@@ -202,6 +202,32 @@ export const spaceSandboxes = v2.table(
   }),
 );
 
+/**
+ * Writes to a space's workspace volume that bypass its sandbox, which agent
+ * searches must not answer past. Keyed by space rather than sandbox so a
+ * write is recorded whether or not a sandbox row exists yet.
+ */
+export const spaceWorkspaceWrites = v2.table("space_workspace_writes", {
+  spaceId: uuid("space_id").primaryKey(),
+  /** Bumped whenever a direct writer records itself. */
+  gen: bigint("gen", { mode: "number" }).notNull(),
+  /** Until then the last finished direct write may hide in NFS caches. */
+  settledAt: timestamp("settled_at", { withTimezone: true }).notNull(),
+});
+
+/** Direct writers still running; a writer that stops renewing lapses. */
+export const spaceWorkspaceWriters = v2.table(
+  "space_workspace_writers",
+  {
+    id: uuid("id").primaryKey(),
+    spaceId: uuid("space_id").notNull(),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    spaceIdx: index("v2_idx_space_workspace_writers_space_id").on(table.spaceId),
+  }),
+);
+
 export const checkpoints = v2.table(
   "checkpoints",
   {

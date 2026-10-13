@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -169,7 +170,15 @@ func buildRuntime(
 	portsSink func(protocol.PortsChangedPayload),
 ) sandboxRuntime {
 	processManager := process.NewManager(logger)
-	searchManager := search.NewManager(cfg, logger)
+	// The watcher feeds the search manager, so it starts afterwards; queries
+	// resolve it lazily and stay on rg and fd while it is missing.
+	var watcherRef atomic.Pointer[filewatch.Watcher]
+	searchManager := search.NewManager(cfg, logger, func() search.Watch {
+		if watcher := watcherRef.Load(); watcher != nil {
+			return watcher
+		}
+		return nil
+	})
 	searchManager.Start()
 	dispatcher := rpc.NewDispatcher(cfg, processManager, logger)
 	dispatcher.SetSearchManager(searchManager)
@@ -208,6 +217,9 @@ func buildRuntime(
 	}
 	if watcher, err := filewatch.Start(cfg.WorkspaceDir, logger, func(batch filewatch.Batch) {
 		searchManager.Apply(batch)
+		if !batch.Resync && len(batch.Changes) == 0 {
+			return
+		}
 		fsSink(protocol.FSChangedPayload{
 			Seq:     batch.Seq,
 			Resync:  batch.Resync,
@@ -216,6 +228,7 @@ func buildRuntime(
 	}); err != nil {
 		logger.Warn("file watcher disabled", slog.String("error", err.Error()))
 	} else {
+		watcherRef.Store(watcher)
 		requestFSResync = watcher.RequestResync
 		watchStatus = watcher.Status
 		closers = append(closers, func() { watcher.Close() })
@@ -318,7 +331,6 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 				}
 			}
 
-			searchManager.Activate()
 			logger.Info("workspace mount ready",
 				slog.String("workspaceDir", summary.WorkspaceDir),
 				slog.String("platformAgentsDir", summary.PlatformAgentsDir),
@@ -342,6 +354,9 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 			}); reportErr != nil {
 				logger.Warn("failed to report sandbox ready", slog.String("error", reportErr.Error()))
 			}
+			// Direct writes by the API or worker, before or after this point,
+			// reach the index through the write token of each query.
+			searchManager.Activate()
 		}
 	}()
 

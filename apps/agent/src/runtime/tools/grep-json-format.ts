@@ -109,14 +109,20 @@ export function formatRgJsonGrepResult(input: {
 export function createRgJsonGrepCollector(input: { searchPath?: string; limit: number }) {
   const lines: string[] = [];
   let pending = "";
+  let matches = 0;
   const append = (line: string) => {
     const trimmed = line.trim();
     if (!trimmed) return false;
     lines.push(trimmed);
+    if (isRgMatchLine(trimmed)) matches += 1;
     return true;
   };
   return {
     lines: lines as readonly string[],
+    /** Number of rg match events seen so far. */
+    get matches() {
+      return matches;
+    },
     /** Returns true when the chunk completed at least one line. */
     push(chunk: string) {
       pending += chunk;
@@ -136,4 +142,12 @@ export function createRgJsonGrepCollector(input: { searchPath?: string; limit: n
       return formatRgJsonGrepResult({ lines, searchPath: input.searchPath, limit: input.limit });
     },
   };
+}
+
+function isRgMatchLine(line: string) {
+  try {
+    return (JSON.parse(line) as RgJsonEvent).type === "match";
+  } catch {
+    return false;
+  }
 }

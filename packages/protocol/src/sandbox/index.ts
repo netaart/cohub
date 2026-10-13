@@ -1,5 +1,4 @@
 import type { DisplayCapture, DisplayCaptureParams, DisplayInputBatch, DisplayList, DisplayTree, DisplayTreeParams, DisplayVirtualStart, RtcIceServer } from "../display/index.js";
-import type { WORKSPACE_CANDIDATE_INDEX_FAMILY } from "../search/index.js";
 
 export const AGENT_SANDBOX_PROTOCOL_VERSION = "1" as const;
 
@@ -27,6 +26,7 @@ export const RPC_METHODS = [
   "fs.find",
   "fs.grep",
   "fs.search",
+  "fs.pathSearch",
   "process.start",
   "process.abort",
   "display.list",
@@ -143,8 +143,8 @@ export type SandboxCapabilities = {
   fsTree?: boolean;
   fsFind: boolean;
   fsGrep: boolean;
-  /** Tantivy-backed candidate search is available in the sandbox. */
-  fsSearch?: boolean;
+  /** fs.search and fs.pathSearch answer with exact rg/fd plans or a fallback. */
+  fsSearchIndex?: boolean;
   processStart: boolean;
   /** process.start supports argv exec mode (no shell). */
   processStartArgv?: boolean;
@@ -396,25 +396,78 @@ export type FsGrepResult = {
   truncated?: boolean;
 };
 
+/**
+ * `<epoch>:<generation>` of the writes that reached the workspace without the
+ * sandbox. The index answers only after a rescan that covers it.
+ */
+export type WorkspaceWriteToken = string;
+
 export type FsSearchParams = {
-  /** Required literal fragments; each must contain at least 3 non-whitespace characters. */
-  literals: string[];
+  writeToken: WorkspaceWriteToken;
+  /** rg pattern, with the same flags the caller passes to rg. */
+  pattern: string;
   path?: string;
   cwd?: string;
+  fixedStrings?: boolean;
+  ignoreCase?: boolean;
   glob?: string;
+  /** Maximum number of targets before the plan falls back. */
   limit?: number;
 };
 
-export type FsSearchResult = {
-  path: string;
-  /** Paths relative to the requested path, matching fs.find semantics. */
-  matches: string[];
-  indexFamily: typeof WORKSPACE_CANDIDATE_INDEX_FAMILY;
-  schemaVersion: number;
-  coverage: "complete" | "partial" | "stale";
-  truncated?: boolean;
-  state?: "ready" | "indexing" | "error";
+/** Why the index declined a query; the caller runs the full rg or fd walk. */
+export type FsSearchFallback =
+  | "unavailable"
+  | "watcher"
+  | "partial"
+  | "writes"
+  | "stale"
+  | "names"
+  | "rules"
+  | "scope"
+  | "pattern"
+  | "glob"
+  | "targets";
+
+/**
+ * rg targets whose search equals an rg walk of `path`. Paths are relative to
+ * `path`; `root` is its workspace-relative form.
+ */
+export type FsSearchResult =
+  | { path: string; fallback: FsSearchFallback }
+  | {
+      path: string;
+      fallback?: undefined;
+      root: string;
+      /** Text files rg can search as explicit arguments. */
+      files: string[];
+      /** Files rg must search through a directory walk. */
+      walkFiles: string[];
+      /** Directories rg must walk. */
+      dirs: string[];
+    };
+
+export type FsPathSearchParams = {
+  writeToken: WorkspaceWriteToken;
+  /** fd glob, matched against the file name or, with fullPath, the absolute path. */
+  pattern: string;
+  path?: string;
+  cwd?: string;
+  limit?: number;
+  fullPath?: boolean;
 };
+
+/** Entries fd lists below `path`, plus directories fd must still walk. */
+export type FsPathSearchResult =
+  | { path: string; fallback: FsSearchFallback }
+  | {
+      path: string;
+      fallback?: undefined;
+      root: string;
+      matches: string[];
+      truncated: boolean;
+      dirs: string[];
+    };
 
 export type ProcessStartParams = {
   /** Shell command mode. Preserves existing `bash -c` semantics. */
@@ -504,6 +557,10 @@ export type RpcRequestMap = {
   "fs.search": {
     params: FsSearchParams;
     result: FsSearchResult;
+  };
+  "fs.pathSearch": {
+    params: FsPathSearchParams;
+    result: FsPathSearchResult;
   };
   "process.start": {
     params: ProcessStartParams;
