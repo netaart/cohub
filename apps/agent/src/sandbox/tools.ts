@@ -1252,14 +1252,15 @@ type RgJsonGrepCollector = ReturnType<typeof createRgJsonGrepCollector>;
 
 /**
  * Runs rg invocations in order into one collector, stopping once `limit`
- * matches are collected. Targets that vanished after planning are not errors:
- * a walk of the search path would not have seen them either.
+ * matches are collected. With `planned`, targets that vanished after the
+ * index plan was made are not errors: a walk of the search path would not
+ * have seen them either. A missing search path itself stays an error.
  */
 async function executeRgRuns(
   runs: RgRun[],
   collector: RgJsonGrepCollector,
   runner: SandboxProcessRunner,
-  options: { limit: number; onOutput?: () => void },
+  options: { limit: number; planned: boolean; onOutput?: () => void },
 ): Promise<RgRunsOutcome> {
   for (const run of runs) {
     if (runner.aborted) return { kind: "aborted" };
@@ -1275,7 +1276,7 @@ async function executeRgRuns(
     }
     const exitCode = result.exitCode ?? 0;
     const stderr = result.stderr.trim();
-    const ignorableRgError = stderr.includes("No files were searched") || onlyVanishedTargets(stderr, run.targets);
+    const ignorableRgError = stderr.includes("No files were searched") || (options.planned && onlyVanishedTargets(stderr, run.targets));
     if (exitCode !== 0 && !(exitCode === 1 && isRgNoMatchOutput(collector.lines.slice(runStart))) && !ignorableRgError) {
       return { kind: "failed", message: stderr || `rg exited with code ${exitCode}` };
     }
@@ -1369,7 +1370,7 @@ function createRemoteGrepTool() {
         });
         let outcome: RgRunsOutcome;
         try {
-          outcome = await executeRgRuns(runs, collector, runner, { limit: effectiveLimit, onOutput: emitPartial });
+          outcome = await executeRgRuns(runs, collector, runner, { limit: effectiveLimit, planned: indexRuns !== null, onOutput: emitPartial });
         } finally {
           runner.dispose();
         }

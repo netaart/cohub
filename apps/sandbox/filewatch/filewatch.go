@@ -21,7 +21,7 @@ type Change struct {
 	NodeType string `json:"nodeType,omitempty"`
 	MtimeMs  int64  `json:"mtimeMs,omitempty"`
 	Size     int64  `json:"size,omitempty"`
-	// boundary marks an ignored entry whose parent is watched.
+	// boundary marks a change only the workspace index consumes.
 	boundary bool
 }
 
@@ -31,10 +31,11 @@ type Batch struct {
 	Seq     int64    `json:"seq"`
 	Resync  bool     `json:"resync,omitempty"`
 	Changes []Change `json:"changes"`
-	// Boundaries are ignored entries whose parent is watched: a created,
-	// deleted or renamed `build` directory, never anything inside it. They
-	// are not file-tree changes; the workspace index uses them to keep the
-	// set of entries rg and fd must walk themselves current.
+	// Boundaries are ignored entries whose parent is watched (a created,
+	// deleted or renamed `build` directory, never anything inside it) and
+	// special files, which can replace a file the index lists. They are not
+	// file-tree changes; the workspace index uses them to keep the set of
+	// entries rg and fd must walk themselves current.
 	Boundaries []Change `json:"boundaries,omitempty"`
 }
 
@@ -384,6 +385,9 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	discoverSubtree := false
 	if info, err := os.Lstat(event.Name); err == nil {
 		if !isWatchableNode(info.Mode()) {
+			// A FIFO or socket is no file-tree entry, but it can replace a file
+			// the index lists, so the index looks at the path again.
+			w.enqueue(Change{Path: rel, Kind: kind, boundary: true})
 			return
 		}
 		nodeType = nodeTypeFor(info)
@@ -560,6 +564,10 @@ func (w *Watcher) enqueue(change Change) bool {
 		return false
 	}
 	if exists {
+		if change.boundary && !previous.boundary {
+			// The pending file-tree change makes the index look at the path too.
+			return true
+		}
 		change = mergeChange(previous, change)
 	}
 	w.pending[change.Path] = change
