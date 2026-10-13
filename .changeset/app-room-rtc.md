@@ -1,5 +1,0 @@
----
-"@neta-art/cohub": minor
----
-
-**App room peer channels and device access**: `room.rtc()` adds a WebRTC connection to a realtime room — named data channels (`reliable` or `latest` delivery) and media tracks, relayed between viewers and never through Cohub's servers, for traffic that room events cannot carry. `rtc.publish()` sends several tracks in one negotiation, optionally as simulcast; `replace()` switches devices without renegotiating, and a track whose source ends stops on its own. `rtc.select()` chooses whose media to receive, reusing receivers so switching is cheap, and `setQuality()` picks a simulcast quality. `channel.onPeer()` reports when this client starts or stops receiving a peer's channel; use room events for initial state synchronization. Failures are `AppRtcError` with a `code`. `client.app.devices.request()` asks the viewer for the camera or microphone an App declares with `<meta name="cohub:devices">`, so one App's grant is never reused by another in the shared frame origin; a declared `screen` is ready at once.

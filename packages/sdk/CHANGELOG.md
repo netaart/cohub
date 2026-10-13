@@ -1,5 +1,27 @@
 # @neta-art/cohub
 
+## 11.0.0
+
+### Major Changes
+
+- 0a6b12a: Replace the standalone Sketch item with a shared script attachment for Board items and a `custom` content container. Add isolated module instances, native scene effects, Canvas drawing, local input and explicit document commits. Browser and CLI exports share the script runtime and ESM module loading contract.
+  
+  Existing Sketch documents must move `props.src`, `props.params` and `props.seed` into `script`, change `type` to `custom`, and leave `props` empty. Stored documents are not rewritten automatically.
+
+### Minor Changes
+
+- ab854d7: **App room peer channels and device access**: `room.rtc()` adds a WebRTC connection to a realtime room — named data channels (`reliable` or `latest` delivery) and media tracks, relayed between viewers and never through Cohub's servers, for traffic that room events cannot carry. `rtc.publish()` sends several tracks in one negotiation, optionally as simulcast; `replace()` switches devices without renegotiating, and a track whose source ends stops on its own. `rtc.select()` chooses whose media to receive, reusing receivers so switching is cheap, and `setQuality()` picks a simulcast quality. `channel.onPeer()` reports when this client starts or stops receiving a peer's channel; use room events for initial state synchronization. Failures are `AppRtcError` with a `code`. `client.app.devices.request()` asks the viewer for the camera or microphone an App declares with `<meta name="cohub:devices">`, so one App's grant is never reused by another in the shared frame origin; a declared `screen` is ready at once.
+- 0819b10: **App rooms beyond the App**: a room keeps the latest 1,000 published events (up to 512 KB), so a reconnect replays what it missed and `room.history()` shows a late joiner what came before. `room.invite()` lets someone outside the App join — a person in a terminal, or an Agent — and members now carry their `kind` (`user`, `agent`, `cli`) and an Agent's `model`. The new `cohub rooms` commands (`create`, `join`, `get`, `events`, `publish`, `presence`, `invite`, `leave`) and `client.rooms` hold a seat without a connection; `cohub rooms events --wait` returns when someone else publishes, so an Agent can wait in the background and wake to the room.
+- 0fc09da: Add `success`, `warning`, `error`, `info` and `status-running` App appearance tokens so Apps can render state colors that follow the host theme.
+- bd63932: Make Board animation previews and exports consistent: preserve CSS alpha, sample trails when seeking, follow animation cameras, and stream export frames with cancellation and bounded memory. Add plain frame containers, shared text/layout inspection, and helpers for chapter composition and equal-distance path sampling. Expose inspection, sequence compilation and path sampling in the CLI, with clearer animation schema semantics.
+- 9da65cc: Support stable public HTTP(S) URLs in Board image, video, audio and file sources while retaining relative Space paths. Add shared media resolution and creation helpers, batch item insertion, extensionless image loading, and safe remote audio downloads for CLI export. Published Boards distinguish captured files from live external media references.
+
+### Patch Changes
+
+- 9ef1fbd: Avoid redundant App window state messages while preserving state re-announcement when the host reloads.
+- 152521b: Render image `crop` on Boards, and draw frame borders in their authored color with `dash` and `trim`, matching shapes. A frame with an empty label shows no title.
+- 9146d58: Keep local Board script effects out of copied, cut and duplicated items, including nested transforms and arrow bindings. Publish Board script entry modules and their transitive ESM dependencies using the same import policy as the browser and CLI runtimes.
+
 ## 10.0.0
 
 ### Major Changes

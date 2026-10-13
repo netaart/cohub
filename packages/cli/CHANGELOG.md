@@ -1,5 +1,35 @@
 # @neta-art/cohub-cli
 
+## 10.0.0
+
+### Major Changes
+
+- 0a6b12a: Replace the standalone Sketch item with a shared script attachment for Board items and a `custom` content container. Add isolated module instances, native scene effects, Canvas drawing, local input and explicit document commits. Browser and CLI exports share the script runtime and ESM module loading contract.
+  
+  Existing Sketch documents must move `props.src`, `props.params` and `props.seed` into `script`, change `type` to `custom`, and leave `props` empty. Stored documents are not rewritten automatically.
+
+### Minor Changes
+
+- 0819b10: **App rooms beyond the App**: a room keeps the latest 1,000 published events (up to 512 KB), so a reconnect replays what it missed and `room.history()` shows a late joiner what came before. `room.invite()` lets someone outside the App join — a person in a terminal, or an Agent — and members now carry their `kind` (`user`, `agent`, `cli`) and an Agent's `model`. The new `cohub rooms` commands (`create`, `join`, `get`, `events`, `publish`, `presence`, `invite`, `leave`) and `client.rooms` hold a seat without a connection; `cohub rooms events --wait` returns when someone else publishes, so an Agent can wait in the background and wake to the room.
+- bd63932: Make Board animation previews and exports consistent: preserve CSS alpha, sample trails when seeking, follow animation cameras, and stream export frames with cancellation and bounded memory. Add plain frame containers, shared text/layout inspection, and helpers for chapter composition and equal-distance path sampling. Expose inspection, sequence compilation and path sampling in the CLI, with clearer animation schema semantics.
+- 9da65cc: Support stable public HTTP(S) URLs in Board image, video, audio and file sources while retaining relative Space paths. Add shared media resolution and creation helpers, batch item insertion, extensionless image loading, and safe remote audio downloads for CLI export. Published Boards distinguish captured files from live external media references.
+
+### Patch Changes
+
+- 152521b: Render image `crop` on Boards, and draw frame borders in their authored color with `dash` and `trim`, matching shapes. A frame with an empty label shows no title.
+- e3bd875: Keep Codex's native model list and reasoning capabilities for custom providers without requiring a separate model catalog file. Local spaces can select all models returned by Codex instead of only the configured default.
+- 6d46e98: Upgrade Generation SDK to 0.1.33, adding Doubao ASR transcription support with optional text prompts.
+- Updated dependencies [ab854d7]
+- Updated dependencies [0819b10]
+- Updated dependencies [0fc09da]
+- Updated dependencies [9ef1fbd]
+- Updated dependencies [bd63932]
+- Updated dependencies [152521b]
+- Updated dependencies [9da65cc]
+- Updated dependencies [9146d58]
+- Updated dependencies [0a6b12a]
+  - @neta-art/cohub@11.0.0
+
 ## 9.1.2
 
 ### Patch Changes
