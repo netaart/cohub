@@ -8,8 +8,11 @@ const GEMINI_MAJOR_VERSION = /^gemini(?:-live)?-(\d+)/;
 /**
  * Gemini 4 rejects `thinkingBudget` ("Use thinking level instead"), but pi-ai only
  * sends `thinkingLevel` for the Gemini 3 IDs it recognizes and falls back to a
- * budget for every other model. Once pi-ai sends a level itself, no budget reaches
- * the payload and this rewrite does nothing.
+ * budget for every other model (earendil-works/pi#10890). Once pi-ai sends a level
+ * itself, no budget reaches the payload and this rewrite does nothing; the
+ * "pi-ai still sends thinkingBudget for Gemini 4" test in
+ * apps/agent/src/tests/gemini-thinking-level.test.ts then fails and lists what to
+ * delete.
  */
 const requiresThinkingLevel = (model: Model<Api>) =>
   model.reasoning && Number(GEMINI_MAJOR_VERSION.exec(model.id.toLowerCase())?.[1] ?? 0) >= 4;
