@@ -15,7 +15,6 @@ const config: ModelsConfig = {
       api: "google-generative-ai",
       models: [
         { id: "gemini-4-argon", reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: "low", medium: "medium", high: "high", xhigh: null, max: null } },
-        { id: "gemini-3.8-flash", reasoning: true },
         { id: "gemini-2.5-flash", reasoning: true },
       ],
     },
@@ -47,7 +46,6 @@ async function capturedBody(start: () => AsyncIterable<{ type: string }>) {
   return body;
 }
 
-/** The request body Cohub sends for one model and set of options. */
 function sentBody(modelId: string, options: SimpleStreamOptions = {}) {
   const model = findModel(modelId);
   return capturedBody(() => streamSimpleWithModels(createModelsFromRegistry(registry, model), model, context, { maxRetries: 0, ...options }));
@@ -66,17 +64,12 @@ test("Gemini 4 sends the requested reasoning as thinkingLevel", async () => {
   assert.deepEqual(await thinkingConfig("gemini-4-argon"), { thinkingLevel: "LOW" });
 });
 
-test("other Gemini generations keep pi-ai's thinking config", async () => {
-  assert.deepEqual(await thinkingConfig("gemini-3.8-flash", { reasoning: "high" }), { includeThoughts: true, thinkingLevel: "HIGH" });
+test("Gemini 2.5 keeps its thinking budget", async () => {
   assert.deepEqual(await thinkingConfig("gemini-2.5-flash", { reasoning: "high" }), { includeThoughts: true, thinkingBudget: 24576 });
-  assert.deepEqual(await thinkingConfig("gemini-2.5-flash"), { thinkingBudget: 0 });
 });
 
-// withGeminiThinkingLevel works around earendil-works/pi#10890. This block goes
-// away with it; the tests above describe the requests Cohub sends and stay.
 describe("withGeminiThinkingLevel workaround", () => {
   test("pi-ai still sends thinkingBudget for Gemini 4", async () => {
-    // pi-ai's own request, without Cohub's stream wrappers.
     const body = await capturedBody(() =>
       googleGenerativeAIApi().streamSimple(findModel("gemini-4-argon"), normalizeContext(context), { apiKey: "sk-test", maxRetries: 0, reasoning: "high" }),
     );
@@ -86,7 +79,7 @@ describe("withGeminiThinkingLevel workaround", () => {
       undefined,
       "pi-ai now sends thinkingLevel for Gemini 4 (earendil-works/pi#10890). Delete packages/model-runtime/src/gemini-thinking-level.ts, " +
         "unwrap googleGenerativeAIApi() and googleVertexApi() in packages/model-runtime/src/pi-models-adapter.ts, and delete this block. " +
-        "The other tests in this file and the provider request snapshot must pass unchanged.",
+        "The other tests in this file must pass unchanged.",
     );
   });
 

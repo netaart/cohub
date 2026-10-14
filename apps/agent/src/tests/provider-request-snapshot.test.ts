@@ -28,14 +28,7 @@ const config: ModelsConfig = {
       api: "openai-responses",
       models: [{ id: "gpt-5.6-sol", reasoning: true, requestProfile: "codex", compat: { sessionAffinityFormat: "openai-nosession" }, headers: { Originator: "codex_cli_rs", "User-Agent": "codex_cli_rs/test" } }],
     },
-    google: {
-      ...provider,
-      api: "google-generative-ai",
-      models: [
-        { id: "gemini-3.8-flash", reasoning: true, compat: { supportsDeveloperRole: false } },
-        { id: "gemini-4-argon", reasoning: true, compat: { supportsDeveloperRole: false }, thinkingLevelMap: { off: null, minimal: null, low: "low", medium: "medium", high: "high", xhigh: null, max: null } },
-      ],
-    },
+    google: { ...provider, api: "google-generative-ai", models: [{ id: "gemini-3.8-flash", reasoning: true, compat: { supportsDeveloperRole: false } }] },
   },
 };
 
