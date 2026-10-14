@@ -404,5 +404,104 @@
         }
       }
     }
+  },
+  "google-generative-ai gemini-4-argon": {
+    "url": "https://upstream.test/v1/models/gemini-4-argon:streamGenerateContent?alt=sse",
+    "headers": {
+      "content-type": "application/json",
+      "user-agent": "pi (<host>)",
+      "x-goog-api-key": "sk-test",
+      "x-trace": "1"
+    },
+    "body": {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "hi"
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "calling"
+            },
+            {
+              "functionCall": {
+                "args": {
+                  "text": "x"
+                },
+                "id": "call_1",
+                "name": "echo"
+              }
+            }
+          ],
+          "role": "model"
+        },
+        {
+          "parts": [
+            {
+              "functionResponse": {
+                "name": "echo",
+                "response": {
+                  "output": "x"
+                },
+                "id": "call_1"
+              }
+            }
+          ],
+          "role": "user"
+        },
+        {
+          "parts": [
+            {
+              "text": "again"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "systemInstruction": {
+        "parts": [
+          {
+            "text": "SYSTEM PROMPT"
+          }
+        ],
+        "role": "user"
+      },
+      "tools": [
+        {
+          "functionDeclarations": [
+            {
+              "name": "echo",
+              "description": "Echo the input",
+              "parametersJsonSchema": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "generationConfig": {
+        "maxOutputTokens": 16384,
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingLevel": "HIGH"
+        }
+      }
+    }
   }
 }
