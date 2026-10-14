@@ -94,6 +94,7 @@ export type ImageToTextUsageSummary = {
 
 export type SessionTurnIntermediateSummary = {
   messageCount: number;
+  userMessageCount?: number;
   toolCallCount: number;
   usage?: Usage | null;
   durationMs?: number | null;

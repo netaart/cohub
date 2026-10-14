@@ -1,5 +1,22 @@
 import { z } from "zod";
 import { contentBlockSchema } from "../core/content-schema.js";
+import type { ContentBlock } from "../core/content.js";
+
+/** Keep follow-up authorship in block metadata so older Runtime servers can retain it unchanged. */
+export function nativeUserContent(blocks: readonly ContentBlock[]): ContentBlock[] {
+  return (blocks.length ? blocks : [{ type: "text" as const, text: "" }]).map((block) => ({
+    ...block, _meta: { ...block._meta, nativeUserMessage: true },
+  }));
+}
+
+export function nativeMessageRole(blocks: readonly ContentBlock[]): "user" | "assistant" {
+  const marked = blocks.filter((block) => block._meta?.nativeUserMessage !== undefined);
+  if (!marked.length) return "assistant";
+  if (marked.length !== blocks.length || marked.some((block) => block._meta?.nativeUserMessage !== true)) {
+    throw new Error("Invalid native user message metadata");
+  }
+  return "user";
+}
 
 const id = z.uuid();
 const content = z.array(contentBlockSchema).max(10_000);
@@ -35,7 +52,10 @@ export const nativeTurnMessageSchema = z.object({
   usage: usage.nullable().optional(),
   stopReason: z.string().max(64).nullable().optional(),
   errorMessage: z.string().max(16_384).nullable().optional(),
-}).strict();
+}).strict().superRefine((message, ctx) => {
+  try { nativeMessageRole(message.content); }
+  catch (error) { ctx.addIssue({ code: "custom", message: (error as Error).message, path: ["content"] }); }
+});
 export type NativeTurnMessage = z.infer<typeof nativeTurnMessageSchema>;
 
 /** Ephemeral display state within a Turn; never a fork or persistence boundary. */

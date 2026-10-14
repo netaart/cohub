@@ -7,6 +7,7 @@ import {
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { MessageToolCallsFile } from "@cohub/protocol/model";
 import { page } from "$app/state";
+import CodexQuestionReplies from "$lib/components/CodexQuestionReplies.svelte";
 import MarkdownView from "$lib/components/MarkdownView.svelte";
 import AttachmentBlocks from "$lib/components/TextAttachmentBlocks.svelte";
 import ThinkingBlocks from "$lib/components/ThinkingBlocks.svelte";
@@ -14,6 +15,7 @@ import ToolCallList from "$lib/components/ToolCallList.svelte";
 import ViewportContextBlocks from "$lib/components/ViewportContextBlocks.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { useMarkdownWorkspaceAsset } from "$lib/markdown-asset-context";
+import { parseCodexQuestionReply } from "$lib/messages/codex-question-reply";
 import {
 	type ResourceMentionTextToken,
 	tokenizeResourceMentionText,
@@ -171,8 +173,11 @@ function tokenizeUserText(value: string) {
 	});
 }
 
-const userTextTokens = $derived.by(() =>
-	tokenizeUserText(userTextBlocks.map((block) => block.text).join("\n\n")),
+const userTextSegments = $derived.by(() =>
+	userTextBlocks.map((block) => ({
+		replies: parseCodexQuestionReply(block.text),
+		tokens: tokenizeUserText(block.text),
+	})),
 );
 
 const segments = $derived.by(() => {
@@ -234,21 +239,29 @@ const segments = $derived.by(() => {
 		</div>
 	{/if}
 	{#if userTextBlocks.length > 0}
-		<div class="whitespace-pre-wrap break-words text-inherit" class:mt-2={userShellCommandBlocks.length > 0}>
-			{#each userTextTokens as token}
-				{#if token.type !== 'text'}
-					<button
-						type="button"
-						class={userMentionButtonClass}
-						title={m.message_open_in_new({ label: token.label }, { locale })}
-						aria-label={
-							token.type === "appMention"
-								? m.message_open_aria_app({ label: token.label }, { locale })
-								: m.message_open_aria_space({ label: token.label }, { locale })
-						}
-						onclick={(event) => openUserMention(token, event)}
-					>{token.text}</button>
-				{:else}{token.text}{/if}
+		<div class="min-w-0 space-y-[1.7em] text-inherit" class:mt-2={userShellCommandBlocks.length > 0}>
+			{#each userTextSegments as segment}
+				{#if segment.replies}
+					<CodexQuestionReplies replies={segment.replies} />
+				{:else}
+					<div class="whitespace-pre-wrap break-words">
+				{#each segment.tokens as token}
+					{#if token.type !== 'text'}
+						<button
+							type="button"
+							class={userMentionButtonClass}
+							title={m.message_open_in_new({ label: token.label }, { locale })}
+							aria-label={
+								token.type === "appMention"
+									? m.message_open_aria_app({ label: token.label }, { locale })
+									: m.message_open_aria_space({ label: token.label }, { locale })
+							}
+							onclick={(event) => openUserMention(token, event)}
+						>{token.text}</button>
+					{:else}{token.text}{/if}
+				{/each}
+					</div>
+				{/if}
 			{/each}
 		</div>
 	{/if}

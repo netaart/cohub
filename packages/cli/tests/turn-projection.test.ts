@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { RuntimeTurnInput } from "@neta-art/cohub";
+import { nativeUserContent, type RuntimeTurnInput } from "@neta-art/cohub";
 import type { SessionTurnRecord, TurnIntermediateMessagesFile } from "@cohub/protocol";
 import { ProjectionStore } from "../src/runtime/projection-store.js";
 import { testNativeRuntime } from "./fixtures/runtime-native.js";
@@ -105,6 +105,22 @@ test("Turn pagination respects both incremental and request context boundaries",
   const future = turn(3, "55555555-5555-4555-8555-555555555555");
   const result = await listSessionProjectionTurns(client([turn(1), second, future]), sessionId, { afterSequence: 1, throughSequence: 2 });
   assert.deepEqual(result.map((item) => item.sequence), [2]);
+});
+
+test("native user markers survive projection from older assistant-labeled records", async () => {
+  const steering = nativeUserContent([{ type: "text", text: "User correction" }]);
+  const trailing = nativeUserContent([{ type: "text", text: "One more detail" }]);
+  const source = { ...turn(1), assistantContent: trailing, intermediateIndex: { version: 1 as const, messagesObjectKey: "turn-1.json", messagesSizeBytes: 1, toolCallsBaseObjectKey: "tool/" } };
+  const archive: TurnIntermediateMessagesFile = {
+    version: 1, spaceId: "space", sessionId, turnId, summary: { messageCount: 1, toolCallCount: 0 },
+    messages: [{ id: messageId, sessionId, sequence: 2, role: "assistant", content: steering, text: "User correction", provider: null, model: null, stopReason: null, errorMessage: null, usage: null, durationMs: null, toolCallsObjectKey: null, meta: { messageKind: "assistant_intermediate" }, createdAt: source.createdAt }],
+  };
+  const [projected] = await listSessionProjectionTurns(client([source], archive), sessionId);
+  assert.deepEqual(projected?.messages.map((message) => message.role), ["user", "user", "user"]);
+  assert.deepEqual(projected?.messages[1]?.content, steering);
+  assert.equal(projected?.messages[1]?.meta?.messageKind, "user_steering");
+  assert.deepEqual(projected?.messages[2]?.content, trailing);
+  assert.equal(projected?.assistantContent, null, "a misclassified user reply cannot become Codex last_agent_message");
 });
 
 test("final assistant projection retains Turn result metadata", async () => {

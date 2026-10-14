@@ -1,4 +1,5 @@
 <script lang="ts">
+import { nativeMessageRole } from "@cohub/protocol";
 import type {
 	ContextCompactionMeta,
 	MessageToolCallsFile,
@@ -47,7 +48,7 @@ const compactionSummary = $derived.by(() => {
 const chatMessage = $derived({
 	id: message.id,
 	sourceId: message.id,
-	role: message.role,
+	role: nativeMessageRole(message.content) === "user" ? "user" : message.role,
 	content: message.content,
 	text: message.text ?? "",
 	sequence: message.sequence ?? 0,

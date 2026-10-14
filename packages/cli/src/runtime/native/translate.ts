@@ -178,8 +178,13 @@ export class LiveProgress {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inFlight = false;
   private disposed = false;
+  private failures = 0;
 
-  constructor(private readonly sink: ProgressSink, private readonly intervalMs: number) {}
+  constructor(
+    private readonly sink: ProgressSink,
+    private readonly intervalMs: number,
+    private readonly onError: (error: unknown) => void = (error) => console.error("Native progress failed", error),
+  ) {}
 
   apply(event: RuntimeExecutionEvent): void {
     const ordinal = event.type === "message.start" || event.type === "content.replace" || event.type === "text.delta" ? event.ordinal
@@ -216,27 +221,48 @@ export class LiveProgress {
 
   private schedule(): void {
     if (this.disposed || this.inFlight) return;
-    this.timer ??= setTimeout(() => { this.timer = null; this.flush(); }, this.intervalMs);
+    const delay = this.failures ? Math.max(this.intervalMs, Math.min(30_000, 1_000 * 2 ** Math.min(this.failures - 1, 5))) : this.intervalMs;
+    this.timer ??= setTimeout(() => { this.timer = null; this.flush(); }, delay);
     this.timer.unref?.();
   }
 
   private flush(): void {
     if (this.disposed || !Number.isFinite(this.dirtyFrom)) return;
     const from = this.synced ? Math.min(this.dirtyFrom, this.messages.length) : 0;
-    const sent = this.sink({ revision: nextRevision(), from, messages: this.messages.slice(from) });
-    // Not yet recorded: stay dirty, the next event tries again.
-    if (!sent) return;
+    const dirtyFrom = this.dirtyFrom;
     this.dirtyFrom = Number.POSITIVE_INFINITY;
-    this.synced = true;
     this.inFlight = true;
+    let sent: ReturnType<ProgressSink>;
+    try {
+      sent = this.sink({ revision: nextRevision(), from, messages: this.messages.slice(from).map((message) => ({ ...message, content: [...message.content] })) });
+    } catch (error) {
+      this.inFlight = false;
+      this.failed(error);
+      this.schedule();
+      return;
+    }
+    // Not yet recorded: stay dirty, the next event tries again.
+    if (!sent) {
+      this.inFlight = false;
+      this.dirtyFrom = Math.min(dirtyFrom, this.dirtyFrom);
+      return;
+    }
     void sent.then((result) => {
       const outcome = result as { accepted?: boolean; resync?: boolean } | undefined;
-      if (outcome?.accepted === false || outcome?.resync) this.synced = false;
-    }, () => { this.synced = false; }).finally(() => {
+      if (outcome?.accepted === false || outcome?.resync) this.failed(new Error(outcome.resync ? "Native progress requires resynchronization" : "Native progress was rejected"));
+      else { this.synced = true; this.failures = 0; }
+    }, (error) => { this.failed(error); }).finally(() => {
       this.inFlight = false;
       // Whatever changed meanwhile goes next; after a refusal, the next send is a full one.
       if (Number.isFinite(this.dirtyFrom)) this.schedule();
     });
+  }
+
+  private failed(error: unknown): void {
+    this.synced = false;
+    this.dirtyFrom = 0;
+    this.failures += 1;
+    this.onError(error);
   }
 
   private at(ordinal: number): PreviewMessage {

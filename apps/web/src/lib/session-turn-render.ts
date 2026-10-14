@@ -1,3 +1,4 @@
+import { nativeMessageRole } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type {
 	SessionTurnIntermediateSummary,
@@ -484,7 +485,7 @@ export function buildTurnTimelineItems(input: {
 				kind: "message",
 				message: {
 					id: renderKey,
-					role: "assistant",
+					role: nativeMessageRole(blocks),
 					content: blocks,
 					text: blocks.find((block) => block.type === "text")?.text ?? "",
 					sequence: fallbackSequence + 1,

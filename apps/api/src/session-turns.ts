@@ -12,7 +12,7 @@ import type {
   StoredToolCall,
   TurnIntermediateMessagesFile,
 } from "@cohub/protocol/model";
-import type { ModelThinkingLevel } from "@cohub/protocol";
+import { nativeMessageRole, type ModelThinkingLevel } from "@cohub/protocol";
 import { db } from "./db/index.js";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
 import { addSessionParticipantMeta, interruptedSummaryPatch, interruptedTurnUsage, summarizeSessionTurnCompactions } from "@cohub/core/sessions";
@@ -489,8 +489,9 @@ export const buildIntermediateObjectsForTurn = async (input: { spaceId: string; 
   )).orderBy(asc(sessionMessages.sequence), asc(sessionMessages.createdAt));
 
   const intermediateRows = rows.filter((row) => {
-    if (row.role === "user") return false;
     const meta = normalizeRecord(row.meta);
+    if (nativeMessageRole(row.content) === "user") return true;
+    if (row.role === "user") return meta?.messageKind === "user_steering";
     return meta?.messageKind !== "assistant_final" && meta?.messageKind !== "assistant_error";
   });
 
@@ -504,6 +505,7 @@ export const buildIntermediateObjectsForTurn = async (input: { spaceId: string; 
   const messages: StoredIntermediateMessage[] = [];
   for (const row of intermediateRows) {
     const content = row.content as ContentBlock[];
+    const nativeUser = nativeMessageRole(content) === "user";
     const details = extractToolCalls(content);
     toolCallCount += details.length;
     totalUsage = addUsage(totalUsage, row.usage as Usage | null | undefined);
@@ -525,7 +527,7 @@ export const buildIntermediateObjectsForTurn = async (input: { spaceId: string; 
       id: row.id,
       sessionId: row.sessionId,
       sequence: row.sequence,
-      role: row.role as "user" | "assistant" | "system",
+      role: nativeUser ? "user" : row.role as "user" | "assistant" | "system",
       content: summarizeIntermediateContent(content, details),
       text: row.text ?? null,
       provider: row.provider ?? null,
@@ -535,13 +537,14 @@ export const buildIntermediateObjectsForTurn = async (input: { spaceId: string; 
       usage: row.usage as Usage | null,
       durationMs: row.durationMs ?? null,
       toolCallsObjectKey,
-      meta: normalizeRecord(row.meta),
+      meta: nativeUser ? { ...normalizeRecord(row.meta), messageKind: "user_steering" } : normalizeRecord(row.meta),
       createdAt: toIso(row.createdAt),
     });
   }
 
   const summary = {
     messageCount: messages.length,
+    userMessageCount: messages.filter((message) => message.role === "user").length,
     toolCallCount,
     usage: totalUsage,
     durationMs: totalDurationMs,

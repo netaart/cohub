@@ -1,4 +1,4 @@
-import { projectNativeSession, type CanonicalProjectionTurn, type ContentBlock, type MessageToolCallsFile, type ProjectionInput, type ProjectionTarget, type SessionTurnRecord, type StoredIntermediateMessage, type StoredToolCall, type TurnIntermediateMessagesFile } from "@neta-art/cohub";
+import { nativeMessageRole, projectNativeSession, type CanonicalProjectionTurn, type ContentBlock, type MessageToolCallsFile, type ProjectionInput, type ProjectionTarget, type SessionTurnRecord, type StoredIntermediateMessage, type StoredToolCall, type TurnIntermediateMessagesFile } from "@neta-art/cohub";
 
 export type SessionTurnProjectionClient = {
   session(sessionId: string): {
@@ -51,17 +51,18 @@ async function hydrateIntermediateMessage(
 ) {
   signal?.throwIfAborted();
   const toolCalls = await client.turns.intermediate.getToolCalls(turn.id, message, { signal });
+  const nativeUser = nativeMessageRole(message.content) === "user";
   return {
     id: message.id,
     turnId: turn.id,
-    role: message.role,
+    role: nativeUser ? "user" as const : message.role,
     content: hydrateToolDetails(message.content, toolCalls?.toolCalls ?? []),
     provider: message.provider,
     model: message.model,
     usage: message.usage,
     stopReason: message.stopReason,
     errorMessage: message.errorMessage,
-    meta: message.meta,
+    meta: nativeUser ? { ...message.meta, messageKind: "user_steering" } : message.meta,
     sourceSessionId: message.sessionId,
     sequence: message.sequence ?? 0,
     createdAt: iso(message.createdAt),
@@ -107,11 +108,12 @@ async function hydrateSessionTurn(
     messages.push(...intermediate.map((message) => ({ ...message, sequence: turn.sequence * 1_000_000 + 100_000 + message.sequence })));
   }
   const hasFinalGenerationResult = messages.some((message) => message.role === "assistant" && message.meta?.messageKind === "generation_result" && ["completed", "failed"].includes(String(message.meta.generationStatus)));
+  const finalNativeUser = nativeMessageRole(turn.assistantContent ?? []) === "user";
   if (turn.assistantContent?.length && !hasFinalGenerationResult) {
     messages.push({
-      id: `${turn.id}:assistant`, turnId: turn.id, role: turn.intent === "compact" ? "system" : "assistant", content: turn.assistantContent,
+      id: `${turn.id}:assistant`, turnId: turn.id, role: finalNativeUser ? "user" : turn.intent === "compact" ? "system" : "assistant", content: turn.assistantContent,
       provider: turn.provider, model: turn.model, usage: turn.finalUsage, stopReason: turn.stopReason, errorMessage: turn.errorMessage,
-      meta: { ...(turn.meta ?? {}), turnId: turn.id, createdAt: turn.createdAt }, sourceSessionId: sourceId,
+      meta: { ...(turn.meta ?? {}), ...(finalNativeUser ? { messageKind: "user_steering" } : {}), turnId: turn.id, createdAt: turn.createdAt }, sourceSessionId: sourceId,
       sequence: turn.sequence * 1_000_000 + 900_000, createdAt: iso(turn.createdAt),
     });
   }
@@ -119,7 +121,7 @@ async function hydrateSessionTurn(
   return {
     id: turn.id, sourceSessionId: sourceId, sourceTurnId: sourceTurnId(turn), sequence: turn.sequence,
     status: turn.status, intent: turn.intent, provider: turn.provider, model: turn.model,
-    userContent: turn.userContent, assistantContent: turn.assistantContent, meta: turn.meta,
+    userContent: turn.userContent, assistantContent: finalNativeUser ? null : turn.assistantContent, meta: turn.meta,
     createdAt: iso(turn.createdAt), startedAt: turn.startedAt, completedAt: turn.completedAt, durationMs: turn.durationMs,
     messages,
   };

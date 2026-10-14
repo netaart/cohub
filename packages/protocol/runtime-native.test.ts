@@ -17,3 +17,13 @@ test("native receipts reject invalid counters, nonterminal completion and unboun
   assert(!nativeTurnCompleteSchema.safeParse({ ...result, messages: [{ content: [], usage: { input: -1 } }] }).success);
   assert(!nativeTurnProgressSchema.safeParse({ messages: [], revision: Number.MAX_SAFE_INTEGER + 1 }).success);
 });
+
+test("native user messages preserve ordered text and images on the existing wire format", () => {
+  const content = [
+    { type: "text", text: "Follow up", _meta: { nativeUserMessage: true } },
+    { type: "image", source: { type: "url", url: "https://example.com/image.png" }, _meta: { nativeUserMessage: true } },
+  ];
+  assert.deepEqual(nativeTurnProgressSchema.parse({ revision: 1, messages: [{ content }] }).messages[0].content, content);
+  assert.equal(nativeTurnProgressSchema.safeParse({ revision: 1, messages: [{ content: [content[0], { type: "text", text: "Mixed author" }] }] }).success, false);
+  assert.equal(nativeTurnProgressSchema.safeParse({ revision: 1, messages: [{ content: [{ type: "text", text: "Invalid marker", _meta: { nativeUserMessage: "yes" } }] }] }).success, false);
+});

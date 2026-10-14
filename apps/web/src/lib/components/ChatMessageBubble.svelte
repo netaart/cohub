@@ -41,6 +41,7 @@ import {
 } from "$lib/format-usage";
 import { getGenerationCostPresentation } from "$lib/generation-cost";
 import { getLocale } from "$lib/i18n/locale.svelte";
+import { questionReplyCopyText } from "$lib/messages/codex-question-reply";
 import {
 	findModelCatalogItem,
 	formatThinkingLevelShort,
@@ -202,7 +203,7 @@ const messageContainerClass = $derived(
 const messageBubbleClass = $derived.by(() => {
 	const base = "px-[var(--chat-msg-inset)] py-2 text-[14px] leading-[1.7]";
 	if (message.role === "user") {
-		const user = `${base} justify-self-end`;
+		const user = `${base} min-w-0 max-w-full justify-self-end`;
 		if (isCancelledBeforeDispatch)
 			return `${user} rounded-xl rounded-br-md bg-bg-hover/60 text-text-tertiary`;
 		if (isBackgroundTaskUserMessage)
@@ -554,12 +555,16 @@ function handleCopy() {
 	const text =
 		message.content
 			?.flatMap((block) => {
-				if (block.type === "text") return [block.text];
+				if (block.type === "text") return [
+					isUserMessage && !block._meta?.attachmentKind
+						? questionReplyCopyText(block.text)
+						: block.text,
+				];
 				if (block.type === "shell_command") return [block.rawText];
 				return [];
 			})
 			.join("\n\n")
-			.trim() || message.text;
+			.trim() || (isUserMessage ? questionReplyCopyText(message.text) : message.text);
 
 	navigator.clipboard.writeText(text).then(() => {
 		copied = true;

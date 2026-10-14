@@ -144,7 +144,7 @@ test("a running Codex Turn is sent without a result, then settles in place", asy
     await w.write(path, [
       line({ timestamp: at, type: "session_meta", payload: { id, cwd: w.project } }),
       line({ timestamp: at, type: "event_msg", payload: { type: "turn_started", turn_id: "k1" } }),
-      line({ timestamp: at, type: "event_msg", payload: { type: "user_message", message: "long task" } }),
+      line({ timestamp: at, type: "event_msg", payload: { type: "item_completed", item: { type: "UserMessage", content: [{ type: "text", text: "long task" }] } } }),
     ].join(""));
     const ingest = w.ingest({ harnesses: ["codex"] });
     await ingest.load();
@@ -266,7 +266,7 @@ test("a stop reaches the Turn's harness, including one requested while the Runti
     const stopped: string[] = [];
     const id = randomUUID();
     const path = w.codexPath(id);
-    await w.write(path, codexLine({ id, cwd: w.project }, "session_meta") + codexLine({ type: "turn_started", turn_id: "k1" }) + codexLine({ type: "user_message", message: "long" }));
+    await w.write(path, codexLine({ id, cwd: w.project }, "session_meta") + codexLine({ type: "turn_started", turn_id: "k1" }) + codexLine({ type: "item_completed", item: { type: "UserMessage", content: [{ type: "text", text: "long" }] } }));
     const hooks: IngestHooks = { abortTurn: (state) => stopped.push(state.runningTurnKey ?? ""), controllable: () => true };
     const ingest = w.ingest({ harnesses: ["codex"], hooks });
     await ingest.load();
@@ -312,7 +312,7 @@ test("pausing a harness stops its uploads and previews, for transcripts already 
     const server = fakeServer();
     const id = randomUUID();
     const path = w.codexPath(id);
-    await w.write(path, codexLine({ id, cwd: w.project }, "session_meta") + codexLine({ type: "turn_started", turn_id: "k1" }) + codexLine({ type: "user_message", message: "long" }));
+    await w.write(path, codexLine({ id, cwd: w.project }, "session_meta") + codexLine({ type: "turn_started", turn_id: "k1" }) + codexLine({ type: "item_completed", item: { type: "UserMessage", content: [{ type: "text", text: "long" }] } }));
     const ingest = w.ingest({ harnesses: ["codex"], hooks: { controllable: () => true } });
     await ingest.load();
     ingest.connect(server.transport);

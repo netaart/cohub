@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { hasPermission } from "./permissions.js";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
-import { NATIVE_SYNC_SOURCE, SETTLED_TURN_STATUSES, isNativeClientTurn, type NativeTurnStart, type NativeTurnBinding, type NativeTurnComplete, type NativeIngest, type NativeIngestResult, type NativeKnownResult } from "@cohub/protocol";
+import { NATIVE_SYNC_SOURCE, SETTLED_TURN_STATUSES, isNativeClientTurn, nativeMessageRole, type NativeTurnStart, type NativeTurnBinding, type NativeTurnComplete, type NativeIngest, type NativeIngestResult, type NativeKnownResult } from "@cohub/protocol";
 import { addSessionParticipantMeta, deriveMessagePreviewText, deriveSessionFallbackTitle, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { db } from "./db/index.js";
@@ -279,20 +279,26 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
       return { changed: false, turn, messages: [], projection: null };
     }
     const completedAt = new Date(input.completedAt);
+    const roles = input.messages.map((message) => nativeMessageRole(message.content));
+    // A trailing user reply remains last in the timeline; do not move an earlier
+    // assistant message into the separate final-answer projection after it.
+    const finalOrdinal = roles.at(-1) === "assistant" ? roles.length - 1 : -1;
     const messages = input.messages.map((message, ordinal): typeof sessionMessages.$inferSelect => {
-      const final = ordinal === input.messages.length - 1;
+      const role = roles[ordinal] as "user" | "assistant";
+      const final = ordinal === finalOrdinal;
       const content = sanitizeContentBlocksForPostgresJson(message.content);
       return {
-        id: messageId(turnId, ordinal), sessionId, turnId, role: "assistant", content, text: deriveMessagePreviewText({ content }) || null,
+        id: messageId(turnId, ordinal), sessionId, turnId, role, content, text: deriveMessagePreviewText({ content }) || null,
         sequence: ordinal, idempotencyKey: `native:${turnId}:${ordinal}`, provider: message.provider ?? null, model: message.model ?? null,
         stopReason: message.stopReason ?? null, errorMessage: message.errorMessage ? sanitizePostgresJsonValue(message.errorMessage) : null, usage: message.usage ?? null,
         meta: { turnId, messageOrdinal: ordinal, harness: record(turn.meta).harness, runtime: "local", source: NATIVE_SYNC_SOURCE, actorUserId: userId, anchorUserMessageId: record(turn.meta).userMessageId,
           ...(imported ? { origin: "local_import", originalStartedAt: turn.startedAt, originalCompletedAt: input.completedAt } : {}),
-          messageKind: final ? input.status === "completed" ? "assistant_final" : "assistant_error" : "assistant_intermediate" },
+          messageKind: role === "user" ? "user_steering" : final ? input.status === "completed" ? "assistant_final" : "assistant_error" : "assistant_intermediate" },
         startedAt: turn.startedAt, completedAt, durationMs: null, usageAggregatedAt: null, createdAt: completedAt,
       };
     });
-    const final = messages.at(-1);
+    const final = messages[finalOrdinal];
+    const latest = messages.at(-1);
     const totalUsage = messages.reduce<ReturnType<typeof addUsage>>((sum, message) => addUsage(sum, message.usage), null);
     const [last] = await tx.select({ sequence: sessionMessages.sequence }).from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId)).orderBy(desc(sessionMessages.sequence)).limit(1);
     if (messages.length) await tx.insert(sessionMessages).values(messages.map((message, ordinal) => ({ ...message, sequence: (last?.sequence ?? 0) + ordinal + 1, meta: sanitizePostgresJsonValue(message.meta) })));
@@ -304,7 +310,7 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
       meta: { ...meta, metrics: { ...record(meta.metrics), version: 1, tools: collectToolMetrics(messages.map((message) => message.content)) }, runtimeArchiveStatus: "pending", nativeSync: { ...receipt, completionDigest, ...(imported ? { originalCompletedAt: input.completedAt } : {}) } },
     }).where(and(eq(sessionTurns.id, turnId), runtimeResolutionOpen, inArray(sessionTurns.status, ["running", "abort_requested"]))).returning();
     if (!next) conflict("Execution was resolved");
-    return { changed: true, turn: next, messages, projection: { latestMessageText: final?.text ?? turn.userText, lastMessageId: final?.id, completedAt } };
+    return { changed: true, turn: next, messages, projection: { latestMessageText: latest?.text ?? turn.userText, lastMessageId: latest?.id, completedAt } };
   });
   if (committed.changed && committed.projection) {
     await bestEffortNativeSessionProjection({ sessionId, latestMessageText: committed.projection.latestMessageText,
@@ -321,7 +327,7 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
     // Exact-replay path: refill only a still-missing artifact snapshot from the persisted messages.
     const [final] = await db.select().from(sessionTurns).where(eq(sessionTurns.id, turnId)).limit(1);
     if (!final?.intermediateSummary) {
-      const persisted = await db.select().from(sessionMessages).where(and(eq(sessionMessages.turnId, turnId), eq(sessionMessages.role, "assistant"))).orderBy(asc(sessionMessages.sequence));
+      const persisted = await db.select().from(sessionMessages).where(eq(sessionMessages.turnId, turnId)).orderBy(asc(sessionMessages.sequence));
       const intermediate = await buildIntermediateObjectsForTurn({ spaceId, sessionId, turnId }, persisted).catch(() => null);
       if (intermediate) await db.update(sessionTurns).set({ intermediateIndex: intermediate.index, intermediateSummary: intermediate.summary }).where(eq(sessionTurns.id, turnId));
       else artifactsPending = true;

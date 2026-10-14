@@ -1,7 +1,7 @@
 // RUNTIME_TEST_DB_HOME=/tmp/isolated-db node --experimental-test-module-mocks --import tsx --test apps/api/tests/native-turns.integration.mjs
 import assert from "node:assert/strict";
 import { test, mock, after } from "node:test";
-import { and, eq, SQL } from "drizzle-orm";
+import { and, asc, eq, SQL } from "drizzle-orm";
 import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import { sessionTurns, sessionMessages, spaceSessions, sessionForks, sessionTurnSegments, labelAssignments, taskRuns } from "@cohub/db";
 
@@ -26,46 +26,57 @@ await engine.exec(`create unique index turns_sequence on v2.session_turns(sessio
 create unique index messages_sequence on v2.session_messages(session_id, sequence);
 create unique index segments_ordinal on v2.session_turn_segments(session_id, ordinal);
 create unique index fork_child on v2.session_forks(child_session_id);`);
-mock.module("../src/db/index.js", { exports: { db: database } });
-mock.module("../src/reference-index-queue.js", { exports: { enqueueReferences: () => {} } });
-mock.module("@cohub/core/labels/session-user", { exports: { assignSessionParticipantSystemLabels: async () => [] } });
-mock.module("../src/lib/middleware.js", { exports: { useAuth: (c) => ({ uuid: c.req.header("x-user") ?? "owner" }), requireValidId: (id) => /^[a-f0-9-]{36}$/.test(id), authzDenied: (c) => c.json({ message: "forbidden" }, 403) } });
-mock.module("../src/permissions.js", { exports: { hasPermission: async (user, _permission, context) => user.uuid !== "denied" && !(user.uuid === "no-session-access" && context?.sessionId) } });
-mock.module("../src/space-sessions.js", { exports: { getSpaceSessionById: async (id) => (await database.select().from(spaceSessions).where(eq(spaceSessions.id, id)))[0] } });
+mock.module("../src/db/index.js", { namedExports: { db: database } });
+mock.module("../src/reference-index-queue.js", { namedExports: { enqueueReferences: () => {} } });
+mock.module("@cohub/core/labels/session-user", { namedExports: { assignSessionParticipantSystemLabels: async () => [] } });
+mock.module("../src/lib/middleware.js", { namedExports: { useAuth: (c) => ({ uuid: c.req.header("x-user") ?? "owner" }), requireValidId: (id) => /^[a-f0-9-]{36}$/.test(id), authzDenied: (c) => c.json({ message: "forbidden" }, 403) } });
+mock.module("../src/permissions.js", { namedExports: { hasPermission: async (user, _permission, context) => user.uuid !== "denied" && !(user.uuid === "no-session-access" && context?.sessionId) } });
+mock.module("../src/space-sessions.js", { namedExports: { getSpaceSessionById: async (id) => (await database.select().from(spaceSessions).where(eq(spaceSessions.id, id)))[0] } });
 const published = [];
-mock.module("../src/realtime-events.js", { exports: {
+const persistedEvents = [];
+mock.module("../src/realtime-events.js", { namedExports: {
   dispatchSessionCreated: async (session, fork) => { published.push(["session.created", session.id, fork?.parentSessionId ?? null]); },
   dispatchSessionUpdated: async ({ session }) => { published.push(["session.updated", session.id]); },
   dispatchTurnCreated: async ({ turn }) => { published.push(["turn.created", turn.id]); },
   dispatchLabelAssignmentsUpdated: async () => {}, messageRecordFromRow: (row) => row,
 } });
-mock.module("../src/session-output.js", { exports: {
+mock.module("../src/session-output.js", { namedExports: {
   dispatchTurnUpdated: async ({ turn }) => { published.push(["turn.updated", turn.id]); },
   dispatchTurnFinalized: async ({ turn }) => { published.push(["turn.finalized", turn.id]); },
-  dispatchSessionOutput: async ({ message }) => { published.push([`message.${message.role}`, message.turnId]); },
+  dispatchSessionOutput: async ({ message }) => { published.push([`message.${message.role}`, message.turnId]); persistedEvents.push(message); },
 } });
-mock.module("../src/space-activity.js", { exports: { touchSpaceActivity: async () => {} } });
-mock.module("../src/agent-turn-queue.js", { exports: { enqueueAgentTurnJob: async () => {} } });
-mock.module("../src/session-message-postprocess-queue.js", { exports: { enqueueSessionMessagePostprocess: async ({ messageId }) => { published.push(["postprocess", messageId]); } } });
+mock.module("../src/space-activity.js", { namedExports: { touchSpaceActivity: async () => {} } });
+mock.module("../src/agent-turn-queue.js", { namedExports: { enqueueAgentTurnJob: async () => {} } });
+mock.module("../src/session-message-postprocess-queue.js", { namedExports: { enqueueSessionMessagePostprocess: async ({ messageId }) => { published.push(["postprocess", messageId]); } } });
 const progress = [];
-mock.module("../src/native-turn-progress.js", { exports: {
+mock.module("../src/native-turn-progress.js", { namedExports: {
   cacheNativeTurnBinding: async (binding) => { progress.push(["cache", binding.turnId]); },
   clearNativeTurnBinding: async (turnId) => { progress.push(["clear", turnId]); },
   adoptNativeStreamSnapshot: async (_space, _session, turnId) => { progress.push(["adopt", turnId]); },
   releaseNativeStreamSnapshot: async (_space, _session, turnId) => { progress.push(["release", turnId]); },
 } });
 let failArtifacts = false;
-mock.module("../src/session-turns.js", { exports: {
+const objects = new Map();
+mock.module("../src/user-profiles.js", { namedExports: { fallbackPublicUserProfile: (userUuid) => ({ userUuid }), getProfilesByUuids: async () => [] } });
+mock.module("../src/turn-object-storage.js", { namedExports: {
+  buildTurnObjectPrefix: ({ spaceId, sessionId, turnId }) => `spaces/${spaceId}/sessions/${sessionId}/turns/${turnId}/`,
+  assertTurnObjectKeyForTurn: ({ objectKey }) => objectKey,
+  createTurnObjectCdnUrl: (objectKey) => ({ objectKey, url: `https://storage.invalid/${objectKey}` }),
+  writeTurnObjectJson: async (key, value) => { objects.set(key, structuredClone(value)); return { sizeBytes: JSON.stringify(value).length }; },
+} });
+const realSessionTurns = await import("../src/session-turns.js");
+mock.module("../src/session-turns.js", { namedExports: {
   getSessionTurnById: async (sessionId, id) => (await database.select().from(sessionTurns).where(and(eq(sessionTurns.id, id), eq(sessionTurns.sessionId, sessionId))))[0],
   hydrateTurnAuthorProfiles: async (turns) => turns,
   addUsage: (a, b) => a || b ? { input: (a?.input ?? 0) + (b?.input ?? 0), output: (a?.output ?? 0) + (b?.output ?? 0) } : null,
-  buildIntermediateObjectsForTurn: async (_input, rows) => {
+  buildIntermediateObjectsForTurn: async (input, rows) => {
     if (failArtifacts) throw new Error("storage offline");
-    return { index: null, summary: { messageCount: rows.length - 1, toolCallCount: 0, usage: null, durationMs: null, lastMessageText: null, hasError: false } };
+    return realSessionTurns.buildIntermediateObjectsForTurn(input, rows);
   },
 } });
 const { startNativeTurn, completeNativeTurn, getOwnedNativeTurn, ingestNativeTurns, knownNativeTurns } = await import("../src/native-turns.js");
 const { publishNativeIngest } = await import("../src/native-ingest-events.js");
+const { createRuntimeContextReader } = await import("../../agent/src/runtime/context-reader.js");
 after(() => engine.close());
 const at = "2026-09-21T00:00:00.000Z";
 const content = (text) => [{ type: "text", text }];
@@ -95,6 +106,89 @@ test("start and completion are idempotent; original IDs cannot be hijacked or ch
   assert.equal((await database.select().from(sessionMessages).where(eq(sessionMessages.turnId, input.turnId))).length, 2);
   const turn = await getOwnedNativeTurn(spaceId, "owner", first.binding.sessionId, input.turnId);
   assert.equal(turn.status, "completed"); assert.equal(turn.meta.runtime, "local");
+});
+
+const nativeUser = (text) => content(text).map((block) => ({ ...block, _meta: { nativeUserMessage: true } }));
+test("native steering keeps its user role, images, order and original turn prompt", async () => {
+  const spaceId = crypto.randomUUID(), input = start({ harness: "codex" });
+  const { binding } = await startNativeTurn(spaceId, "owner", input);
+  const steering = [...nativeUser("Please use this screenshot"), { type: "image", source: { type: "url", url: "https://example.invalid/screen.png" }, _meta: { nativeUserMessage: true } }];
+  const completion = { ...result, messages: [
+    { content: content("Working") }, { content: steering }, { content: content("Final answer") },
+    { content: nativeUser("One more detail") },
+  ] };
+  await completeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId, completion);
+  const rows = await database.select().from(sessionMessages).where(eq(sessionMessages.turnId, binding.turnId)).orderBy(asc(sessionMessages.sequence));
+  assert.deepEqual(rows.map((row) => [row.role, row.meta.messageKind]), [
+    ["user", "user"], ["assistant", "assistant_intermediate"], ["user", "user_steering"], ["assistant", "assistant_intermediate"], ["user", "user_steering"],
+  ]);
+  assert.deepEqual(rows[2].content, steering);
+  const turn = await getOwnedNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId);
+  assert.deepEqual(turn.userContent, input.userContent);
+  assert.equal(turn.intermediateSummary.userMessageCount, 2);
+  assert.equal(turn.assistantText, null, "a trailing user reply stays after the previous assistant message, without a synthetic final answer");
+  const stored = objects.get(turn.intermediateIndex.messagesObjectKey);
+  assert.deepEqual(stored.messages.map((message) => [message.role, message.text]), [["assistant", "Working"], ["user", "Please use this screenshot · Image"], ["assistant", "Final answer"], ["user", "One more detail"]]);
+  assert.deepEqual(stored.messages[1].content, steering);
+});
+
+test("native steering survives an exact completion retry after artifact failure", async () => {
+  const spaceId = crypto.randomUUID(), input = start({ harness: "codex" });
+  const { binding } = await startNativeTurn(spaceId, "owner", input);
+  const completion = { ...result, messages: [{ content: content("Working") }, { content: nativeUser("Correction") }, ...result.messages] };
+  failArtifacts = true;
+  try {
+    const first = await completeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId, completion);
+    assert.equal(first.artifactsPending, true);
+  } finally { failArtifacts = false; }
+  const replay = await completeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId, completion);
+  assert.equal(replay.changed, false);
+  assert.equal(replay.artifactsPending, false);
+  const turn = await getOwnedNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId);
+  const stored = objects.get(turn.intermediateIndex.messagesObjectKey);
+  assert.equal(turn.intermediateSummary.userMessageCount, 1, "a retry retains the count used to display native user messages");
+  assert.deepEqual(stored.messages.map((message) => [message.role, message.text]), [["assistant", "Working"], ["user", "Correction"]]);
+  assert.equal((await database.select().from(sessionMessages).where(eq(sessionMessages.turnId, binding.turnId))).length, 4, "replay does not duplicate appended user messages");
+});
+
+test("mixed native role markers reject completion without partially storing messages", async () => {
+  const spaceId = crypto.randomUUID(), input = start({ harness: "codex" });
+  const { binding } = await startNativeTurn(spaceId, "owner", input);
+  await assert.rejects(completeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId, {
+    ...result, messages: [{ content: [...nativeUser("User"), ...content("Assistant")] }],
+  }), /Invalid native user message metadata/);
+  assert.equal((await getOwnedNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId)).status, "running");
+  assert.equal((await database.select().from(sessionMessages).where(eq(sessionMessages.turnId, binding.turnId))).length, 1);
+});
+
+test("artifact rebuild recognizes native user markers stored by older servers", async () => {
+  const { spaceId, binding } = await root();
+  const rows = await database.select().from(sessionMessages).where(and(eq(sessionMessages.turnId, binding.turnId), eq(sessionMessages.role, "assistant")));
+  const marked = { ...rows[0], content: nativeUser("Preserved user reply"), text: "Preserved user reply" };
+  const rebuilt = await realSessionTurns.buildIntermediateObjectsForTurn({ spaceId, sessionId: binding.sessionId, turnId: binding.turnId }, [marked]);
+  assert.equal(rebuilt.summary.messageCount, 1, "a marked user reply is retained even if an old server labeled it assistant_final");
+  const stored = objects.get(rebuilt.index.messagesObjectKey);
+  assert.equal(stored.messages[0].role, "user");
+  assert.equal(stored.messages[0].meta.messageKind, "user_steering");
+});
+
+test("resumed agent context recognizes marked legacy user rows without changing other roles", async () => {
+  const spaceId = crypto.randomUUID(), input = start({ harness: "codex" });
+  const { binding } = await startNativeTurn(spaceId, "owner", input);
+  await completeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId, {
+    ...result, messages: [{ content: content("Working") }, { content: nativeUser("Correction") }, ...result.messages],
+  });
+  const rows = await database.select().from(sessionMessages).where(eq(sessionMessages.turnId, binding.turnId)).orderBy(asc(sessionMessages.sequence));
+  await database.update(sessionMessages).set({ role: "assistant", meta: { ...rows[2].meta, messageKind: "assistant_intermediate" } }).where(eq(sessionMessages.id, rows[2].id));
+  await database.insert(sessionMessages).values({ id: crypto.randomUUID(), sessionId: binding.sessionId, turnId: binding.turnId, sequence: 5, role: "system", content: content("System note"), meta: {} });
+  const context = await createRuntimeContextReader(database)({ spaceId, sessionId: binding.sessionId });
+  assert.deepEqual(context.messages.map((message) => message.role), ["user", "assistant", "user", "assistant", "system"]);
+  assert.equal(context.messages[2].meta.messageKind, "user_steering");
+  assert.deepEqual(context.messages[2].content, nativeUser("Correction"));
+  await database.delete(sessionMessages).where(eq(sessionMessages.turnId, binding.turnId));
+  await database.update(sessionTurns).set({ assistantContent: nativeUser("Trailing user reply") }).where(eq(sessionTurns.id, binding.turnId));
+  const compactHistory = await createRuntimeContextReader(database)({ spaceId, sessionId: binding.sessionId });
+  assert.deepEqual(compactHistory.messages.map((message) => message.role), ["user", "user"], "the durable turn projection also preserves a marked user's role");
 });
 
 test("two native clients sharing a Turn fork only the competing execution, atomically", async () => {
@@ -263,4 +357,25 @@ test("ingest reports what it created and settled, so live Turns are announced an
   assert.equal(published.filter(([kind]) => kind === "postprocess").length, 2, "every settled message is post-processed, imported ones included");
   const replay = await ingestNativeTurns(spaceId, "owner", { harness: "pi", nativeSessionId: "e", turns: [live, imported] });
   assert.deepEqual(replay.effects, { createdSessions: [], turns: [] }, "a replay announces nothing");
+});
+
+for (const liveStart of [true, false]) test(`native completion publishes steering exactly once (${liveStart ? "previously running" : "created and settled together"})`, async () => {
+  const spaceId = crypto.randomUUID();
+  const turn = ingestTurn({ result: null });
+  const input = { harness: "codex", nativeSessionId: "steering-events", turns: [turn] };
+  if (liveStart) await ingestNativeTurns(spaceId, "owner", input);
+  const completed = await ingestNativeTurns(spaceId, "owner", { ...input, turns: [{ ...turn, result: {
+    ...result, messages: [{ content: content("Working") }, { content: nativeUser("Correction") }, ...result.messages],
+  } }] });
+  persistedEvents.length = 0;
+  published.length = 0;
+  await publishNativeIngest(spaceId, completed.effects);
+  const emitted = persistedEvents.filter((message) => message.turnId === turn.turnId);
+  assert.deepEqual(emitted.map((message) => [message.role, message.text]), [
+    ...(!liveStart ? [["user", "hello"]] : []), ["assistant", "Working"], ["user", "Correction"], ["assistant", "answer"],
+  ]);
+  assert.equal(new Set(emitted.map((message) => message.id)).size, emitted.length, "each persisted message is emitted once");
+  const userIds = emitted.filter((message) => message.role === "user").map((message) => message.id);
+  assert.equal(published.filter(([kind]) => kind === "postprocess").length, 2, "postprocessing only receives the two assistant messages");
+  assert.equal(published.some(([kind, id]) => kind === "postprocess" && userIds.includes(id)), false);
 });

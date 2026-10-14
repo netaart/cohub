@@ -1,5 +1,6 @@
 import { asc, inArray } from "drizzle-orm";
 import { sessionMessages } from "@cohub/db";
+import { nativeMessageRole } from "@cohub/protocol";
 import { createLogger } from "@cohub/infra/logging";
 import { db } from "./db/index.js";
 import type { NativeIngestEffects } from "./native-turns.js";
@@ -39,12 +40,12 @@ export async function publishNativeIngest(spaceId: string, effects: NativeIngest
       const turnMessages = byTurn.get(entry.turnId) ?? [];
       if (entry.created) {
         await dispatchTurnCreated({ spaceId, sessionId, turn: (await hydrateTurnAuthorProfiles([turn]))[0] ?? turn }).catch(warn("turn.created"));
-        for (const message of turnMessages.filter((row) => row.role === "user")) await dispatchSessionOutput({ type: "session.message.persisted", spaceId, sessionId, message: messageRecordFromRow(message) }).catch(warn("user message"));
+        for (const message of turnMessages.filter((row) => row.role === "user" && nativeMessageRole(row.content) !== "user")) await dispatchSessionOutput({ type: "session.message.persisted", spaceId, sessionId, message: messageRecordFromRow(message) }).catch(warn("user message"));
       }
       if (entry.changed) {
         await dispatchTurnUpdated({ spaceId, sessionId, turn }).catch(warn("turn.updated"));
         await dispatchTurnFinalized({ spaceId, sessionId, turn }).catch(warn("turn.finalized"));
-        for (const message of turnMessages.filter((row) => row.role === "assistant")) await dispatchSessionOutput({ type: "session.message.persisted", spaceId, sessionId, message: messageRecordFromRow(message) }).catch(warn("assistant message"));
+        for (const message of turnMessages.filter((row) => row.role === "assistant" || row.role === "user" && nativeMessageRole(row.content) === "user")) await dispatchSessionOutput({ type: "session.message.persisted", spaceId, sessionId, message: messageRecordFromRow(message) }).catch(warn("turn message"));
       }
     }
     if (session) await dispatchSessionUpdated({ session, changed: ["latestMessageText", "lastMessageAt", "lastMessageId"] }).catch(warn("session.updated"));

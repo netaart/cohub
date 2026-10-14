@@ -1,3 +1,4 @@
+import { nativeMessageRole } from "@cohub/protocol";
 import type { ContentBlock, Usage } from "@cohub/protocol/core";
 import type { StoredIntermediateMessage } from "@cohub/protocol/model";
 
@@ -44,11 +45,15 @@ export function createStreamingIntermediateMessage(input: {
 	const toolResultError = input.contentBlocks.find(
 		(block) => block.type === "tool_result" && block.is_error,
 	) as Extract<ContentBlock, { type: "tool_result" }> | undefined;
+	const role =
+		nativeMessageRole(input.contentBlocks) === "user"
+			? "user"
+			: (input.role ?? "assistant");
 	return {
 		id,
 		sessionId: input.sessionId,
 		sequence: input.sequence ?? null,
-		role: input.role ?? "assistant",
+		role,
 		content: input.contentBlocks,
 		text,
 		provider: input.provider ?? null,
@@ -63,9 +68,11 @@ export function createStreamingIntermediateMessage(input: {
 		meta: {
 			...(input.meta ?? {}),
 			messageKind:
-				typeof input.meta?.messageKind === "string"
-					? input.meta.messageKind
-					: "assistant_intermediate",
+				role === "user"
+					? "user_steering"
+					: typeof input.meta?.messageKind === "string"
+						? input.meta.messageKind
+						: "assistant_intermediate",
 			streaming: true,
 			turnId: input.turnId ?? null,
 			spaceId: input.spaceId ?? null,

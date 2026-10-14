@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { sessionMessages, sessionTurns, sessionTurnSegments, spaceSessions } from "@cohub/db";
-import { harnessArchiveIndexSchema, isLocalHarness, selectRuntimeContextMessages, type HarnessKind, type RuntimeContext, type RuntimeContextMessage } from "@cohub/protocol";
+import { harnessArchiveIndexSchema, isLocalHarness, nativeMessageRole, selectRuntimeContextMessages, type HarnessKind, type RuntimeContext, type RuntimeContextMessage } from "@cohub/protocol";
 import type { db } from "../db.js";
 
 type ContextInput = { spaceId: string; sessionId: string; beforeSequence?: number; throughTurnId?: string; harness?: HarnessKind; headOnly?: boolean; pendingTurnIds?: string[] };
@@ -73,7 +73,10 @@ export function createRuntimeContextReader(database: ContextDatabase) {
       const appendFallback = (turn: typeof turns[number]) => {
         const meta = asMeta(turn.meta);
         if (turn.userContent.length) result.messages.push({ id: typeof meta.userMessageId === "string" ? meta.userMessageId : `${turn.id}:user`, turnId: turn.id, role: "user", content: turn.userContent });
-        if (turn.assistantContent?.length) result.messages.push({ id: `${turn.id}:assistant`, turnId: turn.id, role: turn.intent === "compact" ? "system" : "assistant", content: turn.assistantContent, provider: turn.provider, model: turn.model, meta: { compaction: meta.compaction, createdAt: turn.createdAt?.toISOString() } });
+        if (turn.assistantContent?.length) {
+          const nativeUser = nativeMessageRole(turn.assistantContent) === "user";
+          result.messages.push({ id: `${turn.id}:assistant`, turnId: turn.id, role: nativeUser ? "user" : turn.intent === "compact" ? "system" : "assistant", content: turn.assistantContent, provider: turn.provider, model: turn.model, meta: { ...(nativeUser ? { messageKind: "user_steering" } : {}), compaction: meta.compaction, createdAt: turn.createdAt?.toISOString() } });
+        }
       };
       for (const { message, turnId, turnMeta, turnSequence } of rows) {
         while (fallback[fallbackIndex]?.sequence !== undefined && (fallback[fallbackIndex]?.sequence ?? Number.POSITIVE_INFINITY) < turnSequence) {
@@ -82,11 +85,13 @@ export function createRuntimeContextReader(database: ContextDatabase) {
           if (turn) appendFallback(turn);
         }
         const meta = asMeta(message.meta);
-        const shellResult = asMeta(turnMeta).intent === "shell_command" && message.role === "assistant";
+        const nativeUser = nativeMessageRole(message.content) === "user";
+        const role = nativeUser ? "user" : message.role as RuntimeContextMessage["role"];
+        const shellResult = asMeta(turnMeta).intent === "shell_command" && role === "assistant";
         result.messages.push({
-          id: message.id, turnId, role: message.role as RuntimeContextMessage["role"], content: message.content,
+          id: message.id, turnId, role, content: message.content,
           provider: message.provider, model: message.model, usage: message.usage, stopReason: message.stopReason, errorMessage: message.errorMessage,
-          meta: { agentSessionEntryId: meta.agentSessionEntryId ?? null, messageKind: shellResult ? "shell_command_result" : meta.messageKind,
+          meta: { agentSessionEntryId: meta.agentSessionEntryId ?? null, messageKind: nativeUser ? "user_steering" : shellResult ? "shell_command_result" : meta.messageKind,
             compaction: meta.compaction, nativeApi: meta.nativeApi, generationTaskId: meta.generationTaskId, generationStatus: meta.generationStatus,
             command: meta.command, llmContextText: meta.llmContextText, createdAt: message.createdAt?.toISOString(),
           },

@@ -7,6 +7,7 @@ import { basename, join } from "node:path";
 import { createZstdDecompress } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import type { ContentBlock, NativeTurnComplete, NativeTurnMessage } from "@neta-art/cohub";
+import { nativeMessageRole, nativeUserContent } from "@neta-art/cohub";
 import { identifiable, piContent } from "../harness.js";
 import { codexTokenTotals, codexUsage } from "../codex-usage.js";
 import { record, type JsonRecord } from "../json-rpc.js";
@@ -18,7 +19,8 @@ export type NativeTranscriptTurn = {
   userContent: ContentBlock[];
   /**
    * Codex records a prompt in several steps and the final form last; until this is set the user
-   * content may still change.
+   * content may still change. Once final, later steering or question replies must not replace
+   * the original prompt or cloud Turn identity used when this Turn was registered.
    */
   userFinal?: boolean;
   messages: NativeTurnMessage[];
@@ -381,20 +383,48 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
   let cloudSessionId = text(record(metadata.cohub).sessionId);
   let provider: string | null = text(metadata.model_provider) || null;
   let userFromResponse = false;
+  let userResponse: ContentBlock[] = [];
+  let pendingUser: { content: ContentBlock[]; clientId: string; message?: NativeTurnMessage } | null = null;
+  const userIds = new Set<string>();
+  const finishUser = (content: ContentBlock[], clientId: string) => {
+    if (!current) return;
+    if (clientId && userIds.has(clientId)) { userResponse = []; pendingUser = null; return; }
+    if (clientId) userIds.add(clientId);
+    if (!current.userFinal) {
+      current.userContent = content;
+      if (clientId) current.cloudTurnId = clientId;
+      current.userFinal = true;
+      userFromResponse = true;
+    } else if (pendingUser?.message) pendingUser.message.content = nativeUserContent(content);
+    else messages.push({ content: nativeUserContent(content), model: null, provider: null });
+    userResponse = []; pendingUser = null;
+  };
+  const finishPendingUser = () => {
+    if (pendingUser) finishUser([...pendingUser.content, ...userResponse.filter((block) => block.type === "image")], pendingUser.clientId);
+  };
+  const updatePendingUser = () => {
+    if (!pendingUser || !current) return;
+    const content = [...pendingUser.content, ...userResponse.filter((block) => block.type === "image")];
+    if (!current.userFinal) current.userContent = content;
+    else if (pendingUser.message) pendingUser.message.content = nativeUserContent(content);
+  };
   const usageByTurn = new Map<string, NativeTurnMessage["usage"]>();
   const assistant = () => {
     let last = messages.at(-1);
-    if (!last) { last = { content: [], model, provider }; messages.push(last); }
+    if (!last || nativeMessageRole(last.content) === "user") { last = { content: [], model, provider }; messages.push(last); }
     return last;
   };
   for (const line of lines.slice(1)) {
     const entry = line.value, payload = record(entry.payload);
     if (entry.type === "turn_context") { model = text(payload.model) || model; provider = text(payload.model_provider) || provider; }
     if (entry.type === "event_msg" && ["turn_started", "task_started"].includes(text(payload.type))) {
+      finishPendingUser();
       if (current) turns.push(current);
       current = { key: text(payload.turn_id), parentKey: turns.at(-1)?.key ?? null, userContent: [], messages: [], startedAt: iso(entry.timestamp), startBytes: line.startBytes, endBytes: line.endBytes, contentEndBytes: line.endBytes, boundaries: {}, sha256: line.sha256, result: null, path: segment.path, rolloutId: segment.rolloutId };
       if (!current.key) throw new Error("Codex Turn identity is missing");
-      messages = current.messages; userFromResponse = false; calls.clear();
+      // An app update resumes execution without a new user prompt; its empty input is final.
+      if (record(payload.turn_attribution).turn_trigger === "app_update_resume") current.userFinal = true;
+      messages = current.messages; userFromResponse = false; calls.clear(); userResponse = []; pendingUser = null; userIds.clear();
     }
     if (entry.type === "token_usage_record") {
       const usage = record(payload.turn_token_usage);
@@ -409,15 +439,23 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
     current.sha256 = line.sha256;
     current.boundaries[line.endBytes] = line.sha256;
     current.contentEndBytes = line.endBytes;
+    // Legacy logs write a simplified user event before the rich response item. Only lock the
+    // input at its typed marker or when execution begins, so image bytes cannot arrive too late.
+    if (entry.type === "response_item" && (payload.type === "message" && payload.role === "assistant"
+      || ["reasoning", "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"].includes(text(payload.type)))
+      || entry.type === "event_msg" && ["turn_complete", "task_complete", "turn_aborted"].includes(text(payload.type))) {
+      finishPendingUser(); userResponse = [];
+    }
     if (entry.type === "response_item") {
       const cohub = record(record(entry.metadata).cohub);
-      if (typeof cohub.turnId === "string") {
+      if (typeof cohub.turnId === "string" && !current.userFinal) {
         current.cloudTurnId = cohub.turnId;
         if (!text(record(metadata.cohub).sessionId)) cloudSessionId = text(cohub.sessionId) || cloudSessionId;
       }
       if (payload.type === "message" && payload.role === "user") {
-        if (!userFromResponse) current.userContent = [];
-        current.userContent.push(...codexContent(payload.content)); userFromResponse = true;
+        userResponse.push(...codexContent(payload.content));
+        if (pendingUser) updatePendingUser();
+        else if (!current.userFinal) { current.userContent = [...userResponse]; userFromResponse = true; }
       } else if (payload.type === "message" && payload.role === "assistant") {
         const content = codexContent(payload.content);
         if (!messages.length || messages.at(-1)?.content.length) messages.push({ content, model, provider });
@@ -445,17 +483,33 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
       const item = record(payload.item);
       if (item.type === "UserMessage") {
         const clientId = text(item.client_id);
-        if (clientId) current.cloudTurnId = clientId;
+        if (clientId && userIds.has(clientId)) { userResponse = []; pendingUser = null; continue; }
+        if (pendingUser && pendingUser.clientId && clientId && pendingUser.clientId !== clientId) finishPendingUser();
         // The typed input, without the environment context Codex injects as a user item.
-        const typed = codexContent(item.content);
-        if (typed.length) { current.userContent = typed; userFromResponse = true; }
-        current.userFinal = true;
+        // Local-image markers carry paths; their preceding response contains the actual bytes.
+        const images = userResponse.filter((block) => block.type === "image");
+        let imageIndex = 0;
+        const typed = list(item.content).flatMap((value): ContentBlock[] => {
+          if (record(value).type !== "local_image") return codexContent([value]);
+          const image = images[imageIndex++];
+          if (!image) throw new Error("Codex user image content is missing from its response item");
+          return [image];
+        });
+        finishUser(typed.length ? typed : [{ type: "text", text: "" }], clientId);
       }
     }
     if (entry.type === "event_msg" && payload.type === "user_message") {
-      if (!userFromResponse) current.userContent = [{ type: "text", text: text(payload.message) }];
-      userFromResponse = true;
-      current.userFinal = true;
+      finishPendingUser();
+      const clientId = text(payload.client_id);
+      pendingUser = { content: [{ type: "text", text: text(payload.message) }], clientId };
+      if (!current.userFinal) {
+        current.userContent = pendingUser.content; userFromResponse = true;
+        if (clientId) current.cloudTurnId = clientId;
+      } else if (!clientId || !userIds.has(clientId)) {
+        pendingUser.message = { content: nativeUserContent(pendingUser.content), model: null, provider: null };
+        messages.push(pendingUser.message);
+      }
+      updatePendingUser();
     }
     if (entry.type === "event_msg" && ["turn_complete", "task_complete", "turn_aborted"].includes(text(payload.type))) {
       if (payload.turn_id && payload.turn_id !== current.key) throw new Error("Codex Turn boundary mismatch");
@@ -470,7 +524,7 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
     }
   }
   const settled = current === null;
-  if (current && userFromResponse) turns.push(current);
+  if (current && (userFromResponse || current.userFinal)) turns.push(current);
   for (const turn of turns) {
     const last = turn.result?.messages.at(-1);
     if (last && usageByTurn.has(turn.key)) last.usage = usageByTurn.get(turn.key);
