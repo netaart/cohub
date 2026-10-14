@@ -59,7 +59,7 @@ export class JsonRpcProcess {
   private closed: Promise<void>;
   private closing: Promise<void> | null = null;
   constructor(binary: string, args: string[], cwd: string, private mode: "pi" | "codex", context: Record<string, string> = {}) {
-    this.child = spawn(binary, args, { cwd, env: { ...harnessEnvironment(), ...context }, stdio: "pipe", detached: process.platform !== "win32" });
+    this.child = spawn(binary, args, { cwd, env: { ...harnessEnvironment(), ...context }, stdio: "pipe", detached: process.platform !== "win32", windowsHide: true });
     this.closed = new Promise((resolve) => this.child.once("close", () => resolve()));
     const decoder = new JsonLineDecoder((value) => this.receive(value));
     this.child.stdout.on("data", (chunk: Buffer) => { try { decoder.push(chunk); } catch (error) { this.fail(error); } });

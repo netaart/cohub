@@ -149,6 +149,10 @@ func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (
 		return accepted, d.complete(request, accepted.OpID, d.handleFSEdit(request))
 	case "fs.mkdir":
 		return accepted, d.complete(request, accepted.OpID, d.handleFSMkdir(request))
+	case "fs.delete":
+		return accepted, d.complete(request, accepted.OpID, d.handleFSDelete(request))
+	case "fs.move":
+		return accepted, d.complete(request, accepted.OpID, d.handleFSMove(request))
 	case "fs.stat":
 		return accepted, d.complete(request, accepted.OpID, d.handleFSStat(request))
 	case "fs.ls":

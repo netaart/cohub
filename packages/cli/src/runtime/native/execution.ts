@@ -1,5 +1,5 @@
 import type { ContentBlock, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput } from "@neta-art/cohub";
-import { imageForPi, type HarnessOptions } from "../harness.js";
+import { harnessCommand, imageForPi, type HarnessOptions } from "../harness.js";
 import { JsonRpcProcess, record, RpcProcessClosedError, type JsonRecord } from "../json-rpc.js";
 import { describeError } from "../../network-error.js";
 import { ProcessCleanupUncertainError } from "../process-group.js";
@@ -89,7 +89,7 @@ async function runPi(executor: Executor, turn: Turn, context?: RuntimeDiagnostic
   let begun = false;
   try {
     if (!link) {
-      host = new JsonRpcProcess(executor.executables.pi || "pi", ["--mode", "rpc", "--session", session.path, "-e", executor.piExtension], executor.cwd, "pi", turnEnvironment(input));
+      host = new JsonRpcProcess(...harnessCommand(executor.executables.pi || "pi", ["--mode", "rpc", "--session", session.path, "-e", executor.piExtension], executor.cwd), executor.cwd, "pi", turnEnvironment(input));
       watchHost(host, executor.diagnostics, context);
       const rpc = host;
       // Nobody is at this Pi's terminal to answer an extension's question.
@@ -209,7 +209,7 @@ async function runCodex(executor: Executor, turn: Turn, context?: RuntimeDiagnos
   let begun = false;
   try {
     if (!channel) {
-      host = new JsonRpcProcess(executor.executables.codex || "codex", ["app-server", "--listen", "stdio://"], executor.cwd, "codex", turnEnvironment(input));
+      host = new JsonRpcProcess(...harnessCommand(executor.executables.codex || "codex", ["app-server", "--listen", "stdio://"], executor.cwd), executor.cwd, "codex", turnEnvironment(input));
       watchHost(host, executor.diagnostics, context);
       channel = await openPrivateServer(host);
     }

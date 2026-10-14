@@ -282,12 +282,18 @@ func resolveSandboxPath(cfg env.Config, rawPath string, cwd string) (resolvedSan
 	}
 
 	candidate := strings.TrimSpace(rawPath)
+	if err := validateHostPathSyntax(candidate); err != nil {
+		return resolvedSandboxPath{}, err
+	}
+	if err := validateHostPathSyntax(strings.TrimSpace(cwd)); err != nil {
+		return resolvedSandboxPath{}, err
+	}
 	if candidate == "" || candidate == "." {
 		candidate = base
 	}
 
 	var cleaned string
-	if filepath.IsAbs(candidate) {
+	if isAbsSandboxPath(candidate) {
 		cleaned = filepath.Clean(candidate)
 	} else {
 		cleaned = filepath.Clean(filepath.Join(base, candidate))
@@ -329,7 +335,7 @@ func ensureWithinRoot(root, cleaned string) error {
 			for i := len(trailing) - 1; i >= 0; i-- {
 				full = filepath.Join(full, trailing[i])
 			}
-			if full == root || strings.HasPrefix(full, root+string(filepath.Separator)) {
+			if pathWithin(root, full) {
 				return nil
 			}
 			return errPathOutsideRoot
@@ -344,7 +350,7 @@ func ensureWithinRoot(root, cleaned string) error {
 	}
 
 	// No existing ancestor resolved; fall back to a lexical prefix check.
-	if cleaned == root || strings.HasPrefix(cleaned, root+string(filepath.Separator)) {
+	if pathWithin(root, cleaned) {
 		return nil
 	}
 	return errPathOutsideRoot
@@ -357,7 +363,7 @@ func isReadOnlyPath(cfg env.Config, path string) bool {
 	}
 	candidate := filepath.Clean(path)
 	for _, root := range roots {
-		if candidate == root || strings.HasPrefix(candidate, root+string(filepath.Separator)) {
+		if pathWithin(root, candidate) {
 			return true
 		}
 	}

@@ -1,7 +1,8 @@
-import { fork } from "node:child_process";
+import { execFile, fork, type ForkOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { createInterface } from "node:readline/promises";
 import { isLocalHarness } from "@neta-art/cohub";
 import { discoverHarnesses, installedHarnesses } from "./harness.js";
@@ -61,7 +62,9 @@ export async function startBackgroundRuntime(config: RuntimeLaunch): Promise<Run
   return new Promise((resolve, reject) => {
     // Keep the same Node executable and loader (also works from source in tests).
     const workerUrl = new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.js", import.meta.url);
-    const child = fork(workerUrl, [], { detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"] });
+    // fork forwards spawn options; windowsHide keeps a detached Windows worker from opening a console.
+    const forkOptions: ForkOptions & { windowsHide: boolean } = { detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"], windowsHide: true };
+    const child = fork(workerUrl, [], forkOptions);
     const diagnosticConsole = createDiagnosticConsole(config.verbose);
     let last: RuntimeSummary | null = null;
     let settled = false;
@@ -89,7 +92,17 @@ export async function startBackgroundRuntime(config: RuntimeLaunch): Promise<Run
   });
 }
 
+/** Collaborators execute as this OS user; an elevated Windows token would grant them administrator rights. */
+async function assertNotElevatedOnWindows() {
+  if (process.platform !== "win32") return;
+  if (!process.env.SystemRoot) throw new Error("SystemRoot is not set; cannot check terminal elevation");
+  const { stdout } = await promisify(execFile)(join(process.env.SystemRoot, "System32", "whoami.exe"), ["/groups"], { encoding: "utf8", windowsHide: true });
+  // High (S-1-16-12288) and System (S-1-16-16384) integrity labels mark an elevated token.
+  if (/\bS-1-16-(?:12288|16384)\b/.test(stdout)) throw new Error("Run cohub runtime up from a non-elevated terminal");
+}
+
 export async function runtimeUp(program: Command, dir: string | undefined, options: RuntimeUpOptions) {
+  await assertNotElevatedOnWindows();
   const requestedRoot = resolve(dir ?? process.cwd());
   if (!(await stat(requestedRoot)).isDirectory()) throw new Error("Workspace is not a directory");
   const root = await canonicalRuntimeRoot(requestedRoot);

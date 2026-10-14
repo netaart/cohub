@@ -1,5 +1,5 @@
 import { access, stat } from "node:fs/promises";
-import { constants } from "node:fs";
+import { constants, readFileSync, statSync } from "node:fs";
 import { delimiter, join, resolve, win32 } from "node:path";
 import type { ContentBlock, RuntimeCapabilities } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "./json-rpc.js";
@@ -18,6 +18,25 @@ export function harnessExecutableCandidates(binary: string, cwd: string, path: s
     ? [paths.resolve(cwd, binary)]
     : path.split(paths.delimiter).map((directory) => directory.replace(/^"(.*)"$/, "$1")).filter(Boolean).map((directory) => paths.resolve(cwd, directory, binary));
   return roots.flatMap((root) => extensions.map((ext) => `${root}${ext}`));
+}
+
+/**
+ * Windows npm/pnpm installs expose harnesses as .cmd shims, which cannot be spawned
+ * without a shell. Run an .exe directly, or the shim's Node entry with this Node.
+ */
+export function harnessCommand(binary: string, args: string[], cwd: string): [string, string[]] {
+  if (process.platform !== "win32") return [binary, args];
+  const path = harnessExecutableCandidates(binary, cwd, process.env.PATH ?? "").find((candidate) => statSync(candidate, { throwIfNoEntry: false })?.isFile());
+  if (!path) throw new Error(`${binary} was not found on PATH`);
+  const extension = win32.extname(path).toLowerCase();
+  if (extension === ".exe" || extension === ".com") return [path, args];
+  if ([".js", ".mjs", ".cjs"].includes(extension)) return [process.execPath, [path, ...args]];
+  if (extension === ".cmd") {
+    const shim = readFileSync(path, "utf8");
+    const entry = /SET "_prog=node"/i.test(shim) ? /"%dp0%\\([^"]+)"\s+%\*/i.exec(shim)?.[1] : undefined;
+    if (entry) return [process.execPath, [win32.join(win32.dirname(path), entry), ...args]];
+  }
+  throw new Error(`Cannot run ${path} without a shell; pass --pi/--codex with an .exe or Node script`);
 }
 
 /** Discover installed executables only; authentication/capability errors stay explicit. */
@@ -65,7 +84,7 @@ async function initializeCodex(rpc: JsonRpcProcess) {
 export async function discoverHarnesses(harnesses: ("pi" | "codex")[], options: HarnessOptions, cwd: string): Promise<RuntimeCapabilities> {
   const models: RuntimeCapabilities["models"] = [];
   await Promise.all(harnesses.map(async (harness) => {
-    const rpc = new JsonRpcProcess(options[harness] || harness, harness === "pi" ? ["--mode", "rpc", "--no-session"] : ["app-server", "--listen", "stdio://"], cwd, harness);
+    const rpc = new JsonRpcProcess(...harnessCommand(options[harness] || harness, harness === "pi" ? ["--mode", "rpc", "--no-session"] : ["app-server", "--listen", "stdio://"], cwd), cwd, harness);
     try {
       if (harness === "pi") {
         const result = await rpc.request("get_available_models");

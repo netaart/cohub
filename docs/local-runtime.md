@@ -38,6 +38,10 @@ If creation succeeded but its ID was not received, inspect your Spaces and use `
 do not automatically create a replacement. 原始创建回执会保留，结果未知时不会自动重建。
 
 It supervises the workspace bridge and the Harness connection. Node.js 24+ is required.
+On Windows, install Git for Windows (or set `COHUB_BASH` to `bash.exe`) and run `runtime up` from a
+non-elevated terminal: collaborators execute as your OS user, so an administrator terminal is refused.
+The Pi extension connects over a private named pipe. Codex's shared app-server listens on an AF_UNIX
+socket Node cannot reach on Windows, so terminal Codex chats sync read-only there.
 Pi and Codex must already be installed and authenticated locally. Without `--harness`,
 startup discovers installed Pi/Codex executables on PATH (or explicit executable overrides).
 Capability/authentication failures remain explicit; it never silently switches executors.

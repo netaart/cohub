@@ -32,7 +32,9 @@ const codexHome = () => process.env.CODEX_HOME?.trim() || join(homedir(), ".code
 /** The socket every Codex client on this machine discovers; a terminal `codex` attaches to it. */
 const codexControlSocket = () => join(codexHome(), "app-server-control", "app-server-control.sock");
 
-export const supportsSharedServer = (version: Version | null) => atLeast(version, CODEX_SHARED_MIN_VERSION);
+/** Codex's shared server listens on an AF_UNIX socket, which Node cannot reach on Windows. */
+export const sharedServerAvailable = process.platform !== "win32";
+export const supportsSharedServer = (version: Version | null) => sharedServerAvailable && atLeast(version, CODEX_SHARED_MIN_VERSION);
 
 /** Start the shared app-server when none is running. */
 async function ensureSharedServer(binary: string, cwd: string): Promise<boolean> {

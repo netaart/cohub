@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/coder/websocket"
@@ -491,11 +490,4 @@ func (s *Server) maybeSelfHealOnStaleMount(request protocol.RPCRequest, failed p
 		s.logger.Warn("stale mount recovery report failed; falling back to self terminate")
 		s.selfTerminate("stale mount report failed")
 	}()
-}
-
-func (s *Server) selfTerminate(reason string) {
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM); err != nil {
-		s.logger.Error("failed to signal sandbox for self-heal shutdown", slog.String("reason", reason), slog.String("error", err.Error()))
-		os.Exit(1)
-	}
 }

@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
-import { chmod, mkdir, rm } from "node:fs/promises";
+import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { COHUB_PI_PROTOCOL } from "./pi-extension.js";
 import type { Version } from "./version.js";
@@ -81,16 +82,30 @@ export class PiLink {
 
   async listen(signal: AbortSignal): Promise<void> {
     const { socketPath } = this.options;
+    const windows = process.platform === "win32";
+    // Windows named pipes share one global namespace: listen on a random name and
+    // publish it at socketPath, so another account cannot pre-claim the endpoint.
+    const endpoint = windows ? `\\\\.\\pipe\\cohub-pi-${randomUUID()}` : socketPath;
     // The socket accepts commands that drive the user's agent: only this user may reach it.
     await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
-    if (process.platform !== "win32") await chmod(dirname(socketPath), 0o700);
+    if (!windows) await chmod(dirname(socketPath), 0o700);
     await rm(socketPath, { force: true });
     const server = createServer((socket) => this.accept(socket));
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
-      server.listen(socketPath, () => { server.removeListener("error", reject); resolve(); });
+      server.listen(endpoint, () => { server.removeListener("error", reject); resolve(); });
     });
-    if (process.platform !== "win32") await chmod(socketPath, 0o600);
+    if (windows) {
+      const temporary = `${socketPath}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporary, endpoint, { mode: 0o600 });
+        await rename(temporary, socketPath);
+      } catch (error) {
+        server.close();
+        await rm(temporary, { force: true });
+        throw error;
+      }
+    } else await chmod(socketPath, 0o600);
     this.server = server;
     signal.addEventListener("abort", () => {
       for (const session of this.sessions.values()) session.socket.destroy();

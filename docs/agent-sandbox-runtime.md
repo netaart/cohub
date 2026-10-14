@@ -41,14 +41,28 @@ turns a user's local folder into the sandbox of a Space:
 `cohub-sandboxd` is the same code as the cloud sandbox, run only as a `--local` dial-out.
 CI (`.github/workflows/sandbox-binaries-build.yml`) cross-compiles common platforms when a `v*` tag is pushed:
 
-- `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`
+- `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`, `windows/arm64`
 - Each platform produces `cohub-sandboxd_<version>_<os>_<arch>.tar.gz` + `.sha256`, plus an aggregated `SHA256SUMS.txt`
 - The version is injected via `-ldflags -X main.buildVersion=<tag>`; inside containers the `COHUB_SANDBOX_VERSION` env var takes precedence and the legacy `IMAGE_VERSION` is accepted
-- Windows is not supported yet (process group management depends on Unix syscalls; platform support to follow)
+- Windows archives contain `cohub-sandboxd.exe`; `verify:sandboxd` requires all six platforms before the CLI can publish
 - Android is built by the app's Gradle build, not this workflow: `:app:buildSandboxd` cross-compiles
   `apps/sandbox` with Go and the NDK (cgo, for bionic's resolver) into the APK's native library
   directory, the one place an app may execute its own binaries. See [Local Runtime](local-runtime.md#android-device--android-设备)
 - Artifacts are attached to the GitHub Release (private repo, internal downloads only) and uploaded to the public CDN `https://public.cohub.live/sandboxd/<version>/` (the CLI download source)
+
+### Windows
+
+Windows-only behavior lives in `*_windows.go` files and `win32` CLI branches; Unix paths are unchanged.
+
+- Shell commands run through Git Bash (`COHUB_BASH`, then the Git installation next to `git.exe`, then the standard
+  install locations). `bash` is never looked up on PATH because it commonly resolves to WSL. `LANG=C.UTF-8` is set
+  when no locale is configured; native Windows programs may still write their own code page.
+- Each command runs in a Job Object: abort/timeout terminates the whole tree, a normal exit leaves background
+  descendants running (matching the Unix process group).
+- Rooted paths such as `/workspace/...` are sandbox paths. The fence compares case-insensitively and rejects
+  UNC/device paths, drive-relative paths and alternate data streams.
+- The managed control channel uses a per-launch named pipe (`COHUB_RUNTIME_CONTROL_PIPE`) instead of fd 3.
+- `fs.delete` / `fs.move` (capabilities `fsDelete` / `fsMove`) replace the `rm` / `mv` argv fallback.
 
 ### Managed download (CLI)
 

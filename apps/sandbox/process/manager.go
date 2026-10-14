@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,7 +33,7 @@ func sanitizeInheritedEnv(env []string) []string {
 	out := make([]string, 0, len(env))
 	for _, e := range env {
 		key, _, _ := strings.Cut(e, "=")
-		if _, blocked := blockedInheritedEnvKeys[key]; blocked {
+		if _, blocked := blockedInheritedEnvKeys[envKey(key)]; blocked {
 			continue
 		}
 		out = append(out, e)
@@ -47,6 +46,7 @@ type ManagedProcess struct {
 	OwnerIdentity string
 	Cmd           *exec.Cmd
 	Cancel        context.CancelFunc
+	tree          processTree
 
 	mu            sync.Mutex
 	terminating   bool
@@ -130,7 +130,11 @@ func (m *Manager) StartWithOptions(ownerIdentity string, options StartOptions) (
 	if len(options.Argv) > 0 {
 		cmd = exec.CommandContext(ctx, options.Argv[0], options.Argv[1:]...)
 	} else {
-		cmd = exec.CommandContext(ctx, commandShell(), "-c", options.Command)
+		shell, err := shellCommand(ctx, options.Command)
+		if err != nil {
+			return "", nil, nil, nil, err
+		}
+		cmd = shell
 	}
 	// Context cancellation is handled below by terminating the whole process
 	// group. Keep exec's cancellation hook from killing only the leader first.
@@ -141,8 +145,8 @@ func (m *Manager) StartWithOptions(ownerIdentity string, options StartOptions) (
 	// keep the RPC pending forever; the descendant itself remains untouched
 	// unless the process is explicitly aborted or times out.
 	cmd.WaitDelay = processWaitDelay
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	inheritedEnv := sanitizeInheritedEnv(os.Environ())
+	cmd.SysProcAttr = processTreeAttr()
+	inheritedEnv := platformEnv(sanitizeInheritedEnv(os.Environ()))
 	// User-provided env vars are appended only if the key doesn't already
 	// exist in the sanitized pod environment. This prevents users from accidentally
 	// overriding critical system vars (PATH, HOME, LANG, etc.) and is
@@ -151,11 +155,11 @@ func (m *Manager) StartWithOptions(ownerIdentity string, options StartOptions) (
 		existingKeys := make(map[string]bool)
 		for _, e := range inheritedEnv {
 			key, _, _ := strings.Cut(e, "=")
-			existingKeys[key] = true
+			existingKeys[envKey(key)] = true
 		}
 		var merged []string
 		for key, value := range options.Env {
-			if key == "" || existingKeys[key] {
+			if key == "" || existingKeys[envKey(key)] {
 				continue
 			}
 			if !envKeyPattern.MatchString(key) {
@@ -193,11 +197,17 @@ func (m *Manager) StartWithOptions(ownerIdentity string, options StartOptions) (
 	if err := cmd.Start(); err != nil {
 		return "", nil, nil, nil, fmt.Errorf("start command: %w", err)
 	}
+	tree, err := attachProcessTree(cmd)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return "", nil, nil, nil, fmt.Errorf("start command: %w", err)
+	}
 	started = true
 
 	m.startedTotal.Add(1)
 	processID := uuid.NewString()
-	managed := &ManagedProcess{ID: processID, OwnerIdentity: ownerIdentity, Cmd: cmd, Cancel: cancel}
+	managed := &ManagedProcess{ID: processID, OwnerIdentity: ownerIdentity, Cmd: cmd, Cancel: cancel, tree: tree}
 
 	m.mu.Lock()
 	m.processes[processID] = managed
@@ -238,6 +248,13 @@ func (m *Manager) StartWithOptions(ownerIdentity string, options StartOptions) (
 	go func() {
 		defer close(exitCh)
 		err := cmd.Wait()
+		if err := tree.release(); err != nil {
+			m.logger.Warn("process:release failed",
+				slog.String("processId", processID),
+				slog.String("ownerIdentity", ownerIdentity),
+				slog.String("error", err.Error()),
+			)
+		}
 		_ = stdoutWriter.Close()
 		_ = stderrWriter.Close()
 		var exitCode *int
@@ -339,41 +356,7 @@ func (m *Manager) terminateProcessGroup(managed *ManagedProcess, reason string) 
 		m.abortedTotal.Add(1)
 	}
 
-	proc := managed.Cmd.Process
-	if proc == nil {
-		return nil
-	}
-
-	pgid, err := syscall.Getpgid(proc.Pid)
-	if err != nil {
-		if errors.Is(err, syscall.ESRCH) {
-			return nil
-		}
-		return fmt.Errorf("getpgid: %w", err)
-	}
-
-	m.logger.Info("process:terminate",
-		slog.String("processId", managed.ID),
-		slog.String("ownerIdentity", managed.OwnerIdentity),
-		slog.Int("pid", proc.Pid),
-		slog.Int("pgid", pgid),
-		slog.String("reason", reason),
-	)
-
-	if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return fmt.Errorf("sigterm process group %d: %w", pgid, err)
-	}
-
-	time.Sleep(processTerminationGrace)
-
-	if err := syscall.Kill(-pgid, 0); err == nil {
-		m.forceKilledTotal.Add(1)
-		if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-			return fmt.Errorf("sigkill process group %d: %w", pgid, err)
-		}
-	}
-
-	return nil
+	return m.terminateTree(managed, reason)
 }
 
 func (p *ManagedProcess) requestStop(reason string) bool {

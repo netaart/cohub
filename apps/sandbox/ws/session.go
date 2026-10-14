@@ -229,6 +229,8 @@ func (s *Server) sendHeartbeat(session *connectionSession, includeSnapshot bool)
 			FSWriteSource:      true,
 			FSEdit:             true,
 			FSMkdir:            true,
+			FSDelete:           nativeFSMutations,
+			FSMove:             nativeFSMutations,
 			FSStat:             true,
 			FSLs:               true,
 			FSTree:             true,

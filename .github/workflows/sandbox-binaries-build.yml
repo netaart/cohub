@@ -47,6 +47,17 @@ jobs:
             goarch: arm64
             runner: macos-15
             cgo: '1'
+          # Windows is cross-compiled; native Windows tests run in ci.yml.
+          - goos: windows
+            goarch: amd64
+            runner: ubuntu-latest
+            cgo: '0'
+            ext: .exe
+          - goos: windows
+            goarch: arm64
+            runner: ubuntu-latest
+            cgo: '0'
+            ext: .exe
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -68,7 +79,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Test native watcher
-        if: matrix.goos == 'darwin' || matrix.goarch == 'amd64'
+        if: matrix.goos == 'darwin' || (matrix.goos == 'linux' && matrix.goarch == 'amd64')
         working-directory: apps/sandbox
         run: |
           test -z "$(gofmt -l filewatch)"
@@ -83,14 +94,15 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: ${{ matrix.cgo }}
           VERSION: ${{ steps.version.outputs.version }}
+          EXT: ${{ matrix.ext }}
         run: |
           set -euo pipefail
           OUT_DIR="dist/${BINARY_NAME}_${GOOS}_${GOARCH}"
           mkdir -p "$OUT_DIR"
           go build -trimpath \
             -ldflags "-s -w -X main.buildVersion=${VERSION}" \
-            -o "${OUT_DIR}/${BINARY_NAME}" .
-          "${OUT_DIR}/${BINARY_NAME}" --version || true
+            -o "${OUT_DIR}/${BINARY_NAME}${EXT}" .
+          "${OUT_DIR}/${BINARY_NAME}${EXT}" --version || true
 
       - name: Package
         working-directory: apps/sandbox
@@ -98,13 +110,14 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           VERSION: ${{ steps.version.outputs.version }}
+          EXT: ${{ matrix.ext }}
         run: |
           set -euo pipefail
           BASE="${BINARY_NAME}_${VERSION}_${GOOS}_${GOARCH}"
           # Apache-2.0 redistribution requires license notices alongside binaries.
           cp LICENSE NOTICE "dist/${BINARY_NAME}_${GOOS}_${GOARCH}/"
           cd dist
-          tar -czf "${BASE}.tar.gz" -C "${BINARY_NAME}_${GOOS}_${GOARCH}" "${BINARY_NAME}" LICENSE NOTICE
+          tar -czf "${BASE}.tar.gz" -C "${BINARY_NAME}_${GOOS}_${GOARCH}" "${BINARY_NAME}${EXT}" LICENSE NOTICE
           shasum -a 256 "${BASE}.tar.gz" > "${BASE}.tar.gz.sha256"
 
       - name: Upload artifact

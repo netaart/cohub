@@ -17,6 +17,7 @@ require (
 	github.com/pion/webrtc/v4 v4.2.23
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	golang.org/x/image v0.47.0
+	golang.org/x/sys v0.49.0
 	golang.org/x/time v0.16.0
 )
 
@@ -35,5 +36,4 @@ require (
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/net v0.61.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
 )

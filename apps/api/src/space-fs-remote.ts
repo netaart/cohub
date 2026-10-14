@@ -61,6 +61,8 @@ function mapRpcError(error: unknown): never {
         throw new SpaceFsError(403, "read_only", "This path is read-only.");
       case "CONFLICT":
         throw new SpaceFsError(409, "file_conflict", "File changed since it was opened.");
+      case "DIRECTORY_NOT_EMPTY":
+        throw new SpaceFsError(400, "directory_not_empty", "Directory is not empty.");
       default:
         throw new SpaceFsError(500, "space_fs_error", error.message);
     }
@@ -370,6 +372,15 @@ export async function createSpaceFileExclusive(spaceId: string, input: SpaceFsWr
   }
 }
 
+/** Native fs.delete/fs.move report OS failures as IO_ERROR; keep the argv path's 400 contract. */
+async function nativeMutation(code: "delete_failed" | "move_failed", run: () => Promise<unknown>) {
+  try { await run(); }
+  catch (error) {
+    if (error instanceof SandboxRpcError && error.rpcErrorCode === "IO_ERROR") throw new SpaceFsError(400, code, error.message);
+    throw error;
+  }
+}
+
 // Run a shell-less argv command and capture stderr for error reporting.
 async function runProcess(spaceId: string, argv: string[]): Promise<{ exitCode: number | null; stderr: string }> {
   let stderr = "";
@@ -416,6 +427,10 @@ export async function deleteSpaceNode(spaceId: string, path: string, recursive =
     const stat = await callSandboxRpc(spaceId, "fs.stat", { path: safePath });
     if (!stat.exists) throw new SpaceFsError(404, "path_not_found", "File or directory not found.");
     const nodeType: SpaceFsEntry["type"] | "unknown" = stat.isDirectory ? "dir" : "file";
+    if ((await getSandboxCapabilities(spaceId))?.fsDelete === true) {
+      await nativeMutation("delete_failed", () => callSandboxRpc(spaceId, "fs.delete", { path: safePath, recursive }));
+      return { path: safePath, deleted: true, nodeType };
+    }
     // Non-recursive directory delete must fail on non-empty dirs (rmdir parity).
     const argv = stat.isDirectory
       ? (recursive ? ["rm", "-rf", "--", safePath] : ["rmdir", "--", safePath])
@@ -449,8 +464,12 @@ export async function moveSpaceNode(spaceId: string, input: SpaceFsMoveInput) {
     if (targetStat.exists && targetStat.isDirectory) {
       throw new SpaceFsError(400, "move_failed", "Destination path is a directory.");
     }
-    const { exitCode, stderr } = await runProcess(spaceId, ["mv", "--", from, to]);
-    if (exitCode !== 0) throw new SpaceFsError(400, "move_failed", stderr || "failed to move");
+    if (capabilities?.fsMove === true) {
+      await nativeMutation("move_failed", () => callSandboxRpc(spaceId, "fs.move", { fromPath: from, toPath: to }));
+    } else {
+      const { exitCode, stderr } = await runProcess(spaceId, ["mv", "--", from, to]);
+      if (exitCode !== 0) throw new SpaceFsError(400, "move_failed", stderr || "failed to move");
+    }
     return { fromPath: from, toPath: to, nodeType, createdDirs: directoryResult.createdDirs };
   } catch (error) {
     mapRpcError(error);

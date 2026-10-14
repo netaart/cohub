@@ -1,6 +1,6 @@
 // Cohub control bridge for Pi. Self-contained: Node built-ins only, so it installs as one file.
 import { createHash } from "node:crypto";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -109,7 +109,12 @@ export default function cohub(pi: Pi) {
     probedAt = Date.now();
     const path = locateSocket(ctx.cwd);
     if (!path) return;
-    const current = connect(path);
+    // On Windows the socket file names the Runtime's private named pipe.
+    let endpoint = path;
+    if (process.platform === "win32") {
+      try { endpoint = readFileSync(path, "utf8").trim(); } catch { return; }
+    }
+    const current = connect(endpoint);
     socket = current;
     buffer = "";
     current.on("connect", () => send({

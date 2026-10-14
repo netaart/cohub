@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { serializeDiagnosticError } from "../diagnostics.js";
 import type { Harness } from "./adapters.js";
-import { CODEX_SHARED_MIN_VERSION, supportsSharedServer } from "./codex-link.js";
+import { CODEX_SHARED_MIN_VERSION, sharedServerAvailable, supportsSharedServer } from "./codex-link.js";
 import { PI_MIN_VERSION } from "./pi-link.js";
 import { atLeast, formatVersion, harnessVersion } from "./version.js";
 import { readNativeConfig, runtimeStateRoot, writeNativeConfig, type NativeConfig } from "./config.js";
@@ -53,7 +53,9 @@ export async function ensureNativeSync(input: Input, log: (line: string) => void
   let codexShared = previous?.codexShared ?? false;
   if (input.harnesses.includes("codex") && !codexShared) {
     const version = await harnessVersion(input.executables?.codex || "codex");
-    if (!supportsSharedServer(version)) {
+    if (!sharedServerAvailable) {
+      log("Shared Codex sessions are unavailable on Windows; terminal Codex chats sync read-only\n");
+    } else if (!supportsSharedServer(version)) {
       log(`Codex ${formatVersion(version)} predates the shared app-server (${CODEX_SHARED_MIN_VERSION.join(".")}+); terminal Codex chats sync read-only\n`);
     } else {
       codexShared = await confirm("Let terminal Codex and the web drive the same live sessions? Cohub starts Codex's shared app-server, which keeps running in the background. [Y/n] ");

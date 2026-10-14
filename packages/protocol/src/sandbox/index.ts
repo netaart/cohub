@@ -21,6 +21,8 @@ export const RPC_METHODS = [
   "fs.write",
   "fs.edit",
   "fs.mkdir",
+  "fs.delete",
+  "fs.move",
   "fs.stat",
   "fs.ls",
   "fs.tree",
@@ -99,6 +101,7 @@ export const RPC_ERROR_CODES = [
   "SEARCH_UNAVAILABLE",
   "UNAVAILABLE",
   "BUSY",
+  "DIRECTORY_NOT_EMPTY",
 ] as const;
 
 export type RpcErrorCode = (typeof RPC_ERROR_CODES)[number];
@@ -137,6 +140,9 @@ export type SandboxCapabilities = {
   /** Supports the atomic fs.edit read-apply-write method. */
   fsEdit?: boolean;
   fsMkdir?: boolean;
+  /** Native fs.delete / fs.move, advertised where rm/mv argv are unavailable (Windows). */
+  fsDelete?: boolean;
+  fsMove?: boolean;
   fsStat: boolean;
   fsLs: boolean;
   /** Supports the structured recursive fs.tree method. */
@@ -283,6 +289,30 @@ export type FsMkdirResult = {
   path: string;
   createdDirs: string[];
   mtimeMs?: number;
+};
+
+export type FsDeleteParams = {
+  path: string;
+  cwd?: string;
+  recursive?: boolean;
+};
+
+export type FsDeleteResult = {
+  path: string;
+  deleted: true;
+  nodeType: "file" | "dir";
+};
+
+export type FsMoveParams = {
+  fromPath: string;
+  toPath: string;
+  cwd?: string;
+};
+
+export type FsMoveResult = {
+  fromPath: string;
+  toPath: string;
+  nodeType: "file" | "dir";
 };
 
 export type FsStatParams = {
@@ -480,6 +510,14 @@ export type RpcRequestMap = {
   "fs.mkdir": {
     params: FsMkdirParams;
     result: FsMkdirResult;
+  };
+  "fs.delete": {
+    params: FsDeleteParams;
+    result: FsDeleteResult;
+  };
+  "fs.move": {
+    params: FsMoveParams;
+    result: FsMoveResult;
   };
   "fs.stat": {
     params: FsStatParams;
