@@ -169,4 +169,4 @@ jobs:
 
       - name: Test CLI Windows behavior
         working-directory: packages/cli
-        run: node --import tsx --test tests/runtime-windows.test.ts tests/sandboxd-binary.test.ts
+        run: node --import tsx --test tests/runtime-windows.test.ts

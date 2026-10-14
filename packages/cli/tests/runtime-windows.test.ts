@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { validSandboxdArchiveEntries } from "../src/commands/sandboxd-binary.js";
 import { harnessCommand } from "../src/runtime/harness.js";
 
 test("npm .cmd shims run their Node entry directly", { skip: process.platform !== "win32" }, async (t) => {
@@ -20,4 +21,10 @@ test("npm .cmd shims run their Node entry directly", { skip: process.platform !=
     process.execPath,
     [join(directory, "node_modules", "@openai", "codex", "bin", "codex.js"), "app-server"],
   ]);
+});
+
+test("Windows sandboxd archives ship the .exe binary", () => {
+  assert(validSandboxdArchiveEntries(["cohub-sandboxd.exe", "LICENSE", "NOTICE"], "windows"));
+  assert.equal(validSandboxdArchiveEntries(["cohub-sandboxd", "LICENSE", "NOTICE"], "windows"), false);
+  assert(validSandboxdArchiveEntries(["cohub-sandboxd", "LICENSE", "NOTICE"], "linux"));
 });
