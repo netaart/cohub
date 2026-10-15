@@ -1,4 +1,4 @@
-import { createReadStream } from "node:fs";
+import type { ReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import { Hono, type Context } from "hono";
 import { setCookie } from "hono/cookie";
@@ -173,32 +173,34 @@ export function createPreviewRouter(dependencies: PreviewRouterDependencies) {
       }
 
       const info = await dependencies.streamSpaceFile(spaceId, path, { visibility: "full" });
-      const range = parseRange(context.req.header("range"), info.size);
-      if (range === "invalid") {
-        return context.body(null, 416, {
-          ...headers,
-          "content-range": `bytes */${info.size}`,
-        });
-      }
-      if (range) {
-        const stream = Readable.toWeb(
-          createReadStream(info.target, { start: range.start, end: range.end }),
-        ) as ReadableStream;
-        return context.body(stream, 206, {
+      let stream: ReadStream | undefined;
+      try {
+        const range = parseRange(context.req.header("range"), info.size);
+        if (range === "invalid") {
+          await info.file.close();
+          return context.body(null, 416, {
+            ...headers,
+            "content-range": `bytes */${info.size}`,
+          });
+        }
+        const responseHeaders = {
           ...headers,
           "accept-ranges": "bytes",
-          "content-length": String(range.end - range.start + 1),
-          "content-range": `bytes ${range.start}-${range.end}/${info.size}`,
+          "content-length": String(range ? range.end - range.start + 1 : info.size),
           "content-type": info.mimeType ?? "application/octet-stream",
-        });
+          ...(range ? { "content-range": `bytes ${range.start}-${range.end}/${info.size}` } : {}),
+        };
+        if (context.req.method === "HEAD") {
+          await info.file.close();
+          return context.body(null, range ? 206 : 200, responseHeaders);
+        }
+        stream = info.file.createReadStream(range || undefined);
+        return context.body(Readable.toWeb(stream) as ReadableStream, range ? 206 : 200, responseHeaders);
+      } catch (error) {
+        stream?.destroy();
+        await info.file.close();
+        throw error;
       }
-      const stream = Readable.toWeb(createReadStream(info.target)) as ReadableStream;
-      return context.body(stream, 200, {
-        ...headers,
-        "accept-ranges": "bytes",
-        "content-length": String(info.size),
-        "content-type": info.mimeType ?? "application/octet-stream",
-      });
     } catch (error) {
       const { status, body } = dependencies.spaceFsJsonError(error);
       return context.json(body, status as never);
