@@ -44,7 +44,7 @@ const resolveTarget = (): Target => {
 };
 
 const cacheDir = (version: string): string => join(homedir(), ".cache", "cohub", "sandboxd", version);
-const cachedBinaryPath = (version: string): string => join(cacheDir(version), binaryName(GOOS_BY_PLATFORM[process.platform] ?? ""));
+const cachedBinaryPath = (version: string, target: Target): string => join(cacheDir(version), binaryName(target.goos));
 const archiveName = (version: string, target: Target): string =>
   `${BINARY_NAME}_${version}_${target.goos}_${target.goarch}.tar.gz`;
 
@@ -103,7 +103,7 @@ const fetchText = (url: string, accept: string): Promise<string> =>
   });
 
 // Every published release ships the binary alongside its LICENSE and NOTICE.
-export function validSandboxdArchiveEntries(entries: string[], goos = GOOS_BY_PLATFORM[process.platform] ?? ""): boolean {
+export function validSandboxdArchiveEntries(entries: string[], goos: string): boolean {
   const expected = [binaryName(goos), "LICENSE", "NOTICE"];
   return (
     entries.length === expected.length &&
@@ -139,7 +139,7 @@ const listTarGz = (archivePath: string, verbose = false): Promise<string[]> =>
     );
   });
 
-export async function validateSandboxdArchive(archivePath: string, goos?: string): Promise<string[]> {
+export async function validateSandboxdArchive(archivePath: string, goos: string): Promise<string[]> {
   const entries = await listTarGz(archivePath);
   if (!validSandboxdArchiveEntries(entries, goos)) {
     throw new SandboxdDownloadError(`Unexpected sandbox archive contents: ${entries.join(", ") || "(empty)"}`);
@@ -228,7 +228,7 @@ const downloadAndVerify = async (version: string, target: Target): Promise<strin
     }
 
     // Atomically move into the version cache (fall back to copy across devices).
-    const dest = cachedBinaryPath(version);
+    const dest = cachedBinaryPath(version, target);
     await mkdir(dirname(dest), { recursive: true });
     await rename(extractedBinary, dest).catch(async (err) => {
       if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
@@ -258,10 +258,10 @@ export const ensureSandboxdBinary = async (options: EnsureSandboxdOptions = {}):
   }
 
   const version = options.version?.trim() || SANDBOXD_VERSION;
-  const cached = cachedBinaryPath(version);
+  const target = resolveTarget();
+  const cached = cachedBinaryPath(version, target);
   if (await isExecutableFile(cached)) return cached;
 
-  const target = resolveTarget();
   return withLock(version, async () => {
     // Re-check inside the lock: another process may have finished downloading.
     if (await isExecutableFile(cached)) return cached;

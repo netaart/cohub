@@ -24,18 +24,18 @@ test("archive validation rejects links and directories before extraction", async
       if (kind === "directory") await mkdir(binary);
       await exec("tar", ["-czf", archive, "-C", root, "LICENSE", "NOTICE", "cohub-sandboxd"]);
       if (kind === "regular") {
-        await validateSandboxdArchive(archive);
+        await validateSandboxdArchive(archive, "linux");
       } else {
-        await assert.rejects(validateSandboxdArchive(archive));
+        await assert.rejects(validateSandboxdArchive(archive, "linux"));
       }
     }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("sandboxd archives must ship the binary with its notices", () => {
-  assert(validSandboxdArchiveEntries(["cohub-sandboxd", "LICENSE", "NOTICE"]));
-  assert(validSandboxdArchiveEntries(["NOTICE", "cohub-sandboxd", "LICENSE"]));
+  assert(validSandboxdArchiveEntries(["cohub-sandboxd", "LICENSE", "NOTICE"], "linux"));
+  assert(validSandboxdArchiveEntries(["NOTICE", "cohub-sandboxd", "LICENSE"], "linux"));
   for (const entries of [[], ["cohub-sandboxd"], ["LICENSE"], ["cohub-sandboxd", "LICENSE"], ["cohub-sandboxd", "LICENSE", "../NOTICE"], ["cohub-sandboxd", "LICENSE", "/NOTICE"], ["cohub-sandboxd", "LICENSE", "NOTICE", "extra"], ["cohub-sandboxd", "LICENSE", "LICENSE"]]) {
-    assert.equal(validSandboxdArchiveEntries(entries), false);
+    assert.equal(validSandboxdArchiveEntries(entries, "linux"), false);
   }
 });
