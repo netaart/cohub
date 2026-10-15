@@ -105,6 +105,8 @@ func attachProcessTree(cmd *exec.Cmd) (processTree, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create job object: %w", err)
 	}
+	// BREAKAWAY_OK mirrors Unix, where a command may setsid out of its process group;
+	// without it, programs that ask for CREATE_BREAKAWAY_FROM_JOB fail to start.
 	if err := setJobLimits(job, windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE|windows.JOB_OBJECT_LIMIT_BREAKAWAY_OK); err != nil {
 		_ = windows.CloseHandle(job)
 		return nil, err
@@ -167,7 +169,7 @@ func (m *Manager) terminateTree(managed *ManagedProcess, reason string) error {
 		slog.String("reason", reason),
 	)
 
-	m.forceKilledTotal.Add(1)
+	// No graceful step exists to escalate from, so forceKilledTotal (SIGKILL after SIGTERM on Unix) is not counted.
 	if err := windows.TerminateJobObject(tree.job, 1); err != nil {
 		return fmt.Errorf("terminate job object: %w", err)
 	}

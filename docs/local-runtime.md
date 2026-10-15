@@ -42,6 +42,8 @@ On Windows, install Git for Windows (or set `COHUB_BASH` to `bash.exe`) and run 
 non-elevated terminal: collaborators execute as your OS user, so an administrator terminal is refused.
 The Pi extension connects over a private named pipe. Codex's shared app-server listens on an AF_UNIX
 socket Node cannot reach on Windows, so terminal Codex chats sync read-only there.
+Cancelling a turn on Windows stops Pi/Codex tools by process tree; a detached background job whose parent
+already exited can keep running.
 Pi and Codex must already be installed and authenticated locally. Without `--harness`,
 startup discovers installed Pi/Codex executables on PATH (or explicit executable overrides).
 Capability/authentication failures remain explicit; it never silently switches executors.

@@ -59,6 +59,9 @@ Windows-only behavior lives in `*_windows.go` files and `win32` CLI branches; Un
   when no locale is configured; native Windows programs may still write their own code page.
 - Each command runs in a Job Object: abort/timeout terminates the whole tree, a normal exit leaves background
   descendants running (matching the Unix process group).
+- Pi/Codex tool processes are not in a Job Object: cancelling a turn stops them with `taskkill /T`, which follows
+  parent links, so a descendant whose parent already exited (a detached background job) can outlive the turn.
+  On Unix the process group covers it.
 - Rooted paths such as `/workspace/...` are sandbox paths. The fence compares case-insensitively and rejects
   UNC/device paths, drive-relative paths and alternate data streams.
 - The managed control channel uses a per-launch named pipe (`COHUB_RUNTIME_CONTROL_PIPE`) instead of fd 3.
