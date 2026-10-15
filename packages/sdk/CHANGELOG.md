@@ -1,5 +1,12 @@
 # @neta-art/cohub
 
+## 11.3.1
+
+### Patch Changes
+
+- 66ed27c: Initialize script worker fonts consistently with native Board text, expose inspection bounds and inherited opacity with explicit coverage, and support targeted schema field lookup. Clarify safe Board authoring and animation verification workflows.
+- 9551b8b: Release intermediate native Canvas surfaces eagerly during Board exports, avoid redundant image copies, and release script drawing surfaces after each frame. Board CLI exports now preflight video dimensions, enforce a configurable decoded-image memory budget, and expose render-stage memory diagnostics through `NODE_DEBUG=cohub:board-export`.
+
 ## 11.3.0
 
 ### Minor Changes
