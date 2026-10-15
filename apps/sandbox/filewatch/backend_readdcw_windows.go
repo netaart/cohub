@@ -72,11 +72,14 @@ func (b *readDirectoryChangesBackend) events() <-chan backendEvent { return b.ev
 func (b *readDirectoryChangesBackend) errors() <-chan error        { return b.errorCh }
 func (b *readDirectoryChangesBackend) name() string                { return "readdcw" }
 
+// close owns the handles: run only stops using them, so a run that already
+// exited on an error never leaves close signalling a closed (reusable) handle.
 func (b *readDirectoryChangesBackend) close() error {
 	b.once.Do(func() {
 		close(b.done)
 		_ = windows.SetEvent(b.stop)
 		<-b.stopped
+		b.release()
 	})
 	return nil
 }
@@ -95,23 +98,29 @@ func (b *readDirectoryChangesBackend) read() error {
 
 func (b *readDirectoryChangesBackend) run() {
 	defer close(b.stopped)
-	defer b.release()
 	defer close(b.errorCh)
 	defer close(b.eventCh)
-	for {
-		which, err := windows.WaitForMultipleObjects([]windows.Handle{b.overlap.HEvent, b.stop}, false, windows.INFINITE)
-		if err != nil || which != windows.WAIT_OBJECT_0 {
-			// The kernel writes into buffer until the read is cancelled and settled.
+	pending := true // armed by the constructor
+	defer func() {
+		// The kernel writes into buffer until a pending read is cancelled and settled.
+		if pending {
 			var n uint32
 			_ = windows.CancelIoEx(b.handle, &b.overlap)
 			_ = windows.GetOverlappedResult(b.handle, &b.overlap, &n, true)
-			if err != nil {
-				b.errorCh <- fmt.Errorf("wait for directory changes: %w", err)
-			}
+		}
+	}()
+	for {
+		which, err := windows.WaitForMultipleObjects([]windows.Handle{b.overlap.HEvent, b.stop}, false, windows.INFINITE)
+		if err != nil {
+			b.errorCh <- fmt.Errorf("wait for directory changes: %w", err)
+			return
+		}
+		if which != windows.WAIT_OBJECT_0 {
 			return
 		}
 		var n uint32
 		err = windows.GetOverlappedResult(b.handle, &b.overlap, &n, false)
+		pending = false
 		if current, pathErr := finalPath(b.handle); pathErr != nil || !strings.EqualFold(current, b.finalPath) {
 			// Stay open without watching: closing the streams would replace root_changed with watch_error.
 			if b.send(backendEvent{resync: true, failed: true, reason: "root_changed"}) {
@@ -119,31 +128,30 @@ func (b *readDirectoryChangesBackend) run() {
 			}
 			return
 		}
-		switch {
-		case errors.Is(err, windows.ERROR_NOTIFY_ENUM_DIR) || err == nil && n == 0:
-			// The change buffer overflowed; only a rescan is authoritative.
-			if !b.send(backendEvent{resync: true}) {
-				return
-			}
-		case err != nil:
+		// The change buffer overflowed; only a rescan is authoritative.
+		overflow := errors.Is(err, windows.ERROR_NOTIFY_ENUM_DIR) || err == nil && n == 0
+		if err != nil && !overflow {
 			b.errorCh <- fmt.Errorf("read directory changes: %w", err)
 			return
-		default:
-			if !b.dispatch(n) {
-				return
-			}
 		}
+		changes := append([]byte(nil), b.buffer[:n]...)
+		// Re-arm before dispatching, so changes made meanwhile queue in the kernel.
 		_ = windows.ResetEvent(b.overlap.HEvent)
-		if err := b.read(); err != nil {
-			b.errorCh <- fmt.Errorf("read directory changes: %w", err)
+		rearmErr := b.read()
+		pending = rearmErr == nil
+		if overflow && !b.send(backendEvent{resync: true}) || !overflow && !b.dispatch(changes) {
+			return
+		}
+		if rearmErr != nil {
+			b.errorCh <- fmt.Errorf("read directory changes: %w", rearmErr)
 			return
 		}
 	}
 }
 
-func (b *readDirectoryChangesBackend) dispatch(n uint32) bool {
-	for offset := uint32(0); offset < n; {
-		info := (*windows.FileNotifyInformation)(unsafe.Pointer(&b.buffer[offset]))
+func (b *readDirectoryChangesBackend) dispatch(changes []byte) bool {
+	for offset := uint32(0); offset < uint32(len(changes)); {
+		info := (*windows.FileNotifyInformation)(unsafe.Pointer(&changes[offset]))
 		name := windows.UTF16ToString(unsafe.Slice(&info.FileName, info.FileNameLength/2))
 		if !b.send(mapReadDirectoryChange(filepath.Join(b.root, name), info.Action)) {
 			return false
