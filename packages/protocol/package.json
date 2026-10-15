@@ -168,7 +168,7 @@
   },
   "dependencies": {
     "es-module-lexer": "2.3.2",
-    "@neta-art/generation": "^0.1.35",
+    "@neta-art/generation": "^0.1.38",
     "zod": "^4.6.5"
   },
   "devDependencies": {

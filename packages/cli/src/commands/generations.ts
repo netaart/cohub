@@ -224,11 +224,12 @@ const PROBE_TIMEOUT_MS = 3_000;
 
 type OutputMedia = MediaInfo & { index: number };
 
-/** Size, duration, and frames of URL outputs, probed in parallel; best effort. */
+/** Size, duration, and frames of image, video, and audio URL outputs, probed in parallel; best effort. */
 async function probeOutputs(output: GenerationContentBlock[]): Promise<OutputMedia[]> {
   const signal = AbortSignal.timeout(PROBE_TIMEOUT_MS);
   const probed = await Promise.all(output.map(async (block, index) => {
-    if (block.type === "text" || block.source.type !== "url") return null;
+    if (block.type !== "image" && block.type !== "video" && block.type !== "audio") return null;
+    if (block.source.type !== "url") return null;
     const info = await probeMediaInfo(block.source.url, { type: block.type, signal });
     return Object.keys(info).length > 0 ? { index, ...info } : null;
   }));
