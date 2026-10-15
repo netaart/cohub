@@ -38,8 +38,8 @@ test("ordinary up discovers installed Harnesses without defaulting to an absent 
 
 test("Windows discovery respects PATHEXT, quoted PATH entries and explicit extensions", () => {
   assert.deepEqual(harnessExecutableCandidates("pi", "C:\\work", '"C:\\Program Files\\node";D:\\bin', "win32", ".EXE;.CMD"), [
-    "C:\\Program Files\\node\\pi", "C:\\Program Files\\node\\pi.EXE", "C:\\Program Files\\node\\pi.CMD",
-    "D:\\bin\\pi", "D:\\bin\\pi.EXE", "D:\\bin\\pi.CMD",
+    "C:\\Program Files\\node\\pi.EXE", "C:\\Program Files\\node\\pi.CMD",
+    "D:\\bin\\pi.EXE", "D:\\bin\\pi.CMD",
   ]);
   assert.deepEqual(harnessExecutableCandidates(".\\codex.exe", "C:\\work", "", "win32", ".EXE;.CMD"), ["C:\\work\\codex.exe"]);
   assert(harnessExecutableCandidates("codex", "C:\\work", "D:\\bin", "win32", "").includes("D:\\bin\\codex.CMD"));

@@ -11,8 +11,9 @@ export type HarnessOptions = { pi?: string; codex?: string };
 export function harnessExecutableCandidates(binary: string, cwd: string, path: string, platform = process.platform, pathExt = process.env.PATHEXT): string[] {
   const windows = platform === "win32";
   const paths = windows ? win32 : { delimiter, join, resolve };
+  // Windows runs only PATHEXT names; npm/pnpm also write an extensionless sh script beside the .cmd shim.
   const extensions = windows && !win32.extname(binary)
-    ? ["", ...(pathExt || ".COM;.EXE;.BAT;.CMD").split(";").filter((ext) => /^\.[a-z0-9]+$/i.test(ext))]
+    ? (pathExt || ".COM;.EXE;.BAT;.CMD").split(";").filter((ext) => /^\.[a-z0-9]+$/i.test(ext))
     : [""];
   const roots = binary.includes("/") || binary.includes("\\")
     ? [paths.resolve(cwd, binary)]
@@ -32,8 +33,10 @@ export function harnessCommand(binary: string, args: string[], cwd: string): [st
   if (extension === ".exe" || extension === ".com") return [path, args];
   if ([".js", ".mjs", ".cjs"].includes(extension)) return [process.execPath, [path, ...args]];
   if (extension === ".cmd") {
+    // npm (cmd-shim): SET "_prog=node" … "%dp0%\entry" %*; pnpm (@zkochan/cmd-shim): node  "%~dp0\entry" %*
     const shim = readFileSync(path, "utf8");
-    const entry = /SET "_prog=node"/i.test(shim) ? /"%dp0%\\([^"]+)"\s+%\*/i.exec(shim)?.[1] : undefined;
+    const runsNode = /SET "_prog=node"/i.test(shim) || /^\s*node\s+"%~dp0\\/im.test(shim);
+    const entry = runsNode ? /"%~?dp0%?\\([^"]+)"\s+%\*/i.exec(shim)?.[1] : undefined;
     if (entry) return [process.execPath, [win32.join(win32.dirname(path), entry), ...args]];
   }
   throw new Error(`Cannot run ${path} without a shell; pass --pi/--codex with an .exe or Node script`);
