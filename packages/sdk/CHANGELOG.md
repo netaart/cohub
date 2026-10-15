@@ -1,5 +1,12 @@
 # @neta-art/cohub
 
+## 11.3.0
+
+### Minor Changes
+
+- dcb3bbc: `cohub boards schema` now explains every Board field: descriptions come from the protocol schema, so item, track, animation and settings fields say what they mean. `cohub boards schema script` prints the script attachment and the module API, exported from the SDK as `BOARD_SCRIPT_API`. `cohub boards -h` lists every Board command.
+- bebc55d: Add live hosted Room connections with bidirectional NDJSON CLI commands, member synchronization, and retained-event replay. Add participant-scoped RTC authorization and a pluggable PeerConnection factory. The CLI supports isolated, opt-in RTC media/data workers with PCM/I420 or Opus/VP8 file or pipe inputs and bounded binary or segmented-file outputs. RTC runs in an on-demand Go/Pion helper (`cohub-rtc`) that the CLI downloads and verifies; FFmpeg is needed only for format conversion.
+
 ## 11.2.0
 
 ### Minor Changes
