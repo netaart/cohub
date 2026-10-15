@@ -152,7 +152,15 @@ func TestWindowsInputLayout(t *testing.T) {
 	if event.Type != inputKeyboard || key.VK != 0x41 || key.Scan != 0x1e || key.Flags != keyUp|keyExtended {
 		t.Fatalf("keyboard event = %+v %+v", event, *key)
 	}
+	key.ExtraInfo = ^uintptr(0)
+	copied := copyWindowsInput(event)
+	if got := *(*keyboardInput)(unsafe.Pointer(&copied.Mouse)); got != *key {
+		t.Fatalf("copied keyboard event = %+v, want %+v", got, *key)
+	}
 }
+
+//go:noinline
+func copyWindowsInput(event input) input { return event }
 
 func TestWindowsWheelAmount(t *testing.T) {
 	for _, c := range []struct {

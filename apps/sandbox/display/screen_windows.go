@@ -193,6 +193,8 @@ type mouseInput struct {
 	MouseData uint32
 	Flags     uint32
 	Time      uint32
+	// Keyboard ExtraInfo overlaps these bytes on 64-bit Windows; Go copies must preserve them.
+	Padding   [unsafe.Sizeof(uintptr(0)) - 4]byte
 	ExtraInfo uintptr
 }
 

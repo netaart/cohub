@@ -23,3 +23,7 @@ func pathWithin(root, path string) bool {
 func samePath(a, b string) bool {
 	return a == b
 }
+
+func canonicalExistingPath(path string) (string, error) {
+	return filepath.EvalSymlinks(path)
+}

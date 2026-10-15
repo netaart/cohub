@@ -69,6 +69,9 @@ func TestFSMutationWorkspaceAliases(t *testing.T) {
 	d := newTreeDispatcher(t, root)
 	mutationDirectoryAlias(t, filepath.Join(root, "parent-alias"), filepath.Dir(root))
 	alias := filepath.Join("parent-alias", filepath.Base(root))
+	if content, err := os.ReadFile(filepath.Join(root, alias, "a.txt")); err != nil || string(content) != "x" {
+		t.Fatalf("workspace alias is not usable: content = %q, error = %v", content, err)
+	}
 	for _, request := range []protocol.RPCRequest{
 		mutationRequest(t, "fs.delete", fsDeleteParams{Path: alias, Recursive: true}),
 		mutationRequest(t, "fs.move", fsMoveParams{FromPath: alias, ToPath: "moved"}),
@@ -79,6 +82,28 @@ func TestFSMutationWorkspaceAliases(t *testing.T) {
 		if !ok || failed.Error.Code != "INVALID_PATH" || !exists(filepath.Join(root, "a.txt")) {
 			t.Fatalf("%s through workspace alias: result = %#v, want INVALID_PATH with workspace content kept", request.Method, result)
 		}
+	}
+}
+
+func TestFSMutationThroughDirectoryAlias(t *testing.T) {
+	for _, method := range []string{"fs.delete", "fs.move"} {
+		t.Run(method, func(t *testing.T) {
+			root := mutationRoot(t)
+			d := newTreeDispatcher(t, root)
+			mutationDirectoryAlias(t, filepath.Join(root, "parent-alias"), filepath.Dir(root))
+			path := filepath.Join("parent-alias", filepath.Base(root), "full")
+			request := mutationRequest(t, method, fsDeleteParams{Path: path, Recursive: true})
+			if method == "fs.move" {
+				request = mutationRequest(t, method, fsMoveParams{FromPath: path, ToPath: "dest/moved"})
+			}
+			_, result := d.Handle(request, "owner")
+			if _, ok := result.(protocol.RPCFailed); ok || exists(filepath.Join(root, "full")) || !exists(filepath.Join(root, "a.txt")) {
+				t.Fatalf("%s through directory alias: result = %#v, want operation applied with workspace kept", method, result)
+			}
+			if method == "fs.move" && !exists(filepath.Join(root, "dest", "moved", "nested", "b.txt")) {
+				t.Fatal("moved directory lost its contents")
+			}
+		})
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/cohub/apps/sandbox/protocol"
 )
@@ -43,7 +42,7 @@ func (d *Dispatcher) resolveMutablePath(request protocol.RPCRequest, rawPath, cw
 	}
 	// Resolve directory aliases without following a final symlink or junction.
 	if err == nil && info.IsDir() {
-		mutationTarget, err = filepath.EvalSymlinks(mutationTarget)
+		mutationTarget, err = canonicalExistingPath(mutationTarget)
 		if err != nil {
 			return "", d.failedFSMutation(request, err), false
 		}
