@@ -80,6 +80,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   };
   let closeInstance: (() => Promise<void>) | undefined;
   let bridgeTask: Promise<void> | undefined;
+  let retryDisconnectedBridge: (() => void) | undefined;
   let nativeStarted = false;
   let tokenInFlight: Promise<string> | null = null;
   const token = (forceRefresh = false) => {
@@ -120,6 +121,9 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
         let probeTimer: ReturnType<typeof setTimeout> | undefined;
         let managed = false;
         let childStopped = false;
+        let bridgeDisconnected = false;
+        let terminating = false;
+        let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
         try {
           const initialToken = await token();
           signal.throwIfAborted();
@@ -158,8 +162,10 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
               if (event.type === "hello") managed = true;
               if (event.type === "connected" || event.type === "disconnected") {
                 const connected = event.type === "connected";
+                bridgeDisconnected = !connected;
                 update({ workspaceConnected: connected });
                 diagnostics.log(connected ? "info" : "warn", `sandboxd.${event.type}`);
+                retryDisconnectedBridge?.();
               }
             } catch { diagnostics.log("warn", "sandboxd.control_invalid"); }
           });
@@ -186,9 +192,30 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
           };
           probeTimer = setTimeout(() => void probe(), 1000);
           const terminate = () => {
+            if (terminating || childStopped) return;
+            terminating = true;
             bridge.kill("SIGTERM");
             const timeout = setTimeout(() => bridge.kill("SIGKILL"), 3000);
             void closed.finally(() => clearTimeout(timeout));
+          };
+          // A managed bridge may be sleeping for five minutes after a lease
+          // rejection. Retry only after it reports a lost connection and the
+          // Harness has regained its lease; a connected bridge stays untouched.
+          retryDisconnectedBridge = () => {
+            if (signal.aborted || !status.harnessConnected || !bridgeDisconnected || terminating || childStopped) {
+              clearTimeout(recoveryTimer);
+              recoveryTimer = undefined;
+            } else if (!recoveryTimer) {
+              // Give the bridge its normal retry and channel reattachment
+              // window before replacing a process stuck in config backoff.
+              recoveryTimer = setTimeout(() => {
+                recoveryTimer = undefined;
+                if (!signal.aborted && status.harnessConnected && bridgeDisconnected && !terminating && !childStopped) {
+                  diagnostics.log("info", "sandboxd.lease_recovery");
+                  terminate();
+                }
+              }, 30_000);
+            }
           };
           signal.addEventListener("abort", terminate, { once: true });
           if (signal.aborted) terminate();
@@ -197,8 +224,10 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
         } catch (error) {
           if (!signal.aborted) diagnostics.log("warn", "sandboxd.restart_failed", { error: serializeDiagnosticError(error) });
         } finally {
+          retryDisconnectedBridge = undefined;
           childStopped = true;
           clearTimeout(refreshTimer); clearTimeout(probeTimer);
+          clearTimeout(recoveryTimer);
           update({ workspaceConnected: false });
         }
         if (Date.now() - startedAt > 60_000) attempts = 0;
@@ -213,8 +242,8 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     await serveRuntime({
       spaceId: config.spaceId, cwd: config.root, url: url.toString(), capabilities,
       runtimeId: status.runtimeId, diagnostics, token, signal, executor: native.executor,
-      onReady: () => update({ harnessConnected: true }),
-      onDisconnected: () => { native.connect(null); update({ harnessConnected: false }); },
+      onReady: () => { update({ harnessConnected: true }); retryDisconnectedBridge?.(); },
+      onDisconnected: () => { native.connect(null); update({ harnessConnected: false }); retryDisconnectedBridge?.(); },
       onNativeStop: (stop) => { native.stop(stop.sessionId, stop.turnId); },
       onNativeChannel: (send) => {
         native.connect(send);
