@@ -1,6 +1,5 @@
 import ignore from "ignore";
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { openSpaceFile } from "./resolve.js";
 
 const GIT_DIR_PATTERN = /^\.git(?:\/|$)/;
 const GITIGNORE_CACHE_TTL_MS = 30_000;
@@ -42,23 +41,17 @@ function createFilter(content: string | null): SpaceGitignoreFilter {
 }
 
 export async function createSpaceGitignoreFilter(root: string): Promise<SpaceGitignoreFilter> {
-  const gitignorePath = join(root, ".gitignore");
   const now = Date.now();
-  const stats = await stat(gitignorePath).catch((error: unknown) => {
+  await using file = await openSpaceFile(root, ".gitignore").catch((error: unknown) => {
     if (getErrorCode(error) === "ENOENT") return null;
     throw error;
   });
-  let signature = stats ? `${stats.mtimeMs}:${stats.ctimeMs}:${stats.size}` : "missing";
+  const stats = file ? await file.stat() : null;
+  const signature = stats ? `${stats.mtimeMs}:${stats.ctimeMs}:${stats.size}` : "missing";
   const cached = filterCache.get(root);
   if (cached && cached.signature === signature && cached.expiresAt > now) return cached.filter;
 
-  const content = stats ? await readFile(gitignorePath, "utf8").catch((error: unknown) => {
-    if (getErrorCode(error) === "ENOENT") {
-      signature = "missing";
-      return null;
-    }
-    throw error;
-  }) : null;
+  const content = file ? await file.readFile("utf8") : null;
   const filter = createFilter(content);
   filterCache.set(root, { filter, signature, expiresAt: now + GITIGNORE_CACHE_TTL_MS });
   return filter;

@@ -1,6 +1,6 @@
 import { createLogger } from "@cohub/infra/logging";
-import { createReadStream } from "node:fs";
-import { lstat, realpath } from "node:fs/promises";
+import type { Stats } from "node:fs";
+import { assertWorkspaceId, openSpaceFile } from "@cohub/core/space-fs";
 import { basename, isAbsolute, relative, resolve } from "node:path";
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import type { Job } from "bullmq";
@@ -68,21 +68,21 @@ function assertSafeRelativePath(input: string) {
 }
 
 async function resolveSpaceFile(spaceId: string, inputPath: string) {
+  assertWorkspaceId(spaceId);
   const safePath = assertSafeRelativePath(inputPath);
-  const root = await realpath(resolve(config.spaceStorageRoot, spaceId, "workspace"));
+  const root = resolve(config.spaceStorageRoot, spaceId, "workspace");
   const target = resolve(root, safePath);
   assertInsideRoot(target, root);
-  const realTarget = await realpath(target);
-  assertInsideRoot(realTarget, root);
-  return { target: realTarget, relativePath: safePath };
+  return { file: await openSpaceFile(root, relative(root, target)), relativePath: safePath };
 }
 
 async function processWarmFile(job: Job<FsCdnWarmFileJob>) {
   const payload = job.data;
   const startedAt = Date.now();
-  const { target, relativePath } = await resolveSpaceFile(payload.spaceId, payload.path);
-  const before = await lstat(target);
-  if (before.isSymbolicLink() || !before.isFile()) throw new Error("target is not a regular file");
+  const resolved = await resolveSpaceFile(payload.spaceId, payload.path);
+  await using file = resolved.file;
+  const { relativePath } = resolved;
+  const before = await file.stat();
   if (before.size !== payload.size || before.mtimeMs !== payload.mtimeMs) {
     return { skipped: true, reason: "stale_payload" };
   }
@@ -98,16 +98,22 @@ async function processWarmFile(job: Job<FsCdnWarmFileJob>) {
     mtimeMs: before.mtimeMs,
   });
 
-  await getS3Client().send(new PutObjectCommand({
-    Bucket: config.turnObjectS3Bucket,
-    Key: objectKey,
-    Body: createReadStream(target),
-    ContentType: payload.mimeType ?? "application/octet-stream",
-    ContentLength: before.size,
-    CacheControl: IMMUTABLE_PUBLIC_CACHE_CONTROL,
-  }));
+  const stream = file.createReadStream({ autoClose: false });
+  let after: Stats;
+  try {
+    await getS3Client().send(new PutObjectCommand({
+      Bucket: config.turnObjectS3Bucket,
+      Key: objectKey,
+      Body: stream,
+      ContentType: payload.mimeType ?? "application/octet-stream",
+      ContentLength: before.size,
+      CacheControl: IMMUTABLE_PUBLIC_CACHE_CONTROL,
+    }));
+    after = await file.stat();
+  } finally {
+    stream.destroy();
+  }
 
-  const after = await lstat(target);
   if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
     await getS3Client().send(new DeleteObjectCommand({
       Bucket: config.turnObjectS3Bucket,
