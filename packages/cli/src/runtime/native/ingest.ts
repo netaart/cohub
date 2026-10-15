@@ -5,6 +5,7 @@ import { acceptsDirectory, acceptsTranscript, readSessionHeader, readTranscript,
 import { nativeTurnId } from "./identity.js";
 import type { RuntimeArchiveStore } from "../archive-store.js";
 import { ensurePlainCodexRollout } from "./transcript.js";
+import { containsNativePath } from "./paths.js";
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
 
@@ -105,10 +106,8 @@ export type NativeCandidate = { harness: Harness; path: string; size: number; mt
 /** Headers are read this many at a time; each costs one small read. */
 const HEADER_CONCURRENCY = 16;
 
-const within = (root: string, cwd: string) => cwd === root || cwd.startsWith(`${root}/`);
-
 /** Whether a session in `cwd` belongs to the directory bound at `root`. */
-export const owns = (root: string, cwd: string, nested: readonly string[] = []) => Boolean(cwd) && within(root, cwd) && !nested.some((inner) => within(inner, cwd));
+export const owns = (root: string, cwd: string, nested: readonly string[] = []) => Boolean(cwd) && containsNativePath(root, cwd) && !nested.some((inner) => containsNativePath(inner, cwd));
 
 /** Every transcript of the bound directory and its subdirectories, newest first. */
 export async function discoverTranscripts(cwd: string, harnesses: Harness[], options: { headers?: boolean; nested?: readonly string[]; signal?: AbortSignal } = {}): Promise<Array<NativeCandidate & { nativeSessionId?: string }>> {
@@ -214,7 +213,7 @@ export class NativeIngest {
   }
 
   exclude(nested: string[]): void {
-    this.nested = nested.filter((root) => root !== this.options.cwd && within(this.options.cwd, root));
+    this.nested = nested.filter((root) => !containsNativePath(root, this.options.cwd) && containsNativePath(this.options.cwd, root));
   }
 
   configure(harnesses: Harness[], enabledAt: string): void {
@@ -582,7 +581,7 @@ export class NativeIngest {
 
   private harnessFor(path: string): Harness | null {
     for (const harness of this.harnesses) {
-      if (transcriptRoots(harness).some((root) => path.startsWith(`${root}/`)) && acceptsTranscript(path, harness, this.options.cwd)) return harness;
+      if (transcriptRoots(harness).some((root) => containsNativePath(root, path)) && acceptsTranscript(path, harness, this.options.cwd)) return harness;
     }
     return null;
   }

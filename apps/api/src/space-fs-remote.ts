@@ -231,7 +231,6 @@ export async function readSpaceFiles(
 
   const toReadError = (path: string, error: unknown) => {
     if (error instanceof SandboxOfflineError) throw error;
-    if (error instanceof SandboxRpcError && error.rpcErrorCode === "IO_ERROR") throw new SandboxOfflineError(spaceId, error);
     const status = error instanceof SpaceFsError ? error.status : 500;
     const code = error instanceof SpaceFsError ? error.code : "space_fs_error";
     const message = error instanceof Error ? error.message : "Failed to read file.";

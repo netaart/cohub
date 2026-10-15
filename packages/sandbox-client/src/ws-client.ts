@@ -276,7 +276,6 @@ export class SandboxConnection {
         method: pending.method,
         rpcErrorCode: message.error.code,
         retryable: message.error.retryable ?? false,
-        ...(message.error.code === "IO_ERROR" ? { transportReason: message.error.message } : {}),
         diagnostics: pending.diagnostics,
       }));
     }

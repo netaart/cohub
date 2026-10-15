@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/cohub/apps/sandbox/protocol"
 )
@@ -35,7 +36,19 @@ func (d *Dispatcher) resolveMutablePath(request protocol.RPCRequest, rawPath, cw
 	if !ok {
 		return "", errResponse, false
 	}
-	if samePath(resolved.path, d.cfg.WorkspaceDir) {
+	mutationTarget := resolved.path
+	info, err := os.Lstat(mutationTarget)
+	if err != nil && !os.IsNotExist(err) {
+		return "", d.failedFSMutation(request, err), false
+	}
+	// Resolve directory aliases without following a final symlink or junction.
+	if err == nil && info.IsDir() {
+		mutationTarget, err = filepath.EvalSymlinks(mutationTarget)
+		if err != nil {
+			return "", d.failedFSMutation(request, err), false
+		}
+	}
+	if samePath(mutationTarget, d.cfg.WorkspaceDir) {
 		return "", d.failed(request, "", "INVALID_PATH", "cannot modify the workspace root"), false
 	}
 	if isReadOnlyPath(d.cfg, resolved.path) {

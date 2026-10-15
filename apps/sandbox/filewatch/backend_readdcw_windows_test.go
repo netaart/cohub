@@ -49,3 +49,65 @@ func TestWindowsWatcherKeepsFoldersRenamable(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowsWatcherDetectsQuietRootChanges(t *testing.T) {
+	for _, replace := range []bool{false, true} {
+		name := "rename"
+		if replace {
+			name = "replacement"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(filewatchBackendEnv, "readdcw")
+			parent := t.TempDir()
+			t.Chdir(parent)
+			root := filepath.Join(parent, "workspace")
+			moved := filepath.Join(parent, "moved")
+			if err := os.Mkdir(root, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			batches := make(chan Batch, 16)
+			watcher, err := Start(root, slog.New(slog.NewTextHandler(io.Discard, nil)), func(batch Batch) { batches <- batch })
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer watcher.Close()
+			waitForResync(t, batches)
+
+			if err := os.Rename(root, moved); err != nil {
+				t.Fatal(err)
+			}
+			if replace {
+				if err := os.Mkdir(root, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// No child changes wake ReadDirectoryChangesW after the root itself moves.
+			select {
+			case batch := <-batches:
+				status := watcher.Status()
+				if !batch.Resync || status.State != "degraded" || status.Reason != "root_changed" {
+					t.Fatalf("root change: batch=%+v status=%+v", batch, status)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("quiet root change went undetected: %+v", watcher.Status())
+			}
+
+			for _, path := range []string{moved, root} {
+				if path == root && !replace {
+					continue
+				}
+				if err := os.WriteFile(filepath.Join(path, "after.txt"), []byte("changed"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case batch := <-batches:
+				t.Fatalf("watch continued after the root changed: %+v", batch)
+			case <-time.After(2 * debounceWindow):
+			}
+			if status := watcher.Status(); status.State != "degraded" || status.Reason != "root_changed" {
+				t.Fatalf("root change recovered without restart: %+v", status)
+			}
+		})
+	}
+}

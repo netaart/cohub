@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -19,21 +19,22 @@ import (
 // root. Per-directory handles (fsnotify) keep every watched folder open, and
 // Windows refuses to rename or delete a folder while a descendant is open.
 type readDirectoryChangesBackend struct {
-	root      string
-	finalPath string
-	handle    windows.Handle
-	stop      windows.Handle
-	overlap   windows.Overlapped
-	buffer    []byte
-	eventCh   chan backendEvent
-	errorCh   chan error
-	done      chan struct{}
-	stopped   chan struct{}
-	once      sync.Once
+	root     string
+	rootInfo windows.ByHandleFileInformation
+	handle   windows.Handle
+	stop     windows.Handle
+	overlap  windows.Overlapped
+	buffer   []byte
+	eventCh  chan backendEvent
+	errorCh  chan error
+	done     chan struct{}
+	stopped  chan struct{}
+	once     sync.Once
 }
 
 const (
 	readDirectoryChangesBufferSize = 64 << 10
+	watchRootCheckInterval         = time.Second
 	readDirectoryChangesFilter     = windows.FILE_NOTIFY_CHANGE_FILE_NAME | windows.FILE_NOTIFY_CHANGE_DIR_NAME |
 		windows.FILE_NOTIFY_CHANGE_SIZE | windows.FILE_NOTIFY_CHANGE_LAST_WRITE | windows.FILE_NOTIFY_CHANGE_CREATION
 )
@@ -53,7 +54,7 @@ func newReadDirectoryChangesBackend(root string, _ *slog.Logger) (eventBackend, 
 		root: root, handle: handle, buffer: make([]byte, readDirectoryChangesBufferSize),
 		eventCh: make(chan backendEvent, 256), errorCh: make(chan error, 8), done: make(chan struct{}), stopped: make(chan struct{}),
 	}
-	if b.finalPath, err = finalPath(handle); err == nil {
+	if err = windows.GetFileInformationByHandle(handle, &b.rootInfo); err == nil {
 		if b.overlap.HEvent, err = windows.CreateEvent(nil, 1, 0, nil); err == nil {
 			if b.stop, err = windows.CreateEvent(nil, 1, 0, nil); err == nil {
 				// Arm the watch before returning so the caller's initial resync covers everything before it.
@@ -101,33 +102,40 @@ func (b *readDirectoryChangesBackend) run() {
 	defer close(b.errorCh)
 	defer close(b.eventCh)
 	pending := true // armed by the constructor
-	defer func() {
+	cancelRead := func() {
 		// The kernel writes into buffer until a pending read is cancelled and settled.
 		if pending {
 			var n uint32
 			_ = windows.CancelIoEx(b.handle, &b.overlap)
 			_ = windows.GetOverlappedResult(b.handle, &b.overlap, &n, true)
+			pending = false
 		}
-	}()
+	}
+	defer cancelRead()
 	for {
-		which, err := windows.WaitForMultipleObjects([]windows.Handle{b.overlap.HEvent, b.stop}, false, windows.INFINITE)
+		// ReadDirectoryChangesW reports descendants, not a rename of the root itself.
+		which, err := windows.WaitForMultipleObjects([]windows.Handle{b.overlap.HEvent, b.stop}, false, uint32(watchRootCheckInterval/time.Millisecond))
 		if err != nil {
 			b.errorCh <- fmt.Errorf("wait for directory changes: %w", err)
 			return
 		}
-		if which != windows.WAIT_OBJECT_0 {
+		if which != windows.WAIT_OBJECT_0 && which != uint32(windows.WAIT_TIMEOUT) {
 			return
 		}
-		var n uint32
-		err = windows.GetOverlappedResult(b.handle, &b.overlap, &n, false)
-		pending = false
-		if current, pathErr := finalPath(b.handle); pathErr != nil || !strings.EqualFold(current, b.finalPath) {
+		if !b.sameRoot() {
+			cancelRead()
 			// Stay open without watching: closing the streams would replace root_changed with watch_error.
 			if b.send(backendEvent{resync: true, failed: true, reason: "root_changed"}) {
 				<-b.done
 			}
 			return
 		}
+		if which == uint32(windows.WAIT_TIMEOUT) {
+			continue
+		}
+		var n uint32
+		err = windows.GetOverlappedResult(b.handle, &b.overlap, &n, false)
+		pending = false
 		// The change buffer overflowed; only a rescan is authoritative.
 		overflow := errors.Is(err, windows.ERROR_NOTIFY_ENUM_DIR) || err == nil && n == 0
 		if err != nil && !overflow {
@@ -189,12 +197,22 @@ func mapReadDirectoryChange(path string, action uint32) backendEvent {
 	}
 }
 
-// finalPath identifies the directory behind the handle, so a renamed or replaced root is noticed.
-func finalPath(handle windows.Handle) (string, error) {
-	buffer := make([]uint16, windows.MAX_LONG_PATH)
-	n, err := windows.GetFinalPathNameByHandle(handle, &buffer[0], uint32(len(buffer)), 0)
+// Check the selected path's identity, not just the old handle's current name:
+// deleting and recreating a root can leave its old handle reporting the same name.
+func (b *readDirectoryChangesBackend) sameRoot() bool {
+	path, err := windows.UTF16PtrFromString(b.root)
 	if err != nil {
-		return "", err
+		return false
 	}
-	return windows.UTF16ToString(buffer[:n]), nil
+	handle, err := windows.CreateFile(path, 0,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(handle)
+	var info windows.ByHandleFileInformation
+	return windows.GetFileInformationByHandle(handle, &info) == nil &&
+		info.VolumeSerialNumber == b.rootInfo.VolumeSerialNumber &&
+		info.FileIndexHigh == b.rootInfo.FileIndexHigh && info.FileIndexLow == b.rootInfo.FileIndexLow
 }

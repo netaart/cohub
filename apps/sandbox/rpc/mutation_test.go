@@ -3,6 +3,7 @@ package rpc
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -50,6 +51,46 @@ func mutationRoot(t *testing.T) string {
 func exists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
+}
+
+func mutationDirectoryAlias(t *testing.T, path, target string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		if output, err := exec.Command("cmd", "/c", "mklink", "/J", path, target).CombinedOutput(); err != nil {
+			t.Fatalf("create junction: %v: %s", err, output)
+		}
+	} else if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFSMutationWorkspaceAliases(t *testing.T) {
+	root := mutationRoot(t)
+	d := newTreeDispatcher(t, root)
+	mutationDirectoryAlias(t, filepath.Join(root, "parent-alias"), filepath.Dir(root))
+	alias := filepath.Join("parent-alias", filepath.Base(root))
+	for _, request := range []protocol.RPCRequest{
+		mutationRequest(t, "fs.delete", fsDeleteParams{Path: alias, Recursive: true}),
+		mutationRequest(t, "fs.move", fsMoveParams{FromPath: alias, ToPath: "moved"}),
+		mutationRequest(t, "fs.move", fsMoveParams{FromPath: "a.txt", ToPath: alias}),
+	} {
+		_, result := d.Handle(request, "owner")
+		failed, ok := result.(protocol.RPCFailed)
+		if !ok || failed.Error.Code != "INVALID_PATH" || !exists(filepath.Join(root, "a.txt")) {
+			t.Fatalf("%s through workspace alias: result = %#v, want INVALID_PATH with workspace content kept", request.Method, result)
+		}
+	}
+}
+
+func TestFSMutationDeleteLeafAliasKeepsWorkspace(t *testing.T) {
+	root := mutationRoot(t)
+	d := newTreeDispatcher(t, root)
+	alias := filepath.Join(root, "workspace-alias")
+	mutationDirectoryAlias(t, alias, root)
+	result := d.handleFSDelete(mutationRequest(t, "fs.delete", fsDeleteParams{Path: "workspace-alias", Recursive: true}))
+	if code := failureCode(t, result); code != "" || exists(alias) || !exists(filepath.Join(root, "a.txt")) {
+		t.Fatalf("delete leaf alias: code = %q, want alias removed with workspace content kept", code)
+	}
 }
 
 func TestFSMutationDelete(t *testing.T) {

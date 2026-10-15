@@ -45,6 +45,7 @@ export class SandboxRpcError extends Error {
       method: RpcMethod | string;
       rpcErrorCode: RpcErrorCode;
       retryable: boolean;
+      /** Set only for a failure detected by the local transport. */
       transportReason?: string;
       diagnostics?: SandboxRpcDiagnostics;
     },
@@ -79,10 +80,9 @@ export function isSandboxRpcError(error: unknown): error is SandboxRpcError {
 }
 
 export function getSandboxRpcFailurePresentation(error: SandboxRpcError): SandboxRpcFailurePresentation {
-  // Business errors can contain arbitrary file content in their message. Only
-  // IO_ERROR represents a transport/infrastructure failure, so never classify
-  // other RPC codes by scanning their text for connection-looking words.
-  if (error.rpcErrorCode !== "IO_ERROR") {
+  // Remote operation errors can include arbitrary file names or content.
+  // Only locally detected transport failures carry a transportReason.
+  if (error.rpcErrorCode !== "IO_ERROR" || error.transportReason === undefined) {
     return {
       kind: "rpc_error",
       message: error.message,

@@ -128,9 +128,9 @@ export async function callSandboxRpc<M extends RpcMethod>(
       onEvent: options?.onEvent,
     });
   } catch (error) {
-    if (error instanceof SandboxRpcError && error.rpcErrorCode === "IO_ERROR") {
+    if (error instanceof SandboxRpcError && error.rpcErrorCode === "IO_ERROR" && error.transportReason !== undefined) {
       // Connection dropped mid-flight; treat as offline for a clean retry story.
-      logger.warn(`[SandboxRpc] rpc io error spaceId=${spaceId} method=${method}: ${error.message}`);
+      logger.warn(`[SandboxRpc] rpc transport error spaceId=${spaceId} method=${method}: ${error.message}`);
       throw new SandboxOfflineError(spaceId, error);
     }
     throw error;

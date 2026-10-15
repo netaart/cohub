@@ -15,23 +15,27 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+type windowsProc interface {
+	Call(...uintptr) (uintptr, uintptr, error)
+}
+
 var (
 	user32 = windows.NewLazySystemDLL("user32.dll")
 	gdi32  = windows.NewLazySystemDLL("gdi32.dll")
 
-	procSetProcessDpiAwarenessContext = user32.NewProc("SetProcessDpiAwarenessContext")
-	procGetSystemMetrics              = user32.NewProc("GetSystemMetrics")
-	procGetDC                         = user32.NewProc("GetDC")
-	procReleaseDC                     = user32.NewProc("ReleaseDC")
-	procSendInput                     = user32.NewProc("SendInput")
-	procMapVirtualKeyW                = user32.NewProc("MapVirtualKeyW")
-	procVkKeyScanW                    = user32.NewProc("VkKeyScanW")
-	procCreateCompatibleDC            = gdi32.NewProc("CreateCompatibleDC")
-	procCreateDIBSection              = gdi32.NewProc("CreateDIBSection")
-	procSelectObject                  = gdi32.NewProc("SelectObject")
-	procBitBlt                        = gdi32.NewProc("BitBlt")
-	procDeleteDC                      = gdi32.NewProc("DeleteDC")
-	procDeleteObject                  = gdi32.NewProc("DeleteObject")
+	procSetProcessDpiAwarenessContext             = user32.NewProc("SetProcessDpiAwarenessContext")
+	procGetSystemMetrics                          = user32.NewProc("GetSystemMetrics")
+	procGetDC                                     = user32.NewProc("GetDC")
+	procReleaseDC                                 = user32.NewProc("ReleaseDC")
+	procSendInput                                 = user32.NewProc("SendInput")
+	procMapVirtualKeyW                windowsProc = user32.NewProc("MapVirtualKeyW")
+	procVkKeyScanW                    windowsProc = user32.NewProc("VkKeyScanW")
+	procCreateCompatibleDC                        = gdi32.NewProc("CreateCompatibleDC")
+	procCreateDIBSection                          = gdi32.NewProc("CreateDIBSection")
+	procSelectObject                              = gdi32.NewProc("SelectObject")
+	procBitBlt                                    = gdi32.NewProc("BitBlt")
+	procDeleteDC                                  = gdi32.NewProc("DeleteDC")
+	procDeleteObject                              = gdi32.NewProc("DeleteObject")
 )
 
 const (
@@ -69,8 +73,6 @@ const (
 // Keys on the extended block must say so, or Windows reads them as their numeric keypad twins.
 var extendedKeys = map[uint16]bool{0x21: true, 0x22: true, 0x23: true, 0x24: true, 0x25: true, 0x26: true, 0x27: true, 0x28: true, 0x2d: true, 0x2e: true, 0x5b: true}
 
-var shortcutModifiers = map[string]bool{"Control": true, "Alt": true, "Meta": true}
-
 var (
 	dpiOnce sync.Once
 	dpiErr  error
@@ -101,10 +103,10 @@ func platformDialer(spec string, logger *slog.Logger) (Dialer, error) {
 type windowsScreen struct {
 	name string
 
-	mu        sync.Mutex
-	button    string
-	at        [2]int32 // normalized absolute pointer position
-	modifiers map[string]bool
+	mu     sync.Mutex
+	button string
+	at     [2]int32 // normalized absolute pointer position
+	keys   map[string][]input
 }
 
 func systemMetric(index uintptr) int {
@@ -234,7 +236,9 @@ func unicodeKeys(events []input, text string, down bool) []input {
 	return events
 }
 
-func sendInput(events ...input) error {
+var sendInput = nativeSendInput
+
+func nativeSendInput(events ...input) error {
 	sent, _, err := procSendInput.Call(uintptr(len(events)), uintptr(unsafe.Pointer(&events[0])), unsafe.Sizeof(events[0]))
 	if int(sent) != len(events) {
 		return errorf(CodeFailed, "SendInput: %v", err)
@@ -312,26 +316,49 @@ func wheelAmount(amount float64) int32 {
 func (s *windowsScreen) Key(down bool, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if named, ok := namedKeys[key]; ok {
-		if shortcutModifiers[key] {
-			if s.modifiers == nil {
-				s.modifiers = map[string]bool{}
+	events := s.keys[key]
+	if len(events) == 0 {
+		if named, ok := namedKeys[key]; ok {
+			events = []input{virtualKey(named.win, true)}
+		} else {
+			runes := []rune(key)
+			if len(runes) != 1 {
+				return errorf(CodeUnsupported, "key %q is not supported", key)
 			}
-			s.modifiers[key] = down
-		}
-		return sendInput(virtualKey(named.win, down))
-	}
-	runes := []rune(key)
-	if len(runes) != 1 {
-		return errorf(CodeUnsupported, "key %q is not supported", key)
-	}
-	// Shortcuts match virtual keys (Ctrl+C), not the characters a layout produces.
-	if (s.modifiers["Control"] || s.modifiers["Alt"] || s.modifiers["Meta"]) && runes[0] <= 0xffff {
-		if scan, _, _ := procVkKeyScanW.Call(uintptr(runes[0])); int16(scan) != -1 {
-			return sendInput(virtualKey(uint16(scan&0xff), down))
+			// Shortcuts match virtual keys (Ctrl+C), not the characters a layout produces.
+			if (s.keys["Control"] != nil || s.keys["Alt"] != nil || s.keys["Meta"] != nil) && runes[0] <= 0xffff {
+				if scan, _, _ := procVkKeyScanW.Call(uintptr(runes[0])); int16(scan) != -1 {
+					events = []input{virtualKey(uint16(scan&0xff), true)}
+				}
+			}
+			if len(events) == 0 {
+				events = unicodeKeys(nil, key, true)
+			}
 		}
 	}
-	return sendInput(unicodeKeys(nil, key, down)...)
+	if !down {
+		events = keyReleases(nil, events)
+	}
+	if err := sendInput(events...); err != nil {
+		return err
+	}
+	if down {
+		if s.keys == nil {
+			s.keys = map[string][]input{}
+		}
+		s.keys[key] = events
+	} else {
+		delete(s.keys, key)
+	}
+	return nil
+}
+
+func keyReleases(events, held []input) []input {
+	for _, event := range held {
+		(*keyboardInput)(unsafe.Pointer(&event.Mouse)).Flags |= keyUp
+		events = append(events, event)
+	}
+	return events
 }
 
 func (s *windowsScreen) Text(text string) error {
@@ -356,10 +383,20 @@ func (s *windowsScreen) Text(text string) error {
 func (s *windowsScreen) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var events []input
+	for _, held := range s.keys {
+		events = keyReleases(events, held)
+	}
 	if s.button != "" {
 		_, up := buttonFlags(s.button)
-		s.button = ""
-		return sendInput(mouseEvent(mouseMove|mouseAbsolute|up, s.at, 0))
+		events = append(events, mouseEvent(mouseMove|mouseAbsolute|up, s.at, 0))
 	}
+	if len(events) > 0 {
+		if err := sendInput(events...); err != nil {
+			return err
+		}
+	}
+	s.button = ""
+	clear(s.keys)
 	return nil
 }
