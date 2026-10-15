@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm, utimes, writeFile, appendFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
 import { piSessionDirectoryName } from "../src/runtime/native/adapters.js";
-import { nativeTurnId } from "../src/runtime/native/identity.js";
+import { nativeStableId, nativeTurnId } from "../src/runtime/native/identity.js";
 import { discoverTranscripts, NativeIngest, type IngestHooks, type TranscriptState } from "../src/runtime/native/ingest.js";
 import { fakeNativeServer as fakeServer } from "./fixtures/native-server.js";
 
@@ -57,6 +57,102 @@ async function workspace() {
   };
   return { root, project, piDirectory, codexPath, ingest, write, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
+
+test("a registered unfinished Turn settles with its original prompt after the parser changes", async () => {
+  const w = await workspace(), errors: unknown[] = [], restored: unknown[] = [];
+  const ingest = w.ingest({ harnesses: ["codex"], enabledAt: "2026-01-02T00:00:00.000Z", hooks: { onError: (error) => errors.push(error), onRegistrationRestored: (details) => restored.push(details) } });
+  try {
+    const server = fakeServer(), id = randomUUID(), sessionId = randomUUID(), turnId = turnIdOf("codex", id, "k1");
+    const userContent = [{ type: "text" as const, text: "registered later reply" }];
+    const identity = { turnId, sessionId: null, parentTurnId: null, branchSessionId: nativeStableId(JSON.stringify([turnId, "branch"])), harness: "codex", nativeSessionId: id, userContent, startedAt: at, origin: "local_import" };
+    const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+    const requestDigest = digest(identity);
+    const registered = { id: turnId, sessionId, startedAt: at, userContent, meta: { source: "native_client", harness: "codex", nativeSync: { version: 1, spaceId: SPACE, nativeSessionId: id, parentTurnId: null, origin: "local_import", originalStartedAt: at, requestDigest } } };
+    server.turns.set(turnId, { sessionId, parentTurnId: null, settled: false });
+    const reads: string[][] = [];
+    const transport = {
+      ...server.transport,
+      registration: async (session: string, turn: string) => { reads.push([session, turn]); return { turn: registered, parent: null }; },
+      ingest: async (event: Parameters<typeof server.transport.ingest>[0]) => {
+        const turn = event.input.turns[0]; assert(turn);
+        if (digest({ ...identity, userContent: turn.userContent }) !== requestDigest) throw new Error("Native Turn identity mismatch");
+        return server.transport.ingest(event);
+      },
+    };
+    const path = w.codexPath(id), transcript = codexRollout(id, w.project, ["k1"]);
+    await w.write(path, transcript);
+    ingest.connect(transport);
+    await until(() => server.turns.get(turnId)?.settled === true || errors.length > 0);
+    assert.equal(server.turns.get(turnId)?.settled, true, `registered Turn did not settle: ${errors.map(String).join("; ")}`);
+    await until(() => ingest.status().live === 0);
+    assert.deepEqual(reads, [[sessionId, turnId]]);
+    assert.equal(server.batches.length, 1);
+    const sent = server.batches[0]?.turns[0]; assert(sent);
+    assert.deepEqual(sent.userContent, userContent);
+    assert.deepEqual(sent.result?.messages.at(-1)?.content, [{ type: "text", text: "a k1" }]);
+    assert.equal(sent.result?.status, "completed");
+    assert.equal(await readFile(path, "utf8"), transcript);
+    assert.equal(registered.meta.nativeSync.requestDigest, requestDigest);
+    assert.equal(restored.length, 1);
+    assert.equal((restored[0] as { requestDigest: string }).requestDigest, requestDigest);
+  } finally { await ingest.close(AbortSignal.timeout(2000)); await w.cleanup(); }
+});
+
+test("unreadable or damaged registrations preserve the pending Turn and transcript without sending", async () => {
+  for (const unavailable of [false, true]) {
+    const w = await workspace(), errors: unknown[] = [];
+    const ingest = w.ingest({ harnesses: ["codex"], hooks: { onError: (error) => errors.push(error) } });
+    try {
+      const server = fakeServer(), id = randomUUID(), sessionId = randomUUID(), turnId = turnIdOf("codex", id, "k1");
+      const stored = { sessionId, parentTurnId: null, settled: false };
+      server.turns.set(turnId, stored);
+      const failure = new Error("registration read unavailable");
+      const transport = { ...server.transport, registration: async () => {
+        if (unavailable) throw failure;
+        return { turn: { id: turnId, sessionId, startedAt: at, userContent: [{ type: "text", text: "q k1" }], meta: { source: "native_client", harness: "codex", nativeSync: { version: 1, spaceId: SPACE, nativeSessionId: id, parentTurnId: null, requestDigest: "0".repeat(64) } } }, parent: null };
+      } };
+      const path = w.codexPath(id), transcript = codexRollout(id, w.project, ["k1"]);
+      await w.write(path, transcript);
+      ingest.connect(transport);
+      await until(() => errors.length > 0 || server.batches.length > 0);
+      if (unavailable) assert.equal(errors[0], failure);
+      else assert.match(String(errors[0]), /registration digest mismatch/i);
+      assert.equal(server.batches.length, 0);
+      assert.deepEqual(server.turns.get(turnId), stored);
+      assert.equal(ingest.status().transcripts, 1);
+      assert.equal(await readFile(path, "utf8"), transcript);
+    } finally { await ingest.close(AbortSignal.timeout(2000)); await w.cleanup(); }
+  }
+});
+
+test("disconnect and shutdown cancel pending registration reads before ingest", async () => {
+  for (const shutdown of [false, true]) {
+    const w = await workspace(), errors: unknown[] = [];
+    const ingest = w.ingest({ harnesses: ["codex"], hooks: { onError: (error) => errors.push(error) } });
+    try {
+      const server = fakeServer(), id = randomUUID(), turnId = turnIdOf("codex", id, "k1");
+      server.turns.set(turnId, { sessionId: randomUUID(), parentTurnId: null, settled: false });
+      let signal: AbortSignal | undefined, entered = false;
+      const transport = { ...server.transport, registration: async (_session: string, _turn: string, options?: { signal?: AbortSignal }): Promise<never> => {
+        signal = options?.signal; entered = true;
+        assert(signal, "registration read must be cancellable");
+        const active = signal;
+        return new Promise((_, reject) => active.addEventListener("abort", () => reject(active.reason), { once: true }));
+      } };
+      await w.write(w.codexPath(id), codexRollout(id, w.project, ["k1"]));
+      ingest.connect(transport);
+      await until(() => entered);
+      assert(signal, "ingest did not pass its cancellation signal");
+      if (shutdown) await ingest.close(AbortSignal.timeout(2000));
+      else ingest.connect(null);
+      await until(() => errors.length > 0);
+      assert.equal(errors[0], signal.reason);
+      assert.equal(signal.aborted, true);
+      assert.equal(server.batches.length, 0);
+      assert.equal(server.turns.get(turnId)?.settled, false);
+    } finally { await ingest.close(AbortSignal.timeout(2000)); await w.cleanup(); }
+  }
+});
 
 test("discovery covers the project and its subdirectories, skips Codex's own threads, newest first", async () => {
   const w = await workspace();

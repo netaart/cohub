@@ -18,6 +18,7 @@ import { NativeSessions } from "./sessions.js";
 import { codexTranslator, LiveProgress, piTranslator, type Translator } from "./translate.js";
 import { nativeWebSocketTransport } from "./transport.js";
 import { readRuntimeSpaceBindings } from "../space-binding.js";
+import { readRegistration } from "./registration.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
 /** Streamed previews reach the web at most this often. */
@@ -104,6 +105,7 @@ export class NativeRuntime {
         },
         onGrowth: (state) => this.onGrowth(state),
         onRunning: (state, turnId) => this.onRunning(state, turnId),
+        onRegistrationRestored: (details, context) => options.diagnostics.log("warn", "native.registration_restored", { ...details, path: context.path, reason: "Registered prompt differs from transcript; original registration retained" }, { component: "native", harness: context.harness, sessionId: details.sessionId, turnId: details.turnId }),
         onError: (error, context) => options.diagnostics.log("warn", "native.sync_pending", { path: context.path, error: serializeDiagnosticError(error) }, { component: "native", harness: context.harness }),
       },
     });
@@ -150,7 +152,7 @@ export class NativeRuntime {
 
   connect(send: ((event: NativeRuntimeEvent) => Promise<unknown>) | null): void {
     this.send = send;
-    this.ingest.connect(send ? nativeWebSocketTransport(send) : null);
+    this.ingest.connect(send ? nativeWebSocketTransport(send, (sessionId, turnId, options) => readRegistration(this.options.projectionSource, sessionId, turnId, options)) : null);
   }
 
   stop(sessionId: string, turnId: string): boolean {
