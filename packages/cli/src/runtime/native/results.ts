@@ -105,6 +105,9 @@ export class ExecutionResults {
   }
 
   private async fromTranscript(receipt: Receipt): Promise<RuntimeExecutionEvent[] | null> {
+    // WorkBuddy persists individual message statuses, not the final execution result.
+    // Without a saved result receipt, a completed message cannot prove turn success.
+    if (receipt.session.harness === "workbuddy") return null;
     const transcript = await readTranscript(receipt.session.path, receipt.session.harness).catch(() => null);
     const turn = transcript?.turns.find((entry) => entry.cloudTurnId === receipt.turnId);
     const result = turn?.result;

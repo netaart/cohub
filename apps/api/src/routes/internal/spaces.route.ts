@@ -422,7 +422,7 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
       source?: string | null;
       model?: string | null;
       provider?: string | null;
-      harness?: "cohub" | "pi" | "codex" | null;
+      harness?: "cohub" | "pi" | "codex" | "workbuddy" | null;
       thinkingLevel?: string | null;
       accessMode?: PromptAccessMode | null;
       env?: unknown;

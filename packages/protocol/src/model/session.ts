@@ -69,7 +69,7 @@ export type SessionPromptInput = {
     model?: string;
     provider?: string;
     thinkingLevel?: string;
-    harness?: "cohub" | "pi" | "codex";
+    harness?: "cohub" | "pi" | "codex" | "workbuddy";
     runtime?: "cloud" | "local";
     turnId?: string;
   } | null;

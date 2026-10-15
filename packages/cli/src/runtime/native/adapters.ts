@@ -1,11 +1,13 @@
 import { createReadStream } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { codexArchivedSessionsDirectory, codexRolloutBytes, codexRolloutIdOf, codexSessionsDirectory, readNativeTranscript,
   type NativeTranscript, type NativeTranscriptTurn } from "./transcript.js";
+import { parseWorkBuddyOrigin, workbuddyHeader, workbuddyHomeDirectory, workbuddySessionDirectoryName } from "./workbuddy-transcript.js";
 
 export type { NativeTranscript, NativeTranscriptTurn };
-export type Harness = "pi" | "codex";
+export type Harness = "pi" | "codex" | "workbuddy";
 
 /**
  * Why a Codex thread exists. Codex writes every thread it starts into one rollout tree: the user's
@@ -22,6 +24,7 @@ const HEADER_MAX_BYTES = 1024 * 1024;
 
 /** Directories holding this harness's transcripts; a transcript's header says which project it is. */
 export function transcriptRoots(harness: Harness): string[] {
+  if (harness === "workbuddy") return [join(workbuddyHomeDirectory(), "projects")];
   if (harness === "codex") return [codexSessionsDirectory(), codexArchivedSessionsDirectory()];
   const custom = process.env.PI_CODING_AGENT_SESSION_DIR?.trim();
   if (custom) return [custom];
@@ -40,7 +43,11 @@ function piProjectFolderMatches(folder: string, cwd: string): boolean {
 
 /** Whether a directory found under a root can hold transcripts of `cwd`. */
 export function acceptsDirectory(path: string, root: string, harness: Harness, cwd: string): boolean {
-  if (harness === "codex" || process.env.PI_CODING_AGENT_SESSION_DIR?.trim() || dirname(path) !== root) return true;
+  if (harness === "workbuddy" && dirname(path) === root) {
+    const project = workbuddySessionDirectoryName(cwd), folder = basename(path);
+    return !project || folder === project || folder.startsWith(`${project}-`);
+  }
+  if (harness !== "pi" || process.env.PI_CODING_AGENT_SESSION_DIR?.trim() || dirname(path) !== root) return true;
   return piProjectFolderMatches(path, cwd);
 }
 
@@ -48,6 +55,7 @@ export function acceptsDirectory(path: string, root: string, harness: Harness, c
 export function acceptsTranscript(path: string, harness: Harness, cwd: string): boolean {
   const name = basename(path);
   if (harness === "codex") return codexRolloutIdOf(name) !== null;
+  if (harness === "workbuddy") return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.jsonl$/i.test(name);
   return name.endsWith(".jsonl") && (Boolean(process.env.PI_CODING_AGENT_SESSION_DIR?.trim()) || piProjectFolderMatches(dirname(path), cwd));
 }
 
@@ -72,6 +80,7 @@ export function codexThreadKind(payload: Record<string, unknown>): ThreadKind {
 
 /** The first line of a transcript: identity, project and purpose. Nothing else is read. */
 export async function readSessionHeader(path: string, harness: Harness, signal?: AbortSignal): Promise<SessionHeader | null> {
+  if (harness === "workbuddy") return { harness, ...workbuddyHeader(await firstRecord(createReadStream(path, { signal }))), thread: "user" };
   if (harness === "pi") {
     const header = await firstRecord(createReadStream(path, { signal }));
     if (header.type !== "session" || !text(header.id) || !text(header.cwd)) return null;
@@ -88,5 +97,12 @@ export async function readSessionHeader(path: string, harness: Harness, signal?:
  * by the caller, so Pi is parsed as settled here and the caller withdraws a tail still in flight.
  */
 export async function readTranscript(path: string, harness: Harness, signal?: AbortSignal): Promise<NativeTranscript> {
-  return await readNativeTranscript(path, harness, { settled: harness === "pi", signal });
+  if (harness === "workbuddy") {
+    const bytes = await readFile(`${path}.cohub.json`, { encoding: "utf8", signal }).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    return readNativeTranscript(path, harness, { settled: true, signal, ...(bytes == null ? {} : { workbuddyOrigin: parseWorkBuddyOrigin(JSON.parse(bytes)) }) });
+  }
+  return await readNativeTranscript(path, harness, { settled: harness !== "codex", signal });
 }

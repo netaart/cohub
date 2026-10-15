@@ -55,7 +55,7 @@ type PromptOptions = {
   title?: string;
   model?: string;
   provider?: string;
-  harness?: "cohub" | "pi" | "codex";
+  harness?: "cohub" | "pi" | "codex" | "workbuddy";
   thinkingLevel?: string;
   readOnly?: boolean;
   steer?: boolean;
@@ -403,7 +403,7 @@ export function registerPrompt(program: Command): void {
     .option("--title <title>", "Title for a newly created session or schedule")
     .option("-m, --model <model>", "Model name")
     .option("-p, --provider <provider>", "Provider name")
-    .option("--harness <harness>", "Harness: cohub, pi, or codex", "cohub")
+    .option("--harness <harness>", "Harness: cohub, pi, codex, or workbuddy", "cohub")
     .option("--thinking-level <level>", "Thinking level: off|minimal|low|medium|high|xhigh|max")
     .option("--read-only", "Use read-only tools")
     .option("--steer", "Interrupt the current turn and run immediately")
@@ -688,7 +688,7 @@ export function registerSpaces(program: Command): void {
     .command("prompt [content...]", { hidden: true })
     .alias("send")
     .description("Send or schedule a prompt in the target space")
-    .option("--harness <harness>", "Harness: cohub, pi, or codex", "cohub")
+    .option("--harness <harness>", "Harness: cohub, pi, codex, or workbuddy", "cohub")
     .option("--session <id>", "Target session ID")
     .option("--title <title>", "Title for a newly created session or schedule")
     .option("-m, --model <model>", "Model name")

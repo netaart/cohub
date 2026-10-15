@@ -365,7 +365,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		mode: "agent",
 		model: null,
 	});
-	let harnessBySession = $state<Record<string, "cohub" | "pi" | "codex">>({});
+	let harnessBySession = $state<Record<string, "cohub" | "pi" | "codex" | "workbuddy">>({});
 	let localModelsBySession = $state<Record<string, LocalModelSelection>>({});
 	const harnessSelectionKey = $derived(
 		`${spaceId}:${activeSessionId ?? "draft"}`,
@@ -2921,13 +2921,13 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		}
 	}
 
-	function setComposerHarness(harness: "cohub" | "pi" | "codex") {
+	function setComposerHarness(harness: "cohub" | "pi" | "codex" | "workbuddy") {
 		if (sending || composerMode === "create") return;
 		harnessBySession = { ...harnessBySession, [harnessSelectionKey]: harness };
 		clearComposerError();
 	}
 
-	function canUseHarness(harness: "cohub" | "pi" | "codex") {
+	function canUseHarness(harness: "cohub" | "pi" | "codex" | "workbuddy") {
 		if (harness === "cohub") return true;
 		return Boolean(
 			runtimeCatalog?.online &&

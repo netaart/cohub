@@ -13,10 +13,11 @@ export type NativeSyncReport = {
   harnesses: Harness[];
   codexShared: boolean;
   importHistory: boolean;
+  importHarnesses: Harness[];
   note?: string;
 };
 
-type Input = { root: string; spaceId: string; identity: string; harnesses: Harness[]; yes?: boolean; executables?: { pi?: string; codex?: string } };
+type Input = { root: string; spaceId: string; identity: string; harnesses: Harness[]; yes?: boolean; executables?: { pi?: string; codex?: string; workbuddy?: string } };
 type Ask = (question: string) => Promise<boolean>;
 
 /** Whether this directory already syncs every requested harness. */
@@ -35,20 +36,20 @@ async function defaultAsk(question: string) {
  */
 export async function ensureNativeSync(input: Input, log: (line: string) => void = (line) => process.stderr.write(line), ask: Ask = defaultAsk): Promise<NativeSyncReport> {
   const stateRoot = runtimeStateRoot(input.spaceId);
-  const previous = await readNativeConfig(stateRoot, input.identity).catch(() => null);
+  const previous = await readNativeConfig(stateRoot, input.identity);
   if (previous && nativeSyncSatisfied(previous, input)) {
     await maintain(previous, log, input.executables?.pi);
-    return { enabled: true, harnesses: previous.harnesses, codexShared: previous.codexShared, importHistory: false };
+    return { enabled: true, harnesses: previous.harnesses, codexShared: previous.codexShared, importHistory: false, importHarnesses: [] };
   }
   const interactive = process.stdin.isTTY === true;
   const confirm: Ask = async (question) => input.yes ? true : interactive ? await ask(question) : false;
   if (!input.yes && !interactive) {
     log("Native sync off · rerun interactively or with --yes to enable\n");
-    return { enabled: false, harnesses: input.harnesses, codexShared: false, importHistory: false, note: "non-interactive" };
+    return { enabled: false, harnesses: input.harnesses, codexShared: false, importHistory: false, importHarnesses: [], note: "non-interactive" };
   }
-  const names = input.harnesses.map((harness) => harness === "pi" ? "Pi" : "Codex").join(" and ");
+  const names = input.harnesses.map((harness) => ({ pi: "Pi", codex: "Codex", workbuddy: "WorkBuddy" })[harness]).join(" and ");
   if (!await confirm(`Sync ${names} chats in this folder to this Space so they continue on the web? Their history may contain secrets. [Y/n] `)) {
-    return { enabled: false, harnesses: input.harnesses, codexShared: false, importHistory: false, note: "declined" };
+    return { enabled: false, harnesses: input.harnesses, codexShared: false, importHistory: false, importHarnesses: [], note: "declined" };
   }
   let codexShared = previous?.codexShared ?? false;
   if (input.harnesses.includes("codex") && !codexShared) {
@@ -70,17 +71,19 @@ export async function ensureNativeSync(input: Input, log: (line: string) => void
     await writeNativeConfig(stateRoot, config);
   } catch (error) {
     log(`Native sync unavailable; Runtime continues without it — ${serializeDiagnosticError(error).message}\n`);
-    return { enabled: false, harnesses: input.harnesses, codexShared: false, importHistory: false, note: "config" };
+    return { enabled: false, harnesses: input.harnesses, codexShared: false, importHistory: false, importHarnesses: [], note: "config" };
   }
   await maintain(config, log, input.executables?.pi, true);
-  const history = (await discoverTranscripts(input.root, input.harnesses, { headers: true }).catch(() => []))
+  const addedHarnesses = input.harnesses.filter((harness) => previous?.root !== input.root || !previous.harnesses.includes(harness));
+  const history = (await discoverTranscripts(input.root, addedHarnesses, { headers: true }))
     .filter((candidate) => candidate.mtimeMs < Date.parse(config.enabledAt)).length;
   let importHistory = false;
-  if (history && !previous) {
-    importHistory = await confirm(`Import ${history} earlier conversation${history === 1 ? "" : "s"} from this folder? [Y/n] `);
+  if (history) {
+    const historyNames = addedHarnesses.map((harness) => ({ pi: "Pi", codex: "Codex", workbuddy: "WorkBuddy" })[harness]).join(" and ");
+    importHistory = await confirm(`Import ${history} earlier conversation${history === 1 ? "" : "s"} from ${historyNames} in this folder? [Y/n] `);
     if (!importHistory) log("Import them later with cohub runtime import\n");
   }
-  return { enabled: true, harnesses, codexShared, importHistory };
+  return { enabled: true, harnesses, codexShared, importHistory, importHarnesses: importHistory ? addedHarnesses : [] };
 }
 
 /** Keep integrations current on every `up`. */

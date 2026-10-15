@@ -95,11 +95,11 @@ export class NativeRuntime {
         },
         controllable: (state) => state.harness === "pi"
           ? this.pi.find(state.nativeSessionId) !== null
-          : this.codex.enabled && (this.active.has(state.nativeSessionId) || this.watched.has(state.nativeSessionId) || this.codex.driving.has(state.nativeSessionId)),
+          : state.harness === "codex" && this.codex.enabled && (this.active.has(state.nativeSessionId) || this.watched.has(state.nativeSessionId) || this.codex.driving.has(state.nativeSessionId)),
         abortTurn: (state) => {
           const stop = state.harness === "pi"
             ? this.pi.abort(state.nativeSessionId)
-            : state.runningTurnKey ? this.codex.interrupt(state.nativeSessionId, state.runningTurnKey) : Promise.resolve(false);
+            : state.harness === "codex" && state.runningTurnKey ? this.codex.interrupt(state.nativeSessionId, state.runningTurnKey) : Promise.resolve(false);
           void stop.catch((error: unknown) => options.diagnostics.log("warn", "native.stop_failed", { error: serializeDiagnosticError(error) }, { harness: state.harness, sessionId: state.sessionId ?? undefined }));
         },
         onGrowth: (state) => this.onGrowth(state),
@@ -235,7 +235,7 @@ export class NativeRuntime {
     this.stream(key, "pi", link.sessionId).translator.push(event);
   }
 
-  private stream(key: string, harness: Harness, nativeSessionId: string): Stream {
+  private stream(key: string, harness: "pi" | "codex", nativeSessionId: string): Stream {
     let stream = this.streams.get(key);
     if (!stream) {
       const progress = new LiveProgress(this.sink(harness, nativeSessionId), STREAM_INTERVAL_MS);
@@ -332,7 +332,7 @@ export class NativeRuntime {
   private onGrowth(state: TranscriptState): void {
     this.ingest.alive(state.harness, state.nativeSessionId);
     if (state.harness === "codex" && this.codex.enabled && !this.watched.has(state.nativeSessionId)) void this.codex.get();
-    const streamed = state.harness === "pi" ? this.pi.find(state.nativeSessionId) !== null : this.watched.has(state.nativeSessionId);
+    const streamed = state.harness === "pi" ? this.pi.find(state.nativeSessionId) !== null : state.harness === "codex" && this.watched.has(state.nativeSessionId);
     if (streamed) return;
     let preview = this.filePreviews.get(state.path);
     if (!preview) {

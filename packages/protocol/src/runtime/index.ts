@@ -5,6 +5,8 @@ import type { DisplayInfo } from "../display/index.js";
 import { contentBlockSchema } from "../core/content-schema.js";
 import { harnessArchiveSchema, type HarnessArchive } from "./archive.js";
 import { nativeRuntimeEventSchema } from "./native.js";
+import { localHarnessSchema, type LocalHarness } from "./harness.js";
+export * from "./harness.js";
 export * from "./archive.js";
 export * from "./native.js";
 export {
@@ -51,14 +53,6 @@ export function runtimeWorkspaceStatus(runtimeId: string | null | undefined, raw
   } catch { /* Untrusted telemetry must fail closed. */ }
   return { online: false, observedAt: null };
 }
-export const harnessSchema = z.enum(["cohub", "pi", "codex"]);
-export type HarnessKind = z.infer<typeof harnessSchema>;
-export type LocalHarness = Exclude<HarnessKind, "cohub">;
-export const isLocalHarness = (value: unknown): value is LocalHarness => value === "pi" || value === "codex";
-export const resolveHarness = (meta: unknown): HarnessKind => {
-  const value = meta && typeof meta === "object" ? (meta as { harness?: unknown }).harness : null;
-  return isLocalHarness(value) ? value : "cohub";
-};
 
 export type RuntimeContextMessage = {
   id: string;
@@ -93,9 +87,9 @@ export type RuntimeTraceContext = {
 
 const runtimeThinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const runtimeCapabilitiesSchema = z.object({
-  harnesses: z.array(z.enum(["pi", "codex"])).max(2),
+  harnesses: z.array(localHarnessSchema).max(localHarnessSchema.options.length),
   models: z.array(z.object({
-    harness: z.enum(["pi", "codex"]),
+    harness: localHarnessSchema,
     provider: z.string().max(100),
     id: z.string().min(1).max(255),
     name: z.string().max(255),
@@ -110,7 +104,7 @@ export type RuntimeCapabilities = z.infer<typeof runtimeCapabilitiesSchema>;
 export const runtimePendingExecutionSchema = z.object({
   sessionId: z.string().uuid(),
   turnId: z.string().uuid(),
-  harness: z.enum(["pi", "codex"]),
+  harness: localHarnessSchema,
 }).strict();
 export type RuntimePendingExecution = z.infer<typeof runtimePendingExecutionSchema>;
 export const runtimeRegistrationSchema = z.object({
@@ -251,9 +245,9 @@ const runtimeContextSchema = z.object({ complete: z.boolean().optional(), revisi
 })), archive: harnessArchiveSchema.nullable().optional(), resolvedTurnIds: z.array(id).max(2).optional(), settledTurnIds: z.array(id).max(2).optional() });
 
 export const runtimeCommandSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("turn.recover"), requestId: id, execution: z.object({ spaceId: id, sessionId: id, turnId: id, harness: z.enum(["pi", "codex"]) }), traceContext: runtimeTraceContextSchema.optional() }),
+  z.object({ type: z.literal("turn.recover"), requestId: id, execution: z.object({ spaceId: id, sessionId: id, turnId: id, harness: localHarnessSchema }), traceContext: runtimeTraceContextSchema.optional() }),
   z.object({ type: z.literal("turn.start"), requestId: id, resumeOnly: z.boolean().optional(), input: z.object({
-    spaceId: id, sessionId: id, turnId: id, userMessageId: id, harness: z.enum(["pi", "codex"]),
+    spaceId: id, sessionId: id, turnId: id, userMessageId: id, harness: localHarnessSchema,
     messages: z.array(z.object({ turnId: id, userMessageId: id, userId: z.string().nullable(), content })).min(1).max(RUNTIME_MAX_BATCH_MESSAGES),
     context: runtimeContextSchema,
     provider: z.string().nullable().optional(), model: z.string().nullable().optional(), thinkingLevel: z.string().nullable().optional(),

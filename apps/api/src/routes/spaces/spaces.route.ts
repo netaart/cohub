@@ -315,7 +315,7 @@ type SpacePromptInput = {
   content?: ContentBlock[];
   model?: string | null;
   provider?: string | null;
-  harness?: "cohub" | "pi" | "codex" | null;
+  harness?: "cohub" | "pi" | "codex" | "workbuddy" | null;
   thinkingLevel?: string | null;
   clientMessageId?: string | null;
   generationPolicy?: unknown;
@@ -1968,7 +1968,7 @@ router.post("/:id/prompt", async (c) => {
   const promptThinkingLevel = normalizePromptThinkingLevel(body.thinkingLevel);
   if (promptThinkingLevel === null) return c.json({ message: "thinkingLevel must be one of: off, minimal, low, medium, high, xhigh, max" }, 400);
   if (body.harness !== undefined && body.harness !== null && !harnessSchema.safeParse(body.harness).success) {
-    return c.json({ message: "harness must be one of: cohub, pi, codex" }, 400);
+    return c.json({ message: "harness must be one of: cohub, pi, codex, workbuddy" }, 400);
   }
   const promptPermission = accessMode === "read_only" ? "session.prompt.readonly" : "session.prompt.fullaccess";
   if (!(await hasPermission(user, promptPermission, { spaceId }))) return authzDenied(c);

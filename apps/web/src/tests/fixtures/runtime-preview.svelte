@@ -56,7 +56,7 @@ const models = [
 type PreviewState = "ready" | "limited" | "offline" | "unknown";
 let previewState = $state<PreviewState>("ready");
 let input = $state("");
-let harness = $state<"cohub" | "pi" | "codex">("pi");
+let harness = $state<"cohub" | "pi" | "codex" | "workbuddy">("pi");
 let model = $state<LocalModelSelection | null>(null);
 const localModels = $derived(models.filter((item) => item.harness === harness));
 // Mirrors the session host: the composer always shows a resolved model and level.

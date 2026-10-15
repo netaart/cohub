@@ -25,13 +25,14 @@ test("-n is a boolean alias for --new; name and detach remain explicit", () => {
 test("ordinary up discovers installed Harnesses without defaulting to an absent Pi", async () => {
   const root = await mkdtemp(join(tmpdir(), "rt-bins-"));
   try {
-    assert.deepEqual(await installedHarnesses(root, {}, root), []);
+    const noWorkBuddy = async () => false;
+    assert.deepEqual(await installedHarnesses(root, {}, root, noWorkBuddy), []);
     await writeFile(join(root, "codex"), "#!/bin/sh\n", { mode: 0o700 });
-    assert.deepEqual(await installedHarnesses(root, {}, root), ["codex"]);
+    assert.deepEqual(await installedHarnesses(root, {}, root, noWorkBuddy), ["codex"]);
     await writeFile(join(root, "pi"), "#!/bin/sh\n", { mode: 0o700 });
-    assert.deepEqual(await installedHarnesses(root, {}, root), ["pi", "codex"]);
+    assert.deepEqual(await installedHarnesses(root, {}, root, noWorkBuddy), ["pi", "codex"]);
     await chmod(join(root, "pi"), 0o600);
-    assert.deepEqual(await installedHarnesses(root, {}, root), ["codex"]);
+    assert.deepEqual(await installedHarnesses(root, {}, root, noWorkBuddy), ["codex"]);
     assert.deepEqual(await installedHarnesses(root, { codex: "./codex" }, ""), ["codex"]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

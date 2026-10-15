@@ -10,6 +10,7 @@ import type { ContentBlock, NativeTurnComplete, NativeTurnMessage } from "@neta-
 import { identifiable, piContent } from "../harness.js";
 import { codexTokenTotals, codexUsage } from "../codex-usage.js";
 import { record, type JsonRecord } from "../json-rpc.js";
+import { readWorkBuddyTranscript, workbuddyHeader, type WorkBuddyOrigin } from "./workbuddy-transcript.js";
 
 export type NativeTranscriptTurn = {
   key: string;
@@ -42,7 +43,7 @@ export type NativeTranscript = {
   lineagePaths?: string[];
   lineageRolloutIds?: string[];
 };
-type Line = { value: JsonRecord; startBytes: number; endBytes: number; sha256: string };
+export type Line = { value: JsonRecord; startBytes: number; endBytes: number; sha256: string };
 const text = (value: unknown) => typeof value === "string" ? value : "";
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const iso = (value: unknown) => {
@@ -111,7 +112,8 @@ async function readCodexHeader(path: string, signal?: AbortSignal): Promise<{ th
 }
 
 /** Read only the session header before deciding whether a global Codex file belongs to this project. */
-export async function readNativeTranscriptHeader(path: string, harness: "pi" | "codex", signal?: AbortSignal): Promise<NativeTranscriptHeader> {
+export async function readNativeTranscriptHeader(path: string, harness: "pi" | "codex" | "workbuddy", signal?: AbortSignal): Promise<NativeTranscriptHeader> {
+  if (harness === "workbuddy") return workbuddyHeader(await readFirstLine(createReadStream(path, { signal })));
   if (harness === "pi") {
     const value = await readFirstLine(createReadStream(path, { signal }));
     if (value.type !== "session" || !text(value.id) || !text(value.cwd)) throw new Error("Invalid native session header");
@@ -208,7 +210,7 @@ export async function ensurePlainCodexRollout(path: string, cacheDirectory: stri
 type TranscriptLines = { lines: Line[]; prefixes: Map<number, string> };
 
 /** Newline framing with exact byte offsets and rolling checksums; a partial tail stays unparsed. */
-async function readTranscriptLines(stream: AsyncIterable<Buffer>): Promise<TranscriptLines> {
+export async function readTranscriptLines(stream: AsyncIterable<Buffer>): Promise<TranscriptLines> {
   const lines: Line[] = [];
   const prefixes = new Map<number, string>();
   let fragments: Buffer[] = [], pendingBytes = 0, offset = 0;
@@ -244,7 +246,8 @@ async function readTranscriptLines(stream: AsyncIterable<Buffer>): Promise<Trans
 }
 
 /** Partial trailing records are retried, never parsed or acknowledged as complete. */
-export async function readNativeTranscript(path: string, harness: "pi" | "codex", options: { settled?: boolean; leafId?: string | null; signal?: AbortSignal } = {}): Promise<NativeTranscript> {
+export async function readNativeTranscript(path: string, harness: "pi" | "codex" | "workbuddy", options: { settled?: boolean; leafId?: string | null; signal?: AbortSignal; workbuddyOrigin?: WorkBuddyOrigin } = {}): Promise<NativeTranscript> {
+  if (harness === "workbuddy") return readWorkBuddyTranscript(path, options);
   if (harness === "pi") {
     const read = await readTranscriptLines(createReadStream(path, { signal: options.signal }));
     if (!read.lines.length) throw new Error("Native transcript is empty");

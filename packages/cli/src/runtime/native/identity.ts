@@ -12,6 +12,6 @@ export function nativeStableId(value: string): string {
  * Turn ids are globally unique (a fork shares its history's Turns) and Pi entry ids are per
  * session.
  */
-export function nativeTurnId(spaceId: string, harness: "pi" | "codex", nativeSessionId: string, turnKey: string): string {
-  return nativeStableId(JSON.stringify(harness === "pi" ? ["native", spaceId, "pi", nativeSessionId, turnKey] : ["native", spaceId, "codex", turnKey]));
+export function nativeTurnId(spaceId: string, harness: "pi" | "codex" | "workbuddy", nativeSessionId: string, turnKey: string): string {
+  return nativeStableId(JSON.stringify(harness !== "codex" ? ["native", spaceId, harness, nativeSessionId, turnKey] : ["native", spaceId, "codex", turnKey]));
 }

@@ -37,12 +37,13 @@ export async function markRuntimeRecovery(turnId: string, recovery: RuntimeRecov
 export async function executeRemoteHarnessTurn(input: {
   spaceId: string; sessionId: string; batch: ClaimedTurnBatch; actorUserId: string | null;
   accessMode: PromptAccessMode; requestedThinkingLevel?: string | null;
-  harness: "pi" | "codex"; provider?: string | null; model?: string | null; requestId?: string | null; abortSignal: AbortSignal;
+  harness: "pi" | "codex" | "workbuddy"; provider?: string | null; model?: string | null; requestId?: string | null; abortSignal: AbortSignal;
   recovery?: boolean;
   leaseSignal?: AbortSignal;
 }): Promise<void> {
   input.abortSignal.throwIfAborted();
   if (!input.recovery && input.harness === "pi" && input.accessMode === "read_only") throw new Error("Pi cannot enforce read-only access");
+  if (!input.recovery && input.harness === "workbuddy" && input.accessMode === "read_only") throw new Error("WorkBuddy cannot enforce read-only access");
   const [sandbox, registrationRaw] = await Promise.all([input.recovery ? Promise.resolve(null) : getSpaceSandbox({ spaceId: input.spaceId }), redis.get(runtimeRegistrationKey(input.spaceId))]);
   if ((!input.recovery && sandbox?.sandbox?.provider !== "local") || !registrationRaw) throw new Error("Local Runtime is offline");
   const registration = parseRuntimeRegistration(registrationRaw);

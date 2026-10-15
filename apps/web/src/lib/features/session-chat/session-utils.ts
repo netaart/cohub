@@ -17,7 +17,7 @@ export {
 
 type HarnessTurn = {
 	meta?: Record<string, unknown> | null;
-	harness?: "cohub" | "pi" | "codex";
+	harness?: "cohub" | "pi" | "codex" | "workbuddy";
 };
 export const resolveTurnHarness = (turn?: HarnessTurn) =>
 	resolveHarness({ harness: turn?.meta?.harness ?? turn?.harness });
@@ -42,7 +42,7 @@ type ComposerTurnSource = Pick<
  */
 export function resolveLocalModelFromTurns(
 	turns: ComposerTurnSource[],
-	harness: "pi" | "codex",
+	harness: "pi" | "codex" | "workbuddy",
 ): LocalModelSelection | null {
 	const meta = turns.findLast(
 		(turn) =>

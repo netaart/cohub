@@ -259,7 +259,7 @@ export const submitInternalSessionPrompt = async (input: {
   source: string;
   model?: string | null;
   provider?: string | null;
-  harness?: "cohub" | "pi" | "codex";
+  harness?: "cohub" | "pi" | "codex" | "workbuddy";
   thinkingLevel?: string | null;
   context?: Record<string, unknown> | null;
 }): Promise<{ ok: true; turnId: string; userMessageId: string; trace: TraceIdentifiers }> => {

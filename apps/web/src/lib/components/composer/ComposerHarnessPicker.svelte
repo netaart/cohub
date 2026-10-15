@@ -5,7 +5,7 @@ import { floatNear, portal } from "$lib/actions/portal";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
-type Harness = "cohub" | "pi" | "codex";
+type Harness = "cohub" | "pi" | "codex" | "workbuddy";
 const {
 	value,
 	available,
@@ -21,12 +21,12 @@ const {
 	onchange: (value: Harness) => void;
 	onopen?: () => void;
 } = $props();
-const labels = { cohub: "Cohub", pi: "Pi", codex: "Codex" };
+const labels = { cohub: "Cohub", pi: "Pi", codex: "Codex", workbuddy: "WorkBuddy" };
 const locale = $derived(getLocale());
 let open = $state(false);
 let trigger = $state<HTMLButtonElement | null>(null);
 let panel = $state<HTMLDivElement | null>(null);
-const options: Harness[] = ["cohub", "pi", "codex"];
+const options: Harness[] = ["cohub", "pi", "codex", "workbuddy"];
 const local = $derived(value !== "cohub");
 function close() {
 	open = false;

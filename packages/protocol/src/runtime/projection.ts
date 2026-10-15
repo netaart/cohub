@@ -17,7 +17,7 @@ export type CanonicalProjectionMessage = {
   createdAt: string;
 };
 
-export type ProjectionTarget = "pi" | "codex";
+export type ProjectionTarget = "pi" | "codex" | "workbuddy";
 
 export type CanonicalProjectionTurn = {
   id: string;
@@ -288,8 +288,81 @@ function codexProjection(input: ProjectionInput): NativeProjection {
   return { target: "codex", records, cursor: { sourceSequence: input.turns.at(-1)?.sequence ?? null, sourceTurnId: input.turns.at(-1)?.sourceTurnId ?? null, sourceFingerprint: sourceFingerprint(input.turns) }, warnings };
 }
 
+/** WorkBuddy stores each response item directly in a parent-linked JSONL record. */
+function workbuddyProjection(input: ProjectionInput): NativeProjection {
+  const records: ProjectionRecord[] = [];
+  const warnings: ProjectionWarning[] = [];
+  const toolNames = new Map<string, string>();
+  let parentId: string | null = null;
+  for (const turn of trimProjectionTurnsToCompaction(input.turns)) {
+    for (const message of turn.messages) {
+      if (isPendingGeneration(message)) continue;
+      let ordinal = 0;
+      const warn = (reason: string) => warnings.push({ sourceMessageId: message.id, sourceTurnId: message.turnId, reason });
+      const push = (payload: Record<string, unknown>) => {
+        const key = `${message.id}:${message.turnId}:${ordinal++}`;
+        const identity = [input.nativeSessionId, key];
+        const hex = fingerprint(["workbuddy-projection", identity]) + fingerprint([identity, "workbuddy-projection"]);
+        const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+        const record = {
+          ...payload, id, parentId, sessionId: input.nativeSessionId, cwd: input.cwd,
+          timestamp: timestampOf(message, input.timestamp ?? DEFAULT_TIMESTAMP),
+          cohub: { ...projectionMetadata(input), turnId: message.turnId, messageId: message.id },
+        };
+        records.push({ key, sourceTurnId: message.turnId, sourceMessageId: message.id, record });
+        parentId = id;
+      };
+      const contentBlock = (block: ContentBlock, output: boolean): Record<string, unknown> | null => {
+        if (block.type === "text") return { type: output ? "output_text" : "input_text", text: block.text };
+        if (block.type === "system_note") return { type: output ? "output_text" : "input_text", text: block.text };
+        if (block.type === "image") {
+          if (block.source.type === "base64") return { type: "input_image", image: `data:${block.source.media_type};base64,${block.source.data}` };
+          warn("external image URL has no native WorkBuddy projection");
+          return null;
+        }
+        warn(`content block ${block.type} has no native WorkBuddy representation`);
+        return null;
+      };
+      let content: Record<string, unknown>[] = [];
+      const flush = () => {
+        if (content.length) push({ type: "message", role: message.role, content, status: "completed" });
+        content = [];
+      };
+      for (const block of message.content) {
+        if (block.type === "thinking" || block.type === "tool_use" || block.type === "tool_result") {
+          flush();
+          if (block.type === "thinking") {
+            push({ type: "reasoning", content: [], rawContent: [{ type: "reasoning_text", text: block.thinking }], status: "completed" });
+          } else if (block.type === "tool_use") {
+            toolNames.set(block.id, block.name);
+            push({ type: "function_call", name: block.name, arguments: JSON.stringify(block.input), callId: block.id, status: "completed" });
+          } else {
+            const name = toolNames.get(block.tool_use_id);
+            if (!name) { warn(`tool result ${block.tool_use_id} has no preceding native WorkBuddy call`); continue; }
+            const output = typeof block.content === "string" ? { type: "text", text: block.content } : block.content.flatMap((item) => {
+              const projected = contentBlock(item, false);
+              return projected ? [projected] : [];
+            });
+            push({ type: "function_call_result", name, output, callId: block.tool_use_id, status: block.is_error ? "incomplete" : "completed" });
+          }
+        } else {
+          const projected = contentBlock(block, message.role === "assistant");
+          if (projected) content.push(projected);
+        }
+      }
+      flush();
+    }
+  }
+  return { target: "workbuddy", records, cursor: { sourceSequence: input.turns.at(-1)?.sequence ?? null, sourceTurnId: input.turns.at(-1)?.sourceTurnId ?? null, sourceFingerprint: sourceFingerprint(input.turns) }, warnings };
+}
+
 export function projectNativeSession(input: ProjectionInput, target: ProjectionTarget): NativeProjection {
-  return target === "pi" ? piProjection(input) : codexProjection(input);
+  switch (target) {
+    case "pi": return piProjection(input);
+    case "codex": return codexProjection(input);
+    case "workbuddy": return workbuddyProjection(input);
+    default: throw new Error(`Unknown projection target: ${String(target)}`);
+  }
 }
 
 export function serializeProjectionRecords(records: ProjectionRecord[]): string {

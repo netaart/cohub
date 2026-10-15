@@ -98,11 +98,12 @@ type SelectedModel = {
 	name?: string;
 };
 
-type Harness = "cohub" | "pi" | "codex";
+type Harness = "cohub" | "pi" | "codex" | "workbuddy";
 const harnessLabels: Record<Harness, string> = {
 	cohub: "Cohub",
 	pi: "Pi",
 	codex: "Codex",
+	workbuddy: "WorkBuddy",
 };
 
 type Props = {

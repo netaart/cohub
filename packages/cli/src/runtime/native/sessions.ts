@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { serializeProjectionRecords, type HarnessArchive, type RuntimeContext } from "@neta-art/cohub";
@@ -9,12 +9,15 @@ import { ProjectionStore, rebindProjectionNativeSession } from "../projection-st
 import type { SessionTurnProjectionClient } from "../turn-projection.js";
 import type { RuntimeArchiveStore } from "../archive-store.js";
 import type { NativeIngest, TranscriptState } from "./ingest.js";
+import { parseWorkBuddyOrigin, workbuddyHomeDirectory, workbuddySessionPath } from "./workbuddy-transcript.js";
+import { assertWorkBuddySessionAvailable } from "./workbuddy-ownership.js";
+import { nativeTurnId } from "./identity.js";
 
 /** How the native file for a Turn was obtained; reported with the Turn result. */
 export type ResumeKind = "native" | "restored" | "handoff" | "new";
 
 export type NativeSession = {
-  harness: "pi" | "codex";
+  harness: "pi" | "codex" | "workbuddy";
   nativeSessionId: string;
   path: string;
   cwd: string;
@@ -32,7 +35,7 @@ export class NativeSessions {
     projectionSource: SessionTurnProjectionClient;
     archives: RuntimeArchiveStore;
     ingest: NativeIngest;
-    onRestoreFailed?: (error: unknown, context: { sessionId: string; harness: "pi" | "codex"; unrestorable: boolean }) => void;
+    onRestoreFailed?: (error: unknown, context: { sessionId: string; harness: "pi" | "codex" | "workbuddy"; unrestorable: boolean }) => void;
   }) {
     this.projections = new ProjectionStore(options.projectionSource);
   }
@@ -40,13 +43,14 @@ export class NativeSessions {
   async prepare(input: {
     sessionId: string;
     turnId: string;
-    harness: "pi" | "codex";
+    harness: "pi" | "codex" | "workbuddy";
     cwd: string;
     provider?: string | null;
     context: RuntimeContext;
     resumable: (transcript: TranscriptState) => boolean;
     signal?: AbortSignal;
   }): Promise<PreparedSession> {
+    if (input.harness === "workbuddy") return this.prepareWorkBuddy(input);
     const existing = this.options.ingest.transcriptFor(input.sessionId, input.harness, input.context.throughTurnId);
     if (existing && input.resumable(existing)) {
       return { session: { harness: existing.harness, nativeSessionId: existing.nativeSessionId, path: existing.path, cwd: existing.cwd }, resume: "native" };
@@ -73,7 +77,65 @@ export class NativeSessions {
     return projected;
   }
 
-  private async restore(input: { harness: "pi" | "codex"; cwd: string }, archive: HarnessArchive, signal?: AbortSignal): Promise<NativeSession> {
+  /** Every Cohub turn gets a private native identity; a user's transcript is only read. */
+  private async prepareWorkBuddy(input: Parameters<NativeSessions["prepare"]>[0]): Promise<PreparedSession> {
+    input.signal?.throwIfAborted();
+    const nativeSessionId = randomUUID(), home = workbuddyHomeDirectory();
+    const path = workbuddySessionPath(home, input.cwd, nativeSessionId);
+    const session: NativeSession = { harness: "workbuddy", nativeSessionId, path, cwd: input.cwd };
+    const existing = this.options.ingest.transcriptFor(input.sessionId, "workbuddy", input.context.throughTurnId);
+    const archive = input.context.archive;
+    let resume: ResumeKind;
+    let prefix: Buffer;
+    if (existing && input.resumable(existing)) {
+      await assertWorkBuddySessionAvailable(existing.nativeSessionId, { home, signal: input.signal });
+      const before = await stat(existing.path, { bigint: true });
+      if (!before.isFile()) throw new Error("WorkBuddy source transcript is not a file");
+      // The watcher may not have observed a closed desktop session's latest writes yet.
+      // Verify the actual tail before hiding copied history behind the execution prefix.
+      const source = await readTranscript(existing.path, "workbuddy", input.signal);
+      const tail = source.turns.at(-1);
+      const matchesHead = tail && input.context.throughTurnId !== null && (
+        tail.cloudTurnId === input.context.throughTurnId ||
+        nativeTurnId(this.options.spaceId, "workbuddy", existing.nativeSessionId, tail.key) === input.context.throughTurnId
+      );
+      if (source.nativeSessionId !== existing.nativeSessionId || source.cwd !== existing.cwd || !matchesHead) throw new Error("WorkBuddy source history does not match the Session head; wait for native synchronization before continuing");
+      await importNativeArchive({ source: existing.path, target: path, harness: "workbuddy", nativeSessionId: existing.nativeSessionId, id: nativeSessionId, cwd: input.cwd, signal: input.signal });
+      const after = await stat(existing.path, { bigint: true });
+      if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) throw new Error("WorkBuddy source changed while copying; close the session before continuing");
+      prefix = await readFile(path, { signal: input.signal });
+      resume = "native";
+    } else if (archive?.harness === "workbuddy") {
+      if (archive.sessionId !== input.sessionId || archive.turnId !== input.context.throughTurnId) throw new Error("WorkBuddy archive does not match the Session head");
+      const raw = join(this.options.root, "native", "restored", `${nativeSessionId}.jsonl`);
+      const restored = await this.options.archives.restore(archive, raw, input.signal);
+      await importNativeArchive({ source: raw, target: path, harness: "workbuddy", nativeSessionId: restored.nativeSessionId, id: nativeSessionId, cwd: input.cwd, signal: input.signal });
+      prefix = await readFile(path, { signal: input.signal });
+      // Failed restore/import leaves its original evidence in place.
+      await rm(raw);
+      resume = "restored";
+    } else {
+      const result = await this.projections.project({ spaceId: this.options.spaceId, sessionId: input.sessionId, turnId: input.turnId, nativeSessionId, cwd: input.cwd, provider: input.provider, target: "workbuddy", throughTurnId: input.context.throughTurnId }, input.signal);
+      if (result.projection.warnings.length) throw new Error(`WorkBuddy history projection is incomplete: ${result.projection.warnings.map((warning) => warning.reason).join("; ")}`);
+      prefix = Buffer.from(serializeProjectionRecords(result.projection.records));
+      await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+      if (prefix.length) await writeFile(path, prefix, { flag: "wx", mode: 0o600, signal: input.signal });
+      else {
+        // --session-id must create an empty session itself; only reserve its Cohub marker.
+        try { await lstat(path); throw new Error("WorkBuddy target transcript already exists"); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
+      resume = prefix.length ? "handoff" : "new";
+    }
+    input.signal?.throwIfAborted();
+    const origin = parseWorkBuddyOrigin({ nativeSessionId, cloudSessionId: input.sessionId, turnId: input.turnId, prefixBytes: prefix.length, prefixSha256: createHash("sha256").update(prefix).digest("hex") });
+    await writeFile(`${path}.cohub.json`, `${JSON.stringify(origin)}\n`, { flag: "wx", mode: 0o600, signal: input.signal });
+    // The parser excludes the verified prefix; no old native turn key exists in this stream.
+    this.options.ingest.adopt(session, input.sessionId);
+    return { session, resume };
+  }
+
+  private async restore(input: { harness: "pi" | "codex" | "workbuddy"; cwd: string }, archive: HarnessArchive, signal?: AbortSignal): Promise<NativeSession> {
     const id = randomUUID();
     const raw = join(this.options.root, "native", "restored", `${id}.jsonl`);
     const path = nativePath(input.harness, id, input.cwd);
@@ -86,7 +148,7 @@ export class NativeSessions {
     }
   }
 
-  private async project(input: { sessionId: string; turnId: string; harness: "pi" | "codex"; cwd: string; provider?: string | null; context: RuntimeContext; signal?: AbortSignal }): Promise<PreparedSession> {
+  private async project(input: { sessionId: string; turnId: string; harness: "pi" | "codex" | "workbuddy"; cwd: string; provider?: string | null; context: RuntimeContext; signal?: AbortSignal }): Promise<PreparedSession> {
     const nativeSessionId = randomUUID();
     const path = nativePath(input.harness, nativeSessionId, input.cwd);
     const projection = rebindProjectionNativeSession(await this.projections.project({
@@ -111,7 +173,8 @@ export class NativeSessions {
 }
 
 /** Where a harness keeps a new transcript for the bound directory. */
-function nativePath(harness: "pi" | "codex", nativeSessionId: string, cwd: string): string {
+function nativePath(harness: "pi" | "codex" | "workbuddy", nativeSessionId: string, cwd: string): string {
+  if (harness === "workbuddy") return workbuddySessionPath(workbuddyHomeDirectory(), cwd, nativeSessionId);
   const stamp = new Date().toISOString();
   if (harness === "pi") {
     const agent = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");

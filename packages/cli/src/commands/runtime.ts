@@ -47,9 +47,10 @@ export function registerRuntime(program: Command) {
     .option("-n, --new", "Create a new Space")
     .option("--name <name>", "New Space name")
     .option("-d, --detach", "Run in the background")
-    .option("--harness <name>", "Pi or Codex; repeatable", (value: string, previous: string[]) => [...previous, value], [])
+    .option("--harness <name>", "Pi, Codex or WorkBuddy; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--pi <path>", "Pi executable")
     .option("--codex <path>", "Codex executable")
+    .option("--workbuddy <path>", "WorkBuddy bundled CLI executable or script")
     .option("--display [screen]", "Share a screen (default: auto when available), or xvfb[:WIDTHxHEIGHT] for a virtual one")
     .option("--no-display", "Disable screen sharing and skip its confirmation")
     .option("-y, --yes", "Accept defaults and authorize local execution, native sync, and screen sharing")
@@ -68,7 +69,7 @@ export function registerRuntime(program: Command) {
     .action(async (options: TargetOptions & { harness: string[] }) => {
       try {
         const harnesses = parseRuntimeHarnesses(options.harness.length ? options.harness : ["pi"]);
-        if (!harnesses.includes("pi")) throw new Error("Codex needs no extension; runtime up offers its shared app-server");
+        if (!harnesses.includes("pi")) throw new Error("Only Pi needs an extension; use runtime up for Codex or WorkBuddy");
         const before = await piExtensionState();
         if (before === "foreign") throw new Error("A Pi extension named cohub exists and is not managed by Cohub; move it aside, then retry");
         await installPiExtension();
@@ -83,14 +84,14 @@ export function registerRuntime(program: Command) {
   runtime.command("detach")
     .description("Pause native sync; keep all data")
     .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
-    .option("--harness <name>", "Pi or Codex; repeatable", (value: string, previous: string[]) => [...previous, value], [])
+    .option("--harness <name>", "Pi, Codex or WorkBuddy; repeatable", (value: string, previous: string[]) => [...previous, value], [])
     .option("--json", "JSON output")
     .action(async (options: TargetOptions & { harness: string[] }) => {
       try {
         const { identity, spaceId, directory } = await boundRuntime(program, undefined, options.space);
         const stateRoot = runtimeStateRoot(spaceId);
         const config = await readNativeConfig(stateRoot, identity);
-        const paused = parseRuntimeHarnesses(options.harness.length ? options.harness : config?.harnesses ?? ["pi", "codex"]);
+        const paused = parseRuntimeHarnesses(options.harness.length ? options.harness : config?.harnesses ?? ["pi", "codex", "workbuddy"]);
         const harnesses = (config?.harnesses ?? []).filter((harness) => !paused.includes(harness));
         if (config) await writeNativeConfig(stateRoot, { ...config, harnesses, codexShared: harnesses.includes("codex") && config.codexShared });
         await controlRuntimeInstance(directory, "reload").catch(() => undefined);

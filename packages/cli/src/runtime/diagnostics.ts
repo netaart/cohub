@@ -35,7 +35,7 @@ export type RuntimeDiagnostic = {
   spaceId: string;
   sessionId?: string | null;
   turnId?: string | null;
-  harness?: "pi" | "codex" | null;
+  harness?: "pi" | "codex" | "workbuddy" | null;
   traceContext?: RuntimeTraceContext;
   data?: Record<string, unknown>;
   error?: RuntimeDiagnosticError;
@@ -48,7 +48,7 @@ export type RuntimeDiagnosticContext = {
   spaceId?: string;
   sessionId?: string | null;
   turnId?: string | null;
-  harness?: "pi" | "codex" | null;
+  harness?: "pi" | "codex" | "workbuddy" | null;
   traceContext?: RuntimeTraceContext;
 };
 

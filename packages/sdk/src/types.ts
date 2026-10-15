@@ -1272,7 +1272,7 @@ export type CreateSpacePromptInput = {
   model?: string | null;
   provider?: string | null;
   /** Harness selected for this turn. */
-  harness?: "cohub" | "pi" | "codex" | null;
+  harness?: "cohub" | "pi" | "codex" | "workbuddy" | null;
   /** Optional thinking level override for this turn. Omit to inherit session default. */
   thinkingLevel?: ModelThinkingLevel | null;
   clientMessageId?: string | null;

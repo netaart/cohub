@@ -311,10 +311,10 @@ const requestedThinkingLevelShort = $derived(
 		: "",
 );
 
-// Local Harness runs (Pi / Codex) mark the execution origin; cloud turns stay unlabelled.
+// Local Harness runs mark the execution origin; cloud turns stay unlabelled.
 const harness = $derived(resolveHarness(turnMeta));
 const harnessLabel = $derived(
-	harness === "pi" ? "Pi" : harness === "codex" ? "Codex" : "",
+	harness === "pi" ? "Pi" : harness === "codex" ? "Codex" : harness === "workbuddy" ? "WorkBuddy" : "",
 );
 const harnessTitle = $derived(
 	`${harnessLabel} · ${m.runtime_local({}, { locale })}`,

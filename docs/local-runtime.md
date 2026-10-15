@@ -38,11 +38,59 @@ If creation succeeded but its ID was not received, inspect your Spaces and use `
 do not automatically create a replacement. 原始创建回执会保留，结果未知时不会自动重建。
 
 It supervises the workspace bridge and the Harness connection. Node.js 24+ is required.
-Pi and Codex must already be installed and authenticated locally. Without `--harness`,
-startup discovers installed Pi/Codex executables on PATH (or explicit executable overrides).
+Pi, Codex, and WorkBuddy must already be installed and authenticated locally. Without `--harness`,
+startup discovers installed Pi/Codex executables on PATH and the macOS WorkBuddy application (or explicit executable overrides).
 Capability/authentication failures remain explicit; it never silently switches executors.
-`--pi` and `--codex` override executable paths. Repeated `--harness` options and comma-separated values are
+`--pi`, `--codex`, and `--workbuddy` override executable paths. Repeated `--harness` options and comma-separated values are
 accepted. `--yes` accepts the explicit local execution consent for non-interactive startup.
+
+## WorkBuddy
+
+```bash
+cd ./project
+cohub runtime up --harness workbuddy
+cohub runtime import --harness workbuddy
+cohub spaces prompt "Continue" --harness workbuddy
+```
+
+On macOS, discovery uses WorkBuddy's bundled CLI in `/Applications/WorkBuddy.app`,
+with WorkBuddy's product environment and existing login. It does not substitute a standalone
+CodeBuddy installation. `--workbuddy <path>` selects a different WorkBuddy CLI entry;
+other platforms require that explicit path and have not been validated. `WORKBUDDY_HOME`
+overrides the default `~/.workbuddy` data directory. The verified local versions are
+WorkBuddy 5.3.14 and its bundled CLI 2.115.0. Native reply, continuation and
+cancellation have also been exercised against the installed, signed-in application.
+When WorkBuddy's saved proxy setting is explicitly off, its Cohub child processes
+also connect directly; the parent Runtime's network configuration is unchanged.
+
+After the existing folder consent, WorkBuddy histories in the bound project and its
+subdirectories sync to Cohub, excluding separately bound projects. Earlier histories use
+the existing import command. Text, reasoning, tool calls/results, supported images,
+branches, and original timestamps retain their native relationships. Missing attachments
+and malformed records produce explicit errors instead of incomplete successful imports.
+If an earlier conversation ends with an unfinished turn, import retains its completed
+turns and reports the unfinished turn in the import failures. It does not invent an end
+state or upload unfinished old history as a running task. Complete the turn in WorkBuddy
+and retry the import; already imported turns are not duplicated.
+
+Selecting WorkBuddy in Cohub supports creating and continuing conversations, model
+selection, streamed responses, and stopping Cohub's own execution. Every turn resumes a
+private copy of the history with a fresh native identity, while retaining the same Cohub
+conversation. Cohub never appends to the original desktop transcript. A verified prefix
+receipt prevents copied history and Cohub turns from being uploaded again. Native archives
+can restore continuation on another machine; referenced attachments must be available.
+
+WorkBuddy's desktop transport assigns one connection as the event owner, so this bridge
+does not share control of an open desktop conversation. Close a desktop-held conversation
+before continuing it in Cohub. Occupancy-check failures block continuation. Desktop turns
+can be viewed through file updates but must be stopped in WorkBuddy. Private Cohub copies
+are not guaranteed to appear automatically in WorkBuddy's desktop list.
+
+The bridge preserves WorkBuddy's normal permission checks and refuses approval requests
+it cannot present. Read-only execution and a separate reasoning-level setting are not
+supported and are rejected explicitly. An execution with no durable final result receipt
+remains unresolved after a crash; a completed message alone is not treated as proof of
+success. Deployed-Space and cross-device acceptance remains pending.
 
 ## Native clients / 原生客户端
 

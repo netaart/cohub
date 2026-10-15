@@ -1,5 +1,6 @@
 import type { GenerationPolicy } from "@cohub/protocol/generation";
 import type { SpaceFsUploadTargetVersion } from "@cohub/protocol/fs";
+import type { LocalHarness } from "@cohub/protocol/runtime";
 import { createHash } from "node:crypto";
 import type { Queue, JobsOptions, QueueOptions } from "bullmq";
 import { COHUB_AGENT_TURNS_QUEUE, createBullmqConnectionOptions, createBullmqQueue, defaultJobRetention } from "../bullmq/index.js";
@@ -14,7 +15,7 @@ export type AgentRuntimeRecoveryJobData = {
   spaceId: string;
   sessionId: string;
   expectedTurnId: string;
-  expectedHarness: "pi" | "codex";
+  expectedHarness: LocalHarness;
   expectedOwnerUserId: string;
   confirmation?: { actorUserId: string; revision: string };
 };

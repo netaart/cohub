@@ -27,7 +27,7 @@ type Execution = {
   promise: Promise<void>;
   sessionId: string;
   turnId: string;
-  harness: "pi" | "codex";
+  harness: "pi" | "codex" | "workbuddy";
   requestId?: string | null;
   traceContext?: RuntimeDiagnosticContext["traceContext"];
   result?: HarnessResult;
@@ -143,7 +143,7 @@ function executionContext(
   input: {
     sessionId: string;
     turnId: string;
-    harness: "pi" | "codex";
+    harness: "pi" | "codex" | "workbuddy";
     requestId?: string | null;
     traceContext?: RuntimeDiagnosticContext["traceContext"];
   },

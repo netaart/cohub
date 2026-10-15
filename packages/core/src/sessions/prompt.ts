@@ -132,7 +132,7 @@ export type SkillUsageMeta = {
 };
 
 export type PromptAccessMode = "read_only" | "full_access";
-export type PromptHarness = "cohub" | "pi" | "codex";
+export type PromptHarness = "cohub" | "pi" | "codex" | "workbuddy";
 
 export type SubmitSessionPromptInput = {
   spaceId: string;
@@ -383,6 +383,7 @@ export const submitSessionPrompt = async (
   const localHarness = isLocalHarness(input.harness);
   if (localHarness) {
     if (input.harness === "pi" && input.accessMode === "read_only") throw new Error("Pi cannot enforce read-only access");
+    if (input.harness === "workbuddy" && input.accessMode === "read_only") throw new Error("WorkBuddy cannot enforce read-only access");
     if (input.env && Object.keys(input.env).length) throw new Error("Local Harness uses its native environment; per-turn environment overrides are unavailable");
     if (!deps.validateLocalHarness) throw new Error("Local Harness execution is unavailable on this prompt entry point");
     await deps.validateLocalHarness(input);

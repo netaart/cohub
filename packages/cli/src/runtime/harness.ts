@@ -5,8 +5,9 @@ import type { ContentBlock, RuntimeCapabilities } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "./json-rpc.js";
 import { codexModelCatalog, piModelCatalog } from "./model-catalog.js";
 import { downloadPublicImage } from "../safe-remote-image.js";
+import { discoverWorkBuddy, installedWorkBuddy } from "./workbuddy-process.js";
 
-export type HarnessOptions = { pi?: string; codex?: string };
+export type HarnessOptions = { pi?: string; codex?: string; workbuddy?: string };
 
 export function harnessExecutableCandidates(binary: string, cwd: string, path: string, platform = process.platform, pathExt = process.env.PATHEXT): string[] {
   const windows = platform === "win32";
@@ -21,9 +22,14 @@ export function harnessExecutableCandidates(binary: string, cwd: string, path: s
 }
 
 /** Discover installed executables only; authentication/capability errors stay explicit. */
-export async function installedHarnesses(cwd: string, options: HarnessOptions, path = process.env.PATH ?? ""): Promise<("pi" | "codex")[]> {
-  const names = options.pi || options.codex ? (["pi", "codex"] as const).filter((name) => options[name]) : ["pi", "codex"] as const;
+export async function installedHarnesses(cwd: string, options: HarnessOptions, path = process.env.PATH ?? "", discoverWorkBuddyInstall = installedWorkBuddy): Promise<("pi" | "codex" | "workbuddy")[]> {
+  const names = options.pi || options.codex || options.workbuddy ? (["pi", "codex", "workbuddy"] as const).filter((name) => options[name]) : ["pi", "codex", "workbuddy"] as const;
   const found = await Promise.all(names.map(async (name) => {
+    if (name === "workbuddy") {
+      if (await discoverWorkBuddyInstall(cwd, options.workbuddy)) return name;
+      if (options.workbuddy) throw new Error("WorkBuddy executable was not found at the requested path");
+      return null;
+    }
     const binary = options[name] || name;
     const candidates = harnessExecutableCandidates(binary, cwd, path);
     for (const candidate of candidates) {
@@ -32,7 +38,7 @@ export async function installedHarnesses(cwd: string, options: HarnessOptions, p
     }
     return null;
   }));
-  return found.filter((name): name is "pi" | "codex" => name !== null);
+  return found.filter((name): name is "pi" | "codex" | "workbuddy" => name !== null);
 }
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const text = (value: unknown) => typeof value === "string" ? value : "";
@@ -62,9 +68,14 @@ async function initializeCodex(rpc: JsonRpcProcess) {
   rpc.write({ method: "initialized", params: {} });
 }
 
-export async function discoverHarnesses(harnesses: ("pi" | "codex")[], options: HarnessOptions, cwd: string): Promise<RuntimeCapabilities> {
+export async function discoverHarnesses(harnesses: ("pi" | "codex" | "workbuddy")[], options: HarnessOptions, cwd: string): Promise<RuntimeCapabilities> {
   const models: RuntimeCapabilities["models"] = [];
   await Promise.all(harnesses.map(async (harness) => {
+    if (harness === "workbuddy") {
+      const catalog = await discoverWorkBuddy(cwd, options.workbuddy);
+      models.push(...catalog.models.map((model) => ({ harness: "workbuddy" as const, provider: "workbuddy", id: model.id, name: model.name, ...(model.id === catalog.currentModelId ? { isDefault: true } : {}) })));
+      return;
+    }
     const rpc = new JsonRpcProcess(options[harness] || harness, harness === "pi" ? ["--mode", "rpc", "--no-session"] : ["app-server", "--listen", "stdio://"], cwd, harness);
     try {
       if (harness === "pi") {

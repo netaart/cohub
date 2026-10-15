@@ -37,6 +37,9 @@ const INGEST_BATCH_TURNS = Math.min(50, NATIVE_INGEST_MAX_TURNS);
 const BOUNDARIES: Record<Harness, string[]> = {
   codex: ['"UserMessage"', '"user_message"', '"turn_complete"', '"task_complete"', '"turn_aborted"'],
   pi: ['"role":"user"', ...PI_ENDED.map((reason) => `"stopReason":"${reason}"`)],
+  // WorkBuddy rewrites messages by appending records and has no durable Turn-end event. A final
+  // newline also retries a record whose boundary token arrived in an earlier partial write.
+  workbuddy: ["\n"],
 };
 const BOUNDARY_OVERLAP = Math.max(...Object.values(BOUNDARIES).flat().map((token) => token.length));
 
@@ -140,7 +143,10 @@ export async function discoverTranscripts(cwd: string, harnesses: Harness[], opt
     while (next < found.length) {
       const index = next++;
       const candidate = found[index] as NativeCandidate;
-      const header = await readSessionHeader(candidate.path, candidate.harness, options.signal).catch(() => null);
+      const header = await readSessionHeader(candidate.path, candidate.harness, options.signal).catch((error) => {
+        if (candidate.harness === "workbuddy") throw error;
+        return null;
+      });
       if (header?.thread === "user" && owns(cwd, header.cwd, options.nested)) kept[index] = { ...candidate, nativeSessionId: header.nativeSessionId };
     }
   }));
@@ -344,6 +350,9 @@ export class NativeIngest {
     const enabledAt = Date.parse(this.enabledAt);
     for (const candidate of await discoverTranscripts(this.options.cwd, this.harnesses)) {
       const state = this.states.get(candidate.path);
+      // An unfinished/failed WorkBuddy import remains eligible for explicit retry. Merely seeing
+      // its in-memory state again must not promote unchanged old history into a live task.
+      if (candidate.harness === "workbuddy" && (state?.size ?? -1) < 0 && candidate.mtimeMs < enabledAt) continue;
       if (state ? !this.unchanged(state, candidate) : candidate.mtimeMs >= enabledAt) this.live.set(candidate.path, this.live.get(candidate.path) ?? false);
     }
     this.drainLive();
@@ -552,7 +561,9 @@ export class NativeIngest {
     this.states.set(path, state);
     // The file counts as read only once the server confirmed it; a failed send is retried.
     await this.apply(state, transcript.turns, lane, info.mtimeMs);
+    const previewGrowth = harness === "workbuddy" && previous && info.size > previous.scannedBytes && state.runningTurnId;
     Object.assign(state, { size: info.size, mtimeMs: info.mtimeMs, ino: info.ino, scannedBytes: info.size });
+    if (previewGrowth) this.options.hooks?.onGrowth?.(state);
     this.markDirty(path);
   }
 
@@ -589,6 +600,13 @@ export class NativeIngest {
 
   private tailSettled(state: TranscriptState, tail: NativeTranscriptTurn, mtimeMs: number): boolean {
     if (state.harness === "codex") return tail.result !== null;
+    if (state.harness === "workbuddy") {
+      if (!tail.result || !["completed", "failed"].includes(tail.result.status) || !["stop", "error"].includes(tail.messages.at(-1)?.stopReason ?? "")) return false;
+      const idleMs = Date.now() - mtimeMs;
+      if (idleMs >= PI_QUIET_SETTLE_MS) return true;
+      this.recheck(state.path, PI_QUIET_SETTLE_MS - idleMs);
+      return false;
+    }
     const certain = this.options.hooks?.piSettled?.(state.nativeSessionId, mtimeMs);
     if (certain != null) return certain;
     if (!PI_ENDED.includes(tail.messages.at(-1)?.stopReason ?? "")) return false;
@@ -619,12 +637,24 @@ export class NativeIngest {
     const derived = (turn: NativeTranscriptTurn) => nativeTurnId(this.options.spaceId, state.harness, state.nativeSessionId, turn.key);
     const from = state.throughTurnKey ? turns.findIndex((turn) => turn.key === state.throughTurnKey) + 1 : 0;
     const pending = turns.slice(from);
+    const turnByKey = new Map(turns.map((turn) => [turn.key, turn]));
+    const workbuddyParent = (turn: NativeTranscriptTurn): NativeTranscriptTurn | null => {
+      if (turn.parentKey == null) return null;
+      const parent = turnByKey.get(turn.parentKey);
+      if (!parent) throw new Error("WorkBuddy Turn parent is absent from the retained history");
+      return parent;
+    };
+    const referencedParents = state.harness === "workbuddy" ? pending.flatMap((turn) => {
+      const parent = workbuddyParent(turn);
+      return parent ? [parent] : [];
+    }) : [];
     // One question to the server replaces every local receipt: which of these do you have?
-    const known = pending.length ? await this.known(transport, pending.flatMap((turn) => turn.cloudTurnId ? [turn.cloudTurnId, derived(turn)] : [derived(turn)])) : new Map();
+    const known = pending.length ? await this.known(transport, [...pending, ...referencedParents].flatMap((turn) => turn.cloudTurnId ? [turn.cloudTurnId, derived(turn)] : [derived(turn)])) : new Map();
     const cohub = (turn: NativeTranscriptTurn) => turn.cloudTurnId && known.has(turn.cloudTurnId) ? turn.cloudTurnId : null;
     const tail = turns.at(-1);
     const head = !tail ? null : pending.length ? cohub(tail) ?? derived(tail) : state.throughTurnId;
     const candidates: Candidate[] = [];
+    let unfinishedImportError: Error | null = null;
     let parentTurnId = from > 0 ? state.throughTurnId : null;
     for (const [offset, turn] of pending.entries()) {
       const marked = cohub(turn);
@@ -632,19 +662,30 @@ export class NativeIngest {
         // Cohub started this Turn, so the server already has it; the marker exists only so the
         // native conversation can be resumed.
         parentTurnId = marked;
+        state.sessionId ??= known.get(marked)?.sessionId ?? null;
         if (!candidates.length) { state.throughTurnKey = turn.key; state.throughTurnId = marked; }
         continue;
       }
       const settled = offset < pending.length - 1 || this.tailSettled(state, turn, mtimeMs);
       // History that never ended is left to the live lane; its transcript reports it again.
-      if (!settled && lane === "import") break;
+      if (!settled && lane === "import") {
+        if (state.harness === "workbuddy") unfinishedImportError = new Error(`WorkBuddy history has an unfinished Turn (${turn.key}); completed Turns were retained, unfinished history was not imported`);
+        break;
+      }
       // A prompt still being recorded would change the Turn's identity; it is sent once complete.
       if (!settled && state.harness === "codex" && !turn.userFinal) break;
       const turnId = derived(turn);
-      candidates.push({ turn, turnId, parentTurnId, settled });
+      const parent = state.harness === "workbuddy" ? workbuddyParent(turn) : null;
+      const candidateParent = state.harness !== "workbuddy" ? parentTurnId : !parent ? null
+        : parent.key === state.throughTurnKey ? state.throughTurnId : cohub(parent) ?? derived(parent);
+      candidates.push({ turn, turnId, parentTurnId: candidateParent, settled });
       parentTurnId = turnId;
     }
-    if (!candidates.length) { state.headTurnId = head; return; }
+    if (!candidates.length) {
+      state.headTurnId = head;
+      if (unfinishedImportError) throw unfinishedImportError;
+      return;
+    }
     let prefix = 0;
     for (const item of candidates) {
       const recorded = known.get(item.turnId);
@@ -699,6 +740,7 @@ export class NativeIngest {
     // Only the newest settled state needs raw bytes: every older version is a prefix of it.
     state.headTurnId = head;
     if (lastSettled) await this.archive(state, lastSettled.turn, lastSettled.turnId);
+    if (unfinishedImportError) throw unfinishedImportError;
   }
 
   private markRunning(state: TranscriptState, sessionId: string, item: Candidate): void {

@@ -116,7 +116,7 @@ export function formatImportProgress(job: NativeStatus["import"], now = Date.now
 export function formatNativeSync(config: NativeConfig | null, native: NativeStatus | undefined, error: string | null = null): string {
   if (error) return `Native sync  unknown — ${error} · fix or remove the config, then runtime up\n`;
   if (!config?.harnesses.length) return "Native sync  off · run cohub runtime up to enable\n";
-  const lines = [`Native sync  ${config.harnesses.map((harness) => harness === "pi" ? "Pi" : "Codex").join(" · ")}`];
+  const lines = [`Native sync  ${config.harnesses.map((harness) => ({ pi: "Pi", codex: "Codex", workbuddy: "WorkBuddy" })[harness]).join(" · ")}`];
   if (!native) return `${lines[0]} · Runtime not running\n`;
   if (native.pi) {
     lines.push(native.pi.unavailable ? `  Pi     read-only · ${native.pi.unavailable}`

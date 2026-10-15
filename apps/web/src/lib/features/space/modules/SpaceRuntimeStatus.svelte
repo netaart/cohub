@@ -341,7 +341,7 @@ $effect(() => {
 				<dl>
 					<div class="runtime-row"><dt>{m.runtime_harnesses({}, { locale })}</dt><dd>
 						{#if status.capabilities?.harnesses.length}
-							{#each status.capabilities.harnesses as harness}<span class="harness-line">{harness === "pi" ? "Pi" : "Codex"}<span class="runtime-meta">{m.runtime_model_count({ count: counts[harness] }, { locale })}</span></span>{/each}
+							{#each status.capabilities.harnesses as harness}<span class="harness-line">{{ pi: "Pi", codex: "Codex", workbuddy: "WorkBuddy" }[harness]}<span class="runtime-meta">{m.runtime_model_count({ count: counts[harness] }, { locale })}</span></span>{/each}
 						{:else}—{/if}
 					</dd></div>
 					<div class="runtime-row"><dt>{m.runtime_connection({}, { locale })}</dt><dd>{tone === "unknown" ? m.runtime_watcher_unknown({}, { locale }) : status.online ? m.runtime_online({}, { locale }) : m.runtime_offline({}, { locale })}</dd></div>

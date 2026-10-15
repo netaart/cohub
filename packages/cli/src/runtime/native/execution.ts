@@ -11,6 +11,7 @@ import { PI_DISCONNECTED, type PiLink, type PiSessionLink } from "./pi-link.js";
 import type { ExecutionResults } from "./results.js";
 import type { NativeSession, NativeSessions, ResumeKind } from "./sessions.js";
 import { codexTranslator, piTranslator } from "./translate.js";
+import { executeWorkBuddyTurn } from "./workbuddy-execution.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
 /** A stop request that the harness does not honour within this long ends its private process. */
@@ -53,6 +54,7 @@ type Turn = {
  */
 export async function executeTurn(executor: Executor, input: RuntimeTurnInput, emit: Turn["emit"], signal: AbortSignal, requestId: string | null, context?: RuntimeDiagnosticContext): Promise<HarnessResult> {
   signal.throwIfAborted();
+  if (input.harness === "workbuddy") return executeWorkBuddyTurn(executor, input, emit, signal, requestId);
   const diverged = await executor.results.admit(input);
   const turn: Turn = { input, emit, signal, diverged, started: (session) => executor.results.start(session, input, requestId) };
   const run = await (input.harness === "pi" ? runPi : runCodex)(executor, turn, context);
