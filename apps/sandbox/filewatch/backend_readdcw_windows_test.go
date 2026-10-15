@@ -30,6 +30,8 @@ func TestWindowsWatcherKeepsFoldersRenamable(t *testing.T) {
 	if err := os.Rename(filepath.Join(root, "a"), filepath.Join(root, "renamed")); err != nil {
 		t.Fatalf("rename a folder with watched descendants: %v", err)
 	}
+	// A folder renamed in asks for a resync, which absorbs changes made before it is delivered.
+	waitForResync(t, batches)
 	if err := os.WriteFile(filepath.Join(root, "renamed", "b", "c", "hello.txt"), []byte("hi"), 0o600); err != nil {
 		t.Fatal(err)
 	}
