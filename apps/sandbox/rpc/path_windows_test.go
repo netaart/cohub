@@ -42,9 +42,32 @@ func TestWindowsFenceResolvesVirtualWorkspaceAndRejectsEscapes(t *testing.T) {
 		filepath.Join(filepath.Dir(root), "outside.txt"),
 		root + "-sibling",
 		`C:\Windows\win.ini`,
+		// Win32 strips trailing dots and spaces, so these must never reach the fence.
+		`.. \outside.txt`,
+		`/workspace/.. /outside.txt`,
+		`.. .\outside.txt`,
+		"a.txt.",
+		`dir \a.txt`,
 	} {
 		if _, err := resolveSandboxPath(cfg, path, ""); err == nil {
 			t.Fatalf("resolve(%q) succeeded, want rejection", path)
+		}
+	}
+}
+
+func TestWindowsPathWithinDriveRoot(t *testing.T) {
+	for _, c := range []struct {
+		root, path string
+		want       bool
+	}{
+		{`C:\`, `C:\ws\a.txt`, true},
+		{`C:\ws`, `c:\WS\a.txt`, true},
+		{`C:\ws`, `C:\ws`, true},
+		{`C:\ws`, `C:\wsx\a.txt`, false},
+		{`C:\`, `D:\a.txt`, false},
+	} {
+		if got := pathWithin(c.root, c.path); got != c.want {
+			t.Fatalf("pathWithin(%q, %q) = %v, want %v", c.root, c.path, got, c.want)
 		}
 	}
 }

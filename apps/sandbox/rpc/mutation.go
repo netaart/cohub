@@ -35,7 +35,7 @@ func (d *Dispatcher) resolveMutablePath(request protocol.RPCRequest, rawPath, cw
 	if !ok {
 		return "", errResponse, false
 	}
-	if pathWithin(resolved.path, d.cfg.WorkspaceDir) {
+	if samePath(resolved.path, d.cfg.WorkspaceDir) {
 		return "", d.failed(request, "", "INVALID_PATH", "cannot modify the workspace root"), false
 	}
 	if isReadOnlyPath(d.cfg, resolved.path) {
@@ -61,11 +61,11 @@ func (d *Dispatcher) handleFSDelete(request protocol.RPCRequest) interface{} {
 		return d.failedFSMutation(request, err)
 	}
 	if info.IsDir() && params.Recursive {
-		err = os.RemoveAll(path)
-	} else {
-		err = os.Remove(path)
-	}
-	if err != nil {
+		// A partial failure (locked or protected entry) reports its own cause, not "not empty".
+		if err := os.RemoveAll(path); err != nil {
+			return d.failedFSMutation(request, err)
+		}
+	} else if err := os.Remove(path); err != nil {
 		if entries, readErr := os.ReadDir(path); info.IsDir() && readErr == nil && len(entries) > 0 {
 			return d.failed(request, "", "DIRECTORY_NOT_EMPTY", fmt.Sprintf("directory is not empty: %s", path))
 		}

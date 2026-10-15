@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var errUnsupportedWindowsPath = errors.New("unsupported path: UNC, device and alternate data stream paths are not allowed")
+var errUnsupportedWindowsPath = errors.New("unsupported path: UNC, device, alternate data stream and names ending in a dot or space are not allowed")
 
 // Rooted paths without a drive, such as the virtual /workspace, are sandbox
 // absolute paths; filepath.IsAbs would treat them as relative on Windows.
@@ -31,6 +31,13 @@ func validateHostPathSyntax(path string) error {
 	if strings.Contains(path[len(volume):], ":") {
 		return errUnsupportedWindowsPath
 	}
+	// Win32 strips trailing dots and spaces from names, so "a." opens "a" and the
+	// fence's lexical view would differ from the file actually opened.
+	for _, name := range strings.FieldsFunc(path[len(volume):], func(r rune) bool { return r < 128 && os.IsPathSeparator(uint8(r)) }) {
+		if name != "." && name != ".." && strings.TrimRight(name, ". ") != name {
+			return errUnsupportedWindowsPath
+		}
+	}
 	return nil
 }
 
@@ -39,5 +46,10 @@ func pathWithin(root, path string) bool {
 	if len(path) < len(root) || !strings.EqualFold(path[:len(root)], root) {
 		return false
 	}
-	return len(path) == len(root) || os.IsPathSeparator(path[len(root)])
+	// A clean drive root (C:\) already ends with its separator.
+	return len(path) == len(root) || os.IsPathSeparator(path[len(root)]) || strings.HasSuffix(root, string(filepath.Separator))
+}
+
+func samePath(a, b string) bool {
+	return strings.EqualFold(a, b)
 }

@@ -15,6 +15,11 @@ func validateHostPathSyntax(string) error {
 	return nil
 }
 
+// A clean root keeps a trailing separator only when it is "/".
 func pathWithin(root, path string) bool {
-	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+	return path == root || strings.HasPrefix(path, strings.TrimSuffix(root, string(filepath.Separator))+string(filepath.Separator))
+}
+
+func samePath(a, b string) bool {
+	return a == b
 }
