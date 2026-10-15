@@ -1,5 +1,15 @@
 # @neta-art/cohub
 
+## 11.3.2
+
+### Patch Changes
+
+- f18264d: Board file cards for 3D models (`.glb`, `.gltf`, `.stl`, `.obj`) draw a model still and open in place. `createBoardAssetManager` accepts `modelPreviews` to render the stills, and `boardModelFormat`/`isBoardModelItem` identify model cards.
+- b30fd14: Preserve chapter focus tracks when combining Board animations, with frame focus as the chapter-start fallback. Describe camera value types, units and composition through `boards schema camera`, including field queries.
+- aa51893: Upgrade Generation SDK to 0.1.38. Generation types include `3d` content blocks, the `3d` model category, model `operations` selected by the `operation` parameter, `array` parameters, and `multipleOf` on number parameters. `cohub generate` probes only image, video, and audio outputs for media details.
+- 0fdff05: Raise the single-file upload limit from 1 GiB to 2 GiB. Upload rejections now carry a structured `code` — `file_too_large`, `upload_batch_too_large`, `upload_too_many_files`, or `upload_rate_limited` with `retryAfterSeconds` — exported from the SDK as `UPLOAD_ERROR_*` constants, alongside `batchUploadEntries` for splitting large uploads under the batch caps.
+- 7be7af4: Name files with one shared MIME table, now including 3D models (`.glb`, `.gltf`, `.stl`, `.obj`, `.3mf`, `.usdz`). The SDK exports `mimeTypeForPath` and `isTextMime`; `cohub public upload` serves every known type with its proper content type.
+
 ## 11.3.1
 
 ### Patch Changes
