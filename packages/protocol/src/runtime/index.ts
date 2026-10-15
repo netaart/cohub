@@ -140,7 +140,7 @@ const runtimeTraceContextSchema = z.object({
 
 export type RuntimeRecoveryState = { state: "executing" | "attention" | "confirmed_stopped"; ownerUserId?: string | null; resolvedBy?: string; resolvedAt?: string; reason?: string; detectedAt?: string };
 export const fileWatcherStatusSchema = z.object({
-  backend: z.enum(["fsevents", "fsnotify", "scan", "none"]),
+  backend: z.enum(["fsevents", "readdcw", "fsnotify", "scan", "none"]),
   state: z.enum(["running", "degraded", "unavailable"]),
   reason: z.enum(["polling", "watch_error", "start_failed", "coverage_incomplete", "root_changed"]).optional(),
   observedAt: z.iso.datetime(),

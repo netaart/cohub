@@ -34,9 +34,9 @@ func startPlatformBackend(root string, logger *slog.Logger, ignored []string) (e
 		mode = "auto"
 	}
 	switch mode {
-	case "auto", "fsevents", "fsnotify", "scan":
+	case "auto", "fsevents", "readdcw", "fsnotify", "scan":
 	default:
-		return nil, fmt.Errorf("unsupported %s value %q (want auto, fsevents, fsnotify, or scan)", filewatchBackendEnv, mode)
+		return nil, fmt.Errorf("unsupported %s value %q (want auto, fsevents, readdcw, fsnotify, or scan)", filewatchBackendEnv, mode)
 	}
 
 	if mode == "fsnotify" {
@@ -46,22 +46,30 @@ func startPlatformBackend(root string, logger *slog.Logger, ignored []string) (e
 		return newScannerBackend(root, logger, ignored)
 	}
 
-	backend, supported, err := newFSEventsBackend(root, logger)
-	if !supported {
-		if mode == "fsevents" {
-			return nil, fmt.Errorf("fsevents is not supported on this platform")
+	for _, native := range []struct {
+		name  string
+		start func(string, *slog.Logger) (eventBackend, bool, error)
+	}{{"fsevents", newFSEventsBackend}, {"readdcw", newReadDirectoryChangesBackend}} {
+		if mode != "auto" && mode != native.name {
+			continue
 		}
-		return nil, nil
+		backend, supported, err := native.start(root, logger)
+		if !supported {
+			continue
+		}
+		if err == nil {
+			return backend, nil
+		}
+		if mode != "auto" {
+			return nil, err
+		}
+		logger.Warn(native.name+" unavailable; falling back to metadata scanner", slog.String("error", err.Error()))
+		return newScannerBackend(root, logger, ignored)
 	}
-	if err == nil {
-		return backend, nil
+	if mode != "auto" {
+		return nil, fmt.Errorf("%s is not supported on this platform", mode)
 	}
-	if mode == "fsevents" {
-		return nil, err
-	}
-
-	logger.Warn("fsevents unavailable; falling back to metadata scanner", slog.String("error", err.Error()))
-	return newScannerBackend(root, logger, ignored)
+	return nil, nil
 }
 
 // Staged uploads and copies are reported only at their installed path.

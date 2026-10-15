@@ -144,10 +144,10 @@ jobs:
           go vet ./...
           go build ./...
 
-      # Windows-specific process and path fence tests; Git Bash ships with the runner.
+      # Windows-specific process, path fence and file watcher tests; Git Bash ships with the runner.
       - name: Test sandbox Windows behavior
         working-directory: apps/sandbox
-        run: go test -run Windows ./process ./rpc
+        run: go test -run Windows ./process ./rpc ./filewatch
 
       - name: Setup pnpm and Node.js
         uses: pnpm/setup@v3

@@ -7,14 +7,15 @@ The watcher produces invalidation hints, not a durable filesystem journal. Files
 ## Backends / 后端
 
 - macOS releases use `github.com/fsnotify/fsevents` with CGO and CoreServices, watching one recursive workspace root.
+- Windows uses `ReadDirectoryChangesW` on one handle to the workspace root, watching the subtree (as VS Code's parcel-watcher, Watchman and Node's recursive `fs.watch` do). fsnotify's per-directory handles would keep every folder open, and Windows refuses to rename or delete a folder while a descendant is open ([fsnotify#356](https://github.com/fsnotify/fsnotify/issues/356)). Folders arriving by mkdir, move or rename, and buffer overflows, request a resync. Only the root's ancestors stay locked.
 - Linux keeps fsnotify/inotify and its recursive directory registration.
-- `COHUB_FILEWATCH_BACKEND=auto|fsevents|fsnotify|scan` selects a backend. `auto` falls back to scanning when FSEvents cannot start, including Darwin builds without CGO. Explicit `fsevents` fails visibly instead of silently switching.
+- `COHUB_FILEWATCH_BACKEND=auto|fsevents|readdcw|fsnotify|scan` selects a backend. `auto` falls back to scanning when the native backend (FSEvents, ReadDirectoryChangesW) cannot start, including Darwin builds without CGO. An explicit native backend fails visibly instead of silently switching.
 - Scanning runs every five seconds after the previous pass completes. Continuous failures report once and exponentially back off to five minutes. It retains at most 250,000 entries, compares nanosecond modification times, size, type and mode, and preserves the previous baseline on incomplete scans. It does not follow directory symlinks intentionally. Short-lived changes between scans are not guaranteed to be observed.
 - Sockets, FIFOs and device nodes are never reported as changes: macOS rejects watching them with `EOPNOTSUPP`, and they carry no file-tree meaning. The authoritative `fs.tree` / `fs.stat` RPC remains the source for what exists.
 - Entries named `.cohub-upload.*` are staging for uploads and copies. They are never watched or reported; the atomic rename that installs them is reported at the destination path, including every entry of an installed directory.
 - macOS uses no per-file kqueue watches by default. Explicit `fsnotify` on macOS is a diagnostic escape hatch and can still exhaust file descriptors.
 
-macOS 发布包使用 FSEvents 原生递归监听，Linux 保留 inotify。上述环境变量可切换后端；自动模式在 FSEvents 启动失败时降级扫描，显式选择 FSEvents 则报告错误。扫描间隔为上一轮完成后的 5 秒；连续失败只报告一次，并指数退避至 5 分钟。最多保留 250,000 个条目，不完整扫描不会覆盖旧基线；扫描无法保证观察到两轮之间的短暂变化。macOS 显式使用 fsnotify 仍有 FD 耗尽风险。`.cohub-upload.*` 是上传和拷贝的暂存条目，不监听也不上报；安装时的原子 rename 按目标路径上报，安装的目录会上报其中每个条目。
+macOS 发布包使用 FSEvents 原生递归监听；Windows 只在工作区根目录上用一个 `ReadDirectoryChangesW` 句柄递归监听（与 VS Code 的 parcel-watcher、Watchman 和 Node 递归 `fs.watch` 相同），因为 fsnotify 为每个目录打开句柄，Windows 不允许重命名或删除仍有后代被打开的文件夹；目录的新建、移入、重命名以及缓冲区溢出都会请求重新同步，只有根目录的上级目录仍被锁定。Linux 保留 inotify。上述环境变量可切换后端；自动模式在原生后端启动失败时降级扫描，显式选择原生后端则报告错误。扫描间隔为上一轮完成后的 5 秒；连续失败只报告一次，并指数退避至 5 分钟。最多保留 250,000 个条目，不完整扫描不会覆盖旧基线；扫描无法保证观察到两轮之间的短暂变化。macOS 显式使用 fsnotify 仍有 FD 耗尽风险。`.cohub-upload.*` 是上传和拷贝的暂存条目，不监听也不上报；安装时的原子 rename 按目标路径上报，安装的目录会上报其中每个条目。
 
 ## Recovery / 恢复
 
