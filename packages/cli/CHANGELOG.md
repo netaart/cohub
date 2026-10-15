@@ -1,5 +1,11 @@
 # @neta-art/cohub-cli
 
+## 10.4.1
+
+### Patch Changes
+
+- d188747: Pin sandboxd to v2.68.0, the first release with Windows binaries.
+
 ## 10.4.0
 
 ### Minor Changes
