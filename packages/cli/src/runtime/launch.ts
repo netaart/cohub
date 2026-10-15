@@ -31,10 +31,10 @@ export function parseRuntimeDisplay(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
   if (value === false) return undefined;
-  if (value === undefined && platform !== "darwin" && (platform !== "linux" || !env.DISPLAY)) return undefined;
+  if (value === undefined && platform !== "darwin" && platform !== "win32" && (platform !== "linux" || !env.DISPLAY)) return undefined;
   const spec = value === undefined || value === true ? "auto" : value.trim();
-  if (!/^(auto|macos|x11(:[\w.:-]+)?|xvfb(:\d{3,4}x\d{3,4})?)$/.test(spec)) {
-    throw new Error("Display must be auto, macos, x11[:display] or xvfb[:WIDTHxHEIGHT]");
+  if (!/^(auto|macos|windows|x11(:[\w.:-]+)?|xvfb(:\d{3,4}x\d{3,4})?)$/.test(spec)) {
+    throw new Error("Display must be auto, macos, windows, x11[:display] or xvfb[:WIDTHxHEIGHT]");
   }
   if (platform === "linux" && spec === "auto" && !env.DISPLAY) {
     throw new Error(env.WAYLAND_DISPLAY

@@ -1,11 +1,11 @@
 # Displays
 
-A display is a screen a Space's machine shares: a phone through the Android app, a Mac or Linux
+A display is a screen a Space's machine shares: a phone through the Android app, a Mac, Windows or Linux
 desktop through `cohub runtime up --display`, or a virtual screen sandboxd starts. People watch and steer it live over WebRTC; agents use the
 same display through screenshots and input. Nothing about a display is stored — every call reaches
 the machine live, and media never touches Cohub servers.
 
-显示（Display）是 Space 所在机器共享出来的屏幕：Android 应用共享的手机屏幕，`cohub runtime up --display` 共享的 Mac / Linux 桌面，或 sandboxd 启动的虚拟屏。
+显示（Display）是 Space 所在机器共享出来的屏幕：Android 应用共享的手机屏幕，`cohub runtime up --display` 共享的 Mac / Windows / Linux 桌面，或 sandboxd 启动的虚拟屏。
 人通过 WebRTC 实时查看和操作，Agent 通过截图和输入使用同一块屏幕。显示相关内容一律不落库，媒体也不经过 Cohub 服务端。
 
 ## Shape
@@ -65,8 +65,8 @@ always types the viewer's own clipboard.
 | `COHUB_DISPLAY` | Provider |
 | --- | --- |
 | unset | none |
-| `auto` | this computer's screen: the main display on macOS, `$DISPLAY` on Linux |
-| `macos` / `x11[:<display>]` | the same, explicitly |
+| `auto` | this computer's screen: the main display on macOS, the primary monitor on Windows, `$DISPLAY` on Linux |
+| `macos` / `windows` / `x11[:<display>]` | the same, explicitly |
 | `xvfb[:<W>x<H>]` | a virtual screen (1280×800 by default) from start; see [Virtual screens](#virtual-screens) for one on request |
 | `unix:<path>` | a provider socket (the Android app) |
 | `test` | the built-in test pattern, the reference provider |
@@ -147,7 +147,7 @@ input. The shared runtime adds the wire protocol, change polling (resolution, pe
 scheduled input and the encoder. An encoder is a process writing H.264 in FLV, which frames every
 access unit so it leaves the moment it is encoded:
 
-- **ffmpeg** — `h264_videotoolbox` on macOS or `libx264` (Constrained Baseline, zero latency,
+- **ffmpeg** — `h264_videotoolbox` on macOS or `libx264` (on Windows, a GPL build such as gyan.dev's) (Constrained Baseline, zero latency,
   longest edge 1920). `mpdecimate` drops frames that repeat the last one, so a still screen sends one
   frame every 2 s, a key frame; key frames come every 2 s by time, since ffmpeg cannot make one on
   request. A new bitrate (by more than a third) or frame rate restarts it in place.
@@ -175,6 +175,11 @@ needs one.
 - **Linux (X11)** — a pure Go X11 client (`jezek/xgb`): XTest for input, buttons 4–7 for scrolling,
   a spare keycode remapped per character so any Unicode text types regardless of keyboard layout;
   `GetImage` for stills, `x11grab` for video. Wayland sessions are not supported yet.
+- **Windows** — Win32 through `golang.org/x/sys/windows` (no cgo), on the primary monitor in physical
+  pixels (sandboxd turns on per-monitor DPI awareness, Windows 10 1703+): `SendInput` for absolute
+  pointer, wheel and keys (virtual-key codes for named keys and shortcuts, Unicode events for text in
+  any layout); GDI `BitBlt` for stills, `gdigrab` for video. No grant is needed; the locked or UAC
+  secure desktop refuses capture, and elevated windows ignore input. No element tree yet.
 - **`xvfb`** — sandboxd starts `Xvfb` on the first free display from `:99` (`-nolisten tcp`),
   exports `DISPLAY` so every program started in the sandbox draws on it, restarts it on the same
   display if it dies, and stops it on exit. It needs the `xvfb` package; the sandbox image ships it.

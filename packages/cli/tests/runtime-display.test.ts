@@ -4,6 +4,7 @@ import { parseRuntimeDisplay } from "../src/runtime/launch.js";
 
 test("screen sharing defaults to available desktops and respects opt-out", () => {
   assert.equal(parseRuntimeDisplay(undefined, "darwin", {}), "auto");
+  assert.equal(parseRuntimeDisplay(undefined, "win32", {}), "auto");
   assert.equal(parseRuntimeDisplay(undefined, "linux", { DISPLAY: ":0" }), "auto");
   assert.equal(parseRuntimeDisplay(undefined, "linux", {}), undefined);
   assert.equal(parseRuntimeDisplay(false, "darwin", {}), undefined);

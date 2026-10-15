@@ -213,16 +213,6 @@ func (s *x11Screen) Scroll(x, y, dx, dy float64) error {
 	return nil
 }
 
-func notches(amount float64, perScreen int) int {
-	if amount == 0 {
-		return 0
-	}
-	if amount < 0 {
-		amount = -amount
-	}
-	return max(1, int(amount*float64(perScreen)+0.5))
-}
-
 func (s *x11Screen) Key(down bool, key string) error {
 	keysym, ok := x11Keysym(key)
 	if !ok {

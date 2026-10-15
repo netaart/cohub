@@ -218,11 +218,11 @@ enabled in Accessibility settings. See [Displays](displays.md).
 设备 Runtime 还可以把手机屏幕共享给它所服务的一个 Space：人在 Web 端通过 WebRTC 查看和操作，Space 的 Agent 通过截图和输入使用它。
 每次共享都需要系统的录屏授权，直到用户停止；操作屏幕还需要在无障碍设置中启用 Cohub。详见 [Displays](displays.md)。
 
-On a computer, `cohub runtime up --display` shares its screen the same way (macOS, or Linux with
+On a computer, `cohub runtime up --display` shares its screen the same way (macOS, Windows, or Linux with
 X11; asking first unless `--yes`), and `--display xvfb[:WxH]` gives a headless Linux machine a
 virtual screen that programs started in the Space draw on.
 
-在电脑上，`cohub runtime up --display` 以同样方式共享屏幕（macOS，或使用 X11 的 Linux；除非传入 `--yes`，否则会先询问），
+在电脑上，`cohub runtime up --display` 以同样方式共享屏幕（macOS、Windows，或使用 X11 的 Linux；除非传入 `--yes`，否则会先询问），
 `--display xvfb[:WxH]` 则为无界面的 Linux 机器启动一块虚拟屏，Space 中启动的程序都画在上面。
 
 ## Lifecycle / 生命周期

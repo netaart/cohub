@@ -414,6 +414,16 @@ func hostName() string {
 	return host
 }
 
+func notches(amount float64, perScreen int) int {
+	if amount == 0 {
+		return 0
+	}
+	if amount < 0 {
+		amount = -amount
+	}
+	return max(1, int(amount*float64(perScreen)+0.5))
+}
+
 func fitSize(width, height, limit int) (int, int) {
 	if limit <= 0 || (width <= limit && height <= limit) {
 		return width, height
