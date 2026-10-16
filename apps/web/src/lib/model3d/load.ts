@@ -15,6 +15,7 @@ import {
 	objMaterialLibraries,
 	readGlbJson,
 } from "./references";
+import { materialsOf } from "./studio";
 
 export type LoadedModel = {
 	root: Object3D;
@@ -75,12 +76,13 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 		: (buffer.slice(byteOffset, byteOffset + byteLength) as ArrayBuffer);
 }
 
-const neutralMaterial = () =>
-	new MeshStandardMaterial({
-		color: 0x9aa0a8,
-		roughness: 0.62,
-		metalness: 0.04,
-	});
+const NEUTRAL_MATERIAL = {
+	color: 0x9aa0a8,
+	roughness: 0.62,
+	metalness: 0.04,
+};
+
+const neutralMaterial = () => new MeshStandardMaterial(NEUTRAL_MATERIAL);
 
 async function configureDecoders(loader: GLTFLoader, json: GltfJson) {
 	const used = new Set(json.extensionsUsed ?? []);
@@ -117,6 +119,17 @@ async function loadGltf({
 	const disposeDecoders = await configureDecoders(loader, json);
 	try {
 		const gltf = await loader.parseAsync(text ?? toArrayBuffer(bytes), "");
+		for (const material of materialsOf(gltf.scene)) {
+			if (
+				!(material instanceof MeshStandardMaterial) ||
+				gltf.parser.associations.get(material)?.materials !== undefined
+			) {
+				continue;
+			}
+			material.roughness = NEUTRAL_MATERIAL.roughness;
+			material.metalness = NEUTRAL_MATERIAL.metalness;
+			if (!material.vertexColors) material.color.setHex(NEUTRAL_MATERIAL.color);
+		}
 		return {
 			root: gltf.scene,
 			animations: gltf.animations,
