@@ -16,6 +16,7 @@ import { describeError } from "../network-error.js";
 import { executeTurn, type Executor, type HarnessResult } from "./native/execution.js";
 import { ContextRequiredError } from "./native/results.js";
 import { ProcessCleanupUncertainError } from "./process-group.js";
+import { NativeChunkUploads } from "./native/chunk-upload.js";
 import {
   serializeDiagnosticError,
   type RuntimeDiagnosticContext,
@@ -196,6 +197,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
   let readyTimer: ReturnType<typeof setTimeout>;
   const nativePending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   let nativeChannelReady = false;
+  let nativeChunkUpload = false;
 
   const send = (frame: unknown) => {
     if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > RUNTIME_MAX_FRAME_BYTES) {
@@ -214,19 +216,43 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
     socket.send(data);
   };
   const closeTransport = () => socket.close();
+  const chunkUploads = new NativeChunkUploads(send, closeTransport);
   const shutdown = () => {
     for (const execution of active.values()) execution.controller.abort();
     closeTransport();
   };
-  const sendNative = (event: NativeRuntimeEvent) => new Promise<unknown>((resolve, reject) => {
+  const sendNativeRequest = (event: NativeRuntimeEvent) => new Promise<unknown>((resolve, reject) => {
     if (!nativeChannelReady || !connectionId) { reject(new Error("Runtime native channel is unavailable")); return; }
     const requestId = randomUUID();
     // An ingest batch writes each of its Turns durably; everything else answers from memory or one row.
-    const timer = setTimeout(() => { nativePending.delete(requestId); reject(new Error("Native Runtime event timed out")); }, event.type === "ingest" ? 120_000 : 30_000);
+    const frame = { type: "runtime.native", requestId, event };
+    const large = Buffer.byteLength(JSON.stringify(frame)) > RUNTIME_MAX_FRAME_BYTES;
+    const timeoutMs = large ? 120_000 + 32 * 30_000 : event.type === "ingest" ? 120_000 : 30_000;
+    const timer = setTimeout(() => {
+      const error = new Error("Native Runtime event timed out");
+      chunkUploads.fail(requestId, error); nativePending.delete(requestId); reject(error);
+      closeTransport();
+    }, timeoutMs);
     nativePending.set(requestId, { resolve, reject, timer });
-    try { send({ type: "runtime.native", requestId, event }); }
+    try {
+      if (!large) send(frame);
+      else {
+        if (!nativeChunkUpload) throw new Error("Native completion requires a server upgrade with chunk upload support; original transcript retained");
+        void chunkUploads.upload(requestId, Buffer.from(JSON.stringify(event))).catch((error: unknown) => {
+          clearTimeout(timer); nativePending.delete(requestId); reject(error instanceof Error ? error : new Error(String(error)));
+        });
+      }
+    }
     catch (error) { clearTimeout(timer); nativePending.delete(requestId); reject(error instanceof Error ? error : new Error(String(error))); }
   });
+  // The gateway persists requests in order. Start each deadline only when its request can run.
+  let nativeQueue: Promise<unknown> = Promise.resolve();
+  const sendNative = (event: NativeRuntimeEvent): Promise<unknown> => {
+    const send = () => sendNativeRequest(event);
+    const result = nativeQueue.then(send, send);
+    nativeQueue = result;
+    return result;
+  };
   options.signal.addEventListener("abort", shutdown, { once: true });
 
   const heartbeat = setInterval(() => {
@@ -282,6 +308,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         conflict,
       }, { connectionId });
       nativeChannelReady = false;
+      chunkUploads.close(new Error("Runtime native channel disconnected"));
       for (const pending of nativePending.values()) { clearTimeout(pending.timer); pending.reject(new Error("Runtime native channel disconnected")); }
       nativePending.clear();
       options.onDisconnected?.();
@@ -347,6 +374,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
           durationMs: Date.now() - connectedAt,
         }, { connectionId });
         nativeChannelReady = true;
+        nativeChunkUpload = frame.nativeChunkUpload === true;
         options.onNativeChannel?.(sendNative);
         options.onReady();
         let recoveryBatch = 0;
@@ -370,12 +398,22 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         if (stop.data.spaceId === options.spaceId) options.onNativeStop?.(stop.data);
         return;
       }
+      if (raw.type === "runtime.native.chunk.ack") {
+        const ack = raw as { requestId?: unknown; index?: unknown };
+        if (typeof ack.requestId !== "string") throw new Error("Native chunk acknowledgement identity is missing");
+        chunkUploads.acknowledge(ack.requestId, ack.index);
+        return;
+      }
       if (raw.type === "runtime.native.result") {
         const result = raw as { requestId?: string; result?: unknown; error?: string };
         const pending = result.requestId ? nativePending.get(result.requestId) : null;
         if (!pending) return;
         clearTimeout(pending.timer); nativePending.delete(result.requestId ?? "");
-        if (result.error) pending.reject(new Error(result.error)); else pending.resolve(result.result);
+        if (result.error) { const error = new Error(result.error); chunkUploads.fail(result.requestId ?? "", error); pending.reject(error); }
+        else {
+          const premature = chunkUploads.complete(result.requestId ?? "");
+          if (premature) pending.reject(premature); else pending.resolve(result.result);
+        }
         return;
       }
 

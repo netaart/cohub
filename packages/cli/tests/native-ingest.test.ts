@@ -358,3 +358,24 @@ test("pausing a harness stops its uploads and previews, for transcripts already 
     await ingest.close(AbortSignal.timeout(2_000));
   } finally { await w.cleanup(); }
 });
+
+test("native ingest budgets UTF-8 bytes and preserves every Turn in order", async () => {
+  const w = await workspace(), ingest = w.ingest({ harnesses: ["codex"] });
+  try {
+    const server = fakeServer(), id = randomUUID(), answer = "汉".repeat(1_000_000);
+    const rows = [codexLine({ id, cwd: w.project }, "session_meta")];
+    for (let n = 0; n < 6; n++) rows.push(codexLine({ type: "task_started", turn_id: `large-${n}` }), codexLine({ type: "user_message", message: `question ${n}` }), codexLine({ type: "task_complete", turn_id: `large-${n}`, last_agent_message: answer }));
+    await w.write(w.codexPath(id), rows.join(""));
+    ingest.connect(server.transport);
+    await until(() => server.turns.size === 6 && ingest.status().live === 0, 15000);
+    assert.equal(server.batches.length, 3, "two 3 MB Turns fit each 8 MiB batch");
+    const uploaded = server.batches.flatMap(batch => batch.turns);
+    assert.equal(uploaded.length, 6);
+    for (const batch of server.batches) assert(Buffer.byteLength(JSON.stringify(batch)) <= 8 * 1024 * 1024);
+    for (const [n, turn] of uploaded.entries()) {
+      assert.equal(turn.turnId, turnIdOf("codex", id, `large-${n}`));
+      assert.equal(turn.parentTurnId, n === 0 ? null : uploaded[n - 1]?.turnId);
+      assert.deepEqual(turn.result?.messages.at(-1)?.content, [{ type: "text", text: answer }]);
+    }
+  } finally { await ingest.close(AbortSignal.timeout(2000)); await w.cleanup(); }
+});

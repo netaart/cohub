@@ -127,7 +127,7 @@ export function parseRuntimeRegistration(raw: string): RuntimeRegistration | nul
   catch { return null; }
 }
 
-export const runtimeReadySchema = z.object({ type: z.literal("runtime.ready"), connectionId: z.string().uuid() });
+export const runtimeReadySchema = z.object({ type: z.literal("runtime.ready"), connectionId: z.string().uuid(), nativeChunkUpload: z.boolean().optional() });
 
 export type RuntimeExecutionIdentity = { spaceId: string; sessionId: string; turnId: string; harness: LocalHarness };
 
@@ -233,6 +233,15 @@ export const runtimeEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn.acknowledged") }),
   z.object({ type: z.literal("turn.error"), message: z.string().max(16_384), uncertain: z.boolean().optional() }),
 ]);
+export const runtimeNativeChunkSchema = z.object({
+  type: z.literal("runtime.native.chunk"),
+  requestId: id,
+  index: z.number().int().min(0).max(31),
+  totalBytes: z.number().int().positive().max(256 * 1024 * 1024),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  data: z.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4),
+}).strict();
+
 export const runtimeClientFrameSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runtime.hello"), version: z.literal(RUNTIME_PROTOCOL_VERSION), spaceId: id, token: z.string().min(1).max(16_384), capabilities: runtimeCapabilitiesSchema }).strict(),
   z.object({ type: z.literal("runtime.recovery"), executions: z.array(runtimePendingExecutionSchema).min(1).max(RUNTIME_RECOVERY_BATCH_SIZE) }).strict(),
@@ -240,6 +249,7 @@ export const runtimeClientFrameSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runtime.auth"), token: z.string().min(1).max(16_384) }),
   z.object({ type: z.literal("runtime.event"), requestId: id, event: runtimeEventSchema }),
   z.object({ type: z.literal("runtime.native"), requestId: id, event: nativeRuntimeEventSchema }),
+  runtimeNativeChunkSchema,
 ]);
 export type RuntimeClientFrame = z.infer<typeof runtimeClientFrameSchema>;
 export const runtimeNativeResultSchema = z.object({ type: z.literal("runtime.native.result"), requestId: id, result: z.unknown(), error: z.string().optional() }).strict();

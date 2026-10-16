@@ -675,7 +675,7 @@ export class NativeIngest {
         result: item.settled ? this.complete(item.turn.result ?? this.cutOff(item, pending)) : null,
       },
     }));
-    for (const batch of chunks(payloads, INGEST_BATCH_TURNS, (payload) => JSON.stringify(payload.turn).length)) {
+    for (const batch of chunks(payloads, INGEST_BATCH_TURNS, (payload) => Buffer.byteLength(JSON.stringify(payload.turn)))) {
       const result = await transport.ingest({
         type: "ingest",
         input: { harness: state.harness, nativeSessionId: state.nativeSessionId, turns: batch.map((payload) => payload.turn) },

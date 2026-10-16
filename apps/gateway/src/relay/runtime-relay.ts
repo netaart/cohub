@@ -3,6 +3,7 @@ import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
 import { createLogger } from "@cohub/infra/logging";
 import { isUuid, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
+import { NativeChunkAssembler } from "./native-chunks.js";
 
 const logger = createLogger({ serviceName: "cohub-gateway" });
 
@@ -56,7 +57,7 @@ const summarizeIssues = (issues: readonly { path: readonly PropertyKey[]; messag
 
 const nativeRequestId = (raw: unknown) => {
   const frame = raw as { type?: unknown; requestId?: unknown } | null;
-  return frame?.type === "runtime.native" && isUuid(frame.requestId) ? frame.requestId : null;
+  return (frame?.type === "runtime.native" || frame?.type === "runtime.native.chunk") && isUuid(frame.requestId) ? frame.requestId : null;
 };
 
 export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
@@ -79,6 +80,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
     let closed = false;
     let queuedBytes = 0;
     let chain = Promise.resolve();
+    const nativeChunks = new NativeChunkAssembler();
     const deny = (status: number) => socket.close(status === 401 ? 4401 : status >= 500 ? 1011 : 4403, "Runtime authorization failed");
     const handshake = setTimeout(() => socket.close(4408, "Runtime handshake timed out"), 10_000);
     const interval = deps.heartbeatMs ?? 10_000;
@@ -123,6 +125,8 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
         return;
       }
       try {
+        const requestId = nativeChunks.expire();
+        if (requestId) send(socket, { type: "runtime.native.result", requestId, error: "Native chunk upload timed out before completion" });
         send(socket, { type: "runtime.heartbeat" });
       } catch (error) {
         logger.warn("runtime.control.heartbeat_send_failed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId, error });
@@ -135,6 +139,8 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       });
     }, interval);
     socket.on("message", (data) => {
+      // A durable write can hold the ordered queue while heartbeats keep arriving.
+      if (current) lastHeartbeat = Date.now();
       const bytes = Buffer.byteLength(data as Buffer);
       queuedBytes += bytes;
       if (queuedBytes > RUNTIME_MAX_FRAME_BYTES * 2) { socket.terminate(); return; }
@@ -146,6 +152,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           const issues = summarizeIssues(parsed.error.issues);
           const requestId = current ? nativeRequestId(raw) : null;
           if (!requestId) throw new RuntimeProtocolError("Invalid Runtime frame", issues);
+          if ((raw as { type?: unknown }).type === "runtime.native.chunk") nativeChunks.clear();
           // One bad native request fails alone; the connection stays.
           logger.warn("runtime.control.native_frame_rejected", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, requestId, issues });
           send(socket, { type: "runtime.native.result", requestId, error: `Invalid runtime.native frame: ${issues}` });
@@ -180,7 +187,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             harnesses: frame.capabilities.harnesses,
             modelCount: frame.capabilities.models.length,
           });
-          send(socket, { type: "runtime.ready", connectionId });
+          send(socket, { type: "runtime.ready", connectionId, nativeChunkUpload: true });
         } else {
           if (!current) throw new RuntimeProtocolError("Runtime is not registered");
           if (frame.type === "runtime.auth") {
@@ -199,7 +206,20 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             authorizedAt = Date.now();
             logger.debug("runtime.control.auth_refreshed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId });
           } else if (frame.type === "runtime.heartbeat") lastHeartbeat = Date.now();
-          else if (frame.type === "runtime.native") {
+          else if (frame.type === "runtime.native.chunk") {
+            try {
+              if (!deps.nativeEvent) throw new Error("Native runtime events are unavailable");
+              const event = nativeChunks.accept(frame);
+              send(socket, { type: "runtime.native.chunk.ack", requestId: frame.requestId, index: frame.index });
+              if (event) {
+                const result = await deps.nativeEvent(current.spaceId, current.record.ownerUserId, frame.requestId, event);
+                if (!closed) send(socket, { type: "runtime.native.result", requestId: frame.requestId, result });
+              }
+            } catch (error) {
+              nativeChunks.clear();
+              if (!closed) send(socket, { type: "runtime.native.result", requestId: frame.requestId, error: error instanceof Error ? error.message : String(error) });
+            }
+          } else if (frame.type === "runtime.native") {
             try {
               if (!deps.nativeEvent) throw new Error("Native runtime events are unavailable");
               const result = await deps.nativeEvent(current.spaceId, current.record.ownerUserId, frame.requestId, frame.event);
@@ -234,7 +254,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       socket.terminate();
     });
     socket.once("close", (code, reason) => {
-      closed = true; clearTimeout(handshake); clearInterval(heartbeat); clearInterval(lease);
+      closed = true; nativeChunks.clear(); clearTimeout(handshake); clearInterval(heartbeat); clearInterval(lease);
       if (!current) {
         logger.debug("runtime.control.closed", { code, reason: reason.toString(), durationMs: Date.now() - connectedAt });
         return;

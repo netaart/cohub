@@ -7,8 +7,16 @@ export async function forwardNativeRuntimeEvent(input: { spaceId: string; ownerU
     method: "POST",
     headers: { "content-type": "application/json", "x-worker-secret": gatewayConfig.workerSecret, ...buildTraceHeaders() },
     body: JSON.stringify(input),
+    signal: AbortSignal.timeout(120_000),
   });
-  const body = await response.json().catch(() => null) as { result?: unknown; message?: string } | null;
-  if (!response.ok) throw new Error(body?.message ?? `Native runtime event failed: ${response.status}`);
-  return body?.result ?? { accepted: true };
+  let body: unknown;
+  try { body = await response.json(); }
+  catch (cause) { throw new Error(`Invalid native runtime response JSON (${response.status})`, { cause }); }
+  const object = body !== null && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : null;
+  if (!response.ok) {
+    const message = object && typeof object.message === "string" && object.message.length ? `: ${object.message}` : "";
+    throw new Error(`Native runtime event failed (${response.status})${message}`);
+  }
+  if (!object || !Object.hasOwn(object, "result")) throw new Error(`Invalid native runtime response (${response.status}): missing result`);
+  return object.result;
 }
