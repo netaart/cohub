@@ -71,6 +71,7 @@ vim secrets.yaml
 
 ## 前置条件
 
+- [ ] 已按[共享存储访问与备份隔离要求](../storage/README.md)完成存储网络、服务端导出权限、历史备份和恢复流程的配置与验收
 - [ ] `cohub-agent-pvc` PVC 已创建（sessions namespace 中）
 - [ ] 镜像已推送到 registry
 - [ ] secrets.yaml 已配置
