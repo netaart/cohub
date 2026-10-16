@@ -11,24 +11,25 @@ const assistants: Array<{ turnId: string; userMessageId: string; userId: string;
 const outputs: Array<{ turnId?: string }> = [];
 const registration = { connectionId: randomUUID(), ownerUserId: "host-owner", endpoint: "ws://gateway/internal/runtime-relay/space",
   capabilities: { harnesses: ["pi", "codex"], models: [{ harness: "pi", id: "chosen", provider: "fixture", name: "chosen" }, { harness: "codex", id: "chosen", provider: "fixture", name: "chosen" }] } };
-mock.module("../env.js", { exports: { env: {} } });
-mock.module("../db.js", { exports: { db: {
+mock.module("@cohub/infra/tracing", { namedExports: { getActiveTraceIdentifiers: (requestId: string) => ({ requestId, traceId: null, spanId: null, traceparent: null }) } });
+mock.module("../env.js", { namedExports: { env: {} } });
+mock.module("../db.js", { namedExports: { db: {
   select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ status, meta: {} }] }) }) }),
   update: () => ({ set: () => ({ where: () => ({ returning: async () => [{ meta: {} }] }) }) }),
 } } });
-mock.module("../redis.js", { exports: { redis: { get: async () => online ? JSON.stringify(registration) : null }, sendOutput: async (event: { turnId?: string }) => { outputs.push(event); } } });
-mock.module("../api.js", { exports: { getSpaceSandbox: async () => ({ sandbox: { provider: "local" } }) } });
-mock.module("../logger.js", { exports: { logger: { info() {}, warn() {}, debug() {}, error() {} } } });
-mock.module("../runtime/context-store.js", { exports: { loadRuntimeContext: async (input: { beforeSequence?: number; throughTurnId?: string }) => {
+mock.module("../redis.js", { namedExports: { redis: { get: async () => online ? JSON.stringify(registration) : null }, sendOutput: async (event: { turnId?: string }) => { outputs.push(event); } } });
+mock.module("../api.js", { namedExports: { getSpaceSandbox: async () => ({ sandbox: { provider: "local" } }) } });
+mock.module("../logger.js", { namedExports: { logger: { info() {}, warn() {}, debug() {}, error() {} } } });
+mock.module("../runtime/context-store.js", { namedExports: { loadRuntimeContext: async (input: { beforeSequence?: number; throughTurnId?: string }) => {
   contexts.push(input); return { revision: input.throughTurnId ? "completed" : "previous", throughTurnId: input.throughTurnId ?? null, messages: [] };
 } } });
-mock.module("../persistence.js", { exports: {
+mock.module("../persistence.js", { namedExports: {
   persistBatchUserMessages: async ({ batch }: { batch: ClaimedTurnBatch }) => {
     const { buildUserMessagesForBatch } = await import("../batch.js"); users.push(...buildUserMessagesForBatch(batch));
   },
   persistAssistantMessage: async (input: typeof assistants[number]) => { assistants.push(input); status = "completed"; },
 } });
-mock.module("../runtime/exchange.js", { exports: {
+mock.module("../runtime/exchange.js", { namedExports: {
   RuntimeExecutionUncertainError: class extends Error {}, RuntimeResultUnavailableError: class extends Error {},
   exchangeRuntimeTurn: async (options: { input: RuntimeTurnInput; recovery?: boolean; event: (event: unknown, send: (command: unknown) => void, id: string) => Promise<void> }) => {
     commands.push(options.input);
@@ -82,5 +83,41 @@ test("read-only Pi and offline selected harness fail before dispatch without swi
   await assert.rejects(executeRemoteHarnessTurn(input), /read-only/);
   online = false;
   await assert.rejects(executeRemoteHarnessTurn({ ...input, accessMode: "full_access" }), /offline/);
+  assert.equal(commands.length, 0); assert.equal(users.length, 0);
+});
+
+
+test("Codex explicit approval mode survives dispatch and recovery; old runtimes fail before persistence", async () => {
+  online = true;
+  Object.assign(registration.capabilities, { codexApprovalModes: ["inherit", "read_only", "auto", "full_access"] });
+  for (const mode of [undefined, "inherit", "read_only", "auto", "full_access"] as const) {
+    const claimed = batch();
+    for (const turn of claimed.turns) turn.meta = { ...(turn.meta as object), harness: "codex", ...(mode === undefined ? {} : { codexApprovalMode: mode }) };
+    const input = { spaceId: randomUUID(), sessionId: claimed.ownerTurn.sessionId, batch: claimed, actorUserId: claimed.ownerTurn.userUuid,
+      harness: "codex" as const, provider: "fixture", model: "chosen", accessMode: "full_access" as const, abortSignal: new AbortController().signal };
+    for (const recovery of [false, true]) {
+      status = "running"; commands.length = 0;
+      await executeRemoteHarnessTurn({ ...input, recovery });
+      const command = commands[0];
+      assert.ok(command);
+      assert.equal(command.codexApprovalMode, mode);
+      assert.equal(Object.hasOwn(command, "codexApprovalMode"), mode !== undefined);
+    }
+  }
+  const claimed = batch();
+  for (const turn of claimed.turns) turn.meta = { ...(turn.meta as object), harness: "codex", codexApprovalMode: "auto" };
+  Object.assign(registration.capabilities, { codexApprovalModes: undefined });
+  commands.length = users.length = 0;
+  await assert.rejects(executeRemoteHarnessTurn({ spaceId: randomUUID(), sessionId: claimed.ownerTurn.sessionId, batch: claimed, actorUserId: claimed.ownerTurn.userUuid,
+    harness: "codex", accessMode: "full_access", abortSignal: new AbortController().signal }), /update the Local Runtime/);
+  assert.equal(commands.length, 0); assert.equal(users.length, 0);
+});
+
+test("corrupt recovered batches cannot apply a later turn's approval mode to earlier inputs", async () => {
+  online = true; commands.length = users.length = 0;
+  const claimed = batch();
+  claimed.ownerTurn.meta = { ...(claimed.ownerTurn.meta as object), harness: "codex", codexApprovalMode: "full_access" };
+  await assert.rejects(executeRemoteHarnessTurn({ spaceId: randomUUID(), sessionId: claimed.ownerTurn.sessionId, batch: claimed, actorUserId: claimed.ownerTurn.userUuid,
+    harness: "codex", accessMode: "full_access", recovery: true, abortSignal: new AbortController().signal }), /different Codex approval modes/);
   assert.equal(commands.length, 0); assert.equal(users.length, 0);
 });

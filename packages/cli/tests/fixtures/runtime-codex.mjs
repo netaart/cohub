@@ -1,16 +1,45 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 if (!process.argv.includes("app-server")) throw new Error("Expected app-server");
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
-const respond = (input, result) => send({ id: input.id, result });
+const settingsPath = (id) => join(process.cwd(), `codex-settings-${id}.json`);
+const readSettings = (id) => existsSync(settingsPath(id)) ? JSON.parse(readFileSync(settingsPath(id), "utf8")) : {};
+const sandboxPolicies = {
+  "danger-full-access": { type: "dangerFullAccess" },
+  "read-only": { type: "readOnly", networkAccess: false },
+  "workspace-write": { type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
+};
+const applySettings = (params, previous) => {
+  const defaults = params.permissions ? JSON.parse(readFileSync(join(process.cwd(), "codex-default-approval.json"), "utf8")) : {};
+  return { ...previous,
+    ...(params.approvalPolicy !== undefined ? { approvalPolicy: params.approvalPolicy } : {}),
+    ...(params.approvalsReviewer !== undefined ? { approvalsReviewer: params.approvalsReviewer } : {}),
+    ...(params.sandbox ? { sandbox: sandboxPolicies[params.sandbox], activePermissionProfile: null } : {}),
+    ...(params.sandboxPolicy ? { sandbox: params.sandboxPolicy, activePermissionProfile: null } : {}),
+    ...defaults,
+  };
+};
+const respond = (input, result) => {
+  if (["thread/start", "thread/resume", "thread/fork"].includes(input.method)) {
+    const override = join(process.cwd(), "codex-approval-response.json");
+    const localDefaults = join(process.cwd(), "codex-default-approval.json");
+    const previous = input.method === "thread/start" && existsSync(localDefaults) ? JSON.parse(readFileSync(localDefaults, "utf8")) : readSettings(result.thread.id);
+    const sticky = input.method === "thread/resume" && existsSync(join(process.cwd(), "codex-sticky-resume"));
+    const settings = sticky ? previous : applySettings(input.params, previous);
+    writeFileSync(settingsPath(result.thread.id), JSON.stringify(settings));
+    result = { ...result, ...(existsSync(override) ? JSON.parse(readFileSync(override, "utf8")) : settings) };
+  }
+  send({ id: input.id, result });
+};
 let thread;
 const lines = createInterface({ input: process.stdin });
 for await (const line of lines) {
   const input = JSON.parse(line);
-  if (input.method === "initialize") respond(input, { userAgent: "fixture" });
+  if (input.method) appendFileSync(join(process.cwd(), "codex-requests.jsonl"), `${JSON.stringify(input)}\n`);
+  if (input.method === "initialize") respond(input, { userAgent: existsSync(join(process.cwd(), "codex-user-agent.txt")) ? readFileSync(join(process.cwd(), "codex-user-agent.txt"), "utf8") : "codex_cli_rs/0.162.1" });
   else if (input.method === "config/read") respond(input, { config: { model: "test", model_provider: "fixture" } });
   else if (input.method === "model/list") {
     const secondPage = input.params.cursor === "next-model";
@@ -18,6 +47,16 @@ for await (const line of lines) {
       data: [{ id: secondPage ? "another" : "test", model: secondPage ? "another" : "test", displayName: secondPage ? "Another" : "Test", defaultReasoningEffort: "medium", supportedReasoningEfforts: ["medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort })) }],
       nextCursor: secondPage ? null : "next-model",
     });
+  }
+  else if (input.method === "thread/start" && input.params.ephemeral) {
+    send({ id: input.id, result: { thread: { id: randomUUID() }, ...JSON.parse(readFileSync(join(process.cwd(), "codex-default-approval.json"), "utf8")) } });
+  } else if (input.method === "thread/unsubscribe") respond(input, {});
+  else if (input.method === "thread/settings/update") {
+    const settingsError = join(process.cwd(), "codex-settings-error.txt");
+    if (existsSync(settingsError)) { send({ id: input.id, error: { code: -32000, message: readFileSync(settingsError, "utf8") } }); continue; }
+    const settings = applySettings(input.params, readSettings(input.params.threadId));
+    writeFileSync(settingsPath(input.params.threadId), JSON.stringify(settings));
+    respond(input, {});
   }
   else if (input.method === "thread/start") {
     const id = randomUUID();

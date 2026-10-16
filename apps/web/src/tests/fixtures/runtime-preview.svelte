@@ -1,6 +1,7 @@
 <script lang="ts">
 // Local-only browser fixture. Mounted temporarily by scripts/preview-runtime-ui.mjs.
 import "../../app.css";
+import type { CodexApprovalMode } from "@cohub/protocol";
 import type { RuntimeStatus } from "@neta-art/cohub";
 import SessionComposer from "$lib/components/SessionComposer.svelte";
 import SpaceWorkspaceHeader, {
@@ -58,6 +59,7 @@ let previewState = $state<PreviewState>("ready");
 let input = $state("");
 let harness = $state<"cohub" | "pi" | "codex">("pi");
 let model = $state<LocalModelSelection | null>(null);
+let codexApprovalMode = $state<CodexApprovalMode | undefined>();
 const localModels = $derived(models.filter((item) => item.harness === harness));
 // Mirrors the session host: the composer always shows a resolved model and level.
 const localModel = $derived(resolveLocalModel(localModels, model));
@@ -129,7 +131,8 @@ const noop = () => {};
 			<button class="rounded border border-border-subtle px-2 py-1" onclick={() => document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"}>Theme</button>
 		</div>
 		<div class="flex-1 text-sm text-text-tertiary">Isolated fixtures · no account or model requests</div>
+		<output aria-label="Approval selection">{codexApprovalMode ?? "inherited"}</output>
 		<output aria-label="Model selection">{JSON.stringify(localModel)}</output>
-		<SessionComposer bind:value={input} {harness} harnesses={["cohub", "pi", "codex"]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} onsubmit={noop} onpickattachment={noop} />
+		<SessionComposer bind:value={input} {harness} harnesses={["cohub", "pi", "codex"]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} {codexApprovalMode} codexApprovalModes={previewState === "limited" ? undefined : ["inherit", "auto", "full_access", "read_only"]} oncodexapprovalmodechange={(next) => { codexApprovalMode = next; }} onsubmit={noop} onpickattachment={noop} />
 	</main>
 </div>

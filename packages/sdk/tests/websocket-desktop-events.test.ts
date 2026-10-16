@@ -91,3 +91,24 @@ test("emits desktop command envelopes as user events", async () => {
   assert.deepEqual(events.map((event) => event.type), ["desktop.command.dispatched"]);
   await client.disconnect();
 });
+
+test("Codex approval choice is preserved in websocket prompts", async () => {
+  const client = new WebsocketClient({ url: "ws://localhost", autoReconnect: false, WebSocketImpl: FakeWebSocket, getAccessToken: () => "token" });
+  const connecting = client.connect();
+  const socket = FakeWebSocket.instance;
+  assert.ok(socket);
+  socket.open();
+  await waitFor(() => socket.sent.length > 0);
+  socket.receive({ id: "auth", timestamp: Date.now(), domain: "system", type: "system.auth.ok", payload: { connectionId: "connection", user: {} } });
+  await connecting;
+  for (const codexApprovalMode of [undefined, "inherit", "read_only", "auto", "full_access"] as const) {
+    await client.sendMessage({ spaceId: "space", sessionId: "session", content: [{ type: "text", text: "hello" }], harness: "codex", codexApprovalMode });
+    const sent = socket.sent.at(-1);
+    assert.ok(sent);
+    const payload = JSON.parse(sent).payload;
+    assert.equal(payload.harness, "codex");
+    assert.equal(payload.codexApprovalMode, codexApprovalMode);
+    assert.equal(Object.hasOwn(payload, "codexApprovalMode"), codexApprovalMode !== undefined);
+  }
+  await client.disconnect();
+});

@@ -4,7 +4,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { displaysSnapshotSchema, fileWatcherStatusSchema, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
+import { displaysSnapshotSchema, fileWatcherStatusSchema, getDefaultSpaceModsForEnv, runtimeDisplaysKey, validateCodexApprovalMode, type CodexApprovalMode, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
 import {
   HOME_SPACE_SLUG,
   parseSpaceSlug,
@@ -316,6 +316,7 @@ type SpacePromptInput = {
   model?: string | null;
   provider?: string | null;
   harness?: "cohub" | "pi" | "codex" | null;
+  codexApprovalMode?: CodexApprovalMode;
   thinkingLevel?: string | null;
   clientMessageId?: string | null;
   generationPolicy?: unknown;
@@ -1921,6 +1922,11 @@ router.post("/:id/prompt", async (c) => {
   if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
 
   const body = await c.req.json<SpacePromptInput>().catch(() => null);
+  if (body) {
+    try { validateCodexApprovalMode(body); }
+    catch (error) { return c.json({ message: error instanceof Error ? error.message : String(error) }, 400); }
+    if (body.mode === "create" && body.codexApprovalMode !== undefined) return c.json({ message: "codexApprovalMode is only supported by Codex agent prompts" }, 400);
+  }
   if (body?.mode === "create") {
     const generation = body.generation;
     if (!generation?.model || !Array.isArray(generation.content) || generation.content.length === 0) {
@@ -2016,6 +2022,12 @@ router.post("/:id/prompt", async (c) => {
     return c.json({ code: "model_unavailable", message: "requested model is not available" }, 422);
   }
 
+  if (body.codexApprovalMode !== undefined) {
+    const capabilities = (await getRuntimeRegistration(spaceId))?.capabilities;
+    if (!capabilities) return c.json({ message: "Local Runtime is offline" }, 503);
+    try { validateCodexApprovalMode(body, capabilities); }
+    catch (error) { return c.json({ message: error instanceof Error ? error.message : String(error) }, 422); }
+  }
   let promptLabelIds: string[] = [];
   try {
     const labelPaths = parseLabelRefs(body.labelRefs);
@@ -2110,6 +2122,7 @@ router.post("/:id/prompt", async (c) => {
         model: requestedModel,
         provider: requestedProvider,
         harness: body.harness ?? null,
+        codexApprovalMode: body.codexApprovalMode,
         thinkingLevel: promptThinkingLevel ?? null,
         generationPolicy,
         intent: promptIntent,

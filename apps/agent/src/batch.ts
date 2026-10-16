@@ -1,3 +1,4 @@
+import { limitApprovalBatch } from "./runtime/approval-mode.js";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { sessionTurns } from "@cohub/db";
 import type { ContentBlock } from "@cohub/protocol/core";
@@ -210,7 +211,7 @@ export async function claimNextTurnBatch(input: Pick<AgentTurnJobData, "sessionI
     const followups = followupRows.map((row) => normalizeTurn(row as Record<string, unknown>));
     if (followups.length === 0) return { kind: "noop" as const };
 
-    const batch = await claimQueuedTurns(tx, limitBatchSize(followups, (turn) => Buffer.byteLength(JSON.stringify(turn.userContent ?? []), "utf8")));
+    const batch = await claimQueuedTurns(tx, limitBatchSize(limitApprovalBatch(followups), (turn) => Buffer.byteLength(JSON.stringify(turn.userContent ?? []), "utf8")));
     return batch ? { kind: "claimed" as const, batch } : { kind: "noop" as const };
   });
 }

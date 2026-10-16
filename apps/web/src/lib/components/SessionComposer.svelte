@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { ViewportContext } from "@cohub/protocol";
+import type { CodexApprovalMode, ViewportContext } from "@cohub/protocol";
 import type {
 	PromptTemplateCatalogEntry,
 	RuntimeCapabilities,
@@ -16,6 +16,7 @@ import {
 	X,
 } from "lucide-svelte";
 import { flushSync, onMount } from "svelte";
+import ComposerApprovalPicker from "$lib/components/composer/ComposerApprovalPicker.svelte";
 import ComposerHarnessPicker from "$lib/components/composer/ComposerHarnessPicker.svelte";
 import ComposerModelTrigger from "$lib/components/composer/ComposerModelTrigger.svelte";
 import ComposerSubmitButton from "$lib/components/composer/ComposerSubmitButton.svelte";
@@ -129,6 +130,10 @@ type Props = {
 	localModels?: RuntimeCapabilities["models"];
 	localModel?: LocalModelSelection | null;
 	onlocalmodelchange?: (model: LocalModelSelection) => void;
+	codexApprovalMode?: CodexApprovalMode;
+	codexApprovalError?: boolean;
+	codexApprovalModes?: CodexApprovalMode[];
+	oncodexapprovalmodechange?: (mode: CodexApprovalMode) => void;
 	/** Compact thinking level suffix; null/empty hides. */
 	thinkingLevelLabel?: string | null;
 	/** Compact generation-policy suffix; null/empty hides (Auto). */
@@ -175,6 +180,10 @@ let {
 	localModels = [],
 	localModel = null,
 	onlocalmodelchange,
+	codexApprovalMode,
+	codexApprovalError = false,
+	codexApprovalModes,
+	oncodexapprovalmodechange,
 	thinkingLevelLabel = null,
 	generationPolicyLabel = null,
 	quickActions = [],
@@ -1566,7 +1575,7 @@ $effect(() => {
 					/>
 
 					<div class="mt-1.5 flex items-center justify-between gap-2">
-						<div class="flex min-w-0 items-center gap-1">
+						<div class="flex min-w-0 flex-wrap items-center gap-1">
 							{#if onpickattachment}
 								<button
 									type="button"
@@ -1650,6 +1659,10 @@ $effect(() => {
 									disabled={disabled || sending || !runtimeOnline}
 									onclick={() => { onharnessopen?.(); showLocalModelSelector = true; }}
 								/>
+							{/if}
+
+							{#if mode === "agent" && harness === "codex" && oncodexapprovalmodechange}
+								<ComposerApprovalPicker invalid={codexApprovalError} value={codexApprovalMode} supportedModes={codexApprovalModes} onchange={oncodexapprovalmodechange} onopen={onharnessopen} disabled={disabled || sending || !runtimeOnline} />
 							{/if}
 
 							{#if onModelSelect}

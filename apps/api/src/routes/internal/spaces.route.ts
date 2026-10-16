@@ -1,3 +1,5 @@
+import { validateCodexApprovalMode, type CodexApprovalMode } from "@cohub/protocol";
+import { getRuntimeRegistration } from "../../runtime.js";
 import { createLogger } from "@cohub/infra/logging";
 import { Hono } from "hono";
 import { BillingAccessBlockedError, serializeBillingBlocked } from "@cohub/billing";
@@ -423,6 +425,7 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
       model?: string | null;
       provider?: string | null;
       harness?: "cohub" | "pi" | "codex" | null;
+      codexApprovalMode?: CodexApprovalMode;
       thinkingLevel?: string | null;
       accessMode?: PromptAccessMode | null;
       env?: unknown;
@@ -441,6 +444,8 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
   const VALID_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
   const promptThinkingLevel = typeof body.thinkingLevel === "string" && body.thinkingLevel.trim() && VALID_THINKING_LEVELS.has(body.thinkingLevel.trim()) ? body.thinkingLevel.trim() : body.thinkingLevel === undefined || body.thinkingLevel === null ? undefined : null;
   if (promptThinkingLevel === null) return c.json({ message: "thinkingLevel must be one of: off, minimal, low, medium, high, xhigh, max" }, 400);
+  try { validateCodexApprovalMode(body); }
+  catch (error) { return c.json({ message: error instanceof Error ? error.message : String(error) }, 400); }
   const promptPermission = accessMode === "read_only" ? "session.prompt.readonly" : "session.prompt.fullaccess";
   const appSession = body.authToken ? verifyAppSessionToken(body.authToken) : null;
   const permissionSubject = appSession && appSession.userUuid === userId
@@ -461,6 +466,12 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
     throw error;
   }
 
+  if (body.codexApprovalMode !== undefined) {
+    const capabilities = (await getRuntimeRegistration(spaceId))?.capabilities;
+    if (!capabilities) return c.json({ message: "Local Runtime is offline" }, 503);
+    try { validateCodexApprovalMode(body, capabilities); }
+    catch (error) { return c.json({ message: error instanceof Error ? error.message : String(error) }, 422); }
+  }
   let content: ContentBlock[];
   try {
     content = normalizeContentBlocks(body.content);
@@ -479,6 +490,7 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
       model: body.model ?? null,
       provider: body.provider ?? null,
       harness: body.harness ?? null,
+      codexApprovalMode: body.codexApprovalMode,
       thinkingLevel: promptThinkingLevel ?? null,
       accessMode,
       env: promptEnv,

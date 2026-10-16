@@ -1,3 +1,4 @@
+import { parseCodexApprovalMode } from "../runtime/native/codex-approval.js";
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { readSentTurns, readSessionTurnOrigin, resolveCohubEnvironment } from "@neta-art/cohub";
@@ -56,6 +57,7 @@ type PromptOptions = {
   model?: string;
   provider?: string;
   harness?: "cohub" | "pi" | "codex";
+  codexApprovalMode?: string;
   thinkingLevel?: string;
   readOnly?: boolean;
   steer?: boolean;
@@ -241,6 +243,7 @@ async function confirmRestart(opts: { yes?: boolean }): Promise<void> {
 }
 
 async function sendPrompt(command: Command, words: string[], opts: PromptOptions): Promise<void> {
+  const codexApprovalMode = parseCodexApprovalMode(opts.codexApprovalMode, opts.harness);
   const content = await readPromptContent(words, { allowEmpty: Boolean(opts.image?.length) });
   const scheduleFlags = [opts.delayMs, opts.at, opts.cron].filter((value) => value !== undefined);
   if (scheduleFlags.length > 1) return error("Conflicting schedule", "Use only one of --delay-ms, --at, or --cron");
@@ -299,6 +302,7 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
       model: opts.model,
       provider: opts.provider,
       harness: opts.harness,
+      ...(codexApprovalMode !== undefined ? { codexApprovalMode } : {}),
       thinkingLevel: thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | undefined,
       accessMode: opts.readOnly ? "read_only" : "full_access",
       intent: opts.steer ? "steer" : undefined,
@@ -404,6 +408,7 @@ export function registerPrompt(program: Command): void {
     .option("-m, --model <model>", "Model name")
     .option("-p, --provider <provider>", "Provider name")
     .option("--harness <harness>", "Harness: cohub, pi, or codex", "cohub")
+    .option("--codex-approval-mode <mode>", "Codex approval mode: inherit|read_only|auto|full_access")
     .option("--thinking-level <level>", "Thinking level: off|minimal|low|medium|high|xhigh|max")
     .option("--read-only", "Use read-only tools")
     .option("--steer", "Interrupt the current turn and run immediately")
@@ -689,6 +694,7 @@ export function registerSpaces(program: Command): void {
     .alias("send")
     .description("Send or schedule a prompt in the target space")
     .option("--harness <harness>", "Harness: cohub, pi, or codex", "cohub")
+    .option("--codex-approval-mode <mode>", "Codex approval mode: inherit|read_only|auto|full_access")
     .option("--session <id>", "Target session ID")
     .option("--title <title>", "Title for a newly created session or schedule")
     .option("-m, --model <model>", "Model name")

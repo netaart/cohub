@@ -45,3 +45,17 @@ test("spaces.create serializes checkpoint bootstrap input and request headers", 
 		},
 	});
 });
+
+test("space prompts retain each explicit Codex approval mode over HTTP", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const client = new CohubHttpClient({ baseUrl: "https://api.example.test", fetch: async (_input, init) => {
+    bodies.push(JSON.parse(String(init?.body))); return jsonResponse({ turnId: "turn", userMessageId: "message" });
+  } });
+  for (const codexApprovalMode of [undefined, "inherit", "read_only", "auto", "full_access"] as const) {
+    await client.space("space").prompt({ sessionId: "session", content: [{ type: "text", text: "hello" }], harness: "codex", codexApprovalMode });
+    const body = bodies.at(-1);
+    assert.ok(body);
+    assert.equal(body.codexApprovalMode, codexApprovalMode);
+    assert.equal(Object.hasOwn(body, "codexApprovalMode"), codexApprovalMode !== undefined);
+  }
+});

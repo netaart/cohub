@@ -3,7 +3,7 @@ import type { ContentBlock } from "@cohub/protocol/core";
 import type { GenerationPolicy } from "@cohub/protocol/generation";
 import { normalizeSessionTurnOrigin, type SessionTurnIntent, type SessionTurnOrigin, type SessionTurnOriginKind } from "@cohub/protocol/model";
 import { isRequestSourceClientId, normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
-import { harnessSchema, isLocalHarness } from "@cohub/protocol/runtime";
+import { harnessSchema, isLocalHarness, validateCodexApprovalMode, type CodexApprovalMode } from "@cohub/protocol/runtime";
 import { normalizeContentBlocks } from "../content/normalize.js";
 import type { PromptEnv } from "./prompt-env.js";
 
@@ -149,6 +149,7 @@ export type SubmitSessionPromptInput = {
   provider?: string | null;
   /** Agent implementation for this turn. Cloud/local runtime is resolved by the Space. */
   harness?: PromptHarness | null;
+  codexApprovalMode?: CodexApprovalMode;
   /** Optional thinking level override for this turn. Omit to inherit session default. */
   thinkingLevel?: string | null;
   generationPolicy?: GenerationPolicy | null;
@@ -380,6 +381,7 @@ export const submitSessionPrompt = async (
 
   const modelProvider = normalizePromptModelProvider(input);
   if (input.harness != null && !harnessSchema.safeParse(input.harness).success) throw new Error("Invalid Harness");
+  validateCodexApprovalMode(input);
   const localHarness = isLocalHarness(input.harness);
   if (localHarness) {
     if (input.harness === "pi" && input.accessMode === "read_only") throw new Error("Pi cannot enforce read-only access");
@@ -480,6 +482,7 @@ export const submitSessionPrompt = async (
     model: modelProvider.model,
     provider: modelProvider.provider,
     harness: input.harness ?? "cohub",
+    ...(input.codexApprovalMode !== undefined ? { codexApprovalMode: input.codexApprovalMode } : {}),
     requestedThinkingLevel,
     promptTemplate,
     skillUsage,

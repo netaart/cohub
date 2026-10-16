@@ -6,6 +6,7 @@ import {
 	buildFileReferencesText,
 	buildImageReferencesText,
 	buildViewportContentBlock,
+	type CodexApprovalMode,
 } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { SpaceFsChangedPayload } from "@cohub/protocol/fs";
@@ -27,6 +28,12 @@ import type { SessionListForkRecord } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
 import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
 import { shouldRefreshAgentCatalogs } from "$lib/cache/space-fs-invalidation";
+import {
+	buildCodexApprovalRequest,
+	finishCodexApprovalChoice,
+	type PendingCodexApprovalChoice,
+	resolveCodexApprovalModeFromTurns,
+} from "$lib/codex-approval-mode";
 import { noteViewerActivity } from "$lib/command-palette/palette-overview";
 import {
 	buildComposerTextContentBlock,
@@ -369,6 +376,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	});
 	let harnessBySession = $state<Record<string, "cohub" | "pi" | "codex">>({});
 	let localModelsBySession = $state<Record<string, LocalModelSelection>>({});
+	let codexApprovalModesBySession = $state<
+		Record<string, PendingCodexApprovalChoice>
+	>({});
+	let codexApprovalChoiceRevision = 0;
 	const harnessSelectionKey = $derived(
 		`${spaceId}:${activeSessionId ?? "draft"}`,
 	);
@@ -383,6 +394,20 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			resolveTurnHarness(composerAgentTurns.at(-1)),
 	);
 	const runtimeCatalog = $derived(cachedRuntimeStatus(spaceId));
+	const codexApprovalSelection = $derived.by(() => {
+		try {
+			return {
+				mode:
+					codexApprovalModesBySession[harnessSelectionKey]?.mode ??
+					resolveCodexApprovalModeFromTurns(composerAgentTurns),
+				error: null,
+			};
+		} catch (error) {
+			// Keep corrupt history intact, surface it in the composer, and block dispatch.
+			return { mode: undefined, error };
+		}
+	});
+	const codexApprovalMode = $derived(codexApprovalSelection.mode);
 	// Local Turns always name a model and, when the model has a choice, a level:
 	// a Harness keeps a requested level for later Turns, so leaving it out would
 	// not mean its default.
@@ -2996,6 +3021,24 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			setComposerError(m.runtime_harness_unavailable());
 			return;
 		}
+		if (harness === "codex" && codexApprovalSelection.error) {
+			setComposerError(m.runtime_codex_approval_invalid());
+			return;
+		}
+		let approvalRequest: { codexApprovalMode?: CodexApprovalMode };
+		try {
+			approvalRequest = buildCodexApprovalRequest(
+				harness,
+				codexApprovalMode,
+				runtimeCatalog?.capabilities?.codexApprovalModes,
+			);
+		} catch {
+			setComposerError(m.runtime_codex_approval_unsupported());
+			return;
+		}
+		const opApprovalSelectionKey = harnessSelectionKey;
+		const opApprovalChoice =
+			codexApprovalModesBySession[opApprovalSelectionKey];
 		composer.sending = true;
 		const model = harness === "cohub" ? activeSessionModel : localModel;
 		const thinkingLevel =
@@ -3222,6 +3265,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						// Mirrors the server's request meta, which local model restore reads.
 						...(model ? { model: model.id, provider: model.provider } : {}),
 						...(thinkingLevel ? { requestedThinkingLevel: thinkingLevel } : {}),
+						...approvalRequest,
 						userId: currentUser.uuid,
 						clientMessageId,
 					},
@@ -3260,6 +3304,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				provider: model?.provider,
 				harness,
 				...(thinkingLevel ? { thinkingLevel } : {}),
+				...approvalRequest,
 				clientMessageId,
 				...(harness === "cohub"
 					? { generationPolicy: buildTurnGenerationPolicy() }
@@ -3271,6 +3316,15 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			if (sendResult.mode !== "immediate") {
 				throw new Error("Expected immediate prompt response");
 			}
+			const acceptedSession = sendResult.session;
+			if (!acceptedSession) throw new Error("Prompt response missing session");
+			if (harness === "codex" || isNewChat) {
+				codexApprovalModesBySession = finishCodexApprovalChoice(
+					codexApprovalModesBySession,
+					opApprovalSelectionKey,
+					opApprovalChoice,
+				);
+			}
 			// The server accepted the prompt even if this host moved elsewhere.
 			// Invalidate before the UI-only early return so Recent revalidates later.
 			noteViewerActivity();
@@ -3280,8 +3334,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				return;
 			}
 			const acceptedTurn = sendResult.turn;
-			const acceptedSession = sendResult.session;
-			if (!acceptedSession) throw new Error("Prompt response missing session");
 			const acceptedTurnWithProfile = {
 				...acceptedTurn,
 				userUuid: acceptedTurn.userUuid ?? currentUser.uuid,
@@ -4537,6 +4589,21 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		loadRuntimeCatalog,
 		get runtimeCatalog() {
 			return runtimeCatalog;
+		},
+		get codexApprovalError() {
+			return Boolean(codexApprovalSelection.error);
+		},
+		get codexApprovalMode() {
+			return codexApprovalMode;
+		},
+		setCodexApprovalMode(mode: CodexApprovalMode) {
+			codexApprovalModesBySession = {
+				...codexApprovalModesBySession,
+				[harnessSelectionKey]: {
+					mode,
+					revision: ++codexApprovalChoiceRevision,
+				},
+			};
 		},
 		get localModel() {
 			return localModel;

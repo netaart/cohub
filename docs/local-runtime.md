@@ -99,8 +99,8 @@ archived so a conversation can be restored natively on another machine.
   by default, so web and terminal drive the same live thread. Cohub never restarts or stops it:
   `detach` and `down` print `codex app-server daemon stop` instead. The server is started with the
   login environment minus Cohub credentials; each thread only gets its cwd, an explicitly chosen
-  model, a read-only sandbox when requested, and `COHUB_SPACE_ID` / `COHUB_SESSION_ID`. Cohub
-  refuses approvals of the Turns it started and never answers a terminal user's approvals.
+  model, the selected approval mode, and `COHUB_SPACE_ID` / `COHUB_SESSION_ID`. Cohub
+  rejects requests for human approval on Turns it started and never answers a terminal user's approvals.
   Declining, an older Codex or a failed start degrade the same way: Cohub Turns use a private
   `codex app-server --listen stdio://`, and terminal Codex sessions sync read-only.
 
@@ -277,6 +277,34 @@ is used for all providers, including custom providers without `model_catalog_jso
 configured model is retained as a fallback when absent from the list, without guessed reasoning
 capabilities. Older Runtime catalogs remain supported. Deploy the updated services and Web,
 then update and restart the CLI Runtime to refresh its catalog.
+
+When Codex is selected, the composer offers four approval modes:
+
+| Mode | Behavior |
+| --- | --- |
+| Inherit local settings (`inherit`) | Read the local Codex settings again, including named permissions profiles, and restore them for the next Turn. |
+| Auto approval (`auto`) | Write within the workspace; Codex's automatic reviewer decides requests for additional access. |
+| Full access (`full_access`) | Run without the Codex sandbox or approval prompts. |
+| Read only (`read_only`) | Read files, with writes and network access disabled. |
+
+The choice applies to the next message and is remembered within that Session. A new Session
+starts without an override. Switching back to Inherit restores the local settings even after
+Full access. A platform read-only restriction remains an upper bound for every choice.
+The CLI accepts `--codex-approval-mode inherit|auto|full_access|read_only` with
+`--harness codex` on both the top-level and Space prompt commands.
+
+Explicit selection requires Codex app-server 0.162.1 or newer and an updated Cohub Runtime
+advertising the supported modes. Deploy API, Gateway, Agent and Web together, then update and
+restart the CLI Runtime. Unsupported explicit choices fail before execution; older clients
+that omit the field retain their existing behavior. Human approval cards are not included:
+if the local settings require a human decision, Cohub rejects that request.
+
+Before an explicit-mode Turn starts, Cohub verifies the complete resolved sandbox and
+permissions profile, including network access, writable roots and temporary-directory rules.
+If Codex retains broader local permissions (for example, an extra writable root when switching
+to Auto approval), the Turn fails before sending the prompt. Inherit preserves those local
+policy details when creating a new thread as well as when continuing an existing one.
+
 The header distinguishes ready, limited, offline and stale/unknown status. Runtime lifecycle
 changes invalidate the existing status cache over the shared realtime room; old snapshots
 may populate labels/models, never authorize a local turn.
@@ -410,8 +438,8 @@ Never infer that a disconnected execution has stopped.
   survive between such Turns. A shared Codex app-server keeps its threads loaded across Turns.
 - Verified with Pi 0.86.1 and Codex 0.156.1. Codex rollout-path recovery is an upstream
   experimental API; incompatible versions fail explicitly.
-- Native approval escalation is never automatically granted. Requests requiring
-  an interactive local approval are rejected by the unattended adapter. Pi
+- Codex Auto approval delegates escalation decisions to Codex's automatic reviewer.
+  Requests requiring an interactive human approval are rejected by the unattended adapter. Pi
   read-only execution is rejected because it cannot enforce the requested limit.
 - Unknown execution outcomes remain active and block automatic takeover. Local
   unconfirmed state requires reconciliation; it is not silently discarded or replayed.

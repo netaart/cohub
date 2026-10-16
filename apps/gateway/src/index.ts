@@ -1,3 +1,4 @@
+import type { CodexApprovalMode } from "@cohub/protocol";
 import "dotenv/config";
 import "./tracing.js";
 import { createLogger } from "@cohub/infra/logging";
@@ -804,6 +805,7 @@ const submitWebsocketSessionMessage = async (ctx: WsConnectionContext, requestId
     model,
     provider,
     harness: isLocalHarness(payload.harness) ? payload.harness : "cohub",
+    codexApprovalMode: payload.codexApprovalMode as CodexApprovalMode | undefined,
     thinkingLevel,
     context: {
       kind: "websocket",

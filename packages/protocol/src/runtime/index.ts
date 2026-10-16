@@ -52,6 +52,19 @@ export function runtimeWorkspaceStatus(runtimeId: string | null | undefined, raw
   return { online: false, observedAt: null };
 }
 export const harnessSchema = z.enum(["cohub", "pi", "codex"]);
+export const codexApprovalModeSchema = z.enum(["inherit", "read_only", "auto", "full_access"]);
+export type CodexApprovalMode = z.infer<typeof codexApprovalModeSchema>;
+
+/** Explicit choices must never silently fall back to a host's defaults. */
+export function validateCodexApprovalMode(input: { harness?: unknown; codexApprovalMode?: unknown }, capabilities?: RuntimeCapabilities): void {
+  if (input.codexApprovalMode === undefined) return;
+  if (!codexApprovalModeSchema.safeParse(input.codexApprovalMode).success) throw new Error("codexApprovalMode must be one of: inherit, read_only, auto, full_access");
+  if (input.harness !== "codex") throw new Error("codexApprovalMode is only supported by Codex");
+  if (capabilities !== undefined && !capabilities.codexApprovalModes?.includes(input.codexApprovalMode as CodexApprovalMode)) {
+    throw new Error("This Runtime does not support the selected Codex approval mode; update the Local Runtime");
+  }
+}
+
 export type HarnessKind = z.infer<typeof harnessSchema>;
 export type LocalHarness = Exclude<HarnessKind, "cohub">;
 export const isLocalHarness = (value: unknown): value is LocalHarness => value === "pi" || value === "codex";
@@ -93,6 +106,7 @@ export type RuntimeTraceContext = {
 
 const runtimeThinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const runtimeCapabilitiesSchema = z.object({
+  codexApprovalModes: z.array(codexApprovalModeSchema).optional(),
   harnesses: z.array(z.enum(["pi", "codex"])).max(2),
   models: z.array(z.object({
     harness: z.enum(["pi", "codex"]),
@@ -182,6 +196,8 @@ export type RuntimeTurnInput = {
   provider?: string | null;
   model?: string | null;
   thinkingLevel?: string | null;
+  /** Explicit inherit restores native host settings; omission preserves legacy behavior. */
+  codexApprovalMode?: CodexApprovalMode;
   requestId?: string | null;
   traceContext?: RuntimeTraceContext;
   accessMode: "read_only" | "full_access";
@@ -256,11 +272,12 @@ export const runtimeCommandSchema = z.discriminatedUnion("type", [
     spaceId: id, sessionId: id, turnId: id, userMessageId: id, harness: z.enum(["pi", "codex"]),
     messages: z.array(z.object({ turnId: id, userMessageId: id, userId: z.string().nullable(), content })).min(1).max(RUNTIME_MAX_BATCH_MESSAGES),
     context: runtimeContextSchema,
+    codexApprovalMode: codexApprovalModeSchema.optional(),
     provider: z.string().nullable().optional(), model: z.string().nullable().optional(), thinkingLevel: z.string().nullable().optional(),
     requestId: z.string().regex(/^[a-zA-Z0-9._:-]{1,128}$/).nullable().optional(),
     traceContext: runtimeTraceContextSchema.optional(),
     accessMode: z.enum(["read_only", "full_access"]),
-  }).refine((input) => {
+  }).refine((input) => input.codexApprovalMode === undefined || input.harness === "codex", "codexApprovalMode is only supported by Codex").refine((input) => {
     const owner = input.messages.at(-1);
     return owner?.turnId === input.turnId && owner.userMessageId === input.userMessageId
       && new Set(input.messages.map((message) => message.turnId)).size === input.messages.length

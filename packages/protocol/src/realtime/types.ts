@@ -1,3 +1,4 @@
+import type { CodexApprovalMode } from "../runtime/index.js";
 import type { ContentBlock } from "../core/content.js";
 import type { BillingPayload } from "../billing.js";
 import type { MessageRecord, SessionForkRecord, SessionRecord, SessionTurnRecord } from "../model/session.js";
@@ -91,7 +92,7 @@ export type WsClientEvent =
   | { type: "auth"; requestId?: string; payload: { token: string; capabilities?: string[] } }
   | { type: "subscribe"; requestId?: string; payload: { rooms: string[] } }
   | { type: "unsubscribe"; requestId?: string; payload: { rooms: string[] } }
-  | { type: "session.message.create"; requestId?: string; payload: { spaceId: string; sessionId: string; clientMessageId?: string; content: ContentBlock[]; model?: string; provider?: string; harness?: "cohub" | "pi" | "codex"; thinkingLevel?: ModelThinkingLevel } }
+  | { type: "session.message.create"; requestId?: string; payload: { spaceId: string; sessionId: string; clientMessageId?: string; content: ContentBlock[]; model?: string; provider?: string; harness?: "cohub" | "pi" | "codex"; codexApprovalMode?: CodexApprovalMode; thinkingLevel?: ModelThinkingLevel } }
   | { type: "presence.update"; requestId?: string; payload: { spaceId: string; meta?: Record<string, unknown> | null } }
   | { type: "board.awareness.update"; requestId?: string; payload: BoardAwarenessClientPayload }
   | { type: "realtime.room.join"; requestId?: string; payload: { roomId: string; ticket: string; instanceId?: string; after?: number } }

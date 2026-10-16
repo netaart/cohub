@@ -1,3 +1,4 @@
+import { readTurnApprovalMode } from "./runtime/approval-mode.js";
 import { randomUUID } from "node:crypto";
 import { UnrecoverableError, type Job } from "bullmq";
 import { imageBlockToPi, type ContentBlock, type PiImageContent } from "@cohub/protocol/core";
@@ -855,6 +856,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
       }
       lock.signal.throwIfAborted();
       const requestedHarness = resolveHarness(ownerMeta);
+      readTurnApprovalMode(ownerMeta);
       if (isLocalHarness(requestedHarness)) {
         if (fileVisibility !== "full") throw new Error("Local Harness requires full workspace access");
         const remoteController = new AbortController();

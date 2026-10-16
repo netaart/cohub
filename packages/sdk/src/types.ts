@@ -1,3 +1,4 @@
+import type { CodexApprovalMode } from "@cohub/protocol/runtime";
 export type { SessionStats, ExecutionStats, TurnMetrics, RequestMetric } from "@cohub/protocol/model";
 import type {
   SessionBindingRecord as ProtocolSessionBindingRecord,
@@ -1271,6 +1272,8 @@ export type CreateSpacePromptInput = {
   content?: ContentBlock[];
   model?: string | null;
   provider?: string | null;
+  /** Explicit approval mode for local Codex; omission preserves host settings. */
+  codexApprovalMode?: CodexApprovalMode;
   /** Harness selected for this turn. */
   harness?: "cohub" | "pi" | "codex" | null;
   /** Optional thinking level override for this turn. Omit to inherit session default. */

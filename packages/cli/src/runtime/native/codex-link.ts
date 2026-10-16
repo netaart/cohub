@@ -24,6 +24,7 @@ export interface CodexChannel {
   onEvent(listener: (event: CodexEvent & { id?: string | number }) => void): () => void;
   onClose(listener: (error: Error) => void): () => void;
   close(): Promise<void>;
+  readonly userAgent?: string;
   readonly shared: boolean;
   readonly closed: boolean;
 }
@@ -132,12 +133,14 @@ export class CodexShared {
 }
 
 async function initialize(channel: CodexChannel) {
-  await channel.request("initialize", { clientInfo: { name: "cohub-runtime", title: "Cohub", version: "1" }, capabilities: { experimentalApi: true } });
+  const result = await channel.request("initialize", { clientInfo: { name: "cohub-runtime", title: "Cohub", version: "1" }, capabilities: { experimentalApi: true } });
+  (channel as SocketChannel | StdioChannel).userAgent = typeof result.userAgent === "string" ? result.userAgent : undefined;
   // The notification completes the handshake; responses are not expected.
   (channel as SocketChannel | StdioChannel).notify("initialized");
 }
 
 class SocketChannel implements CodexChannel {
+  userAgent: string | undefined;
   readonly shared = true;
   private readonly pending = new Map<string, { resolve: (value: JsonRecord) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private readonly listeners = new Set<(event: CodexEvent & { id?: string | number }) => void>();
@@ -200,6 +203,7 @@ class SocketChannel implements CodexChannel {
 }
 
 class StdioChannel implements CodexChannel {
+  userAgent: string | undefined;
   readonly shared = false;
   private failed = false;
   constructor(private readonly rpc: JsonRpcProcess) { rpc.onFailure(() => { this.failed = true; }); }

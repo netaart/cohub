@@ -1,3 +1,4 @@
+import { CODEX_APPROVAL_MODES, supportsCodexApprovalModes } from "./native/codex-approval.js";
 import { access, stat } from "node:fs/promises";
 import { constants, readFileSync, statSync } from "node:fs";
 import { delimiter, join, resolve, win32 } from "node:path";
@@ -80,12 +81,14 @@ export async function imageForPi(block: Extract<ContentBlock, { type: "image" }>
 }
 
 async function initializeCodex(rpc: JsonRpcProcess) {
-  await rpc.request("initialize", { clientInfo: { name: "cohub", title: "Cohub", version: "1" }, capabilities: { experimentalApi: true } });
+  const response = await rpc.request("initialize", { clientInfo: { name: "cohub", title: "Cohub", version: "1" }, capabilities: { experimentalApi: true } });
   rpc.write({ method: "initialized", params: {} });
+  return response;
 }
 
 export async function discoverHarnesses(harnesses: ("pi" | "codex")[], options: HarnessOptions, cwd: string): Promise<RuntimeCapabilities> {
   const models: RuntimeCapabilities["models"] = [];
+  let codexApprovalModes: RuntimeCapabilities["codexApprovalModes"];
   await Promise.all(harnesses.map(async (harness) => {
     const rpc = new JsonRpcProcess(...harnessCommand(options[harness] || harness, harness === "pi" ? ["--mode", "rpc", "--no-session"] : ["app-server", "--listen", "stdio://"], cwd), cwd, harness);
     try {
@@ -94,7 +97,8 @@ export async function discoverHarnesses(harnesses: ("pi" | "codex")[], options: 
         const state = await rpc.request("get_state");
         models.push(...piModelCatalog(array(result.models), state));
       } else {
-        await initializeCodex(rpc);
+        const initialized = await initializeCodex(rpc);
+        if (supportsCodexApprovalModes(typeof initialized.userAgent === "string" ? initialized.userAgent : undefined)) codexApprovalModes = [...CODEX_APPROVAL_MODES];
         const config = await rpc.request("config/read", { includeLayers: false, cwd });
         const entries: unknown[] = [];
         const cursors = new Set<string>();
@@ -110,7 +114,7 @@ export async function discoverHarnesses(harnesses: ("pi" | "codex")[], options: 
       }
     } finally { await rpc.close(); }
   }));
-  return { harnesses, models };
+  return { harnesses, models, ...(codexApprovalModes ? { codexApprovalModes } : {}) };
 }
 
 export function codexItemContent(item: JsonRecord): ContentBlock[] {

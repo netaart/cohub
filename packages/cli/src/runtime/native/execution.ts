@@ -10,6 +10,7 @@ import type { NativeIngest } from "./ingest.js";
 import { PI_DISCONNECTED, type PiLink, type PiSessionLink } from "./pi-link.js";
 import type { ExecutionResults } from "./results.js";
 import type { NativeSession, NativeSessions, ResumeKind } from "./sessions.js";
+import { codexApprovalOptions, confirmCodexApprovalOptions, parseCodexApprovalMode, supportsCodexApprovalModes } from "./codex-approval.js";
 import { codexTranslator, piTranslator } from "./translate.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
@@ -53,6 +54,7 @@ type Turn = {
  */
 export async function executeTurn(executor: Executor, input: RuntimeTurnInput, emit: Turn["emit"], signal: AbortSignal, requestId: string | null, context?: RuntimeDiagnosticContext): Promise<HarnessResult> {
   signal.throwIfAborted();
+  parseCodexApprovalMode(input.codexApprovalMode, input.harness);
   const diverged = await executor.results.admit(input);
   const turn: Turn = { input, emit, signal, diverged, started: (session) => executor.results.start(session, input, requestId) };
   const run = await (input.harness === "pi" ? runPi : runCodex)(executor, turn, context);
@@ -214,21 +216,32 @@ async function runCodex(executor: Executor, turn: Turn, context?: RuntimeDiagnos
       channel = await openPrivateServer(host);
     }
     const codex = channel;
+    if (input.codexApprovalMode !== undefined && !supportsCodexApprovalModes(codex.userAgent)) throw new Error("Codex approval modes require app-server 0.162.1 or newer; update Codex and restart its app-server");
+    const approval = await codexApprovalOptions(input, codex, executor.cwd);
     const threadOptions = {
       cwd: executor.cwd,
       ...(input.model ? { model: input.model } : {}),
       ...(input.provider && input.provider !== "codex" ? { modelProvider: input.provider } : {}),
-      ...(input.accessMode === "read_only" ? { sandbox: "read-only" } : {}),
+      ...approval.thread,
       // Tools of a shared server otherwise see the environment of whoever started that server.
       config: { "shell_environment_policy.set.COHUB_SPACE_ID": input.spaceId, "shell_environment_policy.set.COHUB_SESSION_ID": input.sessionId },
     };
     const existing = { ...threadOptions, threadId: session.nativeSessionId, path: session.path, excludeTurns: true };
-    const opened = prepared.resume === "new" ? await codex.request("thread/start", threadOptions)
+    let opened = prepared.resume === "new" ? await codex.request("thread/start", threadOptions)
       : prepared.resume === "restored" ? await codex.request("thread/fork", existing)
         : await codex.request("thread/resume", existing);
     const thread = record(opened.thread);
     if (typeof thread.id !== "string" || typeof thread.path !== "string") throw new Error("Codex did not provide a durable native thread");
     const threadId = thread.id;
+    if (input.codexApprovalMode !== undefined) {
+      // A live shared thread ignores resume overrides. Update its next-turn settings explicitly,
+      // then read them back before sending any user input. New threads have no rollout to resume yet.
+      if (prepared.resume !== "new") {
+        await codex.request("thread/settings/update", { threadId, ...approval.turn });
+        opened = await codex.request("thread/resume", { threadId, path: thread.path, excludeTurns: true });
+      }
+      confirmCodexApprovalOptions(opened, approval);
+    }
     if (thread.path !== session.path || threadId !== session.nativeSessionId) {
       session = { ...session, nativeSessionId: threadId, path: thread.path };
       executor.ingest.adopt(session, input.sessionId);
@@ -270,7 +283,7 @@ async function runCodex(executor: Executor, turn: Turn, context?: RuntimeDiagnos
         if (host) escalation = setTimeout(() => void host?.close().catch(() => undefined), ABORT_ESCALATION_MS);
       };
       signal.addEventListener("abort", abort, { once: true });
-      codex.request("turn/start", { threadId, clientUserMessageId: input.turnId, input: content, ...(input.thinkingLevel ? { effort: input.thinkingLevel === "off" ? "none" : input.thinkingLevel } : {}) })
+      codex.request("turn/start", { threadId, ...approval.turn, clientUserMessageId: input.turnId, input: content, ...(input.thinkingLevel ? { effort: input.thinkingLevel === "off" ? "none" : input.thinkingLevel } : {}) })
         .then((result) => { nativeTurnId ??= text(record(result.turn).id) || null; if (signal.aborted) interrupt(); })
         .catch(finish);
     }).finally(() => executor.codex.driving.delete(threadId));
