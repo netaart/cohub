@@ -161,6 +161,48 @@ parameters:
 
 Set `hidden: true` on a declaration to exclude the model from default Web and CLI discovery. Hidden models remain available through exact-ID search, `cohub models show <model>`, direct generation requests, and explicit Limited policies. The models API and SDK continue to return the complete catalog with the `hidden` field, so this is a discovery hint rather than an authorization or runtime availability control.
 
+### Operations and array parameters
+
+A declaration with `operations` serves several functions. Its `operation` parameter names the function, and the selected entry of `operations` declares `content.input` and `parameters` that add to the model's own. `category` (for example `image`, `video`, `music`, `3d`) groups the model in pickers; Web falls back to the content inputs when it is absent.
+
+```yaml
+category: 3d
+content:
+  input: []
+parameters:
+  operation:
+    type: string
+    enum: [text-to-3d, remesh]
+operations:
+  text-to-3d:
+    title: Text To 3D
+    content:
+      input:
+        - type: text
+          required: true
+    parameters:
+      target_formats:
+        type: array
+        optional: true
+        items:
+          type: string
+          enum: [glb, obj, fbx, usdz, stl, 3mf]
+        min: 1
+        unique: true
+  remesh:
+    content:
+      input:
+        - type: 3d
+          required: true
+          sources: [url]
+```
+
+`array` parameters take `items` (a string, integer, or number spec with its own `enum`, `min`, and `max`), and optionally `min` and `max` item counts and `unique`. Requests send them as JSON arrays. Web shows enum arrays as toggles and other arrays as comma-separated values; Board and Create mode keep each model's parameters, including the operation, after submit.
+
+### 3D results
+
+Meshy returns its model files first, one `3d` block per format, then the stills, textures, and turntable video of the same provider task. Each block carries `meta.task_id`, `meta.task_type`, `meta.field`, `meta.task_expires_at`, and on model files `meta.format`. Cohub uses `meta.task_id` to pair each model with the first image of its task as its preview. Board task cards and result items, chat, the task view, the Media panel, and the lightbox open GLB and glTF in the 3D viewer and list every format for download. Passing a result back to `text-to-3d-refine`, `animation`, or another operation keeps the block unchanged so the provider can reuse the task until it expires; Board references copy the output meta.
+
 See the full examples:
 
 - [`docs/examples/generations/gpt-image-2.yaml`](./examples/generations/gpt-image-2.yaml)
@@ -228,7 +270,24 @@ cohub generate "uplifting cinematic pop with warm piano and clear chorus" \
 cohub generate "write a hopeful chorus about sunrise after a storm" \
   --model suno_music \
   --param operation=lyrics
+
+cohub generate "a wooden treasure chest with iron bands" \
+  --model meshy \
+  --param operation=text-to-3d \
+  --param 'target_formats=["glb","usdz"]'
+
+cohub generate "weathered oak planks and dark iron" \
+  --model meshy \
+  --param operation=text-to-3d-refine \
+  --block "$(cohub tasks get <task-id> --json | jq -c '.run.result.output[0]')"
+
+cohub generate --model meshy \
+  --3d ./chest.glb \
+  --param operation=remesh \
+  --param topology=quad
 ```
+
+`--3d` takes GLB, glTF, OBJ, FBX, or STL paths or URLs; local files upload by extension. `--block` adds a JSON content block as is, which is how a 3D result passes back with its `meta`. The prompt is optional when the request has other content.
 
 Role-qualified media values add `meta.role` to that content block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles (`reference_image`, `reference_video`, `reference_audio`) in one request. Seedance 2 reference audio is additive to image or video; audio-only is rejected.
 

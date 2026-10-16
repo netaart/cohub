@@ -1,5 +1,9 @@
 <script lang="ts">
-import type { PublicGenerationDeclaration } from "@cohub/protocol/generation";
+import {
+	type GenerationOperation,
+	type PublicGenerationDeclaration,
+	resolveGenerationOperation,
+} from "@cohub/protocol/generation";
 import type { BoardSceneItem } from "@neta-art/cohub/board";
 import {
 	featuredTaskArtifact,
@@ -9,10 +13,10 @@ import {
 } from "@neta-art/cohub/board";
 import {
 	AudioLines,
+	Box,
 	Image,
 	LoaderCircle,
 	Search,
-	Settings2,
 	Video,
 	X,
 } from "lucide-svelte";
@@ -22,28 +26,39 @@ import { referencePortForKind } from "$lib/board/board-content";
 import {
 	type BoardGenerationMediaType,
 	type BoardGenerationReference,
+	boardGenerationReferenceType,
+	boardGenerationSourceRun,
 	buildBoardGenerationContent,
 	defaultGenerationReferenceRole,
 	generationAspectRatio,
 	generationInputSpec,
+	generationOutputMeta,
 	modelAcceptsGenerationReferences,
 	normalizeGenerationReferenceUrl,
+	operationAcceptsGenerationReferences,
 	parseBoardGenerationReferences,
 	pendingGenerationTaskSnapshot,
 	supportsBoardGenerationComposer,
 	validateBoardGeneration,
-	validateBoardGenerationParameters,
 } from "$lib/board/board-generation";
 import type { BoardEditor } from "$lib/board/editor.svelte";
 import { canUseUserScopedCache, getCacheUserKey } from "$lib/cache/keys";
 import ComposerModelTrigger from "$lib/components/composer/ComposerModelTrigger.svelte";
 import ComposerSubmitButton from "$lib/components/composer/ComposerSubmitButton.svelte";
 import ComposerSurface from "$lib/components/composer/ComposerSurface.svelte";
+import GenerationOperationPicker from "$lib/components/generation/GenerationOperationPicker.svelte";
+import GenerationSettingsButton from "$lib/components/generation/GenerationSettingsButton.svelte";
 import {
 	getComposerKeyAction,
 	isMobileComposerInput,
 } from "$lib/composer-keyboard";
 import { getGenerationModelPickerItems } from "$lib/generation-model-catalog";
+import {
+	declaredGenerationParameters,
+	editableGenerationParameters,
+	type GenerationParameterValues,
+	storedGenerationParameters,
+} from "$lib/generation-parameters";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
@@ -84,8 +99,9 @@ let prompt = $state("");
 let references = $state<BoardGenerationReference[]>([]);
 let models = $state<PublicGenerationDeclaration[]>(initialModels);
 let selectedModelId = $state("");
-let parametersByModel = $state<Record<string, Record<string, unknown>>>({});
+let parametersByModel = $state<Record<string, GenerationParameterValues>>({});
 let modelOpen = $state(false);
+let operationOpen = $state(false);
 let settingsOpen = $state(false);
 let modelQuery = $state("");
 let loadingModels = $state(initialModels.length === 0);
@@ -122,14 +138,15 @@ const supportedModels = $derived(
 const selectedModel = $derived(
 	supportedModels.find((model) => model.model === selectedModelId) ?? null,
 );
-const parameters = $derived.by(() => {
-	const saved = parametersByModel[selectedModelId] ?? {};
-	if (!selectedModel || selectedModel.allowUnknownParameters) return saved;
-	const declared = selectedModel.parameters ?? {};
-	return Object.fromEntries(
-		Object.entries(saved).filter(([name]) => name in declared),
-	);
-});
+const parameters = $derived(
+	declaredGenerationParameters(
+		selectedModel,
+		parametersByModel[selectedModelId] ?? {},
+	),
+);
+const activeModel = $derived(
+	selectedModel ? resolveGenerationOperation(selectedModel, parameters) : null,
+);
 const visibleModels = $derived(
 	getGenerationModelPickerItems(supportedModels, {
 		query: modelQuery,
@@ -137,35 +154,23 @@ const visibleModels = $derived(
 	}),
 );
 const validationError = $derived(
-	validateBoardGeneration({ model: selectedModel, prompt, references }) ??
-		validateBoardGenerationParameters(selectedModel, parameters),
+	validateBoardGeneration({
+		model: selectedModel,
+		prompt,
+		references,
+		parameters,
+		locale,
+	}),
 );
 const parameterEntries = $derived(
-	Object.entries(selectedModel?.parameters ?? {}),
+	editableGenerationParameters(selectedModel, parameters),
 );
 
 function mediaIcon(type: BoardGenerationMediaType) {
 	if (type === "video") return Video;
 	if (type === "audio") return AudioLines;
+	if (type === "3d") return Box;
 	return Image;
-}
-
-function itemMediaType(item: BoardSceneItem): BoardGenerationMediaType | null {
-	if (item.type === "image" || item.type === "video" || item.type === "audio")
-		return item.type;
-	if (item.type === "file") {
-		const mimeType = item.props.snapshot?.mimeType ?? "";
-		if (mimeType.startsWith("image/")) return "image";
-		if (mimeType.startsWith("video/")) return "video";
-		if (mimeType.startsWith("audio/")) return "audio";
-	}
-	if (item.type === "task") {
-		const type = featuredTaskArtifact(item.props.snapshot.artifacts)?.type;
-		return type === "image" || type === "video" || type === "audio"
-			? type
-			: null;
-	}
-	return null;
 }
 
 function itemLabel(item: BoardSceneItem): string {
@@ -181,10 +186,17 @@ function itemLabel(item: BoardSceneItem): string {
 	return m.board_reference({}, { locale });
 }
 
+async function sourceOutputMeta(item: BoardSceneItem, url: string) {
+	const runId = boardGenerationSourceRun(item);
+	if (!runId) return undefined;
+	const detail = await sdk.tasks.get(runId);
+	return generationOutputMeta(detail.run, url);
+}
+
 async function resolveItemReference(
 	item: BoardSceneItem,
 ): Promise<BoardGenerationReference | null> {
-	const type = itemMediaType(item);
+	const type = boardGenerationReferenceType(item);
 	if (!type) return null;
 	let rawUrl: string | undefined | null;
 	if (
@@ -200,13 +212,20 @@ async function resolveItemReference(
 	}
 	const url = rawUrl ? normalizeGenerationReferenceUrl(rawUrl) : null;
 	if (!url) return null;
-	return { id: item.id, type, url, label: itemLabel(item) };
+	const meta = type === "3d" ? await sourceOutputMeta(item, url) : undefined;
+	return {
+		id: item.id,
+		type,
+		url,
+		label: itemLabel(item),
+		...(meta ? { meta } : {}),
+	};
 }
 
 function roleFor(
 	type: BoardGenerationMediaType,
 	current?: string,
-	model: PublicGenerationDeclaration | null = selectedModel,
+	model: PublicGenerationDeclaration | null = activeModel,
 ) {
 	if (!model) return current;
 	const spec = generationInputSpec(model, type);
@@ -216,7 +235,7 @@ function roleFor(
 
 function normalizeReferenceRoles(
 	next: BoardGenerationReference[],
-	model: PublicGenerationDeclaration | null = selectedModel,
+	model: PublicGenerationDeclaration | null = activeModel,
 ) {
 	return next.map((reference) => ({
 		...reference,
@@ -225,7 +244,9 @@ function normalizeReferenceRoles(
 }
 
 async function addSelectedReferences() {
-	const candidates = editor.selectedItems.filter((item) => itemMediaType(item));
+	const candidates = editor.selectedItems.filter((item) =>
+		boardGenerationReferenceType(item),
+	);
 	if (candidates.length === 0) return;
 	resolvingSelection = true;
 	try {
@@ -266,7 +287,10 @@ function updateReferenceRole(id: string, role: string) {
 
 function chooseModel(model: PublicGenerationDeclaration) {
 	selectedModelId = model.model;
-	references = normalizeReferenceRoles(references, model);
+	references = normalizeReferenceRoles(
+		references,
+		resolveGenerationOperation(model, parametersByModel[model.model] ?? {}),
+	);
 	writeStorage(modelStorageKey, model.model);
 	modelOpen = false;
 	modelQuery = "";
@@ -274,19 +298,16 @@ function chooseModel(model: PublicGenerationDeclaration) {
 }
 
 function updateParameter(name: string, value: unknown) {
-	parametersByModel = {
-		...parametersByModel,
-		[selectedModelId]: {
-			...(parametersByModel[selectedModelId] ?? {}),
-			[name]: value,
-		},
-	};
+	const next = { ...(parametersByModel[selectedModelId] ?? {}) };
+	if (value === undefined) delete next[name];
+	else next[name] = value;
+	parametersByModel = { ...parametersByModel, [selectedModelId]: next };
 }
 
-function clearParameter(name: string) {
-	const next = { ...(parametersByModel[selectedModelId] ?? {}) };
-	delete next[name];
-	parametersByModel = { ...parametersByModel, [selectedModelId]: next };
+function chooseOperation(operation: GenerationOperation) {
+	updateParameter("operation", operation.name);
+	references = normalizeReferenceRoles(references);
+	error = null;
 }
 
 function restoreDraft() {
@@ -304,30 +325,16 @@ function restoreDraft() {
 		references = parseBoardGenerationReferences(parsed.references).filter(
 			(reference) => editor.itemById(reference.id) !== null,
 		);
-		if (
-			parsed.parametersByModel &&
-			typeof parsed.parametersByModel === "object" &&
-			!Array.isArray(parsed.parametersByModel)
-		) {
-			const next: Record<string, Record<string, unknown>> = {};
-			for (const [modelId, params] of Object.entries(
-				parsed.parametersByModel,
-			)) {
-				if (params && typeof params === "object" && !Array.isArray(params)) {
-					const filtered: Record<string, unknown> = {};
-					for (const [key, value] of Object.entries(params)) {
-						if (
-							typeof value === "string" ||
-							typeof value === "number" ||
-							typeof value === "boolean"
-						) {
-							filtered[key] = value;
-						}
-					}
-					if (Object.keys(filtered).length > 0) next[modelId] = filtered;
-				}
-			}
-			parametersByModel = next;
+		const stored = parsed.parametersByModel;
+		if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+			parametersByModel = Object.fromEntries(
+				Object.entries(stored)
+					.map(([modelId, params]) => [
+						modelId,
+						storedGenerationParameters(params),
+					])
+					.filter(([, params]) => Object.keys(params).length > 0),
+			);
 		}
 	} catch {
 		writeStorage(draftKey, null);
@@ -375,7 +382,6 @@ async function submit() {
 	error = null;
 	const submittingUserKey = getCacheUserKey();
 	const snapshotModel = selectedModel;
-	const snapshotModelId = snapshotModel.model;
 	const snapshotPrompt = prompt;
 	const snapshotReferences = references;
 	const snapshotParameters = { ...parameters };
@@ -461,16 +467,6 @@ async function submit() {
 	} finally {
 		if (prompt === snapshotPrompt) prompt = "";
 		if (references === snapshotReferences) references = [];
-		const current = parametersByModel[snapshotModelId] ?? {};
-		if (
-			Object.keys(current).length > 0 &&
-			JSON.stringify(current) === JSON.stringify(snapshotParameters)
-		) {
-			parametersByModel = {
-				...parametersByModel,
-				[snapshotModelId]: {},
-			};
-		}
 		persistDraft();
 		submitting = false;
 	}
@@ -513,9 +509,10 @@ function handlePromptKeydown(event: KeyboardEvent) {
 
 function handleKeydown(event: KeyboardEvent) {
 	if (event.key !== "Escape" || isComposingKeyboardEvent(event)) return;
-	if (modelOpen || settingsOpen) {
+	if (modelOpen || operationOpen || settingsOpen) {
 		event.preventDefault();
 		modelOpen = false;
+		operationOpen = false;
 		settingsOpen = false;
 		return;
 	}
@@ -543,7 +540,7 @@ onMount(() => {
 		getGenerationModelPickerItems(supportedModels)[0] ??
 		null;
 	selectedModelId = initialModel?.model ?? "";
-	references = normalizeReferenceRoles(references, initialModel);
+	references = normalizeReferenceRoles(references);
 	void addSelectedReferences();
 	mounted = true;
 	void loadGenerationModels({ refresh: true })
@@ -560,7 +557,7 @@ onMount(() => {
 				);
 				selectedModelId = current?.model ?? "";
 			}
-			references = normalizeReferenceRoles(references, current ?? null);
+			references = normalizeReferenceRoles(references);
 		})
 		.catch(() => {
 			if (!disposed && models.length === 0)
@@ -612,7 +609,7 @@ onDestroy(() => {
 			<div class="reference-strip" aria-label={m.board_generation_refs({}, { locale })}>
 				{#each references as reference (reference.id)}
 					{@const ReferenceIcon = mediaIcon(reference.type)}
-					{@const spec = selectedModel ? generationInputSpec(selectedModel, reference.type) : null}
+					{@const spec = activeModel ? generationInputSpec(activeModel, reference.type) : null}
 					<div class="reference-pill" title={reference.url}>
 						<ReferenceIcon class="h-3.5 w-3.5 shrink-0" />
 						<span class="max-w-28 truncate">{reference.label}</span>
@@ -653,7 +650,7 @@ onDestroy(() => {
 						label={selectedModel?.title ?? selectedModel?.model ?? m.board_model({}, { locale })}
 						expanded={modelOpen}
 						loading={loadingModels && !selectedModel}
-						onclick={() => { modelOpen = !modelOpen; settingsOpen = false; }}
+						onclick={() => { modelOpen = !modelOpen; settingsOpen = false; operationOpen = false; }}
 					/>
 					{#if modelOpen}
 						<div class="popover model-popover">
@@ -682,41 +679,21 @@ onDestroy(() => {
 					{/if}
 				</div>
 
+				<GenerationOperationPicker
+					model={selectedModel}
+					value={typeof parameters.operation === "string" ? parameters.operation : undefined}
+					bind:open={operationOpen}
+					accepts={(operation) => selectedModel !== null && operationAcceptsGenerationReferences(selectedModel, operation, references)}
+					onchange={chooseOperation}
+				/>
+
 				{#if parameterEntries.length > 0}
-					<div class="relative settings-anchor">
-						<button
-							type="button"
-							class="icon-btn"
-							class:icon-btn--active={settingsOpen}
-							title={m.board_generation_settings({}, { locale })}
-							aria-label={m.board_generation_settings({}, { locale })}
-							aria-expanded={settingsOpen}
-							onclick={() => { settingsOpen = !settingsOpen; modelOpen = false; }}
-						>
-							<Settings2 class="h-3.5 w-3.5" />
-						</button>
-						{#if settingsOpen}
-							<div class="popover settings-popover">
-								{#each parameterEntries as [name, spec] (name)}
-									<label class="parameter-row" title={spec.description}>
-										<span>{name.replaceAll("_", " ")}</span>
-										{#if spec.type === "boolean"}
-											<input type="checkbox" checked={(parameters[name] ?? spec.default) === true} onchange={(event) => updateParameter(name, event.currentTarget.checked)} />
-										{:else if spec.type === "string" && spec.enum}
-											<select value={String(parameters[name] ?? spec.default ?? "")} onchange={(event) => event.currentTarget.value ? updateParameter(name, event.currentTarget.value) : clearParameter(name)}>
-												<option value="">{m.board_auto({}, { locale })}</option>
-												{#each spec.enum as value (value)}<option value={value}>{value}</option>{/each}
-											</select>
-										{:else if spec.type === "number" || spec.type === "integer"}
-											<input type="number" min={spec.min} max={spec.max} step={spec.type === "integer" ? 1 : "any"} value={String(parameters[name] ?? spec.default ?? "")} placeholder={spec.default === undefined ? m.board_auto({}, { locale }) : String(spec.default)} oninput={(event) => event.currentTarget.value ? updateParameter(name, Number(event.currentTarget.value)) : clearParameter(name)} />
-										{:else}
-											<input value={String(parameters[name] ?? spec.default ?? "")} placeholder={spec.default === undefined ? m.board_auto({}, { locale }) : String(spec.default)} oninput={(event) => event.currentTarget.value ? updateParameter(name, event.currentTarget.value) : clearParameter(name)} />
-										{/if}
-									</label>
-								{/each}
-							</div>
-						{/if}
-					</div>
+					<GenerationSettingsButton
+						entries={parameterEntries}
+						values={parameters}
+						bind:open={settingsOpen}
+						onchange={updateParameter}
+					/>
 				{/if}
 			</div>
 
@@ -813,18 +790,18 @@ onDestroy(() => {
 		padding: 2px 4px 0;
 	}
 	.footer-tools { display: flex; min-width: 0; flex: 1; align-items: center; gap: 4px; }
-	.icon-btn, .mini-btn {
+	.mini-btn {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
+		width: 20px;
+		height: 20px;
 		border: 1px solid transparent;
+		border-radius: 4px;
 		color: var(--text-secondary);
 		transition: background-color 100ms ease, color 100ms ease, border-color 100ms ease;
 	}
-	.icon-btn:hover, .mini-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.icon-btn { width: 28px; height: 28px; border-radius: 6px; }
-	.icon-btn--active { background: var(--brand-bg); color: var(--brand-muted-fg); }
-	.mini-btn { width: 20px; height: 20px; border-radius: 4px; }
+	.mini-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.popover {
 		position: absolute;
 		bottom: calc(100% + 7px);
@@ -869,50 +846,12 @@ onDestroy(() => {
 	.model-option--active { background: var(--brand-bg); color: var(--brand-muted-fg); }
 	.model-option:disabled { cursor: not-allowed; opacity: 0.38; }
 	.empty-row { padding: 14px 8px; text-align: center; font-size: 11px; color: var(--text-tertiary); }
-	.settings-popover {
-		left: 0;
-		width: min(300px, calc(100vw - 32px));
-		max-height: 310px;
-		overflow-y: auto;
-		padding: 5px;
-	}
-	.parameter-row {
-		display: grid;
-		min-height: 34px;
-		grid-template-columns: minmax(0, 1fr) minmax(90px, 140px);
-		align-items: center;
-		gap: 10px;
-		padding: 3px 5px;
-		font-size: 11px;
-		text-transform: capitalize;
-		color: var(--text-secondary);
-	}
-	.parameter-row input:not([type="checkbox"]), .parameter-row select {
-		min-width: 0;
-		height: 26px;
-		border: 1px solid var(--border-subtle);
-		border-radius: 5px;
-		background: var(--bg-input);
-		padding: 0 6px;
-		font-size: 10px;
-		color: var(--text-primary);
-		outline: none;
-	}
-	.parameter-row input[type="checkbox"] { justify-self: end; }
 	@media (pointer: coarse) {
 		.generation-wrap { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
-		.icon-btn { width: 36px; height: 36px; }
 		.composer-footer { min-height: 48px; }
 		.mini-btn { width: 28px; height: 28px; }
 	}
 	@media (max-width: 520px) {
 		.generation-wrap { width: calc(100% - 16px); }
-		.settings-anchor { position: static; }
-		.settings-popover {
-			left: 8px;
-			right: 8px;
-			bottom: 48px;
-			width: auto;
-		}
 	}
 </style>

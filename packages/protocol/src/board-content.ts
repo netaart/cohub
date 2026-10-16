@@ -5,6 +5,7 @@ export const BOARD_CONTENT_KINDS = [
   "image",
   "video",
   "audio",
+  "3d",
   "file",
   "json",
   "collection",
@@ -28,7 +29,7 @@ export const BoardNodeCapabilitySchema = z.object({
 }).strict();
 export type BoardNodeCapability = z.infer<typeof BoardNodeCapabilitySchema>;
 
-const mediaOutputs = (kind: "image" | "video" | "audio") => [{ id: kind, kind }];
+const mediaOutputs = (kind: "image" | "video" | "audio" | "3d") => [{ id: kind, kind }];
 
 /** Shared semantic capabilities. Presentation-only shapes intentionally have no ports yet. */
 export const BOARD_NODE_CAPABILITIES: Record<string, BoardNodeCapability> = {
@@ -43,6 +44,7 @@ export const BOARD_NODE_CAPABILITIES: Record<string, BoardNodeCapability> = {
       { id: "image-references", kind: "image", role: "reference", multiple: true },
       { id: "video-references", kind: "video", role: "reference", multiple: true },
       { id: "audio-references", kind: "audio", role: "reference", multiple: true },
+      { id: "3d-references", kind: "3d", role: "reference", multiple: true },
     ],
     outputs: [{ id: "artifacts", kind: "collection", multiple: true }],
   },

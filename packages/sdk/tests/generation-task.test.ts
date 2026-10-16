@@ -167,6 +167,31 @@ test("never gives a video frame to audio listed before the video", () => {
 	);
 });
 
+test("projects 3D outputs with their format and the task's still", () => {
+	const meta = { task_id: "task_meshy", task_type: "text-to-3d" };
+	const still = "https://cdn.example.com/preview.png";
+	const view = toGenerationTaskView(
+		taskRun({
+			result: {
+				output: [
+					{ type: "3d", source: { url: "https://cdn.example.com/model.glb" }, meta: { ...meta, format: "glb" } },
+					{ type: "3d", source: { url: "https://cdn.example.com/model.fbx" }, meta },
+					{ type: "image", source: { url: still }, meta },
+					{ type: "image", source: { url: "https://cdn.example.com/texture.png" } },
+				],
+			},
+		}),
+	);
+	assert.deepEqual(
+		view.outputs.map((output) => [output.index, output.type, output.format, output.previewUrl]),
+		[
+			[0, "3d", "glb", still],
+			[1, "3d", "fbx", still],
+			[3, "image", null, null],
+		],
+	);
+});
+
 test("resolves remote and inline output sources", () => {
 	const result = {
 		output: [

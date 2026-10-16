@@ -30,6 +30,7 @@ const filters = $derived<{ id: Filter; label: string }[]>([
 	{ id: "image", label: m.media_filter_image({}, { locale }) },
 	{ id: "video", label: m.media_filter_video({}, { locale }) },
 	{ id: "audio", label: m.media_filter_audio({}, { locale }) },
+	{ id: "3d", label: m.media_filter_3d({}, { locale }) },
 ]);
 const tasks = $derived(feed?.tasks ?? []);
 const matches = $derived(

@@ -1,6 +1,8 @@
 import { parseBoardMediaSource } from "@cohub/protocol/board-model";
+import { featuredTaskArtifact, taskArtifactModelFormat } from "@cohub/protocol";
 import { type ModelFormat, modelFormatForPath } from "@cohub/protocol/fs";
 import type { BoardSceneItem } from "./scene.js";
+import { fileStem } from "./file-snapshot.js";
 
 const IMAGE_EXTENSIONS = new Set([
 	"png",
@@ -100,4 +102,42 @@ export function isBoardModelItem(
 		item?.type === "file" &&
 		boardModelFormat(item.props.src, item.props.snapshot?.mimeType) !== null
 	);
+}
+
+/** A 3D model a Board item shows: its own file, or a generation result it features. */
+export type BoardModelTarget = {
+	/** Stable identity for asset caches. */
+	key: string;
+	src: string;
+	format: ModelFormat;
+	title: string;
+	size?: number;
+};
+
+/** The model an item shows in place, or null when it shows none. */
+export function boardModelTarget(
+	item: BoardSceneItem | null | undefined,
+): BoardModelTarget | null {
+	if (item?.type === "file") {
+		const { src, snapshot } = item.props;
+		const format = boardModelFormat(src, snapshot?.mimeType);
+		if (!format) return null;
+		return {
+			key: `${src}:${snapshot?.mtimeMs ?? ""}`,
+			src,
+			format,
+			title: snapshot?.title || fileStem(src),
+			...(snapshot?.size === undefined ? {} : { size: snapshot.size }),
+		};
+	}
+	if (item?.type !== "task") return null;
+	const artifact = featuredTaskArtifact(item.props.snapshot.artifacts);
+	const format = taskArtifactModelFormat(artifact);
+	if (artifact?.type !== "3d" || !format) return null;
+	return {
+		key: artifact.url,
+		src: artifact.url,
+		format,
+		title: artifact.title || fileStem(artifact.url),
+	};
 }

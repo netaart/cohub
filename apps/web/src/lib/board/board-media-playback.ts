@@ -1,7 +1,7 @@
 import {
 	type BoardAssetSource,
 	type BoardSceneItem,
-	isBoardModelItem,
+	boardModelTarget,
 	playableBoardMedia,
 } from "@neta-art/cohub/board";
 
@@ -23,7 +23,7 @@ export function opensInPlace(
 	assetSource: BoardAssetSource,
 ): boolean {
 	return (
-		isBoardModelItem(item) ||
+		boardModelTarget(item) !== null ||
 		playableBoardMedia(item ?? null, assetSource) !== null
 	);
 }

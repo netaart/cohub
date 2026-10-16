@@ -1,4 +1,4 @@
-import { isBoardModelItem } from "../model/media.js";
+import { boardModelTarget, isBoardModelItem } from "../model/media.js";
 import type { BoardSceneItem } from "../model/scene.js";
 import { degToRad, rotatePointAround, type WorldPoint, worldPoint } from "../model/geometry.js";
 import { audioKeyCenter } from "./renderers/audio-card-renderer.js";
@@ -18,7 +18,7 @@ export function mediaPlayBadgeVisible(
 ): boolean {
 	if (!options.materialized) return false;
 	if (item.type === "video" || item.type === "audio") return true;
-	if (isBoardModelItem(item)) return boardCardDetailed(zoom);
+	if (boardModelTarget(item)) return boardCardDetailed(zoom);
 	if (item.type !== "task" || !boardCardDetailed(zoom)) return false;
 	const artifact = featuredTaskArtifact(item.props.snapshot.artifacts);
 	if (artifact?.type === "audio") return true;

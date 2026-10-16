@@ -78,6 +78,7 @@ function mediaItem(item: MediaGridItem): MediaItem {
 		resolve: output.url ? undefined : () => resolveSource(item),
 		alt: output.title ?? task.prompt ?? undefined,
 		poster: output.previewUrl ?? undefined,
+		format: output.format ?? undefined,
 		title: task.prompt ?? undefined,
 		subtitle: task.model ?? undefined,
 		mimeType: output.mimeType ?? undefined,

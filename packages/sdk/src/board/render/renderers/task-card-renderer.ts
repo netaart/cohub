@@ -3,9 +3,10 @@ import {
 	BOARD_FONT_STACK,
 	BOARD_MONO_FONT_STACK,
 } from "@cohub/protocol/board-constants";
-import { type BoardTaskItem, featuredTaskArtifact } from "@cohub/protocol";
+import { type BoardTaskItem, featuredTaskArtifact, taskArtifactModelFormat } from "@cohub/protocol";
 import { Container, FillGradient, Graphics, Sprite, Text } from "pixi.js";
 import { drawAudioWaveform } from "../audio-waveform.js";
+import { drawModelKey } from "./media-key.js";
 import {
 	boardCardDetailed,
 	syncTextResolution,
@@ -81,6 +82,11 @@ function previewKindFor(
 	if (artifact.type === "image" || artifact.type === "video") return "texture";
 	if (artifact.type === "audio") {
 		return artifact.previewUrl ? "texture" : "waveform";
+	}
+	if (artifact.type === "3d") {
+		return taskArtifactModelFormat(artifact) || artifact.previewUrl
+			? "texture"
+			: "empty";
 	}
 	return artifact.textExcerpt ? "text" : "empty";
 }
@@ -464,6 +470,19 @@ function sync(
 				(artifact?.type === "video" && texture))
 		) {
 			drawPlayBadge(parts.previewArt, frame, context);
+		}
+		if (full && texture && taskArtifactModelFormat(artifact)) {
+			const radius = Math.min(
+				PLAY_BADGE_RADIUS,
+				Math.max(8, Math.min(frame.width, frame.height) * 0.16),
+			);
+			drawModelKey(
+				parts.previewArt,
+				frame.x + frame.width / 2,
+				frame.y + frame.height / 2,
+				radius,
+				context,
+			);
 		}
 		if (surface) {
 			const markY = frame.y + frame.height / 2 - (full && label ? 18 : 0);

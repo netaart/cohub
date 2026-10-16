@@ -8,11 +8,11 @@ import {
 	type BoardMediaItemKind,
 	boardItemOrigin,
 	boardModelFormat,
+	boardModelTarget,
 	boardOriginKey,
 	createMediaBoardItem,
 	createTaskResultItems,
 	inferBoardMediaKind,
-	isBoardModelItem,
 	normalizeBoardRemoteUrl,
 	parseBoardDocument,
 	parseBoardMediaSource,
@@ -368,7 +368,7 @@ function addSelectionToGeneration() {
 function openInPlace(itemId: string) {
 	const item = editor.itemById(itemId);
 	if (!opensInPlace(item, resolvedAssetSource)) return;
-	const model = isBoardModelItem(item);
+	const model = boardModelTarget(item ?? null) !== null;
 	modelId = model ? itemId : null;
 	playingId = model ? null : itemId;
 }
@@ -1031,6 +1031,7 @@ onDestroy(() => {
 				itemId={modelId}
 				{isMobile}
 				onOpenFile={openMediaSource}
+				{onOpenTask}
 				onClose={closeInPlace}
 			/>
 		{/if}

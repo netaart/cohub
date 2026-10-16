@@ -18,6 +18,7 @@ const {
 	itemId,
 	isMobile = false,
 	onOpenFile,
+	onOpenTask,
 	onClose,
 }: {
 	editor: BoardEditor;
@@ -25,6 +26,7 @@ const {
 	itemId: string;
 	isMobile?: boolean;
 	onOpenFile?: (src: string) => void;
+	onOpenTask?: (taskRunId: string) => void;
 	onClose: () => void;
 } = $props();
 
@@ -57,11 +59,25 @@ $effect(() => {
 	if (!source) onClose();
 });
 
-const openLabel = $derived(
-	item?.type === "file" && /^https?:/i.test(item.props.src)
-		? m.board_open_source({}, { locale })
-		: m.board_open_file({}, { locale }),
-);
+const openAction = $derived.by(() => {
+	if (item?.type === "task" && onOpenTask) {
+		const { taskRunId } = item.props;
+		return {
+			label: m.board_open_task({}, { locale }),
+			run: () => onOpenTask(taskRunId),
+		};
+	}
+	if (item?.type === "file" && onOpenFile) {
+		const { src } = item.props;
+		return {
+			label: /^https?:/i.test(src)
+				? m.board_open_source({}, { locale })
+				: m.board_open_file({}, { locale }),
+			run: () => onOpenFile(src),
+		};
+	}
+	return null;
+});
 
 function stop(event: Event) {
 	event.stopPropagation();
@@ -90,14 +106,13 @@ function stopMenu(event: Event) {
 	>
 		<div class="board-model-header">
 			<div class="board-model-title" title={source.name}>{source.name}</div>
-			{#if onOpenFile && item.type === "file"}
-				{@const src = item.props.src}
+			{#if openAction}
 				<button
 					type="button"
 					class="board-model-action"
-					title={openLabel}
-					aria-label={openLabel}
-					onclick={() => onOpenFile(src)}
+					title={openAction.label}
+					aria-label={openAction.label}
+					onclick={openAction.run}
 				>
 					<ExternalLink size={14} strokeWidth={2} />
 				</button>

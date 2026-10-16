@@ -1,6 +1,7 @@
 import {
 	asRecord,
 	blockDurationMs,
+	blockFormat,
 	blockMimeType,
 	blockNaturalSize,
 	blockPreviewUrl,
@@ -15,7 +16,7 @@ import {
 import type { TaskRunRecord } from "./types.js";
 
 /** Media a generation delivers; text blocks (revised prompts, refusals) are not outputs. */
-export type GenerationOutputType = "image" | "video" | "audio";
+export type GenerationOutputType = "image" | "video" | "audio" | "3d";
 
 export type GenerationTaskOutput = {
 	index: number;
@@ -25,6 +26,8 @@ export type GenerationTaskOutput = {
 	previewUrl: string | null;
 	title: string | null;
 	mimeType: string | null;
+	/** File format of a 3D output, such as `glb` or `fbx`. */
+	format: string | null;
 	width: number | null;
 	height: number | null;
 	durationMs: number | null;
@@ -54,15 +57,18 @@ function isDeferred(block: Record<string, unknown>) {
 	return block.deferredBase64 === true || asRecord(block.source)?.deferredBase64 === true;
 }
 
-const MEDIA_TYPE_PATTERN = /^(image|video|audio)\/[\w.+-]+$/;
+const MEDIA_TYPE_PATTERN = /^(image|video|audio|model)\/[\w.+-]+$/;
 const DEFAULT_MEDIA_TYPES: Record<string, string> = {
 	image: "image/png",
 	video: "video/mp4",
 	audio: "audio/mpeg",
+	"3d": "model/gltf-binary",
 };
 
 function outputType(value: unknown): GenerationOutputType | null {
-	return value === "image" || value === "video" || value === "audio" ? value : null;
+	return value === "image" || value === "video" || value === "audio" || value === "3d"
+		? value
+		: null;
 }
 
 /**
@@ -90,6 +96,7 @@ function projectOutputs(run: TaskRunRecord): GenerationTaskOutput[] {
 				previewUrl: blockPreviewUrl(block) ?? coverUrl(index) ?? null,
 				title: blockTitle(block) ?? null,
 				mimeType: blockMimeType(block) ?? null,
+				format: type === "3d" ? (blockFormat(block) ?? null) : null,
 				width: size.naturalWidth ?? null,
 				height: size.naturalHeight ?? null,
 				durationMs: blockDurationMs(block) ?? null,

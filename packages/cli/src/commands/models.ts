@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import {
   filterDiscoverableGenerationModels,
   filterGenerationDeclarationsByPolicy,
+  generationOperations,
   getAllowedGenerationModelIds,
   parseGenerationPolicyFromEnv,
   type PublicGenerationDeclaration,
@@ -9,12 +10,13 @@ import {
 import { createClient } from "../client.js";
 import { table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
 
-type MultimodalModelSummary = Pick<PublicGenerationDeclaration, "model" | "title" | "description" | "pricing">;
+type MultimodalModelSummary = Pick<PublicGenerationDeclaration, "model" | "title" | "category" | "description" | "pricing">;
 
 export function toMultimodalModelSummary(model: PublicGenerationDeclaration): MultimodalModelSummary {
   return {
     model: model.model,
     ...(model.title ? { title: model.title } : {}),
+    ...(model.category ? { category: model.category } : {}),
     ...(model.description ? { description: model.description } : {}),
     // Keep pricing structured for `--json`; the human table formats it separately.
     ...(model.pricing ? { pricing: model.pricing } : {}),
@@ -140,28 +142,57 @@ function formatContentSpec(spec: GenerationContentSpec): string {
 
 function formatParameter(name: string, spec: GenerationParameterSpec): string[] {
   const lines = [`${name}`];
-  const details: string[] = [`type: ${spec.type}`];
+  const details: string[] = [spec.type === "array" ? `type: array of ${spec.items.type}` : `type: ${spec.type}`];
   if (spec.optional) details.push("optional");
-  if ("default" in spec && spec.default !== undefined) details.push(`default: ${String(spec.default)}`);
-  if ("min" in spec && typeof spec.min === "number") details.push(`min: ${spec.min}`);
-  if ("max" in spec && typeof spec.max === "number") details.push(`max: ${spec.max}`);
-  if ("enum" in spec && spec.enum?.length) details.push(`values: ${spec.enum.join(", ")}`);
+  if ("default" in spec && spec.default !== undefined) details.push(`default: ${JSON.stringify(spec.default)}`);
+  if (spec.type === "array") {
+    const { items } = spec;
+    if (typeof spec.min === "number") details.push(`min items: ${spec.min}`);
+    if (typeof spec.max === "number") details.push(`max items: ${spec.max}`);
+    if (spec.unique) details.push("unique");
+    if (items.type === "string" && items.enum?.length) details.push(`values: ${items.enum.join(", ")}`);
+    if (items.type === "integer" && typeof items.min === "number") details.push(`item min: ${items.min}`);
+    if (items.type === "integer" && typeof items.max === "number") details.push(`item max: ${items.max}`);
+  } else {
+    if ("min" in spec && typeof spec.min === "number") details.push(`min: ${spec.min}`);
+    if ("max" in spec && typeof spec.max === "number") details.push(`max: ${spec.max}`);
+    if ("enum" in spec && spec.enum?.length) details.push(`values: ${spec.enum.join(", ")}`);
+  }
   lines.push(`  ${details.join("; ")}`);
   if (spec.description) lines.push(`  ${spec.description}`);
-  if ("examples" in spec && spec.examples?.length) lines.push(`  examples: ${spec.examples.map(String).join(", ")}`);
+  if ("examples" in spec && spec.examples?.length) lines.push(`  examples: ${spec.examples.map((example) => JSON.stringify(example)).join(", ")}`);
   return lines;
+}
+
+function parameterLines(parameters: PublicGenerationDeclaration["parameters"]): string[] {
+  return Object.entries(parameters ?? {}).flatMap(([name, spec]) => formatParameter(name, spec));
+}
+
+/** Each operation's inputs and parameters, which apply on top of the model's own when `operation` selects it. */
+export function operationLines(model: PublicGenerationDeclaration): string[] {
+  return generationOperations(model).flatMap((operation) => {
+    const indent = (line: string) => `  ${line}`;
+    const inputs = (operation.content?.input ?? []).map(formatContentSpec);
+    const parameters = parameterLines(operation.parameters);
+    return [
+      `${operation.name}${operation.title ? ` — ${operation.title}` : ""}`,
+      ...(operation.description ? [indent(operation.description)] : []),
+      ...(inputs.length > 0 ? [indent("Input"), ...inputs.map((line) => indent(indent(line)))] : []),
+      ...(parameters.length > 0 ? [indent("Parameters"), ...parameters.map((line) => indent(indent(line)))] : []),
+    ];
+  });
 }
 
 function printMultimodalModel(model: PublicGenerationDeclaration): void {
   console.log(model.title ?? model.model);
   printSection("Model", [model.model]);
+  if (model.category) printSection("Category", [model.category]);
   if (model.description) printSection("Description", [model.description]);
   if (model.pricing) printSection("Pricing", [formatGenerationPrice(model.pricing)]);
 
   printSection("Input", model.content.input.map(formatContentSpec));
-
-  const parameterLines = Object.entries(model.parameters ?? {}).flatMap(([name, spec]) => formatParameter(name, spec));
-  printSection("Parameters", parameterLines);
+  printSection("Parameters", parameterLines(model.parameters));
+  printSection("Operations", operationLines(model));
 
   const examples = model.examples ?? [];
   printSection("Examples", examples.map((example, index) => {
@@ -206,6 +237,7 @@ Examples:
           table(models as unknown as Row[], [
             { key: "model", label: "Model" },
             { key: "title", label: "Title" },
+            { key: "category", label: "Category" },
             {
               key: "pricing",
               label: "Price",

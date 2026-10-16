@@ -3,6 +3,7 @@ import { imageVariantUrl, mediaPreviewCandidates } from "@neta-art/cohub/media";
 import {
 	AlertCircle,
 	AudioLines,
+	Box,
 	ChevronLeft,
 	ChevronRight,
 	Download,
@@ -34,11 +35,17 @@ import {
 	IMAGE_ZOOM_STEP,
 } from "$lib/gestures/image-gesture";
 import { getLocale } from "$lib/i18n/locale.svelte";
+import { createLazyModuleLoader } from "$lib/lazy-module";
 import { screenVariantSize } from "$lib/media/media-info";
 import { downloadMedia } from "$lib/media-download";
+import { remoteModelSource } from "$lib/model3d/remote";
 import { EASE_OUT } from "$lib/motion.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import MediaImage from "$lib/resource-kit/MediaImage.svelte";
+
+const loadModelPreview = createLazyModuleLoader(
+	() => import("$lib/components/ModelPreview.svelte"),
+);
 
 const SLIDE_GAP_PX = 16;
 const SETTLE_MS = 220;
@@ -166,7 +173,7 @@ function openDetails(item: MediaItem) {
 function canSwipeFrom(event: PointerEvent) {
 	if (zoomed) return false;
 	const target = event.target instanceof Element ? event.target : null;
-	if (target?.closest("button, a, input")) return false;
+	if (target?.closest("button, a, input, canvas")) return false;
 	const video = target?.closest("video");
 	return (
 		!video ||
@@ -413,6 +420,31 @@ $effect(() => {
 			class="max-h-full max-w-full"
 			style:aspect-ratio={aspect(item)}
 		></video>
+	{:else if active && item.type === "3d"}
+		{@const model = remoteModelSource({ url: source.src, name: item.filename ?? item.alt ?? "model", format: item.format })}
+		{#if model}
+			<div class="model-slide" data-lightbox-content>
+				{#await loadModelPreview()}
+					<Loader2 class="m-auto h-6 w-6 animate-spin text-text-tertiary" />
+				{:then module}
+					{@const ModelPreview = module.default}
+					<ModelPreview source={model} downloadUrl={source.src} downloadName={model.name} />
+				{:catch}
+					{@render failed()}
+				{/await}
+			</div>
+		{:else}
+			<div class="flex max-h-full max-w-full flex-col items-center gap-3">
+				<MediaImage candidates={previews(item, source.src)} alt={item.alt ?? ""} loading="eager" class="max-h-[70vh] max-w-full object-contain select-none">
+					{#snippet fallback()}
+						<Box class="h-8 w-8 text-overlay-control-text opacity-50" />
+					{/snippet}
+				</MediaImage>
+				<p class="px-6 text-center text-[13px] leading-5 text-overlay-control-text" data-lightbox-content>
+					{m.model3d_format_unavailable({ format: (item.format ?? "").toUpperCase() }, { locale })}
+				</p>
+			</div>
+		{/if}
 	{:else}
 		<!-- Neighbours show stills only: no decoders, and the image variant is
 		     the one the active slide reuses from cache. Eager, since slides sit
@@ -426,6 +458,8 @@ $effect(() => {
 			{#snippet fallback()}
 				{#if item.type === "video"}
 					<Film class="h-8 w-8 text-overlay-control-text opacity-50" />
+				{:else if item.type === "3d"}
+					<Box class="h-8 w-8 text-overlay-control-text opacity-50" />
 				{:else}
 					<ImageIcon class="h-8 w-8 text-overlay-control-text opacity-50" />
 				{/if}
@@ -581,6 +615,16 @@ $effect(() => {
 		top: 50%;
 		z-index: 10;
 		transform: translateY(-50%);
+	}
+
+	.model-slide {
+		display: flex;
+		width: min(100% - 32px, 64rem);
+		height: 100%;
+		overflow: hidden;
+		border-radius: 12px;
+		background: var(--bg-primary);
+		touch-action: none;
 	}
 
 	.pill {

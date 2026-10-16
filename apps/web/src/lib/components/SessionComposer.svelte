@@ -15,7 +15,7 @@ import {
 	Plus,
 	X,
 } from "lucide-svelte";
-import { flushSync, onMount } from "svelte";
+import { flushSync, onMount, type Snippet } from "svelte";
 import ComposerHarnessPicker from "$lib/components/composer/ComposerHarnessPicker.svelte";
 import ComposerModelTrigger from "$lib/components/composer/ComposerModelTrigger.svelte";
 import ComposerSubmitButton from "$lib/components/composer/ComposerSubmitButton.svelte";
@@ -150,6 +150,8 @@ type Props = {
 	onremoveattachment?: (id: string) => void;
 	onremoveviewport?: (id: string) => void;
 	onModelSelect?: () => void;
+	/** Controls shown after the model control, such as Create mode generation settings. */
+	footerTools?: Snippet;
 };
 
 let {
@@ -191,6 +193,7 @@ let {
 	onremoveattachment,
 	onremoveviewport,
 	onModelSelect,
+	footerTools,
 }: Props = $props();
 
 const locale = $derived(getLocale());
@@ -1663,6 +1666,7 @@ $effect(() => {
 									onclick={() => onModelSelect?.()}
 								/>
 							{/if}
+							{@render footerTools?.()}
 						</div>
 
 						<div class="flex items-center gap-2">

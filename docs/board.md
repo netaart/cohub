@@ -84,7 +84,7 @@ without an extension, set the item `type` explicitly. Optional `snapshot` facts
 (title, MIME type, natural dimensions and duration) give an immediate preview.
 The Web editor supports pasting media URLs, dropping links, and **Add from link**
 on desktop and mobile. Task cards offer **Add results to board**, which lays out
-their media results as items that keep their URLs.
+their media and 3D results as items that keep their URLs.
 
 A `file` item whose source is a 3D model (`.glb`, `.gltf`, `.stl` or `.obj`) shows
 a still of the model; its corner key, double-click or Enter opens an orbitable view
@@ -130,12 +130,16 @@ When a run finishes, the worker writes its final snapshot onto every Board in
 the run's Space that shows it, one version per Board, attributed to the task
 (`source.via = "task"`). Items deleted meanwhile stay deleted. When the first
 result is a sized image or video, the card takes its aspect ratio at its
-current width, top edge in place; content below may be overlapped. Clients
+current width, top edge in place; content below may be overlapped. A card
+whose first result is a 3D model is square and shows the still of its task;
+for GLB and glTF its center key or Enter opens the orbitable view, and
+double-click still opens the run. Clients
 draw "queued", "generating" and the elapsed time from realtime task events
 without writing the document.
 
-Results laid out from a card become ordinary media items that keep an
-`origin` back to the run. The task detail lists the Boards that show a run.
+Results laid out from a card become ordinary items that keep an origin back
+to the run: media items in `props.origin`, text and 3D model `file` items in
+`metadata.origin`. The task detail lists the Boards that show a run.
 
 ### Plain containers
 
