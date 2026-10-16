@@ -27,10 +27,7 @@ import {
   TOOL_CALL_LOOP_GUARD_PROMPT,
   TOOL_CALL_LOOP_GUARD_THRESHOLD,
 } from "./tool-call-loop-guard.js";
-
 import { isRetryableProviderError } from "./provider-errors.js";
-
-export { isRetryableProviderErrorMessage } from "./provider-errors.js";
 
 export type CohubAgentSessionEvent = AgentEvent;
 

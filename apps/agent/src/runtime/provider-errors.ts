@@ -10,7 +10,7 @@ function getHttpErrorStatus(errorMessage: string): number | null {
   return status ? Number(status) : null;
 }
 
-// null 表示仅凭错误文本无法判定，交给 pi-ai 继续分类。
+// null: inconclusive from the text alone; defer to pi-ai.
 function classifyProviderErrorMessage(errorMessage: string): boolean | null {
   if (COHUB_RETRYABLE_ERROR_OVERRIDE_PATTERN.test(errorMessage)) return true;
   if (COHUB_NON_RETRYABLE_ERROR_PATTERN.test(errorMessage)) return false;
@@ -21,11 +21,6 @@ function classifyProviderErrorMessage(errorMessage: string): boolean | null {
   if (COHUB_RETRYABLE_ERROR_PATTERN.test(errorMessage)) return true;
 
   return null;
-}
-
-export function isRetryableProviderErrorMessage(errorMessage: string): boolean {
-  if (!errorMessage) return false;
-  return classifyProviderErrorMessage(errorMessage) === true;
 }
 
 export function isRetryableProviderError(message: AssistantMessage | undefined): boolean {
