@@ -15,6 +15,7 @@ test("strips inline generation inputs and outputs for list views", () => {
           { type: "text", text: "prompt" },
           { type: "image", source: { type: "base64", mediaType: "image/png", data: "AAAA" }, meta: { role: "first_frame" } },
           { type: "image", source: url },
+          { type: "3d", source: { type: "base64", mediaType: "model/gltf-binary", data: "CCCC" } },
         ],
       },
     },
@@ -26,6 +27,7 @@ test("strips inline generation inputs and outputs for list views", () => {
     { type: "text", text: "prompt" },
     { type: "image", source: { type: "base64", mediaType: "image/png", deferredBase64: true }, meta: { role: "first_frame" } },
     { type: "image", source: url },
+    { type: "3d", source: { type: "base64", mediaType: "model/gltf-binary", deferredBase64: true } },
   ]);
   assert.deepEqual(listed.result.output, [
     { type: "video", source: { type: "base64", mediaType: "video/mp4", deferredBase64: true } },

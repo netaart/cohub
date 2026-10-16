@@ -31,6 +31,10 @@ test("resolveGenerationUsageType prefers strict adapter families", () => {
 		resolveGenerationUsageType({ adapterType: "kling.videoGenerations" }),
 		COHUB_BILLING_USAGE_TYPES.generationVideo,
 	);
+	assert.equal(
+		resolveGenerationUsageType({ adapterType: "meshy.tasks", contentTypes: ["text", "image"] }),
+		COHUB_BILLING_USAGE_TYPES.generation3d,
+	);
 });
 
 test("ambiguous adapters prefer content modality over adapter default", () => {
@@ -66,6 +70,14 @@ test("resolveGenerationUsageType falls back to content types for unknown adapter
 		COHUB_BILLING_USAGE_TYPES.generationMusic,
 	);
 	assert.equal(
+		resolveGenerationUsageType({ contentTypes: ["text", "image", "3d"] }),
+		COHUB_BILLING_USAGE_TYPES.generation3d,
+	);
+	assert.equal(
+		resolveGenerationUsageType({ contentTypes: ["3d", "video"] }),
+		COHUB_BILLING_USAGE_TYPES.generationVideo,
+	);
+	assert.equal(
 		resolveGenerationUsageType({ contentTypes: ["text"] }),
 		COHUB_BILLING_USAGE_TYPES.generation,
 	);
@@ -88,6 +100,7 @@ test("generationUsageKind maps ledger types onto gate kinds", () => {
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generationImage), "generation.image");
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generationVideo), "generation.video");
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generationMusic), "generation.music");
+	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generation3d), "generation.3d");
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generation), "generation");
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generationLlm), "llm.turn");
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generationLlmRaw), "llm.raw_completion");

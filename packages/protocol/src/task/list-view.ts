@@ -1,5 +1,5 @@
 const INLINE_KEYS = ["data", "base64", "contentBase64"] as const;
-const MEDIA_TYPES = new Set(["image", "video", "audio"]);
+const MEDIA_TYPES = new Set(["image", "video", "audio", "3d"]);
 
 type JsonRecord = Record<string, unknown>;
 

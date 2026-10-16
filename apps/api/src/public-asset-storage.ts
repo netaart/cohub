@@ -92,6 +92,10 @@ const CHAT_MIME_EXTENSIONS: Record<string, string> = {
   "audio/wav": "wav",
   "video/mp4": "mp4",
   "video/webm": "webm",
+  "model/gltf-binary": "glb",
+  "model/gltf+json": "gltf",
+  "model/obj": "obj",
+  "model/stl": "stl",
 };
 
 
@@ -156,11 +160,11 @@ const normalizeSessionImageMimeType = (mimeType: unknown) => {
   return value;
 };
 
-/** Generation inputs are media a provider fetches by URL; active types were already neutralized. */
+/** Generation inputs are media and 3D models a provider fetches by URL; active types were already neutralized. */
 const normalizeGenerationInputMimeType = (mimeType: unknown) => {
   const value = normalizeChatMimeType(mimeType);
-  if (!/^(image|video|audio)\//.test(value)) {
-    throw new PublicAssetValidationError("generation inputs must be image, video, or audio");
+  if (!/^(image|video|audio|model)\//.test(value)) {
+    throw new PublicAssetValidationError("generation inputs must be image, video, audio, or 3D model files");
   }
   return value;
 };

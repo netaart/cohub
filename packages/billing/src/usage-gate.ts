@@ -11,6 +11,7 @@ export type BillingUsageKind =
   | "generation.image"
   | "generation.video"
   | "generation.music"
+  | "generation.3d"
   | "sandbox.compute"
   | (string & {});
 

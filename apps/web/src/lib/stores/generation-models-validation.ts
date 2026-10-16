@@ -1,7 +1,7 @@
 import type { PublicGenerationDeclaration } from "@cohub/protocol/generation";
 
 const MODEL_SCHEMA = "neta.generation.model.v1";
-const CONTENT_TYPES = new Set(["text", "image", "video", "audio"]);
+const CONTENT_TYPES = new Set(["text", "image", "video", "audio", "3d"]);
 const SOURCE_TYPES = new Set(["url", "base64"]);
 const MERGE_TYPES = new Set(["newline", "space", "concat"]);
 type UnknownRecord = Record<string, unknown>;

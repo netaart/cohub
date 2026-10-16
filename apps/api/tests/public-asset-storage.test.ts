@@ -14,7 +14,7 @@ const file = (mimeType: string, size = 1024) => ({ size, mimeType, filename: "sh
 
 test("accepts generation inputs as user-scoped media", () => {
   assert.equal(isPublicAssetPurpose("generation_input"), true);
-  for (const mimeType of ["image/png", "video/mp4", "audio/mpeg"]) {
+  for (const mimeType of ["image/png", "video/mp4", "audio/mpeg", "model/gltf-binary"]) {
     assert.doesNotThrow(() => assertPublicAssetUploadFile({ purpose: "generation_input", file: file(mimeType) }));
   }
   const key = buildPublicAssetObjectKey({
@@ -24,9 +24,15 @@ test("accepts generation inputs as user-scoped media", () => {
     filename: "shot.png",
   });
   assert.match(key, /(^|\/)generation-inputs\/user_1\/[0-9a-f-]{36}\.png$/);
+  const modelKey = buildPublicAssetObjectKey({
+    purpose: "generation_input",
+    userUuid: "user_1",
+    mimeType: "model/gltf-binary",
+  });
+  assert.match(modelKey, /(^|\/)generation-inputs\/user_1\/[0-9a-f-]{36}\.glb$/);
 });
 
-test("rejects generation inputs that are not image, video, or audio", () => {
+test("rejects generation inputs that are not image, video, audio, or 3D model files", () => {
   for (const mimeType of ["image/svg+xml", "text/html", "application/pdf", "application/octet-stream"]) {
     assert.throws(
       () => assertPublicAssetUploadFile({ purpose: "generation_input", file: file(mimeType) }),

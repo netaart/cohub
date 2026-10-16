@@ -153,6 +153,10 @@ const MUSIC_ADAPTER_TYPES = new Set([
   "suno.tasks",
 ]);
 
+const MODEL_3D_ADAPTER_TYPES = new Set([
+  "meshy.tasks",
+]);
+
 /**
  * Adapters that can host multiple modalities. Prefer content-block types;
  * fall back to a default usage type when content is inconclusive.
@@ -185,14 +189,17 @@ function usageTypeFromContentTypes(contentTypes: Iterable<string> | null | undef
   let sawImage = false;
   let sawVideo = false;
   let sawAudio = false;
+  let saw3d = false;
   for (const raw of contentTypes) {
     const type = normalizeType(raw);
     if (type === "image") sawImage = true;
     else if (type === "video") sawVideo = true;
     else if (type === "audio") sawAudio = true;
+    else if (type === "3d") saw3d = true;
   }
   // Prefer the highest-cost media family when multiple are present.
   if (sawVideo) return COHUB_BILLING_USAGE_TYPES.generationVideo;
+  if (saw3d) return COHUB_BILLING_USAGE_TYPES.generation3d;
   if (sawAudio) return COHUB_BILLING_USAGE_TYPES.generationMusic;
   if (sawImage) return COHUB_BILLING_USAGE_TYPES.generationImage;
   return null;
@@ -202,7 +209,7 @@ function usageTypeFromContentTypes(contentTypes: Iterable<string> | null | undef
  * Resolve a multimodal generation ledger usage type.
  *
  * Order:
- * 1. Strict adapter families (image / video / music)
+ * 1. Strict adapter families (image / video / music / 3d)
  * 2. Content block modality (for ambiguous adapters / unknown adapters)
  * 3. Ambiguous-adapter default (e.g. gemini → image)
  * 4. Generic `generation`
@@ -216,6 +223,7 @@ export function resolveGenerationUsageType(input: {
   if (IMAGE_ADAPTER_TYPES.has(adapterType)) return COHUB_BILLING_USAGE_TYPES.generationImage;
   if (VIDEO_ADAPTER_TYPES.has(adapterType)) return COHUB_BILLING_USAGE_TYPES.generationVideo;
   if (MUSIC_ADAPTER_TYPES.has(adapterType)) return COHUB_BILLING_USAGE_TYPES.generationMusic;
+  if (MODEL_3D_ADAPTER_TYPES.has(adapterType)) return COHUB_BILLING_USAGE_TYPES.generation3d;
 
   const fromContent = usageTypeFromContentTypes(input.contentTypes);
   if (fromContent) return fromContent;
@@ -235,6 +243,8 @@ export function generationUsageKind(usageType: CohubBillingUsageType): BillingUs
       return "generation.video";
     case COHUB_BILLING_USAGE_TYPES.generationMusic:
       return "generation.music";
+    case COHUB_BILLING_USAGE_TYPES.generation3d:
+      return "generation.3d";
     case COHUB_BILLING_USAGE_TYPES.generationLlm:
       return "llm.turn";
     case COHUB_BILLING_USAGE_TYPES.generationLlmRaw:

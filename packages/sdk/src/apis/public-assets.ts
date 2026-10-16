@@ -67,7 +67,7 @@ export type UploadChatAttachmentInput = {
   signal?: AbortSignal;
 };
 
-/** A local generation input (image, video, or audio); same shape as a chat attachment. */
+/** A local generation input (image, video, audio, or 3D model); same shape as a chat attachment. */
 export type UploadGenerationInputInput = UploadChatAttachmentInput;
 
 /** @deprecated Prefer UploadChatAttachmentInput — images are a special case of chat attachments. */
@@ -230,7 +230,7 @@ export class PublicAssetsApi {
     });
   }
 
-  /** Durable, unlisted URL for a local generation input (image, video, or audio). */
+  /** Durable, unlisted URL for a local generation input (image, video, audio, or 3D model). */
   uploadGenerationInput(input: UploadGenerationInputInput) {
     return this.upload({ ...input, purpose: "generation_input" });
   }

@@ -13,6 +13,7 @@ export const generationContentBlockSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("image"), source: generationSourceSchema, meta: metaSchema.optional() }),
   z.object({ type: z.literal("video"), source: generationSourceSchema, meta: metaSchema.optional() }),
   z.object({ type: z.literal("audio"), source: generationSourceSchema, meta: metaSchema.optional() }),
+  z.object({ type: z.literal("3d"), source: generationSourceSchema, meta: metaSchema.optional() }),
 ]);
 
 export const createGenerationTaskRequestSchema = z.object({

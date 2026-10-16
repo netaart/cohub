@@ -21,7 +21,7 @@ type CreateGenerationTaskRequest = {
 };
 ```
 
-`content` contains the prompt and any reference media:
+`content` contains the prompt and any reference media or 3D models:
 
 ```ts
 type GenerationSource =
@@ -32,8 +32,11 @@ type GenerationContentBlock =
   | { type: "text"; text: string; meta?: Record<string, unknown> }
   | { type: "image"; source: GenerationSource; meta?: Record<string, unknown> }
   | { type: "video"; source: GenerationSource; meta?: Record<string, unknown> }
-  | { type: "audio"; source: GenerationSource; meta?: Record<string, unknown> };
+  | { type: "audio"; source: GenerationSource; meta?: Record<string, unknown> }
+  | { type: "3d"; source: GenerationSource; meta?: Record<string, unknown> };
 ```
+
+`3d` blocks carry 3D asset files such as GLB, OBJ or FBX models. 3D models (for example `meshy`, adapter `meshy.tasks`) return them as output, and operations such as retexture and remesh take them as input; pass an output block back unchanged so the provider can reuse its task from `meta.task_id`. Local model files upload as generation inputs (`publicAssets.uploadGenerationInput`), which accept `model/*` MIME types besides images, video and audio.
 
 The API queues a generation task and returns a task ID. Use task polling, or the SDK / CLI helpers, to wait for the final `GenerationTaskResult`:
 
@@ -62,7 +65,7 @@ Generation requests share the platform credit balance with LLM turns.
 
 ```ts
 operationId: `generation:${taskRunId}`  // idempotent
-usageType: "generation.image" | "generation.video" | "generation.music" | "generation"
+usageType: "generation.image" | "generation.video" | "generation.music" | "generation.3d" | "generation"
 officialCostUsd: result.cost
 amountUsd: officialCostUsd * discountMultiplier
 ```
