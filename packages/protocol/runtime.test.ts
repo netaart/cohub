@@ -3,6 +3,18 @@ import { test } from "node:test";
 import { fileWatcherStatusSchema, runtimeClientFrameSchema, runtimeCommandSchema, runtimeReadySchema, parseRuntimeRegistration, contextToPiMessages, RUNTIME_MAX_BATCH_MESSAGES } from "./src/runtime/index.js";
 import { getSessionStreamSnapshotKey, SESSION_STREAM_SNAPSHOT_CLEAR_TURN_LUA } from "./src/realtime/index.js";
 
+test("Codex fork boundaries and Runtime support survive protocol parsing", () => {
+  const fork = { sessionId: crypto.randomUUID(), turnId: crypto.randomUUID() };
+  const frame = { type: "session.context", requestId: crypto.randomUUID(), context: { revision: "fork", throughTurnId: fork.turnId, messages: [], fork } };
+  assert.deepEqual(runtimeCommandSchema.parse(frame), frame);
+  assert.equal(runtimeCommandSchema.safeParse({ ...frame, context: { ...frame.context, fork: { ...fork, turnId: "bad" } } }).success, false);
+  assert.equal(runtimeCommandSchema.safeParse({ ...frame, context: { ...frame.context, throughTurnId: null } }).success, false);
+  const continued = { ...frame, context: { ...frame.context, throughTurnId: crypto.randomUUID() } };
+  assert.deepEqual(runtimeCommandSchema.parse(continued), continued, "child turns retain their original fork boundary");
+  const hello = { type: "runtime.hello", version: 1, spaceId: crypto.randomUUID(), token: "token", capabilities: { harnesses: ["codex"], models: [], codexFork: true } };
+  assert.deepEqual(runtimeClientFrameSchema.parse(hello), hello);
+});
+
 test("file watcher telemetry validates codes and drops local details", () => {
   const value = { backend: "fsevents", state: "running", observedAt: new Date().toISOString() };
   assert.deepEqual(fileWatcherStatusSchema.parse({ ...value, path: "/private/project", token: "secret" }), value);

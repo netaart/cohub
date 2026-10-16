@@ -110,7 +110,7 @@ export async function discoverHarnesses(harnesses: ("pi" | "codex")[], options: 
       }
     } finally { await rpc.close(); }
   }));
-  return { harnesses, models };
+  return { harnesses, models, ...(harnesses.includes("codex") ? { codexFork: true } : {}) };
 }
 
 export function codexItemContent(item: JsonRecord): ContentBlock[] {

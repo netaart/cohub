@@ -58,6 +58,56 @@ async function workspace() {
   return { root, project, piDirectory, codexPath, ingest, write, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 
+test("Codex fork holds prevent inherited history uploads until the child is adopted", async () => {
+  const w = await workspace();
+  const ingest = w.ingest({ harnesses: ["codex"] });
+  try {
+    const server = fakeServer();
+    const childNativeId = randomUUID(), parentSessionId = randomUUID(), childSessionId = randomUUID();
+    const boundary = randomUUID(), childTurnId = randomUUID();
+    server.turns.set(boundary, { sessionId: parentSessionId, settled: true, parentTurnId: null });
+    server.turns.set(childTurnId, { sessionId: childSessionId, settled: true, parentTurnId: boundary });
+    const path = w.codexPath(childNativeId);
+    await ingest.load();
+    const releaseFirst = ingest.holdCodexFork();
+    const releaseSecond = ingest.holdCodexFork();
+    await w.write(path, codexRollout(childNativeId, w.project, ["parent-boundary"]));
+    ingest.connect(server.transport);
+    ingest.touch(path);
+    await until(() => ingest.status().live === 0);
+    assert.equal(server.batches.length, 0, "the fork's copied parent history must not upload before adoption");
+    releaseFirst();
+    releaseFirst();
+    ingest.touch(path);
+    await until(() => ingest.status().live === 0);
+    assert.equal(server.batches.length, 0, "one release (even repeated) must not release another fork's hold");
+    ingest.adopt({ harness: "codex", nativeSessionId: childNativeId, path, cwd: w.project }, childSessionId,
+      { turnKey: "parent-boundary", turnId: boundary });
+    releaseSecond();
+    await until(() => (ingest.transcriptFor(childSessionId, "codex", boundary)?.size ?? -1) > 0);
+    await until(() => ingest.status().live === 0);
+    assert.equal(ingest.transcriptFor(childSessionId, "codex", boundary)?.path, path);
+    assert.equal(server.batches.length, 0, "adoption skips the inherited prefix");
+
+    await appendFile(path, codexLine({ type: "turn_started", turn_id: "child-cloud" })
+      + codexLine({ type: "user_message", message: "child continuation", client_id: childTurnId })
+      + codexLine({ type: "turn_complete", turn_id: "child-cloud", last_agent_message: "child answer" })
+      + codexLine({ type: "turn_started", turn_id: "child-terminal" })
+      + codexLine({ type: "user_message", message: "new terminal question" })
+      + codexLine({ type: "turn_complete", turn_id: "child-terminal", last_agent_message: "new terminal answer" }));
+    ingest.touch(path);
+    const terminalId = turnIdOf("codex", childNativeId, "child-terminal");
+    await until(() => server.turns.has(terminalId));
+    assert.deepEqual(server.batches.flatMap((batch) => batch.turns.map((turn) => turn.turnId)), [terminalId]);
+    assert.equal(server.turns.get(terminalId)?.sessionId, childSessionId);
+    assert.equal(server.turns.get(terminalId)?.parentTurnId, childTurnId);
+    assert.equal(server.turns.get(boundary)?.sessionId, parentSessionId, "the parent stays bound to its original session");
+  } finally {
+    await ingest.close(AbortSignal.timeout(2_000));
+    await w.cleanup();
+  }
+});
+
 test("discovery covers the project and its subdirectories, skips Codex's own threads, newest first", async () => {
   const w = await workspace();
   try {

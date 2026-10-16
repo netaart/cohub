@@ -79,6 +79,8 @@ export type RuntimeContext = {
   throughTurnId: string | null;
   messages: RuntimeContextMessage[];
   archive?: HarnessArchive | null;
+  /** Inherited Codex boundary; this lineage must never be rebuilt from projected messages. */
+  fork?: { sessionId: string; turnId: string };
   resolvedTurnIds?: string[];
   settledTurnIds?: string[];
 };
@@ -94,6 +96,7 @@ export type RuntimeTraceContext = {
 const runtimeThinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const runtimeCapabilitiesSchema = z.object({
   harnesses: z.array(z.enum(["pi", "codex"])).max(2),
+  codexFork: z.boolean().optional(),
   models: z.array(z.object({
     harness: z.enum(["pi", "codex"]),
     provider: z.string().max(100),
@@ -248,7 +251,8 @@ const runtimeContextSchema = z.object({ complete: z.boolean().optional(), revisi
   id: z.string(), turnId: id, role: z.enum(["user", "assistant", "system"]), content,
   provider: z.string().nullable().optional(), model: z.string().nullable().optional(), usage: usageSchema.nullable().optional(),
   stopReason: z.string().nullable().optional(), errorMessage: z.string().nullable().optional(), meta: z.record(z.string(), z.unknown()).nullable().optional(),
-})), archive: harnessArchiveSchema.nullable().optional(), resolvedTurnIds: z.array(id).max(2).optional(), settledTurnIds: z.array(id).max(2).optional() });
+})), archive: harnessArchiveSchema.nullable().optional(), fork: z.object({ sessionId: id, turnId: id }).strict().optional(), resolvedTurnIds: z.array(id).max(2).optional(), settledTurnIds: z.array(id).max(2).optional() })
+  .refine((context) => !context.fork || context.throughTurnId !== null, "Fork context requires a history boundary");
 
 export const runtimeCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn.recover"), requestId: id, execution: z.object({ spaceId: id, sessionId: id, turnId: id, harness: z.enum(["pi", "codex"]) }), traceContext: runtimeTraceContextSchema.optional() }),

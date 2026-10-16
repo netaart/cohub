@@ -14,6 +14,7 @@
     "test": "node ../../scripts/test/run.mjs --test-isolation=none 'src/tests/**/*.test.ts'",
     "test:runtime": "node --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import tsx --test 'src/tests/runtime-*.integration.ts'",
     "test:runtime:db": "node --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import tsx --test src/tests/runtime-persistence.integration.mjs",
+    "test:runtime:fork": "node --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import tsx --test src/tests/runtime-codex-fork-*.integration.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
     "smoke:runtime": "tsx scripts/smoke-runtime.ts"

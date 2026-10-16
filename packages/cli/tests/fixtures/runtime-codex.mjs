@@ -25,9 +25,13 @@ for await (const line of lines) {
     writeFileSync(thread.path, `${JSON.stringify({ type: "session_meta", payload: { id, session_id: id, cwd: process.cwd(), history_mode: "paginated" } })}\n`);
     respond(input, { thread, model: "test", modelProvider: "fixture" });
   } else if (input.method === "thread/fork") {
-    const data = readFileSync(input.params.path, "utf8").trimEnd().split("\n");
+    let data = readFileSync(input.params.path, "utf8").trimEnd().split("\n");
     const header = JSON.parse(data[0]);
-    if (header.payload.history_mode !== "legacy" || header.payload.session_id !== header.payload.id) throw new Error("Archived projection must be portable and independent from the private index");
+    if (input.params.lastTurnId) {
+      const boundary = data.findIndex((line) => { const row = JSON.parse(line); return row.type === "event_msg" && row.payload?.type === "turn_complete" && row.payload.turn_id === input.params.lastTurnId; });
+      if (boundary < 0) throw new Error("Native fork boundary not found");
+      data = data.slice(0, boundary + 1);
+    } else if (header.payload.history_mode !== "legacy" || header.payload.session_id !== header.payload.id) throw new Error("Archived projection must be portable and independent from the private index");
     const id = randomUUID();
     header.payload.id = id;
     header.payload.forked_from_id = input.params.threadId;

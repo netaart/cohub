@@ -177,6 +177,8 @@ export class NativeIngest {
   private readonly failures = new Map<string, number>();
   private readonly aliveAt = new Map<string, number>();
   private readonly runningPaths = new Set<string>();
+  private codexForkHolds = 0;
+  private readonly heldCodexPaths = new Set<string>();
   private writing: Promise<void> = Promise.resolve();
   private readonly foreign = new Set<string>();
   private importQueue: NativeCandidate[] = [];
@@ -254,6 +256,21 @@ export class NativeIngest {
     this.transport = transport;
     if (!transport) return;
     void this.scan().then(() => this.resync()).catch((error) => this.report(this.options.cwd, error));
+  }
+
+  /** Keep a new Codex fork private until its inherited boundary has been adopted. */
+  holdCodexFork(): () => void {
+    this.codexForkHolds += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.codexForkHolds -= 1;
+      if (this.codexForkHolds) return;
+      const paths = [...this.heldCodexPaths];
+      this.heldCodexPaths.clear();
+      for (const path of paths) this.touch(path);
+    };
   }
 
   /**
@@ -337,6 +354,22 @@ export class NativeIngest {
       if (state.sessionId === sessionId && state.harness === harness && state.headTurnId === headTurnId && state.threadKind === "user" && (synced || state.origin === "cohub")) return state;
     }
     return null;
+  }
+
+  /** Resolve an exact historical Codex Turn without moving or rewriting its parent. */
+  async codexForkSource(sessionId: string, turnId: string, signal?: AbortSignal): Promise<{ state: TranscriptState; turnKey: string }> {
+    const candidates = [...this.states.values()].filter((state) => state.sessionId === sessionId && state.harness === "codex" && state.threadKind === "user");
+    if (!candidates.length) throw new Error("Codex fork source is unavailable on this Runtime");
+    for (const state of candidates) {
+      signal?.throwIfAborted();
+      const transcript = await readTranscript(state.path, "codex", signal);
+      if (transcript.nativeSessionId !== state.nativeSessionId || transcript.cwd !== state.cwd) throw new Error("Codex fork source identity mismatch");
+      const turn = transcript.turns.find((turn) => turn.cloudTurnId === turnId || nativeTurnId(this.options.spaceId, "codex", state.nativeSessionId, turn.key) === turnId);
+      if (!turn) continue;
+      if (!turn.result) throw new Error("Cannot fork an unfinished Codex turn");
+      return { state, turnKey: turn.key };
+    }
+    throw new Error("Codex fork boundary is missing from the native history");
   }
 
   async scan(): Promise<void> {
@@ -524,6 +557,7 @@ export class NativeIngest {
     const harness = previous?.harness ?? this.harnessFor(path);
     // A paused harness uploads nothing, not even for transcripts it already tracks.
     if (!harness || !this.harnesses.includes(harness)) return;
+    if (harness === "codex" && this.codexForkHolds) { this.heldCodexPaths.add(path); return; }
     if (previous && (previous.threadKind !== "user" || !this.owns(previous.cwd))) return;
     if (!previous) {
       // A header is read once per file: it names the project and the thread's purpose.
@@ -547,7 +581,9 @@ export class NativeIngest {
       }
     }
     const transcript = await readTranscript(path, harness);
-    const state = previous ?? this.blank(path, transcript.nativeSessionId, transcript.cwd, harness, "user", { size: -1, mtimeMs: 0, ino: 0 });
+    if (harness === "codex" && this.codexForkHolds) { this.heldCodexPaths.add(path); return; }
+    // Adoption may have happened while reading; never overwrite its child binding.
+    const state = this.states.get(path) ?? this.blank(path, transcript.nativeSessionId, transcript.cwd, harness, "user", { size: -1, mtimeMs: 0, ino: 0 });
     this.states.set(path, state);
     // The file counts as read only once the server confirmed it; a failed send is retried.
     await this.apply(state, transcript.turns, lane, info.mtimeMs);

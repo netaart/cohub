@@ -159,6 +159,9 @@ export async function createSessionForkInTransaction(tx: Transaction, input: Ses
     .where(and(eq(spaceSessions.id, anchorTurn.sessionId), eq(spaceSessions.spaceId, input.spaceId)))
     .limit(1);
   if (!anchorSourceSession) throw new Error("Turn source session not found");
+  if ((anchorTurn.meta as Record<string, unknown> | null)?.harness === "codex" && !["completed", "failed", "interrupted"].includes(anchorTurn.status)) {
+    throw new Error("Cannot fork a Codex turn before it has executed and settled");
+  }
   if (anchorTurn.status === "running") throw new Error("Cannot fork a running turn");
   const anchorSequence = input.sequence ?? anchorTurn.sequence;
   const [parent] = await tx

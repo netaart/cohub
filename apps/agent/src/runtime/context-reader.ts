@@ -29,6 +29,9 @@ export function createRuntimeContextReader(database: ContextDatabase) {
       eq(sessionTurns.sessionId, range.sourceSessionId), gte(sessionTurns.sequence, range.fromSequence),
       range.toSequence == null ? undefined : lte(sessionTurns.sequence, range.toSequence),
       beforeSequence == null ? undefined : lt(sessionTurns.sequence, beforeSequence), ne(sessionTurns.status, "queued"),
+      input.harness === "codex" && range.sourceSessionId === input.sessionId
+        ? sql`not (${sessionTurns.status} in ('failed', 'merged') and ${sessionTurns.meta}->>'runtimeForkRejection' is not distinct from 'unsupported_runtime')`
+        : undefined,
     );
     const heads = await Promise.all(ranges.map(async (range) => {
       const [head] = await database.select({ id: sessionTurns.id, sessionId: sessionTurns.sessionId, sequence: sessionTurns.sequence, status: sessionTurns.status, updatedAt: sessionTurns.updatedAt, harnessIndex: sessionTurns.harnessIndex, harness: sql<string | null>`${sessionTurns.meta}->>'harness'`, archiveStatus: sql<string | null>`${sessionTurns.meta}->>'runtimeArchiveStatus'`, recoveryState: sql<string | null>`${sessionTurns.meta}->'runtimeRecovery'->>'state'` })
@@ -48,6 +51,14 @@ export function createRuntimeContextReader(database: ContextDatabase) {
       result.resolvedTurnIds = settled.filter((turn) => turn.recoveryState === "confirmed_stopped").map((turn) => turn.id);
       result.settledTurnIds = settled.filter((turn) => turn.recoveryState !== "confirmed_stopped").map((turn) => turn.id);
     }
+    const inheritedHead = heads.filter((head) => head && head.sessionId !== input.sessionId).at(-1);
+    if (input.harness === "codex" && inheritedHead?.harness === "codex") {
+      if (!["completed", "failed", "interrupted"].includes(inheritedHead.status)) throw new Error("Cannot fork a Codex turn before it has executed and settled");
+      // Keep the native ancestry after a failed continuation too. A missing local
+      // branch must fail explicitly, never resume from projected text instead.
+      result.fork = { sessionId: inheritedHead.sessionId, turnId: inheritedHead.id };
+      result.complete = false;
+    }
     if (input.harness && isLocalHarness(input.harness) && lastTurn?.sessionId === input.sessionId
       && lastTurn.archiveStatus === "ready" && lastTurn.recoveryState !== "confirmed_stopped") {
       const index = harnessArchiveIndexSchema.safeParse(lastTurn.harnessIndex);
@@ -57,7 +68,7 @@ export function createRuntimeContextReader(database: ContextDatabase) {
         return result;
       }
     }
-    if (input.headOnly) return result;
+    if (input.headOnly || result.fork) return result;
 
     for (const range of ranges) {
       const turns = await database.select().from(sessionTurns).where(predicate(range)).orderBy(asc(sessionTurns.sequence));

@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { sessionTurns } from "@cohub/db";
 import { readRuntimeRecovery, runtimeRecoveryActive, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { db } from "../db.js";
@@ -63,6 +63,14 @@ export async function executeRemoteHarnessTurn(input: {
   const beforeSequence = first.turnSeq;
   const traceIdentifiers = getActiveTraceIdentifiers(input.requestId?.trim() || user.turnId);
   const context = await loadRuntimeContext({ spaceId: input.spaceId, sessionId: input.sessionId, beforeSequence, headOnly: true, harness: input.harness });
+  if (!input.recovery && context.fork && !capabilities.codexFork) {
+    // This check precedes every dispatch. Preserve the rejected attempt for the
+    // UI without turning it (or its merged inputs) into a native resume boundary.
+    await db.update(sessionTurns).set({
+      meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify({ runtimeForkRejection: "unsupported_runtime" })}::jsonb`,
+    }).where(and(eq(sessionTurns.sessionId, input.sessionId), inArray(sessionTurns.id, users.map((message) => message.turnId)), inArray(sessionTurns.status, ["running", "merged"])));
+    throw new Error("Upgrade the Local Runtime to continue a Codex fork");
+  }
   await persistBatchUserMessages({ spaceId: input.spaceId, sessionId: input.sessionId, batch: input.batch });
   const command: RuntimeTurnInput = {
     spaceId: input.spaceId, sessionId: input.sessionId, turnId: user.turnId, userMessageId,
@@ -107,6 +115,7 @@ export async function executeRemoteHarnessTurn(input: {
         const current = parseRuntimeRegistration(raw);
         if (!current) throw new Error("Local Runtime registration is invalid");
         if (current.ownerUserId !== registration.ownerUserId) throw new Error("Runtime owner changed");
+        if (!input.recovery && context.fork && !current.capabilities.codexFork) throw new Error("Upgrade the Local Runtime to continue a Codex fork");
         const endpoint = new URL(current.endpoint);
         if (!["ws:", "wss:"].includes(endpoint.protocol) || endpoint.pathname !== `/internal/runtime-relay/${input.spaceId}` || endpoint.username || endpoint.password) throw new Error("Invalid Runtime endpoint");
         endpoint.searchParams.set("connection", current.connectionId);

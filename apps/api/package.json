@@ -13,6 +13,7 @@
     "test": "node ../../scripts/test/run.mjs --test-isolation=none 'src/**/*.test.ts' 'tests/**/*.test.ts' && node ../../scripts/test/run.mjs --experimental-test-module-mocks --disable-warning=ExperimentalWarning tests/sandbox-auth.integration.ts tests/decisions.integration.ts tests/space-fs-remote.integration.ts",
     "test:runtime:archives": "node --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import tsx --test tests/runtime-archives.integration.mjs",
     "test:runtime:native-sync": "node --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import tsx --test tests/native-turns.integration.mjs",
+    "test:runtime:fork": "node --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import tsx --test tests/session-fork-*.integration.mjs",
     "lint:fix": "biome lint --write .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node --import ./dist/register-otel-esm-hook.js dist/index.js",

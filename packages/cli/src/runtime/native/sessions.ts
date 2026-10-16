@@ -20,7 +20,7 @@ export type NativeSession = {
   cwd: string;
 };
 
-export type PreparedSession = { session: NativeSession; resume: ResumeKind };
+export type PreparedSession = { session: NativeSession; resume: ResumeKind; fork?: { lastTurnId: string } };
 
 /** Chooses the native file a Turn runs in. 1. */
 export class NativeSessions {
@@ -55,6 +55,7 @@ export class NativeSessions {
     if (archive && archive.harness === input.harness && archive.sessionId === input.sessionId && archive.turnId === input.context.throughTurnId) {
       const restored = await this.restore(input, archive, input.signal).catch((error: unknown) => {
         input.signal?.throwIfAborted();
+        if (input.context.fork) throw error;
         // A structurally unrestorable archive falls back to projection; so does a transient
         // failure, which simply tries the archive again on the next Turn.
         this.options.onRestoreFailed?.(error, { sessionId: input.sessionId, harness: input.harness, unrestorable: error instanceof ArchiveNotRestorableError });
@@ -66,6 +67,13 @@ export class NativeSessions {
         this.options.ingest.adopt(restored, input.sessionId, { turnKey: through, turnId: input.context.throughTurnId });
         return { session: restored, resume: "restored" };
       }
+    }
+    if (input.context.fork) {
+      const fork = input.context.fork;
+      if (input.harness !== "codex" || fork.sessionId === input.sessionId) throw new Error("Invalid Codex fork source");
+      if (fork.turnId !== input.context.throughTurnId) throw new Error("Native Codex fork continuation is unavailable; retain the original history");
+      const { state, turnKey } = await this.options.ingest.codexForkSource(fork.sessionId, fork.turnId, input.signal);
+      return { session: { harness: "codex", nativeSessionId: state.nativeSessionId, path: state.path, cwd: state.cwd }, resume: "native", fork: { lastTurnId: turnKey } };
     }
     const projected = await this.project(input);
     // A new Codex thread gets its file when it starts; the executor adopts it then.

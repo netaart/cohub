@@ -11,6 +11,7 @@ import { PI_DISCONNECTED, type PiLink, type PiSessionLink } from "./pi-link.js";
 import type { ExecutionResults } from "./results.js";
 import type { NativeSession, NativeSessions, ResumeKind } from "./sessions.js";
 import { codexTranslator, piTranslator } from "./translate.js";
+import { readTranscript } from "./adapters.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
 /** A stop request that the harness does not honour within this long ends its private process. */
@@ -223,16 +224,26 @@ async function runCodex(executor: Executor, turn: Turn, context?: RuntimeDiagnos
       config: { "shell_environment_policy.set.COHUB_SPACE_ID": input.spaceId, "shell_environment_policy.set.COHUB_SESSION_ID": input.sessionId },
     };
     const existing = { ...threadOptions, threadId: session.nativeSessionId, path: session.path, excludeTurns: true };
-    const opened = prepared.resume === "new" ? await codex.request("thread/start", threadOptions)
-      : prepared.resume === "restored" ? await codex.request("thread/fork", existing)
-        : await codex.request("thread/resume", existing);
-    const thread = record(opened.thread);
-    if (typeof thread.id !== "string" || typeof thread.path !== "string") throw new Error("Codex did not provide a durable native thread");
-    const threadId = thread.id;
-    if (thread.path !== session.path || threadId !== session.nativeSessionId) {
-      session = { ...session, nativeSessionId: threadId, path: thread.path };
-      executor.ingest.adopt(session, input.sessionId);
-    }
+    const releaseFork = prepared.fork ? executor.ingest.holdCodexFork() : undefined;
+    let opened: JsonRecord;
+    try {
+      opened = prepared.fork ? await codex.request("thread/fork", { ...existing, lastTurnId: prepared.fork.lastTurnId, deferGoalContinuation: true })
+        : prepared.resume === "new" ? await codex.request("thread/start", threadOptions)
+          : prepared.resume === "restored" ? await codex.request("thread/fork", existing)
+            : await codex.request("thread/resume", existing);
+      const thread = record(opened.thread);
+      if (typeof thread.id !== "string" || typeof thread.path !== "string") throw new Error("Codex did not provide a durable native thread");
+      if (prepared.fork) {
+        if (thread.id === session.nativeSessionId || thread.path === session.path) throw new Error("Codex fork did not create an independent thread");
+        const forked = await readTranscript(thread.path, "codex", signal);
+        if (forked.nativeSessionId !== thread.id || forked.turns.at(-1)?.key !== prepared.fork.lastTurnId) throw new Error("Codex fork did not preserve the requested turn boundary; update Codex before retrying");
+      }
+      if (thread.path !== session.path || thread.id !== session.nativeSessionId) {
+        session = { ...session, nativeSessionId: thread.id, path: thread.path, ...(prepared.fork ? { cwd: executor.cwd } : {}) };
+        executor.ingest.adopt(session, input.sessionId, prepared.fork ? { turnKey: prepared.fork.lastTurnId, turnId: input.context.throughTurnId } : undefined);
+      }
+    } finally { releaseFork?.(); }
+    const threadId = session.nativeSessionId;
     const translator = codexTranslator(turn.emit, { provider: text(opened.modelProvider) || "codex", model: text(opened.model) || input.model || null });
     const content = await codexPrompt(input);
     signal.throwIfAborted();

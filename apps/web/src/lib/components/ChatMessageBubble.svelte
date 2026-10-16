@@ -17,6 +17,7 @@ import {
 	Loader2,
 	TriangleAlert,
 } from "lucide-svelte";
+import { canForkChatMessage } from "$lib/chat-message-fork";
 import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
 import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
 import StatsContent from "$lib/components/StatsContent.svelte";
@@ -225,37 +226,7 @@ const defaultExpandToolCalls = $derived(
 		(message.content ?? []).some((block) => block.type === "tool_use"),
 );
 
-const hasForkCheckpoint = $derived(
-	Boolean(
-		message.meta?.turn &&
-			(typeof message.meta.turn.meta?.agentSessionEntryId === "string" ||
-				(message.meta.turn.meta?.agent &&
-					typeof message.meta.turn.meta.agent === "object" &&
-					!Array.isArray(message.meta.turn.meta.agent) &&
-					typeof (message.meta.turn.meta.agent as Record<string, unknown>)
-						.leafEntryId === "string")),
-	),
-);
-
-const isTerminalDirectGeneration = $derived(
-	message.meta?.turn?.executionKind === "direct_generation" &&
-		["completed", "failed", "interrupted", "cancelled"].includes(
-			message.meta.turn.status,
-		),
-);
-
-const canFork = $derived(
-	Boolean(
-		onForkTurn &&
-			(hasForkCheckpoint || isTerminalDirectGeneration) &&
-			message.role === "assistant" &&
-			message.meta?.messageKind &&
-			["assistant_final", "assistant_error", "assistant_interrupted"].includes(
-				message.meta.messageKind,
-			) &&
-			message.meta?.streaming !== true,
-	),
-);
+const canFork = $derived(Boolean(onForkTurn) && canForkChatMessage(message));
 
 function fallbackUserName(uuid?: string | null): string {
 	if (!uuid) return m.common_user({}, { locale });

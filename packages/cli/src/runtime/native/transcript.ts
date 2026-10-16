@@ -439,6 +439,7 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
         calls.get(id)?.content.push({ type: "tool_result", tool_use_id: id, content: typeof payload.output === "string" ? payload.output : JSON.stringify(payload.output ?? null) });
       }
     }
+    if (entry.type === "event_msg" && payload.type === "user_message" && text(payload.client_id)) current.cloudTurnId = text(payload.client_id);
     if (entry.type === "event_msg" && payload.type === "item_completed") {
       // Cohub tags a Turn it starts with its own cloud Turn id, so the file itself records which
       // Turns already belong to a cloud Turn (and must not be ingested twice).
