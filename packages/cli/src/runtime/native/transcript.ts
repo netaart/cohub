@@ -453,6 +453,8 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
       }
     }
     if (entry.type === "event_msg" && payload.type === "user_message") {
+      const clientId = text(payload.client_id);
+      if (clientId) current.cloudTurnId = clientId;
       if (!userFromResponse) current.userContent = [{ type: "text", text: text(payload.message) }];
       userFromResponse = true;
       current.userFinal = true;
