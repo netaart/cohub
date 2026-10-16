@@ -1,5 +1,8 @@
 <script lang="ts">
-import type { PublicGenerationDeclaration } from "@cohub/protocol/generation";
+import {
+	type PublicGenerationDeclaration,
+	resolveGenerationOperation,
+} from "@cohub/protocol/generation";
 import type { BoardSceneItem } from "@neta-art/cohub/board";
 import {
 	featuredTaskArtifact,
@@ -20,6 +23,8 @@ import { onDestroy, onMount } from "svelte";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
 import { referencePortForKind } from "$lib/board/board-content";
 import {
+	arrayParameterItems,
+	arrayParameterText,
 	type BoardGenerationMediaType,
 	type BoardGenerationReference,
 	buildBoardGenerationContent,
@@ -28,6 +33,7 @@ import {
 	generationInputSpec,
 	modelAcceptsGenerationReferences,
 	normalizeGenerationReferenceUrl,
+	parseArrayParameterText,
 	parseBoardGenerationReferences,
 	pendingGenerationTaskSnapshot,
 	supportsBoardGenerationComposer,
@@ -122,12 +128,18 @@ const supportedModels = $derived(
 const selectedModel = $derived(
 	supportedModels.find((model) => model.model === selectedModelId) ?? null,
 );
+const savedParameters = $derived(parametersByModel[selectedModelId] ?? {});
+const activeModel = $derived(
+	selectedModel
+		? resolveGenerationOperation(selectedModel, savedParameters)
+		: null,
+);
 const parameters = $derived.by(() => {
-	const saved = parametersByModel[selectedModelId] ?? {};
-	if (!selectedModel || selectedModel.allowUnknownParameters) return saved;
-	const declared = selectedModel.parameters ?? {};
+	if (!activeModel || activeModel.allowUnknownParameters)
+		return savedParameters;
+	const declared = activeModel.parameters ?? {};
 	return Object.fromEntries(
-		Object.entries(saved).filter(([name]) => name in declared),
+		Object.entries(savedParameters).filter(([name]) => name in declared),
 	);
 });
 const visibleModels = $derived(
@@ -137,11 +149,11 @@ const visibleModels = $derived(
 	}),
 );
 const validationError = $derived(
-	validateBoardGeneration({ model: selectedModel, prompt, references }) ??
-		validateBoardGenerationParameters(selectedModel, parameters),
+	validateBoardGenerationParameters(activeModel, parameters) ??
+		validateBoardGeneration({ model: activeModel, prompt, references }),
 );
 const parameterEntries = $derived(
-	Object.entries(selectedModel?.parameters ?? {}),
+	Object.entries(activeModel?.parameters ?? {}),
 );
 
 function mediaIcon(type: BoardGenerationMediaType) {
@@ -206,7 +218,7 @@ async function resolveItemReference(
 function roleFor(
 	type: BoardGenerationMediaType,
 	current?: string,
-	model: PublicGenerationDeclaration | null = selectedModel,
+	model: PublicGenerationDeclaration | null = activeModel,
 ) {
 	if (!model) return current;
 	const spec = generationInputSpec(model, type);
@@ -216,7 +228,7 @@ function roleFor(
 
 function normalizeReferenceRoles(
 	next: BoardGenerationReference[],
-	model: PublicGenerationDeclaration | null = selectedModel,
+	model: PublicGenerationDeclaration | null = activeModel,
 ) {
 	return next.map((reference) => ({
 		...reference,
@@ -287,6 +299,20 @@ function clearParameter(name: string) {
 	const next = { ...(parametersByModel[selectedModelId] ?? {}) };
 	delete next[name];
 	parametersByModel = { ...parametersByModel, [selectedModelId]: next };
+}
+
+function toggleArrayItem(
+	name: string,
+	options: readonly string[],
+	selected: readonly unknown[],
+	option: string,
+	checked: boolean,
+) {
+	const next = options.filter((value) =>
+		value === option ? checked : selected.includes(value),
+	);
+	if (next.length > 0) updateParameter(name, next);
+	else clearParameter(name);
 }
 
 function restoreDraft() {
@@ -612,7 +638,7 @@ onDestroy(() => {
 			<div class="reference-strip" aria-label={m.board_generation_refs({}, { locale })}>
 				{#each references as reference (reference.id)}
 					{@const ReferenceIcon = mediaIcon(reference.type)}
-					{@const spec = selectedModel ? generationInputSpec(selectedModel, reference.type) : null}
+					{@const spec = activeModel ? generationInputSpec(activeModel, reference.type) : null}
 					<div class="reference-pill" title={reference.url}>
 						<ReferenceIcon class="h-3.5 w-3.5 shrink-0" />
 						<span class="max-w-28 truncate">{reference.label}</span>
@@ -707,6 +733,19 @@ onDestroy(() => {
 												<option value="">{m.board_auto({}, { locale })}</option>
 												{#each spec.enum as value (value)}<option value={value}>{value}</option>{/each}
 											</select>
+										{:else if spec.type === "array" && spec.items.type === "string" && spec.items.enum}
+											{@const options = spec.items.enum}
+											{@const selected = arrayParameterItems(parameters[name] ?? spec.default)}
+											<div class="array-options">
+												{#each options as option (option)}
+													<label class="array-option">
+														<input type="checkbox" checked={selected.includes(option)} onchange={(event) => toggleArrayItem(name, options, selected, option, event.currentTarget.checked)} />
+														<span>{option}</span>
+													</label>
+												{/each}
+											</div>
+										{:else if spec.type === "array"}
+											<input value={arrayParameterText(parameters[name] ?? spec.default)} placeholder={m.board_auto({}, { locale })} oninput={(event) => event.currentTarget.value.trim() ? updateParameter(name, parseArrayParameterText(event.currentTarget.value, spec.items)) : clearParameter(name)} />
 										{:else if spec.type === "number" || spec.type === "integer"}
 											<input type="number" min={spec.min} max={spec.max} step={spec.type === "integer" ? 1 : "any"} value={String(parameters[name] ?? spec.default ?? "")} placeholder={spec.default === undefined ? m.board_auto({}, { locale }) : String(spec.default)} oninput={(event) => event.currentTarget.value ? updateParameter(name, Number(event.currentTarget.value)) : clearParameter(name)} />
 										{:else}
@@ -899,6 +938,17 @@ onDestroy(() => {
 		outline: none;
 	}
 	.parameter-row input[type="checkbox"] { justify-self: end; }
+	.array-options {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 4px 8px;
+	}
+	.array-option {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+	}
 	@media (pointer: coarse) {
 		.generation-wrap { bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
 		.icon-btn { width: 36px; height: 36px; }

@@ -7,6 +7,7 @@ import {
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { MessageToolCallsFile } from "@cohub/protocol/model";
 import { page } from "$app/state";
+import GenerationModelOutput from "$lib/components/GenerationModelOutput.svelte";
 import MarkdownView from "$lib/components/MarkdownView.svelte";
 import AttachmentBlocks from "$lib/components/TextAttachmentBlocks.svelte";
 import ThinkingBlocks from "$lib/components/ThinkingBlocks.svelte";
@@ -74,8 +75,11 @@ function isViewportAttachment(block: ContentBlock): block is TextBlock {
 }
 
 function generationMediaForBlocks(blocks: TextBlock[]) {
-	const media: Array<{ type: "video" | "audio"; url: string; index: number }> =
-		[];
+	const media: Array<{
+		type: "video" | "audio" | "3d";
+		url: string;
+		index: number;
+	}> = [];
 	for (const block of blocks) {
 		if (block._meta?.attachmentKind !== "generation-output") continue;
 		try {
@@ -92,7 +96,9 @@ function generationMediaForBlocks(blocks: TextBlock[]) {
 					source?: { type?: unknown; url?: unknown };
 				};
 				if (
-					(record.type !== "video" && record.type !== "audio") ||
+					(record.type !== "video" &&
+						record.type !== "audio" &&
+						record.type !== "3d") ||
 					record.source?.type !== "url" ||
 					typeof record.source.url !== "string"
 				)
@@ -274,6 +280,8 @@ const segments = $derived.by(() => {
 							{#if media.type === "video"}
 								<!-- svelte-ignore a11y_media_has_caption: generated media does not provide caption tracks. -->
 								<video src={media.url} controls playsinline preload="metadata" class="max-h-[min(60vh,32rem)] max-w-full rounded-lg border border-border-subtle" aria-label={m.message_generated_video({ index: media.index + 1 }, { locale })}></video>
+							{:else if media.type === "3d"}
+								<GenerationModelOutput url={media.url} index={media.index} />
 							{:else}
 								<audio src={media.url} controls preload="metadata" class="w-full" aria-label={m.message_generated_audio({ index: media.index + 1 }, { locale })}></audio>
 							{/if}

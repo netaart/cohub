@@ -44,6 +44,26 @@ function isDimensionsSpec(value: unknown) {
 	);
 }
 
+function isArrayItem(value: unknown) {
+	return isString(value) || isNumber(value);
+}
+
+function isArrayItemSpec(value: unknown): boolean {
+	if (!isRecord(value)) return false;
+	switch (value.type) {
+		case "string":
+			return optionalArray(value.enum, isString) && absent(value, "min", "max");
+		case "integer":
+			return (
+				optional(value.min, isNumber) &&
+				optional(value.max, isNumber) &&
+				absent(value, "enum")
+			);
+		default:
+			return false;
+	}
+}
+
 function isParameterSpec(value: unknown): boolean {
 	if (
 		!isRecord(value) ||
@@ -76,6 +96,19 @@ function isParameterSpec(value: unknown): boolean {
 				optional(value.default, isBoolean) &&
 				optionalArray(value.examples, isBoolean) &&
 				absent(value, "enum", "dimensions", "min", "max")
+			);
+		case "array":
+			return (
+				isArrayItemSpec(value.items) &&
+				optionalArray(value.default, isArrayItem) &&
+				optional(value.min, isNumber) &&
+				optional(value.max, isNumber) &&
+				optional(value.unique, isBoolean) &&
+				optionalArray(
+					value.examples,
+					(example) => Array.isArray(example) && example.every(isArrayItem),
+				) &&
+				absent(value, "enum", "dimensions")
 			);
 		default:
 			return false;

@@ -2,6 +2,7 @@ import type { GenerationContentBlock, GenerationModelDeclaration } from "@neta-a
 import type { BillingPayload } from "../billing.js";
 import type { RequestSource } from "../provenance.js";
 export * from "./catalog.js";
+export * from "./operation.js";
 export * from "./policy.js";
 export * from "./session-messages.js";
 

@@ -1,7 +1,9 @@
-import type {
-	CreateGenerationTaskRequest,
-	GenerationContentBlock,
-	PublicGenerationDeclaration,
+import {
+	type CreateGenerationTaskRequest,
+	type GenerationContentBlock,
+	type GenerationParameterSpec,
+	type PublicGenerationDeclaration,
+	resolveGenerationOperation,
 } from "@cohub/protocol/generation";
 import type { TaskRunRecord } from "@neta-art/cohub";
 import type { BoardFrame, BoardTaskSnapshot } from "@neta-art/cohub/board";
@@ -35,7 +37,8 @@ function isGenerationContentBlock(
 	if (
 		block.type !== "image" &&
 		block.type !== "video" &&
-		block.type !== "audio"
+		block.type !== "audio" &&
+		block.type !== "3d"
 	)
 		return false;
 	const source = record(block.source);
@@ -204,6 +207,18 @@ export function modelAcceptsGenerationReferences(
 	model: PublicGenerationDeclaration,
 	references: readonly BoardGenerationReference[],
 ): boolean {
+	const candidates = model.operations
+		? Object.keys(model.operations).map((operation) =>
+				resolveGenerationOperation(model, { operation }),
+			)
+		: [model];
+	return candidates.some((candidate) => referencesFit(candidate, references));
+}
+
+function referencesFit(
+	model: PublicGenerationDeclaration,
+	references: readonly BoardGenerationReference[],
+): boolean {
 	for (const type of ["image", "video", "audio"] as const) {
 		const count = references.filter(
 			(reference) => reference.type === type,
@@ -292,6 +307,74 @@ export function validateBoardGeneration(input: {
 	return null;
 }
 
+type ArrayParameterSpec = Extract<GenerationParameterSpec, { type: "array" }>;
+
+function arrayItemError(
+	name: string,
+	items: ArrayParameterSpec["items"],
+	item: unknown,
+): string | null {
+	if (items.type === "string") {
+		if (typeof item !== "string") return `${name} must contain text.`;
+		if (items.enum && !items.enum.includes(item)) {
+			return `Choose a valid ${name.replaceAll("_", " ")}.`;
+		}
+		return null;
+	}
+	if (typeof item !== "number" || !Number.isInteger(item)) {
+		return `${name} must contain whole numbers.`;
+	}
+	if (items.min !== undefined && item < items.min) {
+		return `${name} must be at least ${items.min}.`;
+	}
+	if (items.max !== undefined && item > items.max) {
+		return `${name} must be at most ${items.max}.`;
+	}
+	return null;
+}
+
+function arrayParameterError(
+	name: string,
+	spec: ArrayParameterSpec,
+	value: unknown,
+): string | null {
+	if (!Array.isArray(value)) return `${name} must be a list.`;
+	if (spec.min !== undefined && value.length < spec.min) {
+		return `${name} needs at least ${spec.min} items.`;
+	}
+	if (spec.max !== undefined && value.length > spec.max) {
+		return `${name} allows at most ${spec.max} items.`;
+	}
+	if (spec.unique && new Set(value).size !== value.length) {
+		return `${name} must not repeat items.`;
+	}
+	for (const item of value) {
+		const error = arrayItemError(name, spec.items, item);
+		if (error) return error;
+	}
+	return null;
+}
+
+export function arrayParameterItems(value: unknown): unknown[] {
+	return Array.isArray(value) ? value : [];
+}
+
+export function arrayParameterText(value: unknown): string {
+	return arrayParameterItems(value).join(", ");
+}
+
+/** Splits the comma-separated text of an array parameter; whole-number items are parsed so validation rejects bad ones. */
+export function parseArrayParameterText(
+	text: string,
+	items: ArrayParameterSpec["items"],
+): unknown[] {
+	return text
+		.split(",")
+		.map((part) => part.trim())
+		.filter((part) => part !== "")
+		.map((part) => (items.type === "integer" ? Number(part) : part));
+}
+
 export function validateBoardGenerationParameters(
 	model: PublicGenerationDeclaration | null,
 	parameters: Readonly<Record<string, unknown>>,
@@ -340,6 +423,11 @@ export function validateBoardGenerationParameters(
 		}
 		if (spec.type === "boolean") {
 			if (typeof value !== "boolean") return `${name} must be true or false.`;
+			continue;
+		}
+		if (spec.type === "array") {
+			const error = arrayParameterError(name, spec, value);
+			if (error) return error;
 			continue;
 		}
 		if (
