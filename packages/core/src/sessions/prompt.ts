@@ -218,6 +218,7 @@ export type SessionPromptDependencies = {
     }): void | Promise<void>;
   };
   createSessionTurn(input: {
+    spaceId: string;
     sessionId: string;
     userUuid: string;
     userContent: ContentBlock[];
@@ -491,6 +492,7 @@ export const submitSessionPrompt = async (
   };
 
   const turn = await deps.createSessionTurn({
+    spaceId: input.spaceId,
     sessionId: input.sessionId,
     userUuid: userId,
     userContent: content,

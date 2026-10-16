@@ -326,7 +326,7 @@ export async function filterSessionsByPermission<TSession extends SpaceSessionLi
   });
 }
 
-type DrizzlePermissionDb = PostgresJsDatabase<Record<string, unknown>>;
+type DrizzlePermissionDb = Pick<PostgresJsDatabase<Record<string, unknown>>, "select">;
 
 export function createDrizzlePermissionStore(db: DrizzlePermissionDb): PermissionStore {
   return {

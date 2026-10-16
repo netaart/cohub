@@ -1,6 +1,6 @@
 import { UnrecoverableError } from "bullmq";
 import { getPromptAuthScopes, type PromptAuthContext } from "@cohub/core/sessions";
-import { normalizePermissionScopes, scopeListHasPermission, type Permission } from "@cohub/core/permissions";
+import { hasPermission, normalizePermissionScopes, scopeListHasPermission, type Permission, type PermissionStore } from "@cohub/core/permissions";
 
 /**
  * Resolves everything a delegated app authorization may do on a space, from
@@ -12,6 +12,24 @@ export type LiveScopeResolver = (input: {
   viewerUserUuid: string;
   spaceId: string;
 }) => Promise<{ appScopes: Permission[]; viewerScopes: Permission[] }>;
+
+export async function assertTaskPromptAccess(
+  input: { spaceId: string; sessionId?: string | null; userId: string; promptPermission: Permission; auth: PromptAuthContext | null },
+  store: PermissionStore,
+): Promise<void> {
+  if (input.sessionId && await store.getSessionSpaceId(input.sessionId) !== input.spaceId) {
+    throw new UnrecoverableError("Scheduled session does not belong to this space.");
+  }
+  if (input.auth && scopeListHasPermission(getPromptAuthScopes(input.auth, input.spaceId), input.promptPermission)) return;
+  if (input.auth || !(await hasPermission({
+    store,
+    user: { uuid: input.userId },
+    permission: input.promptPermission,
+    context: { spaceId: input.spaceId, sessionId: input.sessionId ?? undefined },
+  }))) {
+    throw new UnrecoverableError("Prompt permission is no longer available for this task.");
+  }
+}
 
 /**
  * Re-validates delegated app auth before a delayed prompt runs, before any
