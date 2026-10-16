@@ -152,10 +152,29 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
           });
           bridge.stdin?.on("error", () => undefined);
           const closed = new Promise<void>((resolve) => {
-            bridge.once("error", (error) => diagnostics.log("error", "sandboxd.process_error", { error: serializeDiagnosticError(error) }));
-            bridge.once("close", (code, exitSignal) => {
+            let drainTimer: ReturnType<typeof setTimeout> | undefined;
+            const detachStreams = () => {
+              // Descendants may inherit these pipes after sandboxd itself has
+              // exited. Detach only our pipe ends; they are not our processes.
+              for (const stream of bridge.stdio) stream?.destroy();
+            };
+            bridge.once("error", (error) => {
+              diagnostics.log("error", "sandboxd.process_error", { error: serializeDiagnosticError(error) });
+              if (bridge.pid === undefined) { childStopped = true; detachStreams(); }
+            });
+            bridge.once("exit", (code, exitSignal) => {
               childStopped = true;
               if (!signal.aborted) diagnostics.log("warn", "sandboxd.process_exit", { code, signal: exitSignal });
+              // Drain buffered diagnostics normally, but do not equate open
+              // inherited streams with a live bridge indefinitely.
+              drainTimer = setTimeout(() => {
+                diagnostics.log("warn", "sandboxd.stdio_drain_timeout");
+                detachStreams();
+              }, 1000);
+            });
+            bridge.once("close", () => {
+              childStopped = true;
+              clearTimeout(drainTimer);
               resolve();
             });
           });

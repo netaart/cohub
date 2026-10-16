@@ -149,6 +149,7 @@ test("detached Runtime confirms both components, survives bridge exit, and stops
     assert.equal(current?.pid, summary.pid, "only the crashed bridge restarts, not the supervisor");
     const events = await readRuntimeDiagnosticEvents(join(root, ".local", "state", "cohub", "runtime", spaceId), { limit: 100 });
     assert(events.some((event) => event.event === "sandboxd.process_exit"));
+    assert.equal(events.some((event) => event.event === "sandboxd.stdio_drain_timeout"), false);
     assert.equal(events.filter((event) => event.event === "sandboxd.connected").length, 2);
     await requestRuntimeInstance(directory, "stop", true);
     for (let i = 0; i < 40; i++) {
