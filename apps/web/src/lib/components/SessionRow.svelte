@@ -49,6 +49,7 @@ const {
 	renaming = false,
 	renameValue = "",
 	renameSaving = false,
+	renameError = "",
 	removeLabelTitle,
 	removeLabelDisabled = false,
 	onNavigate,
@@ -78,6 +79,7 @@ const {
 	renaming?: boolean;
 	renameValue?: string;
 	renameSaving?: boolean;
+	renameError?: string;
 	removeLabelTitle?: string;
 	removeLabelDisabled?: boolean;
 	onNavigate: (event: MouseEvent, session: SessionRecord) => void;
@@ -122,6 +124,7 @@ const GLYPHS: Record<
 
 const locale = $derived(getLocale());
 let renameInput = $state<HTMLInputElement | null>(null);
+const renameErrorId = $props.id();
 
 const dense = $derived(density === "dense");
 const isUnread = $derived(
@@ -184,6 +187,11 @@ const sourceBadge = $derived(
 const isFork = $derived(Boolean(tree && tree.depth > 0));
 const guide = $derived(
 	tree && (isFork || tree.hasChildren) ? (avatar ? "column" : "indent") : null,
+);
+const treeStyle = $derived(
+	guide
+		? `--tree-depth: ${tree?.depth}${guide === "indent" ? `; --tree-step: ${isMobile ? 10 : 12}px` : ""}`
+		: undefined,
 );
 
 function railX(level: number) {
@@ -289,28 +297,62 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 	<StatusGlyph tone="activity" class="[--status-glyph-size:7px]" />
 {/snippet}
 
+{#snippet treeGuide()}
+	{#if guide && tree}
+		<span class="tree" aria-hidden="true">
+			{#each tree.rails as level (level)}
+				<span class="tree-line" style:left={railX(level)}></span>
+			{/each}
+			{#if isFork}
+				<span class="tree-line" class:tree-elbow={tree.last} style:left={railX(tree.depth)}></span>
+			{/if}
+			{#if tree.hasChildren}
+				<span class="tree-line tree-stem" style:left={railX(tree.depth + 1)}></span>
+			{/if}
+		</span>
+	{/if}
+{/snippet}
+
 {#if renaming}
-	<ListRow {density} active data-session-rename leading={avatar ? leading : undefined}>
-		<input
-			bind:this={renameInput}
-			value={renameValue}
-			type="text"
-			class="min-w-0 flex-1 bg-transparent text-[length:var(--list-title-size)] leading-tight text-text-primary outline-none"
-			placeholder={m.sidebar_session_name({}, { locale })}
-			maxlength="80"
-			disabled={renameSaving}
-			oninput={(event) => onRenameValueChange?.(event.currentTarget.value)}
-			onkeydown={(event) => {
-				if (renameSaving) return;
-				if (event.key === "Enter") {
-					event.preventDefault();
-					onSubmitRename?.(session);
-				} else if (event.key === "Escape") {
-					event.preventDefault();
-					onCancelRename?.();
-				}
-			}}
-		/>
+	<ListRow
+		{density}
+		active
+		data-session-rename
+		class="session-row"
+		style={treeStyle}
+		data-tree={guide ?? undefined}
+		data-depth={guide ? tree?.depth : undefined}
+		leading={avatar ? leading : undefined}
+	>
+		{@render treeGuide()}
+		<div class="flex min-w-0 flex-1 flex-col">
+			<input
+				bind:this={renameInput}
+				value={renameValue}
+				type="text"
+				class="min-w-0 flex-1 bg-transparent text-[length:var(--list-title-size)] leading-tight text-text-primary outline-none"
+				placeholder={m.sidebar_session_name({}, { locale })}
+				aria-label={m.sidebar_session_name({}, { locale })}
+				aria-invalid={renameError ? true : undefined}
+				aria-describedby={renameError ? renameErrorId : undefined}
+				maxlength="80"
+				disabled={renameSaving}
+				oninput={(event) => onRenameValueChange?.(event.currentTarget.value)}
+				onkeydown={(event) => {
+					if (renameSaving || event.isComposing) return;
+					if (event.key === "Enter") {
+						event.preventDefault();
+						onSubmitRename?.(session);
+					} else if (event.key === "Escape") {
+						event.preventDefault();
+						onCancelRename?.();
+					}
+				}}
+			/>
+			{#if renameError}
+				<p id={renameErrorId} role="alert" class="truncate text-[10px] leading-3 text-error-soft" title={renameError}>{renameError}</p>
+			{/if}
+		</div>
 		<button
 			type="button"
 			class="shrink-0 rounded p-0.5 text-status-running transition-colors hover:bg-bg-hover disabled:opacity-50"
@@ -336,7 +378,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		{href}
 		{active}
 		class="session-row {hoverRoomClass} {isMobile ? 'select-none [-webkit-touch-callout:none]' : ''}"
-		style={guide ? `--tree-depth: ${tree?.depth}${guide === "indent" ? `; --tree-step: ${isMobile ? 10 : 12}px` : ""}` : undefined}
+		style={treeStyle}
 		data-tree={guide ?? undefined}
 		data-depth={guide ? tree?.depth : undefined}
 		data-unread={!dense && unread ? "" : undefined}
@@ -350,19 +392,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		ondragstart={(event: DragEvent) => onDragStart?.(event, session, title)}
 		ondragend={onDragEnd}
 	>
-		{#if guide && tree}
-			<span class="tree" aria-hidden="true">
-				{#each tree.rails as level (level)}
-					<span class="tree-line" style:left={railX(level)}></span>
-				{/each}
-				{#if isFork}
-					<span class="tree-line" class:tree-elbow={tree.last} style:left={railX(tree.depth)}></span>
-				{/if}
-				{#if tree.hasChildren}
-					<span class="tree-line tree-stem" style:left={railX(tree.depth + 1)}></span>
-				{/if}
-			</span>
-		{/if}
+		{@render treeGuide()}
 		<ListRowText
 			{title}
 			{meta}
