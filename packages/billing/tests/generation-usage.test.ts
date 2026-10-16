@@ -78,6 +78,10 @@ test("resolveGenerationUsageType falls back to content types for unknown adapter
 		COHUB_BILLING_USAGE_TYPES.generationVideo,
 	);
 	assert.equal(
+		resolveGenerationUsageType({ contentTypes: ["3d", "audio"] }),
+		COHUB_BILLING_USAGE_TYPES.generationMusic,
+	);
+	assert.equal(
 		resolveGenerationUsageType({ contentTypes: ["text"] }),
 		COHUB_BILLING_USAGE_TYPES.generation,
 	);

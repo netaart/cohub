@@ -10,7 +10,7 @@ import {
   serializeBillingWarning,
 } from "@cohub/billing";
 import { Hono, type Context } from "hono";
-import { createGenerationClient, GenerationValidationError } from "@neta-art/generation";
+import { GenerationValidationError } from "@neta-art/generation";
 import {
   GENERATION_TASK_TYPE,
   type CreateGenerationTaskResponse,
@@ -20,7 +20,7 @@ import { useAuth, authzDenied } from "../lib/middleware.js";
 import { billingBlockedResponse } from "../lib/billing-blocked.js";
 import { hasPermission } from "../permissions.js";
 import { loadGenerationDeclaration } from "../generations/declarations.js";
-import { createGenerationTaskRequestSchema } from "../generations/schema.js";
+import { createGenerationTaskRequestSchema, resolveGenerationRequestParameters } from "../generations/schema.js";
 import { getSpaceSessionById } from "../space-sessions.js";
 import { getSessionTurnById } from "../session-turns.js";
 import { enqueueTask } from "../tasks.js";
@@ -90,16 +90,7 @@ router.post("/", async (c) => {
 
   let parameters: Record<string, unknown> | undefined;
   try {
-    const resolved = createGenerationClient({
-      models: [declaration],
-      includeBuiltinModels: false,
-    }).validate({
-      model: request.model,
-      content: request.content,
-      parameters: request.parameters,
-      meta,
-    });
-    parameters = resolved.parameters;
+    parameters = resolveGenerationRequestParameters(declaration, request);
   } catch (error) {
     if (error instanceof GenerationValidationError) {
       return generationError(c, 400, "invalid_generation_input", error.message);

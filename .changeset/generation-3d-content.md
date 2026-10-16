@@ -2,4 +2,4 @@
 "@neta-art/cohub": patch
 ---
 
-Generation requests accept `3d` content blocks, so 3D models such as Meshy can retexture, remesh, rig and animate existing models. `publicAssets.uploadGenerationInput` accepts 3D model files (`model/*`), and 3D generations bill as `generation.3d`.
+`generations.create` accepts `3d` content blocks, so a generation can take a 3D model as input. `publicAssets.uploadGenerationInput` accepts GLB, glTF, OBJ, FBX and STL models whose `filename` ends with the format's extension; the uploaded file keeps that extension.

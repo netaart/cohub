@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AVATAR_MAX_FILE_BYTES, UPLOAD_ERROR_FILE_TOO_LARGE, UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
+import { mimeTypeForPath } from "@cohub/protocol/fs";
 import { config } from "./config.js";
 import { createPresignedPutObjectUrl } from "./object-presign.js";
 import { buildPublicAssetCdnUrl, requirePublicAssetOssStorage } from "./public-file-storage.js";
@@ -33,7 +34,7 @@ export type CreatePublicAssetUploadInput = {
   file: {
     size: number;
     mimeType: string;
-    /** Optional original name — used only for chat_attachment object key extension. */
+    /** Optional original name: gives the object key its extension and identifies 3D model generation inputs. */
     filename?: string;
   };
 };
@@ -92,10 +93,6 @@ const CHAT_MIME_EXTENSIONS: Record<string, string> = {
   "audio/wav": "wav",
   "video/mp4": "mp4",
   "video/webm": "webm",
-  "model/gltf-binary": "glb",
-  "model/gltf+json": "gltf",
-  "model/obj": "obj",
-  "model/stl": "stl",
 };
 
 
@@ -160,20 +157,39 @@ const normalizeSessionImageMimeType = (mimeType: unknown) => {
   return value;
 };
 
-/** Generation inputs are media and 3D models a provider fetches by URL; active types were already neutralized. */
-const normalizeGenerationInputMimeType = (mimeType: unknown) => {
-  const value = normalizeChatMimeType(mimeType);
-  if (!/^(image|video|audio|model)\//.test(value)) {
-    throw new PublicAssetValidationError("generation inputs must be image, video, audio, or 3D model files");
-  }
-  return value;
+/**
+ * 3D model formats generation providers fetch by URL (Meshy takes GLB, glTF, OBJ, FBX and STL). Providers read the
+ * format from the URL extension, so a model input is recognized by its filename extension and stored with that
+ * extension's type; FBX has no registered type and stays `application/octet-stream`.
+ */
+const GENERATION_INPUT_MODEL_EXTENSIONS = new Set(["glb", "gltf", "obj", "fbx", "stl"]);
+const UNKNOWN_BINARY_TYPE = "application/octet-stream";
+
+const generationInputModelType = (mimeType: string, filename: string | undefined) => {
+  const extension = safeExtensionFromFilename(filename);
+  if (!extension || !GENERATION_INPUT_MODEL_EXTENSIONS.has(extension)) return null;
+  const modelType = mimeTypeForPath(`model.${extension}`) ?? UNKNOWN_BINARY_TYPE;
+  return mimeType === modelType || mimeType === UNKNOWN_BINARY_TYPE ? modelType : null;
 };
 
-const normalizeUploadMimeType = (purpose: PublicAssetPurpose, mimeType: string) => {
-  if (purpose === "chat_attachment") return normalizeChatMimeType(mimeType);
-  if (purpose === "generation_input") return normalizeGenerationInputMimeType(mimeType);
-  if (purpose === "session_image") return normalizeSessionImageMimeType(mimeType);
-  return mimeType;
+/** Generation inputs are media and 3D models a provider fetches by URL; active types were already neutralized. */
+const normalizeGenerationInputMimeType = (mimeType: unknown, filename: string | undefined) => {
+  const value = normalizeChatMimeType(mimeType);
+  if (/^(image|video|audio)\//.test(value)) return value;
+  const modelType = generationInputModelType(value, filename);
+  if (!modelType) {
+    throw new PublicAssetValidationError(
+      "generation inputs must be image, video, or audio, or a GLB, glTF, OBJ, FBX, or STL model named with its extension",
+    );
+  }
+  return modelType;
+};
+
+const normalizeUploadMimeType = (purpose: PublicAssetPurpose, file: { mimeType: string; filename?: string }) => {
+  if (purpose === "chat_attachment") return normalizeChatMimeType(file.mimeType);
+  if (purpose === "generation_input") return normalizeGenerationInputMimeType(file.mimeType, file.filename);
+  if (purpose === "session_image") return normalizeSessionImageMimeType(file.mimeType);
+  return file.mimeType;
 };
 
 const chatAttachmentContentDisposition = (filename?: string) => {
@@ -280,10 +296,10 @@ export const assertPublicAssetUploadFile = (input: {
   if (!Number.isSafeInteger(file.size) || file.size <= 0) throw new PublicAssetValidationError("invalid file size");
 
   if (input.purpose === "chat_attachment" || input.purpose === "app_source" || input.purpose === "generation_input" || input.purpose === "session_image") {
-    normalizeUploadMimeType(input.purpose, file.mimeType);
     if (file.filename != null && (typeof file.filename !== "string" || file.filename.length > 255)) {
       throw new PublicAssetValidationError("invalid filename");
     }
+    normalizeUploadMimeType(input.purpose, file);
     if (file.size > UPLOAD_MAX_FILE_BYTES) {
       throw new PublicAssetValidationError(`${input.purpose.replace("_", " ")} is too large`, UPLOAD_ERROR_FILE_TOO_LARGE);
     }
@@ -340,7 +356,7 @@ const signPutUrl = (input: PublicAssetPlanInput, objectKey: string, mimeType: st
 
 const createPutPlan = (input: PublicAssetPlanInput): CreateInternalPublicAssetUploadResponse => {
   assertPublicAssetUploadFile({ purpose: input.purpose, file: input.file });
-  const mimeType = normalizeUploadMimeType(input.purpose, input.file.mimeType);
+  const mimeType = normalizeUploadMimeType(input.purpose, input.file);
   const objectKey = buildPublicAssetObjectKey({
     purpose: input.purpose,
     userUuid: input.userUuid,

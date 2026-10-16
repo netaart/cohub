@@ -1,3 +1,4 @@
+import { createGenerationClient, type GenerationModelDeclaration } from "@neta-art/generation";
 import { z } from "zod";
 
 const metaSchema = z.record(z.string(), z.unknown());
@@ -27,3 +28,19 @@ export const createGenerationTaskRequestSchema = z.object({
 });
 
 export type CreateGenerationTaskRequestInput = z.infer<typeof createGenerationTaskRequestSchema>;
+
+/**
+ * Validates a parsed request against its model declaration, including the operation it selects, and returns the
+ * resolved parameters. Throws `GenerationValidationError` for content or parameters the model does not accept.
+ */
+export function resolveGenerationRequestParameters(
+  declaration: GenerationModelDeclaration,
+  request: CreateGenerationTaskRequestInput,
+): Record<string, unknown> | undefined {
+  return createGenerationClient({ models: [declaration], includeBuiltinModels: false }).validate({
+    model: request.model,
+    content: request.content,
+    parameters: request.parameters,
+    meta: request.meta,
+  }).parameters;
+}

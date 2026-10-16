@@ -199,8 +199,10 @@ function usageTypeFromContentTypes(contentTypes: Iterable<string> | null | undef
   }
   // Prefer the highest-cost media family when multiple are present.
   if (sawVideo) return COHUB_BILLING_USAGE_TYPES.generationVideo;
-  if (saw3d) return COHUB_BILLING_USAGE_TYPES.generation3d;
   if (sawAudio) return COHUB_BILLING_USAGE_TYPES.generationMusic;
+  // 3D models also take reference images and return thumbnails and texture maps, so a 3d block marks the
+  // generation as 3D whenever images come with it.
+  if (saw3d) return COHUB_BILLING_USAGE_TYPES.generation3d;
   if (sawImage) return COHUB_BILLING_USAGE_TYPES.generationImage;
   return null;
 }
