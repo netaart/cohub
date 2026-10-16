@@ -2,9 +2,7 @@ import type { ModelFormat } from "@cohub/protocol/fs";
 import {
 	type BoardAssetSource,
 	type BoardSceneItem,
-	boardModelFormat,
-	fileStem,
-	isBoardModelItem,
+	boardModelTarget,
 	parseBoardMediaSource,
 } from "@neta-art/cohub/board";
 import type { BoardModelPreviews } from "@neta-art/cohub/board/stage";
@@ -55,17 +53,15 @@ export function boardModelSource(
 	item: BoardSceneItem | null | undefined,
 	assetSource: BoardAssetSource,
 ): ModelSource | null {
-	if (item?.type !== "file" || !isBoardModelItem(item)) return null;
-	const { src, snapshot } = item.props;
-	const format = boardModelFormat(src, snapshot?.mimeType);
-	if (!format) return null;
+	const target = boardModelTarget(item);
+	if (!target) return null;
 	return cardModelSource(
 		{
-			key: `${src}:${snapshot?.mtimeMs ?? ""}`,
-			name: snapshot?.title || fileStem(src),
-			src,
-			format,
-			size: snapshot?.size,
+			key: target.key,
+			name: target.title,
+			src: target.src,
+			format: target.format,
+			size: target.size,
 		},
 		assetSource,
 	);

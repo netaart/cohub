@@ -1,12 +1,35 @@
-import type {
-	CreateGenerationTaskRequest,
-	GenerationContentBlock,
-	PublicGenerationDeclaration,
+import {
+	asRecord,
+	blockUrl,
+	featuredTaskArtifact,
+	generationOutput,
+} from "@cohub/protocol";
+import {
+	type CreateGenerationTaskRequest,
+	type GenerationContentBlock,
+	type GenerationContentSpec,
+	type GenerationOperation,
+	generationModelInputType,
+	generationOperations,
+	type PublicGenerationDeclaration,
+	resolveGenerationOperation,
 } from "@cohub/protocol/generation";
 import type { TaskRunRecord } from "@neta-art/cohub";
-import type { BoardFrame, BoardTaskSnapshot } from "@neta-art/cohub/board";
+import {
+	type BoardFrame,
+	type BoardSceneItem,
+	type BoardTaskSnapshot,
+	boardItemOrigin,
+	parseBoardMediaSource,
+} from "@neta-art/cohub/board";
+import {
+	type GenerationParameterValues,
+	generationParametersError,
+} from "$lib/generation-parameters";
+import type { Locale } from "$lib/i18n/locale";
+import { m } from "$lib/paraglide/messages.js";
 
-export type BoardGenerationMediaType = "image" | "video" | "audio";
+export type BoardGenerationMediaType = "image" | "video" | "audio" | "3d";
 
 export type BoardGenerationReference = {
 	id: string;
@@ -14,8 +37,16 @@ export type BoardGenerationReference = {
 	url: string;
 	label: string;
 	role?: string;
+	/** Output meta of the generation the reference came from, which chains 3D operations to its provider task. */
+	meta?: Record<string, unknown>;
 };
 
+const MEDIA_TYPES: readonly BoardGenerationMediaType[] = [
+	"image",
+	"video",
+	"audio",
+	"3d",
+];
 const REGENERATED_TASK_GAP = 48;
 const PENDING_TASK_WIDTH = 300;
 
@@ -25,6 +56,10 @@ function record(value: unknown): Record<string, unknown> | null {
 		: null;
 }
 
+function isMediaType(value: unknown): value is BoardGenerationMediaType {
+	return MEDIA_TYPES.includes(value as BoardGenerationMediaType);
+}
+
 function isGenerationContentBlock(
 	value: unknown,
 ): value is GenerationContentBlock {
@@ -32,12 +67,7 @@ function isGenerationContentBlock(
 	if (!block) return false;
 	if (block.meta !== undefined && !record(block.meta)) return false;
 	if (block.type === "text") return typeof block.text === "string";
-	if (
-		block.type !== "image" &&
-		block.type !== "video" &&
-		block.type !== "audio"
-	)
-		return false;
+	if (!isMediaType(block.type)) return false;
 	const source = record(block.source);
 	if (source?.type === "url") return typeof source.url === "string";
 	return (
@@ -90,9 +120,10 @@ export function regenerationRequestFromTaskRun(
 const RATIO_PATTERN = /^(\d+(?:\.\d+)?)\s*[x×:/]\s*(\d+(?:\.\d+)?)$/i;
 
 export function generationAspectRatio(
-	model: Pick<PublicGenerationDeclaration, "parameters">,
+	model: Pick<PublicGenerationDeclaration, "parameters" | "category">,
 	parameters: Readonly<Record<string, unknown>>,
 ): number | undefined {
+	if (model.category === "3d") return 1;
 	for (const name of ["aspect_ratio", "ratio", "size"]) {
 		const value = parameters[name] ?? model.parameters?.[name]?.default;
 		const match =
@@ -144,17 +175,15 @@ export function parseBoardGenerationReferences(
 ): BoardGenerationReference[] {
 	if (!Array.isArray(value)) return [];
 	return value.flatMap((candidate) => {
-		if (!candidate || typeof candidate !== "object") return [];
-		const reference = candidate as Record<string, unknown>;
+		const reference = record(candidate);
+		if (!reference) return [];
 		const url =
 			typeof reference.url === "string"
 				? normalizeGenerationReferenceUrl(reference.url)
 				: null;
 		if (
 			typeof reference.id !== "string" ||
-			(reference.type !== "image" &&
-				reference.type !== "video" &&
-				reference.type !== "audio") ||
+			!isMediaType(reference.type) ||
 			!url ||
 			typeof reference.label !== "string"
 		) {
@@ -164,6 +193,7 @@ export function parseBoardGenerationReferences(
 			typeof reference.role === "string" && reference.role.trim()
 				? reference.role.trim()
 				: undefined;
+		const meta = record(reference.meta);
 		return [
 			{
 				id: reference.id,
@@ -171,15 +201,64 @@ export function parseBoardGenerationReferences(
 				url,
 				label: reference.label,
 				...(role ? { role } : {}),
+				...(meta ? { meta } : {}),
 			},
 		];
 	});
 }
 
+function sourceFileName(src: string) {
+	const source = parseBoardMediaSource(src);
+	if (!source) return "";
+	const path =
+		source.kind === "url" ? new URL(source.value).pathname : source.value;
+	return path.split("/").pop() ?? "";
+}
+
+/** The input type a Board item gives a generation, or null when it gives none. */
+export function boardGenerationReferenceType(
+	item: BoardSceneItem,
+): BoardGenerationMediaType | null {
+	if (item.type === "image" || item.type === "video" || item.type === "audio")
+		return item.type;
+	if (item.type === "file") {
+		const mimeType = item.props.snapshot?.mimeType ?? "";
+		if (mimeType.startsWith("image/")) return "image";
+		if (mimeType.startsWith("video/")) return "video";
+		if (mimeType.startsWith("audio/")) return "audio";
+		return generationModelInputType(sourceFileName(item.props.src))
+			? "3d"
+			: null;
+	}
+	if (item.type === "task") {
+		const type = featuredTaskArtifact(item.props.snapshot.artifacts)?.type;
+		return isMediaType(type) ? type : null;
+	}
+	return null;
+}
+
+/** The generation run whose output a Board item shows. */
+export function boardGenerationSourceRun(item: BoardSceneItem): string | null {
+	if (item.type === "task") return item.props.taskRunId;
+	return boardItemOrigin(item)?.taskRunId ?? null;
+}
+
+/** The meta of the run output at `url`, which a follow-up operation reads to reuse the provider task. */
+export function generationOutputMeta(
+	run: Pick<TaskRunRecord, "result">,
+	url: string,
+): Record<string, unknown> | undefined {
+	const block = generationOutput(run).find(
+		(candidate) => blockUrl(candidate) === url,
+	);
+	const meta = block ? asRecord(block.meta) : null;
+	return meta ? { ...meta } : undefined;
+}
+
 export function generationInputSpec(
-	model: PublicGenerationDeclaration,
+	model: Pick<PublicGenerationDeclaration, "content">,
 	type: "text" | BoardGenerationMediaType,
-) {
+): GenerationContentSpec | null {
 	return model.content.input.find((spec) => spec.type === type) ?? null;
 }
 
@@ -200,11 +279,11 @@ export function supportsBoardGenerationComposer(
 	);
 }
 
-export function modelAcceptsGenerationReferences(
-	model: PublicGenerationDeclaration,
+function inputsAccept(
+	model: Pick<PublicGenerationDeclaration, "content">,
 	references: readonly BoardGenerationReference[],
 ): boolean {
-	for (const type of ["image", "video", "audio"] as const) {
+	for (const type of MEDIA_TYPES) {
 		const count = references.filter(
 			(reference) => reference.type === type,
 		).length;
@@ -217,145 +296,140 @@ export function modelAcceptsGenerationReferences(
 	return true;
 }
 
-export function defaultGenerationReferenceRole(
+/** Whether an operation of a model takes these references. */
+export function operationAcceptsGenerationReferences(
 	model: PublicGenerationDeclaration,
+	operation: GenerationOperation,
+	references: readonly BoardGenerationReference[],
+): boolean {
+	return inputsAccept(
+		resolveGenerationOperation(model, { operation: operation.name }),
+		references,
+	);
+}
+
+/** Whether a model takes these references; a model with operations does when any operation does. */
+export function modelAcceptsGenerationReferences(
+	model: PublicGenerationDeclaration,
+	references: readonly BoardGenerationReference[],
+): boolean {
+	const operations = generationOperations(model);
+	return operations.length > 0
+		? operations.some((operation) =>
+				operationAcceptsGenerationReferences(model, operation, references),
+			)
+		: inputsAccept(model, references);
+}
+
+export function defaultGenerationReferenceRole(
+	model: Pick<PublicGenerationDeclaration, "content">,
 	type: BoardGenerationMediaType,
 ): string | undefined {
 	const spec = generationInputSpec(model, type);
 	return spec?.roleRequired ? spec.roles?.[0] : undefined;
 }
 
+function inputTypeLabel(
+	type: "text" | BoardGenerationMediaType,
+	locale: Locale,
+): string {
+	switch (type) {
+		case "text":
+			return m.generation_input_text({}, { locale });
+		case "image":
+			return m.generation_input_image({}, { locale });
+		case "video":
+			return m.generation_input_video({}, { locale });
+		case "audio":
+			return m.generation_input_audio({}, { locale });
+		case "3d":
+			return m.generation_input_3d({}, { locale });
+	}
+}
+
+function inputCountError(
+	spec: GenerationContentSpec,
+	count: number,
+	locale: Locale,
+): string | null {
+	const type = inputTypeLabel(spec.type, locale);
+	if (spec.required === true && count === 0)
+		return m.generation_input_required({ type }, { locale });
+	if (typeof spec.min === "number" && count < spec.min)
+		return m.generation_inputs_min({ type, count: spec.min }, { locale });
+	if (typeof spec.max === "number" && count > spec.max)
+		return m.generation_inputs_max({ type, count: spec.max }, { locale });
+	return null;
+}
+
+function roleError(
+	spec: GenerationContentSpec,
+	references: readonly BoardGenerationReference[],
+	locale: Locale,
+): string | null {
+	if (spec.type === "text") return null;
+	const ofType = references.filter((reference) => reference.type === spec.type);
+	const type = inputTypeLabel(spec.type, locale);
+	if (spec.roleRequired && ofType.some((reference) => !reference.role))
+		return m.generation_input_role_required({ type }, { locale });
+	if (
+		spec.roles &&
+		ofType.some(
+			(reference) =>
+				reference.role !== undefined && !spec.roles?.includes(reference.role),
+		)
+	)
+		return m.generation_input_role_invalid({ type }, { locale });
+	return null;
+}
+
+/** Why the composer cannot start this generation, or null when it can. */
 export function validateBoardGeneration(input: {
 	model: PublicGenerationDeclaration | null;
 	prompt: string;
 	references: readonly BoardGenerationReference[];
+	parameters: Readonly<GenerationParameterValues>;
+	locale: Locale;
 }): string | null {
-	const { model, references } = input;
-	if (!model) return "Select a model.";
-	if (!supportsBoardGenerationComposer(model, references)) {
-		return QWEN_REFERENCE_VOICE_MODELS.has(model.model)
-			? "Add an audio reference for this model."
-			: "This model requires additional metadata.";
+	const { model: declared, references, locale } = input;
+	if (!declared) return m.generation_select_model({}, { locale });
+	if (!supportsBoardGenerationComposer(declared, references)) {
+		return QWEN_REFERENCE_VOICE_MODELS.has(declared.model)
+			? m.generation_audio_reference_required({}, { locale })
+			: m.generation_meta_required({}, { locale });
 	}
-	if (!modelAcceptsGenerationReferences(model, references)) {
-		return "The selected model does not support these references.";
-	}
+	const parametersError = generationParametersError(
+		declared,
+		input.parameters,
+		locale,
+	);
+	if (parametersError) return parametersError;
+	const model = resolveGenerationOperation(declared, input.parameters);
+	if (!inputsAccept(model, references))
+		return m.generation_inputs_unsupported({}, { locale });
 
 	const textCount = input.prompt.trim() ? 1 : 0;
-	if (textCount > 0 && !generationInputSpec(model, "text")) {
-		return "The selected model does not support text input.";
-	}
+	if (textCount > 0 && !generationInputSpec(model, "text"))
+		return m.generation_text_unsupported({}, { locale });
 	for (const spec of model.content.input) {
 		const count =
 			spec.type === "text"
 				? textCount
 				: references.filter((reference) => reference.type === spec.type).length;
-		if (spec.required === true && count === 0) {
-			return `Add ${spec.type} input.`;
-		}
-		if (typeof spec.min === "number" && count < spec.min) {
-			return `Add at least ${spec.min} ${spec.type} inputs.`;
-		}
-		if (typeof spec.max === "number" && count > spec.max) {
-			return `Use at most ${spec.max} ${spec.type} inputs.`;
-		}
-		if (
-			spec.roleRequired &&
-			spec.type !== "text" &&
-			references.some(
-				(reference) => reference.type === spec.type && !reference.role,
-			)
-		) {
-			return `Choose a role for each ${spec.type} reference.`;
-		}
-		if (
-			spec.type !== "text" &&
-			spec.roles &&
-			references.some(
-				(reference) =>
-					reference.type === spec.type &&
-					reference.role !== undefined &&
-					!spec.roles?.includes(reference.role),
-			)
-		) {
-			return `Choose a valid role for each ${spec.type} reference.`;
-		}
+		const error =
+			inputCountError(spec, count, locale) ??
+			roleError(spec, references, locale);
+		if (error) return error;
 	}
 
 	if (
-		QWEN_AUDIO_3_MODELS.has(model.model) &&
+		QWEN_AUDIO_3_MODELS.has(declared.model) &&
 		Array.from(input.prompt.trim()).length < 15
 	) {
-		return "Enter at least 15 characters for this model.";
+		return m.generation_prompt_min_length({ count: 15 }, { locale });
 	}
-	if (textCount === 0 && references.length === 0) return "Add an input.";
-	return null;
-}
-
-export function validateBoardGenerationParameters(
-	model: PublicGenerationDeclaration | null,
-	parameters: Readonly<Record<string, unknown>>,
-): string | null {
-	if (!model) return null;
-	for (const [name, spec] of Object.entries(model.parameters ?? {})) {
-		const value = parameters[name];
-		if (value === undefined) {
-			if (spec.default === undefined && spec.optional !== true) {
-				return `Set ${name.replaceAll("_", " ")}.`;
-			}
-			continue;
-		}
-		if (spec.type === "string") {
-			if (typeof value !== "string") return `${name} must be text.`;
-			if (spec.enum && !spec.enum.includes(value)) {
-				return `Choose a valid ${name.replaceAll("_", " ")}.`;
-			}
-			if (spec.dimensions) {
-				const { min, max, multipleOf, separator = "x" } = spec.dimensions;
-				const parts = value.split(separator);
-				if (parts.length !== 2 || parts.some((part) => !/^\d+$/.test(part))) {
-					return `Use WIDTH${separator}HEIGHT for ${name}.`;
-				}
-				const dimensions = parts.map(Number);
-				if (
-					min !== undefined &&
-					dimensions.some((dimension) => dimension < min)
-				) {
-					return `${name} must be at least ${min}.`;
-				}
-				if (
-					max !== undefined &&
-					dimensions.some((dimension) => dimension > max)
-				) {
-					return `${name} must be at most ${max}.`;
-				}
-				if (
-					multipleOf !== undefined &&
-					dimensions.some((dimension) => dimension % multipleOf !== 0)
-				) {
-					return `${name} must use multiples of ${multipleOf}.`;
-				}
-			}
-			continue;
-		}
-		if (spec.type === "boolean") {
-			if (typeof value !== "boolean") return `${name} must be true or false.`;
-			continue;
-		}
-		if (
-			typeof value !== "number" ||
-			!Number.isFinite(value) ||
-			(spec.type === "integer" && !Number.isInteger(value))
-		) {
-			return `${name} must be a valid ${spec.type}.`;
-		}
-		if (spec.min !== undefined && value < spec.min) {
-			return `${name} must be at least ${spec.min}.`;
-		}
-		if (spec.max !== undefined && value > spec.max) {
-			return `${name} must be at most ${spec.max}.`;
-		}
-	}
+	if (textCount === 0 && references.length === 0)
+		return m.generation_input_missing({}, { locale });
 	return null;
 }
 
@@ -367,10 +441,14 @@ export function buildBoardGenerationContent(
 	const text = prompt.trim();
 	if (text) content.push({ type: "text", text });
 	for (const reference of references) {
+		const meta = {
+			...reference.meta,
+			...(reference.role ? { role: reference.role } : {}),
+		};
 		content.push({
 			type: reference.type,
 			source: { type: "url", url: reference.url },
-			...(reference.role ? { meta: { role: reference.role } } : {}),
+			...(Object.keys(meta).length > 0 ? { meta } : {}),
 		});
 	}
 	return content;

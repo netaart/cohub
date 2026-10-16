@@ -3,7 +3,7 @@ import { hostSavesFiles } from "$lib/host-files";
 
 export type DownloadableMedia = {
 	src: string;
-	type: "image" | "video" | "audio";
+	type: "image" | "video" | "audio" | "3d";
 	filename?: string;
 	mimeType?: string;
 };
@@ -26,7 +26,12 @@ const EXTENSION_BY_MIME: Record<string, string> = {
 	"audio/ogg": "ogg",
 	"audio/flac": "flac",
 };
-const DEFAULT_EXTENSION = { image: "png", video: "mp4", audio: "mp3" } as const;
+const DEFAULT_EXTENSION = {
+	image: "png",
+	video: "mp4",
+	audio: "mp3",
+	"3d": "glb",
+} as const;
 const EXTENSION_PATTERN = /\.[a-z0-9]{2,5}$/i;
 const UNSAFE_CHARS = /[\\/:*?"<>|]+/g;
 

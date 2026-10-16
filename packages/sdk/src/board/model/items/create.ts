@@ -9,6 +9,7 @@ import {
 	pointsRect,
 } from "@cohub/protocol";
 import { BOARD_DRAW_STROKE_SIZE } from "@cohub/protocol/board-constants";
+import { mimeTypeForPath } from "@cohub/protocol/fs";
 import { quantizeDrawCoordinate } from "../draw-input.js";
 import { filePreviewKind } from "../file-preview.js";
 import { type BoardFileSnapshotFacts, fileStem } from "../file-snapshot.js";
@@ -172,7 +173,7 @@ export function createTaskBoardItem(
 			)
 		: artifact?.type === "audio"
 			? DEFAULT_TASK_MEDIA_SIZE
-			: expectedTaskSize(aspect);
+			: expectedTaskSize(artifact?.type === "3d" ? 1 : aspect);
 	return {
 		id,
 		item: item({
@@ -363,7 +364,7 @@ const RESULT_MAX_HEIGHT = 480;
 
 export function boardItemOrigin(item: BoardItem): BoardMediaOrigin | null {
 	if (item.type === "image" || item.type === "video" || item.type === "audio") return item.props.origin ?? null;
-	if (item.type !== "text") return null;
+	if (item.type !== "text" && item.type !== "file") return null;
 	const parsed = BoardMediaOriginSchema.safeParse(item.metadata?.origin);
 	return parsed.success ? parsed.data : null;
 }
@@ -414,6 +415,21 @@ function taskResultItem(
 		return {
 			id,
 			item: item({ type: "text", position: { x, y }, metadata: { origin }, props: { text: artifact.textExcerpt, width: RESULT_TEXT_WIDTH } }),
+		};
+	}
+	if (artifact.type === "3d") {
+		const title = artifact.title ?? fileStem(artifact.url);
+		const mimeType = artifact.mimeType ?? mimeTypeForPath(artifact.format ? `model.${artifact.format}` : artifact.url) ?? undefined;
+		const size = boardModelFormat(artifact.url, mimeType) ? { width: rowHeight, height: rowHeight } : DEFAULT_FILE_SIZE;
+		return {
+			id,
+			item: item({
+				type: "file",
+				position: { x, y },
+				size,
+				metadata: { origin },
+				props: { src: artifact.url, snapshot: cleanSnapshot({ title, mimeType }) },
+			}),
 		};
 	}
 	const snapshot = cleanSnapshot({

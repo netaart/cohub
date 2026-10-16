@@ -346,6 +346,7 @@ export const BoardTaskArtifactSchema = z.discriminatedUnion("type", [
 	z.object({ ...artifactBase, type: z.literal("image"), naturalWidth: finite.positive().optional(), naturalHeight: finite.positive().optional() }).strict(),
 	z.object({ ...artifactBase, type: z.literal("video"), previewUrl: httpsUrl.optional(), durationMs: z.number().int().positive().optional(), naturalWidth: finite.positive().optional(), naturalHeight: finite.positive().optional() }).strict(),
 	z.object({ ...artifactBase, type: z.literal("audio"), previewUrl: httpsUrl.optional(), durationMs: z.number().int().positive().optional() }).strict(),
+	z.object({ ...artifactBase, type: z.literal("3d"), format: z.string().min(1).max(16).optional(), previewUrl: httpsUrl.optional() }).strict(),
 	z.object({ id: z.string().min(1).max(240), type: z.literal("text"), title: z.string().max(240).optional(), textExcerpt: z.string().min(1).max(480) }).strict(),
 ]);
 export type BoardTaskArtifact = z.infer<typeof BoardTaskArtifactSchema>;

@@ -2,16 +2,21 @@ import type { GenerationContentBlock, GenerationModelDeclaration } from "@neta-a
 import type { BillingPayload } from "../billing.js";
 import type { RequestSource } from "../provenance.js";
 export * from "./catalog.js";
+export * from "./model-inputs.js";
+export * from "./operation.js";
 export * from "./policy.js";
 export * from "./session-messages.js";
 
 export type {
   GenerateRequest,
+  GenerationArrayItemSpec,
   GenerationContentBlock,
   GenerationContentBlockMeta,
   GenerationContentSpec,
+  GenerationModelCategory,
   GenerationModelDeclaration,
   GenerationModelPricing,
+  GenerationOperationSpec,
   GenerationParameterSpec,
   GenerationResult,
   GenerationSource,

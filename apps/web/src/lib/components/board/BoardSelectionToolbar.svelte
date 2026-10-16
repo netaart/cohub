@@ -27,6 +27,7 @@ import {
 	Sparkles,
 	Trash2,
 } from "lucide-svelte";
+import { boardGenerationReferenceType } from "$lib/board/board-generation";
 import { boardSelectionColor } from "$lib/board/board-selection-color";
 import type { BoardEditor } from "$lib/board/editor.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -73,10 +74,7 @@ const plainFrames = $derived(
 );
 const canDistribute = $derived(editor.selection.length >= 3);
 const canGenerate = $derived(
-	editor.selectedItems.some(
-		(item) =>
-			item.type === "image" || item.type === "video" || item.type === "audio",
-	),
+	editor.selectedItems.some((item) => boardGenerationReferenceType(item)),
 );
 const single = $derived(
 	editor.selectedItems.length === 1 ? (editor.selectedItems[0] ?? null) : null,

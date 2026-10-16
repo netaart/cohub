@@ -5,7 +5,7 @@ import {
 	type MediaVariantSize,
 	mediaPreviewCandidates,
 } from "@neta-art/cohub/media";
-import { AlertCircle, Info, Play } from "lucide-svelte";
+import { AlertCircle, Box, Info, Play } from "lucide-svelte";
 import { clock } from "$lib/clock.svelte";
 import EntityIcon from "$lib/components/EntityIcon.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -126,6 +126,8 @@ const durationMs = $derived(output?.durationMs ?? probed?.durationMs);
 							<EntityIcon name="audio" class="h-5 w-5" />
 						{:else if output?.type === "video"}
 							<EntityIcon name="video" class="h-5 w-5" />
+						{:else if output?.type === "3d"}
+							<Box class="h-5 w-5" />
 						{:else}
 							<EntityIcon name="image" class="h-5 w-5" />
 						{/if}
@@ -137,7 +139,12 @@ const durationMs = $derived(output?.durationMs ?? probed?.durationMs);
 		{#if output?.type === "video" || output?.type === "audio"}
 			<span class="tile-badge"><Play class="h-3 w-3" /></span>
 			{#if durationMs}
-				<span class="tile-duration">{formatElapsed(durationMs)}</span>
+				<span class="tile-label">{formatElapsed(durationMs)}</span>
+			{/if}
+		{:else if output?.type === "3d"}
+			<span class="tile-badge"><Box class="h-3 w-3" /></span>
+			{#if output.format}
+				<span class="tile-label uppercase">{output.format}</span>
 			{/if}
 		{/if}
 	</button>
@@ -213,7 +220,7 @@ const durationMs = $derived(output?.durationMs ?? probed?.durationMs);
 		pointer-events: none;
 	}
 
-	.tile-duration {
+	.tile-label {
 		position: absolute;
 		right: 6px;
 		bottom: 6px;

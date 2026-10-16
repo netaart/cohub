@@ -14,6 +14,7 @@ export {
 	boardTaskSource,
 	featuredTaskArtifact,
 	rankedTaskArtifacts,
+	taskArtifactModelFormat,
 	taskArtifactPreviewUrl,
 	taskArtifacts,
 	taskRunArtifacts,

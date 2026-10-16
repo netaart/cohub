@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AVATAR_MAX_FILE_BYTES, UPLOAD_ERROR_FILE_TOO_LARGE, UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
-import { mimeTypeForPath } from "@cohub/protocol/fs";
+import { generationModelInputType } from "@cohub/protocol/generation";
 import { config } from "./config.js";
 import { createPresignedPutObjectUrl } from "./object-presign.js";
 import { buildPublicAssetCdnUrl, requirePublicAssetOssStorage } from "./public-file-storage.js";
@@ -163,19 +163,10 @@ const normalizeSessionImageMimeType = (mimeType: unknown) => {
   return value;
 };
 
-/**
- * 3D model formats generation providers fetch by URL (Meshy takes GLB, glTF, OBJ, FBX and STL). Providers read the
- * format from the URL extension, so a model input is recognized by its filename extension and stored with that
- * extension's type; FBX has no registered type and stays `application/octet-stream`.
- */
-const GENERATION_INPUT_MODEL_EXTENSIONS = new Set(["glb", "gltf", "obj", "fbx", "stl"]);
-const UNKNOWN_BINARY_TYPE = "application/octet-stream";
-
+/** A 3D model input is stored with its extension's type, which the client may also send as `application/octet-stream`. */
 const generationInputModelType = (mimeType: string, filename: string | undefined) => {
-  const extension = safeExtensionFromFilename(filename);
-  if (!extension || !GENERATION_INPUT_MODEL_EXTENSIONS.has(extension)) return null;
-  const modelType = mimeTypeForPath(`model.${extension}`) ?? UNKNOWN_BINARY_TYPE;
-  return mimeType === modelType || mimeType === UNKNOWN_BINARY_TYPE ? modelType : null;
+  const modelType = filename ? generationModelInputType(filename) : null;
+  return modelType && (mimeType === modelType || mimeType === "application/octet-stream") ? modelType : null;
 };
 
 /** Generation inputs are media and 3D models a provider fetches by URL; they are served inline. */

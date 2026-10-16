@@ -9,7 +9,10 @@ import {
 } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { SpaceFsChangedPayload } from "@cohub/protocol/fs";
-import type { GenerationContentBlock } from "@cohub/protocol/generation";
+import {
+	type GenerationContentBlock,
+	generationModelInputType,
+} from "@cohub/protocol/generation";
 import type {
 	SessionTurnIndexItem,
 	SessionTurnRecord,
@@ -46,6 +49,12 @@ import {
 } from "$lib/features/space/runtime-status.svelte";
 import { isStale } from "$lib/features/space/runtime-status-view";
 import { resolvePreferredGenerationModel } from "$lib/generation-model-catalog";
+import {
+	declaredGenerationParameters,
+	editableGenerationParameters,
+	type GenerationParameterValues,
+	generationParametersError,
+} from "$lib/generation-parameters";
 import { formatGenerationPolicyLabel } from "$lib/generation-policy-label";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { extractSpaceMentionsFromText } from "$lib/mentions/space";
@@ -441,6 +450,21 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const catalog = generationModelsCatalog ?? [];
 		return resolvePreferredGenerationModel(catalog, activeCreateModelId);
 	});
+	let createParametersByModel = $state<
+		Record<string, GenerationParameterValues>
+	>({});
+	const createParameters = $derived(
+		declaredGenerationParameters(
+			activeCreateModelDeclaration,
+			createParametersByModel[activeCreateModelDeclaration?.model ?? ""] ?? {},
+		),
+	);
+	const createParameterEntries = $derived(
+		editableGenerationParameters(
+			activeCreateModelDeclaration,
+			createParameters,
+		),
+	);
 	const activeGenerationModel = $derived.by(() => {
 		const model = activeCreateModelDeclaration;
 		return model
@@ -2701,6 +2725,35 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		return urls;
 	}
 
+	async function uploadComposerModelInputs(
+		opSpaceId: string,
+		sessionId: string | null,
+		modelAttachments: ComposerFileAttachment[],
+	) {
+		if (modelAttachments.length === 0) return [];
+		composer.setUploading("file");
+		return Promise.all(
+			modelAttachments.map(async (attachment) => {
+				const asset = await sdk.publicAssets.uploadGenerationInput({
+					spaceId: opSpaceId,
+					sessionId: sessionId ?? undefined,
+					file: attachment.file,
+					mimeType:
+						generationModelInputType(attachment.name) ??
+						"application/octet-stream",
+					filename: attachment.name,
+					onProgress: ({ ratio }) =>
+						composer.setAttachmentUploadProgress(
+							attachment.id,
+							Math.round(ratio * 100),
+						),
+				});
+				composer.setAttachmentFinalizing(attachment.id);
+				return asset.publicUrl;
+			}),
+		);
+	}
+
 	async function uploadComposerImageDurables(
 		opSpaceId: string,
 		sessionId: string | null,
@@ -2823,6 +2876,16 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			composer.setError("No generation model is available.");
 			return;
 		}
+		const parameters = createParameters;
+		const parametersError = generationParametersError(
+			selected,
+			parameters,
+			getLocale(),
+		);
+		if (parametersError) {
+			composer.setError(parametersError);
+			return;
+		}
 		const sessionIdAtStart =
 			activeSessionId ??
 			generationDraftSessionId ??
@@ -2841,15 +2904,22 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				(attachment): attachment is ComposerFileAttachment =>
 					attachment.kind === "file",
 			);
-			if (fileAttachments.length > 0)
+			if (
+				fileAttachments.some(
+					(attachment) => !generationModelInputType(attachment.name),
+				)
+			)
 				throw new Error(
-					"Create mode supports text and image attachments only.",
+					m.create_attachments_unsupported({}, { locale: getLocale() }),
 				);
-			const imageUpload = await uploadComposerImageDurables(
-				spaceId,
-				sessionIdAtStart,
-				imageAttachments,
-			);
+			const [imageUpload, modelUrls] = await Promise.all([
+				uploadComposerImageDurables(
+					spaceId,
+					sessionIdAtStart,
+					imageAttachments,
+				),
+				uploadComposerModelInputs(spaceId, sessionIdAtStart, fileAttachments),
+			]);
 			const imageUrls = [...imageUpload.urls.values()];
 			if (imageUrls.length !== imageAttachments.length)
 				throw new Error("Failed to upload an image attachment.");
@@ -2875,11 +2945,22 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 							source: { type: "url", url },
 						}) satisfies GenerationContentBlock,
 				),
+				...modelUrls.map(
+					(url) =>
+						({
+							type: "3d",
+							source: { type: "url", url },
+						}) satisfies GenerationContentBlock,
+				),
 			];
 			const result = await sdk.space(spaceId).prompt({
 				mode: "create",
 				...(sessionIdAtStart ? { sessionId: sessionIdAtStart } : {}),
-				generation: { model: selected.model, content },
+				generation: {
+					model: selected.model,
+					content,
+					...(Object.keys(parameters).length > 0 ? { parameters } : {}),
+				},
 				clientMessageId,
 				accessMode: "full_access",
 				intent: "followup",
@@ -4512,6 +4593,24 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		},
 		get createModelId() {
 			return activeCreateModelDeclaration?.model ?? null;
+		},
+		get createModel() {
+			return activeCreateModelDeclaration;
+		},
+		get createParameters() {
+			return createParameters;
+		},
+		get createParameterEntries() {
+			return createParameterEntries;
+		},
+		setCreateParameter(name: string, value: unknown) {
+			const modelId = activeCreateModelDeclaration?.model;
+			if (!modelId) return;
+			const next = { ...(createParametersByModel[modelId] ?? {}) };
+			if (value === undefined) delete next[name];
+			else next[name] = value;
+			createParametersByModel = { ...createParametersByModel, [modelId]: next };
+			clearComposerError();
 		},
 		/** Model recorded on the session from server turns (no draft/override). */
 		get activeSessionTurnModel() {

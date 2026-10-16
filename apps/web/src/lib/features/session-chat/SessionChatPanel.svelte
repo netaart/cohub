@@ -12,6 +12,8 @@ import AccessStateView from "$lib/components/AccessStateView.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import ChatTimeline from "$lib/components/ChatTimeline.svelte";
 import CreateModelSelectorDialog from "$lib/components/CreateModelSelectorDialog.svelte";
+import GenerationOperationPicker from "$lib/components/generation/GenerationOperationPicker.svelte";
+import GenerationSettingsButton from "$lib/components/generation/GenerationSettingsButton.svelte";
 import NewChatBackground from "$lib/components/NewChatBackground.svelte";
 import SessionComposer from "$lib/components/SessionComposer.svelte";
 import TurnBottomSheet from "$lib/components/TurnBottomSheet.svelte";
@@ -261,6 +263,23 @@ async function handleDraftDrop(event: DragEvent) {
 }
 </script>
 
+{#snippet createGenerationTools()}
+	<GenerationOperationPicker
+		model={host.createModel}
+		value={typeof host.createParameters.operation === "string" ? host.createParameters.operation : undefined}
+		disabled={host.sending}
+		onchange={(operation) => host.setCreateParameter("operation", operation.name)}
+	/>
+	{#if host.createParameterEntries.length > 0}
+		<GenerationSettingsButton
+			entries={host.createParameterEntries}
+			values={host.createParameters}
+			disabled={host.sending}
+			onchange={host.setCreateParameter}
+		/>
+	{/if}
+{/snippet}
+
 {#if access.spaceLoadError && !access.spaceHasMinimalAccess}
 	<div class="m-4">
 		<AccessStateView
@@ -486,6 +505,7 @@ async function handleDraftDrop(event: DragEvent) {
 						void modelsStatusStore.load();
 						showModelSelector = true;
 					} : undefined}
+					footerTools={host.composerMode === "create" ? createGenerationTools : undefined}
 				/>
 			</div>
 		</div>

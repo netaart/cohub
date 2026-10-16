@@ -1,5 +1,7 @@
 <script lang="ts">
 import {
+	blockUrl,
+	contentBlocks,
 	isViewportContentBlock,
 	parseViewportContextsFromMeta,
 	type ViewportContext,
@@ -7,6 +9,7 @@ import {
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { MessageToolCallsFile } from "@cohub/protocol/model";
 import { page } from "$app/state";
+import GenerationModelFiles from "$lib/components/generation/GenerationModelFiles.svelte";
 import MarkdownView from "$lib/components/MarkdownView.svelte";
 import AttachmentBlocks from "$lib/components/TextAttachmentBlocks.svelte";
 import ThinkingBlocks from "$lib/components/ThinkingBlocks.svelte";
@@ -18,6 +21,7 @@ import {
 	type ResourceMentionTextToken,
 	tokenizeResourceMentionText,
 } from "$lib/mentions/resource";
+import { generationModelOutputs } from "$lib/model3d/remote";
 import { m } from "$lib/paraglide/messages.js";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
@@ -73,37 +77,59 @@ function isViewportAttachment(block: ContentBlock): block is TextBlock {
 	return isViewportContentBlock(block);
 }
 
+function generationResult(block: TextBlock): Record<string, unknown>[] {
+	if (block._meta?.attachmentKind !== "generation-output") return [];
+	try {
+		const parsed = JSON.parse(block.text) as {
+			type?: unknown;
+			result?: unknown;
+		};
+		return parsed.type === "generation.result"
+			? contentBlocks(parsed.result)
+			: [];
+	} catch {
+		// Keep malformed or legacy generation text readable as normal markdown.
+		return [];
+	}
+}
+
 function generationMediaForBlocks(blocks: TextBlock[]) {
 	const media: Array<{ type: "video" | "audio"; url: string; index: number }> =
 		[];
 	for (const block of blocks) {
-		if (block._meta?.attachmentKind !== "generation-output") continue;
-		try {
-			const parsed = JSON.parse(block.text) as {
-				type?: unknown;
-				result?: unknown;
-			};
-			if (parsed.type !== "generation.result" || !Array.isArray(parsed.result))
+		for (const [index, record] of generationResult(block).entries()) {
+			const url = blockUrl(record);
+			if ((record.type !== "video" && record.type !== "audio") || !url)
 				continue;
-			for (const [index, item] of parsed.result.entries()) {
-				if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-				const record = item as {
-					type?: unknown;
-					source?: { type?: unknown; url?: unknown };
-				};
-				if (
-					(record.type !== "video" && record.type !== "audio") ||
-					record.source?.type !== "url" ||
-					typeof record.source.url !== "string"
-				)
-					continue;
-				media.push({ type: record.type, url: record.source.url, index });
-			}
-		} catch {
-			// Keep malformed or legacy generation text readable as normal markdown.
+			media.push({ type: record.type, url, index });
 		}
 	}
 	return media;
+}
+
+function generationModelsForBlocks(blocks: TextBlock[]) {
+	return blocks.flatMap(
+		(block) => generationModelOutputs(generationResult(block)).models,
+	);
+}
+
+/** Stills of generated 3D models, which the model card shows instead of the image list. */
+const modelCoverUrls = $derived.by(() => {
+	const urls = new Set<string>();
+	for (const block of content) {
+		if (block.type !== "text") continue;
+		const result = generationResult(block);
+		for (const index of generationModelOutputs(result).coverIndexes) {
+			const url = blockUrl(result[index] ?? {});
+			if (url) urls.add(url);
+		}
+	}
+	return urls;
+});
+
+function isModelCover(block: ImageBlock) {
+	const url = blockUrl(block);
+	return url !== undefined && modelCoverUrls.has(url);
 }
 
 const resolveWorkspaceAsset = useMarkdownWorkspaceAsset();
@@ -201,10 +227,11 @@ const segments = $derived.by(() => {
 		if (block.type === "image") {
 			const blocks: ImageBlock[] = [];
 			while (content[i]?.type === "image") {
-				blocks.push(content[i] as ImageBlock);
+				const image = content[i] as ImageBlock;
+				if (!isModelCover(image)) blocks.push(image);
 				i += 1;
 			}
-			result.push({ type: "image", blocks });
+			if (blocks.length > 0) result.push({ type: "image", blocks });
 			continue;
 		}
 		if (block.type === "tool_use") {
@@ -267,6 +294,7 @@ const segments = $derived.by(() => {
 		<div class={index === 0 ? "" : "mt-2"}>
 			{#if segment.type === 'text'}
 				{@const generationMedia = isStreaming ? [] : generationMediaForBlocks(segment.blocks)}
+				{@const generationModels = isStreaming ? [] : generationModelsForBlocks(segment.blocks)}
 				<MarkdownView blocks={segment.blocks} variant="chat" {isStreaming} onStart={onMarkdownSegmentStart} onRendered={onMarkdownSegmentRendered} {onOpenFile} {onOpenUrl} {resolveWorkspaceAsset} />
 				{#if generationMedia.length > 0}
 					<div class="mt-3 space-y-2">
@@ -278,6 +306,11 @@ const segments = $derived.by(() => {
 								<audio src={media.url} controls preload="metadata" class="w-full" aria-label={m.message_generated_audio({ index: media.index + 1 }, { locale })}></audio>
 							{/if}
 						{/each}
+					</div>
+				{/if}
+				{#if generationModels.length > 0}
+					<div class="mt-3">
+						<GenerationModelFiles models={generationModels} />
 					</div>
 				{/if}
 			{:else if segment.type === 'thinking'}

@@ -6,7 +6,10 @@ import type {
 import type { ModelStatusEntry } from "@cohub/protocol/model/status";
 import { Brain, Check, ChevronDown, Image } from "lucide-svelte";
 import Dialog from "$lib/components/Dialog.svelte";
-import { getGenerationModelPickerItems } from "$lib/generation-model-catalog";
+import {
+	generationModelKind,
+	getGenerationModelPickerItems,
+} from "$lib/generation-model-catalog";
 import { formatCurrency } from "$lib/i18n/format";
 import type { Locale } from "$lib/i18n/locale";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -379,13 +382,6 @@ function formatGenerationPrice(
 
 function getGenerationModelTitle(model: PublicGenerationDeclaration): string {
 	return model.title?.trim() || model.model;
-}
-
-function getGenerationKind(model: PublicGenerationDeclaration): string {
-	const inputTypes = new Set(model.content.input.map((item) => item.type));
-	if (inputTypes.has("video")) return m.model_kind_video({}, { locale });
-	if (inputTypes.has("image")) return m.model_kind_image({}, { locale });
-	return m.model_kind_multimodal({}, { locale });
 }
 
 function isEnumParameterSpec(spec: unknown): spec is { enum: unknown[] } {
@@ -1202,7 +1198,7 @@ const hoverCardPos = $derived.by(() => {
 											<div class="flex items-center gap-1.5">
 												<ChevronDown class={`h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationModelExpanded(model.model) ? "rotate-0" : "-rotate-90"}`} />
 												<span class="truncate text-[13px] font-medium text-text-primary">{getGenerationModelTitle(model)}</span>
-												<span class="text-[10px] text-text-tertiary/80">{getGenerationKind(model)}</span>
+												<span class="text-[10px] text-text-tertiary/80">{generationModelKind(model, locale)}</span>
 												{@render availabilityDot(model.model)}
 											</div>
 											<div class="mt-0.5 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-text-tertiary">

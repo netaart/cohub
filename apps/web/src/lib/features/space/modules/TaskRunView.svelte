@@ -11,9 +11,11 @@ import { onDestroy } from "svelte";
 import { goto } from "$app/navigation";
 import AudioPlayer from "$lib/components/AudioPlayer.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
+import GenerationModelFiles from "$lib/components/generation/GenerationModelFiles.svelte";
 import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
 import { mediaLightbox } from "$lib/components/media-lightbox";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
+import { generationModelOutputs } from "$lib/model3d/remote";
 import MediaImage from "$lib/resource-kit/MediaImage.svelte";
 import {
 	appActionInput,
@@ -73,10 +75,17 @@ const locale = $derived(getLocale());
 /** Output stills fill a 60vh column; the largest variant covers it on any screen (video frames cap themselves). */
 const OUTPUT_PREVIEW_SIZE = 1536;
 
-/** Opens the run's image outputs as one gallery, starting at `start`. */
-function openOutputImage(blocks: Record<string, unknown>[], start: number) {
+/** Opens the run's image outputs, except 3D model stills, as one gallery starting at `start`. */
+function openOutputImage(
+	blocks: Record<string, unknown>[],
+	start: number,
+	modelCovers: ReadonlySet<number>,
+) {
 	const images = blocks.flatMap((block, index) => {
-		const src = block.type === "image" ? generationBlockSource(block) : null;
+		const src =
+			block.type === "image" && !modelCovers.has(index)
+				? generationBlockSource(block)
+				: null;
 		if (!src) return [];
 		const alt = generationBlockLabel(block, index);
 		return [{ index, item: { type: "image" as const, src, alt } }];
@@ -204,6 +213,7 @@ function userTitle(
 			{@const commandMeta = runCommandResultMeta(taskRunDetail)}
 			{@const outputContent = taskOutputContent(taskRunDetail, taskRunProgress)}
 			{@const generationBlocks = generationOutputBlocks(taskRunDetail)}
+			{@const generationModels = generationModelOutputs(generationBlocks)}
 			{@const rawResult = taskRawResult(taskRunDetail)}
 			<div class="space-y-6 sm:space-y-8">
 				<header class="flex flex-col gap-4 border-b border-border-subtle/70 pb-5 lg:flex-row lg:items-start lg:justify-between">
@@ -331,33 +341,37 @@ function userTitle(
 										{@const blockText = generationBlockText(block)}
 										{@const blockSrc = generationBlockSource(block)}
 										{@const blockMeta = generationBlockMeta(block)}
-										<div class="rounded-[8px] bg-bg-elevated/35 p-3">
-											<div class="mb-2 flex items-center justify-between gap-3 text-[11px] text-text-tertiary">
-												<span class="truncate">{generationBlockLabel(block, index)}</span>
-												{#if blockMeta}<span class="shrink-0 font-mono text-text-placeholder">{blockMeta}</span>{/if}
-											</div>
-											{#if blockText !== null}
-												<div class="whitespace-pre-wrap break-words text-[13px] leading-6 text-text-secondary">{blockText}</div>
-											{:else if block.type === "image" && blockSrc}
-												<button type="button" class="block w-full cursor-zoom-in" onclick={() => openOutputImage(generationBlocks, index)}>
-													<MediaImage
-														candidates={mediaPreviewCandidates({ type: "image", url: blockSrc }, { size: OUTPUT_PREVIEW_SIZE })}
-														alt={generationBlockLabel(block, index)}
-														class="max-h-[60vh] w-full rounded-[6px] object-contain"
+										{#if index === generationModels.modelIndexes[0]}
+											<GenerationModelFiles models={generationModels.models} />
+										{:else if !generationModels.modelIndexes.includes(index) && !generationModels.coverIndexes.has(index)}
+											<div class="rounded-[8px] bg-bg-elevated/35 p-3">
+												<div class="mb-2 flex items-center justify-between gap-3 text-[11px] text-text-tertiary">
+													<span class="truncate">{generationBlockLabel(block, index)}</span>
+													{#if blockMeta}<span class="shrink-0 font-mono text-text-placeholder">{blockMeta}</span>{/if}
+												</div>
+												{#if blockText !== null}
+													<div class="whitespace-pre-wrap break-words text-[13px] leading-6 text-text-secondary">{blockText}</div>
+												{:else if block.type === "image" && blockSrc}
+													<button type="button" class="block w-full cursor-zoom-in" onclick={() => openOutputImage(generationBlocks, index, generationModels.coverIndexes)}>
+														<MediaImage
+															candidates={mediaPreviewCandidates({ type: "image", url: blockSrc }, { size: OUTPUT_PREVIEW_SIZE })}
+															alt={generationBlockLabel(block, index)}
+															class="max-h-[60vh] w-full rounded-[6px] object-contain"
+														/>
+													</button>
+												{:else if block.type === "video" && blockSrc}
+													{@const [poster] = mediaPreviewCandidates({ type: "video", url: blockSrc }, { size: OUTPUT_PREVIEW_SIZE })}
+													<video src={blockSrc} {poster} controls preload={poster ? "none" : "metadata"} class="max-h-[60vh] w-full rounded-[6px]"><track kind="captions" label={m.track_generated_video({}, { locale })} /></video>
+												{:else if block.type === "audio" && blockSrc}
+													<AudioPlayer
+														src={blockSrc}
+														title={generationBlockLabel(block, index)}
 													/>
-												</button>
-											{:else if block.type === "video" && blockSrc}
-												{@const [poster] = mediaPreviewCandidates({ type: "video", url: blockSrc }, { size: OUTPUT_PREVIEW_SIZE })}
-												<video src={blockSrc} {poster} controls preload={poster ? "none" : "metadata"} class="max-h-[60vh] w-full rounded-[6px]"><track kind="captions" label={m.track_generated_video({}, { locale })} /></video>
-											{:else if block.type === "audio" && blockSrc}
-												<AudioPlayer
-													src={blockSrc}
-													title={generationBlockLabel(block, index)}
-												/>
-											{:else}
-												<pre class="max-h-[40vh] overflow-auto text-[12px] font-mono leading-relaxed text-text-secondary whitespace-pre-wrap break-all">{displaySafeJson(block, { maxStringLength: 12_000, locale })}</pre>
-											{/if}
-										</div>
+												{:else}
+													<pre class="max-h-[40vh] overflow-auto text-[12px] font-mono leading-relaxed text-text-secondary whitespace-pre-wrap break-all">{displaySafeJson(block, { maxStringLength: 12_000, locale })}</pre>
+												{/if}
+											</div>
+										{/if}
 									{/each}
 								</div>
 							</div>

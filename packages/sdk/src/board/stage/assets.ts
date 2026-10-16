@@ -1,12 +1,12 @@
 import {
 	type BoardSceneItem,
-	type BoardTaskArtifact,
 	boardImageKeySource,
+	boardModelTarget,
 	featuredTaskArtifact,
 	imageAssetKey,
-	boardModelFormat,
 	isBoardModelItem,
 	parseBoardMediaSource,
+	taskArtifactModelFormat,
 } from "../model/index.js";
 import type { ModelFormat } from "@cohub/protocol/fs";
 import { mediaPreviewCandidates } from "../../media.js";
@@ -38,13 +38,14 @@ type BoardAssetSource = {
 
 const TASK_TEXTURE_SIZE = 1536;
 
-function taskPreviewKey(artifact: BoardTaskArtifact | undefined) {
+function taskPreviewKey(item: BoardSceneItem & { type: "task" }) {
+	const artifact = featuredTaskArtifact(item.props.snapshot.artifacts);
 	if (!artifact || artifact.type === "text") return null;
 	const [still] = mediaPreviewCandidates(artifact, { size: TASK_TEXTURE_SIZE });
 	if (still) return `url:${still}`;
-	return artifact.type === "video"
-		? `video-url:${encodeURIComponent(artifact.url)}`
-		: null;
+	if (artifact.type === "video") return `video-url:${encodeURIComponent(artifact.url)}`;
+	const model = taskArtifactModelFormat(artifact);
+	return model ? `model-url:${encodeURIComponent(artifact.url)}` : null;
 }
 
 const STILL_MEDIA = ["video", "model"] as const;
@@ -62,7 +63,7 @@ function stillKey(
 }
 
 export function boardAssetKey(item: BoardSceneItem): string | null {
-	if (item.type === "task") return taskPreviewKey(featuredTaskArtifact(item.props.snapshot.artifacts));
+	if (item.type === "task") return taskPreviewKey(item);
 	if (item.type === "video") return stillKey("video", item.props.src, item.props.snapshot?.mtimeMs);
 	if (item.type === "file" && isBoardModelItem(item)) return stillKey("model", item.props.src, item.props.snapshot?.mtimeMs);
 	return imageAssetKey(item);
@@ -415,11 +416,15 @@ export function createBoardAssetManager(
 
 	function modelLoader(item: BoardSceneItem, key: string): Load | null {
 		const previews = options.modelPreviews;
-		if (!previews || item.type !== "file") return null;
-		const { src, snapshot } = item.props;
-		const format = boardModelFormat(src, snapshot?.mimeType);
-		if (!format) return null;
-		const request = { key, src, format, size: snapshot?.size };
+		if (!previews) return null;
+		const target = boardModelTarget(item);
+		if (!target) return null;
+		const request = {
+			key,
+			src: target.src,
+			format: target.format,
+			...(target.size === undefined ? {} : { size: target.size }),
+		};
 		return async () => Texture.from(await previews.load(request));
 	}
 

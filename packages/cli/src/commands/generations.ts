@@ -5,6 +5,7 @@ import type { Command } from "commander";
 import {
   GenerationPolicyError,
   assertGenerationRequestAllowedByPolicy,
+  generationModelInputType,
   mimeTypeForPath,
   parseGenerationPolicyFromEnv,
   type GenerationContentBlock,
@@ -18,18 +19,21 @@ type GenerationSource =
   | { type: "url"; url: string }
   | { type: "base64"; mediaType: string; data: string };
 
-type MediaInputType = "image" | "video" | "audio";
+type MediaInputType = "image" | "video" | "audio" | "3d";
 
 const frameMediaRoles = new Set(["first_frame", "last_frame"]);
 const referenceMediaRoles = new Set(["reference_image", "reference_video", "reference_audio"]);
 
+/** Roles that name their media type; the model declaration validates any other role. */
 const rolesByMediaType: Record<MediaInputType, ReadonlySet<string>> = {
   image: new Set([...frameMediaRoles, "reference_image"]),
   video: new Set(["reference_video"]),
   audio: new Set(["reference_audio"]),
+  "3d": new Set(),
 };
 
-const mediaRoles = new Set([...frameMediaRoles, ...referenceMediaRoles]);
+const typedMediaRoles = new Set([...frameMediaRoles, ...referenceMediaRoles]);
+const ROLE_PATTERN = /^[a-z][a-z0-9_]*$/;
 
 function parseValue(value: string): unknown {
   const trimmed = value.trim();
@@ -67,15 +71,39 @@ async function parseMediaInput(type: MediaInputType, rawValue: string): Promise<
   if (separator <= 0) return { type, value: rawValue };
 
   const role = rawValue.slice(0, separator).trim();
-  if (!mediaRoles.has(role)) return { type, value: rawValue };
+  if (!ROLE_PATTERN.test(role)) return { type, value: rawValue };
   if (await pathExists(rawValue)) return { type, value: rawValue };
-  if (!rolesByMediaType[type].has(role)) {
+  if (typedMediaRoles.has(role) && !rolesByMediaType[type].has(role)) {
     return error("Invalid media role", `${role} cannot be used with --${type}`);
   }
 
   const value = rawValue.slice(separator + 1).trim();
   if (!value) return error("Invalid media input", `--${type} ${role}= requires a path or URL`);
   return { type, value, role };
+}
+
+const BLOCK_TYPES = new Set(["text", "image", "video", "audio", "3d"]);
+
+/** A content block passed as JSON, such as an output block of an earlier generation with its `meta`. */
+function parseContentBlock(value: string): GenerationContentBlock {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch {
+    return error("Invalid block", "--block must be a JSON content block");
+  }
+  const block = parsed as { type?: unknown; text?: unknown; source?: unknown };
+  const valid = parsed && typeof parsed === "object" && !Array.isArray(parsed) && BLOCK_TYPES.has(String(block.type)) &&
+    (block.type === "text" ? typeof block.text === "string" : Boolean(block.source && typeof block.source === "object"));
+  if (!valid) return error("Invalid block", "--block needs a type of text, image, video, audio, or 3d, and its text or source");
+  return parsed as GenerationContentBlock;
+}
+
+/** The type a local input uploads with, or null when uploads do not accept it. */
+function uploadType(type: MediaInputType, path: string): string | null {
+  if (type === "3d") return generationModelInputType(path);
+  const mediaType = mimeTypeForPath(path);
+  return mediaType && /^(image|video|audio)\//.test(mediaType) ? mediaType : null;
 }
 
 /** Uploads a local input and returns its durable URL; `null` keeps it inline. */
@@ -94,8 +122,8 @@ async function mediaContent(
     ({ type, source, ...(role ? { meta: { role } } : {}) }) as GenerationContentBlock;
   if (/^https?:\/\//.test(value)) return block({ type: "url", url: value });
 
-  const mediaType = mimeTypeForPath(value);
-  if (mediaType && /^(image|video|audio)\//.test(mediaType) && upload) {
+  const mediaType = uploadType(type, value);
+  if (mediaType && upload) {
     try {
       return block({ type: "url", url: await upload(value, mediaType) });
     } catch (uploadError) {
@@ -106,7 +134,7 @@ async function mediaContent(
   const data = await readFile(value);
   return block({
     type: "base64",
-    mediaType: mediaType ?? "application/octet-stream",
+    mediaType: mediaType ?? mimeTypeForPath(value) ?? "application/octet-stream",
     data: data.toString("base64"),
   });
 }
@@ -123,8 +151,7 @@ function validateMediaRoleModes(inputs: MediaInput[]): void {
   }
 }
 
-async function saveOutputs(output: GenerationContentBlock[], outputPath: string): Promise<string[]> {
-  const outputs = output.filter((block) => block.type === "text" || block.type === "image" || block.type === "video" || block.type === "audio");
+async function saveOutputs(outputs: GenerationContentBlock[], outputPath: string): Promise<string[]> {
   if (outputs.length === 0) return [];
 
   const info = await stat(outputPath).catch(() => null);
@@ -177,7 +204,8 @@ function outputName(block: GenerationContentBlock, url: string | undefined, inde
   const fromUrl = url ? basename(new URL(url).pathname) : "";
   const label = slugOutputLabel(block);
   if (fromUrl?.includes(".")) return `generation-${index + 1}-${label}-${fromUrl}`;
-  const ext = block.type === "video" ? "mp4" : block.type === "audio" ? "bin" : block.type === "text" ? "txt" : "png";
+  const format = block.meta?.format;
+  const ext = block.type === "video" ? "mp4" : block.type === "audio" ? "bin" : block.type === "text" ? "txt" : block.type === "3d" ? (typeof format === "string" ? format : "bin") : "png";
   return `generation-${index + 1}-${label}.${ext}`;
 }
 
@@ -287,15 +315,20 @@ function parseMeta(value?: string): Record<string, unknown> | undefined {
   return parsed as Record<string, unknown>;
 }
 
-export function registerGenerations(program: Command): void {
+type RegisterGenerationsDependencies = {
+  createClient?: () => ReturnType<typeof createClient>;
+};
+
+export function registerGenerations(program: Command, dependencies: RegisterGenerationsDependencies = {}): void {
+  const getClient = dependencies.createClient ?? createClient;
   program
     .command("generate")
     .description("Generate multimodal outputs")
-    .argument("<prompt>", "Prompt text")
+    .argument("[prompt]", "Prompt text; omit it for inputs that take no text, such as a 3D remesh")
     .requiredOption("-m, --model <model>", "Multimodal model ID from `cohub models ls --model-type multimodal`")
     .option(
       "--image <path-or-url>",
-      "Image input file path or URL; prefix with first_frame=, last_frame=, or reference_image= when needed; repeatable",
+      "Image input file path or URL; prefix with a role such as first_frame=, last_frame=, or reference_image= when needed; repeatable",
       collect,
       [],
     )
@@ -308,6 +341,18 @@ export function registerGenerations(program: Command): void {
     .option(
       "--audio <path-or-url>",
       "Audio input file path or URL; prefix with reference_audio= when needed; repeatable",
+      collect,
+      [],
+    )
+    .option(
+      "--3d <path-or-url>",
+      "3D model input (GLB, glTF, OBJ, FBX, or STL) file path or URL; prefix with a role such as motion= when needed; repeatable",
+      collect,
+      [],
+    )
+    .option(
+      "--block <json>",
+      "Content block as JSON, such as an output block of an earlier generation passed back with its meta; repeatable",
       collect,
       [],
     )
@@ -332,12 +377,17 @@ Examples:
   cohub -s <space-id> generate "Use these references" -m seedance-2-0-fast --image reference_image=https://example.com/a.png --image reference_image=https://example.com/b.png
   cohub -s <space-id> generate "Lip-sync to the reference take" -m seedance-2-0-fast --image reference_image=https://example.com/portrait.png --audio reference_audio=https://example.com/speech.mp3
   cohub -s <space-id> generate "A calm lake" -m <model> --async
+  cohub -s <space-id> generate "a wooden treasure chest" -m meshy --param operation=text-to-3d --param 'target_formats=["glb","usdz"]'
+  cohub -s <space-id> generate -m meshy --3d ./chest.glb --param operation=remesh --param topology=quad
+  cohub -s <space-id> generate "weathered oak" -m meshy --param operation=text-to-3d-refine --block "$(cohub tasks get <task-id> --json | jq -c '.run.result.output[0]')"
 `)
-    .action(async (prompt: string, opts: {
+    .action(async (prompt: string | undefined, opts: {
       model: string;
       image: string[];
       video: string[];
       audio: string[];
+      "3d": string[];
+      block: string[];
       param: string[];
       parameters?: string;
       meta?: string;
@@ -354,7 +404,12 @@ Examples:
           ...opts.image.map((value) => parseMediaInput("image", value)),
           ...opts.video.map((value) => parseMediaInput("video", value)),
           ...opts.audio.map((value) => parseMediaInput("audio", value)),
+          ...opts["3d"].map((value) => parseMediaInput("3d", value)),
         ]);
+        const blocks = opts.block.map(parseContentBlock);
+        if (!prompt && inputs.length === 0 && blocks.length === 0) {
+          return error("Missing input", "Pass a prompt, an input file, or a --block");
+        }
         validateMediaRoleModes(inputs);
         for (const { value } of inputs) {
           if (!/^https?:\/\//.test(value) && !(await pathExists(value))) {
@@ -375,7 +430,7 @@ Examples:
         }
 
         const meta = parseMeta(opts.meta);
-        const client = createClient();
+        const client = getClient();
         // Validate everything first, so rejected requests never upload files.
         const upload: InputUploader = opts.inline ? null : async (path, mimeType) => {
           const asset = await client.publicAssets.uploadGenerationInput({
@@ -389,8 +444,9 @@ Examples:
           return asset.publicUrl;
         };
         const content: GenerationContentBlock[] = [
-          { type: "text", text: prompt },
+          ...(prompt ? [{ type: "text" as const, text: prompt }] : []),
           ...await Promise.all(inputs.map((input) => mediaContent(input, upload))),
+          ...blocks,
         ];
         const created = await client.generations.create({
           spaceId,

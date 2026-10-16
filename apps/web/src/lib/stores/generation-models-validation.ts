@@ -44,6 +44,26 @@ function isDimensionsSpec(value: unknown) {
 	);
 }
 
+function isArrayItemSpec(value: unknown): boolean {
+	if (!isRecord(value)) return false;
+	switch (value.type) {
+		case "string":
+			return optionalArray(value.enum, isString) && absent(value, "min", "max");
+		case "integer":
+			return (
+				optional(value.min, isNumber) &&
+				optional(value.max, isNumber) &&
+				absent(value, "enum")
+			);
+		default:
+			return false;
+	}
+}
+
+function isArrayItem(value: unknown) {
+	return isString(value) || isNumber(value);
+}
+
 function isParameterSpec(value: unknown): boolean {
 	if (
 		!isRecord(value) ||
@@ -77,9 +97,47 @@ function isParameterSpec(value: unknown): boolean {
 				optionalArray(value.examples, isBoolean) &&
 				absent(value, "enum", "dimensions", "min", "max")
 			);
+		case "array":
+			return (
+				isArrayItemSpec(value.items) &&
+				optionalArray(value.default, isArrayItem) &&
+				optional(value.min, isNumber) &&
+				optional(value.max, isNumber) &&
+				optional(value.unique, isBoolean) &&
+				optionalArray(
+					value.examples,
+					(example) => Array.isArray(example) && example.every(isArrayItem),
+				) &&
+				absent(value, "enum", "dimensions")
+			);
 		default:
 			return false;
 	}
+}
+
+function isParameters(value: unknown) {
+	return (
+		value === undefined ||
+		(isRecord(value) && Object.values(value).every(isParameterSpec))
+	);
+}
+
+function isContentInputs(value: unknown) {
+	return (
+		isRecord(value) &&
+		Array.isArray(value.input) &&
+		value.input.every(isContentSpec)
+	);
+}
+
+function isOperationSpec(value: unknown): boolean {
+	return (
+		isRecord(value) &&
+		optional(value.title, isString) &&
+		optional(value.description, isString) &&
+		optional(value.content, isContentInputs) &&
+		isParameters(value.parameters)
+	);
 }
 
 function isContentSpec(value: unknown): boolean {
@@ -138,15 +196,15 @@ export function isValidCachedGenerationModel(
 		typeof value.model === "string" &&
 		value.model.trim() !== "" &&
 		optional(value.title, isString) &&
+		optional(value.category, isString) &&
 		optional(value.description, isString) &&
 		optional(value.hidden, isBoolean) &&
 		optional(value.allowUnknownParameters, isBoolean) &&
-		isRecord(value.content) &&
-		Array.isArray(value.content.input) &&
-		value.content.input.every(isContentSpec) &&
-		(value.parameters === undefined ||
-			(isRecord(value.parameters) &&
-				Object.values(value.parameters).every(isParameterSpec))) &&
+		isContentInputs(value.content) &&
+		isParameters(value.parameters) &&
+		(value.operations === undefined ||
+			(isRecord(value.operations) &&
+				Object.values(value.operations).every(isOperationSpec))) &&
 		(value.meta === undefined || isMetaSpec(value.meta)) &&
 		(value.examples === undefined || Array.isArray(value.examples))
 	);

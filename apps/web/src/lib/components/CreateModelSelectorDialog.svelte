@@ -10,7 +10,10 @@ import {
 	Video,
 } from "lucide-svelte";
 import Dialog from "$lib/components/Dialog.svelte";
-import { getGenerationModelPickerItems } from "$lib/generation-model-catalog";
+import {
+	generationModelKind,
+	getGenerationModelPickerItems,
+} from "$lib/generation-model-catalog";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
@@ -53,14 +56,6 @@ $effect(() => {
 
 function title(model: PublicGenerationDeclaration) {
 	return model.title?.trim() || model.model;
-}
-
-function kind(model: PublicGenerationDeclaration) {
-	const inputs = new Set(model.content.input.map((item) => item.type));
-	if (inputs.has("video")) return m.model_kind_video({}, { locale });
-	if (inputs.has("audio")) return m.model_kind_audio({}, { locale });
-	if (inputs.has("image")) return m.model_kind_image({}, { locale });
-	return m.model_kind_multimodal({}, { locale });
 }
 
 function select(modelId: string) {
@@ -120,7 +115,7 @@ function handleKeydown(event: KeyboardEvent) {
 		{:else}
 			{#each visibleModels as model (model.model)}
 				{@const selected = model.model === currentModelId}
-				{@const modelKind = kind(model)}
+				{@const modelKind = generationModelKind(model, locale)}
 				<button
 					type="button"
 					class={`group relative flex min-h-12 w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-bg-hover ${selected ? "bg-bg-hover/70" : ""}`}

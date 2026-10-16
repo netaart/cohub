@@ -3,8 +3,10 @@ import {
 	type BoardTaskArtifact,
 	type BoardTaskSnapshot,
 } from "./board-model.js";
+import { type ModelFormat, modelFormatForPath } from "./fs/mime.js";
 import {
 	blockDurationMs,
+	blockFormat,
 	blockIdentity,
 	blockMimeType,
 	blockNaturalSize,
@@ -84,6 +86,29 @@ export function taskArtifacts(
 		const media = blocksInGroup
 			.filter(({ block }) => block.type === "video" || block.type === "audio")
 			.filter(withUrl);
+		const models = blocksInGroup
+			.filter(({ block }) => block.type === "3d")
+			.filter(withUrl);
+
+		models.forEach(({ block, index, url }, modelIndex) => {
+			const title = blockTitle(block);
+			const mimeType = blockMimeType(block);
+			const format = blockFormat(block);
+			const previewUrl = blockPreviewUrl(block) ?? coverUrl(index);
+			artifacts.push({
+				id: artifactId(
+					groupId,
+					usedIds,
+					models.length > 1 ? `3d-${modelIndex + 1}` : undefined,
+				),
+				type: "3d",
+				url,
+				...(title ? { title } : {}),
+				...(mimeType ? { mimeType } : {}),
+				...(format ? { format } : {}),
+				...(previewUrl ? { previewUrl } : {}),
+			});
+		});
 
 		media.forEach(({ block, index, url }, mediaIndex) => {
 			const type = block.type as "video" | "audio";
@@ -160,11 +185,25 @@ export function taskArtifacts(
 	return artifacts;
 }
 
+/** The format a 3D artifact previews as, or null when the viewer cannot read it. */
+export function taskArtifactModelFormat(
+	artifact: BoardTaskArtifact | undefined,
+): ModelFormat | null {
+	if (artifact?.type !== "3d") return null;
+	return modelFormatForPath(
+		artifact.format ? `model.${artifact.format}` : new URL(artifact.url).pathname,
+		artifact.mimeType,
+	);
+}
+
 function artifactScore(artifact: BoardTaskArtifact): readonly number[] {
-	const kind = { text: 1, image: 2, audio: 3, video: 4 }[artifact.type];
+	const kind = { text: 1, image: 2, audio: 3, video: 4, "3d": 5 }[artifact.type];
 	if (artifact.type === "text") return [kind, artifact.textExcerpt.length];
 	if (artifact.type === "image") {
 		return [kind, (artifact.naturalWidth ?? 0) * (artifact.naturalHeight ?? 0)];
+	}
+	if (artifact.type === "3d") {
+		return [kind, taskArtifactModelFormat(artifact) ? 1 : 0, artifact.previewUrl ? 1 : 0];
 	}
 	return [
 		kind,
@@ -211,7 +250,7 @@ export function taskArtifactPreviewUrl(
 	artifact: BoardTaskArtifact | undefined,
 ): string | undefined {
 	if (artifact?.type === "image") return artifact.url;
-	if (artifact?.type === "video" || artifact?.type === "audio") {
+	if (artifact?.type === "video" || artifact?.type === "audio" || artifact?.type === "3d") {
 		return artifact.previewUrl;
 	}
 	return undefined;

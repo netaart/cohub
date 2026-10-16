@@ -95,7 +95,7 @@ export function variantSource(url: string): { url: string; type: "image" | "vide
 }
 
 export type MediaPreviewSource = {
-	type: MediaType;
+	type: MediaType | "3d";
 	url?: string | null;
 	/** Provider cover or poster: art chosen for the work, so it ranks first. */
 	previewUrl?: string | null;

@@ -392,6 +392,20 @@ cohub generate "a calm lake" \
   --model <model> \
   --async
 
+cohub generate "a wooden treasure chest with iron bands" \
+  --model meshy \
+  --param operation=text-to-3d \
+  --param 'target_formats=["glb","usdz"]'
+
+cohub generate "weathered oak planks and dark iron" \
+  --model meshy \
+  --param operation=text-to-3d-refine \
+  --block "$(cohub tasks get <taskRunId> --json | jq -c '.run.result.output[0]')"
+
+cohub generate --model meshy \
+  --3d ./chest.glb \
+  --param operation=remesh
+
 cohub tasks get <taskRunId> --json
 ```
 
@@ -406,11 +420,16 @@ Supported inputs:
 --video reference_video=<path-or-url>
 --audio <path-or-url>
 --audio reference_audio=<path-or-url>
+--3d <path-or-url>
+--3d <role>=<path-or-url>
+--block '<content block JSON>'
 ```
 
-Role-qualified media values add `meta.role` to that content block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles (`reference_image`, `reference_video`, `reference_audio`) in one request.
+Role-qualified media values add `meta.role` to that content block; the model declaration decides which roles it accepts. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles (`reference_image`, `reference_video`, `reference_audio`) in one request.
 
-Pass generation parameters with `--param key=value` or `--parameters '<json>'`.
+`--3d` takes GLB, glTF, OBJ, FBX, or STL; local files upload with the type their extension implies. `--block` adds a content block as is, which passes an earlier output back with its `meta` (Meshy reads `meta.task_id` to continue that task). The prompt is optional when the request has other content.
+
+Pass generation parameters with `--param key=value` or `--parameters '<json>'`. Array parameters take a JSON array: `--param 'target_formats=["glb","fbx"]'`. A model with operations takes `--param operation=<name>`; `cohub models show <model>` lists each operation's inputs and parameters.
 
 ## Files
 

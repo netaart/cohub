@@ -26,7 +26,7 @@ export function canConnectContent(
 }
 
 export function referencePortForKind(
-	kind: "image" | "video" | "audio",
+	kind: "image" | "video" | "audio" | "3d",
 ): BoardPort {
 	return {
 		id: `${kind}-references`,

@@ -1,4 +1,4 @@
-export type MediaType = "image" | "video" | "audio";
+export type MediaType = "image" | "video" | "audio" | "3d";
 
 export interface MediaItem {
 	type: MediaType;
@@ -6,8 +6,10 @@ export interface MediaItem {
 	src?: string;
 	resolve?: () => Promise<string | null>;
 	alt?: string;
-	/** Video poster or audio cover. */
+	/** Video poster, audio cover, or 3D model still. */
 	poster?: string;
+	/** File format of a 3D model, such as `glb`. */
+	format?: string;
 	/** Caption, e.g. the generation prompt. */
 	title?: string;
 	/** Secondary caption, e.g. the model. */
