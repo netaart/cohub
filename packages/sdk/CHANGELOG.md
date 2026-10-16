@@ -1,5 +1,12 @@
 # @neta-art/cohub
 
+## 11.3.3
+
+### Patch Changes
+
+- 7a88ef2: `generations.create` accepts `3d` content blocks, so a generation can take a 3D model as input. `publicAssets.uploadGenerationInput` accepts GLB, glTF, OBJ, FBX and STL models whose `filename` ends with the format's extension; the uploaded file keeps that extension.
+- cbd3820: Upgrade Generation SDK to 0.1.39. Generation declarations can use the `newapi.audioGenerations` adapter for song generation from a style prompt, lyrics and an optional ABC score.
+
 ## 11.3.2
 
 ### Patch Changes

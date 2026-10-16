@@ -1,5 +1,14 @@
 # @neta-art/cohub-cli
 
+## 10.4.3
+
+### Patch Changes
+
+- cbd3820: Upgrade Generation SDK to 0.1.39. Generation declarations can use the `newapi.audioGenerations` adapter for song generation from a style prompt, lyrics and an optional ABC score.
+- Updated dependencies [7a88ef2]
+- Updated dependencies [cbd3820]
+  - @neta-art/cohub@11.3.3
+
 ## 10.4.2
 
 ### Patch Changes
