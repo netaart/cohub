@@ -151,9 +151,15 @@ const normalizeChatMimeType = (mimeType: unknown) => {
   return value;
 };
 
+/**
+ * Media a public asset may serve inline. Browsers render any `+xml` type as an XML document that can run scripts,
+ * whatever its top-level type, so inline media excludes them.
+ */
+const isInlineMediaType = (value: string, family: RegExp) => family.test(value) && !value.endsWith("+xml");
+
 const normalizeSessionImageMimeType = (mimeType: unknown) => {
   const value = normalizeChatMimeType(mimeType);
-  if (!value.startsWith("image/")) throw new PublicAssetValidationError("session images must be raster images");
+  if (!isInlineMediaType(value, /^image\//)) throw new PublicAssetValidationError("session images must be raster images");
   return value;
 };
 
@@ -172,10 +178,10 @@ const generationInputModelType = (mimeType: string, filename: string | undefined
   return mimeType === modelType || mimeType === UNKNOWN_BINARY_TYPE ? modelType : null;
 };
 
-/** Generation inputs are media and 3D models a provider fetches by URL; active types were already neutralized. */
+/** Generation inputs are media and 3D models a provider fetches by URL; they are served inline. */
 const normalizeGenerationInputMimeType = (mimeType: unknown, filename: string | undefined) => {
   const value = normalizeChatMimeType(mimeType);
-  if (/^(image|video|audio)\//.test(value)) return value;
+  if (isInlineMediaType(value, /^(image|video|audio)\//)) return value;
   const modelType = generationInputModelType(value, filename);
   if (!modelType) {
     throw new PublicAssetValidationError(

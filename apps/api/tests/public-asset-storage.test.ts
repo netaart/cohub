@@ -27,7 +27,7 @@ test("accepts generation inputs as user-scoped media", () => {
 });
 
 test("rejects generation inputs that are not image, video, audio, or a 3D model", () => {
-  for (const mimeType of ["image/svg+xml", "text/html", "application/pdf", "application/octet-stream"]) {
+  for (const mimeType of ["image/svg+xml", "text/html", "application/pdf", "application/octet-stream", "image/x+xml", "video/x+xml", "audio/x+xml"]) {
     assert.throws(
       () => assertPublicAssetUploadFile({ purpose: "generation_input", file: file(mimeType) }),
       PublicAssetValidationError,
@@ -35,6 +35,17 @@ test("rejects generation inputs that are not image, video, audio, or a 3D model"
     );
   }
   assert.equal(isPublicAssetPurpose("anything_else"), false);
+});
+
+test("session images accept raster images and reject XML image types", () => {
+  assert.doesNotThrow(() => assertPublicAssetUploadFile({ purpose: "session_image", file: file("image/png") }));
+  for (const mimeType of ["image/svg+xml", "image/x+xml", "text/html"]) {
+    assert.throws(
+      () => assertPublicAssetUploadFile({ purpose: "session_image", file: file(mimeType) }),
+      PublicAssetValidationError,
+      mimeType,
+    );
+  }
 });
 
 test("accepts GLB, glTF, OBJ, FBX and STL generation inputs by extension and serves them with that extension's type", (t) => {
