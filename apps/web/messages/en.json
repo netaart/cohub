@@ -2427,6 +2427,10 @@
 	"chats_new_chat_in": "New chat in…",
 	"chats_row_no_messages": "No messages yet",
 	"spaces_row_no_description": "No description",
+	"model_selector_fast": "Fast",
+	"model_selector_fast_aria": "Fast mode for {model}",
+	"model_selector_fast_hint": "Faster responses with increased usage. Applies to your next message.",
+	"model_selector_fast_unavailable": "Fast settings are unavailable for this model or Runtime version. Re-select a model or update the local Runtime before sending.",
 	"board_script_title": "Script",
 	"board_script_preview": "Interact with scripts",
 	"board_script_pause": "Pause scripts"

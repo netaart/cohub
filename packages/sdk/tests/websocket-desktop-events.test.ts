@@ -91,3 +91,24 @@ test("emits desktop command envelopes as user events", async () => {
   assert.deepEqual(events.map((event) => event.type), ["desktop.command.dispatched"]);
   await client.disconnect();
 });
+
+test("Codex messages serialize explicit Fast on and off while omission stays absent", async () => {
+  FakeWebSocket.instance = null;
+  const client = new WebsocketClient({ url: "ws://localhost", autoReconnect: false, WebSocketImpl: FakeWebSocket, getAccessToken: () => "token" });
+  const connecting = client.connect();
+  const socket = FakeWebSocket.instance;
+  assert.ok(socket);
+  socket.open();
+  await waitFor(() => socket.sent.length > 0);
+  socket.receive({ id: "auth", timestamp: Date.now(), domain: "system", type: "system.auth.ok", payload: { connectionId: "connection", user: {} } });
+  await connecting;
+  try {
+    for (const patch of [{}, { serviceTier: null }, { serviceTier: "priority" as const }]) {
+      await client.sendMessage({ spaceId: "space", sessionId: "session", harness: "codex", content: [{ type: "text", text: "Hello" }], ...patch });
+      const frame = JSON.parse(socket.sent.at(-1)!);
+      assert.equal(frame.type, "session.message.create");
+      assert.equal(frame.payload.harness, "codex");
+      assert.deepEqual(Object.fromEntries(Object.entries(frame.payload).filter(([key]) => key === "serviceTier")), patch);
+    }
+  } finally { await client.disconnect(); }
+});

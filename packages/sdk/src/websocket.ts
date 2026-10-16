@@ -605,6 +605,8 @@ export class WebsocketClient {
     requestId?: string;
     model?: string;
     provider?: string;
+    harness?: "cohub" | "pi" | "codex";
+    serviceTier?: "priority" | null;
     thinkingLevel?: ModelThinkingLevel;
   }) {
     await this.ensureOpen();
@@ -618,6 +620,8 @@ export class WebsocketClient {
         clientMessageId: input.clientMessageId,
         model: input.model,
         provider: input.provider,
+        harness: input.harness,
+        serviceTier: input.serviceTier,
         thinkingLevel: input.thinkingLevel,
       },
     });

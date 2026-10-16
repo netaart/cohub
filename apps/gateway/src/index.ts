@@ -804,6 +804,7 @@ const submitWebsocketSessionMessage = async (ctx: WsConnectionContext, requestId
     model,
     provider,
     harness: isLocalHarness(payload.harness) ? payload.harness : "cohub",
+    serviceTier: payload.serviceTier as "priority" | null | undefined,
     thinkingLevel,
     context: {
       kind: "websocket",

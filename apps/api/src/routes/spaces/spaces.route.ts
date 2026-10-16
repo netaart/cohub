@@ -4,7 +4,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { displaysSnapshotSchema, fileWatcherStatusSchema, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
+import { displaysSnapshotSchema, fileWatcherStatusSchema, getDefaultSpaceModsForEnv, runtimeDisplaysKey, validateRuntimeServiceTier, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
 import {
   HOME_SPACE_SLUG,
   parseSpaceSlug,
@@ -316,6 +316,7 @@ type SpacePromptInput = {
   model?: string | null;
   provider?: string | null;
   harness?: "cohub" | "pi" | "codex" | null;
+  serviceTier?: "priority" | null;
   thinkingLevel?: string | null;
   clientMessageId?: string | null;
   generationPolicy?: unknown;
@@ -1921,6 +1922,11 @@ router.post("/:id/prompt", async (c) => {
   if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
 
   const body = await c.req.json<SpacePromptInput>().catch(() => null);
+  if (body) {
+    try { validateRuntimeServiceTier(body); }
+    catch (error) { return c.json({ message: error instanceof Error ? error.message : String(error) }, 400); }
+    if (body.mode === "create" && body.serviceTier !== undefined) return c.json({ message: "serviceTier is only supported by Codex agent prompts" }, 400);
+  }
   if (body?.mode === "create") {
     const generation = body.generation;
     if (!generation?.model || !Array.isArray(generation.content) || generation.content.length === 0) {
@@ -2014,6 +2020,13 @@ router.post("/:id/prompt", async (c) => {
     !(await validatePromptModel({ userId: user.uuid, provider: requestedProvider, model: requestedModel }))
   ) {
     return c.json({ code: "model_unavailable", message: "requested model is not available" }, 422);
+  }
+
+  if (body.serviceTier !== undefined) {
+    const capabilities = (await getRuntimeRegistration(spaceId))?.capabilities;
+    if (!capabilities) return c.json({ message: "Local Runtime is offline" }, 503);
+    try { validateRuntimeServiceTier({ ...body, model: requestedModel, provider: requestedProvider }, capabilities); }
+    catch (error) { return c.json({ message: error instanceof Error ? error.message : String(error) }, 422); }
   }
 
   let promptLabelIds: string[] = [];
@@ -2110,6 +2123,7 @@ router.post("/:id/prompt", async (c) => {
         model: requestedModel,
         provider: requestedProvider,
         harness: body.harness ?? null,
+        serviceTier: body.serviceTier,
         thinkingLevel: promptThinkingLevel ?? null,
         generationPolicy,
         intent: promptIntent,

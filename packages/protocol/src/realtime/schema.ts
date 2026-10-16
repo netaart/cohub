@@ -43,8 +43,9 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
       model: z.string().optional(),
       provider: z.string().optional(),
       harness: harnessSchema.optional(),
+      serviceTier: z.literal("priority").nullable().optional(),
       thinkingLevel: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
-    }),
+    }).refine((input) => input.serviceTier === undefined || input.harness === "codex", "serviceTier is only supported by Codex"),
   }),
   z.object({
     type: z.literal("presence.update"),

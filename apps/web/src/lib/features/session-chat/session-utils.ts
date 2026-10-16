@@ -2,6 +2,7 @@ import { resolveHarness } from "@cohub/protocol";
 import type { SessionTurnRecord } from "@cohub/protocol/model";
 import type { SessionRecord, TaskRunRecord } from "@neta-art/cohub";
 import {
+	getRequestedServiceTier,
 	getRequestedThinkingLevel,
 	type LocalModelSelection,
 	type ModelCatalogItem,
@@ -52,10 +53,13 @@ export function resolveLocalModelFromTurns(
 	if (typeof meta?.model !== "string" || typeof meta.provider !== "string")
 		return null;
 	const thinkingLevel = getRequestedThinkingLevel(meta);
+	const serviceTier =
+		harness === "codex" ? getRequestedServiceTier(meta) : undefined;
 	return {
 		id: meta.model,
 		provider: meta.provider,
 		...(thinkingLevel ? { thinkingLevel } : {}),
+		...(serviceTier !== undefined ? { serviceTier } : {}),
 	};
 }
 

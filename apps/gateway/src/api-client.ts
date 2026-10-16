@@ -260,6 +260,7 @@ export const submitInternalSessionPrompt = async (input: {
   model?: string | null;
   provider?: string | null;
   harness?: "cohub" | "pi" | "codex";
+  serviceTier?: "priority" | null;
   thinkingLevel?: string | null;
   context?: Record<string, unknown> | null;
 }): Promise<{ ok: true; turnId: string; userMessageId: string; trace: TraceIdentifiers }> => {
@@ -280,6 +281,7 @@ export const submitInternalSessionPrompt = async (input: {
       model: input.model ?? null,
       provider: input.provider ?? null,
       harness: input.harness ?? "cohub",
+      serviceTier: input.serviceTier,
       thinkingLevel: input.thinkingLevel ?? null,
       context: input.context ?? null,
     }),

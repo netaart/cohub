@@ -4,7 +4,7 @@ import type {
 	PublicGenerationDeclaration,
 } from "@cohub/protocol/generation";
 import type { ModelStatusEntry } from "@cohub/protocol/model/status";
-import { Brain, Check, ChevronDown, Image } from "lucide-svelte";
+import { Brain, Check, ChevronDown, Image, Zap } from "lucide-svelte";
 import Dialog from "$lib/components/Dialog.svelte";
 import { getGenerationModelPickerItems } from "$lib/generation-model-catalog";
 import { formatCurrency } from "$lib/i18n/format";
@@ -19,6 +19,7 @@ import {
 	clampThinkingLevel,
 	formatThinkingLevelFull,
 	formatThinkingLevelShort,
+	getFastServiceTier,
 	getModelDefaultThinkingLevel,
 	getSupportedThinkingLevels,
 	type ModelThinkingLevel,
@@ -50,12 +51,14 @@ type Props = {
 		provider: string;
 		id: string;
 		thinkingLevel?: ModelThinkingLevel;
+		serviceTier?: "priority" | null;
 	}) => void;
 	models: ModelItem[];
 	currentModel?: { provider: string; id: string } | null;
 	/** Model the session thinking level is bound to. Defaults to currentModel. */
 	thinkingLevelModel?: { provider: string; id: string } | null;
 	currentThinkingLevel?: ModelThinkingLevel | null;
+	currentServiceTier?: "priority" | null;
 	modelStatus?: Record<string, ModelStatusEntry> | null;
 	generationModels?: PublicGenerationDeclaration[];
 	generationPolicyMode?: "auto" | "limited";
@@ -100,6 +103,7 @@ const {
 	currentModel = null,
 	thinkingLevelModel = null,
 	currentThinkingLevel = null,
+	currentServiceTier,
 	modelStatus = null,
 	generationModels = [],
 	generationPolicyMode = "auto",
@@ -270,11 +274,47 @@ function toggleThinkingMenu(item: ModelItem, e: MouseEvent) {
 
 function selectThinkingLevel(item: ModelItem, level: ModelThinkingLevel) {
 	closeThinkingMenu();
-	onSelect({ provider: item.provider, id: item.id, thinkingLevel: level });
+	onSelect({
+		provider: item.provider,
+		id: item.id,
+		thinkingLevel: level,
+		...serviceTierSelection(item),
+	});
 }
 
 function handleModelClick(item: ModelItem) {
-	onSelect({ provider: item.provider, id: item.id });
+	onSelect({
+		provider: item.provider,
+		id: item.id,
+		...serviceTierSelection(item),
+	});
+}
+
+function serviceTierSelection(item: ModelItem): {
+	serviceTier?: "priority" | null;
+} {
+	if (!getFastServiceTier(item)) return {};
+	return {
+		serviceTier:
+			isCurrentModel(item) && currentServiceTier !== undefined
+				? currentServiceTier
+				: item.model.defaultServiceTier === "priority"
+					? "priority"
+					: null,
+	};
+}
+
+function toggleFast(item: ModelItem) {
+	onSelect({
+		provider: item.provider,
+		id: item.id,
+		thinkingLevel:
+			thinkingLevels(item).length > 1
+				? candidateThinkingLevel(item)
+				: undefined,
+		serviceTier:
+			serviceTierSelection(item).serviceTier === "priority" ? null : "priority",
+	});
 }
 
 function isHiddenModel(item: ModelItem): boolean {
@@ -741,7 +781,7 @@ function handleNavigationKeydown(e: KeyboardEvent) {
 		e.stopPropagation();
 		e.stopImmediatePropagation();
 		const selected = filteredModels[selectedIndex];
-		onSelect({ provider: selected.provider, id: selected.id });
+		handleModelClick(selected);
 	}
 }
 
@@ -1014,6 +1054,8 @@ const hoverCardPos = $derived.by(() => {
 					{@const costText = formatModelCost(item, locale)}
 					{@const tLevels = thinkingLevels(item)}
 					{@const showThinking = tLevels.length > 1}
+					{@const fastTier = getFastServiceTier(item)}
+					{@const fastEnabled = serviceTierSelection(item).serviceTier === "priority"}
 					{@const tMenuKey = thinkingMenuKey(item)}
 					{@const activeLevel = candidateThinkingLevel(item)}
 					{@const thinkingOpen = thinkingMenuOpenFor === tMenuKey}
@@ -1062,74 +1104,89 @@ const hoverCardPos = $derived.by(() => {
 								<span class="max-w-[7.5rem] truncate text-right text-[11px] leading-4 text-text-tertiary/70">
 									{item.provider}
 								</span>
-								{#if showThinking}
-									<div class="relative self-end">
+								<div class="flex items-center justify-end gap-1">
+									{#if fastTier}
 										<button
 											type="button"
-											class={`inline-flex h-5 items-center justify-end gap-1 rounded border px-1 text-[10px] leading-none transition-colors ${
-												thinkingOpen
-													? "border-border-subtle bg-bg-surface text-text-secondary"
-													: "border-transparent text-text-tertiary hover:border-border-subtle/80 hover:bg-bg-surface hover:text-text-secondary"
-											}`}
-											title={m.model_selector_thinking_title({ level: formatThinkingLevelFull(activeLevel) }, { locale })}
-											aria-label={m.model_selector_thinking_aria({ level: formatThinkingLevelFull(activeLevel) }, { locale })}
-											aria-expanded={thinkingOpen}
-											aria-haspopup="listbox"
-											onclick={(e) => toggleThinkingMenu(item, e)}
+											class={`inline-flex h-5 items-center gap-1 rounded px-1 text-[10px] leading-none transition-colors focus-visible:outline focus-visible:outline-brand ${fastEnabled ? "bg-brand/10 text-brand" : "text-text-tertiary hover:bg-bg-surface hover:text-text-secondary"}`}
+											aria-pressed={fastEnabled}
+											aria-label={m.model_selector_fast_aria({ model: getDisplayName(item) }, { locale })}
+											title={m.model_selector_fast_hint({}, { locale })}
+											onclick={() => toggleFast(item)}
 										>
-											<Brain class="h-3 w-3 opacity-70" />
-											<span class="tabular-nums">{formatThinkingLevelShort(activeLevel)}</span>
-											<ChevronDown class={`h-2.5 w-2.5 opacity-50 transition-transform ${thinkingOpen ? "rotate-180" : ""}`} />
+											<Zap class="h-3 w-3" />
+											{m.model_selector_fast({}, { locale })}
 										</button>
-										{#if thinkingOpen && thinkingMenuPos}
+									{/if}
+									{#if showThinking}
+										<div class="relative self-end">
 											<button
 												type="button"
-												class="fixed inset-0 z-[120] cursor-default"
-												aria-hidden="true"
-												tabindex="-1"
-												onclick={(e) => {
-													e.stopPropagation();
-													closeThinkingMenu();
-												}}
-											></button>
-											<div
-												class="menu-surface fixed z-[121] min-w-[8.5rem] overflow-hidden py-0.5"
-												style={`top: ${thinkingMenuPos.top}px; right: ${thinkingMenuPos.right}px;`}
-												role="listbox"
-												aria-label={m.model_selector_thinking_menu_aria({}, { locale })}
-												use:thinkingMenuAnchor
+												class={`inline-flex h-5 items-center justify-end gap-1 rounded border px-1 text-[10px] leading-none transition-colors ${
+													thinkingOpen
+														? "border-border-subtle bg-bg-surface text-text-secondary"
+														: "border-transparent text-text-tertiary hover:border-border-subtle/80 hover:bg-bg-surface hover:text-text-secondary"
+												}`}
+												title={m.model_selector_thinking_title({ level: formatThinkingLevelFull(activeLevel) }, { locale })}
+												aria-label={m.model_selector_thinking_aria({ level: formatThinkingLevelFull(activeLevel) }, { locale })}
+												aria-expanded={thinkingOpen}
+												aria-haspopup="listbox"
+												onclick={(e) => toggleThinkingMenu(item, e)}
 											>
-												{#each tLevels as level (level)}
-													{@const selected = level === activeLevel}
-													<button
-														type="button"
-														role="option"
-														aria-selected={selected}
-														class={`flex w-full min-h-[36px] items-center gap-2 px-2.5 text-left text-[12px] transition-colors ${
-															selected
-																? "bg-bg-hover text-text-primary"
-																: "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-														}`}
-														onclick={(e) => {
-															e.stopPropagation();
-															selectThinkingLevel(item, level);
-														}}
-													>
-														<span class="w-3.5 shrink-0">
-															{#if selected}
-																<Check class="h-3.5 w-3.5 text-brand" />
+												<Brain class="h-3 w-3 opacity-70" />
+												<span class="tabular-nums">{formatThinkingLevelShort(activeLevel)}</span>
+												<ChevronDown class={`h-2.5 w-2.5 opacity-50 transition-transform ${thinkingOpen ? "rotate-180" : ""}`} />
+											</button>
+											{#if thinkingOpen && thinkingMenuPos}
+												<button
+													type="button"
+													class="fixed inset-0 z-[120] cursor-default"
+													aria-hidden="true"
+													tabindex="-1"
+													onclick={(e) => {
+														e.stopPropagation();
+														closeThinkingMenu();
+													}}
+												></button>
+												<div
+													class="menu-surface fixed z-[121] min-w-[8.5rem] overflow-hidden py-0.5"
+													style={`top: ${thinkingMenuPos.top}px; right: ${thinkingMenuPos.right}px;`}
+													role="listbox"
+													aria-label={m.model_selector_thinking_menu_aria({}, { locale })}
+													use:thinkingMenuAnchor
+												>
+													{#each tLevels as level (level)}
+														{@const selected = level === activeLevel}
+														<button
+															type="button"
+															role="option"
+															aria-selected={selected}
+															class={`flex w-full min-h-[36px] items-center gap-2 px-2.5 text-left text-[12px] transition-colors ${
+																selected
+																	? "bg-bg-hover text-text-primary"
+																	: "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+															}`}
+															onclick={(e) => {
+																e.stopPropagation();
+																selectThinkingLevel(item, level);
+															}}
+														>
+															<span class="w-3.5 shrink-0">
+																{#if selected}
+																	<Check class="h-3.5 w-3.5 text-brand" />
+																{/if}
+															</span>
+															<span class="min-w-0 flex-1">{formatThinkingLevelFull(level)}</span>
+															{#if isDefaultLevel(item, level)}
+																<span class="shrink-0 text-[9px] uppercase tracking-wide text-text-placeholder">{m.model_selector_thinking_default({}, { locale })}</span>
 															{/if}
-														</span>
-														<span class="min-w-0 flex-1">{formatThinkingLevelFull(level)}</span>
-														{#if isDefaultLevel(item, level)}
-															<span class="shrink-0 text-[9px] uppercase tracking-wide text-text-placeholder">{m.model_selector_thinking_default({}, { locale })}</span>
-														{/if}
-													</button>
-												{/each}
-											</div>
-										{/if}
-									</div>
-								{/if}
+														</button>
+													{/each}
+												</div>
+											{/if}
+										</div>
+									{/if}
+								</div>
 							</div>
 						</div>
 					</div>

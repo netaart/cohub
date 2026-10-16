@@ -101,12 +101,29 @@ export const runtimeCapabilitiesSchema = z.object({
     name: z.string().max(255),
     /** The model the Harness runs when none is requested; at most one per Harness. */
     isDefault: z.boolean().optional(),
+    serviceTiers: z.array(z.object({ id: z.literal("priority"), name: z.string(), description: z.string().optional() })).optional(),
+    defaultServiceTier: z.literal("priority").nullable().optional(),
     reasoning: z.boolean().optional(),
     defaultThinkingLevel: runtimeThinkingLevelSchema.optional(),
     thinkingLevelMap: z.partialRecord(runtimeThinkingLevelSchema, z.string().max(100).nullable()).optional(),
   })).max(2000),
 });
 export type RuntimeCapabilities = z.infer<typeof runtimeCapabilitiesSchema>;
+
+/** Validate explicit Fast mode changes before persisting or dispatching a prompt. */
+export function validateRuntimeServiceTier(input: { harness?: unknown; serviceTier?: unknown; model?: string | null; provider?: string | null }, capabilities?: RuntimeCapabilities): void {
+  if (input.serviceTier === undefined) return;
+  if (input.serviceTier !== null && input.serviceTier !== "priority") throw new Error("serviceTier must be priority or null");
+  if (input.harness !== "codex") throw new Error("serviceTier is only supported by Codex");
+  if (capabilities === undefined) return;
+  const models = capabilities.models.filter((model) => model.harness === "codex"
+    && (!input.provider || model.provider === input.provider)
+    && (input.model ? model.id === input.model : model.isDefault));
+  if (models.length !== 1 || models[0]?.serviceTiers === undefined || (input.serviceTier === "priority" && !models[0].serviceTiers.some((tier) => tier.id === "priority"))) {
+    throw new Error("Fast mode is unavailable for this Codex model");
+  }
+}
+
 export const runtimePendingExecutionSchema = z.object({
   sessionId: z.string().uuid(),
   turnId: z.string().uuid(),
@@ -182,6 +199,8 @@ export type RuntimeTurnInput = {
   provider?: string | null;
   model?: string | null;
   thinkingLevel?: string | null;
+  /** Omit to inherit; null explicitly disables Fast mode. */
+  serviceTier?: "priority" | null;
   requestId?: string | null;
   traceContext?: RuntimeTraceContext;
   accessMode: "read_only" | "full_access";
@@ -257,10 +276,11 @@ export const runtimeCommandSchema = z.discriminatedUnion("type", [
     messages: z.array(z.object({ turnId: id, userMessageId: id, userId: z.string().nullable(), content })).min(1).max(RUNTIME_MAX_BATCH_MESSAGES),
     context: runtimeContextSchema,
     provider: z.string().nullable().optional(), model: z.string().nullable().optional(), thinkingLevel: z.string().nullable().optional(),
+    serviceTier: z.literal("priority").nullable().optional(),
     requestId: z.string().regex(/^[a-zA-Z0-9._:-]{1,128}$/).nullable().optional(),
     traceContext: runtimeTraceContextSchema.optional(),
     accessMode: z.enum(["read_only", "full_access"]),
-  }).refine((input) => {
+  }).refine((input) => input.serviceTier === undefined || input.harness === "codex", "serviceTier is only supported by Codex").refine((input) => {
     const owner = input.messages.at(-1);
     return owner?.turnId === input.turnId && owner.userMessageId === input.userMessageId
       && new Set(input.messages.map((message) => message.turnId)).size === input.messages.length

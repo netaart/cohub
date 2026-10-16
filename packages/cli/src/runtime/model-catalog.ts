@@ -52,6 +52,29 @@ function codexThinking(model: JsonRecord, configuredEffort: unknown): Pick<Model
   };
 }
 
+function codexServiceTiers(model: JsonRecord, configuredTier: unknown): Pick<Model, "serviceTiers" | "defaultServiceTier"> {
+  for (const value of [configuredTier, model.defaultServiceTier]) {
+    if (value !== undefined && value !== null && (typeof value !== "string" || !value)) throw new Error("Invalid Codex service tier default");
+  }
+  // Older Codex versions do not advertise this capability. Deprecated speed-tier
+  // names are not evidence that the current turn/start protocol supports Fast.
+  if (model.serviceTiers === undefined) return {};
+  if (!Array.isArray(model.serviceTiers)) throw new Error("Invalid Codex service tier catalog");
+  const serviceTiers: NonNullable<Model["serviceTiers"]> = [];
+  const ids = new Set<string>();
+  for (const value of model.serviceTiers) {
+    const tier = record(value);
+    if (typeof tier.id !== "string" || !tier.id || typeof tier.name !== "string" || !tier.name ||
+      tier.description !== undefined && typeof tier.description !== "string" || ids.has(tier.id)) {
+      throw new Error("Invalid Codex service tier metadata");
+    }
+    ids.add(tier.id);
+    if (tier.id === "priority") serviceTiers.push({ id: "priority", name: tier.name, ...(typeof tier.description === "string" ? { description: tier.description } : {}) });
+  }
+  const selected = configuredTier ?? model.defaultServiceTier;
+  return { serviceTiers, defaultServiceTier: selected === "priority" && ids.has("priority") ? "priority" : null };
+}
+
 /** Use Codex's picker-visible model/list for every provider, including custom providers. */
 export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[]): Model[] {
   const config = record(configResponse.config);
@@ -63,7 +86,7 @@ export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[]
     if (!id || model.hidden) return [];
     // A configured model replaces the catalog's own default.
     const isDefault = configuredModel ? id === configuredModel : model.isDefault === true;
-    return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id, ...(isDefault ? { isDefault } : {}), ...codexThinking(model, config.model_reasoning_effort) }];
+    return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id, ...(isDefault ? { isDefault } : {}), ...codexThinking(model, config.model_reasoning_effort), ...codexServiceTiers(model, config.service_tier) }];
   });
   if (configuredModel && !models.some((model) => model.id === configuredModel)) models.unshift({ harness: "codex", provider, id: configuredModel, name: configuredModel, isDefault: true });
   return models;

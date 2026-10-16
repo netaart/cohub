@@ -11,24 +11,25 @@ const assistants: Array<{ turnId: string; userMessageId: string; userId: string;
 const outputs: Array<{ turnId?: string }> = [];
 const registration = { connectionId: randomUUID(), ownerUserId: "host-owner", endpoint: "ws://gateway/internal/runtime-relay/space",
   capabilities: { harnesses: ["pi", "codex"], models: [{ harness: "pi", id: "chosen", provider: "fixture", name: "chosen" }, { harness: "codex", id: "chosen", provider: "fixture", name: "chosen" }] } };
-mock.module("../env.js", { exports: { env: {} } });
-mock.module("../db.js", { exports: { db: {
+mock.module("@cohub/infra/tracing", { namedExports: { getActiveTraceIdentifiers: (requestId: string) => ({ requestId, traceId: null, spanId: null, traceparent: null }) } });
+mock.module("../env.js", { namedExports: { env: {} } });
+mock.module("../db.js", { namedExports: { db: {
   select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ status, meta: {} }] }) }) }),
   update: () => ({ set: () => ({ where: () => ({ returning: async () => [{ meta: {} }] }) }) }),
 } } });
-mock.module("../redis.js", { exports: { redis: { get: async () => online ? JSON.stringify(registration) : null }, sendOutput: async (event: { turnId?: string }) => { outputs.push(event); } } });
-mock.module("../api.js", { exports: { getSpaceSandbox: async () => ({ sandbox: { provider: "local" } }) } });
-mock.module("../logger.js", { exports: { logger: { info() {}, warn() {}, debug() {}, error() {} } } });
-mock.module("../runtime/context-store.js", { exports: { loadRuntimeContext: async (input: { beforeSequence?: number; throughTurnId?: string }) => {
+mock.module("../redis.js", { namedExports: { redis: { get: async () => online ? JSON.stringify(registration) : null }, sendOutput: async (event: { turnId?: string }) => { outputs.push(event); } } });
+mock.module("../api.js", { namedExports: { getSpaceSandbox: async () => ({ sandbox: { provider: "local" } }) } });
+mock.module("../logger.js", { namedExports: { logger: { info() {}, warn() {}, debug() {}, error() {} } } });
+mock.module("../runtime/context-store.js", { namedExports: { loadRuntimeContext: async (input: { beforeSequence?: number; throughTurnId?: string }) => {
   contexts.push(input); return { revision: input.throughTurnId ? "completed" : "previous", throughTurnId: input.throughTurnId ?? null, messages: [] };
 } } });
-mock.module("../persistence.js", { exports: {
+mock.module("../persistence.js", { namedExports: {
   persistBatchUserMessages: async ({ batch }: { batch: ClaimedTurnBatch }) => {
     const { buildUserMessagesForBatch } = await import("../batch.js"); users.push(...buildUserMessagesForBatch(batch));
   },
   persistAssistantMessage: async (input: typeof assistants[number]) => { assistants.push(input); status = "completed"; },
 } });
-mock.module("../runtime/exchange.js", { exports: {
+mock.module("../runtime/exchange.js", { namedExports: {
   RuntimeExecutionUncertainError: class extends Error {}, RuntimeResultUnavailableError: class extends Error {},
   exchangeRuntimeTurn: async (options: { input: RuntimeTurnInput; recovery?: boolean; event: (event: unknown, send: (command: unknown) => void, id: string) => Promise<void> }) => {
     commands.push(options.input);
@@ -82,5 +83,24 @@ test("read-only Pi and offline selected harness fail before dispatch without swi
   await assert.rejects(executeRemoteHarnessTurn(input), /read-only/);
   online = false;
   await assert.rejects(executeRemoteHarnessTurn({ ...input, accessMode: "full_access" }), /offline/);
+  assert.equal(commands.length, 0); assert.equal(users.length, 0);
+});
+
+test("Codex dispatch preserves Fast on, off and omitted without affecting other harnesses", async () => {
+  online = true;
+  const codex = registration.capabilities.models.find((model) => model.harness === "codex")!;
+  Object.assign(codex, { serviceTiers: [{ id: "priority", name: "Fast" }] });
+  for (const patch of [{}, { serviceTier: null }, { serviceTier: "priority" as const }]) {
+    const claimed = batch(); status = "running"; commands.length = 0;
+    await executeRemoteHarnessTurn({ spaceId: randomUUID(), sessionId: claimed.ownerTurn.sessionId, batch: claimed, actorUserId: claimed.ownerTurn.userUuid,
+      harness: "codex", model: "chosen", provider: "fixture", accessMode: "full_access", abortSignal: new AbortController().signal, ...patch });
+    assert.deepEqual(Object.fromEntries(Object.entries(commands[0]!).filter(([key]) => key === "serviceTier")), patch);
+  }
+  const claimed = batch(); commands.length = users.length = 0;
+  const input = { spaceId: randomUUID(), sessionId: claimed.ownerTurn.sessionId, batch: claimed, actorUserId: claimed.ownerTurn.userUuid,
+    harness: "pi" as const, serviceTier: null, accessMode: "full_access" as const, abortSignal: new AbortController().signal };
+  await assert.rejects(executeRemoteHarnessTurn(input), /Codex/);
+  Object.assign(codex, { serviceTiers: [] });
+  await assert.rejects(executeRemoteHarnessTurn({ ...input, harness: "codex", model: "chosen", serviceTier: "priority" }), /unavailable/);
   assert.equal(commands.length, 0); assert.equal(users.length, 0);
 });

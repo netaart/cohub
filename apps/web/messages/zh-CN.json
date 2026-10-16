@@ -2427,6 +2427,10 @@
 	"chats_new_chat_in": "选择 Space 新建对话",
 	"chats_row_no_messages": "暂无消息",
 	"spaces_row_no_description": "暂无描述",
+	"model_selector_fast": "Fast",
+	"model_selector_fast_aria": "{model} 的 Fast 模式",
+	"model_selector_fast_hint": "响应更快，用量更高。从下一条消息生效。",
+	"model_selector_fast_unavailable": "当前模型或本地版本不支持此 Fast 设置。请重新选择模型，或更新本地版本后再发送。",
 	"board_script_title": "脚本",
 	"board_script_preview": "与脚本交互",
 	"board_script_pause": "暂停脚本"

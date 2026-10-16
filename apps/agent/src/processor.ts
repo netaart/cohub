@@ -631,6 +631,12 @@ function resolveRequestedModel(ownerMeta: Record<string, unknown>) {
   return provider && model ? { provider, id: model } : undefined;
 }
 
+function resolveRequestedServiceTier(ownerMeta: Record<string, unknown>): "priority" | null | undefined {
+  const value = ownerMeta.requestedServiceTier;
+  if (value === undefined || value === null || value === "priority") return value;
+  throw new Error("Invalid requested serviceTier");
+}
+
 function resolveRequestedThinkingLevel(ownerMeta: Record<string, unknown>): string | null | undefined {
   if (typeof ownerMeta.requestedThinkingLevel !== "string") return undefined;
   const trimmed = ownerMeta.requestedThinkingLevel.trim();
@@ -872,6 +878,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
             batch,
             actorUserId,
             accessMode,
+            serviceTier: resolveRequestedServiceTier(ownerMeta),
             requestedThinkingLevel: resolveRequestedThinkingLevel(ownerMeta),
             harness: requestedHarness,
             provider: typeof ownerMeta.provider === "string" ? ownerMeta.provider : null,

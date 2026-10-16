@@ -1273,6 +1273,8 @@ export type CreateSpacePromptInput = {
   provider?: string | null;
   /** Harness selected for this turn. */
   harness?: "cohub" | "pi" | "codex" | null;
+  /** Omit to inherit; null explicitly disables Codex Fast mode. */
+  serviceTier?: "priority" | null;
   /** Optional thinking level override for this turn. Omit to inherit session default. */
   thinkingLevel?: ModelThinkingLevel | null;
   clientMessageId?: string | null;

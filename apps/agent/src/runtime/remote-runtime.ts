@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { sessionTurns } from "@cohub/db";
 import { readRuntimeRecovery, runtimeRecoveryActive, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { db } from "../db.js";
-import { runtimeRegistrationKey, parseRuntimeRegistration, type RuntimeExecutionEvent, type RuntimeTurnInput, type RuntimeRecoveryState } from "@cohub/protocol";
+import { runtimeRegistrationKey, parseRuntimeRegistration, validateRuntimeServiceTier, type RuntimeExecutionEvent, type RuntimeTurnInput, type RuntimeRecoveryState } from "@cohub/protocol";
 import { redis, sendOutput } from "../redis.js";
 import { env } from "../env.js";
 import { logger } from "../logger.js";
@@ -36,12 +36,13 @@ export async function markRuntimeRecovery(turnId: string, recovery: RuntimeRecov
 
 export async function executeRemoteHarnessTurn(input: {
   spaceId: string; sessionId: string; batch: ClaimedTurnBatch; actorUserId: string | null;
-  accessMode: PromptAccessMode; requestedThinkingLevel?: string | null;
+  accessMode: PromptAccessMode; requestedThinkingLevel?: string | null; serviceTier?: "priority" | null;
   harness: "pi" | "codex"; provider?: string | null; model?: string | null; requestId?: string | null; abortSignal: AbortSignal;
   recovery?: boolean;
   leaseSignal?: AbortSignal;
 }): Promise<void> {
   input.abortSignal.throwIfAborted();
+  validateRuntimeServiceTier(input);
   if (!input.recovery && input.harness === "pi" && input.accessMode === "read_only") throw new Error("Pi cannot enforce read-only access");
   const [sandbox, registrationRaw] = await Promise.all([input.recovery ? Promise.resolve(null) : getSpaceSandbox({ spaceId: input.spaceId }), redis.get(runtimeRegistrationKey(input.spaceId))]);
   if ((!input.recovery && sandbox?.sandbox?.provider !== "local") || !registrationRaw) throw new Error("Local Runtime is offline");
@@ -51,6 +52,7 @@ export async function executeRemoteHarnessTurn(input: {
     throw new Error("Local Runtime registration is invalid");
   }
   const capabilities = registration.capabilities;
+  if (!input.recovery) validateRuntimeServiceTier(input, capabilities);
   const previousRecovery = readRuntimeRecovery(input.batch.ownerTurn.meta);
   if (input.recovery && previousRecovery?.ownerUserId && previousRecovery.ownerUserId !== registration.ownerUserId) throw new RuntimeExecutionUncertainError("Runtime owner changed");
   if (!input.recovery && !capabilities.harnesses.includes(input.harness)) throw new Error("Harness is unavailable on this Runtime");
@@ -69,6 +71,7 @@ export async function executeRemoteHarnessTurn(input: {
     harness: input.harness, messages: users.map((message, index) => ({ turnId: message.turnId, userMessageId: message.userMessageId,
       userId: input.batch.turns[index]?.userUuid ?? null, content: message.content })),
     context, provider: input.provider, model: input.model,
+    ...(input.serviceTier !== undefined ? { serviceTier: input.serviceTier } : {}),
     thinkingLevel: input.requestedThinkingLevel,
     requestId: traceIdentifiers.requestId,
     traceContext: {

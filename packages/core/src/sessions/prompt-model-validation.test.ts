@@ -59,3 +59,22 @@ test("mismatched prevalidated model still validates the requested model", async 
 
   assert.deepEqual(validatedInput, { userId: "user-1", provider: "cohub", model: "model-1" });
 });
+
+test("Codex service tiers preserve explicit off and reject invalid requests before mutations", async () => {
+  const created: Array<Record<string, unknown>> = [];
+  const deps = { ...createDeps(undefined), validateLocalHarness: async () => undefined,
+    createSessionTurn: async (turn: Parameters<SessionPromptDependencies["createSessionTurn"]>[0]) => { created.push(turn.meta); return { id: "turn-id", spaceId: "space-1" }; },
+  };
+  for (const serviceTier of ["priority", null] as const) {
+    await submitSessionPrompt(deps, { ...input, harness: "codex", serviceTier });
+    assert.equal(created.at(-1)?.requestedServiceTier, serviceTier);
+  }
+  await submitSessionPrompt(deps, { ...input, harness: "codex" });
+  assert.equal(Object.hasOwn(created.at(-1)!, "requestedServiceTier"), false);
+  created.length = 0;
+  for (const harness of ["pi", "cohub", undefined] as const) {
+    await assert.rejects(submitSessionPrompt(deps, { ...input, harness, serviceTier: null }), /Codex/);
+  }
+  await assert.rejects(submitSessionPrompt(deps, { ...input, harness: "codex", serviceTier: "invalid" as "priority" }), /serviceTier/);
+  assert.equal(created.length, 0);
+});

@@ -4,7 +4,7 @@ import { getCurrentRequestId, getOrCreateRequestId } from "@cohub/infra/tracing"
 import { injectTrace } from "@cohub/infra/tracing/propagator";
 import { createSessionServices, HarnessUnavailableError, ModelUnavailableError } from "@cohub/core/sessions";
 import { createSandboxLifecycleController, getSandboxPromptRecoveryReason } from "@cohub/sandbox-controller";
-import { isLocalHarness } from "@cohub/protocol";
+import { isLocalHarness, validateRuntimeServiceTier } from "@cohub/protocol";
 import { db } from "./db/index.js";
 import { config } from "./config.js";
 import { redisCommandClient } from "./redis.js";
@@ -82,6 +82,7 @@ export function getSessionDomainServices(input?: {
       if (!isLocalHarness(harness)) throw new HarnessUnavailableError();
       const capabilities = (await getRuntimeRegistration(prompt.spaceId))?.capabilities;
       if (!capabilities?.harnesses.includes(harness)) throw new HarnessUnavailableError();
+      validateRuntimeServiceTier(prompt, capabilities);
       if (prompt.model && !capabilities.models.some((model) => model.harness === harness && model.id === prompt.model && (!prompt.provider || model.provider === prompt.provider))) throw new ModelUnavailableError(prompt.provider ?? harness, prompt.model);
     },
     validatePromptModel: ({ userId, provider, model }) => validatePromptModel({ userId, provider, model }),

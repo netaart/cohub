@@ -1723,6 +1723,7 @@ $effect(() => {
 	models={localModelCatalog}
 	currentModel={localModel}
 	currentThinkingLevel={localModel?.thinkingLevel ?? null}
+	currentServiceTier={localModel?.serviceTier}
 />
 
 <style>

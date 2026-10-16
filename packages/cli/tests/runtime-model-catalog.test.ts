@@ -96,3 +96,46 @@ test("custom Codex providers retain an unlisted configured model without guessin
     { harness: "codex", provider: "custom", id: "listed", name: "listed" },
   ]);
 });
+
+const fastTier = { id: "priority", name: "Fast", description: "Higher speed" };
+
+test("Codex advertises Fast only from its service tier catalog and honors supported defaults", () => {
+  for (const [config, catalogDefault, expected] of [
+    [{}, null, null], [{}, "priority", "priority"], [{ service_tier: "priority" }, null, "priority"],
+    [{ service_tier: null }, "priority", "priority"], [{ service_tier: "flex" }, "priority", null],
+  ] as const) {
+    const [model] = codexModelCatalog({ config }, [{ id: "test", serviceTiers: [fastTier, { id: "flex", name: "Flex", description: "" }], defaultServiceTier: catalogDefault }]);
+    assert.deepEqual(model?.serviceTiers, [fastTier]);
+    assert.equal(model?.defaultServiceTier, expected);
+  }
+  const [unsupported] = codexModelCatalog({ config: { service_tier: "priority" } }, [{ id: "test", serviceTiers: [], defaultServiceTier: null }]);
+  assert.deepEqual(unsupported?.serviceTiers, []);
+  assert.equal(unsupported?.defaultServiceTier, null);
+});
+
+test("Codex uses advertised Fast capabilities for every provider without inventing support", () => {
+  for (const entries of [[{ id: "test" }], [{ id: "test", additionalSpeedTiers: ["fast"] }]]) {
+    const [model] = codexModelCatalog({ config: { service_tier: "priority" } }, entries);
+    assert.equal(model?.serviceTiers, undefined);
+    assert.equal(model?.defaultServiceTier, undefined);
+  }
+  const entries = [{ id: "test", serviceTiers: [fastTier], defaultServiceTier: "priority" }];
+  const [custom] = codexModelCatalog({ config: { model: "test", model_provider: "custom" } }, entries);
+  assert.deepEqual(custom?.serviceTiers, [fastTier]);
+  const [unadvertised] = codexModelCatalog({ config: { model: "test", model_provider: "custom" } }, [{ id: "test" }]);
+  assert.equal(unadvertised?.serviceTiers, undefined);
+  const [explicit] = codexModelCatalog({ config: { model: "test", model_provider: "custom", model_catalog_json: "/catalog.json" } }, entries);
+  assert.deepEqual(explicit?.serviceTiers, [fastTier]);
+});
+
+test("Codex reports malformed service tier metadata instead of hiding it", () => {
+  for (const metadata of [
+    { serviceTiers: null }, { serviceTiers: {} }, { serviceTiers: [null] },
+    { serviceTiers: [{ id: "priority", name: 42 }] },
+    { serviceTiers: [{ id: "priority", name: "Fast", description: false }] },
+    { serviceTiers: [{ id: "", name: "Fast" }] },
+    { serviceTiers: [fastTier, fastTier] },
+    { serviceTiers: [fastTier], defaultServiceTier: false },
+  ]) assert.throws(() => codexModelCatalog({ config: {} }, [{ id: "test", ...metadata }]), /Invalid Codex service tier/);
+  assert.throws(() => codexModelCatalog({ config: { service_tier: 42 } }, [{ id: "test", serviceTiers: [fastTier] }]), /Invalid Codex service tier/);
+});

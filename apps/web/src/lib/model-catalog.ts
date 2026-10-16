@@ -20,6 +20,7 @@ export type LocalModelSelection = {
 	id: string;
 	name?: string;
 	thinkingLevel?: ModelThinkingLevel;
+	serviceTier?: "priority" | null;
 };
 
 type LocalModel = RuntimeCapabilities["models"][number];
@@ -31,11 +32,20 @@ function toLocalModelItem({
 	reasoning,
 	thinkingLevelMap,
 	defaultThinkingLevel,
+	serviceTiers,
+	defaultServiceTier,
 }: LocalModel): ModelCatalogItem {
 	return {
 		provider,
 		id,
-		model: { name, reasoning, thinkingLevelMap, defaultThinkingLevel },
+		model: {
+			name,
+			reasoning,
+			thinkingLevelMap,
+			defaultThinkingLevel,
+			serviceTiers,
+			defaultServiceTier,
+		},
 	};
 }
 
@@ -72,11 +82,18 @@ export function resolveLocalModel(
 					match ? requested?.thinkingLevel : null,
 				)
 			: undefined;
+	const serviceTier =
+		match && requested?.serviceTier !== undefined
+			? requested.serviceTier
+			: model.serviceTiers !== undefined
+				? (model.defaultServiceTier ?? null)
+				: undefined;
 	return {
 		provider: model.provider,
 		id: model.id,
 		name: model.name,
 		...(thinkingLevel ? { thinkingLevel } : {}),
+		...(serviceTier !== undefined ? { serviceTier } : {}),
 	};
 }
 
@@ -307,5 +324,44 @@ export function getModelDisplayName(
 	if (!model) return "";
 	return (
 		getCatalogModelName(findModelCatalogItem(modelsCatalog, input)) || model
+	);
+}
+
+export function getFastServiceTier(
+	item: ModelCatalogItem,
+): { id: "priority"; name: string; description?: string } | undefined {
+	const tiers = item.model.serviceTiers;
+	if (tiers === undefined) return undefined;
+	if (!Array.isArray(tiers)) throw new Error("Invalid model service tiers");
+	return tiers.find((tier) => tier.id === "priority");
+}
+
+export function getRequestedServiceTier(
+	meta: unknown,
+): "priority" | null | undefined {
+	if (!meta || typeof meta !== "object" || Array.isArray(meta))
+		return undefined;
+	const value = (meta as Record<string, unknown>).requestedServiceTier;
+	if (value === undefined || value === null || value === "priority")
+		return value;
+	throw new Error("Invalid requested service tier");
+}
+
+/** Keep stale choices reviewable, but never silently send them at another speed. */
+export function isLocalServiceTierUnavailable(
+	models: RuntimeCapabilities["models"],
+	selection: LocalModelSelection | null,
+): boolean {
+	if (selection?.serviceTier === undefined) return false;
+	const model = models.find(
+		(item) =>
+			item.harness === "codex" &&
+			item.provider === selection.provider &&
+			item.id === selection.id,
+	);
+	return (
+		model?.serviceTiers === undefined ||
+		(selection.serviceTier === "priority" &&
+			!model.serviceTiers.some((tier) => tier.id === "priority"))
 	);
 }
