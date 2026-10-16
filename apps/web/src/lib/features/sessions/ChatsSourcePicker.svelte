@@ -61,6 +61,10 @@ function pick(source: UserSessionSourceKey | null) {
 	</button>
 {/snippet}
 
+{#if value !== null}
+	<span class="max-w-32 truncate text-[13px] text-text-secondary lg:text-[12px]" title={sourceName(value)}>{sourceName(value)}</span>
+{/if}
+
 <HeaderAction
 	bind:ref={anchor}
 	label={m.chats_source_current({ source: sourceName(value) }, { locale })}
