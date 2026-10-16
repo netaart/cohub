@@ -20,6 +20,20 @@ permissions:
   contents: read
 
 jobs:
+  sandbox-network:
+    name: Validate sandbox network isolation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.30.0'
+      - run: python -m pip install -r deploy/sandbox-network/requirements-test.txt
+      - run: python deploy/sandbox-network/test_policy.py
+
   js-checks:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest

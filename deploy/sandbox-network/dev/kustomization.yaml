@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cohub-sessions-dev
+resources:
+  - ../base
+patches:
+  - target:
+      kind: NetworkPolicy
+      name: sandbox-isolation
+    patch: |-
+      - op: replace
+        path: /spec/ingress/0/from/0/namespaceSelector/matchLabels/kubernetes.io~1metadata.name
+        value: cohub-dev
+      - op: replace
+        path: /spec/ingress/0/from/0/podSelector/matchExpressions/0/values
+        value: [cohub-api-dev, cohub-worker-dev, cohub-user-worker-dev, cohub-system-worker-dev, cohub-gateway-dev]
+      - op: replace
+        path: /spec/egress/1/to/0/namespaceSelector/matchLabels/kubernetes.io~1metadata.name
+        value: cohub-dev
+      - op: replace
+        path: /spec/egress/1/to/0/podSelector/matchLabels/app.kubernetes.io~1name
+        value: cohub-api-dev

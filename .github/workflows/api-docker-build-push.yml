@@ -13,6 +13,7 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
+      - 'deploy/sandbox-network/**'
       - '.github/workflows/api-docker-build-push.yml'
   workflow_dispatch:
     inputs:
@@ -206,6 +207,7 @@ jobs:
 
       - name: Deploy to Dev
         run: |
+          kubectl apply -k deploy/sandbox-network/dev
           kubectl set image deployment/cohub-api-dev cohub-api-dev=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} -n cohub-dev
           kubectl set image deployment/cohub-fs-api-dev cohub-fs-api-dev=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} -n cohub-dev
 
@@ -296,6 +298,7 @@ jobs:
 
       - name: Deploy to Prod
         run: |
+          kubectl apply -k deploy/sandbox-network/prod
           TAG="${{ steps.get-tag.outputs.tag }}"
           kubectl set image deployment/cohub-api cohub-api=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:$TAG -n cohub
           kubectl set image deployment/cohub-fs-api cohub-fs-api=${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}:$TAG -n cohub
