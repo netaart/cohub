@@ -1,7 +1,10 @@
-import { Queue, Worker, type JobsOptions, type Processor, type QueueOptions, type WorkerOptions } from "bullmq";
+import { type Queue, Worker, type JobsOptions, type Processor, type QueueOptions, type WorkerOptions } from "bullmq";
 import { BullMQOtel } from "bullmq-otel";
 import { Redis, type RedisOptions } from "ioredis";
 import { createLogger } from "../logging/logger.js";
+import { AuthenticatedQueue, authenticateQueueJob, readQueueSigningKey } from "./authenticated-queue.js";
+
+export * from "./authenticated-queue.js";
 
 export * from "./job-diagnostics.js";
 
@@ -121,7 +124,7 @@ export function createBullmqQueue<DataType = unknown, ResultType = unknown, Name
   },
 ) {
   const { redisUrl, telemetryServiceName, ...queueOptions } = options;
-  return new Queue<DataType, ResultType, NameType>(queueName, {
+  return new AuthenticatedQueue<DataType, ResultType, NameType>(queueName, {
     ...queueOptions,
     connection: createBullmqConnectionOptions(redisUrl),
     telemetry: createQueueTelemetry(telemetryServiceName),
@@ -137,8 +140,12 @@ export function createBullmqWorker<DataType = unknown, ResultType = unknown, Nam
   },
 ) {
   const { redisUrl, telemetryServiceName, ...workerOptions } = options;
+  const signingKey = readQueueSigningKey();
   const connection = createBullmqRedisConnection(redisUrl);
-  const worker = new Worker<DataType, ResultType, NameType>(queueName, processor, {
+  const worker = new Worker<DataType, ResultType, NameType>(queueName, async (job, token) => {
+    authenticateQueueJob(job, signingKey);
+    return processor(job, token);
+  }, {
     ...workerOptions,
     connection,
     telemetry: createQueueTelemetry(telemetryServiceName),
