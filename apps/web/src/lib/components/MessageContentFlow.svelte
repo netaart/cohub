@@ -234,7 +234,7 @@ const segments = $derived.by(() => {
 		</div>
 	{/if}
 	{#if userTextBlocks.length > 0}
-		<div class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-inherit" class:mt-2={userShellCommandBlocks.length > 0}>
+		<div class="whitespace-pre-wrap [overflow-wrap:anywhere] text-inherit" class:mt-2={userShellCommandBlocks.length > 0}>
 			{#each userTextTokens as token}
 				{#if token.type !== 'text'}
 					<button
