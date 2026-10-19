@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { ViewportContext } from "@cohub/protocol";
+import { type HarnessKind, harnessLabel } from "@cohub/protocol/runtime";
 import type {
 	PromptTemplateCatalogEntry,
 	RuntimeCapabilities,
@@ -98,12 +99,7 @@ type SelectedModel = {
 	name?: string;
 };
 
-type Harness = "cohub" | "pi" | "codex";
-const harnessLabels: Record<Harness, string> = {
-	cohub: "Cohub",
-	pi: "Pi",
-	codex: "Codex",
-};
+type Harness = HarnessKind;
 
 type Props = {
 	value: string;
@@ -1719,7 +1715,7 @@ $effect(() => {
 	onClose={() => { showLocalModelSelector = false; }}
 	onSelect={selectLocalModel}
 	showGeneration={false}
-	title={`${harnessLabels[harness]} · ${m.runtime_model({}, { locale })}`}
+	title={`${harnessLabel(harness)} · ${m.runtime_model({}, { locale })}`}
 	models={localModelCatalog}
 	currentModel={localModel}
 	currentThinkingLevel={localModel?.thinkingLevel ?? null}

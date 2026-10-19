@@ -10,6 +10,7 @@ import {
   type RuntimeCapabilities,
   type RuntimeContext,
   type RuntimeExecutionEvent,
+  type LocalHarness,
   type NativeRuntimeEvent,
 } from "@neta-art/cohub";
 import { describeError } from "../network-error.js";
@@ -27,7 +28,7 @@ type Execution = {
   promise: Promise<void>;
   sessionId: string;
   turnId: string;
-  harness: "pi" | "codex";
+  harness: LocalHarness;
   requestId?: string | null;
   traceContext?: RuntimeDiagnosticContext["traceContext"];
   result?: HarnessResult;
@@ -143,7 +144,7 @@ function executionContext(
   input: {
     sessionId: string;
     turnId: string;
-    harness: "pi" | "codex";
+    harness: LocalHarness;
     requestId?: string | null;
     traceContext?: RuntimeDiagnosticContext["traceContext"];
   },

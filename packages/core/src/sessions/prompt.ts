@@ -3,7 +3,7 @@ import type { ContentBlock } from "@cohub/protocol/core";
 import type { GenerationPolicy } from "@cohub/protocol/generation";
 import { normalizeSessionTurnOrigin, type SessionTurnIntent, type SessionTurnOrigin, type SessionTurnOriginKind } from "@cohub/protocol/model";
 import { isRequestSourceClientId, normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
-import { harnessSchema, isLocalHarness } from "@cohub/protocol/runtime";
+import { assertHarnessAccess, harnessSchema, isLocalHarness, type HarnessKind } from "@cohub/protocol/runtime";
 import { normalizeContentBlocks } from "../content/normalize.js";
 import type { PromptEnv } from "./prompt-env.js";
 
@@ -132,7 +132,7 @@ export type SkillUsageMeta = {
 };
 
 export type PromptAccessMode = "read_only" | "full_access";
-export type PromptHarness = "cohub" | "pi" | "codex";
+export type PromptHarness = HarnessKind;
 
 export type SubmitSessionPromptInput = {
   spaceId: string;
@@ -382,7 +382,7 @@ export const submitSessionPrompt = async (
   if (input.harness != null && !harnessSchema.safeParse(input.harness).success) throw new Error("Invalid Harness");
   const localHarness = isLocalHarness(input.harness);
   if (localHarness) {
-    if (input.harness === "pi" && input.accessMode === "read_only") throw new Error("Pi cannot enforce read-only access");
+    assertHarnessAccess(input.harness, input.accessMode);
     if (input.env && Object.keys(input.env).length) throw new Error("Local Harness uses its native environment; per-turn environment overrides are unavailable");
     if (!deps.validateLocalHarness) throw new Error("Local Harness execution is unavailable on this prompt entry point");
     await deps.validateLocalHarness(input);

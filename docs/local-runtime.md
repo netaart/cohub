@@ -44,11 +44,44 @@ The Pi extension connects over a private named pipe. Codex's shared app-server l
 socket Node cannot reach on Windows, so terminal Codex chats sync read-only there.
 Cancelling a turn on Windows stops Pi/Codex tools by process tree; a detached background job whose parent
 already exited can keep running.
-Pi and Codex must already be installed and authenticated locally. Without `--harness`,
-startup discovers installed Pi/Codex executables on PATH (or explicit executable overrides).
-Capability/authentication failures remain explicit; it never silently switches executors.
-`--pi` and `--codex` override executable paths. Repeated `--harness` options and comma-separated values are
-accepted. `--yes` accepts the explicit local execution consent for non-interactive startup.
+Harnesses (`pi`, `codex`, `claude` for Claude Code, `workbuddy` for the WorkBuddy CLI `codebuddy`) must
+already be installed and authenticated locally. Without `--harness`, startup discovers every installed
+harness on PATH (or explicit executable overrides); one that fails its startup check is skipped with a
+warning, and startup fails only when none can run. Explicitly requested harnesses must all pass; a Turn
+never silently switches executors. `--<harness> <path>` (for example `--claude`) overrides an executable
+path. Repeated `--harness` options and comma-separated values are accepted. `--yes` accepts the explicit
+local execution consent for non-interactive startup.
+未指定 `--harness` 时自动发现所有已安装的 Harness，启动检查失败的告警并跳过，全部失败才报错；显式指定的必须全部可用。
+
+## Harness adapters / Harness 适配器
+
+Each local harness is one adapter under `packages/cli/src/runtime/harnesses/`. The shared Runtime
+(execution receipts, Session files, projection, archives, recovery, native ingest) calls the adapter
+and does not branch on a harness. Adding one takes two steps:
+
+1. Register its identity in `LOCAL_HARNESS_SPECS` (`packages/protocol/src/runtime/harnesses.ts`): label,
+   archive `nativeFormat` (immutable once archives exist) and whether it can enforce read-only access.
+2. Implement `LocalHarnessAdapter` (`harnesses/types.ts`) and list it in `harnesses/index.ts`: executable,
+   model discovery, running a Turn, native file layout, history projection and archive restore. A
+   `transcript` reader enables receipt-less recovery and, with `nativeSync`, terminal conversation sync.
+
+CLI flags, Web pickers, labels, API validation and archive schemas derive from the registry. Logos live in
+`apps/web/src/lib/assets/harness-icons/` (LobeHub Icons, MIT); a harness without one gets a generic icon.
+Live control of terminal sessions stays harness-specific: the Pi extension and Codex's shared app-server.
+
+新增 Harness 只需在协议注册表登记，并在 `harnesses/` 下实现一个适配器；共享逻辑不再按 Harness 分支。
+CLI 参数、Web 选择器、API 校验与归档结构均由注册表派生。终端会话的实时控制仍由 Pi 扩展与 Codex 共享 app-server 各自实现。
+
+Claude Code and WorkBuddy run one stream-json process per Turn (`-p --input-format stream-json`). Full
+access maps to `--permission-mode acceptEdits`, read-only to `plan`; other tools follow the user's own
+permission rules and permission requests are always denied, never granted. Cohub history is projected
+into their native transcript (`~/.claude/projects`, `~/.codebuddy/projects`) and continued with
+`--resume`; thinking blocks and tool calls without results are left out. They run Cohub Turns only:
+terminal conversations are not synced, and an unknown outcome keeps the explicit stop confirmation.
+
+Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`，只读映射为 `plan`，
+其他工具遵循本机权限规则，权限请求一律拒绝。云端历史投影到原生会话文件并通过 `--resume` 续接。
+二者仅执行 Cohub 发起的 Turn，不同步终端会话；结果未知时仍需显式确认停止。
 
 ## Native clients / 原生客户端
 

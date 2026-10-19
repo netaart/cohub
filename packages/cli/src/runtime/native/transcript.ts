@@ -7,7 +7,8 @@ import { basename, join } from "node:path";
 import { createZstdDecompress } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import type { ContentBlock, NativeTurnComplete, NativeTurnMessage } from "@neta-art/cohub";
-import { identifiable, piContent } from "../harness.js";
+import { identifiable } from "../harnesses/process.js";
+import { piContent } from "./translate.js";
 import { codexTokenTotals, codexUsage } from "../codex-usage.js";
 import { record, type JsonRecord } from "../json-rpc.js";
 
@@ -82,8 +83,8 @@ function parseCodexHistoryBase(value: unknown): CodexHistoryBase | undefined {
 }
 
 
-/** Read exactly the first JSONL line of a stream without re-concatenating per chunk. */
-async function readFirstLine(stream: AsyncIterable<Buffer>): Promise<JsonRecord> {
+/** Read exactly the first JSONL record of a stream without re-concatenating per chunk. */
+export async function readFirstRecord(stream: AsyncIterable<Buffer>): Promise<JsonRecord> {
   const chunks: Buffer[] = [];
   let buffered = 0;
   for await (const chunk of stream) {
@@ -102,7 +103,7 @@ async function readFirstLine(stream: AsyncIterable<Buffer>): Promise<JsonRecord>
 }
 
 async function readCodexHeader(path: string, signal?: AbortSignal): Promise<{ threadId: string; cwd: string; historyBase?: CodexHistoryBase }> {
-  const value = await readFirstLine(codexRolloutBytes(path, null, signal));
+  const value = await readFirstRecord(codexRolloutBytes(path, null, signal));
   const payload = record(value.payload);
   const threadId = text(payload.id), cwd = text(payload.cwd);
   if (value.type !== "session_meta" || !threadId || !cwd) throw new Error("Invalid native session header");
@@ -113,7 +114,7 @@ async function readCodexHeader(path: string, signal?: AbortSignal): Promise<{ th
 /** Read only the session header before deciding whether a global Codex file belongs to this project. */
 export async function readNativeTranscriptHeader(path: string, harness: "pi" | "codex", signal?: AbortSignal): Promise<NativeTranscriptHeader> {
   if (harness === "pi") {
-    const value = await readFirstLine(createReadStream(path, { signal }));
+    const value = await readFirstRecord(createReadStream(path, { signal }));
     if (value.type !== "session" || !text(value.id) || !text(value.cwd)) throw new Error("Invalid native session header");
     return { nativeSessionId: text(value.id), cwd: text(value.cwd) };
   }

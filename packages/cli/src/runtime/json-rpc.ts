@@ -58,7 +58,8 @@ export class JsonRpcProcess {
   private stderr = "";
   private closed: Promise<void>;
   private closing: Promise<void> | null = null;
-  constructor(binary: string, args: string[], cwd: string, private mode: "pi" | "codex", context: Record<string, string> = {}) {
+  /** `pi` and `jsonrpc` correlate request responses; `stream` delivers every line as an event. */
+  constructor(binary: string, args: string[], cwd: string, private mode: "pi" | "jsonrpc" | "stream", context: Record<string, string> = {}) {
     this.child = spawn(binary, args, { cwd, env: { ...harnessEnvironment(), ...context }, stdio: "pipe", detached: process.platform !== "win32", windowsHide: true });
     this.closed = new Promise((resolve) => this.child.once("close", () => resolve()));
     const decoder = new JsonLineDecoder((value) => this.receive(value));
@@ -78,7 +79,7 @@ export class JsonRpcProcess {
   }
   private receive(value: JsonRecord) {
     const key = value.id == null ? null : String(value.id);
-    const response = this.mode === "pi" ? value.type === "response" : "result" in value || "error" in value;
+    const response = this.mode === "pi" ? value.type === "response" : this.mode === "jsonrpc" && ("result" in value || "error" in value);
     if (key && response) {
       const pending = this.pending.get(key);
       if (!pending) return;
@@ -108,6 +109,15 @@ export class JsonRpcProcess {
       try { this.write(this.mode === "pi" ? { ...params, id, type: method } : { id, method, params }); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
     });
+  }
+  /** Signal end of input; a stream-mode CLI flushes its transcript and exits. */
+  endInput() { if (!this.failure) this.child.stdin.end(); }
+  /** Whether the process exits within the timeout. */
+  async exited(timeoutMs: number): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); });
+    try { return await Promise.race([this.closed.then(() => true as const), timeout]); }
+    finally { clearTimeout(timer); }
   }
   onEvent(listener: (event: JsonRecord) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   onFailure(listener: (error: Error) => void) {

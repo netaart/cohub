@@ -41,7 +41,7 @@ import type {
   PublicGenerationDeclaration,
 } from "@cohub/protocol/generation";
 import type { MessageRecord } from "@cohub/protocol/model";
-import type { ModelThinkingLevel, SearchTextRange } from "@cohub/protocol";
+import type { HarnessKind, ModelThinkingLevel, SearchTextRange } from "@cohub/protocol";
 import type { TaskRunBoard } from "@cohub/protocol/task";
 export type { TaskRunBoard } from "@cohub/protocol/task";
 
@@ -1272,7 +1272,7 @@ export type CreateSpacePromptInput = {
   model?: string | null;
   provider?: string | null;
   /** Harness selected for this turn. */
-  harness?: "cohub" | "pi" | "codex" | null;
+  harness?: HarnessKind | null;
   /** Optional thinking level override for this turn. Omit to inherit session default. */
   thinkingLevel?: ModelThinkingLevel | null;
   clientMessageId?: string | null;

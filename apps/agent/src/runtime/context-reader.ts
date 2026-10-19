@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { sessionMessages, sessionTurns, sessionTurnSegments, spaceSessions } from "@cohub/db";
-import { harnessArchiveIndexSchema, isLocalHarness, selectRuntimeContextMessages, type HarnessKind, type RuntimeContext, type RuntimeContextMessage } from "@cohub/protocol";
+import { harnessArchiveIndexSchema, isLocalHarness, LOCAL_HARNESSES, selectRuntimeContextMessages, type HarnessKind, type RuntimeContext, type RuntimeContextMessage } from "@cohub/protocol";
 import type { db } from "../db.js";
 
 type ContextInput = { spaceId: string; sessionId: string; beforeSequence?: number; throughTurnId?: string; harness?: HarnessKind; headOnly?: boolean; pendingTurnIds?: string[] };
@@ -40,7 +40,7 @@ export function createRuntimeContextReader(database: ContextDatabase) {
     const revision = createHash("sha256").update(JSON.stringify(ranges.map((range, index) => [range.sourceSessionId, range.fromSequence, range.toSequence, heads[index]?.id, heads[index]?.sequence, heads[index]?.updatedAt]))).digest("hex");
     const result: RuntimeContext = { complete: !input.headOnly, revision, throughTurnId: lastTurn?.id ?? null, messages: [], resolvedTurnIds: [], settledTurnIds: [] };
     if (input.pendingTurnIds?.length) {
-      if (input.pendingTurnIds.length > 2) throw new Error("Too many pending Runtime projections");
+      if (input.pendingTurnIds.length > LOCAL_HARNESSES.length) throw new Error("Too many pending Runtime projections");
       const settled = await database.select({ id: sessionTurns.id, recoveryState: sql<string | null>`${sessionTurns.meta}->'runtimeRecovery'->>'state'` }).from(sessionTurns)
         .where(and(eq(sessionTurns.sessionId, input.sessionId), inArray(sessionTurns.id, input.pendingTurnIds),
           beforeSequence == null ? undefined : lt(sessionTurns.sequence, beforeSequence),

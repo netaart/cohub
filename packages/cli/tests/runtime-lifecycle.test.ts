@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { installedHarnesses, harnessExecutableCandidates } from "../src/runtime/harness.js";
+import { installedHarnesses, harnessExecutableCandidates } from "../src/runtime/harnesses/index.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "commander";

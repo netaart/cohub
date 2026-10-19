@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import type { RuntimeTraceContext } from "@neta-art/cohub";
+import type { LocalHarness, RuntimeTraceContext } from "@neta-art/cohub";
 
 export type RuntimeDiagnosticLevel = "debug" | "info" | "warn" | "error";
 
@@ -35,7 +35,7 @@ export type RuntimeDiagnostic = {
   spaceId: string;
   sessionId?: string | null;
   turnId?: string | null;
-  harness?: "pi" | "codex" | null;
+  harness?: LocalHarness | null;
   traceContext?: RuntimeTraceContext;
   data?: Record<string, unknown>;
   error?: RuntimeDiagnosticError;
@@ -48,7 +48,7 @@ export type RuntimeDiagnosticContext = {
   spaceId?: string;
   sessionId?: string | null;
   turnId?: string | null;
-  harness?: "pi" | "codex" | null;
+  harness?: LocalHarness | null;
   traceContext?: RuntimeTraceContext;
 };
 

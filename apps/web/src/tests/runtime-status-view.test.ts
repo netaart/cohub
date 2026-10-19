@@ -112,7 +112,12 @@ test("an online Harness never hides a disconnected file bridge or an expired sta
 });
 
 test("model counts are grouped by harness", () => {
-	assert.deepEqual(harnessModelCounts(null), { pi: 0, codex: 0 });
+	assert.deepEqual(harnessModelCounts(null), {
+		pi: 0,
+		codex: 0,
+		claude: 0,
+		workbuddy: 0,
+	});
 	assert.deepEqual(
 		harnessModelCounts(
 			status({
@@ -126,6 +131,6 @@ test("model counts are grouped by harness", () => {
 				},
 			}),
 		),
-		{ pi: 2, codex: 1 },
+		{ pi: 2, codex: 1, claude: 0, workbuddy: 0 },
 	);
 });

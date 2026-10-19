@@ -1,11 +1,17 @@
 <script lang="ts">
-import { Check, ChevronDown, Cloud, Monitor } from "lucide-svelte";
+import {
+	type HarnessKind,
+	harnessLabel,
+	LOCAL_HARNESSES,
+} from "@cohub/protocol/runtime";
+import { Check, ChevronDown } from "lucide-svelte";
 import { tick } from "svelte";
 import { floatNear, portal } from "$lib/actions/portal";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import HarnessIcon from "./HarnessIcon.svelte";
 
-type Harness = "cohub" | "pi" | "codex";
+type Harness = HarnessKind;
 const {
 	value,
 	available,
@@ -21,12 +27,17 @@ const {
 	onchange: (value: Harness) => void;
 	onopen?: () => void;
 } = $props();
-const labels = { cohub: "Cohub", pi: "Pi", codex: "Codex" };
 const locale = $derived(getLocale());
 let open = $state(false);
 let trigger = $state<HTMLButtonElement | null>(null);
 let panel = $state<HTMLDivElement | null>(null);
-const options: Harness[] = ["cohub", "pi", "codex"];
+// Only connected Harnesses are offered; the current choice stays visible so its state is explained.
+const options = $derived<Harness[]>([
+	"cohub",
+	...LOCAL_HARNESSES.filter(
+		(harness) => available.includes(harness) || harness === value,
+	),
+]);
 const local = $derived(value !== "cohub");
 function close() {
 	open = false;
@@ -74,9 +85,9 @@ function navigate(event: KeyboardEvent) {
 }
 </script>
 
-<button bind:this={trigger} type="button" class="harness-trigger" {disabled} aria-haspopup="menu" aria-expanded={open} aria-label={`${m.runtime_harness({}, { locale })}: ${labels[value]}`} title={local ? m.runtime_local({}, { locale }) : m.runtime_cloud({}, { locale })} onclick={() => open ? close() : void show()}>
-	{#if local}<Monitor class="h-3 w-3 shrink-0" />{:else}<Cloud class="h-3 w-3 shrink-0" />{/if}
-	<span>{labels[value]}</span>
+<button bind:this={trigger} type="button" class="harness-trigger" {disabled} aria-haspopup="menu" aria-expanded={open} aria-label={`${m.runtime_harness({}, { locale })}: ${harnessLabel(value)}`} title={local ? m.runtime_local({}, { locale }) : m.runtime_cloud({}, { locale })} onclick={() => open ? close() : void show()}>
+	<HarnessIcon harness={value} size={14} />
+	<span>{harnessLabel(value)}</span>
 	{#if local && !online}<span class="offline-dot" aria-label={m.runtime_offline({}, { locale })}></span>{/if}
 	<ChevronDown class="h-3 w-3 shrink-0 opacity-50" />
 </button>
@@ -88,8 +99,8 @@ function navigate(event: KeyboardEvent) {
 			{@const isLocal = harness !== "cohub"}
 			{@const unavailable = isLocal && (!online || !available.includes(harness))}
 			<button type="button" class="harness-option" role="menuitemradio" aria-checked={value === harness} disabled={unavailable} onclick={() => { onchange(harness); close(); }}>
-				{#if isLocal}<Monitor class="h-4 w-4 shrink-0 text-text-tertiary" />{:else}<Cloud class="h-4 w-4 shrink-0 text-text-tertiary" />{/if}
-				<span class="option-content"><span class="option-title">{labels[harness]}</span><span class="option-detail">{isLocal ? !online ? m.runtime_offline({}, { locale }) : available.includes(harness) ? m.runtime_local_execution({}, { locale }) : m.runtime_not_connected({}, { locale }) : m.runtime_cloud_execution({}, { locale })}</span></span>
+				<HarnessIcon {harness} size={20} />
+				<span class="option-content"><span class="option-title">{harnessLabel(harness)}</span><span class="option-detail">{isLocal ? !online ? m.runtime_offline({}, { locale }) : available.includes(harness) ? m.runtime_local_execution({}, { locale }) : m.runtime_not_connected({}, { locale }) : m.runtime_cloud_execution({}, { locale })}</span></span>
 				{#if value === harness}<Check class="h-4 w-4 shrink-0 text-brand" />{/if}
 			</button>
 		{/each}

@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { LOCAL_HARNESS_SPECS, LOCAL_HARNESSES, localHarnessSchema } from "./harnesses.js";
+
+const nativeFormats = LOCAL_HARNESSES.map((harness) => LOCAL_HARNESS_SPECS[harness].nativeFormat) as [string, ...string[]];
 
 export const RUNTIME_ARCHIVE_SEGMENT_BYTES = 4 * 1024 * 1024;
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -9,15 +12,15 @@ export const runtimeArchiveSegmentSchema = z.object({
   md5: z.string().regex(/^[a-f0-9]{32}$/),
 }).strict();
 export const harnessArchiveSchema = z.object({
-  sessionId: z.string().uuid(), turnId: z.string().uuid(), harness: z.enum(["pi", "codex"]),
+  sessionId: z.string().uuid(), turnId: z.string().uuid(), harness: localHarnessSchema,
 }).strict();
 export const harnessArchiveIndexSchema = harnessArchiveSchema.extend({
-  version: z.literal(1), nativeFormat: z.enum(["pi.jsonl", "codex.rollout"]),
+  version: z.literal(1), nativeFormat: z.enum(nativeFormats),
   nativeSessionId: z.string().min(1).max(255),
   parentTurnId: z.string().uuid().nullable(),
   sizeBytes: z.number().int().safe().positive(), sha256: digest,
   segments: z.array(runtimeArchiveSegmentSchema).max(256),
-}).strict().refine((value) => value.nativeFormat === (value.harness === "pi" ? "pi.jsonl" : "codex.rollout"), "Native format mismatch");
+}).strict().refine((value) => value.nativeFormat === LOCAL_HARNESS_SPECS[value.harness].nativeFormat, "Native format mismatch");
 export type HarnessArchive = z.infer<typeof harnessArchiveSchema>;
 export type HarnessArchiveIndex = z.infer<typeof harnessArchiveIndexSchema>;
 export type RuntimeArchiveSegment = z.infer<typeof runtimeArchiveSegmentSchema>;

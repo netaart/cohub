@@ -3,7 +3,7 @@ import { AuthorizationError, verifyUserAccessToken } from "@cohub/identity";
 import { buildTraceHeaders, getTraceResponseHeaders, type TraceIdentifiers } from "@cohub/infra/tracing";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { RealtimeRoom, RealtimeRoomDescriptor } from "@cohub/protocol/realtime";
-import type { BillingPayload } from "@cohub/protocol";
+import type { BillingPayload, HarnessKind } from "@cohub/protocol";
 import type { GatewayAuthUser } from "./config.js";
 import { gatewayConfig } from "./config.js";
 import { verifyLocalSandboxAccessToken } from "./local-sandbox-auth.js";
@@ -259,7 +259,7 @@ export const submitInternalSessionPrompt = async (input: {
   source: string;
   model?: string | null;
   provider?: string | null;
-  harness?: "cohub" | "pi" | "codex";
+  harness?: HarnessKind;
   thinkingLevel?: string | null;
   context?: Record<string, unknown> | null;
 }): Promise<{ ok: true; turnId: string; userMessageId: string; trace: TraceIdentifiers }> => {

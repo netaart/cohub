@@ -4,7 +4,7 @@ import { NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, type NativeIngestResult
 import { acceptsDirectory, acceptsTranscript, readSessionHeader, readTranscript, transcriptRoots, type Harness, type NativeTranscriptTurn } from "./adapters.js";
 import { nativeTurnId } from "./identity.js";
 import type { RuntimeArchiveStore } from "../archive-store.js";
-import { ensurePlainCodexRollout } from "./transcript.js";
+import { transcriptFormat } from "../harnesses/index.js";
 import { containsNativePath } from "./paths.js";
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
@@ -15,11 +15,9 @@ export const DEFAULT_IMPORT_CONCURRENCY = 4;
 export const MAX_IMPORT_CONCURRENCY = 8;
 /** A harness writes one Turn as many appends; filesystem events are coalesced for this long. */
 const WATCH_DEBOUNCE_MS = 150;
-/** A quiet Pi transcript whose last reply ended is settled after this long. */
-const PI_QUIET_SETTLE_MS = 10_000;
+/** A quiet transcript whose last reply ended is settled after this long, unless the file records Turn ends. */
+const QUIET_SETTLE_MS = 10_000;
 const SETTLED_STATUSES = new Set<string>(SETTLED_TURN_STATUSES);
-/** Pi stop reasons that end a reply; anything else (a tool call) means more is coming. */
-const PI_ENDED = ["stop", "length", "error", "aborted"];
 /** A running Turn that shows signs of life tells the server at most this often. */
 const ALIVE_INTERVAL_MS = 5 * 60_000;
 /** A failed read is retried this many times with backoff; afterwards the next write or reconnect retries. */
@@ -31,15 +29,6 @@ const RETRY_MAX_MS = 5 * 60_000;
  * small enough to answer well within the request timeout; the protocol allows more.
  */
 const INGEST_BATCH_TURNS = Math.min(50, NATIVE_INGEST_MAX_TURNS);
-/**
- * Records that end or begin a Turn. New bytes of a known transcript are only searched for these;
- * the transcript is parsed and sent when one appears.
- */
-const BOUNDARIES: Record<Harness, string[]> = {
-  codex: ['"UserMessage"', '"user_message"', '"turn_complete"', '"task_complete"', '"turn_aborted"'],
-  pi: ['"role":"user"', ...PI_ENDED.map((reason) => `"stopReason":"${reason}"`)],
-};
-const BOUNDARY_OVERLAP = Math.max(...Object.values(BOUNDARIES).flat().map((token) => token.length));
 
 export type TranscriptState = {
   harness: Harness;
@@ -88,11 +77,11 @@ export type IngestTransport = {
 
 export type IngestHooks = {
   /**
-   * Control-plane certainty about a Pi session's file as last written at `mtimeMs`: `true` when the
+   * Control-plane certainty about a session's file as last written at `mtimeMs`: `true` when the
    * agent settled after that write, `false` while it runs, `null` when the control plane cannot
    * tell.
    */
-  piSettled?: (nativeSessionId: string, mtimeMs: number) => boolean | null;
+  settled?: (state: TranscriptState, mtimeMs: number) => boolean | null;
   controllable?: (state: TranscriptState) => boolean;
   abortTurn?: (state: TranscriptState) => void;
   onGrowth?: (state: TranscriptState) => void;
@@ -556,17 +545,20 @@ export class NativeIngest {
   }
 
   private async crossesBoundary(path: string, harness: Harness, from: number, to: number): Promise<boolean> {
+    // New bytes of a known transcript are only searched for records that begin or end a Turn.
+    const tokens = transcriptFormat(harness).boundaries;
+    const overlap = Math.max(0, ...tokens.map((token) => token.length));
     const file = await open(path, "r");
     try {
-      const chunk = Buffer.alloc(Math.min(to - from + BOUNDARY_OVERLAP, 1024 * 1024));
+      const chunk = Buffer.alloc(Math.min(to - from + overlap, 1024 * 1024));
       for (let position = from; position < to;) {
-        const start = Math.max(0, position - BOUNDARY_OVERLAP);
+        const start = Math.max(0, position - overlap);
         const { bytesRead } = await file.read(chunk, 0, Math.min(chunk.length, to - start), start);
         if (bytesRead <= position - start) break;
         const bytes = chunk.subarray(0, bytesRead);
         // A token that ends inside the bytes already searched was seen before; it does not count again.
         const fresh = position - start;
-        for (const token of BOUNDARIES[harness]) {
+        for (const token of tokens) {
           for (let index = bytes.indexOf(token); index >= 0; index = bytes.indexOf(token, index + 1)) if (index + token.length > fresh) return true;
         }
         position = start + bytesRead;
@@ -587,13 +579,14 @@ export class NativeIngest {
   }
 
   private tailSettled(state: TranscriptState, tail: NativeTranscriptTurn, mtimeMs: number): boolean {
-    if (state.harness === "codex") return tail.result !== null;
-    const certain = this.options.hooks?.piSettled?.(state.nativeSessionId, mtimeMs);
+    const format = transcriptFormat(state.harness);
+    if (format.turnEndRecorded) return tail.result !== null;
+    const certain = this.options.hooks?.settled?.(state, mtimeMs);
     if (certain != null) return certain;
-    if (!PI_ENDED.includes(tail.messages.at(-1)?.stopReason ?? "")) return false;
+    if (!format.replyEnded?.(tail)) return false;
     const idleMs = Date.now() - mtimeMs;
-    if (idleMs >= PI_QUIET_SETTLE_MS) return true;
-    this.recheck(state.path, PI_QUIET_SETTLE_MS - idleMs);
+    if (idleMs >= QUIET_SETTLE_MS) return true;
+    this.recheck(state.path, QUIET_SETTLE_MS - idleMs);
     return false;
   }
 
@@ -638,7 +631,7 @@ export class NativeIngest {
       // History that never ended is left to the live lane; its transcript reports it again.
       if (!settled && lane === "import") break;
       // A prompt still being recorded would change the Turn's identity; it is sent once complete.
-      if (!settled && state.harness === "codex" && !turn.userFinal) break;
+      if (!settled && transcriptFormat(state.harness).userFinalMarked && !turn.userFinal) break;
       const turnId = derived(turn);
       candidates.push({ turn, turnId, parentTurnId, settled });
       parentTurnId = turnId;
@@ -735,11 +728,12 @@ export class NativeIngest {
     if (!state.sessionId) return;
     try {
       const source = turn.path ?? state.path;
+      const archiveSource = transcriptFormat(state.harness).archiveSource;
       await this.options.archives.stage({
         sessionId: state.sessionId,
         harness: state.harness,
         nativeSessionId: state.nativeSessionId,
-        path: state.harness === "codex" ? await ensurePlainCodexRollout(source, join(this.options.root, "native", "rollouts")) : source,
+        path: archiveSource ? await archiveSource(source, join(this.options.root, "native", "rollouts")) : source,
         sizeBytes: turn.endBytes,
         expectedChecksum: turn.sha256,
       }, turnId);

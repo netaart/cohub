@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Command } from "commander";
+import { LOCAL_HARNESS_SPECS, LOCAL_HARNESSES } from "@neta-art/cohub";
 import { createClient } from "../client.js";
 import { json as outJson, jsonRequested } from "../output.js";
 import { currentIdentityKey } from "../space.js";
@@ -41,15 +42,15 @@ async function boundRuntime(program: Command, dir: string | undefined, space: st
 
 export function registerRuntime(program: Command) {
   const runtime = program.command("runtime").description("Connect a local workspace");
-  runtime.command("up [dir]")
+  const up = runtime.command("up [dir]")
     .description("Connect local Harnesses and files")
     .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("-n, --new", "Create a new Space")
     .option("--name <name>", "New Space name")
     .option("-d, --detach", "Run in the background")
-    .option("--harness <name>", "Pi or Codex; repeatable", (value: string, previous: string[]) => [...previous, value], [])
-    .option("--pi <path>", "Pi executable")
-    .option("--codex <path>", "Codex executable")
+    .option("--harness <name>", `${LOCAL_HARNESSES.join(", ")}; repeatable`, (value: string, previous: string[]) => [...previous, value], []);
+  for (const harness of LOCAL_HARNESSES) up.option(`--${harness} <path>`, `${LOCAL_HARNESS_SPECS[harness].label} executable`);
+  up
     .option("--display [screen]", "Share a screen (default: auto when available), or xvfb[:WIDTHxHEIGHT] for a virtual one")
     .option("--no-display", "Disable screen sharing and skip its confirmation")
     .option("-y, --yes", "Accept defaults and authorize local execution, native sync, and screen sharing")

@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validSandboxdArchiveEntries } from "../src/commands/sandboxd-binary.js";
-import { harnessCommand } from "../src/runtime/harness.js";
+import { harnessCommand } from "../src/runtime/harnesses/index.js";
 
 // Verbatim cmd-shim 9 (npm) and @zkochan/cmd-shim 9 (pnpm) output for bin/codex.js.
 const entry = "node_modules\\@openai\\codex\\bin\\codex.js";

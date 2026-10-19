@@ -1,5 +1,8 @@
 import { createInterface } from "node:readline/promises";
+import { LOCAL_HARNESS_SPECS } from "@neta-art/cohub";
 import { serializeDiagnosticError } from "../diagnostics.js";
+import { nativeSyncHarnesses } from "../harnesses/index.js";
+import type { HarnessExecutables } from "../harnesses/types.js";
 import type { Harness } from "./adapters.js";
 import { CODEX_SHARED_MIN_VERSION, sharedServerAvailable, supportsSharedServer } from "./codex-link.js";
 import { PI_MIN_VERSION } from "./pi-link.js";
@@ -16,7 +19,7 @@ export type NativeSyncReport = {
   note?: string;
 };
 
-type Input = { root: string; spaceId: string; identity: string; harnesses: Harness[]; yes?: boolean; executables?: { pi?: string; codex?: string } };
+type Input = { root: string; spaceId: string; identity: string; harnesses: Harness[]; yes?: boolean; executables?: HarnessExecutables };
 type Ask = (question: string) => Promise<boolean>;
 
 /** Whether this directory already syncs every requested harness. */
@@ -33,7 +36,10 @@ async function defaultAsk(question: string) {
  * Enable native sync after consent. Native history may contain secrets, so nothing is read before
  * the user agrees; a failure here never blocks the Runtime, it only leaves sessions read-only.
  */
-export async function ensureNativeSync(input: Input, log: (line: string) => void = (line) => process.stderr.write(line), ask: Ask = defaultAsk): Promise<NativeSyncReport> {
+export async function ensureNativeSync(requested: Input, log: (line: string) => void = (line) => process.stderr.write(line), ask: Ask = defaultAsk): Promise<NativeSyncReport> {
+  // A harness without a native integration runs Cohub Turns only.
+  const input = { ...requested, harnesses: nativeSyncHarnesses(requested.harnesses) };
+  if (!input.harnesses.length) return { enabled: false, harnesses: [], codexShared: false, importHistory: false, note: "unsupported" };
   const stateRoot = runtimeStateRoot(input.spaceId);
   const previous = await readNativeConfig(stateRoot, input.identity).catch(() => null);
   if (previous && nativeSyncSatisfied(previous, input)) {
@@ -46,7 +52,7 @@ export async function ensureNativeSync(input: Input, log: (line: string) => void
     log("Native sync off · rerun interactively or with --yes to enable\n");
     return { enabled: false, harnesses: input.harnesses, codexShared: false, importHistory: false, note: "non-interactive" };
   }
-  const names = input.harnesses.map((harness) => harness === "pi" ? "Pi" : "Codex").join(" and ");
+  const names = input.harnesses.map((harness) => LOCAL_HARNESS_SPECS[harness].label).join(" and ");
   if (!await confirm(`Sync ${names} chats in this folder to this Space so they continue on the web? Their history may contain secrets. [Y/n] `)) {
     return { enabled: false, harnesses: input.harnesses, codexShared: false, importHistory: false, note: "declined" };
   }
