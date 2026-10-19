@@ -30,6 +30,7 @@ export function claudeProjectDirectory(cwd: string) {
 const profile: StreamJsonProfile = {
   harness: "claude",
   label: "Claude Code",
+  binary: "claude",
   provider: "anthropic",
   dataRoot,
   projectDirectory: claudeProjectDirectory,
@@ -56,10 +57,10 @@ function withAssistantIds(projection: NativeProjection): NativeProjection {
 
 export const claudeHarness: LocalHarnessAdapter = {
   id: "claude",
-  binary: "claude",
+  binary: profile.binary,
   async models(executable, cwd) {
     await promisify(execFile)(...harnessCommand(executable, ["--version"], cwd), { cwd, encoding: "utf8", timeout: 15_000, windowsHide: true });
-    // Aliases follow the signed-in account; other model names still pass through `--model`.
+    // Aliases follow the signed-in account.
     return ["opus", "sonnet", "haiku"].map((id) => ({ harness: "claude" as const, provider: "anthropic", id, name: `Claude ${id[0]?.toUpperCase()}${id.slice(1)}` }));
   },
   run: (executor, turn) => runStreamJson(profile, executor, turn),
@@ -84,11 +85,11 @@ export const claudeHarness: LocalHarnessAdapter = {
     })),
     rebind: rebindSessionId,
     archive: {
-      // Claude Code resumes by session id, so a restored copy keeps its native identity.
-      target: ({ nativeSessionId, cwd }) => join(claudeProjectDirectory(cwd), `${nativeSessionId}.jsonl`),
+      // The copy takes a fresh id: the archived one may already exist here, and is never replaced.
+      target: ({ id, cwd }) => join(claudeProjectDirectory(cwd), `${id}.jsonl`),
       async import(input) {
-        const { checksum } = await copyNativeArchive(input);
-        return { checksum, nativeSessionId: input.nativeSessionId };
+        const { checksum } = await copyNativeArchive({ ...input, sessionId: input.id });
+        return { checksum, nativeSessionId: input.id };
       },
     },
   },

@@ -27,6 +27,24 @@ for (const harness of ["pi", "codex"] as const) test(`${harness} import changes 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+for (const harness of ["claude", "workbuddy"] as const) test(`${harness} import rebinds only the top-level session id and keeps every other byte`, async () => {
+  const root = await mkdtemp(join(tmpdir(), "native-import-"));
+  try {
+    const source = join(root, "raw"), target = join(root, "working");
+    const nativeSessionId = randomUUID(), id = randomUUID();
+    const lines = [
+      `{"type":"user", "input": {"sessionId": "${nativeSessionId}", "account": 9007199254740993}, "sessionId" : "${nativeSessionId}", "text": "中文 \\" \\u0022sessionId\\": x"}`,
+      '{ "type": "file-history-snapshot", "number": 9007199254740993 }\r',
+      `{"sessionId":"${nativeSessionId}","torn":`,
+    ];
+    await writeFile(source, lines.join("\n"));
+    const result = await importNativeArchive({ source, target, harness, nativeSessionId, id, cwd: root });
+    assert.equal(result.nativeSessionId, id);
+    const expected = [lines[0]?.replace(`"sessionId" : "${nativeSessionId}"`, `"sessionId" : "${id}"`), lines[1], lines[2]?.replace(nativeSessionId, id)].join("\n");
+    assert.equal(await readFile(target, "utf8"), expected);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("codex import refuses an archive whose history_base reference it cannot satisfy", async () => {
   const root = await mkdtemp(join(tmpdir(), "native-import-"));
   try {

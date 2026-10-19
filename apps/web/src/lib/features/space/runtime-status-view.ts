@@ -1,4 +1,8 @@
-import { LOCAL_HARNESSES, type LocalHarness } from "@cohub/protocol/runtime";
+import {
+	type HarnessKind,
+	LOCAL_HARNESSES,
+	type LocalHarness,
+} from "@cohub/protocol/runtime";
 import type { RuntimeStatus } from "@neta-art/cohub";
 
 /**
@@ -67,4 +71,18 @@ export function harnessModelCounts(
 	for (const model of status?.capabilities?.models ?? [])
 		counts[model.harness] += 1;
 	return counts;
+}
+
+/** Picker options: Cohub and the connected Harnesses; the current choice stays so its state is explained. */
+export function harnessOptions(
+	value: HarnessKind,
+	available: readonly HarnessKind[],
+	online: boolean,
+): HarnessKind[] {
+	return [
+		"cohub",
+		...LOCAL_HARNESSES.filter(
+			(harness) => (online && available.includes(harness)) || harness === value,
+		),
+	];
 }

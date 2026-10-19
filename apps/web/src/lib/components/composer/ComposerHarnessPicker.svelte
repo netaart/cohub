@@ -1,12 +1,9 @@
 <script lang="ts">
-import {
-	type HarnessKind,
-	harnessLabel,
-	LOCAL_HARNESSES,
-} from "@cohub/protocol/runtime";
+import { type HarnessKind, harnessLabel } from "@cohub/protocol/runtime";
 import { Check, ChevronDown } from "lucide-svelte";
 import { tick } from "svelte";
 import { floatNear, portal } from "$lib/actions/portal";
+import { harnessOptions } from "$lib/features/space/runtime-status-view";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import HarnessIcon from "./HarnessIcon.svelte";
@@ -31,13 +28,7 @@ const locale = $derived(getLocale());
 let open = $state(false);
 let trigger = $state<HTMLButtonElement | null>(null);
 let panel = $state<HTMLDivElement | null>(null);
-// Only connected Harnesses are offered; the current choice stays visible so its state is explained.
-const options = $derived<Harness[]>([
-	"cohub",
-	...LOCAL_HARNESSES.filter(
-		(harness) => available.includes(harness) || harness === value,
-	),
-]);
+const options = $derived(harnessOptions(value, available, online));
 const local = $derived(value !== "cohub");
 function close() {
 	open = false;

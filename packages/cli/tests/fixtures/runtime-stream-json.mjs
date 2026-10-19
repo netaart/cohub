@@ -1,14 +1,18 @@
 #!/usr/bin/env node
-// Claude Code-compatible stream-json fixture: one Turn per process, transcript under CLAUDE_CONFIG_DIR.
+// Claude Code / CodeBuddy-compatible stream-json fixture: one Turn per process. CODEBUDDY_CONFIG_DIR selects CodeBuddy's layout.
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 const args = process.argv.slice(2);
 if (args[0] === "--version") { process.stdout.write("9.9.9 (fixture)\n"); process.exit(0); }
+if (args[0] === "--help") { process.stdout.write("  --model <model>  Model for the session. Currently supported: (fixture-a, fixture-b)\n"); process.exit(0); }
+const codebuddy = process.env.CODEBUDDY_CONFIG_DIR;
 const flag = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : null; };
 const id = flag("--session-id") ?? flag("--resume");
-const directory = join(process.env.CLAUDE_CONFIG_DIR, "projects", process.cwd().replace(/[^a-zA-Z0-9]/g, "-"));
+const directory = codebuddy
+  ? join(codebuddy, "projects", process.cwd().replace(/[/\\:]/g, "-").replace(/^-+|-+$/g, "").replace(/-+/g, "-"))
+  : join(process.env.CLAUDE_CONFIG_DIR, "projects", process.cwd().replace(/[^a-zA-Z0-9]/g, "-"));
 const file = join(directory, `${id}.jsonl`);
 if (flag("--resume") && !existsSync(file)) { process.stderr.write("No conversation found\n"); process.exit(1); }
 const history = existsSync(file) ? readFileSync(file, "utf8") : "";
@@ -19,7 +23,14 @@ for await (const line of createInterface({ input: process.stdin })) {
   const prompt = JSON.parse(line);
   record({ type: "user", uuid: "u1", message: prompt.message });
   write({ type: "system", subtype: "init", session_id: id, model: "fixture-model" });
-  const answer = `${history.includes("historical fact") ? "history retained" : "no history"} ${flag("--permission-mode")}`;
+  if (JSON.stringify(prompt).includes("crash")) {
+    write({ type: "stream_event", event: { type: "message_start", message: { id: "m0" } } });
+    write({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial " } } });
+    write({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "reply" } } });
+    process.exit(1);
+  }
+  const tools = flag("--tools") ? ` tools:${flag("--tools")}${args.includes("--strict-mcp-config") ? " no-mcp" : ""}` : "";
+  const answer = `${history.includes("historical fact") && history.includes("aGlzdG9yaWNhbCBpbWFnZQ") ? "history retained" : "no history"} ${flag("--permission-mode")}${tools}`;
   write({ type: "stream_event", event: { type: "message_start", message: { id: "m1" } } });
   write({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Run" } } });
   write({ type: "assistant", message: { id: "m1", content: [{ type: "text", text: "Running" }] } });

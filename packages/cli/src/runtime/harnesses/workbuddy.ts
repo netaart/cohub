@@ -32,6 +32,7 @@ const projectDirectory = (cwd: string) => join(dataRoot(), "projects", workbuddy
 const profile: StreamJsonProfile = {
   harness: "workbuddy",
   label: "WorkBuddy",
+  binary: "codebuddy",
   provider: "codebuddy",
   dataRoot,
   projectDirectory,
@@ -47,7 +48,7 @@ export function workbuddyModels(help: string) {
 
 export const workbuddyHarness: LocalHarnessAdapter = {
   id: "workbuddy",
-  binary: "codebuddy",
+  binary: profile.binary,
   async models(executable, cwd) {
     const { stdout } = await promisify(execFile)(...harnessCommand(executable, ["--help"], cwd), { cwd, encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
     return workbuddyModels(stdout);
@@ -67,7 +68,9 @@ export const workbuddyHarness: LocalHarnessAdapter = {
               ? [{ ...base, type: "function_call_result", callId: projectionToolId(block.tool_use_id), name: names.get(block.tool_use_id) ?? "tool", status: "completed", output: { type: "text", text: toolResultText(block) } }]
               : []);
           }
-          const content = segment.blocks.flatMap((block) => block.type === "text" ? [{ type: "input_text", text: block.text }] : []);
+          const content = segment.blocks.flatMap((block): Record<string, string>[] => block.type === "text" ? [{ type: "input_text", text: block.text }]
+            : block.type === "image" && block.source.type === "base64" ? [{ type: "input_image", image: `data:${block.source.media_type};base64,${block.source.data}` }]
+            : []);
           return content.length ? [{ ...base, type: "message", role: "user", content, providerData: { startsNewUserRequest: true } }] : [];
         }
         const records: Record<string, unknown>[] = [];
@@ -86,10 +89,11 @@ export const workbuddyHarness: LocalHarnessAdapter = {
     },
     rebind: rebindSessionId,
     archive: {
-      target: ({ nativeSessionId, cwd }) => join(projectDirectory(cwd), `${nativeSessionId}.jsonl`),
+      // The copy takes a fresh id: the archived one may already exist here, and is never replaced.
+      target: ({ id, cwd }) => join(projectDirectory(cwd), `${id}.jsonl`),
       async import(input) {
-        const { checksum } = await copyNativeArchive(input);
-        return { checksum, nativeSessionId: input.nativeSessionId };
+        const { checksum } = await copyNativeArchive({ ...input, sessionId: input.id });
+        return { checksum, nativeSessionId: input.id };
       },
     },
   },

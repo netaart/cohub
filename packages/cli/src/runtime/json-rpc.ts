@@ -58,6 +58,7 @@ export class JsonRpcProcess {
   private stderr = "";
   private closed: Promise<void>;
   private closing: Promise<void> | null = null;
+  private inputEnded = false;
   /** `pi` and `jsonrpc` correlate request responses; `stream` delivers every line as an event. */
   constructor(binary: string, args: string[], cwd: string, private mode: "pi" | "jsonrpc" | "stream", context: Record<string, string> = {}) {
     this.child = spawn(binary, args, { cwd, env: { ...harnessEnvironment(), ...context }, stdio: "pipe", detached: process.platform !== "win32", windowsHide: true });
@@ -72,7 +73,7 @@ export class JsonRpcProcess {
   }
   private fail(value: unknown) {
     if (this.failure) return;
-    this.failure = this.closing ? new RpcProcessClosedError() : value instanceof Error ? value : new Error(String(value));
+    this.failure = this.closing || this.inputEnded ? new RpcProcessClosedError() : value instanceof Error ? value : new Error(String(value));
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(this.failure); }
     this.pending.clear();
     for (const listener of this.failureListeners) listener(this.failure);
@@ -111,7 +112,12 @@ export class JsonRpcProcess {
     });
   }
   /** Signal end of input; a stream-mode CLI flushes its transcript and exits. */
-  endInput() { if (!this.failure) this.child.stdin.end(); }
+  endInput() {
+    if (this.failure) return;
+    // The exit that follows is expected, not a failure.
+    this.inputEnded = true;
+    this.child.stdin.end();
+  }
   /** Whether the process exits within the timeout. */
   async exited(timeoutMs: number): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined;

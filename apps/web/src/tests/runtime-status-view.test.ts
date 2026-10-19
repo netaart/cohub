@@ -4,6 +4,7 @@ import type { RuntimeStatus } from "@neta-art/cohub";
 import {
 	freshWatcher,
 	harnessModelCounts,
+	harnessOptions,
 	isStale,
 	RUNTIME_WATCHER_FRESHNESS_MS,
 	runtimeTone,
@@ -133,4 +134,24 @@ test("model counts are grouped by harness", () => {
 		),
 		{ pi: 2, codex: 1, claude: 0, workbuddy: 0 },
 	);
+});
+
+test("the picker offers only connected harnesses and the current choice", () => {
+	assert.deepEqual(harnessOptions("cohub", ["pi", "claude"], true), [
+		"cohub",
+		"pi",
+		"claude",
+	]);
+	assert.deepEqual(harnessOptions("codex", ["pi", "claude"], true), [
+		"cohub",
+		"pi",
+		"codex",
+		"claude",
+	]);
+	// Cached capabilities of an offline Runtime are not connected harnesses.
+	assert.deepEqual(harnessOptions("cohub", ["pi", "claude"], false), ["cohub"]);
+	assert.deepEqual(harnessOptions("claude", ["pi", "claude"], false), [
+		"cohub",
+		"claude",
+	]);
 });

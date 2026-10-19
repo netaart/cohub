@@ -12,11 +12,17 @@ import type { HarnessRun, HarnessTurn } from "./types.js";
 const ABORT_ESCALATION_MS = 5_000;
 /** After input closes, the CLI flushes its transcript; it is reaped when it does not exit by then. */
 const FLUSH_TIMEOUT_MS = 10_000;
+/**
+ * Plan mode still honours the user's allow rules, so a read-only Turn also gets only these
+ * built-in tools and no configured MCP servers.
+ */
+const READ_ONLY_TOOLS = "Read,Glob,Grep";
 
 /** A Claude Code–compatible CLI (`-p --input-format stream-json --output-format stream-json`). */
 export type StreamJsonProfile = {
   harness: RuntimeTurnInput["harness"];
   label: string;
+  binary: string;
   provider: string;
   /** Root holding `projects/<project>/<session>.jsonl`. */
   dataRoot(): string;
@@ -68,7 +74,8 @@ async function prompt(input: RuntimeTurnInput) {
   return { type: "user", message: { role: "user", content } };
 }
 
-type Message = { ordinal: number; content: ContentBlock[]; model: string | null };
+/** `partial` holds streamed blocks by index until the complete block arrives, so an interrupted reply keeps them. */
+type Message = { ordinal: number; content: ContentBlock[]; partial: Map<number, Extract<ContentBlock, { type: "text" | "thinking" }>>; model: string | null };
 
 /** Maps stream-json output onto Cohub's streaming protocol; sub-agent traffic stays in the native transcript. */
 function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, identity: { provider: string; model: string | null }) {
@@ -79,14 +86,14 @@ function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, iden
   let model = identity.model;
   let final: RuntimeMessage | null = null;
   const snapshot = (message: Message): RuntimeMessage => ({
-    ordinal: message.ordinal, content: [...message.content], provider: identity.provider, model: message.model ?? model,
+    ordinal: message.ordinal, content: [...message.content, ...message.partial.values()], provider: identity.provider, model: message.model ?? model,
     stopReason: message.content.some((block) => block.type === "tool_use") ? "tool_use" : "stop",
   });
   const begin = (id: string, messageModel: string | null) => {
     const existing = messages.get(id);
     if (existing) return existing;
     if (current) emit({ type: "message.commit", message: snapshot(current) });
-    const message: Message = { ordinal: messages.size, content: [], model: messageModel };
+    const message: Message = { ordinal: messages.size, content: [], partial: new Map(), model: messageModel };
     messages.set(id, message);
     current = message;
     emit({ type: "message.start", ordinal: message.ordinal });
@@ -105,13 +112,20 @@ function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, iden
         if (stream.type === "message_start") streaming = begin(text(record(stream.message).id) || randomUUID(), text(record(stream.message).model) || null);
         const delta = record(stream.delta);
         if (streaming && stream.type === "content_block_delta" && (delta.type === "text_delta" || delta.type === "thinking_delta")) {
-          emit({ type: "text.delta", ordinal: streaming.ordinal, index: Number(stream.index ?? 0), kind: delta.type === "text_delta" ? "text" : "thinking", delta: text(delta.text ?? delta.thinking) });
+          const index = Number(stream.index ?? 0), chunk = text(delta.text ?? delta.thinking);
+          const previous = streaming.partial.get(index);
+          streaming.partial.set(index, delta.type === "text_delta"
+            ? { type: "text", text: (previous?.type === "text" ? previous.text : "") + chunk }
+            : { type: "thinking", thinking: (previous?.type === "thinking" ? previous.thinking : "") + chunk });
+          emit({ type: "text.delta", ordinal: streaming.ordinal, index, kind: delta.type === "text_delta" ? "text" : "thinking", delta: chunk });
         }
         return false;
       }
       if (event.type === "assistant") {
         const native = record(event.message);
         const message = begin(text(native.id) || randomUUID(), text(native.model) || null);
+        // Complete blocks supersede what streamed so far.
+        message.partial.clear();
         for (const block of streamContent(native.content)) {
           const index = block.type === "tool_use" ? message.content.findIndex((existing) => existing.type === "tool_use" && existing.id === block.id) : -1;
           if (index >= 0) message.content[index] = block;
@@ -148,7 +162,7 @@ function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, iden
 
 /**
  * One Turn per process. Unattended execution never grants an approval: workspace edits follow
- * `acceptEdits` (`plan` when read-only) and every other tool follows the user's own permission rules.
+ * `acceptEdits` and every other tool follows the user's own permission rules.
  */
 export async function runStreamJson(profile: StreamJsonProfile, executor: Executor, turn: HarnessTurn): Promise<HarnessRun> {
   const { input, signal, context } = turn;
@@ -163,13 +177,13 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
   const args = [
     "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     ...(prepared.resume === "new" ? ["--session-id", session.nativeSessionId] : ["--resume", session.nativeSessionId]),
-    "--permission-mode", input.accessMode === "read_only" ? "plan" : "acceptEdits",
+    ...(input.accessMode === "read_only" ? ["--permission-mode", "plan", "--tools", READ_ONLY_TOOLS, "--strict-mcp-config"] : ["--permission-mode", "acceptEdits"]),
     ...(input.model ? ["--model", input.model] : []),
     ...(effort ? ["--effort", effort] : []),
   ];
   const content = await prompt(input);
   signal.throwIfAborted();
-  const host = new JsonRpcProcess(...harnessCommand(executor.executables[profile.harness] || profile.harness, args, executor.cwd), executor.cwd, "stream", turnEnvironment(input));
+  const host = new JsonRpcProcess(...harnessCommand(executor.executables[profile.harness] || profile.binary, args, executor.cwd), executor.cwd, "stream", turnEnvironment(input));
   watchHost(host, executor.diagnostics, context);
   const translator = streamJsonTranslator(turn.emit, { provider: profile.provider, model: input.model ?? null });
   let message: RuntimeMessage = { ordinal: 0, content: [] };
