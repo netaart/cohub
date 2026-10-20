@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
 import type { ContentBlock, NativeTurnMessage } from "@neta-art/cohub";
 import { record } from "../json-rpc.js";
 import type { NativeTranscript, NativeTranscriptTurn } from "../native/transcript.js";
@@ -35,9 +35,11 @@ function transcriptParts(path: string, root: string): string[] | null {
   const parts = relative(root, path).split(sep);
   return parts.length && !parts[0]?.startsWith("..") ? parts : null;
 }
-const ownsProject = (name: string | undefined, cwd: string) => {
-  const project = cursorProjectName(cwd);
-  return name === project || Boolean(name?.startsWith(`${project}-`));
+/** Windows paths ignore case, so a terminal opened as `c:\\users` names the same project as `C:\\Users`. */
+const fold = (value: string, platform: NodeJS.Platform) => platform === "win32" ? value.toLowerCase() : value;
+const ownsProject = (name: string | undefined, cwd: string, platform = process.platform) => {
+  const project = fold(cursorProjectName(cwd), platform), own = fold(name ?? "", platform);
+  return own === project || own.startsWith(`${project}-`);
 };
 
 export function acceptsCursorDirectory(path: string, root: string, cwd: string): boolean {
@@ -51,22 +53,29 @@ export function acceptsCursorTranscript(path: string, cwd: string): boolean {
   return parts?.length === 4 && ownsProject(parts[0], cwd) && parts[1] === TRANSCRIPTS && parts[3] === `${parts[2]}.jsonl`;
 }
 
-/** The directory a project name stands for, matched against real directories; a literal hyphen wins over a separator. */
-async function projectDirectory(name: string): Promise<string | null> {
+/**
+ * The directory a project name stands for, matched against real directories; a literal hyphen wins
+ * over a separator. On Windows the name starts with the drive letter and matching ignores case.
+ */
+type Entry = { name: string; isDirectory(): boolean; isSymbolicLink(): boolean };
+async function projectDirectory(name: string, platform = process.platform, list: (directory: string) => Promise<Entry[]> = (directory) => readdir(directory, { withFileTypes: true })): Promise<string | null> {
+  const paths = platform === "win32" ? win32 : posix;
+  const drive = platform === "win32" ? /^([A-Za-z])(?:-(.*))?$/.exec(name) : null;
+  if (platform === "win32" && !drive) return null;
   const walk = async (directory: string, rest: string): Promise<string | null> => {
     if (!rest) return directory;
-    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    const entries = await list(directory).catch(() => []);
     const matches = entries.filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
-      .map((entry) => [entry.name, cursorProjectName(entry.name)] as const)
-      .filter(([, part]) => part && (rest === part || rest.startsWith(`${part}-`)))
+      .map((entry) => [entry.name, fold(cursorProjectName(entry.name), platform)] as const)
+      .filter(([, part]) => part && (fold(rest, platform) === part || fold(rest, platform).startsWith(`${part}-`)))
       .sort((left, right) => right[1].length - left[1].length);
     for (const [entry, part] of matches) {
-      const found = await walk(join(directory, entry), rest.slice(part.length + 1));
+      const found = await walk(paths.join(directory, entry), rest.slice(part.length + 1));
       if (found) return found;
     }
     return null;
   };
-  return process.platform === "win32" ? null : await walk("/", name);
+  return drive ? await walk(`${drive[1]?.toUpperCase()}:\\`, drive[2] ?? "") : await walk("/", name);
 }
 
 /**

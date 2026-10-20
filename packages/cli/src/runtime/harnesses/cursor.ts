@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { access, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { promisify, stripVTControlCharacters } from "node:util";
 import type { ContentBlock, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput } from "@neta-art/cohub";
 import { describeError } from "../../network-error.js";
@@ -13,7 +14,7 @@ import { projectChainedSession, projectionToolId } from "./chained-projection.js
 import {
   acceptsCursorDirectory, acceptsCursorTranscript, cursorChatsRoot, cursorConfigDirectory, cursorProjectsRoot, cursorSessionHeader, cursorTranscriptPath, readCursorTranscript,
 } from "./cursor-transcript.js";
-import { array, harnessCommand, inlineImage, missing, text, turnEnvironment, watchHost } from "./process.js";
+import { array, harnessCommand, harnessExecutableCandidates, inlineImage, missing, text, turnEnvironment, watchHost } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn, LocalHarnessAdapter } from "./types.js";
 
 const BINARY = "cursor-agent";
@@ -34,9 +35,49 @@ const MAX_PROMPT_BYTES = process.platform === "win32" ? 30_000 : 120_000;
 const IMAGE_EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 const HISTORY_KINDS = ["user", "assistant", "tool"];
 
+const VERSION_DIRECTORY = /^(\d{4})\.(\d{1,2})\.(\d{1,2})(?:-\d{2}-\d{2}-\d{2})?-[a-f0-9]+$/;
+
+/**
+ * Cursor's Windows install puts `cursor-agent.cmd` on PATH, which starts PowerShell to run the newest
+ * `versions\<version>\node.exe index.js`. A shell would re-quote the prompt, so this resolves the
+ * same Node entry the launcher would and runs it directly.
+ */
+function cursorLauncher(shim: string): [string, string] | null {
+  const runnable = (directory: string): [string, string] | null => {
+    const node = join(directory, "node.exe"), entry = join(directory, "index.js");
+    return existsSync(node) && existsSync(entry) ? [node, entry] : null;
+  };
+  const beside = runnable(dirname(shim));
+  if (beside) return beside;
+  const versions = join(dirname(shim), "versions");
+  const day = (name: string) => { const match = VERSION_DIRECTORY.exec(name); return match ? Number(`${match[1]}${match[2]?.padStart(2, "0")}${match[3]?.padStart(2, "0")}`) : -1; };
+  let entries: string[] = [];
+  try { entries = readdirSync(versions).filter((name) => day(name) >= 0 && statSync(join(versions, name)).isDirectory()); } catch { return null; }
+  entries.sort((left, right) => day(right) - day(left) || right.localeCompare(left));
+  for (const name of entries) {
+    const found = runnable(join(versions, name));
+    if (found) return found;
+  }
+  return null;
+}
+
+/** The process a Cursor CLI invocation runs, and the variables its launcher would set. */
+export function cursorCommand(executable: string, args: string[], cwd: string): { command: [string, string[]]; env: Record<string, string> } {
+  if (process.platform !== "win32") return { command: harnessCommand(executable, args, cwd), env: {} };
+  const shim = harnessExecutableCandidates(executable, cwd, process.env.PATH ?? "").find((candidate) => statSync(candidate, { throwIfNoEntry: false })?.isFile());
+  const launcher = shim && [".cmd", ".ps1", ".bat"].includes(extname(shim).toLowerCase()) ? cursorLauncher(shim) : null;
+  if (!shim || !launcher) return { command: harnessCommand(executable, args, cwd), env: {} };
+  return {
+    command: [launcher[0], [launcher[1], ...args]],
+    env: { CURSOR_INVOKED_AS: basename(shim), ...(process.env.NODE_COMPILE_CACHE ? {} : { NODE_COMPILE_CACHE: join(process.env.LOCALAPPDATA ?? dirname(dirname(shim)), "cursor-compile-cache") }) },
+  };
+}
+
 const exec = promisify(execFile);
-const command = (executable: string, args: string[], cwd: string, timeout: number) =>
-  exec(...harnessCommand(executable, args, cwd), { cwd, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024, windowsHide: true, env: { ...process.env, NO_COLOR: "1" } });
+const command = (executable: string, args: string[], cwd: string, timeout: number) => {
+  const run = cursorCommand(executable, args, cwd);
+  return exec(...run.command, { cwd, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024, windowsHide: true, env: { ...process.env, ...run.env, NO_COLOR: "1" } });
+};
 const exists = (path: string) => access(path).then(() => true, () => false);
 
 /** `cursor-agent models`: `<id> - <name> (current, default)` per line. */
@@ -299,7 +340,8 @@ async function runCursor(executor: Executor, turn: HarnessTurn): Promise<Harness
     // The prompt is sent when the process starts.
     await turn.started(session);
     try {
-      host = new JsonRpcProcess(...harnessCommand(executor.executables.cursor || BINARY, args, executor.cwd), executor.cwd, "stream", turnEnvironment(input));
+      const run = cursorCommand(executor.executables.cursor || BINARY, args, executor.cwd);
+      host = new JsonRpcProcess(...run.command, executor.cwd, "stream", { ...run.env, ...turnEnvironment(input) });
       watchHost(host, executor.diagnostics, context);
       const child = host;
       await new Promise<void>((resolve, reject) => {
