@@ -1,5 +1,11 @@
 # @neta-art/cohub
 
+## 11.5.1
+
+### Patch Changes
+
+- 451b5d3: Improve Board sharpness on high-DPI displays with up to 3× rendering and a bounded canvas pixel budget. Refresh density and text textures when the display changes without moving the camera, and fix multi-label cards only refreshing their first text texture.
+
 ## 11.5.0
 
 ### Minor Changes

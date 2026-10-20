@@ -1,5 +1,17 @@
 # @neta-art/cohub-cli
 
+## 10.7.0
+
+### Minor Changes
+
+- 4fee251: List Claude Code's own model catalog, including gateway-discovered models with their gateway as provider.
+- 3eb3713: Add repeatable `--text <role>=<text>` to `cohub generate` for models that require text roles, such as `song2`. The positional prompt is optional when `--text` is given and stays first when both are used.
+
+### Patch Changes
+
+- Updated dependencies [451b5d3]
+  - @neta-art/cohub@11.5.1
+
 ## 10.6.0
 
 ### Minor Changes
