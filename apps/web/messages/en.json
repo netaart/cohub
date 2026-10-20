@@ -184,6 +184,7 @@
 	"runtime_not_connected": "Not connected",
 	"runtime_cloud_execution": "Managed by Cohub",
 	"runtime_local_execution": "On your computer",
+	"runtime_harness_not_installed": "Not installed",
 	"runtime_degraded_hint": "Some local features are unavailable. Check the Runtime terminal for recovery progress.",
 	"runtime_disconnected_hint": "Connection lost. Waiting for the local Runtime. An interrupted connection does not confirm that a task has stopped.",
 	"runtime_unknown_hint": "Status is out of date. Refresh to check the current connection.",

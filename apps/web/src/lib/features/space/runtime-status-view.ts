@@ -73,16 +73,24 @@ export function harnessModelCounts(
 	return counts;
 }
 
-/** Picker options: Cohub and the connected Harnesses; the current choice stays so its state is explained. */
+export type HarnessAvailability = "ready" | "offline" | "missing";
+
+/** Every local Harness is listed so an offline Runtime or an uninstalled CLI reads as a state, not an absence. */
 export function harnessOptions(
-	value: HarnessKind,
 	available: readonly HarnessKind[],
 	online: boolean,
-): HarnessKind[] {
+): { harness: HarnessKind; availability: HarnessAvailability }[] {
+	const local = LOCAL_HARNESSES.map((harness) => ({
+		harness,
+		availability: (!online
+			? "offline"
+			: available.includes(harness)
+				? "ready"
+				: "missing") as HarnessAvailability,
+	}));
 	return [
-		"cohub",
-		...LOCAL_HARNESSES.filter(
-			(harness) => (online && available.includes(harness)) || harness === value,
-		),
+		{ harness: "cohub", availability: "ready" },
+		...local.filter((option) => option.availability === "ready"),
+		...local.filter((option) => option.availability !== "ready"),
 	];
 }
