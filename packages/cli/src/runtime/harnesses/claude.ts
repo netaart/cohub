@@ -1,31 +1,26 @@
-import { execFile } from "node:child_process";
-import { readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import type { ContentBlock, NativeProjection } from "@neta-art/cohub";
 import { copyNativeArchive } from "../native/archive.js";
 import { projectChainedSession, projectionMeta, projectionToolId, rebindSessionId } from "./chained-projection.js";
-import { harnessCommand, missing } from "./process.js";
-import { runStreamJson, type StreamJsonProfile } from "./stream-json.js";
+import { DEFAULT_MODEL, runStreamJson, streamJsonHelp, streamJsonModel, type StreamJsonProfile } from "./stream-json.js";
 import type { LocalHarnessAdapter } from "./types.js";
 
 const MAX_PROJECT_NAME = 200;
 const dataRoot = () => process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), ".claude");
 
-/** Claude Code names a project directory by replacing every non-alphanumeric character. */
-export function claudeProjectDirectory(cwd: string) {
+/**
+ * Claude Code names a project directory by replacing every non-alphanumeric UTF-16 unit; a longer
+ * name keeps its first 200 units and appends the base-36 Java string hash of the path.
+ */
+export function claudeProjectName(cwd: string) {
   const name = cwd.replace(/[^a-zA-Z0-9]/g, "-");
-  const projects = join(dataRoot(), "projects");
-  if (name.length <= MAX_PROJECT_NAME) return join(projects, name);
-  // Longer names end with a runtime-specific hash; reuse the directory Claude Code already created.
-  const prefix = `${name.slice(0, MAX_PROJECT_NAME)}-`;
-  let matches: string[] = [];
-  try { matches = readdirSync(projects).filter((entry) => entry.startsWith(prefix)); }
-  catch (error) { if (!missing(error)) throw error; }
-  if (matches.length !== 1) throw new Error("Cannot locate the Claude Code project directory for this long path; run claude here once first");
-  return join(projects, matches[0] as string);
+  if (name.length <= MAX_PROJECT_NAME) return name;
+  let hash = 0;
+  for (let index = 0; index < cwd.length; index++) hash = (hash * 31 + cwd.charCodeAt(index)) | 0;
+  return `${name.slice(0, MAX_PROJECT_NAME)}-${Math.abs(hash).toString(36)}`;
 }
+export const claudeProjectDirectory = (cwd: string) => join(dataRoot(), "projects", claudeProjectName(cwd));
 
 const profile: StreamJsonProfile = {
   harness: "claude",
@@ -34,7 +29,7 @@ const profile: StreamJsonProfile = {
   provider: "anthropic",
   dataRoot,
   projectDirectory: claudeProjectDirectory,
-  effort: (level) => level === "off" ? null : level === "minimal" ? "low" : level,
+  effortLevels: ["low", "medium", "high", "xhigh", "max"],
 };
 
 function anthropicBlock(block: ContentBlock): Record<string, unknown> | null {
@@ -59,9 +54,14 @@ export const claudeHarness: LocalHarnessAdapter = {
   id: "claude",
   binary: profile.binary,
   async models(executable, cwd) {
-    await promisify(execFile)(...harnessCommand(executable, ["--version"], cwd), { cwd, encoding: "utf8", timeout: 15_000, windowsHide: true });
-    // Aliases follow the signed-in account.
-    return ["opus", "sonnet", "haiku"].map((id) => ({ harness: "claude" as const, provider: "anthropic", id, name: `Claude ${id[0]?.toUpperCase()}${id.slice(1)}` }));
+    await streamJsonHelp(profile, executable, cwd);
+    // Aliases follow the signed-in account; Haiku takes no effort level.
+    return [
+      streamJsonModel(profile, DEFAULT_MODEL, "Default", { reasoning: true, isDefault: true }),
+      streamJsonModel(profile, "opus", "Claude Opus", { reasoning: true }),
+      streamJsonModel(profile, "sonnet", "Claude Sonnet", { reasoning: true }),
+      streamJsonModel(profile, "haiku", "Claude Haiku", { reasoning: false }),
+    ];
   },
   run: (executor, turn) => runStreamJson(profile, executor, turn),
   session: {

@@ -4,7 +4,11 @@ import { mkdtemp, readFile, writeFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { importNativeArchive } from "../src/runtime/harnesses/index.js";
+import type { LocalHarness } from "@neta-art/cohub";
+import { harnessAdapter } from "../src/runtime/harnesses/index.js";
+import type { NativeArchiveImport } from "../src/runtime/harnesses/types.js";
+
+const importNativeArchive = (input: NativeArchiveImport & { harness: LocalHarness }) => harnessAdapter(input.harness).session.archive.import(input);
 
 for (const harness of ["pi", "codex"] as const) test(`${harness} import changes only a working-copy header and preserves opaque history bytes`, async () => {
   const root = await mkdtemp(join(tmpdir(), "native-import-"));

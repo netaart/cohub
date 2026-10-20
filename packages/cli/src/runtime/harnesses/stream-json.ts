@@ -1,12 +1,14 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import type { ContentBlock, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { describeError } from "../../network-error.js";
 import type { Executor } from "../native/execution.js";
 import { array, closeHost, harnessCommand, identifiable, inlineImage, missing, text, turnEnvironment, watchHost } from "./process.js";
-import type { HarnessRun, HarnessTurn } from "./types.js";
+import type { HarnessModel, HarnessRun, HarnessTurn } from "./types.js";
 
 /** A stop request that the harness does not honour within this long ends its process. */
 const ABORT_ESCALATION_MS = 5_000;
@@ -17,6 +19,11 @@ const FLUSH_TIMEOUT_MS = 10_000;
  * built-in tools and no configured MCP servers.
  */
 const READ_ONLY_TOOLS = "Read,Glob,Grep";
+/** Flags every Turn relies on; an executable whose help lacks one is an older or unrelated CLI. */
+const REQUIRED_FLAGS = ["--input-format", "--output-format", "--include-partial-messages", "--session-id", "--resume", "--permission-mode", "--tools", "--strict-mcp-config", "--model", "--effort"];
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+/** Runs without `--model`, so the CLI's own configuration and account default apply. */
+export const DEFAULT_MODEL = "default";
 
 /** A Claude Code–compatible CLI (`-p --input-format stream-json --output-format stream-json`). */
 export type StreamJsonProfile = {
@@ -27,8 +34,25 @@ export type StreamJsonProfile = {
   /** Root holding `projects/<project>/<session>.jsonl`. */
   dataRoot(): string;
   projectDirectory(cwd: string): string;
-  effort?(level: string): string | null;
+  /** Thinking levels accepted by `--effort`. */
+  effortLevels: readonly string[];
 };
+
+/** The CLI's help, after checking it offers every flag a Turn uses. */
+export async function streamJsonHelp(profile: StreamJsonProfile, executable: string, cwd: string) {
+  const { stdout } = await promisify(execFile)(...harnessCommand(executable, ["--help"], cwd), { cwd, encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
+  const missingFlags = REQUIRED_FLAGS.filter((flag) => !new RegExp(`(^|[\\s,])${flag}(?=[\\s,=<]|$)`, "m").test(stdout));
+  if (missingFlags.length) throw new Error(`${executable} is not a supported ${profile.label} CLI (missing ${missingFlags.join(", ")}); update ${profile.label}`);
+  return stdout;
+}
+
+export function streamJsonModel(profile: StreamJsonProfile, id: string, name: string, options: { reasoning: boolean; isDefault?: boolean }): HarnessModel {
+  return {
+    harness: profile.harness, provider: profile.provider, id, name,
+    ...(options.isDefault ? { isDefault: true } : {}),
+    ...(options.reasoning ? { reasoning: true, thinkingLevelMap: Object.fromEntries(THINKING_LEVELS.map((level) => [level, profile.effortLevels.includes(level) ? level : null])) } : {}),
+  };
+}
 
 /** A session's file is found by id; the project directory naming is only the fast path. */
 async function findSession(profile: StreamJsonProfile, nativeSessionId: string, cwd: string): Promise<string | null> {
@@ -173,19 +197,19 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
     resumable: (transcript) => transcript.path !== turn.diverged && transcript.origin === "cohub",
   });
   let session = prepared.session;
-  const effort = input.thinkingLevel ? profile.effort?.(input.thinkingLevel) ?? null : null;
+  const effort = input.thinkingLevel && profile.effortLevels.includes(input.thinkingLevel) ? input.thinkingLevel : null;
   const args = [
     "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     ...(prepared.resume === "new" ? ["--session-id", session.nativeSessionId] : ["--resume", session.nativeSessionId]),
     ...(input.accessMode === "read_only" ? ["--permission-mode", "plan", "--tools", READ_ONLY_TOOLS, "--strict-mcp-config"] : ["--permission-mode", "acceptEdits"]),
-    ...(input.model ? ["--model", input.model] : []),
+    ...(input.model && input.model !== DEFAULT_MODEL ? ["--model", input.model] : []),
     ...(effort ? ["--effort", effort] : []),
   ];
   const content = await prompt(input);
   signal.throwIfAborted();
   const host = new JsonRpcProcess(...harnessCommand(executor.executables[profile.harness] || profile.binary, args, executor.cwd), executor.cwd, "stream", turnEnvironment(input));
   watchHost(host, executor.diagnostics, context);
-  const translator = streamJsonTranslator(turn.emit, { provider: profile.provider, model: input.model ?? null });
+  const translator = streamJsonTranslator(turn.emit, { provider: profile.provider, model: input.model && input.model !== DEFAULT_MODEL ? input.model : null });
   let message: RuntimeMessage = { ordinal: 0, content: [] };
   let begun = false;
   try {
@@ -219,6 +243,8 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
       if (signal.aborted) abort();
     });
     message = translator.result() ?? translator.last();
+    // A stopped Turn ends with an error result; the stop is not a failure to report.
+    if (signal.aborted) message = { ...message, stopReason: "aborted", errorMessage: null };
   } catch (error) {
     if (!begun) {
       await closeHost(host, null).catch(() => undefined);

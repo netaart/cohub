@@ -1,11 +1,8 @@
-import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { copyNativeArchive } from "../native/archive.js";
 import { projectChainedSession, projectionMeta, projectionToolId, rebindSessionId, toolResultText } from "./chained-projection.js";
-import { harnessCommand } from "./process.js";
-import { runStreamJson, type StreamJsonProfile } from "./stream-json.js";
+import { DEFAULT_MODEL, runStreamJson, streamJsonHelp, streamJsonModel, type StreamJsonProfile } from "./stream-json.js";
 import type { LocalHarnessAdapter } from "./types.js";
 
 /** WorkBuddy's CLI is CodeBuddy Code; both share its data root. */
@@ -36,23 +33,22 @@ const profile: StreamJsonProfile = {
   provider: "codebuddy",
   dataRoot,
   projectDirectory,
-  effort: (level) => level === "off" ? null : level,
+  effortLevels: ["minimal", "low", "medium", "high", "xhigh", "max"],
 };
 
 /** The CLI lists selectable models (built-in and `models.json`) in its `--model` help. */
 export function workbuddyModels(help: string) {
   const list = /--model <model>[\s\S]*?Currently supported:\s*\(([^)]*)\)/.exec(help)?.[1] ?? "";
-  return [...new Set(list.split(",").map((id) => id.trim()).filter((id) => /^[\w.:/@-]{1,255}$/.test(id)))]
-    .map((id) => ({ harness: "workbuddy" as const, provider: "codebuddy", id, name: id }));
+  const ids = [...new Set(list.split(",").map((id) => id.trim()).filter((id) => /^[\w.:/@-]{1,255}$/.test(id) && id !== DEFAULT_MODEL))];
+  if (!ids.length) throw new Error("WorkBuddy lists no models; sign in to WorkBuddy or configure a model");
+  // The CLI ignores an effort level a model does not support.
+  return [streamJsonModel(profile, DEFAULT_MODEL, "Default", { reasoning: true, isDefault: true }), ...ids.map((id) => streamJsonModel(profile, id, id, { reasoning: true }))];
 }
 
 export const workbuddyHarness: LocalHarnessAdapter = {
   id: "workbuddy",
   binary: profile.binary,
-  async models(executable, cwd) {
-    const { stdout } = await promisify(execFile)(...harnessCommand(executable, ["--help"], cwd), { cwd, encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
-    return workbuddyModels(stdout);
-  },
+  models: async (executable, cwd) => workbuddyModels(await streamJsonHelp(profile, executable, cwd)),
   run: (executor, turn) => runStreamJson(profile, executor, turn),
   session: {
     path: (nativeSessionId, cwd) => join(projectDirectory(cwd), `${nativeSessionId}.jsonl`),

@@ -55,8 +55,19 @@ const models = [
 	{
 		harness: "claude" as const,
 		provider: "anthropic",
-		id: "opus",
-		name: "Claude Opus",
+		id: "default",
+		name: "Default",
+		isDefault: true,
+		reasoning: true,
+		thinkingLevelMap: {
+			off: null,
+			minimal: null,
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: "xhigh",
+			max: "max",
+		},
 	},
 ];
 type PreviewState = "ready" | "limited" | "offline" | "unknown";

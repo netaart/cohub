@@ -77,11 +77,14 @@ access maps to `--permission-mode acceptEdits`. Read-only maps to `plan` with on
 tools and no MCP servers, since plan mode still honours the user's allow rules. Other tools follow the
 user's own permission rules and permission requests are always denied, never granted. Cohub history is projected
 into their native transcript (`~/.claude/projects`, `~/.codebuddy/projects`) and continued with
-`--resume`; thinking blocks and tool calls without results are left out. They run Cohub Turns only:
+`--resume`; thinking blocks and tool calls without results are left out. Startup checks the CLI's help
+for every flag a Turn uses, so an older or unrelated executable is skipped. The `default` model passes no
+`--model`, keeping the user's own configuration; thinking levels map to `--effort`. They run Cohub Turns only:
 terminal conversations are not synced, and an unknown outcome keeps the explicit stop confirmation.
 
 Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`；只读映射为 `plan`，
 且仅开放 Read、Glob、Grep 工具、不加载 MCP（plan 模式仍会执行本机允许规则）。其他工具遵循本机权限规则，权限请求一律拒绝。云端历史投影到原生会话文件并通过 `--resume` 续接。
+启动时检查 CLI 是否提供 Turn 所需的全部参数，旧版或无关的同名程序会被跳过。`default` 模型不传 `--model`，沿用用户自己的配置；思考等级映射为 `--effort`。
 二者仅执行 Cohub 发起的 Turn，不同步终端会话；结果未知时仍需显式确认停止。
 
 ## Native clients / 原生客户端

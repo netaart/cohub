@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
-import { piSessionDirectoryName } from "../src/runtime/native/adapters.js";
+import { piSessionDirectoryName } from "../src/runtime/harnesses/pi.js";
 import { nativeTurnId } from "../src/runtime/native/identity.js";
 import { discoverTranscripts, NativeIngest, type IngestHooks, type TranscriptState } from "../src/runtime/native/ingest.js";
 import { fakeNativeServer as fakeServer } from "./fixtures/native-server.js";

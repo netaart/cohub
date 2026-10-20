@@ -311,7 +311,8 @@ export class NativeIngest {
 
   status() {
     return {
-      transcripts: this.states.size,
+      // Cohub Turns of other harnesses are tracked here too; only synced transcripts count.
+      transcripts: [...this.states.values()].filter((state) => this.harnesses.includes(state.harness)).length,
       live: this.live.size + this.runningLive,
       running: [...this.states.values()].filter((state) => state.runningTurnId).length,
       import: { ...this.job, queued: this.importQueue.length, running: this.runningImport },

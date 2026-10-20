@@ -102,8 +102,8 @@ export class NativeSessions {
       throughTurnId: input.context.throughTurnId,
     }, input.signal), nativeSessionId);
     const session = { harness: input.harness, nativeSessionId, path, cwd: input.cwd };
-    // An empty session of a harness that creates its own file starts natively.
-    if (!projection.turns.length && format.startsWithoutFile) return { session, resume: "new" };
+    // Nothing to carry (no Turns, or none that project) starts natively where the harness creates its own file.
+    if ((!projection.turns.length || !projection.projection.records.length) && format.startsWithoutFile) return { session, resume: "new" };
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const temporary = `${path}.${randomUUID()}.projection`;
     await writeFile(temporary, serializeProjectionRecords(projection.projection.records), { mode: 0o600 });

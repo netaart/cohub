@@ -6,7 +6,7 @@ import { piHarness } from "./pi.js";
 import { codexHarness } from "./codex.js";
 import { claudeHarness } from "./claude.js";
 import { workbuddyHarness } from "./workbuddy.js";
-import type { HarnessExecutables, LocalHarnessAdapter, NativeArchiveImport, NativeTranscriptFormat } from "./types.js";
+import type { HarnessExecutables, LocalHarnessAdapter, NativeTranscriptFormat } from "./types.js";
 
 export type { HarnessExecutables, HarnessModel, HarnessResult, LocalHarnessAdapter } from "./types.js";
 export { harnessCommand, harnessExecutableCandidates } from "./process.js";
@@ -54,8 +54,4 @@ export async function discoverHarnesses(harnesses: LocalHarness[], executables: 
   }));
   const available = catalogs.filter((catalog) => catalog !== null);
   return { harnesses: available.map((catalog) => catalog.harness), models: available.flatMap((catalog) => catalog.models) };
-}
-
-export function importNativeArchive(input: NativeArchiveImport & { harness: LocalHarness }) {
-  return adapters()[input.harness].session.archive.import(input);
 }

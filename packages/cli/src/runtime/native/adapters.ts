@@ -5,7 +5,6 @@ import type { NativeTranscript, NativeTranscriptTurn } from "./transcript.js";
 
 export type { NativeTranscript, NativeTranscriptTurn, SessionHeader, ThreadKind };
 export type Harness = LocalHarness;
-export { piSessionDirectoryName } from "../harnesses/pi.js";
 
 /** Directories holding this harness's transcripts; a transcript's header says which project it is. */
 export const transcriptRoots = (harness: Harness): string[] => transcriptFormat(harness).roots();
