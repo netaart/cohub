@@ -463,7 +463,6 @@
 	"feedback_send": "Send",
 	"feedback_sending": "Sending",
 	"feedback_sent_title": "Thanks for your feedback",
-	"feedback_sent_reference": "Reference ID",
 	"feedback_done": "Done",
 	"feedback_error_send": "Couldn't send feedback. Please try again.",
 	"sidebar_sign_out": "Sign out",

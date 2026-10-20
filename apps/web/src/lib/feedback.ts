@@ -36,7 +36,7 @@ export async function submitFeedback(input: {
 	content: string;
 	extra: FeedbackExtra;
 	files: File[];
-}): Promise<{ id: string }> {
+}): Promise<void> {
 	const body = new FormData();
 	body.set("app", CFEED_APP);
 	body.set("content", input.content);
@@ -52,5 +52,4 @@ export async function submitFeedback(input: {
 			payload?.error?.message ?? `${response.status} ${response.statusText}`,
 		);
 	}
-	return (await response.json()) as { id: string };
 }

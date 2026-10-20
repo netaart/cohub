@@ -463,7 +463,6 @@
 	"feedback_send": "发送",
 	"feedback_sending": "发送中",
 	"feedback_sent_title": "感谢你的反馈",
-	"feedback_sent_reference": "反馈编号",
 	"feedback_done": "完成",
 	"feedback_error_send": "反馈发送失败，请重试。",
 	"sidebar_sign_out": "退出登录",

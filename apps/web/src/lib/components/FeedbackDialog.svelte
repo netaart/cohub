@@ -20,7 +20,7 @@ let includeLog = $state(true);
 let sending = $state(false);
 let error = $state<string | null>(null);
 let errorDetail = $state<string | null>(null);
-let sentId = $state<string | null>(null);
+let sent = $state(false);
 let fileInput = $state<HTMLInputElement | null>(null);
 let textarea = $state<HTMLTextAreaElement | null>(null);
 
@@ -34,7 +34,7 @@ $effect(() => {
 	sending = false;
 	error = null;
 	errorDetail = null;
-	sentId = null;
+	sent = false;
 	queueMicrotask(() => textarea?.focus());
 });
 
@@ -83,12 +83,12 @@ async function send() {
 	errorDetail = null;
 	try {
 		const attachments = includeLog ? [...files, createDebugLogFile()] : files;
-		const result = await submitFeedback({
+		await submitFeedback({
 			content: content.trim(),
 			extra: buildExtra(),
 			files: attachments,
 		});
-		sentId = result.id;
+		sent = true;
 	} catch (cause) {
 		console.error("[feedback] Failed to submit", cause);
 		error = m.feedback_error_send({}, { locale });
@@ -105,7 +105,7 @@ function handleKeydown(event: KeyboardEvent) {
 		onClose();
 		return;
 	}
-	if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !sentId) {
+	if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !sent) {
 		event.preventDefault();
 		void send();
 	}
@@ -115,11 +115,10 @@ function handleKeydown(event: KeyboardEvent) {
 <svelte:window onkeydown={handleKeydown} />
 
 <Dialog {open} onClose={() => { if (!sending) onClose(); }} title={m.feedback_title({}, { locale })} maxWidth="520px" maxHeight="85vh">
-	{#if sentId}
+	{#if sent}
 		<div class="flex flex-col items-center gap-3 px-6 py-10 text-center">
 			<div class="flex h-9 w-9 items-center justify-center rounded-full bg-bg-hover text-brand"><Check class="h-4 w-4" /></div>
 			<div class="text-[14px] font-medium text-text-primary">{m.feedback_sent_title({}, { locale })}</div>
-			<div class="text-[11px] text-text-tertiary">{m.feedback_sent_reference({}, { locale })} <span class="select-all font-mono text-text-secondary">{sentId}</span></div>
 			<button type="button" class="primary-btn mt-2" onclick={onClose}>{m.feedback_done({}, { locale })}</button>
 		</div>
 	{:else}
