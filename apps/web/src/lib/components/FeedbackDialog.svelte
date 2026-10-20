@@ -4,15 +4,7 @@ import { page } from "$app/state";
 import { PUBLIC_COHUB_ENV } from "$env/static/public";
 import Dialog from "$lib/components/Dialog.svelte";
 import { saveCohubDebugBundle } from "$lib/debugger";
-import {
-	createDebugLogFile,
-	FEEDBACK_ACCEPT,
-	FEEDBACK_MAX_CONTENT_CHARS,
-	FEEDBACK_MAX_FILE_BYTES,
-	FEEDBACK_MAX_FILES,
-	isFeedbackFileAccepted,
-	submitFeedback,
-} from "$lib/feedback";
+import { createDebugLogFile, submitFeedback } from "$lib/feedback";
 import { formatBytes } from "$lib/format-bytes";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -27,14 +19,12 @@ let files = $state<File[]>([]);
 let includeLog = $state(true);
 let sending = $state(false);
 let error = $state<string | null>(null);
+let errorDetail = $state<string | null>(null);
 let sentId = $state<string | null>(null);
 let fileInput = $state<HTMLInputElement | null>(null);
 let textarea = $state<HTMLTextAreaElement | null>(null);
 
-const maxUserFiles = $derived(FEEDBACK_MAX_FILES - (includeLog ? 1 : 0));
-const canSend = $derived(
-	!sending && content.trim().length > 0 && files.length <= maxUserFiles,
-);
+const canSend = $derived(!sending && content.trim().length > 0);
 
 $effect(() => {
 	if (!open) return;
@@ -43,32 +33,13 @@ $effect(() => {
 	includeLog = true;
 	sending = false;
 	error = null;
+	errorDetail = null;
 	sentId = null;
 	queueMicrotask(() => textarea?.focus());
 });
 
 function addFiles(incoming: Iterable<File>) {
-	error = null;
-	const next = [...files];
-	for (const file of incoming) {
-		if (next.length >= maxUserFiles) {
-			error = m.feedback_error_too_many_files(
-				{ count: maxUserFiles },
-				{ locale },
-			);
-			break;
-		}
-		if (!isFeedbackFileAccepted(file)) {
-			error = m.feedback_error_file_type({ name: file.name }, { locale });
-			continue;
-		}
-		if (file.size > FEEDBACK_MAX_FILE_BYTES) {
-			error = m.feedback_error_file_too_large({ name: file.name }, { locale });
-			continue;
-		}
-		next.push(file);
-	}
-	files = next;
+	files = [...files, ...incoming];
 }
 
 function handleFileChange(event: Event) {
@@ -86,7 +57,6 @@ function handlePaste(event: ClipboardEvent) {
 
 function removeFile(index: number) {
 	files = files.filter((_, i) => i !== index);
-	error = null;
 }
 
 function buildExtra() {
@@ -110,6 +80,7 @@ async function send() {
 	if (!canSend) return;
 	sending = true;
 	error = null;
+	errorDetail = null;
 	try {
 		const attachments = includeLog ? [...files, createDebugLogFile()] : files;
 		const result = await submitFeedback({
@@ -121,6 +92,7 @@ async function send() {
 	} catch (cause) {
 		console.error("[feedback] Failed to submit", cause);
 		error = m.feedback_error_send({}, { locale });
+		errorDetail = cause instanceof Error ? cause.message : null;
 	} finally {
 		sending = false;
 	}
@@ -158,7 +130,6 @@ function handleKeydown(event: KeyboardEvent) {
 				onpaste={handlePaste}
 				class="form-textarea"
 				rows="6"
-				maxlength={FEEDBACK_MAX_CONTENT_CHARS}
 				placeholder={m.feedback_placeholder({}, { locale })}
 				aria-label={m.feedback_title({}, { locale })}
 				disabled={sending}
@@ -185,11 +156,11 @@ function handleKeydown(event: KeyboardEvent) {
 			{/if}
 
 			<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-				<button type="button" class="secondary-btn" onclick={() => fileInput?.click()} disabled={sending || files.length >= maxUserFiles}>
+				<button type="button" class="secondary-btn" onclick={() => fileInput?.click()} disabled={sending}>
 					<Paperclip class="h-3.5 w-3.5" />{m.feedback_add_files({}, { locale })}
 				</button>
 				<span class="min-w-0 text-[11px] text-text-placeholder">{m.feedback_attachment_hint({}, { locale })}</span>
-				<input bind:this={fileInput} type="file" class="hidden" multiple accept={FEEDBACK_ACCEPT} onchange={handleFileChange} />
+				<input bind:this={fileInput} type="file" class="hidden" multiple onchange={handleFileChange} />
 			</div>
 
 			<label class="flex items-start gap-2 rounded-[6px] border border-border-subtle bg-bg-surface p-2.5 text-[12px]">
@@ -207,7 +178,10 @@ function handleKeydown(event: KeyboardEvent) {
 			</label>
 
 			{#if error}
-				<div class="rounded-[6px] border border-error-soft/30 bg-error-bg px-2.5 py-2 text-[12px] text-error-soft" role="alert">{error}</div>
+				<div class="rounded-[6px] border border-error-soft/30 bg-error-bg px-2.5 py-2 text-[12px] text-error-soft" role="alert">
+					<div>{error}</div>
+					{#if errorDetail}<div class="mt-0.5 break-words font-mono text-[11px] opacity-80">{errorDetail}</div>{/if}
+				</div>
 			{/if}
 
 			<div class="flex justify-end gap-2 pt-1">

@@ -3,36 +3,15 @@ import { exportCohubDebugLog } from "@neta-art/cohub/debugger";
 const CFEED_ENDPOINT = "https://cfeed.neta.art/api/v1/feedback";
 const CFEED_APP = "cohub";
 
-// Mirrors cfeed's global defaults (5 files, 10 MB each, MIME allowlist).
-export const FEEDBACK_MAX_FILES = 5;
-export const FEEDBACK_MAX_FILE_BYTES = 10 * 1024 * 1024;
-export const FEEDBACK_MAX_CONTENT_CHARS = 10_000;
-export const FEEDBACK_ACCEPT = [
-	"image/png",
-	"image/jpeg",
-	"image/webp",
-	"image/gif",
-	"video/mp4",
-	"video/webm",
-	"text/plain",
-	"application/json",
-	"application/pdf",
-	"application/zip",
-].join(",");
-
-// Leave headroom under the per-file limit for multipart overhead.
-const DEBUG_LOG_MAX_BYTES = 9 * 1024 * 1024;
+// Our own budget for the auto-attached log; cfeed enforces its limits server-side.
+const DEBUG_LOG_MAX_BYTES = 5 * 1024 * 1024;
 
 export type FeedbackExtra = Record<string, unknown>;
-
-export function isFeedbackFileAccepted(file: File) {
-	return FEEDBACK_ACCEPT.split(",").includes(file.type);
-}
 
 export function createDebugLogFile(now = new Date()): File {
 	const log = exportCohubDebugLog();
 	let text = JSON.stringify(log);
-	// Keep the newest entries when the ring buffers exceed the upload limit.
+	// Keep the newest entries when the ring buffers exceed the budget.
 	while (
 		new Blob([text]).size > DEBUG_LOG_MAX_BYTES &&
 		(log.console.length > 0 || log.network.length > 0)
@@ -69,8 +48,9 @@ export async function submitFeedback(input: {
 		const payload = (await response.json().catch(() => null)) as {
 			error?: { code?: string; message?: string };
 		} | null;
-		const message = payload?.error?.message ?? response.statusText;
-		throw new Error(`Feedback upload failed (${response.status}): ${message}`);
+		throw new Error(
+			payload?.error?.message ?? `${response.status} ${response.statusText}`,
+		);
 	}
 	return (await response.json()) as { id: string };
 }
