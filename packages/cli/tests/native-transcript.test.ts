@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { readNativeTranscript, readNativeTranscriptHeader, ensurePlainCodexRollout } from "../src/runtime/native/transcript.js";
+import { readClaudeTranscript } from "../src/runtime/harnesses/claude-transcript.js";
+import { readWorkbuddyTranscript } from "../src/runtime/harnesses/workbuddy-transcript.js";
 import { nativeIngestTurnSchema } from "@neta-art/cohub";
 
 const at = "2026-09-21T00:00:00.000Z";
@@ -325,4 +327,55 @@ test("a lineage crossing projects is rejected instead of importing foreign histo
     await rm(other, { recursive: true, force: true });
     await f.cleanup();
   }
+});
+
+test("Claude Code Turns follow the live branch across a compaction, merge block records and drop local commands", async () => {
+  const f = await fixture();
+  try {
+    const record = (value: Record<string, unknown>) => line({ isSidechain: false, cwd: f.root, sessionId: f.nativeSessionId, timestamp: at, ...value });
+    const user = (uuid: string, parentUuid: string | null, content: unknown, extra: Record<string, unknown> = {}) => record({ type: "user", uuid, parentUuid, promptId: `p-${uuid}`, message: { role: "user", content }, ...extra });
+    const assistant = (uuid: string, parentUuid: string, id: string, block: Record<string, unknown>, stop: string) => record({ type: "assistant", uuid, parentUuid, message: { id, model: "claude-test", content: [block], stop_reason: stop, usage: { input_tokens: 2, output_tokens: 1 } } });
+    await writeFile(f.path, [
+      user("u1", null, "first"), assistant("a1", "u1", "m1", { type: "text", text: "one" }, "end_turn"),
+      // Rewound: this reply is off the live branch.
+      user("u2", "a1", "abandoned"),
+      user("c1", "a1", "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>"),
+      user("c2", "c1", "<local-command-stdout>Set model</local-command-stdout>"),
+      record({ type: "system", subtype: "compact_boundary", uuid: "b1", parentUuid: null, logicalParentUuid: "c2" }),
+      user("s1", "b1", "summary", { isCompactSummary: true }),
+      user("u3", "s1", [{ type: "text", text: "run it" }]),
+      assistant("a3", "u3", "m3", { type: "thinking", thinking: "plan" }, "tool_use"),
+      assistant("a4", "a3", "m3", { type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }, "tool_use"),
+      record({ type: "user", uuid: "r1", parentUuid: "a4", promptId: "p-u3", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } }),
+      record({ type: "user", uuid: "i1", parentUuid: "r1", promptId: "p-u3", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } }),
+      user("u4", "i1", "again"), assistant("a5", "u4", "m5", { type: "text", text: "API Error: 400" }, "stop_sequence"),
+    ].join("").replace('"uuid":"a5"', '"isApiErrorMessage":true,"uuid":"a5"'));
+    const transcript = await readClaudeTranscript(f.path, f.nativeSessionId);
+    assert.deepEqual(transcript.turns.map((turn) => [turn.key, turn.parentKey, turn.result?.status, turn.ended ?? false]), [["u1", null, "completed", false], ["u3", "u1", "interrupted", true], ["u4", "u3", "failed", false]]);
+    const [, run, failed] = transcript.turns;
+    assert.deepEqual(run?.messages.map((message) => message.content.map((block) => block.type)), [["thinking", "tool_use", "tool_result"]]);
+    assert.equal(failed?.messages[0]?.errorMessage, "API Error: 400");
+    assert.equal(transcript.turns[0]?.cloudTurnId, "u1", "the prompt id is the marker Cohub sets");
+  } finally { await f.cleanup(); }
+});
+
+test("CodeBuddy Turns group each model step, pair tool output and record an interruption", async () => {
+  const f = await fixture();
+  try {
+    const item = (value: Record<string, unknown>) => line({ timestamp: 1, sessionId: f.nativeSessionId, cwd: f.root, ...value });
+    await writeFile(f.path, [
+      line({ type: "session-meta", id: "meta", sessionId: f.nativeSessionId }),
+      item({ id: "u1", type: "message", role: "user", content: [{ type: "input_text", text: "run" }] }),
+      item({ id: "r1", parentId: "u1", type: "reasoning", rawContent: [{ type: "reasoning_text", text: "plan" }], providerData: { messageId: "s1", model: "hy" } }),
+      item({ id: "f1", parentId: "r1", type: "function_call", callId: "c1", name: "Bash", arguments: "{\"command\":\"ls\"}", providerData: { messageId: "s1" } }),
+      item({ id: "o1", parentId: "f1", type: "function_call_result", callId: "c1", output: { type: "text", text: "ok" }, providerData: { messageId: "s1" } }),
+      item({ id: "a1", parentId: "o1", type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "done" }], providerData: { messageId: "s2" }, message: { usage: { input_tokens: 3, output_tokens: 1 } } }),
+      line({ id: "m1", type: "turn-metrics", durationMs: 1 }),
+      item({ id: "u2", parentId: "a1", type: "message", role: "user", content: [{ type: "input_text", text: "wait" }] }),
+      item({ id: "a2", parentId: "u2", type: "message", role: "assistant", status: "incomplete", content: [{ type: "output_text", text: "Interrupted by user" }], providerData: { error: { message: "Interrupted by user" } } }),
+    ].join(""));
+    const transcript = await readWorkbuddyTranscript(f.path, f.nativeSessionId);
+    assert.deepEqual(transcript.turns.map((turn) => [turn.key, turn.result?.status, turn.ended ?? false]), [["u1", "completed", false], ["u2", "interrupted", true]]);
+    assert.deepEqual(transcript.turns[0]?.messages.map((message) => [message.content.map((block) => block.type), message.stopReason, message.usage?.totalTokens]), [[["thinking", "tool_use", "tool_result"], "tool_use", undefined], [["text"], "stop", 4]]);
+  } finally { await f.cleanup(); }
 });

@@ -210,6 +210,6 @@ export const piHarness: LocalHarnessAdapter = {
     replyEnded: (turn) => PI_ENDED.includes(turn.messages.at(-1)?.stopReason ?? ""),
     userFinalMarked: false,
     globalTurnKeys: false,
+    marksCohubTurns: true,
   },
-  nativeSync: true,
 };

@@ -3,7 +3,7 @@ import type { RuntimeArchiveStore } from "../archive-store.js";
 import { serializeDiagnosticError, type RuntimeDiagnosticContext, type RuntimeDiagnostics } from "../diagnostics.js";
 import { harnessAdapter } from "../harnesses/index.js";
 import { closeHost } from "../harnesses/process.js";
-import type { HarnessExecutables, HarnessResult, HarnessTurn } from "../harnesses/types.js";
+import type { HarnessExecutables, HarnessResult, HarnessRun, HarnessTurn } from "../harnesses/types.js";
 import type { CodexShared } from "./codex-link.js";
 import type { NativeIngest } from "./ingest.js";
 import type { PiLink } from "./pi-link.js";
@@ -30,8 +30,14 @@ export async function executeTurn(executor: Executor, input: RuntimeTurnInput, e
   signal.throwIfAborted();
   assertHarnessAccess(input.harness, input.accessMode);
   const diverged = await executor.results.admit(input);
-  const turn: HarnessTurn = { input, emit, signal, diverged, started: (session) => executor.results.start(session, input, requestId), context };
-  const run = await harnessAdapter(input.harness).run(executor, turn);
+  const started: HarnessTurn["started"] = async (session) => {
+    await executor.results.start(session, input, requestId);
+    executor.ingest.begin(session, input.sessionId, input.turnId);
+  };
+  const turn: HarnessTurn = { input, emit, signal, diverged, started, context };
+  let run: HarnessRun;
+  try { run = await harnessAdapter(input.harness).run(executor, turn); }
+  catch (error) { executor.ingest.end(input.turnId); throw error; }
   let uncertainCleanup: HarnessResult["uncertainCleanup"];
   if (run.host) uncertainCleanup = await closeHost(run.host, run.message.errorMessage);
   const message = signal.aborted ? { ...run.message, stopReason: "aborted" } : run.message;

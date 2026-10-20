@@ -1,7 +1,9 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { copyNativeArchive } from "../native/archive.js";
 import { projectChainedSession, projectionMeta, projectionToolId, rebindSessionId, toolResultText } from "./chained-projection.js";
+import { chainedSessionHeader, projectDirectory as projectFolder, projectTranscript } from "./chained-transcript.js";
+import { readWorkbuddyTranscript, WORKBUDDY_REPLY_ENDED } from "./workbuddy-transcript.js";
 import { DEFAULT_MODEL, runStreamJson, streamJsonHelp, streamJsonModel, type StreamJsonProfile } from "./stream-json.js";
 import type { LocalHarnessAdapter } from "./types.js";
 
@@ -10,21 +12,30 @@ const dataRoot = () => process.env.CODEBUDDY_CONFIG_DIR?.trim() || join(homedir(
 const MAX_NAME_BYTES = 255;
 const TRUNCATED_NAME_BYTES = 180;
 
-/** Mirrors CodeBuddy's project naming, including its truncation hash for long paths. */
-export function workbuddyProjectName(cwd: string) {
-  const base = cwd.replace(/[/\\:]/g, "-").replace(/^-+/, "").replace(/-+$/, "").replace(/-+/g, "-");
-  if (Buffer.byteLength(base, "utf8") <= MAX_NAME_BYTES) return base;
+const projectBase = (cwd: string) => cwd.replace(/[/\\:]/g, "-").replace(/^-+/, "").replace(/-+$/, "").replace(/-+/g, "-");
+function truncated(base: string) {
   let prefix = "", bytes = 0;
   for (const character of base) {
     const size = Buffer.byteLength(character, "utf8");
     if (bytes + size > TRUNCATED_NAME_BYTES) break;
     bytes += size; prefix += character;
   }
+  return prefix;
+}
+
+/** Mirrors CodeBuddy's project naming, including its truncation hash for long paths. */
+export function workbuddyProjectName(cwd: string) {
+  const base = projectBase(cwd);
+  if (Buffer.byteLength(base, "utf8") <= MAX_NAME_BYTES) return base;
+  const prefix = truncated(base);
   let hash = 5381;
   for (const byte of Buffer.from(base, "utf8")) hash = 33 * hash ^ byte;
   return `${prefix}-${(hash >>> 0).toString(36)}`;
 }
 const projectDirectory = (cwd: string) => join(dataRoot(), "projects", workbuddyProjectName(cwd));
+const projectsRoot = () => join(dataRoot(), "projects");
+/** Every subdirectory's project name starts with this, hashed long names included. */
+const projectPrefix = (cwd: string) => truncated(projectBase(cwd));
 
 const profile: StreamJsonProfile = {
   harness: "workbuddy",
@@ -34,6 +45,7 @@ const profile: StreamJsonProfile = {
   dataRoot,
   projectDirectory,
   effortLevels: ["minimal", "low", "medium", "high", "xhigh", "max"],
+  promptUuid: false,
 };
 
 /** The CLI lists selectable models (built-in and `models.json`) in its `--model` help. */
@@ -93,5 +105,18 @@ export const workbuddyHarness: LocalHarnessAdapter = {
       },
     },
   },
-  nativeSync: false,
+  transcript: {
+    roots: () => [projectsRoot()],
+    acceptsDirectory: (path, root, cwd) => projectFolder(path, root, projectPrefix(cwd)),
+    acceptsTranscript: (path, cwd) => projectTranscript(path, projectsRoot(), projectPrefix(cwd)),
+    header: (path, signal) => chainedSessionHeader(path, "workbuddy", signal),
+    read: (path, signal) => readWorkbuddyTranscript(path, basename(path, ".jsonl"), signal),
+    boundaries: ['"role":"user"', '"role":"assistant"', '"type":"turn-metrics"'],
+    turnEndRecorded: false,
+    replyEnded: (turn) => WORKBUDDY_REPLY_ENDED.includes(turn.messages.at(-1)?.stopReason ?? ""),
+    userFinalMarked: false,
+    globalTurnKeys: false,
+    // CodeBuddy keeps no field of a stream-json prompt, so Cohub's Turns are tracked in the ledger.
+    marksCohubTurns: false,
+  },
 };

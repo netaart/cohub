@@ -1,7 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { LOCAL_HARNESS_SPECS } from "@neta-art/cohub";
 import { serializeDiagnosticError } from "../diagnostics.js";
-import { nativeSyncHarnesses } from "../harnesses/index.js";
 import type { HarnessExecutables } from "../harnesses/types.js";
 import type { Harness } from "./adapters.js";
 import { CODEX_SHARED_MIN_VERSION, sharedServerAvailable, supportsSharedServer } from "./codex-link.js";
@@ -36,9 +35,7 @@ async function defaultAsk(question: string) {
  * Enable native sync after consent. Native history may contain secrets, so nothing is read before
  * the user agrees; a failure here never blocks the Runtime, it only leaves sessions read-only.
  */
-export async function ensureNativeSync(requested: Input, log: (line: string) => void = (line) => process.stderr.write(line), ask: Ask = defaultAsk): Promise<NativeSyncReport> {
-  // A harness without a native integration runs Cohub Turns only.
-  const input = { ...requested, harnesses: nativeSyncHarnesses(requested.harnesses) };
+export async function ensureNativeSync(input: Input, log: (line: string) => void = (line) => process.stderr.write(line), ask: Ask = defaultAsk): Promise<NativeSyncReport> {
   if (!input.harnesses.length) return { enabled: false, harnesses: [], codexShared: false, importHistory: false, note: "unsupported" };
   const stateRoot = runtimeStateRoot(input.spaceId);
   const previous = await readNativeConfig(stateRoot, input.identity).catch(() => null);

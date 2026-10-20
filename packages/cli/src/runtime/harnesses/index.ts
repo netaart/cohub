@@ -1,6 +1,6 @@
 import { access, stat } from "node:fs/promises";
 import { constants } from "node:fs";
-import { LOCAL_HARNESS_SPECS, LOCAL_HARNESSES, type LocalHarness, type RuntimeCapabilities } from "@neta-art/cohub";
+import { LOCAL_HARNESSES, type LocalHarness, type RuntimeCapabilities } from "@neta-art/cohub";
 import { harnessExecutableCandidates } from "./process.js";
 import { piHarness } from "./pi.js";
 import { codexHarness } from "./codex.js";
@@ -17,14 +17,7 @@ const adapters = () => registry ??= { pi: piHarness, codex: codexHarness, claude
 
 export const harnessAdapter = (harness: LocalHarness): LocalHarnessAdapter => adapters()[harness];
 export const harnessExecutable = (harness: LocalHarness, executables: HarnessExecutables) => executables[harness] || adapters()[harness].binary;
-/** Harnesses whose terminal conversations can sync to the Space. */
-export const nativeSyncHarnesses = (harnesses: readonly LocalHarness[]) => harnesses.filter((harness) => adapters()[harness].nativeSync);
-
-export function transcriptFormat(harness: LocalHarness): NativeTranscriptFormat {
-  const format = adapters()[harness].transcript;
-  if (!format) throw new Error(`${LOCAL_HARNESS_SPECS[harness].label} transcripts cannot be read`);
-  return format;
-}
+export const transcriptFormat = (harness: LocalHarness): NativeTranscriptFormat => adapters()[harness].transcript;
 
 /** Discover installed executables only; authentication/capability errors stay explicit. */
 export async function installedHarnesses(cwd: string, executables: HarnessExecutables, path = process.env.PATH ?? ""): Promise<LocalHarness[]> {

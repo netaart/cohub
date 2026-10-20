@@ -5,14 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
+import { claudeProjectName } from "../src/runtime/harnesses/claude.js";
 import { piSessionDirectoryName } from "../src/runtime/harnesses/pi.js";
+import { workbuddyProjectName } from "../src/runtime/harnesses/workbuddy.js";
 import { nativeTurnId } from "../src/runtime/native/identity.js";
 import { discoverTranscripts, NativeIngest, type IngestHooks, type TranscriptState } from "../src/runtime/native/ingest.js";
 import { fakeNativeServer as fakeServer } from "./fixtures/native-server.js";
 
 const at = "2026-01-01T00:00:00.000Z";
 const SPACE = "00000000-0000-4000-8000-000000000001";
-const turnIdOf = (harness: "pi" | "codex", nativeSessionId: string, key: string) => nativeTurnId(SPACE, harness, nativeSessionId, key);
+type Synced = "pi" | "codex" | "claude" | "workbuddy";
+const turnIdOf = (harness: Synced, nativeSessionId: string, key: string) => nativeTurnId(SPACE, harness, nativeSessionId, key);
 const line = (value: unknown) => `${JSON.stringify(value)}\n`;
 const piHeader = (id: string, cwd: string) => line({ type: "session", version: 3, id, cwd, timestamp: at });
 const piMessage = (id: string, parentId: string | null, role: string, content: unknown, extra: Record<string, unknown> = {}) =>
@@ -28,6 +31,15 @@ const codexRollout = (id: string, cwd: string, turns: string[], extra: Record<st
     line({ timestamp: at, type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } }),
   ]),
 ].join("");
+const claudeRecord = (sessionId: string, cwd: string, value: Record<string, unknown>) => line({ isSidechain: false, cwd, sessionId, timestamp: at, ...value });
+/** A Claude Code Turn: prompt, reply, and in interactive sessions the recorded end. */
+const claudeTurn = (sessionId: string, cwd: string, uuid: string, parentUuid: string | null, prompt: string, ended = true) =>
+  claudeRecord(sessionId, cwd, { type: "user", uuid, parentUuid, promptId: `p-${uuid}`, promptSource: "typed", message: { role: "user", content: prompt } })
+  + claudeRecord(sessionId, cwd, { type: "assistant", uuid: `a-${uuid}`, parentUuid: uuid, message: { id: `m-${uuid}`, role: "assistant", model: "claude-test", content: [{ type: "text", text: `re ${prompt}` }], stop_reason: "end_turn" } })
+  + (ended ? claudeRecord(sessionId, cwd, { type: "system", subtype: "turn_duration", uuid: `d-${uuid}`, parentUuid: `a-${uuid}` }) : "");
+const workbuddyTurn = (sessionId: string, cwd: string, id: string, parentId: string | null, prompt: string) =>
+  line({ id, ...(parentId ? { parentId } : {}), timestamp: 1, type: "message", role: "user", content: [{ type: "input_text", text: prompt }], sessionId, cwd })
+  + line({ id: `a-${id}`, parentId: id, timestamp: 2, type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: `re ${prompt}` }], providerData: { messageId: `m-${id}`, model: "hy-test" }, sessionId, cwd });
 
 async function until(check: () => boolean, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
@@ -44,9 +56,13 @@ async function workspace() {
   process.env.PI_CODING_AGENT_DIR = join(root, "pi-agent");
   delete process.env.PI_CODING_AGENT_SESSION_DIR;
   process.env.CODEX_HOME = join(root, "codex-home");
+  process.env.CLAUDE_CONFIG_DIR = join(root, "claude");
+  process.env.CODEBUDDY_CONFIG_DIR = join(root, "codebuddy");
   const piDirectory = (cwd: string) => join(root, "pi-agent", "sessions", piSessionDirectoryName(cwd));
   const codexPath = (id: string) => join(root, "codex-home", "sessions", "2026", "01", "01", `rollout-2026-01-01T00-00-00-${id}.jsonl`);
-  const ingest = (options: { enabledAt?: string; harnesses?: Array<"pi" | "codex">; hooks?: IngestHooks } = {}) => new NativeIngest({
+  const claudePath = (cwd: string, id: string) => join(root, "claude", "projects", claudeProjectName(cwd), `${id}.jsonl`);
+  const workbuddyPath = (cwd: string, id: string) => join(root, "codebuddy", "projects", workbuddyProjectName(cwd), `${id}.jsonl`);
+  const ingest = (options: { enabledAt?: string; harnesses?: Synced[]; hooks?: IngestHooks } = {}) => new NativeIngest({
     spaceId: SPACE, cwd: project, harnesses: options.harnesses ?? ["pi", "codex"], enabledAt: options.enabledAt ?? new Date(0).toISOString(),
     root: join(root, "state"), archives: new RuntimeArchiveStore(join(root, "state", "archives"), null), hooks: options.hooks,
   });
@@ -55,7 +71,7 @@ async function workspace() {
     await writeFile(path, content);
     if (mtime) await utimes(path, mtime, mtime);
   };
-  return { root, project, piDirectory, codexPath, ingest, write, cleanup: () => rm(root, { recursive: true, force: true }) };
+  return { root, project, piDirectory, codexPath, claudePath, workbuddyPath, ingest, write, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 
 test("discovery covers the project and its subdirectories, skips Codex's own threads, newest first", async () => {
@@ -355,6 +371,80 @@ test("pausing a harness stops its uploads and previews, for transcripts already 
     ingest.touch(path);
     await new Promise((resolve) => setTimeout(resolve, 200));
     assert.equal(server.batches.length, batches, "nothing more is uploaded");
+    await ingest.close(AbortSignal.timeout(2_000));
+  } finally { await w.cleanup(); }
+});
+
+test("Claude Code terminal Turns sync and settle on their recorded end; Cohub's prompt id marks its own Turn", async () => {
+  const w = await workspace();
+  try {
+    const server = fakeServer();
+    const cloudTurnId = randomUUID(), sessionId = randomUUID(), id = randomUUID(), cwd = join(w.project, "sub");
+    server.turns.set(cloudTurnId, { sessionId, settled: true, parentTurnId: null });
+    const path = w.claudePath(cwd, id);
+    // Fresh bytes: a recorded end settles the Turn without waiting for a quiet period.
+    await w.write(path, claudeTurn(id, cwd, cloudTurnId, null, "from the web", false) + claudeTurn(id, cwd, "u2", `a-${cloudTurnId}`, "from the terminal"));
+    await w.write(join(path.slice(0, -".jsonl".length), "subagents", "agent-x.jsonl"), claudeTurn(id, cwd, "s1", null, "sub-agent"));
+    const ingest = w.ingest({ harnesses: ["claude"] });
+    await ingest.load();
+    ingest.connect(server.transport);
+    await until(() => server.turns.size === 2);
+    const terminal = server.batches.flatMap((batch) => batch.turns);
+    assert.deepEqual(terminal.map((turn) => [turn.turnId, turn.parentTurnId, turn.result?.status]), [[turnIdOf("claude", id, "u2"), cloudTurnId, "completed"]]);
+    assert.equal(server.turns.get(turnIdOf("claude", id, "u2"))?.sessionId, sessionId);
+    await ingest.close(AbortSignal.timeout(2_000));
+  } finally { await w.cleanup(); }
+});
+
+test("a WorkBuddy Turn Cohub runs is never sent back, and a terminal Turn after it continues its Session", async () => {
+  const w = await workspace();
+  try {
+    const server = fakeServer();
+    const cloudTurnId = randomUUID(), sessionId = randomUUID(), id = randomUUID();
+    server.turns.set(cloudTurnId, { sessionId, settled: true, parentTurnId: null });
+    const path = w.workbuddyPath(w.project, id);
+    const session = { harness: "workbuddy" as const, path, nativeSessionId: id, cwd: w.project };
+    const ingest = w.ingest({ harnesses: ["workbuddy"] });
+    await ingest.load();
+    ingest.connect(server.transport);
+    ingest.begin(session, sessionId, cloudTurnId);
+    await w.write(path, workbuddyTurn(id, w.project, "u1", null, "from the web"));
+    ingest.touch(path);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(server.batches.length, 0, "a running Cohub Turn is not read");
+    ingest.advance(path, cloudTurnId);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(server.batches.length, 0, "nor sent once it ends");
+    await appendFile(path, workbuddyTurn(id, w.project, "u2", "a-u1", "from the terminal") + line({ id: "metrics", timestamp: 3, type: "turn-metrics", cwd: w.project }));
+    ingest.touch(path);
+    await until(() => server.turns.size === 2);
+    assert.deepEqual(server.batches.flatMap((batch) => batch.turns).map((turn) => [turn.turnId, turn.parentTurnId]), [[turnIdOf("workbuddy", id, "u2"), cloudTurnId]]);
+    await ingest.close(AbortSignal.timeout(2_000));
+  } finally { await w.cleanup(); }
+});
+
+test("a Claude Code file Cohub wrote before marking its Turns is history the server has", async () => {
+  const w = await workspace();
+  try {
+    const server = fakeServer();
+    const head = randomUUID(), sessionId = randomUUID(), id = randomUUID();
+    server.turns.set(head, { sessionId, settled: true, parentTurnId: null });
+    const path = w.claudePath(w.project, id);
+    await w.write(path, claudeTurn(id, w.project, "old1", null, "unmarked", false) + claudeTurn(id, w.project, "old2", "a-old1", "unmarked", false));
+    const first = w.ingest({ harnesses: [] });
+    first.adopt({ harness: "claude", path, nativeSessionId: id, cwd: w.project }, sessionId);
+    first.advance(path, head);
+    await first.close(AbortSignal.timeout(2_000));
+    const ingest = w.ingest({ harnesses: ["claude"] });
+    await ingest.load();
+    ingest.connect(server.transport);
+    await until(() => server.knownCalls > 0);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(server.batches.length, 0, "its unmarked Turns are not sent");
+    await appendFile(path, claudeTurn(id, w.project, "u3", "a-old2", "from the terminal"));
+    ingest.touch(path);
+    await until(() => server.turns.size === 2);
+    assert.deepEqual(server.batches.flatMap((batch) => batch.turns).map((turn) => [turn.turnId, turn.parentTurnId]), [[turnIdOf("claude", id, "u3"), head]]);
     await ingest.close(AbortSignal.timeout(2_000));
   } finally { await w.cleanup(); }
 });

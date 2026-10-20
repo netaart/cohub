@@ -48,6 +48,8 @@ export type TranscriptState = {
   headTurnId: string | null;
   origin: "cohub" | "native";
   controllable?: boolean;
+  /** The Turn Cohub is running in this file, for formats that cannot mark it; kept across a crash. */
+  executingTurnId?: string | null;
 };
 
 export type ImportFilter = { harnesses?: Harness[]; nativeSessionId?: string };
@@ -166,6 +168,8 @@ export class NativeIngest {
   private readonly failures = new Map<string, number>();
   private readonly aliveAt = new Map<string, number>();
   private readonly runningPaths = new Set<string>();
+  /** Files a live Cohub execution is writing in a format that cannot mark its Turn. */
+  private readonly executing = new Set<string>();
   private writing: Promise<void> = Promise.resolve();
   private readonly foreign = new Set<string>();
   private importQueue: NativeCandidate[] = [];
@@ -253,11 +257,39 @@ export class NativeIngest {
     Object.assign(state, { sessionId, nativeSessionId: session.nativeSessionId });
     if (through?.turnKey) Object.assign(state, { throughTurnKey: through.turnKey, throughTurnId: through.turnId, headTurnId: through.turnId });
     if (!this.states.has(session.path)) state.origin = "cohub";
+    // The harness wrote elsewhere than expected; the execution follows the file.
+    for (const other of this.states.values()) {
+      if (other === state || other.harness !== session.harness || other.nativeSessionId !== session.nativeSessionId || !other.executingTurnId) continue;
+      state.executingTurnId = other.executingTurnId;
+      other.executingTurnId = null;
+      if (this.executing.delete(other.path)) this.executing.add(session.path);
+      this.markDirty(other.path);
+    }
     this.states.set(session.path, state);
     this.markDirty(session.path);
   }
 
+  /** A Cohub Turn starts writing this file; a format that cannot mark it is not read until it ends. */
+  begin(session: { harness: Harness; path: string; nativeSessionId: string; cwd: string }, sessionId: string, turnId: string): void {
+    if (transcriptFormat(session.harness).marksCohubTurns) return;
+    this.adopt(session, sessionId);
+    const state = this.states.get(session.path) as TranscriptState;
+    state.executingTurnId = turnId;
+    this.executing.add(session.path);
+    this.markDirty(session.path);
+  }
+
+  /** A Cohub Turn ended, whether or not it produced a result. */
+  end(turnId: string): void {
+    for (const state of this.states.values()) {
+      if (state.executingTurnId !== turnId) continue;
+      this.executing.delete(state.path);
+      this.touch(state.path);
+    }
+  }
+
   advance(path: string, turnId: string): void {
+    this.end(turnId);
     const state = this.states.get(path);
     if (!state) return;
     state.headTurnId = turnId;
@@ -505,7 +537,7 @@ export class NativeIngest {
   }
 
   private async read(path: string, lane: "live" | "import", force: boolean): Promise<void> {
-    if (this.foreign.has(path)) return;
+    if (this.foreign.has(path) || this.executing.has(path)) return;
     const info = await stat(path).catch((error) => { if (missing(error)) return null; throw error; });
     if (!info?.isFile()) return;
     const previous = this.states.get(path);
@@ -584,6 +616,7 @@ export class NativeIngest {
     if (format.turnEndRecorded) return tail.result !== null;
     const certain = this.options.hooks?.settled?.(state, mtimeMs);
     if (certain != null) return certain;
+    if (tail.ended) return true;
     if (!format.replyEnded?.(tail)) return false;
     const idleMs = Date.now() - mtimeMs;
     if (idleMs >= QUIET_SETTLE_MS) return true;
@@ -616,6 +649,16 @@ export class NativeIngest {
     const known = pending.length ? await this.known(transport, pending.flatMap((turn) => turn.cloudTurnId ? [turn.cloudTurnId, derived(turn)] : [derived(turn)])) : new Map();
     const cohub = (turn: NativeTranscriptTurn) => turn.cloudTurnId && known.has(turn.cloudTurnId) ? turn.cloudTurnId : null;
     const tail = turns.at(-1);
+    // A Cohub file whose latest Cohub Turn the file cannot name (its format marks none, or it predates
+    // the marker) holds only Turns the server already has, up to its current end.
+    const cohubHead = state.executingTurnId ?? state.headTurnId;
+    const unmarked = !transcriptFormat(state.harness).marksCohubTurns || state.size < 0;
+    if (state.origin === "cohub" && cohubHead && unmarked && state.throughTurnId !== cohubHead && !turns.some((turn) => turn.cloudTurnId === cohubHead)) {
+      const through = tail ? cohub(tail) ?? cohubHead : cohubHead;
+      Object.assign(state, { throughTurnKey: tail?.key ?? state.throughTurnKey, throughTurnId: through, headTurnId: through, executingTurnId: null });
+      return;
+    }
+    state.executingTurnId = null;
     const head = !tail ? null : pending.length ? cohub(tail) ?? derived(tail) : state.throughTurnId;
     const candidates: Candidate[] = [];
     let parentTurnId = from > 0 ? state.throughTurnId : null;

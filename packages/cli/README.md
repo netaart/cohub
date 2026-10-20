@@ -138,7 +138,7 @@ cohub -s home spaces files ls
 ## Local Runtime
 
 Connect one local workspace to a Space and select Pi, Codex, Claude Code or WorkBuddy per turn.
-Claude Code (`claude`) and WorkBuddy (`codebuddy`) run Cohub Turns only; terminal sync covers Pi and Codex.
+Terminal conversations of every harness sync to the Space; Claude Code (`claude`) and WorkBuddy (`codebuddy`) sync read-only.
 Without `--harness`, every installed harness is tried; one that cannot start is skipped with a warning.
 
 To keep using native terminals with ordinary Cohub Chats / Turns:

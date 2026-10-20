@@ -12,7 +12,6 @@ import { readNativeConfig, runtimeStateRoot, writeNativeConfig } from "../runtim
 import type { NativeStatus } from "../runtime/native/daemon.js";
 import { MAX_IMPORT_CONCURRENCY, DEFAULT_IMPORT_CONCURRENCY, type ImportJob } from "../runtime/native/ingest.js";
 import { installPiExtension, piExtensionState } from "../runtime/native/install.js";
-import { nativeSyncHarnesses } from "../runtime/harnesses/index.js";
 import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirectory } from "../runtime/instance.js";
 import { atLeastLevel, diagnosticLevels, formatDiagnostic, formatImportProgress, formatNativeSync, printRuntimeSummary } from "../runtime/presentation.js";
 import { readRuntimeDiagnosticEvents, RuntimeDiagnosticReader, runtimeDiagnosticsDirectory, serializeDiagnosticError, type RuntimeDiagnosticLevel } from "../runtime/diagnostics.js";
@@ -27,17 +26,6 @@ type TargetOptions = { space?: string; json?: boolean };
 
 type ImportPlan = { files: number; bytes: number; sample: Array<{ harness: string; path: string; nativeSessionId?: string; mtimeMs: number; size: number }> };
 type ImportStatus = NativeStatus["import"];
-
-const SYNCED = nativeSyncHarnesses(LOCAL_HARNESSES);
-const SYNCED_LABELS = SYNCED.map((harness) => LOCAL_HARNESS_SPECS[harness].label).join(" or ");
-
-/** Native sync and import cover only harnesses whose terminal conversations sync. */
-function parseSyncedHarnesses(values: string[]) {
-  const harnesses = parseRuntimeHarnesses(values);
-  const unsynced = harnesses.filter((harness) => !SYNCED.includes(harness));
-  if (unsynced.length) throw new Error(`${unsynced.map((harness) => LOCAL_HARNESS_SPECS[harness].label).join(", ")} conversations do not sync; native sync covers ${SYNCED_LABELS}`);
-  return harnesses;
-}
 
 const megabytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
@@ -96,14 +84,14 @@ export function registerRuntime(program: Command) {
   runtime.command("detach")
     .description("Pause native sync; keep all data")
     .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
-    .option("--harness <name>", `${SYNCED_LABELS}; repeatable`, (value: string, previous: string[]) => [...previous, value], [])
+    .option("--harness <name>", `${LOCAL_HARNESSES.join(", ")}; repeatable`, (value: string, previous: string[]) => [...previous, value], [])
     .option("--json", "JSON output")
     .action(async (options: TargetOptions & { harness: string[] }) => {
       try {
         const { identity, spaceId, directory } = await boundRuntime(program, undefined, options.space);
         const stateRoot = runtimeStateRoot(spaceId);
         const config = await readNativeConfig(stateRoot, identity);
-        const paused = options.harness.length ? parseSyncedHarnesses(options.harness) : config?.harnesses ?? SYNCED;
+        const paused = options.harness.length ? parseRuntimeHarnesses(options.harness) : config?.harnesses ?? [...LOCAL_HARNESSES];
         const harnesses = (config?.harnesses ?? []).filter((harness) => !paused.includes(harness));
         if (config) await writeNativeConfig(stateRoot, { ...config, harnesses, codexShared: harnesses.includes("codex") && config.codexShared });
         await controlRuntimeInstance(directory, "reload").catch(() => undefined);
@@ -136,7 +124,7 @@ export function registerRuntime(program: Command) {
         if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > MAX_IMPORT_CONCURRENCY) throw new Error(`Use a concurrency from 1 to ${MAX_IMPORT_CONCURRENCY}`);
         const { spaceId, root, directory } = await boundRuntime(program, dir, options.space);
         // The Runtime does the work, so an import survives this command: Ctrl-C only pauses it.
-        const filter = { harnesses: options.harness.length ? parseSyncedHarnesses(options.harness) : [], ...(options.session ? { nativeSessionId: options.session } : {}) };
+        const filter = { harnesses: options.harness.length ? parseRuntimeHarnesses(options.harness) : [], ...(options.session ? { nativeSessionId: options.session } : {}) };
         const control = async <T>(command: string, timeoutMs = 60_000) => {
           const response = await controlRuntimeInstance(directory, "import", { ...filter, command, concurrency }, timeoutMs);
           if (!response) throw new Error("Local Runtime is not running; start it with cohub runtime up");

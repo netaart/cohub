@@ -198,7 +198,7 @@ export const codexHarness: LocalHarnessAdapter = {
     turnEndRecorded: true,
     userFinalMarked: true,
     globalTurnKeys: true,
+    marksCohubTurns: true,
     archiveSource: (path, cacheDirectory) => ensurePlainCodexRollout(path, cacheDirectory),
   },
-  nativeSync: true,
 };

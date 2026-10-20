@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -7,6 +8,7 @@ import type { ContentBlock, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnIn
 import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { describeError } from "../../network-error.js";
 import type { Executor } from "../native/execution.js";
+import type { TranscriptState } from "../native/ingest.js";
 import { array, closeHost, harnessCommand, identifiable, inlineImage, missing, text, turnEnvironment, watchHost } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn } from "./types.js";
 
@@ -36,6 +38,8 @@ export type StreamJsonProfile = {
   projectDirectory(cwd: string): string;
   /** Thinking levels accepted by `--effort`. */
   effortLevels: readonly string[];
+  /** The CLI keeps a stream-json prompt's `uuid` as its record id, so the file names the Cohub Turn. */
+  promptUuid: boolean;
 };
 
 /** The CLI's help, after checking it offers every flag a Turn uses. */
@@ -70,7 +74,7 @@ async function findSession(profile: StreamJsonProfile, nativeSessionId: string, 
   return null;
 }
 
-function streamContent(value: unknown): ContentBlock[] {
+export function streamContent(value: unknown): ContentBlock[] {
   return array(value).flatMap((entry): ContentBlock[] => {
     const block = record(entry);
     if (block.type === "text") return [{ type: "text", text: text(block.text) }];
@@ -82,7 +86,7 @@ function streamContent(value: unknown): ContentBlock[] {
   });
 }
 
-function streamUsage(value: unknown, cost: unknown): RuntimeMessage["usage"] {
+export function streamUsage(value: unknown, cost: unknown): RuntimeMessage["usage"] {
   const usage = record(value);
   const count = (key: string) => typeof usage[key] === "number" ? usage[key] as number : 0;
   const input = count("input_tokens"), output = count("output_tokens"), cacheRead = count("cache_read_input_tokens"), cacheWrite = count("cache_creation_input_tokens");
@@ -90,13 +94,27 @@ function streamUsage(value: unknown, cost: unknown): RuntimeMessage["usage"] {
   return { input, output, cacheRead, cacheWrite, totalTokens: input + output + cacheRead + cacheWrite, ...(typeof cost === "number" && cost > 0 ? { cost: { total: cost } } : {}) };
 }
 
-async function prompt(input: RuntimeTurnInput) {
+async function prompt(profile: StreamJsonProfile, input: RuntimeTurnInput) {
   const content = await Promise.all(input.messages.flatMap((message) => message.content).map(async (block): Promise<JsonRecord> => {
     if (block.type !== "image") return { type: "text", text: block.type === "text" ? block.text : JSON.stringify(block) };
     const image = await inlineImage(block);
     return { type: "image", source: { type: "base64", media_type: image.mimeType, data: image.data } };
   }));
-  return { type: "user", message: { role: "user", content } };
+  return { type: "user", ...(profile.promptUuid ? { uuid: input.turnId } : {}), message: { role: "user", content } };
+}
+
+/** Whether a session file already records this Turn's prompt (the CLI silently drops a repeated `uuid`). */
+async function holdsPrompt(path: string, turnId: string, signal: AbortSignal): Promise<boolean> {
+  const token = Buffer.from(`"uuid":"${turnId}"`);
+  let tail = Buffer.alloc(0);
+  try {
+    for await (const chunk of createReadStream(path, { signal })) {
+      const bytes = Buffer.concat([tail, chunk as Buffer]);
+      if (bytes.includes(token)) return true;
+      tail = bytes.subarray(Math.max(0, bytes.length - token.length + 1));
+    }
+  } catch (error) { if (!missing(error)) throw error; }
+  return false;
 }
 
 /** `partial` holds streamed blocks by index until the complete block arrives, so an interrupted reply keeps them. */
@@ -191,12 +209,14 @@ function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, iden
  */
 export async function runStreamJson(profile: StreamJsonProfile, executor: Executor, turn: HarnessTurn): Promise<HarnessRun> {
   const { input, signal, context } = turn;
-  const prepared = await executor.sessions.prepare({
+  const prepare = (resumable: (transcript: TranscriptState) => boolean) => executor.sessions.prepare({
     sessionId: input.sessionId, turnId: input.turnId, harness: profile.harness, cwd: executor.cwd,
-    provider: input.provider, context: input.context, signal,
-    // Only a file Cohub wrote and advanced is continued; nothing else writes to it.
-    resumable: (transcript) => transcript.path !== turn.diverged && transcript.origin === "cohub",
+    provider: input.provider, context: input.context, signal, resumable,
   });
+  // Without a control plane, a terminal conversation is read-only: Cohub continues only files it wrote.
+  let prepared = await prepare((transcript) => transcript.path !== turn.diverged && transcript.origin === "cohub");
+  // A retried Turn whose prompt is already in the file would be dropped, so it continues from history.
+  if (profile.promptUuid && prepared.resume === "native" && await holdsPrompt(prepared.session.path, input.turnId, signal)) prepared = await prepare(() => false);
   let session = prepared.session;
   const effort = input.thinkingLevel && profile.effortLevels.includes(input.thinkingLevel) ? input.thinkingLevel : null;
   const args = [
@@ -206,7 +226,7 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
     ...(input.model && input.model !== DEFAULT_MODEL ? ["--model", input.model] : []),
     ...(effort ? ["--effort", effort] : []),
   ];
-  const content = await prompt(input);
+  const content = await prompt(profile, input);
   signal.throwIfAborted();
   const host = new JsonRpcProcess(...harnessCommand(executor.executables[profile.harness] || profile.binary, args, executor.cwd), executor.cwd, "stream", turnEnvironment(input));
   watchHost(host, executor.diagnostics, context);

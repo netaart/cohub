@@ -62,14 +62,16 @@ and does not branch on a harness. Adding one takes two steps:
 1. Register its identity in `LOCAL_HARNESS_SPECS` (`packages/protocol/src/runtime/harnesses.ts`): label,
    archive `nativeFormat` (immutable once archives exist) and whether it can enforce read-only access.
 2. Implement `LocalHarnessAdapter` (`harnesses/types.ts`) and list it in `harnesses/index.ts`: executable,
-   model discovery, running a Turn, native file layout, history projection and archive restore. A
-   `transcript` reader enables receipt-less recovery and, with `nativeSync`, terminal conversation sync.
+   model discovery, running a Turn, native file layout, history projection, archive restore and a
+   `transcript` reader. The reader is required: every harness syncs its terminal conversations, and
+   it also serves import and receipt-less recovery.
 
 CLI flags, Web pickers, labels, API validation and archive schemas derive from the registry. Logos live in
 `apps/web/src/lib/assets/harness-icons/` (LobeHub Icons, MIT); a harness without one gets a generic icon.
 Live control of terminal sessions stays harness-specific: the Pi extension and Codex's shared app-server.
 
 新增 Harness 只需在协议注册表登记，并在 `harnesses/` 下实现一个适配器；共享逻辑不再按 Harness 分支。
+适配器必须实现 `transcript` 读取器：每个 Harness 都同步终端会话，并支持导入与无回执恢复。
 CLI 参数、Web 选择器、API 校验与归档结构均由注册表派生。终端会话的实时控制仍由 Pi 扩展与 Codex 共享 app-server 各自实现。
 
 Claude Code and WorkBuddy run one stream-json process per Turn (`-p --input-format stream-json`). Full
@@ -79,22 +81,40 @@ user's own permission rules and permission requests are always denied, never gra
 into their native transcript (`~/.claude/projects`, `~/.codebuddy/projects`) and continued with
 `--resume`; thinking blocks and tool calls without results are left out. Startup checks the CLI's help
 for every flag a Turn uses, so an older or unrelated executable is skipped. The `default` model passes no
-`--model`, keeping the user's own configuration; thinking levels map to `--effort`. They run Cohub Turns only:
-terminal conversations are not synced, and an unknown outcome keeps the explicit stop confirmation.
+`--model`, keeping the user's own configuration; thinking levels map to `--effort`.
+
+Their terminal conversations sync read-only: neither has a control plane, so the web cannot stop a
+terminal Turn, an unknown outcome keeps the explicit stop confirmation, and Cohub continues only
+files it wrote. Records link by `parentUuid` / `parentId` and the live branch is followed from the last
+one; local `/commands`, `!shell` output and sub-agent files are skipped. An interactive Turn's end is
+recorded (`turn_duration`, `turn-metrics`, an interruption) and settles at once; a `-p` Turn settles
+after its reply ended and the file stayed quiet. Claude Code keeps a stream-json prompt's `uuid` as its
+record id, so Cohub sends its Turn id there. CodeBuddy keeps no prompt field, so the ledger records the
+Turn Cohub is running (`executingTurnId`, kept across a crash); the file is not read until it ends,
+and its Turns up to then are the server's. A Cohub file written before markers existed is treated the
+same way on its first read. A retried Turn whose prompt is already in the file (Claude Code drops a
+repeated `uuid`) continues from projected history instead.
 
 Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`；只读映射为 `plan`，
 且仅开放 Read、Glob、Grep 工具、不加载 MCP（plan 模式仍会执行本机允许规则）。其他工具遵循本机权限规则，权限请求一律拒绝。云端历史投影到原生会话文件并通过 `--resume` 续接。
 启动时检查 CLI 是否提供 Turn 所需的全部参数，旧版或无关的同名程序会被跳过。`default` 模型不传 `--model`，沿用用户自己的配置；思考等级映射为 `--effort`。
-二者仅执行 Cohub 发起的 Turn，不同步终端会话；结果未知时仍需显式确认停止。
+二者的终端会话只读同步：没有控制面，Web 无法停止终端 Turn，结果未知时仍需显式确认停止，Cohub 只续接自己写的文件。
+记录按 `parentUuid` / `parentId` 链接，从最后一条沿当前分支回溯；本地 `/命令`、`!shell` 输出与子 Agent 文件不同步。
+交互模式记录 Turn 结束（`turn_duration`、`turn-metrics`、中断）并立即结算；`-p` 模式在回复结束且文件静默后结算。
+Claude Code 会把 stream-json prompt 的 `uuid` 作为记录 id，Cohub 在此写入 Turn id；CodeBuddy 不保留任何字段，
+由账本记录 Cohub 正在执行的 Turn（`executingTurnId`，崩溃后保留），执行期间不读取该文件，结束时其内容视为服务端已有。
+标记出现前 Cohub 写过的文件首次读取时同样处理。重试的 Turn 若 prompt 已在文件中（Claude Code 会丢弃重复 `uuid`），改从投影历史续接。
 
 ## Native clients / 原生客户端
 
 ```bash
-cohub runtime up -d --harness pi --harness codex
+cohub runtime up -d --harness pi --harness codex --harness claude --harness workbuddy
 # One consent for this folder (default yes); Codex asks once more before sharing its app-server.
 # 首次授权一次（默认 yes）；Codex 共享 app-server 另确认一次。
 pi                                   # run /reload in Pi sessions that were already open
 codex
+claude                               # Claude Code and CodeBuddy sync read-only
+codebuddy
 cohub runtime status
 cohub runtime import                 # earlier conversations, newest first; Ctrl-C pauses
 cohub runtime attach --harness pi    # install the Pi extension by hand
@@ -102,7 +122,7 @@ cohub runtime detach --harness codex
 ```
 
 **Data plane.** A harness's own session file is the durable record and the outbox. The Runtime
-watches Pi's and Codex's session trees (the bound folder and its subdirectories, except a subdirectory
+watches every harness's session tree (the bound folder and its subdirectories, except a subdirectory
 bound to a Space of its own) and sends Turns over
 its Runtime WebSocket. Persistence is event-driven and separate from realtime: a transcript is parsed
 only when a Turn begins or ends in it — reported by the control plane (Pi's prompt and settle, Codex's
@@ -120,7 +140,7 @@ it outgrows its content). Codex's own threads (reviews, compaction, memory) and
 spawned sub-agents are skipped. Raw bytes of the latest settled Turn are
 archived so a conversation can be restored natively on another machine.
 
-**数据面。** 原生会话文件就是唯一的持久记录和发件箱。Runtime 监听 Pi / Codex 的会话目录（绑定目录及其子目录），
+**数据面。** 原生会话文件就是唯一的持久记录和发件箱。Runtime 监听所有 Harness 的会话目录（绑定目录及其子目录），
 只在 Turn 开始或结束时解析并经 Runtime WS 上报（由控制面事件或新追加字节中的边界记录触发），其间只扫描新字节、不重解析、不轮询。服务端是唯一账本：重启或断线后先询问服务端已有哪些 Turn 再继续读，
 本地不再保存投递回执，重放不会重复。本地只有可重建的缓存。Codex 自身的内部线程与子 Agent 不同步。
 
@@ -170,8 +190,8 @@ Cohub 启动的 Pi 加载同一扩展。未安装扩展时只读同步。Codex 0
 统一降级：Cohub 的 Turn 使用私有 stdio app-server，终端会话只读同步。
 
 A Turn Cohub starts writes its cloud Turn id into the native file (Pi `custom: cohub.turn` entry;
-Codex `clientUserMessageId`), so the file proves which Turns are Cohub's and they are never ingested
-twice. A Session is continued in its native file only when that file ends at the Session head and a
+Codex `clientUserMessageId`; Claude Code prompt `uuid`), so the file proves which Turns are Cohub's and
+they are never ingested twice; for CodeBuddy the ledger does (see above). A Session is continued in its native file only when that file ends at the Session head and a
 live client (or Cohub itself) owns it; otherwise Cohub restores the archive or projects the Session
 into a new file and never writes into a file a terminal holds.
 

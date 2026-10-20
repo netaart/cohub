@@ -30,6 +30,8 @@ export type NativeTranscriptTurn = {
   boundaries: Record<number, string>;
   sha256: string;
   result: NativeTurnComplete | null;
+  /** The file itself recorded this Turn's end, so it settles without waiting for a quiet period. */
+  ended?: boolean;
   path?: string;
   rolloutId?: string;
   sequence?: number;
@@ -43,10 +45,11 @@ export type NativeTranscript = {
   lineagePaths?: string[];
   lineageRolloutIds?: string[];
 };
-type Line = { value: JsonRecord; startBytes: number; endBytes: number; sha256: string };
+export type TranscriptLine = { value: JsonRecord; startBytes: number; endBytes: number; sha256: string };
+type Line = TranscriptLine;
 const text = (value: unknown) => typeof value === "string" ? value : "";
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
-const iso = (value: unknown) => {
+export const iso = (value: unknown) => {
   const date = new Date(typeof value === "number" || typeof value === "string" ? value : 0);
   if (!Number.isFinite(date.getTime())) throw new Error("Invalid native timestamp");
   return date.toISOString();
@@ -55,6 +58,8 @@ const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "
 export const NATIVE_MAX_RECORD_BYTES = 256 * 1024 * 1024;
 export const NATIVE_MAX_TRANSCRIPT_BYTES = 1024 * 1024 * 1024;
 const NATIVE_HEADER_MAX_BYTES = 1024 * 1024;
+/** Formats without a header line are searched this far for the record naming the session's project. */
+const NATIVE_HEADER_SCAN_MAX_BYTES = 16 * 1024 * 1024;
 const CODEX_HISTORY_MAX_DEPTH = 64;
 const CODEX_ROLLOUT_INDEX_TTL_MS = 2_000;
 const CODEX_ROLLOUT_NAME = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-f-]{36})(?:_([0-9a-f-]{36}))?\.(?:jsonl|jsonl\.zst)$/;
@@ -100,6 +105,27 @@ export async function readFirstRecord(stream: AsyncIterable<Buffer>): Promise<Js
     if (buffered > NATIVE_HEADER_MAX_BYTES) throw new Error("Native session header is too large");
   }
   throw new Error("Native transcript is empty");
+}
+
+/** The first record a format without a header line identifies its session by; `null` when none is found early. */
+export async function readFirstMatchingRecord(stream: AsyncIterable<Buffer>, match: (value: JsonRecord) => boolean): Promise<JsonRecord | null> {
+  let fragments: Buffer[] = [], scanned = 0;
+  for await (const chunk of stream) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    let start = 0;
+    for (let end = bytes.indexOf(10, start); end >= 0; end = bytes.indexOf(10, start)) {
+      const line = Buffer.concat([...fragments, bytes.subarray(start, end)]);
+      fragments = []; start = end + 1;
+      if (!line.length) continue;
+      let value: JsonRecord;
+      try { value = record(JSON.parse(line.toString("utf8"))); } catch { return null; }
+      if (match(value)) return value;
+    }
+    fragments.push(bytes.subarray(start));
+    scanned += bytes.length;
+    if (scanned > NATIVE_HEADER_SCAN_MAX_BYTES) return null;
+  }
+  return null;
 }
 
 async function readCodexHeader(path: string, signal?: AbortSignal): Promise<{ threadId: string; cwd: string; historyBase?: CodexHistoryBase }> {
@@ -209,7 +235,7 @@ export async function ensurePlainCodexRollout(path: string, cacheDirectory: stri
 type TranscriptLines = { lines: Line[]; prefixes: Map<number, string> };
 
 /** Newline framing with exact byte offsets and rolling checksums; a partial tail stays unparsed. */
-async function readTranscriptLines(stream: AsyncIterable<Buffer>): Promise<TranscriptLines> {
+export async function readTranscriptLines(stream: AsyncIterable<Buffer>): Promise<TranscriptLines> {
   const lines: Line[] = [];
   const prefixes = new Map<number, string>();
   let fragments: Buffer[] = [], pendingBytes = 0, offset = 0;
