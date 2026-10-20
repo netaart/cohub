@@ -183,7 +183,7 @@
 	"runtime_model_count": "{count} 个模型",
 	"runtime_not_connected": "未连接",
 	"runtime_cloud_execution": "由 Cohub 托管执行",
-	"runtime_local_execution": "在你的电脑上执行",
+	"runtime_local_execution": "在你的电脑上",
 	"runtime_degraded_hint": "部分本地功能暂不可用，可在 Runtime 终端查看恢复进度。",
 	"runtime_disconnected_hint": "连接已中断，等待本地 Runtime 恢复。断连不代表任务已经停止。",
 	"runtime_unknown_hint": "状态已过期，请刷新以确认当前连接。",

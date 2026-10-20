@@ -86,12 +86,13 @@ function navigate(event: KeyboardEvent) {
 	<button type="button" class="harness-backdrop" aria-hidden="true" tabindex="-1" use:portal onclick={close}></button>
 	<div bind:this={panel} class="harness-menu menu-surface" role="menu" aria-label={m.runtime_harness({}, { locale })} tabindex="-1" onkeydown={navigate} use:floatNear={{ getAnchor: () => trigger, placement: "top-start", width: 264, zIndex: 121 }}>
 		<p class="menu-heading">{m.runtime_harness({}, { locale })}</p>
-		{#each options as harness}
+		{#each options as harness, index}
 			{@const isLocal = harness !== "cohub"}
 			{@const unavailable = isLocal && (!online || !available.includes(harness))}
-			<button type="button" class="harness-option" role="menuitemradio" aria-checked={value === harness} disabled={unavailable} onclick={() => { onchange(harness); close(); }}>
+			{#if index === 1}<div class="menu-separator" role="separator"></div><p class="menu-heading">{m.runtime_local_execution({}, { locale })}</p>{/if}
+			<button type="button" class="harness-option" class:compact={isLocal && !unavailable} role="menuitemradio" aria-checked={value === harness} disabled={unavailable} onclick={() => { onchange(harness); close(); }}>
 				<HarnessIcon {harness} size={20} />
-				<span class="option-content"><span class="option-title">{harnessLabel(harness)}</span><span class="option-detail">{isLocal ? !online ? m.runtime_offline({}, { locale }) : available.includes(harness) ? m.runtime_local_execution({}, { locale }) : m.runtime_not_connected({}, { locale }) : m.runtime_cloud_execution({}, { locale })}</span></span>
+				<span class="option-content"><span class="option-title">{harnessLabel(harness)}</span>{#if !isLocal}<span class="option-detail">{m.runtime_cloud_execution({}, { locale })}</span>{:else if unavailable}<span class="option-detail">{online ? m.runtime_not_connected({}, { locale }) : m.runtime_offline({}, { locale })}</span>{/if}</span>
 				{#if value === harness}<Check class="h-4 w-4 shrink-0 text-brand" />{/if}
 			</button>
 		{/each}
@@ -108,6 +109,8 @@ function navigate(event: KeyboardEvent) {
 .harness-menu { padding: 6px; max-width: calc(100vw - 16px); }
 .menu-heading { padding: 6px 8px; color: var(--text-tertiary); font-size: 11px; }
 .harness-option { display: flex; width: 100%; min-height: 52px; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; text-align: left; cursor: pointer; }
+.harness-option.compact { min-height: 36px; padding-block: 6px; }
+.menu-separator { height: 1px; margin: 4px 2px; background: var(--border-subtle); }
 .harness-option:hover:not(:disabled), .harness-option:focus-visible { background: var(--bg-hover); }
 .harness-option:disabled { opacity: .5; cursor: not-allowed; }
 .option-content { display: flex; flex: 1; flex-direction: column; gap: 2px; }

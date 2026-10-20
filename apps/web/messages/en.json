@@ -183,7 +183,7 @@
 	"runtime_model_count": "Models: {count}",
 	"runtime_not_connected": "Not connected",
 	"runtime_cloud_execution": "Managed by Cohub",
-	"runtime_local_execution": "Runs on your computer",
+	"runtime_local_execution": "On your computer",
 	"runtime_degraded_hint": "Some local features are unavailable. Check the Runtime terminal for recovery progress.",
 	"runtime_disconnected_hint": "Connection lost. Waiting for the local Runtime. An interrupted connection does not confirm that a task has stopped.",
 	"runtime_unknown_hint": "Status is out of date. Refresh to check the current connection.",
