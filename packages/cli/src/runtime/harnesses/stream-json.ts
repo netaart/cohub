@@ -46,11 +46,12 @@ export async function streamJsonHelp(profile: StreamJsonProfile, executable: str
   return stdout;
 }
 
-export function streamJsonModel(profile: StreamJsonProfile, id: string, name: string, options: { reasoning: boolean; isDefault?: boolean }): HarnessModel {
+export function streamJsonModel(profile: StreamJsonProfile, id: string, name: string, options: { reasoning: boolean; isDefault?: boolean; provider?: string; effortLevels?: readonly string[] }): HarnessModel {
+  const effortLevels = options.effortLevels ?? profile.effortLevels;
   return {
-    harness: profile.harness, provider: profile.provider, id, name,
+    harness: profile.harness, provider: options.provider ?? profile.provider, id, name,
     ...(options.isDefault ? { isDefault: true } : {}),
-    ...(options.reasoning ? { reasoning: true, thinkingLevelMap: Object.fromEntries(THINKING_LEVELS.map((level) => [level, profile.effortLevels.includes(level) ? level : null])) } : {}),
+    ...(options.reasoning ? { reasoning: true, thinkingLevelMap: Object.fromEntries(THINKING_LEVELS.map((level) => [level, effortLevels.includes(level) ? level : null])) } : {}),
   };
 }
 
@@ -209,7 +210,7 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
   signal.throwIfAborted();
   const host = new JsonRpcProcess(...harnessCommand(executor.executables[profile.harness] || profile.binary, args, executor.cwd), executor.cwd, "stream", turnEnvironment(input));
   watchHost(host, executor.diagnostics, context);
-  const translator = streamJsonTranslator(turn.emit, { provider: profile.provider, model: input.model && input.model !== DEFAULT_MODEL ? input.model : null });
+  const translator = streamJsonTranslator(turn.emit, { provider: input.provider || profile.provider, model: input.model && input.model !== DEFAULT_MODEL ? input.model : null });
   let message: RuntimeMessage = { ordinal: 0, content: [] };
   let begun = false;
   try {

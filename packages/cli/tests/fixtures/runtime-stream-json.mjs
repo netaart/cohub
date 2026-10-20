@@ -12,6 +12,20 @@ if (args[0] === "--help") {
   process.stdout.write(`${flags.map((flag) => `  ${flag}  option\n`).join("")}  --model <model>  Model for the session. Currently supported: (${models})\n`);
   process.exit(0);
 }
+if (!args.includes("--session-id") && !args.includes("--resume")) {
+  // Model discovery: answer `initialize` like Claude Code, gateway models included.
+  if (process.env.STREAM_JSON_FIXTURE_HELP === "no-initialize") process.exit(1);
+  for await (const line of createInterface({ input: process.stdin })) {
+    const { request_id } = JSON.parse(line);
+    const models = [
+      { value: "default", displayName: "Default (recommended)", supportsEffort: true, supportedEffortLevels: ["low", "high", "max"] },
+      { value: "opus", displayName: "Opus", supportsEffort: true, supportedEffortLevels: ["low", "high", "max"] },
+      { value: "gw-model", displayName: "gateway-model", description: "From gateway", supportsEffort: false },
+    ];
+    process.stdout.write(`${JSON.stringify({ type: "control_response", response: { subtype: "success", request_id, response: { models } } })}\n`);
+  }
+  process.exit(0);
+}
 const codebuddy = process.env.CODEBUDDY_CONFIG_DIR;
 const flag = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : null; };
 const id = flag("--session-id") ?? flag("--resume");

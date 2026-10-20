@@ -1,12 +1,16 @@
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ContentBlock, NativeProjection } from "@neta-art/cohub";
+import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { copyNativeArchive } from "../native/archive.js";
 import { projectChainedSession, projectionMeta, projectionToolId, rebindSessionId } from "./chained-projection.js";
+import { array, harnessCommand, text } from "./process.js";
 import { DEFAULT_MODEL, runStreamJson, streamJsonHelp, streamJsonModel, type StreamJsonProfile } from "./stream-json.js";
-import type { LocalHarnessAdapter } from "./types.js";
+import type { HarnessModel, LocalHarnessAdapter } from "./types.js";
 
 const MAX_PROJECT_NAME = 200;
+const INITIALIZE_TIMEOUT_MS = 30_000;
 const dataRoot = () => process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), ".claude");
 
 /**
@@ -50,11 +54,57 @@ function withAssistantIds(projection: NativeProjection): NativeProjection {
   }) };
 }
 
+/** Claude Code's own `/model` list (what the SDK's `supportedModels()` reads), gateway-discovered models included. */
+async function claudeInitialize(executable: string, cwd: string): Promise<JsonRecord> {
+  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config"];
+  const host = new JsonRpcProcess(...harnessCommand(executable, args, cwd), cwd, "stream");
+  const requestId = randomUUID();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await new Promise<JsonRecord>((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("Claude Code initialize timed out")), INITIALIZE_TIMEOUT_MS);
+      host.onFailure(reject);
+      host.onEvent((event) => {
+        const response = record(event.response);
+        if (event.type !== "control_response" || response.request_id !== requestId) return;
+        if (response.subtype === "success") resolve(record(response.response));
+        else reject(new Error(text(response.error) || "Claude Code initialize failed"));
+      });
+      host.write({ type: "control_request", request_id: requestId, request: { subtype: "initialize" } });
+    });
+  } finally {
+    clearTimeout(timer);
+    await host.close();
+  }
+}
+
+/** Gateway models are served by `ANTHROPIC_BASE_URL`, so they carry its host as provider. */
+function claudeModelCatalog(entries: unknown[], baseUrl?: string): HarnessModel[] {
+  let gateway = "gateway";
+  try { if (baseUrl) gateway = new URL(baseUrl).hostname.slice(0, 100) || gateway; } catch { /* Keep the generic name. */ }
+  const seen = new Set<string>();
+  return entries.flatMap((value) => {
+    const model = record(value);
+    const id = text(model.value);
+    if (!id || id.length > 255 || seen.has(id)) return [];
+    seen.add(id);
+    const effortLevels = model.supportsEffort === true ? array(model.supportedEffortLevels).filter((level): level is string => typeof level === "string") : [];
+    return [streamJsonModel(profile, id, (text(model.displayName) || id).slice(0, 255), {
+      reasoning: effortLevels.length > 0, effortLevels, isDefault: id === DEFAULT_MODEL,
+      provider: text(model.description).startsWith("From gateway") ? gateway : profile.provider,
+    })];
+  });
+}
+
 export const claudeHarness: LocalHarnessAdapter = {
   id: "claude",
   binary: profile.binary,
   async models(executable, cwd) {
     await streamJsonHelp(profile, executable, cwd);
+    try {
+      const models = claudeModelCatalog(array((await claudeInitialize(executable, cwd)).models), process.env.ANTHROPIC_BASE_URL);
+      if (models.some((model) => model.isDefault)) return models;
+    } catch { /* A CLI without the initialize model list keeps the account aliases. */ }
     // Aliases follow the signed-in account; Haiku takes no effort level.
     return [
       streamJsonModel(profile, DEFAULT_MODEL, "Default", { reasoning: true, isDefault: true }),

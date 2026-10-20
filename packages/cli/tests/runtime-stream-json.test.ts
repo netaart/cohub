@@ -128,8 +128,15 @@ test("discovery checks the CLI, lists models with a default and skips unusable h
     assert.deepEqual([catalog.harnesses, catalog.models.map((model) => model.id), skipped], [["workbuddy"], ["default", "fixture-a", "fixture-b"], ["claude"]]);
     assert.deepEqual([catalog.models[0]?.isDefault, catalog.models[0]?.reasoning, catalog.models[0]?.thinkingLevelMap?.off, catalog.models[0]?.thinkingLevelMap?.max], [true, true, null, "max"]);
     await assert.rejects(discoverHarnesses(["claude", "workbuddy"], { claude: missing, workbuddy: fixture }, tmpdir()));
-    const claude = await discoverHarnesses(["claude"], { claude: fixture }, tmpdir());
-    assert.deepEqual(claude.models.map((model) => [model.id, model.isDefault ?? false, model.thinkingLevelMap?.minimal]), [["default", true, null], ["opus", false, null], ["sonnet", false, null], ["haiku", false, undefined]]);
+    const previousBaseUrl = process.env.ANTHROPIC_BASE_URL;
+    process.env.ANTHROPIC_BASE_URL = "https://gateway.example.com/v1";
+    const claude = await discoverHarnesses(["claude"], { claude: fixture }, tmpdir()).finally(() => {
+      if (previousBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL; else process.env.ANTHROPIC_BASE_URL = previousBaseUrl;
+    });
+    assert.deepEqual(claude.models.map((model) => [model.id, model.provider, model.isDefault ?? false, model.thinkingLevelMap?.high]), [["default", "anthropic", true, "high"], ["opus", "anthropic", false, "high"], ["gw-model", "gateway.example.com", false, undefined]]);
+    process.env.STREAM_JSON_FIXTURE_HELP = "no-initialize";
+    const aliases = await discoverHarnesses(["claude"], { claude: fixture }, tmpdir());
+    assert.deepEqual(aliases.models.map((model) => [model.id, model.isDefault ?? false, model.thinkingLevelMap?.minimal]), [["default", true, null], ["opus", false, null], ["sonnet", false, null], ["haiku", false, undefined]]);
     process.env.STREAM_JSON_FIXTURE_HELP = "legacy";
     await assert.rejects(discoverHarnesses(["claude"], { claude: fixture }, tmpdir()), /missing --tools/);
     process.env.STREAM_JSON_FIXTURE_HELP = "no-models";
