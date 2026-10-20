@@ -23,13 +23,13 @@ import {
 	CircleHelp,
 	Clock,
 	CreditCard,
-	Download,
 	FolderKanban,
 	Gift,
 	History,
 	Keyboard,
 	Loader2,
 	LogOut,
+	MessageSquareText,
 	PanelLeftClose,
 	PanelLeftOpen,
 	Pencil,
@@ -74,7 +74,6 @@ import SidebarCheckpointRow from "$lib/components/sidebar/SidebarCheckpointRow.s
 import SidebarFallbackResourceRow from "$lib/components/sidebar/SidebarFallbackResourceRow.svelte";
 import SidebarFileRow from "$lib/components/sidebar/SidebarFileRow.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { downloadCohubDebugBundle } from "$lib/debugger";
 import {
 	type CohubResourceDragPayload,
 	getCohubResourceDragData,
@@ -2670,10 +2669,10 @@ async function handleLogout() {
 	await signOut();
 }
 
-function saveDebugLog() {
+function openFeedback() {
 	showUserMenu = false;
 	onClose?.();
-	downloadCohubDebugBundle();
+	window.dispatchEvent(new CustomEvent("cohub:open-feedback"));
 }
 
 function handleGlobalSidebarKeydown(event: KeyboardEvent) {
@@ -2991,7 +2990,8 @@ $effect(() => {
 	const spaceId = routeSpaceId;
 	if (!userUuid || !spaceId) return;
 	untrack(() => {
-		const sessionId = activeSession?.spaceId === spaceId ? activeSession.id : null;
+		const sessionId =
+			activeSession?.spaceId === spaceId ? activeSession.id : null;
 		setRecentSpace(userUuid, spaceId, sessionId);
 	});
 });
@@ -3727,7 +3727,7 @@ $effect(() => {
             {/if}
             <a href="/trending" class="rail-menu-item" onclick={(e) => { e.preventDefault(); showUserMenu = false; handleNavigate('/trending'); }}><BarChart3 class="h-3.5 w-3.5" /><span>{m.sidebar_trending({}, { locale })}</span></a>
             <button type="button" class="rail-menu-item w-full" onclick={openHelpPanel}><Keyboard class="h-3.5 w-3.5" /><span>{m.sidebar_help({}, { locale })}</span></button>
-            <button type="button" class="rail-menu-item w-full" onclick={saveDebugLog}><Download class="h-3.5 w-3.5" /><span>{m.sidebar_save_debug_log({}, { locale })}</span></button>
+            <button type="button" class="rail-menu-item w-full" onclick={openFeedback}><MessageSquareText class="h-3.5 w-3.5" /><span>{m.sidebar_feedback({}, { locale })}</span></button>
             <button type="button" class="rail-menu-item w-full hover:text-error-soft" onclick={() => { showUserMenu = false; void handleLogout(); }}><LogOut class="h-3.5 w-3.5" /><span>{m.sidebar_sign_out({}, { locale })}</span></button>
           </div>
         {/if}
@@ -4266,10 +4266,10 @@ $effect(() => {
 	        <button
 	          type="button"
 	          class="flex items-center gap-2 w-full px-2.5 py-[7px] text-[12px] text-text-tertiary hover:text-text-secondary hover:bg-bg-hover transition-colors duration-100"
-	          onclick={saveDebugLog}
+	          onclick={openFeedback}
 	        >
-	          <Download class="w-3.5 h-3.5" />
-	          <span>{m.sidebar_save_debug_log({}, { locale })}</span>
+	          <MessageSquareText class="w-3.5 h-3.5" />
+	          <span>{m.sidebar_feedback({}, { locale })}</span>
 	        </button>
 	        <button
 	          type="button"

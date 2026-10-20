@@ -8,6 +8,7 @@ import BillingConversionCenter from "$lib/components/BillingConversionCenter.sve
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import CommandPalette from "$lib/components/CommandPalette.svelte";
 import DragGhostLayer from "$lib/components/DragGhostLayer.svelte";
+import FeedbackDialog from "$lib/components/FeedbackDialog.svelte";
 import HelpPanel from "$lib/components/HelpPanel.svelte";
 import MediaLightbox from "$lib/components/MediaLightbox.svelte";
 import MobileSidebarDrawer from "$lib/components/MobileSidebarDrawer.svelte";
@@ -89,6 +90,7 @@ const currentLayoutSpaceId = $derived(
 	}),
 );
 let showHelpPanel = $state(false);
+let showFeedback = $state(false);
 let authReady = $state(false);
 
 let gesturePhase = $state<DrawerGesturePhase>("idle");
@@ -438,6 +440,9 @@ $effect(() => {
 	function openHelpPanel() {
 		showHelpPanel = true;
 	}
+	function openFeedback() {
+		showFeedback = true;
+	}
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.defaultPrevented || isComposingKeyboardEvent(e)) return;
 		if (e.key === "Escape" && showHelpPanel) {
@@ -465,9 +470,11 @@ $effect(() => {
 		}
 	}
 	window.addEventListener("cohub:open-help-panel", openHelpPanel);
+	window.addEventListener("cohub:open-feedback", openFeedback);
 	window.addEventListener("keydown", handleKeydown, { capture: true });
 	return () => {
 		window.removeEventListener("cohub:open-help-panel", openHelpPanel);
+		window.removeEventListener("cohub:open-feedback", openFeedback);
 		window.removeEventListener("keydown", handleKeydown, { capture: true });
 	};
 });
@@ -669,6 +676,7 @@ onMount(() => {
   <CommandPalette />
   <DragGhostLayer />
   <HelpPanel open={showHelpPanel} onClose={() => { showHelpPanel = false; }} />
+  <FeedbackDialog open={showFeedback} onClose={() => { showFeedback = false; }} />
   <BillingConversionCenter />
   <CheckoutReturnHandler />
   <TurnNotificationStack />
