@@ -119,6 +119,7 @@ test("model counts are grouped by harness", () => {
 		codex: 0,
 		claude: 0,
 		workbuddy: 0,
+		cursor: 0,
 	});
 	assert.deepEqual(
 		harnessModelCounts(
@@ -133,7 +134,7 @@ test("model counts are grouped by harness", () => {
 				},
 			}),
 		),
-		{ pi: 2, codex: 1, claude: 0, workbuddy: 0 },
+		{ pi: 2, codex: 1, claude: 0, workbuddy: 0, cursor: 0 },
 	);
 });
 
@@ -148,6 +149,7 @@ test("the picker lists every local harness with its availability", () => {
 		"claude:ready",
 		"pi:missing",
 		"workbuddy:missing",
+		"cursor:missing",
 	]);
 	// Cached capabilities of an offline Runtime are not connected harnesses.
 	assert.deepEqual(view(["codex", "claude"], false), [
@@ -156,5 +158,6 @@ test("the picker lists every local harness with its availability", () => {
 		"codex:offline",
 		"claude:offline",
 		"workbuddy:offline",
+		"cursor:offline",
 	]);
 });

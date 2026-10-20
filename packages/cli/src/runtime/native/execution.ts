@@ -41,7 +41,7 @@ export async function executeTurn(executor: Executor, input: RuntimeTurnInput, e
   let uncertainCleanup: HarnessResult["uncertainCleanup"];
   if (run.host) uncertainCleanup = await closeHost(run.host, run.message.errorMessage);
   const message = signal.aborted ? { ...run.message, stopReason: "aborted" } : run.message;
-  const archive = await executor.archives.stage({ sessionId: input.sessionId, harness: input.harness, nativeSessionId: run.session.nativeSessionId, path: run.session.path }, input.turnId).catch((error: unknown) => {
+  const archive = !harnessAdapter(input.harness).session.archive ? null : await executor.archives.stage({ sessionId: input.sessionId, harness: input.harness, nativeSessionId: run.session.nativeSessionId, path: run.session.path }, input.turnId).catch((error: unknown) => {
     // A missing archive only costs cross-machine native resume; the file itself is intact.
     executor.diagnostics?.log("warn", "archive.capture_failed", { error: serializeDiagnosticError(error) }, { ...context, component: "archive" });
     return null;

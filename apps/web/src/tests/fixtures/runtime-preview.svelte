@@ -69,6 +69,13 @@ const models = [
 			max: "max",
 		},
 	},
+	{
+		harness: "cursor" as const,
+		provider: "cursor",
+		id: "default",
+		name: "Default",
+		isDefault: true,
+	},
 ];
 type PreviewState = "ready" | "limited" | "offline" | "unknown";
 let previewState = $state<PreviewState>("ready");
@@ -84,7 +91,10 @@ function makeStatus(): RuntimeStatus {
 		kind: "local",
 		online: previewState !== "offline",
 		runtimeId: "22222222-2222-4222-8222-222222222222",
-		capabilities: { harnesses: ["pi", "codex", "claude", "workbuddy"], models },
+		capabilities: {
+			harnesses: ["pi", "codex", "claude", "workbuddy", "cursor"],
+			models,
+		},
 		workspace: {
 			online: previewState === "ready",
 			observedAt: new Date().toISOString(),

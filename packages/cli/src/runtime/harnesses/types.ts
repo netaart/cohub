@@ -42,7 +42,8 @@ export type NativeSessionFormat = {
   project(input: ProjectionInput): NativeProjection;
   /** Rewrite the session identity of a full projection. */
   rebind(records: ProjectionRecord[], nativeSessionId: string): ProjectionRecord[];
-  archive: {
+  /** Absent when the native state is not one file Cohub can carry; history is then projected again. */
+  archive?: {
     /** Working-copy path of a restored archive; `id` is fresh, `nativeSessionId` the archived one. */
     target(input: { id: string; nativeSessionId: string; cwd: string }): string;
     /** Copy raw archive bytes to `target`, adjusting only the header; returns the copy's session id. */

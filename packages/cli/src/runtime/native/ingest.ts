@@ -4,7 +4,7 @@ import { NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, type NativeIngestResult
 import { acceptsDirectory, acceptsTranscript, readSessionHeader, readTranscript, transcriptRoots, type Harness, type NativeTranscriptTurn } from "./adapters.js";
 import { nativeTurnId } from "./identity.js";
 import type { RuntimeArchiveStore } from "../archive-store.js";
-import { transcriptFormat } from "../harnesses/index.js";
+import { harnessAdapter, transcriptFormat } from "../harnesses/index.js";
 import { containsNativePath } from "./paths.js";
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
@@ -769,7 +769,7 @@ export class NativeIngest {
   }
 
   private async archive(state: TranscriptState, turn: NativeTranscriptTurn, turnId: string): Promise<void> {
-    if (!state.sessionId) return;
+    if (!state.sessionId || !harnessAdapter(state.harness).session.archive) return;
     try {
       const source = turn.path ?? state.path;
       const archiveSource = transcriptFormat(state.harness).archiveSource;

@@ -6,6 +6,7 @@ import { piHarness } from "./pi.js";
 import { codexHarness } from "./codex.js";
 import { claudeHarness } from "./claude.js";
 import { workbuddyHarness } from "./workbuddy.js";
+import { cursorHarness } from "./cursor.js";
 import type { HarnessExecutables, LocalHarnessAdapter, NativeTranscriptFormat } from "./types.js";
 
 export type { HarnessExecutables, HarnessModel, HarnessResult, LocalHarnessAdapter } from "./types.js";
@@ -13,7 +14,7 @@ export { harnessCommand, harnessExecutableCandidates } from "./process.js";
 
 /** Every local harness is one adapter; the protocol registry lists their identities. Built lazily to tolerate import cycles. */
 let registry: Readonly<Record<LocalHarness, LocalHarnessAdapter>> | null = null;
-const adapters = () => registry ??= { pi: piHarness, codex: codexHarness, claude: claudeHarness, workbuddy: workbuddyHarness };
+const adapters = () => registry ??= { pi: piHarness, codex: codexHarness, claude: claudeHarness, workbuddy: workbuddyHarness, cursor: cursorHarness };
 
 export const harnessAdapter = (harness: LocalHarness): LocalHarnessAdapter => adapters()[harness];
 export const harnessExecutable = (harness: LocalHarness, executables: HarnessExecutables) => executables[harness] || adapters()[harness].binary;

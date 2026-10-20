@@ -77,6 +77,7 @@ export class NativeSessions {
     const id = randomUUID();
     const raw = join(this.options.root, "native", "restored", `${id}.jsonl`);
     const format = harnessAdapter(input.harness).session.archive;
+    if (!format) throw new ArchiveNotRestorableError(`${input.harness} archives are not restorable`);
     try {
       const restored = await this.options.archives.restore(archive, raw, signal);
       const path = format.target({ id, nativeSessionId: restored.nativeSessionId, cwd: input.cwd });

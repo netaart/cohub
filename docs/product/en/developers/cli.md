@@ -280,7 +280,7 @@ If not ready within 30 seconds, it returns exit code 2 and continues connecting.
 `--yes` authorizes local execution without interaction. `down` retains all data and
 requires `--yes` when work is unconfirmed. Network reconnection is automatic; it does
 not replay model or tool work, and a disconnect does not confirm a task stopped.
-Local harnesses are Pi, Codex, Claude Code (`claude`) and WorkBuddy (`codebuddy`). Without
+Local harnesses are Pi, Codex, Claude Code (`claude`), WorkBuddy (`codebuddy`) and Cursor (`cursor-agent`). Without
 `--harness`, every installed one is tried and one that cannot start is skipped with a warning.
 
 ### Displays
