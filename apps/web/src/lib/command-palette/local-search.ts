@@ -367,13 +367,8 @@ export async function searchLocalCommandItems(
 	const spacesById = new Map<string, SpaceRecord>();
 	const items: CommandPaletteItem[] = [];
 
-	for (const space of getCachedSpaceList() ?? []) {
+	for (const space of getCachedSpaceList() ?? [])
 		spacesById.set(space.id, space);
-		if (includeSpaces) {
-			const item = spaceToItem(space, normalized, viewerUserUuid);
-			if (item) items.push(item);
-		}
-	}
 
 	const spaceRecords = await idbGetAllByIndex<SpaceRecordCacheRecord>(
 		"space_records",
@@ -381,11 +376,15 @@ export async function searchLocalCommandItems(
 		IDBKeyRange.lowerBound(0),
 	);
 	shouldAbort(options?.signal);
+	// Per-space records are refreshed from server reads; the legacy list is not,
+	// so it only fills gaps and must never shadow a record (e.g. after a rename).
 	for (const record of spaceRecords) {
 		if (record.userKey !== userKey) continue;
 		spacesById.set(record.spaceId, record.space);
-		if (includeSpaces) {
-			const item = spaceToItem(record.space, normalized, viewerUserUuid);
+	}
+	if (includeSpaces) {
+		for (const space of spacesById.values()) {
+			const item = spaceToItem(space, normalized, viewerUserUuid);
 			if (item) items.push(item);
 		}
 	}

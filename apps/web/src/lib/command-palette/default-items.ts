@@ -134,15 +134,15 @@ async function getLocalSpaces(
 		IDBKeyRange.lowerBound(0),
 	);
 	shouldAbort(options?.signal);
+	// Per-space records are refreshed from server reads; the legacy list is not,
+	// so it only fills gaps and must never shadow a record (e.g. after a rename).
 	const spacesById = new Map<string, SpaceRecord>();
+	for (const space of getCachedSpaceList() ?? [])
+		spacesById.set(space.id, space);
 	for (const record of records) {
 		if (record.userKey === userKey)
 			spacesById.set(record.spaceId, record.space);
 	}
-	// Prefer the list cache when present: it is refreshed in the background when
-	// the palette opens, while per-space IndexedDB records may lag behind briefly.
-	for (const space of getCachedSpaceList() ?? [])
-		spacesById.set(space.id, space);
 	return [...spacesById.values()];
 }
 
