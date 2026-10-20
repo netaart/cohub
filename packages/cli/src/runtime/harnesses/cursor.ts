@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { access, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify, stripVTControlCharacters } from "node:util";
@@ -10,7 +11,7 @@ import type { Executor } from "../native/execution.js";
 import type { TranscriptState } from "../native/ingest.js";
 import { projectChainedSession, projectionToolId } from "./chained-projection.js";
 import {
-  acceptsCursorDirectory, acceptsCursorTranscript, cursorChatsRoot, cursorProjectsRoot, cursorSessionHeader, cursorTranscriptPath, readCursorTranscript,
+  acceptsCursorDirectory, acceptsCursorTranscript, cursorChatsRoot, cursorConfigDirectory, cursorProjectsRoot, cursorSessionHeader, cursorTranscriptPath, readCursorTranscript,
 } from "./cursor-transcript.js";
 import { array, harnessCommand, inlineImage, missing, text, turnEnvironment, watchHost } from "./process.js";
 import type { HarnessModel, HarnessRun, HarnessTurn, LocalHarnessAdapter } from "./types.js";
@@ -19,8 +20,13 @@ const BINARY = "cursor-agent";
 const PROVIDER = "cursor";
 /** Runs without `--model`, so the model chosen in Cursor applies. */
 const DEFAULT_MODEL = "default";
-/** Public flags a Turn relies on; an executable whose help lacks one is an older or unrelated CLI. */
-const REQUIRED_FLAGS = ["--print", "--output-format", "--stream-partial-output", "--resume", "--model", "--trust"];
+/**
+ * Every flag a Turn passes, some of them hidden from `--help`. The CLI rejects an unknown option
+ * before anything else and an invalid session id right after, so this probe starts no chat.
+ */
+const PROBE = ["-p", "--output-format", "stream-json", "--stream-partial-output", "--trust", "--new-session-id", "probe", "--conversation-history-file", "probe", "--image", "probe", "--resume", "probe", "--model", "probe", "--", "probe"];
+/** Keys `--model` writes to `cli-config.json` as the user's default (Cursor persists any model it starts with). */
+const MODEL_PREFERENCE = ["model", "hasChangedDefaultModel", "maxMode", "maxModeAutoEnabled"];
 const ABORT_ESCALATION_MS = 5_000;
 const FLUSH_TIMEOUT_MS = 10_000;
 /** The prompt is an argument: Linux caps one at 128 KiB, Windows a whole command line at 32K characters. */
@@ -42,6 +48,28 @@ export function cursorModels(output: string): HarnessModel[] {
   }
   if (!models.size) throw new Error("Cursor lists no models; sign in with `cursor-agent login` or set CURSOR_API_KEY");
   return [[DEFAULT_MODEL, "Default"] as const, ...models].map(([id, name]) => ({ harness: "cursor", provider: PROVIDER, id, name, ...(id === DEFAULT_MODEL ? { isDefault: true } : {}) }));
+}
+
+/**
+ * Cursor saves the model a run starts with as the user's default. A Cohub Turn's choice is its own:
+ * the earlier preference is put back unless the user picked another model meanwhile.
+ */
+async function keepModelPreference(requested: string): Promise<() => Promise<void>> {
+  const path = join(cursorConfigDirectory(), "cli-config.json");
+  const read = () => readFile(path, "utf8").then((raw) => record(JSON.parse(raw)), () => null);
+  const before = await read();
+  if (!before) return async () => {};
+  return async () => {
+    const after = await read();
+    const model = record(after?.model);
+    const ours = [text(model.modelId), text(model.displayModelId)].some((id) => id && requested.startsWith(id));
+    if (!after || !ours || MODEL_PREFERENCE.every((key) => JSON.stringify(after[key]) === JSON.stringify(before[key]))) return;
+    const restored = { ...after };
+    for (const key of MODEL_PREFERENCE) { if (key in before) restored[key] = before[key]; else delete restored[key]; }
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(restored, null, 2)}\n`, { mode: 0o600 });
+    await rename(temporary, path).catch(async (error: unknown) => { await rm(temporary, { force: true }); throw error; });
+  };
 }
 
 /** A chat Cursor stored, wherever its workspace hash put it. */
@@ -266,6 +294,8 @@ async function runCursor(executor: Executor, turn: HarnessTurn): Promise<Harness
       "--", content.text,
     ];
     signal.throwIfAborted();
+    const model = input.model && input.model !== DEFAULT_MODEL ? input.model : null;
+    const restorePreference = model ? await keepModelPreference(model) : null;
     // The prompt is sent when the process starts.
     await turn.started(session);
     try {
@@ -299,6 +329,9 @@ async function runCursor(executor: Executor, turn: HarnessTurn): Promise<Harness
     }
     host?.endInput();
     await host?.exited(FLUSH_TIMEOUT_MS);
+    await restorePreference?.().catch((error: unknown) => {
+      executor.diagnostics?.log("warn", "harness.cursor_model_preference_failed", { error: describeError(error) }, { ...context, component: "harness" });
+    });
   } finally {
     await rm(directory, { recursive: true, force: true }).catch(() => undefined);
   }
@@ -314,10 +347,15 @@ export const cursorHarness: LocalHarnessAdapter = {
   id: "cursor",
   binary: BINARY,
   async models(executable, cwd) {
-    const { stdout: help } = await command(executable, ["--help"], cwd, 30_000);
-    const missingFlags = REQUIRED_FLAGS.filter((flag) => !new RegExp(`(^|[\\s,])${flag}(?=[\\s,=<\\[]|$)`, "m").test(help));
-    if (missingFlags.length) throw new Error(`${executable} is not a supported Cursor CLI (missing ${missingFlags.join(", ")}); update Cursor`);
-    return cursorModels((await command(executable, ["models"], cwd, 60_000)).stdout);
+    const probe = await command(executable, PROBE, cwd, 30_000).then(({ stdout, stderr }) => stdout + stderr, (error: { stdout?: string; stderr?: string }) => `${error.stdout ?? ""}${error.stderr ?? ""}`);
+    if (!/Invalid --new-session-id/.test(probe)) {
+      const unknown = /unknown option '([^']+)'/.exec(probe)?.[1];
+      throw new Error(`${executable} is not a supported Cursor CLI${unknown ? ` (no ${unknown})` : ""}; update Cursor`);
+    }
+    const listed = await command(executable, ["models"], cwd, 60_000).catch((error: { stderr?: string; message?: string }) => {
+      throw new Error(`Cursor cannot list models: ${stripVTControlCharacters(error.stderr ?? "").trim() || error.message}`);
+    });
+    return cursorModels(listed.stdout);
   },
   run: runCursor,
   session: {

@@ -102,10 +102,15 @@ Turn with the prompt as its argument and images as `--image` files. A new chat t
 the chat (`<config>/chats/<md5 of cwd>/<id>/store.db`), else history is handed over again. Without
 `--force`, the CLI itself refuses commands outside the user's allowlist and answers its own questions, so
 nothing is granted; Cursor cannot enforce read-only access. A stop sends SIGINT. The `default` model passes
-no `--model`. Its chat store is SQLite, so Turns stage no archive. Terminal chats sync read-only from
-`<data>/projects/<project>/agent-transcripts/<id>/<id>.jsonl`, whose project the chat's `meta.json`
-names: a `<user_query>` line starts a Turn, `turn_ended` settles it, and tool results, model names and
-exact times are not recorded there. The ledger records the Turn Cohub is running, as for CodeBuddy.
+no `--model`; Cursor saves a run's model as the user's default, so Cohub puts the earlier preference back
+unless the user picked another model meanwhile. Startup runs the CLI with every flag a Turn uses, several
+hidden from `--help`, and an invalid session id, which the CLI rejects before starting anything. Its chat
+store is SQLite, so Turns stage no archive. Terminal and IDE chats sync read-only from
+`<data>/projects/<project>/agent-transcripts/<id>/<id>.jsonl`: a CLI chat's `meta.json` names the project,
+otherwise the project name is resolved to the directory it stands for. A `<user_query>` line (or a bare
+prompt no other user line follows) starts a Turn, keyed by the file's checksum through it, and
+`turn_ended` settles it; tool results, model names and exact times are not recorded there. The ledger
+records the Turn Cohub is running, as for CodeBuddy.
 
 Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`；只读映射为 `plan`，
 且仅开放 Read、Glob、Grep 工具、不加载 MCP（plan 模式仍会执行本机允许规则）。其他工具遵循本机权限规则，权限请求一律拒绝。云端历史投影到原生会话文件并通过 `--resume` 续接。
@@ -120,8 +125,11 @@ Claude Code 会把 stream-json prompt 的 `uuid` 作为记录 id，Cohub 在此�
 Cursor 每个 Turn 启动一个 `cursor-agent -p` 进程，prompt 作为参数、图片通过 `--image` 传入。新会话用
 `--new-session-id` 与 `--conversation-history-file` 带入云端历史，之后用 `--resume` 续接；Cursor 不再保存该会话时重新带入历史。
 不传 `--force`：允许列表外的命令由 CLI 自行拒绝，权限请求不会被批准；Cursor 无法保证只读。停止时发送 SIGINT。
-会话库是 SQLite，因此不生成归档。终端会话从 `agent-transcripts` 只读同步，项目由会话的 `meta.json` 确定；
-`<user_query>` 开始一个 Turn，`turn_ended` 结算；该文件不记录工具结果、模型和精确时间。Cohub 正在执行的 Turn 由账本记录。
+Cursor 会把本次运行的模型存为用户默认，Cohub 在 Turn 结束后恢复原设置（期间用户改选了其他模型则不动）。
+启动检查用 Turn 的全部参数（部分不在 `--help` 中）加一个无效会话 id 运行 CLI，它会在启动任何会话前拒绝。
+会话库是 SQLite，因此不生成归档。终端与 IDE 会话从 `agent-transcripts` 只读同步：CLI 会话的项目由 `meta.json` 确定，
+否则按项目名还原为实际目录。`<user_query>`（或后面没有其他用户行的纯文本 prompt）开始一个 Turn，以文件到该行的校验和为键，
+`turn_ended` 结算；该文件不记录工具结果、模型和精确时间。Cohub 正在执行的 Turn 由账本记录。
 
 ## Native clients / 原生客户端
 

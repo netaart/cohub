@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -79,10 +79,15 @@ for (const variant of ["", "call-ids"]) test(`Cursor Turns hand over Cohub histo
     assert(result.session.path.endsWith(join("agent-transcripts", result.session.nativeSessionId, `${result.session.nativeSessionId}.jsonl`)));
     await settle(first, result);
 
+    // A Turn's model does not become the user's saved default.
+    const config = join(root, "config", "cli-config.json");
+    const preference = { model: { modelId: "auto" }, hasChangedDefaultModel: false, vimMode: true };
+    await writeFile(config, JSON.stringify(preference));
     const second = turn(first.turnId, undefined, { model: "gpt-5" });
     const resumed = await executeTurn(native.executor, second, () => {}, new AbortController().signal, null);
     assert.deepEqual([resumed.event.resume, resumed.session.path], ["native", result.session.path]);
     assert.deepEqual(resumed.event.message.content, [{ type: "text", text: "history retained model:gpt-5" }]);
+    assert.deepEqual(JSON.parse(await readFile(config, "utf8")), preference);
     await settle(second, resumed);
 
     // A chat Cursor no longer stores is handed over again instead of failing to resume.
@@ -118,8 +123,8 @@ test("Cursor discovery checks the CLI and lists its models behind a default", ()
   assert.deepEqual(catalog.models.map((model) => [model.id, model.name, model.isDefault ?? false]), [["default", "Default", true], ["auto", "Auto", false], ["gpt-5", "GPT-5 (High)", false]]);
   process.env.CURSOR_FIXTURE = "signed-out";
   const skipped: string[] = [];
-  assert.deepEqual((await discoverHarnesses(["cursor"], {}, tmpdir(), (harness) => skipped.push(harness))).harnesses, []);
-  assert.deepEqual(skipped, ["cursor"]);
+  assert.deepEqual((await discoverHarnesses(["cursor"], {}, tmpdir(), (harness, error) => skipped.push(`${harness}: ${(error as Error).message}`))).harnesses, []);
+  assert.deepEqual(skipped, ["cursor: Cursor cannot list models: Error: Authentication required."]);
   process.env.CURSOR_FIXTURE = "legacy";
-  await assert.rejects(discoverHarnesses(["cursor"], {}, tmpdir()), /missing --stream-partial-output/);
+  await assert.rejects(discoverHarnesses(["cursor"], {}, tmpdir()), /not a supported Cursor CLI \(no --conversation-history-file\)/);
 }));

@@ -51,22 +51,46 @@ export function acceptsCursorTranscript(path: string, cwd: string): boolean {
   return parts?.length === 4 && ownsProject(parts[0], cwd) && parts[1] === TRANSCRIPTS && parts[3] === `${parts[2]}.jsonl`;
 }
 
-/** The transcript does not name its project; the chat's `meta.json` does. A file without a CLI chat is not synced. */
+/** The directory a project name stands for, matched against real directories; a literal hyphen wins over a separator. */
+async function projectDirectory(name: string): Promise<string | null> {
+  const walk = async (directory: string, rest: string): Promise<string | null> => {
+    if (!rest) return directory;
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    const matches = entries.filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => [entry.name, cursorProjectName(entry.name)] as const)
+      .filter(([, part]) => part && (rest === part || rest.startsWith(`${part}-`)))
+      .sort((left, right) => right[1].length - left[1].length);
+    for (const [entry, part] of matches) {
+      const found = await walk(join(directory, entry), rest.slice(part.length + 1));
+      if (found) return found;
+    }
+    return null;
+  };
+  return process.platform === "win32" ? null : await walk("/", name);
+}
+
+/**
+ * The transcript does not name its project. A CLI chat's `meta.json` does; the IDE writes the same
+ * transcripts without one, so its project name is resolved to the directory it stands for.
+ */
 export async function cursorSessionHeader(path: string): Promise<SessionHeader | null> {
   const nativeSessionId = basename(path, ".jsonl");
   if (basename(dirname(path)) !== nativeSessionId) return null;
   const known = headers.get(nativeSessionId);
   if (known) return known;
+  let header: SessionHeader | null = null;
   const hashes = await readdir(cursorChatsRoot()).catch((error) => { if (missing(error)) return []; throw error; });
   for (const hash of hashes) {
     const meta = await readFile(join(cursorChatsRoot(), hash, nativeSessionId, "meta.json"), "utf8").then((raw) => record(JSON.parse(raw)), () => null);
-    const cwd = text(meta?.cwd);
-    if (!meta || !cwd) continue;
-    const header: SessionHeader = { harness: "cursor", nativeSessionId, cwd, thread: meta.isSubagent === true ? "spawned" : "user" };
-    headers.set(nativeSessionId, header);
-    return header;
+    if (!meta || !text(meta.cwd)) continue;
+    header = { harness: "cursor", nativeSessionId, cwd: text(meta.cwd), thread: meta.isSubagent === true ? "spawned" : "user" };
+    break;
   }
-  return null;
+  const project = basename(dirname(dirname(dirname(path))));
+  const cwd = header ? null : await projectDirectory(project);
+  header ??= cwd ? { harness: "cursor", nativeSessionId, cwd, thread: "user" } : null;
+  if (header) headers.set(nativeSessionId, header);
+  return header;
 }
 
 /** "Saturday, Aug 01, 2026, 9:30 AM (UTC+8)": minutes only, so Turn times are approximate. */
@@ -83,24 +107,25 @@ function promptTime(value: string): string | null {
 const blocks = (value: unknown) => array(record(record(value).message).content).map(record);
 
 /**
- * Cursor writes the model's messages without ids or times: a prompt (`<user_query>`), one line per
- * reply step with its tool calls (results are not recorded), and `turn_ended` after every Turn.
- * Context lines without a query are not prompts. Turns are keyed by their position.
+ * Cursor writes the model's messages without ids or times: a prompt (`<user_query>`, or a bare text
+ * that no other user line follows), one line per reply step with its tool calls (results are not
+ * recorded), and `turn_ended` after every Turn. A user line followed by another is context. A Turn
+ * is keyed by the file's checksum through its prompt, so a rewritten history never reuses a key.
  */
 export async function readCursorTranscript(path: string, nativeSessionId: string, signal?: AbortSignal): Promise<NativeTranscript> {
   const read = await readChainedLines(path, signal);
   const modified = (await stat(path)).mtime.toISOString();
   const turns: NativeTranscriptTurn[] = [];
   let current: NativeTranscriptTurn | null = null;
-  for (const line of read.lines) {
+  for (const [index, line] of read.lines.entries()) {
     const value = line.value;
     if (value.role === "user") {
       const raw = blocks(value).map((block) => text(block.text)).join("\n");
-      const query = USER_QUERY.exec(raw);
+      const query = USER_QUERY.exec(raw)?.[1] ?? (read.lines[index + 1]?.value.role === "user" ? null : raw.replace(TIMESTAMP, "").trim());
       if (!query) continue;
       const startedAt: string = promptTime(TIMESTAMP.exec(raw)?.[1] ?? "") ?? current?.startedAt ?? modified;
       current = {
-        key: `t${turns.length + 1}`, parentKey: turns.at(-1)?.key ?? null, userContent: [{ type: "text", text: query[1] ?? "" }], messages: [], startedAt,
+        key: line.sha256, parentKey: turns.at(-1)?.key ?? null, userContent: [{ type: "text", text: query }], messages: [], startedAt,
         startBytes: line.startBytes, endBytes: line.endBytes, contentEndBytes: line.endBytes, boundaries: {}, sha256: line.sha256, result: null,
       };
       turns.push(current);
@@ -108,10 +133,10 @@ export async function readCursorTranscript(path: string, nativeSessionId: string
     }
     if (!current) continue;
     if (value.role === "assistant") {
-      const content = blocks(value).flatMap((block, index): ContentBlock[] => {
+      const content = blocks(value).flatMap((block, position): ContentBlock[] => {
         if (block.type === "text") return text(block.text) ? [{ type: "text", text: text(block.text) }] : [];
         if (block.type !== "tool_use") return [];
-        return [{ type: "tool_use", id: `cursor_${current?.key}_${line.startBytes}_${index}`, name: text(block.name) || "tool", input: record(block.input) }];
+        return [{ type: "tool_use", id: `cursor_${line.sha256.slice(0, 24)}_${position}`, name: text(block.name) || "tool", input: record(block.input) }];
       });
       if (content.length) current.messages.push({ content, provider: null, model: null, stopReason: content.some((block) => block.type === "tool_use") ? "tool_use" : "stop", errorMessage: null });
       extendTurn(current, line, true);

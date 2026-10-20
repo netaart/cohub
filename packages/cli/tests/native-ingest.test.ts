@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, utimes, writeFile, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,11 +42,14 @@ const workbuddyTurn = (sessionId: string, cwd: string, id: string, parentId: str
   line({ id, ...(parentId ? { parentId } : {}), timestamp: 1, type: "message", role: "user", content: [{ type: "input_text", text: prompt }], sessionId, cwd })
   + line({ id: `a-${id}`, parentId: id, timestamp: 2, type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: `re ${prompt}` }], providerData: { messageId: `m-${id}`, model: "hy-test" }, sessionId, cwd });
 
-/** A Cursor Turn: context without a query, the prompt, a reply step and the recorded end. */
-const cursorTurn = (prompt: string) => line({ role: "user", message: { content: [{ type: "text", text: "<workspace>open tabs</workspace>" }] } })
-  + line({ role: "user", message: { content: [{ type: "text", text: `<timestamp>Saturday, Aug 01, 2026, 9:30 AM (UTC+8)</timestamp>\n<user_query>${prompt}</user_query>` }] } })
-  + line({ role: "assistant", message: { content: [{ type: "text", text: `re ${prompt}` }, { type: "tool_use", name: "Shell", input: { command: "ls" } }] } })
+/** A Cursor Turn: context, the prompt (bare when `query` is false), a reply step and the recorded end. */
+const cursorPrompt = (prompt: string, query = true) => line({ role: "user", message: { content: [{ type: "text", text: "<workspace>open tabs</workspace>" }] } })
+  + line({ role: "user", message: { content: [{ type: "text", text: query ? `<timestamp>Saturday, Aug 01, 2026, 9:30 AM (UTC+8)</timestamp>\n<user_query>${prompt}</user_query>` : prompt }] } });
+const cursorReply = (prompt: string) => line({ role: "assistant", message: { content: [{ type: "text", text: `re ${prompt}` }, { type: "tool_use", name: "Shell", input: { command: "ls" } }] } })
   + line({ type: "turn_ended", status: "success" });
+const cursorTurn = (prompt: string, query = true) => cursorPrompt(prompt, query) + cursorReply(prompt);
+/** A Cursor Turn is keyed by the file's checksum through its prompt. */
+const cursorKey = (before: string) => createHash("sha256").update(before).digest("hex");
 
 async function until(check: () => boolean, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
@@ -432,33 +435,39 @@ test("a WorkBuddy Turn Cohub runs is never sent back, and a terminal Turn after 
   } finally { await w.cleanup(); }
 });
 
-test("Cursor terminal Turns sync through their chat's project; a Turn Cohub runs is never sent back", async () => {
+test("Cursor terminal and IDE Turns sync through their project; a Turn Cohub runs is never sent back", async () => {
   const w = await workspace();
   try {
     const server = fakeServer();
-    const cloudTurnId = randomUUID(), sessionId = randomUUID(), id = randomUUID(), terminal = randomUUID(), cwd = join(w.project, "sub");
+    const cloudTurnId = randomUUID(), sessionId = randomUUID(), id = randomUUID(), terminal = randomUUID(), ide = randomUUID(), cwd = join(w.project, "sub");
     server.turns.set(cloudTurnId, { sessionId, settled: true, parentTurnId: null });
     await w.write(join(cursorChatDirectory(terminal, cwd), "meta.json"), JSON.stringify({ cwd }));
     await w.write(cursorTranscriptPath(terminal, cwd), cursorTurn("from the terminal"));
     await w.write(join(cursorTranscriptPath(terminal, cwd), "..", "subagents", "s1.jsonl"), cursorTurn("sub-agent"));
+    // The IDE keeps no chat metadata; its project name resolves to the directory, here with a bare prompt.
+    await w.write(cursorTranscriptPath(ide, cwd), cursorTurn("from the IDE", false));
     const path = cursorTranscriptPath(id, w.project);
     const ingest = w.ingest({ harnesses: ["cursor"] });
     await ingest.load();
     ingest.connect(server.transport);
-    await until(() => server.turns.size === 2);
-    const [synced] = server.batches.flatMap((batch) => batch.turns);
-    assert.deepEqual([synced?.turnId, synced?.userContent, synced?.result?.status], [turnIdOf("cursor", terminal, "t1"), [{ type: "text", text: "from the terminal" }], "completed"]);
+    await until(() => server.turns.size === 3);
+    const synced = server.batches.flatMap((batch) => batch.turns).map((turn) => [turn.turnId, turn.userContent, turn.result?.status]).sort();
+    assert.deepEqual(synced, [
+      [turnIdOf("cursor", terminal, cursorKey(cursorPrompt("from the terminal"))), [{ type: "text", text: "from the terminal" }], "completed"],
+      [turnIdOf("cursor", ide, cursorKey(cursorPrompt("from the IDE", false))), [{ type: "text", text: "from the IDE" }], "completed"],
+    ].sort());
 
     ingest.begin({ harness: "cursor", path, nativeSessionId: id, cwd: w.project }, sessionId, cloudTurnId);
     await w.write(join(cursorChatDirectory(id, w.project), "meta.json"), JSON.stringify({ cwd: w.project }));
     await w.write(path, cursorTurn("from the web"));
     ingest.advance(path, cloudTurnId);
     await new Promise((resolve) => setTimeout(resolve, 200));
-    assert.equal(server.turns.size, 2, "a Cohub Turn is not sent back");
+    assert.equal(server.turns.size, 3, "a Cohub Turn is not sent back");
     await appendFile(path, cursorTurn("then the terminal"));
     ingest.touch(path);
-    await until(() => server.turns.size === 3);
-    assert.deepEqual(server.batches.flatMap((batch) => batch.turns).slice(1).map((turn) => [turn.turnId, turn.parentTurnId]), [[turnIdOf("cursor", id, "t2"), cloudTurnId]]);
+    await until(() => server.turns.size === 4);
+    const key = cursorKey(cursorTurn("from the web") + cursorPrompt("then the terminal"));
+    assert.deepEqual(server.batches.flatMap((batch) => batch.turns).slice(2).map((turn) => [turn.turnId, turn.parentTurnId]), [[turnIdOf("cursor", id, key), cloudTurnId]]);
     await ingest.close(AbortSignal.timeout(2_000));
   } finally { await w.cleanup(); }
 });

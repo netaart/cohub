@@ -6,23 +6,24 @@ import { join, resolve } from "node:path";
 
 const args = process.argv.slice(2);
 const variant = process.env.CURSOR_FIXTURE ?? "";
-if (args[0] === "--help") {
-  const flags = ["-p, --print", "--output-format <format>", "--resume [chatId]", "--model <model>", "--trust", ...(variant === "legacy" ? [] : ["--stream-partial-output"])];
-  process.stdout.write(`Usage: agent [options]\n${flags.map((flag) => `  ${flag}  option\n`).join("")}`);
-  process.exit(0);
-}
+// Like the CLI: unknown options fail first, then an invalid --new-session-id.
+if (variant === "legacy" && args.includes("--conversation-history-file")) { process.stderr.write("error: unknown option '--conversation-history-file'\n"); process.exit(1); }
 if (args[0] === "models") {
   if (variant === "signed-out") { process.stderr.write("Error: Authentication required.\n"); process.exit(1); }
   process.stdout.write("\x1b[2mAvailable models\x1b[0m\n\nauto - Auto (current, default)\ngpt-5 - GPT-5 (High)\n\nTip: use --model <id> to switch.\n");
   process.exit(0);
 }
 const flag = (name) => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : null; };
+if (flag("--new-session-id") && !/^[0-9a-f-]{36}$/.test(flag("--new-session-id"))) { process.stderr.write(`Error: Invalid --new-session-id "${flag("--new-session-id")}": expected a UUIDv4.\n`); process.exit(1); }
 const id = flag("--new-session-id") ?? flag("--resume");
 const prompt = args[args.indexOf("--") + 1] ?? "";
 const chat = join(process.env.CURSOR_CONFIG_DIR, "chats", createHash("md5").update(resolve(process.cwd())).digest("hex"), id);
 const store = join(chat, "store.db");
 if (flag("--resume") && !existsSync(store)) { process.stderr.write(`Chat ${id} not found\n`); process.exit(1); }
 mkdirSync(chat, { recursive: true });
+// Like the CLI, the model a run starts with becomes the saved default.
+const config = join(process.env.CURSOR_CONFIG_DIR, "cli-config.json");
+if (flag("--model") && existsSync(config)) writeFileSync(config, JSON.stringify({ ...JSON.parse(readFileSync(config, "utf8")), model: { modelId: flag("--model"), displayModelId: flag("--model") }, hasChangedDefaultModel: true }));
 writeFileSync(join(chat, "meta.json"), JSON.stringify({ schemaVersion: 1, createdAtMs: 1, hasConversation: true, cwd: process.cwd() }));
 const imported = flag("--conversation-history-file") ? JSON.parse(readFileSync(flag("--conversation-history-file"), "utf8")).messages : [];
 const history = [...(existsSync(store) ? JSON.parse(readFileSync(store, "utf8")) : []), ...imported];
@@ -35,6 +36,7 @@ const write = (value) => process.stdout.write(`${JSON.stringify({ ...value, sess
 const now = Date.now();
 const text = (value, extra = {}) => write({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: value }] }, ...extra });
 
+record({ role: "user", message: { content: [{ type: "text", text: "<workspace>open tabs</workspace>" }] } });
 record({ role: "user", message: { content: [{ type: "text", text: `<timestamp>Saturday, Aug 01, 2026, 9:30 AM (UTC+8)</timestamp>\n<user_query>\n${prompt}\n</user_query>` }] } });
 write({ type: "system", subtype: "init", apiKeySource: "login", cwd: process.cwd(), model: "Fixture Model", permissionMode: "default" });
 write({ type: "user", message: { role: "user", content: [{ type: "text", text: prompt }] } });
