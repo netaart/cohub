@@ -1422,12 +1422,13 @@ function registerSessions(spacesCmd: Command): void {
     .command("ls")
     .alias("list")
     .description("List sessions")
+    .option("--archived", "Only sessions archived in your personal view")
     .option("--json", "Output as JSON")
-    .action(async (opts: { json?: boolean }) => {
+    .action(async (opts: { archived?: boolean; json?: boolean }) => {
       const spaceId = await resolveSpace(spacesCmd);
       const client = createClient();
       try {
-        const result = await client.space(spaceId).sessions.list();
+        const result = await client.space(spaceId).sessions.list({ archived: opts.archived });
         if (jsonRequested(opts)) return outJson(result);
         if (result.sessions.length === 0) {
           console.log("  (empty)");
@@ -1444,6 +1445,28 @@ function registerSessions(spacesCmd: Command): void {
         handleHttp(e);
       }
     });
+
+  for (const archive of [true, false]) {
+    sessionsCmd
+      .command(archive ? "archive <ids...>" : "unarchive <ids...>")
+      .description(archive ? "Archive sessions in your personal view" : "Restore archived sessions")
+      .option("--json", "Output as JSON")
+      .action(async (ids: string[], opts: { json?: boolean }) => {
+        const client = createClient();
+        try {
+          const chunks = Array.from({ length: Math.ceil(ids.length / 200) }, (_, index) => ids.slice(index * 200, (index + 1) * 200));
+          for (const chunk of chunks) {
+            await client.user.labels.patchResourceLabelsBatch("session", chunk, archive
+              ? { addLabelRefs: ["Archived"] }
+              : { removeLabelRefs: ["Archived"] });
+          }
+          if (jsonRequested(opts)) return outJson({ ids, archived: archive });
+          ok(`${archive ? "Archived" : "Unarchived"} ${ids.length} session(s)`);
+        } catch (e: unknown) {
+          handleHttp(e);
+        }
+      });
+  }
 
   sessionsCmd
     .command("create [title]")

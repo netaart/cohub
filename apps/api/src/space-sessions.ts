@@ -25,6 +25,8 @@ import {
 } from "@cohub/core/sessions";
 import { db } from "./db/index.js";
 import {
+  labelAssignments,
+  labels,
   sessionMessages,
   sessionTurnSegments,
   sessionTurns,
@@ -44,6 +46,7 @@ import { enqueueSessionMessagePostprocess } from "./session-message-postprocess-
 import { enqueueSessionTitleGeneration } from "./session-title-queue.js";
 import { touchSpaceActivity } from "./space-activity.js";
 import { sessionListSourceCondition } from "./session-source-filter.js";
+import { ARCHIVED_SESSION_SYSTEM_KEY, hasArchivedSessionLabel, sessionArchiveFilter } from "./session-archive.js";
 import {
   decodeSessionListCursor,
   mergeUserSessionListBranches,
@@ -354,6 +357,19 @@ const sessionListOrderBy = [
   desc(spaceSessions.id),
 ] as const;
 
+const archivedFlagSql = (viewerUuid: string | null) =>
+  viewerUuid
+    ? hasArchivedSessionLabel(viewerUuid, sql`${spaceSessions.id}`)
+    : sql<boolean>`false`;
+
+type SessionRowWithArchiveFlag = {
+  session: typeof spaceSessions.$inferSelect;
+  isArchived: boolean;
+};
+
+const flattenSessionRows = (rows: SessionRowWithArchiveFlag[]) =>
+  rows.map(({ session, isArchived }) => ({ ...session, isArchived }));
+
 export async function attachActiveTurns<T extends { id: string; meta?: unknown }>(sessions: T[]) {
   const states = await readSessionActiveTurns(db, sessions.map((session) => session.id));
   return sessions.map((session) => ({
@@ -364,19 +380,28 @@ export async function attachActiveTurns<T extends { id: string; meta?: unknown }
 
 export const listSpaceSessions = async (
   spaceId: string,
-  options?: { limit?: number; cursor?: string | null },
+  options?: {
+    limit?: number;
+    cursor?: string | null;
+    viewerUuid?: string | null;
+    archived?: boolean;
+  },
 ) => {
+  const viewer = options?.viewerUuid?.trim() || null;
+  const archived = options?.archived === true;
   const limit = resolveSessionListLimit(options?.limit);
   const cursor = decodeSessionListCursor(options?.cursor);
   const activityCursor = sessionListActivityCursorCondition(cursor);
+  const archiveCondition = sessionArchiveFilter(viewer, archived, sql`${spaceSessions.id}`);
 
-  const rows = await db.select().from(spaceSessions).where(
-    activityCursor
-      ? and(eq(spaceSessions.spaceId, spaceId), activityCursor)
-      : eq(spaceSessions.spaceId, spaceId),
-  ).orderBy(...sessionListOrderBy).limit(limit + 1);
+  const rows = await db
+    .select({ session: spaceSessions, isArchived: archivedFlagSql(viewer) })
+    .from(spaceSessions)
+    .where(and(eq(spaceSessions.spaceId, spaceId), activityCursor, archiveCondition))
+    .orderBy(...sessionListOrderBy)
+    .limit(limit + 1);
 
-  const page = paginateSessionRows(rows, limit);
+  const page = paginateSessionRows(flattenSessionRows(rows), limit);
   return {
     ...page,
     sessions: await attachActiveTurns(page.sessions),
@@ -450,7 +475,12 @@ export const attachSessionSpaceSummaries = async <T extends { spaceId: string }>
  */
 export const listUserSessions = async (
   userUuid: string,
-  options?: { limit?: number; cursor?: string | null; source?: SessionSourceFilter | null },
+  options?: {
+    limit?: number;
+    cursor?: string | null;
+    source?: SessionSourceFilter | null;
+    archived?: boolean;
+  },
 ) => {
   const limit = resolveSessionListLimit(options?.limit);
   const cursor = decodeSessionListCursor(options?.cursor);
@@ -458,21 +488,47 @@ export const listUserSessions = async (
   const sourceCondition = sessionListSourceCondition(options?.source ?? null);
   const branchLimit = limit + 1;
 
-  const creatorWhere = and(eq(spaceSessions.userUuid, userUuid), activityCursor, sourceCondition);
+  if (options?.archived) {
+    const rows = await db
+      .select({ session: spaceSessions, isArchived: sql<boolean>`true` })
+      .from(labelAssignments)
+      .innerJoin(labels, eq(labels.id, labelAssignments.labelId))
+      .innerJoin(spaceSessions, sql`${spaceSessions.id} = ${labelAssignments.resourceRef}::uuid`)
+      .where(and(
+        eq(labels.scopeType, "user"),
+        eq(labels.scopeId, userUuid),
+        eq(labels.systemKey, ARCHIVED_SESSION_SYSTEM_KEY),
+        eq(labelAssignments.scopeType, "user"),
+        eq(labelAssignments.scopeId, userUuid),
+        eq(labelAssignments.resourceType, "session"),
+        activityCursor,
+      ))
+      .orderBy(...sessionListOrderBy)
+      .limit(branchLimit);
+    const page = paginateSessionRows(flattenSessionRows(rows), limit);
+    return {
+      ...page,
+      sessions: await attachActiveTurns(page.sessions),
+    };
+  }
+
+  const archiveCondition = sessionArchiveFilter(userUuid, false, sql`${spaceSessions.id}`);
+  const creatorWhere = and(eq(spaceSessions.userUuid, userUuid), activityCursor, sourceCondition, archiveCondition);
 
   const participantWhere = and(
     userSessionParticipantCondition(userUuid),
     sql`${spaceSessions.userUuid} is distinct from ${userUuid}`,
     activityCursor,
     sourceCondition,
+    archiveCondition,
   );
 
   const [creatorRows, participantRows] = await Promise.all([
-    db.select().from(spaceSessions).where(creatorWhere).orderBy(...sessionListOrderBy).limit(branchLimit),
-    db.select().from(spaceSessions).where(participantWhere).orderBy(...sessionListOrderBy).limit(branchLimit),
+    db.select({ session: spaceSessions, isArchived: archivedFlagSql(userUuid) }).from(spaceSessions).where(creatorWhere).orderBy(...sessionListOrderBy).limit(branchLimit),
+    db.select({ session: spaceSessions, isArchived: archivedFlagSql(userUuid) }).from(spaceSessions).where(participantWhere).orderBy(...sessionListOrderBy).limit(branchLimit),
   ]);
 
-  const page = mergeUserSessionListBranches([creatorRows, participantRows], limit);
+  const page = mergeUserSessionListBranches([flattenSessionRows(creatorRows), flattenSessionRows(participantRows)], limit);
   return {
     ...page,
     sessions: await attachActiveTurns(page.sessions),

@@ -1134,7 +1134,7 @@ export class SpaceSessionsApi {
   }
 
   list(
-    optionsOrFetch?: { limit?: number; cursor?: string | null; includeForks?: boolean } | Fetch,
+    optionsOrFetch?: { limit?: number; cursor?: string | null; includeForks?: boolean; archived?: boolean } | Fetch,
     customFetch?: Fetch,
   ) {
     const options = typeof optionsOrFetch === "function" ? undefined : optionsOrFetch;
@@ -1143,6 +1143,7 @@ export class SpaceSessionsApi {
     if (options?.limit !== undefined) params.set("limit", String(options.limit));
     if (options?.cursor) params.set("cursor", options.cursor);
     if (options?.includeForks) params.set("includeForks", "1");
+    if (options?.archived) params.set("archived", "1");
     const query = params.toString();
     return this.transport.request<SpaceSessionsResponse>(
       `/api/spaces/${this.spaceId}/sessions${query ? `?${query}` : ""}`,

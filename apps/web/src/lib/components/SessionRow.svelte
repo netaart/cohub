@@ -1,6 +1,14 @@
 <script lang="ts">
 import type { SessionRecord } from "@neta-art/cohub";
-import { Check, Link2Off, Pencil, TextCursorInput, X } from "lucide-svelte";
+import {
+	Archive,
+	ArchiveRestore,
+	Check,
+	Link2Off,
+	Pencil,
+	TextCursorInput,
+	X,
+} from "lucide-svelte";
 import type { Snippet } from "svelte";
 import { clock } from "$lib/clock.svelte";
 import ListRow from "$lib/components/list-page/ListRow.svelte";
@@ -46,6 +54,7 @@ const {
 	draggable = false,
 	showInsert = true,
 	showRename = true,
+	archived = false,
 	renaming = false,
 	renameValue = "",
 	renameSaving = false,
@@ -55,6 +64,7 @@ const {
 	onDoubleClick,
 	onInsert,
 	onRename,
+	onArchive,
 	onRenameValueChange,
 	onSubmitRename,
 	onCancelRename,
@@ -75,6 +85,7 @@ const {
 	draggable?: boolean;
 	showInsert?: boolean;
 	showRename?: boolean;
+	archived?: boolean;
 	renaming?: boolean;
 	renameValue?: string;
 	renameSaving?: boolean;
@@ -84,6 +95,7 @@ const {
 	onDoubleClick?: (event: MouseEvent, session: SessionRecord) => void;
 	onInsert?: (path: string) => void;
 	onRename?: (session: SessionRecord) => void;
+	onArchive?: (session: SessionRecord) => void;
 	onRenameValueChange?: (value: string) => void;
 	onSubmitRename?: (session: SessionRecord) => void;
 	onCancelRename?: () => void;
@@ -193,19 +205,23 @@ function railX(level: number) {
 }
 
 const actionCount = $derived(
-	isMobile
-		? 0
-		: (showInsert && onInsert ? 1 : 0) +
+	(onArchive ? 1 : 0) +
+		(isMobile
+			? 0
+			: (showInsert && onInsert ? 1 : 0) +
 				(showRename && onRename ? 1 : 0) +
-				(onRemoveLabel ? 1 : 0),
+				(onRemoveLabel ? 1 : 0)),
 );
 const HOVER_ROOM = [
 	"",
 	"hover:pr-8 focus-within:pr-8",
 	"hover:pr-12 focus-within:pr-12",
 	"hover:pr-16 focus-within:pr-16",
+	"hover:pr-20 focus-within:pr-20",
 ] as const;
-const hoverRoomClass = $derived(HOVER_ROOM[actionCount] ?? "");
+const hoverRoomClass = $derived(
+	isMobile && onArchive ? "pr-8" : (HOVER_ROOM[actionCount] ?? ""),
+);
 
 $effect(() => {
 	if (!renaming) return;
@@ -372,15 +388,18 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		/>
 		{#snippet trailing()}
 			{#if actionCount > 0}
-				<span class="pointer-events-none absolute right-1.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100">
-					{#if showInsert && onInsert}
+				<span class="{isMobile ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100'} absolute right-1.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-0.5">
+					{#if !isMobile && showInsert && onInsert}
 						<SidebarActionButton icon={TextCursorInput} title={m.common_insert({}, { locale })} onClick={() => onInsert(`/sessions/${session.id}.jsonl`)} />
 					{/if}
-					{#if showRename && onRename}
+					{#if !isMobile && showRename && onRename}
 						<SidebarActionButton icon={Pencil} title={m.common_rename({}, { locale })} onClick={() => onRename(session)} />
 					{/if}
-					{#if onRemoveLabel}
+					{#if !isMobile && onRemoveLabel}
 						<SidebarActionButton icon={Link2Off} title={removeLabelTitle ?? m.sidebar_remove_from_label_generic({}, { locale })} disabled={removeLabelDisabled} tone="danger" onClick={onRemoveLabel} />
+					{/if}
+					{#if onArchive}
+						<SidebarActionButton icon={archived ? ArchiveRestore : Archive} title={archived ? m.chats_unarchive({}, { locale }) : m.chats_archive({}, { locale })} onClick={() => onArchive(session)} />
 					{/if}
 				</span>
 			{/if}

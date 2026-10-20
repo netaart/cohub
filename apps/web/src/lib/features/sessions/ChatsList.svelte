@@ -30,6 +30,7 @@ import {
 	buildUserSessionRoute,
 } from "$lib/space-routes";
 import { type ChatsFilter, chatsFilterScope } from "$lib/stores/chats-filter";
+import { setSessionsArchived } from "$lib/stores/session-archive.svelte";
 
 const {
 	view,
@@ -57,6 +58,7 @@ const density = $derived<FixedListRowDensity>(
 	isPage ? "comfortable" : "compact",
 );
 const isDefaultFilter = $derived(filter.source === "web" && !filter.space);
+const isArchivedView = $derived(filter.archived);
 const sessions = $derived(view.sessions);
 const forks = $derived(view.forks);
 const rows = $derived(buildSessionForkTree(sessions, forks));
@@ -116,9 +118,13 @@ function listKeyboard(node: HTMLUListElement) {
 		const index = rowIndex(event.target);
 		const next = index + (event.shiftKey ? -1 : 1);
 		if (
-			index < 0 || next < 0 || next >= rows.length ||
-			visibleIndices.includes(next) || !scroller
-		) return;
+			index < 0 ||
+			next < 0 ||
+			next >= rows.length ||
+			visibleIndices.includes(next) ||
+			!scroller
+		)
+			return;
 		event.preventDefault();
 		const id = rows[next].session.id;
 		scroller.scrollTop = next * rowHeight;
@@ -126,9 +132,11 @@ function listKeyboard(node: HTMLUListElement) {
 		await tick();
 		if (!node.isConnected || document.activeElement !== event.target) return;
 		const targetIndex = rows.findIndex((row) => row.session.id === id);
-		node.querySelector<HTMLAnchorElement>(
-			`[data-chat-index="${targetIndex}"] a[href]`,
-		)?.focus();
+		node
+			.querySelector<HTMLAnchorElement>(
+				`[data-chat-index="${targetIndex}"] a[href]`,
+			)
+			?.focus();
 	};
 	node.addEventListener("focusin", onFocus);
 	node.addEventListener("focusout", onBlur);
@@ -217,10 +225,10 @@ function onScroll(event: Event) {
 	{:else if sessions.length === 0}
 		<div class="flex flex-col items-center px-6 py-12 text-center">
 			<p class="text-[13px] font-medium text-text-secondary">
-				{isDefaultFilter ? m.sessions_no_chats({}, { locale }) : m.chats_empty_filtered({}, { locale })}
+				{isArchivedView ? m.chats_empty_archived({}, { locale }) : isDefaultFilter ? m.sessions_no_chats({}, { locale }) : m.chats_empty_filtered({}, { locale })}
 			</p>
 			<p class="mt-1 max-w-[260px] text-[12px] text-text-tertiary">
-				{isDefaultFilter ? m.sessions_no_chats_hint({}, { locale }) : m.chats_empty_filtered_hint({}, { locale })}
+				{isArchivedView ? m.chats_empty_archived_hint({}, { locale }) : isDefaultFilter ? m.sessions_no_chats_hint({}, { locale }) : m.chats_empty_filtered_hint({}, { locale })}
 			</p>
 			<div class="mt-4 flex items-center gap-2">
 				<button
@@ -262,6 +270,8 @@ function onScroll(event: Event) {
 						tooltip={tooltipFor(row)}
 						showInsert={false}
 						showRename={false}
+						archived={Boolean(session.isArchived)}
+						onArchive={(target) => void setSessionsArchived([target.id], !target.isArchived)}
 						onNavigate={open}
 					>
 						{#snippet avatar()}

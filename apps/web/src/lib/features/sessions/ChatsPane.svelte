@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { UserSessionSpaceSummary } from "@neta-art/cohub";
-import { Plus, Search, X } from "lucide-svelte";
+import { Archive, Plus, Search, X } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
 import { openAreaSearch } from "$lib/command-palette/open";
 import FilterBar from "$lib/components/list-page/FilterBar.svelte";
@@ -35,8 +35,13 @@ const filter = $derived(inbox.filter);
 const isPage = $derived(variant === "page");
 const chips = $derived(inbox.spaceChips);
 const source = $derived(filter.source);
-const pages = $derived<(UserSessionSpaceSummary | null)[]>([null, ...chips]);
-const pageFilters = $derived(pages.map((space) => ({ source, space })));
+const archived = $derived(filter.archived);
+const pages = $derived<(UserSessionSpaceSummary | null)[]>(
+	archived ? [null] : [null, ...chips],
+);
+const pageFilters = $derived(
+	pages.map((space) => ({ source, space, archived })),
+);
 const keys = $derived(pages.map((space) => space?.id ?? ALL_KEY));
 const pageIndex = $derived(
 	Math.max(0, keys.indexOf(filter.space?.id ?? ALL_KEY)),
@@ -78,8 +83,16 @@ onMount(() => {
 			{#snippet actions()}
 				{#if isPage}
 					<HeaderAction label={m.list_search({}, { locale })} icon={Search} onclick={() => openAreaSearch("chats")} />
+					<HeaderAction
+						label={archived ? m.chats_archived_exit({}, { locale }) : m.chats_archived({}, { locale })}
+						icon={Archive}
+						expanded={archived}
+						onclick={() => inbox.setArchived(!archived)}
+					/>
 				{/if}
-				<ChatsSourcePicker value={filter.source} onChange={(source) => inbox.setSource(source)} />
+				{#if !archived}
+					<ChatsSourcePicker value={filter.source} onChange={(source) => inbox.setSource(source)} />
+				{/if}
 				<HeaderAction
 					label={m.sidebar_new_chat({}, { locale })}
 					icon={Plus}
@@ -94,33 +107,46 @@ onMount(() => {
 		</ListHeader>
 		<FilterBar
 			label={m.chats_filter_label({}, { locale })}
-			role="tablist"
+			role={archived ? "group" : "tablist"}
 			activeKey={keys[tabs.shown] ?? null}
-			position={tabs.position}
+			position={archived ? null : tabs.position}
 			glide={tabs.glide}
 		>
-			<FilterChip
-				label={m.chats_space_all({}, { locale })}
-				title={m.chats_space_all_hint({}, { locale })}
-				active={tabs.shown === 0}
-				onclick={() => select(0)}
-			/>
-			{#each chips as space, index (space.id)}
-				{@const selected = pageIndex === index + 1}
+			{#if archived}
 				<FilterChip
-					label={space.name}
-					active={tabs.shown === index + 1}
-					title={selected ? m.chats_space_all_hint({}, { locale }) : space.name}
-					onclick={() => select(index + 1)}
+					label={m.chats_archived({}, { locale })}
+					kind="toggle"
+					active
+					title={m.chats_archived_hint({}, { locale })}
+					onclick={() => inbox.setArchived(false)}
 				>
-					{#snippet leading()}
-						<SpaceAvatar name={space.name} profile={space.publicProfile ?? null} seed={space.id} size="xxs" />
-					{/snippet}
-					{#snippet trailing()}
-						{#if selected}<X class="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />{/if}
-					{/snippet}
+					{#snippet leading()}<Archive class="h-3.5 w-3.5" />{/snippet}
+					{#snippet trailing()}<X class="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />{/snippet}
 				</FilterChip>
-			{/each}
+			{:else}
+				<FilterChip
+					label={m.chats_space_all({}, { locale })}
+					title={m.chats_space_all_hint({}, { locale })}
+					active={tabs.shown === 0}
+					onclick={() => select(0)}
+				/>
+				{#each chips as space, index (space.id)}
+					{@const selected = pageIndex === index + 1}
+					<FilterChip
+						label={space.name}
+						active={tabs.shown === index + 1}
+						title={selected ? m.chats_space_all_hint({}, { locale }) : space.name}
+						onclick={() => select(index + 1)}
+					>
+						{#snippet leading()}
+							<SpaceAvatar name={space.name} profile={space.publicProfile ?? null} seed={space.id} size="xxs" />
+						{/snippet}
+						{#snippet trailing()}
+							{#if selected}<X class="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />{/if}
+						{/snippet}
+					</FilterChip>
+				{/each}
+			{/if}
 		</FilterBar>
 	</div>
 

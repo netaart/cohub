@@ -21,13 +21,15 @@ export function registerMe(program: Command): void {
     .description("List sessions you created across all spaces")
     .option("--limit <n>", "Maximum number of sessions (default 20)")
     .option("--cursor <cursor>", "Pagination cursor from a previous result")
+    .option("--archived", "Only sessions archived in your personal view")
     .option("--json", "Output as JSON")
-    .action(async (opts: { limit?: string; cursor?: string; json?: boolean }) => {
+    .action(async (opts: { limit?: string; cursor?: string; archived?: boolean; json?: boolean }) => {
       const client = createClient();
       try {
         const result = await client.user.listSessions({
           limit: opts.limit ? parseInteger(opts.limit, "limit", 1) : undefined,
           cursor: opts.cursor ?? null,
+          archived: opts.archived,
         });
         if (jsonRequested(opts)) return outJson(result);
         if (result.sessions.length === 0) {

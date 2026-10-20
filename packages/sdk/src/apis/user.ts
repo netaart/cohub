@@ -38,7 +38,7 @@ export class UserApi {
     });
   }
 
-  listSessions(optionsOrFetch?: { limit?: number; cursor?: string | null; source?: readonly UserSessionSourceKey[] | null; includeForks?: boolean } | Fetch, customFetch?: Fetch) {
+  listSessions(optionsOrFetch?: { limit?: number; cursor?: string | null; source?: readonly UserSessionSourceKey[] | null; includeForks?: boolean; archived?: boolean } | Fetch, customFetch?: Fetch) {
     const options = typeof optionsOrFetch === "function" ? undefined : optionsOrFetch;
     const fetch = typeof optionsOrFetch === "function" ? optionsOrFetch : customFetch;
     const params = new URLSearchParams();
@@ -46,6 +46,7 @@ export class UserApi {
     if (options?.cursor) params.set("cursor", options.cursor);
     if (options?.source?.length) params.set("source", options.source.join(","));
     if (options?.includeForks) params.set("includeForks", "1");
+    if (options?.archived) params.set("archived", "1");
     const query = params.toString();
     return this.transport.request<UserSessionsResponse>(
       `/api/me/sessions${query ? `?${query}` : ""}`,
@@ -132,7 +133,11 @@ export class UserLabelsApi {
   }
 
   patchResources(resourceRefs: string[], input: { addLabelRefs?: string[]; removeLabelRefs?: string[] }) {
-    return this.transport.request<{ resourceRefs: string[]; affectedLabelIds: string[] }>("/api/me/resources/space/labels/batch", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceRefs, ...input }) });
+    return this.patchResourceLabelsBatch("space", resourceRefs, input);
+  }
+
+  patchResourceLabelsBatch(resourceType: LabelResourceType, resourceRefs: string[], input: { addLabelRefs?: string[]; removeLabelRefs?: string[] }) {
+    return this.transport.request<{ resourceRefs: string[]; affectedLabelIds: string[] }>(`/api/me/resources/${resourceType}/labels/batch`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resourceRefs, ...input }) });
   }
 
   getResourceLabels(resourceType: LabelResourceType, resourceRef: string) {

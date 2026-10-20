@@ -10,6 +10,7 @@ import { dispatchLabelAssignmentsUpdated } from "../../realtime-events.js";
 import { listSessionForksForSessions } from "../../session-forks.js";
 import { redactSessionForksForViewer } from "../../session-fork-visibility.js";
 import { attachActiveTurns, hydrateSessionParticipantProfiles } from "../../space-sessions.js";
+import { sessionArchiveFilter } from "../../session-archive.js";
 
 const router = new Hono();
 const SCOPE_TYPE = "space";
@@ -348,6 +349,7 @@ async function listVisibleSystemLabelItems(input: {
       .where(and(
         eq(spaceSessions.spaceId, input.spaceId),
         buildSessionActivityItemsCursorCondition(input.cursor),
+        sessionArchiveFilter(input.user?.uuid, false, sql`${spaceSessions.id}`),
       ))
       .orderBy(sql`${spaceSessions.lastMessageAt} desc nulls last`, desc(spaceSessions.id))
       .limit(input.limit + 1);
@@ -382,6 +384,7 @@ async function listVisibleSystemLabelItems(input: {
       .where(and(
         eq(spaceSessions.spaceId, input.spaceId),
         buildSessionActivityItemsCursorCondition(cursor),
+        sessionArchiveFilter(input.user?.uuid, false, sql`${spaceSessions.id}`),
       ))
       .orderBy(sql`${spaceSessions.lastMessageAt} desc nulls last`, desc(spaceSessions.id))
       .limit(batchLimit);
@@ -446,6 +449,7 @@ async function listVisibleManualLabelItems(input: {
         eq(labelAssignments.scopeId, input.spaceId),
         eq(labelAssignments.labelId, input.labelId),
         buildManualItemsCursorCondition(input.cursor),
+        sessionArchiveFilter(input.user?.uuid, false, sql`${labelAssignments.resourceRef}`),
       ))
       .orderBy(sql`${labelAssignments.rank} desc nulls last`, desc(labelAssignments.createdAt), desc(labelAssignments.id))
       .limit(input.limit + 1);
@@ -473,6 +477,7 @@ async function listVisibleManualLabelItems(input: {
         eq(labelAssignments.scopeId, input.spaceId),
         eq(labelAssignments.labelId, input.labelId),
         buildManualItemsCursorCondition(cursor),
+        sessionArchiveFilter(input.user?.uuid, false, sql`${labelAssignments.resourceRef}`),
       ))
       .orderBy(sql`${labelAssignments.rank} desc nulls last`, desc(labelAssignments.createdAt), desc(labelAssignments.id))
       .limit(batchLimit);
