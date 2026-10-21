@@ -16,6 +16,7 @@ import {
 import { describeError } from "../network-error.js";
 import { executeTurn, type Executor, type HarnessResult } from "./native/execution.js";
 import { ContextRequiredError } from "./native/results.js";
+import { SizeLimitError } from "./native/transcript.js";
 import { ProcessCleanupUncertainError } from "./process-group.js";
 import {
   serializeDiagnosticError,
@@ -32,6 +33,10 @@ type Execution = {
   requestId?: string | null;
   traceContext?: RuntimeDiagnosticContext["traceContext"];
   result?: HarnessResult;
+  /** Started on a transport that has since closed; it keeps running and replays on a later one. */
+  detached?: boolean;
+  /** Only replays a saved result for its connection; it does no local work and ends with that connection. */
+  recovery?: boolean;
 };
 
 export type RuntimeConnectionOptions = {
@@ -57,6 +62,11 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
   let backoff = 500;
   let attempt = 0;
   let conflictSince: number | null = null;
+  // Executions outlive a single transport so a dropped socket reconnects immediately
+  // instead of waiting for in-flight turns to finish.
+  const executions = new Map<string, Execution>();
+  const seen = new Set<string>();
+  const announce: Announce = { current: null };
   const uploads = new AbortController();
   const uploadSignal = AbortSignal.any([options.signal, uploads.signal]);
   const log = (
@@ -85,12 +95,16 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
     while (!options.signal.aborted) {
       attempt += 1;
       let readyAt = 0;
+      const connectStartedAt = Date.now();
       let outcome: ConnectOutcome;
       try {
         outcome = await connect({
           ...options,
           runtimeId,
           attempt,
+          executions,
+          seen,
+          announce,
           onReady: () => {
             readyAt = Date.now();
             conflictSince = null;
@@ -117,11 +131,16 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
         attempt: attempt || 1,
         delayMs: backoff,
         outcome: outcome.kind,
+        connectedMs: Date.now() - connectStartedAt,
+        readyMs: readyAt ? Date.now() - readyAt : null,
+        activeExecutions: executions.size,
       });
       await delay(backoff / 2 + Math.random() * backoff / 2, undefined, { signal: options.signal }).catch(() => undefined);
       backoff = Math.min(30_000, backoff * 2);
     }
   } finally {
+    for (const execution of executions.values()) execution.controller.abort();
+    await Promise.allSettled([...executions.values()].map((entry) => entry.promise));
     clearInterval(timer);
     uploads.abort();
     await flush();
@@ -132,7 +151,31 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
 type ConnectOptions = RuntimeConnectionOptions & {
   runtimeId: string;
   attempt: number;
+  executions: Map<string, Execution>;
+  seen: Set<string>;
+  /** Reports a detached execution's saved result on whichever connection is ready when it settles. */
+  announce: Announce;
 };
+
+type PendingExecution = { sessionId: string; turnId: string; harness: LocalHarness };
+type Announce = { current: ((execution: PendingExecution) => void) | null };
+
+function frameIdentity(frame: unknown) {
+  const value = frame as { type?: unknown; requestId?: unknown; event?: { type?: unknown; sessionId?: unknown; turnId?: unknown; input?: { harness?: unknown; nativeSessionId?: unknown; turns?: Array<{ turnId?: unknown }>; sessionId?: unknown; turnId?: unknown } } };
+  const event = value?.event;
+  const pick = (input: unknown) => typeof input === "string" ? input : undefined;
+  return {
+    frameType: pick(value?.type),
+    requestId: pick(value?.requestId),
+    eventType: pick(event?.type),
+    sessionId: pick(event?.sessionId) ?? pick(event?.input?.sessionId),
+    turnId: pick(event?.turnId) ?? pick(event?.input?.turnId),
+    harness: pick(event?.input?.harness),
+    nativeSessionId: pick(event?.input?.nativeSessionId),
+    turnCount: Array.isArray(event?.input?.turns) ? event.input.turns.length : undefined,
+    turnIds: Array.isArray(event?.input?.turns) ? event.input.turns.slice(0, 10).map((turn) => pick(turn?.turnId)).filter(Boolean) : undefined,
+  };
+}
 
 type ConnectOutcome =
   | { kind: "retry" }
@@ -183,11 +226,13 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
   const runtimeUrl = new URL(options.url);
   runtimeUrl.searchParams.set("runtimeId", options.runtimeId);
   const socket = new WebSocket(runtimeUrl.toString());
-  const active = new Map<string, Execution>();
-  const seen = new Set<string>();
+  const active = options.executions;
+  const seen = options.seen;
   const disconnected = new AbortController();
   const contexts = new Map<string, (context: RuntimeContext) => void>();
   let lastHeartbeat = Date.now();
+  let openedAt = 0;
+  let readyAt = 0;
   let connectionId: string | null = null;
   let fatal = false;
   let fatalCode = 0;
@@ -209,8 +254,10 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
     const data = JSON.stringify(frame);
     const bytes = Buffer.byteLength(data);
     if (bytes > RUNTIME_MAX_FRAME_BYTES) {
-      log("error", "runtime.frame_too_large", { bytes, maxBytes: RUNTIME_MAX_FRAME_BYTES }, { connectionId });
-      throw new Error("Runtime frame exceeds transfer limit");
+      const identity = frameIdentity(frame);
+      const execution = identity.requestId ? active.get(identity.requestId) : undefined;
+      log("error", "runtime.frame_too_large", { bytes, maxBytes: RUNTIME_MAX_FRAME_BYTES, ...identity }, execution ? executionContext(connectionId, execution) : { connectionId });
+      throw new SizeLimitError("Runtime frame exceeds transfer limit");
     }
     socket.send(data);
   };
@@ -236,8 +283,12 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
       log("error", "runtime.heartbeat_timeout", {
         ageMs: heartbeatAgeMs,
         activeExecutions: active.size,
+        readyState: socket.readyState,
+        bufferedBytes: socket.bufferedAmount,
       }, { connectionId });
       closeTransport();
+      // A half-open TCP path may never deliver the close event; stop waiting so reconnect can start.
+      if (heartbeatAgeMs > 45_000) handleClose({ code: 1006, reason: "Runtime heartbeat timed out", wasClean: false }, true);
     } else if (connectionId) {
       try {
         send({ type: "runtime.heartbeat" });
@@ -267,46 +318,90 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
     }
   }, 10_000);
 
-  const closed = new Promise<void>((resolve) => {
-    socket.addEventListener("close", (event) => {
-      unauthorized = event.code === 4401;
-      fatal = [4400, 4403].includes(event.code);
-      if (fatal) { fatalCode = event.code; fatalReason = event.reason; }
-      conflict = event.code === 4409;
-      disconnected.abort();
-      log(options.signal.aborted ? "debug" : fatal || conflict ? "error" : "warn", fatal ? "runtime.websocket.rejected" : "runtime.websocket.closed", {
-        code: event.code,
-        reason: event.reason,
-        durationMs: Date.now() - connectedAt,
-        activeExecutions: active.size,
-        fatal,
-        conflict,
-      }, { connectionId });
-      nativeChannelReady = false;
-      for (const pending of nativePending.values()) { clearTimeout(pending.timer); pending.reject(new Error("Runtime native channel disconnected")); }
-      nativePending.clear();
-      options.onDisconnected?.();
-      const executionMustStop = options.signal.aborted || fatal || conflict;
-      for (const execution of active.values()) {
-        log(executionMustStop ? "error" : "warn", executionMustStop ? "runtime.execution_transport_invalidated" : "runtime.execution_transport_detached", {
-          code: event.code,
-          reason: event.reason,
-        }, executionContext(connectionId, execution));
-        if (executionMustStop) execution.controller.abort();
+  const announceHere = (execution: PendingExecution) => {
+    try {
+      send({ type: "runtime.recovery", executions: [execution] });
+      log("info", "runtime.detached_result_announced", undefined, executionContext(connectionId, execution));
+    } catch {
+      // The next ready connection reports every pending receipt.
+    }
+  };
+  /** Replays a saved result, or answers explicitly that none is available; never leaves the server waiting. */
+  const replaySaved = async (requestId: string, input: PendingExecution & { spaceId: string }, context: RuntimeDiagnosticContext, executionRequestId?: string) => {
+    let saved: Awaited<ReturnType<typeof options.executor.results.recover>> = null;
+    try { saved = await options.executor.results.recover(input, executionRequestId); }
+    catch (error) { log("error", "runtime.recovery_failed", { error: serializeDiagnosticError(error) }, context); }
+    if (saved) for (const event of saved.events) send({ type: "runtime.event", requestId, event });
+    else send({ type: "runtime.event", requestId, event: { type: "turn.error", uncertain: true, message: "Result unavailable; files retained" } });
+  };
+  let closeHandled = false;
+  let resolveClosed = () => {};
+  const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
+  const handleClose = (event: { code: number; reason: string; wasClean: boolean }, forced = false) => {
+    if (closeHandled) return;
+    closeHandled = true;
+    unauthorized = event.code === 4401;
+    fatal = [4400, 4403].includes(event.code);
+    if (fatal) { fatalCode = event.code; fatalReason = event.reason; }
+    conflict = event.code === 4409;
+    disconnected.abort();
+    const now = Date.now();
+    log(options.signal.aborted ? "debug" : fatal || conflict ? "error" : "warn", fatal ? "runtime.websocket.rejected" : "runtime.websocket.closed", {
+      code: event.code,
+      reason: event.reason,
+      wasClean: event.wasClean,
+      forced,
+      durationMs: now - connectedAt,
+      openMs: openedAt ? now - openedAt : null,
+      readyMs: readyAt ? now - readyAt : null,
+      lastInboundAgeMs: now - lastHeartbeat,
+      bufferedBytes: socket.bufferedAmount,
+      activeExecutions: active.size,
+      fatal,
+      conflict,
+    }, { connectionId });
+    nativeChannelReady = false;
+    for (const pending of nativePending.values()) { clearTimeout(pending.timer); pending.reject(new Error("Runtime native channel disconnected")); }
+    nativePending.clear();
+    options.onDisconnected?.();
+    const executionMustStop = options.signal.aborted || fatal || conflict;
+    if (options.announce.current === announceHere) options.announce.current = null;
+    for (const [requestId, execution] of active) {
+      if (executionMustStop) {
+        log("error", "runtime.execution_transport_invalidated", { code: event.code, reason: event.reason }, executionContext(connectionId, execution));
+        execution.controller.abort();
+      } else if (execution.recovery) {
+        // The server re-asks on the next connection; a stale waiter must not hold a slot or its request id.
+        execution.controller.abort();
+      } else if (!execution.detached) {
+        execution.detached = true;
+        log("warn", "runtime.execution_transport_detached", { code: event.code, reason: event.reason }, executionContext(connectionId, execution));
+        // The server may have stopped asking by the time this finishes; a saved result is announced again.
+        void execution.promise.finally(() => {
+          if (!execution.result || active.get(requestId) !== execution) return;
+          options.announce.current?.({ sessionId: execution.sessionId, turnId: execution.turnId, harness: execution.harness });
+        });
       }
-      resolve();
-    }, { once: true });
-  });
+    }
+    resolveClosed();
+  };
+  socket.addEventListener("close", (event) => handleClose(event), { once: true });
 
   socket.addEventListener("error", (event) => {
-    const detail = (event as Event & { error?: unknown }).error;
+    const detail = event as Event & { error?: unknown; message?: unknown };
     log("warn", "runtime.websocket.error", {
       type: event.type,
-      error: serializeDiagnosticError(detail ?? new Error("WebSocket error")),
+      message: typeof detail.message === "string" && detail.message ? detail.message : undefined,
+      readyState: socket.readyState,
+      opened: openedAt > 0,
+      ready: readyAt > 0,
+      lastInboundAgeMs: Date.now() - lastHeartbeat,
+      error: serializeDiagnosticError(detail.error ?? new Error("WebSocket error")),
     }, { connectionId });
     socket.close();
   });
   socket.addEventListener("open", () => {
+    openedAt = Date.now();
     try {
       log("info", "runtime.websocket.open", {
         attempt: options.attempt,
@@ -342,14 +437,17 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         if (connectionId === frame.connectionId) return;
         if (connectionId) throw new Error("Runtime connection identity changed");
         connectionId = frame.connectionId;
+        readyAt = Date.now();
         clearTimeout(readyTimer);
         log("info", "runtime.ready", {
           connectionId,
-          durationMs: Date.now() - connectedAt,
+          durationMs: readyAt - connectedAt,
+          detachedExecutions: [...active.values()].filter((entry) => entry.detached).length,
         }, { connectionId });
         nativeChannelReady = true;
         options.onNativeChannel?.(sendNative);
         options.onReady();
+        options.announce.current = announceHere;
         let recoveryBatch = 0;
         for await (const executions of options.executor.results.pendingBatches()) {
           recoveryBatch += 1;
@@ -430,8 +528,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         if (previous) {
           if (previous.sessionId !== identity.sessionId || previous.turnId !== identity.turnId || previous.harness !== identity.harness) throw new Error("Runtime recovery identity changed");
           await previous.promise;
-          const saved = await options.executor.results.recover(identity);
-          if (saved) for (const event of saved.events) send({ type: "runtime.event", requestId: frame.requestId, event });
+          await replaySaved(frame.requestId, identity, context);
           return;
         }
         const running = [...active].find(([, entry]) => entry.turnId === identity.turnId && entry.sessionId === identity.sessionId && entry.harness === identity.harness);
@@ -441,14 +538,24 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
           traceContext: frame.traceContext,
           controller: new AbortController(),
           promise: Promise.resolve(),
+          recovery: true,
         };
         active.set(frame.requestId, recovery);
         recovery.promise = (async () => {
           try {
             if (running) {
-              running[1].controller.abort();
-              await running[1].promise;
-              active.delete(running[0]);
+              // A detached execution was not superseded by this host; wait for its result instead of discarding it.
+              if (running[1].detached) {
+                log("info", "runtime.recovery_waiting_detached", { runningRequestId: running[0] }, context);
+                // A recovery the server gave up on must not hold an execution slot until the Turn ends.
+                const stopped = recovery.controller.signal;
+                await Promise.race([running[1].promise, new Promise<void>((resolve) => stopped.addEventListener("abort", () => resolve(), { once: true }))]);
+                stopped.throwIfAborted();
+              } else {
+                running[1].controller.abort();
+                await running[1].promise;
+              }
+              if (active.get(running[0]) === running[1]) active.delete(running[0]);
             }
             const saved = await options.executor.results.recover(identity);
             recovery.controller.signal.throwIfAborted();
@@ -466,7 +573,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
                 // The next connection can read the same result.
               }
             }
-            active.delete(frame.requestId);
+            if (active.get(frame.requestId) === recovery) active.delete(frame.requestId);
           }
         })();
         return;
@@ -481,9 +588,9 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
       const previous = active.get(frame.requestId);
       if (previous) {
         if (previous.sessionId !== frame.input.sessionId || previous.turnId !== frame.input.turnId || previous.harness !== frame.input.harness) throw new Error("Runtime execution identity changed");
+        log("info", "runtime.execution_resumed", { detached: previous.detached === true, settled: Boolean(previous.result) }, executionContext(connectionId, frame.input));
         await previous.promise;
-        const saved = await options.executor.results.recover(frame.input, frame.requestId);
-        if (saved) for (const event of saved.events) send({ type: "runtime.event", requestId: frame.requestId, event });
+        await replaySaved(frame.requestId, frame.input, context, frame.requestId);
         return;
       }
       const requestContext = async (executionSignal: AbortSignal) => {
@@ -615,7 +722,6 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
   if (options.signal.aborted) shutdown();
   try {
     await closed;
-    await Promise.allSettled([...active.values()].map((entry) => entry.promise));
   } finally {
     clearTimeout(readyTimer);
     clearInterval(heartbeat);

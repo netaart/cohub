@@ -11,6 +11,7 @@ import { workbuddyProjectName } from "../src/runtime/harnesses/workbuddy.js";
 import { cursorChatDirectory, cursorTranscriptPath } from "../src/runtime/harnesses/cursor-transcript.js";
 import { nativeTurnId } from "../src/runtime/native/identity.js";
 import { discoverTranscripts, NativeIngest, type IngestHooks, type TranscriptState } from "../src/runtime/native/ingest.js";
+import { SizeLimitError } from "../src/runtime/native/transcript.js";
 import { fakeNativeServer as fakeServer } from "./fixtures/native-server.js";
 
 const at = "2026-01-01T00:00:00.000Z";
@@ -162,6 +163,52 @@ test("a new terminal conversation syncs in order, and a restart asks the server 
     assert.deepEqual(server.batches.at(-1)?.turns.map((turn) => turn.turnId), [turnIdOf("pi", id, "u3")]);
     await restarted.close(AbortSignal.timeout(2_000));
   } finally { await w.cleanup(); }
+});
+
+test("a Turn over a size limit is not resent until its transcript changes", async () => {
+  const w = await workspace();
+  const server = fakeServer();
+  let attempts = 0;
+  const transport = { ...server.transport, ingest: async () => { attempts += 1; throw new SizeLimitError("Runtime frame exceeds transfer limit"); } };
+  const ingest = w.ingest({ hooks: { onError: () => {} } });
+  try {
+    const id = randomUUID();
+    const path = join(w.piDirectory(w.project), "big.jsonl");
+    const quiet = new Date(Date.now() - 60_000);
+    await w.write(path, piHeader(id, w.project) + piTurn(1, null), quiet);
+    await ingest.load();
+    ingest.connect(transport);
+    await until(() => attempts === 1);
+    // A reconnect and a backoff window would both have retried the same bytes.
+    ingest.connect(transport);
+    ingest.touch(path);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    assert.equal(attempts, 1);
+    await appendFile(path, piTurn(2, "a1"));
+    await utimes(path, quiet, new Date(quiet.getTime() + 1_000));
+    ingest.touch(path);
+    await until(() => attempts === 2);
+  } finally { await ingest.close(AbortSignal.timeout(2_000)); await w.cleanup(); }
+});
+
+test("an automatically resumed import skips a size-limited history file; an explicit import retries it", async () => {
+  const w = await workspace();
+  const server = fakeServer();
+  let attempts = 0;
+  const transport = { ...server.transport, ingest: async () => { attempts += 1; throw new SizeLimitError("Runtime frame exceeds transfer limit"); } };
+  const ingest = w.ingest({ enabledAt: "2026-01-01T00:00:00Z", hooks: { onError: () => {} } });
+  try {
+    const id = randomUUID();
+    const path = join(w.piDirectory(w.project), "history.jsonl");
+    await w.write(path, piHeader(id, w.project) + piTurn(1, null), new Date("2025-01-01T00:00:00Z"));
+    await ingest.load();
+    ingest.connect(transport);
+    await ingest.startImport();
+    await until(() => attempts === 1 && ingest.status().import.state === "done");
+    assert.equal(ingest.status().import.failed.length, 1);
+    assert.deepEqual(await ingest.plan({}, undefined, { resume: true }), []);
+    assert.equal((await ingest.plan()).length, 1);
+  } finally { await ingest.close(AbortSignal.timeout(2_000)); await w.cleanup(); }
 });
 
 test("Cohub's own Turns are recognized by their marker; a terminal Turn after one continues its Session", async () => {

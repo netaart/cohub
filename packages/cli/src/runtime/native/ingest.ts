@@ -2,6 +2,7 @@ import { appendFile, mkdir, open, readFile, readdir, rename, stat } from "node:f
 import { join } from "node:path";
 import { NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, type NativeIngestResult, type NativeRuntimeEvent, type NativeTurnComplete, type NativeTurnMessage } from "@neta-art/cohub";
 import { acceptsDirectory, acceptsTranscript, readSessionHeader, readTranscript, transcriptRoots, type Harness, type NativeTranscriptTurn } from "./adapters.js";
+import { SizeLimitError } from "./transcript.js";
 import { nativeTurnId } from "./identity.js";
 import type { RuntimeArchiveStore } from "../archive-store.js";
 import { harnessAdapter, transcriptFormat } from "../harnesses/index.js";
@@ -94,6 +95,8 @@ export type IngestHooks = {
 /** A transcript on disk that may belong to the bound directory. */
 export type NativeCandidate = { harness: Harness; path: string; size: number; mtimeMs: number; ino: number };
 
+const fileVersion = (info: { ino: number; size: number; mtimeMs: number }) => `${info.ino}:${info.size}:${info.mtimeMs}`;
+
 /** Headers are read this many at a time; each costs one small read. */
 const HEADER_CONCURRENCY = 16;
 
@@ -166,6 +169,8 @@ export class NativeIngest {
   private readonly reads = new Set<Promise<void>>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly failures = new Map<string, number>();
+  /** File versions that hit a size limit; they are not read again until the file changes. */
+  private readonly oversized = new Map<string, string>();
   private readonly aliveAt = new Map<string, number>();
   private readonly runningPaths = new Set<string>();
   /** Files a live Cohub execution is writing in a format that cannot mark its Turn. */
@@ -369,14 +374,16 @@ export class NativeIngest {
       if (state ? !this.unchanged(state, candidate) : candidate.mtimeMs >= enabledAt) this.live.set(candidate.path, this.live.get(candidate.path) ?? false);
     }
     this.drainLive();
-    if (this.job.state === "running") await this.startImport(this.job.filter, this.job.concurrency);
+    if (this.job.state === "running") await this.startImport(this.job.filter, this.job.concurrency, { resume: true });
   }
 
-  async plan(filter: ImportFilter = {}, signal?: AbortSignal): Promise<Array<NativeCandidate & { nativeSessionId?: string }>> {
+  /** `resume` is automatic resumption: it skips file versions that already hit a size limit, which only an explicit import retries. */
+  async plan(filter: ImportFilter = {}, signal?: AbortSignal, options: { resume?: boolean } = {}): Promise<Array<NativeCandidate & { nativeSessionId?: string }>> {
     const harnesses = this.harnesses.filter((harness) => !filter.harnesses?.length || filter.harnesses.includes(harness));
     const candidates = await discoverTranscripts(this.options.cwd, harnesses, { headers: true, nested: this.nested, signal });
     // A transcript whose first read failed is still untracked (size -1), so a later import retries it.
     return candidates.filter((candidate) => (this.states.get(candidate.path)?.size ?? -1) < 0 && !this.live.has(candidate.path)
+      && !(options.resume && this.oversized.get(candidate.path) === fileVersion(candidate))
       && (!filter.nativeSessionId || candidate.nativeSessionId === filter.nativeSessionId));
   }
 
@@ -384,8 +391,8 @@ export class NativeIngest {
    * Start or resume a backfill. What was imported is tracked, so resuming simply plans again; the
    * server recognizes any Turn it already has, so an interrupted batch is never duplicated.
    */
-  async startImport(filter: ImportFilter = {}, concurrency = DEFAULT_IMPORT_CONCURRENCY): Promise<ImportJob> {
-    const queue = await this.plan(filter);
+  async startImport(filter: ImportFilter = {}, concurrency = DEFAULT_IMPORT_CONCURRENCY, options: { resume?: boolean } = {}): Promise<ImportJob> {
+    const queue = await this.plan(filter, undefined, options);
     const resuming = this.job.state === "running" || this.job.state === "paused";
     const same = resuming && JSON.stringify(this.job.filter) === JSON.stringify(filter);
     const base = same ? this.job : { ...this.job, done: 0, turns: 0, bytes: 0, failed: [], startedAt: new Date().toISOString() };
@@ -494,7 +501,7 @@ export class NativeIngest {
 
   private retryLater(path: string, error: unknown): void {
     this.report(path, error);
-    if (this.stopped || !this.transport) return;
+    if (this.stopped || !this.transport || error instanceof SizeLimitError) return;
     const attempts = (this.failures.get(path) ?? 0) + 1;
     if (attempts > RETRY_ATTEMPTS) { this.failures.delete(path); return; }
     this.failures.set(path, attempts);
@@ -541,6 +548,17 @@ export class NativeIngest {
     if (this.foreign.has(path) || this.executing.has(path)) return;
     const info = await stat(path).catch((error) => { if (missing(error)) return null; throw error; });
     if (!info?.isFile()) return;
+    const version = fileVersion(info);
+    if (lane === "live" && this.oversized.get(path) === version) return;
+    this.oversized.delete(path);
+    try { await this.readVersion(path, lane, force, info); }
+    catch (error) {
+      if (error instanceof SizeLimitError) this.oversized.set(path, version);
+      throw error;
+    }
+  }
+
+  private async readVersion(path: string, lane: "live" | "import", force: boolean, info: { size: number; mtimeMs: number; ino: number }): Promise<void> {
     const previous = this.states.get(path);
     // Unchanged bytes can still hold a Turn whose end the control plane has only now reported.
     if (previous && this.unchanged(previous, info) && !(force && previous.runningTurnId)) return;

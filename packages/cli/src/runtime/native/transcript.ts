@@ -55,6 +55,10 @@ export const iso = (value: unknown) => {
   return date.toISOString();
 };
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
+/** A size limit that the same bytes will hit again; retrying before the file changes is wasted work. */
+export class SizeLimitError extends Error {
+  override name = "SizeLimitError";
+}
 export const NATIVE_MAX_RECORD_BYTES = 256 * 1024 * 1024;
 export const NATIVE_MAX_TRANSCRIPT_BYTES = 1024 * 1024 * 1024;
 const NATIVE_HEADER_MAX_BYTES = 1024 * 1024;
@@ -222,7 +226,7 @@ export async function ensurePlainCodexRollout(path: string, cacheDirectory: stri
     const bounded = new Transform({
       transform(chunk, _encoding, push) {
         written += chunk.length;
-        if (written > maxBytes) { push(new Error("Decompressed rollout exceeds the local limit")); return; }
+        if (written > maxBytes) { push(new SizeLimitError("Decompressed rollout exceeds the local limit")); return; }
         push(null, chunk);
       },
     });
@@ -243,8 +247,8 @@ export async function readTranscriptLines(stream: AsyncIterable<Buffer>): Promis
   const append = (bytes: Buffer) => {
     if (!bytes.length) return;
     fragments.push(bytes); pendingBytes += bytes.length; checksum.update(bytes);
-    if (pendingBytes > NATIVE_MAX_RECORD_BYTES) throw new Error("Native record exceeds the 256 MiB local parse limit; original retained");
-    if (offset + pendingBytes > NATIVE_MAX_TRANSCRIPT_BYTES) throw new Error("Native transcript exceeds the 1 GiB local parse limit; original retained");
+    if (pendingBytes > NATIVE_MAX_RECORD_BYTES) throw new SizeLimitError("Native record exceeds the 256 MiB local parse limit; original retained");
+    if (offset + pendingBytes > NATIVE_MAX_TRANSCRIPT_BYTES) throw new SizeLimitError("Native transcript exceeds the 1 GiB local parse limit; original retained");
   };
   for await (const chunk of stream) {
     let start = 0;
