@@ -370,7 +370,9 @@ cohub search "query" --limit 20 --json
 
 ## Models and multimodal generation
 
-`models ls` prints each LLM's per-million-token cost (`$3 /M input · $15 /M output`, with cache rates when declared) and hides models marked `hidden`. `models ls --model-type multimodal` prints each model's unit price (`$0.04 / image`, `$0.10–$0.50 / second`); use `--json` for the raw `pricing` object (`unit`, `amount` or `min`/`max`, optional `note`).
+`models ls` prints each LLM's per-million-token cost (`$3 /M input · $15 /M output`, with cache rates when declared) and hides models marked `hidden`. `models ls --model-type multimodal` prints each model's category and unit price (`$0.04 / image`, `$0.10–$0.50 / second`); use `--json` for the raw `pricing` object (`unit`, `amount` or `min`/`max`, optional `note`).
+
+`models show <model>` includes each operation's inputs and parameters. Array parameters show their item type, allowed values, item limits, uniqueness, defaults, and examples when declared.
 
 ```bash
 cohub models ls --json

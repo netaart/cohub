@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { getBuiltinGenerationModel } from "@neta-art/generation";
 import type { PublicGenerationDeclaration } from "@neta-art/cohub";
-import { filterHiddenLlmModels, formatGenerationPrice, formatLlmModelCost, toMultimodalModelSummary } from "../src/commands/models.js";
+import { filterHiddenLlmModels, formatGenerationPrice, formatLlmModelCost, operationLines, toMultimodalModelSummary } from "../src/commands/models.js";
 
 test("formatGenerationPrice renders a flat unit price", () => {
 	assert.equal(formatGenerationPrice({ unit: "image", amount: 0.04 }), "$0.04 / image");
@@ -60,6 +61,23 @@ test("toMultimodalModelSummary omits absent optional fields", () => {
 	};
 
 	assert.deepEqual(toMultimodalModelSummary(declaration), { model: "unnamed-model" });
+});
+
+test("Meshy model summaries retain the declared category", () => {
+	const model = getBuiltinGenerationModel("meshy");
+	assert.ok(model);
+	assert.equal(toMultimodalModelSummary(model).category, "3d");
+});
+
+test("Meshy operation descriptions include media roles and string/integer array constraints", () => {
+	const model = getBuiltinGenerationModel("meshy");
+	assert.ok(model);
+	const lines = operationLines(model);
+	assert.equal(lines[0], "text-to-3d — Text To 3D");
+	assert.ok(lines.includes("      type: array of string; optional; min items: 1; unique; values: glb, obj, fbx, stl, usdz, 3mf"));
+	assert.ok(lines.includes("      type: array of integer; optional; min items: 1; max items: 10; unique; item min: 0"));
+	assert.ok(lines.some((line) => line.includes("3d — required; min 1; max 2; sources: url; roles: motion")));
+	assert.deepEqual(operationLines({ ...model, operations: undefined }), []);
 });
 
 test("formatLlmModelCost renders per-million-token input and output rates", () => {
