@@ -2,7 +2,7 @@
 
 Messages sent while an Agent turn is running wait in the Chat queue as follow-ups. Each time the Agent is free, the queued follow-ups are claimed for the next turn. The sender's Home Space decides whether they are claimed together or one by one.
 
-Create `.cohub/queue.json` in the Home Space:
+Create `.cohub/agent.json` in the Home Space:
 
 ```json
 {
@@ -21,4 +21,4 @@ Create `.cohub/queue.json` in the Home Space:
 
 The config belongs to the user who sent the follow-up. The earliest queued follow-up decides the delivery mode for the claim. Steer messages always run on their own and are not affected by this setting.
 
-A missing Home Space or a missing `.cohub/queue.json` uses `together`. The file must be a regular file inside the Home Space workspace and at most 4096 bytes; a symlink that points outside the workspace or to a missing target is rejected. An invalid file (unknown version, unknown `followupDelivery` value, unknown field, or a rejected path or size) makes the claim throw, so the queued follow-ups stay queued. After the file is fixed, they start at the next claim, which runs when a new message is sent or the previous turn ends.
+A missing Home Space or a missing `.cohub/agent.json` uses `together`. The file must be a regular file inside the Home Space workspace and at most 4096 bytes; a symlink that points outside the workspace or to a missing target is rejected. An invalid file (unknown version, unknown `followupDelivery` value, unknown field, or a rejected path or size) makes the claim throw, so the queued follow-ups stay queued. After the file is fixed, they start at the next claim, which runs when a new message is sent or the previous turn ends.

@@ -52,7 +52,7 @@ async function createUserWithHomeSpace(configText: string | null) {
   if (configText !== null) {
     const dir = join(workspaceRoot, home.id, "workspace", ".cohub");
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "queue.json"), configText);
+    await writeFile(join(dir, "agent.json"), configText);
   }
   return userUuid;
 }
@@ -141,13 +141,13 @@ test("an invalid queue config fails the claim and keeps every follow-up queued",
 });
 
 test("a queue config linked outside the workspace or above the size limit fails the claim", async () => {
-  const outsidePath = join(workspaceRoot, "outside-queue.json");
+  const outsidePath = join(workspaceRoot, "outside-agent.json");
   await mkdir(workspaceRoot, { recursive: true });
   await writeFile(outsidePath, "{\"version\":1,\"followupDelivery\":\"one_by_one\"}");
 
   const linkedUser = await createUserWithHomeSpace(null);
   const linkedDir = await homeConfigDir(linkedUser);
-  await symlink(outsidePath, join(linkedDir, "queue.json"));
+  await symlink(outsidePath, join(linkedDir, "agent.json"));
   const linked = await createQueuedFollowups(linkedUser, 1);
   await assert.rejects(() => claimNextTurnBatch({ sessionId: linked.sessionId }), /must stay inside its workspace/);
   assert.equal(await statusOf(linked.turnIds[0] as string), "queued");
@@ -161,7 +161,7 @@ test("a queue config linked outside the workspace or above the size limit fails 
 test("a .cohub directory linked outside the workspace fails the claim", async () => {
   const outsideConfigDir = join(workspaceRoot, "outside-config");
   await mkdir(outsideConfigDir, { recursive: true });
-  await writeFile(join(outsideConfigDir, "queue.json"), "{\"version\":1,\"followupDelivery\":\"one_by_one\"}");
+  await writeFile(join(outsideConfigDir, "agent.json"), "{\"version\":1,\"followupDelivery\":\"one_by_one\"}");
   const userUuid = await createUserWithHomeSpace(null);
   const configDir = await homeConfigDir(userUuid);
   await rm(configDir, { recursive: true });
@@ -171,10 +171,10 @@ test("a .cohub directory linked outside the workspace fails the claim", async ()
   assert.equal(await statusOf(turnIds[0] as string), "queued");
 });
 
-test("a dangling queue.json symlink fails the claim instead of using the default delivery", async () => {
+test("a dangling agent.json symlink fails the claim instead of using the default delivery", async () => {
   const userUuid = await createUserWithHomeSpace(null);
   const dir = await homeConfigDir(userUuid);
-  await symlink(join(workspaceRoot, "missing-target.json"), join(dir, "queue.json"));
+  await symlink(join(workspaceRoot, "missing-target.json"), join(dir, "agent.json"));
   const { sessionId, turnIds } = await createQueuedFollowups(userUuid, 2);
   await assert.rejects(() => claimNextTurnBatch({ sessionId }), /ENOENT/);
   assert.equal(await statusOf(turnIds[0] as string), "queued");
@@ -195,7 +195,7 @@ test("a dangling .cohub symlink fails the claim instead of using the default del
 test("a FIFO as queue config fails the claim without blocking it", { timeout: 10_000 }, async () => {
   const userUuid = await createUserWithHomeSpace(null);
   const dir = await homeConfigDir(userUuid);
-  await execFileAsync("mkfifo", [join(dir, "queue.json")]);
+  await execFileAsync("mkfifo", [join(dir, "agent.json")]);
   const { sessionId, turnIds } = await createQueuedFollowups(userUuid, 1);
   await assert.rejects(() => claimNextTurnBatch({ sessionId }), /must be a regular file/);
   assert.equal(await statusOf(turnIds[0] as string), "queued");
