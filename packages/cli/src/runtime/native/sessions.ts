@@ -63,7 +63,8 @@ export class NativeSessions {
       if (restored) {
         // A restored copy is history the server already has, even where it carries no markers.
         const through = (await readTranscript(restored.path, restored.harness).catch(() => null))?.turns.at(-1)?.key ?? null;
-        this.options.ingest.adopt(restored, input.sessionId, { turnKey: through, turnId: input.context.throughTurnId });
+        if (through) this.options.ingest.adopt(restored, input.sessionId, { turnKey: through, turnId: input.context.throughTurnId });
+        else this.options.ingest.adopt(restored, input.sessionId);
         return { session: restored, resume: "restored" };
       }
     }

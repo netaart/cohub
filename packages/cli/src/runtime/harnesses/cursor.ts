@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { access, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-import { tmpdir } from "node:os";
+import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { promisify, stripVTControlCharacters } from "node:util";
 import type { ContentBlock, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput } from "@neta-art/cohub";
@@ -28,6 +28,8 @@ const DEFAULT_MODEL = "default";
 const PROBE = ["-p", "--output-format", "stream-json", "--stream-partial-output", "--trust", "--new-session-id", "probe", "--conversation-history-file", "probe", "--image", "probe", "--resume", "probe", "--model", "probe", "--", "probe"];
 /** Keys `--model` writes to `cli-config.json` as the user's default (Cursor persists any model it starts with). */
 const MODEL_PREFERENCE = ["model", "hasChangedDefaultModel", "maxMode", "maxModeAutoEnabled"];
+/** Waiting longer than this on a live owner (or a reused pid) fails the Turn instead of stalling it. */
+const LOCK_WAIT_MS = 30_000;
 const ABORT_ESCALATION_MS = 5_000;
 const FLUSH_TIMEOUT_MS = 10_000;
 /** The prompt is an argument: Linux caps one at 128 KiB, Windows a whole command line at 32K characters. */
@@ -91,26 +93,98 @@ export function cursorModels(output: string): HarnessModel[] {
   return [[DEFAULT_MODEL, "Default"] as const, ...models].map(([id, name]) => ({ harness: "cursor", provider: PROVIDER, id, name, ...(id === DEFAULT_MODEL ? { isDefault: true } : {}) }));
 }
 
+/** Shared by every Runtime process on this machine, one per Cursor config file. */
+const preferenceRecord = (config: string) => join(process.env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state"), "cohub", `cursor-model-${createHash("sha256").update(config).digest("hex").slice(0, 16)}.json`);
+type PreferenceHold = { id: string; pid: number };
+type PreferenceRecord = { config: string; baseline: JsonRecord | null; requested: string[]; holders: PreferenceHold[] };
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; } };
+const readJson = (path: string) => readFile(path, "utf8").then((raw) => record(JSON.parse(raw)), () => null);
+async function writeJson(path: string, value: unknown) {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await rename(temporary, path).catch(async (error: unknown) => { await rm(temporary, { force: true }); throw error; });
+}
 /**
- * Cursor saves the model a run starts with as the user's default. A Cohub Turn's choice is its own:
- * the earlier preference is put back unless the user picked another model meanwhile.
+ * A lock directory naming its owner's pid, published by renaming a prepared one into place, so it
+ * never exists without its owner. It is taken over only once that process is gone, by one waiter
+ * that renames it aside, so a live owner always releases its own lock.
  */
-async function keepModelPreference(requested: string): Promise<() => Promise<void>> {
-  const path = join(cursorConfigDirectory(), "cli-config.json");
-  const read = () => readFile(path, "utf8").then((raw) => record(JSON.parse(raw)), () => null);
-  const before = await read();
-  if (!before) return async () => {};
-  return async () => {
-    const after = await read();
-    const model = record(after?.model);
-    const ours = [text(model.modelId), text(model.displayModelId)].some((id) => id && requested.startsWith(id));
-    if (!after || !ours || MODEL_PREFERENCE.every((key) => JSON.stringify(after[key]) === JSON.stringify(before[key]))) return;
-    const restored = { ...after };
-    for (const key of MODEL_PREFERENCE) { if (key in before) restored[key] = before[key]; else delete restored[key]; }
-    const temporary = `${path}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(restored, null, 2)}\n`, { mode: 0o600 });
-    await rename(temporary, path).catch(async (error: unknown) => { await rm(temporary, { force: true }); throw error; });
+async function locked<T>(path: string, run: () => Promise<T>): Promise<T> {
+  const lock = `${path}.lock`, draft = `${lock}.${randomUUID()}`;
+  await mkdir(draft, { recursive: true, mode: 0o700 });
+  await writeFile(join(draft, String(process.pid)), "");
+  try {
+    for (const deadline = Date.now() + LOCK_WAIT_MS; ;) {
+      // Renaming onto an existing lock (which always holds its owner) fails.
+      if (await rename(draft, lock).then(() => true, () => false)) break;
+      const [owner] = await readdir(lock).catch(() => []);
+      if (!owner || !alive(Number(owner))) {
+        const aside = `${lock}.${randomUUID()}`;
+        if (await rename(lock, aside).then(() => true, () => false)) await rm(aside, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() > deadline) throw new Error(`Another process (pid ${owner}) holds ${lock}; if no Cohub Runtime is running, remove it and retry`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  } catch (error) {
+    await rm(draft, { recursive: true, force: true });
+    throw error;
+  }
+  // Released by renaming it aside first, so the lock never exists without its owner.
+  try { return await run(); } finally {
+    const aside = `${lock}.${randomUUID()}`;
+    if (await rename(lock, aside).then(() => true, () => false)) await rm(aside, { recursive: true, force: true });
+  }
+}
+const savedModel = (config: JsonRecord | null) => { const model = record(config?.model); return text(model.displayModelId) || text(model.modelId); };
+
+/** Put the baseline back once no Turn holds it, unless the saved model is none the holders chose. Returns the config now saved. */
+async function restoreBaseline(config: string, stored: PreferenceRecord): Promise<JsonRecord | null> {
+  const [before, after] = [stored.baseline, await readJson(config)];
+  const saved = record(after?.model);
+  const ours = [text(saved.modelId), text(saved.displayModelId)].some((value) => stored.requested.includes(value));
+  if (!before || !after || !ours || MODEL_PREFERENCE.every((key) => JSON.stringify(after[key]) === JSON.stringify(before[key]))) return after;
+  const restored = { ...after };
+  for (const key of MODEL_PREFERENCE) { if (key in before) restored[key] = before[key]; else delete restored[key]; }
+  await writeJson(config, restored);
+  return restored;
+}
+
+/**
+ * Cursor saves the model a run starts with as the user's default. Turns that choose a model hold the
+ * preference from before the first of them; once the last one ends it is put back, unless the saved
+ * model is none of theirs (the user picked another meanwhile). A Default Turn that overlaps them runs
+ * on that preference rather than on another Turn's model. Returns the model to pass, if any.
+ */
+async function holdModelPreference(requested: string | null): Promise<{ model: string | null; release: () => Promise<void> }> {
+  const config = join(cursorConfigDirectory(), "cli-config.json"), path = preferenceRecord(config), id = randomUUID();
+  const model = await locked(path, async () => {
+    const stored = await readJson(path) as PreferenceRecord | null;
+    const holders = stored ? stored.holders.filter((hold) => alive(hold.pid)) : [];
+    // Holders that died (a crashed Runtime) left Cursor on their model; their baseline comes back first.
+    const current = holders.length && stored ? stored : { config, baseline: stored ? await restoreBaseline(config, stored) : await readJson(config), requested: [], holders: [] };
+    const model = requested ?? (holders.length ? savedModel(current.baseline) || null : null);
+    if (!model) {
+      if (stored && !holders.length) await rm(path, { force: true });
+      return null;
+    }
+    // Parameterized models are saved without their `[…]` overrides.
+    await writeJson(path, { ...current, requested: [...new Set([...current.requested, model.split("[")[0] ?? model])], holders: [...holders, { id, pid: process.pid }] });
+    return model;
+  });
+  const release = async () => {
+    if (!model) return;
+    await locked(path, async () => {
+      const stored = await readJson(path) as PreferenceRecord | null;
+      if (!stored) return;
+      const holders = stored.holders.filter((hold) => hold.id !== id && alive(hold.pid));
+      if (holders.length) { await writeJson(path, { ...stored, holders }); return; }
+      await restoreBaseline(config, stored);
+      await rm(path, { force: true });
+    });
   };
+  return { model, release };
 }
 
 /** A chat Cursor stored, wherever its workspace hash put it. */
@@ -227,7 +301,8 @@ export function cursorTranslator(emit: (event: RuntimeExecutionEvent) => void, i
     }
     streamed = "";
   };
-  const last = (): RuntimeMessage => current ? snapshot(current) : { ordinal: 0, content: [], provider: PROVIDER, model };
+  /** A line still held when the stream ends was no repeat; it stays in the result. */
+  const last = (): RuntimeMessage => { release(); return current ? snapshot(current) : { ordinal: 0, content: [], provider: PROVIDER, model }; };
   return {
     result: () => final,
     last,
@@ -235,7 +310,8 @@ export function cursorTranslator(emit: (event: RuntimeExecutionEvent) => void, i
       if (event.type === "assistant") {
         const value = array(record(event.message).content).map((block) => text(record(block).text)).join("");
         if (typeof event.timestamp_ms !== "number" || text(event.model_call_id)) whole(value);
-        else if (streamed && value === streamed) { release(); held = value; }
+        // A repeat equals all the step's text so far, which includes a line held as a possible repeat.
+        else if (streamed && value === streamed + (held ?? "")) { release(); held = value; }
         else { release(); streamText(value); }
         return false;
       }
@@ -320,23 +396,34 @@ async function runCursor(executor: Executor, turn: HarnessTurn): Promise<Harness
   let prepared = await prepare((transcript) => transcript.path !== turn.diverged && transcript.origin === "cohub");
   if (prepared.resume === "native" && !await chatStored(prepared.session.nativeSessionId)) prepared = await prepare(() => false);
   let session = prepared.session;
-  const directory = await mkdtemp(join(tmpdir(), "cohub-cursor-"));
   const translator = cursorTranslator(turn.emit, { model: input.model && input.model !== DEFAULT_MODEL ? input.model : null });
   let message: RuntimeMessage = { ordinal: 0, content: [] };
   let host: JsonRpcProcess | null = null;
+  let directory: string | null = null;
+  let preference: Awaited<ReturnType<typeof holdModelPreference>> | null = null;
+  let sent: string | null = null;
+  // Cursor records a prompt only after its first output line.
+  let spoke = false;
+  let exited: { path: string; size: number } | null = null;
+  // Bytes already in a continued transcript; a Turn recorded past them is this one. Others start empty.
+  const before = prepared.resume === "native" ? await stat(session.path).then((info) => info.size, () => 0) : 0;
   try {
+    directory = await mkdtemp(join(tmpdir(), "cohub-cursor-"));
+    // The projection sits where Cursor's transcript will be; it is moved out before anything else can fail.
+    const history = prepared.resume === "handoff" ? await handoff(session.path, directory) : null;
     const content = await prompt(input, directory);
+    sent = content.text;
+    signal.throwIfAborted();
+    // Without coordination a Turn could run on, or leave behind, another Turn's model; it fails instead.
+    preference = await holdModelPreference(input.model && input.model !== DEFAULT_MODEL ? input.model : null);
     const args = [
       "-p", "--output-format", "stream-json", "--stream-partial-output", "--trust",
       ...(prepared.resume === "native" ? ["--resume", session.nativeSessionId] : ["--new-session-id", session.nativeSessionId]),
-      ...(prepared.resume === "handoff" ? ["--conversation-history-file", await handoff(session.path, directory)] : []),
-      ...(input.model && input.model !== DEFAULT_MODEL ? ["--model", input.model] : []),
+      ...(history ? ["--conversation-history-file", history] : []),
+      ...(preference.model ? ["--model", preference.model] : []),
       ...content.images.flatMap((path) => ["--image", path]),
       "--", content.text,
     ];
-    signal.throwIfAborted();
-    const model = input.model && input.model !== DEFAULT_MODEL ? input.model : null;
-    const restorePreference = model ? await keepModelPreference(model) : null;
     // The prompt is sent when the process starts.
     await turn.started(session);
     try {
@@ -354,7 +441,7 @@ async function runCursor(executor: Executor, turn: HarnessTurn): Promise<Harness
           if (error) reject(error); else resolve();
         };
         const offFailure = child.onFailure((error) => finish(error));
-        const off = child.onEvent((event) => { try { if (translator.push(event)) finish(); } catch (error) { finish(error); } });
+        const off = child.onEvent((event) => { spoke = true; try { if (translator.push(event)) finish(); } catch (error) { finish(error); } });
         const abort = () => {
           // The exit that follows a stop is expected.
           child.endInput();
@@ -371,16 +458,32 @@ async function runCursor(executor: Executor, turn: HarnessTurn): Promise<Harness
     }
     host?.endInput();
     await host?.exited(FLUSH_TIMEOUT_MS);
-    await restorePreference?.().catch((error: unknown) => {
+    const written = await findTranscript(session.nativeSessionId, executor.cwd);
+    if (written) exited = { path: written, size: await stat(written).then((info) => info.size, () => 0) };
+  } finally {
+    await preference?.release().catch((error: unknown) => {
       executor.diagnostics?.log("warn", "harness.cursor_model_preference_failed", { error: describeError(error) }, { ...context, component: "harness" });
     });
-  } finally {
-    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    if (directory) await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    // A Turn that failed before Cursor started leaves no projection in Cursor's transcripts.
+    if (!host && prepared.resume === "handoff") await rm(session.path, { force: true }).catch(() => undefined);
   }
-  const path = await findTranscript(session.nativeSessionId, executor.cwd);
-  if (path && (path !== session.path || prepared.resume === "new")) {
+  const path = exited?.path ?? await findTranscript(session.nativeSessionId, executor.cwd);
+  if (path) {
     session = { ...session, path };
-    executor.ingest.adopt(session, input.sessionId);
+    // The transcript cannot name Cohub's Turn: it was recorded between the earlier bytes and the size at
+    // exit, once the CLI spoke, with this prompt and the reply this run streamed. Another client may write
+    // the same chat meanwhile; a Turn the window does not single out keeps the boundary before it, so a
+    // Turn identical in prompt and reply may sync twice but no terminal Turn is lost. The server has the
+    // file through that boundary, so terminal Turns after it sync even if the Runtime was offline.
+    const turns = (await readCursorTranscript(path, session.nativeSessionId).catch(() => null))?.turns ?? [];
+    const recorded = spoke && exited ? turns.filter((entry) => entry.startBytes >= before && entry.startBytes < (exited?.size ?? 0)) : [];
+    const words = (blocks: ContentBlock[]) => blocks.flatMap((block) => block.type === "text" ? [block.text] : []).join("").trim();
+    const matching = recorded.filter((entry) => words(entry.userContent) === sent?.trim());
+    const replied = words(message.content) ? matching.filter((entry) => words(entry.messages.at(-1)?.content ?? []) === words(message.content)) : [];
+    const own = replied.length === 1 ? replied[0] : matching.length === 1 ? matching[0] : !matching.length && recorded.length === 1 ? recorded[0] : undefined;
+    const earlier = turns.filter((entry) => entry.startBytes < before).at(-1);
+    executor.ingest.adopt(session, input.sessionId, { turnKey: (own ?? earlier)?.key ?? null, turnId: input.turnId });
   }
   return { session, resume: prepared.resume, message, host };
 }

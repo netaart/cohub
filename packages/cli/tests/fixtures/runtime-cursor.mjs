@@ -36,6 +36,13 @@ const write = (value) => process.stdout.write(`${JSON.stringify({ ...value, sess
 const now = Date.now();
 const text = (value, extra = {}) => write({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: value }] }, ...extra });
 
+// A terminal Turn with the same prompt that ended just before this run started.
+if (prompt === "same-before") {
+  record({ role: "user", message: { content: [{ type: "text", text: "<user_query>\nsame-before\n</user_query>" }] } });
+  record({ role: "assistant", message: { content: [{ type: "text", text: "another reply" }] } });
+  record({ type: "turn_ended", status: "success" });
+}
+if (prompt === "die-early") { process.stderr.write("Error: died before recording\n"); process.exit(1); }
 record({ role: "user", message: { content: [{ type: "text", text: "<workspace>open tabs</workspace>" }] } });
 record({ role: "user", message: { content: [{ type: "text", text: `<timestamp>Saturday, Aug 01, 2026, 9:30 AM (UTC+8)</timestamp>\n<user_query>\n${prompt}\n</user_query>` }] } });
 write({ type: "system", subtype: "init", apiKeySource: "login", cwd: process.cwd(), model: "Fixture Model", permissionMode: "default" });
@@ -47,6 +54,7 @@ if (prompt === "crash" || prompt === "wait") {
   if (prompt === "crash") { process.stderr.write("Error: backend went away\n"); process.exit(1); }
   setInterval(() => {}, 1_000);
 } else {
+  if (prompt.startsWith("sleep:")) await new Promise((resolve) => setTimeout(resolve, Number(prompt.slice(6))));
   const retained = JSON.stringify(history);
   const facts = [
     retained.includes("historical fact") && retained.includes("aGlzdG9yaWNhbCBpbWFnZQ==") && retained.includes('"toolCall"') ? "history retained" : "no history",
@@ -67,5 +75,10 @@ if (prompt === "crash" || prompt === "wait") {
   record({ role: "assistant", message: { content: [{ type: "text", text: "Running" }, { type: "tool_use", name: "Shell", input: { command: "ls" } }] } });
   record({ role: "assistant", message: { content: [{ type: "text", text: facts }] } });
   record({ type: "turn_ended", status: "success" });
+  // A terminal Turn in the same chat, written before Cohub reads the transcript back.
+  if (prompt === "then-terminal") {
+    record({ role: "user", message: { content: [{ type: "text", text: "<user_query>\nfrom the terminal\n</user_query>" }] } });
+    record({ type: "turn_ended", status: "success" });
+  }
   write({ type: "result", subtype: "success", duration_ms: 1, duration_api_ms: 1, is_error: false, result: `Running${facts}`, request_id: "r1", usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 } });
 }

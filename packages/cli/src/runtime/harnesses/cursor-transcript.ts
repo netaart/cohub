@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readdirSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve, sep, win32 } from "node:path";
@@ -23,7 +24,13 @@ export const cursorChatsRoot = () => join(cursorConfigDirectory(), "chats");
 
 /** Cursor's project name for a workspace path. */
 export const cursorProjectName = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
-export const cursorTranscriptPath = (nativeSessionId: string, cwd: string) => join(cursorProjectsRoot(), cursorProjectName(cwd), TRANSCRIPTS, nativeSessionId, `${nativeSessionId}.jsonl`);
+/** Windows reuses a project folder whose name differs only in case, and file events name that folder. */
+function projectFolder(cwd: string) {
+  const name = cursorProjectName(cwd);
+  if (process.platform !== "win32") return name;
+  try { return readdirSync(cursorProjectsRoot()).find((entry) => entry.toLowerCase() === name.toLowerCase()) ?? name; } catch { return name; }
+}
+export const cursorTranscriptPath = (nativeSessionId: string, cwd: string) => join(cursorProjectsRoot(), projectFolder(cwd), TRANSCRIPTS, nativeSessionId, `${nativeSessionId}.jsonl`);
 /** A chat's store directory is keyed by the MD5 of the directory the CLI ran in. */
 export const cursorChatDirectory = (nativeSessionId: string, cwd: string) => join(cursorChatsRoot(), createHash("md5").update(resolve(cwd)).digest("hex"), nativeSessionId);
 
@@ -54,28 +61,28 @@ export function acceptsCursorTranscript(path: string, cwd: string): boolean {
 }
 
 /**
- * The directory a project name stands for, matched against real directories; a literal hyphen wins
- * over a separator. On Windows the name starts with the drive letter and matching ignores case.
+ * The directory a project name stands for, matched against real directories. On Windows the name
+ * starts with the drive letter and matching ignores case. Several directories with the same name
+ * (`a/b` and `a-b`) cannot be told apart, so none is chosen.
  */
 type Entry = { name: string; isDirectory(): boolean; isSymbolicLink(): boolean };
-async function projectDirectory(name: string, platform = process.platform, list: (directory: string) => Promise<Entry[]> = (directory) => readdir(directory, { withFileTypes: true })): Promise<string | null> {
+export async function projectDirectory(name: string, platform = process.platform, list: (directory: string) => Promise<Entry[]> = (directory) => readdir(directory, { withFileTypes: true })): Promise<string | null> {
   const paths = platform === "win32" ? win32 : posix;
   const drive = platform === "win32" ? /^([A-Za-z])(?:-(.*))?$/.exec(name) : null;
   if (platform === "win32" && !drive) return null;
-  const walk = async (directory: string, rest: string): Promise<string | null> => {
-    if (!rest) return directory;
+  const found: string[] = [];
+  const walk = async (directory: string, rest: string): Promise<void> => {
+    if (found.length > 1) return;
+    if (!rest) { found.push(directory); return; }
     const entries = await list(directory).catch(() => []);
-    const matches = entries.filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
-      .map((entry) => [entry.name, fold(cursorProjectName(entry.name), platform)] as const)
-      .filter(([, part]) => part && (fold(rest, platform) === part || fold(rest, platform).startsWith(`${part}-`)))
-      .sort((left, right) => right[1].length - left[1].length);
-    for (const [entry, part] of matches) {
-      const found = await walk(paths.join(directory, entry), rest.slice(part.length + 1));
-      if (found) return found;
+    for (const entry of entries) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      const part = fold(cursorProjectName(entry.name), platform);
+      if (part && (fold(rest, platform) === part || fold(rest, platform).startsWith(`${part}-`))) await walk(paths.join(directory, entry.name), rest.slice(part.length + 1));
     }
-    return null;
   };
-  return drive ? await walk(`${drive[1]?.toUpperCase()}:\\`, drive[2] ?? "") : await walk("/", name);
+  await (drive ? walk(`${drive[1]?.toUpperCase()}:\\`, drive[2] ?? "") : walk("/", name));
+  return found.length === 1 ? found[0] ?? null : null;
 }
 
 /**
@@ -130,7 +137,9 @@ export async function readCursorTranscript(path: string, nativeSessionId: string
     const value = line.value;
     if (value.role === "user") {
       const raw = blocks(value).map((block) => text(block.text)).join("\n");
-      const query = USER_QUERY.exec(raw)?.[1] ?? (read.lines[index + 1]?.value.role === "user" ? null : raw.replace(TIMESTAMP, "").trim());
+      // A bare text is a prompt only once a reply or end follows it; until then it may be context.
+      const next = read.lines[index + 1]?.value;
+      const query = USER_QUERY.exec(raw)?.[1] ?? (next && next.role !== "user" ? raw.replace(TIMESTAMP, "").trim() : null);
       if (!query) continue;
       const startedAt: string = promptTime(TIMESTAMP.exec(raw)?.[1] ?? "") ?? current?.startedAt ?? modified;
       current = {

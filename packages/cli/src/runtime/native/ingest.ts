@@ -251,11 +251,12 @@ export class NativeIngest {
 
   /**
    * Record that Cohub created or chose this transcript for a Session, before any Turn of it runs.
+   * `through` says the server has the file's Turns up to `turnKey` (none when null) and `turnId` heads them.
    */
   adopt(session: { harness: Harness; path: string; nativeSessionId: string; cwd: string }, sessionId: string, through?: { turnKey: string | null; turnId: string | null }): void {
     const state = this.states.get(session.path) ?? this.blank(session.path, session.nativeSessionId, session.cwd, session.harness, "user", { size: -1, mtimeMs: 0, ino: 0 });
     Object.assign(state, { sessionId, nativeSessionId: session.nativeSessionId });
-    if (through?.turnKey) Object.assign(state, { throughTurnKey: through.turnKey, throughTurnId: through.turnId, headTurnId: through.turnId });
+    if (through) Object.assign(state, { throughTurnKey: through.turnKey, throughTurnId: through.turnId, headTurnId: through.turnId });
     if (!this.states.has(session.path)) state.origin = "cohub";
     // The harness wrote elsewhere than expected; the execution follows the file.
     for (const other of this.states.values()) {
@@ -661,7 +662,8 @@ export class NativeIngest {
     state.executingTurnId = null;
     const head = !tail ? null : pending.length ? cohub(tail) ?? derived(tail) : state.throughTurnId;
     const candidates: Candidate[] = [];
-    let parentTurnId = from > 0 ? state.throughTurnId : null;
+    // A head adopted without a transcript key (Cohub's Turn left no record) still parents what follows.
+    let parentTurnId = from > 0 || !state.throughTurnKey ? state.throughTurnId : null;
     for (const [offset, turn] of pending.entries()) {
       const marked = cohub(turn);
       if (marked) {

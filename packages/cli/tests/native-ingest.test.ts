@@ -463,6 +463,15 @@ test("Cursor terminal Turns sync through their chat's project; a Turn Cohub runs
     await until(() => server.turns.size === 3);
     const key = cursorKey(cursorTurn("from the web") + cursorPrompt("then the terminal"));
     assert.deepEqual(server.batches.flatMap((batch) => batch.turns).slice(1).map((turn) => [turn.turnId, turn.parentTurnId]), [[turnIdOf("cursor", id, key), cloudTurnId]]);
+
+    // Cohub's Turn left no record: the head it adopted still parents the terminal Turn that follows.
+    const empty = randomUUID(), emptyPath = cursorTranscriptPath(empty, w.project);
+    ingest.adopt({ harness: "cursor", path: emptyPath, nativeSessionId: empty, cwd: w.project }, sessionId, { turnKey: null, turnId: cloudTurnId });
+    await w.write(join(cursorChatDirectory(empty, w.project), "meta.json"), JSON.stringify({ cwd: w.project }));
+    await w.write(emptyPath, cursorTurn("first in the terminal"));
+    ingest.touch(emptyPath);
+    await until(() => server.turns.size === 4);
+    assert.equal(server.batches.flatMap((batch) => batch.turns).at(-1)?.parentTurnId, cloudTurnId);
     await ingest.close(AbortSignal.timeout(2_000));
   } finally { await w.cleanup(); }
 });
