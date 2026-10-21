@@ -53,7 +53,7 @@ jobs:
             goarch: arm64
             runner: macos-15
             cgo: '1'
-          # Windows is cross-compiled; native Windows tests run in ci.yml.
+          # Windows is cross-compiled; native Windows tests run in sandbox-ci.yml.
           - goos: windows
             goarch: amd64
             runner: ubuntu-latest
