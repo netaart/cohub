@@ -72,7 +72,7 @@ export function createRuntimeContextReader(database: ContextDatabase) {
       let fallbackIndex = 0;
       const appendFallback = (turn: typeof turns[number]) => {
         const meta = asMeta(turn.meta);
-        if (turn.userContent.length) result.messages.push({ id: typeof meta.userMessageId === "string" ? meta.userMessageId : `${turn.id}:user`, turnId: turn.id, role: "user", content: turn.userContent });
+        if (turn.userContent.length) result.messages.push({ id: typeof meta.userMessageId === "string" ? meta.userMessageId : `${turn.id}:user`, turnId: turn.id, role: "user", content: turn.userContent, meta: turn.intent === "goal" ? { messageKind: "goal_continuation" } : undefined });
         if (turn.assistantContent?.length) result.messages.push({ id: `${turn.id}:assistant`, turnId: turn.id, role: turn.intent === "compact" ? "system" : "assistant", content: turn.assistantContent, provider: turn.provider, model: turn.model, meta: { compaction: meta.compaction, createdAt: turn.createdAt?.toISOString() } });
       };
       for (const { message, turnId, turnMeta, turnSequence } of rows) {
