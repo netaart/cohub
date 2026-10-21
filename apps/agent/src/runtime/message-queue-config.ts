@@ -51,11 +51,6 @@ async function realpathIfExists(path: string): Promise<string | null> {
   return realpath(path);
 }
 
-/**
- * Read `.cohub/agent.json` from a Space workspace; a missing workspace, directory or file means the default delivery.
- * O_NONBLOCK keeps a FIFO from blocking the claim transaction, and fstat rejects anything that is not a regular file.
- * The path the kernel opened is checked again through /proc, so a directory swapped for a symlink after realpath is still rejected.
- */
 export async function readMessageQueueConfig(spaceId: string): Promise<MessageQueueConfig | null> {
   const workspace = getAgentWorkspacePath(assertValidSpaceId(spaceId));
   const workspaceReal = await realpathIfExists(workspace);
@@ -67,12 +62,13 @@ export async function readMessageQueueConfig(spaceId: string): Promise<MessageQu
   if (!configReal) return null;
   assertInsideRoot(configReal, workspaceReal, OUTSIDE_WORKSPACE_MESSAGE);
 
-  const handle = await open(configReal, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  const handle = await open(configReal, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW); // O_NONBLOCK: a FIFO must not block the claim transaction
   try {
     const info = await handle.stat();
     if (!info.isFile() || info.size > MESSAGE_QUEUE_CONFIG_MAX_BYTES) {
       throw new Error(`Message queue config must be a regular file of at most ${MESSAGE_QUEUE_CONFIG_MAX_BYTES} bytes`);
     }
+    // realpath and open are not atomic; check the path the kernel actually opened.
     assertInsideRoot(await realpath(`/proc/self/fd/${handle.fd}`), workspaceReal, OUTSIDE_WORKSPACE_MESSAGE);
 
     // One byte past the size check: a file that grew after fstat reads back more bytes than fstat reported.

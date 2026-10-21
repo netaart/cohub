@@ -155,7 +155,6 @@ async function claimQueuedTurns(tx: Transaction, queued: TurnRow[]): Promise<Cla
   };
 }
 
-/** The sender's Home Space `.cohub/agent.json` decides whether queued follow-ups go out together or one by one. */
 async function resolveFollowupDelivery(tx: Transaction, userUuid: string | null): Promise<FollowupDelivery> {
   if (!userUuid) return DEFAULT_FOLLOWUP_DELIVERY;
   const [home] = await tx.select({ id: spaces.id }).from(spaces)
