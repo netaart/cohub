@@ -198,7 +198,9 @@ export function createSandboxRelay(deps: SandboxRelayDeps) {
           connectionId: randomUUID(), receipt: "", authorizedAt: Date.now(), ownerUserId: auth.userId,
         };
         if (!await deps.renewWorkspace(candidate)) {
-          socket.send(JSON.stringify({ type: "error", status: 409, message: "Runtime lease does not belong to this file bridge" }));
+          // Usually the Runtime is re-claiming its lease after a reconnect. A 5xx keeps sandboxd on its
+          // short retry schedule; a 4xx would park it for minutes while the Runtime is already back.
+          socket.send(JSON.stringify({ type: "error", status: 503, message: "Runtime lease does not belong to this file bridge" }));
           closeSocket(socket, 4409, "Runtime lease unavailable");
           return;
         }

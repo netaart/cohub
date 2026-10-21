@@ -79,6 +79,6 @@ export async function startRuntimeStopSubscriber() {
 }
 
 export async function closeRuntimeRelay() {
-  await Promise.all([recovery.close(), stopSubscriber?.quit().catch(() => undefined)]);
+  await Promise.all([relay.closeAll(), recovery.close(), stopSubscriber?.quit().catch(() => undefined)]);
   stopSubscriber = null;
 }

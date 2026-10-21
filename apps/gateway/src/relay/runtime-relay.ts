@@ -40,6 +40,16 @@ export function createRuntimeRecoveryLifecycle(input: { enqueue: (spaceId: strin
   return { recover, close };
 }
 
+const header = (request: IncomingMessage | undefined, name: string) => {
+  const value = request?.headers[name];
+  return (Array.isArray(value) ? value[0] : value)?.split(",")[0]?.trim() || undefined;
+};
+/** Edge identity for correlating client drops with Cloudflare and ISP/proxy paths. */
+const clientMeta = (request?: IncomingMessage) => ({
+  clientIp: header(request, "cf-connecting-ip") ?? header(request, "x-forwarded-for") ?? request?.socket.remoteAddress,
+  cfRay: header(request, "cf-ray"),
+});
+
 const secretsEqual = (left: unknown, right: string) => typeof left === "string" && right.length > 0 && Buffer.byteLength(left) === Buffer.byteLength(right) && timingSafeEqual(Buffer.from(left), Buffer.from(right));
 
 /** Closes with 4400; any other error is a server fault and closes with a retryable 1011. */
@@ -71,7 +81,9 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
     const advertisedRuntimeIdValue = new URL(request?.url ?? "/", "http://localhost").searchParams.get("runtimeId")?.trim() || "";
     const advertisedRuntimeId = isUuid(advertisedRuntimeIdValue) ? advertisedRuntimeIdValue : undefined;
     const connectedAt = Date.now();
-    logger.debug("runtime.control.connected");
+    const client = clientMeta(request);
+    let registeredAt = 0;
+    logger.debug("runtime.control.connected", { runtimeId: advertisedRuntimeId, ...client });
     let token = "";
     let authorizedAt = 0;
     let lastHeartbeat = Date.now();
@@ -118,6 +130,8 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           runtimeId: current.record.runtimeId,
           connectionId: current.record.connectionId,
           heartbeatAgeMs: Date.now() - lastHeartbeat,
+          bufferedBytes: socket.bufferedAmount,
+          ...client,
         });
         socket.terminate();
         return;
@@ -125,7 +139,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       try {
         send(socket, { type: "runtime.heartbeat" });
       } catch (error) {
-        logger.warn("runtime.control.heartbeat_send_failed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId, error });
+        logger.warn("runtime.control.heartbeat_send_failed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId, connectionId: current.record.connectionId, bufferedBytes: socket.bufferedAmount, error });
       }
     }, interval);
     const lease = setInterval(() => {
@@ -170,7 +184,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           }
           if (closed || socket.readyState !== socket.OPEN) { await deps.release(frame.spaceId, record); return; }
           current = { spaceId: frame.spaceId, record };
-          token = frame.token; authorizedAt = Date.now(); lastHeartbeat = Date.now();
+          token = frame.token; authorizedAt = Date.now(); lastHeartbeat = Date.now(); registeredAt = Date.now();
           registrations.set(frame.spaceId, { socket, record, peers: new Map() });
           clearTimeout(handshake);
           logger.info("runtime.control.registered", {
@@ -179,6 +193,8 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             connectionId,
             harnesses: frame.capabilities.harnesses,
             modelCount: frame.capabilities.models.length,
+            handshakeMs: registeredAt - connectedAt,
+            ...client,
           });
           send(socket, { type: "runtime.ready", connectionId });
         } else {
@@ -230,24 +246,29 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       }).finally(() => { queuedBytes -= bytes; });
     });
     socket.on("error", (error) => {
-      logger.warn("runtime.control.socket_error", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, error });
+      logger.warn("runtime.control.socket_error", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, connectionId: current?.record.connectionId, error });
       socket.terminate();
     });
     socket.once("close", (code, reason) => {
       closed = true; clearTimeout(handshake); clearInterval(heartbeat); clearInterval(lease);
       if (!current) {
-        logger.debug("runtime.control.closed", { code, reason: reason.toString(), durationMs: Date.now() - connectedAt });
+        logger.debug("runtime.control.closed", { code, reason: reason.toString(), durationMs: Date.now() - connectedAt, runtimeId: advertisedRuntimeId, ...client });
         return;
       }
+      const registration = registrations.get(current.spaceId);
       logger.info("runtime.control.closed", {
         spaceId: current.spaceId,
         runtimeId: current.record.runtimeId,
         connectionId: current.record.connectionId,
         durationMs: Date.now() - connectedAt,
+        registeredMs: Date.now() - registeredAt,
+        heartbeatAgeMs: Date.now() - lastHeartbeat,
+        bufferedBytes: socket.bufferedAmount,
+        activePeers: registration?.socket === socket ? registration.peers.size : 0,
         code,
         reason: reason.toString(),
+        ...client,
       });
-      const registration = registrations.get(current.spaceId);
       if (registration?.socket === socket) {
         registrations.delete(current.spaceId);
         for (const peer of registration.peers.values()) peer.close(1011, "Runtime disconnected");
@@ -354,5 +375,14 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       return false;
     }
   }
-  return { control, peer, stop };
+  /** Tell every Runtime this pod is going away, so its logs name the cause and it reconnects at once. */
+  async function closeAll() {
+    await Promise.allSettled([...registrations].map(async ([spaceId, registration]) => {
+      registrations.delete(spaceId);
+      for (const peer of registration.peers.values()) peer.close(1012, "Gateway restarting");
+      registration.socket.close(1012, "Gateway restarting");
+      await deps.release(spaceId, registration.record);
+    }));
+  }
+  return { control, peer, stop, closeAll };
 }
