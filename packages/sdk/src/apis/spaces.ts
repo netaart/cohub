@@ -1,10 +1,10 @@
 import { listDirectory, type FileListOptions } from "./file-list.js";
 import type { SpaceFsTreePage } from "../types.js";
-import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
+import { readSessionStats, type SessionGoal, type SessionGoalWriteInput, type SessionStats } from "@cohub/protocol/model";
 import type { SpacePublicEndpoints } from "@cohub/protocol/ports";
 import type { SandboxSetupInfo } from "@cohub/protocol/sandbox";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
+import { SPACE_HOOK_WEBHOOK_SECRET_HEADER, type ModelThinkingLevel } from "@cohub/protocol";
 import type {
   PublicFileCreateUploadInput,
   PublicFileCreateUploadResponse,
@@ -966,11 +966,62 @@ class SessionRealtimeClient {
   }
 }
 
+class SessionGoalClient {
+  constructor(
+    private readonly transport: HttpTransport,
+    private readonly sessionId: string,
+  ) {}
+
+  get(options: { signal?: AbortSignal } = {}) {
+    return this.transport.request<{ goal: SessionGoal | null }>(
+      `/api/sessions/${this.sessionId}/goal`,
+      options,
+    );
+  }
+
+  set(input: {
+    objective: string;
+    tokenBudget?: number | null;
+    provider?: string | null;
+    model?: string | null;
+    accessMode?: "full_access" | "read_only";
+    thinkingLevel?: ModelThinkingLevel | null;
+  }) {
+    return this.transport.request<{ goal: SessionGoal }>(
+      `/api/sessions/${this.sessionId}/goal`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  update(input: SessionGoalWriteInput) {
+    return this.transport.request<{ goal: SessionGoal }>(
+      `/api/sessions/${this.sessionId}/goal`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  clear() {
+    return this.transport.request<{ cleared: boolean }>(
+      `/api/sessions/${this.sessionId}/goal`,
+      { method: "DELETE" },
+    );
+  }
+}
+
 export class SessionClient {
   readonly messages: SessionMessagesClient;
   readonly turns: SessionTurnsClient;
   readonly realtime: SessionRealtimeClient;
   readonly generation: SessionGenerationStreamClient;
+  readonly goal: SessionGoalClient;
 
   constructor(
     readonly spaceId: string,
@@ -987,6 +1038,7 @@ export class SessionClient {
       id,
       () => this.turns.streamSnapshot(),
     );
+    this.goal = new SessionGoalClient(transport, id);
   }
 
   get(customFetch?: Fetch) {

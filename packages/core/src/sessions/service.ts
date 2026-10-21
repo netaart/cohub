@@ -1,6 +1,6 @@
 import type { BillingUsageGate } from "@cohub/billing";
 import { randomUUID as defaultRandomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { readSessionTurnOrigin, type SessionTurnIntent, type SessionTurnRecord, type SessionTurnOrigin } from "@cohub/protocol/model";
@@ -10,6 +10,7 @@ import { sanitizePostgresJsonValue } from "../content/sanitize.js";
 import { resolveSessionTurnOrigin } from "./turn-origin.js";
 import { appendSentTurn, sentTurnRefFor } from "./sent-turns.js";
 import { turnTriggerReference } from "../references/turn-trigger.js";
+import { nextSessionTurnSequence } from "./turn-sequence.js";
 import type { ReferenceInput } from "../references/types.js";
 import { normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
 import {
@@ -47,7 +48,7 @@ export type AgentTurnQueue = {
   enqueue(input: {
     spaceId: string;
     sessionId: string;
-    reason?: "prompt" | "steer" | "drain" | "retry" | "recovery";
+    reason?: "prompt" | "steer" | "goal" | "drain" | "retry" | "recovery";
     requestId?: string | null;
     trace?: Record<string, unknown>;
     jobId?: string;
@@ -62,7 +63,7 @@ const imagePreviewLabel = (count: number) => (count === 1 ? "Image" : `${count} 
 
 const THINKING_LEVELS = new Set<ModelThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
-const toSessionTurnRecord = (row: typeof sessionTurns.$inferSelect): SessionTurnRecord => {
+export const toSessionTurnRecord = (row: typeof sessionTurns.$inferSelect): SessionTurnRecord => {
   const meta = row.meta && typeof row.meta === "object" && !Array.isArray(row.meta)
     ? row.meta as Record<string, unknown>
     : null;
@@ -247,13 +248,7 @@ export function createSessionServices(input: {
     const { row, spaceId } = await input.db.transaction(async (tx) => {
       const [sessionRow] = await tx.select({ meta: spaceSessions.meta, spaceId: spaceSessions.spaceId }).from(spaceSessions).where(eq(spaceSessions.id, turnInput.sessionId)).for("update").limit(1);
       if (!sessionRow) throw new Error("session not found");
-      const [seqRow] = await tx.select({ max: sql<number>`coalesce(max(${sessionTurns.sequence}), 0)::int` }).from(sessionTurns).where(eq(sessionTurns.sessionId, turnInput.sessionId));
-      const [localSegment] = await tx.select({ fromSequence: sessionTurnSegments.fromSequence }).from(sessionTurnSegments).where(and(
-        eq(sessionTurnSegments.sessionId, turnInput.sessionId),
-        eq(sessionTurnSegments.sourceSessionId, turnInput.sessionId),
-        isNull(sessionTurnSegments.toSequence),
-      )).orderBy(desc(sessionTurnSegments.ordinal)).limit(1);
-      const sequence = seqRow?.max ? (seqRow.max + 1) : (localSegment?.fromSequence ?? 1);
+      const sequence = await nextSessionTurnSequence(tx, turnInput.sessionId);
       await tx.update(spaceSessions).set({
         latestMessageText: userText,
         lastMessageAt: touchedAt,

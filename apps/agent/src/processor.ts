@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { UnrecoverableError, type Job } from "bullmq";
 import { imageBlockToPi, type ContentBlock, type PiImageContent } from "@cohub/protocol/core";
-import { ModelUnavailableError } from "@cohub/core/sessions";
+import { getSessionGoal, ModelUnavailableError } from "@cohub/core/sessions";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { context, trace } from "@opentelemetry/api";
 import { getActiveTraceIdentifiers, getOrCreateRequestId, setRequestContextAttributes } from "@cohub/infra/tracing";
@@ -12,6 +12,9 @@ import { getSpace } from "./api.js";
 import { abortSessionTurn, failSessionTurn, interruptSessionTurn, persistAssistantMessage, persistUserMessage, publishSessionTurnsUpdated } from "./persistence.js";
 import { ensureSandboxConnection } from "./sandbox-pool.js";
 import { createSandboxCodingTools } from "./sandbox/tools.js";
+import { db } from "./db.js";
+import { createGoalTools, handleGoalAfterTurn } from "./goals/tools.js";
+import { publishSessionGoalUpdated } from "./goals/events.js";
 import { CohubModelRegistry } from "./runtime/model-registry.js";
 import { loadRuntimeModelsConfigs } from "./runtime/models-loader.js";
 import { loadImageToTextConfig } from "./runtime/image-to-text-config.js";
@@ -41,7 +44,7 @@ import { loadRuntimeContext } from "./runtime/context-store.js";
 
 
 const sessionHandles = new Map<string, SessionHandle>();
-const tools = createSandboxCodingTools();
+const tools = [...createSandboxCodingTools(), ...createGoalTools()];
 const agentTracer = getAgentTracer();
 type RetryReason = "session_busy";
 
@@ -796,6 +799,22 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
         clearRetryState(data);
         return { skipped: "noop" };
       }
+      if (claim.kind === "cancelled") {
+        logger.info(`[Goal] cancelled inactive goal turn sessionId=${data.sessionId} turnId=${claim.turnId}`);
+        const goal = await getSessionGoal(db, data.sessionId).catch((error) => {
+          logger.warn("[Goal] failed to read the cancelled goal state", error);
+          return null;
+        });
+        if (goal) {
+          await publishSessionGoalUpdated({ spaceId: data.spaceId, sessionId: data.sessionId, goal }).catch((error) => {
+            logger.warn("[Goal] failed to publish the cancelled goal state", error);
+          });
+        }
+        await drainNextQueuedTurn({ spaceId: data.spaceId, sessionId: data.sessionId, reason: "goal_inactive" }).catch((error) => {
+          logger.warn("[Goal] failed to drain after cancelling a goal turn", error);
+        });
+        return { skipped: "goal_inactive", turnId: claim.turnId };
+      }
       if (claim.kind === "busy") {
         const result = await requeueTurnJob(data, "session_busy", job, {
           activeTurnId: claim.activeTurnId,
@@ -1067,6 +1086,8 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
           anchorUserMessageId: ownerUserMessageId,
           llmRound: 0,
           model: executionModel,
+          accessMode,
+          thinkingLevel: activeHandle.session.agent.state.thinkingLevel,
           actorUserId,
           executionToken,
           executionScopes,
@@ -1266,6 +1287,20 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
       if (claimedBatch) clearRetryState(data);
       lock.signal.removeEventListener("abort", onLeaseLost);
       await lock.release();
+      if (claimedBatch) {
+        try {
+          const goal = await handleGoalAfterTurn({
+            spaceId: data.spaceId,
+            sessionId: data.sessionId,
+            turnId: claimedBatch.ownerTurn.id,
+          });
+          if (goal.createdTurnId && !drainAfterRelease) {
+            drainAfterRelease = { spaceId: data.spaceId, sessionId: data.sessionId, reason: "goal" };
+          }
+        } catch (error) {
+          logger.warn(`[Goal] failed to advance goal sessionId=${data.sessionId} turnId=${claimedBatch.ownerTurn.id}:`, error);
+        }
+      }
       if (drainAfterRelease) await drainNextQueuedTurn(drainAfterRelease);
     }
   });

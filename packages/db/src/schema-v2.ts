@@ -636,6 +636,31 @@ export const spaceSessions = v2.table(
   }),
 );
 
+export const sessionGoals = v2.table(
+  "session_goals",
+  {
+    sessionId: uuid("session_id").primaryKey().references(() => spaceSessions.id, { onDelete: "cascade" }),
+    goalId: uuid("goal_id").notNull(),
+    objective: text("objective").notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("active"),
+    tokenBudget: bigint("token_budget", { mode: "number" }),
+    createdSequence: integer("created_sequence").notNull(),
+    harness: varchar("harness", { length: 20 }).notNull().default("cohub"),
+    provider: varchar("provider", { length: 100 }),
+    model: varchar("model", { length: 255 }),
+    accessMode: varchar("access_mode", { length: 20 }).notNull().default("full_access"),
+    thinkingLevel: varchar("thinking_level", { length: 20 }),
+    createdBy: varchar("created_by", { length: 255 }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    statusUpdatedIdx: index("v2_idx_session_goals_status_updated").on(table.status, table.updatedAt),
+    createdByIdx: index("v2_idx_session_goals_created_by").on(table.createdBy),
+  }),
+);
+
 export const sessionForks = v2.table(
   "session_forks",
   {

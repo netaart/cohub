@@ -354,6 +354,14 @@ function renderTurnTimelineItems(
 			});
 			continue;
 		}
+		const isGoalTurn = turn.intent === "goal";
+		if (isGoalTurn) {
+			items.push({
+				id: `${turnRenderKey}:goal`,
+				kind: "goal",
+				turn,
+			});
+		}
 		let messages = cache?.messages.get(turn);
 		if (!messages) {
 			messages = {
@@ -362,11 +370,13 @@ function renderTurnTimelineItems(
 			};
 			cache?.messages.set(turn, messages);
 		}
-		items.push({
-			id: `${turnRenderKey}:user`,
-			kind: "message",
-			message: messages.user,
-		});
+		if (!isGoalTurn) {
+			items.push({
+				id: `${turnRenderKey}:user`,
+				kind: "message",
+				message: messages.user,
+			});
+		}
 		const isStreamingActiveTurn = streamingTurnId === turn.id;
 		if (isStreamingActiveTurn) {
 			const processIntermediateMessages =

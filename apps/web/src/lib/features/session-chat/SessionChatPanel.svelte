@@ -5,7 +5,14 @@
  */
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
-import { ArrowDown, FileCode2, ListTree, Plus, Upload } from "lucide-svelte";
+import {
+	ArrowDown,
+	FileCode2,
+	ListTree,
+	Plus,
+	Target,
+	Upload,
+} from "lucide-svelte";
 import type { Snippet } from "svelte";
 import { onMount, untrack } from "svelte";
 import AccessStateView from "$lib/components/AccessStateView.svelte";
@@ -31,6 +38,8 @@ import { insertComposerSnippet } from "$lib/stores/composer-insert";
 import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 import { modelsStatusStore } from "$lib/stores/models-status.svelte";
 import { entriesFromDataTransfer } from "$lib/upload-entries";
+import GoalBar from "./GoalBar.svelte";
+import GoalDialog from "./GoalDialog.svelte";
 import SessionRuntimeRecovery from "./SessionRuntimeRecovery.svelte";
 import type { SessionChatHost } from "./session-chat-host.controller.svelte";
 
@@ -115,6 +124,8 @@ let showModelSelector = $state(false);
 let showCreateModelSelector = $state(false);
 let draftDropKind = $state<ChatDraftDropKind | null>(null);
 let draftDropCounter = 0;
+let goalDialogOpen = $state(false);
+let goalDialogEditing = $state(false);
 const modelsCatalog = $derived(modelsCatalogStore.items);
 const modelsStatus = $derived(modelsStatusStore.status);
 const generationModelsCatalog = $derived(host.generationModelsCatalog);
@@ -128,6 +139,16 @@ const generationBooleanConstraints = $derived(
 	host.generationBooleanConstraints,
 );
 const activeSessionModel = $derived(host.activeSessionModel);
+const activeSessionGoal = $derived(host.activeSessionGoal);
+const goalModelLabel = $derived.by(() => {
+	if (activeSessionGoal?.provider && activeSessionGoal.model) {
+		return `${activeSessionGoal.provider}/${activeSessionGoal.model}`;
+	}
+	const model = activeSessionModel;
+	return typeof model?.provider === "string" && typeof model?.id === "string"
+		? `${model.provider}/${model.id}`
+		: null;
+});
 const hasCustomPage = $derived(
 	shouldShowNewChatProfile || shouldShowNewChatBackground,
 );
@@ -259,6 +280,41 @@ async function handleDraftDrop(event: DragEvent) {
 	if (!path) return;
 	insertComposerSnippet(` \`${path}\` `);
 }
+
+function openGoalDialog(editing: boolean) {
+	goalDialogEditing = editing;
+	goalDialogOpen = true;
+}
+
+async function submitGoal(input: {
+	objective: string;
+	tokenBudget: number | null;
+}) {
+	if (goalDialogEditing) {
+		await host.updateSessionGoal({
+			objective: input.objective,
+			tokenBudget: input.tokenBudget,
+			...(activeSessionGoal?.status === "budget_limited"
+				? { status: "active" as const }
+				: {}),
+		});
+		return;
+	}
+	await host.createSessionGoal(input);
+}
+
+async function clearGoal() {
+	if (!window.confirm(m.goal_clear_confirm({}, { locale }))) return;
+	try {
+		await host.clearSessionGoal();
+	} catch (error) {
+		host.setComposerError(
+			error instanceof Error
+				? error.message
+				: m.goal_action_failed({}, { locale }),
+		);
+	}
+}
 </script>
 
 {#if access.spaceLoadError && !access.spaceHasMinimalAccess}
@@ -357,6 +413,30 @@ async function handleDraftDrop(event: DragEvent) {
 				{#if newChatProfile}{@render newChatProfile()}{/if}
 			</div>
 		{:else}
+			{#if activeSessionId && activeSessionGoal}
+				<GoalBar
+					goal={activeSessionGoal}
+					pending={host.goalPending}
+					onpause={() => void host.pauseSessionGoal()}
+					onresume={() => void host.resumeSessionGoal()}
+					oncomplete={() => void host.completeSessionGoal()}
+					onedit={() => openGoalDialog(true)}
+					onclear={() => void clearGoal()}
+				/>
+			{:else if activeSessionId && host.composerMode === "agent" && host.composerHarness === "cohub"}
+				<div class="chat-gutter-x border-b border-chat-panel-border/70 bg-chat-panel">
+					<div class="mx-auto flex w-full max-w-[var(--chat-content-max-width)] justify-end px-[var(--chat-msg-inset)] py-1.5">
+						<button
+							type="button"
+							class="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-text-placeholder hover:bg-bg-hover hover:text-text-secondary"
+							onclick={() => openGoalDialog(false)}
+						>
+							<Target class="h-3 w-3" />
+							{m.goal_create({}, { locale })}
+						</button>
+					</div>
+				</div>
+			{/if}
 			{#key activeSessionId ?? "none"}
 				<ChatTimeline
 					bind:this={chatTimelineRef}
@@ -586,6 +666,16 @@ async function handleDraftDrop(event: DragEvent) {
 				</div>
 			</div>
 		{/if}
+		<GoalDialog
+			open={goalDialogOpen}
+			goal={goalDialogEditing ? activeSessionGoal : null}
+			modelLabel={goalModelLabel}
+			pending={host.goalPending}
+			onclose={() => {
+				goalDialogOpen = false;
+			}}
+			onsubmit={submitGoal}
+		/>
 		<TurnBottomSheet
 			open={showTurnBottomSheet}
 			turns={activeTurnRailItems}

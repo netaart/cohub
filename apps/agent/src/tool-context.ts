@@ -22,6 +22,8 @@ export type ToolExecutionContext = {
   anchorUserMessageId?: string | null;
   llmRound?: number;
   model?: { provider: string; id: string } | null;
+  accessMode?: "full_access" | "read_only" | null;
+  thinkingLevel?: string | null;
   toolCallId?: string;
   actorUserId?: string | null;
   executionToken?: string | null;

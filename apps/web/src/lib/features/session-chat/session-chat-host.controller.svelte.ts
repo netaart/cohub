@@ -20,6 +20,8 @@ import {
 	extractBillingPayload,
 	type HarnessKind,
 	HttpError,
+	type SessionGoal,
+	type SessionGoalWriteInput,
 	type SessionRecord,
 } from "@neta-art/cohub";
 import { tick, untrack } from "svelte";
@@ -653,6 +655,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	);
 	// Explicit choices remain sticky across turns. Effective model defaults are
 	// never promoted into a request, and a pending null explicitly resets to default.
+	const activeSessionGoal = $derived(activeSessionState?.goal ?? null);
+	let goalPending = $state(false);
 	const activeSessionThinkingLevel = $derived.by<ModelThinkingLevel | null>(
 		() => {
 			if (!activeSessionId) return draftThinkingLevel;
@@ -1929,6 +1933,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						loadingOlder: false,
 						loadingNewer: false,
 						oldestCursor: cached.oldestSequence ?? undefined,
+						goal: existing?.goal ?? null,
 					},
 				};
 			}
@@ -1967,6 +1972,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					loadingOlder: false,
 					loadingNewer: false,
 					oldestCursor: currentSeed?.oldestCursor ?? existing?.oldestCursor,
+					goal: currentSeed?.goal ?? existing?.goal ?? null,
 				},
 			};
 			try {
@@ -1977,6 +1983,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					.turns.listPaginated({
 						limit: 30,
 					});
+				if (!guard.isCurrent()) return;
+				const goal = (await sdk.space(spaceId).session(sessionId).goal.get())
+					.goal;
 				if (!guard.isCurrent()) return;
 				await syncGenerationStateFromTail(
 					sessionId,
@@ -2015,6 +2024,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						loadingOlder: false,
 						loadingNewer: false,
 						oldestCursor: snapshot.oldestSequence ?? undefined,
+						goal: goal ?? currentAfterSnapshot?.goal ?? null,
 					},
 				};
 			} catch (error) {
@@ -2040,6 +2050,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						loadingOlder: false,
 						loadingNewer: false,
 						oldestCursor: fallback?.oldestCursor ?? existing?.oldestCursor,
+						goal: fallback?.goal ?? existing?.goal ?? null,
 					},
 				};
 			} finally {
@@ -2580,6 +2591,105 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		}
 	}
 
+	function applyGoalState(goal: SessionGoal | null) {
+		const sessionId = activeSessionId;
+		if (!sessionId) return;
+		const state = sessionStateById[sessionId];
+		if (!state) return;
+		workspace.sessionStateById = {
+			...sessionStateById,
+			[sessionId]: { ...state, goal },
+		};
+	}
+
+	async function createSessionGoal(input: {
+		objective: string;
+		tokenBudget: number | null;
+	}) {
+		const sessionId = activeSessionId;
+		if (!sessionId || goalPending) return;
+		const model = activeSessionModel;
+		goalPending = true;
+		try {
+			const response = await sdk
+				.space(spaceId)
+				.session(sessionId)
+				.goal.set({
+					objective: input.objective,
+					tokenBudget: input.tokenBudget,
+					provider: typeof model?.provider === "string" ? model.provider : null,
+					model: typeof model?.id === "string" ? model.id : null,
+					thinkingLevel: activeSessionThinkingLevel,
+					accessMode: "full_access",
+				});
+			if (sessionId === activeSessionId) applyGoalState(response.goal);
+		} finally {
+			goalPending = false;
+		}
+	}
+
+	async function updateSessionGoal(input: SessionGoalWriteInput) {
+		const sessionId = activeSessionId;
+		if (!sessionId || goalPending) return;
+		goalPending = true;
+		try {
+			const response = await sdk
+				.space(spaceId)
+				.session(sessionId)
+				.goal.update(input);
+			if (sessionId === activeSessionId) applyGoalState(response.goal);
+		} finally {
+			goalPending = false;
+		}
+	}
+
+	async function clearSessionGoal() {
+		const sessionId = activeSessionId;
+		if (!sessionId || goalPending) return;
+		goalPending = true;
+		try {
+			await sdk.space(spaceId).session(sessionId).goal.clear();
+			if (sessionId === activeSessionId) applyGoalState(null);
+		} finally {
+			goalPending = false;
+		}
+	}
+
+	async function pauseSessionGoal() {
+		try {
+			await updateSessionGoal({ status: "paused" });
+			const runningTurn = activeSessionState?.turns.find(
+				(turn) =>
+					turn.status === "running" || turn.status === "abort_requested",
+			);
+			if (runningTurn?.intent === "goal") await handleAbort();
+		} catch (error) {
+			setComposerError(
+				error instanceof Error ? error.message : "Failed to pause goal",
+			);
+		}
+	}
+
+	async function resumeSessionGoal() {
+		try {
+			await updateSessionGoal({ status: "active" });
+		} catch (error) {
+			setComposerError(
+				error instanceof Error ? error.message : "Failed to resume goal",
+			);
+		}
+	}
+
+	async function completeSessionGoal() {
+		try {
+			await updateSessionGoal({ status: "complete" });
+		} catch (error) {
+			setComposerError(
+				error instanceof Error ? error.message : "Failed to complete goal",
+			);
+		}
+	}
+
 	async function handleAbort() {
 		if (
 			!activeSessionId ||
@@ -2926,6 +3036,14 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 
 	function setComposerHarness(harness: HarnessKind) {
 		if (sending || composerMode === "create") return;
+		if (
+			activeSessionGoal &&
+			activeSessionGoal.status !== "complete" &&
+			harness !== "cohub"
+		) {
+			setComposerError(m.goal_runtime_locked({}, { locale: getLocale() }));
+			return;
+		}
 		harnessBySession = { ...harnessBySession, [harnessSelectionKey]: harness };
 		clearComposerError();
 	}
@@ -2992,6 +3110,14 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		)
 			return;
 		const harness = composerHarness;
+		if (
+			activeSessionGoal &&
+			activeSessionGoal.status !== "complete" &&
+			harness !== "cohub"
+		) {
+			setComposerError(m.goal_runtime_locked({}, { locale: getLocale() }));
+			return;
+		}
 		// Fail closed: a disconnected Runtime must never dispatch a local turn.
 		if (!canUseHarness(harness)) {
 			setComposerError(m.runtime_harness_unavailable());
@@ -3951,6 +4077,17 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			}
 			const currentActiveSessionId = activeSessionId;
 			const isActiveSession = targetSessionId === currentActiveSessionId;
+			if (payload.type === "session.goal.updated") {
+				const goal = payload.payload.goal as SessionGoal | null;
+				const state = sessionStateById[targetSessionId];
+				if (state) {
+					workspace.sessionStateById = {
+						...sessionStateById,
+						[targetSessionId]: { ...state, goal },
+					};
+				}
+				return;
+			}
 			if (
 				payload.type === "session.turn.created" ||
 				payload.type === "session.turn.updated" ||
@@ -4367,7 +4504,12 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	function retryFailedSessionLoad() {
 		const sessionId = activeSessionId;
 		const state = sessionId ? sessionStateById[sessionId] : null;
-		if (sessionId && state?.error?.kind === "error" && !state.loaded && !state.loading) {
+		if (
+			sessionId &&
+			state?.error?.kind === "error" &&
+			!state.loaded &&
+			!state.loading
+		) {
 			void loadSessionState(sessionId);
 		}
 	}
@@ -4481,6 +4623,19 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		get activeSessionState() {
 			return activeSessionState;
 		},
+		get activeSessionGoal() {
+			return activeSessionGoal;
+		},
+		get goalPending() {
+			return goalPending;
+		},
+		setComposerError,
+		createSessionGoal,
+		updateSessionGoal,
+		clearSessionGoal,
+		pauseSessionGoal,
+		resumeSessionGoal,
+		completeSessionGoal,
 		get activeSessionInitialLoadingVisible() {
 			return activeSessionInitialLoadingVisible;
 		},

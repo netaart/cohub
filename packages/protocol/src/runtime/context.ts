@@ -63,6 +63,8 @@ export function contextToPiMessages(messages: RuntimeContextMessage[], options: 
   const result: Record<string, unknown>[] = [];
   for (const message of selectRuntimeContextMessages(messages)) {
     if (isPendingGenerationResult(message)) continue;
+    // A goal continuation prompt is control input for one turn, not conversation history.
+    if (message.role === "user" && message.meta?.messageKind === "goal_continuation") continue;
     const meta = { ...message.meta, messageId: message.id, turnId: message.turnId };
     const recordedAt = Date.parse(String(message.meta?.createdAt ?? ""));
     const timestamp = Number.isFinite(recordedAt) ? recordedAt : 0;

@@ -71,6 +71,25 @@ test("Cloud materialization restores history and appends a local Harness tail ex
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("Goal continuation prompts stay out of model context", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cohub-cloud-goal-"));
+  try {
+    const manager = SessionManager.create(root, root);
+    manager.newSession({ id: "test" });
+    const context: RuntimeContext = {
+      revision: "goal", throughTurnId: "turn-goal", messages: [
+        { id: "goal-user", turnId: "turn-goal", role: "user", content: [{ type: "text", text: "Continue working toward the active goal." }], meta: { messageKind: "goal_continuation" } },
+        { id: "goal-assistant", turnId: "turn-goal", role: "assistant", content: [{ type: "text", text: "progress" }], meta: { messageKind: "assistant_final" } },
+      ],
+    };
+    assert.equal(syncCloudContext(manager, context), true);
+    const messages = manager.buildSessionContext().messages;
+    assert.deepEqual(messages.map((message) => message.role), ["assistant"]);
+    assert.equal(JSON.stringify(messages).includes("Continue working"), false);
+    await manager.close();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("Durable compactions become native boundaries, never projected messages", async () => {
   const root = await mkdtemp(join(tmpdir(), "cohub-cloud-compaction-"));
   try {

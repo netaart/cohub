@@ -30,7 +30,7 @@ import type { ContextProjectionOptions } from "@cohub/protocol";
 import { loadRequestedThinkingLevel, loadRuntimeContext } from "./runtime/context-store.js";
 import { appendTerminalGenerationMessages } from "./generation-session-sync.js";
 import { syncCloudContext } from "./runtime/cloud-context.js";
-import type { createSandboxCodingTools } from "./sandbox/tools.js";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Permission } from "@cohub/core/permissions";
 import type { PromptAccessMode } from "@cohub/core/sessions";
 import {
@@ -1087,7 +1087,7 @@ export async function loadOrCreateSessionHandle(input: {
   userId?: string | null;
   modelRegistry: CohubModelRegistry;
   imageToTextConfig?: ImageToTextConfig | null;
-  tools: ReturnType<typeof createSandboxCodingTools>;
+  tools: AgentTool[];
   model?: { provider: string; id: string };
   beforeTurnSequence?: number | null;
   sessionHandles: Map<string, SessionHandle>;

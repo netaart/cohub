@@ -107,6 +107,9 @@ function parseTurnNavPreview(turn: {
 	if (turn.intent === "compact") {
 		return { text: "Context compacted", imageCount: 0, compact: true };
 	}
+	if (turn.intent === "goal") {
+		return { text: "Continuing goal", imageCount: 0, compact: true };
+	}
 
 	const contentImageCount = countImagesInContent(turn.userContent);
 	const contentText = textFromContent(turn.userContent);

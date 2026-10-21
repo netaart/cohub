@@ -327,7 +327,7 @@ type PersistenceTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0
 async function persistMessageNode(input: PersistMessageInput & { message: PersistMessageInput["message"] & { id?: string } }, finalizeLocal?: (tx: PersistenceTransaction, message: typeof sessionMessages.$inferSelect) => Promise<void>): Promise<{ message: typeof sessionMessages.$inferSelect; created: boolean }> {
   const [existing] = await db.select().from(sessionMessages).where(and(eq(sessionMessages.sessionId, input.sessionId), eq(sessionMessages.idempotencyKey, input.idempotencyKey))).limit(1);
   if (existing) {
-    if (existing.role === "user") {
+    if (existing.role === "user" && existing.meta && (existing.meta as Record<string, unknown>).messageKind !== "goal_continuation") {
       try {
         const [session] = await db.select({ meta: spaceSessions.meta })
           .from(spaceSessions)
@@ -362,6 +362,7 @@ async function persistMessageNode(input: PersistMessageInput & { message: Persis
   const content = sanitizeContentBlocksForPostgresJson(input.message.content);
   const text = deriveMessagePreviewText({ content }) || null;
   const messageRole = input.message.role ?? "assistant";
+  const goalContinuation = messageRole === "user" && input.message.meta?.messageKind === "goal_continuation";
   const normalizedUsage = normalizeUsage(input.message.usage);
   const isAborted = input.message.stopReason === "aborted";
   const hasError = Boolean(input.message.errorMessage) || input.message.stopReason === "error";
@@ -425,7 +426,7 @@ async function persistMessageNode(input: PersistMessageInput & { message: Persis
   }) : await db.insert(sessionMessages).values(values).returning();
   if (!messageNode) throw new Error("Failed to persist message");
 
-  if (messageRole === "user") {
+  if (messageRole === "user" && !goalContinuation) {
     try {
       const fallbackTitle = deriveSessionFallbackTitle({ content, text });
       if (
@@ -443,7 +444,7 @@ async function persistMessageNode(input: PersistMessageInput & { message: Persis
       logger.warn("[SessionTitle] failed to prepare title generation", error);
     }
   }
-  if (!localResult) await updateSessionAfterAppend(input.sessionId, messageNode);
+  if (!localResult && !goalContinuation) await updateSessionAfterAppend(input.sessionId, messageNode);
   return { message: messageNode, created };
 }
 
@@ -799,6 +800,7 @@ export async function persistUserMessage(input: { spaceId: string; sessionId: st
     eq(sessionTurns.sessionId, input.sessionId),
   )).limit(1);
   if (!turnRow) throw new Error("User message turn not found in session");
+  const content = input.meta?.messageKind === "goal_continuation" ? [] : input.content;
   const timing = completeMessageTiming({ startedAt: input.startedAt });
   const persisted = await persistMessageNode({
     spaceId: input.spaceId,
@@ -806,8 +808,8 @@ export async function persistUserMessage(input: { spaceId: string; sessionId: st
     previousMessageId: null,
     anchorUserMessageId: input.userMessageId,
     userId: turnRow.userUuid ?? null,
-    idempotencyKey: await buildUserIdempotencyKey({ messageId: input.userMessageId, content: input.content, meta: input.meta ?? null }),
-    message: { id: input.userMessageId, role: "user", content: input.content, meta: { ...(input.meta ?? {}), turnId, messageId: input.userMessageId, clientMessageId: typeof input.meta?.clientMessageId === "string" ? input.meta.clientMessageId : null, agentSessionEntryId: input.agentSessionEntryId ?? (typeof input.meta?.sessionEntryId === "string" ? input.meta.sessionEntryId : null) }, provider: null, model: null, stopReason: null, errorMessage: null, usage: null, ...timing },
+    idempotencyKey: await buildUserIdempotencyKey({ messageId: input.userMessageId, content, meta: input.meta ?? null }),
+    message: { id: input.userMessageId, role: "user", content, meta: { ...(input.meta ?? {}), turnId, messageId: input.userMessageId, clientMessageId: typeof input.meta?.clientMessageId === "string" ? input.meta.clientMessageId : null, agentSessionEntryId: input.agentSessionEntryId ?? (typeof input.meta?.sessionEntryId === "string" ? input.meta.sessionEntryId : null) }, provider: null, model: null, stopReason: null, errorMessage: null, usage: null, ...timing },
   });
   const record = toMessageRecord(persisted.message);
   if (!persisted.created) return { ok: true, message: record, created: false };

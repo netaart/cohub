@@ -1,10 +1,11 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { sessionTurns, spaces } from "@cohub/db";
+import { sessionGoals, sessionTurns, spaces } from "@cohub/db";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { db } from "./db.js";
 import { env } from "./env.js";
 import type { AgentTurnJobData } from "./queue.js";
 import { HOME_SPACE_SLUG, resolveHarness } from "@cohub/protocol";
+import { cancelExpiredSessionGoalTurn, sessionGoalTurnCanRun } from "@cohub/core/sessions";
 import { limitBatchSize } from "./runtime/batch-limit.js";
 import { DEFAULT_FOLLOWUP_DELIVERY, readMessageQueueConfig, type FollowupDelivery } from "./runtime/message-queue-config.js";
 
@@ -39,6 +40,7 @@ export type ClaimedTurnBatch = {
 export type ClaimResult =
   | { kind: "claimed"; batch: ClaimedTurnBatch }
   | { kind: "busy"; activeTurnId: string; activeUpdatedAt: Date | null; activeStatus: string }
+  | { kind: "cancelled"; turnId: string }
   | { kind: "noop" };
 
 const STALE_ACTIVE_TURN_MS = env.AGENT_STALE_ACTIVE_TURN_MS;
@@ -180,6 +182,17 @@ export async function claimNextTurnBatch(input: Pick<AgentTurnJobData, "sessionI
     if (active) {
       if (resolveHarness(active.meta) === "cohub" && isStaleActiveTurn(active)) {
         await markStaleTurnInterrupted(tx, active);
+        if (active.intent === "goal") {
+          const goalId = asRecord(active.meta).goalId;
+          if (typeof goalId === "string") {
+            await tx.update(sessionGoals).set({ status: "blocked", updatedAt: new Date() })
+              .where(and(
+                eq(sessionGoals.sessionId, input.sessionId),
+                eq(sessionGoals.goalId, goalId),
+                eq(sessionGoals.status, "active"),
+              ));
+          }
+        }
       } else {
         return { kind: "busy" as const, activeTurnId: active.id, activeUpdatedAt: active.updatedAt, activeStatus: active.status };
       }
@@ -219,7 +232,23 @@ export async function claimNextTurnBatch(input: Pick<AgentTurnJobData, "sessionI
       order by sequence asc
     `);
     const followups = followupRows.map((row) => normalizeTurn(row as Record<string, unknown>));
-    if (followups.length === 0) return { kind: "noop" as const };
+    if (followups.length === 0) {
+      const goalRows = await tx.execute(sql`
+        select id, session_id, user_uuid, sequence, status, intent, user_content, user_text, meta, updated_at
+        from v2.session_turns
+        where session_id = ${input.sessionId} and execution_kind = 'agent' and status = 'queued' and intent = 'goal' and ${beforeGeneration}
+        order by sequence asc
+        limit 1
+      `);
+      const goalTurn = goalRows[0] ? normalizeTurn(goalRows[0] as Record<string, unknown>) : null;
+      if (!goalTurn) return { kind: "noop" as const };
+      if (!(await sessionGoalTurnCanRun(tx, goalTurn))) {
+        await cancelExpiredSessionGoalTurn(tx, { sessionId: input.sessionId, turnId: goalTurn.id });
+        return { kind: "cancelled" as const, turnId: goalTurn.id };
+      }
+      const batch = await claimQueuedTurns(tx, [goalTurn]);
+      return batch ? { kind: "claimed" as const, batch } : { kind: "noop" as const };
+    }
 
     const delivery = await resolveFollowupDelivery(tx, followups[0]?.userUuid ?? null);
     const selected = delivery === "one_by_one"
@@ -258,8 +287,8 @@ export async function enqueueNextRunnableTurn(input: { spaceId: string; sessionI
   const rows = await db.execute(sql`
     select id
     from v2.session_turns
-    where session_id = ${input.sessionId} and execution_kind = 'agent' and status = 'queued' and intent in ('steer', 'followup')
-    order by case when intent = 'steer' then 0 else 1 end, updated_at asc, sequence asc
+    where session_id = ${input.sessionId} and execution_kind = 'agent' and status = 'queued' and intent in ('steer', 'followup', 'goal')
+    order by case when intent = 'steer' then 0 when intent = 'followup' then 1 else 2 end, updated_at asc, sequence asc
     limit 1
   `);
   const turnId = rows

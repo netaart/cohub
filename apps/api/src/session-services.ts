@@ -44,7 +44,7 @@ const defaultSkillService: SkillService = {
 const agentTurnQueue = createBullmqQueue<{
   spaceId: string;
   sessionId: string;
-  reason?: "prompt" | "steer" | "drain" | "retry" | "recovery";
+  reason?: "prompt" | "steer" | "goal" | "drain" | "retry" | "recovery";
   requestId?: string | null;
   trace?: Record<string, unknown>;
 }>(COHUB_AGENT_TURNS_QUEUE, {

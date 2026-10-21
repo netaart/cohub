@@ -88,6 +88,11 @@ export type TimelineItem =
 			id: string;
 			kind: "compact";
 			turn: SessionTurnRecord;
+	  }
+	| {
+			id: string;
+			kind: "goal";
+			turn: SessionTurnRecord;
 	  };
 
 export const stringifyUnknown = (value: unknown) => {

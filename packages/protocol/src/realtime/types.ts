@@ -1,6 +1,7 @@
 import type { ContentBlock } from "../core/content.js";
 import type { BillingPayload } from "../billing.js";
 import type { MessageRecord, SessionForkRecord, SessionRecord, SessionTurnRecord } from "../model/session.js";
+import type { SessionGoal } from "../model/goal.js";
 import type { ModelThinkingLevel } from "../model/completion.js";
 import type { SessionTurnSummary } from "../model/turn.js";
 import type { TaskRunStatus } from "../task/index.js";
@@ -620,6 +621,17 @@ export type RealtimeMessageRecord = Pick<
   | "createdAt"
 >;
 
+export type SessionGoalUpdatedEvent = {
+  id: string;
+  timestamp: number;
+  domain: "session";
+  type: "session.goal.updated";
+  requestId?: string | null;
+  spaceId: string;
+  sessionId: string;
+  payload: { goal: SessionGoal | null };
+};
+
 export type SessionTurnCreatedEvent = {
   id: string;
   timestamp: number;
@@ -962,6 +974,7 @@ export type RealtimeServerEvent =
   | SystemSubscribeErrorEvent
   | SessionCreatedEvent
   | SessionUpdatedEvent
+  | SessionGoalUpdatedEvent
   | SessionRequestAcceptedEvent
   | SessionRequestErrorEvent
   | SessionTurnCreatedEvent

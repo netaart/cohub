@@ -3,7 +3,7 @@ import { accessPolicies, type sessionMessages } from "@cohub/db";
 import { and, eq } from "drizzle-orm";
 import type { RealtimeMessageRecord, RealtimeSessionFork, RealtimeSessionRecord, RealtimeTaskRecord, RealtimeTurnRecord, SpacePresenceSnapshot } from "@cohub/protocol/realtime";
 import { getRealtimeSpaceRoom } from "@cohub/protocol/realtime";
-import type { MessageRecord, SessionActiveTurn, SessionRecord, SessionTurnIssue, SessionTurnRecord } from "@cohub/protocol/model";
+import type { MessageRecord, SessionActiveTurn, SessionGoal, SessionRecord, SessionTurnIssue, SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
 import { dispatchRealtimeEvent } from "./channels.js";
 import { buildResourceLabelSnapshot, type LabelResourceType } from "@cohub/core/labels/resource-events";
@@ -236,6 +236,22 @@ export async function dispatchSessionUpdated(input: {
     sessionId: realtimeSession.id,
     rooms,
     payload: { session: realtimeSession, changed: input.changed },
+  });
+}
+
+export async function dispatchSessionGoalUpdated(input: {
+  spaceId: string;
+  sessionId: string;
+  goal: SessionGoal | null;
+}) {
+  await dispatchRealtimeEvent({
+    id: randomUUID(),
+    timestamp: Date.now(),
+    domain: "session",
+    type: "session.goal.updated",
+    spaceId: input.spaceId,
+    sessionId: input.sessionId,
+    payload: { goal: input.goal },
   });
 }
 

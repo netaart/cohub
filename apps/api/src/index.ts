@@ -23,6 +23,7 @@ import { verifyAppSessionToken, type AppSessionPrincipal } from "./app-sessions.
 import { assertRequiredConfig, config } from "./config.js";
 
 import router from "./routes/index.js";
+import { startSessionGoalRecovery } from "./session-goal-recovery.js";
 import { resolveRequestSourceTurn } from "./lib/request-source.js";
 import type { RequestSource } from "@cohub/protocol/provenance";
 
@@ -267,3 +268,4 @@ const server = serve({
 });
 server.setTimeout(0);
 logger.info(`@cohub/api listening on :${port}`);
+startSessionGoalRecovery();

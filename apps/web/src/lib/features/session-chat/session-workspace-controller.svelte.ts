@@ -1,4 +1,8 @@
-import type { SessionRecord, SessionTurnRecord } from "@neta-art/cohub";
+import type {
+	SessionGoal,
+	SessionRecord,
+	SessionTurnRecord,
+} from "@neta-art/cohub";
 import type { AccessState } from "$lib/access/access-state";
 import { createRequestDedupe } from "$lib/features/space/modules/request-dedupe";
 import { sessionMatchesContext } from "$lib/session-context";
@@ -15,6 +19,7 @@ export type SessionViewState = {
 	loadingOlder: boolean;
 	loadingNewer: boolean;
 	oldestCursor: number | undefined;
+	goal?: SessionGoal | null;
 };
 
 export function createSessionWorkspaceController(getSpaceId: () => string) {

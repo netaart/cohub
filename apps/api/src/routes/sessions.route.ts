@@ -1,9 +1,11 @@
 import { readFreshSessionStats } from "@cohub/protocol/model";
-import { refreshSessionStats } from "@cohub/core/sessions";
+import { cancelExpiredSessionGoalTurn, clearSessionGoal, createSessionGoalContinuation, getSessionGoal, refreshSessionStats, SessionGoalError, setSessionGoal, updateSessionGoal } from "@cohub/core/sessions";
+import { isSessionGoalStatus, type SessionGoalAccessMode, type SessionGoalStatus } from "@cohub/protocol/model";
+import type { ModelThinkingLevel } from "@cohub/protocol";
 import { db } from "../db/index.js";
 import { createLogger } from "@cohub/infra/logging";
 import { randomUUID } from "node:crypto";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { hasPermission } from "../permissions.js";
 import { getOptionalAuth, useAuth, requireValidId, authzDenied } from "../lib/middleware.js";
 import {
@@ -28,6 +30,9 @@ import { isNativeClientTurn } from "@cohub/protocol";
 import type { SessionFilesResponse } from "@cohub/protocol/model";
 import { getSessionRuntimeTurn } from "../runtime.js";
 import { listSessionFiles } from "../session-files.js";
+import { dispatchSessionGoalUpdated, dispatchTurnCreated } from "../realtime-events.js";
+import { enqueueAgentTurnJob } from "../agent-turn-queue.js";
+import { validatePromptModel } from "../llm/models.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -112,6 +117,195 @@ router.post("/:id/turns/:turnId/fork", async (c) => {
   } catch (error) {
     return c.json({ message: error instanceof Error ? error.message.toLowerCase().replace(/\.$/, "") : "failed to fork session" }, 400);
   }
+});
+
+const sessionGoalErrorResponse = (c: Context, error: unknown) => {
+  if (error instanceof SessionGoalError) {
+    const status = error.code === "not_found" ? 404 : error.code === "unfinished_goal" ? 409 : 400;
+    return c.json({ message: error.message, code: error.code }, status);
+  }
+  throw error;
+};
+
+const readSessionGoalBody = async (c: Context) =>
+  c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+
+const validateGoalModel = async (input: {
+  userId: string;
+  provider?: string | null;
+  model?: string | null;
+}) => {
+  if (!input.provider && !input.model) return true;
+  if (!input.provider || !input.model) return false;
+  return validatePromptModel({ userId: input.userId, provider: input.provider, model: input.model });
+};
+
+const startSessionGoalIfIdle = async (spaceId: string, sessionId: string) => {
+  const result = await createSessionGoalContinuation(db, { spaceId, sessionId });
+  if (!result.continuation) return;
+  try {
+    await enqueueAgentTurnJob({
+      spaceId,
+      sessionId,
+      reason: "goal",
+    });
+    await dispatchTurnCreated({
+      spaceId,
+      sessionId,
+      turn: result.continuation.turn,
+    });
+  } catch (error) {
+    await cancelExpiredSessionGoalTurn(db, { sessionId, turnId: result.continuation.turn.id }).catch((cancelError) => {
+      logger.warn("[SessionGoal] failed to cancel an unqueued goal turn", cancelError);
+    });
+    throw error;
+  }
+};
+
+router.get("/:id/goal", async (c) => {
+  const user = getOptionalAuth(c);
+  const sessionId = c.req.param("id");
+  if (!sessionId || !requireValidId(sessionId)) return c.json({ message: "session not found" }, 404);
+  const session = await getSpaceSessionById(sessionId);
+  if (!session) return c.json({ message: "session not found" }, 404);
+  if (!(await hasPermission(user, "session.view", { spaceId: session.spaceId, sessionId }))) return authzDenied(c);
+  return c.json({ goal: await getSessionGoal(db, sessionId) });
+});
+
+router.put("/:id/goal", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const sessionId = c.req.param("id");
+  if (!sessionId || !requireValidId(sessionId)) return c.json({ message: "session not found" }, 404);
+  const session = await getSpaceSessionById(sessionId);
+  if (!session) return c.json({ message: "session not found" }, 404);
+  if (!(await hasPermission(user, "session.edit", { spaceId: session.spaceId, sessionId }))) return authzDenied(c);
+
+  const body = await readSessionGoalBody(c);
+  if (typeof body.objective !== "string") return c.json({ message: "objective is required" }, 400);
+  if (body.tokenBudget !== undefined && body.tokenBudget !== null && typeof body.tokenBudget !== "number") {
+    return c.json({ message: "tokenBudget must be a number or null" }, 400);
+  }
+  if (body.provider !== undefined && body.provider !== null && typeof body.provider !== "string") {
+    return c.json({ message: "provider must be a string or null" }, 400);
+  }
+  if (body.model !== undefined && body.model !== null && typeof body.model !== "string") {
+    return c.json({ message: "model must be a string or null" }, 400);
+  }
+  if (body.accessMode !== undefined && body.accessMode !== "full_access" && body.accessMode !== "read_only") {
+    return c.json({ message: "invalid access mode" }, 400);
+  }
+  if (body.thinkingLevel !== undefined && body.thinkingLevel !== null && typeof body.thinkingLevel !== "string") {
+    return c.json({ message: "thinkingLevel must be a string or null" }, 400);
+  }
+  const provider = typeof body.provider === "string" ? body.provider : null;
+  const model = typeof body.model === "string" ? body.model : null;
+  if (!(await validateGoalModel({ userId: user.uuid, provider, model }))) {
+    return c.json({ message: "model is unavailable" }, 400);
+  }
+  try {
+    const goal = await setSessionGoal(db, {
+      sessionId,
+      objective: body.objective,
+      tokenBudget: typeof body.tokenBudget === "number" ? body.tokenBudget : null,
+      provider,
+      model,
+      accessMode: body.accessMode === "read_only" ? "read_only" : "full_access",
+      thinkingLevel: typeof body.thinkingLevel === "string" ? body.thinkingLevel as ModelThinkingLevel : null,
+      createdBy: user.uuid,
+    });
+    await dispatchSessionGoalUpdated({ spaceId: session.spaceId, sessionId, goal }).catch((error) => {
+      logger.warn("[SessionGoal] failed to dispatch goal update", error);
+    });
+    await startSessionGoalIfIdle(session.spaceId, sessionId).catch((error) => {
+      logger.warn("[SessionGoal] failed to start a new goal", error);
+    });
+    return c.json({ goal });
+  } catch (error) {
+    return sessionGoalErrorResponse(c, error);
+  }
+});
+
+router.patch("/:id/goal", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const sessionId = c.req.param("id");
+  if (!sessionId || !requireValidId(sessionId)) return c.json({ message: "session not found" }, 404);
+  const session = await getSpaceSessionById(sessionId);
+  if (!session) return c.json({ message: "session not found" }, 404);
+  if (!(await hasPermission(user, "session.edit", { spaceId: session.spaceId, sessionId }))) return authzDenied(c);
+
+  const body = await readSessionGoalBody(c);
+  if (body.status !== undefined && !isSessionGoalStatus(body.status)) {
+    return c.json({ message: "invalid goal status" }, 400);
+  }
+  if (body.objective !== undefined && typeof body.objective !== "string") {
+    return c.json({ message: "objective must be a string" }, 400);
+  }
+  if (body.tokenBudget !== undefined && body.tokenBudget !== null && typeof body.tokenBudget !== "number") {
+    return c.json({ message: "tokenBudget must be a number or null" }, 400);
+  }
+  if (body.provider !== undefined && body.provider !== null && typeof body.provider !== "string") {
+    return c.json({ message: "provider must be a string or null" }, 400);
+  }
+  if (body.model !== undefined && body.model !== null && typeof body.model !== "string") {
+    return c.json({ message: "model must be a string or null" }, 400);
+  }
+  if (
+    body.accessMode !== undefined
+    && body.accessMode !== null
+    && body.accessMode !== "full_access"
+    && body.accessMode !== "read_only"
+  ) {
+    return c.json({ message: "invalid accessMode" }, 400);
+  }
+  if (body.thinkingLevel !== undefined && body.thinkingLevel !== null && typeof body.thinkingLevel !== "string") {
+    return c.json({ message: "thinkingLevel must be a string or null" }, 400);
+  }
+  const provider = body.provider as string | null | undefined;
+  const model = body.model as string | null | undefined;
+  if (provider !== undefined || model !== undefined) {
+    if (!(await validateGoalModel({ userId: user.uuid, provider, model }))) {
+      return c.json({ message: "model is unavailable" }, 400);
+    }
+  }
+  try {
+    const goal = await updateSessionGoal(db, sessionId, {
+      ...(body.objective !== undefined ? { objective: body.objective as string } : {}),
+      ...(body.tokenBudget !== undefined ? { tokenBudget: body.tokenBudget as number | null } : {}),
+      ...(body.status !== undefined ? { status: body.status as SessionGoalStatus } : {}),
+      ...(provider !== undefined ? { provider } : {}),
+      ...(model !== undefined ? { model } : {}),
+      ...(body.accessMode === "full_access" || body.accessMode === "read_only" ? { accessMode: body.accessMode as SessionGoalAccessMode } : {}),
+      ...(body.thinkingLevel !== undefined ? { thinkingLevel: body.thinkingLevel as ModelThinkingLevel | null } : {}),
+    });
+    await dispatchSessionGoalUpdated({ spaceId: session.spaceId, sessionId, goal }).catch((error) => {
+      logger.warn("[SessionGoal] failed to dispatch goal update", error);
+    });
+    if (goal.status === "active") {
+      await startSessionGoalIfIdle(session.spaceId, sessionId).catch((error) => {
+        logger.warn("[SessionGoal] failed to resume a goal", error);
+      });
+    }
+    return c.json({ goal });
+  } catch (error) {
+    return sessionGoalErrorResponse(c, error);
+  }
+});
+
+router.delete("/:id/goal", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const sessionId = c.req.param("id");
+  if (!sessionId || !requireValidId(sessionId)) return c.json({ message: "session not found" }, 404);
+  const session = await getSpaceSessionById(sessionId);
+  if (!session) return c.json({ message: "session not found" }, 404);
+  if (!(await hasPermission(user, "session.edit", { spaceId: session.spaceId, sessionId }))) return authzDenied(c);
+  const cleared = await clearSessionGoal(db, sessionId);
+  await dispatchSessionGoalUpdated({ spaceId: session.spaceId, sessionId, goal: null }).catch((error) => {
+    logger.warn("[SessionGoal] failed to dispatch goal clear", error);
+  });
+  return c.json({ cleared });
 });
 
 router.get("/:id", async (c) => {

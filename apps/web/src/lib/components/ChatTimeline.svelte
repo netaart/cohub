@@ -4,7 +4,7 @@ import type {
 	SessionTurnRecord,
 	StoredIntermediateMessage,
 } from "@cohub/protocol/model";
-import { Loader2 } from "lucide-svelte";
+import { Loader2, Target } from "lucide-svelte";
 import ChatMessageBubble from "$lib/components/ChatMessageBubble.svelte";
 import CompactionDivider from "$lib/components/CompactionDivider.svelte";
 import GenerationRuntimeStatusRow from "$lib/components/GenerationRuntimeStatusRow.svelte";
@@ -76,7 +76,7 @@ let prevScrollHeight = $state(0);
 type TimelineScrollAnchor = {
 	itemKey: string;
 	turnSequence: number;
-	kind: "user" | "assistant" | "process" | "compact";
+	kind: "user" | "assistant" | "process" | "compact" | "goal";
 };
 
 function shouldFollowSessionTail(item: TimelineItem) {
@@ -93,7 +93,11 @@ function shouldFollowSessionTail(item: TimelineItem) {
 function getTimelineScrollAnchor(
 	item: TimelineItem,
 ): TimelineScrollAnchor | null {
-	if (item.kind === "process" || item.kind === "compact") {
+	if (
+		item.kind === "process" ||
+		item.kind === "compact" ||
+		item.kind === "goal"
+	) {
 		return {
 			itemKey: item.id,
 			turnSequence: item.turn.sequence,
@@ -256,6 +260,11 @@ $effect(() => {
 					</div>
 				{:else if item.kind === 'compact'}
 					<CompactionDivider turn={item.turn} />
+				{:else if item.kind === 'goal'}
+					<div class="flex items-center gap-2 px-[var(--chat-msg-inset)] py-2 text-[11px] text-text-placeholder">
+						<Target class="h-3 w-3" />
+						<span>{m.goal_continuation({}, { locale })}</span>
+					</div>
 				{/if}
 			</div>
 		{/each}

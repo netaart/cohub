@@ -1,5 +1,5 @@
 export type { SpaceWalletSummary, SpaceWalletActivity, SpaceWalletActivityPage } from "@cohub/protocol";
-export type { SessionStats, ExecutionStats, TurnMetrics, RequestMetric } from "@cohub/protocol/model";
+export type { SessionStats, ExecutionStats, TurnMetrics, RequestMetric, SessionGoal, SessionGoalStatus, SessionGoalWriteInput } from "@cohub/protocol/model";
 import type {
   SessionBindingRecord as ProtocolSessionBindingRecord,
   SessionRecord as ProtocolSessionRecord,
