@@ -83,13 +83,13 @@ onMount(() => {
 			{#snippet actions()}
 				{#if isPage}
 					<HeaderAction label={m.list_search({}, { locale })} icon={Search} onclick={() => openAreaSearch("chats")} />
-					<HeaderAction
-						label={archived ? m.chats_archived_exit({}, { locale }) : m.chats_archived({}, { locale })}
-						icon={Archive}
-						expanded={archived}
-						onclick={() => inbox.setArchived(!archived)}
-					/>
 				{/if}
+				<HeaderAction
+					label={archived ? m.chats_archived_exit({}, { locale }) : m.chats_archived({}, { locale })}
+					icon={Archive}
+					expanded={archived}
+					onclick={() => inbox.setArchived(!archived)}
+				/>
 				{#if !archived}
 					<ChatsSourcePicker value={filter.source} onChange={(source) => inbox.setSource(source)} />
 				{/if}
