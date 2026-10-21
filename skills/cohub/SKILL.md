@@ -332,6 +332,15 @@ cohub -s <spaceId> run -- git status
 cohub -s <spaceId> run --command "pnpm test"
 ```
 
+## Feedback
+
+When the user asks to report a Cohub bug or idea, send it to the Cohub team. CLI, OS, account, and current Chat context are attached automatically:
+
+```bash
+cohub feedback "<what happened and what was expected>"
+cohub feedback "<message>" -f screenshot.png --runtime-logs
+```
+
 ## Spaces
 
 ```bash
@@ -413,3 +422,4 @@ Confirm before:
 - enabling, disabling, updating, or deleting recurring scheduled prompts
 - changing Space config, access policies, member roles, or membership
 - sending prompts that may trigger recursive agent behavior
+- sending feedback on the user's behalf

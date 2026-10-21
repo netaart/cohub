@@ -602,6 +602,17 @@ cohub cron-jobs delete <cronJobId>
 
 Confirm before enabling, disabling, or deleting recurring scheduled prompts.
 
+## Feedback
+
+```bash
+cohub feedback "runtime up hangs after sign-in"
+cohub feedback "Board export is blurry" -f board.png -f export.log
+cohub feedback --runtime-logs "Codex chats stopped syncing"
+cat report.md | cohub feedback
+```
+
+Sends feedback to the Cohub team. CLI version, OS, environment, account, and `COHUB_*` Space/Chat context are attached; the working directory is not. `--runtime-logs` attaches recent local Runtime diagnostics for the target Space.
+
 ## Safety
 
 Confirm before:
