@@ -1,4 +1,5 @@
 import type { NativeProjection, ProjectionTarget } from "@neta-art/cohub";
+import { harnessAdapter } from "./harnesses/index.js";
 import { listSessionProjectionTurns, projectTurnBatch, type ProjectionSourceTurn, type SessionTurnProjectionClient } from "./turn-projection.js";
 
 export type ProjectionStoreInput = {
@@ -16,17 +17,7 @@ export type ProjectionStoreResult = { projection: NativeProjection; turns: Proje
 
 /** Give the projection's own records (the native header) the identity of the file it becomes. */
 export function rebindProjectionNativeSession(result: ProjectionStoreResult, nativeSessionId: string): ProjectionStoreResult {
-  const records = result.projection.records.map((entry) => {
-    if (entry.sourceTurnId !== null) return entry;
-    if (entry.record.type === "session") {
-      return { ...entry, record: { ...entry.record, id: nativeSessionId, affinity: { ...(entry.record.affinity as Record<string, unknown>), threadId: nativeSessionId } } };
-    }
-    if (entry.record.type === "session_meta") {
-      const payload = entry.record.payload as Record<string, unknown>;
-      return { ...entry, record: { ...entry.record, payload: { ...payload, id: nativeSessionId, session_id: nativeSessionId } } };
-    }
-    return entry;
-  });
+  const records = harnessAdapter(result.projection.target).session.rebind(result.projection.records, nativeSessionId);
   return { ...result, projection: { ...result.projection, records } };
 }
 

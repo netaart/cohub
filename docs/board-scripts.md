@@ -76,6 +76,11 @@ contains `t`, `dt`, `width`, `height`, `seed`, `params`, and `state`. Times use
 milliseconds. Static drawings need no `animated` export; they redraw when their
 input changes or the instance calls `invalidate()`.
 
+`draw()` only renders current state: it may be skipped, repeated, or executed at a
+different pixel density. Advance state in frame or event handlers. Use the frame's
+`width` and `height` for logical dimensions; `ctx.canvas.width` and `height` are
+backing pixels and vary with rendering quality.
+
 Keep drawing inside `width` × `height`. Node script workers use the renderer's
 registered fonts; prefer `Geist` or `Geist Mono` for consistent Canvas text. Native
 text items remain editable and measurable by `boards inspect`; text and shapes

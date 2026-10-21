@@ -1,22 +1,18 @@
 import type { AppBoardAsset } from "@neta-art/cohub";
 import type { BoardAssetSource } from "@neta-art/cohub/board";
+import { spaceFileUrls } from "$lib/board/space-file-urls";
 
 export type { BoardAssetSource } from "@neta-art/cohub/board";
 
 export function createSpaceBoardAssetSource(spaceId: string): BoardAssetSource {
 	return {
-		resolveFileUrl: async (path) => {
-			const { resolveSpaceFileImageUrl } = await import(
-				"$lib/board/board-image-urls"
-			);
-			return resolveSpaceFileImageUrl(spaceId, path);
-		},
-		resolvePlaybackUrl: async (path) => {
-			const { resolveSpaceFilePlaybackUrl } = await import(
-				"$lib/board/board-image-urls"
-			);
-			return resolveSpaceFilePlaybackUrl(spaceId, path);
-		},
+		resolveFileUrl: (path, options) =>
+			spaceFileUrls.resolve(spaceId, path, { fresh: options?.fresh }),
+		resolvePlaybackUrl: (path, options) =>
+			spaceFileUrls.resolve(spaceId, path, {
+				purpose: "playback",
+				fresh: options?.fresh,
+			}),
 	};
 }
 

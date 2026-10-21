@@ -1,5 +1,64 @@
 # @neta-art/cohub-cli
 
+## 10.8.2
+
+### Patch Changes
+
+- 4cb0d2b: The shared Codex app-server no longer holds a conversation after its Turn ends, so Codex Desktop can continue a conversation that Cohub ran or watched (immediately with Codex 0.164+, after Codex's idle timeout before that). A Cohub Turn on a conversation open in another app now says so instead of failing with a writer-lock error. 共享 Codex app-server 在 Turn 结束后不再占用会话，Codex 桌面端可以继续 Cohub 运行或观察过的会话（Codex 0.164+ 立即释放，更早版本在 Codex 空闲超时后释放）。会话在其他应用中打开时，Cohub Turn 会明确提示，而不是报写锁错误。
+
+## 10.8.1
+
+### Patch Changes
+
+- 16dfdef: Local Runtime reconnects immediately after a dropped WebSocket instead of staying offline until in-flight Turns finish; detached Turns keep running and replay their result on the new connection. Native sync no longer re-reads or resends a transcript that hit a size limit until the file changes. Connection diagnostics record close and handshake context and the identity of oversized frames. 本地 Runtime 在 WebSocket 断开后立即重连，不再等进行中的 Turn 结束才恢复在线；断开期间的 Turn 继续执行，并在新连接上回放结果。原生同步遇到超出大小限制的会话时，在文件变化前不再反复读取和重发。连接诊断新增关闭/握手上下文与超限帧标识。
+- Updated dependencies [e4e8b58]
+  - @neta-art/cohub@12.1.0
+
+## 10.8.0
+
+### Minor Changes
+
+- 89be906: Sync terminal Claude Code and WorkBuddy conversations to the Space, read-only, like Pi and Codex. Every harness adapter now requires a transcript reader. Rerun `cohub runtime up` to consent for the new harnesses.
+- 1df0409: Add Cursor (`cursor-agent`) as a local harness: Cohub Turns hand over history and resume natively, and terminal and IDE Cursor chats sync read-only. Deploy API, Gateway and Agent before the CLI.
+
+### Patch Changes
+
+- d6bc322: Give Board items one reading scale. Schema defaults now match the sizes the web creates, media and task cards take a 480 long edge from every entry, and refits keep the long edge instead of the width. `boardTaskCardSize` exposes the task card sizing. `boards schema` lists the scale, and the slide examples use 960×540 pages.
+- 1063e2f: Upgrade Generation SDK to 0.1.40. Seedance declarations now use the upstream resolution values: Seedance 2.0 exposes 480p, 720p, 1080p and 4k; Seedance 2.0 Fast exposes 480p and 720p; Seedance 2.5 exposes 480p, 720p and 1080p. The unsupported 2K resolution and the 3:2 and 2:3 aspect ratios are removed.
+- Updated dependencies [3cdf904]
+- Updated dependencies [6623e23]
+- Updated dependencies [bdc38af]
+- Updated dependencies [d6bc322]
+- Updated dependencies [fa7e272]
+- Updated dependencies [02d0414]
+- Updated dependencies [e0a660e]
+- Updated dependencies [1df0409]
+- Updated dependencies [1063e2f]
+  - @neta-art/cohub@12.0.0
+
+## 10.7.0
+
+### Minor Changes
+
+- 4fee251: List Claude Code's own model catalog, including gateway-discovered models with their gateway as provider.
+- 3eb3713: Add repeatable `--text <role>=<text>` to `cohub generate` for models that require text roles, such as `song2`. The positional prompt is optional when `--text` is given and stays first when both are used.
+
+### Patch Changes
+
+- Updated dependencies [451b5d3]
+  - @neta-art/cohub@11.5.1
+
+## 10.6.0
+
+### Minor Changes
+
+- 6347fa9: Local Runtime harnesses are self-contained adapters driven by one protocol registry (`LOCAL_HARNESSES` / `LOCAL_HARNESS_SPECS`), and `cohub runtime up` adds Claude Code (`--harness claude`) and WorkBuddy (`--harness workbuddy`, via the `codebuddy` CLI). Both run Cohub Turns over stream-json, carry Cohub history in their native transcripts, resume natively and restore from archives; full access maps to `acceptEdits`, read-only to `plan` with only Read/Glob/Grep and no MCP servers, and permission requests are never granted. Without `--harness`, an installed harness that cannot start is skipped with a warning. Deploy API, Gateway and Agent before updating the CLI. Bilingual summary: 本地 Runtime 的 Harness 改为由协议注册表驱动的独立适配器，并新增 Claude Code（`--harness claude`）与 WorkBuddy（`--harness workbuddy`，使用 `codebuddy` CLI）。二者通过 stream-json 执行 Cohub Turn，云端历史写入原生会话文件，可原生续接并从归档恢复；完整权限映射为 `acceptEdits`，只读映射为仅开放 Read/Glob/Grep 且不加载 MCP 的 `plan`，权限请求不会被批准。未指定 `--harness` 时，无法启动的已安装 Harness 会告警并跳过。请先部署 API、Gateway 与 Agent，再更新 CLI。
+
+### Patch Changes
+
+- Updated dependencies [6347fa9]
+  - @neta-art/cohub@11.5.0
+
 ## 10.5.0
 
 ### Minor Changes

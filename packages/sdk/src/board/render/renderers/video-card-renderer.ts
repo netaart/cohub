@@ -1,9 +1,9 @@
 import { getMediaResourceTitle } from "../../model/media.js";
 import type { BoardSceneItem, SceneItem } from "../../model/scene.js";
 import type { BoardVideoItem } from "@cohub/protocol";
-import { Container, Graphics, Sprite, Texture } from "pixi.js";
+import { Container, Graphics } from "pixi.js";
 import { createCardTag, formatBoardDuration, syncCardTag, type CardTag, zoomCardTag } from "../card-tag.js";
-import { cardElevation, containRect, drawCardSurface, traceCardOutline } from "../surface.js";
+import { cardElevation, containRect, drawCardSurface, fillCardPicture } from "../surface.js";
 import { boardCardDetailed } from "../text-resolution.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
@@ -13,8 +13,7 @@ import { drawMediaPlayKey } from "./media-key.js";
 type VideoParts = {
 	root: Container;
 	plate: Graphics;
-	sprite: Sprite;
-	mask: Graphics;
+	picture: Graphics;
 	chrome: Graphics;
 	tag: CardTag;
 	sig: string;
@@ -43,7 +42,7 @@ function sync(container: Container, item: SceneItem<BoardVideoItem>, context: Bo
 	const elevation = cardElevation(context, item.id);
 	const sig = [
 		key ?? "",
-		texture ? `${texture.width}x${texture.height}` : "none",
+		texture?.uid ?? "none",
 		width,
 		height,
 		elevation,
@@ -66,14 +65,11 @@ function sync(container: Container, item: SceneItem<BoardVideoItem>, context: Bo
 	});
 	if (framed) drawFilmRails(parts.plate, width, height, rail, context.palette.bg);
 
-	traceCardOutline(parts.mask.clear(), framed ? screen : rect, framed ? { corner: "round", radius: 1 } : context.style).fill({ color: 0xffffff });
-	if (texture && parts.sprite.texture !== texture) parts.sprite.texture = texture;
-	parts.sprite.visible = Boolean(texture);
+	parts.picture.clear();
 	if (texture) {
 		const fitted = containRect(screen.width, screen.height, texture.width, texture.height);
-		parts.sprite.position.set(screen.x + fitted.x, screen.y + fitted.y);
-		parts.sprite.width = fitted.width;
-		parts.sprite.height = fitted.height;
+		const picture = { ...fitted, x: screen.x + fitted.x, y: screen.y + fitted.y };
+		fillCardPicture(parts.picture, texture, picture, framed ? { corner: "round", radius: 1 } : context.style);
 	}
 
 	parts.chrome.clear();
@@ -99,17 +95,18 @@ export const videoCardRenderer: BoardCardRenderer = {
 	create: (item, context) => {
 		const root = new Container();
 		const plate = new Graphics();
-		const sprite = new Sprite(Texture.EMPTY);
-		const mask = new Graphics();
+		const picture = new Graphics();
 		const chrome = new Graphics();
 		const tag = createCardTag();
-		root.addChild(plate, sprite, mask, chrome, tag.root);
-		sprite.mask = mask;
-		partsByContainer.set(root, { root, plate, sprite, mask, chrome, tag, sig: "" });
+		root.addChild(plate, picture, chrome, tag.root);
+		partsByContainer.set(root, { root, plate, picture, chrome, tag, sig: "" });
 		if (item.type === "video") sync(root, item, context);
 		return root;
 	},
 	update: (container, item, context) => {
+		if (item.type === "video") sync(container, item, context);
+	},
+	resolution: (container, item, context) => {
 		if (item.type === "video") sync(container, item, context);
 	},
 	zoom: (container, zoom) => {

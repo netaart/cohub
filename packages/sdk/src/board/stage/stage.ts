@@ -22,9 +22,9 @@ import {
 	resolveItemColor,
 	resolveSceneArrow,
 	type SceneItem,
-	type ScreenPoint,
+	elementClientToLocal,
+	pointToWorld,
 	screenPoint,
-	screenToWorld,
 	stableCullRect,
 	visibleWorldRect,
 	type WorldPoint,
@@ -47,16 +47,18 @@ import {
 	itemAlpha,
 	getBoardResolution,
 	parseBoardCssColor,
-	textZoomBucket,
 	updateBoardBackground,
 } from "../render/index.js";
-import type { BoardAssetManager } from "./assets.js";
+import { type BoardAssetManager, boardTextureEdge } from "./assets.js";
+import { type BoardCanvasBox, boardCanvasSize, measureBoardCanvasBox } from "./canvas-size.js";
 import { scheduleBoardMaintenance } from "./maintenance.js";
+import { observeDisplayDensity } from "./display-density.js";
 import { toBoardPointerEvent } from "./pointer.js";
 import { createBoardPointerGestures } from "./pointer-gestures.js";
 import { createBoardScriptPointerRouter } from "./script-pointer.js";
 import { type BoardLiveStroke, createBoardScene } from "./scene.js";
 import { drawBoardOverlay } from "./overlay.js";
+import { createTextResolutionTracker } from "./text-resolution-tracker.js";
 import { type BoardItemView, createBoardItemViewLayer } from "./views.js";
 
 export type BoardStageTheme = {
@@ -89,6 +91,7 @@ export type BoardStageOptions = {
 	onDoubleClick?: (item: BoardSceneItem | null, point: WorldPoint) => boolean | undefined;
 	onSurfaceChange?: (size: { width: number; height: number }) => void;
 	onVisibleChange?: (ids: ReadonlySet<string> | null) => void;
+	onLiveChange?: (ids: ReadonlySet<string>) => void;
 	safeRect?: () => Rect;
 	scriptCapabilities?: Record<string, (id: string, input: unknown) => Promise<unknown>>;
 };
@@ -127,6 +130,7 @@ function defaultTheme(): BoardStageTheme {
 const NO_IDS: ReadonlySet<string> = new Set();
 const MARCH_STEP_MS = 160;
 const MARCH_SMOOTH_MS = 40;
+const TEXTURE_SETTLE_MS = 150;
 
 const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5' fill='none' stroke='%23fff' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5' fill='none' stroke='%231d1d1f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 12 12, crosshair`;
 
@@ -179,22 +183,24 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let scriptHover: { owner: string; target: string } | null = null;
 	const scriptPointers = createBoardScriptPointerRouter();
 	let stopMaintenance: (() => void) | null = null;
+	let stopDensity: (() => void) | null = null;
 	let active = true;
 	let disposed = false;
 	let renderFrame = 0;
 	let tickFrame = 0;
+	let scriptTickFrame = 0;
 	let cardTickFrame = 0;
 	let cardTickTimer: ReturnType<typeof setTimeout> | null = null;
 	let cardTickDue = 0;
 	const staleIds = new Set<string>();
 	let resizeFrame = 0;
+	let canvasBox: BoardCanvasBox | null = null;
 	let cardEpoch = 0;
-	let assetVersion = 0;
 	let surface = { width: 0, height: 0 };
 	let playbackCamera: BoardViewport | null = null;
 	let cursor = "";
 	const renderCamera = () => playbackCamera ?? editor.camera;
-	const views = createBoardItemViewLayer(host, editor, options.views ?? [], renderCamera);
+	const views = createBoardItemViewLayer(host, editor, options.views ?? [], renderCamera, scheduleTick);
 
 	const player = createBoardPlayer({
 		resolveColor: (color) => {
@@ -216,21 +222,51 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (same && cull.scene === editor.scene) return cull.ids;
 		cull = { rect: same ? cull.rect : rect, ids: new Set(editor.idsInRect(rect, true)), scene: editor.scene };
 		options.onVisibleChange?.(cull.ids);
-		requestAssets = true;
 		return cull.ids;
 	}
 
-	let requestAssets = true;
-	function syncAssets(ids: Set<string> | null) {
-		if (!requestAssets || !ids) return;
-		requestAssets = false;
+	const textureScale = () => renderCamera().zoom * (app?.renderer.resolution ?? 1);
+	const textResolution = createTextResolutionTracker(TEXTURE_SETTLE_MS, scheduleTick);
+	let refined = { scale: 0, geometry: 0 };
+	let pendingRefine = "";
+	let refineTimer: ReturnType<typeof setTimeout> | null = null;
+	function stopRefine() {
+		if (refineTimer !== null) clearTimeout(refineTimer);
+		refineTimer = null;
+		refined = { scale: 0, geometry: 0 };
+		pendingRefine = "";
+	}
+	function scheduleRefine() {
+		const scale = textureScale();
+		const geometry = editor.geometryVersion;
+		const key = `${scale}:${geometry}`;
+		if (key === pendingRefine) return;
+		pendingRefine = key;
+		if (refineTimer !== null) clearTimeout(refineTimer);
+		refineTimer = null;
+		if (refined.scale === 0 || (scale <= refined.scale && geometry === refined.geometry)) {
+			refined = { scale, geometry };
+			return;
+		}
+		refineTimer = setTimeout(() => {
+			refineTimer = null;
+			refined = { scale, geometry };
+			for (const id of scene?.liveIds() ?? []) {
+				const item = editor.scene.get(id);
+				if (item) assets.requestItem(item, boardTextureEdge(item, scale));
+			}
+		}, TEXTURE_SETTLE_MS);
+	}
+
+	const naturalIds = new Set<string>();
+	let liveVersion = -1;
+	function adoptNaturalSizes() {
+		if (naturalIds.size === 0) return;
 		const sizes: Array<{ id: string; width: number; height: number }> = [];
-		for (const id of ids) {
+		for (const id of naturalIds) {
 			const item = editor.itemById(id);
-			if (!item) continue;
-			const key = assets.assetKey(item);
-			if (!key) continue;
-			assets.requestItem(item);
+			const key = item && assets.assetKey(item);
+			if (!item || !key) continue;
 			const artifact = item.type === "task" ? featuredTaskArtifact(item.props.snapshot.artifacts) : null;
 			const recorded =
 				artifact?.type === "image" || artifact?.type === "video"
@@ -240,8 +276,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 						: null;
 			if (!recorded || (recorded.naturalWidth && recorded.naturalHeight)) continue;
 			const natural = assets.getNaturalSize(key);
-			if (natural?.width && natural.height) sizes.push({ id: item.id, ...natural });
+			if (natural?.width && natural.height) sizes.push({ id, ...natural });
 		}
+		naturalIds.clear();
 		if (sizes.length > 0) editor.adoptMediaNaturalSizes(sizes);
 	}
 
@@ -274,6 +311,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			themeKey: current.key,
 			rendererType: app?.renderer.type === RendererType.CANVAS ? "canvas" : "gpu",
 			zoom: renderCamera().zoom,
+			textResolution: textResolution.value,
 			reducedMotion: options.reducedMotion?.() ?? false,
 			labels: options.labels?.() ?? DEFAULT_BOARD_RENDER_LABELS,
 			taskRun: options.taskRun ?? (() => null),
@@ -281,7 +319,11 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			getTexture: (key) => assets.getTexture(key),
 			hasError: (key) => assets.hasError(key),
 			fileState: (path) => options.fileState?.(path) ?? "ok",
-			acquireTexture: (key) => assets.acquire(key),
+			acquireTexture: (key, item) => {
+				assets.acquire(key);
+				assets.requestItem(item, boardTextureEdge(item, textureScale()));
+				if (assets.getTexture(key)) naturalIds.add(item.id);
+			},
 			releaseTexture: (key) => assets.release(key),
 		};
 	}
@@ -523,9 +565,36 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (!retained || (scriptHover && scriptHover.owner === owner && !Object.hasOwn(retained, scriptHover.target))) scriptHover = null;
 	}
 
+	function syncScripts() {
+		if (!scripts) return;
+		const now = performance.now();
+		if (scriptMode !== "paused") scriptTime += Math.min(250, Math.max(0, now - scriptLastTick));
+		scriptLastTick = now;
+		const camera = renderCamera();
+		if (scriptMode !== "paused" && scriptObservers.size) {
+			scriptObservers.sync(editor.document, editor.selection, () => ({
+				camera: { ...camera }, ...surface,
+				safeRect: options.safeRect?.() ?? { x: 0, y: 0, ...surface },
+			}));
+		}
+		scripts.sync(editor.document, editor.scene, camera, scriptTime, scriptMode === "interact", visibleIds());
+	}
+
+	function scheduleScriptTick() {
+		if (scriptTickFrame || !active || disposed) return;
+		scriptTickFrame = requestAnimationFrame(() => {
+			scriptTickFrame = 0;
+			if (tickFrame) return;
+			syncScripts();
+			if (scriptMode !== "paused" && scripts?.animated) scheduleScriptTick();
+		});
+	}
+
 	function createScripts() {
 		return createBoardScriptHost({
 			host,
+			isMaterialized: (id) => Boolean(scene?.getNode(id)),
+			onSchedule: scheduleScriptTick,
 			capabilities: {
 				...options.scriptCapabilities,
 				"board.emit": async (id: string, value: unknown) => {
@@ -631,23 +700,11 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		}
 
 		const renderScene = editor.scene;
-		if (scripts) {
-			const now = performance.now();
-			if (scriptMode !== "paused") scriptTime += Math.min(250, Math.max(0, now - scriptLastTick));
-			scriptLastTick = now;
-			if (scriptMode !== "paused" && scriptObservers.size) {
-				scriptObservers.sync(editor.document, editor.selection, () => ({
-					camera: { ...camera }, ...surface,
-					safeRect: options.safeRect?.() ?? { x: 0, y: 0, ...surface },
-				}));
-			}
-			scripts.sync(editor.document, renderScene, camera, scriptTime, scriptMode === "interact", visibleIds());
-		}
 		world.position.set(camera.x, camera.y);
 		world.scale.set(camera.zoom);
 
 		const ids = visibleIds();
-		syncAssets(ids);
+		textResolution.update(textureScale());
 		const context = renderContext(current, renderScene, frame.time);
 		if (animationId && effectSampler) {
 			context.time = editor.playhead?.time ?? frame.time;
@@ -673,13 +730,21 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			getItem: (id) => renderScene.get(id) ?? null,
 			visibleIds: ids,
 			pinnedIds,
-			globalSig: [assetVersion, cardEpoch, current.key, textZoomBucket(camera.zoom)].join("|"),
+			globalSig: [cardEpoch, current.key].join("|"),
 			staleIds,
 			structureVersion: editor.structureVersion,
 			geometryVersion: editor.geometryVersion,
 			gestureActive: editor.gestureActive && editor.interaction.type !== "panning",
+			focus: pointToWorld(screenPoint(surface.width / 2, surface.height / 2), camera),
 		});
 		staleIds.clear();
+		if (scene.liveVersion !== liveVersion) {
+			liveVersion = scene.liveVersion;
+			options.onLiveChange?.(scene.liveIds());
+		}
+		adoptNaturalSizes();
+		scheduleRefine();
+		syncScripts();
 
 		drawInteraction();
 
@@ -688,7 +753,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (nextCursor !== cursor) host.style.cursor = cursor = nextCursor;
 
 		scheduleRender();
-		if (frame.running || scene.animated || (scriptMode !== "paused" && scripts?.animated)) scheduleTick();
+		if (frame.running || scene.animated) scheduleTick();
+		if (scriptMode !== "paused" && scripts?.animated) scheduleScriptTick();
 		const cardWait = scene.tick(performance.now());
 		if (cardWait !== null) scheduleCardTick(cardWait);
 	}
@@ -696,20 +762,29 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	function resize() {
 		cancelAnimationFrame(resizeFrame);
 		resizeFrame = requestAnimationFrame(() => {
-			if (!app) return;
-			app.resize();
-			surface = { width: app.screen.width, height: app.screen.height };
-			editor.surfaceSize = surface;
-			options.onSurfaceChange?.(surface);
+			if (!app || !active) return;
+			const size = { width: host.clientWidth, height: host.clientHeight };
+			if (size.width <= 0 || size.height <= 0) return;
+			const density = host.ownerDocument.defaultView?.devicePixelRatio ?? 1;
+			const canvas = boardCanvasSize(canvasBox ?? { ...size, density, device: null }, density);
+			if (canvas.width !== app.screen.width || canvas.height !== app.screen.height || canvas.resolution !== app.renderer.resolution) {
+				app.renderer.resize(canvas.width, canvas.height, canvas.resolution);
+			}
+			const sizeChanged = size.width !== surface.width || size.height !== surface.height;
+			if (sizeChanged) {
+				surface = size;
+				editor.surfaceSize = surface;
+				options.onSurfaceChange?.(surface);
+			}
 			sync();
 		});
 	}
 
-	const rectOf = () => host.getBoundingClientRect();
+	const localPoint = (x: number, y: number) => elementClientToLocal(host)(x, y);
 	const inViews = (event: Event) => event.target instanceof Node && views.element.contains(event.target);
 
 	function toInput(event: PointerEvent): BoardPointerEvent {
-		return toBoardPointerEvent(event, rectOf(), renderCamera(), event.type === "pointermove" && editor.interaction.type === "drawing");
+		return toBoardPointerEvent(event, host, renderCamera(), event.type === "pointermove" && editor.interaction.type === "drawing");
 	}
 
 	function scriptTarget(input: BoardPointerEvent) {
@@ -795,14 +870,13 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (inViews(event)) return;
 		event.preventDefault();
 		editor.takeCameraControl();
-		const rect = rectOf();
-		const point: ScreenPoint = screenPoint(event.clientX - rect.left, event.clientY - rect.top);
+		const point = localPoint(event.clientX, event.clientY);
 		editor.wheel(point, event.deltaX, event.deltaY, event.ctrlKey || event.metaKey, event.deltaMode);
 	}
 
 	function handleDoubleClick(event: MouseEvent) {
 		if (inViews(event)) return;
-		const point = screenToWorld(event.clientX, event.clientY, rectOf(), renderCamera());
+		const point = pointToWorld(localPoint(event.clientX, event.clientY), renderCamera());
 		const item = editor.itemAt(point);
 		if (options.onDoubleClick?.(item, point) === true || editor.readonly) return;
 		if (item && !item.locked && editor.registry.capabilities(item).canEdit) {
@@ -826,22 +900,30 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	];
 
 	const stopEditor = editor.subscribe(LIVE_CHANNELS, scheduleTick);
-	const stopAssets = assets.subscribe(() => {
-		assetVersion += 1;
-		requestAssets = true;
+	const stopAssets = assets.subscribe((key) => {
+		const ids = scene?.holders(key);
+		if (!ids?.size) return;
+		for (const id of ids) {
+			staleIds.add(id);
+			naturalIds.add(id);
+		}
 		scheduleTick();
 	});
-	const resizeObserver = new ResizeObserver(resize);
+	const resizeObserver = new ResizeObserver((entries) => {
+		const entry = entries[entries.length - 1];
+		if (entry) canvasBox = measureBoardCanvasBox(entry, host.ownerDocument.defaultView?.devicePixelRatio ?? 1);
+		resize();
+	});
 
 	const ready = (async () => {
 		const instance = new Application();
 		try {
 			await instance.init({
 				antialias: true,
-				autoDensity: true,
 				backgroundAlpha: 0,
-				resizeTo: host,
-				resolution: getBoardResolution(),
+				width: host.clientWidth,
+				height: host.clientHeight,
+				resolution: getBoardResolution({ width: host.clientWidth, height: host.clientHeight }),
 				autoStart: false,
 			});
 		} catch (error) {
@@ -859,6 +941,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			position: "relative",
 			zIndex: "1",
 			display: "block",
+			width: "100%",
+			height: "100%",
 			touchAction: "none",
 		});
 		host.insertBefore(instance.canvas, views.element);
@@ -867,11 +951,17 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		overlay = new Graphics({ label: "board-interaction-overlay" });
 		world.addChild(nodes, overlay);
 		instance.stage.addChild(world);
-		scene = createBoardScene({ world: nodes, overlay, getRenderer: resolveRenderer, onFarLayerFrame: scheduleTick });
+		scene = createBoardScene({ world: nodes, overlay, getRenderer: resolveRenderer, requestFrame: scheduleTick });
 
 		for (const [type, listener, listenerOptions] of listeners)
 			host.addEventListener(type, listener as EventListener, listenerOptions);
-		resizeObserver.observe(host);
+		try {
+			resizeObserver.observe(instance.canvas, { box: "device-pixel-content-box" });
+		} catch {
+			resizeObserver.observe(instance.canvas);
+		}
+		const window = host.ownerDocument.defaultView;
+		if (window) stopDensity = observeDisplayDensity(window, resize);
 		resize();
 		return true;
 	})();
@@ -905,7 +995,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			if (!active) {
 				pointers.cancel();
 				stopMarch();
+				stopRefine();
 				cancelScriptPointers();
+				cancelAnimationFrame(scriptTickFrame);
+				scriptTickFrame = 0;
 				cancelAnimationFrame(renderFrame);
 				cancelAnimationFrame(tickFrame);
 				cancelAnimationFrame(cardTickFrame);
@@ -923,25 +1016,28 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		invalidate(invalidation) {
 			if (invalidation?.cards) {
 				cardEpoch += 1;
-				requestAssets = true;
 			}
 			for (const id of invalidation?.items ?? []) staleIds.add(id);
 			scheduleTick();
 		},
 		isMaterialized: (id) => Boolean(scene?.getNode(id)),
-		toWorld: (clientX, clientY) => screenToWorld(clientX, clientY, rectOf(), renderCamera()),
+		toWorld: (clientX, clientY) => pointToWorld(localPoint(clientX, clientY), renderCamera()),
 		destroy() {
 			disposed = true;
 			pointers.cancel();
 			stopMarch();
+			stopRefine();
+			textResolution.dispose();
 			scriptPointers.clear();
 			stopTransforms?.();
 			scriptObservers.clear();
 			scriptListeners.clear();
 			stopMaintenance?.();
+			stopDensity?.();
 			stopEditor();
 			stopAssets();
 			resizeObserver.disconnect();
+			cancelAnimationFrame(scriptTickFrame);
 			cancelAnimationFrame(resizeFrame);
 			cancelAnimationFrame(renderFrame);
 			cancelAnimationFrame(tickFrame);

@@ -280,6 +280,8 @@ If not ready within 30 seconds, it returns exit code 2 and continues connecting.
 `--yes` authorizes local execution without interaction. `down` retains all data and
 requires `--yes` when work is unconfirmed. Network reconnection is automatic; it does
 not replay model or tool work, and a disconnect does not confirm a task stopped.
+Local harnesses are Pi, Codex, Claude Code (`claude`), WorkBuddy (`codebuddy`) and Cursor (`cursor-agent`). Without
+`--harness`, every installed one is tried and one that cannot start is skipped with a warning.
 
 ### Displays
 
@@ -335,7 +337,7 @@ cohub -s <spaceId> boards apply <boardId> -i - < changes.json
 `boards schema` explains every field, and `boards preset` prints tracks for a preset motion — as an apply-ready patch with `--animation`, or bare `tracks` without it:
 
 ```bash
-cohub -s <spaceId> boards schema                 # units, item types, colors, animatable properties
+cohub -s <spaceId> boards schema                 # units, scale, item types, colors, animatable properties
 cohub -s <spaceId> boards schema arrow           # one target
 cohub -s <spaceId> boards examples lesson > lesson.json
 cohub -s <spaceId> boards preset rise --targets a,b --animation intro | cohub boards apply <boardId> -i -
@@ -370,11 +372,14 @@ cohub search "release notes"
 cohub models ls
 cohub models ls --model-type multimodal
 cohub generate "A calm lake at sunrise" --model <model> --output lake.png
+cohub generate -m song2 --text "prompt=upbeat synthwave" --text "lyrics=[Verse] Neon lights" --param seed=42
 ```
 
 `search` finds Spaces, chats by title or by the messages sent in them, and label items. `--types chat,space,label` narrows the result types, and `--space-id` searches every chat you can view in one Space; chat rows show the matching message.
 
 `models ls` shows each LLM's per-million-token cost (for example `$3 /M input · $15 /M output`) and hides models marked `hidden`. `models ls --model-type multimodal` shows each model's unit price (for example `$0.04 / image` or `$0.10–$0.50 / second`); `--json` returns the raw `pricing` object (`unit`, `amount` or `min`/`max`, optional `note`).
+
+`generate --text <role>=<text>` passes a text input tagged with a role from the model's text inputs (`cohub models show <model>`); repeat it for each text block.
 
 ## Output discipline
 

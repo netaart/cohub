@@ -77,6 +77,40 @@ cohub generate "lip-sync to this spoken take" \
 
 Roles include `first_frame`, `last_frame`, `reference_image`, `reference_video`, and `reference_audio`. Check `models show` for what a model accepts. Do not mix first/last frame roles with reference roles. Seedance 2 reference audio needs an image or video in the same request.
 
+## Text roles
+
+Some multimodal models declare roles for their text inputs. Inspect them with:
+
+```bash
+cohub models show <model> --json
+```
+
+Pass each role as its own repeatable `--text <role>=<text>`. The value may contain `=` and newlines; quote multi-line values. The positional prompt is optional with `--text`, but when both are present the prompt is sent first without a role.
+
+`song2` uses `prompt` (style), `lyrics`, and `abc` (score). The first call makes a song and, with `return_abc=true`, also returns the score it used as a text block with `meta.role` `abc` (the song's own output stays in `first-song.json`); the second sings the same lyrics from that score in another style:
+
+```bash
+LYRICS='[Verse]
+Neon on the water, morning in the wires
+We carry the quiet through the city lights
+[Chorus]
+Sing it back to sunrise, sing it back to me
+Every little spark becomes a melody'
+
+cohub generate -m song2 \
+  --text "prompt=uplifting synthwave with warm analog pads and a clear chorus" \
+  --text "lyrics=$LYRICS" \
+  --param seed=42 \
+  --param return_abc=true \
+  --json > first-song.json
+ABC=$(jq -r '.output[] | select(.type == "text" and .meta.role == "abc") | .text' first-song.json)
+
+cohub generate -m song2 \
+  --text "prompt=mellow acoustic folk, soft female vocal" \
+  --text "lyrics=$LYRICS" \
+  --text "abc=$ABC"
+```
+
 Pass generation parameters with `--param key=value` (repeatable; JSON, number, or boolean values) or `--parameters '<json>'`:
 
 ```bash

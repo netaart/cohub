@@ -70,8 +70,9 @@ test("preset prints an apply-ready patch", async () => {
 
 test("schema describes targets and animatable properties", async () => {
   const { boards } = createProgram();
-  const overview = JSON.parse((await capture(() => boards.parseAsync(["schema"], { from: "user" }))).join("")) as { properties: Record<string, string[]>; units: { time: string } };
+  const overview = JSON.parse((await capture(() => boards.parseAsync(["schema"], { from: "user" }))).join("")) as { properties: Record<string, string[]>; units: { time: string }; scale: { page: { width: number } } };
   assert.equal(overview.units.time, "milliseconds");
+  assert.equal(overview.scale.page.width, 960);
   assert.ok(overview.properties.text?.includes("props.fontSize"));
   assert.ok(overview.properties.shape?.includes("style.fill"));
   const text = JSON.parse((await capture(() => boards.parseAsync(["schema", "text"], { from: "user" }))).join("")) as { schema: { properties: Record<string, unknown> } };

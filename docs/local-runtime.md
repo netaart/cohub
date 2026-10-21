@@ -42,22 +42,109 @@ On Windows, install Git for Windows (or set `COHUB_BASH` to `bash.exe`) and run 
 non-elevated terminal: collaborators execute as your OS user, so an administrator terminal is refused.
 The Pi extension connects over a private named pipe. Codex's shared app-server listens on an AF_UNIX
 socket Node cannot reach on Windows, so terminal Codex chats sync read-only there.
-Cancelling a turn on Windows stops Pi/Codex tools by process tree; a detached background job whose parent
-already exited can keep running.
-Pi and Codex must already be installed and authenticated locally. Without `--harness`,
-startup discovers installed Pi/Codex executables on PATH (or explicit executable overrides).
-Capability/authentication failures remain explicit; it never silently switches executors.
-`--pi` and `--codex` override executable paths. Repeated `--harness` options and comma-separated values are
-accepted. `--yes` accepts the explicit local execution consent for non-interactive startup.
+Cancelling a turn on Windows stops Pi/Codex/Cursor tools by process tree; a detached background job whose parent
+already exited can keep running. Cursor's `cursor-agent.cmd` would pass the prompt through cmd.exe and
+PowerShell, so Cohub runs the newest `versions\<version>\node.exe index.js` it would start directly.
+Harnesses (`pi`, `codex`, `claude` for Claude Code, `workbuddy` for the WorkBuddy CLI `codebuddy`, `cursor`
+for the Cursor CLI `cursor-agent`) must
+already be installed and authenticated locally. Without `--harness`, startup discovers every installed
+harness on PATH (or explicit executable overrides); one that fails its startup check is skipped with a
+warning, and startup fails only when none can run. Explicitly requested harnesses must all pass; a Turn
+never silently switches executors. `--<harness> <path>` (for example `--claude`) overrides an executable
+path. Repeated `--harness` options and comma-separated values are accepted. `--yes` accepts the explicit
+local execution consent for non-interactive startup.
+未指定 `--harness` 时自动发现所有已安装的 Harness，启动检查失败的告警并跳过，全部失败才报错；显式指定的必须全部可用。
+
+## Harness adapters / Harness 适配器
+
+Each local harness is one adapter under `packages/cli/src/runtime/harnesses/`. The shared Runtime
+(execution receipts, Session files, projection, archives, recovery, native ingest) calls the adapter
+and does not branch on a harness. Adding one takes two steps:
+
+1. Register its identity in `LOCAL_HARNESS_SPECS` (`packages/protocol/src/runtime/harnesses.ts`): label,
+   archive `nativeFormat` (immutable once archives exist) and whether it can enforce read-only access.
+2. Implement `LocalHarnessAdapter` (`harnesses/types.ts`) and list it in `harnesses/index.ts`: executable,
+   model discovery, running a Turn, native file layout, history projection, archive restore (optional:
+   without it a restore projects history again) and a `transcript` reader. The reader is required: every harness syncs its terminal conversations, and
+   it also serves import and receipt-less recovery.
+
+CLI flags, Web pickers, labels, API validation and archive schemas derive from the registry. Logos live in
+`apps/web/src/lib/assets/harness-icons/` (LobeHub Icons, MIT); a harness without one gets a generic icon.
+Live control of terminal sessions stays harness-specific: the Pi extension and Codex's shared app-server.
+
+新增 Harness 只需在协议注册表登记，并在 `harnesses/` 下实现一个适配器；共享逻辑不再按 Harness 分支。
+适配器必须实现 `transcript` 读取器：每个 Harness 都同步终端会话，并支持导入与无回执恢复。
+CLI 参数、Web 选择器、API 校验与归档结构均由注册表派生。终端会话的实时控制仍由 Pi 扩展与 Codex 共享 app-server 各自实现。
+
+Claude Code and WorkBuddy run one stream-json process per Turn (`-p --input-format stream-json`). Full
+access maps to `--permission-mode acceptEdits`. Read-only maps to `plan` with only the Read, Glob and Grep
+tools and no MCP servers, since plan mode still honours the user's allow rules. Other tools follow the
+user's own permission rules and permission requests are always denied, never granted. Cohub history is projected
+into their native transcript (`~/.claude/projects`, `~/.codebuddy/projects`) and continued with
+`--resume`; thinking blocks and tool calls without results are left out. Startup checks the CLI's help
+for every flag a Turn uses, so an older or unrelated executable is skipped. The `default` model passes no
+`--model`, keeping the user's own configuration; thinking levels map to `--effort`.
+
+Their terminal conversations sync read-only: neither has a control plane, so the web cannot stop a
+terminal Turn, an unknown outcome keeps the explicit stop confirmation, and Cohub continues only
+files it wrote. Records link by `parentUuid` / `parentId` and the live branch is followed from the last
+one; local `/commands`, `!shell` output and sub-agent files are skipped. An interactive Turn's end is
+recorded (`turn_duration`, `turn-metrics`, an interruption) and settles at once; a `-p` Turn settles
+after its reply ended and the file stayed quiet. Claude Code keeps a stream-json prompt's `uuid` as its
+record id, so Cohub sends its Turn id there. CodeBuddy keeps no prompt field, so the ledger records the
+Turn Cohub is running (`executingTurnId`, kept across a crash); the file is not read until it ends,
+and its Turns up to then are the server's. A Cohub file written before markers existed is treated the
+same way on its first read. A retried Turn whose prompt is already in the file (Claude Code drops a
+repeated `uuid`) continues from projected history instead.
+
+Cursor runs one `cursor-agent -p --output-format stream-json --stream-partial-output --trust` process per
+Turn with the prompt as its argument and images as `--image` files. A new chat takes Cohub history through
+`--new-session-id` and `--conversation-history-file`; later Turns `--resume` it while Cursor still stores
+the chat (`<config>/chats/<md5 of cwd>/<id>/store.db`), else history is handed over again. Without
+`--force`, the CLI itself refuses commands outside the user's allowlist and answers its own questions, so
+nothing is granted; Cursor cannot enforce read-only access. A stop sends SIGINT. The `default` model passes
+no `--model`; Cursor saves a run's model as the user's default, so Cohub puts the earlier preference back
+unless the user picked another model meanwhile. Startup runs the CLI with every flag a Turn uses, several
+hidden from `--help`, and an invalid session id, which the CLI rejects before starting anything. Its chat
+store is SQLite, so Turns stage no archive. Terminal and IDE chats sync read-only from
+`<data>/projects/<project>/agent-transcripts/<id>/<id>.jsonl`: a CLI chat's `meta.json` names the project,
+otherwise the project name is resolved to the directory it stands for (from the drive letter on Windows,
+ignoring case). A `<user_query>` line (or a bare
+prompt no other user line follows) starts a Turn, keyed by the file's checksum through it, and
+`turn_ended` settles it; tool results, model names and exact times are not recorded there. The ledger
+records the Turn Cohub is running, as for CodeBuddy.
+
+Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`；只读映射为 `plan`，
+且仅开放 Read、Glob、Grep 工具、不加载 MCP（plan 模式仍会执行本机允许规则）。其他工具遵循本机权限规则，权限请求一律拒绝。云端历史投影到原生会话文件并通过 `--resume` 续接。
+启动时检查 CLI 是否提供 Turn 所需的全部参数，旧版或无关的同名程序会被跳过。`default` 模型不传 `--model`，沿用用户自己的配置；思考等级映射为 `--effort`。
+二者的终端会话只读同步：没有控制面，Web 无法停止终端 Turn，结果未知时仍需显式确认停止，Cohub 只续接自己写的文件。
+记录按 `parentUuid` / `parentId` 链接，从最后一条沿当前分支回溯；本地 `/命令`、`!shell` 输出与子 Agent 文件不同步。
+交互模式记录 Turn 结束（`turn_duration`、`turn-metrics`、中断）并立即结算；`-p` 模式在回复结束且文件静默后结算。
+Claude Code 会把 stream-json prompt 的 `uuid` 作为记录 id，Cohub 在此写入 Turn id；CodeBuddy 不保留任何字段，
+由账本记录 Cohub 正在执行的 Turn（`executingTurnId`，崩溃后保留），执行期间不读取该文件，结束时其内容视为服务端已有。
+标记出现前 Cohub 写过的文件首次读取时同样处理。重试的 Turn 若 prompt 已在文件中（Claude Code 会丢弃重复 `uuid`），改从投影历史续接。
+
+Cursor 每个 Turn 启动一个 `cursor-agent -p` 进程，prompt 作为参数、图片通过 `--image` 传入。新会话用
+`--new-session-id` 与 `--conversation-history-file` 带入云端历史，之后用 `--resume` 续接；Cursor 不再保存该会话时重新带入历史。
+不传 `--force`：允许列表外的命令由 CLI 自行拒绝，权限请求不会被批准；Cursor 无法保证只读。停止时发送 SIGINT。
+Cursor 会把本次运行的模型存为用户默认，Cohub 在 Turn 结束后恢复原设置（期间用户改选了其他模型则不动）。
+启动检查用 Turn 的全部参数（部分不在 `--help` 中）加一个无效会话 id 运行 CLI，它会在启动任何会话前拒绝。
+Windows 上 Cohub 不经 `cursor-agent.cmd`（会经 cmd.exe 与 PowerShell 转义 prompt），直接运行它会启动的最新 `node.exe index.js`；
+停止 Turn 时按进程树结束。会话库是 SQLite，因此不生成归档。终端与 IDE 会话从 `agent-transcripts` 只读同步：CLI 会话的项目由 `meta.json` 确定，
+否则按项目名还原为实际目录。`<user_query>`（或后面没有其他用户行的纯文本 prompt）开始一个 Turn，以文件到该行的校验和为键，
+`turn_ended` 结算；该文件不记录工具结果、模型和精确时间。Cohub 正在执行的 Turn 由账本记录。
 
 ## Native clients / 原生客户端
 
 ```bash
-cohub runtime up -d --harness pi --harness codex
+cohub runtime up -d --harness pi --harness codex --harness claude --harness workbuddy --harness cursor
 # One consent for this folder (default yes); Codex asks once more before sharing its app-server.
 # 首次授权一次（默认 yes）；Codex 共享 app-server 另确认一次。
 pi                                   # run /reload in Pi sessions that were already open
 codex
+claude                               # Claude Code and CodeBuddy sync read-only
+codebuddy
+cursor-agent                         # Cursor syncs read-only
 cohub runtime status
 cohub runtime import                 # earlier conversations, newest first; Ctrl-C pauses
 cohub runtime attach --harness pi    # install the Pi extension by hand
@@ -65,7 +152,7 @@ cohub runtime detach --harness codex
 ```
 
 **Data plane.** A harness's own session file is the durable record and the outbox. The Runtime
-watches Pi's and Codex's session trees (the bound folder and its subdirectories, except a subdirectory
+watches every harness's session tree (the bound folder and its subdirectories, except a subdirectory
 bound to a Space of its own) and sends Turns over
 its Runtime WebSocket. Persistence is event-driven and separate from realtime: a transcript is parsed
 only when a Turn begins or ends in it — reported by the control plane (Pi's prompt and settle, Codex's
@@ -83,7 +170,7 @@ it outgrows its content). Codex's own threads (reviews, compaction, memory) and
 spawned sub-agents are skipped. Raw bytes of the latest settled Turn are
 archived so a conversation can be restored natively on another machine.
 
-**数据面。** 原生会话文件就是唯一的持久记录和发件箱。Runtime 监听 Pi / Codex 的会话目录（绑定目录及其子目录），
+**数据面。** 原生会话文件就是唯一的持久记录和发件箱。Runtime 监听所有 Harness 的会话目录（绑定目录及其子目录），
 只在 Turn 开始或结束时解析并经 Runtime WS 上报（由控制面事件或新追加字节中的边界记录触发），其间只扫描新字节、不重解析、不轮询。服务端是唯一账本：重启或断线后先询问服务端已有哪些 Turn 再继续读，
 本地不再保存投递回执，重放不会重复。本地只有可重建的缓存。Codex 自身的内部线程与子 Agent 不同步。
 
@@ -133,8 +220,8 @@ Cohub 启动的 Pi 加载同一扩展。未安装扩展时只读同步。Codex 0
 统一降级：Cohub 的 Turn 使用私有 stdio app-server，终端会话只读同步。
 
 A Turn Cohub starts writes its cloud Turn id into the native file (Pi `custom: cohub.turn` entry;
-Codex `clientUserMessageId`), so the file proves which Turns are Cohub's and they are never ingested
-twice. A Session is continued in its native file only when that file ends at the Session head and a
+Codex `clientUserMessageId`; Claude Code prompt `uuid`), so the file proves which Turns are Cohub's and
+they are never ingested twice; for CodeBuddy the ledger does (see above). A Session is continued in its native file only when that file ends at the Session head and a
 live client (or Cohub itself) owns it; otherwise Cohub restores the archive or projects the Session
 into a new file and never writes into a file a terminal holds.
 

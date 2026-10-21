@@ -26,16 +26,20 @@ export type BoardPlayerFrame = {
 	running: boolean;
 };
 
-export function playbackTimeAt(playback: BoardPlaybackSnapshot, document: BoardDocument, now: number): number | null {
+export type BoardPlaybackClock = { time: number | null; advancing: boolean };
+
+const SETTLED: BoardPlaybackClock = { time: null, advancing: false };
+
+export function playbackClockAt(playback: BoardPlaybackSnapshot, document: BoardDocument, now: number): BoardPlaybackClock {
 	const animation = document.animations[playback.animationId];
-	if (!animation || playback.status === "stopped") return null;
-	if (playback.status !== "playing") return Math.min(playback.position, animation.duration);
-	let position = playback.position + Math.max(0, now - playback.effectiveAt) * playback.timeScale;
+	if (!animation || playback.status === "stopped") return SETTLED;
+	if (playback.status !== "playing") return { time: Math.min(playback.position, animation.duration), advancing: false };
+	const position = playback.position + Math.max(0, now - playback.effectiveAt) * playback.timeScale;
 	const pause = animation.markers.find((marker) => marker.pause && marker.at > playback.position && marker.at <= position);
-	if (pause) return pause.at;
-	if (animation.loop || animation.play === "always") return animation.duration > 0 ? position % animation.duration : 0;
-	position = Math.min(position, animation.duration);
-	return animation.end === "reset" && position >= animation.duration ? null : position;
+	if (pause) return { time: pause.at, advancing: false };
+	if (animation.loop || animation.play === "always") return { time: position % animation.duration, advancing: true };
+	if (position < animation.duration) return { time: position, advancing: true };
+	return { time: animation.end === "reset" ? null : animation.duration, advancing: false };
 }
 
 export function createBoardPlayer(options: { resolveColor?: BoardColorResolver } = {}) {
@@ -102,11 +106,10 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 			}
 			let playbackTime: number | null = null;
 			if (playback && playback.animationId !== exclude) {
-				playbackTime = playbackTimeAt(playback, current, wallNow);
-				if (playbackTime !== null) {
-					times.set(playback.animationId, playbackTime);
-					if (playback.status === "playing") running = true;
-				}
+				const clock = playbackClockAt(playback, current, wallNow);
+				playbackTime = clock.time;
+				if (playbackTime !== null) times.set(playback.animationId, playbackTime);
+				if (clock.advancing) running = true;
 			}
 			if (entrance) {
 				times.set(ENTER_ANIMATION, now - entrance.startedAt);
@@ -132,7 +135,7 @@ export function nextLocalPlayback(
 	document: BoardDocument,
 	now = Date.now(),
 ): BoardPlaybackSnapshot | null {
-	const position = current ? (playbackTimeAt(current, document, now) ?? 0) : 0;
+	const position = current ? (playbackClockAt(current, document, now).time ?? 0) : 0;
 	const base = { effectiveAt: now, commandId: command.commandId, revision: (current?.revision ?? 0) + 1 };
 	switch (command.type) {
 		case "play":

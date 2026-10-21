@@ -1,3 +1,8 @@
+import {
+	type HarnessKind,
+	LOCAL_HARNESSES,
+	type LocalHarness,
+} from "@cohub/protocol/runtime";
 import type { RuntimeStatus } from "@neta-art/cohub";
 
 /**
@@ -59,9 +64,33 @@ export function runtimeTone(
 /** Local model counts per Harness, for the capability summary. */
 export function harnessModelCounts(
 	status: RuntimeStatus | null | undefined,
-): Record<"pi" | "codex", number> {
-	const counts = { pi: 0, codex: 0 };
+): Record<LocalHarness, number> {
+	const counts = Object.fromEntries(
+		LOCAL_HARNESSES.map((harness) => [harness, 0]),
+	) as Record<LocalHarness, number>;
 	for (const model of status?.capabilities?.models ?? [])
 		counts[model.harness] += 1;
 	return counts;
+}
+
+export type HarnessAvailability = "ready" | "offline" | "missing";
+
+/** Every local Harness is listed so an offline Runtime or an uninstalled CLI reads as a state, not an absence. */
+export function harnessOptions(
+	available: readonly HarnessKind[],
+	online: boolean,
+): { harness: HarnessKind; availability: HarnessAvailability }[] {
+	const local = LOCAL_HARNESSES.map((harness) => ({
+		harness,
+		availability: (!online
+			? "offline"
+			: available.includes(harness)
+				? "ready"
+				: "missing") as HarnessAvailability,
+	}));
+	return [
+		{ harness: "cohub", availability: "ready" },
+		...local.filter((option) => option.availability === "ready"),
+		...local.filter((option) => option.availability !== "ready"),
+	];
 }

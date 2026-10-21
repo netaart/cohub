@@ -146,6 +146,7 @@ export type BoardStageExportBridge = {
 	};
 	withTextures: <T>(
 		items: BoardSceneItem[],
+		scale: number,
 		use: (textures: Map<string, Texture>) => T | Promise<T>,
 	) => Promise<T>;
 };
@@ -247,52 +248,57 @@ export async function exportBoardImage(
 		}
 
 		try {
-			return await bridge.withTextures(assets.items, async (textures) => {
-				const result = renderBoardExport(renderer, document, {
-					palette: theme.palette,
-					colors: theme.colors,
-					colorScheme: theme.colorScheme,
-					style: theme.style,
-					...exportOptions,
-					scripts: scripts?.host,
-					sampler,
-					region,
-					textures,
-					assetKey: cappedAssetKey,
-					backgroundImage: backgroundTexture
-						? {
-								texture: backgroundTexture.texture,
-								fit: declaredBackground.fit ?? "cover",
-								position: "center",
-								opacity: declaredBackground.opacity ?? 1,
-							}
-						: undefined,
-				});
-				if (!result) return null;
+			return await bridge.withTextures(
+				assets.items,
+				prepared.plan.scale,
+				async (textures) => {
+					const result = renderBoardExport(renderer, document, {
+						palette: theme.palette,
+						colors: theme.colors,
+						colorScheme: theme.colorScheme,
+						style: theme.style,
+						...exportOptions,
+						scripts: scripts?.host,
+						sampler,
+						region,
+						textures,
+						assetKey: cappedAssetKey,
+						backgroundImage: backgroundTexture
+							? {
+									texture: backgroundTexture.texture,
+									fit: declaredBackground.fit ?? "cover",
+									position: "center",
+									opacity: declaredBackground.opacity ?? 1,
+								}
+							: undefined,
+					});
+					if (!result) return null;
 
-				const canvas = result.canvas as unknown as HTMLCanvasElement;
-				const blob = await canvasToBlob(
-					canvas,
-					MIME[format],
-					format === "png" ? undefined : quality,
-				);
-				if (!blob) throw new Error("This browser could not encode the export.");
-				const warnings = describe(result.warnings);
-				if (backgroundWarning) warnings.push(backgroundWarning);
-				if (assets.omittedKeys.length > 0) {
-					warnings.push(
-						`${assets.omittedKeys.length} previews were drawn as placeholders to stay within the export texture limit.`,
+					const canvas = result.canvas as unknown as HTMLCanvasElement;
+					const blob = await canvasToBlob(
+						canvas,
+						MIME[format],
+						format === "png" ? undefined : quality,
 					);
-				}
-				return {
-					blob,
-					width: result.plan.width,
-					height: result.plan.height,
-					scale: result.plan.scale,
-					format,
-					warnings,
-				};
-			});
+					if (!blob)
+						throw new Error("This browser could not encode the export.");
+					const warnings = describe(result.warnings);
+					if (backgroundWarning) warnings.push(backgroundWarning);
+					if (assets.omittedKeys.length > 0) {
+						warnings.push(
+							`${assets.omittedKeys.length} previews were drawn as placeholders to stay within the export texture limit.`,
+						);
+					}
+					return {
+						blob,
+						width: result.plan.width,
+						height: result.plan.height,
+						scale: result.plan.scale,
+						format,
+						warnings,
+					};
+				},
+			);
 		} finally {
 			backgroundTexture?.dispose();
 		}

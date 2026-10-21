@@ -1,5 +1,6 @@
 
 import { z } from "zod";
+import { BOARD_DEFAULT_SIZES, BOARD_MEDIA_EDGE, BOARD_PAGE_SIZE, BOARD_TEXT_SCALE } from "./board-constants.js";
 import {
 	BOARD_CAMERA_TARGET,
 	BOARD_COLOR_TOKENS,
@@ -62,6 +63,13 @@ export function boardSchemaOverview() {
 	return {
 		units: { time: "milliseconds", rotation: "degrees", length: "board units (1 = 1 CSS px at zoom 1)" },
 		coordinates: "Positions, draw points and unbound arrow endpoints are relative to their parent frame; without a parent they are world coordinates. Shape paths are fitted to the item size.",
+		scale: {
+			guide: "Sizes that read together at 100% zoom. Match the content already nearby; use page for slide frames, a long edge of mediaEdge for media, and fontSizes for text.",
+			page: BOARD_PAGE_SIZE,
+			mediaEdge: BOARD_MEDIA_EDGE,
+			fontSizes: BOARD_TEXT_SCALE,
+			itemSizes: BOARD_DEFAULT_SIZES,
+		},
 		types: BOARD_ITEM_TYPES,
 		colors: { tokens: BOARD_COLOR_TOKENS, css: "any CSS color", themed: "{ light, dark }" },
 		properties: Object.fromEntries(

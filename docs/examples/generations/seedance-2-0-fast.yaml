@@ -64,7 +64,7 @@ parameters:
     type: string
     optional: true
     default: "16:9"
-    enum: ["16:9", "9:16", "1:1", "4:3", "3:2", "2:3", "3:4", "21:9", adaptive]
+    enum: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", adaptive]
     description: Output aspect ratio. Use adaptive to let the model choose.
   seed:
     type: integer

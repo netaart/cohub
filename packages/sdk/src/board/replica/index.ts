@@ -9,6 +9,7 @@ import {
 	type BoardReadResult,
 	parseBoardDocument,
 } from "@cohub/protocol";
+import { shareBoardDocument } from "../model/document-share.js";
 import { createBoardEntityId } from "../model/items/id.js";
 
 export type BoardPendingPatch = { mutationId: string; patch: BoardPatch };
@@ -191,7 +192,9 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 		title = result.title;
 		if (readPlaybackRevision === playbackRevision) playback = result.playback;
 		loaded = true;
-		adoptServer(parsed.document, result.version, true);
+		const next = shareBoardDocument(server, parsed.document);
+		if (next === server && result.version === version) return;
+		adoptServer(next, result.version, true);
 	}
 
 	function refresh(): Promise<void> {

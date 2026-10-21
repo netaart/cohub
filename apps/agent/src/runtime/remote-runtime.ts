@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { sessionTurns } from "@cohub/db";
 import { readRuntimeRecovery, runtimeRecoveryActive, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { db } from "../db.js";
-import { runtimeRegistrationKey, parseRuntimeRegistration, type RuntimeExecutionEvent, type RuntimeTurnInput, type RuntimeRecoveryState } from "@cohub/protocol";
+import { assertHarnessAccess, runtimeRegistrationKey, parseRuntimeRegistration, type LocalHarness, type RuntimeExecutionEvent, type RuntimeTurnInput, type RuntimeRecoveryState } from "@cohub/protocol";
 import { redis, sendOutput } from "../redis.js";
 import { env } from "../env.js";
 import { logger } from "../logger.js";
@@ -37,12 +37,12 @@ export async function markRuntimeRecovery(turnId: string, recovery: RuntimeRecov
 export async function executeRemoteHarnessTurn(input: {
   spaceId: string; sessionId: string; batch: ClaimedTurnBatch; actorUserId: string | null;
   accessMode: PromptAccessMode; requestedThinkingLevel?: string | null;
-  harness: "pi" | "codex"; provider?: string | null; model?: string | null; requestId?: string | null; abortSignal: AbortSignal;
+  harness: LocalHarness; provider?: string | null; model?: string | null; requestId?: string | null; abortSignal: AbortSignal;
   recovery?: boolean;
   leaseSignal?: AbortSignal;
 }): Promise<void> {
   input.abortSignal.throwIfAborted();
-  if (!input.recovery && input.harness === "pi" && input.accessMode === "read_only") throw new Error("Pi cannot enforce read-only access");
+  if (!input.recovery) assertHarnessAccess(input.harness, input.accessMode);
   const [sandbox, registrationRaw] = await Promise.all([input.recovery ? Promise.resolve(null) : getSpaceSandbox({ spaceId: input.spaceId }), redis.get(runtimeRegistrationKey(input.spaceId))]);
   if ((!input.recovery && sandbox?.sandbox?.provider !== "local") || !registrationRaw) throw new Error("Local Runtime is offline");
   const registration = parseRuntimeRegistration(registrationRaw);

@@ -1,8 +1,9 @@
 import { lstat, realpath, stat } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { relative, resolve } from "node:path";
 import { env } from "../env.js";
 import { assertValidSpaceId } from "./ids.js";
 import { getAgentWorkspacePath } from "./paths.js";
+import { assertInsideRoot } from "./path-containment.js";
 
 const WORKSPACE_PATH = "/workspace";
 
@@ -13,14 +14,6 @@ export type WorkspaceScope = {
 };
 
 export { assertValidSpaceId };
-
-export function assertInsideRoot(target: string, root: string, message = "Path outside workspace is not allowed.") {
-  const normalizedTarget = resolve(target);
-  const normalizedRoot = resolve(root);
-  const rootWithSep = normalizedRoot.endsWith(sep) ? normalizedRoot : `${normalizedRoot}${sep}`;
-  if (normalizedTarget === normalizedRoot || normalizedTarget.startsWith(rootWithSep)) return;
-  throw new Error(message);
-}
 
 export async function createWorkspaceScope(spaceId: string): Promise<WorkspaceScope> {
   const validSpaceId = assertValidSpaceId(spaceId);

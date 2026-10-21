@@ -1,7 +1,7 @@
 <script lang="ts">
 // Local-only browser fixture. Mounted temporarily by scripts/preview-runtime-ui.mjs.
 import "../../app.css";
-import type { RuntimeStatus } from "@neta-art/cohub";
+import type { HarnessKind, RuntimeStatus } from "@neta-art/cohub";
 import SessionComposer from "$lib/components/SessionComposer.svelte";
 import SpaceWorkspaceHeader, {
 	type SpaceWorkspaceHeaderContext,
@@ -52,11 +52,35 @@ const models = [
 			max: null,
 		},
 	},
+	{
+		harness: "claude" as const,
+		provider: "anthropic",
+		id: "default",
+		name: "Default",
+		isDefault: true,
+		reasoning: true,
+		thinkingLevelMap: {
+			off: null,
+			minimal: null,
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: "xhigh",
+			max: "max",
+		},
+	},
+	{
+		harness: "cursor" as const,
+		provider: "cursor",
+		id: "default",
+		name: "Default",
+		isDefault: true,
+	},
 ];
 type PreviewState = "ready" | "limited" | "offline" | "unknown";
 let previewState = $state<PreviewState>("ready");
 let input = $state("");
-let harness = $state<"cohub" | "pi" | "codex">("pi");
+let harness = $state<HarnessKind>("pi");
 let model = $state<LocalModelSelection | null>(null);
 const localModels = $derived(models.filter((item) => item.harness === harness));
 // Mirrors the session host: the composer always shows a resolved model and level.
@@ -67,7 +91,10 @@ function makeStatus(): RuntimeStatus {
 		kind: "local",
 		online: previewState !== "offline",
 		runtimeId: "22222222-2222-4222-8222-222222222222",
-		capabilities: { harnesses: ["pi", "codex"], models },
+		capabilities: {
+			harnesses: ["pi", "codex", "claude", "workbuddy", "cursor"],
+			models,
+		},
 		workspace: {
 			online: previewState === "ready",
 			observedAt: new Date().toISOString(),
@@ -130,6 +157,6 @@ const noop = () => {};
 		</div>
 		<div class="flex-1 text-sm text-text-tertiary">Isolated fixtures · no account or model requests</div>
 		<output aria-label="Model selection">{JSON.stringify(localModel)}</output>
-		<SessionComposer bind:value={input} {harness} harnesses={["cohub", "pi", "codex"]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} onsubmit={noop} onpickattachment={noop} />
+		<SessionComposer bind:value={input} {harness} harnesses={["cohub", ...(status.capabilities?.harnesses ?? [])]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} onsubmit={noop} onpickattachment={noop} />
 	</main>
 </div>

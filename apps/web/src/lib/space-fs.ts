@@ -12,4 +12,5 @@ export type SpaceFsNode = SpaceFsEntry & {
 	isOpen: boolean;
 	isLoaded: boolean;
 	isLoading: boolean;
+	loadError?: string | null;
 };

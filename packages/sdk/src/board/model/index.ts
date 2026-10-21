@@ -44,6 +44,7 @@ export * from "./shape-types.js";
 export * from "./text-metrics.js";
 export * from "./tool-styles.js";
 export * from "./geometry.js";
+export * from "./client-geometry.js";
 export * from "./image-key.js";
 export * from "./items/index.js";
 export * from "./media.js";

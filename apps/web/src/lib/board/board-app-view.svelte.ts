@@ -15,8 +15,6 @@ import BoardAppItem from "$lib/components/board/BoardAppItem.svelte";
 type AppItemProps = {
 	id: string;
 	meta: BoardAppMeta;
-	width: number;
-	height: number;
 	context: BoardItemViewContext;
 };
 
@@ -27,12 +25,11 @@ export function createBoardAppItemView(options: {
 	const loadDetail = createBoardAppDetailLoader();
 	return {
 		type: (item) => boardAppMeta(item) !== null,
+		contentSize: { width: 180, height: 120 },
 		mount(target, item, context) {
 			const props = $state<AppItemProps>({
 				id: item.id,
 				meta: boardAppMeta(item) as BoardAppMeta,
-				width: item.frame.width,
-				height: item.frame.height,
 				context,
 			});
 			const component = mount(BoardAppItem, {
@@ -43,12 +40,6 @@ export function createBoardAppItemView(options: {
 					},
 					get meta() {
 						return props.meta;
-					},
-					get width() {
-						return props.width;
-					},
-					get height() {
-						return props.height;
 					},
 					get context() {
 						return props.context;
@@ -66,8 +57,6 @@ export function createBoardAppItemView(options: {
 				update(next, nextContext) {
 					const meta = boardAppMeta(next);
 					if (meta) props.meta = meta;
-					props.width = next.frame.width;
-					props.height = next.frame.height;
 					props.context = nextContext;
 				},
 				destroy() {

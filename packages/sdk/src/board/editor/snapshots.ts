@@ -3,6 +3,7 @@ import {
 	type BoardItem,
 	type BoardMediaSnapshot,
 	featuredTaskArtifact,
+	fitBoardMediaSize,
 	mergeFileSnapshot,
 } from "../model/index.js";
 import type { EditorContext } from "./context.js";
@@ -10,14 +11,18 @@ import { sameJson } from "./document-edits.js";
 
 export type BoardNaturalSize = { id: string; width: number; height: number };
 
-function fitHeight<T extends Extract<BoardItem, { size: unknown }>>(item: T, natural: BoardNaturalSize): T | null {
-	const height = (item.size.width * natural.height) / natural.width;
-	if (!Number.isFinite(height) || height <= 0) return null;
-	const shift = item.type === "task" ? 0 : (item.size.height - height) / 2;
+// Task cards keep the top-left corner, matching server refits; media stay centered.
+function fitToNatural<T extends Extract<BoardItem, { size: unknown }>>(item: T, natural: BoardNaturalSize): T | null {
+	const size = fitBoardMediaSize(natural, Math.max(item.size.width, item.size.height));
+	if (!size) return null;
+	const anchor = item.type === "task" ? 0 : 0.5;
 	return {
 		...item,
-		position: { x: item.position.x, y: item.position.y + shift },
-		size: { ...item.size, height },
+		position: {
+			x: item.position.x + (item.size.width - size.width) * anchor,
+			y: item.position.y + (item.size.height - size.height) * anchor,
+		},
+		size,
 	};
 }
 
@@ -53,7 +58,7 @@ export function createSnapshotsModule(ctx: EditorContext) {
 				const artifact = featuredTaskArtifact(item.props.snapshot.artifacts);
 				if ((artifact?.type !== "image" && artifact?.type !== "video") || (artifact.naturalWidth && artifact.naturalHeight))
 					continue;
-				const fitted = fitHeight(item, natural);
+				const fitted = fitToNatural(item, natural);
 				if (!fitted) continue;
 				const artifacts = item.props.snapshot.artifacts.map((entry) =>
 					entry.id === artifact.id ? { ...entry, ...dimensions } : entry,
@@ -63,7 +68,7 @@ export function createSnapshotsModule(ctx: EditorContext) {
 			}
 			if (item.type !== "image" && item.type !== "video") continue;
 			if (item.props.snapshot?.naturalWidth && item.props.snapshot.naturalHeight) continue;
-			const fitted = fitHeight(item, natural);
+			const fitted = fitToNatural(item, natural);
 			if (!fitted) continue;
 			changes.set(natural.id, {
 				...fitted,

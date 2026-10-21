@@ -5,13 +5,15 @@ import {
 	type BoardMediaSnapshot,
 	type BoardTaskArtifact,
 	type BoardTaskSnapshot,
+	fitBoardMediaSize,
 	parseBoardItem,
 	pointsRect,
 } from "@cohub/protocol";
-import { BOARD_DRAW_STROKE_SIZE } from "@cohub/protocol/board-constants";
+import { BOARD_DEFAULT_SIZES, BOARD_DRAW_STROKE_SIZE, BOARD_MEDIA_EDGE } from "@cohub/protocol/board-constants";
 import { quantizeDrawCoordinate } from "../draw-input.js";
 import { filePreviewKind } from "../file-preview.js";
 import { type BoardFileSnapshotFacts, fileStem } from "../file-snapshot.js";
+import { MIN_ITEM_SIZE } from "../geometry.js";
 import { boardModelFormat, getMediaResourceTitle as getResourceTitle, inferBoardMediaKind as inferMediaKind } from "../media.js";
 import type { ShapeKind } from "../shape-types.js";
 import { featuredTaskArtifact } from "@cohub/protocol";
@@ -20,16 +22,8 @@ import { createBoardItemId } from "./id.js";
 
 export type BoardItemEntry = { id: string; item: BoardItem };
 
-const DEFAULT_MEDIA_SIZE = { width: 320, height: 200 };
-const DEFAULT_TASK_SIZE = { width: 300, height: 188 };
-const DEFAULT_TASK_MEDIA_SIZE = { width: 320, height: 180 };
-const DEFAULT_VIDEO_SIZE = { width: 320, height: 180 };
-const DEFAULT_AUDIO_SIZE = { width: 320, height: 112 };
-const DEFAULT_FILE_SIZE = { width: 260, height: 132 };
 const DEFAULT_MODEL_SIZE = { width: 264, height: 264 };
 const DEFAULT_FILE_COVER_SIZE = { width: 260, height: 208 };
-const DEFAULT_SHAPE_SIZE = { width: 200, height: 140 };
-const DEFAULT_FRAME_SIZE = { width: 480, height: 320 };
 
 function item(value: Record<string, unknown>): BoardItem {
 	const parsed = parseBoardItem(value);
@@ -54,24 +48,13 @@ function centered(
 export function mediaFrameSize(
 	naturalWidth?: number | null,
 	naturalHeight?: number | null,
-	maxEdge = 480,
-	fallback = DEFAULT_MEDIA_SIZE,
+	maxEdge = BOARD_MEDIA_EDGE,
+	fallback: { width: number; height: number } = BOARD_DEFAULT_SIZES.image,
 ): { width: number; height: number } {
-	if (
-		!naturalWidth ||
-		!naturalHeight ||
-		!Number.isFinite(naturalWidth) ||
-		!Number.isFinite(naturalHeight) ||
-		naturalWidth <= 0 ||
-		naturalHeight <= 0
-	) {
-		return { ...fallback };
-	}
-	const scale = Math.min(1, maxEdge / Math.max(naturalWidth, naturalHeight));
-	return {
-		width: Math.max(24, naturalWidth * scale),
-		height: Math.max(24, naturalHeight * scale),
-	};
+	const natural = { width: naturalWidth ?? 0, height: naturalHeight ?? 0 };
+	const size = fitBoardMediaSize(natural, Math.min(maxEdge, Math.max(natural.width, natural.height)));
+	if (!size) return { ...fallback };
+	return { width: Math.max(MIN_ITEM_SIZE, size.width), height: Math.max(MIN_ITEM_SIZE, size.height) };
 }
 
 function cleanSnapshot(snapshot: BoardMediaSnapshot): BoardMediaSnapshot {
@@ -100,8 +83,8 @@ export function createMediaBoardItem(
 		const size = mediaFrameSize(
 			snapshot.naturalWidth,
 			snapshot.naturalHeight,
-			480,
-			kind === "video" ? DEFAULT_VIDEO_SIZE : DEFAULT_MEDIA_SIZE,
+			BOARD_MEDIA_EDGE,
+			BOARD_DEFAULT_SIZES[kind],
 		);
 		const mimeType =
 			snapshot.mimeType ?? (kind === "video" ? "video/*" : undefined);
@@ -122,7 +105,7 @@ export function createMediaBoardItem(
 			id,
 			item: item({
 				type: "audio",
-				...centered(x, y, DEFAULT_AUDIO_SIZE),
+				...centered(x, y, BOARD_DEFAULT_SIZES.audio),
 				props: {
 					src: path,
 					snapshot: cleanSnapshot({
@@ -138,7 +121,7 @@ export function createMediaBoardItem(
 		? DEFAULT_MODEL_SIZE
 		: filePreviewKind(snapshot) === "cover"
 			? DEFAULT_FILE_COVER_SIZE
-			: DEFAULT_FILE_SIZE;
+			: BOARD_DEFAULT_SIZES.file;
 	return {
 		id,
 		item: item({
@@ -151,6 +134,14 @@ export function createMediaBoardItem(
 
 export const createFileNodeForPath = createMediaBoardItem;
 
+export function boardTaskCardSize(snapshot: BoardTaskSnapshot, aspect?: number): { width: number; height: number } {
+	const artifact = featuredTaskArtifact(snapshot.artifacts);
+	const expected = fitBoardMediaSize({ width: aspect ?? 0, height: 1 }, BOARD_MEDIA_EDGE) ?? { ...BOARD_DEFAULT_SIZES.task };
+	return artifact?.type === "image" || artifact?.type === "video"
+		? mediaFrameSize(artifact.naturalWidth, artifact.naturalHeight, BOARD_MEDIA_EDGE, expected)
+		: expected;
+}
+
 export function createTaskBoardItem(
 	taskRunId: string,
 	snapshot: BoardTaskSnapshot,
@@ -160,19 +151,7 @@ export function createTaskBoardItem(
 	id = createBoardItemId(),
 	aspect?: number,
 ): BoardItemEntry {
-	const artifact = featuredTaskArtifact(snapshot.artifacts);
-	const visual =
-		artifact?.type === "image" || artifact?.type === "video" ? artifact : null;
-	const size = visual
-		? mediaFrameSize(
-				visual.naturalWidth,
-				visual.naturalHeight,
-				480,
-				DEFAULT_TASK_MEDIA_SIZE,
-			)
-		: artifact?.type === "audio"
-			? DEFAULT_TASK_MEDIA_SIZE
-			: expectedTaskSize(aspect);
+	const size = boardTaskCardSize(snapshot, aspect);
 	return {
 		id,
 		item: item({
@@ -182,13 +161,6 @@ export function createTaskBoardItem(
 			props: { taskRunId, snapshot },
 		}),
 	};
-}
-
-function expectedTaskSize(aspect?: number): { width: number; height: number } {
-	if (!aspect || !Number.isFinite(aspect) || aspect <= 0) return { ...DEFAULT_TASK_SIZE };
-	const width = DEFAULT_TASK_MEDIA_SIZE.width;
-	const height = Math.round(width / aspect);
-	return height > 0 && height <= width * 4 ? { width, height } : { ...DEFAULT_TASK_SIZE };
 }
 
 export function createTextBoardItem(
@@ -222,7 +194,7 @@ export function createShapeBoardItem(
 				position: { x: box.x, y: box.y },
 				size: { width: box.width, height: box.height },
 			}
-		: centered(x, y, DEFAULT_SHAPE_SIZE);
+		: centered(x, y, BOARD_DEFAULT_SIZES.shape);
 	return {
 		id,
 		item: item({
@@ -247,7 +219,7 @@ export function createFrameBoardItem(
 				position: { x: box.x, y: box.y },
 				size: { width: box.width, height: box.height },
 			}
-		: centered(x, y, DEFAULT_FRAME_SIZE);
+		: centered(x, y, BOARD_DEFAULT_SIZES.frame);
 	return {
 		id,
 		item: item({
@@ -359,7 +331,7 @@ const RESULT_GAP = 24;
 const RESULT_COLUMNS = 4;
 const RESULT_TEXT_WIDTH = 320;
 const RESULT_MIN_HEIGHT = 120;
-const RESULT_MAX_HEIGHT = 480;
+const RESULT_MAX_HEIGHT = BOARD_MEDIA_EDGE;
 
 export function boardItemOrigin(item: BoardItem): BoardMediaOrigin | null {
 	if (item.type === "image" || item.type === "video" || item.type === "audio") return item.props.origin ?? null;
@@ -425,10 +397,10 @@ function taskResultItem(
 	if (artifact.type === "audio") {
 		return {
 			id,
-			item: item({ type: "audio", position: { x, y }, size: DEFAULT_AUDIO_SIZE, props: { src: artifact.url, snapshot, origin } }),
+			item: item({ type: "audio", position: { x, y }, size: { ...BOARD_DEFAULT_SIZES.audio }, props: { src: artifact.url, snapshot, origin } }),
 		};
 	}
-	const fallback = artifact.type === "video" ? DEFAULT_VIDEO_SIZE : DEFAULT_MEDIA_SIZE;
+	const fallback = BOARD_DEFAULT_SIZES[artifact.type];
 	const ratio = artifact.naturalWidth && artifact.naturalHeight
 		? artifact.naturalWidth / artifact.naturalHeight
 		: fallback.width / fallback.height;

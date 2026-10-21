@@ -1,11 +1,37 @@
 import type { ContentBlock, NativeTurnProgress, RuntimeExecutionEvent, RuntimeMessage } from "@neta-art/cohub";
-import { codexItemContent, identifiable, piContent } from "../harness.js";
 import { codexTokenTotals, codexUsage, subtractCodexTokens, type CodexTokenTotals } from "../codex-usage.js";
+import { identifiable } from "../harnesses/process.js";
 import { record, type JsonRecord } from "../json-rpc.js";
 
 const text = (value: unknown) => typeof value === "string" ? value : "";
 const list = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const hasToolCall = (content: readonly ContentBlock[], id: string) => content.some((block) => block.type === "tool_use" && block.id === id);
+
+export function piContent(value: unknown): ContentBlock[] {
+  return list(value).flatMap((entry): ContentBlock[] => {
+    const block = record(entry);
+    if (block.type === "text") return [{ type: "text", text: text(block.text) }];
+    if (block.type === "thinking") return [{ type: "thinking", thinking: text(block.thinking), ...(typeof (block.thinkingSignature ?? block.signature) === "string" ? { signature: String(block.thinkingSignature ?? block.signature) } : {}) }];
+    if (block.type === "toolCall") return identifiable(block.id) && identifiable(block.name) ? [{ type: "tool_use", id: block.id, name: block.name, input: record(block.arguments) }] : [];
+    if (block.type === "image") return [{ type: "image", source: { type: "base64", data: text(block.data), media_type: text(block.mimeType) } }];
+    return [{ type: "text", text: JSON.stringify(block) }];
+  });
+}
+
+export function codexItemContent(item: JsonRecord): ContentBlock[] {
+  if (item.type === "agentMessage" || item.type === "plan") return [{ type: "text", text: text(item.text) }];
+  if (item.type === "reasoning") return [{ type: "thinking", thinking: [...list(item.summary), ...list(item.content)].map(text).join("\n") }];
+  if (item.type === "userMessage") return [];
+  if (item.type === "contextCompaction") return [{ type: "system_note", note_type: "compacted", text: "Context compacted" }];
+  const id = item.id;
+  if (!identifiable(id)) return [];
+  const name = item.type === "commandExecution" ? "bash" : item.type === "fileChange" ? "apply_patch" : text(item.tool) || text(item.type);
+  const input = item.type === "commandExecution" ? { command: item.command, cwd: item.cwd } : item.type === "fileChange" ? { changes: item.changes } : record(item.arguments);
+  return [
+    { type: "tool_use", id, name, input },
+    { type: "tool_result", tool_use_id: id, content: typeof item.aggregatedOutput === "string" ? item.aggregatedOutput : JSON.stringify(item.result ?? item.error ?? item.changes ?? item), is_error: item.status === "failed" || typeof item.exitCode === "number" && item.exitCode !== 0 },
+  ];
+}
 
 /** Harness events mapped onto Cohub's streaming protocol. */
 export type Translator = {

@@ -9,6 +9,7 @@ import type { SpacePortsChangedPayload } from "../ports/index.js";
 import type { BoardChangeSummary, BoardPlaybackSnapshot } from "../board.js";
 import type { BoardDelta } from "../board-model.js";
 import type { RequestSource } from "../provenance.js";
+import type { HarnessKind } from "../runtime/harnesses.js";
 import type { DesktopCommandDispatchedPayload } from "../desktop-command.js";
 import type { AppArtifactDescriptor, AppContentKind, AppVersionSource } from "../app.js";
 import type { AppRtcPublication } from "../rtc/index.js";
@@ -91,7 +92,7 @@ export type WsClientEvent =
   | { type: "auth"; requestId?: string; payload: { token: string; capabilities?: string[] } }
   | { type: "subscribe"; requestId?: string; payload: { rooms: string[] } }
   | { type: "unsubscribe"; requestId?: string; payload: { rooms: string[] } }
-  | { type: "session.message.create"; requestId?: string; payload: { spaceId: string; sessionId: string; clientMessageId?: string; content: ContentBlock[]; model?: string; provider?: string; harness?: "cohub" | "pi" | "codex"; thinkingLevel?: ModelThinkingLevel } }
+  | { type: "session.message.create"; requestId?: string; payload: { spaceId: string; sessionId: string; clientMessageId?: string; content: ContentBlock[]; model?: string; provider?: string; harness?: HarnessKind; thinkingLevel?: ModelThinkingLevel } }
   | { type: "presence.update"; requestId?: string; payload: { spaceId: string; meta?: Record<string, unknown> | null } }
   | { type: "board.awareness.update"; requestId?: string; payload: BoardAwarenessClientPayload }
   | { type: "realtime.room.join"; requestId?: string; payload: { roomId: string; ticket: string; instanceId?: string; after?: number } }

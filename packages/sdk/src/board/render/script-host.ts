@@ -1,5 +1,7 @@
 import type { BoardDocument, BoardItem } from "@cohub/protocol";
 import { BoardScriptTexture } from "./script-texture.js";
+import { scriptResolution } from "./script-resolution.js";
+import { getBoardResolution } from "./text-resolution.js";
 import { boardScriptItems } from "../model/script-index.js";
 import { boardScriptScope } from "../model/script-scene.js";
 import { boardScriptHitVisible, resolveBoardScriptHit } from "../model/script-hit.js";
@@ -47,12 +49,16 @@ type Entry = {
   time: number;
   sentSources: boolean;
   visible: boolean;
+  draw: boolean;
+  scale: number;
 };
 
 export type BoardScriptHostOptions = {
   readModule(path: string): Promise<string>;
   host: HTMLElement;
   onFrame(): void;
+  onSchedule?(): void;
+  isMaterialized?(id: string): boolean;
   onOutput(id: string, output: BoardScriptOutput | null): void;
   capabilities?: Record<
     string,
@@ -113,6 +119,12 @@ export function createBoardScriptHost(
   layer.dataset.boardScripts = "";
   options.host.appendChild(layer);
   let disposed = false;
+  const schedule = () => (options.onSchedule ?? options.onFrame)();
+  let lastZoom = Number.NaN;
+  let settledAt = 0;
+  let resolutionTimer: ReturnType<typeof setTimeout> | undefined;
+  const needsTick = (entry: Entry) => !entry.error && entry.ready && entry.sources !== null && !entry.pending &&
+    (entry.dirty || Boolean(entry.output?.updating || (entry.output?.animated && entry.draw)));
   const retiredTextures = new Set<BoardScriptTexture>();
   let retirementFrame = 0;
 
@@ -210,7 +222,7 @@ export function createBoardScriptHost(
     }
     if (data.kind === "dirty") {
       entry.dirty = true;
-      options.onFrame();
+      schedule();
       return;
     }
     if (data.kind === "call") {
@@ -261,8 +273,11 @@ export function createBoardScriptHost(
     }
     clearTimeout(entry.timer);
     entry.pending = false;
-    revisions.set(entry.id, (revisions.get(entry.id) ?? 0) + 1);
-    if (data.bitmap) entry.texture.update(data.bitmap);
+    const acceptsBitmap = Boolean(data.bitmap) && (options.export || !options.isMaterialized || options.isMaterialized(entry.id)) && entry.draw;
+    if (acceptsBitmap) entry.texture.update(data.bitmap);
+    else data.bitmap?.close?.();
+    const changed = acceptsBitmap || Boolean(data.output);
+    if (changed) revisions.set(entry.id, (revisions.get(entry.id) ?? 0) + 1);
     try {
       const output = data.output as BoardScriptOutput | undefined;
       if (output) {
@@ -273,7 +288,8 @@ export function createBoardScriptHost(
       fail(entry, error instanceof Error ? error.message : String(error));
       return;
     }
-    options.onFrame();
+    if (changed) options.onFrame();
+    else if (needsTick(entry)) schedule();
   };
   window.addEventListener("message", onMessage);
 
@@ -326,17 +342,20 @@ export function createBoardScriptHost(
     },
     output: (id) => entries.get(id)?.output ?? null,
     get animated() {
-      return [...entries.values()].some(
-        (entry) =>
-          !entry.error &&
-          entry.output?.animated &&
-          (entry.visible || entry.output.updating) &&
-          !entry.pending,
-      );
+      for (const entry of entries.values()) if (needsTick(entry)) return true;
+      return false;
     },
     sync(board, scene, camera, time, inputEnabled, visibleIds) {
       if (disposed) return;
       interactive = inputEnabled;
+      const now = performance.now();
+      if (!options.export && camera.zoom !== lastZoom) {
+        const first = Number.isNaN(lastZoom);
+        lastZoom = camera.zoom;
+        settledAt = first ? now : now + 120;
+        clearTimeout(resolutionTimer);
+        if (!first) resolutionTimer = setTimeout(schedule, 120);
+      }
       const alive = new Set<string>();
       const liveFocusTargets = new Set<string>();
       let focusSurface: { width: number; height: number } | undefined;
@@ -394,6 +413,8 @@ export function createBoardScriptHost(
             time: -1,
             sentSources: false,
             visible: true,
+            draw: false,
+            scale: 0,
           };
           entries.set(id, entry);
           restored.delete(id);
@@ -430,6 +451,22 @@ export function createBoardScriptHost(
         if (entry.visible !== visible) {
           entry.visible = visible;
           if (visible) entry.dirty = true;
+        }
+        const draw = Boolean(options.export || (visible && (options.isMaterialized?.(id) ?? true)));
+        if (entry.draw !== draw) {
+          entry.draw = draw;
+          if (draw) entry.dirty = true;
+        }
+        const frame = scene.get(id)?.frame;
+        const itemScale = Math.max((frame?.width ?? box.width) / Math.max(1, box.width),
+          (frame?.height ?? box.height) / Math.max(1, box.height));
+        const scale = options.export
+          ? Math.min(2, 2048 / Math.max(1, box.width, box.height))
+          : scriptResolution(box.width, box.height,
+              now < settledAt && entry.scale > 0 ? entry.scale : camera.zoom * getBoardResolution() * itemScale, entry.scale);
+        if (scale !== entry.scale) {
+          entry.scale = scale;
+          if (draw) entry.dirty = true;
         }
         if (entry.input !== input || entry.inputDocument !== board) {
           const inputKey = JSON.stringify(input);
@@ -490,7 +527,7 @@ export function createBoardScriptHost(
           entry.pending ||
           (!entry.dirty &&
             (!entry.output?.animated ||
-              (!visible && !entry.output.updating) ||
+              (!entry.draw && !entry.output.updating) ||
               entry.time === time))
         )
           continue;
@@ -508,9 +545,9 @@ export function createBoardScriptHost(
           request: entry.request,
           input: entry.sentInput === entry.input ? undefined : entry.input,
           sources: entry.sentSources ? undefined : entry.sources,
-          draw: visible,
+          draw: entry.draw,
           t: time - entry.startedAt,
-          scale: Math.min(2, 2048 / Math.max(1, box.width, box.height)),
+          scale: entry.scale,
           events: entry.events.splice(0),
         });
         entry.sentInput = entry.input;
@@ -569,6 +606,7 @@ export function createBoardScriptHost(
     },
     destroy() {
       disposed = true;
+      clearTimeout(resolutionTimer);
       window.removeEventListener("message", onMessage);
       for (const entry of entries.values()) release(entry);
       layer.remove();

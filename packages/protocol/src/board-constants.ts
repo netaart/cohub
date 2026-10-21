@@ -14,6 +14,30 @@ export const BOARD_TEXT_MAX_FONT_SIZE = 512;
 export const BOARD_DRAW_STROKE_SIZE = 4;
 export const BOARD_ARROW_STROKE_SIZE = 2.5;
 
+export const BOARD_PAGE_SIZE = { width: 960, height: 540 } as const;
+export const BOARD_MEDIA_EDGE = 480;
+export const BOARD_TEXT_SCALE = { title: 56, heading: 40, body: BOARD_TEXT_FONT_SIZE, caption: 16 } as const;
+
+export const BOARD_DEFAULT_ITEM_SIZE = { width: 240, height: 160 } as const;
+export const BOARD_DEFAULT_SIZES = {
+  frame: { width: 480, height: 320 },
+  shape: { width: 200, height: 140 },
+  image: { width: BOARD_MEDIA_EDGE, height: 270 },
+  video: { width: BOARD_MEDIA_EDGE, height: 270 },
+  audio: { width: 320, height: 112 },
+  file: { width: 260, height: 132 },
+  task: { width: BOARD_MEDIA_EDGE, height: 270 },
+  effect: { width: 240, height: 240 },
+  custom: { width: 480, height: 320 },
+} as const;
+
+export function boardDefaultSize(type: string): { width: number; height: number } {
+  const size = Object.hasOwn(BOARD_DEFAULT_SIZES, type)
+    ? BOARD_DEFAULT_SIZES[type as keyof typeof BOARD_DEFAULT_SIZES]
+    : BOARD_DEFAULT_ITEM_SIZE;
+  return { ...size };
+}
+
 export const BOARD_REALTIME_DELTA_MAX_BYTES = 64 * 1024;
 
 export const BOARD_STROKE_MIN_SIZE = 1;

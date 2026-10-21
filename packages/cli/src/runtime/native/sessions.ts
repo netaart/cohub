@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { serializeProjectionRecords, type HarnessArchive, type RuntimeContext } from "@neta-art/cohub";
-import { ArchiveNotRestorableError, importNativeArchive } from "./archive.js";
-import { piSessionDirectoryName, readTranscript } from "./adapters.js";
+import { serializeProjectionRecords, type HarnessArchive, type LocalHarness, type RuntimeContext } from "@neta-art/cohub";
+import { ArchiveNotRestorableError } from "./archive.js";
+import { readTranscript } from "./adapters.js";
+import { harnessAdapter } from "../harnesses/index.js";
 import { ProjectionStore, rebindProjectionNativeSession } from "../projection-store.js";
 import type { SessionTurnProjectionClient } from "../turn-projection.js";
 import type { RuntimeArchiveStore } from "../archive-store.js";
@@ -14,7 +14,7 @@ import type { NativeIngest, TranscriptState } from "./ingest.js";
 export type ResumeKind = "native" | "restored" | "handoff" | "new";
 
 export type NativeSession = {
-  harness: "pi" | "codex";
+  harness: LocalHarness;
   nativeSessionId: string;
   path: string;
   cwd: string;
@@ -32,7 +32,7 @@ export class NativeSessions {
     projectionSource: SessionTurnProjectionClient;
     archives: RuntimeArchiveStore;
     ingest: NativeIngest;
-    onRestoreFailed?: (error: unknown, context: { sessionId: string; harness: "pi" | "codex"; unrestorable: boolean }) => void;
+    onRestoreFailed?: (error: unknown, context: { sessionId: string; harness: LocalHarness; unrestorable: boolean }) => void;
   }) {
     this.projections = new ProjectionStore(options.projectionSource);
   }
@@ -40,7 +40,7 @@ export class NativeSessions {
   async prepare(input: {
     sessionId: string;
     turnId: string;
-    harness: "pi" | "codex";
+    harness: LocalHarness;
     cwd: string;
     provider?: string | null;
     context: RuntimeContext;
@@ -63,32 +63,36 @@ export class NativeSessions {
       if (restored) {
         // A restored copy is history the server already has, even where it carries no markers.
         const through = (await readTranscript(restored.path, restored.harness).catch(() => null))?.turns.at(-1)?.key ?? null;
-        this.options.ingest.adopt(restored, input.sessionId, { turnKey: through, turnId: input.context.throughTurnId });
+        if (through) this.options.ingest.adopt(restored, input.sessionId, { turnKey: through, turnId: input.context.throughTurnId });
+        else this.options.ingest.adopt(restored, input.sessionId);
         return { session: restored, resume: "restored" };
       }
     }
     const projected = await this.project(input);
-    // A new Codex thread gets its file when it starts; the executor adopts it then.
-    if (projected.resume !== "new" || input.harness === "pi") this.options.ingest.adopt(projected.session, input.sessionId);
+    // A harness that creates its own file gets it when the Turn starts; the executor adopts it then.
+    if (projected.resume !== "new" || !harnessAdapter(input.harness).session.startsWithoutFile) this.options.ingest.adopt(projected.session, input.sessionId);
     return projected;
   }
 
-  private async restore(input: { harness: "pi" | "codex"; cwd: string }, archive: HarnessArchive, signal?: AbortSignal): Promise<NativeSession> {
+  private async restore(input: { harness: LocalHarness; cwd: string }, archive: HarnessArchive, signal?: AbortSignal): Promise<NativeSession> {
     const id = randomUUID();
     const raw = join(this.options.root, "native", "restored", `${id}.jsonl`);
-    const path = nativePath(input.harness, id, input.cwd);
+    const format = harnessAdapter(input.harness).session.archive;
+    if (!format) throw new ArchiveNotRestorableError(`${input.harness} archives are not restorable`);
     try {
       const restored = await this.options.archives.restore(archive, raw, signal);
-      const imported = await importNativeArchive({ source: raw, target: path, harness: input.harness, nativeSessionId: restored.nativeSessionId, id, cwd: input.cwd, signal });
+      const path = format.target({ id, nativeSessionId: restored.nativeSessionId, cwd: input.cwd });
+      const imported = await format.import({ source: raw, target: path, nativeSessionId: restored.nativeSessionId, id, cwd: input.cwd, signal });
       return { harness: input.harness, nativeSessionId: imported.nativeSessionId, path, cwd: input.cwd };
     } finally {
       await rm(raw, { force: true }).catch(() => undefined);
     }
   }
 
-  private async project(input: { sessionId: string; turnId: string; harness: "pi" | "codex"; cwd: string; provider?: string | null; context: RuntimeContext; signal?: AbortSignal }): Promise<PreparedSession> {
+  private async project(input: { sessionId: string; turnId: string; harness: LocalHarness; cwd: string; provider?: string | null; context: RuntimeContext; signal?: AbortSignal }): Promise<PreparedSession> {
+    const format = harnessAdapter(input.harness).session;
     const nativeSessionId = randomUUID();
-    const path = nativePath(input.harness, nativeSessionId, input.cwd);
+    const path = format.path(nativeSessionId, input.cwd);
     const projection = rebindProjectionNativeSession(await this.projections.project({
       spaceId: this.options.spaceId,
       sessionId: input.sessionId,
@@ -100,25 +104,12 @@ export class NativeSessions {
       throughTurnId: input.context.throughTurnId,
     }, input.signal), nativeSessionId);
     const session = { harness: input.harness, nativeSessionId, path, cwd: input.cwd };
-    // An empty Codex thread is created by Codex itself when the Turn starts.
-    if (!projection.turns.length && input.harness === "codex") return { session, resume: "new" };
+    // Nothing to carry (no Turns, or none that project) starts natively where the harness creates its own file.
+    if ((!projection.turns.length || !projection.projection.records.length) && format.startsWithoutFile) return { session, resume: "new" };
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const temporary = `${path}.${randomUUID()}.projection`;
     await writeFile(temporary, serializeProjectionRecords(projection.projection.records), { mode: 0o600 });
     await rename(temporary, path);
     return { session, resume: projection.turns.length ? "handoff" : "new" };
   }
-}
-
-/** Where a harness keeps a new transcript for the bound directory. */
-function nativePath(harness: "pi" | "codex", nativeSessionId: string, cwd: string): string {
-  const stamp = new Date().toISOString();
-  if (harness === "pi") {
-    const agent = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
-    const directory = process.env.PI_CODING_AGENT_SESSION_DIR?.trim() || join(agent, "sessions", piSessionDirectoryName(cwd));
-    return join(directory, `${stamp.replace(/[:.]/g, "-")}_${nativeSessionId}.jsonl`);
-  }
-  const home = process.env.CODEX_HOME?.trim() || join(homedir(), ".codex");
-  const day = stamp.replace(/\.\d{3}Z$/, "").replaceAll(":", "-");
-  return join(home, "sessions", day.slice(0, 4), day.slice(5, 7), day.slice(8, 10), `rollout-${day}-${nativeSessionId}.jsonl`);
 }

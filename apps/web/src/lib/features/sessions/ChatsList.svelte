@@ -1,7 +1,7 @@
 <script lang="ts">
-import type { UserSessionListItem } from "@neta-art/cohub";
+import type { SessionRecord, UserSessionListItem } from "@neta-art/cohub";
 import { Plus } from "lucide-svelte";
-import { tick } from "svelte";
+import { onDestroy, tick } from "svelte";
 import { goto } from "$app/navigation";
 import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
 import {
@@ -9,18 +9,22 @@ import {
 	LIST_ROW_AVATAR,
 	LIST_ROW_HEIGHT,
 } from "$lib/components/list-page/list-row";
-import SessionRow from "$lib/components/SessionRow.svelte";
+import SessionRow, {
+	SESSION_ROW_NAVIGATE_DELAY_MS,
+} from "$lib/components/SessionRow.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import {
 	type ChatsView,
 	chatsInbox,
 } from "$lib/features/sessions/chats-inbox.svelte";
 import { chatsWorkspaceScope } from "$lib/features/sessions/chats-workspace-scope";
-import { withCurrentWindow } from "$lib/features/space/modules/window-route";
+import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
 import { getLocale } from "$lib/i18n/locale.svelte";
+import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { scrollListToTop } from "$lib/layout/list-scroll-top";
 import { scrollMemory } from "$lib/layout/scroll-memory";
 import { m } from "$lib/paraglide/messages.js";
+import { sdk } from "$lib/sdk";
 import {
 	buildSessionForkTree,
 	getSessionTreeTitle,
@@ -31,6 +35,7 @@ import {
 } from "$lib/space-routes";
 import { type ChatsFilter, chatsFilterScope } from "$lib/stores/chats-filter";
 import { setSessionsArchived } from "$lib/stores/session-archive.svelte";
+import { sessionStore } from "$lib/stores/session-store";
 
 const {
 	view,
@@ -52,7 +57,10 @@ const LOAD_MORE_THRESHOLD_PX = 480;
 const OVERSCAN_ROWS = 6;
 
 const locale = $derived(getLocale());
+const isMobile = $derived(useCompactShell());
 const isPage = $derived(variant === "page");
+// Touch layouts open on a single tap, so rename stays desktop-only.
+const canRename = $derived(!isPage && !isMobile);
 const scoped = $derived(Boolean(filter.space));
 const density = $derived<FixedListRowDensity>(
 	isPage ? "comfortable" : "compact",
@@ -66,6 +74,21 @@ let scroller = $state<HTMLDivElement | null>(null);
 let scrollTop = $state(0);
 let viewportHeight = $state(600);
 let focusedSessionId = $state<string | null>(null);
+let renamingId = $state<string | null>(null);
+let renameValue = $state("");
+let renameSaving = $state(false);
+let renameError = $state("");
+let navigateTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelPendingNavigation() {
+	if (navigateTimer) clearTimeout(navigateTimer);
+	navigateTimer = null;
+}
+
+onDestroy(cancelPendingNavigation);
+$effect(() => {
+	if (!active) cancelPendingNavigation();
+});
 const rowHeight = $derived(LIST_ROW_HEIGHT[density]);
 const windowTop = $derived(
 	Math.min(scrollTop, Math.max(0, rows.length * rowHeight - viewportHeight)),
@@ -84,6 +107,9 @@ const focusedIndex = $derived(
 		? rows.findIndex((row) => row.session.id === focusedSessionId)
 		: -1,
 );
+const renamingIndex = $derived(
+	renamingId ? rows.findIndex((row) => row.session.id === renamingId) : -1,
+);
 const visibleIndices = $derived.by(() => {
 	const indices = new Set<number>();
 	for (let index = start; index < end; index += 1) indices.add(index);
@@ -92,10 +118,15 @@ const visibleIndices = $derived.by(() => {
 		indices.add(rows.length - 1);
 	}
 	if (focusedIndex >= 0) indices.add(focusedIndex);
+	if (renamingIndex >= 0) indices.add(renamingIndex);
 	return [...indices].sort((a, b) => a - b);
 });
 
 function listKeyboard(node: HTMLUListElement) {
+	const controls = (index: number) =>
+		node.querySelectorAll<HTMLElement>(
+			`[data-chat-index="${index}"] :is(a[href], button:enabled, input:enabled)`,
+		);
 	const rowIndex = (target: EventTarget | null) => {
 		if (!(target instanceof Element)) return -1;
 		const row = target.closest<HTMLElement>("[data-chat-index]");
@@ -116,7 +147,10 @@ function listKeyboard(node: HTMLUListElement) {
 		if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey)
 			return;
 		const index = rowIndex(event.target);
-		const next = index + (event.shiftKey ? -1 : 1);
+		const direction = event.shiftKey ? -1 : 1;
+		let next = index + direction;
+		if (renameSaving && rows[next]?.session.id === renamingId)
+			next += direction;
 		if (
 			index < 0 ||
 			next < 0 ||
@@ -125,6 +159,8 @@ function listKeyboard(node: HTMLUListElement) {
 			!scroller
 		)
 			return;
+		const current = [...controls(index)];
+		if (event.target !== current.at(event.shiftKey ? 0 : -1)) return;
 		event.preventDefault();
 		const id = rows[next].session.id;
 		scroller.scrollTop = next * rowHeight;
@@ -132,11 +168,7 @@ function listKeyboard(node: HTMLUListElement) {
 		await tick();
 		if (!node.isConnected || document.activeElement !== event.target) return;
 		const targetIndex = rows.findIndex((row) => row.session.id === id);
-		node
-			.querySelector<HTMLAnchorElement>(
-				`[data-chat-index="${targetIndex}"] a[href]`,
-			)
-			?.focus();
+		[...controls(targetIndex)].at(event.shiftKey ? -1 : 0)?.focus();
 	};
 	node.addEventListener("focusin", onFocus);
 	node.addEventListener("focusout", onBlur);
@@ -179,6 +211,18 @@ function open(event: MouseEvent, session: UserSessionListItem) {
 	if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)
 		return;
 	event.preventDefault();
+	cancelPendingNavigation();
+	if (!canRename || event.detail === 0) {
+		navigate(session);
+		return;
+	}
+	navigateTimer = setTimeout(() => {
+		navigateTimer = null;
+		navigate(session);
+	}, SESSION_ROW_NAVIGATE_DELAY_MS);
+}
+
+function navigate(session: UserSessionListItem) {
 	onNavigate?.();
 	if (isPage) {
 		void goto(hrefFor(session));
@@ -188,10 +232,68 @@ function open(event: MouseEvent, session: UserSessionListItem) {
 	const sameSpace =
 		chatsWorkspaceScope.spaceAt(new URL(window.location.href)) ===
 		session.spaceId;
-	void goto(sameSpace ? withCurrentWindow(href) : href, {
+	void goto(sameSpace ? withSidebarMainWindow(href, { isMobile }) : href, {
 		keepFocus: true,
 		noScroll: true,
 	});
+}
+
+function startRename(session: SessionRecord, title: string) {
+	cancelPendingNavigation();
+	if (renameSaving) return;
+	renamingId = session.id;
+	renameValue = session.title ?? title;
+	renameError = "";
+}
+
+async function cancelRename() {
+	const id = renamingId;
+	const restoreFocus =
+		active &&
+		(document.activeElement === document.body ||
+			scroller
+				?.querySelector("[data-session-rename]")
+				?.contains(document.activeElement));
+	if (restoreFocus) focusedSessionId = id;
+	renamingId = null;
+	renameValue = "";
+	renameError = "";
+	await tick();
+	if (!restoreFocus || !active || document.activeElement !== document.body)
+		return;
+	const index = rows.findIndex((row) => row.session.id === id);
+	scroller
+		?.querySelector<HTMLAnchorElement>(`[data-chat-index="${index}"] a[href]`)
+		?.focus({ preventScroll: true });
+}
+
+async function submitRename(session: SessionRecord, title: string) {
+	if (renameSaving) return;
+	const trimmed = renameValue.trim();
+	if (!trimmed || trimmed === (session.title ?? title)) {
+		await cancelRename();
+		return;
+	}
+	renameSaving = true;
+	renameError = "";
+	try {
+		const result = await sdk
+			.space(session.spaceId)
+			.session(session.id)
+			.rename(trimmed);
+		sessionStore.merge(result.session);
+		await cancelRename();
+	} catch (error) {
+		renameError = error instanceof Error ? error.message : String(error);
+	} finally {
+		renameSaving = false;
+		await tick();
+		if (renameError && active && document.activeElement === document.body) {
+			scroller
+				?.querySelector<HTMLInputElement>("[data-session-rename] input")
+				?.focus({ preventScroll: true });
+		}
+	}
 }
 
 function onScroll(event: Event) {
@@ -269,10 +371,24 @@ function onScroll(event: Event) {
 						tree={row.tree}
 						tooltip={tooltipFor(row)}
 						showInsert={false}
-						showRename={false}
+						showRename={canRename}
+						renaming={renamingId === session.id}
+						{renameValue}
+						{renameSaving}
+						{renameError}
 						archived={Boolean(session.isArchived)}
 						onArchive={(target) => void setSessionsArchived([target.id], !target.isArchived)}
 						onNavigate={open}
+						onDoubleClick={!canRename ? undefined : (event, target) => {
+							if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+							event.preventDefault();
+							event.stopPropagation();
+							startRename(target, title);
+						}}
+						onRename={(target) => startRename(target, title)}
+						onRenameValueChange={(value) => renameValue = value}
+						onSubmitRename={(target) => void submitRename(target, title)}
+						onCancelRename={cancelRename}
 					>
 						{#snippet avatar()}
 							<SpaceAvatar name={spaceName(session)} profile={session.space?.publicProfile ?? null} seed={session.spaceId} size={LIST_ROW_AVATAR[density]} />

@@ -8,7 +8,6 @@ import type {
 	Channel,
 	DiscordChannelConfig,
 	FeishuChannelConfig,
-	SandboxSpecId,
 	SpaceAccessPolicy,
 	SpaceChannelBindingRecord,
 	SpaceEnvInput,
@@ -17,7 +16,6 @@ import type {
 	SpaceModListItem,
 	SpaceRecord,
 	SpaceRole,
-	SpaceSandboxAutoDestroyPolicy,
 } from "@neta-art/cohub";
 import { buildSpaceInvitePath } from "@neta-art/cohub";
 import {
@@ -39,8 +37,8 @@ import {
 	Trash2,
 	Upload,
 	Users,
+	Wallet,
 	X,
-	Zap,
 } from "lucide-svelte";
 import { onDestroy } from "svelte";
 import { browser } from "$app/environment";
@@ -52,14 +50,24 @@ import {
 	channelHealthLabel,
 	channelHealthMessage,
 } from "$lib/channel-health";
+import { copyTextToClipboard } from "$lib/clipboard";
 import ChannelModelPicker from "$lib/components/ChannelModelPicker.svelte";
+import FilterBar from "$lib/components/list-page/FilterBar.svelte";
+import FilterChip from "$lib/components/list-page/FilterChip.svelte";
+import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
+import ListHeader from "$lib/components/list-page/ListHeader.svelte";
 import ListRowText from "$lib/components/list-page/ListRowText.svelte";
 import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
 import Sheet from "$lib/components/Sheet.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import UploadProgress from "$lib/components/UploadProgress.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { formatDateTime } from "$lib/i18n/format";
+import SandboxSettings from "$lib/features/space-settings/SandboxSettings.svelte";
+import SettingsHeading from "$lib/features/space-settings/SettingsHeading.svelte";
+import SettingsRow, {
+	SETTINGS_SELECT,
+} from "$lib/features/space-settings/SettingsRow.svelte";
+import { SandboxSettingsState } from "$lib/features/space-settings/sandbox-settings.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
@@ -67,45 +75,13 @@ import { uploadSpaceAvatarImage } from "$lib/public-asset-images";
 import { sdk } from "$lib/sdk";
 import { validateSpaceSlugInput } from "$lib/slug-rules";
 import { buildSpaceLandingRoute } from "$lib/space-routes";
-import { billingConversion } from "$lib/stores/billing-conversion.svelte";
 import { invalidateCachedSpaceMembers } from "$lib/stores/space-profile-cache";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
-import { sandboxSetupInfoSchema, type SandboxPreferenceStatus, type SandboxImageId } from "@cohub/protocol/sandbox";
-import SandboxSetup from "./SandboxSetup.svelte";
-import SandboxEnvironment from "./SandboxEnvironment.svelte";
-import SandboxSpecPicker from "./SandboxSpecPicker.svelte";
 
 const locale = $derived(getLocale());
-type SandboxSpecOption = {
-	id: SandboxSpecId;
-	rank: number;
-	label: string;
-	description: string;
-	requiredPlan: string | null;
-	resources: {
-		limits: Record<string, string>;
-		requests: Record<string, string>;
-	};
-};
-
-type SandboxInfo = {
-	provider?: "cloud" | "local";
-	status: string | null;
-	runtimeStatus?: string | null;
-	podName?: string | null;
-	desiredImage?: string | null;
-	reportedImageVersion?: string | null;
-	lastHeartbeatAt?: string | null;
-	lastActivityAt?: string | null;
-	reportedAt?: string | null;
-	stoppedAt?: string | null;
-	stopReason?: string | null;
-	meta?: Record<string, unknown> | null;
-};
-
 const props = $props<{ data: { spaceId: string } }>();
 const spaceId = $derived(props.data.spaceId);
-const defaultIdleTtlSeconds = import.meta.env.DEV ? 5 * 60 : 60 * 60;
+const sandboxSettings = $derived(new SandboxSettingsState(spaceId));
 const recommendedBaseMod =
 	getDefaultSpaceModsForEnv(normalizeCohubRuntimeEnv(PUBLIC_COHUB_ENV))[0] ??
 	null;
@@ -117,8 +93,6 @@ let invitations = $state<SpaceInvitation[]>([]);
 let env = $state<SpaceEnvInput[]>([]);
 let channels = $state<SpaceChannelBindingRecord[]>([]);
 let mods = $state<SpaceModListItem[]>([]);
-let sandbox = $state<SandboxInfo | null>(null);
-const sandboxSetup = $derived(sandboxSetupInfoSchema.safeParse(sandbox?.meta?.setup));
 let allChannels = $state<Channel[]>([]);
 let loading = $state(true);
 let error = $state("");
@@ -161,61 +135,6 @@ let inviteCreateNotice = $state("");
 let inviteNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 let copiedInviteToken = $state<string | null>(null);
 let copiedInviteTimer: ReturnType<typeof setTimeout> | null = null;
-let recoveringSandbox = $state(false);
-let sandboxRecoveryMessage = $state("");
-let sandboxRecoveryError = $state("");
-let sandboxAutoDestroyMode = $state<"idle" | "never">("idle");
-let sandboxIdleTtlSeconds = $state(defaultIdleTtlSeconds);
-let savingSandboxConfig = $state(false);
-let sandboxConfigMessage = $state("");
-let sandboxConfigError = $state("");
-let sandboxPreferences = $state<SandboxPreferenceStatus | null>(null);
-let sandboxSpec = $state<SandboxSpecId>("standard");
-let appliedSandboxSpec = $state<SandboxSpecId | null>(null);
-let sandboxSpecPendingRestart = $state(false);
-let allowedSandboxSpec = $state<SandboxSpecId>("standard");
-const defaultSandboxSpecs: Record<string, SandboxSpecOption> = {
-	standard: {
-		id: "standard",
-		rank: 0,
-		label: "Standard",
-		description: "Everyday building",
-		requiredPlan: null,
-		resources: {
-			limits: { cpu: "2", memory: "4Gi" },
-			requests: { cpu: "100m", memory: "256Mi" },
-		},
-	},
-	boost: {
-		id: "boost",
-		rank: 1,
-		label: "Boost",
-		description: "Faster builds and heavier dev servers",
-		requiredPlan: "Pro",
-		resources: {
-			limits: { cpu: "4", memory: "8Gi" },
-			requests: { cpu: "250m", memory: "768Mi" },
-		},
-	},
-	ultra: {
-		id: "ultra",
-		rank: 2,
-		label: "Ultra",
-		description: "Highest-priority compute for large work",
-		requiredPlan: "Max",
-		resources: {
-			limits: { cpu: "4", memory: "12Gi" },
-			requests: { cpu: "500m", memory: "1536Mi" },
-		},
-	},
-};
-let sandboxSpecs =
-	$state<Record<string, SandboxSpecOption>>(defaultSandboxSpecs);
-let specPickerOpen = $state(false);
-let savingSandboxSpec = $state(false);
-let sandboxSpecMessage = $state("");
-let sandboxSpecError = $state("");
-let sandboxSpecMessageTimer: ReturnType<typeof setTimeout> | null = null;
 let renamingSpace = $state(false);
 let renameInput = $state("");
 let renameSaving = $state(false);
@@ -270,305 +189,37 @@ onDestroy(() => {
 	if (copiedMemberTimer) clearTimeout(copiedMemberTimer);
 	if (copiedSpaceIdTimer) clearTimeout(copiedSpaceIdTimer);
 	if (copiedSpaceSlugLinkTimer) clearTimeout(copiedSpaceSlugLinkTimer);
-	if (sandboxSpecMessageTimer) clearTimeout(sandboxSpecMessageTimer);
 	if (programmaticScrollTimer) clearTimeout(programmaticScrollTimer);
 	if (channelHealthRefreshTimer) clearInterval(channelHealthRefreshTimer);
 	if (scrollSpyRaf) cancelAnimationFrame(scrollSpyRaf);
 	scrollSpyObserver?.disconnect();
 });
 
-function getSpaceAutoDestroyPolicy(
-	record: SpaceRecord | null,
-): SpaceSandboxAutoDestroyPolicy {
-	const fallback = { mode: "idle" as const, ttlSeconds: defaultIdleTtlSeconds };
-	const policy = record?.meta?.config?.sandbox?.autoDestroy;
-	if (!policy) return fallback;
-	if (policy.mode === "never") return { mode: "never" };
-	if (policy.mode === "idle" && Number.isInteger(policy.ttlSeconds))
-		return policy;
-	return fallback;
-}
-
-function applySandboxConfigFromSpace(record: SpaceRecord | null) {
-	const policy = getSpaceAutoDestroyPolicy(record);
-	sandboxAutoDestroyMode = policy.mode;
-	sandboxIdleTtlSeconds =
-		policy.mode === "idle" ? policy.ttlSeconds : defaultIdleTtlSeconds;
-	sandboxSpec = record?.meta?.config?.sandbox?.spec ?? sandboxSpec;
-}
-
 $effect(() => {
 	const id = spaceId;
+	const settings = sandboxSettings;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const stop = sdk.onUserEvent((event) => {
-		if (event.type !== "space.list.changed" || (event.payload as { spaceId?: string }).spaceId !== id) return;
+		if (
+			event.type !== "space.list.changed" ||
+			(event.payload as { spaceId?: string }).spaceId !== id
+		)
+			return;
 		clearTimeout(timer);
-		timer = setTimeout(() => { void Promise.all([loadSandboxConfig(), loadSandbox()]); }, 100);
+		timer = setTimeout(() => void settings.load(), 100);
 	});
-	return () => { stop(); clearTimeout(timer); };
+	return () => {
+		stop();
+		clearTimeout(timer);
+	};
 });
 
-async function loadSandboxConfig() {
-	const result = await sdk
-		.space(spaceId)
-		.getConfig()
-		.catch(() => null);
-	if (!result?.config?.sandbox) return;
-	const config = result.config.sandbox;
-	sandboxPreferences = config.preferences ?? null;
-	sandboxSpec = config.spec ?? "standard";
-	appliedSandboxSpec = config.appliedSpec ?? null;
-	sandboxSpecPendingRestart = config.specPendingRestart === true;
-	allowedSandboxSpec = config.allowedSpec ?? "standard";
-	sandboxSpecs =
-		(config.specs as Record<string, SandboxSpecOption> | undefined) ??
-		sandboxSpecs;
-}
-
-async function saveSandboxEnvironment(patch: { image?: SandboxImageId | null; spec?: null }) {
-	if (!canManageSpaceSandbox || savingSandboxSpec) return;
-	savingSandboxSpec = true;
-	sandboxSpecError = "";
-	try {
-		const result = await sdk.space(spaceId).updateConfig({ sandbox: patch });
-		space = result.space;
-		cacheSpaceRecordSoon(result.space);
-		await loadSandboxConfig();
-	} catch (error) {
-		sandboxSpecError = error instanceof Error ? error.message : m.space_failed_sandbox_spec({}, { locale });
-	} finally {
-		savingSandboxSpec = false;
+function goBack() {
+	if (window.history.length > 1) {
+		window.history.back();
+		return;
 	}
-}
-
-function getSandboxSpecLabel(specId: SandboxSpecId | null | undefined) {
-	return (
-		sandboxSpecs[specId ?? ""]?.label ??
-		(specId ? specId : m.space_spec_standard({}, { locale }))
-	);
-}
-
-function getSandboxSpecSummary(specId: SandboxSpecId | null | undefined) {
-	const spec = sandboxSpecs[specId ?? ""];
-	if (!spec) return "2 vCPU · 4 Gi";
-	return `${spec.resources?.limits?.cpu ?? "2"} vCPU · ${spec.resources?.limits?.memory ?? "4Gi"}`;
-}
-
-function openSandboxSpecUpgrade(specId: SandboxSpecId) {
-	const spec = sandboxSpecs[specId];
-	billingConversion.openFromIntent({
-		level: "hard",
-		reason: "feature_not_entitled",
-		audience: "unknown",
-		preferredOfferKind: "upgrade",
-		title: m.space_upgrade_title({ spec: spec?.label ?? "better" }, { locale }),
-		message: m.space_upgrade_message(
-			{
-				spec: spec?.label ?? specId,
-				cpu: spec?.resources?.limits?.cpu ?? "more",
-				memory: spec?.resources?.limits?.memory ?? "more",
-			},
-			{ locale },
-		),
-		primaryAction: {
-			label: m.space_view_plans({}, { locale }),
-			action: "open_billing_conversion",
-		},
-		source: "sandbox_spec_picker",
-	});
-}
-
-function setSandboxSpecMessage(message: string) {
-	sandboxSpecMessage = message;
-	if (sandboxSpecMessageTimer) clearTimeout(sandboxSpecMessageTimer);
-	sandboxSpecMessageTimer = setTimeout(() => {
-		sandboxSpecMessage = "";
-	}, 4000);
-}
-
-async function saveSandboxSpec(spec: SandboxSpecId) {
-	if (!canManageSpaceSandbox || savingSandboxSpec) return;
-	specPickerOpen = false;
-	if (spec === sandboxSpec && sandboxPreferences?.overrides.spec === spec) return;
-	// Optimistic: reflect the choice immediately, save in the background.
-	const previousSpec = sandboxSpec;
-	sandboxSpec = spec;
-	savingSandboxSpec = true;
-	sandboxSpecMessage = "";
-	sandboxSpecError = "";
-	try {
-		const result = await sdk.space(spaceId).updateConfig({ sandbox: { spec } });
-		space = result.space;
-		cacheSpaceRecordSoon(result.space);
-		applySandboxConfigFromSpace(result.space);
-		void Promise.all([loadSandboxConfig(), loadSandbox()]);
-		const sandboxResult = (
-			result as unknown as {
-				sandbox?: { pendingRestart?: boolean; resized?: boolean };
-			}
-		).sandbox;
-		if (sandboxResult?.pendingRestart) sandboxSpecPendingRestart = true;
-		setSandboxSpecMessage(
-			sandboxResult?.pendingRestart
-				? m.space_saved_restart({}, { locale })
-				: m.space_spec_updated({}, { locale }),
-		);
-	} catch (err) {
-		sandboxSpec = previousSpec;
-		if (!billingConversion.handleHttpError(err)) {
-			sandboxSpecError =
-				err instanceof Error
-					? err.message
-					: m.space_failed_sandbox_spec({}, { locale });
-		}
-	} finally {
-		savingSandboxSpec = false;
-	}
-}
-
-function formatTtl(seconds: number): string {
-	if (seconds % 86400 === 0) return `${seconds / 86400}d`;
-	if (seconds % 3600 === 0) return `${seconds / 3600}h`;
-	if (seconds % 60 === 0) return `${seconds / 60}m`;
-	return `${seconds}s`;
-}
-
-async function saveSandboxConfig() {
-	if (!canManageSpaceSandbox) return;
-	savingSandboxConfig = true;
-	sandboxConfigMessage = "";
-	sandboxConfigError = "";
-	try {
-		const autoDestroy: SpaceSandboxAutoDestroyPolicy =
-			sandboxAutoDestroyMode === "never"
-				? { mode: "never" }
-				: { mode: "idle", ttlSeconds: Number(sandboxIdleTtlSeconds) };
-		const result = await sdk
-			.space(spaceId)
-			.updateConfig({ sandbox: { autoDestroy } });
-		space = result.space;
-		cacheSpaceRecordSoon(result.space);
-		applySandboxConfigFromSpace(result.space);
-		sandboxConfigMessage = m.space_hibernation_saved({}, { locale });
-	} catch (err) {
-		sandboxConfigError =
-			err instanceof Error
-				? err.message
-				: m.space_failed_sandbox_config({}, { locale });
-	} finally {
-		savingSandboxConfig = false;
-	}
-}
-
-function getSandboxMetaValue(key: string): string {
-	const meta = sandbox?.meta;
-	if (!meta || typeof meta !== "object") return "";
-	const value = meta[key];
-	return typeof value === "string" ? value : "";
-}
-
-function formatTime(value?: string | null): string {
-	if (!value) return "—";
-	return formatDateTime(value, locale) || "—";
-}
-
-function formatRelativeTime(value?: string | null): string {
-	if (!value) return "—";
-	const date = new Date(value);
-	const time = date.getTime();
-	if (Number.isNaN(time)) return "—";
-	const diffMs = Date.now() - time;
-	const absMs = Math.abs(diffMs);
-	const minute = 60_000;
-	const hour = 60 * minute;
-	const day = 24 * hour;
-	const ahead = diffMs < 0;
-	if (absMs < minute) return m.time_just_now({}, { locale });
-	if (absMs < hour)
-		return ahead
-			? m.time_ahead_min({ n: Math.round(absMs / minute) }, { locale })
-			: m.time_ago_min({ n: Math.round(absMs / minute) }, { locale });
-	if (absMs < day)
-		return ahead
-			? m.time_ahead_hour({ n: Math.round(absMs / hour) }, { locale })
-			: m.time_ago_hour({ n: Math.round(absMs / hour) }, { locale });
-	return ahead
-		? m.time_ahead_day({ n: Math.round(absMs / day) }, { locale })
-		: m.time_ago_day({ n: Math.round(absMs / day) }, { locale });
-}
-
-function getSandboxLifecycleLabel(status?: string | null): string {
-	switch (status) {
-		case "running":
-		case "ready":
-			return m.space_health_running({}, { locale });
-		case "provisioning":
-		case "pending":
-			return m.space_health_provisioning({}, { locale });
-		case "stopping":
-			return m.space_health_stopping({}, { locale });
-		case "stopped":
-			return m.space_health_stopped({}, { locale });
-		case "error":
-			return m.space_health_error({}, { locale });
-		case "terminated":
-			return m.space_health_terminated({}, { locale });
-		default:
-			return m.space_health_unknown({}, { locale });
-	}
-}
-
-function getSandboxRuntimeLabel(status?: string | null): string {
-	switch (status) {
-		case "healthy":
-			return m.space_health_healthy({}, { locale });
-		case "starting":
-			return m.space_health_starting({}, { locale });
-		case "degraded":
-			return m.space_health_degraded({}, { locale });
-		case "unhealthy":
-			return m.space_health_unhealthy({}, { locale });
-		default:
-			return m.space_health_unknown({}, { locale });
-	}
-}
-
-function getSandboxStatusClass(status?: string | null): string {
-	if (status === "running" || status === "ready" || status === "healthy")
-		return "bg-success-bg text-success-soft ring-success-soft/20";
-	if (
-		status === "provisioning" ||
-		status === "pending" ||
-		status === "starting" ||
-		status === "stopping"
-	)
-		return "bg-brand-bg text-brand-muted-fg ring-brand/20";
-	if (status === "stopped" || status === "unknown")
-		return "bg-bg-hover text-text-tertiary ring-border-subtle";
-	return "bg-error-bg text-error-soft ring-error-soft/25";
-}
-
-function getSandboxActivityText(): string {
-	const activity = formatRelativeTime(sandbox?.lastActivityAt);
-	if (activity !== "—") return activity;
-	return formatRelativeTime(sandbox?.lastHeartbeatAt);
-}
-
-function getSandboxActivityLabel(): string {
-	return sandbox?.lastActivityAt
-		? m.space_last_rpc({}, { locale })
-		: m.space_no_rpc_yet({}, { locale });
-}
-
-function getSandboxActivityTitle(): string {
-	const label = getSandboxActivityLabel();
-	const activityTime = formatTime(sandbox?.lastActivityAt);
-	const heartbeatTime = formatTime(sandbox?.lastHeartbeatAt);
-	return `${label}\n${m.space_last_rpc({}, { locale })}: ${activityTime}\n${m.space_heartbeat({}, { locale })}: ${heartbeatTime}\n${m.space_idle_hibernation_note({}, { locale })}`;
-}
-
-function getSandboxHeartbeatTitle(): string {
-	return `${m.space_sandbox_self_report({}, { locale })}\n${m.space_heartbeat({}, { locale })}: ${formatTime(sandbox?.lastHeartbeatAt)}\n${m.space_heartbeat_note({}, { locale })}`;
+	void goto(buildSpaceLandingRoute(spaceId));
 }
 
 function getSpaceOwnerUsername(record: SpaceRecord | null): string {
@@ -676,30 +327,26 @@ async function saveSpaceSlug() {
 
 async function copySpaceId() {
 	try {
-		await navigator.clipboard.writeText(spaceId);
+		await copyTextToClipboard(spaceId);
 		copiedSpaceId = true;
 		if (copiedSpaceIdTimer) clearTimeout(copiedSpaceIdTimer);
 		copiedSpaceIdTimer = setTimeout(() => {
 			copiedSpaceId = false;
 		}, 2000);
-	} catch {
-		// Clipboard failures are non-critical.
-	}
+	} catch {}
 }
 
 async function copySpacePublicLink() {
 	const path = getSpacePublicPath(space);
 	if (!path) return;
 	try {
-		await navigator.clipboard.writeText(`${window.location.origin}${path}`);
+		await copyTextToClipboard(`${window.location.origin}${path}`);
 		copiedSpaceSlugLink = true;
 		if (copiedSpaceSlugLinkTimer) clearTimeout(copiedSpaceSlugLinkTimer);
 		copiedSpaceSlugLinkTimer = setTimeout(() => {
 			copiedSpaceSlugLink = false;
 		}, 2000);
-	} catch {
-		// Clipboard failures are non-critical.
-	}
+	} catch {}
 }
 
 async function saveSpaceDescription() {
@@ -774,15 +421,6 @@ function handleSpaceAvatarFileChange(event: Event) {
 	if (file) void uploadSpaceAvatar(file);
 }
 
-async function loadSandbox() {
-	const id = spaceId;
-	try {
-		const result = await sdk.space(id).sandbox.get();
-		if (id === spaceId) sandbox = result.sandbox;
-	} catch {
-	}
-}
-
 function confirmModRestart(): boolean {
 	return window.confirm(m.space_mod_restart_confirm({}, { locale }));
 }
@@ -793,34 +431,6 @@ function noteModRestart() {
 	modRestartTimer = setTimeout(() => {
 		modRestartMessage = "";
 	}, 6000);
-}
-
-async function loadMods() {
-	const result = await sdk.space(spaceId).mods.list();
-	mods = result.items;
-}
-
-async function forceRecoverSandbox() {
-	if (recoveringSandbox || !canManageSpaceSandbox) return;
-	const confirmed = window.confirm(m.space_recovery_confirm({}, { locale }));
-	if (!confirmed) return;
-	recoveringSandbox = true;
-	sandboxRecoveryMessage = "";
-	sandboxRecoveryError = "";
-	try {
-		const result = await sdk.space(spaceId).sandbox.recreate();
-		sandboxRecoveryMessage = result.verified
-			? m.space_sandbox_recovered({}, { locale })
-			: m.space_recovery_completed({}, { locale });
-		await Promise.all([loadSandbox(), loadSandboxConfig()]);
-	} catch (err) {
-		sandboxRecoveryError =
-			err instanceof Error
-				? err.message
-				: m.space_recovery_failed({}, { locale });
-	} finally {
-		recoveringSandbox = false;
-	}
 }
 
 async function loadPage() {
@@ -851,8 +461,6 @@ async function loadPage() {
 			channelResult,
 			modResult,
 			allChannelResult,
-			sandboxResult,
-			sandboxConfigResult,
 			invitationItems,
 		] = await Promise.all([
 			spacePromise,
@@ -877,15 +485,8 @@ async function loadPage() {
 				.mods.list()
 				.catch(() => ({ items: [] })),
 			sdk.channels.list().catch(() => []),
-			sdk
-				.space(spaceId)
-				.sandbox.get()
-				.catch(() => null),
-			sdk
-				.space(spaceId)
-				.getConfig()
-				.catch(() => null),
 			invitationPromise,
+			sandboxSettings.load(),
 		]);
 		space = spaceResult;
 		spaceDescriptionDraft = spaceResult.description ?? "";
@@ -896,20 +497,7 @@ async function loadPage() {
 		channels = channelResult;
 		mods = modResult.items;
 		allChannels = allChannelResult;
-		sandbox = sandboxResult?.sandbox ?? null;
-		if (sandboxConfigResult?.config?.sandbox) {
-			const sandboxConfig = sandboxConfigResult.config.sandbox;
-			sandboxPreferences = sandboxConfig.preferences ?? null;
-			sandboxSpec = sandboxConfig.spec ?? "standard";
-			appliedSandboxSpec = sandboxConfig.appliedSpec ?? null;
-			allowedSandboxSpec = sandboxConfig.allowedSpec ?? "standard";
-			sandboxSpecs =
-				(sandboxConfig.specs as
-					| Record<string, SandboxSpecOption>
-					| undefined) ?? sandboxSpecs;
-		}
 		invitations = invitationItems;
-		applySandboxConfigFromSpace(spaceResult);
 		if (channelHealthRefreshTimer) clearInterval(channelHealthRefreshTimer);
 		channelHealthRefreshTimer = setInterval(() => {
 			void refreshChannelHealth();
@@ -925,12 +513,9 @@ async function loadPage() {
 async function refreshChannelHealth() {
 	if (loading) return;
 	try {
-		// Only refresh bound-channel health; keep allChannels from full load.
 		const channelResult = await sdk.space(spaceId).channels.list();
 		channels = channelResult;
-	} catch {
-		// Silent refresh — keep last known health.
-	}
+	} catch {}
 }
 
 async function setAccess(body: {
@@ -1047,59 +632,24 @@ function getMemberUuid(member: SpaceMember): string {
 async function copyMemberUuid(member: SpaceMember) {
 	const value = getMemberUuid(member);
 	try {
-		if (navigator.clipboard?.writeText) {
-			await navigator.clipboard.writeText(value);
-		} else {
-			const textarea = document.createElement("textarea");
-			textarea.value = value;
-			textarea.setAttribute("readonly", "true");
-			textarea.style.position = "fixed";
-			textarea.style.opacity = "0";
-			document.body.appendChild(textarea);
-			textarea.select();
-			const copied = document.execCommand("copy");
-			document.body.removeChild(textarea);
-			if (!copied) return;
-		}
+		await copyTextToClipboard(value);
 		copiedMemberUserId = member.userId;
 		if (copiedMemberTimer) clearTimeout(copiedMemberTimer);
 		copiedMemberTimer = setTimeout(() => {
 			copiedMemberUserId = null;
 		}, 2000);
-	} catch {
-		// ignore copy failure silently
-	}
+	} catch {}
 }
 
 async function copyModSpaceId(id: string) {
 	try {
-		if (navigator.clipboard?.writeText) {
-			await navigator.clipboard.writeText(id);
-		} else {
-			const textarea = document.createElement("textarea");
-			textarea.value = id;
-			textarea.setAttribute("readonly", "true");
-			textarea.style.position = "fixed";
-			textarea.style.opacity = "0";
-			document.body.appendChild(textarea);
-			textarea.select();
-			const copied = document.execCommand("copy");
-			document.body.removeChild(textarea);
-			if (!copied) return;
-		}
+		await copyTextToClipboard(id);
 		copiedModSpaceId = id;
 		if (copiedModSpaceIdTimer) clearTimeout(copiedModSpaceIdTimer);
 		copiedModSpaceIdTimer = setTimeout(() => {
 			copiedModSpaceId = null;
 		}, 2000);
-	} catch {
-		// ignore copy failure silently
-	}
-}
-
-function selectAddingMemberRole(role: SpaceRole) {
-	if (!canManageSpaceMembers) return;
-	addingMemberRole = role;
+	} catch {}
 }
 
 async function selectMemberRole(
@@ -1213,20 +763,7 @@ async function copyInviteLink(token: string) {
 	});
 	const url = `${window.location.origin}${path}`;
 	try {
-		if (navigator.clipboard?.writeText) {
-			await navigator.clipboard.writeText(url);
-		} else {
-			const textarea = document.createElement("textarea");
-			textarea.value = url;
-			textarea.setAttribute("readonly", "true");
-			textarea.style.position = "fixed";
-			textarea.style.opacity = "0";
-			document.body.appendChild(textarea);
-			textarea.select();
-			const copied = document.execCommand("copy");
-			document.body.removeChild(textarea);
-			if (!copied) return false;
-		}
+		await copyTextToClipboard(url);
 		copiedInviteToken = token;
 		if (copiedInviteTimer) clearTimeout(copiedInviteTimer);
 		copiedInviteTimer = setTimeout(() => {
@@ -1380,7 +917,7 @@ async function addMod() {
 		modName = "";
 		modMountSlug = "";
 		noteModRestart();
-		await loadSandbox();
+		await sandboxSettings.load();
 	} catch (err) {
 		modError =
 			err instanceof Error
@@ -1410,7 +947,7 @@ async function toggleMod(mod: SpaceModListItem) {
 			.mods.update(mod.id, { enabled: !mod.enabled });
 		mods = mods.map((item) => (item.id === mod.id ? result.item : item));
 		noteModRestart();
-		await loadSandbox();
+		await sandboxSettings.load();
 	} catch (err) {
 		modError =
 			err instanceof Error
@@ -1432,7 +969,7 @@ async function updateModMountSlug(mod: SpaceModListItem, mountSlug: string) {
 			.mods.update(mod.id, { mountSlug: mountSlug || undefined });
 		mods = mods.map((item) => (item.id === mod.id ? result.item : item));
 		noteModRestart();
-		await loadSandbox();
+		await sandboxSettings.load();
 	} catch (err) {
 		modError =
 			err instanceof Error
@@ -1452,7 +989,7 @@ async function removeMod(mod: SpaceModListItem) {
 		await sdk.space(spaceId).mods.remove(mod.id);
 		mods = mods.filter((item) => item.id !== mod.id);
 		noteModRestart();
-		await loadSandbox();
+		await sandboxSettings.load();
 	} catch (err) {
 		modError =
 			err instanceof Error
@@ -1551,14 +1088,26 @@ function handleSectionNavClick(event: MouseEvent, sectionId: SettingsSection) {
 }
 
 function updateActiveSectionFromScroll() {
-	if (!settingsMainEl || programmaticScroll) return;
-	const mainTop = settingsMainEl.getBoundingClientRect().top;
-	const marker = mainTop + 48;
+	const main = settingsMainEl;
+	if (!main || programmaticScroll) return;
+	const marker = main.getBoundingClientRect().top + 48;
+	const top = (id: SettingsSection) =>
+		document.getElementById(sectionElementId(id))?.getBoundingClientRect().top;
 	let next: SettingsSection = settingsSections[0].id;
 	for (const section of settingsSections) {
-		const el = document.getElementById(sectionElementId(section.id));
-		if (!el) continue;
-		if (el.getBoundingClientRect().top <= marker) next = section.id;
+		const y = top(section.id);
+		if (y !== undefined && y <= marker) next = section.id;
+	}
+	// Keep short trailing sections selectable even when they cannot reach the marker.
+	const atBottom =
+		main.scrollTop > 0 &&
+		main.scrollTop + main.clientHeight >= main.scrollHeight - 2;
+	if (atBottom) {
+		const current = top(activeSection);
+		next =
+			current !== undefined && current > marker
+				? activeSection
+				: settingsSections[settingsSections.length - 1].id;
 	}
 	setActiveSection(next, { syncHash: true });
 }
@@ -1597,12 +1146,10 @@ $effect(() => {
 $effect(() => {
 	if (!browser || loading || error || !settingsMainEl) return;
 	const main = settingsMainEl;
-	bindScrollSpy(main);
 	const hash = window.location.hash.replace(/^#/, "");
+	bindScrollSpy(main);
 	if (isSettingsSection(hash)) {
 		requestAnimationFrame(() => scrollToSection(hash, { smooth: false }));
-	} else {
-		updateActiveSectionFromScroll();
 	}
 	return () => {
 		scrollSpyObserver?.disconnect();
@@ -1616,36 +1163,30 @@ $effect(() => {
 <svelte:head><title>{m.space_title({}, { locale })} — Cohub</title></svelte:head>
 
 <div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
-	<header class="flex h-[44px] shrink-0 items-center justify-between border-b border-border-subtle px-3 sm:px-4">
-		<div class="flex min-w-0 items-center gap-3">
-			<button
-				type="button"
-				class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35"
-				aria-label={m.space_back({}, { locale })}
-				onclick={() => {
-					if (typeof window !== "undefined" && window.history.length > 1) {
-						window.history.back();
-						return;
-					}
-					void goto(buildSpaceLandingRoute(spaceId));
-				}}
-			>
-				<ArrowLeft class="h-4 w-4" />
-			</button>
-			<div class="min-w-0 truncate text-[13px] font-medium text-text-primary">{m.space_title({}, { locale })}</div>
+	<div class="shrink-0 border-b border-border-subtle">
+		<ListHeader title={m.space_title({}, { locale })} brand={false}>
+			<HeaderAction label={m.space_back({}, { locale })} icon={ArrowLeft} onclick={goBack} />
+			<h1 class="min-w-0 truncate text-[15px] font-semibold tracking-tight text-text-primary lg:text-[13px]">{m.space_title({}, { locale })}</h1>
+			{#snippet actions()}
+				<HeaderAction label={m.wallet_title({}, { locale })} icon={Wallet} href={`/spaces/${spaceId}/wallet`} showLabel />
+				<HeaderAction label={m.space_section_commerce({}, { locale })} icon={PackagePlus} href={`/spaces/${spaceId}/settings/commerce`} showLabel />
+			{/snippet}
+		</ListHeader>
+		<div class="lg:hidden">
+			<FilterBar label={m.space_sections({}, { locale })} role="navigation" activeKey={activeSection}>
+				{#each settingsSections as section (section.id)}
+					<FilterChip label={section.label} href={`#${section.id}`} active={activeSection === section.id} onclick={(event) => handleSectionNavClick(event, section.id)} />
+				{/each}
+			</FilterBar>
 		</div>
-		<div class="flex items-center gap-1">
-			<a href={`/spaces/${spaceId}/wallet`} class="inline-flex h-8 items-center rounded-[5px] px-2.5 text-[12px] text-text-tertiary hover:bg-bg-hover hover:text-text-primary">{m.wallet_title({}, { locale })}</a>
-			<a href={`/spaces/${spaceId}/settings/commerce`} class="inline-flex h-8 items-center justify-center gap-1.5 rounded-[5px] px-2.5 text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary"><PackagePlus class="h-3.5 w-3.5" /> {m.space_section_commerce({}, { locale })}</a>
-		</div>
-	</header>
+	</div>
 
-	<div class="flex min-h-0 flex-1 flex-col lg:flex-row">
-		<!-- Section nav — desktop sidebar -->
+	<div class="flex min-h-0 flex-1">
 		<nav class="hidden w-44 shrink-0 flex-col gap-[2px] border-r border-border-subtle px-2 py-3 lg:flex" aria-label={m.space_sections({}, { locale })}>
 			{#each settingsSections as section (section.id)}
 				<a
 					href={`#${section.id}`}
+					aria-current={activeSection === section.id ? "location" : undefined}
 					class="flex items-center gap-2.5 rounded-[5px] px-2 py-2 text-left text-[13px] transition-colors duration-100 {activeSection === section.id ? 'bg-bg-active font-medium text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
 					onclick={(event) => handleSectionNavClick(event, section.id)}
 				>
@@ -1655,28 +1196,12 @@ $effect(() => {
 			{/each}
 		</nav>
 
-		<!-- Section nav — mobile tabs -->
-		<div class="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border-subtle px-3 py-1.5 lg:hidden" role="navigation" aria-label={m.space_sections({}, { locale })}>
-			{#each settingsSections as section (section.id)}
-				<a
-					href={`#${section.id}`}
-					aria-current={activeSection === section.id ? 'location' : undefined}
-					class="shrink-0 rounded-[5px] px-2.5 py-1.5 text-[12px] font-medium transition-colors duration-100 {activeSection === section.id ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
-					onclick={(event) => handleSectionNavClick(event, section.id)}
-				>
-					{section.label}
-				</a>
-			{/each}
-		</div>
-
 		<main bind:this={settingsMainEl} class="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 sm:py-7">
 			<div class="mx-auto w-full max-w-2xl">
 				{#if loading}
 					<div aria-hidden="true">
-						<div class="border-b border-border-subtle pb-5">
-							<div class="h-5 w-24 rounded bg-bg-hover-strong"></div>
-							<div class="mt-2 h-3.5 w-52 rounded bg-bg-hover-strong"></div>
-						</div>
+						<div class="h-5 w-24 rounded bg-bg-hover-strong"></div>
+						<div class="mt-2 h-3.5 w-52 rounded bg-bg-hover-strong"></div>
 						<div class="space-y-3 py-6">
 							<div class="h-9 w-full rounded-[5px] bg-bg-hover-strong"></div>
 							<div class="h-9 w-full rounded-[5px] bg-bg-hover-strong"></div>
@@ -1687,12 +1212,8 @@ $effect(() => {
 					<div class="rounded-md border border-error-soft/30 bg-error-bg p-3 text-[12px] text-error-soft">{error}</div>
 				{:else}
 					<div class="pb-10">
-						<!-- ════════ Profile ════════ -->
 						<section id={sectionElementId("profile")} class="scroll-mt-6">
-						<div class="border-b border-border-subtle pb-5">
-							<h1 class="text-[18px] font-semibold tracking-tight text-text-primary">{m.space_section_profile({}, { locale })}</h1>
-							<p class="mt-1 text-[13px] leading-5 text-text-tertiary">{m.space_profile_desc({}, { locale })}</p>
-						</div>
+						<SettingsHeading title={m.space_section_profile({}, { locale })} description={m.space_profile_desc({}, { locale })} />
 
 						<div class="flex items-start gap-4 py-6">
 							<div class="flex w-16 shrink-0 flex-col items-center gap-1.5">
@@ -1718,7 +1239,6 @@ $effect(() => {
 							</div>
 
 							<div class="min-w-0 flex-1 pt-0.5">
-								<!-- Name -->
 								{#if renamingSpace && canEditSpaceProfile}
 									<div class="flex min-w-0 items-center gap-2">
 										<input type="text" bind:value={renameInput} disabled={renameSaving} aria-label={m.space_name({}, { locale })} class="min-w-0 flex-1 rounded-[5px] border border-brand/40 bg-bg-input px-2.5 py-1.5 text-[15px] font-medium text-text-primary transition-colors focus:outline-none disabled:opacity-60" onkeydown={(event) => { if (event.key === 'Enter' && !renameSaving && !isComposingKeyboardEvent(event)) { event.preventDefault(); const trimmed = renameInput.trim(); if (trimmed && trimmed !== space?.name) void handleRenameSpace(trimmed); else { renamingSpace = false; renameError = ''; } } if (event.key === 'Escape' && !renameSaving) { renamingSpace = false; renameError = ''; } }} />
@@ -1732,7 +1252,6 @@ $effect(() => {
 								{/if}
 								{#if renameError}<p class="mt-1 text-[11px] text-error-soft">{renameError}</p>{/if}
 
-								<!-- ID -->
 								<div class="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-text-tertiary">
 									<span class="shrink-0 uppercase tracking-wider">{m.space_id({}, { locale })}</span>
 									<code class="min-w-0 truncate font-mono" title={spaceId}>{formatCompactId(spaceId)}</code>
@@ -1741,7 +1260,6 @@ $effect(() => {
 									</button>
 								</div>
 
-								<!-- URL -->
 								<div class="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-text-tertiary">
 									<span class="shrink-0 uppercase tracking-wider">{m.space_url({}, { locale })}</span>
 									{#if editingSpaceSlug && canEditSpaceProfile}
@@ -1768,7 +1286,6 @@ $effect(() => {
 							</div>
 						</div>
 
-						<!-- Description -->
 						<div class="border-t border-border-subtle py-6">
 							<label class="block text-[13px] font-medium text-text-primary" for="space-description">{m.space_description({}, { locale })}</label>
 							<textarea id="space-description" bind:value={spaceDescriptionDraft} rows="3" maxlength="2000" disabled={!canEditSpaceProfile || spaceDescriptionSaving} onkeydown={handleDescriptionKeydown} class="mt-2 w-full resize-y rounded-[5px] border border-border-subtle bg-bg-input px-2.5 py-2 text-[13px] leading-5 text-text-primary placeholder:text-text-placeholder transition-colors focus:border-brand/40 focus:outline-none disabled:opacity-60" placeholder={m.space_what_for({}, { locale })}></textarea>
@@ -1781,38 +1298,29 @@ $effect(() => {
 						</div>
 						</section>
 
-						<!-- ════════ Access ════════ -->
-						<section id={sectionElementId("access")} class="scroll-mt-6 border-t border-border-subtle pt-10">
-						<div class="flex items-start justify-between gap-3 border-b border-border-subtle pb-5">
-							<div class="min-w-0">
-								<h1 class="text-[18px] font-semibold tracking-tight text-text-primary">{m.space_section_access({}, { locale })}</h1>
-								<p class="mt-1 text-[13px] leading-5 text-text-tertiary">{m.space_access_desc({}, { locale })}</p>
-							</div>
-							{#if canManageSpaceMembers}
-								<button type="button" onclick={() => { showInvitePanel = true; inviteCreateError = ""; }} class="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[5px] border border-brand-border bg-brand-muted px-2.5 text-[12px] font-medium text-brand transition-colors hover:bg-brand-muted-hover"><Link class="h-3.5 w-3.5" /> {m.space_invite({}, { locale })}</button>
-							{/if}
-						</div>
+						<section id={sectionElementId("access")} class="-scroll-mt-4 border-t border-border-subtle pt-10">
+						<SettingsHeading title={m.space_section_access({}, { locale })} description={m.space_access_desc({}, { locale })}>
+							{#snippet action()}
+								{#if canManageSpaceMembers}
+									<button type="button" onclick={() => { showInvitePanel = true; inviteCreateError = ""; }} class="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[5px] border border-brand-border bg-brand-muted px-2.5 text-[12px] font-medium text-brand transition-colors hover:bg-brand-muted-hover"><Link class="h-3.5 w-3.5" /> {m.space_invite({}, { locale })}</button>
+								{/if}
+							{/snippet}
+						</SettingsHeading>
 
-						<!-- Default roles: settings rows -->
-						<div class="divide-y divide-border-subtle border-b border-border-subtle">
-							<div class="flex items-center justify-between gap-4 py-4">
-								<div class="min-w-0">
-									<div class="text-[13px] text-text-primary">{m.space_signed_in_users({}, { locale })}</div>
-									<p class="mt-0.5 text-[12px] leading-4 text-text-tertiary">{m.space_access_any_signed_in({}, { locale })}</p>
-								</div>
-								<select value={access?.signed_in_user ?? ""} disabled={!canManageSpaceMembers} onchange={(e) => { const value = (e.currentTarget as HTMLSelectElement).value as SpaceRole | ""; void setAccess({ signed_in_user: value || null }); }} class="h-8 w-28 shrink-0 rounded-[5px] border border-border-subtle bg-bg-input px-2 text-[12px] text-text-primary focus:border-brand/40 focus:outline-none disabled:opacity-60" aria-label={m.space_default_signed_in({}, { locale })}><option value="">{m.space_role_no_access({}, { locale })}</option><option value="guest">{m.space_role_guest({}, { locale })}</option><option value="builder">{m.space_role_builder({}, { locale })}</option></select>
-							</div>
-							<div class="flex items-center justify-between gap-4 py-4">
-								<div class="min-w-0">
-									<div class="text-[13px] text-text-primary">{m.space_access_anon({}, { locale })}</div>
-									<p class="mt-0.5 text-[12px] leading-4 text-text-tertiary">{m.space_access_no_account({}, { locale })}</p>
-								</div>
-								<select value={access?.anonymous_user ?? ""} disabled={!canManageSpaceMembers} onchange={(e) => { const value = (e.currentTarget as HTMLSelectElement).value as SpaceRole | ""; void setAccess({ anonymous_user: value || null }); }} class="h-8 w-28 shrink-0 rounded-[5px] border border-border-subtle bg-bg-input px-2 text-[12px] text-text-primary focus:border-brand/40 focus:outline-none disabled:opacity-60" aria-label={m.space_default_anon({}, { locale })}><option value="">{m.space_role_no_access({}, { locale })}</option><option value="guest">{m.space_role_guest({}, { locale })}</option></select>
-							</div>
+						<div class="mt-2 divide-y divide-border-subtle border-b border-border-subtle">
+							<SettingsRow label={m.space_signed_in_users({}, { locale })} hint={m.space_access_any_signed_in({}, { locale })} for="access-signed-in">
+								{#snippet control()}
+									<select id="access-signed-in" value={access?.signed_in_user ?? ""} disabled={!canManageSpaceMembers} onchange={(e) => { const value = e.currentTarget.value as SpaceRole | ""; void setAccess({ signed_in_user: value || null }); }} class="{SETTINGS_SELECT} w-28"><option value="">{m.space_role_no_access({}, { locale })}</option><option value="guest">{m.space_role_guest({}, { locale })}</option><option value="builder">{m.space_role_builder({}, { locale })}</option></select>
+								{/snippet}
+							</SettingsRow>
+							<SettingsRow label={m.space_access_anon({}, { locale })} hint={m.space_access_no_account({}, { locale })} for="access-anonymous">
+								{#snippet control()}
+									<select id="access-anonymous" value={access?.anonymous_user ?? ""} disabled={!canManageSpaceMembers} onchange={(e) => { const value = e.currentTarget.value as SpaceRole | ""; void setAccess({ anonymous_user: value || null }); }} class="{SETTINGS_SELECT} w-28"><option value="">{m.space_role_no_access({}, { locale })}</option><option value="guest">{m.space_role_guest({}, { locale })}</option></select>
+								{/snippet}
+							</SettingsRow>
 						</div>
 						{#if accessError}<p class="mt-3 text-[12px] text-error-soft break-words">{accessError}</p>{/if}
 
-						<!-- Members -->
 						<div class="py-6">
 							<h2 class="text-[13px] font-medium text-text-primary">{m.space_members_caption({}, { locale })}<span class="font-normal text-text-tertiary">· {members.length}</span></h2>
 							<div class="mt-3 overflow-hidden rounded-md border border-border-subtle">
@@ -1854,7 +1362,6 @@ $effect(() => {
 						</div>
 
 						{#if canManageSpaceMembers}
-						<!-- Invite links -->
 						<div class="border-t border-border-subtle py-6">
 							<div class="flex items-center justify-between gap-3">
 								<h2 class="text-[13px] font-medium text-text-primary">{m.space_invite_links({}, { locale })}<span class="font-normal text-text-tertiary">· {m.space_active({ count: invitations.filter((item) => item.status === 'active').length }, { locale })}</span></h2>
@@ -1889,14 +1396,9 @@ $effect(() => {
 						{/if}
 						</section>
 
-						<!-- ════════ Environment ════════ -->
-						<section id={sectionElementId("environment")} class="scroll-mt-6 border-t border-border-subtle pt-10">
-						<div class="border-b border-border-subtle pb-5">
-							<h1 class="text-[18px] font-semibold tracking-tight text-text-primary">{m.space_section_env({}, { locale })}</h1>
-							<p class="mt-1 text-[13px] leading-5 text-text-tertiary">{m.space_env_desc({}, { locale })}</p>
-						</div>
+						<section id={sectionElementId("environment")} class="-scroll-mt-4 border-t border-border-subtle pt-10">
+						<SettingsHeading title={m.space_section_env({}, { locale })} description={m.space_env_desc({}, { locale })} />
 
-						<!-- Env vars -->
 						<div class="py-6">
 							<h2 class="text-[13px] font-medium text-text-primary">{m.space_variables({}, { locale })}<span class="font-normal text-text-tertiary">· {env.length}</span></h2>
 							<p class="mt-0.5 text-[12px] leading-5 text-text-tertiary">{m.space_available_to_process({}, { locale })}</p>
@@ -1926,7 +1428,6 @@ $effect(() => {
 							{#if envError}<p class="mt-2 text-[12px] text-error-soft break-words">{envError}</p>{/if}
 						</div>
 
-						<!-- Mounted spaces -->
 						<div class="border-t border-border-subtle py-6">
 							<h2 class="text-[13px] font-medium text-text-primary">{m.space_mounted_spaces({}, { locale })}<span class="font-normal text-text-tertiary">· {mods.length}</span></h2>
 							<p class="mt-0.5 max-w-xl text-[12px] leading-5 text-text-tertiary">{m.space_mounted_readonly({}, { locale })} <code class="font-mono text-text-secondary">/mods/&lt;slug&gt;</code>. {m.space_mount_changes_restart({}, { locale })}</p>
@@ -1984,12 +1485,8 @@ $effect(() => {
 						</div>
 						</section>
 
-						<!-- ════════ Channels ════════ -->
-						<section id={sectionElementId("channels")} class="scroll-mt-6 border-t border-border-subtle pt-10">
-						<div class="border-b border-border-subtle pb-5">
-							<h1 class="text-[18px] font-semibold tracking-tight text-text-primary">{m.space_section_channels({}, { locale })}</h1>
-							<p class="mt-1 text-[13px] leading-5 text-text-tertiary">{m.space_channels_desc({}, { locale })}</p>
-						</div>
+						<section id={sectionElementId("channels")} class="-scroll-mt-4 border-t border-border-subtle pt-10">
+						<SettingsHeading title={m.space_section_channels({}, { locale })} description={m.space_channels_desc({}, { locale })} />
 
 						<div class="py-6">
 							<div class="overflow-hidden rounded-md border border-border-subtle">
@@ -2062,91 +1559,8 @@ $effect(() => {
 						</div>
 						</section>
 
-						<!-- ════════ Sandbox ════════ -->
-						<section id={sectionElementId("sandbox")} class="scroll-mt-6 border-t border-border-subtle pt-10">
-						<div class="flex items-start justify-between gap-3 border-b border-border-subtle pb-5">
-							<div class="min-w-0">
-								<h1 class="text-[18px] font-semibold tracking-tight text-text-primary">{m.space_section_sandbox({}, { locale })}</h1>
-								<p class="mt-1 text-[13px] leading-5 text-text-tertiary">{m.space_sandbox_desc({}, { locale })}</p>
-							</div>
-							<button type="button" onclick={forceRecoverSandbox} disabled={!canManageSpaceSandbox || recoveringSandbox} class="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[5px] border border-border-subtle bg-bg-input px-2.5 text-[12px] font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:opacity-50">{#if recoveringSandbox}<Loader2 class="h-3.5 w-3.5 animate-spin" />{:else}<RefreshCw class="h-3.5 w-3.5" />{/if} {m.space_force_recovery({}, { locale })}</button>
-						</div>
-
-						<!-- Settings rows -->
-						<div class="divide-y divide-border-subtle border-b border-border-subtle">
-							{#if sandboxPreferences}
-								<SandboxEnvironment status={sandboxPreferences} disabled={!canManageSpaceSandbox || savingSandboxSpec} onChange={saveSandboxEnvironment} />
-							{/if}
-							<!-- Compute spec -->
-							<div class="py-4">
-								<div class="flex items-center justify-between gap-4">
-									<div class="min-w-0">
-										<div class="text-[13px] text-text-primary">{m.space_compute_spec({}, { locale })}</div>
-										<div class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-											<span class="text-[12px] font-medium text-text-secondary">{getSandboxSpecLabel(sandboxSpec)}</span>
-											<span class="font-mono text-[11px] text-text-tertiary">{getSandboxSpecSummary(sandboxSpec)}</span>
-											{#if savingSandboxSpec}
-												<Loader2 class="h-3 w-3 animate-spin text-text-tertiary" />
-											{:else if sandboxSpecPendingRestart || (appliedSandboxSpec && appliedSandboxSpec !== sandboxSpec)}
-												<span class="tag font-medium" data-tone="warning">{m.space_restart_to_apply({}, { locale })}</span>
-												{#if canManageSpaceSandbox}
-													<button type="button" onclick={forceRecoverSandbox} disabled={recoveringSandbox} class="inline-flex items-center gap-1 text-[11px] font-medium text-brand transition-colors hover:text-brand-hover disabled:opacity-50">{#if recoveringSandbox}<Loader2 class="h-3 w-3 animate-spin" />{:else}<RefreshCw class="h-3 w-3" />{/if} {m.space_restart_now({}, { locale })}</button>
-												{/if}
-											{/if}
-										</div>
-									</div>
-									<button type="button" onclick={() => (specPickerOpen = true)} disabled={!canManageSpaceSandbox} class="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[5px] border border-border-subtle bg-bg-input px-3 text-[12px] font-medium text-text-primary transition-colors hover:bg-bg-hover disabled:opacity-50"><Zap class="h-3.5 w-3.5" /> {m.space_change({}, { locale })}</button>
-								</div>
-								{#if sandboxSpecError}<p class="mt-1.5 text-[12px] text-error-soft break-words">{sandboxSpecError}</p>{/if}
-								{#if sandboxSpecMessage}<p class="mt-1.5 text-[12px] text-success-soft">{sandboxSpecMessage}</p>{/if}
-							</div>
-
-							<!-- Hibernate policy -->
-							<div class="py-4">
-								<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-									<div class="min-w-0">
-										<div class="text-[13px] text-text-primary">{m.space_hibernation({}, { locale })}</div>
-										<p class="mt-0.5 text-[12px] leading-4 text-text-tertiary">{m.space_hibernation_desc({}, { locale })}</p>
-									</div>
-									<div class="flex shrink-0 items-center gap-2">
-										<select bind:value={sandboxAutoDestroyMode} disabled={!canManageSpaceSandbox} class="h-8 rounded-[5px] border border-border-subtle bg-bg-input px-2 text-[12px] text-text-primary focus:border-brand/40 focus:outline-none disabled:opacity-60" aria-label={m.space_hibernate_mode({}, { locale })}>
-											<option value="idle">{m.space_after_idle({}, { locale })}</option>
-											<option value="never">{m.space_never({}, { locale })}</option>
-										</select>
-										{#if sandboxAutoDestroyMode === "idle"}
-											<input type="number" min="60" max="2592000" step="60" bind:value={sandboxIdleTtlSeconds} disabled={!canManageSpaceSandbox} class="h-8 w-24 rounded-[5px] border border-border-subtle bg-bg-input px-2 text-[12px] text-text-primary focus:border-brand/40 focus:outline-none disabled:opacity-60" aria-label={m.space_idle_seconds({}, { locale })} />
-											<span class="text-[11px] text-text-tertiary">{m.space_sec({}, { locale })}</span>
-										{/if}
-										<button type="button" onclick={saveSandboxConfig} disabled={!canManageSpaceSandbox || savingSandboxConfig} class="inline-flex h-8 items-center justify-center rounded-[5px] bg-brand px-3 text-[12px] font-medium text-brand-contrast-fg transition-colors hover:bg-brand-hover disabled:opacity-50">{savingSandboxConfig ? m.space_saving({}, { locale }) : m.space_save({}, { locale })}</button>
-									</div>
-								</div>
-								{#if sandboxAutoDestroyMode === "idle"}<p class="mt-1.5 text-[11px] text-text-placeholder sm:text-right">{formatTtl(sandboxIdleTtlSeconds)} · max 30d</p>{/if}
-								{#if sandboxConfigError}<p class="mt-1.5 text-[12px] text-error-soft">{sandboxConfigError}</p>{/if}
-								{#if sandboxConfigMessage}<p class="mt-1.5 text-[12px] text-success-soft">{sandboxConfigMessage}</p>{/if}
-							</div>
-						</div>
-
-						<SandboxSetup {spaceId} local={sandbox?.provider === "local" || space?.meta?.config?.sandbox?.provider === "local"} setup={sandboxSetup.success ? sandboxSetup.data : null} />
-
-						<!-- Health -->
-						<div class="py-6">
-							<h2 class="text-[13px] font-medium text-text-primary">{m.space_health_heading({}, { locale })}</h2>
-							<div class="mt-3 flex flex-wrap items-center gap-2">
-								<span class={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${getSandboxStatusClass(sandbox?.status)}`}>{getSandboxLifecycleLabel(sandbox?.status)}</span>
-								<span class={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${getSandboxStatusClass(sandbox?.runtimeStatus)}`}>{getSandboxRuntimeLabel(sandbox?.runtimeStatus)}</span>
-								{#if sandbox?.stopReason}<span class="inline-flex max-w-full items-center rounded-full bg-bg-hover px-2 py-0.5 text-[11px] text-text-tertiary ring-1 ring-border-subtle"><span class="truncate">{sandbox.stopReason}</span></span>{/if}
-							</div>
-							<div class="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 text-[12px] sm:grid-cols-4">
-								<div title={getSandboxActivityTitle()}><div class="text-[10px] uppercase tracking-[0.14em] text-text-placeholder">{m.space_activity({}, { locale })}</div><div class="mt-0.5 text-text-primary">{getSandboxActivityText()}</div></div>
-								<div title={getSandboxHeartbeatTitle()}><div class="text-[10px] uppercase tracking-[0.14em] text-text-placeholder">{m.space_heartbeat({}, { locale })}</div><div class="mt-0.5 text-text-primary">{formatRelativeTime(sandbox?.lastHeartbeatAt)}</div></div>
-								<div><div class="text-[10px] uppercase tracking-[0.14em] text-text-placeholder">{m.space_health_stopped({}, { locale })}</div><div class="mt-0.5 text-text-primary">{formatRelativeTime(sandbox?.stoppedAt)}</div></div>
-								<div class="min-w-0"><div class="text-[10px] uppercase tracking-[0.14em] text-text-placeholder">{m.space_pod({}, { locale })}</div><div class="mt-0.5 min-w-0 truncate font-mono text-[11px] text-text-primary" title={sandbox?.podName ?? ''}>{sandbox?.podName ?? '—'}</div></div>
-								<div class="col-span-2 min-w-0"><div class="text-[10px] uppercase tracking-[0.14em] text-text-placeholder">{m.space_desired_image({}, { locale })}</div><div class="mt-0.5 break-all font-mono text-[11px] leading-relaxed text-text-secondary">{sandbox?.desiredImage ?? '—'}</div></div>
-								<div class="col-span-2 min-w-0"><div class="text-[10px] uppercase tracking-[0.14em] text-text-placeholder">{m.space_reported_image({}, { locale })}</div><div class="mt-0.5 break-all font-mono text-[11px] leading-relaxed text-text-secondary">{(sandbox?.reportedImageVersion ?? getSandboxMetaValue('imageVersion')) || '—'}</div></div>
-							</div>
-							{#if sandboxRecoveryMessage}<div class="mt-4 rounded-md border border-success-soft/30 bg-success-bg px-3 py-2 text-[12px] text-success-soft">{sandboxRecoveryMessage}</div>{/if}
-							{#if sandboxRecoveryError}<div class="mt-4 rounded-md border border-error-soft/30 bg-error-bg px-3 py-2 text-[12px] text-error-soft break-words">{sandboxRecoveryError}</div>{/if}
-						</div>
+						<section id={sectionElementId("sandbox")} class="-scroll-mt-4 border-t border-border-subtle pt-10">
+							<SandboxSettings settings={sandboxSettings} canManage={canManageSpaceSandbox} />
 						</section>
 					</div>
 				{/if}
@@ -2178,14 +1592,3 @@ $effect(() => {
 	</div>
 </Sheet>
 {/if}
-
-<SandboxSpecPicker
-	open={specPickerOpen}
-	currentSpec={sandboxSpec}
-	appliedSpec={appliedSandboxSpec}
-	allowedSpec={allowedSandboxSpec}
-	specs={sandboxSpecs}
-	onClose={() => (specPickerOpen = false)}
-	onSelect={saveSandboxSpec}
-	onUpgrade={openSandboxSpecUpgrade}
-/>

@@ -141,6 +141,7 @@ export function mergeFsNodeLists(
 			isOpen: previous.isOpen,
 			isLoaded: previous.isLoaded,
 			isLoading: false,
+			loadError: previous.loadError,
 		};
 	});
 }
@@ -164,6 +165,7 @@ export function replaceNodeChildren(
 				children: mergeFsNodeLists(children, node.children),
 				isLoaded: true,
 				isLoading: false,
+				loadError: null,
 				isOpen: true,
 			};
 		if (node.children.length > 0)

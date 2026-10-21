@@ -4,8 +4,9 @@ import type {
 } from "@cohub/protocol/model/status";
 
 /**
- * Selector dot color levels. The API prefers the 5-minute observed-traffic
- * window and falls back to probe data when observed traffic is unavailable.
+ * Selector dot color levels. The API uses the most recent non-empty observed
+ * traffic window (5m, 10m, 30m, 60m) and falls back to probe data when no
+ * observed traffic is available.
  *
  * - `available` (green): ≥95% success.
  * - `degraded` (amber): 75–95%.
@@ -21,7 +22,7 @@ export function availabilityLevel(
 	entry: ModelStatusEntry | null | undefined,
 ): AvailabilityLevel {
 	if (!entry) return "unknown";
-	const rate = entry.successRate5m;
+	const rate = entry.successRateRecent;
 	if (rate == null) return "unknown"; // no recent samples
 	if (rate >= AVAILABLE_THRESHOLD) return "available";
 	if (rate >= DEGRADED_THRESHOLD) return "degraded";

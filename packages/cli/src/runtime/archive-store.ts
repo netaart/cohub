@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, rm, stat, link } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
-  RUNTIME_ARCHIVE_SEGMENT_BYTES, harnessArchiveIndexSchema, validateArchiveBoundary,
+  LOCAL_HARNESS_SPECS, RUNTIME_ARCHIVE_SEGMENT_BYTES, harnessArchiveIndexSchema, validateArchiveBoundary, type LocalHarness,
   type HarnessArchive, type HarnessArchiveIndex, type RuntimeArchivePage, type RuntimeArchiveUpload,
 } from "@neta-art/cohub";
 
@@ -79,14 +79,14 @@ export class RuntimeArchiveStore {
     try { return harnessArchiveIndexSchema.parse(JSON.parse(await readFile(path, "utf8"))); }
     catch (error) { if (missing(error)) return null; throw error; }
   }
-  stage(state: { sessionId: string; harness: "pi" | "codex"; nativeSessionId: string; path: string; sizeBytes?: number; expectedChecksum?: string }, turnId: string): Promise<HarnessArchive> {
+  stage(state: { sessionId: string; harness: LocalHarness; nativeSessionId: string; path: string; sizeBytes?: number; expectedChecksum?: string }, turnId: string): Promise<HarnessArchive> {
     const existing = this.capturing.get(turnId);
     if (existing) return existing;
     const task = this.capture(state, turnId).finally(() => this.capturing.delete(turnId));
     this.capturing.set(turnId, task);
     return task;
   }
-  private async capture(state: { sessionId: string; harness: "pi" | "codex"; nativeSessionId: string; path: string; sizeBytes?: number; expectedChecksum?: string }, turnId: string): Promise<HarnessArchive> {
+  private async capture(state: { sessionId: string; harness: LocalHarness; nativeSessionId: string; path: string; sizeBytes?: number; expectedChecksum?: string }, turnId: string): Promise<HarnessArchive> {
     const identity = { sessionId: state.sessionId, turnId, harness: state.harness };
     const headPath = join(this.root, "heads", `${state.sessionId}.${state.harness}.json`);
     const saved = await this.readIndex(this.version(turnId));
@@ -144,7 +144,7 @@ export class RuntimeArchiveStore {
         try { await directory.sync(); } finally { await directory.close(); }
       }
       index = harnessArchiveIndexSchema.parse({ ...identity, version: 1, nativeSessionId: state.nativeSessionId,
-        nativeFormat: state.harness === "pi" ? "pi.jsonl" : "codex.rollout", parentTurnId: parent?.turnId ?? null,
+        nativeFormat: LOCAL_HARNESS_SPECS[state.harness].nativeFormat, parentTurnId: parent?.turnId ?? null,
         sizeBytes, sha256: digest.digest("hex"), segments });
       validateArchiveBoundary(index, parent);
       if (state.expectedChecksum && index.sha256 !== state.expectedChecksum) throw new ArchiveCaptureIntegrityError("Native Turn bytes changed during capture; original retained");

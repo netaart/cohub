@@ -3,7 +3,7 @@ import type {
 	SpaceFsFileResponse,
 	SpacePendingDiffFileResponse,
 } from "@neta-art/cohub";
-import { HttpError } from "@neta-art/cohub";
+import { HttpError, isHttpErrorCode } from "@neta-art/cohub";
 
 import { ensureBoardExtension } from "$lib/board/board-file";
 import {
@@ -705,6 +705,17 @@ export function createFileWorkspaceController(
 		return getActiveFsClient().read(path, signal);
 	}
 
+	function directoryLoadError(error: unknown, hasEntries: boolean) {
+		if (isHttpErrorCode(error, "directory_changed")) {
+			return hasEntries
+				? m.files_refresh_failed({}, { locale: getLocale() })
+				: m.files_load_failed({}, { locale: getLocale() });
+		}
+		return error instanceof Error
+			? error.message
+			: m.files_load_failed({}, { locale: getLocale() });
+	}
+
 	async function loadFileTree(force = false) {
 		const source = options.getActiveFsSource();
 		const sourceKey = options.getActiveFsSourceKey();
@@ -733,8 +744,7 @@ export function createFileWorkspaceController(
 				if (cached) setActiveFileTree(cached);
 			}
 		}
-		const shouldShowLoading = fileTree.length === 0 || force;
-		if (shouldShowLoading) fileTreeLoading = true;
+		fileTreeLoading = fileTree.length === 0;
 		fileTreeError = null;
 		try {
 			const client = createActiveFsClient({ spaceId, source });
@@ -765,8 +775,7 @@ export function createFileWorkspaceController(
 				sourceKey !== options.getActiveFsSourceKey()
 			)
 				return;
-			fileTreeError =
-				error instanceof Error ? error.message : "Failed to load files";
+			fileTreeError = directoryLoadError(error, fileTree.length > 0);
 		} finally {
 			if (
 				requestToken === fileTreeRequestToken &&
@@ -799,13 +808,18 @@ export function createFileWorkspaceController(
 		};
 		const source = options.getActiveFsSource();
 		const sourceKey = options.getActiveFsSourceKey();
+		const context = getWorkspaceContext();
+		const isCurrentRequest = () =>
+			directoryLoadTokenByPath[node.path] === requestToken &&
+			sourceKey === options.getActiveFsSourceKey() &&
+			isCurrentWorkspaceContext(context);
 		const hasExistingChildren = node.children.length > 0;
 		const cached =
 			source.kind === "live"
-				? await getCachedSpaceFsDir(options.getSpaceId(), node.path)
+				? await getCachedSpaceFsDir(context.spaceId, node.path)
 				: null;
-		if (directoryLoadTokenByPath[node.path] !== requestToken) return;
-		if (cached) {
+		if (!isCurrentRequest()) return;
+		if (cached && !hasExistingChildren) {
 			setActiveFileTree(
 				replaceNodeChildren(fileTree, node.path, makeFsNodes(cached)),
 			);
@@ -814,25 +828,20 @@ export function createFileWorkspaceController(
 				updateNodeState(fileTree, node.path, (item) => ({
 					...item,
 					isLoading: !hasExistingChildren,
+					loadError: null,
 					isOpen: true,
 				})),
 			);
 		}
 		try {
-			const requestSpaceId = options.getSpaceId();
 			const client = createActiveFsClient({
-				spaceId: requestSpaceId,
+				spaceId: context.spaceId,
 				source,
 			});
 			let previewed = hasExistingChildren || Boolean(cached?.length);
 			const read = () =>
 				client.list(node.path, (partial) => {
-					if (
-						previewed ||
-						directoryLoadTokenByPath[node.path] !== requestToken ||
-						sourceKey !== options.getActiveFsSourceKey()
-					)
-						return;
+					if (previewed || !isCurrentRequest()) return;
 					previewed = true;
 					setActiveFileTree(
 						updateNodeState(fileTree, node.path, (item) => ({
@@ -845,31 +854,23 @@ export function createFileWorkspaceController(
 				});
 			const entries =
 				source.kind === "live"
-					? await fetchSpaceFsDirWithCache(
-							requestSpaceId,
-							node.path,
-							read,
-							{ force: true },
-						)
+					? await fetchSpaceFsDirWithCache(context.spaceId, node.path, read, {
+							force: true,
+						})
 					: (await read()).entries;
-			if (
-				directoryLoadTokenByPath[node.path] !== requestToken ||
-				sourceKey !== options.getActiveFsSourceKey()
-			)
-				return;
+			if (!isCurrentRequest()) return;
 			setActiveFileTree(
 				replaceNodeChildren(fileTree, node.path, makeFsNodes(entries)),
 			);
 		} catch (error) {
-			if (directoryLoadTokenByPath[node.path] !== requestToken) return;
+			if (!isCurrentRequest()) return;
 			setActiveFileTree(
 				updateNodeState(fileTree, node.path, (item) => ({
 					...item,
 					isLoading: false,
+					loadError: directoryLoadError(error, item.children.length > 0),
 				})),
 			);
-			fileTreeError =
-				error instanceof Error ? error.message : "Failed to load directory";
 		}
 	}
 

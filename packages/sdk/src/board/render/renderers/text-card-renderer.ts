@@ -5,7 +5,7 @@ import { boardFontFamily } from "../../model/text-metrics.js";
 import type { SceneItem } from "../../model/scene.js";
 import { itemAlpha, itemColor } from "../palette.js";
 import { BOARD_FONT_STACKS } from "../text-measurement.js";
-import { syncTextResolution, textResolutionForZoom } from "../text-resolution.js";
+import { syncTextResolution } from "../text-resolution.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
 import { drawFarPlate } from "./far-plate.js";
@@ -14,7 +14,6 @@ type TextParts = {
   root: Container;
   body: Text;
   caret: Graphics;
-  resolution: number;
   contentSig: string;
 };
 
@@ -46,7 +45,6 @@ function sync(container: Container, item: SceneItem<BoardTextItem>, context: Boa
   const anchorX = props.align === "center" ? 0.5 : props.align === "right" ? 1 : 0;
   parts.body.anchor.set(anchorX, 0);
   parts.body.position.set(item.frame.width * anchorX, 0);
-  syncTextResolution(parts.body, parts, context.zoom * Math.max(1, previewScale));
 
   parts.body.alpha = itemAlpha(context, item.style.fill);
   parts.caret.alpha = parts.body.alpha;
@@ -68,6 +66,7 @@ function sync(container: Container, item: SceneItem<BoardTextItem>, context: Boa
       breakWords: true,
     });
   }
+  syncTextResolution(parts.body, context.textResolution * previewScale);
   syncCaret(parts, item, context);
 }
 
@@ -76,16 +75,19 @@ export const textCardRenderer: BoardCardRenderer = {
   canRender: (item) => item.type === "text",
   create: (item, context) => {
     const root = new Container();
-    const resolution = textResolutionForZoom(context.zoom);
-    const body = new Text({ text: "", style: { fontFamily: BOARD_FONT_STACKS.sans }, resolution, roundPixels: true });
+    const body = new Text({ text: "", style: { fontFamily: BOARD_FONT_STACKS.sans }, resolution: context.textResolution, roundPixels: true });
     const caret = new Graphics();
     root.addChild(body, caret);
-    partsByContainer.set(root, { root, body, caret, resolution, contentSig: "" });
+    partsByContainer.set(root, { root, body, caret, contentSig: "" });
     if (item.type === "text") sync(root, item as SceneItem<BoardTextItem>, context);
     return root;
   },
   update: (container, item, context) => {
     if (item.type === "text") sync(container, item as SceneItem<BoardTextItem>, context);
+  },
+  resolution: (container, _item, context) => {
+    const parts = partsByContainer.get(container);
+    if (parts) syncTextResolution(parts.body, context.textResolution * parts.body.scale.x);
   },
   renderFar: (graphics, item, context) => {
     if (item.type !== "text") return;

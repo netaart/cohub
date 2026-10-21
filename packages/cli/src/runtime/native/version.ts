@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { harnessCommand } from "../harness.js";
+import { harnessCommand } from "../harnesses/process.js";
 
 export type Version = readonly [number, number, number];
 

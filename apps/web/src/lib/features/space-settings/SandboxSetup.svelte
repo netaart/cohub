@@ -4,32 +4,52 @@ import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { buildSpaceFileRoute } from "$lib/space-routes";
 
-const { spaceId, local = false, setup }: { spaceId: string; local?: boolean; setup?: SandboxSetupInfo | null } = $props();
+const {
+	spaceId,
+	local = false,
+	setup,
+}: {
+	spaceId: string;
+	local?: boolean;
+	setup?: SandboxSetupInfo | null;
+} = $props();
 const locale = $derived(getLocale());
-const status = $derived(setup?.status ?? (setup ? (setup.error || setup.exitCode ? "failed" : "succeeded") : undefined));
+const status = $derived(
+	setup?.status ??
+		(setup
+			? setup.error || setup.exitCode
+				? "failed"
+				: "succeeded"
+			: undefined),
+);
 function statusLabel(status: string | undefined) {
 	switch (status) {
-		case "waiting": return m.sandbox_setup_waiting({}, { locale });
-		case "running": return m.sandbox_setup_running({}, { locale });
-		case "succeeded": return m.sandbox_setup_succeeded({}, { locale });
-		case "failed": return m.sandbox_setup_failed({}, { locale });
-		default: return m.sandbox_setup_unavailable({}, { locale });
+		case "waiting":
+			return m.sandbox_setup_waiting({}, { locale });
+		case "running":
+			return m.sandbox_setup_running({}, { locale });
+		case "succeeded":
+			return m.sandbox_setup_succeeded({}, { locale });
+		case "failed":
+			return m.sandbox_setup_failed({}, { locale });
+		default:
+			return m.sandbox_setup_unavailable({}, { locale });
 	}
 }
 </script>
 
-<section class="border-b border-border-subtle py-4" aria-labelledby="sandbox-setup-title">
+<section class="border-t border-border-subtle py-4" aria-labelledby="sandbox-setup-title">
 	<div class="flex flex-wrap items-center justify-between gap-2">
-		<h2 id="sandbox-setup-title" class="text-[13px] font-medium text-text-primary">{m.sandbox_setup_title({}, { locale })}</h2>
-		{#if !local}<span class="text-[12px] text-text-secondary" aria-live="polite">{statusLabel(status)}{setup?.duration ? ` · ${setup.duration}` : ""}</span>{/if}
+		<h3 id="sandbox-setup-title" class="text-[13px] text-text-primary">{m.sandbox_setup_title({}, { locale })}</h3>
+		{#if !local}<span class="text-[12px] {status === 'failed' ? 'text-error-soft' : 'text-text-secondary'}" aria-live="polite">{statusLabel(status)}{setup?.duration ? ` · ${setup.duration}` : ""}</span>{/if}
 	</div>
-	<p class="mt-1 max-w-prose text-[12px] leading-5 text-text-tertiary">{local ? m.sandbox_setup_local({}, { locale }) : m.sandbox_setup_hint({}, { locale })}</p>
+	<p class="mt-0.5 max-w-prose text-[12px] leading-5 text-text-tertiary">{local ? m.sandbox_setup_local({}, { locale }) : m.sandbox_setup_hint({}, { locale })}</p>
 	{#if !local}
 		{#if setup?.error}<p class="mt-2 break-words text-[12px] text-error-soft">{setup.error}</p>{/if}
 		{#if status === "succeeded" && !setup?.ran}<p class="mt-2 text-[12px] text-text-secondary">{m.sandbox_setup_empty({}, { locale })}</p>{/if}
 		{#each setup?.steps ?? [] as step (step.path)}
 			<details class="group mt-2 min-w-0 text-[12px]">
-				<summary class="flex min-h-11 cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 py-2 sm:min-h-8">
+				<summary class="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 py-2 sm:min-h-8 [&::-webkit-details-marker]:hidden">
 					<span aria-hidden="true" class="shrink-0 text-text-tertiary group-open:rotate-90">›</span>
 					<span class="min-w-0 flex-1 break-all font-mono text-text-secondary">{step.path}</span>
 					<span class={step.status === "failed" ? "text-error-soft" : "text-text-tertiary"}>{statusLabel(step.status)}{step.duration ? ` · ${step.duration}` : ""}</span>
@@ -44,6 +64,5 @@ function statusLabel(status: string | undefined) {
 				</div>
 			</details>
 		{/each}
-		<p class="mt-2 text-[12px] leading-5 text-text-tertiary">{m.sandbox_setup_restart({}, { locale })}</p>
 	{/if}
 </section>

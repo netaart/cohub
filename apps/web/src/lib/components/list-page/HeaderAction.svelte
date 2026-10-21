@@ -10,7 +10,8 @@ let {
 	disabled = false,
 	shortcut,
 	expanded,
-	indicator = false,
+	text,
+	showLabel = false,
 	ref = $bindable(null),
 }: {
 	label: string;
@@ -21,12 +22,13 @@ let {
 	disabled?: boolean;
 	shortcut?: string;
 	expanded?: boolean;
-	indicator?: boolean;
+	text?: string;
+	showLabel?: boolean;
 	ref?: HTMLElement | null;
 } = $props();
 
 const className = $derived(
-	`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 disabled:pointer-events-none disabled:opacity-50 lg:h-7 lg:w-7 lg:rounded-[6px] ${
+	`relative flex h-10 shrink-0 items-center justify-center rounded-[8px] transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 disabled:pointer-events-none disabled:opacity-50 lg:h-7 lg:rounded-[6px] ${text ? "max-w-40 gap-1.5 px-2.5 lg:px-2" : showLabel ? "w-10 sm:w-auto sm:gap-1.5 sm:px-2.5" : "w-10 lg:w-7"} ${
 		tone === "brand"
 			? "text-brand hover:bg-brand-muted"
 			: expanded
@@ -38,10 +40,9 @@ const title = $derived(shortcut ? `${label} (${shortcut})` : label);
 </script>
 
 {#snippet content()}
-	<Icon class="h-5 w-5 lg:h-4 lg:w-4" strokeWidth={1.9} />
-	{#if indicator}
-		<span class="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand lg:right-[3px] lg:top-[3px]" aria-hidden="true"></span>
-	{/if}
+	<Icon class="h-5 w-5 shrink-0 lg:h-4 lg:w-4" strokeWidth={1.9} />
+	{#if showLabel}<span class="hidden whitespace-nowrap text-[12px] sm:inline">{label}</span>{/if}
+	{#if text}<span class="min-w-0 truncate text-[13px] lg:text-[12px]">{text}</span>{/if}
 {/snippet}
 
 {#if href && !disabled}

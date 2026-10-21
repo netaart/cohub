@@ -81,7 +81,7 @@ async function board(document = {}, space = spaceId) {
 
 const task = (taskRunId: string, extra: Record<string, unknown> = {}) => ({
 	type: "task",
-	size: { width: 400, height: 300 },
+	size: { width: 300, height: 400 },
 	props: { taskRunId, ...extra },
 });
 

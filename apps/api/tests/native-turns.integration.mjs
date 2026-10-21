@@ -88,8 +88,12 @@ test("start and completion are idempotent; original IDs cannot be hijacked or ch
   assert.equal(replay.created, false);
   await assert.rejects(startNativeTurn(spaceId, "other", input), /identity mismatch/);
   await assert.rejects(startNativeTurn(crypto.randomUUID(), "owner", input), /identity mismatch/);
-  await assert.rejects(startNativeTurn(spaceId, "owner", { ...input, userContent: content("changed") }), /identity mismatch/);
+  await assert.rejects(startNativeTurn(spaceId, "owner", { ...input, nativeSessionId: "other", userContent: content("changed") }), /identity mismatch/);
+  await assert.rejects(startNativeTurn(spaceId, "owner", { ...input, startedAt: "2026-09-22T00:00:00.000Z", userContent: content("changed") }), /identity mismatch/);
+  assert.deepEqual((await startNativeTurn(spaceId, "owner", { ...input, userContent: content("reparsed") })).binding, first.binding);
+  assert.deepEqual((await getOwnedNativeTurn(spaceId, "owner", first.binding.sessionId, input.turnId)).userContent, input.userContent);
   await completeNativeTurn(spaceId, "owner", first.binding.sessionId, input.turnId, result);
+  await assert.rejects(startNativeTurn(spaceId, "owner", { ...input, userContent: content("changed") }), /identity mismatch/);
   await completeNativeTurn(spaceId, "owner", first.binding.sessionId, input.turnId, result);
   await assert.rejects(completeNativeTurn(spaceId, "owner", first.binding.sessionId, input.turnId, { ...result, messages: [{ content: content("overwrite") }] }), /immutable/);
   assert.equal((await database.select().from(sessionMessages).where(eq(sessionMessages.turnId, input.turnId))).length, 2);

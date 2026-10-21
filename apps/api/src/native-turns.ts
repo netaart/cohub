@@ -67,6 +67,17 @@ async function bestEffortNativeSessionProjection(input: Parameters<typeof projec
   }
 }
 
+/**
+ * A newer Runtime may parse a still-running Turn's prompt differently from the one that registered
+ * it. Only the prompt may differ, and the registered prompt is kept.
+ */
+function reparsedPrompt(existing: typeof sessionTurns.$inferSelect, input: NativeTurnStart) {
+  const meta = record(existing.meta), receipt = record(meta.nativeSync);
+  return !terminal.has(existing.status) && meta.harness === input.harness && receipt.nativeSessionId === input.nativeSessionId
+    && receipt.parentTurnId === input.parentTurnId && receipt.origin === input.origin
+    && existing.startedAt?.getTime() === new Date(input.startedAt).getTime();
+}
+
 /** Shares the Session row lock with createSessionTurn and the Agent's batch claim. */
 export async function startNativeTurn(spaceId: string, userId: string, input: NativeTurnStart) {
   // Controllability can change while a Turn runs; it is state, not part of the Turn's identity.
@@ -79,12 +90,16 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
     if (existing) {
       const meta = record(existing.meta);
       const receipt = record(meta.nativeSync);
-      if (existing.userUuid !== userId || receipt.spaceId !== spaceId || receipt.requestDigest !== requestDigest) conflict("Native Turn identity mismatch");
+      if (existing.userUuid !== userId || receipt.spaceId !== spaceId) conflict("Native Turn identity mismatch");
+      if (receipt.requestDigest !== requestDigest) {
+        if (!reparsedPrompt(existing, input)) conflict("Native Turn identity mismatch");
+        nativeLogger.warn("[NativeTurn] prompt differs from registration; keeping the registered prompt", { spaceId, turnId: input.turnId });
+      }
       // Re-verify on retry: a permission revoked after the first start must stop future receipts.
       await assertSessionPromptPermission(spaceId, userId, existing.sessionId);
       const [session] = await tx.select().from(spaceSessions).where(eq(spaceSessions.id, existing.sessionId));
       if (!session) throw new NativeTurnError(404, "Session not found");
-      const userContent = sanitizeContentBlocksForPostgresJson(input.userContent);
+      const userContent = existing.userContent;
       return { binding: { sessionId: session.id, turnId: existing.id, forked: input.sessionId !== null && session.id !== input.sessionId }, session, created: false, sessionCreated: false, fork: null,
         projection: { userText: deriveMessagePreviewText({ content: userContent }) || null, userMessageId: messageId(input.turnId, -1), startedAt: new Date(input.startedAt), title: deriveSessionFallbackTitle({ content: userContent }) } };
     }

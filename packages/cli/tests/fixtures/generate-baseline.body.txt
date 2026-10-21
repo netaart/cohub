@@ -1,0 +1,1 @@
+{"spaceId":"7c9e6679-7425-40de-944b-e07fc1f90ae7","model":"test-model","content":[{"type":"text","text":"A calm lake at sunrise"},{"type":"image","source":{"type":"url","url":"https://cdn.example.test/input.png"}}],"parameters":{"seed":42,"duration":5},"meta":{"source":"baseline"}}

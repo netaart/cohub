@@ -4,7 +4,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { displaysSnapshotSchema, fileWatcherStatusSchema, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
+import { displaysSnapshotSchema, fileWatcherStatusSchema, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, runtimeStopConfirmationSchema, type HarnessKind, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
 import {
   HOME_SPACE_SLUG,
   parseSpaceSlug,
@@ -318,7 +318,7 @@ type SpacePromptInput = {
   content?: ContentBlock[];
   model?: string | null;
   provider?: string | null;
-  harness?: "cohub" | "pi" | "codex" | null;
+  harness?: HarnessKind | null;
   thinkingLevel?: string | null;
   clientMessageId?: string | null;
   generationPolicy?: unknown;
@@ -1994,7 +1994,7 @@ router.post("/:id/prompt", async (c) => {
   const promptThinkingLevel = normalizePromptThinkingLevel(body.thinkingLevel);
   if (promptThinkingLevel === null) return c.json({ message: "thinkingLevel must be one of: off, minimal, low, medium, high, xhigh, max" }, 400);
   if (body.harness !== undefined && body.harness !== null && !harnessSchema.safeParse(body.harness).success) {
-    return c.json({ message: "harness must be one of: cohub, pi, codex" }, 400);
+    return c.json({ message: `harness must be one of: ${harnessSchema.options.join(", ")}` }, 400);
   }
   const promptPermission = accessMode === "read_only" ? "session.prompt.readonly" : "session.prompt.fullaccess";
   if (!(await hasPermission(user, promptPermission, { spaceId }))) return authzDenied(c);

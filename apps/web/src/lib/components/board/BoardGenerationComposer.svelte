@@ -2,6 +2,7 @@
 import type { PublicGenerationDeclaration } from "@cohub/protocol/generation";
 import type { BoardSceneItem } from "@neta-art/cohub/board";
 import {
+	boardTaskCardSize,
 	featuredTaskArtifact,
 	getMediaResourceTitle,
 	resolveBoardMediaUrl,
@@ -30,6 +31,7 @@ import {
 	normalizeGenerationReferenceUrl,
 	parseBoardGenerationReferences,
 	pendingGenerationTaskSnapshot,
+	pendingTaskPosition,
 	supportsBoardGenerationComposer,
 	validateBoardGeneration,
 	validateBoardGenerationParameters,
@@ -355,13 +357,11 @@ function persistDraft() {
 	);
 }
 
-function taskPosition() {
+function taskPosition(card: { width: number }) {
 	const bounds = editor.bounds;
 	if (!bounds) return editor.viewCenter();
-	return worldPoint(
-		bounds.x + bounds.width + 180,
-		bounds.y + bounds.height / 2,
-	);
+	const { x, y } = pendingTaskPosition(bounds, card);
+	return worldPoint(x, y);
 }
 
 async function submit() {
@@ -445,13 +445,14 @@ async function submit() {
 			prompt: snapshotPrompt,
 			model: snapshotModel.model,
 		});
+		const aspect = generationAspectRatio(snapshotModel, snapshotParameters);
 		const id = editor.addTaskWithSources(
 			taskRunId,
 			snapshot,
-			taskPosition(),
+			taskPosition(boardTaskCardSize(snapshot, aspect)),
 			sources,
 			{ generation: { boardContext } },
-			generationAspectRatio(snapshotModel, snapshotParameters),
+			aspect,
 		);
 		if (!id) throw new Error(m.board_task_add_failed({}, { locale }));
 		nodeAdded = true;

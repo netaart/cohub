@@ -6,7 +6,7 @@ import { drawAudioWaveform } from "../audio-waveform.js";
 import { formatBoardDuration } from "../card-tag.js";
 import { cardElevation, drawCardSurface } from "../surface.js";
 import { fitTextToWidth } from "../text-fit.js";
-import { boardCardDetailed, syncTextResolution, textResolutionForZoom } from "../text-resolution.js";
+import { boardCardDetailed, syncTextResolution } from "../text-resolution.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
 import { drawFarPlate } from "./far-plate.js";
@@ -23,7 +23,6 @@ type AudioParts = {
 	wave: Graphics;
 	title: Text;
 	sig: string;
-	resolution: number;
 };
 
 const partsByContainer = new WeakMap<Container, AudioParts>();
@@ -36,12 +35,16 @@ export function audioKeyCenter(width: number, height: number) {
 function sync(container: Container, item: SceneItem<BoardAudioItem>, context: BoardRenderContext) {
 	const parts = partsByContainer.get(container);
 	if (!parts) return;
+	syncContent(parts, item, context);
+	syncTextResolution(parts.title, context.textResolution);
+}
+
+function syncContent(parts: AudioParts, item: SceneItem<BoardAudioItem>, context: BoardRenderContext) {
 	positionShell(parts.root, item);
 	const { width, height } = item.frame;
 	const title = item.props.snapshot?.title ?? getMediaResourceTitle(item.props.src);
 	const durationMs = item.props.snapshot?.durationMs;
 	const detailed = boardCardDetailed(context.zoom);
-	syncTextResolution(parts.title, parts, context.zoom);
 	const elevation = cardElevation(context, item.id);
 	const sig = [width, height, title, durationMs ?? "", detailed, elevation, item.props.src, item.props.snapshot?.mtimeMs ?? "", context.themeKey].join("|");
 	if (sig === parts.sig) return;
@@ -90,14 +93,16 @@ export const audioCardRenderer: BoardCardRenderer = {
 		const root = new Container();
 		const plate = new Graphics();
 		const wave = new Graphics();
-		const resolution = textResolutionForZoom(context.zoom);
-		const title = new Text({ text: "", style: { fontSize: 13, fontWeight: "600" }, resolution, roundPixels: true });
+		const title = new Text({ text: "", style: { fontSize: 13, fontWeight: "600" }, resolution: context.textResolution, roundPixels: true });
 		root.addChild(plate, wave, title);
-		partsByContainer.set(root, { root, plate, wave, title, sig: "", resolution });
+		partsByContainer.set(root, { root, plate, wave, title, sig: "" });
 		if (item.type === "audio") sync(root, item, context);
 		return root;
 	},
 	update: (container, item, context) => {
+		if (item.type === "audio") sync(container, item, context);
+	},
+	resolution: (container, item, context) => {
 		if (item.type === "audio") sync(container, item, context);
 	},
 	renderFar: (graphics, item, context) => {

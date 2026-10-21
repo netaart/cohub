@@ -2,7 +2,7 @@ schema: neta.generation.model.v1
 model: seedance-2-0
 title: Seedance 2.0
 category: video
-description: High-quality video generation model that accepts text, image, video, and audio inputs. Supports resolutions from 480p to 2K and is well suited to final deliverables.
+description: High-quality video generation model that accepts text, image, video, and audio inputs. Supports resolutions from 480p to 4k and is well suited to final deliverables.
 pricing:
   unit: 1m_tokens
   min: 2.4
@@ -58,13 +58,13 @@ parameters:
     type: string
     optional: true
     default: 1080p
-    enum: [480p, 720p, 1080p, 2K]
+    enum: [480p, 720p, 1080p, 4k]
     description: Output video resolution.
   ratio:
     type: string
     optional: true
     default: "16:9"
-    enum: ["16:9", "9:16", "1:1", "4:3", "3:2", "2:3", "3:4", "21:9", adaptive]
+    enum: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", adaptive]
     description: Output aspect ratio. Use adaptive to let the model choose.
   seed:
     type: integer

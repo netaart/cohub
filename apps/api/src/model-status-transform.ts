@@ -186,6 +186,21 @@ function onlineCheckedAt(online: RawOnlineModel | null): string | null {
 	return null;
 }
 
+const RECENT_RATE_WINDOWS = [5, 10, 30, 60] as const;
+
+function recentRate(
+	online: RawOnlineModel | null,
+	check: RawCheck | null,
+): { rate: number | null; minutes: number | null } {
+	for (const minutes of RECENT_RATE_WINDOWS) {
+		const rate = onlineWindowRate(online?.windows, minutes);
+		if (rate != null) return { rate, minutes };
+	}
+	const probeRate = probeWindowRate(check?.windows, "5m");
+	if (probeRate != null) return { rate: probeRate, minutes: 5 };
+	return { rate: null, minutes: null };
+}
+
 function slimModelStatus(
 	check: RawCheck | null,
 	online: RawOnlineModel | null,
@@ -197,11 +212,14 @@ function slimModelStatus(
 		knownStatus(online?.status) ??
 		knownStatus(onlineWindowMetric(online?.windows, 5)?.status);
 	const latency = check?.latency_1h ?? onlineLatency(online);
+	const recent = recentRate(online, check);
 
 	return {
 		status: onlineStatus ?? normalizeStatus(check?.status),
 		successRate5m:
 			onlineWindowRate(online?.windows, 5) ?? probeWindowRate(checkWindows, "5m"),
+		successRateRecent: recent.rate,
+		successRateRecentWindowMinutes: recent.minutes,
 		successRate2h: probeWindowRate(checkWindows, "2h"),
 		successRate24h:
 			onlineWindowRate(online?.windows, 1440) ?? uptime24h(check?.history),

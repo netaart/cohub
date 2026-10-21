@@ -4,7 +4,7 @@ import type {
 	PublicGenerationDeclaration,
 } from "@cohub/protocol/generation";
 import type { TaskRunRecord } from "@neta-art/cohub";
-import type { BoardFrame, BoardTaskSnapshot } from "@neta-art/cohub/board";
+import type { BoardRect, BoardTaskSnapshot } from "@neta-art/cohub/board";
 
 export type BoardGenerationMediaType = "image" | "video" | "audio";
 
@@ -16,8 +16,7 @@ export type BoardGenerationReference = {
 	role?: string;
 };
 
-const REGENERATED_TASK_GAP = 48;
-const PENDING_TASK_WIDTH = 300;
+const PENDING_TASK_GAP = 48;
 
 function record(value: unknown): Record<string, unknown> | null {
 	return value && typeof value === "object" && !Array.isArray(value)
@@ -110,10 +109,12 @@ export function generationPromptFromContent(
 	return block?.type === "text" ? block.text : "";
 }
 
-/** Center a pending task node to the right of its source with a stable gap. */
-export function regeneratedTaskPosition(source: BoardFrame) {
+export function pendingTaskPosition(
+	source: BoardRect,
+	card: { width: number },
+) {
 	return {
-		x: source.x + source.width + REGENERATED_TASK_GAP + PENDING_TASK_WIDTH / 2,
+		x: source.x + source.width + PENDING_TASK_GAP + card.width / 2,
 		y: source.y + source.height / 2,
 	};
 }

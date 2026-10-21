@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { HarnessKind } from "@cohub/protocol/runtime";
 import type { RuntimeStatus } from "@neta-art/cohub";
 import {
 	freshWatcher,
 	harnessModelCounts,
+	harnessOptions,
 	isStale,
 	RUNTIME_WATCHER_FRESHNESS_MS,
 	runtimeTone,
@@ -112,7 +114,13 @@ test("an online Harness never hides a disconnected file bridge or an expired sta
 });
 
 test("model counts are grouped by harness", () => {
-	assert.deepEqual(harnessModelCounts(null), { pi: 0, codex: 0 });
+	assert.deepEqual(harnessModelCounts(null), {
+		pi: 0,
+		codex: 0,
+		claude: 0,
+		workbuddy: 0,
+		cursor: 0,
+	});
 	assert.deepEqual(
 		harnessModelCounts(
 			status({
@@ -126,6 +134,30 @@ test("model counts are grouped by harness", () => {
 				},
 			}),
 		),
-		{ pi: 2, codex: 1 },
+		{ pi: 2, codex: 1, claude: 0, workbuddy: 0, cursor: 0 },
 	);
+});
+
+test("the picker lists every local harness with its availability", () => {
+	const view = (available: HarnessKind[], online: boolean) =>
+		harnessOptions(available, online).map(
+			({ harness, availability }) => `${harness}:${availability}`,
+		);
+	assert.deepEqual(view(["codex", "claude"], true), [
+		"cohub:ready",
+		"codex:ready",
+		"claude:ready",
+		"pi:missing",
+		"workbuddy:missing",
+		"cursor:missing",
+	]);
+	// Cached capabilities of an offline Runtime are not connected harnesses.
+	assert.deepEqual(view(["codex", "claude"], false), [
+		"cohub:ready",
+		"pi:offline",
+		"codex:offline",
+		"claude:offline",
+		"workbuddy:offline",
+		"cursor:offline",
+	]);
 });

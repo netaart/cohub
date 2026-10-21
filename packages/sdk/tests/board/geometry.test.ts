@@ -382,3 +382,27 @@ test("rectCenter returns the midpoint", () => {
 		y: 10,
 	});
 });
+
+test("clientToLocal inverts ancestor transform, rotate, scale and zoom", async () => {
+	const { clientToLocal } = await import("../../src/board/model/index.js");
+	const angle = Math.PI / 6;
+	const [a, b, c, d] = [0.5 * Math.cos(angle), 0.5 * Math.sin(angle), -0.5 * Math.sin(angle), 0.5 * Math.cos(angle)];
+	const origin = { x: 123, y: 45 };
+	const width = 400;
+	const height = 300;
+	const map = clientToLocal({
+		left: origin.x + Math.min(0, a * width, c * height, a * width + c * height),
+		top: origin.y + Math.min(0, b * width, d * height, b * width + d * height),
+		width, height, borderLeft: 5, borderTop: 7, zoom: 0.5,
+		styles: [
+			{ transform: "matrix(2, 0, 0, 2, 10, 20)", rotate: "none", scale: "none" },
+			{ transform: "none", rotate: "30deg", scale: "0.5" },
+		],
+	});
+	const local = { x: 124, y: 78 };
+	const x = local.x + 5;
+	const y = local.y + 7;
+	const point = map(origin.x + a * x + c * y, origin.y + b * x + d * y);
+	approx(point.x, local.x);
+	approx(point.y, local.y);
+});

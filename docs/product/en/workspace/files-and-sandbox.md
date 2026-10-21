@@ -136,7 +136,7 @@ A cloud sandbox can run a virtual screen. Choose the screen button in the Space 
 **Start virtual screen**: programs started in the sandbox from then on show on it — a browser an
 Agent opens, for example — and you can watch and steer them live. Stop it from the same place; it
 also ends when the sandbox stops. A sandbox created before virtual screens existed asks to be
-updated with **Force recovery** in the Space settings.
+updated with **Restart sandbox** in the Space settings.
 
 This is how to watch an Agent at work in a browser and take over when it needs you — to sign in, for
 example: ask it to use the virtual screen, open the screen from the link it gives you, and type

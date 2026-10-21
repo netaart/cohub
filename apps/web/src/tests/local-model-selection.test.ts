@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RuntimeCapabilities } from "@neta-art/cohub";
 import { resolveLocalModelFromTurns } from "../lib/features/session-chat/session-utils.ts";
-import { resolveLocalModel } from "../lib/model-catalog.ts";
+import {
+	getSupportedThinkingLevels,
+	resolveLocalModel,
+	toLocalModelCatalog,
+} from "../lib/model-catalog.ts";
 
 const turn = (
 	sequence: number,
@@ -139,5 +143,49 @@ test("a catalog without a declared default resolves only explicit requests", () 
 	assert.equal(
 		resolveLocalModel(legacy, { provider: "openai", id: "deep" })?.id,
 		"deep",
+	);
+});
+
+test("Claude Code offers its default model and effort levels", () => {
+	// Shape reported by the CLI adapter: no "off", effort low..max.
+	const effort = {
+		off: null,
+		minimal: null,
+		low: "low",
+		medium: "medium",
+		high: "high",
+		xhigh: "xhigh",
+		max: "max",
+	};
+	const claude: RuntimeCapabilities["models"] = [
+		{
+			harness: "claude",
+			provider: "anthropic",
+			id: "default",
+			name: "Default",
+			isDefault: true,
+			reasoning: true,
+			thinkingLevelMap: effort,
+		},
+		{
+			harness: "claude",
+			provider: "anthropic",
+			id: "haiku",
+			name: "Claude Haiku",
+		},
+	];
+	assert.deepEqual(resolveLocalModel(claude, null), {
+		provider: "anthropic",
+		id: "default",
+		name: "Default",
+		thinkingLevel: "high",
+	});
+	assert.deepEqual(
+		getSupportedThinkingLevels(
+			toLocalModelCatalog(claude)[0] as ReturnType<
+				typeof toLocalModelCatalog
+			>[number],
+		),
+		["low", "medium", "high", "xhigh", "max"],
 	);
 });

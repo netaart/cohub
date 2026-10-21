@@ -66,7 +66,7 @@ function pick(source: UserSessionSourceKey | null) {
 	label={m.chats_source_current({ source: sourceName(value) }, { locale })}
 	icon={ListFilter}
 	expanded={open}
-	indicator={value !== DEFAULT_CHATS_FILTER.source}
+	text={value === DEFAULT_CHATS_FILTER.source ? undefined : sourceName(value)}
 	onclick={() => {
 		open = !open;
 	}}

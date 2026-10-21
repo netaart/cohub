@@ -1,7 +1,7 @@
 import type { NativeRuntimeEvent, NativeTurnProgress } from "@neta-art/cohub";
 import type { RuntimeArchiveStore } from "../archive-store.js";
 import { serializeDiagnosticError, type RuntimeDiagnostics } from "../diagnostics.js";
-import type { HarnessOptions } from "../harness.js";
+import type { HarnessExecutables } from "../harnesses/types.js";
 import { record } from "../json-rpc.js";
 import type { SessionTurnProjectionClient } from "../turn-projection.js";
 import { readTranscript, type Harness } from "./adapters.js";
@@ -59,7 +59,7 @@ export class NativeRuntime {
     root: string;
     stateRoot: string;
     harnesses: Harness[];
-    executables: HarnessOptions;
+    executables: HarnessExecutables;
     identity: string;
     config: NativeConfig | null;
     archives: RuntimeArchiveStore;
@@ -78,6 +78,11 @@ export class NativeRuntime {
     });
     this.codex = new CodexShared(options.executables.codex || "codex", options.root, Boolean(options.config?.codexShared) && options.harnesses.includes("codex"));
     this.codex.onConnect((channel) => this.observeCodex(channel));
+    // Its next Turn is found again through the server's status broadcast.
+    this.codex.onRelease((threadId) => {
+      this.watched.delete(threadId);
+      this.endStream(`codex:${threadId}`);
+    });
     this.ingest = new NativeIngest({
       spaceId: options.spaceId,
       cwd: options.root,
@@ -86,20 +91,21 @@ export class NativeRuntime {
       root: options.stateRoot,
       archives: options.archives,
       hooks: {
-        piSettled: (nativeSessionId, mtimeMs) => {
-          const link = this.pi.find(nativeSessionId);
+        settled: (state, mtimeMs) => {
+          const link = state.harness === "pi" ? this.pi.find(state.nativeSessionId) : null;
           if (!link) return null;
           if (!link.idle) return false;
           // Idle and nothing written since it settled: done. A newer write lets the file decide.
           return link.settledAt >= mtimeMs ? true : null;
         },
+        // Only Pi (extension) and Codex (shared app-server) have a control plane; other synced clients are read-only.
         controllable: (state) => state.harness === "pi"
           ? this.pi.find(state.nativeSessionId) !== null
-          : this.codex.enabled && (this.active.has(state.nativeSessionId) || this.watched.has(state.nativeSessionId) || this.codex.driving.has(state.nativeSessionId)),
+          : state.harness === "codex" && this.codex.enabled && (this.active.has(state.nativeSessionId) || this.watched.has(state.nativeSessionId) || this.codex.driving.has(state.nativeSessionId)),
         abortTurn: (state) => {
           const stop = state.harness === "pi"
             ? this.pi.abort(state.nativeSessionId)
-            : state.runningTurnKey ? this.codex.interrupt(state.nativeSessionId, state.runningTurnKey) : Promise.resolve(false);
+            : state.harness === "codex" && state.runningTurnKey ? this.codex.interrupt(state.nativeSessionId, state.runningTurnKey) : Promise.resolve(false);
           void stop.catch((error: unknown) => options.diagnostics.log("warn", "native.stop_failed", { error: serializeDiagnosticError(error) }, { harness: state.harness, sessionId: state.sessionId ?? undefined }));
         },
         onGrowth: (state) => this.onGrowth(state),
@@ -310,6 +316,7 @@ export class NativeRuntime {
     if (event.method === "turn/completed") {
       this.endStream(key);
       if (watched.path) this.ingest.touch(watched.path);
+      void this.codex.release(threadId);
       return;
     }
     this.stream(key, "codex", threadId).translator.push(event);

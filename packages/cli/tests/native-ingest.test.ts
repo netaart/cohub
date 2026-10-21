@@ -1,18 +1,23 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, utimes, writeFile, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
-import { piSessionDirectoryName } from "../src/runtime/native/adapters.js";
+import { claudeProjectName } from "../src/runtime/harnesses/claude.js";
+import { piSessionDirectoryName } from "../src/runtime/harnesses/pi.js";
+import { workbuddyProjectName } from "../src/runtime/harnesses/workbuddy.js";
+import { cursorChatDirectory, cursorTranscriptPath } from "../src/runtime/harnesses/cursor-transcript.js";
 import { nativeTurnId } from "../src/runtime/native/identity.js";
 import { discoverTranscripts, NativeIngest, type IngestHooks, type TranscriptState } from "../src/runtime/native/ingest.js";
+import { SizeLimitError } from "../src/runtime/native/transcript.js";
 import { fakeNativeServer as fakeServer } from "./fixtures/native-server.js";
 
 const at = "2026-01-01T00:00:00.000Z";
 const SPACE = "00000000-0000-4000-8000-000000000001";
-const turnIdOf = (harness: "pi" | "codex", nativeSessionId: string, key: string) => nativeTurnId(SPACE, harness, nativeSessionId, key);
+type Synced = "pi" | "codex" | "claude" | "workbuddy" | "cursor";
+const turnIdOf = (harness: Synced, nativeSessionId: string, key: string) => nativeTurnId(SPACE, harness, nativeSessionId, key);
 const line = (value: unknown) => `${JSON.stringify(value)}\n`;
 const piHeader = (id: string, cwd: string) => line({ type: "session", version: 3, id, cwd, timestamp: at });
 const piMessage = (id: string, parentId: string | null, role: string, content: unknown, extra: Record<string, unknown> = {}) =>
@@ -28,6 +33,24 @@ const codexRollout = (id: string, cwd: string, turns: string[], extra: Record<st
     line({ timestamp: at, type: "event_msg", payload: { type: "turn_complete", turn_id: key, last_agent_message: `a ${key}` } }),
   ]),
 ].join("");
+const claudeRecord = (sessionId: string, cwd: string, value: Record<string, unknown>) => line({ isSidechain: false, cwd, sessionId, timestamp: at, ...value });
+/** A Claude Code Turn: prompt, reply, and in interactive sessions the recorded end. */
+const claudeTurn = (sessionId: string, cwd: string, uuid: string, parentUuid: string | null, prompt: string, ended = true) =>
+  claudeRecord(sessionId, cwd, { type: "user", uuid, parentUuid, promptId: `p-${uuid}`, promptSource: "typed", message: { role: "user", content: prompt } })
+  + claudeRecord(sessionId, cwd, { type: "assistant", uuid: `a-${uuid}`, parentUuid: uuid, message: { id: `m-${uuid}`, role: "assistant", model: "claude-test", content: [{ type: "text", text: `re ${prompt}` }], stop_reason: "end_turn" } })
+  + (ended ? claudeRecord(sessionId, cwd, { type: "system", subtype: "turn_duration", uuid: `d-${uuid}`, parentUuid: `a-${uuid}` }) : "");
+const workbuddyTurn = (sessionId: string, cwd: string, id: string, parentId: string | null, prompt: string) =>
+  line({ id, ...(parentId ? { parentId } : {}), timestamp: 1, type: "message", role: "user", content: [{ type: "input_text", text: prompt }], sessionId, cwd })
+  + line({ id: `a-${id}`, parentId: id, timestamp: 2, type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: `re ${prompt}` }], providerData: { messageId: `m-${id}`, model: "hy-test" }, sessionId, cwd });
+
+/** A Cursor Turn: context, the prompt, a reply step and the recorded end. */
+const cursorPrompt = (prompt: string) => line({ role: "user", message: { content: [{ type: "text", text: "<workspace>open tabs</workspace>" }] } })
+  + line({ role: "user", message: { content: [{ type: "text", text: `<timestamp>Saturday, Aug 01, 2026, 9:30 AM (UTC+8)</timestamp>\n<user_query>${prompt}</user_query>` }] } });
+const cursorTurn = (prompt: string) => cursorPrompt(prompt)
+  + line({ role: "assistant", message: { content: [{ type: "text", text: `re ${prompt}` }, { type: "tool_use", name: "Shell", input: { command: "ls" } }] } })
+  + line({ type: "turn_ended", status: "success" });
+/** A Cursor Turn is keyed by the file's checksum through its prompt. */
+const cursorKey = (before: string) => createHash("sha256").update(before).digest("hex");
 
 async function until(check: () => boolean, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
@@ -44,9 +67,15 @@ async function workspace() {
   process.env.PI_CODING_AGENT_DIR = join(root, "pi-agent");
   delete process.env.PI_CODING_AGENT_SESSION_DIR;
   process.env.CODEX_HOME = join(root, "codex-home");
+  process.env.CLAUDE_CONFIG_DIR = join(root, "claude");
+  process.env.CODEBUDDY_CONFIG_DIR = join(root, "codebuddy");
+  process.env.CURSOR_CONFIG_DIR = join(root, "cursor-config");
+  process.env.CURSOR_DATA_DIR = join(root, "cursor-data");
   const piDirectory = (cwd: string) => join(root, "pi-agent", "sessions", piSessionDirectoryName(cwd));
   const codexPath = (id: string) => join(root, "codex-home", "sessions", "2026", "01", "01", `rollout-2026-01-01T00-00-00-${id}.jsonl`);
-  const ingest = (options: { enabledAt?: string; harnesses?: Array<"pi" | "codex">; hooks?: IngestHooks } = {}) => new NativeIngest({
+  const claudePath = (cwd: string, id: string) => join(root, "claude", "projects", claudeProjectName(cwd), `${id}.jsonl`);
+  const workbuddyPath = (cwd: string, id: string) => join(root, "codebuddy", "projects", workbuddyProjectName(cwd), `${id}.jsonl`);
+  const ingest = (options: { enabledAt?: string; harnesses?: Synced[]; hooks?: IngestHooks } = {}) => new NativeIngest({
     spaceId: SPACE, cwd: project, harnesses: options.harnesses ?? ["pi", "codex"], enabledAt: options.enabledAt ?? new Date(0).toISOString(),
     root: join(root, "state"), archives: new RuntimeArchiveStore(join(root, "state", "archives"), null), hooks: options.hooks,
   });
@@ -55,7 +84,7 @@ async function workspace() {
     await writeFile(path, content);
     if (mtime) await utimes(path, mtime, mtime);
   };
-  return { root, project, piDirectory, codexPath, ingest, write, cleanup: () => rm(root, { recursive: true, force: true }) };
+  return { root, project, piDirectory, codexPath, claudePath, workbuddyPath, ingest, write, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 
 test("discovery covers the project and its subdirectories, skips Codex's own threads, newest first", async () => {
@@ -136,6 +165,52 @@ test("a new terminal conversation syncs in order, and a restart asks the server 
   } finally { await w.cleanup(); }
 });
 
+test("a Turn over a size limit is not resent until its transcript changes", async () => {
+  const w = await workspace();
+  const server = fakeServer();
+  let attempts = 0;
+  const transport = { ...server.transport, ingest: async () => { attempts += 1; throw new SizeLimitError("Runtime frame exceeds transfer limit"); } };
+  const ingest = w.ingest({ hooks: { onError: () => {} } });
+  try {
+    const id = randomUUID();
+    const path = join(w.piDirectory(w.project), "big.jsonl");
+    const quiet = new Date(Date.now() - 60_000);
+    await w.write(path, piHeader(id, w.project) + piTurn(1, null), quiet);
+    await ingest.load();
+    ingest.connect(transport);
+    await until(() => attempts === 1);
+    // A reconnect and a backoff window would both have retried the same bytes.
+    ingest.connect(transport);
+    ingest.touch(path);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    assert.equal(attempts, 1);
+    await appendFile(path, piTurn(2, "a1"));
+    await utimes(path, quiet, new Date(quiet.getTime() + 1_000));
+    ingest.touch(path);
+    await until(() => attempts === 2);
+  } finally { await ingest.close(AbortSignal.timeout(2_000)); await w.cleanup(); }
+});
+
+test("an automatically resumed import skips a size-limited history file; an explicit import retries it", async () => {
+  const w = await workspace();
+  const server = fakeServer();
+  let attempts = 0;
+  const transport = { ...server.transport, ingest: async () => { attempts += 1; throw new SizeLimitError("Runtime frame exceeds transfer limit"); } };
+  const ingest = w.ingest({ enabledAt: "2026-01-01T00:00:00Z", hooks: { onError: () => {} } });
+  try {
+    const id = randomUUID();
+    const path = join(w.piDirectory(w.project), "history.jsonl");
+    await w.write(path, piHeader(id, w.project) + piTurn(1, null), new Date("2025-01-01T00:00:00Z"));
+    await ingest.load();
+    ingest.connect(transport);
+    await ingest.startImport();
+    await until(() => attempts === 1 && ingest.status().import.state === "done");
+    assert.equal(ingest.status().import.failed.length, 1);
+    assert.deepEqual(await ingest.plan({}, undefined, { resume: true }), []);
+    assert.equal((await ingest.plan()).length, 1);
+  } finally { await ingest.close(AbortSignal.timeout(2_000)); await w.cleanup(); }
+});
+
 test("Cohub's own Turns are recognized by their marker; a terminal Turn after one continues its Session", async () => {
   const w = await workspace();
   try {
@@ -159,6 +234,60 @@ test("Cohub's own Turns are recognized by their marker; a terminal Turn after on
     assert(!server.batches.some((batch) => batch.turns.some((turn) => turn.turnId === cloudTurnId)), "a Cohub Turn is never sent back");
     await ingest.close(AbortSignal.timeout(2_000));
   } finally { await w.cleanup(); }
+});
+
+test("a running Cohub Turn marked by Codex user_message client_id is not reuploaded", async () => {
+  const w = await workspace();
+  const ingest = w.ingest({ harnesses: ["codex"] });
+  try {
+    const server = fakeServer();
+    const cloudTurnId = randomUUID(), sessionId = randomUUID(), nativeTurnId = randomUUID(), id = randomUUID();
+    server.turns.set(cloudTurnId, { sessionId, settled: false, parentTurnId: null });
+    await w.write(w.codexPath(id), line({ timestamp: at, type: "session_meta", payload: { id, cwd: w.project } })
+      + codexLine({ type: "task_started", turn_id: nativeTurnId })
+      + codexLine({ type: "user_message", message: "from the web", client_id: cloudTurnId }));
+    await ingest.load();
+    ingest.connect(server.transport);
+    await until(() => server.knownCalls > 0);
+    await ingest.close(AbortSignal.timeout(2_000));
+    assert.equal(server.batches.length, 0);
+    assert.equal(server.turns.size, 1);
+  } finally {
+    await ingest.close(AbortSignal.timeout(2_000));
+    await w.cleanup();
+  }
+});
+
+test("a local Codex continuation uploads once under the Session identified by user_message client_id", async () => {
+  const w = await workspace();
+  const ingest = w.ingest({ harnesses: ["codex"] });
+  try {
+    const server = fakeServer();
+    const cloudTurnId = randomUUID(), sessionId = randomUUID(), nativeTurnId = randomUUID(), localTurnId = randomUUID(), id = randomUUID();
+    server.turns.set(cloudTurnId, { sessionId, settled: true, parentTurnId: null });
+    await w.write(w.codexPath(id), line({ timestamp: at, type: "session_meta", payload: { id, cwd: w.project } })
+      + codexLine({ type: "task_started", turn_id: nativeTurnId })
+      + codexLine({ type: "user_message", message: "from the web", client_id: cloudTurnId })
+      + codexLine({ type: "task_complete", turn_id: nativeTurnId, last_agent_message: "web answer" })
+      + codexLine({ type: "task_started", turn_id: localTurnId })
+      + codexLine({ type: "user_message", message: "from the terminal" })
+      + codexLine({ type: "task_complete", turn_id: localTurnId, last_agent_message: "local answer" }));
+    await ingest.load();
+    ingest.connect(server.transport);
+    await until(() => server.knownCalls > 0);
+    await ingest.close(AbortSignal.timeout(2_000));
+    const localId = turnIdOf("codex", id, localTurnId);
+    const sent = server.batches.flatMap((batch) => batch.turns);
+    assert.deepEqual(sent.map((turn) => turn.turnId), [localId], "only the unmarked local continuation is uploaded");
+    assert.equal(sent[0]?.parentTurnId, cloudTurnId);
+    assert.deepEqual(sent[0]?.userContent, [{ type: "text", text: "from the terminal" }]);
+    assert.equal(sent[0]?.result?.status, "completed");
+    assert.equal(server.turns.size, 2);
+    assert.equal(server.turns.get(localId)?.sessionId, sessionId);
+  } finally {
+    await ingest.close(AbortSignal.timeout(2_000));
+    await w.cleanup();
+  }
 });
 
 test("a running Codex Turn is sent without a result, then settles in place", async () => {
@@ -355,6 +484,121 @@ test("pausing a harness stops its uploads and previews, for transcripts already 
     ingest.touch(path);
     await new Promise((resolve) => setTimeout(resolve, 200));
     assert.equal(server.batches.length, batches, "nothing more is uploaded");
+    await ingest.close(AbortSignal.timeout(2_000));
+  } finally { await w.cleanup(); }
+});
+
+test("Claude Code terminal Turns sync and settle on their recorded end; Cohub's prompt id marks its own Turn", async () => {
+  const w = await workspace();
+  try {
+    const server = fakeServer();
+    const cloudTurnId = randomUUID(), sessionId = randomUUID(), id = randomUUID(), cwd = join(w.project, "sub");
+    server.turns.set(cloudTurnId, { sessionId, settled: true, parentTurnId: null });
+    const path = w.claudePath(cwd, id);
+    // Fresh bytes: a recorded end settles the Turn without waiting for a quiet period.
+    await w.write(path, claudeTurn(id, cwd, cloudTurnId, null, "from the web", false) + claudeTurn(id, cwd, "u2", `a-${cloudTurnId}`, "from the terminal"));
+    await w.write(join(path.slice(0, -".jsonl".length), "subagents", "agent-x.jsonl"), claudeTurn(id, cwd, "s1", null, "sub-agent"));
+    const ingest = w.ingest({ harnesses: ["claude"] });
+    await ingest.load();
+    ingest.connect(server.transport);
+    await until(() => server.turns.size === 2);
+    const terminal = server.batches.flatMap((batch) => batch.turns);
+    assert.deepEqual(terminal.map((turn) => [turn.turnId, turn.parentTurnId, turn.result?.status]), [[turnIdOf("claude", id, "u2"), cloudTurnId, "completed"]]);
+    assert.equal(server.turns.get(turnIdOf("claude", id, "u2"))?.sessionId, sessionId);
+    await ingest.close(AbortSignal.timeout(2_000));
+  } finally { await w.cleanup(); }
+});
+
+test("a WorkBuddy Turn Cohub runs is never sent back, and a terminal Turn after it continues its Session", async () => {
+  const w = await workspace();
+  try {
+    const server = fakeServer();
+    const cloudTurnId = randomUUID(), sessionId = randomUUID(), id = randomUUID();
+    server.turns.set(cloudTurnId, { sessionId, settled: true, parentTurnId: null });
+    const path = w.workbuddyPath(w.project, id);
+    const session = { harness: "workbuddy" as const, path, nativeSessionId: id, cwd: w.project };
+    const ingest = w.ingest({ harnesses: ["workbuddy"] });
+    await ingest.load();
+    ingest.connect(server.transport);
+    ingest.begin(session, sessionId, cloudTurnId);
+    await w.write(path, workbuddyTurn(id, w.project, "u1", null, "from the web"));
+    ingest.touch(path);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(server.batches.length, 0, "a running Cohub Turn is not read");
+    ingest.advance(path, cloudTurnId);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(server.batches.length, 0, "nor sent once it ends");
+    await appendFile(path, workbuddyTurn(id, w.project, "u2", "a-u1", "from the terminal") + line({ id: "metrics", timestamp: 3, type: "turn-metrics", cwd: w.project }));
+    ingest.touch(path);
+    await until(() => server.turns.size === 2);
+    assert.deepEqual(server.batches.flatMap((batch) => batch.turns).map((turn) => [turn.turnId, turn.parentTurnId]), [[turnIdOf("workbuddy", id, "u2"), cloudTurnId]]);
+    await ingest.close(AbortSignal.timeout(2_000));
+  } finally { await w.cleanup(); }
+});
+
+test("Cursor terminal Turns sync through their chat's project; a Turn Cohub runs is never sent back", async () => {
+  const w = await workspace();
+  try {
+    const server = fakeServer();
+    const cloudTurnId = randomUUID(), sessionId = randomUUID(), id = randomUUID(), terminal = randomUUID(), cwd = join(w.project, "sub");
+    server.turns.set(cloudTurnId, { sessionId, settled: true, parentTurnId: null });
+    await w.write(join(cursorChatDirectory(terminal, cwd), "meta.json"), JSON.stringify({ cwd }));
+    await w.write(cursorTranscriptPath(terminal, cwd), cursorTurn("from the terminal"));
+    await w.write(join(cursorTranscriptPath(terminal, cwd), "..", "subagents", "s1.jsonl"), cursorTurn("sub-agent"));
+    const path = cursorTranscriptPath(id, w.project);
+    const ingest = w.ingest({ harnesses: ["cursor"] });
+    await ingest.load();
+    ingest.connect(server.transport);
+    await until(() => server.turns.size === 2);
+    const [synced] = server.batches.flatMap((batch) => batch.turns);
+    assert.deepEqual([synced?.turnId, synced?.userContent, synced?.result?.status], [turnIdOf("cursor", terminal, cursorKey(cursorPrompt("from the terminal"))), [{ type: "text", text: "from the terminal" }], "completed"]);
+
+    ingest.begin({ harness: "cursor", path, nativeSessionId: id, cwd: w.project }, sessionId, cloudTurnId);
+    await w.write(join(cursorChatDirectory(id, w.project), "meta.json"), JSON.stringify({ cwd: w.project }));
+    await w.write(path, cursorTurn("from the web"));
+    ingest.advance(path, cloudTurnId);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(server.turns.size, 2, "a Cohub Turn is not sent back");
+    await appendFile(path, cursorTurn("then the terminal"));
+    ingest.touch(path);
+    await until(() => server.turns.size === 3);
+    const key = cursorKey(cursorTurn("from the web") + cursorPrompt("then the terminal"));
+    assert.deepEqual(server.batches.flatMap((batch) => batch.turns).slice(1).map((turn) => [turn.turnId, turn.parentTurnId]), [[turnIdOf("cursor", id, key), cloudTurnId]]);
+
+    // Cohub's Turn left no record: the head it adopted still parents the terminal Turn that follows.
+    const empty = randomUUID(), emptyPath = cursorTranscriptPath(empty, w.project);
+    ingest.adopt({ harness: "cursor", path: emptyPath, nativeSessionId: empty, cwd: w.project }, sessionId, { turnKey: null, turnId: cloudTurnId });
+    await w.write(join(cursorChatDirectory(empty, w.project), "meta.json"), JSON.stringify({ cwd: w.project }));
+    await w.write(emptyPath, cursorTurn("first in the terminal"));
+    ingest.touch(emptyPath);
+    await until(() => server.turns.size === 4);
+    assert.equal(server.batches.flatMap((batch) => batch.turns).at(-1)?.parentTurnId, cloudTurnId);
+    await ingest.close(AbortSignal.timeout(2_000));
+  } finally { await w.cleanup(); }
+});
+
+test("a Claude Code file Cohub wrote before marking its Turns is history the server has", async () => {
+  const w = await workspace();
+  try {
+    const server = fakeServer();
+    const head = randomUUID(), sessionId = randomUUID(), id = randomUUID();
+    server.turns.set(head, { sessionId, settled: true, parentTurnId: null });
+    const path = w.claudePath(w.project, id);
+    await w.write(path, claudeTurn(id, w.project, "old1", null, "unmarked", false) + claudeTurn(id, w.project, "old2", "a-old1", "unmarked", false));
+    const first = w.ingest({ harnesses: [] });
+    first.adopt({ harness: "claude", path, nativeSessionId: id, cwd: w.project }, sessionId);
+    first.advance(path, head);
+    await first.close(AbortSignal.timeout(2_000));
+    const ingest = w.ingest({ harnesses: ["claude"] });
+    await ingest.load();
+    ingest.connect(server.transport);
+    await until(() => server.knownCalls > 0);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(server.batches.length, 0, "its unmarked Turns are not sent");
+    await appendFile(path, claudeTurn(id, w.project, "u3", "a-old2", "from the terminal"));
+    ingest.touch(path);
+    await until(() => server.turns.size === 2);
+    assert.deepEqual(server.batches.flatMap((batch) => batch.turns).map((turn) => [turn.turnId, turn.parentTurnId]), [[turnIdOf("claude", id, "u3"), head]]);
     await ingest.close(AbortSignal.timeout(2_000));
   } finally { await w.cleanup(); }
 });

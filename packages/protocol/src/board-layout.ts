@@ -2,6 +2,7 @@
 import {
 	BOARD_ARROW_STROKE_SIZE,
 	BOARD_DRAW_STROKE_SIZE,
+	boardDefaultSize,
 	BOARD_TEXT_FONT_SIZE,
 	BOARD_TEXT_MAX_FONT_SIZE,
 	BOARD_TEXT_MIN_FONT_SIZE,
@@ -144,6 +145,16 @@ export function layoutBoardText(props: Pick<BoardTextItem["props"], "text" | "fo
 }
 
 
+export function fitBoardMediaSize(
+	natural: { width: number; height: number },
+	edge: number,
+): { width: number; height: number } | null {
+	const { width, height } = natural;
+	if (![width, height, edge].every((value) => Number.isFinite(value) && value > 0)) return null;
+	const scale = edge / Math.max(width, height);
+	return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+}
+
 export function drawSampleRadius(strokeWidth: number, pressure: number): number {
 	const clamped = Math.min(1, Math.max(0, pressure));
 	return Math.max(0.5, (strokeWidth / 2) * (0.5 + clamped));
@@ -279,7 +290,7 @@ export function createBoardLayout(
 			const rect = pointsRect(points);
 			const pad = Math.max(8, (item.style.strokeWidth ?? BOARD_ARROW_STROKE_SIZE) * 2);
 			box = { x: rect.x - pad, y: rect.y - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 };
-		} else box = { x: 0, y: 0, width: 240, height: 160 };
+		} else box = { x: 0, y: 0, ...boardDefaultSize(item.type) };
 		boxes.set(id, box);
 		return box;
 	}

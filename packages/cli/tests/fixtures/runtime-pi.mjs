@@ -63,7 +63,7 @@ async function runTurn(content) {
     };
     running = { finish };
     if (text.includes("wait for abort")) return;
-    setTimeout(() => void finish("stop"), text.includes("slow transport test") ? 250 : 0);
+    setTimeout(() => void finish("stop"), text.includes("slow transport test") ? 2000 : 0);
   });
 }
 

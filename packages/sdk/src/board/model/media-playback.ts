@@ -3,9 +3,13 @@ import { getMediaResourceTitle } from "./media.js";
 import type { BoardSceneItem, } from "./scene.js";
 import { rankedTaskArtifacts } from "@cohub/protocol";
 
+export type BoardAssetUrlOptions = {
+	fresh?: boolean;
+};
+
 export type BoardAssetSource = {
-	resolveFileUrl: (path: string) => Promise<string | null>;
-	resolvePlaybackUrl?: (path: string) => Promise<string | null>;
+	resolveFileUrl: (path: string, options?: BoardAssetUrlOptions) => Promise<string | null>;
+	resolvePlaybackUrl?: (path: string, options?: BoardAssetUrlOptions) => Promise<string | null>;
 };
 
 export function resolveBoardMediaUrl(

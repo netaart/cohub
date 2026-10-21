@@ -20,7 +20,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 23;
+export const DB_VERSION = 24;
 
 export type SessionListForkRecord = Partial<
 	Omit<SessionForkRecord, "parentSessionId">
@@ -269,6 +269,26 @@ export type BoardDocumentCacheRecord = {
 	updatedAt: number;
 };
 
+export type BoardManifestCacheRecord = {
+	key: string;
+	userKey: string;
+	spaceId: string;
+	sourceKey: string;
+	path: string;
+	boardId: string;
+	lastAccessedAt: number;
+};
+
+export type SpaceFileUrlCacheRecord = {
+	key: string;
+	userKey: string;
+	spaceId: string;
+	path: string;
+	url: string;
+	verifiedAt: number;
+	lastAccessedAt: number;
+};
+
 export type SessionFilesCacheRecord = {
 	key: string;
 	userKey: string;
@@ -311,6 +331,8 @@ export type StoreName =
 	| "file_pending_drafts"
 	| "board_pending_txs"
 	| "board_documents"
+	| "board_manifests"
+	| "space_file_urls"
 	| "task_run_summaries"
 	| "task_run_details"
 	| "session_files";
@@ -822,6 +844,14 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
+			defineStore(db, tx, "board_manifests", [
+				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
+				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
+			]);
+			defineStore(db, tx, "space_file_urls", [
+				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
+				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
+			]);
 			defineStore(db, tx, "task_run_summaries", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
 				{
@@ -1102,6 +1132,45 @@ export async function idbPut<T>(storeName: StoreName, value: T) {
 export async function idbDelete(storeName: StoreName, key: string) {
 	await withObjectStore(storeName, "readwrite", async (store, tx) => {
 		store.delete(key);
+		await awaitTransaction(tx);
+		return true;
+	});
+}
+
+export async function idbGetMany<T>(
+	storeName: StoreName,
+	keys: readonly string[],
+) {
+	const found = new Map<string, T>();
+	if (keys.length === 0) return found;
+	await withObjectStore(storeName, "readonly", (store) =>
+		Promise.all(
+			keys.map(
+				(key) =>
+					new Promise<void>((resolve, reject) => {
+						const request = store.get(key);
+						request.onsuccess = () => {
+							if (request.result !== undefined)
+								found.set(key, request.result as T);
+							resolve();
+						};
+						request.onerror = () => reject(request.error);
+					}),
+			),
+		),
+	);
+	return found;
+}
+
+export async function idbWriteMany<T>(
+	storeName: StoreName,
+	changes: { put?: readonly T[]; delete?: readonly string[] },
+) {
+	if (!changes.put?.length && !changes.delete?.length) return;
+	await withObjectStore(storeName, "readwrite", async (store, tx) => {
+		for (const value of changes.put ?? [])
+			store.put(sanitizeForIndexedDb(value));
+		for (const key of changes.delete ?? []) store.delete(key);
 		await awaitTransaction(tx);
 		return true;
 	});

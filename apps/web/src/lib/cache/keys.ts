@@ -117,6 +117,25 @@ export function boardPendingTransactionKey(
 	return [userKey, spaceId, boardId, txId].map(encodeKeyPart).join(":");
 }
 
+export function boardManifestKey(
+	userKey: string,
+	spaceId: string,
+	sourceKey: string,
+	path: string,
+) {
+	return [userKey, spaceId, sourceKey, path, "board-manifest"]
+		.map(encodeKeyPart)
+		.join(":");
+}
+
+export function spaceFileUrlKey(
+	userKey: string,
+	spaceId: string,
+	path: string,
+) {
+	return [userKey, spaceId, path, "file-url"].map(encodeKeyPart).join(":");
+}
+
 export function taskRunKey(
 	userKey: string,
 	spaceId: string,

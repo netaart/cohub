@@ -1,6 +1,7 @@
 import {
 	type BoardDrawInputSample,
 	type BoardViewport,
+	elementClientToLocal,
 	pointToWorld,
 	screenPoint,
 } from "../model/index.js";
@@ -12,22 +13,21 @@ function pressureOf(event: PointerEvent): number {
 		: 0.5;
 }
 
-function screenOf(event: PointerEvent, rect: DOMRect) {
-	return screenPoint(event.clientX - rect.left, event.clientY - rect.top);
-}
-
 export function toBoardPointerEvent(
 	event: PointerEvent,
-	rect: DOMRect,
+	rect: DOMRect | HTMLElement,
 	camera: BoardViewport,
 	coalesce = false,
 ): BoardPointerEvent {
-	const screen = screenOf(event, rect);
+	const local = "getBoundingClientRect" in rect
+		? elementClientToLocal(rect)
+		: (x: number, y: number) => screenPoint(x - rect.left, y - rect.top);
+	const screen = local(event.clientX, event.clientY);
 	const coalesced = coalesce ? event.getCoalescedEvents?.() : undefined;
 	const samples: BoardDrawInputSample[] | undefined =
 		coalesced && coalesced.length > 1
 			? coalesced.map((sample) => ({
-					world: pointToWorld(screenOf(sample, rect), camera),
+					world: pointToWorld(local(sample.clientX, sample.clientY), camera),
 					pressure: pressureOf(sample),
 				}))
 			: undefined;

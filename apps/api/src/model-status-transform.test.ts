@@ -92,7 +92,11 @@ test("includes online-only models and reads the current online window shape", ()
 	assert.ok(shared);
 	assert.ok(onlineOnly);
 	assert.equal(shared.successRate5m, 75);
+	assert.equal(shared.successRateRecent, 75);
+	assert.equal(shared.successRateRecentWindowMinutes, 5);
 	assert.equal(onlineOnly.successRate5m, 75);
+	assert.equal(onlineOnly.successRateRecent, 75);
+	assert.equal(onlineOnly.successRateRecentWindowMinutes, 5);
 	assert.equal(onlineOnly.successRate24h, 75);
 	assert.equal(onlineOnly.latencyAvgMs, 1200);
 	assert.equal(onlineOnly.latencyP90Ms, 1800);
@@ -137,5 +141,74 @@ test("falls back to probe data when online has no usable 5m samples", () => {
 
 	const entry = buildModelStatusResponse(raw).models["fallback-model"];
 	assert.equal(entry?.successRate5m, 100);
+	assert.equal(entry?.successRateRecent, 100);
+	assert.equal(entry?.successRateRecentWindowMinutes, 5);
 	assert.equal(entry?.checkedAt, null);
+});
+
+test("uses the shortest non-empty online window for the recent rate", () => {
+	const raw: RawStatus = {
+		overall_status: "operational",
+		online: {
+			window: { start: WINDOW_START, minutes: 24 * 60 },
+			models: [
+				{
+					model: "sparse-model",
+					status: "operational",
+					windows: [
+						onlineWindow(5, {
+							has_data: false,
+							request_count: 0,
+							success_rate: 0,
+						}),
+						onlineWindow(10, {
+							has_data: false,
+							request_count: 0,
+							success_rate: 0,
+						}),
+						onlineWindow(30, {
+							has_data: true,
+							request_count: 10,
+							success_count: 9,
+							success_rate: 90,
+						}),
+					],
+					heartbeats: [],
+				},
+			],
+		},
+	};
+
+	const entry = buildModelStatusResponse(raw).models["sparse-model"];
+	assert.equal(entry?.successRate5m, null);
+	assert.equal(entry?.successRateRecent, 90);
+	assert.equal(entry?.successRateRecentWindowMinutes, 30);
+});
+
+test("leaves the recent rate empty when every recent window is empty", () => {
+	const raw: RawStatus = {
+		overall_status: "unknown",
+		online: {
+			window: { start: WINDOW_START, minutes: 24 * 60 },
+			models: [
+				{
+					model: "idle-model",
+					status: "unknown",
+					windows: [5, 10, 30, 60].map((minutes) =>
+						onlineWindow(minutes, {
+							has_data: false,
+							request_count: 0,
+							success_rate: 0,
+						}),
+					),
+					heartbeats: [],
+				},
+			],
+		},
+	};
+
+	const entry = buildModelStatusResponse(raw).models["idle-model"];
+	assert.equal(entry?.successRate5m, null);
+	assert.equal(entry?.successRateRecent, null);
+	assert.equal(entry?.successRateRecentWindowMinutes, null);
 });

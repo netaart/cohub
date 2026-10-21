@@ -4,7 +4,7 @@ import type {
 	BoardPlaybackSnapshot,
 	BoardTrack,
 } from "@cohub/protocol";
-import { playbackTimeAt } from "@neta-art/cohub/board/player";
+import { playbackClockAt } from "@neta-art/cohub/board/player";
 import {
 	Circle,
 	Crosshair,
@@ -58,27 +58,36 @@ const animationId = $derived(
 const animation = $derived(
 	animationId ? editor.animations[animationId] : undefined,
 );
-const playing = $derived(
+const live = $derived(
 	playback?.status === "playing" &&
 		playback.animationId === animationId &&
 		!editor.playhead,
 );
+let ended = $state.raw<BoardPlaybackSnapshot | null>(null);
+const playing = $derived(live && ended !== playback);
 
 let clock = $state(0);
 let frame = 0;
 function tick() {
 	frame = 0;
-	if (!playing || !playback) return;
-	clock = playbackTimeAt(playback, editor.document, Date.now()) ?? 0;
-	frame = requestAnimationFrame(tick);
+	if (!live || !playback) return;
+	const state = playbackClockAt(playback, editor.document, Date.now());
+	clock = state.time ?? 0;
+	ended =
+		!state.advancing &&
+		(state.time === null || state.time >= (animation?.duration ?? 0))
+			? playback
+			: null;
+	if (state.advancing) frame = requestAnimationFrame(tick);
 }
 $effect(() => {
-	if (playing && !frame) frame = requestAnimationFrame(tick);
+	if (live && playback && animation && !frame)
+		frame = requestAnimationFrame(tick);
 });
 onDestroy(() => cancelAnimationFrame(frame));
 
 const time = $derived(
-	playing
+	live
 		? clock
 		: (editor.playhead?.time ??
 				(playback?.animationId === animationId ? playback.position : 0)),

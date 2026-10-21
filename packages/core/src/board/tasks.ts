@@ -14,6 +14,7 @@ import {
 	boardTaskSource,
 	diffMergePatch,
 	featuredTaskArtifact,
+	fitBoardMediaSize,
 	isUuid,
 	mergePatch,
 	taskRunToBoardTaskSnapshot,
@@ -206,8 +207,8 @@ function visual(snapshot: BoardTaskSnapshot | undefined) {
 function fittedSize(item: BoardItem | undefined, before: BoardTaskSnapshot | undefined, after: BoardTaskSnapshot) {
 	const next = visual(after);
 	if (item?.type !== "task" || !next?.naturalWidth || !next.naturalHeight || visual(before)?.url === next.url) return undefined;
-	const height = Math.round((item.size.width * next.naturalHeight) / next.naturalWidth);
-	return height > 0 && height !== item.size.height ? { width: item.size.width, height } : undefined;
+	const size = fitBoardMediaSize({ width: next.naturalWidth, height: next.naturalHeight }, Math.max(item.size.width, item.size.height));
+	return size && (size.width !== item.size.width || size.height !== item.size.height) ? size : undefined;
 }
 
 export async function listTaskBoards(db: Executor, input: { spaceId: string; taskRunId: string; limit?: number }) {

@@ -72,6 +72,7 @@ function buildContext(input: BoardExportSceneInput): {
     themeKey: "export",
     rendererType: "canvas",
     zoom: input.scale,
+    textResolution: input.scale,
     reducedMotion: true,
     labels: DEFAULT_BOARD_RENDER_LABELS,
     taskRun: () => null,

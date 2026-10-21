@@ -1,6 +1,7 @@
 export * from "./metrics.js";
 import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
+import type { HarnessKind } from "../runtime/harnesses.js";
 export { normalizeSessionTurnOrigin, readSessionTurnOrigin, turnEventRequestSource } from "../turn-origin.js";
 export type { SessionTurnOrigin, SessionTurnOriginKind } from "../turn-origin.js";
 export { normalizeSentTurnRef, readSentTurns } from "../sent-turns.js";
@@ -69,7 +70,7 @@ export type SessionPromptInput = {
     model?: string;
     provider?: string;
     thinkingLevel?: string;
-    harness?: "cohub" | "pi" | "codex";
+    harness?: HarnessKind;
     runtime?: "cloud" | "local";
     turnId?: string;
   } | null;

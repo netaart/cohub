@@ -7,6 +7,7 @@ import type {
   UpdateSessionInfoInput,
 } from "@cohub/protocol/model";
 import type { ContentBlock } from "@cohub/protocol/core";
+import type { HarnessKind } from "@cohub/protocol/runtime";
 import {
   getSpaceById,
   getSpaceSessionById,
@@ -432,7 +433,7 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
       source?: string | null;
       model?: string | null;
       provider?: string | null;
-      harness?: "cohub" | "pi" | "codex" | null;
+      harness?: HarnessKind | null;
       thinkingLevel?: string | null;
       accessMode?: PromptAccessMode | null;
       env?: unknown;

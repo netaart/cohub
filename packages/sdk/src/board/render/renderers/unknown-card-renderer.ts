@@ -1,9 +1,6 @@
 import { BOARD_MONO_FONT_STACK } from "@cohub/protocol/board-constants";
 import { Container, Graphics, Text } from "pixi.js";
-import {
-	syncTextResolution,
-	textResolutionForZoom,
-} from "../text-resolution.js";
+import { syncTextResolution } from "../text-resolution.js";
 import type { BoardSceneItem } from "../../model/scene.js";
 import { cardElevation, drawCardSurface, traceCardOutline } from "../surface.js";
 import { positionShell } from "./base-card-renderer.js";
@@ -19,7 +16,6 @@ type UnknownParts = {
 	label: Text;
 	visualSig: string;
 	textSig: string;
-	resolution: number;
 };
 
 const partsByContainer = new WeakMap<Container, UnknownParts>();
@@ -34,7 +30,6 @@ function sync(
 	positionShell(parts.root, item);
 	const { width, height } = item.frame;
 	const realType = item.type;
-	syncTextResolution(parts.label, parts, context.zoom);
 	const elevation = cardElevation(context, item.id);
 	const visualSig = [width, height, elevation, context.themeKey].join("|");
 	if (visualSig !== parts.visualSig) {
@@ -60,6 +55,7 @@ function sync(
 		parts.label.text = realType;
 		parts.label.style.fill = context.palette.muted;
 	}
+	syncTextResolution(parts.label, context.textResolution);
 	parts.label.position.set(width / 2, height / 2);
 }
 
@@ -70,11 +66,10 @@ export const unknownCardRenderer: BoardCardRenderer = {
 		const root = new Container();
 		const box = new Graphics();
 		box.context.batchMode = "batch";
-		const resolution = textResolutionForZoom(context.zoom);
 		const label = new Text({
 			text: "",
 			style: { fontFamily: BOARD_MONO_FONT_STACK, fontSize: 11, fontWeight: "600" },
-			resolution,
+			resolution: context.textResolution,
 			roundPixels: true,
 		});
 		label.anchor.set(0.5);
@@ -85,13 +80,16 @@ export const unknownCardRenderer: BoardCardRenderer = {
 			label,
 			visualSig: "",
 			textSig: "",
-			resolution,
 		});
 		sync(root, item, context);
 		return root;
 	},
 	update: (container, item, context) => {
 		sync(container, item, context);
+	},
+	resolution: (container, _item, context) => {
+		const parts = partsByContainer.get(container);
+		if (parts) syncTextResolution(parts.label, context.textResolution);
 	},
 	renderFar: (graphics, item, context) => {
 		drawFarPlate(graphics, item.frame, {

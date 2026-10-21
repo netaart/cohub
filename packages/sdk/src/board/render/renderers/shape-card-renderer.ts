@@ -5,7 +5,7 @@ import type { SceneItem } from "../../model/scene.js";
 import { type WorldPoint, worldPoint } from "../../model/geometry.js";
 import { dashPattern, roundRectPoints, tracePolyline, trimPolyline } from "../stroke.js";
 import { itemAlpha, itemColor } from "../palette.js";
-import { syncTextResolution, syncTextWrapWidth, textResolutionForZoom } from "../text-resolution.js";
+import { syncTextResolution, syncTextWrapWidth } from "../text-resolution.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
 import { drawFarPlate } from "./far-plate.js";
@@ -20,7 +20,6 @@ type ShapeParts = {
 	visualSig: string;
 	textSig: string;
 	wrapWidth: number;
-	resolution: number;
 };
 
 const partsByContainer = new WeakMap<Container, ShapeParts>();
@@ -104,7 +103,6 @@ function sync(container: Container, item: SceneItem<BoardShapeItem>, context: Bo
 	const fillOpacity = (style.fillOpacity ?? (style.fill ? 1 : 0)) * itemAlpha(context, style.fill ?? style.stroke);
 	const strokeAlpha = itemAlpha(context, style.stroke ?? style.fill);
 	const strokeWidth = style.strokeWidth ?? 1.75;
-	syncTextResolution(parts.label, parts, context.zoom);
 
 	const visualSig = [width, height, props.geometry, props.path, fill, fillOpacity, stroke, strokeAlpha, strokeWidth, style.dash, style.radius, style.trim].join("|");
 	if (visualSig !== parts.visualSig) {
@@ -144,6 +142,7 @@ function sync(container: Container, item: SceneItem<BoardShapeItem>, context: Bo
 		parts.label.style.align = props.align;
 	}
 	syncTextWrapWidth(parts.label, parts, Math.max(1, width - LABEL_PADDING * 2), context.resizingIds.has(item.id));
+	syncTextResolution(parts.label, context.textResolution);
 	parts.label.position.set(width / 2, height / 2);
 }
 
@@ -153,21 +152,24 @@ export const shapeCardRenderer: BoardCardRenderer = {
 	create: (item, context) => {
 		const root = new Container();
 		const shape = new Graphics();
-		const resolution = textResolutionForZoom(context.zoom);
 		const label = new Text({
 			text: "",
 			style: { fill: 0xffffff, fontFamily: BOARD_FONT_STACK, fontSize: 20, fontWeight: "500", align: "center", wordWrap: true, lineHeight: 28 },
-			resolution,
+			resolution: context.textResolution,
 			roundPixels: true,
 		});
 		label.anchor.set(0.5);
 		root.addChild(shape, label);
-		partsByContainer.set(root, { root, shape, label, visualSig: "", textSig: "", wrapWidth: 0, resolution });
+		partsByContainer.set(root, { root, shape, label, visualSig: "", textSig: "", wrapWidth: 0 });
 		if (item.type === "shape") sync(root, item as SceneItem<BoardShapeItem>, context);
 		return root;
 	},
 	update: (container, item, context) => {
 		if (item.type === "shape") sync(container, item as SceneItem<BoardShapeItem>, context);
+	},
+	resolution: (container, _item, context) => {
+		const parts = partsByContainer.get(container);
+		if (parts) syncTextResolution(parts.label, context.textResolution);
 	},
 	renderFar: (graphics, item, context) => {
 		if (item.type !== "shape") return;

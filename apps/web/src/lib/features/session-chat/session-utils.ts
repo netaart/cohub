@@ -1,4 +1,8 @@
-import { resolveHarness } from "@cohub/protocol";
+import {
+	type HarnessKind,
+	type LocalHarness,
+	resolveHarness,
+} from "@cohub/protocol";
 import type { SessionTurnRecord } from "@cohub/protocol/model";
 import type { SessionRecord, TaskRunRecord } from "@neta-art/cohub";
 import {
@@ -17,7 +21,7 @@ export {
 
 type HarnessTurn = {
 	meta?: Record<string, unknown> | null;
-	harness?: "cohub" | "pi" | "codex";
+	harness?: HarnessKind;
 };
 export const resolveTurnHarness = (turn?: HarnessTurn) =>
 	resolveHarness({ harness: turn?.meta?.harness ?? turn?.harness });
@@ -42,7 +46,7 @@ type ComposerTurnSource = Pick<
  */
 export function resolveLocalModelFromTurns(
 	turns: ComposerTurnSource[],
-	harness: "pi" | "codex",
+	harness: LocalHarness,
 ): LocalModelSelection | null {
 	const meta = turns.findLast(
 		(turn) =>

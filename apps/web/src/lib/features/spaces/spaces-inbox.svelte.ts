@@ -20,6 +20,7 @@ import { sdk } from "$lib/sdk";
 import { authStore } from "$lib/stores/auth.svelte";
 import { getRecentSpaces, onRecentSpaceVisit } from "$lib/stores/recent-space";
 import type { ViewerFlags } from "$lib/stores/space-pins.svelte";
+import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 
 const PAGE_SIZE = 50;
 const PINNED_SYSTEM_KEY = "user:pinned";
@@ -240,6 +241,7 @@ class SpacesInbox {
 				this.list.remove(spaceId);
 				return;
 			}
+			cacheSpaceRecordSoon(space);
 			const known = this.list.find(spaceId);
 			if (!known) {
 				this.list.invalidate((filter) => filter !== "archived");

@@ -423,9 +423,10 @@ $effect(() => {
   <SpacePreviewPorts endpoints={previewEndpoints} {activePort} onOpen={onOpenPort} />
 
   {#if error}
-    <div class="mx-1.5 mt-2 flex items-start gap-2 rounded-md border border-error-soft/30 bg-error-bg p-2 text-[12px] text-error-soft">
+    <div class="mx-1.5 mt-2 flex items-start gap-2 rounded-md border border-error-soft/30 bg-error-bg p-2 text-[12px] text-error-soft" role="status">
       <AlertCircle class="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <span>{error}</span>
+      <span class="min-w-0 flex-1">{error}</span>
+      <button type="button" class="shrink-0 px-1 py-0.5 hover:underline" onclick={onRefresh}>{m.common_retry({}, { locale })}</button>
     </div>
   {/if}
 

@@ -28,16 +28,7 @@ export function installCohubDebuggerConsoleExports() {
 	window.cohubSaveDebugLog = () => saveCohubDebugBundle();
 }
 
-export function downloadCohubDebugBundle() {
-	const confirmed = window.confirm("Save the current debug info?");
-	if (!confirmed) {
-		return;
-	}
-
-	saveCohubDebugBundle();
-}
-
-function saveCohubDebugBundle() {
+export function saveCohubDebugBundle() {
 	const timestamp = formatDebugFileTimestamp(new Date());
 	downloadJsonFile(`cohub-debug-${timestamp}.log`, exportCohubDebugLog());
 	downloadJsonFile(`cohub-debug-${timestamp}.har`, exportCohubDebugHar());

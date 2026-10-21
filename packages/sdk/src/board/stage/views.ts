@@ -1,10 +1,10 @@
 import type { BoardEditor, BoardPointerEvent } from "../editor/index.js";
-import type { BoardFrame, BoardScene, BoardSceneItem, BoardViewport } from "../model/index.js";
+import { itemBounds, type BoardFrame, type BoardScene, type BoardSceneItem, type BoardViewport } from "../model/index.js";
 import { toBoardPointerEvent } from "./pointer.js";
 
 export type BoardItemViewContext = {
 	editor: BoardEditor;
-	zoom: number;
+	detailed: boolean;
 	selected: boolean;
 	toPointerEvent(event: PointerEvent): BoardPointerEvent;
 };
@@ -16,6 +16,8 @@ export type BoardItemViewInstance = {
 
 export type BoardItemView = {
 	type: string | ((item: BoardSceneItem) => boolean);
+	/** Optional screen-pixel threshold for expensive content, with built-in hysteresis. */
+	contentSize?: { width: number; height: number };
 	mount(element: HTMLElement, item: BoardSceneItem, context: BoardItemViewContext): BoardItemViewInstance;
 };
 
@@ -24,32 +26,31 @@ type Mounted = {
 	element: HTMLElement;
 	instance: BoardItemViewInstance;
 	item: BoardSceneItem;
-	zoom: number;
+	detailed: boolean;
 	selected: boolean;
 	style: string;
 };
 
 const VISIBLE_MARGIN = 240;
 
-function screenStyle(frame: BoardFrame, camera: BoardViewport, order: number): string {
-	const { zoom } = camera;
+function worldStyle(frame: BoardFrame, order: number): string {
 	return [
 		`z-index:${order}`,
-		`left:${frame.x * zoom + camera.x}px`,
-		`top:${frame.y * zoom + camera.y}px`,
-		`width:${frame.width * zoom}px`,
-		`height:${frame.height * zoom}px`,
-		`--board-zoom:${zoom}`,
+		`left:${frame.x}px`,
+		`top:${frame.y}px`,
+		`width:${frame.width}px`,
+		`height:${frame.height}px`,
 		`transform:rotate(${frame.rotation}deg)`,
 	].join(";");
 }
 
 function onScreen(frame: BoardFrame, camera: BoardViewport, surface: { width: number; height: number }) {
-	const left = frame.x * camera.zoom + camera.x;
-	const top = frame.y * camera.zoom + camera.y;
+	const bounds = itemBounds(frame);
+	const left = bounds.x * camera.zoom + camera.x;
+	const top = bounds.y * camera.zoom + camera.y;
 	return (
-		left + frame.width * camera.zoom >= -VISIBLE_MARGIN &&
-		top + frame.height * camera.zoom >= -VISIBLE_MARGIN &&
+		left + bounds.width * camera.zoom >= -VISIBLE_MARGIN &&
+		top + bounds.height * camera.zoom >= -VISIBLE_MARGIN &&
 		left <= surface.width + VISIBLE_MARGIN &&
 		top <= surface.height + VISIBLE_MARGIN
 	);
@@ -72,14 +73,34 @@ export function createBoardItemViewLayer(
 	editor: BoardEditor,
 	views: readonly BoardItemView[],
 	camera: () => BoardViewport,
+	onInvalidate: () => void = () => {},
 ): BoardItemViewLayer {
 	const element = host.ownerDocument.createElement("div");
 	element.dataset.boardViews = "";
 	element.style.cssText = "position:absolute;inset:0;z-index:2;overflow:hidden;pointer-events:none";
 	host.appendChild(element);
+	const world = host.ownerDocument.createElement("div");
+	world.style.cssText = "position:absolute;inset:0;transform-origin:0 0;pointer-events:none";
+	element.appendChild(world);
+	let cameraStyle = "";
 	const mounted = new Map<string, Mounted>();
+	const pointers = new Map<number, string>();
+	const retained = (id: string, entry: Mounted) =>
+		entry.element.contains(host.ownerDocument.activeElement) || [...pointers.values()].includes(id);
+	const pointerDown = (event: PointerEvent) => {
+		const target = event.target as Element | null;
+		const id = target?.closest<HTMLElement>("[data-board-item]")?.dataset.boardItem;
+		if (id && mounted.has(id)) pointers.set(event.pointerId, id);
+	};
+	const pointerEnd = (event: PointerEvent) => {
+		if (pointers.delete(event.pointerId)) onInvalidate();
+	};
+	element.addEventListener("pointerdown", pointerDown, true);
+	element.addEventListener("focusout", onInvalidate);
+	host.ownerDocument.addEventListener("pointerup", pointerEnd, true);
+	host.ownerDocument.addEventListener("pointercancel", pointerEnd, true);
 	const toPointerEvent = (event: PointerEvent) =>
-		toBoardPointerEvent(event, host.getBoundingClientRect(), camera());
+		toBoardPointerEvent(event, host, camera());
 	const viewFor = (item: BoardSceneItem) =>
 		views.find((view) => (typeof view.type === "string" ? view.type === item.type : view.type(item)));
 
@@ -87,22 +108,31 @@ export function createBoardItemViewLayer(
 		entry.instance.destroy?.();
 		entry.element.remove();
 		mounted.delete(id);
+		for (const [pointer, owner] of pointers) if (owner === id) pointers.delete(pointer);
 	}
 
 	return {
 		element,
 		sync({ ids, scene, camera: view, surface, selection }) {
 			if (views.length === 0) return;
+			const transform = `translate(${view.x}px,${view.y}px) scale(${view.zoom})`;
+			if (transform !== cameraStyle) world.style.transform = cameraStyle = transform;
 			const live = new Set<string>();
-			for (const id of ids ?? scene.items.map((item) => item.id)) {
+			const candidates = new Set(ids ?? scene.items.map((item) => item.id));
+			for (const [id, entry] of mounted) if (retained(id, entry)) candidates.add(id);
+			for (const id of candidates) {
 				const item = scene.get(id);
 				if (!item) continue;
 				const itemView = viewFor(item);
-				if (!itemView || !onScreen(item.frame, view, surface)) continue;
-				live.add(item.id);
-				const context = { editor, zoom: view.zoom, selected: selection.has(item.id), toPointerEvent };
-				const style = screenStyle(item.frame, view, scene.indexOf(item.id));
 				let entry = mounted.get(item.id);
+				const held = entry ? retained(id, entry) : false;
+				if (!itemView || (!held && !onScreen(item.frame, view, surface))) continue;
+				live.add(item.id);
+				const style = worldStyle(item.frame, scene.indexOf(item.id));
+				const minimum = itemView.contentSize;
+				const threshold = entry?.detailed ? 0.85 : 1;
+				const detailed = held || !minimum || (item.frame.width * view.zoom >= minimum.width * threshold && item.frame.height * view.zoom >= minimum.height * threshold);
+				const context = { editor, detailed, selected: selection.has(item.id), toPointerEvent };
 				if (entry && entry.view !== itemView) {
 					unmount(item.id, entry);
 					entry = undefined;
@@ -111,13 +141,13 @@ export function createBoardItemViewLayer(
 					const node = host.ownerDocument.createElement("div");
 					node.dataset.boardItem = item.id;
 					node.style.cssText = `position:absolute;pointer-events:none;transform-origin:center;${style}`;
-					element.appendChild(node);
+					world.appendChild(node);
 					mounted.set(item.id, {
 						view: itemView,
 						element: node,
 						instance: itemView.mount(node, item, context),
 						item,
-						zoom: context.zoom,
+						detailed: context.detailed,
 						selected: context.selected,
 						style,
 					});
@@ -127,9 +157,9 @@ export function createBoardItemViewLayer(
 					entry.element.style.cssText = `position:absolute;pointer-events:none;transform-origin:center;${style}`;
 					entry.style = style;
 				}
-				if (entry.item !== item || entry.zoom !== context.zoom || entry.selected !== context.selected) {
+				if (entry.item !== item || entry.detailed !== context.detailed || entry.selected !== context.selected) {
 					entry.item = item;
-					entry.zoom = context.zoom;
+					entry.detailed = context.detailed;
 					entry.selected = context.selected;
 					entry.instance.update?.(item, context);
 				}
@@ -137,6 +167,10 @@ export function createBoardItemViewLayer(
 			for (const [id, entry] of mounted) if (!live.has(id)) unmount(id, entry);
 		},
 		destroy() {
+			element.removeEventListener("pointerdown", pointerDown, true);
+			element.removeEventListener("focusout", onInvalidate);
+			host.ownerDocument.removeEventListener("pointerup", pointerEnd, true);
+			host.ownerDocument.removeEventListener("pointercancel", pointerEnd, true);
 			for (const [id, entry] of mounted) unmount(id, entry);
 			element.remove();
 		},

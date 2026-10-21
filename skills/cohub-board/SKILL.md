@@ -12,7 +12,7 @@ same shape into the document and lands it as one version.
 ```json
 {"board":{"background":{"kind":"grid"}},
  "items":{
-   "title":{"type":"text","position":{"x":80,"y":60},"props":{"text":"Plan","fontSize":48}},
+   "title":{"type":"text","position":{"x":80,"y":60},"props":{"text":"Plan","fontSize":40}},
    "hero":{"type":"shape","position":{"x":80,"y":160},"size":{"width":240,"height":120},"props":{"geometry":"rounded","text":"Ship"},"style":{"fill":"green","fillOpacity":0.12}}},
  "animations":{
    "intro":{"duration":1200,"tracks":{
@@ -50,7 +50,7 @@ cohub boards examples workflow > seed.json
 `schema` lists every field with its meaning and default — read it instead of guessing:
 
 ```bash
-cohub boards schema              # units, coordinates, item types, colors, animatable properties
+cohub boards schema              # units, scale, coordinates, item types, colors, animatable properties
 cohub boards schema frame        # one item type: text, shape, arrow, image, task, custom, …
 cohub boards schema frame --field props.decoration  # one field, without the full schema
 cohub boards schema track        # also board, animation, camera
@@ -61,6 +61,8 @@ cohub boards schema script       # the script attachment and the module API
 Worth knowing before you build:
 
 - Item and animation IDs must be distinct.
+- Match the scale of existing content when adding items. For a new Board, use
+  the examples or the recommended `scale` in `boards schema`.
 - Only frames are parents; children use frame-relative positions and move with it.
 - Set `z` to order layers; changing JSON key order does not reorder existing items.
 - Frames have a neutral outline and a small organizational label. Use
@@ -78,7 +80,7 @@ Worth knowing before you build:
 ```bash
 cohub boards get <board> --only board          # settings only
 cohub boards get <board> --within s1           # frame s1 and its children
-cohub boards get <board> --rect 0,0,1600,900   # a region
+cohub boards get <board> --rect 0,0,960,540    # a region
 
 cohub boards apply <board> '{"items":{"title":{"props":{"text":"New title"}}}}'
 cohub boards apply <board> -i patch.json --dry-run
@@ -161,6 +163,8 @@ cohub boards export <board> --items a,b -o /tmp/part.png       # or --frame <id>
 cohub boards export <board> --animation intro --at 1s,5s,9s --camera --size 1600x900 -o /tmp/preview-%d.png
 cohub boards export <board> --animation intro --at 0:10s:40ms --camera -o /tmp/intro.mp4
 ```
+
+`--size` sets the output pixels of a camera export; it never sizes frames.
 
 `inspect` checks the static document unless `--animation` is given. `bounds` uses
 world units with `x/y` at the top left, regardless of text alignment; `worldBounds`

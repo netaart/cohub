@@ -4,20 +4,9 @@ import { Check, Lock, Zap } from "lucide-svelte";
 import Sheet from "$lib/components/Sheet.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import type { SandboxSpecOption as SandboxSpec } from "./sandbox-settings.svelte";
 
 const locale = $derived(getLocale());
-
-type SandboxSpec = {
-	id: SandboxSpecId;
-	rank: number;
-	label: string;
-	description: string;
-	requiredPlan: string | null;
-	resources: {
-		limits: Record<string, string>;
-		requests: Record<string, string>;
-	};
-};
 
 const props = $props<{
 	open: boolean;
@@ -65,7 +54,6 @@ function specDescription(id: SandboxSpecId, fallback: string): string {
 
 <Sheet open={props.open} onClose={props.onClose} maxWidth="520px">
 	<div class="flex max-h-[88vh] flex-col">
-		<!-- Header -->
 		<div class="flex items-center gap-2.5 border-b border-border-subtle px-5 py-4">
 			<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-brand-bg text-brand">
 				<Zap class="h-4 w-4" />
@@ -76,7 +64,6 @@ function specDescription(id: SandboxSpecId, fallback: string): string {
 			</div>
 		</div>
 
-		<!-- Spec list -->
 		<div class="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-4">
 			{#each orderedSpecs as spec (spec.id)}
 				{@const locked = isLocked(spec)}

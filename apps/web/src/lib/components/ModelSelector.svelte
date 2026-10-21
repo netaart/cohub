@@ -1307,7 +1307,7 @@ const hoverCardPos = $derived.by(() => {
 				{availabilityLabel(hoveredLevel)}
 			</span>
 			<span class="text-[16px] font-semibold tabular-nums leading-none {`avail-rate--${hoveredLevel}`}">
-				{hoveredEntry?.successRate5m != null ? fmtRate(hoveredEntry.successRate5m) : "—"}{#if hoveredEntry?.successRate5m != null}<span class="text-[10px] font-medium text-text-tertiary">{m.model_avail_rate_5m({}, { locale })}</span>{/if}
+				{hoveredEntry?.successRateRecent != null ? fmtRate(hoveredEntry.successRateRecent) : "—"}{#if hoveredEntry?.successRateRecent != null}<span class="text-[10px] font-medium text-text-tertiary">{m.model_avail_rate_window({ minutes: hoveredEntry.successRateRecentWindowMinutes ?? 5 }, { locale })}</span>{/if}
 			</span>
 		</div>
 		<div class="mt-0.5 font-mono text-[10px] text-text-tertiary">{hoveredModelId}</div>

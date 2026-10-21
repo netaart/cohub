@@ -34,6 +34,7 @@ import type {
 	AppRuntimeInvocationContext,
 	AppRuntimeShellContext,
 } from "@neta-art/cohub";
+import { elementClientToLocal } from "@neta-art/cohub/board";
 import { onMount, type Snippet, untrack } from "svelte";
 import { page } from "$app/state";
 import { appDisplayTitle } from "$lib/app-page-meta";
@@ -406,8 +407,7 @@ const showDropProxy = $derived(
 );
 
 function framePoint(clientX: number, clientY: number) {
-	const rect = frame?.getBoundingClientRect();
-	return { x: clientX - (rect?.left ?? 0), y: clientY - (rect?.top ?? 0) };
+	return frame ? elementClientToLocal(frame)(clientX, clientY) : { x: 0, y: 0 };
 }
 
 function cancelDragFrame() {

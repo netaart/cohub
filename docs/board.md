@@ -9,9 +9,9 @@ shared runtime used by native items and custom content.
 {
   "board": { "background": { "kind": "dots" }, "grid": { "visible": true, "size": 24 }, "enter": { "preset": "deal" } },
   "items": {
-    "s3":   { "type": "frame", "position": { "x": 1700, "y": 1000 }, "size": { "width": 1600, "height": 900 }, "props": { "label": "Length contraction" } },
-    "ship": { "type": "shape", "parent": "s3", "position": { "x": 200, "y": 400 }, "size": { "width": 320, "height": 80 }, "props": { "geometry": "rounded" }, "style": { "fill": "blue" } },
-    "t3":   { "type": "text", "parent": "s3", "position": { "x": 80, "y": 60 }, "props": { "text": "Moving rulers get shorter", "fontSize": 48 } }
+    "s3":   { "type": "frame", "position": { "x": 2160, "y": 0 }, "size": { "width": 960, "height": 540 }, "props": { "label": "Length contraction" } },
+    "ship": { "type": "shape", "parent": "s3", "position": { "x": 120, "y": 240 }, "size": { "width": 192, "height": 48 }, "props": { "geometry": "rounded" }, "style": { "fill": "blue" } },
+    "t3":   { "type": "text", "parent": "s3", "position": { "x": 72, "y": 60 }, "props": { "text": "Moving rulers get shorter", "fontSize": 40 } }
   },
   "animations": {
     "scene-3": {
@@ -40,6 +40,10 @@ Common fields: `type`, `parent`, `z`, `position`, `size`, `rotation` (degrees),
 - `size` is authored for boxes (`frame`, `shape`, media, `task`, `effect`, `custom`)
   and derived for `text` (from `fontSize`, optional `props.width` wraps), `draw`
   (from points) and `arrow` (from endpoints).
+- One unit is one CSS pixel at 100% zoom, and defaults share one reading scale: a
+  slide is a 960×540 frame, media take a 480 long edge, cards keep their interface
+  size, and text uses 56 / 40 / 24 / 16 for title, heading, body and caption.
+  `boards schema` lists it under `scale`.
 - `style`: `fill`, `fillOpacity`, `stroke`, `strokeWidth`, `dash`, `radius`, `trim`.
   A color is a palette token (`brand`, `neutral`, `blue`, …, follows the theme),
   any CSS color, or `{ "light": …, "dark": … }`.
@@ -129,8 +133,8 @@ cohub generate "a calm lake at sunrise" -m <model> --async --json \
 When a run finishes, the worker writes its final snapshot onto every Board in
 the run's Space that shows it, one version per Board, attributed to the task
 (`source.via = "task"`). Items deleted meanwhile stay deleted. When the first
-result is a sized image or video, the card takes its aspect ratio at its
-current width, top edge in place; content below may be overlapped. Clients
+result is a sized image or video, the card takes its aspect ratio and keeps its
+long edge, top-left corner in place; nearby content may be overlapped. Clients
 draw "queued", "generating" and the elapsed time from realtime task events
 without writing the document.
 
@@ -249,9 +253,10 @@ cohub boards export lesson.board --animation lecture --at 1s,5s,9s --camera -o /
 cohub boards export lesson.board --animation lecture --at 0:30s:100ms --camera -o lesson.mp4
 ```
 
-Camera and fixed region options are mutually exclusive. `--size` determines camera
-output dimensions; `--scale` applies to fixed regions. In the web export dialog, choose
-an animation and time, then **Follow camera**. Export does not change shared playback.
+Camera and fixed region options are mutually exclusive. `--size` sets camera output
+pixels and never sizes frames; `--scale` applies to fixed regions. In the web export
+dialog, choose an animation and time, then **Follow camera**. Export does not change
+shared playback.
 
 Trails reconstruct recent target positions when seeking or exporting directly at a time.
 `follow` applies to trails only; use a shared parent frame to move a particle emitter

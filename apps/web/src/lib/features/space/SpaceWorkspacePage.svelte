@@ -47,6 +47,7 @@ import type {
 	BoardCollaboratorProfile,
 } from "$lib/board/board-activity";
 import { invalidateFilePreviews } from "$lib/board/board-file-preview-source";
+import { spaceFileUrls } from "$lib/board/space-file-urls";
 import { spaceFsRepo } from "$lib/cache/repositories/space-fs-repo";
 import { spaceRecordRepo } from "$lib/cache/repositories/space-record-repo";
 import {
@@ -106,8 +107,8 @@ import {
 	getSessionTitle,
 	subscribeSpaceChannel,
 } from "$lib/features/session-chat";
-import { createSessionRenameController } from "$lib/features/session-chat/session-rename-controller.svelte";
 import SessionChatPanel from "$lib/features/session-chat/SessionChatPanel.svelte";
+import { createSessionRenameController } from "$lib/features/session-chat/session-rename-controller.svelte";
 import { pushHostShortcut } from "$lib/host-bridge";
 import { getLocale } from "$lib/i18n/locale.svelte";
 // SettingsOverlay removed — settings merged inline into detail page
@@ -442,7 +443,9 @@ const appShell = $derived.by<AppRuntimeShellContext>(() => {
 const sessionRename = createSessionRenameController({
 	getTarget: () => {
 		const session = sessionChat.activeSession;
-		return session && session.spaceId === spaceId && session.id === routeSessionId
+		return session &&
+			session.spaceId === spaceId &&
+			session.id === routeSessionId
 			? {
 					spaceId,
 					sessionId: session.id,
@@ -1443,8 +1446,8 @@ $effect(() => {
 			layout,
 			{ hasRoutePreview, isMobile },
 		);
-		if (!openLayout || !layout.window) return;
-		if (hasRoutePreview) return;
+		if (!openLayout || !layout.window || hasRoutePreview) return;
+		if (isMobile && routeView === "session" && !isNewSessionRoute) return;
 		syncPreviewQuery(layout.window, true);
 	});
 });
@@ -1924,7 +1927,17 @@ function scheduleSpaceFsRefresh(input: {
 	if (eventPayload.resync || spaceConfigChanged(eventPayload.changes))
 		refreshSpaceConfig(eventSpaceId);
 
-	invalidateFilePreviews(eventSpaceId, eventPayload.changes ?? []);
+	const changes = eventPayload.changes ?? [];
+	if (eventPayload.resync) spaceFileUrls.expire(eventSpaceId);
+	spaceFileUrls.invalidate(
+		eventSpaceId,
+		changes.flatMap((change) =>
+			[change.path, change.oldPath].filter((path): path is string =>
+				Boolean(path),
+			),
+		),
+	);
+	invalidateFilePreviews(eventSpaceId, changes);
 
 	const batch: SpaceFsRefreshBatch = {
 		eventSpaceId,

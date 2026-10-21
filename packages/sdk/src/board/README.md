@@ -68,9 +68,56 @@ overlay (`stage/overlay.ts`) owns them, so pointer and selection changes redraw
 one layer. A renderer that still needs them sets `observesSelection`.
 
 Cache keys include `context.themeKey` rather than individual palette fields.
-Zoom-dependent detail flips on `boardCardDetailed`, which follows the text
-resolution buckets; anything that must track every zoom step uses the
-renderer's `zoom` hook and only touches transforms there.
+Zoom-dependent detail flips on `boardCardDetailed`, which follows the zoom
+buckets; anything that must track every zoom step uses the renderer's `zoom`
+hook and only touches transforms there. The `resolution` hook runs when the zoom
+bucket or `context.textResolution` changes; refresh text textures and
+bucket-dependent detail there instead of invalidating every renderer. The scene
+spreads these refreshes over frames, nearest to the viewport center first.
+
+Display density never changes CSS geometry or document coordinates. The canvas
+fills its host, and its backing store matches the device-pixel content box, so
+fractional display scaling composites without resampling. Density is capped at
+3× and a 10-megapixel budget that still fits a 4K screen.
+
+Text is a bitmap, sharp only when one texel lands on one device pixel.
+`context.textResolution` is that density in texels per world unit. While the
+camera moves, it stays put within a small tolerance and otherwise steps by powers
+of two; once the camera rests it becomes exact. Pass it, times any extra scale on
+the label, to `syncTextResolution`, which also bounds the texture edge.
+Inactive stages defer resizing until reactivation.
+
+## Resources
+
+Holding a texture is the demand signal. The scene calls
+`context.acquireTexture(key, item)` only for live cards, so far-covered cards never
+resolve, download or decode media. File URLs resolve outside the texture slots, so a
+slow lookup never blocks a texture that is ready; a retry passes `{ fresh: true }` to
+`resolveFileUrl`, because the cached URL may be what failed. Readiness, failure and
+invalidation notify with the resource key, and the stage refreshes only the cards that
+hold it. Natural media sizes are recorded once per frame after scene synchronization.
+`onLiveChange` reports the live set for other per-card work such as file previews.
+
+## DOM views
+
+The stage owns world-space position, size and rotation. A single camera container
+translates and scales all views. Render content in ordinary CSS pixels at the item's
+world size: do not multiply dimensions by zoom or apply an additional camera transform.
+Screen-fixed controls belong in the overlay, outside the camera container.
+
+A view may declare `contentSize: { width: 180, height: 120 }` in screen pixels and
+render expensive content only when `context.detailed` is true. The stage adds
+hysteresis and retains focused content and active pointer streams. Camera movement
+alone does not call `update`; item, selection and detail changes do. Continue using
+`context.toPointerEvent` for input conversion. Offscreen inactive views are destroyed;
+iframe state is not automatically persisted. Stage input conversion handles ancestor
+CSS `transform`, `rotate`, `scale` and `zoom` in 2D. Custom DOM integrations can pass the
+host element to `toBoardPointerEvent`, or use `elementClientToLocal` from
+`@neta-art/cohub/board` for client-to-padding-box coordinates.
+
+Migration: replace `context.zoom` and `--board-zoom` layout calculations with world
+sizes; use `contentSize` / `context.detailed` for LOD. `BoardScriptHost.frame` is a
+texture read and no longer accepts the previously ignored resolution argument.
 
 ## Scripts
 
@@ -90,7 +137,17 @@ iframe routes messages to per-instance workers and never executes user modules.
 DOM `mount()` exports are rejected. The broker stamps routing tokens after worker data so scripts
 cannot impersonate another instance. Output validation compiles only changed
 instances; the stage composes them once per frame. Texture revisions invalidate
-only their own card. Offscreen draws are omitted while simulation continues.
+only their own card. Spatially hidden or far-covered draws are omitted while simulation
+continues. The stage queries actual Scene materialization after scene synchronization;
+it does not maintain a second LOD state. Execution-only responses wake the script clock,
+not the scene renderer. Static scripts redraw when rematerialized or when density changes.
+
+Interactive bitmaps use quantized screen-pixel demand, including item scale and DPR,
+with hysteresis, a 2048-pixel edge limit and a 2-megapixel budget per bitmap. Zoom
+reuses existing textures until 120 ms after the last zoom change. Export hosts are
+independent of interactive visibility and settling. `draw()` must only render current
+state: it can be omitted or repeated and must not advance business state or issue
+persistent effects. Use frame/event handlers for those operations.
 
 Boards without enabled scripts do not create a script host, message listener, DOM
 layer, iframe or worker. The stage bypasses script clocks, composition and hit tests;

@@ -30,7 +30,9 @@ import {
 	deleteBoardPendingPatch,
 	listBoardPendingPatches,
 	readBoardDocumentCache,
+	readBoardManifestCache,
 	writeBoardDocumentCache,
+	writeBoardManifestCache,
 	writeBoardPendingPatch,
 } from "$lib/cache/repositories/board-repo";
 import { sdk } from "$lib/sdk";
@@ -262,6 +264,57 @@ export function createBoardWindowController(
 		return manifest.boardId;
 	}
 
+	function attachBoard(path: string, boardId: string) {
+		const previous = boards.find((item) => item.path === path)?.boardId;
+		if (previous === boardId && replicas.has(boardId)) return;
+		if (
+			previous &&
+			previous !== boardId &&
+			!boards.some((item) => item.boardId === previous && item.path !== path)
+		)
+			releaseReplica(previous);
+		const sibling = boards.find(
+			(item) => item.boardId === boardId && item.path !== path,
+		);
+		boards = boards.map((item) =>
+			item.path === path
+				? {
+						...item,
+						boardId,
+						document: sibling?.document ?? null,
+						playback: sibling?.playback ?? null,
+						loading: !sibling?.document,
+						error: null,
+					}
+				: item,
+		);
+		const replica = ensureReplica(boardId);
+		adoptReplicaState(boardId, replica.state);
+	}
+
+	function detachBoard(path: string, message: string) {
+		const board = boards.find((item) => item.path === path);
+		if (
+			board?.boardId &&
+			!boards.some(
+				(item) => item.boardId === board.boardId && item.path !== path,
+			)
+		)
+			releaseReplica(board.boardId);
+		boards = boards.map((item) =>
+			item.path === path
+				? {
+						...item,
+						boardId: null,
+						document: null,
+						playback: null,
+						loading: false,
+						error: message,
+					}
+				: item,
+		);
+	}
+
 	async function openBoard(
 		path: string,
 		input: { activate?: boolean; showLoading?: boolean } = {},
@@ -269,6 +322,7 @@ export function createBoardWindowController(
 		const activate = input.activate ?? true;
 		const existing = boards.find((item) => item.path === path);
 		if (!existing && input.showLoading === false) return;
+		const spaceId = options.getSpaceId();
 		const sourceKey = options.getSourceKey();
 		if (activate) options.onBeforeOpenBoard?.();
 		const token = ++nextRequestToken;
@@ -289,49 +343,41 @@ export function createBoardWindowController(
 				},
 			];
 		if (activate) options.onOpenPanel?.();
+		const manifest = { spaceId, sourceKey, path };
+		// Local first: open the cached Board while the server confirms the manifest.
+		const opened = !existing?.boardId;
+		if (opened) {
+			const cachedId = await readBoardManifestCache(manifest).catch(() => null);
+			if (cachedId && isCurrent(token, path, sourceKey))
+				attachBoard(path, cachedId);
+		}
 		try {
 			const boardId = await readManifest(path);
 			if (!isCurrent(token, path, sourceKey)) return;
-			const previous = boards.find((item) => item.path === path)?.boardId;
-			if (previous === boardId && replicas.has(boardId)) return;
-			if (
-				previous &&
-				previous !== boardId &&
-				!boards.some((item) => item.boardId === previous && item.path !== path)
-			)
-				releaseReplica(previous);
-			const sibling = boards.find(
-				(item) => item.boardId === boardId && item.path !== path,
+			void writeBoardManifestCache({ ...manifest, boardId }).catch(
+				() => undefined,
 			);
-			boards = boards.map((item) =>
-				item.path === path
-					? {
-							...item,
-							boardId,
-							document: sibling?.document ?? null,
-							playback: sibling?.playback ?? null,
-							loading: !sibling?.document,
-							error: null,
-						}
-					: item,
-			);
-			const replica = ensureReplica(boardId);
-			adoptReplicaState(boardId, replica.state);
+			attachBoard(path, boardId);
 		} catch (cause) {
 			if (!isCurrent(token, path, sourceKey)) return;
-			if (
-				existing?.document &&
-				cause instanceof HttpError &&
-				cause.status === 404
-			) {
+			const missing = cause instanceof HttpError && cause.status === 404;
+			if (missing)
+				void writeBoardManifestCache({ ...manifest, boardId: null }).catch(
+					() => undefined,
+				);
+			if (missing && existing?.document) {
 				closeBoard(path);
 				return;
 			}
 			const message =
 				cause instanceof Error ? cause.message : "Failed to open board";
+			if (missing && opened) {
+				detachBoard(path, message);
+				return;
+			}
 			boards = boards.map((item) =>
 				item.path === path
-					? item.document
+					? item.document || item.boardId
 						? { ...item, saveError: message }
 						: { ...item, loading: false, error: message }
 					: item,

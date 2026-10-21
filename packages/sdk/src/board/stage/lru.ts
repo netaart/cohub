@@ -22,10 +22,14 @@ export type LruBudget = {
 	maxBytes: number;
 };
 
-/** Default cooling-pool ceiling: 64 images or ~128 MB of GPU memory. */
+/** Default cooling-pool ceiling: 512 images or ~192 MB of GPU memory. */
 export const DEFAULT_LRU_BUDGET: LruBudget = {
-	maxCount: 64,
-	maxBytes: 128 * 1024 * 1024,
+	maxCount: 512,
+	maxBytes: 192 * 1024 * 1024,
+};
+export const COMPACT_LRU_BUDGET: LruBudget = {
+	maxCount: 256,
+	maxBytes: 96 * 1024 * 1024,
 };
 
 /**

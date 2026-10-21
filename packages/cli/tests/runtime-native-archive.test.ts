@@ -4,7 +4,11 @@ import { mkdtemp, readFile, writeFile, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { importNativeArchive } from "../src/runtime/native/archive.js";
+import type { LocalHarness } from "@neta-art/cohub";
+import { harnessAdapter } from "../src/runtime/harnesses/index.js";
+import type { NativeArchiveImport } from "../src/runtime/harnesses/types.js";
+
+const importNativeArchive = (input: NativeArchiveImport & { harness: LocalHarness }) => harnessAdapter(input.harness).session.archive.import(input);
 
 for (const harness of ["pi", "codex"] as const) test(`${harness} import changes only a working-copy header and preserves opaque history bytes`, async () => {
   const root = await mkdtemp(join(tmpdir(), "native-import-"));
@@ -24,6 +28,24 @@ for (const harness of ["pi", "codex"] as const) test(`${harness} import changes 
     await assert.rejects(importNativeArchive({ source, target, harness, nativeSessionId, id, cwd: root }), /EEXIST/);
     assert.deepEqual(await readFile(target), working);
     assert.equal((await readdir(root)).some((name) => name.endsWith(".importing")), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+for (const harness of ["claude", "workbuddy"] as const) test(`${harness} import rebinds only the top-level session id and keeps every other byte`, async () => {
+  const root = await mkdtemp(join(tmpdir(), "native-import-"));
+  try {
+    const source = join(root, "raw"), target = join(root, "working");
+    const nativeSessionId = randomUUID(), id = randomUUID();
+    const lines = [
+      `{"type":"user", "input": {"sessionId": "${nativeSessionId}", "account": 9007199254740993}, "sessionId" : "${nativeSessionId}", "text": "中文 \\" \\u0022sessionId\\": x"}`,
+      '{ "type": "file-history-snapshot", "number": 9007199254740993 }\r',
+      `{"sessionId":"${nativeSessionId}","torn":`,
+    ];
+    await writeFile(source, lines.join("\n"));
+    const result = await importNativeArchive({ source, target, harness, nativeSessionId, id, cwd: root });
+    assert.equal(result.nativeSessionId, id);
+    const expected = [lines[0]?.replace(`"sessionId" : "${nativeSessionId}"`, `"sessionId" : "${id}"`), lines[1], lines[2]?.replace(nativeSessionId, id)].join("\n");
+    assert.equal(await readFile(target, "utf8"), expected);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

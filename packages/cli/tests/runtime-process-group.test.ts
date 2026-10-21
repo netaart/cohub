@@ -22,7 +22,7 @@ test("an RPC process closed by the host is not a failure; one killed from outsid
 });
 
 test("RPC close waits for a SIGTERM-resistant descendant with detached pipes", { skip: process.platform !== "linux", timeout: 10_000 }, async () => {
-  const rpc = new JsonRpcProcess(process.execPath, [fileURLToPath(new URL("./fixtures/runtime-process-tree.mjs", import.meta.url))], process.cwd(), "codex");
+  const rpc = new JsonRpcProcess(process.execPath, [fileURLToPath(new URL("./fixtures/runtime-process-tree.mjs", import.meta.url))], process.cwd(), "jsonrpc");
   let pids: number[] = [];
   try {
     const response = await rpc.request("pid"); pids = [Number(response.branch), Number(response.leaf)];

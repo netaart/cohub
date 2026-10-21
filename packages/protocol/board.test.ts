@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	applyBoardPatchToDocument,
+	BOARD_DEFAULT_SIZES,
 	createDocumentLayout,
 	diffBoardDocuments,
 	emptyBoardDocument,
@@ -28,7 +29,7 @@ test("items fill defaults, stack on top and round-trip whole", () => {
 		},
 	});
 	assert.equal(document.items.a?.type, "shape");
-	assert.deepEqual(document.items.a && "size" in document.items.a ? document.items.a.size : null, { width: 240, height: 160 });
+	assert.deepEqual(document.items.a && "size" in document.items.a ? document.items.a.size : null, BOARD_DEFAULT_SIZES.shape);
 	assert.equal(document.items.a?.z, 1);
 	assert.equal(document.items.b?.z, 2);
 	// A written value carries its defaults, so parsing it back is the identity.

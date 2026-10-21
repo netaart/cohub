@@ -1,4 +1,5 @@
 import {
+	type BoardManifestCacheRecord,
 	idbDeleteWhere,
 	idbGetAll,
 	type LabelItemsCacheRecord,
@@ -8,6 +9,7 @@ import {
 	type SessionListCacheRecord,
 	type SessionListIndexCacheRecord,
 	type SessionTurnsCacheRecord,
+	type SpaceFileUrlCacheRecord,
 	type SpaceFsDirCacheRecord,
 } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
@@ -30,6 +32,8 @@ const MAX_ENTRIES = {
 	labelItems: 5000,
 	resourceLabels: 5000,
 	activity: 30,
+	boardManifests: 2000,
+	spaceFileUrls: 20000,
 };
 
 function shouldRunCleanup() {
@@ -62,7 +66,9 @@ async function cleanupStore<
 		| "label_trees"
 		| "label_items"
 		| "resource_labels"
-		| "activity",
+		| "activity"
+		| "board_manifests"
+		| "space_file_urls",
 	maxEntries: number,
 ) {
 	const userKey = getCacheUserKey();
@@ -131,6 +137,14 @@ export function scheduleCacheCleanup() {
 				MAX_ENTRIES.resourceLabels,
 			),
 			cleanupStore<ActivityCacheRecord>("activity", MAX_ENTRIES.activity),
+			cleanupStore<BoardManifestCacheRecord>(
+				"board_manifests",
+				MAX_ENTRIES.boardManifests,
+			),
+			cleanupStore<SpaceFileUrlCacheRecord>(
+				"space_file_urls",
+				MAX_ENTRIES.spaceFileUrls,
+			),
 		])
 			.then(markCleanupDone)
 			.catch(() => undefined);

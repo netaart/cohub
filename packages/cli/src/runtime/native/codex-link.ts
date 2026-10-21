@@ -12,6 +12,12 @@ export const CODEX_SHARED_MIN_VERSION: Version = [0, 156, 0];
 const REQUEST_TIMEOUT_MS = 60_000;
 const JOIN_ATTEMPTS = 20;
 const JOIN_RETRY_MS = 100;
+const CLOSING_ATTEMPTS = 100;
+/**
+ * A loaded thread holds Codex's per-thread writer lock, which Codex Desktop and other app-servers
+ * need to continue it. Long enough for an immediate follow-up Turn; honoured from Codex 0.164.
+ */
+export const CODEX_UNLOAD_DELAY_SECS = 10;
 /** `codex app-server daemon start` returns once the server listens; anything slower has failed. */
 const DAEMON_START_TIMEOUT_MS = 30_000;
 
@@ -87,6 +93,7 @@ export class CodexShared {
   private opening: Promise<CodexChannel | null> | null = null;
   private ensured = false;
   private readonly connectListeners = new Set<(channel: CodexChannel) => void>();
+  private readonly releaseListeners = new Set<(threadId: string) => void>();
   readonly driving = new Set<string>();
 
   constructor(private readonly binary: string, private readonly cwd: string, public enabled: boolean) {}
@@ -110,6 +117,19 @@ export class CodexShared {
   onConnect(listener: (channel: CodexChannel) => void): () => void {
     this.connectListeners.add(listener);
     return () => { this.connectListeners.delete(listener); };
+  }
+
+  onRelease(listener: (threadId: string) => void): () => void {
+    this.releaseListeners.add(listener);
+    return () => { this.releaseListeners.delete(listener); };
+  }
+
+  /** Drop this connection's subscription so an idle thread can unload and free its writer lock. */
+  async release(threadId: string): Promise<void> {
+    for (const listener of this.releaseListeners) listener(threadId);
+    const channel = this.channel;
+    if (!channel || channel.closed) return;
+    await channel.request("thread/unsubscribe", { threadId }).catch(() => undefined);
   }
 
   async join(threadId: string): Promise<JsonRecord | null> {
@@ -215,6 +235,19 @@ class StdioChannel implements CodexChannel {
     });
   }
   async close() { await this.rpc.close(); }
+}
+
+/** Resume a thread for a Cohub Turn, waiting out an unload in progress. */
+export async function resumeThread(channel: CodexChannel, params: JsonRecord): Promise<JsonRecord> {
+  for (let attempt = 1; ; attempt += 1) {
+    try { return await channel.request("thread/resume", params); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("already has an active writer")) throw new Error("This Codex conversation is open in another app, such as Codex Desktop. Close it there, then retry.");
+      if (!message.includes("is closing") || attempt >= CLOSING_ATTEMPTS) throw error;
+      await new Promise((resolve) => setTimeout(resolve, JOIN_RETRY_MS));
+    }
+  }
 }
 
 /**

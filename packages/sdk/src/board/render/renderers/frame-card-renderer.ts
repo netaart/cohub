@@ -15,7 +15,6 @@ type FrameParts = {
 	label: Text;
 	visualSig: string;
 	textSig: string;
-	resolution: number;
 };
 
 const partsByContainer = new WeakMap<Container, FrameParts>();
@@ -27,7 +26,6 @@ function sync(container: Container, item: SceneItem<BoardFrameItem>, context: Bo
 	if (!parts) return;
 	const { frame, style, props, locked } = item;
 	positionShell(parts.root, item);
-	syncTextResolution(parts.label, parts, context.zoom);
 
 	const fill = itemColor(context, style.fill ?? style.stroke, "neutral", "fill");
 	const fillAlpha = (style.fillOpacity ?? (style.fill ? 1 : DEFAULT_WASH)) * itemAlpha(context, style.fill ?? style.stroke);
@@ -60,6 +58,7 @@ function sync(container: Container, item: SceneItem<BoardFrameItem>, context: Bo
 		parts.label.style.fill = labelColor;
 		parts.label.style.fontFamily = context.style.font;
 	}
+	syncTextResolution(parts.label, context.textResolution);
 	parts.label.position.set(4, -18);
 }
 
@@ -69,14 +68,18 @@ export const frameCardRenderer: BoardCardRenderer = {
 	create: (item, context) => {
 		const root = new Container();
 		const box = new Graphics();
-		const label = createLabel("", { fill: context.palette.muted, fontFamily: BOARD_FONT_STACK, fontSize: 12, fontWeight: "600" });
+		const label = createLabel("", { fill: context.palette.muted, fontFamily: BOARD_FONT_STACK, fontSize: 12, fontWeight: "600" }, context.textResolution);
 		root.addChild(box, label);
-		partsByContainer.set(root, { root, box, label, visualSig: "", textSig: "", resolution: label.resolution });
+		partsByContainer.set(root, { root, box, label, visualSig: "", textSig: "" });
 		if (item.type === "frame") sync(root, item as SceneItem<BoardFrameItem>, context);
 		return root;
 	},
 	update: (container, item, context) => {
 		if (item.type === "frame") sync(container, item as SceneItem<BoardFrameItem>, context);
+	},
+	resolution: (container, _item, context) => {
+		const parts = partsByContainer.get(container);
+		if (parts) syncTextResolution(parts.label, context.textResolution);
 	},
 	renderFar: (graphics, item, context) => {
 		if (item.type !== "frame" || item.props.decoration === "none") return;

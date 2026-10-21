@@ -201,7 +201,7 @@ function registerExportCommand(boards: Command): void {
     .requiredOption("-o, --out <file>", "Output file; the extension picks the format. Sequences need %d, e.g. frames/%04d.png")
     .option("--at <time>", "A moment, comma-separated moments, or start:end:step")
     .option("--camera", "Follow the animation camera")
-    .option("--size <widthxheight>", "Camera viewport in pixels", "1600x900")
+    .option("--size <widthxheight>", "Camera output in pixels; frames keep their own size", "1600x900")
     .option("--animation <id>", "Animation the --at times refer to")
     .option("--frame <item-id>", "Export one frame as a page")
     .option("--items <ids>", "Comma-separated item ids")

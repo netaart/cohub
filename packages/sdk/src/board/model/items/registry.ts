@@ -1,4 +1,5 @@
 import { type BoardItem, hasAuthoredSize, parseBoardItem } from "@cohub/protocol";
+import { boardDefaultSize } from "@cohub/protocol/board-constants";
 import { frameContainsPoint, itemBounds, type Rect, type WorldPoint } from "../geometry.js";
 import type { BoardSceneItem } from "../scene.js";
 import { builtinBoardItems } from "./builtin.js";
@@ -17,8 +18,6 @@ export type BoardItemInput = {
 	size?: { width: number; height: number };
 	id?: string;
 };
-
-const DEFAULT_ITEM_SIZE = { width: 240, height: 160 };
 
 export type BoardRegistry = {
 	readonly definitions: readonly BoardItemDefinition[];
@@ -73,7 +72,7 @@ export function createBoardRegistry(definitions: Iterable<BoardItemDefinition> =
 		create(type, { props = {}, at, size, id = createBoardItemId() }) {
 			const valid = validateProps(type, props);
 			if (!valid.ok) throw new Error(valid.message);
-			const box = size ?? byType.get(type)?.size ?? DEFAULT_ITEM_SIZE;
+			const box = size ?? byType.get(type)?.size ?? boardDefaultSize(type);
 			const placement = hasAuthoredSize(type)
 				? { position: { x: at.x - box.width / 2, y: at.y - box.height / 2 }, size: { ...box } }
 				: { position: { x: at.x, y: at.y } };

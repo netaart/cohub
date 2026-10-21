@@ -1,5 +1,62 @@
 # @neta-art/cohub
 
+## 12.1.0
+
+### Minor Changes
+
+- e4e8b58: Render Board text pixel-exact at any zoom and display scaling. Text rasterises at the exact screen density once the camera rests and steps by powers of two while it moves; refreshes run over several frames, starting nearest the viewport center. The canvas backing store follows the device-pixel content box, and the pixel budget now fits 4K screens.
+  
+  Breaking changes for custom renderers and direct scene users:
+  
+  - `BoardRenderContext` requires `textResolution`, the text raster density in texels per world unit.
+  - `syncTextResolution(text, state, zoom)` becomes `syncTextResolution(text, resolution)`; `textResolutionForZoom` is removed.
+  - `createBoardScene` renames `onFarLayerFrame` to `requestFrame`.
+  
+  Custom renderers that draw text should apply the context density on update and in the `resolution` hook:
+  
+  ```ts
+  resolution: (container, _item, context) => {
+    const label = labels.get(container);
+    if (label) syncTextResolution(label, context.textResolution);
+  },
+  ```
+
+## 12.0.0
+
+### Major Changes
+
+- bdc38af: Stop rendering Board playback once its position settles. A shared playback that finished on `end: "hold"` or waits at a pause marker keeps its `playing` status but no longer drives frames, so opening a Board that was played once stays idle. Replace `playbackTimeAt` with `playbackClockAt`, which returns `{ time, advancing }`.
+- fa7e272: Render Board DOM views in world coordinates under one camera transform. Replace `BoardItemViewContext.zoom` and `--board-zoom` layout scaling with ordinary world-size CSS; declare `contentSize` and consume `context.detailed` for screen-size LOD. Focused views and active pointer streams are retained.
+  
+  Stop producing script bitmaps for far-covered items, size interactive bitmaps to quantized screen demand, and separate execution-only wakeups from visual invalidation. `BoardScriptHost.frame` no longer accepts the previously ignored resolution argument. `update()` is no longer called when the zoom bucket or DPR changes. Custom renderers that update text resolution or zoom-dependent detail in `update()` must implement `resolution` instead. Keep uncovered real nodes only during the first progressive far pass, counting retained nodes against the live budget.
+- 02d0414: Load Board resources only for live cards. `BoardRenderContext.acquireTexture` now receives the item and starts its load, so far-covered cards no longer resolve or download media; custom renderers that acquire textures must pass the item. `BoardAssetManager.subscribe` listeners receive the affected resource key, and the stage refreshes only the cards holding it instead of every live card.
+  
+  Resolve file URLs outside texture slots and retry failed loads with `resolveFileUrl(path, { fresh: true })`. Raise the default texture concurrency to 6 and the cooling pool to 128 textures or 192 MB; `COMPACT_LRU_BUDGET` keeps the previous footprint for constrained devices. Add `onLiveChange` to stage options. A Board replica now shares unchanged items, settings and animations across reads, and confirming the cached version neither replaces the document nor rewrites the cache.
+- e0a660e: Load Board image textures at their displayed size. `BoardAssetManager.requestItem(item, edge)` takes the edge from the new `boardTextureEdge(item, scale)` and loads the smallest CDN variant covering it, keeping the original for hosts that cannot resize; the stage sharpens live textures once zooming in or resizing settles, and swaps them without dropping the shown image. Space files on `sessions.cohub.live` now resize through OSS like other media hosts. `withTextures` accepts an `edge` option, task preview keys use the original cover URL, and `getNaturalSize` reports the original size, probing it once when only a variant is loaded. Raise the cooling pool to 512 textures (256 compact) within the same byte budget. Built-in renderers compare texture identity instead of dimensions, so custom renderers should do the same to pick up sharper textures.
+
+### Minor Changes
+
+- 3cdf904: Map Board pointer input through ancestor CSS `transform`, `rotate`, `scale` and `zoom`, and let `toBoardPointerEvent` take a host element. `clientToLocal` and `elementClientToLocal` from `@neta-art/cohub/board` convert client coordinates into an element's padding-box layout pixels.
+- 6623e23: Draw image and video cards as textured fills cut to the card outline instead of masked sprites. Media cards no longer render through stencil masks, so a Board full of images batches its draws and pans and zooms with far less GPU work. Add `fillCardPicture` for renderers that paint media into a card outline.
+- d6bc322: Give Board items one reading scale. Schema defaults now match the sizes the web creates, media and task cards take a 480 long edge from every entry, and refits keep the long edge instead of the width. `boardTaskCardSize` exposes the task card sizing. `boards schema` lists the scale, and the slide examples use 960×540 pages.
+- 1df0409: Add Cursor (`cursor-agent`) as a local harness: Cohub Turns hand over history and resume natively, and terminal and IDE Cursor chats sync read-only. Deploy API, Gateway and Agent before the CLI.
+
+### Patch Changes
+
+- 1063e2f: Upgrade Generation SDK to 0.1.40. Seedance declarations now use the upstream resolution values: Seedance 2.0 exposes 480p, 720p, 1080p and 4k; Seedance 2.0 Fast exposes 480p and 720p; Seedance 2.5 exposes 480p, 720p and 1080p. The unsupported 2K resolution and the 3:2 and 2:3 aspect ratios are removed.
+
+## 11.5.1
+
+### Patch Changes
+
+- 451b5d3: Improve Board sharpness on high-DPI displays with up to 3× rendering and a bounded canvas pixel budget. Refresh density and text textures when the display changes without moving the camera, and fix multi-label cards only refreshing their first text texture.
+
+## 11.5.0
+
+### Minor Changes
+
+- 6347fa9: Local Runtime harnesses are self-contained adapters driven by one protocol registry (`LOCAL_HARNESSES` / `LOCAL_HARNESS_SPECS`), and `cohub runtime up` adds Claude Code (`--harness claude`) and WorkBuddy (`--harness workbuddy`, via the `codebuddy` CLI). Both run Cohub Turns over stream-json, carry Cohub history in their native transcripts, resume natively and restore from archives; full access maps to `acceptEdits`, read-only to `plan` with only Read/Glob/Grep and no MCP servers, and permission requests are never granted. Without `--harness`, an installed harness that cannot start is skipped with a warning. Deploy API, Gateway and Agent before updating the CLI. Bilingual summary: 本地 Runtime 的 Harness 改为由协议注册表驱动的独立适配器，并新增 Claude Code（`--harness claude`）与 WorkBuddy（`--harness workbuddy`，使用 `codebuddy` CLI）。二者通过 stream-json 执行 Cohub Turn，云端历史写入原生会话文件，可原生续接并从归档恢复；完整权限映射为 `acceptEdits`，只读映射为仅开放 Read/Glob/Grep 且不加载 MCP 的 `plan`，权限请求不会被批准。未指定 `--harness` 时，无法启动的已安装 Harness 会告警并跳过。请先部署 API、Gateway 与 Agent，再更新 CLI。
+
 ## 11.4.0
 
 ### Minor Changes

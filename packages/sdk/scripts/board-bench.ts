@@ -40,17 +40,22 @@ function benchDocument(count: number) {
 
 function countUpdates() {
 	let updates = 0;
+	let resolutions = 0;
 	const wrapped = new Map<string, BoardCardRenderer>();
 	const resolve = (item: Parameters<typeof getBoardCardRenderer>[0], context: BoardRenderContext) => {
 		const base = getBoardCardRenderer(item, context);
 		let renderer = wrapped.get(base.id);
 		if (!renderer) {
-			renderer = { ...base, update: (container, next, ctx) => { updates += 1; base.update(container, next, ctx); } };
+			renderer = {
+				...base,
+				update: (container, next, ctx) => { updates += 1; base.update(container, next, ctx); },
+				...(base.resolution ? { resolution: (container: Container, next: Parameters<BoardCardRenderer["update"]>[1], ctx: BoardRenderContext) => { resolutions++; base.resolution?.(container, next, ctx); } } : {}),
+			};
 			wrapped.set(base.id, renderer);
 		}
 		return renderer;
 	};
-	return { resolve, take: () => { const value = updates; updates = 0; return value; } };
+	return { resolve, take: () => { const value = { updates, resolutions }; updates = 0; resolutions = 0; return value; } };
 }
 
 const renderer = await createNodeBoardRenderer();
@@ -77,6 +82,7 @@ const context: BoardRenderContext = {
 	themeKey: "bench",
 	rendererType: "canvas",
 	zoom: 1,
+	textResolution: 1,
 	reducedMotion: true,
 	labels: DEFAULT_BOARD_RENDER_LABELS,
 	taskRun: () => null,
@@ -116,8 +122,8 @@ function measure(label: string, rounds: number, run: (round: number) => void, se
 	}
 	times.sort((a, b) => a - b);
 	const ms = times[Math.floor(times.length / 2)] ?? 0;
-	const updates = counter.take() / rounds;
-	console.log(`${label.padEnd(18)} ${ms.toFixed(3).padStart(8)} ms/op ${updates.toFixed(1).padStart(7)} card updates/op`);
+	const counts = counter.take();
+	console.log(`${label.padEnd(18)} ${ms.toFixed(3).padStart(8)} ms/op ${(counts.updates / rounds).toFixed(1).padStart(7)} card updates/op ${(counts.resolutions / rounds).toFixed(1).padStart(7)} resolution updates/op`);
 }
 
 const ids = scene.items.map((item) => item.id);
@@ -127,6 +133,9 @@ measure("materialize", 7, () => sync(), () => {
 	live = createBoardScene({ world, overlay, getRenderer: counter.resolve });
 });
 measure("idle sync", ROUNDS, () => sync());
+measure("zoom bucket", ROUNDS, (round) => sync({ zoom: round % 2 ? 1 : 1.1 }));
+sync({ zoom: 1.1 });
+measure("zoom within bucket", ROUNDS, (round) => sync({ zoom: 1.1 + (round % 2) * 0.1 }));
 measure("hover change", ROUNDS, (round) => sync({ hoveredId: ids[round % ids.length] ?? null }));
 measure("select change", ROUNDS, (round) => sync({ selectedIds: new Set([ids[(round * 7) % ids.length] as string]) }));
 measure("select all", 4, (round) => sync({ selectedIds: round % 2 ? new Set() : new Set(ids) }));

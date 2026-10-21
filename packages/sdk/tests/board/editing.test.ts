@@ -84,6 +84,7 @@ test("strokes and arrows store their points relative to their position", () => {
 
 test("mediaFrameSize keeps the natural aspect and falls back when unknown", () => {
 	assert.deepEqual(mediaFrameSize(1920, 1080, 480), { width: 480, height: 270 });
+	assert.deepEqual(mediaFrameSize(64, 32), { width: 64, height: 32 });
 	assert.deepEqual(mediaFrameSize(null, null, 480, { width: 320, height: 180 }), { width: 320, height: 180 });
 });
 

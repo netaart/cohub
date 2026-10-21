@@ -48,7 +48,7 @@ function sync(container: Container, item: SceneItem<BoardFileItem>, context: Boa
 	const elevation = cardElevation(context, item.id);
 	const sig = [
 		key ?? "",
-		texture ? `${texture.width}x${texture.height}` : "none",
+		texture?.uid ?? "none",
 		failed,
 		width,
 		height,
@@ -107,6 +107,9 @@ export const modelCardRenderer: BoardCardRenderer = {
 		return root;
 	},
 	update: (container, item, context) => {
+		if (item.type === "file") sync(container, item, context);
+	},
+	resolution: (container, item, context) => {
 		if (item.type === "file") sync(container, item, context);
 	},
 	zoom: (container, zoom) => {

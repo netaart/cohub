@@ -473,6 +473,14 @@ $effect(() => {
 </div>
 
 {#if isDir && node.isOpen && depth < 50}
+  {#if node.loadError}
+    <div class="flex items-center gap-2 py-1 text-[12px] text-text-tertiary" style:padding-left={`${(depth + 1) * 14 + 8}px`} role="status">
+      <span class="min-w-0 flex-1">{node.loadError}</span>
+      <button type="button" class="shrink-0 px-2 py-1 text-text-secondary hover:text-text-primary" onclick={() => onToggle({ ...node, isOpen: false })}>
+        {m.common_retry({}, { locale })}
+      </button>
+    </div>
+  {/if}
   {#each node.children as child (child.path)}
     <FsTreeItem
       node={child}

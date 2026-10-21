@@ -38,6 +38,7 @@ const { executeTurn } = await import("../src/runtime/native/execution.js");
 const { installPiExtension } = await import("../src/runtime/native/install.js");
 const { RuntimeArchiveStore } = await import("../src/runtime/archive-store.js");
 const { RuntimeDiagnostics } = await import("../src/runtime/diagnostics.js");
+const { atLeast, harnessVersion } = await import("../src/runtime/native/version.js");
 const { runtimeProjectionSource } = await import("./fixtures/runtime-projection-source.js");
 const { fakeNativeServer } = await import("./fixtures/native-server.js");
 
@@ -189,6 +190,33 @@ async function codexTerminal(): Promise<Terminal> {
   return terminal;
 }
 
+/** Codex Desktop: its own app-server, which needs the thread's writer lock to continue a thread. */
+async function codexDesktop(binary: string): Promise<Terminal & { exited: Promise<unknown> }> {
+  const child = spawn(binary, ["app-server", "--listen", "stdio://"], { cwd: project, env: process.env, stdio: ["pipe", "pipe", "ignore"] });
+  const pending = new Map<string, (value: unknown) => void>();
+  let buffer = "", sequence = 0;
+  child.stdout.on("data", (bytes: Buffer) => {
+    buffer += bytes.toString("utf8");
+    for (let end = buffer.indexOf("\n"); end >= 0; end = buffer.indexOf("\n")) {
+      const message = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
+      if (message.id != null && pending.has(String(message.id))) { pending.get(String(message.id))?.(message); pending.delete(String(message.id)); }
+    }
+  });
+  const exited = new Promise((resolve) => child.once("exit", resolve));
+  const desktop = {
+    exited,
+    request: (method: string, params: Record<string, unknown> = {}) => new Promise((resolve) => {
+      const id = `d${++sequence}`;
+      pending.set(id, resolve);
+      child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+    }),
+    close: () => { child.kill("SIGTERM"); },
+  };
+  await desktop.request("initialize", { clientInfo: { name: "smoke-desktop", title: "Smoke", version: "1" }, capabilities: { experimentalApi: true } });
+  child.stdin.write(`${JSON.stringify({ method: "initialized", params: {} })}\n`);
+  return desktop;
+}
+
 try {
   if (piBinary) {
     await mkdir(join(home, "pi", "extensions"), { recursive: true });
@@ -288,6 +316,23 @@ try {
       assert.match(JSON.stringify(envResult.event.message.content) + JSON.stringify(await readRows(result.session.path)), new RegExp(`session=${first.sessionId}`), "shared-server tools see their Session");
       console.log("codex: tools on the shared server see their Session ✓");
 
+      // 6b. Once the Cohub Turn ends, Codex Desktop's own app-server can continue the thread.
+      //     Codex honours the per-thread unload delay from 0.164; before, the server-wide one applies.
+      if (atLeast(await harnessVersion(codexBinary), [0, 164, 0])) {
+        const desktop = await codexDesktop(codexBinary);
+        try {
+          await until("Codex Desktop takes the thread over", async () => {
+            const resumed = await desktop.request("thread/resume", { threadId: result.session.nativeSessionId }) as { error?: { message?: string } };
+            if (resumed.error && !/active writer|is closing/.test(String(resumed.error.message))) throw new Error(String(resumed.error.message));
+            return !resumed.error;
+          });
+          const blocked = turn("codex", "hello while Desktop has it", { sessionId: first.sessionId, context: { complete: true, revision: "r", throughTurnId: envcheck.turnId, settledTurnIds: [first.turnId, envcheck.turnId], messages: [] } });
+          await assert.rejects(dispatch(native, server, blocked, "codex-blocked", envcheck.turnId), /open in another app/);
+          server.turns.delete(blocked.turnId);
+        } finally { desktop.close(); await desktop.exited; }
+        console.log("codex: Codex Desktop can continue the thread after a Cohub Turn, which then says so ✓");
+      }
+
       // 7. Another client of the same server (the terminal) continues the thread; the Turn syncs
       //    as a continuation of the Cohub Turn.
       const tui = await codexTerminal();
@@ -313,7 +358,8 @@ try {
       const before = server.progress.length;
       await tui.request("turn/start", { threadId, input: [{ type: "text", text: "a slow task in a new thread", text_elements: [] }] });
       await until("new terminal thread streams live", () => server.progress.length >= before + 3);
-      assert.equal(native.status().codex?.watching, 2);
+      // Idle threads are released; only the running one stays joined.
+      await until("only the running thread is watched", () => native.status().codex?.watching === 1);
       console.log("codex: a thread the terminal started streams live ✓");
       tui.close();
     } finally {

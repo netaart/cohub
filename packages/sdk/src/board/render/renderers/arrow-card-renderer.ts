@@ -5,7 +5,7 @@ import { resolveSceneArrow, pathPointAt } from "../../model/arrow-geometry.js";
 import type { SceneItem } from "../../model/scene.js";
 import { itemAlpha, itemColor } from "../palette.js";
 import { dashPattern, endAngle, traceArrowhead, tracePolyline, trimPolyline } from "../stroke.js";
-import { syncTextResolution, textResolutionForZoom } from "../text-resolution.js";
+import { syncTextResolution } from "../text-resolution.js";
 import { drawCardSurface } from "../surface.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
 import { drawFarStroke } from "./far-plate.js";
@@ -17,7 +17,6 @@ type ArrowParts = {
 	label: Text;
 	lineSig: string;
 	labelSig: string;
-	resolution: number;
 };
 
 const partsByContainer = new WeakMap<Container, ArrowParts>();
@@ -32,7 +31,7 @@ function sync(container: Container, item: SceneItem<BoardArrowItem>, context: Bo
 	parts.line.alpha = itemAlpha(context, style.stroke);
 	const color = itemColor(context, style.stroke, "brand");
 	const size = style.strokeWidth ?? BOARD_ARROW_STROKE_SIZE;
-	syncTextResolution(parts.label, parts, context.zoom);
+
 
 	const resolved = resolveSceneArrow(item, context.scene);
 	const path = trimPolyline(resolved.path, style.trim);
@@ -73,6 +72,7 @@ function sync(container: Container, item: SceneItem<BoardArrowItem>, context: Bo
 			border: context.palette.border,
 		});
 	}
+	syncTextResolution(parts.label, context.textResolution);
 	const visible = props.label.length > 0 && (style.trim === undefined || style.trim >= 0.5);
 	parts.label.visible = visible;
 	parts.backdrop.visible = visible;
@@ -87,17 +87,20 @@ export const arrowCardRenderer: BoardCardRenderer = {
 	create: (item, context) => {
 		const root = new Container();
 		const line = new Graphics();
-		const resolution = textResolutionForZoom(context.zoom);
-		const label = new Text({ text: "", style: { fill: 0xffffff, fontFamily: BOARD_FONT_STACK, fontSize: 14, fontWeight: "500" }, resolution, roundPixels: true });
+		const label = new Text({ text: "", style: { fill: 0xffffff, fontFamily: BOARD_FONT_STACK, fontSize: 14, fontWeight: "500" }, resolution: context.textResolution, roundPixels: true });
 		label.anchor.set(0.5);
 		const backdrop = new Graphics();
 		root.addChild(line, backdrop, label);
-		partsByContainer.set(root, { root, line, backdrop, label, lineSig: "", labelSig: "", resolution });
+		partsByContainer.set(root, { root, line, backdrop, label, lineSig: "", labelSig: "" });
 		if (item.type === "arrow") sync(root, item as SceneItem<BoardArrowItem>, context);
 		return root;
 	},
 	update: (container, item, context) => {
 		if (item.type === "arrow") sync(container, item as SceneItem<BoardArrowItem>, context);
+	},
+	resolution: (container, _item, context) => {
+		const parts = partsByContainer.get(container);
+		if (parts) syncTextResolution(parts.label, context.textResolution);
 	},
 	renderFar: (graphics, item, context) => {
 		if (item.type !== "arrow") return;

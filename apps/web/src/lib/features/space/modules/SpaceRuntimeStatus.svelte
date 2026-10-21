@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { DeviceRuntimeInstance } from "@cohub/protocol/host-bridge";
+import { harnessLabel } from "@cohub/protocol/runtime";
 import {
 	type DisplayList,
 	HttpError,
@@ -9,6 +10,7 @@ import { Monitor, RefreshCw, Settings2, X } from "lucide-svelte";
 import { tick, untrack } from "svelte";
 import { goto } from "$app/navigation";
 import { floatNear, portal } from "$lib/actions/portal";
+import HarnessIcon from "$lib/components/composer/HarnessIcon.svelte";
 import DeviceFolderPicker from "$lib/components/DeviceFolderPicker.svelte";
 import {
 	deviceDisplayStatus,
@@ -341,7 +343,7 @@ $effect(() => {
 				<dl>
 					<div class="runtime-row"><dt>{m.runtime_harnesses({}, { locale })}</dt><dd>
 						{#if status.capabilities?.harnesses.length}
-							{#each status.capabilities.harnesses as harness}<span class="harness-line">{harness === "pi" ? "Pi" : "Codex"}<span class="runtime-meta">{m.runtime_model_count({ count: counts[harness] }, { locale })}</span></span>{/each}
+							{#each status.capabilities.harnesses as harness}<span class="harness-line"><HarnessIcon {harness} size={14} />{harnessLabel(harness)}<span class="runtime-meta">{m.runtime_model_count({ count: counts[harness] }, { locale })}</span></span>{/each}
 						{:else}—{/if}
 					</dd></div>
 					<div class="runtime-row"><dt>{m.runtime_connection({}, { locale })}</dt><dd>{tone === "unknown" ? m.runtime_watcher_unknown({}, { locale }) : status.online ? m.runtime_online({}, { locale }) : m.runtime_offline({}, { locale })}</dd></div>
@@ -463,7 +465,7 @@ $effect(() => {
 .runtime-row { display: grid; grid-template-columns: minmax(90px, .8fr) minmax(0, 1.2fr); gap: 12px; padding: 8px 0; font-size: 13px; }
 .runtime-row dt, .runtime-details dt { color: var(--text-tertiary); }
 .runtime-row dd { min-width: 0; text-align: right; color: var(--text-secondary); overflow-wrap: anywhere; }
-.harness-line { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.harness-line { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 .runtime-meta { color: var(--text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .runtime-hint { margin: 8px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
 .runtime-details { margin-top: 8px; border-top: 1px solid var(--border-subtle); padding-top: 10px; font-size: 12px; color: var(--text-tertiary); }

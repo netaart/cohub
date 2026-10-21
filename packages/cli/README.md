@@ -137,7 +137,9 @@ cohub -s home spaces files ls
 
 ## Local Runtime
 
-Connect one local workspace to a Space and select Pi or Codex per turn.
+Connect one local workspace to a Space and select Pi, Codex, Claude Code, WorkBuddy or Cursor per turn.
+Terminal conversations of every harness sync to the Space; Claude Code (`claude`), WorkBuddy (`codebuddy`) and Cursor (`cursor-agent`) sync read-only.
+Without `--harness`, every installed harness is tried; one that cannot start is skipped with a warning.
 
 To keep using native terminals with ordinary Cohub Chats / Turns:
 
@@ -179,7 +181,7 @@ are never uploaded automatically. Use `runtime logs --json` to export a failure 
 events carry the local `runtimeId` plus server `requestId` / `traceparent` when a turn has
 reached the Agent trace.
 
-The Runtime uses WebSockets, native Pi RPC / Codex app-server, and existing cloud
+The Runtime uses WebSockets, native Pi RPC / Codex app-server / Claude Code and Cursor stream-json, and existing cloud
 streaming. Local executables and credentials are required. `sandbox up` has been
 removed. Reconnection and result reconciliation are automatic; no recovery command is needed.
 When a result genuinely cannot be determined, the affected Chat offers an explicit stop
@@ -317,7 +319,7 @@ Use the filters so a large Board is not read whole:
 ```bash
 cohub -s <spaceId> boards get <boardId> --items title,note
 cohub -s <spaceId> boards get <boardId> --within s1
-cohub -s <spaceId> boards get <boardId> --rect 0,0,1600,900
+cohub -s <spaceId> boards get <boardId> --rect 0,0,960,540
 ```
 
 Start from an example and write it with `apply`, a JSON Merge Patch where fields
@@ -402,6 +404,8 @@ cohub generate "Lip-sync to this spoken take" \
   --image reference_image=https://example.com/portrait.png \
   --audio reference_audio=https://example.com/speech.mp3
 
+cohub generate -m song2 --text "prompt=upbeat synthwave" --text "lyrics=[Verse] Neon lights" --param seed=42
+
 cohub generate "a calm lake" \
   --model <model> \
   --async
@@ -412,6 +416,7 @@ cohub tasks get <taskRunId> --json
 Supported inputs:
 
 ```bash
+--text <role>=<text>
 --image <path-or-url>
 --image first_frame=<path-or-url>
 --image last_frame=<path-or-url>
@@ -422,7 +427,7 @@ Supported inputs:
 --audio reference_audio=<path-or-url>
 ```
 
-Role-qualified media values add `meta.role` to that content block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles (`reference_image`, `reference_video`, `reference_audio`) in one request.
+Role-qualified values add `meta.role` to that content block. Text roles come from the model's text inputs (`cohub models show <model>`); repeat `--text <role>=<text>` for each text block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles (`reference_image`, `reference_video`, `reference_audio`) in one request.
 
 Pass generation parameters with `--param key=value` or `--parameters '<json>'`.
 

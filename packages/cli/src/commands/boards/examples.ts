@@ -12,9 +12,9 @@ export const BOARD_EXAMPLES: Record<string, { description: string; value: Record
     value: {
       board: { title: "Launch plan" },
       items: {
-        title: { type: "text", position: { x: 80, y: 60 }, props: { text: "Launch plan", fontSize: 48, fontWeight: 700 } },
-        note: { type: "text", position: { x: 80, y: 140 }, props: { text: "Ship the beta to ten design partners, then widen.", fontSize: 20, width: 420 } },
-        goal: { type: "shape", position: { x: 600, y: 60 }, size: { width: 240, height: 140 }, style: { stroke: "green", fill: "green", fillOpacity: 0.12, radius: 16 }, props: { text: "Beta in March" } },
+        title: { type: "text", position: { x: 80, y: 60 }, props: { text: "Launch plan", fontSize: 40, fontWeight: 700 } },
+        note: { type: "text", position: { x: 80, y: 128 }, props: { text: "Ship the beta to ten design partners, then widen.", width: 420 } },
+        goal: { type: "shape", position: { x: 600, y: 60 }, size: { width: 200, height: 140 }, style: { stroke: "green", fill: "green", fillOpacity: 0.12, radius: 16 }, props: { text: "Beta in March" } },
       },
     },
   },
@@ -31,14 +31,14 @@ export const BOARD_EXAMPLES: Record<string, { description: string; value: Record
     },
   },
   slides: {
-    description: "Frames as slides; children move and clip with their frame.",
+    description: "960×540 frames as slides; children move and clip with their frame.",
     value: {
       items: {
-        s1: { type: "frame", position: { x: 0, y: 0 }, size: { width: 1600, height: 900 }, props: { label: "Intro" } },
-        "s1-title": { type: "text", parent: "s1", position: { x: 120, y: 120 }, props: { text: "Special relativity", fontSize: 96, fontWeight: 700 } },
-        "s1-sub": { type: "text", parent: "s1", position: { x: 120, y: 260 }, props: { text: "Nothing outruns light", fontSize: 40 } },
-        s2: { type: "frame", position: { x: 1800, y: 0 }, size: { width: 1600, height: 900 }, props: { label: "Time dilation" } },
-        "s2-title": { type: "text", parent: "s2", position: { x: 120, y: 120 }, props: { text: "Moving clocks run slow", fontSize: 72, fontWeight: 700 } },
+        s1: { type: "frame", position: { x: 0, y: 0 }, size: { width: 960, height: 540 }, props: { label: "Intro" } },
+        "s1-title": { type: "text", parent: "s1", position: { x: 72, y: 72 }, props: { text: "Special relativity", fontSize: 56, fontWeight: 700 } },
+        "s1-sub": { type: "text", parent: "s1", position: { x: 72, y: 160 }, props: { text: "Nothing outruns light" } },
+        s2: { type: "frame", position: { x: 1080, y: 0 }, size: { width: 960, height: 540 }, props: { label: "Time dilation" } },
+        "s2-title": { type: "text", parent: "s2", position: { x: 72, y: 72 }, props: { text: "Moving clocks run slow", fontSize: 40, fontWeight: 700 } },
       },
     },
   },
@@ -46,12 +46,12 @@ export const BOARD_EXAMPLES: Record<string, { description: string; value: Record
     description: "An animated lesson: entrances, a drawn arrow, typed text and camera moves with pause markers.",
     value: {
       items: {
-        s1: { type: "frame", size: { width: 1600, height: 900 }, props: { label: "Length contraction" } },
-        title: { type: "text", parent: "s1", position: { x: 120, y: 100 }, props: { text: "Moving rulers get shorter", fontSize: 72, fontWeight: 700 } },
-        ruler: { type: "shape", parent: "s1", position: { x: 200, y: 420 }, size: { width: 800, height: 60 }, style: { stroke: "blue", fill: "blue", fillOpacity: 0.15 }, props: { text: "1 m" } },
-        caption: { type: "text", parent: "s1", position: { x: 200, y: 560 }, props: { text: "L = L₀ √(1 − v²/c²)", fontSize: 44, font: "serif", reveal: 1 } },
-        motion: { type: "arrow", parent: "s1", style: { stroke: "rose", strokeWidth: 4 }, props: { start: { x: 200, y: 360 }, end: { x: 1000, y: 360 }, label: "v → c" } },
-        glow: { type: "effect", parent: "s1", position: { x: 1050, y: 380 }, size: { width: 160, height: 160 }, style: { fill: "amber" }, props: { kind: "glow" } },
+        s1: { type: "frame", size: { width: 960, height: 540 }, props: { label: "Length contraction" } },
+        title: { type: "text", parent: "s1", position: { x: 72, y: 60 }, props: { text: "Moving rulers get shorter", fontSize: 40, fontWeight: 700 } },
+        ruler: { type: "shape", parent: "s1", position: { x: 120, y: 252 }, size: { width: 480, height: 40 }, style: { stroke: "blue", fill: "blue", fillOpacity: 0.15 }, props: { text: "1 m", fontSize: 16 } },
+        caption: { type: "text", parent: "s1", position: { x: 120, y: 336 }, props: { text: "L = L₀ √(1 − v²/c²)", font: "serif", reveal: 1 } },
+        motion: { type: "arrow", parent: "s1", style: { stroke: "rose", strokeWidth: 3 }, props: { start: { x: 120, y: 216 }, end: { x: 600, y: 216 }, label: "v → c" } },
+        glow: { type: "effect", parent: "s1", position: { x: 630, y: 224 }, size: { width: 96, height: 96 }, style: { fill: "amber" }, props: { kind: "glow" } },
       },
       animations: {
         lecture: {
@@ -71,7 +71,7 @@ export const BOARD_EXAMPLES: Record<string, { description: string; value: Record
     description: "Custom Canvas content; use --module to print scripts/wave.js.",
     value: {
       items: {
-        wave: { type: "custom", position: { x: 0, y: 0 }, size: { width: 640, height: 360 }, script: { src: "scripts/wave.js", params: { amplitude: 60 } } },
+        wave: { type: "custom", position: { x: 0, y: 0 }, size: { width: 480, height: 270 }, script: { src: "scripts/wave.js", params: { amplitude: 48 } } },
       },
     },
   },

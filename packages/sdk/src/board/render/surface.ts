@@ -1,4 +1,4 @@
-import type { Graphics } from "pixi.js";
+import { type Graphics, Matrix, type Texture } from "pixi.js";
 import { type WorldPoint, worldPoint } from "../model/geometry.js";
 import { roundRectPoints } from "./stroke.js";
 import type { BoardRenderStyle, BoardShadowStyle } from "./style.js";
@@ -22,6 +22,25 @@ export function traceCardOutline(
 	if (style.corner === "pixel") return tracePixelRect(graphics, x, y, width, height, PIXEL_STEP);
 	const radius = Math.min(Math.max(0, style.radius + grow), width / 2, height / 2);
 	return radius > 0 ? graphics.roundRect(x, y, width, height, radius) : graphics.rect(x, y, width, height);
+}
+
+export type CardCrop = { x: number; y: number; w: number; h: number };
+
+export function fillCardPicture(
+	graphics: Graphics,
+	texture: Texture,
+	picture: CardRect,
+	style: Pick<BoardRenderStyle, "corner" | "radius">,
+	crop?: CardCrop | null,
+): Graphics {
+	// Pixi moves clamped textures to repeat for fills; mirroring keeps edge texels from wrapping.
+	const sampling = texture.source.style;
+	if (sampling.addressMode !== "mirror-repeat") {
+		sampling.addressMode = "mirror-repeat";
+		sampling.update();
+	}
+	const matrix = crop ? new Matrix(1 / crop.w, 0, 0, 1 / crop.h, -crop.x / crop.w, -crop.y / crop.h) : undefined;
+	return traceCardOutline(graphics, picture, style).fill({ texture, textureSpace: "local", ...(matrix ? { matrix } : {}) });
 }
 
 export function tracePixelRect(

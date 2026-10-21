@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import type { RuntimeExecutionEvent, RuntimeTurnInput } from "@neta-art/cohub";
 import { Command } from "commander";
 import { JsonLineDecoder } from "../src/runtime/json-rpc.js";
-import { discoverHarnesses } from "../src/runtime/harness.js";
+import { discoverHarnesses } from "../src/runtime/harnesses/index.js";
 import { nativeSyncSatisfied } from "../src/runtime/native/attach.js";
 import type { NativeConfig } from "../src/runtime/native/config.js";
 import type { NativeStatus } from "../src/runtime/native/daemon.js";

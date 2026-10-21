@@ -52,7 +52,7 @@ test("Runtime starts and reports more than 64 pending Sessions in bounded recove
   }
 });
 
-test("Runtime finishes local work after its transport disconnects and replays the durable result", { timeout: 20_000 }, async () => {
+for (const mode of ["resume", "recover"] as const) test(`Runtime reconnects during detached local work and replays the durable result via ${mode}`, { timeout: 20_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "cohub-runtime-detached-"));
   const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
   await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -61,6 +61,79 @@ test("Runtime finishes local work after its transport disconnects and replays th
   const spaceId = crypto.randomUUID(), sessionId = crypto.randomUUID(), turnId = crypto.randomUUID(), recoverRequestId = crypto.randomUUID();
   const runtime = await testNativeRuntime({ spaceId, root, harnesses: ["pi"] });
   let connections = 0;
+  let detachedAt = 0;
+  let reconnectedAt = 0;
+  let rejectFailure: (error: unknown) => void = () => {};
+  const completed = new Promise<void>((resolve, reject) => {
+    rejectFailure = reject;
+    server.on("connection", (socket) => {
+      const connection = ++connections;
+      const send = (value: unknown) => socket.send(JSON.stringify(value));
+      socket.on("message", (raw) => {
+        try {
+          const frame = JSON.parse(raw.toString());
+          const input = {
+            spaceId, sessionId, turnId, userMessageId: turnId, harness: "pi", accessMode: "full_access",
+            messages: [{ turnId, userMessageId: turnId, userId: "author", content: [{ type: "text", text: "slow transport test" }] }],
+            context: { complete: true, revision: "initial", throughTurnId: null, messages: [] },
+          };
+          if (frame.type === "runtime.hello") {
+            send({ type: "runtime.ready", connectionId: crypto.randomUUID() });
+            if (connection === 1) send({ type: "turn.start", requestId: turnId, input });
+            else {
+              reconnectedAt ||= Date.now();
+              if (mode === "resume") send({ type: "turn.start", requestId: turnId, resumeOnly: true, input });
+            }
+            return;
+          }
+          if (connection === 1 && frame.type === "runtime.event" && frame.event?.type === "text.delta") {
+            detachedAt ||= Date.now();
+            socket.terminate();
+            return;
+          }
+          if (mode === "recover" && connection > 1 && frame.type === "runtime.recovery") {
+            assert.deepEqual(frame.executions, [{ sessionId, turnId, harness: "pi" }]);
+            send({ type: "turn.recover", requestId: recoverRequestId, execution: { spaceId, sessionId, turnId, harness: "pi" } });
+            return;
+          }
+          if (connection > 1 && frame.type === "runtime.event" && frame.requestId === (mode === "recover" ? recoverRequestId : turnId)) {
+            if (frame.event.type === "turn.error") throw new Error(frame.event.message);
+            if (frame.event.type === "turn.end") {
+              assert.equal(frame.event.message.stopReason, "stop", "transport loss must not abort local execution");
+              assert(frame.event.message.content.some((block: { type: string; text?: string }) => block.type === "text" && block.text?.includes("new session")));
+              send({ type: "turn.ack", requestId: frame.requestId, revision: "completed", turnId });
+            }
+            if (frame.event.type === "turn.acknowledged") resolve();
+          }
+        } catch (error) { reject(error); controller.abort(); }
+      });
+    });
+  });
+  const running = serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${address.port}`, capabilities: { harnesses: ["pi"], models: [] }, token: async () => "fixture-token", signal: controller.signal, executor: runtime.native.executor, onReady: () => {} });
+  void running.catch(rejectFailure);
+  try {
+    await completed;
+    assert(connections >= 2);
+    assert(reconnectedAt - detachedAt < 1500, "reconnect must not wait for the detached execution");
+  } finally {
+    controller.abort(); await running; await runtime.close();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Runtime announces a detached result the server stopped waiting for, and an abandoned recovery frees its slot", { timeout: 20_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "cohub-runtime-announce-"));
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address(); assert(address && typeof address !== "string");
+  const controller = new AbortController();
+  const spaceId = crypto.randomUUID(), sessionId = crypto.randomUUID(), turnId = crypto.randomUUID();
+  const abandoned = crypto.randomUUID(), retried = crypto.randomUUID();
+  const runtime = await testNativeRuntime({ spaceId, root, harnesses: ["pi"] });
+  let connections = 0;
+  let recoveries = 0;
   let rejectFailure: (error: unknown) => void = () => {};
   const completed = new Promise<void>((resolve, reject) => {
     rejectFailure = reject;
@@ -79,22 +152,20 @@ test("Runtime finishes local work after its transport disconnects and replays th
             } });
             return;
           }
-          if (connection === 1 && frame.type === "runtime.event" && frame.event?.type === "text.delta") {
-            socket.terminate();
-            return;
-          }
+          if (connection === 1 && frame.type === "runtime.event" && frame.event?.type === "text.delta") { socket.terminate(); return; }
           if (connection > 1 && frame.type === "runtime.recovery") {
             assert.deepEqual(frame.executions, [{ sessionId, turnId, harness: "pi" }]);
-            send({ type: "turn.recover", requestId: recoverRequestId, execution: { spaceId, sessionId, turnId, harness: "pi" } });
+            recoveries += 1;
+            const requestId = recoveries === 1 ? abandoned : retried;
+            send({ type: "turn.recover", requestId, execution: { spaceId, sessionId, turnId, harness: "pi" } });
+            // The first recovery times out server-side while the Turn is still running.
+            if (recoveries === 1) setTimeout(() => send({ type: "turn.abort", requestId: abandoned }), 100);
             return;
           }
-          if (connection > 1 && frame.type === "runtime.event" && frame.requestId === recoverRequestId) {
+          if (frame.type === "runtime.event" && frame.requestId === abandoned) throw new Error("an abandoned recovery must stay silent");
+          if (connection > 1 && frame.type === "runtime.event" && frame.requestId === retried) {
             if (frame.event.type === "turn.error") throw new Error(frame.event.message);
-            if (frame.event.type === "turn.end") {
-              assert.equal(frame.event.message.stopReason, "stop", "transport loss must not abort local execution");
-              assert(frame.event.message.content.some((block: { type: string; text?: string }) => block.type === "text" && block.text?.includes("new session")));
-              send({ type: "turn.ack", requestId: frame.requestId, revision: "completed", turnId });
-            }
+            if (frame.event.type === "turn.end") send({ type: "turn.ack", requestId: retried, revision: "completed", turnId });
             if (frame.event.type === "turn.acknowledged") resolve();
           }
         } catch (error) { reject(error); controller.abort(); }
@@ -105,7 +176,66 @@ test("Runtime finishes local work after its transport disconnects and replays th
   void running.catch(rejectFailure);
   try {
     await completed;
-    assert(connections >= 2);
+    assert.equal(connections, 2, "the result arrives on the live connection, not after another reconnect");
+    assert.equal(recoveries, 2);
+  } finally {
+    controller.abort(); await running; await runtime.close();
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a recovery request repeated across another disconnect is answered and acknowledged on the live connection", { timeout: 20_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "cohub-runtime-rerecover-"));
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address(); assert(address && typeof address !== "string");
+  const controller = new AbortController();
+  const spaceId = crypto.randomUUID(), sessionId = crypto.randomUUID(), turnId = crypto.randomUUID(), recoverId = crypto.randomUUID();
+  const runtime = await testNativeRuntime({ spaceId, root, harnesses: ["pi"] });
+  let connections = 0;
+  let rejectFailure: (error: unknown) => void = () => {};
+  const completed = new Promise<void>((resolve, reject) => {
+    rejectFailure = reject;
+    server.on("connection", (socket) => {
+      const connection = ++connections;
+      let asked = false;
+      const send = (value: unknown) => socket.send(JSON.stringify(value));
+      socket.on("message", (raw) => {
+        try {
+          const frame = JSON.parse(raw.toString());
+          if (frame.type === "runtime.hello") {
+            send({ type: "runtime.ready", connectionId: crypto.randomUUID() });
+            if (connection === 1) send({ type: "turn.start", requestId: turnId, input: {
+              spaceId, sessionId, turnId, userMessageId: turnId, harness: "pi", accessMode: "full_access",
+              messages: [{ turnId, userMessageId: turnId, userId: "author", content: [{ type: "text", text: "slow transport test" }] }],
+              context: { complete: true, revision: "initial", throughTurnId: null, messages: [] },
+            } });
+            return;
+          }
+          if (connection === 1 && frame.type === "runtime.event" && frame.event?.type === "text.delta") { socket.terminate(); return; }
+          if (connection > 1 && frame.type === "runtime.recovery" && !asked) {
+            asked = true;
+            send({ type: "turn.recover", requestId: recoverId, execution: { spaceId, sessionId, turnId, harness: "pi" } });
+            // The second connection drops while its recovery still waits for the running Turn.
+            if (connection === 2) setTimeout(() => socket.terminate(), 50);
+            return;
+          }
+          if (connection > 2 && frame.type === "runtime.event" && frame.requestId === recoverId) {
+            if (frame.event.type === "turn.error") throw new Error(frame.event.message);
+            if (frame.event.type === "turn.end") send({ type: "turn.ack", requestId: recoverId, revision: "completed", turnId });
+            if (frame.event.type === "turn.acknowledged") resolve();
+          }
+        } catch (error) { reject(error); controller.abort(); }
+      });
+    });
+  });
+  const running = serveRuntime({ spaceId, cwd: root, url: `ws://127.0.0.1:${address.port}`, capabilities: { harnesses: ["pi"], models: [] }, token: async () => "fixture-token", signal: controller.signal, executor: runtime.native.executor, onReady: () => {} });
+  void running.catch(rejectFailure);
+  try {
+    await completed;
+    assert.equal(connections, 3);
   } finally {
     controller.abort(); await running; await runtime.close();
     for (const socket of server.clients) socket.terminate();

@@ -1,6 +1,8 @@
 
 import { z } from "zod";
 import {
+	BOARD_DEFAULT_ITEM_SIZE,
+	BOARD_DEFAULT_SIZES,
 	BOARD_TEXT_FONT_SIZE,
 	BOARD_TEXT_MAX_FONT_SIZE,
 	BOARD_TEXT_MIN_FONT_SIZE,
@@ -138,9 +140,9 @@ const itemEnvelope = {
 	locked: z.boolean().optional(),
 	metadata: z.record(z.string(), z.unknown()).optional(),
 };
-const boxed = (width: number, height: number) => ({
+const boxed = (size: { width: number; height: number }) => ({
 	...itemEnvelope,
-	size: BoardSizeSchema.default({ width, height }),
+	size: BoardSizeSchema.default({ ...size }),
 });
 const unsized = { ...itemEnvelope };
 
@@ -158,7 +160,7 @@ export type BoardShapeGeometry = (typeof BOARD_SHAPE_GEOMETRIES)[number];
 
 export const BoardFrameItemSchema = z
 	.object({
-		...boxed(480, 320),
+		...boxed(BOARD_DEFAULT_SIZES.frame),
 		type: z.literal("frame"),
 		props: z
 			.object({
@@ -194,7 +196,7 @@ export const BoardTextItemSchema = z
 
 export const BoardShapeItemSchema = z
 	.object({
-		...boxed(240, 160),
+		...boxed(BOARD_DEFAULT_SIZES.shape),
 		type: z.literal("shape"),
 		props: z
 			.object({
@@ -319,19 +321,19 @@ export const BoardCropSchema = z
 
 export const BoardImageItemSchema = z
 	.object({
-		...boxed(640, 360),
+		...boxed(BOARD_DEFAULT_SIZES.image),
 		type: z.literal("image"),
 		props: z.object({ ...mediaProps, crop: BoardCropSchema.optional() }).strict(),
 	})
 	.strict();
 export const BoardVideoItemSchema = z
-	.object({ ...boxed(640, 360), type: z.literal("video"), props: z.object(timedFileProps).strict() })
+	.object({ ...boxed(BOARD_DEFAULT_SIZES.video), type: z.literal("video"), props: z.object(timedFileProps).strict() })
 	.strict();
 export const BoardAudioItemSchema = z
-	.object({ ...boxed(480, 96), type: z.literal("audio"), props: z.object(timedFileProps).strict() })
+	.object({ ...boxed(BOARD_DEFAULT_SIZES.audio), type: z.literal("audio"), props: z.object(timedFileProps).strict() })
 	.strict();
 export const BoardFileItemSchema = z
-	.object({ ...boxed(360, 220), type: z.literal("file"), props: z.object(fileProps).strict() })
+	.object({ ...boxed(BOARD_DEFAULT_SIZES.file), type: z.literal("file"), props: z.object(fileProps).strict() })
 	.strict();
 
 export const BOARD_TASK_ARTIFACT_LIMIT = 6;
@@ -368,7 +370,7 @@ export type BoardTaskSnapshot = z.infer<typeof BoardTaskSnapshotSchema>;
 
 export const BoardTaskItemSchema = z
 	.object({
-		...boxed(420, 240),
+		...boxed(BOARD_DEFAULT_SIZES.task),
 		type: z.literal("task"),
 		props: z
 			.object({
@@ -438,7 +440,7 @@ export const BOARD_EFFECT_KIND_INFO = {
 
 export const BoardEffectItemSchema = z
 	.object({
-		...boxed(240, 240),
+		...boxed(BOARD_DEFAULT_SIZES.effect),
 		type: z.literal("effect"),
 		props: z
 			.object({
@@ -460,7 +462,7 @@ export const BoardEffectItemSchema = z
 
 export const BoardCustomItemSchema = z
 	.object({
-		...boxed(480, 320),
+		...boxed(BOARD_DEFAULT_SIZES.custom),
 		type: z.literal("custom"),
 		script: BoardScriptSchema,
 		props: z.object({}).strict().default({}),
@@ -470,8 +472,7 @@ export const BoardCustomItemSchema = z
 export const BOARD_EXTENSION_TYPE_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z0-9-]+)+$/;
 export const BoardExtensionItemSchema = z
 	.object({
-		...itemEnvelope,
-		size: BoardSizeSchema.default({ width: 240, height: 160 }),
+		...boxed(BOARD_DEFAULT_ITEM_SIZE),
 		type: z.string().regex(BOARD_EXTENSION_TYPE_PATTERN),
 		props: z.record(z.string(), z.unknown()).default({}),
 	})

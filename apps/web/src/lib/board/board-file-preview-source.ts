@@ -5,7 +5,7 @@
  * deliberately conservative about doing so, because a board can hold thousands
  * of file cards:
  *
- * - requests are deduplicated per file and capped by an in-flight limit;
+ * - requests are deduplicated per file and coalesced into batched reads;
  * - oversized files are skipped outright rather than downloaded and truncated;
  * - non-text files never trigger a read at all — their card needs no content;
  * - results are memoised per file version, so panning over the same cards is free.
@@ -30,14 +30,12 @@ import {
 	filePreviewMemoKey,
 	filePreviewScope,
 } from "@neta-art/cohub/board";
-import { sdk } from "$lib/sdk";
+import { spaceFileReads } from "$lib/board/space-file-urls";
 import {
 	isTextFileResponse,
 	tryResolveTextFileResponse,
 } from "$lib/space-file-text";
 
-/** Concurrent file reads. Kept low so previews never crowd out user actions. */
-const MAX_CONCURRENT = 4;
 /** Memoised results, keyed by space, path and mtime. */
 const MEMO_LIMIT = 512;
 const CHANGE_VERDICT_LIMIT = 4096;
@@ -128,8 +126,6 @@ export type FilePreviewInvalidation = {
 
 const listeners = new Set<(event: FilePreviewInvalidation | null) => void>();
 let version = 0;
-let active = 0;
-const waiting: Array<() => void> = [];
 
 function notify(event: FilePreviewInvalidation | null = null) {
 	version += 1;
@@ -151,20 +147,6 @@ function remember(key: string, result: FilePreviewResult) {
 		if (oldest !== undefined) memo.delete(oldest);
 	}
 	memo.set(key, result.facts);
-}
-
-async function acquireSlot(): Promise<void> {
-	if (active < MAX_CONCURRENT) {
-		active += 1;
-		return;
-	}
-	await new Promise<void>((resolve) => waiting.push(resolve));
-	active += 1;
-}
-
-function releaseSlot() {
-	active -= 1;
-	waiting.shift()?.();
 }
 
 /**
@@ -198,44 +180,41 @@ async function readSnapshot(
 	// not go stale.
 	if (!shouldRead(request)) return { facts: base, complete: true };
 
-	await acquireSlot();
-	try {
-		const file = await sdk.space(spaceId).files.read(request.path);
-		setAvailability(spaceId, request.path, "ok");
-		// Still being prepared: metadata-only is right for now, but incomplete, so
-		// the next pass retries rather than caching this.
-		if (!("content" in file)) return { facts: base, complete: false };
-		if (file.size > FILE_EXCERPT_MAX_BYTES) {
-			return {
-				facts: buildFileSnapshot({
-					path: request.path,
-					mimeType: file.mimeType,
-					size: file.size,
-					mtimeMs: file.mtimeMs,
-				}),
-				complete: true,
-			};
-		}
-		const { file: resolved } = await tryResolveTextFileResponse(file);
+	const read = await spaceFileReads.read(spaceId, request.path);
+	// A failed read must not blank the card: the cached facts still render, and
+	// only a definitive 404/410 is treated as the file being gone. Incomplete, so
+	// the caller keeps whatever it already had.
+	if (read.kind === "error") {
+		setAvailability(spaceId, request.path, availabilityFromError(read));
+		return { facts: base, complete: false };
+	}
+	setAvailability(spaceId, request.path, "ok");
+	// Still being prepared: metadata-only is right for now, but incomplete, so
+	// the next pass retries rather than caching this.
+	if (read.kind === "preparing") return { facts: base, complete: false };
+	const { file } = read;
+	if (file.size > FILE_EXCERPT_MAX_BYTES) {
 		return {
 			facts: buildFileSnapshot({
 				path: request.path,
-				content: isTextFileResponse(resolved) ? resolved.content : null,
-				mimeType: resolved.mimeType,
-				size: resolved.size,
-				mtimeMs: resolved.mtimeMs,
+				mimeType: file.mimeType,
+				size: file.size,
+				mtimeMs: file.mtimeMs,
 			}),
 			complete: true,
 		};
-	} catch (error) {
-		// A failed read must not blank the card: the cached facts still render, and
-		// only a definitive 404/410 is treated as the file being gone. Incomplete, so
-		// the caller keeps whatever it already had.
-		setAvailability(spaceId, request.path, availabilityFromError(error));
-		return { facts: base, complete: false };
-	} finally {
-		releaseSlot();
 	}
+	const { file: resolved } = await tryResolveTextFileResponse(file);
+	return {
+		facts: buildFileSnapshot({
+			path: request.path,
+			content: isTextFileResponse(resolved) ? resolved.content : null,
+			mimeType: resolved.mimeType,
+			size: resolved.size,
+			mtimeMs: resolved.mtimeMs,
+		}),
+		complete: true,
+	};
 }
 
 /**

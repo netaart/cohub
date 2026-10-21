@@ -1,5 +1,6 @@
 import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
+import type { LocalHarness } from "./harnesses.js";
 
 export type CanonicalProjectionMessage = {
   id: string;
@@ -17,7 +18,8 @@ export type CanonicalProjectionMessage = {
   createdAt: string;
 };
 
-export type ProjectionTarget = "pi" | "codex";
+/** Native projection formats belong to each local Harness; the protocol ships Pi and Codex. */
+export type ProjectionTarget = LocalHarness;
 
 export type CanonicalProjectionTurn = {
   id: string;
@@ -79,7 +81,7 @@ const asMeta = (value: unknown): Record<string, unknown> => value && typeof valu
 const safeId = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, "_");
 const entryId = (messageId: string, ordinal: number) => `cohub_${safeId(messageId)}_${ordinal}`;
 export const isProjectionCompaction = (message: CanonicalProjectionMessage) => message.role === "system" && message.content.some((block) => block.type === "system_note" && block.note_type === "compacted");
-const isPendingGeneration = (message: CanonicalProjectionMessage) => message.role === "assistant" && message.meta?.messageKind === "generation_result" && !["completed", "failed"].includes(String(message.meta.generationStatus));
+export const isProjectionPendingGeneration = (message: CanonicalProjectionMessage) => message.role === "assistant" && message.meta?.messageKind === "generation_result" && !["completed", "failed"].includes(String(message.meta.generationStatus));
 const messageMeta = (message: CanonicalProjectionMessage) => asMeta(message.meta);
 const timestampOf = (message: CanonicalProjectionMessage, fallback: string) => message.createdAt || fallback;
 
@@ -202,7 +204,7 @@ function piProjection(input: ProjectionInput): NativeProjection {
 
   for (const turn of sourceTurns) {
     for (const message of turn.messages) {
-      if (isPendingGeneration(message)) continue;
+      if (isProjectionPendingGeneration(message)) continue;
       if (isProjectionCompaction(message)) {
         const id = `cohub_${safeId(message.id)}_compaction`;
         const record = { type: "compaction", id, parentId, timestamp: timestampOf(message, fallbackTimestamp), summary: message.content.flatMap((block) => block.type === "system_note" ? [block.text] : []).join("\n"), firstKeptEntryId: "", tokensBefore: Number(asMeta(messageMeta(message).compaction).tokensBefore) || 0 };
@@ -282,13 +284,13 @@ function codexProjection(input: ProjectionInput): NativeProjection {
   for (const turn of sourceTurns) {
     const start = turn.startedAt ?? turn.createdAt;
     records.push({ key: `turn:${turn.id}:started`, sourceTurnId: turn.sourceTurnId, sourceMessageId: null, record: { timestamp: start, type: "event_msg", payload: { type: "turn_started", turn_id: turn.id, started_at: Math.floor(Date.parse(start) / 1000), model_context_window: null, collaboration_mode_kind: "default" } } });
-    for (const message of turn.messages) if (!isPendingGeneration(message)) records.push(...codexMessageRecords(input, message, warnings));
+    for (const message of turn.messages) if (!isProjectionPendingGeneration(message)) records.push(...codexMessageRecords(input, message, warnings));
     records.push({ key: `turn:${turn.id}:terminal`, sourceTurnId: turn.sourceTurnId, sourceMessageId: null, record: { timestamp: turn.completedAt ?? turn.createdAt, type: "event_msg", payload: codexTerminalPayload(turn) } });
   }
   return { target: "codex", records, cursor: { sourceSequence: input.turns.at(-1)?.sequence ?? null, sourceTurnId: input.turns.at(-1)?.sourceTurnId ?? null, sourceFingerprint: sourceFingerprint(input.turns) }, warnings };
 }
 
-export function projectNativeSession(input: ProjectionInput, target: ProjectionTarget): NativeProjection {
+export function projectNativeSession(input: ProjectionInput, target: "pi" | "codex"): NativeProjection {
   return target === "pi" ? piProjection(input) : codexProjection(input);
 }
 
