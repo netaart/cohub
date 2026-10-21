@@ -5,7 +5,7 @@ import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { codexModelCatalog } from "../model-catalog.js";
 import { describeError } from "../../network-error.js";
 import type { Executor } from "../native/execution.js";
-import { openPrivateServer, type CodexChannel } from "../native/codex-link.js";
+import { CODEX_UNLOAD_DELAY_SECS, openPrivateServer, resumeThread, type CodexChannel } from "../native/codex-link.js";
 import { ArchiveNotRestorableError, copyNativeArchive } from "../native/archive.js";
 import {
   codexArchivedSessionsDirectory, codexRolloutBytes, codexRolloutIdOf, codexSessionsDirectory, ensurePlainCodexRollout, readFirstRecord, readNativeTranscript,
@@ -49,6 +49,7 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
   let channel: CodexChannel | null = shared;
   let message: RuntimeMessage = { ordinal: 0, content: [] };
   let begun = false;
+  let joined: string | null = null;
   try {
     if (!channel) {
       host = new JsonRpcProcess(...harnessCommand(executor.executables.codex || "codex", ["app-server", "--listen", "stdio://"], executor.cwd), executor.cwd, "jsonrpc", turnEnvironment(input));
@@ -62,13 +63,17 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
       ...(input.provider && input.provider !== "codex" ? { modelProvider: input.provider } : {}),
       ...(input.accessMode === "read_only" ? { sandbox: "read-only" } : {}),
       // Tools of a shared server otherwise see the environment of whoever started that server.
-      config: { "shell_environment_policy.set.COHUB_SPACE_ID": input.spaceId, "shell_environment_policy.set.COHUB_SESSION_ID": input.sessionId },
+      config: {
+        "shell_environment_policy.set.COHUB_SPACE_ID": input.spaceId, "shell_environment_policy.set.COHUB_SESSION_ID": input.sessionId,
+        ...(codex.shared ? { thread_unload_delay_secs: CODEX_UNLOAD_DELAY_SECS } : {}),
+      },
     };
     const existing = { ...threadOptions, threadId: session.nativeSessionId, path: session.path, excludeTurns: true };
     const opened = prepared.resume === "new" ? await codex.request("thread/start", threadOptions)
       : prepared.resume === "restored" ? await codex.request("thread/fork", existing)
-        : await codex.request("thread/resume", existing);
+        : await resumeThread(codex, existing);
     const thread = record(opened.thread);
+    joined = text(thread.id) || null;
     if (typeof thread.id !== "string" || typeof thread.path !== "string") throw new Error("Codex did not provide a durable native thread");
     const threadId = thread.id;
     if (thread.path !== session.path || threadId !== session.nativeSessionId) {
@@ -123,6 +128,8 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
       throw error;
     }
     message = { ...message, stopReason: signal.aborted ? "aborted" : "error", errorMessage: signal.aborted ? null : describeError(error) };
+  } finally {
+    if (joined && channel?.shared) await executor.codex.release(joined);
   }
   return { session, resume: prepared.resume, message, host };
 }

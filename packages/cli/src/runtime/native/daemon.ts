@@ -78,6 +78,11 @@ export class NativeRuntime {
     });
     this.codex = new CodexShared(options.executables.codex || "codex", options.root, Boolean(options.config?.codexShared) && options.harnesses.includes("codex"));
     this.codex.onConnect((channel) => this.observeCodex(channel));
+    // Its next Turn is found again through the server's status broadcast.
+    this.codex.onRelease((threadId) => {
+      this.watched.delete(threadId);
+      this.endStream(`codex:${threadId}`);
+    });
     this.ingest = new NativeIngest({
       spaceId: options.spaceId,
       cwd: options.root,
@@ -311,6 +316,7 @@ export class NativeRuntime {
     if (event.method === "turn/completed") {
       this.endStream(key);
       if (watched.path) this.ingest.touch(watched.path);
+      void this.codex.release(threadId);
       return;
     }
     this.stream(key, "codex", threadId).translator.push(event);
