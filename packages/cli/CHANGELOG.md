@@ -1,5 +1,18 @@
 # @neta-art/cohub-cli
 
+## 10.8.3
+
+### Patch Changes
+
+- 37e7d36: Fix `cohub boards export` drawing images, video posters, and task previews at their native pixel size, tiled or clipped, instead of fitted to their box. The Node renderer now provides the `DOMMatrix` that texture fills need.
+- 8da08b3: Prevent compressed Codex history reads from crashing when stopping at a session header or history boundary. Preserve archive errors and caller cancellation.
+- 5aae8f8: Recognize cloud turn IDs in current Codex user-message records so native sync does not duplicate Cohub-started turns or create spurious conversation forks. Genuine local continuations still sync normally.
+- 5c65685: `cohub runtime up` now offers shared Codex sessions to a folder that already syncs natively, instead of only on first consent; the folder's sync settings and history stay as they are. 已开启原生同步的目录，重新运行 `cohub runtime up` 时也会询问是否开启 Codex 共享会话，而不只在首次授权时询问；该目录的同步设置和历史保持不变。
+- 6e8d0a6: Allow a local Runtime to recover or stop after its file bridge exits, even when descendants keep inherited pipes open.
+- Updated dependencies [37e7d36]
+- Updated dependencies [ec1426c]
+  - @neta-art/cohub@12.1.1
+
 ## 10.8.2
 
 ### Patch Changes
