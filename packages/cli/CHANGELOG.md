@@ -1,5 +1,27 @@
 # @neta-art/cohub-cli
 
+## 10.8.0
+
+### Minor Changes
+
+- 89be906: Sync terminal Claude Code and WorkBuddy conversations to the Space, read-only, like Pi and Codex. Every harness adapter now requires a transcript reader. Rerun `cohub runtime up` to consent for the new harnesses.
+- 1df0409: Add Cursor (`cursor-agent`) as a local harness: Cohub Turns hand over history and resume natively, and terminal and IDE Cursor chats sync read-only. Deploy API, Gateway and Agent before the CLI.
+
+### Patch Changes
+
+- d6bc322: Give Board items one reading scale. Schema defaults now match the sizes the web creates, media and task cards take a 480 long edge from every entry, and refits keep the long edge instead of the width. `boardTaskCardSize` exposes the task card sizing. `boards schema` lists the scale, and the slide examples use 960×540 pages.
+- 1063e2f: Upgrade Generation SDK to 0.1.40. Seedance declarations now use the upstream resolution values: Seedance 2.0 exposes 480p, 720p, 1080p and 4k; Seedance 2.0 Fast exposes 480p and 720p; Seedance 2.5 exposes 480p, 720p and 1080p. The unsupported 2K resolution and the 3:2 and 2:3 aspect ratios are removed.
+- Updated dependencies [3cdf904]
+- Updated dependencies [6623e23]
+- Updated dependencies [bdc38af]
+- Updated dependencies [d6bc322]
+- Updated dependencies [fa7e272]
+- Updated dependencies [02d0414]
+- Updated dependencies [e0a660e]
+- Updated dependencies [1df0409]
+- Updated dependencies [1063e2f]
+  - @neta-art/cohub@12.0.0
+
 ## 10.7.0
 
 ### Minor Changes
