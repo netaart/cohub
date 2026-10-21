@@ -223,6 +223,19 @@ const canTransition = (from: SessionGoalStatus, to: SessionGoalStatus): boolean 
   return false;
 };
 
+const cancelQueuedGoalTurns = async (tx: Tx, sessionId: string, reason: string) => {
+  await tx.update(sessionTurns).set({
+    status: "cancelled",
+    stopReason: reason,
+    summary: { finishReason: "cancelled", reason },
+    completedAt: new Date(),
+  }).where(and(
+    eq(sessionTurns.sessionId, sessionId),
+    eq(sessionTurns.intent, "goal"),
+    eq(sessionTurns.status, "queued"),
+  ));
+};
+
 export async function updateSessionGoal(
   db: Db,
   sessionId: string,
@@ -268,17 +281,20 @@ export async function updateSessionGoal(
       status = "budget_limited";
     }
 
-    if (nextObjective !== undefined && nextObjective !== row.objective) {
-      await tx.update(sessionTurns).set({
-        status: "cancelled",
-        stopReason: "goal_objective_changed",
-        summary: { finishReason: "cancelled", reason: "goal_objective_changed" },
-        completedAt: new Date(),
-      }).where(and(
-        eq(sessionTurns.sessionId, sessionId),
-        eq(sessionTurns.intent, "goal"),
-        eq(sessionTurns.status, "queued"),
-      ));
+    const executorChanged =
+      (nextObjective !== undefined && nextObjective !== row.objective)
+      || (nextProvider !== undefined && nextProvider !== row.provider)
+      || (nextModel !== undefined && nextModel !== row.model)
+      || (nextAccessMode !== undefined && nextAccessMode !== row.accessMode)
+      || (nextThinkingLevel !== undefined && nextThinkingLevel !== row.thinkingLevel);
+    if (executorChanged) {
+      await cancelQueuedGoalTurns(
+        tx,
+        sessionId,
+        nextObjective !== undefined && nextObjective !== row.objective
+          ? "goal_objective_changed"
+          : "goal_executor_changed",
+      );
     }
     const [updated] = await tx.update(sessionGoals).set({
       ...(nextObjective !== undefined ? { objective: nextObjective } : {}),
