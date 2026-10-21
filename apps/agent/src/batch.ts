@@ -1,11 +1,13 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { sessionTurns } from "@cohub/db";
+import { sessionTurns, spaces } from "@cohub/db";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { db } from "./db.js";
 import { env } from "./env.js";
 import type { AgentTurnJobData } from "./queue.js";
-import { resolveHarness } from "@cohub/protocol";
+import { HOME_SPACE_SLUG, resolveHarness } from "@cohub/protocol";
 import { limitBatchSize } from "./runtime/batch-limit.js";
+import { DEFAULT_FOLLOWUP_DELIVERY, readMessageQueueConfig, type FollowupDelivery } from "./runtime/message-queue-config.js";
+import { getAgentWorkspacePath } from "./runtime/paths.js";
 
 type TurnRow = {
   id: string;
@@ -154,6 +156,17 @@ async function claimQueuedTurns(tx: Transaction, queued: TurnRow[]): Promise<Cla
   };
 }
 
+/** The sender's Home Space `.cohub/queue.json` decides whether queued follow-ups go out together or one by one. */
+async function resolveFollowupDelivery(tx: Transaction, userUuid: string | null): Promise<FollowupDelivery> {
+  if (!userUuid) return DEFAULT_FOLLOWUP_DELIVERY;
+  const [home] = await tx.select({ id: spaces.id }).from(spaces)
+    .where(and(eq(spaces.userUuid, userUuid), eq(spaces.slug, HOME_SPACE_SLUG)))
+    .limit(1);
+  if (!home) return DEFAULT_FOLLOWUP_DELIVERY;
+  const config = await readMessageQueueConfig(getAgentWorkspacePath(home.id));
+  return config?.followupDelivery ?? DEFAULT_FOLLOWUP_DELIVERY;
+}
+
 export async function claimNextTurnBatch(input: Pick<AgentTurnJobData, "sessionId">): Promise<ClaimResult> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select id from v2.space_sessions where id = ${input.sessionId} for update`);
@@ -210,7 +223,11 @@ export async function claimNextTurnBatch(input: Pick<AgentTurnJobData, "sessionI
     const followups = followupRows.map((row) => normalizeTurn(row as Record<string, unknown>));
     if (followups.length === 0) return { kind: "noop" as const };
 
-    const batch = await claimQueuedTurns(tx, limitBatchSize(followups, (turn) => Buffer.byteLength(JSON.stringify(turn.userContent ?? []), "utf8")));
+    const delivery = await resolveFollowupDelivery(tx, followups[0]?.userUuid ?? null);
+    const selected = delivery === "one_by_one"
+      ? followups.slice(0, 1)
+      : limitBatchSize(followups, (turn) => Buffer.byteLength(JSON.stringify(turn.userContent ?? []), "utf8"));
+    const batch = await claimQueuedTurns(tx, selected);
     return batch ? { kind: "claimed" as const, batch } : { kind: "noop" as const };
   });
 }
