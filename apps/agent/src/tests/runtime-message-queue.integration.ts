@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { after, mock, test } from "node:test";
+import { promisify } from "node:util";
 import { PGlite } from "@electric-sql/pglite";
-import { eq, is } from "drizzle-orm";
+import { and, eq, is } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import * as schema from "@cohub/db";
@@ -28,7 +30,9 @@ const db = new Proxy(database, { get(target, key) {
   return typeof value === "function" ? value.bind(target) : value;
 } });
 
-const workspaceRoot = resolve(process.cwd(), ".message-queue-test");
+const execFileAsync = promisify(execFile);
+
+const workspaceRoot = resolve(process.cwd(), "node_modules/.message-queue-test");
 process.env.WORKSPACE_ROOT = workspaceRoot;
 mock.module("../db.js", { exports: { db } });
 mock.module("../env.js", { exports: { env: { ENV: "test", AGENT_STALE_ACTIVE_TURN_MS: 60_000 } } });
@@ -51,6 +55,15 @@ async function createUserWithHomeSpace(configText: string | null) {
     await writeFile(join(dir, "queue.json"), configText);
   }
   return userUuid;
+}
+
+async function homeConfigDir(userUuid: string) {
+  const [home] = await database.select({ id: schema.spaces.id }).from(schema.spaces)
+    .where(and(eq(schema.spaces.userUuid, userUuid), eq(schema.spaces.slug, "home")));
+  if (!home) throw new Error("home space not found");
+  const dir = join(workspaceRoot, home.id, "workspace", ".cohub");
+  await mkdir(dir, { recursive: true });
+  return dir;
 }
 
 async function createQueuedFollowups(userUuid: string, count: number) {
@@ -125,4 +138,65 @@ test("an invalid queue config fails the claim and keeps every follow-up queued",
   await assert.rejects(() => claimNextTurnBatch({ sessionId }), /Unknown followupDelivery/);
   assert.equal(await statusOf(turnIds[0] as string), "queued");
   assert.equal(await statusOf(turnIds[1] as string), "queued");
+});
+
+test("a queue config linked outside the workspace or above the size limit fails the claim", async () => {
+  const outsidePath = join(workspaceRoot, "outside-queue.json");
+  await mkdir(workspaceRoot, { recursive: true });
+  await writeFile(outsidePath, "{\"version\":1,\"followupDelivery\":\"one_by_one\"}");
+
+  const linkedUser = await createUserWithHomeSpace(null);
+  const linkedDir = await homeConfigDir(linkedUser);
+  await symlink(outsidePath, join(linkedDir, "queue.json"));
+  const linked = await createQueuedFollowups(linkedUser, 1);
+  await assert.rejects(() => claimNextTurnBatch({ sessionId: linked.sessionId }), /must stay inside its workspace/);
+  assert.equal(await statusOf(linked.turnIds[0] as string), "queued");
+
+  const oversizedUser = await createUserWithHomeSpace(` ${" ".repeat(4096)}{"version":1,"followupDelivery":"together"}`);
+  const oversized = await createQueuedFollowups(oversizedUser, 1);
+  await assert.rejects(() => claimNextTurnBatch({ sessionId: oversized.sessionId }), /at most 4096 bytes/);
+  assert.equal(await statusOf(oversized.turnIds[0] as string), "queued");
+});
+
+test("a .cohub directory linked outside the workspace fails the claim", async () => {
+  const outsideConfigDir = join(workspaceRoot, "outside-config");
+  await mkdir(outsideConfigDir, { recursive: true });
+  await writeFile(join(outsideConfigDir, "queue.json"), "{\"version\":1,\"followupDelivery\":\"one_by_one\"}");
+  const userUuid = await createUserWithHomeSpace(null);
+  const configDir = await homeConfigDir(userUuid);
+  await rm(configDir, { recursive: true });
+  await symlink(outsideConfigDir, configDir);
+  const { sessionId, turnIds } = await createQueuedFollowups(userUuid, 1);
+  await assert.rejects(() => claimNextTurnBatch({ sessionId }), /must stay inside its workspace/);
+  assert.equal(await statusOf(turnIds[0] as string), "queued");
+});
+
+test("a dangling queue.json symlink fails the claim instead of using the default delivery", async () => {
+  const userUuid = await createUserWithHomeSpace(null);
+  const dir = await homeConfigDir(userUuid);
+  await symlink(join(workspaceRoot, "missing-target.json"), join(dir, "queue.json"));
+  const { sessionId, turnIds } = await createQueuedFollowups(userUuid, 2);
+  await assert.rejects(() => claimNextTurnBatch({ sessionId }), /ENOENT/);
+  assert.equal(await statusOf(turnIds[0] as string), "queued");
+  assert.equal(await statusOf(turnIds[1] as string), "queued");
+});
+
+test("a dangling .cohub symlink fails the claim instead of using the default delivery", async () => {
+  const userUuid = await createUserWithHomeSpace(null);
+  const configDir = await homeConfigDir(userUuid);
+  await rm(configDir, { recursive: true });
+  await symlink(join(workspaceRoot, "missing-config-dir"), configDir);
+  const { sessionId, turnIds } = await createQueuedFollowups(userUuid, 2);
+  await assert.rejects(() => claimNextTurnBatch({ sessionId }), /ENOENT/);
+  assert.equal(await statusOf(turnIds[0] as string), "queued");
+  assert.equal(await statusOf(turnIds[1] as string), "queued");
+});
+
+test("a FIFO as queue config fails the claim without blocking it", { timeout: 10_000 }, async () => {
+  const userUuid = await createUserWithHomeSpace(null);
+  const dir = await homeConfigDir(userUuid);
+  await execFileAsync("mkfifo", [join(dir, "queue.json")]);
+  const { sessionId, turnIds } = await createQueuedFollowups(userUuid, 1);
+  await assert.rejects(() => claimNextTurnBatch({ sessionId }), /must be a regular file/);
+  assert.equal(await statusOf(turnIds[0] as string), "queued");
 });

@@ -1,7 +1,14 @@
-import { readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
 import { join } from "node:path";
+import { assertValidSpaceId } from "./ids.js";
+import { assertInsideRoot } from "./path-containment.js";
+import { getAgentWorkspacePath } from "./paths.js";
 
 export const MESSAGE_QUEUE_CONFIG_PATH = ".cohub/queue.json";
+export const MESSAGE_QUEUE_CONFIG_MAX_BYTES = 4096;
+
+const OUTSIDE_WORKSPACE_MESSAGE = "Message queue config must stay inside its workspace";
 
 export const FOLLOWUP_DELIVERY_MODES = ["together", "one_by_one"] as const;
 export type FollowupDelivery = (typeof FOLLOWUP_DELIVERY_MODES)[number];
@@ -33,14 +40,47 @@ export function parseMessageQueueConfig(rawText: string): MessageQueueConfig {
   return { version: 1, followupDelivery: parsed.followupDelivery };
 }
 
-/** Read `.cohub/queue.json` from a Space workspace; a missing file means the default delivery. */
-export async function readMessageQueueConfig(workspacePath: string): Promise<MessageQueueConfig | null> {
-  let rawText: string;
+/** Return null only when the entry itself is absent; a dangling symlink makes realpath throw ENOENT, which must propagate. */
+async function realpathIfExists(path: string): Promise<string | null> {
   try {
-    rawText = await readFile(join(workspacePath, MESSAGE_QUEUE_CONFIG_PATH), "utf-8");
+    await lstat(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
-  return parseMessageQueueConfig(rawText);
+  return realpath(path);
+}
+
+/**
+ * Read `.cohub/queue.json` from a Space workspace; a missing workspace, directory or file means the default delivery.
+ * O_NONBLOCK keeps a FIFO from blocking the claim transaction, and fstat rejects anything that is not a regular file.
+ * The path the kernel opened is checked again through /proc, so a directory swapped for a symlink after realpath is still rejected.
+ */
+export async function readMessageQueueConfig(spaceId: string): Promise<MessageQueueConfig | null> {
+  const workspace = getAgentWorkspacePath(assertValidSpaceId(spaceId));
+  const workspaceReal = await realpathIfExists(workspace);
+  if (!workspaceReal) return null;
+  const configDirReal = await realpathIfExists(join(workspace, ".cohub"));
+  if (!configDirReal) return null;
+  assertInsideRoot(configDirReal, workspaceReal, OUTSIDE_WORKSPACE_MESSAGE);
+  const configReal = await realpathIfExists(join(configDirReal, "queue.json"));
+  if (!configReal) return null;
+  assertInsideRoot(configReal, workspaceReal, OUTSIDE_WORKSPACE_MESSAGE);
+
+  const handle = await open(configReal, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > MESSAGE_QUEUE_CONFIG_MAX_BYTES) {
+      throw new Error(`Message queue config must be a regular file of at most ${MESSAGE_QUEUE_CONFIG_MAX_BYTES} bytes`);
+    }
+    assertInsideRoot(await realpath(`/proc/self/fd/${handle.fd}`), workspaceReal, OUTSIDE_WORKSPACE_MESSAGE);
+
+    // One byte past the size check: a file that grew after fstat reads back more bytes than fstat reported.
+    const buffer = Buffer.alloc(MESSAGE_QUEUE_CONFIG_MAX_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead !== info.size) throw new Error("Message queue config changed while reading");
+    return parseMessageQueueConfig(buffer.subarray(0, bytesRead).toString("utf8"));
+  } finally {
+    await handle.close();
+  }
 }

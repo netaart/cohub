@@ -7,7 +7,6 @@ import type { AgentTurnJobData } from "./queue.js";
 import { HOME_SPACE_SLUG, resolveHarness } from "@cohub/protocol";
 import { limitBatchSize } from "./runtime/batch-limit.js";
 import { DEFAULT_FOLLOWUP_DELIVERY, readMessageQueueConfig, type FollowupDelivery } from "./runtime/message-queue-config.js";
-import { getAgentWorkspacePath } from "./runtime/paths.js";
 
 type TurnRow = {
   id: string;
@@ -163,7 +162,7 @@ async function resolveFollowupDelivery(tx: Transaction, userUuid: string | null)
     .where(and(eq(spaces.userUuid, userUuid), eq(spaces.slug, HOME_SPACE_SLUG)))
     .limit(1);
   if (!home) return DEFAULT_FOLLOWUP_DELIVERY;
-  const config = await readMessageQueueConfig(getAgentWorkspacePath(home.id));
+  const config = await readMessageQueueConfig(home.id);
   return config?.followupDelivery ?? DEFAULT_FOLLOWUP_DELIVERY;
 }
 
