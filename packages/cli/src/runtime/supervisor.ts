@@ -152,10 +152,21 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
           });
           bridge.stdin?.on("error", () => undefined);
           const closed = new Promise<void>((resolve) => {
+            let drainTimer: ReturnType<typeof setTimeout> | undefined;
             bridge.once("error", (error) => diagnostics.log("error", "sandboxd.process_error", { error: serializeDiagnosticError(error) }));
-            bridge.once("close", (code, exitSignal) => {
+            bridge.once("exit", (code, exitSignal) => {
               childStopped = true;
               if (!signal.aborted) diagnostics.log("warn", "sandboxd.process_exit", { code, signal: exitSignal });
+              // Descendants may still hold inherited pipes. After draining buffered
+              // output, close only our ends so supervision can continue.
+              drainTimer = setTimeout(() => {
+                diagnostics.log("warn", "sandboxd.stdio_drain_timeout");
+                for (const stream of bridge.stdio) stream?.destroy();
+              }, 1000);
+            });
+            bridge.once("close", () => {
+              childStopped = true;
+              clearTimeout(drainTimer);
               resolve();
             });
           });

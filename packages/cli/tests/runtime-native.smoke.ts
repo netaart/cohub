@@ -338,7 +338,7 @@ try {
       const tui = await codexTerminal();
       await tui.request("thread/resume", { threadId: result.session.nativeSessionId });
       await tui.request("turn/start", { threadId: result.session.nativeSessionId, input: [{ type: "text", text: "hello from the terminal", text_elements: [] }] });
-      await until("terminal Turn is recorded", () => [...server.turns.values()].some((entry) => entry.settled && entry.parentTurnId === first.turnId));
+      await until("terminal Turn is recorded", () => [...server.turns.values()].some((entry) => entry.settled && entry.parentTurnId === envcheck.turnId));
       console.log("codex: terminal Turn synced as a continuation ✓");
 
       // 8. The web's stop interrupts a Turn the terminal runs.

@@ -7,12 +7,18 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // The Runtime supervisor passes the control pipe as the fourth inherited descriptor.
 // A JVM supervisor (Android) can only wire the standard streams, so it selects COHUB_RUNTIME_CONTROL_FD=2.
 func openRuntimeControl() (io.WriteCloser, error) {
-	return os.NewFile(runtimeControlFD(), "runtime-control"), nil
+	fd := runtimeControlFD()
+	// Children must not inherit the control pipe, or they keep it open after sandboxd exits.
+	if fd > 2 {
+		syscall.CloseOnExec(int(fd))
+	}
+	return os.NewFile(fd, "runtime-control"), nil
 }
 
 func runtimeControlFD() uintptr {
