@@ -1,5 +1,17 @@
 # @neta-art/cohub
 
+## 12.2.0
+
+### Minor Changes
+
+- 276874d: Boards keep cards visible as long as they are legible. Detail now depends on each card's size on screen rather than how many cards are in view: pictures stay real down to a few pixels, text fades to line bars, and the rest draw as plates painted only where they change. Panning a board full of images stays smooth: loads start where the view is heading, pictures fade in over several frames, small pictures hold small textures, and pictures panned away stay warm as compact copies instead of downloading again. `mountBoardStage` accepts `lod` (`DEFAULT_BOARD_LOD`, `COMPACT_BOARD_LOD`), stages report `stats()`, asset managers add `focus`, `stats` and `shrinkTexture`, and `planLruTrim` plans which cooling textures shrink or leave.
+- d8256d6: Board views and CLI writes now use one media-sizing rule. Exports match the Cohub app's colors, card styles, fonts and previews, including video covers from Cohub-hosted media. Texture selection follows a decoded-memory budget instead of a 64-image cap. Emoji render in color, and Node exports use the variable Geist fonts.
+  
+  Breaking for direct export callers: `selectBoardExportAssets` now takes `{ scale, maxBytes? }`; `boardImageKeySource` is replaced by `boardAssetKeySource`, and `boardAssetKey` / `boardTextureEdge` move from `board/stage` to `board`. The SDK adds `boardRenderTheme`, `BOARD_THEME_IDS`, `settleBoardMediaSizes` and media probe helpers.
+- 58a8e66: Board text wraps where the browser wraps it. Chinese, Japanese and Korean text no longer breaks early after a dash or overflows its selection box, punctuation such as `，` and `。` never starts a line, and long URLs break instead of running past their box. The canvas, the in-place editor and `cohub boards export` lay text out once, with the same lines, so editing no longer shifts text or shows it twice, and typing animations reveal text without reflowing. Shape labels align to their padding when left- or right-aligned.
+  
+  SDK: `setBoardTextLayouter` replaces `setBoardTextMeasurer`, taking a whole text and returning its lines. `board/render` adds `layoutTextLines`, `boardTextStyle` and `onBoardTextFontsChange`; `board` adds `layoutShapeLabel`; the editor adds `relayoutText()`. `syncTextWrapWidth` is removed.
+
 ## 12.1.1
 
 ### Patch Changes

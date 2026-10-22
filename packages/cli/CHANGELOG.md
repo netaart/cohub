@@ -1,5 +1,23 @@
 # @neta-art/cohub-cli
 
+## 10.9.0
+
+### Minor Changes
+
+- d8256d6: Board views and CLI writes now use one media-sizing rule. Exports match the Cohub app's colors, card styles, fonts and previews, including video covers from Cohub-hosted media. Texture selection follows a decoded-memory budget instead of a 64-image cap. Emoji render in color, and Node exports use the variable Geist fonts.
+  
+  Breaking for direct export callers: `selectBoardExportAssets` now takes `{ scale, maxBytes? }`; `boardImageKeySource` is replaced by `boardAssetKeySource`, and `boardAssetKey` / `boardTextureEdge` move from `board/stage` to `board`. The SDK adds `boardRenderTheme`, `BOARD_THEME_IDS`, `settleBoardMediaSizes` and media probe helpers.
+
+### Patch Changes
+
+- 58a8e66: Board text wraps where the browser wraps it. Chinese, Japanese and Korean text no longer breaks early after a dash or overflows its selection box, punctuation such as `，` and `。` never starts a line, and long URLs break instead of running past their box. The canvas, the in-place editor and `cohub boards export` lay text out once, with the same lines, so editing no longer shifts text or shows it twice, and typing animations reveal text without reflowing. Shape labels align to their padding when left- or right-aligned.
+  
+  SDK: `setBoardTextLayouter` replaces `setBoardTextMeasurer`, taking a whole text and returning its lines. `board/render` adds `layoutTextLines`, `boardTextStyle` and `onBoardTextFontsChange`; `board` adds `layoutShapeLabel`; the editor adds `relayoutText()`. `syncTextWrapWidth` is removed.
+- Updated dependencies [276874d]
+- Updated dependencies [d8256d6]
+- Updated dependencies [58a8e66]
+  - @neta-art/cohub@12.2.0
+
 ## 10.8.3
 
 ### Patch Changes
