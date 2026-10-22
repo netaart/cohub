@@ -1,5 +1,30 @@
 # @neta-art/cohub-cli
 
+## 10.11.0
+
+### Minor Changes
+
+- 4110d6e: Extension items take a `preview` (`title`, `excerpt`, `cover`, `src`). Clients and exports without the type's renderer draw it as a file card, and item titles, including the selection sent to agents, use it. `boards schema extension` describes it.
+  
+  Hosts: write `preview` on your own item types and keep it current.
+
+### Patch Changes
+
+- 19c1520: Recover disconnected file bridges after the Runtime reconnects, while leaving healthy bridges and the Runtime process running.
+- Updated dependencies [dcd541b]
+- Updated dependencies [e95cd08]
+- Updated dependencies [e95cd08]
+- Updated dependencies [e95cd08]
+- Updated dependencies [4110d6e]
+- Updated dependencies [4110d6e]
+- Updated dependencies [b01e55d]
+- Updated dependencies [4110d6e]
+- Updated dependencies [e95cd08]
+- Updated dependencies [e95cd08]
+- Updated dependencies [4110d6e]
+- Updated dependencies [e95cd08]
+  - @neta-art/cohub@12.3.0
+
 ## 10.10.0
 
 ### Minor Changes

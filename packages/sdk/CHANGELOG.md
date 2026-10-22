@@ -1,5 +1,49 @@
 # @neta-art/cohub
 
+## 12.3.0
+
+### Minor Changes
+
+- dcd541b: Boards adapt to the device on their own. Input reaches the screen one frame sooner: every stage update now syncs and renders in the same animation frame. New cards, far plates and text refreshes are paced by measured frame time instead of fixed counts, so fast devices settle in a few frames while slow ones keep their frame rate. Multisampling turns off at 3× density.
+  
+  `mountBoardStage` and `createBoardAssetManager` now default `lod`, `prefetch`, `concurrency` and `lruBudget` to `defaultBoardDeviceBudget()`: phones and devices reporting little memory get the compact budget, devices reporting plenty of memory and cores a larger cooling pool and more parallel loads, and a resting camera warms pictures just beyond the view unless Save-Data is on or the connection is slow. Pass `prefetch: 0`, or the previous `lod`, `lruBudget` and `concurrency`, to keep the old behavior. `boardDeviceBudget` and `readBoardDeviceSignals` expose the tiers, asset managers gain an optional `prefetch`, and stage `stats()` adds `loading`, `prefetching`, `waiting`, `settling`, `frame` and `interval`.
+  
+  Hosts: no action.
+- e95cd08: Zoomed far out, Board pictures keep their color: images, video stills, task previews, file covers and model stills draw in their average color instead of a neutral plate once they have loaded. The color is read while the browser is idle and kept after the texture is released. Asset managers add `getTone` and the `readTone` option, `subscribe` listeners receive the change kind (`"texture"` or `"tone"`), and render contexts offer `assetTone`.
+  
+  Hosts: no action. Custom renderers can fill far plates with `farPictureTone(item, context)`.
+- e95cd08: `board/render` exports `drawFarPlate`, `drawFarBars` and `farPictureTone` for custom renderers' `renderFar`, and `board/stage` exports `runBoardStageBench`, the wheel-driven benchmark the Cohub app uses, reporting frame and settle times per phase. The SDK README gains a guide to hosting a Board.
+  
+  Hosts: no action.
+- e95cd08: Boards load pictures for your own item types through the same pipeline as built-in cards. Give `createBoardAssetManager` an `itemAsset` that maps an item to `{ url, media?, fit? }`; those pictures get screen-sized CDN variants, loads ordered by where the view is heading, prefetch, compact copies when panned away, device budgets, one shared cache and exports. `fit: "cover"` sizes the short edge for pictures cropped to fill their box. Call `invalidateItemAssets()` when the data `itemAsset` reads changes, and use `boardAssetRefKey` to look a picture up by URL.
+  
+  Hosts: replace asset manager wrappers with `itemAsset`. `BoardAssetManager` is meant to be built by `createBoardAssetManager` and gains members as the SDK grows.
+- 4110d6e: Extension items take a `preview` (`title`, `excerpt`, `cover`, `src`). Clients and exports without the type's renderer draw it as a file card, and item titles, including the selection sent to agents, use it. `boards schema extension` describes it.
+  
+  Hosts: write `preview` on your own item types and keep it current.
+- 4110d6e: Board replicas keep their cache and unsent writes in IndexedDB with `createIndexedDbBoardReplicaStorage({ userKey, spaceId, boardId })`, so a reload shows the last document at once and never loses an edit; `clearBoardReplicaStorage({ userKey })` forgets them on sign-out. Replicas read the Board again when realtime reconnects and resend pending writes when the network returns, and writes applied while storage loads are no longer dropped. `BoardRemote.subscribe` handlers gain `resync`, and `space.boards.open(target)` opens a Board by id or `.board` path.
+  
+  Hosts: pass the IndexedDB storage to `createBoardReplica` and drop refresh polling.
+- 4110d6e: Board items can open on a tap. Define a type with `activation: "tap"` and handle the stage's `onActivate`: a quick press opens the item without selecting it, a drag moves it without selecting it (or pans with the hand tool or read-only), and hovering shows a pointer instead of connection ports. `onLongPress` reports a still touch or pen; `editor.pickUp()` there picks the item up and drags it. The stage drops the click a touch screen sends after an opening tap. Renderers declare keys drawn on a card with `hitAt`; the stage shows their cursor, passes `context.hoveredHit` and routes presses to `onHit`. Media play keys use the same path (`BOARD_PLAY_MEDIA`). `editor.commitPatch` takes `{ record: false }` to keep a write out of undo, and the root entry exports `buildViewportContentBlock` with the viewport context types.
+  
+  Hosts: replace pointer interception for opening cards, long presses and card keys with these options.
+- e95cd08: `layoutTextLines` takes `{ maxLines, whiteSpace }`: it clamps text like `line-clamp`, ending the last line in an ellipsis, collapses white space with `whiteSpace: "normal"`, and reports `truncated`. Ellipses no longer split emoji or other grapheme clusters. `ellipsizeWrappedLines` is removed; use `maxLines`.
+  
+  Hosts: wrap canvas card text with `layoutTextLines` instead of a separate line breaker.
+- e95cd08: Editing a frame title or an arrow label now opens the editor exactly over the canvas text, in the same font, size and position. `boardTextEditLayout` from `board/render` returns that placement for text, shape, frame and arrow items, and `boardEditableText` from `board` returns the text an editor edits.
+  
+  Hosts: place in-place text editors with `boardTextEditLayout` instead of computing their geometry.
+- 4110d6e: Board themes set frame titles with `style.frameLabelSize`; the title's position, the editor's hit box and the in-place editor follow it. The Neta themes draw 16px titles and a 1.5px selection that hugs the item, and Neta Studio selects in blue.
+  
+  Hosts: custom `BoardRenderStyle` objects need `frameLabelSize`; build them with `resolveBoardRenderStyle`.
+
+### Patch Changes
+
+- b01e55d: The board stage redraws in the same frame its canvas resizes, so opening a soft keyboard or resizing the window no longer flashes a stretched frame.
+- e95cd08: Images on `oss.talesofai.com`, `works.cohub.live`, `works.cohub.run` and `public.cohub.run` now load as resized variants on Boards and are downscaled before reaching a model, like other Cohub media hosts.
+  
+  Hosts: no action.
+
 ## 12.2.0
 
 ### Minor Changes
