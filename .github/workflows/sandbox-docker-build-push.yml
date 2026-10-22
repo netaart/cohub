@@ -178,6 +178,7 @@ jobs:
         env:
           RUNTIME_TAGS: ${{ steps.image-tags.outputs.runtime }}
           GAME_TAGS: ${{ steps.image-tags.outputs.game }}
+          IMAGE_REPO: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}
           COHUB_CLI_REFRESH: ${{ steps.cli-refresh.outputs.token }}
           GIT_REVISION: ${{ github.sha }}
           GIT_VERSION: ${{ github.ref_name }}

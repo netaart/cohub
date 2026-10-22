@@ -79,7 +79,7 @@ docker run --rm --entrypoint bash --shm-size=256m \
 
 CI builds and smoke-tests both targets on the same builder before publishing. Sharing the `base` build allows the images to reuse its layer digests on the registry and on nodes that use both profiles; actual savings depend on the resulting layers and node cache. A shared source revision produces `cohub-sandbox` and `cohub-sandbox-game` tags. Deployment only advances after the build job succeeds, updating both image configuration keys in one ConfigMap patch. Manual workflows refresh the CLI layer in both images. Default builds remain compatible without `--target`.
 
-`apps/sandbox/docker-bake.ci.hcl` adds GitHub Actions cache settings on top of the local Bake file, so local builds never require Actions cache credentials. Tool versions in the Dockerfile (Go, Chrome for Testing, Bun, pnpm) are pinned and bumped deliberately; `@neta-art/cohub-cli` intentionally tracks npm `latest` and is refreshed with `COHUB_CLI_REFRESH`.
+`apps/sandbox/docker-bake.ci.hcl` adds cache settings on top of the local Bake file, so local builds never require registry or Actions cache credentials. CI imports the inline cache from the published `:latest` images first, so unchanged layers keep their digests across releases and nodes only pull what changed (usually the `cohub-sandbox` binary). The `node` base image is pinned by digest for the same reason; bump it deliberately. Tool versions in the Dockerfile (Go, Chrome for Testing, Bun, pnpm) are pinned and bumped deliberately; `@neta-art/cohub-cli` intentionally tracks npm `latest` and is refreshed with `COHUB_CLI_REFRESH`.
 
 ### Release-time image prewarming
 
