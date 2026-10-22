@@ -232,13 +232,6 @@ jobs:
         run: |
           echo "sha=${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
 
-      - name: Prewarm sandbox images
-        continue-on-error: true
-        run: |
-          python3 scripts/prewarm-sandbox.py --env dev \
-            --image '${{ env.REGISTRY }}/${{ env.NAMESPACE }}/cohub-sandbox:sha-${{ steps.get-sha.outputs.sha }}' \
-            --image '${{ env.REGISTRY }}/${{ env.NAMESPACE }}/cohub-sandbox-game:sha-${{ steps.get-sha.outputs.sha }}'
-
       - name: Patch sandbox image config
         run: |
           kubectl patch configmap cohub-api-dev-config -n cohub-dev --type=merge \

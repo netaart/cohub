@@ -83,7 +83,7 @@ CI builds and smoke-tests both targets on the same builder before publishing. Sh
 
 ### Release-time image prewarming
 
-Before patching the API image configuration, CI runs `scripts/prewarm-sandbox.py` for both images. It creates a temporary DaemonSet in `cohub-sessions[-dev]` on the API's `SANDBOX_NODE_SELECTOR` / `SANDBOX_TOLERATIONS` nodes, waits until every node is ready, then deletes it. Each Pod runs two unprivileged `/bin/sleep` containers with the exact images and `IfNotPresent`; no sandbox process or PVC is involved. The step is best-effort (`continue-on-error`) and times out after 600 seconds.
+Before patching the prod API image configuration, CI runs `scripts/prewarm-sandbox.py` for both images; dev releases too often for prewarming to pay off. It creates a temporary DaemonSet in `cohub-sessions` on the API's `SANDBOX_NODE_SELECTOR` / `SANDBOX_TOLERATIONS` nodes, waits until every node is ready, then deletes it. Each Pod runs two unprivileged `/bin/sleep` containers with the exact images and `IfNotPresent`; no sandbox process or PVC is involved. The step is best-effort (`continue-on-error`) and times out after 600 seconds.
 
 ```bash
 python3 scripts/prewarm-sandbox.py --env dev \
