@@ -1,7 +1,7 @@
 import type { AppDevice } from "@cohub/protocol/app-devices";
 import type { HttpTransport } from "../transport.js";
 import type { RequestSource } from "@cohub/protocol/provenance";
-import type { AppArtifactDescriptor, AppContentKind, AppPromotionEventKey, AppVersionSource } from "@cohub/protocol";
+import type { AppArtifactDescriptor, AppContentKind, AppDomainListResponse, AppDomainRecord, AppPromotionEventKey, AppVersionSource } from "@cohub/protocol";
 import type { Permission, PublicUserProfile, SpacePublicProfile } from "../types.js";
 
 export type AppTargetType = "file" | "directory" | "port";
@@ -434,6 +434,36 @@ export class AppsApi {
         headers: input ? { "Content-Type": "application/json" } : undefined,
         body: input ? JSON.stringify(input) : undefined,
       },
+    );
+  }
+
+  /** Custom domain bindings of an App, plus whether the deployment offers them. */
+  listDomains(appId: string) {
+    return this.transport.request<AppDomainListResponse>(`/api/apps/${encodeURIComponent(appId)}/domains`);
+  }
+
+  /** Claims `hostname` for the App; the response lists the DNS records to add. */
+  addDomain(appId: string, hostname: string) {
+    return this.transport.request<{ domain: AppDomainRecord }>(`/api/apps/${encodeURIComponent(appId)}/domains`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hostname }),
+    });
+  }
+
+  /** Checks DNS and certificate status now; a failed domain gets a new token. */
+  checkDomain(appId: string, domainId: string) {
+    return this.transport.request<{ domain: AppDomainRecord }>(
+      `/api/apps/${encodeURIComponent(appId)}/domains/${encodeURIComponent(domainId)}/check`,
+      { method: "POST" },
+    );
+  }
+
+  /** `domain` is null once removed, or the domain while its certificate is released. */
+  removeDomain(appId: string, domainId: string) {
+    return this.transport.request<{ ok: true; domain: AppDomainRecord | null }>(
+      `/api/apps/${encodeURIComponent(appId)}/domains/${encodeURIComponent(domainId)}`,
+      { method: "DELETE" },
     );
   }
 

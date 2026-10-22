@@ -1,7 +1,7 @@
 // Cloudflare Worker entry for the web app.
 //
-// Standalone App origins get one App per hostname, so every path on such a host
-// belongs to that App. Those requests must be resolved here, before the
+// Standalone App origins and custom domains get one App per hostname, so every
+// path on such a host belongs to that App. Those requests must be resolved here, before the
 // SvelteKit adapter runs: the adapter serves prerendered paths (`/`, `/docs`,
 // `/pricing`, …) straight from static assets, which would otherwise answer with
 // the marketing shell instead of the App.
@@ -27,6 +27,8 @@ import {
 	GENERATED_ASSET_PATHS,
 	PUBLIC_API_ORIGIN,
 	PUBLIC_APP_STANDALONE_HOST_TEMPLATE,
+	PUBLIC_COHUB_ENV,
+	PUBLIC_SITE_HOST_SUFFIXES,
 } from "#worker-entry-deps";
 import { serveStandaloneHostRequest } from "./src/lib/server/standalone-host-request.ts";
 
@@ -41,6 +43,8 @@ const entry: typeof adapter = {
 			request,
 			url,
 			template: PUBLIC_APP_STANDALONE_HOST_TEMPLATE,
+			siteHostSuffixes: PUBLIC_SITE_HOST_SUFFIXES,
+			cohubEnv: PUBLIC_COHUB_ENV,
 			apiOrigin: PUBLIC_API_ORIGIN,
 			fetcher: fetch.bind(globalThis),
 			waitUntil: (promise) => ctx.waitUntil(promise),

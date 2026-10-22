@@ -1,9 +1,21 @@
 import type { ChannelEnvelope } from "@cohub/protocol/realtime";
-import type { AppRecord, AppVersionRecord } from "@neta-art/cohub";
+import type {
+	AppDomainRecord,
+	AppRecord,
+	AppVersionRecord,
+} from "@neta-art/cohub";
 import { sortAppsByRecentUpdate } from "$lib/app-sort";
 
 export const APPS_CHANGED_EVENT = "cohub:apps-changed";
 export const INSTALLED_APPS_CHANGED_EVENT = "cohub:installed-apps-changed";
+export const APP_DOMAINS_CHANGED_EVENT = "cohub:app-domains-changed";
+
+export type AppDomainsChangedDetail = {
+	spaceId: string;
+	appId: string;
+	domain?: AppDomainRecord;
+	removedDomainId?: string;
+};
 
 export type AppVersionPublishedPayload = {
 	app: AppRecord;
@@ -139,4 +151,44 @@ export function dispatchInstalledAppsChanged(spaceId: string) {
 	window.dispatchEvent(
 		new CustomEvent(INSTALLED_APPS_CHANGED_EVENT, { detail: { spaceId } }),
 	);
+}
+
+export function parseAppDomainEvent(
+	event: ChannelEnvelope,
+): AppDomainsChangedDetail | null {
+	if (!event.spaceId) return null;
+	const payload = event.payload as Record<string, unknown>;
+	if (event.type === "app.domain.updated") {
+		const domain = isRecord(payload.domain) ? payload.domain : null;
+		if (
+			!domain ||
+			typeof domain.id !== "string" ||
+			typeof domain.appId !== "string" ||
+			domain.spaceId !== event.spaceId
+		)
+			return null;
+		return {
+			spaceId: event.spaceId,
+			appId: domain.appId,
+			domain: domain as AppDomainRecord,
+		};
+	}
+	if (event.type === "app.domain.removed") {
+		if (
+			typeof payload.appId !== "string" ||
+			typeof payload.domainId !== "string"
+		)
+			return null;
+		return {
+			spaceId: event.spaceId,
+			appId: payload.appId,
+			removedDomainId: payload.domainId,
+		};
+	}
+	return null;
+}
+
+export function dispatchAppDomainsChanged(detail: AppDomainsChangedDetail) {
+	if (typeof window === "undefined") return;
+	window.dispatchEvent(new CustomEvent(APP_DOMAINS_CHANGED_EVENT, { detail }));
 }

@@ -123,6 +123,10 @@
     "./app-rtc": {
       "types": "./dist/app-rtc/index.d.ts",
       "default": "./dist/app-rtc/index.js"
+    },
+    "./app-domains": {
+      "types": "./dist/app-domains/index.d.ts",
+      "default": "./dist/app-domains/index.js"
     }
   },
   "types": "./dist/index.d.ts",

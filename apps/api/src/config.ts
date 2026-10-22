@@ -1,5 +1,6 @@
 import { resolveLogtoEndpoint } from "@cohub/identity";
 import {
+  APP_DOMAIN_DEFAULT_CNAME_TARGET,
   parseCohubAppHostTemplate,
   type CohubAppHostTemplate,
 } from "@cohub/protocol";
@@ -83,6 +84,9 @@ export type AppConfig = {
    * `{id}.apps.example.com`. Unset disables standalone origins entirely.
    */
   appStandaloneHostTemplate: CohubAppHostTemplate | null;
+  /** Custom domains are enabled when the Cloudflare for SaaS zone is configured. */
+  appCustomDomainsEnabled: boolean;
+  appCustomDomainCnameTarget: string;
   /** Author email for checkpoint git commits. */
   checkpointGitAuthorEmail: string;
   /** Optional deployment-level Meta promotion provider configuration. */
@@ -272,6 +276,11 @@ export const config: AppConfig = {
   appStandaloneHostTemplate: parseCohubAppHostTemplate(
     process.env.APP_STANDALONE_HOST_TEMPLATE,
   ),
+  appCustomDomainsEnabled: Boolean(
+    process.env.CLOUDFLARE_SAAS_API_TOKEN?.trim() && process.env.CLOUDFLARE_SAAS_ZONE_ID?.trim(),
+  ),
+  appCustomDomainCnameTarget:
+    process.env.APP_CUSTOM_DOMAIN_CNAME_TARGET?.trim().toLowerCase() || APP_DOMAIN_DEFAULT_CNAME_TARGET,
   checkpointGitAuthorEmail: process.env.CHECKPOINT_GIT_AUTHOR_EMAIL?.trim() || "noreply@cohub.live",
   metaPromotionPixelId: process.env.COHUB_META_PIXEL_ID?.trim() || undefined,
   metaPromotionAccessToken: process.env.COHUB_META_CAPI_ACCESS_TOKEN?.trim() || undefined,

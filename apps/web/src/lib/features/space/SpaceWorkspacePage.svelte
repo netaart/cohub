@@ -83,8 +83,10 @@ import {
 import {
 	APPS_CHANGED_EVENT,
 	createAppMutationBuffer,
+	dispatchAppDomainsChanged,
 	dispatchAppsChanged,
 	dispatchInstalledAppsChanged,
+	parseAppDomainEvent,
 	parseAppVersionPublished,
 	upsertAppSnapshot,
 } from "$lib/features/app/app-realtime";
@@ -2055,6 +2057,12 @@ async function handleWsEvent(payload: ChannelEnvelope) {
 					version: published.version,
 				});
 			}
+		} else if (
+			payload.type === "app.domain.updated" ||
+			payload.type === "app.domain.removed"
+		) {
+			const change = parseAppDomainEvent(payload);
+			if (change) dispatchAppDomainsChanged(change);
 		} else if (payload.type === "label.assignments.updated") {
 			const snapshot = parseResourceLabelRealtimePayload({
 				spaceId: payload.spaceId,

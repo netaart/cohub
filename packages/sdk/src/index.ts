@@ -309,7 +309,14 @@ export type {
   AppBoardAsset,
   AppContentKind,
   AppVersionSource,
+  AppDomainDnsRecord,
+  AppDomainErrorCode,
+  AppDomainListResponse,
+  AppDomainRecord,
+  AppDomainRemovedReason,
+  AppDomainStatus,
 } from "@cohub/protocol";
+export { APP_DOMAIN_PRICE_USD, normalizeAppDomainHostname } from "@cohub/protocol";
 export {
   defaultDesktopCommandTimeoutMs,
   isTerminalDesktopCommandStatus,

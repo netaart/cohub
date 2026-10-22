@@ -92,3 +92,30 @@ Web deploy is driven by Cloudflare wrangler configs and CI env injection (see `.
 
 Do not commit real secrets or production-only credentials.
 
+
+## App 自定义域名（可选）
+
+用户自有域名通过 Cloudflare for SaaS 接入 `cohub.live` Zone，证书由 Cloudflare 签发与续期，集群网关无需改动。设计见 `docs/app-custom-domains.md`。
+
+| 位置 | 配置 | 说明 |
+|------|------|------|
+| API / system worker | `CLOUDFLARE_SAAS_API_TOKEN`、`CLOUDFLARE_SAAS_ZONE_ID` | 写入 `cohub-api-secrets`（两者共用）；未配置时功能关闭 |
+| API / system worker | `APP_CUSTOM_DOMAIN_CNAME_TARGET` | 可选，默认 `cname.cohub.live` |
+| Web | `PUBLIC_SITE_HOST_SUFFIXES` | 构建期注入，取值自 GitHub Variable `SITE_HOST_SUFFIXES_DEV` / `SITE_HOST_SUFFIXES_PROD`，如 `cohub.live,cohub.run` |
+
+`PUBLIC_SITE_HOST_SUFFIXES` 列出由主站服务的 Zone，须覆盖所有指向该 Worker 的主站 host（含仍在使用的 `*.workers.dev` 等）。配置后，入口把其它所有 host 当作自定义域名：查不到绑定一律返回 404，绝不渲染主站。port App 只会被代理到该 Zone 内的沙箱主机（prod 为 `s-…`，dev 为 `d-…`）。
+
+上线顺序（不可颠倒）：
+
+1. 设置 `SITE_HOST_SUFFIXES_*` 并部署 Web，确认主站与独立域名行为不变
+2. 在 `cohub.live` 启用 Custom Hostnames，创建 `saas-fallback.cohub.live  AAAA  100::`（Proxied，设为 Fallback Origin）与 `cname.cohub.live  CNAME  saas-fallback.cohub.live`（Proxied）
+3. 新增 Worker 路由 `*/*` → `cohub-web` 与 `*.cohub.live/*` → None；前后导出路由表核对，确保 `api.`、`s-*` 等仍不经过 Worker
+4. Cache Rule：`s-*.cohub.live`、`d-*.cohub.live` → Bypass cache
+5. 配置 API/worker secrets 并重启
+
+验证：
+
+```bash
+# 未绑定的自定义主机名返回 Worker 404
+curl -s -o /dev/null -w '%{http_code}\n' https://<test-hostname>/
+```

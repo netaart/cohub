@@ -6,6 +6,7 @@ import type {
 } from "@cohub/protocol/model";
 import { sanitizeTaskRunForList } from "@cohub/protocol/task";
 import type {
+	AppDomainListResponse,
 	LabelAssignmentListItem,
 	LabelAssignmentPageInfo,
 	LabelAssignmentRecord,
@@ -286,6 +287,16 @@ export type TaskRunDetailCacheRecord = {
 	lastAccessedAt: number;
 };
 
+export type AppDomainsCacheRecord = {
+	key: string;
+	userKey: string;
+	spaceId: string;
+	appId: string;
+	list: AppDomainListResponse;
+	updatedAt: number;
+	lastAccessedAt: number;
+};
+
 export type StoreName =
 	| "session_lists"
 	| "session_list_indexes"
@@ -306,7 +317,8 @@ export type StoreName =
 	| "space_file_urls"
 	| "task_run_summaries"
 	| "task_run_details"
-	| "session_files";
+	| "session_files"
+	| "app_domains";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 /** Resolved connection for O(1) reuse after open; cleared on versionchange/reset. */
@@ -819,6 +831,9 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 			]);
 			defineStore(db, tx, "session_files", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
+				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
+			]);
+			defineStore(db, tx, "app_domains", [
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
 			defineStore(db, tx, "task_run_details", [

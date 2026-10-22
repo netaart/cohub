@@ -12,6 +12,7 @@ import type { RequestSource } from "../provenance.js";
 import type { HarnessKind } from "../runtime/harnesses.js";
 import type { DesktopCommandDispatchedPayload } from "../desktop-command.js";
 import type { AppArtifactDescriptor, AppContentKind, AppVersionSource } from "../app.js";
+import type { AppDomainRecord, AppDomainRemovedReason } from "../app-domains.js";
 import type { AppRtcPublication } from "../rtc/index.js";
 import type { Actor, ActorKind, ActorModel } from "../provenance.js";
 import type {
@@ -873,6 +874,33 @@ export type AppVersionPublishedEvent = {
   };
 };
 
+export type AppDomainUpdatedEvent = {
+  id: string;
+  timestamp: number;
+  domain: "space";
+  type: "app.domain.updated";
+  requestId?: string | null;
+  spaceId: string;
+  sessionId?: null;
+  payload: { domain: AppDomainRecord };
+};
+
+export type AppDomainRemovedEvent = {
+  id: string;
+  timestamp: number;
+  domain: "space";
+  type: "app.domain.removed";
+  requestId?: string | null;
+  spaceId: string;
+  sessionId?: null;
+  payload: {
+    appId: string;
+    domainId: string;
+    hostname: string;
+    reason: AppDomainRemovedReason;
+  };
+};
+
 export type RealtimeTaskRecord = {
   id: string;
   type: string;
@@ -980,6 +1008,8 @@ export type RealtimeServerEvent =
   | BoardAwarenessUpdatedEvent
   | BoardPlaybackChangedEvent
   | AppVersionPublishedEvent
+  | AppDomainUpdatedEvent
+  | AppDomainRemovedEvent
   | TaskCreatedEvent
   | TaskUpdatedEvent
   | LabelAssignmentsUpdatedEvent

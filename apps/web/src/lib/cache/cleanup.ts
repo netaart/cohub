@@ -1,4 +1,5 @@
 import {
+	type AppDomainsCacheRecord,
 	type BoardManifestCacheRecord,
 	idbDeleteWhere,
 	idbGetAll,
@@ -34,6 +35,7 @@ const MAX_ENTRIES = {
 	activity: 30,
 	boardManifests: 2000,
 	spaceFileUrls: 20000,
+	appDomains: 500,
 };
 
 function shouldRunCleanup() {
@@ -68,7 +70,8 @@ async function cleanupStore<
 		| "resource_labels"
 		| "activity"
 		| "board_manifests"
-		| "space_file_urls",
+		| "space_file_urls"
+		| "app_domains",
 	maxEntries: number,
 ) {
 	const userKey = getCacheUserKey();
@@ -144,6 +147,10 @@ export function scheduleCacheCleanup() {
 			cleanupStore<SpaceFileUrlCacheRecord>(
 				"space_file_urls",
 				MAX_ENTRIES.spaceFileUrls,
+			),
+			cleanupStore<AppDomainsCacheRecord>(
+				"app_domains",
+				MAX_ENTRIES.appDomains,
 			),
 		])
 			.then(markCleanupDone)

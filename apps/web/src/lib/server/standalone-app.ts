@@ -1,3 +1,4 @@
+import { SANDBOX_PUBLIC_PORTS } from "@cohub/protocol";
 import type { AppDetailResponse } from "@neta-art/cohub";
 
 const APP_CACHE_CONTROL = "public, max-age=60, stale-while-revalidate=300";
@@ -19,8 +20,39 @@ const STANDALONE_DETAIL_CACHE_TTL_MS = 30_000;
 const STANDALONE_DETAIL_CACHE_MAX_ENTRIES = 128;
 const standaloneDetailCache = new Map<
 	string,
-	{ expiresAt: number; detail: AppDetailResponse }
+	{ expiresAt: number; detail: AppDetailResponse | null }
 >();
+const SANDBOX_HOST_RE =
+	/^([a-z])-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-(\d{2,5})\.(.+)$/;
+
+/**
+ * Port Apps are proxied only to this deployment's sandbox hosts, so a
+ * resolved upstream can never turn the edge into an open proxy.
+ */
+export type PortUpstreamPolicy = {
+	/** `s` in production, `d` elsewhere, as the API names sandbox hosts. */
+	prefix: string;
+	/** Zones sandbox hosts live in; same-zone fetches keep the visitor IP. */
+	zones: readonly string[];
+};
+
+export function isSandboxUpstream(value: string, policy: PortUpstreamPolicy) {
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return false;
+	}
+	if (url.protocol !== "https:" || url.port || url.pathname !== "/")
+		return false;
+	const match = SANDBOX_HOST_RE.exec(url.hostname);
+	return Boolean(
+		match &&
+			match[1] === policy.prefix &&
+			(SANDBOX_PUBLIC_PORTS as readonly number[]).includes(Number(match[2])) &&
+			policy.zones.includes(match[3] ?? ""),
+	);
+}
 
 type StandaloneDetailResult =
 	| { status: "ok"; detail: AppDetailResponse }
@@ -31,13 +63,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function asAppDetail(value: unknown): AppDetailResponse | null {
+function asAppDetail(
+	value: unknown,
+	portPolicy: PortUpstreamPolicy | null,
+): AppDetailResponse | null {
 	if (!isRecord(value) || !isRecord(value.app) || !isRecord(value.space))
 		return null;
 	if (typeof value.app.id !== "string" || value.app.visibility !== "public")
 		return null;
 	if (typeof value.space.id !== "string" || !isRecord(value.content))
 		return null;
+	if (value.content.kind === "port") {
+		return portPolicy &&
+			typeof value.content.url === "string" &&
+			isSandboxUpstream(value.content.url, portPolicy)
+			? (value as AppDetailResponse)
+			: null;
+	}
 	if (value.content.kind !== "web") return null;
 	if (
 		value.content.targetType !== "file" &&
@@ -51,17 +93,20 @@ function asAppDetail(value: unknown): AppDetailResponse | null {
 /** Schedules work that must finish after the response, e.g. `ctx.waitUntil`. */
 export type WaitUntil = (promise: Promise<unknown>) => void;
 
-function readCachedDetail(origin: string): AppDetailResponse | null {
+/** `undefined` on a miss; `null` for a cached "no App here". */
+function readCachedDetail(
+	origin: string,
+): AppDetailResponse | null | undefined {
 	const cached = standaloneDetailCache.get(origin);
-	if (!cached) return null;
+	if (!cached) return undefined;
 	standaloneDetailCache.delete(origin);
-	if (cached.expiresAt <= Date.now()) return null;
+	if (cached.expiresAt <= Date.now()) return undefined;
 	// Re-insert to keep Map order least-recently-used first.
 	standaloneDetailCache.set(origin, cached);
 	return cached.detail;
 }
 
-function writeCachedDetail(origin: string, detail: AppDetailResponse) {
+function writeCachedDetail(origin: string, detail: AppDetailResponse | null) {
 	standaloneDetailCache.delete(origin);
 	standaloneDetailCache.set(origin, {
 		expiresAt: Date.now() + STANDALONE_DETAIL_CACHE_TTL_MS,
@@ -74,12 +119,20 @@ function writeCachedDetail(origin: string, detail: AppDetailResponse) {
 	}
 }
 
-async function fetchStandaloneAppDetail(input: {
+type DetailRequest = {
 	apiOrigin: string;
 	origin: string;
 	fetcher: typeof fetch;
 	recordView: boolean;
-}): Promise<StandaloneDetailResult> {
+	/** Set for custom domains, which may serve port Apps. */
+	portPolicy?: PortUpstreamPolicy | null;
+	/** Remember misses too, so scans of unbound hosts stay off the API. */
+	cacheMisses?: boolean;
+};
+
+async function fetchStandaloneAppDetail(
+	input: DetailRequest,
+): Promise<StandaloneDetailResult> {
 	const query = `?origin=${encodeURIComponent(input.origin)}${input.recordView ? "&view=1" : ""}`;
 	const response = await input
 		.fetcher(`${input.apiOrigin}/api/apps/by-origin${query}`, {
@@ -88,12 +141,13 @@ async function fetchStandaloneAppDetail(input: {
 		.catch(() => null);
 	if (!response) return { status: "unavailable" };
 	if (response.status === 404) {
-		standaloneDetailCache.delete(input.origin);
+		if (input.cacheMisses) writeCachedDetail(input.origin, null);
+		else standaloneDetailCache.delete(input.origin);
 		return { status: "not_found" };
 	}
 	if (!response.ok) return { status: "unavailable" };
 	const parsed = await response.json().catch(() => undefined);
-	const detail = asAppDetail(parsed);
+	const detail = asAppDetail(parsed, input.portPolicy ?? null);
 	if (!detail) return { status: "unavailable" };
 	writeCachedDetail(input.origin, detail);
 	return { status: "ok", detail };
@@ -107,16 +161,13 @@ async function fetchStandaloneAppDetail(input: {
  * hit that call runs after the response via `waitUntil`, so recording views
  * never delays the page; it also refreshes the cached detail.
  */
-export async function loadStandaloneAppDetail(input: {
-	apiOrigin: string;
-	origin: string;
-	fetcher: typeof fetch;
-	waitUntil: WaitUntil;
-	recordView: boolean;
-}): Promise<StandaloneDetailResult> {
+export async function loadStandaloneAppDetail(
+	input: DetailRequest & { waitUntil: WaitUntil },
+): Promise<StandaloneDetailResult> {
 	const request = { ...input, apiOrigin: input.apiOrigin.replace(/\/+$/, "") };
 	if (!request.apiOrigin) return { status: "unavailable" };
 	const cached = readCachedDetail(input.origin);
+	if (cached === null) return { status: "not_found" };
 	if (!cached) return fetchStandaloneAppDetail(request);
 	if (input.recordView) input.waitUntil(fetchStandaloneAppDetail(request));
 	return { status: "ok", detail: cached };
@@ -204,12 +255,35 @@ function proxyResponse(upstream: Response, method: string) {
 	});
 }
 
-function isDocumentRequest(request: Request, url: URL) {
+export function isDocumentRequest(request: Request, url: URL) {
 	if (request.method !== "GET") return false;
 	if (!request.headers.get("accept")?.includes("text/html")) return false;
 	if (url.pathname === "/" || url.pathname === "/index.html") return true;
 	const lastSegment = url.pathname.split("/").at(-1) ?? "";
 	return !lastSegment.includes(".");
+}
+
+const notFound = (body: string) =>
+	new Response(body, {
+		status: 404,
+		headers: { "Cache-Control": "no-store" },
+	});
+
+export function methodNotAllowed() {
+	return new Response("Method not allowed", {
+		status: 405,
+		headers: { Allow: "GET, HEAD", "Cache-Control": "no-store" },
+	});
+}
+
+export function detailFailureResponse(
+	result: Exclude<StandaloneDetailResult, { status: "ok" }>,
+) {
+	if (result.status === "not_found") return notFound("App not found");
+	return new Response("App metadata unavailable", {
+		status: 502,
+		headers: { "Cache-Control": "no-store" },
+	});
 }
 
 export async function serveStandaloneApp(input: {
@@ -220,10 +294,7 @@ export async function serveStandaloneApp(input: {
 	waitUntil: WaitUntil;
 }): Promise<Response> {
 	if (input.request.method !== "GET" && input.request.method !== "HEAD") {
-		return new Response("Method not allowed", {
-			status: 405,
-			headers: { Allow: "GET, HEAD", "Cache-Control": "no-store" },
-		});
+		return methodNotAllowed();
 	}
 	const detailResult = await loadStandaloneAppDetail({
 		apiOrigin: input.apiOrigin,
@@ -232,31 +303,21 @@ export async function serveStandaloneApp(input: {
 		waitUntil: input.waitUntil,
 		recordView: isDocumentRequest(input.request, input.url),
 	});
-	if (detailResult.status === "unavailable") {
-		return new Response("App metadata unavailable", {
-			status: 502,
-			headers: { "Cache-Control": "no-store" },
-		});
-	}
-	if (detailResult.status === "not_found") {
-		return new Response("App not found", {
-			status: 404,
-			headers: { "Cache-Control": "no-store" },
-		});
-	}
+	if (detailResult.status !== "ok") return detailFailureResponse(detailResult);
 	const content = detailResult.detail.content;
-	if (content?.kind !== "web") {
-		return new Response("App not found", {
-			status: 404,
-			headers: { "Cache-Control": "no-store" },
-		});
-	}
+	if (content?.kind !== "web") return notFound("App not found");
+	return serveWebContent({ ...input, content });
+}
+
+export async function serveWebContent(input: {
+	request: Request;
+	url: URL;
+	content: Extract<AppDetailResponse["content"], { kind: "web" }>;
+	fetcher: typeof fetch;
+}): Promise<Response> {
+	const { content } = input;
 	const assetUrl = resolveStandaloneAssetUrl(content, input.url.pathname);
-	if (!assetUrl)
-		return new Response("File not found", {
-			status: 404,
-			headers: { "Cache-Control": "no-store" },
-		});
+	if (!assetUrl) return notFound("File not found");
 
 	try {
 		let upstream = await fetchAsset(input.request, assetUrl, input.fetcher);

@@ -73,6 +73,7 @@ export const COHUB_BILLING_USAGE_TYPES = {
   sandboxCompute: "sandbox.compute",
   spaceStorage: "space.storage",
   workConsumption: "work.consumption",
+  appDomain: "app.domain",
 } as const;
 
 export const COHUB_BILLING_BENEFITS = {

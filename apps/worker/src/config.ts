@@ -1,3 +1,4 @@
+import { APP_DOMAIN_DEFAULT_CNAME_TARGET } from "@cohub/protocol";
 export interface WorkerConfig {
   redisUrl: string;
   bullmqRedisUrl: string;
@@ -42,6 +43,9 @@ export interface WorkerConfig {
   talesofaiBillingSpaceWalletBusinessKey?: string;
   talesofaiBillingAdminApiKey?: string;
   env: "dev" | "prod";
+  cloudflareSaasApiToken?: string;
+  cloudflareSaasZoneId?: string;
+  appCustomDomainCnameTarget: string;
   /** Author email for checkpoint git commits. */
   checkpointGitAuthorEmail: string;
 }
@@ -99,6 +103,10 @@ export const config: WorkerConfig = {
   checkpointAssetOssBucket: process.env.CHECKPOINT_ASSET_OSS_BUCKET ?? process.env.TURN_OBJECT_S3_BUCKET,
   checkpointAssetOssAccessKeyId: process.env.CHECKPOINT_ASSET_OSS_ACCESS_KEY_ID ?? process.env.TURN_OBJECT_S3_ACCESS_KEY_ID,
   checkpointAssetOssSecretAccessKey: process.env.CHECKPOINT_ASSET_OSS_SECRET_ACCESS_KEY ?? process.env.TURN_OBJECT_S3_SECRET_ACCESS_KEY,
+  cloudflareSaasApiToken: process.env.CLOUDFLARE_SAAS_API_TOKEN?.trim() || undefined,
+  cloudflareSaasZoneId: process.env.CLOUDFLARE_SAAS_ZONE_ID?.trim() || undefined,
+  appCustomDomainCnameTarget:
+    process.env.APP_CUSTOM_DOMAIN_CNAME_TARGET?.trim().toLowerCase() || APP_DOMAIN_DEFAULT_CNAME_TARGET,
   talesofaiBillingBaseUrl: process.env.TALESOFAI_BILLING_BASE_URL?.replace(/\/+$/, ""),
   talesofaiBillingBusinessKey: process.env.TALESOFAI_BILLING_BUSINESS_KEY,
   talesofaiBillingSpaceWalletBusinessKey: process.env.TALESOFAI_BILLING_SPACE_WALLET_BUSINESS_KEY,

@@ -496,6 +496,15 @@ cohub apps versions <appId> --json
 cohub apps rm <appId> --yes
 ```
 
+Bind a custom domain to a published public App. The binding costs a one-time $5, charged when the domain goes live; `add` prints the CNAME and TXT records to create at the DNS provider:
+
+```bash
+cohub apps domains add <app> app.example.com --yes
+cohub apps domains ls <app>
+cohub apps domains check <app> app.example.com
+cohub apps domains rm <app> app.example.com --yes
+```
+
 Resolve a published App by public identity:
 
 ```bash

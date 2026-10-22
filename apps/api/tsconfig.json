@@ -147,6 +147,9 @@
       "@cohub/core/sandbox-lifecycle": [
         "../../packages/core/src/sandbox-lifecycle/index.ts"
       ],
+      "@cohub/core/app-domains": [
+        "../../packages/core/src/app-domains/index.ts"
+      ],
       "@cohub/sandbox-controller": [
         "../../packages/sandbox-controller/src/index.ts"
       ],

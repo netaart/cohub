@@ -49,6 +49,7 @@ import { featureGateResponse } from "../lib/feature-gate.js";
 import { createAppPublicUrl } from "../lib/app-public-url.js";
 import { applyRequestSourceToMeta, getRequestSource } from "../lib/request-source.js";
 import { dispatchAppVersionPublished } from "../app-events.js";
+import { parseHttpsOriginHostname, releaseAppDomainsForApp, resolveCustomDomainAppId } from "../app-domains.js";
 import { resolveAppVersionSources } from "../app-version-source.js";
 import { ensureUserProfileByUuid, fallbackPublicUserProfile, type PublicUserProfile } from "../user-profiles.js";
 import {
@@ -629,20 +630,25 @@ router.get("/by-origin", async (c) => {
   const requestedOrigin = c.req.query("origin")?.trim() || c.req.header("origin")?.trim();
   const recordView = c.req.query("view") === "1";
   const hostTemplate = config.appStandaloneHostTemplate;
-  const appId = hostTemplate
+  const templateAppId = hostTemplate
     ? resolveCohubAppOrigin(requestedOrigin, hostTemplate)
     : null;
+  // Custom domains may serve port Apps too; the mapping is authoritative and
+  // changes on (un)binding, so their answers are never HTTP-cached.
+  const customDomain = templateAppId ? null : parseHttpsOriginHostname(requestedOrigin);
+  const appId = templateAppId ?? (customDomain ? await resolveCustomDomainAppId(customDomain) : null);
   if (!appId) return c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
   const app = await getAppById(appId);
   if (app?.status !== "published" || requiresSpaceAppAccess(app)) {
     return c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
   }
   const detail = await getStandaloneAppDetail(app);
-  if (detail?.content?.kind !== "web") {
+  const contentKind = detail?.content?.kind;
+  if (contentKind !== "web" && !(customDomain && contentKind === "port")) {
     return c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
   }
   if (recordView) recordResolvedAppView(c, app, "web");
-  c.header("Cache-Control", recordView ? "no-store" : PUBLIC_APP_HTTP_CACHE);
+  c.header("Cache-Control", recordView || customDomain ? "no-store" : PUBLIC_APP_HTTP_CACHE);
   c.header("Vary", "Origin");
   return c.json(detail);
 });
@@ -1171,6 +1177,8 @@ router.delete("/:id", async (c) => {
   const canDelete = (await hasPermission(user, "space.edit", { spaceId: app.spaceId }))
     || (app.userUuid === user.uuid && (await hasPermission(user, "app.manage", { spaceId: app.spaceId })));
   if (!canDelete) return authzDenied(c);
+  // Hand the custom domain to cleanup first; its Cloudflare hostname must not outlive the App.
+  await releaseAppDomainsForApp(app.id);
   await db.transaction(async (tx) => {
     const promotions = await tx
       .select({ id: appPromotions.id })

@@ -132,6 +132,41 @@ cohub apps promotions stats <app> <promotion-id>
 Pixel 与 Conversions API。归因按 App 存入本地存储 30 天，登录与结账跳转都能
 保留；Cohub 不保留访客级推广记录。
 
+## 自定义域名
+
+已公开发布的文件、目录或端口 App 可以绑定你自己的域名，例如
+`app.example.com`。每条绑定在域名生效时**一次性扣费 $5**（Space 钱包余额足够
+则由 Space 支付，否则由添加域名的人支付）。移除域名不退款。
+
+1. 在 App 管理页的 **自定义域名** 中添加域名
+   （或执行 `cohub apps domains add <app> app.example.com --yes`）
+2. 在你的 DNS 服务商添加页面上显示的两条记录：
+
+| 类型 | 名称 | 值 | 读取方 |
+| --- | --- | --- | --- |
+| CNAME | `app.example.com` | `cname.cohub.live` | Cloudflare，用于路由和签发证书 |
+| TXT | `_cohub-challenge.app.example.com` | `cohub-verify=<token>` | 仅 Cohub，用于证明域名属于这个 App |
+
+3. Cohub 会自动检查 DNS；证书签发后域名变为 **已生效**，通常只需几分钟。之后
+   可以删除 TXT 记录。
+
+```bash
+cohub apps domains ls <app>
+cohub apps domains check <app> app.example.com
+cohub apps domains rm <app> app.example.com --yes
+```
+
+注意：
+
+- 请使用子域名；根域名只有在 DNS 服务商支持 CNAME 拉平时可用
+- 如果域名设置了 CAA 记录，需要允许 Let's Encrypt 和 Google Trust Services
+- 子域名上的代码可以写入父域名的 Cookie；只在信任该 App 的站点下绑定子域名，
+  父站点的登录 Cookie 应使用 `__Host-` 前缀
+- 端口 App 照常拿到访客 IP；生成绝对 URL 和 OAuth 回调时请使用自定义域名，
+  不要依赖请求里的转发主机头
+- 域名连续 72 小时不再指向 `cname.cohub.live` 会被释放。**重新检查** 会重新
+  发起验证；失败的域名会得到新的 TXT token
+
 ## 常见问题
 
 | 现象 | 检查项 |

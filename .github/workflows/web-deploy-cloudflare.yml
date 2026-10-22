@@ -81,6 +81,8 @@ jobs:
           if [[ "${{ steps.env.outputs.env }}" == "prod" ]]; then
             # Hostname template for published App standalone origins; empty disables them.
             echo "PUBLIC_APP_STANDALONE_HOST_TEMPLATE=${{ vars.APP_STANDALONE_HOST_TEMPLATE_PROD }}" >> .env
+            # Zones served as the Cohub site; other hosts are custom domains. Empty disables custom domains.
+            echo "PUBLIC_SITE_HOST_SUFFIXES=${{ vars.SITE_HOST_SUFFIXES_PROD }}" >> .env
             echo "PUBLIC_API_ORIGIN=https://capi.neta.art" >> .env
             echo "PUBLIC_GATEWAY_ORIGIN=https://cgateway.neta.art" >> .env
             echo "PUBLIC_PREVIEW_ORIGIN=https://preview.cohub.live" >> .env
@@ -92,6 +94,8 @@ jobs:
           else
             # Hostname template for published App standalone origins; empty disables them.
             echo "PUBLIC_APP_STANDALONE_HOST_TEMPLATE=${{ vars.APP_STANDALONE_HOST_TEMPLATE_DEV }}" >> .env
+            # Zones served as the Cohub site; other hosts are custom domains. Empty disables custom domains.
+            echo "PUBLIC_SITE_HOST_SUFFIXES=${{ vars.SITE_HOST_SUFFIXES_DEV }}" >> .env
             echo "PUBLIC_API_ORIGIN=https://capi-dev.neta.art" >> .env
             echo "PUBLIC_GATEWAY_ORIGIN=https://cgateway-dev.neta.art" >> .env
             echo "PUBLIC_PREVIEW_ORIGIN=https://preview-dev.cohub.live" >> .env

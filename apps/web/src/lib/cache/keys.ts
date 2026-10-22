@@ -178,3 +178,7 @@ export function spaceFsEpochKey(userKey: string, spaceId: string) {
 export function normalizeDirPath(dirPath: string) {
 	return dirPath.trim().replace(/^\/+|\/+$/g, "");
 }
+
+export function appDomainsKey(userKey: string, spaceId: string, appId: string) {
+	return [userKey, spaceId, appId, "domains"].map(encodeKeyPart).join(":");
+}

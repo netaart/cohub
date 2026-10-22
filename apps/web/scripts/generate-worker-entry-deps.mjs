@@ -26,7 +26,12 @@ const clientDir = new URL(".svelte-kit/output/client/", appDir);
 // SvelteKit's `kit.files.assets`; svelte.config.js keeps the default.
 const staticDir = new URL("static/", appDir);
 
-const NAMES = ["PUBLIC_API_ORIGIN", "PUBLIC_APP_STANDALONE_HOST_TEMPLATE"];
+const NAMES = [
+	"PUBLIC_API_ORIGIN",
+	"PUBLIC_APP_STANDALONE_HOST_TEMPLATE",
+	"PUBLIC_COHUB_ENV",
+	"PUBLIC_SITE_HOST_SUFFIXES",
+];
 
 const mode = process.argv[2] ?? "production";
 const env = {

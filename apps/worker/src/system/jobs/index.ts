@@ -10,3 +10,4 @@ import "./app-publish-asset/index.js";
 import "./app-view-stats-flush/index.js";
 import "./app-promotion-stats-flush/index.js";
 import "./app-rtc-sweep/index.js";
+import "./app-domain-check/index.js";

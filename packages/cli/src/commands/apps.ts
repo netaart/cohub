@@ -10,6 +10,7 @@ import { getAppByRef, parseAppRef } from "../app-ref.js";
 import { checkAppTarget } from "../app-target.js";
 import { putBytes, putLocalFile } from "../http-put.js";
 import { registerAppCommerce } from "./app-commerce.js";
+import { registerAppDomains } from "./app-domains.js";
 import { collectPublicUpload } from "./public.js";
 
 const APP_STATUSES = ["published", "disabled"] as const;
@@ -745,6 +746,7 @@ export function registerApps(program: Command): void {
     });
 
   registerAppCommerce(appsCmd);
+  registerAppDomains(appsCmd);
 
   // ── Viewer grants ─────────────────────────────────────────────────────────
 

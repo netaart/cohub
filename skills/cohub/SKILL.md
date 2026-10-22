@@ -286,6 +286,13 @@ cohub apps download <appId|url|mentionUri> --output <path> --json
 
 HTML files with companion assets download as directory bundles. Board and port Apps are not downloadable; open their public URL with browser tooling when rendered inspection is needed.
 
+Bind a custom domain to a published public App only when the user asks; it costs a one-time $5 when the domain goes live, so confirm before passing `--yes`. The output lists the CNAME and TXT records the user must add at their DNS provider:
+
+```bash
+cohub apps domains add <app> app.example.com --yes
+cohub apps domains check <app> app.example.com
+```
+
 ```bash
 cohub apps -h
 ```

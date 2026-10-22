@@ -292,6 +292,53 @@ export const appVersions = v2.table(
   }),
 );
 
+/**
+ * Custom domain bindings for published Apps. Several Apps may claim the same
+ * hostname while pending; only one row per hostname may be exclusive
+ * (provisioning/active/removing), and only that row owns the Cloudflare
+ * custom hostname.
+ */
+export const appDomains = v2.table(
+  "app_domains",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    appId: uuid("app_id").notNull(),
+    spaceId: uuid("space_id").notNull(),
+    hostname: varchar("hostname", { length: 253 }).notNull(),
+    status: varchar("status", { length: 16 }).notNull().default("pending"),
+    verificationToken: varchar("verification_token", { length: 64 }).notNull(),
+    tokenIssuedAt: timestamp("token_issued_at", { withTimezone: true }).notNull().defaultNow(),
+    providerHostnameId: varchar("provider_hostname_id", { length: 64 }),
+    providerStatus: varchar("provider_status", { length: 32 }),
+    certificateStatus: varchar("certificate_status", { length: 32 }),
+    providerUnhealthySince: timestamp("provider_unhealthy_since", { withTimezone: true }),
+    errorCode: varchar("error_code", { length: 32 }),
+    errorMessage: text("error_message"),
+    removalIntent: varchar("removal_intent", { length: 8 }),
+    billingClaimedAt: timestamp("billing_claimed_at", { withTimezone: true }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    createdBy: varchar("created_by", { length: 255 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    appUniqueIdx: uniqueIndex("v2_uq_app_domains_app").on(table.appId),
+    hostnameExclusiveUniqueIdx: uniqueIndex("v2_uq_app_domains_hostname_exclusive")
+      .on(table.hostname)
+      .where(sql`${table.status} in ('provisioning', 'active', 'removing')`),
+    statusCheck: check(
+      "v2_chk_app_domains_status",
+      sql`${table.status} in ('pending', 'provisioning', 'active', 'failed', 'removing')`,
+    ),
+    removalIntentCheck: check(
+      "v2_chk_app_domains_removal_intent",
+      sql`${table.removalIntent} is null or ${table.removalIntent} in ('user', 'failure')`,
+    ),
+  }),
+);
+
 /** Hourly app view rollups, split by the immutable published version and source. */
 export const appViewStatsHourly = v2.table(
   "app_view_stats_hourly",

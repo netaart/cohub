@@ -137,6 +137,43 @@ Meta Pixel and Conversions API provider. Attribution is kept App-scoped in local
 storage for 30 days so sign-in and checkout redirects preserve it. Cohub never
 retains visitor-level promotion records.
 
+## Custom domain
+
+A published public file, directory, or port App can be served on your own
+domain, such as `app.example.com`. Each binding costs **$5, charged once** when
+the domain goes live (from the Space wallet if it can cover it, otherwise from
+the person who added the domain). Removing a domain does not refund it.
+
+1. Open the App's management page and add the domain under **Custom domain**
+   (or run `cohub apps domains add <app> app.example.com --yes`)
+2. At your DNS provider, add the two records shown:
+
+| Type | Name | Value | Read by |
+| --- | --- | --- | --- |
+| CNAME | `app.example.com` | `cname.cohub.live` | Cloudflare, to route traffic and issue the certificate |
+| TXT | `_cohub-challenge.app.example.com` | `cohub-verify=<token>` | Cohub only, to prove the domain belongs to this App |
+
+3. Cohub checks DNS automatically; the domain turns **Live** once the
+   certificate is issued, usually within minutes. The TXT record can then be
+   deleted.
+
+```bash
+cohub apps domains ls <app>
+cohub apps domains check <app> app.example.com
+cohub apps domains rm <app> app.example.com --yes
+```
+
+Notes:
+
+- Use a subdomain; apex domains work only where your DNS provider flattens CNAMEs
+- If your domain has CAA records, allow Let's Encrypt and Google Trust Services
+- Code on a subdomain can set cookies for its parent domain; bind subdomains only
+  of sites that trust the App, and keep the parent's sign-in cookies `__Host-`
+- A port App sees the visitor's IP as usual; build absolute URLs and OAuth
+  callbacks from the custom domain, not the request's forwarded host
+- A domain that stops pointing at `cname.cohub.live` for 72 hours is released.
+  **Check now** restarts validation; a failed domain gets a new TXT token
+
 ## Troubleshooting
 
 | Symptom | Check |

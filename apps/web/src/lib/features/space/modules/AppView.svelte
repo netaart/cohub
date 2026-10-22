@@ -33,6 +33,7 @@ import {
 	buildSpaceSessionTurnRoute,
 } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
+import AppCustomDomain from "./AppCustomDomain.svelte";
 import AppPromotions from "./AppPromotions.svelte";
 import { createAppDetailController } from "./app-detail-controller.svelte";
 
@@ -222,6 +223,11 @@ onDestroy(() => {
         {/if}
         {#if canEditSpace && publicRoute && appDetail.status === 'published'}
           <AppPromotions appId={appDetail.id} publicRoute={publicRoute} />
+        {/if}
+        {#if canManageApp}
+          {#key appDetail.id}
+            <AppCustomDomain spaceId={spaceId} appId={appDetail.id} eligible={appDetail.status === 'published' && appDetail.visibility === 'public'} />
+          {/key}
         {/if}
       {/if}
 

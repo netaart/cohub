@@ -23,6 +23,7 @@ import { getRegisteredSystemJobs, getSystemJobHandler } from "../system/registry
 import { SANDBOX_IDLE_REAPER_JOB } from "../system/jobs/sandbox-idle-reaper/types.js";
 import { startSystemReferralRewardRetryLoop } from "../system/referral-reward-retry.js";
 import {
+  APP_DOMAIN_SWEEP_JOB,
   APP_PROMOTION_STATS_FLUSH_INTERVAL_MS,
   APP_PROMOTION_STATS_FLUSH_JOB,
   APP_PROMOTION_STATS_FLUSH_SCHEDULER_ID,
@@ -36,6 +37,7 @@ import { APP_RTC_LIVENESS_INTERVAL_MS, APP_RTC_SWEEP_JOB, APP_RTC_SWEEP_SCHEDULE
 import "../system/jobs/index.js";
 
 const SANDBOX_IDLE_REAPER_SCHEDULER_ID = "sandbox-idle-reaper-daily";
+const APP_DOMAIN_SWEEP_SCHEDULER_ID = "app-domain-sweep-hourly";
 /** UTC 00:24 — offset from top-of-hour to reduce collisions with other daily jobs. */
 const SANDBOX_IDLE_REAPER_CRON = "24 0 * * *";
 
@@ -215,6 +217,23 @@ try {
   });
 } catch (error) {
   logger.error("[SystemWorker] Failed to ensure sandbox idle reaper schedule", {
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
+try {
+  await systemQueue.upsertJobScheduler(
+    APP_DOMAIN_SWEEP_SCHEDULER_ID,
+    { every: 60 * 60 * 1000 },
+    {
+      name: APP_DOMAIN_SWEEP_JOB,
+      data: {},
+      opts: { attempts: 1, ...defaultJobRetention },
+    },
+  );
+  logger.info("[SystemWorker] Ensured app domain sweep schedule", { schedulerId: APP_DOMAIN_SWEEP_SCHEDULER_ID });
+} catch (error) {
+  logger.error("[SystemWorker] Failed to ensure app domain sweep schedule", {
     error: error instanceof Error ? error.message : String(error),
   });
 }

@@ -169,6 +169,8 @@ cohub -s <spaceId> apps publish site --dir ./dist
 cohub -s <spaceId> apps publish site --source workspace --dir dist
 cohub -s <spaceId> apps ls --json
 cohub apps stats <workId|url|username/space/work>
+cohub apps domains add <app> app.example.com --yes
+cohub apps domains check <app> app.example.com
 ```
 
 ### Rooms
