@@ -7,7 +7,11 @@ export const APP_DOMAIN_TOKEN_PREFIX = "cohub-verify=";
 
 export const APP_DOMAIN_CHECK_JOB = "app_domain.check";
 export const APP_DOMAIN_SWEEP_JOB = "app_domain.sweep";
-export type AppDomainCheckJobData = { domainId: string };
+export type AppDomainCheckJobData = {
+	domainId: string;
+	/** Set on one-off jobs for a change made while the regular job was running (Redis-clock ms). */
+	requestedAt?: number;
+};
 
 export const APP_DOMAIN_STATUSES = [
 	"pending",

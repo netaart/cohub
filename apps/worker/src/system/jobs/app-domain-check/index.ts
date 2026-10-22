@@ -3,7 +3,8 @@ import { DelayedError, type Job } from "bullmq";
 import { billingOperations, spaceWalletBillingOperations } from "@cohub/billing";
 import {
   appDomainCheckJobId,
-  appDomainFollowUpJobId,
+  appDomainRegularStartedKey,
+  redisNowMs,
   invalidateAppDomainOriginCache,
   appDomainRefreshKey,
   checkAppDomain,
@@ -26,8 +27,7 @@ import { registerSystemJob } from "../../registry.js";
 
 const logger = createLogger({ serviceName: "cohub-worker" });
 const LOCK_TTL_MS = 120_000;
-const FOLLOW_UP_MAX_DELAY_MS = 60 * 60 * 1000;
-const regularRanKey = (domainId: string) => `app-domain:regular-ran:${domainId}`;
+const REQUEST_MAX_DELAY_MS = 60 * 60 * 1000;
 const RELEASE_LOCK_SCRIPT = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end`;
 
 const queue = createBullmqQueue<AppDomainCheckJobData>(COHUB_SYSTEM_QUEUE, {
@@ -111,22 +111,27 @@ registerSystemJob(APP_DOMAIN_CHECK_JOB, async (job: Job<AppDomainCheckJobData>) 
     logger.warn("[AppDomains] check skipped: CLOUDFLARE_SAAS_API_TOKEN / CLOUDFLARE_SAAS_ZONE_ID not configured", { domainId });
     return { skipped: true };
   }
+  const requestedAt = job.data.requestedAt;
+  // Redis-clock start of this pass: it observes every change made before it.
+  const startedAt = await redisNowMs(redisCommandClient);
+  if (requestedAt === undefined) {
+    await redisCommandClient
+      .set(appDomainRegularStartedKey(domainId), String(startedAt), "EX", 2 * 24 * 60 * 60)
+      .catch(() => undefined);
+  }
   const { nextCheckMs } = await checkAppDomain(deps, domainId);
-  // A follow-up chain covers changes the regular job may have missed. It
-  // keeps itself going while the domain needs prompt checks and never touches
-  // the regular job's schedule, so it can neither lose nor postpone work.
-  if (job.id === appDomainFollowUpJobId(domainId)) {
-    // Once the regular job has run after this follow-up was queued, it has
-    // seen the change and owns the schedule again.
-    const regularRanAt = Number(await redisCommandClient.get(regularRanKey(domainId)).catch(() => null));
-    if (nextCheckMs === null || nextCheckMs > FOLLOW_UP_MAX_DELAY_MS || regularRanAt > job.timestamp) {
-      return { domainId, followUp: true };
+  // A one-off request job keeps checking while the domain needs prompt checks,
+  // until a regular pass that started after the request owns the schedule. It
+  // never touches the regular job, so it can neither lose nor postpone work.
+  if (requestedAt !== undefined) {
+    const regularStartedAt = Number(await redisCommandClient.get(appDomainRegularStartedKey(domainId)).catch(() => null));
+    if (nextCheckMs === null || nextCheckMs > REQUEST_MAX_DELAY_MS || regularStartedAt > requestedAt) {
+      return { domainId, request: true };
     }
-    if (!job.token) throw new Error(`app domain follow-up missing job token domainId=${domainId}`);
+    if (!job.token) throw new Error(`app domain request job missing token domainId=${domainId}`);
     await job.moveToDelayed(Date.now() + nextCheckMs, job.token);
     throw new DelayedError();
   }
-  await redisCommandClient.set(regularRanKey(domainId), String(Date.now()), "EX", 2 * 24 * 60 * 60).catch(() => undefined);
   if (nextCheckMs === null) return { domainId, done: true };
   if (!job.token) throw new Error(`app domain check missing job token domainId=${domainId}`);
   // One job per domain: reschedule it instead of enqueueing another.

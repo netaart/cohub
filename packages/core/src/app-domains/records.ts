@@ -70,6 +70,18 @@ export async function invalidateAppDomainOriginCache(redis: OriginCacheRedis, ho
 }
 export const appDomainRefreshKey = (domainId: string) => `app-domain:refresh:${domainId}`;
 export const appDomainCheckJobId = (domainId: string) => `app-domain-${domainId}`;
-/** A one-off extra check for a request that arrived while the regular job was running. */
-export const appDomainFollowUpJobId = (domainId: string) => `app-domain-${domainId}-follow-up`;
-export const APP_DOMAIN_FOLLOW_UP_DELAY_MS = 2_000;
+/**
+ * A request that arrived while the regular job was running gets its own job,
+ * queued before the API returns, so no handoff can lose it.
+ */
+export const appDomainRequestJobId = (domainId: string, requestedAt: number) =>
+  `app-domain-${domainId}-request-${requestedAt}-${randomBytes(4).toString("hex")}`;
+export const APP_DOMAIN_REQUEST_DELAY_MS = 2_000;
+/** Redis-clock ms when the latest regular pass started. */
+export const appDomainRegularStartedKey = (domainId: string) => `app-domain:regular-started:${domainId}`;
+
+/** Milliseconds on the Redis server clock, shared by API and worker pods. */
+export async function redisNowMs(redis: { time(): Promise<ReadonlyArray<string | number>> }) {
+  const [seconds = 0, micros = 0] = await redis.time();
+  return Number(seconds) * 1000 + Math.floor(Number(micros) / 1000);
+}

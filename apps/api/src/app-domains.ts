@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { billingOperations, spaceWalletBillingOperations } from "@cohub/billing";
 import {
-  APP_DOMAIN_FOLLOW_UP_DELAY_MS,
+  APP_DOMAIN_REQUEST_DELAY_MS,
   appDomainCheckJobId,
-  appDomainFollowUpJobId,
+  appDomainRequestJobId,
   appDomainOriginCacheKey,
   appDomainOriginGenerationKey,
   invalidateAppDomainOriginCache,
+  redisNowMs,
   appDomainRefreshKey,
   createAppDomainBilling,
   createAppDomainToken,
@@ -130,50 +131,35 @@ export async function invalidateAppDomainOrigin(hostname: string) {
 }
 
 /**
- * One check job per domain (fixed id). A delayed job is pulled forward, an
- * active one is left to finish (it re-reads the row), anything else re-added.
+ * Runs a check that sees the caller's change. A delayed regular job is pulled
+ * forward and a waiting one has not read the row yet; a running one may have,
+ * so the change gets its own one-off job.
  */
 export async function enqueueAppDomainCheck(domainId: string, delayMs = 0) {
+  const delay = Math.max(0, delayMs);
+  const options = { attempts: 3, backoff: { type: "exponential" as const, delay: 30_000 }, ...defaultJobRetention };
   const jobId = appDomainCheckJobId(domainId);
   const existing = await queue.getJob(jobId);
-  if (existing) {
-    const state = await existing.getState().catch(() => "unknown" as const);
-    if (state === "delayed") {
-      await existing.changeDelay(Math.max(0, delayMs));
+  if (!existing) {
+    await queue.add(APP_DOMAIN_CHECK_JOB, { domainId }, { ...options, jobId, delay });
+    return;
+  }
+  const state = await existing.getState().catch(() => null);
+  if (state === "waiting") return;
+  if (state === "delayed" && (await existing.changeDelay(delay).then(() => true, () => false))) return;
+  if (state === "completed" || state === "failed") {
+    // Reuse the fixed id only once the old job is certainly gone; a duplicate add would be a no-op.
+    if (await existing.remove().then(() => true, () => false)) {
+      await queue.add(APP_DOMAIN_CHECK_JOB, { domainId }, { ...options, jobId, delay });
       return;
     }
-    if (state === "waiting") return;
-    if (state === "active") {
-      // The running check may already be past this change: queue one more
-      // pass, which also re-arms the regular schedule.
-      await enqueueAppDomainFollowUp(domainId);
-      return;
-    }
-    await existing.remove().catch(() => undefined);
   }
-  await queue.add(APP_DOMAIN_CHECK_JOB, { domainId }, {
-    jobId,
-    delay: Math.max(0, delayMs),
-    attempts: 3,
-    backoff: { type: "exponential", delay: 30_000 },
-    ...defaultJobRetention,
-  });
-}
-
-async function enqueueAppDomainFollowUp(domainId: string) {
-  const jobId = appDomainFollowUpJobId(domainId);
-  const existing = await queue.getJob(jobId);
-  if (existing) {
-    const state = await existing.getState().catch(() => "unknown" as const);
-    if (state === "delayed" || state === "waiting") return;
-    await existing.remove().catch(() => undefined);
-  }
-  await queue.add(APP_DOMAIN_CHECK_JOB, { domainId }, {
-    jobId,
-    delay: APP_DOMAIN_FOLLOW_UP_DELAY_MS,
-    attempts: 3,
-    backoff: { type: "exponential", delay: 30_000 },
-    ...defaultJobRetention,
+  // Running, unreadable, or not re-armable: queue a distinct one-off job.
+  const requestedAt = await redisNowMs(redisCommandClient);
+  await queue.add(APP_DOMAIN_CHECK_JOB, { domainId, requestedAt }, {
+    ...options,
+    jobId: appDomainRequestJobId(domainId, requestedAt),
+    delay: Math.max(APP_DOMAIN_REQUEST_DELAY_MS, delay),
   });
 }
 
