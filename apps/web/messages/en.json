@@ -2494,5 +2494,18 @@
 	"app_domain_check": "Check now",
 	"app_domain_remove": "Remove",
 	"app_domain_remove_confirm": "Remove {hostname}? The one-time charge is not refunded.",
-	"app_domain_subdomain_warning": "Code on {hostname} can set cookies for {parent}. Bind subdomains only of sites that trust this App."
+	"app_domain_subdomain_warning": "Code on {hostname} can set cookies for {parent}. Bind subdomains only of sites that trust this App.",
+	"app_domain_error_domain_invalid": "Enter a domain name such as app.example.com.",
+	"app_domain_error_domain_reserved": "This domain is reserved by Cohub.",
+	"app_domain_error_domain_in_use": "{hostname} is bound to another App. Remove that App's TXT value to move the domain here.",
+	"app_domain_error_app_domain_exists": "Remove the current domain before adding another.",
+	"app_domain_error_ownership_not_found": "TXT record not found yet. DNS changes can take a few minutes.",
+	"app_domain_error_verification_expired": "The TXT record was not found within 7 days. Check again to get a new value.",
+	"app_domain_error_insufficient_balance": "Your balance must cover ${price}.",
+	"app_domain_error_dns_moved": "{hostname} no longer points to {target}.",
+	"app_domain_error_certificate_failed": "The certificate has not been issued yet.",
+	"app_domain_error_provider_unavailable": "Cloudflare is not responding. Cohub will retry shortly.",
+	"app_domain_error_disabled": "Custom domains are not available.",
+	"app_domain_error_billing_unavailable": "Your balance can't be checked right now. Try again shortly.",
+	"app_domain_error_generic": "Something went wrong. Try again."
 }

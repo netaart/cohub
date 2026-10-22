@@ -57,7 +57,7 @@
 | 3 | DNS | `cname.cohub.live  CNAME  saas-fallback.cohub.live`，Proxied。这是给用户的 CNAME 目标；显式记录覆盖现有 `*.cohub.live` 泛解析 |
 | 4 | Workers Routes | **前置条件：§8.1 的 Host 分流已上线**（设置 `PUBLIC_SITE_HOST_SUFFIXES` 并部署 Web，未知 Host 一律 404）。然后新增两条：`*/*` → `cohub-web`；`*.cohub.live/*` → None。已有的 `cohub.live/*`、`dev.cohub.live/*` 等更具体路由不变且优先。上线前后导出路由表核对，确保 `api.`、`s-*`、`public.` 等仍不经过 Worker |
 | 5 | Custom Hostnames 默认 | DV、HTTP 验证、最低 TLS 1.2 |
-| 6 | API Token | 仅 cohub.live，权限 `Zone › SSL and Certificates › Edit`。写入 `cohub-api-secrets`（API 与 worker 共用）：`CLOUDFLARE_SAAS_API_TOKEN`、`CLOUDFLARE_SAAS_ZONE_ID`。所有 CF 调用都在 system worker 的检查任务里；API 只以两者是否配置判断功能是否开启 |
+| 6 | API Token | 仅 cohub.live，权限 `Zone › SSL and Certificates › Edit`。写入 `cohub-api-secrets`（API 与 worker 共用）：`CLOUDFLARE_SAAS_API_TOKEN`、`CLOUDFLARE_SAAS_ZONE_ID`。所有 CF 调用都在 system worker 的检查任务里；API 只以 Zone ID 是否配置判断功能是否开启 |
 | 7 | Cache Rule | 沙箱主机 `s-*.cohub.live`（prod）与 `d-*.cohub.live`（dev）→ Bypass cache（与 §8.4 的 `cache: "no-store"` 双保险；这也修复今天直连 `s-…` 时 `.pdf` 等默认可缓存扩展名被边缘缓存的隐患） |
 | 8 | 安全规则 | 针对自定义主机名流量的限速规则，条件 `not (http.host eq "cohub.live" or ends_with(http.host, ".cohub.live"))`，例如每 IP 每 10s 300 次（cohub.live 为 Pro，支持按 `http.host` 写规则）。作用是在边缘挡掉刷量，保护 Traefik 与沙箱 |
 
@@ -139,6 +139,7 @@ provisioning|active ── remove ──► removing ──(按自身 provider_h
 
 - BullMQ 任务 `app_domain.check`（`COHUB_SYSTEM_QUEUE`，由 system worker 执行），每个域名固定 jobId，检查完用 `moveToDelayed` 自行改期；API 只写库并入队。`pending` 退避 30s → 2m → 10m → 1h，最长 7 天。
 - 每小时的 `app_domain.sweep` 为检查逾期的域名补回丢失的任务。
+- 任务正在运行时 API 发起的检查（例如用户移除域名）会另排一个跟进任务（2 秒后执行）。跟进任务只在常规任务还没重新运行、且域名仍需较快复查时继续，不会改动常规任务的排期，所以既不会漏掉变更，也不会推迟它。
 - 用户点击“重新检查”立即入队（每域名 30 秒冷却）。
 - TXT 查询使用 `node:dns` 的 `Resolver`，显式指定公共解析器（1.1.1.1、8.8.8.8），任一命中即可；不新增依赖。
 - `active` 域名每 6 小时查一次 CF 状态，分散执行（CF API 限额 1200 次/5 分钟）。
@@ -154,13 +155,14 @@ provisioning|active ── remove ──► removing ──(按自身 provider_h
 
 规范化：`trim` → 去末尾 `.` → `new URL("https://" + input).hostname`（得到小写 punycode）→ 拒绝含端口、路径、`*`、IP 字面量、单标签、超长（>253 / 标签 >63）。
 
-拒绝列表（配置项 `APP_CUSTOM_DOMAIN_RESERVED_SUFFIXES`，默认）：`cohub.live`、`cohub.run`、`netaverses.cc` 及其子域。CF 自身的保留域/公共后缀错误映射为 `domain_invalid`。
+拒绝列表由现有配置推导：沙箱公网域名（`cohub.live`、`cohub.run`）、CNAME 目标所在 Zone、独立域名模板所在 Zone（如 `netaverses.cc`）、Web 主站域名，及其子域。CF 自身的保留域/公共后缀错误映射为 `domain_invalid`。
 
 准入：
 
 - App `status=published`、`visibility=public`、当前版本 `content.kind ∈ {web, port}`。
 - 调用者在 App 所在 Space 拥有 `app.manage`。
-- 配置了 `CLOUDFLARE_SAAS_API_TOKEN` 与 `CLOUDFLARE_SAAS_ZONE_ID` 即对所有人开放，由 §6.1 的费用控制数量。
+- 配置了 `CLOUDFLARE_SAAS_ZONE_ID` 即对所有人开放（Token 只有 system worker 需要），由 §6.1 的费用控制数量。
+- 检查任务在晋升前也会复核：App 已删除则直接丢弃认领；不再符合条件则保持 `pending` 并记 `app_not_eligible`，不会创建主机名或扣费。
 - 余额足以支付 §6.1 的费用。
 
 ### 6.1 计费
@@ -243,6 +245,8 @@ App 记录不变；域名只经上述接口与实时事件获取。
 2. 否则查 `app_domains`（`status='active'`）→ App。
 3. App 仍需 `published` 且非 `space` 可见。
 
+已被某个 App 占用（`provisioning`/`active`/`removing`）但当前不能提供服务的域名返回 404 `app_origin_unavailable`，与未绑定的 `app_origin_not_found` 区分，授权代理据此拒绝回退到白名单。
+
 - Redis 缓存 `app-origin:<hostname>` 只记 hostname → appId（正向 60s、负向 30s），域名状态变化时主动删除；App 状态、可见性与内容每次实时读取，所以发布与下线无需清缓存。
 - port 内容沿用现有 `getAppContent` 的 `{ kind: "port", url, port }`。该 URL 今天已经由 `/api/apps/:id/public`、`by-slug` 公开返回，v1 不假装隐藏；封住直连属于后续的仅边缘访问模式。
 - 自定义域名的响应 `Cache-Control: no-store`，不叠加 HTTP 缓存层。
@@ -278,7 +282,7 @@ App 记录不变；域名只经上述接口与实时事件获取。
 
 - isolate 内存缓存（现有 30s / 128 条）→ API（Redis）。不使用 `caches.default`：它按机房存储，无法全局主动失效。
 - 404 同样缓存 30s，防止扫描流量打穿到 API。
-- `asAppDetail` 放开 `content.kind === "port"`，并按沙箱主机的精确模式校验上游：`^https://<prefix>-<uuid>-<port>\.cohub\.live$`，`prefix` 与 `getSandboxPublicHostname` 一致（prod 为 `s`，dev 为 `d`，取自 `PUBLIC_COHUB_ENV`），Zone 属于 `PUBLIC_SITE_HOST_SUFFIXES`，端口属于 `SANDBOX_PUBLIC_PORTS`。既杜绝开放代理，也排除 `api.`、`dev.` 等主机以及跨 Zone 的 `cohub.run`（会丢失真实 IP）。
+- `asAppDetail` 放开 `content.kind === "port"`，并按沙箱主机的精确模式校验上游：`^https://<prefix>-<uuid>-<port>\.cohub\.live$`，`prefix` 与 `getSandboxPublicHostname` 一致（prod 为 `s`，dev 为 `d`，取自 `PUBLIC_COHUB_ENV`），Zone 必须是 `PUBLIC_SITE_HOST_SUFFIXES` 的第一项（SaaS Zone），端口属于 `SANDBOX_PUBLIC_PORTS`。既杜绝开放代理，也排除 `api.`、`dev.` 等主机以及跨 Zone 的 `cohub.run`（会丢失真实 IP）。
 
 ### 8.3 静态 App
 
@@ -289,12 +293,12 @@ App 记录不变；域名只经上述接口与实时事件获取。
 | 项 | 规则 |
 |---|---|
 | 方法 | 全部透传（含 POST/PUT/PATCH/DELETE/OPTIONS） |
-| 目标 | 上游 URL + 原 `pathname` + `search`；`redirect: "manual"` |
+| 目标 | 以上游 origin 为基准逐个赋值 `pathname`、`search`（不做 URL 解析，`//evil.example` 这类路径不会跳到别的主机），再校验 origin 未变；`redirect: "manual"` |
 | 请求体 | 流式透传，不缓冲。上限默认 30 MiB（可配）：`Content-Length` 超限直接 413；无 `Content-Length`（HTTP/2 流、chunked）时经计数 `TransformStream` 透传，累计超限即中止上游请求并返回 413 |
 | 请求头 | 透传 Cookie、Origin、Content-Type、Authorization、`X-CSRF-Token` 等业务头；移除 hop-by-hop 头（WebSocket 升级请求保留 `Upgrade`/`Connection`）、`Host`、客户端传入的 `X-Forwarded-*`、`X-Cohub-*` |
 | 追加头 | `X-Real-IP: <CF-Connecting-IP>`（同 Zone 子请求下即上游的 `CF-Connecting-IP`）、`X-Forwarded-Host: <自定义域名>`、`X-Forwarded-Proto: https`。Traefik 对非信任来源可能覆盖 `X-Forwarded-*`，因此 App 生成绝对 URL 时以配置的公开 origin 为准 |
 | WebSocket | 带 `Upgrade: websocket` 时透传给 `fetch`，原样返回 101 响应 |
-| 重定向 | `Location` 指向上游 origin 时改写为自定义域名 origin |
+| 重定向 | 绝对地址的 `Location` 指向上游 origin 时改写为自定义域名 origin；相对地址原样返回，由浏览器按当前页面解析 |
 | Set-Cookie | 删除所有 `Domain=` 属性，服务端下发的 Cookie 统一为仅当前主机有效 |
 | 缓存 | 子请求显式 `cache: "no-store"`（不读不写 Zone 缓存，否则 `.pdf` 等默认可缓存扩展名可能把需登录的附件缓存给匿名访客），并由 §3 第 7 步的 Cache Rule 兜底；不加缓存头；SSE/流式响应原样透传 |
 | 注入 | 不注入 runtime 脚本、不加 Cohub bar |
@@ -302,9 +306,9 @@ App 记录不变；域名只经上述接口与实时事件获取。
 
 **父域 Cookie 的信任边界**：删除 `Domain=` 只约束服务端响应头，约束不了页面 JavaScript。任何跑在 `app.example.com` 上的内容（静态 App 也一样）都能写入 `Domain=example.com` 的 Cookie，浏览器也会把父域 Cookie 发给子域。绑定子域名即意味着父域信任该 App 的代码：父域的登录 Cookie 应使用 `__Host-` 前缀（不可被子域覆盖，也不会发给子域）；不信任时应换用独立的可注册域名。Web 绑定界面对子域名展示这一提示。
 
-### 8.5 可观测性
+### 8.5 可观测性（后续）
 
-Worker 采样日志：hostname、appId、kind、上游状态码、耗时；不记录 Cookie/Authorization/查询串中的 `code`、`state`。
+v1 未实现。计划：Worker 采样日志记录 hostname、appId、kind、上游状态码、耗时；不记录 Cookie/Authorization/查询串中的 `code`、`state`。
 
 ## 9. 对集群网关的影响
 

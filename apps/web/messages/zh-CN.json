@@ -2494,5 +2494,18 @@
 	"app_domain_check": "重新检查",
 	"app_domain_remove": "移除",
 	"app_domain_remove_confirm": "移除 {hostname}？一次性费用不退还。",
-	"app_domain_subdomain_warning": "{hostname} 上的代码可以写入 {parent} 的 Cookie。只在信任此 App 的站点下绑定子域名。"
+	"app_domain_subdomain_warning": "{hostname} 上的代码可以写入 {parent} 的 Cookie。只在信任此 App 的站点下绑定子域名。",
+	"app_domain_error_domain_invalid": "请输入域名，例如 app.example.com。",
+	"app_domain_error_domain_reserved": "该域名为 Cohub 保留。",
+	"app_domain_error_domain_in_use": "{hostname} 已绑定到其他 App。删除那个 App 的 TXT 值后，才能把域名转移到这里。",
+	"app_domain_error_app_domain_exists": "请先移除当前域名，再添加新的。",
+	"app_domain_error_ownership_not_found": "尚未检测到 TXT 记录，DNS 生效可能需要几分钟。",
+	"app_domain_error_verification_expired": "7 天内未检测到 TXT 记录。重新检查即可获取新的值。",
+	"app_domain_error_insufficient_balance": "余额需不少于 ${price}。",
+	"app_domain_error_dns_moved": "{hostname} 不再指向 {target}。",
+	"app_domain_error_certificate_failed": "证书尚未签发成功。",
+	"app_domain_error_provider_unavailable": "Cloudflare 暂无响应，Cohub 稍后会自动重试。",
+	"app_domain_error_disabled": "自定义域名暂不可用。",
+	"app_domain_error_billing_unavailable": "暂时无法检查余额，请稍后重试。",
+	"app_domain_error_generic": "出了点问题，请重试。"
 }

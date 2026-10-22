@@ -14,7 +14,7 @@ import {
 	RefreshCw,
 	Trash2,
 } from "lucide-svelte";
-import { onMount } from "svelte";
+import { onMount, untrack } from "svelte";
 import {
 	readAppDomains,
 	writeAppDomains,
@@ -30,18 +30,28 @@ import { sdk } from "$lib/sdk";
 type Props = {
 	spaceId: string;
 	appId: string;
-	/** Published, public, web or port: the server enforces the same rule. */
-	eligible: boolean;
+	/** Changes whenever the App's status, visibility or version changes. */
+	revision: string;
 };
 
-let { spaceId, appId, eligible }: Props = $props();
+type Problem = { code: string | null };
+
+let { spaceId, appId, revision }: Props = $props();
 
 const locale = $derived(getLocale());
 let list = $state<AppDomainListResponse | null>(null);
 let hostnameInput = $state("");
 let busy = $state<"add" | "check" | "remove" | null>(null);
-let error = $state<{ message: string; code: string | null } | null>(null);
+let problem = $state<Problem | null>(null);
 let copied = $state<string | null>(null);
+
+// Realtime changes that land while a list request is in flight are replayed
+// on top of its (older) snapshot; removals are remembered so no late
+// response can bring a removed domain back.
+let listRequests = 0;
+let latestListRequest = 0;
+let buffered: AppDomainsChangedDetail[] = [];
+const removedIds = new Set<string>();
 
 const domain = $derived(list?.domains[0] ?? null);
 const visible = $derived(Boolean(list && (list.enabled || domain)));
@@ -60,6 +70,45 @@ const statusTone: Record<AppDomainStatus, string> = {
 	removing: "muted",
 };
 
+/** Localized copy for an API or domain error; English diagnostics go to the console only. */
+function problemText(code: string | null, record: AppDomainRecord | null) {
+	const hostname = record?.hostname ?? "";
+	const price = String(list?.priceUsd ?? "");
+	switch (code) {
+		case "domain_invalid":
+			return m.app_domain_error_domain_invalid({}, { locale });
+		case "domain_reserved":
+			return m.app_domain_error_domain_reserved({}, { locale });
+		case "domain_in_use":
+			return m.app_domain_error_domain_in_use({ hostname }, { locale });
+		case "app_domain_exists":
+			return m.app_domain_error_app_domain_exists({}, { locale });
+		case "app_not_eligible":
+			return m.app_domain_not_eligible({}, { locale });
+		case "ownership_not_found":
+			return m.app_domain_error_ownership_not_found({}, { locale });
+		case "verification_expired":
+			return m.app_domain_error_verification_expired({}, { locale });
+		case "insufficient_balance":
+			return m.app_domain_error_insufficient_balance({ price }, { locale });
+		case "dns_moved":
+			return m.app_domain_error_dns_moved(
+				{ hostname, target: list?.cnameTarget ?? "" },
+				{ locale },
+			);
+		case "certificate_failed":
+			return m.app_domain_error_certificate_failed({}, { locale });
+		case "provider_unavailable":
+			return m.app_domain_error_provider_unavailable({}, { locale });
+		case "custom_domains_disabled":
+			return m.app_domain_error_disabled({}, { locale });
+		case "billing_unavailable":
+			return m.app_domain_error_billing_unavailable({}, { locale });
+		default:
+			return m.app_domain_error_generic({}, { locale });
+	}
+}
+
 /** Parent zone of a subdomain, whose cookies the App's pages could set. */
 function parentZone(hostname: string) {
 	const labels = hostname.trim().toLowerCase().split(".").filter(Boolean);
@@ -67,11 +116,41 @@ function parentZone(hostname: string) {
 }
 const inputParent = $derived(parentZone(hostnameInput));
 
-function toError(cause: unknown) {
+function toProblem(cause: unknown): Problem {
+	console.warn("[custom-domain]", cause);
 	return {
-		message: cause instanceof Error ? cause.message : String(cause),
 		code: cause instanceof HttpError ? (cause.code ?? null) : null,
 	};
+}
+
+function withRecord(
+	base: AppDomainListResponse,
+	record: AppDomainRecord,
+): AppDomainListResponse {
+	if (removedIds.has(record.id)) return base;
+	const current = base.domains.find((item) => item.id === record.id);
+	if (current && Date.parse(current.updatedAt) > Date.parse(record.updatedAt))
+		return base;
+	const others = base.domains.filter((item) => item.id !== record.id);
+	return { ...base, domains: [...others, record] };
+}
+
+function withoutRecord(base: AppDomainListResponse, domainId: string) {
+	removedIds.add(domainId);
+	return {
+		...base,
+		domains: base.domains.filter((item) => item.id !== domainId),
+	};
+}
+
+function applyChange(
+	base: AppDomainListResponse,
+	change: AppDomainsChangedDetail,
+) {
+	if (change.domain) return withRecord(base, change.domain);
+	if (change.removedDomainId)
+		return withoutRecord(base, change.removedDomainId);
+	return base;
 }
 
 function store(next: AppDomainListResponse) {
@@ -79,17 +158,30 @@ function store(next: AppDomainListResponse) {
 	void writeAppDomains(spaceId, appId, $state.snapshot(next));
 }
 
-function upsert(record: AppDomainRecord) {
-	if (!list) return;
-	const others = list.domains.filter((item) => item.id !== record.id);
-	store({ ...list, domains: [...others, record] });
+/** Applies a server change now and replays it over any list still in flight. */
+function applyLocal(change: AppDomainsChangedDetail) {
+	if (listRequests > 0 || !list) buffered.push(change);
+	if (list) store(applyChange(list, change));
 }
 
 async function refresh() {
+	listRequests += 1;
+	const request = ++latestListRequest;
 	try {
-		store(await sdk.apps.listDomains(appId));
+		let next = await sdk.apps.listDomains(appId);
+		// A newer request carries newer eligibility; drop this older answer.
+		if (request !== latestListRequest) return;
+		next = {
+			...next,
+			domains: next.domains.filter((item) => !removedIds.has(item.id)),
+		};
+		for (const change of buffered) next = applyChange(next, change);
+		store(next);
 	} catch (cause) {
-		if (!list) error = toError(cause);
+		if (!list) problem = toProblem(cause);
+	} finally {
+		listRequests -= 1;
+		if (listRequests === 0) buffered = [];
 	}
 }
 
@@ -98,11 +190,11 @@ async function run(
 	action: () => Promise<void>,
 ) {
 	busy = kind;
-	error = null;
+	problem = null;
 	try {
 		await action();
 	} catch (cause) {
-		error = toError(cause);
+		problem = toProblem(cause);
 	} finally {
 		busy = null;
 	}
@@ -111,18 +203,19 @@ async function run(
 function add(event: SubmitEvent) {
 	event.preventDefault();
 	const hostname = hostnameInput.trim();
-	if (!hostname) return;
+	if (!hostname || !list) return;
 	void run("add", async () => {
 		const result = await sdk.apps.addDomain(appId, hostname);
-		upsert(result.domain);
+		applyLocal({ spaceId, appId, domain: result.domain });
 		hostnameInput = "";
 	});
 }
 
 function check(record: AppDomainRecord) {
-	void run("check", async () =>
-		upsert((await sdk.apps.checkDomain(appId, record.id)).domain),
-	);
+	void run("check", async () => {
+		const result = await sdk.apps.checkDomain(appId, record.id);
+		applyLocal({ spaceId, appId, domain: result.domain });
+	});
 }
 
 function remove(record: AppDomainRecord) {
@@ -134,12 +227,11 @@ function remove(record: AppDomainRecord) {
 		return;
 	void run("remove", async () => {
 		const result = await sdk.apps.removeDomain(appId, record.id);
-		if (result.domain) upsert(result.domain);
-		else if (list)
-			store({
-				...list,
-				domains: list.domains.filter((item) => item.id !== record.id),
-			});
+		applyLocal(
+			result.domain
+				? { spaceId, appId, domain: result.domain }
+				: { spaceId, appId, removedDomainId: record.id },
+		);
 	});
 }
 
@@ -151,23 +243,25 @@ async function copy(value: string) {
 	}, 1500);
 }
 
+// Reload when the App itself changes, since that can change eligibility.
+$effect(() => {
+	revision;
+	untrack(() => void refresh());
+});
+
 onMount(() => {
 	let disposed = false;
 	void readAppDomains(spaceId, appId).then((cached) => {
-		if (!disposed && cached && !list) list = cached;
+		if (disposed || !cached || list) return;
+		list = buffered.reduce(applyChange, {
+			...cached,
+			eligible: cached.eligible ?? false,
+		});
 	});
-	void refresh();
 	const handleChange = (event: Event) => {
 		const detail = (event as CustomEvent<AppDomainsChangedDetail>).detail;
-		if (detail?.spaceId !== spaceId || detail.appId !== appId || !list) return;
-		if (detail.domain) upsert(detail.domain);
-		else if (detail.removedDomainId)
-			store({
-				...list,
-				domains: list.domains.filter(
-					(item) => item.id !== detail.removedDomainId,
-				),
-			});
+		if (detail?.spaceId !== spaceId || detail.appId !== appId) return;
+		applyLocal(detail);
 	};
 	window.addEventListener(APP_DOMAINS_CHANGED_EVENT, handleChange);
 	return () => {
@@ -218,8 +312,13 @@ onMount(() => {
 					</div>
 				</div>
 
+				{#if !list.eligible && domain.status !== "removing"}
+					<div class="text-[12px] leading-5 text-text-tertiary">{m.app_domain_not_eligible({}, { locale })}</div>
+				{/if}
 				{#if domain.error && domain.status !== "removing"}
-					<div class="break-words text-[12px] leading-5 {domain.status === 'failed' || domain.error.code === 'dns_moved' ? 'text-error-soft' : 'text-text-tertiary'}">{domain.error.message}</div>
+					<div class="space-y-1 text-[12px] leading-5 {domain.status === 'failed' || domain.error.code === 'dns_moved' ? 'text-error-soft' : 'text-text-tertiary'}">
+						<div class="break-words">{problemText(domain.error.code, domain)}</div>
+					</div>
 				{/if}
 
 				{#if domain.status === "pending" || domain.status === "provisioning" || domain.status === "failed"}
@@ -246,7 +345,7 @@ onMount(() => {
 					</div>
 				{/if}
 			</div>
-		{:else if !eligible}
+		{:else if !list.eligible}
 			<div class="text-[12px] text-text-placeholder">{m.app_domain_not_eligible({}, { locale })}</div>
 		{:else}
 			<form class="space-y-2" onsubmit={add}>
@@ -275,10 +374,12 @@ onMount(() => {
 			</form>
 		{/if}
 
-		{#if error}
-			<div class="mt-3 break-words rounded-[6px] border border-error-soft/30 bg-error-bg px-3 py-2 text-[12px] text-error-soft">{error.message}</div>
+		{#if problem}
+			<div class="mt-3 space-y-1 rounded-[6px] border border-error-soft/30 bg-error-bg px-3 py-2 text-[12px] text-error-soft">
+				<div class="break-words">{problemText(problem.code, domain)}</div>
+			</div>
 		{/if}
-		{#if error?.code === "insufficient_balance" || domain?.error?.code === "insufficient_balance"}
+		{#if problem?.code === "insufficient_balance" || domain?.error?.code === "insufficient_balance"}
 			<a href="/settings/billing" class="mt-2 inline-flex text-[12px] font-medium text-brand underline-offset-2 hover:underline">{m.purchase_cta_add_balance({}, { locale })}</a>
 		{/if}
 	</section>

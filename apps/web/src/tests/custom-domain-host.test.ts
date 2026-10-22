@@ -56,6 +56,7 @@ describe("custom domain hosts", () => {
 			"https://d-550e8400-e29b-41d4-a716-446655440000-3000.cohub.live",
 			"https://s-550e8400-e29b-41d4-a716-446655440000-3000.evil.com",
 			"https://s-550e8400-e29b-41d4-a716-446655440000-22.cohub.live",
+			"https://s-550e8400-e29b-41d4-a716-446655440000-3000.cohub.run",
 		]) {
 			const fetcher: typeof fetch = async () =>
 				Response.json(portDetail(upstream));
@@ -121,5 +122,91 @@ describe("custom domain hosts", () => {
 		});
 		assert.equal(response?.status, 413);
 		assert.equal(proxied, false);
+	});
+
+	it("keeps scheme-relative paths on the sandbox host", async () => {
+		const targets: string[] = [];
+		const fetcher: typeof fetch = async (input) => {
+			if (String(input).startsWith(API_ORIGIN))
+				return Response.json(portDetail());
+			targets.push(new URL(String(input)).origin);
+			return new Response("ok");
+		};
+		const host = nextHost();
+		for (const path of [
+			"//evil.example/x",
+			"///evil.example/x",
+			"/\\evil.example/x",
+		])
+			await serve(host, path, fetcher);
+		assert.deepEqual(targets, [UPSTREAM, UPSTREAM, UPSTREAM]);
+	});
+
+	it("leaves relative redirects for the browser to resolve", async () => {
+		const fetcher: typeof fetch = async (input) => {
+			if (String(input).startsWith(API_ORIGIN))
+				return Response.json(portDetail());
+			return new Response(null, {
+				status: 302,
+				headers: { Location: "next?step=2" },
+			});
+		};
+		const response = await serve(nextHost(), "/account/login", fetcher);
+		assert.equal(response?.headers.get("location"), "next?step=2");
+	});
+
+	it("never serves one visitor's response to another from the zone cache", async () => {
+		const sent: Array<{
+			cache: RequestCache | undefined;
+			cookie: string | null;
+		}> = [];
+		const fetcher: typeof fetch = async (input, init) => {
+			if (String(input).startsWith(API_ORIGIN))
+				return Response.json(portDetail());
+			sent.push({
+				cache: init?.cache,
+				cookie: new Headers(init?.headers).get("cookie"),
+			});
+			return new Response("pdf", {
+				headers: { "Content-Type": "application/pdf" },
+			});
+		};
+		const host = nextHost();
+		await serve(host, "/files/a.pdf", fetcher, {
+			headers: { Cookie: "sid=1" },
+		});
+		await serve(host, "/files/a.pdf", fetcher);
+		assert.deepEqual(sent, [
+			{ cache: "no-store", cookie: "sid=1" },
+			{ cache: "no-store", cookie: null },
+		]);
+	});
+
+	it("streams large uploads without a length and cuts them off past the cap", async () => {
+		const MiB = 1024 * 1024;
+		const stream = (chunks: number) =>
+			new ReadableStream<Uint8Array>({
+				start(controller) {
+					for (let index = 0; index < chunks; index += 1)
+						controller.enqueue(new Uint8Array(MiB));
+					controller.close();
+				},
+			});
+		let received = 0;
+		const fetcher: typeof fetch = async (input, init) => {
+			if (String(input).startsWith(API_ORIGIN))
+				return Response.json(portDetail());
+			received = (await new Response(init?.body).arrayBuffer()).byteLength;
+			return new Response("ok");
+		};
+		const upload = (chunks: number) =>
+			serve(nextHost(), "/upload", fetcher, {
+				method: "POST",
+				body: stream(chunks),
+				duplex: "half",
+			} as RequestInit);
+		assert.equal((await upload(25))?.status, 200);
+		assert.equal(received, 25 * MiB);
+		assert.equal((await upload(31))?.status, 413);
 	});
 });

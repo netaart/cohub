@@ -12,11 +12,18 @@ const HOST = "app.example.com";
 const APP_A = "11111111-1111-4111-8111-111111111111";
 const APP_B = "22222222-2222-4222-8222-222222222222";
 const SPACE = "33333333-3333-4333-8333-333333333333";
+const VERSION = "44444444-4444-4444-8444-444444444444";
 
 async function setup() {
   const engine = new PGlite();
   await engine.exec("CREATE SCHEMA v2;");
   await engine.exec(readFileSync(MIGRATION, "utf8").replaceAll("--> statement-breakpoint", ""));
+  await engine.exec(`
+    CREATE TABLE v2.apps (id uuid PRIMARY KEY, status text, visibility text, current_version_id uuid);
+    CREATE TABLE v2.app_versions (id uuid PRIMARY KEY, content_kind text);
+    INSERT INTO v2.app_versions VALUES ('${VERSION}', 'web');
+    INSERT INTO v2.apps VALUES ('${APP_A}', 'published', 'public', '${VERSION}'), ('${APP_B}', 'published', 'public', '${VERSION}');
+  `);
   const txt: string[] = [];
   const hostnames = new Map<string, CustomHostname>();
   const calls: string[] = [];
@@ -154,6 +161,44 @@ test("a domain moved away past the grace period releases its hostname and fails"
     assert.equal(failed?.provider_hostname_id, null);
     assert.equal(t.hostnames.size, 0);
     assert.deepEqual(t.charges, [a.id]);
+  } finally {
+    await t.engine.close();
+  }
+});
+
+test("a claim whose App was deleted is dropped without touching Cloudflare", async () => {
+  const t = await setup();
+  try {
+    const a = await t.claim(APP_A);
+    t.txt.push(appDomainChallengeValue(a.verification_token));
+    await t.engine.exec(`DELETE FROM v2.apps WHERE id = '${APP_A}'`);
+    assert.equal((await checkAppDomain(t.deps, a.id)).nextCheckMs, null);
+    assert.equal(await t.row(a.id), null);
+    assert.deepEqual(t.calls, []);
+    assert.deepEqual(t.charges, []);
+  } finally {
+    await t.engine.close();
+  }
+});
+
+test("removal cleans up a Cloudflare hostname whose create response was lost", async () => {
+  const t = await setup();
+  try {
+    const a = await t.claim(APP_A);
+    t.txt.push(appDomainChallengeValue(a.verification_token));
+    const create = t.deps.cf.create;
+    t.deps.cf.create = async (hostname) => {
+      await create(hostname);
+      throw new Error("socket hang up");
+    };
+    await checkAppDomain(t.deps, a.id);
+    assert.equal((await t.row(a.id))?.provider_hostname_id, null);
+    assert.equal(t.hostnames.size, 1);
+
+    await t.engine.exec(`UPDATE v2.app_domains SET status = 'removing', removal_intent = 'user' WHERE id = '${a.id}'`);
+    await checkAppDomain(t.deps, a.id);
+    assert.equal(await t.row(a.id), null);
+    assert.equal(t.hostnames.size, 0);
   } finally {
     await t.engine.close();
   }

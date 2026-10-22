@@ -76,11 +76,13 @@ export function hostOnlyCookie(value: string) {
 		.join(";");
 }
 
+/** Only absolute redirects back to the sandbox host need the public origin. */
 function rewriteLocation(
 	location: string,
 	upstream: URL,
 	publicOrigin: string,
 ) {
+	if (!/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(location)) return location;
 	try {
 		const target = new URL(location, upstream);
 		if (target.origin !== upstream.origin) return location;
@@ -107,7 +109,13 @@ export async function proxyPortApp(input: {
 }): Promise<Response> {
 	const { request, url } = input;
 	const upstreamBase = new URL(input.upstream);
-	const target = new URL(`${url.pathname}${url.search}`, upstreamBase);
+	// Assign components rather than resolving the path: `//evil.example/x`
+	// would otherwise resolve to another host.
+	const target = new URL(upstreamBase.origin);
+	target.pathname = url.pathname;
+	target.search = url.search;
+	if (target.origin !== upstreamBase.origin)
+		return textResponse(400, "Bad request");
 	const websocket =
 		request.headers.get("upgrade")?.toLowerCase() === "websocket";
 	const limit = input.maxBodyBytes ?? PORT_APP_MAX_BODY_BYTES;

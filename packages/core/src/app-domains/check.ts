@@ -13,6 +13,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { AppDomainBilling } from "./billing.js";
 import { CloudflareApiError, type CustomHostname, type CustomHostnameClient } from "./cloudflare.js";
 import type { DomainDnsLookup } from "./dns.js";
+import { getAppDomainEligibility } from "./eligibility.js";
 import type { AppDomainRow } from "./records.js";
 
 const SECOND = 1_000;
@@ -30,6 +31,8 @@ const RETRY_SOON_MS = SECOND;
 const LOCK_BUSY_RETRY_MS = 15 * SECOND;
 const BILLING_RETRY_MS = 5 * MINUTE;
 const INSUFFICIENT_BALANCE_RECHECK_MS = HOUR;
+/** `provider_status` while a Cloudflare create is in flight or its outcome is unknown. */
+const CREATING = "creating";
 
 /** Certificate states Cloudflare only leaves after an explicit refresh. */
 const STALLED_SSL_STATUSES = new Set(["validation_timed_out", "issuance_timed_out", "expired", "deleted"]);
@@ -104,7 +107,19 @@ async function loadDomain(db: Db, id: string) {
   return row ?? null;
 }
 
-function runCheck(deps: AppDomainCheckDeps, row: AppDomainRow) {
+async function runCheck(deps: AppDomainCheckDeps, row: AppDomainRow): Promise<AppDomainCheckResult> {
+  if (row.status !== "removing" && row.status !== "failed") {
+    const eligibility = await getAppDomainEligibility(deps.db, row.appId);
+    // A binding must never outlive its App (e.g. one created while it was being deleted).
+    if (eligibility === "missing") return releaseOrphan(deps, row);
+    if (eligibility === "ineligible" && row.status === "pending" && !pendingExpired(deps, row)) {
+      const next = await transition(deps, row, {
+        lastCheckedAt: now(deps),
+        ...errorPatch("app_not_eligible", "Only published public web or port Apps can use a custom domain"),
+      });
+      return next ? after(pendingBackoff(now(deps).getTime() - row.tokenIssuedAt.getTime())) : after(RETRY_SOON_MS);
+    }
+  }
   switch (row.status as AppDomainStatus) {
     case "pending":
       return checkPending(deps, row);
@@ -120,6 +135,22 @@ function runCheck(deps: AppDomainCheckDeps, row: AppDomainRow) {
 }
 
 const now = (deps: AppDomainCheckDeps) => deps.now?.() ?? new Date();
+
+async function releaseOrphan(deps: AppDomainCheckDeps, row: AppDomainRow): Promise<AppDomainCheckResult> {
+  if (row.status === "pending") {
+    const removed = await deps.db
+      .delete(appDomains)
+      .where(and(eq(appDomains.id, row.id), eq(appDomains.status, "pending")))
+      .returning({ id: appDomains.id });
+    if (removed.length === 0) return after(RETRY_SOON_MS);
+    await deps.publishRemoved(row, "removed");
+    return done;
+  }
+  const next = await transition(deps, row, { status: "removing", removalIntent: "user", lastCheckedAt: now(deps) });
+  if (!next) return after(RETRY_SOON_MS);
+  await deps.invalidateOrigin(row.hostname);
+  return checkRemoving(deps, next);
+}
 
 /** Compare-and-set on status; null when the row moved on concurrently. */
 async function transition(
@@ -138,11 +169,14 @@ async function transition(
   return next;
 }
 
+const pendingExpired = (deps: AppDomainCheckDeps, row: AppDomainRow) =>
+  now(deps).getTime() - row.tokenIssuedAt.getTime() > APP_DOMAIN_PENDING_TTL_MS;
+
 async function checkPending(deps: AppDomainCheckDeps, row: AppDomainRow): Promise<AppDomainCheckResult> {
   const checkedAt = now(deps);
   const elapsed = checkedAt.getTime() - row.tokenIssuedAt.getTime();
   const challenge = appDomainChallengeName(row.hostname);
-  if (elapsed > APP_DOMAIN_PENDING_TTL_MS) {
+  if (pendingExpired(deps, row)) {
     await transition(deps, row, {
       status: "failed",
       lastCheckedAt: checkedAt,
@@ -215,6 +249,7 @@ async function checkPending(deps: AppDomainCheckDeps, row: AppDomainRow): Promis
     return after(RETRY_SOON_MS);
   }
   if (!promoted) return after(RETRY_SOON_MS);
+  await deps.invalidateOrigin(promoted.hostname);
   return checkProvisioning(deps, promoted);
 }
 
@@ -266,9 +301,14 @@ async function transfer(deps: AppDomainCheckDeps, row: AppDomainRow, holder: App
   return after(APP_DOMAIN_ACTIVE_RECHECK_MS);
 }
 
-async function createOrAdopt(cf: CustomHostnameClient, hostname: string): Promise<CustomHostname> {
+async function createOrAdopt(
+  cf: CustomHostnameClient,
+  hostname: string,
+  beforeCreate: () => Promise<void>,
+): Promise<CustomHostname> {
   const existing = await cf.findByHostname(hostname);
   if (existing) return existing;
+  await beforeCreate();
   try {
     return await cf.create(hostname);
   } catch (error) {
@@ -288,8 +328,22 @@ async function checkProvisioning(deps: AppDomainCheckDeps, row: AppDomainRow): P
   let hostname: CustomHostname;
   try {
     let found = row.providerHostnameId ? await deps.cf.get(row.providerHostnameId) : null;
+    if (!found && row.providerHostnameId) {
+      // Forget an id Cloudflare no longer knows, so cleanup can't latch onto it.
+      await deps.db
+        .update(appDomains)
+        .set({ providerHostnameId: null, updatedAt: checkedAt })
+        .where(and(eq(appDomains.id, row.id), eq(appDomains.providerHostnameId, row.providerHostnameId)));
+    }
     if (!found) {
-      found = await createOrAdopt(deps.cf, row.hostname);
+      // Recorded first: if the create response is lost, removal still knows
+      // to look the hostname up before dropping the row.
+      found = await createOrAdopt(deps.cf, row.hostname, async () => {
+        await deps.db
+          .update(appDomains)
+          .set({ providerStatus: CREATING, updatedAt: checkedAt })
+          .where(eq(appDomains.id, row.id));
+      });
       // Saved by id alone: if the user removed the domain meanwhile, the
       // removal must still see and delete this hostname.
       await deps.db
@@ -302,6 +356,10 @@ async function checkProvisioning(deps: AppDomainCheckDeps, row: AppDomainRow): P
   } catch (error) {
     deps.warn("App domain provisioning call failed", { domainId: row.id, error });
     const message = error instanceof Error ? error.message : String(error);
+    // Cloudflare rejected the hostname itself (invalid, reserved, owned elsewhere); retrying cannot help.
+    if (error instanceof CloudflareApiError && [400, 409, 422].includes(error.status)) {
+      return fail(deps, row, "domain_invalid", `Cloudflare rejected ${row.hostname}: ${message}`);
+    }
     await transition(deps, row, { lastCheckedAt: checkedAt, ...errorPatch("provider_unavailable", `Cloudflare: ${message}`) });
     return after(provisioningBackoff(elapsed));
   }
@@ -364,40 +422,52 @@ async function checkActive(deps: AppDomainCheckDeps, row: AppDomainRow): Promise
     return checkProvisioning(deps, next);
   }
 
-  if (hostname.status === "active") {
-    const next = await transition(deps, row, {
-      providerStatus: hostname.status,
-      certificateStatus: hostname.sslStatus,
-      providerUnhealthySince: null,
-      lastCheckedAt: checkedAt,
-      ...errorPatch(null),
-    });
-    // Covers a crash between going live and claiming the charge.
-    if (next && !next.billingClaimedAt) await chargeOnce(deps, next);
-    return after(APP_DOMAIN_ACTIVE_RECHECK_MS);
+  const refreshRequested = await deps.consumeRefreshRequest(row.id);
+  if (hostname.status !== "active") {
+    // Read DNS and any manual request before judging the grace period, so a
+    // domain restored just before the deadline is refreshed, not released.
+    const pointsHere = (await deps.dns.cname(row.hostname)).includes(deps.cnameTarget);
+    if (refreshRequested || pointsHere) hostname = await refreshQuietly(deps, row, hostname);
+    if (hostname.status !== "active") {
+      const since = row.providerUnhealthySince ?? checkedAt;
+      const movedMessage = `${row.hostname} no longer points to ${deps.cnameTarget}`;
+      const expired = checkedAt.getTime() - since.getTime() > APP_DOMAIN_MOVED_GRACE_MS;
+      if (expired && !pointsHere && !refreshRequested) return fail(deps, row, "dns_moved", movedMessage);
+      const next = await transition(deps, row, {
+        providerStatus: hostname.status,
+        certificateStatus: hostname.sslStatus,
+        providerUnhealthySince: since,
+        lastCheckedAt: checkedAt,
+        ...errorPatch("dns_moved", movedMessage),
+      });
+      return next ? after(UNHEALTHY_RECHECK_MS) : after(RETRY_SOON_MS);
+    }
+  } else if (refreshRequested || STALLED_SSL_STATUSES.has(hostname.sslStatus ?? "")) {
+    // The hostname still routes here but its certificate renewal stalled.
+    hostname = await refreshQuietly(deps, row, hostname);
   }
 
-  const since = row.providerUnhealthySince ?? checkedAt;
-  const movedMessage = `${row.hostname} no longer points to ${deps.cnameTarget}`;
-  if (checkedAt.getTime() - since.getTime() > APP_DOMAIN_MOVED_GRACE_MS) {
-    return fail(deps, row, "dns_moved", movedMessage);
-  }
-  const refreshRequested = await deps.consumeRefreshRequest(row.id);
-  const pointsHere = (await deps.dns.cname(row.hostname)).includes(deps.cnameTarget);
-  if (refreshRequested || pointsHere) {
-    hostname = await deps.cf.refresh(hostname.id).catch((error: unknown) => {
-      deps.warn("App domain refresh failed", { domainId: row.id, error });
-      return hostname as CustomHostname;
-    });
-  }
-  await transition(deps, row, {
+  const certificateStalled = STALLED_SSL_STATUSES.has(hostname.sslStatus ?? "");
+  const next = await transition(deps, row, {
     providerStatus: hostname.status,
     certificateStatus: hostname.sslStatus,
-    providerUnhealthySince: since,
+    providerUnhealthySince: null,
     lastCheckedAt: checkedAt,
-    ...errorPatch("dns_moved", movedMessage),
+    ...(certificateStalled
+      ? errorPatch("certificate_failed", `Certificate for ${row.hostname} is ${hostname.sslStatus}; validation was restarted`)
+      : errorPatch(null)),
   });
-  return after(UNHEALTHY_RECHECK_MS);
+  if (!next) return after(RETRY_SOON_MS);
+  // Covers a crash between going live and claiming the charge.
+  if (!next.billingClaimedAt) await chargeOnce(deps, next);
+  return after(certificateStalled ? UNHEALTHY_RECHECK_MS : APP_DOMAIN_ACTIVE_RECHECK_MS);
+}
+
+async function refreshQuietly(deps: AppDomainCheckDeps, row: AppDomainRow, hostname: CustomHostname) {
+  return deps.cf.refresh(hostname.id).catch((error: unknown) => {
+    deps.warn("App domain refresh failed", { domainId: row.id, error });
+    return hostname;
+  });
 }
 
 /** Exclusive rows release their Cloudflare hostname before becoming `failed`. */
@@ -413,14 +483,25 @@ async function fail(
     lastCheckedAt: now(deps),
     ...errorPatch(code, message),
   });
-  return next ? checkRemoving(deps, next) : after(RETRY_SOON_MS);
+  if (!next) return after(RETRY_SOON_MS);
+  await deps.invalidateOrigin(row.hostname);
+  return checkRemoving(deps, next);
 }
 
 async function checkRemoving(deps: AppDomainCheckDeps, row: AppDomainRow): Promise<AppDomainCheckResult> {
   const checkedAt = now(deps);
-  if (row.providerHostnameId) {
+  if (row.providerHostnameId || row.providerStatus === CREATING) {
     try {
-      await deps.cf.delete(row.providerHostnameId);
+      // This row was verified and exclusive when it tried to create the
+      // hostname, so a hostname found by name is its own.
+      const ids = new Set<string>();
+      if (row.providerHostnameId) ids.add(row.providerHostnameId);
+      // A create whose response was lost leaves no id; find it by name.
+      if (row.providerStatus === CREATING) {
+        const created = await deps.cf.findByHostname(row.hostname);
+        if (created) ids.add(created.id);
+      }
+      for (const id of ids) await deps.cf.delete(id);
     } catch (error) {
       deps.warn("App domain Cloudflare cleanup failed", { domainId: row.id, error });
       await transition(deps, row, { lastCheckedAt: checkedAt });
@@ -461,7 +542,7 @@ async function checkRemoving(deps: AppDomainCheckDeps, row: AppDomainRow): Promi
 async function chargeOnce(deps: AppDomainCheckDeps, row: AppDomainRow) {
   const [claimed] = await deps.db
     .update(appDomains)
-    .set({ billingClaimedAt: now(deps) })
+    .set({ billingClaimedAt: now(deps), updatedAt: now(deps) })
     .where(and(eq(appDomains.id, row.id), isNull(appDomains.billingClaimedAt)))
     .returning();
   if (!claimed) return;

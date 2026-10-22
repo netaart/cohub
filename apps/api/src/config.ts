@@ -84,7 +84,7 @@ export type AppConfig = {
    * `{id}.apps.example.com`. Unset disables standalone origins entirely.
    */
   appStandaloneHostTemplate: CohubAppHostTemplate | null;
-  /** Custom domains are enabled when the Cloudflare for SaaS zone is configured. */
+  /** Custom domains are on when the Cloudflare for SaaS zone is configured. */
   appCustomDomainsEnabled: boolean;
   appCustomDomainCnameTarget: string;
   /** Author email for checkpoint git commits. */
@@ -276,9 +276,8 @@ export const config: AppConfig = {
   appStandaloneHostTemplate: parseCohubAppHostTemplate(
     process.env.APP_STANDALONE_HOST_TEMPLATE,
   ),
-  appCustomDomainsEnabled: Boolean(
-    process.env.CLOUDFLARE_SAAS_API_TOKEN?.trim() && process.env.CLOUDFLARE_SAAS_ZONE_ID?.trim(),
-  ),
+  // The API never calls Cloudflare; only the system worker needs the token.
+  appCustomDomainsEnabled: Boolean(process.env.CLOUDFLARE_SAAS_ZONE_ID?.trim()),
   appCustomDomainCnameTarget:
     process.env.APP_CUSTOM_DOMAIN_CNAME_TARGET?.trim().toLowerCase() || APP_DOMAIN_DEFAULT_CNAME_TARGET,
   checkpointGitAuthorEmail: process.env.CHECKPOINT_GIT_AUTHOR_EMAIL?.trim() || "noreply@cohub.live",

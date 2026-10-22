@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { billingOperations, spaceWalletBillingOperations } from "@cohub/billing";
 import {
+  APP_DOMAIN_FOLLOW_UP_DELAY_MS,
   appDomainCheckJobId,
+  appDomainFollowUpJobId,
   appDomainOriginCacheKey,
+  appDomainOriginGenerationKey,
+  invalidateAppDomainOriginCache,
   appDomainRefreshKey,
   createAppDomainBilling,
   createAppDomainToken,
@@ -14,6 +18,7 @@ import { COHUB_SYSTEM_QUEUE, createBullmqQueue, defaultJobRetention } from "@coh
 import { createLogger } from "@cohub/infra/logging";
 import {
   APP_DOMAIN_CHECK_JOB,
+  APP_DOMAIN_EXCLUSIVE_STATUSES,
   isHostnameWithin,
   type AppDomainCheckJobData,
   type AppDomainRemovedReason,
@@ -74,25 +79,54 @@ export function parseHttpsOriginHostname(origin: string | null | undefined): str
   }
 }
 
-/** The App behind an active custom domain; host-to-App mapping is cached briefly. */
-export async function resolveCustomDomainAppId(hostname: string): Promise<string | null> {
-  const key = appDomainOriginCacheKey(hostname);
-  const cached = await redisCommandClient.get(key).catch(() => null);
-  if (cached !== null) return cached || null;
+export type CustomDomainBinding = { appId: string; active: boolean };
+
+const FILL_IF_GENERATION_SCRIPT = `if (redis.call("get", KEYS[2]) or "0") == ARGV[1] then return redis.call("set", KEYS[1], ARGV[2], "EX", ARGV[3]) end return 0`;
+
+async function readCustomDomainBinding(hostname: string): Promise<CustomDomainBinding | null> {
   const [row] = await db
-    .select({ appId: appDomains.appId })
+    .select({ appId: appDomains.appId, status: appDomains.status })
     .from(appDomains)
-    .where(and(eq(appDomains.hostname, hostname), eq(appDomains.status, "active")))
+    .where(and(eq(appDomains.hostname, hostname), inArray(appDomains.status, [...APP_DOMAIN_EXCLUSIVE_STATUSES])))
     .limit(1);
-  const appId = row?.appId ?? null;
+  return row ? { appId: row.appId, active: row.status === "active" } : null;
+}
+
+/**
+ * The App holding a custom domain (provisioning, active or being removed), or
+ * null when the host is unbound. `fresh` skips the cache for authorization
+ * decisions; otherwise the answer is cached briefly, and a lookup that raced
+ * an invalidation never writes its result back.
+ */
+export async function resolveCustomDomainBinding(
+  hostname: string,
+  options: { fresh?: boolean } = {},
+): Promise<CustomDomainBinding | null> {
+  if (options.fresh) return readCustomDomainBinding(hostname);
+  const key = appDomainOriginCacheKey(hostname);
+  const generationKey = appDomainOriginGenerationKey(hostname);
+  const [cached, generation] = await redisCommandClient.mget(key, generationKey).catch(() => [null, null]);
+  if (cached !== null && cached !== undefined) {
+    return cached ? { appId: cached.slice(2), active: cached.startsWith("a:") } : null;
+  }
+  const binding = await readCustomDomainBinding(hostname);
   await redisCommandClient
-    .set(key, appId ?? "", "EX", appId ? ORIGIN_CACHE_TTL_SECONDS : ORIGIN_MISS_CACHE_TTL_SECONDS)
+    .eval(
+      FILL_IF_GENERATION_SCRIPT,
+      2,
+      key,
+      generationKey,
+      generation ?? "0",
+      binding ? `${binding.active ? "a" : "b"}:${binding.appId}` : "",
+      binding ? ORIGIN_CACHE_TTL_SECONDS : ORIGIN_MISS_CACHE_TTL_SECONDS,
+    )
     .catch(() => undefined);
-  return appId;
+  return binding;
 }
 
 export async function invalidateAppDomainOrigin(hostname: string) {
-  await redisCommandClient.del(appDomainOriginCacheKey(hostname)).catch(() => undefined);
+  await invalidateAppDomainOriginCache(redisCommandClient, hostname).catch((error) =>
+    logger.warn("[app-domains] failed to invalidate origin cache", { hostname, error }));
 }
 
 /**
@@ -108,12 +142,35 @@ export async function enqueueAppDomainCheck(domainId: string, delayMs = 0) {
       await existing.changeDelay(Math.max(0, delayMs));
       return;
     }
-    if (state === "active" || state === "waiting") return;
+    if (state === "waiting") return;
+    if (state === "active") {
+      // The running check may already be past this change: queue one more
+      // pass, which also re-arms the regular schedule.
+      await enqueueAppDomainFollowUp(domainId);
+      return;
+    }
     await existing.remove().catch(() => undefined);
   }
   await queue.add(APP_DOMAIN_CHECK_JOB, { domainId }, {
     jobId,
     delay: Math.max(0, delayMs),
+    attempts: 3,
+    backoff: { type: "exponential", delay: 30_000 },
+    ...defaultJobRetention,
+  });
+}
+
+async function enqueueAppDomainFollowUp(domainId: string) {
+  const jobId = appDomainFollowUpJobId(domainId);
+  const existing = await queue.getJob(jobId);
+  if (existing) {
+    const state = await existing.getState().catch(() => "unknown" as const);
+    if (state === "delayed" || state === "waiting") return;
+    await existing.remove().catch(() => undefined);
+  }
+  await queue.add(APP_DOMAIN_CHECK_JOB, { domainId }, {
+    jobId,
+    delay: APP_DOMAIN_FOLLOW_UP_DELAY_MS,
     attempts: 3,
     backoff: { type: "exponential", delay: 30_000 },
     ...defaultJobRetention,
@@ -184,6 +241,8 @@ export async function removeAppDomain(row: AppDomainRow): Promise<AppDomainRow |
         .where(and(eq(appDomains.id, current.id), eq(appDomains.status, current.status)))
         .returning();
       if (next) {
+        // Stop serving now; Cloudflare cleanup may take retries.
+        await invalidateAppDomainOrigin(next.hostname);
         await publishAppDomainUpdated(next);
         await enqueueAppDomainCheck(next.id);
         return next;
@@ -195,9 +254,38 @@ export async function removeAppDomain(row: AppDomainRow): Promise<AppDomainRow |
   return null;
 }
 
-export async function releaseAppDomainsForApp(appId: string) {
-  const rows = await db.select().from(appDomains).where(eq(appDomains.appId, appId));
-  for (const row of rows) await removeAppDomain(row);
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Releases an App's domains inside the App deletion transaction, which holds
+ * the App row lock that domain creation also takes. Run the returned
+ * follow-up after commit.
+ */
+export async function releaseAppDomainsInTransaction(tx: Tx, appId: string) {
+  const rows = await tx.select().from(appDomains).where(eq(appDomains.appId, appId)).for("update");
+  const deleted: AppDomainRow[] = [];
+  const removing: AppDomainRow[] = [];
+  for (const row of rows) {
+    if (row.status === "pending" || row.status === "failed") {
+      await tx.delete(appDomains).where(eq(appDomains.id, row.id));
+      deleted.push(row);
+      continue;
+    }
+    const [next] = await tx
+      .update(appDomains)
+      .set({ status: "removing", removalIntent: "user", updatedAt: new Date() })
+      .where(eq(appDomains.id, row.id))
+      .returning();
+    if (next) removing.push(next);
+  }
+  return async () => {
+    for (const row of deleted) await publishAppDomainRemoved(row, "removed");
+    for (const row of removing) {
+      await invalidateAppDomainOrigin(row.hostname);
+      await publishAppDomainUpdated(row);
+      await enqueueAppDomainCheck(row.id);
+    }
+  };
 }
 
 export function newAppDomainToken() {

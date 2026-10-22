@@ -16,7 +16,7 @@
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --strategy globalVariable baseLocale --emit-ts-declarations --silent",
 		"lint": "biome lint .",
 		"lint:fix": "biome lint --write .",
-		"test": "node ./scripts/ensure-i18n.mjs && node ../../scripts/test/run.mjs --native-types --test-isolation=none --import ./scripts/register-alias.mjs 'src/tests/**/*.test.ts' && node ../../scripts/test/run.mjs --native-types --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import ./scripts/register-alias.mjs src/tests/space-fs-cache.integration.ts",
+		"test": "node ./scripts/ensure-i18n.mjs && node ../../scripts/test/run.mjs --native-types --test-isolation=none --import ./scripts/register-alias.mjs 'src/tests/**/*.test.ts' && node ../../scripts/test/run.mjs --native-types --experimental-test-module-mocks --disable-warning=ExperimentalWarning --import ./scripts/register-alias.mjs src/tests/space-fs-cache.integration.ts && COHUB_TEST_ALLOW_NETWORK=1 node ../../scripts/test/run.mjs --native-types src/tests/port-app-proxy.workerd.integration.ts",
 		"typecheck": "node ./scripts/ensure-i18n.mjs && node ../../scripts/typecheck-web.mjs",
 		"preview": "pnpm build && wrangler dev",
 		"preview:prod": "pnpm build && wrangler dev --config wrangler.prod.toml",

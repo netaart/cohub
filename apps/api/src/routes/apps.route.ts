@@ -49,7 +49,7 @@ import { featureGateResponse } from "../lib/feature-gate.js";
 import { createAppPublicUrl } from "../lib/app-public-url.js";
 import { applyRequestSourceToMeta, getRequestSource } from "../lib/request-source.js";
 import { dispatchAppVersionPublished } from "../app-events.js";
-import { parseHttpsOriginHostname, releaseAppDomainsForApp, resolveCustomDomainAppId } from "../app-domains.js";
+import { parseHttpsOriginHostname, releaseAppDomainsInTransaction, resolveCustomDomainBinding } from "../app-domains.js";
 import { resolveAppVersionSources } from "../app-version-source.js";
 import { ensureUserProfileByUuid, fallbackPublicUserProfile, type PublicUserProfile } from "../user-profiles.js";
 import {
@@ -636,16 +636,24 @@ router.get("/by-origin", async (c) => {
   // Custom domains may serve port Apps too; the mapping is authoritative and
   // changes on (un)binding, so their answers are never HTTP-cached.
   const customDomain = templateAppId ? null : parseHttpsOriginHostname(requestedOrigin);
-  const appId = templateAppId ?? (customDomain ? await resolveCustomDomainAppId(customDomain) : null);
+  // `fresh=1` (the auth broker) decides authorization, so it never trusts a cached answer.
+  const binding = customDomain
+    ? await resolveCustomDomainBinding(customDomain, { fresh: c.req.query("fresh") === "1" })
+    : null;
+  // A bound origin that cannot be served right now is still that App's origin;
+  // the distinct code keeps the auth broker from treating it as unbound.
+  const unavailable = () => c.json({ message: "app origin is bound but unavailable", code: "app_origin_unavailable" }, 404);
+  if (binding && !binding.active) return unavailable();
+  const appId = templateAppId ?? binding?.appId ?? null;
   if (!appId) return c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
   const app = await getAppById(appId);
   if (app?.status !== "published" || requiresSpaceAppAccess(app)) {
-    return c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
+    return binding ? unavailable() : c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
   }
   const detail = await getStandaloneAppDetail(app);
   const contentKind = detail?.content?.kind;
-  if (contentKind !== "web" && !(customDomain && contentKind === "port")) {
-    return c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
+  if (contentKind !== "web" && !(binding && contentKind === "port")) {
+    return binding ? unavailable() : c.json({ message: "app origin not found", code: "app_origin_not_found" }, 404);
   }
   if (recordView) recordResolvedAppView(c, app, "web");
   c.header("Cache-Control", recordView || customDomain ? "no-store" : PUBLIC_APP_HTTP_CACHE);
@@ -1177,9 +1185,10 @@ router.delete("/:id", async (c) => {
   const canDelete = (await hasPermission(user, "space.edit", { spaceId: app.spaceId }))
     || (app.userUuid === user.uuid && (await hasPermission(user, "app.manage", { spaceId: app.spaceId })));
   if (!canDelete) return authzDenied(c);
-  // Hand the custom domain to cleanup first; its Cloudflare hostname must not outlive the App.
-  await releaseAppDomainsForApp(app.id);
-  await db.transaction(async (tx) => {
+  const afterDomainsReleased = await db.transaction(async (tx) => {
+    // Domain creation takes the same row lock, so no binding can slip in.
+    await tx.select({ id: apps.id }).from(apps).where(eq(apps.id, app.id)).for("update");
+    const releasedDomains = await releaseAppDomainsInTransaction(tx, app.id);
     const promotions = await tx
       .select({ id: appPromotions.id })
       .from(appPromotions)
@@ -1194,7 +1203,9 @@ router.delete("/:id", async (c) => {
     await tx.delete(appViewStatsHourly).where(eq(appViewStatsHourly.appId, app.id));
     await tx.delete(appVersions).where(eq(appVersions.appId, app.id));
     await tx.delete(apps).where(eq(apps.id, app.id));
+    return releasedDomains;
   });
+  await afterDomainsReleased();
   return c.json({ ok: true });
 });
 

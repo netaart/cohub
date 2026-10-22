@@ -1,4 +1,4 @@
-import type { AppDomainRecord, CohubHttpClient } from "@neta-art/cohub";
+import { normalizeAppDomainHostname, type AppDomainRecord, type CohubHttpClient } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { getAppByRef } from "../app-ref.js";
@@ -19,7 +19,7 @@ async function confirm(question: string, opts: { yes?: boolean }, hint: string):
 
 async function findDomain(client: CohubHttpClient, appId: string, ref: string): Promise<AppDomainRecord> {
   const { domains } = await client.apps.listDomains(appId);
-  const target = ref.trim().toLowerCase().replace(/\.$/, "");
+  const target = normalizeAppDomainHostname(ref) ?? ref.trim().toLowerCase();
   const domain = domains.find((item) => item.id === ref || item.hostname === target);
   return domain ?? error(`Domain not found: ${ref}`, "Run `cohub apps domains ls <app>` to see the App's domains.");
 }
@@ -125,8 +125,8 @@ export function registerAppDomains(appsCmd: Command): void {
         const detail = await getAppByRef(client, appRef);
         const target = await findDomain(client, detail.app.id, domainRef);
         await confirm(`Remove ${target.hostname}? The one-time charge is not refunded.`, opts, "Pass --yes to remove the domain.");
-        await client.apps.removeDomain(detail.app.id, target.id);
-        ok(`Domain removed: ${target.hostname}`);
+        const result = await client.apps.removeDomain(detail.app.id, target.id);
+        ok(result.domain ? `Removing ${target.hostname}; its certificate is being released` : `Domain removed: ${target.hostname}`);
       } catch (e: unknown) {
         handleHttp(e);
       }

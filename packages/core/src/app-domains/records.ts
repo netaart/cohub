@@ -47,11 +47,29 @@ export function serializeAppDomain(row: AppDomainRow, cnameTarget: string): AppD
     activatedAt: row.activatedAt?.toISOString() ?? null,
     lastCheckedAt: row.lastCheckedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
     priceUsd: APP_DOMAIN_PRICE_USD,
     charged: row.billingClaimedAt !== null,
   };
 }
 
 export const appDomainOriginCacheKey = (hostname: string) => `app-origin:${hostname}`;
+/** Bumped on every invalidation so a lookup that started earlier cannot refill the cache. */
+export const appDomainOriginGenerationKey = (hostname: string) => `app-origin-gen:${hostname}`;
+
+type OriginCacheRedis = {
+  multi(): { incr(key: string): unknown; expire(key: string, seconds: number): unknown; del(key: string): unknown; exec(): Promise<unknown> };
+};
+
+export async function invalidateAppDomainOriginCache(redis: OriginCacheRedis, hostname: string) {
+  const multi = redis.multi();
+  multi.incr(appDomainOriginGenerationKey(hostname));
+  multi.expire(appDomainOriginGenerationKey(hostname), 24 * 60 * 60);
+  multi.del(appDomainOriginCacheKey(hostname));
+  await multi.exec();
+}
 export const appDomainRefreshKey = (domainId: string) => `app-domain:refresh:${domainId}`;
 export const appDomainCheckJobId = (domainId: string) => `app-domain-${domainId}`;
+/** A one-off extra check for a request that arrived while the regular job was running. */
+export const appDomainFollowUpJobId = (domainId: string) => `app-domain-${domainId}-follow-up`;
+export const APP_DOMAIN_FOLLOW_UP_DELAY_MS = 2_000;

@@ -44,8 +44,9 @@ export declare const PUBLIC_APP_STANDALONE_HOST_TEMPLATE: string;
 export declare const PUBLIC_COHUB_ENV: string;
 
 /**
- * Zones served as the Cohub site, comma-separated. When set, every other host
- * is treated as a custom domain; empty disables custom domains at the edge.
+ * Zones served as the Cohub site, comma-separated, the Cloudflare for SaaS
+ * zone first. When set, every other host is treated as a custom domain;
+ * empty disables custom domains at the edge.
  */
 export declare const PUBLIC_SITE_HOST_SUFFIXES: string;
 

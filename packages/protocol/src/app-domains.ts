@@ -60,6 +60,8 @@ export type AppDomainRecord = {
 	activatedAt: string | null;
 	lastCheckedAt: string | null;
 	createdAt: string;
+	/** Orders snapshots: a client keeps the newer of two records for one id. */
+	updatedAt: string;
 	priceUsd: number;
 	charged: boolean;
 };
@@ -67,6 +69,8 @@ export type AppDomainRecord = {
 export type AppDomainListResponse = {
 	domains: AppDomainRecord[];
 	enabled: boolean;
+	/** Whether the App can be served on a custom domain right now. */
+	eligible: boolean;
 	priceUsd: number;
 	cnameTarget: string | null;
 };

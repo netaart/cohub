@@ -226,7 +226,7 @@ onDestroy(() => {
         {/if}
         {#if canManageApp}
           {#key appDetail.id}
-            <AppCustomDomain spaceId={spaceId} appId={appDetail.id} eligible={appDetail.status === 'published' && appDetail.visibility === 'public'} />
+            <AppCustomDomain spaceId={spaceId} appId={appDetail.id} revision={`${appDetail.status}:${appDetail.visibility}:${appDetail.currentVersionId ?? ''}`} />
           {/key}
         {/if}
       {/if}
