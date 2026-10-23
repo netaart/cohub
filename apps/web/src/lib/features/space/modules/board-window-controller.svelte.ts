@@ -14,7 +14,9 @@ import { type BoardDocument, parseBoardManifest } from "@neta-art/cohub/board";
 import {
 	type BoardReplica,
 	type BoardReplicaState,
+	type BoardReplicaStorage,
 	createBoardReplica,
+	createIndexedDbBoardReplicaStorage,
 } from "@neta-art/cohub/board/replica";
 import {
 	BOARD_AUTOMATION_ACTIVE_MS,
@@ -26,14 +28,10 @@ import {
 } from "$lib/board/board-activity";
 import { resolveBoardManifestText } from "$lib/board/board-manifest-text";
 import { boardPathMatchesTarget } from "$lib/board/board-sync-policy";
+import { getCacheUserKeyAsync } from "$lib/cache/keys";
 import {
-	deleteBoardPendingPatch,
-	listBoardPendingPatches,
-	readBoardDocumentCache,
 	readBoardManifestCache,
-	writeBoardDocumentCache,
 	writeBoardManifestCache,
-	writeBoardPendingPatch,
 } from "$lib/cache/repositories/board-repo";
 import { sdk } from "$lib/sdk";
 import { tryResolveTextFileResponse } from "$lib/space-file-text";
@@ -63,6 +61,23 @@ type BoardPreviewControllerOptions = {
 	onMarkSavePending?: (path: string) => void;
 	onClearSavePendingSoon?: (path: string) => void;
 };
+
+function boardReplicaStorage(
+	spaceId: string,
+	boardId: string,
+): BoardReplicaStorage {
+	const ready = getCacheUserKeyAsync().then((userKey) =>
+		createIndexedDbBoardReplicaStorage({ userKey, spaceId, boardId }),
+	);
+	return {
+		listPending: () => ready.then((storage) => storage.listPending()),
+		putPending: (entry) => ready.then((storage) => storage.putPending(entry)),
+		deletePending: (id) => ready.then((storage) => storage.deletePending(id)),
+		readDocument: () => ready.then((storage) => storage.readDocument()),
+		writeDocument: (version, document) =>
+			ready.then((storage) => storage.writeDocument(version, document)),
+	};
+}
 
 export function createBoardWindowController(
 	options: BoardPreviewControllerOptions,
@@ -183,21 +198,7 @@ export function createBoardWindowController(
 		const client = sdk.space(spaceId).board(boardId);
 		const replica = createBoardReplica({
 			remote: client,
-			storage: {
-				listPending: async () =>
-					(await listBoardPendingPatches(spaceId, boardId)).map((record) => ({
-						mutationId: record.mutationId,
-						patch: record.patch,
-					})),
-				putPending: async (entry) => {
-					await writeBoardPendingPatch({ spaceId, boardId, ...entry });
-				},
-				deletePending: (mutationId) =>
-					deleteBoardPendingPatch({ spaceId, boardId, mutationId }),
-				readDocument: () => readBoardDocumentCache(spaceId, boardId),
-				writeDocument: (version, document) =>
-					writeBoardDocumentCache({ spaceId, boardId, version, document }),
-			},
+			storage: boardReplicaStorage(spaceId, boardId),
 		});
 		const stopState = replica.subscribe((state) =>
 			adoptReplicaState(boardId, state),
@@ -408,9 +409,6 @@ export function createBoardWindowController(
 
 	async function reconcileOpenBoards() {
 		await Promise.all(boards.map((item) => refreshBoardManifest(item.path)));
-		await Promise.all(
-			[...replicas.values()].map(({ replica }) => replica.retry()),
-		);
 	}
 
 	function closeBoard(path = activeBoardPath) {

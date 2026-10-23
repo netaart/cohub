@@ -92,6 +92,8 @@ export type BoardEditorOptions = {
 	initialTool?: BoardToolId;
 	key?: string;
 	readonly?: boolean;
+	/** false: touch and pen move and resize the selection but never rotate it. */
+	touchRotation?: boolean;
 	preferences?: Partial<BoardEditorPreferences>;
 	onPreferencesChange?: (preferences: BoardEditorPreferences) => void;
 	onCommit: (patch: BoardPatch) => void | Promise<void>;

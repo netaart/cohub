@@ -51,7 +51,7 @@ function drawLineGlyph(graphics: Graphics, glyph: CardGlyph, color: number) {
 			traceCube(graphics, 6, 6, 4.5).stroke(line);
 			return;
 		case "file":
-			graphics.poly([2.5, 1, 7.5, 1, 9.5, 3, 9.5, 11, 2.5, 11]).stroke(line);
+			graphics.poly([2.5, 1, 7.5, 1, 9.5, 3, 9.5, 11, 2.5, 11], true).stroke(line);
 			graphics.moveTo(7.5, 1).lineTo(7.5, 3).lineTo(9.5, 3).stroke(line);
 			return;
 		case "task":
@@ -64,7 +64,7 @@ export function traceCube(graphics: Graphics, cx: number, cy: number, radius: nu
 	const dx = radius * 0.866;
 	const dy = radius / 2;
 	graphics
-		.poly([cx, cy - radius, cx + dx, cy - dy, cx + dx, cy + dy, cx, cy + radius, cx - dx, cy + dy, cx - dx, cy - dy])
+		.poly([cx, cy - radius, cx + dx, cy - dy, cx + dx, cy + dy, cx, cy + radius, cx - dx, cy + dy, cx - dx, cy - dy], true)
 		.moveTo(cx - dx, cy - dy)
 		.lineTo(cx, cy)
 		.lineTo(cx + dx, cy - dy)

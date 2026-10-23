@@ -31,7 +31,10 @@ model    ──► @cohub/protocol                (runs anywhere)
 | `client` | HTTP and realtime transport; the only layer that knows about Spaces |
 
 Cohub's own UI (toolbars, menus, i18n, generation, collaboration cursors) stays
-in `apps/web` and talks to these layers through their public entries.
+in `apps/web` and talks to these layers through their public entries. Anything
+that must line up with canvas pixels (editor boxes, label geometry, overlays on
+a card) is computed here and shared with the renderers, never in a component:
+other hosts embed the same canvas, and a copy drifts on the next change.
 
 ## The editor
 
@@ -67,13 +70,53 @@ shadow serve every card type, and short facts above a card through
 overlay (`stage/overlay.ts`) owns them, so pointer and selection changes redraw
 one layer. A renderer that still needs them sets `observesSelection`.
 
-Cache keys include `context.themeKey` rather than individual palette fields.
-Zoom-dependent detail flips on `boardCardDetailed`, which follows the zoom
-buckets; anything that must track every zoom step uses the renderer's `zoom`
+Frame titles take `style.frameLabelSize`; their offset and the editor's title hit
+box derive from it in `model/text-metrics.ts`, so renderer, editor and in-place
+editor agree. Cache keys include `context.themeKey` rather than individual palette fields.
+Zoom-dependent detail flips on `boardCardDetailed`, true while card body text is
+legible; anything that must track every zoom step uses the renderer's `zoom`
 hook and only touches transforms there. The `resolution` hook runs when the zoom
 bucket or `context.textResolution` changes; refresh text textures and
 bucket-dependent detail there instead of invalidating every renderer. The scene
 spreads these refreshes over frames, nearest to the viewport center first.
+
+## Level of detail
+
+A card stays live while it is legible on screen, not while few cards are in view.
+`BoardLod` sets the thresholds in CSS pixels: a renderer's `lod.kind` picks one
+(`media` for long edges of pictures, `text` for font size, `card` otherwise), and
+`lod.size` measures the item in world units. Cards below their threshold, with
+hysteresis, draw through `renderFar` onto far plates: one `Graphics` per z-order
+chunk, drawn at that chunk's depth and repainted only when its cards change.
+Text draws its lines as bars, and pictures as their average color once loaded
+(`farPictureTone`): the asset manager reads it while idle and keeps it after the
+texture leaves, and the stage repaints only the plates showing it. Beyond
+`BoardLod.live`, the on-screen cards nearest the view center stay live; pinned
+cards and cards without `renderFar` are always live. Live cards outside the
+screen skip rendering. Pass `lod` to `mountBoardStage`.
+
+## Frames and devices
+
+Every update runs in one animation frame callback (`requestFrame` in
+`stage/stage.ts`): resize, sync or scripts, card ticks, then render, so input
+reaches the screen in the frame it was handled. Work requested during a frame
+waits for the next one.
+
+Materializing cards, painting far plates and refreshing text resolution are
+deferred work, spread over frames by `stage/frame-budget.ts`. Each kind learns its
+main-thread cost per unit and takes what fits a share of the measured display
+interval, smaller while the view moves; it grows at most twofold per frame, halves
+when frames arrive late while the view moves, and always keeps an eighth of the
+initial batch so work finishes. Fast devices settle in a few frames, slow ones keep
+their frame rate. Scenes synced without a budget use the initial batch every frame.
+
+`defaultBoardDeviceBudget()` in `stage/device.ts` turns what the browser reveals
+(a touch-first small screen, memory, cores, Save-Data) into a tier with a live budget,
+cooling pool, load concurrency and prefetch margin; stages and asset managers default
+to it. Phones that report nothing stay low, since iOS reports nothing and kills tabs
+early. Memory and cores say nothing about the GPU, so no tier raises the live budget.
+
+Multisampling is off from 3× density, where it no longer shows and costs the most.
 
 Display density never changes CSS geometry or document coordinates. The canvas
 fills its host, and its backing store matches the device-pixel content box, so
@@ -95,8 +138,39 @@ resolve, download or decode media. File URLs resolve outside the texture slots, 
 slow lookup never blocks a texture that is ready; a retry passes `{ fresh: true }` to
 `resolveFileUrl`, because the cached URL may be what failed. Readiness, failure and
 invalidation notify with the resource key, and the stage refreshes only the cards that
-hold it. Natural media sizes are recorded once per frame after scene synchronization.
+hold it, a bounded number of texture pixels per frame; pictures that arrive after their
+card fade in. Natural media sizes are recorded once per frame after scene synchronization.
 `onLiveChange` reports the live set for other per-card work such as file previews.
+
+Hosts add pictures for their own items through `itemAsset`, which maps an item to
+the same `file:` and `url:` keys built-in cards use, so they share every rule below.
+A `cover:` prefix sizes a picture cropped to fill its box by its short edge. Queued
+loads start nearest a focus just ahead of a pan. Textures hold the size drawn: CDN
+variants above `BOARD_THUMBNAIL_EDGE`, a local downscale below it, and originals without
+variants decode straight to that size, so no new CDN sizes are requested.
+Released textures cool in an LRU pool trimmed once the camera rests; over budget, the
+oldest pictures shrink to small copies a few at a time, and only leave when those copies
+still do not fit, so returning shows them at once and sharpens.
+
+A resting camera warms the pictures of cards that would be live within `prefetch`
+viewports beyond the cull margin, nearest first, at background task priority.
+`assets.prefetch` keeps them in the cooling pool without holding them: only as many as
+fit half the pool at the size they would load, never originals, two at a time with a
+slot left for cards, and only while no card waits. Requests the view left are dropped,
+and a failed prefetch is not tried again until a card holds it.
+
+## Presses
+
+`editor/interaction.ts` owns what a press means. On an unselected item whose
+definition has `activation: "tap"`, a plain primary press enters `pressing`
+without selecting; past the tap slop it becomes a translation of that item alone
+(or a pan when it cannot move), and released in place within `BOARD_TAP_MAX_MS`
+it reports an activation. `pickUp()` turns a press into a selected drag. A touch or
+pen on the selected item skips the connection ports, whose touch reach covers a small
+item, and `touchRotation: false` drops rotation for those pointers. The stage
+adds what needs the DOM: long presses, dropping the compatibility click after a
+touch tap, and card keys from `BoardCardRenderer.hitAt`, which it hit-tests only
+on live cards with the last frame's render context, keeping those `handlesHit` accepts.
 
 ## DOM views
 
@@ -104,6 +178,9 @@ The stage owns world-space position, size and rotation. A single camera containe
 translates and scales all views. Render content in ordinary CSS pixels at the item's
 world size: do not multiply dimensions by zoom or apply an additional camera transform.
 Screen-fixed controls belong in the overlay, outside the camera container.
+`viewLayer: "below"` stacks the views under the canvas for hosts whose DOM views only
+stand in for canvas drawing; they then get no pointer input, and the theme needs
+`imageBackground` so the canvas leaves them visible.
 
 A view may declare `contentSize: { width: 180, height: 120 }` in screen pixels and
 render expensive content only when `context.detailed` is true. The stage adds

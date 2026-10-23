@@ -13,13 +13,12 @@ import (
 )
 
 type treeCursor struct {
-	Version  int    `json:"v"`
-	Scope    string `json:"s"`
-	Revision string `json:"r"`
-	After    string `json:"a"`
+	Version int    `json:"v"`
+	Scope   string `json:"s"`
+	After   string `json:"a"`
 }
 
-func (d *Dispatcher) listTreePage(request protocol.RPCRequest, params fsTreeParams, root string, info os.FileInfo) interface{} {
+func (d *Dispatcher) listTreePage(request protocol.RPCRequest, params fsTreeParams, root string) interface{} {
 	if params.Depth > 1 || params.Depth < 0 || params.Limit < 0 || params.Limit > 5000 {
 		return d.failed(request, "", "BAD_REQUEST", "Directory pagination requires depth 1 and a page size up to 5000.")
 	}
@@ -29,8 +28,7 @@ func (d *Dispatcher) listTreePage(request protocol.RPCRequest, params fsTreePara
 	}
 	respectGitignore := params.RespectGitignore == nil || *params.RespectGitignore
 	scope := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s:%t", root, respectGitignore))))
-	revision := fmt.Sprintf("%d", info.ModTime().UnixNano())
-	cursor := treeCursor{Version: 1, Scope: scope, Revision: revision}
+	cursor := treeCursor{Version: 1, Scope: scope}
 	if params.Cursor != "" {
 		if len(params.Cursor) > 16384 {
 			return d.failed(request, "", "INVALID_CURSOR", "Invalid directory cursor.")
@@ -41,9 +39,6 @@ func (d *Dispatcher) listTreePage(request protocol.RPCRequest, params fsTreePara
 			return d.failed(request, "", "INVALID_CURSOR", "Invalid directory cursor.")
 		}
 		cursor = decoded
-		if cursor.Revision != revision {
-			return d.failed(request, "", "DIRECTORY_CHANGED", "Directory changed. Restart the listing.")
-		}
 	}
 	names, err := osReadDir(root)
 	if err != nil {
@@ -73,13 +68,6 @@ func (d *Dispatcher) listTreePage(request protocol.RPCRequest, params fsTreePara
 			nodeType = "dir"
 		}
 		entries = append(entries, fsTreeEntry{Name: name, Path: name, Type: nodeType, Size: stats.Size(), MtimeMs: stats.ModTime().UnixMilli()})
-	}
-	current, err := os.Stat(root)
-	if err != nil {
-		return d.failed(request, "", "IO_ERROR", err.Error())
-	}
-	if current.ModTime() != info.ModTime() {
-		return d.failed(request, "", "DIRECTORY_CHANGED", "Directory changed. Restart the listing.")
 	}
 	var next interface{}
 	if end < len(names) {

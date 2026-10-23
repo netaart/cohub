@@ -187,3 +187,29 @@ test("space file reads revalidate a cached body by ETag", async () => {
   assert.deepEqual(second, file);
   assert.notEqual(first, second);
 });
+
+const directoryChanged = () =>
+  new Response(JSON.stringify({ code: "directory_changed", message: "Directory changed. Restart the listing." }), {
+    status: 409,
+    headers: { "Content-Type": "application/json" },
+  });
+
+const entry = (name: string) => ({ name, path: `world/${name}`, type: "file", size: 1, mimeType: null, mtimeMs: 1 });
+
+test("space file listing restarts from the first page when the directory changes", async () => {
+  const cursors: Array<string | null> = [];
+  let conflicts = 1;
+  const fetch: Fetch = async (input) => {
+    const cursor = new URL(String(input)).searchParams.get("cursor");
+    cursors.push(cursor);
+    if (!cursor) return jsonResponse({ path: "world", entries: [entry("a.md")], nextCursor: "c1", truncated: false });
+    if (conflicts-- > 0) return directoryChanged();
+    return jsonResponse({ path: "world", entries: [entry("b.md")], nextCursor: null, truncated: false });
+  };
+  const files = new CohubHttpClient({ baseUrl: "https://api.example.test", fetch }).space("space-1").files;
+
+  const listing = await files.list("world");
+
+  assert.deepEqual(cursors, [null, "c1", null, "c1"]);
+  assert.deepEqual(listing.entries.map((item) => item.name), ["a.md", "b.md"]);
+});

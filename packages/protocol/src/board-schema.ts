@@ -9,6 +9,7 @@ import {
 	BOARD_ITEM_SCHEMAS,
 	BOARD_ITEM_TYPES,
 	BoardAnimationHeaderSchema,
+	BoardExtensionItemSchema,
 	BoardKeySchema,
 	BoardScriptSchema,
 	BoardSettingsSchema,
@@ -24,7 +25,7 @@ function toJsonSchema(schema: z.ZodType): JsonSchema {
 	return rest;
 }
 
-export const BOARD_SCHEMA_TARGETS = ["board", "animation", "track", "script", BOARD_CAMERA_TARGET, ...BOARD_ITEM_TYPES] as const;
+export const BOARD_SCHEMA_TARGETS = ["board", "animation", "track", "script", "extension", BOARD_CAMERA_TARGET, ...BOARD_ITEM_TYPES] as const;
 
 export type BoardJsonSchemaResult = {
 	schema?: JsonSchema;
@@ -42,6 +43,7 @@ export function boardJsonSchema(target: string): BoardJsonSchemaResult | null {
 	}
 	if (target === "track") return { schema: toJsonSchema(BoardTrackSchema) };
 	if (target === "script") return { schema: toJsonSchema(BoardScriptSchema) };
+	if (target === "extension") return { schema: toJsonSchema(BoardExtensionItemSchema) };
 	if (target === BOARD_CAMERA_TARGET) {
 		const properties = listBoardProperties(target);
 		const fields = Object.fromEntries(properties.map(({ property }) => {
@@ -71,6 +73,7 @@ export function boardSchemaOverview() {
 			itemSizes: BOARD_DEFAULT_SIZES,
 		},
 		types: BOARD_ITEM_TYPES,
+		extensionTypes: "Namespaced types like acme.order keep props as written; give them a preview (title, excerpt, cover, src) so every client can show them. See schema extension.",
 		colors: { tokens: BOARD_COLOR_TOKENS, css: "any CSS color", themed: "{ light, dark }" },
 		properties: Object.fromEntries(
 			[...BOARD_ITEM_TYPES, BOARD_CAMERA_TARGET, "animation"].map((target) => [target, listBoardProperties(target).map((entry) => entry.property)]),

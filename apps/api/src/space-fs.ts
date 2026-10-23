@@ -578,8 +578,7 @@ export async function listSpaceDirectory(
         entryCount: result.length,
       }),
     );
-    const revision = `${targetStats.mtimeMs}:${targetStats.ctimeMs}`;
-    const cursor = directoryCursor(JSON.stringify([spaceId, relativePath, visibility]), revision, pagination);
+    const cursor = directoryCursor(JSON.stringify([spaceId, relativePath, visibility]), pagination);
     const start = pagination ? names.sort().findIndex((name) => name > cursor.after) : 0;
     const selected = pagination ? (start < 0 ? [] : names.slice(start, start + (pagination.limit ?? 1000))) : names;
     const hasMore = start >= 0 && start + selected.length < names.length;
@@ -634,10 +633,6 @@ export async function listSpaceDirectory(
     };
 
     if (pagination) {
-      const current = await lstat(target);
-      if (`${current.mtimeMs}:${current.ctimeMs}` !== revision) {
-        throw new FsPaginationError(409, "directory_changed", "Directory changed. Restart the listing.");
-      }
       const last = selected.at(-1);
       return { path: relativePath, entries: visibleEntries, nextCursor: hasMore && last ? cursor.encode(last) : null, truncated: false };
     }

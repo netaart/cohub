@@ -5,6 +5,7 @@ import type { BoardSceneItem } from "../scene.js";
 import { builtinBoardItems } from "./builtin.js";
 import type { BoardItemEntry } from "./create.js";
 import {
+	type BoardItemActivation,
 	type BoardItemCapabilities,
 	type BoardItemDefinition,
 	type BoardItemResizeMode,
@@ -23,6 +24,7 @@ export type BoardRegistry = {
 	readonly definitions: readonly BoardItemDefinition[];
 	get(type: string): BoardItemDefinition | undefined;
 	capabilities(item: Pick<BoardItem, "type">): BoardItemCapabilities;
+	activation(item: Pick<BoardItem, "type">): BoardItemActivation;
 	resizeMode(item: Pick<BoardItem, "type">): BoardItemResizeMode;
 	bounds(item: BoardSceneItem): Rect;
 	hitTest(item: BoardSceneItem, point: WorldPoint): boolean;
@@ -58,6 +60,7 @@ export function createBoardRegistry(definitions: Iterable<BoardItemDefinition> =
 		definitions: [...byType.values()],
 		get: (type) => byType.get(type),
 		capabilities: (item) => capabilitiesOf(item.type),
+		activation: (item) => byType.get(item.type)?.activation ?? "select",
 		resizeMode(item) {
 			const value = capabilitiesOf(item.type);
 			if (!value.canResize) return "none";

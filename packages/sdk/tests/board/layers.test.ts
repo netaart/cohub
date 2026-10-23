@@ -23,6 +23,7 @@ const PACKAGES: Record<string, Layer[]> = {
   "@napi-rs/canvas": ["export/node"],
   "perfect-freehand": ["model"],
   "es-module-lexer": ["render"],
+  "@chenglou/pretext": ["render"],
   zod: ["model", "editor"],
 };
 

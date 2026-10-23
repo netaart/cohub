@@ -20,9 +20,9 @@ export function parseFsPagination(query: Record<string, string | undefined>): Sp
   return { pagination: true, limit, cursor: query.cursor };
 }
 
-export function directoryCursor(scope: string, revision: string, options?: SpaceFsListOptions) {
+export function directoryCursor(scope: string, options?: SpaceFsListOptions, version?: string) {
   const key = createHash("sha256").update(scope).digest("base64url");
-  const version = createHash("sha256").update(revision).digest("base64url");
+  const versionKey = version === undefined ? "" : createHash("sha256").update(version).digest("base64url");
   let after = "";
   if (options?.cursor) {
     let value: unknown;
@@ -30,23 +30,24 @@ export function directoryCursor(scope: string, revision: string, options?: Space
     if (!Array.isArray(value) || value.length !== 4 || value[0] !== 1 || value[1] !== key || typeof value[2] !== "string" || typeof value[3] !== "string") {
       throw new FsPaginationError(400, "invalid_cursor", "Invalid directory cursor.");
     }
-    if (value[2] !== version) throw new FsPaginationError(409, "directory_changed", "Directory changed. Restart the listing.");
+    if (version !== undefined && value[2] !== versionKey) {
+      throw new FsPaginationError(409, "directory_changed", "Directory changed. Restart the listing.");
+    }
     after = value[3];
   }
   return {
     after,
-    encode: (name: string) => Buffer.from(JSON.stringify([1, key, version, name])).toString("base64url"),
+    encode: (name: string) => Buffer.from(JSON.stringify([1, key, versionKey, name])).toString("base64url"),
   };
 }
 
 export function pageDirectory(
   tree: SpaceFsTreeResponse,
   scope: string,
-  revision: string,
   options: SpaceFsListOptions,
-  truncated = false,
+  { version, truncated = false }: { version?: string; truncated?: boolean } = {},
 ): SpaceFsTreePage {
-  const cursor = directoryCursor(scope, revision, options);
+  const cursor = directoryCursor(scope, options, version);
   const sorted = [...tree.entries].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   const start = sorted.findIndex((entry) => entry.name > cursor.after);
   const entries = start < 0 ? [] : sorted.slice(start, start + (options.limit ?? 1000));

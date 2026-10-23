@@ -201,6 +201,26 @@ describe("Node board export", { skip: available ? false : "@napi-rs/canvas is no
     texture.destroy(true);
   });
 
+  test("a magnified image does not bleed across its edges", async () => {
+    const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+    const source = createCanvas(4, 2);
+    const sourceContext = source.getContext("2d");
+    sourceContext.fillStyle = "#ff0000";
+    sourceContext.fillRect(0, 0, 2, 2);
+    sourceContext.fillStyle = "#0000ff";
+    sourceContext.fillRect(2, 0, 2, 2);
+    const texture = await renderer.decodeImage(source.toBuffer("image/png"), "image/png");
+    const image = boardDocument({ items: { i: { type: "image", size: { width: 200, height: 100 }, props: { src: "edge.png" } } } });
+    const result = exportBoardImageBytes(renderer, image, { scale: 1, padding: 0, textures: new Map([["file:edge.png", texture]]) });
+    assert.ok(result);
+    const canvas = createCanvas(result.plan.width, result.plan.height);
+    const context = canvas.getContext("2d");
+    context.drawImage(await loadImage(result.bytes), 0, 0);
+    assert.deepEqual([...context.getImageData(1, 50, 1, 1).data], [255, 0, 0, 255]);
+    assert.deepEqual([...context.getImageData(198, 50, 1, 1).data], [0, 0, 255, 255]);
+    texture.destroy(true);
+  });
+
   test("scale multiplies the output size", () => {
     const single = exportBoardImageBytes(renderer, document, { scale: 1 });
     const double = exportBoardImageBytes(renderer, document, { scale: 2 });

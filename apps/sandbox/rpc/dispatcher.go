@@ -792,7 +792,7 @@ func (d *Dispatcher) handleFSTree(request protocol.RPCRequest) interface{} {
 		return d.failed(request, "", "NOT_DIRECTORY", fmt.Sprintf("not a directory: %s", resolved.path))
 	}
 	if params.Pagination {
-		return d.listTreePage(request, params, resolved.path, info)
+		return d.listTreePage(request, params, resolved.path)
 	}
 
 	depth := params.Depth

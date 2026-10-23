@@ -128,13 +128,13 @@ const sentSessions = $derived(
 );
 
 $effect(() => {
-	if (
-		(defaultExpanded || (autoExpandWhileRunning && isRunning)) &&
-		!userToggled &&
-		!expanded
-	) {
+	if (userToggled) return;
+	if (defaultExpanded || (autoExpandWhileRunning && isRunning)) {
+		if (expanded) return;
 		expanded = true;
 		void onExpand?.();
+	} else if (!autoExpandWhileRunning) {
+		expanded = false;
 	}
 });
 

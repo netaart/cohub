@@ -17,7 +17,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/cohub-sandbox .
 
-FROM node:26-slim AS base
+# Pinned so unchanged layers keep their digests across releases; bump deliberately.
+FROM node:26-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec AS base
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -96,9 +97,6 @@ USER root
 
 WORKDIR /app
 
-COPY --from=builder /out/cohub-sandbox /opt/cohub/internal/cohub-sandbox
-COPY LICENSE NOTICE /opt/cohub/
-
 RUN install -d -o node -g node "$WORKSPACE_DIR"
 
 USER node
@@ -127,5 +125,10 @@ RUN set -eux; \
     ln -s "/opt/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot; \
     rm "/tmp/$archive"
 USER node
+# The binary changes every release; keep it last so game layers stay cached.
+COPY LICENSE NOTICE /opt/cohub/
+COPY --from=builder /out/cohub-sandbox /opt/cohub/internal/cohub-sandbox
 
 FROM base AS runtime
+COPY LICENSE NOTICE /opt/cohub/
+COPY --from=builder /out/cohub-sandbox /opt/cohub/internal/cohub-sandbox

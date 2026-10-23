@@ -106,6 +106,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	ctx.remote = createRemoteModule(ctx);
 	const { document, query, camera, selection, creation, deletion, copy, interaction, animation, snapshots, remote } = ctx;
 
+	const transformChannels: readonly BoardEditorChannel[] =
+		options.touchRotation === false ? ["scene", "selection", "hover"] : ["scene", "selection"];
+
 	let viewStateQueued = false;
 	function emitViewState() {
 		viewStateQueued = false;
@@ -192,7 +195,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			return read(["scene", "selection"], selection.bounds);
 		},
 		get selectionTransform() {
-			return read(["scene", "selection"], selection.transform);
+			return read(transformChannels, selection.transform);
 		},
 		get camera() {
 			return read("camera", () => state.camera);
@@ -384,6 +387,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		commitTextEdit: creation.commitTextEdit,
 		updateText: creation.updateText,
 		previewTextLayout: creation.previewTextLayout,
+		relayoutText: () => {
+			const ids = state.scene.items.filter((item) => item.type === "text").map((item) => item.id);
+			if (ids.length > 0) document.rescene(ids);
+		},
 		deleteSelection: deletion.deleteSelection,
 		deleteItem: deletion.deleteItem,
 		duplicateSelection: copy.duplicateSelection,
@@ -409,6 +416,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		pointerUp: interaction.pointerUp,
 		pointerLeave: interaction.pointerLeave,
 		subscribeTransforms: interaction.subscribeTransforms,
+		subscribeActivations: interaction.subscribeActivations,
+		pickUp: interaction.pickUp,
 		cancelPointerInteraction: interaction.cancel,
 
 		destroy() {

@@ -7,9 +7,17 @@
  * known to serve Aliyun OSS processing; any other URL is used as is.
  */
 
-import { mediaHost, OSS_PROCESS_PATTERN, ossProcessUrl } from "@cohub/protocol/core";
+import { type MediaInfo, mediaHost, ossProcessUrl } from "@cohub/protocol/core";
 
-export { ossProcessUrl };
+export {
+	type MediaInfo,
+	mediaInfoFromHeaders,
+	mergeMediaInfo,
+	ossProcessUrl,
+	probeMediaInfo,
+	probeMediaSize,
+	probeVideoFrameSize,
+} from "@cohub/protocol/core";
 
 export type MediaType = "image" | "video" | "audio";
 /**
@@ -25,27 +33,18 @@ const RESIZE: Record<MediaFit, (size: number) => string> = {
 	width: (size) => `w_${size}`,
 };
 
-export type MediaInfo = {
-	width?: number;
-	height?: number;
-	durationMs?: number;
-	frameCount?: number;
-	firstFrameUrl?: string;
-	lastFrameUrl?: string;
-	mimeType?: string;
-	bytes?: number;
-};
 
 /** Snapshots render at the requested width, upscaling small videos; cap it. */
 const VIDEO_FRAME_MAX_WIDTH = 768;
 
 /** Fixed variant widths keep CDN cache hits high; pick with `mediaVariantSize`. */
 export const MEDIA_VARIANT_SIZES = [192, 384, 768, 1536] as const;
+export const MEDIA_VARIANT_MAX = 1536;
 export type MediaVariantSize = (typeof MEDIA_VARIANT_SIZES)[number];
 
 /** Smallest variant covering `pixels` device pixels, capped at the largest. */
 export function mediaVariantSize(pixels: number): MediaVariantSize {
-	return MEDIA_VARIANT_SIZES.find((size) => size >= pixels) ?? 1536;
+	return MEDIA_VARIANT_SIZES.find((size) => size >= pixels) ?? MEDIA_VARIANT_MAX;
 }
 
 function ossHost(url: string) {
@@ -128,109 +127,4 @@ export function mediaPreviewCandidates(
 		addImage(info?.firstFrameUrl);
 	}
 	return candidates;
-}
-
-function positive(value: unknown): number | undefined {
-	const number = typeof value === "string" ? Number(value) : value;
-	return typeof number === "number" && Number.isFinite(number) && number > 0
-		? number
-		: undefined;
-}
-
-/** Frame URLs must stay on the media's own origin. */
-function sameOriginUrl(value: string | null, origin: string): string | undefined {
-	if (!value) return undefined;
-	try {
-		const url = new URL(value);
-		return url.protocol === "https:" && url.origin === origin ? url.href : undefined;
-	} catch {
-		return undefined;
-	}
-}
-
-function compact(info: MediaInfo): MediaInfo {
-	return Object.fromEntries(
-		Object.entries(info).filter(([, value]) => value !== undefined),
-	) as MediaInfo;
-}
-
-/** Media facts from response headers; `x-oss-meta-*` need CORS exposure in browsers. */
-export function mediaInfoFromHeaders(headers: Headers, url: string): MediaInfo {
-	const origin = new URL(url).origin;
-	const meta = (name: string) => headers.get(`x-oss-meta-${name}`);
-	const seconds = positive(meta("duration"));
-	const frameCount = positive(meta("nb-frames"));
-	return compact({
-		width: positive(meta("width")),
-		height: positive(meta("height")),
-		durationMs: seconds ? Math.round(seconds * 1000) : undefined,
-		frameCount: frameCount ? Math.round(frameCount) : undefined,
-		firstFrameUrl: sameOriginUrl(meta("first-frame"), origin),
-		lastFrameUrl: sameOriginUrl(meta("last-frame"), origin),
-		mimeType: headers.get("content-type")?.split(";")[0]?.trim() || undefined,
-		bytes: positive(headers.get("content-length")),
-	});
-}
-
-/** Fields of `primary` win; `fallback` fills the rest. */
-export function mergeMediaInfo(primary: MediaInfo, fallback: MediaInfo): MediaInfo {
-	return compact({ ...fallback, ...compact(primary) });
-}
-
-function hasDimensions(info: MediaInfo) {
-	return info.width !== undefined && info.height !== undefined;
-}
-
-type ProbeOptions = {
-	type: MediaType;
-	fetch?: typeof globalThis.fetch;
-	signal?: AbortSignal;
-};
-
-async function probeHeaders(url: string, options: ProbeOptions) {
-	const fetcher = options.fetch ?? globalThis.fetch;
-	const response = await fetcher(url, { method: "HEAD", signal: options.signal });
-	return response.ok ? mediaInfoFromHeaders(response.headers, url) : {};
-}
-
-async function probeImageInfo(url: string, options: ProbeOptions): Promise<MediaInfo> {
-	// A processed URL cannot take `image/info`; fetching it would download the image.
-	if (OSS_PROCESS_PATTERN.test(url)) return {};
-	const fetcher = options.fetch ?? globalThis.fetch;
-	const response = await fetcher(ossProcessUrl(url, "image/info"), {
-		signal: options.signal,
-	});
-	if (!response.ok) return {};
-	const body = (await response.json()) as Record<string, { value?: unknown } | undefined>;
-	return compact({
-		width: positive(body.ImageWidth?.value),
-		height: positive(body.ImageHeight?.value),
-		bytes: positive(body.FileSize?.value),
-	});
-}
-
-/**
- * Probe remote media: OSS meta headers (one HEAD, the only source of video
- * duration and frames), then OSS `image/info` for image dimensions. Unknown
- * hosts and failed steps resolve to what was learned so far; never throws.
- */
-export async function probeMediaInfo(
-	url: string,
-	options: ProbeOptions,
-): Promise<MediaInfo> {
-	const host = ossHost(url);
-	if (!host) return {};
-	let info: MediaInfo = {};
-	const attempt = async (strategy: () => Promise<MediaInfo>) => {
-		try {
-			info = mergeMediaInfo(info, await strategy());
-		} catch {
-			// Best effort: keep what earlier strategies found.
-		}
-	};
-	if (host.metaHeaders) await attempt(() => probeHeaders(url, options));
-	if (options.type === "image" && !hasDimensions(info)) {
-		await attempt(() => probeImageInfo(url, options));
-	}
-	return info;
 }

@@ -67,6 +67,7 @@ type Props = {
 	onMarkdownRenderStart?: (message: ChatMessage) => void;
 	onMarkdownRendered?: (message: ChatMessage) => void;
 	showToolCalls?: boolean;
+	showMeta?: boolean;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
 	onOpenUrl?: (href: string, event: MouseEvent) => void | Promise<void>;
 	onForkTurn?: () => void;
@@ -80,6 +81,7 @@ const {
 	onMarkdownRenderStart,
 	onMarkdownRendered,
 	showToolCalls = true,
+	showMeta = true,
 	onOpenFile,
 	onOpenUrl,
 	onForkTurn,
@@ -91,25 +93,9 @@ const locale = $derived(getLocale());
 let pendingMarkdownSegments = $state(0);
 let markdownStartedForSignature = $state("");
 
-// Thinking state: track user manual toggle to avoid overriding
-let thinkingExpanded = $state(false);
-let thinkingUserToggled = $state(false);
-// Auto-expand during streaming, auto-collapse after (unless user toggled)
-const isStreaming = $derived(
-	message.meta?.messageKind === "assistant_streaming_preview" ||
-		message.meta?.streaming === true ||
-		message.id.startsWith("assistant-streaming:") ||
-		message.id === "assistant-streaming" ||
-		message.id === "assistant-thinking",
-);
-
-$effect(() => {
-	if (isStreaming && !thinkingUserToggled) {
-		thinkingExpanded = true;
-	} else if (!isStreaming && !thinkingUserToggled) {
-		thinkingExpanded = false;
-	}
-});
+const isStreaming = $derived(message.meta?.streaming === true);
+let thinkingToggled = $state<boolean | null>(null);
+const thinkingExpanded = $derived(thinkingToggled ?? isStreaming);
 
 const textSignature = $derived(
 	(message.content ?? [])
@@ -273,8 +259,7 @@ const userDisplayName = $derived(
 );
 
 function toggleThinking() {
-	thinkingExpanded = !thinkingExpanded;
-	thinkingUserToggled = true;
+	thinkingToggled = !thinkingExpanded;
 }
 
 // ─── Meta bar: time, model, tokens, copy ───
@@ -379,7 +364,6 @@ const hasDuration = $derived.by(() => {
 	return (
 		message.role === "assistant" &&
 		message.meta?.streaming !== true &&
-		message.meta?.messageKind !== "assistant_streaming_preview" &&
 		isDisplayableDurationMs(durationMs)
 	);
 });
@@ -611,7 +595,7 @@ function handleCopy() {
       {/if}
     </div>
 
-    {#if (message.role === 'assistant' && (message.meta?.model || hasUsage || hasDuration || timeDisplay || harnessLabel)) || (message.role === 'user' && timeDisplay)}
+    {#if showMeta && ((message.role === 'assistant' && (message.meta?.model || hasUsage || hasDuration || timeDisplay || harnessLabel)) || (message.role === 'user' && timeDisplay))}
       <!-- Meta bar: copy | identity/model | tokens | time -->
       <div class="mt-1 flex items-center gap-1 px-[var(--chat-msg-inset)] text-[11px] text-text-placeholder/50 select-none">
         <!-- Copy button -->

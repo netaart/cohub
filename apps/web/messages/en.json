@@ -1381,6 +1381,7 @@
 	"tool_verb_running": "running",
 	"tool_status_done": "done",
 	"tool_status_failed": "failed",
+	"tool_failed_count": "{count} failed",
 	"tool_in": "in",
 	"tool_out": "out",
 	"tool_err": "err",

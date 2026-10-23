@@ -9,7 +9,7 @@ export class InvalidFileOperandError extends Error {
   override name = "InvalidFileOperandError";
 }
 
-const WORKSPACE_ROOT = "/workspace";
+export const WORKSPACE_ROOT = "/workspace";
 
 const isWorkspacePath = (path: string) => path === WORKSPACE_ROOT || path.startsWith(`${WORKSPACE_ROOT}/`);
 

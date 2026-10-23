@@ -9,6 +9,7 @@ import { type AlignMode, alignFrames, type DistributeAxis, distributeFrames } fr
 import type { EditorContext } from "./context.js";
 import { resolveSelectionTransform } from "./selection-transform.js";
 import { memo } from "./state.js";
+import { canTapSelectWithHand } from "./tool.js";
 
 const NUDGE_STEP = 1;
 const NUDGE_STEP_LARGE = 10;
@@ -31,9 +32,13 @@ export function createSelectionModule(ctx: EditorContext) {
 		() => [items()] as const,
 		(selected) => selectionBounds(selected.map((item) => item.frame)),
 	);
+	const rotatesOnTouch = ctx.options.touchRotation !== false;
 	const transform = memo(
-		() => [items(), bounds()] as const,
-		(selected, rect) => resolveSelectionTransform(registry, selected, rect),
+		() => [items(), bounds(), rotatesOnTouch || !canTapSelectWithHand(state.hoverPointerType)] as const,
+		(selected, rect, rotates) => {
+			const resolved = resolveSelectionTransform(registry, selected, rect);
+			return resolved && !rotates ? { ...resolved, canRotate: false } : resolved;
+		},
 	);
 
 	function set(ids: string[]) {

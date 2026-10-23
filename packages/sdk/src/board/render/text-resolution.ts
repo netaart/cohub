@@ -26,10 +26,6 @@ export function textZoomBucket(zoom: number): number {
 	return ZOOM_BUCKETS[ZOOM_BUCKETS.length - 1] ?? 4;
 }
 
-export function boardCardDetailed(zoom: number): boolean {
-	return textZoomBucket(zoom) >= 1;
-}
-
 /** Exact screen density at rest; reuse or step the raster while moving. */
 export function boardTextResolution(target: number, current: number, settled: boolean): number {
 	if (!Number.isFinite(target) || target <= 0) return current > 0 ? current : 1;
@@ -43,16 +39,4 @@ export function syncTextResolution(text: Text, resolution: number) {
 	const limit = MAX_TEXT_EDGE / Math.max(1, Math.ceil(width + text.style.padding * 2), Math.ceil(height + text.style.padding * 2));
 	const next = Math.min(limit, Math.max(MIN_TEXT_RESOLUTION, resolution));
 	if (text.resolution !== next) text.resolution = next;
-}
-
-/** Defer expensive Pixi word-wrap rasterisation during a live resize. */
-export function syncTextWrapWidth(
-	text: Text,
-	state: { wrapWidth: number },
-	width: number,
-	defer: boolean,
-) {
-	if (defer || width === state.wrapWidth) return;
-	text.style.wordWrapWidth = width;
-	state.wrapWidth = width;
 }

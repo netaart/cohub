@@ -40,7 +40,7 @@
     "@biomejs/biome": "catalog:",
     "@changesets/cli": "^3.0.1",
     "@electric-sql/pglite": "^0.5.8",
-    "@napi-rs/canvas": "1.0.8",
+    "@napi-rs/canvas": "1.0.13",
     "husky": "^9.1.7",
     "lint-staged": "^17.4.1",
     "tsx": "catalog:",

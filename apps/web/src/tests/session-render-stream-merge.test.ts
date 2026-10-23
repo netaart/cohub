@@ -2,12 +2,21 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { mergeStreamingDeltaBlocks } from "../lib/session-streaming";
+import type { TimelineItem } from "../lib/session-tree";
 import {
+	buildProcessEntries,
 	buildStreamingPreviewBlocks,
 	createTurnTimelineBuilder,
 } from "../lib/session-turn-render";
 
 const buildTurnTimelineItems = createTurnTimelineBuilder();
+
+function liveBlockTypes(items: TimelineItem[]) {
+	const process = items.find((item) => item.kind === "process");
+	return process?.kind === "process"
+		? (process.live?.content.map((block) => block.type) ?? [])
+		: [];
+}
 
 test("mergeStreamingDeltaBlocks appends text deltas by stream index", () => {
 	const existing: ContentBlock[] = [
@@ -74,7 +83,7 @@ test("buildStreamingPreviewBlocks preserves stream block order", () => {
 	);
 });
 
-test("buildTurnTimelineItems renders streaming intermediate messages separately from active preview", () => {
+test("buildTurnTimelineItems renders settled steps and the live message in one process", () => {
 	const items = buildTurnTimelineItems({
 		sessionId: "s1",
 		turns: [
@@ -144,21 +153,18 @@ test("buildTurnTimelineItems renders streaming intermediate messages separately 
 		},
 	});
 
-	const preview = items.find(
-		(item) =>
-			item.kind === "message" &&
-			item.message.meta?.messageKind === "assistant_streaming_preview",
+	const process = items.find((item) => item.kind === "process");
+	assert.equal(process?.id, "turn:t1:process");
+	assert.equal(
+		process?.kind === "process"
+			? process.intermediateMessages?.[0]?.text
+			: null,
+		"previous answer",
 	);
-	assert.equal(preview?.kind, "message");
-	assert.deepEqual(
-		preview?.kind === "message"
-			? preview.message.content.map((block) => block.type)
-			: [],
-		["thinking"],
-	);
+	assert.deepEqual(liveBlockTypes(items), ["thinking"]);
 });
 
-test("buildTurnTimelineItems keeps streaming preview visible when a same-turn partial assistant patch exists", () => {
+test("buildTurnTimelineItems keeps the live message as the only answer while a partial assistant patch exists", () => {
 	const items = buildTurnTimelineItems({
 		sessionId: "s1",
 		turns: [
@@ -201,22 +207,13 @@ test("buildTurnTimelineItems keeps streaming preview visible when a same-turn pa
 		},
 	});
 
-	const assistantMessages = items.filter(
-		(item) => item.kind === "message" && item.message.role === "assistant",
-	);
-	assert.equal(assistantMessages.length, 1);
-	assert.deepEqual(
-		assistantMessages[0]?.kind === "message"
-			? assistantMessages[0].message.content.map((block) => block.type)
-			: [],
-		["thinking", "text"],
-	);
 	assert.equal(
-		assistantMessages[0]?.kind === "message"
-			? assistantMessages[0].message.meta?.messageKind
-			: null,
-		"assistant_streaming_preview",
+		items.some(
+			(item) => item.kind === "message" && item.message.role === "assistant",
+		),
+		false,
 	);
+	assert.deepEqual(liveBlockTypes(items), ["thinking", "text"]);
 });
 
 test("buildTurnTimelineItems keeps streaming intermediate messages after final turn patch", () => {
@@ -617,14 +614,7 @@ test("buildTurnTimelineItems hides turn footer once assistant content is streami
 		items.some((item) => item.kind === "turn_footer"),
 		false,
 	);
-	assert.equal(
-		items.some(
-			(item) =>
-				item.kind === "message" &&
-				item.message.meta?.messageKind === "assistant_streaming_preview",
-		),
-		true,
-	);
+	assert.deepEqual(liveBlockTypes(items), ["text"]);
 });
 
 test("buildTurnTimelineItems hides waiting footer when live content already exists", () => {
@@ -1025,4 +1015,26 @@ test("restoring a running Turn never invents a starting footer or thinking block
 		),
 		true,
 	);
+});
+
+test("buildProcessEntries settles the live message in place and folds silent steps", () => {
+	const step = (id: string, ordinal: number | null, text = id) => ({
+		id,
+		meta: { messageOrdinal: ordinal },
+		content: text ? [{ type: "text" as const, text }] : [],
+		stopReason: null,
+	});
+	const live = buildProcessEntries([step("a", 0)], step("live", 1));
+	const settled = buildProcessEntries([step("a", 0), step("b", 1)], null);
+	assert.equal(live[1]?.key, settled[1]?.key);
+	const entries = buildProcessEntries(
+		[step("a", 0), step("a", 0), step("b", null, ""), step("c", 2, "")],
+		step("d", 0),
+	);
+	assert.deepEqual(
+		entries.map((entry) => entry.kind),
+		["step", "step", "run", "step"],
+	);
+	const keys = entries.map((entry) => entry.key);
+	assert.equal(new Set(keys).size, keys.length);
 });

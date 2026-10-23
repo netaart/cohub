@@ -32,6 +32,7 @@ export type { BoardNodeFont } from "./fonts.js";
 export type NodeCanvasModule = {
   createCanvas: (width: number, height: number) => unknown;
   Image: new () => unknown;
+  DOMMatrix: new (init?: number[]) => unknown;
   GlobalFonts: BoardFontRegistry;
 };
 
@@ -42,6 +43,8 @@ export type BoardNodeRendererOptions = {
 
 export type BoardNodeTexture = {
   readonly __boardTexture: unique symbol;
+  readonly width: number;
+  readonly height: number;
   destroy: (destroySource?: boolean) => void;
 };
 
@@ -72,6 +75,19 @@ async function loadCanvasModule(): Promise<NodeCanvasModule> {
       { cause },
     );
   }
+}
+
+// Pixi skips texture fill transforms without a global DOMMatrix, which Node lacks.
+function installDOMMatrix(canvasModule: NodeCanvasModule): void {
+  const globals = globalThis as { DOMMatrix?: unknown };
+  globals.DOMMatrix ??= canvasModule.DOMMatrix;
+}
+
+function installOffscreenCanvas(): void {
+  const globals = globalThis as { OffscreenCanvas?: unknown };
+  globals.OffscreenCanvas ??= function OffscreenCanvas(width: number, height: number) {
+    return DOMAdapter.get().createCanvas(width, height);
+  };
 }
 
 function installAnimationFrameShim(): () => void {
@@ -148,6 +164,8 @@ export async function createNodeBoardRenderer(
     },
   };
   DOMAdapter.set(adapter);
+  installDOMMatrix(canvasModule);
+  installOffscreenCanvas();
   installBoardTextMeasurement();
 
   const restoreAnimationFrame = installAnimationFrameShim();

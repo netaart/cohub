@@ -224,6 +224,7 @@ export async function exportBoardImage(
 		const assets = selectBoardExportAssets(
 			prepared.plan.items.filter((item) => prepared.scene.opacity(item.id) > 0),
 			bridge.assetKey,
+			{ scale: prepared.plan.scale },
 		);
 		const omittedKeys = new Set(assets.omittedKeys);
 		const cappedAssetKey = (item: BoardSceneItem) => {
@@ -286,7 +287,7 @@ export async function exportBoardImage(
 					if (backgroundWarning) warnings.push(backgroundWarning);
 					if (assets.omittedKeys.length > 0) {
 						warnings.push(
-							`${assets.omittedKeys.length} previews were drawn as placeholders to stay within the export texture limit.`,
+							`${assets.omittedKeys.length} previews were drawn as placeholders to stay within the export memory budget.`,
 						);
 					}
 					return {

@@ -1,7 +1,7 @@
-import type { BoardColor, BoardColorToken } from "@cohub/protocol";
+import { BOARD_COLOR_TOKENS, type BoardColor, type BoardColorToken } from "@cohub/protocol";
+import { BOARD_THEME_DATA } from "./themes.js";
 
 export type BoardColorId = BoardColorToken;
-
 
 export type BoardColorValue = {
 	stroke: number;
@@ -16,65 +16,25 @@ export type BoardColorEntry = {
 	light: BoardColorValue;
 };
 
-const LABEL_DARK = 0xf4f4f4;
-const LABEL_LIGHT = 0x18181b;
+const COLOR_LABELS: Record<BoardColorId, string> = {
+	brand: "Brand",
+	neutral: "Neutral",
+	black: "Black",
+	white: "White",
+	blue: "Blue",
+	green: "Green",
+	amber: "Amber",
+	violet: "Violet",
+	rose: "Rose",
+};
 
-export const BOARD_COLORS: readonly BoardColorEntry[] = [
-	{
-		id: "brand",
-		label: "Brand",
-		dark: { stroke: 0xff5a1f, fill: 0xff5a1f, label: LABEL_DARK },
-		light: { stroke: 0xe8450e, fill: 0xe8450e, label: LABEL_LIGHT },
-	},
-	{
-		id: "neutral",
-		label: "Neutral",
-		dark: { stroke: 0x9aa0a6, fill: 0x9aa0a6, label: LABEL_DARK },
-		light: { stroke: 0x5f6368, fill: 0x5f6368, label: LABEL_LIGHT },
-	},
-	{
-		id: "black",
-		label: "Black",
-		dark: { stroke: 0x000000, fill: 0x000000, label: LABEL_DARK },
-		light: { stroke: 0x000000, fill: 0x000000, label: LABEL_LIGHT },
-	},
-	{
-		id: "white",
-		label: "White",
-		dark: { stroke: 0xffffff, fill: 0xffffff, label: LABEL_DARK },
-		light: { stroke: 0xffffff, fill: 0xffffff, label: LABEL_LIGHT },
-	},
-	{
-		id: "blue",
-		label: "Blue",
-		dark: { stroke: 0x38bdf8, fill: 0x38bdf8, label: LABEL_DARK },
-		light: { stroke: 0x2563eb, fill: 0x2563eb, label: LABEL_LIGHT },
-	},
-	{
-		id: "green",
-		label: "Green",
-		dark: { stroke: 0x34d399, fill: 0x34d399, label: LABEL_DARK },
-		light: { stroke: 0x16a34a, fill: 0x16a34a, label: LABEL_LIGHT },
-	},
-	{
-		id: "amber",
-		label: "Amber",
-		dark: { stroke: 0xf59e0b, fill: 0xf59e0b, label: LABEL_DARK },
-		light: { stroke: 0xd97706, fill: 0xd97706, label: LABEL_LIGHT },
-	},
-	{
-		id: "violet",
-		label: "Violet",
-		dark: { stroke: 0xa78bfa, fill: 0xa78bfa, label: LABEL_DARK },
-		light: { stroke: 0x7c3aed, fill: 0x7c3aed, label: LABEL_LIGHT },
-	},
-	{
-		id: "rose",
-		label: "Rose",
-		dark: { stroke: 0xfb7185, fill: 0xfb7185, label: LABEL_DARK },
-		light: { stroke: 0xe11d48, fill: 0xe11d48, label: LABEL_LIGHT },
-	},
-] as const;
+/** Swatches with the colors of the default dark and light themes. */
+export const BOARD_COLORS: readonly BoardColorEntry[] = BOARD_COLOR_TOKENS.map((id) => ({
+	id,
+	label: COLOR_LABELS[id],
+	dark: { ...BOARD_THEME_DATA.dark.colors[id] },
+	light: { ...BOARD_THEME_DATA.light.colors[id] },
+}));
 
 export const DEFAULT_BOARD_COLOR: BoardColorId = "brand";
 

@@ -5,10 +5,10 @@ import { isBoardModelItem } from "../../model/media.js";
 import type { SceneItem } from "../../model/scene.js";
 import { type CardTag, createCardTag, syncCardTag, traceCube, zoomCardTag } from "../card-tag.js";
 import { cardElevation, containRect, drawCardSurface } from "../surface.js";
-import { boardCardDetailed } from "../text-resolution.js";
+import { boardCardDetailed } from "../lod.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
-import { drawFarPlate } from "./far-plate.js";
+import { drawFarPlate, farPictureTone } from "./far-plate.js";
 import { drawModelKey } from "./media-key.js";
 
 type ModelParts = {
@@ -118,7 +118,7 @@ export const modelCardRenderer: BoardCardRenderer = {
 	},
 	renderFar: (graphics, item, context) => {
 		drawFarPlate(graphics, item.frame, {
-			fill: context.palette.surface,
+			fill: farPictureTone(item, context) ?? context.palette.surface,
 			fillAlpha: 0.96,
 			accent: context.palette.legendary,
 			accentAlpha: 0.45,

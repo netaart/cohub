@@ -323,7 +323,7 @@ export function titleForBoardItem(value: BoardItem): string {
 		case "custom":
 			return value.script.src.split("/").pop() ?? "Custom";
 		default:
-			return value.type;
+			return value.preview?.title || value.type;
 	}
 }
 

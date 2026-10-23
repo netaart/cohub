@@ -6,6 +6,8 @@ import {
   BOARD_EXPORT_MAX_PIXELS,
   planBoardExport,
 } from "../../src/board/model/export-plan.js";
+import { boardAssetKey } from "../../src/board/model/asset-key.js";
+import { boardTextureBytes, selectBoardExportAssets } from "../../src/board/model/export-assets.js";
 import { boardScene } from "./fixtures.js";
 
 /**
@@ -191,4 +193,21 @@ test("an arrow between exported items comes along, and its route is not clipped"
   const one = planFor(items, { region: { kind: "items", ids: ["a"] }, padding: 0, scale: 1 });
   assert.ok(one);
   assert.deepEqual(one.items.map((item) => item.id), ["a"]);
+});
+
+test("export textures stay within the memory budget, sized by their largest use", () => {
+  const scene = boardScene({
+    small: { type: "image", size: { width: 100, height: 100 }, props: { src: "a.png" } },
+    large: { type: "image", position: { x: 200, y: 0 }, size: { width: 300, height: 300 }, props: { src: "a.png" } },
+    other: { type: "image", position: { x: 600, y: 0 }, size: { width: 100, height: 100 }, props: { src: "b.png" } },
+  });
+  const items = scene.items;
+  const all = selectBoardExportAssets(items, boardAssetKey, { scale: 1 });
+  assert.deepEqual(all.keys, ["file:a.png", "file:b.png"]);
+  assert.equal(all.items[0]?.id, "large");
+  const large = scene.get("large");
+  assert.ok(large);
+  const capped = selectBoardExportAssets(items, boardAssetKey, { scale: 1, maxBytes: boardTextureBytes(large, 1) });
+  assert.deepEqual(capped.keys, ["file:a.png"]);
+  assert.deepEqual(capped.omittedKeys, ["file:b.png"]);
 });

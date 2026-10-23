@@ -99,18 +99,3 @@ export function mergeStreamingDeltaBlocks(
 
 	return result;
 }
-
-export function getStreamingRenderKey(
-	anchorUserMessageId: string | null,
-	sessionId: string,
-	turnId?: string | null,
-	clientMessageId?: string | null,
-) {
-	if (clientMessageId?.trim())
-		return `client:${clientMessageId.trim()}:assistant`;
-	return anchorUserMessageId?.trim()
-		? `assistant-final:${anchorUserMessageId.trim()}`
-		: turnId?.trim()
-			? `turn:${turnId.trim()}:assistant`
-			: `assistant-streaming:${sessionId}`;
-}

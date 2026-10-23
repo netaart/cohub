@@ -32,7 +32,7 @@ const options = {
   times: [0, 100, 200],
   region: { kind: "all" as const },
   scale: 1,
-  colorScheme: "dark" as const,
+  theme: "dark" as const,
   background: "paper" as const,
   format: "png" as const,
   withImages: false,
@@ -62,7 +62,9 @@ test("camera sequences load visible images and evict textures as the camera move
   ctx.fillRect(0, 0, 32, 32);
   const png = canvas.toBuffer("image/png");
   const downloads: string[] = [];
-  t.mock.method(Object.getPrototypeOf(createClient().space("unused").files), "download", async (path: string) => {
+  const files = Object.getPrototypeOf(createClient().space("unused").files);
+  t.mock.method(files, "resolveUrl", async () => null);
+  t.mock.method(files, "download", async (path: string) => {
     downloads.push(path);
     return { blob: new Blob([png], { type: "image/png" }), filename: path, mimeType: "image/png" };
   });

@@ -2,6 +2,8 @@ import { BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
 import type { BoardFrameItem } from "@cohub/protocol";
 import { Container, Graphics, type Text } from "pixi.js";
 import type { SceneItem } from "../../model/scene.js";
+import { BOARD_FRAME_LABEL_LINE_HEIGHT, frameLabelOffset } from "../../model/text-metrics.js";
+import { FRAME_LABEL_WEIGHT } from "../labels.js";
 import { itemAlpha, itemColor } from "../palette.js";
 import { dashPattern, roundRectPoints, tracePolyline, trimPolyline } from "../stroke.js";
 import { syncTextResolution } from "../text-resolution.js";
@@ -51,15 +53,19 @@ function sync(container: Container, item: SceneItem<BoardFrameItem>, context: Bo
 	parts.label.visible = decorated;
 	const title = locked ? `🔒 ${props.label}`.trim() : props.label;
 	const labelColor = style.stroke ? baseStroke : context.palette.muted;
-	const textSig = [title, labelColor, context.style.font].join("|");
+	const size = context.style.frameLabelSize;
+	const textSig = [title, labelColor, context.style.font, size].join("|");
 	if (textSig !== parts.textSig) {
 		parts.textSig = textSig;
 		parts.label.text = title;
 		parts.label.style.fill = labelColor;
 		parts.label.style.fontFamily = context.style.font;
+		parts.label.style.fontSize = size;
+		parts.label.style.lineHeight = size * BOARD_FRAME_LABEL_LINE_HEIGHT;
+		const offset = frameLabelOffset(size);
+		parts.label.position.set(offset.x, offset.y);
 	}
 	syncTextResolution(parts.label, context.textResolution);
-	parts.label.position.set(4, -18);
 }
 
 export const frameCardRenderer: BoardCardRenderer = {
@@ -68,7 +74,11 @@ export const frameCardRenderer: BoardCardRenderer = {
 	create: (item, context) => {
 		const root = new Container();
 		const box = new Graphics();
-		const label = createLabel("", { fill: context.palette.muted, fontFamily: BOARD_FONT_STACK, fontSize: 12, fontWeight: "600" }, context.textResolution);
+		const label = createLabel(
+			"",
+			{ fill: context.palette.muted, fontFamily: BOARD_FONT_STACK, fontWeight: FRAME_LABEL_WEIGHT },
+			context.textResolution,
+		);
 		root.addChild(box, label);
 		partsByContainer.set(root, { root, box, label, visualSig: "", textSig: "" });
 		if (item.type === "frame") sync(root, item as SceneItem<BoardFrameItem>, context);

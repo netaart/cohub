@@ -13,10 +13,12 @@ export function initializeBoardFonts(registry: BoardFontRegistry, fonts: readonl
   for (const font of fonts) registry.registerFromPath(font.path, font.family);
   if (!registry.setAlias) return;
   const aliases = {
+    Geist: ["Geist Variable"],
+    "Geist Mono": ["Geist Mono Variable"],
     "system-ui": ["Noto Sans", "DejaVu Sans", "Liberation Sans", "FreeSans", "Helvetica Neue", "Arial", "Segoe UI"],
-    "sans-serif": ["Geist", "Noto Sans", "DejaVu Sans", "Liberation Sans", "FreeSans", "Arial"],
+    "sans-serif": ["Geist Variable", "Geist", "Noto Sans", "DejaVu Sans", "Liberation Sans", "FreeSans", "Arial"],
     serif: ["Noto Serif", "DejaVu Serif", "Liberation Serif", "FreeSerif", "Times New Roman"],
-    monospace: ["Geist Mono", "DejaVu Sans Mono", "Liberation Mono", "FreeMono", "Courier New"],
+    monospace: ["Geist Mono Variable", "Geist Mono", "DejaVu Sans Mono", "Liberation Mono", "FreeMono", "Courier New"],
   };
   for (const [alias, candidates] of Object.entries(aliases)) {
     if (registry.has(alias)) continue;

@@ -9,9 +9,10 @@ type MermaidApi = typeof import("mermaid").default;
 
 const MAX_MERMAID_SOURCE_LENGTH = 12_000;
 const MAX_MERMAID_SOURCE_LINES = 240;
-const FONT_FAMILY = "Geist, ui-sans-serif, system-ui, sans-serif";
+const FONT_FAMILY =
+	'"Geist Variable", Geist, ui-sans-serif, system-ui, sans-serif';
 const EXPORT_FONT_FAMILY =
-	'Geist, -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", ui-sans-serif, system-ui, sans-serif';
+	'"Geist Variable", Geist, -apple-system, BlinkMacSystemFont, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", ui-sans-serif, system-ui, sans-serif';
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 2.5;
 const DEFAULT_MAX_WIDTH = 860;

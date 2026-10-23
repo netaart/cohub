@@ -82,12 +82,7 @@ type TimelineScrollAnchor = {
 function shouldFollowSessionTail(item: TimelineItem) {
 	if (item.kind === "process" || item.kind === "sent")
 		return item.streaming === true;
-	if (item.kind === "turn_footer") return true;
-	return (
-		item.kind === "message" &&
-		(item.message.meta?.streaming === true ||
-			item.message.meta?.messageKind === "assistant_streaming_preview")
-	);
+	return item.kind === "turn_footer";
 }
 
 function getTimelineScrollAnchor(
@@ -112,10 +107,7 @@ function getTimelineScrollAnchor(
 	if (item.message.role === "user") {
 		return { itemKey: item.id, turnSequence, kind: "user" };
 	}
-	if (
-		item.message.role === "assistant" &&
-		item.message.meta?.messageKind !== "assistant_streaming_preview"
-	) {
+	if (item.message.role === "assistant") {
 		return { itemKey: item.id, turnSequence, kind: "assistant" };
 	}
 	return null;
@@ -231,7 +223,7 @@ $effect(() => {
 							forking={forkingTurnId === forkTurn?.id}
 					/>
 				{:else if item.kind === 'process' && item.turn}
-						<ProcessCard turn={item.turn} summary={item.summary} intermediateMessages={item.intermediateMessages} streaming={item.streaming} {modelsCatalog} {onLoadIntermediate} {onRequestIntermediateSync} {onLoadToolCalls} {onOpenFile} {onOpenUrl} />
+						<ProcessCard turn={item.turn} summary={item.summary} intermediateMessages={item.intermediateMessages} live={item.live} streaming={item.streaming} running={item.running} {modelsCatalog} {onLoadIntermediate} {onRequestIntermediateSync} {onLoadToolCalls} {onOpenFile} {onOpenUrl} {onMarkdownRenderStart} {onMarkdownRendered} />
 				{:else if item.kind === 'sent'}
 					<SentTurnsSummary turnId={item.turnId} />
 				{:else if item.kind === 'turn_footer'}

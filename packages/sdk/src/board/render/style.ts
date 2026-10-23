@@ -1,4 +1,5 @@
 import { BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
+import { BOARD_FRAME_LABEL_SIZE } from "../model/text-metrics.js";
 
 export type BoardRenderStyle = {
 	corner: "round" | "pixel";
@@ -10,6 +11,7 @@ export type BoardRenderStyle = {
 	icons: "line" | "pixel";
 	motion: "smooth" | "stepped";
 	font: string;
+	frameLabelSize: number;
 };
 
 export type BoardShadowStyle = {
@@ -36,6 +38,7 @@ const BASE: Omit<BoardRenderStyle, "shadow"> = {
 	icons: "line",
 	motion: "smooth",
 	font: BOARD_FONT_STACK,
+	frameLabelSize: BOARD_FRAME_LABEL_SIZE,
 };
 
 const SHADOW: Record<"dark" | "light", BoardShadowStyle> = {
@@ -47,16 +50,23 @@ export function defaultBoardRenderStyle(mode: "dark" | "light"): BoardRenderStyl
 	return { ...BASE, selection: { ...BASE.selection }, shadow: { ...SHADOW[mode] } };
 }
 
+/** Theme overrides of the default style; a shadow without positive alpha is none. */
+export type BoardRenderStyleInput = Partial<Omit<BoardRenderStyle, "shadow" | "selection">> & {
+	shadow?: Partial<BoardShadowStyle> | null;
+	selection?: Partial<BoardSelectionStyle>;
+};
+
 export function resolveBoardRenderStyle(
 	mode: "dark" | "light",
-	style?: Partial<BoardRenderStyle>,
+	style?: BoardRenderStyleInput,
 ): BoardRenderStyle {
 	const base = defaultBoardRenderStyle(mode);
 	if (!style) return base;
+	const shadow = style.shadow === null ? null : { ...SHADOW[mode], ...style.shadow };
 	return {
 		...base,
 		...style,
 		selection: { ...base.selection, ...style.selection },
-		shadow: style.shadow === undefined ? base.shadow : style.shadow,
+		shadow: shadow && shadow.alpha > 0 ? shadow : null,
 	};
 }

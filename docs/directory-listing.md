@@ -36,7 +36,9 @@ An empty page can have a continuation cursor, for example after visibility filte
 - **Checkpoint:** API reads and caches the full immutable Git tree, without the former 1000-entry slice. Tree cache version `v2` prevents reuse of old truncated cache entries. Existing Git output-byte and timeout protections still apply and fail explicitly rather than returning a partial tree.
 - **New SDK against old API:** an unpaged response ends iteration. Explicit pagination reports unknown completeness conservatively as `truncated: true`.
 
-Cursors are bound to the directory and relevant options. Live backends also bind them to directory metadata; detected changes return `directory_changed` (409), requiring a restart. This is not a filesystem snapshot or a guarantee against all concurrent metadata changes. Checkpoint cursors bind to the resolved checkpoint ID, including when the caller uses `latest`.
+Cursors are bound to the directory and relevant options, and resume after the last returned name. Live listings are weakly consistent, like `readdir`: directory changes do not invalidate cursors, unchanged entries are never repeated or skipped, and entries added, removed, or renamed meanwhile may or may not appear. Clients converge through file change events, not through listing errors. Old live cursors remain valid; their embedded directory revisions are ignored. Checkpoint cursors also bind to the resolved checkpoint ID, including when the caller uses `latest`; a different checkpoint returns `directory_changed` (409), requiring a restart.
+
+Older Local Sandboxes still reject listings that race a write. The API retries from the beginning after 100 / 250 ms when it owns the listing start, discarding partial results. An expired caller-held cursor, or exhausted retries, still returns `directory_changed` (409). SDK full-list calls and the web file tree can restart these listings; paged callers must restart explicitly. Sandboxes without pagination retain their existing `truncated` flag and limits; when a capped listing is split into API pages, the capped subset can differ between pages, so `truncated: true` results may skip entries.
 
 ## Web cache safety
 

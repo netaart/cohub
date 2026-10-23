@@ -4,10 +4,13 @@ import { degToRad, rotatePointAround, type WorldPoint, worldPoint } from "../mod
 import { audioKeyCenter } from "./renderers/audio-card-renderer.js";
 import { modelKeyCenter } from "./renderers/model-card-renderer.js";
 import { featuredTaskArtifact } from "@cohub/protocol";
-import { boardCardDetailed } from "./text-resolution.js";
+import { boardCardDetailed } from "./lod.js";
+import type { BoardCardHit, BoardRenderContext } from "./renderers/board-renderer-registry.js";
+
+export const BOARD_PLAY_MEDIA = "play-media";
 
 export type BoardMediaAction = {
-	action: "play-media";
+	action: typeof BOARD_PLAY_MEDIA;
 	itemId: string;
 };
 
@@ -61,6 +64,17 @@ export function boardMediaActionAt(
 ): BoardMediaAction | null {
 	return mediaPlayBadgeVisible(item, zoom, options) &&
 		mediaPlayBadgeHit(item, point, zoom)
-		? { action: "play-media", itemId: item.id }
+		? { action: BOARD_PLAY_MEDIA, itemId: item.id }
 		: null;
+}
+
+const PLAY_HIT: BoardCardHit = { action: BOARD_PLAY_MEDIA, cursor: "pointer" };
+
+export function mediaPlayHit(item: BoardSceneItem, point: WorldPoint, context: BoardRenderContext): BoardCardHit | null {
+	const key = context.assetKey(item);
+	const action = boardMediaActionAt(item, point, context.zoom, {
+		materialized: true,
+		hasVideoPreview: Boolean(key && context.getTexture(key)),
+	});
+	return action ? PLAY_HIT : null;
 }

@@ -344,7 +344,7 @@ cohub -s <spaceId> boards preset rise --targets a,b --animation intro | cohub bo
 cohub -s <spaceId> boards preset float --targets ship   # bare tracks, to fold into your own animation
 ```
 
-`boards history` lists versions or restores one. Playback is shared by every viewer (`play`, `pause`, `resume`, `seek`, `next`, `stop`), `boards export` renders images and videos, and `boards watch` streams changes and playback.
+`boards history` lists versions or restores one. Playback is shared by every viewer (`play`, `pause`, `resume`, `seek`, `next`, `stop`), `boards export` renders images and videos in any built-in theme (`--theme`), and `boards watch` streams changes and playback.
 
 `video` and `audio` items accept `props.time` in milliseconds, so an animation track can drive it:
 

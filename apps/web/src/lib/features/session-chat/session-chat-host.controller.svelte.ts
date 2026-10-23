@@ -699,25 +699,19 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	const EMPTY_INTERMEDIATE_MESSAGES: ReturnType<
 		typeof buildStreamingStoredIntermediateMessages
 	> = [];
+	let previousStreamingIntermediateMessages = EMPTY_INTERMEDIATE_MESSAGES;
 	const activeStreamingIntermediateMessages = $derived.by(() => {
 		if (!activeGenerationState || !activeSessionId)
 			return EMPTY_INTERMEDIATE_MESSAGES;
-		return buildStreamingStoredIntermediateMessages({
-			spaceId,
-			sessionId: activeSessionId,
-			turnId: activeGenerationState.turnId,
-			intermediateMessages: activeGenerationState.intermediateMessages,
-		});
-	});
-	const activeGenerationClientMessageId = $derived.by(() => {
-		const turnId = activeGenerationState?.turnId;
-		if (!turnId) return null;
-		return getTurnClientMessageId(
-			activeSessionState?.turns.find((turn) => turn.id === turnId) ??
-				activeSessionState?.turns.find(
-					(turn) => getTurnClientMessageId(turn) === turnId,
-				) ?? { meta: null },
-		);
+		previousStreamingIntermediateMessages =
+			buildStreamingStoredIntermediateMessages({
+				spaceId,
+				sessionId: activeSessionId,
+				turnId: activeGenerationState.turnId,
+				intermediateMessages: activeGenerationState.intermediateMessages,
+				previous: previousStreamingIntermediateMessages,
+			});
+		return previousStreamingIntermediateMessages;
 	});
 	const activeStreamError = $derived.by(
 		() => activeGenerationState?.error ?? "",
@@ -750,15 +744,12 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				? {
 						sessionId: activeSessionId ?? "active",
 						turnId: activeGenerationState.turnId ?? null,
-						anchorUserMessageId:
-							activeGenerationState.anchorUserMessageId ?? null,
-						clientMessageId: activeGenerationClientMessageId,
 						executionKind: activeSessionState?.turns.find(
 							(turn) => turn.id === activeGenerationState.turnId,
 						)?.executionKind,
 						intermediateMessages: activeStreamingIntermediateMessages,
+						messageOrdinal: activeGenerationState.messageOrdinal,
 						contentBlocks: activeGenerationState.contentBlocks,
-						finalizedPreview: activeGenerationState.finalizedPreview,
 						status: activeGenerationState.status,
 						resumed: activeGenerationState.resumed,
 						runtimePhase: activeGenerationState.runtimePhase,
@@ -4367,7 +4358,12 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	function retryFailedSessionLoad() {
 		const sessionId = activeSessionId;
 		const state = sessionId ? sessionStateById[sessionId] : null;
-		if (sessionId && state?.error?.kind === "error" && !state.loaded && !state.loading) {
+		if (
+			sessionId &&
+			state?.error?.kind === "error" &&
+			!state.loaded &&
+			!state.loading
+		) {
 			void loadSessionState(sessionId);
 		}
 	}

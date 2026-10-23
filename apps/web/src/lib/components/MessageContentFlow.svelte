@@ -208,12 +208,12 @@ const segments = $derived.by(() => {
 			continue;
 		}
 		if (block.type === "tool_use") {
-			const blocks: ContentBlock[] = [block];
-			const next = content[i + 1];
-			if (next?.type === "tool_result" && next.tool_use_id === block.id) {
-				blocks.push(next);
-				i += 2;
-			} else {
+			const blocks: ContentBlock[] = [];
+			while (
+				content[i]?.type === "tool_use" ||
+				content[i]?.type === "tool_result"
+			) {
+				blocks.push(content[i] as ContentBlock);
 				i += 1;
 			}
 			result.push({ type: "tool", blocks });

@@ -10,9 +10,12 @@ import {
 	Text,
 	Texture,
 } from "pixi.js";
-import { boardCardDetailed, syncTextResolution } from "../text-resolution.js";
-import type { BoardFileItem, } from "@cohub/protocol";
+import { boardCardDetailed } from "../lod.js";
+import { syncTextResolution } from "../text-resolution.js";
+import { boardItemPreview, type BoardFileItem } from "@cohub/protocol";
 import {
+	type FileCategory,
+	type FilePreviewKind,
 	fileCategory,
 	fileCategoryAccent,
 	fileMetaLine,
@@ -29,7 +32,7 @@ import type {
 	BoardCardRenderer,
 	BoardRenderContext,
 } from "./board-renderer-registry.js";
-import { drawFarPlate } from "./far-plate.js";
+import { drawFarPlate, farPictureTone } from "./far-plate.js";
 
 const PADDING = 10;
 const COVER_RATIO = 0.56;
@@ -68,8 +71,45 @@ function detailFor(zoom: number): "title" | "full" {
 	return boardCardDetailed(zoom) ? "full" : "title";
 }
 
-function coverHeight(item: SceneItem<BoardFileItem>, height: number): number {
-	if (filePreviewKind(item.props.snapshot) !== "cover") return 0;
+type FileCardView = {
+	src: string | null;
+	title: string;
+	excerpt: string;
+	kind: FilePreviewKind;
+	meta: string;
+	mark: string;
+	category: FileCategory;
+};
+
+function viewOf(item: BoardSceneItem): FileCardView | null {
+	if (item.type === "file") {
+		const { src, snapshot } = (item as SceneItem<BoardFileItem>).props;
+		return {
+			src,
+			title: snapshot?.title || fileStem(src),
+			excerpt: snapshot?.excerpt ?? "",
+			kind: filePreviewKind(snapshot),
+			meta: fileMetaLine(src, snapshot?.size),
+			mark: fileTypeLabel(src),
+			category: fileCategory(src, snapshot?.mimeType),
+		};
+	}
+	const preview = boardItemPreview(item);
+	if (!preview) return null;
+	const label = (item.type.split(".").pop() ?? item.type).toUpperCase();
+	return {
+		src: preview.src ?? null,
+		title: preview.title || item.type,
+		excerpt: preview.excerpt ?? "",
+		kind: preview.cover ? "cover" : preview.excerpt ? "text" : "blank",
+		meta: label,
+		mark: label,
+		category: preview.src ? fileCategory(preview.src) : "other",
+	};
+}
+
+function coverHeight(view: FileCardView, height: number): number {
+	if (view.kind !== "cover") return 0;
 	const ideal = Math.round(height * COVER_RATIO);
 	return Math.max(0, Math.min(ideal, height - MIN_BODY_FOR_COVER));
 }
@@ -97,29 +137,29 @@ function syncClip(parts: FileParts, rect: CardRect, style: BoardRenderStyle) {
 
 function sync(
 	container: Container,
-	item: SceneItem<BoardFileItem>,
+	item: BoardSceneItem,
 	context: BoardRenderContext,
 ) {
 	const parts = partsByContainer.get(container);
-	if (!parts) return;
-	syncContent(parts, item, context);
+	const view = viewOf(item);
+	if (!parts || !view) return;
+	syncContent(parts, item, view, context);
 	for (const text of [parts.title, parts.excerpt, parts.typeMark]) syncTextResolution(text, context.textResolution);
 }
 
-function syncContent(parts: FileParts, item: SceneItem<BoardFileItem>, context: BoardRenderContext) {
+function syncContent(parts: FileParts, item: BoardSceneItem, view: FileCardView, context: BoardRenderContext) {
 	positionShell(parts.root, item);
 
 	const { width, height } = item.frame;
 	const detail = detailFor(context.zoom);
 	const elevation = cardElevation(context, item.id);
-	syncCardTag(parts.tag, { glyph: "file", text: fileMetaLine(item.props.src, item.props.snapshot?.size), width }, context);
+	syncCardTag(parts.tag, { glyph: "file", text: view.meta, width }, context);
 	const key = context.assetKey(item);
 	const texture = key ? context.getTexture(key) : null;
 	const coverFailed = Boolean(key && !texture && context.hasError(key));
-	const fileState = context.fileState(item.props.src);
-	const band = coverHeight(item, height);
-	const kind = filePreviewKind(item.props.snapshot);
-	const category = fileCategory(item.props.src, item.props.snapshot?.mimeType);
+	const fileState = view.src ? context.fileState(view.src) : "ok";
+	const band = coverHeight(view, height);
+	const { kind, category, title, excerpt, mark } = view;
 	const accent = fileCategoryAccent(category, context.palette);
 
 	const visualSig = [
@@ -186,9 +226,6 @@ function syncContent(parts: FileParts, item: SceneItem<BoardFileItem>, context: 
 		parts.typeMark.visible = kind === "blank";
 	}
 
-	const title = item.props.snapshot?.title || fileStem(item.props.src);
-	const excerpt = item.props.snapshot?.excerpt ?? "";
-	const mark = fileTypeLabel(item.props.src);
 	const innerWidth = Math.max(1, width - PADDING * 2);
 	const showTypeMark = kind === "blank";
 	const textSig = [
@@ -203,6 +240,7 @@ function syncContent(parts: FileParts, item: SceneItem<BoardFileItem>, context: 
 		context.palette.text,
 		context.palette.muted,
 		context.style.font,
+		context.themeKey,
 		accent,
 	].join("|");
 	if (textSig === parts.textSig) return;
@@ -257,7 +295,7 @@ function syncContent(parts: FileParts, item: SceneItem<BoardFileItem>, context: 
 
 export const fileCardRenderer: BoardCardRenderer = {
 	id: "file-card",
-	canRender: (item) => item.type === "file",
+	canRender: (item) => item.type === "file" || boardItemPreview(item) !== null,
 	create: (item, context) => {
 		const root = new Container();
 		const plate = new Graphics();
@@ -275,8 +313,6 @@ export const fileCardRenderer: BoardCardRenderer = {
 				fontFamily: BOARD_FONT_STACK,
 				fontSize: TITLE_SIZE,
 				fontWeight: "600",
-				wordWrap: true,
-				breakWords: true,
 				lineHeight: TITLE_LINE,
 			},
 			resolution,
@@ -289,8 +325,6 @@ export const fileCardRenderer: BoardCardRenderer = {
 				fontFamily: BOARD_FONT_STACK,
 				fontSize: EXCERPT_SIZE,
 				fontWeight: "400",
-				wordWrap: true,
-				breakWords: true,
 				lineHeight: EXCERPT_LINE,
 			},
 			resolution,
@@ -326,26 +360,19 @@ export const fileCardRenderer: BoardCardRenderer = {
 			visualSig: "",
 			textSig: "",
 		});
-		if (item.type === "file") sync(root, item, context);
+		sync(root, item, context);
 		return root;
 	},
-	update: (container, item, context) => {
-		if (item.type === "file") sync(container, item, context);
-	},
-	resolution: (container, item, context) => {
-		if (item.type === "file") sync(container, item, context);
-	},
+	update: sync,
+	resolution: sync,
 	zoom: (container, zoom) => {
 		const tag = partsByContainer.get(container)?.tag;
 		if (tag) zoomCardTag(tag, zoom);
 	},
 	renderFar: (graphics, item, context) => {
-		const category = fileCategory(
-			item.type === "file" ? item.props.src : "",
-			item.type === "file" ? item.props.snapshot?.mimeType : undefined,
-		);
+		const category = viewOf(item)?.category ?? "other";
 		drawFarPlate(graphics, item.frame, {
-			fill: context.palette.surface,
+			fill: farPictureTone(item, context) ?? context.palette.surface,
 			fillAlpha: 0.96,
 			accent: fileCategoryAccent(category, context.palette),
 			accentAlpha: 0.45,

@@ -42,13 +42,20 @@ import {
 	createBoardLayout,
 	diffBoardDocuments,
 	diffMergePatch,
+	isBuiltinItem,
 	isEmptyBoardDelta,
 	parseBoardDocument,
 	parseBoardItem,
 	summarizeBoardDelta,
 	trackReferences,
 } from "@cohub/protocol";
-import { BOARD_TASK_MUTATION_PREFIX, type BoardTaskViewer, listTaskBoards, resolveBoardTaskSnapshots } from "./tasks.js";
+import {
+	BOARD_TASK_MUTATION_PREFIX,
+	type BoardTaskArtifactSizes,
+	type BoardTaskViewer,
+	listTaskBoards,
+	resolveBoardTaskSnapshots,
+} from "./tasks.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: any Postgres driver (postgres-js in production, PGlite in tests).
 export type BoardDatabase = PgDatabase<PgQueryResultHKT, any, any>;
@@ -103,6 +110,7 @@ function itemData(item: BoardItem): JsonRecord {
 
 function itemSource(item: BoardItem): string | null {
 	if (item.type === "task") return boardTaskSource(item.props.taskRunId);
+	if (!isBuiltinItem(item)) return item.preview?.src ?? null;
 	return "src" in item.props && typeof item.props.src === "string" ? item.props.src : null;
 }
 
@@ -291,6 +299,7 @@ export type BoardWriteInput = {
 	actorId: string;
 	source?: RequestSource | null;
 	taskViewer?: BoardTaskViewer;
+	taskArtifactSizes?: BoardTaskArtifactSizes;
 };
 
 export async function applyBoard(
@@ -336,7 +345,7 @@ export async function applyBoardInTransaction(
 
 	let patch = apply.patch as BoardPatch;
 	const resolveTasks = async (current: (id: string) => BoardItem | undefined, whole: boolean) => {
-		const tasks = await resolveBoardTaskSnapshots(tx, { spaceId: input.spaceId, patch, current, viewer: input.taskViewer, whole });
+		const tasks = await resolveBoardTaskSnapshots(tx, { spaceId: input.spaceId, patch, current, viewer: input.taskViewer, whole, artifactSizes: input.taskArtifactSizes });
 		if (!tasks.ok) throw new BoardError(tasks.status, tasks.code, `${tasks.path}: ${tasks.message}`, [{ severity: "error", code: tasks.code, path: tasks.path, message: tasks.message }]);
 		return tasks.patch;
 	};
@@ -736,7 +745,14 @@ export async function syncTaskBoards(
 					patch: { items: Object.fromEntries(live.map(({ id }) => [id, { props: { taskRunId: input.taskRunId } }])) },
 					mutationId: `${BOARD_TASK_MUTATION_PREFIX}${input.taskRunId}:${input.revision}`,
 				});
-				return applyBoardInTransaction(tx, { spaceId: input.spaceId, boardId, actorId: input.actorId, source: input.source, apply });
+				return applyBoardInTransaction(tx, {
+					spaceId: input.spaceId,
+					boardId,
+					actorId: input.actorId,
+					source: input.source,
+					taskArtifactSizes: input.taskArtifactSizes,
+					apply,
+				});
 			});
 			if (outcome) writes.push({ boardId, outcome });
 		} catch (error) {

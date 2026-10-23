@@ -94,7 +94,7 @@ const context: BoardRenderContext = {
 	releaseTexture: () => {},
 };
 
-function sync(next: Partial<BoardRenderContext> = {}, globalSig = "g") {
+function sync(next: Partial<BoardRenderContext> = {}, globalSig = "g", visibleIds: Set<string> | null = null) {
 	Object.assign(context, next);
 	live.sync({
 		items: scene.items,
@@ -102,11 +102,10 @@ function sync(next: Partial<BoardRenderContext> = {}, globalSig = "g") {
 		scene,
 		context,
 		getItem: (id) => scene.get(id) ?? null,
-		visibleIds: null,
+		visibleIds,
 		pinnedIds: new Set(context.selectedIds),
 		globalSig,
 		structureVersion: 1,
-		geometryVersion: 1,
 		gestureActive: false,
 	});
 }
@@ -140,5 +139,7 @@ measure("hover change", ROUNDS, (round) => sync({ hoveredId: ids[round % ids.len
 measure("select change", ROUNDS, (round) => sync({ selectedIds: new Set([ids[(round * 7) % ids.length] as string]) }));
 measure("select all", 4, (round) => sync({ selectedIds: round % 2 ? new Set() : new Set(ids) }));
 measure("theme change", 4, (round) => sync({ themeKey: `t${round}` }, `g${round}`));
+const visible = new Set([...ids].sort());
+measure("far replan", ROUNDS, (round) => sync({ zoom: round % 2 ? 0.08 : 0.09 }, "g", new Set(visible)));
 live.destroy(context);
 renderer.destroy();

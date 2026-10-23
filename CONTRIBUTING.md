@@ -32,3 +32,5 @@ This repository ships directly on `main` (no long-lived feature branches).
 1. Keep changes small and focused.
 2. Describe the problem and the approach in the commit message.
 3. Ensure lint and typecheck pass before pushing.
+4. Changesets that touch Board end with a `Hosts:` line: what an app embedding the
+   Board must change, with the code, or `Hosts: no action`.

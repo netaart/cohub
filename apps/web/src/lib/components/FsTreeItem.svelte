@@ -14,6 +14,7 @@ import {
 	Trash2,
 	Upload,
 } from "lucide-svelte";
+import { preloadBoardRuntime } from "$lib/board/runtime/board-runtime";
 import FsTreeItem from "$lib/components/FsTreeItem.svelte";
 import { useFileTreeMarks } from "$lib/components/file-tree-marks";
 import {
@@ -355,6 +356,8 @@ $effect(() => {
   }}
   onclick={handleClick}
   onkeydown={handleKeydown}
+  onpointerenter={() => preloadBoardRuntime(node.path)}
+  onfocus={() => preloadBoardRuntime(node.path)}
   ondragstart={(e) => {
     if (!draggable) {
       e.preventDefault();

@@ -1,16 +1,16 @@
 import { Container, Graphics, GraphicsPath, Matrix, Text } from "pixi.js";
 import type { BoardShapeItem } from "@cohub/protocol";
-import { BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
 import type { SceneItem } from "../../model/scene.js";
+import { layoutShapeLabel, SHAPE_LABEL_PADDING } from "../../model/text-metrics.js";
 import { type WorldPoint, worldPoint } from "../../model/geometry.js";
 import { dashPattern, roundRectPoints, tracePolyline, trimPolyline } from "../stroke.js";
 import { itemAlpha, itemColor } from "../palette.js";
-import { syncTextResolution, syncTextWrapWidth } from "../text-resolution.js";
+import { boardTextStyle, cssBaselineShift } from "../text-measurement.js";
+import { syncTextResolution } from "../text-resolution.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
 import { drawFarPlate } from "./far-plate.js";
 
-const LABEL_PADDING = 8;
 const DEFAULT_ROUNDED_RADIUS = 8;
 
 type ShapeParts = {
@@ -19,7 +19,6 @@ type ShapeParts = {
 	label: Text;
 	visualSig: string;
 	textSig: string;
-	wrapWidth: number;
 };
 
 const partsByContainer = new WeakMap<Container, ShapeParts>();
@@ -131,19 +130,24 @@ function sync(container: Container, item: SceneItem<BoardShapeItem>, context: Bo
 
 	parts.label.alpha = itemAlpha(context, style.stroke);
 	const label = itemColor(context, style.stroke, "neutral", "label");
-	const textSig = [props.text, label, props.fontSize, props.align].join("|");
+	const layout = layoutShapeLabel(props, width);
+	const text = layout.lines.join("\n");
+	const textSig = [text, label, props.fontSize, props.align, context.themeKey].join("|");
 	if (textSig !== parts.textSig) {
 		parts.textSig = textSig;
-		parts.label.text = props.text;
-		parts.label.visible = props.text.length > 0;
-		parts.label.style.fill = label;
-		parts.label.style.fontSize = props.fontSize;
-		parts.label.style.lineHeight = props.fontSize * 1.4;
-		parts.label.style.align = props.align;
+		parts.label.text = text;
+		Object.assign(parts.label.style, {
+			...boardTextStyle({ font: "sans", fontSize: props.fontSize, fontWeight: 500 }),
+			fill: label,
+			lineHeight: layout.lineHeight,
+			align: props.align,
+		});
 	}
-	syncTextWrapWidth(parts.label, parts, Math.max(1, width - LABEL_PADDING * 2), context.resizingIds.has(item.id));
+	parts.label.visible = props.text.length > 0 && context.editingId !== item.id;
 	syncTextResolution(parts.label, context.textResolution);
-	parts.label.position.set(width / 2, height / 2);
+	const anchor = props.align === "left" ? 0 : props.align === "right" ? 1 : 0.5;
+	parts.label.anchor.set(anchor, 0.5);
+	parts.label.position.set(SHAPE_LABEL_PADDING + Math.max(0, width - SHAPE_LABEL_PADDING * 2) * anchor, height / 2 + cssBaselineShift(parts.label.style));
 }
 
 export const shapeCardRenderer: BoardCardRenderer = {
@@ -154,13 +158,12 @@ export const shapeCardRenderer: BoardCardRenderer = {
 		const shape = new Graphics();
 		const label = new Text({
 			text: "",
-			style: { fill: 0xffffff, fontFamily: BOARD_FONT_STACK, fontSize: 20, fontWeight: "500", align: "center", wordWrap: true, lineHeight: 28 },
+			style: { fill: 0xffffff },
 			resolution: context.textResolution,
 			roundPixels: true,
 		});
-		label.anchor.set(0.5);
 		root.addChild(shape, label);
-		partsByContainer.set(root, { root, shape, label, visualSig: "", textSig: "", wrapWidth: 0 });
+		partsByContainer.set(root, { root, shape, label, visualSig: "", textSig: "" });
 		if (item.type === "shape") sync(root, item as SceneItem<BoardShapeItem>, context);
 		return root;
 	},

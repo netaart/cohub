@@ -1,5 +1,12 @@
-import { syncTaskBoards, boardChangedEvent } from "@cohub/core/board";
+import {
+  type BoardTaskArtifactSizes,
+  boardChangedEvent,
+  listTaskBoards,
+  readUnsizedTaskVisual,
+  syncTaskBoards,
+} from "@cohub/core/board";
 import { createLogger } from "@cohub/infra/logging";
+import { probeMediaSize } from "@cohub/protocol/core";
 import { REALTIME_OUTBOUND_CHANNEL } from "@cohub/protocol/realtime";
 import { db } from "./db.js";
 import { redisCommandClient } from "./redis.js";
@@ -7,6 +14,14 @@ import { redisCommandClient } from "./redis.js";
 const logger = createLogger({ serviceName: "cohub-worker" });
 const TASK_SOURCE = { via: "task" } as const;
 const RETRY_DELAYS_MS = [2_000, 10_000];
+const PROBE_TIMEOUT_MS = 2_000;
+
+async function probeTaskArtifactSizes(spaceId: string, taskRunId: string): Promise<BoardTaskArtifactSizes | undefined> {
+  const shown = await listTaskBoards(db, { spaceId, taskRunId, limit: 1 }).catch(() => []);
+  const visual = shown.length ? await readUnsizedTaskVisual(db, { spaceId, taskRunId }).catch(() => null) : null;
+  const size = visual && (await probeMediaSize(visual.url, visual.type, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) }).catch(() => null));
+  return visual && size ? new Map([[visual.url, size]]) : undefined;
+}
 
 export async function syncFinishedTaskBoards(run: {
   id: string;
@@ -19,6 +34,7 @@ export async function syncFinishedTaskBoards(run: {
   const spaceId = run.spaceId;
   const actorId = run.userUuid ?? "system";
   const revision = `${run.status}:${run.updatedAt instanceof Date ? run.updatedAt.toISOString() : (run.updatedAt ?? "")}`;
+  const taskArtifactSizes = run.status === "completed" ? await probeTaskArtifactSizes(spaceId, run.id) : undefined;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
     let failed = 0;
     const fail = (error: unknown, boardId?: string) => {
@@ -31,6 +47,7 @@ export async function syncFinishedTaskBoards(run: {
       revision,
       actorId,
       source: TASK_SOURCE,
+      taskArtifactSizes,
       onError: (boardId, error) => fail(error, boardId),
     }).catch((error) => {
       fail(error);

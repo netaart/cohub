@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import type { BoardChapter, BoardVec2 } from "@neta-art/cohub/board";
 import { readBoardJsonObject } from "../../board-command-support.js";
 import { loadBoardDocument, resolveBundledFonts } from "../../board-export.js";
+import { settleBoardDocument } from "../../board-media.js";
 import {
   boardPathTrack,
   boardSequencePatch,
@@ -29,7 +30,8 @@ Checks native layout only, not camera cropping or content drawn inside scripts.
 Example: cohub boards inspect lesson.board --animation lecture --at 0:20s:1s --json`)
     .action(async (target: string, options: { animation?: string; at: string; items?: string }) => {
       try {
-        const { document } = await loadBoardDocument(await resolveSpace(boards), target);
+        const spaceId = await resolveSpace(boards);
+        const document = await settleBoardDocument(spaceId, (await loadBoardDocument(spaceId, target)).document);
         const times = parseBoardTimes(options.at, "--at", 100);
         const sampler = options.animation ? createBoardAnimationSampler(document, options.animation) : null;
         const renderer = await createNodeBoardRenderer({ fonts: resolveBundledFonts() });

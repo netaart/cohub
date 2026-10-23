@@ -26,6 +26,11 @@ export function traceCardOutline(
 
 export type CardCrop = { x: number; y: number; w: number; h: number };
 
+/**
+ * The canvas renderer fills with a repeating pattern, so bilinear samples at the
+ * edge would blend in the opposite side. Mapping the picture half a texel inside
+ * its source keeps every sample within it on both renderers.
+ */
 export function fillCardPicture(
 	graphics: Graphics,
 	texture: Texture,
@@ -33,14 +38,19 @@ export function fillCardPicture(
 	style: Pick<BoardRenderStyle, "corner" | "radius">,
 	crop?: CardCrop | null,
 ): Graphics {
-	// Pixi moves clamped textures to repeat for fills; mirroring keeps edge texels from wrapping.
+	// Pixi switches clamped sources to repeat for fills; mirroring keeps sprites sharing this source from wrapping.
 	const sampling = texture.source.style;
 	if (sampling.addressMode !== "mirror-repeat") {
 		sampling.addressMode = "mirror-repeat";
 		sampling.update();
 	}
-	const matrix = crop ? new Matrix(1 / crop.w, 0, 0, 1 / crop.h, -crop.x / crop.w, -crop.y / crop.h) : undefined;
-	return traceCardOutline(graphics, picture, style).fill({ texture, textureSpace: "local", ...(matrix ? { matrix } : {}) });
+	const { x = 0, y = 0, w = 1, h = 1 } = crop ?? {};
+	const insetX = Math.min(0.5 / texture.source.pixelWidth, w / 4);
+	const insetY = Math.min(0.5 / texture.source.pixelHeight, h / 4);
+	const sw = w - insetX * 2;
+	const sh = h - insetY * 2;
+	const matrix = new Matrix(1 / sw, 0, 0, 1 / sh, -(x + insetX) / sw, -(y + insetY) / sh);
+	return traceCardOutline(graphics, picture, style).fill({ texture, textureSpace: "local", matrix });
 }
 
 export function tracePixelRect(
@@ -53,7 +63,7 @@ export function tracePixelRect(
 ): Graphics {
 	const s = Math.min(step, width / 4, height / 4);
 	if (s <= 0) return graphics.rect(x, y, width, height);
-	return graphics.poly(pixelRectPoints(x, y, width, height, s).flatMap((point) => [point.x, point.y]));
+	return graphics.poly(pixelRectPoints(x, y, width, height, s).flatMap((point) => [point.x, point.y]), true);
 }
 
 function pixelRectPoints(x: number, y: number, width: number, height: number, s: number): WorldPoint[] {

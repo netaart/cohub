@@ -5,7 +5,7 @@ import type {
 	BoardScene as BoardModelScene,
 	SceneItem,
 } from "../model/index.js";
-import { drawPointsBounds, parseBoardItem } from "../model/index.js";
+import { drawPointsBounds, itemBounds, parseBoardItem, type Rect, rectsIntersect } from "../model/index.js";
 import type {
 	BoardCardRenderer,
 	BoardCardRendererResolver,
@@ -17,8 +17,10 @@ import {
 	isClippingFrame,
 	syncClipGroup,
 } from "../render/index.js";
+import { BOARD_LOD_HYSTERESIS, type BoardLod, boardCardDetailed, boardLodRatio, boardLodSize, DEFAULT_BOARD_LOD } from "../render/lod.js";
 import { textZoomBucket } from "../render/text-resolution.js";
-import { type Container, Graphics } from "pixi.js";
+import { type BoardFrameBudget, fixedBoardFrameBudget } from "./frame-budget.js";
+import { type Container, Graphics, Text } from "pixi.js";
 
 type CardEntry = {
 	item: BoardItem;
@@ -31,12 +33,8 @@ type CardEntry = {
 	scriptRevision: number;
 };
 
-const FAR_LAYER_ENTER = 450;
-const FAR_LAYER_EXIT = 350;
-const FAR_PASS_BATCH = 240;
-const FAR_LIVE_LIMIT = 64;
-const RESOLUTION_BATCH = 32;
-const Z_FAR_LAYER = -1;
+const FAR_CHUNK = 256;
+const LOD_ZOOM_STEPS = 8;
 const Z_LIFTED = 1e9;
 const Z_LIVE_STROKE = Number.MAX_SAFE_INTEGER - 1;
 const Z_OVERLAY = Number.MAX_SAFE_INTEGER;
@@ -74,10 +72,28 @@ export type SceneSyncInput = {
 	globalSig: string;
 	staleIds?: ReadonlySet<string>;
 	structureVersion: number;
-	geometryVersion: number;
 	gestureActive: boolean;
 	focus?: { x: number; y: number };
+	/** The world area on screen; live cards outside it skip rendering. */
+	view?: Rect;
+	lod?: BoardLod;
+	budget?: BoardFrameBudget;
 };
+
+type FarRun = { key: string; order: number; items: BoardItem[] };
+type LodPlan = {
+	scene: BoardModelScene;
+	live: ReadonlySet<string>;
+	far: ReadonlySet<string>;
+	runs: Map<string, FarRun>;
+	limited: boolean;
+	deferred: boolean;
+};
+type FarPlate = { graphics: Graphics; items: readonly BoardItem[]; sig: string };
+
+function sameItems(a: readonly BoardItem[], b: readonly BoardItem[]): boolean {
+	return a.length === b.length && a.every((item, index) => item === b[index]);
+}
 
 export type BoardSceneNode = {
 	item: BoardItem;
@@ -88,10 +104,15 @@ export type BoardScene = {
 	sync: (input: SceneSyncInput) => void;
 	getNode: (itemId: string) => BoardSceneNode | null;
 	holders: (key: string) => ReadonlySet<string>;
+	repaintFar: (keys: ReadonlySet<string>, assetKey: (item: BoardItem) => string | null) => void;
 	readonly liveVersion: number;
 	liveIds: () => ReadonlySet<string>;
+	/** Live cards and cards drawn on far plates. */
+	counts: () => { live: number; far: number };
+	readonly settling: boolean;
 	readonly animated: boolean;
 	tick: (clock: number) => number | null;
+	redrawText: () => void;
 	destroy: (context: BoardRenderContext) => void;
 };
 
@@ -112,14 +133,15 @@ export function createBoardScene(options: {
 	const heldKeys = new Map<string, string>();
 	const holders = new Map<string, Set<string>>();
 	let orderById = new Map<string, number>();
-	let farSig: string | null = null;
-	let farActive = false;
+	let idsByOrder: readonly string[] = [];
 	let lastStructureVersion = -1;
 	let lastZoom = Number.NaN;
 	let lastResolution = "";
 	const pendingResolution = new Set<string>();
 	let liveVersion = 0;
 	let lifted: ReadonlySet<string> = new Set();
+	const fixedBudget = fixedBoardFrameBudget();
+	let budget: BoardFrameBudget = fixedBudget;
 	const liveStrokes = new Map<
 		string,
 		{
@@ -201,6 +223,11 @@ export function createBoardScene(options: {
 			const host = hostFor(entry.item, scene);
 			if (entry.container.parent !== host) host.addChild(entry.container);
 		}
+		for (const plate of plates.values()) {
+			const first = plate.items[0];
+			const host = first && hostFor(first, scene);
+			if (host && plate.graphics.parent !== host) host.addChild(plate.graphics);
+		}
 		for (const [id, entry] of clips) {
 			const frame = scene.get(id);
 			if (
@@ -228,6 +255,7 @@ export function createBoardScene(options: {
 		const pooled = takeFromPool(renderer.id);
 		const container = pooled ?? renderer.create(item, context);
 		container.visible = true;
+		container.culled = false;
 		if (pooled) renderer.update(container, item, context);
 		container.alpha = scene.opacity(item.id);
 		hostFor(item, scene).addChild(container);
@@ -249,84 +277,179 @@ export function createBoardScene(options: {
 		return entry;
 	}
 
-	// Double-buffered: a pass paints the hidden layer, then swaps it in.
-	let farFront = createFarLayer();
-	let farBack = createFarLayer();
-	let farPainted = false;
-	let farCovered: ReadonlySet<string> = new Set();
-	let farInput: SceneSyncInput | null = null;
-	let farRunning = false;
-	let farQueued = false;
-	let farFrame = 0;
+	const lodSizes = new WeakMap<BoardItem, number>();
+	let nearIds: ReadonlySet<string> = EMPTY_IDS;
+	let plan: LodPlan | null = null;
+	let planInputs: unknown[] = [];
 
-	function createFarLayer() {
-		const layer = new Graphics({ label: "board-far-layer" });
-		layer.zIndex = Z_FAR_LAYER;
-		layer.visible = false;
-		world.addChild(layer);
-		return layer;
+	/** Visible ids in z-order; sorting indices beats comparing ids through the map. */
+	function orderedIds(visibleIds: Set<string> | null): readonly string[] {
+		if (visibleIds === null) return idsByOrder;
+		const order = new Int32Array(visibleIds.size);
+		let length = 0;
+		for (const id of visibleIds) {
+			const index = orderById.get(id);
+			if (index !== undefined) order[length++] = index;
+		}
+		return Array.from(order.subarray(0, length).sort(), (index) => idsByOrder[index] as string);
 	}
 
-	function requestFarPass(signature: string) {
-		farSig = signature;
-		if (farRunning) farQueued = true;
-		else runFarPass();
+	function lodSize(renderer: BoardCardRenderer, item: BoardItem): number {
+		let size = lodSizes.get(item);
+		if (size === undefined) {
+			size = boardLodSize(renderer, item);
+			lodSizes.set(item, size);
+		}
+		return size;
 	}
 
-	function runFarPass() {
-		if (!farInput) return;
-		farRunning = true;
-		farQueued = false;
-		const { context, getItem, pinnedIds } = farInput;
-		const ids = visibleFacts(farInput).orderedIds;
-		const target = farPainted ? farBack : farFront;
-		const painted = new Set<string>();
-		target.clear();
-		if (target === farFront) farCovered = painted;
-		let index = 0;
-		const step = () => {
-			farFrame = 0;
-			const end = Math.min(ids.length, index + FAR_PASS_BATCH);
-			for (; index < end; index += 1) {
-				const id = ids[index] as string;
-				if (pinnedIds.has(id)) continue;
-				const item = getItem(id);
-				if (!item) continue;
-				getRenderer(item, context).renderFar?.(target, item, context);
-				painted.add(id);
+	/**
+	 * Split the visible cards into live ones and z-ordered chunks of far stand-ins.
+	 * A card is live while it is legible on screen, until the live budget keeps
+	 * the on-screen ones nearest the focus; pinned cards and cards without a far
+	 * stand-in stay live.
+	 */
+	function lodPlan(input: SceneSyncInput): LodPlan {
+		const { visibleIds, context, getItem, pinnedIds, scene } = input;
+		const lod = input.lod ?? DEFAULT_BOARD_LOD;
+		const step = Math.round(Math.log2(Math.max(context.zoom, 1e-4)) * LOD_ZOOM_STEPS);
+		const cell = input.view && input.focus && plan?.limited ? input.view.width / 8 : 0;
+		const at = cell ? `${Math.round((input.focus?.x ?? 0) / cell)},${Math.round((input.focus?.y ?? 0) / cell)}` : "";
+		const inputs = [visibleIds, input.structureVersion, idSetSignature(pinnedIds), step, at, lod.media, lod.text, lod.card, lod.live];
+		const reusable = plan && inputs.every((value, index) => value === planInputs[index]);
+		if (plan && reusable && !plan.deferred && (input.gestureActive || plan.scene === scene)) return plan;
+		planInputs = inputs;
+
+		const ids = orderedIds(visibleIds);
+		const live = new Set<string>();
+		const near: BoardItem[] = [];
+		for (const id of ids) {
+			const item = getItem(id);
+			if (!item) continue;
+			const renderer = getRenderer(item, context);
+			if (pinnedIds.has(id) || !renderer.renderFar) {
+				live.add(id);
+				continue;
 			}
-			if (index < ids.length) {
-				farFrame = requestAnimationFrame(step);
-				if (target === farFront) options.requestFrame?.();
-				return;
-			}
-			if (target === farBack) {
-				farBack = farFront;
-				farFront = target;
-				farBack.visible = false;
-				farBack.clear();
-				farCovered = painted;
-			}
-			farFront.visible = farActive;
-			farPainted = true;
-			farRunning = false;
-			options.requestFrame?.();
-			if (farQueued) runFarPass();
-		};
-		step();
+			const ratio = boardLodRatio(renderer, lodSize(renderer, item), context.zoom, lod);
+			if (ratio >= (nearIds.has(id) ? BOARD_LOD_HYSTERESIS : 1)) near.push(item);
+		}
+		const room = Math.max(0, lod.live - live.size);
+		const limited = near.length > room;
+		const allowance = budget.allow("materialize");
+		const { focus, view } = input;
+		const ranked = focus && (limited || near.length > allowance)
+			? near
+					.map(({ id, frame }) => ({
+						id,
+						offscreen: view && !rectsIntersect(itemBounds(frame), view) ? 1 : 0,
+						distance: (frame.x + frame.width / 2 - focus.x) ** 2 + (frame.y + frame.height / 2 - focus.y) ** 2,
+					}))
+					.sort((a, b) => a.offscreen - b.offscreen || a.distance - b.distance)
+			: near;
+		let admitted = 0;
+		let deferred = false;
+		for (const { id } of ranked.slice(0, room)) {
+			if (!cards.has(id) && admitted++ >= allowance) deferred = true;
+			else live.add(id);
+		}
+		if (deferred) options.requestFrame?.();
+		nearIds = live;
+
+		const runs = new Map<string, FarRun>();
+		const far = new Set<string>();
+		for (const id of ids) {
+			const item = getItem(id);
+			if (!item || live.has(id)) continue;
+			const order = orderById.get(id) ?? 0;
+			const key = `${Math.floor(order / FAR_CHUNK)}:${clippingAncestor(scene, item) ?? ""}`;
+			const run = runs.get(key);
+			if (run) run.items.push(item);
+			else runs.set(key, { key, order, items: [item] });
+			far.add(id);
+		}
+		plan = { scene, live, far, runs, limited, deferred };
+		return plan;
 	}
 
-	function resetFarLayer() {
-		cancelAnimationFrame(farFrame);
-		farFrame = 0;
-		farRunning = false;
-		farQueued = false;
-		farInput = null;
-		farPainted = false;
-		farCovered = new Set();
-		farSig = null;
-		farFront.clear();
-		farBack.clear();
+	const plates = new Map<string, FarPlate>();
+	let paintedPlan: LodPlan | null = null;
+	let paintedSig = "";
+	let platesPending = false;
+	let covered: ReadonlySet<string> = EMPTY_IDS;
+
+	/**
+	 * Repaint the plates whose cards changed, within a per-frame budget. A card
+	 * is covered once a plate draws it; until then it stays live if it already is.
+	 */
+	function paintPlates(input: SceneSyncInput, current: LodPlan): boolean {
+		const { context, globalSig, scene } = input;
+		if (current === paintedPlan && globalSig === paintedSig) return false;
+		const start = performance.now();
+		const allowance = budget.allow("plate");
+		let painted = 0;
+		let pending = false;
+		let changed = false;
+		for (const run of current.runs.values()) {
+			let plate = plates.get(run.key);
+			if (plate?.sig === globalSig && sameItems(plate.items, run.items)) continue;
+			if (painted >= allowance) {
+				pending = true;
+				continue;
+			}
+			painted += run.items.length;
+			if (!plate) {
+				plate = { graphics: new Graphics({ label: "board-far-plate" }), items: [], sig: "" };
+				plates.set(run.key, plate);
+				changed = true;
+			}
+			const { graphics } = plate;
+			graphics.clear();
+			for (const item of run.items) getRenderer(item, context).renderFar?.(graphics, item, context);
+			plate.items = run.items;
+			plate.sig = globalSig;
+			graphics.zIndex = run.order;
+			const host = hostFor(run.items[0] as BoardItem, scene);
+			if (graphics.parent !== host) host.addChild(graphics);
+		}
+		const paintMs = performance.now() - start;
+		for (const [key, plate] of plates) {
+			if (current.runs.has(key)) continue;
+			plates.delete(key);
+			plate.graphics.destroy();
+			changed = true;
+		}
+		const next = new Set<string>();
+		for (const plate of plates.values()) for (const item of plate.items) next.add(item.id);
+		covered = next;
+		budget.spend("plate", painted, paintMs);
+		platesPending = pending;
+		if (pending) options.requestFrame?.();
+		else {
+			paintedPlan = current;
+			paintedSig = globalSig;
+		}
+		return changed;
+	}
+
+	function repaintFar(keys: ReadonlySet<string>, assetKey: (item: BoardItem) => string | null) {
+		for (const plate of plates.values()) {
+			if (!plate.items.some((item) => keys.has(assetKey(item) ?? ""))) continue;
+			plate.sig = "";
+			paintedPlan = null;
+		}
+	}
+
+	function clearPlates() {
+		for (const plate of plates.values()) plate.graphics.destroy();
+		plates.clear();
+		paintedPlan = null;
+		paintedSig = "";
+		platesPending = false;
+		covered = EMPTY_IDS;
+		plan = null;
+		planInputs = [];
+		nearIds = EMPTY_IDS;
 	}
 
 	function syncLiveStrokes(input: SceneSyncInput) {
@@ -396,56 +519,20 @@ export function createBoardScene(options: {
 		entry.renderer.destroy?.(entry.container, context);
 	}
 
-	let visibleMemo: {
-		ids: Set<string> | null;
-		structureVersion: number;
-		signature: number;
-		orderedIds: string[];
-		unbatched: Set<string>;
-	} | null = null;
-	function visibleFacts(input: SceneSyncInput) {
-		const { items, visibleIds, structureVersion, context, getItem } = input;
-		if (
-			visibleMemo?.ids === visibleIds &&
-			visibleMemo.structureVersion === structureVersion
-		)
-			return visibleMemo;
-		const orderedIds =
-			visibleIds === null
-				? items.map((item) => item.id)
-				: [...visibleIds].sort(
-						(a, b) => (orderById.get(a) ?? 0) - (orderById.get(b) ?? 0),
-					);
-		const unbatched = new Set<string>();
-		for (const id of orderedIds) {
-			const item = getItem(id);
-			if (item && !getRenderer(item, context).renderFar) unbatched.add(id);
-		}
-		visibleMemo = {
-			ids: visibleIds,
-			structureVersion,
-			signature: visibleIds === null ? 0 : idSetSignature(visibleIds),
-			orderedIds,
-			unbatched,
-		};
-		return visibleMemo;
-	}
-
 	function sync(input: SceneSyncInput) {
 		const {
 			items,
 			scene,
 			context,
 			getItem,
-			visibleIds,
 			pinnedIds,
 			globalSig,
 			structureVersion,
-			geometryVersion,
-			gestureActive,
 		} = input;
+		fixedBudget.reset();
+		budget = input.budget ?? fixedBudget;
 
-		const resolution = `${textZoomBucket(context.zoom)}:${context.textResolution}`;
+		const resolution = `${textZoomBucket(context.zoom)}:${boardCardDetailed(context.zoom)}:${context.textResolution}`;
 		if (resolution !== lastResolution) {
 			lastResolution = resolution;
 			queueResolution(input.focus);
@@ -457,58 +544,21 @@ export function createBoardScene(options: {
 			for (const [id, entry] of [...cards]) {
 				if (!liveIds.has(id)) recycle(id, entry, context, false);
 			}
-			orderById = new Map(items.map((item, index) => [item.id, index]));
+			idsByOrder = items.map((item) => item.id);
+			orderById = new Map(idsByOrder.map((id, index) => [id, index]));
 		}
 
-		const visibleCount = visibleIds === null ? items.length : visibleIds.size;
-		const nextFarActive = farActive
-			? visibleCount > FAR_LAYER_EXIT
-			: visibleCount > FAR_LAYER_ENTER;
-		const farModeChanged = nextFarActive !== farActive;
-		farActive = nextFarActive;
-		farFront.visible = farActive;
-
-		if (farActive) {
-			farInput = input;
-			const nextFarSig = [
-				structureVersion,
-				geometryVersion,
-				globalSig,
-				idSetSignature(pinnedIds),
-				visibleIds === null ? "all" : visibleFacts(input).signature,
-			].join("|");
-			if (farSig === null || (nextFarSig !== farSig && !gestureActive)) {
-				requestFarPass(nextFarSig);
-			}
-		} else if (farModeChanged) {
-			resetFarLayer();
-		}
-
+		const current = lodPlan(input);
+		const platesChanged = paintPlates(input, current);
 		const wanted = new Set<string>(pinnedIds);
-		if (farActive) {
-			const { orderedIds, unbatched } = visibleFacts(input);
-			for (const id of unbatched) wanted.add(id);
-			let retained = 0;
-			if (!farPainted) for (const id of cards.keys()) {
-				if ((!visibleIds || visibleIds.has(id)) && !farCovered.has(id) && !wanted.has(id)) {
-					wanted.add(id);
-					retained++;
-				}
-			}
-			let budget = Math.max(0, FAR_LIVE_LIMIT - retained);
-			for (const id of orderedIds) {
-				if (budget === 0) break;
-				if (farCovered.has(id) || wanted.has(id)) continue;
-				wanted.add(id);
-				budget -= 1;
-			}
-		} else if (visibleIds === null) {
-			for (const item of items) wanted.add(item.id);
-		} else {
-			for (const id of visibleIds) wanted.add(id);
+		for (const id of current.live) wanted.add(id);
+		for (const id of cards.keys()) {
+			if (current.far.has(id) && !covered.has(id)) wanted.add(id);
 		}
 
 		let liveSetChanged = false;
+		let made = 0;
+		let making = 0;
 
 		for (const [id, entry] of [...cards]) {
 			if (!wanted.has(id)) {
@@ -529,7 +579,10 @@ export function createBoardScene(options: {
 				entry = undefined;
 			}
 			if (!entry) {
+				const start = performance.now();
 				materialize(item, context, globalSig, scene);
+				making += performance.now() - start;
+				made += 1;
 				liveSetChanged = true;
 				continue;
 			}
@@ -563,9 +616,11 @@ export function createBoardScene(options: {
 				pendingResolution.delete(id);
 			}
 		}
+		budget.spend("materialize", made, making);
+		if (input.view) cullCards(input.view, pinnedIds);
 		refreshResolution(context);
 		if (liveSetChanged) liveVersion += 1;
-		if (structureChanged || liveSetChanged) syncClips(scene);
+		if (structureChanged || liveSetChanged || platesChanged) syncClips(scene);
 		if (context.zoom !== lastZoom) {
 			lastZoom = context.zoom;
 			for (const entry of cards.values()) entry.renderer.zoom?.(entry.container, lastZoom);
@@ -573,8 +628,17 @@ export function createBoardScene(options: {
 
 		const liftChanged = context.liftedIds !== lifted;
 		lifted = context.liftedIds;
-		if (structureChanged || farModeChanged || liveSetChanged || liftChanged) applyChildOrder(scene);
+		if (structureChanged || liveSetChanged || liftChanged) applyChildOrder(scene);
 		syncLiveStrokes(input);
+	}
+
+	function cullCards(view: Rect, pinnedIds: ReadonlySet<string>) {
+		for (const [id, entry] of cards) {
+			const culled = !pinnedIds.has(id) && !rectsIntersect(itemBounds(entry.item.frame), view);
+			if (entry.container.culled === culled) continue;
+			entry.container.culled = culled;
+			if (!culled && entry.renderer.tick) tickingIds.add(id);
+		}
 	}
 
 	function queueResolution(focus: SceneSyncInput["focus"]) {
@@ -589,15 +653,20 @@ export function createBoardScene(options: {
 	}
 
 	function refreshResolution(context: BoardRenderContext) {
-		let budget = RESOLUTION_BATCH;
+		if (pendingResolution.size === 0) return;
+		const start = performance.now();
+		const allowance = budget.allow("resolution");
+		let refreshed = 0;
 		for (const id of pendingResolution) {
-			if (budget-- === 0) break;
+			if (refreshed === allowance) break;
 			pendingResolution.delete(id);
 			const entry = cards.get(id);
 			if (!entry) continue;
 			entry.renderer.resolution?.(entry.container, entry.item, context);
 			if (entry.renderer.tick) tickingIds.add(id);
+			refreshed += 1;
 		}
+		budget.spend("resolution", refreshed, performance.now() - start);
 		if (pendingResolution.size) options.requestFrame?.();
 	}
 
@@ -605,7 +674,7 @@ export function createBoardScene(options: {
 		let next: number | null = null;
 		for (const id of tickingIds) {
 			const entry = cards.get(id);
-			const wait = entry?.container.visible ? (entry.renderer.tick?.(entry.container, clock) ?? null) : null;
+			const wait = entry?.container.visible && !entry.container.culled ? (entry.renderer.tick?.(entry.container, clock) ?? null) : null;
 			if (wait === null) tickingIds.delete(id);
 			else next = next === null ? wait : Math.min(next, wait);
 		}
@@ -628,6 +697,17 @@ export function createBoardScene(options: {
 		world.sortChildren();
 	}
 
+	function redrawText() {
+		const redraw = (container: Container) => {
+			for (const child of container.children) {
+				if (child instanceof Text) child.style.update();
+				else redraw(child);
+			}
+		};
+		for (const entry of cards.values()) redraw(entry.container);
+		for (const pool of pools.values()) for (const container of pool) redraw(container);
+	}
+
 	function destroy(context: BoardRenderContext) {
 		for (const entry of cards.values())
 			entry.renderer.destroy?.(entry.container, context);
@@ -640,14 +720,13 @@ export function createBoardScene(options: {
 		heldKeys.clear();
 		holders.clear();
 		orderById = new Map();
+		idsByOrder = [];
+		clearPlates();
 		for (const entry of clips.values()) entry.group.destroy({ children: true });
 		clips.clear();
 		animatedIds.clear();
 		tickingIds.clear();
 		for (const id of [...liveStrokes.keys()]) removeLiveStroke(id, context);
-		resetFarLayer();
-		farActive = false;
-		visibleMemo = null;
 		lastStructureVersion = -1;
 		lastZoom = Number.NaN;
 		lastResolution = "";
@@ -661,14 +740,20 @@ export function createBoardScene(options: {
 			return entry ? { item: entry.item, container: entry.container } : null;
 		},
 		holders: (key) => holders.get(key) ?? EMPTY_IDS,
+		repaintFar,
 		get liveVersion() {
 			return liveVersion;
 		},
 		liveIds: () => new Set(cards.keys()),
+		counts: () => ({ live: cards.size, far: covered.size }),
+		get settling() {
+			return Boolean(plan?.deferred) || platesPending || pendingResolution.size > 0;
+		},
 		get animated() {
 			return animatedIds.size > 0;
 		},
 		tick,
+		redrawText,
 		destroy,
 	};
 }

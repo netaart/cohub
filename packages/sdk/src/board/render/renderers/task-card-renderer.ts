@@ -6,10 +6,8 @@ import {
 import { type BoardTaskItem, featuredTaskArtifact } from "@cohub/protocol";
 import { Container, FillGradient, Graphics, Sprite, Text } from "pixi.js";
 import { drawAudioWaveform } from "../audio-waveform.js";
-import {
-	boardCardDetailed,
-	syncTextResolution,
-} from "../text-resolution.js";
+import { boardCardDetailed } from "../lod.js";
+import { syncTextResolution } from "../text-resolution.js";
 import { type CardTag, createCardTag, formatBoardDuration, syncCardTag, zoomCardTag } from "../card-tag.js";
 import { cardElevation, containRect, drawCardSurface, traceCardOutline } from "../surface.js";
 import { positionShell } from "./base-card-renderer.js";
@@ -17,8 +15,8 @@ import type {
 	BoardCardRenderer,
 	BoardRenderContext,
 } from "./board-renderer-registry.js";
-import { drawFarPlate } from "./far-plate.js";
-import { fitTextToLines } from "../text-fit.js";
+import { drawFarPlate, farPictureTone } from "./far-plate.js";
+import { fitTextToLines, fitTextToWidth } from "../text-fit.js";
 
 const PADDING = 12;
 const META_HEIGHT = 28;
@@ -293,7 +291,7 @@ function advance(parts: TaskParts, clock: number): number | null {
 		const elapsed = formatBoardDuration(elapsedMs);
 		if (elapsed !== motion.elapsed) {
 			motion.elapsed = elapsed;
-			parts.body.text = `${motion.label} · ${elapsed}`;
+			fitTextToWidth(parts.body, `${motion.label} · ${elapsed}`, Math.max(24, motion.width - PADDING * 2));
 		}
 		const untilNextSecond = SECOND - (Math.max(0, elapsedMs) % SECOND);
 		next = next === null ? untilNextSecond : Math.min(next, untilNextSecond);
@@ -375,6 +373,7 @@ function sync(
 		context.palette.text,
 		context.palette.muted,
 		context.style.font,
+		context.themeKey,
 	].join("|");
 	if (textSig !== parts.textSig) {
 		parts.textSig = textSig;
@@ -542,7 +541,7 @@ export const taskCardRenderer: BoardCardRenderer = {
 		const text = (fontFamily: string, fontSize: number, fontWeight: "400" | "500") =>
 			new Text({
 				text: "",
-				style: { fontFamily, fontSize, fontWeight, wordWrap: true, breakWords: true },
+				style: { fontFamily, fontSize, fontWeight },
 				resolution: context.textResolution,
 				roundPixels: true,
 			});
@@ -550,7 +549,6 @@ export const taskCardRenderer: BoardCardRenderer = {
 		const detail = text(BOARD_FONT_STACK, 10.5, "400");
 		const meta = text(BOARD_MONO_FONT_STACK, 10, "500");
 		const badge = text(BOARD_MONO_FONT_STACK, 10, "500");
-		badge.style.wordWrap = false;
 		badge.anchor.set(0.5);
 		detail.anchor.set(0.5, 0);
 		detail.style.align = "center";
@@ -612,7 +610,7 @@ export const taskCardRenderer: BoardCardRenderer = {
 		const { status } = liveStatus(item, context);
 		const active = status === "failed" || status === "running" || status === "pending";
 		drawFarPlate(graphics, item.frame, {
-			fill: context.palette.surface,
+			fill: farPictureTone(item, context) ?? context.palette.surface,
 			fillAlpha: 0.82,
 			...(active
 				? { accent: statusColor(status, context), accentAlpha: 0.9 }

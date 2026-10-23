@@ -27,6 +27,7 @@ export type BoardRemote = {
 	subscribe?(handlers: {
 		changed?: (event: { payload: BoardChangedPayload }) => void;
 		playback?: (event: { payload: { playback: BoardPlaybackSnapshot | null } }) => void;
+		resync?: () => void;
 	}): () => void;
 };
 
@@ -104,6 +105,7 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 	let retryTimer: ReturnType<typeof setTimeout> | null = null;
 	let retryDelay = RETRY_BASE_MS;
 	let disposed = false;
+	let restored = false;
 	let unpersisted: { version: number; document: BoardDocument } | null = null;
 	let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -113,6 +115,7 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 			return remote.subscribe({
 				changed: (event) => receive(event.payload),
 				playback: (event) => receivePlayback(event.payload.playback),
+				resync: () => void retry(),
 			});
 		} catch {
 			return null;
@@ -234,7 +237,7 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 	}
 
 	async function flush() {
-		if (sending || disposed || !loaded) return;
+		if (sending || disposed || !loaded || !restored) return;
 		sending = true;
 		try {
 			while (pending.length && !disposed) {
@@ -312,6 +315,36 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 		emit();
 	}
 
+	function retry(): Promise<void> {
+		if (disposed) return Promise.resolve();
+		if (retryTimer) clearTimeout(retryTimer);
+		retryTimer = null;
+		retryDelay = RETRY_BASE_MS;
+		readError = null;
+		writeError = null;
+		emit();
+		return refresh().then(flush);
+	}
+
+	function onOnline() {
+		if (pending.length || readError || writeError) void retry();
+	}
+
+	async function restore() {
+		const [cached, stored] = await Promise.all([
+			storage.readDocument().catch(() => null),
+			storage.listPending().catch(() => []),
+		]);
+		if (disposed) return;
+		const known = new Set(stored.map((entry) => entry.mutationId));
+		pending = [...stored, ...pending.filter((entry) => !known.has(entry.mutationId))];
+		restored = true;
+		const parsed = cached && !server ? parseBoardDocument(cached.document) : null;
+		if (cached && parsed?.ok) adoptServer(parsed.document, cached.version, false);
+		else recompute();
+		emit();
+	}
+
 	function receivePlayback(next: BoardPlaybackSnapshot | null) {
 		playbackRevision += 1;
 		playback = next;
@@ -328,19 +361,8 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 		},
 		async start() {
 			unsubscribeRemote ??= subscribeRemote();
-
-			const [cached, stored] = await Promise.all([
-				storage.readDocument().catch(() => null),
-				storage.listPending().catch(() => []),
-			]);
-			if (disposed) return;
-			pending = stored;
-			if (cached && !server) {
-				const parsed = parseBoardDocument(cached.document);
-				if (parsed.ok) adoptServer(parsed.document, cached.version, false);
-			}
-			emit();
-			await refresh();
+			globalThis.addEventListener?.("online", onOnline);
+			await Promise.all([restore(), refresh()]);
 			await flush();
 		},
 		apply(patch: BoardPatch): Promise<void> {
@@ -356,17 +378,10 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 		receive,
 		receivePlayback,
 		refresh,
-		retry() {
-			if (retryTimer) clearTimeout(retryTimer);
-			retryTimer = null;
-			retryDelay = RETRY_BASE_MS;
-			readError = null;
-			writeError = null;
-			emit();
-			return refresh().then(flush);
-		},
+		retry,
 		dispose() {
 			disposed = true;
+			globalThis.removeEventListener?.("online", onOnline);
 			unsubscribeRemote?.();
 			unsubscribeRemote = null;
 			listeners.clear();
@@ -377,3 +392,10 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 }
 
 export type BoardReplica = ReturnType<typeof createBoardReplica>;
+
+export {
+	type BoardReplicaDatabaseOptions,
+	type BoardReplicaScope,
+	clearBoardReplicaStorage,
+	createIndexedDbBoardReplicaStorage,
+} from "./indexeddb.js";

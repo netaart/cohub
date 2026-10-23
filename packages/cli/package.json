@@ -1,6 +1,6 @@
 {
   "name": "@neta-art/cohub-cli",
-  "version": "10.8.2",
+  "version": "10.11.1",
   "description": "CLI for Cohub — spaces, sessions, and agent collaboration.",
   "type": "module",
   "engines": {
@@ -39,8 +39,9 @@
     "access": "public"
   },
   "devDependencies": {
-    "@fontsource/geist": "^5.3.0",
-    "@fontsource/geist-mono": "^5.3.0",
+    "@fontsource-variable/figtree": "^5.3.0",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
     "@types/node": "catalog:",
     "@types/ws": "^8.18.1",
     "pixi.js": "^8.20.1",
@@ -48,6 +49,6 @@
     "typescript": "^7.0.2"
   },
   "optionalDependencies": {
-    "@napi-rs/canvas": "^1.0.8"
+    "@napi-rs/canvas": "^1.0.13"
   }
 }

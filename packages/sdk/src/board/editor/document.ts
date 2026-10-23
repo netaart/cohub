@@ -256,7 +256,7 @@ export function createDocumentModule(ctx: EditorContext) {
 		commit({}, record);
 	}
 
-	function commitPatch(patch: BoardPatch) {
+	function commitPatch(patch: BoardPatch, { record = true }: { record?: boolean } = {}) {
 		if (options.readonly) throw new Error("Board is read-only.");
 		const before = state.base;
 		const result = applyBoardPatchToDocument(before, patch);
@@ -264,8 +264,10 @@ export function createDocumentModule(ctx: EditorContext) {
 		const ids = Object.keys(patch.items ?? {});
 		const redo = diffBoardEdits(before, result.document, ids);
 		if (isEmptyBoardPatch(redo)) return;
-		state.undoStack = [...state.undoStack.slice(-UNDO_LIMIT + 1), { undo: diffBoardEdits(result.document, before, ids), redo }];
-		state.redoStack = [];
+		if (record) {
+			state.undoStack = [...state.undoStack.slice(-UNDO_LIMIT + 1), { undo: diffBoardEdits(result.document, before, ids), redo }];
+			state.redoStack = [];
+		}
 		adopt(result.document, ids);
 		return send(redo).then((error) => { if (error) throw error; });
 	}

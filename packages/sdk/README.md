@@ -112,7 +112,7 @@ const created = await space.boards.create({
   },
 });
 
-const board = space.board(created.id);
+const board = space.board(created.id); // or await space.boards.open("boards/plan.board")
 const { items, version } = await board.get({ only: ["items"] });
 await board.apply({ items: { goal: { props: { text: "Shipped" } } } }, { baseVersion: version });
 
@@ -159,7 +159,7 @@ change, so they work directly with `useSyncExternalStore`:
 ```ts
 import { createBoardRegistry, defineBoardItem, worldPoint } from "@neta-art/cohub/board";
 import { createBoardEditor } from "@neta-art/cohub/board/editor";
-import { createBoardReplica } from "@neta-art/cohub/board/replica";
+import { createBoardReplica, createIndexedDbBoardReplicaStorage } from "@neta-art/cohub/board/replica";
 import { createBoardAssetManager, mountBoardStage } from "@neta-art/cohub/board/stage";
 import { z } from "zod";
 
@@ -172,7 +172,13 @@ const order = defineBoardItem({
   capabilities: { canRotate: false },
 });
 
-const replica = createBoardReplica({ remote: space.board(boardId) });
+// Cached documents and unsent writes survive a reload; clear them on sign-out
+// with `clearBoardReplicaStorage({ userKey })`. The replica reads the Board again
+// after a realtime reconnect and resends pending writes when the network returns.
+const replica = createBoardReplica({
+  remote: space.board(boardId),
+  storage: createIndexedDbBoardReplicaStorage({ userKey, spaceId: space.id, boardId }),
+});
 await replica.start();
 
 const editor = createBoardEditor({
@@ -230,6 +236,84 @@ rewritten by older ones. For a canvas look instead of DOM, pass renderers to
 `createBoardCardRendererResolver` from `board/render` and hand the result to
 the stage or to `renderBoardExport` as `renderers`.
 
+### Hosting a Board
+
+Compose the SDK instead of wrapping it, and each release's loading, level of
+detail and text work reaches your Board without code changes.
+
+Pictures your own items show go through `itemAsset`. They share the built-in
+loader: CDN variants sized to the screen, loads ordered by where the view is
+heading, prefetch, compact copies when panned away, device budgets, one cache
+and exports. `src` is a Space path, resolved like an image item's, or a URL;
+`fit: "cover"` sizes pictures cropped to fill their box by the short edge. Call
+`invalidateItemAssets()` when the data it reads changes, and `invalidatePath`
+when a file changes:
+
+```ts
+const assets = createBoardAssetManager({
+  resolveFileUrl: source.resolveFileUrl,
+  // undefined keeps the built-in rule; null shows no picture.
+  itemAsset: (item) => {
+    if (item.type !== "acme.order") return undefined;
+    const cover = covers.get(item.props.orderId as string); // "orders/o-1.webp"
+    return cover ? { src: cover, fit: "cover" } : null;
+  },
+});
+```
+
+- **Budgets.** Leave `lod`, `prefetch`, `concurrency` and `lruBudget` unset; they
+  follow `defaultBoardDeviceBudget()`. Force a tier with
+  `boardDeviceBudget(readBoardDeviceSignals(), "low")`.
+- **Canvas cards.** Declare `lod` (`{ kind: "media" }` for pictures) and
+  `renderFar`, drawn with `drawFarPlate(graphics, item.frame, { fill:
+  farPictureTone(item, context) ?? paper })`. Wrap card text with
+  `layoutTextLines(text, font, width, { whiteSpace: "normal", maxLines: 2 })`
+  and apply `context.textResolution` in the `resolution` hook.
+- **Opening cards.** Give a type `activation: "tap"` and handle `onActivate`: a
+  quick press opens the card without selecting it, a drag moves it (or pans with
+  the hand tool or read-only), and hovering shows a pointer instead of ports. A
+  press held in place past `BOARD_TAP_MAX_MS` does nothing: it was a pick-up. A
+  press on a selected card reports `selected: true`. `onLongPress` fires for a still
+  touch or pen; call `editor.pickUp()` there to pick the card up and drag it. The
+  stage drops the click a touch screen sends after a tap that opened something.
+- **Card keys.** A renderer's `hitAt(item, point, context)` returns `{ action, cursor? }`
+  for keys it draws; the stage shows the cursor, passes the hovered key to renderers as
+  `context.hoveredHit` and sends presses to `onHit` (return `false` to let the editor
+  have them). Media cards report `BOARD_PLAY_MEDIA` this way. `handlesHit(item, action)`
+  names the keys you act on; the rest show no cursor and go to the editor.
+- **Touch.** A touch on the selected item drags it, never a port. Pass
+  `touchRotation: false` to `createBoardEditor` to move and resize by touch and pen
+  without a rotation handle.
+- **DOM views.** `viewLayer: "below"` puts them under the canvas, so selection and
+  strokes draw over them; views there get no input. Use a theme with `imageBackground`
+  and paint the Board background behind the host, or the canvas covers them.
+- **Previews.** Write `preview: { title, excerpt, cover, src }` on your items so
+  clients without your renderer, exports and agents show them as cards. Keep it out
+  of undo with `editor.commitPatch(patch, { record: false })`.
+- **Text editing.** Place the in-place editor with `boardTextEditLayout`, so its
+  caret sits on the canvas text:
+
+  ```ts
+  const layout = boardTextEditLayout(item, { viewport: editor.camera, scene: editor.scene, style: stage.theme.style, draft });
+  // A content-box textarea at layout.left/top, sized layout.width × height, padded by
+  // layout.padding, with `rotate(${layout.rotation}deg) scale(${layout.scale})` about its center.
+  ```
+
+- **Themes.** Start from a built-in theme and override what differs:
+  `{ key: "neta-pixel", ...boardRenderTheme("neta-pixel") }`. `style.frameLabelSize`
+  sets frame titles; the editor's title hit box and text editor follow it.
+- **Fonts.** Board text measures in `"Geist Variable"`; load
+  `@fontsource-variable/geist` so lines match the CLI export.
+- **Agent context.** `onViewStateChange` on the editor reports `visibleRect` and
+  `selectedNodes`; send them with a prompt as
+  `buildViewportContentBlock([{ kind: "board", path, boardId, visibleRect, selectedNodes }])`
+  so the agent knows which Board, where and what the user is looking at.
+- **Measuring.** `runBoardStageBench(stage)` drives the stage with wheel input and
+  reports frame and settle times; `stage.stats()` shows live, far and texture counts.
+
+Release notes for Board changes end with `Hosts:`, naming what an embedding app
+must change, or `Hosts: no action`.
+
 ### Images
 
 In the browser, `renderBoardExport(renderer, document, options)` from
@@ -242,11 +326,14 @@ const renderer = await createNodeBoardRenderer();
 const result = exportBoardImageBytes(renderer, document, { format: "png", scale: 2 });
 ```
 
-Text metrics follow the same split. The renderers measure through a real canvas
-and set that up themselves. Called straight off `@neta-art/cohub/board` with no
-renderer in play, `measureBoardText` returns a per-character estimate — fine
-for laying out a board on a server; call `installBoardTextMeasurement` from
-`board/render` first if the numbers have to match what the editor draws.
+Text layout follows the same split. The renderers measure through a real canvas
+and break lines where the browser breaks them in a `<textarea>`
+(`white-space: pre-wrap; overflow-wrap: break-word`), so canvas, editor and
+selection agree. Called straight off `@neta-art/cohub/board` with no renderer in
+play, `layoutBoardText` estimates widths per character — fine for laying out a
+board on a server; call `installBoardTextMeasurement` from `board/render` first
+if the lines have to match what the editor draws. In a browser, call it again
+when a web font Board text uses finishes loading (the stage does this itself).
 
 ## Session subscriptions
 

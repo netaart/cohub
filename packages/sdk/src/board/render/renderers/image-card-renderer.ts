@@ -7,13 +7,17 @@ import type {
 	BoardCardRenderer,
 	BoardRenderContext,
 } from "./board-renderer-registry.js";
-import { drawFarPlate } from "./far-plate.js";
+import { drawFarPlate, farPictureTone } from "./far-plate.js";
 
 type ImageParts = {
 	root: Container;
 	placeholder: Graphics;
 	picture: Graphics;
 	sig: string;
+	textured: boolean;
+	/** When a picture that arrived after its placeholder was shown began fading in. */
+	fadeFrom: number | null;
+	clearSurface: boolean;
 };
 
 const partsByContainer = new WeakMap<Container, ImageParts>();
@@ -26,6 +30,8 @@ function cropRect(crop: BoardImageItem["props"]["crop"]): CardCrop | null {
 }
 
 const PRINT_MARGIN = 6;
+const FADE_MS = 160;
+const FAR_ALPHA = 0.9;
 
 function sync(
 	container: Container,
@@ -51,7 +57,15 @@ function sync(
 		context.themeKey,
 	].join("|");
 	if (sig === parts.sig) return;
+	if (texture && !parts.textured && parts.sig !== "" && !context.reducedMotion) {
+		parts.fadeFrom = performance.now();
+		parts.picture.alpha = 0;
+	} else if (!texture) {
+		parts.fadeFrom = null;
+		parts.picture.alpha = 1;
+	}
 	parts.sig = sig;
+	parts.textured = Boolean(texture);
 
 	const crop = cropRect(item.props.crop);
 	const framed = context.style.media === "framed";
@@ -67,11 +81,13 @@ function sync(
 	if (texture) fillCardPicture(parts.picture, texture, picture, framed ? { corner: "round", radius: 0 } : context.style, crop);
 
 	parts.placeholder.clear();
-	if (texture && !framed) return;
+	parts.clearSurface = !framed;
+	if (texture && !framed && parts.fadeFrom === null) return;
 	drawCardSurface(parts.placeholder, card, context.style, {
-		fill: context.palette.surface,
-		border: texture ? null : failed ? context.palette.border : context.palette.hover,
-		elevation,
+		fill: failed || framed ? context.palette.surface : context.palette.hover,
+		fillAlpha: failed || framed ? 1 : FAR_ALPHA,
+		border: failed ? context.palette.border : null,
+		elevation: texture && !framed ? 0 : elevation,
 	});
 	if (texture) return;
 	const cx = width / 2;
@@ -98,17 +114,28 @@ export const imageCardRenderer: BoardCardRenderer = {
 		const placeholder = new Graphics();
 		const picture = new Graphics();
 		root.addChild(placeholder, picture);
-		partsByContainer.set(root, { root, placeholder, picture, sig: "" });
+		partsByContainer.set(root, { root, placeholder, picture, sig: "", textured: false, fadeFrom: null, clearSurface: false });
 		if (item.type === "image") sync(root, item, context);
 		return root;
 	},
 	update: (container, item, context) => {
 		if (item.type === "image") sync(container, item, context);
 	},
+	tick: (container, clock) => {
+		const parts = partsByContainer.get(container);
+		if (parts?.fadeFrom == null) return null;
+		const progress = Math.min(1, Math.max(0, (clock - parts.fadeFrom) / FADE_MS));
+		parts.picture.alpha = 1 - (1 - progress) ** 3;
+		if (progress < 1) return 16;
+		parts.fadeFrom = null;
+		if (parts.clearSurface) parts.placeholder.clear();
+		return null;
+	},
+	lod: { kind: "media" },
 	renderFar: (graphics, item, context) => {
 		drawFarPlate(graphics, item.frame, {
-			fill: context.palette.hover,
-			fillAlpha: 0.9,
+			fill: farPictureTone(item, context) ?? context.palette.hover,
+			fillAlpha: FAR_ALPHA,
 		});
 	},
 	destroy: (container) => {

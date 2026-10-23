@@ -3,6 +3,7 @@ import type {
 	MessageToolCallsFile,
 	SessionTurnIntermediateSummary,
 	SessionTurnRecord,
+	StoredIntermediateMessage,
 } from "@cohub/protocol/model";
 
 export type ChatMessage = {
@@ -68,8 +69,10 @@ export type TimelineItem =
 			kind: "process";
 			turn: SessionTurnRecord;
 			summary?: SessionTurnIntermediateSummary;
-			intermediateMessages?: import("@cohub/protocol/model").StoredIntermediateMessage[];
+			intermediateMessages?: StoredIntermediateMessage[];
+			live?: StoredIntermediateMessage | null;
 			streaming?: boolean;
+			running?: boolean;
 	  }
 	| {
 			id: string;

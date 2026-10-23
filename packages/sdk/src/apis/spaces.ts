@@ -2034,7 +2034,7 @@ export class SpaceClient {
     this.displays = new SpaceDisplaysApi(transport, id);
     this.invitations = new SpaceInvitationsApi(transport, id);
     this.labels = new SpaceLabelsApi(transport, id);
-    this.boards = new SpaceBoardsApi(transport, id, websocketClient);
+    this.boards = new SpaceBoardsApi(transport, id, websocketClient, this.files);
     this.wallet = new SpaceWalletApi(transport, id);
     this.commerce = new SpaceCommerceApi(transport, id);
   }

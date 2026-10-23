@@ -19,8 +19,11 @@ import type {
   BoardPlaybackSnapshot,
   BoardReadInput,
   BoardReadResult,
+  SpaceFsFileResponse,
+  SpaceFsPreparingFile,
 } from "../../types.js";
 import type { WebsocketClient } from "../../websocket.js";
+import { isBoardPath, parseBoardManifest } from "../model/index.js";
 import { createBoardEntityId } from "../model/items/id.js";
 import type { BoardRemote } from "../replica/index.js";
 
@@ -33,6 +36,7 @@ export type BoardSubscriptionHandlers = {
   awareness?: (event: BoardAwarenessUpdatedEvent) => void;
   playback?: (event: BoardPlaybackChangedEvent) => void;
   event?: (event: BoardChangedEvent | BoardAwarenessUpdatedEvent | BoardPlaybackChangedEvent) => void;
+  resync?: () => void;
 };
 
 export type BoardClientOptions = {
@@ -54,10 +58,8 @@ class BoardRealtimeClient {
       throw new Error("realtime transport is not configured for this client");
     }
     ensureRealtimeConnected(this.websocketClient);
-    const releaseRoom = this.websocketClient.retainRooms([
-      getRealtimeSpaceRoom(this.spaceId),
-      getRealtimeBoardRoom(this.boardId),
-    ]);
+    const room = getRealtimeBoardRoom(this.boardId);
+    const releaseRoom = this.websocketClient.retainRooms([getRealtimeSpaceRoom(this.spaceId), room]);
     const unsubscribe = this.websocketClient.on("event", (event) => {
       if (event.spaceId !== this.spaceId) return;
       if (event.type === "board.changed" && event.payload.boardId === this.boardId) {
@@ -78,8 +80,15 @@ class BoardRealtimeClient {
         handlers.playback?.(playbackEvent);
       }
     });
+    const resync = handlers.resync;
+    const stopResync = resync
+      ? this.websocketClient.on("subscribed", ({ rooms }) => {
+          if (rooms.includes(room)) resync();
+        })
+      : null;
     return () => {
       unsubscribe();
+      stopResync?.();
       releaseRoom();
     };
   }
@@ -225,15 +234,40 @@ export class BoardClient implements BoardRemote {
   }
 }
 
+type BoardFileReader = {
+  read(path: string, customFetch?: Fetch): Promise<SpaceFsFileResponse | SpaceFsPreparingFile>;
+};
+
+async function fileText(file: SpaceFsFileResponse, customFetch: Fetch = fetch): Promise<string> {
+  if (!file.content && file.delivery === "url" && file.url) {
+    const response = await customFetch(file.url);
+    if (!response.ok) throw new Error(`${file.path} could not be read (${response.status})`);
+    return response.text();
+  }
+  if (file.encoding !== "base64") return file.content;
+  return new TextDecoder().decode(Uint8Array.from(atob(file.content), (char) => char.charCodeAt(0)));
+}
+
 export class SpaceBoardsApi {
   constructor(
     private readonly http: HttpTransport,
     private readonly spaceId: string,
     private readonly websocket: WebsocketClient | null,
+    private readonly files: BoardFileReader,
   ) {}
 
   byId(boardId: string) {
     return new BoardClient({ http: this.http, websocket: this.websocket, spaceId: this.spaceId, boardId });
+  }
+
+  async open(target: string, customFetch?: Fetch) {
+    return this.byId(isBoardPath(target) ? await this.resolveId(target, customFetch) : target);
+  }
+
+  async resolveId(path: string, customFetch?: Fetch): Promise<string> {
+    const file = await this.files.read(path, customFetch);
+    if (!("content" in file)) throw new Error(`${path} is being prepared; try again shortly.`);
+    return parseBoardManifest(await fileText(file, customFetch)).boardId;
   }
 
   /** Create a `.board` file and its Board, optionally with an initial document. */

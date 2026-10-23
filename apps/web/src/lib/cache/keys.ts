@@ -108,15 +108,6 @@ export function filePendingDraftKey(
 	return [userKey, spaceId, path, "file-draft"].map(encodeKeyPart).join(":");
 }
 
-export function boardPendingTransactionKey(
-	userKey: string,
-	spaceId: string,
-	boardId: string,
-	txId: string,
-) {
-	return [userKey, spaceId, boardId, txId].map(encodeKeyPart).join(":");
-}
-
 export function boardManifestKey(
 	userKey: string,
 	spaceId: string,

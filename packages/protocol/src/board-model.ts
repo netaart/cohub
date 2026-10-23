@@ -470,11 +470,22 @@ export const BoardCustomItemSchema = z
 	.strict();
 
 export const BOARD_EXTENSION_TYPE_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z0-9-]+)+$/;
+export const BoardItemPreviewSchema = z
+	.object({
+		title: z.string().max(500).optional(),
+		excerpt: z.string().max(2000).optional(),
+		cover: BoardMediaSourceSchema.optional().describe("An image for the card."),
+		src: BoardMediaSourceSchema.optional().describe("The file or page the card stands for."),
+	})
+	.strict()
+	.describe("How a client without this type's renderer shows the card, and what it refers to. The type's own client keeps it current.");
+export type BoardItemPreview = z.infer<typeof BoardItemPreviewSchema>;
 export const BoardExtensionItemSchema = z
 	.object({
 		...boxed(BOARD_DEFAULT_ITEM_SIZE),
 		type: z.string().regex(BOARD_EXTENSION_TYPE_PATTERN),
 		props: z.record(z.string(), z.unknown()).default({}),
+		preview: BoardItemPreviewSchema.optional(),
 	})
 	.strict();
 
@@ -535,6 +546,10 @@ export function isBuiltinItemType(type: string): type is BoardBuiltinItemType {
 
 export function isBuiltinItem(item: BoardItem): item is BoardBuiltinItem {
 	return isBuiltinItemType(item.type);
+}
+
+export function boardItemPreview(item: BoardItem): BoardItemPreview | null {
+	return isBuiltinItem(item) ? null : (item.preview ?? null);
 }
 
 export function isFileBackedItem(item: BoardItem): item is BoardFileBackedItem {

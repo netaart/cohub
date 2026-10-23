@@ -703,7 +703,7 @@ export async function listCheckpointDirectory(input: { spaceId: string; checkpoi
       () => ({ repoConfigured: Boolean(config.spaceSystemRoot) }),
     );
     const finish = (tree: SpaceFsTreeResponse) => input.pagination
-      ? pageDirectory(tree, JSON.stringify([input.spaceId, path]), checkpoint.id, input.pagination)
+      ? pageDirectory(tree, JSON.stringify([input.spaceId, path]), input.pagination, { version: checkpoint.id })
       : tree;
     const key = cacheKey("tree", checkpoint.id, path);
     const cached = await observeStage(

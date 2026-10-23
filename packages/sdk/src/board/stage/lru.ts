@@ -5,8 +5,8 @@
  * they enter a "cooling" pool (reference count zero but still on the GPU) so a
  * quick pan back is instant instead of re-fetching. The pool is bounded by
  * both entry count and approximate GPU bytes; when a budget is exceeded the least
- * recently used entries are evicted first. Keeping this decision pure makes the
- * release-vs-churn trade-off trivial to test.
+ * recently used entries shrink or leave first. Keeping this decision pure makes
+ * the release-vs-churn trade-off trivial to test.
  */
 
 export type LruEntry = {
@@ -15,6 +15,7 @@ export type LruEntry = {
 	lastUsedAt: number;
 	/** Approximate GPU footprint in bytes. */
 	bytes: number;
+	shrunkBytes?: number;
 };
 
 export type LruBudget = {
@@ -22,38 +23,46 @@ export type LruBudget = {
 	maxBytes: number;
 };
 
-/** Default cooling-pool ceiling: 512 images or ~192 MB of GPU memory. */
+/**
+ * Default cooling-pool ceiling: 2048 images or ~192 MB of GPU memory. Bytes
+ * bind first for full-size textures; shrunk copies let many more stay warm.
+ */
 export const DEFAULT_LRU_BUDGET: LruBudget = {
-	maxCount: 512,
+	maxCount: 2048,
 	maxBytes: 192 * 1024 * 1024,
 };
 export const COMPACT_LRU_BUDGET: LruBudget = {
-	maxCount: 256,
+	maxCount: 1024,
 	maxBytes: 96 * 1024 * 1024,
 };
 
-/**
- * Given the unreferenced (cooling) entries and a budget, return the keys to
- * evict — oldest first — so the remaining pool fits within both limits. Returns
- * an empty array when the pool already fits.
- */
-export function selectLruEvictions(
-	entries: LruEntry[],
-	budget: LruBudget,
-): string[] {
-	if (entries.length === 0) return [];
-	let count = entries.length;
+export type LruTrim = { shrink: string[]; evict: string[] };
+
+export function planLruTrim(entries: LruEntry[], budget: LruBudget): LruTrim {
 	let bytes = 0;
 	for (const entry of entries) bytes += entry.bytes;
-	if (count <= budget.maxCount && bytes <= budget.maxBytes) return [];
+	const over = entries.length - budget.maxCount;
+	if (over <= 0 && bytes <= budget.maxBytes) return { shrink: [], evict: [] };
 
 	const sorted = [...entries].sort((a, b) => a.lastUsedAt - b.lastUsedAt);
-	const evict: string[] = [];
-	for (const entry of sorted) {
-		if (count <= budget.maxCount && bytes <= budget.maxBytes) break;
-		evict.push(entry.key);
-		count -= 1;
-		bytes -= entry.bytes;
+	const evict = sorted.slice(0, Math.max(0, over));
+	const kept = sorted.slice(evict.length);
+	for (const entry of evict) bytes -= entry.bytes;
+	const shrink = new Set<LruEntry>();
+	for (const entry of kept) {
+		if (bytes <= budget.maxBytes) break;
+		if (entry.shrunkBytes === undefined || entry.shrunkBytes >= entry.bytes) continue;
+		shrink.add(entry);
+		bytes -= entry.bytes - entry.shrunkBytes;
 	}
-	return evict;
+	for (const entry of kept) {
+		if (bytes <= budget.maxBytes) break;
+		bytes -= shrink.delete(entry) ? (entry.shrunkBytes as number) : entry.bytes;
+		evict.push(entry);
+	}
+	return { shrink: [...shrink].map(({ key }) => key), evict: evict.map(({ key }) => key) };
+}
+
+export function selectLruEvictions(entries: LruEntry[], budget: LruBudget): string[] {
+	return planLruTrim(entries.map(({ key, lastUsedAt, bytes }) => ({ key, lastUsedAt, bytes })), budget).evict;
 }

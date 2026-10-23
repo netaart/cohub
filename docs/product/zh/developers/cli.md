@@ -310,7 +310,7 @@ cohub -s <spaceId> boards preset rise --targets a,b --animation intro | cohub bo
 cohub -s <spaceId> boards preset float --targets ship   # 纯 tracks，可自行折进动画
 ```
 
-`boards history` 列出历史版本或恢复到某个版本。播放对所有观看者同步（`play`、`pause`、`resume`、`seek`、`next`、`stop`），`boards export` 渲染图片和视频，`boards watch` 会流式输出变更与播放状态。
+`boards history` 列出历史版本或恢复到某个版本。播放对所有观看者同步（`play`、`pause`、`resume`、`seek`、`next`、`stop`），`boards export` 渲染图片和视频（`--theme` 可选任一内置主题），`boards watch` 会流式输出变更与播放状态。
 
 `video` 和 `audio` item 支持以毫秒为单位的 `props.time`，可以直接用动画轨迹驱动：
 

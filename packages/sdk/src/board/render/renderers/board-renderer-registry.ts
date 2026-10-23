@@ -1,8 +1,11 @@
 import type { Container, Graphics, Texture } from "pixi.js";
 import type { BoardSettings, BoardCustomItem, BoardFrame, BoardDocument, BoardTaskItem } from "@cohub/protocol";
 import type { BoardShapeColors } from "../../model/palette.js";
+import type { WorldPoint } from "../../model/geometry.js";
 import type { BoardScene, BoardSceneItem, SceneItem } from "../../model/scene.js";
 import type { BoardRenderStyle } from "../style.js";
+import type { BoardLodKind } from "../lod.js";
+import { mediaPlayHit } from "../media-interaction.js";
 import { ensureBoardTextMeasurement } from "../text-measurement.js";
 import { arrowCardRenderer } from "./arrow-card-renderer.js";
 import { audioCardRenderer } from "./audio-card-renderer.js";
@@ -64,6 +67,7 @@ export type BoardRenderContext = {
 	hoveredId: string | null;
 	resizingIds: Set<string>;
 	liftedIds: ReadonlySet<string>;
+	editingId?: string | null;
 	palette: BoardRenderPalette;
 	colors: BoardShapeColors;
 	colorScheme: "dark" | "light";
@@ -82,10 +86,14 @@ export type BoardRenderContext = {
 	assetKey: (item: BoardSceneItem) => string | null;
 	getTexture: (key: string) => Texture | null;
 	hasError: (key: string) => boolean;
+	assetTone?: (key: string) => number | null;
 	fileState: (path: string) => "ok" | "missing" | "unavailable";
 	acquireTexture: (key: string, item: BoardSceneItem) => void;
 	releaseTexture: (key: string) => void;
+	hoveredHit?: { itemId: string; action: string } | null;
 };
+
+export type BoardCardHit = { action: string; cursor?: string };
 
 export type BoardCardRenderer = {
 	id: string;
@@ -104,6 +112,12 @@ export type BoardCardRenderer = {
 	resolution?: (container: Container, item: BoardSceneItem, context: BoardRenderContext) => void;
 	/** Runs on every zoom step; only update transforms and visibility. */
 	zoom?: (container: Container, zoom: number) => void;
+	/**
+	 * Level of detail for `renderFar`: `size` is the world-unit measure kept
+	 * legible (default: the long edge), held against the `BoardLod[kind]` threshold.
+	 */
+	lod?: { kind: BoardLodKind; size?: (item: BoardSceneItem) => number };
+	hitAt?: (item: BoardSceneItem, point: WorldPoint, context: BoardRenderContext) => BoardCardHit | null;
 	renderFar?: (
 		graphics: Graphics,
 		item: BoardSceneItem,
@@ -117,14 +131,16 @@ export type BoardCardRendererResolver = (
 	context: BoardRenderContext,
 ) => BoardCardRenderer;
 
+const playable = (renderer: BoardCardRenderer): BoardCardRenderer => ({ ...renderer, hitAt: mediaPlayHit });
+
 const builtinCardRenderers: readonly BoardCardRenderer[] = [
 	textCardRenderer,
 	imageCardRenderer,
-	videoCardRenderer,
-	audioCardRenderer,
-	modelCardRenderer,
+	playable(videoCardRenderer),
+	playable(audioCardRenderer),
+	playable(modelCardRenderer),
 	fileCardRenderer,
-	taskCardRenderer,
+	playable(taskCardRenderer),
 	shapeCardRenderer,
 	drawCardRenderer,
 	arrowCardRenderer,

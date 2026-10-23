@@ -8,6 +8,7 @@ import type {
 	WorldPoint,
 } from "@neta-art/cohub/board";
 import {
+	boardTextureEdge,
 	createMediaBoardItem,
 	isBoardModelItem,
 	parseBoardMediaSource,
@@ -16,6 +17,8 @@ import {
 } from "@neta-art/cohub/board";
 import type { BoardPointerEvent } from "@neta-art/cohub/board/editor";
 import {
+	BOARD_PLAY_MEDIA,
+	type BoardLod,
 	type BoardRenderLabels,
 	traceCardOutline,
 } from "@neta-art/cohub/board/render";
@@ -24,7 +27,7 @@ import {
 	type BoardItemView,
 	type BoardLiveStroke,
 	type BoardStage,
-	boardTextureEdge,
+	type BoardStagePress,
 	mountBoardStage,
 } from "@neta-art/cohub/board/stage";
 import type { Graphics } from "pixi.js";
@@ -43,10 +46,7 @@ import {
 } from "$lib/board/board-file-preview-source";
 import type { BoardStageExportBridge } from "$lib/board/board-image-export";
 import { createBoardLiveTasks } from "$lib/board/board-live-tasks";
-import {
-	boardMediaActionAt,
-	opensInPlace,
-} from "$lib/board/board-media-playback";
+import { opensInPlace } from "$lib/board/board-media-playback";
 import {
 	type BoardBackgroundLoadState,
 	type BoardThemeBackground,
@@ -93,6 +93,8 @@ const {
 	onBackgroundLoadStateChange,
 	onLongPress,
 	relatedIds,
+	lod,
+	prefetch,
 }: {
 	editor: BoardEditor;
 	playback?: BoardPlaybackSnapshot | null;
@@ -122,6 +124,8 @@ const {
 	) => void;
 	onLongPress?: (point: { x: number; y: number }) => void;
 	relatedIds?: readonly string[];
+	lod?: BoardLod;
+	prefetch?: number;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -321,32 +325,24 @@ function drawOverlay(
 	}
 }
 
-const LONG_PRESS_MS = 480;
-const LONG_PRESS_SLOP = 10;
-let longPressTimer: ReturnType<typeof setTimeout> | null = null;
-let longPressOrigin: { x: number; y: number } | null = null;
-
-function cancelLongPress() {
-	if (longPressTimer) clearTimeout(longPressTimer);
-	longPressTimer = null;
-	longPressOrigin = null;
+function handleLongPress(_item: BoardSceneItem, press: BoardStagePress) {
+	if (!onLongPress || readonly) return;
+	editor.cancelPointerInteraction();
+	try {
+		host?.releasePointerCapture(press.pointerId);
+	} catch {}
+	haptic("longPress");
+	onLongPress({ x: press.clientX, y: press.clientY });
 }
 
-function scheduleLongPress(event: PointerEvent, input: BoardPointerEvent) {
-	cancelLongPress();
-	if (!onLongPress || readonly || event.pointerType === "mouse") return;
-	if (event.button !== 0 || !editor.itemAt(input.world)) return;
-	longPressOrigin = { x: event.clientX, y: event.clientY };
-	longPressTimer = setTimeout(() => {
-		longPressTimer = null;
-		longPressOrigin = null;
-		editor.cancelPointerInteraction();
-		try {
-			host?.releasePointerCapture(event.pointerId);
-		} catch {}
-		haptic("longPress");
-		onLongPress?.({ x: event.clientX, y: event.clientY });
-	}, LONG_PRESS_MS);
+function handlesHit(item: BoardSceneItem, action: string): boolean {
+	return action === BOARD_PLAY_MEDIA && opensInPlace(item, assetSource);
+}
+
+function handleHit(item: BoardSceneItem): boolean {
+	editor.setSelection([item.id]);
+	onOpenInPlace?.(item.id);
+	return true;
 }
 
 function presence(event: PointerEvent, input: BoardPointerEvent | null) {
@@ -363,53 +359,12 @@ function handlePointer(
 	phase: "down" | "move" | "up" | "leave",
 	event: PointerEvent,
 	input: BoardPointerEvent,
-): boolean | undefined {
-	switch (phase) {
-		case "down": {
-			const item = event.button === 0 ? editor.itemAt(input.world) : null;
-			const key = item ? assets.assetKey(item) : null;
-			if (
-				item &&
-				opensInPlace(item, assetSource) &&
-				boardMediaActionAt(item, input.world, stage?.camera.zoom ?? 1, {
-					materialized: stage?.isMaterialized(item.id) ?? false,
-					hasVideoPreview: Boolean(key && assets.getTexture(key)),
-				})
-			) {
-				event.preventDefault();
-				editor.setSelection([item.id]);
-				onOpenInPlace?.(item.id);
-				return false;
-			}
-			scheduleLongPress(event, input);
-			presence(event, input);
-			return;
-		}
-		case "move":
-			if (
-				longPressOrigin &&
-				Math.hypot(
-					event.clientX - longPressOrigin.x,
-					event.clientY - longPressOrigin.y,
-				) > LONG_PRESS_SLOP
-			)
-				cancelLongPress();
-			presence(event, input);
-			return;
-		case "up":
-			cancelLongPress();
-			presence(
-				event,
-				event.type === "pointercancel" || event.pointerType !== "mouse"
-					? null
-					: input,
-			);
-			return;
-		case "leave":
-			cancelLongPress();
-			presence(event, null);
-			return;
-	}
+): undefined {
+	const gone =
+		phase === "leave" ||
+		(phase === "up" &&
+			(event.type === "pointercancel" || event.pointerType !== "mouse"));
+	presence(event, gone ? null : input);
 }
 
 function handleDoubleClick(item: BoardSceneItem | null): boolean {
@@ -514,11 +469,16 @@ onMount(() => {
 		strokes: remoteStrokes,
 		drawOverlay,
 		onPointer: handlePointer,
+		onHit: handleHit,
+		handlesHit,
+		onLongPress: handleLongPress,
 		onDoubleClick: handleDoubleClick,
 		onSurfaceChange: (size) => onSurfaceChange?.(size),
 		onLiveChange: (ids) => {
 			liveIds = ids;
 		},
+		lod: () => lod,
+		prefetch,
 	});
 	stage = mounted;
 	onStageReady?.(mounted);
@@ -588,6 +548,7 @@ $effect(() => {
 $effect(() => {
 	playback;
 	relatedIds;
+	lod;
 	awarenessVersion;
 	backdropReady;
 	getResolvedTheme();
@@ -602,7 +563,6 @@ $effect(() => {
 });
 
 onDestroy(() => {
-	cancelLongPress();
 	window.removeEventListener(
 		CUSTOM_THEME_CHANGED_EVENT,
 		handleCustomThemeChanged,

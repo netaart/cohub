@@ -1,5 +1,5 @@
 import { variantSource } from "../../media.js";
-import { Assets, Texture } from "pixi.js";
+import { Assets, DOMAdapter, Texture } from "pixi.js";
 import { loadVideoThumbnailTexture } from "../render/index.js";
 
 export type BoardImageTexturePool = {
@@ -83,6 +83,72 @@ export async function unloadBoardImageTexture(
 ) {
 	await Assets.unload(url).catch(() => {});
 	if (!texture?.destroyed) texture?.destroy(true);
+}
+
+function fit(width: number, height: number, edge: number, cover = false) {
+	const scale = edge / (cover ? Math.min(width, height) : Math.max(width, height));
+	return scale < 1
+		? { resizeWidth: Math.max(1, Math.round(width * scale)), resizeHeight: Math.max(1, Math.round(height * scale)) }
+		: null;
+}
+
+/**
+ * Decode an image no larger than `edge` along its long side (short side with
+ * `cover`), for sources without CDN variants. The texture is unshared; destroy
+ * it to release it.
+ */
+export async function loadFittedImageTexture(url: string, edge: number, cover = false): Promise<Texture> {
+	const response = await fetch(url);
+	if (!response.ok) throw new Error(`HTTP ${response.status}`);
+	const image = await createImageBitmap(await response.blob());
+	const size = fit(image.width, image.height, edge, cover);
+	if (!size) return Texture.from(image, true);
+	try {
+		return Texture.from(await createImageBitmap(image, { ...size, resizeQuality: "high" }), true);
+	} finally {
+		image.close();
+	}
+}
+
+/** A smaller unshared copy of a decoded texture, or null when it cannot be read back. */
+export async function shrinkBoardTexture(texture: Texture, edge: number): Promise<Texture | null> {
+	const resource = texture.source.resource as ImageBitmapSource | undefined;
+	const size = fit(texture.width, texture.height, edge);
+	if (!resource || !size || typeof createImageBitmap !== "function") return null;
+	return Texture.from(await createImageBitmap(resource, { ...size, resizeQuality: "medium" }), true);
+}
+
+const TONE_SAMPLE = 8;
+let toneContext: CanvasRenderingContext2D | null | undefined;
+
+export async function readTextureTone(texture: Texture): Promise<number | null> {
+	const resource = texture.source.resource as ImageBitmapSource | undefined;
+	if (!resource || texture.destroyed) return null;
+	const bitmap = await createImageBitmap(resource, { resizeWidth: TONE_SAMPLE, resizeHeight: TONE_SAMPLE, resizeQuality: "medium" });
+	try {
+		toneContext ??= DOMAdapter.get()
+			.createCanvas(TONE_SAMPLE, TONE_SAMPLE)
+			.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D | null;
+		if (!toneContext) return null;
+		toneContext.clearRect(0, 0, TONE_SAMPLE, TONE_SAMPLE);
+		toneContext.drawImage(bitmap, 0, 0);
+		const { data } = toneContext.getImageData(0, 0, TONE_SAMPLE, TONE_SAMPLE);
+		let red = 0;
+		let green = 0;
+		let blue = 0;
+		let weight = 0;
+		for (let index = 0; index < data.length; index += 4) {
+			const alpha = data[index + 3] as number;
+			red += (data[index] as number) * alpha;
+			green += (data[index + 1] as number) * alpha;
+			blue += (data[index + 2] as number) * alpha;
+			weight += alpha;
+		}
+		if (weight === 0) return null;
+		return (Math.round(red / weight) << 16) | (Math.round(green / weight) << 8) | Math.round(blue / weight);
+	} finally {
+		bitmap.close();
+	}
 }
 
 /**

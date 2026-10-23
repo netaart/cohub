@@ -2,11 +2,6 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, link, open, rename, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import {
-  isBoardPath,
-  parseBoardManifest,
-} from "@neta-art/cohub/board";
-import { createClient } from "./client.js";
 
 export const BOARD_TRANSACTION_INPUT_MAX_BYTES = 16 * 1024 * 1024;
 export const BOARD_CREATE_INPUT_MAX_BYTES = 32 * 1024 * 1024;
@@ -65,15 +60,6 @@ export async function readBoardJsonObject(
   } finally {
     await handle.close();
   }
-}
-
-export async function resolveBoardId(spaceId: string, target: string): Promise<string> {
-  if (!isBoardPath(target)) return target;
-  const file = await createClient().space(spaceId).files.read(target);
-  if (!("content" in file) || typeof file.content !== "string") {
-    throw new Error(`${target} is not a readable Board manifest`);
-  }
-  return parseBoardManifest(file.content).boardId;
 }
 
 export async function writeBoardOutput(

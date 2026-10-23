@@ -64,7 +64,8 @@ test("direct listing reads more than 5000 entries in full or in bounded pages", 
   } while (cursor);
   assert.equal(names.size, 5001);
   await writeFile(join(path, "new-file"), "");
-  await assert.rejects(direct.listSpaceDirectory("space", "", { pagination: true, cursor: firstCursor }), { code: "directory_changed" });
+  const resumed = await direct.listSpaceDirectory("space", "", { pagination: true, cursor: firstCursor }) as SpaceFsTreePage;
+  assert.equal(resumed.entries[0]?.name, "file-01000");
 });
 
 test("old sandboxes keep their request and result, including truncation", async () => {

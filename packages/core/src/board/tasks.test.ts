@@ -16,7 +16,7 @@ import {
 	readBoard,
 	syncTaskBoards,
 } from "./store.js";
-import { boardChangedEvent } from "./tasks.js";
+import { boardChangedEvent, readUnsizedTaskVisual } from "./tasks.js";
 
 const migrations = join(dirname(fileURLToPath(import.meta.url)), "../../../../apps/api/drizzle/v2");
 const spaceId = "22222222-2222-4222-8222-222222222222";
@@ -149,4 +149,18 @@ test("completion updates every Board showing the task, once", async () => {
 	const event = boardChangedEvent({ spaceId, boardId: first.boardId, actorId: owner, actor: { kind: "user" }, outcome: written });
 	assert.equal(event?.payload.mutationId, `task:${id}:completed:1`);
 	assert.equal(boardChangedEvent({ spaceId, boardId: first.boardId, actorId: owner, actor: { kind: "user" }, outcome: { result: written.result } }), null);
+});
+
+test("completion fits cards to a result size learned before the write", async () => {
+	const id = await generation({ status: "running" });
+	const { db, boardId } = await board({ items: { t: task(id) } });
+	await finish(id, [image("https://cdn.example.com/unsized.png")]);
+	const visual = await readUnsizedTaskVisual(db, { spaceId, taskRunId: id });
+	assert.deepEqual(visual, { type: "image", url: "https://cdn.example.com/unsized.png" });
+	assert.ok(visual);
+	const taskArtifactSizes = new Map([[visual.url, { width: 1600, height: 900 }]]);
+	await syncTaskBoards(db, { spaceId, taskRunId: id, revision: "completed:sized", actorId: owner, taskArtifactSizes });
+	const featured = (await snapshot(db, boardId, "t")).artifacts[0];
+	assert.equal(featured?.type === "image" ? featured.naturalWidth : undefined, 1600);
+	assert.deepEqual((await readBoard(db, { spaceId, boardId, read: { items: ["t"] } })).items?.t?.size, { width: 400, height: 225 });
 });

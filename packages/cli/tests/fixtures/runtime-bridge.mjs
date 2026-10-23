@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createWriteStream, existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
-const control = createWriteStream(null, { fd: 3 });
+export const control = createWriteStream(null, { fd: 3 });
 control.write(`${JSON.stringify({ type: "hello" })}\n`);
 control.write(`${JSON.stringify({ type: "connected" })}\n`);
 const marker = process.env.COHUB_TEST_BRIDGE_EXIT_MARKER;

@@ -14,6 +14,10 @@ export type {
   RuntimeTraceContext, MessageToolCallsFile, SessionTurnRecord, StoredIntermediateMessage, StoredToolCall, TurnIntermediateMessagesFile,
   NativeTurnMessage, NativeTurnComplete, NativeTurnProgress, NativeRuntimeEvent, NativeIngest, NativeIngestTurn, NativeIngestResult, NativeKnownResult, RuntimeNativeStop,
 } from "@cohub/protocol";
+export { buildViewportContentBlock } from "@cohub/protocol";
+export type {
+  ViewportAppContext, ViewportBoardContext, ViewportContext, ViewportFileContext, ViewportPortContext, ViewportSelectedNode, ViewportVisibleRect,
+} from "@cohub/protocol";
 export { CohubHttpClient, createHttpClient } from "./http.js";
 export { BillingApi } from "./apis/billing.js";
 export { CohubClient, createCohubClient } from "./client.js";

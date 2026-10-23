@@ -1,8 +1,9 @@
 import { Container, Graphics, Text } from "pixi.js";
 import type { BoardArrowItem } from "@cohub/protocol";
 import { BOARD_ARROW_STROKE_SIZE, BOARD_FONT_STACK } from "@cohub/protocol/board-constants";
-import { resolveSceneArrow, pathPointAt } from "../../model/arrow-geometry.js";
+import { resolveSceneArrow } from "../../model/arrow-geometry.js";
 import type { SceneItem } from "../../model/scene.js";
+import { ARROW_LABEL, arrowLabelAnchor } from "../labels.js";
 import { itemAlpha, itemColor } from "../palette.js";
 import { dashPattern, endAngle, traceArrowhead, tracePolyline, trimPolyline } from "../stroke.js";
 import { syncTextResolution } from "../text-resolution.js";
@@ -63,8 +64,9 @@ function sync(container: Container, item: SceneItem<BoardArrowItem>, context: Bo
 		parts.label.text = props.label;
 		parts.label.style.fill = context.palette.text;
 		parts.label.style.fontSize = props.fontSize;
-		const padX = props.fontSize * 0.5;
-		const padY = props.fontSize * 0.25;
+		parts.label.style.lineHeight = props.fontSize * ARROW_LABEL.lineHeight;
+		const padX = props.fontSize * ARROW_LABEL.padX;
+		const padY = props.fontSize * ARROW_LABEL.padY;
 		const { width, height } = parts.label;
 		const plate = { x: -width / 2 - padX, y: -height / 2 - padY, width: width + padX * 2, height: height + padY * 2 };
 		drawCardSurface(parts.backdrop.clear(), plate, { ...context.style, radius: Math.min(context.style.radius, plate.height / 2) }, {
@@ -76,7 +78,7 @@ function sync(container: Container, item: SceneItem<BoardArrowItem>, context: Bo
 	const visible = props.label.length > 0 && (style.trim === undefined || style.trim >= 0.5);
 	parts.label.visible = visible;
 	parts.backdrop.visible = visible;
-	const mid = style.trim === undefined ? resolved.mid : pathPointAt(resolved.path, 0.5);
+	const mid = arrowLabelAnchor(resolved, style);
 	parts.label.position.set(mid.x, mid.y);
 	parts.backdrop.position.set(mid.x, mid.y);
 }
@@ -87,7 +89,7 @@ export const arrowCardRenderer: BoardCardRenderer = {
 	create: (item, context) => {
 		const root = new Container();
 		const line = new Graphics();
-		const label = new Text({ text: "", style: { fill: 0xffffff, fontFamily: BOARD_FONT_STACK, fontSize: 14, fontWeight: "500" }, resolution: context.textResolution, roundPixels: true });
+		const label = new Text({ text: "", style: { fill: 0xffffff, fontFamily: BOARD_FONT_STACK, fontSize: 14, fontWeight: ARROW_LABEL.fontWeight }, resolution: context.textResolution, roundPixels: true });
 		label.anchor.set(0.5);
 		const backdrop = new Graphics();
 		root.addChild(line, backdrop, label);

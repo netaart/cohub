@@ -1,4 +1,4 @@
-import { isRetryableAssistantError, type AssistantMessage } from "@earendil-works/pi-ai";
+import { isContextOverflow, isRetryableAssistantError, type AssistantMessage } from "@earendil-works/pi-ai";
 
 const COHUB_RETRYABLE_ERROR_OVERRIDE_PATTERN = /\b400\b.*(?:upstream(?:_error)?:?\s*upstream request failed|upstream response failed.*(?:bad_response_status_code|stage["']?\s*[:=]\s*["']?upstream_response))/i;
 const COHUB_NON_RETRYABLE_ERROR_PATTERN = /insufficient[_ ](?:user[_ ])?quota|quota exceeded|out of budget|billing|余额不足|额度不足|invalid (?:request|url)|content[_ ]filter|request (?:is )?too large|payload too large/i;
@@ -26,4 +26,23 @@ function classifyProviderErrorMessage(errorMessage: string): boolean | null {
 export function isRetryableProviderError(message: AssistantMessage | undefined): boolean {
   if (message?.stopReason !== "error" || !message.errorMessage) return false;
   return classifyProviderErrorMessage(message.errorMessage) ?? isRetryableAssistantError(message);
+}
+
+/**
+ * Supplementary overflow patterns not yet covered by upstream pi-ai.
+ * The cohub provider proxy returns Chinese error messages on context overflow.
+ */
+const LOCAL_OVERFLOW_PATTERNS = [
+  /超过系统限制/, // Cohub proxy: "输入Tokens数量(N)超过系统限制(M)"
+];
+
+/**
+ * Explicit context-window overflow (provider error). Silent / length-stop overflow
+ * is intentionally excluded so we never discard a successful-looking response.
+ */
+export function isContextOverflowFailure(message: AssistantMessage | undefined): boolean {
+  if (message?.stopReason !== "error" || !message.errorMessage) return false;
+  if (isContextOverflow(message)) return true;
+  const errorMessage = message.errorMessage;
+  return LOCAL_OVERFLOW_PATTERNS.some((p) => p.test(errorMessage));
 }

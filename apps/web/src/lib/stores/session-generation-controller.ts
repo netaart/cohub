@@ -1,5 +1,6 @@
 import type { StoredIntermediateMessage } from "@cohub/protocol/model";
 import { createStreamingIntermediateMessage } from "$lib/session-streaming-message";
+import { reuseUnchangedItems } from "$lib/structural-sharing";
 import {
 	type StreamingIntermediateMessage,
 	sessionGenerationStore,
@@ -10,17 +11,23 @@ export function buildStreamingStoredIntermediateMessages(input: {
 	sessionId: string;
 	turnId?: string | null;
 	intermediateMessages?: StreamingIntermediateMessage[];
+	previous?: readonly StoredIntermediateMessage[];
 }): StoredIntermediateMessage[] {
-	return (input.intermediateMessages ?? [])
-		.map((message, index) =>
-			createStreamingIntermediateMessage({
+	const previous = input.previous ?? [];
+	const previousCreatedAt = new Map(
+		previous.map((message) => [message.id, message.createdAt]),
+	);
+	const next = (input.intermediateMessages ?? [])
+		.map((message, index) => {
+			const streamMessageId =
+				message.id ??
+				message.messageId ??
+				`stream:${input.sessionId}:${input.turnId ?? "turn"}:intermediate:${index}`;
+			return createStreamingIntermediateMessage({
 				spaceId: input.spaceId,
 				sessionId: input.sessionId,
 				turnId: input.turnId,
-				streamMessageId:
-					message.id ??
-					message.messageId ??
-					`stream:${input.sessionId}:${input.turnId ?? "turn"}:intermediate:${index}`,
+				streamMessageId,
 				messageOrdinal:
 					message.meta?.messageKind === "compacted"
 						? null
@@ -37,12 +44,13 @@ export function buildStreamingStoredIntermediateMessages(input: {
 				durationMs: message.durationMs,
 				toolCallsObjectKey: message.toolCallsObjectKey,
 				meta: message.meta,
-				createdAt: message.createdAt,
-			}),
-		)
+				createdAt: message.createdAt ?? previousCreatedAt.get(streamMessageId),
+			});
+		})
 		.filter((message): message is StoredIntermediateMessage =>
 			Boolean(message),
 		);
+	return reuseUnchangedItems(previous, next);
 }
 
 export function clearGenerationError(sessionId: string | null | undefined) {

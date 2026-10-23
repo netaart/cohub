@@ -1,5 +1,6 @@
+import { clearBoardReplicaStorage } from "@neta-art/cohub/board/replica";
 import { deleteCacheDatabase } from "$lib/cache/db";
 
 export async function clearAllIndexedDbCache() {
-	await deleteCacheDatabase();
+	await Promise.all([deleteCacheDatabase(), clearBoardReplicaStorage()]);
 }

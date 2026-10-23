@@ -19,6 +19,13 @@ function loadMarkdownModule() {
 	markdownModulePromise ??= import("$lib/markdown");
 	return markdownModulePromise;
 }
+
+// Lets a remounted settled view (live answer → persisted message) skip the plain-text flash.
+let streamHandoff: {
+	source: string;
+	stableHtml: string;
+	tailHtml: string;
+} | null = null;
 </script>
 
 <script lang="ts">
@@ -111,6 +118,11 @@ function ensureController() {
 	unsubscribeController = controller.subscribe((snapshot) => {
 		stableHtml = snapshot.stableHtml;
 		tailHtml = snapshot.tailHtml;
+		streamHandoff = {
+			source: untrack(() => renderSource).trim(),
+			stableHtml: snapshot.stableHtml,
+			tailHtml: snapshot.tailHtml,
+		};
 		notifyStreamingRenderedSoon();
 	});
 	return controller;
@@ -128,10 +140,15 @@ function renderFullMarkdown(
 	markdownSource: string,
 	assetBasePath: string | null,
 	assetResolver: ResolveWorkspaceAsset | undefined,
+	keepVisible: boolean,
 ) {
 	const seq = ++renderSeq;
-	stableHtml = renderPlainTextFallback(markdownSource);
-	tailHtml = "";
+	if (!keepVisible) {
+		const handoff =
+			streamHandoff?.source === markdownSource.trim() ? streamHandoff : null;
+		stableHtml = handoff?.stableHtml ?? renderPlainTextFallback(markdownSource);
+		tailHtml = handoff?.tailHtml ?? "";
+	}
 	untrack(() => onStart?.());
 	void loadMarkdownModule()
 		.then(({ renderMarkdown }) => renderMarkdown(markdownSource))
@@ -165,8 +182,9 @@ $effect(() => {
 		return;
 	}
 
+	const settling = controller !== null;
 	destroyController();
-	renderFullMarkdown(markdownSource, assetBasePath, assetResolver);
+	renderFullMarkdown(markdownSource, assetBasePath, assetResolver, settling);
 });
 
 onDestroy(() => {

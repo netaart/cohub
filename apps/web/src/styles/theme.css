@@ -181,8 +181,8 @@
 	--breakpoint-2xl: 1536px;
 
 	/* Fonts */
-	--font-sans: "Geist", system-ui, -apple-system, sans-serif;
-	--font-mono: "Geist Mono", "Fira Code", ui-monospace, monospace;
+	--font-sans: "Geist Variable", "Geist", system-ui, -apple-system, sans-serif;
+	--font-mono: "Geist Mono Variable", "Geist Mono", "Fira Code", ui-monospace, monospace;
 
 	--spacing-workspace: 2rem;
 

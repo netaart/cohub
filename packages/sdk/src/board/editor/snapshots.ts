@@ -2,29 +2,13 @@ import {
 	type BoardFileSnapshotFacts,
 	type BoardItem,
 	type BoardMediaSnapshot,
-	featuredTaskArtifact,
-	fitBoardMediaSize,
 	mergeFileSnapshot,
 } from "../model/index.js";
+import { adoptBoardNaturalSize } from "@cohub/protocol";
 import type { EditorContext } from "./context.js";
 import { sameJson } from "./document-edits.js";
 
 export type BoardNaturalSize = { id: string; width: number; height: number };
-
-// Task cards keep the top-left corner, matching server refits; media stay centered.
-function fitToNatural<T extends Extract<BoardItem, { size: unknown }>>(item: T, natural: BoardNaturalSize): T | null {
-	const size = fitBoardMediaSize(natural, Math.max(item.size.width, item.size.height));
-	if (!size) return null;
-	const anchor = item.type === "task" ? 0 : 0.5;
-	return {
-		...item,
-		position: {
-			x: item.position.x + (item.size.width - size.width) * anchor,
-			y: item.position.y + (item.size.height - size.height) * anchor,
-		},
-		size,
-	};
-}
 
 export function createSnapshotsModule(ctx: EditorContext) {
 	const { state } = ctx;
@@ -50,30 +34,10 @@ export function createSnapshotsModule(ctx: EditorContext) {
 
 	function adoptMediaNaturalSizes(sizes: BoardNaturalSize[]) {
 		const changes = new Map<string, BoardItem>();
-		for (const natural of sizes) {
-			const item = state.base.items[natural.id];
-			if (!item || natural.width <= 0 || natural.height <= 0) continue;
-			const dimensions = { naturalWidth: natural.width, naturalHeight: natural.height };
-			if (item.type === "task") {
-				const artifact = featuredTaskArtifact(item.props.snapshot.artifacts);
-				if ((artifact?.type !== "image" && artifact?.type !== "video") || (artifact.naturalWidth && artifact.naturalHeight))
-					continue;
-				const fitted = fitToNatural(item, natural);
-				if (!fitted) continue;
-				const artifacts = item.props.snapshot.artifacts.map((entry) =>
-					entry.id === artifact.id ? { ...entry, ...dimensions } : entry,
-				);
-				changes.set(natural.id, { ...fitted, props: { ...item.props, snapshot: { ...item.props.snapshot, artifacts } } });
-				continue;
-			}
-			if (item.type !== "image" && item.type !== "video") continue;
-			if (item.props.snapshot?.naturalWidth && item.props.snapshot.naturalHeight) continue;
-			const fitted = fitToNatural(item, natural);
-			if (!fitted) continue;
-			changes.set(natural.id, {
-				...fitted,
-				props: { ...item.props, snapshot: { ...item.props.snapshot, ...dimensions } },
-			} as BoardItem);
+		for (const { id, ...natural } of sizes) {
+			const item = state.base.items[id];
+			const adopted = item && adoptBoardNaturalSize(item, natural);
+			if (adopted) changes.set(id, adopted);
 		}
 		commit(changes);
 	}

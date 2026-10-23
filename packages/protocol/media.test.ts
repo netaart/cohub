@@ -12,6 +12,10 @@ it("derives model-sized variants on known CDNs only", () => {
     "https://sessions.cohub.live/fs-cache/a.jpg?x-oss-process=image/resize,m_lfit,w_1280,h_1280/quality,q_75/format,webp",
   );
   assert.equal(
+    modelImageUrl("https://works.cohub.live/covers/a.png"),
+    "https://works.cohub.live/covers/a.png?x-oss-process=image/resize,m_lfit,w_1280,h_1280/quality,q_75/format,webp",
+  );
+  assert.equal(
     modelImageUrl("https://cca.neta.art/u/a.webp"),
     "https://cca.neta.art/cdn-cgi/image/width=1280,height=1280,fit=scale-down,quality=75,format=webp,onerror=redirect/u/a.webp",
   );

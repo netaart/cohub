@@ -151,20 +151,6 @@ function harness(
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-test("the cached document shows before the server answers", async () => {
-	const board = harness({
-		items: { a: { type: "shape" } },
-		cached: { version: 1, items: { cached: { type: "shape" } } },
-	});
-	const started = board.replica.start();
-	await flush();
-	assert.ok(board.states[0]?.document?.items.cached);
-	assert.equal(board.states[0]?.loaded, false);
-	await started;
-	assert.ok(board.replica.state.document?.items.a);
-	assert.equal(board.replica.state.document?.items.cached, undefined);
-});
-
 test("a local write shows at once and is adopted without a read", async () => {
 	const board = harness();
 	await board.replica.start();

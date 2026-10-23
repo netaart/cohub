@@ -1381,6 +1381,7 @@
 	"tool_verb_running": "运行中",
 	"tool_status_done": "完成",
 	"tool_status_failed": "失败",
+	"tool_failed_count": "{count} 个失败",
 	"tool_in": "输入",
 	"tool_out": "输出",
 	"tool_err": "错误",

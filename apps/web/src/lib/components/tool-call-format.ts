@@ -49,6 +49,29 @@ export type ToolCallViewModel = {
 	resultImages?: Extract<ContentBlock, { type: "image" }>[];
 };
 
+export type ToolCallsSummary = {
+	names: string;
+	failed: number;
+	running: boolean;
+};
+
+export function summarizeToolCalls(
+	tools: readonly ToolCallViewModel[],
+): ToolCallsSummary {
+	const counts = new Map<string, number>();
+	let failed = 0;
+	let running = false;
+	for (const tool of tools) {
+		counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
+		if (tool.status === "failed") failed += 1;
+		if (tool.status === "running") running = true;
+	}
+	const names = [...counts]
+		.map(([name, count]) => (count > 1 ? `${name} ×${count}` : name))
+		.join(" · ");
+	return { names, failed, running };
+}
+
 export function summarizeToolInput(
 	name: string,
 	input?: Record<string, unknown>,

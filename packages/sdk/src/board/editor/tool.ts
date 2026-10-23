@@ -8,6 +8,12 @@ export type BoardToolId =
 	| "frame";
 
 export const BOARD_HAND_TAP_SLOP = 8;
+export const BOARD_MOUSE_TAP_SLOP = 4;
+export const BOARD_TAP_MAX_MS = 300;
+
+export function boardTapSlop(pointerType: string): number {
+	return pointerType === "mouse" ? BOARD_MOUSE_TAP_SLOP : BOARD_HAND_TAP_SLOP;
+}
 
 export function defaultBoardTool(isMobile: boolean): BoardToolId {
 	return isMobile ? "hand" : "select";

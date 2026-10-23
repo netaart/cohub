@@ -1,4 +1,7 @@
 export * from "./assets.js";
+export * from "./bench.js";
+export * from "./device.js";
+export type { BoardFrameBudget, BoardFrameWork } from "./frame-budget.js";
 export * from "./lru.js";
 export * from "./pointer.js";
 export * from "./pointer-gestures.js";
@@ -7,3 +10,4 @@ export * from "./stage.js";
 export * from "./texture-pool.js";
 export * from "./views.js";
 export * from "./overlay.js";
+export { BOARD_LONG_PRESS_MS, type BoardStagePress } from "./presses.js";

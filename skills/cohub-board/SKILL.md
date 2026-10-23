@@ -71,7 +71,9 @@ Worth knowing before you build:
   when the Board opens, `always` loops.
 - Palette tokens (`blue`, `green`, …) and `{ "light": …, "dark": … }` follow the
   viewer's theme; a fixed CSS color can vanish on one of them. Exports default to
-  `--theme dark`.
+  `--theme dark`; `--theme` takes any built-in theme, such as `light` or `neta-pixel`.
+- `boards apply` fits new image and video items to their media's aspect ratio before
+  writing; write `snapshot.naturalWidth` and `naturalHeight` to keep a box as authored.
 - `board` sets the background (`solid`, `dots`, `grid`, `image`), the grid, and
   `enter`, a motion for items as they are added.
 

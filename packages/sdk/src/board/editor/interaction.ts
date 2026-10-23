@@ -32,14 +32,26 @@ import type { EditorContext } from "./context.js";
 import { selectionTransformControlAt } from "./selection-transform.js";
 import { computeSnap, type SnapGuide } from "./snapping.js";
 import { memo } from "./state.js";
-import { canTapSelectWithHand, isCreationBoardTool, isWithinHandTapSlop } from "./tool.js";
+import { BOARD_TAP_MAX_MS, boardTapSlop, canTapSelectWithHand, isCreationBoardTool, isWithinHandTapSlop } from "./tool.js";
 
 const DRAG_THRESHOLD = 3;
 const SNAP_THRESHOLD = 8;
 const NO_IDS: ReadonlySet<string> = new Set();
 
+type BoardPress = {
+	type: "pressing";
+	itemId: string;
+	pointerId: number;
+	pointerType: string;
+	start: ScreenPoint;
+	world: WorldPoint;
+	camera: BoardViewport;
+	at: number;
+};
+
 export type BoardInteraction =
 	| { type: "idle" }
+	| BoardPress
 	| {
 			type: "panning";
 			start: ScreenPoint;
@@ -47,7 +59,14 @@ export type BoardInteraction =
 			moved: boolean;
 			tapSelection: { targetId: string | null } | null;
 	  }
-	| { type: "translating"; start: WorldPoint; origin: Map<string, BoardFrame>; moved: boolean; duplicate: boolean }
+	| {
+			type: "translating";
+			start: WorldPoint;
+			origin: Map<string, BoardFrame>;
+			moved: boolean;
+			duplicate: boolean;
+			tap?: { itemId: string; at: number };
+	  }
 	| {
 			type: "resizing";
 			handle: ResizeHandle;
@@ -116,6 +135,12 @@ function angleFrom(center: WorldPoint, point: WorldPoint) {
 	return (Math.atan2(point.y - center.y, point.x - center.x) * 180) / Math.PI;
 }
 
+export type BoardActivation = {
+	itemId: string;
+	pointerType: string;
+	selected: boolean;
+};
+
 export type BoardTransformEnd = {
 	ids: string[];
 	operation: "move" | "resize" | "rotate" | "arrow";
@@ -135,6 +160,11 @@ export function createInteractionModule(ctx: EditorContext) {
 		for (const listener of transformListeners) listener(event);
 	}
 	const { state, options, registry } = ctx;
+	const activationListeners = new Set<(event: BoardActivation) => void>();
+	function activate(itemId: string, at: number, pointerType: string, selected: boolean) {
+		if (performance.now() - at > BOARD_TAP_MAX_MS || !state.scene.get(itemId)) return;
+		for (const listener of activationListeners) listener({ itemId, pointerType, selected });
+	}
 	const activePointers = new Map<number, ScreenPoint>();
 	let pinch: { distance: number; midpoint: ScreenPoint; zoom: number } | null = null;
 
@@ -218,6 +248,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		if (!candidateId) return null;
 		const item = scene.get(candidateId);
 		if (!item || ctx.query.isLocked(item) || item.type === "arrow") return null;
+		if (!selection.includes(item.id) && registry.activation(item) === "tap") return null;
 		return registry.capabilities(item).canConnect ? item.id : null;
 	}
 
@@ -277,6 +308,76 @@ export function createInteractionModule(ctx: EditorContext) {
 		};
 	}
 
+	function onSelectedItem(event: BoardPointerEvent) {
+		if (!canTapSelectWithHand(event.pointerType)) return false;
+		const item = ctx.query.itemAt(event.world);
+		return item !== null && state.selection.includes(item.id);
+	}
+
+	function plainPrimary(event: BoardPointerEvent) {
+		return event.button === 0 && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey;
+	}
+
+	function press(event: BoardPointerEvent): boolean {
+		if (!plainPrimary(event)) return false;
+		const item = ctx.query.itemAt(event.world);
+		if (!item || state.selection.includes(item.id) || registry.activation(item) !== "tap") return false;
+		state.interaction = {
+			type: "pressing",
+			itemId: item.id,
+			pointerId: event.pointerId,
+			pointerType: event.pointerType,
+			start: event.screen,
+			world: event.world,
+			camera: { ...state.camera },
+			at: performance.now(),
+		};
+		return true;
+	}
+
+	function releasePress(gesture: BoardPress, event: BoardPointerEvent) {
+		const dx = event.screen.x - gesture.start.x;
+		const dy = event.screen.y - gesture.start.y;
+		if (Math.hypot(dx, dy) <= boardTapSlop(gesture.pointerType)) return;
+		const item = state.scene.get(gesture.itemId);
+		const movable =
+			!options.readonly &&
+			state.tool === "select" &&
+			item &&
+			!ctx.query.isLocked(item) &&
+			registry.capabilities(item).canMove;
+		if (!movable) {
+			state.interaction = { type: "panning", start: gesture.start, origin: gesture.camera, moved: true, tapSelection: null };
+			ctx.camera.setCamera(panBy(gesture.camera, dx, dy));
+			return;
+		}
+		const translating: Extract<BoardInteraction, { type: "translating" }> = {
+			type: "translating",
+			start: gesture.world,
+			origin: ctx.selection.framesFor([gesture.itemId]),
+			moved: false,
+			duplicate: false,
+		};
+		state.interaction = translating;
+		translate(translating, event);
+	}
+
+	function pickUp(): boolean {
+		const gesture = state.interaction;
+		if (options.readonly || gesture.type !== "pressing") return false;
+		const item = state.scene.get(gesture.itemId);
+		if (!item || ctx.query.isLocked(item) || !registry.capabilities(item).canMove) return false;
+		state.selection = [item.id];
+		state.interaction = {
+			type: "translating",
+			start: state.hoverPoint ?? gesture.world,
+			origin: ctx.selection.framesFor([item.id]),
+			moved: false,
+			duplicate: false,
+		};
+		return true;
+	}
+
 	function pointerDown(event: BoardPointerEvent) {
 		ctx.camera.cancelAnimation();
 		state.hoverPoint = event.world;
@@ -291,6 +392,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		if (activePointers.size > 2) return;
 
 		const additive = event.shiftKey || event.metaKey || event.ctrlKey;
+		if (!spaceHeld && (tool === "hand" || options.readonly) && press(event)) return;
 		if (tool === "hand" || spaceHeld || event.button === 1) {
 			const tapSelection =
 				tool === "hand" && !spaceHeld && event.button !== 1 && canTapSelectWithHand(event.pointerType)
@@ -343,7 +445,7 @@ export function createInteractionModule(ctx: EditorContext) {
 				return;
 		}
 
-		const port = connectionPortAt(event.world, event.pointerType);
+		const port = onSelectedItem(event) ? null : connectionPortAt(event.world, event.pointerType);
 		if (port) {
 			state.interaction = arrowGesture(port.point, event.world, port.itemId, port.side);
 			return;
@@ -388,11 +490,16 @@ export function createInteractionModule(ctx: EditorContext) {
 			return;
 		}
 
+		if (press(event)) return;
 		const item = ctx.query.itemAt(event.world);
 		if (!item) return brush(event, additive);
 		if (additive) ctx.selection.toggle(item.id);
 		else if (!state.selection.includes(item.id)) state.selection = [item.id];
 		const movable = ctx.selection.movable();
+		const tap =
+			plainPrimary(event) && state.selection.length === 1 && registry.activation(item) === "tap"
+				? { itemId: item.id, at: performance.now() }
+				: undefined;
 		state.interaction =
 			movable.length === 0
 				? { type: "idle" }
@@ -402,6 +509,7 @@ export function createInteractionModule(ctx: EditorContext) {
 						origin: ctx.selection.framesFor(movable),
 						moved: false,
 						duplicate: event.altKey,
+						...(tap ? { tap } : {}),
 					};
 	}
 
@@ -544,6 +652,8 @@ export function createInteractionModule(ctx: EditorContext) {
 				ctx.camera.setCamera(panBy(interaction.origin, dx, dy));
 				return;
 			}
+			case "pressing":
+				return releasePress(interaction, event);
 			case "translating":
 				return translate(interaction, event);
 			case "resizing":
@@ -603,12 +713,15 @@ export function createInteractionModule(ctx: EditorContext) {
 					state.selection = targetId && state.scene.get(targetId) ? [targetId] : [];
 				}
 				break;
+			case "pressing":
+				activate(gesture.itemId, gesture.at, gesture.pointerType, false);
+				break;
 			case "translating":
 				if (gesture.moved) {
-					for (const [id, item] of reparentDropped(ctx.query.rootsOf(state.selection)))
+					for (const [id, item] of reparentDropped([...gesture.origin.keys()]))
 						ctx.document.setDraftItem(id, item);
 					ctx.document.commit();
-				}
+				} else if (gesture.tap) activate(gesture.tap.itemId, gesture.tap.at, event.pointerType, true);
 				break;
 			case "resizing":
 			case "rotating":
@@ -697,11 +810,16 @@ export function createInteractionModule(ctx: EditorContext) {
 		pointerUp,
 		pointerLeave,
 		cancel,
+		pickUp,
 		subscribeTransforms(listener: (event: BoardTransformEnd) => void) {
 			transformListeners.add(listener);
 			return () => { transformListeners.delete(listener); };
 		},
-		destroy() { activePointers.clear(); transformListeners.clear(); },
+		subscribeActivations(listener: (event: BoardActivation) => void) {
+			activationListeners.add(listener);
+			return () => { activationListeners.delete(listener); };
+		},
+		destroy() { activePointers.clear(); transformListeners.clear(); activationListeners.clear(); },
 	};
 }
 

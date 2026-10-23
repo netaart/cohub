@@ -14,6 +14,7 @@ import {
   BOARD_PRESET_NAMES,
   BOARD_SCHEMA_TARGETS,
   BOARD_SCRIPT_API,
+  BOARD_THEME_IDS,
   type BoardExportRegion,
   boardJsonSchema,
   boardPresetTracks,
@@ -28,10 +29,10 @@ import {
   BOARD_TRANSACTION_INPUT_MAX_BYTES,
   parseBoardJsonObject,
   readBoardJsonObject,
-  resolveBoardId,
   writeBoardOutput,
 } from "../board-command-support.js";
 import { BOARD_EXPORT_IMAGE_MEMORY_MIB } from "../board-export-resources.js";
+import { settleBoardPatch } from "../board-media.js";
 import { formatBoardTime, parseBoardTime, parseBoardTimes } from "../board-time.js";
 import { createClient, createRealtimeClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
@@ -80,9 +81,9 @@ function list(value: string | undefined): string[] | undefined {
   return entries?.length ? entries : undefined;
 }
 
-async function boardClient(boards: Command, target: string) {
-  const spaceId = await resolveSpace(boards);
-  return createClient().space(spaceId).board(await resolveBoardId(spaceId, target));
+async function boardClient(boards: Command, target: string, spaceId?: string) {
+  spaceId ??= await resolveSpace(boards);
+  return createClient().space(spaceId).boards.open(target);
 }
 
 /** A patch from an inline argument, a file, or stdin (`-`). */
@@ -208,7 +209,7 @@ function registerExportCommand(boards: Command): void {
     .option("--rect <rect>", "World rect as x,y,width,height")
     .option("--scale <factor>", "Output pixels per board unit", "2")
     .option("--padding <units>", "Padding around the content in board units")
-    .option("--theme <mode>", "dark or light", "dark")
+    .option("--theme <name>", `Cohub theme: ${BOARD_THEME_IDS.join(", ")}`, "dark")
     .option("--paper <mode>", "Output paper: paper or transparent", "paper")
     .option("--format <format>", `Override the format (${BOARD_EXPORT_FORMATS.join(", ")}, ${BOARD_VIDEO_FORMATS.join(", ")})`)
     .option("--quality <q>", "JPEG/WebP quality from 0 to 1", "0.92")
@@ -272,7 +273,7 @@ Examples:
             ...(options.animation ? { animation: options.animation } : {}),
             scale: parseNumber(options.scale ?? "2", "--scale", { min: 0.01, max: 16 }),
             ...(options.padding === undefined ? {} : { padding: parseNumber(options.padding, "--padding", { min: 0 }) }),
-            colorScheme: parseChoice(options.theme, "--theme", ["dark", "light"] as const),
+            theme: parseChoice(options.theme, "--theme", BOARD_THEME_IDS),
             background: parseChoice(options.paper, "--paper", ["paper", "transparent"] as const),
             format: videoFormat,
             fps,
@@ -310,7 +311,7 @@ Examples:
           ...(options.animation ? { animation: options.animation } : {}),
           scale: parseNumber(options.scale ?? "2", "--scale", { min: 0.01, max: 16 }),
           ...(options.padding === undefined ? {} : { padding: parseNumber(options.padding, "--padding", { min: 0 }) }),
-          colorScheme: parseChoice(options.theme, "--theme", ["dark", "light"] as const),
+          theme: parseChoice(options.theme, "--theme", BOARD_THEME_IDS),
           background: parseChoice(options.paper, "--paper", ["paper", "transparent"] as const),
           format: parseExportFormat(options, out),
           quality: parseNumber(options.quality ?? "0.92", "--quality", { min: 0, max: 1 }),
@@ -364,14 +365,16 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
   cohub boards create lesson.board -i lesson.json`)
     .action(async (path: string, options: JsonOptions & { title?: string; input?: string; mutationId?: string }) => {
       try {
-        const document = options.input ? await readBoardJsonObject(options.input, BOARD_CREATE_INPUT_MAX_BYTES) : undefined;
+        const spaceId = await resolveSpace(boards);
+        const read = options.input ? await readBoardJsonObject(options.input, BOARD_CREATE_INPUT_MAX_BYTES) : undefined;
+        const document = read && await settleBoardPatch(spaceId, read, async () => ({}));
         const input: BoardCreateInput = {
           path,
           mutationId: options.mutationId ?? randomUUID(),
           ...(options.title ? { title: options.title } : {}),
           ...(document ? { document: document as BoardCreateInput["document"] } : {}),
         };
-        const result = await createClient().space(await resolveSpace(boards)).boards.create(input);
+        const result = await createClient().space(spaceId).boards.create(input);
         if (jsonRequested(options)) return outJson({ path, id: result.id, title: result.title, version: result.version });
         ok(`Created ${path}`);
         table([{ path, id: result.id, title: result.title, version: result.version }], [
@@ -445,8 +448,12 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
   cohub boards preset rise --targets a,b --animation intro | cohub boards apply plan.board -i -`)
     .action(async (target: string, inline: string | undefined, options: JsonOptions & { input?: string; replace?: boolean; cascade?: boolean; dryRun?: boolean; baseVersion?: string; mutationId?: string }) => {
       try {
-        const patch = await readPatch(inline, options.input, BOARD_TRANSACTION_INPUT_MAX_BYTES);
-        const result = await (await boardClient(boards, target)).apply(patch, {
+        const spaceId = await resolveSpace(boards);
+        const board = await boardClient(boards, target, spaceId);
+        const read = await readPatch(inline, options.input, BOARD_TRANSACTION_INPUT_MAX_BYTES);
+        const patch = await settleBoardPatch(spaceId, read, async (items) =>
+          options.replace ? {} : board.get({ only: ["items"], items }).then((result) => result.items ?? {}, () => null));
+        const result = await board.apply(patch, {
           ...(options.replace ? { replace: true } : {}),
           ...(options.cascade ? { cascade: true } : {}),
           ...(options.dryRun ? { dryRun: true } : {}),
@@ -557,9 +564,9 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
     .action(async (target: string, options: JsonOptions) => {
       try {
         const spaceId = await resolveSpace(boards);
-        const boardId = await resolveBoardId(spaceId, target);
         const client = createRealtimeClient();
-        const board = client.space(spaceId).board(boardId);
+        const board = await client.space(spaceId).boards.open(target);
+        const boardId = board.id;
         if (!jsonRequested(options)) process.stderr.write(`Watching Board ${boardId}…\n`);
         const offConnection = client.onConnection((state) => {
           if (jsonRequested(options)) process.stdout.write(`${JSON.stringify({ type: "connection", ...state })}\n`);

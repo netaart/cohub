@@ -2,6 +2,7 @@ import { Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import type { BoardCustomItem } from "@cohub/protocol";
 import { BOARD_MONO_FONT_STACK } from "@cohub/protocol/board-constants";
 import type { SceneItem } from "../../model/scene.js";
+import { fitTextToLines } from "../text-fit.js";
 import { syncTextResolution } from "../text-resolution.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
@@ -17,6 +18,7 @@ type CustomParts = {
 };
 
 const partsByContainer = new WeakMap<Container, CustomParts>();
+const LABEL_LINE = 16;
 
 function sync(container: Container, item: SceneItem<BoardCustomItem>, context: BoardRenderContext) {
 	const parts = partsByContainer.get(container);
@@ -43,9 +45,8 @@ function sync(container: Container, item: SceneItem<BoardCustomItem>, context: B
 		parts.placeholder.clear();
 		if (!ready || error) parts.placeholder.rect(0, 0, width, height).stroke({ color: context.palette.border, width: 1, alpha: 0.8 });
 		parts.label.visible = !ready || Boolean(error);
-		parts.label.text = message;
 		parts.label.style.fill = error ? context.colors.rose.stroke : context.palette.muted;
-		parts.label.style.wordWrapWidth = Math.max(40, width - 16);
+		fitTextToLines(parts.label, message, Math.max(1, Math.floor((height - 16) / LABEL_LINE)), Math.max(40, width - 16));
 		parts.label.position.set(width / 2, height / 2);
 	}
 	syncTextResolution(parts.label, context.textResolution);
@@ -61,7 +62,7 @@ export const customCardRenderer: BoardCardRenderer = {
 		const placeholder = new Graphics();
 		const label = new Text({
 			text: "",
-			style: { fontFamily: BOARD_MONO_FONT_STACK, fontSize: 12, align: "center", wordWrap: true, breakWords: true },
+			style: { fontFamily: BOARD_MONO_FONT_STACK, fontSize: 12, lineHeight: LABEL_LINE, align: "center" },
 			resolution: context.textResolution,
 			roundPixels: true,
 		});

@@ -1,6 +1,6 @@
 import type { Agent, AgentEvent, AgentMessage, AgentTool, StreamFn } from "@earendil-works/pi-agent-core";
 import { Agent as PiAgent } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, type Api, type AssistantMessageEvent, type AssistantMessageEventStream, type Context, type ImageContent, type Model, type SimpleStreamOptions, type TranscriptContext, isContextOverflow, toToolDeclaration, type AssistantMessage } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type Api, type AssistantMessageEvent, type AssistantMessageEventStream, type Context, type ImageContent, type Model, type SimpleStreamOptions, type TranscriptContext, toToolDeclaration, type AssistantMessage } from "@earendil-works/pi-ai";
 import { context, trace, type Span } from "@opentelemetry/api";
 import { sumStatsUsage } from "@cohub/protocol/model";
 import { IMAGE_URL_MIME_TYPE, imageUrlContent, type Usage } from "@cohub/protocol/core";
@@ -27,7 +27,8 @@ import {
   TOOL_CALL_LOOP_GUARD_PROMPT,
   TOOL_CALL_LOOP_GUARD_THRESHOLD,
 } from "./tool-call-loop-guard.js";
-import { isRetryableProviderError } from "./provider-errors.js";
+import { isContextOverflowFailure, isRetryableProviderError } from "./provider-errors.js";
+import { observeContextOverflow } from "./token-calibration.js";
 
 export type CohubAgentSessionEvent = AgentEvent;
 
@@ -73,25 +74,6 @@ function isEmptySuccessfulAssistantMessage(message: AssistantMessage | undefined
   if (!message) return false;
   if (message.stopReason === "error" || message.stopReason === "aborted") return false;
   return !hasAssistantContent(message);
-}
-
-/**
- * Supplementary overflow patterns not yet covered by upstream pi-ai.
- * The cohub provider proxy returns Chinese error messages on context overflow.
- */
-const LOCAL_OVERFLOW_PATTERNS = [
-  /超过系统限制/, // Cohub proxy: "输入Tokens数量(N)超过系统限制(M)"
-];
-
-/**
- * Explicit context-window overflow (provider error). Silent / length-stop overflow
- * is intentionally excluded so we never discard a successful-looking response.
- */
-export function isContextOverflowFailure(message: AssistantMessage | undefined): boolean {
-  if (message?.stopReason !== "error" || !message.errorMessage) return false;
-  if (isContextOverflow(message)) return true;
-  const errorMessage = message.errorMessage;
-  return LOCAL_OVERFLOW_PATTERNS.some((p) => p.test(errorMessage));
 }
 
 export function isRetryableAssistantFailure(message: AssistantMessage | undefined): boolean {
@@ -693,6 +675,12 @@ function createStreamFn(getRuntime: () => StreamRuntime, shouldOmit: (message: A
               return finishReceipt(event.message, "completed");
             } else if (event.type === "error") {
               attachImageToTextCalls(event.error, prepared.calls);
+              if (isContextOverflowFailure(event.error)) {
+                const overflow = observeContextOverflow(model, transcript.messages, event.error.errorMessage);
+                llmRound.span.setAttribute("agent.context_overflow.estimated_tokens", overflow.estimatedTokens);
+                if (overflow.actualTokens) llmRound.span.setAttribute("agent.context_overflow.actual_tokens", overflow.actualTokens);
+                logger.warn(`[Agent] context overflow sessionId=${toolCtx?.sessionId ?? "unknown"} model=${model.provider}/${model.id} estimated=${overflow.estimatedTokens} actual=${overflow.actualTokens ?? "unknown"} limit=${overflow.limitTokens ?? "unknown"} ratio=${overflow.ratio?.toFixed(2) ?? "unknown"}`);
+              }
               recordLlmUsage(llmRound.span, {
                 inputTokens: event.error.usage?.input,
                 outputTokens: event.error.usage?.output,

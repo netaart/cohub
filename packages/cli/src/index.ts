@@ -6,6 +6,7 @@ import { registerAuth } from "./commands/auth.js";
 import { registerBoards } from "./commands/boards.js";
 import { registerChannels } from "./commands/channels.js";
 import { registerCronJobs } from "./commands/cron-jobs.js";
+import { registerFeedback } from "./commands/feedback.js";
 import { registerGenerations } from "./commands/generations.js";
 import { registerMe } from "./commands/me.js";
 import { registerModels } from "./commands/models.js";
@@ -73,6 +74,7 @@ Common commands:
   cohub models ls
   cohub models ls --model-type multimodal
   cohub generate "A calm lake at sunrise" --model <model> --output lake.png
+  cohub feedback "Describe the problem" -f screenshot.png
 
 Target space:
   -s <space>, then COHUB_SPACE_ID, then the current directory Runtime binding.
@@ -111,6 +113,7 @@ registerTasks(program);
 registerCronJobs(program);
 registerApps(program);
 registerRooms(program);
+registerFeedback(program);
 registerDesktop(program);
 registerLegacyUi(program);
 

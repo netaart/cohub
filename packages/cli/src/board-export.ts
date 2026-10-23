@@ -12,33 +12,41 @@ import { tmpdir } from "node:os";
 
 const execFile = promisify(execFileCallback);
 import { parseBoardMediaSource } from "@neta-art/cohub/board";
-import type { BoardDocument, BoardExportRegion, BoardSceneItem } from "@neta-art/cohub/board";
+import type { BoardAssetKeySource, BoardDocument, BoardExportRegion, BoardSceneItem, BoardThemeId } from "@neta-art/cohub/board";
+import { imageVariantUrl, MEDIA_VARIANT_MAX, mediaVariantSize, videoFrameUrl } from "@neta-art/cohub/media";
 import type {
   BoardNodeExportFormat,
   BoardNodeFont,
-  BoardNodeRenderer,
   BoardNodeTexture,
 } from "@neta-art/cohub/board/export/node";
 import {
   hasBoardScripts,
+  boardAssetKey,
+  boardAssetKeySource,
   boardDocumentAt,
+  boardRenderTheme,
+  boardTextureEdge,
+  boardTexturePixels,
   createBoardRenderSampler,
-  boardImageKeySource,
   buildBoardScene,
   createNodeBoardRenderer,
   createNodeBoardScriptHost,
   exportBoardImageBytes,
-  imageAssetKey,
   parseBoardDocument,
   planBoardExport,
   prepareBoardExport,
   selectBoardExportAssets,
 } from "./board-kernel.js";
-import { resolveBoardId } from "./board-command-support.js";
+import { settleBoardDocument } from "./board-media.js";
 import { BOARD_EXPORT_FONTS, type BoardExportFont } from "./board-fonts.js";
 import { createClient } from "./client.js";
 import { downloadPublicAudio, downloadPublicImage } from "./safe-remote-image.js";
-import { BOARD_EXPORT_IMAGE_MEMORY_MIB, BoardExportResourceError, createBoardExportImageBudget } from "./board-export-resources.js";
+import {
+  BOARD_EXPORT_IMAGE_MEMORY_MIB,
+  type BoardExportDecodeImage,
+  BoardExportResourceError,
+  createBoardExportImageBudget,
+} from "./board-export-resources.js";
 
 const debugExport = debuglog("cohub:board-export");
 
@@ -71,7 +79,7 @@ export async function loadBoardDocument(
   spaceId: string,
   target: string,
 ): Promise<BoardExportSource> {
-  const board = createClient().space(spaceId).board(await resolveBoardId(spaceId, target));
+  const board = await createClient().space(spaceId).boards.open(target);
   let result = await board.get();
   const snapshot = result;
   const items = { ...result.items };
@@ -85,60 +93,126 @@ export async function loadBoardDocument(
   return { document: parsed.document, boardId: result.id, title: result.title };
 }
 
-export type BoardExportTextureCache = { textures: Map<string, BoardNodeTexture>; failed: Set<string> };
+type TextureMiss = "error" | "unavailable" | "omitted";
 
+export type BoardExportTextureCache = {
+  textures: Map<string, BoardNodeTexture>;
+  /** Long edge each texture was decoded for; Infinity once it is the whole source. */
+  edges: Map<string, number>;
+  /** Keys without a texture: failed to load, no picture Node can draw, or over the image budget. */
+  missed: Map<string, TextureMiss>;
+};
+
+/** Texture keys Node can draw; 3D model stills need a browser. */
+export function boardExportAssetKey(item: BoardSceneItem): string | null {
+  const key = boardAssetKey(item);
+  return key && boardAssetKeySource(key)?.media !== "model" ? key : null;
+}
+
+function textureEdge(item: BoardSceneItem, scale: number): number {
+  const edge = boardTextureEdge(item, scale);
+  return Number.isFinite(edge) ? edge : Math.ceil(boardTexturePixels(item, scale));
+}
+
+const textureBytes = (texture: BoardNodeTexture) => texture.width * texture.height * 4;
+
+/**
+ * Previews for `items` within what the image budget leaves after other images,
+ * such as the background. A preview that still does not fit is omitted.
+ */
 export async function loadBoardTextures(
-  renderer: BoardNodeRenderer,
+  images: { decodeImage: BoardExportDecodeImage; usedBytes: number },
   spaceId: string,
   items: readonly BoardSceneItem[],
-  options: { concurrency?: number; cache?: BoardExportTextureCache } = {},
-): Promise<{
-  textures: Map<string, BoardNodeTexture>;
-  failed: string[];
-  omitted: string[];
-}> {
-  const selection = selectBoardExportAssets([...items], imageAssetKey);
-  const cache = options.cache ?? { textures: new Map<string, BoardNodeTexture>(), failed: new Set<string>() };
-  const { textures, failed } = cache;
+  options: { scale: number; maxBytes: number; concurrency?: number; cache?: BoardExportTextureCache },
+): Promise<{ textures: Map<string, BoardNodeTexture> } & Record<"failed" | "unavailable" | "omitted", string[]>> {
+  const cache = options.cache ?? { textures: new Map(), edges: new Map(), missed: new Map() };
+  const { textures, edges, missed } = cache;
+  let previewBytes = 0;
+  for (const texture of textures.values()) previewBytes += textureBytes(texture);
+  const maxBytes = options.maxBytes - (images.usedBytes - previewBytes);
+  const selection = selectBoardExportAssets([...items], boardExportAssetKey, { scale: options.scale, maxBytes });
   const wanted = new Set(selection.keys);
   for (const [key, texture] of textures) {
     if (wanted.has(key)) continue;
     texture.destroy(true);
     textures.delete(key);
+    edges.delete(key);
   }
-  for (const key of failed) if (!wanted.has(key)) failed.delete(key);
-  const pending = selection.keys.filter((key) => !textures.has(key) && !failed.has(key));
+  for (const key of missed.keys()) if (!wanted.has(key)) missed.delete(key);
+  const pending = selection.items.flatMap((item, index) => {
+    const key = selection.keys[index] as string;
+    const edge = textureEdge(item, options.scale);
+    return missed.has(key) || (edges.get(key) ?? 0) >= edge ? [] : [{ key, item, edge }];
+  });
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 2, 16));
   const client = createClient();
-  let resourceError: BoardExportResourceError | undefined;
 
   async function worker() {
-    for (;;) {
-      if (resourceError) return;
-      const key = pending.shift();
-      if (!key) return;
-      const source = boardImageKeySource(key);
-      if (!source) {
-        failed.add(key);
-        continue;
-      }
+    for (let task = pending.shift(); task; task = pending.shift()) {
+      const { key, item, edge } = task;
+      let miss: TextureMiss | null = "unavailable";
       try {
-        const { bytes, mimeType } =
-          source.kind === "file"
-            ? await readSpaceFileBytes(client, spaceId, source.value)
-            : await downloadPublicImage(source.value);
-        const texture = await renderer.decodeImage(bytes, mimeType);
-        textures.set(key, texture);
+        const source = boardAssetKeySource(key);
+        const picture = source && await fetchBoardPicture(client, spaceId, source, item, edge);
+        if (picture) {
+          const texture = await images.decodeImage(picture.bytes, picture.mimeType, edge);
+          textures.get(key)?.destroy(true);
+          textures.set(key, texture);
+          edges.set(key, Math.max(texture.width, texture.height) < edge ? Number.POSITIVE_INFINITY : edge);
+          miss = null;
+        }
       } catch (error) {
-        if (error instanceof BoardExportResourceError) resourceError = error;
-        else failed.add(key);
+        miss = error instanceof BoardExportResourceError ? "omitted" : "error";
       }
+      // A preview already shown stays, at the sharpness it has.
+      if (miss && textures.has(key)) edges.set(key, Number.POSITIVE_INFINITY);
+      else if (miss) missed.set(key, miss);
     }
   }
 
   await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }, worker));
-  if (resourceError) throw resourceError;
-  return { textures, failed: [...failed], omitted: selection.omittedKeys };
+  const keys = (reason: TextureMiss) => [...missed].flatMap(([key, value]) => (value === reason ? [key] : []));
+  return { textures, failed: keys("error"), unavailable: keys("unavailable"), omitted: [...selection.omittedKeys, ...keys("omitted")] };
+}
+
+type Picture = { bytes: Uint8Array; mimeType: string };
+
+/**
+ * The picture for a texture, `edge` pixels on its long edge where the host can
+ * resize: a CDN variant of an image, or the first frame of a video. Null when
+ * there is none, as for videos outside Cohub's media hosts.
+ */
+async function fetchBoardPicture(
+  client: ReturnType<typeof createClient>,
+  spaceId: string,
+  source: BoardAssetKeySource,
+  item: BoardSceneItem,
+  edge: number,
+): Promise<Picture | null> {
+  // Thumbnail edges below the smallest variant fetch that variant; decoding scales it down.
+  const variantEdge = Number.isFinite(edge) && edge <= MEDIA_VARIANT_MAX ? mediaVariantSize(edge) : null;
+  const video = source.media === "video";
+  const url = source.kind === "url"
+    ? source.value
+    : video || variantEdge
+      ? await client.space(spaceId).files.resolveUrl(source.value, { purpose: "playback" }).catch(() => null)
+      : null;
+  if (video) {
+    const { naturalWidth: w, naturalHeight: h } = (item.type === "video" && item.props.snapshot) || {};
+    const width = w && h ? Math.min(w, (edge * w) / Math.max(w, h)) : edge;
+    const frame = url && videoFrameUrl(url, mediaVariantSize(width));
+    return frame ? downloadPublicImage(frame) : null;
+  }
+  const variant = url && variantEdge && imageVariantUrl(url, variantEdge);
+  if (variant) {
+    try {
+      return await downloadPublicImage(variant);
+    } catch {
+      // Fall back to the original below.
+    }
+  }
+  return source.kind === "url" ? downloadPublicImage(source.value) : readSpaceFileBytes(client, spaceId, source.value);
 }
 
 async function readSpaceFileBytes(
@@ -158,7 +232,7 @@ export type BoardExportRunOptions = {
   animation?: string;
   scale: number;
   padding?: number;
-  colorScheme: "dark" | "light";
+  theme: BoardThemeId;
   background: "paper" | "transparent";
   format: BoardNodeExportFormat;
   quality?: number;
@@ -206,7 +280,7 @@ export async function runBoardVideoExport(options: BoardVideoExportOptions): Pro
   if (Math.abs(options.fps - derivedFps) > 0.01) throw new Error(`--fps must match the --at step (${derivedFps.toFixed(3)} fps).`);
   if (times.some((time, index) => index > 0 && Math.abs(time - (times[index - 1] as number) - step) > 0.001)) throw new Error("Video export needs evenly spaced times.");
   await execFile("ffmpeg", ["-version"], { signal: options.signal }).catch(() => { throw new Error("Video export needs ffmpeg. Install ffmpeg and try again."); });
-  const document = options.document ?? (await loadBoardDocument(options.spaceId, options.target)).document;
+  const document = options.document ?? await settleBoardDocument(options.spaceId, (await loadBoardDocument(options.spaceId, options.target)).document);
   const tempDir = await mkdtemp(join(tmpdir(), "cohub-board-export-"));
   try {
     let count = 0;
@@ -279,7 +353,7 @@ export async function runBoardExport(
   options: BoardExportRunOptions,
 ): Promise<BoardExportRunResult | null> {
   options.signal?.throwIfAborted();
-  const document = options.document ?? (await loadBoardDocument(options.spaceId, options.target)).document;
+  const document = options.document ?? await settleBoardDocument(options.spaceId, (await loadBoardDocument(options.spaceId, options.target)).document);
   if (options.animation && !document.animations[options.animation]) {
     throw new Error(`Animation ${options.animation} does not exist.`);
   }
@@ -299,10 +373,11 @@ export async function runBoardExport(
     });
   };
   let scriptHost: ReturnType<typeof createNodeBoardScriptHost> | null = null;
-  const textureCache: BoardExportTextureCache = { textures: new Map(), failed: new Set() };
+  const textureCache: BoardExportTextureCache = { textures: new Map(), edges: new Map(), missed: new Map() };
   let backgroundTexture: BoardNodeTexture | undefined;
   try {
-    const sampler = createBoardRenderSampler(document, options.animation ?? null, { colorScheme: options.colorScheme });
+    const theme = boardRenderTheme(options.theme);
+    const sampler = createBoardRenderSampler(document, options.animation ?? null, theme);
     const documentAt = (time: number | null) => time === null ? document : sampler.at(time).document;
 
     const plan = planBoardExport({
@@ -344,7 +419,6 @@ export async function runBoardExport(
       }
     }
 
-    const videoCount = plan.items.filter((item) => item.type === "video").length;
     if (hasBoardScripts(document)) scriptHost = createNodeBoardScriptHost(renderer, {
       concurrency: 2,
       readModule: async (src) => {
@@ -353,21 +427,14 @@ export async function runBoardExport(
       },
     });
     const host = scriptHost;
-    if (videoCount > 0) {
-      warnings.push(
-        `${videoCount} video preview${videoCount === 1 ? " was" : "s were"} drawn as placeholders; video decoding is unavailable in Node.`,
-      );
-    }
 
     const backgroundImage = backgroundTexture
       ? { texture: backgroundTexture, fit: declaredBackground.fit ?? "cover", position: "center" as const, opacity: declaredBackground.opacity ?? 1 }
       : undefined;
-    const assetKey = options.withImages
-      ? (item: BoardSceneItem) => {
-          const key = imageAssetKey(item);
-          return key && omittedKeys.has(key) ? null : key;
-        }
-      : undefined;
+    const assetKey = (item: BoardSceneItem) => {
+      const key = boardExportAssetKey(item);
+      return key && omittedKeys.has(key) ? null : key;
+    };
     const frames: BoardExportFrame[] = [];
     const reported = new Set<string>();
     let completed = 0;
@@ -391,11 +458,15 @@ export async function runBoardExport(
       }
       trace("images", completed, prepared.plan);
       if (options.withImages) {
-        const loaded = await loadBoardTextures(renderer, options.spaceId, prepared.plan.items.filter((item) => prepared.scene.opacity(item.id) > 0), { cache: textureCache });
+        const visible = prepared.plan.items.filter((item) => prepared.scene.opacity(item.id) > 0);
+        const loaded = await loadBoardTextures(images, options.spaceId, visible, { scale: prepared.plan.scale, maxBytes: imageMemoryBytes, cache: textureCache });
         omittedKeys = new Set(loaded.omitted);
+        const sources = (keys: string[]) => keys.slice(0, 3).map((key) => boardAssetKeySource(key)?.value ?? key).join(", ");
+        const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
         const assetWarnings = [
-          loaded.failed.length ? `${loaded.failed.length} image(s) could not be loaded: ${loaded.failed.slice(0, 3).join(", ")}` : null,
-          loaded.omitted.length ? `${loaded.omitted.length} previews were drawn as placeholders to stay within the export texture limit.` : null,
+          loaded.failed.length ? `${plural(loaded.failed.length, "preview")} could not be loaded: ${sources(loaded.failed)}` : null,
+          loaded.unavailable.length ? `${plural(loaded.unavailable.length, "video")} drawn without a cover; Node exports take covers from Cohub-hosted media only.` : null,
+          loaded.omitted.length ? `${plural(loaded.omitted.length, "preview")} drawn as placeholders to stay within the ${imageMemoryBytes / 1024 ** 2} MiB image budget; raise --image-memory to include them.` : null,
         ];
         for (const warning of assetWarnings) if (warning && !reported.has(warning)) {
           warnings.push(warning);
@@ -406,12 +477,12 @@ export async function runBoardExport(
       trace("render", completed, prepared.plan);
       const result = exportBoardImageBytes(renderer, document, {
         ...frameOptions,
-        colorScheme: options.colorScheme,
+        ...theme,
         background: options.background,
         textures,
         scripts: scriptHost ?? undefined,
         backgroundImage,
-        ...(assetKey ? { assetKey } : {}),
+        assetKey,
         format: options.format,
         quality: options.quality,
       });
@@ -452,7 +523,7 @@ function describeWarning(warning: { kind: string; [key: string]: unknown }): str
   }
   if (warning.kind === "images-missing") {
     const keys = warning.keys as string[];
-    return `${keys.length} image${keys.length === 1 ? "" : "s"} drawn as placeholders (use --images to fetch them).`;
+    return `${keys.length} preview${keys.length === 1 ? "" : "s"} drawn as placeholders; omit --no-images to fetch them.`;
   }
   if (warning.kind === "many-items") {
     return `${warning.count} items exported.`;

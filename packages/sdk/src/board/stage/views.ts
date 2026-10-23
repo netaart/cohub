@@ -74,10 +74,11 @@ export function createBoardItemViewLayer(
 	views: readonly BoardItemView[],
 	camera: () => BoardViewport,
 	onInvalidate: () => void = () => {},
+	layer: "above" | "below" = "above",
 ): BoardItemViewLayer {
 	const element = host.ownerDocument.createElement("div");
 	element.dataset.boardViews = "";
-	element.style.cssText = "position:absolute;inset:0;z-index:2;overflow:hidden;pointer-events:none";
+	element.style.cssText = `position:absolute;inset:0;z-index:${layer === "below" ? 0 : 2};overflow:hidden;pointer-events:none`;
 	host.appendChild(element);
 	const world = host.ownerDocument.createElement("div");
 	world.style.cssText = "position:absolute;inset:0;transform-origin:0 0;pointer-events:none";

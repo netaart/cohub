@@ -7,6 +7,7 @@ import type {
 } from "@cohub/protocol/model";
 import { ChevronDown, ChevronRight, Loader2, RotateCw } from "lucide-svelte";
 import IntermediateMessageBubble from "$lib/components/IntermediateMessageBubble.svelte";
+import ProcessRun from "$lib/components/ProcessRun.svelte";
 import {
 	formatDurationDetail,
 	formatDurationMs,
@@ -24,6 +25,8 @@ import {
 import { getLocale } from "$lib/i18n/locale.svelte";
 import type { ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
+import type { ChatMessage } from "$lib/session-tree";
+import { buildProcessEntries, hasStepText } from "$lib/session-turn-render";
 import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
 
 type IntermediateLoadState =
@@ -37,7 +40,9 @@ type Props = {
 	turn: SessionTurnRecord;
 	summary?: SessionTurnIntermediateSummary;
 	intermediateMessages?: StoredIntermediateMessage[] | null;
+	live?: StoredIntermediateMessage | null;
 	streaming?: boolean;
+	running?: boolean;
 	modelsCatalog?: ModelCatalogItem[];
 	onLoadIntermediate?: (
 		turn: SessionTurnRecord,
@@ -51,24 +56,31 @@ type Props = {
 	}) => Promise<MessageToolCallsFile | null>;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
 	onOpenUrl?: (href: string, event: MouseEvent) => void | Promise<void>;
+	onMarkdownRenderStart?: (message: ChatMessage) => void;
+	onMarkdownRendered?: (message: ChatMessage) => void;
 };
 
 const {
 	turn,
 	summary,
 	intermediateMessages: liveIntermediateMessages = null,
+	live = null,
 	streaming = false,
+	running = false,
 	modelsCatalog,
 	onLoadIntermediate,
 	onRequestIntermediateSync,
 	onLoadToolCalls,
 	onOpenFile,
 	onOpenUrl,
+	onMarkdownRenderStart,
+	onMarkdownRendered,
 }: Props = $props();
 
 const locale = $derived(getLocale());
 
-let expanded = $state(false);
+let userExpanded = $state<boolean | null>(null);
+const expanded = $derived(userExpanded ?? running);
 let loadState = $state<IntermediateLoadState>({ status: "idle" });
 
 const persistedMessagesAvailable = $derived(
@@ -179,9 +191,21 @@ $effect(() => {
 	}
 });
 
+$effect(() => {
+	if (
+		expanded &&
+		userExpanded === null &&
+		loadState.status === "idle" &&
+		hasPersistedMessages &&
+		!hasLiveMessages
+	)
+		void ensureLoaded();
+});
+
 async function toggle() {
-	if (!expanded) await ensureLoaded();
-	expanded = !expanded;
+	const opening = !expanded;
+	if (opening) await ensureLoaded();
+	userExpanded = opening;
 }
 
 const toolCallCount = $derived(summary?.toolCallCount ?? 0);
@@ -346,37 +370,41 @@ const summaryLabel = $derived(
 			? m.process_running({}, { locale })
 			: m.process_title({}, { locale })),
 );
+
+const showHeader = $derived(
+	!streaming || stepCount > 0 || compactionCount > 0 || hasPersistedMessages,
+);
+const entries = $derived(
+	buildProcessEntries(expanded ? expandedMessages : [], live),
+);
 </script>
 
-{#if !expanded}
-	<button type="button" class="flex w-full items-center gap-2 px-[var(--chat-msg-inset)] py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md disabled:cursor-wait disabled:opacity-75" disabled={isLoading} onclick={() => void toggle()} title={usageTitle || undefined}>
-		{#if isLoading}<Loader2 class="w-3.5 h-3.5 text-text-tertiary shrink-0 animate-spin" />{:else}<ChevronRight class="w-3.5 h-3.5 text-text-tertiary shrink-0" />{/if}
-		<span class="text-[13px] text-text-tertiary tabular-nums">{summaryLabel}</span>
+{#if showHeader}
+	<button type="button" class="flex w-full items-center gap-2 px-[var(--chat-msg-inset)] py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md disabled:cursor-wait disabled:opacity-75" disabled={isLoading} aria-expanded={expanded} onclick={() => void toggle()} title={(!expanded && usageTitle) || undefined}>
+		{#if isLoading}<Loader2 class="w-3.5 h-3.5 text-text-tertiary shrink-0 animate-spin" />{:else if expanded}<ChevronDown class="w-3.5 h-3.5 text-text-tertiary shrink-0" />{:else}<ChevronRight class="w-3.5 h-3.5 text-text-tertiary shrink-0" />{/if}
+		<span class="text-[13px] text-text-tertiary tabular-nums">{expanded ? m.common_collapse({}, { locale }) : summaryLabel}</span>
 	</button>
-{:else}
-	<div class="flex flex-col gap-0">
-		<button type="button" class="flex w-full items-center gap-2 px-[var(--chat-msg-inset)] py-2 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer rounded-md" onclick={() => void toggle()} title={usageTitle || undefined}>
-			<ChevronDown class="w-3.5 h-3.5 text-text-tertiary shrink-0" />
-			<span class="text-[13px] text-text-tertiary tabular-nums">{summaryLabel}</span>
+{/if}
+{#if expanded}
+	{#if loadError}
+		<button type="button" class="mx-[var(--chat-msg-inset)] mt-2 rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 text-left text-[12px] text-status-error hover:bg-status-error/10" onclick={() => void ensureLoaded()}>
+			{loadError} · {m.process_click_retry({}, { locale })}
 		</button>
-		<div class="flex flex-col gap-2">
-			{#if loadError}
-				<button type="button" class="mx-[var(--chat-msg-inset)] rounded-md border border-status-error/30 bg-status-error/5 px-3 py-2 text-left text-[12px] text-status-error hover:bg-status-error/10" onclick={() => void ensureLoaded()}>
-					{loadError} · {m.process_click_retry({}, { locale })}
-				</button>
-			{:else if isSyncing && expandedMessages.length === 0}
-				<button type="button" class="mx-[var(--chat-msg-inset)] flex items-center gap-2 rounded-md border border-border-subtle/80 bg-bg-surface px-3 py-2 text-left text-[12px] text-text-tertiary hover:bg-bg-hover/60" onclick={() => void requestIntermediateSync(true)}>
-					<RotateCw class="h-3.5 w-3.5 shrink-0" />
-					<span>{m.process_syncing_steps({}, { locale })}</span>
-				</button>
+	{:else if isSyncing && expandedMessages.length === 0}
+		<button type="button" class="mx-[var(--chat-msg-inset)] mt-2 flex items-center gap-2 rounded-md border border-border-subtle/80 bg-bg-surface px-3 py-2 text-left text-[12px] text-text-tertiary hover:bg-bg-hover/60" onclick={() => void requestIntermediateSync(true)}>
+			<RotateCw class="h-3.5 w-3.5 shrink-0" />
+			<span>{m.process_syncing_steps({}, { locale })}</span>
+		</button>
+	{/if}
+{/if}
+{#if entries.length > 0}
+	<div class={`flex flex-col gap-2 ${showHeader ? 'mt-1' : ''}`}>
+		{#each entries as entry (entry.key)}
+			{#if entry.kind === 'run'}
+				<ProcessRun {turn} messages={entry.messages} {modelsCatalog} {onLoadToolCalls} {onOpenFile} {onOpenUrl} />
+			{:else}
+				<IntermediateMessageBubble message={entry.message} streaming={entry.live} showMeta={hasStepText(entry.message)} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message: entry.message }) : undefined} {onOpenFile} {onOpenUrl} {onMarkdownRenderStart} {onMarkdownRendered} />
 			{/if}
-			{#each expandedMessages as msg (msg.id)}
-				<IntermediateMessageBubble message={msg} streaming={streaming} {modelsCatalog} onLoadToolCalls={onLoadToolCalls ? () => onLoadToolCalls({ turn, message: msg }) : undefined} {onOpenFile} {onOpenUrl} />
-			{/each}
-		</div>
-		<button type="button" class="flex items-center gap-1.5 px-[var(--chat-msg-inset)] py-1.5 text-left transition-colors hover:bg-bg-hover/50 cursor-pointer text-text-placeholder hover:text-text-tertiary rounded-md self-start" onclick={() => void toggle()}>
-			<ChevronRight class="w-3 h-3" />
-			<span class="text-[11px]">{m.common_collapse({}, { locale })}</span>
-		</button>
+		{/each}
 	</div>
 {/if}

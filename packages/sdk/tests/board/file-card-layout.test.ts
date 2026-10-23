@@ -5,7 +5,7 @@ import {
 	fileMetaLine,
 } from "../../src/board/model/file-preview.js";
 import { containRect as containCoverRect } from "../../src/board/render/surface.js";
-import { ellipsizeWrappedLines, fitLineWithEllipsis } from "../../src/board/render/text-fit.js";
+import { fitLineWithEllipsis } from "../../src/board/render/text-measurement.js";
 
 test("cover layout contains square images without cropping", () => {
 	assert.deepEqual(containCoverRect(260, 116, 1024, 1024), {
@@ -38,28 +38,6 @@ test("cover layout safely handles missing dimensions", () => {
 		width: 0,
 		height: 0,
 	});
-});
-
-test("ellipsize leaves short wraps untouched", () => {
-	assert.equal(ellipsizeWrappedLines(["one", "two"], 3), "one\ntwo");
-	assert.equal(ellipsizeWrappedLines(["only"], 1), "only");
-});
-
-test("ellipsize keeps the first N lines and marks the cut", () => {
-	assert.equal(
-		ellipsizeWrappedLines(["alpha", "bravo", "charlie", "delta"], 2),
-		"alpha\nbravo…",
-	);
-	assert.equal(ellipsizeWrappedLines(["alpha", "bravo"], 1), "alpha…");
-});
-
-test("ellipsize handles empty and zero-line budgets", () => {
-	assert.equal(ellipsizeWrappedLines([], 2), "");
-	assert.equal(ellipsizeWrappedLines(["x"], 0), "");
-	// Content that already fits is left alone, even if it is only whitespace.
-	assert.equal(ellipsizeWrappedLines(["   "], 1), "   ");
-	// Trailing whitespace on a truncated last line is stripped before the mark.
-	assert.equal(ellipsizeWrappedLines(["alpha  ", "bravo"], 1), "alpha…");
 });
 
 test("fitLineWithEllipsis keeps a line that already fits with the mark", () => {

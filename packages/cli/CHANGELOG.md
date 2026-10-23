@@ -1,5 +1,78 @@
 # @neta-art/cohub-cli
 
+## 10.11.1
+
+### Patch Changes
+
+- Updated dependencies [1597942]
+- Updated dependencies [1597942]
+- Updated dependencies [1597942]
+- Updated dependencies [1597942]
+- Updated dependencies [1597942]
+  - @neta-art/cohub@12.4.0
+
+## 10.11.0
+
+### Minor Changes
+
+- 4110d6e: Extension items take a `preview` (`title`, `excerpt`, `cover`, `src`). Clients and exports without the type's renderer draw it as a file card, and item titles, including the selection sent to agents, use it. `boards schema extension` describes it.
+  
+  Hosts: write `preview` on your own item types and keep it current.
+
+### Patch Changes
+
+- 19c1520: Recover disconnected file bridges after the Runtime reconnects, while leaving healthy bridges and the Runtime process running.
+- Updated dependencies [dcd541b]
+- Updated dependencies [e95cd08]
+- Updated dependencies [e95cd08]
+- Updated dependencies [e95cd08]
+- Updated dependencies [4110d6e]
+- Updated dependencies [4110d6e]
+- Updated dependencies [b01e55d]
+- Updated dependencies [4110d6e]
+- Updated dependencies [e95cd08]
+- Updated dependencies [e95cd08]
+- Updated dependencies [4110d6e]
+- Updated dependencies [e95cd08]
+  - @neta-art/cohub@12.3.0
+
+## 10.10.0
+
+### Minor Changes
+
+- 3962c30: Add `cohub feedback` to send feedback to the Cohub team from the terminal, with file attachments, optional local Runtime diagnostics, and automatic CLI, OS, account, and Space/Chat context. 新增 `cohub feedback`，可在终端向 Cohub 团队提交反馈，支持附件、可选的本地 Runtime 诊断日志，并自动附带 CLI、系统、账号与 Space/Chat 上下文。
+
+## 10.9.0
+
+### Minor Changes
+
+- d8256d6: Board views and CLI writes now use one media-sizing rule. Exports match the Cohub app's colors, card styles, fonts and previews, including video covers from Cohub-hosted media. Texture selection follows a decoded-memory budget instead of a 64-image cap. Emoji render in color, and Node exports use the variable Geist fonts.
+  
+  Breaking for direct export callers: `selectBoardExportAssets` now takes `{ scale, maxBytes? }`; `boardImageKeySource` is replaced by `boardAssetKeySource`, and `boardAssetKey` / `boardTextureEdge` move from `board/stage` to `board`. The SDK adds `boardRenderTheme`, `BOARD_THEME_IDS`, `settleBoardMediaSizes` and media probe helpers.
+
+### Patch Changes
+
+- 58a8e66: Board text wraps where the browser wraps it. Chinese, Japanese and Korean text no longer breaks early after a dash or overflows its selection box, punctuation such as `，` and `。` never starts a line, and long URLs break instead of running past their box. The canvas, the in-place editor and `cohub boards export` lay text out once, with the same lines, so editing no longer shifts text or shows it twice, and typing animations reveal text without reflowing. Shape labels align to their padding when left- or right-aligned.
+  
+  SDK: `setBoardTextLayouter` replaces `setBoardTextMeasurer`, taking a whole text and returning its lines. `board/render` adds `layoutTextLines`, `boardTextStyle` and `onBoardTextFontsChange`; `board` adds `layoutShapeLabel`; the editor adds `relayoutText()`. `syncTextWrapWidth` is removed.
+- Updated dependencies [276874d]
+- Updated dependencies [d8256d6]
+- Updated dependencies [58a8e66]
+  - @neta-art/cohub@12.2.0
+
+## 10.8.3
+
+### Patch Changes
+
+- 37e7d36: Fix `cohub boards export` drawing images, video posters, and task previews at their native pixel size, tiled or clipped, instead of fitted to their box. The Node renderer now provides the `DOMMatrix` that texture fills need.
+- 8da08b3: Prevent compressed Codex history reads from crashing when stopping at a session header or history boundary. Preserve archive errors and caller cancellation.
+- 5aae8f8: Recognize cloud turn IDs in current Codex user-message records so native sync does not duplicate Cohub-started turns or create spurious conversation forks. Genuine local continuations still sync normally.
+- 5c65685: `cohub runtime up` now offers shared Codex sessions to a folder that already syncs natively, instead of only on first consent; the folder's sync settings and history stay as they are. 已开启原生同步的目录，重新运行 `cohub runtime up` 时也会询问是否开启 Codex 共享会话，而不只在首次授权时询问；该目录的同步设置和历史保持不变。
+- 6e8d0a6: Allow a local Runtime to recover or stop after its file bridge exits, even when descendants keep inherited pipes open.
+- Updated dependencies [37e7d36]
+- Updated dependencies [ec1426c]
+  - @neta-art/cohub@12.1.1
+
 ## 10.8.2
 
 ### Patch Changes

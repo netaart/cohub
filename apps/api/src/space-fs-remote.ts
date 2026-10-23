@@ -121,6 +121,9 @@ async function collectMissingRemoteDirectories(spaceId: string, targetDir: strin
   return missing;
 }
 
+// Older sandboxes reject listings that race a write.
+const DIRECTORY_CHANGED_RETRY_DELAYS_MS = [100, 250] as const;
+
 export async function listSpaceDirectory(
   spaceId: string,
   path = "",
@@ -128,50 +131,64 @@ export async function listSpaceDirectory(
 ): Promise<SpaceFsTreeResponse | SpaceFsTreePage> {
   const visibility = options?.visibility ?? "full";
   assertFullVisibility(visibility);
-  try {
-    const supportsPagination = (await getSandboxCapabilities(spaceId))?.fsTreePagination === true;
-    const pagination = options?.pagination ? { ...options, pagination: true as const } : undefined;
-    const entries: SpaceFsEntry[] = [];
-    let cursor = supportsPagination ? pagination?.cursor : undefined;
-    const seen = new Set(cursor ? [cursor] : []);
-    let truncated = false;
-    do {
-      const result = await callSandboxRpc(spaceId, "fs.tree", {
-        path: path || ".",
-        depth: 1,
-        limit: pagination?.limit && supportsPagination ? pagination.limit : MAX_TREE_ENTRIES,
-        respectGitignore: false,
-        ...(supportsPagination ? { pagination: true, cursor } : {}),
-      });
-      if (supportsPagination && result.nextCursor === undefined) {
-        throw new SpaceFsError(502, "invalid_pagination", "Sandbox returned an invalid directory page.");
-      }
-      for (const entry of result.entries) {
-        entries.push({
-          name: entry.name,
-          path: toPosixJoin(path, entry.path),
-          type: entry.type,
-          size: entry.size,
-          mimeType: entry.type === "file" ? mimeTypeForPath(entry.name) : null,
-          mtimeMs: entry.mtimeMs,
-        });
-      }
-      truncated ||= result.truncated !== false;
-      const next = supportsPagination ? result.nextCursor : null;
-      if (next && seen.has(next)) throw new SpaceFsError(502, "invalid_cursor", "Sandbox returned a repeated directory cursor.");
-      if (next) seen.add(next);
-      cursor = next ?? undefined;
-    } while (!pagination && cursor);
-    if (pagination) {
-      if (!supportsPagination) {
-        return pageDirectory({ path, entries }, JSON.stringify([spaceId, path, visibility]), JSON.stringify(entries.map((entry) => entry.name)), pagination, truncated);
-      }
-      return { path, entries, nextCursor: cursor ?? null, truncated };
+  const pagination = options?.pagination ? { ...options, pagination: true as const } : undefined;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await readSandboxDirectory(spaceId, path, visibility, pagination);
+    } catch (error) {
+      const delay = DIRECTORY_CHANGED_RETRY_DELAYS_MS[attempt];
+      const changed = error instanceof SandboxRpcError && error.rpcErrorCode === "DIRECTORY_CHANGED";
+      if (!changed || delay === undefined || pagination?.cursor) mapRpcError(error);
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
-    return { path, entries };
-  } catch (error) {
-    mapRpcError(error);
   }
+}
+
+async function readSandboxDirectory(
+  spaceId: string,
+  path: string,
+  visibility: SpaceFsVisibility,
+  pagination: SpaceFsListOptions | undefined,
+): Promise<SpaceFsTreeResponse | SpaceFsTreePage> {
+  const supportsPagination = (await getSandboxCapabilities(spaceId))?.fsTreePagination === true;
+  const entries: SpaceFsEntry[] = [];
+  let cursor = supportsPagination ? pagination?.cursor : undefined;
+  const seen = new Set(cursor ? [cursor] : []);
+  let truncated = false;
+  do {
+    const result = await callSandboxRpc(spaceId, "fs.tree", {
+      path: path || ".",
+      depth: 1,
+      limit: pagination?.limit && supportsPagination ? pagination.limit : MAX_TREE_ENTRIES,
+      respectGitignore: false,
+      ...(supportsPagination ? { pagination: true, cursor } : {}),
+    });
+    if (supportsPagination && result.nextCursor === undefined) {
+      throw new SpaceFsError(502, "invalid_pagination", "Sandbox returned an invalid directory page.");
+    }
+    for (const entry of result.entries) {
+      entries.push({
+        name: entry.name,
+        path: toPosixJoin(path, entry.path),
+        type: entry.type,
+        size: entry.size,
+        mimeType: entry.type === "file" ? mimeTypeForPath(entry.name) : null,
+        mtimeMs: entry.mtimeMs,
+      });
+    }
+    truncated ||= result.truncated !== false;
+    const next = supportsPagination ? result.nextCursor : null;
+    if (next && seen.has(next)) throw new SpaceFsError(502, "invalid_cursor", "Sandbox returned a repeated directory cursor.");
+    if (next) seen.add(next);
+    cursor = next ?? undefined;
+  } while (!pagination && cursor);
+  if (pagination) {
+    if (!supportsPagination) {
+      return pageDirectory({ path, entries }, JSON.stringify([spaceId, path, visibility]), pagination, { truncated });
+    }
+    return { path, entries, nextCursor: cursor ?? null, truncated };
+  }
+  return { path, entries };
 }
 
 function buildFileResponse(relativePath: string, params: {

@@ -12,7 +12,7 @@ export type { BoardFocusOptions } from "./camera.js";
 export type { BoardAppMetadata, BoardTaskSource } from "./creation.js";
 export * from "./document-edits.js";
 export { type BoardEditor, createBoardEditor } from "./editor.js";
-export type { BoardInteraction, BoardPointerEvent, BoardTransformEnd } from "./interaction.js";
+export type { BoardActivation, BoardInteraction, BoardPointerEvent, BoardTransformEnd } from "./interaction.js";
 export * from "./selection-transform.js";
 export type { BoardNaturalSize } from "./snapshots.js";
 export * from "./snapping.js";

@@ -1,9 +1,11 @@
 import {
 	arrowHitRadius,
 	arrowPathBounds,
+	BOARD_FRAME_LABEL_SIZE,
 	type BoardArrowItem,
 	type BoardSceneItem,
 	distanceToArrow,
+	frameLabelHitRect,
 	HANDLE_HIT_RADIUS,
 	type Rect,
 	rectContainsPoint,
@@ -165,7 +167,7 @@ export function createQueryModule(ctx: EditorContext) {
 		return null;
 	}
 
-	function labelItemAt(point: WorldPoint): BoardSceneItem | null {
+	function labelItemAt(point: WorldPoint, frameLabelSize = BOARD_FRAME_LABEL_SIZE): BoardSceneItem | null {
 		ensureSpatial();
 		const { scene, selection, camera } = state;
 		const nearby = spatial.idsAtPoint(point);
@@ -175,10 +177,7 @@ export function createQueryModule(ctx: EditorContext) {
 			if (!item || !state.base.items[id] || isLocked(item)) continue;
 			if (
 				item.type === "frame" &&
-				rectContainsPoint(
-					{ x: item.frame.x, y: item.frame.y - 22, width: Math.max(48, item.frame.width * 0.5), height: 24 },
-					point,
-				)
+				rectContainsPoint(frameLabelHitRect(item.frame, frameLabelSize), point)
 			)
 				return item;
 			if (item.type === "arrow") {

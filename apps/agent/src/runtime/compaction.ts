@@ -1,14 +1,9 @@
 import {
-  BACKGROUND_CONTEXT,
-  calculateContextTokens,
-  compact,
   DEFAULT_COMPACTION_SETTINGS,
-  estimateTokens,
   prepareCompaction,
   shouldCompact,
-  withAbortSignal,
 } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, RetryPolicy, Usage } from "@earendil-works/pi-ai";
+import type { Usage } from "@earendil-works/pi-ai";
 import { logger } from "../logger.js";
 import type { SessionHandle } from "../session.js";
 import { persistCompactionEvent } from "../persistence.js";
@@ -21,18 +16,14 @@ import { getCurrentToolExecutionContext } from "../tool-context.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createModelsFromCohubRegistry } from "./pi-models-adapter.js";
 import { estimateProxyContextTokens, resolveReserveTokens } from "./compaction-policy.js";
+import { summarizeForCompaction } from "./compaction-summary.js";
+import { getContextTokenBudget, getTokenRatio } from "./token-calibration.js";
 import {
   findFirstKeptEntryId,
   getCompactionSummaryMessageCount,
   resolveCompactionScope,
   validateCompactionEffect,
 } from "./compaction-plan.js";
-
-type ProviderCallStats = {
-  total: number;
-  succeeded: number;
-  failed: number;
-};
 
 export type CompactionOutcome =
   | {
@@ -75,77 +66,6 @@ function resolveCompactionSettings(contextWindow: number) {
   };
 }
 
-function getContextTokenBudget(messages: AgentMessage[]): { accurateTokens: number; estimatedTokens: number } | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message?.role !== "assistant") continue;
-    const assistant = message as unknown as AssistantMessage;
-    if (assistant.stopReason === "aborted" || assistant.stopReason === "error" || !assistant.usage) continue;
-    const accurateTokens = calculateContextTokens(assistant.usage);
-    if (accurateTokens <= 0) continue;
-
-    let trailingTokens = 0;
-    for (let j = i + 1; j < messages.length; j++) {
-      const trailingMessage = messages[j];
-      if (trailingMessage) trailingTokens += estimateTokens(trailingMessage);
-    }
-    return { accurateTokens, estimatedTokens: accurateTokens + trailingTokens };
-  }
-  return null;
-}
-
-const COMPACTION_RETRY_POLICY: RetryPolicy = {
-  enabled: true,
-  maxRetries: 1,
-  baseDelayMs: 1_000,
-};
-
-/** Run compaction once while retrying only the individual failed provider call. */
-async function compactWithRetry(
-  preparation: Parameters<typeof compact>[0],
-  models: Parameters<typeof compact>[1],
-  model: Parameters<typeof compact>[2],
-  abortSignal?: AbortSignal,
-): Promise<{
-  result: Awaited<ReturnType<typeof compact>>;
-  attemptCount: number;
-  providerCalls: ProviderCallStats;
-}> {
-  const providerCalls: ProviderCallStats = { total: 0, succeeded: 0, failed: 0 };
-  const countedModels = new Proxy(models, {
-    get(target, property, receiver) {
-      if (property !== "completeSimple") return Reflect.get(target, property, receiver);
-      return async (...args: Parameters<typeof target.completeSimple>) => {
-        providerCalls.total += 1;
-        try {
-          const response = await target.completeSimple(...args);
-          if (response.stopReason === "error" || response.stopReason === "aborted") {
-            providerCalls.failed += 1;
-          } else {
-            providerCalls.succeeded += 1;
-          }
-          return response;
-        } catch (error) {
-          providerCalls.failed += 1;
-          throw error;
-        }
-      };
-    },
-  });
-  const result = await compact(
-    preparation,
-    countedModels,
-    model,
-    undefined,
-    undefined,
-    COMPACTION_RETRY_POLICY,
-    undefined,
-    abortSignal ? withAbortSignal(abortSignal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT,
-  );
-
-  return { result, attemptCount: 1, providerCalls };
-}
-
 async function restorePreCompactionState(handle: SessionHandle, archivePath: string) {
   const restored = await handle.sessionManager.restoreFromArchive(archivePath).catch((error) => {
     logger.error(`[Compaction] restoreFromArchive failed sessionId=${handle.sessionId}:`, error);
@@ -184,12 +104,14 @@ export async function maybeAutoCompact(
 
   const force = input.force === true;
   const messages = handle.session.agent.state.messages;
-  const tokenBudget = getContextTokenBudget(messages);
+  const proxyTokens = estimateProxyContextTokens(messages);
+  // Learned from this model's real usage; 1 (the raw estimate) until a sample exists.
+  const tokenBudget = getContextTokenBudget(messages, model, getTokenRatio("context", model) ?? 1, proxyTokens);
+  const ratio = tokenBudget?.ratio ?? getTokenRatio("context", model) ?? 1;
   // Provider usage undercounts inline base64 images on proxies that bill them
   // as text, so take the larger of the two views for the threshold decision.
   // tokensBefore reporting keeps using the accurate provider number.
-  const proxyTokens = estimateProxyContextTokens(messages);
-  const thresholdTokens = Math.max(tokenBudget?.estimatedTokens ?? 0, proxyTokens);
+  const thresholdTokens = Math.max(tokenBudget?.estimatedTokens ?? Math.ceil(proxyTokens * ratio), proxyTokens);
   if (!force) {
     if (!tokenBudget && proxyTokens <= 0) return { compacted: false, reason: "no_usage_data" };
     if (!shouldCompact(thresholdTokens, contextWindow, settings)) {
@@ -199,7 +121,7 @@ export async function maybeAutoCompact(
 
   const tokensLabel = tokenBudget?.estimatedTokens ?? "unknown";
   logger.info(
-    `[Compaction] ${force ? "overflow-compact" : "auto-compact"} triggered sessionId=${handle.sessionId} contextWindow=${contextWindow} reserve=${settings.reserveTokens} tokens=${tokensLabel} proxyTokens=${proxyTokens}`,
+    `[Compaction] ${force ? "overflow-compact" : "auto-compact"} triggered sessionId=${handle.sessionId} model=${model.provider}/${model.id} contextWindow=${contextWindow} reserve=${settings.reserveTokens} tokens=${tokensLabel} proxyTokens=${proxyTokens} ratio=${ratio.toFixed(2)} threshold=${thresholdTokens}`,
   );
 
   let compactionEntryAppended = false;
@@ -253,12 +175,37 @@ export async function maybeAutoCompact(
 
       const models = createModelsFromCohubRegistry(handle.session.modelRegistry, model);
       const compactStartedAt = Date.now();
-      const compactAttempt = await compactWithRetry(preparation, models, model, input.abortSignal);
+      const compactAttempt = await summarizeForCompaction({ preparation, models, model, abortSignal: input.abortSignal });
       const compactDurationMs = Math.max(0, Date.now() - compactStartedAt);
+      const summaryStats = compactAttempt.stats;
+      span.setAttribute("agent.compaction.summary_requests", summaryStats.requests);
+      span.setAttribute("agent.compaction.summary_chunks", summaryStats.chunks);
+      span.setAttribute("agent.compaction.summary_shrinks", summaryStats.shrinks);
+      span.setAttribute("agent.compaction.summary_omitted_messages", summaryStats.omittedMessages);
+      span.setAttribute("agent.compaction.summary_token_ratio", summaryStats.ratio);
+      span.setAttribute("agent.compaction.context_token_ratio", ratio);
+      span.setAttribute("agent.compaction.summary_overflows", summaryStats.overflows);
+      span.setAttribute("agent.compaction.summary_degradation", summaryStats.degradation);
+      span.setAttribute("agent.compaction.previous_summary", summaryStats.previousSummary);
+      const lastOverflow = summaryStats.lastOverflow;
+      if (lastOverflow) {
+        span.setAttribute("agent.compaction.overflow_kind", lastOverflow.kind);
+        span.setAttribute("agent.compaction.overflow_estimated_tokens", lastOverflow.estimatedTokens);
+        if (lastOverflow.actualTokens) span.setAttribute("agent.compaction.overflow_actual_tokens", lastOverflow.actualTokens);
+        if (lastOverflow.limitTokens) span.setAttribute("agent.compaction.overflow_limit_tokens", lastOverflow.limitTokens);
+        span.setAttribute("agent.compaction.overflow_error", lastOverflow.error);
+      }
+      const overflowLabel = lastOverflow
+        ? ` overflows=${summaryStats.overflows} lastOverflow=${lastOverflow.kind}:estimated=${lastOverflow.estimatedTokens},actual=${lastOverflow.actualTokens ?? "unknown"},limit=${lastOverflow.limitTokens ?? "unknown"}`
+        : "";
+      const summaryLabel = `degradation=${summaryStats.degradation} requests=${summaryStats.requests} chunks=${summaryStats.chunks} shrinks=${summaryStats.shrinks} omitted=${summaryStats.omittedMessages} previousSummary=${summaryStats.previousSummary} summaryRatio=${summaryStats.ratio.toFixed(2)}${overflowLabel}`;
       if (!compactAttempt.result.ok) {
         span.setAttribute("agent.compaction.error", compactAttempt.result.error.message);
-        logger.warn(`[Compaction] summarization failed sessionId=${handle.sessionId}: ${compactAttempt.result.error.message}`);
+        logger.warn(`[Compaction] summarization failed sessionId=${handle.sessionId} ${summaryLabel}: ${compactAttempt.result.error.message}`);
         return { compacted: false, reason: `compact_failed: ${compactAttempt.result.error.message}` };
+      }
+      if (summaryStats.degradation !== "none" || summaryStats.overflows > 0) {
+        logger.info(`[Compaction] bounded summarization sessionId=${handle.sessionId} ${summaryLabel}`);
       }
       const result = compactAttempt.result.value;
       const estimatedTokensAfter = estimateProxyContextTokens([
@@ -278,7 +225,7 @@ export async function maybeAutoCompact(
       span.setAttribute("agent.compaction.duration_ms", compactDurationMs);
       const invalidEffect = validateCompactionEffect({
         estimatedTokensBefore: Math.max(thresholdTokens, result.tokensBefore),
-        estimatedTokensAfter,
+        estimatedTokensAfter: Math.max(estimatedTokensAfter, Math.ceil(estimatedTokensAfter * ratio)),
         inputBudget: Math.max(1, contextWindow - settings.reserveTokens),
         force,
       });

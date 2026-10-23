@@ -8,6 +8,7 @@ on:
       - 'v*.*.*'
     paths:
       - 'apps/sandbox/**'
+      - 'scripts/prewarm-sandbox.py'
       - '.github/workflows/sandbox-docker-build-push.yml'
   workflow_dispatch:
     inputs:
@@ -68,7 +69,7 @@ jobs:
             exit 0
           fi
 
-          CHANGED_FILES=$(git diff --name-only "$PREV_TAG" "$TAG" -- apps/sandbox .github/workflows/sandbox-docker-build-push.yml || true)
+          CHANGED_FILES=$(git diff --name-only "$PREV_TAG" "$TAG" -- apps/sandbox scripts/prewarm-sandbox.py .github/workflows/sandbox-docker-build-push.yml || true)
 
           if [[ -z "$CHANGED_FILES" ]]; then
             echo "No sandbox-related changes detected between $PREV_TAG and $TAG."
@@ -177,6 +178,7 @@ jobs:
         env:
           RUNTIME_TAGS: ${{ steps.image-tags.outputs.runtime }}
           GAME_TAGS: ${{ steps.image-tags.outputs.game }}
+          IMAGE_REPO: ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE_NAME }}
           COHUB_CLI_REFRESH: ${{ steps.cli-refresh.outputs.token }}
           GIT_REVISION: ${{ github.sha }}
           GIT_VERSION: ${{ github.ref_name }}
@@ -245,6 +247,11 @@ jobs:
     if: ${{ (startsWith(github.ref, 'refs/tags/v') && needs.build-and-push.outputs.sandbox_release_changed == 'true') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy-prod == 'true') }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
       - name: Setup kubectl
         uses: azure/setup-kubectl@v5
         with:
@@ -268,6 +275,13 @@ jobs:
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Prewarm sandbox images
+        continue-on-error: true
+        run: |
+          python3 scripts/prewarm-sandbox.py --env prod \
+            --image '${{ env.REGISTRY }}/${{ env.NAMESPACE }}/cohub-sandbox:${{ steps.get-tag.outputs.tag }}' \
+            --image '${{ env.REGISTRY }}/${{ env.NAMESPACE }}/cohub-sandbox-game:${{ steps.get-tag.outputs.tag }}'
 
       - name: Patch sandbox image config
         run: |
