@@ -1,5 +1,29 @@
 # @neta-art/cohub
 
+## 12.6.0
+
+### Minor Changes
+
+- 4fd2d85: Signed-out viewers can follow public Boards live. `createCohubClient({ websocket: { anonymous: true } })` connects without an access token as an anonymous viewer: Board subscriptions receive changes and playback as they happen, without who made them, while awareness, Space and user rooms stay closed. The `auth` event reports `anonymous`. A Board that stops being public is refused within a minute, and its replica reads it again to report why.
+  
+  Hosts: pass `websocket: { anonymous: true }` for signed-out visitors and drop Board polling.
+- 4fd2d85: Board events travel in the Board's own realtime room. `board.changed` and `board.playback.changed` reach only clients subscribed to that Board instead of every connection in its Space, so a busy Board no longer streams its deltas to people who are not looking at it. Board subscriptions hold the Board room alone, and `space.on` no longer offers `"board.changed"` or `"board.playback.changed"`.
+  
+  Breaking for Space listeners: Board events no longer arrive in the Space room. Hosts: listen for Board changes through `space.board(id).subscribe`.
+- 4fd2d85: Board asset managers invalidate pictures per item: `invalidateItemAssets(ids)` re-reads `itemAsset` for those items only, and `invalidatePath` versions the keys of one file instead of recomputing every item's key. `stage.invalidate({ items })` also repaints the far plates holding those items, so a far card's color follows its new picture.
+  
+  Hosts: when your data changes for some items, call `invalidateItemAssets(ids)` and `stage.invalidate({ items: ids })` instead of invalidating every card.
+- ea62adf: Board replicas read a Board once when they open. When realtime starts or resumes, a replica checks the version with a read that skips items and animations, `remote.get({ only: [] })`, and reads the whole Board only when it moved. A Board room the server refuses makes the replica read again, so a Board that became private or was deleted reports the error instead of going quiet. Rooms whose authorization could not be checked stay retained and are subscribed again with the reconnect backoff, rather than dropped.
+  
+  Hosts: custom `BoardRemote`s may pass `get`'s `only` through to read less; ignoring it still works.
+- 4fd2d85: Space file reads share requests. `space.files.read` calls made in the same task become one batched read per 32 files, and concurrent reads of a file share one request; a lone read keeps its plain request. Reads share a request only when they carry the same access token, so a server client that resolves each caller's token never reads with another caller's; a shared read that gets 401 is read again alone, refreshing that caller's session. `space.files.resolveUrl` resolves through the same reads and, in browsers with realtime, remembers URLs per signed-in user in memory and IndexedDB: a reload shows Board pictures without resolving them again, remembered URLs are confirmed in the background, and `space.fs.changed` events drop them. `resolveUrl` takes `fresh` to skip remembered URLs, and `space.files.onUrlChange` reports files whose URL changed.
+  
+  `space.boards.assetSource()` returns a Board asset source over these URLs, and `createBoardAssetManager` takes the source's `subscribe` to reload pictures whose file changed, so hosts no longer forward file changes to `invalidatePath`. `clearFileUrlCache()` forgets remembered URLs.
+  
+  Single file reads wait up to 5 seconds for CDN delivery, as batched reads do, then answer `preparing`; `resolveUrl` keeps polling until its own deadline.
+  
+  Hosts: build Board asset sources with `space.boards.assetSource()`, pass the source to `createBoardAssetManager`, and call `clearFileUrlCache()` on sign-out. Pictures follow file changes while the Space is subscribed (`space.subscribe`); otherwise remembered URLs are confirmed again after a minute.
+
 ## 12.5.0
 
 ### Minor Changes

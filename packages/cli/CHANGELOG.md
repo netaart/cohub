@@ -1,5 +1,16 @@
 # @neta-art/cohub-cli
 
+## 10.12.1
+
+### Patch Changes
+
+- Updated dependencies [4fd2d85]
+- Updated dependencies [4fd2d85]
+- Updated dependencies [4fd2d85]
+- Updated dependencies [ea62adf]
+- Updated dependencies [4fd2d85]
+  - @neta-art/cohub@12.6.0
+
 ## 10.12.0
 
 ### Minor Changes
