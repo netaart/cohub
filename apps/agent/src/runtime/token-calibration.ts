@@ -1,4 +1,5 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { calculateContextTokens, type AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { estimateProxyContextTokens } from "./compaction-policy.js";
 
 /**
@@ -89,6 +90,51 @@ export function parseOverflowTokens(errorMessage: string | undefined): { actual:
 /** Learn the live-context ratio from an overflow error on a main agent request. */
 export function observeContextOverflow(model: ModelRef, messages: readonly unknown[], errorMessage: string | undefined) {
   const parsed = parseOverflowTokens(errorMessage);
-  if (!parsed) return;
-  observeTokenRatio("context", model, estimateProxyContextTokens(messages as AgentMessage[]), parsed.actual, { overflow: true });
+  const estimatedTokens = estimateProxyContextTokens(messages as AgentMessage[]);
+  const ratio = parsed
+    ? observeTokenRatio("context", model, estimatedTokens, parsed.actual, { overflow: true })
+    : getTokenRatio("context", model);
+  return { estimatedTokens, actualTokens: parsed?.actual, limitTokens: parsed?.limit, ratio };
+}
+
+function toEpochMs(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Date.parse(value);
+  return Number.NaN;
+}
+
+/**
+ * Context size from the last usage reported by `model` itself, plus a
+ * calibrated estimate of the messages after it. Usage from another model, or
+ * from before the latest compaction (retained-tail messages keep their old
+ * usage), does not describe what `model` will be sent.
+ */
+export function getContextTokenBudget(
+  messages: AgentMessage[],
+  model: Pick<Model<Api>, "provider" | "id">,
+  ratio: number,
+  proxyTokens: number,
+): { accurateTokens: number; estimatedTokens: number; ratio: number } | null {
+  let compactedAt = Number.NEGATIVE_INFINITY;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === "compactionSummary") {
+      compactedAt = toEpochMs((messages[i] as { timestamp?: unknown }).timestamp);
+      break;
+    }
+  }
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== "assistant") continue;
+    const assistant = message as unknown as AssistantMessage;
+    if (assistant.stopReason === "aborted" || assistant.stopReason === "error" || !assistant.usage) continue;
+    if (assistant.provider !== model.provider || assistant.model !== model.id) continue;
+    if (!(toEpochMs(assistant.timestamp) > compactedAt)) break;
+    const accurateTokens = calculateContextTokens(assistant.usage);
+    if (accurateTokens <= 0) continue;
+
+    const trailingTokens = estimateProxyContextTokens(messages.slice(i + 1));
+    const learned = observeTokenRatio("context", model, proxyTokens - trailingTokens, accurateTokens) ?? ratio;
+    return { accurateTokens, estimatedTokens: accurateTokens + Math.ceil(trailingTokens * learned), ratio: learned };
+  }
+  return null;
 }

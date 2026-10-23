@@ -676,7 +676,10 @@ function createStreamFn(getRuntime: () => StreamRuntime, shouldOmit: (message: A
             } else if (event.type === "error") {
               attachImageToTextCalls(event.error, prepared.calls);
               if (isContextOverflowFailure(event.error)) {
-                observeContextOverflow(model, transcript.messages, event.error.errorMessage);
+                const overflow = observeContextOverflow(model, transcript.messages, event.error.errorMessage);
+                llmRound.span.setAttribute("agent.context_overflow.estimated_tokens", overflow.estimatedTokens);
+                if (overflow.actualTokens) llmRound.span.setAttribute("agent.context_overflow.actual_tokens", overflow.actualTokens);
+                logger.warn(`[Agent] context overflow sessionId=${toolCtx?.sessionId ?? "unknown"} model=${model.provider}/${model.id} estimated=${overflow.estimatedTokens} actual=${overflow.actualTokens ?? "unknown"} limit=${overflow.limitTokens ?? "unknown"} ratio=${overflow.ratio?.toFixed(2) ?? "unknown"}`);
               }
               recordLlmUsage(llmRound.span, {
                 inputTokens: event.error.usage?.input,

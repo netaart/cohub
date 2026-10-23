@@ -17,12 +17,19 @@ type CompactResultValue = Extract<Awaited<ReturnType<typeof compact>>, { ok: tru
 
 type ProviderCallStats = { total: number; succeeded: number; failed: number };
 
+type RequestKind = "history" | "prefix";
+
 export type SummaryStats = {
   requests: number;
   chunks: number;
   shrinks: number;
+  overflows: number;
   omittedMessages: number;
+  previousSummary: "none" | "kept" | "folded";
+  /** Furthest degradation reached: none → chunked → recalibrated → omitted. */
+  degradation: "none" | "chunked" | "recalibrated" | "omitted";
   ratio: number;
+  lastOverflow?: { kind: RequestKind; estimatedTokens: number; actualTokens?: number; limitTokens?: number; error: string };
 };
 
 export type SummaryOutcome = {
@@ -46,9 +53,13 @@ const MAX_OVERFLOW_SCALE = 0.9;
 const UNKNOWN_OVERFLOW_SCALE = 0.6;
 const MAX_TRANSIENT_RETRIES = 1;
 const TRANSIENT_RETRY_DELAY_MS = 1_000;
-const MAX_FOLD_CHUNKS = 8;
-const MAX_REQUESTS = 32;
 const OMITTED_OUTLINE_MAX_CHARS = 8_000;
+// A fold summary may use at most half of the next request, so history always
+// keeps room; output is bounded via maxTokens at a conservative chars/token.
+const OUTPUT_CHARS_PER_TOKEN = 5;
+const MIN_FOLD_RESERVE_TOKENS = 512;
+// Unfolding repeats only after an overflow tightened the budget.
+const MAX_SUMMARY_UNFOLDS = MAX_SHRINKS + 1;
 // pi's split-turn summary starts with this when it was given no history messages.
 const PI_EMPTY_HISTORY_TEXT = "No prior history.";
 
@@ -128,11 +139,57 @@ export function projectForSummary(messages: readonly AgentMessage[]): Message[] 
   return convertToLlm([...messages]).filter((message) => message.role !== "system").map(projectMessage);
 }
 
+function splitSummary(summary: string, maxChars: number): Message[] {
+  const pieces: string[] = [];
+  let current = "";
+  for (const line of summary.split("\n")) {
+    for (let start = 0; start < Math.max(1, line.length); start += maxChars) {
+      const part = line.slice(start, start + maxChars);
+      if (current && current.length + part.length + 1 > maxChars) {
+        pieces.push(current);
+        current = "";
+      }
+      current = current ? `${current}\n${part}` : part;
+    }
+  }
+  if (current) pieces.push(current);
+  return pieces.map((text, index) => ({
+    role: "user",
+    content: [{ type: "text", text: `[Earlier context summary, part ${index + 1}/${pieces.length}]\n${text}` }],
+    timestamp: 0,
+  }));
+}
+
 const serializedChars = (message: Message) => serializeConversation([message]).length + 2;
 
+/** Bound one message to `maxChars` serialized, keeping its role so the summarizer knows who acted. */
 function shrinkMessage(message: Message, maxChars: number): Message {
-  const text = truncateMiddle(serializeConversation([message]), Math.max(0, maxChars - 16));
-  return { role: "user", content: [{ type: "text", text }], timestamp: message.timestamp };
+  const limit = Math.max(0, maxChars - 64);
+  if (message.role !== "assistant") {
+    return { ...message, content: [{ type: "text", text: contentToText(message.content, limit) }] } as Message;
+  }
+  const text = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+  const toolCalls = message.content.filter((block) => block.type === "toolCall");
+  const argCount = toolCalls.reduce((count, call) => count + Math.max(1, Object.keys(call.arguments ?? {}).length), 0);
+  const perArgument = Math.max(64, Math.floor(limit / (2 * Math.max(1, argCount))));
+  const bounded: Message = {
+    ...message,
+    content: [
+      ...(text ? [{ type: "text" as const, text: truncateMiddle(text, Math.floor(limit / 2)) }] : []),
+      ...toolCalls.map((call) => ({
+        ...call,
+        arguments: Object.fromEntries(
+          Object.entries(call.arguments ?? {}).map(([key, value]) => [key, truncateMiddle(typeof value === "string" ? value : safeJson(value), perArgument)]),
+        ),
+      })),
+    ],
+  };
+  if (serializedChars(bounded) <= maxChars) return bounded;
+  // Too many tool calls to list: keep the text and a tally of the calls.
+  const tally = new Map<string, number>();
+  for (const call of toolCalls) tally.set(call.name, (tally.get(call.name) ?? 0) + 1);
+  const toolLine = `[${toolCalls.length} tool calls: ${formatTools(tally)}]`;
+  return { ...message, content: [{ type: "text", text: truncateMiddle(text ? `${text}\n${toolLine}` : toolLine, limit) }] };
 }
 
 function oneLine(text: string, maxChars: number) {
@@ -140,31 +197,54 @@ function oneLine(text: string, maxChars: number) {
   return flat.length > maxChars ? `${flat.slice(0, maxChars)}…` : flat;
 }
 
-/** Turn headlines and tool usage of messages that could not be summarized. */
-function outlineOmittedMessages(messages: readonly Message[]): string {
-  const lines: string[] = [];
-  let tools = new Map<string, number>();
-  const flushTools = () => {
-    if (tools.size === 0) return;
-    lines.push(`  - Tools: ${[...tools].map(([name, count]) => (count > 1 ? `${name} ×${count}` : name)).join(", ")}`);
-    tools = new Map();
-  };
+type OmittedTurn = { headline: string; tools: Map<string, number> };
+
+function omittedTurns(messages: readonly Message[]): OmittedTurn[] {
+  const turns: OmittedTurn[] = [];
   for (const message of messages) {
-    if (message.role === "user") {
-      flushTools();
-      const text = contentToText(message.content, 2_000);
-      if (text) lines.push(`- User: ${oneLine(text, 300)}`);
-    } else if (message.role === "assistant") {
+    if (message.role === "user" || turns.length === 0) {
+      const text = message.role === "user" ? contentToText(message.content, 2_000) : "";
+      turns.push({ headline: oneLine(text, 300), tools: new Map() });
+    }
+    const turn = turns[turns.length - 1];
+    if (turn && message.role === "assistant") {
       for (const block of message.content) {
-        if (block.type === "toolCall") tools.set(block.name, (tools.get(block.name) ?? 0) + 1);
+        if (block.type === "toolCall") turn.tools.set(block.name, (turn.tools.get(block.name) ?? 0) + 1);
       }
     }
   }
-  flushTools();
-  const body = truncateMiddle(lines.join("\n"), OMITTED_OUTLINE_MAX_CHARS);
+  return turns;
+}
+
+const formatTools = (tools: Map<string, number>) =>
+  [...tools].map(([name, count]) => (count > 1 ? `${name} ×${count}` : name)).join(", ");
+
+/**
+ * Every omitted turn with its tool usage. Past the size cap, consecutive turns
+ * are grouped into ranges (tool counts aggregated) rather than cut off.
+ */
+export function outlineOmittedMessages(messages: readonly Message[]): string {
+  const turns = omittedTurns(messages);
+  const render = (headlineChars: number, groupSize: number) => {
+    const lines: string[] = [];
+    for (let start = 0; start < turns.length; start += groupSize) {
+      const group = turns.slice(start, start + groupSize);
+      const tools = new Map<string, number>();
+      for (const turn of group) for (const [name, count] of turn.tools) tools.set(name, (tools.get(name) ?? 0) + count);
+      const label = group.length > 1 ? `Turns ${start + 1}–${start + group.length}` : `Turn ${start + 1}`;
+      const headline = oneLine(group.find((turn) => turn.headline)?.headline ?? "", headlineChars);
+      lines.push(`- ${label}${headline ? `: ${headline}` : ""}${tools.size ? ` (tools: ${formatTools(tools)})` : ""}`);
+    }
+    return lines.join("\n");
+  };
+  let body = render(300, 1);
+  if (body.length > OMITTED_OUTLINE_MAX_CHARS) body = render(80, 1);
+  for (let groupSize = 2; body.length > OMITTED_OUTLINE_MAX_CHARS && groupSize < turns.length; groupSize *= 2) {
+    body = render(80, groupSize);
+  }
   return [
     "## Omitted History",
-    `${messages.length} older messages were too large to summarize and are only outlined here. The full transcript remains in the session archive.`,
+    `${messages.length} older messages could not be summarized and are only outlined here. The full transcript remains in the session archive.`,
     body,
   ].filter(Boolean).join("\n");
 }
@@ -195,6 +275,15 @@ function fileLists(fileOps: CompactionPreparation["fileOps"]) {
   };
 }
 
+/** Same tags pi's `compact()` appends, for summaries finished without it. */
+function formatFileLists({ readFiles, modifiedFiles }: ReturnType<typeof fileLists>) {
+  const sections = [
+    ...(readFiles.length ? [`<read-files>\n${readFiles.join("\n")}\n</read-files>`] : []),
+    ...(modifiedFiles.length ? [`<modified-files>\n${modifiedFiles.join("\n")}\n</modified-files>`] : []),
+  ];
+  return sections.length ? `\n\n${sections.join("\n\n")}` : "";
+}
+
 const inputTokensOf = (usage: Usage | undefined) => (usage ? usage.input + usage.cacheRead + usage.cacheWrite : 0);
 
 function sum(values: readonly number[], start: number, end: number) {
@@ -209,10 +298,14 @@ function sum(values: readonly number[], start: number, end: number) {
  *
  * - Fits in one request: identical to pi's `compact()` (one call, or two for a split turn).
  * - Otherwise: oldest chunks are folded into a rolling summary via pi's update prompt.
- * - Overflow anyway: recalibrate from the provider's reported size and retry smaller.
- * - Still overflowing after MAX_SHRINKS, or more history than MAX_FOLD_CHUNKS can
- *   cover: omit the oldest messages (outlined in the summary). Every failed
- *   attempt removes input, so the loop always terminates.
+ * - A running summary that leaves no room for the next message is split back into
+ *   history pieces and folded like any other history.
+ * - Overflow anyway: recalibrate from the provider's reported size; the rejected
+ *   request's next attempt is always strictly smaller.
+ * - Still overflowing after MAX_SHRINKS, or no room left for any history: omit the
+ *   oldest history (outlined in the summary), or move the split-turn prefix into
+ *   history. Every failed attempt removes input from the failed request, so the
+ *   loop always terminates.
  */
 export async function summarizeForCompaction(input: {
   preparation: CompactionPreparation;
@@ -224,21 +317,33 @@ export async function summarizeForCompaction(input: {
   const context = abortSignal ? withAbortSignal(abortSignal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT;
   const providerCalls: ProviderCallStats = { total: 0, succeeded: 0, failed: 0 };
   let lastResponse: AssistantMessage | undefined;
+  // Transient provider errors are retried per call, so a split turn never replays
+  // its already successful history request. Overflow is never retried here.
   const models = new Proxy(input.models, {
     get(target, property, receiver) {
       if (property !== "completeSimple") return Reflect.get(target, property, receiver);
       return async (...args: Parameters<typeof target.completeSimple>) => {
-        providerCalls.total += 1;
-        lastResponse = undefined;
-        try {
-          const response = await target.completeSimple(...args);
+        for (let attempt = 0; ; attempt++) {
+          providerCalls.total += 1;
+          lastResponse = undefined;
+          let response: AssistantMessage;
+          try {
+            response = await target.completeSimple(...args);
+          } catch (error) {
+            providerCalls.failed += 1;
+            throw error;
+          }
           lastResponse = response;
-          if (response.stopReason === "error" || response.stopReason === "aborted") providerCalls.failed += 1;
-          else providerCalls.succeeded += 1;
-          return response;
-        } catch (error) {
+          if (response.stopReason !== "error" && response.stopReason !== "aborted") {
+            providerCalls.succeeded += 1;
+            return response;
+          }
           providerCalls.failed += 1;
-          throw error;
+          const retryable = response.stopReason === "error"
+            && !isContextOverflowFailure(response)
+            && isRetryableProviderError(response);
+          if (!retryable || attempt >= MAX_TRANSIENT_RETRIES || abortSignal?.aborted) return response;
+          await sleep(TRANSIENT_RETRY_DELAY_MS);
         }
       };
     },
@@ -248,34 +353,57 @@ export async function summarizeForCompaction(input: {
   const maxOutputTokens = Math.min(Math.floor(0.8 * reserveTokens), model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY);
   let contextWindow = model.contextWindow;
   let ratio = getTokenRatio("summary", model) ?? DEFAULT_SUMMARY_RATIO;
+  // Total-request ceilings set by rejected requests, per request kind: a retry of
+  // the rejected request is strictly smaller even when the configured window
+  // overstates what the provider accepts.
+  const ceilingChars: Record<RequestKind, number> = { history: Number.POSITIVE_INFINITY, prefix: Number.POSITIVE_INFINITY };
 
   const history = projectForSummary(preparation.messagesToSummarize);
   const prefix = preparation.isSplitTurn ? projectForSummary(preparation.turnPrefixMessages) : [];
-  const sequence = [...history, ...prefix];
-  const prefixStart = history.length;
+  const originals = [...history, ...prefix];
+  const sequence = [...originals];
+  let prefixStart = history.length;
   const sizes = sequence.map(serializedChars);
   const size = (index: number) => sizes[index] ?? 0;
 
   let cursor = 0;
   let running = preparation.previousSummary;
+  let unfolds = 0;
   let usage: Usage | undefined;
+  let omittedCount = 0;
   const omitted: Message[] = [];
-  const stats: SummaryStats = { requests: 0, chunks: 0, shrinks: 0, omittedMessages: 0, ratio };
+  const stats: SummaryStats = {
+    requests: 0,
+    chunks: 0,
+    shrinks: 0,
+    overflows: 0,
+    omittedMessages: 0,
+    previousSummary: running ? "kept" : "none",
+    degradation: "none",
+    ratio,
+  };
   let attemptCount = 0;
-  let transientRetries = 0;
 
   const done = (result: SummaryOutcome["result"]): SummaryOutcome => {
-    stats.omittedMessages = omitted.length;
+    stats.omittedMessages = omittedCount;
     stats.ratio = ratio;
+    stats.degradation = omittedCount > 0
+      ? "omitted"
+      : stats.shrinks > 0
+        ? "recalibrated"
+        : stats.chunks > 0
+          ? "chunked"
+          : "none";
     return { result, attemptCount, providerCalls, stats };
   };
   const fail = (message: string) => done({ ok: false, error: new Error(message) });
+  const omit = (start: number, end: number) => {
+    omitted.push(...originals.slice(start, end));
+    omittedCount += end - start;
+  };
   const withOmitted = (summary: string) => (omitted.length ? `${summary}\n\n${outlineOmittedMessages(omitted)}` : summary);
-  // Request-size ceiling set by rejected requests: every retry is strictly smaller,
-  // even when the configured window overstates what the provider accepts.
-  let ceilingChars = Number.POSITIVE_INFINITY;
-  const budgetChars = (summaryChars: number) =>
-    Math.min(Math.floor(((contextWindow - maxOutputTokens) * 4) / ratio), ceilingChars) - PROMPT_OVERHEAD_CHARS - summaryChars;
+  const requestBudgetChars = (kind: RequestKind) =>
+    Math.min(Math.floor(((contextWindow - maxOutputTokens) * 4) / ratio), ceilingChars[kind]) - PROMPT_OVERHEAD_CHARS;
   const estimateTokens = (chars: number) => Math.ceil((chars + PROMPT_OVERHEAD_CHARS) / 4);
 
   for (;;) {
@@ -283,7 +411,7 @@ export async function summarizeForCompaction(input: {
       return done({
         ok: true,
         value: {
-          summary: withOmitted(running ?? PI_EMPTY_HISTORY_TEXT),
+          summary: withOmitted(running ?? PI_EMPTY_HISTORY_TEXT) + formatFileLists(fileLists(preparation.fileOps)),
           tokensBefore: preparation.tokensBefore,
           usage,
           retainedTail: preparation.retainedTail,
@@ -291,10 +419,33 @@ export async function summarizeForCompaction(input: {
         },
       });
     }
-    if (stats.requests >= MAX_REQUESTS) return fail("Summarization failed: request limit reached");
+    // Every request either makes progress or is one of a bounded number of retries.
+    if (stats.requests >= 2 * sequence.length + MAX_SHRINKS + MAX_SUMMARY_UNFOLDS + 8) {
+      return fail("Summarization failed: request limit reached");
+    }
 
-    const historyBudget = budgetChars(running?.length ?? 0);
-    if (historyBudget < MIN_CHUNK_CHARS) return fail("Summarization failed: summarizer context window too small");
+    const fullBudget = requestBudgetChars("history");
+    // A running summary (e.g. from a larger-window model, or a budget tightened by
+    // overflow) that crowds out history is folded back in as history, not cut.
+    if (running && running.length > fullBudget / 2 && unfolds < MAX_SUMMARY_UNFOLDS) {
+      unfolds += 1;
+      const pieces = splitSummary(running, Math.max(MIN_CHUNK_CHARS, Math.floor(fullBudget / 2)));
+      sequence.splice(cursor, 0, ...pieces);
+      originals.splice(cursor, 0, ...pieces);
+      sizes.splice(cursor, 0, ...pieces.map(serializedChars));
+      prefixStart = Math.max(prefixStart, cursor) + pieces.length;
+      running = undefined;
+      stats.previousSummary = "folded";
+      continue;
+    }
+
+    const historyBudget = fullBudget - (running?.length ?? 0);
+    if (historyBudget < MIN_CHUNK_CHARS) {
+      // In practice only after overflows tightened the budget: keep what is summarized, outline the rest.
+      omit(cursor, sequence.length);
+      cursor = sequence.length;
+      continue;
+    }
     for (let i = cursor; i < sequence.length; i++) {
       const message = sequence[i];
       if (message && size(i) > historyBudget) {
@@ -307,27 +458,19 @@ export async function summarizeForCompaction(input: {
     // The split-turn prefix is summarized by its own request; keep the longest tail that fits.
     let tailStart = sequence.length;
     if (prefix.length > 0) {
-      const prefixBudget = budgetChars(0);
+      const prefixBudget = requestBudgetChars("prefix");
       let used = 0;
       while (tailStart > Math.max(prefixStart, cursor) && used + size(tailStart - 1) <= prefixBudget) {
         tailStart -= 1;
         used += size(tailStart);
       }
     }
-    const remainingEnd = tailStart;
-    let remainingChars = sum(sizes, cursor, remainingEnd);
-    const capacity = historyBudget * (MAX_FOLD_CHUNKS - stats.chunks + 1);
-    while (cursor < remainingEnd - 1 && remainingChars > capacity) {
-      remainingChars -= size(cursor);
-      omitted.push(...sequence.slice(cursor, cursor + 1));
-      cursor += 1;
-    }
-    const isFinal = remainingChars <= historyBudget;
-    let end = remainingEnd;
+    const isFinal = sum(sizes, cursor, tailStart) <= historyBudget;
+    let end = tailStart;
     if (!isFinal) {
       end = cursor;
       let used = 0;
-      while (end < remainingEnd && used + size(end) <= historyBudget) {
+      while (end < tailStart && used + size(end) <= historyBudget) {
         used += size(end);
         end += 1;
       }
@@ -335,13 +478,15 @@ export async function summarizeForCompaction(input: {
     }
 
     const chunk = sequence.slice(cursor, end) as AgentMessage[];
-    const historyEstimate = estimateTokens(sum(sizes, cursor, end) + (running?.length ?? 0));
-    const prefixEstimate = estimateTokens(sum(sizes, tailStart, sequence.length));
+    const requestChars: Record<RequestKind, number> = {
+      history: sum(sizes, cursor, end) + (running?.length ?? 0) + PROMPT_OVERHEAD_CHARS,
+      prefix: sum(sizes, tailStart, sequence.length) + PROMPT_OVERHEAD_CHARS,
+    };
     stats.requests += 1;
     attemptCount += 1;
 
-    let failure: string | undefined;
-    let failedEstimate = historyEstimate;
+    let failure: string;
+    let failedKind: RequestKind = "history";
     if (isFinal) {
       const tail = sequence.slice(tailStart) as AgentMessage[];
       const result = await compact(
@@ -367,7 +512,7 @@ export async function summarizeForCompaction(input: {
           summary = running + summary.slice(PI_EMPTY_HISTORY_TEXT.length);
         }
         if (tail.length === 0 && stats.shrinks === 0) {
-          ratio = observeTokenRatio("summary", model, historyEstimate, inputTokensOf(result.value.usage)) ?? ratio;
+          ratio = observeTokenRatio("summary", model, estimateTokens(requestChars.history - PROMPT_OVERHEAD_CHARS), inputTokensOf(result.value.usage)) ?? ratio;
         }
         return done({
           ok: true,
@@ -375,13 +520,13 @@ export async function summarizeForCompaction(input: {
         });
       }
       failure = result.error.message;
-      if (failure.startsWith("Turn prefix")) failedEstimate = prefixEstimate;
+      if (failure.startsWith("Turn prefix")) failedKind = "prefix";
     } else {
       const result = await generateSummaryWithUsage(
         chunk,
         models,
         model,
-        reserveTokens,
+        Math.max(MIN_FOLD_RESERVE_TOKENS, Math.min(reserveTokens, Math.floor(fullBudget / 2 / OUTPUT_CHARS_PER_TOKEN / 0.8))),
         undefined,
         running,
         undefined,
@@ -394,8 +539,7 @@ export async function summarizeForCompaction(input: {
         usage = addUsage(usage, result.value.usage);
         cursor = end;
         stats.chunks += 1;
-        transientRetries = 0;
-        const learned = observeTokenRatio("summary", model, historyEstimate, inputTokensOf(result.value.usage));
+        const learned = observeTokenRatio("summary", model, estimateTokens(requestChars.history - PROMPT_OVERHEAD_CHARS), inputTokensOf(result.value.usage));
         if (learned !== undefined && stats.shrinks === 0) ratio = learned;
         continue;
       }
@@ -403,32 +547,38 @@ export async function summarizeForCompaction(input: {
     }
 
     if (abortSignal?.aborted || lastResponse?.stopReason === "aborted") return fail(failure);
+    if (!lastResponse || !isContextOverflowFailure(lastResponse)) return fail(failure);
 
-    if (lastResponse && isContextOverflowFailure(lastResponse)) {
-      transientRetries = 0;
-      if (stats.shrinks < MAX_SHRINKS) {
-        stats.shrinks += 1;
-        const parsed = parseOverflowTokens(lastResponse.errorMessage);
-        if (parsed?.limit && parsed.limit < contextWindow) contextWindow = parsed.limit;
-        if (parsed) {
-          observeTokenRatio("summary", model, failedEstimate, parsed.actual, { overflow: true });
-          ratio = Math.max(ratio, parsed.actual / failedEstimate);
-        }
-        const scale = parsed ? ((parsed.limit ?? contextWindow) - maxOutputTokens) / parsed.actual : UNKNOWN_OVERFLOW_SCALE;
-        ceilingChars = Math.min(ceilingChars, Math.floor(failedEstimate * 4 * Math.min(MAX_OVERFLOW_SCALE, scale * 0.95)));
-        continue;
+    const failedChars = requestChars[failedKind];
+    const failedEstimate = estimateTokens(failedChars - PROMPT_OVERHEAD_CHARS);
+    const parsed = parseOverflowTokens(lastResponse.errorMessage);
+    stats.overflows += 1;
+    stats.lastOverflow = {
+      kind: failedKind,
+      estimatedTokens: failedEstimate,
+      actualTokens: parsed?.actual,
+      limitTokens: parsed?.limit,
+      error: failure.slice(0, 500),
+    };
+
+    if (stats.shrinks < MAX_SHRINKS) {
+      stats.shrinks += 1;
+      if (parsed?.limit && parsed.limit < contextWindow) contextWindow = parsed.limit;
+      if (parsed) {
+        observeTokenRatio("summary", model, failedEstimate, parsed.actual, { overflow: true });
+        ratio = Math.max(ratio, parsed.actual / failedEstimate);
       }
-      const dropEnd = isFinal ? cursor + Math.max(1, Math.ceil((sequence.length - cursor) / 2)) : end;
-      omitted.push(...sequence.slice(cursor, dropEnd));
-      cursor = dropEnd;
+      const scale = parsed ? ((parsed.limit ?? contextWindow) - maxOutputTokens) / parsed.actual : UNKNOWN_OVERFLOW_SCALE;
+      ceilingChars[failedKind] = Math.min(ceilingChars[failedKind], Math.floor(failedChars * Math.min(MAX_OVERFLOW_SCALE, scale * 0.95)));
       continue;
     }
-
-    if (lastResponse && isRetryableProviderError(lastResponse) && transientRetries < MAX_TRANSIENT_RETRIES) {
-      transientRetries += 1;
-      await sleep(TRANSIENT_RETRY_DELAY_MS);
+    if (failedKind === "prefix") {
+      // Halving the prefix request moves its oldest messages into history.
+      ceilingChars.prefix = Math.floor(failedChars / 2);
       continue;
     }
-    return fail(failure);
+    const dropEnd = isFinal ? cursor + Math.max(1, Math.ceil((tailStart - cursor) / 2)) : end;
+    omit(cursor, dropEnd);
+    cursor = dropEnd;
   }
 }

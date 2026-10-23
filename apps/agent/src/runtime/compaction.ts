@@ -1,10 +1,9 @@
 import {
-  calculateContextTokens,
   DEFAULT_COMPACTION_SETTINGS,
   prepareCompaction,
   shouldCompact,
 } from "@earendil-works/pi-agent-core";
-import type { Api, AssistantMessage, Model, Usage } from "@earendil-works/pi-ai";
+import type { Usage } from "@earendil-works/pi-ai";
 import { logger } from "../logger.js";
 import type { SessionHandle } from "../session.js";
 import { persistCompactionEvent } from "../persistence.js";
@@ -18,7 +17,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createModelsFromCohubRegistry } from "./pi-models-adapter.js";
 import { estimateProxyContextTokens, resolveReserveTokens } from "./compaction-policy.js";
 import { summarizeForCompaction } from "./compaction-summary.js";
-import { getTokenRatio, observeTokenRatio } from "./token-calibration.js";
+import { getContextTokenBudget, getTokenRatio } from "./token-calibration.js";
 import {
   findFirstKeptEntryId,
   getCompactionSummaryMessageCount,
@@ -67,48 +66,6 @@ function resolveCompactionSettings(contextWindow: number) {
   };
 }
 
-function toEpochMs(value: unknown): number {
-  if (typeof value === "number") return value;
-  if (typeof value === "string") return Date.parse(value);
-  return Number.NaN;
-}
-
-/**
- * Context size from the last usage reported by `model` itself, plus a
- * calibrated estimate of the messages after it. Usage from another model, or
- * from before the latest compaction (retained-tail messages keep their old
- * usage), does not describe what `model` will be sent.
- */
-function getContextTokenBudget(
-  messages: AgentMessage[],
-  model: Pick<Model<Api>, "provider" | "id">,
-  ratio: number,
-  proxyTokens: number,
-): { accurateTokens: number; estimatedTokens: number } | null {
-  let compactedAt = Number.NEGATIVE_INFINITY;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]?.role === "compactionSummary") {
-      compactedAt = toEpochMs((messages[i] as { timestamp?: unknown }).timestamp);
-      break;
-    }
-  }
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message?.role !== "assistant") continue;
-    const assistant = message as unknown as AssistantMessage;
-    if (assistant.stopReason === "aborted" || assistant.stopReason === "error" || !assistant.usage) continue;
-    if (assistant.provider !== model.provider || assistant.model !== model.id) continue;
-    if (!(toEpochMs(assistant.timestamp) > compactedAt)) break;
-    const accurateTokens = calculateContextTokens(assistant.usage);
-    if (accurateTokens <= 0) continue;
-
-    const trailingTokens = estimateProxyContextTokens(messages.slice(i + 1));
-    observeTokenRatio("context", model, proxyTokens - trailingTokens, accurateTokens);
-    return { accurateTokens, estimatedTokens: accurateTokens + Math.ceil(trailingTokens * ratio) };
-  }
-  return null;
-}
-
 async function restorePreCompactionState(handle: SessionHandle, archivePath: string) {
   const restored = await handle.sessionManager.restoreFromArchive(archivePath).catch((error) => {
     logger.error(`[Compaction] restoreFromArchive failed sessionId=${handle.sessionId}:`, error);
@@ -147,10 +104,10 @@ export async function maybeAutoCompact(
 
   const force = input.force === true;
   const messages = handle.session.agent.state.messages;
-  // Learned from this model's real usage; 1 (the raw estimate) until a sample exists.
-  const ratio = getTokenRatio("context", model) ?? 1;
   const proxyTokens = estimateProxyContextTokens(messages);
-  const tokenBudget = getContextTokenBudget(messages, model, ratio, proxyTokens);
+  // Learned from this model's real usage; 1 (the raw estimate) until a sample exists.
+  const tokenBudget = getContextTokenBudget(messages, model, getTokenRatio("context", model) ?? 1, proxyTokens);
+  const ratio = tokenBudget?.ratio ?? getTokenRatio("context", model) ?? 1;
   // Provider usage undercounts inline base64 images on proxies that bill them
   // as text, so take the larger of the two views for the threshold decision.
   // tokensBefore reporting keeps using the accurate provider number.
@@ -227,13 +184,27 @@ export async function maybeAutoCompact(
       span.setAttribute("agent.compaction.summary_omitted_messages", summaryStats.omittedMessages);
       span.setAttribute("agent.compaction.summary_token_ratio", summaryStats.ratio);
       span.setAttribute("agent.compaction.context_token_ratio", ratio);
-      const summaryLabel = `requests=${summaryStats.requests} chunks=${summaryStats.chunks} shrinks=${summaryStats.shrinks} omitted=${summaryStats.omittedMessages} summaryRatio=${summaryStats.ratio.toFixed(2)}`;
+      span.setAttribute("agent.compaction.summary_overflows", summaryStats.overflows);
+      span.setAttribute("agent.compaction.summary_degradation", summaryStats.degradation);
+      span.setAttribute("agent.compaction.previous_summary", summaryStats.previousSummary);
+      const lastOverflow = summaryStats.lastOverflow;
+      if (lastOverflow) {
+        span.setAttribute("agent.compaction.overflow_kind", lastOverflow.kind);
+        span.setAttribute("agent.compaction.overflow_estimated_tokens", lastOverflow.estimatedTokens);
+        if (lastOverflow.actualTokens) span.setAttribute("agent.compaction.overflow_actual_tokens", lastOverflow.actualTokens);
+        if (lastOverflow.limitTokens) span.setAttribute("agent.compaction.overflow_limit_tokens", lastOverflow.limitTokens);
+        span.setAttribute("agent.compaction.overflow_error", lastOverflow.error);
+      }
+      const overflowLabel = lastOverflow
+        ? ` overflows=${summaryStats.overflows} lastOverflow=${lastOverflow.kind}:estimated=${lastOverflow.estimatedTokens},actual=${lastOverflow.actualTokens ?? "unknown"},limit=${lastOverflow.limitTokens ?? "unknown"}`
+        : "";
+      const summaryLabel = `degradation=${summaryStats.degradation} requests=${summaryStats.requests} chunks=${summaryStats.chunks} shrinks=${summaryStats.shrinks} omitted=${summaryStats.omittedMessages} previousSummary=${summaryStats.previousSummary} summaryRatio=${summaryStats.ratio.toFixed(2)}${overflowLabel}`;
       if (!compactAttempt.result.ok) {
         span.setAttribute("agent.compaction.error", compactAttempt.result.error.message);
         logger.warn(`[Compaction] summarization failed sessionId=${handle.sessionId} ${summaryLabel}: ${compactAttempt.result.error.message}`);
         return { compacted: false, reason: `compact_failed: ${compactAttempt.result.error.message}` };
       }
-      if (summaryStats.requests > 1 || summaryStats.omittedMessages > 0) {
+      if (summaryStats.degradation !== "none" || summaryStats.overflows > 0) {
         logger.info(`[Compaction] bounded summarization sessionId=${handle.sessionId} ${summaryLabel}`);
       }
       const result = compactAttempt.result.value;
