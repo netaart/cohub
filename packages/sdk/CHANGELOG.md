@@ -1,5 +1,28 @@
 # @neta-art/cohub
 
+## 12.4.0
+
+### Minor Changes
+
+- 1597942: `itemAsset` pictures can be Space files. `BoardAssetRef` takes `src`, a Space path resolved through `resolveFileUrl` like an image item's or a URL the page can load, in place of `url`; Space files get the same screen-sized CDN variants, cache entries and `invalidatePath` refreshes as built-in cards. Cropped pictures (`fit: "cover"`) key as `cover:` followed by the plain key, and `boardAssetRefKey` returns null for an empty `src`.
+  
+  Hosts: rename `url` to `src` in `itemAsset` results and pass Space paths as they are.
+- 1597942: Board replicas read the server while their local cache loads instead of after it, so a slow or stalled IndexedDB no longer delays the first document. The cached document still shows first whenever it arrives before the server answers.
+  
+  Hosts: no action.
+- 1597942: `mountBoardStage` takes `handlesHit(item, action)`: card keys it rejects show no cursor and their presses go to the editor, so a play key the host does not open no longer looks clickable. `viewLayer: "below"` puts DOM views under the canvas, so selection, arrows and strokes draw over them; pair it with a theme that sets `imageBackground`.
+  
+  Hosts: no action.
+- 1597942: A touch on the selected item drags it instead of starting an arrow from a connection port whose touch reach covers it when zoomed out; ports outside the item still draw arrows. `createBoardEditor` takes `touchRotation: false` to move and resize selections by touch and pen without a rotation handle.
+  
+  Hosts: no action.
+
+### Patch Changes
+
+- 1597942: The Neta Pixel, Neta Pixel Dark and Neta Studio Board themes take Neta Studio's design tokens: lighter Pixel borders and hovers, Studio's darker Pixel Dark greys, and Studio's cream ladder and translucent surfaces in Neta Studio.
+  
+  Hosts: no action.
+
 ## 12.3.0
 
 ### Minor Changes
