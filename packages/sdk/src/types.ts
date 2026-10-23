@@ -790,6 +790,8 @@ export type SessionBindingRecord = ProtocolSessionBindingRecord;
 
 export type SessionRecord = ProtocolSessionRecord & {
   bindings?: SessionBindingRecord[];
+  /** Viewer-scoped archive state, present on list responses. */
+  isArchived?: boolean;
   totalMessages?: number;
   totalToolCalls?: number;
   totalInputTokens?: number;

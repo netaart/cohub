@@ -1,5 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import { buildSearchExcerpt, findSearchMatches, toSearchDisplayText } from "@cohub/protocol";
+import { hasArchivedSessionLabel } from "../session-archive.js";
 import { containsSql, substringQualitySql, toIso, type SearchCandidate, type SearchViewerRelation } from "./shared.js";
 
 const MESSAGE_WEIGHT = 0.85;
@@ -68,10 +69,12 @@ export function buildChatSearchQuery(input: ChatSearchInput) {
       SELECT sess.id, true AS is_member
       FROM v2.space_sessions sess
       WHERE sess.space_id IN (SELECT id FROM viewer_spaces) ${inSpace(sql`sess.space_id`)}
+        AND NOT ${hasArchivedSessionLabel(me, sql`sess.id`)}
       UNION ALL
       SELECT sess.id, false AS is_member
       FROM v2.space_sessions sess
       WHERE ${spaceId ? sql`sess.space_id = ${spaceId}::uuid` : sql`(sess.user_uuid = ${me} OR ${isParticipant})`}
+        AND NOT ${hasArchivedSessionLabel(me, sql`sess.id`)}
         AND sess.space_id NOT IN (SELECT id FROM viewer_spaces)
         AND coalesce(
           (SELECT ap.signed_in_user_role IS NOT NULL OR ap.anonymous_user_role IS NOT NULL

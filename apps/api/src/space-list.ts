@@ -1,5 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import { db } from "./db/index.js";
+import { hasArchivedSessionLabel } from "./session-archive.js";
 
 const SPACE_LIST_FILTERS = ["recent", "all", "mine", "pinned", "archived"] as const;
 export type SpaceListFilter = (typeof SPACE_LIST_FILTERS)[number];
@@ -64,12 +65,14 @@ function recentPage(userUuid: string, visits: SpaceVisit[], limit: number) {
     : sql``;
   return sql`
     with signal(space_id, at) as (
-      (select space_id, last_message_at from v2.space_sessions
+      (select space_id, last_message_at from v2.space_sessions sess
         where user_uuid = ${userUuid} and last_message_at is not null
+          and not ${hasArchivedSessionLabel(userUuid, sql`sess.id`)}
         order by last_message_at desc nulls last, id desc limit ${RECENT_SESSION_WINDOW})
       union all
-      (select space_id, last_message_at from v2.space_sessions
+      (select space_id, last_message_at from v2.space_sessions sess
         where (meta -> 'participants' -> 'userUuids') ? ${userUuid} and last_message_at is not null
+          and not ${hasArchivedSessionLabel(userUuid, sql`sess.id`)}
         order by last_message_at desc limit ${RECENT_SESSION_WINDOW})
       union all
       (select space_id, created_at from v2.space_members

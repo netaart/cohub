@@ -2401,10 +2401,11 @@ router.get("/:id/sessions", async (c) => {
   const limitParam = Number(c.req.query("limit") ?? 20);
   const limit = Number.isFinite(limitParam) ? limitParam : 20;
   const cursor = c.req.query("cursor") ?? null;
+  const archived = c.req.query("archived") === "1" || c.req.query("archived") === "true";
   let sessions: Awaited<ReturnType<typeof listSpaceSessions>>["sessions"];
   let pageInfo: Awaited<ReturnType<typeof listSpaceSessions>>["pageInfo"];
   try {
-    ({ sessions, pageInfo } = await listSpaceSessions(spaceId, { limit, cursor }));
+    ({ sessions, pageInfo } = await listSpaceSessions(spaceId, { limit, cursor, viewerUuid: user?.uuid ?? null, archived }));
   } catch (error) {
     if (error instanceof InvalidSessionListCursorError) {
       return c.json({ message: "invalid cursor" }, 400);
