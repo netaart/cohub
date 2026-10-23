@@ -107,11 +107,11 @@ Do not commit real secrets or production-only credentials.
 
 上线顺序（不可颠倒）：
 
-1. 设置 `SITE_HOST_SUFFIXES_*` 并部署 Web，确认主站与独立域名行为不变
-2. 在 `cohub.live` 启用 Custom Hostnames，创建 `saas-fallback.cohub.live  AAAA  100::`（Proxied，设为 Fallback Origin）与 `cname.cohub.live  CNAME  saas-fallback.cohub.live`（Proxied）
-3. 新增 Worker 路由 `*/*` → `cohub-web` 与 `*.cohub.live/*` → None；前后导出路由表核对，确保 `api.`、`s-*` 等仍不经过 Worker
+1. 设置 `SITE_HOST_SUFFIXES_PROD`（如 `cohub.live,cohub.run,cohub.neta.art`，含所有经回退源进入该 Worker 的主站别名）并部署 Web，确认主站、主站别名与独立域名行为不变。dev 留空
+2. `cohub.live` 的 Custom Hostnames 回退源保持 `cohub.live`（它绑定 `cohub-web`，自定义主机名的流量经回退源进入 Worker，Host 不变）；添加 `cname.cohub.live  CNAME  cohub.live`（Proxied）作为用户的 CNAME 目标
+3. 不新增 Worker 路由：同一主机名上路由优先于 Worker 自定义域，`*/*` 会抢走 `dev.cohub.live` 及直连网关的子域名
 4. Cache Rule：`s-*.cohub.live`、`d-*.cohub.live` → Bypass cache
-5. 配置 API/worker secrets 并重启
+5. 仅 prod 配置 API/worker secrets，执行数据库迁移并重启。dev 不配 `CLOUDFLARE_SAAS_ZONE_ID`：自定义主机名属于整个 Zone，流量只会进入 prod Worker
 
 验证：
 

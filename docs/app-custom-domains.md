@@ -28,7 +28,7 @@
                      │ Cloudflare 边缘（cohub.live Zone，SaaS）   │
                      │ - Custom Hostname：DV 证书签发/续期/TLS    │
                      │ - WAF / 限速（按 hostname）                │
-                     │ - Worker 路由 */* → cohub-web             │
+                     │ - 回退源 cohub.live → cohub-web（Worker） │
                      └──────────┬───────────────────────────────┘
                                 │ entry.worker.ts：Host → App
                                 │   GET {API}/api/apps/by-origin
@@ -52,10 +52,10 @@
 
 | # | 位置 | 配置 |
 |---|---|---|
-| 1 | cohub.live → SSL/TLS → Custom Hostnames | 启用 Cloudflare for SaaS（Free/Pro/Business 含 100 个，超出 $0.10/个/月） |
-| 2 | DNS | `saas-fallback.cohub.live  AAAA  100::`，Proxied；设为 Fallback Origin |
-| 3 | DNS | `cname.cohub.live  CNAME  saas-fallback.cohub.live`，Proxied。这是给用户的 CNAME 目标；显式记录覆盖现有 `*.cohub.live` 泛解析 |
-| 4 | Workers Routes | **前置条件：§8.1 的 Host 分流已上线**（设置 `PUBLIC_SITE_HOST_SUFFIXES` 并部署 Web，未知 Host 一律 404）。然后新增两条：`*/*` → `cohub-web`；`*.cohub.live/*` → None。已有的 `cohub.live/*`、`dev.cohub.live/*` 等更具体路由不变且优先。上线前后导出路由表核对，确保 `api.`、`s-*`、`public.` 等仍不经过 Worker |
+| 1 | cohub.live → SSL/TLS → Custom Hostnames | 已启用（Free/Pro/Business 含 100 个，超出 $0.10/个/月） |
+| 2 | Fallback Origin | 保持 `cohub.live`。它是 `cohub-web` 的 Worker 自定义域，自定义主机名的流量经回退源进入该 Worker，Host 头保持为用户域名（现有的 `cohub.neta.art` 即如此） |
+| 3 | DNS | `cname.cohub.live  CNAME  cohub.live`，Proxied。这是给用户的 CNAME 目标 |
+| 4 | Workers Routes | **不新增**。同一主机名上路由优先于 Worker 自定义域，`*/*` 会把 `dev.cohub.live` 抢到 prod Worker，还会拦下直连网关的子域名。**前置条件**：§8.1 的 Host 分流已上线（设置 `PUBLIC_SITE_HOST_SUFFIXES` 并部署 Web），再配置 secrets 开启功能 |
 | 5 | Custom Hostnames 默认 | DV、HTTP 验证、最低 TLS 1.2 |
 | 6 | API Token | 仅 cohub.live，权限 `Zone › SSL and Certificates › Edit`。写入 `cohub-api-secrets`（API 与 worker 共用）：`CLOUDFLARE_SAAS_API_TOKEN`、`CLOUDFLARE_SAAS_ZONE_ID`。所有 CF 调用都在 system worker 的检查任务里；API 只以 Zone ID 是否配置判断功能是否开启 |
 | 7 | Cache Rule | 沙箱主机 `s-*.cohub.live`（prod）与 `d-*.cohub.live`（dev）→ Bypass cache（与 §8.4 的 `cache: "no-store"` 双保险；这也修复今天直连 `s-…` 时 `.pdf` 等默认可缓存扩展名被边缘缓存的隐患） |
@@ -63,7 +63,7 @@
 
 保留名：不得为 `cohub.live` 本身创建自定义主机名（Cloudflare 限制）；§6 的拒绝列表同时覆盖其子域。
 
-**dev 环境**：自定义主机名属于 Zone 级资源，dev 与 prod 共用 cohub.live。dev 默认关闭此功能；联调时手工创建测试主机名，并加显式路由 `test-x.example.com/*` → `cohub-web-dev`（更具体的路由优先）。
+**dev 环境**：不开启。自定义主机名属于 Zone 级资源，dev 与 prod 共用 cohub.live，流量都经回退源进入 prod Worker，dev 建出的主机名无法访问。dev 不配 `CLOUDFLARE_SAAS_ZONE_ID`。
 
 ## 4. 数据模型
 
@@ -274,9 +274,9 @@ App 记录不变；域名只经上述接口与实时事件获取。
 
 ### 8.1 Host 判定
 
-`*/*` 路由下，cohub-web 按 hostname 分流：`{id}` 模板 → 现有独立域名逻辑；`PUBLIC_SITE_HOST_SUFFIXES` 列出的主站 Zone → SvelteKit；其余 → 自定义域名候选，查不到直接 404。
+经回退源进入 cohub-web 的请求按 hostname 分流：`{id}` 模板 → 现有独立域名逻辑；`PUBLIC_SITE_HOST_SUFFIXES` 列出的主站 Zone → SvelteKit；其余 → 自定义域名候选，查不到直接 404。
 
-`PUBLIC_SITE_HOST_SUFFIXES` 一经配置，分流即**无条件生效**：自定义域名候选绝不落入 SvelteKit，以免在第三方域名上渲染 Cohub 主站、登录页与授权页。该 Web 版本必须先于 §3 第 4 步的 `*/*` 路由上线；未配置时行为与现状一致。
+`PUBLIC_SITE_HOST_SUFFIXES` 一经配置，分流即**无条件生效**：自定义域名候选绝不落入 SvelteKit，以免在第三方域名上渲染 Cohub 主站、登录页与授权页。该 Web 版本必须先于配置 secrets 开启功能上线；未配置时行为与现状一致。主站别名（如 `cohub.neta.art`）也经回退源进入，必须列入 `PUBLIC_SITE_HOST_SUFFIXES`。
 
 ### 8.2 App 解析缓存
 
