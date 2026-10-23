@@ -91,6 +91,24 @@ describe("standalone App serving", () => {
 		);
 	});
 
+	it("passes 304 through for conditional requests", async () => {
+		const fetcher: typeof fetch = async (input, init) => {
+			if (String(input).includes("/api/apps/by-origin"))
+				return Response.json(detail);
+			const since = new Headers(init?.headers).get("if-modified-since");
+			return since
+				? new Response(null, { status: 304 })
+				: new Response("<p>ok</p>");
+		};
+		const url = new URL(
+			"https://750e8400-e29b-41d4-a716-446655440000.apps.cohub.live/daily.html",
+		);
+		const response = await serve(url, fetcher, {
+			headers: { "If-Modified-Since": "Fri, 23 Oct 2026 02:17:20 GMT" },
+		});
+		assert.equal(response.status, 304);
+	});
+
 	it("returns an uncached 502 when the App resolver is unavailable", async () => {
 		const fetcher: typeof fetch = async () =>
 			new Response("upstream failed", { status: 503 });

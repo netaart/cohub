@@ -222,7 +222,9 @@ async function fetchAsset(
 		headers,
 		redirect: "manual",
 	});
-	if (response.status < 300 || response.status > 399) return response;
+	// 304 answers a conditional request; only other 3xx are redirects.
+	if (response.status === 304 || response.status < 300 || response.status > 399)
+		return response;
 	const location = response.headers.get("location");
 	const redirectsLeft = options.redirectsLeft ?? 3;
 	if (!location || redirectsLeft <= 0)
