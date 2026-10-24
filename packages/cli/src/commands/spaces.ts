@@ -10,7 +10,7 @@ import type {
   SpaceListPage,
   SpaceRecord,
 } from "@neta-art/cohub";
-import type { Command } from "commander";
+import { Option, type Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset } from "../avatar.js";
 import { createClient } from "../client.js";
 import { collectOption, readPromptContent } from "../command-input.js";
@@ -65,6 +65,7 @@ type PromptOptions = {
   at?: string;
   cron?: string;
   timezone?: string;
+  notifyOnSuccess?: "on" | "off";
   label?: string[];
   env?: string[];
   image?: string[];
@@ -248,6 +249,9 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
   const content = await readPromptContent(words, { allowEmpty: Boolean(opts.image?.length) });
   const scheduleFlags = [opts.delayMs, opts.at, opts.cron].filter((value) => value !== undefined);
   if (scheduleFlags.length > 1) return error("Conflicting schedule", "Use only one of --delay-ms, --at, or --cron");
+  if (opts.notifyOnSuccess !== undefined && scheduleFlags.length === 0) {
+    return error("Missing schedule", "--notify-on-success requires --delay-ms, --at, or --cron");
+  }
   if (opts.cron && !opts.timezone) return error("Missing timezone", "--timezone is required with --cron");
 
   const thinkingLevel = opts.thinkingLevel?.trim() || undefined;
@@ -261,11 +265,11 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
   const spaceId = await resolveSpace(command, { home: true });
   const client = createClient();
   try {
-    const schedule = opts.delayMs
+    const schedule = opts.delayMs !== undefined
       ? { mode: "delay" as const, delayMs: parseInteger(opts.delayMs, "delay", { min: 1 }) }
-      : opts.at
+      : opts.at !== undefined
         ? { mode: "at" as const, sendAt: opts.at }
-        : opts.cron
+        : opts.cron !== undefined
           ? { mode: "repeat" as const, cronExpression: opts.cron, timezone: opts.timezone as string }
           : undefined;
     const sessionId = opts.session;
@@ -307,7 +311,10 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
       accessMode: opts.readOnly ? "read_only" : "full_access",
       intent: opts.steer ? "steer" : undefined,
       env: parseEnvOptions(opts.env),
-      schedule,
+      schedule: schedule && {
+        ...schedule,
+        ...(opts.notifyOnSuccess !== undefined ? { notifyOnSuccess: opts.notifyOnSuccess === "on" } : {}),
+      },
       labelRefs: opts.label?.length ? opts.label : undefined,
     });
     if (jsonRequested(opts)) return outJson(result);
@@ -415,6 +422,7 @@ export function registerPrompt(program: Command): void {
     .option("--at <iso>", "Send once at an ISO 8601 time with timezone")
     .option("--cron <expression>", "Repeat using a 5-field cron expression")
     .option("--timezone <tz>", "IANA timezone for --cron, e.g. Asia/Shanghai")
+    .addOption(new Option("--notify-on-success <on|off>", "Show a notification when the scheduled prompt succeeds (default: on)").choices(["on", "off"]))
     .option("--label <ref>", "Attach a label, e.g. Bug or Area/Frontend", collectOption, [])
     .option("--env <key=value>", "Set an environment variable for this turn", collectOption, [])
     .option("--image <path>", "Attach an image", collectOption, [])
@@ -742,6 +750,7 @@ export function registerSpaces(program: Command): void {
     .option("--at <iso>", "Send once at an ISO 8601 time with timezone")
     .option("--cron <expression>", "Repeat using a 5-field cron expression")
     .option("--timezone <tz>", "IANA timezone for --cron, e.g. Asia/Shanghai")
+    .addOption(new Option("--notify-on-success <on|off>", "Show a notification when the scheduled prompt succeeds (default: on)").choices(["on", "off"]))
     .option("--label <ref>", "Attach a label, e.g. Bug or Area/Frontend", collectOption, [])
     .option("--env <key=value>", "Set an environment variable for this turn", collectOption, [])
     .option("--image <path>", "Attach an image", collectOption, [])

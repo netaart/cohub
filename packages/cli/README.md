@@ -238,6 +238,7 @@ Scheduling rules:
 
 - Use only one of `--delay-ms`, `--at`, or `--cron`.
 - `--cron` requires `--timezone`.
+- Add `--notify-on-success off` to a scheduled prompt to silence successful completion popups. Failure notifications stay on; existing schedules notify by default.
 
 ## Chats / Sessions
 
@@ -609,8 +610,11 @@ cohub cron-jobs ls <spaceId> --json
 cohub cron-jobs runs <cronJobId> --json
 cohub cron-jobs toggle <cronJobId> on
 cohub cron-jobs toggle <cronJobId> off
+cohub cron-jobs update <cronJobId> --notify-on-success off
 cohub cron-jobs delete <cronJobId>
 ```
+
+Use `--notify-on-success on` to restore completion popups. Changes apply to future executions; a run already started keeps its original setting.
 
 Confirm before enabling, disabling, or deleting recurring scheduled prompts.
 

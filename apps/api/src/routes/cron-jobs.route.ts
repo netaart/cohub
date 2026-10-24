@@ -273,6 +273,21 @@ router.patch("/:id", async (c) => {
       sanitizePostgresJsonValue(body.payload) as Record<string, unknown>,
       job.payload,
     );
+    if (job.taskType === "send_message") {
+      if (!("notifyOnSuccess" in patch.payload) && isRecord(job.payload) && "notifyOnSuccess" in job.payload) {
+        patch.payload.notifyOnSuccess = job.payload.notifyOnSuccess;
+      }
+      if ("notifyOnSuccess" in patch.payload && typeof patch.payload.notifyOnSuccess !== "boolean") {
+        return c.json({ message: "notifyOnSuccess must be a boolean" }, 400);
+      }
+    }
+  }
+
+  if ("notifyOnSuccess" in body) {
+    if (typeof body.notifyOnSuccess !== "boolean") return c.json({ message: "notifyOnSuccess must be a boolean" }, 400);
+    if (job.taskType !== "send_message") return c.json({ message: "notifyOnSuccess is only supported for scheduled prompts" }, 400);
+    if (!isRecord(job.payload)) throw new Error("Stored scheduled prompt payload must be an object");
+    patch.payload = { ...(patch.payload ?? job.payload), notifyOnSuccess: body.notifyOnSuccess };
   }
 
   const nextCronExpression = "cronExpression" in body ? body.cronExpression : undefined;

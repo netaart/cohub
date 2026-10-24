@@ -1290,9 +1290,9 @@ export type CreateSpacePromptInput = {
   labelRefs?: string[];
   schedule?:
     | { mode?: "immediate" }
-    | { mode: "delay"; delayMs: number }
-    | { mode: "at"; sendAt: string }
-    | { mode: "repeat"; cronExpression: string; timezone: string };
+    | { mode: "delay"; delayMs: number; notifyOnSuccess?: boolean }
+    | { mode: "at"; sendAt: string; notifyOnSuccess?: boolean }
+    | { mode: "repeat"; cronExpression: string; timezone: string; notifyOnSuccess?: boolean };
 };
 
 export type CreateSpacePromptResponse =
@@ -1335,6 +1335,8 @@ export type CronJobPayload = Record<string, unknown>;
 
 export type SendMessageCronJobPayload = CronJobPayload & {
   content: ContentBlock[];
+  /** Notify after successful completion. Defaults to true; failures still notify. */
+  notifyOnSuccess?: boolean;
   clientMessageId?: string;
   generationPolicy?: unknown;
   intent?: "followup" | "steer" | string;
@@ -1352,6 +1354,8 @@ export type SendMessageCronJobPayload = CronJobPayload & {
 export type CronJobUpdatePatch<TPayload extends CronJobPayload = CronJobPayload> = {
   title?: string;
   payload?: TPayload;
+  /** Update a scheduled prompt's success notifications without replacing its payload. */
+  notifyOnSuccess?: boolean;
   cronExpression?: string;
   timezone?: string;
   enabled?: boolean;

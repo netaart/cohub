@@ -1,4 +1,4 @@
-import { createSessionSnapshotScheduler, publishSessionSnapshot } from "@cohub/core/sessions";
+import { createSessionSnapshotScheduler, publishSessionSnapshot, type SubmitSessionPromptContext } from "@cohub/core/sessions";
 import { isSettledStatsTurn } from "@cohub/protocol/model";
 import { createLogger } from "@cohub/infra/logging";
 import { randomUUID } from "node:crypto";
@@ -208,6 +208,8 @@ export const dispatchTurnFinalized = async (input: { spaceId: string; sessionId:
   await dispatchSessionTurnState(input.spaceId, input.turn);
 
   if (!input.turn.userUuid) return;
+  const context = input.turn.meta?.context as SubmitSessionPromptContext | undefined;
+  if (input.turn.status === "completed" && context?.kind === "scheduled_task" && context.notifyOnSuccess === false) return;
   await dispatchRealtimeEvent({
     id: randomUUID(),
     timestamp: Date.now(),

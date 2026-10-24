@@ -1958,6 +1958,8 @@
 	"cron_schedule": "计划",
 	"cron_schedule_hint": "5 个字段 · 分 时 日 月 星期",
 	"cron_timezone": "时区",
+	"cron_notify_on_success": "成功完成时提醒",
+	"cron_notify_on_success_hint": "关闭后，后续执行成功时不再弹窗，失败提醒仍保留。",
 	"cron_model": "模型",
 	"cron_cancel": "取消",
 	"cron_active": "启用",

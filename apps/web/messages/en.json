@@ -1958,6 +1958,8 @@
 	"cron_schedule": "Schedule",
 	"cron_schedule_hint": "5 fields · minute hour day month weekday",
 	"cron_timezone": "Timezone",
+	"cron_notify_on_success": "Notify on successful completion",
+	"cron_notify_on_success_hint": "Turn off to silence completion popups for future runs. Failure notifications stay on.",
 	"cron_model": "Model",
 	"cron_cancel": "Cancel",
 	"cron_active": "Active",

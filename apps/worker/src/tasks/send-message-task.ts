@@ -40,7 +40,7 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
   const requestSource = normalizeRequestSource(payload.data?.requestSource);
   const origin = normalizeSessionTurnOrigin(payload.data?.origin);
   const spaceId = payload.spaceId;
-  const { content, sessionId, title, source: payloadSource, model, provider, thinkingLevel, clientMessageId, generationPolicy, accessMode: payloadAccessMode, intent, labelIds, auth, env } = (payload.data ?? {}) as {
+  const { content, sessionId, title, source: payloadSource, model, provider, thinkingLevel, clientMessageId, generationPolicy, accessMode: payloadAccessMode, intent, labelIds, auth, env, notifyOnSuccess } = (payload.data ?? {}) as {
     content?: ContentBlock[];
     sessionId?: string;
     title?: string;
@@ -55,10 +55,12 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
     labelIds?: string[];
     auth?: PromptAuthContext | null;
     env?: PromptEnv | null;
+    notifyOnSuccess?: boolean;
   };
 
   if (!spaceId) throw new Error("spaceId is required for send_message task");
   if (!content || content.length === 0) throw new Error("content (ContentBlock[]) is required for send_message task");
+  if (notifyOnSuccess !== undefined && typeof notifyOnSuccess !== "boolean") throw new UnrecoverableError("notifyOnSuccess must be a boolean");
 
   const userId = payload.userId?.trim();
   if (!userId) throw new Error("userId is required for send_message task");
@@ -122,6 +124,7 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
       kind: "scheduled_task",
       taskRunId,
       cronJobId: payload.cronJobId ?? null,
+      notifyOnSuccess: notifyOnSuccess ?? true,
       auth: sanitizedAuth,
     } satisfies SubmitSessionPromptContext,
   });

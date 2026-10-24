@@ -121,9 +121,9 @@ async function buildSpacePromptTurnResponse(session: SpaceRouteSessionRecord | n
 
 type SpacePromptSchedule =
   | { mode?: "immediate" }
-  | { mode: "delay"; delayMs?: number }
-  | { mode: "at"; sendAt?: string }
-  | { mode: "repeat"; cronExpression?: string; timezone?: string };
+  | { mode: "delay"; delayMs?: number; notifyOnSuccess?: boolean }
+  | { mode: "at"; sendAt?: string; notifyOnSuccess?: boolean }
+  | { mode: "repeat"; cronExpression?: string; timezone?: string; notifyOnSuccess?: boolean };
 
 type PromptAccessMode = "read_only" | "full_access";
 
@@ -2017,9 +2017,15 @@ router.post("/:id/prompt", async (c) => {
   }
 
   const schedule = body.schedule ?? { mode: "immediate" as const };
+  if (typeof schedule !== "object" || Array.isArray(schedule)) return c.json({ message: "schedule must be an object" }, 400);
   const mode = schedule.mode ?? "immediate";
   if (!["immediate", "delay", "at", "repeat"].includes(mode)) {
     return c.json({ message: "schedule.mode must be one of: immediate, delay, at, repeat" }, 400);
+  }
+  const notifyOnSuccess = "notifyOnSuccess" in schedule ? schedule.notifyOnSuccess : undefined;
+  if (notifyOnSuccess !== undefined) {
+    if (typeof notifyOnSuccess !== "boolean") return c.json({ message: "notifyOnSuccess must be a boolean" }, 400);
+    if (mode === "immediate") return c.json({ message: "notifyOnSuccess requires a scheduled prompt" }, 400);
   }
 
   const generationPolicy = body.generationPolicy === undefined || body.generationPolicy === null
@@ -2081,6 +2087,7 @@ router.post("/:id/prompt", async (c) => {
   const taskData = {
     ...provenance,
     content,
+    ...(notifyOnSuccess === undefined ? {} : { notifyOnSuccess }),
     clientMessageId,
     ...(generationPolicy ? { generationPolicy } : {}),
     ...(promptIntent !== "followup" ? { intent: promptIntent } : {}),

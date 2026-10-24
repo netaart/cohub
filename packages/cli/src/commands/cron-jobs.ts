@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { Command } from "commander";
+import { Option, type Command } from "commander";
 import { createClient } from "../client.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp } from "../output.js";
 
@@ -67,8 +67,9 @@ export function registerCronJobs(program: Command): void {
     .option("--cron <expression>", "Update cron expression")
     .option("--timezone <timezone>", "Update timezone")
     .option("--payload <jsonOrPath>", "Update payload from JSON string or file")
+    .addOption(new Option("--notify-on-success <on|off>", "Notify when the scheduled prompt succeeds").choices(["on", "off"]))
     .option("--json", "Output as JSON")
-    .action(async (id: string, opts: { title?: string; cron?: string; timezone?: string; payload?: string; json?: boolean }) => {
+    .action(async (id: string, opts: { title?: string; cron?: string; timezone?: string; payload?: string; notifyOnSuccess?: "on" | "off"; json?: boolean }) => {
       const client = createClient();
       try {
         const patch: Record<string, unknown> = {};
@@ -76,7 +77,8 @@ export function registerCronJobs(program: Command): void {
         if (opts.cron !== undefined) patch.cronExpression = opts.cron;
         if (opts.timezone !== undefined) patch.timezone = opts.timezone;
         if (opts.payload !== undefined) patch.payload = readJsonObject(opts.payload);
-        if (Object.keys(patch).length === 0) error("No changes provided", "Use --title, --cron, --timezone, or --payload");
+        if (opts.notifyOnSuccess !== undefined) patch.notifyOnSuccess = opts.notifyOnSuccess === "on";
+        if (Object.keys(patch).length === 0) error("No changes provided", "Use --title, --cron, --timezone, --payload, or --notify-on-success");
         const result = await client.cronJobs.update(id, patch);
         if (jsonRequested(opts)) return outJson(result);
         ok(`Cron job updated: ${result.job.id}`);

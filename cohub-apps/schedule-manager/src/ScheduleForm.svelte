@@ -1,5 +1,5 @@
 <script module lang="ts">
-export type ScheduleFields = { title: string; cronExpression: string; timezone: string };
+export type ScheduleFields = { title: string; cronExpression: string; timezone: string; notifyOnSuccess: boolean };
 export type ScheduleSubmission = ScheduleFields & { prompt: string };
 </script>
 
@@ -19,25 +19,27 @@ type Props = {
   mode: "create" | "edit";
   initial: ScheduleFields & { prompt?: string };
   readonlyPrompt?: string;
+  showNotifications?: boolean;
   busy: boolean;
   /** A new schedule reports its prompt so unsaved text is never lost. */
   onchange: (fields: ScheduleFields, prompt?: string) => void;
   onsubmit: (values: ScheduleSubmission) => void;
   oncancel: () => void;
 };
-let { mode, initial, readonlyPrompt, busy, onchange, onsubmit, oncancel }: Props = $props();
+let { mode, initial, readonlyPrompt, showNotifications = true, busy, onchange, onsubmit, oncancel }: Props = $props();
 
 const locale = $derived(getLocale());
 let title = $state(untrack(() => initial.title));
 let prompt = $state(untrack(() => initial.prompt ?? ""));
 let cronExpression = $state(untrack(() => initial.cronExpression));
 let timezone = $state(untrack(() => initial.timezone));
+let notifyOnSuccess = $state(untrack(() => initial.notifyOnSuccess));
 let preview = $state<CronPreview | null>(null);
 let submitted = $state(false);
 let timezones = $state<string[]>([]);
 
 const creating = untrack(() => mode === "create");
-const fields: ScheduleFields = $derived({ title, cronExpression, timezone });
+const fields: ScheduleFields = $derived({ title, cronExpression, timezone, notifyOnSuccess });
 const values = $derived({ ...fields, prompt });
 const previewError = $derived(
   preview && !preview.ok
@@ -131,6 +133,15 @@ const presetLabel = {
         <input id="schedule-timezone" class={inputClass} list="schedule-timezones" autocomplete="off" spellcheck="false" placeholder="UTC" bind:value={timezone} onfocus={loadTimezones} />
         <datalist id="schedule-timezones">{#each timezones as zone (zone)}<option value={zone}></option>{/each}</datalist>
       </Field>
+      {#if showNotifications}
+        <label class="flex min-h-11 items-start gap-3 text-text-secondary">
+          <input type="checkbox" class="mt-0.5 accent-brand" checked={notifyOnSuccess} aria-describedby="schedule-notifications-hint" onchange={(event) => { notifyOnSuccess = event.currentTarget.checked; changed(); }} />
+          <span class="min-w-0">
+            <span class={labelClass}>{m.cron_notify_on_success({}, { locale })}</span>
+            <span id="schedule-notifications-hint" class="mt-1 block text-[11px] leading-5 text-text-placeholder">{m.cron_notify_on_success_hint({}, { locale })}</span>
+          </span>
+        </label>
+      {/if}
       {#if preview?.ok}
         <div class={cardClass}>
           <div class={labelClass}>{m.resource_app_next_runs({}, { locale })}</div>

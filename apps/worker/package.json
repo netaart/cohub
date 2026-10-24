@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.build.json",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
-    "test": "node ../../scripts/test/run.mjs 'tests/**/*.test.ts'",
+    "test": "node ../../scripts/test/run.mjs 'tests/**/*.test.ts' && node ../../scripts/test/run.mjs --experimental-test-module-mocks --disable-warning=ExperimentalWarning tests/send-message-notifications.integration.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js",
     "start:system": "node dist/entrances/system-worker.js"

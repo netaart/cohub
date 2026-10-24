@@ -65,6 +65,7 @@ export type ScheduledTaskPromptContext = {
   kind: "scheduled_task";
   taskRunId: string;
   cronJobId?: string | null;
+  notifyOnSuccess?: boolean;
   auth?: PromptAuthContext | null;
 };
 

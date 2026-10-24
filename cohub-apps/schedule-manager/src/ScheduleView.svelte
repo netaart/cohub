@@ -35,10 +35,13 @@ let nextRuns = $state<Date[]>([]);
 
 function initialValues(): ScheduleFields & { prompt?: string } {
   const text = (key: string) => (typeof draft?.[key] === "string" ? (draft[key] as string) : null);
+  const notifyOnSuccess = draft?.notifyOnSuccess === undefined ? job?.payload.notifyOnSuccess : draft.notifyOnSuccess;
+  if (notifyOnSuccess !== undefined && typeof notifyOnSuccess !== "boolean") throw new Error("notifyOnSuccess must be a boolean");
   return {
     title: text("title") ?? job?.title ?? "",
     cronExpression: text("cronExpression") ?? job?.cronExpression ?? "0 9 * * *",
     timezone: text("timezone") ?? job?.timezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"),
+    notifyOnSuccess: notifyOnSuccess ?? true,
     ...(job ? {} : { prompt: text("prompt") ?? "" }),
   };
 }
@@ -66,7 +69,7 @@ async function save(values: ScheduleSubmission) {
       const result = await client.space(spaceId).prompt({
         title: values.title,
         content: [{ type: "text", text: values.prompt }],
-        schedule: { mode: "repeat", cronExpression: values.cronExpression, timezone: values.timezone },
+        schedule: { mode: "repeat", cronExpression: values.cronExpression, timezone: values.timezone, notifyOnSuccess: values.notifyOnSuccess },
       });
       if (result.mode !== "repeat") throw new Error("Expected a scheduled prompt");
       updateDraft(null);
@@ -83,6 +86,7 @@ async function save(values: ScheduleSubmission) {
       title: values.title,
       cronExpression: values.cronExpression,
       timezone: values.timezone,
+      ...(sendsMessage ? { notifyOnSuccess: values.notifyOnSuccess } : {}),
     });
     updateDraft(null);
     show(next);
@@ -158,7 +162,7 @@ function payloadField(key: string) {
     </header>
 
     {#if editing}
-      <ScheduleForm mode="edit" initial={initialValues()} readonlyPrompt={formatCronjobPrompt(job.payload)} {busy} onchange={(fields) => updateDraft(fields)} onsubmit={save} oncancel={cancel} />
+      <ScheduleForm mode="edit" initial={initialValues()} readonlyPrompt={formatCronjobPrompt(job.payload)} showNotifications={sendsMessage} {busy} onchange={(fields) => updateDraft(fields)} onsubmit={save} oncancel={cancel} />
     {:else}
       <section class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_260px] lg:gap-8">
         <div class="min-w-0 space-y-6">
