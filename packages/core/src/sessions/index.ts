@@ -18,3 +18,4 @@ export * from "./session-meta.js";
 export * from "./session-title.js";
 export * from "./turn-origin.js";
 export * from "./runtime-recovery.js";
+export * from "./goal.js";

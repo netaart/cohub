@@ -13,7 +13,7 @@ export type SessionTurnStatus =
   | "interrupted"
   | "merged"
   | "cancelled";
-export type SessionTurnIntent = "steer" | "followup" | "compact";
+export type SessionTurnIntent = "steer" | "followup" | "goal" | "compact";
 export type SessionTurnExecutionKind = "agent" | "direct_generation";
 
 export type SessionTurnSummary = {

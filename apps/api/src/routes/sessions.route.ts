@@ -1,9 +1,10 @@
 import { readFreshSessionStats } from "@cohub/protocol/model";
 import { refreshSessionStats } from "@cohub/core/sessions";
+import { clearSessionGoal, createSessionGoalContinuation, getSessionGoal, setSessionGoal, updateSessionGoal, SessionGoalError, cancelExpiredSessionGoalTurn } from "@cohub/core/sessions";
 import { db } from "../db/index.js";
 import { createLogger } from "@cohub/infra/logging";
 import { randomUUID } from "node:crypto";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { hasPermission } from "../permissions.js";
 import { getOptionalAuth, useAuth, requireValidId, authzDenied } from "../lib/middleware.js";
 import {
@@ -21,11 +22,13 @@ import { markMessageAsFull, summarizeMessageForHistory } from "../session-conten
 import { createSignedTurnUrls, findLatestVisibleAgentEntryId, getSessionTurnById, getSessionTurnSequenceById, hydrateTurnAuthorProfiles, listSessionTurnIndex, listSessionTurns, listSessionTurnWindow } from "../session-turns.js";
 import { clearSessionStreamSnapshot, getSessionStreamSnapshot } from "../session-stream-snapshot.js";
 import { createSessionFork, listSessionForksForSessions } from "../session-forks.js";
-import { dispatchLabelAssignmentsUpdated } from "../realtime-events.js";
+import { dispatchLabelAssignmentsUpdated, dispatchTurnCreated } from "../realtime-events.js";
 import { buildSessionTurnResponse } from "../session-turn-response.js";
 import { parseSessionTitleInput } from "../session-title-input.js";
 import { isNativeClientTurn } from "@cohub/protocol";
 import type { SessionFilesResponse } from "@cohub/protocol/model";
+import { isSessionGoalStatus } from "@cohub/protocol/model";
+import { enqueueSessionAgentTurn } from "../session-services.js";
 import { getSessionRuntimeTurn } from "../runtime.js";
 import { listSessionFiles } from "../session-files.js";
 
@@ -131,6 +134,68 @@ router.get("/:id", async (c) => {
   const [hydratedSession] = await hydrateSessionParticipantProfiles([session]);
   const [sessionWithActiveTurn] = await attachActiveTurns([hydratedSession ?? session]);
   return c.json({ space, session: sessionWithActiveTurn ?? hydratedSession ?? session, user });
+});
+
+// ── Session goal ─────────────────────────────────────────────────────────────
+
+const goalError = (c: Context, error: unknown) => {
+  if (!(error instanceof SessionGoalError)) throw error;
+  return c.json({ message: error.message }, error.code === "not_found" ? 404 : error.code === "unfinished_goal" || error.code === "invalid_transition" ? 409 : 400);
+};
+
+const goalSession = async (c: Context, edit: boolean) => {
+  const sessionId = c.req.param("id");
+  if (!sessionId || !requireValidId(sessionId)) return { error: c.json({ message: "Session not found" }, 404) };
+  const session = await getSpaceSessionById(sessionId);
+  if (!session) return { error: c.json({ message: "Session not found" }, 404) };
+  const user = edit ? useAuth(c) : getOptionalAuth(c);
+  if (user instanceof Response) return { error: user };
+  const allowed = await hasPermission(user, edit ? "session.edit" : "session.view", { spaceId: session.spaceId, sessionId });
+  return allowed ? { sessionId, session } : { error: authzDenied(c) };
+};
+
+const startGoal = async (spaceId: string, sessionId: string) => {
+  const started = await createSessionGoalContinuation(db, { spaceId, sessionId });
+  if (!started) return;
+  try {
+    await enqueueSessionAgentTurn({ spaceId, sessionId, reason: "goal" });
+  } catch (error) {
+    await updateSessionGoal(db, sessionId, { status: "blocked" }).catch(() => undefined);
+    await cancelExpiredSessionGoalTurn(db, { sessionId, turnId: started.turn.id });
+    throw error;
+  }
+  const [turn] = await hydrateTurnAuthorProfiles([started.turn]);
+  await dispatchTurnCreated({ spaceId, sessionId, turn: turn ?? started.turn });
+};
+
+router.get("/:id/goal", async (c) => {
+  const loaded = await goalSession(c, false);
+  if ("error" in loaded) return loaded.error;
+  return c.json({ goal: await getSessionGoal(db, loaded.sessionId) });
+});
+
+router.put("/:id/goal", async (c) => {
+  const loaded = await goalSession(c, true);
+  if ("error" in loaded) return loaded.error;
+  const body = await c.req.json<{ objective?: unknown; status?: unknown }>().catch(() => null);
+  try {
+    const goal = typeof body?.objective === "string"
+      ? await setSessionGoal(db, loaded.sessionId, body.objective)
+      : isSessionGoalStatus(body?.status)
+        ? await updateSessionGoal(db, loaded.sessionId, { status: body.status })
+        : null;
+    if (!goal) return c.json({ message: "objective or status is required" }, 400);
+    await startGoal(loaded.session.spaceId, loaded.sessionId);
+    return c.json({ goal }, 201);
+  } catch (error) {
+    return goalError(c, error);
+  }
+});
+
+router.delete("/:id/goal", async (c) => {
+  const loaded = await goalSession(c, true);
+  if ("error" in loaded) return loaded.error;
+  return c.json({ removed: await clearSessionGoal(db, loaded.sessionId) });
 });
 
 // ── PATCH /api/sessions/:id (rename) ─────────────────────────────────────────

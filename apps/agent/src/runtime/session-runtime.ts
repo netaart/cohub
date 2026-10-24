@@ -366,6 +366,10 @@ function toLlmMessages(messages: AgentMessage[]) {
       ? record.meta as Record<string, unknown>
       : {};
 
+    if (role === "user" && meta.messageKind === "goal_continuation") {
+      continue;
+    }
+
     if (role === "user" && Array.isArray(record.content) && record.content.some((block) => Boolean(block && typeof block === "object" && (block as Record<string, unknown>).type === "shell_command"))) {
       continue;
     }

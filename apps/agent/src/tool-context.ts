@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { GenerationPolicy } from "@cohub/protocol/generation";
+import type { SessionTurnIntent } from "@cohub/protocol/model";
 import type { PromptEnv } from "@cohub/core/sessions";
 import type { ImageInputCache } from "@cohub/model-runtime/image-content";
 import type { Permission } from "@cohub/core/permissions";
@@ -19,6 +20,9 @@ export type ToolExecutionContext = {
   sessionId: string;
   turnId?: string;
   turnSeq?: number;
+  turnIntent?: SessionTurnIntent;
+  goalId?: string | null;
+  promptAuthType?: string | null;
   anchorUserMessageId?: string | null;
   llmRound?: number;
   model?: { provider: string; id: string } | null;

@@ -9,7 +9,7 @@ export const AGENT_SESSION_FORK_JOB_NAME = "agent_session_fork";
 export type AgentTurnJobData = {
   spaceId: string;
   sessionId: string;
-  reason?: "prompt" | "steer" | "drain" | "retry" | "recovery";
+  reason?: "prompt" | "steer" | "goal" | "drain" | "retry" | "recovery";
   requestId?: string | null;
   trace?: Record<string, unknown>;
 };

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { UnrecoverableError, type Job } from "bullmq";
 import { imageBlockToPi, type ContentBlock, type PiImageContent } from "@cohub/protocol/core";
-import { ModelUnavailableError } from "@cohub/core/sessions";
+import { getSessionGoal, ModelUnavailableError } from "@cohub/core/sessions";
 import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { context, trace } from "@opentelemetry/api";
 import { getActiveTraceIdentifiers, getOrCreateRequestId, setRequestContextAttributes } from "@cohub/infra/tracing";
@@ -12,6 +12,8 @@ import { getSpace } from "./api.js";
 import { abortSessionTurn, failSessionTurn, interruptSessionTurn, persistAssistantMessage, persistUserMessage, publishSessionTurnsUpdated } from "./persistence.js";
 import { ensureSandboxConnection } from "./sandbox-pool.js";
 import { createSandboxCodingTools } from "./sandbox/tools.js";
+import { createGoalTools, handleGoalAfterTurn } from "./goals/tools.js";
+import { db } from "./db.js";
 import { CohubModelRegistry } from "./runtime/model-registry.js";
 import { loadRuntimeModelsConfigs } from "./runtime/models-loader.js";
 import { loadImageToTextConfig } from "./runtime/image-to-text-config.js";
@@ -36,12 +38,13 @@ import { logger } from "./logger.js";
 import { getPromptAuthScopes, parsePromptEnv, readRuntimeRecovery, type PromptAccessMode } from "@cohub/core/sessions";
 import { createAgentExecutionToken } from "./execution-grants.js";
 import { isLocalHarness, resolveHarness } from "@cohub/protocol";
+import type { SessionTurnIntent } from "@cohub/protocol/model";
 import { executeRemoteHarnessTurn, markRuntimeRecovery, RuntimeExecutionUncertainError } from "./runtime/remote-runtime.js";
 import { loadRuntimeContext } from "./runtime/context-store.js";
 
 
 const sessionHandles = new Map<string, SessionHandle>();
-const tools = createSandboxCodingTools();
+const tools = [...createSandboxCodingTools(), ...createGoalTools()];
 const agentTracer = getAgentTracer();
 type RetryReason = "session_busy";
 
@@ -697,7 +700,7 @@ async function createTurnExecutionToken(input: {
 
 function filterToolsForAccessMode(allTools: AgentTool[], accessMode: PromptAccessMode) {
   if (accessMode === "full_access") return allTools;
-  const readOnlyTools = new Set(["read", "ls", "find", "grep"]);
+  const readOnlyTools = new Set(["read", "ls", "find", "grep", "update_goal"]);
   return allTools.filter((tool) => readOnlyTools.has(tool.name));
 }
 
@@ -824,6 +827,13 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
       const promptContext = ownerMeta.context && typeof ownerMeta.context === "object" && !Array.isArray(ownerMeta.context)
         ? ownerMeta.context as Record<string, unknown>
         : null;
+      const promptAuth = promptContext?.auth && typeof promptContext.auth === "object" && !Array.isArray(promptContext.auth)
+        ? promptContext.auth as Record<string, unknown>
+        : null;
+      const promptAuthType = typeof promptAuth?.type === "string" ? promptAuth.type : null;
+      const turnGoalId = typeof ownerMeta.goalId === "string"
+        ? ownerMeta.goalId
+        : (await getSessionGoal(db, data.sessionId))?.goalId ?? null;
       const fileVisibility = await resolveSpaceFileVisibility({
         actorUserId,
         spaceId: data.spaceId,
@@ -992,6 +1002,9 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
             sessionId: data.sessionId,
             turnId: batch.ownerTurn.id,
             turnSeq: batch.ownerTurn.sequence,
+            turnIntent: batch.ownerTurn.intent as SessionTurnIntent,
+            goalId: turnGoalId,
+            promptAuthType,
             anchorUserMessageId: directShellItem.userMessageId,
             llmRound: 0,
             model: executionModel,
@@ -1064,6 +1077,9 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
           sessionId: data.sessionId,
           turnId: batch.ownerTurn.id,
           turnSeq: batch.ownerTurn.sequence,
+          turnIntent: batch.ownerTurn.intent as SessionTurnIntent,
+          goalId: turnGoalId,
+          promptAuthType,
           anchorUserMessageId: ownerUserMessageId,
           llmRound: 0,
           model: executionModel,
@@ -1266,6 +1282,20 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
       if (claimedBatch) clearRetryState(data);
       lock.signal.removeEventListener("abort", onLeaseLost);
       await lock.release();
+      if (claimedBatch) {
+        try {
+          const goal = await handleGoalAfterTurn({
+            spaceId: data.spaceId,
+            sessionId: data.sessionId,
+            turnId: claimedBatch.ownerTurn.id,
+          });
+          if (goal.createdTurnId && !drainAfterRelease) {
+            drainAfterRelease = { spaceId: data.spaceId, sessionId: data.sessionId, reason: "goal" };
+          }
+        } catch (error) {
+          logger.warn(`[Goal] failed to advance goal sessionId=${data.sessionId} turnId=${claimedBatch.ownerTurn.id}:`, error);
+        }
+      }
       if (drainAfterRelease) await drainNextQueuedTurn(drainAfterRelease);
     }
   });
