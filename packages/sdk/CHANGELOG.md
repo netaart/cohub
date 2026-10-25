@@ -1,5 +1,33 @@
 # @neta-art/cohub
 
+## 13.0.0
+
+### Major Changes
+
+- 8ba32b9: File URLs resolve through one call that also carries recorded media facts, so Boards size Space file textures without probing. `space.files.resolve(path, options)` replaces `resolveUrl` and returns `{ url, media? }` (`ResolvedFile`) or null. `BoardAssetSource` and `createBoardAssetManager` take one `resolveFile(path, { purpose, fresh })` returning the same shape, replacing `resolveFileUrl` and `resolvePlaybackUrl`. Both take `ResolveFileOptions` (`purpose`, `fresh`); `ResolveSpaceFileOptions` adds `timeoutMs`, `signal` and `fetch`, replacing `ResolveSpaceFileUrlOptions` and `SpaceFileUrlPurpose`.
+  
+  Migrate `files.resolveUrl(path)` to `(await files.resolve(path))?.url ?? null`, and `{ resolveFileUrl: fn }` to `{ resolveFile: async (path, options) => { const url = await fn(path, options); return url ? { url } : null; } }`.
+
+### Minor Changes
+
+- bbe88ba: Board backgrounds are layers: `board.background` holds an optional `color`, `image` (`{ src, fit, opacity }`, a public URL or Space path) and `pattern` (`none`, `dots` or `grid`), and `board.grid` holds `size` and `snap`. Layers left out follow the theme. Migration `0076_board_background_layers` rewrites stored settings, history and Save snapshots (now version 4); writes in the old shape are rejected. The stage draws the backdrop on the GPU: patterns keep their screen size, merge as the view zooms out and stay crisp while panning, and images load through the shared texture pool. Built-in themes show a 24px dot grid (square on the pixel themes). Themes declare their own `backdrop`, and `resolveBoardBackdrop(settings, theme)` resolves one for previews and exports. The canvas is now opaque.
+  
+  Hosts: drop `imageBackground` from stage themes and paint no backdrop behind the canvas; pass a theme `backdrop` instead. `viewLayer: "below"` needs `transparent: true`. Exports take `backgroundTexture` for `document.board.background.image` in place of `backgroundImage`.
+- 3886056: Boards read incrementally. `board.get({ since })` returns the Board's metadata with `changes`, every write after that version oldest first (`[]` when nothing changed), or the whole Board when they are unavailable; `board.sync(cached)` brings a cached `{ version, document }` up to date in that one request, and `readBoardDocument(result, base)` applies any read to a document. Replicas with a cached copy now start, catch up and resync this way. `cohub boards get --since <version>` does the same.
+- 79d82e3: Media previews follow one pipeline across hosts. `imageVariantUrl`, `videoFrameUrl` and `mediaPreviewCandidates` now resize Cloudflare-hosted (R2) media as well as OSS, `probeMediaInfo` reads R2 image sizes, and `variantSource` traces either back to its source. `videoFrameUrl(url, size, { fit, natural })` sizes frames like image variants, exactly when the video's size is known; `MediaPreviewSource` takes a recorded `width` and `height` for that. `loadMediaInfo` and `cachedMediaInfo` share probed facts per context.
+  
+  Boards load video and task covers as sized CDN frames instead of decoding the video, so they share the image pool, sharpen with zoom and shrink when idle; videos elsewhere still decode in the page. `loadVideoPreviews: false` now only skips that decoding. `boardMediaNaturalSize(item)` reads a media item's recorded size. CLI exports use the same frames.
+  
+  Video frames on OSS hosts, which cannot fit a frame into a box, size themselves from what is known: `BoardAssetRef.natural` lets hosts pass a video's pixel size, Boards learn each video's aspect from its first frame, and a frame that cannot sharpen without the size probes it instead of staying soft. On hosts with media metadata, the first frame waits briefly for one HEAD to be sized exactly. `videoFrameUrl` takes an `aspect`, and `fitsVideoFrames(url)` tells hosts that fit frames themselves. `loadMediaSize(url, type)` probes a size once per context.
+  
+  `probeVideoFrameSize` reads a JPEG frame header and stops once it has it, and no longer reports Cloudflare's scaled default frames as the video's size, which Board size settling could persist.
+
+### Patch Changes
+
+- 4d8b996: Public file uploads can store an image or video's size and duration (`MediaFacts`) with the object (`PublicFileUploadEntryInput.media`), so a HEAD answers them on `public.cohub.live` and `works.cohub.live`; `cohub public upload` records them from local files. Chat images record their width and height in `_meta`, so the lightbox reserves their frame. `static.neta.art` and `pages-r2.neta.art` are resized like other Cohub media hosts.
+  
+  Space files served from the CDN carry their recorded `media` in file responses and object metadata (served by `sessions.cohub.live`), read from the file's header bytes when it is cached to the CDN; `mediaFacts` validates such facts.
+
 ## 12.6.0
 
 ### Minor Changes
