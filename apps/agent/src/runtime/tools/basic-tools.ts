@@ -534,6 +534,7 @@ export function createWriteTool(cwd: string, options: { operations: WriteOperati
     label: "write",
     description: "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
     parameters,
+    executionMode: "sequential",
     async execute(_toolCallId, rawParams) {
       const params = rawParams as Static<typeof parameters>;
       const absolutePath = resolveToCwd(params.path, cwd);
@@ -561,6 +562,7 @@ export function createEditTool(cwd: string, options: { operations: EditOperation
     label: "edit",
     description: "Edit a file by applying targeted text replacements. Read the target file first and copy oldText verbatim, including whitespace, newlines, and escaping. Use enough surrounding context to make each oldText unique; do not guess file contents or use literal \\n where the file has a real newline. Nearby changes should be merged into one edit, and edits must not overlap.",
     parameters,
+    executionMode: "sequential",
     async execute(_toolCallId, rawParams) {
       const params = rawParams as Static<typeof parameters>;
       if (params.edits.length === 0) throw new Error("edits must contain at least one replacement");
@@ -601,6 +603,9 @@ export function createBashTool(cwd: string, options: { operations: BashOperation
     label: "bash",
     description: "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB.",
     parameters,
+    // A mutating tool makes pi-agent-core run its whole batch in model order,
+    // so a read issued alongside it sees the files it creates.
+    executionMode: "sequential",
     async execute(_toolCallId, rawParams, signal, onUpdate) {
       const params = rawParams as BashToolParams;
       const timeout = clampBashTimeout(params.timeout);
