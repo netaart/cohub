@@ -1,5 +1,24 @@
 # @neta-art/cohub
 
+## 13.1.0
+
+### Minor Changes
+
+- 62d8819: Board wheels and trackpads feel native. Each wheel stream is read once: a coarse first step is a mouse wheel and eases to its target, a trackpad follows the fingers one to one, ctrl or cmd zooms about the pointer, Safari's gesture events pinch, and pans just after a pinch are dropped. A stream begun in a scrollable DOM view scrolls it until it reaches its end. A drag pressed against the edge pans toward it, and a dragged item stays under the pointer while the camera moves. `handleBoardKeyDown` and `handleBoardKeyUp` run Figma's key bindings, including `shift+0/1/2` zoom.
+  
+  Hosts: `editor.wheel` is replaced by `editor.scroll(dx, dy, smooth)` and `editor.zoomBy(point, factor, smooth)`; `normalizeWheelDelta` and `wheelZoomFactor` move to `board/stage`. Replace hand-written Board key handling with `handleBoardKeyDown(editor, event, host)`, where `host(command)` performs `copy`, `cut`, `paste` and `export`, and may open the selection on `open` before Enter edits its text.
+- 62d8819: Board presses follow one set of rules, Figma's when editing and a browsing model for read-only, the hand tool and touch, all thresholds in `BOARD_INPUT`. A press drags past 4 CSS pixels for a mouse and 8 for touch, and a drag that lands where it began writes nothing. A second finger lands the drag so far before it pinches, lifting one finger of a pinch keeps panning, and Escape puts a drag back. Locked items are blank to presses and marquees; a frame with children is picked by its title, and a marquee begun inside it selects its children. A click on one of several selected items narrows to it on release, a shift-click removes a selected item on release, the gap inside a multiple selection drags it, and a drag over a frame shows it as the drop target (`editor.dropTargetId`). Read-only drags pan over items, touch reaches items within 8 pixels, and `editor.pickAt(point, pointerType)` is the hit test presses use.
+  
+  Hosts: `canTapSelectWithHand`, `boardTapSlop`, `isWithinHandTapSlop`, `BOARD_TAP_MAX_MS`, `BOARD_HAND_TAP_SLOP` and `BOARD_MOUSE_TAP_SLOP` are replaced by `isTouchLikePointer`, `boardDragSlop` and `BOARD_INPUT`. `editor.pickUp()` returns the lifted item or null.
+- 62d8819: Touch browses a Board with the hand tool, as Neta Studio does: a tap selects and switches to select, a touch away from the selection returns to the hand, and a select tool the host set keeps one marquee. A long press lifts the item for the same finger to move; released in place, or on empty space, it asks for the context menu. Double taps edit text, two- and three-finger taps undo and redo, a released pan glides, and once a pen is used fingers pan while drawing. Built-in media, file and task items open with a tap in read-only Boards (`activation: { readonly: "tap" }`); `onActivate` returning `false`, or no handler, selects them instead.
+  
+  Hosts: `onLongPress` is removed. The stage lifts items itself; handle `onContextMenu({ item, world, clientX, clientY, pointerType })` for right clicks and long presses, and `onFeedback(kind)` for haptics or sound (`pickup`, `drop`, `menu`, `undo`, `redo`). Delete host code that switched tools on touch. `onHit` now fires on release, and a drag that starts on a key moves the card. Set `editor.enteredId` to let an item's view take input, like an embedded page; views get `context.entered` and should take input only while it is true. A press elsewhere or Escape leaves it.
+
+### Patch Changes
+
+- 6326cd1: `BoardAppMetadata` takes an optional `cover` and `themeColor`, snapshotted when an App is placed, so an App card can show its face before the App detail loads.
+- e495e87: Upgrade Generation SDK to 0.1.41. Song 2 takes lyrics up to 4000 characters with no length cap on the style prompt or the score, waits until the server ends the task instead of giving up after 21 minutes, and accepts the optional `abc_continue`, `harmony` and `lyric_schedule` parameters.
+
 ## 13.0.0
 
 ### Major Changes

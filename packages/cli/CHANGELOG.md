@@ -1,5 +1,17 @@
 # @neta-art/cohub-cli
 
+## 10.12.3
+
+### Patch Changes
+
+- e495e87: Upgrade Generation SDK to 0.1.41. Song 2 takes lyrics up to 4000 characters with no length cap on the style prompt or the score, waits until the server ends the task instead of giving up after 21 minutes, and accepts the optional `abc_continue`, `harmony` and `lyric_schedule` parameters.
+- Updated dependencies [6326cd1]
+- Updated dependencies [62d8819]
+- Updated dependencies [62d8819]
+- Updated dependencies [62d8819]
+- Updated dependencies [e495e87]
+  - @neta-art/cohub@13.1.0
+
 ## 10.12.2
 
 ### Patch Changes
