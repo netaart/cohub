@@ -9,6 +9,7 @@ import type { redisCommandClient } from "./redis.js";
  * from one budget instead of per-feature rate limits.
  */
 const CONSUME_UPLOAD_QUOTA_SCRIPT = `
+if #KEYS > 2 and redis.call("EXISTS", KEYS[3]) == 1 then return {1, 0} end
 local over = 0
 if tonumber(ARGV[1]) > 0 then
   local next_files = redis.call("INCRBY", KEYS[1], ARGV[1])
@@ -20,7 +21,10 @@ if tonumber(ARGV[2]) > 0 then
   if next_bytes == tonumber(ARGV[2]) then redis.call("EXPIRE", KEYS[2], ARGV[5]) end
   if next_bytes > tonumber(ARGV[4]) then over = 1 end
 end
-if over == 0 then return {1, 0} end
+if over == 0 then
+  if #KEYS > 2 then redis.call("SET", KEYS[3], "1", "EX", 86400) end
+  return {1, 0}
+end
 if tonumber(ARGV[1]) > 0 then redis.call("DECRBY", KEYS[1], ARGV[1]) end
 if tonumber(ARGV[2]) > 0 then redis.call("DECRBY", KEYS[2], ARGV[2]) end
 local retry = redis.call("TTL", KEYS[1])
@@ -47,15 +51,17 @@ export const consumeUploadQuota = async (
   redis: UploadQuotaRedis,
   userId: string,
   usage: { entryCount?: number; totalBytes?: number } = {},
+  requestId?: string,
 ) => {
   const entryCount = Math.max(0, Math.floor(usage.entryCount ?? 0));
   const totalBytes = Math.max(0, Math.floor(usage.totalBytes ?? 0));
   if (entryCount === 0 && totalBytes === 0) return;
   const result = await redis.eval(
     CONSUME_UPLOAD_QUOTA_SCRIPT,
-    2,
+    requestId ? 3 : 2,
     `upload:rate:${userId}:files`,
     `upload:rate:${userId}:bytes`,
+    ...(requestId ? [`${requestId}:quota`] : []),
     entryCount,
     totalBytes,
     UPLOAD_RATE_MAX_FILES,

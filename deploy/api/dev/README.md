@@ -45,6 +45,8 @@ Billing 启用后，Cohub 使用 `usd_micro_cent` credit type：`1 usd_micro_cen
 
 两个 R2 Bucket 都需要为 `WEB_ORIGIN` 配置浏览器直传 CORS：允许 `PUT`，允许 `Content-Type`、`Cache-Control`、`Content-Disposition` 请求头，并暴露 `ETag`。公共文件使用的 OSS Bucket 还需允许 `x-oss-forbid-overwrite` 与 `Content-Length`。聊天附件 Bucket 绑定 `CHAT_ATTACHMENT_PUBLIC_BASE_URL` 对应的 Custom Domain；Space 上传 Bucket 不开放公共访问。
 
+Multipart uploads require the upload credentials to create, upload, list, complete, and abort multipart uploads on the same buckets and prefixes. Keep `ETag` exposed by bucket CORS. Configure incomplete multipart uploads to expire after one day on both R2 and OSS; ordinary object expiration does not replace incomplete-part cleanup. Deploy the API and fs-api changes before releasing the updated SDK, CLI, or Web clients. Upload recovery is limited to the current page or process and the server upload session lifetime; no database migration is required.
+
 CI 构建还需要配置 `GITEA_NPM_TOKEN` secret。该 token 只在构建期用于读取 `git.talesofai.com/api/packages/talesofai/npm/` 中的私有 npm 包，不是 API 运行时 secret。
 
 ### 2. 运行数据库迁移

@@ -2,6 +2,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { Hono } from "hono";
 import { hasPermission } from "../permissions.js";
 import { authzDenied, getExecutionPrincipal, requireValidId, useAuth } from "../lib/middleware.js";
+import { createMultipartUpload, MULTIPART_PART_BYTES, MultipartUploadError, withUploadRequest } from "../multipart-upload.js";
 import { PublicFileConfigError } from "../public-file-storage.js";
 import {
   createPublicAssetUploadPlan,
@@ -26,8 +27,8 @@ router.post("/uploads", async (c) => {
   if (!isPublicAssetPurpose(body.purpose)) {
     return c.json({ message: "invalid public asset purpose" }, 400);
   }
-  if (body.uploadProtocol !== "presigned_put_v1") {
-    return c.json({ message: "presigned_put_v1 upload protocol is required" }, 400);
+  if (body.uploadProtocol !== "presigned_put_v1" && body.uploadProtocol !== "multipart_v1") {
+    return c.json({ message: "unsupported upload protocol" }, 400);
   }
 
   if (body.purpose === "space_avatar" || body.purpose === "app_source") {
@@ -48,20 +49,30 @@ router.post("/uploads", async (c) => {
   // Optional spaceId/sessionId are association hints only and do not gate upload.
 
   try {
-    const plan = createPublicAssetUploadPlan({
-      purpose: body.purpose,
-      uploadProtocol: body.uploadProtocol,
-      userUuid: user.uuid,
-      spaceId: body.spaceId,
-      sessionId: body.sessionId,
-      file: body.file,
-      endpoint: execution ? "internal" : "public",
+    const result = await withUploadRequest(user.uuid, "public-asset", body, async (quotaRequestId) => {
+      const plan = createPublicAssetUploadPlan({
+        purpose: body.purpose, uploadProtocol: body.uploadProtocol, userUuid: user.uuid,
+        spaceId: body.spaceId, sessionId: body.sessionId, file: body.file,
+        endpoint: execution ? "internal" : "public",
+      });
+      if (body.purpose !== "session_image") {
+        await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: 1, totalBytes: body.file.size }, quotaRequestId);
+      }
+      if (body.uploadProtocol === "multipart_v1" && body.file.size > MULTIPART_PART_BYTES) {
+        const multipart = await createMultipartUpload({
+          userId: user.uuid, objectKey: plan.asset.objectKey, size: body.file.size, headers: plan.asset.uploadHeaders,
+          storageKind: body.purpose === "session_image" ? "public_asset" : "chat_attachment",
+          internalEndpoint: body.purpose === "session_image" && !!execution,
+          ...(body.purpose === "app_source" && body.spaceId ? { access: { spaceId: body.spaceId, permission: "app.manage" as const } } : {}),
+          ...(body.purpose === "session_image" && body.spaceId ? { access: { spaceId: body.spaceId, sessionId: body.sessionId, permission: "session_image" as const } } : {}),
+        });
+        return { ...plan, asset: { ...plan.asset, multipart } };
+      }
+      return plan;
     });
-    if (body.purpose !== "session_image") {
-      await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: 1, totalBytes: body.file.size });
-    }
-    return c.json(plan);
+    return c.json(result);
   } catch (error) {
+    if (error instanceof MultipartUploadError) return c.json({ message: error.message }, error.status);
     if (error instanceof UploadRateLimitError) return uploadRateLimitedResponse(c, error);
     if (error instanceof PublicAssetValidationError) {
       return c.json({ ...(error.code ? { code: error.code } : {}), message: error.message }, (error.code ? 413 : 400) as never);

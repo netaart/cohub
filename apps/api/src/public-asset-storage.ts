@@ -24,11 +24,12 @@ export type PublicAssetPurpose = (typeof PUBLIC_ASSET_PURPOSES)[number];
 export function isPublicAssetPurpose(value: unknown): value is PublicAssetPurpose {
   return PUBLIC_ASSET_PURPOSES.includes(value as PublicAssetPurpose);
 }
-export type PublicAssetUploadProtocol = "presigned_put_v1";
+export type PublicAssetUploadProtocol = "presigned_put_v1" | "multipart_v1";
 
 export type CreatePublicAssetUploadInput = {
   purpose: PublicAssetPurpose;
   uploadProtocol: PublicAssetUploadProtocol;
+  uploadRequestId?: string;
   spaceId?: string;
   sessionId?: string;
   file: {

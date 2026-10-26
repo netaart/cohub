@@ -1,3 +1,4 @@
+import type { MultipartUploadPlan, UploadProtocol } from "./upload.js";
 import type { MediaFacts } from "./core/media.js";
 
 export type PublicFileUploadEntryInput = {
@@ -9,11 +10,14 @@ export type PublicFileUploadEntryInput = {
 };
 
 export type PublicFileCreateUploadInput = {
+  uploadProtocol?: UploadProtocol;
+  uploadRequestId?: string;
   entries: PublicFileUploadEntryInput[];
   overwrite?: boolean;
 };
 
 export type PublicFileUploadPlanEntry = {
+  multipart?: MultipartUploadPlan;
   id: string;
   path: string;
   uploadUrl: string;

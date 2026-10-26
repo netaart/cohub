@@ -17,7 +17,8 @@ const hmac = (key: Buffer | string, value: string) => createHmac("sha256", key).
 const hexHmac = (key: Buffer | string, value: string) => createHmac("sha256", key).update(value).digest("hex");
 const toAmzDate = (date: Date) => date.toISOString().replace(/[:-]|\.\d{3}/g, "");
 const toDateStamp = (date: Date) => toAmzDate(date).slice(0, 8);
-const encodePath = (value: string) => value.split("/").map(encodeURIComponent).join("/");
+const encodeRfc3986 = (value: string) => encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+const encodePath = (value: string) => value.split("/").map(encodeRfc3986).join("/");
 
 const signingKey = (secret: string, dateStamp: string, region: string) => {
   const kDate = hmac(`AWS4${secret}`, dateStamp);
@@ -52,6 +53,7 @@ const createPresignedObjectUrl = (
   cacheControl?: string | null,
   contentDisposition?: string | null,
   putConditions?: PutConditions,
+  query?: Record<string, string>,
 ) => {
   if (!storage.bucket) throw new Error("bucket is required");
   if (!storage.endpoint) throw new Error("endpoint is required");
@@ -65,6 +67,7 @@ const createPresignedObjectUrl = (
   const credentialScope = `${dateStamp}/${storage.region}/s3/aws4_request`;
   const endpoint = getBucketPublicEndpoint(storage);
   const url = new URL(`${endpoint}/${encodePath(objectKey)}`);
+  for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value);
   const headers = {
     host: url.host,
     ...(method === "PUT" && contentType ? { "content-type": contentType } : {}),
@@ -88,8 +91,8 @@ const createPresignedObjectUrl = (
   url.searchParams.set("X-Amz-SignedHeaders", signedHeaders);
 
   const canonicalQuery = Array.from(url.searchParams.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+    .map(([key, value]) => `${encodeRfc3986(key)}=${encodeRfc3986(value)}`)
     .join("&");
   const canonicalHeaders = Object.entries(headers)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -146,6 +149,18 @@ export const createPresignedGetObjectUrl = (
 ) => {
   const signed = createPresignedObjectUrl("GET", storage, objectKey);
   return { downloadUrl: signed.url, expiresAt: signed.expiresAt };
+};
+
+export const createPresignedUploadPartUrl = (
+  storage: PresignStorageConfig,
+  objectKey: string,
+  uploadId: string,
+  partNumber: number,
+  contentLength: number,
+) => {
+  const signed = createPresignedObjectUrl("PUT", storage, objectKey, undefined, undefined, undefined,
+    { contentLength }, { uploadId, partNumber: String(partNumber) });
+  return { uploadUrl: signed.url, expiresAt: signed.expiresAt, headers: signed.headers };
 };
 
 export const buildPublicObjectUrl = (storage: PresignStorageConfig, objectKey: string) =>

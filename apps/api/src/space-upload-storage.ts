@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { SpaceFsUploadTargetVersion } from "@cohub/protocol/fs";
+import type { SpaceFsCompleteUploadResponse, SpaceFsUploadTargetVersion } from "@cohub/protocol/fs";
 import { config } from "./config.js";
 import { redisCommandClient } from "./redis.js";
 import { createUserUploadGetUrl, createUserUploadPutUrl } from "./user-upload-storage.js";
@@ -14,6 +14,7 @@ export type SpaceUploadManifestEntry = {
   mimeType: string | null;
   /** Private staging object when client PUTs. Absent when entry is remote (downloadUrl). */
   objectKey?: string;
+  multipartUploadId?: string;
   /** Durable public URL already uploaded elsewhere; complete pulls from this. */
   downloadUrl?: string;
   /** Target version captured before the client began uploading. */
@@ -93,3 +94,19 @@ export const createPresignedPutUrl = (
 
 export const createPresignedGetUrl = (objectKey: string) =>
   createUserUploadGetUrl("space_upload", objectKey);
+
+export const getSpaceUploadResult = async (spaceId: string, uploadId: string) => {
+  const raw = await redisCommandClient.get(`${completeKey(spaceId, uploadId)}:result`);
+  return raw ? JSON.parse(raw) as SpaceFsCompleteUploadResponse : null;
+};
+
+export const saveSpaceUploadResult = async (spaceId: string, uploadId: string, result: SpaceFsCompleteUploadResponse) => {
+  await redisCommandClient.set(`${completeKey(spaceId, uploadId)}:result`, JSON.stringify(result), "EX", UPLOAD_TTL_SECONDS);
+};
+
+export const claimSpaceUploadEntries = async (spaceId: string, uploadId: string, entryIds: string[]) => {
+  const key = `${completeKey(spaceId, uploadId)}:selection`;
+  const selection = JSON.stringify([...entryIds].sort());
+  await redisCommandClient.set(key, selection, "EX", UPLOAD_TTL_SECONDS, "NX");
+  return await redisCommandClient.get(key) === selection;
+};

@@ -1,9 +1,11 @@
 import type {
 	PublicAssetMimeType,
 	PublicAssetUploadProgress,
+	UploadPublicAssetInput,
 } from "@neta-art/cohub";
 import { normalizeAvatarImage } from "$lib/avatar-image";
 import { sdk } from "$lib/sdk";
+import { authStore } from "$lib/stores/auth.svelte";
 
 export type PreparedChatImageAttachment = {
 	file: File;
@@ -118,6 +120,31 @@ type PublicAssetUploadOptions = {
 	signal?: AbortSignal;
 };
 
+const attachmentUploads = new WeakMap<File, Map<string, ReturnType<typeof sdk.publicAssets.createUploadTask>>>();
+
+export async function cancelChatAttachmentUpload(file: File) {
+	const tasks = attachmentUploads.get(file);
+	attachmentUploads.delete(file);
+	if (tasks) await Promise.allSettled([...tasks.values()].map((task) => task.cancel()));
+}
+
+function uploadChatAttachment(input: UploadPublicAssetInput & { file: File }) {
+	const account = authStore.userUuid ?? authStore.claims?.sub ?? authStore.hostSubjectKey;
+	if (!account) return sdk.publicAssets.upload(input);
+	const key = JSON.stringify([account, input.spaceId, input.sessionId, input.mimeType, input.filename]);
+	let tasks = attachmentUploads.get(input.file);
+	if (!tasks) {
+		tasks = new Map();
+		attachmentUploads.set(input.file, tasks);
+	}
+	let task = tasks.get(key);
+	if (!task) {
+		task = sdk.publicAssets.createUploadTask({ ...input, signal: undefined, onProgress: undefined });
+		tasks.set(key, task);
+	}
+	return task.run({ signal: input.signal, onProgress: input.onProgress });
+}
+
 export async function uploadUserAvatarImage(
 	file: File,
 	options: PublicAssetUploadOptions = {},
@@ -160,7 +187,8 @@ export function uploadChatAttachmentImage(input: {
 	onProgress?: (progress: PublicAssetUploadProgress) => void;
 	signal?: AbortSignal;
 }) {
-	return sdk.publicAssets.uploadChatImageAttachment({
+	return uploadChatAttachment({
+		purpose: "chat_attachment",
 		spaceId: input.spaceId,
 		sessionId: input.sessionId,
 		file: input.file,
@@ -180,7 +208,8 @@ export function uploadChatAttachmentFile(input: {
 	onProgress?: (progress: PublicAssetUploadProgress) => void;
 	signal?: AbortSignal;
 }) {
-	return sdk.publicAssets.uploadChatAttachment({
+	return uploadChatAttachment({
+		purpose: "chat_attachment",
 		spaceId: input.spaceId,
 		sessionId: input.sessionId,
 		file: input.file,

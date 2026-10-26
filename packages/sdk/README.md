@@ -418,3 +418,24 @@ commerce, and App Actions — are documented in one place:
 
 Runtime APIs only work inside a published App; local pages get `null` from
 `context()`.
+
+## Resumable uploads
+
+Public asset helpers automatically use 16 MiB multipart uploads for files larger than 16 MiB. Retain an upload task to resume after a failure without uploading confirmed parts again:
+
+```ts
+const task = client.publicAssets.createUploadTask({
+  purpose: "chat_attachment",
+  file,
+  filename: file.name,
+  mimeType: file.type || "application/octet-stream",
+});
+const asset = await task.run({ onProgress: ({ ratio }) => console.log(ratio) });
+// After a failure, call task.run() again. To discard the upload, call task.cancel().
+```
+
+For Space and public files, request a plan with `uploadProtocol: "multipart_v1"` and a stable `uploadRequestId: crypto.randomUUID()`. Pass each returned entry and its file to `space.files.createUploadTask(entry, file)` or `space.publicFiles.createUploadTask(entry, file)`, then call `run()`. Space files still require `space.files.completeUpload(plan.uploadId, { entries: plan.entries.map(({ id }) => ({ id })) })` after all file tasks succeed.
+
+Tasks share a limit of two transfer requests and attempt each failed part at most three times per run. Aborting a run's signal stops the current transfer and preserves confirmed parts; `cancel()` discards the multipart session. Resume state stays in memory and is lost when the page or process exits. Signed part URLs renew within the server session's lifetime. Object storage must expose `ETag` through CORS and expire abandoned multipart uploads.
+
+Node clients can provide an `UploadSource` with `size`, `slice(start, end)` returning a `Blob`, and optional `validate()` to verify the local file has not changed. This allows bounded range reads without loading the whole file.

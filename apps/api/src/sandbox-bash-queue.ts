@@ -79,6 +79,7 @@ export async function enqueueSandboxUploadFilesJob(input: Omit<SandboxBashUpload
     attempts: 2,
     backoff: { type: "fixed", delay: 1000 },
     ...defaultJobRetention,
+    removeOnComplete: { age: 24 * 60 * 60 },
   });
 
   try {

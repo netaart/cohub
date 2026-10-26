@@ -8,7 +8,7 @@ import { resolveSpace } from "../space.js";
 import { downloadApp } from "../app-download.js";
 import { getAppByRef, parseAppRef } from "../app-ref.js";
 import { checkAppTarget } from "../app-target.js";
-import { putBytes, putLocalFile } from "../http-put.js";
+import { localUploadSource } from "../local-upload-source.js";
 import { registerAppCommerce } from "./app-commerce.js";
 import { registerAppDomains } from "./app-domains.js";
 import { collectPublicUpload } from "./public.js";
@@ -93,44 +93,31 @@ async function uploadLocalAppSource(client: CohubHttpClient, spaceId: string, so
       const index = nextIndex++;
       const file = upload.files[index];
       if (!file) return;
-      const plan = await client.publicAssets.createUpload({
+      const asset = await client.publicAssets.createUploadTask({
         purpose: "app_source",
-        uploadProtocol: "presigned_put_v1",
         spaceId,
         sessionId: uploadId,
-        file: { size: file.size, mimeType: file.mimeType, filename: basename(file.publicPath) },
-      });
-      await putLocalFile({
-        url: plan.asset.uploadUrl,
-        filePath: file.localPath,
-        size: file.size,
-        headers: plan.asset.uploadHeaders,
-        label: file.publicPath,
-      });
+        file: await localUploadSource(file.localPath, file.size),
+        mimeType: file.mimeType,
+        filename: basename(file.publicPath),
+      }).run();
       const path = directoryPrefix && file.publicPath.startsWith(`${directoryPrefix}/`)
         ? file.publicPath.slice(directoryPrefix.length + 1)
         : basename(file.publicPath);
-      files[index] = { path, objectKey: plan.asset.objectKey, size: file.size, mimeType: file.mimeType };
+      files[index] = { path, objectKey: asset.objectKey, size: file.size, mimeType: file.mimeType };
     }
   });
   await Promise.all(workers);
   const manifest = JSON.stringify({ kind: "cohub.app-source", version: 1, targetType: source.targetType, files });
   const manifestBlob = new Blob([manifest], { type: "application/json" });
-  const manifestPlan = await client.publicAssets.createUpload({
+  const manifestAsset = await client.publicAssets.upload({
     purpose: "app_source",
-    uploadProtocol: "presigned_put_v1",
     spaceId,
     sessionId: uploadId,
-    file: { size: manifestBlob.size, mimeType: "application/json", filename: "manifest.json" },
+    file: manifestBlob,
+    mimeType: "application/json",
+    filename: "manifest.json",
   });
-  await putBytes({
-    url: manifestPlan.asset.uploadUrl,
-    body: manifestBlob,
-    size: manifestBlob.size,
-    headers: manifestPlan.asset.uploadHeaders,
-    label: "app source manifest",
-  });
-  const manifestAsset = manifestPlan.asset;
   return { sourceRef: manifestAsset.objectKey, targetRef: source.targetType === "file" ? files[0]?.path ?? "" : "." };
 }
 

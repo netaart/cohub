@@ -1,3 +1,5 @@
+import { createUploadTask, retryUploadRequest, type UploadSource, type UploadTaskOptions } from "../upload-task.js";
+import { UPLOAD_MULTIPART_PART_BYTES } from "@cohub/protocol";
 import { listDirectory, type FileListOptions } from "./file-list.js";
 import type { SpaceFsTreePage } from "../types.js";
 import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
@@ -8,6 +10,7 @@ import { SPACE_HOOK_WEBHOOK_SECRET_HEADER } from "@cohub/protocol";
 import type {
   PublicFileCreateUploadInput,
   PublicFileCreateUploadResponse,
+  PublicFileUploadPlanEntry,
   PublicFileListResponse,
   PublicFileUrlResponse,
   SpaceWebhookListItem,
@@ -81,6 +84,7 @@ import type {
   SpaceFsMoveInput,
   SpaceFsTreeResponse,
   SpaceFsUploadResponse,
+  SpaceFsUploadPlanEntry,
   SpaceUsageResponse,
   SpaceActivityResponse,
   SpaceStartupResponse,
@@ -381,6 +385,10 @@ export class SpacePublicFilesApi {
     );
   }
 
+  createUploadTask(entry: PublicFileUploadPlanEntry, source: Blob | UploadSource, options: UploadTaskOptions = {}) {
+    return createUploadTask(this.transport, entry, source, options);
+  }
+
   list(path = "", options: {
     recursive?: boolean;
     limit?: number;
@@ -617,7 +625,25 @@ export class SpaceFilesApi {
     );
   }
 
-  upload(files: File[], dir = "") {
+  async upload(files: File[], dir = "") {
+    if (files.some((file) => file.size > UPLOAD_MULTIPART_PART_BYTES)) {
+      const plan = await this.createUpload({
+        destination: { kind: "workspace", targetDir: dir },
+        uploadProtocol: "multipart_v1",
+        uploadRequestId: crypto.randomUUID(),
+        entries: files.map((file, index) => ({
+          id: String(index), name: file.name, relativePath: file.name, size: file.size,
+          mimeType: file.type || null, lastModified: file.lastModified,
+        })),
+      });
+      for (const entry of plan.entries) {
+        const file = files[Number(entry.id)];
+        if (!file) throw new Error("Upload source is missing");
+        await this.createUploadTask(entry, file).run();
+      }
+      const result = await this.completeUpload(plan.uploadId, { entries: plan.entries.map(({ id }) => ({ id })) });
+      return { uploaded: result.uploaded, errors: [] } satisfies SpaceFsUploadResponse;
+    }
     const params = new URLSearchParams();
     if (dir) params.set("dir", dir);
     const query = params.toString();
@@ -644,15 +670,20 @@ export class SpaceFilesApi {
     );
   }
 
-  completeUpload(uploadId: string, input: SpaceFsCompleteUploadInput) {
-    return this.transport.request<SpaceFsCompleteUploadResponse>(
+  createUploadTask(entry: SpaceFsUploadPlanEntry, source: Blob | UploadSource, options: UploadTaskOptions = {}) {
+    return createUploadTask(this.transport, entry, source, options);
+  }
+
+  completeUpload(uploadId: string, input: SpaceFsCompleteUploadInput, options: { signal?: AbortSignal } = {}) {
+    return retryUploadRequest((signal) => this.transport.request<SpaceFsCompleteUploadResponse>(
       `/api/spaces/${this.spaceId}/fs/uploads/${uploadId}/complete`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
+        signal,
       },
-    );
+    ), options.signal);
   }
 }
 
