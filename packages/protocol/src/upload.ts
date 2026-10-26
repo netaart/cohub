@@ -54,3 +54,9 @@ export type MultipartUploadPlan = {
   expiresAt: string;
 };
 export type MultipartUploadCompletedPart = { partNumber: number; etag: string };
+
+export type UploadStrategy = {
+  multipart: "auto" | "always" | "never";
+  multipartThresholdBytes: number;
+  partSizeBytes: number;
+};

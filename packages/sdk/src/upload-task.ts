@@ -1,3 +1,4 @@
+import { DEFAULT_UPLOAD_CONFIG, resolveUploadGroup, UploadGroup, usesMultipart, type UploadConfig, type UploadOptions } from "./upload-config.js";
 import type { MultipartUploadPlan } from "@cohub/protocol";
 import type { HttpTransport } from "./transport.js";
 
@@ -12,6 +13,8 @@ export type UploadTaskOptions = {
   onProgress?: (progress: UploadProgress) => void;
   fetch?: typeof fetch;
 };
+export type UploadTaskCreateOptions = UploadTaskOptions & { upload?: UploadOptions };
+export type PreparedUploadTaskOptions = UploadTaskOptions & { upload: UploadGroup };
 export type UploadPlan = {
   uploadUrl?: string;
   headers?: Record<string, string>;
@@ -42,22 +45,23 @@ function delay(ms: number, signal: AbortSignal) {
   });
 }
 
-async function retry<T>(action: () => Promise<T>, signal: AbortSignal): Promise<T> {
+async function retry<T>(action: () => Promise<T>, signal: AbortSignal, config: Readonly<UploadConfig>): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     signal.throwIfAborted();
     try { return await action(); } catch (error) {
-      if (signal.aborted || attempt >= 2 || !retryable(error)) throw error;
-      await delay(300 * 2 ** attempt + Math.random() * 200, signal);
+      if (signal.aborted || attempt + 1 >= config.maxAttempts || !retryable(error)) throw error;
+      await delay(300 * 2 ** Math.min(attempt, 4) + Math.random() * 200, signal);
     }
   }
 }
 
-async function withTimeout<T>(action: (signal: AbortSignal) => Promise<T>, signal: AbortSignal): Promise<T> {
+async function withTimeout<T>(action: (signal: AbortSignal) => Promise<T>, signal: AbortSignal, timeoutMs: number): Promise<T> {
   signal.throwIfAborted();
+  if (timeoutMs === 0) return action(signal);
   const controller = new AbortController();
   const onAbort = () => controller.abort(signal.reason);
   signal.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => controller.abort(new DOMException("Upload timed out", "TimeoutError")), 120_000);
+  const timer = setTimeout(() => controller.abort(new DOMException("Upload timed out", "TimeoutError")), timeoutMs);
   try {
     const result = await action(controller.signal);
     controller.signal.throwIfAborted();
@@ -71,36 +75,10 @@ async function withTimeout<T>(action: (signal: AbortSignal) => Promise<T>, signa
   }
 }
 
-export function retryUploadRequest<T>(action: (signal: AbortSignal) => Promise<T>, signal = new AbortController().signal) {
-  return retry(() => withTimeout(action, signal), signal);
-}
-
-let activeRequests = 0;
-const waitingRequests: Array<() => void> = [];
-function releaseRequest() {
-  activeRequests--;
-  waitingRequests.shift()?.();
-}
-function acquireRequest(signal: AbortSignal): Promise<() => void> {
-  signal.throwIfAborted();
-  if (activeRequests < 2) {
-    activeRequests++;
-    return Promise.resolve(releaseRequest);
-  }
-  return new Promise((resolve, reject) => {
-    const grant = () => {
-      signal.removeEventListener("abort", onAbort);
-      activeRequests++;
-      resolve(releaseRequest);
-    };
-    const onAbort = () => {
-      const index = waitingRequests.indexOf(grant);
-      if (index >= 0) waitingRequests.splice(index, 1);
-      reject(abortError());
-    };
-    waitingRequests.push(grant);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
+export function retryUploadRequest<T>(
+  action: (signal: AbortSignal) => Promise<T>, signal = new AbortController().signal, config = DEFAULT_UPLOAD_CONFIG,
+) {
+  return retry(() => withTimeout(action, signal, config.timeoutMs), signal, config);
 }
 
 function uploadHeaders(headers?: Record<string, string>) {
@@ -114,6 +92,7 @@ async function put(input: {
   body: Blob;
   signal: AbortSignal;
   onProgress: (bytes: number) => void;
+  timeoutMs: number;
   progressEnabled?: boolean;
   fetch?: typeof fetch;
 }): Promise<string | undefined> {
@@ -129,7 +108,7 @@ async function put(input: {
         else resolve(xhr.getResponseHeader?.("ETag") ?? undefined);
       };
       xhr.open("PUT", input.url);
-      xhr.timeout = 120_000;
+      xhr.timeout = input.timeoutMs;
       for (const [key, value] of Object.entries(headers)) xhr.setRequestHeader(key, value);
       xhr.upload.onprogress = (event) => input.onProgress(Math.min(input.body.size, event.loaded));
       xhr.onload = () => finish(xhr.status >= 200 && xhr.status < 300 ? undefined : new UploadHttpError(xhr.status));
@@ -150,11 +129,12 @@ async function put(input: {
     }
     input.onProgress(input.body.size);
     return response.headers.get("etag") ?? undefined;
-  }, input.signal);
+  }, input.signal, input.timeoutMs);
 }
 
 /** Retain this task and call run again to resume within the current client session. */
 export class UploadTask<T = void> {
+  readonly group: UploadGroup;
   private prepared?: { plan: UploadPlan; result: T };
   private readonly completedParts = new Map<number, string>();
   private readonly inflightBytes = new Map<number, number>();
@@ -171,13 +151,17 @@ export class UploadTask<T = void> {
     private readonly transport: HttpTransport,
     private readonly source: Blob | UploadSource,
     private readonly prepare: (signal: AbortSignal) => Promise<{ plan: UploadPlan; result: T }>,
-    private readonly options: UploadTaskOptions = {},
+    private readonly options: UploadTaskCreateOptions = {},
     prepared?: { plan: UploadPlan; result: T },
-  ) { this.prepared = prepared; }
+  ) {
+    this.prepared = prepared;
+    this.group = resolveUploadGroup(transport, options.upload);
+  }
 
   get etag() { return this.singlePutEtag; }
 
   run(options: UploadTaskOptions = {}): Promise<T> {
+    if ("upload" in options) return Promise.reject(new Error("Upload configuration cannot change during a task"));
     if (this.cancelled) return Promise.reject(abortError());
     if (this.finished && this.prepared) return Promise.resolve(this.prepared.result);
     if (this.pending) return this.pending;
@@ -202,7 +186,7 @@ export class UploadTask<T = void> {
     await this.pending?.catch(() => {});
     const multipart = this.prepared?.plan.multipart;
     if (multipart && !this.finished) {
-      await retryUploadRequest((signal) => this.transport.request(`/api/uploads/${encodeURIComponent(multipart.uploadId)}`, { method: "DELETE", signal }));
+      await retryUploadRequest((signal) => this.transport.request(`/api/uploads/${encodeURIComponent(multipart.uploadId)}`, { method: "DELETE", signal }), undefined, this.group.config);
     }
   }
 
@@ -224,7 +208,7 @@ export class UploadTask<T = void> {
           throw new Error("Upload session changed unexpectedly");
         }
         plan.multipart = next;
-      }, signal).finally(() => { this.refreshing = undefined; });
+      }, signal, this.group.config).finally(() => { this.refreshing = undefined; });
     }
     await this.refreshing;
   }
@@ -252,14 +236,12 @@ export class UploadTask<T = void> {
   private async sendPart(partNumber: number, signal: AbortSignal, options: UploadTaskOptions) {
     let renewed = false;
     for (let attempt = 0; ; attempt++) {
-      const release = await acquireRequest(signal);
+      const plan = this.currentPlan();
+      if (plan.multipart && Date.parse(plan.multipart.expiresAt) <= Date.now() + 30_000) await this.refresh(signal);
+      const release = await this.group.acquire(signal);
       let failure: unknown;
       try {
         await this.validate();
-        const plan = this.currentPlan();
-        if (plan.multipart && Date.parse(plan.multipart.expiresAt) <= Date.now() + 30_000) {
-          await this.refresh(signal);
-        }
         const partSize = plan.multipart?.partSize ?? this.source.size;
         const start = (partNumber - 1) * partSize;
         const end = Math.min(start + partSize, this.source.size);
@@ -269,7 +251,7 @@ export class UploadTask<T = void> {
         const url = part?.uploadUrl ?? (plan.multipart ? undefined : plan.uploadUrl);
         if (!url) throw new Error("Upload URL is missing");
         const etag = await put({
-          url, headers: part?.headers ?? plan.headers, body, signal, fetch: options.fetch, progressEnabled: Boolean(options.onProgress),
+          url, headers: part?.headers ?? plan.headers, body, signal, timeoutMs: this.group.config.timeoutMs, fetch: options.fetch, progressEnabled: Boolean(options.onProgress),
           onProgress: (bytes) => { this.inflightBytes.set(partNumber, bytes); this.emitProgress(options); },
         });
         if (plan.multipart) {
@@ -287,12 +269,12 @@ export class UploadTask<T = void> {
         this.emitProgress(options);
         release();
       }
-      if (signal.aborted || attempt >= 2) throw failure;
+      if (signal.aborted || attempt + 1 >= this.group.config.maxAttempts) throw failure;
       if (failure instanceof UploadHttpError && failure.status === 403 && this.currentPlan().multipart && !renewed) {
         renewed = true;
         await this.refresh(signal);
       } else if (retryable(failure)) {
-        await delay(300 * 2 ** attempt + Math.random() * 200, signal);
+        await delay(300 * 2 ** Math.min(attempt, 4) + Math.random() * 200, signal);
       } else {
         throw failure;
       }
@@ -303,9 +285,11 @@ export class UploadTask<T = void> {
     const signal = controller.signal;
     signal.throwIfAborted();
     await this.validate();
-    this.prepared ??= await retryUploadRequest(this.prepare, signal);
+    this.prepared ??= await retryUploadRequest(this.prepare, signal, this.group.config);
     signal.throwIfAborted();
     const multipart = this.prepared.plan.multipart;
+    if (Boolean(multipart) !== usesMultipart(this.group.config, this.source.size)) throw new Error("Upload plan conflicts with the configured multipart mode");
+    if (multipart && multipart.partSize !== this.group.config.partSizeBytes) throw new Error("Upload plan conflicts with the configured part size");
     if (multipart) {
       if (!Number.isSafeInteger(multipart.partSize) || multipart.partSize <= 0) throw new Error("Invalid upload part size");
       const count = Math.ceil(this.source.size / multipart.partSize);
@@ -322,14 +306,14 @@ export class UploadTask<T = void> {
           }
         }
       };
-      await Promise.all([worker(), worker()]);
+      await Promise.all(Array.from({ length: Math.min(this.group.config.concurrency, pending.length) }, worker));
       if (failure) throw failure;
       signal.throwIfAborted();
       await this.validate();
       await retryUploadRequest((requestSignal) => this.transport.request(`/api/uploads/${encodeURIComponent(multipart.uploadId)}/complete`, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: requestSignal,
         body: JSON.stringify({ parts: [...this.completedParts].sort(([a], [b]) => a - b).map(([partNumber, etag]) => ({ partNumber, etag })) }),
-      }), signal);
+      }), signal, this.group.config);
     } else {
       if (!this.singlePutComplete) await this.sendPart(1, signal, options);
       await this.validate();
@@ -341,8 +325,9 @@ export class UploadTask<T = void> {
 }
 
 export function createUploadTask(
-  transport: HttpTransport, plan: UploadPlan, source: Blob | UploadSource, options: UploadTaskOptions = {},
+  transport: HttpTransport, plan: UploadPlan, source: Blob | UploadSource, options: PreparedUploadTaskOptions,
 ): UploadTask<void> {
+  if (!(options.upload instanceof UploadGroup)) throw new Error("A shared upload group is required for prepared uploads");
   const prepared = { plan, result: undefined };
   return new UploadTask(transport, source, async () => prepared, options, prepared);
 }

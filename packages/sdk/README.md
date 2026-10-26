@@ -421,21 +421,47 @@ Runtime APIs only work inside a published App; local pages get `null` from
 
 ## Resumable uploads
 
-Public asset helpers automatically use 16 MiB multipart uploads for files larger than 16 MiB. Retain an upload task to resume after a failure without uploading confirmed parts again:
+Upload defaults can be set on either client, then overridden per operation:
 
 ```ts
+const client = createCohubClient({
+  upload: {
+    multipart: "auto",
+    multipartThresholdBytes: 16 * 1024 * 1024,
+    partSizeBytes: 16 * 1024 * 1024,
+    concurrency: 2,
+    maxAttempts: 3,
+    timeoutMs: 120_000,
+  },
+});
 const task = client.publicAssets.createUploadTask({
   purpose: "chat_attachment",
   file,
   filename: file.name,
   mimeType: file.type || "application/octet-stream",
+  upload: { concurrency: 4 },
 });
 const asset = await task.run({ onProgress: ({ ratio }) => console.log(ratio) });
-// After a failure, call task.run() again. To discard the upload, call task.cancel().
 ```
 
-For Space and public files, request a plan with `uploadProtocol: "multipart_v1"` and a stable `uploadRequestId: crypto.randomUUID()`. Pass each returned entry and its file to `space.files.createUploadTask(entry, file)` or `space.publicFiles.createUploadTask(entry, file)`, then call `run()`. Space files still require `space.files.completeUpload(plan.uploadId, { entries: plan.entries.map(({ id }) => ({ id })) })` after all file tasks succeed.
+The values above are the library defaults. Precedence is library defaults, client defaults, then operation overrides. `multipart` accepts `auto`, `always`, or `never`; `auto` uses multipart when the file exceeds `multipartThresholdBytes`, independently of `partSizeBytes`. Empty files use a single PUT. `maxAttempts` includes the first request; `timeoutMs: 0` disables SDK request timeouts. The same retry and timeout policy applies to planning, PUT, renewal, completion, and cancellation.
 
-Tasks share a limit of two transfer requests and attempt each failed part at most three times per run. Aborting a run's signal stops the current transfer and preserves confirmed parts; `cancel()` discards the multipart session. Resume state stays in memory and is lost when the page or process exits. Signed part URLs renew within the server session's lifetime. Object storage must expose `ETag` through CORS and expire abandoned multipart uploads.
+A prepared batch shares one immutable upload group across its file tasks and completion:
 
-Node clients can provide an `UploadSource` with `size`, `slice(start, end)` returning a `Blob`, and optional `validate()` to verify the local file has not changed. This allows bounded range reads without loading the whole file.
+```ts
+const files = client.space(spaceId).files;
+const group = files.createUploadGroup({ concurrency: 4 });
+const plan = await files.createUpload({ destination: { kind: "workspace" }, entries }, { upload: group });
+await Promise.all(plan.entries.map((entry) =>
+  files.createUploadTask(entry, sources[entry.id], { upload: group }).run(),
+));
+await files.completeUpload(plan.uploadId, {
+  entries: plan.entries.map(({ id }) => ({ id })),
+}, { upload: group });
+```
+
+Public files use the same `createUploadGroup`, `createUpload`, and `createUploadTask` pattern without the final workspace import. Groups are also available from `client.createUploadGroup()` and `client.publicAssets.createUploadGroup()`. Concurrency limits all transfer requests in one group, across all its files; independent groups have independent budgets. Passing an existing group preserves its configuration. A prepared task requires a group and rejects conflicting multipart modes or part sizes.
+
+Retain a task and call `run()` again after a failure to reuse confirmed parts. Its configuration stays fixed; `run()` only accepts signal, progress, and fetch options. Aborting a run stops the transfer and preserves confirmed parts; `cancel()` discards the multipart session. Resume state is held in memory and is lost when the page or process exits. Signed part URLs renew within the server session's lifetime. Storage must expose `ETag` through CORS and expire abandoned multipart uploads.
+
+Node clients can provide an `UploadSource` with `size`, `slice(start, end)` returning a `Blob`, and optional `validate()` to verify that the local file has not changed. This allows bounded range reads without loading the whole file.

@@ -1,7 +1,7 @@
-import { UPLOAD_MULTIPART_PART_BYTES } from "@cohub/protocol";
-import type { MultipartUploadPlan, UploadProtocol } from "@cohub/protocol";
+import { configureUploadInput, resolveUploadGroup, resolveUploadRequestGroup, uploadStrategy, usesMultipart, type UploadOptions } from "../upload-config.js";
+import type { MultipartUploadPlan, UploadProtocol, UploadStrategy } from "@cohub/protocol";
 import type { HttpTransport } from "../transport.js";
-import { UploadTask, type UploadSource, type UploadTaskOptions } from "../upload-task.js";
+import { UploadTask, retryUploadRequest, type UploadSource, type UploadTaskCreateOptions } from "../upload-task.js";
 
 export type PublicAssetPurpose =
   | "user_avatar"
@@ -15,7 +15,8 @@ export type PublicAssetMimeType = "image/webp" | "image/jpeg";
 
 export type CreatePublicAssetUploadInput = {
   purpose: PublicAssetPurpose;
-  uploadProtocol: PublicAssetUploadProtocol;
+  uploadProtocol?: PublicAssetUploadProtocol;
+  upload?: Partial<UploadStrategy>;
   uploadRequestId?: string;
   spaceId?: string;
   sessionId?: string;
@@ -42,6 +43,7 @@ export type CreatePublicAssetUploadResponse = {
 };
 
 export type UploadPublicAssetInput = {
+  upload?: UploadOptions;
   purpose: PublicAssetPurpose;
   spaceId?: string;
   sessionId?: string;
@@ -62,6 +64,7 @@ export type PublicAssetUploadProgress = {
 export type UploadAppSourceInput = UploadChatAttachmentInput;
 
 export type UploadChatAttachmentInput = {
+  upload?: UploadOptions;
   /** Optional association only; upload is user-scoped. */
   spaceId?: string;
   /** Optional association only; upload is user-scoped. */
@@ -88,27 +91,42 @@ export type UploadChatImageAttachmentInput = UploadChatAttachmentInput & {
 export class PublicAssetsApi {
   constructor(private readonly transport: HttpTransport) {}
 
-  createUpload(input: CreatePublicAssetUploadInput, options: { signal?: AbortSignal } = {}) {
+  createUploadGroup(upload?: UploadOptions) {
+    return resolveUploadGroup(this.transport, upload);
+  }
+
+  private requestUpload(input: CreatePublicAssetUploadInput, signal?: AbortSignal) {
     return this.transport.request<CreatePublicAssetUploadResponse>("/api/public-assets/uploads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-      signal: options.signal,
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), signal,
     });
   }
 
+  createUpload(input: CreatePublicAssetUploadInput, options: { signal?: AbortSignal; upload?: UploadOptions } = {}) {
+    const group = resolveUploadRequestGroup(this.transport, input, options.upload, !input.uploadProtocol);
+    if (!group) return this.requestUpload(input, options.signal);
+    const body = configureUploadInput({
+      ...input,
+      uploadProtocol: input.uploadProtocol ?? (group.config.multipart === "never" ? "presigned_put_v1" : "multipart_v1"),
+      uploadRequestId: input.uploadRequestId ?? crypto.randomUUID(),
+    }, group);
+    return retryUploadRequest((signal) => this.requestUpload(body, signal), options.signal, group.config);
+  }
+
   createUploadTask(input: UploadPublicAssetInput): UploadTask<PublicAssetUploadBase> {
-    const uploadRequestId = crypto.randomUUID();
-    const options: UploadTaskOptions = { signal: input.signal, onProgress: input.onProgress, fetch: input.fetch };
+    const group = this.createUploadGroup(input.upload);
+    const multipart = usesMultipart(group.config, input.file.size);
+    const body: CreatePublicAssetUploadInput = {
+      purpose: input.purpose,
+      uploadProtocol: multipart ? "multipart_v1" : "presigned_put_v1",
+      upload: { ...uploadStrategy(group.config), multipart: multipart ? "always" : "never" },
+      uploadRequestId: crypto.randomUUID(),
+      spaceId: input.spaceId,
+      sessionId: input.sessionId,
+      file: { size: input.file.size, mimeType: input.mimeType, filename: input.filename },
+    };
+    const options: UploadTaskCreateOptions = { upload: group, signal: input.signal, onProgress: input.onProgress, fetch: input.fetch };
     return new UploadTask(this.transport, input.file, async (signal) => {
-      const response = await this.createUpload({
-        purpose: input.purpose,
-        uploadProtocol: input.file.size > UPLOAD_MULTIPART_PART_BYTES ? "multipart_v1" : "presigned_put_v1",
-        uploadRequestId,
-        spaceId: input.spaceId,
-        sessionId: input.sessionId,
-        file: { size: input.file.size, mimeType: input.mimeType, filename: input.filename },
-      }, { signal });
+      const response = await this.requestUpload(body, signal);
       return {
         plan: { uploadUrl: response.asset.uploadUrl, headers: response.asset.uploadHeaders, multipart: response.asset.multipart },
         result: response.asset,
@@ -123,6 +141,7 @@ export class PublicAssetsApi {
   /** Durable public upload for any chat attachment (image or file). No space required. */
   uploadAppSource(input: UploadAppSourceInput) {
     return this.upload({
+      upload: input.upload,
       purpose: "app_source",
       spaceId: input.spaceId,
       sessionId: input.sessionId,
@@ -137,6 +156,7 @@ export class PublicAssetsApi {
 
   uploadChatAttachment(input: UploadChatAttachmentInput) {
     return this.upload({
+      upload: input.upload,
       purpose: "chat_attachment",
       spaceId: input.spaceId,
       sessionId: input.sessionId,

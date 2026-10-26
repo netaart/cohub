@@ -2,7 +2,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { Hono } from "hono";
 import { hasPermission } from "../permissions.js";
 import { authzDenied, getExecutionPrincipal, requireValidId, useAuth } from "../lib/middleware.js";
-import { createMultipartUpload, MULTIPART_PART_BYTES, MultipartUploadError, withUploadRequest } from "../multipart-upload.js";
+import { createMultipartUpload, MultipartUploadError, normalizeUploadStrategy, shouldUseMultipartUpload, withUploadRequest } from "../multipart-upload.js";
 import { PublicFileConfigError } from "../public-file-storage.js";
 import {
   createPublicAssetUploadPlan,
@@ -49,6 +49,7 @@ router.post("/uploads", async (c) => {
   // Optional spaceId/sessionId are association hints only and do not gate upload.
 
   try {
+    const upload = normalizeUploadStrategy(body);
     const result = await withUploadRequest(user.uuid, "public-asset", body, async (quotaRequestId) => {
       const plan = createPublicAssetUploadPlan({
         purpose: body.purpose, uploadProtocol: body.uploadProtocol, userUuid: user.uuid,
@@ -58,11 +59,12 @@ router.post("/uploads", async (c) => {
       if (body.purpose !== "session_image") {
         await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: 1, totalBytes: body.file.size }, quotaRequestId);
       }
-      if (body.uploadProtocol === "multipart_v1" && body.file.size > MULTIPART_PART_BYTES) {
+      if (shouldUseMultipartUpload(body.file.size, upload)) {
         const multipart = await createMultipartUpload({
-          userId: user.uuid, objectKey: plan.asset.objectKey, size: body.file.size, headers: plan.asset.uploadHeaders,
+          userId: user.uuid, objectKey: plan.asset.objectKey, size: body.file.size, partSize: upload.partSizeBytes, headers: plan.asset.uploadHeaders,
           storageKind: body.purpose === "session_image" ? "public_asset" : "chat_attachment",
           internalEndpoint: body.purpose === "session_image" && !!execution,
+          ...(body.purpose === "space_avatar" && body.spaceId ? { access: { spaceId: body.spaceId, permission: "space.edit" as const } } : {}),
           ...(body.purpose === "app_source" && body.spaceId ? { access: { spaceId: body.spaceId, permission: "app.manage" as const } } : {}),
           ...(body.purpose === "session_image" && body.spaceId ? { access: { spaceId: body.spaceId, sessionId: body.sessionId, permission: "session_image" as const } } : {}),
         });

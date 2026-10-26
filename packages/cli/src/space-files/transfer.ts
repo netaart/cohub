@@ -4,7 +4,7 @@ import { cp, lstat, mkdir, readdir, rename, rm, stat, utimes } from "node:fs/pro
 import { dirname, join, posix } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { UPLOAD_MAX_FILE_BYTES, type SpaceFsCopyResult, type SpaceFsCopyStats, type SpaceFsTreeResponse } from "@neta-art/cohub";
+import { UPLOAD_MAX_FILE_BYTES, type SpaceFsCopyResult, type SpaceFsCopyStats, type SpaceFsTreeResponse, type UploadConfig, type UploadGroup } from "@neta-art/cohub";
 import { createLimiter } from "./limit.js";
 import { uploadLocalFiles, type LocalUploadEntry, type SpaceFiles } from "./upload.js";
 
@@ -12,6 +12,7 @@ export type CopyOptions = {
   recursive: boolean;
   noClobber: boolean;
   preserveTimestamps: boolean;
+  upload?: Partial<UploadConfig> | UploadGroup;
 };
 
 export class CopyAbortError extends Error {
@@ -161,6 +162,7 @@ export async function uploadToSpace(input: {
 
   const progress = { files: 0, dirs: 0, symlinks: 0, bytes: 0 };
   await uploadLocalFiles(files, upload, {
+    upload: options.upload,
     onUploaded: (entry) => {
       progress.files += 1;
       progress.bytes += entry.size;

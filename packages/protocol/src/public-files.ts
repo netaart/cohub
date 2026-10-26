@@ -1,4 +1,4 @@
-import type { MultipartUploadPlan, UploadProtocol } from "./upload.js";
+import type { MultipartUploadPlan, UploadProtocol, UploadStrategy } from "./upload.js";
 import type { MediaFacts } from "./core/media.js";
 
 export type PublicFileUploadEntryInput = {
@@ -11,6 +11,7 @@ export type PublicFileUploadEntryInput = {
 
 export type PublicFileCreateUploadInput = {
   uploadProtocol?: UploadProtocol;
+  upload?: Partial<UploadStrategy>;
   uploadRequestId?: string;
   entries: PublicFileUploadEntryInput[];
   overwrite?: boolean;

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
-import { getCohubContext, HttpError, type CohubHttpClient, type Permission, type AppCreateInput, type AppMeta, type AppStatus, type AppUpdateInput, type AppVersionRecord, type AppViewStatsResponse, type AppVisibility } from "@neta-art/cohub";
+import { getCohubContext, HttpError, type UploadGroup, type UploadConfig, type CohubHttpClient, type Permission, type AppCreateInput, type AppMeta, type AppStatus, type AppUpdateInput, type AppVersionRecord, type AppViewStatsResponse, type AppVisibility } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient, createClientWithAccessToken } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
@@ -75,11 +75,13 @@ function withCohubBarMeta(input: {
 type AppSourceType = "workspace" | "local";
 const MAX_APP_SOURCE_FILES = 1000;
 const MAX_APP_SOURCE_BYTES = 1024 * 1024 * 1024;
-const APP_SOURCE_UPLOAD_CONCURRENCY = 4;
 type ResolvedTarget = { targetType: "file" | "directory" | "port"; targetRef: string };
 
-async function uploadLocalAppSource(client: CohubHttpClient, spaceId: string, source: ResolvedTarget) {
+async function uploadLocalAppSource(client: CohubHttpClient, spaceId: string, source: ResolvedTarget, options: {
+  upload?: Partial<UploadConfig> | UploadGroup;
+} = {}) {
   if (source.targetType === "port") return null;
+  const group = client.createUploadGroup(options.upload);
   const upload = await collectPublicUpload(source.targetRef);
   const totalBytes = upload.files.reduce((sum, file) => sum + file.size, 0);
   if (upload.files.length > MAX_APP_SOURCE_FILES) return error("App source is too large", `Use no more than ${MAX_APP_SOURCE_FILES} files.`);
@@ -88,12 +90,13 @@ async function uploadLocalAppSource(client: CohubHttpClient, spaceId: string, so
   const directoryPrefix = source.targetType === "directory" ? upload.destination.replace(/\/$/, "") : "";
   const files: Array<{ path: string; objectKey: string; size: number; mimeType: string }> = new Array(upload.files.length);
   let nextIndex = 0;
-  const workers = Array.from({ length: Math.min(APP_SOURCE_UPLOAD_CONCURRENCY, upload.files.length) }, async () => {
+  const workers = Array.from({ length: Math.min(group.config.concurrency, upload.files.length) }, async () => {
     while (nextIndex < upload.files.length) {
       const index = nextIndex++;
       const file = upload.files[index];
       if (!file) return;
       const asset = await client.publicAssets.createUploadTask({
+        upload: group,
         purpose: "app_source",
         spaceId,
         sessionId: uploadId,
@@ -111,6 +114,7 @@ async function uploadLocalAppSource(client: CohubHttpClient, spaceId: string, so
   const manifest = JSON.stringify({ kind: "cohub.app-source", version: 1, targetType: source.targetType, files });
   const manifestBlob = new Blob([manifest], { type: "application/json" });
   const manifestAsset = await client.publicAssets.upload({
+    upload: group,
     purpose: "app_source",
     spaceId,
     sessionId: uploadId,

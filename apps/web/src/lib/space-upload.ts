@@ -1,5 +1,5 @@
 import { batchUploadEntries } from "@cohub/protocol";
-import type { SpaceFsUploadDestination, SpaceFsCreateUploadResponse, UploadTask } from "@neta-art/cohub";
+import type { UploadGroup, UploadConfig, SpaceFsUploadDestination, SpaceFsCreateUploadResponse, UploadTask } from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
 import {
 	type LocalUploadEntry,
@@ -33,6 +33,7 @@ export type UploadSpaceEntriesOptions = {
 	entries: LocalUploadEntry[];
 	onProgress?: (progress: SpaceUploadProgress) => void;
 	signal?: AbortSignal;
+	upload?: Partial<UploadConfig> | UploadGroup;
 };
 
 export function joinUploadPath(...parts: string[]) {
@@ -87,6 +88,7 @@ export type MaterializeSpaceEntriesOptions = {
 	destination?: SpaceFsUploadDestination;
 	targetDir?: string;
 	entries: MaterializeSpaceEntry[];
+	upload?: Partial<UploadConfig> | UploadGroup;
 };
 
 const toUploadedFile = (file: {
@@ -110,8 +112,10 @@ export async function materializeSpaceEntries({
 	destination,
 	targetDir = "",
 	entries,
+	upload,
 }: MaterializeSpaceEntriesOptions): Promise<SpaceUploadedFile[]> {
 	if (entries.length === 0) return [];
+	const group = sdk.createUploadGroup(upload);
 	const uploadDestination = normalizeDestination({ destination, targetDir });
 	const safeEntries = entries.map((entry) => ({
 		...entry,
@@ -128,13 +132,13 @@ export async function materializeSpaceEntries({
 			mimeType: entry.mimeType ?? null,
 			downloadUrl: entry.downloadUrl,
 		})),
-	});
+	}, { upload: group });
 	// Remote entries have no uploadUrl; complete immediately.
 	const complete = await sdk
 		.space(spaceId)
 		.files.completeUpload(plan.uploadId, {
 			entries: ids.map((id) => ({ id })),
-		});
+		}, { upload: group });
 	return complete.uploaded.map(toUploadedFile);
 }
 
@@ -148,8 +152,10 @@ export function createSpaceUploadTask({
 	destination,
 	targetDir = "",
 	entries,
+	upload,
 }: Omit<UploadSpaceEntriesOptions, "onProgress" | "signal">): SpaceUploadTask {
 	const files = sdk.space(spaceId).files;
+	const group = sdk.createUploadGroup(upload);
 	const uploadDestination = normalizeDestination({ destination, targetDir });
 	const safeEntries = entries.map((entry) => ({
 		...entry,
@@ -197,7 +203,6 @@ export function createSpaceUploadTask({
 				throwIfAborted(runSignal);
 				const batch = batches[batchIndex];
 				batch.plan ??= await files.createUpload({
-					uploadProtocol: "multipart_v1",
 					uploadRequestId: batch.requestId,
 					destination: uploadDestination,
 					entries: batch.entries.map((entry) => ({
@@ -208,12 +213,12 @@ export function createSpaceUploadTask({
 						mimeType: entry.file.type || null,
 						lastModified: entry.file.lastModified,
 					})),
-				}, { signal: runSignal });
+				}, { signal: runSignal, upload: group });
 				const planById = new Map(batch.plan.entries.map((entry) => [entry.id, entry]));
 				for (const entry of batch.entries) {
 					const planned = planById.get(entry.id);
 					if (!planned) throw new Error("Upload plan missing file");
-					if (!transfers.has(entry.id)) transfers.set(entry.id, files.createUploadTask(planned, entry.file));
+					if (!transfers.has(entry.id)) transfers.set(entry.id, files.createUploadTask(planned, entry.file, { upload: group }));
 				}
 				for (const [index, entry] of batch.entries.entries()) {
 					throwIfAborted(runSignal);
@@ -232,7 +237,7 @@ export function createSpaceUploadTask({
 				report("importing");
 				const complete = await files.completeUpload(batch.plan.uploadId, {
 					entries: batch.entries.map(({ id }) => ({ id })),
-				});
+				}, { upload: group });
 				uploaded.push(...complete.uploaded.map(toUploadedFile));
 				importedFiles += batch.entries.length;
 				report("importing");

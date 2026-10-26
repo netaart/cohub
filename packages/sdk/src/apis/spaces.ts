@@ -1,5 +1,5 @@
-import { createUploadTask, retryUploadRequest, type UploadSource, type UploadTaskOptions } from "../upload-task.js";
-import { UPLOAD_MULTIPART_PART_BYTES } from "@cohub/protocol";
+import { createUploadTask, retryUploadRequest, type UploadSource, type UploadTaskCreateOptions, type PreparedUploadTaskOptions } from "../upload-task.js";
+import { configureUploadInput, resolveUploadGroup, resolveUploadRequestGroup, type UploadOptions } from "../upload-config.js";
 import { listDirectory, type FileListOptions } from "./file-list.js";
 import type { SpaceFsTreePage } from "../types.js";
 import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
@@ -373,19 +373,25 @@ export class SpacePublicFilesApi {
     private readonly spaceId: string,
   ) {}
 
-  createUpload(input: PublicFileCreateUploadInput, options: { signal?: AbortSignal } = {}) {
-    return this.transport.request<PublicFileCreateUploadResponse>(
-      `/api/spaces/${this.spaceId}/public/uploads`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-        signal: options.signal,
-      },
-    );
+  get uploadConfig() {
+    return this.transport.uploadConfig;
   }
 
-  createUploadTask(entry: PublicFileUploadPlanEntry, source: Blob | UploadSource, options: UploadTaskOptions = {}) {
+  createUploadGroup(upload?: UploadOptions) {
+    return resolveUploadGroup(this.transport, upload);
+  }
+
+  createUpload(input: PublicFileCreateUploadInput, options: { signal?: AbortSignal; upload?: UploadOptions } = {}) {
+    const group = resolveUploadRequestGroup(this.transport, input, options.upload);
+    const body = configureUploadInput(group ? { ...input, uploadRequestId: input.uploadRequestId ?? crypto.randomUUID() } : input, group);
+    const request = (signal?: AbortSignal) => this.transport.request<PublicFileCreateUploadResponse>(
+      `/api/spaces/${this.spaceId}/public/uploads`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal },
+    );
+    return group ? retryUploadRequest(request, options.signal, group.config) : request(options.signal);
+  }
+
+  createUploadTask(entry: PublicFileUploadPlanEntry, source: Blob | UploadSource, options: PreparedUploadTaskOptions) {
     return createUploadTask(this.transport, entry, source, options);
   }
 
@@ -625,66 +631,60 @@ export class SpaceFilesApi {
     );
   }
 
-  async upload(files: File[], dir = "") {
-    if (files.some((file) => file.size > UPLOAD_MULTIPART_PART_BYTES)) {
-      const plan = await this.createUpload({
-        destination: { kind: "workspace", targetDir: dir },
-        uploadProtocol: "multipart_v1",
-        uploadRequestId: crypto.randomUUID(),
-        entries: files.map((file, index) => ({
-          id: String(index), name: file.name, relativePath: file.name, size: file.size,
-          mimeType: file.type || null, lastModified: file.lastModified,
-        })),
-      });
-      for (const entry of plan.entries) {
-        const file = files[Number(entry.id)];
-        if (!file) throw new Error("Upload source is missing");
-        await this.createUploadTask(entry, file).run();
+  createUploadGroup(upload?: UploadOptions) {
+    return resolveUploadGroup(this.transport, upload);
+  }
+
+  async upload(files: File[], dir = "", options: UploadTaskCreateOptions = {}): Promise<SpaceFsUploadResponse> {
+    const group = this.createUploadGroup(options.upload);
+    const plan = await this.createUpload({
+      destination: { kind: "workspace", targetDir: dir },
+      entries: files.map((file, index) => ({
+        id: String(index), name: file.name, relativePath: file.name, size: file.size,
+        mimeType: file.type || null, lastModified: file.lastModified,
+      })),
+    }, { upload: group, signal: options.signal });
+    const pending = [...plan.entries];
+    let failure: unknown;
+    const worker = async () => {
+      while (pending.length && !failure) {
+        const entry = pending.shift();
+        if (!entry) return;
+        try {
+          const file = files[Number(entry.id)];
+          if (!file) throw new Error("Upload source is missing");
+          await this.createUploadTask(entry, file, { ...options, upload: group }).run();
+        } catch (error) { failure = error; }
       }
-      const result = await this.completeUpload(plan.uploadId, { entries: plan.entries.map(({ id }) => ({ id })) });
-      return { uploaded: result.uploaded, errors: [] } satisfies SpaceFsUploadResponse;
-    }
-    const params = new URLSearchParams();
-    if (dir) params.set("dir", dir);
-    const query = params.toString();
-    const formData = new FormData();
-    for (const file of files) formData.append("files", file);
-    return this.transport.request<SpaceFsUploadResponse>(
-      `/api/spaces/${this.spaceId}/fs/upload${query ? `?${query}` : ""}`,
-      {
-        method: "POST",
-        body: formData,
-      },
-    );
+    };
+    await Promise.all(Array.from({ length: Math.min(group.config.concurrency, pending.length) }, worker));
+    if (failure) throw failure;
+    const result = await this.completeUpload(plan.uploadId, { entries: plan.entries.map(({ id }) => ({ id })) }, { upload: group, signal: options.signal });
+    return { uploaded: result.uploaded, errors: [] };
   }
 
-  createUpload(input: SpaceFsCreateUploadInput, options: { signal?: AbortSignal } = {}) {
-    return this.transport.request<SpaceFsCreateUploadResponse>(
+  createUpload(input: SpaceFsCreateUploadInput, options: { signal?: AbortSignal; upload?: UploadOptions } = {}) {
+    const group = resolveUploadRequestGroup(this.transport, input, options.upload);
+    const body = configureUploadInput(group ? { ...input, uploadRequestId: input.uploadRequestId ?? crypto.randomUUID() } : input, group);
+    const request = (signal?: AbortSignal) => this.transport.request<SpaceFsCreateUploadResponse>(
       `/api/spaces/${this.spaceId}/fs/uploads`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-        signal: options.signal,
-      },
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal },
     );
+    return group ? retryUploadRequest(request, options.signal, group.config) : request(options.signal);
   }
 
-  createUploadTask(entry: SpaceFsUploadPlanEntry, source: Blob | UploadSource, options: UploadTaskOptions = {}) {
+  createUploadTask(entry: SpaceFsUploadPlanEntry, source: Blob | UploadSource, options: PreparedUploadTaskOptions) {
     return createUploadTask(this.transport, entry, source, options);
   }
 
-  completeUpload(uploadId: string, input: SpaceFsCompleteUploadInput, options: { signal?: AbortSignal } = {}) {
+  completeUpload(uploadId: string, input: SpaceFsCompleteUploadInput, options: { signal?: AbortSignal; upload?: UploadOptions } = {}) {
+    const group = this.createUploadGroup(options.upload);
     return retryUploadRequest((signal) => this.transport.request<SpaceFsCompleteUploadResponse>(
       `/api/spaces/${this.spaceId}/fs/uploads/${uploadId}/complete`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-        signal,
-      },
-    ), options.signal);
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), signal },
+    ), options.signal, group.config);
   }
+
 }
 
 class SessionMessagesClient {

@@ -495,5 +495,8 @@ export type {
 export type { PublicUserWorkItem } from "./types.js";
 
 export { UploadTask, UploadHttpError } from "./upload-task.js";
-export type { UploadPlan, UploadProgress, UploadSource, UploadTaskOptions } from "./upload-task.js";
-export type { MultipartUploadPlan, MultipartUploadPart, MultipartUploadCompletedPart, UploadProtocol } from "@cohub/protocol";
+export type { UploadPlan, UploadProgress, UploadSource, UploadTaskOptions, UploadTaskCreateOptions, PreparedUploadTaskOptions } from "./upload-task.js";
+export type { MultipartUploadPlan, MultipartUploadPart, MultipartUploadCompletedPart, UploadProtocol, UploadStrategy } from "@cohub/protocol";
+
+export { UploadGroup, DEFAULT_UPLOAD_CONFIG } from "./upload-config.js";
+export type { UploadConfig, UploadOptions } from "./upload-config.js";

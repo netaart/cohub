@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { AVATAR_MAX_FILE_BYTES, UPLOAD_ERROR_FILE_TOO_LARGE, UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
+import { AVATAR_MAX_FILE_BYTES, UPLOAD_ERROR_FILE_TOO_LARGE, UPLOAD_MAX_FILE_BYTES, type UploadStrategy } from "@cohub/protocol";
 import { mimeTypeForPath } from "@cohub/protocol/fs";
 import { config } from "./config.js";
 import { createPresignedPutObjectUrl } from "./object-presign.js";
@@ -30,6 +30,7 @@ export type CreatePublicAssetUploadInput = {
   purpose: PublicAssetPurpose;
   uploadProtocol: PublicAssetUploadProtocol;
   uploadRequestId?: string;
+  upload?: Partial<UploadStrategy>;
   spaceId?: string;
   sessionId?: string;
   file: {

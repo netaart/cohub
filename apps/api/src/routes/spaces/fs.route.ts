@@ -47,7 +47,7 @@ import {
   type SpaceUploadDestination,
   type SpaceUploadManifestEntry,
 } from "../../space-upload-storage.js";
-import { abortMultipartUpload, createMultipartUpload, getMultipartUpload, MULTIPART_PART_BYTES, MultipartUploadError, withUploadRequest } from "../../multipart-upload.js";
+import { abortMultipartUpload, createMultipartUpload, getMultipartUpload, MultipartUploadError, normalizeUploadStrategy, shouldUseMultipartUpload, withUploadRequest } from "../../multipart-upload.js";
 import { consumeUploadQuota, UploadRateLimitError, uploadRateLimitedResponse } from "../../upload-quota.js";
 import { getSpaceFsCopy, startSpaceFsCopy, type SpaceFsCopyState } from "../../space-fs-copy-queue.js";
 import { redisCommandClient } from "../../redis.js";
@@ -566,6 +566,7 @@ router.post("/uploads", async (c) => {
   let totalBytes = 0;
 
   try {
+    const upload = normalizeUploadStrategy(body);
     const destination = normalizeUploadDestination(body.destination);
     for (const entry of body.entries) {
       if (typeof entry.id !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(entry.id) || seenIds.has(entry.id)) {
@@ -630,10 +631,10 @@ router.post("/uploads", async (c) => {
           const objectKey = entry.objectKey;
           if (!objectKey) throw new Error("upload object key is missing");
           const signed = createPresignedPutUrl(objectKey, entry.mimeType, entry.size);
-          const multipart = body.uploadProtocol === "multipart_v1" && entry.size > MULTIPART_PART_BYTES
+          const multipart = shouldUseMultipartUpload(entry.size, upload)
             ? await createMultipartUpload({
               userId: user.uuid, storageKind: "space_upload", objectKey,
-              size: entry.size, headers: signed.headers, access: { spaceId, permission: "file.edit" },
+              size: entry.size, partSize: upload.partSizeBytes, headers: signed.headers, access: { spaceId, permission: "file.edit" },
             }) : undefined;
           if (multipart) {
             entry.multipartUploadId = multipart.uploadId;

@@ -1,7 +1,8 @@
-import type {
-	PublicAssetMimeType,
-	PublicAssetUploadProgress,
-	UploadPublicAssetInput,
+import {
+	UploadGroup,
+	type PublicAssetMimeType,
+	type PublicAssetUploadProgress,
+	type UploadPublicAssetInput,
 } from "@neta-art/cohub";
 import { normalizeAvatarImage } from "$lib/avatar-image";
 import { sdk } from "$lib/sdk";
@@ -118,9 +119,11 @@ export async function prepareChatImageAttachment(
 type PublicAssetUploadOptions = {
 	onProgress?: (progress: PublicAssetUploadProgress) => void;
 	signal?: AbortSignal;
+	upload?: UploadPublicAssetInput["upload"];
 };
 
 const attachmentUploads = new WeakMap<File, Map<string, ReturnType<typeof sdk.publicAssets.createUploadTask>>>();
+const attachmentUploadGroups = new WeakMap<UploadGroup, string>();
 
 export async function cancelChatAttachmentUpload(file: File) {
 	const tasks = attachmentUploads.get(file);
@@ -131,7 +134,17 @@ export async function cancelChatAttachmentUpload(file: File) {
 function uploadChatAttachment(input: UploadPublicAssetInput & { file: File }) {
 	const account = authStore.userUuid ?? authStore.claims?.sub ?? authStore.hostSubjectKey;
 	if (!account) return sdk.publicAssets.upload(input);
-	const key = JSON.stringify([account, input.spaceId, input.sessionId, input.mimeType, input.filename]);
+	const group = sdk.createUploadGroup(input.upload);
+	let policyKey = JSON.stringify(group.config);
+	if (input.upload instanceof UploadGroup) {
+		let identity = attachmentUploadGroups.get(group);
+		if (!identity) {
+			identity = crypto.randomUUID();
+			attachmentUploadGroups.set(group, identity);
+		}
+		policyKey = identity;
+	}
+	const key = JSON.stringify([account, input.spaceId, input.sessionId, input.mimeType, input.filename, policyKey]);
 	let tasks = attachmentUploads.get(input.file);
 	if (!tasks) {
 		tasks = new Map();
@@ -139,7 +152,7 @@ function uploadChatAttachment(input: UploadPublicAssetInput & { file: File }) {
 	}
 	let task = tasks.get(key);
 	if (!task) {
-		task = sdk.publicAssets.createUploadTask({ ...input, signal: undefined, onProgress: undefined });
+		task = sdk.publicAssets.createUploadTask({ ...input, upload: group, signal: undefined, onProgress: undefined });
 		tasks.set(key, task);
 	}
 	return task.run({ signal: input.signal, onProgress: input.onProgress });
@@ -157,6 +170,7 @@ export async function uploadUserAvatarImage(
 		filename: `avatar.${avatar.extension}`,
 		onProgress: options.onProgress,
 		signal: options.signal,
+		upload: options.upload,
 	});
 }
 
@@ -165,6 +179,7 @@ export async function uploadSpaceAvatarImage(input: {
 	file: File;
 	onProgress?: (progress: PublicAssetUploadProgress) => void;
 	signal?: AbortSignal;
+	upload?: UploadPublicAssetInput["upload"];
 }) {
 	const avatar = await normalizeAvatarImage(input.file);
 	return sdk.publicAssets.upload({
@@ -175,6 +190,7 @@ export async function uploadSpaceAvatarImage(input: {
 		filename: `avatar.${avatar.extension}`,
 		onProgress: input.onProgress,
 		signal: input.signal,
+		upload: input.upload,
 	});
 }
 
@@ -186,6 +202,7 @@ export function uploadChatAttachmentImage(input: {
 	filename: string;
 	onProgress?: (progress: PublicAssetUploadProgress) => void;
 	signal?: AbortSignal;
+	upload?: UploadPublicAssetInput["upload"];
 }) {
 	return uploadChatAttachment({
 		purpose: "chat_attachment",
@@ -196,6 +213,7 @@ export function uploadChatAttachmentImage(input: {
 		filename: input.filename,
 		onProgress: input.onProgress,
 		signal: input.signal,
+		upload: input.upload,
 	});
 }
 
@@ -207,6 +225,7 @@ export function uploadChatAttachmentFile(input: {
 	filename?: string;
 	onProgress?: (progress: PublicAssetUploadProgress) => void;
 	signal?: AbortSignal;
+	upload?: UploadPublicAssetInput["upload"];
 }) {
 	return uploadChatAttachment({
 		purpose: "chat_attachment",
@@ -217,5 +236,6 @@ export function uploadChatAttachmentFile(input: {
 		filename: input.filename ?? input.file.name,
 		onProgress: input.onProgress,
 		signal: input.signal,
+		upload: input.upload,
 	});
 }

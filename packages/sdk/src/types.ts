@@ -1,4 +1,4 @@
-import type { MultipartUploadPlan, UploadProtocol } from "@cohub/protocol";
+import type { MultipartUploadPlan, UploadProtocol, UploadStrategy } from "@cohub/protocol";
 export type { SpaceWalletSummary, SpaceWalletActivity, SpaceWalletActivityPage } from "@cohub/protocol";
 export type { SessionStats, ExecutionStats, TurnMetrics, RequestMetric } from "@cohub/protocol/model";
 import type { MediaFacts } from "@cohub/protocol/core";
@@ -744,6 +744,7 @@ export type SpaceFsUploadDestination =
     };
 export type SpaceFsCreateUploadInput = {
   uploadProtocol?: UploadProtocol;
+  upload?: Partial<UploadStrategy>;
   uploadRequestId?: string;
   destination: SpaceFsUploadDestination;
   entries: SpaceFsUploadPlanEntryInput[];
