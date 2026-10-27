@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte, ne, sql } from "drizzle-orm";
 import { sessionMessages, sessionTurns, sessionTurnSegments, spaceSessions } from "@cohub/db";
 import { harnessArchiveIndexSchema, isLocalHarness, LOCAL_HARNESSES, selectRuntimeContextMessages, type HarnessKind, type RuntimeContext, type RuntimeContextMessage } from "@cohub/protocol";
 import type { db } from "../db.js";
@@ -62,10 +62,10 @@ export function createRuntimeContextReader(database: ContextDatabase) {
     for (const range of ranges) {
       const turns = await database.select().from(sessionTurns).where(predicate(range)).orderBy(asc(sessionTurns.sequence));
       if (hasUnsettledTurn(turns.map((turn) => turn.status))) throw new Error("Cannot resume before an earlier turn has settled");
-      // Legacy messages may have meta.turnId but no indexed turn_id yet.
+      // Messages without turn_id are not joined; their Turns are rebuilt from the fallback below.
       // Turn order first: a note written during an agent turn must follow that turn.
       const rows = await database.select({ message: sessionMessages, turnId: sessionTurns.id, turnMeta: sessionTurns.meta, turnSequence: sessionTurns.sequence }).from(sessionMessages)
-        .innerJoin(sessionTurns, or(eq(sessionMessages.turnId, sessionTurns.id), and(isNull(sessionMessages.turnId), sql`${sessionMessages.meta}->>'turnId' = ${sessionTurns.id}::text`)))
+        .innerJoin(sessionTurns, eq(sessionMessages.turnId, sessionTurns.id))
         .where(and(predicate(range), eq(sessionMessages.sessionId, sessionTurns.sessionId)))
         .orderBy(asc(sessionTurns.sequence), asc(sessionMessages.sequence));
       const present = new Set(rows.map((row) => row.turnId));
