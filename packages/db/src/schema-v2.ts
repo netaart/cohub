@@ -810,6 +810,8 @@ export const sessionTurns = v2.table(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     sessionId: uuid("session_id").notNull(),
+    // Copy of space_sessions.space_id (Sessions never change Space) so Space-wide feeds read one index range.
+    spaceId: uuid("space_id"),
     userUuid: varchar("user_uuid", { length: 255 }),
     sequence: integer("sequence").notNull(),
     executionKind: varchar("execution_kind", { length: 32 }).$type<SessionTurnExecutionKind>().notNull().default("agent"),
@@ -852,6 +854,7 @@ export const sessionTurns = v2.table(
     ).where(sql`${table.executionKind} = 'direct_generation' and ${table.meta}->>'clientMessageId' is not null`),
     directGenerationBarrierIdx: index("v2_idx_session_turns_direct_generation_barrier").on(table.sessionId, table.sequence, table.status).where(sql`${table.executionKind} = 'direct_generation'`),
     createdAtIdx: index("v2_idx_session_turns_created_at").on(table.createdAt),
+    spaceCreatedAtIdx: index("v2_idx_session_turns_space_created_at").on(table.spaceId, table.createdAt.desc().nullsFirst(), table.id.desc().nullsFirst()),
     userTextSearchIdx: index("v2_idx_session_turns_user_text_trgm").using("gin", table.userText.op("gin_trgm_ops")),
   }),
 );

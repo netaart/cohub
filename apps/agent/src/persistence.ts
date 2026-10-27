@@ -1148,6 +1148,7 @@ export async function persistCompactionEvent(
         if (compactSequence == null) throw new Error("Missing compact turn sequence");
         const [turnRow] = await tx.insert(sessionTurns).values({
           sessionId: input.sessionId,
+          spaceId: input.spaceId,
           userUuid: input.actorUserId,
           sequence: compactSequence,
           status: "completed",

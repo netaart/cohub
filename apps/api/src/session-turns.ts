@@ -298,14 +298,14 @@ type CreateSessionTurnInput = {
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const lockTurnSession = async (tx: Transaction, sessionId: string) => {
-  const [sessionRow] = await tx.select({ meta: spaceSessions.meta }).from(spaceSessions).where(eq(spaceSessions.id, sessionId)).for("update").limit(1);
+  const [sessionRow] = await tx.select({ meta: spaceSessions.meta, spaceId: spaceSessions.spaceId }).from(spaceSessions).where(eq(spaceSessions.id, sessionId)).for("update").limit(1);
   if (!sessionRow) throw new Error("session not found");
   return sessionRow;
 };
 
 const insertSessionTurn = async (
   tx: Transaction,
-  sessionRow: { meta: unknown },
+  sessionRow: { meta: unknown; spaceId: string },
   input: CreateSessionTurnInput & { status?: "queued" | "completed" },
 ) => {
   const userContent = sanitizeContentBlocksForPostgresJson(input.userContent);
@@ -324,6 +324,7 @@ const insertSessionTurn = async (
   const [row] = await tx.insert(sessionTurns).values({
     ...(input.id ? { id: input.id } : {}),
     sessionId: input.sessionId,
+    spaceId: sessionRow.spaceId,
     userUuid: input.userUuid,
     sequence,
     executionKind: input.executionKind ?? "agent",

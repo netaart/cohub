@@ -9,13 +9,10 @@ import {
   and,
   desc,
   eq,
-  gt,
   inArray,
   isNotNull,
-  lt,
   lte,
   ne,
-  or,
   sql,
   type SQL,
 } from "drizzle-orm";
@@ -129,25 +126,17 @@ export async function listSpaceTurns(input: {
   }
 
   const conditions: SQL[] = [
-    eq(spaceSessions.spaceId, input.spaceId),
+    eq(sessionTurns.spaceId, input.spaceId),
     lte(sessionTurns.createdAt, before),
   ];
   const authorFilter = authorCondition(author, input.userUuid);
   if (authorFilter) conditions.push(authorFilter);
   if (input.sessionId) conditions.push(eq(sessionTurns.sessionId, input.sessionId));
   if (accessibleSessionIds) conditions.push(inArray(sessionTurns.sessionId, accessibleSessionIds));
-  if (after) {
-    conditions.push(or(
-      gt(sessionTurns.createdAt, after.createdAt),
-      and(eq(sessionTurns.createdAt, after.createdAt), gt(sessionTurns.id, after.id)),
-    ) as SQL);
-  }
-  if (cursor) {
-    conditions.push(or(
-      lt(sessionTurns.createdAt, cursor.createdAt),
-      and(eq(sessionTurns.createdAt, cursor.createdAt), lt(sessionTurns.id, cursor.id)),
-    ) as SQL);
-  }
+  // Row comparisons, unlike the equivalent OR, become seek boundaries on the (space_id, created_at, id) index.
+  const keyset = (boundary: SpaceTurnCursor) => sql`(${boundary.createdAt.toISOString()}::timestamptz, ${boundary.id}::uuid)`;
+  if (after) conditions.push(sql`(${sessionTurns.createdAt}, ${sessionTurns.id}) > ${keyset(after)}`);
+  if (cursor) conditions.push(sql`(${sessionTurns.createdAt}, ${sessionTurns.id}) < ${keyset(cursor)}`);
 
   const rows = await db
     .select({

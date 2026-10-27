@@ -165,7 +165,7 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
         ...(input.origin ? { origin: input.origin, originalStartedAt: input.startedAt } : {}),
         ...(controllable === undefined ? {} : { controllable }) },
     };
-    await tx.insert(sessionTurns).values({ id: input.turnId, sessionId, userUuid: userId, sequence, status: "running", intent: "followup", userContent, userText, meta, startedAt, createdAt: startedAt });
+    await tx.insert(sessionTurns).values({ id: input.turnId, sessionId, spaceId, userUuid: userId, sequence, status: "running", intent: "followup", userContent, userText, meta, startedAt, createdAt: startedAt });
     const [last] = await tx.select({ sequence: sessionMessages.sequence }).from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId)).orderBy(desc(sessionMessages.sequence)).limit(1);
     await tx.insert(sessionMessages).values({ id: userMessageId, sessionId, turnId: input.turnId, role: "user", content: userContent, text: userText, sequence: (last?.sequence ?? 0) + 1, idempotencyKey: `native:${input.turnId}:user`, meta: { ...meta, turnId: input.turnId, messageKind: "user" }, startedAt, completedAt: startedAt, createdAt: startedAt });
     const [session] = await tx.select().from(spaceSessions).where(eq(spaceSessions.id, sessionId)).limit(1);

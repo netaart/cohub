@@ -259,6 +259,7 @@ export function createSessionServices(input: {
       }).where(eq(spaceSessions.id, turnInput.sessionId));
       const [row] = await tx.insert(sessionTurns).values({
         sessionId: turnInput.sessionId,
+        spaceId: sessionRow.spaceId,
         sequence,
         userUuid: turnInput.userUuid,
         userContent,
