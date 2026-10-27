@@ -468,6 +468,7 @@ function renderTurnTimelineItems(
 			});
 			continue;
 		}
+		const isGoalTurn = turn.intent === "goal";
 		let messages = cache?.messages.get(turn);
 		if (!messages) {
 			messages = {
@@ -476,11 +477,13 @@ function renderTurnTimelineItems(
 			};
 			cache?.messages.set(turn, messages);
 		}
-		items.push({
-			id: `${turnRenderKey}:user`,
-			kind: "message",
-			message: messages.user,
-		});
+		if (!isGoalTurn) {
+			items.push({
+				id: `${turnRenderKey}:user`,
+				kind: "message",
+				message: messages.user,
+			});
+		}
 		const adoptsStream =
 			streamingTurnId === turn.id ||
 			(turn.id === adoptingTurnId &&

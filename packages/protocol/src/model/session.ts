@@ -1,4 +1,5 @@
 export * from "./metrics.js";
+export * from "./goal.js";
 import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
 import type { HarnessKind } from "../runtime/harnesses.js";

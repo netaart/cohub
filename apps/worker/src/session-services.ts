@@ -19,7 +19,7 @@ const billingUsageGate = spaceWalletBilling.gate;
 const agentTurnQueue = createBullmqQueue<{
   spaceId: string;
   sessionId: string;
-  reason?: "prompt" | "steer" | "drain" | "retry" | "recovery" | "generation_complete" | "generation_failed";
+  reason?: "prompt" | "steer" | "goal" | "drain" | "retry" | "recovery" | "generation_complete" | "generation_failed";
   requestId?: string | null;
   trace?: Record<string, unknown>;
 }>(COHUB_AGENT_TURNS_QUEUE, {

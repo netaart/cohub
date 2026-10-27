@@ -219,7 +219,19 @@ export async function claimNextTurnBatch(input: Pick<AgentTurnJobData, "sessionI
       order by sequence asc
     `);
     const followups = followupRows.map((row) => normalizeTurn(row as Record<string, unknown>));
-    if (followups.length === 0) return { kind: "noop" as const };
+    if (followups.length === 0) {
+      const goalRows = await tx.execute(sql`
+        select id, session_id, user_uuid, sequence, status, intent, user_content, user_text, meta, updated_at
+        from v2.session_turns
+        where session_id = ${input.sessionId} and execution_kind = 'agent' and status = 'queued' and intent = 'goal' and ${beforeGeneration}
+        order by sequence asc
+        limit 1
+      `);
+      const goalTurn = goalRows[0] ? normalizeTurn(goalRows[0] as Record<string, unknown>) : null;
+      if (!goalTurn) return { kind: "noop" as const };
+      const batch = await claimQueuedTurns(tx, [goalTurn]);
+      return batch ? { kind: "claimed" as const, batch } : { kind: "noop" as const };
+    }
 
     const delivery = await resolveFollowupDelivery(tx, followups[0]?.userUuid ?? null);
     const selected = delivery === "one_by_one"
@@ -258,8 +270,8 @@ export async function enqueueNextRunnableTurn(input: { spaceId: string; sessionI
   const rows = await db.execute(sql`
     select id
     from v2.session_turns
-    where session_id = ${input.sessionId} and execution_kind = 'agent' and status = 'queued' and intent in ('steer', 'followup')
-    order by case when intent = 'steer' then 0 else 1 end, updated_at asc, sequence asc
+    where session_id = ${input.sessionId} and execution_kind = 'agent' and status = 'queued' and intent in ('steer', 'followup', 'goal')
+    order by case when intent = 'steer' then 0 when intent = 'followup' then 1 else 2 end, updated_at asc, sequence asc
     limit 1
   `);
   const turnId = rows
@@ -282,7 +294,9 @@ export function buildUserMessagesForBatch(batch: ClaimedTurnBatch) {
       turnId: turn.id,
       turnSeq: turn.sequence,
       userMessageId,
-      content: turn.userContent,
+      content: turn.intent === "goal" && typeof meta.goalPrompt === "string"
+        ? [{ type: "text" as const, text: meta.goalPrompt }]
+        : turn.userContent,
       meta: {
         ...meta,
         userMessageId,

@@ -1,4 +1,5 @@
 import { COHUB_AGENT_TURNS_QUEUE, createBullmqQueue, defaultJobRetention } from "@cohub/infra/bullmq";
+import { randomUUID } from "node:crypto";
 import { getCurrentRequestId, getOrCreateRequestId } from "@cohub/infra/tracing";
 import { injectTrace } from "@cohub/infra/tracing/propagator";
 import { createSessionServices, HarnessUnavailableError, ModelUnavailableError } from "@cohub/core/sessions";
@@ -44,13 +45,25 @@ const defaultSkillService: SkillService = {
 const agentTurnQueue = createBullmqQueue<{
   spaceId: string;
   sessionId: string;
-  reason?: "prompt" | "steer" | "drain" | "retry" | "recovery";
+  reason?: "prompt" | "steer" | "goal" | "drain" | "retry" | "recovery";
   requestId?: string | null;
   trace?: Record<string, unknown>;
 }>(COHUB_AGENT_TURNS_QUEUE, {
   redisUrl: config.bullmqRedisUrl,
   telemetryServiceName: "cohub-api-agent-turns",
 });
+
+export async function enqueueSessionAgentTurn(input: { spaceId: string; sessionId: string; reason: "goal" }) {
+  const requestId = getOrCreateRequestId();
+  const trace = injectTrace();
+  await agentTurnQueue.add(AGENT_TURN_JOB_NAME, {
+    spaceId: input.spaceId,
+    sessionId: input.sessionId,
+    reason: input.reason,
+    requestId,
+    trace,
+  }, { jobId: `${input.sessionId}:goal:${randomUUID()}` });
+}
 
 const sandboxLifecycle = createSandboxLifecycleController({ db, infra: null });
 const billingUsageGate = spaceWalletBilling.gate;
