@@ -106,6 +106,41 @@ const closeSocket = (socket: WebSocket, code: number, reason: string) => {
   }
 };
 
+// Runner legs can go half-open and TCP takes ~15 min to notice. Raw bytes count as
+// progress so a slow frame still being buffered here is not mistaken for silence.
+const RUNNER_LIVENESS_CHECK_MS = 5_000;
+const RUNNER_LIVENESS_PING_AFTER_MS = 10_000;
+const RUNNER_LIVENESS_TIMEOUT_MS = 20_000;
+
+function watchRunnerLiveness(runner: WebSocket, request: IncomingMessage, channelId: string) {
+  if (runner.readyState !== runner.OPEN) return;
+  const raw = request.socket as { bytesRead?: number } | undefined;
+  let frames = 0;
+  let lastProgress = -1;
+  let silentMs = 0;
+  const countFrame = () => { frames += 1; };
+  runner.on("message", countFrame);
+  runner.on("pong", countFrame);
+  const timer = setInterval(() => {
+    const progress = (raw?.bytesRead ?? 0) + frames;
+    if (progress !== lastProgress) {
+      lastProgress = progress;
+      silentMs = 0;
+      return;
+    }
+    silentMs += RUNNER_LIVENESS_CHECK_MS;
+    if (silentMs >= RUNNER_LIVENESS_TIMEOUT_MS) {
+      logger.warn("[Relay] runner data channel silent, terminating", { channelId, silentMs });
+      clearInterval(timer);
+      runner.terminate();
+    } else if (silentMs >= RUNNER_LIVENESS_PING_AFTER_MS && runner.readyState === runner.OPEN) {
+      runner.ping();
+    }
+  }, RUNNER_LIVENESS_CHECK_MS);
+  timer.unref?.();
+  runner.once("close", () => clearInterval(timer));
+}
+
 // Wires two sockets together with transparent frame forwarding. The gateway
 // does not parse the agent-sandbox protocol; it only relays bytes.
 function relayFrames(a: WebSocket, b: WebSocket) {
@@ -433,6 +468,7 @@ export function createSandboxRelay(deps: SandboxRelayDeps) {
     }
     logger.info("[Relay] data channel forwarded", { channelId, endpoint });
     relayFrames(runnerSocket, target);
+    watchRunnerLiveness(runnerSocket, request, channelId);
   }
 
   function pairDataChannel(runnerSocket: WebSocket, request: IncomingMessage, channelId: string) {
@@ -456,6 +492,7 @@ export function createSandboxRelay(deps: SandboxRelayDeps) {
     void deps.clearChannelHint(channelId).catch(() => undefined);
     logger.info("[Relay] data channel paired", { spaceId: pending.spaceId, channelId, runtimeId: runner.runtimeId ?? null });
     relayFrames(pending.peerSocket, runnerSocket);
+    watchRunnerLiveness(runnerSocket, request, channelId);
   }
 
   return { handleControlConnection, handlePeerConnection, handleDataConnection, handleDataForwardConnection };

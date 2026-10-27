@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { EventEmitter } from "node:events";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
@@ -22,6 +22,7 @@ class FakeSocket extends EventEmitter {
   bufferedAmount = 0;
   readonly sent: Buffer[] = [];
   closeCode: number | null = null;
+  pings = 0;
   private peer: FakeSocket | null = null;
 
   send(data: Buffer) {
@@ -42,6 +43,7 @@ class FakeSocket extends EventEmitter {
     this.emit("close", this.closeCode ?? 1006, Buffer.from(""));
   }
   terminate() { this.close(); }
+  ping() { this.pings += 1; }
   frames<T = { type?: string; channel?: string }>(): T[] { return this.sent.map((data) => JSON.parse(data.toString()) as T); }
   text() { return this.sent.map((data) => data.toString()).filter((value) => !value.startsWith("{")); }
 }
@@ -195,4 +197,35 @@ test("data dial with a wrong token is rejected even with a valid channel", async
   relay.handleDataConnection(dial as unknown as WebSocket, fakeRequest({ authorization: "Bearer wrong-token" }, `/sandbox/relay/data?channel=${channelId}`));
   await settle();
   assert.equal(dial.closeCode, 4401);
+});
+
+test("a silent runner data leg is pinged, then terminated with its peer", async (t) => {
+  mock.timers.enable({ apis: ["setInterval"] });
+  const { pod, track, teardown } = clusterFixture();
+  t.after(() => { teardown(); mock.timers.reset(); });
+  const { relay } = pod("10.0.0.1:8788");
+  const runner = await registerRunner({ track }, relay);
+  const { peer, channelId } = await openChannel({ track }, relay, runner);
+  const dial = track(new FakeSocket());
+  const raw = { bytesRead: 0 };
+  relay.handleDataConnection(dial as unknown as WebSocket, { ...fakeRequest({ authorization: `Bearer ${runnerToken}` }, `/sandbox/relay/data?channel=${channelId}`), socket: raw } as unknown as IncomingMessage);
+  await settle();
+  const advance = (ms: number) => { for (let elapsed = 0; elapsed < ms; elapsed += 5_000) mock.timers.tick(5_000); };
+
+  for (let elapsed = 0; elapsed < 60_000; elapsed += 5_000) {
+    raw.bytesRead += 64 * 1024;
+    advance(5_000);
+  }
+  assert.equal(dial.readyState, 1, "byte progress of a slow frame keeps the leg alive");
+  assert.equal(dial.pings, 0);
+
+  advance(15_000);
+  assert.ok(dial.pings > 0, "silence triggers a ping");
+  dial.emit("pong");
+  advance(15_000);
+  assert.equal(dial.readyState, 1, "a pong keeps the leg alive");
+
+  advance(20_000);
+  assert.equal(dial.readyState, 3);
+  assert.equal(peer.readyState, 3, "the peer leg closes so its pending rpcs fail fast");
 });

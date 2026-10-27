@@ -24,6 +24,11 @@ const logger = createLogger({ serviceName: "sandbox-client" });
 
 
 const ACCEPTED_RPC_DISCONNECT_GRACE_MS = 3_000;
+// Half-open sockets would hang RPCs until TCP gives up (~15 min). Sandbox heartbeats
+// (5s) keep healthy links busy, so pings go out only after silence.
+const LIVENESS_CHECK_MS = 5_000;
+const LIVENESS_PING_AFTER_MS = 10_000;
+const LIVENESS_TIMEOUT_MS = 20_000;
 const RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 5_000, 10_000, 30_000] as const;
 const LOG_VALUE_LIMIT = 500;
 
@@ -575,10 +580,18 @@ async function connectOnce(registration: SandboxClientRegistration, run: Sandbox
     let settled = false;
     let attachSent = false;
     let onAbort: (() => void) | null = null;
+    let rawSocket: { bytesRead: number } | null = null;
+    let inboundFrames = 0;
+    let silenceWatchdog: ReturnType<typeof setInterval> | null = null;
     const attachRequestId = randomUUID();
 
     const isActiveConnection = () => registrations.get(registration.spaceId)?.connection === connection;
+    const stopSilenceWatchdog = () => {
+      if (silenceWatchdog) clearInterval(silenceWatchdog);
+      silenceWatchdog = null;
+    };
     const cleanupAbortListener = () => {
+      stopSilenceWatchdog();
       if (onAbort) signal.removeEventListener("abort", onAbort);
     };
 
@@ -617,9 +630,41 @@ async function connectOnce(registration: SandboxClientRegistration, run: Sandbox
         return;
       }
       logger.info(`[SandboxWS] Connected ${registration.spaceId} to ${registration.wsUrl}`);
+      startSilenceWatchdog();
+    });
+
+    socket.on("upgrade", (response) => {
+      rawSocket = response.socket;
+    });
+
+    function startSilenceWatchdog() {
+      let lastProgress = -1;
+      let silentMs = 0;
+      silenceWatchdog = setInterval(() => {
+        const progress = (rawSocket?.bytesRead ?? 0) + inboundFrames;
+        if (progress !== lastProgress) {
+          lastProgress = progress;
+          silentMs = 0;
+          return;
+        }
+        silentMs += LIVENESS_CHECK_MS;
+        if (silentMs >= LIVENESS_TIMEOUT_MS) {
+          logger.warn(`[SandboxWS] no inbound traffic, terminating spaceId=${registration.spaceId} identity=${registration.identity} silentMs=${silentMs} attached=${attached}`);
+          stopSilenceWatchdog();
+          socket.terminate();
+        } else if (silentMs >= LIVENESS_PING_AFTER_MS) {
+          socket.ping();
+        }
+      }, LIVENESS_CHECK_MS);
+      silenceWatchdog.unref?.();
+    }
+
+    socket.on("pong", () => {
+      inboundFrames += 1;
     });
 
     socket.on("message", (data: RawData) => {
+      inboundFrames += 1;
       if (!isCurrentRun(registration, run)) {
         closeSupersededSocket();
         finishResolve();
@@ -721,6 +766,7 @@ async function connectOnce(registration: SandboxClientRegistration, run: Sandbox
     });
 
     socket.on("close", (_code, reason) => {
+      stopSilenceWatchdog();
       connection?.dispose();
       const reasonStr = reason?.toString() || "unknown";
       const isActive = isActiveConnection();

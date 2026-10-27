@@ -13,6 +13,8 @@ class FakeWebSocket extends EventEmitter {
   static instances: FakeWebSocket[] = [];
 
   readonly sent: string[] = [];
+  readonly raw = { bytesRead: 0 };
+  pings = 0;
   readyState = FakeWebSocket.CONNECTING;
 
   constructor(readonly url: string, readonly options?: { headers?: Record<string, string> }) {
@@ -21,6 +23,7 @@ class FakeWebSocket extends EventEmitter {
   }
 
   open() {
+    this.emit("upgrade", { socket: this.raw });
     this.readyState = FakeWebSocket.OPEN;
     this.emit("open");
   }
@@ -31,6 +34,10 @@ class FakeWebSocket extends EventEmitter {
 
   send(data: string) {
     this.sent.push(data);
+  }
+
+  ping() {
+    this.pings += 1;
   }
 
   fail(error: Error) {
@@ -211,4 +218,62 @@ test("disconnect and restart cannot revive a run loop waiting in reconnect backo
     for (const socket of FakeWebSocket.instances) socket.terminate();
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
+});
+
+async function withAttachedConnection(spaceId: string, run: (socket: FakeWebSocket, advance: (ms: number) => void) => Promise<void>) {
+  FakeWebSocket.instances = [];
+  mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
+  try {
+    await startSandboxWsClient({ spaceId, wsUrl: "ws://relay.test/sandbox", identity: "agent-test" });
+    const socket = FakeWebSocket.instances[0];
+    assert.ok(socket);
+    attach(socket, spaceId, `connection-${spaceId}`);
+    await run(socket, (ms) => {
+      for (let elapsed = 0; elapsed < ms; elapsed += 5_000) mock.timers.tick(5_000);
+    });
+  } finally {
+    mock.timers.reset();
+    disconnectSandboxWsClient(spaceId, "test cleanup");
+    for (const socket of FakeWebSocket.instances) socket.terminate();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+test("a half-open connection is pinged, then terminated, and its in-flight rpc fails instead of hanging", async () => {
+  const spaceId = "space-half-open";
+  await withAttachedConnection(spaceId, async (socket, advance) => {
+    const connection = getSandboxClientConnection(spaceId);
+    assert.ok(connection);
+    const pending = connection.request("fs.tree", { path: "." }, { spaceId, sandboxId: "sandbox-test" });
+    const sent = socket.sent.at(-1);
+    assert.ok(sent);
+    const request = JSON.parse(sent) as { requestId: string };
+    socket.receive({ version: "1", type: "rpc.accepted", spaceId, sandboxId: "sandbox-test", timestamp: Date.now(), requestId: request.requestId, opId: "op-1" });
+
+    advance(15_000);
+    assert.equal(socket.readyState, FakeWebSocket.OPEN);
+    assert.ok(socket.pings > 0, "silence triggers a ping before giving up");
+
+    advance(10_000);
+    assert.equal(socket.readyState, FakeWebSocket.CLOSED);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    mock.timers.tick(3_000);
+    await assert.rejects(pending, /connection/i);
+  });
+});
+
+test("byte progress and pongs keep a healthy connection alive", async () => {
+  await withAttachedConnection("space-slow-frame", async (socket, advance) => {
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 5_000) {
+      socket.raw.bytesRead += 64 * 1024;
+      advance(5_000);
+    }
+    assert.equal(socket.pings, 0);
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 5_000) {
+      const pings = socket.pings;
+      advance(5_000);
+      if (socket.pings > pings) socket.emit("pong");
+    }
+    assert.equal(socket.readyState, FakeWebSocket.OPEN);
+  });
 });
