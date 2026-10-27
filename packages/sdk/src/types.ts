@@ -1237,21 +1237,25 @@ export type UserSessionListItem = SessionRecord & {
 
 
 /**
- * Source kinds for the `source` query on `GET /api/me/sessions`. Keys match the
- * `Source/*` labels a space sidebar shows; `other` catches anything unlabelled.
+ * Source kinds for the `source` query on `GET /api/me/sessions` and
+ * `GET /api/spaces/:id/sessions`. Keys match the `Source/*` labels a space
+ * sidebar shows; `other` catches anything unlabelled.
  */
-export type UserSessionSourceKey =
-  | "public_api"
-  | "scheduled_task"
-  | "space_hook"
-  | "web"
-  | "websocket"
-  | "cli"
-  | "feishu"
-  | "wechat"
-  | "discord"
-  | "qq"
-  | "other";
+export const USER_SESSION_SOURCE_KEYS = [
+  "public_api",
+  "scheduled_task",
+  "space_hook",
+  "web",
+  "websocket",
+  "cli",
+  "feishu",
+  "wechat",
+  "discord",
+  "qq",
+  "other",
+] as const;
+
+export type UserSessionSourceKey = (typeof USER_SESSION_SOURCE_KEYS)[number];
 
 export type UserSessionsResponse = {
   sessions: UserSessionListItem[];

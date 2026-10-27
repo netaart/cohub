@@ -107,6 +107,7 @@ import type {
   SpaceConfigUpdateResponse,
   ChannelConfig,
   ChannelHealth,
+  UserSessionSourceKey,
 } from "../types.js";
 import type { ResolvedFile } from "../media.js";
 import { SpaceInvitationsApi } from "./invitations.js";
@@ -1127,7 +1128,7 @@ export class SpaceSessionsApi {
   }
 
   list(
-    optionsOrFetch?: { limit?: number; cursor?: string | null; includeForks?: boolean } | Fetch,
+    optionsOrFetch?: { limit?: number; cursor?: string | null; source?: readonly UserSessionSourceKey[] | null; includeForks?: boolean } | Fetch,
     customFetch?: Fetch,
   ) {
     const options = typeof optionsOrFetch === "function" ? undefined : optionsOrFetch;
@@ -1135,6 +1136,7 @@ export class SpaceSessionsApi {
     const params = new URLSearchParams();
     if (options?.limit !== undefined) params.set("limit", String(options.limit));
     if (options?.cursor) params.set("cursor", options.cursor);
+    if (options?.source?.length) params.set("source", options.source.join(","));
     if (options?.includeForks) params.set("includeForks", "1");
     const query = params.toString();
     return this.transport.request<SpaceSessionsResponse>(

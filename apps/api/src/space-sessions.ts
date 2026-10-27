@@ -364,16 +364,15 @@ export async function attachActiveTurns<T extends { id: string; meta?: unknown }
 
 export const listSpaceSessions = async (
   spaceId: string,
-  options?: { limit?: number; cursor?: string | null },
+  options?: { limit?: number; cursor?: string | null; source?: SessionSourceFilter | null },
 ) => {
   const limit = resolveSessionListLimit(options?.limit);
   const cursor = decodeSessionListCursor(options?.cursor);
   const activityCursor = sessionListActivityCursorCondition(cursor);
+  const sourceCondition = sessionListSourceCondition(options?.source ?? null);
 
   const rows = await db.select().from(spaceSessions).where(
-    activityCursor
-      ? and(eq(spaceSessions.spaceId, spaceId), activityCursor)
-      : eq(spaceSessions.spaceId, spaceId),
+    and(eq(spaceSessions.spaceId, spaceId), activityCursor, sourceCondition),
   ).orderBy(...sessionListOrderBy).limit(limit + 1);
 
   const page = paginateSessionRows(rows, limit);

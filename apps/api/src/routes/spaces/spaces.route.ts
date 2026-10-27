@@ -43,8 +43,10 @@ import {
   getSpaceSessionById,
   hydrateSessionParticipantProfiles,
   InvalidSessionListCursorError,
+  InvalidSessionSourceFilterError,
   listSpaceSessions,
   normalizeSpaceEnv,
+  parseSessionSourceKeys,
   validateSpaceEnv,
   setSpaceEnv,
   SandboxNotReadyError,
@@ -2404,8 +2406,12 @@ router.get("/:id/sessions", async (c) => {
   let sessions: Awaited<ReturnType<typeof listSpaceSessions>>["sessions"];
   let pageInfo: Awaited<ReturnType<typeof listSpaceSessions>>["pageInfo"];
   try {
-    ({ sessions, pageInfo } = await listSpaceSessions(spaceId, { limit, cursor }));
+    const source = parseSessionSourceKeys(c.req.query("source"));
+    ({ sessions, pageInfo } = await listSpaceSessions(spaceId, { limit, cursor, source }));
   } catch (error) {
+    if (error instanceof InvalidSessionSourceFilterError) {
+      return c.json({ message: error.message, unknownSources: error.unknownKeys }, 400);
+    }
     if (error instanceof InvalidSessionListCursorError) {
       return c.json({ message: "invalid cursor" }, 400);
     }

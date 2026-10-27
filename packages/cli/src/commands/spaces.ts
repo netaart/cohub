@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
-import { harnessSchema, readSentTurns, readSessionTurnOrigin, resolveCohubEnvironment, type HarnessKind } from "@neta-art/cohub";
+import { harnessSchema, readSentTurns, readSessionTurnOrigin, resolveCohubEnvironment, USER_SESSION_SOURCE_KEYS, type HarnessKind } from "@neta-art/cohub";
 import type {
   CohubHttpClient,
   ContentBlock,
@@ -120,6 +120,11 @@ function parseEnvOptions(values: string[] | undefined): Record<string, string> |
 function parseChoice<const T extends readonly string[]>(value: string, name: string, choices: T): T[number] {
   if ((choices as readonly string[]).includes(value)) return value as T[number];
   return error(`Invalid ${name}`, `Use one of: ${choices.join(", ")}`);
+}
+
+function parseSessionSources(value: string | undefined) {
+  return (value ?? "").split(",").map((item) => item.trim()).filter(Boolean)
+    .map((item) => parseChoice(item, "source", USER_SESSION_SOURCE_KEYS));
 }
 
 function parseNullableRole(value: string | undefined, name: string): "host" | "builder" | "guest" | null {
@@ -1424,12 +1429,13 @@ function registerSessions(spacesCmd: Command): void {
     .command("ls")
     .alias("list")
     .description("List sessions")
+    .option("--source <keys>", `Only sessions from these sources, comma-separated: ${USER_SESSION_SOURCE_KEYS.join(", ")}`)
     .option("--json", "Output as JSON")
-    .action(async (opts: { json?: boolean }) => {
+    .action(async (opts: { source?: string; json?: boolean }) => {
       const spaceId = await resolveSpace(spacesCmd);
       const client = createClient();
       try {
-        const result = await client.space(spaceId).sessions.list();
+        const result = await client.space(spaceId).sessions.list({ source: parseSessionSources(opts.source) });
         if (jsonRequested(opts)) return outJson(result);
         if (result.sessions.length === 0) {
           console.log("  (empty)");
