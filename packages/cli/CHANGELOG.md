@@ -1,5 +1,25 @@
 # @neta-art/cohub-cli
 
+## 10.13.0
+
+### Minor Changes
+
+- 62e64d2: Boards step through frames like pages, in two dimensions, and present them. Top-level frames read in rows by where they sit; `N` and `Shift+N` move through them, arrow keys move by direction, read-only Boards swipe between them on touch and toggle one with a double tap, and focusing a selected frame shows it. A presentation fills the screen with the frame, covers everything around it and moves on with clicks, taps, swipes and keys. The editor exposes `frames`, `frameView`, `goToFrame`, `stepFrame`, `frameNeighbor`, `toggleFrameAt`, `exitFrameView` and `frameInset`; the model adds `boardFrameRegions`, `boardReadingOrder`, `boardRegionNeighbor` and `boardRegionStep`; `#focus=<frame>` now opens framed instead of selecting the frame, and `&present` launches a presentation. `cohub boards frames` lists the order and where each arrow leads.
+  
+  Hosts: no action. `BoardKeyCommand` gains a `frame` command; hosts that switch exhaustively over command types add a case.
+
+### Patch Changes
+
+- 66769b5: An Agent Turn whose payer runs out of balance mid-run now stops before its next LLM round instead of running to the end. The Turn ends interrupted with `summary.reason` `billing` and `summary.billing` carrying the balance gate's conversion payload. `cohub spaces sessions ls` shows such Sessions as `stopped: insufficient balance`, and `cohub spaces sessions turns get` explains the stop.
+- 69a0d36: Displays say which platform they run (`DisplayInfo.platform`: `macos`, `windows`, `linux` or `android`) and whether they report the keyboard focus (`DisplayInfo.focus`). A `DisplayConnection` that controls such a display tracks the focused text field in `connection.focus` and emits `focus` when it changes: its bounds in display units and whether it takes a password, or `null` when no text field has the focus. `cohub spaces displays ls` shows the platform.
+- Updated dependencies [66769b5]
+- Updated dependencies [2a1c012]
+- Updated dependencies [62e64d2]
+- Updated dependencies [24af214]
+- Updated dependencies [b24b577]
+- Updated dependencies [69a0d36]
+  - @neta-art/cohub@13.2.0
+
 ## 10.12.3
 
 ### Patch Changes

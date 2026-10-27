@@ -1,5 +1,25 @@
 # @neta-art/cohub
 
+## 13.2.0
+
+### Minor Changes
+
+- 62e64d2: Boards step through frames like pages, in two dimensions, and present them. Top-level frames read in rows by where they sit; `N` and `Shift+N` move through them, arrow keys move by direction, read-only Boards swipe between them on touch and toggle one with a double tap, and focusing a selected frame shows it. A presentation fills the screen with the frame, covers everything around it and moves on with clicks, taps, swipes and keys. The editor exposes `frames`, `frameView`, `goToFrame`, `stepFrame`, `frameNeighbor`, `toggleFrameAt`, `exitFrameView` and `frameInset`; the model adds `boardFrameRegions`, `boardReadingOrder`, `boardRegionNeighbor` and `boardRegionStep`; `#focus=<frame>` now opens framed instead of selecting the frame, and `&present` launches a presentation. `cohub boards frames` lists the order and where each arrow leads.
+  
+  Hosts: no action. `BoardKeyCommand` gains a `frame` command; hosts that switch exhaustively over command types add a case.
+- b24b577: Boards remember and share where they open. `editor.cameraState()` reads the view as a center and zoom that survive resizing, and `editor.restoreCameraState(view)` shows it again, fitting the Board when nothing is in sight. `parseBoardLaunch` and `formatBoardLaunch` read and write `#focus=`, `#view=` and `#play=…&t=` fragments, and `stateForCamera` complements `cameraForState`. `parsePublishedBoard(json, manifestUrl)` reads a published Board artifact into a document and an asset source for its captured files.
+  
+  Hosts: no action. Hosts that keep their own camera memory can replace its conversion with `cameraState` and `restoreCameraState`.
+- 69a0d36: Displays say which platform they run (`DisplayInfo.platform`: `macos`, `windows`, `linux` or `android`) and whether they report the keyboard focus (`DisplayInfo.focus`). A `DisplayConnection` that controls such a display tracks the focused text field in `connection.focus` and emits `focus` when it changes: its bounds in display units and whether it takes a password, or `null` when no text field has the focus. `cohub spaces displays ls` shows the platform.
+
+### Patch Changes
+
+- 66769b5: An Agent Turn whose payer runs out of balance mid-run now stops before its next LLM round instead of running to the end. The Turn ends interrupted with `summary.reason` `billing` and `summary.billing` carrying the balance gate's conversion payload. `cohub spaces sessions ls` shows such Sessions as `stopped: insufficient balance`, and `cohub spaces sessions turns get` explains the stop.
+- 2a1c012: Frames behave like containers on the canvas. Dragging blank space inside a selected frame moves the frame with its contents, and a marquee started inside a frame also selects the cards resting on it, without selecting the frame itself. A frame made with the frame tool nests in the frame it lands inside, and a dragged-out one also adopts the unlocked items it fully encloses, in one undoable change; moving or resizing a frame never adopts items. A moved frame's clipping now follows it instead of cutting its children at the old edges.
+  
+  Hosts: no action.
+- 24af214: A tap followed by a long press at the same spot no longer starts an empty text draft. The stage ignores the `dblclick` the browser synthesizes from touch and pen input; double taps still edit text.
+
 ## 13.1.0
 
 ### Minor Changes
