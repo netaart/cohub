@@ -25,6 +25,8 @@ const router = new Hono();
 const MIN_QUERY_LENGTH = 2;
 const MIN_MESSAGE_QUERY_LENGTH = 3;
 const LONG_QUERY_LENGTH = 12;
+// Unindexed substring scans over turn text can run for minutes on the primary; a partial answer beats that.
+const STATEMENT_TIMEOUT = "10s";
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 50;
 
@@ -41,14 +43,12 @@ function parseTypes(values: string[]) {
   return { types: new Set<SearchType>(types.length > 0 ? (types as SearchType[]) : SEARCH_TYPES) } as const;
 }
 
-async function execute<T>(query: SQL) {
-  return [...(await db.execute(query))] as T[];
-}
-
 /** Space and label matching rely on the trigram `%` operator at this threshold. */
-async function executeTrigram<T>(query: SQL) {
+async function execute<T>(query: SQL, options: { trigram?: boolean } = {}) {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL pg_trgm.similarity_threshold = 0.2`);
+    await tx.execute(options.trigram
+      ? sql`SELECT set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true), set_config('pg_trgm.similarity_threshold', '0.2', true)`
+      : sql`SELECT set_config('statement_timeout', ${STATEMENT_TIMEOUT}, true)`);
     return [...(await tx.execute(query))] as T[];
   });
 }
@@ -113,11 +113,11 @@ router.get("/", async (c) => {
   }
   if (includeSpaces) {
     const query = buildSpaceSearchQuery({ viewerUuid, query: q, spaceId, limit });
-    searches.push(executeTrigram<SpaceSearchRow>(query).then(toSpaceCandidates));
+    searches.push(execute<SpaceSearchRow>(query, { trigram: true }).then(toSpaceCandidates));
   }
   if (includeLabels) {
     const query = buildLabelSearchQuery({ viewerUuid, query: q, labelRef, spaceId, limit });
-    searches.push(executeTrigram<LabelSearchRow>(query).then((rows) => toLabelCandidates(rows, q)));
+    searches.push(execute<LabelSearchRow>(query, { trigram: true }).then((rows) => toLabelCandidates(rows, q)));
   }
 
   const settled = await Promise.allSettled(searches);

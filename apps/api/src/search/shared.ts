@@ -60,8 +60,13 @@ export function escapeLikePattern(value: string) {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
+/**
+ * Caseless queries (e.g. Chinese) use LIKE, which matches the same rows as ILIKE but can also be served by
+ * pg_bigm indexes; pg_trgm extracts no trigrams from CJK text under the production `C` ctype.
+ */
 export function containsSql(column: SQL, query: string) {
-  return sql`${column} ILIKE '%' || ${escapeLikePattern(query)} || '%' ESCAPE '\\'`;
+  const pattern = sql`'%' || ${escapeLikePattern(query)} || '%' ESCAPE '\\'`;
+  return query.toLowerCase() === query.toUpperCase() ? sql`${column} LIKE ${pattern}` : sql`${column} ILIKE ${pattern}`;
 }
 
 export function substringQualitySql(column: SQL, query: string) {
