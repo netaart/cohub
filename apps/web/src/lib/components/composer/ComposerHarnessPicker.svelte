@@ -119,5 +119,4 @@ function navigate(event: KeyboardEvent) {
 .option-title { color: var(--text-primary); font-size: 13px; }
 .option-detail { color: var(--text-tertiary); font-size: 12px; }
 .option-tag { flex-shrink: 0; color: var(--text-tertiary); font-size: 11px; }
-@media (pointer: coarse) { .harness-trigger { min-height: 36px; } }
 </style>
