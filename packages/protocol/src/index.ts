@@ -23,6 +23,7 @@ export * from "./core/usage.js";
 export * from "./model/session.js";
 export * from "./model/turn.js";
 export * from "./model/completion.js";
+export * from "./model/thinking.js";
 export * from "./model/decision.js";
 export * from "./model/status.js";
 export * from "./realtime/board-awareness.js";

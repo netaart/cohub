@@ -1,7 +1,7 @@
 import type { ContentBlock } from "../core/content.js";
 import type { BillingPayload } from "../billing.js";
 import type { MessageRecord, SessionForkRecord, SessionRecord, SessionTurnRecord } from "../model/session.js";
-import type { ModelThinkingLevel } from "../model/completion.js";
+import type { ModelThinkingLevel } from "../model/thinking.js";
 import type { SessionTurnSummary } from "../model/turn.js";
 import type { TaskRunStatus } from "../task/index.js";
 import type { SpaceFsChangedPayload } from "../fs/index.js";

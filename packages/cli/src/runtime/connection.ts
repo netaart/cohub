@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { isDeepStrictEqual } from "node:util";
 import {
   RUNTIME_MAX_FRAME_BYTES,
   RUNTIME_PROTOCOL_VERSION,
+  runtimeCapabilitiesSchema,
   runtimeCommandSchema,
+  runtimeHelloCapabilities,
   runtimeReadySchema,
   runtimeNativeStopSchema,
   type RuntimeNativeStop,
@@ -44,6 +47,9 @@ export type RuntimeConnectionOptions = {
   cwd: string;
   url: string;
   capabilities: RuntimeCapabilities;
+  /** Rediscovers the catalog; a change is published to the registration without restarting. */
+  refreshCapabilities?: (current: RuntimeCapabilities) => Promise<RuntimeCapabilities>;
+  capabilitiesRefreshMs?: number;
   token: (forceRefresh?: boolean) => Promise<string>;
   signal: AbortSignal;
   executor: Executor;
@@ -67,6 +73,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
   const executions = new Map<string, Execution>();
   const seen = new Set<string>();
   const announce: Announce = { current: null };
+  const catalog: Catalog = { current: options.capabilities, publish: null };
   const uploads = new AbortController();
   const uploadSignal = AbortSignal.any([options.signal, uploads.signal]);
   const log = (
@@ -84,6 +91,23 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
   const timer = setInterval(() => {
     void flush();
   }, 10_000);
+  let refreshing = false;
+  const refreshCatalog = async () => {
+    if (!options.refreshCapabilities || refreshing || options.signal.aborted) return;
+    refreshing = true;
+    try {
+      const next = await options.refreshCapabilities(catalog.current);
+      // The Gateway closes a Runtime that sends an invalid frame; an invalid catalog stays local.
+      runtimeCapabilitiesSchema.parse(next);
+      if (options.signal.aborted || isDeepStrictEqual(next, catalog.current)) return;
+      catalog.current = next;
+      log("info", "runtime.catalog_changed", { harnesses: next.harnesses, modelCount: next.models.length });
+      catalog.publish?.();
+    } catch (error) {
+      log("warn", "runtime.catalog_refresh_failed", { error: serializeDiagnosticError(error) });
+    } finally { refreshing = false; }
+  };
+  const catalogTimer = options.refreshCapabilities ? setInterval(() => { void refreshCatalog(); }, options.capabilitiesRefreshMs ?? 60 * 60_000) : undefined;
   void flush();
   log("info", "runtime.started", {
     runtimeId,
@@ -105,6 +129,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
           executions,
           seen,
           announce,
+          catalog,
           onReady: () => {
             readyAt = Date.now();
             conflictSince = null;
@@ -139,6 +164,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
       backoff = Math.min(30_000, backoff * 2);
     }
   } finally {
+    clearInterval(catalogTimer);
     for (const execution of executions.values()) execution.controller.abort();
     await Promise.allSettled([...executions.values()].map((entry) => entry.promise));
     clearInterval(timer);
@@ -155,7 +181,11 @@ type ConnectOptions = RuntimeConnectionOptions & {
   seen: Set<string>;
   /** Reports a detached execution's saved result on whichever connection is ready when it settles. */
   announce: Announce;
+  /** The latest catalog; `publish` brings the ready connection's registration up to date. */
+  catalog: Catalog;
 };
+
+type Catalog = { current: RuntimeCapabilities; publish: (() => void) | null };
 
 type PendingExecution = { sessionId: string; turnId: string; harness: LocalHarness };
 type Announce = { current: ((execution: PendingExecution) => void) | null };
@@ -262,6 +292,27 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
     socket.send(data);
   };
   const closeTransport = () => socket.close();
+  /** What the Gateway holds for this connection. */
+  let registered: RuntimeCapabilities | null = null;
+  let capabilitiesFrame = false;
+  // A Gateway without the update frame learns a changed catalog from the next hello.
+  const publishCatalog = () => {
+    const current = options.catalog.current;
+    if (!connectionId || isDeepStrictEqual(registered, capabilitiesFrame ? current : runtimeHelloCapabilities(current))) return;
+    if (!capabilitiesFrame) {
+      log("info", "runtime.catalog_reconnect", undefined, { connectionId });
+      closeTransport();
+      return;
+    }
+    try {
+      send({ type: "runtime.capabilities", capabilities: current });
+      registered = current;
+      log("info", "runtime.catalog_published", { modelCount: current.models.length }, { connectionId });
+    } catch (error) {
+      log("warn", "runtime.catalog_publish_failed", { error: serializeDiagnosticError(error) }, { connectionId });
+      closeTransport();
+    }
+  };
   const shutdown = () => {
     for (const execution of active.values()) execution.controller.abort();
     closeTransport();
@@ -366,6 +417,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
     options.onDisconnected?.();
     const executionMustStop = options.signal.aborted || fatal || conflict;
     if (options.announce.current === announceHere) options.announce.current = null;
+    if (options.catalog.publish === publishCatalog) options.catalog.publish = null;
     for (const [requestId, execution] of active) {
       if (executionMustStop) {
         log("error", "runtime.execution_transport_invalidated", { code: event.code, reason: event.reason }, executionContext(connectionId, execution));
@@ -407,12 +459,13 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         attempt: options.attempt,
         durationMs: Date.now() - connectedAt,
       });
+      registered = runtimeHelloCapabilities(options.catalog.current);
       send({
         type: "runtime.hello",
         version: RUNTIME_PROTOCOL_VERSION,
         spaceId: options.spaceId,
         token: currentToken,
-        capabilities: options.capabilities,
+        capabilities: registered,
       });
     } catch (error) {
       log("error", "runtime.hello_failed", { error: serializeDiagnosticError(error) });
@@ -445,9 +498,12 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
           detachedExecutions: [...active.values()].filter((entry) => entry.detached).length,
         }, { connectionId });
         nativeChannelReady = true;
+        capabilitiesFrame = frame.features?.includes("capabilities") === true;
         options.onNativeChannel?.(sendNative);
         options.onReady();
         options.announce.current = announceHere;
+        options.catalog.publish = publishCatalog;
+        publishCatalog();
         let recoveryBatch = 0;
         for await (const executions of options.executor.results.pendingBatches()) {
           recoveryBatch += 1;
@@ -579,7 +635,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         return;
       }
 
-      if (frame.input.spaceId !== options.spaceId || !options.capabilities.harnesses.includes(frame.input.harness)) throw new Error("Invalid Runtime target");
+      if (frame.input.spaceId !== options.spaceId || !options.catalog.current.harnesses.includes(frame.input.harness)) throw new Error("Invalid Runtime target");
       const context = executionContext(connectionId, frame.input);
       log("info", "runtime.turn_received", {
         requestId: frame.requestId,

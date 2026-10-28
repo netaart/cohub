@@ -43,6 +43,11 @@ const relay = createRuntimeRelay({
     return claimed;
   },
   renew: async (spaceId, record) => await redisCommandClient.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('EXPIRE', KEYS[1], 40) else return 0 end", 1, runtimeRegistrationKey(spaceId), JSON.stringify(record)) === 1,
+  update: async (spaceId, previous, next) => {
+    const updated = await redisCommandClient.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2], 'EX', 40) return 1 else return 0 end", 1, runtimeRegistrationKey(spaceId), JSON.stringify(previous), JSON.stringify(next)) === 1;
+    if (updated) await publishRuntimeChanged(spaceId).catch(() => undefined);
+    return updated;
+  },
   release: async (spaceId, record) => {
     const released = await redisCommandClient.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end", 1, runtimeRegistrationKey(spaceId), JSON.stringify(record));
     if (released === 1) await publishRuntimeChanged(spaceId).catch(() => undefined);

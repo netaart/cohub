@@ -12,7 +12,7 @@ import type {
   StoredToolCall,
   TurnIntermediateMessagesFile,
 } from "@cohub/protocol/model";
-import type { ModelThinkingLevel } from "@cohub/protocol";
+import { isModelThinkingLevel, type ModelThinkingLevel } from "@cohub/protocol";
 import { db } from "./db/index.js";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
 import { addSessionParticipantMeta, interruptedSummaryPatch, interruptedTurnUsage, summarizeSessionTurnCompactions } from "@cohub/core/sessions";
@@ -32,14 +32,12 @@ const toIso = (value: Date | string | null | undefined) => {
 const normalizeRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
-const THINKING_LEVEL_SET = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-
 /** Extracts the effective thinking level from turn meta, if present. */
 function extractThinkingLevel(meta: unknown): ModelThinkingLevel | null {
   const record = normalizeRecord(meta);
   if (!record) return null;
   const level = record.effectiveThinkingLevel;
-  return typeof level === "string" && THINKING_LEVEL_SET.has(level) ? level as ModelThinkingLevel : null;
+  return isModelThinkingLevel(level) ? level : null;
 }
 
 export const addUsage = (a: Usage | null | undefined, b: Usage | null | undefined): Usage | null => {

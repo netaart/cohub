@@ -115,6 +115,35 @@ test("a requested level is clamped to the requested model", () => {
 	);
 });
 
+test("ultra is offered only where declared and restores from a request", () => {
+	const ultra: RuntimeCapabilities["models"][number] = {
+		harness: "codex",
+		provider: "openai",
+		id: "ultra",
+		name: "Ultra",
+		reasoning: true,
+		thinkingLevelMap: { ultra: "ultra" },
+	};
+	const [declared] = toLocalModelCatalog([ultra]);
+	assert(declared);
+	assert.equal(getSupportedThinkingLevels(declared).at(-1), "ultra");
+	assert.equal(
+		resolveLocalModel([...catalog, ultra], {
+			provider: "openai",
+			id: "deep",
+			thinkingLevel: "ultra",
+		})?.thinkingLevel,
+		"high",
+	);
+	assert.equal(
+		resolveLocalModelFromTurns(
+			[turn(1, "codex", { model: "ultra", thinkingLevel: "ultra" })],
+			"codex",
+		)?.thinkingLevel,
+		"ultra",
+	);
+});
+
 test("a model without a level choice sends no level", () => {
 	assert.deepEqual(
 		resolveLocalModel(catalog, {

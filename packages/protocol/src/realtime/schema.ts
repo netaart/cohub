@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { contentBlockSchema } from "../core/content-schema.js";
 import { harnessSchema } from "../runtime/index.js";
+import { modelThinkingLevelSchema } from "../model/thinking.js";
 import type { RealtimeCompactFrame, RealtimeEnvelope, RealtimeRoom } from "./types.js";
 import { REALTIME_DOMAINS, REALTIME_ROOM_EVENT_NAME_PATTERN, REALTIME_ROOM_HISTORY_PAGE } from "./types.js";
 import { BoardAwarenessClientPayloadSchema } from "./board-awareness.js";
@@ -49,7 +50,7 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
       model: z.string().optional(),
       provider: z.string().optional(),
       harness: harnessSchema.optional(),
-      thinkingLevel: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+      thinkingLevel: modelThinkingLevelSchema.optional(),
     }),
   }),
   z.object({

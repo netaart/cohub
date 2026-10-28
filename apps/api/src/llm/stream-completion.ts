@@ -2,7 +2,6 @@ import { imageBlockToPi, type ContentBlock } from "@cohub/protocol/core";
 import type {
   CompletionAssistantMessage,
   CompletionMessage,
-  CompletionThinkingLevel,
   CompletionUsage,
   SpaceCompletionStreamEvent,
 } from "@cohub/protocol";
@@ -11,6 +10,7 @@ import {
   type AssistantMessage,
   type ImageContent,
   type Message,
+  type ModelThinkingLevel as PiThinkingLevel,
   type ThinkingLevel,
   type Usage as PiUsage,
 } from "@earendil-works/pi-ai";
@@ -19,11 +19,11 @@ import type { CompletionModelRegistry, RuntimeLlmModel } from "./completion-regi
 import { prepareCompletionImagesForModel, type ImageToTextCall } from "./image-to-text.js";
 import { createModelsFromRegistry, streamSimpleWithModels } from "./pi-models-adapter.js";
 
-const THINKING_LEVELS = new Set<CompletionThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const THINKING_LEVELS = new Set<PiThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
-export function normalizeThinkingLevel(level: string | null | undefined): CompletionThinkingLevel | undefined {
-  return level && THINKING_LEVELS.has(level as CompletionThinkingLevel)
-    ? level as CompletionThinkingLevel
+export function normalizeThinkingLevel(level: string | null | undefined): PiThinkingLevel | undefined {
+  return level && THINKING_LEVELS.has(level as PiThinkingLevel)
+    ? level as PiThinkingLevel
     : undefined;
 }
 

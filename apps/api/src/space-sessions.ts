@@ -4,7 +4,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-or
 import type { Usage } from "@cohub/protocol/core";
 import { sanitizeSessionRecordStats } from "@cohub/protocol/model";
 import type { PersistMessageInput, RegisterSessionInput, SessionTurnRecord, UpdateSessionInfoInput } from "@cohub/protocol/model";
-import type { ModelThinkingLevel } from "@cohub/protocol";
+import { isModelThinkingLevel, type ModelThinkingLevel } from "@cohub/protocol";
 import { getOrCreateRequestId } from "@cohub/infra/tracing";
 import { injectTrace } from "@cohub/infra/tracing/propagator";
 import { SPACE_ENV_REDIS_KEY } from "@cohub/protocol/sandbox";
@@ -84,13 +84,11 @@ export class SpaceEnvValidationError extends Error {
 const normalizeRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
-const THINKING_LEVEL_SET = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-
 function extractThinkingLevel(meta: unknown): ModelThinkingLevel | null {
   const record = normalizeRecord(meta);
   if (!record) return null;
   const level = record.effectiveThinkingLevel;
-  return typeof level === "string" && THINKING_LEVEL_SET.has(level) ? level as ModelThinkingLevel : null;
+  return isModelThinkingLevel(level) ? level : null;
 }
 
 const finiteNumberOrUndefined = (value: unknown): number | undefined =>

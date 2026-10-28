@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs";
 import { access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { ContentBlock, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput } from "@neta-art/cohub";
+import { isModelThinkingLevel, thinkingLevelMapFor, type ContentBlock, type RuntimeExecutionEvent, type RuntimeMessage, type RuntimeTurnInput } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { describeError } from "../../network-error.js";
 import type { Executor } from "../native/execution.js";
@@ -23,7 +23,6 @@ const FLUSH_TIMEOUT_MS = 10_000;
 const READ_ONLY_TOOLS = "Read,Glob,Grep";
 /** Flags every Turn relies on; an executable whose help lacks one is an older or unrelated CLI. */
 const REQUIRED_FLAGS = ["--input-format", "--output-format", "--include-partial-messages", "--session-id", "--resume", "--permission-mode", "--tools", "--strict-mcp-config", "--model", "--effort"];
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 /** Runs without `--model`, so the CLI's own configuration and account default apply. */
 export const DEFAULT_MODEL = "default";
 
@@ -36,7 +35,7 @@ export type StreamJsonProfile = {
   /** Root holding `projects/<project>/<session>.jsonl`. */
   dataRoot(): string;
   projectDirectory(cwd: string): string;
-  /** Thinking levels accepted by `--effort`. */
+  /** Thinking levels offered when the CLI does not list a model's own. */
   effortLevels: readonly string[];
   /** The CLI keeps a stream-json prompt's `uuid` as its record id, so the file names the Cohub Turn. */
   promptUuid: boolean;
@@ -55,7 +54,8 @@ export function streamJsonModel(profile: StreamJsonProfile, id: string, name: st
   return {
     harness: profile.harness, provider: options.provider ?? profile.provider, id, name,
     ...(options.isDefault ? { isDefault: true } : {}),
-    ...(options.reasoning ? { reasoning: true, thinkingLevelMap: Object.fromEntries(THINKING_LEVELS.map((level) => [level, effortLevels.includes(level) ? level : null])) } : {}),
+    // An explicit `reasoning: false` lets Cohub fit any requested level to `off`, so no `--effort` is sent.
+    ...(options.reasoning ? { reasoning: true, thinkingLevelMap: thinkingLevelMapFor((level) => effortLevels.includes(level) ? level : null) } : { reasoning: false }),
   };
 }
 
@@ -218,7 +218,8 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
   // A retried Turn whose prompt is already in the file would be dropped, so it continues from history.
   if (profile.promptUuid && prepared.resume === "native" && await holdsPrompt(prepared.session.path, input.turnId, signal)) prepared = await prepare(() => false);
   let session = prepared.session;
-  const effort = input.thinkingLevel && profile.effortLevels.includes(input.thinkingLevel) ? input.thinkingLevel : null;
+  // Cohub has already fitted the level to the levels the model declares; these CLIs have no `off` effort.
+  const effort = isModelThinkingLevel(input.thinkingLevel) && input.thinkingLevel !== "off" ? input.thinkingLevel : null;
   const args = [
     "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     ...(prepared.resume === "new" ? ["--session-id", session.nativeSessionId] : ["--resume", session.nativeSessionId]),

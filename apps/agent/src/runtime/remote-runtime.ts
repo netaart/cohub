@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { sessionTurns } from "@cohub/db";
 import { readRuntimeRecovery, runtimeRecoveryActive, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { db } from "../db.js";
-import { assertHarnessAccess, runtimeRegistrationKey, parseRuntimeRegistration, type LocalHarness, type RuntimeExecutionEvent, type RuntimeTurnInput, type RuntimeRecoveryState } from "@cohub/protocol";
+import { assertHarnessAccess, findRuntimeModel, resolveRuntimeThinkingLevel, runtimeRegistrationKey, parseRuntimeRegistration, type LocalHarness, type RuntimeExecutionEvent, type RuntimeTurnInput, type RuntimeRecoveryState } from "@cohub/protocol";
 import { redis, sendOutput } from "../redis.js";
 import { env } from "../env.js";
 import { logger } from "../logger.js";
@@ -27,8 +27,8 @@ function nativeAssistant(event: Extract<RuntimeExecutionEvent, { type: "message.
   };
 }
 
-export async function markRuntimeRecovery(turnId: string, recovery: RuntimeRecoveryState) {
-  const [updated] = await db.update(sessionTurns).set({ meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || jsonb_build_object('runtimeRecovery', coalesce(${sessionTurns.meta}->'runtimeRecovery', '{}'::jsonb) || ${JSON.stringify(recovery)}::jsonb)` })
+export async function markRuntimeRecovery(turnId: string, recovery: RuntimeRecoveryState, metaPatch: Record<string, unknown> = {}) {
+  const [updated] = await db.update(sessionTurns).set({ meta: sql`coalesce(${sessionTurns.meta}, '{}'::jsonb) || ${JSON.stringify(metaPatch)}::jsonb || jsonb_build_object('runtimeRecovery', coalesce(${sessionTurns.meta}->'runtimeRecovery', '{}'::jsonb) || ${JSON.stringify(recovery)}::jsonb)` })
     .where(and(eq(sessionTurns.id, turnId), runtimeRecoveryActive, runtimeResolutionOpen))
     .returning({ meta: sessionTurns.meta });
   return updated?.meta ?? null;
@@ -54,7 +54,9 @@ export async function executeRemoteHarnessTurn(input: {
   const previousRecovery = readRuntimeRecovery(input.batch.ownerTurn.meta);
   if (input.recovery && previousRecovery?.ownerUserId && previousRecovery.ownerUserId !== registration.ownerUserId) throw new RuntimeExecutionUncertainError("Runtime owner changed");
   if (!input.recovery && !capabilities.harnesses.includes(input.harness)) throw new Error("Harness is unavailable on this Runtime");
-  if (!input.recovery && input.model && !capabilities.models.some((model) => model.harness === input.harness && model.id === input.model && (!input.provider || model.provider === input.provider))) throw new Error("Model is unavailable on this Runtime");
+  const runtimeModel = findRuntimeModel(capabilities, input);
+  if (!input.recovery && input.model && !runtimeModel) throw new Error("Model is unavailable on this Runtime");
+  const thinkingLevel = resolveRuntimeThinkingLevel(runtimeModel, input.requestedThinkingLevel);
   const users = buildUserMessagesForBatch(input.batch);
   const user = users.at(-1);
   const first = users[0];
@@ -69,7 +71,7 @@ export async function executeRemoteHarnessTurn(input: {
     harness: input.harness, messages: users.map((message, index) => ({ turnId: message.turnId, userMessageId: message.userMessageId,
       userId: input.batch.turns[index]?.userUuid ?? null, content: message.content })),
     context, provider: input.provider, model: input.model,
-    thinkingLevel: input.requestedThinkingLevel,
+    thinkingLevel,
     requestId: traceIdentifiers.requestId,
     traceContext: {
       requestId: traceIdentifiers.requestId,
@@ -93,7 +95,8 @@ export async function executeRemoteHarnessTurn(input: {
   let finalRevision: string | null = null;
   try {
     if (!input.recovery) {
-      await markRuntimeRecovery(user.turnId, { state: "executing", ownerUserId: registration.ownerUserId });
+      // Recorded before dispatch so recovery keeps the level this execution ran with.
+      await markRuntimeRecovery(user.turnId, { state: "executing", ownerUserId: registration.ownerUserId }, thinkingLevel ? { effectiveThinkingLevel: thinkingLevel } : {});
     }
     if (!input.recovery) await sendOutput({ type: "turn_lifecycle", spaceId: input.spaceId, sessionId: input.sessionId, turnId: user.turnId, anchorUserMessageId: userMessageId, phase: "llm_call_started", llmRound: 1, provider: input.provider, model: input.model, at: new Date().toISOString(), timestamp: Date.now() }).catch((error) => logger.warn("[Runtime] lifecycle delivery failed", error));
     await exchangeRuntimeTurn({

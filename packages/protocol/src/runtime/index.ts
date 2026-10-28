@@ -6,6 +6,7 @@ import { contentBlockSchema } from "../core/content-schema.js";
 import { harnessArchiveSchema, type HarnessArchive } from "./archive.js";
 import { nativeRuntimeEventSchema } from "./native.js";
 import { LOCAL_HARNESSES, localHarnessSchema, type LocalHarness } from "./harnesses.js";
+import { clampThinkingLevel, isModelThinkingLevel, modelThinkingLevelSchema, type ModelThinkingLevel } from "../model/thinking.js";
 export * from "./archive.js";
 export * from "./harnesses.js";
 export * from "./native.js";
@@ -86,7 +87,6 @@ export type RuntimeTraceContext = {
   traceparent?: string | null;
 };
 
-const runtimeThinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const runtimeCapabilitiesSchema = z.object({
   harnesses: z.array(localHarnessSchema).max(LOCAL_HARNESSES.length),
   models: z.array(z.object({
@@ -97,11 +97,50 @@ export const runtimeCapabilitiesSchema = z.object({
     /** The model the Harness runs when none is requested; at most one per Harness. */
     isDefault: z.boolean().optional(),
     reasoning: z.boolean().optional(),
-    defaultThinkingLevel: runtimeThinkingLevelSchema.optional(),
-    thinkingLevelMap: z.partialRecord(runtimeThinkingLevelSchema, z.string().max(100).nullable()).optional(),
+    // Levels this build does not know are dropped rather than rejecting the Runtime that names them.
+    defaultThinkingLevel: modelThinkingLevelSchema.optional().catch(undefined),
+    thinkingLevelMap: z.record(z.string().max(32), z.string().max(100).nullable())
+      .refine((map) => Object.keys(map).length <= 32, "Too many thinking levels")
+      .transform((map) => Object.fromEntries(Object.entries(map).filter(([level]) => isModelThinkingLevel(level))) as Partial<Record<ModelThinkingLevel, string | null>>)
+      .optional(),
+    /** Selectable service (speed) tiers; `id` is the Harness's own request value. */
+    serviceTiers: z.array(z.object({
+      id: z.string().min(1).max(100),
+      name: z.string().max(255),
+      description: z.string().max(2000).optional(),
+    })).max(20).optional(),
+    defaultServiceTier: z.string().min(1).max(100).optional(),
   })).max(2000),
 });
 export type RuntimeCapabilities = z.infer<typeof runtimeCapabilitiesSchema>;
+export type RuntimeModel = RuntimeCapabilities["models"][number];
+
+/** Levels every Gateway accepts in `runtime.hello`; later levels reach the registration through `runtime.capabilities`. */
+const RUNTIME_HELLO_THINKING_LEVELS: ReadonlySet<string> = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+export function runtimeHelloCapabilities(capabilities: RuntimeCapabilities): RuntimeCapabilities {
+  return {
+    ...capabilities,
+    models: capabilities.models.map(({ defaultThinkingLevel, thinkingLevelMap, ...model }) => ({
+      ...model,
+      ...(defaultThinkingLevel && RUNTIME_HELLO_THINKING_LEVELS.has(defaultThinkingLevel) ? { defaultThinkingLevel } : {}),
+      ...(thinkingLevelMap ? { thinkingLevelMap: Object.fromEntries(Object.entries(thinkingLevelMap).filter(([level]) => RUNTIME_HELLO_THINKING_LEVELS.has(level))) } : {}),
+    })),
+  };
+}
+
+/** Like Cloud, a model that declares its reasoning runs the nearest level it supports; otherwise the Harness decides. */
+export function resolveRuntimeThinkingLevel(model: RuntimeModel | undefined, requested: string | null | undefined): string | null | undefined {
+  const declared = model && (model.reasoning !== undefined || model.thinkingLevelMap !== undefined);
+  return declared && isModelThinkingLevel(requested) ? clampThinkingLevel(model, requested) : requested;
+}
+
+/** The requested model, or the Harness default when none is requested. */
+export function findRuntimeModel(capabilities: RuntimeCapabilities, input: { harness: LocalHarness; model?: string | null; provider?: string | null }): RuntimeModel | undefined {
+  return capabilities.models.find((model) => model.harness === input.harness && (input.model
+    ? model.id === input.model && (!input.provider || model.provider === input.provider)
+    : model.isDefault === true));
+}
 export const runtimePendingExecutionSchema = z.object({
   sessionId: z.string().uuid(),
   turnId: z.string().uuid(),
@@ -122,7 +161,9 @@ export function parseRuntimeRegistration(raw: string): RuntimeRegistration | nul
   catch { return null; }
 }
 
-export const runtimeReadySchema = z.object({ type: z.literal("runtime.ready"), connectionId: z.string().uuid() });
+/** Control frames a Gateway accepts beyond the base protocol; older Gateways omit the list. */
+export const RUNTIME_CONTROL_FEATURES = ["capabilities"] as const;
+export const runtimeReadySchema = z.object({ type: z.literal("runtime.ready"), connectionId: z.string().uuid(), features: z.array(z.string()).optional() });
 
 export type RuntimeExecutionIdentity = { spaceId: string; sessionId: string; turnId: string; harness: LocalHarness };
 
@@ -230,6 +271,8 @@ export const runtimeEventSchema = z.discriminatedUnion("type", [
 ]);
 export const runtimeClientFrameSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runtime.hello"), version: z.literal(RUNTIME_PROTOCOL_VERSION), spaceId: id, token: z.string().min(1).max(16_384), capabilities: runtimeCapabilitiesSchema }).strict(),
+  /** A changed catalog replaces the registered one without reconnecting. */
+  z.object({ type: z.literal("runtime.capabilities"), capabilities: runtimeCapabilitiesSchema }).strict(),
   z.object({ type: z.literal("runtime.recovery"), executions: z.array(runtimePendingExecutionSchema).min(1).max(RUNTIME_RECOVERY_BATCH_SIZE) }).strict(),
   z.object({ type: z.literal("runtime.heartbeat") }),
   z.object({ type: z.literal("runtime.auth"), token: z.string().min(1).max(16_384) }),

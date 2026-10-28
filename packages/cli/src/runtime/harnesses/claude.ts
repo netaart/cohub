@@ -105,12 +105,16 @@ function claudeModelCatalog(entries: unknown[], baseUrl?: string): HarnessModel[
 export const claudeHarness: LocalHarnessAdapter = {
   id: "claude",
   binary: profile.binary,
-  async models(executable, cwd) {
+  async models(executable, cwd, options) {
     await streamJsonHelp(profile, executable, cwd);
     try {
       const models = claudeModelCatalog(array((await claudeInitialize(executable, cwd)).models), process.env.ANTHROPIC_BASE_URL);
       if (models.some((model) => model.isDefault)) return models;
-    } catch { /* A CLI without the initialize model list keeps the account aliases. */ }
+      if (options?.strict) throw new Error("Claude Code initialize lists no default model");
+    } catch (error) {
+      // A CLI without the initialize model list keeps the account aliases.
+      if (options?.strict) throw error;
+    }
     // Aliases follow the signed-in account; Haiku takes no effort level.
     return [
       streamJsonModel(profile, DEFAULT_MODEL, "Default", { reasoning: true, isDefault: true }),

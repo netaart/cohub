@@ -10,7 +10,7 @@ import { createClient } from "../client.js";
 import { currentIdentityKey } from "../space.js";
 import { ensureSandboxdBinary } from "../commands/sandboxd-binary.js";
 import { serveRuntime } from "./connection.js";
-import { discoverHarnesses, type HarnessExecutables } from "./harnesses/index.js";
+import { discoverHarnesses, refreshHarnesses, type HarnessExecutables } from "./harnesses/index.js";
 import { RuntimeDiagnostics, serializeDiagnosticError, type RuntimeDiagnostic, type RuntimeDiagnosticLevel } from "./diagnostics.js";
 import { ownRuntimeInstance, runtimeInstanceDirectory } from "./instance.js";
 import { createDiagnosticConsole, type RuntimeSummary } from "./presentation.js";
@@ -280,6 +280,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     let importRequested = Boolean(config.importHistory);
     await serveRuntime({
       spaceId: config.spaceId, cwd: config.root, url: url.toString(), capabilities,
+      refreshCapabilities: (current) => refreshHarnesses(current, config.executables, config.root, (harness, error) => diagnostics.log("warn", "runtime.harness_catalog_failed", { harness, error: serializeDiagnosticError(error) })),
       runtimeId: status.runtimeId, diagnostics, token, signal, executor: native.executor,
       onReady: () => { update({ harnessConnected: true }); retryDisconnectedBridge?.(); },
       onDisconnected: () => { native.connect(null); update({ harnessConnected: false }); retryDisconnectedBridge?.(); },

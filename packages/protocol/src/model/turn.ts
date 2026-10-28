@@ -1,6 +1,6 @@
 import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
-import type { ModelThinkingLevel } from "./completion.js";
+import type { ModelThinkingLevel } from "./thinking.js";
 import type { BillingPayload } from "../billing.js";
 import type { HarnessArchiveIndex } from "../runtime/index.js";
 export type { HarnessArchiveIndex } from "../runtime/index.js";

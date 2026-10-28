@@ -4,7 +4,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { displaysSnapshotSchema, fileWatcherStatusSchema, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, isUuid, runtimeStopConfirmationSchema, type HarnessKind, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
+import { displaysSnapshotSchema, fileWatcherStatusSchema, isModelThinkingLevel, MODEL_THINKING_LEVELS, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, isUuid, runtimeStopConfirmationSchema, type HarnessKind, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
 import {
   HOME_SPACE_SLUG,
   parseSpaceSlug,
@@ -227,14 +227,12 @@ const normalizeSpacePromptIntent = (value: unknown): SpacePromptIntent | null =>
   return value === "followup" || value === "steer" ? value : null;
 };
 
-const VALID_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-
 const normalizePromptThinkingLevel = (value: unknown): string | null | undefined => {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  return VALID_THINKING_LEVELS.has(trimmed) ? trimmed : null;
+  return isModelThinkingLevel(trimmed) ? trimmed : null;
 };
 
 const readMetaRecord = (value: unknown): Record<string, unknown> =>
@@ -2082,7 +2080,7 @@ router.post("/:id/prompt", async (c) => {
   const promptIntent = normalizeSpacePromptIntent(body.intent);
   if (!promptIntent) return c.json({ message: "intent must be one of: followup, steer" }, 400);
   const promptThinkingLevel = normalizePromptThinkingLevel(body.thinkingLevel);
-  if (promptThinkingLevel === null) return c.json({ message: "thinkingLevel must be one of: off, minimal, low, medium, high, xhigh, max" }, 400);
+  if (promptThinkingLevel === null) return c.json({ message: `thinkingLevel must be one of: ${MODEL_THINKING_LEVELS.join(", ")}` }, 400);
   if (body.harness !== undefined && body.harness !== null && !harnessSchema.safeParse(body.harness).success) {
     return c.json({ message: `harness must be one of: ${harnessSchema.options.join(", ")}` }, 400);
   }

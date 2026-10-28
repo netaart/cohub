@@ -6,11 +6,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { LocalHarness, RuntimeExecutionEvent, RuntimeTurnInput } from "@neta-art/cohub";
+import { resolveRuntimeThinkingLevel } from "@cohub/protocol";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
 import { RuntimeDiagnostics } from "../src/runtime/diagnostics.js";
 import { NativeRuntime } from "../src/runtime/native/daemon.js";
 import { executeTurn } from "../src/runtime/native/execution.js";
-import { discoverHarnesses } from "../src/runtime/harnesses/index.js";
+import { discoverHarnesses, refreshHarnesses } from "../src/runtime/harnesses/index.js";
 import { claudeProjectName } from "../src/runtime/harnesses/claude.js";
 import { workbuddyProjectName } from "../src/runtime/harnesses/workbuddy.js";
 import { runtimeProjectionSource } from "./fixtures/runtime-projection-source.js";
@@ -99,9 +100,9 @@ async function streamJsonTurns(harness: Extract<LocalHarness, "claude" | "workbu
     // History that projects to nothing starts a new session; the default model passes no --model.
     const empty = randomUUID(), emptyHistory = randomUUID();
     source.addTurn(empty, emptyHistory, { userContent: [{ type: "image", source: { type: "url", url: "https://example.com/a.png" } }], assistantContent: [] });
-    const fresh = await executeTurn(cold.executor, turn(emptyHistory, { session: empty, model: "default", thinkingLevel: "high" }), () => {}, new AbortController().signal, null);
+    const fresh = await executeTurn(cold.executor, turn(emptyHistory, { session: empty, model: "default", thinkingLevel: "ultra" }), () => {}, new AbortController().signal, null);
     assert.equal(fresh.event.resume, "new");
-    assert.deepEqual(fresh.event.message.content, [{ type: "text", text: "no history acceptEdits effort:high" }]);
+    assert.deepEqual(fresh.event.message.content, [{ type: "text", text: "no history acceptEdits effort:ultra" }]);
 
     // A stop interrupts the CLI and is not reported as an error.
     const stop = new AbortController();
@@ -134,7 +135,14 @@ test("discovery checks the CLI, lists models with a default and skips unusable h
       if (previousBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL; else process.env.ANTHROPIC_BASE_URL = previousBaseUrl;
     });
     assert.deepEqual(claude.models.map((model) => [model.id, model.provider, model.isDefault ?? false, model.thinkingLevelMap?.high]), [["default", "anthropic", true, "high"], ["opus", "anthropic", false, "high"], ["gw-model", "gateway.example.com", false, undefined]]);
+    // A level the CLI lists for a model is offered beyond the profile's fallback levels; a model without effort runs `off`.
+    assert.equal(claude.models[0]?.thinkingLevelMap?.ultra, "ultra");
+    assert.equal(resolveRuntimeThinkingLevel(claude.models[2], "ultra"), "off");
     process.env.STREAM_JSON_FIXTURE_HELP = "no-initialize";
+    // A refresh keeps the discovered catalog rather than falling back to the aliases.
+    const failures: string[] = [];
+    assert.deepEqual(await refreshHarnesses(claude, { claude: fixture }, tmpdir(), (harness) => failures.push(harness)), claude);
+    assert.deepEqual(failures, ["claude"]);
     const aliases = await discoverHarnesses(["claude"], { claude: fixture }, tmpdir());
     assert.deepEqual(aliases.models.map((model) => [model.id, model.isDefault ?? false, model.thinkingLevelMap?.minimal]), [["default", true, null], ["opus", false, null], ["sonnet", false, null], ["haiku", false, undefined]]);
     process.env.STREAM_JSON_FIXTURE_HELP = "legacy";

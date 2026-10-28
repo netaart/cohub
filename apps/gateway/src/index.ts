@@ -13,6 +13,7 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import { isLocalHarness } from "@cohub/protocol/runtime";
 import { sanitizeSessionStatsEvent } from "@cohub/protocol/model";
 import type { ContentBlock } from "@cohub/protocol/core";
+import { isModelThinkingLevel, MODEL_THINKING_LEVELS } from "@cohub/protocol";
 import type {
   RealtimeCompactFrame,
   RealtimeEnvelope,
@@ -894,8 +895,8 @@ const submitWebsocketSessionMessage = async (ctx: WsConnectionContext, requestId
     ? payload.thinkingLevel.trim()
     : null;
   // WS schema already validates enum; reject if non-empty but invalid
-  if (thinkingLevel && !new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).has(thinkingLevel)) {
-    throw new WsClientInputError("thinkingLevel must be one of: off, minimal, low, medium, high, xhigh, max");
+  if (thinkingLevel && !isModelThinkingLevel(thinkingLevel)) {
+    throw new WsClientInputError(`thinkingLevel must be one of: ${MODEL_THINKING_LEVELS.join(", ")}`);
   }
 
   if (!ctx.userId) throw new WsClientInputError("authentication required");

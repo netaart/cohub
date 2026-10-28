@@ -18,7 +18,7 @@ if (!args.includes("--session-id") && !args.includes("--resume")) {
   for await (const line of createInterface({ input: process.stdin })) {
     const { request_id } = JSON.parse(line);
     const models = [
-      { value: "default", displayName: "Default (recommended)", supportsEffort: true, supportedEffortLevels: ["low", "high", "max"] },
+      { value: "default", displayName: "Default (recommended)", supportsEffort: true, supportedEffortLevels: ["low", "high", "max", "ultra"] },
       { value: "opus", displayName: "Opus", supportsEffort: true, supportedEffortLevels: ["low", "high", "max"] },
       { value: "gw-model", displayName: "gateway-model", description: "From gateway", supportsEffort: false },
     ];

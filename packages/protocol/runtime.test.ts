@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fileWatcherStatusSchema, runtimeClientFrameSchema, runtimeCommandSchema, runtimeReadySchema, parseRuntimeRegistration, contextToPiMessages, RUNTIME_MAX_BATCH_MESSAGES } from "./src/runtime/index.js";
+import { fileWatcherStatusSchema, resolveRuntimeThinkingLevel, runtimeCapabilitiesSchema, runtimeClientFrameSchema, runtimeCommandSchema, runtimeReadySchema, parseRuntimeRegistration, contextToPiMessages, RUNTIME_MAX_BATCH_MESSAGES } from "./src/runtime/index.js";
 import { getSessionStreamSnapshotKey, SESSION_STREAM_SNAPSHOT_CLEAR_TURN_LUA } from "./src/realtime/index.js";
 
 test("file watcher telemetry validates codes and drops local details", () => {
@@ -113,4 +113,20 @@ test("Context projection skips compaction rows, pending generation placeholders 
   assert.equal(texts.some((text) => text.includes("placeholder")), false);
   assert.equal(texts.some((text) => text.includes("finished")), true);
   assert.equal(pi.every((message) => message.timestamp === 0), true);
+});
+
+test("Runtime capabilities drop thinking levels this build does not know", () => {
+  const model = { harness: "codex", provider: "openai", id: "m", name: "M", reasoning: true };
+  const [parsed] = runtimeCapabilitiesSchema.parse({ harnesses: ["codex"], models: [{ ...model, defaultThinkingLevel: "future", thinkingLevelMap: { high: "high", ultra: "ultra", future: "future" } }] }).models;
+  assert.equal(parsed?.defaultThinkingLevel, undefined);
+  assert.deepEqual(parsed?.thinkingLevelMap, { high: "high", ultra: "ultra" });
+});
+
+test("local thinking levels clamp to what a model declares and pass through otherwise", () => {
+  const base = { harness: "pi" as const, provider: "p", id: "m", name: "M" };
+  assert.equal(resolveRuntimeThinkingLevel({ ...base, reasoning: true }, "ultra"), "high");
+  assert.equal(resolveRuntimeThinkingLevel({ ...base, reasoning: true, thinkingLevelMap: { ultra: "ultra" } }, "ultra"), "ultra");
+  assert.equal(resolveRuntimeThinkingLevel({ ...base, reasoning: false }, "high"), "off");
+  assert.equal(resolveRuntimeThinkingLevel(base, "high"), "high");
+  assert.equal(resolveRuntimeThinkingLevel(undefined, "ultra"), "ultra");
 });

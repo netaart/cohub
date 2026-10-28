@@ -29,6 +29,8 @@ test("a lost record falls back to the explicit selection, clamped to the model",
   assert.equal(await resolveInitialThinkingLevel(model(), { recorded: "bogus", resumed: true, loadSelected: async () => "minimal" }), "minimal");
   // max is opt-in, so an unsupported selection is clamped to the nearest supported level.
   assert.equal(await resolveInitialThinkingLevel(model(), { recorded: null, resumed: true, loadSelected: async () => "max" }), "high");
+  // Pi has no level above max; a higher Cohub level runs Pi's nearest one.
+  assert.equal(await resolveInitialThinkingLevel(model({ thinkingLevelMap: { max: "max" } }), { recorded: null, resumed: true, loadSelected: async () => "ultra" }), "max");
 });
 
 test("without any selection a lost record uses the lowest supported level", async () => {

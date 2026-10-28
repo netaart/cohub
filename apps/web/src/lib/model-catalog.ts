@@ -1,19 +1,18 @@
+import {
+	clampThinkingLevel as clampModelThinkingLevel,
+	isModelThinkingLevel,
+	type ModelThinkingLevel,
+	supportedThinkingLevels,
+} from "@cohub/protocol";
 import type { RuntimeCapabilities } from "@neta-art/cohub";
+
+export type { ModelThinkingLevel };
 
 export type ModelCatalogItem = {
 	provider: string;
 	id: string;
 	model: Record<string, unknown> & { hidden?: boolean };
 };
-
-export type ModelThinkingLevel =
-	| "off"
-	| "minimal"
-	| "low"
-	| "medium"
-	| "high"
-	| "xhigh"
-	| "max";
 
 export type LocalModelSelection = {
 	provider: string;
@@ -80,26 +79,13 @@ export function resolveLocalModel(
 	};
 }
 
-const THINKING_LEVELS = new Set<ModelThinkingLevel>([
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-]);
-
 /** Read only an explicitly requested level; effective defaults are intentionally ignored. */
 export function getRequestedThinkingLevel(
 	meta: unknown,
 ): ModelThinkingLevel | null {
 	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
 	const value = (meta as Record<string, unknown>).requestedThinkingLevel;
-	return typeof value === "string" &&
-		THINKING_LEVELS.has(value as ModelThinkingLevel)
-		? (value as ModelThinkingLevel)
-		: null;
+	return isModelThinkingLevel(value) ? value : null;
 }
 
 /** Compact labels for dense controls (composer, chips). */
@@ -133,43 +119,19 @@ export function formatThinkingLevelFull(level: ModelThinkingLevel): string {
 			return "Extra high";
 		case "max":
 			return "Max";
+		case "ultra":
+			return "Ultra";
 	}
 }
-
-const ALL_THINKING_LEVELS: ModelThinkingLevel[] = [
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-];
 
 export function isModelHidden(item: ModelCatalogItem): boolean {
 	return item.model.hidden === true;
 }
 
-/**
- * Returns the thinking levels supported by a model, mirroring pi-ai's
- * getSupportedThinkingLevels. Non-reasoning models only support "off".
- * xhigh/max are opt-in and require an explicit non-null thinkingLevelMap entry.
- */
 export function getSupportedThinkingLevels(
 	item: ModelCatalogItem,
 ): ModelThinkingLevel[] {
-	const reasoning = item.model.reasoning === true;
-	if (!reasoning) return ["off"];
-	const map = item.model.thinkingLevelMap as
-		| Partial<Record<ModelThinkingLevel, string | null>>
-		| undefined;
-	return ALL_THINKING_LEVELS.filter((level) => {
-		if (!map) return level !== "xhigh" && level !== "max";
-		const mapped = map[level];
-		if (mapped === null) return false;
-		if (level === "xhigh" || level === "max") return mapped !== undefined;
-		return true;
-	});
+	return supportedThinkingLevels(item.model);
 }
 
 /**
@@ -180,48 +142,15 @@ export function getModelDefaultThinkingLevel(
 	item: ModelCatalogItem,
 ): ModelThinkingLevel {
 	const configured = item.model.defaultThinkingLevel;
-	if (
-		typeof configured === "string" &&
-		ALL_THINKING_LEVELS.includes(configured as ModelThinkingLevel)
-	) {
-		return configured as ModelThinkingLevel;
-	}
+	if (isModelThinkingLevel(configured)) return configured;
 	return item.model.reasoning === true ? "high" : "off";
 }
 
-const CLAMP_ORDER: ModelThinkingLevel[] = [
-	"off",
-	"minimal",
-	"low",
-	"medium",
-	"high",
-	"xhigh",
-	"max",
-];
-
-/**
- * Clamps a requested thinking level to one supported by the model, mirroring
- * pi-ai's clampThinkingLevel. Falls back to the nearest supported level.
- */
 export function clampThinkingLevel(
 	item: ModelCatalogItem,
 	requested: ModelThinkingLevel,
 ): ModelThinkingLevel {
-	const supported = getSupportedThinkingLevels(item);
-	if (supported.includes(requested)) return requested;
-	const requestedIndex = CLAMP_ORDER.indexOf(requested);
-	if (requestedIndex === -1) return supported[0] ?? "off";
-	// Try same or higher level first
-	for (let i = requestedIndex; i < CLAMP_ORDER.length; i++) {
-		const candidate = CLAMP_ORDER[i];
-		if (candidate && supported.includes(candidate)) return candidate;
-	}
-	// Fall back to nearest lower level
-	for (let i = requestedIndex - 1; i >= 0; i--) {
-		const candidate = CLAMP_ORDER[i];
-		if (candidate && supported.includes(candidate)) return candidate;
-	}
-	return supported[0] ?? "off";
+	return clampModelThinkingLevel(item.model, requested);
 }
 
 /**

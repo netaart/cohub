@@ -4,27 +4,37 @@ import { codexModelCatalog, piModelCatalog } from "../src/runtime/model-catalog.
 import { runtimeCapabilitiesSchema } from "../../protocol/src/runtime/index.js";
 import { getModelDefaultThinkingLevel, getSupportedThinkingLevels, toLocalModelCatalog } from "../../../apps/web/src/lib/model-catalog.ts";
 
-test("Codex reasoning choices survive discovery and the server capability schema", () => {
+test("Codex reasoning and service tiers survive discovery and the server capability schema", () => {
   const models = codexModelCatalog({ config: { model_provider: "openai" } }, [{
     id: "test", displayName: "Test", defaultReasoningEffort: "medium",
-    supportedReasoningEfforts: ["none", "low", "medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort })),
-  }]);
-  const [item] = toLocalModelCatalog(runtimeCapabilitiesSchema.parse({ harnesses: ["codex"], models }).models);
+    supportedReasoningEfforts: ["none", "low", "medium", "high", "xhigh", "ultra"].map((reasoningEffort) => ({ reasoningEffort })),
+    additionalSpeedTiers: ["fast"], defaultServiceTier: "priority",
+    serviceTiers: [{ id: "priority", name: "Fast", description: "1.5x speed", headers: { Authorization: "secret" } }, { id: "default", name: "Standard", description: "" }, null, { id: 42, name: "Invalid" }],
+  }, { id: "legacy", additionalSpeedTiers: ["fast", null] }]);
+  const parsed = runtimeCapabilitiesSchema.parse({ harnesses: ["codex"], models }).models;
+  assert.deepEqual(parsed.map(({ serviceTiers, defaultServiceTier }) => ({ serviceTiers, defaultServiceTier })), [
+    { serviceTiers: [{ id: "priority", name: "Fast", description: "1.5x speed" }, { id: "default", name: "Standard" }], defaultServiceTier: "priority" },
+    { serviceTiers: [{ id: "fast", name: "fast" }], defaultServiceTier: undefined },
+  ]);
+  // Unsupported opt-in levels are omitted, so a Gateway that predates them accepts the catalog.
+  assert.equal("max" in (models[0]?.thinkingLevelMap ?? {}), false);
+  const [item] = toLocalModelCatalog(parsed);
   assert(item);
-  assert.deepEqual(getSupportedThinkingLevels(item), ["off", "low", "medium", "high", "xhigh"]);
+  assert.deepEqual(getSupportedThinkingLevels(item), ["off", "low", "medium", "high", "xhigh", "ultra"]);
   assert.equal(getModelDefaultThinkingLevel(item), "medium");
 });
 
 test("Pi reasoning metadata reaches the picker without provider configuration", () => {
   const models = piModelCatalog([{
     id: "test", provider: "fixture", name: "Test", reasoning: true,
-    thinkingLevelMap: { off: null, minimal: null, xhigh: "xhigh", max: "max", invalid: "ignored" },
+    thinkingLevelMap: { off: null, minimal: null, xhigh: "xhigh", max: "max", ultra: null, invalid: "ignored" },
     baseUrl: "https://private.example", headers: { Authorization: "secret" },
   }, { id: "plain", provider: "fixture", reasoning: false }], { model: { provider: "fixture", id: "test" }, thinkingLevel: "medium" });
   const parsed = runtimeCapabilitiesSchema.parse({ harnesses: ["pi"], models });
   const items = toLocalModelCatalog(parsed.models);
   assert(items[0] && items[1]);
   assert.deepEqual(getSupportedThinkingLevels(items[0]), ["low", "medium", "high", "xhigh", "max"]);
+  assert.deepEqual(parsed.models[0]?.thinkingLevelMap, { off: null, minimal: null, xhigh: "xhigh", max: "max" });
   assert.deepEqual(getSupportedThinkingLevels(items[1]), ["off"]);
   // Pi's current model is its default; its level is resolved for that model only.
   assert.deepEqual(parsed.models.map((model) => [model.isDefault, model.defaultThinkingLevel]), [[true, "medium"], [undefined, undefined]]);

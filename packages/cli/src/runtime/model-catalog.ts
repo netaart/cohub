@@ -1,11 +1,7 @@
-import type { RuntimeCapabilities } from "@neta-art/cohub";
+import { isModelThinkingLevel, MODEL_THINKING_LEVELS as thinkingLevels, thinkingLevelMapFor, type RuntimeModel as Model } from "@neta-art/cohub";
 import { record, type JsonRecord } from "./json-rpc.js";
 
-type Model = RuntimeCapabilities["models"][number];
-type ThinkingLevel = NonNullable<Model["defaultThinkingLevel"]>;
-const thinkingLevels: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-const thinkingLevel = (value: unknown): ThinkingLevel | undefined =>
-  thinkingLevels.includes(value as ThinkingLevel) ? value as ThinkingLevel : undefined;
+const thinkingLevel = (value: unknown) => isModelThinkingLevel(value) ? value : undefined;
 
 /**
  * Publish only picker metadata, never provider credentials or request configuration.
@@ -21,8 +17,7 @@ export function piModelCatalog(entries: unknown[], state: JsonRecord): Model[] {
     const model = record(value);
     if (typeof model.id !== "string" || !model.id || typeof model.provider !== "string" || !model.provider) return [];
     const map = record(model.thinkingLevelMap);
-    const thinkingLevelMap = Object.fromEntries(thinkingLevels.flatMap((level) =>
-      map[level] === null || typeof map[level] === "string" ? [[level, map[level]]] : []));
+    const thinkingLevelMap = thinkingLevelMapFor((level) => map[level] === null || typeof map[level] === "string" ? map[level] : undefined);
     const isDefault = current.provider === model.provider && current.id === model.id;
     return [{
       harness: "pi", id: model.id, provider: model.provider, name: typeof model.name === "string" ? model.name : model.id,
@@ -37,10 +32,10 @@ export function piModelCatalog(entries: unknown[], state: JsonRecord): Model[] {
 function codexThinking(model: JsonRecord, configuredEffort: unknown): Pick<Model, "reasoning" | "defaultThinkingLevel" | "thinkingLevelMap"> {
   if (!Array.isArray(model.supportedReasoningEfforts)) return {};
   const efforts = new Set(model.supportedReasoningEfforts.map((entry) => record(entry).reasoningEffort));
-  const thinkingLevelMap = Object.fromEntries(thinkingLevels.map((level) => {
+  const thinkingLevelMap = thinkingLevelMapFor((level) => {
     const effort = level === "off" ? "none" : level;
-    return [level, efforts.has(effort) ? effort : null];
-  }));
+    return efforts.has(effort) ? effort : null;
+  });
   const normalize = (value: unknown) => thinkingLevel(value === "none" ? "off" : value);
   const configured = normalize(configuredEffort);
   const fallback = normalize(model.defaultReasoningEffort);
@@ -50,6 +45,21 @@ function codexThinking(model: JsonRecord, configuredEffort: unknown): Pick<Model
     thinkingLevelMap,
     ...(defaultThinkingLevel ? { defaultThinkingLevel } : {}),
   };
+}
+
+/** `serviceTiers` supersedes the deprecated `additionalSpeedTiers`, which only names tier ids. */
+function codexServiceTiers(model: JsonRecord): Pick<Model, "serviceTiers" | "defaultServiceTier"> {
+  const tiers = Array.isArray(model.serviceTiers)
+    ? model.serviceTiers.flatMap((entry) => {
+      const tier = record(entry);
+      if (typeof tier.id !== "string" || !tier.id || typeof tier.name !== "string") return [];
+      return [{ id: tier.id, name: tier.name, ...(typeof tier.description === "string" && tier.description ? { description: tier.description } : {}) }];
+    })
+    : Array.isArray(model.additionalSpeedTiers)
+      ? model.additionalSpeedTiers.flatMap((id) => typeof id === "string" && id ? [{ id, name: id }] : [])
+      : [];
+  const defaultServiceTier = typeof model.defaultServiceTier === "string" && tiers.some((tier) => tier.id === model.defaultServiceTier) ? model.defaultServiceTier : undefined;
+  return { ...(tiers.length ? { serviceTiers: tiers } : {}), ...(defaultServiceTier ? { defaultServiceTier } : {}) };
 }
 
 /** Use Codex's picker-visible model/list for every provider, including custom providers. */
@@ -63,7 +73,7 @@ export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[]
     if (!id || model.hidden) return [];
     // A configured model replaces the catalog's own default.
     const isDefault = configuredModel ? id === configuredModel : model.isDefault === true;
-    return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id, ...(isDefault ? { isDefault } : {}), ...codexThinking(model, config.model_reasoning_effort) }];
+    return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id, ...(isDefault ? { isDefault } : {}), ...codexThinking(model, config.model_reasoning_effort), ...codexServiceTiers(model) }];
   });
   if (configuredModel && !models.some((model) => model.id === configuredModel)) models.unshift({ harness: "codex", provider, id: configuredModel, name: configuredModel, isDefault: true });
   return models;

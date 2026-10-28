@@ -15,7 +15,7 @@ import type {
   StoredToolCall,
   TurnIntermediateMessagesFile,
 } from "@cohub/protocol/model";
-import type { AgentTurnAbortEvent, ModelThinkingLevel } from "@cohub/protocol";
+import { isModelThinkingLevel, type AgentTurnAbortEvent, type ModelThinkingLevel } from "@cohub/protocol";
 import type { ChannelProvider, GatewayOutboundCommand } from "@cohub/protocol/gateway";
 import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
 import { sessionMessages, sessionTurns, spaceChannels, spaceSessionBindings, spaceSessions, providerMessageRefs, userChannels, userProfiles } from "@cohub/db";
@@ -114,13 +114,11 @@ const normalizeUsage = (usage: PersistMessageInput["message"]["usage"]): Usage |
 
 const normalizeRecord = (value: unknown): Record<string, unknown> | null => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
-const THINKING_LEVEL_SET = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-
 function extractThinkingLevel(meta: unknown): ModelThinkingLevel | null {
   const record = normalizeRecord(meta);
   if (!record) return null;
   const level = record.effectiveThinkingLevel;
-  return typeof level === "string" && THINKING_LEVEL_SET.has(level) ? level as ModelThinkingLevel : null;
+  return isModelThinkingLevel(level) ? level : null;
 }
 
 

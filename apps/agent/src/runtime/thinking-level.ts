@@ -1,11 +1,14 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { isModelThinkingLevel } from "@cohub/protocol";
 import type { CohubModel } from "./model-registry.js";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
+/** Pi's levels are a prefix of Cohub's; a level above them asks for Pi's highest, which clamping then fits. */
 export function normalizeThinkingLevel(level: string | null | undefined): ThinkingLevel | undefined {
-  return level && THINKING_LEVELS.has(level as ThinkingLevel) ? level as ThinkingLevel : undefined;
+  if (level && THINKING_LEVELS.has(level as ThinkingLevel)) return level as ThinkingLevel;
+  return isModelThinkingLevel(level) ? "max" : undefined;
 }
 
 /** Requested level (or the model default) clamped to what the model supports. */

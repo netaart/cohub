@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
-import { harnessSchema, readSentTurns, readSessionTurnOrigin, resolveCohubEnvironment, type HarnessKind } from "@neta-art/cohub";
+import { harnessSchema, isModelThinkingLevel, MODEL_THINKING_LEVELS, readSentTurns, readSessionTurnOrigin, resolveCohubEnvironment, type HarnessKind } from "@neta-art/cohub";
 import type {
   CohubHttpClient,
   ContentBlock,
@@ -258,12 +258,10 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
     if (agentOnly.length) return error("Conflicting options", `--note cannot be combined with ${agentOnly.join(", ")}`);
   }
 
-  const thinkingLevel = opts.thinkingLevel?.trim() || undefined;
-  if (
-    thinkingLevel
-    && !new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).has(thinkingLevel)
-  ) {
-    return error("Invalid thinking level", "Use off|minimal|low|medium|high|xhigh|max");
+  const requestedThinkingLevel = opts.thinkingLevel?.trim() || undefined;
+  const thinkingLevel = isModelThinkingLevel(requestedThinkingLevel) ? requestedThinkingLevel : undefined;
+  if (requestedThinkingLevel && !thinkingLevel) {
+    return error("Invalid thinking level", `Use ${MODEL_THINKING_LEVELS.join("|")}`);
   }
 
   const spaceId = await resolveSpace(command, { home: true });
@@ -314,7 +312,7 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
       model: opts.model,
       provider: opts.provider,
       harness: opts.harness,
-      thinkingLevel: thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | undefined,
+      thinkingLevel,
       accessMode: opts.readOnly ? "read_only" : "full_access",
       intent: opts.steer ? "steer" : undefined,
       env: parseEnvOptions(opts.env),
@@ -353,12 +351,10 @@ async function runCompletionCommand(command: Command, words: string[], opts: Com
   if (maxTokens !== undefined && (!Number.isFinite(maxTokens) || maxTokens <= 0)) {
     return error("Invalid max tokens", "--max-tokens must be a positive number");
   }
-  const thinkingLevel = opts.thinkingLevel?.trim() || undefined;
-  if (
-    thinkingLevel
-    && !new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).has(thinkingLevel)
-  ) {
-    return error("Invalid thinking level", "Use off|minimal|low|medium|high|xhigh|max");
+  const requestedThinkingLevel = opts.thinkingLevel?.trim() || undefined;
+  const thinkingLevel = isModelThinkingLevel(requestedThinkingLevel) ? requestedThinkingLevel : undefined;
+  if (requestedThinkingLevel && !thinkingLevel) {
+    return error("Invalid thinking level", `Use ${MODEL_THINKING_LEVELS.join("|")}`);
   }
 
   const client = createClient();
@@ -369,7 +365,7 @@ async function runCompletionCommand(command: Command, words: string[], opts: Com
     messages: [{ role: "user" as const, content: [{ type: "text" as const, text }] }],
     temperature,
     maxTokens,
-    thinkingLevel: thinkingLevel as "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | undefined,
+    thinkingLevel,
   };
 
   try {
@@ -419,7 +415,7 @@ export function registerPrompt(program: Command): void {
     .option("-m, --model <model>", "Model name")
     .option("-p, --provider <provider>", "Provider name")
     .option("--harness <harness>", `Harness: ${harnessSchema.options.join(", ")}`, "cohub")
-    .option("--thinking-level <level>", "Thinking level: off|minimal|low|medium|high|xhigh|max")
+    .option("--thinking-level <level>", `Thinking level: ${MODEL_THINKING_LEVELS.join("|")}`)
     .option("--read-only", "Use read-only tools")
     .option("--steer", "Interrupt the current turn and run immediately")
     .option("--delay-ms <ms>", "Delay sending by milliseconds")
@@ -747,7 +743,7 @@ export function registerSpaces(program: Command): void {
     .option("--title <title>", "Title for a newly created session or schedule")
     .option("-m, --model <model>", "Model name")
     .option("-p, --provider <provider>", "Provider name")
-    .option("--thinking-level <level>", "Thinking level: off|minimal|low|medium|high|xhigh|max")
+    .option("--thinking-level <level>", `Thinking level: ${MODEL_THINKING_LEVELS.join("|")}`)
     .option("--read-only", "Use read-only tools")
     .option("--steer", "Interrupt the current turn and run immediately")
     .option("--delay-ms <ms>", "Delay sending by milliseconds")

@@ -1,4 +1,4 @@
-import type { ModelThinkingLevel } from "../model/completion.js";
+import type { ModelThinkingLevel } from "../model/thinking.js";
 
 export type ChannelModelConfig = {
   provider: string;

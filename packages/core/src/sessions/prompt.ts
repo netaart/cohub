@@ -4,10 +4,9 @@ import type { GenerationPolicy } from "@cohub/protocol/generation";
 import { normalizeSessionTurnOrigin, type SessionTurnIntent, type SessionTurnOrigin, type SessionTurnOriginKind } from "@cohub/protocol/model";
 import { isRequestSourceClientId, normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
 import { assertHarnessAccess, harnessSchema, isLocalHarness, type HarnessKind } from "@cohub/protocol/runtime";
+import { isModelThinkingLevel } from "@cohub/protocol";
 import { normalizeContentBlocks } from "../content/normalize.js";
 import type { PromptEnv } from "./prompt-env.js";
-
-const VALID_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 export type PromptSource =
   | "web_app"
@@ -440,7 +439,7 @@ export const submitSessionPrompt = async (
   const inputIntent = isDirectShellCommand ? "shell_command" : "prompt";
   const turnIntent: SessionTurnIntent = isDirectShellCommand ? "steer" : (input.intent ?? "followup");
   const userMessageId = deps.randomUUID();
-  const requestedThinkingLevel = typeof input.thinkingLevel === "string" && VALID_THINKING_LEVELS.has(input.thinkingLevel.trim()) ? input.thinkingLevel.trim() : undefined;
+  const requestedThinkingLevel = typeof input.thinkingLevel === "string" && isModelThinkingLevel(input.thinkingLevel.trim()) ? input.thinkingLevel.trim() : undefined;
   const billingDecision: BillingAccessDecision | null = isDirectShellCommand || localHarness
     ? null
     : (await deps.billingUsageGate?.evaluate({

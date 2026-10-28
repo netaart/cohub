@@ -1,4 +1,5 @@
 import type { ContentBlock, Usage } from "../core/index.js";
+import type { ModelThinkingLevel } from "./thinking.js";
 
 export type CompletionMessageRole = "user" | "assistant" | "system";
 
@@ -16,13 +17,6 @@ export type CompletionMessageInput = {
   role: CompletionMessageRole;
   content: string | Array<ContentBlock | CompletionImageInput>;
 };
-
-/**
- * Unified thinking level across completions, session prompts, and model config.
- * `off` disables reasoning; `minimal`–`high` use provider defaults;
- * `xhigh`/`max` are opt-in and require an explicit `thinkingLevelMap` entry.
- */
-export type ModelThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /** @deprecated Use {@link ModelThinkingLevel} — kept for SDK compatibility. */
 export type CompletionThinkingLevel = ModelThinkingLevel;

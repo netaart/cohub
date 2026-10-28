@@ -72,3 +72,33 @@ test("a failing renew still closes the connection after heartbeats had time to f
   assert.ok(frames.some((frame) => frame.type === "runtime.heartbeat"), "at least one heartbeat flowed before the lease verdict");
   assert.equal(socket.closeCode, 4409, "lease loss closes with 4409");
 });
+
+test("a renew that loses to an in-flight catalog update keeps the connection", { timeout: 10_000 }, async () => {
+  const socket = new FakeSocket();
+  let stored: unknown = null;
+  let finishUpdate = () => {};
+  let renewed = 0;
+  createRuntimeRelay({
+    secret: "worker-secret",
+    authorize: async () => ({ ok: true, userId: "owner" }),
+    claim: async (_space, record) => { stored = record; return true; },
+    renew: async (_space, record) => { renewed++; return stored === record; },
+    // The registration is replaced at once; the update itself resolves only later, after a renew failed.
+    update: (_space, _previous, next) => { stored = next; return new Promise<boolean>((resolve) => { finishUpdate = () => resolve(true); }); },
+    release: async () => undefined,
+    heartbeatMs: 20,
+    endpoint: () => "ws://127.0.0.1:1/internal",
+  }).control(socket as unknown as WebSocket);
+  const heartbeat = setInterval(() => socket.emit("message", Buffer.from(JSON.stringify({ type: "runtime.heartbeat" }))), 10);
+  socket.emit("message", Buffer.from(hello()));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  socket.emit("message", Buffer.from(JSON.stringify({ type: "runtime.capabilities", capabilities: { harnesses: ["pi"], models: [] } })));
+  const failed = renewed + 1;
+  while (renewed < failed) await new Promise((resolve) => setTimeout(resolve, 5));
+  finishUpdate();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  clearInterval(heartbeat);
+  assert.equal(socket.terminated, false);
+  assert.equal(socket.closeCode, null, "the renew failure belongs to the update");
+  socket.terminate();
+});

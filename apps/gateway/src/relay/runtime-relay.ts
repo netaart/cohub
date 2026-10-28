@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
 import { createLogger } from "@cohub/infra/logging";
-import { isUuid, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
+import { isUuid, RUNTIME_CONTROL_FEATURES, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
 
 const logger = createLogger({ serviceName: "cohub-gateway" });
 
@@ -19,6 +19,8 @@ export type RuntimeRelayDependencies = {
   authorize: (token: string, spaceId: string) => Promise<{ ok: true; userId: string } | { ok: false; status: number }>;
   claim: (spaceId: string, record: RuntimeRegistration) => Promise<boolean>;
   renew: (spaceId: string, record: RuntimeRegistration) => Promise<boolean>;
+  /** Replaces the registration only while `previous` still holds the lease; without it, Runtimes reconnect to change it. */
+  update?: (spaceId: string, previous: RuntimeRegistration, next: RuntimeRegistration) => Promise<boolean>;
   release: (spaceId: string, record: RuntimeRegistration) => Promise<void>;
   heartbeatMs?: number;
   recover?: (spaceId: string, ownerUserId: string, execution: RuntimePendingExecution) => Promise<unknown>;
@@ -91,6 +93,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
     let closed = false;
     let queuedBytes = 0;
     let chain = Promise.resolve();
+    let updating: Promise<boolean> | null = null;
     const deny = (status: number) => socket.close(status === 401 ? 4401 : status >= 500 ? 1011 : 4403, "Runtime authorization failed");
     const handshake = setTimeout(() => socket.close(4408, "Runtime handshake timed out"), 10_000);
     const interval = deps.heartbeatMs ?? 10_000;
@@ -112,7 +115,11 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           }
           authorizedAt = Date.now();
         }
-        if (!await deps.renew(current.spaceId, current.record)) {
+        const record = current.record;
+        if (!await deps.renew(current.spaceId, record)) {
+          // A catalog update may have replaced the record (and its TTL) while this renew was in flight.
+          await updating;
+          if (current.record !== record) return;
           logger.warn("runtime.control.lease_lost", { spaceId: current.spaceId, runtimeId: current.record.runtimeId });
           socket.close(4409, "Runtime lease lost");
           return;
@@ -196,7 +203,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             handshakeMs: registeredAt - connectedAt,
             ...client,
           });
-          send(socket, { type: "runtime.ready", connectionId });
+          send(socket, { type: "runtime.ready", connectionId, ...(deps.update ? { features: RUNTIME_CONTROL_FEATURES } : {}) });
         } else {
           if (!current) throw new RuntimeProtocolError("Runtime is not registered");
           if (frame.type === "runtime.auth") {
@@ -215,6 +222,27 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             authorizedAt = Date.now();
             logger.debug("runtime.control.auth_refreshed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId });
           } else if (frame.type === "runtime.heartbeat") lastHeartbeat = Date.now();
+          else if (frame.type === "runtime.capabilities") {
+            if (!deps.update) throw new RuntimeProtocolError("Runtime capability updates are unavailable");
+            const { spaceId, record: previous } = current;
+            const next: RuntimeRegistration = { ...previous, capabilities: frame.capabilities };
+            // The record is swapped before anything awaiting `updating` resumes, so a racing renew sees it.
+            updating = deps.update(spaceId, previous, next).then((updated) => {
+              if (updated && current) {
+                current.record = next;
+                const registration = registrations.get(spaceId);
+                if (registration?.socket === socket) registration.record = next;
+              }
+              return updated;
+            });
+            const updated = await updating.finally(() => { updating = null; });
+            if (!updated) {
+              logger.warn("runtime.control.lease_lost", { spaceId, runtimeId: previous.runtimeId });
+              socket.close(4409, "Runtime lease lost");
+              return;
+            }
+            logger.info("runtime.control.capabilities_updated", { spaceId: current.spaceId, runtimeId: next.runtimeId, harnesses: next.capabilities.harnesses, modelCount: next.capabilities.models.length });
+          }
           else if (frame.type === "runtime.native") {
             try {
               if (!deps.nativeEvent) throw new Error("Native runtime events are unavailable");

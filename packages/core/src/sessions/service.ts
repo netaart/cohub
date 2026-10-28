@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { readSessionTurnOrigin, type SessionTurnIntent, type SessionTurnRecord, type SessionTurnOrigin } from "@cohub/protocol/model";
-import type { ModelThinkingLevel } from "@cohub/protocol";
+import { isModelThinkingLevel } from "@cohub/protocol";
 import { sessionTurnSegments, sessionTurns, spaceSessions, spaces } from "@cohub/db";
 import { sanitizePostgresJsonValue } from "../content/sanitize.js";
 import { resolveSessionTurnOrigin } from "./turn-origin.js";
@@ -57,15 +57,11 @@ export type SessionServices = ReturnType<typeof createSessionServices>;
 
 const imagePreviewLabel = (count: number) => (count === 1 ? "Image" : `${count} images`);
 
-const THINKING_LEVELS = new Set<ModelThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-
 const toSessionTurnRecord = (row: typeof sessionTurns.$inferSelect): SessionTurnRecord => {
   const meta = row.meta && typeof row.meta === "object" && !Array.isArray(row.meta)
     ? row.meta as Record<string, unknown>
     : null;
-  const thinkingLevel = typeof meta?.effectiveThinkingLevel === "string" && THINKING_LEVELS.has(meta.effectiveThinkingLevel as ModelThinkingLevel)
-    ? meta.effectiveThinkingLevel as ModelThinkingLevel
-    : null;
+  const thinkingLevel = isModelThinkingLevel(meta?.effectiveThinkingLevel) ? meta.effectiveThinkingLevel : null;
   const fallbackTimestamp = new Date().toISOString();
   return {
     id: row.id,
