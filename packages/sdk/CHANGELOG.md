@@ -1,5 +1,11 @@
 # @neta-art/cohub
 
+## 13.4.0
+
+### Minor Changes
+
+- 4841b8d: Expose the caller's received referral and each invitation's current-cycle membership in `referrals.getMine()`.
+
 ## 13.3.0
 
 ### Minor Changes
