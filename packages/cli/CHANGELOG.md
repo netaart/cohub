@@ -1,5 +1,23 @@
 # @neta-art/cohub-cli
 
+## 10.15.0
+
+### Minor Changes
+
+- 92d4f9e: `cohub boards simulate <board>` runs a Board's scripts locally through taps, drags, pen strokes, keys and waits, reports the changes and script errors without saving, and renders the result with screen UI using `-o`.
+- 33eb744: Local Runtimes keep their model catalogs current and support the `ultra` thinking level.
+  
+  - A running Runtime rediscovers every Harness's models hourly; a change reaches the Space without restarting, and a Harness whose discovery fails keeps its previous models.
+  - `ultra` can be selected and sent (`--thinking-level ultra`) for models that declare it. Requests are fitted to the levels a model declares, as for Cloud models.
+  - Runtime capabilities carry each model's `serviceTiers` and `defaultServiceTier`.
+  - The SDK exports `MODEL_THINKING_LEVELS`, `isModelThinkingLevel`, `supportedThinkingLevels`, `clampThinkingLevel` and `findRuntimeModel`.
+
+### Patch Changes
+
+- Updated dependencies [92d4f9e]
+- Updated dependencies [33eb744]
+  - @neta-art/cohub@13.5.0
+
 ## 10.14.1
 
 ### Patch Changes
