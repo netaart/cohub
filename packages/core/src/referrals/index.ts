@@ -1,4 +1,5 @@
 export {
+  expireReferralClaims,
   isNewReferralAccount,
   referralClaimExpiresAt,
   resolveReferralQuota,
@@ -7,8 +8,6 @@ export {
   type ReferralQuota,
   type ReferralQuotaRow,
 } from "./quota.js";
-export { expireReferralClaims, finalizeReferralTurn, lockReferralQuota, reconcileReferralClaims, referralTransactionTime } from "./lifecycle.js";
-export { isQualifyingReferralTurn } from "./qualification.js";
 export {
   qualifyAndRewardReferral,
   rewardQualifiedReferral,

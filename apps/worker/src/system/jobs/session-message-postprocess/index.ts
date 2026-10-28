@@ -1,6 +1,6 @@
 import { billingOperations, spaceWalletBillingOperations, COHUB_BILLING_TOKEN_TYPES, COHUB_BILLING_USAGE_TYPES } from "@cohub/billing";
 import { claimMessageWalletBilling } from "@cohub/core/space-wallet";
-import { isQualifyingReferralTurn, qualifyAndRewardReferral } from "@cohub/core/referrals";
+import { qualifyAndRewardReferral } from "@cohub/core/referrals";
 import { readImageToTextCalls } from "@cohub/core/sessions";
 import { sessionMessages, sessionTurns, spaceSessions, tokenUsageStatsHourly } from "@cohub/db";
 import {
@@ -105,27 +105,22 @@ const maybeQualifyReferral = async (message: typeof sessionMessages.$inferSelect
   const turnId = typeof meta?.turnId === "string" ? meta.turnId : null;
   if (!turnId || meta?.messageKind !== "assistant_final" || meta.runtime === "local") return;
 
+  // Prefer turn owner; fall back to actor stamped on the assistant message.
+  const actorUserId = await resolveActorUserId(message);
   const [turn] = await db
-    .select({
-      id: sessionTurns.id,
-      sessionId: sessionTurns.sessionId,
-      userUuid: sessionTurns.userUuid,
-      executionKind: sessionTurns.executionKind,
-      status: sessionTurns.status,
-      intent: sessionTurns.intent,
-      meta: sessionTurns.meta,
-      userContent: sessionTurns.userContent,
-      completedAt: sessionTurns.completedAt,
-    })
+    .select({ userUuid: sessionTurns.userUuid, status: sessionTurns.status, completedAt: sessionTurns.completedAt })
     .from(sessionTurns)
     .where(and(eq(sessionTurns.id, turnId), eq(sessionTurns.sessionId, message.sessionId)))
     .limit(1);
-  if (!turn || !isQualifyingReferralTurn(turn, message)) return;
+  if (turn?.status !== "completed") return;
+  const inviteeUserId = turn.userUuid?.trim() || actorUserId;
+  if (!inviteeUserId) return;
 
   await qualifyAndRewardReferral({
     db,
     billing: billingOperations,
-    inviteeUserId: turn.userUuid,
+    inviteeUserId,
+    completedAt: turn.completedAt,
     logger: {
       warn: (messageText, metaFields) => logger.warn(messageText, metaFields),
       info: (messageText, metaFields) => logger.info(messageText, metaFields),
