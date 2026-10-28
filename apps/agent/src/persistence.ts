@@ -1,4 +1,5 @@
 import { resolveWalletMessageEligibility } from "@cohub/core/space-wallet";
+import { finalizeReferralTurn } from "@cohub/core/referrals";
 import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import type { ContentBlock, Usage } from "@cohub/protocol/core";
@@ -676,7 +677,7 @@ const buildIntermediateObjectsForTurn = async (input: { spaceId: string; session
   }
 };
 
-async function finalizeSessionTurnFromMessage(input: { spaceId: string; sessionId: string; turnId: string; status: Exclude<SessionTurnStatus, "running">; assistantContent: ContentBlock[]; assistantText: string | null; provider: string | null; model: string | null; stopReason: string | null; errorMessage: string | null; usage: Usage | null; metaPatch?: Record<string, unknown> | null }, executor: Pick<typeof db, "update"> = db, prepared?: Awaited<ReturnType<typeof buildIntermediateObjectsForTurn>>) {
+async function finalizeSessionTurnFromMessage(input: { spaceId: string; sessionId: string; turnId: string; status: Exclude<SessionTurnStatus, "running">; assistantContent: ContentBlock[]; assistantText: string | null; provider: string | null; model: string | null; stopReason: string | null; errorMessage: string | null; usage: Usage | null; metaPatch?: Record<string, unknown> | null }, executor: Pick<typeof db, "update"> = db, prepared?: Awaited<ReturnType<typeof buildIntermediateObjectsForTurn>>, completionTime?: Date) {
   const intermediate = prepared ?? await buildIntermediateObjectsForTurn(input);
   const imageToText = intermediate?.imageToTextAccumulator ?? createImageToTextUsageSummaryAccumulator();
   const finalCalls = readImageToTextCalls(input.metaPatch);
@@ -689,7 +690,7 @@ async function finalizeSessionTurnFromMessage(input: { spaceId: string; sessionI
       ? { imageToText: { ...(currentImageToText ?? {}), schemaVersion: 1, summary: imageToTextSummary } }
       : {}),
   };
-  const completedAt = new Date();
+  const completedAt = completionTime ?? new Date();
   const completedAtIso = completedAt.toISOString();
   const [row] = await executor.update(sessionTurns).set({
     status: input.status,
@@ -879,15 +880,17 @@ export async function persistAssistantMessage(input: { spaceId: string; spaceSes
     }
     return { ok: true, message: record, created: persisted.created };
   }
-  if (!persisted.created && !input.idempotencyKey) {
+  if (!persisted.created && !input.idempotencyKey && record.meta?.messageKind !== "assistant_final" && record.meta?.messageKind !== "assistant_error") {
     await enqueueSessionMessagePostprocess({ sessionId: input.spaceSessionId, messageId: record.id });
     return { ok: true, message: record, created: false };
   }
   if (persisted.created) await publishMessagePersisted(input.spaceId, record);
   if (record.meta?.messageKind === "assistant_final" || record.meta?.messageKind === "assistant_error") {
-    const turnId = typeof record.meta.turnId === "string" ? record.meta.turnId : null;
+    const finalMeta = record.meta;
+    const turnId = typeof finalMeta.turnId === "string" ? finalMeta.turnId : null;
     if (turnId) {
-      const { turn: finalized, messages: turnMessages } = await finalizeSessionTurnFromMessage({ spaceId: input.spaceId, sessionId: input.spaceSessionId, turnId, status: effectiveStopReason === "aborted" ? "interrupted" : record.meta.messageKind === "assistant_error" ? "failed" : "completed", assistantContent: record.content, assistantText: record.text, provider: record.provider, model: record.model, stopReason: record.stopReason, errorMessage: record.errorMessage, usage: record.usage, metaPatch: { ...(record.meta.runtimeResolution === true ? { runtimeResolution: true } : {}), ...(typeof record.meta.agentSessionEntryId === "string" ? { agentSessionEntryId: record.meta.agentSessionEntryId } : {}), ...(record.meta.imageToText ? { imageToText: record.meta.imageToText } : {}), ...(typeof record.durationMs === "number" ? { finalMessageDurationMs: record.durationMs } : {}), ...(typeof input.thinkingLevel === "string" && input.thinkingLevel.trim() ? { effectiveThinkingLevel: input.thinkingLevel } : {}) } });
+      const intermediate = await buildIntermediateObjectsForTurn({ spaceId: input.spaceId, sessionId: input.spaceSessionId, turnId });
+      const { turn: finalized, messages: turnMessages } = await finalizeReferralTurn(db, turnId, (tx, completedAt) => finalizeSessionTurnFromMessage({ spaceId: input.spaceId, sessionId: input.spaceSessionId, turnId, status: effectiveStopReason === "aborted" ? "interrupted" : finalMeta.messageKind === "assistant_error" ? "failed" : "completed", assistantContent: record.content, assistantText: record.text, provider: record.provider, model: record.model, stopReason: record.stopReason, errorMessage: record.errorMessage, usage: record.usage, metaPatch: { ...(finalMeta.runtimeResolution === true ? { runtimeResolution: true } : {}), ...(typeof finalMeta.agentSessionEntryId === "string" ? { agentSessionEntryId: finalMeta.agentSessionEntryId } : {}), ...(finalMeta.imageToText ? { imageToText: finalMeta.imageToText } : {}), ...(typeof record.durationMs === "number" ? { finalMessageDurationMs: record.durationMs } : {}), ...(typeof input.thinkingLevel === "string" && input.thinkingLevel.trim() ? { effectiveThinkingLevel: input.thinkingLevel } : {}) } }, tx, intermediate, completedAt));
       if (finalized) {
         indexTurnReferences({ spaceId: input.spaceId, sessionId: finalized.sessionId, turnId: finalized.id, messages: turnMessages });
         await publishTurnFinalized(input.spaceId, finalized).catch((error) => logger.warn("[Realtime] failed to publish finalized turn", error));

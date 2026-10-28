@@ -3,6 +3,7 @@ import { mock, test, after } from "node:test";
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import { is, eq, asc } from "drizzle-orm";
 import * as schema from "@cohub/db";
+import { LOCAL_HARNESSES } from "@cohub/protocol";
 
 // Opt-in isolated engine; no production DB or test dependency is required by the app.
 const home = process.env.RUNTIME_TEST_DB_HOME;
@@ -21,6 +22,7 @@ await engine.exec("create unique index test_message_idempotency on v2.session_me
 let queueUnavailable = false;
 let gatewayUnavailable = false;
 let rejectFinalUpdate = false;
+let rejectReferralUpdate = false;
 let beforeFinalUpdate;
 const wakes = [], processed = [], publications = [], gatewayCommands = [];
 let gatewayTargets = [];
@@ -32,26 +34,28 @@ const db = new Proxy(database, { get(target, key) {
         beforeFinalUpdate?.();
         if (rejectFinalUpdate) throw new Error("injected failure between message insert and terminal update");
       }
+      if (table === schema.referrals && rejectReferralUpdate) throw new Error("injected failure after terminal update before referral qualification");
       return transaction.update(table);
     };
     const value = transaction[method]; return typeof value === "function" ? value.bind(transaction) : value;
   } })));
   const value = target[key]; return typeof value === "function" ? value.bind(target) : value;
 } });
-mock.module("../db.js", { exports: { db } });
-mock.module("../env.js", { exports: { env: { ENV: "test", AGENT_STALE_ACTIVE_TURN_MS: 60_000 } } });
-mock.module("../logger.js", { exports: { logger: { warn() {}, error() {}, debug() {} } } });
-mock.module("../redis.js", { exports: {
+mock.module("../db.js", { namedExports: { db } });
+mock.module("../env.js", { namedExports: { env: { ENV: "test", AGENT_STALE_ACTIVE_TURN_MS: 60_000 } } });
+mock.module("../logger.js", { namedExports: { logger: { warn() {}, error() {}, debug() {} } } });
+mock.module("../redis.js", { namedExports: {
   redis: { hget: async () => "gateway-node" }, publishRealtimeEnvelope: async (event) => { publications.push(event); }, clearPersistedSessionStreamSnapshot: async () => {}, getGatewayNodeOutboundStreamKey: () => "test",
   xaddWithMaxlen: async (_redis, _key, ...args) => { if (gatewayUnavailable) throw new Error("gateway unavailable"); gatewayCommands.push(JSON.parse(args.at(-1))); },
 } });
-mock.module("../queue.js", { exports: { agentTurnQueue: { add: async () => {} }, enqueueAgentTurnJob: async (job) => { if (queueUnavailable) throw new Error("queue unavailable"); wakes.push(job); } } });
-mock.module("../session-message-postprocess-queue.js", { exports: { enqueueSessionMessagePostprocess: async (job) => { if (queueUnavailable) throw new Error("queue unavailable"); processed.push(job); } } });
-mock.module("../session-title-queue.js", { exports: { enqueueSessionTitleGeneration: async () => {} } });
-mock.module("../reference-index.js", { exports: { indexTurnReferences: () => {} } });
-mock.module("../turn-object-storage.js", { exports: { buildTurnObjectPrefix: () => "test/", writeTurnObjectJson: async () => ({ sizeBytes: 0 }) } });
-mock.module("../session-lock.js", { exports: { acquireSessionLock: async () => null } });
-mock.module("../runtime/remote-runtime.js", { exports: { executeRemoteHarnessTurn: async () => {}, markRuntimeRecovery: async () => {} } });
+mock.module("../queue.js", { namedExports: { agentTurnQueue: { add: async () => {} }, enqueueAgentTurnJob: async (job) => { if (queueUnavailable) throw new Error("queue unavailable"); wakes.push(job); } } });
+mock.module("../session-message-postprocess-queue.js", { namedExports: { enqueueSessionMessagePostprocess: async (job) => { if (queueUnavailable) throw new Error("queue unavailable"); processed.push(job); } } });
+mock.module("../session-title-queue.js", { namedExports: { enqueueSessionTitleGeneration: async () => {} } });
+mock.module("../board-session-sync.js", { namedExports: { syncSessionBoardsLater: async () => {} } });
+mock.module("../reference-index.js", { namedExports: { indexTurnReferences: () => {} } });
+mock.module("../turn-object-storage.js", { namedExports: { buildTurnObjectPrefix: () => "test/", writeTurnObjectJson: async () => ({ sizeBytes: 0 }) } });
+mock.module("../session-lock.js", { namedExports: { acquireSessionLock: async () => null } });
+mock.module("../runtime/remote-runtime.js", { namedExports: { executeRemoteHarnessTurn: async () => {}, markRuntimeRecovery: async () => {} } });
 const { persistAssistantMessage, persistBatchUserMessages, persistUserMessage } = await import("../persistence.js");
 const { claimNextTurnBatch, loadClaimedTurnBatch, resolveBatchAccessMode } = await import("../batch.js");
 const { createRuntimeContextReader } = await import("../runtime/context-reader.js");
@@ -75,6 +79,21 @@ const finish = (identity, resolution = false) => persistAssistantMessage({ ...id
   event: { message: { role: "assistant", content: [{ type: "text", text: "durable result" }], stopReason: resolution ? "aborted" : "stop", meta: { runtime: "local", messageKind: "assistant_final", ...(resolution ? { runtimeResolution: true } : {}) } } },
 });
 const readTurn = async (id) => (await database.select().from(schema.sessionTurns).where(eq(schema.sessionTurns.id, id)))[0];
+
+async function setupCloudReferral() {
+  const identity = { ...await setup(), userId: crypto.randomUUID(), startedAt: new Date().toISOString(), completedAt: new Date().toISOString() };
+  await database.update(schema.sessionTurns).set({ userUuid: identity.userId, meta: { harness: "cohub", context: { kind: "websocket" } } }).where(eq(schema.sessionTurns.id, identity.turnId));
+  const [referral] = await database.insert(schema.referrals).values({
+    id: crypto.randomUUID(), referralCodeId: crypto.randomUUID(), inviterUserId: crypto.randomUUID(), inviteeUserId: identity.userId,
+    status: "pending", quotaCycle: 0, claimedAt: new Date(Date.now() - 60_000), expiresAt: new Date(Date.now() + 60_000),
+    inviterRewardAmountUsd: "5", inviteeRewardAmountUsd: "5",
+  }).returning();
+  return { ...identity, referralId: referral.id };
+}
+const finishCloud = (identity) => persistAssistantMessage({ ...identity, spaceSessionId: identity.sessionId, messageOrdinal: 0,
+  event: { message: { role: "assistant", content: [{ type: "text", text: "Hello!" }], stopReason: "stop", meta: { messageKind: "assistant_final" } } },
+});
+const readReferral = async (id) => (await database.select().from(schema.referrals).where(eq(schema.referrals.id, id)))[0];
 
 for (const harness of ["cohub", "pi", "codex"]) test(`mixed follow-ups use the last ${harness} owner, preserve inputs and recover the original claim`, async () => {
   const sessionId = crypto.randomUUID(), spaceId = crypto.randomUUID();
@@ -159,7 +178,7 @@ test("resolution lookup stays bounded and validates Session and execution bounda
   assert.deepEqual(result.resolvedTurnIds, [history[0].id]);
   assert(JSON.stringify(result).length < 450);
   assert.deepEqual((await load({ ...base, pendingTurnIds: [history.at(-1).id] })).resolvedTurnIds, []);
-  await assert.rejects(() => load({ ...base, pendingTurnIds: history.slice(0, 3).map((turn) => turn.id) }), /Too many/);
+  await assert.rejects(() => load({ ...base, pendingTurnIds: history.slice(0, LOCAL_HARNESSES.length + 1).map((turn) => turn.id) }), /Too many/);
 });
 
 test("local message insertion and terminal state roll back together", async () => {
@@ -167,6 +186,54 @@ test("local message insertion and terminal state roll back together", async () =
   await assert.rejects(() => finish(identity), /injected failure/); rejectFinalUpdate = false;
   assert.equal((await readTurn(identity.turnId)).status, "running");
   assert.equal((await database.select().from(schema.sessionMessages).where(eq(schema.sessionMessages.turnId, identity.turnId))).length, 1);
+});
+
+test("cloud completion confirms its pending referral without granting Billing rewards", async () => {
+  const identity = await setupCloudReferral();
+  await finishCloud(identity);
+  const completed = await readTurn(identity.turnId);
+  const qualified = await readReferral(identity.referralId);
+  assert.equal(completed.status, "completed");
+  assert.equal(qualified.status, "qualified");
+  assert.equal(qualified.qualifiedAt.getTime(), completed.completedAt.getTime());
+  assert.deepEqual([qualified.inviterRewardedAt, qualified.inviteeRewardedAt, qualified.rewardedAt, qualified.rewardAttemptedAt], [null, null, null, null]);
+  await finishCloud(identity);
+  assert.equal((await readReferral(identity.referralId)).qualifiedAt.getTime(), qualified.qualifiedAt.getTime());
+  assert.equal((await database.select().from(schema.sessionMessages).where(eq(schema.sessionMessages.turnId, identity.turnId))).length, 2);
+});
+
+test("cloud qualification failure rolls back completion and retry of the same final message recovers", async () => {
+  const identity = await setupCloudReferral();
+  rejectReferralUpdate = true;
+  try {
+    await assert.rejects(() => finishCloud(identity), /injected failure after terminal update/);
+  } finally {
+    rejectReferralUpdate = false;
+  }
+  assert.equal((await readTurn(identity.turnId)).status, "running");
+  assert.equal((await readReferral(identity.referralId)).status, "pending");
+  const persisted = await database.select().from(schema.sessionMessages).where(eq(schema.sessionMessages.turnId, identity.turnId));
+  assert.equal(persisted.length, 2, "the final message remains durable for a retry without an explicit idempotency key");
+  await finishCloud(identity);
+  const qualified = await readReferral(identity.referralId);
+  assert.equal((await readTurn(identity.turnId)).status, "completed");
+  assert.equal(qualified.status, "qualified");
+  await finishCloud(identity);
+  assert.deepEqual(await readReferral(identity.referralId), qualified);
+  assert.deepEqual((await database.select().from(schema.sessionMessages).where(eq(schema.sessionMessages.turnId, identity.turnId))).map((message) => message.id), persisted.map((message) => message.id));
+  assert.deepEqual([qualified.inviterRewardedAt, qualified.inviteeRewardedAt, qualified.rewardedAt, qualified.rewardAttemptedAt], [null, null, null, null]);
+});
+
+test("an unrelated cloud completion and a local completion leave a pending referral unchanged", async () => {
+  const invited = await setupCloudReferral();
+  const unrelated = { ...await setup(), userId: crypto.randomUUID() };
+  await database.update(schema.sessionTurns).set({ userUuid: unrelated.userId, meta: { harness: "cohub", context: { kind: "websocket" } } }).where(eq(schema.sessionTurns.id, unrelated.turnId));
+  await finishCloud(unrelated);
+  assert.equal((await readTurn(unrelated.turnId)).status, "completed");
+  assert.equal((await readReferral(invited.referralId)).status, "pending");
+  await finish(invited);
+  assert.equal((await readTurn(invited.turnId)).status, "completed");
+  assert.equal((await readReferral(invited.referralId)).status, "pending");
 });
 
 test("confirmation queued after message insertion cannot observe a half-committed final result", async () => {

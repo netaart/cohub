@@ -1,6 +1,4 @@
-import { referrals, type ReferralStatus } from "@cohub/db";
-import { and, eq, lt } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import type { ReferralStatus } from "@cohub/db";
 
 const HOUR_MS = 60 * 60_000;
 const DAY_MS = 24 * HOUR_MS;
@@ -52,7 +50,8 @@ export function resolveReferralQuota(rows: readonly ReferralQuotaRow[], now = ne
   for (const row of quotaRows) {
     if (row.quotaCycle !== cycle) continue;
     if (row.status === "qualified" || row.status === "rewarded") used += 1;
-    else if (row.status === "pending" && (time(row.expiresAt) ?? Number.POSITIVE_INFINITY) > nowMs) reserved += 1;
+    // Expiry is authoritative only after successful turns have been reconciled under lock.
+    else if (row.status === "pending") reserved += 1;
   }
   const cycleStartMs = startMs === null ? null : startMs + cycle * CYCLE_MS;
   return {
@@ -73,12 +72,3 @@ export const referralClaimExpiresAt = (claimedAt: Date) =>
 
 export const isNewReferralAccount = (createdAt: Date, now = new Date()) =>
   now.getTime() - createdAt.getTime() <= REFERRAL_QUOTA.newAccountHours * HOUR_MS;
-
-export async function expireReferralClaims(db: PostgresJsDatabase<Record<string, unknown>>, now = new Date()) {
-  const expired = await db
-    .update(referrals)
-    .set({ status: "expired", updatedAt: now })
-    .where(and(eq(referrals.status, "pending"), lt(referrals.expiresAt, now)))
-    .returning({ id: referrals.id });
-  return expired.length;
-}

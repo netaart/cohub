@@ -1882,6 +1882,7 @@ export type ClaimReferralResponse = {
 export type ReferralListItem = {
   id: string;
   status: ReferralStatus;
+  inCurrentCycle: boolean;
   claimedAt: string;
   qualifiedAt: string | null;
   rewardedAt: string | null;
@@ -1903,6 +1904,14 @@ export type ReferralQuota = {
 export type ReferralDashboard = {
   code: string;
   reward: ReferralReward;
+  received: {
+    id: string;
+    status: ReferralStatus;
+    claimedAt: string;
+    expiresAt: string | null;
+    qualifiedAt: string | null;
+    inviteeRewardedAt: string | null;
+  } | null;
   quota: ReferralQuota;
   summary: {
     total: number;

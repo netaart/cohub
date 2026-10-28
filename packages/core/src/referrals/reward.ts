@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import type { BillingOperations } from "@cohub/billing";
 import { referrals, type ReferralStatus } from "@cohub/db";
-import { and, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { lockReferralQuota, reconcileReferralClaims, referralTransactionTime } from "./lifecycle.js";
 
 export const REFERRAL_REWARD_LEASE_MS = 5 * 60_000;
 export const REFERRAL_REWARD_RETRY_COOLDOWN_MS = 5 * 60_000;
@@ -27,7 +28,6 @@ export type QualifyAndRewardReferralInput = {
   db: ReferralsDb;
   billing: Pick<BillingOperations, "status" | "grantReferralReward">;
   inviteeUserId: string;
-  completedAt?: Date | null;
   logger?: ReferralRewardLogger;
   leaseMs?: number;
 };
@@ -264,37 +264,19 @@ export async function rewardQualifiedReferral(
 }
 
 /**
- * CAS pending → qualified (if needed), then grant rewards under lease.
- * Safe to call from system worker after a successful invitee turn.
+ * Recover qualification from persisted turns, then grant rewards under lease.
  */
 export async function qualifyAndRewardReferral(
   input: QualifyAndRewardReferralInput,
 ): Promise<ReferralRow | null> {
   const { db, inviteeUserId } = input;
-  const qualifiedAt = input.completedAt ?? new Date();
-  const [qualified] = await db
-    .update(referrals)
-    .set({ status: "qualified", qualifiedAt, updatedAt: new Date() })
-    .where(
-      and(
-        eq(referrals.inviteeUserId, inviteeUserId),
-        inArray(referrals.status, ["pending", "expired"]),
-        or(isNull(referrals.expiresAt), gt(referrals.expiresAt, qualifiedAt)),
-      ),
-    )
-    .returning();
-
-  if (qualified) {
-    return rewardQualifiedReferral({
-      db,
-      billing: input.billing,
-      referral: qualified,
-      logger: input.logger,
-      leaseMs: input.leaseMs,
+  const current = await loadReferralByInvitee(db, inviteeUserId);
+  if (current?.status === "pending") {
+    await db.transaction(async (tx) => {
+      await lockReferralQuota(tx, current.inviterUserId);
+      await reconcileReferralClaims(tx, current.inviterUserId, await referralTransactionTime(tx));
     });
   }
-
-  // Already qualified (or rewarded) — still try to finish incomplete grants.
   const existing = await loadReferralByInvitee(db, inviteeUserId);
   if (existing?.status !== "qualified") return existing;
   return rewardQualifiedReferral({
