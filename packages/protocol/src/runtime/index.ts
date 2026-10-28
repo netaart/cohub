@@ -87,6 +87,12 @@ export type RuntimeTraceContext = {
   traceparent?: string | null;
 };
 
+export const RUNTIME_MAX_SERVICE_TIERS = 20;
+export const runtimeServiceTierSchema = z.object({
+  id: z.string().min(1).max(100),
+  name: z.string().max(255),
+  description: z.string().max(2000).optional(),
+});
 export const runtimeCapabilitiesSchema = z.object({
   harnesses: z.array(localHarnessSchema).max(LOCAL_HARNESSES.length),
   models: z.array(z.object({
@@ -104,11 +110,7 @@ export const runtimeCapabilitiesSchema = z.object({
       .transform((map) => Object.fromEntries(Object.entries(map).filter(([level]) => isModelThinkingLevel(level))) as Partial<Record<ModelThinkingLevel, string | null>>)
       .optional(),
     /** Selectable service (speed) tiers; `id` is the Harness's own request value. */
-    serviceTiers: z.array(z.object({
-      id: z.string().min(1).max(100),
-      name: z.string().max(255),
-      description: z.string().max(2000).optional(),
-    })).max(20).optional(),
+    serviceTiers: z.array(runtimeServiceTierSchema).max(RUNTIME_MAX_SERVICE_TIERS).optional(),
     defaultServiceTier: z.string().min(1).max(100).optional(),
   })).max(2000),
 });

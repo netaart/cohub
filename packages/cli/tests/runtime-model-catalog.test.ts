@@ -10,9 +10,13 @@ test("Codex reasoning and service tiers survive discovery and the server capabil
     supportedReasoningEfforts: ["none", "low", "medium", "high", "xhigh", "ultra"].map((reasoningEffort) => ({ reasoningEffort })),
     additionalSpeedTiers: ["fast"], defaultServiceTier: "priority",
     serviceTiers: [{ id: "priority", name: "Fast", description: "1.5x speed", headers: { Authorization: "secret" } }, { id: "default", name: "Standard", description: "" }, null, { id: 42, name: "Invalid" }],
-  }, { id: "legacy", additionalSpeedTiers: ["fast", null] }]);
+  }, { id: "legacy", additionalSpeedTiers: ["fast", null, "x".repeat(101)] }, {
+    id: "bounded", serviceTiers: [{ id: "long", name: "n".repeat(256) }, ...Array.from({ length: 25 }, (_, index) => ({ id: `t${index}`, name: "T" }))],
+  }]);
+  assert.equal(models[2]?.serviceTiers?.length, 20);
+  assert.equal(models[2]?.serviceTiers?.[0]?.id, "t0");
   const parsed = runtimeCapabilitiesSchema.parse({ harnesses: ["codex"], models }).models;
-  assert.deepEqual(parsed.map(({ serviceTiers, defaultServiceTier }) => ({ serviceTiers, defaultServiceTier })), [
+  assert.deepEqual(parsed.slice(0, 2).map(({ serviceTiers, defaultServiceTier }) => ({ serviceTiers, defaultServiceTier })), [
     { serviceTiers: [{ id: "priority", name: "Fast", description: "1.5x speed" }, { id: "default", name: "Standard" }], defaultServiceTier: "priority" },
     { serviceTiers: [{ id: "fast", name: "fast" }], defaultServiceTier: undefined },
   ]);

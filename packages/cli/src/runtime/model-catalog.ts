@@ -1,4 +1,4 @@
-import { isModelThinkingLevel, MODEL_THINKING_LEVELS as thinkingLevels, thinkingLevelMapFor, type RuntimeModel as Model } from "@neta-art/cohub";
+import { isModelThinkingLevel, MODEL_THINKING_LEVELS as thinkingLevels, RUNTIME_MAX_SERVICE_TIERS, runtimeServiceTierSchema, thinkingLevelMapFor, type RuntimeModel as Model } from "@neta-art/cohub";
 import { record, type JsonRecord } from "./json-rpc.js";
 
 const thinkingLevel = (value: unknown) => isModelThinkingLevel(value) ? value : undefined;
@@ -49,15 +49,17 @@ function codexThinking(model: JsonRecord, configuredEffort: unknown): Pick<Model
 
 /** `serviceTiers` supersedes the deprecated `additionalSpeedTiers`, which only names tier ids. */
 function codexServiceTiers(model: JsonRecord): Pick<Model, "serviceTiers" | "defaultServiceTier"> {
-  const tiers = Array.isArray(model.serviceTiers)
-    ? model.serviceTiers.flatMap((entry) => {
+  const candidates = Array.isArray(model.serviceTiers)
+    ? model.serviceTiers.map((entry) => {
       const tier = record(entry);
-      if (typeof tier.id !== "string" || !tier.id || typeof tier.name !== "string") return [];
-      return [{ id: tier.id, name: tier.name, ...(typeof tier.description === "string" && tier.description ? { description: tier.description } : {}) }];
+      return { id: tier.id, name: tier.name, ...(typeof tier.description === "string" && tier.description ? { description: tier.description } : {}) };
     })
-    : Array.isArray(model.additionalSpeedTiers)
-      ? model.additionalSpeedTiers.flatMap((id) => typeof id === "string" && id ? [{ id, name: id }] : [])
-      : [];
+    : Array.isArray(model.additionalSpeedTiers) ? model.additionalSpeedTiers.map((id) => ({ id, name: id })) : [];
+  // An entry outside the protocol's bounds is dropped rather than invalidating the whole catalog.
+  const tiers = candidates.flatMap((tier) => {
+    const parsed = runtimeServiceTierSchema.safeParse(tier);
+    return parsed.success ? [parsed.data] : [];
+  }).slice(0, RUNTIME_MAX_SERVICE_TIERS);
   const defaultServiceTier = typeof model.defaultServiceTier === "string" && tiers.some((tier) => tier.id === model.defaultServiceTier) ? model.defaultServiceTier : undefined;
   return { ...(tiers.length ? { serviceTiers: tiers } : {}), ...(defaultServiceTier ? { defaultServiceTier } : {}) };
 }

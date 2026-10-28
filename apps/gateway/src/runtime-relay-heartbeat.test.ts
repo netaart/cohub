@@ -102,3 +102,64 @@ test("a renew that loses to an in-flight catalog update keeps the connection", {
   assert.equal(socket.closeCode, null, "the renew failure belongs to the update");
   socket.terminate();
 });
+
+function updatingFixture() {
+  const socket = new FakeSocket();
+  let stored: unknown = null;
+  let finishUpdate = () => {};
+  const updates: unknown[] = [];
+  createRuntimeRelay({
+    secret: "worker-secret",
+    authorize: async () => ({ ok: true, userId: "owner" }),
+    claim: async (_space, record) => { stored = record; return true; },
+    renew: async (_space, record) => stored === record,
+    update: (_space, previous, next) => {
+      if (stored !== previous) return Promise.resolve(false);
+      stored = next;
+      updates.push(next.capabilities);
+      return new Promise<boolean>((resolve) => { finishUpdate = () => resolve(true); });
+    },
+    release: async (_space, record) => { if (stored === record) stored = null; },
+    heartbeatMs: 20,
+    endpoint: () => "ws://127.0.0.1:1/internal",
+  }).control(socket as unknown as WebSocket);
+  const heartbeat = setInterval(() => socket.emit("message", Buffer.from(JSON.stringify({ type: "runtime.heartbeat" }))), 10);
+  socket.on("close", () => clearInterval(heartbeat));
+  socket.emit("message", Buffer.from(hello()));
+  socket.emit("message", Buffer.from(JSON.stringify({ type: "runtime.capabilities", capabilities: { harnesses: ["pi"], models: [] } })));
+  const capabilities = (models: number) => socket.emit("message", Buffer.from(JSON.stringify({ type: "runtime.capabilities", capabilities: { harnesses: ["pi"], models: Array.from({ length: models }, (_, index) => ({ harness: "pi", provider: "p", id: `m${index}`, name: "M" })) } })));
+  return { socket, updates, capabilities, stored: () => stored, finish: () => finishUpdate() };
+}
+
+test("heartbeats keep the connection alive while a catalog update is slow", { timeout: 10_000 }, async () => {
+  const { socket, finish } = updatingFixture();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(socket.terminated, false);
+  finish();
+  socket.terminate();
+});
+
+test("a close during a catalog update releases the record that update stored", { timeout: 10_000 }, async () => {
+  const { socket, stored, finish } = updatingFixture();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  socket.terminate();
+  assert.notEqual(stored(), null);
+  finish();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(stored(), null);
+});
+
+test("catalogs sent during a slow update collapse into the latest one", { timeout: 10_000 }, async () => {
+  const { socket, updates, capabilities, finish } = updatingFixture();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  for (let models = 1; models <= 5; models++) capabilities(models);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(updates.length, 1);
+  finish();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  finish();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(updates.map((update) => (update as { models: unknown[] }).models.length), [0, 5]);
+  assert.equal(socket.closeCode, null);
+  socket.terminate();
+});

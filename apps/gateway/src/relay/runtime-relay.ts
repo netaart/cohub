@@ -94,6 +94,27 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
     let queuedBytes = 0;
     let chain = Promise.resolve();
     let updating: Promise<boolean> | null = null;
+    let pendingCatalog: RuntimeRegistration["capabilities"] | null = null;
+    let draining = false;
+    // Off the frame chain, so heartbeats and execution events keep flowing while Redis answers. The
+    // record is swapped before anything awaiting `updating` resumes, so a racing renew sees it.
+    async function drainCatalogs(update: NonNullable<RuntimeRelayDependencies["update"]>): Promise<boolean> {
+      try {
+        while (pendingCatalog && current && !closed) {
+          const { spaceId, record: previous } = current;
+          const next: RuntimeRegistration = { ...previous, capabilities: pendingCatalog };
+          pendingCatalog = null;
+          if (!await update(spaceId, previous, next)) return false;
+          // The close released the record it saw, which this update had already replaced.
+          if (closed) { await deps.release(spaceId, next).catch(() => undefined); return true; }
+          current.record = next;
+          const registration = registrations.get(spaceId);
+          if (registration?.socket === socket) registration.record = next;
+          logger.info("runtime.control.capabilities_updated", { spaceId, runtimeId: next.runtimeId, harnesses: next.capabilities.harnesses, modelCount: next.capabilities.models.length });
+        }
+        return true;
+      } finally { draining = false; }
+    }
     const deny = (status: number) => socket.close(status === 401 ? 4401 : status >= 500 ? 1011 : 4403, "Runtime authorization failed");
     const handshake = setTimeout(() => socket.close(4408, "Runtime handshake timed out"), 10_000);
     const interval = deps.heartbeatMs ?? 10_000;
@@ -118,7 +139,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
         const record = current.record;
         if (!await deps.renew(current.spaceId, record)) {
           // A catalog update may have replaced the record (and its TTL) while this renew was in flight.
-          await updating;
+          await updating?.catch(() => undefined);
           if (current.record !== record) return;
           logger.warn("runtime.control.lease_lost", { spaceId: current.spaceId, runtimeId: current.record.runtimeId });
           socket.close(4409, "Runtime lease lost");
@@ -223,25 +244,25 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             logger.debug("runtime.control.auth_refreshed", { spaceId: current.spaceId, runtimeId: current.record.runtimeId });
           } else if (frame.type === "runtime.heartbeat") lastHeartbeat = Date.now();
           else if (frame.type === "runtime.capabilities") {
-            if (!deps.update) throw new RuntimeProtocolError("Runtime capability updates are unavailable");
-            const { spaceId, record: previous } = current;
-            const next: RuntimeRegistration = { ...previous, capabilities: frame.capabilities };
-            // The record is swapped before anything awaiting `updating` resumes, so a racing renew sees it.
-            updating = deps.update(spaceId, previous, next).then((updated) => {
-              if (updated && current) {
-                current.record = next;
-                const registration = registrations.get(spaceId);
-                if (registration?.socket === socket) registration.record = next;
-              }
-              return updated;
-            });
-            const updated = await updating.finally(() => { updating = null; });
-            if (!updated) {
-              logger.warn("runtime.control.lease_lost", { spaceId, runtimeId: previous.runtimeId });
-              socket.close(4409, "Runtime lease lost");
-              return;
+            const update = deps.update;
+            if (!update) throw new RuntimeProtocolError("Runtime capability updates are unavailable");
+            // A catalog replaces the whole registration, so only the latest one waiting matters.
+            pendingCatalog = frame.capabilities;
+            if (!draining) {
+              draining = true;
+              const run = drainCatalogs(update);
+              updating = run;
+              void run.then((updated) => {
+                if (updating === run) updating = null;
+                if (updated || closed) return;
+                logger.warn("runtime.control.lease_lost", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId });
+                socket.close(4409, "Runtime lease lost");
+              }, (error) => {
+                if (updating === run) updating = null;
+                logger.error("runtime.control.capabilities_update_failed", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, error });
+                socket.close(1011, "Runtime relay unavailable");
+              });
             }
-            logger.info("runtime.control.capabilities_updated", { spaceId: current.spaceId, runtimeId: next.runtimeId, harnesses: next.capabilities.harnesses, modelCount: next.capabilities.models.length });
           }
           else if (frame.type === "runtime.native") {
             try {
