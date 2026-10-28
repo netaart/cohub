@@ -37,6 +37,7 @@ import {
 	writeChatsFilter,
 } from "$lib/stores/chats-filter";
 import { getRecentSpaces } from "$lib/stores/recent-space";
+import { sessionArchive } from "$lib/stores/session-archive.svelte";
 import { findCachedSession } from "$lib/stores/session-detail-cache";
 import {
 	getCachedSessionListSnapshot,
@@ -97,16 +98,26 @@ function sessionOf({ space: _space, ...session }: UserSessionListItem) {
 
 const liveRows = new WeakMap<
 	UserSessionListItem,
-	{ session: SessionRecord; row: UserSessionListItem }
+	{ session: SessionRecord; archived: boolean; row: UserSessionListItem }
 >();
 
 function liveRow(row: UserSessionListItem): UserSessionListItem {
 	const session = sessionStore.get(row.id);
 	if (!session) return row;
+	const archived =
+		sessionArchive.stateOf(row.id) ??
+		session.isArchived ??
+		row.isArchived ??
+		false;
 	const cached = liveRows.get(row);
-	if (cached?.session === session) return cached.row;
-	const live = { ...session, space: row.space } as UserSessionListItem;
-	liveRows.set(row, { session, row: live });
+	if (cached?.session === session && cached.archived === archived)
+		return cached.row;
+	const live = {
+		...session,
+		isArchived: archived,
+		space: row.space,
+	} as UserSessionListItem;
+	liveRows.set(row, { session, archived, row: live });
 	return live;
 }
 
@@ -150,6 +161,7 @@ class ChatsInbox {
 		mergeExtra: mergeSessionForks,
 		fetch: async (filter, cursor) => {
 			const page = await this.#fetchPage(filter, cursor);
+			sessionArchive.seed(page.sessions);
 			sessionStore.mergeAll(page.sessions.map(sessionOf));
 			return {
 				items: page.sessions,
@@ -160,7 +172,10 @@ class ChatsInbox {
 		},
 		read: async (filter) => {
 			const cached = await this.#readCachedPage(filter);
-			if (cached) sessionStore.seedAll(cached.sessions.map(sessionOf));
+			if (cached) {
+				sessionArchive.seed(cached.sessions, { authoritative: false });
+				sessionStore.seedAll(cached.sessions.map(sessionOf));
+			}
 			return cached
 				? {
 						items: cached.sessions,
@@ -246,7 +261,9 @@ class ChatsInbox {
 	viewOf(filter: ChatsFilter): ChatsView {
 		const view = this.list.view(filter);
 		return {
-			sessions: view.items.map(liveRow),
+			sessions: view.items
+				.map(liveRow)
+				.filter((session) => Boolean(session.isArchived) === filter.archived),
 			forks: view.extra,
 			loading: view.loading,
 			loadingMore: view.loadingMore,
@@ -259,11 +276,19 @@ class ChatsInbox {
 	}
 
 	setSpace(space: UserSessionSpaceSummary | null) {
-		this.#applyFilter({ ...this.filter, space });
+		this.#applyFilter({ ...this.filter, space, archived: false });
+	}
+
+	setArchived(archived: boolean) {
+		this.#applyFilter(
+			archived
+				? { source: null, space: null, archived: true }
+				: { source: DEFAULT_CHATS_FILTER.source, space: null, archived: false },
+		);
 	}
 
 	showAll() {
-		this.#applyFilter({ source: null, space: null });
+		this.#applyFilter({ source: null, space: null, archived: false });
 	}
 
 	prewarm(filters: readonly ChatsFilter[]) {
@@ -382,6 +407,10 @@ class ChatsInbox {
 	}
 
 	#handleEvent(event: ChannelEnvelope) {
+		if (event.type === "label.assignments.updated") {
+			this.#handleArchiveEvent(event);
+			return;
+		}
 		if (event.type !== "session.created" && event.type !== "session.updated")
 			return;
 		const record = readSessionRecord(
@@ -393,6 +422,48 @@ class ChatsInbox {
 			settled: created,
 			fork: created ? readRealtimeSessionFork(event.payload) : null,
 		});
+	}
+
+	#handleArchiveEvent(event: ChannelEnvelope) {
+		const payload = event.payload as {
+			resourceType?: string;
+			resourceRef?: string;
+			resourceRefs?: string[];
+			resourceAssignments?: Array<{
+				resourceRef: string;
+				assignments: Array<{ labelSystemKey?: string | null }>;
+			}>;
+		};
+		if (payload.resourceType !== "session") return;
+		if (payload.resourceAssignments) {
+			sessionArchive.applyAssignments(payload.resourceAssignments);
+		} else {
+			const refs = payload.resourceRefs?.length
+				? payload.resourceRefs
+				: payload.resourceRef
+					? [payload.resourceRef]
+					: [];
+			for (const ref of refs) void this.#refreshArchiveState(ref);
+		}
+		this.list.invalidate();
+		if (this.#visible > 0) void this.list.sync(this.filter);
+	}
+
+	async #refreshArchiveState(sessionId: string) {
+		try {
+			const result = await sdk.user.labels.getResourceLabels(
+				"session",
+				sessionId,
+			);
+			sessionArchive.mark(
+				[sessionId],
+				result.assignments.some(
+					(assignment) => assignment.labelSystemKey === "user:archived",
+				),
+			);
+		} catch (error) {
+			console.warn("[chats] failed to refresh archive state", error);
+		}
 	}
 
 	#applySession(
@@ -416,9 +487,18 @@ class ChatsInbox {
 			}
 			return;
 		}
+		// Updates never introduce rows: an unseen row may be archived, paginated
+		// out, or outside the current filter. Creations and refetches add rows.
+		if (!options.settled && !this.list.find(record.id)) return;
 		const change: LiveChange<ChatsFilter, UserSessionListItem, Forks> = {
 			id: record.id,
-			fit: (filter) => sessionFit(record, filter, viewer),
+			fit: (filter) =>
+				sessionFit(
+					record,
+					filter,
+					viewer,
+					sessionArchive.stateOf(record.id) ?? false,
+				),
 			merge,
 			create: (filter) => {
 				const space =
@@ -502,6 +582,7 @@ class ChatsInbox {
 				cursor,
 				source: source ? [source] : null,
 				includeForks: true,
+				archived: filter.archived,
 			});
 			return {
 				sessions: result.sessions ?? [],

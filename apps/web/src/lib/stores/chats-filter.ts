@@ -10,9 +10,14 @@ import { m } from "$lib/paraglide/messages.js";
 export type ChatsFilter = {
 	source: UserSessionSourceKey | null;
 	space: UserSessionSpaceSummary | null;
+	archived: boolean;
 };
 
-export const DEFAULT_CHATS_FILTER: ChatsFilter = { source: "web", space: null };
+export const DEFAULT_CHATS_FILTER: ChatsFilter = {
+	source: "web",
+	space: null,
+	archived: false,
+};
 
 export const CHATS_SOURCE_GROUPS = [
 	{ id: "clients", sources: ["web", "cli", "websocket"] },
@@ -83,7 +88,10 @@ export function resolveSessionSourceKey(
 
 export function chatsFilterScope(filter: ChatsFilter): string {
 	const source = filter.source ?? "all";
-	return filter.space ? `space:${filter.space.id}:${source}` : source;
+	const view = filter.archived ? "archived" : "active";
+	return filter.space
+		? `space:${filter.space.id}:${view}:${source}`
+		: `${view}:${source}`;
 }
 
 export type SessionEventRecord = Partial<SessionRecord> & {
@@ -95,8 +103,11 @@ export function sessionFit(
 	session: SessionEventRecord,
 	filter: ChatsFilter,
 	viewer: string | null,
+	archived = false,
 ): LiveFit {
+	if (filter.archived !== archived) return "out";
 	if (filter.space && session.spaceId !== filter.space.id) return "out";
+	if (filter.archived) return "in";
 	if (!filter.space) {
 		const participants = session.participantUserUuids;
 		const listed =
@@ -114,7 +125,9 @@ export function sessionFit(
 
 export function sameChatsFilter(a: ChatsFilter, b: ChatsFilter) {
 	return (
-		a.source === b.source && (a.space?.id ?? null) === (b.space?.id ?? null)
+		a.source === b.source &&
+		a.archived === b.archived &&
+		(a.space?.id ?? null) === (b.space?.id ?? null)
 	);
 }
 
@@ -123,6 +136,7 @@ export function parseChatsFilter(raw: string | null): ChatsFilter {
 	try {
 		const value = JSON.parse(raw) as {
 			source?: unknown;
+			archived?: unknown;
 			space?: {
 				id?: unknown;
 				name?: unknown;
@@ -151,7 +165,7 @@ export function parseChatsFilter(raw: string | null): ChatsFilter {
 								: null,
 					}
 				: null;
-		return { source, space };
+		return { source, space, archived: value.archived === true };
 	} catch {
 		return DEFAULT_CHATS_FILTER;
 	}

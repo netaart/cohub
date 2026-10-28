@@ -196,15 +196,23 @@ router.patch("/resources/:resourceType/labels", async (c) => {
 router.patch("/resources/:resourceType/labels/batch", async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
-  if (c.req.param("resourceType") !== "space") return c.json({ message: "resource not found" }, 404);
+  const resourceType = parseResourceType(c.req.param("resourceType") ?? "");
+  if (resourceType !== "space" && resourceType !== "session") return c.json({ message: "resource not found" }, 404);
   const body = await c.req.json().catch(() => null) as { resourceRefs?: unknown; addLabelRefs?: string[]; removeLabelRefs?: string[] } | null;
   if (!Array.isArray(body?.resourceRefs) || body.resourceRefs.length < 1 || body.resourceRefs.length > MAX_BATCH || !body.resourceRefs.every((id) => typeof id === "string" && requireValidId(id))) return c.json({ message: "resourceRefs must contain 1-200 valid ids" }, 400);
   const refs = [...new Set(body.resourceRefs)];
-  const allowedRefs = await filterSpaceIdsByPermission(user, "space.view", refs);
-  if (allowedRefs.length !== refs.length) return c.json({ message: "forbidden" }, 403);
+  if (resourceType === "space") {
+    const allowedRefs = await filterSpaceIdsByPermission(user, "space.view", refs);
+    if (allowedRefs.length !== refs.length) return c.json({ message: "forbidden" }, 403);
+  } else {
+    const rows = await db.select({ id: spaceSessions.id, spaceId: spaceSessions.spaceId }).from(spaceSessions).where(inArray(spaceSessions.id, refs));
+    if (rows.length !== refs.length) return c.json({ message: "resource not found" }, 404);
+    const allowedSpaceIds = new Set(await filterSpaceIdsByPermission(user, "session.view", [...new Set(rows.map((row) => row.spaceId))]));
+    if (rows.some((row) => !allowedSpaceIds.has(row.spaceId))) return c.json({ message: "forbidden" }, 403);
+  }
   try {
-    const result = await db.transaction((tx) => patchUserResourcesLabels(tx, user.uuid, "space", refs, body ?? {}));
-    await dispatchUserLabelsChanged(user.uuid, "space", result.resourceRefs, result);
+    const result = await db.transaction((tx) => patchUserResourcesLabels(tx, user.uuid, resourceType, refs, body ?? {}));
+    await dispatchUserLabelsChanged(user.uuid, resourceType, result.resourceRefs, result);
     return c.json({ resourceRefs: result.resourceRefs, affectedLabelIds: result.affectedLabelIds });
   } catch (error) {
     return c.json({ message: error instanceof Error ? error.message : "invalid labels" }, 400);

@@ -90,11 +90,13 @@ export async function patchUserResourcesLabels(db: LabelsDb, userUuid: string, r
   await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`user-labels:${userUuid}`}, 0))`);
   const adds = parseLabelRefs(input.addLabelRefs).map((path) => path.join("/"));
   const removes = parseLabelRefs(input.removeLabelRefs).map((path) => path.join("/"));
-  if (adds.some((ref) => ref.toLowerCase() === "archived")) {
-    if (adds.some((ref) => ref.toLowerCase() === "pinned")) throw new Error("cannot pin and archive together");
-    removes.push("Pinned");
-  } else if (adds.some((ref) => ref.toLowerCase() === "pinned")) {
-    removes.push("Archived");
+  if (resourceType === "space") {
+    if (adds.some((ref) => ref.toLowerCase() === "archived")) {
+      if (adds.some((ref) => ref.toLowerCase() === "pinned")) throw new Error("cannot pin and archive together");
+      removes.push("Pinned");
+    } else if (adds.some((ref) => ref.toLowerCase() === "pinned")) {
+      removes.push("Archived");
+    }
   }
   const addIds = await resolveOrCreateUserLabelRefs(db, userUuid, adds);
   const { labelIds: removeIds } = await resolveLabelPaths({ db, spaceId: userUuid, scopeType: "user", paths: parseLabelRefs([...new Set(removes)]) });

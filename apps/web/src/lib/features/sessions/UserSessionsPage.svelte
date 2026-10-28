@@ -31,6 +31,7 @@ import {
 	getLastUserSessionId,
 	setLastUserSessionId,
 } from "$lib/stores/last-user-session";
+import { sessionArchive } from "$lib/stores/session-archive.svelte";
 import { forgetCachedSession } from "$lib/stores/session-detail-cache";
 
 const {
@@ -124,8 +125,19 @@ async function openInSpace(pathname: string) {
 }
 
 async function adoptServerSession(seq: number, sessionId: string) {
-	const detail = await sdk.user.getSession(sessionId);
+	const [detail, labels] = await Promise.all([
+		sdk.user.getSession(sessionId),
+		sdk.user.labels.getResourceLabels("session", sessionId).catch(() => null),
+	]);
 	if (!isCurrent(seq)) return null;
+	if (labels) {
+		sessionArchive.mark(
+			[sessionId],
+			labels.assignments.some(
+				(assignment) => assignment.labelSystemKey === "user:archived",
+			),
+		);
+	}
 	const seed: UserSessionListItem = {
 		...detail.session,
 		space: spaceSummaryOf(detail.space),

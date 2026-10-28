@@ -162,6 +162,10 @@ import {
 	getRecentSpace,
 	setRecentSpace,
 } from "$lib/stores/recent-space";
+import {
+	sessionArchive,
+	setSessionsArchived,
+} from "$lib/stores/session-archive.svelte";
 import { fetchSessionDetailWithCache } from "$lib/stores/session-detail-cache";
 import {
 	getCachedSessionListSnapshot,
@@ -432,7 +436,10 @@ const activeLabelResource = $derived(workspaceRoute.labelResource);
 
 const sessions = $derived(
 	sortSessionsByRecentActivity(
-		sessionIds.flatMap((id) => sessionStore.get(id) ?? []),
+		sessionIds.flatMap((id) => {
+			const session = sessionStore.get(id);
+			return session && !sessionArchive.isArchived(id) ? [session] : [];
+		}),
 	),
 );
 const activeSession = $derived(
@@ -462,15 +469,23 @@ const canManageLabels = $derived(
 const checkpointsById = $derived.by(
 	() => new Map(checkpoints.map((checkpoint) => [checkpoint.id, checkpoint])),
 );
-const currentLabelItemsById = $derived.by(() =>
-	currentSpaceId
-		? hydrateLabelItemsById(
-				currentSpaceId,
-				labelItemsBySpace[currentSpaceId] ?? {},
-				(id) => sessionStore.get(id),
-			)
-		: {},
-);
+const currentLabelItemsById = $derived.by(() => {
+	if (!currentSpaceId) return {};
+	const itemsByLabelId = labelItemsBySpace[currentSpaceId] ?? {};
+	const visible = Object.fromEntries(
+		Object.entries(itemsByLabelId).map(([labelId, items]) => [
+			labelId,
+			items.filter(
+				(item) =>
+					item.resourceType !== "session" ||
+					!sessionArchive.isArchived(item.resourceRef),
+			),
+		]),
+	);
+	return hydrateLabelItemsById(currentSpaceId, visible, (id) =>
+		sessionStore.get(id),
+	);
+});
 const currentLabelItemsPageInfoById = $derived(
 	currentSpaceId ? (labelItemsPageInfoBySpace[currentSpaceId] ?? {}) : {},
 );
@@ -2727,6 +2742,43 @@ function subscribeSidebarUpdates() {
 		const fork = readRealtimeSessionFork(event.payload);
 		if (fork) applySessionForks([fork]);
 	});
+	const offSessionArchiveEvents = sdk.onUserEvent((event) => {
+		if (event.type !== "label.assignments.updated") return;
+		const payload = event.payload as {
+			resourceType?: string;
+			resourceRef?: string;
+			resourceRefs?: string[];
+			resourceAssignments?: Array<{
+				resourceRef: string;
+				assignments: Array<{ labelSystemKey?: string | null }>;
+			}>;
+		};
+		if (payload.resourceType !== "session") return;
+		if (payload.resourceAssignments) {
+			sessionArchive.applyAssignments(payload.resourceAssignments);
+			const restored = payload.resourceAssignments
+				.filter(
+					(entry) =>
+						!entry.assignments.some(
+							(assignment) => assignment.labelSystemKey === "user:archived",
+						),
+				)
+				.map((entry) => entry.resourceRef);
+			if (restored.length && currentSpaceId)
+				void loadSessionsForSpace(currentSpaceId, {
+					force: true,
+					network: true,
+				});
+		} else {
+			const refs = payload.resourceRefs?.length
+				? payload.resourceRefs
+				: payload.resourceRef
+					? [payload.resourceRef]
+					: [];
+			for (const ref of refs) void refreshSessionArchiveState(ref);
+		}
+		if (currentSpaceId) refreshExpandedLabelItems(currentSpaceId);
+	});
 	const offSyncGap = syncStatus.onGap(() => {
 		if (currentSpaceId) refreshExpandedLabelItems(currentSpaceId);
 	});
@@ -2802,6 +2854,25 @@ function subscribeSidebarUpdates() {
 		}
 	}
 
+	function refreshSessionArchiveState(sessionId: string) {
+		void sdk.user.labels
+			.getResourceLabels("session", sessionId)
+			.then((result) =>
+				sessionArchive.mark(
+					[sessionId],
+					result.assignments.some(
+						(assignment) => assignment.labelSystemKey === "user:archived",
+					),
+				),
+			)
+			.catch((error) =>
+				console.warn(
+					"[sidebar] failed to refresh session archive state",
+					error,
+				),
+			);
+	}
+
 	function handleLabelAssignmentsUpdated(e: Event) {
 		const custom = e as CustomEvent<{
 			spaceId?: string;
@@ -2839,6 +2910,7 @@ function subscribeSidebarUpdates() {
 	return () => {
 		stopSessionSync();
 		offSessionForks();
+		offSessionArchiveEvents();
 		offSyncGap();
 		offSessionListCacheUpdated();
 		offSpaceLabelsCacheUpdated();
@@ -3058,6 +3130,12 @@ $effect(() => {
 							draggable={itemDraggable}
 							removeLabelTitle={canRemoveItem ? labelRemoveTitle : undefined}
 							removeLabelDisabled={labelDropBusyId === label.id}
+							archived={sessionArchive.isArchived(session.id)}
+							onArchive={(target) =>
+								void setSessionsArchived(
+									[target.id],
+									!sessionArchive.isArchived(target.id),
+								)}
 							onNavigate={(event, target) => {
 								event.preventDefault();
 								void handleNavigateToSession(target.id);
@@ -3384,6 +3462,12 @@ $effect(() => {
 					active={isActive}
 					{isMobile}
 					showSourceBadge={true}
+					archived={sessionArchive.isArchived(session.id)}
+					onArchive={(target) =>
+						void setSessionsArchived(
+							[target.id],
+							!sessionArchive.isArchived(target.id),
+						)}
 					renaming={renamingSessionId === session.id}
 					renameValue={renameTitleValue}
 					renameSaving={renameSaving}

@@ -198,7 +198,7 @@ router.get("/rules", async (c) => {
  */
 async function listVisibleUserSessions(
   user: { uuid: string },
-  options: { limit: number; cursor: string | null; source: SessionSourceFilter | null },
+  options: { limit: number; cursor: string | null; source: SessionSourceFilter | null; archived: boolean },
 ) {
   const identity = asAccountIdentity(user);
   if (!identity) {
@@ -228,7 +228,7 @@ async function listVisibleUserSessions(
   while (visible.length < limit && hasMore && guard < 8) {
     guard += 1;
     const batchLimit = Math.min(100, Math.max(limit * 2, limit - visible.length + 4));
-    const batch = await listUserSessions(identity.uuid, { limit: batchLimit, cursor, source: options.source });
+    const batch = await listUserSessions(identity.uuid, { limit: batchLimit, cursor, source: options.source, archived: options.archived });
     hasMore = Boolean(batch.pageInfo.hasMore);
     cursor = batch.pageInfo.nextCursor;
 
@@ -295,6 +295,7 @@ router.get("/sessions", async (c) => {
   const limit = Number.isFinite(limitParam) ? limitParam : 20;
   const cursor = c.req.query("cursor") ?? null;
   const includeForks = c.req.query("includeForks") === "1" || c.req.query("includeForks") === "true";
+  const archived = c.req.query("archived") === "1" || c.req.query("archived") === "true";
   let source: SessionSourceFilter | null;
   try {
     source = parseSessionSourceKeys(c.req.query("source"));
@@ -305,7 +306,7 @@ router.get("/sessions", async (c) => {
     throw error;
   }
   try {
-    const { sessions, fullViewSpaceIds, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source });
+    const { sessions, fullViewSpaceIds, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source, archived });
     const visibleSessionIds = sessions.map((session) => session.id);
     const [withSpaces, forks] = await Promise.all([
       hydrateSessionParticipantProfiles(sessions).then(attachSessionSpaceSummaries),

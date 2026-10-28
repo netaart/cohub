@@ -1,7 +1,15 @@
 <script lang="ts">
-import type { Link2Off, Pencil, TextCursorInput } from "lucide-svelte";
+import type {
+	Archive,
+	ArchiveRestore,
+	Link2Off,
+	Pencil,
+	TextCursorInput,
+} from "lucide-svelte";
 
 type SidebarActionIcon =
+	| typeof Archive
+	| typeof ArchiveRestore
 	| typeof Link2Off
 	| typeof Pencil
 	| typeof TextCursorInput;
