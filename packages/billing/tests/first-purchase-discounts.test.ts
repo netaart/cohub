@@ -468,6 +468,7 @@ test("an identified purchase retries its exact key and return identity without a
   const bodies: Record<string, unknown>[] = [];
   globalThis.fetch = async (input, init) => {
     const url = new URL(String(input));
+    if (url.pathname === "/v1/orders" && init?.method !== "POST") return response({ items: [], pagination: { has_more: false } });
     if (url.pathname === "/v1/products/cohub_credits_small") return response({ product: product("cohub_credits_small", "one_time") });
     if (url.pathname === "/v1/customers") return response({ customer: { external_user_id: "user_1" } });
     if (url.pathname === "/v1/providers/status") return response({ status: "available", checkout_available: true });
@@ -521,3 +522,64 @@ test("only a confirmed unpaid closed order can restart; unknown and conflict rem
     assert.equal((await inspect()).canRestart, false);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+for (const kind of ["order", "subscription"] as const) {
+  test(`${kind} lost create response resolves the original paid receipt before changed eligibility`, async () => {
+    const originalFetch = globalThis.fetch;
+    const path = kind === "order" ? "/v1/orders" : "/v1/subscriptions";
+    const productKey = kind === "order" ? "cohub_credits_small" : "cohub_pro_monthly";
+    let accepted: Record<string, unknown> | null = null;
+    let creates = 0;
+    let previews = 0;
+    let duplicate = false;
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? "GET";
+      if (url.pathname === path && method === "GET") {
+        if (url.searchParams.has("meta_contains")) {
+          assert.equal(url.searchParams.get("external_user_id"), "user_1");
+          return response({ items: accepted ? duplicate ? [accepted, accepted] : [accepted] : [], pagination: { has_more: false } });
+        }
+        if (accepted) throw new Error("A retry must resolve the original receipt before active-subscription admission");
+        return response({ items: [], pagination: { has_more: false } });
+      }
+      if (url.pathname === `${path}/original`) return response({ [kind]: accepted, checkout: { checkout_usable: false, status: kind === "order" ? "paid" : "active" } });
+      if (url.pathname === `/v1/products/${productKey}`) {
+        if (accepted) throw new Error("A receipt cannot depend on the current catalog");
+        return response({ product: product(productKey, kind === "order" ? "one_time" : "recurring") });
+      }
+      if (url.pathname === "/v1/customers") return response({ customer: { external_user_id: "user_1" } });
+      if (url.pathname === "/v1/providers/status") return response({ status: "available", checkout_available: true });
+      if (url.pathname === "/v1/discounts/preview") {
+        previews++;
+        if (accepted) return response({ eligible: false, reason_code: "discount_customer_limit_reached", message: "Already redeemed" });
+        return response(preview("first_purchase"));
+      }
+      if (url.pathname === path && method === "POST") {
+        creates++;
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        accepted = { id: "original", status: kind === "order" ? "paid" : "active", external_user_id: "user_1", product_key_snapshot: productKey, meta: body.meta };
+        throw new TypeError("Connection closed after the server committed");
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    };
+    try {
+      const config = { baseUrl: "https://billing.example.test/v1", businessKey: "cohub", adminApiKey: "test-key" };
+      const input = { userId: "user_1", productKey, purchaseId: "66b87c53-d24f-4b7a-9ad2-8f07d07e188b", promotionCode: "HALF", returnUrl: "https://cohub.example.test/settings/billing" };
+      const first = createTalesofaiBillingOperations(config);
+      const run = (operations: ReturnType<typeof createTalesofaiBillingOperations>, value = input) => kind === "order" ? operations.purchaseAddon(value) : operations.createSubscription(value);
+      await assert.rejects(run(first), /Connection closed/);
+      const next = createTalesofaiBillingOperations(config);
+      const recovered = await run(next);
+      assert.equal(recovered.orderId ?? recovered.subscriptionId, "original");
+      assert.equal(recovered.reused, true);
+      assert.equal(recovered.checkoutUsable, false);
+      assert.equal(previews, 1);
+      assert.equal(creates, 1);
+      await assert.rejects(run(next, { ...input, promotionCode: "DIFFERENT" }), /intent differs/);
+      duplicate = true;
+      await assert.rejects(run(next), /identity is ambiguous/);
+      assert.equal(creates, 1);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+}

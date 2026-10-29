@@ -2366,6 +2366,49 @@ export function createTalesofaiBillingOperations(
       reason: input.reason,
     });
 
+  const purchaseMeta = (input: BillingCheckoutInput) => ({
+    cohub_purchase_id: input.purchaseId,
+    cohub_purchase_fingerprint: createHash("sha256").update(JSON.stringify([
+      businessKey, input.userId, input.productKey, input.returnUrl ?? null,
+      input.promotionCode?.trim().toUpperCase() ?? null,
+      input.offer ? [input.offer.key, input.offer.revision] : null,
+    ])).digest("hex"),
+  });
+
+  const findIdentifiedCheckout = async (
+    input: BillingCheckoutInput,
+    kind: "order" | "subscription",
+  ): Promise<BillingCheckoutResult | null> => {
+    if (!input.purchaseId || input.walletCheckout) return null;
+    await ensureCustomer({ userId: input.userId });
+    const query = {
+      business_key: businessKey,
+      external_user_id: input.userId,
+      meta_contains: { cohub_purchase_id: input.purchaseId },
+      include_count: false as const,
+      limit: 2,
+    };
+    const matched = kind === "order"
+      ? await sdk.admin.orders.list(query)
+      : await sdk.admin.subscriptions.list(query);
+    if (matched.items.length > 1 || matched.pagination.has_more) {
+      throw billingApiError(409, "Purchase identity is ambiguous", "purchase_identity_ambiguous");
+    }
+    const resource = matched.items[0];
+    if (!resource) return null;
+    if (resource.external_user_id !== input.userId
+      || resource.product_key_snapshot !== input.productKey
+      || resource.meta?.cohub_purchase_fingerprint !== purchaseMeta(input).cohub_purchase_fingerprint) {
+      throw billingApiError(409, "Purchase intent differs from the original request", "purchase_intent_mismatch");
+    }
+    if (kind === "order") {
+      const inspected = await sdk.admin.orders.inspect({ business_key: businessKey, order_id: resource.id });
+      return checkoutResultFromOrder({ userId: input.userId, productKey: input.productKey, response: inspected, status, reused: true });
+    }
+    const inspected = await sdk.admin.subscriptions.inspect({ business_key: businessKey, subscription_id: resource.id });
+    return checkoutResultFromSubscription({ userId: input.userId, productKey: input.productKey, response: { ...inspected, reused: true }, status });
+  };
+
   const findReusableAddonCheckout = async (input: {
     userId: string;
     productKey: string;
@@ -2466,6 +2509,8 @@ export function createTalesofaiBillingOperations(
   const purchaseAddonUnprotected = async (
     input: BillingCheckoutInput,
   ): Promise<BillingCheckoutResult> => {
+    const original = await findIdentifiedCheckout(input, "order");
+    if (original) return original;
     const product = await findCheckoutProduct({
       productKey: input.productKey,
       kind: "addon",
@@ -2504,7 +2549,7 @@ export function createTalesofaiBillingOperations(
       ...checkoutRedirects(input.returnUrl, input.productKey, input.purchaseId),
       ...(input.walletCheckout ? {
         meta: { space_id: input.walletCheckout.spaceId, actor_user_id: input.walletCheckout.actorUserId, wallet_checkout_id: input.walletCheckout.id },
-      } : {}),
+      } : input.purchaseId ? { meta: purchaseMeta(input) } : {}),
       ...(discount?.createSelector ?? {}),
     }, input.walletCheckout ? { idempotencyKey: `space-wallet:${input.walletCheckout.id}` } : input.purchaseId ? { idempotencyKey: `cohub:order:${input.userId}:${input.purchaseId}` } : undefined);
     return checkoutResultFromOrder({
@@ -2532,6 +2577,8 @@ export function createTalesofaiBillingOperations(
   const createSubscriptionUnprotected = async (
     input: BillingCheckoutInput,
   ): Promise<BillingCheckoutResult> => {
+    const original = await findIdentifiedCheckout(input, "subscription");
+    if (original) return original;
     const product = await findCheckoutProduct({
       productKey: input.productKey,
       kind: "plan",
@@ -2576,6 +2623,7 @@ export function createTalesofaiBillingOperations(
       external_user_id: input.userId,
       product_key: product.key,
       ...checkoutRedirects(input.returnUrl, input.productKey, input.purchaseId),
+      ...(input.purchaseId ? { meta: purchaseMeta(input) } : {}),
       ...(discount?.createSelector ?? {}),
     }, input.purchaseId ? { idempotencyKey: `cohub:subscription:${input.userId}:${input.purchaseId}` } : undefined);
     return checkoutResultFromSubscription({

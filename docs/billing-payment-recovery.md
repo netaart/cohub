@@ -47,7 +47,7 @@ components against the candidate Billing API, with a temporary local test identi
   after a real inspection returned `subscribe.reason=paid_coverage_active`; the
   UI retained paid access and did not create a replacement.
 
-The provider suite passed 38 tests; the purchase context regression passed, and
+The provider suite passed 40 tests; the purchase context regression passed, and
 Billing/API/SDK type checks plus the Web check (0 errors/0 warnings), changed-file
 Biome and Changeset status passed. The temporary UI route and authentication
 server are not part of this commit. Full production-auth acceptance and deployment
@@ -56,3 +56,15 @@ are separate from these scoped local consumer checks.
   (`canRestart=true`, no URL) from the newly paid Order (`settled=true`,
   `canRestart=false`). This read used the real Cohub provider and SDK against the
   same local Billing facts accepted from signed Stripe events.
+
+New ordinary purchases also persist their purchase ID and a normalized request
+hash in the existing immutable Order/Subscription Meta. A retry resolves the
+exact owned resource before checking current prices, Discounts or active
+subscription admission. Thus a successful create with a lost response still
+returns its original receipt after the offer is consumed or the subscription
+becomes active. Multiple matches or a changed intent fail closed. Wallet and
+legacy purchases retain their existing path. No recovery relation or new storage
+resource was introduced. A previously unresolved browser attempt retains its
+identity even if a later response reports a changed offer; only a clearly rejected
+first attempt may discard that key. The regression exercises both paid Order and
+active Subscription receipts after simulated response loss.

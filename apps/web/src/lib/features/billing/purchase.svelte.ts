@@ -351,6 +351,7 @@ export class PurchaseFlow {
 			this.attempt?.userId === userId && this.attempt.productKey === product.key
 				? this.attempt
 				: currentCheckoutContext(userId, product.key);
+		const hadPriorAttempt = context !== null;
 		try {
 			if (context?.checkoutId) {
 				const { confirmation } = await sdk.billing.confirmCheckout(
@@ -405,15 +406,27 @@ export class PurchaseFlow {
 							...context.request,
 							purchaseId: context.purchaseId,
 						});
+			const checkoutId = checkout.orderId ?? checkout.subscriptionId;
+			if (checkoutId) {
+				context.checkoutId = checkoutId;
+				saveCheckoutContext(context);
+			}
 			if (checkout.checkoutUsable && checkout.checkoutUrl) {
 				if (product.kind === "plan") saveRenewalPurchaseIntent(userId, null);
-				const checkoutId = checkout.orderId ?? checkout.subscriptionId;
-				if (checkoutId) {
-					context.checkoutId = checkoutId;
-					saveCheckoutContext(context);
-				}
 				window.location.assign(checkout.checkoutUrl);
 				return true;
+			}
+			if (checkoutId) {
+				const { confirmation } = await sdk.billing.confirmCheckout(
+					product.key,
+					checkoutId,
+				);
+				if (confirmation.settled) {
+					finishCheckoutContext(context);
+					this.attempt = null;
+					await this.load({ force: true });
+					return false;
+				}
 			}
 			this.error = {
 				message:
@@ -426,7 +439,8 @@ export class PurchaseFlow {
 		} catch (error) {
 			if (await handleUnauthorizedError(error)) return false;
 			const code = error instanceof HttpError ? error.code : null;
-			const offerChanged = !!code && OFFER_STALE_CODES.has(code);
+			const offerChanged =
+				!hadPriorAttempt && !!code && OFFER_STALE_CODES.has(code);
 			this.error = {
 				message:
 					error instanceof Error ? error.message : "Checkout is not available.",

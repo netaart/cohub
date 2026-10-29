@@ -457,3 +457,9 @@ The recovery candidate is validated with a local build of the matching Billing
 SDK. Before a combined release, resolve the Billing SDK dependency and lockfile to
 the version that includes `Subscription.renewal_recovery` and
 `subscriptions.paymentAction`; this source change does not publish that package.
+
+For new ordinary purchases, Cohub stores the stable purchase ID and request hash
+in the existing Order/Subscription Meta. Same-ID retries inspect that exact
+resource before reevaluating Discounts or subscription admission. A changed
+request with the same ID is rejected; multiple matching resources remain
+unresolved. Wallet and legacy purchase calls keep their original behavior.
