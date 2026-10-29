@@ -130,7 +130,8 @@ after 20 minutes. Direct file writes while the sandbox is stopped schedule a new
 workspace is measured again after 30 days. Running workspaces show their last measurement as possibly stale.
 
 The amd64 worker image includes pdu. On other architectures, install pdu 0.24.0 and set
-`WORKSPACE_USAGE_PDU_PATH`, or the worker skips workspace usage at startup.
+`WORKSPACE_USAGE_PDU_PATH`, or the worker skips workspace usage at startup. pdu runs under GNU
+coreutils `timeout`, which must be on `PATH`.
 
 ## Security reports
 

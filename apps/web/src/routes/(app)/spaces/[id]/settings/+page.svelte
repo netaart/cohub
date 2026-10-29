@@ -1034,8 +1034,9 @@ $effect(() => {
 		if (event.type !== WORKSPACE_USAGE_UPDATED_EVENT) return;
 		const usage = (event.payload as { workspaceUsage?: unknown })
 			.workspaceUsage;
-		if (!isWorkspaceUsage(usage) || space?.id !== id) return;
-		space = { ...space, workspaceUsage: usage };
+		const current = space;
+		if (!isWorkspaceUsage(usage) || !current || current.id !== id) return;
+		space = { ...current, workspaceUsage: usage };
 		cacheSpaceRecordSoon(space);
 	});
 });

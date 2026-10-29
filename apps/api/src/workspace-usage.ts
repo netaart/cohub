@@ -2,7 +2,7 @@ import { spaceWorkspaceUsage } from "@cohub/db";
 import { createBullmqQueue } from "@cohub/infra/bullmq";
 import { createLogger } from "@cohub/infra/logging";
 import { toWorkspaceUsage, WORKSPACE_USAGE_QUEUE, type WorkspaceUsage } from "@cohub/protocol";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { config } from "./config.js";
 import { db } from "./db/index.js";
 
@@ -24,17 +24,13 @@ export async function readWorkspaceUsage(
   return toWorkspaceUsage(row, sandbox);
 }
 
-// The sweep waits 10 quiet minutes after changedAt and measures from scan start,
-// so a marker up to a minute old still covers every write.
-const MARK_THROTTLE_MS = 60_000;
-const lastMarked = new Map<string, number>();
-
-/** Direct volume writes happen while the sandbox is down; the next sweep re-measures. */
+/**
+ * Direct volume writes happen while the sandbox is down; the next sweep re-measures.
+ * Every write is marked on the database clock after it completes, so any write
+ * that finishes after a scan's claim is newer than that measurement.
+ */
 export function markWorkspaceChanged(spaceId: string) {
-  const now = new Date();
-  if (now.getTime() - (lastMarked.get(spaceId) ?? 0) < MARK_THROTTLE_MS) return;
-  if (lastMarked.size > 10_000) lastMarked.clear();
-  lastMarked.set(spaceId, now.getTime());
+  const now = sql`date_trunc('milliseconds', clock_timestamp())`;
   void db.insert(spaceWorkspaceUsage).values({ spaceId, changedAt: now, updatedAt: now })
     .onConflictDoUpdate({ target: spaceWorkspaceUsage.spaceId, set: { changedAt: now, updatedAt: now } })
     .catch((error) => logger.warn(`[WorkspaceUsage] change marker failed spaceId=${spaceId}`, error));
