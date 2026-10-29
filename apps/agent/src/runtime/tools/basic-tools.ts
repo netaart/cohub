@@ -1,7 +1,7 @@
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { MAX_RUN_COMMAND_TIMEOUT_SECONDS } from "@cohub/core/commands";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "./truncate.js";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead, type TruncationResult } from "./truncate.js";
 import { createThrottledTextToolUpdate, tailText } from "./tool-stream-update.js";
 import { prepareToolImage } from "../../session-images.js";
 
@@ -124,6 +124,16 @@ function formatBashTerminationNote(termination: BashTermination) {
     return `Command exited with code ${termination.exitCode}`;
   }
   return "";
+}
+
+const REDIRECT_HINT = "Redirect output to a file and inspect it in smaller ranges (e.g. head -c, cut, sed -n).";
+
+function formatBashTruncatedOutput(truncation: TruncationResult) {
+  const total = formatSize(truncation.totalBytes);
+  if (truncation.firstLineExceedsLimit) {
+    return `[Output omitted: first line exceeds ${formatSize(truncation.maxBytes)} limit (${total} total). ${REDIRECT_HINT}]`;
+  }
+  return `${truncation.content}\n\n[Showing first ${truncation.outputLines} of ${truncation.totalLines} lines (${total} total). ${REDIRECT_HINT}]`;
 }
 
 export interface LsOperations {
@@ -601,7 +611,7 @@ export function createBashTool(cwd: string, options: { operations: BashOperation
   return {
     name: "bash",
     label: "bash",
-    description: "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB.",
+    description: "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to the first 2000 lines or 50KB.",
     parameters,
     // A mutating tool makes pi-agent-core run its whole batch in model order,
     // so a read issued alongside it sees the files it creates.
@@ -653,9 +663,12 @@ export function createBashTool(cwd: string, options: { operations: BashOperation
       const truncationNote = outputTruncated ? "[Output truncated by sandbox transport.]" : "";
       const renderedOutput = [note ? `[${note}]` : "", truncationNote].filter(Boolean).join("\n");
       const fullOutput = output ? `${output}${renderedOutput ? `\n\n${renderedOutput}` : ""}` : renderedOutput || "(no output)";
-      const truncated = truncateHead(fullOutput, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
+      const truncated = truncateHead(output, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
+      const text = truncated.truncated
+        ? [formatBashTruncatedOutput(truncated), renderedOutput].filter(Boolean).join("\n\n")
+        : fullOutput;
       return {
-        content: [{ type: "text", text: truncated.truncated ? truncated.content : fullOutput }],
+        content: [{ type: "text", text }],
         details: {
           exitCode: result.exitCode,
           termination,

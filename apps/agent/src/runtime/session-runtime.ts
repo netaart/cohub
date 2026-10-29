@@ -350,15 +350,16 @@ function toLlmToolResultMessage(message: AgentMessage): AgentMessage {
       if (item.type === "image") return toLlmImageContent(item) ?? null;
       return null;
     })
-    .filter((block): block is ImageContent | { type: "text"; text: string } => Boolean(block));
+    .filter((block): block is ImageContent | { type: "text"; text: string } => Boolean(block && (block.type !== "text" || block.text.trim())));
 
+  // Providers reject empty tool results (Anthropic: "content cannot be empty if is_error is true").
   return {
     ...record,
-    content,
+    content: content.length > 0 ? content : [{ type: "text", text: "(no output)" }],
   } as unknown as AgentMessage;
 }
 
-function toLlmMessages(messages: AgentMessage[]) {
+export function toLlmMessages(messages: AgentMessage[]) {
   const result: unknown[] = [];
   for (const message of messages) {
     const record = message as unknown as Record<string, unknown>;

@@ -58,3 +58,20 @@ test("bash keeps compatibility with the hidden background parameter", async () =
   assert.equal(request?.toolCallId, "call-1");
   assert.match(result.content[0]?.type === "text" ? result.content[0].text : "", /Task ID: task-1/);
 });
+
+test("bash explains output whose first line exceeds the size limit", async () => {
+  const tool = createBashTool(CWD, {
+    operations: {
+      async exec({ onData }) {
+        onData(Buffer.from(`${"x".repeat(60 * 1024)}\nshort\n`));
+        return { exitCode: 0, outputTruncated: true };
+      },
+    },
+  });
+
+  const result = await tool.execute("call-long-line", { command: "grep -r x ." });
+  const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+
+  assert.match(text, /^\[Output omitted: first line exceeds 50\.0KB limit/);
+  assert.match(text, /Output truncated by sandbox transport/);
+});
