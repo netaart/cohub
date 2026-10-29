@@ -47,7 +47,7 @@ components against the candidate Billing API, with a temporary local test identi
   after a real inspection returned `subscribe.reason=paid_coverage_active`; the
   UI retained paid access and did not create a replacement.
 
-The provider suite passed 40 tests; the purchase context regression passed, and
+The provider suite passed 42 tests; the purchase context regression passed, and
 Billing/API/SDK type checks plus the Web check (0 errors/0 warnings), changed-file
 Biome and Changeset status passed. The temporary UI route and authentication
 server are not part of this commit. Full production-auth acceptance and deployment
@@ -67,4 +67,7 @@ legacy purchases retain their existing path. No recovery relation or new storage
 resource was introduced. A previously unresolved browser attempt retains its
 identity even if a later response reports a changed offer; only a clearly rejected
 first attempt may discard that key. The regression exercises both paid Order and
-active Subscription receipts after simulated response loss.
+active Subscription receipts after simulated response loss. In-process request
+coalescing uses the same complete fingerprint, including the return URL; changed
+concurrent requests retain the same Billing idempotency key and are rejected
+instead of sharing the first request's result or creating a second resource.

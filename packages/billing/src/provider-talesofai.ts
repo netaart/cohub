@@ -2500,7 +2500,9 @@ export function createTalesofaiBillingOperations(
         kind: "addon",
         userId: input.userId,
         productKey: input.productKey,
-        selectionKey: `${checkoutSelectionKey(input)}:${input.purchaseId ?? "legacy"}`,
+        selectionKey: input.purchaseId && !input.walletCheckout
+          ? `${purchaseMeta(input).cohub_purchase_fingerprint}:${input.purchaseId}`
+          : `${checkoutSelectionKey(input)}:${input.purchaseId ?? "legacy"}`,
       },
       () => purchaseAddonUnprotected(input),
     );
@@ -2568,7 +2570,9 @@ export function createTalesofaiBillingOperations(
         kind: "plan",
         userId: input.userId,
         productKey: input.productKey,
-        selectionKey: `${checkoutSelectionKey(input)}:${input.purchaseId ?? "legacy"}`,
+        selectionKey: input.purchaseId && !input.walletCheckout
+          ? `${purchaseMeta(input).cohub_purchase_fingerprint}:${input.purchaseId}`
+          : `${checkoutSelectionKey(input)}:${input.purchaseId ?? "legacy"}`,
       },
       () => createSubscriptionUnprotected(input),
     );

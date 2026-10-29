@@ -577,9 +577,60 @@ for (const kind of ["order", "subscription"] as const) {
       assert.equal(previews, 1);
       assert.equal(creates, 1);
       await assert.rejects(run(next, { ...input, promotionCode: "DIFFERENT" }), /intent differs/);
+      await assert.rejects(run(next, { ...input, returnUrl: "https://cohub.example.test/other" }), /intent differs/);
       duplicate = true;
       await assert.rejects(run(next), /identity is ambiguous/);
       assert.equal(creates, 1);
     } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test(`${kind} concurrent changed return URL does not share a purchase result`, async () => {
+    const originalFetch = globalThis.fetch;
+    const path = kind === "order" ? "/v1/orders" : "/v1/subscriptions";
+    const productKey = kind === "order" ? "cohub_credits_small" : "cohub_pro_monthly";
+    const requests: { key: string; body: Record<string, unknown> }[] = [];
+    let release = () => {};
+    let created = () => {};
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { created = resolve; });
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input));
+      const method = init?.method ?? "GET";
+      // Both requests can miss a resource whose creation has not returned yet.
+      if (url.pathname === path && method === "GET") return response({ items: [], pagination: { has_more: false } });
+      if (url.pathname === "/v1/customers") return response({ customer: { external_user_id: "user_1" } });
+      if (url.pathname === `/v1/products/${productKey}`) return response({ product: product(productKey, kind === "order" ? "one_time" : "recurring") });
+      if (url.pathname === "/v1/providers/status") return response({ status: "available", checkout_available: true });
+      if (url.pathname === path && method === "POST") {
+        requests.push({ key: new Headers(init?.headers).get("Idempotency-Key") ?? "", body: JSON.parse(String(init?.body)) });
+        if (requests.length > 1) {
+          // Billing's unchanged key is the final concurrent-create boundary.
+          assert.equal(requests[1].key, requests[0].key);
+          assert.notDeepEqual(requests[1].body, requests[0].body);
+          return response({ error: { code: "idempotency_conflict", message: "API idempotency key conflict" } }, 409);
+        }
+        created();
+        await hold;
+        return response({ [kind]: { id: "original", status: "pending_checkout" }, checkout: { checkout_usable: true, checkout_url: "https://checkout.example.test/original" } });
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    };
+    try {
+      const operations = createTalesofaiBillingOperations({ baseUrl: "https://billing.example.test/v1", businessKey: "cohub", adminApiKey: "test-key" });
+      const input = { userId: "user_1", productKey, purchaseId: "66b87c53-d24f-4b7a-9ad2-8f07d07e188b", returnUrl: "https://cohub.example.test/return-a" };
+      const run = (value = input) => kind === "order" ? operations.purchaseAddon(value) : operations.createSubscription(value);
+      const first = run();
+      await started;
+      const identical = run();
+      const changed = run({ ...input, returnUrl: "https://cohub.example.test/return-b" });
+      release();
+      const rejected = assert.rejects(changed, (error: Error & { code?: string }) => error.code === "idempotency_conflict");
+      const [original, reused] = await Promise.all([first, identical]);
+      await rejected;
+      assert.deepEqual(reused, original);
+      assert.equal(original.orderId ?? original.subscriptionId, "original");
+      assert.equal(requests.length, 2);
+      assert.ok(requests[0].key.includes(input.purchaseId));
+    } finally { release(); globalThis.fetch = originalFetch; }
   });
 }
