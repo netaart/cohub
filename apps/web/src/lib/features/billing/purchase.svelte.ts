@@ -107,8 +107,9 @@ export class PurchaseFlow {
 	constructor(readonly source: PurchaseSource) {}
 
 	focus(intent: Parameters<typeof purchaseFocus>[1] = null): PurchaseFocus {
-		if (this.recoverySubscription) return "plans";
-		return this.view ? purchaseFocus(this.view, intent) : "plans";
+		return this.view
+			? purchaseFocus(this.view, intent, Boolean(this.recoverySubscription))
+			: "plans";
 	}
 
 	async load(options: { force?: boolean } = {}) {

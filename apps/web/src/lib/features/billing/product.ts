@@ -294,6 +294,7 @@ export function purchaseFocus(
 		"hasPaidPlan" | "packs" | "monthlyPlans" | "yearlyPlans"
 	>,
 	intent: Pick<BillingConversionIntent, "preferredOfferKind"> | null = null,
+	recovering = false,
 ): PurchaseFocus {
 	const hasPlans = view.monthlyPlans.length + view.yearlyPlans.length > 0;
 	if (!hasPlans) return "packs";
@@ -305,7 +306,7 @@ export function purchaseFocus(
 		case "upgrade":
 			return "plans";
 		default:
-			return view.hasPaidPlan ? "packs" : "plans";
+			return recovering ? "plans" : view.hasPaidPlan ? "packs" : "plans";
 	}
 }
 

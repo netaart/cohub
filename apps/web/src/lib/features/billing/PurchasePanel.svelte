@@ -93,7 +93,7 @@ const processing = $derived(
 		Boolean(flow.endingSubscriptionId),
 );
 const recoveringPlan = $derived(
-	processing || (family === "plans" && Boolean(recovery)),
+	family === "plans" && (processing || Boolean(recovery)),
 );
 const currentLabel = $derived(
 	processing
@@ -168,7 +168,6 @@ function select(product: BillingCatalogProduct) {
         </div>
       </section>
     {/if}
-    {#if !processing}
 		<div class="controls">
 			{#if showTabs}
 				<Segmented
@@ -184,7 +183,7 @@ function select(product: BillingCatalogProduct) {
 			{:else}
 				<span></span>
 			{/if}
-			{#if family === "plans" && hasPlans}
+			{#if family === "plans" && hasPlans && !processing}
 				<Segmented
 					label={m.purchase_billing_interval({}, { locale })}
 					value={flow.interval}
@@ -202,6 +201,7 @@ function select(product: BillingCatalogProduct) {
 			{/if}
 		</div>
 
+    {#if family === "packs" || !processing}
 		{#if flow.loading && !view}
 			<div class="grid" aria-busy="true">
 				{#each [0, 1, 2] as i (i)}

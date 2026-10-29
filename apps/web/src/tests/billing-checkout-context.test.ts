@@ -163,3 +163,57 @@ test("plan summaries keep grace and closing on the paid plan, then follow the co
 		null,
 	);
 });
+
+test("subscription processing keeps an explicit independent credits purchase intent", async () => {
+	const { purchaseFocus } = await import("../lib/features/billing/product");
+	const product: Parameters<typeof purchaseFocus>[0]["monthlyPlans"][number] = {
+		id: "plan",
+		key: "pro",
+		name: "Pro",
+		description: null,
+		status: "active",
+		visibility: "public",
+		billingType: "recurring",
+		billingPeriod: "monthly",
+		billingIntervalCount: 1,
+		currency: "USD",
+		kind: "plan",
+		interval: "monthly",
+		pricing: {
+			amountMinor: 100,
+			amountUsd: 1,
+			compareAtAmountMinor: null,
+			compareAtAmountUsd: null,
+			discountLabel: null,
+			discountRate: null,
+		},
+		promotion: null,
+		offer: null,
+		display: {
+			description: null,
+			benefits: [],
+			creditsAmount: null,
+			validity: null,
+			creditBenefits: [],
+		},
+		isDefaultPlan: false,
+	};
+	const view: Parameters<typeof purchaseFocus>[0] = {
+		hasPaidPlan: true,
+		packs: [
+			{ ...product, key: "credits", kind: "addon", interval: "one_time" },
+		],
+		monthlyPlans: [product],
+		yearlyPlans: [],
+	};
+	assert.equal(purchaseFocus(view), "packs");
+	assert.equal(purchaseFocus(view, null, true), "plans");
+	assert.equal(
+		purchaseFocus(view, { preferredOfferKind: "addon" }, true),
+		"packs",
+	);
+	assert.equal(
+		purchaseFocus(view, { preferredOfferKind: "plan" }, true),
+		"plans",
+	);
+});

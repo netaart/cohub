@@ -2716,7 +2716,7 @@
 	"app_auth_join_validity_scopes": "将以你自己的账号加入。App 授权有效期 14 天。",
 	"billing_recovery_grace": "续费未完成",
 	"billing_recovery_grace_detail": "功能保留至 {date}，付款后补充本期额度。",
-	"billing_recovery_closing": "正在确认付款结果…",
+	"billing_recovery_closing": "正在更新订阅…",
 	"billing_recovery_pay": "继续付款",
 	"billing_recovery_resubscribe": "重新订阅",
 	"billing_recovery_refresh": "重新查看",

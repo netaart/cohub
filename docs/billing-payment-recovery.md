@@ -10,10 +10,12 @@ admission. Cohub displays its `renewal_recovery` summary without treating
   or paid-active. The purchase panel leads with “Continue payment” and a quiet
   “Subscribe again” action. It shows the feature deadline and credits-after-payment
   promise, without a new-purchase quote that could be mistaken for the amount due.
-  Processing hides purchase actions, checks the result up to five times, and only
+  Processing hides subscription purchase actions, keeps the independent Credits
+  tab and purchase path available, checks the result up to five times, and only
   shows a compact recheck action after an unresolved result or failure. Focus
-  refresh remains available. Confirmation reuses the existing Dialog; ending the
-  plan still requires a separate purchase click at the current price.
+  refresh remains available. An explicit Credits purchase intent takes priority
+  over the default subscription recovery focus. Confirmation reuses the existing
+  Dialog; ending the plan still requires a separate purchase click at the current price.
   Feature decisions still use the entitlement API; balance remains Credits-based.
   A finite feature result expires locally and is refreshed at its deadline.
 - The payment action fetches a fresh, owner-checked Hosted Invoice URL with
