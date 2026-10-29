@@ -7,8 +7,9 @@ admission. Cohub displays its `renewal_recovery` summary without treating
 
 - Catalog and settings share one current-plan selection: valid grace stays on the
   paid plan with a payment-due label, and closing shows processing rather than free
-  or paid-active. The purchase panel leads with “Continue payment” and a quiet
-  “Subscribe again” action. It shows the feature deadline and credits-after-payment
+  or paid-active. The purchase panel leads with “Continue payment” and a bordered
+  “Subscribe again” secondary button of the same size. It shows the feature
+  deadline and credits-after-payment
   promise, without a new-purchase quote that could be mistaken for the amount due.
   Processing hides subscription purchase actions, keeps the independent Credits
   tab and purchase path available, checks the result up to five times, and only
@@ -21,7 +22,12 @@ admission. Cohub displays its `renewal_recovery` summary without treating
 - The payment action fetches a fresh, owner-checked Hosted Invoice URL with
   `Cache-Control: no-store`. It is not stored in Catalog or purchase context.
 - Ending recovery uses the existing cancellation endpoint. The selected plan and
-  old subscription ID survive reload in user-scoped session storage. Once a fresh
+  old subscription ID survive reload in user-scoped session storage. Selecting an
+  independent Credits pack does not overwrite that plan intent, and refreshes
+  preserve the selected pack. A Provider-unresolved payment action stays pending
+  through stale locally-payable summaries; bounded automatic checks only load and
+  inspect. Paid coverage or confirmed end clears the wait; an explicit recheck may
+  request a fresh payment action, without auto-navigation or storing its URL. Once a fresh
   inspect confirms `ended` and purchase eligibility, the user reviews current
   pricing and clicks the ordinary subscription button. If the original payment
   wins, the paid cycle stays active and no new create occurs. Explicitly accepted
@@ -89,3 +95,10 @@ Web check reports zero errors and warnings. Desktop/mobile screenshots replay
 saved Sandbox facts through the actual current components with all business
 actions disabled. They verify presentation and confirmation wording, not a new
 Provider transaction.
+
+The purchase-flow regression compiles the actual Svelte controller and stubs only
+its I/O. It covers a pending plan intent followed by Credits selection and repeated
+loads, stale grace after an unresolved payment action, accepted paid coverage,
+confirmed end, and explicit usable-action rechecks without navigation. A local
+component replay also observed automatic convergence after two scheduled reads:
+four total Catalog reads and one payment-action call, with no Provider request.

@@ -64,11 +64,16 @@ export class PurchaseFlow {
 	recoveryLoading = $state(false);
 	endingSubscriptionId = $state<string | null>(null);
 	recoveryNotice = $state<string | null>(null);
+	private pendingPaymentSubscriptionId = $state<string | null>(null);
 	private attempt: CheckoutContext | null = null;
 	readonly recoverySubscription = $derived(
 		this.catalog?.currentSubscriptions.find(
 			(item) => item.renewalRecovery && item.renewalRecovery.state !== "none",
 		) ?? null,
+	);
+	readonly renewalPaymentPending = $derived(
+		this.recoverySubscription?.renewalRecovery?.payInvoice.reason ===
+			"payment_unresolved" || Boolean(this.pendingPaymentSubscriptionId),
 	);
 	loading = $state(false);
 	loadError = $state<string | null>(null);
@@ -112,7 +117,7 @@ export class PurchaseFlow {
 			: "plans";
 	}
 
-	async load(options: { force?: boolean } = {}) {
+	async load(options: { force?: boolean; checkPayment?: boolean } = {}) {
 		this.loading = !this.catalog;
 		this.loadError = null;
 		this.error = null;
@@ -121,6 +126,7 @@ export class PurchaseFlow {
 				force: options.force,
 				silent: !!this.catalog,
 			});
+			await this.refreshPendingPayment(options.checkPayment);
 			this.ensureSelection();
 			await this.restoreRenewalIntent();
 		} catch (error) {
@@ -131,6 +137,30 @@ export class PurchaseFlow {
 		}
 	}
 
+	private async refreshPendingPayment(checkPayment = false) {
+		const id = this.pendingPaymentSubscriptionId;
+		if (!id) return;
+		const { subscription } = await sdk.billing.getSubscription(id);
+		if (
+			subscription.renewalRecovery?.subscribe.reason ===
+				"paid_coverage_active" ||
+			(subscription.status === "ended" &&
+				subscription.renewalRecovery?.subscribe.allowed)
+		) {
+			this.pendingPaymentSubscriptionId = null;
+		} else if (
+			checkPayment &&
+			subscription.renewalRecovery?.payInvoice.allowed
+		) {
+			// Local eligibility does not resolve a Provider payment already in flight.
+			const action = await sdk.billing.getSubscriptionPaymentAction(id);
+			if (action.checkoutUrl) {
+				this.pendingPaymentSubscriptionId = null;
+				await billingCatalogStore.load({ force: true, silent: true });
+			}
+		}
+	}
+
 	async restoreRenewalIntent() {
 		this.recoveryNotice = null;
 		const userId = authStore.userUuid;
@@ -138,8 +168,10 @@ export class PurchaseFlow {
 		if (intent && userId) {
 			this.endingSubscriptionId = intent.subscriptionId;
 			if (
+				this.selected?.kind !== "addon" &&
 				this.catalog?.products.some(
-					(product) => product.key === intent.productKey,
+					(product) =>
+						product.key === intent.productKey && product.kind === "plan",
 				)
 			)
 				this.selectedKey = intent.productKey;
@@ -183,7 +215,7 @@ export class PurchaseFlow {
 		this.selectedKey = product.key;
 		const userId = authStore.userUuid;
 		const intent = userId ? readRenewalPurchaseIntent(userId) : null;
-		if (userId && intent)
+		if (userId && intent && product.kind === "plan")
 			saveRenewalPurchaseIntent(userId, { ...intent, productKey: product.key });
 		this.clearPromotion();
 		this.error = null;
@@ -268,6 +300,7 @@ export class PurchaseFlow {
 		const subscription = this.recoverySubscription;
 		if (
 			!subscription?.renewalRecovery?.payInvoice.allowed ||
+			this.renewalPaymentPending ||
 			this.recoveryLoading
 		)
 			return;
@@ -278,7 +311,11 @@ export class PurchaseFlow {
 				subscription.id,
 			);
 			if (result.checkoutUrl) window.location.assign(result.checkoutUrl);
-			else await this.load({ force: true });
+			else {
+				if (result.reason === "payment_unresolved")
+					this.pendingPaymentSubscriptionId = subscription.id;
+				await this.load({ force: true });
+			}
 		} catch (error) {
 			this.error = {
 				message:

@@ -90,6 +90,7 @@ $effect(() => {
 const processing = $derived(
 	recovery?.state === "closing" ||
 		recoveryExpired ||
+		flow.renewalPaymentPending ||
 		Boolean(flow.endingSubscriptionId),
 );
 const recoveringPlan = $derived(
@@ -148,9 +149,9 @@ function select(product: BillingCatalogProduct) {
 <div class="panel" class:compact class:recovering={recoveringPlan}>
 	<div class="catalog">
     {#if flow.recoveryNotice}<p class="recovery" role="status">{flow.recoveryNotice}</p>{/if}
-    {#if recovery || flow.endingSubscriptionId}
+    {#if recovery || flow.endingSubscriptionId || flow.renewalPaymentPending}
       <section class="recovery" aria-live="polite">
-        <strong>{processing ? m.billing_recovery_closing({}, { locale }) : m.billing_recovery_grace({}, { locale })}</strong>
+        <strong>{processing ? needsRecheck ? m.billing_recovery_refresh_failed({}, { locale }) : m.billing_recovery_closing({}, { locale }) : m.billing_recovery_grace({}, { locale })}</strong>
         {#if !processing}
           <p>{m.billing_recovery_grace_detail({ date: recovery?.effectiveEndsAt ? formatDateTime(recovery.effectiveEndsAt, locale) : "" }, { locale })}</p>
         {/if}
@@ -159,11 +160,11 @@ function select(product: BillingCatalogProduct) {
             <button type="button" class="primary-key" disabled={flow.recoveryLoading} onclick={() => flow.payRenewal()}>{m.billing_recovery_pay({}, { locale })}</button>
           {/if}
           {#if !processing && recovery?.endRecovery.allowed}
-            <button type="button" class="link" disabled={flow.recoveryLoading} onclick={() => { switchFamily("plans"); endingConfirmation = flow.recoverySubscription?.id ?? null; }}>{m.billing_recovery_resubscribe({}, { locale })}</button>
+            <button type="button" class="secondary-key" disabled={flow.recoveryLoading} onclick={() => { switchFamily("plans"); endingConfirmation = flow.recoverySubscription?.id ?? null; }}>{m.billing_recovery_resubscribe({}, { locale })}</button>
           {/if}
           {#if needsRecheck || flow.error || flow.loadError}
             {#if flow.error || flow.loadError}<p>{m.billing_recovery_refresh_failed({}, { locale })}</p>{/if}
-            <button type="button" class="link" disabled={flow.recoveryLoading || flow.loading} onclick={() => flow.load({ force: true })}>{m.billing_recovery_refresh({}, { locale })}</button>
+            <button type="button" class="link" disabled={flow.recoveryLoading || flow.loading} onclick={() => flow.load({ force: true, checkPayment: true })}>{m.billing_recovery_refresh({}, { locale })}</button>
           {/if}
         </div>
       </section>
