@@ -14,8 +14,6 @@ export const SCAN_TIMEOUT_MS = 20 * 60_000;
 export const QUIET_MS = 10 * 60_000;
 const MIN_INTERVAL_MS = 6 * 60 * 60_000;
 const MAX_BACKOFF_MS = 7 * 24 * 60 * 60_000;
-// Bounds staleness from writers that do not mark the workspace changed.
-const RECALIBRATE_MS = 30 * 24 * 60 * 60_000;
 export const SWEEP_BATCH = 10;
 
 const ms = (value: number) => sql.raw(`interval '${value} milliseconds'`);
@@ -37,8 +35,7 @@ export async function findDueWorkspaces(database: Database, limit: number) {
       and (${usage.attemptedAt} is null or ${usage.attemptedAt} < now() - ${retryAfter})
       and (${usage.measuredAt} is null
         or ${sandbox.stoppedAt} > ${usage.measuredAt}
-        or ${usage.changedAt} > ${usage.measuredAt}
-        or ${usage.measuredAt} < now() - ${ms(RECALIBRATE_MS)})`)
+        or ${usage.changedAt} > ${usage.measuredAt})`)
     .orderBy(sql`${usage.attemptedAt} asc nulls first`)
     .limit(limit);
   return { spaceIds: rows.map((row) => row.spaceId), due: rows[0]?.due ?? 0 };
