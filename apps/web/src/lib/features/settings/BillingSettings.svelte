@@ -396,8 +396,8 @@ async function loadCatalog(options: { force?: boolean } = {}) {
 		if (!(await ensureAuth())) return;
 		try {
 			billingCatalog = await billingCatalogStore.load({ force: options.force });
-			purchase.catalog = billingCatalog;
 			purchase.ensureSelection();
+			await purchase.restoreRenewalIntent();
 		} catch (error) {
 			if (await handleUnauthorizedError(error)) return;
 			catalogError =
@@ -559,6 +559,17 @@ function goToSubscriptionsPage(page: number) {
 	if (subscriptionsLoading) return;
 	void loadSubscriptionsPage(page);
 }
+
+$effect(() => {
+	if (!active()) return;
+	const refresh = () => {
+		void loadCatalog({ force: true });
+		void loadCreditStatus({ force: true });
+		void loadSubscriptionsPage(subscriptionsPage, { force: true });
+	};
+	window.addEventListener("cohub:billing-refresh", refresh);
+	return () => window.removeEventListener("cohub:billing-refresh", refresh);
+});
 
 onSettingsPageActive(() => {
 	void loadCatalog();

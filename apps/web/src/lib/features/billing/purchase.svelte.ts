@@ -6,8 +6,19 @@ import type {
 } from "@neta-art/cohub";
 import { HttpError } from "@neta-art/cohub";
 import { handleUnauthorizedError } from "$lib/auth-redirect";
+import { getLocale } from "$lib/i18n/locale.svelte";
+import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import { authStore } from "$lib/stores/auth.svelte";
 import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
+import {
+	type CheckoutContext,
+	currentCheckoutContext,
+	finishCheckoutContext,
+	readRenewalPurchaseIntent,
+	saveCheckoutContext,
+	saveRenewalPurchaseIntent,
+} from "./checkout-context";
 import { checkoutReturnUrl } from "./checkout-return";
 import { trackPurchase } from "./funnel";
 import {
@@ -27,24 +38,6 @@ export type PurchaseSource =
 	| "settings"
 	| "conversion-hard"
 	| "conversion-soft";
-
-const CHECKOUT_ID_PREFIX = "cohub:billing:checkout:";
-
-function checkoutStorageKey(productKey: string) {
-	return `${CHECKOUT_ID_PREFIX}${productKey}`;
-}
-
-export function takeCheckoutId(productKey: string): string | null {
-	try {
-		if (typeof sessionStorage === "undefined") return null;
-		const key = checkoutStorageKey(productKey);
-		const value = sessionStorage.getItem(key);
-		sessionStorage.removeItem(key);
-		return value;
-	} catch {
-		return null;
-	}
-}
 
 export type PurchaseError = {
 	message: string;
@@ -67,7 +60,16 @@ const OFFER_STALE_CODES = new Set([
  * the same flow so that a fix or an experiment lands everywhere at once.
  */
 export class PurchaseFlow {
-	catalog = $state<BillingCatalog | null>(billingCatalogStore.catalog);
+	catalog = $derived<BillingCatalog | null>(billingCatalogStore.catalog);
+	recoveryLoading = $state(false);
+	endingSubscriptionId = $state<string | null>(null);
+	recoveryNotice = $state<string | null>(null);
+	private attempt: CheckoutContext | null = null;
+	readonly recoverySubscription = $derived(
+		this.catalog?.currentSubscriptions.find(
+			(item) => item.renewalRecovery && item.renewalRecovery.state !== "none",
+		) ?? null,
+	);
 	loading = $state(false);
 	loadError = $state<string | null>(null);
 	interval = $state<PlanInterval>("monthly");
@@ -109,20 +111,56 @@ export class PurchaseFlow {
 	}
 
 	async load(options: { force?: boolean } = {}) {
-		this.catalog = billingCatalogStore.catalog;
 		this.loading = !this.catalog;
 		this.loadError = null;
 		try {
-			this.catalog = await billingCatalogStore.load({
+			await billingCatalogStore.load({
 				force: options.force,
 				silent: !!this.catalog,
 			});
 			this.ensureSelection();
+			await this.restoreRenewalIntent();
 		} catch (error) {
 			this.loadError =
 				error instanceof Error ? error.message : "Failed to load pricing";
 		} finally {
 			this.loading = false;
+		}
+	}
+
+	async restoreRenewalIntent() {
+		const userId = authStore.userUuid;
+		const intent = userId ? readRenewalPurchaseIntent(userId) : null;
+		if (intent && userId) {
+			this.endingSubscriptionId = intent.subscriptionId;
+			if (
+				this.catalog?.products.some(
+					(product) => product.key === intent.productKey,
+				)
+			)
+				this.selectedKey = intent.productKey;
+			const { subscription } = await sdk.billing.getSubscription(
+				intent.subscriptionId,
+			);
+			if (
+				subscription.status === "ended" &&
+				subscription.renewalRecovery?.subscribe.allowed
+			) {
+				this.endingSubscriptionId = null;
+				this.recoveryNotice = subscription.paymentConflict
+					? m.billing_recovery_previous_payment({}, { locale: getLocale() })
+					: m.billing_recovery_ready({}, { locale: getLocale() });
+			} else if (
+				subscription.renewalRecovery?.subscribe.reason ===
+				"paid_coverage_active"
+			) {
+				this.endingSubscriptionId = null;
+				saveRenewalPurchaseIntent(userId, null);
+				this.recoveryNotice = m.billing_recovery_paid_before_cancel(
+					{},
+					{ locale: getLocale() },
+				);
+			}
 		}
 	}
 
@@ -139,6 +177,10 @@ export class PurchaseFlow {
 	select(product: BillingCatalogProduct) {
 		if (this.selectedKey === product.key) return;
 		this.selectedKey = product.key;
+		const userId = authStore.userUuid;
+		const intent = userId ? readRenewalPurchaseIntent(userId) : null;
+		if (userId && intent)
+			saveRenewalPurchaseIntent(userId, { ...intent, productKey: product.key });
 		this.clearPromotion();
 		this.error = null;
 		trackPurchase({
@@ -170,6 +212,7 @@ export class PurchaseFlow {
 		const view = this.view;
 		if (!view?.paymentAvailable) return false;
 		if (product.kind === "addon") return true;
+		if (this.endingSubscriptionId) return false;
 		if (view.currentPlan?.key === product.key) return false;
 		return !view.hasActiveSubscription;
 	}
@@ -217,6 +260,72 @@ export class PurchaseFlow {
 	 * Starts checkout for the selection and hands off to the payment page.
 	 * Returns false when nothing happened (caller keeps the UI open).
 	 */
+	async payRenewal() {
+		const subscription = this.recoverySubscription;
+		if (
+			!subscription?.renewalRecovery?.payInvoice.allowed ||
+			this.recoveryLoading
+		)
+			return;
+		this.recoveryLoading = true;
+		this.error = null;
+		try {
+			const result = await sdk.billing.getSubscriptionPaymentAction(
+				subscription.id,
+			);
+			if (result.checkoutUrl) window.location.assign(result.checkoutUrl);
+			else await this.load({ force: true });
+		} catch (error) {
+			this.error = {
+				message:
+					error instanceof Error
+						? error.message
+						: m.billing_recovery_refresh_failed({}, { locale: getLocale() }),
+				offerChanged: false,
+			};
+		} finally {
+			this.recoveryLoading = false;
+		}
+	}
+
+	async endRecovery() {
+		const subscription = this.recoverySubscription;
+		const id = this.endingSubscriptionId ?? subscription?.id;
+		if (!id || this.recoveryLoading) return;
+		if (!this.endingSubscriptionId) {
+			if (!subscription?.renewalRecovery?.endRecovery.allowed) return;
+			if (
+				!window.confirm(
+					m.billing_recovery_end_confirm({}, { locale: getLocale() }),
+				)
+			)
+				return;
+			this.endingSubscriptionId = id;
+			if (authStore.userUuid && this.selectedKey)
+				saveRenewalPurchaseIntent(authStore.userUuid, {
+					subscriptionId: id,
+					productKey: this.selectedKey,
+				});
+		}
+		this.recoveryLoading = true;
+		this.error = null;
+		try {
+			if (subscription?.renewalRecovery?.endRecovery.allowed)
+				await sdk.billing.cancelSubscriptionAutoRenew(id);
+			await this.load({ force: true });
+		} catch (error) {
+			this.error = {
+				message:
+					error instanceof Error
+						? error.message
+						: m.billing_recovery_refresh_failed({}, { locale: getLocale() }),
+				offerChanged: false,
+			};
+		} finally {
+			this.recoveryLoading = false;
+		}
+	}
+
 	async checkout(input: { returnTo: string | URL }): Promise<boolean> {
 		const product = this.selected;
 		if (!product || this.checkoutLoading || !this.canBuy(product)) return false;
@@ -237,25 +346,71 @@ export class PurchaseFlow {
 			hasOffer: !!product.offer,
 			dueTodayUsd: this.dueTodayUsd,
 		});
+		const userId = authStore.userUuid ?? "";
+		let context =
+			this.attempt?.userId === userId && this.attempt.productKey === product.key
+				? this.attempt
+				: currentCheckoutContext(userId, product.key);
 		try {
+			if (context?.checkoutId) {
+				const { confirmation } = await sdk.billing.confirmCheckout(
+					product.key,
+					context.checkoutId,
+				);
+				if (confirmation.checkoutUrl) {
+					window.location.assign(confirmation.checkoutUrl);
+					return true;
+				}
+				if (confirmation.settled) {
+					finishCheckoutContext(context);
+					this.attempt = null;
+					await this.load({ force: true });
+					return false;
+				}
+				if (confirmation.canRestart) {
+					finishCheckoutContext(context);
+					this.attempt = null;
+					await this.load({ force: true });
+					this.error = {
+						message: m.billing_checkout_reconfirm({}, { locale: getLocale() }),
+						offerChanged: true,
+					};
+					return false;
+				}
+				this.error = {
+					message: m.purchase_return_confirming_detail(
+						{},
+						{ locale: getLocale() },
+					),
+					offerChanged: false,
+				};
+				return false;
+			}
+			context ??= {
+				purchaseId: crypto.randomUUID(),
+				userId,
+				productKey: product.key,
+				checkoutId: null,
+				request: { returnUrl, ...selection },
+			};
+			this.attempt = context;
+			saveCheckoutContext(context);
 			const { checkout } =
 				product.kind === "plan"
 					? await sdk.billing.createSubscription(product.key, {
-							returnUrl,
-							...selection,
+							...context.request,
+							purchaseId: context.purchaseId,
 						})
 					: await sdk.billing.createOrder(product.key, {
-							returnUrl,
-							...selection,
+							...context.request,
+							purchaseId: context.purchaseId,
 						});
 			if (checkout.checkoutUsable && checkout.checkoutUrl) {
+				if (product.kind === "plan") saveRenewalPurchaseIntent(userId, null);
 				const checkoutId = checkout.orderId ?? checkout.subscriptionId;
 				if (checkoutId) {
-					try {
-						sessionStorage.setItem(checkoutStorageKey(product.key), checkoutId);
-					} catch {
-						// Storage is only a confirmation aid; never block a created checkout.
-					}
+					context.checkoutId = checkoutId;
+					saveCheckoutContext(context);
 				}
 				window.location.assign(checkout.checkoutUrl);
 				return true;
@@ -277,7 +432,11 @@ export class PurchaseFlow {
 					error instanceof Error ? error.message : "Checkout is not available.",
 				offerChanged,
 			};
-			if (offerChanged) void this.load({ force: true });
+			if (offerChanged) {
+				if (context) finishCheckoutContext(context);
+				this.attempt = null;
+				void this.load({ force: true });
+			}
 			return false;
 		} finally {
 			this.checkoutLoading = false;

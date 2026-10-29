@@ -417,7 +417,7 @@ test("checkout confirmation reads provider order/subscription state", async () =
         : response({ error: { message: "Not found" } }, 404);
     }
     if (url.pathname === "/v1/subscriptions/sub_live" && method === "GET") {
-      return response({ subscription: subscriptions[0] });
+      return response({ subscription: subscriptions[0], checkout: { status: subscriptions[0]?.status, checkout_usable: subscriptions[0]?.status === "pending_checkout", checkout_url: "https://checkout.example.test/exact-subscription" } });
     }
     if (url.pathname === "/v1/orders/order_paid" && method === "GET") {
       return response({ order: orders[0] });
@@ -438,6 +438,11 @@ test("checkout confirmation reads provider order/subscription state", async () =
     assert.equal(plan.settled, true);
     assert.equal(plan.status, "active");
     assert.equal(plan.productName, "cohub_pro_monthly");
+    assert.ok(subscriptions[0]);
+    subscriptions[0].status = "pending_checkout";
+    const resumedPlan = await operations.resolveCheckoutConfirmation({ userId: "user_1", productKey: "cohub_pro_monthly", checkoutId: "sub_live" });
+    assert.equal(resumedPlan.checkoutUrl, "https://checkout.example.test/exact-subscription");
+    assert.equal(resumedPlan.settled, false);
     const pack = await operations.resolveCheckoutConfirmation({
       userId: "user_1",
       productKey: "cohub_credits_small",
@@ -455,4 +460,64 @@ test("checkout confirmation reads provider order/subscription state", async () =
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("an identified purchase retries its exact key and return identity without adopting another pending order", async () => {
+  const originalFetch = globalThis.fetch;
+  const keys: string[] = [];
+  const bodies: Record<string, unknown>[] = [];
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/products/cohub_credits_small") return response({ product: product("cohub_credits_small", "one_time") });
+    if (url.pathname === "/v1/customers") return response({ customer: { external_user_id: "user_1" } });
+    if (url.pathname === "/v1/providers/status") return response({ status: "available", checkout_available: true });
+    if (url.pathname === "/v1/orders" && init?.method === "POST") {
+      keys.push(new Headers(init.headers).get("Idempotency-Key") ?? "");
+      bodies.push(JSON.parse(String(init.body)));
+      return response({ order: { id: "order_1", status: "pending_checkout" }, checkout: { checkout_usable: true, checkout_url: "https://checkout.example.test/original" } });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  try {
+    const operations = createTalesofaiBillingOperations({ baseUrl: "https://billing.example.test/v1", businessKey: "cohub", adminApiKey: "test-key" });
+    const input = { userId: "user_1", productKey: "cohub_credits_small", purchaseId: "66b87c53-d24f-4b7a-9ad2-8f07d07e188b", returnUrl: "https://cohub.example.test/settings/billing" };
+    await operations.purchaseAddon(input);
+    await operations.purchaseAddon(input);
+    assert.equal(keys.length, 2);
+    assert.ok(keys[0].includes(input.purchaseId));
+    assert.equal(keys[0], keys[1]);
+    assert.deepEqual(bodies[0], bodies[1]);
+    assert.equal(new URL(String(bodies[0].success_redirect_url)).searchParams.get("cohub_billing_purchase"), input.purchaseId);
+    await operations.purchaseAddon({ ...input, purchaseId: "f0847124-56e6-4f55-ac42-668c4d8eb788" });
+    assert.notEqual(keys[0], keys[2]);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("only a confirmed unpaid closed order can restart; unknown and conflict remain unresolved", async () => {
+  const originalFetch = globalThis.fetch;
+  let status = "pending_checkout";
+  let checkoutState: string | null = null;
+  let paidAt: string | null = null;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/customers") return response({ customer: { external_user_id: "user_1" } });
+    if (url.pathname.startsWith("/v1/products/")) return response({ product: product("cohub_credits_small", "one_time") });
+    if (url.pathname === "/v1/orders/order_1") {
+      if (status === "unknown") return response({ error: { message: "Not found" } }, 404);
+      return response({ order: { id: "order_1", external_user_id: "user_1", product_key_snapshot: "cohub_credits_small", status, paid_at: paidAt, payment_conflicted_at: status === "payment_conflicted" ? "2026-10-29T00:00:00Z" : null }, checkout: { status: checkoutState ?? status, checkout_usable: status === "pending_checkout", checkout_url: "https://checkout.example.test/original" } });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  try {
+    const operations = createTalesofaiBillingOperations({ baseUrl: "https://billing.example.test/v1", businessKey: "cohub", adminApiKey: "test-key" });
+    const inspect = () => operations.resolveCheckoutConfirmation({ userId: "user_1", productKey: "cohub_credits_small", checkoutId: "order_1" });
+    assert.equal((await inspect()).checkoutUrl, "https://checkout.example.test/original");
+    for (status of ["payment_conflicted", "unknown"]) assert.equal((await inspect()).canRestart, false);
+    for (status of ["checkout_expired", "checkout_canceled"]) assert.equal((await inspect()).canRestart, true);
+    checkoutState = "unknown";
+    assert.equal((await inspect()).canRestart, false);
+    checkoutState = null;
+    paidAt = "2026-10-29T00:00:00Z";
+    assert.equal((await inspect()).canRestart, false);
+  } finally { globalThis.fetch = originalFetch; }
 });

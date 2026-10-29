@@ -1893,7 +1893,6 @@
 	"board_add": "添加",
 	"board_more": "更多",
 	"board_text": "文本",
-
 	"board_ease": "缓动",
 	"board_ease_linear": "线性",
 	"board_ease_ease": "缓动",
@@ -2714,5 +2713,19 @@
 	"app_auth_join_as": "以{role}身份加入",
 	"app_auth_join_confirm": "加入",
 	"app_auth_join_validity": "将以你自己的账号加入。",
-	"app_auth_join_validity_scopes": "将以你自己的账号加入。App 授权有效期 14 天。"
+	"app_auth_join_validity_scopes": "将以你自己的账号加入。App 授权有效期 14 天。",
+	"billing_recovery_grace": "续费待付款",
+	"billing_recovery_grace_detail": "套餐功能保留至 {date}。付款成功前不会发放新额度。",
+	"billing_recovery_closing": "正在结束上一订阅",
+	"billing_recovery_closing_detail": "正在核对付款和关闭结果。确认关闭后即可重新订阅。",
+	"billing_recovery_pay": "完成付款",
+	"billing_recovery_resubscribe": "结束恢复并重新订阅",
+	"billing_recovery_refresh": "检查状态",
+	"billing_recovery_end_confirm": "结束当前恢复期？临时功能将停止。上一账单及订阅确认关闭后，请按最新报价确认新购买。",
+	"billing_recovery_paid_before_cancel": "原付款已完成，已付周期保留，没有创建新购买。请在账户中查看当前续费设置。",
+	"billing_recovery_refresh_failed": "无法核对付款状态，请重试。",
+	"billing_checkout_reconfirm": "上一付款已关闭且未收款。请确认当前价格后重新点击购买。",
+	"billing_recovery_purchase_blocked": "请先完成本期付款，或结束恢复后重新订阅。",
+	"billing_recovery_ready": "上一订阅已结束。请核对当前套餐和价格，再开始一个完整的新周期。",
+	"billing_recovery_previous_payment": "上一订阅已结束，但有一笔异常付款需要核对退款。你可以按当前价格重新订阅；新购买不会抵扣或重复履约这笔旧款。"
 }

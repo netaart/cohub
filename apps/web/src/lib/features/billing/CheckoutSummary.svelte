@@ -40,6 +40,8 @@ const blockedReason = $derived.by(() => {
 		return (
 			view.paymentReason ?? m.billing_payment_unavailable_plain({}, { locale })
 		);
+	if (isPlan && flow.recoverySubscription)
+		return m.billing_recovery_purchase_blocked({}, { locale });
 	if (isPlan && view.currentPlan?.key === product.key)
 		return m.purchase_already_on_plan({}, { locale });
 	if (isPlan && view.hasActiveSubscription)

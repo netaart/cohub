@@ -1893,7 +1893,6 @@
 	"board_add": "Add",
 	"board_more": "More",
 	"board_text": "Text",
-
 	"board_ease": "Easing",
 	"board_ease_linear": "Linear",
 	"board_ease_ease": "Ease",
@@ -2714,5 +2713,19 @@
 	"app_auth_join_as": "Join as {role}",
 	"app_auth_join_confirm": "Join",
 	"app_auth_join_validity": "You join with your own account.",
-	"app_auth_join_validity_scopes": "You join with your own account. App access lasts 14 days."
+	"app_auth_join_validity_scopes": "You join with your own account. App access lasts 14 days.",
+	"billing_recovery_grace": "Payment required",
+	"billing_recovery_grace_detail": "Plan features remain available until {date}. No new credits are granted until payment succeeds.",
+	"billing_recovery_closing": "Finishing the previous subscription",
+	"billing_recovery_closing_detail": "Payment and closure are being checked. A new subscription will be available once closure is confirmed.",
+	"billing_recovery_pay": "Complete payment",
+	"billing_recovery_resubscribe": "End recovery and resubscribe",
+	"billing_recovery_refresh": "Check status",
+	"billing_recovery_end_confirm": "End this recovery period? Temporary features will stop. Once the previous invoice and subscription are closed, review current pricing before starting a new purchase.",
+	"billing_recovery_paid_before_cancel": "The original payment completed. Your paid cycle is retained and no new purchase was created. Check your account for the current renewal setting.",
+	"billing_recovery_refresh_failed": "Could not check payment status. Try again.",
+	"billing_checkout_reconfirm": "The previous checkout is closed and unpaid. Review the current price and select purchase again.",
+	"billing_recovery_purchase_blocked": "Complete the current payment or end recovery before starting a new subscription.",
+	"billing_recovery_ready": "The previous subscription has ended. Review the current plan and price before starting a new full cycle.",
+	"billing_recovery_previous_payment": "The previous subscription has ended, but a payment needs refund review. You may subscribe at the current price; the new purchase does not apply or fulfill that earlier payment."
 }

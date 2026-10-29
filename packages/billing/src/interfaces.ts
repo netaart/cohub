@@ -294,6 +294,14 @@ export type BillingCatalogProduct = {
   isDefaultPlan: boolean;
 };
 
+export type BillingRenewalRecovery = {
+  state: "none" | "grace" | "closing";
+  effectiveEndsAt: string | null;
+  payInvoice: { allowed: boolean; reason: string | null };
+  endRecovery: { allowed: boolean; reason: string | null };
+  subscribe: { allowed: boolean; reason: string | null };
+};
+
 export type BillingSubscriptionSummary = {
   id: string;
   productKey: string | null;
@@ -302,6 +310,7 @@ export type BillingSubscriptionSummary = {
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  renewalRecovery?: BillingRenewalRecovery;
 };
 
 export type BillingPaymentStatus = {
@@ -340,6 +349,7 @@ export type BillingHistoryListInput = BillingUserRef & {
 };
 
 export type BillingSubscriptionHistoryStatus = {
+  paymentConflict?: { reason: string; amountMinor: number; currency: string | null };
   id: string;
   externalUserId: string;
   productKey: string;
@@ -355,6 +365,7 @@ export type BillingSubscriptionHistoryStatus = {
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  renewalRecovery?: BillingRenewalRecovery;
   canceledAt: string | null;
   checkoutExpiresAt: string | null;
   checkoutCanceledAt: string | null;
@@ -378,6 +389,7 @@ export type BillingSubscriptionHistoryList = BillingUserRef & {
 };
 
 export type BillingCheckoutInput = BillingUserRef & {
+  purchaseId?: string;
   walletCheckout?: { id: string; actorUserId: string; spaceId: string };
   productKey: string;
   returnUrl?: string;
@@ -420,6 +432,8 @@ export type BillingCheckoutResult = BillingUserRef & {
  * settled; the URL alone never carries that promise.
  */
 export type BillingCheckoutConfirmation = {
+  checkoutUrl?: string | null;
+  canRestart?: boolean;
   productKey: string;
   /** `true` when the order/subscription reached a paid (or live) terminal state. */
   settled: boolean;
@@ -606,6 +620,8 @@ export interface BillingOperations {
   confirmSpaceWalletOrder(input: BillingUserRef & { requestId: string; actorUserId: string; spaceId: string }): Promise<{ settled: boolean; pending: boolean }>;
   resolveCheckoutConfirmation(input: BillingUserRef & { productKey: string; checkoutId: string }): Promise<BillingCheckoutConfirmation>;
   cancelSubscriptionCheckout(input: BillingUserRef & { subscriptionId: string }): Promise<BillingSubscriptionHistoryStatus>;
+  getSubscription(input: BillingUserRef & { subscriptionId: string }): Promise<BillingSubscriptionHistoryStatus>;
+  getSubscriptionPaymentAction(input: BillingUserRef & { subscriptionId: string }): Promise<{ checkoutUrl: string | null; reason: string | null }>;
   cancelSubscriptionAutoRenew(input: BillingUserRef & { subscriptionId: string }): Promise<BillingSubscriptionHistoryStatus>;
   redeemCode(input: BillingRedemptionInput): Promise<BillingRedemptionResult>;
   grantReferralReward(input: BillingReferralRewardInput): Promise<BillingReferralRewardResult>;

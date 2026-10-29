@@ -2,6 +2,7 @@
 import type { BillingCatalogProduct } from "@neta-art/cohub";
 import { AlertCircle, ChevronUp } from "lucide-svelte";
 import Segmented from "$lib/components/Segmented.svelte";
+import { formatDateTime } from "$lib/i18n/format";
 import type { Locale } from "$lib/i18n/locale";
 import { m } from "$lib/paraglide/messages.js";
 import CheckoutSummary from "./CheckoutSummary.svelte";
@@ -60,6 +61,28 @@ const yearlySavings = $derived(
 );
 const recommendedPackKey = $derived(recommendedPack(packs)?.key ?? null);
 const compact = $derived(density === "sheet");
+const recovery = $derived(flow.recoverySubscription?.renewalRecovery);
+let recoveryNow = $state(Date.now());
+const recoveryExpired = $derived(
+	Boolean(
+		recovery?.effectiveEndsAt &&
+			Date.parse(recovery.effectiveEndsAt) <= recoveryNow,
+	),
+);
+$effect(() => {
+	const deadline = recovery?.effectiveEndsAt
+		? Date.parse(recovery.effectiveEndsAt)
+		: null;
+	recoveryNow = Date.now();
+	if (deadline === null || deadline <= Date.now()) return;
+	const timer = setTimeout(
+		() => {
+			recoveryNow = Date.now();
+		},
+		Math.min(2_147_483_647, deadline - Date.now()),
+	);
+	return () => clearTimeout(timer);
+});
 
 function switchFamily(next: PurchaseFocus) {
 	if (family === next) return;
@@ -75,6 +98,24 @@ function select(product: BillingCatalogProduct) {
 
 <div class="panel" class:compact>
 	<div class="catalog">
+    {#if flow.recoveryNotice}<p class="recovery" role="status">{flow.recoveryNotice}</p>{/if}
+    {#if recovery && recovery.state !== "none"}
+      <section class="recovery" aria-live="polite">
+        <strong>{recovery.state === "closing" || recoveryExpired ? m.billing_recovery_closing({}, { locale }) : m.billing_recovery_grace({}, { locale })}</strong>
+        <p>{recovery.state === "closing" || recoveryExpired
+          ? m.billing_recovery_closing_detail({}, { locale })
+          : m.billing_recovery_grace_detail({ date: recovery.effectiveEndsAt ? formatDateTime(recovery.effectiveEndsAt, locale) : "" }, { locale })}</p>
+        <div class="recovery-actions">
+          {#if recovery.payInvoice.allowed && !recoveryExpired}
+            <button type="button" class="primary-key" disabled={flow.recoveryLoading} onclick={() => flow.payRenewal()}>{m.billing_recovery_pay({}, { locale })}</button>
+          {/if}
+          {#if recovery.endRecovery.allowed && !recoveryExpired && flow.selected?.kind === "plan"}
+            <button type="button" class="secondary-key" disabled={flow.recoveryLoading} onclick={() => flow.endRecovery()}>{m.billing_recovery_resubscribe({}, { locale })}</button>
+          {/if}
+          <button type="button" class="secondary-key" disabled={flow.recoveryLoading || flow.loading} onclick={() => flow.load({ force: true })}>{m.billing_recovery_refresh({}, { locale })}</button>
+        </div>
+      </section>
+    {/if}
 		<div class="controls">
 			{#if showTabs}
 				<Segmented
@@ -164,7 +205,7 @@ function select(product: BillingCatalogProduct) {
 					<CheckoutSummary {flow} {locale} {signedIn} {ctaLabel} {onbuy} />
 				</div>
 			{:else}
-				<button type="button" class="bar-cta primary-key" disabled={flow.checkoutLoading} onclick={onbuy}>
+				<button type="button" class="bar-cta primary-key" disabled={flow.checkoutLoading || (signedIn && !flow.canBuy(flow.selected))} onclick={onbuy}>
 					{ctaLabel ?? (flow.selected.kind === "plan" ? m.purchase_cta_subscribe({}, { locale }) : m.purchase_cta_add_balance({}, { locale }))}
 				</button>
 			{/if}
@@ -173,6 +214,10 @@ function select(product: BillingCatalogProduct) {
 </div>
 
 <style>
+  .recovery { display: flex; flex-direction: column; gap: 8px; padding-bottom: 20px; font-size: 13px; }
+  .recovery p { color: var(--text-secondary); line-height: 1.5; }
+  .recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .recovery-actions button { min-height: 44px; padding: 8px 12px; }
 	.panel {
 		display: grid;
 		gap: 28px;

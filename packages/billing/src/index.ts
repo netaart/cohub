@@ -17,6 +17,7 @@ export {
 export type { BillingClientConfig, BillingRedisClient, BillingRuntimeConfig, SpaceWalletBillingOperations } from "./client.js";
 export type {
   BillingAccountState,
+  BillingRenewalRecovery,
   BillingCatalog,
   BillingCatalogProduct,
   BillingCheckoutInput,

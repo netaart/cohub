@@ -56,6 +56,14 @@ async function readCheckoutBody(c: Context) {
   }
 }
 
+function parsePurchaseId(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+    throw new ApiError({ status: 400, message: "Invalid purchase ID", code: "invalid_purchase_id", responseBody: null });
+  }
+  return value;
+}
+
 function parseRedemptionCode(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -208,7 +216,14 @@ router.get("/features/:featureKey", async (c) => {
       userId: user.uuid,
       featureKey,
     });
-    return c.json({ enabled: Boolean(entitlement?.enabled) });
+    const deadlines = entitlement?.grants
+      .map((grant) => grant.expires_at)
+      .filter((value): value is string => value !== null && Date.parse(value) > Date.now()) ?? [];
+    c.header("Cache-Control", "no-store");
+    return c.json({
+      enabled: Boolean(entitlement?.enabled),
+      validUntil: deadlines.sort()[0] ?? null,
+    });
   } catch (error) {
     if (isBillingApiError(error)) return billingApiErrorResponse(c, error);
     throw error;
@@ -266,6 +281,7 @@ router.post("/orders", async (c) => {
     const checkout = await billingOperations.purchaseAddon({
       userId: user.uuid,
       productKey,
+      purchaseId: parsePurchaseId((body as { purchaseId?: unknown }).purchaseId),
       returnUrl: parseReturnUrl((body as { returnUrl?: unknown }).returnUrl),
       ...discount,
     });
@@ -290,10 +306,36 @@ router.post("/subscriptions", async (c) => {
     const checkout = await billingOperations.createSubscription({
       userId: user.uuid,
       productKey,
+      purchaseId: parsePurchaseId((body as { purchaseId?: unknown }).purchaseId),
       returnUrl: parseReturnUrl((body as { returnUrl?: unknown }).returnUrl),
       ...discount,
     });
     return c.json({ checkout });
+  } catch (error) {
+    if (isBillingApiError(error)) return billingApiErrorResponse(c, error);
+    throw error;
+  }
+});
+
+router.get("/subscriptions/:subscriptionId", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  try {
+    const subscription = await billingOperations.getSubscription({ userId: user.uuid, subscriptionId: c.req.param("subscriptionId") });
+    c.header("Cache-Control", "no-store");
+    return c.json({ subscription });
+  } catch (error) {
+    if (isBillingApiError(error)) return billingApiErrorResponse(c, error);
+    throw error;
+  }
+});
+
+router.post("/subscriptions/:subscriptionId/payment-action", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  try {
+    return c.json(await billingOperations.getSubscriptionPaymentAction({ userId: user.uuid, subscriptionId: c.req.param("subscriptionId") }));
   } catch (error) {
     if (isBillingApiError(error)) return billingApiErrorResponse(c, error);
     throw error;

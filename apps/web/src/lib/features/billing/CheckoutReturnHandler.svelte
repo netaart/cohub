@@ -12,17 +12,17 @@ import { replaceState } from "$app/navigation";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import { authStore } from "$lib/stores/auth.svelte";
 import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
 import { billingConversion } from "$lib/stores/billing-conversion.svelte";
+import { finishCheckoutContext, readCheckoutContext } from "./checkout-context";
 import {
 	type CheckoutReturn,
 	readCheckoutReturn,
 	stripCheckoutReturn,
 } from "./checkout-return";
 import { trackPurchase } from "./funnel";
-import { takeCheckoutId } from "./purchase.svelte";
 
-const AUTO_DISMISS_MS = 8_000;
 /** Grace for the provider webhook to land after the redirect. */
 const SETTLE_POLLS = 3;
 const SETTLE_DELAY_MS = 1_500;
@@ -33,21 +33,15 @@ let confirming = $state(false);
 let settled = $state(false);
 let confirmationState = $state<"pending" | "settled" | "failed">("pending");
 let productName = $state<string | null>(null);
-let timer: ReturnType<typeof setTimeout> | null = null;
 
-const success = $derived(result?.outcome === "success");
-const showPending = $derived(
-	success && (confirming || confirmationState === "pending"),
-);
-const showSuccess = $derived(success && confirmationState === "settled");
+const showPending = $derived(confirming || confirmationState === "pending");
+const showSuccess = $derived(confirmationState === "settled");
 
 function dismiss() {
 	result = null;
 	settled = false;
 	confirmationState = "pending";
 	confirming = false;
-	if (timer) clearTimeout(timer);
-	timer = null;
 }
 
 function reopenPurchase() {
@@ -103,41 +97,53 @@ async function waitForSettlement(productKey: string, checkoutId: string) {
 }
 
 onMount(() => {
+	const refresh = () => {
+		void billingCatalogStore
+			.refresh()
+			.catch((error) => console.warn("[billing] Refresh failed", error));
+		window.dispatchEvent(new Event("cohub:billing-refresh"));
+	};
+	const visible = () => {
+		if (document.visibilityState === "visible") refresh();
+	};
+	window.addEventListener("focus", refresh);
+	window.addEventListener("pageshow", refresh);
+	document.addEventListener("visibilitychange", visible);
 	const url = new URL(window.location.href);
-	if (url.searchParams.has("wallet_order")) return;
-	const found = readCheckoutReturn(url);
-	if (!found) return;
-	result = found;
-	replaceState(stripCheckoutReturn(url), history.state);
-	trackPurchase({
-		name: "purchase_checkout_return",
-		outcome: found.outcome,
-		productKey: found.productKey,
-	});
-	if (found.outcome === "success") {
+	const found = url.searchParams.has("wallet_order")
+		? null
+		: readCheckoutReturn(url);
+	if (found) {
+		result = found;
+		replaceState(stripCheckoutReturn(url), history.state);
+		trackPurchase({
+			name: "purchase_checkout_return",
+			outcome: found.outcome,
+			productKey: found.productKey,
+		});
 		confirming = true;
 		void (async () => {
-			if (found.productKey) {
-				const checkoutId = takeCheckoutId(found.productKey);
-				if (checkoutId) await waitForSettlement(found.productKey, checkoutId);
+			await authStore.ensureLoaded();
+			const userId = authStore.userUuid;
+			const context =
+				userId && found.purchaseId
+					? readCheckoutContext(userId, found.purchaseId)
+					: null;
+			if (context?.checkoutId && context.productKey === found.productKey) {
+				await waitForSettlement(context.productKey, context.checkoutId);
+				if (settled) {
+					finishCheckoutContext(context);
+					billingConversion.clear();
+				}
 			}
 			confirming = false;
-			if (settled) {
-				billingConversion.clear();
-			}
-			void billingCatalogStore.refresh().catch((error) => {
-				console.warn("[billing] Catalog refresh after checkout failed", error);
-			});
+			refresh();
 		})();
-	} else {
-		productName =
-			billingCatalogStore.catalog?.products.find(
-				(product) => product.key === found.productKey,
-			)?.name ?? null;
 	}
-	if (found.outcome !== "success") timer = setTimeout(dismiss, AUTO_DISMISS_MS);
 	return () => {
-		if (timer) clearTimeout(timer);
+		window.removeEventListener("focus", refresh);
+		window.removeEventListener("pageshow", refresh);
+		document.removeEventListener("visibilitychange", visible);
 	};
 });
 </script>
@@ -168,7 +174,7 @@ onMount(() => {
 			<div class="detail">
 				{#if showPending}
 					{m.purchase_return_confirming_detail({}, { locale })}
-				{:else if success && settled}
+				{:else if settled}
 					{m.purchase_return_success_detail({}, { locale })}
 				{:else}
 					<button type="button" class="link" onclick={reopenPurchase}>{m.purchase_return_retry({}, { locale })}</button>

@@ -335,6 +335,13 @@ export function createDisabledBillingOperations(
       );
     },
 
+    async getSubscription(): Promise<BillingSubscriptionHistoryStatus> {
+      throw billingApiError(503, "Billing integration is not configured", "billing_unavailable");
+    },
+    async getSubscriptionPaymentAction(): Promise<{ checkoutUrl: string | null; reason: string | null }> {
+      throw billingApiError(503, "Billing integration is not configured", "billing_unavailable");
+    },
+
     async cancelSubscriptionAutoRenew(): Promise<BillingSubscriptionHistoryStatus> {
       throw billingApiError(
         503,
