@@ -1,12 +1,10 @@
 import { batchUploadEntries } from "@cohub/protocol";
-import type { SpaceFsUploadDestination } from "@neta-art/cohub";
+import type { UploadGroup, UploadConfig, SpaceFsUploadDestination, SpaceFsCreateUploadResponse, UploadTask } from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
 import {
 	type LocalUploadEntry,
 	sanitizeRelativePath,
 } from "$lib/upload-entries";
-import { UploadTransferError } from "$lib/upload-errors";
-import { isBrowserManagedUploadHeader } from "$lib/upload-headers";
 
 export type SpaceUploadStage = "preparing" | "uploading" | "importing" | "done";
 
@@ -35,6 +33,7 @@ export type UploadSpaceEntriesOptions = {
 	entries: LocalUploadEntry[];
 	onProgress?: (progress: SpaceUploadProgress) => void;
 	signal?: AbortSignal;
+	upload?: Partial<UploadConfig> | UploadGroup;
 };
 
 export function joinUploadPath(...parts: string[]) {
@@ -53,61 +52,6 @@ function createAbortError() {
 
 function throwIfAborted(signal?: AbortSignal) {
 	if (signal?.aborted) throw createAbortError();
-}
-
-function putWithProgress(
-	file: File,
-	uploadUrl: string,
-	headers: Record<string, string> | undefined,
-	onProgress?: (uploaded: number) => void,
-	signal?: AbortSignal,
-) {
-	return new Promise<void>((resolve, reject) => {
-		if (signal?.aborted) {
-			reject(createAbortError());
-			return;
-		}
-		const xhr = new XMLHttpRequest();
-		let settled = false;
-		const handleAbort = () => xhr.abort();
-		const finish = (callback: () => void) => {
-			if (settled) return;
-			settled = true;
-			signal?.removeEventListener("abort", handleAbort);
-			callback();
-		};
-		try {
-			xhr.open("PUT", uploadUrl);
-			for (const [key, value] of Object.entries(headers ?? {})) {
-				if (isBrowserManagedUploadHeader(key)) continue;
-				// Skip empty / control-char values — Safari throws
-				// "The string did not match the expected pattern."
-				if (/[\r\n\0]/.test(value)) continue;
-				xhr.setRequestHeader(key, value);
-			}
-		} catch (error) {
-			finish(() =>
-				reject(
-					error instanceof Error
-						? error
-						: new Error("Upload failed: invalid request headers"),
-				),
-			);
-			return;
-		}
-		xhr.upload.onprogress = (event) => {
-			if (!event.lengthComputable) return;
-			onProgress?.(event.loaded);
-		};
-		xhr.onload = () => {
-			if (xhr.status >= 200 && xhr.status < 300) finish(resolve);
-			else finish(() => reject(new UploadTransferError(xhr.status)));
-		};
-		xhr.onerror = () => finish(() => reject(new UploadTransferError(0)));
-		xhr.onabort = () => finish(() => reject(createAbortError()));
-		signal?.addEventListener("abort", handleAbort, { once: true });
-		xhr.send(file);
-	});
 }
 
 function normalizeDestination(input: {
@@ -144,6 +88,7 @@ export type MaterializeSpaceEntriesOptions = {
 	destination?: SpaceFsUploadDestination;
 	targetDir?: string;
 	entries: MaterializeSpaceEntry[];
+	upload?: Partial<UploadConfig> | UploadGroup;
 };
 
 const toUploadedFile = (file: {
@@ -167,8 +112,10 @@ export async function materializeSpaceEntries({
 	destination,
 	targetDir = "",
 	entries,
+	upload,
 }: MaterializeSpaceEntriesOptions): Promise<SpaceUploadedFile[]> {
 	if (entries.length === 0) return [];
+	const group = sdk.createUploadGroup(upload);
 	const uploadDestination = normalizeDestination({ destination, targetDir });
 	const safeEntries = entries.map((entry) => ({
 		...entry,
@@ -185,124 +132,138 @@ export async function materializeSpaceEntries({
 			mimeType: entry.mimeType ?? null,
 			downloadUrl: entry.downloadUrl,
 		})),
-	});
+	}, { upload: group });
 	// Remote entries have no uploadUrl; complete immediately.
 	const complete = await sdk
 		.space(spaceId)
 		.files.completeUpload(plan.uploadId, {
 			entries: ids.map((id) => ({ id })),
-		});
+		}, { upload: group });
 	return complete.uploaded.map(toUploadedFile);
 }
 
-export async function uploadSpaceEntries({
+export type SpaceUploadTask = {
+	run(options?: Pick<UploadSpaceEntriesOptions, "onProgress" | "signal">): Promise<SpaceUploadedFile[]>;
+	cancel(): Promise<void>;
+};
+
+export function createSpaceUploadTask({
 	spaceId,
 	destination,
 	targetDir = "",
 	entries,
-	onProgress,
-	signal,
-}: UploadSpaceEntriesOptions): Promise<SpaceUploadedFile[]> {
-	if (entries.length === 0) return [];
+	upload,
+}: Omit<UploadSpaceEntriesOptions, "onProgress" | "signal">): SpaceUploadTask {
+	const files = sdk.space(spaceId).files;
+	const group = sdk.createUploadGroup(upload);
 	const uploadDestination = normalizeDestination({ destination, targetDir });
 	const safeEntries = entries.map((entry) => ({
 		...entry,
+		id: crypto.randomUUID(),
 		relativePath: sanitizeRelativePath(entry.relativePath),
 	}));
-	const totalFiles = safeEntries.length;
-	const totalBytes = safeEntries.reduce(
-		(sum, entry) => sum + entry.file.size,
-		0,
-	);
-	const ids = safeEntries.map(() => crypto.randomUUID());
-	const batches = batchUploadEntries(safeEntries, (entry) => entry.file.size);
-
-	let completedFiles = 0;
+	const totalBytes = safeEntries.reduce((sum, entry) => sum + entry.file.size, 0);
+	const batches = batchUploadEntries(safeEntries, (entry) => entry.file.size).map((entries) => ({
+		entries,
+		requestId: crypto.randomUUID(),
+		plan: undefined as SpaceFsCreateUploadResponse | undefined,
+	}));
+	const transfers = new Map<string, UploadTask<void>>();
+	const transferred = new Set<string>();
+	const uploaded: SpaceUploadedFile[] = [];
 	let completedBytes = 0;
 	let importedFiles = 0;
-	const report = (info: {
-		stage: SpaceUploadStage;
-		activeIndex?: number;
-		activeFileUploadedBytes?: number;
-	}) => {
-		const activeFileUploadedBytes = info.activeFileUploadedBytes ?? 0;
-		onProgress?.({
-			stage: info.stage,
-			uploadedBytes: Math.min(
+	let batchIndex = 0;
+	let cancelled = false;
+	let running: Promise<SpaceUploadedFile[]> | undefined;
+	let controller: AbortController | undefined;
+
+	async function run({ onProgress, signal }: Pick<UploadSpaceEntriesOptions, "onProgress" | "signal"> = {}) {
+		if (cancelled) throw createAbortError();
+		controller = new AbortController();
+		const abort = () => controller?.abort();
+		if (signal?.aborted) controller.abort();
+		signal?.addEventListener("abort", abort, { once: true });
+		const runSignal = controller.signal;
+		const report = (stage: SpaceUploadStage, activeIndex?: number, activeFileUploadedBytes = 0) => {
+			onProgress?.({
+				stage,
+				uploadedBytes: Math.min(totalBytes, completedBytes + activeFileUploadedBytes),
 				totalBytes,
-				completedBytes + activeFileUploadedBytes,
-			),
-			totalBytes,
-			completedFiles,
-			activeFileIndex: info.activeIndex,
-			activeFileUploadedBytes,
-			importedFiles,
-			totalFiles,
-		});
-	};
-
-	report({ stage: "preparing" });
-	throwIfAborted(signal);
-
-	const uploaded: SpaceUploadedFile[] = [];
-
-	for (const batch of batches) {
-		const batchIds = ids.slice(importedFiles, importedFiles + batch.length);
-		const plan = await sdk.space(spaceId).files.createUpload(
-			{
-				destination: uploadDestination,
-				entries: batch.map((entry, index) => ({
-					id: batchIds[index],
-					name: entry.file.name,
-					relativePath: entry.relativePath,
-					size: entry.file.size,
-					mimeType: entry.file.type || null,
-					lastModified: entry.file.lastModified,
-				})),
-			},
-			{ signal },
-		);
-		throwIfAborted(signal);
-		const planById = new Map(plan.entries.map((entry) => [entry.id, entry]));
-
-		for (const [index, entry] of batch.entries()) {
-			throwIfAborted(signal);
-			const globalIndex = importedFiles + index;
-			const planned = planById.get(batchIds[index]);
-			if (!planned) throw new Error("Upload plan missing file");
-			report({ stage: "uploading", activeIndex: globalIndex });
-			if (planned.uploadUrl) {
-				await putWithProgress(
-					entry.file,
-					planned.uploadUrl,
-					planned.headers,
-					(loaded) => {
-						report({
-							stage: "uploading",
-							activeIndex: globalIndex,
-							activeFileUploadedBytes: Math.min(entry.file.size, loaded),
-						});
-					},
-					signal,
-				);
-			}
-			completedFiles += 1;
-			completedBytes += entry.file.size;
-			report({ stage: "uploading" });
-		}
-
-		throwIfAborted(signal);
-		report({ stage: "importing" });
-		const complete = await sdk
-			.space(spaceId)
-			.files.completeUpload(plan.uploadId, {
-				entries: batchIds.map((id) => ({ id })),
+				completedFiles: transferred.size,
+				activeFileIndex: activeIndex,
+				activeFileUploadedBytes,
+				importedFiles,
+				totalFiles: safeEntries.length,
 			});
-		uploaded.push(...complete.uploaded.map(toUploadedFile));
-		importedFiles += batch.length;
-		report({ stage: "importing" });
+		};
+		try {
+			report("preparing");
+			for (; batchIndex < batches.length; batchIndex += 1) {
+				throwIfAborted(runSignal);
+				const batch = batches[batchIndex];
+				batch.plan ??= await files.createUpload({
+					uploadRequestId: batch.requestId,
+					destination: uploadDestination,
+					entries: batch.entries.map((entry) => ({
+						id: entry.id,
+						name: entry.file.name,
+						relativePath: entry.relativePath,
+						size: entry.file.size,
+						mimeType: entry.file.type || null,
+						lastModified: entry.file.lastModified,
+					})),
+				}, { signal: runSignal, upload: group });
+				const planById = new Map(batch.plan.entries.map((entry) => [entry.id, entry]));
+				for (const entry of batch.entries) {
+					const planned = planById.get(entry.id);
+					if (!planned) throw new Error("Upload plan missing file");
+					if (!transfers.has(entry.id)) transfers.set(entry.id, files.createUploadTask(planned, entry.file, { upload: group }));
+				}
+				for (const [index, entry] of batch.entries.entries()) {
+					throwIfAborted(runSignal);
+					if (transferred.has(entry.id)) continue;
+					const transfer = transfers.get(entry.id);
+					if (!transfer) throw new Error("Upload task missing file");
+					await transfer.run({
+						signal: runSignal,
+						onProgress: ({ loadedBytes }) => report("uploading", importedFiles + index, loadedBytes),
+					});
+					transferred.add(entry.id);
+					completedBytes += entry.file.size;
+					report("uploading");
+				}
+				throwIfAborted(runSignal);
+				report("importing");
+				const complete = await files.completeUpload(batch.plan.uploadId, {
+					entries: batch.entries.map(({ id }) => ({ id })),
+				}, { upload: group });
+				uploaded.push(...complete.uploaded.map(toUploadedFile));
+				importedFiles += batch.entries.length;
+				report("importing");
+			}
+			report("done");
+			return uploaded;
+		} finally {
+			signal?.removeEventListener("abort", abort);
+			controller = undefined;
+		}
 	}
 
-	report({ stage: "done" });
-	return uploaded;
+	return {
+		run(options) {
+			running ??= run(options).finally(() => { running = undefined; });
+			return running;
+		},
+		async cancel() {
+			cancelled = true;
+			controller?.abort();
+			await running?.catch(() => {});
+			await Promise.allSettled([...transfers.values()].map((transfer) => transfer.cancel()));
+		},
+	};
+}
+
+export function uploadSpaceEntries(options: UploadSpaceEntriesOptions): Promise<SpaceUploadedFile[]> {
+	return createSpaceUploadTask(options).run(options);
 }

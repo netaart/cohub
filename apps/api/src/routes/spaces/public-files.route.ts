@@ -8,11 +8,13 @@ import { authzDenied, getExecutionPrincipal, requireValidId, useAuth } from "../
 import { hasPermission } from "../../permissions.js";
 import {
   createPublicFileUpload,
+  buildPublicFileObjectKey,
   getPublicFileUrl,
   listPublicFiles,
   PublicFileConfigError,
   PublicFileValidationError,
 } from "../../public-file-storage.js";
+import { abortMultipartUpload, createMultipartUpload, getMultipartUpload, MultipartUploadError, normalizeUploadStrategy, shouldUseMultipartUpload, withUploadRequest } from "../../multipart-upload.js";
 import { consumeUploadQuota, UploadRateLimitError, uploadRateLimitedResponse } from "../../upload-quota.js";
 import { redisCommandClient } from "../../redis.js";
 
@@ -26,6 +28,9 @@ const uploadBodyLimit = bodyLimit({
 });
 
 const uploadSchema = z.object({
+  uploadProtocol: z.enum(["presigned_put_v1", "multipart_v1"]).optional(),
+  upload: z.unknown().optional(),
+  uploadRequestId: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/).optional(),
   overwrite: z.boolean().optional(),
   entries: z.array(z.object({
     id: z.string().min(1).max(80),
@@ -54,15 +59,41 @@ router.post("/uploads", uploadBodyLimit, async (c) => {
   if (!parsed.success) return c.json({ message: "invalid upload request" }, 400);
 
   try {
-    const plan = createPublicFileUpload(spaceId, parsed.data, {
-      endpoint: getExecutionPrincipal(c) ? "internal" : "public",
+    const upload = normalizeUploadStrategy(parsed.data);
+    const result = await withUploadRequest(user.uuid, `public-files:${spaceId}`, parsed.data, async (quotaRequestId) => {
+      const internalEndpoint = !!getExecutionPrincipal(c);
+      const plan = createPublicFileUpload(spaceId, { ...parsed.data, upload }, { endpoint: internalEndpoint ? "internal" : "public" });
+      await consumeUploadQuota(redisCommandClient, user.uuid, {
+        entryCount: parsed.data.entries.length,
+        totalBytes: parsed.data.entries.reduce((sum, entry) => sum + entry.size, 0),
+      }, quotaRequestId);
+      const created: string[] = [];
+      try {
+        const entries = [];
+        for (const [index, entry] of plan.entries.entries()) {
+          const input = parsed.data.entries[index];
+          if (!input) throw new PublicFileValidationError("upload entry is missing");
+          if (!shouldUseMultipartUpload(input.size, upload)) {
+            entries.push(entry);
+            continue;
+          }
+          const multipart = await createMultipartUpload({
+            userId: user.uuid, storageKind: "public_asset", objectKey: buildPublicFileObjectKey(spaceId, entry.path),
+            size: input.size, partSize: upload.partSizeBytes, headers: entry.headers, internalEndpoint, forbidOverwrite: !parsed.data.overwrite,
+            access: { spaceId, permission: "file.edit" },
+          });
+          created.push(multipart.uploadId);
+          entries.push({ ...entry, multipart });
+        }
+        return { ...plan, entries };
+      } catch (error) {
+        await Promise.allSettled(created.map(async (id) => { const record = await getMultipartUpload(id); if (record) await abortMultipartUpload(record); }));
+        throw error;
+      }
     });
-    await consumeUploadQuota(redisCommandClient, user.uuid, {
-      entryCount: parsed.data.entries.length,
-      totalBytes: parsed.data.entries.reduce((sum, entry) => sum + entry.size, 0),
-    });
-    return c.json(plan);
+    return c.json(result);
   } catch (error) {
+    if (error instanceof MultipartUploadError) return c.json({ message: error.message }, error.status);
     if (error instanceof PublicFileValidationError) {
       return c.json({ ...(error.code ? { code: error.code } : {}), message: error.message }, 400);
     }

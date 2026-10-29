@@ -16,6 +16,8 @@ const RETRYABLE_CODES = new Set([
   "EPIPE",
   "ETIMEDOUT",
   "HeadersTimeoutError",
+  "TimeoutError",
+  "TypeError",
   "UND_ERR_BODY_TIMEOUT",
   "UND_ERR_CONNECT",
   "UND_ERR_CONNECT_TIMEOUT",
@@ -40,6 +42,7 @@ export type PutRetryOptions = {
   delayMs?: number;
   sleep?: (ms: number) => Promise<void>;
   fetch?: typeof fetch;
+  timeoutMs?: number;
 };
 
 type PutWithRetryInput = PutRetryOptions & {
@@ -49,6 +52,7 @@ type PutWithRetryInput = PutRetryOptions & {
   contentLength?: number;
   duplex?: boolean;
   label: string;
+  validate?: () => Promise<void>;
 };
 
 function withContentLength(headers: HeadersInit | undefined, contentLength?: number): Headers {
@@ -94,14 +98,22 @@ async function putWithRetry(input: PutWithRetryInput): Promise<Response> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timer = input.timeoutMs ? setTimeout(() => controller.abort(new DOMException("Upload timed out", "TimeoutError")), input.timeoutMs) : undefined;
     try {
+      await input.validate?.();
       const response = await fetchImpl(input.url, {
         method: "PUT",
         headers: withContentLength(input.headers, input.contentLength),
         body: input.body(),
+        signal: controller.signal,
         ...(input.duplex ? { duplex: "half" as const } : {}),
       } as RequestInit);
-      if (response.ok) return response;
+      controller.signal.throwIfAborted();
+      if (response.ok) {
+        await input.validate?.();
+        return response;
+      }
       const detail = await response.text().catch(() => "");
       const error = new HttpPutError(failureMessage(input.label, response.status, detail), response.status, detail);
       if (attempt < attempts - 1 && isRetryableStatus(response.status)) {
@@ -110,7 +122,8 @@ async function putWithRetry(input: PutWithRetryInput): Promise<Response> {
         continue;
       }
       throw error;
-    } catch (error) {
+    } catch (cause) {
+      const error = controller.signal.aborted ? controller.signal.reason : cause;
       if (error instanceof HttpPutError) throw error;
       lastError = error;
       if (attempt < attempts - 1 && isRetryableError(error)) {
@@ -118,6 +131,8 @@ async function putWithRetry(input: PutWithRetryInput): Promise<Response> {
         continue;
       }
       throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -130,6 +145,7 @@ export async function putLocalFile(input: PutRetryOptions & {
   size: number;
   headers?: HeadersInit;
   label: string;
+  validate?: () => Promise<void>;
 }): Promise<void> {
   await putWithRetry({
     url: input.url,
@@ -142,6 +158,8 @@ export async function putLocalFile(input: PutRetryOptions & {
     delayMs: input.delayMs,
     sleep: input.sleep,
     fetch: input.fetch,
+    timeoutMs: input.timeoutMs,
+    validate: input.validate,
   });
 }
 
@@ -163,5 +181,6 @@ export async function putBytes(input: PutRetryOptions & {
     delayMs: input.delayMs,
     sleep: input.sleep,
     fetch: input.fetch,
+    timeoutMs: input.timeoutMs,
   });
 }

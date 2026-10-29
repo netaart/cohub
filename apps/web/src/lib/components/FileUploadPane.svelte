@@ -7,7 +7,8 @@ import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import {
 	type SpaceUploadProgress,
-	uploadSpaceEntries,
+	type SpaceUploadTask,
+	createSpaceUploadTask,
 } from "$lib/space-upload";
 import type { LocalUploadEntry } from "$lib/upload-entries";
 import {
@@ -82,6 +83,9 @@ let lastSignature = $state("");
 let activeBatchId = $state("");
 let activeTargetDir = $state("");
 let queuedBatches = $state<QueuedUploadBatch[]>([]);
+let uploadTask: SpaceUploadTask | null = null;
+let uploadQueue: UploadItem[] = [];
+let uploadBaseBytes = 0;
 
 function effectiveEntries() {
 	return entries.length > 0
@@ -101,6 +105,8 @@ function startBatch(
 	activeBatchId = batchId;
 	activeTargetDir = uploadTargetDir;
 	previousController?.abort();
+	void uploadTask?.cancel();
+	uploadTask = null;
 	lastSignature = signature;
 	items = [
 		...carried,
@@ -113,6 +119,9 @@ function startBatch(
 				: ("pending" as const),
 		})),
 	];
+	uploadQueue = items.filter((item) => item.status !== "done" && item.status !== "rejected");
+	uploadBaseBytes = items.reduce((sum, item) => item.status === "done" ? sum + item.file.size : sum, 0);
+	uploadedBytes = uploadBaseBytes;
 	void uploadAll(batchId, uploadTargetDir);
 }
 
@@ -159,9 +168,7 @@ function queueItemState(
 	if (progress.stage === "done" || index < progress.importedFiles)
 		return { status: "done", progress: 100 };
 	if (index < progress.completedFiles)
-		return progress.stage === "importing"
-			? { status: "importing", progress: 100 }
-			: { status: "done", progress: 100 };
+		return { status: "importing", progress: 100 };
 	if (index === progress.activeFileIndex)
 		return {
 			status: "uploading",
@@ -191,16 +198,8 @@ function applyQueueState(
 
 async function uploadAll(batchId: string, uploadTargetDir: string) {
 	if (activeBatchId !== batchId) return;
-	// Done files stay saved and rejected ones can't succeed, so a retry only resends the rest.
-	const queue = items.filter(
-		(item) => item.status !== "done" && item.status !== "rejected",
-	);
-	const baseBytes = items.reduce(
-		(s, item) => (item.status === "done" ? s + item.file.size : s),
-		0,
-	);
+	const queue = uploadQueue;
 	uploadError = null;
-	uploadedBytes = baseBytes;
 	if (queue.length === 0) {
 		finishRun(batchId);
 		return;
@@ -210,16 +209,18 @@ async function uploadAll(batchId: string, uploadTargetDir: string) {
 	let importedFiles = 0;
 	try {
 		stage = "preparing";
-		await uploadSpaceEntries({
+		uploadTask ??= createSpaceUploadTask({
 			spaceId,
 			targetDir: uploadTargetDir,
 			entries: queue.map(({ file, relativePath }) => ({ file, relativePath })),
+		});
+		await uploadTask.run({
 			signal: controller.signal,
 			onProgress: (progress) => {
 				if (activeBatchId !== batchId) return;
 				importedFiles = progress.importedFiles;
 				stage = progress.stage;
-				uploadedBytes = baseBytes + progress.uploadedBytes;
+				uploadedBytes = uploadBaseBytes + progress.uploadedBytes;
 				applyQueueState(queue, (index, item) =>
 					queueItemState(index, item.file.size, progress),
 				);
@@ -273,6 +274,9 @@ function finishRun(batchId: string) {
 function handleReset() {
 	if (closeTimer) clearTimeout(closeTimer);
 	closeTimer = null;
+	void uploadTask?.cancel();
+	uploadTask = null;
+	uploadQueue = [];
 	onClose?.();
 	items = [];
 	lastSignature = "";
@@ -301,6 +305,9 @@ onDestroy(() => {
 	queuedBatches = [];
 	items = [];
 	uploadController?.abort();
+	void uploadTask?.cancel();
+	uploadTask = null;
+	uploadQueue = [];
 });
 </script>
 

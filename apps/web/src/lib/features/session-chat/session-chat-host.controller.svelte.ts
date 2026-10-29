@@ -263,6 +263,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	const isNewSessionRoute = $derived(route.kind === "new");
 	const workspace = createSessionWorkspaceController(() => spaceId);
 	const composer = createSessionComposerController();
+	const attachmentUploadGroup = sdk.createUploadGroup();
 	const viewport = createViewportContextController();
 	const scroll = createSessionScrollController();
 	let sessionScrollAnchorsLoaded = $state(false);
@@ -2690,6 +2691,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			downloadUrl: entries[index].downloadUrl,
 		}));
 		const uploaded = await materializeSpaceEntries({
+			upload: attachmentUploadGroup,
 			spaceId: opSpaceId,
 			destination: {
 				kind: "sandbox_tmp",
@@ -2711,6 +2713,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const results = await Promise.allSettled(
 			fileAttachments.map(async (attachment) => {
 				const asset = await uploadChatAttachmentFile({
+					upload: attachmentUploadGroup,
 					spaceId: opSpaceId,
 					sessionId: sessionId ?? undefined,
 					file: attachment.file,
@@ -2755,6 +2758,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				}
 				try {
 					const asset = await uploadChatAttachmentImage({
+						upload: attachmentUploadGroup,
 						spaceId: opSpaceId,
 						sessionId: sessionId ?? undefined,
 						file: attachment.file,
@@ -2781,6 +2785,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					);
 					try {
 						const asset = await uploadChatAttachmentFile({
+							upload: attachmentUploadGroup,
 							spaceId: opSpaceId,
 							sessionId: sessionId ?? undefined,
 							file: attachment.file,

@@ -1,4 +1,7 @@
+import { configureUploadInput, resolveUploadGroup, resolveUploadRequestGroup, uploadStrategy, usesMultipart, type UploadOptions } from "../upload-config.js";
+import type { MultipartUploadPlan, UploadProtocol, UploadStrategy } from "@cohub/protocol";
 import type { HttpTransport } from "../transport.js";
+import { UploadTask, retryUploadRequest, type UploadSource, type UploadTaskCreateOptions } from "../upload-task.js";
 
 export type PublicAssetPurpose =
   | "user_avatar"
@@ -6,13 +9,15 @@ export type PublicAssetPurpose =
   | "chat_attachment"
   | "app_source"
   | "generation_input";
-export type PublicAssetUploadProtocol = "presigned_put_v1";
+export type PublicAssetUploadProtocol = UploadProtocol;
 /** Preprocessed chat images. General chat files and avatars may use any mime string. */
 export type PublicAssetMimeType = "image/webp" | "image/jpeg";
 
 export type CreatePublicAssetUploadInput = {
   purpose: PublicAssetPurpose;
-  uploadProtocol: PublicAssetUploadProtocol;
+  uploadProtocol?: PublicAssetUploadProtocol;
+  upload?: Partial<UploadStrategy>;
+  uploadRequestId?: string;
   spaceId?: string;
   sessionId?: string;
   file: {
@@ -22,7 +27,8 @@ export type CreatePublicAssetUploadInput = {
   };
 };
 
-type PublicAssetUploadBase = {
+export type PublicAssetUploadBase = {
+  multipart?: MultipartUploadPlan;
   purpose: PublicAssetPurpose;
   objectKey: string;
   publicUrl: string;
@@ -37,14 +43,16 @@ export type CreatePublicAssetUploadResponse = {
 };
 
 export type UploadPublicAssetInput = {
+  upload?: UploadOptions;
   purpose: PublicAssetPurpose;
   spaceId?: string;
   sessionId?: string;
-  file: Blob;
+  file: Blob | UploadSource;
   mimeType: string;
   filename?: string;
   onProgress?: (progress: PublicAssetUploadProgress) => void;
   signal?: AbortSignal;
+  fetch?: typeof fetch;
 };
 
 export type PublicAssetUploadProgress = {
@@ -56,15 +64,17 @@ export type PublicAssetUploadProgress = {
 export type UploadAppSourceInput = UploadChatAttachmentInput;
 
 export type UploadChatAttachmentInput = {
+  upload?: UploadOptions;
   /** Optional association only; upload is user-scoped. */
   spaceId?: string;
   /** Optional association only; upload is user-scoped. */
   sessionId?: string;
-  file: Blob;
+  file: Blob | UploadSource;
   mimeType: string;
   filename?: string;
   onProgress?: (progress: PublicAssetUploadProgress) => void;
   signal?: AbortSignal;
+  fetch?: typeof fetch;
 };
 
 /**
@@ -78,137 +88,60 @@ export type UploadChatImageAttachmentInput = UploadChatAttachmentInput & {
   mimeType: PublicAssetMimeType;
 };
 
-function createAbortError() {
-  if (typeof DOMException === "function") return new DOMException("The operation was aborted.", "AbortError");
-  const error = new Error("The operation was aborted.");
-  error.name = "AbortError";
-  return error;
-}
-
-function uploadWithProgress(input: {
-  method: "PUT";
-  url: string;
-  headers?: Record<string, string>;
-  body: Blob;
-  fileBytes: number;
-  onProgress: (progress: PublicAssetUploadProgress) => void;
-  signal?: AbortSignal;
-}) {
-  return new Promise<void>((resolve, reject) => {
-    if (input.signal?.aborted) {
-      reject(createAbortError());
-      return;
-    }
-
-    const xhr = new XMLHttpRequest();
-    let settled = false;
-    let lastRatio = 0;
-    const handleSignalAbort = () => xhr.abort();
-    const finish = (callback: () => void) => {
-      if (settled) return;
-      settled = true;
-      input.signal?.removeEventListener("abort", handleSignalAbort);
-      callback();
-    };
-    const emitProgress = (loaded: number, total: number) => {
-      const ratio = Math.max(lastRatio, Math.min(1, total > 0 ? loaded / total : 0));
-      lastRatio = ratio;
-      try {
-        input.onProgress({
-          loadedBytes: Math.round(input.fileBytes * ratio),
-          totalBytes: input.fileBytes,
-          ratio,
-        });
-      } catch {
-        // Observers must not be able to interrupt the upload request.
-      }
-    };
-
-    try {
-      xhr.open(input.method, input.url);
-      for (const [key, value] of Object.entries(input.headers ?? {})) {
-        if (/[\r\n\0]/.test(value)) continue;
-        xhr.setRequestHeader(key, value);
-      }
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) emitProgress(event.loaded, event.total);
-      };
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          emitProgress(1, 1);
-          finish(resolve);
-          return;
-        }
-        const detail = xhr.responseText?.trim();
-        finish(() => reject(new Error(
-          `Public asset upload failed: HTTP ${xhr.status}${detail ? ` — ${detail}` : ""}`,
-        )));
-      };
-      xhr.onerror = () => finish(() => reject(new Error("Public asset upload failed")));
-      xhr.onabort = () => finish(() => reject(createAbortError()));
-      input.signal?.addEventListener("abort", handleSignalAbort, { once: true });
-      xhr.send(input.body);
-    } catch (error) {
-      finish(() => reject(error));
-    }
-  });
-}
-
 export class PublicAssetsApi {
   constructor(private readonly transport: HttpTransport) {}
 
-  createUpload(input: CreatePublicAssetUploadInput, options: { signal?: AbortSignal } = {}) {
+  createUploadGroup(upload?: UploadOptions) {
+    return resolveUploadGroup(this.transport, upload);
+  }
+
+  private requestUpload(input: CreatePublicAssetUploadInput, signal?: AbortSignal) {
     return this.transport.request<CreatePublicAssetUploadResponse>("/api/public-assets/uploads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-      signal: options.signal,
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), signal,
     });
   }
 
-  async upload(input: UploadPublicAssetInput) {
-    if (input.signal?.aborted) throw createAbortError();
-    const plan = await this.createUpload({
+  createUpload(input: CreatePublicAssetUploadInput, options: { signal?: AbortSignal; upload?: UploadOptions } = {}) {
+    const group = resolveUploadRequestGroup(this.transport, input, options.upload, !input.uploadProtocol);
+    if (!group) return this.requestUpload(input, options.signal);
+    const body = configureUploadInput({
+      ...input,
+      uploadProtocol: input.uploadProtocol ?? (group.config.multipart === "never" ? "presigned_put_v1" : "multipart_v1"),
+      uploadRequestId: input.uploadRequestId ?? crypto.randomUUID(),
+    }, group);
+    return retryUploadRequest((signal) => this.requestUpload(body, signal), options.signal, group.config);
+  }
+
+  createUploadTask(input: UploadPublicAssetInput): UploadTask<PublicAssetUploadBase> {
+    const group = this.createUploadGroup(input.upload);
+    const multipart = usesMultipart(group.config, input.file.size);
+    const body: CreatePublicAssetUploadInput = {
       purpose: input.purpose,
-      uploadProtocol: "presigned_put_v1",
+      uploadProtocol: multipart ? "multipart_v1" : "presigned_put_v1",
+      upload: { ...uploadStrategy(group.config), multipart: multipart ? "always" : "never" },
+      uploadRequestId: crypto.randomUUID(),
       spaceId: input.spaceId,
       sessionId: input.sessionId,
-      file: {
-        size: input.file.size,
-        mimeType: input.mimeType,
-        filename: input.filename,
-      },
-    }, { signal: input.signal });
-    if (input.signal?.aborted) throw createAbortError();
-    let response: Response;
-    if (input.onProgress && typeof XMLHttpRequest === "function") {
-      await uploadWithProgress({
-        method: "PUT",
-        url: plan.asset.uploadUrl,
-        headers: plan.asset.uploadHeaders,
-        body: input.file,
-        fileBytes: input.file.size,
-        onProgress: input.onProgress,
-        signal: input.signal,
-      });
-      return plan.asset;
-    }
-    response = await fetch(plan.asset.uploadUrl, {
-      method: "PUT",
-      headers: plan.asset.uploadHeaders,
-      body: input.file,
-      signal: input.signal,
-    });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new Error(`Public asset upload failed: HTTP ${response.status}${detail ? ` — ${detail}` : ""}`);
-    }
-    return plan.asset;
+      file: { size: input.file.size, mimeType: input.mimeType, filename: input.filename },
+    };
+    const options: UploadTaskCreateOptions = { upload: group, signal: input.signal, onProgress: input.onProgress, fetch: input.fetch };
+    return new UploadTask(this.transport, input.file, async (signal) => {
+      const response = await this.requestUpload(body, signal);
+      return {
+        plan: { uploadUrl: response.asset.uploadUrl, headers: response.asset.uploadHeaders, multipart: response.asset.multipart },
+        result: response.asset,
+      };
+    }, options);
+  }
+
+  upload(input: UploadPublicAssetInput) {
+    return this.createUploadTask(input).run();
   }
 
   /** Durable public upload for any chat attachment (image or file). No space required. */
   uploadAppSource(input: UploadAppSourceInput) {
     return this.upload({
+      upload: input.upload,
       purpose: "app_source",
       spaceId: input.spaceId,
       sessionId: input.sessionId,
@@ -217,11 +150,13 @@ export class PublicAssetsApi {
       filename: input.filename,
       onProgress: input.onProgress,
       signal: input.signal,
+      fetch: input.fetch,
     });
   }
 
   uploadChatAttachment(input: UploadChatAttachmentInput) {
     return this.upload({
+      upload: input.upload,
       purpose: "chat_attachment",
       spaceId: input.spaceId,
       sessionId: input.sessionId,
@@ -230,6 +165,7 @@ export class PublicAssetsApi {
       filename: input.filename,
       onProgress: input.onProgress,
       signal: input.signal,
+      fetch: input.fetch,
     });
   }
 

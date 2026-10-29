@@ -1,22 +1,27 @@
 import { randomUUID } from "node:crypto";
-import { lstat, readdir } from "node:fs/promises";
+import { lstat, readdir, realpath } from "node:fs/promises";
 import { basename, relative, resolve } from "node:path";
 import {
   isTextMime,
   mimeTypeForPath,
+  HttpError,
+  UploadHttpError,
   type CohubHttpClient,
   type PublicFileListEntry,
   type PublicFileUploadPlanEntry,
+  type UploadConfig,
+  UploadGroup,
 } from "@neta-art/cohub";
 import { type MediaFacts, mediaFacts } from "@neta-art/cohub/media";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { HttpPutError, putLocalFile } from "../http-put.js";
+import { localUploadSource } from "../local-upload-source.js";
 import { localMediaFacts } from "../local-media.js";
 import { error, handleHttp, json as outJson, jsonRequested } from "../output.js";
 import { resolveSpace } from "../space.js";
 
-const UPLOAD_CONCURRENCY = 4;
+const MEDIA_CONCURRENCY = 4;
 
 type LocalPublicFile = {
   id: string;
@@ -29,6 +34,7 @@ type LocalPublicFile = {
 type PublicCommandDeps = {
   createClient?: () => CohubHttpClient;
   fetch?: typeof fetch;
+  upload?: Partial<UploadConfig> | UploadGroup;
 };
 
 function hasControlCharacters(value: string) {
@@ -156,19 +162,24 @@ async function mapSettledWithConcurrency<T>(
 async function putPublicFile(
   file: LocalPublicFile,
   plan: PublicFileUploadPlanEntry,
+  publicFiles: ReturnType<CohubHttpClient["space"]>["publicFiles"],
+  upload: UploadGroup,
   fetchImpl: typeof fetch,
 ) {
   try {
-    await putLocalFile({
-      url: plan.uploadUrl,
-      filePath: file.localPath,
-      size: file.size,
-      headers: plan.headers,
-      label: file.publicPath,
-      fetch: fetchImpl,
-    });
+    const filePath = await realpath(file.localPath);
+    const source = await localUploadSource(filePath, file.size);
+    if (plan.multipart) {
+      await publicFiles.createUploadTask(plan, source, { upload, fetch: fetchImpl }).run();
+    } else {
+      const release = await upload.acquire(new AbortController().signal);
+      try {
+        await putLocalFile({ url: plan.uploadUrl, filePath, size: file.size, headers: plan.headers, label: file.publicPath, fetch: fetchImpl,
+          attempts: upload.config.maxAttempts, timeoutMs: upload.config.timeoutMs, validate: async () => source.validate?.() });
+      } finally { release(); }
+    }
   } catch (error) {
-    if (error instanceof HttpPutError && (error.status === 409 || error.status === 412)) {
+    if ((error instanceof UploadHttpError || error instanceof HttpPutError || error instanceof HttpError) && (error.status === 409 || error.status === 412)) {
       throw new Error(`${file.publicPath} already exists. Use --overwrite.`);
     }
     throw error;
@@ -181,7 +192,7 @@ async function publicMediaFacts(files: LocalPublicFile[]) {
     const type = file.mimeType.split("/")[0];
     return type === "image" || type === "video" ? [{ file, type: type as "image" | "video" }] : [];
   });
-  await mapSettledWithConcurrency(media, UPLOAD_CONCURRENCY, async ({ file, type }) => {
+  await mapSettledWithConcurrency(media, MEDIA_CONCURRENCY, async ({ file, type }) => {
     // Facts only help previews; out-of-range ones are dropped rather than failing the upload.
     const found = mediaFacts(await localMediaFacts(file.localPath, type));
     if (found) facts.set(file.id, found);
@@ -219,7 +230,10 @@ async function uploadPublic(
   try {
     const upload = await collectPublicUpload(source, destination);
     const media = await publicMediaFacts(upload.files);
-    const plan = await client.space(spaceId).publicFiles.createUpload({
+    const publicFiles = client.space(spaceId).publicFiles;
+    const group = deps.upload instanceof UploadGroup ? deps.upload : new UploadGroup(deps.upload, publicFiles.uploadConfig);
+    const plan = await publicFiles.createUpload({
+      uploadRequestId: randomUUID(),
       overwrite: Boolean(opts.overwrite),
       entries: upload.files.map((file) => ({
         id: file.id,
@@ -228,7 +242,7 @@ async function uploadPublic(
         mimeType: file.mimeType,
         ...(media.has(file.id) ? { media: media.get(file.id) } : {}),
       })),
-    });
+    }, { upload: group });
 
     if (opts.overwrite && !jsonRequested(opts)) {
       process.stderr.write(`Overwrite enabled for ${upload.destination}\n`);
@@ -241,10 +255,10 @@ async function uploadPublic(
       ? plan.entries.filter((entry) => entry.id !== entryPlan.id)
       : plan.entries;
     const uploadPlans = async (entries: PublicFileUploadPlanEntry[]) =>
-      mapSettledWithConcurrency(entries, UPLOAD_CONCURRENCY, async (entry) => {
+      mapSettledWithConcurrency(entries, group.config.concurrency, async (entry) => {
         const file = filesById.get(entry.id);
         if (!file) throw new Error(`Missing local file for ${entry.path}`);
-        await putPublicFile(file, entry, deps.fetch ?? fetch);
+        await putPublicFile(file, entry, publicFiles, group, deps.fetch ?? fetch);
       });
 
     const assetErrors = await uploadPlans(assetPlans);

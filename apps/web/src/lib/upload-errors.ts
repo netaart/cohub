@@ -45,6 +45,8 @@ export function describeUploadError(
 ): string | null {
 	if (error instanceof UploadTransferError)
 		return error.status === 0 ? m.upload_error_network({}, { locale }) : null;
+	if (error instanceof TypeError || (error instanceof Error && error.name === "TimeoutError"))
+		return m.upload_error_network({}, { locale });
 	if (typeof error !== "object" || error === null) return null;
 	const coded = error as CodedError;
 	if (coded.code === UPLOAD_ERROR_FILE_TOO_LARGE)

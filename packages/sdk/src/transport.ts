@@ -1,3 +1,4 @@
+import { resolveUploadConfig, type UploadConfig } from "./upload-config.js";
 import type { RequestSource } from "@cohub/protocol/provenance";
 import { requestSourceToHeaders } from "@cohub/protocol/provenance";
 import type { CohubEnvironment } from "./environment.js";
@@ -68,6 +69,7 @@ export type UnauthorizedContext = {
 };
 
 export type CohubClientOptions = {
+  upload?: Partial<UploadConfig>;
   env?: CohubEnvironment;
   baseUrl?: string;
   webBaseUrl?: string;
@@ -194,6 +196,8 @@ export function matchesUnauthorizedErrorToken(
 }
 
 export class HttpTransport {
+  readonly uploadConfig: Readonly<UploadConfig>;
+  readonly hasUploadConfig: boolean;
   private readonly baseUrl: string;
   private readonly fetcher: Fetch;
   private readonly getAccessToken?: (options?: AccessTokenRequestOptions) => Promise<string | null> | string | null;
@@ -207,6 +211,8 @@ export class HttpTransport {
   } | null = null;
 
   constructor(options: CohubClientOptions = {}) {
+    this.uploadConfig = resolveUploadConfig(options.upload);
+    this.hasUploadConfig = options.upload !== undefined;
     this.baseUrl = resolveApiBaseUrl(options);
     this.fetcher = options.fetch ?? fetch;
     this.getAccessToken = options.getAccessToken;

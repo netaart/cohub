@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { batchUploadEntries, type CohubHttpClient, type SpaceFsUploadEntry } from "@neta-art/cohub";
-import { putLocalFile } from "../http-put.js";
+import { batchUploadEntries, type CohubHttpClient, type SpaceFsUploadEntry, type UploadConfig, type UploadGroup } from "@neta-art/cohub";
+import { localUploadSource } from "../local-upload-source.js";
 import { createLimiter } from "./limit.js";
 
 export type SpaceFiles = ReturnType<CohubHttpClient["space"]>["files"];
@@ -11,18 +11,19 @@ export type LocalUploadEntry = {
   size: number;
 };
 
-const PUT_CONCURRENCY = 4;
-
 export async function uploadLocalFiles(files: SpaceFiles, entries: LocalUploadEntry[], options: {
   targetDir?: string;
   onUploaded?: (entry: LocalUploadEntry) => void;
+  upload?: Partial<UploadConfig> | UploadGroup;
 } = {}) {
   const uploaded: SpaceFsUploadEntry[] = [];
   const uploadIds: string[] = [];
-  const limit = createLimiter(PUT_CONCURRENCY);
+  const group = files.createUploadGroup(options.upload);
+  const limit = createLimiter(group.config.concurrency);
   for (const batch of batchUploadEntries(entries, (entry) => entry.size)) {
     const byId = new Map<string, LocalUploadEntry>(batch.map((entry) => [randomUUID(), entry]));
     const plan = await files.createUpload({
+      uploadRequestId: randomUUID(),
       destination: { kind: "workspace", targetDir: options.targetDir },
       entries: [...byId].map(([id, entry]) => ({
         id,
@@ -31,16 +32,17 @@ export async function uploadLocalFiles(files: SpaceFiles, entries: LocalUploadEn
         size: entry.size,
         mimeType: null,
       })),
-    });
+    }, { upload: group });
     await Promise.all(plan.entries.map((item) => limit(async () => {
       const entry = byId.get(item.id);
       if (!entry) throw new Error(`Missing upload entry: ${item.id}`);
-      if (item.uploadUrl) {
-        await putLocalFile({ url: item.uploadUrl, filePath: entry.localPath, size: entry.size, headers: item.headers, label: entry.relativePath });
+      if (item.uploadUrl || item.multipart) {
+        const source = await localUploadSource(entry.localPath, entry.size);
+        await files.createUploadTask(item, source, { upload: group }).run();
       }
       options.onUploaded?.(entry);
     })));
-    const result = await files.completeUpload(plan.uploadId, { entries: plan.entries.map((item) => ({ id: item.id })) });
+    const result = await files.completeUpload(plan.uploadId, { entries: plan.entries.map((item) => ({ id: item.id })) }, { upload: group });
     uploaded.push(...result.uploaded);
     uploadIds.push(plan.uploadId);
   }

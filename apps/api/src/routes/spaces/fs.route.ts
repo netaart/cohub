@@ -35,18 +35,19 @@ import {
 import { buildCreatedDirectoryChanges, buildFileMutationChanges } from "../../space-fs-change.js";
 import { dispatchSpaceFsChanged } from "../../space-events.js";
 import {
-  beginSpaceUploadComplete,
+  claimSpaceUploadEntries,
+  getSpaceUploadResult,
+  saveSpaceUploadResult,
   buildSpaceUploadObjectKey,
-  cancelSpaceUploadComplete,
   createPresignedGetUrl,
   createPresignedPutUrl,
   createSpaceUploadId,
-  deleteSpaceUploadManifest,
   getSpaceUploadManifest,
   saveSpaceUploadManifest,
   type SpaceUploadDestination,
   type SpaceUploadManifestEntry,
 } from "../../space-upload-storage.js";
+import { abortMultipartUpload, createMultipartUpload, getMultipartUpload, MultipartUploadError, normalizeUploadStrategy, shouldUseMultipartUpload, withUploadRequest } from "../../multipart-upload.js";
 import { consumeUploadQuota, UploadRateLimitError, uploadRateLimitedResponse } from "../../upload-quota.js";
 import { getSpaceFsCopy, startSpaceFsCopy, type SpaceFsCopyState } from "../../space-fs-copy-queue.js";
 import { redisCommandClient } from "../../redis.js";
@@ -556,6 +557,8 @@ router.post("/uploads", async (c) => {
   if (!body?.entries?.length) return c.json({ message: "entries are required" }, 400);
   if (body.entries.length > UPLOAD_MAX_BATCH_FILES) return c.json({ code: UPLOAD_ERROR_TOO_MANY_FILES, message: "too many files" }, 413);
 
+  if (body.uploadProtocol != null && body.uploadProtocol !== "presigned_put_v1" && body.uploadProtocol !== "multipart_v1") return c.json({ message: "unsupported upload protocol" }, 400);
+
   const uploadId = createSpaceUploadId();
   const seenIds = new Set<string>();
   const seenPaths = new Set<string>();
@@ -563,6 +566,7 @@ router.post("/uploads", async (c) => {
   let totalBytes = 0;
 
   try {
+    const upload = normalizeUploadStrategy(body);
     const destination = normalizeUploadDestination(body.destination);
     for (const entry of body.entries) {
       if (typeof entry.id !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(entry.id) || seenIds.has(entry.id)) {
@@ -606,41 +610,49 @@ router.post("/uploads", async (c) => {
       });
     }
 
-    // Capture the destination baseline before the client uploads the object;
-    // the async materializer uses it to reject a late overwrite.
-    if (destination.kind === "workspace") {
-      const targetDir = destination.targetDir ?? "";
-      const targetVersions = await mapWithConcurrency(entries, UPLOAD_TARGET_STAT_CONCURRENCY, (entry) => {
-        const targetPath = targetDir ? `${targetDir}/${entry.relativePath}` : entry.relativePath;
-        return statSpaceFileVersion(spaceId, targetPath);
-      });
-      for (const [index, entry] of entries.entries()) {
-        entry.targetVersion = targetVersions[index];
+    const result = await withUploadRequest(user.uuid, `space-files:${spaceId}`, body, async (quotaRequestId) => {
+      if (destination.kind === "workspace") {
+        const targetDir = destination.targetDir ?? "";
+        const targetVersions = await mapWithConcurrency(entries, UPLOAD_TARGET_STAT_CONCURRENCY, (entry) => {
+          const targetPath = targetDir ? `${targetDir}/${entry.relativePath}` : entry.relativePath;
+          return statSpaceFileVersion(spaceId, targetPath);
+        });
+        for (const [index, entry] of entries.entries()) entry.targetVersion = targetVersions[index];
       }
-    }
-
-    // Charge quota only after full validation so bad requests cannot consume the window.
-    await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: entries.length, totalBytes });
-
-    const planned = entries.map((entry) => {
-      if (entry.downloadUrl) {
-        return { id: entry.id, downloadUrl: entry.downloadUrl };
+      await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: entries.length, totalBytes }, quotaRequestId);
+      const created: string[] = [];
+      try {
+        const planned = [];
+        for (const entry of entries) {
+          if (entry.downloadUrl) {
+            planned.push({ id: entry.id, downloadUrl: entry.downloadUrl });
+            continue;
+          }
+          const objectKey = entry.objectKey;
+          if (!objectKey) throw new Error("upload object key is missing");
+          const signed = createPresignedPutUrl(objectKey, entry.mimeType, entry.size);
+          const multipart = shouldUseMultipartUpload(entry.size, upload)
+            ? await createMultipartUpload({
+              userId: user.uuid, storageKind: "space_upload", objectKey,
+              size: entry.size, partSize: upload.partSizeBytes, headers: signed.headers, access: { spaceId, permission: "file.edit" },
+            }) : undefined;
+          if (multipart) {
+            entry.multipartUploadId = multipart.uploadId;
+            created.push(multipart.uploadId);
+          }
+          planned.push({ id: entry.id, objectKey: entry.objectKey, uploadUrl: signed.uploadUrl, headers: signed.headers, ...(multipart ? { multipart } : {}) });
+        }
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        await saveSpaceUploadManifest({ uploadId, spaceId, userId: user.uuid, destination, entries, createdAt: new Date().toISOString(), expiresAt });
+        return { uploadId, expiresAt, entries: planned };
+      } catch (error) {
+        await Promise.allSettled(created.map(async (id) => { const record = await getMultipartUpload(id); if (record) await abortMultipartUpload(record); }));
+        throw error;
       }
-      const signed = createPresignedPutUrl(entry.objectKey as string, entry.mimeType, entry.size);
-      return { id: entry.id, objectKey: entry.objectKey, uploadUrl: signed.uploadUrl, headers: signed.headers };
     });
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    await saveSpaceUploadManifest({
-      uploadId,
-      spaceId,
-      userId: user.uuid,
-      destination,
-      entries,
-      createdAt: new Date().toISOString(),
-      expiresAt,
-    });
-    return c.json({ uploadId, expiresAt, entries: planned });
+    return c.json(result);
   } catch (error) {
+    if (error instanceof MultipartUploadError) return c.json({ message: error.message }, error.status);
     if (error instanceof UploadRateLimitError) return uploadRateLimitedResponse(c, error);
     if (error instanceof SpaceFsError || (error instanceof Error && error.name === "SandboxOfflineError")) {
       const mapped = spaceFsJsonError(error);
@@ -663,26 +675,33 @@ router.post("/uploads/:uploadId/complete", async (c) => {
   const body = await c.req.json<SpaceFsCompleteUploadInput>().catch(() => null);
   if (!body?.entries?.length || !Array.isArray(body.entries)) return c.json({ message: "entries are required" }, 400);
   if (body.entries.some((entry) => typeof entry.id !== "string")) return c.json({ message: "invalid entries" }, 400);
-  const completeState = await beginSpaceUploadComplete(spaceId, uploadId);
-  if (!completeState.acquired) {
-    return c.json({ message: "upload is already being completed" }, 409);
-  }
 
   try {
     const manifest = await getSpaceUploadManifest(spaceId, uploadId);
     if (!manifest || manifest.userId !== user.uuid) {
-      await cancelSpaceUploadComplete(spaceId, uploadId);
       return c.json({ message: "upload not found" }, 404);
     }
     const completedIds = new Set(body.entries.map((entry) => entry.id));
+    if (completedIds.size !== body.entries.length || body.entries.some((entry) => !manifest.entries.some((planned) => planned.id === entry.id))) {
+      return c.json({ message: "invalid completed entries" }, 400);
+    }
     const entries = manifest.entries.filter((entry) => completedIds.has(entry.id));
     if (entries.length === 0) {
-      await cancelSpaceUploadComplete(spaceId, uploadId);
       return c.json({ message: "no completed entries" }, 400);
     }
     if (manifest.destination.kind === "workspace" && entries.some((entry) => !entry.targetVersion)) {
-      await cancelSpaceUploadComplete(spaceId, uploadId);
       return c.json({ code: "upload_conflict", message: "upload target version is unavailable; upload the file again" }, 409);
+    }
+
+    if (!(await claimSpaceUploadEntries(spaceId, uploadId, [...completedIds]))) {
+      return c.json({ message: "upload completion entries do not match the original request" }, 409);
+    }
+    const completed = await getSpaceUploadResult(spaceId, uploadId);
+    if (completed) return c.json(completed);
+    for (const entry of entries) {
+      if (!entry.multipartUploadId) continue;
+      const multipart = await getMultipartUpload(entry.multipartUploadId);
+      if (multipart?.state !== "completed") return c.json({ message: "file upload is not complete" }, 409);
     }
 
     const destinationRoot = buildUploadDestinationRoot(manifest.destination, manifest.uploadId);
@@ -711,13 +730,10 @@ router.post("/uploads/:uploadId/complete", async (c) => {
       }),
     });
 
-    await deleteSpaceUploadManifest(spaceId, uploadId);
-    return c.json({
-      ok: true,
-      uploaded: result.uploaded,
-    });
+    const response = { ok: true as const, uploaded: result.uploaded };
+    await saveSpaceUploadResult(spaceId, uploadId, response);
+    return c.json(response);
   } catch (error) {
-    await cancelSpaceUploadComplete(spaceId, uploadId);
     if (error instanceof SandboxUploadSizeMismatchError) {
       return c.json({ code: "upload_size_mismatch", message: "uploaded file size does not match" }, 422);
     }

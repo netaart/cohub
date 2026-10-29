@@ -11,7 +11,7 @@ export class UserUploadConfigError extends Error {
   override name = "UserUploadConfigError";
 }
 
-const requireStorage = (kind: UserUploadBucket): PresignStorageConfig & {
+export const requireUserUploadStorage = (kind: UserUploadBucket): PresignStorageConfig & {
   endpoint: string;
   bucket: string;
   accessKeyId: string;
@@ -51,7 +51,7 @@ export const createUserUploadPutUrl = (input: {
   contentDisposition?: string | null;
   contentLength?: number;
 }) => createPresignedPutObjectUrl(
-  requireStorage(input.kind),
+  requireUserUploadStorage(input.kind),
   input.objectKey,
   input.contentType,
   input.cacheControl,
@@ -60,7 +60,7 @@ export const createUserUploadPutUrl = (input: {
 );
 
 export const createUserUploadGetUrl = (kind: UserUploadBucket, objectKey: string) =>
-  createPresignedGetObjectUrl(requireStorage(kind), objectKey);
+  createPresignedGetObjectUrl(requireUserUploadStorage(kind), objectKey);
 
 export const buildChatAttachmentPublicUrl = (objectKey: string) => {
   if (!config.chatAttachmentPublicBaseUrl) {

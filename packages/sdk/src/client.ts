@@ -1,3 +1,4 @@
+import { resolveUploadGroup, type UploadOptions } from "./upload-config.js";
 import type { AppDevice } from "@cohub/protocol/app-devices";
 import { ChannelsApi } from "./apis/channels.js";
 import { BillingApi } from "./apis/billing.js";
@@ -99,6 +100,10 @@ export class CohubClient {
   private readonly fileServices: SpaceFileServices;
   private readonly appRuntime: AppRuntimeApi;
   private readonly appWindow: AppWindowApi;
+
+  createUploadGroup(upload?: UploadOptions) {
+    return resolveUploadGroup(this.transport, upload);
+  }
 
   constructor(options: CohubClientOptions = {}) {
     const apiBaseUrl = resolveApiBaseUrl(options);

@@ -314,7 +314,7 @@ export {
   parseBoardDocument,
   parseBoardItem,
 } from "@cohub/protocol";
-export type { CreatePublicAssetUploadInput, CreatePublicAssetUploadResponse, PublicAssetMimeType, PublicAssetPurpose, PublicAssetUploadProgress, PublicAssetUploadProtocol, UploadAppSourceInput, UploadChatAttachmentInput, UploadChatImageAttachmentInput, UploadGenerationInputInput, UploadPublicAssetInput } from "./apis/public-assets.js";
+export type { CreatePublicAssetUploadInput, CreatePublicAssetUploadResponse, PublicAssetMimeType, PublicAssetUploadBase, PublicAssetPurpose, PublicAssetUploadProgress, PublicAssetUploadProtocol, UploadAppSourceInput, UploadChatAttachmentInput, UploadChatImageAttachmentInput, UploadGenerationInputInput, UploadPublicAssetInput } from "./apis/public-assets.js";
 export type { AppActionRunResponse, AppAuthorizeResponse, AppContent, AppContentDownload, AppCreateInput, AppDetailResponse, AppExtractedPageMeta, AppGetResponse, AppMeta, AppPresentationMeta, AppPromotionCreateInput, AppPromotionEventResponse, AppPromotionProvider, AppPromotionProviderStatus, AppPromotionRecord, AppPromotionStatsResponse, AppPublicOwnerRecord, AppPublicSpaceRecord, AppRecord, AppResolveResponse, AppSessionResponse, AppStatus, AppTargetType, AppUpdateInput, AppVersionRecord, AppViewerGrantRecord, AppViewSource, AppViewStatsResponse, AppVisibility, PublicAppVersionSummary } from "./apis/apps.js";
 export type {
   PublicFileCreateUploadInput,
@@ -512,3 +512,10 @@ export type {
   AppContentKind as WorkContentKind,
 } from "@cohub/protocol";
 export type { PublicUserWorkItem } from "./types.js";
+
+export { UploadTask, UploadHttpError } from "./upload-task.js";
+export type { UploadPlan, UploadProgress, UploadSource, UploadTaskOptions, UploadTaskCreateOptions, PreparedUploadTaskOptions } from "./upload-task.js";
+export type { MultipartUploadPlan, MultipartUploadPart, MultipartUploadCompletedPart, UploadProtocol, UploadStrategy } from "@cohub/protocol";
+
+export { UploadGroup, DEFAULT_UPLOAD_CONFIG } from "./upload-config.js";
+export type { UploadConfig, UploadOptions } from "./upload-config.js";

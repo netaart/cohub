@@ -1,3 +1,4 @@
+import type { MultipartUploadPlan, UploadProtocol, UploadStrategy } from "../upload.js";
 import type { MediaFacts } from "../core/media.js";
 
 export * from "./mime.js";
@@ -265,11 +266,15 @@ export type SpaceFsUploadDestination =
     };
 
 export type SpaceFsCreateUploadInput = {
+  uploadProtocol?: UploadProtocol;
+  upload?: Partial<UploadStrategy>;
+  uploadRequestId?: string;
   destination: SpaceFsUploadDestination;
   entries: SpaceFsUploadPlanEntryInput[];
 };
 
 export type SpaceFsUploadPlanEntry = {
+  multipart?: MultipartUploadPlan;
   id: string;
   /** Present for client-PUT entries; omitted for remote downloadUrl entries. */
   objectKey?: string;

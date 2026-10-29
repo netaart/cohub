@@ -1,3 +1,4 @@
+import { resolveUploadGroup, type UploadOptions } from "./upload-config.js";
 import { ChannelsApi } from "./apis/channels.js";
 import { CronJobsApi } from "./apis/cron-jobs.js";
 import { GenerationsApi } from "./apis/generations.js";
@@ -61,6 +62,10 @@ export class CohubHttpClient {
 
   private readonly transport: HttpTransport;
   private readonly fileServices: SpaceFileServices;
+
+  createUploadGroup(upload?: UploadOptions) {
+    return resolveUploadGroup(this.transport, upload);
+  }
 
   constructor(options: CohubClientOptions = {}) {
     const apiBaseUrl = resolveApiBaseUrl(options);

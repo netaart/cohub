@@ -1,3 +1,4 @@
+import type { MultipartUploadPlan, UploadProtocol, UploadStrategy } from "@cohub/protocol";
 export type { SpaceWalletSummary, SpaceWalletActivity, SpaceWalletActivityPage } from "@cohub/protocol";
 export type { SessionStats, ExecutionStats, TurnMetrics, RequestMetric } from "@cohub/protocol/model";
 import type { MediaFacts } from "@cohub/protocol/core";
@@ -742,10 +743,14 @@ export type SpaceFsUploadDestination =
       sessionId?: string;
     };
 export type SpaceFsCreateUploadInput = {
+  uploadProtocol?: UploadProtocol;
+  upload?: Partial<UploadStrategy>;
+  uploadRequestId?: string;
   destination: SpaceFsUploadDestination;
   entries: SpaceFsUploadPlanEntryInput[];
 };
 export type SpaceFsUploadPlanEntry = {
+  multipart?: MultipartUploadPlan;
   id: string;
   /** Present for client-PUT entries; omitted for remote downloadUrl entries. */
   objectKey?: string;

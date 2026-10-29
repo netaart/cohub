@@ -21,6 +21,7 @@ import paletteOverviewRouter from "./palette-overview.route.js";
 import generationsRouter from "./generations.route.js";
 import billingRouter from "./billing.route.js";
 import queuesRouter from "./queues.route.js";
+import uploadsRouter from "./uploads.route.js";
 import publicAssetsRouter from "./public-assets.route.js";
 import { createAppsRouter } from "./apps.route.js";
 import { appDomainsRouter } from "./app-domains.route.js";
@@ -59,6 +60,7 @@ router.route("/api/generations", generationsRouter);
 router.route("/api/billing", billingRouter);
 router.route("/api/queues", queuesRouter);
 router.route("/api/public-assets", publicAssetsRouter);
+router.route("/api/uploads", uploadsRouter);
 // Works REST is dual-mounted: the canonical /api/apps serves new SDK clients,
 // and the legacy /api/works mount keeps existing consumers (older SDK versions
 // and direct REST callers) working with identical payloads until the next

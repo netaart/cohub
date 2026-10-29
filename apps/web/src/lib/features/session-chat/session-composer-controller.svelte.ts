@@ -13,7 +13,7 @@ import {
 import type { Locale } from "$lib/i18n/locale";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
-import { prepareChatImageAttachment } from "$lib/public-asset-images";
+import { cancelChatAttachmentUpload, prepareChatImageAttachment } from "$lib/public-asset-images";
 import { entriesFromFiles, type LocalUploadEntry } from "$lib/upload-entries";
 import {
 	exceedsUploadFileLimit,
@@ -264,12 +264,17 @@ export function createSessionComposerController() {
 	function handleRemoveAttachment(id: string) {
 		const removed = attachments.find((attachment) => attachment.id === id);
 		if (removed) revokeComposerAttachmentPreview(removed);
+		if (removed?.kind === "file" || removed?.kind === "image")
+			void cancelChatAttachmentUpload(removed.file);
 		attachments = attachments.filter((attachment) => attachment.id !== id);
 	}
 
 	function dispose() {
-		for (const attachment of attachments)
+		for (const attachment of attachments) {
 			revokeComposerAttachmentPreview(attachment);
+			if (attachment.kind === "file" || attachment.kind === "image")
+				void cancelChatAttachmentUpload(attachment.file);
+		}
 	}
 
 	return {

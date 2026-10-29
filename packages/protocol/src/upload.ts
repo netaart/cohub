@@ -39,3 +39,24 @@ export const INLINE_WRITE_MAX_BYTES = 10 * MiB;
 export const UPLOAD_RATE_WINDOW_SECONDS = 60 * 60;
 export const UPLOAD_RATE_MAX_FILES = 5_000;
 export const UPLOAD_RATE_MAX_BYTES = 10 * GiB;
+
+export const UPLOAD_MULTIPART_PART_BYTES = 16 * MiB;
+export type UploadProtocol = "presigned_put_v1" | "multipart_v1";
+export type MultipartUploadPart = {
+  partNumber: number;
+  uploadUrl: string;
+  headers?: Record<string, string>;
+};
+export type MultipartUploadPlan = {
+  uploadId: string;
+  partSize: number;
+  parts: MultipartUploadPart[];
+  expiresAt: string;
+};
+export type MultipartUploadCompletedPart = { partNumber: number; etag: string };
+
+export type UploadStrategy = {
+  multipart: "auto" | "always" | "never";
+  multipartThresholdBytes: number;
+  partSizeBytes: number;
+};
