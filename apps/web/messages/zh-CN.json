@@ -2718,7 +2718,7 @@
 	"billing_recovery_grace_detail": "功能保留至 {date}，付款后补充本期额度。",
 	"billing_recovery_closing": "正在更新订阅…",
 	"billing_recovery_pay": "继续付款",
-	"billing_recovery_resubscribe": "重新订阅",
+	"billing_recovery_resubscribe": "重新选择套餐",
 	"billing_recovery_refresh": "重新查看",
 	"billing_recovery_end_confirm": "将结束当前套餐，之后可按最新价格重新订阅。",
 	"billing_recovery_paid_before_cancel": "付款已完成，套餐已恢复。",

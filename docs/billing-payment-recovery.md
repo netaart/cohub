@@ -8,7 +8,7 @@ admission. Cohub displays its `renewal_recovery` summary without treating
 - Catalog and settings share one current-plan selection: valid grace stays on the
   paid plan with a payment-due label, and closing shows processing rather than free
   or paid-active. The purchase panel leads with “Continue payment” and a bordered
-  “Subscribe again” secondary button of the same size. It shows the feature
+  “Choose a plan” secondary button of the same size. It shows the feature
   deadline and credits-after-payment
   promise, without a new-purchase quote that could be mistaken for the amount due.
   Processing hides subscription purchase actions, keeps the independent Credits

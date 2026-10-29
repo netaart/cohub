@@ -2718,7 +2718,7 @@
 	"billing_recovery_grace_detail": "Features remain available until {date}. Pay to receive this period’s credits.",
 	"billing_recovery_closing": "Updating your subscription…",
 	"billing_recovery_pay": "Continue payment",
-	"billing_recovery_resubscribe": "Subscribe again",
+	"billing_recovery_resubscribe": "Choose a plan",
 	"billing_recovery_refresh": "Check again",
 	"billing_recovery_end_confirm": "Your current plan will end. You can then subscribe again at the latest price.",
 	"billing_recovery_paid_before_cancel": "Payment complete. Your plan is restored.",
