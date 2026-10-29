@@ -4,6 +4,7 @@ import { agentTurnQueue } from "../agent-turn-queue.js";
 import { fsCdnQueue } from "../space-fs-cdn-queue.js";
 import { taskQueue } from "../tasks.js";
 import { config } from "../config.js";
+import { workspaceUsageQueue } from "../workspace-usage.js";
 
 const router = new Hono();
 
@@ -18,7 +19,7 @@ const describeRedisEndpoint = (value: string) => {
 };
 
 router.get("/", async (c) => {
-  const queues = await getQueueSnapshots([taskQueue, agentTurnQueue, fsCdnQueue], { redisUrl: config.bullmqRedisUrl });
+  const queues = await getQueueSnapshots([taskQueue, agentTurnQueue, fsCdnQueue, workspaceUsageQueue], { redisUrl: config.bullmqRedisUrl });
   const bullmqRedisEndpoint = describeRedisEndpoint(config.bullmqRedisUrl);
   return c.json({
     ok: true,
@@ -33,7 +34,7 @@ router.get("/", async (c) => {
 });
 
 router.get("/metrics", async (c) => {
-  const metrics = await exportQueuesPrometheusMetrics([taskQueue, agentTurnQueue, fsCdnQueue], {
+  const metrics = await exportQueuesPrometheusMetrics([taskQueue, agentTurnQueue, fsCdnQueue, workspaceUsageQueue], {
     includeQueueDefinitionLabels: true,
   });
   return c.text(metrics, 200, {

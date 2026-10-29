@@ -22,6 +22,7 @@ import { assertRequiredConfig, config } from "../config.js";
 import { getRegisteredSystemJobs, getSystemJobHandler } from "../system/registry.js";
 import { SANDBOX_IDLE_REAPER_JOB } from "../system/jobs/sandbox-idle-reaper/types.js";
 import { startSystemReferralRewardRetryLoop } from "../system/referral-reward-retry.js";
+import { startWorkspaceUsage } from "../system/jobs/workspace-usage/index.js";
 import {
   APP_DOMAIN_SWEEP_JOB,
   APP_PROMOTION_STATS_FLUSH_INTERVAL_MS,
@@ -238,11 +239,19 @@ try {
   });
 }
 
+const stopWorkspaceUsage = await startWorkspaceUsage(systemQueue).catch((error) => {
+  logger.error("[SystemWorker] Failed to start workspace usage", {
+    error: error instanceof Error ? error.message : String(error),
+  });
+  return async () => undefined;
+});
+
 const stopReferralRewardRetry = startSystemReferralRewardRetryLoop();
 
 const shutdown = async (signal: string) => {
   logger.info(`[SystemWorker] Received ${signal}, shutting down...`);
   stopReferralRewardRetry();
+  await stopWorkspaceUsage();
   await closeWorkerGracefully(systemWorker, {
     serviceName: "SystemWorker",
     timeoutMs: Number(process.env.SYSTEM_WORKER_SHUTDOWN_TIMEOUT_MS ?? 300_000),

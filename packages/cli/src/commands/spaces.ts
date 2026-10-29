@@ -20,7 +20,7 @@ import { resolveSpace } from "../space.js";
 import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
 import { registerDecisionCommand } from "./decision.js";
 import { registerSpaceCommerce } from "./space-commerce.js";
-import { registerSpaceFileTransfer } from "./space-files.js";
+import { formatBytes, registerSpaceFileTransfer } from "./space-files.js";
 import { registerSpaceWallet } from "./space-wallet.js";
 import { registerSpaceActivity } from "./space-activity.js";
 import { registerSpaceDisplays } from "./space-displays.js";
@@ -627,13 +627,16 @@ export function registerSpaces(program: Command): void {
       try {
         const space = await client.spaces.get(spaceId);
         if (jsonRequested(opts)) return outJson(space);
-        table([space], [
+        const usage = space.workspaceUsage;
+        const storage = usage ? `${usage.bytes === null ? "-" : formatBytes(usage.bytes)} (${usage.status})` : undefined;
+        table([{ ...space, storage }], [
           { key: "id", label: "ID" },
           { key: "name", label: "Name" },
           { key: "slug", label: "Slug" },
           { key: "description", label: "Description", format: (value) => truncateText(value, SPACE_DESCRIPTION_COLUMN_WIDTH) },
           { key: "status", label: "Status" },
           { key: "createdAt", label: "Created" },
+          ...(storage ? [{ key: "storage", label: "Storage" }] : []),
         ]);
       } catch (e: unknown) {
         handleHttp(e);

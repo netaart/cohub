@@ -1,4 +1,5 @@
-export type { SpaceWalletSummary, SpaceWalletActivity, SpaceWalletActivityPage } from "@cohub/protocol";
+export type { SpaceWalletSummary, SpaceWalletActivity, SpaceWalletActivityPage, WorkspaceUsage } from "@cohub/protocol";
+import type { WorkspaceUsage } from "@cohub/protocol";
 export type { SessionStats, ExecutionStats, TurnMetrics, RequestMetric } from "@cohub/protocol/model";
 import type { MediaFacts } from "@cohub/protocol/core";
 import type {
@@ -893,6 +894,8 @@ export type SpaceRecord = {
   accessLevel?: "minimal";
   guestAppId?: string | null;
   ownerProfile?: Pick<UserProfile, "userUuid" | "username" | "displayName" | "avatarUrl"> | null;
+  /** Space details only. Last pdu measurement of the cloud workspace; null for local sandboxes. */
+  workspaceUsage?: WorkspaceUsage | null;
   /** User-private label state returned by paginated account listings. */
   isPinned?: boolean;
   isArchived?: boolean;

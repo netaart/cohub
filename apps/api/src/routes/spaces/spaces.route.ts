@@ -17,6 +17,7 @@ import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/
 import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels, userProfiles } from "@cohub/db";
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
 import { hostPromptImages } from "../../session-images.js";
+import { readWorkspaceUsage } from "../../workspace-usage.js";
 import { useAuth, getOptionalAuth, getAppSessionPrincipal, requireValidId, buildSpaceListItems, authzDenied, getSpacePublicProfile, normalizePublicAvatarUrl } from "../../lib/middleware.js";
 import { getAllowedSandboxSpecId, getSandboxImageCatalog, resolveSpaceSandboxPreferences } from "../../space-sandbox-preferences.js";
 import { parseSandboxPreferences, type SandboxImageId } from "../../sandbox-preferences.js";
@@ -1151,7 +1152,10 @@ async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user
     resolvePermissionAccess(user, { spaceId: space.id }),
     resolveSpaceRelation(space, user),
   ]);
-  const profileMap = await getProfilesByUuids([space.userUuid]);
+  const [profileMap, workspaceUsage] = await Promise.all([
+    getProfilesByUuids([space.userUuid]),
+    readWorkspaceUsage(space.id, sandbox),
+  ]);
   const ownerProfile = profileMap.get(space.userUuid) ?? fallbackPublicUserProfile(space.userUuid);
 
   return {
@@ -1160,6 +1164,7 @@ async function serializeSpaceForResponse(space: typeof spaces.$inferSelect, user
     publicProfile: getSpacePublicProfile(space),
     sandboxStatus: sandbox?.status ?? null,
     sandbox: attachSandboxPublicEndpoints(sandbox),
+    workspaceUsage,
     access,
     relation,
     ownerProfile,
