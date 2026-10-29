@@ -120,14 +120,13 @@ async function scanWorkspace(spaceId: string, deadline: number) {
 }
 
 /**
- * Starts the scan consumer and the sweep schedule. Deployments without the
- * pinned pdu binary (e.g. non-amd64 images) skip the feature instead of
- * recording failures for every workspace.
+ * Starts the scan consumer and the sweep schedule. Workers without the pinned
+ * pdu binary (e.g. non-amd64 images) only skip consuming scans; they leave the
+ * shared schedule alone so pdu-capable workers in the same deployment keep it.
  */
 export async function startWorkspaceUsage(systemQueue: Queue) {
   if (!config.spaceStorageRoot || !await isPduAvailable()) {
     logger.warn(`[WorkspaceUsage] disabled: ${config.spaceStorageRoot ? `pdu ${pduBinary()} unavailable` : "SPACE_STORAGE_ROOT unset"}`);
-    await systemQueue.removeJobScheduler(SWEEP_SCHEDULER_ID).catch(() => undefined);
     return async () => undefined;
   }
   await getWorkspaceUsageQueue().setGlobalConcurrency(1);

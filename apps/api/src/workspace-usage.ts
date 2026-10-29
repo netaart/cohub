@@ -14,13 +14,17 @@ export const workspaceUsageQueue = createBullmqQueue(WORKSPACE_USAGE_QUEUE, {
   telemetryServiceName: "cohub-api-workspace-usage",
 });
 
-/** Stored measurement only: API reads never touch NAS. */
+/**
+ * Stored measurement only: API reads never touch NAS. Null until a scan has
+ * been attempted, so deployments that never scan (no pdu) show nothing.
+ */
 export async function readWorkspaceUsage(
   spaceId: string,
   sandbox: { provider: string; status: string; stoppedAt: Date | null } | null,
 ): Promise<WorkspaceUsage | null> {
   if (sandbox?.provider === "local") return null;
   const [row] = await db.select().from(spaceWorkspaceUsage).where(eq(spaceWorkspaceUsage.spaceId, spaceId)).limit(1);
+  if (!row?.attemptedAt) return null;
   return toWorkspaceUsage(row, sandbox);
 }
 

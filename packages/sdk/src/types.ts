@@ -894,7 +894,7 @@ export type SpaceRecord = {
   accessLevel?: "minimal";
   guestAppId?: string | null;
   ownerProfile?: Pick<UserProfile, "userUuid" | "username" | "displayName" | "avatarUrl"> | null;
-  /** Space details only. Last pdu measurement of the cloud workspace; null for local sandboxes. */
+  /** Space details only. Last pdu measurement of the cloud workspace; null for local sandboxes and before the first scan attempt. */
   workspaceUsage?: WorkspaceUsage | null;
   /** User-private label state returned by paginated account listings. */
   isPinned?: boolean;

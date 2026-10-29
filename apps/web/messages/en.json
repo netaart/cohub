@@ -1020,7 +1020,7 @@
 	"space_hibernation_desc": "Pause the sandbox when idle to free compute.",
 	"space_storage": "Workspace storage",
 	"space_storage_measured": "Measured {time}",
-	"space_storage_pending": "Measured after the sandbox stops",
+	"space_storage_pending": "Measuring",
 	"space_storage_stale": "May have changed since",
 	"space_storage_error": "Last measurement failed",
 	"space_never": "Never",

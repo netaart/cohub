@@ -1020,7 +1020,7 @@
 	"space_hibernation_desc": "空闲时暂停 Sandbox 以释放算力。",
 	"space_storage": "工作区占用",
 	"space_storage_measured": "统计于 {time}",
-	"space_storage_pending": "Sandbox 停止后统计",
+	"space_storage_pending": "统计中",
 	"space_storage_stale": "之后可能有变化",
 	"space_storage_error": "最近一次统计失败",
 	"space_never": "从不",
