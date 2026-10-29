@@ -5,7 +5,15 @@ Billing owns paid periods, grace deadlines, close confirmation and purchase
 admission. Cohub displays its `renewal_recovery` summary without treating
 `past_due`, a return URL or cancellation HTTP success as paid access.
 
-- Catalog and settings show grace/closing, including the effective deadline.
+- Catalog and settings share one current-plan selection: valid grace stays on the
+  paid plan with a payment-due label, and closing shows processing rather than free
+  or paid-active. The purchase panel leads with “Continue payment” and a quiet
+  “Subscribe again” action. It shows the feature deadline and credits-after-payment
+  promise, without a new-purchase quote that could be mistaken for the amount due.
+  Processing hides purchase actions, checks the result up to five times, and only
+  shows a compact recheck action after an unresolved result or failure. Focus
+  refresh remains available. Confirmation reuses the existing Dialog; ending the
+  plan still requires a separate purchase click at the current price.
   Feature decisions still use the entitlement API; balance remains Credits-based.
   A finite feature result expires locally and is refreshed at its deadline.
 - The payment action fetches a fresh, owner-checked Hosted Invoice URL with
@@ -71,3 +79,11 @@ active Subscription receipts after simulated response loss. In-process request
 coalescing uses the same complete fingerprint, including the return URL; changed
 concurrent requests retain the same Billing idempotency key and are rejected
 instead of sharing the first request's result or creating a second resource.
+
+The subsequent customer-facing UI pass keeps recovery terminology out of the
+purchase flow. Its existing Web regression covers current-plan selection across
+valid grace, the deadline, closing, successful payment and confirmed end; the
+Web check reports zero errors and warnings. Desktop/mobile screenshots replay
+saved Sandbox facts through the actual current components with all business
+actions disabled. They verify presentation and confirmation wording, not a new
+Provider transaction.

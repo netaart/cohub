@@ -107,12 +107,14 @@ export class PurchaseFlow {
 	constructor(readonly source: PurchaseSource) {}
 
 	focus(intent: Parameters<typeof purchaseFocus>[1] = null): PurchaseFocus {
+		if (this.recoverySubscription) return "plans";
 		return this.view ? purchaseFocus(this.view, intent) : "plans";
 	}
 
 	async load(options: { force?: boolean } = {}) {
 		this.loading = !this.catalog;
 		this.loadError = null;
+		this.error = null;
 		try {
 			await billingCatalogStore.load({
 				force: options.force,
@@ -129,6 +131,7 @@ export class PurchaseFlow {
 	}
 
 	async restoreRenewalIntent() {
+		this.recoveryNotice = null;
 		const userId = authStore.userUuid;
 		const intent = userId ? readRenewalPurchaseIntent(userId) : null;
 		if (intent && userId) {
@@ -294,12 +297,6 @@ export class PurchaseFlow {
 		if (!id || this.recoveryLoading) return;
 		if (!this.endingSubscriptionId) {
 			if (!subscription?.renewalRecovery?.endRecovery.allowed) return;
-			if (
-				!window.confirm(
-					m.billing_recovery_end_confirm({}, { locale: getLocale() }),
-				)
-			)
-				return;
 			this.endingSubscriptionId = id;
 			if (authStore.userUuid && this.selectedKey)
 				saveRenewalPurchaseIntent(authStore.userUuid, {

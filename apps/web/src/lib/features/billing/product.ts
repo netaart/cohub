@@ -188,9 +188,51 @@ export type CatalogView = {
 	paymentReason: string | null;
 };
 
-const LIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
+export function subscriptionDisplayState(
+	subscription: BillingSubscriptionSummary | null,
+	now = Date.now(),
+): "active" | "grace" | "closing" | null {
+	if (!subscription) return null;
+	const recovery = subscription.renewalRecovery;
+	if (recovery?.state === "closing") return "closing";
+	if (recovery?.state === "grace") {
+		return recovery.effectiveEndsAt &&
+			Date.parse(recovery.effectiveEndsAt) > now
+			? "grace"
+			: "closing";
+	}
+	return ["active", "trialing"].includes(subscription.status) ? "active" : null;
+}
 
-export function catalogView(catalog: BillingCatalog): CatalogView {
+export function currentCatalogSubscription(
+	catalog: Pick<
+		BillingCatalog,
+		"currentSubscriptions" | "defaultPlanProductKey"
+	>,
+	now = Date.now(),
+) {
+	return (
+		catalog.currentSubscriptions.find(
+			(item) =>
+				item.productKey !== catalog.defaultPlanProductKey &&
+				subscriptionDisplayState(item, now) === "active",
+		) ??
+		catalog.currentSubscriptions.find(
+			(item) =>
+				item.productKey !== catalog.defaultPlanProductKey &&
+				subscriptionDisplayState(item, now) !== null,
+		) ??
+		catalog.currentSubscriptions.find(
+			(item) => subscriptionDisplayState(item, now) === "active",
+		) ??
+		null
+	);
+}
+
+export function catalogView(
+	catalog: BillingCatalog,
+	now = Date.now(),
+): CatalogView {
 	const plans = catalog.plans.filter((plan) => plan.visibility === "public");
 	const defaultKey = catalog.defaultPlanProductKey;
 	const freePlan =
@@ -200,10 +242,8 @@ export function catalogView(catalog: BillingCatalog): CatalogView {
 	const paid = plans.filter(
 		(plan) => plan.key !== freePlan?.key && !isFreeProduct(plan),
 	);
-	const currentSubscription =
-		catalog.currentSubscriptions.find((subscription) =>
-			LIVE_SUBSCRIPTION_STATUSES.has(subscription.status),
-		) ?? null;
+	const currentSubscription = currentCatalogSubscription(catalog, now);
+	const subscriptionState = subscriptionDisplayState(currentSubscription, now);
 	const currentPlan =
 		(currentSubscription?.productKey
 			? catalog.plans.find(
@@ -212,7 +252,8 @@ export function catalogView(catalog: BillingCatalog): CatalogView {
 			: null) ?? null;
 	const hasPaidPlan =
 		!!currentSubscription?.productKey &&
-		currentSubscription.productKey !== defaultKey;
+		currentSubscription.productKey !== defaultKey &&
+		subscriptionState !== "closing";
 	return {
 		freePlan,
 		monthlyPlans: sortByPrice(

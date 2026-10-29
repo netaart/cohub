@@ -83,3 +83,83 @@ test("checkout receipts remain scoped to their purchase and user when newer purc
 		else Reflect.deleteProperty(globalThis, "sessionStorage");
 	}
 });
+
+test("plan summaries keep grace and closing on the paid plan, then follow the confirmed result", async () => {
+	const { currentCatalogSubscription, subscriptionDisplayState } = await import(
+		"../lib/features/billing/product"
+	);
+	const paid = {
+		id: "paid",
+		productKey: "pro",
+		productName: "Pro",
+		status: "past_due",
+		currentPeriodStart: null,
+		currentPeriodEnd: null,
+		cancelAtPeriodEnd: false,
+		renewalRecovery: {
+			state: "grace" as const,
+			effectiveEndsAt: "2026-11-01T00:00:00Z",
+			payInvoice: { allowed: true, reason: null },
+			endRecovery: { allowed: true, reason: null },
+			subscribe: { allowed: false, reason: "occupied" },
+		},
+	};
+	const free = {
+		...paid,
+		id: "free",
+		productKey: "free",
+		status: "active",
+		renewalRecovery: undefined,
+	};
+	const catalog = {
+		currentSubscriptions: [free, paid],
+		defaultPlanProductKey: "free",
+	};
+	const before = Date.parse("2026-10-31T00:00:00Z");
+	const deadline = Date.parse("2026-11-01T00:00:00Z");
+	assert.equal(currentCatalogSubscription(catalog, before)?.id, "paid");
+	assert.equal(subscriptionDisplayState(paid, before), "grace");
+	assert.equal(currentCatalogSubscription(catalog, deadline)?.id, "paid");
+	assert.equal(subscriptionDisplayState(paid, deadline), "closing");
+	assert.equal(
+		subscriptionDisplayState(
+			{
+				...paid,
+				renewalRecovery: { ...paid.renewalRecovery, state: "closing" },
+			},
+			before,
+		),
+		"closing",
+	);
+	const recovered = {
+		...paid,
+		id: "recovered",
+		status: "active",
+		renewalRecovery: { ...paid.renewalRecovery, state: "none" as const },
+	};
+	assert.equal(
+		currentCatalogSubscription(
+			{ ...catalog, currentSubscriptions: [free, paid, recovered] },
+			before,
+		)?.id,
+		"recovered",
+	);
+	assert.equal(subscriptionDisplayState(recovered, before), "active");
+	assert.equal(
+		currentCatalogSubscription(
+			{
+				...catalog,
+				currentSubscriptions: [
+					free,
+					{ ...paid, status: "ended", renewalRecovery: undefined },
+				],
+			},
+			before,
+		)?.id,
+		"free",
+	);
+	assert.equal(
+		subscriptionDisplayState({ ...paid, renewalRecovery: undefined }, before),
+		null,
+	);
+});

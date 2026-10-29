@@ -21,6 +21,7 @@ const {
 	selected = false,
 	recommended = false,
 	current = false,
+	currentLabel,
 	disabled = false,
 	variant = "full",
 	monthlyPlans = [],
@@ -32,6 +33,7 @@ const {
 	selected?: boolean;
 	recommended?: boolean;
 	current?: boolean;
+	currentLabel?: string;
 	disabled?: boolean;
 	/** `full` for pricing grids, `compact` for the conversion sheet. */
 	variant?: "full" | "compact";
@@ -78,7 +80,7 @@ const unit = $derived(
 	{#if recommended && !current}
 		<span class="flag badge" data-tone="promo">{m.purchase_most_popular({}, { locale })}</span>
 	{:else if current}
-		<span class="flag badge" data-tone="muted">{m.purchase_current_plan({}, { locale })}</span>
+		<span class="flag badge" data-tone="muted">{currentLabel ?? m.purchase_current_plan({}, { locale })}</span>
 	{/if}
 
 	<header class="head">
