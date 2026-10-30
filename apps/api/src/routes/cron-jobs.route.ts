@@ -11,14 +11,12 @@ import { disableCronJob, enableCronJob, removeCronJob, updateCronJob } from "../
 import { fallbackPublicUserProfile, getProfilesByUuids } from "../user-profiles.js";
 import { sanitizeTaskRunPricingForViewer } from "../task-run-privacy.js";
 import { preserveCronPayloadServerFields } from "./cron-jobs-payload.js";
-import { deleteCronJobNotificationOverride, loadUserPreferences, UserPreferencesLimitError } from "@cohub/core/preferences";
+import { loadUserPreferences, UserPreferencesInputError } from "@cohub/core/preferences";
 import type { UserPreferences } from "@cohub/protocol/notifications";
-import { updateAndPublishUserPreferences } from "../user-preferences.js";
-import { createLogger } from "@cohub/infra/logging";
+import { publishUserPreferencesChanged, updateAndPublishUserPreferences } from "../user-preferences.js";
 
 const router = new Hono();
 const { CronExpressionParser } = cronParser;
-const logger = createLogger({ serviceName: "cohub-api" });
 
 const MAX_RUNS_LIMIT = 100;
 
@@ -222,7 +220,7 @@ router.get("/:id/notification", async (c) => {
   if (!job) return c.json({ message: "not found" }, 404);
   if (!(await authorizeCronJobView(user, job))) return authzDenied(c);
   if (job.userUuid !== user.uuid) return ownerOnly(c);
-  return c.json(notificationSetting(await loadUserPreferences(db, user.uuid), cronJobId));
+  return c.json(notificationSetting(await loadUserPreferences(db, user.uuid), job.id));
 });
 
 router.put("/:id/notification", async (c) => {
@@ -239,14 +237,15 @@ router.put("/:id/notification", async (c) => {
   if (override !== null && typeof override !== "boolean") {
     return c.json({ message: "override must be true, false, or null to follow the global setting" }, 400);
   }
+  // The stored id is canonical; the route accepts other spellings of it.
   const preferences = await updateAndPublishUserPreferences(user.uuid, {
-    notifications: { cronJobs: { [cronJobId]: override } },
+    notifications: { cronJobs: { [job.id]: override } },
   }).catch((error: unknown) => {
-    if (error instanceof UserPreferencesLimitError) return error;
+    if (error instanceof UserPreferencesInputError) return error;
     throw error;
   });
-  if (preferences instanceof UserPreferencesLimitError) return c.json({ message: preferences.message }, 400);
-  return c.json(notificationSetting(preferences, cronJobId));
+  if (preferences instanceof UserPreferencesInputError) return c.json({ message: preferences.message }, 400);
+  return c.json(notificationSetting(preferences, job.id));
 });
 
 router.delete("/:id", async (c) => {
@@ -270,11 +269,7 @@ router.delete("/:id", async (c) => {
   if (!job) return c.json({ message: "not found" }, 404);
   if (!(await authorizeCronJobManage(c, user, job))) return authzDenied(c);
 
-  await removeCronJob(cronJobId);
-  // Notifications go to the job owner, so only their preferences can reference it.
-  await deleteCronJobNotificationOverride(db, job.userUuid, cronJobId).catch((error) => {
-    logger.warn("[CronJobs] failed to drop notification override", { cronJobId, error });
-  });
+  if (await removeCronJob(job)) await publishUserPreferencesChanged(job.userUuid);
   return c.json({ ok: true });
 });
 

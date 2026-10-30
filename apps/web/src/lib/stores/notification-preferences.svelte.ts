@@ -26,15 +26,19 @@ function writeCache(userUuid: string, notifications: NotificationPreferences) {
 	}
 }
 
-/** Server-owned; the local cache only ever holds values the server returned. */
+/**
+ * Server-owned; the local cache only ever holds values the server returned.
+ * `#revision` advances on every local edit and every remote change signal, so
+ * a response that started before either is never applied.
+ */
 class NotificationPreferencesStore {
 	value = $state<NotificationPreferences>(
 		parseUserPreferences(null).notifications,
 	);
 	loaded = $state(false);
 	#userUuid: string | null = null;
-	#request: Promise<void> | null = null;
-	#stopEvents: (() => void) | null = null;
+	#request: { revision: number; promise: Promise<void> } | null = null;
+	#listening = false;
 	#revision = 0;
 
 	/** Shows cached values immediately and refreshes them from the server. */
@@ -42,10 +46,16 @@ class NotificationPreferencesStore {
 		const userUuid = authStore.userUuid;
 		if (!userUuid) return Promise.resolve();
 		if (userUuid !== this.#userUuid) this.#switchUser(userUuid);
-		this.#request ??= this.#fetch(userUuid).finally(() => {
-			this.#request = null;
-		});
-		return this.#request;
+		if (this.#request?.revision !== this.#revision) {
+			const request = {
+				revision: this.#revision,
+				promise: this.#fetch(userUuid, this.#revision).finally(() => {
+					if (this.#request === request) this.#request = null;
+				}),
+			};
+			this.#request = request;
+		}
+		return this.#request.promise;
 	}
 
 	async update(patch: UserPreferencesPatch) {
@@ -71,23 +81,36 @@ class NotificationPreferencesStore {
 
 	#switchUser(userUuid: string) {
 		this.#userUuid = userUuid;
-		this.#request = null;
+		this.#revision++;
 		const cached = readCache(userUuid);
 		this.value = cached ?? parseUserPreferences(null).notifications;
 		this.loaded = cached !== null;
-		this.#stopEvents ??= sdk.onUserEvent((event) => {
-			if (event.type !== "user.preferences.updated" || !this.#userUuid) return;
-			this.#accept(
-				this.#userUuid,
-				parseUserPreferences(event.payload.preferences).notifications,
-			);
+		if (this.#listening) return;
+		this.#listening = true;
+		sdk.onUserEvent((event) => {
+			if (event.type === "user.preferences.updated") this.#refresh();
+		});
+		// Change signals are not replayed, so catch up after every reconnect.
+		let dropped = false;
+		sdk.onConnection(({ state }) => {
+			if (state === "closed" || state === "error") dropped = true;
+			else if (state === "open" && dropped) {
+				dropped = false;
+				this.#refresh();
+			}
 		});
 	}
 
-	async #fetch(userUuid: string) {
-		const revision = this.#revision;
+	#refresh() {
+		if (!this.#userUuid) return;
+		this.#revision++;
+		void this.sync().catch((error) =>
+			console.warn("[notifications] Failed to refresh preferences:", error),
+		);
+	}
+
+	async #fetch(userUuid: string, revision: number) {
 		const { preferences } = await sdk.user.getPreferences();
-		// A local edit made while this read was in flight is newer.
 		if (userUuid === this.#userUuid && revision === this.#revision)
 			this.#accept(userUuid, preferences.notifications);
 	}

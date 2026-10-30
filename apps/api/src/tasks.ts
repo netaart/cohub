@@ -1,6 +1,7 @@
 import { COHUB_TASKS_QUEUE, createBullmqQueue, defaultJobRetention } from "@cohub/infra/bullmq";
 import type { JobsOptions } from "bullmq";
 import { enqueueTaskRun } from "@cohub/core/tasks";
+import { deleteCronJobNotificationOverride } from "@cohub/core/preferences";
 import { eq } from "drizzle-orm";
 import { config } from "./config.js";
 import { db } from "./db/index.js";
@@ -135,12 +136,17 @@ export const createCronJob = async (params: {
   }
 };
 
-export const removeCronJob = async (cronJobId: string) => {
-  await removeCronScheduler(cronSchedulerId(cronJobId));
-  await db
-    .update(cronJobs)
-    .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(eq(cronJobs.id, cronJobId));
+/** Returns whether the owner's notification override for the job was removed with it. */
+export const removeCronJob = async (job: { id: string; userUuid: string }) => {
+  await removeCronScheduler(cronSchedulerId(job.id));
+  return db.transaction(async (tx) => {
+    await tx
+      .update(cronJobs)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(cronJobs.id, job.id));
+    // Notifications go to the owner, so only their preferences can reference the job.
+    return deleteCronJobNotificationOverride(tx, job.userUuid, job.id);
+  });
 };
 
 export const disableCronJob = async (cronJobId: string) => {

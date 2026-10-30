@@ -11,7 +11,7 @@ import type { BoardDelta } from "../board-model.js";
 import type { RequestSource } from "../provenance.js";
 import type { HarnessKind } from "../runtime/harnesses.js";
 import type { DesktopCommandDispatchedPayload } from "../desktop-command.js";
-import type { TurnNotificationSource, UserPreferences } from "../notifications.js";
+import type { TurnNotificationSource } from "../notifications.js";
 import type { AppArtifactDescriptor, AppContentKind, AppVersionSource } from "../app.js";
 import type { AppDomainRecord, AppDomainRemovedReason } from "../app-domains.js";
 import type { AppRtcPublication } from "../rtc/index.js";
@@ -993,7 +993,7 @@ export type DesktopCommandDispatchedEvent = {
   payload: DesktopCommandDispatchedPayload;
 };
 
-/** Delivered to the owner's user room so every open client applies the same preferences. */
+/** Signals the owner's clients to refetch; carries no data because App sessions share the user room. */
 export type UserPreferencesUpdatedEvent = {
   id: string;
   timestamp: number;
@@ -1003,7 +1003,7 @@ export type UserPreferencesUpdatedEvent = {
   spaceId?: null;
   sessionId?: null;
   rooms?: RealtimeRoom[];
-  payload: { preferences: UserPreferences };
+  payload: Record<string, never>;
 };
 
 export type RealtimeServerEvent =

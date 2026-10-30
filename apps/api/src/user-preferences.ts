@@ -8,16 +8,23 @@ import { db } from "./db/index.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 
-/** Every write goes through here so all of the user's open clients converge. */
-export async function updateAndPublishUserPreferences(userUuid: string, patch: UserPreferencesPatch) {
-  const preferences = await updateUserPreferences(db, userUuid, patch);
+/**
+ * A signal without the data: App sessions share the user room, and the full
+ * preferences are account-only. Clients refetch them.
+ */
+export async function publishUserPreferencesChanged(userUuid: string) {
   await dispatchRealtimeEvent({
     id: randomUUID(),
     timestamp: Date.now(),
     domain: "user",
     type: "user.preferences.updated",
     rooms: [getRealtimeUserRoom(userUuid)],
-    payload: { preferences },
+    payload: {},
   }).catch((error) => logger.warn("[Preferences] failed to publish update", { userUuid, error }));
+}
+
+export async function updateAndPublishUserPreferences(userUuid: string, patch: UserPreferencesPatch) {
+  const preferences = await updateUserPreferences(db, userUuid, patch);
+  await publishUserPreferencesChanged(userUuid);
   return preferences;
 }

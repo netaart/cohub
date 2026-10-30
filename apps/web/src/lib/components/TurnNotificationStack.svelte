@@ -71,6 +71,8 @@ function handleCardKeydown(
 	event: KeyboardEvent,
 	notification: TurnNotification,
 ) {
+	// Nested buttons and links keep their own Enter / Space activation.
+	if (event.target !== event.currentTarget) return;
 	if (event.key !== "Enter" && event.key !== " ") return;
 	event.preventDefault();
 	openCurrent(notification);

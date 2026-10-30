@@ -31,7 +31,7 @@ export function parseUserPreferences(value: unknown): UserPreferences {
   const success = record(notifications?.success);
   const cronJobs: Record<string, boolean> = {};
   for (const [id, enabled] of Object.entries(record(notifications?.cronJobs) ?? {})) {
-    if (isUuidLike(id) && typeof enabled === "boolean") cronJobs[id] = enabled;
+    if (isUuidLike(id) && typeof enabled === "boolean") cronJobs[id.toLowerCase()] = enabled;
   }
   return {
     notifications: {
@@ -45,13 +45,20 @@ export function parseUserPreferences(value: unknown): UserPreferences {
   };
 }
 
+function rejectUnknownKeys(input: Record<string, unknown>, known: readonly string[], path: string) {
+  const unknown = Object.keys(input).find((key) => !known.includes(key));
+  if (unknown) throw new Error(`${path}.${unknown} is not a known field; use ${known.join(", ")}`);
+}
+
 /** Strict read of a client patch; throws with a message suitable for a 400. */
 export function parseUserPreferencesPatch(value: unknown): UserPreferencesPatch {
   const input = record(value);
   if (!input) throw new Error("preferences patch must be an object");
+  rejectUnknownKeys(input, ["notifications"], "preferences");
   if (input.notifications === undefined) return {};
   const notifications = record(input.notifications);
   if (!notifications) throw new Error("notifications must be an object");
+  rejectUnknownKeys(notifications, ["success", "cronJobs"], "notifications");
   const patch: NotificationPreferencesPatch = {};
   if (notifications.success !== undefined) {
     const success = record(notifications.success);
@@ -72,7 +79,7 @@ export function parseUserPreferencesPatch(value: unknown): UserPreferencesPatch 
     for (const [id, enabled] of Object.entries(cronJobs)) {
       if (!isUuidLike(id)) throw new Error(`notifications.cronJobs key ${id} must be a cron job id`);
       if (enabled !== null && typeof enabled !== "boolean") throw new Error(`notifications.cronJobs.${id} must be a boolean or null`);
-      patch.cronJobs[id] = enabled;
+      patch.cronJobs[id.toLowerCase()] = enabled;
     }
   }
   return { notifications: patch };
@@ -89,6 +96,27 @@ export function applyUserPreferencesPatch(current: UserPreferences, patch: UserP
   return {
     notifications: {
       success: { ...current.notifications.success, ...changes.success },
+      cronJobs,
+    },
+  };
+}
+
+/** Applies a patch to raw stored data, touching only the fields it names. */
+export function patchStoredUserPreferences(stored: unknown, patch: UserPreferencesPatch): Record<string, unknown> {
+  const raw = record(stored) ?? {};
+  const changes = patch.notifications;
+  if (!changes) return raw;
+  const notifications = record(raw.notifications) ?? {};
+  const cronJobs: Record<string, unknown> = { ...record(notifications.cronJobs) };
+  for (const [id, enabled] of Object.entries(changes.cronJobs ?? {})) {
+    if (enabled === null) delete cronJobs[id];
+    else cronJobs[id] = enabled;
+  }
+  return {
+    ...raw,
+    notifications: {
+      ...notifications,
+      success: { ...record(notifications.success), ...changes.success },
       cronJobs,
     },
   };
@@ -113,6 +141,6 @@ export function shouldNotifyTurn(
   turn: { status: string; source: TurnNotificationSource; cronJobId?: string | null },
 ): boolean {
   if (turn.status !== "completed" || turn.source === "chat") return true;
-  const override = turn.cronJobId ? preferences.cronJobs[turn.cronJobId] : undefined;
+  const override = turn.cronJobId ? preferences.cronJobs[turn.cronJobId.toLowerCase()] : undefined;
   return override ?? preferences.success[turn.source];
 }

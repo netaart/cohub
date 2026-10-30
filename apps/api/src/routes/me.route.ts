@@ -1,11 +1,11 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import * as schema from "@cohub/db";
 import { db } from "../db/index.js";
 import { config } from "../config.js";
-import { requireValidId, useAccountPrincipal, useAuth, authzDenied } from "../lib/middleware.js";
+import { getExecutionPrincipal, requireValidId, useAccountPrincipal, useAuth, authzDenied } from "../lib/middleware.js";
 import { ensureCurrentUserProfile, resolveCurrentUserEmail, updateCurrentUserProfile, LogtoUserRequiredError, UsernameClearError, UsernameConflictError, UsernameReservedError, validateUsername } from "../user-profiles.js";
 import {
   filterSessionsByPermission,
@@ -38,7 +38,7 @@ import {
 } from "../usage-aggregation.js";
 import { createLogger } from "@cohub/infra/logging";
 import { getReferralDashboard, rotateReferralCode } from "../referrals.js";
-import { loadUserPreferences, UserPreferencesLimitError } from "@cohub/core/preferences";
+import { loadUserPreferences, UserPreferencesInputError } from "@cohub/core/preferences";
 import { parseUserPreferencesPatch, type UserPreferencesPatch } from "@cohub/protocol/notifications";
 import { updateAndPublishUserPreferences } from "../user-preferences.js";
 
@@ -171,14 +171,40 @@ router.patch("/profile", async (c) => {
   }
 });
 
-router.get("/preferences", async (c) => {
+/**
+ * Full preferences are account-only. Apps reach a single scheduled prompt's
+ * setting through /api/cron-jobs/:id/notification. App Action tokens carry an
+ * appId; a turn an App submitted keeps its app authorization in the turn meta,
+ * even after that authorization expired and the token lost its scopes.
+ */
+const usePreferencesPrincipal = async (c: Context) => {
   const user = useAccountPrincipal(c);
+  if (user instanceof Response) return user;
+  const execution = getExecutionPrincipal(c);
+  if (execution && (execution.appId || execution.scopes.length > 0 || (await isAppSubmittedTurn(execution.turnId)))) {
+    return c.json({ message: "apps cannot access account preferences" }, 403);
+  }
+  return user;
+};
+
+async function isAppSubmittedTurn(turnId: string | null) {
+  if (!turnId) return false;
+  const [turn] = await db
+    .select({ authType: sql<string | null>`${schema.sessionTurns.meta} -> 'context' -> 'auth' ->> 'type'` })
+    .from(schema.sessionTurns)
+    .where(eq(schema.sessionTurns.id, turnId))
+    .limit(1);
+  return turn?.authType != null;
+}
+
+router.get("/preferences", async (c) => {
+  const user = await usePreferencesPrincipal(c);
   if (user instanceof Response) return user;
   return c.json({ preferences: await loadUserPreferences(db, user.uuid) });
 });
 
 router.patch("/preferences", async (c) => {
-  const user = useAccountPrincipal(c);
+  const user = await usePreferencesPrincipal(c);
   if (user instanceof Response) return user;
   let patch: UserPreferencesPatch;
   try {
@@ -187,10 +213,10 @@ router.patch("/preferences", async (c) => {
     return c.json({ message: error instanceof Error ? error.message : "invalid preferences patch" }, 400);
   }
   const preferences = await updateAndPublishUserPreferences(user.uuid, patch).catch((error: unknown) => {
-    if (error instanceof UserPreferencesLimitError) return error;
+    if (error instanceof UserPreferencesInputError) return error;
     throw error;
   });
-  if (preferences instanceof UserPreferencesLimitError) return c.json({ message: preferences.message }, 400);
+  if (preferences instanceof UserPreferencesInputError) return c.json({ message: preferences.message }, 400);
   return c.json({ preferences });
 });
 
