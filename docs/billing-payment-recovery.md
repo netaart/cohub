@@ -1,109 +1,69 @@
 # Billing payment recovery
 
-This candidate connects Cohub to Billing's existing subscription recovery policy.
 Billing owns paid periods, grace deadlines, close confirmation and purchase
-admission. Cohub displays its `renewal_recovery` summary without treating
-`past_due`, a return URL or cancellation HTTP success as paid access.
+admission. Cohub uses its `renewal_recovery` summary; `past_due`, a return URL or
+a successful cancellation request does not establish paid access. See the
+[current Billing contract](https://git.talesofai.com/talesofai/talesofai-billing/src/branch/codex/stripe-recovery-p0/.agents/docs/current/stripe-payment-recovery.md).
 
-- Catalog and settings share one current-plan selection: valid grace stays on the
-  paid plan with a payment-due label, and closing shows processing rather than free
-  or paid-active. The purchase panel leads with “Continue payment” and a bordered
-  “Choose a plan” secondary button of the same size. It shows the feature
-  deadline and credits-after-payment
-  promise, without a new-purchase quote that could be mistaken for the amount due.
-  Processing hides subscription purchase actions, keeps the independent Credits
-  tab and purchase path available, checks the result up to five times, and only
-  shows a compact recheck action after an unresolved result or failure. Focus
-  refresh remains available. An explicit Credits purchase intent takes priority
-  over the default subscription recovery focus. Confirmation reuses the existing
-  Dialog; ending the plan still requires a separate purchase click at the current price.
-  Feature decisions still use the entitlement API; balance remains Credits-based.
-  A finite feature result expires locally and is refreshed at its deadline.
-- The payment action fetches a fresh, owner-checked Hosted Invoice URL with
-  `Cache-Control: no-store`. It is not stored in Catalog or purchase context.
-- Ending recovery uses the existing cancellation endpoint. The selected plan and
-  old subscription ID survive reload in user-scoped session storage. Selecting an
-  independent Credits pack does not overwrite that plan intent, and refreshes
-  preserve the selected pack. A Provider-unresolved payment action stays pending
-  through stale locally-payable summaries; bounded automatic checks only load and
-  inspect. Paid coverage or confirmed end clears the wait; an explicit recheck may
-  request a fresh payment action, without auto-navigation or storing its URL. Once a fresh
-  inspect confirms `ended` and purchase eligibility, the user reviews current
-  pricing and clicks the ordinary subscription button. If the original payment
-  wins, the paid cycle stays active and no new create occurs. Explicitly accepted
-  cancellation follows Billing's period-end cancellation result.
-- One-time Checkout keeps a UUID purchase identity and immutable create request
-  across network failures. A usable original Checkout resumes. Only an explicit
-  expired/canceled unpaid result clears the current attempt and asks for a new
-  price confirmation. A conflict or unknown result cannot auto-start a new Order.
-  Returns resolve the exact user/purchase/Order identity, so an older return cannot
-  clear a later purchase of the same product. Storage is isolated per browser tab.
+Both direct consumers pin the registry-published
+`@talesofai-billing/sdk@1.30.0-beta.0`. The lockfile contains its registry integrity;
+no local SDK artifact is used.
 
-Both direct Billing SDK dependencies now pin the registry-published
-`@talesofai-billing/sdk@1.30.0-beta.0`, with its registry integrity in the lockfile.
-Validation against that registry package passed the Billing/API dependency builds,
-42 Billing tests, 222 API tests, four Web recovery regressions and the relevant
-Billing/API/SDK/Web type checks. Frozen-lockfile installation also passed.
-The earlier local acceptance used a candidate SDK artifact, local Billing and a
-disposable database. Browser testing mounts the real purchase components and
-Cohub billing router with a test-only authentication fixture; it does not verify a
-production Logto session. Stripe account/payment evidence is recorded separately
-in the Billing P7 acceptance record. Temporary test routes are removed from the
-candidate. No deployed environment, SDK publication or Stripe recovery setting is
-changed by this source delivery.
+## Purchase behavior
 
-Local acceptance on 2026-10-29 used the real Cohub Billing router and real purchase
-components against the candidate Billing API, with a temporary local test identity:
+- Catalog and settings share the current-plan selection. Valid grace keeps the
+  paid plan labeled payment due; closing is processing, not free or paid-active.
+  Features remain governed by the entitlement API and expire locally at their
+  deadline. Credits are not granted by the UI or extended by grace.
+- The panel shows the feature deadline, credits-after-payment message, a primary
+  Continue payment button and a bordered Choose a plan secondary button. A fresh,
+  owner-checked Hosted Invoice action is fetched on demand with `no-store`; its
+  URL is not saved. New-subscription quotes are hidden while recovery is pending.
+- Choosing a plan uses the existing confirmation Dialog and cancellation API.
+  Closure must be confirmed as `ended` with `subscribe.allowed` before the user
+  reviews the current price and clicks to purchase a complete new period. A
+  successful original payment preserves paid coverage instead of creating again.
+- Independent Credits purchases remain available, including during closing.
+  Selecting Credits neither overwrites the saved replacement-plan intent nor
+  loses the selected pack when the catalog refreshes.
+- Processing performs at most five automatic load/inspect checks, then offers a
+  short explicit recheck. Focus refresh remains enabled. An unresolved Provider
+  payment stays pending through stale local eligibility; paid coverage or a
+  confirmed end clears it. Only an explicit recheck may fetch a new payment
+  action, and a usable result clears waiting without automatic navigation.
 
-- Grace was visible on desktop/mobile, with zero new Credits and an enabled Feature
-  from `subscription_grace`. A real scheduled Stripe retry then produced active
-  state and the original renewed cycle; reloading the component removed recovery
-  actions. Provider Test Clock and local page wall-clock evidence remain separate.
-- Explicit end recovery closed the original Invoice and Subscription. Reloading
-  before the next purchase preserved selection and created no extra Subscription.
-  Only the following purchase click created the new unpaid Checkout. Leaving it
-  did not restore the old grace. Exact inspection offers the same new Checkout for
-  resumption instead of creating another one.
-- A prepared browser intent for the already-recovered subscription was cleared
-  after a real inspection returned `subscribe.reason=paid_coverage_active`; the
-  UI retained paid access and did not create a replacement.
+## Purchase identity
 
-The provider suite passed 42 tests; the purchase context regression passed, and
-Billing/API/SDK type checks plus the Web check (0 errors/0 warnings), changed-file
-Biome and Changeset status passed. The temporary UI route and authentication
-server are not part of this commit. Full production-auth acceptance and deployment
-are separate from these scoped local consumer checks.
-- Actual one-time consumer inspection distinguished the original expired Order
-  (`canRestart=true`, no URL) from the newly paid Order (`settled=true`,
-  `canRestart=false`). This read used the real Cohub provider and SDK against the
-  same local Billing facts accepted from signed Stripe events.
+Ordinary Checkout requests keep a UUID purchase ID and immutable request through
+network failures. Cohub stores that ID and a normalized request hash in existing
+Order/Subscription Meta. A retry inspects the exact owned resource before current
+offer or subscription-admission checks. Same-ID intent changes and multiple
+matches fail closed; in-process coalescing uses the same complete fingerprint.
+Wallet and legacy purchases keep their existing path.
 
-New ordinary purchases also persist their purchase ID and a normalized request
-hash in the existing immutable Order/Subscription Meta. A retry resolves the
-exact owned resource before checking current prices, Discounts or active
-subscription admission. Thus a successful create with a lost response still
-returns its original receipt after the offer is consumed or the subscription
-becomes active. Multiple matches or a changed intent fail closed. Wallet and
-legacy purchases retain their existing path. No recovery relation or new storage
-resource was introduced. A previously unresolved browser attempt retains its
-identity even if a later response reports a changed offer; only a clearly rejected
-first attempt may discard that key. The regression exercises both paid Order and
-active Subscription receipts after simulated response loss. In-process request
-coalescing uses the same complete fingerprint, including the return URL; changed
-concurrent requests retain the same Billing idempotency key and are rejected
-instead of sharing the first request's result or creating a second resource.
+A usable Checkout resumes. Only a confirmed expired/canceled, unpaid resource
+with a closed Provider Checkout clears the current attempt and asks the user to
+review the price again. Unknown or conflicted results cannot start a new Order.
+Browser context is scoped by user, product and purchase, isolated per tab. The
+current-attempt index is separate from retained receipt identity so an old return
+cannot clear a later purchase. Replacement-plan intent is separate from ordinary
+Checkout context and survives reload; in-memory state covers unavailable storage.
 
-The subsequent customer-facing UI pass keeps recovery terminology out of the
-purchase flow. Its existing Web regression covers current-plan selection across
-valid grace, the deadline, closing, successful payment and confirmed end; the
-Web check reports zero errors and warnings. Desktop/mobile screenshots replay
-saved Sandbox facts through the actual current components with all business
-actions disabled. They verify presentation and confirmation wording, not a new
-Provider transaction.
+## Validation boundaries
 
-The purchase-flow regression compiles the actual Svelte controller and stubs only
-its I/O. It covers a pending plan intent followed by Credits selection and repeated
-loads, stale grace after an unresolved payment action, accepted paid coverage,
-confirmed end, and explicit usable-action rechecks without navigation. A local
-component replay also observed automatic convergence after two scheduled reads:
-four total Catalog reads and one payment-action call, with no Provider request.
+- Provider regressions cover lost responses, consumed offers, already-active
+  subscriptions, changed concurrent intent, and strict restart eligibility.
+  Web unit tests cover context ownership and plan selection; the existing native
+  module-mock integration runner executes the compiled real PurchaseFlow for
+  Credits selection across reloads and unresolved-payment convergence.
+- Isolated Sandbox acceptance on 2026-10-29 verified automatic retry returning to
+  the original paid cycle, explicit closure before a separately confirmed new
+  Checkout, abandonment without restoring old grace, and exact expired/paid
+  one-time Order inspection. Provider Test Clock and local wall time are separate.
+- Desktop/mobile replays and a prepared paid-winner intent verify presentation
+  and race handling; they do not constitute another Provider payment. Temporary
+  routes and authentication harnesses are not part of the repository. Production
+  Logto acceptance and deployment remain separate from these local checks.
+
+Registry-based builds, type checks and tests are recorded on
+[Cohub WIP PR #415](https://github.com/netaart/cohub/pull/415).
