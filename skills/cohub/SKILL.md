@@ -269,8 +269,6 @@ cohub cron-jobs notify <cronJobId> on|off|default
 
 Confirm before enabling, disabling, updating, or deleting recurring scheduled prompts.
 
-`cron-jobs notify` controls the completion popup for successful runs of that prompt; `default` follows `cohub me notifications set --scheduled on|off`. Failed and interrupted runs always notify.
-
 ```bash
 cohub cron-jobs -h
 ```
