@@ -39,8 +39,13 @@ admission. Cohub displays its `renewal_recovery` summary without treating
   Returns resolve the exact user/purchase/Order identity, so an older return cannot
   clear a later purchase of the same product. Storage is isolated per browser tab.
 
-The local integration uses the candidate Billing SDK artifact, local Billing and
-a disposable database. Browser testing mounts the real purchase components and
+Both direct Billing SDK dependencies now pin the registry-published
+`@talesofai-billing/sdk@1.30.0-beta.0`, with its registry integrity in the lockfile.
+Validation against that registry package passed the Billing/API dependency builds,
+42 Billing tests, 222 API tests, four Web recovery regressions and the relevant
+Billing/API/SDK/Web type checks. Frozen-lockfile installation also passed.
+The earlier local acceptance used a candidate SDK artifact, local Billing and a
+disposable database. Browser testing mounts the real purchase components and
 Cohub billing router with a test-only authentication fixture; it does not verify a
 production Logto session. Stripe account/payment evidence is recorded separately
 in the Billing P7 acceptance record. Temporary test routes are removed from the
