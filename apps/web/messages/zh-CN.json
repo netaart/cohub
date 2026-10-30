@@ -2038,6 +2038,8 @@
 	"board_export_selection": "导出所选",
 	"board_copy_view_link": "复制当前视图链接",
 	"board_view_link_copied": "链接已复制",
+	"board_image_uploading": "正在上传图片…",
+	"board_image_upload_failed": "图片上传失败，请重试。",
 	"board_frames": "画框",
 	"board_frame_numbered": "画框 {index}",
 	"board_frame_previous": "上一个画框",

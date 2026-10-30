@@ -8,8 +8,8 @@ import {
 	createBoardItemId,
 	invertMatrix,
 	type Point,
+	type Rect,
 	rectCenter,
-	rectContainsPoint,
 	resolveSceneArrow,
 	type SceneItem,
 	unionRects,
@@ -24,6 +24,21 @@ import {
 	remapItems,
 } from "./clipboard.js";
 import type { EditorContext } from "./context.js";
+
+/** How much of a paste beside its copy must show for that spot to count as the one in view. */
+const IN_PLACE_VISIBLE_SHARE = 0.9;
+
+function axisShare(start: number, length: number, viewStart: number, viewLength: number): number {
+	const overlap = Math.min(start + length, viewStart + viewLength) - Math.max(start, viewStart);
+	if (overlap < 0) return 0;
+	const span = Math.min(length, viewLength);
+	return span > 0 ? overlap / span : 1;
+}
+
+/** Share of `rect` inside `view`, measured against the view when the rect outgrows it. */
+function visibleShare(rect: Rect, view: Rect): number {
+	return axisShare(rect.x, rect.width, view.x, view.width) * axisShare(rect.y, rect.height, view.y, view.height);
+}
 
 export function createCopyModule(ctx: EditorContext) {
 	const { state, options } = ctx;
@@ -143,8 +158,9 @@ export function createCopyModule(ctx: EditorContext) {
 		const probe = buildBoardScene({ ...state.base, items: payload.items });
 		const bounds = unionRects(probe.items.map((item) => ctx.query.boundsOf(item, probe)));
 		if (!bounds) return next;
+		const landed = { x: bounds.x + next.x, y: bounds.y + next.y, width: bounds.width, height: bounds.height };
+		if (visibleShare(landed, view) >= IN_PLACE_VISIBLE_SHARE) return next;
 		const middle = rectCenter(bounds);
-		if (rectContainsPoint(view, { x: next.x + middle.x, y: next.y + middle.y })) return next;
 		const center = rectCenter(view);
 		return { x: center.x - middle.x, y: center.y - middle.y };
 	}

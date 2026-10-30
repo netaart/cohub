@@ -62,7 +62,7 @@ import {
 import { m } from "$lib/paraglide/messages.js";
 import {
 	uploadChatAttachmentFile,
-	uploadChatAttachmentImage,
+	uploadChatImageDurable,
 } from "$lib/public-asset-images";
 import { createRelatedSessions } from "$lib/related-sessions";
 import { isRelayExchange } from "$lib/relay";
@@ -2754,7 +2754,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					return;
 				}
 				try {
-					const asset = await uploadChatAttachmentImage({
+					const { publicUrl, demoted } = await uploadChatImageDurable({
 						spaceId: opSpaceId,
 						sessionId: sessionId ?? undefined,
 						file: attachment.file,
@@ -2766,39 +2766,17 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 								Math.round(ratio * 100),
 							),
 					});
-					urls.set(attachment.id, asset.publicUrl);
+					if (demoted) {
+						demotedIds.add(attachment.id);
+						fileUrls.set(attachment.id, publicUrl);
+					} else urls.set(attachment.id, publicUrl);
 					composer.setAttachmentFinalizing(attachment.id);
 				} catch (error) {
-					// Image specialization failed — still upload as a normal durable file.
 					demotedIds.add(attachment.id);
-					console.warn(
-						"[composer] image specialization demoted to file durable",
-						{
-							name: attachment.name,
-							size: attachment.size,
-							error,
-						},
-					);
-					try {
-						const asset = await uploadChatAttachmentFile({
-							spaceId: opSpaceId,
-							sessionId: sessionId ?? undefined,
-							file: attachment.file,
-							filename: attachment.name,
-							onProgress: ({ ratio }) =>
-								composer.setAttachmentUploadProgress(
-									attachment.id,
-									Math.round(ratio * 100),
-								),
-						});
-						fileUrls.set(attachment.id, asset.publicUrl);
-						composer.setAttachmentFinalizing(attachment.id);
-					} catch (fileError) {
-						console.warn("[composer] demoted image file durable failed", {
-							name: attachment.name,
-							error: fileError,
-						});
-					}
+					console.warn("[composer] demoted image file durable failed", {
+						name: attachment.name,
+						error,
+					});
 				}
 			}),
 		);

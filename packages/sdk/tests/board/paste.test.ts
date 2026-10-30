@@ -18,3 +18,19 @@ test("a paste whose spot is out of view lands mid-view", () => {
 	assert.equal(editor.selectedItems[0]?.frame.x, 5460);
 	editor.destroy();
 });
+
+test("a paste that would mostly spill out of view lands mid-view", () => {
+	const editor = createBoardEditor({
+		document: boardDocument({ items: { a: { type: "shape", position: { x: 850, y: 100 }, size: { width: 200, height: 80 } } } }),
+		onCommit() {},
+	});
+	editor.surfaceSize = { width: 1000, height: 600 };
+	editor.setSelection(["a"]);
+	editor.copySelection();
+	editor.pasteClipboard();
+	assert.equal(editor.selectedItems[0]?.frame.x, 400);
+	assert.equal(editor.selectedItems[0]?.frame.y, 260);
+	editor.pasteClipboard();
+	assert.equal(editor.selectedItems[0]?.frame.x, 424);
+	editor.destroy();
+});

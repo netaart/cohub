@@ -2038,6 +2038,8 @@
 	"board_export_selection": "Export selection",
 	"board_copy_view_link": "Copy link to this view",
 	"board_view_link_copied": "Link copied",
+	"board_image_uploading": "Uploading image…",
+	"board_image_upload_failed": "Image upload failed. Try again.",
 	"board_frames": "Frames",
 	"board_frame_numbered": "Frame {index}",
 	"board_frame_previous": "Previous frame",

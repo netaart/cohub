@@ -77,6 +77,11 @@ import {
 } from "$lib/board/board-generation";
 import type { BoardStageExportBridge } from "$lib/board/board-image-export";
 import {
+	clipboardImageFiles,
+	layoutBoardImages,
+	uploadBoardImage,
+} from "$lib/board/board-image-paste";
+import {
 	boardReceivesKeys,
 	registerBoardPanel,
 } from "$lib/board/board-keyboard";
@@ -127,6 +132,11 @@ import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { mergeCachedTaskRun } from "$lib/stores/task-runs-cache";
+import {
+	describeUploadError,
+	exceedsUploadFileLimit,
+	uploadFileLimitLabel,
+} from "$lib/upload-errors";
 
 const {
 	path,
@@ -360,6 +370,48 @@ function pasteText(text: string) {
 	else editor.pasteClipboard(text);
 }
 
+let imageUploads = 0;
+let destroyed = false;
+
+function pastedView() {
+	const { x, y, zoom } = editor.camera;
+	return {
+		x: -x / zoom,
+		y: -y / zoom,
+		width: surfaceSize.width / zoom,
+		height: surfaceSize.height / zoom,
+	};
+}
+
+async function pasteImages(files: File[]) {
+	imageUploads += 1;
+	const uploading = m.board_image_uploading({}, { locale });
+	if (noticeTimer) clearTimeout(noticeTimer);
+	noticeTimer = null;
+	notice = { text: uploading, error: false };
+	const results = await Promise.allSettled(
+		files.map((file) =>
+			uploadBoardImage(file, { spaceId: spaceId ?? undefined }),
+		),
+	);
+	imageUploads -= 1;
+	if (destroyed) return;
+	const images = results.flatMap((result) =>
+		result.status === "fulfilled" ? [result.value] : [],
+	);
+	const failure = results.find((result) => result.status === "rejected");
+	if (images.length)
+		editor.addItems(layoutBoardImages(images, pastedView()), { select: true });
+	if (failure?.status === "rejected") {
+		console.warn("[board] pasted image upload failed", failure.reason);
+		showNotice(
+			describeUploadError(failure.reason, locale) ??
+				m.board_image_upload_failed({}, { locale }),
+			true,
+		);
+	} else if (!imageUploads && notice?.text === uploading) notice = null;
+}
+
 function handlePaste(event: ClipboardEvent) {
 	if (
 		!receivesKeys() ||
@@ -369,13 +421,29 @@ function handlePaste(event: ClipboardEvent) {
 		replayOpen ||
 		linkRequest ||
 		editor.editingId ||
+		editor.enteredId ||
 		isEditableTarget(event.target)
 	)
 		return;
-	const text = event.clipboardData?.getData("text/plain");
-	if (!text) return;
 	event.preventDefault();
-	pasteText(text);
+	const images = clipboardImageFiles(event.clipboardData);
+	const tooLarge = images.filter(exceedsUploadFileLimit);
+	if (tooLarge.length)
+		showNotice(
+			m.upload_error_file_too_large(
+				{ limit: uploadFileLimitLabel() },
+				{ locale },
+			),
+			true,
+		);
+	if (images.length) {
+		const accepted = images.filter((file) => !exceedsUploadFileLimit(file));
+		if (accepted.length) void pasteImages(accepted);
+		return;
+	}
+	const text = event.clipboardData?.getData("text/plain");
+	if (text) pasteText(text);
+	else editor.pasteClipboard();
 }
 
 const checkedTasks = new Set<string>();
@@ -937,14 +1005,6 @@ async function writeClipboard(payload: unknown) {
 	} catch {}
 }
 
-async function readClipboardText(): Promise<string | null> {
-	try {
-		if (navigator.clipboard?.readText)
-			return await navigator.clipboard.readText();
-	} catch {}
-	return null;
-}
-
 function openItem(item: BoardSceneItem): boolean {
 	if (boardAppMeta(item)) {
 		runApp(item.id);
@@ -973,12 +1033,8 @@ function runHostCommand(command: BoardKeyCommand): boolean {
 			return payload !== null;
 		}
 		case "paste":
-			void (async () => {
-				const text = await readClipboardText();
-				if (text) pasteText(text);
-				else editor.pasteClipboard();
-			})();
-			return true;
+			// Leave the shortcut to the browser so its paste event carries files as well as text.
+			return false;
 		case "export":
 			openExport();
 			return true;
@@ -1114,6 +1170,7 @@ $effect(() => {
 });
 
 onDestroy(() => {
+	destroyed = true;
 	if (noticeTimer) clearTimeout(noticeTimer);
 	flushView();
 	window.removeEventListener("paste", handlePaste);

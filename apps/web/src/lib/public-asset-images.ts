@@ -171,6 +171,35 @@ export function uploadChatAttachmentImage(input: {
 	});
 }
 
+/**
+ * Durable upload for a prepared chat image. When the image upload is refused it
+ * is retried as a plain file durable, reported as `demoted`.
+ */
+export async function uploadChatImageDurable(
+	input: Parameters<typeof uploadChatAttachmentImage>[0],
+): Promise<{ publicUrl: string; demoted: boolean }> {
+	try {
+		const asset = await uploadChatAttachmentImage(input);
+		return { publicUrl: asset.publicUrl, demoted: false };
+	} catch (error) {
+		if (input.signal?.aborted) throw error;
+		console.warn("[chat-image] image specialization demoted to file durable", {
+			name: input.filename,
+			size: input.file.size,
+			error,
+		});
+		const asset = await uploadChatAttachmentFile({
+			spaceId: input.spaceId,
+			sessionId: input.sessionId,
+			file: input.file,
+			filename: input.filename,
+			onProgress: input.onProgress,
+			signal: input.signal,
+		});
+		return { publicUrl: asset.publicUrl, demoted: true };
+	}
+}
+
 /** Durable public upload for any chat file (no space required). */
 export function uploadChatAttachmentFile(input: {
 	spaceId?: string;
