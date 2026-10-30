@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="../windows/Cohub.Core/Cohub.Core.csproj" />
+  <Project Path="Cohub/Cohub.csproj" />
+</Solution>
