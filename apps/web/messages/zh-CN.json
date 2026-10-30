@@ -1904,7 +1904,6 @@
 	"board_add": "添加",
 	"board_more": "更多",
 	"board_text": "文本",
-
 	"board_ease": "缓动",
 	"board_ease_linear": "线性",
 	"board_ease_ease": "缓动",
@@ -2725,5 +2724,22 @@
 	"app_auth_join_as": "以{role}身份加入",
 	"app_auth_join_confirm": "加入",
 	"app_auth_join_validity": "将以你自己的账号加入。",
-	"app_auth_join_validity_scopes": "将以你自己的账号加入。App 授权有效期 14 天。"
+	"app_auth_join_validity_scopes": "将以你自己的账号加入。App 授权有效期 14 天。",
+	"billing_recovery_grace": "续费未完成",
+	"billing_recovery_grace_detail": "功能保留至 {date}，付款后补充本期额度。",
+	"billing_recovery_closing": "正在更新订阅…",
+	"billing_recovery_pay": "继续付款",
+	"billing_recovery_resubscribe": "重新选择套餐",
+	"billing_recovery_refresh": "重新查看",
+	"billing_recovery_end_confirm": "将结束当前套餐，之后可按最新价格重新订阅。",
+	"billing_recovery_paid_before_cancel": "付款已完成，套餐已恢复。",
+	"billing_recovery_refresh_failed": "暂时无法确认，请重试。",
+	"billing_checkout_reconfirm": "请确认当前价格后重新购买。",
+	"billing_recovery_purchase_blocked": "请先完成付款或重新选择套餐。",
+	"billing_recovery_ready": "当前套餐已结束，请选择新套餐。",
+	"billing_recovery_previous_payment": "上一笔付款仍待处理，你可以重新订阅。",
+	"billing_recovery_keep_plan": "保留套餐",
+	"billing_recovery_end_choose": "结束并选套餐",
+	"billing_recovery_pending": "待付款",
+	"billing_recovery_processing": "处理中"
 }

@@ -42,7 +42,7 @@ export class BillingApi {
   }
 
   async getFeatureEntitlement(featureKey: string) {
-    return this.transport.request<{ enabled: boolean }>(
+    return this.transport.request<{ enabled: boolean; validUntil: string | null }>(
       `/api/billing/features/${encodeURIComponent(featureKey)}`,
     );
   }
@@ -73,6 +73,7 @@ export class BillingApi {
   }
 
   async createOrder(productKey: string, input?: {
+    purchaseId?: string;
     returnUrl?: string;
     promotionCode?: string;
     offer?: BillingDiscountOfferRef;
@@ -87,6 +88,7 @@ export class BillingApi {
   }
 
   async createSubscription(productKey: string, input?: {
+    purchaseId?: string;
     returnUrl?: string;
     promotionCode?: string;
     offer?: BillingDiscountOfferRef;
@@ -104,6 +106,19 @@ export class BillingApi {
     return this.transport.request<{ subscription: BillingSubscriptionHistoryStatus }>(
       `/api/billing/subscriptions/${encodeURIComponent(subscriptionId)}/checkout`,
       { method: "DELETE" },
+    );
+  }
+
+  async getSubscription(subscriptionId: string) {
+    return this.transport.request<{ subscription: BillingSubscriptionHistoryStatus }>(
+      `/api/billing/subscriptions/${encodeURIComponent(subscriptionId)}`,
+    );
+  }
+
+  async getSubscriptionPaymentAction(subscriptionId: string) {
+    return this.transport.request<{ checkoutUrl: string | null; reason: string | null }>(
+      `/api/billing/subscriptions/${encodeURIComponent(subscriptionId)}/payment-action`,
+      { method: "POST" },
     );
   }
 

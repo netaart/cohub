@@ -1,7 +1,9 @@
 <script lang="ts">
 import type { BillingCatalogProduct } from "@neta-art/cohub";
 import { AlertCircle, ChevronUp } from "lucide-svelte";
+import Dialog from "$lib/components/Dialog.svelte";
 import Segmented from "$lib/components/Segmented.svelte";
+import { formatDateTime } from "$lib/i18n/format";
 import type { Locale } from "$lib/i18n/locale";
 import { m } from "$lib/paraglide/messages.js";
 import CheckoutSummary from "./CheckoutSummary.svelte";
@@ -60,6 +62,77 @@ const yearlySavings = $derived(
 );
 const recommendedPackKey = $derived(recommendedPack(packs)?.key ?? null);
 const compact = $derived(density === "sheet");
+const recovery = $derived(flow.recoverySubscription?.renewalRecovery);
+let endingConfirmation = $state<string | null>(null);
+let needsRecheck = $state(false);
+let recoveryNow = $state(Date.now());
+const recoveryExpired = $derived(
+	Boolean(
+		recovery?.effectiveEndsAt &&
+			Date.parse(recovery.effectiveEndsAt) <= recoveryNow,
+	),
+);
+$effect(() => {
+	const deadline = recovery?.effectiveEndsAt
+		? Date.parse(recovery.effectiveEndsAt)
+		: null;
+	recoveryNow = Date.now();
+	if (deadline === null || deadline <= Date.now()) return;
+	const timer = setTimeout(
+		() => {
+			recoveryNow = Date.now();
+		},
+		Math.min(2_147_483_647, deadline - Date.now()),
+	);
+	return () => clearTimeout(timer);
+});
+
+const processing = $derived(
+	recovery?.state === "closing" ||
+		recoveryExpired ||
+		flow.renewalPaymentPending ||
+		Boolean(flow.endingSubscriptionId),
+);
+const recoveringPlan = $derived(
+	family === "plans" && (processing || Boolean(recovery)),
+);
+const currentLabel = $derived(
+	processing
+		? m.billing_recovery_processing({}, { locale })
+		: recovery?.state === "grace"
+			? m.billing_recovery_pending({}, { locale })
+			: undefined,
+);
+$effect(() => {
+	if (!processing) {
+		needsRecheck = false;
+		return;
+	}
+	let checks = 0;
+	let checking = false;
+	const timer = setInterval(() => {
+		if (flow.recoveryLoading || checking) return;
+		checking = true;
+		void flow.load({ force: true }).finally(() => {
+			checking = false;
+		});
+		if (++checks >= 5) {
+			clearInterval(timer);
+			needsRecheck = true;
+		}
+	}, 2000);
+	return () => clearInterval(timer);
+});
+
+$effect(() => {
+	const refresh = () => {
+		void flow.restoreRenewalIntent().catch(() => {
+			needsRecheck = true;
+		});
+	};
+	window.addEventListener("cohub:billing-refresh", refresh);
+	return () => window.removeEventListener("cohub:billing-refresh", refresh);
+});
 
 function switchFamily(next: PurchaseFocus) {
 	if (family === next) return;
@@ -73,8 +146,29 @@ function select(product: BillingCatalogProduct) {
 }
 </script>
 
-<div class="panel" class:compact>
+<div class="panel" class:compact class:recovering={recoveringPlan}>
 	<div class="catalog">
+    {#if flow.recoveryNotice}<p class="recovery" role="status">{flow.recoveryNotice}</p>{/if}
+    {#if recovery || flow.endingSubscriptionId || flow.renewalPaymentPending}
+      <section class="recovery" aria-live="polite">
+        <strong>{processing ? needsRecheck ? m.billing_recovery_refresh_failed({}, { locale }) : m.billing_recovery_closing({}, { locale }) : m.billing_recovery_grace({}, { locale })}</strong>
+        {#if !processing}
+          <p>{m.billing_recovery_grace_detail({ date: recovery?.effectiveEndsAt ? formatDateTime(recovery.effectiveEndsAt, locale) : "" }, { locale })}</p>
+        {/if}
+        <div class="recovery-actions">
+          {#if !processing && recovery?.payInvoice.allowed}
+            <button type="button" class="primary-key" disabled={flow.recoveryLoading} onclick={() => flow.payRenewal()}>{m.billing_recovery_pay({}, { locale })}</button>
+          {/if}
+          {#if !processing && recovery?.endRecovery.allowed}
+            <button type="button" class="secondary-key" disabled={flow.recoveryLoading} onclick={() => { switchFamily("plans"); endingConfirmation = flow.recoverySubscription?.id ?? null; }}>{m.billing_recovery_resubscribe({}, { locale })}</button>
+          {/if}
+          {#if needsRecheck || flow.error || flow.loadError}
+            {#if flow.error || flow.loadError}<p>{m.billing_recovery_refresh_failed({}, { locale })}</p>{/if}
+            <button type="button" class="link" disabled={flow.recoveryLoading || flow.loading} onclick={() => flow.load({ force: true, checkPayment: true })}>{m.billing_recovery_refresh({}, { locale })}</button>
+          {/if}
+        </div>
+      </section>
+    {/if}
 		<div class="controls">
 			{#if showTabs}
 				<Segmented
@@ -90,7 +184,7 @@ function select(product: BillingCatalogProduct) {
 			{:else}
 				<span></span>
 			{/if}
-			{#if family === "plans" && hasPlans}
+			{#if family === "plans" && hasPlans && !processing}
 				<Segmented
 					label={m.purchase_billing_interval({}, { locale })}
 					value={flow.interval}
@@ -108,6 +202,7 @@ function select(product: BillingCatalogProduct) {
 			{/if}
 		</div>
 
+    {#if family === "packs" || !processing}
 		{#if flow.loading && !view}
 			<div class="grid" aria-busy="true">
 				{#each [0, 1, 2] as i (i)}
@@ -132,6 +227,7 @@ function select(product: BillingCatalogProduct) {
 						selected={flow.selectedKey === product.key}
 						recommended={product.kind === "plan" ? isRecommended(product, plans) : product.key === recommendedPackKey}
 						current={view?.currentPlan?.key === product.key}
+						{currentLabel}
 						monthlyPlans={view?.monthlyPlans ?? []}
 						variant={compact ? "compact" : "full"}
 						onselect={select}
@@ -146,13 +242,16 @@ function select(product: BillingCatalogProduct) {
 				<button type="button" class="link" onclick={() => switchFamily("plans")}>{m.purchase_family_plans({}, { locale })} →</button>
 			</p>
 		{/if}
+    {/if}
 	</div>
 
+ {#if !recoveringPlan}
 	<div class="aside">
 		<CheckoutSummary {flow} {locale} {signedIn} {ctaLabel} {onbuy} />
 	</div>
+ {/if}
 
-	{#if flow.selected}
+	{#if flow.selected && !recoveringPlan}
 		<div class="bar" class:open={summaryOpen}>
 			<button type="button" class="bar-toggle" aria-expanded={summaryOpen} onclick={() => (summaryOpen = !summaryOpen)}>
 				<span class="bar-name">{flow.selected.name}</span>
@@ -164,7 +263,7 @@ function select(product: BillingCatalogProduct) {
 					<CheckoutSummary {flow} {locale} {signedIn} {ctaLabel} {onbuy} />
 				</div>
 			{:else}
-				<button type="button" class="bar-cta primary-key" disabled={flow.checkoutLoading} onclick={onbuy}>
+				<button type="button" class="bar-cta primary-key" disabled={flow.checkoutLoading || (signedIn && !flow.canBuy(flow.selected))} onclick={onbuy}>
 					{ctaLabel ?? (flow.selected.kind === "plan" ? m.purchase_cta_subscribe({}, { locale }) : m.purchase_cta_add_balance({}, { locale }))}
 				</button>
 			{/if}
@@ -172,7 +271,22 @@ function select(product: BillingCatalogProduct) {
 	{/if}
 </div>
 
+<Dialog open={endingConfirmation !== null && endingConfirmation === flow.recoverySubscription?.id} onClose={() => { endingConfirmation = null; }} title={m.billing_recovery_resubscribe({}, { locale })} maxWidth="440px">
+  <div class="p-4">
+    <p class="text-sm text-text-secondary">{m.billing_recovery_end_confirm({}, { locale })}</p>
+    <div class="mt-5 flex justify-end gap-3">
+      <button type="button" class="secondary-key px-3 py-2 text-sm" onclick={() => { endingConfirmation = null; }}>{m.billing_recovery_keep_plan({}, { locale })}</button>
+      <button type="button" class="primary-key px-3 py-2 text-sm" disabled={!recovery?.endRecovery.allowed || processing} onclick={() => { endingConfirmation = null; void flow.endRecovery(); }}>{m.billing_recovery_end_choose({}, { locale })}</button>
+    </div>
+  </div>
+</Dialog>
+
 <style>
+  .panel.recovering { grid-template-columns: 1fr; }
+  .recovery { display: flex; flex-direction: column; gap: 8px; padding-bottom: 20px; font-size: 13px; }
+  .recovery p { color: var(--text-secondary); line-height: 1.5; }
+  .recovery-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .recovery-actions button { min-height: 44px; padding: 8px 12px; }
 	.panel {
 		display: grid;
 		gap: 28px;

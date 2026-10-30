@@ -400,6 +400,14 @@ export type SpaceCommerceOrder = {
   buyerProfile: SpaceCommerceBuyerProfile | null;
 };
 
+export type BillingRenewalRecovery = {
+  state: "none" | "grace" | "closing";
+  effectiveEndsAt: string | null;
+  payInvoice: { allowed: boolean; reason: string | null };
+  endRecovery: { allowed: boolean; reason: string | null };
+  subscribe: { allowed: boolean; reason: string | null };
+};
+
 export type BillingSubscriptionSummary = {
   id: string;
   productKey: string | null;
@@ -408,6 +416,7 @@ export type BillingSubscriptionSummary = {
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  renewalRecovery?: BillingRenewalRecovery;
 };
 
 export type BillingPaymentStatus = {
@@ -442,6 +451,7 @@ export type BillingCheckoutActionState = {
 };
 
 export type BillingSubscriptionHistoryStatus = {
+  paymentConflict?: { reason: string; amountMinor: number; currency: string | null };
   id: string;
   externalUserId: string;
   productKey: string;
@@ -457,6 +467,7 @@ export type BillingSubscriptionHistoryStatus = {
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  renewalRecovery?: BillingRenewalRecovery;
   canceledAt: string | null;
   checkoutExpiresAt: string | null;
   checkoutCanceledAt: string | null;
@@ -494,6 +505,8 @@ export type BillingCheckoutResult = {
 };
 
 export type BillingCheckoutConfirmation = {
+  checkoutUrl?: string | null;
+  canRestart?: boolean;
   productKey: string;
   settled: boolean;
   status: string | null;

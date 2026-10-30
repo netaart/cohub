@@ -152,3 +152,34 @@ test("billing checkout rejects products outside the Cohub catalog", async () => 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("past-due cancellation preserves closing and paid-before-cancel facts, and payment action checks ownership", async () => {
+  const originalFetch = globalThis.fetch;
+  const permission = (allowed: boolean) => ({ allowed, reason: allowed ? null : "subscription_occupied" });
+  const subscription = { id: "sub_recovery", external_user_id: "user_1", product_key_snapshot: "cohub_pro", product_name_snapshot: "Pro", status: "past_due", cancel_at_period_end: false, current_period_end: "2026-10-29T00:00:00Z", renewal_recovery: { state: "grace", effective_ends_at: "2026-11-01T00:00:00Z", pay_invoice: permission(true), end_recovery: permission(true), subscribe: permission(false) } };
+  let paidWon = false;
+  let actionRequests = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/subscriptions/sub_recovery") return jsonResponse({ subscription, checkout: { provider_key: "stripe" }, payment_conflict: { reason: "recovery_deadline_expired", actual_amount: 100, actual_currency: "USD" } });
+    if (url.pathname.endsWith("/cancel") && init?.method === "POST") return jsonResponse({ subscription: { ...subscription, status: paidWon ? "active" : "past_due", cancel_at_period_end: paidWon, renewal_recovery: { ...subscription.renewal_recovery, state: paidWon ? "none" : "closing", end_recovery: permission(false) } } });
+    if (url.pathname.endsWith("/payment-action")) { actionRequests++; return jsonResponse({ subscription_id: subscription.id, payment_action: { kind: "stripe_hosted_invoice", checkout_ui_mode: "hosted_page", checkout_url: "https://invoice.stripe.test/current" }, reason: null }); }
+    throw new Error(`Unexpected request: ${url}`);
+  };
+  try {
+    const operations = createTalesofaiBillingOperations({ baseUrl: "https://billing.example.test/v1", businessKey: "cohub", adminApiKey: "test-key" });
+    const ref = { userId: "user_1", subscriptionId: subscription.id };
+    const closing = await operations.cancelSubscriptionAutoRenew(ref);
+    assert.equal(closing.cancelAtPeriodEnd, false);
+    assert.equal(closing.renewalRecovery?.state, "closing");
+    assert.equal(closing.renewalRecovery?.subscribe.allowed, false);
+    paidWon = true;
+    const paid = await operations.cancelSubscriptionAutoRenew(ref);
+    assert.equal(paid.status, "active");
+    assert.equal(paid.cancelAtPeriodEnd, true);
+    assert.equal((await operations.getSubscriptionPaymentAction(ref)).checkoutUrl, "https://invoice.stripe.test/current");
+    await assert.rejects(operations.getSubscriptionPaymentAction({ ...ref, userId: "other" }));
+    assert.equal(actionRequests, 1);
+    assert.deepEqual((await operations.getSubscription(ref)).paymentConflict, { reason: "recovery_deadline_expired", amountMinor: 100, currency: "USD" });
+  } finally { globalThis.fetch = originalFetch; }
+});

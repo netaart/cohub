@@ -1,7 +1,6 @@
 <script lang="ts">
 import type {
 	BillingBalanceActivityList,
-	BillingCatalog,
 	BillingCreditStatus,
 	BillingSubscriptionHistoryList,
 	BillingSubscriptionHistoryStatus,
@@ -21,6 +20,10 @@ import { ensureAuth } from "$lib/auth";
 import { handleUnauthorizedError } from "$lib/auth-redirect";
 import { trackPurchase } from "$lib/features/billing/funnel";
 import PurchasePanel from "$lib/features/billing/PurchasePanel.svelte";
+import {
+	currentCatalogSubscription,
+	subscriptionDisplayState,
+} from "$lib/features/billing/product";
 import { PurchaseFlow } from "$lib/features/billing/purchase.svelte";
 import * as account from "$lib/features/settings/account-data";
 import {
@@ -53,7 +56,7 @@ let activityPagingError = $state("");
 const balanceActivities = $derived(
 	activityPage === 1 ? account.billingActivity.data : laterActivities,
 );
-let billingCatalog = $state<BillingCatalog | null>(null);
+const billingCatalog = $derived(billingCatalogStore.catalog);
 let billingSubscriptions = $state<BillingSubscriptionHistoryList | null>(null);
 const creditLoading = $derived(
 	account.billingCredits.loading || account.billingCredits.refreshing,
@@ -100,13 +103,9 @@ const subscriptionsHasMore = $derived(
 );
 const routeBillingTab = $derived(page.url.searchParams.get("tab"));
 const currentSubscription = $derived(
-	billingCatalog?.currentSubscriptions.find(
-		(subscription) => subscription.status === "active",
-	) ??
-		billingCatalog?.currentSubscriptions.find(
-			(subscription) => subscription.status === "trialing",
-		) ??
-		null,
+	billingCatalog
+		? currentCatalogSubscription(billingCatalog, checkoutNow)
+		: null,
 );
 const defaultPlanProduct = $derived.by(() => {
 	const catalog = billingCatalog;
@@ -193,6 +192,9 @@ function getExpiryGroupLabel(
 
 function currentSubscriptionLine(): string {
 	if (!currentSubscription) return "";
+	const state = subscriptionDisplayState(currentSubscription, checkoutNow);
+	if (state === "closing") return m.billing_recovery_processing({}, { locale });
+	if (state === "grace") return m.billing_recovery_pending({}, { locale });
 	const parts = [formatHistoryStatus(currentSubscription.status)];
 	if (!currentSubscription.currentPeriodEnd) return parts.join(" - ");
 	parts.push(
@@ -225,6 +227,8 @@ function formatHistoryStatus(value: string): string {
 			return m.billing_status_active({}, { locale });
 		case "trialing":
 			return m.billing_status_trialing({}, { locale });
+		case "past_due":
+			return m.billing_recovery_pending({}, { locale });
 		case "pending_checkout":
 			return m.billing_status_pending_checkout({}, { locale });
 		default:
@@ -395,9 +399,9 @@ async function loadCatalog(options: { force?: boolean } = {}) {
 	catalogRequest = (async () => {
 		if (!(await ensureAuth())) return;
 		try {
-			billingCatalog = await billingCatalogStore.load({ force: options.force });
-			purchase.catalog = billingCatalog;
+			await billingCatalogStore.load({ force: options.force });
 			purchase.ensureSelection();
+			await purchase.restoreRenewalIntent();
 		} catch (error) {
 			if (await handleUnauthorizedError(error)) return;
 			catalogError =
@@ -560,6 +564,17 @@ function goToSubscriptionsPage(page: number) {
 	void loadSubscriptionsPage(page);
 }
 
+$effect(() => {
+	if (!active()) return;
+	const refresh = () => {
+		void loadCatalog({ force: true });
+		void loadCreditStatus({ force: true });
+		void loadSubscriptionsPage(subscriptionsPage, { force: true });
+	};
+	window.addEventListener("cohub:billing-refresh", refresh);
+	return () => window.removeEventListener("cohub:billing-refresh", refresh);
+});
+
 onSettingsPageActive(() => {
 	void loadCatalog();
 	void loadCreditStatus();
@@ -568,7 +583,12 @@ onSettingsPageActive(() => {
 });
 
 $effect(() => {
-	if (!active() || pendingCheckoutExpirations.length === 0) return;
+	if (
+		!active() ||
+		(pendingCheckoutExpirations.length === 0 &&
+			!currentSubscription?.renewalRecovery?.effectiveEndsAt)
+	)
+		return;
 	checkoutNow = Date.now();
 	const interval = window.setInterval(() => {
 		checkoutNow = Date.now();
@@ -728,7 +748,7 @@ $effect(() => {
 									<div class="mt-0.5 truncate font-mono text-[10px] text-text-placeholder">{shortIdentifier(subscription.id)}</div>
 								</div>
 								<div class="min-w-0">
-									<div class="truncate text-text-secondary">{formatHistoryStatus(subscription.status)}</div>
+									<div class="truncate text-text-secondary">{subscriptionDisplayState(subscription, checkoutNow) === "closing" ? m.billing_recovery_processing({}, { locale }) : formatHistoryStatus(subscription.status)}</div>
 									{#if subscription.cancelAtPeriodEnd}
 										<div class="mt-0.5 text-[11px] text-text-tertiary">{m.billing_auto_renew_canceled({}, { locale })}</div>
 									{/if}

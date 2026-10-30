@@ -49,6 +49,7 @@ export function createAppDetailController(options: {
 	let formHideCohubBar = $state(false);
 	let hideCohubBarAllowed = $state(false);
 	let hideCohubBarLoading = $state(false);
+	let entitlementTimer: ReturnType<typeof setTimeout> | null = null;
 	let formScopes = $state<Record<string, boolean>>({});
 	let formSubmitting = $state(false);
 	let formError = $state("");
@@ -87,12 +88,25 @@ export function createAppDetailController(options: {
 		const stateKey = routeStateKey;
 		hideCohubBarLoading = true;
 		try {
-			const { enabled } = await sdk.billing.getFeatureEntitlement(
+			const { enabled, validUntil } = await sdk.billing.getFeatureEntitlement(
 				APP_HIDE_COHUB_BAR_FEATURE,
 			);
 			if (routeStateKey !== stateKey) return;
-			hideCohubBarAllowed = enabled;
-			if (!enabled && !hidesCohubBar(detail?.meta)) formHideCohubBar = false;
+			if (entitlementTimer) clearTimeout(entitlementTimer);
+			const deadline = validUntil ? Date.parse(validUntil) : null;
+			hideCohubBarAllowed =
+				enabled && (deadline === null || deadline > Date.now());
+			if (enabled && deadline !== null && deadline > Date.now()) {
+				entitlementTimer = setTimeout(
+					() => {
+						hideCohubBarAllowed = false;
+						void loadHideCohubBarEntitlement();
+					},
+					Math.min(2_147_483_647, deadline - Date.now()),
+				);
+			}
+			if (!hideCohubBarAllowed && !hidesCohubBar(detail?.meta))
+				formHideCohubBar = false;
 		} catch {
 			if (routeStateKey !== stateKey) return;
 			hideCohubBarAllowed = false;
@@ -403,7 +417,20 @@ export function createAppDetailController(options: {
 		notify(null);
 	}
 
+	$effect(() => {
+		const refresh = () => {
+			if (detail) void loadHideCohubBarEntitlement();
+		};
+		window.addEventListener("focus", refresh);
+		window.addEventListener("cohub:billing-refresh", refresh);
+		return () => {
+			window.removeEventListener("focus", refresh);
+			window.removeEventListener("cohub:billing-refresh", refresh);
+		};
+	});
+
 	function dispose() {
+		if (entitlementTimer) clearTimeout(entitlementTimer);
 		if (copiedTimer) clearTimeout(copiedTimer);
 		if (copiedPublicRouteTimer) clearTimeout(copiedPublicRouteTimer);
 		copiedTimer = null;

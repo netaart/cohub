@@ -458,3 +458,29 @@ commerce, and App Actions — are documented in one place:
 
 Runtime APIs only work inside a published App; local pages get `null` from
 `context()`.
+
+### Subscription payment recovery
+
+`billing.getSubscription(id)` refreshes the owned subscription, including `renewalRecovery` when the Billing service supports it. `billing.getSubscriptionPaymentAction(id)` obtains the current Stripe Hosted Invoice URL after server-side eligibility checks. A successful payment-page return or cancellation request does not establish paid entitlement or permission to buy again: refresh the subscription and follow its action permissions.
+
+`billing.createOrder` and `billing.createSubscription` accept a stable `purchaseId`. Reuse it with the original request after an uncertain response. When retrying an unpaid purchase, use a new ID only after the old purchase is confirmed closed and unpaid and the user has reviewed the current quote. `confirmCheckout(productKey, checkoutId)` returns `checkoutUrl` for a usable original Checkout and `canRestart` for a confirmed unpaid closed order.
+
+For a replacement subscription, persist the selected plan and old subscription ID
+within the user's current browser session, then cancel and inspect the original
+subscription. Only an `ended` result with `renewalRecovery.subscribe.allowed`
+permits a fresh create. Review current pricing and require another purchase click;
+a `200` cancellation receipt or a Checkout return never proves closure or payment.
+The old `paymentConflict`, when present on inspection, describes the earlier money
+and does not automatically block a new subscription after confirmed close.
+
+Both Cohub Billing SDK consumers are pinned to the registry-published
+`@talesofai-billing/sdk@1.30.0-beta.0`, which includes
+`Subscription.renewal_recovery` and `subscriptions.paymentAction`. The lockfile
+records the registry integrity; no local SDK artifact is used as a dependency.
+This Beta integration remains WIP and does not deploy Cohub or publish packages.
+
+For new ordinary purchases, Cohub stores the stable purchase ID and request hash
+in the existing Order/Subscription Meta. Same-ID retries inspect that exact
+resource before reevaluating Discounts or subscription admission. A changed
+request with the same ID is rejected; multiple matching resources remain
+unresolved. Wallet and legacy purchase calls keep their original behavior.

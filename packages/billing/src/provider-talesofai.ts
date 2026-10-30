@@ -152,7 +152,7 @@ const CREDIT_GRANT_DISPLAY_STATUSES = [
   "depleted",
   "expired",
 ] as const;
-const BILLING_CURRENT_SUBSCRIPTION_STATUSES = ["trialing", "active"] as const;
+const BILLING_CURRENT_SUBSCRIPTION_STATUSES = ["trialing", "active", "past_due"] as const;
 const BILLING_BLOCKING_SUBSCRIPTION_STATUSES = [
   "trialing",
   "active",
@@ -905,6 +905,7 @@ function mapSubscriptionHistoryStatus(
     currentPeriodStart: subscription.current_period_start,
     currentPeriodEnd: subscription.current_period_end,
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
+    renewalRecovery: mapRenewalRecovery(subscription),
     canceledAt: subscription.canceled_at,
     checkoutExpiresAt: subscription.checkout_expires_at,
     checkoutCanceledAt: subscription.checkout_canceled_at,
@@ -1221,6 +1222,18 @@ function mapCatalogProduct(
   };
 }
 
+function mapRenewalRecovery(subscription: Subscription) {
+  const recovery = subscription.renewal_recovery;
+  if (!recovery) return undefined;
+  return {
+    state: recovery.state,
+    effectiveEndsAt: recovery.effective_ends_at,
+    payInvoice: recovery.pay_invoice,
+    endRecovery: recovery.end_recovery,
+    subscribe: recovery.subscribe,
+  };
+}
+
 function mapSubscriptionSummary(subscription: Subscription) {
   return {
     id: subscription.id,
@@ -1230,6 +1243,7 @@ function mapSubscriptionSummary(subscription: Subscription) {
     currentPeriodStart: subscription.current_period_start,
     currentPeriodEnd: subscription.current_period_end,
     cancelAtPeriodEnd: subscription.cancel_at_period_end,
+    renewalRecovery: mapRenewalRecovery(subscription),
   };
 }
 
@@ -1371,7 +1385,7 @@ function checkoutResultFromSubscription(input: {
  * appended as `cohub_billing` so the app can confirm, retry or restore state
  * without polling the order first.
  */
-function checkoutRedirects(returnUrl: string | undefined, productKey: string) {
+function checkoutRedirects(returnUrl: string | undefined, productKey: string, purchaseId?: string) {
   if (!returnUrl || !/^https?:\/\//i.test(returnUrl)) {
     return {
       success_redirect_url: undefined,
@@ -1385,6 +1399,7 @@ function checkoutRedirects(returnUrl: string | undefined, productKey: string) {
     // The product is server-authoritative (it is the key the checkout was
     // created for), so the landing page never trusts a client-supplied name.
     url.searchParams.set(CHECKOUT_PRODUCT_PARAM, productKey);
+    if (purchaseId) url.searchParams.set("cohub_billing_purchase", purchaseId);
     return url.toString();
   };
   return {
@@ -2351,6 +2366,49 @@ export function createTalesofaiBillingOperations(
       reason: input.reason,
     });
 
+  const purchaseMeta = (input: BillingCheckoutInput) => ({
+    cohub_purchase_id: input.purchaseId,
+    cohub_purchase_fingerprint: createHash("sha256").update(JSON.stringify([
+      businessKey, input.userId, input.productKey, input.returnUrl ?? null,
+      input.promotionCode?.trim().toUpperCase() ?? null,
+      input.offer ? [input.offer.key, input.offer.revision] : null,
+    ])).digest("hex"),
+  });
+
+  const findIdentifiedCheckout = async (
+    input: BillingCheckoutInput,
+    kind: "order" | "subscription",
+  ): Promise<BillingCheckoutResult | null> => {
+    if (!input.purchaseId || input.walletCheckout) return null;
+    await ensureCustomer({ userId: input.userId });
+    const query = {
+      business_key: businessKey,
+      external_user_id: input.userId,
+      meta_contains: { cohub_purchase_id: input.purchaseId },
+      include_count: false as const,
+      limit: 2,
+    };
+    const matched = kind === "order"
+      ? await sdk.admin.orders.list(query)
+      : await sdk.admin.subscriptions.list(query);
+    if (matched.items.length > 1 || matched.pagination.has_more) {
+      throw billingApiError(409, "Purchase identity is ambiguous", "purchase_identity_ambiguous");
+    }
+    const resource = matched.items[0];
+    if (!resource) return null;
+    if (resource.external_user_id !== input.userId
+      || resource.product_key_snapshot !== input.productKey
+      || resource.meta?.cohub_purchase_fingerprint !== purchaseMeta(input).cohub_purchase_fingerprint) {
+      throw billingApiError(409, "Purchase intent differs from the original request", "purchase_intent_mismatch");
+    }
+    if (kind === "order") {
+      const inspected = await sdk.admin.orders.inspect({ business_key: businessKey, order_id: resource.id });
+      return checkoutResultFromOrder({ userId: input.userId, productKey: input.productKey, response: inspected, status, reused: true });
+    }
+    const inspected = await sdk.admin.subscriptions.inspect({ business_key: businessKey, subscription_id: resource.id });
+    return checkoutResultFromSubscription({ userId: input.userId, productKey: input.productKey, response: { ...inspected, reused: true }, status });
+  };
+
   const findReusableAddonCheckout = async (input: {
     userId: string;
     productKey: string;
@@ -2442,7 +2500,9 @@ export function createTalesofaiBillingOperations(
         kind: "addon",
         userId: input.userId,
         productKey: input.productKey,
-        selectionKey: checkoutSelectionKey(input),
+        selectionKey: input.purchaseId && !input.walletCheckout
+          ? `${purchaseMeta(input).cohub_purchase_fingerprint}:${input.purchaseId}`
+          : `${checkoutSelectionKey(input)}:${input.purchaseId ?? "legacy"}`,
       },
       () => purchaseAddonUnprotected(input),
     );
@@ -2451,6 +2511,8 @@ export function createTalesofaiBillingOperations(
   const purchaseAddonUnprotected = async (
     input: BillingCheckoutInput,
   ): Promise<BillingCheckoutResult> => {
+    const original = await findIdentifiedCheckout(input, "order");
+    if (original) return original;
     const product = await findCheckoutProduct({
       productKey: input.productKey,
       kind: "addon",
@@ -2465,7 +2527,7 @@ export function createTalesofaiBillingOperations(
 
     await ensureCustomer({ userId: input.userId });
     const discount = await resolveCheckoutDiscount(input, product);
-    const reusableCheckout = input.walletCheckout ? null : await findReusableAddonCheckout({
+    const reusableCheckout = input.walletCheckout || input.purchaseId ? null : await findReusableAddonCheckout({
       userId: input.userId,
       productKey: product.key,
       discountId: discount?.discountId ?? null,
@@ -2486,12 +2548,12 @@ export function createTalesofaiBillingOperations(
       external_user_id: input.userId,
       product_key: product.key,
       billing_reason: "purchase",
-      ...checkoutRedirects(input.returnUrl, input.productKey),
+      ...checkoutRedirects(input.returnUrl, input.productKey, input.purchaseId),
       ...(input.walletCheckout ? {
         meta: { space_id: input.walletCheckout.spaceId, actor_user_id: input.walletCheckout.actorUserId, wallet_checkout_id: input.walletCheckout.id },
-      } : {}),
+      } : input.purchaseId ? { meta: purchaseMeta(input) } : {}),
       ...(discount?.createSelector ?? {}),
-    }, input.walletCheckout ? { idempotencyKey: `space-wallet:${input.walletCheckout.id}` } : undefined);
+    }, input.walletCheckout ? { idempotencyKey: `space-wallet:${input.walletCheckout.id}` } : input.purchaseId ? { idempotencyKey: `cohub:order:${input.userId}:${input.purchaseId}` } : undefined);
     return checkoutResultFromOrder({
       userId: input.userId,
       productKey: product.key,
@@ -2508,7 +2570,9 @@ export function createTalesofaiBillingOperations(
         kind: "plan",
         userId: input.userId,
         productKey: input.productKey,
-        selectionKey: checkoutSelectionKey(input),
+        selectionKey: input.purchaseId && !input.walletCheckout
+          ? `${purchaseMeta(input).cohub_purchase_fingerprint}:${input.purchaseId}`
+          : `${checkoutSelectionKey(input)}:${input.purchaseId ?? "legacy"}`,
       },
       () => createSubscriptionUnprotected(input),
     );
@@ -2517,6 +2581,8 @@ export function createTalesofaiBillingOperations(
   const createSubscriptionUnprotected = async (
     input: BillingCheckoutInput,
   ): Promise<BillingCheckoutResult> => {
+    const original = await findIdentifiedCheckout(input, "subscription");
+    if (original) return original;
     const product = await findCheckoutProduct({
       productKey: input.productKey,
       kind: "plan",
@@ -2540,7 +2606,7 @@ export function createTalesofaiBillingOperations(
     }
 
     const discount = await resolveCheckoutDiscount(input, product);
-    const reusableCheckout = await findReusableSubscriptionCheckout({
+    const reusableCheckout = input.purchaseId ? null : await findReusableSubscriptionCheckout({
       userId: input.userId,
       productKey: product.key,
       discountId: discount?.discountId ?? null,
@@ -2560,9 +2626,10 @@ export function createTalesofaiBillingOperations(
       business_key: businessKey,
       external_user_id: input.userId,
       product_key: product.key,
-      ...checkoutRedirects(input.returnUrl, input.productKey),
+      ...checkoutRedirects(input.returnUrl, input.productKey, input.purchaseId),
+      ...(input.purchaseId ? { meta: purchaseMeta(input) } : {}),
       ...(discount?.createSelector ?? {}),
-    });
+    }, input.purchaseId ? { idempotencyKey: `cohub:subscription:${input.userId}:${input.purchaseId}` } : undefined);
     return checkoutResultFromSubscription({
       userId: input.userId,
       productKey: product.key,
@@ -2597,10 +2664,11 @@ export function createTalesofaiBillingOperations(
       });
       const isPlan = product.billing_type === "recurring";
       if (isPlan) {
-        const subscription = await sdk.admin.subscriptions.get({
+        const inspected = await sdk.admin.subscriptions.inspect({
           business_key: businessKey,
           subscription_id: input.checkoutId,
         });
+        const subscription = inspected.subscription;
         if (
           subscription.external_user_id !== input.userId ||
           subscription.product_key_snapshot !== input.productKey
@@ -2609,18 +2677,22 @@ export function createTalesofaiBillingOperations(
         }
         return {
           productKey: input.productKey,
-          settled: BILLING_CURRENT_SUBSCRIPTION_STATUSES.includes(
-            subscription.status as (typeof BILLING_CURRENT_SUBSCRIPTION_STATUSES)[number],
-          ),
+          settled: ["active", "trialing"].includes(subscription.status),
+          checkoutUrl: subscription.status === "pending_checkout" && inspected.checkout?.checkout_usable ? inspected.checkout.checkout_url ?? null : null,
+          canRestart: ["checkout_expired", "checkout_canceled"].includes(subscription.status)
+            && !subscription.payment_conflicted_at
+            && inspected.checkout?.checkout_usable === false
+            && ["checkout_expired", "checkout_canceled"].includes(inspected.checkout.status),
           status: subscription.status ?? null,
           pending: subscription.status === "pending_checkout",
           productName: product.name ?? null,
         };
       }
-      const order = await sdk.admin.orders.get({
+      const inspected = await sdk.admin.orders.inspect({
         business_key: businessKey,
         order_id: input.checkoutId,
       });
+      const order = inspected.order;
       if (
         order.external_user_id !== input.userId ||
         order.product_key_snapshot !== input.productKey
@@ -2630,6 +2702,11 @@ export function createTalesofaiBillingOperations(
       return {
         productKey: input.productKey,
         settled: order.status === "paid",
+        checkoutUrl: order.status === "pending_checkout" && inspected.checkout?.checkout_usable ? inspected.checkout.checkout_url ?? null : null,
+        canRestart: ["checkout_expired", "checkout_canceled"].includes(order.status)
+          && !order.paid_at && !order.payment_conflicted_at
+          && inspected.checkout?.checkout_usable === false
+          && ["checkout_expired", "checkout_canceled"].includes(inspected.checkout.status),
         status: order.status ?? null,
         pending: order.status === "pending_checkout",
         productName: product.name ?? null,
@@ -2640,7 +2717,8 @@ export function createTalesofaiBillingOperations(
           productKey: input.productKey,
           settled: false,
           status: null,
-          pending: false,
+          pending: true,
+          canRestart: false,
           productName: null,
         };
       }
@@ -2724,6 +2802,37 @@ export function createTalesofaiBillingOperations(
     }
   };
 
+  const getSubscription = async (
+    input: BillingUserRef & { subscriptionId: string },
+  ): Promise<BillingSubscriptionHistoryStatus> => {
+    await getOwnedSubscription(input);
+    const inspected = await sdk.admin.subscriptions.inspect({
+      subscription_id: input.subscriptionId,
+      business_key: businessKey,
+    });
+    return {
+      ...mapSubscriptionHistoryStatus(inspected.subscription, inspected.checkout),
+      ...(inspected.payment_conflict ? {
+        paymentConflict: {
+          reason: inspected.payment_conflict.reason,
+          amountMinor: inspected.payment_conflict.actual_amount,
+          currency: inspected.payment_conflict.actual_currency,
+        },
+      } : {}),
+    };
+  };
+
+  const getSubscriptionPaymentAction = async (
+    input: BillingUserRef & { subscriptionId: string },
+  ) => {
+    await getOwnedSubscription(input);
+    const result = await sdk.admin.subscriptions.paymentAction(
+      { subscription_id: input.subscriptionId },
+      { business_key: businessKey, external_user_id: input.userId },
+    );
+    return { checkoutUrl: result.payment_action?.checkout_url ?? null, reason: result.reason };
+  };
+
   const cancelSubscriptionCheckout = async (
     input: BillingUserRef & { subscriptionId: string },
   ): Promise<BillingSubscriptionHistoryStatus> => {
@@ -2749,13 +2858,15 @@ export function createTalesofaiBillingOperations(
     input: BillingUserRef & { subscriptionId: string },
   ): Promise<BillingSubscriptionHistoryStatus> => {
     const subscription = await getOwnedSubscription(input);
-    if (
+    if (subscription.renewal_recovery?.state === "closing") return getSubscription(input);
+    const endingRecovery = subscription.renewal_recovery?.end_recovery.allowed === true;
+    if (!endingRecovery && (
       !BILLING_AUTO_RENEW_CANCELABLE_SUBSCRIPTION_STATUSES.includes(
         subscription.status as (typeof BILLING_AUTO_RENEW_CANCELABLE_SUBSCRIPTION_STATUSES)[number],
       ) ||
       subscription.cancel_at_period_end ||
       subscription.current_period_end === null
-    ) {
+    )) {
       throw billingApiError(
         409,
         "Subscription auto-renew cannot be canceled",
@@ -2767,7 +2878,7 @@ export function createTalesofaiBillingOperations(
       subscription_id: input.subscriptionId,
       business_key: businessKey,
     });
-    if (!isProviderBackedSubscriptionCheckout(inspected.checkout)) {
+    if (!endingRecovery && !isProviderBackedSubscriptionCheckout(inspected.checkout)) {
       throw billingApiError(
         409,
         "Subscription auto-renew cannot be canceled",
@@ -2778,7 +2889,9 @@ export function createTalesofaiBillingOperations(
       { subscription_id: input.subscriptionId },
       { business_key: businessKey },
       {
-        idempotencyKey: `cohub:billing:subscription-cancel-auto-renew:${input.userId}:${input.subscriptionId}`,
+        idempotencyKey: endingRecovery
+          ? `cohub:billing:subscription-end-recovery:${input.userId}:${input.subscriptionId}:${subscription.current_period_end}`
+          : `cohub:billing:subscription-cancel-auto-renew:${input.userId}:${input.subscriptionId}`,
       },
     );
     const cancellationCheckout = response.cancellation
@@ -2925,6 +3038,8 @@ export function createTalesofaiBillingOperations(
     cancelSubscriptionCheckout,
 
     cancelSubscriptionAutoRenew,
+    getSubscription,
+    getSubscriptionPaymentAction,
 
     redeemCode,
 

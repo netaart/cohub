@@ -68,7 +68,7 @@
     "typescript": "^7.0.2"
   },
   "optionalDependencies": {
-    "@talesofai-billing/sdk": "^1.16.0"
+    "@talesofai-billing/sdk": "1.30.0"
   },
   "license": "Apache-2.0"
 }

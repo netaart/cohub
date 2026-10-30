@@ -35,7 +35,7 @@
     "ioredis": "6.0.0"
   },
   "optionalDependencies": {
-    "@talesofai-billing/sdk": "^1.16.0"
+    "@talesofai-billing/sdk": "1.30.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
