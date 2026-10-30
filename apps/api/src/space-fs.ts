@@ -2,7 +2,7 @@
 import { directoryCursor, FsPaginationError } from "./fs-pagination.js";
 import type { SpaceFsListOptions, SpaceFsTreePage } from "@cohub/protocol/fs";
 import { constants, type Stats } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { context, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
@@ -213,6 +213,51 @@ async function writeFileWithDisposition(path: string, data: Buffer) {
     } finally {
       await handle.close();
     }
+  }
+}
+
+// Shared NFS caches attributes per fs-api replica, so path stat/lstat can be stale.
+// open() revalidates them (close-to-open), so versions must come from an open handle.
+async function readFileWithStats(path: string) {
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(path, "r");
+  } catch (error) {
+    throw toFileReadError(error as NodeJS.ErrnoException);
+  }
+  try {
+    const stats = await handle.stat();
+    return { stats, buffer: await handle.readFile() };
+  } catch (error) {
+    throw toFileReadError(error as NodeJS.ErrnoException);
+  } finally {
+    await handle.close();
+  }
+}
+
+function toFileReadError(error: NodeJS.ErrnoException) {
+  if (error?.code === "ENOENT") return new SpaceFsError(404, "file_read_failed", "File not found.");
+  return new SpaceFsError(500, "file_read_failed", error?.message ?? "Failed to read file.");
+}
+
+// ENXIO: sockets cannot be opened; regular files never fail with it.
+const NOT_A_FILE_CODES = new Set(["ENOENT", "ENOTDIR", "ELOOP", "ENXIO"]);
+
+async function assertFileVersion(path: string, expected: { size: number; mtimeMs: number }) {
+  const conflict = () => new SpaceFsError(409, "file_conflict", "File changed since it was opened.");
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    // O_NONBLOCK keeps a FIFO from blocking the open; it does not affect regular files.
+    handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (error) {
+    if (NOT_A_FILE_CODES.has((error as NodeJS.ErrnoException).code ?? "")) throw conflict();
+    throw error;
+  }
+  try {
+    const current = await handle.stat();
+    if (!current.isFile() || !matchesSpaceFsVersion(current, expected)) throw conflict();
+  } finally {
+    await handle.close();
   }
 }
 
@@ -879,20 +924,14 @@ export async function readSpaceFile(
       }),
     );
 
-    const buffer = await observeSpaceFsStage(
+    const inline = await observeSpaceFsStage(
       observation,
       "inline_read",
       "Read file bytes from workspace storage; slow when the file is large, cold, or the backing volume is under IO pressure.",
-      () =>
-        readFile(target).catch((error: NodeJS.ErrnoException) => {
-          if (error?.code === "ENOENT") {
-            throw new SpaceFsError(404, "file_read_failed", "File not found.");
-          }
-          throw new SpaceFsError(500, "file_read_failed", error?.message ?? "Failed to read file.");
-        }),
+      () => readFileWithStats(target),
       (result) => ({
-        fileSizeBytes: stats.size,
-        bytesRead: result.byteLength,
+        fileSizeBytes: result.stats.size,
+        bytesRead: result.buffer.byteLength,
       }),
     );
 
@@ -900,7 +939,7 @@ export async function readSpaceFile(
       observation,
       "inline_encode",
       "Encode text as UTF-8 or binary content as base64 for the JSON response; slow when the response body is large.",
-      () => toInlineFileResponse(target, relativePath, stats, buffer, mimeType),
+      () => toInlineFileResponse(target, relativePath, inline.stats, inline.buffer, mimeType),
       (result) => ({
         delivery: result.delivery,
         kind: result.kind,
@@ -1083,13 +1122,8 @@ export async function readSpaceFiles(
       "Read and encode inline files with bounded concurrency; slow when files are large or storage is cold.",
       () =>
         mapWithConcurrency(inlineItems, MAX_BATCH_READ_CONCURRENCY, async (item) => {
-          const buffer = await readFile(item.target).catch((error: NodeJS.ErrnoException) => {
-            if (error?.code === "ENOENT") {
-              throw new SpaceFsError(404, "file_read_failed", "File not found.");
-            }
-            throw new SpaceFsError(500, "file_read_failed", error?.message ?? "Failed to read file.");
-          });
-          return toInlineFileResponse(item.target, item.relativePath, item.stats, buffer, item.mimeType);
+          const { stats, buffer } = await readFileWithStats(item.target);
+          return toInlineFileResponse(item.target, item.relativePath, stats, buffer, item.mimeType);
         }),
       (result) => ({ inlineFiles: result.length, inlineTotalBytes, concurrency: MAX_BATCH_READ_CONCURRENCY }),
     );
@@ -1178,17 +1212,7 @@ export async function statSpaceFileVersion(spaceId: string, path: string): Promi
 
 export async function writeSpaceFile(spaceId: string, input: SpaceFsWriteFileInput) {
   const { root, target, relativePath } = await resolveTarget(spaceId, input.path);
-  if (input.expected) {
-    let current: Stats;
-    try {
-      current = await stat(target);
-    } catch {
-      throw new SpaceFsError(409, "file_conflict", "File changed since it was opened.");
-    }
-    if (!matchesSpaceFsVersion(current, input.expected)) {
-      throw new SpaceFsError(409, "file_conflict", "File changed since it was opened.");
-    }
-  }
+  if (input.expected) await assertFileVersion(target, input.expected);
   const createdDirs = await ensureDirectories(root, dirname(target));
   const data = input.encoding === "base64" ? Buffer.from(input.content, "base64") : Buffer.from(input.content, "utf8");
   const created = await writeFileWithDisposition(target, data);
