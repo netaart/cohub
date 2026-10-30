@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Usage: node apps/desktop/scripts/icons.mjs --macos <AppIcon.iconset> --windows <Cohub.ico>
+// Usage: node apps/desktop/scripts/icons.mjs --macos <AppIcon.iconset> --windows <Cohub.ico> --linux <cohub.png>
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
@@ -8,7 +8,7 @@ import { parseArgs } from "node:util";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const sharp = createRequire(join(root, "packages/cli/package.json"))("sharp");
-const { values } = parseArgs({ options: { macos: { type: "string" }, windows: { type: "string" } } });
+const { values } = parseArgs({ options: { macos: { type: "string" }, windows: { type: "string" }, linux: { type: "string" } } });
 
 const favicon = await readFile(join(root, "apps/web/static/favicon.svg"), "utf8");
 const [, inner] = favicon.match(/<svg[^>]*>([\s\S]*)<\/svg>/) ?? [];
@@ -48,4 +48,9 @@ if (values.windows) {
   });
   await mkdir(dirname(values.windows), { recursive: true });
   await writeFile(values.windows, Buffer.concat([header, ...frames]));
+}
+
+if (values.linux) {
+  await mkdir(dirname(values.linux), { recursive: true });
+  await writeFile(values.linux, await render(favicon, 512));
 }

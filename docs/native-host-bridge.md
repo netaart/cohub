@@ -1,7 +1,7 @@
 # Native host bridge
 
-Cohub ships a web surface and native shells (Android, macOS and Windows today,
-iOS later). The bridge lends a web surface what a browser cannot have: the
+Cohub ships a web surface and native shells (Android, macOS, Windows and Linux
+today, iOS later). The bridge lends a web surface what a browser cannot have: the
 credential store, the OAuth round trip, deep links, and system integration.
 
 Contract: `packages/protocol/src/host-bridge.ts` (single source of truth), with
@@ -137,12 +137,13 @@ application):
 
 ## Desktop
 
-The macOS (Swift, AppKit, WKWebView) and Windows (C#, WPF, WebView2) shells load the
-web origin like Android does, and split the bridge in two:
+The macOS (Swift, AppKit, WKWebView), Windows (C#, WPF, WebView2) and Linux (C#,
+GTK 4, WebKitGTK) shells load the web origin like Android does, and split the bridge in two:
 
-- **Shell methods** stay native: windows, `appearance`, `navigation`, `share`, `files`
-  (macOS; Windows keeps WebView2's own downloads), `cache`, `notifications`,
-  `shortcuts` (Dock menu, Jump List), `media.capture` and `runtime.pickFolder`.
+- **Shell methods** stay native: windows, `appearance`, `navigation`, `share` (macOS,
+  Windows), `files` (macOS; Windows and Linux keep the WebView's own downloads), `cache`
+  (macOS, Windows), `notifications`, `shortcuts` (Dock menu, Jump List, launcher actions),
+  `media.capture`, `runtime.pickFolder`, and `launch` (macOS, Linux).
 - **Account and Runtime methods** are forwarded verbatim to the bundled CLI,
   `cohub host serve`, over stdio (one JSON message per line). It answers `auth.*` from
   the CLI's own session, so signing in on the desktop signs in the terminal too and

@@ -51,6 +51,9 @@ jobs:
       - name: Windows app compiles
         working-directory: apps/desktop/windows
         run: dotnet build Cohub/Cohub.csproj -c Release
+      - name: Linux app compiles
+        working-directory: apps/desktop/linux
+        run: dotnet build Cohub/Cohub.csproj -c Release
 
   plan:
     name: Plan
@@ -284,9 +287,86 @@ jobs:
           fi
           echo "published=true" >> "$GITHUB_OUTPUT"
 
+  linux:
+    name: Linux (x64)
+    needs: [test, plan]
+    runs-on: ubuntu-24.04
+    environment: ${{ needs.plan.outputs.env == 'prod' && 'desktop-release' || '' }}
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+    env:
+      ENVIRONMENT: ${{ needs.plan.outputs.env }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      CHANNEL: ${{ needs.plan.outputs.channel }}
+      PUBLISH: ${{ needs.plan.outputs.publishable == 'true' && secrets.PUBLIC_ASSET_OSS_ACCESS_KEY_ID != '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/setup@v3
+        with:
+          cache: true
+          install: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: apps/desktop/linux/global.json
+      - name: Configure Talesofai npm auth
+        shell: bash
+        env:
+          GITEA_NPM_TOKEN: ${{ secrets.GITEA_NPM_TOKEN }}
+        run: |
+          if [ -n "$GITEA_NPM_TOKEN" ]; then
+            printf '\n//git.talesofai.com/api/packages/talesofai/npm/:_authToken=%s\n' "$GITEA_NPM_TOKEN" >> ~/.npmrc
+          fi
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @neta-art/cohub-cli... build
+      - run: sudo apt-get update && sudo apt-get install -y squashfs-tools
+      - run: dotnet tool install -g vpk --version 1.2.161
+
+      - name: Package
+        run: |
+          feed=""
+          if [[ "$PUBLISH" == true && "$CHANNEL" != pr/* ]]; then feed="$CDN_ORIGIN/desktop/linux/$CHANNEL/x64"; fi
+          apps/desktop/linux/scripts/pack.sh --version "$VERSION" --env "$ENVIRONMENT" --arch x64 --feed "$feed"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cohub-linux-x64
+          path: |
+            apps/desktop/linux/dist/${{ env.ENVIRONMENT }}/x64/Cohub-*.AppImage
+            apps/desktop/linux/dist/${{ env.ENVIRONMENT }}/x64/Cohub-*.AppImage.sha256
+          if-no-files-found: error
+
+      - name: Publish to CDN
+        id: publish
+        if: env.PUBLISH == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.PUBLIC_ASSET_OSS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_ASSET_OSS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-west-1
+        working-directory: apps/desktop/linux/dist/${{ env.ENVIRONMENT }}/x64
+        run: |
+          set -euo pipefail
+          aws configure set default.s3.addressing_style virtual
+          aws configure set default.request_checksum_calculation when_required
+          aws configure set default.response_checksum_validation when_required
+          dir="s3://$OSS_BUCKET/desktop/linux/$CHANNEL/x64"
+          put() { aws s3 cp "$1" "$dir/$2" --endpoint-url "$OSS_ENDPOINT" --cache-control "$3" ${4:+--content-type "$4"}; }
+          immutable="public, max-age=31536000, immutable"
+          image=$(ls Cohub-*.AppImage)
+          put "$image" "$image" "$immutable"
+          put "$image.sha256" "$image.sha256" "$immutable" text/plain
+          put "$image" Cohub.AppImage no-cache
+          if [[ "$CHANNEL" != pr/* ]]; then
+            # Packages first, then the feed that points at them.
+            for file in *.nupkg; do put "$file" "$file" "$immutable"; done
+            for file in releases.*.json assets.*.json RELEASES*; do
+              if [[ -e "$file" ]]; then put "$file" "$file" no-cache; fi
+            done
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
   links:
     name: Download links
-    needs: [plan, macos, windows]
+    needs: [plan, macos, windows, linux]
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
@@ -304,6 +384,8 @@ jobs:
           MACOS_PUBLISHED: ${{ needs.macos.outputs.published }}
           WINDOWS: ${{ needs.windows.result }}
           WINDOWS_PUBLISHED: ${{ needs.windows.outputs.published }}
+          LINUX: ${{ needs.linux.result }}
+          LINUX_PUBLISHED: ${{ needs.linux.outputs.published }}
         run: |
           set -euo pipefail
           base="$CDN_ORIGIN/desktop"
@@ -322,9 +404,10 @@ jobs:
             row "macOS, Apple silicon" "$MACOS" "$MACOS_PUBLISHED" "$base/macos/$CHANNEL/arm64/Cohub-$VERSION-$ENVIRONMENT-arm64.dmg"
             row "macOS, Intel" "$MACOS" "$MACOS_PUBLISHED" "$base/macos/$CHANNEL/x64/Cohub-$VERSION-$ENVIRONMENT-x64.dmg"
             row "Windows x64" "$WINDOWS" "$WINDOWS_PUBLISHED" "$base/windows/$CHANNEL/x64/Cohub-$VERSION-$ENVIRONMENT-x64-Setup.exe"
-            if [[ "$CHANNEL" != pr/* && ( "$MACOS_PUBLISHED" == true || "$WINDOWS_PUBLISHED" == true ) ]]; then
+            row "Linux x64" "$LINUX" "$LINUX_PUBLISHED" "$base/linux/$CHANNEL/x64/Cohub-$VERSION-$ENVIRONMENT-x64.AppImage"
+            if [[ "$CHANNEL" != pr/* && ( "$MACOS_PUBLISHED" == true || "$WINDOWS_PUBLISHED" == true || "$LINUX_PUBLISHED" == true ) ]]; then
               echo
-              echo "Latest $ENVIRONMENT: [macOS Apple silicon]($base/macos/$CHANNEL/arm64/Cohub.dmg) · [macOS Intel]($base/macos/$CHANNEL/x64/Cohub.dmg) · [Windows]($base/windows/$CHANNEL/x64/Cohub-Setup.exe)"
+              echo "Latest $ENVIRONMENT: [macOS Apple silicon]($base/macos/$CHANNEL/arm64/Cohub.dmg) · [macOS Intel]($base/macos/$CHANNEL/x64/Cohub.dmg) · [Windows]($base/windows/$CHANNEL/x64/Cohub-Setup.exe) · [Linux]($base/linux/$CHANNEL/x64/Cohub.AppImage)"
             fi
           } > "$RUNNER_TEMP/links.md"
           cat "$RUNNER_TEMP/links.md" >> "$GITHUB_STEP_SUMMARY"
@@ -347,7 +430,7 @@ jobs:
   release:
     name: Attach to GitHub Release
     if: github.ref_type == 'tag'
-    needs: [macos, windows]
+    needs: [macos, windows, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -364,4 +447,6 @@ jobs:
             dist/Cohub-*.dmg.sha256
             dist/Cohub-*-Setup.exe
             dist/Cohub-*-Setup.exe.sha256
+            dist/Cohub-*.AppImage
+            dist/Cohub-*.AppImage.sha256
           fail_on_unmatched_files: true
