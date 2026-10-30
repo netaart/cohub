@@ -38,11 +38,9 @@ import {
 } from "../usage-aggregation.js";
 import { createLogger } from "@cohub/infra/logging";
 import { getReferralDashboard, rotateReferralCode } from "../referrals.js";
-import { loadUserPreferences, updateUserPreferences, UserPreferencesLimitError } from "@cohub/core/preferences";
+import { loadUserPreferences, UserPreferencesLimitError } from "@cohub/core/preferences";
 import { parseUserPreferencesPatch, type UserPreferencesPatch } from "@cohub/protocol/notifications";
-import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
-import { randomUUID } from "node:crypto";
-import { dispatchRealtimeEvent } from "../channels.js";
+import { updateAndPublishUserPreferences } from "../user-preferences.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 
@@ -188,19 +186,11 @@ router.patch("/preferences", async (c) => {
   } catch (error) {
     return c.json({ message: error instanceof Error ? error.message : "invalid preferences patch" }, 400);
   }
-  const preferences = await updateUserPreferences(db, user.uuid, patch).catch((error: unknown) => {
+  const preferences = await updateAndPublishUserPreferences(user.uuid, patch).catch((error: unknown) => {
     if (error instanceof UserPreferencesLimitError) return error;
     throw error;
   });
   if (preferences instanceof UserPreferencesLimitError) return c.json({ message: preferences.message }, 400);
-  await dispatchRealtimeEvent({
-    id: randomUUID(),
-    timestamp: Date.now(),
-    domain: "user",
-    type: "user.preferences.updated",
-    rooms: [getRealtimeUserRoom(user.uuid)],
-    payload: { preferences },
-  }).catch((error) => logger.warn("[Preferences] failed to publish update", { userUuid: user.uuid, error }));
   return c.json({ preferences });
 });
 

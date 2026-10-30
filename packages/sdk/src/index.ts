@@ -205,6 +205,7 @@ export {
 export type { CohubClientOptions, Fetch, HttpTraceContext, UnauthorizedContext } from "./transport.js";
 export type { CohubContext, CohubEnvironment, CohubExecutionContext, CohubRuntimeKind } from "./environment.js";
 export type { TaskWaitOptions } from "./apis/tasks.js";
+export type { CronJobNotificationSetting } from "./apis/cron-jobs.js";
 export type {
   VoiceInputCallbacks,
   VoiceInputClientOptions,

@@ -123,8 +123,9 @@ export function registerCronJobs(program: Command): void {
       if (state !== "on" && state !== "off" && state !== "default") return error("Invalid state", "Use on, off, or default");
       const client = createClient();
       try {
-        await client.user.updatePreferences({ notifications: { cronJobs: { [id]: state === "default" ? null : state === "on" } } });
-        ok(`Success notifications for ${id}: ${state}`);
+        const setting = await client.cronJobs.setNotification(id, state === "default" ? null : state === "on");
+        const effective = (setting.override ?? setting.global) ? "on" : "off";
+        ok(`Success notifications for ${id}: ${state}${state === "default" ? ` (global: ${effective})` : ""}`);
       } catch (e: unknown) {
         handleHttp(e);
       }

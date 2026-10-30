@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { CronJobRecord } from "@neta-art/cohub";
+import type { CronJobNotificationSetting, CronJobRecord } from "@neta-art/cohub";
 import { Clock, Clock3, Pencil, Power, PowerOff, Trash2 } from "lucide-svelte";
 import { untrack } from "svelte";
 import { m } from "$messages";
@@ -8,7 +8,7 @@ import { cronjobPromptMeta, formatCronjobPrompt } from "$kit/cronjob";
 import { displaySafeJson } from "$kit/task-run";
 import { formatDateTime, formatShortDateTime } from "$kit/time";
 import { client } from "../../shared/src/client";
-import { getLocale } from "../../shared/src/runtime.svelte";
+import { getLocale, runtime } from "../../shared/src/runtime.svelte";
 import { scheduleStatus } from "../../shared/src/status";
 import Button from "../../shared/src/ui/Button.svelte";
 import { cardClass, eyebrowClass, labelClass } from "../../shared/src/ui/classes";
@@ -32,6 +32,15 @@ const sendsMessage = $derived(!job || job.taskType === "send_message");
 const status = $derived(job ? scheduleStatus(job.enabled, locale) : null);
 let editing = $state(untrack(() => draft !== null));
 let nextRuns = $state<Date[]>([]);
+let notification = $state<CronJobNotificationSetting | null>(null);
+// Completions notify the job owner only, so only they get this control.
+const ownedJobId = $derived(job && sendsMessage && job.userUuid === runtime.viewer ? job.id : null);
+const notifyChoice = $derived(!notification || notification.override === null ? "default" : notification.override ? "on" : "off");
+const notifyOptions = $derived([
+  { value: "default", label: m.cron_notify_default({}, { locale }) },
+  { value: "on", label: m.cron_notify_on({}, { locale }) },
+  { value: "off", label: m.cron_notify_off({}, { locale }) },
+] as const);
 
 function initialValues(): ScheduleFields & { prompt?: string } {
   const text = (key: string) => (typeof draft?.[key] === "string" ? (draft[key] as string) : null);
@@ -54,6 +63,30 @@ $effect(() => {
     current = false;
   };
 });
+
+$effect(() => {
+  const id = ownedJobId;
+  notification = null;
+  if (!id) return;
+  let current = true;
+  void client.cronJobs.getNotification(id).then(
+    (setting) => {
+      if (current) notification = setting;
+    },
+    (error) => console.warn("[schedule-manager] Failed to load notification setting:", error),
+  );
+  return () => {
+    current = false;
+  };
+});
+
+async function setNotify(choice: "default" | "on" | "off") {
+  const id = ownedJobId;
+  if (!id || choice === notifyChoice) return;
+  await action(["cronjob.manage"], async () => {
+    notification = await client.cronJobs.setNotification(id, choice === "default" ? null : choice === "on");
+  });
+}
 
 function show(next: CronJobRecord) {
   setDetail({ kind: "cronjob", data: { ...job, ...next, userProfile: next.userProfile ?? job?.userProfile } as CronJobRecord });
@@ -204,6 +237,19 @@ function payloadField(key: string) {
               </div>
             {/if}
           </div>
+          {#if notification}
+            <div class="h-px bg-border-subtle/70"></div>
+            <div class="space-y-2">
+              <h2 class={eyebrowClass} id="schedule-notify">{m.cron_notify({}, { locale })}</h2>
+              <div class="inline-grid auto-cols-fr grid-flow-col rounded-[7px] border border-border-subtle bg-bg-hover p-0.5 text-[12px]" role="group" aria-labelledby="schedule-notify">
+                {#each notifyOptions as option (option.value)}
+                  {@const selected = option.value === notifyChoice}
+                  <button type="button" class="min-h-[30px] rounded-[5px] px-3 whitespace-nowrap transition-colors pointer-coarse:min-h-[38px] disabled:opacity-40 {selected ? 'bg-bg-input text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-secondary'}" aria-pressed={selected} disabled={busy} onclick={() => setNotify(option.value)}>{option.label}</button>
+                {/each}
+              </div>
+              {#if notifyChoice === "default"}<p class="text-[11px] leading-5 text-text-placeholder">{m.cron_notify_following({ state: notification.global ? m.cron_notify_on({}, { locale }) : m.cron_notify_off({}, { locale }) }, { locale })}</p>{/if}
+            </div>
+          {/if}
           <div class="h-px bg-border-subtle/70"></div>
           <div class="space-y-3">
             <h2 class={eyebrowClass}>{m.cron_metadata({}, { locale })}</h2>

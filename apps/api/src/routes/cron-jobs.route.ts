@@ -11,7 +11,9 @@ import { disableCronJob, enableCronJob, removeCronJob, updateCronJob } from "../
 import { fallbackPublicUserProfile, getProfilesByUuids } from "../user-profiles.js";
 import { sanitizeTaskRunPricingForViewer } from "../task-run-privacy.js";
 import { preserveCronPayloadServerFields } from "./cron-jobs-payload.js";
-import { deleteCronJobNotificationOverride } from "@cohub/core/preferences";
+import { deleteCronJobNotificationOverride, loadUserPreferences, UserPreferencesLimitError } from "@cohub/core/preferences";
+import type { UserPreferences } from "@cohub/protocol/notifications";
+import { updateAndPublishUserPreferences } from "../user-preferences.js";
 import { createLogger } from "@cohub/infra/logging";
 
 const router = new Hono();
@@ -202,6 +204,49 @@ router.get("/:id/runs", async (c) => {
       nextCursor: rows.length > limit ? buildTaskCursor(runs.at(-1)) : null,
     },
   });
+});
+
+// Completions notify the job owner only, so the setting lives in the owner's preferences.
+const ownerOnly = (c: Context) => c.json({ message: "only the scheduled prompt's owner receives its notifications" }, 403);
+const notificationSetting = (preferences: UserPreferences, cronJobId: string) => ({
+  override: preferences.notifications.cronJobs[cronJobId] ?? null,
+  global: preferences.notifications.success.scheduled,
+});
+
+router.get("/:id/notification", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const cronJobId = c.req.param("id");
+  if (!requireValidId(cronJobId)) return c.json({ message: "not found" }, 404);
+  const job = await loadCronJobAuthSubject(cronJobId);
+  if (!job) return c.json({ message: "not found" }, 404);
+  if (!(await authorizeCronJobView(user, job))) return authzDenied(c);
+  if (job.userUuid !== user.uuid) return ownerOnly(c);
+  return c.json(notificationSetting(await loadUserPreferences(db, user.uuid), cronJobId));
+});
+
+router.put("/:id/notification", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const cronJobId = c.req.param("id");
+  if (!requireValidId(cronJobId)) return c.json({ message: "not found" }, 404);
+  const job = await loadCronJobAuthSubject(cronJobId);
+  if (!job) return c.json({ message: "not found" }, 404);
+  if (!(await authorizeCronJobManage(c, user, job))) return authzDenied(c);
+  if (job.userUuid !== user.uuid) return ownerOnly(c);
+  const body = await c.req.json<{ override?: unknown }>().catch(() => null);
+  const override = body?.override;
+  if (override !== null && typeof override !== "boolean") {
+    return c.json({ message: "override must be true, false, or null to follow the global setting" }, 400);
+  }
+  const preferences = await updateAndPublishUserPreferences(user.uuid, {
+    notifications: { cronJobs: { [cronJobId]: override } },
+  }).catch((error: unknown) => {
+    if (error instanceof UserPreferencesLimitError) return error;
+    throw error;
+  });
+  if (preferences instanceof UserPreferencesLimitError) return c.json({ message: preferences.message }, 400);
+  return c.json(notificationSetting(preferences, cronJobId));
 });
 
 router.delete("/:id", async (c) => {
