@@ -513,7 +513,16 @@ export class SessionGenerationStreamClient {
     if (this.recovery !== recovery) return;
     const expectedTurnId = resync?.turnId;
     if (snapshot && (!expectedTurnId || !snapshot.turnId || snapshot.turnId === expectedTurnId)) {
-      this.seedFromSnapshot(snapshot, handlers, options);
+      const seeded = this.seedFromSnapshot(snapshot, handlers, options);
+      // Re-arm resync only once the snapshot covers the mismatched patch's own message (seq restarts
+      // per message), so a later gap can recover while a lagging snapshot is not refetched per patch.
+      const resyncSeq = resync?.event.payload.seq;
+      if (
+        seeded &&
+        typeof resyncSeq === "number" &&
+        snapshot.current.messageId === resync?.event.payload.messageId &&
+        snapshot.seq >= resyncSeq
+      ) this.resyncedMessageKey = null;
     }
     this.finishRecovery(recovery, handlers);
   }
