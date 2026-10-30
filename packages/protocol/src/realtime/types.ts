@@ -385,7 +385,7 @@ export type SystemSubscribeOkEvent = {
   payload: { rooms: RealtimeRoom[] };
 };
 
-export type RealtimeRoomRejection = { room: string; code: "BAD_ROOM" | "FORBIDDEN" | "UNAVAILABLE"; message: string };
+export type RealtimeRoomRejection = { room: string; code: "BAD_ROOM" | "FORBIDDEN" | "UNAUTHORIZED" | "UNAVAILABLE"; message: string };
 
 export type SystemSubscribeErrorEvent = {
   id: string;

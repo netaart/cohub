@@ -216,6 +216,13 @@ export const authorizeRealtimeRooms = async (input: {
     },
     body: JSON.stringify({ rooms: input.rooms }),
   });
+  if (response.status === 401 && input.authToken) {
+    // The connection's token expired after ws auth; the client must re-auth, retrying with it never succeeds.
+    return {
+      rooms: [],
+      rejected: input.rooms.map((room) => ({ room, code: "UNAUTHORIZED", message: "Access token rejected" })),
+    };
+  }
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(`Realtime room authorization failed ${response.status}: ${text}`);

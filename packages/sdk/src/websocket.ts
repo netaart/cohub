@@ -241,6 +241,7 @@ export class WebsocketClient {
   private resubscribeTimer: ReturnType<typeof setTimeout> | null = null;
   private resubscribeAttempt = 0;
   private authReconnectAttempted = false;
+  private roomAuthReconnectAttempted = false;
   private forceRefreshOnNextAuth = false;
   private retryAuthClose = false;
   private manuallyClosed = false;
@@ -485,6 +486,7 @@ export class WebsocketClient {
       this.emit("close", { code, reason, willReconnect: false });
     }
     this.authReconnectAttempted = false;
+    this.roomAuthReconnectAttempted = false;
     this.forceRefreshOnNextAuth = false;
     this.retryAuthClose = false;
     this.compactStreamContexts.clear();
@@ -903,7 +905,10 @@ export class WebsocketClient {
             state.pending = false;
           }
         }
-        if (rooms.length > 0) this.resubscribeAttempt = 0;
+        if (rooms.length > 0) {
+          this.resubscribeAttempt = 0;
+          this.roomAuthReconnectAttempted = false;
+        }
         this.emit("subscribed", { rooms, requestId: envelope.requestId ?? null });
         this.emit("event", envelope);
         return;
@@ -920,12 +925,13 @@ export class WebsocketClient {
               }))
               .filter((entry) => entry.room)
           : [];
+        const reauth = rejected.some((item) => item.code === "UNAUTHORIZED") && this.canReauthForRooms();
         let retry = false;
         for (const item of rejected) {
           const room = normalizeRealtimeRooms([item.room])[0];
           if (!room) continue;
           const state = this.roomSubscriptions.get(room);
-          if (state && item.code === "UNAVAILABLE") {
+          if (state && (item.code === "UNAVAILABLE" || item.code === "UNAUTHORIZED")) {
             state.subscribed = false;
             state.pending = false;
             retry = true;
@@ -933,9 +939,10 @@ export class WebsocketClient {
             this.roomSubscriptions.delete(room);
           }
         }
-        if (retry) this.scheduleResubscribe();
         this.emit("subscribeError", { rejected, requestId: envelope.requestId ?? null });
         this.emit("event", envelope);
+        if (reauth) this.reconnectWithFreshToken();
+        else if (retry) this.scheduleResubscribe();
         return;
       }
       case "system.ack.ok": {
@@ -1153,6 +1160,21 @@ export class WebsocketClient {
 
   private backoff(attempt: number) {
     return Math.min(this.reconnectBaseDelayMs * 2 ** attempt, this.reconnectMaxDelayMs);
+  }
+
+  private canReauthForRooms() {
+    return Boolean(this.getAccessToken && this.autoReconnect && !this.manuallyClosed && !this.roomAuthReconnectAttempted);
+  }
+
+  // The gateway keeps the token from ws auth; an expired one only surfaces as room 401s on an otherwise healthy socket.
+  private reconnectWithFreshToken() {
+    const ws = this.ws;
+    if (!ws) return;
+    this.roomAuthReconnectAttempted = true;
+    this.forceRefreshOnNextAuth = true;
+    this.retryAuthClose = true;
+    this.log("room auth rejected, reconnecting with refreshed token");
+    ws.close(AUTH_CLOSE_CODE, AUTH_CLOSE_REASON);
   }
 
   private scheduleResubscribe() {
