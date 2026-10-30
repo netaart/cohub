@@ -100,3 +100,45 @@ test("releases buffered patches after a missing seq times out", async (t) => {
 	send(5, 4);
 	assert.deepEqual(seqs, [1, 3, 4, 5]);
 });
+
+test("clears pending gap timers when patch buffers are dropped", async () => {
+	const client = new WebsocketClient({
+		url: "ws://localhost",
+		getAccessToken: () => "token",
+	});
+	const handleMessage = (
+		client as unknown as { handleMessage(raw: unknown): void }
+	).handleMessage.bind(client);
+	const send = (seq: number, baseSeq: number) =>
+		handleMessage(JSON.stringify(createPatchEnvelope({ seq, baseSeq, ops: [] })));
+	const timeouts = () =>
+		process.getActiveResourcesInfo().filter((name) => name === "Timeout").length;
+	const baseline = timeouts();
+
+	send(1, 0);
+	send(3, 2);
+	assert.equal(timeouts(), baseline + 1);
+	send(1, 0);
+	assert.equal(timeouts(), baseline);
+
+	send(3, 2);
+	assert.equal(timeouts(), baseline + 1);
+	await client.disconnect();
+	assert.equal(timeouts(), baseline);
+
+	// Full envelopes without `_rt.sid` are keyed by turn and message, not by the compact stream id.
+	const plain = (seq: number, baseSeq: number) => {
+		const envelope = createPatchEnvelope({ seq, baseSeq, ops: [] });
+		const { _rt: _, ...payload } = envelope.payload;
+		handleMessage(JSON.stringify({ ...envelope, payload }));
+	};
+	plain(1, 0);
+	plain(3, 2);
+	assert.equal(timeouts(), baseline + 1);
+	handleMessage(JSON.stringify({
+		id: "persisted-1", timestamp: Date.now(), domain: "session",
+		type: "session.message.persisted", spaceId: "space-1", sessionId: "session-1",
+		payload: { message: { id: "message-1", meta: { turnId: "turn-1" } } },
+	}));
+	assert.equal(timeouts(), baseline);
+});

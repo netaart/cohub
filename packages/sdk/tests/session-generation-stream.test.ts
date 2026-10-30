@@ -400,14 +400,22 @@ test("late events for another round or Turn do not stall the live stream", () =>
 	assert.equal(texts.at(-1), "next turn, continued");
 });
 
-test("a patch that no longer applies resyncs from the snapshot once per message", async () => {
+test("a patch that no longer applies resyncs once per gap the snapshot covers", async () => {
 	let fetches = 0;
+	let snapshotSeq = 12;
 	const { emit, generation } = createGenerationClient(async () => {
 		fetches += 1;
-		return createSnapshot();
+		const response = createSnapshot();
+		response.snapshot.seq = snapshotSeq;
+		return response;
 	});
 	const outOfSync: string[] = [];
+	const texts: string[] = [];
 	const stop = generation.subscribe({
+		state: (event) => {
+			const block = event.state.contentBlocks[0];
+			if (block?.type === "text") texts.push(block.text);
+		},
 		outOfSync: (event) => outOfSync.push(event.reason),
 	});
 	// Joined mid-message: the snapshot covers seq 12, so seq 13 leaves no gap.
@@ -417,11 +425,43 @@ test("a patch that no longer applies resyncs from the snapshot once per message"
 	assert.equal(fetches, 1);
 	assert.deepEqual(outOfSync, []);
 
-	// A repeat mismatch on the same message is reported instead of refetched.
-	emit("event", ordinalPatch(1, 20, "gone"));
+	// A later gap in the same message resyncs again once the snapshot has moved on.
+	snapshotSeq = 20;
+	emit("event", ordinalPatch(1, 20, "skipped"));
 	await delay(0);
-	assert.equal(fetches, 1);
-	assert.deepEqual(outOfSync, ["version_mismatch"]);
+	emit("event", ordinalPatch(1, 21, "after second gap"));
+	assert.equal(fetches, 2);
+	assert.deepEqual(outOfSync, []);
+	assert.equal(texts.at(-1), "after second gap");
+
+	// A snapshot that lags behind the gap is reported instead of refetched per patch.
+	emit("event", ordinalPatch(1, 30, "gone"));
+	await delay(0);
+	emit("event", ordinalPatch(1, 31, "still gone"));
+	assert.equal(fetches, 3);
+	assert.deepEqual(outOfSync, ["version_mismatch", "version_mismatch"]);
+
+	// A snapshot already on a later message does not re-arm resync for the older one.
+	stop();
+	let crossedFetches = 0;
+	const crossed = createGenerationClient(async () => {
+		crossedFetches += 1;
+		await delay(0);
+		const response = createSnapshot();
+		response.snapshot.seq = 4;
+		response.snapshot.current.messageId = "turn:turn-1:assistant:2";
+		return response;
+	});
+	const stopCrossed = crossed.generation.subscribe({});
+	const unordered = (seq: number) => {
+		const envelope = ordinalPatch(1, seq, "older");
+		return { ...envelope, payload: { ...envelope.payload, messageOrdinal: null } };
+	};
+	crossed.emit("event", { ...unordered(1), payload: { ...unordered(1).payload, baseSeq: 0 } });
+	crossed.emit("event", unordered(3));
+	for (let i = 0; i < 5; i += 1) await delay(0);
+	stopCrossed();
+	assert.equal(crossedFetches, 1);
 
 	// A resync without a usable snapshot reports the patch that triggered it.
 	stop();
