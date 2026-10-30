@@ -336,3 +336,47 @@ test("retains and retries a room while authorization is unavailable", async (t) 
   });
   assert.equal(client.isRoomLive("space:space-1"), true);
 });
+
+test("reconnects with a refreshed token when room authorization is unauthorized", async (t) => {
+  FakeWebSocket.instances = [];
+  const tokenOptions: Array<{ forceRefresh?: boolean } | undefined> = [];
+  const client = new WebsocketClient({
+    url: "ws://localhost",
+    reconnectBaseDelayMs: 0,
+    reconnectMaxDelayMs: 0,
+    getAccessToken: (options) => {
+      tokenOptions.push(options);
+      return options?.forceRefresh ? "fresh-token" : "stale-token";
+    },
+    WebSocketImpl: FakeWebSocket,
+  });
+  t.after(() => client.disconnect());
+  const release = client.subscribeSpace("space-1");
+  t.after(release);
+  const first = FakeWebSocket.instances[0];
+  assert.ok(first);
+  first.open();
+  await waitFor(() => sentTypes(first).includes("auth"), "expected authentication");
+  first.receive(authOk("connection-1"));
+  await waitFor(() => sentTypes(first).includes("subscribe"), "expected subscription");
+  first.receive({
+    id: "subscribe-error", timestamp: Date.now(), domain: "system",
+    type: "system.subscribe.error",
+    payload: { rejected: [{ room: "space:space-1", code: "UNAUTHORIZED", message: "" }] },
+  });
+
+  await waitFor(() => FakeWebSocket.instances.length === 2, "expected a reauth reconnect");
+  const second = FakeWebSocket.instances[1];
+  assert.ok(second);
+  second.open();
+  await waitFor(() => sentTypes(second).includes("auth"), "expected refreshed authentication");
+  second.receive(authOk("connection-2"));
+  await waitFor(() => sentTypes(second).includes("subscribe"), "expected room restoration");
+  second.receive({
+    id: "subscribe-ok", timestamp: Date.now(), domain: "system",
+    type: "system.subscribe.ok", payload: { rooms: ["space:space-1"] },
+  });
+
+  assert.deepEqual(tokenOptions, [undefined, { forceRefresh: true }]);
+  assert.equal(client.isRoomLive("space:space-1"), true);
+});
