@@ -617,6 +617,14 @@ cohub cron-jobs delete <cronJobId>
 
 Confirm before enabling, disabling, or deleting recurring scheduled prompts.
 
+Completion popups for successful runs can be silenced per source or per recurring prompt; a prompt's own setting wins. Failed and interrupted runs always notify.
+
+```bash
+cohub me notifications get
+cohub me notifications set --scheduled off --hook on --background on
+cohub cron-jobs notify <cronJobId> on|off|default
+```
+
 ## Feedback
 
 ```bash

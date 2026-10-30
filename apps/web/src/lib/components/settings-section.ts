@@ -1,5 +1,6 @@
 import {
 	Activity,
+	Bell,
 	CreditCard,
 	Gift,
 	Network,
@@ -12,6 +13,7 @@ import type { SettingsSection } from "$lib/settings-nav";
 
 export const SETTINGS_SECTION_ICONS = {
 	general: Settings,
+	notifications: Bell,
 	activity: Activity,
 	referrals: Gift,
 	billing: CreditCard,
@@ -24,6 +26,8 @@ export function settingsSectionLabel(section: SettingsSection, locale: Locale) {
 	switch (section) {
 		case "general":
 			return m.nav_general({}, options);
+		case "notifications":
+			return m.nav_notifications({}, options);
 		case "activity":
 			return m.nav_activity({}, options);
 		case "referrals":
@@ -42,6 +46,8 @@ export function settingsSectionTitle(section: SettingsSection, locale: Locale) {
 	switch (section) {
 		case "general":
 			return m.nav_general({}, options);
+		case "notifications":
+			return m.page_title_notifications({}, options);
 		case "activity":
 			return m.page_title_activity({}, options);
 		case "referrals":

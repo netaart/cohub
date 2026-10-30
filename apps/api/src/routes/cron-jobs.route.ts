@@ -11,9 +11,12 @@ import { disableCronJob, enableCronJob, removeCronJob, updateCronJob } from "../
 import { fallbackPublicUserProfile, getProfilesByUuids } from "../user-profiles.js";
 import { sanitizeTaskRunPricingForViewer } from "../task-run-privacy.js";
 import { preserveCronPayloadServerFields } from "./cron-jobs-payload.js";
+import { deleteCronJobNotificationOverride } from "@cohub/core/preferences";
+import { createLogger } from "@cohub/infra/logging";
 
 const router = new Hono();
 const { CronExpressionParser } = cronParser;
+const logger = createLogger({ serviceName: "cohub-api" });
 
 const MAX_RUNS_LIMIT = 100;
 
@@ -223,6 +226,10 @@ router.delete("/:id", async (c) => {
   if (!(await authorizeCronJobManage(c, user, job))) return authzDenied(c);
 
   await removeCronJob(cronJobId);
+  // Notifications go to the job owner, so only their preferences can reference it.
+  await deleteCronJobNotificationOverride(db, job.userUuid, cronJobId).catch((error) => {
+    logger.warn("[CronJobs] failed to drop notification override", { cronJobId, error });
+  });
   return c.json({ ok: true });
 });
 

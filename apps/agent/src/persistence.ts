@@ -17,11 +17,10 @@ import type {
 } from "@cohub/protocol/model";
 import { isModelThinkingLevel, type AgentTurnAbortEvent, type ModelThinkingLevel } from "@cohub/protocol";
 import type { ChannelProvider, GatewayOutboundCommand } from "@cohub/protocol/gateway";
-import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
 import { sessionMessages, sessionTurns, spaceChannels, spaceSessionBindings, spaceSessions, providerMessageRefs, userChannels, userProfiles } from "@cohub/db";
 import { listResourceLabelRefs } from "@cohub/core/labels";
 import { collectImageToTextTiming, collectToolMetrics } from "@cohub/protocol/model";
-import { interruptedSummaryPatch, interruptedTurnUsage, isFinalAssistantMessageMeta, runtimeResolutionOpen, publishSessionTurnStates, withNextSessionMessageSequence } from "@cohub/core/sessions";
+import { interruptedSummaryPatch, interruptedTurnUsage, isFinalAssistantMessageMeta, runtimeResolutionOpen, publishSessionTurnStates, publishTurnNotification, withNextSessionMessageSequence } from "@cohub/core/sessions";
 import { scheduleSessionSnapshot } from "./session-snapshot.js";
 import { deliverTurnReplyLater } from "./turn-reply.js";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
@@ -224,12 +223,6 @@ async function publishTurnCreated(spaceId: string, turn: SessionTurnRecord) {
   await publishTurnState(spaceId, hydratedTurn);
 }
 
-const truncateTurnPreview = (text: string | null | undefined) => {
-  const normalized = text?.replace(/\s+/g, " ").trim();
-  if (!normalized) return null;
-  return normalized.length > 180 ? `${normalized.slice(0, 177)}...` : normalized;
-};
-
 export async function publishSessionTurnsUpdated(input: {
   sessionId: string;
   turnIds: string[];
@@ -291,27 +284,8 @@ async function publishTurnFinalized(spaceId: string, turn: SessionTurnRecord) {
     payload: { turn, sessionLabelRefs },
   });
   await publishTurnState(spaceId, turn);
-  if (!turn.userUuid) return;
-  await publishRealtimeEnvelope({
-    domain: "session",
-    type: "session.turn.notify",
-    spaceId,
-    sessionId: turn.sessionId,
-    rooms: [getRealtimeUserRoom(turn.userUuid)],
-    payload: {
-      spaceId,
-      sessionId: turn.sessionId,
-      turnId: turn.id,
-      status: turn.status,
-      finishReason: turn.summary?.finishReason ?? null,
-      userPreview: truncateTurnPreview(turn.userText),
-      durationMs: turn.durationMs,
-      stepCount: turn.intermediateSummary?.messageCount ?? null,
-      sequence: turn.sequence ?? null,
-      provider: turn.provider,
-      model: turn.model,
-      completedAt: turn.completedAt,
-    },
+  await publishTurnNotification(db, spaceId, turn, publishRealtimeEnvelope, (error) => {
+    logger.warn("[Realtime] failed to load notification preferences", { userUuid: turn.userUuid, turnId: turn.id, error });
   });
 }
 

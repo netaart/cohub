@@ -11,6 +11,7 @@ import type { BoardDelta } from "../board-model.js";
 import type { RequestSource } from "../provenance.js";
 import type { HarnessKind } from "../runtime/harnesses.js";
 import type { DesktopCommandDispatchedPayload } from "../desktop-command.js";
+import type { TurnNotificationSource, UserPreferences } from "../notifications.js";
 import type { AppArtifactDescriptor, AppContentKind, AppVersionSource } from "../app.js";
 import type { AppDomainRecord, AppDomainRemovedReason } from "../app-domains.js";
 import type { AppRtcPublication } from "../rtc/index.js";
@@ -30,7 +31,7 @@ export const REALTIME_OUTBOUND_CHANNEL = "pubsub:realtime:outbound";
 export const AGENT_REALTIME_PATCH_CHANNEL = "pubsub:realtime:agent_patches";
 export const REALTIME_ROOM_KEY_PREFIX = "cohub:realtime-room:v1";
 
-export const REALTIME_DOMAINS = ["system", "session", "space", "label", "room", "ui", "desktop"] as const;
+export const REALTIME_DOMAINS = ["system", "session", "space", "label", "room", "ui", "desktop", "user"] as const;
 export type RealtimeDomain = (typeof REALTIME_DOMAINS)[number];
 
 export const isRealtimeDomain = (value: unknown): value is RealtimeDomain =>
@@ -686,6 +687,10 @@ export type SessionTurnNotifyEvent = {
     provider: string | null;
     model: string | null;
     completedAt: string | null;
+    source?: TurnNotificationSource;
+    cronJobId?: string | null;
+    /** The recipient silenced this completion: keep activity, skip toasts and desktop alerts. */
+    silent?: boolean;
   };
 };
 
@@ -988,6 +993,19 @@ export type DesktopCommandDispatchedEvent = {
   payload: DesktopCommandDispatchedPayload;
 };
 
+/** Delivered to the owner's user room so every open client applies the same preferences. */
+export type UserPreferencesUpdatedEvent = {
+  id: string;
+  timestamp: number;
+  domain: "user";
+  type: "user.preferences.updated";
+  requestId?: string | null;
+  spaceId?: null;
+  sessionId?: null;
+  rooms?: RealtimeRoom[];
+  payload: { preferences: UserPreferences };
+};
+
 export type RealtimeServerEvent =
   | SystemReadyEvent
   | SystemAuthOkEvent
@@ -1022,6 +1040,7 @@ export type RealtimeServerEvent =
   | TaskUpdatedEvent
   | LabelAssignmentsUpdatedEvent
   | DesktopCommandDispatchedEvent
+  | UserPreferencesUpdatedEvent
   | RealtimeRoomEvent
   | RealtimeRoomJoinedEvent
   | RealtimeRoomHistoryResultEvent

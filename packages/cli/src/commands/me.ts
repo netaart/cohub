@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { createClient } from "../client.js";
-import { formatLocalDateTime, handleHttp, json as outJson, jsonRequested, table } from "../output.js";
+import { formatLocalDateTime, handleHttp, json as outJson, jsonRequested, ok, error, table } from "../output.js";
 import { SESSION_STATUS_COLUMN } from "../session-status.js";
 
 function parseInteger(value: string, name: string, min: number): number {
@@ -10,6 +10,12 @@ function parseInteger(value: string, name: string, min: number): number {
     process.exit(1);
   }
   return parsed;
+}
+
+function parseSwitch(value: string, name: string): boolean {
+  if (value === "on") return true;
+  if (value === "off") return false;
+  return error(`Invalid --${name}`, "Use on or off");
 }
 
 export function registerMe(program: Command): void {
@@ -83,6 +89,60 @@ export function registerMe(program: Command): void {
           { key: "successCount", label: "Success" },
           { key: "errorCount", label: "Errors" },
         ]);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  const notificationsCmd = meCmd
+    .command("notifications")
+    .description("Completion popups for scheduled prompts, hooks, and background tasks");
+
+  notificationsCmd
+    .command("get")
+    .description("Show when successful completions notify you")
+    .option("--json", "Output as JSON")
+    .action(async (opts: { json?: boolean }) => {
+      const client = createClient();
+      try {
+        const { preferences } = await client.user.getPreferences();
+        if (jsonRequested(opts)) return outJson(preferences);
+        const { success, cronJobs } = preferences.notifications;
+        table(Object.entries(success).map(([source, enabled]) => ({ source, notify: enabled ? "on" : "off" })), [
+          { key: "source", label: "Source" },
+          { key: "notify", label: "Notify on success" },
+        ]);
+        const overrides = Object.entries(cronJobs);
+        if (overrides.length) {
+          console.log("");
+          table(overrides.map(([id, enabled]) => ({ id, notify: enabled ? "on" : "off" })), [
+            { key: "id", label: "Scheduled task" },
+            { key: "notify", label: "Notify on success" },
+          ]);
+        }
+        console.log("\n  Failed and interrupted runs always notify.");
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  notificationsCmd
+    .command("set")
+    .description("Turn success notifications on or off per source")
+    .option("--scheduled <on|off>", "Scheduled prompts")
+    .option("--hook <on|off>", "Space hooks")
+    .option("--background <on|off>", "Background tasks")
+    .addHelpText("after", "\nPer-task settings override these; see `cohub cron-jobs notify`.\n\nExample:\n  $ cohub me notifications set --scheduled off")
+    .action(async (opts: { scheduled?: string; hook?: string; background?: string }) => {
+      const success: Partial<Record<"scheduled" | "hook" | "background", boolean>> = {};
+      if (opts.scheduled !== undefined) success.scheduled = parseSwitch(opts.scheduled, "scheduled");
+      if (opts.hook !== undefined) success.hook = parseSwitch(opts.hook, "hook");
+      if (opts.background !== undefined) success.background = parseSwitch(opts.background, "background");
+      if (Object.keys(success).length === 0) error("No changes provided", "Use --scheduled, --hook, or --background");
+      const client = createClient();
+      try {
+        await client.user.updatePreferences({ notifications: { success } });
+        ok("Notification settings updated");
       } catch (e: unknown) {
         handleHttp(e);
       }

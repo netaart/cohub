@@ -1,4 +1,9 @@
-import type { ChannelEnvelope, SpaceRecord } from "@neta-art/cohub";
+import type {
+	ChannelEnvelope,
+	SilenceableNotificationSource,
+	SpaceRecord,
+	TurnNotificationSource,
+} from "@neta-art/cohub";
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
 import { callHost, supportsHostCapability } from "$lib/host-bridge";
@@ -7,6 +12,7 @@ import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { buildSpaceSessionRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
+import { notificationPreferences } from "$lib/stores/notification-preferences.svelte";
 import {
 	cacheSpaceRecordSoon,
 	getCachedSpaceRecord,
@@ -37,6 +43,18 @@ type TurnNotifyPayload = {
 	provider: string | null;
 	model: string | null;
 	completedAt: string | null;
+	source?: TurnNotificationSource;
+	cronJobId?: string | null;
+	silent?: boolean;
+};
+
+type MuteTarget =
+	| { kind: "task"; cronJobId: string; previous: boolean | null }
+	| { kind: "source"; source: SilenceableNotificationSource };
+
+export type TurnNotificationMute = {
+	target: MuteTarget;
+	state: "saving" | "muted" | "failed";
 };
 
 export type TurnNotification = {
@@ -52,6 +70,9 @@ export type TurnNotification = {
 	provider: string | null;
 	model: string | null;
 	completedAt: string | null;
+	source: TurnNotificationSource;
+	cronJobId: string | null;
+	mute: TurnNotificationMute | null;
 	receivedAt: number;
 	space: SpaceRecord | null;
 	dismissAt: number | null;
@@ -329,6 +350,90 @@ class TurnNotificationsStore {
 		this.showDesktopPrompt = false;
 	}
 
+	muteKind(
+		notification: TurnNotification,
+	): "task" | SilenceableNotificationSource | null {
+		if (notification.status !== "completed" || notification.source === "chat")
+			return null;
+		return notification.cronJobId ? "task" : notification.source;
+	}
+
+	async mute(id: string) {
+		const item = this.items.find((entry) => entry.id === id);
+		if (!item || item.mute?.state === "saving") return;
+		const kind = this.muteKind(item);
+		if (!kind) return;
+		let target: MuteTarget;
+		if (kind === "task" && item.cronJobId) {
+			// Undo restores the task's exact previous setting, so read it first.
+			await notificationPreferences.sync().catch(() => undefined);
+			target = {
+				kind: "task",
+				cronJobId: item.cronJobId,
+				previous:
+					notificationPreferences.value.cronJobs[item.cronJobId] ?? null,
+			};
+		} else {
+			target = {
+				kind: "source",
+				source: kind as SilenceableNotificationSource,
+			};
+		}
+		this.setMute(id, { target, state: "saving" }, true);
+		try {
+			await notificationPreferences.update(
+				target.kind === "task"
+					? { notifications: { cronJobs: { [target.cronJobId]: false } } }
+					: { notifications: { success: { [target.source]: false } } },
+			);
+			this.setMute(id, { target, state: "muted" });
+		} catch (error) {
+			console.error("[notifications] Failed to silence notifications:", error);
+			this.setMute(id, { target, state: "failed" });
+		}
+	}
+
+	async undoMute(id: string) {
+		const mute = this.items.find((entry) => entry.id === id)?.mute;
+		if (mute?.state !== "muted") return;
+		const { target } = mute;
+		this.setMute(id, { target, state: "saving" });
+		try {
+			await notificationPreferences.update(
+				target.kind === "task"
+					? {
+							notifications: {
+								cronJobs: { [target.cronJobId]: target.previous },
+							},
+						}
+					: { notifications: { success: { [target.source]: true } } },
+			);
+			this.setMute(id, null);
+		} catch (error) {
+			console.error("[notifications] Failed to restore notifications:", error);
+			this.setMute(id, { target, state: "muted" });
+		}
+	}
+
+	private setMute(
+		id: string,
+		mute: TurnNotificationMute | null,
+		restartCountdown = false,
+	) {
+		const now = Date.now();
+		this.items = this.items.map((item) => {
+			if (item.id !== id) return item;
+			// Give the user time to read the result and undo it.
+			if (!restartCountdown) return { ...item, mute };
+			return {
+				...item,
+				mute,
+				remainingMs: AUTO_DISMISS_MS,
+				dismissAt: item.dismissAt === null ? null : now + AUTO_DISMISS_MS,
+			};
+		});
+	}
+
 	syncActiveSessionPresence() {
 		this.publishActiveSessionPresence();
 	}
@@ -441,7 +546,7 @@ class TurnNotificationsStore {
 		event: ChannelEnvelope & { payload: TurnNotifyPayload },
 	) {
 		const payload = event.payload;
-		if (this.hasSeen(payload.turnId)) return;
+		if (payload.silent === true || this.hasSeen(payload.turnId)) return;
 
 		if (canUseDesktopNotifications())
 			this.desktopPermission = Notification.permission;
@@ -472,6 +577,9 @@ class TurnNotificationsStore {
 			provider: payload.provider,
 			model: payload.model,
 			completedAt: payload.completedAt,
+			source: payload.source ?? "chat",
+			cronJobId: payload.cronJobId ?? null,
+			mute: null,
 			receivedAt: Date.now(),
 			space: cachedSpace,
 			dismissAt: null,
@@ -542,7 +650,9 @@ class TurnNotificationsStore {
 		if (!document.hidden) return;
 		if (this.isSessionActiveInAnyVisibleTab(item.spaceId, item.sessionId))
 			return;
-		const title = spaceTitle(item.space, "Space");
+		const title = m.notif_desktop_title({
+			space: spaceTitle(item.space, "Space"),
+		});
 		const targetUrl = notificationHref(item);
 		const options: NotificationOptions = {
 			body: [item.userPreview, getTurnNotificationMeta(item)]
@@ -553,10 +663,7 @@ class TurnNotificationsStore {
 			data: { url: targetUrl },
 		};
 		try {
-			const notification = new Notification(
-				`${title} finished a turn`,
-				options,
-			);
+			const notification = new Notification(title, options);
 			notification.onclick = () => {
 				window.focus();
 				void goto(targetUrl);
@@ -567,7 +674,7 @@ class TurnNotificationsStore {
 			const registration = await navigator.serviceWorker?.ready.catch(
 				() => null,
 			);
-			await registration?.showNotification(`${title} finished a turn`, options);
+			await registration?.showNotification(title, options);
 		}
 	}
 

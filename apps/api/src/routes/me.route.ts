@@ -5,7 +5,7 @@ import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import * as schema from "@cohub/db";
 import { db } from "../db/index.js";
 import { config } from "../config.js";
-import { requireValidId, useAuth, authzDenied } from "../lib/middleware.js";
+import { requireValidId, useAccountPrincipal, useAuth, authzDenied } from "../lib/middleware.js";
 import { ensureCurrentUserProfile, resolveCurrentUserEmail, updateCurrentUserProfile, LogtoUserRequiredError, UsernameClearError, UsernameConflictError, UsernameReservedError, validateUsername } from "../user-profiles.js";
 import {
   filterSessionsByPermission,
@@ -38,6 +38,11 @@ import {
 } from "../usage-aggregation.js";
 import { createLogger } from "@cohub/infra/logging";
 import { getReferralDashboard, rotateReferralCode } from "../referrals.js";
+import { loadUserPreferences, updateUserPreferences, UserPreferencesLimitError } from "@cohub/core/preferences";
+import { parseUserPreferencesPatch, type UserPreferencesPatch } from "@cohub/protocol/notifications";
+import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
+import { randomUUID } from "node:crypto";
+import { dispatchRealtimeEvent } from "../channels.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 
@@ -166,6 +171,37 @@ router.patch("/profile", async (c) => {
     }
     throw error;
   }
+});
+
+router.get("/preferences", async (c) => {
+  const user = useAccountPrincipal(c);
+  if (user instanceof Response) return user;
+  return c.json({ preferences: await loadUserPreferences(db, user.uuid) });
+});
+
+router.patch("/preferences", async (c) => {
+  const user = useAccountPrincipal(c);
+  if (user instanceof Response) return user;
+  let patch: UserPreferencesPatch;
+  try {
+    patch = parseUserPreferencesPatch(await c.req.json().catch(() => null));
+  } catch (error) {
+    return c.json({ message: error instanceof Error ? error.message : "invalid preferences patch" }, 400);
+  }
+  const preferences = await updateUserPreferences(db, user.uuid, patch).catch((error: unknown) => {
+    if (error instanceof UserPreferencesLimitError) return error;
+    throw error;
+  });
+  if (preferences instanceof UserPreferencesLimitError) return c.json({ message: preferences.message }, 400);
+  await dispatchRealtimeEvent({
+    id: randomUUID(),
+    timestamp: Date.now(),
+    domain: "user",
+    type: "user.preferences.updated",
+    rooms: [getRealtimeUserRoom(user.uuid)],
+    payload: { preferences },
+  }).catch((error) => logger.warn("[Preferences] failed to publish update", { userUuid: user.uuid, error }));
+  return c.json({ preferences });
 });
 
 router.get("/referrals", async (c) => {

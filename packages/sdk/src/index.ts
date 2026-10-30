@@ -250,6 +250,8 @@ export type {
   RealtimeServerEvent,
   RealtimeSessionFork,
   SessionCreatedEvent,
+  SessionTurnNotifyEvent,
+  UserPreferencesUpdatedEvent,
 } from "@cohub/protocol/realtime";
 export type {
   RealtimeAppRecord,
@@ -340,6 +342,20 @@ export type {
   AppDomainStatus,
 } from "@cohub/protocol";
 export { APP_DOMAIN_PRICE_USD, normalizeAppDomainHostname } from "@cohub/protocol";
+export {
+  applyUserPreferencesPatch,
+  parseUserPreferences,
+  shouldNotifyTurn,
+  SILENCEABLE_NOTIFICATION_SOURCES,
+} from "@cohub/protocol";
+export type {
+  NotificationPreferences,
+  NotificationPreferencesPatch,
+  SilenceableNotificationSource,
+  TurnNotificationSource,
+  UserPreferences,
+  UserPreferencesPatch,
+} from "@cohub/protocol";
 export {
   defaultDesktopCommandTimeoutMs,
   isTerminalDesktopCommandStatus,

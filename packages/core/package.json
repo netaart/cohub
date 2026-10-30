@@ -116,6 +116,10 @@
       "types": "./dist/referrals/index.d.ts",
       "default": "./dist/referrals/index.js"
     },
+    "./preferences": {
+      "types": "./dist/preferences/index.d.ts",
+      "default": "./dist/preferences/index.js"
+    },
     "./apps": {
       "types": "./dist/apps/index.d.ts",
       "default": "./dist/apps/index.js"

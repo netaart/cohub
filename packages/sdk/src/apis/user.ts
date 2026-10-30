@@ -1,3 +1,4 @@
+import type { UserPreferences, UserPreferencesPatch } from "@cohub/protocol";
 import { HttpError, type HttpTransport, type Fetch } from "../transport.js";
 import type { LabelAssignmentRecord, LabelListItem, LabelResourceType, MeResponse, SessionRecord, SpaceRecord, UserActivityQuery, UserActivityResponse, UserProfile, UserRulesResponse, UserSessionsResponse, UserSessionSourceKey } from "../types.js";
 
@@ -28,6 +29,19 @@ export class UserApi {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
+    });
+  }
+
+  getPreferences(customFetch?: Fetch) {
+    return this.transport.request<{ preferences: UserPreferences }>("/api/me/preferences", { fetch: customFetch });
+  }
+
+  /** Partial update; a `null` per-task notification value resets that task to the global setting. */
+  updatePreferences(patch: UserPreferencesPatch) {
+    return this.transport.request<{ preferences: UserPreferences }>("/api/me/preferences", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
     });
   }
 
