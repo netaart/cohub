@@ -74,3 +74,29 @@ test("compact stream resumes after a full patch seeds the stream", () => {
 		.map((event) => event.payload.seq);
 	assert.deepEqual(patchSeqs, [12, 13, 14]);
 });
+
+test("releases buffered patches after a missing seq times out", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const client = new WebsocketClient({
+		url: "ws://localhost",
+		getAccessToken: () => "token",
+	});
+	const seqs: unknown[] = [];
+	client.on("event", (event) => seqs.push(event.payload.seq));
+	const handleMessage = (
+		client as unknown as { handleMessage(raw: unknown): void }
+	).handleMessage.bind(client);
+	const send = (seq: number, baseSeq: number) =>
+		handleMessage(JSON.stringify(createPatchEnvelope({ seq, baseSeq, ops: [] })));
+
+	send(1, 0);
+	send(3, 2);
+	send(4, 3);
+	assert.deepEqual(seqs, [1]);
+
+	t.mock.timers.tick(1_500);
+	assert.deepEqual(seqs, [1, 3, 4]);
+
+	send(5, 4);
+	assert.deepEqual(seqs, [1, 3, 4, 5]);
+});

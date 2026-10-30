@@ -140,6 +140,7 @@ const isRetryableCloseCode = (code: number) => {
   return true;
 };
 const PATCH_STREAM_BUFFER_MAX_PENDING = 128;
+const PATCH_STREAM_GAP_TIMEOUT_MS = 1_500;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -212,6 +213,7 @@ type CompactStreamContext = {
 type PatchStreamBuffer = {
   nextSeq: number;
   pending: Map<number, ChannelEnvelope>;
+  gapTimer?: ReturnType<typeof setTimeout> | null;
 };
 
 type RoomSubscriptionState = {
@@ -1045,36 +1047,48 @@ export class WebsocketClient {
         pending: new Map([[payload.seq, envelope]]),
       };
       this.patchStreamBuffers.set(key, newBuffer);
-      this.flushPatchStreamBuffer(newBuffer);
+      this.flushPatchStreamBuffer(newBuffer, key);
       return;
     }
 
     if (payload.seq < buffer.nextSeq) return;
     buffer.pending.set(payload.seq, envelope);
-    if (!this.enforcePatchStreamBufferLimit(key, buffer)) return;
-    this.flushPatchStreamBuffer(buffer);
+    if (buffer.pending.size > PATCH_STREAM_BUFFER_MAX_PENDING) {
+      this.releasePatchStreamGap(key, buffer);
+      return;
+    }
+    this.flushPatchStreamBuffer(buffer, key);
   }
 
-  private enforcePatchStreamBufferLimit(key: string, buffer: PatchStreamBuffer) {
-    if (buffer.pending.size <= PATCH_STREAM_BUFFER_MAX_PENDING) return true;
-    this.patchStreamBuffers.delete(key);
-    this.emit("error", {
-      error: new Error(`patch stream buffer overflow: ${key}`),
-      recoverable: true,
-    });
-    return false;
-  }
-
-  private flushPatchStreamBuffer(buffer: PatchStreamBuffer) {
+  private flushPatchStreamBuffer(buffer: PatchStreamBuffer, key?: string) {
     while (true) {
       const envelope = buffer.pending.get(buffer.nextSeq);
-      if (!envelope) return;
+      if (!envelope) break;
       const seq = envelope.payload.seq;
-      if (typeof seq !== "number" || !Number.isInteger(seq)) return;
+      if (typeof seq !== "number" || !Number.isInteger(seq)) break;
       buffer.pending.delete(buffer.nextSeq);
       buffer.nextSeq = seq + 1;
       this.emit("event", envelope);
     }
+    if (buffer.pending.size === 0) {
+      if (buffer.gapTimer) clearTimeout(buffer.gapTimer);
+      buffer.gapTimer = null;
+    } else if (key && !buffer.gapTimer) {
+      buffer.gapTimer = setTimeout(() => {
+        buffer.gapTimer = null;
+        if (this.patchStreamBuffers.get(key) === buffer) this.releasePatchStreamGap(key, buffer);
+      }, PATCH_STREAM_GAP_TIMEOUT_MS);
+    }
+  }
+
+  // A lost patch would otherwise stall the stream until the turn ends. Skipping it hands the
+  // next patch downstream, where the base-seq mismatch triggers a stream snapshot resync.
+  private releasePatchStreamGap(key: string, buffer: PatchStreamBuffer) {
+    const nextSeq = Math.min(...buffer.pending.keys());
+    if (!Number.isFinite(nextSeq)) return;
+    this.log("patch stream gap skipped", { key, missingFrom: buffer.nextSeq, resumeAt: nextSeq });
+    buffer.nextSeq = nextSeq;
+    this.flushPatchStreamBuffer(buffer, key);
   }
 
   private handleCompactFrame(frame: RealtimeCompactFrame) {
