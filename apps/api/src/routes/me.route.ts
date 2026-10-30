@@ -1,11 +1,11 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import * as schema from "@cohub/db";
 import { db } from "../db/index.js";
 import { config } from "../config.js";
-import { getExecutionPrincipal, requireValidId, useAccountPrincipal, useAuth, authzDenied } from "../lib/middleware.js";
+import { requireValidId, useAccountPrincipal, useAuth, authzDenied } from "../lib/middleware.js";
 import { ensureCurrentUserProfile, resolveCurrentUserEmail, updateCurrentUserProfile, LogtoUserRequiredError, UsernameClearError, UsernameConflictError, UsernameReservedError, validateUsername } from "../user-profiles.js";
 import {
   filterSessionsByPermission,
@@ -171,40 +171,15 @@ router.patch("/profile", async (c) => {
   }
 });
 
-/**
- * Full preferences are account-only. Apps reach a single scheduled prompt's
- * setting through /api/cron-jobs/:id/notification. App Action tokens carry an
- * appId; a turn an App submitted keeps its app authorization in the turn meta,
- * even after that authorization expired and the token lost its scopes.
- */
-const usePreferencesPrincipal = async (c: Context) => {
-  const user = useAccountPrincipal(c);
-  if (user instanceof Response) return user;
-  const execution = getExecutionPrincipal(c);
-  if (execution && (execution.appId || execution.scopes.length > 0 || (await isAppSubmittedTurn(execution.turnId)))) {
-    return c.json({ message: "apps cannot access account preferences" }, 403);
-  }
-  return user;
-};
-
-async function isAppSubmittedTurn(turnId: string | null) {
-  if (!turnId) return false;
-  const [turn] = await db
-    .select({ authType: sql<string | null>`${schema.sessionTurns.meta} -> 'context' -> 'auth' ->> 'type'` })
-    .from(schema.sessionTurns)
-    .where(eq(schema.sessionTurns.id, turnId))
-    .limit(1);
-  return turn?.authType != null;
-}
-
+// Account principals only; Apps use /api/cron-jobs/:id/notification instead.
 router.get("/preferences", async (c) => {
-  const user = await usePreferencesPrincipal(c);
+  const user = useAccountPrincipal(c);
   if (user instanceof Response) return user;
   return c.json({ preferences: await loadUserPreferences(db, user.uuid) });
 });
 
 router.patch("/preferences", async (c) => {
-  const user = await usePreferencesPrincipal(c);
+  const user = useAccountPrincipal(c);
   if (user instanceof Response) return user;
   let patch: UserPreferencesPatch;
   try {
