@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="Add {0} to your PATH, then run cohub." xml:space="preserve"><value>将 {0} 添加到 PATH，然后运行 cohub。</value></data>
+  <data name="Cancel" xml:space="preserve"><value>取消</value></data>
+  <data name="Choose" xml:space="preserve"><value>选择</value></data>
+  <data name="Choose a folder for agents to work in." xml:space="preserve"><value>选择一个文件夹，供 Agent 在其中工作。</value></data>
+  <data name="Cohub needs GTK 4.10 and WebKitGTK 6.0." xml:space="preserve"><value>Cohub 需要 GTK 4.10 和 WebKitGTK 6.0。</value></data>
+  <data name="Connect" xml:space="preserve"><value>连接</value></data>
+  <data name="Connect “{0}” to this Space?" xml:space="preserve"><value>将“{0}”连接到这个 Space？</value></data>
+  <data name="Connected" xml:space="preserve"><value>已连接</value></data>
+  <data name="Connected Folders" xml:space="preserve"><value>已连接的文件夹</value></data>
+  <data name="Connecting…" xml:space="preserve"><value>正在连接…</value></data>
+  <data name="Couldn’t disconnect this folder" xml:space="preserve"><value>无法断开此文件夹</value></data>
+  <data name="Couldn’t install the cohub command" xml:space="preserve"><value>无法安装 cohub 命令</value></data>
+  <data name="Disconnect" xml:space="preserve"><value>断开连接</value></data>
+  <data name="Install Command Line Tool" xml:space="preserve"><value>安装命令行工具</value></data>
+  <data name="Install it with npm install -g @neta-art/cohub-cli." xml:space="preserve"><value>请使用 npm install -g @neta-art/cohub-cli 安装。</value></data>
+  <data name="Install libwebkitgtk-6.0-4 (Debian, Ubuntu), webkitgtk6.0 (Fedora) or webkitgtk-6.0 (Arch), then open Cohub again." xml:space="preserve"><value>请安装 libwebkitgtk-6.0-4（Debian、Ubuntu）、webkitgtk6.0（Fedora）或 webkitgtk-6.0（Arch），然后重新打开 Cohub。</value></data>
+  <data name="Needs attention" xml:space="preserve"><value>需要处理</value></data>
+  <data name="New Window" xml:space="preserve"><value>新建窗口</value></data>
+  <data name="Not connected" xml:space="preserve"><value>未连接</value></data>
+  <data name="Open Space" xml:space="preserve"><value>打开 Space</value></data>
+  <data name="Open a new terminal and run cohub." xml:space="preserve"><value>打开新的终端并运行 cohub。</value></data>
+  <data name="People and agents in this Space can change files in this folder and run commands as you on this computer. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space." xml:space="preserve"><value>这个 Space 中的成员和 Agent 可以修改此文件夹中的文件，并以你的身份在这台电脑上运行命令。此文件夹中本地的 Pi、Codex、Claude Code 和 Cursor 对话（包括之前的对话）会同步到 Space。</value></data>
+  <data name="Quit Cohub" xml:space="preserve"><value>退出 Cohub</value></data>
+  <data name="Replace" xml:space="preserve"><value>替换</value></data>
+  <data name="Replace the existing cohub command?" xml:space="preserve"><value>替换现有的 cohub 命令？</value></data>
+  <data name="Restart to Update" xml:space="preserve"><value>重启以更新</value></data>
+  <data name="Saved to Downloads" xml:space="preserve"><value>已保存到“下载”</value></data>
+  <data name="Show in Files" xml:space="preserve"><value>在文件管理器中显示</value></data>
+  <data name="The cohub command is installed." xml:space="preserve"><value>cohub 命令已安装。</value></data>
+  <data name="This build has no command line tool." xml:space="preserve"><value>此版本未包含命令行工具。</value></data>
+  <data name="{0} already exists, for example from npm. Cohub will link it to the version inside this app." xml:space="preserve"><value>{0} 已存在（例如通过 npm 安装）。Cohub 会将其链接到此应用内置的版本。</value></data>
+</root>

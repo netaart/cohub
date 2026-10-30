@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="Add {0} to your PATH, then run cohub." xml:space="preserve"><value>Add {0} to your PATH, then run cohub.</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Choose" xml:space="preserve"><value>Choose</value></data>
+  <data name="Choose a folder for agents to work in." xml:space="preserve"><value>Choose a folder for agents to work in.</value></data>
+  <data name="Cohub needs GTK 4.10 and WebKitGTK 6.0." xml:space="preserve"><value>Cohub needs GTK 4.10 and WebKitGTK 6.0.</value></data>
+  <data name="Connect" xml:space="preserve"><value>Connect</value></data>
+  <data name="Connect “{0}” to this Space?" xml:space="preserve"><value>Connect “{0}” to this Space?</value></data>
+  <data name="Connected" xml:space="preserve"><value>Connected</value></data>
+  <data name="Connected Folders" xml:space="preserve"><value>Connected Folders</value></data>
+  <data name="Connecting…" xml:space="preserve"><value>Connecting…</value></data>
+  <data name="Couldn’t disconnect this folder" xml:space="preserve"><value>Couldn’t disconnect this folder</value></data>
+  <data name="Couldn’t install the cohub command" xml:space="preserve"><value>Couldn’t install the cohub command</value></data>
+  <data name="Disconnect" xml:space="preserve"><value>Disconnect</value></data>
+  <data name="Install Command Line Tool" xml:space="preserve"><value>Install Command Line Tool</value></data>
+  <data name="Install it with npm install -g @neta-art/cohub-cli." xml:space="preserve"><value>Install it with npm install -g @neta-art/cohub-cli.</value></data>
+  <data name="Install libwebkitgtk-6.0-4 (Debian, Ubuntu), webkitgtk6.0 (Fedora) or webkitgtk-6.0 (Arch), then open Cohub again." xml:space="preserve"><value>Install libwebkitgtk-6.0-4 (Debian, Ubuntu), webkitgtk6.0 (Fedora) or webkitgtk-6.0 (Arch), then open Cohub again.</value></data>
+  <data name="Needs attention" xml:space="preserve"><value>Needs attention</value></data>
+  <data name="New Window" xml:space="preserve"><value>New Window</value></data>
+  <data name="Not connected" xml:space="preserve"><value>Not connected</value></data>
+  <data name="Open Space" xml:space="preserve"><value>Open Space</value></data>
+  <data name="Open a new terminal and run cohub." xml:space="preserve"><value>Open a new terminal and run cohub.</value></data>
+  <data name="People and agents in this Space can change files in this folder and run commands as you on this computer. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space." xml:space="preserve"><value>People and agents in this Space can change files in this folder and run commands as you on this computer. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space.</value></data>
+  <data name="Quit Cohub" xml:space="preserve"><value>Quit Cohub</value></data>
+  <data name="Replace" xml:space="preserve"><value>Replace</value></data>
+  <data name="Replace the existing cohub command?" xml:space="preserve"><value>Replace the existing cohub command?</value></data>
+  <data name="Restart to Update" xml:space="preserve"><value>Restart to Update</value></data>
+  <data name="Saved to Downloads" xml:space="preserve"><value>Saved to Downloads</value></data>
+  <data name="Show in Files" xml:space="preserve"><value>Show in Files</value></data>
+  <data name="The cohub command is installed." xml:space="preserve"><value>The cohub command is installed.</value></data>
+  <data name="This build has no command line tool." xml:space="preserve"><value>This build has no command line tool.</value></data>
+  <data name="{0} already exists, for example from npm. Cohub will link it to the version inside this app." xml:space="preserve"><value>{0} already exists, for example from npm. Cohub will link it to the version inside this app.</value></data>
+</root>

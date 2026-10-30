@@ -1,13 +1,13 @@
 # Cohub desktop
 
-Native shells for macOS and Windows. Like the Android shell, each one owns windows,
+Native shells for macOS, Windows and Linux. Like the Android shell, each one owns windows,
 sign-in and system integration, and leaves the product UI to the web app in the
 system WebView, so Boards, docs and editors keep one implementation. Unlike Android,
 the account and local Runtimes come from the CLI the app bundles: the desktop and the
 terminal share one sign-in and one set of Runtimes.
 
 ```
-┌──────────── Cohub.app / Cohub.exe ────────────┐
+┌──── Cohub.app / Cohub.exe / Cohub.AppImage ───┐
 │  window ── system WebView ──► https://cohub.live
 │              ▲ cohub.host.v1                   │
 │  shell: windows, menus, tray, notifications,   │
@@ -21,22 +21,24 @@ terminal share one sign-in and one set of Runtimes.
    ~/.config/cohub/auth.json, runtime-spaces.json
 ```
 
-| | macOS | Windows |
-| --- | --- | --- |
-| Shell | Swift 6, AppKit | C# (.NET 10), WPF |
-| WebView | WKWebView | WebView2 |
-| Updates | Sparkle (EdDSA-signed appcast) | Velopack (delta packages) |
-| Tray | Menu bar item | Notification area icon |
-| Notifications | UserNotifications | Toasts |
-| Recent Spaces | Dock menu | Jump List |
-| Share | Share picker | Windows share sheet |
-| Platform-neutral core | `macos/Sources/CohubCore` | `windows/Cohub.Core` |
+| | macOS | Windows | Linux |
+| --- | --- | --- | --- |
+| Shell | Swift 6, AppKit | C# (.NET 10), WPF | C# (.NET 10), GTK 4 via GirCore |
+| WebView | WKWebView | WebView2 | WebKitGTK 6.0 (from the system) |
+| Updates | Sparkle (EdDSA-signed appcast) | Velopack (delta packages) | Velopack (AppImage, delta packages) |
+| Tray | Menu bar item | Notification area icon | Header bar menu, tinted by state |
+| Notifications | UserNotifications | Toasts | `GNotification` |
+| Recent Spaces | Dock menu | Jump List | Launcher actions in the `.desktop` entry |
+| Share | Share picker | Windows share sheet | — |
+| Platform-neutral core | `macos/Sources/CohubCore` | `windows/Cohub.Core` | `windows/Cohub.Core`, shared |
 
 Both cores hold the same logic and build on every OS: bridge routing between native
 handlers and the CLI service (`BridgeRouter`), the service process with restart and
 backoff (`HostService`), the runtime copy (`RuntimeInstall`), the origin policy
-(`WebOrigin`) and the tray model (`RuntimeOverview`). The app layers are thin adapters
-onto AppKit and WPF. Their tests pin protocol names against `packages/protocol/host-bridge.json`.
+(`WebOrigin`) and the tray model (`RuntimeOverview`); the .NET core also keeps the shell
+state (`ShellState`). The app layers are thin adapters onto AppKit, WPF and GTK, and the
+Linux app links the .NET core rather than copying it. Their tests pin protocol names against
+`packages/protocol/host-bridge.json`.
 
 The contract and the desktop split are documented in
 [`docs/native-host-bridge.md`](../../docs/native-host-bridge.md#desktop); how the app
@@ -63,12 +65,28 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
 - **Runtime copy.** Runtimes outlive the app, so they never run from inside it: on its first
   start each app version copies its bundled runtime to a directory of its own
   (`~/Library/Application Support/<bundle id>/runtime/<version>`,
-  `%LOCALAPPDATA%\Cohub\Desktop\<env>\runtime\<version>`) and runs the CLI from there. An update
+  `%LOCALAPPDATA%\Cohub\Desktop\<env>\runtime\<version>`,
+  `$XDG_DATA_HOME/cohub/desktop/<env>/runtime/<version>`) and runs the CLI from there. An update
   replaces the app without replacing or stopping code a Runtime is running; copies no process
   runs from any more are removed.
 - **Command line.** On start the app rewrites a `cohub` shim beside those copies that runs the
-  current one. "Install Command Line Tool" links `/usr/local/bin/cohub` to it (macOS) or puts its
-  directory on the user PATH (Windows), so the terminal's `cohub` updates with the app.
+  current one. "Install Command Line Tool" links `/usr/local/bin/cohub` (macOS) or `~/.local/bin/cohub`
+  (Linux) to it, or puts its directory on the user PATH (Windows), so the terminal's `cohub`
+  updates with the app.
+
+### Linux
+
+- **Toolkit.** GTK 4.10+ and WebKitGTK 6.0 come from the distribution (Ubuntu 24.04, Debian 13,
+  Fedora 40, Arch and later); the AppImage bundles .NET, Node and the CLI but not the toolkit,
+  and says what to install when it is missing.
+- **Single instance.** The app is a `GtkApplication` (`live.cohub.desktop`, `live.cohub.desktop.dev`):
+  a second launch hands its `cohub://` link to the running one over D-Bus and exits.
+- **Launcher.** On start the app writes `live.cohub.desktop.desktop` to `~/.local/share/applications`,
+  pointing at the AppImage, registers it for the URL scheme and lists recent Spaces as actions.
+- **Bridge.** The page's `cohubHost` relays to an isolated script world, the only one that can
+  reach the native message handler, so frames and page scripts never touch it directly.
+- **Edge color.** The header bar takes the page's edge color; its menu lists connected folders,
+  and its icon turns green, yellow or red with them, like the tray icon elsewhere.
 
 ## Develop
 
@@ -78,6 +96,7 @@ The cores build and test anywhere their toolchains run:
 swift test --package-path apps/desktop/macos           # Swift 6.0+
 cd apps/desktop/windows && dotnet test --project Cohub.Core.Tests
 dotnet build apps/desktop/windows/Cohub/Cohub.csproj   # compiles on macOS and Linux too
+dotnet build apps/desktop/linux/Cohub/Cohub.csproj     # compiles anywhere; runs on Linux
 ```
 
 Run an app against a CLI from this checkout instead of a bundled one:
@@ -88,7 +107,8 @@ COHUB_DESKTOP_NODE=$(which node) COHUB_DESKTOP_CLI=$PWD/packages/cli/bin/cohub.j
   swift run --package-path apps/desktop/macos Cohub
 ```
 
-On Windows, set the same variables and `dotnet run --project apps/desktop/windows/Cohub`.
+On Windows, set the same variables and `dotnet run --project apps/desktop/windows/Cohub`; on
+Linux, `dotnet run --project apps/desktop/linux/Cohub` (with `libwebkitgtk-6.0-4` installed).
 `COHUB_DESKTOP_ENV=dev` and `COHUB_DESKTOP_WEB_ORIGIN` select another environment or a local web
 server. Without a CLI the app still runs; the page then signs in as it would in a browser.
 `swift run` has no app bundle, so updates and notifications are off there.
@@ -104,12 +124,14 @@ through `scripts/icons.mjs`.
 pnpm install && pnpm --filter @neta-art/cohub-cli... build
 apps/desktop/macos/scripts/bundle.sh --arch arm64 --version 1.2.3 [--env dev]
 pwsh apps/desktop/windows/scripts/pack.ps1 -Version 1.2.3 [-Environment dev]
+apps/desktop/linux/scripts/pack.sh --version 1.2.3 [--env dev]     # needs vpk and mksquashfs
 ```
 
 `bundle.sh` builds `Cohub.app`, signs it inside-out with the hardened runtime (ad hoc without
 `CODESIGN_IDENTITY`), notarizes and staples when `NOTARY_KEY` is set, then writes a DMG and the
 update zip. `pack.ps1` publishes a self-contained ReadyToRun build and packs it with `vpk`,
-signing through Azure Trusted Signing when `AZURE_TRUSTED_SIGNING_METADATA` is set.
+signing through Azure Trusted Signing when `AZURE_TRUSTED_SIGNING_METADATA` is set. `pack.sh`
+publishes a self-contained build and packs it with `vpk` into an AppImage that updates itself.
 
 ## CI
 
@@ -121,15 +143,16 @@ signing through Azure Trusted Signing when `AZURE_TRUSTED_SIGNING_METADATA` is s
 | Push to main | `dev` | `0.<run>.<attempt>` | Installers, update packages and feeds |
 | `vX.Y.Z` tag | `prod` (`desktop-release` environment) | `X.Y.Z` | The same, also attached to the GitHub Release |
 
-Each build tests both cores and compiles the Windows app on Linux, then packages macOS
-(arm64, x64) and Windows (x64). With signing secrets it signs, notarizes and publishes to
-`public.cohub.live/desktop/{macos,windows}/<channel>/<arch>/`:
+Each build tests both cores and compiles the Windows and Linux apps, then packages macOS
+(arm64, x64), Windows (x64) and Linux (x64). With signing secrets it signs, notarizes and publishes to
+`public.cohub.live/desktop/{macos,windows,linux}/<channel>/<arch>/`:
 
-- `Cohub-<version>-<env>-<arch>.dmg` and `Cohub-<version>-<env>-x64-Setup.exe`, each with a `.sha256`, cached for good
-- `Cohub.dmg` and `Cohub-Setup.exe`, the latest of the channel, never cached
-- `appcast.xml` (Sparkle) and `releases.win.json` (Velopack) with their packages; Windows builds a delta from the previous release
+- `Cohub-<version>-<env>-<arch>.dmg`, `Cohub-<version>-<env>-x64-Setup.exe` and `Cohub-<version>-<env>-x64.AppImage`, each with a `.sha256`, cached for good
+- `Cohub.dmg`, `Cohub-Setup.exe` and `Cohub.AppImage`, the latest of the channel, never cached
+- `appcast.xml` (Sparkle), `releases.win.json` and `releases.linux.json` (Velopack) with their packages; Windows and Linux build a delta from the previous release
 
-Without secrets the installers are workflow artifacts, unsigned. The run summary lists every link.
+Without secrets the installers are workflow artifacts, unsigned. The AppImage is never signed; its
+`.sha256` sits beside it. The run summary lists every link.
 
 | Secret / variable | Use |
 | --- | --- |
@@ -148,4 +171,5 @@ backed up outside GitHub.
 - Screen sharing from the app (`display`), with the macOS Screen Recording and Accessibility
   prompts attributed to Cohub rather than a terminal.
 - Bundling a signed `sandboxd`, so a first connection needs no download.
-- Windows on Arm.
+- Windows on Arm and Linux on Arm.
+- Flatpak, with WebKitGTK from the GNOME runtime.

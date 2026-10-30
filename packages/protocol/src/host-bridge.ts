@@ -34,7 +34,7 @@ export const HOST_BRIDGE_CAPABILITIES = [
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
 
-export const hostPlatformSchema = z.enum(["android", "ios", "macos", "windows", "web", "unknown"]);
+export const hostPlatformSchema = z.enum(["android", "ios", "macos", "windows", "linux", "web", "unknown"]);
 export type HostPlatform = z.infer<typeof hostPlatformSchema>;
 
 const identifier = z.string().min(1).max(128);

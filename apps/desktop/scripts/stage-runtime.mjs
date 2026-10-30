@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Usage: node apps/desktop/scripts/stage-runtime.mjs --platform darwin|win32 --arch arm64|x64 --out <dir>
+// Usage: node apps/desktop/scripts/stage-runtime.mjs --platform darwin|linux|win32 --arch arm64|x64 --out <dir>
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const NODE_VERSION = "26.13.0";
-const PLATFORMS = { darwin: "darwin", win32: "win" };
+const PLATFORMS = { darwin: "darwin", linux: "linux", win32: "win" };
 const ARCHS = ["arm64", "x64"];
 
 const { values } = parseArgs({
@@ -22,7 +22,7 @@ const { values } = parseArgs({
 });
 const { platform, arch } = values;
 if (!PLATFORMS[platform] || !ARCHS.includes(arch) || !values.out) {
-  console.error("Usage: stage-runtime.mjs --platform darwin|win32 --arch arm64|x64 --out <dir>");
+  console.error("Usage: stage-runtime.mjs --platform darwin|linux|win32 --arch arm64|x64 --out <dir>");
   process.exit(1);
 }
 
@@ -39,7 +39,7 @@ async function download(url, path) {
 
 async function stageNode() {
   const name = `node-v${NODE_VERSION}-${PLATFORMS[platform]}-${arch}`;
-  const archive = `${name}.${platform === "win32" ? "zip" : "tar.gz"}`;
+  const archive = `${name}.${{ win32: "zip", linux: "tar.xz" }[platform] ?? "tar.gz"}`;
   const base = `https://nodejs.org/dist/v${NODE_VERSION}`;
   await download(`${base}/${archive}`, join(work, archive));
   await download(`${base}/SHASUMS256.txt`, join(work, "SHASUMS256.txt"));
