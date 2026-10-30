@@ -85,6 +85,13 @@ export const userProfiles = v2.table(
   }),
 );
 
+/** Private per-user settings; kept apart from the public profile mirror. */
+export const userPreferences = v2.table("user_preferences", {
+  userUuid: varchar("user_uuid", { length: 255 }).primaryKey(),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 
 export const userChannels = v2.table(
   "user_channels",

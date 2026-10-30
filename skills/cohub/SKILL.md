@@ -264,6 +264,7 @@ cohub cron-jobs update <cronJobId>
 cohub cron-jobs toggle <cronJobId> on
 cohub cron-jobs toggle <cronJobId> off
 cohub cron-jobs delete <cronJobId>
+cohub cron-jobs notify <cronJobId> on|off|default
 ```
 
 Confirm before enabling, disabling, updating, or deleting recurring scheduled prompts.

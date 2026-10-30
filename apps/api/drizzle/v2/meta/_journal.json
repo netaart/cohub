@@ -575,6 +575,13 @@
       "when": 1793254733245,
       "tag": "0081_space_workspace_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1793331148920,
+      "tag": "0082_user_preferences",
+      "breakpoints": true
     }
   ]
 }

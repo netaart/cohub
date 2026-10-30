@@ -15,6 +15,9 @@ const toQuery = (params: Record<string, string | number | null | undefined>) => 
   return text ? `?${text}` : "";
 };
 
+/** `override` is this task's own setting; `null` follows `global` (the scheduled-prompt switch). */
+export type CronJobNotificationSetting = { override: boolean | null; global: boolean };
+
 export class CronJobsApi {
   constructor(private readonly transport: HttpTransport) {}
 
@@ -46,6 +49,19 @@ export class CronJobsApi {
 
   toggle(id: string, enabled: boolean) {
     return this.update(id, { enabled });
+  }
+
+  /** Whether successful runs pop up for the caller; only the task's owner receives them. */
+  getNotification(id: string) {
+    return this.transport.request<CronJobNotificationSetting>(`/api/cron-jobs/${id}/notification`);
+  }
+
+  setNotification(id: string, override: boolean | null) {
+    return this.transport.request<CronJobNotificationSetting>(`/api/cron-jobs/${id}/notification`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ override }),
+    });
   }
 
   runs(cronJobId: string, options: CronJobRunsOptions = {}) {

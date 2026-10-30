@@ -5,7 +5,7 @@ import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import * as schema from "@cohub/db";
 import { db } from "../db/index.js";
 import { config } from "../config.js";
-import { requireValidId, useAuth, authzDenied } from "../lib/middleware.js";
+import { requireValidId, useAccountPrincipal, useAuth, authzDenied } from "../lib/middleware.js";
 import { ensureCurrentUserProfile, resolveCurrentUserEmail, updateCurrentUserProfile, LogtoUserRequiredError, UsernameClearError, UsernameConflictError, UsernameReservedError, validateUsername } from "../user-profiles.js";
 import {
   filterSessionsByPermission,
@@ -38,6 +38,9 @@ import {
 } from "../usage-aggregation.js";
 import { createLogger } from "@cohub/infra/logging";
 import { getReferralDashboard, rotateReferralCode } from "../referrals.js";
+import { loadUserPreferences, UserPreferencesInputError } from "@cohub/core/preferences";
+import { parseUserPreferencesPatch, type UserPreferencesPatch } from "@cohub/protocol/notifications";
+import { updateAndPublishUserPreferences } from "../user-preferences.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 
@@ -166,6 +169,30 @@ router.patch("/profile", async (c) => {
     }
     throw error;
   }
+});
+
+// Account principals only; Apps use /api/cron-jobs/:id/notification instead.
+router.get("/preferences", async (c) => {
+  const user = useAccountPrincipal(c);
+  if (user instanceof Response) return user;
+  return c.json({ preferences: await loadUserPreferences(db, user.uuid) });
+});
+
+router.patch("/preferences", async (c) => {
+  const user = useAccountPrincipal(c);
+  if (user instanceof Response) return user;
+  let patch: UserPreferencesPatch;
+  try {
+    patch = parseUserPreferencesPatch(await c.req.json().catch(() => null));
+  } catch (error) {
+    return c.json({ message: error instanceof Error ? error.message : "invalid preferences patch" }, 400);
+  }
+  const preferences = await updateAndPublishUserPreferences(user.uuid, patch).catch((error: unknown) => {
+    if (error instanceof UserPreferencesInputError) return error;
+    throw error;
+  });
+  if (preferences instanceof UserPreferencesInputError) return c.json({ message: preferences.message }, 400);
+  return c.json({ preferences });
 });
 
 router.get("/referrals", async (c) => {

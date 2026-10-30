@@ -205,6 +205,7 @@ export {
 export type { CohubClientOptions, Fetch, HttpTraceContext, UnauthorizedContext } from "./transport.js";
 export type { CohubContext, CohubEnvironment, CohubExecutionContext, CohubRuntimeKind } from "./environment.js";
 export type { TaskWaitOptions } from "./apis/tasks.js";
+export type { CronJobNotificationSetting } from "./apis/cron-jobs.js";
 export type {
   VoiceInputCallbacks,
   VoiceInputClientOptions,
@@ -250,6 +251,8 @@ export type {
   RealtimeServerEvent,
   RealtimeSessionFork,
   SessionCreatedEvent,
+  SessionTurnNotifyEvent,
+  UserPreferencesUpdatedEvent,
 } from "@cohub/protocol/realtime";
 export type {
   RealtimeAppRecord,
@@ -340,6 +343,20 @@ export type {
   AppDomainStatus,
 } from "@cohub/protocol";
 export { APP_DOMAIN_PRICE_USD, normalizeAppDomainHostname } from "@cohub/protocol";
+export {
+  applyUserPreferencesPatch,
+  parseUserPreferences,
+  shouldNotifyTurn,
+  SILENCEABLE_NOTIFICATION_SOURCES,
+} from "@cohub/protocol";
+export type {
+  NotificationPreferences,
+  NotificationPreferencesPatch,
+  SilenceableNotificationSource,
+  TurnNotificationSource,
+  UserPreferences,
+  UserPreferencesPatch,
+} from "@cohub/protocol";
 export {
   defaultDesktopCommandTimeoutMs,
   isTerminalDesktopCommandStatus,

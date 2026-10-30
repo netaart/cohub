@@ -123,6 +123,10 @@
       "types": "./dist/desktop-command.d.ts",
       "default": "./dist/desktop-command.js"
     },
+    "./notifications": {
+      "types": "./dist/notifications.d.ts",
+      "default": "./dist/notifications.js"
+    },
     "./app-surface": {
       "types": "./dist/app-surface.d.ts",
       "default": "./dist/app-surface.js"

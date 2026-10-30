@@ -18,6 +18,7 @@ import { goto } from "$app/navigation";
 import AccessStateView from "$lib/components/AccessStateView.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import ModelSelector from "$lib/components/ModelSelector.svelte";
+import Segmented from "$lib/components/Segmented.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -36,6 +37,8 @@ import {
 	buildSpaceNewSessionRoute,
 	buildSpaceTaskRoute,
 } from "$lib/space-routes";
+import { authStore } from "$lib/stores/auth.svelte";
+import { notificationPreferences } from "$lib/stores/notification-preferences.svelte";
 import { displayUserName } from "../space-utils";
 import {
 	type CronjobMode,
@@ -98,6 +101,48 @@ const cronjobNewError = $derived(cronjob.newError);
 $effect(() => {
 	cronjob.syncRoute();
 });
+
+type NotifyChoice = "default" | "on" | "off";
+// Completion notifications go to the job owner, so only they get this control.
+const ownsCronjob = $derived(
+	!!cronjobDetail &&
+		cronjobDetail.taskType === "send_message" &&
+		cronjobDetail.userUuid === authStore.userUuid,
+);
+const notifyOverride = $derived(
+	cronjobDetail
+		? notificationPreferences.value.cronJobs[cronjobDetail.id]
+		: undefined,
+);
+const notifyChoice = $derived<NotifyChoice>(
+	notifyOverride === undefined ? "default" : notifyOverride ? "on" : "off",
+);
+const notifyOptions = $derived([
+	{ value: "default" as const, label: m.cron_notify_default({}, { locale }) },
+	{ value: "on" as const, label: m.cron_notify_on({}, { locale }) },
+	{ value: "off" as const, label: m.cron_notify_off({}, { locale }) },
+]);
+let notifyError = $state("");
+
+$effect(() => {
+	if (ownsCronjob) void notificationPreferences.sync().catch(() => undefined);
+});
+
+async function setNotify(choice: NotifyChoice) {
+	const id = cronjobDetail?.id;
+	if (!id || choice === notifyChoice) return;
+	notifyError = "";
+	try {
+		await notificationPreferences.update({
+			notifications: {
+				cronJobs: { [id]: choice === "default" ? null : choice === "on" },
+			},
+		});
+	} catch (error) {
+		console.error("[cronjob] Failed to save notification setting:", error);
+		notifyError = m.settings_notify_save_failed({}, { locale });
+	}
+}
 
 $effect(() => {
 	cronjob.applyRealtimeEvent(taskRealtimeEvent);
@@ -288,6 +333,15 @@ function payloadProviderLabel(payload: unknown) {
 							</div>
 							<aside class="space-y-5 text-[13px]">
 								<div class="space-y-3"><div class="text-[10px] font-medium uppercase tracking-[0.18em] text-text-placeholder">{m.cron_schedule({}, { locale })}</div><div><div class="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-text-placeholder"><Clock class="h-3.5 w-3.5" /> {m.cron_expression({}, { locale })}</div><div class="mt-1.5 font-mono text-[15px] text-text-primary break-all">{cronjobDetail.cronExpression}</div></div><div><div class="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-text-placeholder"><Clock3 class="h-3.5 w-3.5" /> {m.cron_timezone({}, { locale })}</div><div class="mt-1.5 text-text-primary">{cronjobDetail.timezone}</div></div></div>
+								{#if ownsCronjob}
+									<div class="h-px bg-border-subtle/70"></div>
+									<div class="space-y-2">
+										<div class="text-[10px] font-medium uppercase tracking-[0.18em] text-text-placeholder">{m.cron_notify({}, { locale })}</div>
+										<Segmented label={m.cron_notify({}, { locale })} value={notifyChoice} options={notifyOptions} onchange={(choice) => void setNotify(choice)} />
+										{#if notifyChoice === "default"}<p class="text-[11px] leading-5 text-text-placeholder">{m.cron_notify_following({ state: notificationPreferences.value.success.scheduled ? m.cron_notify_on({}, { locale }) : m.cron_notify_off({}, { locale }) }, { locale })}</p>{/if}
+										{#if notifyError}<p class="text-[11px] leading-5 text-error-soft" role="alert">{notifyError}</p>{/if}
+									</div>
+								{/if}
 								<div class="h-px bg-border-subtle/70"></div>
 								<div class="space-y-3"><div class="text-[10px] font-medium uppercase tracking-[0.18em] text-text-placeholder">{m.cron_metadata({}, { locale })}</div><div class="grid grid-cols-[76px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[12px]"><div class="text-text-placeholder">{m.cron_type({}, { locale })}</div><div class="font-mono text-text-secondary break-all">{cronjobDetail.taskType}</div><div class="text-text-placeholder">{m.cron_session({}, { locale })}</div><div class="font-mono text-text-secondary break-all">{cronjobDetail.sessionId ?? m.cron_new_session_on_run({}, { locale })}</div><div class="text-text-placeholder">{m.cron_created({}, { locale })}</div><div class="text-text-secondary">{formatDateTime(cronjobDetail.createdAt, locale)}</div><div class="text-text-placeholder">{m.cron_updated({}, { locale })}</div><div class="text-text-secondary">{formatDateTime(cronjobDetail.updatedAt, locale)}</div></div></div>
 							</aside>

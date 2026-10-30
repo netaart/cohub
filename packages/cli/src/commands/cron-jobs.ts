@@ -117,6 +117,21 @@ export function registerCronJobs(program: Command): void {
     });
 
   cmd
+    .command("notify <id> <on|off|default>")
+    .description("Notify when this scheduled task succeeds; default follows `cohub me notifications`")
+    .action(async (id: string, state: string) => {
+      if (state !== "on" && state !== "off" && state !== "default") return error("Invalid state", "Use on, off, or default");
+      const client = createClient();
+      try {
+        const setting = await client.cronJobs.setNotification(id, state === "default" ? null : state === "on");
+        const effective = (setting.override ?? setting.global) ? "on" : "off";
+        ok(`Success notifications for ${id}: ${state}${state === "default" ? ` (global: ${effective})` : ""}`);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  cmd
     .command("runs <id>")
     .description("List scheduled job runs")
     .option("--limit <limit>", "Page size", "20")

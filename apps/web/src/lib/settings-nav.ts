@@ -1,5 +1,6 @@
 export type SettingsSection =
 	| "general"
+	| "notifications"
 	| "activity"
 	| "referrals"
 	| "billing"
@@ -8,6 +9,7 @@ export type SettingsSection =
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 	"general",
+	"notifications",
 	"activity",
 	"referrals",
 	"billing",
