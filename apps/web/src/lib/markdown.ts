@@ -9,7 +9,6 @@ import {
 } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { RESOLVED_THEMES, THEME_REGISTRY } from "$lib/theme-registry";
-import { normalizeWorkspaceFileLinkTarget } from "$lib/workspace-file-links";
 
 const MARKDOWN_RENDER_CACHE_LIMIT = 256;
 const STREAMING_MARKDOWN_TAIL_PLAIN_THRESHOLD = 1_800;
@@ -561,39 +560,6 @@ function enhanceMermaidTokens(tokens: Token[]) {
 	}
 }
 
-const WORKSPACE_CODE_PATH_PATTERN = /^\/workspace\/\S+$/;
-
-function collectCodespans(tokens: Token[] | undefined, into: WeakSet<Token>) {
-	for (const token of tokens ?? []) {
-		if (token.type === "codespan") into.add(token);
-		if ("tokens" in token) collectCodespans(token.tokens, into);
-	}
-}
-
-/** Turns inline code holding an absolute /workspace path into a file link. */
-function linkWorkspaceCodeTokens(tokens: Token[]) {
-	const skip = new WeakSet<Token>();
-	marked.walkTokens(tokens, (token) => {
-		if (token.type === "link") {
-			collectCodespans(token.tokens, skip);
-			return;
-		}
-		if (token.type !== "codespan" || skip.has(token)) return;
-		const path = token.text;
-		if (!WORKSPACE_CODE_PATH_PATTERN.test(path)) return;
-		if (!normalizeWorkspaceFileLinkTarget(path)) return;
-
-		const code = { type: "codespan", raw: token.raw, text: path } as Token;
-		skip.add(code);
-		Object.assign(token, {
-			type: "link",
-			href: path,
-			title: null,
-			tokens: [code],
-		});
-	});
-}
-
 function normalizeNestedMarkdownCodeFences(source: string) {
 	const lines = source.split(/(\r?\n)/);
 	const output: string[] = [];
@@ -792,7 +758,6 @@ async function renderMarkdownHtml(
 		enhanceCohubAskTokens(tokens);
 	}
 	if (!options?.streamingSafe || options.diagrams) enhanceMermaidTokens(tokens);
-	linkWorkspaceCodeTokens(tokens);
 	if (options?.highlight !== false) await highlightCodeTokens(tokens);
 	return marked.parser(tokens, markedOptions);
 }
