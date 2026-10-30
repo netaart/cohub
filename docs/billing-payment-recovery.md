@@ -6,7 +6,7 @@ a successful cancellation request does not establish paid access. See the
 [current Billing contract](https://git.talesofai.com/talesofai/talesofai-billing/src/branch/codex/stripe-recovery-p0/.agents/docs/current/stripe-payment-recovery.md).
 
 Both direct consumers pin the registry-published
-`@talesofai-billing/sdk@1.30.0-beta.0`. The lockfile contains its registry integrity;
+`@talesofai-billing/sdk@1.30.0`. The lockfile contains its registry integrity;
 no local SDK artifact is used.
 
 ## Purchase behavior
@@ -66,4 +66,4 @@ Checkout context and survives reload; in-memory state covers unavailable storage
   Logto acceptance and deployment remain separate from these local checks.
 
 Registry-based builds, type checks and tests are recorded on
-[Cohub WIP PR #415](https://github.com/netaart/cohub/pull/415).
+[Cohub PR #415](https://github.com/netaart/cohub/pull/415).
