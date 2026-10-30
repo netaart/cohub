@@ -367,8 +367,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0(supports-color@10.2.2)
       '@neta-art/generation':
-        specifier: 0.2.10
-        version: 0.2.10
+        specifier: 0.2.12
+        version: 0.2.12
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -779,8 +779,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0(supports-color@10.2.2)
       '@neta-art/generation':
-        specifier: 0.2.10
-        version: 0.2.10
+        specifier: 0.2.12
+        version: 0.2.12
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -1078,8 +1078,8 @@ importers:
         specifier: workspace:*
         version: link:../sdk
       '@neta-art/generation':
-        specifier: 0.2.10
-        version: 0.2.10
+        specifier: 0.2.12
+        version: 0.2.12
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -1191,8 +1191,8 @@ importers:
         specifier: ^2.1.0
         version: 2.1.0(@opentelemetry/api@1.9.1)(drizzle-orm@0.45.4(@cloudflare/workers-types@5.20261009.1)(@electric-sql/pglite@0.5.8)(@opentelemetry/api@1.9.1)(kysely@0.28.17)(postgres@3.4.9))
       '@neta-art/generation':
-        specifier: 0.2.10
-        version: 0.2.10
+        specifier: 0.2.12
+        version: 0.2.12
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -1278,8 +1278,8 @@ importers:
   packages/protocol:
     dependencies:
       '@neta-art/generation':
-        specifier: 0.2.10
-        version: 0.2.10
+        specifier: 0.2.12
+        version: 0.2.12
       es-module-lexer:
         specifier: 2.3.2
         version: 2.3.2
@@ -3541,8 +3541,8 @@ packages:
     os: [linux]
     libc: [glibc]
 
-  '@neta-art/generation@0.2.10':
-    resolution: {integrity: sha512-qMrXN7u1mtO4nKhyk0CjVJgGDl3jW7BW2+DxbduVUJPMg26jnM+5v8ari37WcYIz2poZpKPkS2FR/YqjKayCfw==}
+  '@neta-art/generation@0.2.12':
+    resolution: {integrity: sha512-0iEHuG3BZdUICQZyXVRpb0uFe4NDN6uHmvkepgpfLCOdRg6LPOn9grS78Kxe9nP01MyAYrwl90MB4O3JpmIEDw==}
     engines: {node: '>=20.0.0'}
     hasBin: true
 
@@ -9436,7 +9436,7 @@ snapshots:
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
 
-  '@neta-art/generation@0.2.10':
+  '@neta-art/generation@0.2.12':
     dependencies:
       '@openrouter/sdk': 1.4.25
       '@typesafe-ai/sdk': 0.6.0

@@ -119,8 +119,6 @@ export function pendingTaskPosition(
 	};
 }
 
-const QWEN_AUDIO_31_TTS_MODELS = new Set(["qwen-audio-3.1-tts-flash"]);
-
 export function normalizeGenerationReferenceUrl(value: string): string | null {
 	try {
 		const url = new URL(value.trim());
@@ -270,12 +268,6 @@ export function validateBoardGeneration(input: {
 		}
 	}
 
-	if (
-		QWEN_AUDIO_31_TTS_MODELS.has(model.model) &&
-		Array.from(input.prompt.trim()).length < 15
-	) {
-		return "Enter at least 15 characters for this model.";
-	}
 	if (textCount === 0 && references.length === 0) return "Add an input.";
 	return null;
 }
