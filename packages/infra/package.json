@@ -109,7 +109,7 @@
   "dependencies": {
     "@cohub/protocol": "workspace:*",
     "@kubiks/otel-drizzle": "^2.1.0",
-    "@neta-art/generation": "0.2.8",
+    "@neta-art/generation": "0.2.10",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.223.0",
     "@opentelemetry/instrumentation": "^0.223.0",

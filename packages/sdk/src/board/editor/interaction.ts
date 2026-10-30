@@ -121,6 +121,7 @@ export type BoardInteraction =
 			color: string;
 			geometry: string;
 	  }
+	| { type: "creatingText"; start: WorldPoint; current: WorldPoint; pointerType: string }
 	| {
 			type: "draggingArrowHandle";
 			arrowId: string;
@@ -411,7 +412,7 @@ export function createInteractionModule(ctx: EditorContext) {
 	function pressCard(event: BoardPointerEvent): boolean {
 		if (!plainPrimary(event)) return false;
 		const item = ctx.query.pickAt(event.world, event.pointerType);
-		if (!item || (!options.readonly && state.selection.includes(item.id)) || !opensOnTap(item)) return false;
+		if (!item || (!options.readonly && ctx.selection.carries(item.id)) || !opensOnTap(item)) return false;
 		state.interaction = {
 			type: "pressing",
 			itemId: item.id,
@@ -601,12 +602,12 @@ export function createInteractionModule(ctx: EditorContext) {
 				};
 				return;
 			case "text":
-				ctx.creation.beginTextDraft(event.world);
+				if (!state.editingId) state.interaction = { type: "creatingText", start: event.world, current: event.world, pointerType: event.pointerType };
 				return;
 		}
 
 		const item = ctx.query.pickAt(event.world, event.pointerType);
-		const onSelected = touch && item !== null && state.selection.includes(item.id);
+		const onSelected = touch && item !== null && ctx.selection.carries(item.id);
 		const port = onSelected ? null : connectionPortAt(event.world, event.pointerType);
 		if (port) {
 			state.interaction = arrowGesture(port.point, event.world, port.itemId, port.side);
@@ -664,9 +665,9 @@ export function createInteractionModule(ctx: EditorContext) {
 		if (additive) {
 			if (selected) tap = { at, select: selection.filter((id) => id !== item.id) };
 			else state.selection = [...selection, item.id];
-		} else if (!selected) state.selection = [item.id];
-		else if (selection.length > 1) tap = { at, select: [item.id] };
-		if (plainPrimary(event) && state.selection.length === 1 && opensOnTap(item)) tap = { at, activate: item.id };
+		} else if (!ctx.selection.carries(item.id)) state.selection = [item.id];
+		else if (!selected || selection.length > 1) tap = { at, select: [item.id] };
+		if (plainPrimary(event) && opensOnTap(item) && (!selected || selection.length === 1)) tap = { at, activate: item.id };
 		translateSelection(event, tap);
 	}
 
@@ -872,6 +873,7 @@ export function createInteractionModule(ctx: EditorContext) {
 				return;
 			}
 			case "creatingBox":
+			case "creatingText":
 				state.interaction = { ...interaction, current: event.world };
 				return;
 		}
@@ -968,6 +970,9 @@ export function createInteractionModule(ctx: EditorContext) {
 				break;
 			case "creatingBox":
 				ctx.creation.commitBox(gesture);
+				break;
+			case "creatingText":
+				ctx.creation.commitTextGesture(gesture);
 				break;
 		}
 		ctx.remote.flushPending();

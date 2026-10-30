@@ -14,7 +14,7 @@ import type {
 } from "$lib/board/board-activity";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
 import { isBoardFile } from "$lib/board/board-file";
-import { createLazyModuleLoader } from "$lib/lazy-module";
+import { createLazyModuleLoader, pending } from "$lib/lazy-module";
 
 export type BoardRuntimeViewState = {
 	path: string;
@@ -48,6 +48,7 @@ export type BoardRuntimeProps = {
 	launch?: BoardLaunch | null;
 	shareUrl?: () => string;
 	active?: boolean;
+	keysWhenUsed?: boolean;
 	syncError?: string | null;
 	isMobile?: boolean;
 	collaborators?: Map<string, BoardCollaboratorProfile>;
@@ -68,8 +69,10 @@ export type BoardRuntimeProps = {
 	onStageReady?: (stage: BoardStage | null) => void;
 };
 
-const loadCohubPixiRuntime = createLazyModuleLoader(
-	() => import("$lib/components/board/BoardPanel.svelte"),
+const loadCohubPixiRuntime = createLazyModuleLoader(() =>
+	import.meta.env.SSR
+		? pending()
+		: import("$lib/components/board/BoardPanel.svelte"),
 );
 
 export const cohubPixiRuntime = {

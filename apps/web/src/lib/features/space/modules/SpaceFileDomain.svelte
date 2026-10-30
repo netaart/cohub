@@ -197,6 +197,8 @@ export type SpaceFileDomainProps = {
 		command: import("@cohub/protocol").BoardPlaybackCommand,
 	) => Promise<import("@cohub/protocol").BoardPlaybackSnapshot | null>;
 	onRetryInlineBoardSave: (boardId: string) => void | Promise<void>;
+	newChatBackgroundBoardPath: string | null;
+	onToggleNewChatBackground?: (path: string, enabled: boolean) => void;
 	onTogglePreviewFocusMode: () => void | Promise<void>;
 	onTogglePreviewMain: () => void | Promise<void>;
 	treeResize: ResizeStart;
@@ -348,6 +350,8 @@ let {
 	onCommitInlineBoard,
 	onPlayInlineBoard,
 	onRetryInlineBoardSave,
+	newChatBackgroundBoardPath,
+	onToggleNewChatBackground,
 	onTogglePreviewFocusMode,
 	onTogglePreviewMain,
 	treeResize,
@@ -578,6 +582,8 @@ function previewContentOut(node: Element) {
 		onOpenTask={onOpenTask}
 		onOpenApp={onOpenApp}
 		{onOpenSession}
+		newChatBackgroundPath={newChatBackgroundBoardPath}
+		{onToggleNewChatBackground}
 		/>
 	</div>
 {/each}

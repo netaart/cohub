@@ -7,6 +7,7 @@ import {
 } from "svelte";
 import { mediaLightbox } from "$lib/components/media-lightbox.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
+import { createLazyModuleLoader } from "$lib/lazy-module";
 import { m } from "$lib/paraglide/messages.js";
 import { insertComposerSnippet } from "$lib/stores/composer-insert";
 import {
@@ -45,8 +46,12 @@ const {
 
 let markdownEl = $state<HTMLElement | null>(null);
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
-let themeObserver: MutationObserver | null = null;
 let workspaceAssetRun = 0;
+let mermaidRenderer: typeof import("$lib/mermaid-renderer") | null = null;
+
+const loadMermaidRenderer = createLazyModuleLoader(
+	() => import("$lib/mermaid-renderer"),
+);
 
 const mountedAudioPlayers: {
 	mount: HTMLElement;
@@ -99,9 +104,9 @@ $effect(() => {
 	// Sweep even while streaming: {@html} can drop mounted players when the
 	// stable region is cleared, and Svelte won't dispose those instances.
 	sweepDisconnectedAudioPlayers();
+	renderDiagrams();
 	if (_streamingLive) return;
 	enhanceCodeBlocks();
-	renderMermaid();
 	enhanceAudioPlayers();
 	checkVideoPosters();
 });
@@ -341,55 +346,36 @@ function enhanceAudioPlayers() {
 	}
 }
 
-function markMermaidLoadError(error: unknown) {
-	console.warn("[mermaid] renderer chunk failed to load", { error });
-	if (!markdownEl) return;
-	for (const element of markdownEl.querySelectorAll<HTMLElement>(
-		".markdown-mermaid",
-	)) {
-		if (element.dataset.mermaidRendered === "true") continue;
-		element.dataset.mermaidRendered = "true";
-		element.classList.add("is-unavailable");
-		element.replaceChildren();
-
-		const message = document.createElement("div");
-		message.className = "markdown-mermaid-error";
-		message.textContent = "Diagram preview unavailable";
-		element.appendChild(message);
-
-		if (error instanceof Error && error.message) {
-			element.title = error.message;
-			const detail = document.createElement("div");
-			detail.className = "markdown-mermaid-error-detail";
-			detail.textContent = error.message;
-			element.appendChild(detail);
-		}
+function renderDiagrams() {
+	const frames = markdownEl?.querySelectorAll<HTMLElement>(
+		".markdown-mermaid:not([data-state])",
+	);
+	if (!frames?.length) {
+		mermaidRenderer?.releaseDetachedDiagrams();
+		return;
 	}
-}
-
-function renderMermaid() {
-	if (!markdownEl) return;
-	void import("$lib/mermaid-renderer")
-		.then(({ renderMermaidDiagrams }) =>
-			markdownEl ? renderMermaidDiagrams(markdownEl) : undefined,
-		)
-		.catch((error) => markMermaidLoadError(error));
-}
-
-function resetMermaidDiagrams() {
-	if (!markdownEl) return;
-	for (const element of markdownEl.querySelectorAll<HTMLElement>(
-		".markdown-mermaid",
-	)) {
-		element.dataset.mermaidRendered = "false";
-		delete element.dataset.mermaidRenderToken;
-		delete element.dataset.mermaidScale;
-		element.classList.remove("is-unavailable");
-		element.removeAttribute("title");
-		element.innerHTML =
-			'<div class="markdown-mermaid-loading">Rendering diagram…</div>';
-	}
-	renderMermaid();
+	const locale = getLocale();
+	const labels = {
+		zoomIn: m.media_zoom_in({}, { locale }),
+		zoomOut: m.media_zoom_out({}, { locale }),
+		resetZoom: m.media_reset_zoom({}, { locale }),
+		expand: m.markdown_diagram_expand({}, { locale }),
+		download: m.media_download({}, { locale }),
+		unavailable: m.markdown_diagram_unavailable({}, { locale }),
+	};
+	void loadMermaidRenderer()
+		.then((renderer) => {
+			mermaidRenderer = renderer;
+			return renderer.renderMermaidDiagrams(frames, labels);
+		})
+		.catch((error) => {
+			console.warn("[mermaid] renderer failed to load", { error });
+			for (const frame of frames) {
+				if (frame.dataset.state) continue;
+				frame.dataset.state = "error";
+				frame.textContent = labels.unavailable;
+			}
+		});
 }
 
 function enhanceCodeBlocks() {
@@ -598,23 +584,17 @@ onMount(() => {
 	el.addEventListener("click", onClick);
 	// Image `error` does not bubble; capture it to fall back from CDN variants.
 	el.addEventListener("error", onImageError, true);
-	themeObserver = new MutationObserver(() => resetMermaidDiagrams());
-	themeObserver.observe(document.documentElement, {
-		attributeFilter: ["data-theme"],
-	});
 
 	return () => {
 		el.removeEventListener("pointerdown", onPointerDown);
 		el.removeEventListener("click", onClick);
 		el.removeEventListener("error", onImageError, true);
-		themeObserver?.disconnect();
-		themeObserver = null;
+		mermaidRenderer?.releaseDetachedDiagrams();
 	};
 });
 
 onDestroy(() => {
 	if (copyResetTimer) clearTimeout(copyResetTimer);
-	themeObserver?.disconnect();
 	for (const { instance } of mountedAudioPlayers) {
 		unmountComponent(instance);
 	}

@@ -11,7 +11,7 @@
 	},
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build && node ./scripts/generate-worker-entry-deps.mjs && node ./scripts/ensure-i18n.mjs --stamp",
+		"build": "vite build && node ./scripts/generate-worker-entry-deps.mjs && node ./scripts/check-worker-deps.mjs && node ./scripts/ensure-i18n.mjs --stamp",
 		"generate:board-themes": "node --import ./scripts/register-alias.mjs scripts/board-themes.ts",
 		"i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --strategy globalVariable baseLocale --emit-ts-declarations --silent",
 		"lint": "biome lint .",
@@ -53,8 +53,8 @@
 		"isomorphic-dompurify": "3.23.0",
 		"lucide-svelte": "^1.0.1",
 		"marked": "18.0.11",
-		"mermaid": "^11.17.2",
 		"pdfjs-dist": "6.3.289",
+		"pele": "^1.12.0",
 		"pixi.js": "^8.20.1",
 		"remend": "^1.3.1",
 		"shiki": "^4.4.3",

@@ -10,13 +10,10 @@ import type {
 	SpaceFsPreparingFile,
 } from "@neta-art/cohub";
 import { HttpError } from "@neta-art/cohub";
-import { type BoardDocument, parseBoardManifest } from "@neta-art/cohub/board";
-import {
-	type BoardReplica,
-	type BoardReplicaState,
-	type BoardReplicaStorage,
-	createBoardReplica,
-	createIndexedDbBoardReplicaStorage,
+import type { BoardDocument } from "@neta-art/cohub/board";
+import type {
+	BoardReplica,
+	BoardReplicaState,
 } from "@neta-art/cohub/board/replica";
 import {
 	BOARD_AUTOMATION_ACTIVE_MS,
@@ -26,15 +23,17 @@ import {
 	createBoardAutomationActivity,
 	mergeBoardAutomationActivity,
 } from "$lib/board/board-activity";
-import { resolveBoardManifestText } from "$lib/board/board-manifest-text";
+import { readBoardManifestId } from "$lib/board/board-manifest-text";
+import {
+	acquireBoardReplica,
+	playBoardReplica,
+} from "$lib/board/board-replica-registry";
 import { boardPathMatchesTarget } from "$lib/board/board-sync-policy";
-import { getCacheUserKeyAsync } from "$lib/cache/keys";
 import {
 	readBoardManifestCache,
 	writeBoardManifestCache,
 } from "$lib/cache/repositories/board-repo";
 import { sdk } from "$lib/sdk";
-import { tryResolveTextFileResponse } from "$lib/space-file-text";
 
 type BoardFileResponse = SpaceFsFileResponse | SpaceFsPreparingFile;
 
@@ -62,23 +61,6 @@ type BoardPreviewControllerOptions = {
 	onClearSavePendingSoon?: (path: string) => void;
 };
 
-function boardReplicaStorage(
-	spaceId: string,
-	boardId: string,
-): BoardReplicaStorage {
-	const ready = getCacheUserKeyAsync().then((userKey) =>
-		createIndexedDbBoardReplicaStorage({ userKey, spaceId, boardId }),
-	);
-	return {
-		listPending: () => ready.then((storage) => storage.listPending()),
-		putPending: (entry) => ready.then((storage) => storage.putPending(entry)),
-		deletePending: (id) => ready.then((storage) => storage.deletePending(id)),
-		readDocument: () => ready.then((storage) => storage.readDocument()),
-		writeDocument: (version, document) =>
-			ready.then((storage) => storage.writeDocument(version, document)),
-	};
-}
-
 export function createBoardWindowController(
 	options: BoardPreviewControllerOptions,
 ) {
@@ -88,7 +70,7 @@ export function createBoardWindowController(
 	let nextRequestToken = 0;
 	const replicas = new Map<
 		string,
-		{ replica: BoardReplica; unsubscribe: () => void }
+		{ replica: BoardReplica; release: () => void }
 	>();
 	const manifestRefreshByPath = new Map<string, Promise<void>>();
 	const manifestRefreshRequested = new Set<string>();
@@ -196,10 +178,7 @@ export function createBoardWindowController(
 		if (existing) return existing.replica;
 		const spaceId = options.getSpaceId();
 		const client = sdk.space(spaceId).board(boardId);
-		const replica = createBoardReplica({
-			remote: client,
-			storage: boardReplicaStorage(spaceId, boardId),
-		});
+		const { replica, release } = acquireBoardReplica(spaceId, boardId);
 		const stopState = replica.subscribe((state) =>
 			adoptReplicaState(boardId, state),
 		);
@@ -222,20 +201,19 @@ export function createBoardWindowController(
 		});
 		replicas.set(boardId, {
 			replica,
-			unsubscribe: () => {
+			release: () => {
 				stopState();
 				stopActivity();
+				release();
 			},
 		});
-		void replica.start();
 		return replica;
 	}
 
 	function releaseReplica(boardId: string) {
 		const entry = replicas.get(boardId);
 		if (!entry) return;
-		entry.unsubscribe();
-		entry.replica.dispose();
+		entry.release();
 		replicas.delete(boardId);
 		clearActivitiesForBoard(boardId);
 	}
@@ -253,16 +231,7 @@ export function createBoardWindowController(
 	}
 
 	async function readManifest(path: string): Promise<string> {
-		const rawFile = await options.readFile(path);
-		if (!rawFile || typeof rawFile !== "object" || !("content" in rawFile))
-			throw new Error("Board manifest is being prepared. Retry in a moment.");
-		const { file, error } = await tryResolveTextFileResponse(rawFile);
-		if (error) throw new Error(error);
-		const content = resolveBoardManifestText(file);
-		if (content == null) throw new Error("Board manifest must be a text file.");
-		const manifest = parseBoardManifest(content);
-		if (!manifest) throw new Error("Board manifest is invalid.");
-		return manifest.boardId;
+		return readBoardManifestId(await options.readFile(path));
 	}
 
 	function attachBoard(path: string, boardId: string) {
@@ -469,34 +438,8 @@ export function createBoardWindowController(
 		return replicas.get(boardId)?.replica.retry() ?? Promise.resolve();
 	}
 
-	async function playBoard(boardId: string, command: BoardPlaybackCommand) {
-		const board = sdk.space(options.getSpaceId()).board(boardId);
-		const playback = await (async () => {
-			switch (command.type) {
-				case "play":
-					return board.play(command.animationId, {
-						...(command.position === undefined
-							? {}
-							: { position: command.position }),
-						...(command.timeScale === undefined
-							? {}
-							: { timeScale: command.timeScale }),
-						...(command.seed ? { seed: command.seed } : {}),
-					});
-				case "pause":
-					return board.pause();
-				case "resume":
-					return board.resume();
-				case "seek":
-					return board.seek(command.position);
-				case "next":
-					return board.next();
-				case "stop":
-					return board.stop();
-			}
-		})();
-		replicas.get(boardId)?.replica.receivePlayback(playback);
-		return playback;
+	function playBoard(boardId: string, command: BoardPlaybackCommand) {
+		return playBoardReplica(options.getSpaceId(), boardId, command);
 	}
 
 	function dispose() {

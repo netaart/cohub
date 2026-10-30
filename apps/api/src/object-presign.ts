@@ -18,6 +18,7 @@ const hexHmac = (key: Buffer | string, value: string) => createHmac("sha256", ke
 const toAmzDate = (date: Date) => date.toISOString().replace(/[:-]|\.\d{3}/g, "");
 const toDateStamp = (date: Date) => toAmzDate(date).slice(0, 8);
 const encodePath = (value: string) => value.split("/").map(encodeURIComponent).join("/");
+const canonicalHeaderValue = (value: string) => value.trim().replace(/\s+/g, " ");
 
 const signingKey = (secret: string, dateStamp: string, region: string) => {
   const kDate = hmac(`AWS4${secret}`, dateStamp);
@@ -93,7 +94,7 @@ const createPresignedObjectUrl = (
     .join("&");
   const canonicalHeaders = Object.entries(headers)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}:${value}\n`)
+    .map(([key, value]) => `${key}:${canonicalHeaderValue(value)}\n`)
     .join("");
   const canonicalRequest = [
     method,

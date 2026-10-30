@@ -76,6 +76,10 @@ import {
 	regenerationRequestFromTaskRun,
 } from "$lib/board/board-generation";
 import type { BoardStageExportBridge } from "$lib/board/board-image-export";
+import {
+	boardReceivesKeys,
+	registerBoardPanel,
+} from "$lib/board/board-keyboard";
 import { opensInPlace } from "$lib/board/board-media-playback";
 import { createBoardModelPreviews } from "$lib/board/board-model";
 import {
@@ -136,6 +140,7 @@ const {
 	launch = null,
 	shareUrl,
 	active = true,
+	keysWhenUsed = false,
 	syncError = null,
 	isMobile = false,
 	collaborators = new Map(),
@@ -357,7 +362,7 @@ function pasteText(text: string) {
 
 function handlePaste(event: ClipboardEvent) {
 	if (
-		!active ||
+		!receivesKeys() ||
 		!editable ||
 		presenting ||
 		generationOpen ||
@@ -699,6 +704,12 @@ const hasAnimations = $derived(Object.keys(editor.animations).length > 0);
 const hasFrames = $derived(editor.frames.length > 0);
 const presenting = $derived(editor.frameView?.present ?? false);
 let panel: HTMLDivElement | null = $state(null);
+
+$effect(() => (panel ? registerBoardPanel(panel) : undefined));
+
+function receivesKeys() {
+	return active && boardReceivesKeys(panel, keysWhenUsed);
+}
 const presentBackdrop = `#${BOARD_PRESENT_BACKDROP.toString(16).padStart(6, "0")}`;
 
 $effect(() => {
@@ -985,7 +996,7 @@ function runHostCommand(command: BoardKeyCommand): boolean {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-	if (!active || generationOpen || replayOpen) return;
+	if (!receivesKeys() || generationOpen || replayOpen) return;
 	if (linkRequest) {
 		if (event.key === "Escape") {
 			event.preventDefault();

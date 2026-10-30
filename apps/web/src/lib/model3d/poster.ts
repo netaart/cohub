@@ -1,4 +1,5 @@
 import { PerspectiveCamera } from "three";
+import { loadModelSource } from "./load";
 import type { ModelSource } from "./source";
 import {
 	createModelRenderer,
@@ -59,7 +60,7 @@ export async function renderModelStill(
 	options: { maxBytes?: number } = {},
 ): Promise<ImageBitmap> {
 	await idle();
-	const model = await source.load({
+	const model = await loadModelSource(source, {
 		signal: AbortSignal.timeout(LOAD_TIMEOUT_MS),
 		maxBytes: options.maxBytes,
 	});

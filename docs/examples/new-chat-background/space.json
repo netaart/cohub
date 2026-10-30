@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "ui": {
+    "newChat": {
+      "background": {
+        "type": "board",
+        "url": "boards/home.board#focus=cover&play=intro"
+      }
+    }
+  }
+}

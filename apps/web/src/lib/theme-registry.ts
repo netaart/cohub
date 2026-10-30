@@ -29,7 +29,6 @@ export type ThemeMetadata = {
 		| "github-light"
 		| "solarized-dark"
 		| "solarized-light";
-	mermaidVariables: Record<string, string>;
 };
 
 export type ThemeOption = {
@@ -46,13 +45,6 @@ export const THEME_REGISTRY = {
 		themeColor: "#101213",
 		isDark: true,
 		shikiTheme: "github-dark",
-		mermaidVariables: {
-			lineColor: "#5A5B66",
-			primaryColor: "#33343B",
-			primaryTextColor: "#ECEEF2",
-			secondaryColor: "#3F4048",
-			tertiaryColor: "#4E4F59",
-		},
 	},
 	light: {
 		value: "light",
@@ -61,13 +53,6 @@ export const THEME_REGISTRY = {
 		themeColor: "#FFFFFF",
 		isDark: false,
 		shikiTheme: "github-light",
-		mermaidVariables: {
-			lineColor: "#D0D1D7",
-			primaryColor: "#F2F2F5",
-			primaryTextColor: "#22232A",
-			secondaryColor: "#E8E8EC",
-			tertiaryColor: "#FFFFFF",
-		},
 	},
 	"solarized-dark": {
 		value: "solarized-dark",
@@ -76,13 +61,6 @@ export const THEME_REGISTRY = {
 		themeColor: "#011415",
 		isDark: true,
 		shikiTheme: "solarized-dark",
-		mermaidVariables: {
-			lineColor: "#4E6770",
-			primaryColor: "#12343D",
-			primaryTextColor: "#F3E9C5",
-			secondaryColor: "#173F49",
-			tertiaryColor: "#214A53",
-		},
 	},
 	"solarized-light": {
 		value: "solarized-light",
@@ -91,13 +69,6 @@ export const THEME_REGISTRY = {
 		themeColor: "#FFFADE",
 		isDark: false,
 		shikiTheme: "solarized-light",
-		mermaidVariables: {
-			lineColor: "#D9CC9E",
-			primaryColor: "#F6EFCF",
-			primaryTextColor: "#3A3524",
-			secondaryColor: "#EFE4BC",
-			tertiaryColor: "#FDF6E3",
-		},
 	},
 	"neta-studio": {
 		value: "neta-studio",
@@ -106,13 +77,6 @@ export const THEME_REGISTRY = {
 		themeColor: "#050605",
 		isDark: true,
 		shikiTheme: "github-dark",
-		mermaidVariables: {
-			lineColor: "#3A3836",
-			primaryColor: "#1A191A",
-			primaryTextColor: "#F8F1E5",
-			secondaryColor: "#252325",
-			tertiaryColor: "#131216",
-		},
 	},
 	"neta-pixel": {
 		value: "neta-pixel",
@@ -121,13 +85,6 @@ export const THEME_REGISTRY = {
 		themeColor: "#FFFFFF",
 		isDark: false,
 		shikiTheme: "github-light",
-		mermaidVariables: {
-			lineColor: "#B9B9BA",
-			primaryColor: "#F6F6F6",
-			primaryTextColor: "#161718",
-			secondaryColor: "#ECECED",
-			tertiaryColor: "#FFFFFF",
-		},
 	},
 	"neta-pixel-dark": {
 		value: "neta-pixel-dark",
@@ -136,13 +93,6 @@ export const THEME_REGISTRY = {
 		themeColor: "#0B0C0D",
 		isDark: true,
 		shikiTheme: "github-dark",
-		mermaidVariables: {
-			lineColor: "#3A3C40",
-			primaryColor: "#242527",
-			primaryTextColor: "#F6F6F6",
-			secondaryColor: "#1C1D1F",
-			tertiaryColor: "#161718",
-		},
 	},
 } satisfies Record<ResolvedTheme, ThemeMetadata>;
 

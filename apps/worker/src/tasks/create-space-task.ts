@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import type { Job } from "bullmq";
 import type { TaskPayload } from "@cohub/protocol/task";
 import { registerTask } from "./registry.js";
+import { markWorkspaceChanged } from "../workspace-usage.js";
 import { db } from "../db.js";
 import { checkpoints, spaces } from "@cohub/db";
 import { checkpointForkReference, spaceForkReference } from "@cohub/core/references";
@@ -310,4 +311,8 @@ const createSpaceHandler = async (job: Job) => {
   }
 };
 
-registerTask("create_space", createSpaceHandler);
+// Bootstrap writes the workspace directly, so it is re-measured once settled.
+registerTask("create_space", (job) => createSpaceHandler(job).finally(() => {
+  const spaceId = (job.data as TaskPayload).spaceId;
+  if (spaceId) return markWorkspaceChanged(spaceId);
+}));

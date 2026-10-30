@@ -9,7 +9,6 @@ import {
 } from "@neta-art/cohub/board";
 import type { BoardModelPreviews } from "@neta-art/cohub/board/stage";
 import {
-	createModelSource,
 	fetchModelBytes,
 	type ModelSource,
 	remoteReferences,
@@ -32,7 +31,7 @@ function cardModelSource(
 		source.kind === "url"
 			? async () => source.value
 			: async () => (await assetSource.resolveFile(source.value))?.url ?? null;
-	return createModelSource({
+	return {
 		key: card.key,
 		name: card.name,
 		format: card.format,
@@ -48,7 +47,7 @@ function cardModelSource(
 				: workspaceReferences(source.value, (path) =>
 						assetSource.resolveFile(path).then((file) => file?.url ?? null),
 					),
-	});
+	};
 }
 
 export function boardModelSource(

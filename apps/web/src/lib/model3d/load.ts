@@ -15,18 +15,20 @@ import {
 	type Object3D,
 } from "three";
 import type { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { materialsOf } from "./studio";
+import {
+	ensureWithin,
+	fetchModelBytes,
+	type ModelLoadOptions,
+	type ModelSource,
+	type ResolveReference,
+} from "./source";
+import { disposeModel, materialsOf } from "./studio";
 
 export type LoadedModel = {
 	root: Object3D;
 	animations: AnimationClip[];
 	missing: string[];
 };
-
-export type ResolveReference = (
-	reference: string,
-	relativeTo?: string,
-) => Promise<string | null>;
 
 type LoadInput = {
 	format: ModelFormat;
@@ -289,4 +291,73 @@ const LOADERS: Record<ModelFormat, (input: LoadInput) => Promise<LoadedModel>> =
 
 export function loadModel(input: LoadInput): Promise<LoadedModel> {
 	return LOADERS[input.format](input);
+}
+
+export async function loadModelSource(
+	{ format, size, read, references }: ModelSource,
+	options: ModelLoadOptions,
+): Promise<LoadedModel> {
+	options.signal.throwIfAborted();
+	if (size !== null) ensureWithin(size, options.maxBytes);
+	const controller = new AbortController();
+	const signal = AbortSignal.any([options.signal, controller.signal]);
+	const urls: string[] = [];
+	let totalBytes = 0;
+	const consumeBytes = (bytes: number) => {
+		totalBytes += bytes;
+		try {
+			ensureWithin(totalBytes, options.maxBytes);
+		} catch (error) {
+			controller.abort(error);
+			throw error;
+		}
+	};
+	const resolveReference = references(signal);
+	const resources = new Map<string, Promise<string>>();
+	const load = async () => {
+		const bytes = await read({ ...options, signal });
+		signal.throwIfAborted();
+		consumeBytes(bytes.byteLength);
+		const model = await loadModel({
+			format,
+			bytes,
+			resolveReference: async (reference, relativeTo) => {
+				signal.throwIfAborted();
+				const url = await resolveReference(reference, relativeTo);
+				if (!url) return null;
+				let resource = resources.get(url);
+				if (!resource) {
+					resource = fetchModelBytes(url, {
+						signal,
+						maxBytes: options.maxBytes,
+						consumeBytes,
+					}).then((data) => {
+						signal.throwIfAborted();
+						const local = URL.createObjectURL(new Blob([data]));
+						urls.push(local);
+						return local;
+					});
+					resources.set(url, resource);
+				}
+				return resource;
+			},
+		});
+		if (signal.aborted) {
+			disposeModel(model.root);
+			signal.throwIfAborted();
+		}
+		return model;
+	};
+	let onAbort = () => {};
+	const aborted = new Promise<never>((_, reject) => {
+		onAbort = () => reject(signal.reason);
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
+	try {
+		return await Promise.race([load(), aborted]);
+	} finally {
+		signal.removeEventListener("abort", onAbort);
+		controller.abort();
+		for (const url of urls) URL.revokeObjectURL(url);
+	}
 }

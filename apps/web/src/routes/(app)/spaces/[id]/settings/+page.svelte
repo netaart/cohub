@@ -2,7 +2,9 @@
 import {
 	type DefaultSpaceModDefinition,
 	getDefaultSpaceModsForEnv,
+	isWorkspaceUsage,
 	normalizeCohubRuntimeEnv,
+	WORKSPACE_USAGE_UPDATED_EVENT,
 } from "@cohub/protocol";
 import type {
 	AppRecord,
@@ -62,6 +64,7 @@ import Sheet from "$lib/components/Sheet.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import UploadProgress from "$lib/components/UploadProgress.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
+import { subscribeSpaceChannel } from "$lib/features/session-chat/space-channel";
 import SandboxSettings from "$lib/features/space-settings/SandboxSettings.svelte";
 import SettingsHeading from "$lib/features/space-settings/SettingsHeading.svelte";
 import SettingsRow, {
@@ -1025,6 +1028,20 @@ function bindScrollSpy(main: HTMLElement | null) {
 }
 
 $effect(() => {
+	if (!browser || !spaceId) return;
+	const id = spaceId;
+	return subscribeSpaceChannel(id, (event) => {
+		if (event.type !== WORKSPACE_USAGE_UPDATED_EVENT) return;
+		const usage = (event.payload as { workspaceUsage?: unknown })
+			.workspaceUsage;
+		const current = space;
+		if (!isWorkspaceUsage(usage) || !current || current.id !== id) return;
+		space = { ...current, workspaceUsage: usage };
+		cacheSpaceRecordSoon(space);
+	});
+});
+
+$effect(() => {
 	void loadPage();
 });
 
@@ -1431,7 +1448,7 @@ $effect(() => {
 						</section>
 
 						<section id={sectionElementId("sandbox")} class="-scroll-mt-4 border-t border-border-subtle pt-10">
-							<SandboxSettings settings={sandboxSettings} canManage={canManageSpaceSandbox} />
+							<SandboxSettings settings={sandboxSettings} canManage={canManageSpaceSandbox} usage={space?.workspaceUsage} />
 						</section>
 					</div>
 				{/if}

@@ -133,9 +133,11 @@ import { sdk } from "$lib/sdk";
 import {
 	activateSpaceConfig,
 	deactivateSpaceConfig,
+	emitSpaceBoardFileChanged,
 	isSpaceConfigPath,
 	refreshSpaceConfig,
 	type SpaceConfig,
+	setNewChatBoardBackground,
 	subscribeSpaceConfig,
 	subscribeSpaceConfigBackgroundAction,
 } from "$lib/space-config";
@@ -1553,6 +1555,24 @@ const activeSessionState = $derived(sessionChat.activeSessionState);
 const newChatBackground = $derived(
 	spaceConfig?.ui?.newChat?.background ?? null,
 );
+const newChatBackgroundBoardPath = $derived(
+	newChatBackground?.type === "board" ? newChatBackground.source.path : null,
+);
+
+async function toggleNewChatBackground(path: string, enabled: boolean) {
+	const locale = getLocale();
+	try {
+		await setNewChatBoardBackground(spaceId, path, enabled, () =>
+			confirm(m.newchat_bg_replace_confirm({}, { locale })),
+		);
+	} catch (error) {
+		showWorkspaceNotice(
+			error instanceof SyntaxError
+				? m.newchat_bg_config_invalid({}, { locale })
+				: m.newchat_bg_update_failed({}, { locale }),
+		);
+	}
+}
 const shouldShowNewChatBackground = $derived(
 	Boolean(
 		newChatBackground &&
@@ -1888,6 +1908,16 @@ function scheduleSpaceFsRefresh(input: {
 		refreshThemeCss(eventSpaceId);
 	if (eventPayload.resync || spaceConfigChanged(eventPayload.changes))
 		refreshSpaceConfig(eventSpaceId);
+	const backgroundBoard = newChatBackgroundBoardPath;
+	if (
+		backgroundBoard &&
+		(eventPayload.resync ||
+			eventPayload.changes?.some(
+				(change) =>
+					change.path === backgroundBoard || change.oldPath === backgroundBoard,
+			))
+	)
+		emitSpaceBoardFileChanged(backgroundBoard);
 
 	const changes = eventPayload.changes ?? [];
 	invalidateFilePreviews(eventSpaceId, changes);
@@ -3236,6 +3266,9 @@ const spaceFileDomainProps = $derived.by<
 	onCommitInlineBoard: commitInlineBoard,
 	onPlayInlineBoard: playInlineBoard,
 	onRetryInlineBoardSave: retryInlineBoardSave,
+	newChatBackgroundBoardPath,
+	onToggleNewChatBackground:
+		canEditFiles && !activeFsReadonly ? toggleNewChatBackground : undefined,
 	onTogglePreviewFocusMode: previewLayout.toggleFocus,
 	onTogglePreviewMain: previewLayout.toggleMain,
 	treeResize: resizeFilesTree,

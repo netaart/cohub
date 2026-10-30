@@ -13,6 +13,7 @@ import Spinner from "$lib/components/Spinner.svelte";
 import { formatBytes } from "$lib/format-bytes";
 import { formatCompactNumber } from "$lib/i18n/format";
 import { getLocale } from "$lib/i18n/locale.svelte";
+import { loadModelSource } from "$lib/model3d/load";
 import type { ModelSource } from "$lib/model3d/source";
 import { disposeModel } from "$lib/model3d/studio";
 import {
@@ -114,7 +115,7 @@ $effect(() => {
 	const { signal } = controller;
 
 	void (async () => {
-		const model = await current.load({
+		const model = await loadModelSource(current, {
 			signal,
 			onProgress: (fraction) => {
 				progress = fraction;

@@ -348,8 +348,9 @@ async function handleDraftDrop(event: DragEvent) {
 			<NewChatBackground
 				background={newChatBackground}
 				spaceId={newChatBackgroundSpaceId}
-					onAppComposerChip={onNewChatBackgroundComposerChip}
-			onNavigationOpen={onNavigationOpen}
+				chromeHeight={host.chatChromeHeight}
+				onAppComposerChip={onNewChatBackgroundComposerChip}
+				onNavigationOpen={onNavigationOpen}
 			/>
 			<div class="relative z-10 flex-1 min-h-0 pointer-events-none"></div>
 		{:else if shouldShowNewChatProfile}

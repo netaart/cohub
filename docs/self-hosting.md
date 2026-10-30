@@ -120,6 +120,19 @@ channels and media tracks between a room's viewers. Set an SFU app on the API an
 rooms keep working over WebSocket events. The API schedules every room's SFU session, and the worker
 sweeps sessions whose owner left so none keeps billing.
 
+## Workspace storage usage
+
+The system worker measures each cloud workspace with [pdu](https://github.com/KSXGitHub/parallel-disk-usage)
+0.24.0 and stores the result in Postgres (`space_workspace_usage`); Space details, the CLI, and Space settings
+show it. To limit NAS load, it measures only after a sandbox has stopped and stayed quiet for 10 minutes, at
+most every 6 hours per workspace, runs one scan at a time across all workers with 4 pdu threads, and gives up
+after 20 minutes. Direct file writes while the sandbox is stopped schedule a new measurement; unchanged
+workspaces are never re-scanned. Running workspaces show their last measurement as possibly stale.
+
+The amd64 worker image includes pdu. On other architectures, install pdu 0.24.0 and set
+`WORKSPACE_USAGE_PDU_PATH`, or the worker skips workspace usage at startup. pdu runs under GNU
+coreutils `timeout`, which must be on `PATH`.
+
 ## Security reports
 
 See `SECURITY.md`. Prefer GitHub Private Vulnerability Reporting or email `dev@talesof.ai`.

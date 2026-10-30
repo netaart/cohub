@@ -962,74 +962,53 @@ body.pointer-dragging {
 }
 
 .markdown-content .markdown-mermaid-figure {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
 	margin: 1em 0;
 }
 
 .markdown-content .markdown-mermaid {
-	position: relative;
-	display: block;
-	min-height: 8rem;
+	--pele-bg: var(--bg-code, var(--bg-surface));
+	--pele-fg: var(--text-primary);
+	--pele-muted: var(--text-tertiary);
+	--pele-line: color-mix(in oklab, var(--pele-fg) 55%, var(--pele-bg));
+	--pele-surface: color-mix(in oklab, var(--pele-fg) 7%, var(--pele-bg));
+	--pele-surface-alt: color-mix(in oklab, var(--pele-fg) 3%, var(--pele-bg));
+	--pele-border: color-mix(in oklab, var(--pele-fg) 26%, var(--pele-bg));
+	--pele-accent: var(--brand);
+	--pele-critical: var(--color-error);
+	--pele-radius: 6px;
+	--pele-font: var(--font-sans);
+	--pele-font-mono: var(--font-mono);
+	display: grid;
+	grid-column: 1 / -1;
+	min-height: 6rem;
+	align-content: center;
 	overflow: hidden;
-	padding: 0;
 	border: 1px solid var(--border-subtle);
-	border-radius: 0.85rem;
-	background: color-mix(
-		in srgb,
-		var(--bg-surface-muted, var(--bg-surface)) 82%,
-		transparent
-	);
-}
-
-.markdown-content .markdown-mermaid-viewport {
-	max-width: 100%;
-	max-height: min(70vh, 42rem);
-	overflow: auto;
-	cursor: grab;
-	overscroll-behavior: contain;
-	scrollbar-width: thin;
-	touch-action: none;
-}
-
-.markdown-content .markdown-mermaid-viewport.is-panning {
-	cursor: grabbing;
-	user-select: none;
+	border-radius: 0.75rem;
+	background: var(--pele-bg);
+	color: var(--pele-fg);
 }
 
 .markdown-content .markdown-mermaid-canvas {
-	display: flex;
-	width: max-content;
-	min-width: 100%;
-	align-items: flex-start;
-	justify-content: center;
 	padding: 1rem;
 }
 
-.markdown-content .markdown-mermaid svg {
-	max-width: none;
-	height: auto;
+.markdown-content .markdown-mermaid-canvas > svg {
+	display: block;
+	margin-inline: auto;
+	border-radius: 0.375rem;
 }
 
-.markdown-content .markdown-mermaid-loading {
-	display: flex;
-	min-height: 8rem;
-	align-items: center;
-	justify-content: center;
-	color: var(--text-tertiary);
-	font-size: 0.9em;
+.markdown-content .markdown-mermaid-canvas > svg:focus-visible {
+	outline: 2px solid color-mix(in srgb, var(--brand) 45%, transparent);
+	outline-offset: 2px;
 }
 
-.markdown-content .markdown-mermaid.is-unavailable {
-	display: flex;
-	min-height: 5.5rem;
-	flex-direction: column;
-	align-items: flex-start;
-	justify-content: center;
+.markdown-content .markdown-mermaid[data-state="error"] {
 	gap: 0.35rem;
-	overflow: hidden;
 	padding: 0.9rem 1rem;
-}
-
-.markdown-content .markdown-mermaid-error {
 	color: var(--text-secondary);
 	font-size: 0.9em;
 	font-weight: 500;
@@ -1037,65 +1016,36 @@ body.pointer-dragging {
 }
 
 .markdown-content .markdown-mermaid-error-detail {
-	max-width: 100%;
-	color: var(--text-tertiary);
-	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-	font-size: 0.78em;
-	line-height: 1.4;
 	overflow: hidden;
+	color: var(--text-tertiary);
+	font-family: var(--font-mono);
+	font-size: 0.86em;
+	font-weight: 400;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.markdown-mermaid-render-host {
-	position: absolute;
-	width: 0;
-	height: 0;
-	overflow: hidden;
-	clip: rect(0, 0, 0, 0);
-	pointer-events: none;
-	visibility: hidden;
-}
-
 .markdown-content .markdown-mermaid-actions {
-	position: absolute;
-	top: 0.55rem;
-	right: 0.55rem;
-	display: inline-flex;
-	align-items: center;
-	gap: 0.2rem;
-	padding: 0.18rem;
-	border: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
-	border-radius: 0.55rem;
-	background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
-	box-shadow: 0 6px 18px color-mix(in srgb, var(--bg-primary) 18%, transparent);
-	opacity: 0;
-	transition: opacity 140ms ease;
-}
-
-.markdown-content .markdown-mermaid:hover .markdown-mermaid-actions,
-.markdown-content .markdown-mermaid:focus-within .markdown-mermaid-actions {
-	opacity: 1;
+	display: flex;
+	grid-area: 2 / 2;
+	gap: 0.125rem;
+	margin-top: 0.35rem;
 }
 
 .markdown-content .markdown-mermaid-action {
-	display: inline-flex;
-	min-width: 1.6rem;
-	height: 1.45rem;
-	align-items: center;
-	justify-content: center;
-	padding: 0 0.42rem;
+	display: grid;
+	width: 1.5rem;
+	height: 1.5rem;
+	place-items: center;
+	padding: 0;
 	border: 0;
-	border-radius: 0.38rem;
+	border-radius: 0.375rem;
 	background: transparent;
 	color: var(--text-tertiary);
-	font-size: 0.75rem;
-	font-weight: 600;
-	line-height: 1;
 	cursor: pointer;
 }
 
-.markdown-content .markdown-mermaid-action:hover,
+.markdown-content .markdown-mermaid-action:hover:not(:disabled),
 .markdown-content .markdown-mermaid-action:focus-visible {
 	background: var(--bg-hover);
 	color: var(--text-primary);
@@ -1106,12 +1056,24 @@ body.pointer-dragging {
 	outline-offset: 1px;
 }
 
-.markdown-content .markdown-mermaid-zoom-label {
-	min-width: 2.6rem;
-	font-variant-numeric: tabular-nums;
+.markdown-content .markdown-mermaid-action:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+@media (pointer: coarse) {
+	.markdown-content .markdown-mermaid-action,
+	.markdown-content .markdown-mermaid-source summary {
+		min-height: 2rem;
+	}
+
+	.markdown-content .markdown-mermaid-action {
+		width: 2rem;
+	}
 }
 
 .markdown-content .markdown-mermaid-source {
+	grid-area: 2 / 1 / 3 / -1;
 	margin: 0.35rem 0 0;
 	border: 0;
 	border-radius: 0;
@@ -1371,10 +1333,6 @@ body.pointer-dragging {
 
 	.markdown-content .markdown-mermaid-canvas {
 		padding: 0.75rem;
-	}
-
-	.markdown-content .markdown-mermaid-actions {
-		opacity: 1;
 	}
 }
 

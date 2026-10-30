@@ -44,6 +44,18 @@ test("dragging blank space inside a selected frame moves the frame and its child
 	editor.destroy();
 });
 
+test("a drag from a card inside a selected frame moves the whole selection; a click narrows to the card", () => {
+	const { editor } = board(framed);
+	editor.selectAll();
+	drag(editor, [50, 50], [90, 80]);
+	assert.deepEqual(new Set(editor.selection), new Set(["f", "r", "g"]));
+	assert.deepEqual([editor.itemById("f")?.frame.x, editor.itemById("r")?.frame.x, editor.itemById("g")?.frame.x], [40, 240, 540]);
+	assert.equal(editor.itemById("c")?.frame.y, 50);
+	drag(editor, [90, 80], [90, 80]);
+	assert.deepEqual(editor.selection, ["c"]);
+	editor.destroy();
+});
+
 test("a marquee inside a frame reaches loose cards on it but not the frames around it", () => {
 	const { editor } = board(framed);
 	drag(editor, [390, 290], [10, 10]);

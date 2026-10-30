@@ -1,6 +1,5 @@
 import { type ModelFormat, resolveModelReference } from "@cohub/protocol/fs";
 import type { SpaceFsFileResponse } from "@neta-art/cohub";
-import type { LoadedModel, ResolveReference } from "./load";
 
 export type ModelLoadOptions = {
 	signal: AbortSignal;
@@ -8,12 +7,19 @@ export type ModelLoadOptions = {
 	onProgress?: (fraction: number) => void;
 };
 
+export type ResolveReference = (
+	reference: string,
+	relativeTo?: string,
+) => Promise<string | null>;
+
+/** Kept free of three so SSR can build it; `loadModelSource` loads it on the client. */
 export type ModelSource = {
 	key: string;
 	name: string;
 	format: ModelFormat;
 	size: number | null;
-	load: (options: ModelLoadOptions) => Promise<LoadedModel>;
+	read: (options: ModelLoadOptions) => Promise<Uint8Array>;
+	references: (signal: AbortSignal) => ResolveReference;
 };
 
 export class ModelTooLargeError extends Error {
@@ -23,91 +29,8 @@ export class ModelTooLargeError extends Error {
 	}
 }
 
-function ensureWithin(size: number, maxBytes: number | undefined) {
+export function ensureWithin(size: number, maxBytes: number | undefined) {
 	if (maxBytes !== undefined && size > maxBytes) throw new ModelTooLargeError();
-}
-
-export function createModelSource(input: {
-	key: string;
-	name: string;
-	format: ModelFormat;
-	size: number | null;
-	read: (options: ModelLoadOptions) => Promise<Uint8Array>;
-	references: (signal: AbortSignal) => ResolveReference;
-}): ModelSource {
-	const { read, references, ...facts } = input;
-	return {
-		...facts,
-		async load(options) {
-			options.signal.throwIfAborted();
-			if (facts.size !== null) ensureWithin(facts.size, options.maxBytes);
-			const controller = new AbortController();
-			const signal = AbortSignal.any([options.signal, controller.signal]);
-			const urls: string[] = [];
-			let totalBytes = 0;
-			const consumeBytes = (size: number) => {
-				totalBytes += size;
-				try {
-					ensureWithin(totalBytes, options.maxBytes);
-				} catch (error) {
-					controller.abort(error);
-					throw error;
-				}
-			};
-			const resolveReference = references(signal);
-			const resources = new Map<string, Promise<string>>();
-			const load = async () => {
-				const [bytes, { loadModel }] = await Promise.all([
-					read({ ...options, signal }),
-					import("./load"),
-				]);
-				signal.throwIfAborted();
-				consumeBytes(bytes.byteLength);
-				const model = await loadModel({
-					format: facts.format,
-					bytes,
-					resolveReference: async (reference, relativeTo) => {
-						signal.throwIfAborted();
-						const url = await resolveReference(reference, relativeTo);
-						if (!url) return null;
-						let resource = resources.get(url);
-						if (!resource) {
-							resource = fetchModelBytes(url, {
-								signal,
-								maxBytes: options.maxBytes,
-								consumeBytes,
-							}).then((data) => {
-								signal.throwIfAborted();
-								const local = URL.createObjectURL(new Blob([data]));
-								urls.push(local);
-								return local;
-							});
-							resources.set(url, resource);
-						}
-						return resource;
-					},
-				});
-				if (signal.aborted) {
-					const { disposeModel } = await import("./studio");
-					disposeModel(model.root);
-					signal.throwIfAborted();
-				}
-				return model;
-			};
-			let onAbort = () => {};
-			const aborted = new Promise<never>((_, reject) => {
-				onAbort = () => reject(signal.reason);
-				signal.addEventListener("abort", onAbort, { once: true });
-			});
-			try {
-				return await Promise.race([load(), aborted]);
-			} finally {
-				signal.removeEventListener("abort", onAbort);
-				controller.abort();
-				for (const url of urls) URL.revokeObjectURL(url);
-			}
-		},
-	};
 }
 
 export async function fetchModelBytes(

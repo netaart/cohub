@@ -29,12 +29,26 @@ import {
 	isShapeKind,
 	rectCenter,
 	type ShapeKind,
+	TEXT_FONT_SIZE,
 	type WorldPoint,
+	worldPoint,
 } from "../model/index.js";
 import type { EditorContext } from "./context.js";
 import { sameJson } from "./document-edits.js";
 import type { BoardInteraction } from "./interaction.js";
+import { boardDragSlop } from "./input.js";
 import { isContinuousBoardTool } from "./tool.js";
+
+const TEXT_MIN_WRAP_WIDTH = TEXT_FONT_SIZE * 2;
+
+export function boardTextGestureWrap(
+	{ start, current, pointerType }: { start: WorldPoint; current: WorldPoint; pointerType: string },
+	zoom: number,
+): { at: WorldPoint; width: number } | null {
+	const width = Math.abs(current.x - start.x);
+	if (width <= boardDragSlop(pointerType) / Math.max(zoom, 0.0001)) return null;
+	return { at: worldPoint(Math.min(start.x, current.x), start.y), width: Math.max(TEXT_MIN_WRAP_WIDTH, width) };
+}
 
 export type BoardAppMetadata = Parameters<typeof createAppBoardItem>[0];
 export type BoardTaskSource = { itemId: string; sourcePortId: string; targetPortId: string };
@@ -238,8 +252,14 @@ export function createCreationModule(ctx: EditorContext) {
 		add([entry], { enter: false });
 	}
 
-	function beginTextDraft(at: WorldPoint) {
-		const entry = createTextBoardItem("", at.x, at.y, state.toolStyles.text.color);
+	function commitTextGesture(gesture: Extract<BoardInteraction, { type: "creatingText" }>) {
+		if (options.readonly) return;
+		const wrap = boardTextGestureWrap(gesture, state.camera.zoom);
+		beginTextDraft(wrap?.at ?? gesture.start, wrap?.width);
+	}
+
+	function beginTextDraft(at: WorldPoint, width?: number) {
+		const entry = createTextBoardItem("", at.x, at.y, state.toolStyles.text.color, undefined, width);
 		ctx.document.writeDraft(placeNew([entry]), true);
 		state.draftTextId = entry.id;
 		state.selection = [entry.id];
@@ -313,6 +333,7 @@ export function createCreationModule(ctx: EditorContext) {
 		commitDraw,
 		commitArrow,
 		arrowEnd,
+		commitTextGesture,
 		beginTextDraft,
 		previewTextLayout,
 		updateText,

@@ -55,7 +55,6 @@ const shikiLanguageLoaders = {
 	json: () => import("@shikijs/langs/json"),
 	jsx: () => import("@shikijs/langs/jsx"),
 	markdown: () => import("@shikijs/langs/markdown"),
-	mermaid: () => import("@shikijs/langs/mermaid"),
 	protobuf: () => import("@shikijs/langs/protobuf"),
 	python: () => import("@shikijs/langs/python"),
 	rust: () => import("@shikijs/langs/rust"),
@@ -94,7 +93,6 @@ const shikiLanguageAliases = new Map<string, SupportedShikiLanguage>([
 	["markdown", "markdown"],
 	["md", "markdown"],
 	["mdx", "markdown"],
-	["mermaid", "mermaid"],
 	["proto", "protobuf"],
 	["protobuf", "protobuf"],
 	["py", "python"],
@@ -199,7 +197,7 @@ async function highlightCodeTokens(tokens: Token[]) {
 		if (token.type === "code" && "lang" in token && token.lang) {
 			const rawLang = token.lang.split(" ")[0]; // handle e.g. "ts {1-3}"
 			const lang = rawLang ? normalizeShikiLanguage(rawLang) : null;
-			if (!lang || lang === "mermaid") continue;
+			if (!lang) continue;
 
 			try {
 				const highlighted = highlighter.codeToHtml(token.text, {
@@ -539,22 +537,8 @@ function enhanceCohubAskTokens(tokens: Token[]) {
 	}
 }
 
-const MAX_MERMAID_SOURCE_LENGTH = 12_000;
-const MAX_MERMAID_SOURCE_LINES = 240;
-
-function isMermaidSourceTooLarge(source: string) {
-	return (
-		source.length > MAX_MERMAID_SOURCE_LENGTH ||
-		source.split(/\r?\n/).length > MAX_MERMAID_SOURCE_LINES
-	);
-}
-
 function renderMermaidPreviewHtml(source: string) {
-	const encodedSource = encodeURIComponent(source);
-	const loadingText = isMermaidSourceTooLarge(source)
-		? "Preview disabled"
-		: "Rendering diagram…";
-	return `<figure class="markdown-mermaid-figure"><div class="markdown-mermaid" data-mermaid-source="${encodedSource}" data-drawer-swipe-ignore role="img" aria-label="Mermaid diagram"><div class="markdown-mermaid-loading">${loadingText}</div></div><details class="markdown-mermaid-source"><summary>Source</summary><pre><code class="language-mermaid">${escapeHtml(source)}</code></pre></details></figure>`;
+	return `<figure class="markdown-mermaid-figure"><div class="markdown-mermaid" data-drawer-swipe-ignore></div><details class="markdown-mermaid-source"><summary>Source</summary><pre><code class="language-mermaid">${escapeHtml(source)}</code></pre></details></figure>`;
 }
 
 function enhanceMermaidTokens(tokens: Token[]) {
@@ -750,9 +734,15 @@ function prepareSourceHtmlTokens(tokens: Token[], allowHtml: boolean) {
 	});
 }
 
+type MarkdownRenderOptions = {
+	highlight?: boolean;
+	streamingSafe?: boolean;
+	diagrams?: boolean;
+};
+
 async function renderMarkdownHtml(
 	source: string,
-	options?: { highlight?: boolean; streamingSafe?: boolean },
+	options?: MarkdownRenderOptions,
 ) {
 	const markedOptions = markdownOptions();
 	const tokens = marked.lexer(
@@ -766,8 +756,8 @@ async function renderMarkdownHtml(
 	if (!options?.streamingSafe) {
 		enhanceMediaPreviewTokens(tokens);
 		enhanceCohubAskTokens(tokens);
-		enhanceMermaidTokens(tokens);
 	}
+	if (!options?.streamingSafe || options.diagrams) enhanceMermaidTokens(tokens);
 	if (options?.highlight !== false) await highlightCodeTokens(tokens);
 	return marked.parser(tokens, markedOptions);
 }
@@ -898,7 +888,7 @@ function escapeHtml(source: string) {
 
 async function renderMarkdownBlock(
 	source: string,
-	options?: { highlight?: boolean; streamingSafe?: boolean },
+	options?: MarkdownRenderOptions,
 ) {
 	const html = await renderMarkdownHtml(source, options);
 	return sanitizeMarkdownHtml(html);
@@ -1039,6 +1029,7 @@ export const renderStreamingMarkdownSplit = async (
 							renderMarkdownBlock(blockSource, {
 								highlight: false,
 								streamingSafe: true,
+								diagrams: true,
 							}),
 						)
 					: Promise.resolve(""),

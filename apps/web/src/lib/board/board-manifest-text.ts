@@ -1,4 +1,9 @@
-import type { SpaceFsFileResponse } from "@neta-art/cohub";
+import type {
+	SpaceFsFileResponse,
+	SpaceFsPreparingFile,
+} from "@neta-art/cohub";
+import { parseBoardManifest } from "@neta-art/cohub/board";
+import { tryResolveTextFileResponse } from "$lib/space-file-text";
 
 /**
  * Extract UTF-8 manifest text from a Space FS response.
@@ -30,4 +35,18 @@ export function resolveBoardManifestText(
 	} catch {
 		return null;
 	}
+}
+
+export async function readBoardManifestId(
+	rawFile: SpaceFsFileResponse | SpaceFsPreparingFile,
+): Promise<string> {
+	if (!rawFile || typeof rawFile !== "object" || !("content" in rawFile))
+		throw new Error("Board manifest is being prepared. Retry in a moment.");
+	const { file, error } = await tryResolveTextFileResponse(rawFile);
+	if (error) throw new Error(error);
+	const content = resolveBoardManifestText(file);
+	if (content == null) throw new Error("Board manifest must be a text file.");
+	const manifest = parseBoardManifest(content);
+	if (!manifest) throw new Error("Board manifest is invalid.");
+	return manifest.boardId;
 }

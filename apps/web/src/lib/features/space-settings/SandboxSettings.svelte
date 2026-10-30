@@ -3,11 +3,16 @@ import {
 	type SandboxImageId,
 	sandboxSetupInfoSchema,
 } from "@cohub/protocol/sandbox";
-import type { SandboxSpecId, SpaceSandboxConfig } from "@neta-art/cohub";
+import type {
+	SandboxSpecId,
+	SpaceSandboxConfig,
+	WorkspaceUsage,
+} from "@neta-art/cohub";
 import { Loader2, RefreshCw, Zap } from "lucide-svelte";
 import StatusGlyph, {
 	type StatusGlyphTone,
 } from "$lib/components/StatusGlyph.svelte";
+import { formatBytes } from "$lib/format-bytes";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { formatTimeAgo } from "$lib/resource-kit/time";
@@ -30,7 +35,12 @@ const IDLE_PRESETS = [5 * 60, 15 * 60, 60 * 60, 6 * 60 * 60, 24 * 60 * 60];
 const {
 	settings,
 	canManage,
-}: { settings: SandboxSettingsState; canManage: boolean } = $props();
+	usage = null,
+}: {
+	settings: SandboxSettingsState;
+	canManage: boolean;
+	usage?: WorkspaceUsage | null;
+} = $props();
 
 const locale = $derived(getLocale());
 const sandbox = $derived(settings.sandbox);
@@ -148,6 +158,21 @@ const lastActive = $derived.by(() => {
 		{ time: formatTimeAgo(at, Date.now(), locale) },
 		{ locale },
 	);
+});
+
+const usageHint = $derived.by(() => {
+	if (!usage) return undefined;
+	const options = { locale };
+	if (usage.status === "error") return m.space_storage_error({}, options);
+	const at = Date.parse(usage.measuredAt ?? "");
+	if (Number.isNaN(at)) return m.space_storage_pending({}, options);
+	const measured = m.space_storage_measured(
+		{ time: formatTimeAgo(at, Date.now(), locale) },
+		options,
+	);
+	return usage.status === "stale"
+		? `${measured} · ${m.space_storage_stale({}, options)}`
+		: measured;
 });
 
 function idleLabel(seconds: number) {
@@ -331,6 +356,14 @@ async function restart() {
 			{/snippet}
 			{@render fieldError("hibernation")}
 		</SettingsRow>
+
+		{#if usage}
+			<SettingsRow label={m.space_storage({}, { locale })} hint={usageHint}>
+				{#snippet control()}
+					<span class="text-[13px] font-medium tabular-nums text-text-primary">{usage.bytes === null ? "—" : formatBytes(usage.bytes)}</span>
+				{/snippet}
+			</SettingsRow>
+		{/if}
 	</div>
 {/if}
 

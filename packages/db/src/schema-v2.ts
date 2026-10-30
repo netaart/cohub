@@ -202,6 +202,24 @@ export const spaceSandboxes = v2.table(
   }),
 );
 
+/** Last pdu measurement of a cloud workspace; `attemptedAt` fences concurrent scans. */
+export const spaceWorkspaceUsage = v2.table(
+  "space_workspace_usage",
+  {
+    spaceId: uuid("space_id").primaryKey(),
+    bytes: bigint("bytes", { mode: "number" }),
+    measuredAt: timestamp("measured_at", { withTimezone: true }),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }),
+    changedAt: timestamp("changed_at", { withTimezone: true }),
+    failures: integer("failures").notNull().default(0),
+    error: text("error"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    bytesCheck: check("v2_chk_space_workspace_usage_bytes", sql`${table.bytes} is null or ${table.bytes} >= 0`),
+  }),
+);
+
 export const checkpoints = v2.table(
   "checkpoints",
   {

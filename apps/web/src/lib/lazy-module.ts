@@ -13,6 +13,11 @@ function normalizeRetryDelays(
 	return [...retryDelaysMs].filter((ms) => ms >= 0);
 }
 
+/** Use as `import.meta.env.SSR ? pending() : import("…")` at the call site to keep client-only modules out of the Worker. */
+export function pending(): Promise<never> {
+	return new Promise(() => {});
+}
+
 /**
  * Cache a dynamic import. Transient failures retry with backoff, then clear
  * the cached promise so the next call can recover.

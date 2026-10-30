@@ -108,27 +108,10 @@ test("renderStreamingMarkdownSplit escapes source HTML in the live tail", async 
 });
 
 test("renderMarkdown renders mermaid fences as diagram placeholders", async () => {
-	const html = await renderMarkdown(`\`\`\`mermaid
-graph TD
-	A[Start] --> B[Done]
-\`\`\``);
+	const html = await renderMarkdown("```mermaid\ngraph TD\n\tA --> B\n```");
 
-	assert.match(html, /markdown-mermaid/);
-	assert.match(html, /data-mermaid-source=/);
-	assert.match(html, /data-drawer-swipe-ignore/);
-	assert.match(html, /<summary>Source<\/summary>/);
-	assert.doesNotMatch(html, /<pre class="shiki/);
-});
-
-test("renderStreamingMarkdownSplit keeps closed mermaid fence streaming-safe", async () => {
-	const { stableHtml, tailHtml } = await renderStreamingMarkdownSplit(
-		`\`\`\`mermaid\ngraph TD\n\tA --> B\n\`\`\``,
-	);
-
-	assert.match(stableHtml, /<pre/);
-	assert.match(stableHtml, /language-mermaid/);
-	assert.doesNotMatch(stableHtml, /markdown-mermaid/);
-	assert.equal(tailHtml, "");
+	assert.match(html, /class="markdown-mermaid"/);
+	assert.match(html, /<code class="language-mermaid">/);
 });
 
 test("renderMarkdown renders cohub ask fences as composer options", async () => {

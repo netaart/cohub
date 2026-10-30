@@ -4,6 +4,20 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.87 — 2026-10-29
+
+- **Workspace storage usage**: Cloud workspaces are measured by a throttled `pdu` scan in the system worker, persisted to Postgres, and exposed in space settings with live `space.workspace_usage.updated` events, SDK types, and `cohub spaces get` — with `pending`/`ready`/`stale`/`error` states derived from sandbox and write activity.
+- **Worker bundle cut by 69%**: Browser-only imports (`three`, `pixi.js`, PDF/CSV/code previews) are gated behind SSR-safe pending loaders, and `ModelSource` is now plain data loaded by `loadModelSource`. Worker upload drops from 7,244 KiB to 2,274 KiB (gzip 1,387 → 413 KiB), plus a build check that fails if a browser-only package becomes reachable from the Worker graph.
+- **App access tokens**: `client.auth.getAccessToken({ forceRefresh })` exposes the same credential provider and runtime authorization state the SDK uses for API requests, so published Apps can authenticate calls to their own trusted backends without a second runtime.
+- **Board editing**: Dragging from a card inside a selected frame moves the whole selection (Select All drags as one), pastes land in view and step on from the previous paste, and the text tool opens on release with a sideways drag setting the wrap width.
+
+### Bug Fixes
+
+- Presigned upload URLs now canonicalize header values per SigV4, so filenames with consecutive spaces no longer fail R2 uploads with 403.
+- Archived generation previews are cleared by message ordinal, preventing stale previews when persisted messages carry a DB id instead of the stream id.
+- Tool results are never sent to model providers with empty content; empty output becomes `(no output)`, avoiding Anthropic rejections on error results.
+- Bash output truncation now explains when the first line exceeds the 50 KB limit and suggests redirecting output, instead of silently dropping it.
+
 ## v2.86 — 2026-10-29
 
 - **Native desktop apps**: macOS (Swift 6, AppKit, WKWebView, Sparkle) and Windows (.NET 10, WPF, WebView2, Velopack) shells load the web app in the system WebView and delegate account and Runtime methods to a bundled CLI over stdio via `cohub host serve`, so desktop and terminal share one sign-in and one set of local Runtimes; per-version runtime copies outlive app updates, with a native folder picker, notifications, deep links, recent Spaces, and `cohub auth token`.

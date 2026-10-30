@@ -1,3 +1,5 @@
+import { isBoardPath } from "./board.js";
+
 export const SPACE_CONFIG_PATH = ".cohub/space.json";
 
 export type WindowKind = "file" | "board" | "port";
@@ -38,7 +40,14 @@ export type NewChatBackgroundConfig = NewChatBackgroundBase &
         type: "image" | "video";
         source: NewChatBackgroundUrlSource;
       }
+    | {
+        type: "board";
+        /** `launch` is a Board launch hash without `#`, e.g. `focus=cover&play=intro`. */
+        source: { kind: "space"; path: string; launch?: string };
+      }
   );
+
+const BOARD_LAUNCH_MAX_LENGTH = 512;
 
 /**
  * Whether a New Chat background is purely decorative, i.e. safe to hide from
@@ -184,17 +193,35 @@ function parseOptionalNumber(value: unknown, fallback: number, min: number, max:
   return Math.min(max, Math.max(min, value));
 }
 
+function parseBoardSource(value: unknown) {
+  if (typeof value !== "string") return null;
+  const hashAt = value.indexOf("#");
+  const path = parseSpacePath(hashAt < 0 ? value : value.slice(0, hashAt));
+  if (!path || !isBoardPath(path)) return null;
+  const launch = hashAt < 0 ? "" : value.slice(hashAt + 1).trim();
+  return launch && launch.length <= BOARD_LAUNCH_MAX_LENGTH
+    ? { kind: "space" as const, path, launch }
+    : { kind: "space" as const, path };
+}
+
 function parseBackground(value: unknown): NewChatBackgroundConfig | undefined {
   if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
   if (record.enabled === false) return undefined;
   const url = parseBackgroundUrl(record.url);
-  const type =
-    record.type === "image" || record.type === "video" || record.type === "html"
+  const declared =
+    record.type === "image" ||
+    record.type === "video" ||
+    record.type === "html" ||
+    record.type === "board"
       ? record.type
-      : "html";
+      : null;
+  const board =
+    !url && (declared === null || declared === "board")
+      ? parseBoardSource(record.url)
+      : null;
+  const type = board ? "board" : (declared ?? "html");
   const spacePath = !url && type === "html" ? parseSpacePath(record.url) : null;
-  if (!url && !spacePath) return undefined;
   const common: NewChatBackgroundBase = {
     opacity: parseOptionalNumber(record.opacity, 1, 0, 1),
     fit:
@@ -203,6 +230,7 @@ function parseBackground(value: unknown): NewChatBackgroundConfig | undefined {
         : "cover",
     position: typeof record.position === "string" ? record.position : "center",
   };
+  if (board) return { ...common, type: "board", source: board };
   if (spacePath) {
     return {
       ...common,
@@ -210,7 +238,7 @@ function parseBackground(value: unknown): NewChatBackgroundConfig | undefined {
       source: { kind: "space", path: spacePath },
     };
   }
-  if (!url) return undefined;
+  if (!url || type === "board") return undefined;
   return {
     ...common,
     type,
@@ -249,4 +277,25 @@ export function parseSpaceConfig(raw: string): SpaceConfig | null {
     if (defaultLayout) config.ui.workspace = { defaultLayout };
   }
   return config;
+}
+
+function objectField(parent: Record<string, unknown>, key: string) {
+  const value = parent[key];
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${SPACE_CONFIG_PATH}: "${key}" must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+export function withNewChatBackground(
+  document: Record<string, unknown>,
+  background: Record<string, unknown> | null,
+): Record<string, unknown> {
+  const ui = objectField(document, "ui");
+  const { background: _, ...newChat } = objectField(ui, "newChat");
+  return {
+    ...document,
+    ui: { ...ui, newChat: background ? { ...newChat, background } : newChat },
+  };
 }

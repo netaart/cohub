@@ -1,9 +1,16 @@
 import type { CohubClient } from "@neta-art/cohub";
 import { LIMITS, type Locale, VOICE } from "./mind.ts";
 
-const PREFERRED_MODEL = "qwen-audio-3.0-tts-plus";
+type Declaration = {
+  model: string;
+  hidden?: boolean;
+  meta?: { fields?: Record<string, unknown> };
+  content?: { input?: Array<{ type?: string }> };
+};
 
-type Declaration = { model: string; hidden?: boolean; content?: { input?: Array<{ type?: string }> } };
+// A model fits when it can design a voice (declares meta.voice_prompt) and clone one (takes audio input).
+const canDesignAndClone = (model: Declaration) =>
+  !model.hidden && Boolean(model.meta?.fields?.voice_prompt) && Boolean(model.content?.input?.some((input) => input.type === "audio"));
 
 export class Voice {
   private readonly client: CohubClient;
@@ -21,8 +28,7 @@ export class Voice {
   async prepare() {
     try {
       const { models } = await this.client.models.listMultimodal();
-      const list = models as Declaration[];
-      this.model = list.find((model) => model.model === PREFERRED_MODEL)?.model ?? list.find((model) => !model.hidden && /tts/i.test(model.model))?.model ?? null;
+      this.model = (models as Declaration[]).find(canDesignAndClone)?.model ?? null;
     } catch {
       this.model = null;
     }
@@ -31,7 +37,7 @@ export class Voice {
 
   async speak(text: string): Promise<string | null> {
     if (!this.model || [...text].length < LIMITS.voiceMinChars) return null;
-    const cloning = this.reference !== null && this.model === PREFERRED_MODEL;
+    const cloning = this.reference !== null;
     const result = await this.client.generations.createAndWait(
       {
         spaceId: this.spaceId,

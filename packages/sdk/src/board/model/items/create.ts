@@ -187,6 +187,7 @@ export function createTextBoardItem(
 	y: number,
 	color: string = DEFAULT_BOARD_TOOL_STYLES.text.color,
 	id = createBoardItemId(),
+	width?: number,
 ): BoardItemEntry {
 	return {
 		id,
@@ -194,7 +195,7 @@ export function createTextBoardItem(
 			type: "text",
 			position: { x, y },
 			...(color === "neutral" ? {} : { style: { fill: color } }),
-			props: { text },
+			props: width ? { text, width } : { text },
 		}),
 	};
 }

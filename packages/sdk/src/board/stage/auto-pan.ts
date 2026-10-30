@@ -1,7 +1,7 @@
 import { BOARD_INPUT, type BoardEditor, boardDragSlop } from "../editor/index.js";
 import { panBy } from "../model/index.js";
 
-const EDGE_GESTURES = new Set(["translating", "resizing", "rotating", "brushing", "creatingBox", "creatingArrow", "draggingArrowHandle"]);
+const EDGE_GESTURES = new Set(["translating", "resizing", "rotating", "brushing", "creatingBox", "creatingText", "creatingArrow", "draggingArrowHandle"]);
 const MAX_STEP_MS = 50;
 
 function edgeSpeed(position: number, start: number, end: number): number {

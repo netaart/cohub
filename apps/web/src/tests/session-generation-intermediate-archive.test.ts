@@ -137,6 +137,31 @@ const archivedRound: StreamingIntermediateMessage = {
 	content: toolBlocks,
 };
 
+test("archive clears the same round when persisted and stream ids differ", () => {
+	const next = archiveIntermediateRound(
+		{
+			status: "streaming",
+			contentBlocks: toolBlocks,
+			intermediateMessages: [],
+			streamMessageId: "turn:t1:assistant:0",
+			messageOrdinal: 0,
+			patchSeq: 4,
+			turnId: "t1",
+		},
+		{
+			intermediateMessages: [archivedRound],
+			archived: { ...archivedRound, messageId: "db-message-uuid" },
+			turnId: "t1",
+		},
+	);
+
+	assert.deepEqual(next.contentBlocks, []);
+	assert.equal(next.streamMessageId, null);
+	assert.equal(next.messageOrdinal, null);
+	assert.equal(next.patchSeq, 0);
+	assert.equal(next.intermediateMessages.length, 1);
+});
+
 test("intermediate archive clears live preview and folds tools into history", () => {
 	const current: GenerationState = {
 		status: "streaming",

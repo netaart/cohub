@@ -77,14 +77,12 @@ export function shouldPreserveLivePreviewOnArchive(
 ): boolean {
 	if (!archived) return false;
 
-	const ordinalMovedOn =
-		archived.messageOrdinal != null &&
-		current.messageOrdinal != null &&
-		current.messageOrdinal !== archived.messageOrdinal;
+	// Persisted messages may use a DB id instead of the stream id.
+	// When both ordinals exist, they are the authoritative round identity.
+	if (archived.messageOrdinal != null && current.messageOrdinal != null) {
+		return current.messageOrdinal !== archived.messageOrdinal;
+	}
 	const currentId = current.streamMessageId ?? current.messageId ?? null;
 	const archivedId = archived.messageId ?? archived.id ?? null;
-	const messageIdMovedOn = Boolean(
-		archivedId && currentId && currentId !== archivedId,
-	);
-	return ordinalMovedOn || messageIdMovedOn;
+	return Boolean(archivedId && currentId && currentId !== archivedId);
 }

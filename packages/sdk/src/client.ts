@@ -22,7 +22,7 @@ import { RoomsApi } from "./apis/rooms.js";
 import { AppRealtimeApi } from "./apis/app-realtime.js";
 import { PublicInviteApi } from "./apis/invitations.js";
 import { ReferralsApi } from "./apis/referrals.js";
-import { HttpTransport, type CohubClientOptions } from "./transport.js";
+import { HttpTransport, sanitizeAccessToken, type CohubClientOptions } from "./transport.js";
 import { ensureRealtimeConnected } from "./realtime.js";
 import { createWebsocketClient, type WebsocketClientState, type WebsocketEventPayload } from "./websocket.js";
 import { VoiceApi } from "./voice-input.js";
@@ -95,6 +95,7 @@ export class CohubClient {
   }
 
   private readonly transport: HttpTransport;
+  private readonly getAccessToken: NonNullable<CohubClientOptions["getAccessToken"]>;
   private readonly websocketClient: ReturnType<typeof createWebsocketClient>;
   private readonly fileServices: SpaceFileServices;
   private readonly appRuntime: AppRuntimeApi;
@@ -140,6 +141,7 @@ export class CohubClient {
       ?? (executionToken
         ? () => executionToken
         : (tokenOptions?: { forceRefresh?: boolean }) => this.appRuntime.getAccessToken(tokenOptions));
+    this.getAccessToken = getAccessToken;
     const resolvedOptions = { ...options, getAccessToken };
     this.transport = new HttpTransport(resolvedOptions);
     this.websocketClient = createWebsocketClient({
@@ -214,6 +216,9 @@ export class CohubClient {
   }
 
   readonly auth = {
+    /** Resolve the same credential used by this client's HTTP requests, including App runtime refresh. */
+    getAccessToken: async (options?: { forceRefresh?: boolean }): Promise<string | null> =>
+      sanitizeAccessToken(await this.getAccessToken(options)),
     authorize: (input: AppAuthorizationRequest) => this.appRuntime.authorize(input),
     /**
      * @deprecated Use authorize() for the actual target and structured result.

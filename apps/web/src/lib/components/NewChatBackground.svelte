@@ -8,6 +8,7 @@ import { MEDIA_VARIANT_MAX } from "@neta-art/cohub/media";
 import { page } from "$app/state";
 import { type CohubAppUrl, parseCohubAppUrl } from "$lib/app-url";
 import NewChatAppBackground from "$lib/components/NewChatAppBackground.svelte";
+import NewChatBoardBackground from "$lib/components/NewChatBoardBackground.svelte";
 import NewChatSpaceBackground from "$lib/components/NewChatSpaceBackground.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { parseNewChatBackgroundAction } from "$lib/new-chat-background-bridge";
@@ -21,6 +22,7 @@ type Props = {
 	background: NewChatBackgroundConfig;
 	/** Current Space, used to serve space-local file backgrounds. */
 	spaceId?: string | null;
+	chromeHeight?: number;
 	onAppComposerChip?: (appId: string, chip: AppComposerChip | null) => void;
 	onNavigationOpen?: (
 		message: AppNavigationOpenMessage,
@@ -35,6 +37,7 @@ type Props = {
 const {
 	background,
 	spaceId = null,
+	chromeHeight = 0,
 	onAppComposerChip,
 	onNavigationOpen,
 }: Props = $props();
@@ -134,13 +137,24 @@ $effect(() => {
 
 <div
   class="new-chat-background"
+  class:board={background.type === "board"}
   style:opacity={background.opacity}
+  style:padding-bottom={background.type === "board" ? `${chromeHeight}px` : undefined}
   aria-hidden={decorative ? "true" : undefined}
 >
   {#if background.type === "image"}
     <img src={background.source.url} alt="" style:object-fit={objectFit} style:object-position={background.position} draggable="false" />
   {:else if background.type === "video"}
     <MediaVideo src={background.source.url} size={MEDIA_VARIANT_MAX} style="object-fit: {objectFit}; object-position: {background.position}" autoplay muted loop playsinline preload="metadata" />
+  {:else if background.type === "board"}
+    {#if spaceId}
+      <NewChatBoardBackground
+        {spaceId}
+        path={background.source.path}
+        launch={background.source.launch}
+        {onNavigationOpen}
+      />
+    {/if}
   {:else if spacePath && spaceId}
     <NewChatSpaceBackground spaceId={spaceId} path={spacePath} />
   {:else if appUrl}
@@ -172,7 +186,7 @@ $effect(() => {
     pointer-events: auto;
   }
 
-  .new-chat-background::after {
+  .new-chat-background:not(.board)::after {
     content: "";
     position: absolute;
     right: 0;

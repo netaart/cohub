@@ -13,3 +13,4 @@ import "./app-rtc-sweep/index.js";
 import "./app-domain-check/index.js";
 import "./board-session-sync/index.js";
 import "./session-turn-reply/index.js";
+import "./workspace-usage/index.js";

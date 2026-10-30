@@ -4,16 +4,20 @@ import {
 	type BoardArrowItem,
 	type BoardScene,
 	type BoardItem,
+	buildBoardScene,
 	createBoardItemId,
 	invertMatrix,
+	type Point,
+	rectCenter,
+	rectContainsPoint,
 	resolveSceneArrow,
 	type SceneItem,
+	unionRects,
 	type WorldPoint,
 } from "../model/index.js";
 import {
 	type BoardClipboardPayload,
 	DUPLICATE_OFFSET,
-	defaultPasteOffset,
 	encodeClipboard,
 	materializeClipboard,
 	parseClipboard,
@@ -24,7 +28,7 @@ import type { EditorContext } from "./context.js";
 export function createCopyModule(ctx: EditorContext) {
 	const { state, options } = ctx;
 	let internalClipboard: BoardClipboardPayload | null = null;
-	let pasteCount = 0;
+	let lastPaste: { origin: Point; at: Point } | null = null;
 
 	function detachedSubtrees(ids: Iterable<string>, scene: BoardScene): Record<string, BoardItem> {
 		const items: Record<string, BoardItem> = {};
@@ -104,7 +108,7 @@ export function createCopyModule(ctx: EditorContext) {
 		const payload = origin ? encodeClipboard(copied, { x: origin.x, y: origin.y }) : null;
 		if (payload) {
 			internalClipboard = payload;
-			pasteCount = 0;
+			lastPaste = null;
 		}
 		return payload;
 	}
@@ -119,18 +123,30 @@ export function createCopyModule(ctx: EditorContext) {
 		if (options.readonly) return;
 		const parsed = parseClipboard(raw) ?? (raw == null ? parseClipboard(internalClipboard) : null);
 		if (!parsed) return;
-		pasteCount += 1;
-		const offset = at ?? {
-			x: parsed.origin.x + defaultPasteOffset(pasteCount).x,
-			y: parsed.origin.y + defaultPasteOffset(pasteCount).y,
-		};
-		const pasted = materializeClipboard(parsed, offset);
+		const target = at ?? pasteTarget(parsed);
+		lastPaste = { origin: parsed.origin, at: target };
+		const pasted = materializeClipboard(parsed, target);
 		const entries = Object.entries(pasted).map(([id, item]) => ({ id, item }));
 		const roots = entries.filter(({ item }) => !item.parent).map(({ id }) => id);
 		const changes = ctx.creation.placeNew(entries);
 		ctx.document.markAdded(roots);
 		state.selection = roots;
 		ctx.document.commitItems(changes);
+	}
+
+	function pasteTarget(payload: BoardClipboardPayload): Point {
+		const from =
+			lastPaste?.origin.x === payload.origin.x && lastPaste.origin.y === payload.origin.y ? lastPaste.at : payload.origin;
+		const next = { x: from.x + DUPLICATE_OFFSET, y: from.y + DUPLICATE_OFFSET };
+		const view = ctx.camera.visibleRect();
+		if (!view) return next;
+		const probe = buildBoardScene({ ...state.base, items: payload.items });
+		const bounds = unionRects(probe.items.map((item) => ctx.query.boundsOf(item, probe)));
+		if (!bounds) return next;
+		const middle = rectCenter(bounds);
+		if (rectContainsPoint(view, { x: next.x + middle.x, y: next.y + middle.y })) return next;
+		const center = rectCenter(view);
+		return { x: center.x - middle.x, y: center.y - middle.y };
 	}
 
 	return { duplicates, rootsOfCopies, duplicateSelection, copySelection, cutSelection, pasteClipboard };

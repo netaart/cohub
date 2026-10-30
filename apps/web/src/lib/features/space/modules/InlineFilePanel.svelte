@@ -25,7 +25,7 @@ import type { PreviewCaptureTarget } from "$lib/features/preview-mark";
 import PreviewMarkHost from "$lib/features/preview-mark/ui/PreviewMarkHost.svelte";
 import type { FilePreviewModel } from "$lib/file-preview-model";
 import { getLocale } from "$lib/i18n/locale.svelte";
-import { createLazyModuleLoader } from "$lib/lazy-module";
+import { createLazyModuleLoader, pending } from "$lib/lazy-module";
 import { m } from "$lib/paraglide/messages.js";
 import type { FileViewMode } from "$lib/resource-kit/diff";
 import type { ResolveWorkspaceAsset } from "$lib/workspace-assets";
@@ -159,8 +159,10 @@ const inlineFileHasRenderedPreview = $derived(
 );
 const inlineFileDataUrl = $derived(inlineFilePreview.mediaUrl);
 
-const loadFileDiffViewModule = createLazyModuleLoader(
-	() => import("$lib/components/FileDiffView.svelte"),
+const loadFileDiffViewModule = createLazyModuleLoader(() =>
+	import.meta.env.SSR
+		? pending()
+		: import("$lib/components/FileDiffView.svelte"),
 );
 let fileDiffLoadAttempt = $state(0);
 const fileDiffModulePromise = $derived.by(() => {

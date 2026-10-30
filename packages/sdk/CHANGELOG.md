@@ -1,5 +1,22 @@
 # @neta-art/cohub
 
+## 13.7.0
+
+### Minor Changes
+
+- ed971a8: A drag on a card inside a selected frame moves the whole selection, so a Select All drags as one; a click there still narrows to the card, and a card that opens on a tap still opens. A paste lands next to its copy while that spot is in view, and in the middle of the view once it is not; each repeat steps on from the last paste.
+  
+  Hosts: `defaultPasteOffset` is removed. `pasteClipboard()` places a paste itself; pass `at` to choose the spot.
+- bebb79f: The Board text tool works again: a click opens the editor where you clicked, and a sideways drag sets the wrap width, previewed while you drag. The editor opens on release, and the stage keeps the browser's default press focus from closing it, for mouse and touch alike. A text tool press while editing only ends that edit.
+  
+  `BoardInteraction` gains `creatingText`, `beginTextDraft(at, width?)` accepts a wrap width, `createTextBoardItem` an optional `width`, and `boardTextGestureWrap` reports where a text drag places its text.
+- 3efa44e: Expose `client.auth.getAccessToken({ forceRefresh? })` so Apps can call trusted backends using the same credential provider and runtime authorization state as their Cohub API requests.
+- 38aeb6f: Space details include `workspaceUsage`: the cloud workspace's allocated bytes, when they were measured, and whether the value is `ready`, `stale`, `pending`, or `error`. `cohub spaces get` shows it as Storage.
+
+### Patch Changes
+
+- 360b8d8: Ember and the cohub-generate skill pick the speech model from the catalog by capability instead of a fixed id, so they keep working when a speech model leaves the catalog. The skill also shows how to pass a speech model's `instructions` parameter. Generation SDK 0.2.10: scene3 no longer takes `instructions` and states its 900-character text limit; `qwen-audio-3.1-tts-flash` gets more accurate descriptions of `instructions` and `seed`.
+
 ## 13.6.0
 
 ### Minor Changes

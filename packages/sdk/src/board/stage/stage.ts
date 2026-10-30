@@ -2,7 +2,7 @@ import type { BoardPlaybackSnapshot } from "@cohub/protocol";
 import type { BoardScriptOutput, BoardScriptSnapshot } from "../model/index.js";
 import { Application, Container, Graphics, type Renderer, RendererType } from "pixi.js";
 import type { BoardActivation, BoardEditor, BoardPointerEvent } from "../editor/index.js";
-import { boardDragSlop, isCreationBoardTool, isTouchLikePointer, resizeCursorForHandle } from "../editor/index.js";
+import { boardDragSlop, boardTextGestureWrap, isCreationBoardTool, isTouchLikePointer, resizeCursorForHandle } from "../editor/index.js";
 import {
 	type BoardArrowItem,
 	type BoardAssetSource,
@@ -27,6 +27,7 @@ import {
 	rectsIntersect,
 	screenPoint,
 	stableCullRect,
+	TEXT_LINE_HEIGHT,
 	visibleWorldRect,
 	type WorldPoint,
 	worldPoint,
@@ -550,6 +551,11 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			target.moveTo(interaction.start.x, interaction.start.y).lineTo(end.x, end.y).stroke({ color: color.stroke, width, alpha: 0.9 });
 			arrowHead(target, interaction.start, end, color.stroke, width, inv, 0.95);
 		}
+		const wrap = interaction.type === "creatingText" && boardTextGestureWrap(interaction, editor.camera.zoom);
+		if (wrap)
+			target
+				.rect(wrap.at.x, wrap.at.y, wrap.width, TEXT_LINE_HEIGHT)
+				.stroke({ color: current.palette.brand, width: 1.5 * inv, alpha: 0.85 });
 		if (interaction.type === "creatingBox") {
 			const color = pickBoardColor(current.colors, interaction.color, current.colorScheme);
 			const { start, current: corner } = interaction;
@@ -1063,6 +1069,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		}
 		if (pressKey(event, input)) return;
 		editor.pointerDown(input);
+		// The text editor opens on release; keep the browser's default press focus from closing it.
+		if (editor.interaction.type === "creatingText") event.preventDefault();
 		if (holdable(event)) longPress.start(event);
 		else longPress.cancel();
 	}

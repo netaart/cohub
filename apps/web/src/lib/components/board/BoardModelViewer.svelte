@@ -5,11 +5,13 @@ import { boardModelSource } from "$lib/board/board-model";
 import type { BoardEditor } from "$lib/board/editor.svelte";
 import Spinner from "$lib/components/Spinner.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
-import { createLazyModuleLoader } from "$lib/lazy-module";
+import { createLazyModuleLoader, pending } from "$lib/lazy-module";
 import { m } from "$lib/paraglide/messages.js";
 
-const loadModelPreview = createLazyModuleLoader(
-	() => import("$lib/components/ModelPreview.svelte"),
+const loadModelPreview = createLazyModuleLoader(() =>
+	import.meta.env.SSR
+		? pending()
+		: import("$lib/components/ModelPreview.svelte"),
 );
 
 const {

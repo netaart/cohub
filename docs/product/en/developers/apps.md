@@ -129,6 +129,31 @@ are absent.
 Pause heavy rendering while `ctx.window.visible` is false; background tabs stay
 mounted so they can resume instantly.
 
+## Calling your backend
+
+After obtaining the required viewer grants, use `client.auth.getAccessToken()`
+to call a trusted backend with the same credential the SDK uses for Cohub API
+requests. In a published App this is the App session, not the host's account
+credential. It reuses the existing runtime in both iframe and standalone broker
+modes; do not create another runtime or read storage keys.
+
+```ts
+const token = await client.auth.getAccessToken();
+if (!token) return; // No credential is available.
+const response = await fetch("https://your-backend.example/api/reply", {
+  method: "POST",
+  headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ input: "Hello" }),
+});
+```
+
+Pass `{ forceRefresh: true }` to request a fresh credential from the same
+provider. A custom client `getAccessToken` provider or sandbox execution token
+still takes precedence. The method returns `Promise<string | null>`, propagates
+provider errors, and does not request new permissions. Your backend must verify
+the credential and preserve its authorization boundaries. Do not put tokens in
+URLs or logs, or automatically replay generation after a stream has started.
+
 ## Permissions
 
 An App's effective permission on one Space is the union of **two sources** —

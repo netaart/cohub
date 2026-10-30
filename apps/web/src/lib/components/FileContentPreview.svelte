@@ -9,10 +9,10 @@ import type { PreviewCaptureTarget } from "$lib/features/preview-mark";
 import { filePreviewModel } from "$lib/file-preview-model";
 import { formatBytes } from "$lib/format-bytes";
 import { getLocale } from "$lib/i18n/locale.svelte";
-import { createLazyModuleLoader } from "$lib/lazy-module";
+import { createLazyModuleLoader, pending } from "$lib/lazy-module";
 import { screenVariantSize } from "$lib/media/media-info";
 import {
-	createModelSource,
+	type ModelSource,
 	readFileModelBytes,
 	workspaceReferences,
 } from "$lib/model3d/source";
@@ -24,20 +24,24 @@ import type {
 	WorkspaceFilePosition,
 } from "$lib/workspace-file-links";
 
-const loadCodeEditor = createLazyModuleLoader(
-	() => import("$lib/components/CodeEditor.svelte"),
+const loadCodeEditor = createLazyModuleLoader(() =>
+	import.meta.env.SSR ? pending() : import("$lib/components/CodeEditor.svelte"),
 );
-const loadRenderedPreview = createLazyModuleLoader(
-	() => import("$lib/components/RenderedFilePreview.svelte"),
+const loadRenderedPreview = createLazyModuleLoader(() =>
+	import.meta.env.SSR
+		? pending()
+		: import("$lib/components/RenderedFilePreview.svelte"),
 );
-const loadCsvPreview = createLazyModuleLoader(
-	() => import("$lib/components/CsvPreview.svelte"),
+const loadCsvPreview = createLazyModuleLoader(() =>
+	import.meta.env.SSR ? pending() : import("$lib/components/CsvPreview.svelte"),
 );
-const loadPdfPreview = createLazyModuleLoader(
-	() => import("$lib/components/PdfPreview.svelte"),
+const loadPdfPreview = createLazyModuleLoader(() =>
+	import.meta.env.SSR ? pending() : import("$lib/components/PdfPreview.svelte"),
 );
-const loadModelPreview = createLazyModuleLoader(
-	() => import("$lib/components/ModelPreview.svelte"),
+const loadModelPreview = createLazyModuleLoader(() =>
+	import.meta.env.SSR
+		? pending()
+		: import("$lib/components/ModelPreview.svelte"),
 );
 
 /**
@@ -132,12 +136,12 @@ const modelPromise = $derived.by(() => {
 	modelAttempt;
 	return loadModelPreview();
 });
-const modelSource = $derived.by(() => {
+const modelSource = $derived.by((): ModelSource | null => {
 	const format = modelFormatForPath(file.path, file.mimeType);
 	if (!format) return null;
 	const current = file;
 	const resolve = resolveWorkspaceAsset;
-	return createModelSource({
+	return {
 		key: `${current.path}:${current.size}:${current.mtimeMs}:${current.url ?? ""}`,
 		name: current.name,
 		format,
@@ -147,7 +151,7 @@ const modelSource = $derived.by(() => {
 			workspaceReferences(current.path, async (path) =>
 				resolve ? (await resolve(path, { signal })).src : null,
 			),
-	});
+	};
 });
 </script>
 

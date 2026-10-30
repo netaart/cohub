@@ -54,6 +54,37 @@ test("isArchivedMessageIdentity rejects revived previous-round patches", () => {
 	);
 });
 
+test("archive identity uses ordinal before ids and falls back to ids", () => {
+	assert.equal(
+		shouldPreserveLivePreviewOnArchive(
+			{ messageOrdinal: 0, streamMessageId: "turn:t1:assistant:0" },
+			{ messageOrdinal: 0, messageId: "db-message-uuid" },
+		),
+		false,
+	);
+	assert.equal(
+		shouldPreserveLivePreviewOnArchive(
+			{ messageOrdinal: 1, streamMessageId: "same-id" },
+			{ messageOrdinal: 0, messageId: "same-id" },
+		),
+		true,
+	);
+	assert.equal(
+		shouldPreserveLivePreviewOnArchive(
+			{ streamMessageId: "next-stream" },
+			{ messageId: "previous-stream" },
+		),
+		true,
+	);
+	assert.equal(
+		shouldPreserveLivePreviewOnArchive(
+			{ streamMessageId: "same-stream" },
+			{ messageId: "same-stream" },
+		),
+		false,
+	);
+});
+
 test("shouldPreserveLivePreviewOnArchive ignores empty contentBlocks", () => {
 	// Next-round identity already advanced, first token not yet arrived.
 	assert.equal(

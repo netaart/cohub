@@ -7,6 +7,7 @@ Sample assets for Cohub guides and demos. Published App samples live in
 |---|---|
 | `decisions.json` | Decision model catalog sample |
 | `generations/` | Multimodal generation model declaration samples |
+| `new-chat-background/` | A Board behind New Chat in a Space |
 | `workspace-default-layout/` | Default workspace layout template for a Space |
 
 These are reference samples. Paths inside a published App (for example

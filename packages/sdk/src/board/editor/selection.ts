@@ -73,6 +73,15 @@ export function createSelectionModule(ctx: EditorContext) {
 		return ctx.query.rootsOf(ctx.query.unlockedIds(state.selection));
 	}
 
+	function carries(id: string): boolean {
+		const roots = new Set(movable());
+		for (let cursor: string | undefined = id, depth = 0; cursor && depth < 64; depth += 1) {
+			if (roots.has(cursor)) return true;
+			cursor = state.scene.get(cursor)?.parent;
+		}
+		return false;
+	}
+
 	function nudge(dx: number, dy: number, large: boolean) {
 		const ids = movable();
 		if (ids.length === 0) return;
@@ -179,6 +188,7 @@ export function createSelectionModule(ctx: EditorContext) {
 		framesFor,
 		placed,
 		movable,
+		carries,
 		nudge,
 		align,
 		distribute,

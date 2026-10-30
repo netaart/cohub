@@ -108,6 +108,22 @@ body {
 
 `ctx.window.visible` 为 false 时暂停高开销的渲染；后台标签页保持挂载，切回时可立即恢复。
 
+## 调用自己的后端
+
+取得所需的 viewer grant 后，使用 `client.auth.getAccessToken()`，以 SDK 调用 Cohub API 时使用的同一凭证请求可信后端。已发布 App 默认取得的是 App session，不是宿主的账户凭证。该方法复用现有 runtime，兼容 iframe 和独立页面 broker 模式；无需另建 runtime 或读取存储键。
+
+```ts
+const token = await client.auth.getAccessToken();
+if (!token) return; // 当前没有可用凭证。
+const response = await fetch("https://your-backend.example/api/reply", {
+  method: "POST",
+  headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+  body: JSON.stringify({ input: "Hello" }),
+});
+```
+
+传入 `{ forceRefresh: true }` 可向同一凭证来源请求刷新。client 配置的自定义 `getAccessToken` 或沙箱执行凭证仍遵循原有优先级。返回值为 `Promise<string | null>`，凭证来源的错误会继续抛出，不会申请额外权限。后端必须验证凭证并保留授权边界。不要把 token 放进 URL 或日志，也不要在生成流已经开始后自动重放请求。
+
 ## 权限
 
 App 在一个 Space 上的有效权限是**两个来源的并集** —— 任一即可：

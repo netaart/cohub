@@ -109,10 +109,6 @@ export function remapItems(
 	return result;
 }
 
-export function defaultPasteOffset(count = 1) {
-	return { x: DUPLICATE_OFFSET * count, y: DUPLICATE_OFFSET * count };
-}
-
 function shiftItem(item: BoardItem, dx: number, dy: number): BoardItem {
 	return { ...item, position: { x: item.position.x + dx, y: item.position.y + dy } };
 }

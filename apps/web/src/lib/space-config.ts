@@ -1,4 +1,4 @@
-import { SPACE_CONFIG_PATH } from "@cohub/protocol";
+import { SPACE_CONFIG_PATH, withNewChatBackground } from "@cohub/protocol";
 import { HttpError } from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
 import {
@@ -9,6 +9,7 @@ import {
 	type WorkspaceDefaultLayout,
 	type WorkspaceLayoutPresentation,
 } from "$lib/space-config-parse";
+import { resolveTextFileResponse } from "$lib/space-file-text";
 import { spacePreviewSessionCache } from "$lib/space-preview-session-cache";
 
 export type {
@@ -29,6 +30,7 @@ const MAX_RETRY_ATTEMPTS = 5;
 const RETRYABLE_ERROR_DELAY_MS = 1200;
 const listeners = new Set<SpaceConfigListener>();
 const backgroundActionListeners = new Set<NewChatBackgroundActionListener>();
+const boardFileListeners = new Set<(path: string) => void>();
 
 let activeSpaceId: string | null = null;
 let activeVersion = 0;
@@ -178,6 +180,70 @@ export function subscribeSpaceConfigBackgroundAction(
 ) {
 	backgroundActionListeners.add(listener);
 	return () => backgroundActionListeners.delete(listener);
+}
+
+export function emitSpaceBoardFileChanged(path: string) {
+	for (const listener of boardFileListeners) listener(path);
+}
+
+export function subscribeSpaceBoardFileChanged(
+	listener: (path: string) => void,
+) {
+	boardFileListeners.add(listener);
+	return () => boardFileListeners.delete(listener);
+}
+
+async function readEditableSpaceConfig(spaceId: string): Promise<{
+	document: Record<string, unknown>;
+	current: NewChatBackgroundConfig | null;
+	expected?: { mtimeMs: number; size: number };
+}> {
+	try {
+		const raw = await sdk.space(spaceId).files.read(SPACE_CONFIG_PATH);
+		if (!("content" in raw))
+			throw new Error(`${SPACE_CONFIG_PATH} is being prepared.`);
+		const { content } = await resolveTextFileResponse(raw);
+		const document: unknown = JSON.parse(content);
+		if (!document || typeof document !== "object" || Array.isArray(document))
+			throw new Error(`${SPACE_CONFIG_PATH} must be a JSON object.`);
+		return {
+			document: document as Record<string, unknown>,
+			current: parseSpaceConfig(content)?.ui?.newChat?.background ?? null,
+			expected: { mtimeMs: raw.mtimeMs, size: raw.size },
+		};
+	} catch (error) {
+		if (error instanceof HttpError && error.status === 404)
+			return { document: {}, current: null };
+		throw error;
+	}
+}
+
+export async function setNewChatBoardBackground(
+	spaceId: string,
+	path: string,
+	enabled: boolean,
+	confirmReplace: () => boolean,
+) {
+	const { document, current, expected } =
+		await readEditableSpaceConfig(spaceId);
+	const shown = current?.type === "board" && current.source.path === path;
+	if (enabled === shown) return;
+	const replaced = (
+		document.ui as { newChat?: { background?: unknown } } | undefined
+	)?.newChat?.background;
+	if (enabled && replaced !== undefined && !confirmReplace()) return;
+	const next = withNewChatBackground(
+		document,
+		enabled ? { type: "board", url: path } : null,
+	);
+	await sdk.space(spaceId).files.write({
+		path: SPACE_CONFIG_PATH,
+		content: `${JSON.stringify(next, null, 2)}\n`,
+		encoding: "utf-8",
+		...(expected ? { expected } : {}),
+		mutationId: crypto.randomUUID(),
+	});
+	refreshSpaceConfig(spaceId);
 }
 
 export function isSpaceConfigPath(path: string | null | undefined) {

@@ -1,5 +1,21 @@
 # @neta-art/cohub-cli
 
+## 10.17.0
+
+### Minor Changes
+
+- 38aeb6f: Space details include `workspaceUsage`: the cloud workspace's allocated bytes, when they were measured, and whether the value is `ready`, `stale`, `pending`, or `error`. `cohub spaces get` shows it as Storage.
+
+### Patch Changes
+
+- 360b8d8: Ember and the cohub-generate skill pick the speech model from the catalog by capability instead of a fixed id, so they keep working when a speech model leaves the catalog. The skill also shows how to pass a speech model's `instructions` parameter. Generation SDK 0.2.10: scene3 no longer takes `instructions` and states its 900-character text limit; `qwen-audio-3.1-tts-flash` gets more accurate descriptions of `instructions` and `seed`.
+- Updated dependencies [ed971a8]
+- Updated dependencies [bebb79f]
+- Updated dependencies [3efa44e]
+- Updated dependencies [360b8d8]
+- Updated dependencies [38aeb6f]
+  - @neta-art/cohub@13.7.0
+
 ## 10.16.0
 
 ### Minor Changes

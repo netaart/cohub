@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type BoardPointerEvent, createBoardEditor } from "../../src/board/editor/index.js";
+import { type BoardPointerEvent, type BoardToolId, createBoardEditor } from "../../src/board/editor/index.js";
 import { screenPoint, worldPoint } from "../../src/board/model/index.js";
 import { boardDocument } from "./fixtures.js";
 
-function setup(tool?: "select" | "hand") {
+function setup(tool?: BoardToolId) {
 	const commits: unknown[] = [];
 	const editor = createBoardEditor({
 		document: boardDocument({ items: { a: { type: "shape", size: { width: 100, height: 100 } } } }),
@@ -78,4 +78,20 @@ test("touch browses with the hand: a tap selects and arms select, a touch away r
 	finger.down(400, 400);
 	assert.deepEqual(editor.selection, []);
 	assert.equal(editor.tool, "hand");
+});
+
+test("the text tool opens its editor on release; a sideways drag sets the wrap width", () => {
+	const { editor, input } = setup("text");
+	input().down(300, 300);
+	assert.equal(editor.editingId, null);
+	input().up(300, 300);
+	assert.equal(editor.itemById(editor.editingId ?? "")?.props.width, undefined);
+	editor.commitTextEdit(editor.editingId ?? "", "");
+	editor.tool = "text";
+	input().down(500, 300);
+	input().move(320, 340);
+	input().up(320, 340);
+	const item = editor.itemById(editor.editingId ?? "");
+	assert.deepEqual(item?.position, { x: 320, y: 300 });
+	assert.equal(item?.props.width, 180);
 });
