@@ -1,5 +1,17 @@
 # @neta-art/cohub
 
+## 13.8.0
+
+### Minor Changes
+
+- 3eee63e: Expose subscription recovery status and payment actions, preserve confirmed cancellation results, and identify Checkout purchases across retries and returns.
+
+### Patch Changes
+
+- 7b49e43: A paste beside its copy keeps that spot only while the spot sits almost wholly in view; otherwise it lands in the middle of the view.
+- 21a8314: Release buffered `session.turn.patch` events when a missing seq does not arrive within 1.5s, so a lost patch triggers a stream snapshot resync instead of freezing live output until the turn ends.
+- 27d3057: Reconnect the WebSocket with a refreshed access token when the gateway rejects room subscriptions as `UNAUTHORIZED`, so long-lived tabs recover live session output after their token expires instead of retrying with the stale token.
+
 ## 13.7.0
 
 ### Minor Changes
