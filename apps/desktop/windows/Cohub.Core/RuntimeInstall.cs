@@ -4,6 +4,7 @@ namespace Cohub.Core;
 public static class RuntimeInstall
 {
     public static readonly string CliEntry = Path.Combine("cli", "node_modules", "@neta-art", "cohub-cli", "bin", "cohub.js");
+    public static readonly string SandboxdEntry = Path.Combine("sandboxd", "cohub-sandboxd.exe");
 
     public static string Prepare(string bundled, string root, string version)
     {
@@ -49,6 +50,7 @@ public static class RuntimeInstall
             "rem Written by Cohub on launch: the CLI it ships, updated with the app.",
             "setlocal",
             "set COHUB_CLI_AUTO_UPDATE=0",
+            $"if not defined COHUB_SANDBOXD_BIN set \"COHUB_SANDBOXD_BIN={Path.Combine(runtime, SandboxdEntry)}\"",
             $"\"{Path.Combine(runtime, "node.exe")}\" \"{Path.Combine(runtime, CliEntry)}\" %*",
             "");
         Directory.CreateDirectory(Path.GetDirectoryName(shim)!);

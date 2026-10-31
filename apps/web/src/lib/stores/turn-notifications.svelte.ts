@@ -2,6 +2,10 @@ import type { ChannelEnvelope, SpaceRecord } from "@neta-art/cohub";
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
 import { callHost, supportsHostCapability } from "$lib/host-bridge";
+import {
+	hostPermissions,
+	requestHostPermission,
+} from "$lib/host-permissions.svelte";
 import type { Locale } from "$lib/i18n/locale";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
@@ -247,6 +251,7 @@ class TurnNotificationsStore {
 
 	start() {
 		if (this.cleanup || !isBrowser()) return;
+		void hostPermissions();
 		this.desktopPermission = canUseDesktopNotifications()
 			? Notification.permission
 			: "denied";
@@ -310,10 +315,15 @@ class TurnNotificationsStore {
 	}
 
 	async enableDesktopNotifications() {
-		if (!canUseDesktopNotifications()) return;
-		const permission = await Notification.requestPermission();
-		this.desktopPermission = permission;
-		this.showDesktopPrompt = false;
+		if (supportsHostCapability("notifications")) {
+			this.showDesktopPrompt = false;
+			await requestHostPermission("notifications").catch(() => undefined);
+		} else {
+			if (!canUseDesktopNotifications()) return;
+			const permission = await Notification.requestPermission();
+			this.desktopPermission = permission;
+			this.showDesktopPrompt = false;
+		}
 		writePromptState(authStore.userUuid, {
 			promptedAt: Date.now(),
 			dismissCount: 0,
@@ -507,8 +517,12 @@ class TurnNotificationsStore {
 	}
 
 	private maybeShowDesktopPrompt() {
-		if (supportsHostCapability("notifications")) return;
-		if (!canUseDesktopNotifications() || this.desktopPermission !== "default")
+		if (supportsHostCapability("notifications")) {
+			if (hostPermissions()?.notifications !== "prompt") return;
+		} else if (
+			!canUseDesktopNotifications() ||
+			this.desktopPermission !== "default"
+		)
 			return;
 		const state = readPromptState(authStore.userUuid);
 		if ((state.dismissCount ?? 0) >= NOTIFICATION_PROMPT_MAX_DISMISSES) return;

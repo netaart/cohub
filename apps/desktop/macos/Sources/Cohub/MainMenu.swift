@@ -9,6 +9,8 @@ enum MainMenu {
         app.addItem(withTitle: L("About Cohub"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         if let updater { app.addItem(updater) }
         app.addItem(.separator())
+        app.addItem(withTitle: L("Settings…"), action: #selector(Shell.openSettings(_:)), keyEquivalent: ",")
+        app.addItem(.separator())
         app.addItem(withTitle: L("Install Command Line Tool…"), action: #selector(Shell.installCommandLineTool(_:)), keyEquivalent: "")
         app.addItem(.separator())
         let services = app.addItem(withTitle: L("Services"), action: nil, keyEquivalent: "")
@@ -23,6 +25,7 @@ enum MainMenu {
 
         let file = submenu(bar, L("File"))
         file.addItem(withTitle: L("New Window"), action: #selector(Shell.newWindow(_:)), keyEquivalent: "n")
+        file.addItem(withTitle: L("New Space…"), action: #selector(Shell.newSpace(_:)), keyEquivalent: "n").keyEquivalentModifierMask = [.command, .shift]
         file.addItem(withTitle: L("Close Window"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
 
         let edit = submenu(bar, L("Edit"))

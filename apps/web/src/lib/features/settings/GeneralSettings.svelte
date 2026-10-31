@@ -21,6 +21,7 @@ import UploadProgress from "$lib/components/UploadProgress.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getThemeCss } from "$lib/custom-theme/theme-css.svelte";
 import { userTheme } from "$lib/custom-theme/user-theme.svelte";
+import DeviceSettings from "$lib/features/settings/DeviceSettings.svelte";
 import type { LocalePreference } from "$lib/i18n/locale";
 import {
 	getLocale,
@@ -297,6 +298,7 @@ onMount(() => {
 					</div>
 				{/if}
 			</div>
+			<DeviceSettings />
 		</section>
 	</section>
 </div>

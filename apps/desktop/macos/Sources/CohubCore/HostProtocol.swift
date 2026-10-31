@@ -14,6 +14,10 @@ public enum HostProtocol {
         public static let mediaCapture = "media.capture"
         public static let runtime = "runtime"
         public static let runtimePicker = "runtime.picker"
+        public static let permissions = "permissions"
+        public static let badge = "badge"
+        public static let launchAtLogin = "app.launchAtLogin"
+        public static let globalShortcut = "app.globalShortcut"
     }
 
     public enum Method {
@@ -32,17 +36,28 @@ public enum HostProtocol {
         public static let runtimeStart = "runtime.start"
         public static let runtimeStop = "runtime.stop"
         public static let runtimePickFolder = "runtime.pickFolder"
+        public static let displayShare = "display.share"
+        public static let displayStop = "display.stop"
+        public static let displayOpenControlSettings = "display.openControlSettings"
+        public static let permissionsStatus = "permissions.status"
+        public static let permissionsRequest = "permissions.request"
+        public static let permissionsOpenSettings = "permissions.openSettings"
+        public static let badgeSet = "badge.set"
+        public static let launchAtLogin = "app.launchAtLogin"
+        public static let globalShortcut = "app.globalShortcut"
     }
 
     public enum Event {
         public static let authChanged = "auth.changed"
         public static let runtimeChanged = "runtime.changed"
+        public static let displayChanged = "display.changed"
     }
 
     public enum ErrorCode {
         public static let unsupported = "unsupported"
         public static let canceled = "canceled"
         public static let failed = "failed"
+        public static let denied = "denied"
     }
 
     public enum ShellEvent {

@@ -6,12 +6,15 @@ final class StatusMenu {
     struct Actions {
         let openSpace: @MainActor (String) -> Void
         let disconnect: @MainActor (String) -> Void
+        let newSpace: @MainActor () -> Void
+        let stopSharing: @MainActor () -> Void
         let showCohub: @MainActor () -> Void
     }
 
     private let actions: Actions
     private var item: NSStatusItem?
     private var overview = RuntimeOverview()
+    private var sharing = false
 
     init(actions: Actions) {
         self.actions = actions
@@ -20,20 +23,35 @@ final class StatusMenu {
     func update(_ next: RuntimeOverview) {
         guard next != overview else { return }
         overview = next
-        guard let summary = next.summary else {
+        rebuild()
+    }
+
+    func update(sharing next: Bool) {
+        guard next != sharing else { return }
+        sharing = next
+        rebuild()
+    }
+
+    private func rebuild() {
+        guard let summary = overview.summary else {
             if let item { NSStatusBar.system.removeStatusItem(item) }
             item = nil
             return
         }
         let item = self.item ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.item = item
-        item.button?.image = Self.icon(summary)
-        item.button?.toolTip = Self.describe(summary)
+        item.button?.image = Self.icon(summary, sharing: sharing)
+        item.button?.toolTip = sharing ? L("Sharing this screen") : Self.describe(summary)
         item.menu = menu()
     }
 
     private func menu() -> NSMenu {
         let menu = NSMenu()
+        if sharing {
+            menu.addItem(.disabled(L("Sharing this screen")))
+            menu.addItem(ActionMenuItem(L("Stop Sharing")) { [actions] in actions.stopSharing() })
+            menu.addItem(.separator())
+        }
         menu.addItem(.disabled(L("Connected Folders")))
         for folder in overview.connected {
             let entry = NSMenuItem(title: folder.name, action: nil, keyEquivalent: "")
@@ -53,6 +71,7 @@ final class StatusMenu {
             menu.addItem(entry)
         }
         menu.addItem(.separator())
+        menu.addItem(ActionMenuItem(L("New Space…")) { [actions] in actions.newSpace() })
         menu.addItem(ActionMenuItem(L("Open Cohub")) { [actions] in actions.showCohub() })
         menu.addItem(NSMenuItem(title: L("Quit Cohub"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         return menu
@@ -67,7 +86,7 @@ final class StatusMenu {
         }
     }
 
-    private static func icon(_ state: RuntimeOverview.State) -> NSImage {
+    private static func icon(_ state: RuntimeOverview.State, sharing: Bool) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
             let ring = NSBezierPath()
             ring.appendArc(withCenter: NSPoint(x: rect.midX, y: rect.midY), radius: 6.5, startAngle: 40, endAngle: 320)
@@ -75,6 +94,10 @@ final class StatusMenu {
             if state == .connecting { ring.setLineDash([2.4, 2.2], count: 2, phase: 0) }
             NSColor.black.setStroke()
             ring.stroke()
+            if sharing {
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: NSRect(x: rect.midX - 2.5, y: rect.midY - 2.5, width: 5, height: 5)).fill()
+            }
             if state == .error {
                 NSColor.black.setFill()
                 NSBezierPath(ovalIn: NSRect(x: rect.maxX - 6, y: rect.maxY - 6, width: 5, height: 5)).fill()

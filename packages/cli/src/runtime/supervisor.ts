@@ -9,15 +9,19 @@ import { AuthRequiredError, resolveAccessToken } from "../auth.js";
 import { createClient } from "../client.js";
 import { currentIdentityKey } from "../space.js";
 import { ensureSandboxdBinary } from "../commands/sandboxd-binary.js";
-import { serveRuntime } from "./connection.js";
+import { serveRuntime, type Execution } from "./connection.js";
 import { discoverHarnesses, refreshHarnesses, type HarnessExecutables } from "./harnesses/index.js";
 import { RuntimeDiagnostics, serializeDiagnosticError, type RuntimeDiagnostic, type RuntimeDiagnosticLevel } from "./diagnostics.js";
-import { ownRuntimeInstance, runtimeInstanceDirectory, type RuntimeInstanceHandle } from "./instance.js";
+import { ownRuntimeInstance, runtimeInstanceDirectory, UNCONFIRMED_WORK, type RuntimeInstanceHandle } from "./instance.js";
+import { readRuntimePreferences } from "./preferences.js";
 import { createDiagnosticConsole, type RuntimeSummary } from "./presentation.js";
 import { join } from "node:path";
 import { RuntimeArchiveStore } from "./archive-store.js";
 import { readNativeConfig, runtimeStateRoot } from "./native/config.js";
 import { NativeRuntime } from "./native/daemon.js";
+
+const DISPLAY_ANSWER_MS = 10_000;
+const ACTIVITY_MS = 60_000;
 
 export type RuntimeLaunch = {
   spaceId: string;
@@ -104,6 +108,41 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   let retryDisconnectedBridge: (() => void) | undefined;
   let nativeStarted = false;
   let tokenInFlight: Promise<string> | null = null;
+  const executions = new Map<string, Execution>();
+  let bridgeControl: { features: string[]; send: (frame: object) => void } | null = null;
+  let displayAnswer: ((frame: { spec: string; error?: string }) => void) | null = null;
+  const applyKeepAwake = async () => {
+    if (bridgeControl?.features.includes("keepAwake")) bridgeControl.send({ type: "keepAwake", enabled: (await readRuntimePreferences()).keepAwake });
+  };
+  const setDisplay = async (spec: string) => {
+    if (bridgeControl && !bridgeControl.features.includes("display")) throw new Error("This Runtime cannot change its screen while running; reconnect it");
+    if (!spec) update({ display: undefined, displayOnRequest: undefined, displayNeeds: undefined });
+    if (!bridgeControl) {
+      if (!spec) return summary();
+      throw new Error("The file bridge is restarting; try again");
+    }
+    const { send } = bridgeControl;
+    const before = status.displayOnRequest;
+    if (spec) update({ displayOnRequest: true });
+    const frame = await new Promise<{ spec: string; error?: string }>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        displayAnswer = null;
+        if (spec) send({ type: "display", spec: "" });
+        update({ display: undefined, displayOnRequest: undefined, displayNeeds: undefined });
+        reject(new Error("The file bridge did not answer"));
+      }, DISPLAY_ANSWER_MS);
+      displayAnswer = (answer) => {
+        if (!answer.error && answer.spec !== spec) return;
+        clearTimeout(timer); displayAnswer = null; resolve(answer);
+      };
+      send({ type: "display", spec });
+    });
+    if (frame.error) {
+      update({ displayOnRequest: before });
+      throw new Error(frame.error);
+    }
+    return summary();
+  };
   const token = (forceRefresh = false) => {
     tokenInFlight ??= (async () => {
       if (currentIdentityKey() !== config.identity) throw new AuthRequiredError("Runtime account changed; sign in to the original account");
@@ -117,11 +156,15 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   try {
     instance = await ownRuntimeInstance(runtimeInstanceDirectory(config.identity, config.spaceId), summary, async (force) => {
       if (!force) for await (const batch of native.executor.results.pendingBatches()) {
-        if (batch.length) throw new Error("Unconfirmed executions remain. Use down --yes to stop; results and files are retained");
+        if (batch.length) throw new Error(`${UNCONFIRMED_WORK}. Use down --yes to stop; results and files are retained`);
       }
       update({ state: "stopping" });
       setTimeout(stop, 30);
-    }, (action, message) => native.control(action, message));
+    }, (action, message) => {
+      if (action === "display") return setDisplay(String(message.spec ?? ""));
+      if (action === "keepAwake") return applyKeepAwake();
+      return native.control(action, message);
+    });
     onState({ ...status });
     diagnostics.log("info", "runtime.cli_started", { platform: process.platform, node: process.versions.node, harnesses: config.harnesses });
     const [binary, capabilities] = await Promise.all([
@@ -150,10 +193,11 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
           const initialToken = await token();
           signal.throwIfAborted();
           if (process.platform === "win32") controlPipe = await listenWindowsControlPipe();
+          const spawnedScreen = status.display ?? "";
           const bridge = spawn(binary, ["--local", "--space", config.spaceId, "--root", config.root, "--relay", process.env.COHUB_RELAY_URL?.trim() || relay.toString()], {
             stdio: controlPipe ? ["pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe", "pipe"],
             windowsHide: true,
-            env: { ...process.env, COHUB_RELAY_TOKEN: initialToken, COHUB_RUNTIME_ID: status.runtimeId, COHUB_LOG_FORMAT: "json", COHUB_RUNTIME_MANAGED: "1", COHUB_DISPLAY: config.display ?? "", ...(controlPipe ? { COHUB_RUNTIME_CONTROL_PIPE: controlPipe.path } : {}) },
+            env: { ...process.env, COHUB_RELAY_TOKEN: initialToken, COHUB_RUNTIME_ID: status.runtimeId, COHUB_LOG_FORMAT: "json", COHUB_RUNTIME_MANAGED: "1", COHUB_DISPLAY: spawnedScreen, ...(controlPipe ? { COHUB_RUNTIME_CONTROL_PIPE: controlPipe.path } : {}) },
           });
           bridge.stdin?.on("error", () => undefined);
           const closed = new Promise<void>((resolve) => {
@@ -196,6 +240,15 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
             try {
               const event = JSON.parse(line);
               if (event.type === "hello") managed = true;
+              if (event.type === "features") {
+                bridgeControl = { features: event.features, send: (frame) => bridge.stdin?.write(`${JSON.stringify(frame)}\n`) };
+                void applyKeepAwake().catch(() => undefined);
+                if ((status.display ?? "") !== spawnedScreen) bridgeControl.send({ type: "display", spec: status.display ?? "" });
+              }
+              if (event.type === "display") {
+                update({ display: event.spec || undefined, displayNeeds: event.needs?.length ? event.needs : undefined });
+                displayAnswer?.(event);
+              }
               if (event.type === "connected" || event.type === "disconnected") {
                 const connected = event.type === "connected";
                 bridgeDisconnected = !connected;
@@ -264,6 +317,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
           if (!signal.aborted) diagnostics.log("warn", "sandboxd.restart_failed", { error: serializeDiagnosticError(error) });
         } finally {
           retryDisconnectedBridge = undefined;
+          bridgeControl = null;
           childStopped = true;
           controlPipe?.close();
           clearTimeout(refreshTimer); clearTimeout(probeTimer);
@@ -276,13 +330,18 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
       }
     };
     bridgeTask = runBridge();
+    const activity = setInterval(() => {
+      if (executions.size || native.status().running) bridgeControl?.send({ type: "activity" });
+    }, ACTIVITY_MS);
+    activity.unref();
+    signal.addEventListener("abort", () => clearInterval(activity), { once: true });
     await native.start(signal);
     nativeStarted = true;
     let importRequested = Boolean(config.importHistory);
     await serveRuntime({
       spaceId: config.spaceId, cwd: config.root, url: url.toString(), capabilities,
       refreshCapabilities: (current) => refreshHarnesses(current, config.executables, config.root, (harness, error) => diagnostics.log("warn", "runtime.harness_catalog_failed", { harness, error: serializeDiagnosticError(error) })),
-      runtimeId: status.runtimeId, diagnostics, token, signal, executor: native.executor,
+      runtimeId: status.runtimeId, diagnostics, token, signal, executor: native.executor, executions,
       onReady: () => { update({ harnessConnected: true }); retryDisconnectedBridge?.(); },
       onDisconnected: () => { native.connect(null); update({ harnessConnected: false }); retryDisconnectedBridge?.(); },
       onNativeStop: (stop) => { native.stop(stop.sessionId, stop.turnId); },

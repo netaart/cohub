@@ -56,8 +56,17 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `runtime.list` | `runtime` | This device's folders bound to Spaces, with live state |
 | `runtime.browse` | `runtime` | Asks for storage access, then lists a device folder |
 | `runtime.start` | `runtime` | Binds a folder to a Space and serves it; refuses taking over a running one |
-| `runtime.stop` | `runtime` | Disconnects a Space; its binding and files stay |
-| `runtime.pickFolder` | `runtime.picker` | The system folder dialog, answering a `runtime.browse` listing; preferred over the in-app browser |
+| `runtime.stop` | `runtime` | Disconnects a Space; its binding and files stay. Without `force`, a Runtime holding unconfirmed work answers `refused`; forcing stops the process and resolves nothing |
+| `runtime.pickFolder` | `runtime.picker` | The system folder dialog, then the consent to connect it, answering a `runtime.browse` listing; `path` skips the dialog for a folder the system handed over |
+| `runtime.keepAwake` | `runtime.keepAwake` | Whether a task keeps this computer from idling to sleep; `enabled` changes it |
+| `permissions.status` | `permissions` | What the host can tell about its permissions: `granted`, `denied` or `prompt` |
+| `permissions.request` | `permissions` | Asks the system; only meaningful for `prompt` |
+| `permissions.openSettings` | `permissions` | Opens the system settings for one permission |
+| `badge.set` | `badge` | The count on the app's icon |
+| `app.launchAtLogin` | `app.launchAtLogin` | Opens the app at login; `enabled` changes it |
+| `app.globalShortcut` | `app.globalShortcut` | ⌃⌥Space or Ctrl+Alt+Space brings the app forward; `enabled` changes it |
+| `share.take` | `share.incoming` | What another app shared here, once |
+| `share.readFile` | `share.incoming` | One shared file as base64, up to 12 MiB |
 | `appearance.set` | `appearance` | Edge color (`#rrggbb`) for the window and system bars |
 | `app.ready` | `launch` | First screen painted; the host lifts its launch screen |
 | `haptics.perform` | `haptics` | `tick`, `confirm`, `reject` or `longPress`, in the system's own feel |
@@ -76,6 +85,29 @@ display status. `display` rides on `runtime`; see [Displays](displays.md). Andro
 
 `app.foreground` and `app.background` follow the shell's visibility; the page
 also sees `visibilitychange`, because the host pauses the WebView with it.
+
+## Permissions
+
+A page asks for a permission at the moment it can explain why, through `permissions.request`; a
+host never surprises the user with a system prompt for its own convenience. Every denial has a way
+back: `permissions.openSettings` lands on the right page of system settings, and pages re-read
+`permissions.status` when the window regains focus, since that is how the user comes back.
+`HostPermissionNotice` is the one component that says so; Settings → General lists everything the
+host reports. `denied` from a host call (`HOST_BRIDGE_ERROR.denied`) means the system refused a
+folder, as distinct from `canceled`, the user's own choice.
+
+| | Android | macOS | Windows |
+| --- | --- | --- | --- |
+| `files` | All files access | Privacy → Files and Folders, per folder | None to ask for |
+| `microphone`, `camera` | Runtime permission | Privacy, through AVFoundation | Settings only; the system does not say |
+| `notifications` | Runtime permission | UserNotifications | Toast setting |
+| `background` | Battery optimization | — | — |
+| `screen`, `control` | Per share, through `display.*` | Settings only; the share's `needs` tell | Not needed |
+
+Connecting a folder lets a Space's people and agents change its files and run commands as the user,
+so every host says so before any Space depends on it: the desktop shells when a folder is chosen
+(the next `runtime.start` for that folder spends the consent; any other start asks again), Android
+once, before the system asks for All files access. A shared screen asks each time it starts.
 
 ## Launch
 
@@ -143,7 +175,7 @@ web origin like Android does, and split the bridge in two:
 - **Shell methods** stay native: windows, `appearance`, `navigation`, `share`, `files`
   (macOS; Windows keeps WebView2's own downloads), `cache`, `notifications`,
   `shortcuts` (Dock menu, Jump List), `media.capture` and `runtime.pickFolder`.
-- **Account and Runtime methods** are forwarded verbatim to the bundled CLI,
+- **Account, Runtime and screen methods** are forwarded verbatim to the bundled CLI,
   `cohub host serve`, over stdio (one JSON message per line). It answers `auth.*` from
   the CLI's own session, so signing in on the desktop signs in the terminal too and
   the other way round, and `runtime.*` from the same `runtime up` Runtimes a terminal
@@ -156,8 +188,9 @@ The service pushes `auth.changed` (with the `redirectPath` a sign-in asked for) 
 each Runtime's status stream rather than polling. `shell.open` asks the shell to open
 a URL in the browser (the device sign-in page); it is never relayed to the page. On
 `auth.changed` every window reloads: the frontmost lands on `redirectPath`, and a
-sign-out returns to `/`. Before a folder is first connected to a Space, the shell
-asks for consent natively; reconnecting a folder already serving that Space does not.
+sign-out returns to `/`. Signing out from the app first stops this account's Runtimes, whichever
+started them, since the session they need is about to be revoked; the folders it connected come back
+with the account.
 
 Sign-in uses the CLI's device authorization in the system browser. The token never
 leaves the CLI's session file; the page asks for it per request, like on Android.

@@ -11,12 +11,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import live.cohub.android.auth.AuthSession
@@ -231,6 +233,20 @@ class HostBridge(
             JsonPrimitive(true)
         }
 
+        HostProtocol.Methods.PERMISSIONS_STATUS -> actions.permissions().status()
+
+        HostProtocol.Methods.PERMISSIONS_REQUEST -> JsonPrimitive(actions.permissions().request(requireKind(params)))
+
+        HostProtocol.Methods.PERMISSIONS_OPEN_SETTINGS -> JsonPrimitive(actions.permissions().openSettings(requireKind(params)))
+
+        HostProtocol.Methods.SHARE_TAKE -> actions.takeShare()?.toJson() ?: JsonNull
+
+        HostProtocol.Methods.SHARE_READ_FILE -> {
+            val shareId = params.string("id") ?: throw IllegalArgumentException("share.readFile requires an id")
+            val index = params["index"]?.jsonPrimitive?.intOrNull ?: throw IllegalArgumentException("share.readFile requires an index")
+            buildJsonObject { put("data", actions.readSharedFile(shareId, index)) }
+        }
+
         HostProtocol.Methods.RUNTIME_LIST -> requireRuntime().instances.value.toJson()
 
         HostProtocol.Methods.RUNTIME_BROWSE -> {
@@ -247,6 +263,7 @@ class HostBridge(
             val root = params["root"]?.jsonPrimitive?.contentOrNull
                 ?: throw IllegalArgumentException("runtime.start requires a folder")
             requireStorageAccess()
+            actions.permissions().requestNotifications()
             val refused = requireRuntime().start(spaceId, root)
             JsonObject(requireRuntime().instances.value.toJson() + ("refused" to JsonPrimitive(refused)))
         }
@@ -276,6 +293,8 @@ class HostBridge(
         else -> throw IllegalArgumentException("Unhandled method: $method")
     }
 
+    private fun requireKind(params: JsonObject): String = params.string("kind") ?: throw IllegalArgumentException("A permission kind is required")
+
     private fun requireDisplay(): DeviceDisplay = display ?: throw IllegalStateException("This device cannot share its screen")
 
     private fun isRunning(state: RuntimeInstance.State) =
@@ -284,7 +303,7 @@ class HostBridge(
     private fun requireRuntime(): DeviceRuntime = runtime ?: throw IllegalStateException("This device cannot serve a Space")
 
     private suspend fun requireStorageAccess() {
-        if (!actions.prepareRuntime()) throw CancellationSignal("All files access was not granted")
+        if (!actions.prepareRuntime()) throw CancellationSignal("Access to this device's files was not granted")
     }
 
     private fun requireSpaceId(params: JsonObject): String =
@@ -357,6 +376,11 @@ class HostBridge(
             HostProtocol.Methods.HAPTICS_PERFORM,
             HostProtocol.Methods.NAVIGATION_INTERCEPT_BACK,
             HostProtocol.Methods.SHORTCUTS_PUSH,
+            HostProtocol.Methods.PERMISSIONS_STATUS,
+            HostProtocol.Methods.PERMISSIONS_REQUEST,
+            HostProtocol.Methods.PERMISSIONS_OPEN_SETTINGS,
+            HostProtocol.Methods.SHARE_TAKE,
+            HostProtocol.Methods.SHARE_READ_FILE,
         )
     }
 }
@@ -391,6 +415,12 @@ interface HostActions {
     fun startSharing(spaceId: String, grant: ScreenCaptureGrant)
 
     fun openControlSettings(): Boolean
+
+    fun permissions(): HostPermissions
+
+    fun takeShare(): IncomingShare?
+
+    suspend fun readSharedFile(id: String, index: Int): String
 }
 
 class ScreenCaptureGrant(val resultCode: Int, val data: android.content.Intent)

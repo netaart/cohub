@@ -49,11 +49,13 @@ Harnesses (`pi`, `codex`, `claude` for Claude Code, `workbuddy` for the WorkBudd
 for the Cursor CLI `cursor-agent`) must
 already be installed and authenticated locally. Without `--harness`, startup discovers every installed
 harness on PATH (or explicit executable overrides); one that fails its startup check is skipped with a
-warning, and startup fails only when none can run. Explicitly requested harnesses must all pass; a Turn
+warning. With none left the Runtime still serves the folder, like a device Runtime: it declares no
+Harness, and Turns run on the Cohub Harness with their tools reaching the folder through the file
+bridge. Reconnecting picks up a Harness installed later. Explicitly requested harnesses must all pass; a Turn
 never silently switches executors. `--<harness> <path>` (for example `--claude`) overrides an executable
 path. Repeated `--harness` options and comma-separated values are accepted. `--yes` accepts the explicit
 local execution consent for non-interactive startup.
-未指定 `--harness` 时自动发现所有已安装的 Harness，启动检查失败的告警并跳过，全部失败才报错；显式指定的必须全部可用。
+未指定 `--harness` 时自动发现所有已安装的 Harness，启动检查失败的告警并跳过；一个都没有时 Runtime 仍提供该文件夹，Turn 由 Cohub Harness 执行，工具经文件桥访问文件夹，之后重连即可识别新装的 Harness。显式指定的必须全部可用。
 
 ## Harness adapters / Harness 适配器
 
@@ -263,13 +265,21 @@ not carried over; sync starts afresh.
 The macOS and Windows apps serve folders through the CLI they bundle, so a folder connected
 in the app is an ordinary `runtime up -d` Runtime: `runtime status`, `logs` and `down` see
 it from a terminal, and the app sees Runtimes a terminal started. Sign-in is shared too: the
-app uses the CLI's session file. Choosing a folder uses the system dialog; connecting a folder
-to a Space for the first time asks for the same consent `runtime up` does, then starts it with
-`--yes` (screen sharing stays off). Folders the app connected and never disconnected reconnect
+app uses the CLI's session file. Choosing a folder uses the system dialog, followed by the same
+consent `runtime up` asks for, so a new Space is only created once the folder can serve it; the
+Runtime then starts with `--yes` (screen sharing stays off). A folder can also come from the system:
+dropped on the Dock icon or opened from Finder, or from "Open in Cohub" in File Explorer. Each lands on
+a new Space with that folder chosen, and asks the same consent. Folders the app connected and never disconnected reconnect
 when it starts again (`~/.local/state/cohub/host/runtimes.json`); `runtime down` from anywhere
 counts as a disconnect, and one since bound to another folder is forgotten rather than rebound.
 Quitting the app leaves its Runtimes running, as closing a terminal leaves `up -d`; they run from
-a per-version copy of the bundled CLI outside the app, so an update never stops or swaps their code. The menu bar (macOS) or notification area (Windows) lists connected folders.
+a per-version copy of the bundled CLI and sandboxd outside the app, so an update never stops or swaps their code, and a first connection downloads nothing. The menu bar (macOS) or notification area (Windows) lists connected folders. Signing out from the app stops the account's Runtimes and keeps their folders for the next sign-in.
+
+While work runs, the machine stays awake: sandboxd holds off idle sleep (`IOPMAssertion`,
+`SetThreadExecutionState`) for as long as it serves requests or runs processes and for five minutes after,
+and the supervisor reports Turns in a local Harness, which never reach sandboxd. Only idle sleep: the
+display may sleep, and closing a lid still sleeps. It is on unless turned off in Settings → General
+(`~/.config/cohub/runtime-preferences.json`), and it applies to Runtimes a terminal started too.
 
 A GUI app starts with a minimal environment, so the CLI resolves Harnesses on the PATH of the
 user's login shell. Cohub settings from that shell (`COHUB_*`, `ENV`) are never inherited.
@@ -277,15 +287,18 @@ See [Native host bridge](native-host-bridge.md#desktop) and `apps/desktop/README
 
 macOS 与 Windows 桌面应用通过内置的 CLI 提供本地 Runtime：应用中连接的文件夹就是普通的 `runtime up -d`，终端的
 `runtime status`、`logs`、`down` 都能看到它，应用也能看到终端启动的 Runtime；登录同样共享 CLI 的会话文件。
-选择文件夹使用系统对话框；文件夹首次连接到某个 Space 时会询问与 `runtime up` 相同的授权，之后以 `--yes` 启动
-（不共享屏幕）。应用连接且未断开的文件夹会在应用再次启动时重新连接；在任何地方执行 `runtime down` 都视为断开。
+选择文件夹使用系统对话框，随后询问与 `runtime up` 相同的授权，确认后才创建 Space，再以 `--yes` 启动（不共享屏幕）。
+文件夹也可来自系统：拖到 Dock 图标、从访达打开，或文件资源管理器的“在 Cohub 中打开”，都会进入新建 Space 并预选该文件夹，同样需要授权。应用连接且未断开的文件夹会在应用再次启动时重新连接；在任何地方执行 `runtime down` 都视为断开。
 已改绑到其他文件夹的 Space 会被遗忘而不会改回。退出应用不会停止其 Runtime；Runtime 运行在应用外按版本复制的 CLI 中，更新应用不会停止或替换其代码。
+应用内退出登录会停止该账号的 Runtime，文件夹保留到下次登录。任务运行期间 sandboxd 会阻止系统因闲置而休眠（屏幕仍可熄灭，合盖仍会休眠），结束五分钟后释放，可在“设置 → 通用”中关闭。
 GUI 应用的环境变量很少，因此 CLI 会从用户的登录 Shell 解析 Harness 的 PATH，但不继承其中的 `COHUB_*` 与 `ENV`。
 
 ## Android device / Android 设备
 
 The Android app serves folders of the phone the way `runtime up` serves directories: each folder is
-bound to one Space for the signed-in account, and every enabled binding runs at once. Any readable
+bound to one Space for the signed-in account, and every enabled binding runs at once. The first
+folder comes with a one-time notice of what connecting lets a Space do, before the system asks for
+All files access. Any readable
 folder can be chosen, including a whole storage volume; only `Android/data` and `Android/obb`, which
 Android keeps private to other apps, are left out. Each binding runs the same pair the CLI supervises,
 with no special path through the server:
@@ -305,7 +318,9 @@ running folder or Space is never taken over: rebinding it is refused until it is
 asks for **All files access** first; one foreground service keeps every enabled folder connected in the
 background and stops them all at sign-out. Folders the user never disconnected come back when the
 system restarts the service, or when the app is next opened after a reboot, update or force stop;
-until then they show as stopped. Like `runtime up`, nothing starts at boot.
+until then they show as stopped. Like `runtime up`, nothing starts at boot. Turning All files access
+off shows why a folder stopped; turning it back on brings the folder back. A network coming back
+reconnects at once instead of waiting out a backoff.
 
 All agent tools keep their meaning. File tools are fenced to the folder; `bash` runs as the app, like
 the CLI runs as the OS user, and uses `sh` (Android's mksh with toybox) because the device has no bash;

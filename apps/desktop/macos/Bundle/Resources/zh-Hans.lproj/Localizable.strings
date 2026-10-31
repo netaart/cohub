@@ -37,8 +37,8 @@
 "Choose" = "选择";
 "Choose a folder for agents to work in." = "选择一个文件夹，供 Agent 在其中工作。";
 "Connect" = "连接";
-"Connect “%@” to this Space?" = "将“%@”连接到这个 Space？";
-"People and agents in this Space can change files in this folder and run commands as you on this Mac. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space." = "这个 Space 中的成员和 Agent 可以修改此文件夹中的文件，并以你的身份在这台 Mac 上运行命令。此文件夹中本地的 Pi、Codex、Claude Code 和 Cursor 对话（包括之前的对话）会同步到 Space。";
+"Connect “%@” to a Space?" = "将“%@”连接到 Space？";
+"People and agents in the Space can change files in this folder and run commands as you on this Mac. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space." = "Space 中的成员和 Agent 可以修改此文件夹中的文件，并以你的身份在这台 Mac 上运行命令。此文件夹中本地的 Pi、Codex、Claude Code 和 Cursor 对话（包括之前的对话）会同步到 Space。";
 "Couldn’t disconnect this folder" = "无法断开此文件夹";
 "This build has no command line tool." = "此版本未包含命令行工具。";
 "Install it with npm install -g @neta-art/cohub-cli." = "请使用 npm install -g @neta-art/cohub-cli 安装。";
@@ -56,3 +56,12 @@
 "Show in Finder" = "在访达中显示";
 "Disconnect" = "断开连接";
 "Open Cohub" = "打开 Cohub";
+"Settings…" = "设置…";
+"New Space…" = "新建 Space…";
+"Sharing this screen" = "正在共享这块屏幕";
+"Stop Sharing" = "停止共享";
+"Share this screen with the Space?" = "将这块屏幕共享给 Space？";
+"People and agents in the Space can see this screen and control this Mac until you stop sharing or quit Cohub." = "Space 中的成员和 Agent 可以查看这块屏幕并控制这台 Mac，直到你停止共享或退出 Cohub。";
+"Share" = "共享";
+"A task’s result hasn’t been confirmed yet" = "有任务的结果尚未确认";
+"Disconnecting stops the Runtime. Results and files are kept." = "断开会停止 Runtime，结果和文件都会保留。";

@@ -3,6 +3,7 @@ import {
 	type HostBridgeCapability,
 	type HostBridgeEvent,
 	type HostBridgeMethod,
+	type HostPlatform,
 	type HostShortcut,
 } from "@cohub/protocol/host-bridge";
 import {
@@ -58,6 +59,10 @@ export function supportsHostCapability(
 	capability: HostBridgeCapability,
 ): boolean {
 	return ensureBridge().supports(capability);
+}
+
+export function hostPlatform(): HostPlatform | null {
+	return ensureBridge().status?.platform ?? null;
 }
 
 export function hostAllowsMediaCapture(): boolean {
@@ -141,5 +146,16 @@ export function pushHostShortcut({ label, ...rest }: HostShortcut) {
 		callHost("shortcuts.push", shortcut).catch(() => {
 			if (lastShortcut === key) lastShortcut = null;
 		});
+	});
+}
+
+let lastBadge = 0;
+
+export function syncHostBadge(count: number) {
+	if (count === lastBadge) return;
+	lastBadge = count;
+	void readyHost().then(() => {
+		if (!supportsHostCapability("badge")) return;
+		callHost("badge.set", { count }).catch(() => {});
 	});
 }

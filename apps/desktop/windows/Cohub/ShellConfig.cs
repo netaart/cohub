@@ -31,13 +31,18 @@ internal sealed record ShellConfig(
         var data = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "Cohub", "Desktop", environment);
         var tool = Path.Combine(data, "bin");
         var childEnv = ChildEnvironment(env, environment);
-        HostService.Launch Serve(string node, string cli) => new(node, [cli, "host", "serve"], childEnv);
+        HostService.Launch Serve(string node, string cli, string? sandboxd = null)
+        {
+            var environment = new Dictionary<string, string>(childEnv, StringComparer.OrdinalIgnoreCase);
+            if (sandboxd is not null && File.Exists(sandboxd)) environment["COHUB_SANDBOXD_BIN"] = sandboxd;
+            return new(node, [cli, "host", "serve"], environment);
+        }
 
         Func<HostService.Launch>? service = null;
         var bundled = Path.Combine(AppContext.BaseDirectory, "runtime");
         if (env.GetValueOrDefault("COHUB_DESKTOP_NODE") is { } node && env.GetValueOrDefault("COHUB_DESKTOP_CLI") is { } cli)
         {
-            service = () => Serve(node, cli);
+            service = () => Serve(node, cli, env.GetValueOrDefault("COHUB_SANDBOXD_BIN"));
         }
         else if (File.Exists(Path.Combine(bundled, RuntimeInstall.CliEntry)))
         {
@@ -48,7 +53,7 @@ internal sealed record ShellConfig(
                 var runtime = RuntimeInstall.Prepare(bundled, root, version);
                 RuntimeInstall.WriteShim(Path.Combine(tool, "cohub.cmd"), runtime);
                 RuntimeInstall.Prune(root, runtime, RunningNodes());
-                return Serve(Path.Combine(runtime, "node.exe"), Path.Combine(runtime, RuntimeInstall.CliEntry));
+                return Serve(Path.Combine(runtime, "node.exe"), Path.Combine(runtime, RuntimeInstall.CliEntry), Path.Combine(runtime, RuntimeInstall.SandboxdEntry));
             };
         }
 
@@ -96,6 +101,7 @@ internal sealed class ShellState
     public ServiceHello? ServiceHello { get; set; }
     public List<Shortcut> Shortcuts { get; set; } = [];
     public Placement? Window { get; set; }
+    public bool GlobalShortcut { get; set; }
 
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
     private string path = "";

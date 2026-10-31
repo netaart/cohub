@@ -120,17 +120,21 @@ final class ShellWindow: NSWindowController, NSWindowDelegate, NSMenuItemValidat
         picker.show(relativeTo: NSRect(x: webView.bounds.midX, y: top, width: 1, height: 1), of: webView, preferredEdge: .minY)
     }
 
-    func pickFolder(service: HostService) async throws -> JSON {
+    func pickFolder(service: HostService, handedOver: String?) async throws -> JSON {
         guard let window else { throw BridgeFailure.canceled() }
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = L("Choose")
-        panel.message = L("Choose a folder for agents to work in.")
-        guard await panel.beginSheetModal(for: window) == .OK, let url = panel.url else { throw BridgeFailure.canceled() }
-        switch await service.call(BridgeRequest(id: "browse", method: HostProtocol.Method.runtimeBrowse, params: ["path": .string(url.path)])) {
+        var path = handedOver
+        if path == nil {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.canCreateDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.prompt = L("Choose")
+            panel.message = L("Choose a folder for agents to work in.")
+            guard await panel.beginSheetModal(for: window) == .OK, let url = panel.url else { throw BridgeFailure.canceled() }
+            path = url.path
+        }
+        switch await service.call(BridgeRequest(id: "browse", method: HostProtocol.Method.runtimeBrowse, params: ["path": .string(path ?? "")])) {
         case .result(let listing): return listing
         case .failure(let failure): throw failure
         }
@@ -139,10 +143,20 @@ final class ShellWindow: NSWindowController, NSWindowDelegate, NSMenuItemValidat
     func confirmConnect(root: String) async -> Bool {
         guard let window else { return false }
         let alert = NSAlert()
-        alert.messageText = L("Connect “\(URL(fileURLWithPath: root).lastPathComponent)” to this Space?")
-        alert.informativeText = L("People and agents in this Space can change files in this folder and run commands as you on this Mac. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space.")
+        alert.messageText = L("Connect “\(URL(fileURLWithPath: root).lastPathComponent)” to a Space?")
+        alert.informativeText = L("People and agents in the Space can change files in this folder and run commands as you on this Mac. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space.")
         alert.icon = NSWorkspace.shared.icon(forFile: root)
         alert.addButton(withTitle: L("Connect"))
+        alert.addButton(withTitle: L("Cancel"))
+        return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
+    }
+
+    func confirmShare() async -> Bool {
+        guard let window else { return false }
+        let alert = NSAlert()
+        alert.messageText = L("Share this screen with the Space?")
+        alert.informativeText = L("People and agents in the Space can see this screen and control this Mac until you stop sharing or quit Cohub.")
+        alert.addButton(withTitle: L("Share"))
         alert.addButton(withTitle: L("Cancel"))
         return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
     }

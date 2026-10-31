@@ -18,6 +18,7 @@ import {
 
 export {
   DEVICE_RUNTIME_REFUSALS,
+  DEVICE_RUNTIME_STOP_REFUSALS,
   HOST_BRIDGE_ERROR,
   HOST_BRIDGE_METHODS,
   HOST_SERVICE_SHELL_EVENTS,
@@ -25,6 +26,7 @@ export {
   hostAuthChangedSchema,
   hostBridgeRequestSchema,
   hostShellOpenSchema,
+  type DeviceDisplayStatus,
   type DeviceFolderListing,
   type DeviceRuntime,
   type DeviceRuntimeInstance,
@@ -54,6 +56,10 @@ export class HostBridgeErrorClass extends Error {
 
   get isCanceled(): boolean {
     return this.code === HOST_BRIDGE_ERROR.canceled;
+  }
+
+  get isDenied(): boolean {
+    return this.code === HOST_BRIDGE_ERROR.denied;
   }
 
   get isUnsupported(): boolean {

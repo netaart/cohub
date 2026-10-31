@@ -1,10 +1,9 @@
 package live.cohub.android
 
-import android.Manifest
+import android.app.AlertDialog
 import android.app.AppOpsManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionConfig
 import android.media.projection.MediaProjectionManager
 import android.graphics.Color
@@ -35,9 +34,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.withStarted
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import live.cohub.android.auth.Account
 import live.cohub.android.auth.AuthSession
 import live.cohub.android.auth.AuthorizationRequest
 import live.cohub.android.auth.Pkce
@@ -46,7 +49,9 @@ import live.cohub.android.media.MediaCapture
 import live.cohub.android.host.CancellationSignal
 import live.cohub.android.host.HostActions
 import live.cohub.android.host.HostBridge
+import live.cohub.android.host.HostPermissions
 import live.cohub.android.host.HostProtocol
+import live.cohub.android.host.IncomingShare
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LauncherShortcuts
 import live.cohub.android.host.ScreenCaptureGrant
@@ -59,6 +64,7 @@ import live.cohub.android.runtime.RuntimeService
 import live.cohub.android.runtime.toJson
 import live.cohub.android.ui.ShellAppearance
 import live.cohub.android.ui.SurfaceContainer
+import kotlin.coroutines.resume
 
 /** The shell: one WebView for product UI, one bridge for native capability. */
 class MainActivity : ComponentActivity(), HostActions {
@@ -73,7 +79,9 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var mediaCapture: MediaCapture
     private lateinit var customTabs: ActivityResultLauncher<Intent>
     private lateinit var allFilesAccess: ActivityResultLauncher<Intent>
-    private lateinit var notificationPermission: ActivityResultLauncher<String>
+    private lateinit var hostPermissions: HostPermissions
+    private var incomingShare: IncomingShare? = null
+    private var takenShare: IncomingShare? = null
     private lateinit var screenCapture: ActivityResultLauncher<Intent>
     private var pendingCapture: CompletableDeferred<ScreenCaptureGrant?>? = null
     private val app get() = application as CohubApplication
@@ -167,9 +175,7 @@ class MainActivity : ComponentActivity(), HostActions {
         allFilesAccess = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             pendingResult?.complete(Unit)
         }
-        notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-            pendingResult?.complete(Unit)
-        }
+        hostPermissions = HostPermissions(this, runtime.takeIf { it.available }?.let { it::hasStorageAccess }, ::prepareRuntime)
         screenCapture = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val data = result.data
             pendingCapture?.complete(if (result.resultCode == RESULT_OK && data != null) ScreenCaptureGrant(result.resultCode, data) else null)
@@ -195,7 +201,9 @@ class MainActivity : ComponentActivity(), HostActions {
         val link = intent?.data?.takeIf {
             savedInstanceState == null && (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0
         }
-        startPath = link?.takeUnless(::isSignInRedirect)?.let(WebOrigin::pathOf) ?: lastPage.read() ?: "/"
+        val fromRecents = (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        val shared = savedInstanceState == null && !fromRecents && receiveShare(intent)
+        startPath = if (shared) LauncherShortcuts.NEW_CHAT_PATH else link?.takeUnless(::isSignInRedirect)?.let(WebOrigin::pathOf) ?: lastPage.read() ?: "/"
         WebSurface.startUp(this) { if (!isDestroyed) mountSurface(startPath) }
         link?.takeIf(::isSignInRedirect)?.let(::handleSignInRedirect)
     }
@@ -263,11 +271,30 @@ class MainActivity : ComponentActivity(), HostActions {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (receiveShare(intent)) return navigate(LauncherShortcuts.NEW_CHAT_PATH)
         val data = intent.data ?: return
         if (isSignInRedirect(data)) handleSignInRedirect(data) else WebOrigin.pathOf(data)?.let(::navigate)
     }
 
+    private fun receiveShare(intent: Intent?): Boolean {
+        if (intent == null || !IncomingShare.isShare(intent)) return false
+        incomingShare = IncomingShare.from(intent, contentResolver) ?: return false
+        return true
+    }
+
     override fun hostId(): String = installId()
+
+    override fun permissions(): HostPermissions = hostPermissions
+
+    override fun takeShare(): IncomingShare? = incomingShare?.also {
+        takenShare = it
+        incomingShare = null
+    }
+
+    override suspend fun readSharedFile(id: String, index: Int): String {
+        val share = takenShare?.takeIf { it.id == id } ?: throw IllegalStateException("That share is gone")
+        return withContext(Dispatchers.IO) { share.readBase64(contentResolver, index) }
+    }
 
     override fun startSignIn(redirectPath: String?) {
         val challenge = Pkce.create()
@@ -330,6 +357,7 @@ class MainActivity : ComponentActivity(), HostActions {
         if (reportedDrawn) return
         reportedDrawn = true
         reportFullyDrawn()
+        if (auth.account is Account.SignedIn) LauncherShortcuts.pushNewChat(this)
     }
 
     private fun lift() {
@@ -378,11 +406,7 @@ class MainActivity : ComponentActivity(), HostActions {
     }
 
     override suspend fun prepareRuntime(): Boolean = preparing.withLock {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            awaitResult(notificationPermission, Manifest.permission.POST_NOTIFICATIONS)
-        }
+        if (!confirmRuntimeConsent()) return@withLock false
         if (runtime.hasStorageAccess()) return@withLock true
         try {
             awaitResult(
@@ -393,6 +417,22 @@ class MainActivity : ComponentActivity(), HostActions {
             awaitResult(allFilesAccess, Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
         }
         runtime.hasStorageAccess()
+    }
+
+    private suspend fun confirmRuntimeConsent(): Boolean {
+        if (hostPrefs.getBoolean(KEY_RUNTIME_CONSENT, false)) return true
+        val allowed = runtime.instances.value.isNotEmpty() || suspendCancellableCoroutine { result ->
+            val dialog = AlertDialog.Builder(this)
+                .setTitle(R.string.runtime_consent_title)
+                .setMessage(R.string.runtime_consent_message)
+                .setPositiveButton(R.string.runtime_consent_allow) { _, _ -> result.resume(true) }
+                .setNegativeButton(android.R.string.cancel) { _, _ -> result.resume(false) }
+                .setOnCancelListener { result.resume(false) }
+                .show()
+            result.invokeOnCancellation { dialog.dismiss() }
+        }
+        if (allowed) hostPrefs.edit { putBoolean(KEY_RUNTIME_CONSENT, true) }
+        return allowed
     }
 
     override suspend fun requestScreenCapture(): ScreenCaptureGrant? = preparing.withLock {
@@ -493,6 +533,7 @@ class MainActivity : ComponentActivity(), HostActions {
         const val TAG = "CohubShell"
         const val KEY_INSTALL_ID = "install_id"
         const val KEY_FORCE_LOGIN = "force_login"
+        const val KEY_RUNTIME_CONSENT = "runtime_consent"
 
         const val OP_ACCESS_RESTRICTED_SETTINGS = "android:access_restricted_settings"
 

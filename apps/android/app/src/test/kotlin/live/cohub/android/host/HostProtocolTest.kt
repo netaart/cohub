@@ -57,6 +57,7 @@ class HostProtocolTest {
             "auth.token", "auth.signIn", "auth.session", "notifications",
             "share", "filePicker", "navigation", "cache", "runtime", "appearance",
             "launch", "haptics", "files", "navigation.back", "shortcuts", "display", "media.capture",
+            "permissions", "share.incoming",
         )
         HostCapabilities.advertised(runtime = true, files = true).forEach { capability ->
             assertTrue("Unknown capability advertised: $capability", capability in known)

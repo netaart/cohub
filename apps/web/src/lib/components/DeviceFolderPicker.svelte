@@ -1,8 +1,10 @@
 <script lang="ts">
 import type { DeviceFolderListing } from "@cohub/protocol/host-bridge";
+import { HostBridgeErrorClass } from "@neta-art/cohub/host-bridge";
 import { ChevronRight, CornerLeftUp, Folder, Loader2 } from "lucide-svelte";
 import { untrack } from "svelte";
 import Dialog from "$lib/components/Dialog.svelte";
+import HostPermissionNotice from "$lib/components/HostPermissionNotice.svelte";
 import {
 	browseDeviceFolder,
 	deviceFolderPickerIsNative,
@@ -25,12 +27,14 @@ const locale = $derived(getLocale());
 let listing = $state<DeviceFolderListing | null>(null);
 let loading = $state(false);
 let failure = $state<string | null>(null);
+let denied = $state(false);
 let request = 0;
 
 async function load(path?: string) {
 	const current = ++request;
 	loading = true;
 	failure = null;
+	denied = false;
 	try {
 		const next = await browseDeviceFolder(path);
 		if (current !== request) return;
@@ -52,9 +56,12 @@ async function pickNatively() {
 		const picked = await pickDeviceFolder();
 		if (picked) onSelect(picked);
 		else onClose();
-	} catch {
+	} catch (error) {
 		native = false;
-		failure = m.runtime_device_failed({}, { locale });
+		denied = error instanceof HostBridgeErrorClass && error.isDenied;
+		failure = denied
+			? m.runtime_device_folder_denied({}, { locale })
+			: m.runtime_device_failed({}, { locale });
 	}
 }
 
@@ -67,11 +74,15 @@ $effect(() => {
 });
 
 const activeVolume = $derived(
-	listing?.volumes.find(
-		(volume) =>
-			listing?.path === volume.path ||
-			listing?.path.startsWith(`${volume.path}/`),
-	)?.path,
+	listing?.volumes.find((volume) => {
+		const base = volume.path.replace(/[\\/]+$/, "");
+		const path = listing?.path ?? "";
+		return (
+			path === volume.path ||
+			path.startsWith(`${base}/`) ||
+			path.startsWith(`${base}\\`)
+		);
+	})?.path,
 );
 </script>
 
@@ -93,7 +104,7 @@ const activeVolume = $derived(
 		{/if}
 		{#if failure}
 			<div class="failure">
-				<p>{failure}</p>
+				{#if denied}<HostPermissionNotice kind="files" message={failure} />{:else}<p>{failure}</p>{/if}
 				<button type="button" class="retry" onclick={() => void load(listing?.path)}>{m.runtime_refresh({}, { locale })}</button>
 			</div>
 		{:else if listing}

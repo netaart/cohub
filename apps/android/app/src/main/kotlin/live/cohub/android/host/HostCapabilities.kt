@@ -23,6 +23,8 @@ object HostCapabilities {
     const val SHORTCUTS = "shortcuts"
     const val DISPLAY = "display"
     const val MEDIA_CAPTURE = "media.capture"
+    const val PERMISSIONS = "permissions"
+    const val SHARE_INCOMING = "share.incoming"
 
     private val always: List<String> = listOf(
         AUTH_TOKEN,
@@ -37,6 +39,8 @@ object HostCapabilities {
         NAVIGATION_BACK,
         SHORTCUTS,
         MEDIA_CAPTURE,
+        PERMISSIONS,
+        SHARE_INCOMING,
     )
 
     fun advertised(runtime: Boolean, files: Boolean): List<String> =

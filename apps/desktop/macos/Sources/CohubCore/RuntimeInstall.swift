@@ -34,7 +34,7 @@ public enum RuntimeInstall {
         let script = """
         #!/bin/sh
         # Written by Cohub on launch: the CLI it ships, updated with the app.
-        COHUB_CLI_AUTO_UPDATE=0 exec \(quote(runtime.appendingPathComponent("node").path)) \(quote(cli)) "$@"
+        COHUB_CLI_AUTO_UPDATE=0 COHUB_SANDBOXD_BIN=${COHUB_SANDBOXD_BIN:-\(quote(runtime.appendingPathComponent(sandboxdEntry).path))} exec \(quote(runtime.appendingPathComponent("node").path)) \(quote(cli)) "$@"
 
         """
         try FileManager.default.createDirectory(at: shim.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -48,6 +48,7 @@ public enum RuntimeInstall {
     }
 
     public static let cliEntry = "cli/node_modules/@neta-art/cohub-cli/bin/cohub.js"
+    public static let sandboxdEntry = "sandboxd/cohub-sandboxd"
 
     static func directoryName(_ version: String) -> String {
         let name = String(version.map { $0.isLetter || $0.isNumber || "._-".contains($0) ? $0 : "-" })

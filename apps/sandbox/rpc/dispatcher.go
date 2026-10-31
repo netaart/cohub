@@ -38,6 +38,7 @@ type Dispatcher struct {
 	processManager *process.Manager
 	logger         *slog.Logger
 	router         IdentityRouter
+	activity       func()
 	opSeq          int64
 	mu             sync.Mutex
 	gitignoreMu    sync.Mutex
@@ -123,7 +124,14 @@ func (d *Dispatcher) nextSeq() int64 {
 	return atomic.AddInt64(&d.opSeq, 1)
 }
 
+func (d *Dispatcher) SetActivity(touch func()) {
+	d.activity = touch
+}
+
 func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (protocol.RPCAccepted, interface{}) {
+	if d.activity != nil {
+		d.activity()
+	}
 	accepted := protocol.RPCAccepted{
 		RequestScopedMessage: protocol.RequestScopedMessage{
 			BaseMessage: protocol.BaseMessage{

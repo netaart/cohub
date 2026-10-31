@@ -1,6 +1,7 @@
 import AppKit
 import CohubCore
 import os
+import ServiceManagement
 import Sparkle
 import WebKit
 
@@ -14,9 +15,12 @@ final class Shell: NSObject, NSApplicationDelegate {
     private var notifications: Notifications?
     private var launched = false
     private var pendingPath: String?
+    private lazy var shortcut = GlobalShortcut { [weak self] in self?.showPrimary() }
     private lazy var status = StatusMenu(actions: .init(
         openSpace: { [weak self] spaceId in self?.open(path: "/spaces/\(spaceId)") },
         disconnect: { [weak self] spaceId in self?.disconnect(spaceId) },
+        newSpace: { [weak self] in self?.open(path: "/spaces/new") },
+        stopSharing: { [weak self] in self?.stopSharing() },
         showCohub: { [weak self] in self?.showPrimary() }
     ))
 
@@ -32,6 +36,7 @@ final class Shell: NSObject, NSApplicationDelegate {
             return item
         })
         startService()
+        if ShellState.globalShortcut { shortcut.set(enabled: true) }
         openWindow(path: pendingPath ?? ShellState.lastPath ?? "/")
         pendingPath = nil
         launched = true
@@ -50,7 +55,8 @@ final class Shell: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            guard let path = WebOrigin.path(fromDeepLink: url, scheme: config.urlScheme) ?? config.origin.path(of: url) else { continue }
+            let folder = url.isFileURL ? WebOrigin.newSpacePath(folder: url.path) : nil
+            guard let path = folder ?? WebOrigin.path(fromDeepLink: url, scheme: config.urlScheme) ?? config.origin.path(of: url) else { continue }
             if launched { open(path: path) } else { pendingPath = path }
         }
     }
@@ -111,8 +117,9 @@ final class Shell: NSObject, NSApplicationDelegate {
     func router(for window: ShellWindow) -> BridgeRouter {
         typealias M = HostProtocol.Method
         typealias C = HostProtocol.Capability
-        var capabilities = [C.launch, C.appearance, C.navigation, C.share, C.files, C.cache, C.shortcuts, C.mediaCapture]
+        var capabilities = [C.launch, C.appearance, C.navigation, C.share, C.files, C.cache, C.shortcuts, C.mediaCapture, C.permissions, C.badge, C.globalShortcut]
         if notifications != nil { capabilities.append(C.notifications) }
+        if Bundle.main.bundleIdentifier != nil { capabilities.append(C.launchAtLogin) }
         if service != nil { capabilities.append(C.runtimePicker) }
         var handlers: [String: BridgeRouter.Handler] = [
             M.appReady: { [weak window] _ in window?.reveal(); return true },
@@ -133,6 +140,30 @@ final class Shell: NSObject, NSApplicationDelegate {
                 return true
             },
             M.filesSave: { params in try await Downloads.save(params); return true },
+            M.permissionsStatus: { [weak self] _ in await Permissions.status(notifications: self?.notifications) },
+            M.permissionsRequest: { [weak self] params in try await Permissions.request(params["kind"]?.string, notifications: self?.notifications) },
+            M.permissionsOpenSettings: { params in .bool(Permissions.openSettings(params["kind"]?.string)) },
+            M.displayOpenControlSettings: { _ in .bool(Permissions.openSettings("control")) },
+            M.badgeSet: { params in
+                let count = params["count"]?.number ?? 0
+                NSApp.dockTile.badgeLabel = count > 0 ? String(Int(count)) : nil
+                return true
+            },
+            M.globalShortcut: { [weak self] params in
+                guard let self else { return false }
+                if let enabled = params["enabled"]?.bool {
+                    ShellState.globalShortcut = enabled
+                    self.shortcut.set(enabled: enabled)
+                }
+                return .bool(ShellState.globalShortcut)
+            },
+            M.launchAtLogin: { params in
+                if let enabled = params["enabled"]?.bool {
+                    do { try Permissions.setLaunchAtLogin(enabled) }
+                    catch { throw BridgeFailure.failed(error.localizedDescription) }
+                }
+                return .bool(SMAppService.mainApp.status == .enabled)
+            },
             M.cacheClear: { _ in
                 await WKWebsiteDataStore.default().removeData(ofTypes: [WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache], modifiedSince: .distantPast)
                 return true
@@ -150,9 +181,9 @@ final class Shell: NSObject, NSApplicationDelegate {
             handlers[M.notificationsShow] = { params in .bool(try await notifications.show(params)) }
         }
         if let service {
-            handlers[M.runtimePickFolder] = { [weak window] _ in
+            handlers[M.runtimePickFolder] = { [weak window] params in
                 guard let window else { throw BridgeFailure.canceled() }
-                return try await window.pickFolder(service: service)
+                return try await window.pickFolder(service: service, handedOver: params["path"]?.string)
             }
         }
         return BridgeRouter(
@@ -161,7 +192,12 @@ final class Shell: NSObject, NSApplicationDelegate {
             capabilities: capabilities,
             handlers: handlers,
             service: service,
-            consent: { [weak window] root, _ in await window?.confirmConnect(root: root) ?? false },
+            consent: { [weak window] request in
+                switch request {
+                case .folder(let root): return await window?.confirmConnect(root: root) ?? false
+                case .screen: return await window?.confirmShare() ?? false
+                }
+            },
             send: { [weak window] text in window?.deliver(text) }
         )
     }
@@ -197,6 +233,8 @@ final class Shell: NSObject, NSApplicationDelegate {
             return
         case HostProtocol.Event.runtimeChanged:
             if let payload, let overview = RuntimeOverview(payload) { status.update(overview) }
+        case HostProtocol.Event.displayChanged:
+            status.update(sharing: payload?["sharedWith"]?.string != nil)
         case HostProtocol.Event.authChanged:
             accountChanged(payload)
         default:
@@ -216,21 +254,45 @@ final class Shell: NSObject, NSApplicationDelegate {
         if authenticated, redirect != nil { showPrimary() }
     }
 
-    private func disconnect(_ spaceId: String) {
+    private func disconnect(_ spaceId: String, force: Bool = false) {
         guard let service else { return }
         Task {
-            let reply = await service.call(BridgeRequest(id: "stop", method: HostProtocol.Method.runtimeStop, params: ["spaceId": .string(spaceId)]))
-            guard case .failure(let failure) = reply else { return }
-            let alert = NSAlert()
-            alert.messageText = L("Couldn’t disconnect this folder")
-            alert.informativeText = failure.message
-            alert.runModal()
+            var params: [String: JSON] = ["spaceId": .string(spaceId)]
+            if force { params["force"] = .bool(true) }
+            switch await service.call(BridgeRequest(id: "stop", method: HostProtocol.Method.runtimeStop, params: .object(params))) {
+            case .result(let runtime):
+                guard runtime["refused"]?.string != nil else { return }
+                let alert = NSAlert()
+                alert.messageText = L("A task’s result hasn’t been confirmed yet")
+                alert.informativeText = L("Disconnecting stops the Runtime. Results and files are kept.")
+                alert.addButton(withTitle: L("Disconnect"))
+                alert.addButton(withTitle: L("Cancel"))
+                if alert.runModal() == .alertFirstButtonReturn { disconnect(spaceId, force: true) }
+            case .failure(let failure):
+                let alert = NSAlert()
+                alert.messageText = L("Couldn’t disconnect this folder")
+                alert.informativeText = failure.message
+                alert.runModal()
+            }
         }
+    }
+
+    private func stopSharing() {
+        guard let service else { return }
+        Task { _ = await service.call(BridgeRequest(id: "stop", method: HostProtocol.Method.displayStop)) }
     }
 
     @objc func newWindow(_ sender: Any?) {
         openWindow(path: "/")
         activate()
+    }
+
+    @objc func newSpace(_ sender: Any?) {
+        open(path: "/spaces/new")
+    }
+
+    @objc func openSettings(_ sender: Any?) {
+        open(path: "/settings/general")
     }
 
     @objc func installCommandLineTool(_ sender: Any?) {

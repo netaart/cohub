@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/filewatch"
 	"github.com/cohub/apps/sandbox/portwatch"
+	"github.com/cohub/apps/sandbox/power"
 	"github.com/cohub/apps/sandbox/process"
 	"github.com/cohub/apps/sandbox/protocol"
 	"github.com/cohub/apps/sandbox/relay"
@@ -155,6 +159,9 @@ type sandboxRuntime struct {
 	server          *ws.Server
 	search          *search.Manager
 	displays        *display.Hub
+	displaySpec     *atomic.Pointer[string]
+	setDisplay      func(spec string) error
+	keeper          *power.Keeper
 	requestFSResync func()
 	watchStatus     func() filewatch.Status
 	close           func()
@@ -181,6 +188,8 @@ func buildRuntime(
 	searchManager := search.NewManager(cfg, logger)
 	searchManager.Start()
 	dispatcher := rpc.NewDispatcher(cfg, processManager, logger)
+	keeper := power.NewKeeper(logger)
+	dispatcher.SetActivity(keeper.Touch)
 	dispatcher.SetSearchManager(searchManager)
 	server := ws.NewServer(cfg, dispatcher, processManager, reporter, state, hostname, logger)
 	server.SetSearchEnabled(searchManager.Enabled())
@@ -200,6 +209,17 @@ func buildRuntime(
 		logger.Info("display provider enabled", slog.String("display", displaySpec))
 	}
 	dispatcher.SetDisplays(displays, viewers, virtual)
+	currentDisplay := &atomic.Pointer[string]{}
+	currentDisplay.Store(&displaySpec)
+	setDisplay := func(spec string) error {
+		next, err := display.DialerFor(spec, logger)
+		if err != nil {
+			return err
+		}
+		displays.SetDialer(next)
+		currentDisplay.Store(&spec)
+		return nil
+	}
 	displayCtx, stopDisplays := context.WithCancel(context.Background())
 	go displays.Run(displayCtx)
 
@@ -244,7 +264,7 @@ func buildRuntime(
 		logger.Info("port watcher started", slog.Any("ports", cfg.PublicPorts))
 	}
 
-	closers = append(closers, searchManager.Close, func() {
+	closers = append(closers, searchManager.Close, keeper.Close, func() {
 		viewers.CloseAll(rtc.ReasonShutdown)
 		stopDisplays()
 		if virtual != nil {
@@ -256,6 +276,9 @@ func buildRuntime(
 		server:          server,
 		search:          searchManager,
 		displays:        displays,
+		displaySpec:     currentDisplay,
+		setDisplay:      setDisplay,
+		keeper:          keeper,
 		requestFSResync: requestFSResync,
 		watchStatus:     watchStatus,
 		close: func() {
@@ -341,6 +364,25 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 // runLocal connects the sandbox to the gateway relay in dial-out mode. There is
 // no reporter (the gateway owns status reporting for local sandboxes) and no
 // workspace bootstrap — the user's directory is already the workspace.
+type displayFrame struct {
+	Type  string   `json:"type"`
+	Spec  string   `json:"spec"`
+	Needs []string `json:"needs"`
+	Error string   `json:"error,omitempty"`
+}
+
+func displayNeeds(displays []display.Info) []string {
+	needs := []string{}
+	for _, info := range displays {
+		for _, need := range info.Needs {
+			if !slices.Contains(needs, need) {
+				needs = append(needs, need)
+			}
+		}
+	}
+	return needs
+}
+
 func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 	relayToken := strings.TrimSpace(os.Getenv("COHUB_RELAY_TOKEN"))
 	// Remove the user token from the environment immediately so it can never be
@@ -421,6 +463,51 @@ func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 	displayStatus := func() interface{} { return displaysPayload{Displays: sandbox.displays.Displays()} }
 	client.SetStatus("displays", displayStatus)
 	// Changes coalesce: a slow relay never stalls the hub, and the latest snapshot wins.
+	var publishDisplay func(failure error)
+	if managed != nil {
+		publishDisplay = func(failure error) {
+			frame := displayFrame{Type: "display", Spec: *sandbox.displaySpec.Load(), Needs: displayNeeds(sandbox.displays.Displays())}
+			if failure != nil {
+				frame.Error = failure.Error()
+			}
+			managed.Send(frame)
+		}
+		managed.Offer(map[string]func(json.RawMessage){
+			"display": func(raw json.RawMessage) {
+				var request struct {
+					Spec string `json:"spec"`
+				}
+				err := json.Unmarshal(raw, &request)
+				if err == nil {
+					err = sandbox.setDisplay(request.Spec)
+				}
+				publishDisplay(err)
+			},
+			"keepAwake": func(raw json.RawMessage) {
+				var request struct {
+					Enabled bool `json:"enabled"`
+				}
+				if json.Unmarshal(raw, &request) == nil {
+					sandbox.keeper.SetEnabled(request.Enabled)
+				}
+			},
+			"activity": func(json.RawMessage) { sandbox.keeper.Touch() },
+		})
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if sandbox.processes.Stats().ActiveProcesses > 0 {
+						sandbox.keeper.Touch()
+					}
+				}
+			}
+		}()
+	}
 	displaysChanged := make(chan struct{}, 1)
 	sandbox.displays.OnChange(func([]display.Info) {
 		select {
@@ -435,6 +522,9 @@ func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 				return
 			case <-displaysChanged:
 				client.PublishEvent("displays", displayStatus())
+				if publishDisplay != nil {
+					publishDisplay(nil)
+				}
 			}
 		}
 	}()

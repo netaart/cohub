@@ -28,6 +28,14 @@ public sealed class WebOrigin
     public static bool IsInAppPath(string? path) =>
         path is { Length: > 0 and <= 2_048 } && path[0] == '/' && !path.StartsWith("//", StringComparison.Ordinal) && !path.Contains('\\', StringComparison.Ordinal);
 
+    public static string FolderFromShell(string argument) => argument.EndsWith('"') ? $"{argument[..^1]}\\" : argument;
+
+    public static string? NewSpacePath(string folder)
+    {
+        var path = $"/spaces/new#folder={Uri.EscapeDataString(folder)}";
+        return IsInAppPath(path) ? path : null;
+    }
+
     public Navigation NavigationTo(Uri target)
     {
         if (Contains(target)) return Navigation.Allow;

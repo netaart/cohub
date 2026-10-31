@@ -119,7 +119,8 @@ try {
         if (line === '{"type":"connected"}') { clearTimeout(timer); resolve(); }
       });
     });
-    assert.deepEqual(control, ['{"type":"hello"}', '{"type":"connected"}']);
+    assert.deepEqual(control.filter((line) => /"type":"(hello|connected)"/.test(line)), ['{"type":"hello"}', '{"type":"connected"}']);
+    assert.ok(control.some((line) => line.includes('"features"')), "sandboxd offers what it can do");
     return started;
   };
 

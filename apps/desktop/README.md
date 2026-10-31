@@ -59,7 +59,14 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
   the frontmost window lands where the sign-in started and Cohub comes forward. Signing in
   or out in a terminal does the same to the app.
 - **Folders.** The system folder dialog picks a folder, the CLI describes it (and the Space it
-  already serves), and a first connection asks for consent natively.
+  already serves), and a native consent follows before any Space depends on it. A folder dropped on
+  the Dock icon, opened from Finder, or sent with "Open in Cohub" in File Explorer lands on a new Space
+  with that folder chosen, and asks the same consent.
+- **Screen.** Sharing asks each time, turns on without restarting the Runtime, shows in the tray, and
+  ends when the app quits. macOS asks for Screen Recording and Accessibility; Windows needs neither.
+- **Staying awake.** While a Runtime has work, its sandboxd holds off idle sleep. Settings → General
+  turns it off, and holds the options to open at login and to bring Cohub up with ⌃⌥Space (Ctrl+Alt+Space).
+- **Badge.** The Dock icon and taskbar button count what is waiting to be looked at.
 - **Runtime copy.** Runtimes outlive the app, so they never run from inside it: on its first
   start each app version copies its bundled runtime to a directory of its own
   (`~/Library/Application Support/<bundle id>/runtime/<version>`,
@@ -96,8 +103,8 @@ server. Without a CLI the app still runs; the page then signs in as it would in 
 ## Package
 
 Both packagers bundle the runtime with `scripts/stage-runtime.mjs`: a pinned Node, verified
-against its published checksums, and this commit's CLI packed as npm publishes it, with the
-native packages of the target platform. Icons come from `apps/web/static/favicon.svg`
+against its published checksums, this commit's CLI packed as npm publishes it, with the
+native packages of the target platform, and this commit's sandboxd built with Go. Icons come from `apps/web/static/favicon.svg`
 through `scripts/icons.mjs`.
 
 ```bash
@@ -145,7 +152,4 @@ backed up outside GitHub.
 
 ## Next
 
-- Screen sharing from the app (`display`), with the macOS Screen Recording and Accessibility
-  prompts attributed to Cohub rather than a terminal.
-- Bundling a signed `sandboxd`, so a first connection needs no download.
 - Windows on Arm.

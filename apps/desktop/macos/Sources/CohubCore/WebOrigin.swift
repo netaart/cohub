@@ -43,6 +43,14 @@ public struct WebOrigin: Sendable, Equatable {
         path.hasPrefix("/") && !path.hasPrefix("//") && !path.contains("\\") && path.count <= 2_048
     }
 
+    public static func newSpacePath(folder: String) -> String? {
+        var components = URLComponents()
+        components.queryItems = [URLQueryItem(name: "folder", value: folder)]
+        guard let encoded = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B") else { return nil }
+        let path = "/spaces/new#\(encoded)"
+        return isInAppPath(path) ? path : nil
+    }
+
     public func navigation(to target: URL) -> Navigation {
         if contains(target) { return .allow }
         switch target.scheme?.lowercased() {

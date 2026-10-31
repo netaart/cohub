@@ -23,6 +23,7 @@ import {
 	readCohubPathFromDataTransfer,
 } from "$lib/drag/chat-draft-drop";
 import SessionModelSelectorDialog from "$lib/features/space/modules/SessionModelSelectorDialog.svelte";
+import { takeHostShare } from "$lib/host-share";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { provideMarkdownWorkspaceAsset } from "$lib/markdown-asset-context";
 import { m } from "$lib/paraglide/messages.js";
@@ -247,6 +248,27 @@ function handleDraftDragLeave(event: DragEvent) {
 	if (draftDropCounter === 0) draftDropKind = null;
 }
 
+let shareNotice = $state<string | null>(null);
+
+$effect(() => {
+	if (!host.isDraftNewSessionRoute) return;
+	untrack(() => void receiveHostShare());
+});
+
+async function receiveHostShare() {
+	const share = await takeHostShare();
+	if (!share) return;
+	if (share.text)
+		composerInput = composerInput
+			? `${composerInput}\n${share.text}`
+			: share.text;
+	if (share.files.length > 0) await host.handlePickAttachments(share.files);
+	shareNotice =
+		share.skipped > 0
+			? m.share_files_skipped({ count: share.skipped }, { locale })
+			: null;
+}
+
 async function handleDraftDrop(event: DragEvent) {
 	const kind = acceptDraftDrop(event);
 	resetDraftDropState();
@@ -447,6 +469,7 @@ async function handleDraftDrop(event: DragEvent) {
 				class:relative={shouldShowNewChatBackground}
 				class:z-10={shouldShowNewChatBackground}
 			>
+				{#if shareNotice}<p class="chat-gutter-x pb-1 text-[12px] text-text-tertiary">{shareNotice}</p>{/if}
 				<SessionComposer
 					bind:value={composerInput}
 					disabled={!activeSessionState && !isNewSessionRoute}

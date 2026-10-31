@@ -7,7 +7,7 @@
   <data name="Choose a folder for agents to work in." xml:space="preserve"><value>选择一个文件夹，供 Agent 在其中工作。</value></data>
   <data name="Cohub needs the Microsoft Edge WebView2 Runtime." xml:space="preserve"><value>Cohub 需要 Microsoft Edge WebView2 运行时。</value></data>
   <data name="Connect" xml:space="preserve"><value>连接</value></data>
-  <data name="Connect “{0}” to this Space?" xml:space="preserve"><value>将“{0}”连接到这个 Space？</value></data>
+  <data name="Connect “{0}” to a Space?" xml:space="preserve"><value>将“{0}”连接到 Space？</value></data>
   <data name="Connected" xml:space="preserve"><value>已连接</value></data>
   <data name="Connected Folders" xml:space="preserve"><value>已连接的文件夹</value></data>
   <data name="Connecting…" xml:space="preserve"><value>正在连接…</value></data>
@@ -22,11 +22,20 @@
   <data name="Open Cohub" xml:space="preserve"><value>打开 Cohub</value></data>
   <data name="Open Space" xml:space="preserve"><value>打开 Space</value></data>
   <data name="Open a new terminal and run cohub." xml:space="preserve"><value>打开新的终端并运行 cohub。</value></data>
-  <data name="People and agents in this Space can change files in this folder and run commands as you on this PC. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space." xml:space="preserve"><value>这个 Space 中的成员和 Agent 可以修改此文件夹中的文件，并以你的身份在这台电脑上运行命令。此文件夹中本地的 Pi、Codex、Claude Code 和 Cursor 对话（包括之前的对话）会同步到 Space。</value></data>
+  <data name="People and agents in the Space can change files in this folder and run commands as you on this PC. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space." xml:space="preserve"><value>Space 中的成员和 Agent 可以修改此文件夹中的文件，并以你的身份在这台电脑上运行命令。此文件夹中本地的 Pi、Codex、Claude Code 和 Cursor 对话（包括之前的对话）会同步到 Space。</value></data>
   <data name="Quit Cohub" xml:space="preserve"><value>退出 Cohub</value></data>
   <data name="Recent" xml:space="preserve"><value>最近</value></data>
   <data name="Restart to Update" xml:space="preserve"><value>重启以更新</value></data>
   <data name="Show in File Explorer" xml:space="preserve"><value>在文件资源管理器中显示</value></data>
   <data name="The cohub command is installed." xml:space="preserve"><value>cohub 命令已安装。</value></data>
   <data name="This build has no command line tool." xml:space="preserve"><value>此版本未包含命令行工具。</value></data>
+  <data name="Open in Cohub" xml:space="preserve"><value>在 Cohub 中打开</value></data>
+  <data name="Share" xml:space="preserve"><value>共享</value></data>
+  <data name="Share this screen with the Space?" xml:space="preserve"><value>将这块屏幕共享给 Space？</value></data>
+  <data name="People and agents in the Space can see this screen and control this PC until you stop sharing or quit Cohub." xml:space="preserve"><value>Space 中的成员和 Agent 可以查看这块屏幕并控制这台电脑，直到你停止共享或退出 Cohub。</value></data>
+  <data name="Sharing this screen" xml:space="preserve"><value>正在共享这块屏幕</value></data>
+  <data name="Stop Sharing" xml:space="preserve"><value>停止共享</value></data>
+  <data name="New Space…" xml:space="preserve"><value>新建 Space…</value></data>
+  <data name="A task’s result hasn’t been confirmed yet" xml:space="preserve"><value>有任务的结果尚未确认</value></data>
+  <data name="Disconnecting stops the Runtime. Results and files are kept." xml:space="preserve"><value>断开会停止 Runtime，结果和文件都会保留。</value></data>
 </root>

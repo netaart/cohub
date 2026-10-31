@@ -30,10 +30,10 @@ func platformDialer(spec string, logger *slog.Logger) (Dialer, error) {
 		// Each request shows the system prompt once; grants apply after a restart.
 		if !cg.preflightCapture() {
 			cg.requestCapture()
-			logger.Warn("allow Screen Recording for this terminal in System Settings → Privacy & Security, then restart the Runtime")
+			logger.Warn("allow Screen Recording for Cohub or this terminal in System Settings → Privacy & Security")
 		}
 		if !promptAccessibility() {
-			logger.Warn("allow Accessibility for this terminal in System Settings → Privacy & Security so the Space can control this Mac")
+			logger.Warn("allow Accessibility for Cohub or this terminal in System Settings → Privacy & Security so the Space can control this Mac")
 		}
 	})
 	return screenDialer("macos", func() (Screen, error) { return newMacScreen(), nil }, logger), nil

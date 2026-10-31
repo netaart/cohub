@@ -22,6 +22,14 @@ internal static partial class Native
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool DestroyIcon(IntPtr handle);
 
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool UnregisterHotKey(IntPtr hwnd, int id);
+
     public static void TintTitleBar(IntPtr hwnd, Color color)
     {
         var dark = 0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B < 128 ? 1 : 0;
@@ -62,6 +70,8 @@ internal static partial class Native
 
 internal static class Registration
 {
+    private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+
     private static string Executable => Environment.ProcessPath ?? throw new InvalidOperationException("No process path");
 
     public static void Register(ShellConfig config)
@@ -72,11 +82,40 @@ internal static class Registration
         using (var icon = scheme.CreateSubKey("DefaultIcon")) icon.SetValue("", $"\"{Executable}\",0");
         using var command = scheme.CreateSubKey(@"shell\open\command");
         command.SetValue("", $"\"{Executable}\" \"%1\"");
+        RegisterFolderCommand(config, @"Directory\shell", "%1");
+        RegisterFolderCommand(config, @"Directory\Background\shell", "%V");
+    }
+
+    private static string FolderCommandKey(ShellConfig config, string parent) => $@"Software\Classes\{parent}\{(config.Environment == "dev" ? "CohubDev" : "Cohub")}";
+
+    private static void RegisterFolderCommand(ShellConfig config, string parent, string argument)
+    {
+        using var verb = Registry.CurrentUser.CreateSubKey(FolderCommandKey(config, parent));
+        verb.SetValue("", Strings.L("Open in Cohub"));
+        verb.SetValue("Icon", $"\"{Executable}\",0");
+        using var command = verb.CreateSubKey("command");
+        command.SetValue("", $"\"{Executable}\" --folder \"{argument}\"");
+    }
+
+    public static bool LaunchesAtLogin(ShellConfig config)
+    {
+        using var run = Registry.CurrentUser.OpenSubKey(RunKey);
+        return run?.GetValue(config.InstanceName) is string;
+    }
+
+    public static void SetLaunchAtLogin(ShellConfig config, bool enabled)
+    {
+        using var run = Registry.CurrentUser.CreateSubKey(RunKey);
+        if (enabled) run.SetValue(config.InstanceName, $"\"{Executable}\"");
+        else run.DeleteValue(config.InstanceName, throwOnMissingValue: false);
     }
 
     public static void Unregister(ShellConfig config)
     {
         Registry.CurrentUser.DeleteSubKeyTree($@"Software\Classes\{config.UrlScheme}", throwOnMissingSubKey: false);
+        Registry.CurrentUser.DeleteSubKeyTree(FolderCommandKey(config, @"Directory\shell"), throwOnMissingSubKey: false);
+        Registry.CurrentUser.DeleteSubKeyTree(FolderCommandKey(config, @"Directory\Background\shell"), throwOnMissingSubKey: false);
+        SetLaunchAtLogin(config, false);
         if (IsOnPath(config.CommandLineTool)) SetOnPath(config.CommandLineTool, false);
     }
 

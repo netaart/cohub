@@ -11,6 +11,8 @@ import { parseArgs } from "node:util";
 
 const NODE_VERSION = "26.13.0";
 const PLATFORMS = { darwin: "darwin", win32: "win" };
+const GOOS = { darwin: "darwin", win32: "windows" };
+const GOARCH = { arm64: "arm64", x64: "amd64" };
 const ARCHS = ["arm64", "x64"];
 
 const { values } = parseArgs({
@@ -73,6 +75,18 @@ async function stageCli() {
   return JSON.parse(await readFile(join(cli, "node_modules/@neta-art/cohub-cli/package.json"), "utf8")).version;
 }
 
+async function stageSandboxd(cli) {
+  const directory = join(out, "sandboxd");
+  await mkdir(directory, { recursive: true });
+  const module = join(root, "apps/sandbox");
+  const clang = platform === "darwin" ? { CGO_ENABLED: "1", CC: `clang -arch ${arch === "x64" ? "x86_64" : "arm64"}` } : { CGO_ENABLED: "0" };
+  run("go", [
+    "build", "-trimpath", "-ldflags", `-s -w -X main.buildVersion=desktop-${cli}`,
+    "-o", join(directory, platform === "win32" ? "cohub-sandboxd.exe" : "cohub-sandboxd"), ".",
+  ], { cwd: module, env: { ...process.env, GOOS: GOOS[platform], GOARCH: GOARCH[arch], ...clang } });
+  for (const notice of ["LICENSE", "NOTICE"]) await copyFile(join(module, notice), join(directory, notice));
+}
+
 try {
   if (!existsSync(join(root, "packages/cli/dist/index.js"))) {
     throw new Error("Build the CLI first: pnpm --filter @neta-art/cohub-cli... build");
@@ -81,6 +95,7 @@ try {
   await mkdir(out, { recursive: true });
   await stageNode();
   const cli = await stageCli();
+  await stageSandboxd(cli);
   await writeFile(join(out, "versions.json"), `${JSON.stringify({ node: NODE_VERSION, cli }, null, 2)}\n`);
   if (platform === process.platform && arch === process.arch) {
     const version = run(join(out, platform === "win32" ? "node.exe" : "node"), [join(out, "cli/node_modules/@neta-art/cohub-cli/bin/cohub.js"), "--version"], {

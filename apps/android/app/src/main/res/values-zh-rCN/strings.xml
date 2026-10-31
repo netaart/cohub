@@ -18,4 +18,8 @@
     <string name="display_stop">停止共享</string>
     <string name="display_control_restricted">点右上角 ⋮，选择「允许受限设置」，再到无障碍中开启 Cohub。</string>
     <string name="display_control_description">允许你共享屏幕的 Space 读取屏幕上的控件，并点按、滑动和输入。仅在你共享屏幕期间生效，也只作用于你能看到的内容。</string>
+    <string name="runtime_consent_title">允许 Space 在这台设备上工作？</string>
+    <string name="runtime_consent_message">你连接文件夹的 Space 中的成员和 Agent 可以修改其中的文件，并以此应用的身份运行命令。</string>
+    <string name="runtime_consent_allow">继续</string>
+    <string name="shortcut_new_chat">新对话</string>
 </resources>

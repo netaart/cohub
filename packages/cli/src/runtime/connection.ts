@@ -27,7 +27,7 @@ import {
   type RuntimeDiagnostics,
 } from "./diagnostics.js";
 
-type Execution = {
+export type Execution = {
   controller: AbortController;
   promise: Promise<void>;
   sessionId: string;
@@ -61,6 +61,7 @@ export type RuntimeConnectionOptions = {
   onNativeChannel?: (send: (event: NativeRuntimeEvent) => Promise<unknown>) => void;
   /** The web asked to stop a Turn; one running in a native client is stopped there. */
   onNativeStop?: (stop: RuntimeNativeStop) => void;
+  executions?: Map<string, Execution>;
 };
 
 export async function serveRuntime(options: RuntimeConnectionOptions) {
@@ -70,7 +71,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
   let conflictSince: number | null = null;
   // Executions outlive a single transport so a dropped socket reconnects immediately
   // instead of waiting for in-flight turns to finish.
-  const executions = new Map<string, Execution>();
+  const executions = options.executions ?? new Map<string, Execution>();
   const seen = new Set<string>();
   const announce: Announce = { current: null };
   const catalog: Catalog = { current: options.capabilities, publish: null };

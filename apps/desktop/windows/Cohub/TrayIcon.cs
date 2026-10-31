@@ -11,6 +11,8 @@ internal sealed class TrayIcon : IDisposable
         Action NewWindow,
         Action<string> OpenSpace,
         Action<string> Disconnect,
+        Action NewSpace,
+        Action StopSharing,
         Action InstallCommandLineTool,
         Action RestartToUpdate,
         Action Quit);
@@ -20,6 +22,7 @@ internal sealed class TrayIcon : IDisposable
     private readonly Actions actions;
     private RuntimeOverview overview = RuntimeOverview.Empty;
     private bool updateReady;
+    private bool sharing;
     private Icon? badged;
 
     public TrayIcon(Icon plain, Actions actions)
@@ -39,6 +42,13 @@ internal sealed class TrayIcon : IDisposable
         Rebuild();
     }
 
+    public void UpdateSharing(bool next)
+    {
+        if (next == sharing) return;
+        sharing = next;
+        Rebuild();
+    }
+
     public void UpdateReady()
     {
         updateReady = true;
@@ -49,6 +59,12 @@ internal sealed class TrayIcon : IDisposable
     {
         var menu = new ContextMenuStrip();
         var connected = overview.Connected;
+        if (sharing)
+        {
+            menu.Items.Add(new ToolStripLabel(Strings.L("Sharing this screen")) { ForeColor = SystemColors.GrayText });
+            menu.Items.Add(Strings.L("Stop Sharing"), null, (_, _) => actions.StopSharing());
+            menu.Items.Add(new ToolStripSeparator());
+        }
         if (connected.Count > 0)
         {
             menu.Items.Add(new ToolStripLabel(Strings.L("Connected Folders")) { ForeColor = SystemColors.GrayText });
@@ -69,6 +85,7 @@ internal sealed class TrayIcon : IDisposable
         var open = new ToolStripMenuItem(Strings.L("Open Cohub"), null, (_, _) => actions.ShowCohub()) { Font = new Font(menu.Font, System.Drawing.FontStyle.Bold) };
         menu.Items.Add(open);
         menu.Items.Add(Strings.L("New Window"), null, (_, _) => actions.NewWindow());
+        menu.Items.Add(Strings.L("New Space…"), null, (_, _) => actions.NewSpace());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Strings.L("Install Command Line Tool"), null, (_, _) => actions.InstallCommandLineTool());
         if (updateReady) menu.Items.Add(Strings.L("Restart to Update"), null, (_, _) => actions.RestartToUpdate());
@@ -84,7 +101,7 @@ internal sealed class TrayIcon : IDisposable
         icon.Icon = next ?? plain;
         badged?.Dispose();
         badged = next;
-        var text = summary is { } current ? $"Cohub · {Describe(current)}" : "Cohub";
+        var text = sharing ? $"Cohub · {Strings.L("Sharing this screen")}" : summary is { } current ? $"Cohub · {Describe(current)}" : "Cohub";
         icon.Text = text.Length > 63 ? text[..63] : text;
     }
 

@@ -12,6 +12,7 @@ import { goto } from "$app/navigation";
 import { floatNear, portal } from "$lib/actions/portal";
 import HarnessIcon from "$lib/components/composer/HarnessIcon.svelte";
 import DeviceFolderPicker from "$lib/components/DeviceFolderPicker.svelte";
+import HostPermissionNotice from "$lib/components/HostPermissionNotice.svelte";
 import {
 	deviceDisplayStatus,
 	openDeviceControlSettings,
@@ -24,7 +25,9 @@ import {
 	isDeviceRuntimeRunning,
 	startDeviceRuntime,
 	stopDeviceRuntime,
+	takeDeviceConnectIssue,
 } from "$lib/device-runtime.svelte";
+import { hostPlatform } from "$lib/host-bridge";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { formatTimeAgo } from "$lib/resource-kit/time";
@@ -111,6 +114,15 @@ const device = $derived(
 const serving = $derived(isDeviceRuntimeRunning(device));
 let deviceBusy = $state(false);
 let deviceHint = $state<string | null>(null);
+let confirmingStop = $state(false);
+let connectFailed = $state(false);
+const devicePermission = $derived(
+	connectFailed ||
+		device?.error === "folder_denied" ||
+		device?.error === "storage_denied"
+		? ("files" as const)
+		: null,
+);
 let pickingFolder = $state(false);
 const displays = $derived(
 	tone !== "unknown" && status?.workspace?.online
@@ -124,7 +136,7 @@ const screenLabel = $derived(
 		? screen?.control
 			? m.runtime_display_sharing_control({}, { locale })
 			: m.runtime_display_sharing({}, { locale })
-		: m.runtime_not_connected({}, { locale }),
+		: m.runtime_display_not_shared({}, { locale }),
 );
 
 async function updateScreen(action: () => Promise<unknown>) {
@@ -214,15 +226,29 @@ function describeDevice(current: DeviceRuntimeInstance) {
 }
 
 function deviceErrorLabel(code: string | null) {
+	if (code === "elevated") return m.runtime_device_elevated({}, { locale });
+	if (code === "offline") return m.runtime_device_offline({}, { locale });
+	if (code === "folder_denied")
+		return m.runtime_device_folder_denied({}, { locale });
+	if (code === "storage_denied")
+		return m.runtime_device_storage_denied({}, { locale });
 	if (code === "signed_out") return m.runtime_device_signed_out({}, { locale });
 	if (code === "forbidden") return m.runtime_device_forbidden({}, { locale });
 	if (code === "conflict") return m.runtime_device_conflict({}, { locale });
 	return m.runtime_device_failed({}, { locale });
 }
 
-function refusalLabel(refusal: DeviceRuntimeRefusal | "declined") {
+function refusalLabel(refusal: DeviceRuntimeRefusal | "declined" | "failed") {
 	if (refusal === "declined")
-		return m.runtime_device_access_required({}, { locale });
+		return hostPlatform() === "android"
+			? m.runtime_device_access_required({}, { locale })
+			: null;
+	if (refusal === "failed")
+		return device?.state === "error"
+			? null
+			: m.runtime_device_failed({}, { locale });
+	if (refusal === "folder_denied")
+		return m.runtime_device_folder_denied({}, { locale });
 	if (refusal === "folder_in_use")
 		return m.runtime_device_folder_in_use({}, { locale });
 	if (refusal === "space_in_use")
@@ -236,9 +262,10 @@ async function updateDevice(
 	if (deviceBusy) return;
 	deviceBusy = true;
 	deviceHint = null;
+	connectFailed = false;
 	try {
 		const refusal = await action();
-		if (refusal) deviceHint = refusalLabel(refusal);
+		if (refusal) showIssue(refusal);
 		void refresh();
 	} catch {
 		deviceHint = m.runtime_device_failed({}, { locale });
@@ -246,6 +273,36 @@ async function updateDevice(
 		deviceBusy = false;
 	}
 }
+
+function showIssue(issue: DeviceRuntimeRefusal | "declined" | "failed") {
+	deviceHint = refusalLabel(issue);
+	connectFailed = issue === "folder_denied";
+}
+
+async function disconnect(force = false) {
+	if (deviceBusy) return;
+	deviceBusy = true;
+	deviceHint = null;
+	try {
+		const refused = await stopDeviceRuntime(spaceId, force);
+		confirmingStop = refused === "unconfirmed_work";
+		void refresh();
+	} catch {
+		deviceHint = m.runtime_device_disconnect_failed({}, { locale });
+	} finally {
+		deviceBusy = false;
+	}
+}
+
+let issueChecked = false;
+$effect(() => {
+	if (issueChecked || status?.kind !== "local") return;
+	issueChecked = true;
+	const issue = takeDeviceConnectIssue(spaceId);
+	if (!issue) return;
+	showIssue(issue);
+	void show();
+});
 
 function chooseFolder() {
 	close();
@@ -275,6 +332,7 @@ async function show() {
 }
 function close() {
 	open = false;
+	confirmingStop = false;
 	trigger?.focus();
 }
 function onKeyDown(event: KeyboardEvent) {
@@ -369,18 +427,21 @@ $effect(() => {
 				{/if}
 				{#if status.runtimeId}<details class="runtime-details"><summary>{m.runtime_diagnostics({}, { locale })}</summary><dl><dt>{m.runtime_id({}, { locale })}</dt><dd><code>{status.runtimeId}</code></dd></dl><code>cohub runtime logs --follow</code></details>{/if}
 				{#if deviceInstances && canManage}
-					{#if deviceHint}<p class="runtime-hint">{deviceHint}</p>{/if}
+					{#if deviceHint}<div class="runtime-hint">{#if devicePermission}<HostPermissionNotice kind={devicePermission} message={deviceHint} />{:else}{deviceHint}{/if}</div>{:else if devicePermission && device?.state === "error"}<div class="runtime-hint"><HostPermissionNotice kind={devicePermission} /></div>{/if}
+					{#if device?.error === "no_shell"}<p class="runtime-hint">{m.runtime_device_no_shell({}, { locale })} <a class="runtime-link" href="https://git-scm.com/download/win" target="_blank" rel="noreferrer">{m.runtime_device_install_git({}, { locale })}</a></p>{/if}
+					{#if screen?.error === "screen_recording"}<div class="runtime-hint"><HostPermissionNotice kind="screen" message={m.runtime_display_needs_recording({}, { locale })} /></div>{/if}
 					<div class="runtime-device-actions">
 						{#if serving}
 							{#if screen}
 								{#if sharingHere}
 									<button type="button" class="runtime-device-action" data-secondary="true" disabled={deviceBusy} onclick={() => void updateScreen(stopDeviceDisplay)}>{m.runtime_display_stop({}, { locale })}</button>
-									{#if !screen.control}<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(openDeviceControlSettings)}>{m.runtime_display_allow_control({}, { locale })}</button><p class="runtime-meta w-full">{m.runtime_display_control_hint({}, { locale })}</p>{/if}
+									{#if !screen.control}<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(openDeviceControlSettings)}>{m.runtime_display_allow_control({}, { locale })}</button><p class="runtime-meta w-full">{hostPlatform() === "android" ? m.runtime_display_control_hint({}, { locale }) : m.runtime_display_control_hint_desktop({}, { locale })}</p>{/if}
 								{:else}
 									<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(() => shareDeviceDisplay(spaceId))}>{m.runtime_display_share({}, { locale })}</button>
 								{/if}
 							{/if}
-							<button type="button" class="runtime-device-action" data-secondary="true" disabled={deviceBusy} onclick={() => void updateDevice(async () => { await stopDeviceRuntime(spaceId); return null; })}>{m.runtime_device_disconnect({}, { locale })}</button>
+							{#if confirmingStop}<p class="runtime-meta w-full">{m.runtime_device_unconfirmed({}, { locale })}</p>{/if}
+							<button type="button" class="runtime-device-action" data-secondary="true" disabled={deviceBusy} onclick={() => void disconnect(confirmingStop)}>{confirmingStop ? m.runtime_device_disconnect_anyway({}, { locale }) : m.runtime_device_disconnect({}, { locale })}</button>
 						{:else if device}
 							{@const root = device.root}
 							<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateDevice(() => startDeviceRuntime(spaceId, root))}>{m.runtime_device_connect({}, { locale })}</button>
@@ -450,6 +511,8 @@ $effect(() => {
 {/if}
 
 <style>
+.runtime-link { color: var(--brand); white-space: nowrap; }
+.runtime-link:hover { text-decoration: underline; }
 .runtime-state { display: inline-flex; align-items: center; gap: 5px; color: var(--text-tertiary); font-size: 12px; }
 .runtime-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--text-placeholder); }
 [data-tone="online"] .runtime-dot { background: var(--status-running); }

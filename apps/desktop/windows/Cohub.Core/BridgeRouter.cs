@@ -2,6 +2,8 @@ using System.Text.Json.Nodes;
 
 namespace Cohub.Core;
 
+public sealed record ConsentRequest(string? Root);
+
 public sealed class BridgeRouter(
     string platform,
     string hostId,
@@ -13,9 +15,12 @@ public sealed class BridgeRouter(
 {
     public delegate Task<JsonNode?> Handler(JsonNode? parameters);
 
-    public delegate Task<bool> Consent(string root, string spaceId);
+    public delegate Task<bool> Consent(ConsentRequest request);
 
     private static readonly TimeSpan DescribeWait = TimeSpan.FromMilliseconds(1_500);
+    private static readonly TimeSpan ConsentLifetime = TimeSpan.FromMinutes(10);
+
+    private (string Root, DateTime Until)? pendingConsent;
 
     public bool DescribedWithoutService { get; private set; }
 
@@ -36,7 +41,12 @@ public sealed class BridgeRouter(
         if (request.Method == HostProtocol.Methods.Describe) return BridgeReply.Success(await DescribeAsync());
         if (handlers.TryGetValue(request.Method, out var handler))
         {
-            try { return BridgeReply.Success(await handler(request.Params)); }
+            try
+            {
+                var result = await handler(request.Params);
+                if (request.Method == HostProtocol.Methods.RuntimePickFolder) await ConfirmFolderAsync(result);
+                return BridgeReply.Success(result);
+            }
             catch (BridgeException failure) { return BridgeReply.Fail(failure); }
             catch (Exception error) when (error is not OutOfMemoryException) { return BridgeReply.Fail(BridgeException.Failed(error.Message)); }
         }
@@ -44,6 +54,8 @@ public sealed class BridgeRouter(
             return BridgeReply.Fail(BridgeException.Unsupported(request.Method));
         if (request.Method == HostProtocol.Methods.RuntimeStart && !await ConsentedAsync(request, service))
             return BridgeReply.Fail(BridgeException.Canceled("Not connected"));
+        if (request.Method == HostProtocol.Methods.DisplayShare && !await consent(new ConsentRequest(null)))
+            return BridgeReply.Fail(BridgeException.Canceled("Not shared"));
         return await service.CallAsync(request);
     }
 
@@ -64,13 +76,22 @@ public sealed class BridgeRouter(
         };
     }
 
+    private async Task ConfirmFolderAsync(JsonNode? listing)
+    {
+        if (JsonFields.Text(listing, "path") is not { } root || !await consent(new ConsentRequest(root))) throw BridgeException.Canceled();
+        pendingConsent = (root, DateTime.UtcNow + ConsentLifetime);
+    }
+
     private async Task<bool> ConsentedAsync(BridgeRequest request, HostService host)
     {
         if (request.Param("root") is not { } root || request.Param("spaceId") is not { } spaceId) return true;
+        var spent = pendingConsent;
+        pendingConsent = null;
+        if (spent is { } given && string.Equals(root, given.Root, StringComparison.OrdinalIgnoreCase) && DateTime.UtcNow < given.Until) return true;
         var listed = await host.CallAsync(new BridgeRequest("list", HostProtocol.Methods.RuntimeList));
         if (listed.Failure is null && RuntimeOverview.From(listed.Result) is { } runtime
             && runtime.Folders.Any(folder => folder.SpaceId == spaceId && string.Equals(folder.Root, root, StringComparison.OrdinalIgnoreCase)))
             return true;
-        return await consent(root, spaceId);
+        return await consent(new ConsentRequest(root));
     }
 }

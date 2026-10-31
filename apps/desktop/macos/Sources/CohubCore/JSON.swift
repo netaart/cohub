@@ -23,6 +23,11 @@ public enum JSON: Sendable, Equatable {
         return nil
     }
 
+    public var number: Double? {
+        if case .number(let value) = self { return value }
+        return nil
+    }
+
     public var array: [JSON]? {
         if case .array(let values) = self { return values }
         return nil

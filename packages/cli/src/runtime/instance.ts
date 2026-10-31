@@ -80,6 +80,8 @@ export async function controlRuntimeInstance(directory: string, action: string, 
   }
 }
 
+export const UNCONFIRMED_WORK = "Unconfirmed executions remain";
+
 export async function stopRuntimeInstance(directory: string, force = false) {
   const local = await requestRuntimeInstance(directory, "stop", force);
   const until = Date.now() + 15_000;

@@ -17,6 +17,10 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -76,6 +80,7 @@ class RuntimeConnection(
     private val runtimeId: String,
     private val token: suspend (forceRefresh: Boolean) -> String,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val networkAvailable: Flow<Unit> = emptyFlow(),
 ) {
     private val registered = MutableStateFlow(false)
 
@@ -106,8 +111,8 @@ class RuntimeConnection(
                 else -> conflictSince = null
             }
             if (clock() - connectedAt >= STABLE_MS) backoff = INITIAL_BACKOFF_MS
-            delay(backoff / 2 + Random.nextLong(backoff / 2 + 1))
-            backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF_MS)
+            val waited = withTimeoutOrNull(backoff / 2 + Random.nextLong(backoff / 2 + 1)) { networkAvailable.first() }
+            backoff = if (waited != null) INITIAL_BACKOFF_MS else (backoff * 2).coerceAtMost(MAX_BACKOFF_MS)
         }
     }
 

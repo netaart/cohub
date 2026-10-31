@@ -146,7 +146,7 @@ func (h *Hub) keepConnected(ctx context.Context, dial Dialer) {
 func (h *Hub) Displays() []Info {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return slices.Clone(h.snapshot)
+	return append([]Info{}, h.snapshot...)
 }
 
 func (h *Hub) Display(id string) (Info, bool) {

@@ -2,6 +2,7 @@
 import { ExternalLink, X } from "lucide-svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import { swipeDismiss } from "$lib/gestures/swipe-dismiss";
+import { syncHostBadge } from "$lib/host-bridge";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import {
@@ -13,6 +14,8 @@ import {
 } from "$lib/stores/turn-notifications.svelte";
 
 const locale = $derived(getLocale());
+
+$effect(() => syncHostBadge(turnNotifications.items.length));
 
 function statusTone(status: string) {
 	if (status === "completed") return "bg-success-soft";
@@ -121,8 +124,8 @@ function handleCardKeydown(
 
 		{#if turnNotifications.showDesktopPrompt}
 			<div class="desktop-prompt pointer-events-auto">
-				<span class="min-w-0 flex-1 truncate">Enable desktop alerts?</span>
-				<button type="button" onclick={() => void turnNotifications.enableDesktopNotifications()}>Enable</button>
+				<span class="min-w-0 flex-1 truncate">{m.notif_enable_prompt({}, { locale })}</span>
+				<button type="button" onclick={() => void turnNotifications.enableDesktopNotifications()}>{m.notif_enable({}, { locale })}</button>
 				<button type="button" onclick={() => turnNotifications.dismissDesktopPrompt()}>{m.notif_not_now({}, { locale })}</button>
 			</div>
 		{/if}

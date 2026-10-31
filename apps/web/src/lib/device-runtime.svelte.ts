@@ -1,5 +1,6 @@
 import {
 	type DEVICE_RUNTIME_REFUSALS,
+	type DEVICE_RUNTIME_STOP_REFUSALS,
 	type DeviceFolderListing,
 	type DeviceRuntimeInstance,
 	deviceRuntimeSchema,
@@ -17,6 +18,8 @@ let instances = $state<DeviceRuntimeInstance[] | null>(null);
 let subscribed: Promise<void> | null = null;
 
 export type DeviceRuntimeRefusal = (typeof DEVICE_RUNTIME_REFUSALS)[number];
+export type DeviceRuntimeStopRefusal =
+	(typeof DEVICE_RUNTIME_STOP_REFUSALS)[number];
 
 function subscribe(): Promise<void> {
 	subscribed ??= (async () => {
@@ -74,9 +77,11 @@ export function deviceFolderPickerIsNative(): boolean {
 	return supportsHostCapability("runtime.picker");
 }
 
-export function pickDeviceFolder(): Promise<DeviceFolderListing | null> {
+export function pickDeviceFolder(
+	path?: string,
+): Promise<DeviceFolderListing | null> {
 	return interactive(() =>
-		callHost("runtime.pickFolder", undefined, {
+		callHost("runtime.pickFolder", path ? { path } : undefined, {
 			timeoutMs: HOST_BRIDGE_INTERACTIVE_TIMEOUT_MS,
 		}),
 	);
@@ -108,10 +113,35 @@ export async function startDeviceRuntime(
 	return result.refused;
 }
 
-export async function stopDeviceRuntime(spaceId: string): Promise<void> {
-	instances = (await callHost("runtime.stop", { spaceId })).instances;
+export async function stopDeviceRuntime(
+	spaceId: string,
+	force = false,
+): Promise<DeviceRuntimeStopRefusal | null> {
+	const result = await callHost(
+		"runtime.stop",
+		force ? { spaceId, force } : { spaceId },
+	);
+	instances = result.instances;
+	return result.refused ?? null;
 }
 
 export function deviceFolderName(listing: DeviceFolderListing): string {
-	return listing.label.split("/").filter(Boolean).at(-1) ?? listing.label;
+	return listing.label.split(/[\\/]/).filter(Boolean).at(-1) ?? listing.label;
+}
+
+const connectIssues = new Map<string, DeviceRuntimeRefusal | "failed">();
+
+export function reportDeviceConnectIssue(
+	spaceId: string,
+	issue: DeviceRuntimeRefusal | "failed",
+): void {
+	connectIssues.set(spaceId, issue);
+}
+
+export function takeDeviceConnectIssue(
+	spaceId: string,
+): DeviceRuntimeRefusal | "failed" | null {
+	const issue = connectIssues.get(spaceId) ?? null;
+	connectIssues.delete(spaceId);
+	return issue;
 }

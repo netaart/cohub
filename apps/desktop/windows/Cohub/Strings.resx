@@ -7,7 +7,7 @@
   <data name="Choose a folder for agents to work in." xml:space="preserve"><value>Choose a folder for agents to work in.</value></data>
   <data name="Cohub needs the Microsoft Edge WebView2 Runtime." xml:space="preserve"><value>Cohub needs the Microsoft Edge WebView2 Runtime.</value></data>
   <data name="Connect" xml:space="preserve"><value>Connect</value></data>
-  <data name="Connect “{0}” to this Space?" xml:space="preserve"><value>Connect “{0}” to this Space?</value></data>
+  <data name="Connect “{0}” to a Space?" xml:space="preserve"><value>Connect “{0}” to a Space?</value></data>
   <data name="Connected" xml:space="preserve"><value>Connected</value></data>
   <data name="Connected Folders" xml:space="preserve"><value>Connected Folders</value></data>
   <data name="Connecting…" xml:space="preserve"><value>Connecting…</value></data>
@@ -22,11 +22,20 @@
   <data name="Open Cohub" xml:space="preserve"><value>Open Cohub</value></data>
   <data name="Open Space" xml:space="preserve"><value>Open Space</value></data>
   <data name="Open a new terminal and run cohub." xml:space="preserve"><value>Open a new terminal and run cohub.</value></data>
-  <data name="People and agents in this Space can change files in this folder and run commands as you on this PC. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space." xml:space="preserve"><value>People and agents in this Space can change files in this folder and run commands as you on this PC. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space.</value></data>
+  <data name="People and agents in the Space can change files in this folder and run commands as you on this PC. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space." xml:space="preserve"><value>People and agents in the Space can change files in this folder and run commands as you on this PC. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space.</value></data>
   <data name="Quit Cohub" xml:space="preserve"><value>Quit Cohub</value></data>
   <data name="Recent" xml:space="preserve"><value>Recent</value></data>
   <data name="Restart to Update" xml:space="preserve"><value>Restart to Update</value></data>
   <data name="Show in File Explorer" xml:space="preserve"><value>Show in File Explorer</value></data>
   <data name="The cohub command is installed." xml:space="preserve"><value>The cohub command is installed.</value></data>
   <data name="This build has no command line tool." xml:space="preserve"><value>This build has no command line tool.</value></data>
+  <data name="Open in Cohub" xml:space="preserve"><value>Open in Cohub</value></data>
+  <data name="Share" xml:space="preserve"><value>Share</value></data>
+  <data name="Share this screen with the Space?" xml:space="preserve"><value>Share this screen with the Space?</value></data>
+  <data name="People and agents in the Space can see this screen and control this PC until you stop sharing or quit Cohub." xml:space="preserve"><value>People and agents in the Space can see this screen and control this PC until you stop sharing or quit Cohub.</value></data>
+  <data name="Sharing this screen" xml:space="preserve"><value>Sharing this screen</value></data>
+  <data name="Stop Sharing" xml:space="preserve"><value>Stop Sharing</value></data>
+  <data name="New Space…" xml:space="preserve"><value>New Space…</value></data>
+  <data name="A task’s result hasn’t been confirmed yet" xml:space="preserve"><value>A task’s result hasn’t been confirmed yet</value></data>
+  <data name="Disconnecting stops the Runtime. Results and files are kept." xml:space="preserve"><value>Disconnecting stops the Runtime. Results and files are kept.</value></data>
 </root>

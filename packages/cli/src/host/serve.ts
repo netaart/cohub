@@ -16,9 +16,11 @@ import { DeviceRuntimeHost } from "./runtime.js";
 
 export type HostEmit = (name: string, payload?: unknown) => void;
 
+const SCREEN_PLATFORMS: readonly NodeJS.Platform[] = ["darwin", "win32"];
+
 type Handler = (params: Record<string, unknown>) => Promise<unknown> | unknown;
 
-const CAPABILITIES = ["auth.token", "auth.signIn", "auth.session", "runtime"] as const satisfies readonly HostBridgeCapability[];
+const CAPABILITIES: readonly HostBridgeCapability[] = ["auth.token", "auth.signIn", "auth.session", "runtime", "runtime.keepAwake", ...(SCREEN_PLATFORMS.includes(process.platform) ? ["display" as const] : [])];
 const MAX_LINE = 1024 * 1024;
 
 const write = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`);
@@ -32,22 +34,31 @@ export async function serveHost(entry = fileURLToPath(new URL("../../bin/cohub.j
     account: currentIdentityKey,
   });
   const auth = new HostAuth(emit, () => {
+    runtime.accountChanged();
     runtime.changed();
     void runtime.restore();
   });
 
-  const handlers = {
+  const handlers: Partial<Record<HostBridgeMethod, Handler>> = {
     "auth.getAccessToken": (params) => auth.accessToken(params.forceRefresh === true),
     "auth.getSessionVersion": () => auth.sessionVersion(),
     "auth.getSession": () => auth.session(),
     "auth.signIn": (params) => auth.signIn(typeof params.redirectPath === "string" ? params.redirectPath : undefined),
-    "auth.signOut": () => auth.signOut(),
+    "auth.signOut": async () => {
+      await runtime.stopAccount().catch((error: unknown) => process.stderr.write(`Could not stop Runtimes before signing out: ${error instanceof Error ? error.message : String(error)}\n`));
+      return auth.signOut();
+    },
     "runtime.list": () => runtime.list(),
     "runtime.browse": (params) => runtime.browse(typeof params.path === "string" ? params.path : undefined),
     "runtime.start": (params) => runtime.connect(String(params.spaceId), String(params.root)),
-    "runtime.stop": (params) => runtime.disconnect(String(params.spaceId)),
-  } satisfies Partial<Record<HostBridgeMethod, Handler>>;
-  const methods = Object.keys(handlers) as (keyof typeof handlers)[];
+    "runtime.stop": (params) => runtime.disconnect(String(params.spaceId), params.force === true),
+    "runtime.keepAwake": (params) => runtime.keepAwake(typeof params.enabled === "boolean" ? params.enabled : undefined),
+    ...(CAPABILITIES.includes("display") ? {
+      "display.status": () => runtime.displayStatus(),
+      "display.share": (params) => runtime.share(String(params.spaceId)),
+      "display.stop": () => runtime.stopSharing(),
+    } : {}),
+  };
 
   const answer = async (line: string) => {
     let raw: unknown;
@@ -56,20 +67,22 @@ export async function serveHost(entry = fileURLToPath(new URL("../../bin/cohub.j
     if (!request.success) return;
     const { id, method } = request.data;
     const fail = (code: string, message: string) => write({ type: "response", id, error: { code, message: message.slice(0, 2_000) || "Host call failed" } });
-    if (!(method in handlers)) return fail(HOST_BRIDGE_ERROR.unsupported, `Unsupported method: ${method}`);
-    const name = method as keyof typeof handlers;
+    const name = method as HostBridgeMethod;
+    const handler = handlers[name];
+    if (!handler) return fail(HOST_BRIDGE_ERROR.unsupported, `Unsupported method: ${method}`);
     const shape = HOST_BRIDGE_METHODS[name];
     const params = shape.params.safeParse(request.data.params);
     if (!params.success) return fail(HOST_BRIDGE_ERROR.failed, `Invalid params for ${method}`);
     try {
-      const result = await handlers[name]((params.data ?? {}) as Record<string, unknown>);
+      const result = await handler((params.data ?? {}) as Record<string, unknown>);
       write({ type: "response", id, result: shape.result.parse(result) });
     } catch (error) {
-      fail(HOST_BRIDGE_ERROR.failed, error instanceof Error ? error.message : String(error));
+      const denied = ["EPERM", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "");
+      fail(denied ? HOST_BRIDGE_ERROR.denied : HOST_BRIDGE_ERROR.failed, error instanceof Error ? error.message : String(error));
     }
   };
 
-  const hello: HostServiceHello = { type: "hello", version: HOST_SERVICE_VERSION, capabilities: [...CAPABILITIES], methods };
+  const hello: HostServiceHello = { type: "hello", version: HOST_SERVICE_VERSION, capabilities: [...CAPABILITIES], methods: Object.keys(handlers) };
   write(hello);
   auth.watch();
   runtime.watch();
@@ -78,5 +91,6 @@ export async function serveHost(entry = fileURLToPath(new URL("../../bin/cohub.j
   input.on("line", (line) => { if (line.length <= MAX_LINE) void answer(line); });
   await new Promise<void>((resolve) => input.once("close", resolve));
   auth.close();
+  await runtime.stopOwnSharing();
   runtime.close();
 }

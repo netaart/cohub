@@ -1,9 +1,15 @@
+public enum ConsentRequest: Sendable, Equatable {
+    case folder(root: String)
+    case screen
+}
+
 @MainActor
 public final class BridgeRouter {
     public typealias Handler = @MainActor (JSON) async throws -> JSON
-    public typealias Consent = @MainActor (_ root: String, _ spaceId: String) async -> Bool
+    public typealias Consent = @MainActor (ConsentRequest) async -> Bool
 
     static let describeWait: Duration = .milliseconds(1_500)
+    static let consentLifetime: Duration = .seconds(600)
 
     private let platform: String
     private let hostId: String
@@ -12,6 +18,7 @@ public final class BridgeRouter {
     private let service: HostService?
     private let consent: Consent
     private let send: @MainActor (String) -> Void
+    private var pendingConsent: (root: String, until: ContinuousClock.Instant)?
     public private(set) var describedWithoutService = false
 
     public init(
@@ -44,13 +51,20 @@ public final class BridgeRouter {
     private func reply(to request: BridgeRequest) async -> BridgeReply {
         if request.method == HostProtocol.Method.describe { return .result(await describe()) }
         if let handler = handlers[request.method] {
-            do { return .result(try await handler(request.params)) }
+            do {
+                let result = try await handler(request.params)
+                if request.method == HostProtocol.Method.runtimePickFolder { try await confirmFolder(result) }
+                return .result(result)
+            }
             catch let failure as BridgeFailure { return .failure(failure) }
             catch { return .failure(.failed(String(describing: error))) }
         }
         guard let service, await serviceHello()?.methods.contains(request.method) == true else { return .failure(.unsupported(request.method)) }
         if request.method == HostProtocol.Method.runtimeStart, !(await consented(to: request, service: service)) {
             return .failure(.canceled("Not connected"))
+        }
+        if request.method == HostProtocol.Method.displayShare, !(await consent(.screen)) {
+            return .failure(.canceled("Not shared"))
         }
         return await service.call(request)
     }
@@ -74,12 +88,20 @@ public final class BridgeRouter {
         ]
     }
 
+    private func confirmFolder(_ listing: JSON) async throws {
+        guard let root = listing["path"]?.string, await consent(.folder(root: root)) else { throw BridgeFailure.canceled() }
+        pendingConsent = (root, .now + Self.consentLifetime)
+    }
+
     private func consented(to request: BridgeRequest, service: HostService) async -> Bool {
         guard let root = request.params["root"]?.string, let spaceId = request.params["spaceId"]?.string else { return true }
+        let spent = pendingConsent
+        pendingConsent = nil
+        if let spent, spent.root == root, .now < spent.until { return true }
         if case .result(let runtime) = await service.call(BridgeRequest(id: "list", method: HostProtocol.Method.runtimeList)),
            runtime["instances"]?.array?.contains(where: { $0["spaceId"]?.string == spaceId && $0["root"]?.string == root }) == true {
             return true
         }
-        return await consent(root, spaceId)
+        return await consent(.folder(root: root))
     }
 }

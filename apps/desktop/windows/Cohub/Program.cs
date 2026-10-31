@@ -1,5 +1,6 @@
 using System.IO;
 using System.IO.Pipes;
+using Cohub.Core;
 using Velopack;
 
 namespace Cohub;
@@ -20,13 +21,14 @@ internal static class Program
             })
             .Run();
 
+        var argument = args is ["--folder", var folder] ? $"{ShellApp.FolderArgument}{WebOrigin.FolderFromShell(folder)}" : args.FirstOrDefault();
         using var instance = SingleInstance.Acquire(config.InstanceName);
         if (instance is null)
         {
-            SingleInstance.Forward(config.InstanceName, args.FirstOrDefault() ?? "");
+            SingleInstance.Forward(config.InstanceName, argument ?? "");
             return 0;
         }
-        return new ShellApp(config, instance, args.FirstOrDefault()).Run();
+        return new ShellApp(config, instance, argument).Run();
     }
 }
 

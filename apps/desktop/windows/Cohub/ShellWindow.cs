@@ -136,7 +136,7 @@ internal sealed class ShellWindow : Window, IDisposable
         var ours = Uri.TryCreate(e.Uri, UriKind.Absolute, out var url) && app.Config.Origin.Contains(url);
         e.State = e.PermissionKind switch
         {
-            CoreWebView2PermissionKind.Microphone or CoreWebView2PermissionKind.Camera when ours => CoreWebView2PermissionState.Allow,
+            CoreWebView2PermissionKind.Microphone or CoreWebView2PermissionKind.Camera or CoreWebView2PermissionKind.ClipboardRead when ours => CoreWebView2PermissionState.Allow,
             CoreWebView2PermissionKind.Notifications => CoreWebView2PermissionState.Deny,
             _ => e.State,
         };
@@ -144,11 +144,16 @@ internal sealed class ShellWindow : Window, IDisposable
 
     public static void OpenExternally(Uri url) => Process.Start(new ProcessStartInfo(url.AbsoluteUri) { UseShellExecute = true })?.Dispose();
 
-    public async Task<System.Text.Json.Nodes.JsonNode?> PickFolderAsync(HostService service)
+    public async Task<System.Text.Json.Nodes.JsonNode?> PickFolderAsync(HostService service, string? handedOver)
     {
-        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = Strings.L("Choose a folder for agents to work in."), Multiselect = false };
-        if (dialog.ShowDialog(this) != true) throw BridgeException.Canceled();
-        var reply = await service.CallAsync(new BridgeRequest("browse", HostProtocol.Methods.RuntimeBrowse, new System.Text.Json.Nodes.JsonObject { ["path"] = dialog.FolderName }));
+        var path = handedOver;
+        if (path is null)
+        {
+            var dialog = new Microsoft.Win32.OpenFolderDialog { Title = Strings.L("Choose a folder for agents to work in."), Multiselect = false };
+            if (dialog.ShowDialog(this) != true) throw BridgeException.Canceled();
+            path = dialog.FolderName;
+        }
+        var reply = await service.CallAsync(new BridgeRequest("browse", HostProtocol.Methods.RuntimeBrowse, new System.Text.Json.Nodes.JsonObject { ["path"] = path }));
         return reply.Failure is { } failure ? throw failure : reply.Result;
     }
 
@@ -159,13 +164,34 @@ internal sealed class ShellWindow : Window, IDisposable
         var page = new System.Windows.Forms.TaskDialogPage
         {
             Caption = "Cohub",
-            Heading = Strings.Format("Connect “{0}” to this Space?", string.IsNullOrEmpty(name) ? root : name),
-            Text = Strings.L("People and agents in this Space can change files in this folder and run commands as you on this PC. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space."),
+            Heading = Strings.Format("Connect “{0}” to a Space?", string.IsNullOrEmpty(name) ? root : name),
+            Text = Strings.L("People and agents in the Space can change files in this folder and run commands as you on this PC. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space."),
             Icon = System.Windows.Forms.TaskDialogIcon.ShieldWarningYellowBar,
             Buttons = { connect, System.Windows.Forms.TaskDialogButton.Cancel },
             DefaultButton = connect,
         };
         return Task.FromResult(System.Windows.Forms.TaskDialog.ShowDialog(Handle, page) == connect);
+    }
+
+    public Task<bool> ConfirmShareAsync()
+    {
+        var share = new System.Windows.Forms.TaskDialogButton(Strings.L("Share"));
+        var page = new System.Windows.Forms.TaskDialogPage
+        {
+            Caption = "Cohub",
+            Heading = Strings.L("Share this screen with the Space?"),
+            Text = Strings.L("People and agents in the Space can see this screen and control this PC until you stop sharing or quit Cohub."),
+            Icon = System.Windows.Forms.TaskDialogIcon.ShieldWarningYellowBar,
+            Buttons = { share, System.Windows.Forms.TaskDialogButton.Cancel },
+            DefaultButton = share,
+        };
+        return Task.FromResult(System.Windows.Forms.TaskDialog.ShowDialog(Handle, page) == share);
+    }
+
+    public void ShowBadge(ImageSource? overlay)
+    {
+        TaskbarItemInfo ??= new System.Windows.Shell.TaskbarItemInfo();
+        TaskbarItemInfo.Overlay = overlay;
     }
 
     protected override void OnClosing(CancelEventArgs e)

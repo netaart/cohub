@@ -18,6 +18,10 @@ public static class HostProtocol
         public const string MediaCapture = "media.capture";
         public const string Runtime = "runtime";
         public const string RuntimePicker = "runtime.picker";
+        public const string Permissions = "permissions";
+        public const string Badge = "badge";
+        public const string LaunchAtLogin = "app.launchAtLogin";
+        public const string GlobalShortcut = "app.globalShortcut";
     }
 
     public static class Methods
@@ -36,12 +40,22 @@ public static class HostProtocol
         public const string RuntimeStart = "runtime.start";
         public const string RuntimeStop = "runtime.stop";
         public const string RuntimePickFolder = "runtime.pickFolder";
+        public const string DisplayShare = "display.share";
+        public const string DisplayStop = "display.stop";
+        public const string DisplayOpenControlSettings = "display.openControlSettings";
+        public const string PermissionsStatus = "permissions.status";
+        public const string PermissionsRequest = "permissions.request";
+        public const string PermissionsOpenSettings = "permissions.openSettings";
+        public const string BadgeSet = "badge.set";
+        public const string LaunchAtLogin = "app.launchAtLogin";
+        public const string GlobalShortcut = "app.globalShortcut";
     }
 
     public static class Events
     {
         public const string AuthChanged = "auth.changed";
         public const string RuntimeChanged = "runtime.changed";
+        public const string DisplayChanged = "display.changed";
     }
 
     public static class ErrorCodes
@@ -49,6 +63,7 @@ public static class HostProtocol
         public const string Unsupported = "unsupported";
         public const string Canceled = "canceled";
         public const string Failed = "failed";
+        public const string Denied = "denied";
     }
 
     public static class ShellEvents

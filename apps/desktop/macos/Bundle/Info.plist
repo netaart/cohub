@@ -36,6 +36,21 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Folder</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+		</dict>
+	</array>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 	<key>LSMinimumSystemVersion</key>
@@ -50,6 +65,16 @@
 	<string>Cohub uses the microphone when you dictate or talk with agents.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Cohub uses the camera when you capture photos or video for a Space.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Cohub reads and changes folders in Documents that you connect to a Space.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Cohub reads and changes folders on the Desktop that you connect to a Space.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Cohub reads and changes folders in Downloads that you connect to a Space, and saves files you download.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Cohub reads and changes folders on removable drives that you connect to a Space.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Cohub reads and changes folders on network drives that you connect to a Space.</string>
 	<key>CohubEnvironment</key>
 	<string>__ENV__</string>
 	<key>CohubWebOrigin</key>

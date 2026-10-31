@@ -15,14 +15,16 @@ struct ShellConfig {
         let fallbackOrigin = environment == "dev" ? "https://dev.cohub.live" : "https://cohub.live"
         let origin = WebOrigin(env["COHUB_DESKTOP_WEB_ORIGIN"] ?? info("CohubWebOrigin") ?? fallbackOrigin) ?? WebOrigin(fallbackOrigin)!
         let childEnv = childEnvironment(env, environment: environment)
-        let serve: @Sendable (URL, URL) -> HostService.Launch = { node, cli in
-            HostService.Launch(executable: node, arguments: [cli.path, "host", "serve"], environment: childEnv)
+        let serve: @Sendable (URL, URL, URL?) -> HostService.Launch = { node, cli, sandboxd in
+            var environment = childEnv
+            if let sandboxd, FileManager.default.fileExists(atPath: sandboxd.path) { environment["COHUB_SANDBOXD_BIN"] = sandboxd.path }
+            return HostService.Launch(executable: node, arguments: [cli.path, "host", "serve"], environment: environment)
         }
 
         var service: (@Sendable () throws -> HostService.Launch)?
         var tool: URL?
         if let node = env["COHUB_DESKTOP_NODE"].map(URL.init(fileURLWithPath:)), let cli = env["COHUB_DESKTOP_CLI"].map(URL.init(fileURLWithPath:)) {
-            service = { serve(node, cli) }
+            service = { serve(node, cli, env["COHUB_SANDBOXD_BIN"].map(URL.init(fileURLWithPath:))) }
         } else if let bundled = bundle.resourceURL?.appendingPathComponent("runtime"), let id = bundle.bundleIdentifier,
                   FileManager.default.fileExists(atPath: bundled.appendingPathComponent(RuntimeInstall.cliEntry).path),
                   let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
@@ -34,7 +36,7 @@ struct ShellConfig {
                 let runtime = try RuntimeInstall.prepare(bundled: bundled, root: root, version: version, finish: Processes.clearQuarantine)
                 try RuntimeInstall.writeShim(shim, runtime: runtime)
                 RuntimeInstall.prune(root: root, keep: runtime, running: Processes.executables())
-                return serve(runtime.appendingPathComponent("node"), runtime.appendingPathComponent(RuntimeInstall.cliEntry))
+                return serve(runtime.appendingPathComponent("node"), runtime.appendingPathComponent(RuntimeInstall.cliEntry), runtime.appendingPathComponent(RuntimeInstall.sandboxdEntry))
             }
             tool = shim
         }
@@ -96,6 +98,11 @@ enum ShellState {
     static var lastPath: String? {
         get { defaults.string(forKey: "lastPath").flatMap { WebOrigin.isInAppPath($0) ? $0 : nil } }
         set { defaults.set(newValue, forKey: "lastPath") }
+    }
+
+    static var globalShortcut: Bool {
+        get { defaults.bool(forKey: "globalShortcut") }
+        set { defaults.set(newValue, forKey: "globalShortcut") }
     }
 
     static var edgeColor: NSColor? {

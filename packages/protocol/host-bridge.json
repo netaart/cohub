@@ -19,7 +19,13 @@
     "shortcuts",
     "display",
     "media.capture",
-    "runtime.picker"
+    "runtime.picker",
+    "permissions",
+    "badge",
+    "app.launchAtLogin",
+    "app.globalShortcut",
+    "runtime.keepAwake",
+    "share.incoming"
   ],
   "methods": [
     "host.describe",
@@ -38,6 +44,15 @@
     "runtime.start",
     "runtime.stop",
     "runtime.pickFolder",
+    "runtime.keepAwake",
+    "permissions.status",
+    "permissions.request",
+    "permissions.openSettings",
+    "badge.set",
+    "app.launchAtLogin",
+    "app.globalShortcut",
+    "share.take",
+    "share.readFile",
     "appearance.set",
     "app.ready",
     "haptics.perform",
@@ -62,7 +77,8 @@
     "unsupported",
     "unauthorized",
     "canceled",
-    "failed"
+    "failed",
+    "denied"
   ],
   "service": {
     "version": 1,

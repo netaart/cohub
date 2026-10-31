@@ -55,6 +55,8 @@ sign() { codesign --force --timestamp --options runtime --sign "$identity" "$@";
 [[ "$identity" == "-" ]] && sign() { codesign --force --sign - "$@"; }
 find "$contents/Resources/runtime" -type f \( -name "*.node" -o -name "*.dylib" \) -print0 | while IFS= read -r -d '' file; do sign "$file"; done
 sign --entitlements "$here/Bundle/Node.entitlements" "$contents/Resources/runtime/node"
+# Its own identifier keeps Screen Recording and Accessibility grants across updates.
+sign --identifier "$bundle_id.sandboxd" "$contents/Resources/runtime/sandboxd/cohub-sandboxd"
 sparkle="$contents/Frameworks/Sparkle.framework/Versions/B"
 sign "$sparkle/XPCServices/Installer.xpc"
 sign --preserve-metadata=entitlements "$sparkle/XPCServices/Downloader.xpc"

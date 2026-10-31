@@ -19,18 +19,25 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    func state() async -> String {
+        switch await authorizationStatus() {
+        case .authorized, .provisional: "granted"
+        case .notDetermined: "prompt"
+        default: "denied"
+        }
+    }
+
+    private func authorizationStatus() async -> UNAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            center.getNotificationSettings { continuation.resume(returning: $0.authorizationStatus) }
+        }
+    }
+
     func show(_ params: JSON) async throws -> Bool {
         guard let id = params["id"]?.string, let title = params["title"]?.string,
               let path = params["path"]?.string, WebOrigin.isInAppPath(path)
         else { throw BridgeFailure.failed("notifications.show requires an id, a title and an in-app path") }
-        let status = await withCheckedContinuation { continuation in
-            center.getNotificationSettings { continuation.resume(returning: $0.authorizationStatus) }
-        }
-        switch status {
-        case .authorized, .provisional: break
-        case .notDetermined: guard await register() else { return false }
-        default: return false
-        }
+        guard await state() == "granted" else { return false }
         let content = UNMutableNotificationContent()
         content.title = title
         if let body = params["body"]?.string { content.body = body }

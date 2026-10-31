@@ -161,13 +161,23 @@ access unit so it leaves the moment it is encoded:
 Without an encoder a desktop still serves screenshots and input, so agents work; only live video
 needs one.
 
+- **Native, on Windows** — the same contract through Media Foundation: GDI capture of the primary monitor
+  (`StretchBlt` down to the longest edge, with the cursor), the H.264 transform Windows ships, bitrate and
+  key frames through `ICodecAPI`. A still screen sends one frame every 2 s. Windows N editions lack the
+  transform and fall through to ffmpeg, as does any failure before the first frame.
+- **The desktop apps** turn a screen on and off without restarting the Runtime: the shell asks for consent
+  each time, the CLI service tells the Runtime (`display` on its private socket), and the supervisor tells
+  sandboxd on its managed control pipe, which offers what it can do with a `features` frame and answers with
+  the spec now in force and what it still `needs`. A sandboxd from before that frame refuses cleanly and asks
+  for a reconnect. A screen is shared with one Space at a time. The tray shows it and can stop it, and quitting
+  the app stops what the app shared; a terminal's `--display` is its own.
 - **`cohub runtime up --display`** shares this computer's screen. Sharing a real screen asks for
   consent (default no) unless `--yes` is passed; `--display xvfb` starts a virtual one instead.
   The flag is part of the Runtime's configuration, so reusing a running Runtime with a different
   screen is refused.
 - **macOS** — Quartz Event Services through `purego` (no cgo): mouse with click counting, scroll in
   pixels, keys by virtual key code, text as Unicode events in any layout; stills from
-  `screencapture`, video from AVFoundation. The terminal running the Runtime needs **Screen
+  `screencapture`, video from AVFoundation. Cohub, or the terminal running the Runtime, needs **Screen
   Recording** (the first share shows the system prompt; the grant applies after a restart) and
   **Accessibility** for control and the element tree. Until granted, the display is listed
   without that ability. Stills come straight from Quartz where the system still offers it, from
@@ -178,7 +188,7 @@ needs one.
 - **Windows** — Win32 through `golang.org/x/sys/windows` (no cgo), on the primary monitor in physical
   pixels (sandboxd turns on per-monitor DPI awareness, Windows 10 1703+): `SendInput` for absolute
   pointer, wheel and keys (virtual-key codes for named keys and shortcuts, Unicode events for text in
-  any layout); GDI `BitBlt` for stills, `gdigrab` for video. No grant is needed; the locked or UAC
+  any layout); GDI `BitBlt` for stills, the native encoder or `gdigrab` for video. No grant is needed; the locked or UAC
   secure desktop refuses capture, and elevated windows ignore input. No element tree yet.
 - **`xvfb`** — sandboxd starts `Xvfb` on the first free display from `:99` (`-nolisten tcp`),
   exports `DISPLAY` so every program started in the sandbox draws on it, restarts it on the same

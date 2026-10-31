@@ -75,6 +75,8 @@ export type RuntimeSummary = {
   diagnosticsPath: string;
   background: boolean;
   display?: string;
+  displayOnRequest?: boolean;
+  displayNeeds?: string[];
   native?: NativeStatus;
 };
 
@@ -87,7 +89,7 @@ export function printRuntimeSummary(summary: RuntimeSummary, json = false, reuse
     ["Space", summary.spaceId],
     ["URL", value.url],
     ["Directory", summary.root],
-    ["Harness", summary.harnesses.join(" · ")],
+    ["Harness", summary.harnesses.join(" · ") || "Cohub"],
     ["Mode", summary.background ? "Background" : "Foreground"],
     ...(summary.display ? [["Screen", summary.display === "auto" ? "This computer" : summary.display]] : []),
     ["PID", String(summary.pid)],

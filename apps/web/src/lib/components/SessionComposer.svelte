@@ -56,6 +56,10 @@ import {
 	parseComposerModeCommand,
 } from "$lib/composer-mode";
 import type { PromptQuickAction } from "$lib/features/space/modules/prompt-template-controller.svelte";
+import {
+	canOpenHostPermissionSettings,
+	openHostPermissionSettings,
+} from "$lib/host-permissions.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { getCohubAppLinkKey, parseCohubAppUrls } from "$lib/mentions/app";
@@ -273,6 +277,7 @@ let voicePartialText = $state("");
 let isVoiceRecording = $state(false);
 let isVoiceStarting = $state(false);
 let voiceError = $state<string | null>(null);
+let voiceDenied = $state(false);
 const composerInsertRanges = new Map<
 	string,
 	{ start: number; end: number; text: string }
@@ -674,6 +679,7 @@ function applyVoiceText(partialText = "") {
 async function startVoiceInput() {
 	if (disabled || sending || isVoiceRecording || isVoiceStarting) return;
 	voiceError = null;
+	voiceDenied = false;
 	isVoiceStarting = true;
 	syncCaretFromDom();
 	const start = caret.start;
@@ -713,7 +719,13 @@ async function startVoiceInput() {
 		isVoiceRecording = true;
 	} catch (error) {
 		if (voiceClient !== client) return;
-		voiceError = error instanceof Error ? error.message : "Voice input failed";
+		voiceDenied =
+			error instanceof DOMException && error.name === "NotAllowedError";
+		voiceError = voiceDenied
+			? m.permission_microphone_denied({}, { locale })
+			: error instanceof Error
+				? error.message
+				: "Voice input failed";
 		isVoiceStarting = false;
 		isVoiceRecording = false;
 		voiceClient = null;
@@ -1682,6 +1694,7 @@ $effect(() => {
 
 						<div class="flex items-center gap-2">
 							{#if isVoiceStarting || isVoiceRecording || voiceError}
+								{#if voiceDenied && canOpenHostPermissionSettings("microphone")}<button type="button" class="shrink-0 text-[11px] leading-none text-brand hover:underline" onclick={() => void openHostPermissionSettings("microphone")}>{m.permission_open_settings({}, { locale })}</button>{/if}
 								<span class={`max-w-[160px] truncate text-[11px] leading-none ${voiceError ? 'text-error-soft' : 'text-text-placeholder'}`}>
 									{voiceError ?? (isVoiceStarting ? 'Starting…' : 'Listening')}
 								</span>

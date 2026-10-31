@@ -18,6 +18,19 @@ object LauncherShortcuts {
             .setLongLabel(label)
             .setIcon(IconCompat.createWithResource(context, R.drawable.ic_shortcut_space))
             .setIntent(intent)
+            .setRank(1)
+            .build()
+        ShortcutManagerCompat.pushDynamicShortcut(context, shortcut)
+    }
+
+    fun pushNewChat(context: Context) {
+        val intent = Intent(Intent.ACTION_VIEW, WebOrigin.urlOf(NEW_CHAT_PATH).toUri(), context, MainActivity::class.java)
+        val label = context.getString(R.string.shortcut_new_chat)
+        val shortcut = ShortcutInfoCompat.Builder(context, "new-chat")
+            .setShortLabel(label)
+            .setIcon(IconCompat.createWithResource(context, R.drawable.ic_shortcut_space))
+            .setIntent(intent)
+            .setRank(0)
             .build()
         ShortcutManagerCompat.pushDynamicShortcut(context, shortcut)
     }
@@ -26,5 +39,6 @@ object LauncherShortcuts {
         ShortcutManagerCompat.removeAllDynamicShortcuts(context)
     }
 
+    const val NEW_CHAT_PATH = "/sessions/new"
     private const val SHORT_LABEL_MAX = 25
 }

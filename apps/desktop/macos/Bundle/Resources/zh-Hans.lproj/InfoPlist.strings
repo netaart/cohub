@@ -1,0 +1,7 @@
+"NSMicrophoneUsageDescription" = "Cohub 在你听写或与 Agent 对话时使用麦克风。";
+"NSCameraUsageDescription" = "Cohub 在你为 Space 拍摄照片或视频时使用摄像头。";
+"NSDocumentsFolderUsageDescription" = "Cohub 读取并修改你连接到 Space 的“文稿”中的文件夹。";
+"NSDesktopFolderUsageDescription" = "Cohub 读取并修改你连接到 Space 的“桌面”上的文件夹。";
+"NSDownloadsFolderUsageDescription" = "Cohub 读取并修改你连接到 Space 的“下载”中的文件夹，并保存你下载的文件。";
+"NSRemovableVolumesUsageDescription" = "Cohub 读取并修改你连接到 Space 的可移动磁盘上的文件夹。";
+"NSNetworkVolumesUsageDescription" = "Cohub 读取并修改你连接到 Space 的网络磁盘上的文件夹。";

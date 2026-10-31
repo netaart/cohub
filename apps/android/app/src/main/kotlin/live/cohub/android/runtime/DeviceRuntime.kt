@@ -139,7 +139,15 @@ class DeviceRuntime(private val context: Context, private val account: () -> Str
     }
 
     fun resume() {
-        if (available && hasStorageAccess() && enabledBindings.value.isNotEmpty()) launchService()
+        if (!available || enabledBindings.value.isEmpty()) return
+        if (hasStorageAccess()) launchService() else storageDenied()
+    }
+
+    internal fun storageDenied() {
+        synchronized(lock) {
+            enabledBindings.value.forEach { live[it.spaceId] = RuntimeInstance.State.ERROR to REFUSED_STORAGE_DENIED }
+            refresh()
+        }
     }
 
     fun accountChanged() {
@@ -240,6 +248,7 @@ class DeviceRuntime(private val context: Context, private val account: () -> Str
         const val KEY_BINDINGS = "bindings"
         const val MAX_FOLDERS = 10_000
         const val REFUSED_FOLDER_UNAVAILABLE = "folder_unavailable"
+        const val REFUSED_STORAGE_DENIED = "storage_denied"
         val PRIVATE = listOf("Android/data", "Android/obb")
     }
 }

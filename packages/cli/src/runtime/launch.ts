@@ -145,7 +145,6 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   }
   display = parseRuntimeDisplay(options.display);
   if (!options.harness.length) harnesses = await installedHarnesses(root, executables);
-  if (!harnesses.length) throw new Error(`Install and sign in to ${LOCAL_HARNESSES.map((harness) => LOCAL_HARNESS_SPECS[harness].label).join(", ")}, or pass --harness`);
   let createNew = Boolean(options.new);
   let name = resolveLocalSpaceName(root, options.name);
   if (!options.yes) {
@@ -182,8 +181,8 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   const capabilities = await discoverHarnesses(harnesses, executables, root, options.harness.length ? undefined : (harness, error) => {
     process.stderr.write(`Skipping ${LOCAL_HARNESS_SPECS[harness].label}: ${serializeDiagnosticError(error).message.split("\n")[0]}\n`);
   });
-  if (!capabilities.harnesses.length) throw new Error("No installed harness could start; fix the warnings above or pass --harness");
   harnesses = capabilities.harnesses;
+  if (!harnesses.length) process.stderr.write(`No local Harness found (${LOCAL_HARNESSES.map((harness) => LOCAL_HARNESS_SPECS[harness].label).join(", ")}); Turns run on Cohub. Reconnect after installing one\n`);
   const client = createClient();
   const { spaceId, source } = await resolveRuntimeSpace({
     root, identityKey: identity, explicitSpaceId: requested,

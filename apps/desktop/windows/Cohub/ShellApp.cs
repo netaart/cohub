@@ -12,6 +12,8 @@ namespace Cohub;
 
 internal sealed class ShellApp : Application, IDisposable
 {
+    public const string FolderArgument = "folder:";
+
     private readonly SingleInstance instance;
     private readonly string? startArgument;
     private readonly List<ShellWindow> windows = [];
@@ -20,6 +22,8 @@ internal sealed class ShellApp : Application, IDisposable
     private TrayIcon? tray;
     private Updates? updates;
     private Task<CoreWebView2Environment>? environment;
+    private GlobalShortcut? shortcut;
+    private ImageSource? badge;
 
     public ShellApp(ShellConfig config, SingleInstance instance, string? startArgument)
     {
@@ -52,11 +56,15 @@ internal sealed class ShellApp : Application, IDisposable
             ShowCohub: ShowPrimary,
             NewWindow: () => OpenWindow("/"),
             OpenSpace: spaceId => Open($"/spaces/{spaceId}"),
-            Disconnect: Disconnect,
+            Disconnect: spaceId => Disconnect(spaceId),
+            NewSpace: () => Open("/spaces/new"),
+            StopSharing: StopSharing,
             InstallCommandLineTool: InstallCommandLineTool,
             RestartToUpdate: () => updates?.RestartNow(),
             Quit: Quit));
         instance.Listen(Config.InstanceName, argument => Dispatcher.BeginInvoke(() => Handle(argument)));
+        shortcut = new GlobalShortcut(ShowPrimary);
+        shortcut.Set(State.GlobalShortcut);
         OpenWindow(PathOf(startArgument) ?? State.LastPath ?? "/");
         UpdateJumpList();
         updates = new Updates(Config.FeedUrl, () => Dispatcher.BeginInvoke(() => tray?.UpdateReady()), Log);
@@ -76,12 +84,14 @@ internal sealed class ShellApp : Application, IDisposable
         stopping.Dispose();
         service?.Dispose();
         tray?.Dispose();
+        shortcut?.Dispose();
     }
 
     public ShellWindow OpenWindow(string path)
     {
         var window = new ShellWindow(this, path, windows.LastOrDefault(item => item.IsVisible));
         windows.Add(window);
+        if (badge is not null) window.ShowBadge(badge);
         window.Show();
         window.Activate();
         return window;
@@ -134,8 +144,13 @@ internal sealed class ShellApp : Application, IDisposable
         else ShowPrimary();
     }
 
-    private string? PathOf(string? argument) =>
-        argument is null ? null : WebOrigin.PathFromDeepLink(argument, Config.UrlScheme);
+    private string? PathOf(string? argument)
+    {
+        if (argument is null) return null;
+        return argument.StartsWith(FolderArgument, StringComparison.Ordinal)
+            ? WebOrigin.NewSpacePath(argument[FolderArgument.Length..])
+            : WebOrigin.PathFromDeepLink(argument, Config.UrlScheme);
+    }
 
     private void Quit()
     {
@@ -149,7 +164,8 @@ internal sealed class ShellApp : Application, IDisposable
         List<string> capabilities = [
             HostProtocol.Capabilities.Appearance, HostProtocol.Capabilities.Navigation, HostProtocol.Capabilities.Share,
             HostProtocol.Capabilities.Cache, HostProtocol.Capabilities.Notifications, HostProtocol.Capabilities.Shortcuts,
-            HostProtocol.Capabilities.MediaCapture,
+            HostProtocol.Capabilities.MediaCapture, HostProtocol.Capabilities.Permissions, HostProtocol.Capabilities.Badge,
+            HostProtocol.Capabilities.LaunchAtLogin, HostProtocol.Capabilities.GlobalShortcut,
         ];
         var handlers = new Dictionary<string, BridgeRouter.Handler>
         {
@@ -185,6 +201,37 @@ internal sealed class ShellApp : Application, IDisposable
                     throw BridgeException.Failed("notifications.show requires an id, a title and an in-app path");
                 return Task.FromResult<JsonNode?>(Toasts.Show(id, title, JsonFields.Text(parameters, "body"), path));
             },
+            [HostProtocol.Methods.PermissionsStatus] = _ => Task.FromResult<JsonNode?>(new JsonObject { ["notifications"] = NotificationState }),
+            [HostProtocol.Methods.PermissionsRequest] = parameters =>
+                JsonFields.Text(parameters, "kind") == "notifications" ? Task.FromResult<JsonNode?>(NotificationState) : throw BridgeException.Failed("This permission cannot be requested"),
+            [HostProtocol.Methods.PermissionsOpenSettings] = parameters =>
+            {
+                if (JsonFields.Text(parameters, "kind") is not { } kind || PermissionSettings.UriFor(kind) is not { } uri) return Task.FromResult<JsonNode?>(false);
+                Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true })?.Dispose();
+                return Ok();
+            },
+            [HostProtocol.Methods.BadgeSet] = parameters =>
+            {
+                var count = parameters?["count"]?.GetValue<int>() ?? 0;
+                badge = count > 0 ? TaskbarBadge.Render(count) : null;
+                foreach (var open in windows) open.ShowBadge(badge);
+                return Ok();
+            },
+            [HostProtocol.Methods.LaunchAtLogin] = parameters =>
+            {
+                if (JsonFields.Bool(parameters, "enabled") is { } enabled) Registration.SetLaunchAtLogin(Config, enabled);
+                return Task.FromResult<JsonNode?>(Registration.LaunchesAtLogin(Config));
+            },
+            [HostProtocol.Methods.GlobalShortcut] = parameters =>
+            {
+                if (JsonFields.Bool(parameters, "enabled") is { } enabled)
+                {
+                    State.GlobalShortcut = enabled;
+                    State.Save();
+                    shortcut?.Set(enabled);
+                }
+                return Task.FromResult<JsonNode?>(State.GlobalShortcut);
+            },
             [HostProtocol.Methods.ShortcutsPush] = parameters =>
             {
                 if (JsonFields.Text(parameters, "id") is not { } id || JsonFields.Text(parameters, "label") is not { } label || JsonFields.Text(parameters, "path") is not { } path || !WebOrigin.IsInAppPath(path))
@@ -197,12 +244,14 @@ internal sealed class ShellApp : Application, IDisposable
         if (service is { } host)
         {
             capabilities.Add(HostProtocol.Capabilities.RuntimePicker);
-            handlers[HostProtocol.Methods.RuntimePickFolder] = _ => window.PickFolderAsync(host);
+            handlers[HostProtocol.Methods.RuntimePickFolder] = parameters => window.PickFolderAsync(host, JsonFields.Text(parameters, "path"));
         }
-        return new BridgeRouter("windows", State.HostId, capabilities, handlers, service, (root, _) => window.ConfirmConnectAsync(root), window.Deliver);
+        return new BridgeRouter("windows", State.HostId, capabilities, handlers, service, request => request.Root is { } root ? window.ConfirmConnectAsync(root) : window.ConfirmShareAsync(), window.Deliver);
     }
 
     private static Task<JsonNode?> Ok() => Task.FromResult<JsonNode?>(true);
+
+    private static string NotificationState => Toasts.Enabled ? "granted" : "denied";
 
     private void StartService()
     {
@@ -236,6 +285,9 @@ internal sealed class ShellApp : Application, IDisposable
             case HostProtocol.Events.RuntimeChanged:
                 if (RuntimeOverview.From(payload) is { } overview) tray?.Update(overview);
                 break;
+            case HostProtocol.Events.DisplayChanged:
+                tray?.UpdateSharing(JsonFields.Text(payload, "sharedWith") is not null);
+                break;
             case HostProtocol.Events.AuthChanged:
                 AccountChanged(payload);
                 break;
@@ -262,11 +314,33 @@ internal sealed class ShellApp : Application, IDisposable
         if (authenticated && redirect is not null) front?.Reveal();
     }
 
-    private async void Disconnect(string spaceId)
+    private async void Disconnect(string spaceId, bool force = false)
     {
         if (service is null) return;
-        var reply = await service.CallAsync(new BridgeRequest("stop", HostProtocol.Methods.RuntimeStop, new JsonObject { ["spaceId"] = spaceId }));
-        if (reply.Failure is { } failure) Inform(Strings.L("Couldn’t disconnect this folder"), failure.Message);
+        var parameters = new JsonObject { ["spaceId"] = spaceId };
+        if (force) parameters["force"] = true;
+        var reply = await service.CallAsync(new BridgeRequest("stop", HostProtocol.Methods.RuntimeStop, parameters));
+        if (reply.Failure is { } failure)
+        {
+            Inform(Strings.L("Couldn’t disconnect this folder"), failure.Message);
+            return;
+        }
+        if (JsonFields.Text(reply.Result, "refused") is null) return;
+        var disconnect = new System.Windows.Forms.TaskDialogButton(Strings.L("Disconnect"));
+        var answer = System.Windows.Forms.TaskDialog.ShowDialog(Primary?.Handle ?? IntPtr.Zero, new System.Windows.Forms.TaskDialogPage
+        {
+            Caption = "Cohub",
+            Heading = Strings.L("A task’s result hasn’t been confirmed yet"),
+            Text = Strings.L("Disconnecting stops the Runtime. Results and files are kept."),
+            Icon = System.Windows.Forms.TaskDialogIcon.Warning,
+            Buttons = { disconnect, System.Windows.Forms.TaskDialogButton.Cancel },
+        });
+        if (answer == disconnect) Disconnect(spaceId, force: true);
+    }
+
+    private async void StopSharing()
+    {
+        if (service is not null) await service.CallAsync(new BridgeRequest("stop", HostProtocol.Methods.DisplayStop));
     }
 
     private void UpdateJumpList()

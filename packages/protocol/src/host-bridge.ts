@@ -30,6 +30,12 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "display",
   "media.capture",
   "runtime.picker",
+  "permissions",
+  "badge",
+  "app.launchAtLogin",
+  "app.globalShortcut",
+  "runtime.keepAwake",
+  "share.incoming",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -102,8 +108,9 @@ const sessionIdentitySchema = z.object({
   email: z.string().max(320).nullable(),
 }).strict();
 
-export const DEVICE_RUNTIME_ERRORS = ["signed_out", "forbidden", "conflict"] as const;
-export const DEVICE_RUNTIME_REFUSALS = ["space_in_use", "folder_in_use", "folder_unavailable"] as const;
+export const DEVICE_RUNTIME_ERRORS = ["signed_out", "forbidden", "conflict", "elevated", "offline", "folder_denied", "no_shell", "storage_denied"] as const;
+export const DEVICE_RUNTIME_REFUSALS = ["space_in_use", "folder_in_use", "folder_unavailable", "folder_denied"] as const;
+export const DEVICE_RUNTIME_STOP_REFUSALS = ["unconfirmed_work"] as const;
 
 const devicePath = z.string().min(1).max(4_096);
 const deviceLabel = z.string().min(1).max(4_096);
@@ -139,6 +146,36 @@ export const deviceDisplayStatusSchema = z.object({
 }).strict();
 export type DeviceDisplayStatus = z.infer<typeof deviceDisplayStatusSchema>;
 
+export const HOST_PERMISSIONS = ["files", "microphone", "camera", "notifications", "background", "screen", "control"] as const;
+export type HostPermission = (typeof HOST_PERMISSIONS)[number];
+export const hostPermissionSchema = z.enum(HOST_PERMISSIONS);
+
+export const HOST_PERMISSION_STATES = ["granted", "denied", "prompt"] as const;
+export type HostPermissionState = (typeof HOST_PERMISSION_STATES)[number];
+const hostPermissionStateSchema = z.enum(HOST_PERMISSION_STATES);
+
+export const hostPermissionsSchema = z.object({
+  files: hostPermissionStateSchema.optional(),
+  microphone: hostPermissionStateSchema.optional(),
+  camera: hostPermissionStateSchema.optional(),
+  notifications: hostPermissionStateSchema.optional(),
+  background: hostPermissionStateSchema.optional(),
+});
+export type HostPermissions = z.infer<typeof hostPermissionsSchema>;
+
+export const HOST_SHARE_FILE_MAX_BYTES = 12 * 1024 * 1024;
+
+export const hostIncomingShareSchema = z.object({
+  id: identifier,
+  text: z.string().max(100_000).nullable(),
+  files: z.array(z.object({
+    name: z.string().min(1).max(255),
+    mimeType: z.string().min(1).max(255),
+    size: z.number().int().nonnegative(),
+  }).strict()).max(16),
+}).strict();
+export type HostIncomingShare = z.infer<typeof hostIncomingShareSchema>;
+
 export const hostColorSchema = z.string().regex(/^#[0-9a-f]{6}$/i);
 
 export const HOST_HAPTICS = ["tick", "confirm", "reject", "longPress"] as const;
@@ -157,6 +194,8 @@ export const hostFileSaveParamsSchema = z.union([
   savedFileSchema.extend({ data: z.base64().max(HOST_FILE_DATA_MAX_LENGTH) }).strict(),
 ]);
 export type HostFileSaveParams = z.infer<typeof hostFileSaveParamsSchema>;
+
+const settingParams = z.object({ enabled: z.boolean().optional() }).strict();
 
 const inAppPath = z.string().regex(/^\/(?!\/)/, "an in-app path").max(2_048);
 
@@ -204,8 +243,23 @@ export const HOST_BRIDGE_METHODS = {
     params: z.object({ spaceId: z.uuid(), root: devicePath }).strict(),
     result: deviceRuntimeSchema.extend({ refused: z.enum(DEVICE_RUNTIME_REFUSALS).nullable() }).strict(),
   },
-  "runtime.stop": { params: z.object({ spaceId: z.uuid() }).strict(), result: deviceRuntimeSchema },
-  "runtime.pickFolder": { params: z.undefined(), result: deviceFolderListingSchema },
+  "runtime.stop": {
+    params: z.object({ spaceId: z.uuid(), force: z.boolean().optional() }).strict(),
+    result: deviceRuntimeSchema.extend({ refused: z.enum(DEVICE_RUNTIME_STOP_REFUSALS).nullable().optional() }).strict(),
+  },
+  "runtime.pickFolder": { params: z.object({ path: devicePath }).strict().optional(), result: deviceFolderListingSchema },
+  "runtime.keepAwake": { params: settingParams, result: z.boolean() },
+  "permissions.status": { params: z.undefined(), result: hostPermissionsSchema },
+  "permissions.request": { params: z.object({ kind: hostPermissionSchema }).strict(), result: hostPermissionStateSchema },
+  "permissions.openSettings": { params: z.object({ kind: hostPermissionSchema }).strict(), result: z.boolean() },
+  "badge.set": { params: z.object({ count: z.number().int().nonnegative() }).strict(), result: z.boolean() },
+  "app.launchAtLogin": { params: settingParams, result: z.boolean() },
+  "app.globalShortcut": { params: settingParams, result: z.boolean() },
+  "share.take": { params: z.undefined(), result: hostIncomingShareSchema.nullable() },
+  "share.readFile": {
+    params: z.object({ id: identifier, index: z.number().int().nonnegative() }).strict(),
+    result: z.object({ data: z.base64().max(HOST_FILE_DATA_MAX_LENGTH) }).strict(),
+  },
   "appearance.set": { params: z.object({ backgroundColor: hostColorSchema }).strict(), result: z.boolean() },
   "app.ready": { params: z.undefined(), result: z.boolean() },
   "haptics.perform": { params: z.object({ kind: z.enum(HOST_HAPTICS) }).strict(), result: z.boolean() },
@@ -227,6 +281,7 @@ export const HOST_BRIDGE_ERROR = {
   unauthorized: "unauthorized",
   canceled: "canceled",
   failed: "failed",
+  denied: "denied",
 } as const;
 export type HostBridgeErrorCode = (typeof HOST_BRIDGE_ERROR)[keyof typeof HOST_BRIDGE_ERROR];
 

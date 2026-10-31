@@ -8,6 +8,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.media.projection.MediaProjectionManager
 import android.os.IBinder
@@ -16,6 +18,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
+import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,6 +27,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -36,6 +40,7 @@ import live.cohub.android.R
 import live.cohub.android.auth.Account
 import live.cohub.android.display.DisplayStatus
 import live.cohub.android.display.launchDisplayProvider
+import live.cohub.android.host.WebOrigin
 import java.io.File
 import java.util.UUID
 
@@ -47,6 +52,12 @@ class RuntimeService : Service() {
 
     private val sessions = mutableMapOf<String, Session>()
     private var watching: Job? = null
+    private val networkAvailable = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            networkAvailable.tryEmit(Unit)
+        }
+    }
 
     private class Session(val root: String, val job: Job)
 
@@ -73,6 +84,7 @@ class RuntimeService : Service() {
         }
         if (share != null) startSharing(share)
         if (watching == null) {
+            getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(networkCallback)
             watching = scope.launch(Dispatchers.Main.immediate) {
                 app.auth.load()
                 runtime.enabled.collect(::reconcile)
@@ -134,6 +146,7 @@ class RuntimeService : Service() {
     }
 
     override fun onDestroy() {
+        if (watching != null) runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(networkCallback) }
         // A projection must not outlive the foreground service holding it.
         app.display.stop()
         scope.cancel()
@@ -145,6 +158,7 @@ class RuntimeService : Service() {
         val runtime = app.runtime
         app.display.status.value.sharedWith?.let { shared -> if (wanted.none { it.spaceId == shared }) app.display.stop() }
         if (wanted.isEmpty() || !runtime.hasStorageAccess()) {
+            if (wanted.isNotEmpty()) runtime.storageDenied()
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             stopSelf()
             return
@@ -188,6 +202,7 @@ class RuntimeService : Service() {
             spaceId = spaceId,
             runtimeId = runtimeId,
             token = token,
+            networkAvailable = networkAvailable,
         )
         val bridge = SandboxBridge(
             binary = runtime.bridgeBinary,
@@ -232,8 +247,12 @@ class RuntimeService : Service() {
             ready > 0 -> resources.getQuantityString(R.plurals.runtime_ready, ready, ready)
             else -> getString(R.string.runtime_connecting)
         }
+        val only = instances.singleOrNull { it.state == RuntimeInstance.State.READY || it.state == RuntimeInstance.State.CONNECTING }
+        val destination = Intent(this, MainActivity::class.java).apply {
+            only?.let { data = WebOrigin.urlOf("/spaces/${it.spaceId}").toUri() }
+        }
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+            this, 0, destination, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val stop = PendingIntent.getService(
             this, 1, Intent(this, RuntimeService::class.java).setAction(ACTION_STOP_ALL), PendingIntent.FLAG_IMMUTABLE,

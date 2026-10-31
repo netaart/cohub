@@ -4790,6 +4790,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		handleSteerFollowup,
 		handleCancelFollowup,
 		handlePickAttachments,
+		get isDraftNewSessionRoute() {
+			return isDraftNewSessionRoute;
+		},
 		handleRemoveAttachment,
 		handleRemoveViewportContext,
 		handleFirstVisible,

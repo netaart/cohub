@@ -14,8 +14,8 @@ import {
 	type SpaceEnvInput,
 } from "@neta-art/cohub";
 import { ArrowLeft, Loader2, PackagePlus, Plus } from "lucide-svelte";
-import { onMount } from "svelte";
-import { goto } from "$app/navigation";
+import { onMount, untrack } from "svelte";
+import { goto, replaceState } from "$app/navigation";
 import { page } from "$app/state";
 import { PUBLIC_COHUB_ENV } from "$env/static/public";
 import { appHomeHref } from "$lib/app-entry";
@@ -28,6 +28,8 @@ import {
 	deviceRuntimeInstances,
 	deviceRuntimeSupported,
 	isDeviceRuntimeRunning,
+	pickDeviceFolder,
+	reportDeviceConnectIssue,
 	startDeviceRuntime,
 } from "$lib/device-runtime.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -80,6 +82,22 @@ function selectFolder(next: DeviceFolderListing) {
 	folder = next;
 	if (!name.trim()) name = deviceFolderName(next);
 }
+
+async function applyHandedOverFolder(fragment: string) {
+	const handedOver = new URLSearchParams(fragment.slice(1)).get("folder");
+	if (!handedOver) return;
+	replaceState(page.url.pathname, {});
+	const picked = await pickDeviceFolder(handedOver).catch(() => null);
+	if (!picked) return;
+	placement = "device";
+	selectFolder(picked);
+}
+
+$effect(() => {
+	const fragment = page.url.hash;
+	if (deviceSupported && fragment.startsWith("#folder="))
+		untrack(() => void applyHandedOverFolder(fragment));
+});
 
 async function openLinkedSpace() {
 	if (!folder?.spaceId) return;
@@ -294,8 +312,19 @@ async function handleSubmit(event: SubmitEvent) {
 				: undefined,
 		);
 
-		if (onDevice && folder)
-			await startDeviceRuntime(result.space.id, folder.path).catch(() => null);
+		if (onDevice && folder) {
+			const issue = await startDeviceRuntime(
+				result.space.id,
+				folder.path,
+			).catch(() => "failed" as const);
+			const failed =
+				deviceRuntimeInstances()?.find(
+					(item) => item.spaceId === result.space.id,
+				)?.state === "error";
+			if (issue && issue !== "declined")
+				reportDeviceConnectIssue(result.space.id, issue);
+			else if (failed) reportDeviceConnectIssue(result.space.id, "failed");
+		}
 
 		cacheSpaceRecordSoon(result.space);
 		window.dispatchEvent(new CustomEvent("cohub:space-created"));
