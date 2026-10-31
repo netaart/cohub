@@ -353,6 +353,43 @@ virtual screen that programs started in the Space draw on.
 在电脑上，`cohub runtime up --display` 以同样方式共享屏幕（macOS、Windows，或使用 X11 的 Linux；除非传入 `--yes`，否则会先询问），
 `--display xvfb[:WxH]` 则为无界面的 Linux 机器启动一块虚拟屏，Space 中启动的程序都画在上面。
 
+## Direct access / 本机直连
+
+On the machine whose Runtime serves a Space, files and screens skip the API, gateway and relay.
+sandboxd serves a private loopback API on an ephemeral `127.0.0.1` port: the same filesystem and
+display RPCs the relay carries (`POST /rpc`), and file streams with ranges (`GET`/`PUT /files`). Its
+token is generated per sandboxd process by the process that starts it (the CLI supervisor, or the
+Android app), handed over in `COHUB_LOCAL_TOKEN`, removed from sandboxd's environment and never
+inherited by processes it starts; the port comes back on the control pipe. Requests must name the
+loopback host. Processes (`process.*`) and viewer sessions (`rtc.*`) are refused: they stay on the
+Cohub pipeline, where Turns and Tasks record them.
+
+- **CLI.** `cohub spaces files` and `cohub spaces displays` ask the Runtime of this account for its
+  endpoint over the private control socket, only when it is ready. Uploads and downloads stream
+  from disk without the API's size limits, and never through a proxy. `runtime status` shows `Direct`.
+- **Desktop and Android.** The page calls `workspace.call` (`fs.*` only) through the host, and loads
+  file URLs the host streams (`workspace.files`): `cohub-workspace://` on macOS, a same-origin
+  `/__cohub/workspace/` path the server never serves on Windows and Android. Workspace files are
+  untrusted, so they come with `Content-Security-Policy: sandbox`, and hosts on the app's origin
+  refuse them as documents. The page never sees the token. Listings read this way are cached in
+  IndexedDB like any others: through the API they would come from this same sandboxd. Uploads
+  from the page stay on the API: an Android WebView cannot hand an intercepted request's body over.
+- **Safety.** A request that never reached sandboxd (refused connection, a token rotated by a
+  restart) goes to the API. Once delivered, a read may still fall back, but a mutation never retries:
+  it can never run twice. Answers and errors match the API, since both use one mapping
+  (`createSandboxSpaceFs` in `@cohub/protocol/fs`). Changes still reach every client and Space hooks
+  through the watcher and the relay, as for any change in the folder.
+- **Who.** Only the signed-in owner goes direct. A scoped execution token, an app session, or
+  `COHUB_NO_DIRECT=1` keeps every request on the API, which enforces the scope.
+
+在提供某个 Space 的那台机器上，文件和屏幕操作不再经过 API、Gateway 和中继。sandboxd 在本机回环地址的随机端口上提供私有 API：
+与中继相同的文件和屏幕 RPC，以及支持 Range 的文件流。令牌由启动 sandboxd 的进程为每个进程单独生成，不会被它启动的进程继承；
+进程和 RTC 观看会话仍走 Cohub 管线。请求未送达时回退到 API；已送达的写操作绝不重试。直连读到的列表与 API 一样写入 IndexedDB，二者的数据都来自同一个 sandboxd。
+只有已登录的本人直连，带作用域的执行令牌、App 会话和 `COHUB_NO_DIRECT=1` 都走 API。
+
+Publish sandboxd before the CLI that pins it: an older sandboxd reports no port, so clients keep the
+API until the Runtime runs the new one. 先发布 sandboxd，再更新 CLI 的版本 pin。
+
 ## Lifecycle / 生命周期
 
 Foreground and detached startup share one supervisor. Readiness requires both the

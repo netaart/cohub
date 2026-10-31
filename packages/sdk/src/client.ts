@@ -12,6 +12,7 @@ import { SearchApi } from "./apis/search.js";
 import { ReferencesApi } from "./apis/references.js";
 import { SpaceClient, SpacesApi, type WebSocketConnectionState } from "./apis/spaces.js";
 import { createSpaceFileServices, type SpaceFileServices } from "./apis/space-file-urls.js";
+import { createLocalWorkspaces } from "./local-workspace.js";
 import { TasksApi } from "./apis/tasks.js";
 import { DesktopCommandsApi } from "./apis/desktop-commands.js";
 import { UserApi } from "./apis/user.js";
@@ -152,7 +153,7 @@ export class CohubClient {
       ...options.websocket,
       getAccessToken: options.websocket?.getAccessToken ?? getAccessToken,
     });
-    this.fileServices = createSpaceFileServices(this.transport, this.websocketClient);
+    this.fileServices = createSpaceFileServices(this.transport, this.websocketClient, createLocalWorkspaces(options.localWorkspace));
     this.voice = new VoiceApi({
       env: options.voice?.env ?? options.env,
       url: options.voice?.url,

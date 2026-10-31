@@ -12,11 +12,15 @@ import (
 	"github.com/cohub/apps/sandbox/rtc"
 )
 
-// rtcIdentityPrefix limits viewer sessions and virtual screens to the API, which authorizes
-// the viewer and mints its TURN credentials. The identity is what an
-// authenticated caller declares, so this keeps other callers on their own
-// paths rather than being a security boundary.
+// rtcIdentityPrefix limits viewer sessions to the API, which authorizes the
+// viewer and mints its TURN credentials. The identity is what an authenticated
+// caller declares, so this keeps other callers on their own paths rather than
+// being a security boundary.
 const rtcIdentityPrefix = "api-"
+
+func managesVirtualScreen(identity string) bool {
+	return strings.HasPrefix(identity, rtcIdentityPrefix) || identity == LocalIdentity
+}
 
 func (d *Dispatcher) SetDisplays(hub *display.Hub, sessions *rtc.Manager, virtual *display.Virtual) {
 	d.mu.Lock()
@@ -73,7 +77,7 @@ func (d *Dispatcher) handleDisplay(request protocol.RPCRequest, identity string)
 			result, err = hub.Tree(ctx, params)
 		}
 	case "display.start", "display.stop":
-		if !strings.HasPrefix(identity, rtcIdentityPrefix) {
+		if !managesVirtualScreen(identity) {
 			return d.failed(request, "", "ACCESS_DENIED", "virtual screens are managed through the API")
 		}
 		if virtual == nil {

@@ -3,7 +3,7 @@ import { directoryCursor, FsPaginationError } from "./fs-pagination.js";
 import type { SpaceFsListOptions, SpaceFsTreePage } from "@cohub/protocol/fs";
 import { constants, type Stats } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, realpath, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { context, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { createLogger } from "@cohub/infra/logging";
@@ -23,9 +23,13 @@ import { FS_CDN_READ_WAIT_TIMEOUT_MS } from "./space-fs-cdn-constants.js";
 import { config } from "./config.js";
 import { createSpaceGitignoreFilter, isSpaceFsStagingName, type SpaceFsVisibility } from "@cohub/core/space-fs";
 import {
+  assertSafeRelativePath,
   isTextMime,
   matchesSpaceFsVersion,
   mimeTypeForPath,
+  sanitizeFileName,
+  SpaceFsError,
+  spaceFsErrorBody,
   type SpaceFsEntry,
   type SpaceFsFileResponse,
   type SpaceFsMoveInput,
@@ -38,27 +42,16 @@ import {
   type SpaceFsWriteFileInput,
 } from "@cohub/protocol/fs";
 
+export { assertSafeRelativePath, sanitizeFileName, SpaceFsError };
+
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_BATCH_READ_FILES = 50;
 const MAX_BATCH_READ_TOTAL_BYTES = 20 * 1024 * 1024;
 const MAX_BATCH_READ_CONCURRENCY = 8;
 const DIRECTORY_STAT_CONCURRENCY = 32;
-const MAX_PATH_CHARS = 4096;
-const MAX_PATH_DEPTH = 64;
 const SPACE_REAL_ROOT_CACHE_TTL_MS = 30_000;
 const logger = createLogger({ serviceName: "cohub-api" });
 const tracer = getTracer("cohub-api");
-
-export class SpaceFsError extends Error {
-  constructor(
-    public status: number,
-    public code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "SpaceFsError";
-  }
-}
 
 /**
  * Prefer inline UTF-8 for text-like files even when CDN policy would otherwise
@@ -97,29 +90,6 @@ export async function ensureSpaceWorkspaceReady(spaceId: string) {
     chmod(workspaceDir, 0o775).catch(() => undefined),
   ]);
   return { spaceBaseDir, workspaceDir };
-}
-
-export function assertSafeRelativePath(input: string, options?: { allowEmpty?: boolean }) {
-  const value = String(input ?? "").replace(/\\/g, "/").trim();
-  if (!value) {
-    if (options?.allowEmpty) return "";
-    throw new SpaceFsError(400, "path_invalid", "Invalid path.");
-  }
-  if (value.startsWith("/") || value.includes("\0")) {
-    throw new SpaceFsError(400, "path_invalid", "Invalid path.");
-  }
-  const normalized = posix.normalize(value);
-  if (normalized === ".") {
-    if (options?.allowEmpty) return "";
-    throw new SpaceFsError(400, "path_invalid", "Invalid path.");
-  }
-  if (normalized === ".." || normalized.startsWith("../") || posix.isAbsolute(normalized)) {
-    throw new SpaceFsError(400, "path_invalid", "Invalid path.");
-  }
-  if (normalized.length > MAX_PATH_CHARS || normalized.split("/").length > MAX_PATH_DEPTH) {
-    throw new SpaceFsError(400, "path_invalid", "Invalid path.");
-  }
-  return normalized;
 }
 
 type CachedSpaceRealRoot = {
@@ -1271,18 +1241,6 @@ export async function moveSpaceNode(spaceId: string, input: SpaceFsMoveInput) {
   return { fromPath: from.relativePath, toPath: to.relativePath, nodeType, createdDirs };
 }
 
-export function sanitizeFileName(name: string): string | null {
-  const cleaned = name
-    .replace(/[<>:"/\\|?*]/g, "")
-    .split("")
-    .filter((c) => c.charCodeAt(0) > 0x1f)
-    .join("")
-    .replace(/^\.+/, "")
-    .trim()
-    .slice(0, 255);
-  return cleaned || null;
-}
-
 type DirectUploadCandidate = { file: File; name: string; relativePath: string };
 
 function prepareDirectUploadCandidates(
@@ -1349,7 +1307,7 @@ export async function uploadSpaceFiles(
 
 export function spaceFsJsonError(error: unknown) {
   if (error instanceof SpaceFsError || error instanceof FsPaginationError) {
-    return { status: error.status, body: { code: error.code, message: error.message.toLowerCase().replace(/\.$/, "") } };
+    return { status: error.status, body: spaceFsErrorBody(error) };
   }
   // Local sandbox offline (matched by name to avoid a cross-module import cycle).
   if (error instanceof Error && error.name === "SandboxOfflineError") {

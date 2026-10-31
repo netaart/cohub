@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
@@ -110,6 +110,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   let tokenInFlight: Promise<string> | null = null;
   const executions = new Map<string, Execution>();
   let bridgeControl: { features: string[]; send: (frame: object) => void } | null = null;
+  let workspace: { url: string; token: string } | null = null;
   let displayAnswer: ((frame: { spec: string; error?: string }) => void) | null = null;
   const applyKeepAwake = async () => {
     if (bridgeControl?.features.includes("keepAwake")) bridgeControl.send({ type: "keepAwake", enabled: (await readRuntimePreferences()).keepAwake });
@@ -163,6 +164,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     }, (action, message) => {
       if (action === "display") return setDisplay(String(message.spec ?? ""));
       if (action === "keepAwake") return applyKeepAwake();
+      if (action === "workspace") return Promise.resolve(status.state === "ready" ? workspace : null);
       return native.control(action, message);
     });
     onState({ ...status });
@@ -194,10 +196,11 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
           signal.throwIfAborted();
           if (process.platform === "win32") controlPipe = await listenWindowsControlPipe();
           const spawnedScreen = status.display ?? "";
+          const localToken = randomBytes(32).toString("base64url");
           const bridge = spawn(binary, ["--local", "--space", config.spaceId, "--root", config.root, "--relay", process.env.COHUB_RELAY_URL?.trim() || relay.toString()], {
             stdio: controlPipe ? ["pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe", "pipe"],
             windowsHide: true,
-            env: { ...process.env, COHUB_RELAY_TOKEN: initialToken, COHUB_RUNTIME_ID: status.runtimeId, COHUB_LOG_FORMAT: "json", COHUB_RUNTIME_MANAGED: "1", COHUB_DISPLAY: spawnedScreen, ...(controlPipe ? { COHUB_RUNTIME_CONTROL_PIPE: controlPipe.path } : {}) },
+            env: { ...process.env, COHUB_RELAY_TOKEN: initialToken, COHUB_LOCAL_TOKEN: localToken, COHUB_RUNTIME_ID: status.runtimeId, COHUB_LOG_FORMAT: "json", COHUB_RUNTIME_MANAGED: "1", COHUB_DISPLAY: spawnedScreen, ...(controlPipe ? { COHUB_RUNTIME_CONTROL_PIPE: controlPipe.path } : {}) },
           });
           bridge.stdin?.on("error", () => undefined);
           const closed = new Promise<void>((resolve) => {
@@ -244,6 +247,10 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
                 bridgeControl = { features: event.features, send: (frame) => bridge.stdin?.write(`${JSON.stringify(frame)}\n`) };
                 void applyKeepAwake().catch(() => undefined);
                 if ((status.display ?? "") !== spawnedScreen) bridgeControl.send({ type: "display", spec: status.display ?? "" });
+              }
+              if (event.type === "local" && Number.isInteger(event.port)) {
+                workspace = { url: `http://127.0.0.1:${event.port}`, token: localToken };
+                update({ direct: true });
               }
               if (event.type === "display") {
                 update({ display: event.spec || undefined, displayNeeds: event.needs?.length ? event.needs : undefined });
@@ -318,11 +325,12 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
         } finally {
           retryDisconnectedBridge = undefined;
           bridgeControl = null;
+          workspace = null;
           childStopped = true;
           controlPipe?.close();
           clearTimeout(refreshTimer); clearTimeout(probeTimer);
           clearTimeout(recoveryTimer);
-          update({ workspaceConnected: false });
+          update({ workspaceConnected: false, direct: undefined });
         }
         if (Date.now() - startedAt > 60_000) attempts = 0;
         const backoff = Math.min(30_000, 500 * 2 ** Math.min(attempts++, 6));

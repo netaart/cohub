@@ -64,6 +64,10 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
   with that folder chosen, and asks the same consent.
 - **Screen.** Sharing asks each time, turns on without restarting the Runtime, shows in the tray, and
   ends when the app quits. macOS asks for Screen Recording and Accessibility; Windows needs neither.
+- **Direct files.** A Space this computer serves is read and written without leaving it: `fs.*` calls
+  go through the CLI to the Runtime's loopback API, and media streams with ranges through a scheme
+  handler (macOS) or `WebResourceRequested` (Windows). The shell asks the CLI for the endpoint; the
+  page never sees its token.
 - **Staying awake.** While a Runtime has work, its sandboxd holds off idle sleep. Settings → General
   turns it off, and holds the options to open at login and to bring Cohub up with ⌃⌥Space (Ctrl+Alt+Space).
 - **Badge.** The Dock icon and taskbar button count what is waiting to be looked at.

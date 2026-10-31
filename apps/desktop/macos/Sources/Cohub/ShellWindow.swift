@@ -20,6 +20,9 @@ final class ShellWindow: NSWindowController, NSWindowDelegate, NSMenuItemValidat
         configuration.preferences.isElementFullscreenEnabled = true
         configuration.userContentController.addUserScript(WKUserScript(source: Self.bridgeScript, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
         configuration.userContentController.add(messages, contentWorld: .page, name: HostProtocol.global)
+        if let files = shell.workspaceFiles {
+            configuration.setURLSchemeHandler(WorkspaceSchemeHandler(files: files, origin: shell.config.origin.origin), forURLScheme: WorkspaceFiles.scheme)
+        }
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true

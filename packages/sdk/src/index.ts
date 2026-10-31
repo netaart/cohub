@@ -134,6 +134,17 @@ export {
 } from "./http-error.js";
 export { HttpError, joinApiUrl, matchesUnauthorizedErrorToken, sanitizeAccessToken } from "./transport.js";
 export {
+  LocalWorkspaceRpcError,
+  LocalWorkspaceUnavailableError,
+  localWorkspaceHttpError,
+  loopbackWorkspace,
+  type LocalWorkspace,
+  type LocalWorkspaceMethod,
+  type LocalWorkspacePutOptions,
+  type LocalWorkspaceResolver,
+  type LocalWorkspaceTransport,
+} from "./local-workspace.js";
+export {
   COHUB_SOURCE_HEADER,
   COHUB_SOURCE_HEADER_NAMES,
   hasRequestSourceIdentity,

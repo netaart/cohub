@@ -38,6 +38,7 @@ internal sealed class ShellApp : Application, IDisposable
 
     public ShellConfig Config { get; }
     public ShellState State { get; }
+    public WorkspaceFiles? WorkspaceFiles { get; private set; }
     public ImageSource? WindowIcon { get; }
     public bool Quitting { get; private set; }
 
@@ -244,6 +245,7 @@ internal sealed class ShellApp : Application, IDisposable
         if (service is { } host)
         {
             capabilities.Add(HostProtocol.Capabilities.RuntimePicker);
+            capabilities.Add(HostProtocol.Capabilities.WorkspaceFiles);
             handlers[HostProtocol.Methods.RuntimePickFolder] = parameters => window.PickFolderAsync(host, JsonFields.Text(parameters, "path"));
         }
         return new BridgeRouter("windows", State.HostId, capabilities, handlers, service, request => request.Root is { } root ? window.ConfirmConnectAsync(root) : window.ConfirmShareAsync(), window.Deliver);
@@ -271,6 +273,7 @@ internal sealed class ShellApp : Application, IDisposable
                 foreach (var window in windows) window.ServiceStarted();
             }),
             Log);
+        WorkspaceFiles = new WorkspaceFiles(service);
         service.Start();
     }
 

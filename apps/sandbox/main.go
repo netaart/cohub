@@ -18,6 +18,7 @@ import (
 	"github.com/cohub/apps/sandbox/display"
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/filewatch"
+	"github.com/cohub/apps/sandbox/local"
 	"github.com/cohub/apps/sandbox/portwatch"
 	"github.com/cohub/apps/sandbox/power"
 	"github.com/cohub/apps/sandbox/process"
@@ -155,6 +156,7 @@ func main() {
 }
 
 type sandboxRuntime struct {
+	dispatcher      *rpc.Dispatcher
 	processes       *process.Manager
 	server          *ws.Server
 	search          *search.Manager
@@ -272,6 +274,7 @@ func buildRuntime(
 		}
 	})
 	return sandboxRuntime{
+		dispatcher:      dispatcher,
 		processes:       processManager,
 		server:          server,
 		search:          searchManager,
@@ -385,9 +388,11 @@ func displayNeeds(displays []display.Info) []string {
 
 func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 	relayToken := strings.TrimSpace(os.Getenv("COHUB_RELAY_TOKEN"))
-	// Remove the user token from the environment immediately so it can never be
+	localToken := strings.TrimSpace(os.Getenv("COHUB_LOCAL_TOKEN"))
+	// Remove the tokens from the environment immediately so they can never be
 	// inherited by agent-started processes via os.Environ().
 	_ = os.Unsetenv("COHUB_RELAY_TOKEN")
+	_ = os.Unsetenv("COHUB_LOCAL_TOKEN")
 	// The standalone binary's build version is the authoritative local runtime version.
 	_ = os.Setenv("COHUB_SANDBOX_VERSION", buildVersion)
 	cfg, err := env.LoadLocal(env.LocalOptions{
@@ -507,6 +512,17 @@ func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 				}
 			}
 		}()
+	}
+	if managed != nil && localToken != "" {
+		if api, err := local.Listen(localToken, sandbox.dispatcher, logger); err != nil {
+			logger.Warn("local API disabled", slog.String("error", err.Error()))
+		} else {
+			defer api.Close()
+			managed.Send(struct {
+				Type string `json:"type"`
+				Port int    `json:"port"`
+			}{"local", api.Port()})
+		}
 	}
 	displaysChanged := make(chan struct{}, 1)
 	sandbox.displays.OnChange(func([]display.Info) {

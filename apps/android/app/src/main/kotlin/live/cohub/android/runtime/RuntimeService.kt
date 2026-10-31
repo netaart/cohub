@@ -213,6 +213,7 @@ class RuntimeService : Service() {
             runtimeId = runtimeId,
             displaySocket = displaySocket,
             token = { token(false) },
+            onEndpoint = { app.workspaces.update(spaceId, it) },
         )
         runtime.publish(spaceId, RuntimeInstance.State.CONNECTING)
         val reporter = launch {

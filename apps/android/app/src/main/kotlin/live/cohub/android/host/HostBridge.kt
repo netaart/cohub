@@ -26,7 +26,9 @@ import live.cohub.android.display.DeviceDisplay
 import live.cohub.android.files.FileSaver
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.FolderUnavailable
+import live.cohub.android.runtime.LocalWorkspaces
 import live.cohub.android.runtime.RuntimeInstance
+import live.cohub.android.runtime.WorkspaceUnavailable
 import live.cohub.android.runtime.toJson
 import java.util.UUID
 
@@ -48,9 +50,11 @@ class HostBridge(
     private val runtime: DeviceRuntime? = null,
     private val files: FileSaver? = null,
     private val display: DeviceDisplay? = null,
+    private val workspaces: LocalWorkspaces? = null,
 ) {
     private val supportedMethods = BASE_METHODS +
         (if (runtime != null) RUNTIME_METHODS else emptySet()) +
+        (if (runtime != null && workspaces != null) setOf(HostProtocol.Methods.WORKSPACE_CALL) else emptySet()) +
         (if (runtime != null && display != null) DISPLAY_METHODS else emptySet()) +
         (if (files != null) setOf(HostProtocol.Methods.FILES_SAVE) else emptySet())
 
@@ -107,10 +111,10 @@ class HostBridge(
             }
                 .onSuccess { result -> reply(proxy, id, result) }
                 .onFailure { error ->
-                    val code = if (error is CancellationSignal) {
-                        HostProtocol.Errors.CANCELED
-                    } else {
-                        HostProtocol.Errors.FAILED
+                    val code = when (error) {
+                        is CancellationSignal -> HostProtocol.Errors.CANCELED
+                        is WorkspaceUnavailable -> HostProtocol.Errors.UNAVAILABLE
+                        else -> HostProtocol.Errors.FAILED
                     }
                     replyError(proxy, id, code, error.message ?: "Host call failed")
                 }
@@ -289,6 +293,12 @@ class HostBridge(
         }
 
         HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS -> JsonPrimitive(actions.openControlSettings())
+
+        HostProtocol.Methods.WORKSPACE_CALL -> {
+            val workspaces = workspaces ?: throw WorkspaceUnavailable("This device cannot serve a Space")
+            val method = params.string("method") ?: throw IllegalArgumentException("workspace.call requires a method")
+            workspaces.call(requireSpaceId(params), method, params["params"] as? JsonObject ?: JsonObject(emptyMap()))
+        }
 
         else -> throw IllegalArgumentException("Unhandled method: $method")
     }

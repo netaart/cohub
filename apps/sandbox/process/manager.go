@@ -27,6 +27,7 @@ var blockedInheritedEnvKeys = map[string]struct{}{
 	// Local mode: the user's access token must never leak into agent-started
 	// processes (main.go also unsets it from the environment after reading).
 	"COHUB_RELAY_TOKEN": {},
+	"COHUB_LOCAL_TOKEN": {},
 }
 
 func sanitizeInheritedEnv(env []string) []string {

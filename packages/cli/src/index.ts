@@ -89,6 +89,7 @@ Environment:
   COHUB_BASE_URL         Override the API base URL
   COHUB_WS_URL           Override the realtime WebSocket URL
   COHUB_WEB_URL          Override the web URL used in links
+  COHUB_NO_DIRECT=1      Send files and screens through the API even when this machine serves the Space
   ENV=dev                Use the development Cohub environment
   HTTPS_PROXY            Honored for API and uploads (also HTTP_PROXY, NO_PROXY)
   Runtime logs            ~/.local/state/cohub/runtime/<space-id>/diagnostics

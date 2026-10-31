@@ -19,6 +19,7 @@ import androidx.webkit.WebViewStartupException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asExecutor
 import live.cohub.android.BuildConfig
+import live.cohub.android.runtime.LocalWorkspaces
 
 interface SurfaceListener {
     fun onExternalLink(url: Uri)
@@ -36,7 +37,7 @@ interface SurfaceListener {
  * discard the web app's state and force a cold start on every tap.
  */
 @SuppressLint("SetJavaScriptEnabled")
-class WebSurface(context: Context, listener: SurfaceListener) {
+class WebSurface(context: Context, listener: SurfaceListener, workspaces: LocalWorkspaces?) {
     val view = WebView(context)
 
     init {
@@ -52,7 +53,7 @@ class WebSurface(context: Context, listener: SurfaceListener) {
         if (BuildConfig.WEB_DEBUGGING) WebView.setWebContentsDebuggingEnabled(true)
         // Waived priority gets the renderer reclaimed whenever the app is hidden.
         view.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
-        view.webViewClient = CohubWebViewClient(listener)
+        view.webViewClient = CohubWebViewClient(listener, workspaces)
         view.webChromeClient = CohubWebChromeClient(listener)
         view.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
             listener.onDownload(url, contentDisposition, mimeType)

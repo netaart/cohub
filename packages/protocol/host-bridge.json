@@ -25,7 +25,9 @@
     "app.launchAtLogin",
     "app.globalShortcut",
     "runtime.keepAwake",
-    "share.incoming"
+    "share.incoming",
+    "workspace",
+    "workspace.files"
   ],
   "methods": [
     "host.describe",
@@ -62,7 +64,8 @@
     "display.status",
     "display.share",
     "display.stop",
-    "display.openControlSettings"
+    "display.openControlSettings",
+    "workspace.call"
   ],
   "events": [
     "auth.changed",
@@ -78,12 +81,18 @@
     "unauthorized",
     "canceled",
     "failed",
-    "denied"
+    "denied",
+    "unavailable"
   ],
   "service": {
     "version": 1,
     "shellEvents": [
       "shell.open"
-    ]
+    ],
+    "workspaceEndpoint": "workspace.endpoint"
+  },
+  "workspace": {
+    "scheme": "cohub-workspace",
+    "path": "/__cohub/workspace/"
   }
 }

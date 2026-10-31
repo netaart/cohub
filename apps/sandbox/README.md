@@ -81,6 +81,14 @@ nonce 格式错误仍报错，401 不触发匿名降级，新版服务端始终�
 本次不需要数据库迁移；token 授权一个实例的控制能力，不区分 RPC 方法。
 现有 ws:// 传输和同 UID 执行模型不变，不能将环境清理当作 /proc 隔离。
 
+## 本机回环 API
+
+本地受管模式（`--local` 且 `COHUB_RUNTIME_MANAGED=1`）在提供 `COHUB_LOCAL_TOKEN` 时，于 `127.0.0.1` 的随机端口提供
+`POST /rpc`（`fs.*` 与 `display.*`，拒绝 `process.*` 和 `rtc.*`）以及 `GET`/`HEAD`/`PUT /files?path=`（支持 Range，响应带 `Content-Security-Policy: sandbox`；
+写入先落到同目录的 `.cohub-upload.*` 再加锁原子安装，可带 `exclusive=true` 或 `expectedSize`/`expectedMtimeMs`）。
+请求须带 `Authorization: Bearer <token>` 且 Host 为回环地址；token 读取后立即从环境移除，不会被子进程继承。
+端口通过控制管道上报 `{"type":"local","port":N}`。详见 [Local Runtime](../../docs/local-runtime.md#direct-access--本机直连)。
+
 ## 启动脚本
 
 仅云端 Space 在 Workspace bootstrap 完成后，按 User → Mods → Space 的顺序执行

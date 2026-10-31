@@ -455,101 +455,137 @@ func (d *Dispatcher) handleFSWrite(request protocol.RPCRequest) interface{} {
 		data = decoded
 	}
 
-	// The version check and the write must be atomic with respect to other
-	// writes to the same path, otherwise a concurrent mutation can land between
-	// the stat and the write (TOCTOU) and the check is meaningless. The
-	// response version (mtimeMs) is also captured under the lock so it cannot
-	// belong to a subsequent writer.
-	var created bool
-	var createdDirs []string
-	var bytesWritten int
-	var mtimeMs int64
-	lockErr := withPathLock(resolved.path, func() error {
-		if params.Expected != nil && !params.Exclusive {
-			info, err := os.Stat(resolved.path)
+	return d.writeResult(request, resolved.path, d.writeFile(fileWrite{
+		target:    resolved.path,
+		source:    sourcePath(source),
+		data:      data,
+		exclusive: params.Exclusive,
+		expected:  params.Expected,
+	}))
+}
+
+func sourcePath(source *resolvedSandboxPath) string {
+	if source == nil {
+		return ""
+	}
+	return source.path
+}
+
+type fileWrite struct {
+	target    string
+	source    string
+	data      []byte
+	exclusive bool
+	expected  *fsWriteVersion
+}
+
+type fileWriteOutcome struct {
+	created      bool
+	createdDirs  []string
+	bytesWritten int
+	mtimeMs      int64
+	err          error
+}
+
+// writeFile performs the version check and the write atomically with respect
+// to other writes to the same path, otherwise a concurrent mutation could land
+// between the stat and the write (TOCTOU). The response version (mtimeMs) is
+// captured under the lock so it cannot belong to a subsequent writer.
+func (d *Dispatcher) writeFile(write fileWrite) fileWriteOutcome {
+	var outcome fileWriteOutcome
+	outcome.err = withPathLock(write.target, func() error {
+		if write.expected != nil && !write.exclusive {
+			info, err := os.Stat(write.target)
 			if err != nil {
 				if os.IsNotExist(err) {
 					return errPathConflict
 				}
 				return err
 			}
-			if info.Size() != params.Expected.Size || info.ModTime().UnixMilli() != params.Expected.MtimeMs {
+			if info.Size() != write.expected.Size || info.ModTime().UnixMilli() != write.expected.MtimeMs {
 				return errPathConflict
 			}
 		}
-		if source != nil {
-			targetInfo, targetErr := os.Lstat(resolved.path)
+		targetMissing := false
+		if write.source != "" {
+			targetInfo, targetErr := os.Lstat(write.target)
 			if targetErr == nil {
 				if targetInfo.Mode()&os.ModeSymlink != 0 || !targetInfo.Mode().IsRegular() {
 					return errPathConflict
 				}
-			} else if !os.IsNotExist(targetErr) {
+			} else if os.IsNotExist(targetErr) {
+				targetMissing = true
+			} else {
 				return targetErr
 			}
 		}
 		var err error
-		createdDirs, err = ensureParentDirs(d.cfg.WorkspaceDir, resolved.path)
+		outcome.createdDirs, err = ensureParentDirs(d.cfg.WorkspaceDir, write.target)
 		if err != nil {
 			return err
 		}
-		if source != nil {
-			// Install the already-downloaded file while holding the same path lock
+		switch {
+		case write.source != "":
+			// Install the already-staged file while holding the same path lock
 			// used by editor writes; never expose an unconditional late mv.
-			sourceInfo, statErr := os.Lstat(source.path)
+			sourceInfo, statErr := os.Lstat(write.source)
 			if statErr != nil {
 				return statErr
 			}
 			if !sourceInfo.Mode().IsRegular() {
 				return errPathConflict
 			}
-			if params.Exclusive {
-				if err := installFileExclusive(source.path, resolved.path); err != nil {
+			if write.exclusive {
+				if err := installFileExclusive(write.source, write.target); err != nil {
 					return err
 				}
-				created = true
+				outcome.created = true
 			} else {
-				if err := os.Rename(source.path, resolved.path); err != nil {
+				if err := os.Rename(write.source, write.target); err != nil {
 					return err
 				}
-				created = false
+				outcome.created = targetMissing
 			}
-			bytesWritten = int(sourceInfo.Size())
-		} else if params.Exclusive {
+			outcome.bytesWritten = int(sourceInfo.Size())
+		case write.exclusive:
 			// Atomic create: O_EXCL fails if the path already exists, so concurrent
 			// exclusive creates cannot clobber each other.
-			if err := osWriteFileExclusive(resolved.path, data); err != nil {
+			if err := osWriteFileExclusive(write.target, write.data); err != nil {
 				return err
 			}
-			created = true
-			bytesWritten = len(data)
-		} else {
-			created, err = writeFileWithDisposition(resolved.path, data)
+			outcome.created = true
+			outcome.bytesWritten = len(write.data)
+		default:
+			outcome.created, err = writeFileWithDisposition(write.target, write.data)
 			if err != nil {
 				return err
 			}
-			bytesWritten = len(data)
+			outcome.bytesWritten = len(write.data)
 		}
-		mtimeMs = statMtimeMs(resolved.path)
+		outcome.mtimeMs = statMtimeMs(write.target)
 		return nil
 	})
-	if lockErr != nil {
-		if errors.Is(lockErr, errPathConflict) {
+	return outcome
+}
+
+func (d *Dispatcher) writeResult(request protocol.RPCRequest, target string, outcome fileWriteOutcome) interface{} {
+	if outcome.err != nil {
+		if errors.Is(outcome.err, errPathConflict) {
 			return d.failed(request, "", "CONFLICT", "file changed since it was opened")
 		}
-		if errors.Is(lockErr, os.ErrExist) {
-			return d.failed(request, "", "ALREADY_EXISTS", fmt.Sprintf("path already exists: %s", resolved.path))
+		if errors.Is(outcome.err, os.ErrExist) {
+			return d.failed(request, "", "ALREADY_EXISTS", fmt.Sprintf("path already exists: %s", target))
 		}
-		return d.failedFSMutation(request, lockErr)
+		return d.failedFSMutation(request, outcome.err)
 	}
-
 	result := map[string]interface{}{
-		"path":         resolved.path,
-		"bytesWritten": bytesWritten,
-		"created":      created,
-		"createdDirs":  createdDirs,
+		"path":         target,
+		"bytesWritten": outcome.bytesWritten,
+		"created":      outcome.created,
+		"createdDirs":  outcome.createdDirs,
 	}
-	if mtimeMs > 0 {
-		result["mtimeMs"] = mtimeMs
+	if outcome.mtimeMs > 0 {
+		result["mtimeMs"] = outcome.mtimeMs
 	}
 	return result
 }

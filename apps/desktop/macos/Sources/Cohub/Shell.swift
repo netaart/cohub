@@ -11,6 +11,7 @@ final class Shell: NSObject, NSApplicationDelegate {
     private let log = Logger(subsystem: "live.cohub.desktop", category: "shell")
     private var windows: [ShellWindow] = []
     private var service: HostService?
+    private(set) var workspaceFiles: WorkspaceFiles?
     private var updater: SPUStandardUpdaterController?
     private var notifications: Notifications?
     private var launched = false
@@ -121,6 +122,7 @@ final class Shell: NSObject, NSApplicationDelegate {
         if notifications != nil { capabilities.append(C.notifications) }
         if Bundle.main.bundleIdentifier != nil { capabilities.append(C.launchAtLogin) }
         if service != nil { capabilities.append(C.runtimePicker) }
+        if workspaceFiles != nil { capabilities.append(C.workspaceFiles) }
         var handlers: [String: BridgeRouter.Handler] = [
             M.appReady: { [weak window] _ in window?.reveal(); return true },
             M.appearanceSet: { [weak window] params in
@@ -221,6 +223,7 @@ final class Shell: NSObject, NSApplicationDelegate {
             log: { line in log.info("\(line, privacy: .public)") }
         )
         self.service = service
+        workspaceFiles = WorkspaceFiles(service: service)
         service.start()
     }
 

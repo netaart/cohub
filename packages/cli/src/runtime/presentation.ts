@@ -77,6 +77,7 @@ export type RuntimeSummary = {
   display?: string;
   displayOnRequest?: boolean;
   displayNeeds?: string[];
+  direct?: boolean;
   native?: NativeStatus;
 };
 
@@ -92,6 +93,7 @@ export function printRuntimeSummary(summary: RuntimeSummary, json = false, reuse
     ["Harness", summary.harnesses.join(" · ") || "Cohub"],
     ["Mode", summary.background ? "Background" : "Foreground"],
     ...(summary.display ? [["Screen", summary.display === "auto" ? "This computer" : summary.display]] : []),
+    ...(summary.direct ? [["Direct", "Files and screens on this machine skip the network"]] : []),
     ["PID", String(summary.pid)],
     ["Logs", summary.diagnosticsPath],
   ];

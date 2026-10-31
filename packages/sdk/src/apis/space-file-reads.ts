@@ -1,3 +1,4 @@
+import { createLocalWorkspaces, type LocalWorkspaces } from "../local-workspace.js";
 import { HttpError, type HttpTransport } from "../transport.js";
 import type { SpaceFsFileResponse, SpaceFsPreparingFile, SpaceFsReadFilesResponse } from "../types.js";
 
@@ -47,7 +48,7 @@ export function createLimiter(limit: number) {
 export const fileReadPath = (spaceId: string, path: string) =>
 	`/api/spaces/${spaceId}/fs/file?${new URLSearchParams({ path })}`;
 
-export function createSpaceFileReads(transport: HttpTransport) {
+export function createSpaceFileReads(transport: HttpTransport, local: LocalWorkspaces = createLocalWorkspaces()) {
 	const queues = [new Map<string, Pending>(), new Map<string, Pending>()] as const;
 	const timers: [ReturnType<typeof setTimeout> | null, ReturnType<typeof setTimeout> | null] = [null, null];
 	const inFlight = new Map<string, Pending>();
@@ -164,14 +165,16 @@ export function createSpaceFileReads(transport: HttpTransport) {
 			path: string,
 			options: { background?: boolean; signal?: AbortSignal; token?: string | null } = {},
 		): Promise<SpaceFileRead> {
-			const own = options.token === undefined;
-			const token = own ? await transport.credential() : (options.token ?? null);
-			try {
-				return await abortable(share(token, spaceId, path, options.background === true), options.signal);
-			} catch (error) {
-				if (!own || !isUnauthorized(error)) throw error;
-				return abortable(readOne(spaceId, path), options.signal);
-			}
+			return local.run(spaceId, "read", (workspace) => abortable(workspace.fs.read(path), options.signal), async () => {
+				const own = options.token === undefined;
+				const token = own ? await transport.credential() : (options.token ?? null);
+				try {
+					return await abortable(share(token, spaceId, path, options.background === true), options.signal);
+				} catch (error) {
+					if (!own || !isUnauthorized(error)) throw error;
+					return abortable(readOne(spaceId, path), options.signal);
+				}
+			});
 		},
 		invalidate(spaceId: string, paths: Iterable<string>) {
 			const stale = new Set([...paths].map((path) => `${spaceId}\u0000${path}`));

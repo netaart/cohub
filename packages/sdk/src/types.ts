@@ -698,20 +698,25 @@ export type SpaceFsWriteFileInput = {
   };
   mutationId?: string;
 };
+export type SpaceFsWriteResult = { path: string; size: number; mtimeMs: number; created: boolean; createdDirs: string[] };
 export type SpaceFsMoveInput = {
   fromPath: string;
   toPath: string;
   mutationId?: string;
 };
+export type SpaceFsNodeType = "file" | "dir" | "symlink" | "unknown";
+export type SpaceFsMoveResult = { fromPath: string; toPath: string; nodeType: SpaceFsNodeType; createdDirs: string[] };
 export type SpaceFsCreateDirectoryInput = {
   path: string;
   mutationId?: string;
 };
+export type SpaceFsCreateDirectoryResult = { path: string; mtimeMs: number; created: boolean; createdDirs: string[] };
 export type SpaceFsDeleteNodeInput = {
   path: string;
   recursive?: boolean;
   mutationId?: string;
 };
+export type SpaceFsDeleteResult = { path: string; deleted: true; nodeType: SpaceFsNodeType };
 export type SpaceFsUploadEntry = {
   path: string;
   name: string;

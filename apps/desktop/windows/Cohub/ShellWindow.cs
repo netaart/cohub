@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -56,6 +58,11 @@ internal sealed class ShellWindow : Window, IDisposable
         core.NavigationStarting += OnNavigationStarting;
         core.NewWindowRequested += OnNewWindowRequested;
         core.PermissionRequested += OnPermissionRequested;
+        if (app.WorkspaceFiles is { } files)
+        {
+            core.AddWebResourceRequestedFilter($"{app.Config.Origin.Origin}{HostProtocol.WorkspacePath}*", CoreWebView2WebResourceContext.All);
+            core.WebResourceRequested += (_, e) => ServeWorkspaceFile(core, files, e);
+        }
         core.ProcessFailed += (_, e) => { if (e.ProcessFailedKind is CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive) core.Reload(); };
         core.DocumentTitleChanged += (_, _) => Title = string.IsNullOrWhiteSpace(core.DocumentTitle) ? "Cohub" : core.DocumentTitle;
         core.SourceChanged += (_, _) =>
@@ -140,6 +147,37 @@ internal sealed class ShellWindow : Window, IDisposable
             CoreWebView2PermissionKind.Notifications => CoreWebView2PermissionState.Deny,
             _ => e.State,
         };
+    }
+
+    private async void ServeWorkspaceFile(CoreWebView2 core, WorkspaceFiles files, CoreWebView2WebResourceRequestedEventArgs e)
+    {
+        if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var url) || WorkspaceFiles.Target(url, app.Config.Origin) is not { } target) return;
+        var deferral = e.GetDeferral();
+        try
+        {
+            var headers = e.Request.Headers.ToList();
+            // Never as a document: workspace files are untrusted and this path is on the app's origin.
+            var servable = e.Request.Method == "GET" && e.ResourceContext != CoreWebView2WebResourceContext.Document;
+            var response = servable ? await files.SendAsync(target.SpaceId, target.Path, headers, CancellationToken.None) : null;
+            if (response is null)
+            {
+                e.Response = core.Environment.CreateWebResourceResponse(null, 503, "Service Unavailable", "Cache-Control: no-store");
+                return;
+            }
+            var passed = response.Headers.Concat(response.Content.Headers)
+                .Where(header => WorkspaceFiles.PassedHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase))
+                .Select(header => $"{header.Key}: {string.Join(", ", header.Value)}");
+            e.Response = core.Environment.CreateWebResourceResponse(
+                await response.Content.ReadAsStreamAsync(), (int)response.StatusCode, response.ReasonPhrase ?? "OK", string.Join("\r\n", passed));
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException or TaskCanceledException)
+        {
+            e.Response = core.Environment.CreateWebResourceResponse(null, 502, "Bad Gateway", "Cache-Control: no-store");
+        }
+        finally
+        {
+            deferral.Complete();
+        }
     }
 
     public static void OpenExternally(Uri url) => Process.Start(new ProcessStartInfo(url.AbsoluteUri) { UseShellExecute = true })?.Dispose();

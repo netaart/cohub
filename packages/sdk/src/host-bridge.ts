@@ -23,9 +23,12 @@ export {
   HOST_BRIDGE_METHODS,
   HOST_SERVICE_SHELL_EVENTS,
   HOST_SERVICE_VERSION,
+  HOST_SERVICE_WORKSPACE_ENDPOINT,
+  HOST_WORKSPACE_CALL_MAX_BYTES,
   hostAuthChangedSchema,
   hostBridgeRequestSchema,
   hostShellOpenSchema,
+  hostWorkspaceFileUrl,
   type DeviceDisplayStatus,
   type DeviceFolderListing,
   type DeviceRuntime,
@@ -33,6 +36,7 @@ export {
   type HostBridgeCapability,
   type HostBridgeMethod,
   type HostServiceHello,
+  type HostWorkspaceCallResult,
 } from "@cohub/protocol/host-bridge";
 
 export type HostBridgeError = HostBridgeErrorClass;

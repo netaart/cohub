@@ -18,6 +18,8 @@ public enum HostProtocol {
         public static let badge = "badge"
         public static let launchAtLogin = "app.launchAtLogin"
         public static let globalShortcut = "app.globalShortcut"
+        public static let workspace = "workspace"
+        public static let workspaceFiles = "workspace.files"
     }
 
     public enum Method {
@@ -45,6 +47,7 @@ public enum HostProtocol {
         public static let badgeSet = "badge.set"
         public static let launchAtLogin = "app.launchAtLogin"
         public static let globalShortcut = "app.globalShortcut"
+        public static let workspaceCall = "workspace.call"
     }
 
     public enum Event {
@@ -58,10 +61,16 @@ public enum HostProtocol {
         public static let canceled = "canceled"
         public static let failed = "failed"
         public static let denied = "denied"
+        public static let unavailable = "unavailable"
     }
 
     public enum ShellEvent {
         public static let open = "shell.open"
+    }
+
+    /// Asked of the CLI by the shell itself; the page can never reach it.
+    public enum ServiceMethod {
+        public static let workspaceEndpoint = "workspace.endpoint"
     }
 
     public static let serviceVersion = 1

@@ -2,6 +2,7 @@ import type { MediaFacts } from "../core/media.js";
 
 export * from "./mime.js";
 export * from "./model-references.js";
+export * from "./sandbox.js";
 
 export type SpaceFsChange = {
   path?: string;

@@ -165,6 +165,7 @@ class MainActivity : ComponentActivity(), HostActions {
             runtime = runtime.takeIf { it.available },
             files = app.files,
             display = app.display,
+            workspaces = app.workspaces.takeIf { runtime.available },
         )
         fileChooser = FileChooser(this)
         mediaCapture = MediaCapture(this)
@@ -216,7 +217,7 @@ class MainActivity : ComponentActivity(), HostActions {
 
     private fun mountSurface(path: String) {
         WebWarmup.prefetch(path)
-        val next = WebSurface(this, surfaceListener)
+        val next = WebSurface(this, surfaceListener, app.workspaces.takeIf { runtime.available })
         next.setBackgroundColor(appearance.backgroundColor)
         // Without the bridge the surface still runs on its browser path; this
         // only explains missing features.

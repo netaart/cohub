@@ -77,6 +77,7 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `display.share` | `display` | Asks for screen capture consent, then shares with a Space this device serves |
 | `display.stop` | `display` | Stops sharing; every stream ends |
 | `display.openControlSettings` | `display` | Opens Accessibility settings, where the user allows control |
+| `workspace.call` | `workspace` | One `fs.*` call on a Space this device's Runtime serves: `{result}` or the sandbox's `{error}`. `unavailable` means it never reached the Runtime, so the page uses the API |
 
 `runtime.changed` pushes the whole `DeviceRuntime` on every change, `display.changed` the whole
 display status. `display` rides on `runtime`; see [Displays](displays.md). Android advertises
@@ -85,6 +86,13 @@ display status. `display` rides on `runtime`; see [Displays](displays.md). Andro
 
 `app.foreground` and `app.background` follow the shell's visibility; the page
 also sees `visibilitychange`, because the host pauses the WebView with it.
+
+With `workspace.files` the host also streams those Spaces' files, ranges included, at
+`hostWorkspaceFileUrl()`: `cohub-workspace://<spaceId>/files?path=…` on WebKit hosts, which cannot
+intercept https, and a same-origin `/__cohub/workspace/<spaceId>/files?path=…` the server never serves
+elsewhere. It answers 503 when no Runtime here serves the Space. Requests over
+`HOST_WORKSPACE_CALL_MAX_BYTES` stay on the API, since hosts read the bridge line by line. See
+[Local Runtime](local-runtime.md#direct-access--本机直连).
 
 ## Permissions
 
@@ -182,6 +190,10 @@ web origin like Android does, and split the bridge in two:
   starts. Its first message, `hello`, names the capabilities and methods it answers;
   the shell adds those to its own when the page describes the host, and remembers the
   hello so later launches never wait for it.
+
+The CLI answers `workspace.call` from this account's ready Runtimes. To stream file URLs the shell
+asks it for a Runtime's loopback endpoint with `workspace.endpoint`, a method absent from `hello`, so
+the page can never reach it or the token.
 
 The service pushes `auth.changed` (with the `redirectPath` a sign-in asked for) and
 `runtime.changed` when the session file or a Runtime changes, from file watches and

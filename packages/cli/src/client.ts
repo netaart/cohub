@@ -1,8 +1,10 @@
 import { CohubClient, CohubHttpClient, readRequestSourceFromEnv, type CohubClientOptions } from "@neta-art/cohub";
 import { clearAuthSession, readAuthSession, resolveAccessToken } from "./auth.js";
+import { resolveLocalWorkspace } from "./runtime/local-workspace.js";
 
 const clientOptions = () => ({
   getAccessToken: resolveAccessToken,
+  localWorkspace: resolveLocalWorkspace,
   onUnauthorized: (context: Parameters<NonNullable<CohubClientOptions["onUnauthorized"]>>[0]) => {
     if (!process.env.COHUB_EXECUTION_TOKEN?.trim() && context.matchesRejectedToken(readAuthSession()?.accessToken ?? null)) clearAuthSession();
   },
@@ -16,8 +18,9 @@ export function createClient(): CohubHttpClient {
   return new CohubHttpClient(clientOptions());
 }
 
+/** A scoped principal, so its requests stay on the API that enforces the scope. */
 export function createClientWithAccessToken(token: string): CohubHttpClient {
-  return new CohubHttpClient({ ...clientOptions(), getAccessToken: () => token });
+  return new CohubHttpClient({ ...clientOptions(), getAccessToken: () => token, localWorkspace: undefined });
 }
 
 export function createRealtimeClient(): CohubClient {

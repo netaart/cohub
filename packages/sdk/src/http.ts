@@ -10,6 +10,7 @@ import { ReferencesApi } from "./apis/references.js";
 import { SessionAccessApi } from "./apis/session-access.js";
 import { SpaceClient, SpacesApi } from "./apis/spaces.js";
 import { createSpaceFileServices, type SpaceFileServices } from "./apis/space-file-urls.js";
+import { createLocalWorkspaces } from "./local-workspace.js";
 import { TasksApi } from "./apis/tasks.js";
 
 import { UserApi } from "./apis/user.js";
@@ -69,7 +70,7 @@ export class CohubHttpClient {
       ? options
       : { ...options, getAccessToken: () => executionToken };
     this.transport = new HttpTransport(resolvedOptions);
-    this.fileServices = createSpaceFileServices(this.transport, null);
+    this.fileServices = createSpaceFileServices(this.transport, null, createLocalWorkspaces(options.localWorkspace));
     this.spaces = new SpacesApi(this.transport);
     this.channels = new ChannelsApi(this.transport);
     this.user = new UserApi(

@@ -5,8 +5,10 @@ import android.graphics.Bitmap
 import android.util.Log
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import live.cohub.android.runtime.LocalWorkspaces
 
 /**
  * Only the Cohub origin loads in-shell; anything else goes to the system
@@ -16,7 +18,16 @@ import android.webkit.WebViewClient
  * `WebViewClient` objects, hence the suppression.
  */
 @SuppressLint("MissingOnRenderProcessGone")
-class CohubWebViewClient(private val listener: SurfaceListener) : WebViewClient() {
+class CohubWebViewClient(
+    private val listener: SurfaceListener,
+    private val workspaces: LocalWorkspaces?,
+) : WebViewClient() {
+
+    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+        val url = request.url
+        if (workspaces == null || !WebOrigin.contains(url) || url.path?.startsWith(LocalWorkspaces.PATH_PREFIX) != true) return null
+        return workspaces.intercept(request)
+    }
 
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         val url = request.url

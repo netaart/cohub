@@ -57,11 +57,18 @@ class HostProtocolTest {
             "auth.token", "auth.signIn", "auth.session", "notifications",
             "share", "filePicker", "navigation", "cache", "runtime", "appearance",
             "launch", "haptics", "files", "navigation.back", "shortcuts", "display", "media.capture",
-            "permissions", "share.incoming",
+            "permissions", "share.incoming", "workspace", "workspace.files",
         )
         HostCapabilities.advertised(runtime = true, files = true).forEach { capability ->
             assertTrue("Unknown capability advertised: $capability", capability in known)
         }
+    }
+
+    @Test
+    fun `workspace names match the protocol tables`() {
+        assertEquals("workspace.call", HostProtocol.Methods.WORKSPACE_CALL)
+        assertEquals("unavailable", HostProtocol.Errors.UNAVAILABLE)
+        assertEquals("/__cohub/workspace/", live.cohub.android.runtime.LocalWorkspaces.PATH_PREFIX)
     }
 
     @Test

@@ -279,3 +279,28 @@ export function splitDisplayText(text: string, max = DISPLAY_INPUT_MAX_TEXT): st
   if (piece) pieces.push(piece);
   return pieces;
 }
+
+export type DisplayErrorResponse = {
+  status: 400 | 404 | 409 | 429 | 501 | 503 | 504;
+  code: string;
+  message: string;
+};
+
+const DISPLAY_RPC_ERRORS: Record<string, Pick<DisplayErrorResponse, "status" | "code">> = {
+  BAD_REQUEST: { status: 400, code: "invalid_request" },
+  NOT_FOUND: { status: 404, code: "display_not_found" },
+  UNAVAILABLE: { status: 409, code: "display_unavailable" },
+  PREEMPTED: { status: 409, code: "display_preempted" },
+  BUSY: { status: 429, code: "display_busy" },
+  UNSUPPORTED_METHOD: { status: 501, code: "display_unsupported" },
+  TIMEOUT: { status: 504, code: "display_timeout" },
+};
+
+export function displayRpcError(rpcErrorCode: string, message: string): DisplayErrorResponse | null {
+  const mapped = DISPLAY_RPC_ERRORS[rpcErrorCode];
+  if (!mapped) return null;
+  return {
+    ...mapped,
+    message: mapped.code === "display_unsupported" ? "This machine runs an older sandbox: restart the sandbox, or update the Cohub runtime." : message,
+  };
+}

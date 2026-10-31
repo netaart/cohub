@@ -39,6 +39,7 @@ object HostProtocol {
         const val PERMISSIONS_OPEN_SETTINGS = "permissions.openSettings"
         const val SHARE_TAKE = "share.take"
         const val SHARE_READ_FILE = "share.readFile"
+        const val WORKSPACE_CALL = "workspace.call"
     }
 
     enum class Haptic(val wire: String) {
@@ -58,6 +59,7 @@ object HostProtocol {
         const val UNAUTHORIZED = "unauthorized"
         const val CANCELED = "canceled"
         const val FAILED = "failed"
+        const val UNAVAILABLE = "unavailable"
     }
 
     object Events {

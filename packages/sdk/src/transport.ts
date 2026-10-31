@@ -6,6 +6,7 @@ import { readRevalidationEntry, revalidationEnabled, writeRevalidationEntry } fr
 import type { WebsocketClientOptions } from "./websocket.js";
 import type { VoiceInputCreateOptions } from "./voice-input.js";
 import type { AppRuntimeModeConfig } from "./app-runtime.js";
+import type { LocalWorkspaceResolver } from "./local-workspace.js";
 
 export type Fetch = typeof globalThis.fetch;
 
@@ -85,6 +86,7 @@ export type CohubClientOptions = {
   work?: AppRuntimeModeConfig;
   /** Optional X-Cohub-Source-* headers (static or per-request getter). */
   requestSource?: RequestSource | null | (() => RequestSource | null | undefined);
+  localWorkspace?: LocalWorkspaceResolver;
 };
 
 function errorCodeFromBody(body: unknown): string | null {

@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { UPLOAD_MAX_FILE_BYTES, type SpaceFsCopyResult, type SpaceFsCopyStats, type SpaceFsTreeResponse } from "@neta-art/cohub";
 import { createLimiter } from "./limit.js";
-import { uploadLocalFiles, type LocalUploadEntry, type SpaceFiles } from "./upload.js";
+import { uploadLocalFiles, uploadsDirectly, type LocalUploadEntry, type SpaceFiles } from "./upload.js";
 
 export type CopyOptions = {
   recursive: boolean;
@@ -137,6 +137,7 @@ export async function uploadToSpace(input: {
     if (node?.type === "dir") for (const entry of node.tree.entries) existing.set(entry.path, entry.type);
   })));
 
+  const maxFileBytes = await uploadsDirectly(files) ? Number.POSITIVE_INFINITY : UPLOAD_MAX_FILE_BYTES;
   const upload = entries.filter((entry) => {
     const current = existing.get(entry.relativePath);
     if (current === "dir") {
@@ -151,7 +152,7 @@ export async function uploadToSpace(input: {
       fail(entry.relativePath, "name_invalid", `cannot upload '${entry.localPath}': unsupported file name`);
       return false;
     }
-    if (entry.size > UPLOAD_MAX_FILE_BYTES) {
+    if (entry.size > maxFileBytes) {
       fail(entry.relativePath, "file_too_large", `cannot upload '${entry.localPath}': file exceeds the upload size limit`);
       return false;
     }

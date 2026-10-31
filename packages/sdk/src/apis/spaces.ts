@@ -78,7 +78,11 @@ import type {
   SpaceFsFileResponse,
   SpaceFsPreparingFile,
   SpaceFsReadFilesResponse,
+  SpaceFsCreateDirectoryResult,
+  SpaceFsDeleteResult,
   SpaceFsMoveInput,
+  SpaceFsMoveResult,
+  SpaceFsWriteResult,
   SpaceFsTreeResponse,
   SpaceFsUploadResponse,
   SpaceUsageResponse,
@@ -112,6 +116,8 @@ import type { ResolvedFile } from "../media.js";
 import { SpaceInvitationsApi } from "./invitations.js";
 import { fileReadPath } from "./space-file-reads.js";
 import { inlineFileDataUrl, type ResolveSpaceFileOptions, type SpaceFileServices } from "./space-file-urls.js";
+import { LocalWorkspaceUnavailableError, type LocalWorkspace } from "../local-workspace.js";
+import { base64ToBytes, SpaceFsError } from "@cohub/protocol/fs";
 
 
 async function fetchTurnObject<T>(url: string, fetchImpl: Fetch = globalThis.fetch, signal?: AbortSignal): Promise<T> {
@@ -418,7 +424,21 @@ export class SpaceFilesApi {
   list(path?: string, customFetch?: Fetch): Promise<SpaceFsTreeResponse>;
   list(path: string, options: FileListOptions): Promise<SpaceFsTreePage>;
   list(path = "", options?: Fetch | FileListOptions) {
-    return listDirectory(this.transport, `/api/spaces/${this.spaceId}/fs/tree`, path, options);
+    const remote = () => listDirectory(this.transport, `/api/spaces/${this.spaceId}/fs/tree`, path, options);
+    if (typeof options === "function" || options?.fetch) return remote();
+    return this.serve("read", (workspace) => {
+      if (!options) return workspace.fs.list(path);
+      const { cursor, limit } = options;
+      return workspace.fs.list(path, { pagination: true, ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) });
+    }, remote);
+  }
+
+  workspace(): Promise<LocalWorkspace | null> {
+    return this.services.local.get(this.spaceId);
+  }
+
+  private serve<T>(mode: "read" | "write", local: (workspace: LocalWorkspace) => Promise<T>, remote: () => Promise<T>): Promise<T> {
+    return this.services.local.run(this.spaceId, mode, local, remote);
   }
 
   read(path: string, customFetch?: Fetch, signal?: AbortSignal): Promise<SpaceFsFileResponse | SpaceFsPreparingFile> {
@@ -431,7 +451,14 @@ export class SpaceFilesApi {
   resolve(path: string, options: ResolveSpaceFileOptions = {}): Promise<ResolvedFile | null> {
     const { fetch: customFetch, ...request } = options;
     if (customFetch) return this.resolveThrough(path, customFetch, options);
-    return this.services.urls.resolve(this.spaceId, path, request);
+    const remote = () => this.services.urls.resolve(this.spaceId, path, request);
+    return this.serve("read", async (workspace) => {
+      const { transport } = workspace;
+      if (!transport.url) throw new LocalWorkspaceUnavailableError("This host serves no file URLs");
+      const version = await workspace.fs.statVersion(path);
+      if (!version.exists) throw new SpaceFsError(404, "path_not_found", "File or directory not found.");
+      return { url: transport.url(path, `${version.mtimeMs}-${version.size}`) };
+    }, remote);
   }
 
   onUrlChange(listener: (path: string) => void): () => void {
@@ -487,7 +514,7 @@ export class SpaceFilesApi {
   }
 
   readMany(paths: string[], customFetch?: Fetch) {
-    return this.transport.request<SpaceFsReadFilesResponse>(
+    const remote = () => this.transport.request<SpaceFsReadFilesResponse>(
       `/api/spaces/${this.spaceId}/fs/files`,
       {
         method: "POST",
@@ -496,6 +523,7 @@ export class SpaceFilesApi {
         fetch: customFetch,
       },
     );
+    return customFetch ? remote() : this.serve("read", (workspace) => workspace.fs.readMany(paths), remote);
   }
 
   /**
@@ -515,6 +543,22 @@ export class SpaceFilesApi {
   }
 
   async open(path: string, options: OpenSpaceFileOptions = {}): Promise<SpaceFileStream> {
+    if (options.fetch) return this.openRemote(path, options);
+    return this.serve("read", async (workspace) => {
+      const name = path.split("/").pop() || "download";
+      if (!workspace.open) {
+        const file = await workspace.fs.read(path);
+        const body = file.encoding === "base64" ? base64ToBytes(file.content) : file.content;
+        const mimeType = file.mimeType ?? "application/octet-stream";
+        return { response: new Response(body, { headers: { "content-type": mimeType } }), filename: name, mimeType };
+      }
+      const response = await workspace.open(path, { signal: options.signal });
+      const mimeType = response.headers.get("content-type") ?? "application/octet-stream";
+      return { response, filename: name, mimeType };
+    }, () => this.openRemote(path, options));
+  }
+
+  private async openRemote(path: string, options: OpenSpaceFileOptions): Promise<SpaceFileStream> {
     const params = new URLSearchParams({ path });
     const deadlineAt = Date.now() + Math.max(0, options.timeoutMs ?? 60_000);
     while (true) {
@@ -543,15 +587,15 @@ export class SpaceFilesApi {
     return { blob: await response.blob(), filename, mimeType };
   }
 
-  write(input: SpaceFsWriteFileInput) {
-    return this.transport.request<{ ok: true; path: string; size: number; mtimeMs: number }>(
+  write(input: SpaceFsWriteFileInput): Promise<SpaceFsWriteResult> {
+    return this.serve("write", (workspace) => workspace.fs.write(input), () => this.transport.request<SpaceFsWriteResult>(
       `/api/spaces/${this.spaceId}/fs/file`,
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       },
-    );
+    ));
   }
 
   copy(input: SpaceFsCopyInput) {
@@ -585,36 +629,36 @@ export class SpaceFilesApi {
     return current.result;
   }
 
-  createDir(path: string, mutationId?: string) {
-    return this.transport.request<{ ok: true; path: string; size: number; mtimeMs: number }>(
+  createDir(path: string, mutationId?: string): Promise<SpaceFsCreateDirectoryResult> {
+    return this.serve("write", (workspace) => workspace.fs.mkdir(path), () => this.transport.request<SpaceFsCreateDirectoryResult>(
       `/api/spaces/${this.spaceId}/fs/dir`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path, ...(mutationId ? { mutationId } : {}) }),
       },
-    );
+    ));
   }
 
-  delete(path: string, recursive = false, mutationId?: string) {
+  delete(path: string, recursive = false, mutationId?: string): Promise<SpaceFsDeleteResult> {
     const params = new URLSearchParams({ path });
     if (recursive) params.set("recursive", "true");
     if (mutationId) params.set("mutationId", mutationId);
-    return this.transport.request<{ ok: true; path: string }>(
+    return this.serve("write", (workspace) => workspace.fs.remove(path, recursive), () => this.transport.request<SpaceFsDeleteResult>(
       `/api/spaces/${this.spaceId}/fs/node?${params.toString()}`,
       { method: "DELETE" },
-    );
+    ));
   }
 
-  move(input: SpaceFsMoveInput) {
-    return this.transport.request<{ ok: true; fromPath: string; toPath: string }>(
+  move(input: SpaceFsMoveInput): Promise<SpaceFsMoveResult> {
+    return this.serve("write", (workspace) => workspace.fs.move(input), () => this.transport.request<SpaceFsMoveResult>(
       `/api/spaces/${this.spaceId}/fs/move`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       },
-    );
+    ));
   }
 
   upload(files: File[], dir = "") {
@@ -2027,7 +2071,7 @@ export class SpaceClient {
     this.webhooks = new SpaceWebhooksApi(transport, id);
     this.env = new SpaceEnvApi(transport, id);
     this.sandbox = new SpaceSandboxApi(transport, id);
-    this.displays = new SpaceDisplaysApi(transport, id);
+    this.displays = new SpaceDisplaysApi(transport, id, fileServices?.local);
     this.invitations = new SpaceInvitationsApi(transport, id);
     this.labels = new SpaceLabelsApi(transport, id);
     this.boards = new SpaceBoardsApi(transport, id, websocketClient, this.files);

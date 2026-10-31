@@ -25,6 +25,8 @@ object HostCapabilities {
     const val MEDIA_CAPTURE = "media.capture"
     const val PERMISSIONS = "permissions"
     const val SHARE_INCOMING = "share.incoming"
+    const val WORKSPACE = "workspace"
+    const val WORKSPACE_FILES = "workspace.files"
 
     private val always: List<String> = listOf(
         AUTH_TOKEN,
@@ -44,5 +46,6 @@ object HostCapabilities {
     )
 
     fun advertised(runtime: Boolean, files: Boolean): List<String> =
-        always + listOfNotNull(RUNTIME.takeIf { runtime }, DISPLAY.takeIf { runtime }, FILES.takeIf { files })
+        always + listOfNotNull(FILES.takeIf { files }) +
+            if (runtime) listOf(RUNTIME, DISPLAY, WORKSPACE, WORKSPACE_FILES) else emptyList()
 }

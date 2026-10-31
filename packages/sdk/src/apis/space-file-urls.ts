@@ -4,6 +4,7 @@ import type { ResolvedFile, ResolveFileOptions } from "../media.js";
 import { type Fetch, HttpError, type HttpTransport } from "../transport.js";
 import type { SpaceFsFileResponse } from "../types.js";
 import type { WebsocketClient } from "../websocket.js";
+import type { LocalWorkspaces } from "../local-workspace.js";
 import { createLimiter, createSpaceFileReads, isUnauthorized, type SpaceFileRead, type SpaceFileReads } from "./space-file-reads.js";
 import { fileUrlStore, type StoredFileUrl } from "./space-file-url-store.js";
 
@@ -277,10 +278,10 @@ export function createSpaceFileUrls(options: {
 
 export type SpaceFileUrls = ReturnType<typeof createSpaceFileUrls>;
 
-export type SpaceFileServices = { reads: SpaceFileReads; urls: SpaceFileUrls };
+export type SpaceFileServices = { reads: SpaceFileReads; urls: SpaceFileUrls; local: LocalWorkspaces };
 
-export function createSpaceFileServices(transport: HttpTransport, websocket: WebsocketClient | null): SpaceFileServices {
-	const reads = createSpaceFileReads(transport);
+export function createSpaceFileServices(transport: HttpTransport, websocket: WebsocketClient | null, local: LocalWorkspaces): SpaceFileServices {
+	const reads = createSpaceFileReads(transport, local);
 	const urls = createSpaceFileUrls({
 		reads,
 		credential: () => transport.credential(),
@@ -292,7 +293,7 @@ export function createSpaceFileServices(transport: HttpTransport, websocket: Web
 		if (event.type === "space.fs.changed" && event.spaceId)
 			urls.applyFsChange(event.spaceId, event.payload as SpaceFsChangedPayload);
 	});
-	return { reads, urls };
+	return { reads, urls, local };
 }
 
 function settle<T>(read: Promise<T | null>, { timeoutMs = PREPARING_TIMEOUT_MS, signal }: ResolveSpaceFileOptions): Promise<T | null> {

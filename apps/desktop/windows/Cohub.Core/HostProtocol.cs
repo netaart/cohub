@@ -22,6 +22,8 @@ public static class HostProtocol
         public const string Badge = "badge";
         public const string LaunchAtLogin = "app.launchAtLogin";
         public const string GlobalShortcut = "app.globalShortcut";
+        public const string Workspace = "workspace";
+        public const string WorkspaceFiles = "workspace.files";
     }
 
     public static class Methods
@@ -49,6 +51,7 @@ public static class HostProtocol
         public const string BadgeSet = "badge.set";
         public const string LaunchAtLogin = "app.launchAtLogin";
         public const string GlobalShortcut = "app.globalShortcut";
+        public const string WorkspaceCall = "workspace.call";
     }
 
     public static class Events
@@ -64,12 +67,21 @@ public static class HostProtocol
         public const string Canceled = "canceled";
         public const string Failed = "failed";
         public const string Denied = "denied";
+        public const string Unavailable = "unavailable";
     }
 
     public static class ShellEvents
     {
         public const string Open = "shell.open";
     }
+
+    /// <summary>Asked of the CLI by the shell itself; the page can never reach it.</summary>
+    public static class ServiceMethods
+    {
+        public const string WorkspaceEndpoint = "workspace.endpoint";
+    }
+
+    public const string WorkspacePath = "/__cohub/workspace/";
 }
 
 public sealed class BridgeException(string code, string message) : Exception(message)

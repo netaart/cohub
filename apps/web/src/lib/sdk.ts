@@ -11,6 +11,7 @@ import { getCurrentRedirectPath, redirectToSignIn } from "$lib/auth-redirect";
 import { decideUnauthorizedRecovery } from "$lib/auth-unauthorized";
 import { getClientInstanceId } from "$lib/client-instance";
 import { hostOwnsCredentials } from "$lib/host-bridge";
+import { resolveHostWorkspace } from "$lib/host-workspace";
 import { createSharedGetFetch } from "$lib/shared-get-fetch";
 import { billingConversion } from "$lib/stores/billing-conversion.svelte";
 
@@ -121,6 +122,7 @@ const createWebSdk = (options: Partial<CohubClientOptions> = {}) => {
 				return { via: "web", ...(clientId ? { clientId } : {}) };
 			}),
 		fetch: createBillingAwareFetch(createSharedGetFetch(baseFetch)),
+		localWorkspace: options.localWorkspace ?? resolveHostWorkspace,
 		websocket: {
 			url: PUBLIC_GATEWAY_ORIGIN ?? undefined,
 			getAccessToken: resolveAccessToken,

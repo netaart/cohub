@@ -20,6 +20,8 @@ public sealed class HostProtocolTests
         Assert.Equal(HostProtocol.Version, (int)Manifest["version"]!);
         Assert.Equal(HostProtocol.ServiceVersion, (int)Manifest["service"]!["version"]!);
         Assert.Equal([HostProtocol.ShellEvents.Open], Manifest["service"]!["shellEvents"]!.AsArray().Select(node => (string)node!));
+        Assert.Equal(HostProtocol.ServiceMethods.WorkspaceEndpoint, (string?)Manifest["service"]!["workspaceEndpoint"]);
+        Assert.Equal(HostProtocol.WorkspacePath, (string?)Manifest["workspace"]!["path"]);
     }
 
     [Fact]

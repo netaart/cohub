@@ -36,6 +36,8 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "app.globalShortcut",
   "runtime.keepAwake",
   "share.incoming",
+  "workspace",
+  "workspace.files",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -221,6 +223,39 @@ export const hostAuthChangedSchema = z.object({
 export type HostAuthChanged = z.infer<typeof hostAuthChangedSchema>;
 
 /**
+ * This device's Runtime answers a Space's filesystem calls directly when it
+ * serves that Space. Only `fs.*` crosses the bridge: process work stays on the
+ * Cohub pipeline. A request larger than this stays on the API: hosts read the
+ * bridge line by line.
+ */
+export const HOST_WORKSPACE_METHOD_PATTERN = /^fs\.[a-z]+$/;
+export const HOST_WORKSPACE_CALL_MAX_BYTES = 768 * 1024;
+
+const workspaceCallResultSchema = z.union([
+  z.object({ result: z.unknown() }).strict(),
+  z.object({ error: z.object({ code: z.string().min(1).max(64), message: z.string().max(4_000) }).strict() }).strict(),
+]);
+export type HostWorkspaceCallResult = z.infer<typeof workspaceCallResultSchema>;
+
+/**
+ * Where a host with `workspace.files` streams a Space's files, with ranges.
+ * WebKit cannot intercept https, so WebKit hosts answer a custom scheme;
+ * others intercept a same-origin path the server never serves.
+ */
+export const HOST_WORKSPACE_SCHEME = "cohub-workspace";
+export const HOST_WORKSPACE_PATH = "/__cohub/workspace/";
+
+export function hostWorkspaceFileUrl(input: { platform: HostPlatform; origin: string; spaceId: string; path: string; version?: string }) {
+  const query = `files?${new URLSearchParams({ path: input.path, ...(input.version ? { v: input.version } : {}) })}`;
+  return input.platform === "macos" || input.platform === "ios"
+    ? `${HOST_WORKSPACE_SCHEME}://${input.spaceId}/${query}`
+    : `${input.origin}${HOST_WORKSPACE_PATH}${input.spaceId}/${query}`;
+}
+
+/** Asked by a desktop shell to proxy file URLs; never forwarded from the page. */
+export const HOST_SERVICE_WORKSPACE_ENDPOINT = "workspace.endpoint";
+
+/**
  * Methods the web surface may call. Both ends validate with these schemas, so
  * a host cannot answer a shape the web side misreads.
  */
@@ -270,6 +305,14 @@ export const HOST_BRIDGE_METHODS = {
   "display.share": { params: z.object({ spaceId: z.uuid() }).strict(), result: deviceDisplayStatusSchema },
   "display.stop": { params: z.undefined(), result: deviceDisplayStatusSchema },
   "display.openControlSettings": { params: z.undefined(), result: z.boolean() },
+  "workspace.call": {
+    params: z.object({
+      spaceId: z.uuid(),
+      method: z.string().regex(HOST_WORKSPACE_METHOD_PATTERN).max(64),
+      params: z.record(z.string(), z.unknown()).optional(),
+    }).strict(),
+    result: workspaceCallResultSchema,
+  },
 } as const;
 export type HostBridgeMethod = keyof typeof HOST_BRIDGE_METHODS;
 
@@ -282,6 +325,7 @@ export const HOST_BRIDGE_ERROR = {
   canceled: "canceled",
   failed: "failed",
   denied: "denied",
+  unavailable: "unavailable",
 } as const;
 export type HostBridgeErrorCode = (typeof HOST_BRIDGE_ERROR)[keyof typeof HOST_BRIDGE_ERROR];
 

@@ -15,7 +15,11 @@ import live.cohub.android.files.FileSaver
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LauncherShortcuts
 import live.cohub.android.runtime.DeviceRuntime
+import live.cohub.android.runtime.LocalWorkspaces
+import live.cohub.android.runtime.RuntimeInstance
 import okhttp3.OkHttpClient
+import java.net.Proxy
+import java.time.Duration
 
 class CohubApplication : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -44,6 +48,12 @@ class CohubApplication : Application() {
     }
 
     val runtime: DeviceRuntime by lazy { DeviceRuntime(this) { (auth.account as? Account.SignedIn)?.key } }
+
+    val workspaces: LocalWorkspaces by lazy {
+        // Never a proxy (requests carry the Runtime's token), and no read limit: media pauses, big deletes take time.
+        val loopback = http.newBuilder().proxy(Proxy.NO_PROXY).readTimeout(Duration.ZERO).build()
+        LocalWorkspaces(loopback) { spaceId -> runtime.instances.value.any { it.spaceId == spaceId && it.state == RuntimeInstance.State.READY } }
+    }
 
     val lastPage: LastPage by lazy { LastPage(this) }
 
