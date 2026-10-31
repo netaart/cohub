@@ -2,7 +2,7 @@ const RESOLUTIONS = [0.125, 0.25, 0.5, 1, 2, 4] as const;
 const MAX_EDGE = 2048;
 const MAX_PIXELS = 2_097_152;
 
-export function scriptResolution(width: number, height: number, demand: number, current = 0): number {
+export function boardBitmapResolution(width: number, height: number, demand: number, current = 0): number {
   const target = Number.isFinite(demand) && demand > 0 ? demand : 1;
   const tier = current > 0 && target <= current * 1.15 && target >= current * 0.4
     ? current

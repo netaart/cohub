@@ -1,5 +1,5 @@
 
-import { Container, Graphics, type Texture } from "pixi.js";
+import { Container, Graphics, Sprite, type Texture } from "pixi.js";
 import type { BoardShapeColors } from "../model/palette.js";
 import { buildFallbackShapeColors } from "../model/palette.js";
 import { boardAssetKey } from "../model/asset-key.js";
@@ -35,6 +35,7 @@ export type BoardExportSceneInput = {
   colors?: BoardShapeColors;
   style?: BoardRenderStyleInput;
   textures?: Map<string, Texture>;
+  viewTextures?: ReadonlyMap<string, Texture>;
   scripts?: BoardRenderContext["scripts"];
   assetKey?: (item: BoardSceneItem) => string | null;
   /** Renderers for item types beyond the built-ins. */
@@ -129,6 +130,8 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
     const host = hostFor(item);
     const container = resolve(item, context).create(item, context);
     container.alpha = opacity;
+    const view = input.viewTextures?.get(item.id);
+    if (view) container.addChild(new Sprite(view)).setSize(item.frame.width, item.frame.height);
     host.addChild(container);
     if (isClippingFrame(item) && !groups.has(item.id)) {
       const { group } = syncClipGroup(undefined, item);

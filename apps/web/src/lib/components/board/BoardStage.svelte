@@ -98,6 +98,7 @@ const {
 	relatedIds,
 	lod,
 	prefetch,
+	drawViews,
 	scriptLeader,
 }: {
 	editor: BoardEditor;
@@ -129,6 +130,7 @@ const {
 	relatedIds?: readonly string[];
 	lod?: BoardLod;
 	prefetch?: number;
+	drawViews?: boolean;
 	scriptLeader?: () => boolean;
 } = $props();
 
@@ -523,6 +525,7 @@ onMount(() => {
 		},
 		lod: () => lod,
 		prefetch,
+		drawViews,
 		scriptLeader: () => scriptLeader?.() ?? true,
 	});
 	stage = mounted;
@@ -542,6 +545,7 @@ onMount(() => {
 			},
 			resolveMedia: (src) => resolveBoardMediaUrl(src, assetSource),
 			renderer: () => mounted.renderer,
+			viewTextures: () => mounted.viewTextures,
 			theme: () => {
 				const { palette, colors, colorScheme, style } = mounted.theme;
 				return { palette, colors, colorScheme, style };

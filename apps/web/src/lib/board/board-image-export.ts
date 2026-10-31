@@ -137,6 +137,7 @@ export type BoardStageExportBridge = {
 	readModule?: (path: string) => Promise<string>;
 	resolveMedia: (src: string) => Promise<string | null>;
 	renderer: () => Renderer | null;
+	viewTextures: () => ReadonlyMap<string, Texture>;
 	assetKey: (item: BoardSceneItem) => string | null;
 	theme: () => {
 		palette: BoardRenderPalette;
@@ -263,6 +264,7 @@ export async function exportBoardImage(
 						sampler,
 						region,
 						textures,
+						viewTextures: bridge.viewTextures(),
 						assetKey: cappedAssetKey,
 						backgroundTexture: backgroundTexture?.texture,
 					});

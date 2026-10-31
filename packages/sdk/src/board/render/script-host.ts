@@ -1,6 +1,6 @@
 import type { BoardDocument, BoardItem } from "@cohub/protocol";
-import { BoardScriptTexture } from "./script-texture.js";
-import { scriptResolution } from "./script-resolution.js";
+import { BoardBitmapTexture } from "./bitmap-texture.js";
+import { boardBitmapResolution } from "./bitmap-resolution.js";
 import { getBoardResolution } from "./text-resolution.js";
 import { boardScriptItems } from "../model/script-index.js";
 import { boardScriptScope } from "../model/script-scene.js";
@@ -39,7 +39,7 @@ type Entry = {
     reject(error: Error): void;
     timer: ReturnType<typeof setTimeout>;
   };
-  texture: BoardScriptTexture;
+  texture: BoardBitmapTexture;
   error: string | null;
   output: BoardScriptOutput | null;
   events: BoardScriptEvent[];
@@ -154,10 +154,10 @@ export function createBoardScriptHost(
   let resolutionTimer: ReturnType<typeof setTimeout> | undefined;
   const needsTick = (entry: Entry) => !entry.error && brokerReady && entry.graph !== null && !entry.pending &&
     (entry.dirty || Boolean(entry.output?.updating || (entry.output?.animated && entry.draw)));
-  const retiredTextures = new Set<BoardScriptTexture>();
+  const retiredTextures = new Set<BoardBitmapTexture>();
   let retirementFrame = 0;
 
-  function retireTexture(texture: BoardScriptTexture) {
+  function retireTexture(texture: BoardBitmapTexture) {
     if (!texture.current) return;
     retiredTextures.add(texture);
     if (retirementFrame) return;
@@ -492,7 +492,7 @@ export function createBoardScriptHost(
             inputDocument: null,
             startedAt:
               (options.export ? 0 : time) - (input.snapshot?.time ?? 0),
-            texture: new BoardScriptTexture(),
+            texture: new BoardBitmapTexture(),
             error: null,
             output: null,
             events: [],
@@ -542,10 +542,10 @@ export function createBoardScriptHost(
         const itemScale = Math.max((frame?.width ?? box.width) / Math.max(1, box.width),
           (frame?.height ?? box.height) / Math.max(1, box.height));
         const scale = entry.output?.pixelated
-          ? scriptResolution(box.width, box.height, 1)
+          ? boardBitmapResolution(box.width, box.height, 1)
           : options.export
             ? Math.min(2, 2048 / Math.max(1, box.width, box.height))
-            : scriptResolution(box.width, box.height,
+            : boardBitmapResolution(box.width, box.height,
                 now < settledAt && entry.scale > 0 ? entry.scale : camera.zoom * getBoardResolution() * itemScale, entry.scale);
         if (scale !== entry.scale) {
           entry.scale = scale;

@@ -16,6 +16,7 @@ export type BoardBenchPhaseReport = BoardBenchSettle & {
 	frame: BoardBenchPercentiles;
 	work: BoardBenchPercentiles;
 	long: number;
+	views: { drawn: number; rasters: number; rasterMs: number };
 };
 
 export type BoardBenchReport = { open: BoardBenchSettle; phases: BoardBenchPhaseReport[] };
@@ -103,6 +104,7 @@ export async function runBoardStageBench(
 			if (phase.rest) await new Promise((resolve) => setTimeout(resolve, phase.rest));
 			const intervals: number[] = [];
 			const costs: number[] = [];
+			const views = stage.stats().views;
 			let previous = await nextFrame();
 			for (let frame = 0; frame < phase.frames; frame += 1) {
 				canvas.dispatchEvent(
@@ -120,12 +122,15 @@ export async function runBoardStageBench(
 				intervals.push(now - previous);
 				previous = now;
 			}
+			const settled = await settle(stage, previous);
+			const after = stage.stats().views;
 			reports.push({
 				name: phase.name,
 				frame: percentiles(intervals),
 				work: percentiles(costs),
 				long: intervals.filter((interval) => interval > LONG_FRAME_MS).length,
-				...(await settle(stage, previous)),
+				...settled,
+				views: { drawn: after.drawn, rasters: after.rasters - views.rasters, rasterMs: after.rasterMs - views.rasterMs },
 			});
 		}
 		return { open, phases: reports };

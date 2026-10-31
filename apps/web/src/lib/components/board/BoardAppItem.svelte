@@ -1,3 +1,9 @@
+<script lang="ts" module>
+import { SvelteSet } from "svelte/reactivity";
+
+const unreadableImages = new SvelteSet<string>();
+</script>
+
 <script lang="ts">
 import type {
 	AppDetailResponse,
@@ -72,6 +78,21 @@ const description = $derived(detail?.app.meta?.description?.trim() || null);
 const unavailable = $derived(settled && !detail);
 
 let shownCover = $state<string | null>(null);
+
+const readable = $derived(
+	![meta.icon, cover, shownCover].some(
+		(src) => src && unreadableImages.has(src),
+	),
+);
+const drawable = $derived(!live && readable);
+const cors = $derived(
+	drawable && context.canDraw ? ("anonymous" as const) : undefined,
+);
+$effect.pre(() => context.setDrawable(drawable));
+
+function unreadable(src: string | null | undefined) {
+	if (cors && src) unreadableImages.add(src);
+}
 </script>
 
 <div
@@ -80,7 +101,9 @@ let shownCover = $state<string | null>(null);
 	class:entered={context.entered}
 >
 	<div class="board-app-bar">
-		{#if meta.icon}<img src={meta.icon} alt="" />{/if}
+		{#if meta.icon}
+			<img src={meta.icon} alt="" crossorigin={cors} onerror={() => unreadable(meta.icon)} />
+		{/if}
 		<span>{meta.name}</span>
 		{#if live}<i class="board-app-live" aria-hidden="true"></i>{/if}
 	</div>
@@ -104,6 +127,7 @@ let shownCover = $state<string | null>(null);
 						mark={avatarInitials(meta.name, "A")}
 						shape="tile"
 						size="lg"
+						crossorigin={cors}
 					/>
 					{#if detailed}
 						<strong>{meta.name}</strong>
@@ -111,7 +135,14 @@ let shownCover = $state<string | null>(null);
 					{/if}
 				</div>
 				{#if shownCover && shownCover !== cover}
-					<img class="board-app-cover shown" src={shownCover} alt="" draggable="false" />
+					<img
+						class="board-app-cover shown"
+						src={shownCover}
+						alt=""
+						draggable="false"
+						crossorigin={cors}
+						onerror={() => unreadable(shownCover)}
+					/>
 				{/if}
 				{#if cover}
 					<img
@@ -121,9 +152,11 @@ let shownCover = $state<string | null>(null);
 						alt=""
 						decoding="async"
 						draggable="false"
+						crossorigin={cors}
 						onload={() => {
 							shownCover = cover ?? null;
 						}}
+						onerror={() => unreadable(cover)}
 					/>
 				{/if}
 				{#if unavailable}

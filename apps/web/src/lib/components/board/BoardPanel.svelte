@@ -1224,6 +1224,7 @@ onDestroy(() => {
 			}}
 			lod={boardLod}
 			prefetch={forced?.prefetch}
+			drawViews={forced?.drawViews}
 			{editor}
 			playback={activePlayback}
 			{assets}

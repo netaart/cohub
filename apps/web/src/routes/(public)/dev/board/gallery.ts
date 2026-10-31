@@ -369,10 +369,37 @@ function galleryItems(): Record<string, unknown> {
 				snapshot: { title: "example.com", mimeType: "text/html" },
 			},
 		},
+		apps: {
+			type: "frame",
+			position: { x: 1240, y: 480 },
+			size: { width: 680, height: 320 },
+			props: { label: "Apps", clip: true },
+		},
+		app: { ...benchApp(0, 24, 40, { width: 360, height: 240 }), parent: "apps" },
+		"app-faded": {
+			...benchApp(1, 440, 70, { width: 300, height: 200 }),
+			parent: "apps",
+			rotation: 6,
+			opacity: 0.55,
+		},
+		"app-note": {
+			type: "shape",
+			parent: "apps",
+			position: { x: 240, y: 200 },
+			size: { width: 200, height: 96 },
+			props: { geometry: "rounded", text: "Above the App" },
+			style: { fill: "yellow" },
+		},
 	};
 }
 
-export const BENCH_SCENARIOS = ["mixed", "images", "notes", "tasks"] as const;
+export const BENCH_SCENARIOS = [
+	"mixed",
+	"images",
+	"notes",
+	"tasks",
+	"apps",
+] as const;
 export type BenchScenario = (typeof BENCH_SCENARIOS)[number];
 
 const BENCH_IMAGES = [
@@ -441,6 +468,31 @@ function benchTask(index: number, x: number, y: number) {
 	};
 }
 
+function benchApp(
+	index: number,
+	x: number,
+	y: number,
+	size = { width: 200, height: 150 },
+) {
+	const name = `App ${index}`;
+	return {
+		type: "frame",
+		position: { x, y },
+		size,
+		style: { stroke: "brand" },
+		props: { label: name },
+		metadata: {
+			cohubApp: {
+				appId: `dev-app-${index}`,
+				ref: "main",
+				url: `https://example.com/apps/${index}`,
+				name,
+				icon: "/favicon.svg",
+			},
+		},
+	};
+}
+
 function benchMixed(index: number, x: number, y: number) {
 	switch (index % 4) {
 		case 0:
@@ -476,6 +528,7 @@ const BENCH_ITEMS = {
 	images: benchImage,
 	notes: benchNote,
 	tasks: benchTask,
+	apps: benchApp,
 } satisfies Record<BenchScenario, unknown>;
 
 function benchItems(

@@ -17,17 +17,19 @@ export type BoardDeviceBudget = {
 	lru: LruBudget;
 	concurrency: number;
 	prefetch: number;
+	drawViews: boolean;
 };
 
 const BUDGETS: Record<BoardDeviceTier, Omit<BoardDeviceBudget, "tier">> = {
-	low: { lod: COMPACT_BOARD_LOD, lru: COMPACT_LRU_BUDGET, concurrency: 4, prefetch: 0 },
-	standard: { lod: DEFAULT_BOARD_LOD, lru: DEFAULT_LRU_BUDGET, concurrency: 6, prefetch: 0.5 },
+	low: { lod: COMPACT_BOARD_LOD, lru: COMPACT_LRU_BUDGET, concurrency: 4, prefetch: 0, drawViews: false },
+	standard: { lod: DEFAULT_BOARD_LOD, lru: DEFAULT_LRU_BUDGET, concurrency: 6, prefetch: 0.5, drawViews: true },
 	// Memory and cores say nothing about the GPU, so no tier raises the live budget.
 	high: {
 		lod: DEFAULT_BOARD_LOD,
 		lru: { maxCount: 4096, maxBytes: 384 * 1024 * 1024 },
 		concurrency: 8,
 		prefetch: 1,
+		drawViews: true,
 	},
 };
 
@@ -70,7 +72,12 @@ export function boardDeviceTier({ phone, memory, cores }: BoardDeviceSignals): B
 
 export function boardDeviceBudget(signals: BoardDeviceSignals, tier = boardDeviceTier(signals)): BoardDeviceBudget {
 	const budget = BUDGETS[tier];
-	return { tier, ...budget, prefetch: signals.saveData || signals.slowNetwork ? 0 : budget.prefetch };
+	return {
+		tier,
+		...budget,
+		prefetch: signals.saveData || signals.slowNetwork ? 0 : budget.prefetch,
+		drawViews: budget.drawViews && !signals.saveData,
+	};
 }
 
 let detected: BoardDeviceBudget | undefined;

@@ -325,7 +325,12 @@ const assets = createBoardAssetManager({
 - **DOM views.** `viewLayer: "below"` puts them under the canvas, so selection and
   strokes draw over them; views there get no input. It needs `transparent: true`:
   the canvas then draws no backdrop, and the host paints `resolveBoardBackdrop(...)`
-  behind it.
+  behind it. A view that calls `context.setDrawable(true)` is drawn into the canvas
+  where the browser supports HTML-in-Canvas, layered, clipped and faded with the items
+  around it; pass `stage.viewTextures` to `renderBoardExport` to export it too. Only
+  readable content draws, so allow it only while the view shows no cross-origin frame,
+  and set `crossorigin` on images while it may be drawn and `context.canDraw`. Low-tier
+  devices skip drawing; `drawViews: false` turns it off.
 - **Previews.** Write `preview: { title, excerpt, cover, src }` on your items so
   clients without your renderer, exports and agents show them as cards. Keep it out
   of undo with `editor.commitPatch(patch, { record: false })`.

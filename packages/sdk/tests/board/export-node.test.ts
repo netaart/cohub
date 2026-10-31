@@ -219,6 +219,29 @@ describe("Node board export", { skip: available ? false : "@napi-rs/canvas is no
     texture.destroy(true);
   });
 
+  test("draws DOM views over their items and under later items", async () => {
+    const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+    const source = createCanvas(2, 2);
+    const sourceContext = source.getContext("2d");
+    sourceContext.fillStyle = "#ff0000";
+    sourceContext.fillRect(0, 0, 2, 2);
+    const texture = await renderer.decodeImage(source.toBuffer("image/png"), "image/png");
+    const board = boardDocument({
+      items: {
+        app: { type: "frame", size: { width: 200, height: 100 }, props: { label: "" } },
+        note: { type: "shape", position: { x: 150, y: 0 }, size: { width: 50, height: 100 }, style: { fill: "#0000ff", stroke: "#0000ff" } },
+      },
+    });
+    const result = exportBoardImageBytes(renderer, board, { scale: 1, padding: 0, viewTextures: new Map([["app", texture]]) });
+    assert.ok(result);
+    const canvas = createCanvas(result.plan.width, result.plan.height);
+    const context = canvas.getContext("2d");
+    context.drawImage(await loadImage(result.bytes), 0, 0);
+    assert.deepEqual([...context.getImageData(50, 50, 1, 1).data], [255, 0, 0, 255]);
+    assert.deepEqual([...context.getImageData(175, 50, 1, 1).data], [0, 0, 255, 255]);
+    texture.destroy(true);
+  });
+
   test("scale multiplies the output size", () => {
     const single = exportBoardImageBytes(renderer, document, { scale: 1 });
     const double = exportBoardImageBytes(renderer, document, { scale: 2 });

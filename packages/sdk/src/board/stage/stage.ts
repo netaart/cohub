@@ -1,6 +1,6 @@
 import type { BoardPlaybackSnapshot } from "@cohub/protocol";
 import type { BoardScriptOutput, BoardScriptSnapshot } from "../model/index.js";
-import { Application, Container, Graphics, type Renderer, RendererType } from "pixi.js";
+import { Application, Container, Graphics, type Renderer, RendererType, type Texture } from "pixi.js";
 import type { BoardActivation, BoardEditor, BoardPointerEvent } from "../editor/index.js";
 import { boardDragSlop, boardTextGestureWrap, isCreationBoardTool, isTouchLikePointer, resizeCursorForHandle } from "../editor/index.js";
 import {
@@ -70,7 +70,7 @@ import { createBoardScriptController } from "./script-controller.js";
 import { type BoardLiveStroke, createBoardScene } from "./scene.js";
 import { drawBoardFrameMask, drawBoardOverlay } from "./overlay.js";
 import { createTextResolutionTracker } from "./text-resolution-tracker.js";
-import { type BoardItemView, createBoardItemViewLayer } from "./views.js";
+import { type BoardItemView, type BoardItemViewStats, createBoardItemViewLayer } from "./views.js";
 import { createBoardWheel } from "./wheel.js";
 import type { BoardLod } from "../render/lod.js";
 
@@ -103,6 +103,7 @@ export type BoardStageOptions = {
 	views?: readonly BoardItemView[];
 	/** `below` needs `transparent`; views there get no input. */
 	viewLayer?: "above" | "below";
+	drawViews?: boolean;
 	/** Leave the canvas clear for the host to paint the backdrop behind it. */
 	transparent?: boolean;
 	theme?: () => BoardStageTheme;
@@ -145,6 +146,7 @@ export type BoardStage = {
 	readonly renderer: Renderer | null;
 	readonly camera: BoardViewport;
 	readonly theme: BoardStageTheme;
+	readonly viewTextures: ReadonlyMap<string, Texture>;
 	setActive(active: boolean): void;
 	setScriptsPaused(paused: boolean): void;
 	resetScripts(id?: string): void;
@@ -173,6 +175,7 @@ export type BoardStageStats = {
 	settling: boolean;
 	frame: { p50: number; p95: number; max: number };
 	interval: number;
+	views: BoardItemViewStats;
 };
 
 const LIVE_CHANNELS = ["document", "scene", "selection", "camera", "tool", "interaction", "hover", "editing", "playback"] as const;
@@ -286,7 +289,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	});
 	const renderCamera = () => playbackCamera ?? editor.camera;
 	const toWorldPoint = (clientX: number, clientY: number) => pointToWorld(localPoint(clientX, clientY), renderCamera());
-	const views = createBoardItemViewLayer(host, editor, options.views ?? [], renderCamera, scheduleTick, options.viewLayer);
+	const views = createBoardItemViewLayer(host, editor, options.views ?? [], renderCamera, scheduleTick, options.viewLayer, options.drawViews ?? device.drawViews);
 	const autoPan = createBoardAutoPan(host, editor);
 
 	const player = createBoardPlayer({
@@ -989,6 +992,17 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			budget: clock,
 		});
 		staleIds.clear();
+		views.sync({
+			ids,
+			scene: renderScene,
+			camera,
+			surface,
+			selection: context.selectedIds,
+			enteredId: editor.enteredId,
+			resolution: context.textResolution,
+			live: (id) => Boolean(scene?.getNode(id)),
+		});
+		scene.syncViews(views.textures);
 		schedulePrefetch(camera, context);
 		if (scene.liveVersion !== liveVersion) {
 			liveVersion = scene.liveVersion;
@@ -1000,7 +1014,6 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 		drawInteraction();
 
-		views.sync({ ids, scene: renderScene, camera, surface, selection: context.selectedIds, enteredId: editor.enteredId });
 		const nextCursor = cursorFor();
 		if (nextCursor !== cursor) host.style.cursor = cursor = nextCursor;
 
@@ -1317,6 +1330,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		get theme() {
 			return theme();
 		},
+		viewTextures: views.textures,
 		setScriptsPaused(paused) {
 			if (paused === scripts.paused) return;
 			scripts.setPaused(paused);
@@ -1372,6 +1386,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 				settling: scene?.settling ?? false,
 				frame: frameStats(),
 				interval: clock.interval,
+				views: views.stats(),
 			};
 		},
 		toWorld: (clientX, clientY) => pointToWorld(localPoint(clientX, clientY), renderCamera()),

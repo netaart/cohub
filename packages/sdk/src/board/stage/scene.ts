@@ -20,7 +20,7 @@ import {
 import { BOARD_LOD_HYSTERESIS, type BoardLod, boardCardDetailed, boardLodRatio, boardLodSize, DEFAULT_BOARD_LOD } from "../render/lod.js";
 import { textZoomBucket } from "../render/text-resolution.js";
 import { type BoardFrameBudget, fixedBoardFrameBudget } from "./frame-budget.js";
-import { type Container, Graphics, Text } from "pixi.js";
+import { type Container, Graphics, Sprite, Text, type Texture } from "pixi.js";
 
 type CardEntry = {
 	item: BoardItem;
@@ -113,6 +113,7 @@ export type BoardScene = {
 	readonly settling: boolean;
 	readonly animated: boolean;
 	tick: (clock: number) => number | null;
+	syncViews: (textures: ReadonlyMap<string, Texture>) => void;
 	redrawText: () => void;
 	destroy: (context: BoardRenderContext) => void;
 };
@@ -143,6 +144,7 @@ export function createBoardScene(options: {
 	let lifted: ReadonlySet<string> = new Set();
 	const fixedBudget = fixedBoardFrameBudget();
 	let budget: BoardFrameBudget = fixedBudget;
+	const viewSprites = new Map<string, Sprite>();
 	const liveStrokes = new Map<
 		string,
 		{
@@ -186,6 +188,7 @@ export function createBoardScene(options: {
 		context: BoardRenderContext,
 		destroyed: boolean,
 	) {
+		dropViewSprite(id);
 		setHeldKey(context, id, null);
 		cards.delete(id);
 		pendingResolution.delete(id);
@@ -586,9 +589,9 @@ export function createBoardScene(options: {
 			let entry = cards.get(id);
 			const renderer = getRenderer(item, context);
 			if (entry && entry.renderer.id !== renderer.id) {
+				recycle(id, entry, context, true);
 				world.removeChild(entry.container);
 				entry.renderer.destroy?.(entry.container, context);
-				recycle(id, entry, context, true);
 				entry = undefined;
 			}
 			if (!entry) {
@@ -644,6 +647,30 @@ export function createBoardScene(options: {
 		lifted = context.liftedIds;
 		if (structureChanged || liveSetChanged || liftChanged) applyChildOrder(scene);
 		syncLiveStrokes(input);
+	}
+
+	function syncViews(textures: ReadonlyMap<string, Texture>) {
+		for (const id of viewSprites.keys()) if (!textures.has(id)) dropViewSprite(id);
+		for (const [id, texture] of textures) {
+			const entry = cards.get(id);
+			if (!entry) {
+				dropViewSprite(id);
+				continue;
+			}
+			let sprite = viewSprites.get(id);
+			if (!sprite) {
+				sprite = new Sprite({ label: "board-view" });
+				viewSprites.set(id, sprite);
+			}
+			sprite.texture = texture;
+			sprite.setSize(entry.item.frame.width, entry.item.frame.height);
+			if (entry.container.children.at(-1) !== sprite) entry.container.addChild(sprite);
+		}
+	}
+
+	function dropViewSprite(id: string) {
+		viewSprites.get(id)?.destroy();
+		viewSprites.delete(id);
 	}
 
 	function cullCards(view: Rect, pinnedIds: ReadonlySet<string>) {
@@ -723,6 +750,7 @@ export function createBoardScene(options: {
 	}
 
 	function destroy(context: BoardRenderContext) {
+		for (const id of [...viewSprites.keys()]) dropViewSprite(id);
 		for (const entry of cards.values())
 			entry.renderer.destroy?.(entry.container, context);
 		cards.clear();
@@ -767,6 +795,7 @@ export function createBoardScene(options: {
 			return animatedIds.size > 0;
 		},
 		tick,
+		syncViews,
 		redrawText,
 		destroy,
 	};

@@ -53,6 +53,7 @@ type Props = {
 	shape?: AvatarShape;
 	class?: string;
 	loading?: "eager" | "lazy";
+	crossorigin?: "anonymous";
 	children?: Snippet;
 };
 
@@ -64,6 +65,7 @@ let {
 	shape = "circle",
 	class: className = "",
 	loading = "lazy",
+	crossorigin,
 	children,
 }: Props = $props();
 
@@ -93,6 +95,7 @@ const tone = $derived(showImage ? null : identityTone(seed));
 			alt=""
 			class="h-full w-full object-cover"
 			{loading}
+			{crossorigin}
 			decoding="async"
 			onerror={() => {
 				failure = { src: src ?? "", count: failures + 1 };

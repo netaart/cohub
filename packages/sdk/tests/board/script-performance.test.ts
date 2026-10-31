@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Sprite } from "pixi.js";
-import { BoardScriptTexture } from "../../src/board/render/script-texture.js";
+import { BoardBitmapTexture } from "../../src/board/render/bitmap-texture.js";
 
 function bitmap(width: number, height: number) {
   let closed = 0;
@@ -9,7 +9,7 @@ function bitmap(width: number, height: number) {
 }
 
 test("script frames reuse their texture and source, resize, and release every bitmap", () => {
-  const frames = new BoardScriptTexture();
+  const frames = new BoardBitmapTexture();
   const first = bitmap(40, 20);
   frames.update(first.image);
   const texture = frames.current;

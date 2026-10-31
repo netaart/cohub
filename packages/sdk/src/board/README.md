@@ -231,6 +231,27 @@ embedded page, should do so only while `context.entered` (the host set
 `editor.enteredId`): until then presses select and drag the card like any other. A
 press elsewhere or Escape leaves it, and unlike text editing it holds no remote update.
 
+**Drawn views.** Where the browser supports HTML-in-Canvas (`stage/view-surface.ts`, the
+only file that touches it), a view that calls `context.setDrawable(true)` moves into a
+`<canvas layoutsubtree>` in its place. The content still lays out, takes input and stays
+accessible there, but the canvas shows nothing: on each `paint` it draws the content,
+copies it into a texture and clears. The scene puts the texture on top of the item's card
+(`scene.syncViews`), so the view takes the card's z-order, clip, opacity, animation and the
+presentation mask, and exports draw it through `viewTextures`, at its on-screen resolution
+and only while it is drawn. A texture that leaves `views.textures` is destroyed at the start
+of the next sync, which then calls `scene.syncViews` before it renders.
+
+Only what the page may read is drawn: cross-origin frames stay blank and images need
+CORS. A view allows drawing only while it shows neither, and requests its images with
+`crossorigin` whenever it may be drawn (`context.canDraw`), so a switch never reloads them.
+Low-tier devices and Save-Data skip drawing (`BoardDeviceBudget.drawViews`), and hosts can
+turn it off with the stage's `drawViews`. Switching moves the view's element to another node, which drops focus and
+reloads frames inside it. A canvas is its own compositing layer, so a drawable
+view keeps one only while its card is live and the view detailed; otherwise it is hidden
+and the card stands in. Rasters follow `boardBitmapResolution` of the text resolution,
+like script bitmaps, and share a 4 ms budget per frame. Elsewhere, or once drawing fails,
+views stay DOM over the canvas.
+
 Embedded pages are expensive: show a static cover (`BoardAppMetadata.cover`) and run
 the page only when the user asks, keeping that choice in the session, not the document.
 

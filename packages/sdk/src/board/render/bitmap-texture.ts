@@ -1,6 +1,6 @@
 import { ImageSource, Texture } from "pixi.js";
 
-export class BoardScriptTexture {
+export class BoardBitmapTexture {
   private texture: Texture<ImageSource> | null = null;
   private bitmap: ImageBitmap | null = null;
 

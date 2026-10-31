@@ -47,6 +47,7 @@ export type BoardExportOptions = {
   colors?: BoardShapeColors;
   style?: BoardRenderStyleInput;
   textures?: Map<string, Texture>;
+  viewTextures?: ReadonlyMap<string, Texture>;
   scripts?: BoardScriptHost;
   assetKey?: (item: BoardSceneItem) => string | null;
   renderers?: BoardCardRendererResolver;
@@ -120,6 +121,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     colors: options.colors,
     style: options.style,
     textures: options.textures,
+    viewTextures: options.viewTextures,
     scripts: options.scripts,
     assetKey: options.assetKey,
     renderers: options.renderers,
