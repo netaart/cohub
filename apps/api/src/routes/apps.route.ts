@@ -810,7 +810,8 @@ router.get("/:id", async (c) => {
   if (!requireValidId(id)) return c.json({ message: "app not found" }, 404);
   const app = await getAppById(id);
   if (!app) return c.json({ message: "app not found" }, 404);
-  if (!(await hasPermission(user, "space.view", { spaceId: app.spaceId }))) return authzDenied(c);
+  const isPublicApp = app.status === "published" && !requiresSpaceAppAccess(app);
+  if (!isPublicApp && !(await hasPermission(user, "space.view", { spaceId: app.spaceId }))) return authzDenied(c);
   const [row] = await db
     .select({
       owner: { userUuid: userProfiles.userUuid, username: userProfiles.username, displayName: userProfiles.displayName, avatarUrl: userProfiles.avatarUrl },
