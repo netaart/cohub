@@ -52,7 +52,7 @@ export type {
   RtcIceServers,
 } from "@cohub/protocol";
 export type { CreateDesktopCommandInput, WaitForDesktopCommandOptions } from "./apis/desktop-commands.js";
-export { AppSurfaceApi } from "./app-surface.js";
+export { AppSurfaceApi, COHUB_APP_ORIGINS } from "./app-surface.js";
 export type { AppSurfaceHandler, AppSurfaceHandlerContext } from "./app-surface.js";
 export {
   formatAppRef,

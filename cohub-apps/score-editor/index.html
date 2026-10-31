@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="cohub:surface" content="window" />
+    <meta name="cohub:file-handlers" content=".abc" />
+    <title>Score editor</title>
+    <style>
+      html,
+      body,
+      #app {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        background: Canvas;
+        color: CanvasText;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+
+      #boot {
+        display: flex;
+        height: 100%;
+        flex-direction: column;
+      }
+
+      #boot .boot-bar {
+        display: flex;
+        height: 40px;
+        flex: none;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+        border-bottom: 1px solid color-mix(in oklab, CanvasText 14%, Canvas);
+      }
+
+      #boot .boot-line {
+        height: 10px;
+        border-radius: 3px;
+        background: color-mix(in oklab, CanvasText 12%, Canvas);
+      }
+
+      #boot .boot-name {
+        width: 34%;
+      }
+
+      #boot .boot-tag {
+        width: 56px;
+      }
+
+      #boot .boot-body {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: 8px;
+        padding: 24px 12px;
+      }
+
+      #boot .boot-body .boot-line {
+        width: 38%;
+      }
+
+      #boot .boot-body .boot-line + .boot-line {
+        width: 26%;
+      }
+
+      #boot[hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="boot" aria-busy="true" role="presentation">
+        <div class="boot-bar">
+          <div class="boot-line boot-name"></div>
+          <div class="boot-line boot-tag"></div>
+        </div>
+        <div class="boot-body">
+          <div class="boot-line"></div>
+          <div class="boot-line"></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
