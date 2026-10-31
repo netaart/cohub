@@ -1,5 +1,13 @@
 # @neta-art/cohub
 
+## 13.9.0
+
+### Minor Changes
+
+- b0cb2fc: Board DOM views can be drawn into the canvas where the browser supports HTML-in-Canvas: a view that calls `context.setDrawable(true)` takes its item's z-order, frame clip, opacity, animations and the presentation mask, while its content keeps input and accessibility. `context.drawn` and `context.canDraw` tell the view how it is shown, `BoardStage.viewTextures` and the `viewTextures` export option draw it in exports, and `BoardStageStats.views` reports drawn views and raster time. Low-tier devices and Save-Data skip drawing (`BoardDeviceBudget.drawViews`), and the stage's `drawViews: false` turns it off. `BoardScene.syncViews` places the textures.
+- 58063f4: Direct local access: on the machine whose Runtime serves a Space, files and screens skip the API, gateway and relay. sandboxd serves a private loopback API whose token only its supervisor holds; `cohub spaces files` and `cohub spaces displays` use it automatically (uploads stream from disk without the API's size limit), and fall back to the API when it cannot be reached, never retrying a mutation it may have run. The SDK adds a `localWorkspace` client option, `files.workspace()` and `loopbackWorkspace()`, and the desktop and Android apps read and write their own folders through the host bridge (`workspace.call`) and stream media with ranges (`workspace.files`). `COHUB_NO_DIRECT=1` keeps every request on the API; scoped execution tokens always do.
+- ee78752: Local Runtimes without a Harness: `cohub runtime up` now serves the folder when no local Harness can run, with Turns on the Cohub Harness. The host service reports why a connection failed, refuses to disconnect over unconfirmed work unless forced, stops an account's Runtimes at sign-out, shares a screen without restarting the Runtime, and keeps the machine awake during tasks. The host bridge adds permissions, the app badge, launch at login, a global shortcut, incoming shares and `runtime.keepAwake`.
+
 ## 13.8.0
 
 ### Minor Changes
