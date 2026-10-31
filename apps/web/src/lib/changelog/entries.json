@@ -1,5 +1,23 @@
 [
 	{
+		"version": "2.88",
+		"date": "2026-10-31",
+		"tags": ["v2.88.0"],
+		"highlights": [
+			"**Live Board backgrounds for New Chat**: Spaces can point `ui.newChat.background` at a `.board` file to render it live and editable behind New Chat, sharing one replica with Board windows so writes have a single owner; shortcuts and paste route to the Board last interacted with, and the Board menu sets or clears the background without disturbing other `space.json` fields.",
+			"**Pele diagram renderer**: Mermaid is replaced by Pele, a lightweight renderer themed by CSS variables, so diagrams render mid-stream as soon as their fence closes, keep zoom across re-renders, follow theme switches without re-rendering, and open full screen for zoom plus SVG and PNG export.",
+			"**Renewal recovery and checkout identity**: Billing now exposes `past_due` subscriptions with grace/closing recovery states and allowed pay-invoice, end-recovery, and resubscribe actions; purchases carry a purchase ID through checkout retries and returns, so confirmed selections and cancellations survive reloads, and feature entitlements report `validUntil`.",
+			"**Image paste on the Board**: Pasting clipboard images uploads them through the same compress-and-durable path as the chat composer and lays them out as a centered row scaled to fit the current view.",
+			"**Clickable workspace paths in Markdown**: Inline code holding an absolute `/workspace` path renders as a file link that opens the file in the workspace."
+		],
+		"fixes": [
+			"Re-authenticate the WebSocket with a refreshed access token when the gateway rejects room subscriptions as `UNAUTHORIZED`, so long-lived tabs recover live session output instead of retrying with an expired token.",
+			"Release buffered `session.turn.patch` events after a 1.5s gap or buffer overflow, letting the generation stream resync from a snapshot instead of freezing live output until the turn ends.",
+			"Read and version space files through open handles so shared NFS attribute caching no longer produces stale sizes and false `file_conflict` errors on saves.",
+			"Allow reading published public apps by ID without space access, fixing `cohub apps download <id>` returning forbidden for public apps inside private Spaces."
+		]
+	},
+	{
 		"version": "2.87",
 		"date": "2026-10-29",
 		"tags": ["v2.87.0"],
