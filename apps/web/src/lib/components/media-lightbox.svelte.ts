@@ -12,6 +12,8 @@ export interface MediaItem {
 	title?: string;
 	/** Secondary caption, e.g. the model. */
 	subtitle?: string;
+	/** The song's score, drawn read-only under its audio. */
+	score?: string;
 	filename?: string;
 	mimeType?: string;
 	/** Natural size, when known, reserves the frame before media loads. */

@@ -18,6 +18,7 @@ import { untrack } from "svelte";
 import { innerHeight, innerWidth } from "svelte/reactivity/window";
 import { dismissOnBack } from "$lib/back-layers.svelte";
 import AudioPlayer from "$lib/components/AudioPlayer.svelte";
+import AudioScore from "$lib/components/AudioScore.svelte";
 import ImageViewer from "$lib/components/ImageViewer.svelte";
 import {
 	type MediaItem,
@@ -385,7 +386,17 @@ $effect(() => {
 				</MediaImage>
 			</div>
 			{#if source.status === "ready"}
-				<AudioPlayer src={source.src} title={item.alt ?? item.title} autoplay={active} />
+				{#if item.score}
+					<AudioScore
+						variant="panel"
+						src={source.src}
+						score={item.score}
+						title={item.alt ?? item.title}
+						autoplay={active}
+					/>
+				{:else}
+					<AudioPlayer src={source.src} title={item.alt ?? item.title} autoplay={active} />
+				{/if}
 			{:else if source.status === "loading"}
 				<Loader2 class="h-6 w-6 animate-spin text-overlay-control-text" />
 			{:else}

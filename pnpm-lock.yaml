@@ -624,6 +624,12 @@ importers:
       '@neta-art/cohub':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@neta-art/score-dialect-song2':
+        specifier: 0.4.6
+        version: 0.4.6(@neta-art/score-editor@0.4.6)
+      '@neta-art/score-editor':
+        specifier: 0.4.6
+        version: 0.4.6
       '@shikijs/langs':
         specifier: ^4.4.3
         version: 4.4.3
@@ -3546,6 +3552,14 @@ packages:
     engines: {node: '>=20.0.0'}
     hasBin: true
 
+  '@neta-art/score-dialect-song2@0.4.6':
+    resolution: {integrity: sha512-jL9lmI/7u36ymLriifo4Jwg3U2gfTUa8sfJO6a85ah/H7Gt2gQHXes/XPIDxNsHhfpmOtlehb1hK4l//nV9smQ==}
+    peerDependencies:
+      '@neta-art/score-editor': ^0.4.6
+
+  '@neta-art/score-editor@0.4.6':
+    resolution: {integrity: sha512-EFf9037GM/zsw6b59Z2VOZH7byw26p0yGAcKO8kMQQhbyk5PY+r2uVE706/rk1RY6h679nOhGGQt0fQescLvyA==}
+
   '@openrouter/sdk@1.4.25':
     resolution: {integrity: sha512-H218lYMy9WhU5cMigUvW/k+e1BimCqTTP+9PqssdDXnQ0gFCeEME0HTsFGPbR6UgJgyYh2hTct43/9pMcBem5A==}
 
@@ -4640,6 +4654,9 @@ packages:
 
   '@yuku-toolchain/types@0.8.7':
     resolution: {integrity: sha512-2Z53dNxAJL6UvFoIrDZvYf3zlO8s4VJK4O2hhaB4mXVwwpX/7ajtss3cmfqKvamlNLWyt9FSWs4eoYdlbxpnHA==}
+
+  abcjs@6.7.1:
+    resolution: {integrity: sha512-H9fnuhSSP3tbcJf4K3a/sgX8lM2M5cx8drlXEsPNrsRca/MGxhSb6HcT0ICFVoNW7Izx3kMHf7PExarC+5LUJw==}
 
   acorn@8.18.0:
     resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
@@ -9439,6 +9456,14 @@ snapshots:
       '@typesafe-ai/sdk': 0.6.0
       yaml: 2.9.0
 
+  '@neta-art/score-dialect-song2@0.4.6(@neta-art/score-editor@0.4.6)':
+    dependencies:
+      '@neta-art/score-editor': 0.4.6
+
+  '@neta-art/score-editor@0.4.6':
+    dependencies:
+      abcjs: 6.7.1
+
   '@openrouter/sdk@1.4.25':
     dependencies:
       zod: 4.6.5
@@ -10246,6 +10271,8 @@ snapshots:
     optional: true
 
   '@yuku-toolchain/types@0.8.7': {}
+
+  abcjs@6.7.1: {}
 
   acorn@8.18.0: {}
 

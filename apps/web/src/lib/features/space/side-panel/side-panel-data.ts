@@ -5,6 +5,16 @@ import type {
 	SessionFileRecord,
 } from "@cohub/protocol/model";
 import type { TaskRunRecord } from "@neta-art/cohub";
+import type {
+	GenerationOutputType,
+	GenerationTaskOutput,
+	GenerationTaskView,
+} from "@neta-art/cohub";
+import {
+	type TaskScoreEntry,
+	type TaskScoreItem,
+	taskScoreItem,
+} from "$lib/score-editor/task-score";
 
 export type LiveFileChange = {
 	path: string;
@@ -315,4 +325,98 @@ export function formatElapsed(ms: number) {
 	return hours > 0
 		? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}`
 		: `${minutes}:${seconds}`;
+}
+
+/**
+ * One tile of the generation grid: an output of a task, a placeholder for a task that has none yet
+ * (`output` is null), or the score item of a song. The score item exists only here, in the web
+ * layer; the SDK's generation outputs stay `image | video | audio`.
+ */
+export type GenerationGridItem =
+	| {
+			kind: "output";
+			key: string;
+			task: GenerationTaskView;
+			output: GenerationTaskOutput | null;
+	  }
+	| {
+			kind: "score";
+			key: string;
+			task: GenerationTaskView;
+			entry: TaskScoreEntry;
+	  };
+
+/**
+ * The tiles for a list of tasks.
+ * - `all`: every score tile shows, after the task's last audio or alone when the task has no
+ *   outputs.
+ * - `audio`: a score tile shows only when the task has audio.
+ * - any other filter: no score tile.
+ */
+export function generationGridItems(
+	tasks: readonly GenerationTaskView[],
+	typeFilter: GenerationOutputType | "all",
+	scoreOf: (task: GenerationTaskView) => TaskScoreItem | null,
+): GenerationGridItem[] {
+	return tasks.flatMap((task): GenerationGridItem[] => {
+		const entry = scoreOf(task);
+		const scoreItem: GenerationGridItem | null = entry
+			? {
+					kind: "score",
+					key: `${task.id}:score`,
+					task,
+					entry: { taskRunId: entry.taskRunId, score: entry.score },
+				}
+			: null;
+		if (task.status !== "completed") {
+			if (typeFilter !== "all") return [];
+			const placeholder: GenerationGridItem = {
+				kind: "output",
+				key: task.id,
+				task,
+				output: null,
+			};
+			return scoreItem ? [placeholder, scoreItem] : [placeholder];
+		}
+		const outputs = task.outputs
+			.filter((output) => typeFilter === "all" || output.type === typeFilter)
+			.map(
+				(output): GenerationGridItem => ({
+					kind: "output",
+					key: `${task.id}:${output.index}`,
+					task,
+					output,
+				}),
+			);
+		const showsScore =
+			scoreItem &&
+			(typeFilter === "all" ||
+				(typeFilter === "audio" &&
+					outputs.some(
+						(item) => item.kind === "output" && item.output?.type === "audio",
+					)));
+		if (!showsScore || !scoreItem) return outputs;
+		const lastAudio = outputs.findLastIndex(
+			(item) => item.kind === "output" && item.output?.type === "audio",
+		);
+		const at = lastAudio < 0 ? outputs.length : lastAudio + 1;
+		return [...outputs.slice(0, at), scoreItem, ...outputs.slice(at)];
+	});
+}
+
+/** The score lookup both the grid and the media count use. */
+export function generationGridScoreResolver(
+	resolveRun: (taskRunId: string) => TaskRunRecord | undefined,
+) {
+	return (task: GenerationTaskView): TaskScoreItem | null => {
+		const run = resolveRun(task.id);
+		return run ? taskScoreItem(run) : null;
+	};
+}
+
+/** The one line a generation tile goes by: what was asked for, then the model. */
+export function generationTaskLabel(
+	task: Pick<GenerationTaskView, "prompt" | "model">,
+) {
+	return [task.prompt, task.model].filter(Boolean).join(" · ");
 }

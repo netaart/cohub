@@ -46,6 +46,8 @@
 		"@lezer/highlight": "^1.2.3",
 		"@logto/browser": "^3.0.13",
 		"@neta-art/cohub": "workspace:*",
+		"@neta-art/score-dialect-song2": "0.4.6",
+		"@neta-art/score-editor": "0.4.6",
 		"@shikijs/langs": "^4.4.3",
 		"@shikijs/themes": "^4.4.3",
 		"bowser": "^2.14.1",

@@ -7,6 +7,10 @@ import LoadError from "./LoadError.svelte";
 import LoadMoreButton from "./LoadMoreButton.svelte";
 import SessionFileList from "./SessionFileList.svelte";
 import SidePanelSection from "./SidePanelSection.svelte";
+import {
+	generationGridItems,
+	generationGridScoreResolver,
+} from "./side-panel-data";
 import type { SessionFilesFeed } from "./session-files.svelte";
 
 type Props = {
@@ -61,11 +65,11 @@ const tasks = $derived(generations?.tasks ?? []);
 const fileEntries = $derived(files?.files ?? []);
 const activeGenerations = $derived(generations?.activeCount ?? 0);
 const mediaCount = $derived(
-	tasks.reduce(
-		(count, task) =>
-			count + (task.status === "completed" ? task.outputs.length : 1),
-		0,
-	),
+	generationGridItems(
+		tasks,
+		"all",
+		generationGridScoreResolver((id) => generations?.run(id)),
+	).length,
 );
 const ready = $derived((generations?.ready ?? true) && (files?.ready ?? true));
 const mediaFailed = $derived(

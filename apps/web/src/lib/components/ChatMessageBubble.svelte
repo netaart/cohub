@@ -61,6 +61,7 @@ import {
 	type ModelCatalogItem,
 } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
+import { generationTurnScoreItem } from "$lib/score-editor/task-score";
 import type { RelayTarget } from "$lib/relay";
 import { readSentFrom } from "$lib/sent-turns";
 import type { ChatMessage } from "$lib/session-tree";
@@ -469,6 +470,12 @@ const isDirectGeneration = $derived(
 	message.meta?.turn?.executionKind === "direct_generation",
 );
 
+const scoreEntry = $derived(
+	message.role === "assistant" && message.meta?.turn
+		? generationTurnScoreItem(message.meta.turn)
+		: null,
+);
+
 const visibleCost = $derived(
 	isDirectGeneration
 		? getGenerationCostPresentation(
@@ -670,6 +677,7 @@ function handleCopy() {
         onMarkdownSegmentRendered={handleMarkdownSegmentRendered}
         onMarkdownSegmentStart={handleMarkdownSegmentStart}
         onLoadToolCalls={message.toolCallsLoader ?? undefined}
+        {scoreEntry}
         onOpenFile={reply ? undefined : onOpenFile}
         {onOpenUrl}
       />

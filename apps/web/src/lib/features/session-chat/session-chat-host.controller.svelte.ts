@@ -9,7 +9,6 @@ import {
 } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { SpaceFsChangedPayload } from "@cohub/protocol/fs";
-import type { GenerationContentBlock } from "@cohub/protocol/generation";
 import {
 	isAgentTurn,
 	type SessionTurnIndexItem,
@@ -135,6 +134,8 @@ import { turnRecordToIndexItem } from "$lib/turn-nav-preview";
 import type { LocalUploadEntry } from "$lib/upload-entries";
 import { describeUploadError } from "$lib/upload-errors";
 import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
+import { buildCreateGenerationRequest } from "./create-generation-request";
+import { createCreateRoleInputsController } from "./create-role-inputs-controller.svelte";
 import {
 	shouldClearActiveSessionForNewDraft,
 	shouldClearResolvedNewSessionOnRoute,
@@ -446,6 +447,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const catalog = generationModelsCatalog ?? [];
 		return resolvePreferredGenerationModel(catalog, activeCreateModelId);
 	});
+	const createRoleInputs = createCreateRoleInputsController(
+		() => (composerMode === "create" ? activeCreateModelDeclaration : null),
+		() => spaceId,
+	);
 	const activeGenerationModel = $derived.by(() => {
 		const model = activeCreateModelDeclaration;
 		return model
@@ -2823,12 +2828,27 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	}
 
 	async function handleDirectGenerationSend() {
-		const prompt = input.trim();
-		if ((!prompt && attachments.length === 0) || sending || !spaceId) return;
+		const roleMode = createRoleInputs.fields.length > 0;
+		const prompt = roleMode ? "" : input.trim();
+		const hasInput = roleMode ? createRoleInputs.hasDraft : Boolean(prompt);
+		if ((!hasInput && attachments.length === 0) || sending || !spaceId) return;
 		const selected = activeCreateModelDeclaration;
 		if (!selected) {
 			composer.setError("No generation model is available.");
 			return;
+		}
+		if (roleMode) {
+			const blocked = createRoleInputs.blockedReason;
+			if (blocked) {
+				composer.setError(blocked);
+				return;
+			}
+			if (attachments.some((attachment) => attachment.kind === "text")) {
+				composer.setError(
+					m.generation_role_text_files({}, { locale: getLocale() }),
+				);
+				return;
+			}
 		}
 		const sessionIdAtStart =
 			activeSessionId ??
@@ -2860,38 +2880,25 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			const imageUrls = [...imageUpload.urls.values()];
 			if (imageUrls.length !== imageAttachments.length)
 				throw new Error("Failed to upload an image attachment.");
-			const textAttachments = attachments.filter(
-				(attachment): attachment is ComposerTextAttachment =>
-					attachment.kind === "text",
+			const result = await sdk.space(spaceId).prompt(
+				buildCreateGenerationRequest({
+					declaration: selected,
+					text: prompt,
+					...(roleMode
+						? {
+								roleTexts: createRoleInputs.texts,
+								parameters: createRoleInputs.parameters,
+							}
+						: {}),
+					textAttachments: attachments.filter(
+						(attachment): attachment is ComposerTextAttachment =>
+							attachment.kind === "text",
+					),
+					imageUrls,
+					sessionId: sessionIdAtStart,
+					clientMessageId,
+				}),
 			);
-			const content: GenerationContentBlock[] = [
-				...(prompt
-					? [{ type: "text", text: prompt } satisfies GenerationContentBlock]
-					: []),
-				...textAttachments.map(
-					(attachment) =>
-						({
-							type: "text",
-							text: attachment.text,
-						}) satisfies GenerationContentBlock,
-				),
-				...imageUrls.map(
-					(url) =>
-						({
-							type: "image",
-							source: { type: "url", url },
-						}) satisfies GenerationContentBlock,
-				),
-			];
-			const result = await sdk.space(spaceId).prompt({
-				mode: "create",
-				...(sessionIdAtStart ? { sessionId: sessionIdAtStart } : {}),
-				generation: { model: selected.model, content },
-				clientMessageId,
-				accessMode: "full_access",
-				intent: "followup",
-				schedule: { mode: "immediate" },
-			});
 			if (result.mode !== "immediate")
 				throw new Error("Expected immediate generation response");
 			noteViewerActivity();
@@ -4563,6 +4570,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		},
 		get activeGenerationModel() {
 			return activeGenerationModel;
+		},
+		get createRoleInputs() {
+			return createRoleInputs;
 		},
 		get createModelId() {
 			return activeCreateModelDeclaration?.model ?? null;

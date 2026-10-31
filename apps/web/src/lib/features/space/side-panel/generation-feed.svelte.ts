@@ -82,6 +82,9 @@ export class GenerationFeed {
 	readonly activeCount = $derived(
 		this.tasks.filter((task) => isActiveGenerationTask(task)).length,
 	);
+	readonly runsById = $derived(
+		new Map(this.#runs.map((run) => [run.id, run] as const)),
+	);
 
 	constructor(scope: GenerationFeedScope) {
 		this.scope = scope;
@@ -146,7 +149,7 @@ export class GenerationFeed {
 	}
 
 	run(taskRunId: string) {
-		return this.#runs.find((run) => run.id === taskRunId);
+		return this.runsById.get(taskRunId);
 	}
 
 	upsert(runs: readonly TaskRunRecord[]) {

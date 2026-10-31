@@ -1,4 +1,5 @@
 <script lang="ts">
+import { generationOutput } from "@cohub/protocol";
 import type { TaskRunRecord, UserProfile } from "@neta-art/cohub";
 import { mediaPreviewCandidates } from "@neta-art/cohub/media";
 import {
@@ -7,11 +8,13 @@ import {
 	GitCommitHorizontal,
 	LayoutDashboard,
 } from "lucide-svelte";
-import { onDestroy } from "svelte";
+import { onDestroy, type Snippet } from "svelte";
 import { goto } from "$app/navigation";
 import AudioPlayer from "$lib/components/AudioPlayer.svelte";
+import AudioScore from "$lib/components/AudioScore.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
+import ScoreStaffView from "$lib/components/ScoreStaffView.svelte";
 import { mediaLightbox } from "$lib/components/media-lightbox";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import MediaImage from "$lib/resource-kit/MediaImage.svelte";
@@ -26,7 +29,6 @@ import {
 	generationBlockMeta,
 	generationBlockSource,
 	generationBlockText,
-	generationOutputBlocks,
 	runCommandPayload,
 	runCommandResultMeta,
 	saveCheckpointHasPublishWarnings,
@@ -41,6 +43,10 @@ import {
 	taskTypeLabel,
 } from "$lib/resource-kit/task-run";
 import { formatDateTime } from "$lib/resource-kit/time";
+import {
+	isTaskScoreBlock,
+	taskScorePlacement,
+} from "$lib/score-editor/task-score";
 import {
 	buildSpaceCheckpointRoute,
 	buildSpaceCronjobRoute,
@@ -189,6 +195,16 @@ function userTitle(
 	</button>
 {/snippet}
 
+{#snippet OutputCard(label: string, meta: string | null, body: Snippet)}
+	<div class="rounded-[8px] bg-bg-elevated/35 p-3">
+		<div class="mb-2 flex items-center justify-between gap-3 text-[11px] text-text-tertiary">
+			<span class="truncate">{label}</span>
+			{#if meta}<span class="shrink-0 font-mono text-text-placeholder">{meta}</span>{/if}
+		</div>
+		{@render body()}
+	</div>
+{/snippet}
+
 <div class="flex-1 min-h-0 overflow-y-auto px-3 py-4 sm:px-6 sm:py-5 lg:px-workspace">
 	<div class="max-w-4xl">
 		{#if taskRunDetailLoading && taskRunDetail?.id !== taskId}
@@ -204,8 +220,9 @@ function userTitle(
 			{@const actionInput = appActionInput(taskRunDetail)}
 			{@const commandMeta = runCommandResultMeta(taskRunDetail)}
 			{@const outputContent = taskOutputContent(taskRunDetail, taskRunProgress)}
-			{@const generationBlocks = generationOutputBlocks(taskRunDetail)}
+			{@const generationBlocks = taskRunDetail.taskType === "generation" ? generationOutput(taskRunDetail) : []}
 			{@const rawResult = taskRawResult(taskRunDetail)}
+			{@const placement = taskScorePlacement(taskRunDetail)}
 			<div class="space-y-6 sm:space-y-8">
 				<header class="flex flex-col gap-4 border-b border-border-subtle/70 pb-5 lg:flex-row lg:items-start lg:justify-between">
 					<div class="min-w-0 space-y-3">
@@ -331,13 +348,19 @@ function userTitle(
 									{#each generationBlocks as block, index}
 										{@const blockText = generationBlockText(block)}
 										{@const blockSrc = generationBlockSource(block)}
-										{@const blockMeta = generationBlockMeta(block)}
-										<div class="rounded-[8px] bg-bg-elevated/35 p-3">
-											<div class="mb-2 flex items-center justify-between gap-3 text-[11px] text-text-tertiary">
-												<span class="truncate">{generationBlockLabel(block, index)}</span>
-												{#if blockMeta}<span class="shrink-0 font-mono text-text-placeholder">{blockMeta}</span>{/if}
-											</div>
-											{#if blockText !== null}
+										{#snippet blockBody()}
+											{#if placement && isTaskScoreBlock(block)}
+												{#if !placement.audio && index === placement.score.outputBlock}
+													<ScoreStaffView score={placement.score.score} title={generationBlockLabel(block, index)} class="overflow-hidden rounded-[6px]" />
+												{/if}
+											{:else if placement?.audio?.index === index && blockSrc && block.type === "audio"}
+												<AudioScore
+													variant="panel"
+													src={blockSrc}
+													score={placement.score.score}
+													title={generationBlockLabel(block, index)}
+												/>
+											{:else if blockText !== null}
 												<div class="whitespace-pre-wrap break-words text-[13px] leading-6 text-text-secondary">{blockText}</div>
 											{:else if block.type === "image" && blockSrc}
 												<button type="button" class="block w-full cursor-zoom-in" onclick={() => openOutputImage(generationBlocks, index)}>
@@ -357,7 +380,8 @@ function userTitle(
 											{:else}
 												<pre class="max-h-[40vh] overflow-auto text-[12px] font-mono leading-relaxed text-text-secondary whitespace-pre-wrap break-all">{displaySafeJson(block, { maxStringLength: 12_000, locale })}</pre>
 											{/if}
-										</div>
+										{/snippet}
+										{@render OutputCard(generationBlockLabel(block, index), generationBlockMeta(block), blockBody)}
 									{/each}
 								</div>
 							</div>
@@ -368,6 +392,12 @@ function userTitle(
 							</div>
 						{:else if taskIsStreaming(taskRunDetail)}
 							<div class="py-6 text-[13px] text-text-tertiary">{m.task_waiting_output({}, { locale })}</div>
+						{/if}
+						{#if placement && placement.score.outputBlock === null && !placement.audio}
+							{#snippet scoreAction()}
+								<ScoreStaffView score={placement.score.score} class="overflow-hidden rounded-[6px]" />
+							{/snippet}
+							{@render OutputCard(m.task_section_input({}, { locale }), "text", scoreAction)}
 						{/if}
 
 						<div class="grid gap-x-8 gap-y-4 sm:grid-cols-2">

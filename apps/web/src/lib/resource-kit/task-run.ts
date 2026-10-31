@@ -247,7 +247,7 @@ export function taskOutputContent(
 }
 
 export function generationOutputBlocks(
-	run: TaskRunRecord,
+	run: Pick<TaskRunRecord, "taskType" | "result">,
 ): Record<string, unknown>[] {
 	if (run.taskType !== "generation") return [];
 	const result = asRecord(run.result);

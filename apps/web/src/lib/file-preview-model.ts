@@ -5,6 +5,7 @@ import { isCsvPath, isTextFileResponse } from "$lib/space-file-text";
 export type FilePreviewKind =
 	| "markdown"
 	| "html"
+	| "score"
 	| "csv"
 	| "text"
 	| "image"
@@ -28,6 +29,10 @@ export function isMarkdownPath(path: string) {
 
 export function isHtmlPath(path: string) {
 	return /\.html?$/i.test(path);
+}
+
+export function isScorePath(path: string) {
+	return /\.abc$/i.test(path);
 }
 
 export function isPdfPath(path: string) {
@@ -81,7 +86,9 @@ export function filePreviewModel(
 			? "markdown"
 			: isText && isHtmlPath(file.path)
 				? "html"
-				: isText && (isCsvPath(file.path) || isCsvMime(file.mimeType))
+				: isText && isScorePath(file.path)
+					? "score"
+					: isText && (isCsvPath(file.path) || isCsvMime(file.mimeType))
 					? "csv"
 					: isText
 						? "text"
@@ -98,7 +105,10 @@ export function filePreviewModel(
 		kind,
 		isText,
 		hasRenderedPreview:
-			kind === "markdown" || kind === "html" || kind === "csv",
+			kind === "markdown" ||
+			kind === "html" ||
+			kind === "score" ||
+			kind === "csv",
 		language,
 		mediaUrl,
 	};

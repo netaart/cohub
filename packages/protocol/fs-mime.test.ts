@@ -17,3 +17,10 @@ test("detects previewable model formats by name, then MIME type", () => {
   assert.equal(modelFormatForPath("part.3mf", "model/3mf"), null);
   assert.equal(modelFormatForPath("constructor"), null);
 });
+
+test("treats .abc scores as text on every read path", () => {
+  for (const path of ["scores/song.abc", "SONG.ABC"]) {
+    assert.equal(mimeTypeForPath(path), "text/plain");
+    assert.equal(isTextMime(mimeTypeForPath(path)), true);
+  }
+});

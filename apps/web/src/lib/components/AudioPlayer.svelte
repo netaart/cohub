@@ -20,6 +20,8 @@ type Props = {
 	downloadName?: string | null;
 	/** Plays once ready; switching it off pauses. */
 	autoplay?: boolean;
+	/** The hidden media element, for a score cursor that follows this player. */
+	element?: HTMLAudioElement | null;
 };
 
 let {
@@ -29,6 +31,7 @@ let {
 	downloadUrl = null,
 	downloadName = null,
 	autoplay = false,
+	element = $bindable(null),
 }: Props = $props();
 
 const locale = $derived(getLocale());
@@ -36,6 +39,9 @@ const locale = $derived(getLocale());
 const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2] as const;
 
 let audioEl = $state<HTMLAudioElement | null>(null);
+$effect(() => {
+	element = audioEl;
+});
 let status = $state<"loading" | "ready" | "error">("loading");
 let playing = $state(false);
 let currentTime = $state(0);

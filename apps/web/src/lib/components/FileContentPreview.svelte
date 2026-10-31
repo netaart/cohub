@@ -35,6 +35,11 @@ const loadRenderedPreview = createLazyModuleLoader(() =>
 const loadCsvPreview = createLazyModuleLoader(() =>
 	import.meta.env.SSR ? pending() : import("$lib/components/CsvPreview.svelte"),
 );
+const loadScorePreview = createLazyModuleLoader(() =>
+	import.meta.env.SSR
+		? pending()
+		: import("$lib/components/ScoreStaffView.svelte"),
+);
 const loadPdfPreview = createLazyModuleLoader(() =>
 	import.meta.env.SSR ? pending() : import("$lib/components/PdfPreview.svelte"),
 );
@@ -114,6 +119,7 @@ const hasPdfSource = $derived(
 let editorAttempt = $state(0);
 let renderedAttempt = $state(0);
 let csvAttempt = $state(0);
+let scoreAttempt = $state(0);
 let pdfAttempt = $state(0);
 let modelAttempt = $state(0);
 const editorPromise = $derived.by(() => {
@@ -127,6 +133,10 @@ const renderedPromise = $derived.by(() => {
 const csvPromise = $derived.by(() => {
 	csvAttempt;
 	return loadCsvPreview();
+});
+const scorePromise = $derived.by(() => {
+	scoreAttempt;
+	return loadScorePreview();
 });
 const pdfPromise = $derived.by(() => {
 	pdfAttempt;
@@ -204,6 +214,17 @@ const modelSource = $derived.by((): ModelSource | null => {
 			{:catch}
 				{@render LazyError(m.preview_failed({}, { locale }), () => {
 					renderedAttempt += 1;
+				})}
+			{/await}
+		</div>
+	{:else if model.kind === "score" && rich}
+		<div class="min-h-0 flex-1 overflow-auto p-4">
+			{#await scorePromise then module}
+				{@const ScoreStaffView = module.default}
+				<ScoreStaffView score={source} class="overflow-hidden rounded-lg border border-border-subtle" />
+			{:catch}
+				{@render LazyError(m.preview_failed({}, { locale }), () => {
+					scoreAttempt += 1;
 				})}
 			{/await}
 		</div>

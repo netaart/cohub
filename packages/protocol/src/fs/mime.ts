@@ -2,6 +2,7 @@ import { BOARD_EXTENSION, BOARD_MIME_TYPE } from "../board.js";
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   ".txt": "text/plain",
+  ".abc": "text/plain",
   ".md": "text/markdown",
   ".markdown": "text/markdown",
   ".json": "application/json",

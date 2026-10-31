@@ -12,6 +12,9 @@ const BROWSER_ONLY = [
 	"mermaid",
 	"codemirror",
 	"@codemirror/*",
+	"@neta-art/score-editor",
+	"@neta-art/score-dialect-song2",
+	"abcjs",
 ];
 
 const appDir = fileURLToPath(new URL("../", import.meta.url));

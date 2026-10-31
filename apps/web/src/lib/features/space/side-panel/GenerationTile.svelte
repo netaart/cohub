@@ -95,7 +95,7 @@ const candidates = $derived(
 const durationMs = $derived(output?.durationMs ?? probed?.durationMs);
 </script>
 
-<div class="tile group" class:tile--failed={tileKind === "failed"}>
+<div class="grid-tile group" class:tile--failed={tileKind === "failed"}>
 	<button
 		type="button"
 		class="tile-surface"
@@ -159,15 +159,6 @@ const durationMs = $derived(output?.durationMs ?? probed?.durationMs);
 </div>
 
 <style>
-	.tile {
-		position: relative;
-		aspect-ratio: 1;
-		min-width: 0;
-		border-radius: 6px;
-		background: var(--bg-elevated);
-		overflow: hidden;
-	}
-
 	.tile--failed {
 		background: color-mix(in srgb, var(--color-error-bg) 60%, var(--bg-elevated));
 	}
@@ -245,8 +236,8 @@ const durationMs = $derived(output?.durationMs ?? probed?.durationMs);
 		transition: opacity 120ms ease;
 	}
 
-	.tile:hover .tile-actions,
-	.tile:focus-within .tile-actions {
+	.grid-tile:hover .tile-actions,
+	.grid-tile:focus-within .tile-actions {
 		opacity: 1;
 	}
 

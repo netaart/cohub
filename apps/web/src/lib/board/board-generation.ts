@@ -5,6 +5,11 @@ import type {
 } from "@cohub/protocol/generation";
 import type { TaskRunRecord } from "@neta-art/cohub";
 import type { BoardRect, BoardTaskSnapshot } from "@neta-art/cohub/board";
+import {
+	type GenerationRoleTexts,
+	missingRequiredRoles,
+	roleTextBlocks,
+} from "$lib/generation-text-roles";
 
 export type BoardGenerationMediaType = "image" | "video" | "audio";
 
@@ -219,6 +224,8 @@ export function validateBoardGeneration(input: {
 	model: PublicGenerationDeclaration | null;
 	prompt: string;
 	references: readonly BoardGenerationReference[];
+	/** Role boxes of a model whose text input declares roles; they replace `prompt`. */
+	roleTexts?: GenerationRoleTexts;
 }): string | null {
 	const { model, references } = input;
 	if (!model) return "Select a model.";
@@ -229,7 +236,19 @@ export function validateBoardGeneration(input: {
 		return "The selected model does not support these references.";
 	}
 
-	const textCount = input.prompt.trim() ? 1 : 0;
+	const roleBlocks = input.roleTexts
+		? roleTextBlocks(model, input.roleTexts)
+		: null;
+	const missingRole =
+		roleBlocks && input.roleTexts
+			? missingRequiredRoles(model, input.roleTexts)[0]
+			: undefined;
+	if (missingRole) return `Add ${missingRole} text.`;
+	const textCount = roleBlocks
+		? roleBlocks.length
+		: input.prompt.trim()
+			? 1
+			: 0;
 	if (textCount > 0 && !generationInputSpec(model, "text")) {
 		return "The selected model does not support text input.";
 	}
@@ -356,8 +375,11 @@ export function validateBoardGenerationParameters(
 export function buildBoardGenerationContent(
 	prompt: string,
 	references: readonly BoardGenerationReference[],
+	roles?: { model: PublicGenerationDeclaration; texts: GenerationRoleTexts },
 ): GenerationContentBlock[] {
-	const content: GenerationContentBlock[] = [];
+	const content: GenerationContentBlock[] = [
+		...(roles ? (roleTextBlocks(roles.model, roles.texts) ?? []) : []),
+	];
 	const text = prompt.trim();
 	if (text) content.push({ type: "text", text });
 	for (const reference of references) {

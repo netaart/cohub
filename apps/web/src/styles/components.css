@@ -108,6 +108,16 @@
 		image-rendering: pixelated;
 	}
 
+	/* A square cell of the generation grid. */
+	.grid-tile {
+		position: relative;
+		aspect-ratio: 1;
+		min-width: 0;
+		border-radius: 6px;
+		background: var(--bg-elevated);
+		overflow: hidden;
+	}
+
 	.tag {
 		display: inline-flex;
 		flex: none;
