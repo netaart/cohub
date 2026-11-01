@@ -1,5 +1,6 @@
 import { imageVariantUrl, mediaPreviewCandidates } from "@neta-art/cohub/media";
 import DOMPurify from "isomorphic-dompurify";
+import type Katex from "katex";
 import { marked, type Token, Tokenizer, type Tokens } from "marked";
 import remend from "remend";
 import {
@@ -337,6 +338,128 @@ marked.use({
 			return `<img src="${escapeHtml(variant)}" alt="${escapeHtml(text)}"${titleAttr} data-original-src="${escapeHtml(href)}">`;
 		},
 	},
+});
+
+type MathToken = {
+	type: "math";
+	raw: string;
+	text: string;
+	displayMode: boolean;
+	block: boolean;
+};
+
+// Blank lines end math so a stray `$$` cannot swallow following paragraphs.
+const BLOCK_MATH_PATTERN =
+	/^ {0,3}(?:\$\$((?:(?!\n[ \t]*\n)[\s\S])+?)\$\$|\\\[((?:(?!\n[ \t]*\n)[\s\S])+?)\\\]) *(?:\n+|$)/;
+const BLOCK_MATH_START_PATTERN = /\n(?= {0,3}(?:\$\$|\\\[))/g;
+const INLINE_DISPLAY_MATH_PATTERN = /^\$\$((?:\\[\s\S]|[^\\$])+?)\$\$/;
+// Pandoc rules keep prices like "$5 and $10" as text; no backticks so a
+// later code span wins.
+const INLINE_MATH_PATTERN = /^\$(?![\s$])((?:\\.|[^\\$`\n])+?)(?<!\s)\$(?!\d)/;
+const INLINE_PAREN_MATH_PATTERN = /^\\\(((?:(?!\n[ \t]*\n)[\s\S])+?)\\\)/;
+const INLINE_MATH_START_PATTERN = /\$|\\\(/;
+const TEX_ANNOTATION_PATTERN =
+	/<annotation encoding="application\/x-tex">[\s\S]*?<\/annotation>/g;
+
+let katex: typeof Katex | null = null;
+let katexPromise: Promise<void> | null = null;
+
+function loadKatex() {
+	katexPromise ??= Promise.all([
+		import("katex"),
+		typeof document === "undefined" ? null : import("katex/dist/katex.min.css"),
+	]).then(
+		([module]) => {
+			katex = module.default;
+		},
+		(error) => {
+			katexPromise = null;
+			console.warn("Failed to load KaTeX; showing TeX source", error);
+		},
+	);
+	return katexPromise;
+}
+
+function hasMathTokens(tokens: Token[]) {
+	let found = false;
+	marked.walkTokens(tokens, (token) => {
+		if (token.type === "math") found = true;
+	});
+	return found;
+}
+
+function renderMathHtml(token: MathToken) {
+	const fallback = escapeHtml(token.raw.trim());
+	if (!katex) return token.block ? `<p>${fallback}</p>` : fallback;
+
+	let html: string;
+	try {
+		html = katex.renderToString(token.text, {
+			displayMode: token.displayMode,
+			throwOnError: true,
+			strict: false,
+		});
+	} catch {
+		return token.block ? `<p>${fallback}</p>` : fallback;
+	}
+
+	// DOMPurify drops <semantics>/<annotation> but keeps the TeX text, which
+	// screen readers would then read alongside the MathML.
+	html = html.replace(TEX_ANNOTATION_PATTERN, "");
+	if (!token.displayMode) return html;
+	const tag = token.block ? "div" : "span";
+	return `<${tag} class="markdown-math-display" data-drawer-swipe-ignore>${html}</${tag}>`;
+}
+
+function mathToken(
+	raw: string,
+	text: string | undefined,
+	displayMode: boolean,
+	block: boolean,
+): MathToken | undefined {
+	const tex = text?.trim();
+	if (!tex) return undefined;
+	return { type: "math", raw, text: tex, displayMode, block };
+}
+
+marked.use({
+	extensions: [
+		{
+			name: "math",
+			level: "block",
+			// marked passes `src.slice(1)`, so only line starts after a newline count.
+			start(src) {
+				for (const match of src.matchAll(BLOCK_MATH_START_PATTERN)) {
+					const index = match.index + 1;
+					if (BLOCK_MATH_PATTERN.test(src.slice(index))) return index;
+				}
+				return undefined;
+			},
+			tokenizer(src) {
+				const match = BLOCK_MATH_PATTERN.exec(src);
+				if (!match) return undefined;
+				return mathToken(match[0], match[1] ?? match[2], true, true);
+			},
+			renderer: (token) => renderMathHtml(token as MathToken),
+		},
+		{
+			name: "math",
+			level: "inline",
+			start(src) {
+				const index = src.search(INLINE_MATH_START_PATTERN);
+				return index === -1 ? undefined : index;
+			},
+			tokenizer(src) {
+				const display = INLINE_DISPLAY_MATH_PATTERN.exec(src);
+				if (display) return mathToken(display[0], display[1], true, false);
+				const inline =
+					INLINE_MATH_PATTERN.exec(src) ?? INLINE_PAREN_MATH_PATTERN.exec(src);
+				if (inline) return mathToken(inline[0], inline[1], false, false);
+				return undefined;
+			},
+			renderer: (token) => renderMathHtml(token as MathToken),
+		},
+	],
 });
 
 function getStandaloneMediaToken(token: Token) {
@@ -794,6 +917,7 @@ async function renderMarkdownHtml(
 	if (!options?.streamingSafe || options.diagrams) enhanceMermaidTokens(tokens);
 	linkWorkspaceCodeTokens(tokens);
 	if (options?.highlight !== false) await highlightCodeTokens(tokens);
+	if (!katex && hasMathTokens(tokens)) await loadKatex();
 	return marked.parser(tokens, markedOptions);
 }
 

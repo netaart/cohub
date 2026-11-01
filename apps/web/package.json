@@ -51,6 +51,7 @@
 		"bowser": "^2.14.1",
 		"codemirror": "^6.0.2",
 		"isomorphic-dompurify": "3.23.0",
+		"katex": "^0.19.1",
 		"lucide-svelte": "^1.0.1",
 		"marked": "18.0.11",
 		"pdfjs-dist": "6.3.289",

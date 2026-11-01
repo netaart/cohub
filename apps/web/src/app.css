@@ -961,6 +961,22 @@ body.pointer-dragging {
 	}
 }
 
+.markdown-content .katex {
+	font-size: 1.1em;
+}
+
+.markdown-content .markdown-math-display {
+	display: block;
+	overflow-x: auto;
+	overflow-y: hidden;
+	margin: 0.75em 0;
+	padding-block: 0.125em;
+}
+
+.markdown-content .markdown-math-display > .katex-display {
+	margin: 0;
+}
+
 .markdown-content .markdown-mermaid-figure {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto;
