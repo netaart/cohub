@@ -87,10 +87,10 @@ public sealed class BridgeRouter(
         if (request.Param("root") is not { } root || request.Param("spaceId") is not { } spaceId) return true;
         var spent = pendingConsent;
         pendingConsent = null;
-        if (spent is { } given && string.Equals(root, given.Root, StringComparison.OrdinalIgnoreCase) && DateTime.UtcNow < given.Until) return true;
+        if (spent is { } given && string.Equals(root, given.Root, RuntimeInstall.PathComparison) && DateTime.UtcNow < given.Until) return true;
         var listed = await host.CallAsync(new BridgeRequest("list", HostProtocol.Methods.RuntimeList));
         if (listed.Failure is null && RuntimeOverview.From(listed.Result) is { } runtime
-            && runtime.Folders.Any(folder => folder.SpaceId == spaceId && string.Equals(folder.Root, root, StringComparison.OrdinalIgnoreCase)))
+            && runtime.Folders.Any(folder => folder.SpaceId == spaceId && string.Equals(folder.Root, root, RuntimeInstall.PathComparison)))
             return true;
         return await consent(new ConsentRequest(root));
     }

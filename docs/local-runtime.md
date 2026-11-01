@@ -262,7 +262,7 @@ not carried over; sync starts afresh.
 
 ## Desktop app / 桌面应用
 
-The macOS and Windows apps serve folders through the CLI they bundle, so a folder connected
+The macOS, Windows and Linux apps serve folders through the CLI they bundle, so a folder connected
 in the app is an ordinary `runtime up -d` Runtime: `runtime status`, `logs` and `down` see
 it from a terminal, and the app sees Runtimes a terminal started. Sign-in is shared too: the
 app uses the CLI's session file. Choosing a folder uses the system dialog, followed by the same
@@ -273,7 +273,7 @@ a new Space with that folder chosen, and asks the same consent. Folders the app 
 when it starts again (`~/.local/state/cohub/host/runtimes.json`); `runtime down` from anywhere
 counts as a disconnect, and one since bound to another folder is forgotten rather than rebound.
 Quitting the app leaves its Runtimes running, as closing a terminal leaves `up -d`; they run from
-a per-version copy of the bundled CLI and sandboxd outside the app, so an update never stops or swaps their code, and a first connection downloads nothing. The menu bar (macOS) or notification area (Windows) lists connected folders. Signing out from the app stops the account's Runtimes and keeps their folders for the next sign-in.
+a per-version copy of the bundled CLI and sandboxd outside the app, so an update never stops or swaps their code, and a first connection downloads nothing. The menu bar (macOS), notification area (Windows) or the window's header bar menu (Linux) lists connected folders. Signing out from the app stops the account's Runtimes and keeps their folders for the next sign-in.
 
 While work runs, the machine stays awake: sandboxd holds off idle sleep (`IOPMAssertion`,
 `SetThreadExecutionState`) for as long as it serves requests or runs processes and for five minutes after,
@@ -285,11 +285,11 @@ A GUI app starts with a minimal environment, so the CLI resolves Harnesses on th
 user's login shell. Cohub settings from that shell (`COHUB_*`, `ENV`) are never inherited.
 See [Native host bridge](native-host-bridge.md#desktop) and `apps/desktop/README.md`.
 
-macOS 与 Windows 桌面应用通过内置的 CLI 提供本地 Runtime：应用中连接的文件夹就是普通的 `runtime up -d`，终端的
+macOS、Windows 与 Linux 桌面应用通过内置的 CLI 提供本地 Runtime：应用中连接的文件夹就是普通的 `runtime up -d`，终端的
 `runtime status`、`logs`、`down` 都能看到它，应用也能看到终端启动的 Runtime；登录同样共享 CLI 的会话文件。
 选择文件夹使用系统对话框，随后询问与 `runtime up` 相同的授权，确认后才创建 Space，再以 `--yes` 启动（不共享屏幕）。
 文件夹也可来自系统：拖到 Dock 图标、从访达打开，或文件资源管理器的“在 Cohub 中打开”，都会进入新建 Space 并预选该文件夹，同样需要授权。应用连接且未断开的文件夹会在应用再次启动时重新连接；在任何地方执行 `runtime down` 都视为断开。
-已改绑到其他文件夹的 Space 会被遗忘而不会改回。退出应用不会停止其 Runtime；Runtime 运行在应用外按版本复制的 CLI 中，更新应用不会停止或替换其代码。
+已改绑到其他文件夹的 Space 会被遗忘而不会改回。退出应用不会停止其 Runtime；Runtime 运行在应用外按版本复制的 CLI 中，更新应用不会停止或替换其代码。菜单栏（macOS）、通知区域（Windows）或窗口标题栏菜单（Linux）会列出已连接的文件夹。
 应用内退出登录会停止该账号的 Runtime，文件夹保留到下次登录。任务运行期间 sandboxd 会阻止系统因闲置而休眠（屏幕仍可熄灭，合盖仍会休眠），结束五分钟后释放，可在“设置 → 通用”中关闭。
 GUI 应用的环境变量很少，因此 CLI 会从用户的登录 Shell 解析 Harness 的 PATH，但不继承其中的 `COHUB_*` 与 `ENV`。
 
