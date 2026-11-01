@@ -283,8 +283,14 @@ class HostBridge(
             val spaceId = requireSpaceId(params)
             val serving = requireRuntime().instances.value.any { it.spaceId == spaceId && isRunning(it.state) }
             if (!serving) throw IllegalStateException("This device does not serve that Space")
-            val grant = actions.requestScreenCapture() ?: throw CancellationSignal("Screen capture was not granted")
-            requireDisplay().awaitShare(spaceId) { actions.startSharing(spaceId, grant) }.toJson()
+            requireDisplay().share(spaceId).toJson()
+        }
+
+        HostProtocol.Methods.DISPLAY_SETUP -> {
+            val display = requireDisplay()
+            display.phone.setup()
+            actions.openDeveloperSettings()
+            display.status.value.toJson()
         }
 
         HostProtocol.Methods.DISPLAY_STOP -> {
@@ -292,7 +298,7 @@ class HostBridge(
             requireDisplay().status.value.toJson()
         }
 
-        HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS -> JsonPrimitive(actions.openControlSettings())
+        HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS -> JsonPrimitive(display?.phone?.enableControl() == true || actions.openControlSettings())
 
         HostProtocol.Methods.WORKSPACE_CALL -> {
             val workspaces = workspaces ?: throw WorkspaceUnavailable("This device cannot serve a Space")
@@ -364,6 +370,7 @@ class HostBridge(
             HostProtocol.Methods.DISPLAY_SHARE,
             HostProtocol.Methods.DISPLAY_STOP,
             HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS,
+            HostProtocol.Methods.DISPLAY_SETUP,
         )
         val RUNTIME_METHODS = setOf(
             HostProtocol.Methods.RUNTIME_LIST,
@@ -420,11 +427,9 @@ interface HostActions {
 
     suspend fun prepareRuntime(): Boolean
 
-    suspend fun requestScreenCapture(): ScreenCaptureGrant?
-
-    fun startSharing(spaceId: String, grant: ScreenCaptureGrant)
-
     fun openControlSettings(): Boolean
+
+    fun openDeveloperSettings(): Boolean
 
     fun permissions(): HostPermissions
 
@@ -432,5 +437,3 @@ interface HostActions {
 
     suspend fun readSharedFile(id: String, index: Int): String
 }
-
-class ScreenCaptureGrant(val resultCode: Int, val data: android.content.Intent)

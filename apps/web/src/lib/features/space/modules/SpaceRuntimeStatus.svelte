@@ -16,6 +16,7 @@ import HostPermissionNotice from "$lib/components/HostPermissionNotice.svelte";
 import {
 	deviceDisplayStatus,
 	openDeviceControlSettings,
+	setupPhoneControl,
 	shareDeviceDisplay,
 	stopDeviceDisplay,
 } from "$lib/device-display.svelte";
@@ -131,6 +132,18 @@ const displays = $derived(
 );
 const screen = $derived(serving ? deviceDisplayStatus() : null);
 const sharingHere = $derived(screen?.sharedWith === spaceId);
+const phoneControl = $derived(screen?.phoneControl ?? null);
+const phoneReady = $derived(!phoneControl || phoneControl.stage === "ready");
+const phoneControlLabel = $derived.by(() => {
+	switch (phoneControl?.stage) {
+		case "ready": return m.runtime_phone_control_ready({}, { locale });
+		case "pairing": return m.runtime_phone_control_pairing({}, { locale });
+		case "starting": return m.runtime_phone_control_starting({}, { locale });
+		case "stopped": return m.runtime_phone_control_stopped({}, { locale });
+		default: return m.runtime_phone_control_off({}, { locale });
+	}
+});
+const canSetupPhone = $derived(phoneControl?.stage === "off" || phoneControl?.stage === "pairing" || phoneControl?.stage === "stopped");
 const screenLabel = $derived(
 	sharingHere
 		? screen?.control
@@ -408,6 +421,7 @@ $effect(() => {
 					<div class="runtime-row"><dt>{m.runtime_workspace_bridge({}, { locale })}</dt><dd>{bridgeLabel}</dd></div>
 					<div class="runtime-row"><dt>{m.runtime_file_watcher({}, { locale })}</dt><dd>{watcherLabel}{#if watcher}<span class="runtime-meta block">{watcher.backend} · {ageLabel(Date.parse(watcher.observedAt))}</span>{/if}</dd></div>
 					{#if deviceInstances}<div class="runtime-row"><dt>{m.runtime_this_device({}, { locale })}</dt><dd class:is-failed={device?.state === "error"}>{deviceLabel}{#if device}<span class="runtime-meta block">{device.label}</span>{/if}</dd></div>{/if}
+					{#if phoneControl}<div class="runtime-row"><dt>{m.runtime_phone_control({}, { locale })}</dt><dd>{phoneControlLabel}</dd></div>{/if}
 					{#if screen}<div class="runtime-row"><dt>{m.runtime_this_screen({}, { locale })}</dt><dd>{screenLabel}{#if screen.sharedWith && !sharingHere}<span class="runtime-meta block">{m.runtime_display_shared_elsewhere({}, { locale })}</span>{/if}</dd></div>{/if}
 				</dl>
 				{#if displays.length > 0}
@@ -415,7 +429,7 @@ $effect(() => {
 						<h3>{m.runtime_displays({}, { locale })}</h3>
 						{#each displays as item (item.id)}
 							<div class="runtime-display">
-								<span class="runtime-display-name">{item.name || item.id}<span class="runtime-meta">{item.width}×{item.height}</span></span>
+								<span class="runtime-display-name">{item.kind === "agent" ? m.runtime_display_agent({}, { locale }) : item.name || item.id}<span class="runtime-meta">{item.held ? m.runtime_display_held({}, { locale }) : item.activity ? item.activity.label ? m.runtime_display_activity({ label: item.activity.label }, { locale }) : m.runtime_display_working({}, { locale }) : `${item.width}×${item.height}`}</span></span>
 								<DisplayViewers viewers={item.viewers} {people} />
 								{#if canView && onOpenDisplay}<button type="button" class="runtime-display-open" onclick={() => openDisplay(item.id)}>{m.runtime_display_open({}, { locale })}</button>{/if}
 							</div>
@@ -432,10 +446,17 @@ $effect(() => {
 					{#if screen?.error === "screen_recording"}<div class="runtime-hint"><HostPermissionNotice kind="screen" message={m.runtime_display_needs_recording({}, { locale })} /></div>{/if}
 					<div class="runtime-device-actions">
 						{#if serving}
-							{#if screen}
+							{#if canSetupPhone}
+								<p class="runtime-meta w-full">{phoneControl?.stage === "pairing" ? m.runtime_phone_control_steps({}, { locale }) : m.runtime_phone_control_hint({}, { locale })}</p>
+								<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(setupPhoneControl)}>{m.runtime_phone_control_setup({}, { locale })}</button>
+							{/if}
+							{#if screen && phoneReady && !screen.control}
+								<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(openDeviceControlSettings)}>{m.runtime_display_allow_control({}, { locale })}</button>
+								{#if !phoneControl}<p class="runtime-meta w-full">{hostPlatform() === "android" ? m.runtime_display_control_hint({}, { locale }) : m.runtime_display_control_hint_desktop({}, { locale })}</p>{/if}
+							{/if}
+							{#if screen && phoneReady}
 								{#if sharingHere}
 									<button type="button" class="runtime-device-action" data-secondary="true" disabled={deviceBusy} onclick={() => void updateScreen(stopDeviceDisplay)}>{m.runtime_display_stop({}, { locale })}</button>
-									{#if !screen.control}<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(openDeviceControlSettings)}>{m.runtime_display_allow_control({}, { locale })}</button><p class="runtime-meta w-full">{hostPlatform() === "android" ? m.runtime_display_control_hint({}, { locale }) : m.runtime_display_control_hint_desktop({}, { locale })}</p>{/if}
 								{:else}
 									<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(() => shareDeviceDisplay(spaceId))}>{m.runtime_display_share({}, { locale })}</button>
 								{/if}

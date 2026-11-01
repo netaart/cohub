@@ -62,3 +62,7 @@ export async function stopDeviceDisplay(): Promise<void> {
 export async function openDeviceControlSettings(): Promise<void> {
 	await callHost("display.openControlSettings");
 }
+
+export async function setupPhoneControl(): Promise<void> {
+	status = await callHost("display.setup");
+}

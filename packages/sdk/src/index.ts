@@ -31,21 +31,31 @@ export { DesktopCommandsApi } from "./apis/desktop-commands.js";
 export { SpaceDisplaysApi } from "./apis/displays.js";
 export { DisplayConnection, connectDisplay } from "./display-session.js";
 export type { ConnectDisplayOptions, DisplayConnectionState, DisplayConnectionStats } from "./display-session.js";
-export { compileDisplayActions, DISPLAY_ACTION_TYPES, DISPLAY_ELEMENT_REF_PATTERN, DISPLAY_SYSTEM_ACTIONS, DisplayActionError, normalizeDisplayPoint } from "@cohub/protocol";
+export { compileDisplayPlan, DISPLAY_ACTION_TYPES, DISPLAY_ELEMENT_REF_PATTERN, DISPLAY_ELEMENT_ROLES, DISPLAY_SYSTEM_ACTIONS, DisplayActionError, normalizeDisplayPoint } from "@cohub/protocol";
 export type {
   DisplayAction,
+  DisplayActParams,
+  DisplayActResult,
+  DisplayActStep,
+  DisplayActStop,
+  DisplayActivity,
+  DisplayApp,
+  DisplayApps,
   DisplayCapture,
   DisplayCaptureParams,
   DisplayElement,
   DisplayFocus,
   DisplayInfo,
   DisplayInputEvent,
+  DisplayKind,
   DisplayList,
   DisplayPlatform,
   DisplaySession,
   DisplaySystemAction,
+  DisplayTarget,
   DisplayTree,
   DisplayTreeParams,
+  DisplayUntil,
   DisplayViewer,
   DisplayVirtualStart,
   RtcIceServer,

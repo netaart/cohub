@@ -13,6 +13,7 @@ type TreeParams struct {
 }
 
 type Tree struct {
+	App       string    `json:"app,omitempty"`
 	Width     int       `json:"width"`
 	Height    int       `json:"height"`
 	Elements  []Element `json:"elements"`
@@ -42,6 +43,9 @@ func (p *TreeParams) normalize() error {
 
 func (t Tree) sanitize(limit int) Tree {
 	clean := Tree{Width: max(0, t.Width), Height: max(0, t.Height), Truncated: t.Truncated, Elements: make([]Element, 0, min(len(t.Elements), limit))}
+	if appIDPattern.MatchString(t.App) {
+		clean.App = t.App
+	}
 	seen := map[string]bool{}
 	for _, element := range t.Elements {
 		if !elementRefPattern.MatchString(element.Ref) || seen[element.Ref] {

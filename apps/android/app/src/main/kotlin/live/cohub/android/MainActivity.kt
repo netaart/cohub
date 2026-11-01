@@ -4,8 +4,6 @@ import android.app.AlertDialog
 import android.app.AppOpsManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import android.media.projection.MediaProjectionConfig
-import android.media.projection.MediaProjectionManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -54,13 +52,11 @@ import live.cohub.android.host.HostProtocol
 import live.cohub.android.host.IncomingShare
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LauncherShortcuts
-import live.cohub.android.host.ScreenCaptureGrant
 import live.cohub.android.host.SurfaceListener
 import live.cohub.android.host.WebOrigin
 import live.cohub.android.host.WebSurface
 import live.cohub.android.host.WebWarmup
 import live.cohub.android.runtime.DeviceRuntime
-import live.cohub.android.runtime.RuntimeService
 import live.cohub.android.runtime.toJson
 import live.cohub.android.ui.ShellAppearance
 import live.cohub.android.ui.SurfaceContainer
@@ -82,8 +78,6 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var hostPermissions: HostPermissions
     private var incomingShare: IncomingShare? = null
     private var takenShare: IncomingShare? = null
-    private lateinit var screenCapture: ActivityResultLauncher<Intent>
-    private var pendingCapture: CompletableDeferred<ScreenCaptureGrant?>? = null
     private val app get() = application as CohubApplication
     private val hostPrefs by lazy { getSharedPreferences("cohub-host", MODE_PRIVATE) }
     private var pendingResult: CompletableDeferred<Unit>? = null
@@ -177,10 +171,6 @@ class MainActivity : ComponentActivity(), HostActions {
             pendingResult?.complete(Unit)
         }
         hostPermissions = HostPermissions(this, runtime.takeIf { it.available }?.let { it::hasStorageAccess }, ::prepareRuntime)
-        screenCapture = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            val data = result.data
-            pendingCapture?.complete(if (result.resultCode == RESULT_OK && data != null) ScreenCaptureGrant(result.resultCode, data) else null)
-        }
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -189,7 +179,7 @@ class MainActivity : ComponentActivity(), HostActions {
         }
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                app.display.status.collect { bridge.emit(HostProtocol.Events.DISPLAY_CHANGED, it.toJson()) }
+                app.display?.status?.collect { bridge.emit(HostProtocol.Events.DISPLAY_CHANGED, it.toJson()) }
             }
         }
 
@@ -436,23 +426,9 @@ class MainActivity : ComponentActivity(), HostActions {
         return allowed
     }
 
-    override suspend fun requestScreenCapture(): ScreenCaptureGrant? = preparing.withLock {
-        val manager = getSystemService(MediaProjectionManager::class.java)
-        // The whole display: a single app would break input coordinates.
-        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            manager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
-        } else {
-            manager.createScreenCaptureIntent()
-        }
-        val result = CompletableDeferred<ScreenCaptureGrant?>()
-        pendingCapture = result
-        screenCapture.launch(intent)
-        result.await().also { pendingCapture = null }
-    }
-
-    override fun startSharing(spaceId: String, grant: ScreenCaptureGrant) {
-        RuntimeService.share(this, spaceId, grant.resultCode, grant.data)
-    }
+    override fun openDeveloperSettings(): Boolean = runCatching {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.isSuccess
 
     override fun openControlSettings(): Boolean = runCatching {
         if (isControlRestrictionAcknowledged()) {

@@ -16,8 +16,18 @@ internal object DisplayVocabulary {
     const val MAX_TREE_ELEMENTS = 1000
     const val MAX_TREE_DEPTH = 64
     const val MAX_ELEMENT_TEXT = 500
+    const val MAX_LABEL_LEN = 120
+    const val MAX_ACT_STEPS = 32
+    const val MAX_ACT_MS = 90000
+    const val DEFAULT_UNTIL_MS = 8000
+    const val MAX_UNTIL_MS = 30000
+    const val MAX_WAIT_MS = 10000
+    const val MAX_CANDIDATES = 8
+    const val MAX_TARGET_NTH = 50
+    const val MAX_URL_LEN = 2048
+    const val MAX_APPS = 2000
     val SYSTEM_ACTIONS = setOf("back", "home", "recents", "notifications", "quickSettings", "lock")
-    val PERMISSIONS = setOf("screenRecording", "accessibility")
+    val PERMISSIONS = setOf("screenRecording", "accessibility", "phoneControl")
     val PLATFORMS = setOf("macos", "windows", "linux", "android")
     val POINTER_ACTIONS = setOf("down", "move", "up", "cancel")
     val KEY_ACTIONS = setOf("down", "up", "press")
@@ -25,4 +35,8 @@ internal object DisplayVocabulary {
     val ELEMENT_ROLES = setOf("window", "dialog", "group", "list", "listItem", "text", "heading", "image", "button", "link", "textField", "checkbox", "radio", "switch", "slider", "tab", "menu", "menuItem", "web", "other")
     val ELEMENT_STATES = setOf("focused", "selected", "checked", "disabled", "editable", "password", "scrollable", "expanded")
     val ELEMENT_ACTIONS = setOf("click", "longPress", "focus", "setText", "scrollForward", "scrollBackward")
+    val KINDS = setOf("screen", "agent")
+    val EFFECTS = setOf("none", "changed", "navigated")
+    val ACT_STOPS = setOf("not_found", "ambiguous", "timeout", "dialog", "app_changed", "failed", "preempted")
+    val BLOCKED_SCHEMES = setOf("file", "content", "data", "javascript", "intent")
 }

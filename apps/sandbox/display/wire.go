@@ -25,9 +25,12 @@ import (
 // JSON messages:
 //
 //	provider → sandboxd  {"type":"hello","version":1,"name":"android"}   first frame
-//	                     {"type":"displays","displays":[Info…]}          full snapshot, any time
+//	                     {"type":"displays","displays":[Info…],"virtual":…?}  full snapshot, any time
 //	                     {"type":"ended","stream":N,"error":{…}?}        a stream stopped on its own
 //	                     {"type":"focus","display":ID,"focus":Focus?}    the focused text field; none when absent
+//	                     {"type":"changed","display":ID}                 what it shows changed, while watched
+//	                     {"type":"hold","display":ID,"held":bool}        a person at the machine took it over, or handed it back
+//	                     {"type":"interrupt","display":ID}               a person at the machine stopped what agents do
 //	                     {"type":"reply","id":N,"result":…|"error":{…}}  answers a call
 //	sandboxd → provider  {"type":"call","id":N,"method":…,"params":…}    id 0 expects no reply
 //
@@ -35,7 +38,11 @@ import (
 // stream.stop {stream}; stream.update {stream, bitrate, fps?}; stream.keyframe
 // {stream}; capture CaptureParams → CaptureResult; tree TreeParams → Tree;
 // input InputBatch, refused once past its startBy; cancel {id}, sent when
-// sandboxd stops waiting for call id, which a provider may abandon.
+// sandboxd stops waiting for call id, which a provider may abandon. Displays
+// that say so also take: changes {display, watch}, answered once the provider
+// has seen the screen, to report changes while watched; launch {display, app}; open {display, url}; apps {display}
+// → {apps}; activity {display, activity?} (id 0), what agents do on it; and,
+// where the snapshot reports `virtual`, virtual.start {size?} and virtual.stop.
 const (
 	WireVersion = 1
 
@@ -60,6 +67,8 @@ type wireMessage struct {
 	Stream   uint32          `json:"stream,omitempty"`
 	Display  string          `json:"display,omitempty"`
 	Focus    *Focus          `json:"focus,omitempty"`
+	Held     bool            `json:"held,omitempty"`
+	Virtual  string          `json:"virtual,omitempty"`
 }
 
 type mediaFrame struct {

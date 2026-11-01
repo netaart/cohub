@@ -23,6 +23,11 @@ func TestSharedCases(t *testing.T) {
 			Info  Info                             `json:"info"`
 			Known struct{ System, Needs []string } `json:"known"`
 		} `json:"displays"`
+		ActSteps []struct {
+			Name  string `json:"name"`
+			Valid bool   `json:"valid"`
+			Step  Step   `json:"step"`
+		} `json:"actSteps"`
 		Elements []struct {
 			Name    string  `json:"name"`
 			Element Element `json:"element"`
@@ -37,6 +42,11 @@ func TestSharedCases(t *testing.T) {
 	}
 	for _, c := range fixture.InputBatches {
 		if err := (InputBatch{Events: c.Events}).Validate(); (err == nil) != c.Valid {
+			t.Errorf("%s: valid %v, got %v", c.Name, c.Valid, err)
+		}
+	}
+	for _, c := range fixture.ActSteps {
+		if err := c.Step.validate(); (err == nil) != c.Valid {
 			t.Errorf("%s: valid %v, got %v", c.Name, c.Valid, err)
 		}
 	}

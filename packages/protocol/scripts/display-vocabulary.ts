@@ -29,6 +29,10 @@ const lists = {
   elementRoles: display.DISPLAY_ELEMENT_ROLES,
   elementStates: display.DISPLAY_ELEMENT_STATES,
   elementActions: display.DISPLAY_ELEMENT_ACTIONS,
+  kinds: display.DISPLAY_KINDS,
+  effects: display.DISPLAY_EFFECTS,
+  actStops: display.DISPLAY_ACT_STOPS,
+  blockedSchemes: display.DISPLAY_URL_BLOCKED_SCHEMES,
 };
 
 const limits = {
@@ -45,11 +49,23 @@ const limits = {
   maxTreeElements: display.DISPLAY_TREE_MAX_ELEMENTS,
   maxTreeDepth: display.DISPLAY_TREE_MAX_DEPTH,
   maxElementText: display.DISPLAY_ELEMENT_TEXT_MAX,
+  maxLabelLen: display.DISPLAY_LABEL_MAX,
+  maxActSteps: display.DISPLAY_ACT_MAX_STEPS,
+  maxActMs: display.DISPLAY_ACT_MAX_MS,
+  defaultUntilMs: display.DISPLAY_UNTIL_DEFAULT_MS,
+  maxUntilMs: display.DISPLAY_UNTIL_MAX_MS,
+  maxWaitMs: display.DISPLAY_WAIT_MAX_MS,
+  maxCandidates: display.DISPLAY_ACT_CANDIDATES_MAX,
+  maxTargetNth: display.DISPLAY_TARGET_NTH_MAX,
+  maxUrlLen: display.DISPLAY_URL_MAX,
+  maxApps: display.DISPLAY_APPS_MAX,
 };
 
 const patterns = {
   displayIDPattern: display.DISPLAY_ID_PATTERN,
   elementRefPattern: display.DISPLAY_ELEMENT_REF_PATTERN,
+  appIDPattern: display.DISPLAY_APP_ID_PATTERN,
+  actorIDPattern: display.DISPLAY_ACTOR_ID_PATTERN,
 };
 
 const upper = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);

@@ -10,7 +10,16 @@ import live.cohub.android.auth.Account
 import live.cohub.android.auth.AuthConfig
 import live.cohub.android.auth.AuthSession
 import live.cohub.android.auth.SealedCredentialStore
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import live.cohub.android.display.Activity
 import live.cohub.android.display.DeviceDisplay
+import live.cohub.android.helper.PhoneControl
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import live.cohub.android.files.FileSaver
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LauncherShortcuts
@@ -20,6 +29,8 @@ import live.cohub.android.runtime.RuntimeInstance
 import okhttp3.OkHttpClient
 import java.net.Proxy
 import java.time.Duration
+
+private fun isUuid(value: String) = runCatching { java.util.UUID.fromString(value) }.getOrNull()?.toString() == value.lowercase()
 
 class CohubApplication : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -38,7 +49,7 @@ class CohubApplication : Application() {
             onAccountChanged = { previous, current ->
                 runtime.accountChanged()
                 if (previous is Account.SignedIn && current !is Account.SignedIn) {
-                    display.stop()
+                    display?.stop()
                     runtime.stopAll()
                     lastPage.clear()
                     LauncherShortcuts.clear(this)
@@ -57,7 +68,22 @@ class CohubApplication : Application() {
 
     val lastPage: LastPage by lazy { LastPage(this) }
 
-    val display: DeviceDisplay by lazy { DeviceDisplay(this, scope) }
+    val display: DeviceDisplay? by lazy {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) DeviceDisplay(this, scope, PhoneControl(this, scope), ::stopTurn) else null
+    }
+
+    private suspend fun stopTurn(activity: Activity) = withContext(Dispatchers.IO) {
+        val session = activity.sessionId?.takeIf(::isUuid) ?: return@withContext
+        val token = auth.accessToken() ?: return@withContext
+        val body = buildJsonObject { activity.turnId?.takeIf(::isUuid)?.let { put("turnId", it) } }.toString()
+        val url = BuildConfig.API_ORIGIN.toHttpUrl().newBuilder().addPathSegments("api/sessions").addPathSegment(session).addPathSegment("abort").build()
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $token")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+        http.newCall(request).execute().close()
+    }
 
     val files: FileSaver? by lazy {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) FileSaver(this, http, scope) { auth.accessToken() } else null

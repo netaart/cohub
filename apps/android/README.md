@@ -37,14 +37,21 @@ app/src/main/kotlin/live/cohub/android/
     RuntimeConnection.kt     /runtime/relay client (no local Harness)
     SandboxBridge.kt         supervises sandboxd over one folder
   display/
-    DeviceDisplay.kt         this screen: shared with one served Space, control state
-    ScreenCapture.kt         MediaProjection mirror → encoder, stills, rotation
+    DeviceDisplay.kt         the phone's screens as Spaces see them: shared, and each Space's agent screen
+    Screen.kt                one display through mirrors: stills, streams, change detection
     ScreenEncoder.kt         hardware H.264 from a Surface, live bitrate and key frames
     DisplayProvider.kt       the display wire protocol on a per-Space private socket
     DisplayWire.kt           frames, mirroring apps/sandbox/display/wire.go
-    ControlService.kt        AccessibilityService: gestures, text, system buttons
-    InputDriver.kt           live and scheduled input onto the service
-    GesturePlanner.kt        input → exact gestures; live drags as continued strokes
+    ControlService.kt        AccessibilityService: controls, window changes, focus, the overlay's host
+    ElementTree.kt           a display's windows as elements, the one in front first
+    InputDriver.kt           touches and keys injected into one display, text through accessibility
+    Overlay.kt               the floating indicator: what agents do, stop, take over
+  helper/
+    PhoneControl.kt          pairing with Wireless debugging, starting the helper, its state
+    HelperMain.kt            the helper process (shell user), started through app_process
+    Helper.kt                ICohubHelper: screens, mirrors, input, launching, as the shell
+    HelperHandoff.kt         the provider the helper hands its binder to
+    adb/                     just enough adb: pairing (SPAKE2), TLS, one exec
   ui/
     SurfaceContainer.kt      holds the WebView, pads insets it misreports
     ShellAppearance.kt       the page's edge color, persisted for cold start

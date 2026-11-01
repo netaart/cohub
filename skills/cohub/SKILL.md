@@ -180,23 +180,24 @@ cohub spaces files -h
 
 ## Displays
 
-A Space's machine can share a screen: the user's phone or computer, or a virtual screen in the sandbox. Prefer elements over pixels where `ls` lists `tree`: refs name exactly one element, and one that changed since is refused. Coordinates are pixels of your latest `capture`.
+A Space's machine can share a screen: the user's phone or computer, or a virtual screen. A phone gives agents an **agent screen** of their own (kind `agent`): apps run there in the background while the user keeps using the phone. Work in plans: one `act` runs several steps on the device, finds each target on the screen as it is, waits for the screen to settle (or for `until`), stops at the first surprise and prints the screen after. Targets by `--name` (what the element says) beat refs, which beat coordinates; coordinates are pixels of your latest image.
 
 ```bash
-cohub spaces displays ls                       # abilities; "Virtual screen: available" means `start` works
-cohub spaces displays start                    # virtual screen; GUI programs started afterwards draw on it
-cohub spaces displays capture -o /tmp/screen.jpg   # then `read` the image
-cohub spaces displays tree                     # e3.12 button "Send" (980,2210 120x80)
-cohub spaces displays tap e3.12 --screenshot /tmp/after.jpg
-cohub spaces displays type "hello" --into e3.4 # replaces the field's text
-cohub spaces displays tap <x> <y>              # --count 2 double-clicks, --button secondary right-clicks
-cohub spaces displays swipe <x1> <y1> <x2> <y2>
-cohub spaces displays type "<text>"            # into the focused field
-cohub spaces displays key Control+a            # shortcuts need a desktop
-cohub spaces displays press back               # system buttons a phone lists
+cohub spaces displays ls                             # kinds, abilities; "Virtual screen: available" means `start` works
+cohub spaces displays start                          # the phone's agent screen, or a sandbox's virtual screen
+cohub spaces displays apps                           # launchable app ids
+cohub spaces displays launch com.android.settings    # waits until it is in front
+cohub spaces displays tap --name "Wi-Fi" --label "Opening Wi-Fi settings"
+cohub spaces displays type "Ada" --name Search --role textField --until-text "Ada Lovelace"
+cohub spaces displays look                           # the screen now, without acting
+echo '[{"type":"tap","name":"Search"},{"type":"type","text":"Ada"},{"type":"key","key":"Enter","until":{"gone":"Loading"}},{"type":"tap","name":"Ada","nth":1}]' | cohub spaces displays act --label "Finding Ada"
+cohub spaces displays tap 540 1200                   # a point of the latest image, when nothing names it
+cohub spaces displays press back
 ```
 
-Look before acting and after each step (`--screenshot`, or a new `tree`; refs to an element that moved or changed are refused). If nothing is shared, ask the user to share their phone from its Runtime menu or their computer with `cohub runtime up --display`, or start a virtual screen yourself when one is available. If a display `needs` a permission, tell the user which one to grant.
+Each result lists what every step did (`none`, `changed`, `navigated`), why a plan stopped (`not_found`, `ambiguous` with candidates, `timeout`, `dialog`, `app_changed`, `failed`, `preempted`), the app in front and the tree; it saves an image when the tree misses much of the screen (`--screenshot` always), so `read` that file before acting by coordinates. Plan up to where you must judge what you see, then look and plan again. Give each plan a short `--label` in the user's language: the phone shows it while you work.
+
+A person always comes first: when someone takes over (on the phone or in the web), plans stop with `preempted`; ask them before going on. Do not pay, sign in or type secrets for the user: tell them to take over on the phone. If nothing is shared, ask the user to set up phone control in the Cohub app, or to run `cohub runtime up --display` on a computer, or start a virtual screen yourself when one is available. If a display `needs` something, tell the user what to grant.
 
 ## Labels
 

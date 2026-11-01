@@ -880,6 +880,10 @@ const problemCopy = $derived.by(() => {
 				<div class="display-pill">{m.display_view_only_permission({}, { locale })}</div>
 			{:else if notice}
 				<div class="display-pill" role="status">{notice}</div>
+			{:else if phase.kind === "live" && display?.held}
+				<div class="display-pill" role="status">{m.runtime_display_held({}, { locale })}</div>
+			{:else if phase.kind === "live" && display?.activity}
+				<div class="display-pill" role="status">{display.activity.label ? m.runtime_display_activity({ label: display.activity.label }, { locale }) : m.runtime_display_working({}, { locale })}</div>
 			{/if}
 		</div>
 

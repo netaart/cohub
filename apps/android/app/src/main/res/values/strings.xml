@@ -14,13 +14,27 @@
     </plurals>
     <string name="runtime_connecting">Connecting…</string>
     <string name="runtime_disconnect">Disconnect all</string>
-    <string name="display_sharing">Sharing this screen with a Space</string>
     <string name="display_sharing_control">Sharing this screen; the Space can control it</string>
     <string name="display_stop">Stop sharing</string>
     <string name="display_control_restricted">Tap ⋮ and choose Allow restricted settings, then turn on Cohub in Accessibility.</string>
-    <string name="display_control_description">Lets a Space you share this screen with read the controls on it, and tap, swipe and type. It only works while you share the screen, and only on what you can see.</string>
+    <string name="display_control_description">Lets agents in your Spaces read the controls on the screens they use: their own agent screen, or yours while you share it. It also shows what they are doing, so you can stop them or take over.</string>
     <string name="runtime_consent_title">Let Spaces work on this device?</string>
     <string name="runtime_consent_message">People and agents in a Space you connect a folder to can change the files in it and run commands as this app.</string>
     <string name="runtime_consent_allow">Continue</string>
     <string name="shortcut_new_chat">New chat</string>
+    <string name="phone_control_channel">Phone control</string>
+    <string name="phone_control_pairing_title">Pair Cohub with Wireless debugging</string>
+    <string name="phone_control_pairing_text">Enter the six-digit code shown under Pair device with pairing code.</string>
+    <string name="phone_control_pairing_wrong">That code didn\'t work. Enter the code shown now.</string>
+    <string name="phone_control_pairing_closed">The pairing dialog closed. Open Pair device with pairing code again, then enter its code.</string>
+    <string name="phone_control_pairing_code">Pairing code</string>
+    <string name="phone_control_pairing_enter">Enter code</string>
+    <string name="overlay_working">Agent is working</string>
+    <string name="overlay_activity">Agent: %1$s</string>
+    <string name="overlay_held">You\'re in control</string>
+    <string name="overlay_sharing">Sharing your screen</string>
+    <string name="overlay_stop">Stop</string>
+    <string name="overlay_stop_sharing">Stop sharing</string>
+    <string name="overlay_take_over">Take over</string>
+    <string name="overlay_hand_back">Hand back</string>
 </resources>

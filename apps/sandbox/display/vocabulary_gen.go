@@ -18,13 +18,25 @@ const (
 	MaxTreeElements     = 1000
 	MaxTreeDepth        = 64
 	MaxElementText      = 500
+	MaxLabelLen         = 120
+	MaxActSteps         = 32
+	MaxActMs            = 90000
+	DefaultUntilMs      = 8000
+	MaxUntilMs          = 30000
+	MaxWaitMs           = 10000
+	MaxCandidates       = 8
+	MaxTargetNth        = 50
+	MaxUrlLen           = 2048
+	MaxApps             = 2000
 )
 
 var (
 	displayIDPattern  = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 	elementRefPattern = regexp.MustCompile(`^e\d{1,9}\.\d{1,5}$`)
+	appIDPattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$`)
+	actorIDPattern    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	systemActions     = names("back", "home", "recents", "notifications", "quickSettings", "lock")
-	permissions       = names("screenRecording", "accessibility")
+	permissions       = names("screenRecording", "accessibility", "phoneControl")
 	platforms         = names("macos", "windows", "linux", "android")
 	pointerActions    = names("down", "move", "up", "cancel")
 	keyActions        = names("down", "up", "press")
@@ -32,4 +44,8 @@ var (
 	elementRoles      = names("window", "dialog", "group", "list", "listItem", "text", "heading", "image", "button", "link", "textField", "checkbox", "radio", "switch", "slider", "tab", "menu", "menuItem", "web", "other")
 	elementStates     = names("focused", "selected", "checked", "disabled", "editable", "password", "scrollable", "expanded")
 	elementActions    = names("click", "longPress", "focus", "setText", "scrollForward", "scrollBackward")
+	kinds             = names("screen", "agent")
+	effects           = names("none", "changed", "navigated")
+	actStops          = names("not_found", "ambiguous", "timeout", "dialog", "app_changed", "failed", "preempted")
+	blockedSchemes    = names("file", "content", "data", "javascript", "intent")
 )

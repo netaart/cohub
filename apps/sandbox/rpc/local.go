@@ -21,7 +21,7 @@ const LocalIdentity = "local"
 var LocalMethods = []string{
 	"fs.read", "fs.write", "fs.edit", "fs.mkdir", "fs.delete", "fs.move", "fs.stat",
 	"fs.ls", "fs.tree", "fs.find", "fs.grep", "fs.search",
-	"display.list", "display.capture", "display.tree", "display.input", "display.start", "display.stop",
+	"display.list", "display.capture", "display.tree", "display.input", "display.act", "display.apps", "display.start", "display.stop",
 }
 
 type FileVersion = fsWriteVersion

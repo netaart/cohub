@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { createLogger } from "@cohub/infra/logging";
 import {
+  displayActParamsSchema,
   displayCaptureParamsSchema,
   displayIdSchema,
   displayInputBatchSchema,
@@ -130,6 +131,34 @@ router.post("/:id/displays/:displayId/input", async (c) => {
   if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid input" }, 400);
   try {
     return c.json(await callSandboxRpc(auth.spaceId, "display.input", { ...parsed.data, display }));
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  }
+});
+
+router.post("/:id/displays/:displayId/act", async (c) => {
+  const auth = await authorize(c, "command.execute");
+  if (auth instanceof Response) return auth;
+  const display = displayParam(c);
+  if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
+  const parsed = displayActParamsSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid plan" }, 400);
+  try {
+    const result = await callSandboxRpc(auth.spaceId, "display.act", { ...parsed.data, display });
+    c.header("Cache-Control", "no-store");
+    return c.json(result);
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  }
+});
+
+router.get("/:id/displays/:displayId/apps", async (c) => {
+  const auth = await authorize(c, "sandbox.view");
+  if (auth instanceof Response) return auth;
+  const display = displayParam(c);
+  if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
+  try {
+    return c.json(await callSandboxRpc(auth.spaceId, "display.apps", { display }));
   } catch (error) {
     return displayError(c, error, auth.spaceId);
   }

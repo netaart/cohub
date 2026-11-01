@@ -44,7 +44,7 @@ type displayListResult struct {
 }
 
 func listDisplays(hub *display.Hub, virtual *display.Virtual) displayListResult {
-	result := displayListResult{Displays: hub.Displays()}
+	result := displayListResult{Displays: hub.Displays(), Virtual: hub.Virtual()}
 	if virtual != nil {
 		result.Virtual = "available"
 		if virtual.Running() {
@@ -80,23 +80,32 @@ func (d *Dispatcher) handleDisplay(request protocol.RPCRequest, identity string)
 		if !managesVirtualScreen(identity) {
 			return d.failed(request, "", "ACCESS_DENIED", "virtual screens are managed through the API")
 		}
-		if virtual == nil {
-			return d.failed(request, "", "UNAVAILABLE", "this sandbox cannot run a virtual screen")
-		}
 		starting := request.Method == "display.start"
-		if starting {
-			var params struct {
-				Size string `json:"size"`
-			}
-			if err = json.Unmarshal(request.Params, &params); err == nil {
-				err = virtual.Start(params.Size)
-			}
-		} else {
+		var params struct {
+			Size string `json:"size"`
+		}
+		_ = json.Unmarshal(request.Params, &params)
+		switch {
+		case virtual != nil && starting:
+			err = virtual.Start(params.Size)
+		case virtual != nil:
 			virtual.Stop()
+		case hub.Virtual() == "":
+			return d.failed(request, "", "UNAVAILABLE", "this machine cannot run a virtual screen")
+		case starting:
+			err = hub.StartVirtual(ctx, params.Size)
+		default:
+			err = hub.StopVirtual(ctx)
 		}
 		// Answer once the hub has followed, so the list matches the screen.
+		running := func() bool {
+			if virtual != nil {
+				return len(hub.Displays()) > 0
+			}
+			return hub.Virtual() == "running"
+		}
 		deadline := time.Now().Add(virtualStartTimeout)
-		for err == nil && (len(hub.Displays()) == 0) == starting && time.Now().Before(deadline) {
+		for err == nil && running() != starting && time.Now().Before(deadline) {
 			time.Sleep(50 * time.Millisecond)
 		}
 		result = listDisplays(hub, virtual)
@@ -111,6 +120,16 @@ func (d *Dispatcher) handleDisplay(request protocol.RPCRequest, identity string)
 			if err = hub.Input(ctx, batch, display.InputScripted); err == nil {
 				result = displayInputResult{Applied: len(batch.Events)}
 			}
+		}
+	case "display.act":
+		var params display.ActParams
+		if err = json.Unmarshal(request.Params, &params); err == nil {
+			result, err = hub.Act(ctx, params)
+		}
+	case "display.apps":
+		var params display.AppsParams
+		if err = json.Unmarshal(request.Params, &params); err == nil {
+			result, err = hub.Apps(ctx, params)
 		}
 	case "rtc.open", "rtc.close":
 		if !strings.HasPrefix(identity, rtcIdentityPrefix) {

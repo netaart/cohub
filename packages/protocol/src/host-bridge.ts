@@ -141,10 +141,17 @@ export const deviceFolderListingSchema = z.object({
 }).strict();
 export type DeviceFolderListing = z.infer<typeof deviceFolderListingSchema>;
 
+export const PHONE_CONTROL_STAGES = ["off", "pairing", "starting", "ready", "stopped"] as const;
+export type PhoneControlStage = (typeof PHONE_CONTROL_STAGES)[number];
+
 export const deviceDisplayStatusSchema = z.object({
   sharedWith: z.uuid().nullable(),
   control: z.boolean(),
   error: z.string().min(1).max(64).nullable(),
+  phoneControl: z.object({
+    stage: z.enum(PHONE_CONTROL_STAGES),
+    error: z.string().min(1).max(64).nullable(),
+  }).strict().optional(),
 }).strict();
 export type DeviceDisplayStatus = z.infer<typeof deviceDisplayStatusSchema>;
 
@@ -305,6 +312,7 @@ export const HOST_BRIDGE_METHODS = {
   "display.share": { params: z.object({ spaceId: z.uuid() }).strict(), result: deviceDisplayStatusSchema },
   "display.stop": { params: z.undefined(), result: deviceDisplayStatusSchema },
   "display.openControlSettings": { params: z.undefined(), result: z.boolean() },
+  "display.setup": { params: z.undefined(), result: deviceDisplayStatusSchema },
   "workspace.call": {
     params: z.object({
       spaceId: z.uuid(),

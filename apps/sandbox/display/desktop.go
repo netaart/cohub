@@ -89,6 +89,7 @@ type desktop struct {
 	streams   map[uint32]*desktopStream
 	stopFocus context.CancelFunc // set while someone watches
 	focusDone chan struct{}      // closed when the last follower has reported its end
+	unwatch   context.CancelFunc // set while sandboxd watches for changes
 }
 
 type desktopStream struct {
@@ -109,6 +110,7 @@ func (d *desktop) publish() bool {
 	if _, ok := d.screen.(FocusScreen); !ok {
 		info.Focus = false
 	}
+	info.Changes = info.Capture
 	d.mu.Lock()
 	changed := !info.equal(d.info)
 	resized := d.info.Width != info.Width || d.info.Height != info.Height
@@ -234,6 +236,29 @@ func (d *desktop) handle(ctx context.Context, method string, raw json.RawMessage
 			return nil, errorf(CodeUnavailable, "input is not permitted")
 		}
 		return nil, d.input(ctx, batch)
+	case "changes":
+		var params changesParams
+		_ = json.Unmarshal(raw, &params)
+		var first *image.Gray
+		if params.Watch && info.Changes {
+			if img, err := d.screen.Capture(ctx); err == nil {
+				first = thumbnail(img)
+			}
+		}
+		d.mu.Lock()
+		if d.unwatch != nil {
+			d.unwatch()
+			d.unwatch = nil
+		}
+		if params.Watch && info.Changes {
+			var watching context.Context
+			watching, d.unwatch = context.WithCancel(d.ctx)
+			go d.watchChanges(watching, info.ID, first)
+		}
+		d.mu.Unlock()
+		return nil, nil
+	case "activity":
+		return nil, nil
 	default:
 		return nil, errorf(CodeUnsupported, "unsupported method %q", method)
 	}

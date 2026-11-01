@@ -338,13 +338,14 @@ Android 应用像 `runtime up` 一样为手机上的文件夹提供本地 Runtim
 
 ### Screen sharing / 屏幕共享
 
-A device Runtime can also share the phone's screen with one Space it serves: people watch and steer
-it from the web over WebRTC, and the Space's agents use it through screenshots and input. Sharing
-needs the system's capture consent each time and lasts until the user stops it; control needs Cohub
-enabled in Accessibility settings. See [Displays](displays.md).
+A device Runtime can also give each Space it serves an agent screen of its own, where agents work in
+apps in the background while the person keeps using the phone, and share the phone's own screen with
+one Space: people watch and steer either from the web over WebRTC, and agents act on them in plans.
+Both need Android 14 and phone control, set up once by pairing with Wireless debugging. See
+[Displays](displays.md#android).
 
-设备 Runtime 还可以把手机屏幕共享给它所服务的一个 Space：人在 Web 端通过 WebRTC 查看和操作，Space 的 Agent 通过截图和输入使用它。
-每次共享都需要系统的录屏授权，直到用户停止；操作屏幕还需要在无障碍设置中启用 Cohub。详见 [Displays](displays.md)。
+设备 Runtime 还可以为它服务的每个 Space 提供一块 Agent 自己的屏幕：Agent 在后台操作 App，人照常使用手机；也可以把手机自己的屏幕共享给一个 Space。
+人在 Web 端通过 WebRTC 查看和操作，Agent 以计划（act）操作。两者都需要 Android 14 和“手机操作”，只需与无线调试配对一次。详见 [Displays](displays.md#android)。
 
 On a computer, `cohub runtime up --display` shares its screen the same way (macOS, Windows, or Linux with
 X11; asking first unless `--yes`), and `--display xvfb[:WxH]` gives a headless Linux machine a

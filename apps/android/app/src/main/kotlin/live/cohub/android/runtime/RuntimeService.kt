@@ -5,19 +5,15 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
-import android.media.projection.MediaProjectionManager
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import androidx.core.content.ContextCompat
-import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,9 +25,7 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import live.cohub.android.BuildConfig
 import live.cohub.android.CohubApplication
@@ -39,7 +33,6 @@ import live.cohub.android.MainActivity
 import live.cohub.android.R
 import live.cohub.android.auth.Account
 import live.cohub.android.display.DisplayStatus
-import live.cohub.android.display.launchDisplayProvider
 import live.cohub.android.host.WebOrigin
 import java.io.File
 import java.util.UUID
@@ -67,22 +60,20 @@ class RuntimeService : Service() {
         val runtime = app.runtime
         when (intent?.action) {
             ACTION_STOP_ALL -> {
-                app.display.stop()
+                app.display?.stop()
                 runtime.stopAll()
                 return START_NOT_STICKY
             }
             ACTION_STOP_SHARING -> {
-                app.display.stop()
+                app.display?.stop()
                 return START_STICKY
             }
         }
         createChannel()
-        val share = intent?.takeIf { it.action == ACTION_SHARE }?.let(ShareRequest::from)
-        if (!enterForeground(projecting = share != null || app.display.status.value.sharedWith != null)) {
+        if (!enterForeground()) {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (share != null) startSharing(share)
         if (watching == null) {
             getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(networkCallback)
             watching = scope.launch(Dispatchers.Main.immediate) {
@@ -90,65 +81,25 @@ class RuntimeService : Service() {
                 runtime.enabled.collect(::reconcile)
             }
             scope.launch {
-                combine(runtime.instances, app.display.status) { instances, display -> instances to display }
+                combine(runtime.instances, app.display?.status ?: flowOf(null)) { instances, display -> instances to display }
                     .collect { (instances, display) -> showNotification(instances, display) }
-            }
-            scope.launch(Dispatchers.Main.immediate) {
-                app.display.status.map { it.sharedWith != null }.distinctUntilChanged().drop(1)
-                    .collect { projecting -> if (!projecting) enterForeground(projecting = false) }
             }
         }
         return START_STICKY
     }
 
-    private fun enterForeground(projecting: Boolean): Boolean = try {
-        val projection = if (projecting && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0
-        val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or projection
-        } else {
-            projection
-        }
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(app.runtime.instances.value, app.display.status.value), types)
+    private fun enterForeground(): Boolean = try {
+        val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(app.runtime.instances.value, app.display?.status?.value), types)
         true
     } catch (error: RuntimeException) {
         Log.w(TAG, "Runtime could not enter the foreground", error)
         false
     }
 
-    private fun startSharing(share: ShareRequest) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return app.display.fail()
-        val running = app.runtime.instances.value.any {
-            it.spaceId == share.spaceId && (it.state == RuntimeInstance.State.READY || it.state == RuntimeInstance.State.CONNECTING)
-        }
-        val projection = if (running) {
-            runCatching { getSystemService(MediaProjectionManager::class.java).getMediaProjection(share.resultCode, share.data) }
-                .onFailure { Log.w(TAG, "Screen capture was not granted", it) }
-                .getOrNull()
-        } else {
-            null
-        }
-        if (projection == null) {
-            app.display.fail()
-            enterForeground(projecting = false)
-            return
-        }
-        app.display.start(projection, share.spaceId)
-    }
-
-    private class ShareRequest(val spaceId: String, val resultCode: Int, val data: Intent) {
-        companion object {
-            fun from(intent: Intent): ShareRequest? {
-                val spaceId = intent.getStringExtra(EXTRA_SPACE_ID) ?: return null
-                val data = IntentCompat.getParcelableExtra(intent, EXTRA_DATA, Intent::class.java) ?: return null
-                return ShareRequest(spaceId, intent.getIntExtra(EXTRA_RESULT_CODE, 0), data)
-            }
-        }
-    }
-
     override fun onDestroy() {
         if (watching != null) runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(networkCallback) }
-        // A projection must not outlive the foreground service holding it.
-        app.display.stop()
+        app.display?.stop()
         scope.cancel()
         app.runtime.clearLive()
         super.onDestroy()
@@ -156,7 +107,7 @@ class RuntimeService : Service() {
 
     private fun reconcile(wanted: List<Binding>) {
         val runtime = app.runtime
-        app.display.status.value.sharedWith?.let { shared -> if (wanted.none { it.spaceId == shared }) app.display.stop() }
+        app.display?.status?.value?.sharedWith?.let { shared -> if (wanted.none { it.spaceId == shared }) app.display?.stop() }
         if (wanted.isEmpty() || !runtime.hasStorageAccess()) {
             if (wanted.isNotEmpty()) runtime.storageDenied()
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -222,7 +173,7 @@ class RuntimeService : Service() {
                     runtime.publish(spaceId, if (ready) RuntimeInstance.State.READY else RuntimeInstance.State.CONNECTING)
                 }
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) launchDisplayProvider(spaceId, displaySocket, app.display)
+        app.display?.provide(this, spaceId, displaySocket)
         launch { bridge.run(connection.ready) }
         try {
             connection.run()
@@ -234,17 +185,16 @@ class RuntimeService : Service() {
         }
     }
 
-    private fun showNotification(instances: List<RuntimeInstance>, display: DisplayStatus) {
+    private fun showNotification(instances: List<RuntimeInstance>, display: DisplayStatus?) {
         if (instances.none { it.state == RuntimeInstance.State.CONNECTING || it.state == RuntimeInstance.State.READY }) return
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(instances, display))
     }
 
-    private fun notification(instances: List<RuntimeInstance>, display: DisplayStatus): Notification {
+    private fun notification(instances: List<RuntimeInstance>, display: DisplayStatus?): Notification {
         val ready = instances.count { it.state == RuntimeInstance.State.READY }
-        val sharing = display.sharedWith != null
+        val sharing = display?.sharedWith != null
         val text = when {
-            sharing && display.control -> getString(R.string.display_sharing_control)
-            sharing -> getString(R.string.display_sharing)
+            sharing -> getString(R.string.display_sharing_control)
             ready > 0 -> resources.getQuantityString(R.plurals.runtime_ready, ready, ready)
             else -> getString(R.string.runtime_connecting)
         }
@@ -286,21 +236,6 @@ class RuntimeService : Service() {
         private const val CHANNEL_ID = "runtime"
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP_ALL = "live.cohub.android.runtime.STOP_ALL"
-        private const val ACTION_SHARE = "live.cohub.android.runtime.SHARE"
         private const val ACTION_STOP_SHARING = "live.cohub.android.runtime.STOP_SHARING"
-        private const val EXTRA_SPACE_ID = "spaceId"
-        private const val EXTRA_RESULT_CODE = "resultCode"
-        private const val EXTRA_DATA = "data"
-
-        fun share(context: Context, spaceId: String, resultCode: Int, data: Intent) {
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, RuntimeService::class.java)
-                    .setAction(ACTION_SHARE)
-                    .putExtra(EXTRA_SPACE_ID, spaceId)
-                    .putExtra(EXTRA_RESULT_CODE, resultCode)
-                    .putExtra(EXTRA_DATA, data),
-            )
-        }
     }
 }

@@ -39,7 +39,11 @@ var reconnectDelays = []time.Duration{250 * time.Millisecond, time.Second, 2 * t
 
 var ErrStreamEnded = errors.New("display stream ended")
 
-var errPreempted = errorf(CodePreempted, "a person is controlling the display; look at it again before acting")
+var (
+	errPreempted   = errorf(CodePreempted, "a person is controlling the display; look at it again before acting")
+	errHeld        = errorf(CodePreempted, "a person at the machine has taken the display over; wait until they hand it back")
+	errInterrupted = errorf(CodePreempted, "a person at the machine stopped this; ask them before going on")
+)
 
 type InputSource int
 
@@ -67,6 +71,11 @@ type Hub struct {
 	focusTo    map[int]func(string, *Focus)
 	liveAt     map[string]time.Time
 	scripted   map[*scriptedInput]struct{}
+	virtual    string                    // what the provider reports about a virtual screen it can start
+	changes    map[string]*changeLog     // by display, while watched
+	activity   map[string]*activityState // by display
+	held       map[string]bool           // displays a person at the machine took over
+	acting     map[string]chan struct{}  // one plan at a time per display
 }
 
 type scriptedInput struct {
@@ -86,6 +95,10 @@ func NewHub(dial Dialer, logger *slog.Logger) *Hub {
 		focusTo:   map[int]func(string, *Focus){},
 		liveAt:    map[string]time.Time{},
 		scripted:  map[*scriptedInput]struct{}{},
+		changes:   map[string]*changeLog{},
+		activity:  map[string]*activityState{},
+		held:      map[string]bool{},
+		acting:    map[string]chan struct{}{},
 	}
 }
 
@@ -225,9 +238,15 @@ func (h *Hub) setFocus(display string, focus *Focus) {
 	}
 }
 
-func (h *Hub) setDisplays(displays []Info) {
+func (h *Hub) setDisplays(displays []Info, virtual string) {
 	h.mu.Lock()
 	h.displays = displays
+	h.virtual = virtual
+	for id := range h.held {
+		if _, ok := h.displayLocked(id); !ok {
+			delete(h.held, id)
+		}
+	}
 	var gone []string
 	for id := range h.focus {
 		if _, ok := h.displayLocked(id); !ok {
@@ -247,6 +266,11 @@ func (h *Hub) publishUnlock() {
 		if current := h.streams[info.ID]; current != nil {
 			info.Viewers = current.viewersLocked()
 		}
+		if current := h.activity[info.ID]; current != nil {
+			activity := current.activity
+			info.Activity = &activity
+		}
+		info.Held = h.held[info.ID]
 		snapshot = append(snapshot, info)
 	}
 	if slices.EqualFunc(h.snapshot, snapshot, Info.equal) {
@@ -282,6 +306,7 @@ func (h *Hub) connect(ctx context.Context, dial Dialer) error {
 	h.mu.Lock()
 	h.conn = conn
 	h.mu.Unlock()
+	h.resume(conn)
 	defer h.disconnected(conn)
 
 	for {
@@ -313,9 +338,15 @@ func (h *Hub) handleMessage(conn *providerConn, message wireMessage) {
 				valid = append(valid, info.known())
 			}
 		}
-		h.setDisplays(valid)
+		h.setDisplays(valid, message.Virtual)
 	case "focus":
 		h.setFocus(message.Display, message.Focus.clean())
+	case "changed":
+		h.changed(message.Display)
+	case "hold":
+		h.hold(message.Display, message.Held)
+	case "interrupt":
+		h.interrupt(message.Display, errInterrupted)
 	case "reply":
 		conn.resolve(message)
 	case "ended":
@@ -342,7 +373,7 @@ func (h *Hub) disconnected(conn *providerConn) {
 	for _, id := range ids {
 		h.endStream(id, fmt.Errorf("%w: provider disconnected", ErrStreamEnded))
 	}
-	h.setDisplays(nil)
+	h.setDisplays(nil, "")
 }
 
 func (h *Hub) currentConn() (*providerConn, error) {
@@ -408,6 +439,24 @@ func (h *Hub) Input(ctx context.Context, batch InputBatch, source InputSource) e
 	if err := h.requireAbility(batch.Display, func(info Info) bool { return info.Input }, "input"); err != nil {
 		return err
 	}
+	switch source {
+	case InputLive:
+		h.mu.Lock()
+		h.liveAt[batch.Display] = time.Now()
+		h.mu.Unlock()
+		h.interrupt(batch.Display, errPreempted)
+	case InputScripted:
+		var release func()
+		var err error
+		if ctx, release, err = h.script(ctx, batch.Display); err != nil {
+			return err
+		}
+		defer release()
+	}
+	return h.send(ctx, batch)
+}
+
+func (h *Hub) send(ctx context.Context, batch InputBatch) error {
 	conn, err := h.currentConn()
 	if err != nil {
 		return err
@@ -418,34 +467,55 @@ func (h *Hub) Input(ctx context.Context, batch InputBatch, source InputSource) e
 			timeout = max(timeout, callTimeout+time.Duration(*event.T)*time.Millisecond)
 		}
 	}
-	h.mu.Lock()
-	switch source {
-	case InputLive:
-		h.liveAt[batch.Display] = time.Now()
-		for input := range h.scripted {
-			if input.display == batch.Display {
-				input.cancel(errPreempted)
-			}
-		}
-	case InputScripted:
-		if time.Since(h.liveAt[batch.Display]) < liveGrace {
-			h.mu.Unlock()
-			return errPreempted
-		}
-		var cancel context.CancelCauseFunc
-		ctx, cancel = context.WithCancelCause(ctx)
-		input := &scriptedInput{display: batch.Display, cancel: cancel}
-		h.scripted[input] = struct{}{}
-		defer func() {
-			h.mu.Lock()
-			delete(h.scripted, input)
-			h.mu.Unlock()
-			cancel(nil)
-		}()
-	}
-	h.mu.Unlock()
 	batch.StartBy = time.Now().Add(callTimeout).UnixMilli()
 	return conn.call(ctx, "input", batch, nil, timeout)
+}
+
+func (h *Hub) script(ctx context.Context, display string) (context.Context, func(), error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.held[display] {
+		return ctx, nil, errHeld
+	}
+	if time.Since(h.liveAt[display]) < liveGrace {
+		return ctx, nil, errPreempted
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	input := &scriptedInput{display: display, cancel: cancel}
+	h.scripted[input] = struct{}{}
+	return ctx, func() {
+		h.mu.Lock()
+		delete(h.scripted, input)
+		h.mu.Unlock()
+		cancel(nil)
+	}, nil
+}
+
+func (h *Hub) interrupt(display string, cause *Error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for input := range h.scripted {
+		if input.display == display {
+			input.cancel(cause)
+		}
+	}
+}
+
+func (h *Hub) hold(display string, held bool) {
+	h.mu.Lock()
+	if _, known := h.displayLocked(display); !known || h.held[display] == held {
+		h.mu.Unlock()
+		return
+	}
+	if held {
+		h.held[display] = true
+	} else {
+		delete(h.held, display)
+	}
+	h.publishUnlock()
+	if held {
+		h.interrupt(display, errHeld)
+	}
 }
 
 func (h *Hub) requireAbility(id string, has func(Info) bool, ability string) error {

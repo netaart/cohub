@@ -1,151 +1,332 @@
 package live.cohub.android.display
 
+import android.annotation.SuppressLint
 import android.content.Context
-import android.media.projection.MediaProjection
+import android.hardware.display.DisplayManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
+import android.view.Display
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import live.cohub.android.helper.Helper
+import live.cohub.android.helper.ICohubHelper
+import live.cohub.android.helper.PhoneControl
 import kotlin.math.roundToInt
 
-data class DisplayStatus(val sharedWith: String?, val control: Boolean, val error: String? = null) {
+data class DisplayStatus(val sharedWith: String?, val control: Boolean, val phoneControl: PhoneControl.State, val error: String? = null) {
     fun toJson(): JsonObject = buildJsonObject {
         put("sharedWith", sharedWith)
         put("control", control)
         put("error", error)
+        put("phoneControl", phoneControl.toJson())
     }
 }
 
-class DeviceDisplay(private val context: Context, private val scope: CoroutineScope) {
-    private class Share(val spaceId: String, val capture: ScreenCapture)
+data class Activity(val sessionId: String?, val turnId: String?, val label: String?)
 
-    private val share = MutableStateFlow<Share?>(null)
+@RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+internal class Served(val spaceId: String, val screen: Screen, val elements: ElementTree, val input: InputDriver) {
+    val inputs = Mutex()
+    @Volatile var activity: Activity? = null
+    @Volatile var held = false
+    @Volatile var watched = false
+    @Volatile var usedAt = SystemClock.elapsedRealtime()
+    @Volatile var takenTask = -1
+}
+
+internal class DisplayEvent(val spaceId: String, val message: JsonObject)
+
+@SuppressLint("NewApi")
+class DeviceDisplay(private val context: Context, private val scope: CoroutineScope, val phone: PhoneControl, private val stopTurn: suspend (Activity) -> Unit) {
+    private val shared = MutableStateFlow<Served?>(null)
+    private val agents = MutableStateFlow<Map<String, Served>>(emptyMap())
     private val failure = MutableStateFlow<String?>(null)
-    private val resized = MutableStateFlow(0)
-    /** Typed loosely: InputDriver needs Android 11, this class does not. */
-    private var driver: Any? = null
-    private val inputs = Mutex()
+    private val displays = context.getSystemService(DisplayManager::class.java)
+    private val events = MutableSharedFlow<DisplayEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    private val revision = MutableStateFlow(0)
 
-    val status: StateFlow<DisplayStatus> = combine(share, DisplayControl.service, failure) { current, control, error ->
-        DisplayStatus(current?.spaceId, control != null, error)
-    }.stateIn(scope, SharingStarted.Eagerly, DisplayStatus(null, DisplayControl.service.value != null))
+    internal val messages: SharedFlow<DisplayEvent> = events.asSharedFlow()
 
-    internal val changes: StateFlow<Any> = combine(share, DisplayControl.service, resized) { current, control, size ->
-        Triple(current, control, size)
-    }.stateIn(scope, SharingStarted.Eagerly, Unit)
+    val status: StateFlow<DisplayStatus> = combine(shared, DisplayControl.service, phone.state, failure) { current, control, phoneControl, error ->
+        DisplayStatus(current?.spaceId, control != null, phoneControl, error)
+    }.stateIn(scope, SharingStarted.Eagerly, DisplayStatus(null, DisplayControl.service.value != null, phone.state.value))
 
-    @RequiresApi(Build.VERSION_CODES.R)
-    fun start(projection: MediaProjection, spaceId: String) {
-        stop()
-        failure.value = null
-        val capture = try {
-            ScreenCapture(context, projection, onStopped = { stopped(spaceId) }, onResized = { resized.value += 1 })
-        } catch (error: Exception) {
-            Log.w(TAG, "Screen sharing could not start", error)
-            failure.value = "failed"
-            projection.stop()
-            return
+    internal val changes: StateFlow<Any> = combine(shared, agents, phone.helper, DisplayControl.service, revision) { a, b, c, d, e -> listOf(a, b, c, d, e) }
+        .stateIn(scope, SharingStarted.Eagerly, Unit)
+
+    internal fun served(): List<Served> = listOfNotNull(shared.value) + agents.value.values
+
+    init {
+        scope.launch { phone.helper.collect { helper -> if (helper == null) releaseAll() } }
+        scope.launch {
+            DisplayControl.windows.collect { displayId -> servedOn(displayId)?.takeIf { it.watched }?.let(::changed) }
         }
-        share.value = Share(spaceId, capture)
+        displays.registerDisplayListener(object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) = Unit
+            override fun onDisplayRemoved(displayId: Int) = Unit
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId != Display.DEFAULT_DISPLAY) return
+                shared.value?.screen?.resize(phoneSize())
+                bump()
+            }
+        }, Handler(Looper.getMainLooper()))
+        scope.launch {
+            while (isActive) {
+                delay(IDLE_CHECK_MS)
+                val idle = SystemClock.elapsedRealtime() - IDLE_MS
+                agents.value.values.filter { it.usedAt < idle && it.activity == null && !it.held }.forEach { stopAgent(it.spaceId) }
+            }
+        }
+    }
+
+    private fun servedOn(displayId: Int): Served? = served().firstOrNull { it.screen.displayId == displayId }
+
+    private fun changed(served: Served) {
+        events.tryEmit(DisplayEvent(served.spaceId, DisplayWire.changed(served.screen.id)))
+    }
+
+    private fun bump() = revision.update { it + 1 }
+
+    private fun requireHelper(): ICohubHelper =
+        phone.helper.value ?: throw DisplayError(DisplayError.UNAVAILABLE, "phone control is off; set it up in the Cohub app")
+
+    private fun open(spaceId: String, id: String, displayId: Int?, size: ScreenSize): Served {
+        val helper = requireHelper()
+        lateinit var served: Served
+        val frames = FrameChanges(size) { changed(served) }
+        val displayIdOrNew = displayId ?: helper.createDisplay("Cohub", size.width, size.height, size.densityDpi, frames.surface)
+        if (displayIdOrNew < 0) {
+            frames.close()
+            throw DisplayError(DisplayError.FAILED, "the phone could not start a screen for agents")
+        }
+        val screen = Screen(id, displayIdOrNew, size, helper, frames)
+        val elements = ElementTree()
+        served = Served(spaceId, screen, elements, InputDriver(helper, screen, elements) { DisplayControl.service.value })
+        return served
+    }
+
+    fun share(spaceId: String): DisplayStatus {
+        failure.value = null
+        stop()
+        try {
+            shared.value = open(spaceId, SCREEN_ID, Display.DEFAULT_DISPLAY, phoneSize())
+        } catch (error: DisplayError) {
+            failure.value = if (phone.helper.value == null) "phone_control_off" else "failed"
+        }
+        return status.value
     }
 
     fun stop() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) share.value?.capture?.stop()
+        shared.getAndUpdate { null }?.screen?.release()
     }
 
-    fun fail(code: String = "failed") {
-        failure.value = code
+    @Synchronized
+    internal fun startAgent(spaceId: String) {
+        if (agents.value.containsKey(spaceId)) return
+        val served = open(spaceId, AGENT_ID, null, phoneSize())
+        agents.update { it + (spaceId to served) }
     }
 
-    suspend fun awaitShare(spaceId: String, request: () -> Unit): DisplayStatus {
-        failure.value = null
-        request()
-        return withTimeout(SHARE_TIMEOUT_MS) { status.first { it.sharedWith == spaceId || it.error != null } }
+    internal fun disconnected(spaceId: String) {
+        served().filter { it.spaceId == spaceId }.forEach { served ->
+            served.watched = false
+            served.screen.watch(false)
+            served.activity = null
+        }
+        bump()
     }
 
-    private fun stopped(spaceId: String) {
-        val current = share.value
-        if (current?.spaceId == spaceId) share.value = null
+    internal fun stopAgent(spaceId: String) {
+        val served = agents.value[spaceId] ?: return
+        agents.update { it - spaceId }
+        served.screen.release()
     }
 
-    @RequiresApi(Build.VERSION_CODES.R)
+    private fun releaseAll() {
+        stop()
+        agents.getAndUpdate { emptyMap() }.values.forEach { it.screen.release() }
+    }
+
     internal fun displays(spaceId: String): List<DisplayInfo> {
-        val current = share.value?.takeIf { it.spaceId == spaceId && it.capture.active } ?: return emptyList()
-        val size = current.capture.size
+        if (phone.helper.value == null) return emptyList()
         val control = DisplayControl.service.value != null
-        val system = if (control) ControlService.GLOBAL_ACTIONS.keys.toList() else emptyList()
         val needs = if (control) emptyList() else listOf("accessibility")
-        return listOf(DisplayInfo(SCREEN_ID, Build.MODEL ?: "Android", size.width, size.height, stream = true, capture = true, input = control, system = system, platform = "android", tree = control, focus = control, needs = needs))
+        return listOfNotNull(shared.value?.takeIf { it.spaceId == spaceId }, agents.value[spaceId]).map { served ->
+            val size = served.screen.size
+            val agent = served.screen.agent
+            DisplayInfo(
+                id = served.screen.id,
+                name = android.os.Build.MODEL ?: "Android",
+                width = size.width, height = size.height, stream = true, capture = true, input = true,
+                system = InputDriver.systemButtons(agent), platform = "android", tree = control, focus = control, needs = needs,
+                kind = if (agent) "agent" else "screen", apps = agent, changes = true,
+            )
+        }
     }
 
-    @RequiresApi(Build.VERSION_CODES.R)
-    internal fun focus(spaceId: String): Flow<JsonObject?> = DisplayControl.focus.map { focused ->
-        val size = share.value?.takeIf { it.spaceId == spaceId }?.capture?.size
-        if (focused == null || size == null || size.width <= 0 || size.height <= 0) return@map null
-        fun unit(value: Int, extent: Int) = ((value.toFloat() / extent).coerceIn(0f, 1f) * 10_000).roundToInt() / 10_000.0
-        val bounds = focused.bounds
-        buildJsonObject {
-            put("bounds", JsonArray(listOf(
-                unit(bounds.left, size.width), unit(bounds.top, size.height),
-                unit(bounds.width(), size.width), unit(bounds.height(), size.height),
-            ).map(::JsonPrimitive)))
-            if (focused.password) put("password", true)
+    internal fun virtual(spaceId: String): String? = when {
+        phone.helper.value == null -> null
+        agents.value.containsKey(spaceId) -> "running"
+        else -> "available"
+    }
+
+    internal fun served(spaceId: String, id: String): Served {
+        val served = when (id) {
+            SCREEN_ID -> shared.value?.takeIf { it.spaceId == spaceId }
+            AGENT_ID -> agents.value[spaceId]
+            else -> null
+        } ?: throw DisplayError(DisplayError.NOT_FOUND, "display $id not found")
+        served.usedAt = SystemClock.elapsedRealtime()
+        return served
+    }
+
+    internal suspend fun input(spaceId: String, id: String, events: List<InputEvent>, startBy: Long) {
+        val served = served(spaceId, id)
+        served.inputs.withLock {
+            if (startBy > 0 && System.currentTimeMillis() > startBy) throw DisplayError(DisplayError.TIMEOUT, "the input waited too long to start")
+            withContext(Dispatchers.Default) { served.input.apply(events) }
+        }
+    }
+
+    internal suspend fun tree(spaceId: String, id: String, maxElements: Int): JsonObject {
+        val served = served(spaceId, id)
+        val service = DisplayControl.service.value
+            ?: throw DisplayError(DisplayError.UNAVAILABLE, "control is off; enable Cohub in Accessibility settings")
+        val size = served.screen.size
+        return withContext(Dispatchers.Default) { served.elements.read(service, served.screen.displayId, size.width, size.height, maxElements) }
+    }
+
+    internal fun focus(spaceId: String) = DisplayControl.focus.map { all ->
+        listOfNotNull(shared.value?.takeIf { it.spaceId == spaceId }, agents.value[spaceId]).associate { served ->
+            val size = served.screen.size
+            served.screen.id to all[served.screen.displayId]?.let { focused ->
+                fun unit(value: Int, extent: Int) = ((value.toFloat() / extent.coerceAtLeast(1)).coerceIn(0f, 1f) * 10_000).roundToInt() / 10_000.0
+                val bounds = focused.bounds
+                buildJsonObject {
+                    put("bounds", JsonArray(listOf(unit(bounds.left, size.width), unit(bounds.top, size.height), unit(bounds.width(), size.width), unit(bounds.height(), size.height)).map(::JsonPrimitive)))
+                    if (focused.password) put("password", true)
+                }
+            }
         }
     }.distinctUntilChanged()
 
-    @RequiresApi(Build.VERSION_CODES.R)
-    internal fun capture(spaceId: String, display: String): ScreenCapture {
-        if (display != SCREEN_ID) throw DisplayError(DisplayError.NOT_FOUND, "display $display not found")
-        return share.value?.takeIf { it.spaceId == spaceId && it.capture.active }?.capture
-            ?: throw DisplayError(DisplayError.UNAVAILABLE, "the screen is not shared with this Space")
-    }
-
-    @RequiresApi(Build.VERSION_CODES.R)
-    internal suspend fun input(spaceId: String, display: String, events: List<InputEvent>, startBy: Long) {
-        val capture = capture(spaceId, display)
-        inputs.withLock {
-            if (startBy > 0 && System.currentTimeMillis() > startBy) {
-                throw DisplayError(DisplayError.TIMEOUT, "the input waited too long to start")
-            }
-            inputDriver().apply(events, capture.size.width, capture.size.height)
+    internal fun launch(spaceId: String, id: String, app: String?, url: String?) {
+        val served = served(spaceId, id)
+        if (!served.screen.agent) throw DisplayError(DisplayError.UNSUPPORTED, "apps launch on the agent's screen")
+        val intent = if (app != null) {
+            context.packageManager.getLaunchIntentForPackage(app) ?: throw DisplayError(DisplayError.NOT_FOUND, "$app is not installed")
+        } else {
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+        }
+        when (requireHelper().start(served.screen.displayId, intent)) {
+            Helper.START_OK -> Unit
+            Helper.START_IN_USE -> throw DisplayError(DisplayError.BUSY, "the person is using ${app ?: "that app"} on the phone; ask them, or wait")
+            Helper.START_NOT_FOUND -> throw DisplayError(DisplayError.NOT_FOUND, "nothing on the phone opens ${app ?: url}")
+            else -> throw DisplayError(DisplayError.FAILED, "the phone could not open ${app ?: url}")
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.R)
-    internal suspend fun tree(spaceId: String, display: String, maxElements: Int): JsonObject {
-        val size = capture(spaceId, display).size
-        val service = DisplayControl.service.value
-            ?: throw DisplayError(DisplayError.UNAVAILABLE, "control is off; enable Cohub in Accessibility settings")
-        return withContext(Dispatchers.Default) { inputDriver().elements.read(service, size.width, size.height, maxElements) }
+    internal fun apps(): JsonObject {
+        val manager = context.packageManager
+        val launcher = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        val apps = manager.queryIntentActivities(launcher, 0)
+            .map { it.activityInfo.packageName to it.loadLabel(manager).toString() }
+            .distinctBy { it.first }
+            .filter { it.first != context.packageName }
+            .sortedBy { it.second.lowercase() }
+            .take(DisplayVocabulary.MAX_APPS)
+        return buildJsonObject {
+            put("apps", buildJsonArray { apps.forEach { (id, name) -> add(buildJsonObject { put("id", id); put("name", name) }) } })
+        }
     }
 
-    @RequiresApi(Build.VERSION_CODES.R)
-    private fun inputDriver(): InputDriver =
-        driver as? InputDriver ?: InputDriver(scope) { share.value?.capture?.size?.densityDpi ?: context.resources.displayMetrics.densityDpi }.also { driver = it }
+    internal fun watch(spaceId: String, id: String, on: Boolean) {
+        val served = runCatching { served(spaceId, id) }.getOrNull() ?: return
+        served.watched = on
+        served.screen.watch(on)
+    }
+
+    internal fun activity(spaceId: String, id: String, activity: Activity?) {
+        val served = runCatching { served(spaceId, id) }.getOrNull() ?: return
+        served.activity = activity
+        bump()
+    }
+
+    internal fun takeOver(served: Served) {
+        served.held = true
+        events.tryEmit(DisplayEvent(served.spaceId, DisplayWire.hold(served.screen.id, true)))
+        if (served.screen.agent) served.takenTask = phone.helper.value?.runCatching { moveTop(served.screen.displayId, Display.DEFAULT_DISPLAY) }?.getOrNull() ?: -1
+        bump()
+    }
+
+    internal fun handBack(served: Served) {
+        if (served.takenTask >= 0) phone.helper.value?.runCatching { moveTask(served.takenTask, served.screen.displayId) }
+        served.takenTask = -1
+        served.held = false
+        events.tryEmit(DisplayEvent(served.spaceId, DisplayWire.hold(served.screen.id, false)))
+        bump()
+    }
+
+    internal fun interrupt(served: Served) {
+        events.tryEmit(DisplayEvent(served.spaceId, DisplayWire.interrupt(served.screen.id)))
+        val activity = served.activity
+        served.activity = null
+        bump()
+        if (activity?.sessionId != null) scope.launch { runCatching { stopTurn(activity) }.onFailure { Log.w(TAG, "The Turn could not be stopped", it) } }
+    }
+
+    fun provide(scope: CoroutineScope, spaceId: String, socket: java.io.File) = scope.launch {
+        phone.start()
+        try {
+            DisplayProvider(spaceId, socket, this@DeviceDisplay).serve()
+        } catch (error: java.io.IOException) {
+            Log.w(TAG, "Display provider unavailable for $spaceId", error)
+        } finally {
+            stopAgent(spaceId)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun phoneSize(): ScreenSize {
+        val point = android.graphics.Point()
+        displays.getDisplay(Display.DEFAULT_DISPLAY).getRealSize(point)
+        return ScreenSize(point.x, point.y, context.resources.displayMetrics.densityDpi)
+    }
 
     companion object {
         const val SCREEN_ID = "screen"
-        private const val SHARE_TIMEOUT_MS = 10_000L
+        const val AGENT_ID = "agent"
+        private const val IDLE_MS = 10 * 60_000L
+        private const val IDLE_CHECK_MS = 60_000L
         private const val TAG = "CohubDisplay"
     }
 }

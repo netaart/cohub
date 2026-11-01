@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.annotation.RequiresApi
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -15,12 +16,14 @@ import kotlinx.serialization.json.put
 import kotlin.math.roundToInt
 
 /**
- * The active window as the elements of the display protocol. Each read is a
- * snapshot whose refs (`e<snapshot>.<index>`) stay valid until a few newer
- * reads replace it. Acting on a ref re-checks that its node still shows the
- * same element: lists recycle views, so a scrolled row must not be clicked.
+ * A display's windows as the elements of the display protocol, the one in
+ * front first: each window is an element at depth 0 (a `dialog` when it
+ * floats over another), its controls below it. Each read is a snapshot whose
+ * refs (`e<snapshot>.<index>`) stay valid until a few newer reads replace
+ * it. Acting on a ref re-checks that its node still shows the same element:
+ * lists recycle views, so a scrolled row must not be clicked.
  */
-@RequiresApi(Build.VERSION_CODES.R)
+@RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 internal class ElementTree {
     private class Entry(val node: AccessibilityNodeInfo, val signature: String)
     private class Snapshot(val id: Int, val entries: List<Entry>)
@@ -28,25 +31,30 @@ internal class ElementTree {
     private val snapshots = ArrayDeque<Snapshot>()
     private var sequence = 0
 
-    fun read(service: AccessibilityService, width: Int, height: Int, maxElements: Int): JsonObject {
-        val root = service.rootInActiveWindow ?: throw DisplayError(DisplayError.UNAVAILABLE, "no window is showing")
+    fun read(service: AccessibilityService, displayId: Int, width: Int, height: Int, maxElements: Int): JsonObject {
+        val windows = windowsOn(service, displayId)
         val id = synchronized(snapshots) { ++sequence }
         val nodes = mutableListOf<Entry>()
         val elements = mutableListOf<JsonObject>()
         var truncated = false
         val bounds = Rect()
 
+        fun add(node: AccessibilityNodeInfo, element: (String) -> JsonObject): Boolean {
+            if (elements.size == maxElements) {
+                truncated = true
+                return false
+            }
+            nodes += Entry(node, node.signature())
+            elements += element("e$id.${nodes.size}")
+            return true
+        }
+
         fun visit(node: AccessibilityNodeInfo, depth: Int) {
             if (!node.isVisibleToUser) return
-            val included = depth == 0 || node.isMeaningful()
+            val included = node.isMeaningful()
             if (included) {
-                if (elements.size == maxElements) {
-                    truncated = true
-                    return
-                }
-                nodes += Entry(node, node.signature())
                 node.getBoundsInScreen(bounds)
-                elements += node.toElement("e$id.${nodes.size}", depth, bounds, width, height)
+                if (!add(node) { ref -> node.toElement(ref, depth, bounds, width, height) }) return
             }
             for (index in 0 until node.childCount) {
                 if (truncated) return
@@ -54,12 +62,22 @@ internal class ElementTree {
             }
         }
 
-        visit(root, 0)
+        val lowest = windows.lastOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+        for (window in windows) {
+            if (truncated) break
+            val root = window.root ?: continue
+            window.getBoundsInScreen(bounds)
+            val floats = window !== lowest && bounds.width() * bounds.height() < width * height * FULL_SCREEN
+            val windowBounds = Rect(bounds)
+            if (!add(root) { ref -> window.toElement(ref, if (floats) "dialog" else "window", windowBounds, width, height) }) break
+            for (index in 0 until root.childCount) root.getChild(index)?.let { visit(it, 1) }
+        }
         synchronized(snapshots) {
             snapshots.addLast(Snapshot(id, nodes))
             while (snapshots.size > KEPT_SNAPSHOTS) snapshots.removeFirst()
         }
         return buildJsonObject {
+            windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }?.root?.packageName?.let { put("app", it.toString()) }
             put("width", width)
             put("height", height)
             put("elements", JsonArray(elements))
@@ -67,11 +85,27 @@ internal class ElementTree {
         }
     }
 
-    fun perform(service: ControlService, ref: String, action: String, text: String?) {
+    private fun windowsOn(service: AccessibilityService, displayId: Int): List<AccessibilityWindowInfo> {
+        val all = service.windowsOnAllDisplays[displayId].orEmpty()
+        val screen = all.maxOfOrNull { Rect().also(it::getBoundsInScreen).let { r -> r.width() * r.height() } } ?: 0
+        val shown = all.filter { window ->
+            when (window.type) {
+                AccessibilityWindowInfo.TYPE_APPLICATION -> true
+                AccessibilityWindowInfo.TYPE_SYSTEM -> Rect().also(window::getBoundsInScreen).let { it.width() * it.height() > screen * SYSTEM_PANEL }
+                else -> false
+            }
+        }
+        return if (shown.any { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }) shown else emptyList()
+    }
+
+    fun focused(service: AccessibilityService, displayId: Int): AccessibilityNodeInfo? =
+        service.windowsOnAllDisplays[displayId].orEmpty().firstNotNullOfOrNull { it.root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf(AccessibilityNodeInfo::isEditable) }
+
+    fun perform(input: InputDriver, ref: String, action: String, text: String?) {
         val node = resolve(ref)
         val done = when (action) {
-            "click" -> node.orAncestor { it.isClickable }?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: tap(service, node, TAP_MS)
-            "longPress" -> node.orAncestor { it.isLongClickable }?.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) ?: tap(service, node, LONG_PRESS_MS)
+            "click" -> node.orAncestor { it.isClickable }?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: tap(input, node, TAP_MS)
+            "longPress" -> node.orAncestor { it.isLongClickable }?.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) ?: tap(input, node, LONG_PRESS_MS)
             "focus" -> node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
             "setText" -> node.takeIf { it.isEditable }?.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text.orEmpty())
@@ -105,11 +139,10 @@ internal class ElementTree {
             .joinToString("\u0000") { it?.toString().orEmpty() }
     }
 
-    private fun tap(service: ControlService, node: AccessibilityNodeInfo, durationMs: Long): Boolean {
+    private fun tap(input: InputDriver, node: AccessibilityNodeInfo, durationMs: Long): Boolean {
         val bounds = Rect().also(node::getBoundsInScreen)
         if (bounds.isEmpty) return false
-        val center = Point(bounds.exactCenterX(), bounds.exactCenterY())
-        service.stroke(StrokePlan(listOf(center), durationMs), null, false) { _, _ -> }
+        input.press(bounds.exactCenterX(), bounds.exactCenterY(), durationMs)
         return true
     }
 
@@ -126,6 +159,8 @@ internal class ElementTree {
     private companion object {
         val REF = Regex("""e(\d{1,9})\.(\d{1,5})""")
         const val KEPT_SNAPSHOTS = 4
+        const val FULL_SCREEN = 0.9
+        const val SYSTEM_PANEL = 0.25
         const val ANCESTOR_DEPTH = 4
         const val TAP_MS = 60L
         const val LONG_PRESS_MS = 800L
@@ -134,6 +169,19 @@ internal class ElementTree {
     private fun AccessibilityNodeInfo.isMeaningful() =
         isClickable || isLongClickable || isEditable || isCheckable || isScrollable || isHeading ||
             !text.isNullOrBlank() || !contentDescription.isNullOrBlank()
+
+    private fun AccessibilityWindowInfo.toElement(ref: String, role: String, bounds: Rect, width: Int, height: Int): JsonObject = buildJsonObject {
+        put("ref", ref)
+        put("depth", 0)
+        put("role", role)
+        title?.toString()?.takeIf { it.isNotBlank() }?.let { put("name", it.take(DisplayVocabulary.MAX_ELEMENT_TEXT)) }
+        put("bounds", bounds.toUnits(width, height))
+    }
+
+    private fun Rect.toUnits(screenWidth: Int, screenHeight: Int): JsonArray {
+        fun unit(value: Int, extent: Int) = if (extent > 0) ((value.toFloat() / extent).coerceIn(0f, 1f) * 10_000).roundToInt() / 10_000.0 else 0.0
+        return JsonArray(listOf(unit(left, screenWidth), unit(top, screenHeight), unit(width(), screenWidth), unit(height(), screenHeight)).map(::JsonPrimitive))
+    }
 
     private fun AccessibilityNodeInfo.toElement(ref: String, depth: Int, bounds: Rect, width: Int, height: Int): JsonObject {
         val password = isPassword
@@ -158,26 +206,21 @@ internal class ElementTree {
             if (actionList.contains(AccessibilityAction.ACTION_SCROLL_FORWARD)) add("scrollForward")
             if (actionList.contains(AccessibilityAction.ACTION_SCROLL_BACKWARD)) add("scrollBackward")
         }
-        fun unit(value: Int, extent: Int) = if (extent > 0) ((value.toFloat() / extent).coerceIn(0f, 1f) * 10_000).roundToInt() / 10_000.0 else 0.0
         return buildJsonObject {
             put("ref", ref)
             put("depth", depth)
-            put("role", role(depth))
+            put("role", role())
             name?.let { put("name", it.take(DisplayVocabulary.MAX_ELEMENT_TEXT)) }
             value?.let { put("value", it.take(DisplayVocabulary.MAX_ELEMENT_TEXT)) }
-            put("bounds", JsonArray(listOf(
-                unit(bounds.left, width), unit(bounds.top, height),
-                unit(bounds.width(), width), unit(bounds.height(), height),
-            ).map(::JsonPrimitive)))
+            put("bounds", bounds.toUnits(width, height))
             if (states.isNotEmpty()) put("states", JsonArray(states.map(::JsonPrimitive)))
             if (actions.isNotEmpty()) put("actions", JsonArray(actions.map(::JsonPrimitive)))
         }
     }
 
-    private fun AccessibilityNodeInfo.role(depth: Int): String {
+    private fun AccessibilityNodeInfo.role(): String {
         val type = className?.toString()?.substringAfterLast('.').orEmpty()
         return when {
-            depth == 0 -> "window"
             isHeading -> "heading"
             isEditable || type.endsWith("EditText") -> "textField"
             type.endsWith("Switch") || type == "ToggleButton" -> "switch"

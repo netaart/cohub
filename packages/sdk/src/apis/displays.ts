@@ -1,4 +1,7 @@
 import type {
+  DisplayActParams,
+  DisplayActResult,
+  DisplayApps,
   DisplayCapture,
   DisplayCaptureParams,
   DisplayInputEvent,
@@ -88,6 +91,24 @@ export class SpaceDisplaysApi {
         body: JSON.stringify({ events }),
         signal: options.signal,
       }));
+  }
+
+  act(displayId: string, params: DisplayActParams, options: { signal?: AbortSignal } = {}) {
+    return this.serve("write", (workspace) => workspace.call("display.act", { ...params, display: displayId }, options.signal), () =>
+      this.transport.request<DisplayActResult>(this.path(displayId, "/act"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+        signal: options.signal,
+      }));
+  }
+
+  apps(displayId: string, options: { signal?: AbortSignal } = {}) {
+    return this.serve(
+      "read",
+      (workspace) => workspace.call("display.apps", { display: displayId }, options.signal),
+      () => this.transport.request<DisplayApps>(this.path(displayId, "/apps"), { signal: options.signal }),
+    );
   }
 
   iceServers(options: { signal?: AbortSignal } = {}): Promise<RtcIceServers> {

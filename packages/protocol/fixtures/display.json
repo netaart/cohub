@@ -288,5 +288,70 @@
     ]
    }
   }
+ ],
+ "actSteps": [
+  {
+   "name": "an element by name, typed into",
+   "valid": true,
+   "step": {
+    "type": "element",
+    "target": {
+     "name": "Message",
+     "role": "textField"
+    },
+    "action": "setText",
+    "text": "你好",
+    "label": "Writing to Ada"
+   }
+  },
+  {
+   "name": "a link with its own scheme",
+   "valid": true,
+   "step": {
+    "type": "open",
+    "url": "weixin://dl/chat"
+   }
+  },
+  {
+   "name": "a ref and a name",
+   "valid": false,
+   "step": {
+    "type": "element",
+    "target": {
+     "ref": "e3.12",
+     "name": "Send"
+    },
+    "action": "click"
+   }
+  },
+  {
+   "name": "setText without text",
+   "valid": false,
+   "step": {
+    "type": "element",
+    "target": {
+     "name": "Message"
+    },
+    "action": "setText"
+   }
+  },
+  {
+   "name": "an empty until",
+   "valid": false,
+   "step": {
+    "type": "wait",
+    "until": {
+     "timeoutMs": 100
+    }
+   }
+  },
+  {
+   "name": "a local file",
+   "valid": false,
+   "step": {
+    "type": "open",
+    "url": "file:///sdcard/notes.txt"
+   }
+  }
  ]
 }

@@ -12,3 +12,6 @@
 -keepclasseswithmembers class kotlinx.serialization.json.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# The phone helper starts by name through app_process, outside the app.
+-keep class live.cohub.android.helper.HelperMain { public static void main(java.lang.String[]); }

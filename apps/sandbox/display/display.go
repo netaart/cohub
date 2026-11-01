@@ -10,20 +10,31 @@ import (
 )
 
 type Info struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Width    int      `json:"width"`
-	Height   int      `json:"height"`
-	Stream   bool     `json:"stream"`
-	Capture  bool     `json:"capture"`
-	Input    bool     `json:"input"`
-	System   []string `json:"system,omitempty"`
-	Desktop  bool     `json:"desktop,omitempty"`
-	Platform string   `json:"platform,omitempty"`
-	Tree     bool     `json:"tree,omitempty"`
-	Focus    bool     `json:"focus,omitempty"` // reports the focused text field
-	Needs    []string `json:"needs,omitempty"`
-	Viewers  []Viewer `json:"viewers,omitempty"`
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Width    int       `json:"width"`
+	Height   int       `json:"height"`
+	Stream   bool      `json:"stream"`
+	Capture  bool      `json:"capture"`
+	Input    bool      `json:"input"`
+	System   []string  `json:"system,omitempty"`
+	Desktop  bool      `json:"desktop,omitempty"`
+	Platform string    `json:"platform,omitempty"`
+	Tree     bool      `json:"tree,omitempty"`
+	Focus    bool      `json:"focus,omitempty"` // reports the focused text field
+	Needs    []string  `json:"needs,omitempty"`
+	Kind     string    `json:"kind,omitempty"`
+	Apps     bool      `json:"apps,omitempty"`    // launches apps and opens links
+	Changes  bool      `json:"changes,omitempty"` // reports what it shows changing, while watched
+	Viewers  []Viewer  `json:"viewers,omitempty"`
+	Activity *Activity `json:"activity,omitempty"`
+	Held     bool      `json:"held,omitempty"` // a person at the machine took it over
+}
+
+type Activity struct {
+	SessionID string `json:"sessionId,omitempty"`
+	TurnID    string `json:"turnId,omitempty"`
+	Label     string `json:"label,omitempty"`
 }
 
 type Focus struct {
@@ -57,6 +68,13 @@ func unit(value float64) float64 {
 	return math.Round(min(max(value, 0), 1)*10000) / 10000
 }
 
+func (a *Activity) equal(other *Activity) bool {
+	if a == nil || other == nil {
+		return a == other
+	}
+	return *a == *other
+}
+
 type Viewer struct {
 	UserID  string `json:"userId"`
 	Control bool   `json:"control,omitempty"`
@@ -74,7 +92,10 @@ func (i Info) known() Info {
 	if !platforms[i.Platform] {
 		i.Platform = ""
 	}
-	i.Viewers = nil
+	if !kinds[i.Kind] {
+		i.Kind = ""
+	}
+	i.Viewers, i.Activity, i.Held = nil, nil, false
 	return i
 }
 
@@ -92,8 +113,9 @@ func (i Info) equal(other Info) bool {
 	return i.ID == other.ID && i.Name == other.Name && i.Width == other.Width && i.Height == other.Height &&
 		i.Stream == other.Stream && i.Capture == other.Capture && i.Input == other.Input &&
 		i.Desktop == other.Desktop && i.Platform == other.Platform && i.Tree == other.Tree && i.Focus == other.Focus &&
+		i.Kind == other.Kind && i.Apps == other.Apps && i.Changes == other.Changes && i.Held == other.Held &&
 		slices.Equal(i.System, other.System) && slices.Equal(i.Needs, other.Needs) &&
-		slices.Equal(i.Viewers, other.Viewers)
+		slices.Equal(i.Viewers, other.Viewers) && i.Activity.equal(other.Activity)
 }
 
 type Sample struct {

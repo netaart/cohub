@@ -1,5 +1,5 @@
 import type { SandboxSetupInfo } from "./setup.js";
-import type { DisplayCapture, DisplayCaptureParams, DisplayInputBatch, DisplayList, DisplayTree, DisplayTreeParams, DisplayVirtualStart } from "../display/index.js";
+import type { DisplayActParams, DisplayActResult, DisplayApps, DisplayCapture, DisplayCaptureParams, DisplayInputBatch, DisplayList, DisplayTree, DisplayTreeParams, DisplayVirtualStart } from "../display/index.js";
 import type { RtcIceServer } from "../rtc/index.js";
 import type { WORKSPACE_CANDIDATE_INDEX_FAMILY } from "../search/index.js";
 
@@ -40,6 +40,8 @@ export const RPC_METHODS = [
   "display.capture",
   "display.input",
   "display.tree",
+  "display.act",
+  "display.apps",
   "display.start",
   "display.stop",
   "rtc.open",
@@ -570,6 +572,14 @@ export type RpcRequestMap = {
   "display.tree": {
     params: DisplayRpcTreeParams;
     result: DisplayTree;
+  };
+  "display.act": {
+    params: DisplayActParams & { display: string };
+    result: DisplayActResult;
+  };
+  "display.apps": {
+    params: { display: string };
+    result: DisplayApps;
   };
   "display.start": {
     params: DisplayVirtualStart;

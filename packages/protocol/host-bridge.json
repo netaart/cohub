@@ -65,6 +65,7 @@
     "display.share",
     "display.stop",
     "display.openControlSettings",
+    "display.setup",
     "workspace.call"
   ],
   "events": [

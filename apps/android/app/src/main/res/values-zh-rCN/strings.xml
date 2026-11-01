@@ -13,13 +13,27 @@
     </plurals>
     <string name="runtime_connecting">正在连接…</string>
     <string name="runtime_disconnect">全部断开</string>
-    <string name="display_sharing">正在与 Space 共享此屏幕</string>
     <string name="display_sharing_control">正在共享此屏幕，Space 可以操作它</string>
     <string name="display_stop">停止共享</string>
     <string name="display_control_restricted">点右上角 ⋮，选择「允许受限设置」，再到无障碍中开启 Cohub。</string>
-    <string name="display_control_description">允许你共享屏幕的 Space 读取屏幕上的控件，并点按、滑动和输入。仅在你共享屏幕期间生效，也只作用于你能看到的内容。</string>
+    <string name="display_control_description">让你的 Space 中的 Agent 读取它们所用屏幕上的控件：它们自己的 Agent 屏幕，或你正在共享的屏幕。同时显示它们正在做什么，方便你随时停止或接手。</string>
     <string name="runtime_consent_title">允许 Space 在这台设备上工作？</string>
     <string name="runtime_consent_message">你连接文件夹的 Space 中的成员和 Agent 可以修改其中的文件，并以此应用的身份运行命令。</string>
     <string name="runtime_consent_allow">继续</string>
     <string name="shortcut_new_chat">新对话</string>
+    <string name="phone_control_channel">手机操作</string>
+    <string name="phone_control_pairing_title">将 Cohub 与无线调试配对</string>
+    <string name="phone_control_pairing_text">输入“使用配对码配对设备”中显示的六位配对码。</string>
+    <string name="phone_control_pairing_wrong">配对码无效，请输入当前显示的配对码。</string>
+    <string name="phone_control_pairing_closed">配对窗口已关闭。请重新打开“使用配对码配对设备”，再输入配对码。</string>
+    <string name="phone_control_pairing_code">配对码</string>
+    <string name="phone_control_pairing_enter">输入配对码</string>
+    <string name="overlay_working">Agent 正在操作</string>
+    <string name="overlay_activity">Agent：%1$s</string>
+    <string name="overlay_held">由你操作中</string>
+    <string name="overlay_sharing">正在共享屏幕</string>
+    <string name="overlay_stop">停止</string>
+    <string name="overlay_stop_sharing">停止共享</string>
+    <string name="overlay_take_over">我来</string>
+    <string name="overlay_hand_back">交还</string>
 </resources>

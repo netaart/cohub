@@ -20,6 +20,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -33,7 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TAG = "CohubDisplay"
 
-@RequiresApi(Build.VERSION_CODES.R)
+@RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 internal class DisplayProvider(
     private val spaceId: String,
     private val socket: File,
@@ -82,9 +83,9 @@ internal class DisplayProvider(
         private val streams = mutableMapOf<Int, Stream>()
         private val calls = ConcurrentHashMap<Long, Job>()
 
-        private inner class Stream(val id: Int, val capture: ScreenCapture) : StreamSink {
+        private inner class Stream(val id: Int, val capture: Screen) : StreamSink {
             @Volatile var open = true
-            private val unfollow = DisplayControl.followFocus()
+            private val unfollow = DisplayControl.followFocus(capture.displayId)
 
             fun close() {
                 open = false
@@ -119,10 +120,23 @@ internal class DisplayProvider(
                 }
             }
             val watcher = launch {
-                display.changes.collect { runCatching { writer.json(DisplayWire.displays(display.displays(spaceId))) } }
+                display.changes.collect {
+                    runCatching {
+                        writer.json(DisplayWire.displays(display.displays(spaceId), display.virtual(spaceId)))
+                        display.served().filter { it.spaceId == spaceId && it.held }.forEach { writer.json(DisplayWire.hold(it.screen.id, true)) }
+                    }
+                }
             }
             val focus = launch {
-                display.focus(spaceId).collect { runCatching { writer.json(DisplayWire.focus(DeviceDisplay.SCREEN_ID, it)) } }
+                var last = emptyMap<String, JsonObject?>()
+                display.focus(spaceId).collect { all ->
+                    for ((id, focus) in all) if (last[id] != focus) runCatching { writer.json(DisplayWire.focus(id, focus)) }
+                    for (id in last.keys - all.keys) runCatching { writer.json(DisplayWire.focus(id, null)) }
+                    last = all
+                }
+            }
+            val events = launch {
+                display.messages.collect { if (it.spaceId == spaceId) runCatching { writer.json(it.message) } }
             }
             try {
                 writer.json(DisplayWire.hello("android"))
@@ -136,9 +150,11 @@ internal class DisplayProvider(
             } finally {
                 watcher.cancel()
                 focus.cancel()
+                events.cancel()
                 closer.cancel()
                 val open = synchronized(streams) { streams.values.toList().also { streams.clear() } }
                 open.forEach { it.close() }
+                display.disconnected(spaceId)
                 runCatching { client.close() }
             }
         }
@@ -173,56 +189,77 @@ internal class DisplayProvider(
             if (id != 0L) runCatching { writer.json(reply) }
         }
 
-        private suspend fun dispatch(method: String?, params: JsonObject): JsonElement? = when (method) {
-            "stream.start" -> {
-                val stream = params.int("stream") ?: throw DisplayError(DisplayError.INVALID, "stream is required")
-                val capture = display.capture(spaceId, params.string("display").orEmpty())
-                val sink = Stream(stream, capture)
-                synchronized(streams) { streams.put(stream, sink) }?.close()
-                try {
-                    capture.subscribe(sink, params.int("bitrate") ?: ScreenCapture.DEFAULT_BITRATE)
-                } catch (error: DisplayError) {
-                    synchronized(streams) { streams.remove(stream, sink) }
-                    sink.close()
-                    throw error
+        private suspend fun dispatch(method: String?, params: JsonObject): JsonElement? {
+            val id = params.string("display").orEmpty()
+            return when (method) {
+                "stream.start" -> {
+                    val stream = params.int("stream") ?: throw DisplayError(DisplayError.INVALID, "stream is required")
+                    val screen = display.served(spaceId, id).screen
+                    val sink = Stream(stream, screen)
+                    synchronized(streams) { streams.put(stream, sink) }?.close()
+                    try {
+                        screen.subscribe(sink, params.int("bitrate") ?: Screen.DEFAULT_BITRATE)
+                    } catch (error: DisplayError) {
+                        synchronized(streams) { streams.remove(stream, sink) }
+                        sink.close()
+                        throw error
+                    }
+                    null
                 }
-                null
-            }
-            "stream.stop" -> {
-                synchronized(streams) { streams.remove(params.int("stream")) }?.close()
-                null
-            }
-            "stream.update" -> {
-                val sink = synchronized(streams) { streams[params.int("stream")] }
-                val bitrate = params.int("bitrate")
-                if (sink != null && bitrate != null) sink.capture.setBitrate(sink, bitrate)
-                null
-            }
-            "stream.keyframe" -> {
-                synchronized(streams) { streams[params.int("stream")] }?.capture?.requestKeyFrame()
-                null
-            }
-            "capture" -> {
-                val capture = display.capture(spaceId, params.string("display").orEmpty())
-                    .capture(params.string("format") ?: "jpeg", params.int("quality") ?: 90, params.int("maxSize") ?: 0)
-                buildJsonObject {
-                    put("mimeType", capture.mimeType)
-                    put("data", capture.base64)
-                    put("width", capture.width)
-                    put("height", capture.height)
+                "stream.stop" -> {
+                    synchronized(streams) { streams.remove(params.int("stream")) }?.close()
+                    null
                 }
+                "stream.update" -> {
+                    val sink = synchronized(streams) { streams[params.int("stream")] }
+                    val bitrate = params.int("bitrate")
+                    if (sink != null && bitrate != null) sink.capture.setBitrate(sink, bitrate)
+                    null
+                }
+                "stream.keyframe" -> {
+                    synchronized(streams) { streams[params.int("stream")] }?.capture?.requestKeyFrame()
+                    null
+                }
+                "capture" -> {
+                    val capture = display.served(spaceId, id).screen
+                        .capture(params.string("format") ?: "jpeg", params.int("quality") ?: 90, params.int("maxSize") ?: 0)
+                    buildJsonObject {
+                        put("mimeType", capture.mimeType)
+                        put("data", capture.base64)
+                        put("width", capture.width)
+                        put("height", capture.height)
+                    }
+                }
+                "tree" -> display.tree(spaceId, id, (params.int("maxElements") ?: DisplayVocabulary.DEFAULT_TREE_ELEMENTS).coerceIn(1, DisplayVocabulary.MAX_TREE_ELEMENTS))
+                "input" -> {
+                    val events = params["events"] as? JsonArray ?: throw DisplayError(DisplayError.INVALID, "events are required")
+                    display.input(spaceId, id, InputEvent.parseAll(events), params.long("startBy") ?: 0L)
+                    JsonNull
+                }
+                "changes" -> {
+                    display.watch(spaceId, id, params["watch"]?.jsonPrimitive?.booleanOrNull == true)
+                    JsonNull
+                }
+                "activity" -> {
+                    val activity = params["activity"] as? JsonObject
+                    display.activity(spaceId, id, activity?.let { Activity(it.string("sessionId"), it.string("turnId"), it.string("label")) })
+                    null
+                }
+                "launch", "open" -> {
+                    display.launch(spaceId, id, params.string("app"), params.string("url"))
+                    JsonNull
+                }
+                "apps" -> display.apps()
+                "virtual.start" -> {
+                    display.startAgent(spaceId)
+                    JsonNull
+                }
+                "virtual.stop" -> {
+                    display.stopAgent(spaceId)
+                    JsonNull
+                }
+                else -> throw DisplayError(DisplayError.UNSUPPORTED, "unsupported method $method")
             }
-            "tree" -> display.tree(
-                spaceId,
-                params.string("display").orEmpty(),
-                (params.int("maxElements") ?: DisplayVocabulary.DEFAULT_TREE_ELEMENTS).coerceIn(1, DisplayVocabulary.MAX_TREE_ELEMENTS),
-            )
-            "input" -> {
-                val events = params["events"] as? JsonArray ?: throw DisplayError(DisplayError.INVALID, "events are required")
-                display.input(spaceId, params.string("display").orEmpty(), InputEvent.parseAll(events), params.long("startBy") ?: 0L)
-                JsonNull
-            }
-            else -> throw DisplayError(DisplayError.UNSUPPORTED, "unsupported method $method")
         }
     }
 }
@@ -232,13 +269,3 @@ private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.
 private fun JsonObject.int(key: String): Int? = this[key]?.jsonPrimitive?.intOrNull
 
 private fun JsonObject.long(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
-
-@RequiresApi(Build.VERSION_CODES.R)
-internal fun CoroutineScope.launchDisplayProvider(spaceId: String, socket: File, display: DeviceDisplay) =
-    launch {
-        try {
-            DisplayProvider(spaceId, socket, display).serve()
-        } catch (error: IOException) {
-            Log.w(TAG, "Display provider unavailable for $spaceId", error)
-        }
-    }
