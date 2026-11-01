@@ -34,7 +34,6 @@ type TaskParts = {
 	clip: Graphics;
 	previewBg: Graphics;
 	preview: Sprite;
-	previewMask: Graphics;
 	shimmer: Graphics;
 	previewArt: Graphics;
 	badge: Text;
@@ -430,10 +429,6 @@ function sync(
 			.clear()
 			.rect(frame.x, frame.y, frame.width, frame.height)
 			.fill({ color: context.palette.hover, alpha: 0.5 });
-		parts.previewMask
-			.clear()
-			.rect(frame.x, frame.y, frame.width, frame.height)
-			.fill({ color: 0xffffff });
 		if (context.style.progress === "shimmer") drawShimmerBand(parts.shimmer, frame.width, frame.height, context.palette.text);
 		parts.shimmer.position.set(context.style.progress === "shimmer" ? 0 : frame.x, frame.y);
 		parts.previewArt.clear();
@@ -535,7 +530,6 @@ export const taskCardRenderer: BoardCardRenderer = {
 		const clip = new Graphics();
 		const previewBg = new Graphics();
 		const preview = new Sprite();
-		const previewMask = new Graphics();
 		const shimmer = new Graphics();
 		const previewArt = new Graphics();
 		const text = (fontFamily: string, fontSize: number, fontWeight: "400" | "500") =>
@@ -553,10 +547,9 @@ export const taskCardRenderer: BoardCardRenderer = {
 		detail.anchor.set(0.5, 0);
 		detail.style.align = "center";
 
-		preview.mask = previewMask;
 		const content = new Container();
 		content.mask = clip;
-		content.addChild(previewBg, shimmer, preview, previewMask, previewArt, body, detail, meta, badge);
+		content.addChild(previewBg, shimmer, preview, previewArt, body, detail, meta, badge);
 		const tag = createCardTag();
 		root.addChild(plate, content, clip, tag.root);
 		partsByContainer.set(root, {
@@ -566,7 +559,6 @@ export const taskCardRenderer: BoardCardRenderer = {
 			clip,
 			previewBg,
 			preview,
-			previewMask,
 			shimmer,
 			previewArt,
 			badge,

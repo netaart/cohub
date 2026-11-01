@@ -1,4 +1,4 @@
-import type { BoardFrame } from "@cohub/protocol";
+import { BOARD_SHADOW_DEFAULTS, type BoardFrame, type BoardStyle } from "@cohub/protocol";
 
 export type BoardViewport = { x: number; y: number; zoom: number };
 export type BoardCameraState = { centerX: number; centerY: number; zoom: number };
@@ -218,6 +218,23 @@ export function rotatePointAround<P extends Point>(
 	} as P;
 }
 
+
+export function effectBounds(rect: Rect, style: BoardStyle | undefined): Rect {
+	const blur = (style?.filter?.blur ?? 0) * 3;
+	const shadow = style?.shadow;
+	if (!blur && !shadow) return rect;
+	const reach = shadow ? (shadow.blur ?? BOARD_SHADOW_DEFAULTS.blur) * 1.5 : 0;
+	const dx = shadow ? (shadow.x ?? BOARD_SHADOW_DEFAULTS.x) : 0;
+	const dy = shadow ? (shadow.y ?? BOARD_SHADOW_DEFAULTS.y) : 0;
+	const left = blur + Math.max(0, reach - dx);
+	const top = blur + Math.max(0, reach - dy);
+	return {
+		x: rect.x - left,
+		y: rect.y - top,
+		width: rect.width + left + blur + Math.max(0, reach + dx),
+		height: rect.height + top + blur + Math.max(0, reach + dy),
+	};
+}
 
 export function itemBounds(frame: BoardFrame): Rect {
 	const rotation = frame.rotation || 0;

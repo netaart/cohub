@@ -98,6 +98,8 @@ export type BoardRenderContext = {
 	themeKey: string;
 	rendererType: "gpu" | "canvas";
 	zoom: number;
+	/** Blur and shadow filters; off on low-tier devices, which keep color filters and blend modes. */
+	blurs?: boolean;
 	/** Texture pixels per world unit for text; see `boardTextResolution`. */
 	textResolution: number;
 	time: number;

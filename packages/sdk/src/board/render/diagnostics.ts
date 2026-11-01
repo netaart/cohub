@@ -1,7 +1,7 @@
 import { layoutBoardText, type BoardTextItem } from "@cohub/protocol";
 import { DOMAdapter } from "pixi.js";
 import type { BoardScene } from "../model/scene.js";
-import { itemBounds, rectsIntersect } from "../model/geometry.js";
+import { effectBounds, itemBounds, rectsIntersect } from "../model/geometry.js";
 import { boardFontFamily } from "../model/text-metrics.js";
 import { BOARD_FONT_STACKS, ensureBoardTextMeasurement } from "./text-measurement.js";
 
@@ -65,6 +65,7 @@ export function inspectBoardItems(scene: BoardScene, ids?: ReadonlySet<string>) 
         id: item.id,
         bounds: item.frame,
         worldBounds: itemBounds(item.frame),
+        ...(item.style.filter?.blur || item.style.shadow ? { visualBounds: effectBounds(itemBounds(item.frame), item.style) } : {}),
         opacity: scene.opacity(item.id),
         ...(item.type === "text" ? { text: measureBoardText(item.props) } : {}),
       })),

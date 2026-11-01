@@ -12,10 +12,13 @@ import type {
 	BoardRenderContext,
 } from "../render/index.js";
 import {
-	type ClipGroup,
-	clippingAncestor,
-	isClippingFrame,
-	syncClipGroup,
+	type FrameGroup,
+	groupingAncestor,
+	isGroupingFrame,
+	isSelfGroupedFrame,
+	rescaleBoardItemEffects,
+	syncBoardItemEffects,
+	syncFrameGroup,
 } from "../render/index.js";
 import { BOARD_LOD_HYSTERESIS, type BoardLod, boardCardDetailed, boardLodRatio, boardLodSize, DEFAULT_BOARD_LOD } from "../render/lod.js";
 import { textZoomBucket } from "../render/text-resolution.js";
@@ -128,7 +131,7 @@ export function createBoardScene(options: {
 	world.sortableChildren = true;
 	overlay.zIndex = Z_OVERLAY;
 	const cards = new Map<string, CardEntry>();
-	const clips = new Map<string, ClipGroup>();
+	const groups = new Map<string, FrameGroup>();
 	const animatedIds = new Set<string>();
 	const tickingIds = new Set<string>();
 	const pools = new Map<string, Container[]>();
@@ -206,52 +209,67 @@ export function createBoardScene(options: {
 		pools.set(entry.renderer.id, pool);
 	}
 
-	function hostFor(item: BoardItem, scene: BoardModelScene): Container {
-		const clipId = clippingAncestor(scene, item);
-		const frame = clipId ? scene.get(clipId) : undefined;
-		if (!clipId || !frame) return world;
-		let entry = clips.get(clipId);
+	function groupOf(frame: BoardItem, scene: BoardModelScene, context: BoardRenderContext): FrameGroup {
+		let entry = groups.get(frame.id);
 		if (!entry) {
-			entry = syncClipGroup(undefined, frame);
-			entry.group.sortableChildren = true;
-			clips.set(clipId, entry);
+			entry = syncFrameGroup(undefined, frame, context);
+			groups.set(frame.id, entry);
 		}
-		const parent = hostFor(frame, scene);
+		const parent = outerHost(frame, scene, context);
 		if (entry.group.parent !== parent) parent.addChild(entry.group);
-		entry.group.zIndex = (orderById.get(clipId) ?? 0) + 0.5;
-		return entry.group;
+		entry.group.zIndex = (orderById.get(frame.id) ?? 0) + 0.5;
+		return entry;
 	}
 
-	function syncClips(scene: BoardModelScene) {
+	function outerHost(item: BoardItem, scene: BoardModelScene, context: BoardRenderContext): Container {
+		const frame = scene.get(groupingAncestor(scene, item) ?? "");
+		return frame ? groupOf(frame, scene, context).content : world;
+	}
+
+	function hostFor(item: BoardItem, scene: BoardModelScene, context: BoardRenderContext): Container {
+		return isSelfGroupedFrame(item) ? groupOf(item, scene, context).group : outerHost(item, scene, context);
+	}
+
+	let groupingScene: BoardModelScene | null = null;
+	let groupingKey = "";
+
+	function groupingFramesChanged(scene: BoardModelScene): boolean {
+		if (scene === groupingScene) return false;
+		groupingScene = scene;
+		let key = "";
+		for (const item of scene.items) if (isGroupingFrame(item)) key += `${item.id}:${isSelfGroupedFrame(item)}\n`;
+		if (key === groupingKey) return false;
+		groupingKey = key;
+		return true;
+	}
+
+	function syncGroups(scene: BoardModelScene, context: BoardRenderContext) {
 		for (const entry of cards.values()) {
-			const host = hostFor(entry.item, scene);
+			const host = hostFor(entry.item, scene, context);
 			if (entry.container.parent !== host) host.addChild(entry.container);
 		}
 		for (const plate of plates.values()) {
 			const first = plate.items[0];
-			const host = first && hostFor(first, scene);
+			const host = first && hostFor(first, scene, context);
 			if (host && plate.graphics.parent !== host) host.addChild(plate.graphics);
 		}
-		for (const [id, entry] of clips) {
+		for (const [id, entry] of groups) {
 			const frame = scene.get(id);
-			if (
-				!frame ||
-				!isClippingFrame(frame) ||
-				entry.group.children.length <= 1
-			) {
-				for (const child of [...entry.group.children])
-					if (child !== entry.mask) world.addChild(child);
+			const empty = entry.group.children.length === 1 && entry.content.children.length === (entry.mask ? 1 : 0);
+			if (!frame || !isGroupingFrame(frame) || empty) {
+				const held = [...entry.group.children, ...entry.content.children];
+				for (const child of held) if (child !== entry.mask && child !== entry.content) world.addChild(child);
 				entry.group.destroy({ children: true });
-				clips.delete(id);
+				groups.delete(id);
 			}
 		}
-		syncClipMasks(scene);
+		syncGroupFrames(scene, context);
 	}
 
-	function syncClipMasks(scene: BoardModelScene) {
-		for (const [id, entry] of clips) {
+	function syncGroupFrames(scene: BoardModelScene, context: BoardRenderContext) {
+		for (const [id, entry] of groups) {
 			const frame = scene.get(id);
-			if (frame) syncClipGroup(entry, frame);
+			if (frame) syncFrameGroup(entry, frame, context);
 		}
 	}
 
@@ -268,7 +286,8 @@ export function createBoardScene(options: {
 		container.culled = false;
 		if (pooled) renderer.update(container, item, context);
 		container.alpha = scene.opacity(item.id);
-		hostFor(item, scene).addChild(container);
+		syncBoardItemEffects(container, item, context);
+		hostFor(item, scene, context).addChild(container);
 		if (renderer.animated) animatedIds.add(item.id);
 		if (renderer.tick) tickingIds.add(item.id);
 		const entry: CardEntry = {
@@ -372,7 +391,8 @@ export function createBoardScene(options: {
 			const item = getItem(id);
 			if (!item || live.has(id)) continue;
 			const order = orderById.get(id) ?? 0;
-			const key = `${Math.floor(order / FAR_CHUNK)}:${clippingAncestor(scene, item) ?? ""}`;
+			const host = isSelfGroupedFrame(item) ? `${item.id}/` : (groupingAncestor(scene, item) ?? "");
+			const key = `${Math.floor(order / FAR_CHUNK)}:${host}`;
 			const run = runs.get(key);
 			if (run) run.items.push(item);
 			else runs.set(key, { key, order, items: [item] });
@@ -425,7 +445,7 @@ export function createBoardScene(options: {
 			plate.items = run.items;
 			plate.sig = globalSig;
 			graphics.zIndex = run.order;
-			const host = hostFor(run.items[0] as BoardItem, scene);
+			const host = hostFor(run.items[0] as BoardItem, scene, context);
 			if (graphics.parent !== host) host.addChild(graphics);
 		}
 		const paintMs = performance.now() - start;
@@ -564,6 +584,7 @@ export function createBoardScene(options: {
 			orderById = new Map(idsByOrder.map((id, index) => [id, index]));
 		}
 
+		const groupingChanged = groupingFramesChanged(scene);
 		const current = lodPlan(input);
 		const platesChanged = paintPlates(input, current);
 		const wanted = new Set<string>(pinnedIds);
@@ -628,6 +649,7 @@ export function createBoardScene(options: {
 			if (changed) {
 				entry.renderer.update(entry.container, item, context);
 				entry.container.alpha = scene.opacity(id);
+				syncBoardItemEffects(entry.container, item, context);
 				if (entry.renderer.tick) tickingIds.add(id);
 				pendingResolution.delete(id);
 			}
@@ -636,11 +658,14 @@ export function createBoardScene(options: {
 		if (input.view) cullCards(input.view, pinnedIds);
 		refreshResolution(context);
 		if (liveSetChanged) liveVersion += 1;
-		if (structureChanged || liveSetChanged || platesChanged) syncClips(scene);
-		else syncClipMasks(scene);
+		if (structureChanged || liveSetChanged || platesChanged || groupingChanged) syncGroups(scene, context);
+		else syncGroupFrames(scene, context);
 		if (context.zoom !== lastZoom) {
 			lastZoom = context.zoom;
-			for (const entry of cards.values()) entry.renderer.zoom?.(entry.container, lastZoom);
+			for (const entry of cards.values()) {
+				entry.renderer.zoom?.(entry.container, lastZoom);
+				rescaleBoardItemEffects(entry.container, entry.item, context);
+			}
 		}
 
 		const liftChanged = context.liftedIds !== lifted;
@@ -731,8 +756,10 @@ export function createBoardScene(options: {
 		}
 		const order = (id: string) => (orderById.get(id) ?? 0) + (raised.has(id) ? Z_LIFTED : 0);
 		for (const [id, entry] of cards) entry.container.zIndex = order(id);
-		for (const [id, entry] of clips) {
+		for (const [id, entry] of groups) {
 			entry.group.zIndex = order(id) + 0.5;
+			entry.content.zIndex = order(id) + 0.5;
+			entry.content.sortChildren();
 			entry.group.sortChildren();
 		}
 		world.sortChildren();
@@ -764,12 +791,14 @@ export function createBoardScene(options: {
 		orderById = new Map();
 		idsByOrder = [];
 		clearPlates();
-		for (const entry of clips.values()) entry.group.destroy({ children: true });
-		clips.clear();
+		for (const entry of groups.values()) entry.group.destroy({ children: true });
+		groups.clear();
 		animatedIds.clear();
 		tickingIds.clear();
 		for (const id of [...liveStrokes.keys()]) removeLiveStroke(id, context);
 		lastStructureVersion = -1;
+		groupingScene = null;
+		groupingKey = "";
 		lastZoom = Number.NaN;
 		lastResolution = "";
 		pendingResolution.clear();

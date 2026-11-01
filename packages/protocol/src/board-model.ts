@@ -77,6 +77,38 @@ export type BoardColor = z.infer<typeof BoardColorSchema>;
 export const BOARD_DASHES = ["solid", "dashed", "dotted"] as const;
 export type BoardDash = (typeof BOARD_DASHES)[number];
 
+export const BOARD_BLEND_MODES = ["normal", "multiply", "screen", "add"] as const;
+export type BoardBlendMode = (typeof BOARD_BLEND_MODES)[number];
+
+export const BoardFilterSchema = z
+	.object({
+		blur: finite.min(0).max(256).optional().describe("Blur radius in board units, as CSS blur()."),
+		brightness: finite.min(0).max(10).optional().describe("1 keeps the color, 0 is black."),
+		contrast: finite.min(0).max(10).optional().describe("1 keeps the color, 0 is flat gray."),
+		saturate: finite.min(0).max(10).optional().describe("1 keeps the color, 0 is gray, above 1 is vivid."),
+		hue: finite.min(-3600).max(3600).optional().describe("Hue rotation in degrees."),
+		grayscale: ratio.optional(),
+		sepia: ratio.optional(),
+		invert: ratio.optional(),
+	})
+	.strict()
+	.describe("CSS filters, applied in this order. On a frame, filter, shadow and blend treat the frame and its contents as one layer.");
+export type BoardFilter = z.infer<typeof BoardFilterSchema>;
+
+export const BOARD_SHADOW_DEFAULTS = { opacity: 0.35, blur: 16, x: 0, y: 8 } as const;
+
+export const BoardShadowSchema = z
+	.object({
+		color: BoardColorSchema.optional().describe("Defaults to black."),
+		opacity: ratio.optional().describe("Defaults to 0.35."),
+		blur: finite.min(0).max(256).optional().describe("Softness in board units, as CSS drop-shadow(); defaults to 16."),
+		x: finite.min(-1024).max(1024).optional(),
+		y: finite.min(-1024).max(1024).optional().describe("Defaults to 8."),
+	})
+	.strict()
+	.describe("A drop shadow following the item's visible shape; with no offset and a bright color it glows.");
+export type BoardShadow = z.infer<typeof BoardShadowSchema>;
+
 export const BoardStyleSchema = z
 	.object({
 		fill: BoardColorSchema.optional(),
@@ -86,6 +118,9 @@ export const BoardStyleSchema = z
 		dash: z.enum(BOARD_DASHES).optional(),
 		radius: nonNegative.optional().describe("Corner radius in board units."),
 		trim: ratio.optional().describe("Fraction of the outline drawn; animate 0 → 1 to draw it in."),
+		filter: BoardFilterSchema.optional(),
+		shadow: BoardShadowSchema.optional(),
+		blend: z.enum(BOARD_BLEND_MODES).optional().describe("How the item mixes with what is under it."),
 	})
 	.strict();
 export type BoardStyle = z.infer<typeof BoardStyleSchema>;
@@ -148,6 +183,8 @@ const unsized = { ...itemEnvelope };
 
 const fontSize = finite.min(BOARD_TEXT_MIN_FONT_SIZE).max(BOARD_TEXT_MAX_FONT_SIZE);
 export const BOARD_TEXT_ALIGNS = ["left", "center", "right"] as const;
+export const BOARD_TEXT_REVEAL_UNITS = ["char", "word", "line"] as const;
+export const BOARD_TEXT_REVEAL_MOTIONS = ["cut", "fade", "rise"] as const;
 export const BOARD_SHAPE_GEOMETRIES = [
 	"rectangle",
 	"rounded",
@@ -187,6 +224,8 @@ export const BoardTextItemSchema = z
 				lineHeight: finite.min(0.5).max(4).default(4 / 3),
 				width: finite.positive().optional().describe("Wrap width; the height follows the text."),
 				reveal: ratio.default(1).describe("Fraction of the text shown; animate 0 → 1 to type it."),
+				revealBy: z.enum(BOARD_TEXT_REVEAL_UNITS).optional().describe("What reveal counts: char (default), word or line."),
+				revealMotion: z.enum(BOARD_TEXT_REVEAL_MOTIONS).optional().describe("How each unit appears: cut (default), fade or rise."),
 				caret: z.boolean().default(false).describe("Blink a caret while the text is being revealed."),
 			})
 			.strict()
@@ -411,6 +450,8 @@ export const BoardSessionItemSchema = z
 
 export const BOARD_EFFECT_KINDS = ["particles", "trail", "impact", "flash", "glow"] as const;
 export type BoardEffectKind = (typeof BOARD_EFFECT_KINDS)[number];
+export const BOARD_PARTICLE_SHAPES = ["circle", "square", "star", "heart", "spark"] as const;
+export type BoardParticleShape = (typeof BOARD_PARTICLE_SHAPES)[number];
 
 export const BOARD_EFFECT_KIND_INFO = {
 	particles: {
@@ -425,6 +466,8 @@ export const BOARD_EFFECT_KIND_INFO = {
 			gravity: "Acceleration in board units per second squared.",
 			intensity: "Opacity and size multiplier.",
 			seed: "Stable seed for repeatable particle motion.",
+			shape: "circle, square, star, heart or spark.",
+			colors: "Up to eight colors the particles pick from.",
 		},
 	},
 	trail: {
@@ -448,6 +491,8 @@ export const BOARD_EFFECT_KIND_INFO = {
 			gravity: "Acceleration in board units per second squared.",
 			intensity: "Opacity multiplier.",
 			seed: "Stable seed for repeatable bursts.",
+			shape: "circle, square, star, heart or spark.",
+			colors: "Up to eight colors the particles pick from.",
 		},
 	},
 	flash: {
@@ -483,6 +528,8 @@ export const BoardEffectItemSchema = z
 				intensity: nonNegative.max(10).default(1),
 				follow: BoardIdSchema.optional().describe("trail: the item to follow."),
 				seed: z.string().min(1).max(160).optional().describe("Makes procedural motion repeatable."),
+				shape: z.enum(BOARD_PARTICLE_SHAPES).optional().describe("particles and impact: circle by default; square and star tumble, spark streaks along its motion."),
+				colors: z.array(BoardColorSchema).min(1).max(8).optional().describe("particles and impact: each particle picks one; defaults to style.fill."),
 			})
 			.strict(),
 	})
@@ -621,9 +668,59 @@ function issuesToDiagnostics(error: z.ZodError, path: string): BoardDiagnostic[]
 	});
 }
 
+export type BoardKeepField = (path: readonly PropertyKey[], key: string) => boolean;
+
+export const keepAllBoardFields: BoardKeepField = () => true;
+
+export function keepBoardFieldsOf(value: unknown): BoardKeepField {
+	return (path, key) => Object.hasOwn(fieldAt(value, path) ?? {}, key);
+}
+
+function fieldAt(value: unknown, path: readonly PropertyKey[]): Record<PropertyKey, unknown> | null {
+	let cursor = value;
+	for (const segment of path) cursor = cursor && typeof cursor === "object" ? (cursor as Record<PropertyKey, unknown>)[segment] : undefined;
+	return cursor && typeof cursor === "object" ? (cursor as Record<PropertyKey, unknown>) : null;
+}
+
+function withoutFields(value: unknown, path: readonly PropertyKey[], keys: readonly string[]): unknown {
+	if (!value || typeof value !== "object") return value;
+	const copy = (Array.isArray(value) ? [...value] : { ...value }) as Record<PropertyKey, unknown>;
+	if (path.length === 0) for (const key of keys) delete copy[key];
+	else copy[path[0] as PropertyKey] = withoutFields(copy[path[0] as PropertyKey], path.slice(1), keys);
+	return copy;
+}
+
+export function parseKeepingBoardFields<T>(schema: z.ZodType<T>, value: unknown, keep?: BoardKeepField): z.ZodSafeParseResult<T> {
+	const kept: Array<{ path: readonly PropertyKey[]; key: string; value: unknown }> = [];
+	let candidate = value;
+	for (;;) {
+		const result = schema.safeParse(candidate);
+		if (result.success) {
+			for (const field of kept) {
+				const target = fieldAt(result.data, field.path);
+				if (target) target[field.key] = field.value;
+			}
+			return result;
+		}
+		if (!keep) return result;
+		let stripped = false;
+		for (const issue of result.error.issues) {
+			if (issue.code !== "unrecognized_keys") continue;
+			const keys = issue.keys.filter((key) => key !== "__proto__" && keep(issue.path, key));
+			if (!keys.length) continue;
+			const source = fieldAt(candidate, issue.path);
+			for (const key of keys) kept.push({ path: issue.path, key, value: source?.[key] });
+			candidate = withoutFields(candidate, issue.path, keys);
+			stripped = true;
+		}
+		if (!stripped) return result;
+	}
+}
+
 export function parseBoardItem(
 	value: unknown,
 	path = "item",
+	keep?: BoardKeepField,
 ): { ok: true; item: BoardItem } | { ok: false; diagnostics: BoardDiagnostic[] } {
 	const type =
 		value && typeof value === "object" && !Array.isArray(value)
@@ -647,7 +744,7 @@ export function parseBoardItem(
 			}],
 		};
 	}
-	const parsed = schema.safeParse(value);
+	const parsed = parseKeepingBoardFields(schema, value, keep);
 	return parsed.success
 		? { ok: true, item: parsed.data }
 		: { ok: false, diagnostics: issuesToDiagnostics(parsed.error, path) };
@@ -767,6 +864,15 @@ export const BoardBackgroundSchema = z
 	.describe("Layers drawn under every item: color, then image, then pattern. Without a color or image the theme's backdrop shows.");
 export type BoardBackground = z.infer<typeof BoardBackgroundSchema>;
 
+export const BoardAtmosphereSchema = z
+	.object({
+		vignette: ratio.optional().describe("Darkens the edges of the view."),
+		grain: ratio.optional().describe("Film grain over the view."),
+	})
+	.strict()
+	.describe("Screen effects over every item, for viewers and exports alike.");
+export type BoardAtmosphere = z.infer<typeof BoardAtmosphereSchema>;
+
 export const BOARD_GRID_MIN_SIZE = 4;
 export const BOARD_GRID_MAX_SIZE = 512;
 export const BOARD_GRID_DEFAULT_SIZE = 24;
@@ -786,6 +892,7 @@ export const BoardSettingsSchema = z
 			})
 			.strict()
 			.optional(),
+		atmosphere: BoardAtmosphereSchema.optional(),
 		enter: z
 			.object({
 				preset: z.enum(BOARD_ENTER_PRESETS),

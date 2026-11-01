@@ -328,7 +328,7 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 	async function restoreDocument() {
 		const cached = await storage.readDocument().catch(() => null);
 		if (disposed || server || !cached) return;
-		const parsed = parseBoardDocument(cached.document);
+		const parsed = parseBoardDocument(cached.document, { keepUnknown: true });
 		if (parsed.ok) adoptServer(parsed.document, cached.version, false);
 	}
 

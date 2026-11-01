@@ -20,9 +20,13 @@ import {
 	BoardTrackSchema,
 	BoardVec2Schema,
 	type BoardVec2,
+	type BoardKeepField,
 	boardItemSchema,
 	isBuiltinItemType,
+	keepAllBoardFields,
+	keepBoardFieldsOf,
 	parseBoardItem,
+	parseKeepingBoardFields,
 } from "./board-model.js";
 
 
@@ -316,6 +320,8 @@ export function boardPatchTouches(patch: BoardPatch): {
 
 export type BoardApplyOptions = {
 	cascade?: boolean;
+	/** Keep every unknown field instead of only those already stored; for reading documents written by newer clients. */
+	keepUnknown?: boolean;
 	resolveArrowEnd?: (arrowId: string, which: "start" | "end") => BoardVec2;
 };
 
@@ -349,6 +355,7 @@ export function applyBoardPatch(
 	}
 	const patch = parsedPatch.data as BoardPatch;
 	const diagnostics: BoardDiagnostic[] = [];
+	const keep = (existing: unknown): BoardKeepField | undefined => (options.keepUnknown ? keepAllBoardFields : existing ? keepBoardFieldsOf(existing) : undefined);
 	const nextItems = new Map<string, BoardItem | null>();
 	const nextAnimations = new Map<string, BoardAnimationHeader | null>();
 	const nextTracks = new Map<string, Map<string, BoardTrack | null>>();
@@ -369,7 +376,7 @@ export function applyBoardPatch(
 
 	if (patch.board !== undefined) {
 		const merged = patch.board === null ? {} : mergePatch(state.settings(), patch.board);
-		const parsed = BoardSettingsSchema.safeParse(merged);
+		const parsed = parseKeepingBoardFields(BoardSettingsSchema, merged, keep(state.settings()));
 		if (parsed.success) nextSettings = parsed.data;
 		else for (const issue of parsed.error.issues) diagnostics.push(error(["board", ...issue.path.map(String)].join("."), "INVALID_BOARD", issue.message));
 	}
@@ -391,7 +398,7 @@ export function applyBoardPatch(
 			candidate.z = current?.z ?? top + 1;
 			if (!current) zByParent.set(key, top + 1);
 		}
-		const parsed = parseBoardItem(candidate, `items.${id}`);
+		const parsed = parseBoardItem(candidate, `items.${id}`, keep(replacing ? undefined : current));
 		if (!parsed.ok) {
 			diagnostics.push(...parsed.diagnostics);
 			continue;
@@ -417,7 +424,7 @@ export function applyBoardPatch(
 			const header = current
 				? mergePatch(current, headerPatch)
 				: { ...headerPatch, ...(headerPatch.duration === undefined ? { duration: lastKeyframeAt([...Object.values(tracks ?? {}), ...state.trackIds(id).map((trackId) => state.track(id, trackId) as JsonRecord | undefined)]) } : {}) };
-			const parsed = BoardAnimationHeaderSchema.safeParse(header);
+			const parsed = parseKeepingBoardFields(BoardAnimationHeaderSchema, header, keep(current));
 			if (!parsed.success) {
 				for (const issue of parsed.error.issues) diagnostics.push(error(["animations", id, ...issue.path.map(String)].join("."), "INVALID_ANIMATION", issue.message));
 				continue;
@@ -430,7 +437,7 @@ export function applyBoardPatch(
 				if (existing) setTrack(id, trackId, null);
 				continue;
 			}
-			const parsed = BoardTrackSchema.safeParse(existing ? mergePatch(existing, trackPatch) : trackPatch);
+			const parsed = parseKeepingBoardFields(BoardTrackSchema, existing ? mergePatch(existing, trackPatch) : trackPatch, keep(existing));
 			if (!parsed.success) {
 				for (const issue of parsed.error.issues) diagnostics.push(error(["animations", id, "tracks", trackId, ...issue.path.map(String)].join("."), "INVALID_TRACK", issue.message));
 				continue;
@@ -545,7 +552,7 @@ export function applyBoardPatch(
 		}
 		for (const ref of state.trackRefs(id)) {
 			const current = track(ref.animation, ref.track);
-			if (current) diagnostics.push(...validateTrack(`animations.${ref.animation}.tracks.${ref.track}`, ref.animation, current, item, animation, track, validationState));
+			if (current) diagnostics.push(...validateTrack(`animations.${ref.animation}.tracks.${ref.track}`, ref.animation, current, item, animation, track, validationState, options.keepUnknown));
 		}
 	}
 	for (const [animationId, tracks] of nextTracks) {
@@ -555,7 +562,8 @@ export function applyBoardPatch(
 		}
 		for (const [trackId, value] of tracks) {
 			if (!value) continue;
-			diagnostics.push(...validateTrack(`animations.${animationId}.tracks.${trackId}`, animationId, value, item, animation, track, validationState));
+			const stored = options.keepUnknown || state.track(animationId, trackId)?.property === value.property;
+			diagnostics.push(...validateTrack(`animations.${animationId}.tracks.${trackId}`, animationId, value, item, animation, track, validationState, stored));
 		}
 	}
 	if (diagnostics.length) return { ok: false, diagnostics };
@@ -595,6 +603,7 @@ function validateTrack(
 	animation: (id: string) => BoardAnimationHeader | undefined,
 	track: (animationId: string, trackId: string) => BoardTrack | undefined,
 	state: BoardState,
+	keepUnknownProperty = false,
 ): BoardDiagnostic[] {
 	const diagnostics: BoardDiagnostic[] = [];
 	let targetType: string;
@@ -607,7 +616,7 @@ function validateTrack(
 		}
 	} else return [error(`${path}.target`, "TARGET_NOT_FOUND", `target ${value.target} is not an item, animation or camera`)];
 	const resolved = resolveBoardProperty(targetType, value.property);
-	if (!resolved.ok) return [error(`${path}.property`, "INVALID_PROPERTY", resolved.message)];
+	if (!resolved.ok) return keepUnknownProperty ? [] : [error(`${path}.property`, "INVALID_PROPERTY", resolved.message)];
 	for (const [index, keyframe] of value.keyframes.entries()) {
 		const parsed = resolved.spec.schema.safeParse(keyframe.value);
 		if (!parsed.success) {
@@ -774,6 +783,7 @@ export function isEmptyBoardPatch(patch: BoardPatch): boolean {
 
 export function parseBoardDocument(
 	input: unknown,
+	options: Pick<BoardApplyOptions, "keepUnknown"> = {},
 ): { ok: true; document: BoardDocument } | { ok: false; diagnostics: BoardDiagnostic[] } {
 	if (!isRecord(input)) return { ok: false, diagnostics: [error("", "INVALID_DOCUMENT", "expected an object")] };
 	const result = applyBoardPatchToDocument(
@@ -783,6 +793,7 @@ export function parseBoardDocument(
 			...(isRecord(input.items) ? { items: input.items as Record<string, JsonRecord> } : {}),
 			...(isRecord(input.animations) ? { animations: input.animations as BoardPatch["animations"] } : {}),
 		},
+		options,
 	);
 	return result.ok ? { ok: true, document: result.document } : result;
 }

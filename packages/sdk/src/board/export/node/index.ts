@@ -3,6 +3,7 @@ import type { BoardDocument } from "@cohub/protocol";
 import { BOARD_TEXT_FONT_FAMILY } from "@cohub/protocol/board-constants";
 import {
   type Adapter,
+  CanvasFilterSystem,
   CanvasGraphicsContextSystem,
   CanvasGraphicsPipe,
   CanvasRenderer,
@@ -10,6 +11,7 @@ import {
   CanvasTextPipe,
   CanvasTextSystem,
   DOMAdapter,
+  FilterPipe,
   extensions,
   GraphicsContextSystem,
   GraphicsPipe,
@@ -123,6 +125,8 @@ export async function createNodeBoardRenderer(
 ): Promise<BoardNodeRenderer> {
   const canvasModule = options.canvasModule ?? (await loadCanvasModule());
   extensions.add(
+    CanvasFilterSystem,
+    FilterPipe,
     CanvasGraphicsPipe,
     GraphicsPipe,
     CanvasGraphicsContextSystem,
@@ -178,6 +182,8 @@ export async function createNodeBoardRenderer(
     resolution: 1,
     skipExtensionImports: true,
   });
+  // Pixi probes Canvas blend modes as it loads, before Node has a canvas to probe.
+  Object.assign(renderer.canvasContext.blendModes, { multiply: "multiply", screen: "screen" });
 
   return {
     renderer: renderer as unknown as Renderer,

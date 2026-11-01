@@ -1,9 +1,11 @@
 import type {
 	BoardAwarenessGesture,
 	BoardAwarenessItemPreview,
+	BoardAwarenessPoint,
 	BoardAwarenessStateUpdate,
 	BoardAwarenessUpdate,
 	BoardAwarenessViewport,
+	BoardReaction,
 } from "@cohub/protocol/realtime";
 import {
 	BOARD_AWARENESS_MAX_VIEWPORT_ZOOM,
@@ -31,6 +33,7 @@ const CURSOR_VISIBLE_MS = 5_000;
 const PEER_TTL_MS = 10_000;
 const ENDED_GESTURE_TTL_MS = 12_000;
 const MAX_PREVIEW_NODES = 64;
+const REACTION_INTERVAL_MS = 150;
 
 let localAwarenessSequence = 0;
 
@@ -92,6 +95,12 @@ type LocalState = Omit<LocalStateInput, "bounds"> & {
 type CursorInput = BoardAwarenessCursor;
 
 type ViewportInput = BoardAwarenessViewport;
+
+export type BoardReactionEvent = {
+	reaction: BoardReaction;
+	at: BoardAwarenessPoint;
+	actorId: string | null;
+};
 
 type ControllerOptions = {
 	send: (seq: number, update: BoardAwarenessUpdate) => Promise<void>;
@@ -345,6 +354,21 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 	let lastGestureSentAt = 0;
 	let sendTail: Promise<void> = Promise.resolve();
 	let destroyed = false;
+	let lastReactionAt = 0;
+	const reactionListeners = new Set<(event: BoardReactionEvent) => void>();
+
+	function react(reaction: BoardReaction, at: BoardAwarenessPoint) {
+		const timestamp = now();
+		if (destroyed || timestamp - lastReactionAt < REACTION_INTERVAL_MS) return;
+		lastReactionAt = timestamp;
+		emit({ type: "reaction", reaction, at });
+		for (const listener of reactionListeners) listener({ reaction, at, actorId: null });
+	}
+
+	function onReaction(listener: (event: BoardReactionEvent) => void): () => void {
+		reactionListeners.add(listener);
+		return () => reactionListeners.delete(listener);
+	}
 
 	function emit(update: BoardAwarenessUpdate) {
 		if (destroyed) return;
@@ -508,6 +532,12 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 		peer.lastSeenAt = timestamp;
 
 		const update = payload.update;
+		if (update.type === "reaction") {
+			peers.set(peer.connectionId, peer);
+			for (const listener of reactionListeners) listener({ reaction: update.reaction, at: update.at, actorId: payload.actorId });
+			if (changed) options.onChange();
+			return;
+		}
 		changed ||=
 			update.type !== "state" || !sameAwarenessState(peer.state, update);
 		if (update.type === "state") {
@@ -640,6 +670,7 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 		if (heartbeat) clearInterval(heartbeat);
 		if (cleanup) clearInterval(cleanup);
 		peers.clear();
+		reactionListeners.clear();
 		options.onChange();
 		return sendTail;
 	}
@@ -657,6 +688,8 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 		syncGesture,
 		receive,
 		reconcile,
+		react,
+		onReaction,
 		destroy,
 	};
 }

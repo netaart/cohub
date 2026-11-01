@@ -71,12 +71,29 @@ shadow serve every card type, and short facts above a card through
 overlay (`stage/overlay.ts`) owns them, so pointer and selection changes redraw
 one layer. A renderer that still needs them sets `observesSelection`.
 
+Card shadows come from `render/shadow.ts`: eight quads around the covered card,
+cut from one small atlas per blur, radius and offset, so they batch and cost no
+tessellation. Particles (`render/particles.ts`) share one white texture per shape in
+pooled `ParticleContainer`s, so a frame rewrites attributes only.
+
+Item effects (`render/effects.ts`) are applied by the scene, not by renderers:
+`style.filter` composes into one color matrix pass, blur and shadows use one clamped
+Gaussian pass, and `style.blend` sets the container's blend mode. Every filter also
+returns a CSS filter string for Canvas; exports run `flattenBoardEffects`, which
+draws each blurred or shadowed layer into one picture first, since Canvas filters
+apply per draw call. A frame with effects draws inside a group with its descendants, so they take its
+effects as one layer (`render/frame-group.ts`). Filters cost a render pass per frame, so containers
+without effects carry none, far plates skip them and low-tier devices drop blur.
+
 Under the items lies the backdrop. `resolveBoardBackdrop` (`render/backdrop.ts`)
 merges the document's `background` over the theme's `backdrop` into one color,
 image and pattern; the stage clears to the color and `render/backdrop-layer.ts`
 draws the rest in screen space. Patterns are one full-screen shader: two levels a
 doubling apart, the finer fading in, dots snapped to device pixels, so nothing
 moves or shimmers as the view zooms or pans. Exports reuse the layer for the image.
+Over the items, `render/atmosphere.ts` draws the vignette and grain in screen space,
+and `stage/bursts.ts` plays transient bursts such as reactions, rendering only while
+one is alive.
 
 Frame titles take `style.frameLabelSize`; their offset and the editor's title hit
 box derive from it in `model/text-metrics.ts`, so renderer, editor and in-place

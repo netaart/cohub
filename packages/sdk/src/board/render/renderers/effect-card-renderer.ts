@@ -1,8 +1,9 @@
 
-import { Container, Graphics } from "pixi.js";
-import type { BoardEffectItem } from "@cohub/protocol";
+import { Container, Graphics, type Particle, type ParticleContainer, Rectangle } from "pixi.js";
+import type { BoardEffectItem, BoardParticleShape } from "@cohub/protocol";
 import type { SceneItem } from "../../model/scene.js";
 import { itemAlpha, itemColor } from "../palette.js";
+import { type BoardParticleState, createBoardParticleLayer, hideBoardParticle, placeBoardParticle, sizeBoardParticleLayer } from "../particles.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
 import { drawFarPlate } from "./far-plate.js";
@@ -12,7 +13,12 @@ const TRAIL_SAMPLES = 64;
 
 type EffectParts = {
 	root: Container;
-	graphics: Graphics;
+	body: Container;
+	still: Graphics;
+	stillKey: string;
+	moving: Graphics;
+	particles: ParticleContainer | null;
+	shape: BoardParticleShape | null;
 	trail: Array<{ x: number; y: number; t: number }>;
 };
 
@@ -38,6 +44,7 @@ function random(seed: number, index: number, channel: number): number {
 }
 
 type Props = BoardEffectItem["props"];
+type Emission = { props: Props; seed: number; colors: number[]; shape: BoardParticleShape };
 
 function velocity(props: Props, seed: number, index: number) {
 	const angle = ((props.direction + (random(seed, index, 1) - 0.5) * props.spread) * Math.PI) / 180;
@@ -45,63 +52,95 @@ function velocity(props: Props, seed: number, index: number) {
 	return { vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed };
 }
 
-function drawParticles(graphics: Graphics, props: Props, width: number, height: number, time: number, seed: number, color: number) {
-	const rate = props.rate * props.intensity;
-	if (rate <= 0) return;
-	const life = props.life;
-	const interval = 1000 / rate;
-	const newest = Math.floor(time / interval);
-	const count = Math.min(BOARD_EFFECT_MAX_PARTICLES, Math.ceil(life / interval));
-	for (let index = Math.max(0, newest - count + 1); index <= newest; index += 1) {
-		const age = (time - index * interval) / 1000;
-		if (age < 0 || age * 1000 > life) continue;
-		const progress = (age * 1000) / life;
-		const { vx, vy } = velocity(props, seed, index);
-		const x = random(seed, index, 3) * width + vx * age;
-		const y = random(seed, index, 4) * height + vy * age + 0.5 * props.gravity * age * age;
-		const size = props.particleSize * (0.6 + random(seed, index, 5) * 0.8) * (1 - progress * 0.5);
-		graphics.circle(x, y, size / 2).fill({ color, alpha: (1 - progress) * Math.min(1, props.intensity) });
-	}
+function particleAt(emission: Emission, seed: number, index: number, age: number, x: number, y: number, size: number, alpha: number): BoardParticleState {
+	const { props, colors, shape } = emission;
+	const { vx, vy } = velocity(props, seed, index);
+	const px = x + vx * age;
+	const py = y + vy * age + 0.5 * props.gravity * age * age;
+	let rotation = 0;
+	if (shape === "spark") rotation = Math.atan2(vy + props.gravity * age, vx);
+	else if (shape === "square" || shape === "star") rotation = random(seed, index, 6) * Math.PI * 2 + (random(seed, index, 7) - 0.5) * 4 * Math.PI * age;
+	const color = colors[Math.floor(random(seed, index, 8) * colors.length)] ?? 0xffffff;
+	return { x: px, y: py, size, rotation, color, alpha };
 }
 
-function drawImpact(graphics: Graphics, props: Props, width: number, height: number, time: number, seed: number, color: number) {
-	const life = props.life;
-	const cycle = Math.floor(time / life);
-	const age = (time - cycle * life) / 1000;
-	const progress = (age * 1000) / life;
-	const count = Math.min(BOARD_EFFECT_MAX_PARTICLES, Math.round(props.rate * props.intensity));
+function emitParticles(slots: Particle[], emission: Emission, width: number, height: number, time: number) {
+	const { props, seed } = emission;
+	const rate = props.rate * props.intensity;
+	let used = 0;
+	if (rate > 0) {
+		const interval = 1000 / rate;
+		const newest = Math.floor(time / interval);
+		for (let index = Math.max(0, newest - slots.length + 1); index <= newest && used < slots.length; index += 1) {
+			const age = (time - index * interval) / 1000;
+			if (age < 0 || age * 1000 > props.life) continue;
+			const progress = (age * 1000) / props.life;
+			const size = props.particleSize * (0.6 + random(seed, index, 5) * 0.8) * (1 - progress * 0.5);
+			const state = particleAt(emission, seed, index, age, random(seed, index, 3) * width, random(seed, index, 4) * height, size, (1 - progress) * Math.min(1, props.intensity));
+			placeBoardParticle(slots[used++] as Particle, state);
+		}
+	}
+	for (; used < slots.length; used += 1) hideBoardParticle(slots[used] as Particle);
+}
+
+function emitImpact(slots: Particle[], ring: Graphics, emission: Emission, width: number, height: number, time: number, color: number) {
+	const { props, seed } = emission;
+	const cycle = Math.floor(time / props.life);
+	const age = (time - cycle * props.life) / 1000;
+	const progress = (age * 1000) / props.life;
 	const cx = width / 2;
 	const cy = height / 2;
 	const alpha = (1 - progress) ** 1.5 * Math.min(1, props.intensity);
 	const radius = Math.min(width, height) * 0.5 * Math.sqrt(progress);
-	graphics.circle(cx, cy, radius).stroke({ color, width: Math.max(1, props.particleSize * (1 - progress)), alpha: alpha * 0.8 });
+	ring.circle(cx, cy, radius).stroke({ color, width: Math.max(1, props.particleSize * (1 - progress)), alpha: alpha * 0.8 });
 	const burst = hashString(`${seed}:${cycle}`);
-	for (let index = 0; index < count; index += 1) {
-		const { vx, vy } = velocity({ ...props, spread: props.spread }, burst, index);
-		const x = cx + vx * age;
-		const y = cy + vy * age + 0.5 * props.gravity * age * age;
-		graphics.circle(x, y, (props.particleSize / 2) * (1 - progress * 0.6)).fill({ color, alpha });
+	const size = props.particleSize * (1 - progress * 0.6);
+	for (let index = 0; index < slots.length; index += 1) {
+		placeBoardParticle(slots[index] as Particle, particleAt(emission, burst, index, age, cx, cy, size, alpha));
 	}
 }
 
-function drawFlash(graphics: Graphics, props: Props, width: number, height: number, time: number, color: number) {
-	const progress = (time % props.life) / props.life;
-	const alpha = (1 - progress) ** 2 * Math.min(1, props.intensity);
-	if (alpha <= 0.001) return;
-	graphics.rect(0, 0, width, height).fill({ color, alpha });
+function particleCount(props: Props): number {
+	if (props.kind === "impact") return Math.min(BOARD_EFFECT_MAX_PARTICLES, Math.round(props.rate * props.intensity));
+	const rate = props.rate * props.intensity;
+	return rate > 0 ? Math.min(BOARD_EFFECT_MAX_PARTICLES, Math.ceil(props.life / (1000 / rate)) + 1) : 0;
 }
 
-function drawGlow(graphics: Graphics, props: Props, width: number, height: number, time: number, color: number) {
-	const pulse = 0.75 + 0.25 * Math.sin((time / props.life) * Math.PI * 2);
+function particleBounds(props: Props, width: number, height: number): Rectangle {
+	const seconds = props.life / 1000;
+	const reach = props.speed * 1.3 * seconds + 0.5 * Math.abs(props.gravity) * seconds * seconds + props.particleSize * 1.4;
+	return new Rectangle(-reach, -reach, width + reach * 2, height + reach * 2);
+}
+
+function syncParticles(parts: EffectParts, emission: Emission, width: number, height: number): Particle[] {
+	if (!parts.particles || parts.shape !== emission.shape) {
+		parts.particles?.destroy();
+		parts.particles = parts.body.addChild(createBoardParticleLayer(emission.shape));
+		parts.shape = emission.shape;
+	}
+	sizeBoardParticleLayer(parts.particles, particleCount(emission.props), particleBounds(emission.props, width, height));
+	return parts.particles.particleChildren as Particle[];
+}
+
+function drawStill(parts: EffectParts, props: Props, width: number, height: number, color: number) {
+	const key = `${props.kind}:${width}:${height}:${color}`;
+	if (parts.stillKey === key) return;
+	parts.stillKey = key;
+	const graphics = parts.still.clear();
+	if (props.kind === "flash") graphics.rect(0, 0, width, height).fill({ color });
+	if (props.kind !== "glow") return;
 	const rings = 12;
-	const cx = width / 2;
-	const cy = height / 2;
 	for (let ring = rings; ring >= 1; ring -= 1) {
 		const fraction = ring / rings;
-		graphics
-			.ellipse(cx, cy, (width / 2) * fraction, (height / 2) * fraction)
-			.fill({ color, alpha: (Math.min(1, props.intensity) * pulse * (1 - fraction) * 2) / rings });
+		graphics.ellipse(width / 2, height / 2, (width / 2) * fraction, (height / 2) * fraction).fill({ color, alpha: ((1 - fraction) * 2) / rings });
 	}
+}
+
+function stillAlpha(props: Props, time: number): number {
+	const intensity = Math.min(1, props.intensity);
+	if (props.kind === "flash") return (1 - (time % props.life) / props.life) ** 2 * intensity;
+	if (props.kind === "glow") return intensity * (0.75 + 0.25 * Math.sin((time / props.life) * Math.PI * 2));
+	return 0;
 }
 
 function drawTrail(graphics: Graphics, parts: EffectParts, item: SceneItem<BoardEffectItem>, context: BoardRenderContext, color: number) {
@@ -150,29 +189,31 @@ function sync(container: Container, item: SceneItem<BoardEffectItem>, context: B
 	positionShell(parts.root, item);
 	const { width, height } = item.frame;
 	const { props } = item;
-	const color = itemColor(context, item.style.fill ?? item.style.stroke, "brand", "fill");
-	const seed = hashString(props.seed ?? item.id);
+	const paint = item.style.fill ?? item.style.stroke;
+	const color = itemColor(context, paint, "brand", "fill");
 	const time = Math.max(0, context.time);
-	const graphics = parts.graphics;
-	graphics.alpha = itemAlpha(context, item.style.fill ?? item.style.stroke);
-	graphics.clear();
-	switch (props.kind) {
-		case "particles":
-			drawParticles(graphics, props, width, height, time, seed, color);
-			break;
-		case "impact":
-			drawImpact(graphics, props, width, height, time, seed, color);
-			break;
-		case "flash":
-			drawFlash(graphics, props, width, height, time, color);
-			break;
-		case "glow":
-			drawGlow(graphics, props, width, height, time, color);
-			break;
-		case "trail":
-			drawTrail(graphics, parts, item, context, color);
-			break;
+	parts.body.alpha = itemAlpha(context, paint);
+	parts.moving.clear();
+	const emits = props.kind === "particles" || props.kind === "impact";
+	if (emits) {
+		const emission: Emission = {
+			props,
+			seed: hashString(props.seed ?? item.id),
+			shape: props.shape ?? "circle",
+			colors: props.colors?.map((entry) => itemColor(context, entry, "brand", "fill")) ?? [color],
+		};
+		const slots = syncParticles(parts, emission, width, height);
+		if (props.kind === "particles") emitParticles(slots, emission, width, height, time);
+		else emitImpact(slots, parts.moving, emission, width, height, time, color);
+	} else if (parts.particles) {
+		parts.particles.destroy();
+		parts.particles = null;
+		parts.shape = null;
 	}
+	if (props.kind === "flash" || props.kind === "glow") drawStill(parts, props, width, height, color);
+	parts.still.visible = props.kind === "flash" || props.kind === "glow";
+	parts.still.alpha = stillAlpha(props, time);
+	if (props.kind === "trail") drawTrail(parts.moving, parts, item, context, color);
 }
 
 export const effectCardRenderer: BoardCardRenderer = {
@@ -181,9 +222,10 @@ export const effectCardRenderer: BoardCardRenderer = {
 	animated: true,
 	create: (item, context) => {
 		const root = new Container();
-		const graphics = new Graphics();
-		root.addChild(graphics);
-		partsByContainer.set(root, { root, graphics, trail: [] });
+		const body = root.addChild(new Container());
+		const still = body.addChild(new Graphics());
+		const moving = body.addChild(new Graphics());
+		partsByContainer.set(root, { root, body, still, stillKey: "", moving, particles: null, shape: null, trail: [] });
 		if (item.type === "effect") sync(root, item as SceneItem<BoardEffectItem>, context);
 		return root;
 	},

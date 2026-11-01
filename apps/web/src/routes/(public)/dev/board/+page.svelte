@@ -33,6 +33,7 @@ const document = boardGalleryDocument({
 	bench,
 	scenario,
 	deck: page.url.searchParams.has("deck"),
+	effects: page.url.searchParams.has("effects"),
 	motion: page.url.searchParams.has("motion"),
 	tracks: Number(page.url.searchParams.get("tracks") ?? 0) || undefined,
 });

@@ -1,10 +1,12 @@
 <script lang="ts">
-import type { BoardRegionDirection } from "@neta-art/cohub/board";
+import type { BoardReaction } from "@cohub/protocol/realtime";
+import { type BoardRegionDirection, type WorldPoint, worldPoint } from "@neta-art/cohub/board";
 import {
 	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
 	ChevronUp,
+	Heart,
 	Play,
 	X,
 } from "lucide-svelte";
@@ -17,10 +19,12 @@ const {
 	editor,
 	isMobile = false,
 	onPresent,
+	onReact,
 }: {
 	editor: BoardEditor;
 	isMobile?: boolean;
 	onPresent?: () => void;
+	onReact?: (reaction: BoardReaction, at: WorldPoint) => void;
 } = $props();
 
 const HINT_MS = 1600;
@@ -150,6 +154,11 @@ const map = $derived.by(() => {
 	};
 });
 
+function heart() {
+	const rect = current?.rect;
+	if (rect) onReact?.("heart", worldPoint(rect.x + rect.width / 2, rect.y + rect.height * 0.9));
+}
+
 function go(id: string) {
 	mapOpen = false;
 	editor.goToFrame(id);
@@ -237,6 +246,17 @@ function go(id: string) {
 				<ChevronRight class="h-3.5 w-3.5" />
 			</button>
 			<div class="toolbar-divider"></div>
+			{#if presenting && onReact}
+				<button
+					type="button"
+					class="tool-key"
+					title={m.board_reaction_heart({}, { locale })}
+					aria-label={m.board_reaction_heart({}, { locale })}
+					onclick={heart}
+				>
+					<Heart class="h-3.5 w-3.5" />
+				</button>
+			{/if}
 			{#if !presenting && onPresent}
 				<button
 					type="button"

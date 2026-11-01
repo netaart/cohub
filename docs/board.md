@@ -44,7 +44,8 @@ Common fields: `type`, `parent`, `z`, `position`, `size`, `rotation` (degrees),
   slide is a 960×540 frame, media take a 480 long edge, cards keep their interface
   size, and text uses 56 / 40 / 24 / 16 for title, heading, body and caption.
   `boards schema` lists it under `scale`.
-- `style`: `fill`, `fillOpacity`, `stroke`, `strokeWidth`, `dash`, `radius`, `trim`.
+- `style`: `fill`, `fillOpacity`, `stroke`, `strokeWidth`, `dash`, `radius`, `trim`,
+  and the effects below.
   A color is a palette token (`brand`, `neutral`, `blue`, …, follows the theme),
   any CSS color, or `{ "light": …, "dark": … }`.
 - An image is drawn whole inside its box; `crop` picks the region to show, so a crop
@@ -54,14 +55,14 @@ Common fields: `type`, `parent`, `z`, `position`, `size`, `rotation` (degrees),
 | type | props |
 |---|---|
 | `frame` | `label`, `clip`, optional `decoration` (`frame` or `none`) |
-| `text` | `text`, `fontSize`, `fontWeight`, `font`, `align`, `lineHeight`, `width`, `reveal` |
+| `text` | `text`, `fontSize`, `fontWeight`, `font`, `align`, `lineHeight`, `width`, `reveal`, `revealBy` (`char` `word` `line`), `revealMotion` (`cut` `fade` `rise`) |
 | `shape` | `geometry` (`rectangle` `rounded` `ellipse` `diamond` `triangle` `path`), `path`, `text`, `fontSize`, `align` |
 | `draw` | `points` (`{x, y, p}` relative to `position`) |
 | `arrow` | `start`, `end` (a point, or `{ "item": id, "anchor"?, "port"? }`), `route`, `bend`, `waypoints`, `arrowStart`, `arrowEnd`, `label`, `fontSize`, `relation` |
 | `image` `video` `audio` `file` | `src` (public HTTP(S) URL or relative Space file path), `crop` (image: `{x, y, w, h}` as 0–1 fractions of the source), `snapshot` (cached media facts), `origin` (media: `{ taskRunId, artifactId }` of the run that produced it) |
 | `task` | `taskRunId`, `snapshot` (server-maintained; see [Tasks on Boards](#tasks-on-boards)) |
 | `session` | `sessionId`, `snapshot` (server-maintained; see [Sessions on Boards](#sessions-on-boards)) |
-| `effect` | `kind` (`particles` `trail` `impact` `flash` `glow`) and its parameters |
+| `effect` | `kind` (`particles` `trail` `impact` `flash` `glow`) and its parameters; `shape` (`circle` `square` `star` `heart` `spark`) and `colors` for particles and impacts |
 | `custom` | empty; the common `script` attachment supplies drawing or native scene content |
 | `vendor.kind` | any; an extension type, namespaced like `acme.order` |
 
@@ -83,6 +84,25 @@ Deleting an item that is still referenced fails and lists the references; `casca
 also deletes children and the tracks that target it. Arrows bound to a deleted item
 keep their place and fall back to a point. Media sources must be a public HTTP(S)
 URL without credentials or a relative Space path.
+
+### Effects
+
+Any item takes `style.filter`, `style.shadow` and `style.blend`, and every number and
+color in them animates by path (`style.filter.blur`, `style.shadow.color`, …):
+
+```json
+{"style":{"filter":{"saturate":0,"blur":2},"shadow":{"color":"blue","blur":24,"y":0,"opacity":0.8},"blend":"multiply"}}
+```
+
+- `filter`: `blur` (board units, as CSS `blur()`), `brightness`, `contrast`, `saturate`,
+  `hue` (degrees), `grayscale`, `sepia`, `invert`, applied in that order.
+- `shadow`: `color` (black), `opacity` (0.35), `blur` (16, as CSS `drop-shadow()`), `x`,
+  `y` (8). It follows the visible shape; with no offset and a bright color it glows.
+- `blend`: `normal`, `multiply`, `screen` or `add`.
+- On a frame they apply to the frame and its contents as one layer.
+- `board.atmosphere` adds `vignette` and `grain` (0–1) over the whole view.
+
+Exports draw all of them. Low-end devices skip blur and shadows and keep the rest.
 
 ### Media sources
 

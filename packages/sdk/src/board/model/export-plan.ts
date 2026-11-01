@@ -1,6 +1,6 @@
 
 import { arrowBindings, type BoardDocument, parseBoardDocument } from "@cohub/protocol";
-import { itemBounds, type Rect, rectsIntersect, unionRects } from "./geometry.js";
+import { effectBounds, itemBounds, type Rect, rectsIntersect, unionRects } from "./geometry.js";
 import { arrowPathBounds, resolveSceneArrow } from "./arrow-geometry.js";
 import type { BoardScene, BoardSceneItem } from "./scene.js";
 
@@ -30,7 +30,7 @@ export type BoardExportPlan = {
 };
 
 export function normalizeBoardDocument(document: unknown): BoardDocument {
-  const parsed = parseBoardDocument(document);
+  const parsed = parseBoardDocument(document, { keepUnknown: true });
   if (!parsed.ok) throw new Error(`Invalid Board document: ${parsed.diagnostics.map((entry) => `${entry.path}: ${entry.message}`).join("; ")}`);
   return parsed.document;
 }
@@ -42,14 +42,15 @@ export const BOARD_EXPORT_DEFAULT_PADDING = 32;
 export const BOARD_EXPORT_ITEM_WARN_THRESHOLD = 2000;
 
 export function exportItemBounds(item: BoardSceneItem, scene: BoardScene): Rect | null {
-  let bounds: Rect | null = item.type === "arrow"
+  let bounds: Rect | null = effectBounds(item.type === "arrow"
     ? arrowPathBounds(resolveSceneArrow(item as Parameters<typeof resolveSceneArrow>[0], scene), item.style.strokeWidth)
-    : itemBounds(item.frame);
+    : itemBounds(item.frame), item.style);
   let cursor = item.parent;
   for (let depth = 0; cursor && bounds && depth < 64; depth += 1) {
     const parent = scene.get(cursor);
-    if (!parent) break;
-    if (parent.type === "frame" && (parent.props as { clip?: boolean }).clip !== false) bounds = intersectRects(bounds, itemBounds(parent.frame));
+    if (parent?.type !== "frame") break;
+    if ((parent.props as { clip?: boolean }).clip !== false) bounds = intersectRects(bounds, itemBounds(parent.frame));
+    if (bounds) bounds = effectBounds(bounds, parent.style);
     cursor = parent.parent;
   }
   return bounds;

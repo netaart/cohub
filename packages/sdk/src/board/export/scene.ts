@@ -19,7 +19,8 @@ import {
 import type { BoardSettings } from "@cohub/protocol";
 import type { BoardScene, BoardSceneItem } from "../model/scene.js";
 import type { Rect } from "../model/geometry.js";
-import { clippingAncestor, isClippingFrame, syncClipGroup } from "../render/clip.js";
+import { createBoardAtmosphereLayer } from "../render/atmosphere.js";
+import { type FrameGroup, groupingAncestor, isGroupingFrame, isSelfGroupedFrame, syncBoardItemEffects, syncFrameGroup } from "../render/frame-group.js";
 import { textureIsCutout } from "../render/cutout.js";
 
 export type BoardExportSceneInput = {
@@ -106,40 +107,46 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
     root.addChild(backdrop.container);
   }
 
-  const world = new Container({ isRenderGroup: true, label: "board-export-world" });
+  const world = new Container({ label: "board-export-world" });
   world.scale.set(input.scale);
   world.position.set(-input.world.x * input.scale, -input.world.y * input.scale);
 
   const resolve = input.renderers ?? getBoardCardRenderer;
-  const groups = new Map<string, Container>();
-  function hostFor(item: BoardSceneItem): Container {
-    const clip = clippingAncestor(input.scene, item);
-    const ancestor = clip ? input.scene.get(clip) : undefined;
-    if (!ancestor) return world;
-    let group = groups.get(ancestor.id);
-    if (!group) {
-      group = syncClipGroup(undefined, ancestor).group;
-      hostFor(ancestor).addChild(group);
-      groups.set(ancestor.id, group);
+  const groups = new Map<string, FrameGroup>();
+  function groupOf(frame: BoardSceneItem): FrameGroup {
+    let entry = groups.get(frame.id);
+    if (!entry) {
+      entry = syncFrameGroup(undefined, frame, context);
+      outerHost(frame).addChild(entry.group);
+      groups.set(frame.id, entry);
     }
-    return group;
+    return entry;
+  }
+  function outerHost(item: BoardSceneItem): Container {
+    const frame = input.scene.get(groupingAncestor(input.scene, item) ?? "");
+    return frame ? groupOf(frame).content : world;
   }
   for (const item of input.items) {
     const opacity = input.scene.opacity(item.id);
     if (opacity <= 0) continue;
-    const host = hostFor(item);
+    const host = isSelfGroupedFrame(item) ? groupOf(item).group : outerHost(item);
     const container = resolve(item, context).create(item, context);
     container.alpha = opacity;
+    syncBoardItemEffects(container, item, context);
     const view = input.viewTextures?.get(item.id);
     if (view) container.addChild(new Sprite(view)).setSize(item.frame.width, item.frame.height);
     host.addChild(container);
-    if (isClippingFrame(item) && !groups.has(item.id)) {
-      const { group } = syncClipGroup(undefined, item);
-      host.addChild(group);
-      groups.set(item.id, group);
+    if (isGroupingFrame(item)) {
+      const { group, content } = groupOf(item);
+      group.addChild(content);
     }
   }
   root.addChild(world);
+  if (input.settings.atmosphere) {
+    const atmosphere = createBoardAtmosphereLayer();
+    atmosphere.sync(input.settings.atmosphere, { width: outputWidth, height: outputHeight, density: 1 });
+    root.addChild(atmosphere.container);
+  }
 
   return {
     root,

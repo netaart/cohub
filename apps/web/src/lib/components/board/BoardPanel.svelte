@@ -4,6 +4,7 @@ import type {
 	BoardPlaybackCommand,
 	BoardPlaybackSnapshot,
 } from "@cohub/protocol";
+import type { BoardReaction } from "@cohub/protocol/realtime";
 import {
 	type BoardCameraState,
 	type BoardLaunch,
@@ -719,8 +720,10 @@ const history = boardClient && {
 const presence = editable ? boardClient : null;
 const generates = editable && spaceId !== null;
 const awareness: BoardAwarenessController = createBoardAwarenessController({
-	send: (seq, update) =>
-		presence ? presence.updateAwareness(seq, update) : Promise.resolve(),
+	send: (seq, update) => {
+		const client = update.type === "reaction" ? boardClient : presence;
+		return client ? client.updateAwareness(seq, update) : Promise.resolve();
+	},
 	onChange: () => {
 		awarenessVersion += 1;
 	},
@@ -1105,6 +1108,10 @@ function retrySync() {
 	void onRetrySync?.();
 }
 
+function reactAt(reaction: BoardReaction, point: { x: number; y: number } | null) {
+	if (point && scriptStage) awareness.react(reaction, scriptStage.toWorld(point.x, point.y));
+}
+
 function handleContextMenu(request: BoardContextMenuRequest): boolean {
 	if (!active || presenting) return false;
 	contextMenu = { x: request.clientX, y: request.clientY };
@@ -1293,6 +1300,7 @@ onDestroy(() => {
 			{editor}
 			{isMobile}
 			onPresent={() => present()}
+			onReact={boardClient ? (reaction, at) => awareness.react(reaction, at) : undefined}
 		/>
 		{#if !presenting}
 			{#if editable && !isMobile}
@@ -1434,6 +1442,7 @@ onDestroy(() => {
 				onCopy={() => { copySelection(); }}
 				onCopyLink={shareUrl ? () => void copyViewLink() : undefined}
 				onPresent={present}
+				onReact={boardClient && scriptStage ? (reaction) => reactAt(reaction, contextMenu) : undefined}
 				onExport={exportBridge ? openExport : undefined}
 				onReplay={history ? () => { contextMenu = null; replayOpen = true; } : undefined}
 				onAnimate={editable ? () => { contextMenu = null; animationOpen = true; } : undefined}

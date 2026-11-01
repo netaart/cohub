@@ -1,5 +1,6 @@
 import { type Graphics, Matrix, type Texture } from "pixi.js";
 import { type WorldPoint, worldPoint } from "../model/geometry.js";
+import { drawBoardShadow } from "./shadow.js";
 import { roundRectPoints } from "./stroke.js";
 import type { BoardRenderStyle, BoardShadowStyle } from "./style.js";
 
@@ -103,6 +104,8 @@ export function drawCardShadow(
 	shadow: BoardShadowStyle | null,
 ) {
 	if (!shadow || shadow.alpha <= 0 || shadow.blur <= 0) return;
+	const radius = style.corner === "pixel" ? 0 : Math.min(style.radius, rect.width / 2, rect.height / 2);
+	if (drawBoardShadow(graphics, rect, { blur: shadow.blur, radius, y: shadow.y }, shadow)) return;
 	const offset = { ...rect, y: rect.y + shadow.y };
 	const reach = (index: number) => (1 - index / SHADOW_LAYERS) ** 2;
 	for (let index = SHADOW_LAYERS; index >= 1; index -= 1) {

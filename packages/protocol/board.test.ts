@@ -228,3 +228,20 @@ test("a new animation without duration lasts until its last keyframe", () => {
 	const empty = applyBoardPatchToDocument(document, { animations: { intro: {} } });
 	assert.equal(empty.ok, false);
 });
+
+test("fields from newer clients survive reads and edits but not new writes", () => {
+	const stored = {
+		board: { future: { glow: true } },
+		items: { a: { type: "shape", style: { fill: "blue", future: 1 }, future: "x" } },
+		animations: { intro: { duration: 1000, tracks: { t: { target: "a", property: "style.future", keyframes: [{ at: 0, value: 0 }] } } } },
+	};
+	assert.equal(parseBoardDocument(stored).ok, false);
+	const read = parseBoardDocument(stored, { keepUnknown: true });
+	assert.ok(read.ok);
+	const { document } = apply(read.document, { items: { a: { style: { fill: "green" } } }, board: { title: "T" } });
+	assert.deepEqual(document.items.a?.style, { fill: "green", future: 1 });
+	assert.equal((document.items.a as unknown as { future: string }).future, "x");
+	assert.deepEqual((document.board as unknown as { future: unknown }).future, { glow: true });
+	const typo = applyBoardPatchToDocument(document, { items: { a: { style: { fil: "red" } } } });
+	assert.equal(typo.ok, false);
+});

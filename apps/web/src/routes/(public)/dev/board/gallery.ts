@@ -548,6 +548,53 @@ function benchItems(
 	return items;
 }
 
+function effectItems(): Record<string, unknown> {
+	const solid = (fill: string) => ({ fill, fillOpacity: 1 });
+	const shape = (x: number, y: number, style: object, text: string, geometry = "rounded") => ({
+		type: "shape",
+		position: { x, y },
+		size: { width: 160, height: 100 },
+		style,
+		props: { geometry, text },
+	});
+	return {
+		plain: shape(0, 0, solid("blue"), "plain"),
+		hue: shape(200, 0, { ...solid("blue"), filter: { hue: 120, saturate: 1.6 } }, "hue"),
+		blur: shape(400, 0, { ...solid("blue"), filter: { blur: 4 } }, "blur"),
+		shadow: shape(600, 0, { ...solid("amber"), shadow: { blur: 24, y: 10, opacity: 0.8 } }, "shadow", "ellipse"),
+		glow: {
+			type: "text",
+			position: { x: 0, y: 160 },
+			style: { fill: "white", shadow: { color: "rose", blur: 16, x: 0, y: 0, opacity: 1 } },
+			props: { text: "Glow", fontSize: 56 },
+		},
+		gray: shape(200, 140, { ...solid("green"), filter: { grayscale: 1 } }, "gray"),
+		under: shape(400, 140, solid("rose"), "", "ellipse"),
+		screen: shape(460, 170, { ...solid("blue"), blend: "screen" }, "screen", "ellipse"),
+		group: {
+			type: "frame",
+			position: { x: 660, y: 140 },
+			size: { width: 200, height: 140 },
+			style: { shadow: { blur: 20, y: 12, opacity: 0.9 }, filter: { sepia: 1 } },
+			props: { label: "", decoration: "none", clip: false },
+		},
+		g1: { ...shape(10, 10, solid("blue"), "", "ellipse"), parent: "group", size: { width: 80, height: 80 } },
+		g2: { ...shape(70, 40, solid("green"), "group"), parent: "group", size: { width: 100, height: 70 } },
+		confetti: {
+			type: "effect",
+			position: { x: 0, y: 320 },
+			size: { width: 420, height: 80 },
+			props: { kind: "particles", rate: 60, life: 3000, speed: 40, direction: 90, spread: 40, gravity: 30, particleSize: 14, shape: "square", colors: ["rose", "amber", "blue", "green", "violet"] },
+		},
+		stars: {
+			type: "effect",
+			position: { x: 460, y: 320 },
+			size: { width: 200, height: 200 },
+			props: { kind: "impact", rate: 30, life: 1500, speed: 120, particleSize: 18, shape: "star", colors: ["amber", "white"] },
+		},
+	};
+}
+
 function deckItems(): Record<string, unknown> {
 	const items: Record<string, unknown> = {};
 	for (let index = 0; index < 6; index += 1) {
@@ -585,6 +632,7 @@ export function boardGalleryDocument(
 		bench?: number;
 		scenario?: BenchScenario;
 		deck?: boolean;
+		effects?: boolean;
 		motion?: boolean;
 		tracks?: number;
 	} = {},
@@ -593,11 +641,14 @@ export function boardGalleryDocument(
 		? benchItems(options.bench, options.scenario ?? "mixed")
 		: options.deck
 			? deckItems()
+			: options.effects
+				? effectItems()
 			: options.motion
 				? motionItems(options.tracks)
 				: galleryItems();
 	const animations = options.motion ? motionAnimations(options.tracks) : {};
-	const parsed = parseBoardDocument({ board: {}, items, animations });
+	const board = options.effects ? { atmosphere: { vignette: 0.5, grain: 0.2 } } : {};
+	const parsed = parseBoardDocument({ board, items, animations });
 	if (!parsed.ok)
 		throw new Error(
 			parsed.diagnostics

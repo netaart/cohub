@@ -2,6 +2,7 @@ export type * from "./board-awareness.js";
 export type * from "./stream.js";
 export type * from "./types.js";
 export {
+  BOARD_REACTIONS,
   BOARD_AWARENESS_MAX_VIEWPORT_ZOOM,
   BOARD_AWARENESS_MIN_VIEWPORT_ZOOM,
   BOARD_AWARENESS_WORLD_COORDINATE_LIMIT,

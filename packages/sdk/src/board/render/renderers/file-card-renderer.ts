@@ -56,7 +56,6 @@ type FileParts = {
 	body: Container;
 	clip: Graphics;
 	cover: Sprite;
-	coverMask: Graphics;
 	typeMark: Text;
 	tag: CardTag;
 	title: Text;
@@ -211,10 +210,8 @@ function syncContent(parts: FileParts, item: BoardSceneItem, view: FileCardView,
 		if (showCover && texture) {
 			if (parts.cover.texture !== texture) parts.cover.texture = texture;
 			layoutCover(parts.cover, width, band, texture);
-			parts.coverMask.clear().rect(0, 0, width, band).fill({ color: 0xffffff });
 		}
 		parts.cover.visible = showCover;
-		parts.coverMask.visible = showCover;
 
 		if (!band) {
 			parts.plate
@@ -302,8 +299,6 @@ export const fileCardRenderer: BoardCardRenderer = {
 		const body = new Container();
 		const clip = new Graphics();
 		const cover = new Sprite(Texture.EMPTY);
-		const coverMask = new Graphics();
-		cover.mask = coverMask;
 		const resolution = context.textResolution;
 
 		const title = new Text({
@@ -343,7 +338,7 @@ export const fileCardRenderer: BoardCardRenderer = {
 			roundPixels: true,
 		});
 		body.mask = clip;
-		body.addChild(cover, coverMask, typeMark, title, excerpt);
+		body.addChild(cover, typeMark, title, excerpt);
 		const tag = createCardTag();
 		root.addChild(plate, body, clip, tag.root);
 		partsByContainer.set(root, {
@@ -353,7 +348,6 @@ export const fileCardRenderer: BoardCardRenderer = {
 			body,
 			clip,
 			cover,
-			coverMask,
 			typeMark,
 			title,
 			excerpt,

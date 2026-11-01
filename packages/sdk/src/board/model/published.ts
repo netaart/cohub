@@ -13,7 +13,7 @@ export function parsePublishedBoard(manifest: unknown, manifestUrl: string): Pub
 	const value = manifest as Partial<AppBoardArtifactManifest> | null;
 	if (value?.kind !== "cohub.work.board" || !value.snapshot || !Array.isArray(value.assets))
 		throw new Error("Not a published Board artifact.");
-	const parsed = parseBoardDocument(boardSnapshotPatch(value.snapshot));
+	const parsed = parseBoardDocument(boardSnapshotPatch(value.snapshot), { keepUnknown: true });
 	if (!parsed.ok) throw new Error("Published Board document is invalid.");
 	const base = new URL(".", manifestUrl);
 	const urls = new Map<string, string>();

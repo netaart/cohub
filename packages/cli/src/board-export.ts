@@ -89,7 +89,7 @@ export async function loadBoardDocument(
     if (result.version !== snapshot.version) throw new Error("Board changed while reading. Retry the export.");
     Object.assign(items, result.items);
   }
-  const parsed = parseBoardDocument({ board: snapshot.board, items, animations: snapshot.animations ?? {} });
+  const parsed = parseBoardDocument({ board: snapshot.board, items, animations: snapshot.animations ?? {} }, { keepUnknown: true });
   if (!parsed.ok) throw new Error(`Board ${result.id} could not be read: ${parsed.diagnostics[0]?.path}: ${parsed.diagnostics[0]?.message}`);
   return { document: parsed.document, boardId: result.id, title: result.title };
 }

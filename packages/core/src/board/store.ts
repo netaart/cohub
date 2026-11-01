@@ -47,8 +47,10 @@ import {
 	diffMergePatch,
 	isBuiltinItem,
 	isEmptyBoardDelta,
+	keepAllBoardFields,
 	parseBoardDocument,
 	parseBoardItem,
+	parseKeepingBoardFields,
 	summarizeBoardDelta,
 	trackReferences,
 } from "@cohub/protocol";
@@ -98,21 +100,27 @@ type JsonRecord = Record<string, unknown>;
 
 
 function readItem(id: string, data: unknown): BoardItem {
-	const parsed = parseBoardItem(data, `items.${id}`);
+	const parsed = parseBoardItem(data, `items.${id}`, keepAllBoardFields);
 	if (!parsed.ok) throw new BoardError(500, "INVALID_STORED_ITEM", `items.${id}: invalid stored item`, parsed.diagnostics);
 	return parsed.item;
 }
 
+function readStored<T>(schema: Parameters<typeof parseKeepingBoardFields<T>>[0], data: unknown): T {
+	const parsed = parseKeepingBoardFields(schema, data, keepAllBoardFields);
+	if (!parsed.success) throw parsed.error;
+	return parsed.data;
+}
+
 function readHeader(data: unknown): BoardAnimationHeader {
-	return BoardAnimationHeaderSchema.parse(data);
+	return readStored(BoardAnimationHeaderSchema, data);
 }
 
 function readTrack(data: unknown): BoardTrack {
-	return BoardTrackSchema.parse(data);
+	return readStored(BoardTrackSchema, data);
 }
 
 function readSettings(data: unknown): BoardSettings {
-	return BoardSettingsSchema.parse(data);
+	return readStored(BoardSettingsSchema, data);
 }
 
 function itemData(item: BoardItem): JsonRecord {

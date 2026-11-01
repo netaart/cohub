@@ -1,6 +1,7 @@
 export * from "./assets.js";
 export type { BoardBackdropStatus } from "./backdrop.js";
 export * from "./bench.js";
+export type { BoardBurst } from "./bursts.js";
 export * from "./device.js";
 export type { BoardFrameBudget, BoardFrameWork } from "./frame-budget.js";
 export * from "./lru.js";

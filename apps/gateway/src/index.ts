@@ -471,7 +471,7 @@ const publishBoardAwareness = async (
   const previousSeq = ctx.boardAwarenessSeqByBoard.get(boardId) ?? -1;
   if (seq <= previousSeq) return;
 
-  const permission = update.type === "state" ? "view" : "edit";
+  const permission = update.type === "state" || update.type === "reaction" ? "view" : "edit";
   const allowed = await canPublishBoardAwareness(ctx, { boardId, spaceId, permission });
   if (!allowed) {
     sendWsError(socket, "FORBIDDEN", `Missing Board ${permission} permission`, requestId);

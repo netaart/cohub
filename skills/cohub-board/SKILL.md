@@ -75,8 +75,11 @@ Worth knowing before you build:
 - `boards apply` fits new image and video items to their media's aspect ratio before
   writing; write `snapshot.naturalWidth` and `naturalHeight` to keep a box as authored.
 - `board` sets the background (`color`, `image` and a `dots` or `grid` pattern; omit
-  them to follow the theme), the grid's size and snapping, and `enter`, a motion for
-  items as they are added.
+  them to follow the theme), the grid's size and snapping, `atmosphere` (vignette,
+  grain), and `enter`, a motion for items as they are added.
+- Any item takes `style.filter` (blur, saturate, hue, …), `style.shadow` (a glow
+  with no offset) and `style.blend`; on a frame they treat it and its contents as one layer.
+  Text reveals by `char`, `word` or `line` (`props.revealBy`) with `revealMotion`.
 
 ## Read and write
 

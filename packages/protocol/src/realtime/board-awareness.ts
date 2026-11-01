@@ -113,6 +113,9 @@ export const BoardAwarenessGestureSchema = z.discriminatedUnion("kind", [
 	}),
 ]);
 
+export const BOARD_REACTIONS = ["heart", "star", "spark", "confetti"] as const;
+export type BoardReaction = (typeof BOARD_REACTIONS)[number];
+
 export const BoardAwarenessUpdateSchema = z.discriminatedUnion("type", [
 	BoardAwarenessStateUpdateSchema,
 	z.object({
@@ -127,6 +130,11 @@ export const BoardAwarenessUpdateSchema = z.discriminatedUnion("type", [
 	z.object({
 		type: z.literal("gesture.cancel"),
 		gestureId: idSchema,
+	}),
+	z.object({
+		type: z.literal("reaction"),
+		reaction: z.enum(BOARD_REACTIONS),
+		at: BoardAwarenessPointSchema,
 	}),
 ]);
 

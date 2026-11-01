@@ -20,6 +20,7 @@ import {
   defaultBoardPalette,
   resolveBoardBackdrop,
 } from "../render/index.js";
+import { flattenBoardEffects } from "../render/effects.js";
 import { ensureBoardTextMeasurement } from "../render/text-measurement.js";
 import type { BoardCardRendererResolver, BoardScriptHost } from "../render/renderers/board-renderer-registry.js";
 import { createBoardExportScene } from "./scene.js";
@@ -129,6 +130,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     backdropTexture: options.backgroundTexture,
   });
 
+  const flattened = renderer.type === RendererType.CANVAS ? flattenBoardEffects(renderer, exportScene.root, plan.scale) : null;
   try {
     const texture = renderer.textureGenerator.generateTexture({
       target: exportScene.root,
@@ -167,6 +169,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     return { canvas, plan, warnings };
   } finally {
     exportScene.destroy();
+    flattened?.();
   }
 }
 

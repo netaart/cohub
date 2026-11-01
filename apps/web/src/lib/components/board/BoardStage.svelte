@@ -40,6 +40,7 @@ import { boardAppFace, boardAppMeta } from "$lib/board/board-app";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
 import type { BoardAwarenessController } from "$lib/board/board-awareness";
 import { drawAwarenessOverlay } from "$lib/board/board-awareness-overlay";
+import { reactionBurst } from "$lib/board/board-reactions";
 import { readBoardResourceDrop } from "$lib/board/board-drop";
 import {
 	fileAvailability,
@@ -141,6 +142,7 @@ const syncsFiles = untrack(() => editable) && spaceId !== null;
 
 let host: HTMLDivElement | null = $state(null);
 let stage: BoardStage | null = null;
+let stopReactions: (() => void) | null = null;
 let dropActive = $state(false);
 let liveIds = $state.raw<ReadonlySet<string> | null>(null);
 let customThemeVersion = $state(0);
@@ -529,6 +531,9 @@ onMount(() => {
 		scriptLeader: () => scriptLeader?.() ?? true,
 	});
 	stage = mounted;
+	stopReactions = awareness.onReaction((event) =>
+		mounted.burst(reactionBurst(event.reaction, event.at, resolveTheme())),
+	);
 	onStageReady?.(mounted);
 	void mounted.ready.then((ready) => {
 		if (!ready || stage !== mounted) return;
@@ -590,6 +595,7 @@ onDestroy(() => {
 	cancelAnimationFrame(snapshotFrame);
 	liveTasks?.destroy();
 	liveSessions?.destroy();
+	stopReactions?.();
 	stage?.destroy();
 	stage = null;
 	onStageReady?.(null);

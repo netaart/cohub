@@ -42,7 +42,9 @@ import {
 	type BoardRenderPalette,
 	type BoardRenderStyle,
 	type BoardThemeBackdrop,
+	type BoardAtmosphereLayer,
 	boardRenderTheme,
+	createBoardAtmosphereLayer,
 	createBoardScriptHost,
 	defaultBoardRenderStyle,
 	getBoardCardRenderer,
@@ -61,6 +63,7 @@ import { scheduleBoardMaintenance } from "./maintenance.js";
 import { createBoardAutoPan } from "./auto-pan.js";
 import { type BoardStagePress, boardStagePress, createBoardLongPress, createBoardTouchTaps, createGhostClickGuard } from "./presses.js";
 import { observeDisplayDensity } from "./display-density.js";
+import { type BoardBurst, createBoardBursts } from "./bursts.js";
 import { defaultBoardDeviceBudget } from "./device.js";
 import { createBoardFrameClock } from "./frame-budget.js";
 import { scheduleBoardIdle } from "./idle.js";
@@ -159,6 +162,8 @@ export type BoardStage = {
 	invalidate(options?: { cards?: boolean; items?: Iterable<string> }): void;
 	isMaterialized(id: string): boolean;
 	toWorld(clientX: number, clientY: number): WorldPoint;
+	/** Play a short particle burst at a world point, such as a reaction; never written to the Board. */
+	burst(burst: BoardBurst): void;
 	stats(): BoardStageStats;
 	destroy(): void;
 };
@@ -223,6 +228,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let world: Container | null = null;
 	let overlay: Graphics | null = null;
 	let backdrop: ReturnType<typeof createBoardStageBackdrop> | null = null;
+	let atmosphere: BoardAtmosphereLayer | null = null;
+	let bursts: ReturnType<typeof createBoardBursts> | null = null;
 	let scene: ReturnType<typeof createBoardScene> | null = null;
 	const scripts = createBoardScriptController({
 		editor,
@@ -441,6 +448,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			themeKey: `${current.key}:${fontEpoch}`,
 			rendererType: app?.renderer.type === RendererType.CANVAS ? "canvas" : "gpu",
 			zoom: renderCamera().zoom,
+			blurs: device.blurs,
 			textResolution: textResolution.value,
 			reducedMotion: options.reducedMotion?.() ?? false,
 			labels: options.labels?.() ?? DEFAULT_BOARD_RENDER_LABELS,
@@ -776,6 +784,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			}
 			if ((work | frameWork) & FRAME_RENDER) {
 				frameWork &= ~FRAME_RENDER;
+				if (bursts?.tick(now, camera.zoom)) frameWork |= FRAME_RENDER;
 				app.render();
 				if (app.canvas.style.visibility) app.canvas.style.visibility = "";
 			}
@@ -942,6 +951,11 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		const renderScene = editor.scene;
 		world.position.set(camera.x, camera.y);
 		world.scale.set(camera.zoom);
+		if (atmosphere) {
+			atmosphere.container.position.set(-camera.x / camera.zoom, -camera.y / camera.zoom);
+			atmosphere.container.scale.set(1 / camera.zoom);
+			atmosphere.sync(editor.settings.atmosphere, { width: app.screen.width, height: app.screen.height, density: app.renderer.resolution });
+		}
 
 		const ids = visibleIds();
 		const center = pointToWorld(screenPoint(surface.width / 2, surface.height / 2), camera);
@@ -1302,7 +1316,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		world = new Container({ isRenderGroup: true, label: "board-world" });
 		const nodes = new Container({ isRenderGroup: true, label: "board-nodes" });
 		overlay = new Graphics({ label: "board-interaction-overlay" });
-		world.addChild(nodes, overlay);
+		atmosphere = createBoardAtmosphereLayer();
+		bursts = createBoardBursts();
+		world.addChild(nodes, atmosphere.container, bursts.container, overlay);
 		instance.stage.addChild(world);
 		scene = createBoardScene({ world: nodes, overlay, getRenderer: resolveRenderer, requestFrame: scheduleTick });
 
@@ -1390,6 +1406,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			};
 		},
 		toWorld: (clientX, clientY) => pointToWorld(localPoint(clientX, clientY), renderCamera()),
+		burst(burst) {
+			bursts?.add(burst, performance.now(), options.reducedMotion?.() ?? false);
+			scheduleRender();
+		},
 		destroy() {
 			disposed = true;
 			pointers.cancel();
@@ -1418,6 +1438,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			scripts.destroy();
 			backdrop?.destroy();
 			backdrop = null;
+			atmosphere = null;
+			bursts = null;
 			views.destroy();
 			world = null;
 			overlay = null;

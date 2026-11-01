@@ -14,6 +14,7 @@ export type BoardMenuAction = {
 </script>
 
 <script lang="ts">
+import { BOARD_REACTIONS, type BoardReaction } from "@cohub/protocol/realtime";
 import { boardItemOrigin, parseBoardMediaSource } from "@neta-art/cohub/board";
 import {
 	ArrowDownToLine,
@@ -23,6 +24,7 @@ import {
 	ClipboardCopy,
 	Copy,
 	Crosshair,
+	Heart,
 	ExternalLink,
 	History,
 	ImageDown,
@@ -31,10 +33,12 @@ import {
 	Link,
 	Link2,
 	LocateFixed,
+	PartyPopper,
 	Pencil,
 	Play,
 	RefreshCw,
 	Sparkles,
+	Star,
 	Trash2,
 } from "lucide-svelte";
 import { onDestroy, onMount, untrack } from "svelte";
@@ -62,6 +66,7 @@ const {
 	onCopy,
 	onCopyLink,
 	onPresent,
+	onReact,
 	itemActions = [],
 	sheet = false,
 }: {
@@ -83,11 +88,20 @@ const {
 	onCopy?: () => void;
 	onCopyLink?: () => void;
 	onPresent?: (frameId: string) => void;
+	onReact?: (reaction: BoardReaction) => void;
 	itemActions?: BoardMenuAction[];
 	sheet?: boolean;
 } = $props();
 
 const locale = $derived(getLocale());
+
+const REACTION_ICONS = { heart: Heart, star: Star, spark: Sparkles, confetti: PartyPopper } satisfies Record<BoardReaction, typeof Heart>;
+const REACTION_LABELS = {
+	heart: m.board_reaction_heart,
+	star: m.board_reaction_star,
+	spark: m.board_reaction_spark,
+	confetti: m.board_reaction_confetti,
+} satisfies Record<BoardReaction, unknown>;
 
 let menu: HTMLDivElement | null = $state(null);
 let left = $state(untrack(() => position.x));
@@ -345,6 +359,23 @@ onDestroy(() => {
 	tabindex="-1"
 	oncontextmenu={(event) => event.preventDefault()}
 >
+	{#if onReact}
+		<div class="ctx-reactions" role="group" aria-label={m.board_react({}, { locale })}>
+			{#each BOARD_REACTIONS as reaction (reaction)}
+				{@const Icon = REACTION_ICONS[reaction]}
+				{@const label = REACTION_LABELS[reaction]({}, { locale })}
+				<button
+					type="button"
+					class="ctx-reaction"
+					title={label}
+					aria-label={label}
+					onclick={() => { onReact(reaction); onClose(); }}
+				>
+					<Icon class="h-4 w-4" />
+				</button>
+			{/each}
+		</div>
+	{/if}
 	{#each actions as action (action.id)}
 		<button
 			type="button"
@@ -393,6 +424,31 @@ onDestroy(() => {
 		width: 16px;
 		height: 16px;
 	}
+
+	.ctx-reactions {
+		display: flex;
+		justify-content: space-between;
+		gap: 2px;
+		margin-bottom: 4px;
+		border-bottom: 1px solid var(--border-subtle);
+		padding: 0 2px 4px;
+	}
+
+	.ctx-reaction {
+		display: grid;
+		width: 32px;
+		height: 32px;
+		place-items: center;
+		border: 0;
+		border-radius: 8px;
+		background: transparent;
+		color: var(--text-secondary);
+		cursor: pointer;
+		transition: background-color 100ms ease, color 100ms ease, transform 120ms ease;
+	}
+	.ctx-reaction:hover { background: var(--bg-hover); color: var(--text-primary); }
+	.ctx-reaction:active { transform: scale(0.9); }
+	.board-context-menu--sheet .ctx-reaction { width: 44px; height: 44px; }
 
 	.ctx-item {
 		display: flex;
