@@ -16,6 +16,7 @@ import HostPermissionNotice from "$lib/components/HostPermissionNotice.svelte";
 import {
 	deviceDisplayStatus,
 	openDeviceControlSettings,
+	pairPhoneControl,
 	setupPhoneControl,
 	shareDeviceDisplay,
 	stopDeviceDisplay,
@@ -146,14 +147,17 @@ const phoneControlLabel = $derived.by(() => {
 	}
 });
 const canSetupPhone = $derived(phoneControl !== null && !["starting", "ready"].includes(phoneControl.stage));
+const PHONE_STEPS = ["developer", "pairing", "code"] as const;
+const phoneStep = $derived(PHONE_STEPS.indexOf(phoneControl?.stage as (typeof PHONE_STEPS)[number]));
+const phoneCodeInput = $derived(phoneControl?.stage === "code" && phoneControl.codeInput === true);
 const phoneSteps = $derived.by(() => {
-	const stage = phoneControl?.stage;
-	if (stage !== "developer" && stage !== "pairing" && stage !== "code") return null;
-	return [
-		{ id: "developer", text: m.runtime_phone_control_step_developer({}, { locale }) },
-		{ id: "pairing", text: m.runtime_phone_control_step_pairing({}, { locale }) },
-		{ id: "code", text: m.runtime_phone_control_step_code({}, { locale }) },
-	].map((step) => ({ ...step, current: step.id === stage }));
+	if (phoneStep < 0) return null;
+	const text = {
+		developer: m.runtime_phone_control_step_developer({}, { locale }),
+		pairing: m.runtime_phone_control_step_pairing({}, { locale }),
+		code: phoneCodeInput ? m.runtime_phone_control_step_code_here({}, { locale }) : m.runtime_phone_control_step_code({}, { locale }),
+	};
+	return PHONE_STEPS.map((id, index) => ({ id, text: text[id], done: index < phoneStep, current: index === phoneStep }));
 });
 const phoneError = $derived.by(() => {
 	switch (phoneControl?.error) {
@@ -164,6 +168,8 @@ const phoneError = $derived.by(() => {
 		case "helper_did_not_start": return m.runtime_phone_control_error_helper_did_not_start({}, { locale });
 		case "helper_stopped": return m.runtime_phone_control_error_helper_stopped({}, { locale });
 		case "unpaired": return m.runtime_phone_control_error_unpaired({}, { locale });
+		case "pairing_wrong": return m.runtime_phone_control_error_pairing_wrong({}, { locale });
+		case "pairing_closed": return m.runtime_phone_control_error_pairing_closed({}, { locale });
 		default: return null;
 	}
 });
@@ -191,6 +197,23 @@ async function updateScreen(action: () => Promise<unknown>) {
 	} finally {
 		deviceBusy = false;
 	}
+}
+
+let pairingCode = $state("");
+let pairingInput = $state<HTMLInputElement | null>(null);
+
+function typePairingCode(event: Event & { currentTarget: HTMLInputElement }) {
+	pairingCode = event.currentTarget.value.replace(/\D/g, "").slice(0, 6);
+	event.currentTarget.value = pairingCode;
+	if (pairingCode.length === 6) void submitPairingCode();
+}
+
+async function submitPairingCode() {
+	const code = pairingCode;
+	if (code.length !== 6 || deviceBusy) return;
+	await updateScreen(() => pairPhoneControl(code));
+	pairingCode = "";
+	pairingInput?.focus();
 }
 
 // A cloud sandbox reports its virtual screen live, only while the panel is
@@ -473,12 +496,20 @@ $effect(() => {
 								{#if phoneError}<div class="runtime-meta w-full">{#if phoneControl?.error === "notifications_off"}<HostPermissionNotice kind="notifications" message={phoneError} />{:else}{phoneError}{/if}</div>{/if}
 								{#if phoneSteps}
 									<ol class="runtime-steps w-full">
-										{#each phoneSteps as step (step.id)}<li class:is-current={step.current} aria-current={step.current ? "step" : undefined}>{step.text}</li>{/each}
+										{#each phoneSteps as step (step.id)}<li class:is-done={step.done} class:is-current={step.current} aria-current={step.current ? "step" : undefined}>{step.text}</li>{/each}
 									</ol>
 								{:else if !phoneError}
 									<p class="runtime-meta w-full">{m.runtime_phone_control_hint({}, { locale })}</p>
 								{/if}
-								<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(setupPhoneControl)}>{m.runtime_phone_control_setup({}, { locale })}</button>
+								{#if phoneCodeInput}
+									<form class="runtime-code w-full" onsubmit={(event) => { event.preventDefault(); void submitPairingCode(); }}>
+										<!-- svelte-ignore a11y_autofocus -->
+										<input bind:this={pairingInput} value={pairingCode} oninput={typePairingCode} readonly={deviceBusy} inputmode="numeric" autocomplete="one-time-code" maxlength="6" autofocus aria-label={m.runtime_phone_control_code_label({}, { locale })} placeholder="······" />
+										<button type="submit" class="runtime-device-action" disabled={deviceBusy || pairingCode.length !== 6}>{m.runtime_phone_control_pair({}, { locale })}</button>
+									</form>
+								{:else}
+									<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(setupPhoneControl)}>{phoneSteps ? m.runtime_phone_control_open_settings({}, { locale }) : m.runtime_phone_control_setup({}, { locale })}</button>
+								{/if}
 							{/if}
 							{#if screen && phoneReady && !screen.control}
 								<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(openDeviceControlSettings)}>{m.runtime_display_allow_control({}, { locale })}</button>
@@ -564,6 +595,13 @@ $effect(() => {
 <style>
 .runtime-steps { margin: 0; padding-left: 18px; list-style: decimal; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
 .runtime-steps li.is-current { color: var(--text-primary); }
+.runtime-steps li.is-done { color: var(--text-placeholder); }
+.runtime-steps li.is-done::marker { content: "✓  "; color: var(--status-running); }
+.runtime-code { display: flex; gap: 8px; }
+.runtime-code input { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border-radius: 6px; background: var(--bg-input); box-shadow: inset 0 0 0 1px var(--border-subtle); color: var(--text-primary); font-size: 16px; font-variant-numeric: tabular-nums; letter-spacing: .3em; text-align: center; }
+.runtime-code input::placeholder { color: var(--text-placeholder); }
+.runtime-code input:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.runtime-code .runtime-device-action { flex: 0 0 auto; padding: 0 16px; }
 .runtime-link { color: var(--brand); white-space: nowrap; }
 .runtime-link:hover { text-decoration: underline; }
 .runtime-state { display: inline-flex; align-items: center; gap: 5px; color: var(--text-tertiary); font-size: 12px; }
@@ -616,6 +654,7 @@ $effect(() => {
 	.runtime-backdrop { background: var(--overlay-scrim); }
 	.runtime-action { width: 44px; height: 44px; }
 	.runtime-device-action { min-height: 44px; }
+	.runtime-code input { height: 44px; }
 	.runtime-display-open { height: 36px; padding: 0 14px; }
 }
 </style>

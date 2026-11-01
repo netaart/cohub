@@ -125,9 +125,13 @@ starts through the phone's own Wireless debugging, the way scrcpy or a computer'
 no computer.
 
 - **Setup, once.** From a Space's Runtime menu the user chooses **Set up phone control** (which needs
-  notifications): Cohub opens About phone until Developer options are on, then those, and waits for
-  Wireless debugging's *Pair device with pairing code* dialog (discovered over mDNS), guiding each
-  stage in a notification and the menu, then asks for its code in a notification that shows over the settings. It
+  notifications): Cohub opens Developer options (About phone where they cannot open) and waits for
+  Wireless debugging's *Pair device with pairing code* dialog (discovered over mDNS, which needs
+  Wi-Fi), guiding each stage in a notification and the menu, whose steps tick off as they complete.
+  The code goes into that notification, since leaving Settings closes the dialog; when Cohub shares
+  the screen with Settings (split screen or a window), the menu takes it too (`codeInput`, then
+  `display.pair`). A code that fails is retried on the dialog's new port, and a closed dialog sends
+  the setup back to waiting for it. It
   pairs (SPAKE2 over TLS 1.3, `helper/adb/AdbPairing.kt`) with a key kept under the Android Keystore,
   and the helper's first act grants the app `WRITE_SECURE_SETTINGS`, turns its accessibility
   service on and exempts it from battery limits. After that the app starts the helper by itself
@@ -161,7 +165,7 @@ no computer.
   moves to the phone's screen; plans refuse with `preempted` until **Hand back**). It steps aside
   inside Cohub unless a person is needed, and shows the same `activity`, `held` and `handover` the
   web sees, which offers **Stop** and **Hand back** too.
-- Host bridge: `display.status` (with `phoneControl`), `display.setup`, `display.share`,
+- Host bridge: `display.status` (with `phoneControl`), `display.setup`, `display.pair`, `display.share`,
   `display.stop`, `display.openControlSettings`, and the `display.changed` event (capability
   `display`).
 - pion enumerates interfaces through `wlynxg/anet`, which links a private symbol of `net`; the

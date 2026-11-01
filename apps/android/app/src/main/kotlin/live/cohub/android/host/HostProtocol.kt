@@ -35,6 +35,7 @@ object HostProtocol {
         const val DISPLAY_STOP = "display.stop"
         const val DISPLAY_OPEN_CONTROL_SETTINGS = "display.openControlSettings"
         const val DISPLAY_SETUP = "display.setup"
+        const val DISPLAY_PAIR = "display.pair"
         const val PERMISSIONS_STATUS = "permissions.status"
         const val PERMISSIONS_REQUEST = "permissions.request"
         const val PERMISSIONS_OPEN_SETTINGS = "permissions.openSettings"

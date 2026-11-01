@@ -1,6 +1,7 @@
 package live.cohub.android.host
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.net.Uri
 import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
@@ -288,10 +289,15 @@ class HostBridge(
 
         HostProtocol.Methods.DISPLAY_SETUP -> {
             val display = requireDisplay()
-            display.phone.setup()
-            val phone = display.phone.state.value
-            if (phone.error == null) actions.openPhoneControlSettings(display.phone.developerOptions)
+            val phone = display.phone.setup()
+            if (phone.guiding) actions.openPhoneControlSettings(display.phone.settingsIntent())
             display.status.value.copy(phoneControl = phone).toJson()
+        }
+
+        HostProtocol.Methods.DISPLAY_PAIR -> {
+            val display = requireDisplay()
+            val code = params.string("code")?.takeIf(PAIRING_CODE::matches) ?: throw IllegalArgumentException("display.pair requires a six-digit code")
+            display.status.value.copy(phoneControl = display.phone.pair(code).await()).toJson()
         }
 
         HostProtocol.Methods.DISPLAY_STOP -> {
@@ -372,7 +378,9 @@ class HostBridge(
             HostProtocol.Methods.DISPLAY_STOP,
             HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS,
             HostProtocol.Methods.DISPLAY_SETUP,
+            HostProtocol.Methods.DISPLAY_PAIR,
         )
+        val PAIRING_CODE = Regex("^\\d{6}$")
         val RUNTIME_METHODS = setOf(
             HostProtocol.Methods.RUNTIME_LIST,
             HostProtocol.Methods.RUNTIME_BROWSE,
@@ -430,7 +438,7 @@ interface HostActions {
 
     fun openControlSettings(): Boolean
 
-    fun openPhoneControlSettings(developerOptions: Boolean): Boolean
+    fun openPhoneControlSettings(intent: Intent): Boolean
 
     fun permissions(): HostPermissions
 

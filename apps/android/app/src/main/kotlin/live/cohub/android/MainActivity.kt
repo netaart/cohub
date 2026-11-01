@@ -183,6 +183,7 @@ class MainActivity : ComponentActivity(), HostActions {
             }
         }
 
+        addOnMultiWindowModeChangedListener { app.display?.phone?.multiWindow = it.isInMultiWindowMode }
         onBackPressedDispatcher.addCallback(this, historyBack)
         onBackPressedDispatcher.addCallback(this, layerBack)
         container = SurfaceContainer(this)
@@ -251,6 +252,7 @@ class MainActivity : ComponentActivity(), HostActions {
             mountSurface(startPath)
         }
         surface?.resume()
+        app.display?.phone?.multiWindow = isInMultiWindowMode
         bridge.emit(HostProtocol.Events.APP_FOREGROUND)
     }
 
@@ -426,8 +428,8 @@ class MainActivity : ComponentActivity(), HostActions {
         return allowed
     }
 
-    override fun openPhoneControlSettings(developerOptions: Boolean): Boolean = runCatching {
-        startActivity(Intent(if (developerOptions) Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS else Settings.ACTION_DEVICE_INFO_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    override fun openPhoneControlSettings(intent: Intent): Boolean = runCatching {
+        startActivity(if (isInMultiWindowMode) intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT) else intent)
     }.isSuccess
 
     override fun openControlSettings(): Boolean = runCatching {

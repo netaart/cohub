@@ -151,6 +151,7 @@ export const deviceDisplayStatusSchema = z.object({
   phoneControl: z.object({
     stage: z.enum(PHONE_CONTROL_STAGES),
     error: z.string().min(1).max(64).nullable(),
+    codeInput: z.boolean().optional(),
   }).strict().optional(),
 }).strict();
 export type DeviceDisplayStatus = z.infer<typeof deviceDisplayStatusSchema>;
@@ -313,6 +314,7 @@ export const HOST_BRIDGE_METHODS = {
   "display.stop": { params: z.undefined(), result: deviceDisplayStatusSchema },
   "display.openControlSettings": { params: z.undefined(), result: z.boolean() },
   "display.setup": { params: z.undefined(), result: deviceDisplayStatusSchema },
+  "display.pair": { params: z.object({ code: z.string().regex(/^\d{6}$/) }).strict(), result: deviceDisplayStatusSchema },
   "workspace.call": {
     params: z.object({
       spaceId: z.uuid(),

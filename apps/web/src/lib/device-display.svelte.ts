@@ -66,3 +66,11 @@ export async function openDeviceControlSettings(): Promise<void> {
 export async function setupPhoneControl(): Promise<void> {
 	status = await callHost("display.setup");
 }
+
+export async function pairPhoneControl(code: string): Promise<void> {
+	status = await callHost(
+		"display.pair",
+		{ code },
+		{ timeoutMs: HOST_BRIDGE_INTERACTIVE_TIMEOUT_MS },
+	);
+}
