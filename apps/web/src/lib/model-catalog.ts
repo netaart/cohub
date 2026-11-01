@@ -2,6 +2,7 @@ import {
 	clampThinkingLevel as clampModelThinkingLevel,
 	isModelThinkingLevel,
 	type ModelThinkingLevel,
+	STANDARD_SERVICE_TIER,
 	supportedThinkingLevels,
 } from "@cohub/protocol";
 import type { RuntimeCapabilities } from "@neta-art/cohub";
@@ -44,6 +45,25 @@ export function supportsFastServiceTier(item: ModelCatalogItem): boolean {
 	);
 }
 
+/** Whether a Turn runs Fast: an explicit choice, otherwise the model's default (Codex `service_tier`). */
+export function isFastServiceTier(
+	item: ModelCatalogItem | undefined,
+	serviceTier: string | null | undefined,
+): boolean {
+	return (serviceTier ?? item?.model.defaultServiceTier) === FAST_SERVICE_TIER;
+}
+
+/** The tier the Fast switch sends: off only needs saying where Fast is the default. */
+export function fastServiceTierChoice(
+	item: ModelCatalogItem,
+	fast: boolean,
+): string | null {
+	if (fast) return FAST_SERVICE_TIER;
+	return item.model.defaultServiceTier === FAST_SERVICE_TIER
+		? STANDARD_SERVICE_TIER
+		: null;
+}
+
 type LocalModel = RuntimeCapabilities["models"][number];
 
 function toLocalModelItem({
@@ -54,6 +74,7 @@ function toLocalModelItem({
 	thinkingLevelMap,
 	defaultThinkingLevel,
 	serviceTiers,
+	defaultServiceTier,
 }: LocalModel): ModelCatalogItem {
 	return {
 		provider,
@@ -64,6 +85,7 @@ function toLocalModelItem({
 			thinkingLevelMap,
 			defaultThinkingLevel,
 			serviceTiers,
+			defaultServiceTier,
 		},
 	};
 }
@@ -103,11 +125,13 @@ export function resolveLocalModel(
 					match ? selection?.thinkingLevel : null,
 				)
 			: undefined;
-	const serviceTier = model.serviceTiers?.some(
-		(tier) => tier.id === requested?.serviceTier,
-	)
-		? requested?.serviceTier
-		: undefined;
+	const serviceTier =
+		requested?.serviceTier &&
+		model.serviceTiers?.length &&
+		(requested.serviceTier === STANDARD_SERVICE_TIER ||
+			model.serviceTiers.some((tier) => tier.id === requested.serviceTier))
+			? requested.serviceTier
+			: undefined;
 	return {
 		provider: model.provider,
 		id: model.id,

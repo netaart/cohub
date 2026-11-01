@@ -156,9 +156,13 @@ export function resolveRuntimeThinkingLevel(model: RuntimeModel | undefined, req
 export const supportsApprovalMode = (capabilities: RuntimeCapabilities | null | undefined, harness: LocalHarness, mode: ApprovalMode) =>
   capabilities?.approvalModes?.[harness]?.includes(mode) === true;
 
+/** Explicitly the standard tier, overriding a default (such as Codex `service_tier`) that is faster. */
+export const STANDARD_SERVICE_TIER = "default";
+
 /** A tier the model does not declare is dropped: the Harness then runs its own default. */
 export function resolveRuntimeServiceTier(model: RuntimeModel | undefined, requested: string | null | undefined): string | undefined {
-  return requested && model?.serviceTiers?.some((tier) => tier.id === requested) ? requested : undefined;
+  if (!requested || !model?.serviceTiers?.length) return undefined;
+  return requested === STANDARD_SERVICE_TIER || model.serviceTiers.some((tier) => tier.id === requested) ? requested : undefined;
 }
 
 /** The requested model, or the Harness default when none is requested. */

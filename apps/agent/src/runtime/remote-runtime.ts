@@ -104,7 +104,7 @@ export async function executeRemoteHarnessTurn(input: {
       // Recorded before dispatch so recovery keeps what this execution ran with.
       await markRuntimeRecovery(user.turnId, { state: "executing", ownerUserId: registration.ownerUserId }, {
         ...(thinkingLevel ? { effectiveThinkingLevel: thinkingLevel } : {}),
-        ...(serviceTier ? { effectiveServiceTier: serviceTier } : {}),
+        ...(serviceTier ?? runtimeModel?.defaultServiceTier ? { effectiveServiceTier: serviceTier ?? runtimeModel?.defaultServiceTier } : {}),
       });
     }
     if (!input.recovery) await sendOutput({ type: "turn_lifecycle", spaceId: input.spaceId, sessionId: input.sessionId, turnId: user.turnId, anchorUserMessageId: userMessageId, phase: "llm_call_started", llmRound: 1, provider: input.provider, model: input.model, at: new Date().toISOString(), timestamp: Date.now() }).catch((error) => logger.warn("[Runtime] lifecycle delivery failed", error));

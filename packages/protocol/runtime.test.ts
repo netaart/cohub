@@ -146,4 +146,6 @@ test("approval modes and service tiers survive the wire; unknown ones are droppe
   assert.equal(resolveRuntimeServiceTier(model, "priority"), "priority");
   assert.equal(resolveRuntimeServiceTier({ ...model, serviceTiers: undefined }, "priority"), undefined);
   assert.equal(resolveRuntimeServiceTier(model, null), undefined);
+  assert.equal(resolveRuntimeServiceTier(model, "default"), "default");
+  assert.equal(resolveRuntimeServiceTier({ ...model, serviceTiers: undefined }, "default"), undefined);
 });

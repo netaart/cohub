@@ -48,6 +48,7 @@ const models = [
 		reasoning: true,
 		defaultThinkingLevel: "medium" as const,
 		serviceTiers: [{ id: "priority", name: "Fast" }],
+		defaultServiceTier: "priority",
 		thinkingLevelMap: {
 			off: "none",
 			minimal: null,

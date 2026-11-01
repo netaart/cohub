@@ -6,7 +6,9 @@ import {
 	resolveLocalModelFromTurns,
 } from "../lib/features/session-chat/session-utils.ts";
 import {
+	fastServiceTierChoice,
 	getSupportedThinkingLevels,
+	isFastServiceTier,
 	resolveLocalModel,
 	toLocalModelCatalog,
 } from "../lib/model-catalog.ts";
@@ -293,5 +295,36 @@ test("the approval mode restores from the last Turn that chose one", () => {
 	assert.equal(
 		resolveApprovalModeFromTurns([withMode(1, "codex", "ask")], "codex"),
 		null,
+	);
+});
+
+test("the Fast switch shows the model's default tier and turns it off explicitly", () => {
+	const [fastByDefault, standard] = toLocalModelCatalog([
+		{
+			...catalog[0],
+			serviceTiers: [{ id: "priority", name: "Fast" }],
+			defaultServiceTier: "priority",
+		},
+		{ ...catalog[1], serviceTiers: [{ id: "priority", name: "Fast" }] },
+	]);
+	assert.equal(isFastServiceTier(fastByDefault, undefined), true);
+	assert.equal(isFastServiceTier(fastByDefault, "default"), false);
+	assert.equal(isFastServiceTier(standard, undefined), false);
+	assert.equal(fastServiceTierChoice(fastByDefault, false), "default");
+	assert.equal(fastServiceTierChoice(standard, false), null);
+	assert.equal(fastServiceTierChoice(standard, true), "priority");
+	assert.equal(
+		resolveLocalModel(
+			catalog.slice(0, 1).map((model) => ({
+				...model,
+				serviceTiers: [{ id: "priority", name: "Fast" }],
+			})),
+			{
+				provider: "openai",
+				id: "default",
+				serviceTier: "default",
+			},
+		)?.serviceTier,
+		"default",
 	);
 });

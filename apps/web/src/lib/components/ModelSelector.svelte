@@ -17,11 +17,12 @@ import {
 } from "$lib/model-availability";
 import {
 	clampThinkingLevel,
-	FAST_SERVICE_TIER,
+	fastServiceTierChoice,
 	formatThinkingLevelFull,
 	formatThinkingLevelShort,
 	getModelDefaultThinkingLevel,
 	getSupportedThinkingLevels,
+	isFastServiceTier,
 	type ModelThinkingLevel,
 	supportsFastServiceTier,
 } from "$lib/model-catalog";
@@ -288,7 +289,7 @@ function toggleFast(item: ModelItem, fast: boolean) {
 		...(thinkingLevels(item).length > 1
 			? { thinkingLevel: candidateThinkingLevel(item) }
 			: {}),
-		serviceTier: fast ? null : FAST_SERVICE_TIER,
+		serviceTier: fastServiceTierChoice(item as never, !fast),
 	});
 }
 
@@ -1037,7 +1038,7 @@ const hoverCardPos = $derived.by(() => {
 					{@const activeLevel = candidateThinkingLevel(item)}
 					{@const thinkingOpen = thinkingMenuOpenFor === tMenuKey}
 					{@const showFast = supportsFastServiceTier(item as never)}
-					{@const fast = showFast && isCurrentModel(item) && currentServiceTier === FAST_SERVICE_TIER}
+					{@const fast = showFast && isFastServiceTier(item as never, isCurrentModel(item) ? currentServiceTier : null)}
 					<div
 						role="presentation"
 						class={`group relative px-4 py-2 transition-colors duration-100 ${

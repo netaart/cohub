@@ -226,11 +226,14 @@ mode is refused before running. A recorded mode the Runtime no longer offers blo
 Use local settings replaces it, which then runs the Runtime's defaults.
 
 **Fast.** A Codex model whose catalog lists the `priority` service tier shows a Fast switch next
-to its thinking level. On, the Turn sends `serviceTierForTurn: "priority"`; off sends nothing, so
-Codex's own default applies and nothing carries over from an earlier Turn or reaches the thread's
-or a terminal's tier. The Agent drops a tier the model does not declare and records the tier it
-sent as `effectiveServiceTier` before dispatch; the request (`requestedServiceTier`) restores the
-switch after refresh and survives thinking-level and model changes where the model offers it.
+to its thinking level. Untouched, it shows the model's default: the configured `service_tier`
+(`fast` is its legacy name for `priority`), else the catalog's, and sends nothing. On sends
+`serviceTierForTurn: "priority"`; off sends `"default"` where Fast is the default and nothing
+otherwise. Either way it applies to that Turn only, so nothing carries over to later Turns or
+reaches the thread's or a terminal's tier. The Agent drops a tier the model does not declare and
+records the tier the Turn runs with (requested, else the model's default) as `effectiveServiceTier`
+before dispatch; the request (`requestedServiceTier`) restores the switch after refresh and survives
+thinking-level and model changes where the model offers it.
 
 **Codex 审批模式与 Fast。** Codex app-server 0.164+（Windows 除外）在输入框的 Harness 菜单中提供四档审批模式，
 下一条消息生效：沿用本机设置、自动审批、完全访问、只读。只读使用 Cohub 的权限配置（继承 `:read-only` 并拒绝读取一个不存在的路径），
@@ -238,7 +241,8 @@ switch after refresh and survives thinking-level and model changes where the mod
 否则在发送前报错；只改变 Cohub 线程，不改 `config.toml`。人工审批请求仍一律拒绝。未选择时保持原有行为；与平台只读冲突的模式会被拒绝。
 选择写入 turn meta，刷新后恢复，未发送的选择在刷新后保留，新对话不继承。Runtime 不再支持已记录的模式时，
 需改选“沿用本机设置”才能继续发送。
-模型目录声明 `priority` 档位时显示 Fast：开启时该 Turn 发送 `serviceTierForTurn: "priority"`，关闭时不发送，沿用 Codex 默认，不影响后续 Turn
+模型目录声明 `priority` 档位时显示 Fast：未操作时显示模型默认档位（`config.toml` 的 `service_tier`，否则取目录默认值）且不发送；
+开启时该 Turn 发送 `serviceTierForTurn: "priority"`，默认为 Fast 时关闭发送 `"default"`，否则不发送。只作用于该 Turn，不影响后续 Turn
 或终端；生效档位记入 `effectiveServiceTier`。旧版 Codex 不提供这些选项。
 
 **Realtime.** Previews of a Turn someone runs in a terminal stream from the control plane — Pi's

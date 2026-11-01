@@ -370,8 +370,9 @@ try {
         if (fast) {
           serviceTiers.length = 0;
           await step("fast", { model: fast.id, serviceTier: "priority" }, "hello fast");
-          await step("standard", { model: fast.id }, "hello standard");
-          assert.deepEqual(serviceTiers, ["priority", null], "Fast applies to its Turn only");
+          await step("standard", { model: fast.id, serviceTier: "default" }, "hello standard");
+          await step("inherit", { model: fast.id }, "hello again");
+          assert.deepEqual(serviceTiers, ["priority", null, null], "Fast applies to its Turn only");
         }
         console.log(`codex: approval modes switch on a loaded thread and read-only holds a pre-approved command${fast ? "; Fast applies per Turn" : ""} ✓`);
       } else {

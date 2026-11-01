@@ -93,6 +93,7 @@ import {
 } from "$lib/mentions/space-trigger";
 import {
 	formatThinkingLevelShort,
+	isFastServiceTier,
 	type LocalModelSelection,
 	toLocalModelCatalog,
 } from "$lib/model-catalog";
@@ -232,7 +233,15 @@ const localModelMeta = $derived(
 		localModel?.thinkingLevel
 			? formatThinkingLevelShort(localModel.thinkingLevel)
 			: null,
-		localModel?.serviceTier ? m.model_selector_fast({}, { locale }) : null,
+		isFastServiceTier(
+			localModelCatalog.find(
+				(item) =>
+					item.provider === localModel?.provider && item.id === localModel?.id,
+			),
+			localModel?.serviceTier,
+		)
+			? m.model_selector_fast({}, { locale })
+			: null,
 	].filter((item): item is string => Boolean(item)),
 );
 
