@@ -3,7 +3,6 @@ package live.cohub.android.display
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
 import android.os.Build
-import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import android.view.accessibility.AccessibilityWindowInfo
@@ -101,15 +100,16 @@ internal class ElementTree {
     fun focused(service: AccessibilityService, displayId: Int): AccessibilityNodeInfo? =
         service.windowsOnAllDisplays[displayId].orEmpty().firstNotNullOfOrNull { it.root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf(AccessibilityNodeInfo::isEditable) }
 
-    fun perform(input: InputDriver, ref: String, action: String, text: String?) {
+    suspend fun perform(input: InputDriver, ref: String, action: String, text: String?) {
         val node = resolve(ref)
         val done = when (action) {
             "click" -> node.orAncestor { it.isClickable }?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: tap(input, node, TAP_MS)
             "longPress" -> node.orAncestor { it.isLongClickable }?.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) ?: tap(input, node, LONG_PRESS_MS)
             "focus" -> node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-            "setText" -> node.takeIf { it.isEditable }?.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text.orEmpty())
-            }) ?: throw DisplayError(DisplayError.UNSUPPORTED, "$ref is not a text field")
+            "setText" -> {
+                input.replace(node.takeIf { it.isEditable } ?: throw DisplayError(DisplayError.UNSUPPORTED, "$ref is not a text field"), text.orEmpty())
+                true
+            }
             "scrollForward", "scrollBackward" -> {
                 val scroll = if (action == "scrollForward") AccessibilityAction.ACTION_SCROLL_FORWARD else AccessibilityAction.ACTION_SCROLL_BACKWARD
                 node.orAncestor { it.isScrollable }?.performAction(scroll.id) ?: throw DisplayError(DisplayError.UNSUPPORTED, "$ref does not scroll")

@@ -21,6 +21,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
@@ -59,7 +60,7 @@ import kotlin.coroutines.resume
 
 @SuppressLint("NewApi")
 class PhoneControl(private val context: Context, private val scope: CoroutineScope) {
-    enum class Stage(val wire: String) { OFF("off"), PAIRING("pairing"), STARTING("starting"), READY("ready"), STOPPED("stopped") }
+    enum class Stage(val wire: String) { OFF("off"), DEVELOPER("developer"), PAIRING("pairing"), CODE("code"), STARTING("starting"), READY("ready"), STOPPED("stopped") }
 
     data class State(val stage: Stage, val error: String? = null) {
         fun toJson(): JsonObject = buildJsonObject {
@@ -176,13 +177,26 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         false
     }
 
+    val developerOptions: Boolean
+        get() = Settings.Global.getInt(context.contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1
+
     fun setup() {
         if (_state.value.stage == Stage.READY) return
         if (paired) return start()
-        _state.value = State(Stage.PAIRING)
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            _state.value = State(Stage.OFF, "notifications_off")
+            return
+        }
         pairing?.cancel()
         pairing = scope.launch(Dispatchers.IO) {
             val found = withTimeoutOrNull(PAIRING_MS) {
+                if (!developerOptions) {
+                    _state.value = State(Stage.DEVELOPER)
+                    guide(R.string.phone_control_guide_developer)
+                    while (!developerOptions) delay(DEVELOPER_POLL_MS)
+                }
+                _state.value = State(Stage.PAIRING)
+                guide(R.string.phone_control_guide_pairing)
                 var port: Int? = null
                 while (port == null) port = findPort(PAIRING_SERVICE, FIND_MS)
                 port
@@ -192,6 +206,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
                 return@launch
             }
             prefs.edit { putInt(PAIRING_PORT, found) }
+            _state.value = State(Stage.CODE)
             notifyPairing(null)
         }
     }
@@ -275,9 +290,50 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         }
     }
 
+    private fun channel(): String {
+        notifications().createNotificationChannel(NotificationChannel(CHANNEL_ID, context.getString(R.string.phone_control_channel), NotificationManager.IMPORTANCE_HIGH))
+        return CHANNEL_ID
+    }
+
+    private fun settingsIntent() = PendingIntent.getActivity(
+        context, 0,
+        Intent(if (developerOptions) Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS else Settings.ACTION_DEVICE_INFO_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    private fun guide(text: Int) {
+        val notification = NotificationCompat.Builder(context, channel())
+            .setSmallIcon(R.drawable.ic_runtime)
+            .setContentTitle(context.getString(R.string.phone_control_pairing_title))
+            .setContentText(context.getString(text))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(context.getString(text)))
+            .setContentIntent(settingsIntent())
+            .setOnlyAlertOnce(true)
+            .setTimeoutAfter(PAIRING_MS)
+            .build()
+        notifications().notify(NOTIFICATION_ID, notification)
+    }
+
+    fun notifyHandover(reason: String) {
+        val take = PendingIntent.getBroadcast(context, 0, Intent(context, HandoverReceiver::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val text = context.getString(R.string.overlay_activity, reason)
+        val notification = NotificationCompat.Builder(context, channel())
+            .setSmallIcon(R.drawable.ic_runtime)
+            .setContentTitle(context.getString(R.string.overlay_needs_you))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(take)
+            .setAutoCancel(true)
+            .addAction(0, context.getString(R.string.overlay_take_over), take)
+            .build()
+        runCatching { notifications().notify(HANDOVER_NOTIFICATION_ID, notification) }
+    }
+
+    fun cancelHandover() = notifications().cancel(HANDOVER_NOTIFICATION_ID)
+
     private fun notifyPairing(problem: String?) {
         val manager = notifications()
-        manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, context.getString(R.string.phone_control_channel), NotificationManager.IMPORTANCE_HIGH))
         val reply = PendingIntent.getBroadcast(
             context, 0, Intent(context, PairingReceiver::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
@@ -285,9 +341,10 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         val input = RemoteInput.Builder(KEY_CODE).setLabel(context.getString(R.string.phone_control_pairing_code)).build()
         val action = NotificationCompat.Action.Builder(0, context.getString(R.string.phone_control_pairing_enter), reply)
             .addRemoteInput(input).setAllowGeneratedReplies(false).build()
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val notification = NotificationCompat.Builder(context, channel())
             .setSmallIcon(R.drawable.ic_runtime)
             .setContentTitle(context.getString(R.string.phone_control_pairing_title))
+            .setContentIntent(settingsIntent())
             .setContentText(problem ?: context.getString(R.string.phone_control_pairing_text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -307,6 +364,12 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         }
     }
 
+    class HandoverReceiver : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            (context.applicationContext as live.cohub.android.CohubApplication).display?.takeOverAsked()
+        }
+    }
+
     private companion object {
         const val TAG = "CohubPhoneControl"
         const val PAIRED = "paired"
@@ -318,6 +381,8 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         const val PAIRING_SERVICE = "_adb-tls-pairing._tcp"
         const val CHANNEL_ID = "phone_control"
         const val NOTIFICATION_ID = 7
+        const val HANDOVER_NOTIFICATION_ID = 8
+        const val DEVELOPER_POLL_MS = 1_000L
         const val KEY_CODE = "code"
         const val FIND_MS = 5_000L
         const val RESOLVE_MS = 3_000L

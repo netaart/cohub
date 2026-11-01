@@ -289,8 +289,9 @@ class HostBridge(
         HostProtocol.Methods.DISPLAY_SETUP -> {
             val display = requireDisplay()
             display.phone.setup()
-            actions.openDeveloperSettings()
-            display.status.value.toJson()
+            val phone = display.phone.state.value
+            if (phone.error == null) actions.openPhoneControlSettings(display.phone.developerOptions)
+            display.status.value.copy(phoneControl = phone).toJson()
         }
 
         HostProtocol.Methods.DISPLAY_STOP -> {
@@ -429,7 +430,7 @@ interface HostActions {
 
     fun openControlSettings(): Boolean
 
-    fun openDeveloperSettings(): Boolean
+    fun openPhoneControlSettings(developerOptions: Boolean): Boolean
 
     fun permissions(): HostPermissions
 

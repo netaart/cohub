@@ -5,6 +5,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -55,6 +56,9 @@ class ControlService : AccessibilityService() {
         if (event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED || event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             DisplayControl.windowsChanged(event.displayId)
         }
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && event.isFullScreen && event.displayId == Display.DEFAULT_DISPLAY) {
+            DisplayControl.foreground.value = event.packageName?.toString()
+        }
         if (DisplayControl.followed.isEmpty()) return
         readFocus()
         main.removeCallbacks(settled)
@@ -96,6 +100,8 @@ object DisplayControl {
     val focus: StateFlow<Map<Int, FocusedField>> = focused.asStateFlow()
 
     val windows: SharedFlow<Int> = changes.asSharedFlow()
+
+    val foreground = MutableStateFlow<String?>(null)
 
     internal fun followFocus(displayId: Int): () -> Unit {
         if (followed.merge(displayId, 1, Int::plus) == 1) current.value?.refreshFocus()

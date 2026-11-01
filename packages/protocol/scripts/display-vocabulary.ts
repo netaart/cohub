@@ -59,6 +59,9 @@ const limits = {
   maxTargetNth: display.DISPLAY_TARGET_NTH_MAX,
   maxUrlLen: display.DISPLAY_URL_MAX,
   maxApps: display.DISPLAY_APPS_MAX,
+  defaultHandoverMs: display.DISPLAY_HANDOVER_DEFAULT_MS,
+  maxHandoverMs: display.DISPLAY_HANDOVER_MAX_MS,
+  maxHandoverWaitMs: display.DISPLAY_HANDOVER_WAIT_MS,
 };
 
 const patterns = {

@@ -41,7 +41,8 @@ import (
 // sandboxd stops waiting for call id, which a provider may abandon. Displays
 // that say so also take: changes {display, watch}, answered once the provider
 // has seen the screen, to report changes while watched; launch {display, app}; open {display, url}; apps {display}
-// → {apps}; activity {display, activity?} (id 0), what agents do on it; and,
+// → {apps}; activity {display, activity?} (id 0), what agents do on it; handover
+// {display, handover?} (id 0), a person being asked for; and,
 // where the snapshot reports `virtual`, virtual.start {size?} and virtual.stop.
 const (
 	WireVersion = 1

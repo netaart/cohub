@@ -141,7 +141,7 @@ export const deviceFolderListingSchema = z.object({
 }).strict();
 export type DeviceFolderListing = z.infer<typeof deviceFolderListingSchema>;
 
-export const PHONE_CONTROL_STAGES = ["off", "pairing", "starting", "ready", "stopped"] as const;
+export const PHONE_CONTROL_STAGES = ["off", "developer", "pairing", "code", "starting", "ready", "stopped"] as const;
 export type PhoneControlStage = (typeof PHONE_CONTROL_STAGES)[number];
 
 export const deviceDisplayStatusSchema = z.object({

@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -21,19 +22,19 @@ const LocalIdentity = "local"
 var LocalMethods = []string{
 	"fs.read", "fs.write", "fs.edit", "fs.mkdir", "fs.delete", "fs.move", "fs.stat",
 	"fs.ls", "fs.tree", "fs.find", "fs.grep", "fs.search",
-	"display.list", "display.capture", "display.tree", "display.input", "display.act", "display.apps", "display.start", "display.stop",
+	"display.list", "display.capture", "display.tree", "display.input", "display.act", "display.apps", "display.interrupt", "display.handover", "display.handback", "display.start", "display.stop",
 }
 
 type FileVersion = fsWriteVersion
 
-func (d *Dispatcher) Invoke(method string, params []byte) (interface{}, *protocol.RPCErrorPayload) {
+func (d *Dispatcher) Invoke(ctx context.Context, method string, params []byte) (interface{}, *protocol.RPCErrorPayload) {
 	if !slices.Contains(LocalMethods, method) {
 		return nil, &protocol.RPCErrorPayload{Code: "UNSUPPORTED_METHOD", Message: fmt.Sprintf("unsupported method: %s", method)}
 	}
 	if len(params) == 0 {
 		params = []byte("{}")
 	}
-	_, response := d.Handle(protocol.RPCRequest{Method: method, Params: params}, LocalIdentity)
+	_, response := d.handle(ctx, protocol.RPCRequest{Method: method, Params: params}, LocalIdentity)
 	return outcome(response)
 }
 

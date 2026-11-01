@@ -31,7 +31,7 @@ export { DesktopCommandsApi } from "./apis/desktop-commands.js";
 export { SpaceDisplaysApi } from "./apis/displays.js";
 export { DisplayConnection, connectDisplay } from "./display-session.js";
 export type { ConnectDisplayOptions, DisplayConnectionState, DisplayConnectionStats } from "./display-session.js";
-export { compileDisplayPlan, DISPLAY_ACTION_TYPES, DISPLAY_ELEMENT_REF_PATTERN, DISPLAY_ELEMENT_ROLES, DISPLAY_SYSTEM_ACTIONS, DisplayActionError, normalizeDisplayPoint } from "@cohub/protocol";
+export { compileDisplayPlan, DISPLAY_ACTION_TYPES, DISPLAY_ELEMENT_REF_PATTERN, DISPLAY_HANDOVER_DEFAULT_MS, DISPLAY_HANDOVER_MAX_MS, DISPLAY_HANDOVER_WAIT_MS, DISPLAY_ELEMENT_ROLES, DISPLAY_SYSTEM_ACTIONS, DisplayActionError, normalizeDisplayPoint } from "@cohub/protocol";
 export type {
   DisplayAction,
   DisplayActParams,
@@ -41,6 +41,10 @@ export type {
   DisplayActivity,
   DisplayApp,
   DisplayApps,
+  DisplayHandoverInfo,
+  DisplayHandoverParams,
+  DisplayHandoverResult,
+  DisplayHandoverState,
   DisplayCapture,
   DisplayCaptureParams,
   DisplayElement,

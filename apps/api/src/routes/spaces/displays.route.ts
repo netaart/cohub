@@ -4,6 +4,7 @@ import { createLogger } from "@cohub/infra/logging";
 import {
   displayActParamsSchema,
   displayCaptureParamsSchema,
+  displayHandoverParamsSchema,
   displayIdSchema,
   displayInputBatchSchema,
   displaySessionRequestSchema,
@@ -16,6 +17,7 @@ import { authzDenied, requireValidId, useAuth } from "../../lib/middleware.js";
 import { getIceServers } from "../../rtc/ice.js";
 import { displayErrorResponse } from "../../display-errors.js";
 import { callSandboxRpc } from "../../space-sandbox-rpc.js";
+import { enqueueSessionAbort, getSpaceSessionById } from "../../space-sessions.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
@@ -84,7 +86,7 @@ router.get("/:id/displays/:displayId/tree", async (c) => {
   const maxElements = c.req.query("maxElements");
   const parsed = displayTreeParamsSchema.safeParse({
     ...(maxElements ? { maxElements: Number(maxElements) } : {}),
-    ...(c.req.query("actionable") === "true" ? { actionable: true } : {}),
+    ...(c.req.query("compact") === "true" ? { compact: true } : {}),
   });
   if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid tree" }, 400);
   try {
@@ -143,10 +145,64 @@ router.post("/:id/displays/:displayId/act", async (c) => {
   if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
   const parsed = displayActParamsSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid plan" }, 400);
+  const plan = randomUUID();
+  const cancel = () => void callSandboxRpc(auth.spaceId, "display.interrupt", { display, plan }).catch(() => undefined);
+  const signal = c.req.raw.signal;
+  if (signal.aborted) return c.body(null, 499 as never);
+  signal.addEventListener("abort", cancel, { once: true });
   try {
-    const result = await callSandboxRpc(auth.spaceId, "display.act", { ...parsed.data, display });
+    const result = await callSandboxRpc(auth.spaceId, "display.act", { ...parsed.data, display, plan });
     c.header("Cache-Control", "no-store");
     return c.json(result);
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  } finally {
+    signal.removeEventListener("abort", cancel);
+  }
+});
+
+router.post("/:id/displays/:displayId/interrupt", async (c) => {
+  const auth = await authorize(c, "command.execute");
+  if (auth instanceof Response) return auth;
+  const display = displayParam(c);
+  if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
+  try {
+    const { activity } = await callSandboxRpc(auth.spaceId, "display.interrupt", { display });
+    logger.info("[Displays] stopped", { spaceId: auth.spaceId, display, userId: auth.user.uuid, sessionId: activity?.sessionId });
+    const session = activity?.sessionId ? await getSpaceSessionById(activity.sessionId) : null;
+    if (session?.spaceId === auth.spaceId && (await hasPermission(auth.user, "session.prompt.fullaccess", { spaceId: session.spaceId, sessionId: session.id }))) {
+      await enqueueSessionAbort({ sessionId: session.id, actorUserId: auth.user.uuid, turnId: activity?.turnId ?? null });
+    }
+    return c.body(null, 204);
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  }
+});
+
+router.post("/:id/displays/:displayId/handover", async (c) => {
+  const auth = await authorize(c, "command.execute");
+  if (auth instanceof Response) return auth;
+  const display = displayParam(c);
+  if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
+  const parsed = displayHandoverParamsSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid handover" }, 400);
+  try {
+    const result = await callSandboxRpc(auth.spaceId, "display.handover", { ...parsed.data, display });
+    c.header("Cache-Control", "no-store");
+    return c.json(result);
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  }
+});
+
+router.delete("/:id/displays/:displayId/handover", async (c) => {
+  const auth = await authorize(c, "command.execute");
+  if (auth instanceof Response) return auth;
+  const display = displayParam(c);
+  if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
+  try {
+    await callSandboxRpc(auth.spaceId, "display.handback", { display });
+    return c.body(null, 204);
   } catch (error) {
     return displayError(c, error, auth.spaceId);
   }

@@ -137,13 +137,36 @@ const phoneReady = $derived(!phoneControl || phoneControl.stage === "ready");
 const phoneControlLabel = $derived.by(() => {
 	switch (phoneControl?.stage) {
 		case "ready": return m.runtime_phone_control_ready({}, { locale });
+		case "developer": return m.runtime_phone_control_developer({}, { locale });
 		case "pairing": return m.runtime_phone_control_pairing({}, { locale });
+		case "code": return m.runtime_phone_control_code({}, { locale });
 		case "starting": return m.runtime_phone_control_starting({}, { locale });
 		case "stopped": return m.runtime_phone_control_stopped({}, { locale });
 		default: return m.runtime_phone_control_off({}, { locale });
 	}
 });
-const canSetupPhone = $derived(phoneControl?.stage === "off" || phoneControl?.stage === "pairing" || phoneControl?.stage === "stopped");
+const canSetupPhone = $derived(phoneControl !== null && !["starting", "ready"].includes(phoneControl.stage));
+const phoneSteps = $derived.by(() => {
+	const stage = phoneControl?.stage;
+	if (stage !== "developer" && stage !== "pairing" && stage !== "code") return null;
+	return [
+		{ id: "developer", text: m.runtime_phone_control_step_developer({}, { locale }) },
+		{ id: "pairing", text: m.runtime_phone_control_step_pairing({}, { locale }) },
+		{ id: "code", text: m.runtime_phone_control_step_code({}, { locale }) },
+	].map((step) => ({ ...step, current: step.id === stage }));
+});
+const phoneError = $derived.by(() => {
+	switch (phoneControl?.error) {
+		case "notifications_off": return m.runtime_phone_control_error_notifications_off({}, { locale });
+		case "pairing_timed_out": return m.runtime_phone_control_error_pairing_timed_out({}, { locale });
+		case "wireless_debugging_off": return m.runtime_phone_control_error_wireless_debugging_off({}, { locale });
+		case "wireless_debugging_unreachable": return m.runtime_phone_control_error_wireless_debugging_unreachable({}, { locale });
+		case "helper_did_not_start": return m.runtime_phone_control_error_helper_did_not_start({}, { locale });
+		case "helper_stopped": return m.runtime_phone_control_error_helper_stopped({}, { locale });
+		case "unpaired": return m.runtime_phone_control_error_unpaired({}, { locale });
+		default: return null;
+	}
+});
 const screenLabel = $derived(
 	sharingHere
 		? screen?.control
@@ -429,7 +452,7 @@ $effect(() => {
 						<h3>{m.runtime_displays({}, { locale })}</h3>
 						{#each displays as item (item.id)}
 							<div class="runtime-display">
-								<span class="runtime-display-name">{item.kind === "agent" ? m.runtime_display_agent({}, { locale }) : item.name || item.id}<span class="runtime-meta">{item.held ? m.runtime_display_held({}, { locale }) : item.activity ? item.activity.label ? m.runtime_display_activity({ label: item.activity.label }, { locale }) : m.runtime_display_working({}, { locale }) : `${item.width}×${item.height}`}</span></span>
+								<span class="runtime-display-name">{item.kind === "agent" ? m.runtime_display_agent({}, { locale }) : item.name || item.id}<span class="runtime-meta">{item.handover && !item.held ? m.runtime_display_needs_you({ reason: item.handover.reason }, { locale }) : item.held ? m.runtime_display_held({}, { locale }) : item.activity ? item.activity.label ? m.runtime_display_activity({ label: item.activity.label }, { locale }) : m.runtime_display_working({}, { locale }) : `${item.width}×${item.height}`}</span></span>
 								<DisplayViewers viewers={item.viewers} {people} />
 								{#if canView && onOpenDisplay}<button type="button" class="runtime-display-open" onclick={() => openDisplay(item.id)}>{m.runtime_display_open({}, { locale })}</button>{/if}
 							</div>
@@ -447,7 +470,14 @@ $effect(() => {
 					<div class="runtime-device-actions">
 						{#if serving}
 							{#if canSetupPhone}
-								<p class="runtime-meta w-full">{phoneControl?.stage === "pairing" ? m.runtime_phone_control_steps({}, { locale }) : m.runtime_phone_control_hint({}, { locale })}</p>
+								{#if phoneError}<div class="runtime-meta w-full">{#if phoneControl?.error === "notifications_off"}<HostPermissionNotice kind="notifications" message={phoneError} />{:else}{phoneError}{/if}</div>{/if}
+								{#if phoneSteps}
+									<ol class="runtime-steps w-full">
+										{#each phoneSteps as step (step.id)}<li class:is-current={step.current} aria-current={step.current ? "step" : undefined}>{step.text}</li>{/each}
+									</ol>
+								{:else if !phoneError}
+									<p class="runtime-meta w-full">{m.runtime_phone_control_hint({}, { locale })}</p>
+								{/if}
 								<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(setupPhoneControl)}>{m.runtime_phone_control_setup({}, { locale })}</button>
 							{/if}
 							{#if screen && phoneReady && !screen.control}
@@ -532,6 +562,8 @@ $effect(() => {
 {/if}
 
 <style>
+.runtime-steps { margin: 0; padding-left: 18px; list-style: decimal; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
+.runtime-steps li.is-current { color: var(--text-primary); }
 .runtime-link { color: var(--brand); white-space: nowrap; }
 .runtime-link:hover { text-decoration: underline; }
 .runtime-state { display: inline-flex; align-items: center; gap: 5px; color: var(--text-tertiary); font-size: 12px; }

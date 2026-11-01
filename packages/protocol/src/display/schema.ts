@@ -48,6 +48,13 @@ export const displayActivitySchema = z.object({
 });
 export type DisplayActivity = z.infer<typeof displayActivitySchema>;
 
+export const displayHandoverInfoSchema = z.object({
+  reason: z.string().max(DISPLAY_LABEL_MAX),
+  sessionId: z.string().min(1).max(64).optional(),
+  turnId: z.string().min(1).max(64).optional(),
+});
+export type DisplayHandoverInfo = z.infer<typeof displayHandoverInfoSchema>;
+
 export const displayInfoSchema = z.object({
   id: displayIdSchema,
   name: z.string().max(DISPLAY_NAME_MAX),
@@ -68,6 +75,7 @@ export const displayInfoSchema = z.object({
   viewers: z.array(displayViewerSchema).max(16).optional(),
   activity: displayActivitySchema.optional(),
   held: z.boolean().optional(),
+  handover: displayHandoverInfoSchema.optional(),
 });
 export type DisplayInfo = z.infer<typeof displayInfoSchema>;
 
@@ -124,7 +132,7 @@ export type DisplayElement = z.infer<typeof displayElementSchema>;
 
 export const displayTreeParamsSchema = z.object({
   maxElements: z.number().int().min(1).max(DISPLAY_TREE_MAX_ELEMENTS).optional(),
-  actionable: z.boolean().optional(),
+  compact: z.boolean().optional(),
 });
 export type DisplayTreeParams = z.infer<typeof displayTreeParamsSchema>;
 

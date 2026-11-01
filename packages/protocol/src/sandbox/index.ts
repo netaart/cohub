@@ -1,5 +1,5 @@
 import type { SandboxSetupInfo } from "./setup.js";
-import type { DisplayActParams, DisplayActResult, DisplayApps, DisplayCapture, DisplayCaptureParams, DisplayInputBatch, DisplayList, DisplayTree, DisplayTreeParams, DisplayVirtualStart } from "../display/index.js";
+import type { DisplayActParams, DisplayActResult, DisplayActivity, DisplayApps, DisplayCapture, DisplayCaptureParams, DisplayHandoverParams, DisplayHandoverResult, DisplayInputBatch, DisplayList, DisplayTree, DisplayTreeParams, DisplayVirtualStart } from "../display/index.js";
 import type { RtcIceServer } from "../rtc/index.js";
 import type { WORKSPACE_CANDIDATE_INDEX_FAMILY } from "../search/index.js";
 
@@ -42,6 +42,9 @@ export const RPC_METHODS = [
   "display.tree",
   "display.act",
   "display.apps",
+  "display.interrupt",
+  "display.handover",
+  "display.handback",
   "display.start",
   "display.stop",
   "rtc.open",
@@ -574,8 +577,20 @@ export type RpcRequestMap = {
     result: DisplayTree;
   };
   "display.act": {
-    params: DisplayActParams & { display: string };
+    params: DisplayActParams & { display: string; plan?: string };
     result: DisplayActResult;
+  };
+  "display.interrupt": {
+    params: { display: string; plan?: string };
+    result: { activity?: DisplayActivity };
+  };
+  "display.handover": {
+    params: DisplayHandoverParams & { display: string };
+    result: DisplayHandoverResult;
+  };
+  "display.handback": {
+    params: { display: string };
+    result: Record<string, never>;
   };
   "display.apps": {
     params: { display: string };

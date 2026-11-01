@@ -14,20 +14,23 @@ import (
 )
 
 const (
-	settleQuiet    = 300 * time.Millisecond
-	settleMax      = 3 * time.Second
-	settleBlind    = 500 * time.Millisecond // without change reports
-	readGap        = 200 * time.Millisecond // between tree reads, however fast the screen moves
-	pollWatched    = 250 * time.Millisecond
-	pollBlind      = 500 * time.Millisecond
-	actImageSize   = 1280
-	actImageJPEG   = 80
-	poorNamedLimit = 3
-	findPatience   = 3 * time.Second
+	settleQuiet      = 300 * time.Millisecond
+	settleMax        = 3 * time.Second
+	settleBlind      = 500 * time.Millisecond // without change reports
+	readGap          = 200 * time.Millisecond // between tree reads, however fast the screen moves
+	pollWatched      = 250 * time.Millisecond
+	pollBlind        = 500 * time.Millisecond
+	actImageSize     = 1280
+	actImageJPEG     = 80
+	poorNamedLimit   = 3
+	findPatience     = 3 * time.Second
+	queuePatience    = 5 * time.Second
+	maxTargetScrolls = 20
 )
 
 type ActParams struct {
 	Display string   `json:"display"`
+	Plan    string   `json:"plan,omitempty"`
 	Steps   []Step   `json:"steps"`
 	Observe *Observe `json:"observe,omitempty"`
 	Actor   *Actor   `json:"actor,omitempty"`
@@ -74,6 +77,8 @@ type ActResult struct {
 
 type StepResult struct {
 	Effect   string `json:"effect"`
+	FindMs   int    `json:"findMs"`
+	ActMs    int    `json:"actMs"`
 	WaitedMs int    `json:"waitedMs"`
 }
 
@@ -85,10 +90,17 @@ type ActStop struct {
 }
 
 type ActScreen struct {
-	App     string         `json:"app,omitempty"`
-	Quality string         `json:"quality,omitempty"`
-	Tree    *Tree          `json:"tree,omitempty"`
-	Image   *CaptureResult `json:"image,omitempty"`
+	App       string         `json:"app,omitempty"`
+	Quality   string         `json:"quality,omitempty"`
+	Tree      *Tree          `json:"tree,omitempty"`
+	Unchanged bool           `json:"unchanged,omitempty"`
+	Image     *CaptureResult `json:"image,omitempty"`
+}
+
+type observation struct {
+	session string
+	tree    string
+	screen  uint64
 }
 
 func (p *ActParams) Validate() error {
@@ -103,14 +115,17 @@ func (p *ActParams) Validate() error {
 	if p.Actor != nil && (!actorIDPattern.MatchString(p.Actor.SessionID) || p.Actor.TurnID != "" && !actorIDPattern.MatchString(p.Actor.TurnID)) {
 		return errorf(CodeInvalid, "actor needs a session id and an optional Turn id, both UUIDs")
 	}
+	if p.Plan != "" && !actorIDPattern.MatchString(p.Plan) {
+		return errorf(CodeInvalid, "plan must be a UUID")
+	}
 	if p.Observe == nil {
 		p.Observe = &Observe{}
 	}
 	o := p.Observe
-	o.Tree, o.Image = cmp.Or(o.Tree, "actionable"), cmp.Or(o.Image, "auto")
+	o.Tree, o.Image = cmp.Or(o.Tree, "compact"), cmp.Or(o.Image, "auto")
 	switch {
-	case !slices.Contains([]string{"actionable", "full", "none"}, o.Tree):
-		return errorf(CodeInvalid, "observe.tree must be actionable, full or none")
+	case !slices.Contains([]string{"compact", "full", "none"}, o.Tree):
+		return errorf(CodeInvalid, "observe.tree must be compact, full or none")
 	case !slices.Contains([]string{"auto", "always", "never"}, o.Image):
 		return errorf(CodeInvalid, "observe.image must be auto, always or never")
 	case o.MaxSize < 0 || o.MaxSize > MaxDimension:
@@ -193,7 +208,23 @@ func (h *Hub) Act(ctx context.Context, params ActParams) (ActResult, error) {
 	if _, ok := h.Display(params.Display); !ok {
 		return ActResult{}, errorf(CodeNotFound, "display %q not found", params.Display)
 	}
-	waiting, stopWaiting := context.WithTimeout(ctx, MaxActMs*time.Millisecond)
+	ctx, cancelled := context.WithCancelCause(ctx)
+	defer cancelled(nil)
+	if params.Plan != "" {
+		h.mu.Lock()
+		if _, gone := h.plans[params.Plan]; gone {
+			h.mu.Unlock()
+			return ActResult{}, errCancelled
+		}
+		h.plans[params.Plan] = cancelled
+		h.mu.Unlock()
+		defer func() {
+			h.mu.Lock()
+			delete(h.plans, params.Plan)
+			h.mu.Unlock()
+		}()
+	}
+	waiting, stopWaiting := context.WithTimeout(ctx, queuePatience)
 	release, err := h.acquire(waiting, params.Display)
 	stopWaiting()
 	if err != nil {
@@ -210,12 +241,11 @@ func (h *Hub) Act(ctx context.Context, params ActParams) (ActResult, error) {
 		defer h.watchChanges(ctx, params.Display)()
 	}
 	run := &actRun{hub: h, info: info, result: ActResult{Steps: []StepResult{}}}
+	if params.Actor != nil {
+		run.actor = Activity{SessionID: params.Actor.SessionID, TurnID: params.Actor.TurnID}
+	}
 	if len(params.Steps) > 0 {
-		run.actor = Activity{}
-		if params.Actor != nil {
-			run.actor = Activity{SessionID: params.Actor.SessionID, TurnID: params.Actor.TurnID}
-		}
-		scripted, done, err := h.script(ctx, params.Display)
+		scripted, done, err := h.script(ctx, params.Display, params.Actor)
 		if err != nil {
 			run.stop(0, err)
 		} else {
@@ -228,7 +258,7 @@ func (h *Hub) Act(ctx context.Context, params ActParams) (ActResult, error) {
 	observing, done := context.WithTimeout(context.WithoutCancel(ctx), callTimeout)
 	defer done()
 	run.ctx = observing
-	if err := run.observe(*params.Observe); err != nil && len(run.result.Steps) == 0 && run.result.Stopped == nil {
+	if err := run.observe(*params.Observe, len(params.Steps) > 0); err != nil && len(run.result.Steps) == 0 && run.result.Stopped == nil {
 		return ActResult{}, err
 	}
 	return run.result, nil
@@ -358,18 +388,30 @@ func (r *actRun) steps(steps []Step) {
 		if step.Label != "" {
 			r.actor.Label = step.Label
 		}
-		r.hub.beginActivity(r.info.ID, r.actor)
+		if r.ctx.Err() == nil {
+			r.hub.beginActivity(r.info.ID, r.actor)
+		}
 		var before *Tree
 		if r.info.Tree {
 			before, _ = r.current()
 		}
 		seq, _, _ := r.hub.changeState(r.info.ID)
-		if !r.perform(index, step) {
+		started := time.Now()
+		ref, ok := r.locate(index, step)
+		if !ok {
+			return
+		}
+		found := time.Now()
+		if !r.perform(index, step, ref) {
 			return
 		}
 		acted := time.Now()
 		met := r.wait(step)
-		result := StepResult{WaitedMs: int(time.Since(acted).Milliseconds())}
+		result := StepResult{
+			FindMs:   int(found.Sub(started).Milliseconds()),
+			ActMs:    int(acted.Sub(found).Milliseconds()),
+			WaitedMs: int(time.Since(acted).Milliseconds()),
+		}
 		var after *Tree
 		if r.info.Tree {
 			after, _ = r.read()
@@ -391,22 +433,25 @@ func (r *actRun) steps(steps []Step) {
 	}
 }
 
-func (r *actRun) perform(index int, step Step) bool {
+func (r *actRun) locate(index int, step Step) (string, bool) {
+	if step.Type != "element" {
+		return "", true
+	}
+	if step.Target.Ref != "" {
+		return step.Target.Ref, true
+	}
+	element, err := r.find(index, step)
+	if err != nil {
+		r.stop(index, err)
+		return "", false
+	}
+	return element.Ref, element.Ref != ""
+}
+
+func (r *actRun) perform(index int, step Step, ref string) bool {
 	var err error
 	switch step.Type {
 	case "element":
-		ref := step.Target.Ref
-		if ref == "" {
-			var element Element
-			if element, err = r.find(index, *step.Target); err != nil {
-				r.stop(index, err)
-				return false
-			}
-			if element.Ref == "" {
-				return false
-			}
-			ref = element.Ref
-		}
 		err = r.hub.send(r.ctx, InputBatch{Display: r.info.ID, Events: []InputEvent{{Type: "element", Ref: ref, Action: step.Action, Text: step.Text}}})
 	case "input":
 		err = r.hub.send(r.ctx, InputBatch{Display: r.info.ID, Events: step.Events})
@@ -427,30 +472,51 @@ func (r *actRun) perform(index int, step Step) bool {
 	return true
 }
 
-func (r *actRun) find(index int, target Target) (Element, error) {
+func (r *actRun) find(index int, step Step) (Element, error) {
+	target := *step.Target
 	deadline := time.Now().Add(findPatience)
+	scrolls := 0
 	for read := r.current; ; read = r.read {
 		tree, err := read()
 		if err != nil {
 			return Element{}, err
 		}
-		element, candidates := resolve(*tree, target)
+		element, candidates := resolve(*tree, target, step.Action)
 		if element.Ref != "" {
 			return element, nil
 		}
-		if !r.next(deadline) {
-			if err := context.Cause(r.ctx); err != nil {
-				return Element{}, err
-			}
-			if len(candidates) > 0 {
-				r.result.Stopped = &ActStop{Step: index, Reason: "ambiguous", Candidates: candidates,
-					Message: fmt.Sprintf("step %d: %d elements match %s; pick one with a ref or nth", index+1, len(candidates), target)}
-			} else {
-				r.result.Stopped = &ActStop{Step: index, Reason: "not_found", Message: fmt.Sprintf("step %d: nothing on the screen matches %s", index+1, target)}
-			}
-			return Element{}, nil
+		if target.Scroll && len(candidates) == 0 && scrolls < maxTargetScrolls && r.scrollOn(tree) {
+			scrolls++
+			continue
 		}
+		if r.next(deadline) {
+			continue
+		}
+		if err := context.Cause(r.ctx); err != nil {
+			return Element{}, err
+		}
+		if len(candidates) > 0 {
+			r.result.Stopped = &ActStop{Step: index, Reason: "ambiguous", Candidates: candidates,
+				Message: fmt.Sprintf("step %d: %d elements match %s; pick one with a ref or nth", index+1, len(candidates), target)}
+		} else {
+			r.result.Stopped = &ActStop{Step: index, Reason: "not_found", Message: fmt.Sprintf("step %d: nothing on the screen matches %s", index+1, target)}
+		}
+		return Element{}, nil
 	}
+}
+
+func (r *actRun) scrollOn(tree *Tree) bool {
+	list := scroller(*tree)
+	if list.Ref == "" {
+		return false
+	}
+	before := signature(tree)
+	if err := r.hub.send(r.ctx, InputBatch{Display: r.info.ID, Events: []InputEvent{{Type: "element", Ref: list.Ref, Action: "scrollForward"}}}); err != nil {
+		return false
+	}
+	r.settle(settleMax)
+	after, err := r.read()
+	return err == nil && signature(after) != before
 }
 
 func (r *actRun) wait(step Step) bool {
@@ -494,7 +560,7 @@ func (r *actRun) holds(until Until) bool {
 
 func shows(tree Tree, text string) bool {
 	query := normalized(text)
-	return slices.ContainsFunc(tree.Elements, func(element Element) bool { return visible(element) && matches(element, query) >= 0 })
+	return slices.ContainsFunc(tree.Elements, func(element Element) bool { return visible(element) && matches(element, query, false) >= 0 })
 }
 
 func untilTimeout(until Until) time.Duration {
@@ -527,7 +593,7 @@ func (r *actRun) surprised(index int, step Step, next Step, before, after *Tree)
 		return false
 	}
 	if next.Type == "element" && next.Target.Ref == "" {
-		if element, _ := resolve(*after, *next.Target); element.Ref != "" {
+		if element, _ := resolve(*after, *next.Target, next.Action); element.Ref != "" {
 			if found := slices.IndexFunc(after.Elements, func(e Element) bool { return e.Ref == element.Ref }); within(after.Elements, dialog, found) {
 				return false
 			}
@@ -588,6 +654,8 @@ func (r *actRun) stop(index int, err error) {
 	reason := "failed"
 	var displayErr *Error
 	switch {
+	case errors.As(err, &displayErr) && displayErr == errInterrupted:
+		reason = "interrupted"
 	case errors.As(err, &displayErr) && displayErr.Code == CodePreempted:
 		reason = "preempted"
 	case errors.Is(err, context.DeadlineExceeded):
@@ -600,7 +668,7 @@ func (r *actRun) stop(index int, err error) {
 	r.result.Stopped = &ActStop{Step: index, Reason: reason, Message: fmt.Sprintf("step %d: %s", index+1, message)}
 }
 
-func (r *actRun) observe(o Observe) error {
+func (r *actRun) observe(o Observe, acted bool) error {
 	screen := &r.result.Screen
 	if r.info.Tree {
 		tree, err := r.read()
@@ -610,14 +678,20 @@ func (r *actRun) observe(o Observe) error {
 		screen.App = tree.App
 		screen.Quality = quality(*tree)
 		if o.Tree != "none" {
-			limit := cmp.Or(o.MaxElements, DefaultTreeElements)
-			shown := *tree
-			if o.Tree == "actionable" {
-				shown = shown.actionable(limit)
+			now := observation{session: r.actor.SessionID, tree: o.Tree, screen: signature(tree)}
+			seen := r.hub.observe(r.info.ID, now)
+			if acted && seen && now.session != "" && screen.Quality == "good" {
+				screen.Unchanged = true
 			} else {
-				shown = shown.sanitize(limit)
+				limit := cmp.Or(o.MaxElements, DefaultTreeElements)
+				shown := *tree
+				if o.Tree == "compact" {
+					shown = shown.compact(limit)
+				} else {
+					shown = shown.sanitize(limit)
+				}
+				screen.Tree = &shown
 			}
-			screen.Tree = &shown
 		}
 	}
 	if o.Image == "always" || o.Image == "auto" && screen.Quality != "good" {
@@ -631,6 +705,14 @@ func (r *actRun) observe(o Observe) error {
 		screen.Image = &image
 	}
 	return nil
+}
+
+func (h *Hub) observe(display string, now observation) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	same := h.observed[display] == now
+	h.observed[display] = now
+	return same
 }
 
 func quality(tree Tree) string {

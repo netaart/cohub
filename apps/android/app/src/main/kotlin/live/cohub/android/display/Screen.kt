@@ -55,8 +55,16 @@ internal class Screen(
 
     val agent: Boolean get() = displayId != android.view.Display.DEFAULT_DISPLAY
 
-    fun mirror(surface: Surface, width: Int, height: Int): IBinder? =
-        if (released) null else runCatching { helper.mirror(displayId, width, height, surface) }.getOrNull()
+    val streaming: Boolean get() = synchronized(lock) { sinks.isNotEmpty() }
+
+    fun mirror(surface: Surface, width: Int, height: Int): IBinder {
+        if (released) throw DisplayError(DisplayError.UNAVAILABLE, "the screen is gone")
+        return try {
+            helper.mirror(displayId, width, height, surface)
+        } catch (error: Exception) {
+            throw DisplayError(DisplayError.FAILED, error.message ?: "the phone could not mirror the screen")
+        }
+    }
 
     fun unmirror(token: IBinder) {
         runCatching { helper.releaseMirror(token) }
@@ -75,9 +83,12 @@ internal class Screen(
         synchronized(lock) {
             if (released) throw DisplayError(DisplayError.UNAVAILABLE, "the screen is gone")
             sinks[sink] = bitrate
-            val current = encoder ?: startEncoder() ?: run {
+            val current = try {
+                encoder ?: startEncoder()
+            } catch (error: Exception) {
+                Log.w(TAG, "Encoder could not start", error)
                 sinks.remove(sink)
-                throw DisplayError(DisplayError.FAILED, "the video encoder could not start")
+                throw DisplayError(DisplayError.FAILED, "the video encoder could not start: ${error.message}")
             }
             current.setBitrate(targetBitrate())
             current.requestKeyFrame()
@@ -105,17 +116,17 @@ internal class Screen(
 
     private fun targetBitrate(): Int = sinks.values.minOrNull()?.coerceIn(MIN_BITRATE, MAX_BITRATE) ?: DEFAULT_BITRATE
 
-    private fun startEncoder(): ScreenEncoder? {
+    private fun startEncoder(): ScreenEncoder {
         val (width, height) = fit(size.width, size.height, MAX_STREAM_EDGE, align = 16)
-        val created = runCatching {
-            ScreenEncoder(width, height, targetBitrate(), FPS, ::fanOut) { error ->
-                Log.w(TAG, "Encoder failed", error)
-                failEncoder()
-            }
-        }.onFailure { Log.w(TAG, "Encoder could not start", it) }.getOrNull() ?: return null
-        val token = mirror(created.surface, width, height) ?: run {
+        val created = ScreenEncoder(width, height, targetBitrate(), FPS, ::fanOut) { error ->
+            Log.w(TAG, "Encoder failed", error)
+            failEncoder()
+        }
+        val token = try {
+            mirror(created.surface, width, height)
+        } catch (error: DisplayError) {
             created.release()
-            return null
+            throw error
         }
         encoder = created
         stream = token
@@ -158,9 +169,11 @@ internal class Screen(
                 if (!frame.complete(bitmap)) bitmap.recycle()
             }
         }, FrameChanges.handler)
-        val token = mirror(reader.surface, width, height) ?: run {
+        val token = try {
+            mirror(reader.surface, width, height)
+        } catch (error: DisplayError) {
             reader.close()
-            throw DisplayError(DisplayError.UNAVAILABLE, "phone control stopped")
+            throw error
         }
         try {
             val bitmap = withTimeout(CAPTURE_TIMEOUT_MS) { frame.await() }
@@ -188,11 +201,11 @@ internal class Screen(
             size = next
             watch?.let {
                 unmirror(it)
-                watch = changes.size(next).let { (width, height) -> mirror(changes.surface, width, height) }
+                watch = runCatching { changes.size(next).let { (width, height) -> mirror(changes.surface, width, height) } }.getOrNull()
             }
             if (encoder == null) return@synchronized false
             stopEncoder()
-            startEncoder() == null
+            runCatching { startEncoder() }.isFailure
         }
         if (restart) failEncoder()
     }

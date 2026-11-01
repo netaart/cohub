@@ -29,6 +29,7 @@ type Info struct {
 	Viewers  []Viewer  `json:"viewers,omitempty"`
 	Activity *Activity `json:"activity,omitempty"`
 	Held     bool      `json:"held,omitempty"` // a person at the machine took it over
+	Handover *Handover `json:"handover,omitempty"`
 }
 
 type Activity struct {
@@ -95,7 +96,7 @@ func (i Info) known() Info {
 	if !kinds[i.Kind] {
 		i.Kind = ""
 	}
-	i.Viewers, i.Activity, i.Held = nil, nil, false
+	i.Viewers, i.Activity, i.Held, i.Handover = nil, nil, false, nil
 	return i
 }
 
@@ -115,7 +116,7 @@ func (i Info) equal(other Info) bool {
 		i.Desktop == other.Desktop && i.Platform == other.Platform && i.Tree == other.Tree && i.Focus == other.Focus &&
 		i.Kind == other.Kind && i.Apps == other.Apps && i.Changes == other.Changes && i.Held == other.Held &&
 		slices.Equal(i.System, other.System) && slices.Equal(i.Needs, other.Needs) &&
-		slices.Equal(i.Viewers, other.Viewers) && i.Activity.equal(other.Activity)
+		slices.Equal(i.Viewers, other.Viewers) && i.Activity.equal(other.Activity) && i.Handover.equal(other.Handover)
 }
 
 type Sample struct {

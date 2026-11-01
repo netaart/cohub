@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -6,11 +7,15 @@ import {
   DISPLAY_ELEMENT_REF_PATTERN,
   DISPLAY_ELEMENT_ROLES,
   DISPLAY_SYSTEM_ACTIONS,
+  DISPLAY_HANDOVER_DEFAULT_MS,
+  DISPLAY_HANDOVER_MAX_MS,
+  DISPLAY_HANDOVER_WAIT_MS,
   DisplayActionError,
   type DisplayAction,
   type DisplayActResult,
   type DisplayCapture,
   type DisplayElement,
+  type DisplayHandoverState,
   type DisplayInfo,
   type DisplayTree,
   type DisplayUntil,
@@ -30,18 +35,20 @@ type ActOptions = {
   untilGone?: string;
   untilApp?: string;
   untilStable?: boolean;
-  timeout?: string;
+  timeoutMs?: string;
   label?: string;
   screenshot?: string | boolean;
   tree?: string;
   json?: boolean;
 };
-type TargetOptions = { name?: string; role?: string; nth?: string };
+type TargetOptions = { name?: string; role?: string; nth?: string; scroll?: boolean };
 
 const DIRECTIONS = ["up", "down", "left", "right"] as const;
 const BUTTONS = ["primary", "secondary", "middle"] as const;
-const TREES = ["actionable", "full", "none"] as const;
+const TREES = ["compact", "full", "none"] as const;
 const DEFAULT_MAX_SIZE = 1280;
+const HANDOVER_RETRY_MS = 60_000;
+const HANDOVER_RETRY_GAP_MS = 2_000;
 const CACHE_DIR = join(homedir(), ".cache", "cohub-cli");
 const FRAMES_PATH = join(CACHE_DIR, "display-frames.json");
 const NO_DISPLAY_HINT =
@@ -103,11 +110,13 @@ function pickDisplay(displays: DisplayInfo[], requested: string | undefined): Di
   return error("Several displays are shared", `Pass --display with one of: ${displays.map((display) => display.id).join(", ")}`);
 }
 
-async function target(spacesCmd: Command, opts: { display?: string }) {
+async function target(spacesCmd: Command, opts: { display?: string }, launching = false) {
   const spaceId = await resolveSpace(spacesCmd);
   const api = createClient().space(spaceId).displays;
-  const { displays } = await api.list();
-  return { spaceId, api, display: pickDisplay(displays, opts.display) };
+  let { displays, virtual } = await api.list();
+  if (launching && !opts.display && !displays.some((display) => display.apps) && virtual === "available") ({ displays } = await api.startVirtual());
+  const launchers = displays.filter((display) => display.apps);
+  return { spaceId, api, display: pickDisplay(launching && !opts.display && launchers.length > 0 ? launchers : displays, opts.display) };
 }
 
 function displayUrl(spaceId: string, displayId: string) {
@@ -139,21 +148,20 @@ async function screenshot(api: SpaceDisplaysApi, spaceId: string, display: Displ
   return saveImage(spaceId, display, await api.capture(display.id, { maxSize }), output ?? resolve(`${display.id}-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`));
 }
 
-function formatElement(element: DisplayElement, frame: Size, indent = true) {
+function formatElement(element: DisplayElement, frame: Size, indent = true, box = true) {
   const scaleX = frame.width - 1 || 1;
   const scaleY = frame.height - 1 || 1;
   const [x, y, width, height] = element.bounds;
-  const box = `(${Math.round(x * scaleX)},${Math.round(y * scaleY)} ${Math.round(width * scaleX)}x${Math.round(height * scaleY)})`;
   const parts = [`${indent ? "  ".repeat(element.depth) : ""}${element.ref}`, element.role];
   if (element.name) parts.push(JSON.stringify(element.name));
   if (element.value) parts.push(`value=${JSON.stringify(element.value)}`);
   if (element.states?.length) parts.push(`[${element.states.join(", ")}]`);
-  parts.push(box);
+  if (box) parts.push(`(${Math.round(x * scaleX)},${Math.round(y * scaleY)} ${Math.round(width * scaleX)}x${Math.round(height * scaleY)})`);
   return parts.join(" ");
 }
 
-function formatTree(tree: DisplayTree, frame: Size): string {
-  return tree.elements.map((element) => formatElement(element, frame)).join("\n");
+function formatTree(tree: DisplayTree, frame: Size, compact = false): string {
+  return tree.elements.map((element) => formatElement(element, frame, true, !compact || Boolean(element.actions?.length))).join("\n");
 }
 
 const ACTOR = process.env.COHUB_SESSION_ID
@@ -168,15 +176,17 @@ function untilOf(opts: ActOptions): DisplayUntil | undefined {
     ...(opts.untilStable ? { stable: true as const } : {}),
   };
   if (Object.keys(until).length === 0) return undefined;
-  return { ...until, ...(opts.timeout ? { timeoutMs: parseNumber("timeout", opts.timeout) } : {}) };
+  return { ...until, ...(opts.timeoutMs ? { timeoutMs: parseNumber("timeout-ms", opts.timeoutMs) } : {}) };
 }
 
 async function act(spacesCmd: Command, opts: ActOptions, actions: DisplayAction[]) {
+  let sent = false;
   try {
-    const { spaceId, api, display } = await target(spacesCmd, opts);
+    const launching = actions.some((action) => action.type === "launch" || action.type === "open");
+    const { spaceId, api, display } = await target(spacesCmd, opts, launching);
     if (!display.input && actions.length > 0) return error("This display is view only", needsHint(display) ?? "Allow control on the device first.");
     const frame = await frameOf(spaceId, display, opts.size);
-    const tree = opts.tree ?? "actionable";
+    const tree = opts.tree ?? "compact";
     if (!(TREES as readonly string[]).includes(tree)) return error("Invalid tree", `Use one of: ${TREES.join(", ")}`);
     const last = actions.at(-1);
     if (last) {
@@ -185,6 +195,7 @@ async function act(spacesCmd: Command, opts: ActOptions, actions: DisplayAction[
       if (opts.label) last.label = opts.label;
     }
     const steps = compileDisplayPlan(actions, frame.width, frame.height);
+    sent = steps.length > 0;
     const result = await api.act(display.id, {
       steps,
       observe: { tree: tree as (typeof TREES)[number], image: opts.screenshot ? "always" : "auto", maxSize: DEFAULT_MAX_SIZE },
@@ -199,19 +210,25 @@ async function act(spacesCmd: Command, opts: ActOptions, actions: DisplayAction[
       const { image: _, ...screen } = result.screen;
       return outJson({ display: display.id, ...result, screen: { ...screen, ...(image ? { image } : {}) }, frame: { width: shown.width, height: shown.height } });
     }
-    printResult(display, result, shown, image?.path);
+    printResult(display, result, shown, tree === "compact", image?.path);
   } catch (e: unknown) {
     if (e instanceof DisplayActionError) return error("Invalid action", e.message);
+    if (sent && isLostAnswer(e)) return error("The answer was lost", "The plan may have run, in part or whole: `look` before repeating any step.");
     handleHttp(e);
   }
 }
 
-function printResult(display: DisplayInfo, result: DisplayActResult, frame: Size, imageFile?: string) {
+function isLostAnswer(e: unknown) {
+  const status = (e as { status?: number }).status;
+  return status === undefined ? e instanceof TypeError : status >= 500 && status !== 501;
+}
+
+function printResult(display: DisplayInfo, result: DisplayActResult, frame: Size, compact: boolean, imageFile?: string) {
   const name = display.name || display.id;
   if (result.steps.length > 0 || result.stopped) {
     const done = result.steps.length;
     if (!result.stopped) ok(`${done} step${done === 1 ? "" : "s"} on ${name}`);
-    for (const [index, step] of result.steps.entries()) console.log(`  ${index + 1}. ${step.effect} · settled in ${step.waitedMs} ms`);
+    for (const [index, step] of result.steps.entries()) console.log(`  ${index + 1}. ${step.effect} · ${step.findMs + step.actMs + step.waitedMs} ms`);
     if (result.stopped) {
       console.log(`✗ Stopped (${result.stopped.reason}): ${result.stopped.message}`);
       for (const candidate of result.stopped.candidates ?? []) console.log(`    ${formatElement(candidate, frame, false)}`);
@@ -219,14 +236,55 @@ function printResult(display: DisplayInfo, result: DisplayActResult, frame: Size
   }
   const { screen } = result;
   console.log(`\n${[screen.app, screen.quality === "poor" ? "the tree misses much of this screen: read the image" : null].filter(Boolean).join(" · ") || name}`);
+  if (screen.unchanged) console.log("  The screen is as you last saw it; its refs are gone, so target by name or `look` again.");
   if (screen.tree) {
-    console.log(formatTree(screen.tree, frame));
+    console.log(formatTree(screen.tree, frame, compact));
     if (screen.tree.truncated) console.log("  More elements exist; pass --tree full or read `tree --max`.");
   }
   if (imageFile) console.log(`\n  Image ${frame.width}x${frame.height}: ${imageFile} (coordinates are its pixels)`);
-  console.log(`\n  Boxes are x,y and size in ${frame.width}x${frame.height} pixels.`);
+  if (screen.tree) console.log(`\n  Boxes are x,y and size in ${frame.width}x${frame.height} pixels.`);
   if (display.held) console.log("  A person at the device has taken it over; wait until they hand it back.");
   else if (display.viewers?.some((viewer) => viewer.control)) console.log("  A person is watching with control; what you do here pauses while they act.");
+}
+
+const HANDOVER_ENDS: Record<Exclude<DisplayHandoverState, "waiting" | "returned">, (held?: boolean) => [string, string]> = {
+  stopped: () => ["The person stopped this", "Do not go on with this Turn; ask them."],
+  gone: () => ["The display went away", "Ask the person what happened before going on."],
+  expired: (held) => held
+    ? ["Timed out while the person is still working", "Tell them to say so in the chat when done; they will not wake you by handing back."]
+    : ["Timed out; the person did not take over", "Tell them what is needed, and to say so in the chat when done."],
+};
+
+async function handover(spacesCmd: Command, opts: { reason: string; display?: string; timeoutMs?: string; wait: boolean; json?: boolean }) {
+  try {
+    const timeoutMs = opts.timeoutMs ? parseNumber("timeout-ms", opts.timeoutMs) : DISPLAY_HANDOVER_DEFAULT_MS;
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > DISPLAY_HANDOVER_MAX_MS) return error("Invalid timeout", `--timeout-ms must be between 1 and ${DISPLAY_HANDOVER_MAX_MS} milliseconds.`);
+    const { api, display } = await target(spacesCmd, opts);
+    const params = { id: randomUUID(), reason: opts.reason, timeoutMs, ...(ACTOR ? { actor: ACTOR } : {}) };
+    const giveUpAt = Date.now() + timeoutMs + HANDOVER_RETRY_MS;
+    let result = await api.handover(display.id, { ...params, waitMs: opts.wait ? DISPLAY_HANDOVER_WAIT_MS : 0 });
+    while (opts.wait && result.state === "waiting") {
+      try {
+        result = await api.handover(display.id, { ...params, waitMs: DISPLAY_HANDOVER_WAIT_MS });
+      } catch (e: unknown) {
+        if (!isLostAnswer(e) || Date.now() > giveUpAt) throw e;
+        await new Promise((done) => setTimeout(done, HANDOVER_RETRY_GAP_MS));
+      }
+    }
+    if (result.state === "waiting") {
+      if (jsonRequested(opts)) return outJson({ display: display.id, ...result });
+      return ok(`Asked the person: ${opts.reason}`);
+    }
+    if (result.state === "returned") return act(spacesCmd, { display: display.id, json: opts.json }, []);
+    const [title, hint] = HANDOVER_ENDS[result.state](result.held);
+    if (jsonRequested(opts)) {
+      process.exitCode = 1;
+      return outJson({ display: display.id, ...result });
+    }
+    return error(title, hint);
+  } catch (e: unknown) {
+    handleHttp(e);
+  }
 }
 
 function withAct(command: Command): Command {
@@ -237,7 +295,7 @@ function withAct(command: Command): Command {
     .option("--until-gone <text>", "Wait until this text is gone, e.g. a loading label")
     .option("--until-app <id>", "Wait until this app is in front")
     .option("--until-stable", "Wait until the screen stops changing")
-    .option("--timeout <ms>", "How long --until-* waits (default 8000)")
+    .option("--timeout-ms <ms>", "How long --until-* waits (default 8000)")
     .option("--label <text>", "What this does, shown to people watching")
     .option("--screenshot [path]", "Attach an image of the screen after (by default only when its tree misses much)")
     .option("--tree <kind>", `The tree after: ${TREES.join(", ")}`)
@@ -248,7 +306,8 @@ function withTarget(command: Command): Command {
   return command
     .option("--name <text>", "The element that says this: whole, then start, then part")
     .option("--role <role>", `Its role: ${DISPLAY_ELEMENT_ROLES.join(", ")}`)
-    .option("--nth <n>", "The nth match, top to bottom");
+    .option("--nth <n>", "The nth match, top to bottom")
+    .option("--scroll", "Scroll the list on until it shows");
 }
 
 function targetOf(x: string | undefined, y: string | undefined, opts: TargetOptions, command: string): Partial<DisplayAction> {
@@ -260,6 +319,7 @@ function targetOf(x: string | undefined, y: string | undefined, opts: TargetOpti
       ...(opts.name !== undefined ? { name: opts.name } : {}),
       ...(opts.role !== undefined ? { role: opts.role as DisplayAction["role"] } : {}),
       ...(opts.nth !== undefined ? { nth: parseNumber("nth", opts.nth) } : {}),
+      ...(opts.scroll ? { scroll: true } : {}),
     };
   }
   if (x === undefined) return error("Missing target", `Pass --name, an element ref, or x and y, e.g. ${command} --name Send.`);
@@ -376,20 +436,20 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
     .description("Read the interface as elements: refs to act on, roles, names and boxes")
     .option("-d, --display <id>", "Display id; defaults to the only one, or the agent screen")
     .option("--max <n>", "Most elements to return (default 300)")
-    .option("--actionable", "Only elements that take an action, flat: fewer tokens when looking for a target")
+    .option("--compact", "What can be acted on or read, flat: fewer tokens")
     .option("--json", "Output as JSON")
-    .action(async (opts: { display?: string; max?: string; actionable?: boolean; json?: boolean }) => {
+    .action(async (opts: { display?: string; max?: string; compact?: boolean; json?: boolean }) => {
       try {
         const { spaceId, api, display } = await target(spacesCmd, opts);
         if (!display.tree) return error("This display has no element tree", "Use capture and coordinates instead.");
         const tree = await api.tree(display.id, {
           ...(opts.max ? { maxElements: parseNumber("max", opts.max) } : {}),
-          ...(opts.actionable ? { actionable: true } : {}),
+          ...(opts.compact ? { compact: true } : {}),
         });
         if (jsonRequested(opts)) return outJson(tree);
         const frame = await frameOf(spaceId, display);
         if (tree.app) console.log(tree.app);
-        console.log(formatTree(tree, frame));
+        console.log(formatTree(tree, frame, opts.compact));
         console.log(`\n  Boxes are x,y and size in ${frame.width}x${frame.height} pixels. Act with: tap --name <text> · type <text> --into <ref> · act < plan.json`);
         if (tree.truncated) console.log("  More elements exist; pass --max to read more.");
       } catch (e: unknown) {
@@ -483,6 +543,18 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
     .action((opts: ActOptions & { ms?: string }) =>
       act(spacesCmd, opts, [{ type: "wait", ...(opts.ms ? { duration_ms: parseNumber("ms", opts.ms) } : {}) }]));
 
+  displays
+    .command("handover")
+    .description("Ask the person to do what you must not (sign in, pay), and wait until they hand back")
+    .requiredOption("--reason <text>", "What they need to do, in their language; shown on the device")
+    .option("-d, --display <id>", "Display id; defaults to the only one, or the agent screen")
+    .option("--timeout-ms <ms>", `How long to wait (default: ${DISPLAY_HANDOVER_DEFAULT_MS}; max: ${DISPLAY_HANDOVER_MAX_MS})`)
+    .option("--no-wait", "Ask and exit without waiting")
+    .option("--json", "Output as JSON")
+    .action(async (opts: { reason: string; display?: string; timeoutMs?: string; wait: boolean; json?: boolean }) => {
+      await handover(spacesCmd, opts);
+    });
+
   withAct(displays.command("act").description("Run a plan: a JSON array of actions from --actions or stdin"))
     .option("--actions <json>", 'Actions, e.g. \'[{"type":"launch","app":"com.android.settings"},{"type":"tap","name":"Wi-Fi"}]\'')
     .addHelpText("after", `
@@ -491,7 +563,7 @@ surprise (a target missing or ambiguous, an until that never came, a dialog,
 another app, a person taking over), then reports the screen.
 
   {"type":"launch","app":"<id>"}                      {"type":"open","url":"<link>"}
-  {"type":"tap","name":"Send"}  {"type":"tap","ref":"e3.12"}  {"type":"tap","x":540,"y":1200}
+  {"type":"tap","name":"Send"}  {"type":"tap","name":"Ada","scroll":true}  {"type":"tap","ref":"e3.12"}  {"type":"tap","x":540,"y":1200}
   {"type":"type","text":"hi","name":"Message","role":"textField"}  {"type":"type","text":"hi"}
   {"type":"scroll","direction":"down"}  {"type":"swipe",...}  {"type":"key","key":"Enter"}
   {"type":"system","action":"back"}  {"type":"long_press",...}  {"type":"wait","duration_ms":500}

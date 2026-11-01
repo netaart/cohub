@@ -29,6 +29,10 @@
     <string name="phone_control_pairing_closed">The pairing dialog closed. Open Pair device with pairing code again, then enter its code.</string>
     <string name="phone_control_pairing_code">Pairing code</string>
     <string name="phone_control_pairing_enter">Enter code</string>
+    <string name="phone_control_guide_developer">Open About phone and tap Build number seven times to turn on Developer options.</string>
+    <string name="phone_control_guide_pairing">In Developer options, turn on Wireless debugging and tap Pair device with pairing code.</string>
+    <string name="overlay_needs_you">Agent needs you</string>
+    <string name="overlay_done_hint">Hand back when you\'re done</string>
     <string name="overlay_working">Agent is working</string>
     <string name="overlay_activity">Agent: %1$s</string>
     <string name="overlay_held">You\'re in control</string>

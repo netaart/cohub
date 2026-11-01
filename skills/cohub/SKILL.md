@@ -186,18 +186,20 @@ A Space's machine can share a screen: the user's phone or computer, or a virtual
 cohub spaces displays ls                             # kinds, abilities; "Virtual screen: available" means `start` works
 cohub spaces displays start                          # the phone's agent screen, or a sandbox's virtual screen
 cohub spaces displays apps                           # launchable app ids
-cohub spaces displays launch com.android.settings    # waits until it is in front
+cohub spaces displays launch com.android.settings    # starts the agent screen if needed; waits until it is in front
 cohub spaces displays tap --name "Wi-Fi" --label "Opening Wi-Fi settings"
 cohub spaces displays type "Ada" --name Search --role textField --until-text "Ada Lovelace"
+cohub spaces displays tap --name "Ada" --scroll      # pages the list until it shows
 cohub spaces displays look                           # the screen now, without acting
 echo '[{"type":"tap","name":"Search"},{"type":"type","text":"Ada"},{"type":"key","key":"Enter","until":{"gone":"Loading"}},{"type":"tap","name":"Ada","nth":1}]' | cohub spaces displays act --label "Finding Ada"
 cohub spaces displays tap 540 1200                   # a point of the latest image, when nothing names it
 cohub spaces displays press back
+cohub spaces displays handover --reason "Sign in to WeChat"   # waits until the person hands back, then prints the screen
 ```
 
-Each result lists what every step did (`none`, `changed`, `navigated`), why a plan stopped (`not_found`, `ambiguous` with candidates, `timeout`, `dialog`, `app_changed`, `failed`, `preempted`), the app in front and the tree; it saves an image when the tree misses much of the screen (`--screenshot` always), so `read` that file before acting by coordinates. Plan up to where you must judge what you see, then look and plan again. Give each plan a short `--label` in the user's language: the phone shows it while you work.
+Each result lists what every step did (`none`, `changed`, `navigated`), why a plan stopped (`not_found`, `ambiguous` with candidates, `timeout`, `dialog`, `app_changed`, `failed`, `preempted`, `interrupted`), the app in front and the screen as what can be acted on or read (`--tree full` for everything), or that it is as you last saw it (refs from before are gone then: use names, or `look`); it saves an image when the tree misses much of the screen (`--screenshot` always), so `read` that file before acting by coordinates. Plan up to where you must judge what you see, then look and plan again. Give each plan a short `--label` in the user's language: the phone shows it while you work.
 
-A person always comes first: when someone takes over (on the phone or in the web), plans stop with `preempted`; ask them before going on. Do not pay, sign in or type secrets for the user: tell them to take over on the phone. If nothing is shared, ask the user to set up phone control in the Cohub app, or to run `cohub runtime up --display` on a computer, or start a virtual screen yourself when one is available. If a display `needs` something, tell the user what to grant.
+A person always comes first: when someone takes over (on the phone or in the web), plans stop with `preempted`; ask them before going on. `interrupted` means they stopped you: end the Turn. Do not pay, sign in or type secrets for the user: run `handover` with a reason in their language. It exits 0 once they hand back, with the screen to check before going on; if it times out, tell them what is needed and to say so in the chat when done. If nothing is shared, ask the user to set up phone control in the Cohub app, or to run `cohub runtime up --display` on a computer, or start a virtual screen yourself when one is available. If a display `needs` something, tell the user what to grant.
 
 ## Labels
 

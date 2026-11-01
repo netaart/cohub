@@ -314,7 +314,7 @@ cohub spaces displays ls
 cohub spaces displays start                   # a virtual screen, where available; stop ends it
 cohub spaces displays capture -o screen.jpg   # longest edge 1280 by default
 cohub spaces displays tree                    # e3.12 button "Send" (980,2210 120x80)
-cohub spaces displays tree --actionable       # only what takes an action
+cohub spaces displays tree --compact          # what can be acted on or read
 cohub spaces displays tap e3.12 --screenshot  # act, then save a screenshot
 cohub spaces displays type "hello" --into e3.4
 cohub spaces displays tap 540 1200

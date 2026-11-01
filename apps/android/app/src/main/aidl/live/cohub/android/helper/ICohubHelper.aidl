@@ -1,5 +1,6 @@
 package live.cohub.android.helper;
 
+import android.content.ClipData;
 import android.content.Intent;
 import android.view.Surface;
 
@@ -15,4 +16,7 @@ interface ICohubHelper {
     int moveTop(int fromDisplayId, int toDisplayId) = 9;
     boolean moveTask(int taskId, int displayId) = 10;
     void prepare() = 11;
+    oneway void syncAudio() = 12;
+    @nullable ClipData putClip(String text) = 13;
+    void restoreClip(in @nullable ClipData previous, String ours) = 14;
 }

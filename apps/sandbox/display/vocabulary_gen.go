@@ -28,6 +28,9 @@ const (
 	MaxTargetNth        = 50
 	MaxUrlLen           = 2048
 	MaxApps             = 2000
+	DefaultHandoverMs   = 600000
+	MaxHandoverMs       = 43200000
+	MaxHandoverWaitMs   = 25000
 )
 
 var (
@@ -46,6 +49,6 @@ var (
 	elementActions    = names("click", "longPress", "focus", "setText", "scrollForward", "scrollBackward")
 	kinds             = names("screen", "agent")
 	effects           = names("none", "changed", "navigated")
-	actStops          = names("not_found", "ambiguous", "timeout", "dialog", "app_changed", "failed", "preempted")
+	actStops          = names("not_found", "ambiguous", "timeout", "dialog", "app_changed", "failed", "preempted", "interrupted")
 	blockedSchemes    = names("file", "content", "data", "javascript", "intent")
 )

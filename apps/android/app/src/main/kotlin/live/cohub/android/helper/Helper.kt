@@ -2,6 +2,8 @@ package live.cohub.android.helper
 
 import android.annotation.SuppressLint
 import android.app.ActivityOptions
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -21,6 +23,8 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
 import androidx.annotation.RequiresApi
+import java.io.File
+import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.ConcurrentHashMap
 
 @SuppressLint("PrivateApi", "DiscouragedPrivateApi", "BlockedPrivateApi", "SoonBlockedPrivateApi", "WrongConstant")
@@ -32,6 +36,8 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
     private val displays = ConcurrentHashMap<Int, VirtualDisplay>()
     private val mirrors = ConcurrentHashMap<IBinder, VirtualDisplay>()
     private val muted = ConcurrentHashMap<String, String>()
+    private val ledger = File(MUTE_LEDGER)
+    private val clipboard by lazy { context.getSystemService(ClipboardManager::class.java) }
 
     private val tasks: Any by lazy { Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!! }
     private val input: Any by lazy { Class.forName("android.hardware.input.InputManagerGlobal").getMethod("getInstance").invoke(null)!! }
@@ -39,12 +45,16 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
     private val inject by lazy { input.javaClass.getMethod("injectInputEvent", InputEvent::class.java, Int::class.javaPrimitiveType) }
     private val taskInfo by lazy { Class.forName("android.app.TaskInfo") }
 
+    init {
+        restoreMuted()
+    }
+
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         if (code != INTERFACE_TRANSACTION && Binder.getCallingUid() != appUid) throw SecurityException("the helper answers Cohub alone")
         return super.onTransact(code, data, reply, flags)
     }
 
-    override fun createDisplay(name: String, width: Int, height: Int, densityDpi: Int, surface: Surface): Int = attempt(-1) {
+    override fun createDisplay(name: String, width: Int, height: Int, densityDpi: Int, surface: Surface): Int = attempt("createDisplay") {
         val display = displayManager.createVirtualDisplay(name, width, height, densityDpi, surface, AGENT_FLAGS)
         val id = display.display.displayId
         displays[id] = display
@@ -60,7 +70,7 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         unmuteGone()
     }
 
-    override fun mirror(displayId: Int, width: Int, height: Int, surface: Surface): IBinder? = attempt(null) {
+    override fun mirror(displayId: Int, width: Int, height: Int, surface: Surface): IBinder? = attempt("mirror") {
         val create = DisplayManager::class.java.getMethod(
             "createVirtualDisplay", String::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Surface::class.java,
         )
@@ -73,7 +83,7 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         mirrors.remove(token)?.release()
     }
 
-    override fun touch(displayId: Int, action: Int, x: Float, y: Float, downTime: Long): Boolean = attempt(false) {
+    override fun touch(displayId: Int, action: Int, x: Float, y: Float, downTime: Long): Boolean = attempt("touch") {
         val properties = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
         val coords = arrayOf(MotionEvent.PointerCoords().apply { this.x = x; this.y = y; pressure = 1f; size = 1f })
         val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, 1, properties, coords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
@@ -84,7 +94,7 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         }
     }
 
-    override fun key(displayId: Int, action: Int, keyCode: Int, metaState: Int): Boolean = attempt(false) {
+    override fun key(displayId: Int, action: Int, keyCode: Int, metaState: Int): Boolean = attempt("key") {
         val now = SystemClock.uptimeMillis()
         send(KeyEvent(now, now, action, keyCode, 0, metaState, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, InputDevice.SOURCE_KEYBOARD), displayId)
     }
@@ -94,7 +104,7 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         return inject.invoke(input, event, INJECT_ASYNC) as Boolean
     }
 
-    override fun start(displayId: Int, intent: Intent): Int = attempt(START_FAILED) {
+    override fun start(displayId: Int, intent: Intent): Int = attempt("start") {
         val target = intent.component?.packageName ?: intent.`package`
         if (displayId != Display.DEFAULT_DISPLAY && target != null && inUseOnPhone(target)) return@attempt START_IN_USE
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -103,7 +113,7 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         val result = start.invoke(tasks, null, ShellContext.PACKAGE, null, intent, null, null, null, 0, 0, null, options, USER_CURRENT) as Int
         when {
             result == START_INTENT_NOT_RESOLVED || result == START_CLASS_NOT_FOUND -> START_NOT_FOUND
-            result < 0 -> START_FAILED
+            result < 0 -> throw IllegalStateException("startActivity returned $result")
             else -> {
                 if (displayId != Display.DEFAULT_DISPLAY) (target ?: topPackage(displayId))?.let(::mute)
                 START_OK
@@ -111,15 +121,15 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         }
     }
 
-    override fun topPackage(displayId: Int): String? = attempt(null) { tasksOn(displayId).firstOrNull()?.let(::packageOf) }
+    override fun topPackage(displayId: Int): String? = attempt("topPackage") { tasksOn(displayId).firstOrNull()?.let(::packageOf) }
 
-    override fun moveTop(fromDisplayId: Int, toDisplayId: Int): Int = attempt(-1) {
+    override fun moveTop(fromDisplayId: Int, toDisplayId: Int): Int = attempt("moveTop") {
         val task = tasksOn(fromDisplayId).firstOrNull() ?: return@attempt -1
         val id = taskInfo.getField("taskId").getInt(task)
         if (moveTask(id, toDisplayId)) id else -1
     }
 
-    override fun moveTask(taskId: Int, displayId: Int): Boolean = attempt(false) {
+    override fun moveTask(taskId: Int, displayId: Int): Boolean = attempt("moveTask") {
         if (displayId != Display.DEFAULT_DISPLAY && !displays.containsKey(displayId)) return@attempt false
         tasks.javaClass.getMethod("moveRootTaskToDisplay", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType).invoke(tasks, taskId, displayId)
         val name = allTasks().firstOrNull { taskInfo.getField("taskId").getInt(it) == taskId }?.let(::packageOf)
@@ -131,6 +141,23 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         sh("pm", "grant", appPackage, "android.permission.WRITE_SECURE_SETTINGS")
         sh("cmd", "deviceidle", "whitelist", "+$appPackage")
         sh("appops", "set", appPackage, "RUN_ANY_IN_BACKGROUND", "allow")
+    }
+
+    override fun syncAudio() = attempt("syncAudio") {
+        if (muted.isEmpty()) return@attempt
+        val shown = visibleOnPhone()
+        muted.keys.filter { it in shown }.forEach(::unmute)
+    }
+
+    override fun putClip(text: String): ClipData? = attempt("putClip") {
+        val previous = clipboard.primaryClip
+        clipboard.setPrimaryClip(ClipData.newPlainText("Cohub", text))
+        previous
+    }
+
+    override fun restoreClip(previous: ClipData?, ours: String) = attempt("restoreClip") {
+        if (clipboard.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString() != ours) return@attempt
+        if (previous != null) clipboard.setPrimaryClip(previous) else clipboard.clearPrimaryClip()
     }
 
     fun releaseAll() {
@@ -154,21 +181,39 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
     private fun packageOf(task: Any): String? =
         listOf("topActivity", "baseActivity").firstNotNullOfOrNull { (taskInfo.getField(it).get(task) as? ComponentName)?.packageName }
 
-    private fun inUseOnPhone(target: String): Boolean {
+    private fun inUseOnPhone(target: String) = target in visibleOnPhone()
+
+    private fun visibleOnPhone(): Set<String> {
         val visible = taskInfo.getField("isVisible")
-        return tasksOn(Display.DEFAULT_DISPLAY).any { packageOf(it) == target && visible.getBoolean(it) }
+        return tasksOn(Display.DEFAULT_DISPLAY).filter(visible::getBoolean).mapNotNull(::packageOf).toSet()
     }
 
     private fun mute(target: String) {
         if (target == appPackage || muted.containsKey(target)) return
         val mode = sh("appops", "get", target, "PLAY_AUDIO").substringAfter("PLAY_AUDIO:", "").trim().substringBefore(';').ifEmpty { "allow" }
         muted[target] = if (mode == "default") "allow" else mode
+        saveMuted()
         sh("appops", "set", target, "PLAY_AUDIO", "ignore")
     }
 
     private fun unmute(target: String) {
         val mode = muted.remove(target) ?: return
         sh("appops", "set", target, "PLAY_AUDIO", mode)
+        saveMuted()
+    }
+
+    private fun saveMuted() {
+        runCatching { ledger.writeText(muted.entries.joinToString("\n") { "${it.key} ${it.value}" }) }
+            .onFailure { Log.w(TAG, "the mute ledger could not be saved", it) }
+    }
+
+    private fun restoreMuted() {
+        if (!ledger.isFile) return
+        ledger.readLines().forEach { line ->
+            val (target, mode) = line.split(' ').takeIf { it.size == 2 } ?: return@forEach
+            sh("appops", "set", target, "PLAY_AUDIO", mode)
+        }
+        ledger.delete()
     }
 
     private fun unmuteGone() {
@@ -181,11 +226,12 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         process.inputStream.bufferedReader().readText().also { process.waitFor() }
     }.onFailure { Log.w(TAG, "${command.first()} failed", it) }.getOrDefault("")
 
-    private inline fun <T> attempt(fallback: T, block: () -> T): T = try {
+    private inline fun <T> attempt(call: String, block: () -> T): T = try {
         block()
     } catch (error: Throwable) {
-        Log.w(TAG, "helper call failed", error)
-        fallback
+        val cause = (error as? InvocationTargetException)?.targetException ?: error
+        Log.w(TAG, "$call failed", cause)
+        throw IllegalStateException("$call: ${cause.javaClass.simpleName}: ${cause.message}")
     }
 
     companion object {
@@ -193,7 +239,6 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         const val START_OK = 0
         const val START_IN_USE = 1
         const val START_NOT_FOUND = 2
-        const val START_FAILED = 3
 
         private const val USER_CURRENT = -2
         private const val START_INTENT_NOT_RESOLVED = -91
@@ -201,6 +246,7 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         private const val INJECT_ASYNC = 0
         private const val MAX_TASKS = 50
         private const val IME_POLICY_LOCAL = 0
+        private const val MUTE_LEDGER = "/data/local/tmp/cohub-muted"
 
         // DisplayManager.VIRTUAL_DISPLAY_FLAG_*: public, own content only, touch,
         // rotates with content, destroys its apps when removed, no touch feedback,

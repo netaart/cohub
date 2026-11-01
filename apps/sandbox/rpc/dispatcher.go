@@ -129,6 +129,10 @@ func (d *Dispatcher) SetActivity(touch func()) {
 }
 
 func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (protocol.RPCAccepted, interface{}) {
+	return d.handle(context.Background(), request, ownerIdentity)
+}
+
+func (d *Dispatcher) handle(ctx context.Context, request protocol.RPCRequest, ownerIdentity string) (protocol.RPCAccepted, interface{}) {
 	if d.activity != nil {
 		d.activity()
 	}
@@ -177,8 +181,8 @@ func (d *Dispatcher) Handle(request protocol.RPCRequest, ownerIdentity string) (
 		return accepted, d.handleProcessStart(request, accepted.OpID, ownerIdentity)
 	case "process.abort":
 		return accepted, d.complete(request, accepted.OpID, d.handleProcessAbort(request))
-	case "display.list", "display.capture", "display.input", "display.tree", "display.act", "display.apps", "display.start", "display.stop", "rtc.open", "rtc.close":
-		return accepted, d.complete(request, accepted.OpID, d.handleDisplay(request, ownerIdentity))
+	case "display.list", "display.capture", "display.input", "display.tree", "display.act", "display.apps", "display.interrupt", "display.handover", "display.handback", "display.start", "display.stop", "rtc.open", "rtc.close":
+		return accepted, d.complete(request, accepted.OpID, d.handleDisplay(ctx, request, ownerIdentity))
 	default:
 		return accepted, d.failed(request, accepted.OpID, "UNSUPPORTED_METHOD", fmt.Sprintf("unsupported method: %s", request.Method))
 	}

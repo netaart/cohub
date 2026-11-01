@@ -140,12 +140,20 @@ func (h *Hub) resume(conn *providerConn) {
 		activity := current.activity
 		activities = append(activities, activityParams{Display: display, Activity: &activity})
 	}
+	asks := make([]handoverParams, 0, len(h.handovers))
+	for display, current := range h.handovers {
+		info := current.info
+		asks = append(asks, handoverParams{Display: display, Handover: &info})
+	}
 	h.mu.Unlock()
 	for _, display := range watched {
 		_ = conn.notify("changes", changesParams{Display: display, Watch: true})
 	}
 	for _, params := range activities {
 		_ = conn.notify("activity", params)
+	}
+	for _, params := range asks {
+		_ = conn.notify("handover", params)
 	}
 }
 

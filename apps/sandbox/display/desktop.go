@@ -257,7 +257,7 @@ func (d *desktop) handle(ctx context.Context, method string, raw json.RawMessage
 		}
 		d.mu.Unlock()
 		return nil, nil
-	case "activity":
+	case "activity", "handover":
 		return nil, nil
 	default:
 		return nil, errorf(CodeUnsupported, "unsupported method %q", method)

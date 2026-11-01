@@ -42,7 +42,9 @@ var ErrStreamEnded = errors.New("display stream ended")
 var (
 	errPreempted   = errorf(CodePreempted, "a person is controlling the display; look at it again before acting")
 	errHeld        = errorf(CodePreempted, "a person at the machine has taken the display over; wait until they hand it back")
-	errInterrupted = errorf(CodePreempted, "a person at the machine stopped this; ask them before going on")
+	errInterrupted = errorf(CodePreempted, "a person stopped this; ask them before going on")
+	errWaiting     = errorf(CodePreempted, "this display is waiting for a person to finish; wait until they hand it back")
+	errCancelled   = errorf(CodePreempted, "the caller went away")
 )
 
 type InputSource int
@@ -76,6 +78,11 @@ type Hub struct {
 	activity   map[string]*activityState // by display
 	held       map[string]bool           // displays a person at the machine took over
 	acting     map[string]chan struct{}  // one plan at a time per display
+	plans      map[string]context.CancelCauseFunc
+	stopped    map[string]string
+	observed   map[string]observation
+	handovers  map[string]*handover
+	handedOver map[string]finishedHandover
 }
 
 type scriptedInput struct {
@@ -85,20 +92,25 @@ type scriptedInput struct {
 
 func NewHub(dial Dialer, logger *slog.Logger) *Hub {
 	return &Hub{
-		dial:      dial,
-		dialed:    make(chan struct{}),
-		logger:    logger.With(slog.String("component", "display")),
-		streams:   map[string]*stream{},
-		byID:      map[uint32]*stream{},
-		listeners: map[int]func([]Info){},
-		focus:     map[string]*Focus{},
-		focusTo:   map[int]func(string, *Focus){},
-		liveAt:    map[string]time.Time{},
-		scripted:  map[*scriptedInput]struct{}{},
-		changes:   map[string]*changeLog{},
-		activity:  map[string]*activityState{},
-		held:      map[string]bool{},
-		acting:    map[string]chan struct{}{},
+		dial:       dial,
+		dialed:     make(chan struct{}),
+		logger:     logger.With(slog.String("component", "display")),
+		streams:    map[string]*stream{},
+		byID:       map[uint32]*stream{},
+		listeners:  map[int]func([]Info){},
+		focus:      map[string]*Focus{},
+		focusTo:    map[int]func(string, *Focus){},
+		liveAt:     map[string]time.Time{},
+		scripted:   map[*scriptedInput]struct{}{},
+		changes:    map[string]*changeLog{},
+		activity:   map[string]*activityState{},
+		held:       map[string]bool{},
+		acting:     map[string]chan struct{}{},
+		plans:      map[string]context.CancelCauseFunc{},
+		stopped:    map[string]string{},
+		observed:   map[string]observation{},
+		handovers:  map[string]*handover{},
+		handedOver: map[string]finishedHandover{},
 	}
 }
 
@@ -247,6 +259,11 @@ func (h *Hub) setDisplays(displays []Info, virtual string) {
 			delete(h.held, id)
 		}
 	}
+	for id, current := range h.handovers {
+		if _, ok := h.displayLocked(id); !ok {
+			h.finishHandoverLocked(id, current, handoverGone)
+		}
+	}
 	var gone []string
 	for id := range h.focus {
 		if _, ok := h.displayLocked(id); !ok {
@@ -271,6 +288,10 @@ func (h *Hub) publishUnlock() {
 			info.Activity = &activity
 		}
 		info.Held = h.held[info.ID]
+		if current := h.handovers[info.ID]; current != nil {
+			handover := current.info
+			info.Handover = &handover
+		}
 		snapshot = append(snapshot, info)
 	}
 	if slices.EqualFunc(h.snapshot, snapshot, Info.equal) {
@@ -346,7 +367,7 @@ func (h *Hub) handleMessage(conn *providerConn, message wireMessage) {
 	case "hold":
 		h.hold(message.Display, message.Held)
 	case "interrupt":
-		h.interrupt(message.Display, errInterrupted)
+		h.Stop(message.Display)
 	case "reply":
 		conn.resolve(message)
 	case "ended":
@@ -418,7 +439,7 @@ func (h *Hub) Tree(ctx context.Context, params TreeParams) (Tree, error) {
 		return Tree{}, err
 	}
 	limit := params.MaxElements
-	if params.Actionable {
+	if params.Compact {
 		params.MaxElements = MaxTreeElements
 	}
 	var tree Tree
@@ -426,8 +447,8 @@ func (h *Hub) Tree(ctx context.Context, params TreeParams) (Tree, error) {
 		return Tree{}, err
 	}
 	tree = tree.sanitize(params.MaxElements)
-	if params.Actionable {
-		tree = tree.actionable(limit)
+	if params.Compact {
+		tree = tree.compact(limit)
 	}
 	return tree, nil
 }
@@ -448,7 +469,7 @@ func (h *Hub) Input(ctx context.Context, batch InputBatch, source InputSource) e
 	case InputScripted:
 		var release func()
 		var err error
-		if ctx, release, err = h.script(ctx, batch.Display); err != nil {
+		if ctx, release, err = h.script(ctx, batch.Display, nil); err != nil {
 			return err
 		}
 		defer release()
@@ -471,11 +492,17 @@ func (h *Hub) send(ctx context.Context, batch InputBatch) error {
 	return conn.call(ctx, "input", batch, nil, timeout)
 }
 
-func (h *Hub) script(ctx context.Context, display string) (context.Context, func(), error) {
+func (h *Hub) script(ctx context.Context, display string, actor *Actor) (context.Context, func(), error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.held[display] {
 		return ctx, nil, errHeld
+	}
+	if h.handovers[display] != nil {
+		return ctx, nil, errWaiting
+	}
+	if actor != nil && actor.TurnID != "" && h.stopped[display] == actor.TurnID {
+		return ctx, nil, errInterrupted
 	}
 	if time.Since(h.liveAt[display]) < liveGrace {
 		return ctx, nil, errPreempted
@@ -501,6 +528,36 @@ func (h *Hub) interrupt(display string, cause *Error) {
 	}
 }
 
+func (h *Hub) Stop(display string) Activity {
+	h.mu.Lock()
+	var stopped Activity
+	if current := h.activity[display]; current != nil {
+		stopped = current.activity
+		if current.linger != nil {
+			current.linger.Stop()
+		}
+		delete(h.activity, display)
+	}
+	if current := h.handovers[display]; current != nil {
+		if stopped.TurnID == "" {
+			stopped.SessionID, stopped.TurnID = current.info.SessionID, current.info.TurnID
+		}
+		h.finishHandoverLocked(display, current, handoverStopped)
+	}
+	if stopped.TurnID != "" {
+		h.stopped[display] = stopped.TurnID
+	}
+	h.liveAt[display] = time.Now()
+	conn := h.conn
+	h.publishUnlock()
+	h.interrupt(display, errInterrupted)
+	if conn != nil {
+		_ = conn.notify("activity", activityParams{Display: display})
+		_ = conn.notify("handover", handoverParams{Display: display})
+	}
+	return stopped
+}
+
 func (h *Hub) hold(display string, held bool) {
 	h.mu.Lock()
 	if _, known := h.displayLocked(display); !known || h.held[display] == held {
@@ -511,8 +568,15 @@ func (h *Hub) hold(display string, held bool) {
 		h.held[display] = true
 	} else {
 		delete(h.held, display)
+		if current := h.handovers[display]; current != nil {
+			h.finishHandoverLocked(display, current, handoverReturned)
+		}
 	}
+	conn := h.conn
 	h.publishUnlock()
+	if !held && conn != nil {
+		_ = conn.notify("handover", handoverParams{Display: display})
+	}
 	if held {
 		h.interrupt(display, errHeld)
 	}

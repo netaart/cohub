@@ -7,10 +7,11 @@ import (
 )
 
 type Target struct {
-	Ref  string `json:"ref,omitempty"`
-	Name string `json:"name,omitempty"`
-	Role string `json:"role,omitempty"`
-	Nth  int    `json:"nth,omitempty"` // 1-based, top to bottom
+	Ref    string `json:"ref,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Role   string `json:"role,omitempty"`
+	Nth    int    `json:"nth,omitempty"` // 1-based, top to bottom
+	Scroll bool   `json:"scroll,omitempty"`
 }
 
 func (t Target) validate() error {
@@ -20,8 +21,8 @@ func (t Target) validate() error {
 		return errorf(CodeInvalid, "a target is a ref, or a name and/or role")
 	case byRef && !elementRefPattern.MatchString(t.Ref):
 		return errorf(CodeInvalid, "%q is not an element ref such as e3.12", t.Ref)
-	case byRef && t.Nth != 0:
-		return errorf(CodeInvalid, "nth goes with a name or role")
+	case byRef && (t.Nth != 0 || t.Scroll):
+		return errorf(CodeInvalid, "nth and scroll go with a name or role")
 	case textLen(t.Name) > MaxElementText:
 		return errorf(CodeInvalid, "a target name has at most %d characters", MaxElementText)
 	case t.Role != "" && !elementRoles[t.Role]:
@@ -50,9 +51,12 @@ func normalized(text string) string {
 	return strings.ToLower(strings.Join(strings.Fields(text), " "))
 }
 
-func matches(element Element, query string) int {
+func matches(element Element, query string, fields bool) int {
 	best := -1
 	for _, text := range []string{element.Name, element.Value} {
+		if text == element.Value && !fields && slices.Contains(element.States, "editable") {
+			continue
+		}
 		text = normalized(text)
 		tier := -1
 		switch {
@@ -79,8 +83,14 @@ func visible(element Element) bool {
 	return element.Bounds[2] > 0 && element.Bounds[3] > 0
 }
 
-func resolve(tree Tree, target Target) (Element, []Element) {
+func resolve(tree Tree, target Target, action string) (Element, []Element) {
 	query := normalized(target.Name)
+	fields := target.Role == "textField" || action == "setText" || action == "focus"
+	if strings.Contains(query, " · ") {
+		if element, rows := resolveRow(tree, target, query); element.Ref != "" || len(rows) > 0 {
+			return element, rows
+		}
+	}
 	parents := parentsOf(tree.Elements)
 	tiers := [3][]int{}
 	for index, element := range tree.Elements {
@@ -89,7 +99,7 @@ func resolve(tree Tree, target Target) (Element, []Element) {
 		}
 		tier := 0
 		if query != "" {
-			if tier = matches(element, query); tier < 0 {
+			if tier = matches(element, query, fields); tier < 0 {
 				continue
 			}
 		}
@@ -130,6 +140,24 @@ func resolve(tree Tree, target Target) (Element, []Element) {
 	return Element{}, nil
 }
 
+func resolveRow(tree Tree, target Target, query string) (Element, []Element) {
+	var rows []Element
+	for _, element := range tree.compact(MaxTreeElements).Elements {
+		if normalized(element.Name) == query && (target.Role == "" || element.Role == target.Role) {
+			rows = append(rows, element)
+		}
+	}
+	switch {
+	case target.Nth > len(rows):
+		return Element{}, nil
+	case target.Nth > 0:
+		return rows[target.Nth-1], nil
+	case len(rows) == 1:
+		return rows[0], nil
+	}
+	return Element{}, rows[:min(len(rows), MaxCandidates)]
+}
+
 func parentsOf(elements []Element) []int {
 	parents := make([]int, len(elements))
 	var stack []int
@@ -144,6 +172,18 @@ func parentsOf(elements []Element) []int {
 		stack = append(stack, index)
 	}
 	return parents
+}
+
+func scroller(tree Tree) Element {
+	var best Element
+	area := 0.0
+	for _, element := range tree.Elements {
+		size := element.Bounds[2] * element.Bounds[3]
+		if size > area && slices.Contains(element.Actions, "scrollForward") {
+			best, area = element, size
+		}
+	}
+	return best
 }
 
 func within(elements []Element, root, index int) bool {

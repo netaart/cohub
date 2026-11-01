@@ -1,6 +1,7 @@
 package display
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -9,7 +10,7 @@ import (
 type TreeParams struct {
 	Display     string `json:"display"`
 	MaxElements int    `json:"maxElements,omitempty"`
-	Actionable  bool   `json:"actionable,omitempty"`
+	Compact     bool   `json:"compact,omitempty"`
 }
 
 type Tree struct {
@@ -40,6 +41,8 @@ func (p *TreeParams) normalize() error {
 	}
 	return nil
 }
+
+const compactNameLen = 160
 
 func (t Tree) sanitize(limit int) Tree {
 	clean := Tree{Width: max(0, t.Width), Height: max(0, t.Height), Truncated: t.Truncated, Elements: make([]Element, 0, min(len(t.Elements), limit))}
@@ -75,18 +78,57 @@ func (t Tree) sanitize(limit int) Tree {
 	return clean
 }
 
-func (t Tree) actionable(limit int) Tree {
+func (t Tree) compact(limit int) Tree {
+	parents := parentsOf(t.Elements)
 	kept := t.Elements[:0:0]
-	for _, element := range t.Elements {
-		if len(element.Actions) == 0 && !slices.Contains(element.States, "editable") {
-			continue
-		}
+	at := make(map[int]int, len(t.Elements))
+	gathered := map[int]bool{}
+	add := func(index int) bool {
 		if len(kept) == limit {
 			t.Truncated = true
+			return false
+		}
+		element := t.Elements[index]
+		element.Depth = 0
+		at[index] = len(kept)
+		kept = append(kept, element)
+		return true
+	}
+	for index, element := range t.Elements {
+		if !visible(element) || element.Depth == 0 && element.Role != "dialog" {
+			continue
+		}
+		if actionable(element) || element.Depth == 0 {
+			if !add(index) {
+				break
+			}
+			continue
+		}
+		text := cmp.Or(element.Name, element.Value)
+		if text == "" {
+			continue
+		}
+		place, inside := -1, false
+		for parent := parents[index]; parent >= 0 && !inside; parent = parents[parent] {
+			place, inside = at[parent]
+			inside = inside && actionable(t.Elements[parent])
+		}
+		if inside {
+			owner := &kept[place]
+			if owner.Name == "" || gathered[place] {
+				gathered[place] = true
+				if textLen(owner.Name) < compactNameLen {
+					owner.Name = strings.TrimPrefix(owner.Name+" · "+text, " · ")
+				}
+				continue
+			}
+			if strings.Contains(normalized(owner.Name), normalized(text)) {
+				continue
+			}
+		}
+		if !add(index) {
 			break
 		}
-		element.Depth = 0
-		kept = append(kept, element)
 	}
 	t.Elements = kept
 	return t

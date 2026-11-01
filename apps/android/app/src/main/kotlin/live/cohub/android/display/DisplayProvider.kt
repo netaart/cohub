@@ -245,6 +245,11 @@ internal class DisplayProvider(
                     display.activity(spaceId, id, activity?.let { Activity(it.string("sessionId"), it.string("turnId"), it.string("label")) })
                     null
                 }
+                "handover" -> {
+                    val ask = params["handover"] as? JsonObject
+                    display.handover(spaceId, id, ask?.let { HandoverAsk(it.string("reason").orEmpty(), it.string("sessionId"), it.string("turnId")) })
+                    null
+                }
                 "launch", "open" -> {
                     display.launch(spaceId, id, params.string("app"), params.string("url"))
                     JsonNull

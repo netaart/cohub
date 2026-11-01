@@ -79,9 +79,11 @@ All routes are under `/api/spaces/:id`.
 | --- | --- | --- |
 | `GET displays` | `sandbox.view` | Live list from the machine, with `viewers` |
 | `GET displays/:display/capture` | `sandbox.view` | `format`, `quality`, `maxSize` (default 1920) |
-| `GET displays/:display/tree` | `sandbox.view` | `maxElements`, `actionable=true` for only what takes an action |
+| `GET displays/:display/tree` | `sandbox.view` | `maxElements`, `compact=true` for what can be acted on or read |
 | `POST displays/:display/input` | `command.execute` | `{ events }`, resolves once performed |
 | `POST displays/:display/act` | `command.execute` | `{ steps, observe?, actor? }`, see [Act](#act) |
+| `POST displays/:display/interrupt` | `command.execute` | A person stops what agents do there, and the Turn doing it |
+| `POST`, `DELETE displays/:display/handover` | `command.execute` | `{ id, reason, timeoutMs?, waitMs?, actor? }` asks for a person or checks on it; `DELETE` is a person saying it is done, see [Handover](#handover) |
 | `GET displays/:display/apps` | `sandbox.view` | What a display can launch |
 | `POST displays/:display/sessions` | `sandbox.view`, `command.execute` with control | `{ offer, control? }` → `201 { sessionId, answer }` |
 | `DELETE displays/:display/sessions/:session` | `sandbox.view` | |
@@ -122,9 +124,10 @@ Screens on a phone need Android 14 and **phone control**: a helper process of th
 starts through the phone's own Wireless debugging, the way scrcpy or a computer's adb would, but with
 no computer.
 
-- **Setup, once.** From a Space's Runtime menu the user chooses **Set up phone control**: Cohub opens
-  Developer options and waits for Wireless debugging's *Pair device with pairing code* dialog
-  (discovered over mDNS), then asks for its code in a notification that shows over the settings. It
+- **Setup, once.** From a Space's Runtime menu the user chooses **Set up phone control** (which needs
+  notifications): Cohub opens About phone until Developer options are on, then those, and waits for
+  Wireless debugging's *Pair device with pairing code* dialog (discovered over mDNS), guiding each
+  stage in a notification and the menu, then asks for its code in a notification that shows over the settings. It
   pairs (SPAKE2 over TLS 1.3, `helper/adb/AdbPairing.kt`) with a key kept under the Android Keystore,
   and the helper's first act grants the app `WRITE_SECURE_SETTINGS`, turns its accessibility
   service on and exempts it from battery limits. After that the app starts the helper by itself
@@ -136,8 +139,10 @@ no computer.
   the app does: when the app goes, it releases every screen and mirror and unmutes what it muted.
 - **The agent screen.** `display.start` gives a Space a screen of its own (kind `agent`): a trusted
   virtual display with its own focus, so apps launched there run in the background while the person
-  keeps using the phone, and the keyboard shows there too. Apps on it are muted. It lasts until
-  `display.stop`, or ten idle minutes. `launch` refuses an app the person has open on the phone.
+  keeps using the phone, and the keyboard shows there too. Apps on it are muted, until they show on
+  the phone's own screen; a ledger brings their sound back after a helper that was killed. It lasts
+  until `display.stop`, or ten minutes with no agent, viewer or person. `launch` refuses an app the
+  person has open on the phone.
 - **Mirrors.** Everything that looks at a screen — a still, a stream, the floating preview, change
   detection — is a mirror the compositor scales into its own surface, so none copies another's pixels
   and the phone's own screen needs no screen recording consent: sharing it is the user's choice in
@@ -145,13 +150,17 @@ no computer.
   Baseline, longest edge 1920) runs only while someone watches.
 - **Input** is real touch and key events the helper injects into one display; between scheduled
   points a finger passes every frame, so swipes keep their speed. Text goes into the focused field
-  through accessibility. The agent screen lists only `back`.
+  through accessibility and is read back; a field that refuses it (web views, Flutter) gets it pasted
+  with the user's clipboard put back after, never a password field. With no field in the tree focused,
+  only what the keyboard map can type goes in. The agent screen lists only `back`.
 - **Elements** come from every window on the display, the one in front first: a window floating over
   another is a `dialog`, and the tree names the app in front.
 - **The floating indicator** is an accessibility overlay (no overlay permission): a pill with the
-  agent's own `label` while it works; opened, the agent screen live and **Stop** (the plan at once and
-  its Turn), **Take over** (its app moves to the phone's screen; plans refuse with `preempted` until
-  **Hand back**). It shows the same `activity` and `held` the web sees.
+  agent's own `label` while it works, dragged to either edge and fading when idle; opened, the agent
+  screen live, its last steps and **Stop** (the plan at once and its Turn), **Take over** (its app
+  moves to the phone's screen; plans refuse with `preempted` until **Hand back**). It steps aside
+  inside Cohub unless a person is needed, and shows the same `activity`, `held` and `handover` the
+  web sees, which offers **Stop** and **Hand back** too.
 - Host bridge: `display.status` (with `phoneControl`), `display.setup`, `display.share`,
   `display.stop`, `display.openControlSettings`, and the `display.changed` event (capability
   `display`).
@@ -231,8 +240,7 @@ Pixels are a fallback: where the platform has an accessibility API, a display re
   and timeline. An element that cannot click itself falls back to a clickable ancestor, then to a
   tap at its center.
 - **Providers**:
-  - **Android** reads the active window through its accessibility service, which the user already
-    enables for control.
+  - **Android** reads every window on the display through its accessibility service.
   - **macOS** reads the window in front through the Accessibility API, with the same grant as
     control; `AXPress`, `AXShowMenu` and `AXValue` act on elements, a tap at the center otherwise.
   - **Linux** reads the showing windows, the active one first, over AT-SPI, the accessibility bus
@@ -243,8 +251,8 @@ Pixels are a fallback: where the platform has an accessibility API, a display re
 
   For web pages in a sandbox browser, `agent-browser` drives the page through CDP more precisely
   still.
-- **`actionable`** keeps only the elements that take an action, flat but with their refs, which is
-  what an agent looking for a target needs and far fewer tokens.
+- **`compact`** is flat and far fewer tokens: elements that take an action, each named by the text
+  inside it when it says nothing itself, and the text no such element already carries.
 
 ## Virtual screens
 
@@ -270,23 +278,45 @@ wait ends.
 
 - **Steps**: `element` (a `target` and an element action), `input` (scheduled events), `launch` (an
   app id), `open` (a link) and `wait`. A target is a ref, or what the element says — its `name`
-  (or a field's value) compared without case or extra spaces, a whole match first, then a start,
-  then a part, with `role` and `nth` to narrow it; within a match, elements that take an action win
-  and a row is kept over the children whose text it repeats.
+  compared without case or extra spaces, a whole match first, then a start, then a part, with
+  `role` and `nth` to narrow it; within a match, elements that take an action win and a row is kept
+  over the children whose text it repeats. What a field holds counts only when a field is sought
+  (`textField`, or an action on one), so a typed value never satisfies an `until` or a tap. With
+  `scroll` a step pages the largest list on until the target shows or the list ends.
 - **Each step** finds its target on the screen as it is when it runs (waiting a moment for a screen
   still loading), acts, then waits for its `until` — `text` shows, `gone` is gone, `app` is in front,
   `stable` — or for the screen to settle: 300 ms without a reported change, at most 3 s. Displays
   that report `changes` push them while a plan waits (desktops compare small grey thumbnails, phones
   their mirrors and window events), so waits end the moment the screen does.
 - **A plan stops** at the first surprise, with a reason: `not_found`, `ambiguous` (with candidates),
-  `timeout`, `dialog` (one opened that the next step does not act in), `app_changed`, `failed`, or
-  `preempted` — a person took over, live or at the machine (`held`, or an `interrupt`).
-- **The result** lists each step's `effect` (`none`, `changed`, `navigated`) and how long it waited,
-  then the screen: the app in front, the tree (actionable by default), its `quality`, and an image
-  when the tree is `poor` or there is none (`observe.image` overrides).
+  `timeout`, `dialog` (one opened that the next step does not act in), `app_changed`, `failed`,
+  `preempted` — a person took over, live or at the machine (`held`) — or `interrupted`: a person
+  stopped it. That Turn's later plans on the display are refused too, so what it tries before it
+  hears does not reach the screen; a new Turn may act.
+- **The result** lists each step's `effect` (`none`, `changed`, `navigated`) and time spent finding,
+  acting and waiting, then the screen: the app in front, the tree (compact by default), its
+  `quality`, and an image when the tree is `poor` or there is none (`observe.image` overrides). A
+  plan that leaves a good tree as its session last saw it reports `unchanged` instead of the tree;
+  the refs an agent holds are stale by then and refused, so it targets by name or looks again.
+- **A caller going away stops its plan.** The API names each plan and cancels it when its request
+  closes; the loopback API cancels through the request itself. Plans wait 5 s at most for one
+  another (`display_busy`), so a request is bounded by a plan's 90 s.
 - **Activity.** While a plan runs, and 30 s after, the display carries `activity` — the agent's
   session, Turn and step `label` — on every snapshot, so the web and the phone show who acts and why.
   One plan acts on a display at a time.
+
+## Handover
+
+`display.handover` asks a person to do what an agent must not: sign in, enter a code, pay. Plans on
+the display are refused (`preempted`) while it stands. The display carries `handover` on every snapshot; on a phone the
+floating indicator turns amber and opens, and a notification offers **Take over**.
+
+The ask ends `returned` when a person hands the display back (`hold`, or `DELETE` from a viewer),
+`stopped` when they stop it, `gone` with the display, or `expired`: at `timeoutMs` (10 min by
+default, 12 h at most), or 15 s after a caller that was polling (each poll waits up to 25 s) stops,
+so a killed CLI leaves nothing behind. Expiry never moves a person's app: `held` says they still have
+it, and handing back then wakes no one. **Take over** from the indicator without an ask is the person
+choosing to step in: its plan ends `preempted`, and handing back does not resume it.
 
 ## Agents
 
@@ -295,9 +325,11 @@ Agents use displays through the CLI and the `cohub` skill, like every other Spac
 ```bash
 cohub spaces displays ls
 cohub spaces displays start                          # the phone's agent screen, or a virtual one
-cohub spaces displays launch com.android.settings    # waits until it is in front
+cohub spaces displays launch com.android.settings    # starts the agent screen if needed; waits until it is in front
 cohub spaces displays tap --name Wi-Fi --label "Opening Wi-Fi"
-cohub spaces displays type hello --name Message --until-text hello
+cohub spaces displays type hello --name Message
+cohub spaces displays tap --name "Ada" --scroll      # pages the list until it shows
+cohub spaces displays handover --reason "Sign in"    # waits until a person hands back
 echo '[{"type":"tap","name":"Search"},{"type":"type","text":"Ada"},{"type":"key","key":"Enter","until":{"gone":"Loading"}}]' | cohub spaces displays act
 cohub spaces displays look                           # the screen, without acting
 cohub spaces displays tap 300 200 --count 2          # a point of the latest image

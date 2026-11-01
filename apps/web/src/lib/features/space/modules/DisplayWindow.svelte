@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { DisplayInputEvent } from "@cohub/protocol/display";
-import type { SpacePresenceUser } from "@neta-art/cohub";
+import type { SpaceDisplaysApi, SpacePresenceUser } from "@neta-art/cohub";
 import {
 	ChevronLeft,
 	Circle,
@@ -17,6 +17,7 @@ import { MediaQuery } from "svelte/reactivity";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { claimKeyboard } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
+import { sdk } from "$lib/sdk";
 import DisplayKeyboard, {
 	DISPLAY_KEY_BAR_HEIGHT,
 } from "./DisplayKeyboard.svelte";
@@ -180,6 +181,14 @@ onDestroy(() => {
 	if (frame) cancelAnimationFrame(frame);
 	if (scrollFrame) cancelAnimationFrame(scrollFrame);
 });
+
+async function agentAction(action: (displays: SpaceDisplaysApi) => Promise<unknown>) {
+	try {
+		await action(sdk.space(spaceId).displays);
+	} catch {
+		flash(m.display_action_failed({}, { locale }));
+	}
+}
 
 function flash(text: string) {
 	notice = text;
@@ -880,10 +889,21 @@ const problemCopy = $derived.by(() => {
 				<div class="display-pill">{m.display_view_only_permission({}, { locale })}</div>
 			{:else if notice}
 				<div class="display-pill" role="status">{notice}</div>
+			{:else if phase.kind === "live" && display?.handover && !display.held}
+				<div class="display-pill is-asking" role="status">{m.runtime_display_needs_you({ reason: display.handover.reason }, { locale })}</div>
+				{#if controllable}
+					<div class="display-chips">
+						<button type="button" class="display-chip" onclick={() => void agentAction((displays) => displays.interrupt(displayId))}>{m.display_stop_agent({}, { locale })}</button>
+						<button type="button" class="display-chip" onclick={() => void agentAction((displays) => displays.handback(displayId))}>{m.display_handback({}, { locale })}</button>
+					</div>
+				{/if}
 			{:else if phase.kind === "live" && display?.held}
 				<div class="display-pill" role="status">{m.runtime_display_held({}, { locale })}</div>
 			{:else if phase.kind === "live" && display?.activity}
 				<div class="display-pill" role="status">{display.activity.label ? m.runtime_display_activity({ label: display.activity.label }, { locale }) : m.runtime_display_working({}, { locale })}</div>
+				{#if controllable}
+					<button type="button" class="display-chip" onclick={() => void agentAction((displays) => displays.interrupt(displayId))}>{m.display_stop_agent({}, { locale })}</button>
+				{/if}
 			{/if}
 		</div>
 
@@ -1054,6 +1074,12 @@ const problemCopy = $derived.by(() => {
 		font-size: 12px;
 		font-variant-numeric: tabular-nums;
 	}
+	.display-chips {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 8px;
+	}
 	.display-chip:hover,
 	.display-fit:hover {
 		color: var(--text-primary);
@@ -1074,6 +1100,10 @@ const problemCopy = $derived.by(() => {
 		line-height: 1.4;
 		text-align: center;
 		pointer-events: none;
+	}
+	.display-pill.is-asking {
+		color: var(--text-primary);
+		border-color: var(--brand);
 	}
 	.display-action {
 		min-height: 32px;

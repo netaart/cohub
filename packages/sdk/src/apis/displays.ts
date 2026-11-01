@@ -4,6 +4,8 @@ import type {
   DisplayApps,
   DisplayCapture,
   DisplayCaptureParams,
+  DisplayHandoverParams,
+  DisplayHandoverResult,
   DisplayInputEvent,
   DisplayList,
   DisplaySession,
@@ -41,7 +43,7 @@ export class SpaceDisplaysApi {
       "read",
       (workspace) => workspace.call("display.list", {}, options.signal),
       () => this.transport.request<DisplayList>(`/api/spaces/${this.spaceId}/displays`, { signal: options.signal }),
-    );
+    ).then((list) => ({ ...list, displays: list.displays ?? [] }));
   }
 
   startVirtual(params: DisplayVirtualStart = {}) {
@@ -61,7 +63,7 @@ export class SpaceDisplaysApi {
   tree(displayId: string, params: DisplayTreeParams = {}, options: { signal?: AbortSignal } = {}) {
     const query = new URLSearchParams();
     if (params.maxElements) query.set("maxElements", String(params.maxElements));
-    if (params.actionable) query.set("actionable", "true");
+    if (params.compact) query.set("compact", "true");
     const search = query.size ? `?${query}` : "";
     return this.serve(
       "read",
@@ -101,6 +103,33 @@ export class SpaceDisplaysApi {
         body: JSON.stringify(params),
         signal: options.signal,
       }));
+  }
+
+  interrupt(displayId: string) {
+    return this.serve("write", async (workspace) => {
+      const { activity } = await workspace.call("display.interrupt", { display: displayId });
+      if (!activity?.sessionId) return;
+      await this.transport.request<void>(`/api/sessions/${activity.sessionId}/abort`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ turnId: activity.turnId ?? null }),
+      });
+    }, () => this.transport.request<void>(this.path(displayId, "/interrupt"), { method: "POST" }));
+  }
+
+  handover(displayId: string, params: DisplayHandoverParams, options: { signal?: AbortSignal } = {}) {
+    return this.serve("write", (workspace) => workspace.call("display.handover", { ...params, display: displayId }, options.signal), () =>
+      this.transport.request<DisplayHandoverResult>(this.path(displayId, "/handover"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+        signal: options.signal,
+      }));
+  }
+
+  handback(displayId: string) {
+    return this.serve("write", (workspace) => workspace.call("display.handback", { display: displayId }).then(() => undefined), () =>
+      this.transport.request<void>(this.path(displayId, "/handover"), { method: "DELETE" }));
   }
 
   apps(displayId: string, options: { signal?: AbortSignal } = {}) {

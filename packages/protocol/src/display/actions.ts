@@ -17,6 +17,7 @@ export type DisplayAction = {
   name?: string;
   role?: DisplayElementRole;
   nth?: number;
+  scroll?: boolean;
   x?: number;
   y?: number;
   to_x?: number;
@@ -82,6 +83,7 @@ function targetOf(action: DisplayAction): DisplayTarget | undefined {
     ...(action.name !== undefined ? { name: action.name } : {}),
     ...(action.role !== undefined ? { role: action.role } : {}),
     ...(action.nth !== undefined ? { nth: action.nth } : {}),
+    ...(action.scroll ? { scroll: true as const } : {}),
   };
 }
 

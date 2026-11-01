@@ -26,6 +26,9 @@ internal object DisplayVocabulary {
     const val MAX_TARGET_NTH = 50
     const val MAX_URL_LEN = 2048
     const val MAX_APPS = 2000
+    const val DEFAULT_HANDOVER_MS = 600000
+    const val MAX_HANDOVER_MS = 43200000
+    const val MAX_HANDOVER_WAIT_MS = 25000
     val SYSTEM_ACTIONS = setOf("back", "home", "recents", "notifications", "quickSettings", "lock")
     val PERMISSIONS = setOf("screenRecording", "accessibility", "phoneControl")
     val PLATFORMS = setOf("macos", "windows", "linux", "android")
@@ -37,6 +40,6 @@ internal object DisplayVocabulary {
     val ELEMENT_ACTIONS = setOf("click", "longPress", "focus", "setText", "scrollForward", "scrollBackward")
     val KINDS = setOf("screen", "agent")
     val EFFECTS = setOf("none", "changed", "navigated")
-    val ACT_STOPS = setOf("not_found", "ambiguous", "timeout", "dialog", "app_changed", "failed", "preempted")
+    val ACT_STOPS = setOf("not_found", "ambiguous", "timeout", "dialog", "app_changed", "failed", "preempted", "interrupted")
     val BLOCKED_SCHEMES = setOf("file", "content", "data", "javascript", "intent")
 }

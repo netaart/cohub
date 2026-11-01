@@ -90,7 +90,7 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
-	result, failure := s.dispatch.Invoke(request.Method, request.Params)
+	result, failure := s.dispatch.Invoke(r.Context(), request.Method, request.Params)
 	if failure != nil {
 		reply(w, http.StatusUnprocessableEntity, map[string]interface{}{"error": failure})
 		return

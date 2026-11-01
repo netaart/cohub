@@ -10,6 +10,8 @@ import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.RequiresApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -177,28 +179,86 @@ internal class InputDriver(
         if (!helper.key(screen.displayId, action, code, metaState)) throw DisplayError(DisplayError.FAILED, "the phone refused the key")
     }
 
-    private fun type(text: String) {
+    private suspend fun type(text: String) {
         val node = service()?.let { elements.focused(it, screen.displayId) }
-        if (node != null) return insert(node, text)
-        val events = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray())
-            ?: throw DisplayError(DisplayError.UNAVAILABLE, "no text field is focused")
-        events.forEach { send(it.action, it.keyCode, it.metaState) }
-    }
-
-    private fun insert(node: AccessibilityNodeInfo, text: String) {
-        val current = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+        if (node == null) {
+            val events = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray())
+                ?: throw DisplayError(DisplayError.UNAVAILABLE, "no text field is focused")
+            return events.forEach { send(it.action, it.keyCode, it.metaState) }
+        }
+        val current = shown(node)
         val start = node.textSelectionStart.takeIf { it in 0..current.length } ?: current.length
         val end = node.textSelectionEnd.takeIf { it in start..current.length } ?: start
         val next = current.substring(0, start) + text + current.substring(end)
-        val set = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, next)
-        })
-        if (!set) throw DisplayError(DisplayError.FAILED, "the focused field refused text")
-        val cursor = start + text.length
-        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
-            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
-            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
-        })
+        if (setText(node, next) && holds(node, next)) {
+            val cursor = start + text.length
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
+            })
+            return
+        }
+        if (node.isPassword) throw DisplayError(DisplayError.FAILED, "the password field refused text")
+        if (!node.refresh()) throw DisplayError(DisplayError.FAILED, "the focused field left the screen")
+        val now = shown(node)
+        if (now == next) return
+        if (now != current) throw DisplayError(DisplayError.FAILED, "the focused field holds something other than what was typed; look at it before typing again")
+        paste(node, text)
+        if (!holds(node, next)) throw DisplayError(DisplayError.FAILED, "the focused field refused text")
+    }
+
+    suspend fun replace(node: AccessibilityNodeInfo, text: String) {
+        if (setText(node, text) && holds(node, text)) return
+        if (node.isPassword) throw DisplayError(DisplayError.FAILED, "the password field refused text")
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        delay(FOCUS_MS)
+        requireFocus(node)
+        chord(KeyEvent.KEYCODE_A)
+        paste(node, text)
+        if (!holds(node, text)) throw DisplayError(DisplayError.FAILED, "the field refused text")
+    }
+
+    private fun shown(node: AccessibilityNodeInfo) = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+
+    private fun setText(node: AccessibilityNodeInfo, text: String) = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+        putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+    })
+
+    private suspend fun holds(node: AccessibilityNodeInfo, text: String): Boolean {
+        if (node.isPassword) return true
+        repeat(READ_BACK_TRIES) {
+            delay(READ_BACK_MS)
+            if (!node.refresh()) return false
+            if (shown(node) == text) return true
+        }
+        return false
+    }
+
+    private fun requireFocus(node: AccessibilityNodeInfo) {
+        if (!node.refresh() || !node.isFocused) throw DisplayError(DisplayError.FAILED, "the field does not have focus")
+    }
+
+    private suspend fun paste(node: AccessibilityNodeInfo, text: String) = clipboard.withLock {
+        requireFocus(node)
+        val previous = try {
+            helper.putClip(text)
+        } catch (error: IllegalStateException) {
+            throw DisplayError(DisplayError.FAILED, error.message ?: "the phone refused the clipboard")
+        }
+        try {
+            chord(KeyEvent.KEYCODE_V)
+            delay(PASTE_MS)
+        } finally {
+            runCatching { helper.restoreClip(previous, text) }
+        }
+    }
+
+    private fun chord(code: Int) {
+        val control = KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON
+        send(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_CTRL_LEFT, control)
+        send(KeyEvent.ACTION_DOWN, code, control)
+        send(KeyEvent.ACTION_UP, code, control)
+        send(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_CTRL_LEFT, 0)
     }
 
     private fun system(action: String) {
@@ -222,9 +282,14 @@ internal class InputDriver(
     }
 
     companion object {
+        private val clipboard = Mutex()
         private const val FRAME_MS = 8L
         private const val SCROLL_MS = 300L
         private const val SCROLL_HOLD_MS = 120L
+        private const val FOCUS_MS = 100L
+        private const val PASTE_MS = 300L
+        private const val READ_BACK_MS = 50L
+        private const val READ_BACK_TRIES = 4
 
         fun systemButtons(agent: Boolean): List<String> = if (agent) listOf("back") else (SYSTEM_KEYS.keys + GLOBAL_ACTIONS.keys).toList()
 

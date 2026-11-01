@@ -54,16 +54,19 @@ func listDisplays(hub *display.Hub, virtual *display.Virtual) displayListResult 
 	return result
 }
 
+type displayInterruptResult struct {
+	Activity *display.Activity `json:"activity,omitempty"`
+}
+
 type displayInputResult struct {
 	Applied int `json:"applied"`
 }
 
-func (d *Dispatcher) handleDisplay(request protocol.RPCRequest, identity string) interface{} {
+func (d *Dispatcher) handleDisplay(ctx context.Context, request protocol.RPCRequest, identity string) interface{} {
 	hub, sessions, virtual := d.displayServices()
 	if hub == nil {
 		return d.failed(request, "", "UNSUPPORTED_METHOD", "displays are not enabled")
 	}
-	ctx := context.Background()
 	var (
 		result interface{}
 		err    error
@@ -130,6 +133,33 @@ func (d *Dispatcher) handleDisplay(request protocol.RPCRequest, identity string)
 		var params display.AppsParams
 		if err = json.Unmarshal(request.Params, &params); err == nil {
 			result, err = hub.Apps(ctx, params)
+		}
+	case "display.interrupt":
+		var params struct {
+			Display string `json:"display"`
+			Plan    string `json:"plan"`
+		}
+		if err = json.Unmarshal(request.Params, &params); err == nil {
+			if params.Plan != "" {
+				hub.CancelPlan(params.Plan)
+				result = displayInterruptResult{}
+			} else {
+				stopped := hub.Stop(params.Display)
+				result = displayInterruptResult{Activity: &stopped}
+			}
+		}
+	case "display.handover":
+		var params display.HandoverParams
+		if err = json.Unmarshal(request.Params, &params); err == nil {
+			result, err = hub.Handover(ctx, params)
+		}
+	case "display.handback":
+		var params struct {
+			Display string `json:"display"`
+		}
+		if err = json.Unmarshal(request.Params, &params); err == nil {
+			err = hub.Handback(params.Display)
+			result = struct{}{}
 		}
 	case "rtc.open", "rtc.close":
 		if !strings.HasPrefix(identity, rtcIdentityPrefix) {

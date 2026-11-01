@@ -125,5 +125,8 @@
         <receiver
             android:name=".helper.PhoneControl$PairingReceiver"
             android:exported="false" />
+        <receiver
+            android:name=".helper.PhoneControl$HandoverReceiver"
+            android:exported="false" />
     </application>
 </manifest>

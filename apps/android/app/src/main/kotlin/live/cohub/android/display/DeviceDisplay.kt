@@ -53,10 +53,14 @@ data class DisplayStatus(val sharedWith: String?, val control: Boolean, val phon
 
 data class Activity(val sessionId: String?, val turnId: String?, val label: String?)
 
+data class HandoverAsk(val reason: String, val sessionId: String?, val turnId: String?)
+
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 internal class Served(val spaceId: String, val screen: Screen, val elements: ElementTree, val input: InputDriver) {
     val inputs = Mutex()
     @Volatile var activity: Activity? = null
+    @Volatile var handover: HandoverAsk? = null
+    @Volatile var recent: List<String> = emptyList()
     @Volatile var held = false
     @Volatile var watched = false
     @Volatile var usedAt = SystemClock.elapsedRealtime()
@@ -88,14 +92,16 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     init {
         scope.launch { phone.helper.collect { helper -> if (helper == null) releaseAll() } }
         scope.launch {
-            DisplayControl.windows.collect { displayId -> servedOn(displayId)?.takeIf { it.watched }?.let(::changed) }
+            DisplayControl.windows.collect { displayId ->
+                servedOn(displayId)?.takeIf { it.watched }?.let(::changed)
+                if (displayId == Display.DEFAULT_DISPLAY && agents.value.isNotEmpty()) phone.helper.value?.runCatching { syncAudio() }
+            }
         }
         displays.registerDisplayListener(object : DisplayManager.DisplayListener {
             override fun onDisplayAdded(displayId: Int) = Unit
             override fun onDisplayRemoved(displayId: Int) = Unit
             override fun onDisplayChanged(displayId: Int) {
-                if (displayId != Display.DEFAULT_DISPLAY) return
-                shared.value?.screen?.resize(phoneSize())
+                servedOn(displayId)?.screen?.resize(sizeOf(displayId) ?: return)
                 bump()
             }
         }, Handler(Looper.getMainLooper()))
@@ -103,7 +109,7 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
             while (isActive) {
                 delay(IDLE_CHECK_MS)
                 val idle = SystemClock.elapsedRealtime() - IDLE_MS
-                agents.value.values.filter { it.usedAt < idle && it.activity == null && !it.held }.forEach { stopAgent(it.spaceId) }
+                agents.value.values.filter { it.usedAt < idle && it.activity == null && it.handover == null && !it.held && !it.screen.streaming }.forEach { stopAgent(it.spaceId) }
             }
         }
     }
@@ -123,10 +129,11 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
         val helper = requireHelper()
         lateinit var served: Served
         val frames = FrameChanges(size) { changed(served) }
-        val displayIdOrNew = displayId ?: helper.createDisplay("Cohub", size.width, size.height, size.densityDpi, frames.surface)
-        if (displayIdOrNew < 0) {
+        val displayIdOrNew = try {
+            displayId ?: helper.createDisplay("Cohub", size.width, size.height, size.densityDpi, frames.surface)
+        } catch (error: Exception) {
             frames.close()
-            throw DisplayError(DisplayError.FAILED, "the phone could not start a screen for agents")
+            throw DisplayError(DisplayError.FAILED, error.message ?: "the phone could not start a screen for agents")
         }
         val screen = Screen(id, displayIdOrNew, size, helper, frames)
         val elements = ElementTree()
@@ -161,6 +168,7 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
             served.watched = false
             served.screen.watch(false)
             served.activity = null
+            setHandover(served, null)
         }
         bump()
     }
@@ -278,10 +286,30 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     internal fun activity(spaceId: String, id: String, activity: Activity?) {
         val served = runCatching { served(spaceId, id) }.getOrNull() ?: return
         served.activity = activity
+        served.recent = when {
+            activity == null -> emptyList()
+            activity.label == null || activity.label == served.recent.lastOrNull() -> served.recent
+            else -> (served.recent + activity.label).takeLast(RECENT_STEPS)
+        }
         bump()
     }
 
+    internal fun handover(spaceId: String, id: String, ask: HandoverAsk?) {
+        setHandover(runCatching { served(spaceId, id) }.getOrNull() ?: return, ask)
+        bump()
+    }
+
+    private fun setHandover(served: Served, ask: HandoverAsk?) {
+        served.handover = ask
+        if (ask != null) phone.notifyHandover(ask.reason) else if (served().none { it.handover != null }) phone.cancelHandover()
+    }
+
+    internal fun takeOverAsked() {
+        served().firstOrNull { it.handover != null && !it.held }?.let(::takeOver)
+    }
+
     internal fun takeOver(served: Served) {
+        phone.cancelHandover()
         served.held = true
         events.tryEmit(DisplayEvent(served.spaceId, DisplayWire.hold(served.screen.id, true)))
         if (served.screen.agent) served.takenTask = phone.helper.value?.runCatching { moveTop(served.screen.displayId, Display.DEFAULT_DISPLAY) }?.getOrNull() ?: -1
@@ -292,14 +320,16 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
         if (served.takenTask >= 0) phone.helper.value?.runCatching { moveTask(served.takenTask, served.screen.displayId) }
         served.takenTask = -1
         served.held = false
+        setHandover(served, null)
         events.tryEmit(DisplayEvent(served.spaceId, DisplayWire.hold(served.screen.id, false)))
         bump()
     }
 
     internal fun interrupt(served: Served) {
         events.tryEmit(DisplayEvent(served.spaceId, DisplayWire.interrupt(served.screen.id)))
-        val activity = served.activity
+        val activity = served.activity ?: served.handover?.let { Activity(it.sessionId, it.turnId, null) }
         served.activity = null
+        setHandover(served, null)
         bump()
         if (activity?.sessionId != null) scope.launch { runCatching { stopTurn(activity) }.onFailure { Log.w(TAG, "The Turn could not be stopped", it) } }
     }
@@ -315,10 +345,12 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
         }
     }
 
+    private fun phoneSize(): ScreenSize = sizeOf(Display.DEFAULT_DISPLAY) ?: throw DisplayError(DisplayError.UNAVAILABLE, "the phone has no screen")
+
     @Suppress("DEPRECATION")
-    private fun phoneSize(): ScreenSize {
+    private fun sizeOf(displayId: Int): ScreenSize? {
         val point = android.graphics.Point()
-        displays.getDisplay(Display.DEFAULT_DISPLAY).getRealSize(point)
+        displays.getDisplay(displayId)?.getRealSize(point) ?: return null
         return ScreenSize(point.x, point.y, context.resources.displayMetrics.densityDpi)
     }
 
@@ -327,6 +359,7 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
         const val AGENT_ID = "agent"
         private const val IDLE_MS = 10 * 60_000L
         private const val IDLE_CHECK_MS = 60_000L
+        private const val RECENT_STEPS = 3
         private const val TAG = "CohubDisplay"
     }
 }

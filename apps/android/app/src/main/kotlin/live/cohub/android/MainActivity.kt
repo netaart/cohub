@@ -426,8 +426,8 @@ class MainActivity : ComponentActivity(), HostActions {
         return allowed
     }
 
-    override fun openDeveloperSettings(): Boolean = runCatching {
-        startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    override fun openPhoneControlSettings(developerOptions: Boolean): Boolean = runCatching {
+        startActivity(Intent(if (developerOptions) Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS else Settings.ACTION_DEVICE_INFO_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }.isSuccess
 
     override fun openControlSettings(): Boolean = runCatching {
