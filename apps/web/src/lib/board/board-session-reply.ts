@@ -2,6 +2,7 @@ import { isAgentTurn, type SessionTurnRecord } from "@cohub/protocol/model";
 import type { CreateSpacePromptInput } from "@neta-art/cohub";
 import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
 import {
+	resolveApprovalModeFromTurns,
 	resolveLocalModelFromTurns,
 	resolveTurnHarness,
 } from "$lib/features/session-chat/session-utils";
@@ -9,7 +10,12 @@ import { sdk } from "$lib/sdk";
 
 export type SessionReplyRuntime = Pick<
 	CreateSpacePromptInput,
-	"harness" | "model" | "provider" | "thinkingLevel"
+	| "harness"
+	| "model"
+	| "provider"
+	| "thinkingLevel"
+	| "approvalMode"
+	| "serviceTier"
 >;
 
 export async function resolveSessionReplyRuntime(
@@ -23,16 +29,18 @@ export async function resolveSessionReplyRuntime(
 		.session(sessionId)
 		.turns.listPaginated({ limit: 5 })
 		.catch(() => null);
-	const turn = latest
-		? lastAgentTurn(latest.turns)
-		: lastAgentTurn(
-				(await sessionTurnsRepo.find(sessionId).catch(() => null))?.turns,
-			);
+	const turns = latest
+		? latest.turns
+		: (await sessionTurnsRepo.find(sessionId).catch(() => null))?.turns;
+	const turn = lastAgentTurn(turns);
 	const harness = resolveTurnHarness(turn);
 	if (harness === "cohub") return {};
 	const local = resolveLocalModelFromTurns(turn ? [turn] : [], harness);
+	// A reply keeps the conversation's permissions rather than falling back to the Harness defaults.
+	const approvalMode = resolveApprovalModeFromTurns(turns ?? [], harness);
 	return {
 		harness,
+		...(approvalMode ? { approvalMode } : {}),
 		...(local
 			? {
 					model: local.id,
@@ -40,6 +48,7 @@ export async function resolveSessionReplyRuntime(
 					...(local.thinkingLevel
 						? { thinkingLevel: local.thinkingLevel }
 						: {}),
+					...(local.serviceTier ? { serviceTier: local.serviceTier } : {}),
 				}
 			: {}),
 	};

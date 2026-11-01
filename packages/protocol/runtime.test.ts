@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fileWatcherStatusSchema, resolveRuntimeThinkingLevel, runtimeCapabilitiesSchema, runtimeClientFrameSchema, runtimeCommandSchema, runtimeReadySchema, parseRuntimeRegistration, contextToPiMessages, RUNTIME_MAX_BATCH_MESSAGES } from "./src/runtime/index.js";
+import { fileWatcherStatusSchema, resolveRuntimeServiceTier, resolveRuntimeThinkingLevel, runtimeCapabilitiesSchema, runtimeClientFrameSchema, runtimeCommandSchema, runtimeReadySchema, parseRuntimeRegistration, contextToPiMessages, RUNTIME_MAX_BATCH_MESSAGES } from "./src/runtime/index.js";
 import { getSessionStreamSnapshotKey, SESSION_STREAM_SNAPSHOT_CLEAR_TURN_LUA } from "./src/realtime/index.js";
 
 test("file watcher telemetry validates codes and drops local details", () => {
@@ -129,4 +129,21 @@ test("local thinking levels clamp to what a model declares and pass through othe
   assert.equal(resolveRuntimeThinkingLevel({ ...base, reasoning: false }, "high"), "off");
   assert.equal(resolveRuntimeThinkingLevel(base, "high"), "high");
   assert.equal(resolveRuntimeThinkingLevel(undefined, "ultra"), "ultra");
+});
+
+test("approval modes and service tiers survive the wire; unknown ones are dropped, not rejected", () => {
+  const capabilities = runtimeCapabilitiesSchema.parse({ harnesses: ["codex"], models: [], approvalModes: { codex: ["read_only", "ask", "auto"], future: ["auto"] } });
+  assert.deepEqual(capabilities.approvalModes, { codex: ["read_only", "auto"] });
+  assert.equal(runtimeCapabilitiesSchema.parse({ harnesses: ["codex"], models: [], approvalModes: "corrupt" }).approvalModes, undefined);
+  const id = "123e4567-e89b-42d3-a456-426614174000";
+  const input = { spaceId: id, sessionId: id, turnId: id, userMessageId: id, harness: "codex", accessMode: "full_access",
+    messages: [{ turnId: id, userMessageId: id, userId: null, content: [{ type: "text", text: "hi" }] }], context: { revision: "r", throughTurnId: null, messages: [] } };
+  const parsed = runtimeCommandSchema.parse({ type: "turn.start", requestId: id, input: { ...input, approvalMode: "read_only", serviceTier: "priority" } });
+  assert.equal(parsed.type === "turn.start" && parsed.input.approvalMode, "read_only");
+  assert.equal(parsed.type === "turn.start" && parsed.input.serviceTier, "priority");
+  assert.equal(runtimeCommandSchema.safeParse({ type: "turn.start", requestId: id, input: { ...input, approvalMode: "ask" } }).success, false);
+  const model = { harness: "codex" as const, provider: "openai", id: "m", name: "M", serviceTiers: [{ id: "priority", name: "Fast" }] };
+  assert.equal(resolveRuntimeServiceTier(model, "priority"), "priority");
+  assert.equal(resolveRuntimeServiceTier({ ...model, serviceTiers: undefined }, "priority"), undefined);
+  assert.equal(resolveRuntimeServiceTier(model, null), undefined);
 });

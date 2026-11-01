@@ -5,7 +5,7 @@ import { db } from "./db.js";
 import { env } from "./env.js";
 import type { AgentTurnJobData } from "./queue.js";
 import { HOME_SPACE_SLUG, resolveHarness } from "@cohub/protocol";
-import { limitBatchSize } from "./runtime/batch-limit.js";
+import { limitBatchSize, limitBatchToApprovalMode } from "./runtime/batch-limit.js";
 import { DEFAULT_FOLLOWUP_DELIVERY, readMessageQueueConfig, type FollowupDelivery } from "./runtime/message-queue-config.js";
 
 type TurnRow = {
@@ -224,7 +224,7 @@ export async function claimNextTurnBatch(input: Pick<AgentTurnJobData, "sessionI
     const delivery = await resolveFollowupDelivery(tx, followups[0]?.userUuid ?? null);
     const selected = delivery === "one_by_one"
       ? followups.slice(0, 1)
-      : limitBatchSize(followups, (turn) => Buffer.byteLength(JSON.stringify(turn.userContent ?? []), "utf8"));
+      : limitBatchSize(limitBatchToApprovalMode(followups), (turn) => Buffer.byteLength(JSON.stringify(turn.userContent ?? []), "utf8"));
     const batch = await claimQueuedTurns(tx, selected);
     return batch ? { kind: "claimed" as const, batch } : { kind: "noop" as const };
   });

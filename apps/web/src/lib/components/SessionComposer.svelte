@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { ViewportContext } from "@cohub/protocol";
+import type { ApprovalMode, ViewportContext } from "@cohub/protocol";
 import { type HarnessKind, harnessLabel } from "@cohub/protocol/runtime";
 import type {
 	BillingConversionIntent,
@@ -135,6 +135,11 @@ type Props = {
 	localModels?: RuntimeCapabilities["models"];
 	localModel?: LocalModelSelection | null;
 	onlocalmodelchange?: (model: LocalModelSelection) => void;
+	/** Approval modes the local Harness enforces; empty hides the choice. */
+	approvalModes?: ApprovalMode[];
+	/** Selected approval mode; `null` leaves the Harness's own settings. */
+	approvalMode?: ApprovalMode | null;
+	onapprovalmodechange?: (mode: ApprovalMode) => void;
 	/** Compact thinking level suffix; null/empty hides. */
 	thinkingLevelLabel?: string | null;
 	/** Compact generation-policy suffix; null/empty hides (Auto). */
@@ -183,6 +188,9 @@ let {
 	localModels = [],
 	localModel = null,
 	onlocalmodelchange,
+	approvalModes = [],
+	approvalMode = null,
+	onapprovalmodechange,
 	thinkingLevelLabel = null,
 	generationPolicyLabel = null,
 	quickActions = [],
@@ -219,8 +227,23 @@ const localModelTitle = $derived(
 	localModel?.name ?? localModel?.id ?? m.runtime_model({}, { locale }),
 );
 
-function selectLocalModel(selected: LocalModelSelection) {
-	onlocalmodelchange?.(selected);
+const localModelMeta = $derived(
+	[
+		localModel?.thinkingLevel
+			? formatThinkingLevelShort(localModel.thinkingLevel)
+			: null,
+		localModel?.serviceTier ? m.model_selector_fast({}, { locale }) : null,
+	].filter((item): item is string => Boolean(item)),
+);
+
+/** The Fast switch reports a tier only when it changes; other picks keep the current one. */
+function selectLocalModel(
+	selected: Omit<LocalModelSelection, "serviceTier"> & {
+		serviceTier?: string | null;
+	},
+) {
+	const { serviceTier = localModel?.serviceTier, ...model } = selected;
+	onlocalmodelchange?.(serviceTier ? { ...model, serviceTier } : model);
 	showLocalModelSelector = false;
 }
 
@@ -1663,6 +1686,9 @@ $effect(() => {
 									available={harnesses}
 									online={runtimeOnline}
 									onchange={(next) => onharnesschange?.(next)}
+									{approvalModes}
+									{approvalMode}
+									onapprovalchange={onapprovalmodechange}
 									onopen={onharnessopen}
 									disabled={disabled || sending}
 								/>
@@ -1670,7 +1696,7 @@ $effect(() => {
 							{#if mode === "agent" && harness !== "cohub"}
 								<ComposerModelTrigger
 									label={localModelTitle}
-									meta={localModel?.thinkingLevel ? [formatThinkingLevelShort(localModel.thinkingLevel)] : []}
+									meta={localModelMeta}
 									keepMetaVisible
 									ariaLabel={m.runtime_model({}, { locale })}
 									expanded={showLocalModelSelector}
@@ -1751,6 +1777,7 @@ $effect(() => {
 	models={localModelCatalog}
 	currentModel={localModel}
 	currentThinkingLevel={localModel?.thinkingLevel ?? null}
+	currentServiceTier={localModel?.serviceTier ?? null}
 />
 
 <style>

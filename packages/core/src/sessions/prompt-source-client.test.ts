@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionPromptDependencies, SubmitSessionPromptInput } from "./prompt.js";
-import { submitSessionPrompt } from "./prompt.js";
+import { createLocalHarnessValidator, HarnessUnavailableError, submitSessionPrompt } from "./prompt.js";
 
 const CLIENT_ID = "abc123def456abc789def012";
 
@@ -100,4 +100,27 @@ test("local harness prompts still expand platform prompt templates", async () =>
   const text = (turnContents[0]?.userContent[0] as { type: string; text?: string } | undefined);
   assert.equal(text?.type, "text");
   assert.equal(text?.text, "expanded template body");
+});
+
+test("local approval mode and service tier are validated and recorded in turn meta", async () => {
+  const metas: Record<string, unknown>[] = [];
+  const deps: SessionPromptDependencies = {
+    randomUUID: () => "message-id",
+    expandPromptTemplate: async () => null,
+    createSessionTurn: async (input) => { metas.push(input.meta); return { id: "turn-id", spaceId: "space-1" }; },
+    enqueueSpacePrompt: async () => undefined,
+    failSessionTurn: async () => undefined,
+    validateLocalHarness: createLocalHarnessValidator(async () => ({
+      connectionId: "c", endpoint: "ws://gateway", ownerUserId: "owner",
+      capabilities: { harnesses: ["codex", "pi"], models: [], approvalModes: { codex: ["read_only", "auto"] } },
+    })),
+  };
+  await submitSessionPrompt(deps, { ...createInput(null), harness: "codex", approvalMode: "read_only", serviceTier: "priority" });
+  assert.equal(metas[0]?.approvalMode, "read_only");
+  assert.equal(metas[0]?.requestedServiceTier, "priority");
+  await assert.rejects(submitSessionPrompt(deps, { ...createInput(null), harness: "codex", approvalMode: "full_access" }), HarnessUnavailableError);
+  await assert.rejects(submitSessionPrompt(deps, { ...createInput(null), harness: "pi", approvalMode: "read_only" }), HarnessUnavailableError);
+  await assert.rejects(submitSessionPrompt(deps, { ...createInput(null), approvalMode: "read_only" }), /require a local Harness/);
+  await assert.rejects(submitSessionPrompt(deps, { ...createInput(null), harness: "codex", approvalMode: "ask" as never }), /approvalMode must be/);
+  assert.equal(metas.length, 1);
 });

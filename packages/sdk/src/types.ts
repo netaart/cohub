@@ -44,7 +44,7 @@ import type {
   PublicGenerationDeclaration,
 } from "@cohub/protocol/generation";
 import type { MessageRecord, SessionTurnReplyMode } from "@cohub/protocol/model";
-import type { HarnessKind, ModelThinkingLevel, SearchTextRange } from "@cohub/protocol";
+import type { ApprovalMode, HarnessKind, ModelThinkingLevel, SearchTextRange } from "@cohub/protocol";
 import type { TaskRunBoard } from "@cohub/protocol/task";
 export type { TaskRunBoard } from "@cohub/protocol/task";
 
@@ -1318,6 +1318,10 @@ export type CreateSpacePromptInput = {
   harness?: HarnessKind | null;
   /** Optional thinking level override for this turn. Omit to inherit session default. */
   thinkingLevel?: ModelThinkingLevel | null;
+  /** Local Harness approval mode; requires Runtime support. Omit to keep the Harness's own settings. */
+  approvalMode?: ApprovalMode | null;
+  /** Local Harness service tier (for example Codex `priority`); omit for the Harness default. */
+  serviceTier?: string | null;
   clientMessageId?: string | null;
   generationPolicy?: GenerationPolicy | null;
   intent?: "followup" | "steer" | "compact" | null;

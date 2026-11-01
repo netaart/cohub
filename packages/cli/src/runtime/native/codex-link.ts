@@ -32,6 +32,8 @@ export interface CodexChannel {
   close(): Promise<void>;
   readonly shared: boolean;
   readonly closed: boolean;
+  /** The app-server's own version, which may differ from the binary on PATH. */
+  readonly version: Version | null;
 }
 
 const codexHome = () => process.env.CODEX_HOME?.trim() || join(homedir(), ".codex");
@@ -151,14 +153,22 @@ export class CodexShared {
   }
 }
 
-async function initialize(channel: CodexChannel) {
-  await channel.request("initialize", { clientInfo: { name: "cohub-runtime", title: "Cohub", version: "1" }, capabilities: { experimentalApi: true } });
+/** `userAgent` starts with `<client name>/<server version>`. */
+export function userAgentVersion(userAgent: unknown): Version | null {
+  const match = typeof userAgent === "string" ? /^[^/\s]+\/(\d+)\.(\d+)\.(\d+)/.exec(userAgent) : null;
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+async function initialize(channel: SocketChannel | StdioChannel) {
+  const result = await channel.request("initialize", { clientInfo: { name: "cohub-runtime", title: "Cohub", version: "1" }, capabilities: { experimentalApi: true } });
+  channel.version = userAgentVersion(result.userAgent);
   // The notification completes the handshake; responses are not expected.
-  (channel as SocketChannel | StdioChannel).notify("initialized");
+  channel.notify("initialized");
 }
 
 class SocketChannel implements CodexChannel {
   readonly shared = true;
+  version: Version | null = null;
   private readonly pending = new Map<string, { resolve: (value: JsonRecord) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private readonly listeners = new Set<(event: CodexEvent & { id?: string | number }) => void>();
   private readonly closeListeners = new Set<(error: Error) => void>();
@@ -221,6 +231,7 @@ class SocketChannel implements CodexChannel {
 
 class StdioChannel implements CodexChannel {
   readonly shared = false;
+  version: Version | null = null;
   private failed = false;
   constructor(private readonly rpc: JsonRpcProcess) { rpc.onFailure(() => { this.failed = true; }); }
   get closed() { return this.failed; }

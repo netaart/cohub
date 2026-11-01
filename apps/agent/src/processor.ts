@@ -35,7 +35,7 @@ import { env } from "./env.js";
 import { logger } from "./logger.js";
 import { getPromptAuthScopes, parsePromptEnv, readRuntimeRecovery, type PromptAccessMode } from "@cohub/core/sessions";
 import { createAgentExecutionToken } from "./execution-grants.js";
-import { isLocalHarness, resolveHarness } from "@cohub/protocol";
+import { isApprovalMode, isLocalHarness, resolveHarness } from "@cohub/protocol";
 import { executeRemoteHarnessTurn, markRuntimeRecovery, RuntimeExecutionUncertainError } from "./runtime/remote-runtime.js";
 import { loadRuntimeContext } from "./runtime/context-store.js";
 
@@ -874,6 +874,8 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
             actorUserId,
             accessMode,
             requestedThinkingLevel: resolveRequestedThinkingLevel(ownerMeta),
+            approvalMode: isApprovalMode(ownerMeta.approvalMode) ? ownerMeta.approvalMode : undefined,
+            requestedServiceTier: typeof ownerMeta.requestedServiceTier === "string" ? ownerMeta.requestedServiceTier : null,
             harness: requestedHarness,
             provider: typeof ownerMeta.provider === "string" ? ownerMeta.provider : null,
             model: typeof ownerMeta.model === "string" ? ownerMeta.model : null,

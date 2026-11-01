@@ -19,7 +19,20 @@ export type LocalModelSelection = {
 	id: string;
 	name?: string;
 	thinkingLevel?: ModelThinkingLevel;
+	/** Service tier for the next Turn; absent runs the Harness default. */
+	serviceTier?: string;
 };
+
+/** The tier the Fast switch selects (Codex `priority`); models without it show no switch. */
+export const FAST_SERVICE_TIER = "priority";
+
+export function supportsFastServiceTier(item: ModelCatalogItem): boolean {
+	const tiers = item.model.serviceTiers;
+	return (
+		Array.isArray(tiers) &&
+		tiers.some((tier) => (tier as { id?: unknown })?.id === FAST_SERVICE_TIER)
+	);
+}
 
 type LocalModel = RuntimeCapabilities["models"][number];
 
@@ -30,11 +43,18 @@ function toLocalModelItem({
 	reasoning,
 	thinkingLevelMap,
 	defaultThinkingLevel,
+	serviceTiers,
 }: LocalModel): ModelCatalogItem {
 	return {
 		provider,
 		id,
-		model: { name, reasoning, thinkingLevelMap, defaultThinkingLevel },
+		model: {
+			name,
+			reasoning,
+			thinkingLevelMap,
+			defaultThinkingLevel,
+			serviceTiers,
+		},
 	};
 }
 
@@ -49,7 +69,8 @@ export function toLocalModelCatalog(
  * requested model when the Runtime still offers it, else the Harness default.
  * The level follows the model like the Cohub picker: a requested level is
  * clamped to the requested model, any other model starts at its default.
- * Models without a level choice carry none, so none is sent.
+ * Models without a level choice carry none, so none is sent. A service tier
+ * follows to any model that offers it.
  */
 export function resolveLocalModel(
 	models: RuntimeCapabilities["models"],
@@ -71,11 +92,17 @@ export function resolveLocalModel(
 					match ? requested?.thinkingLevel : null,
 				)
 			: undefined;
+	const serviceTier = model.serviceTiers?.some(
+		(tier) => tier.id === requested?.serviceTier,
+	)
+		? requested?.serviceTier
+		: undefined;
 	return {
 		provider: model.provider,
 		id: model.id,
 		name: model.name,
 		...(thinkingLevel ? { thinkingLevel } : {}),
+		...(serviceTier ? { serviceTier } : {}),
 	};
 }
 
@@ -86,6 +113,12 @@ export function getRequestedThinkingLevel(
 	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
 	const value = (meta as Record<string, unknown>).requestedThinkingLevel;
 	return isModelThinkingLevel(value) ? value : null;
+}
+
+export function getRequestedServiceTier(meta: unknown): string | null {
+	if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+	const value = (meta as Record<string, unknown>).requestedServiceTier;
+	return typeof value === "string" && value ? value : null;
 }
 
 /** Compact labels for dense controls (composer, chips). */

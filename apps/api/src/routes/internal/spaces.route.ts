@@ -8,7 +8,7 @@ import type {
 } from "@cohub/protocol/model";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { isModelThinkingLevel, MODEL_THINKING_LEVELS } from "@cohub/protocol";
-import type { HarnessKind } from "@cohub/protocol/runtime";
+import type { ApprovalMode, HarnessKind } from "@cohub/protocol/runtime";
 import {
   getSpaceById,
   getSpaceSessionById,
@@ -436,6 +436,8 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
       provider?: string | null;
       harness?: HarnessKind | null;
       thinkingLevel?: string | null;
+      approvalMode?: ApprovalMode | null;
+      serviceTier?: string | null;
       accessMode?: PromptAccessMode | null;
       env?: unknown;
       context?: SubmitSessionPromptContext | null;
@@ -491,6 +493,8 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
       provider: body.provider ?? null,
       harness: body.harness ?? null,
       thinkingLevel: promptThinkingLevel ?? null,
+      approvalMode: body.approvalMode ?? null,
+      serviceTier: body.serviceTier ?? null,
       accessMode,
       env: promptEnv,
       context: mergePromptContextAuth(body.context ?? null, promptAuth),
@@ -503,6 +507,7 @@ router.post("/:spaceId/sessions/:sessionId/prompt", async (c) => {
     }
     if (error instanceof SandboxNotReadyError) return c.json({ message: "sandbox is not ready" }, 503);
     if (error instanceof BillingAccessBlockedError) return c.json(serializeBillingBlocked(error), 402);
+    if (error instanceof Error && /^(approvalMode|serviceTier)/.test(error.message)) return c.json({ message: error.message }, 400);
     throw error as Error;
   }
 });

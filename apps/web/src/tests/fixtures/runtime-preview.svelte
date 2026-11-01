@@ -1,7 +1,12 @@
 <script lang="ts">
 // Local-only browser fixture. Mounted temporarily by scripts/preview-runtime-ui.mjs.
 import "../../app.css";
-import type { HarnessKind, RuntimeStatus } from "@neta-art/cohub";
+import {
+	APPROVAL_MODES,
+	type ApprovalMode,
+	type HarnessKind,
+	type RuntimeStatus,
+} from "@neta-art/cohub";
 import SessionComposer from "$lib/components/SessionComposer.svelte";
 import SpaceWorkspaceHeader, {
 	type SpaceWorkspaceHeaderContext,
@@ -42,6 +47,7 @@ const models = [
 		isDefault: true,
 		reasoning: true,
 		defaultThinkingLevel: "medium" as const,
+		serviceTiers: [{ id: "priority", name: "Fast" }],
 		thinkingLevelMap: {
 			off: "none",
 			minimal: null,
@@ -82,6 +88,7 @@ let previewState = $state<PreviewState>("ready");
 let input = $state("");
 let harness = $state<HarnessKind>("pi");
 let model = $state<LocalModelSelection | null>(null);
+let approvalMode = $state<ApprovalMode | null>(null);
 const localModels = $derived(models.filter((item) => item.harness === harness));
 // Mirrors the session host: the composer always shows a resolved model and level.
 const localModel = $derived(resolveLocalModel(localModels, model));
@@ -93,6 +100,9 @@ function makeStatus(): RuntimeStatus {
 		runtimeId: "22222222-2222-4222-8222-222222222222",
 		capabilities: {
 			harnesses: ["pi", "codex", "claude", "workbuddy", "cursor"],
+			...(previewState === "limited"
+				? {}
+				: { approvalModes: { codex: [...APPROVAL_MODES] } }),
 			models,
 		},
 		workspace: {
@@ -156,7 +166,8 @@ const noop = () => {};
 			<button class="rounded border border-border-subtle px-2 py-1" onclick={() => document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"}>Theme</button>
 		</div>
 		<div class="flex-1 text-sm text-text-tertiary">Isolated fixtures · no account or model requests</div>
+		<output aria-label="Approval selection">{approvalMode ?? "unset"}</output>
 		<output aria-label="Model selection">{JSON.stringify(localModel)}</output>
-		<SessionComposer bind:value={input} {harness} harnesses={["cohub", ...(status.capabilities?.harnesses ?? [])]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} onsubmit={noop} onpickattachment={noop} />
+		<SessionComposer bind:value={input} {harness} harnesses={["cohub", ...(status.capabilities?.harnesses ?? [])]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} approvalModes={harness === "codex" ? (status.capabilities?.approvalModes?.codex ?? []) : []} approvalMode={harness === "codex" ? approvalMode : null} onapprovalmodechange={(next) => { approvalMode = next; }} onsubmit={noop} onpickattachment={noop} />
 	</main>
 </div>

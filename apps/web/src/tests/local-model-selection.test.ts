@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RuntimeCapabilities } from "@neta-art/cohub";
-import { resolveLocalModelFromTurns } from "../lib/features/session-chat/session-utils.ts";
+import {
+	resolveApprovalModeFromTurns,
+	resolveLocalModelFromTurns,
+} from "../lib/features/session-chat/session-utils.ts";
 import {
 	getSupportedThinkingLevels,
 	resolveLocalModel,
@@ -216,5 +219,65 @@ test("Claude Code offers its default model and effort levels", () => {
 			>[number],
 		),
 		["low", "medium", "high", "xhigh", "max"],
+	);
+});
+
+test("Fast follows to models that offer it and restores from the request", () => {
+	const fastCatalog: RuntimeCapabilities["models"] = [
+		{ ...catalog[0], serviceTiers: [{ id: "priority", name: "Fast" }] },
+		{ ...catalog[1], serviceTiers: [{ id: "priority", name: "Fast" }] },
+		catalog[2],
+	];
+	const fast = { provider: "openai", id: "default", serviceTier: "priority" };
+	assert.equal(resolveLocalModel(fastCatalog, fast)?.serviceTier, "priority");
+	assert.equal(
+		resolveLocalModel(fastCatalog, { ...fast, id: "deep" })?.serviceTier,
+		"priority",
+	);
+	assert.equal(
+		resolveLocalModel(fastCatalog, { ...fast, id: "plain" })?.serviceTier,
+		undefined,
+	);
+	const sent = {
+		...turn(1, "codex", { model: "default" }),
+		meta: {
+			harness: "codex",
+			provider: "openai",
+			model: "default",
+			requestedServiceTier: "priority",
+		},
+	};
+	assert.equal(
+		resolveLocalModelFromTurns([sent], "codex")?.serviceTier,
+		"priority",
+	);
+});
+
+test("the approval mode restores from the last Turn that chose one", () => {
+	const withMode = (
+		sequence: number,
+		harness: "codex" | "pi",
+		approvalMode?: string,
+	) => ({
+		...turn(sequence, harness),
+		meta: { harness, ...(approvalMode ? { approvalMode } : {}) },
+	});
+	const turns = [
+		withMode(1, "codex", "read_only"),
+		withMode(2, "codex"),
+		withMode(3, "pi"),
+	];
+	assert.equal(resolveApprovalModeFromTurns(turns, "codex"), "read_only");
+	assert.equal(resolveApprovalModeFromTurns(turns, "pi"), null);
+	assert.equal(
+		resolveApprovalModeFromTurns(
+			[...turns, withMode(4, "codex", "full_access")],
+			"codex",
+		),
+		"full_access",
+	);
+	assert.equal(
+		resolveApprovalModeFromTurns([withMode(1, "codex", "ask")], "codex"),
+		null,
 	);
 });

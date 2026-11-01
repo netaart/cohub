@@ -3,7 +3,7 @@ import type { ContentBlock } from "@cohub/protocol/core";
 import type { GenerationPolicy } from "@cohub/protocol/generation";
 import { normalizeSessionTurnOrigin, type SessionTurnIntent, type SessionTurnOrigin, type SessionTurnOriginKind, type SessionTurnReply } from "@cohub/protocol/model";
 import { isRequestSourceClientId, normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
-import { assertHarnessAccess, harnessSchema, isLocalHarness, type HarnessKind, type RuntimeRegistration } from "@cohub/protocol/runtime";
+import { assertHarnessAccess, harnessSchema, isApprovalMode, isLocalHarness, runtimeServiceTierIdSchema, supportsApprovalMode, type ApprovalMode, type HarnessKind, type RuntimeRegistration } from "@cohub/protocol/runtime";
 import { findRuntimeModel, isModelThinkingLevel } from "@cohub/protocol";
 import { normalizeContentBlocks } from "../content/normalize.js";
 import type { PromptEnv } from "./prompt-env.js";
@@ -151,6 +151,10 @@ export type SubmitSessionPromptInput = {
   harness?: PromptHarness | null;
   /** Optional thinking level override for this turn. Omit to inherit session default. */
   thinkingLevel?: string | null;
+  /** Local Harness approval mode for this Turn; omit to keep the Harness's own settings. */
+  approvalMode?: ApprovalMode | null;
+  /** Local Harness service tier for this Turn; omit for the Harness default. */
+  serviceTier?: string | null;
   generationPolicy?: GenerationPolicy | null;
   accessMode?: PromptAccessMode | null;
   env?: PromptEnv | null;
@@ -272,6 +276,10 @@ export const createLocalHarnessValidator = (readRegistration: (spaceId: string) 
     if (!isLocalHarness(harness)) throw new HarnessUnavailableError();
     const capabilities = (await readRegistration(prompt.spaceId))?.capabilities;
     if (!capabilities?.harnesses.includes(harness)) throw new HarnessUnavailableError();
+    // An unenforced choice must not run with the Harness's defaults instead.
+    if (prompt.approvalMode && !supportsApprovalMode(capabilities, harness, prompt.approvalMode)) {
+      throw new HarnessUnavailableError("The Local Runtime does not support this approval mode; update Cohub Local");
+    }
     if (prompt.model && !findRuntimeModel(capabilities, { harness, model: prompt.model, provider: prompt.provider })) {
       throw new ModelUnavailableError(prompt.provider ?? harness, prompt.model);
     }
@@ -392,6 +400,9 @@ export const submitSessionPrompt = async (
   const modelProvider = normalizePromptModelProvider(input);
   if (input.harness != null && !harnessSchema.safeParse(input.harness).success) throw new Error("Invalid Harness");
   const localHarness = isLocalHarness(input.harness);
+  if (input.approvalMode != null && !isApprovalMode(input.approvalMode)) throw new Error("approvalMode must be one of: inherit, auto, full_access, read_only");
+  if (input.serviceTier != null && !runtimeServiceTierIdSchema.safeParse(input.serviceTier).success) throw new Error("serviceTier must be a non-empty string of at most 100 characters");
+  if (!localHarness && (input.approvalMode != null || input.serviceTier != null)) throw new Error("approvalMode and serviceTier require a local Harness");
   if (localHarness) {
     assertHarnessAccess(input.harness, input.accessMode);
     if (input.env && Object.keys(input.env).length) throw new Error("Local Harness uses its native environment; per-turn environment overrides are unavailable");
@@ -493,6 +504,8 @@ export const submitSessionPrompt = async (
     provider: modelProvider.provider,
     harness: input.harness ?? "cohub",
     requestedThinkingLevel,
+    ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
+    ...(input.serviceTier ? { requestedServiceTier: input.serviceTier } : {}),
     promptTemplate,
     skillUsage,
     generationPolicy: input.generationPolicy ?? null,

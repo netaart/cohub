@@ -84,3 +84,21 @@ test("read-only Pi and offline selected harness fail before dispatch without swi
   await assert.rejects(executeRemoteHarnessTurn({ ...input, accessMode: "full_access" }), /offline/);
   assert.equal(commands.length, 0); assert.equal(users.length, 0);
 });
+
+test("Codex approval mode needs Runtime support; Fast reaches the Runtime only where the model offers it", async () => {
+  status = "running"; online = true; commands.length = users.length = 0;
+  const claimed = batch();
+  const input = { spaceId: randomUUID(), sessionId: claimed.ownerTurn.sessionId, batch: claimed, actorUserId: claimed.ownerTurn.userUuid,
+    harness: "codex" as const, provider: "fixture", model: "chosen", accessMode: "full_access" as const, abortSignal: new AbortController().signal };
+  await assert.rejects(executeRemoteHarnessTurn({ ...input, approvalMode: "read_only" }), /does not support this approval mode/);
+  assert.equal(commands.length, 0); assert.equal(users.length, 0);
+  Object.assign(registration.capabilities, { approvalModes: { codex: ["read_only"] } });
+  registration.capabilities.models[1] = { ...registration.capabilities.models[1], serviceTiers: [{ id: "priority", name: "Fast" }] } as typeof registration.capabilities.models[1];
+  await executeRemoteHarnessTurn({ ...input, approvalMode: "read_only", requestedServiceTier: "priority" });
+  assert.equal(commands[0]?.approvalMode, "read_only");
+  assert.equal(commands[0]?.serviceTier, "priority");
+  status = "running";
+  await executeRemoteHarnessTurn({ ...input, requestedServiceTier: "flex" });
+  assert.equal(Object.hasOwn(commands[1] ?? {}, "serviceTier"), false);
+  assert.equal(Object.hasOwn(commands[1] ?? {}, "approvalMode"), false);
+});

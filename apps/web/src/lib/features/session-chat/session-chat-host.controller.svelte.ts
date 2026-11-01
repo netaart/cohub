@@ -3,6 +3,7 @@
  * Shell uses a small Handle surface; Panel uses the host as view-model.
  */
 import {
+	type ApprovalMode,
 	buildFileReferencesText,
 	buildImageReferencesText,
 	buildViewportContentBlock,
@@ -169,6 +170,7 @@ import {
 	normalizeTurnDuplicates,
 	preserveSessionTurnRefs,
 	reconcileOptimisticTurn,
+	resolveApprovalModeFromTurns,
 	resolveComposerSelectionFromTurn,
 	resolveLastAgentTurnModel,
 	resolveLocalModelFromTurns,
@@ -401,6 +403,22 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		);
 		return models ? resolveLocalModel(models, requested) : requested;
 	});
+	// Unsent choices only: once sent, the Turn's own record is the source, so other clients' choices show.
+	let approvalModesBySession = $state<Record<string, ApprovalMode>>({});
+	const approvalSelectionKey = $derived(
+		`${harnessSelectionKey}:${composerHarness}`,
+	);
+	const approvalModes = $derived(
+		composerHarness === "cohub"
+			? []
+			: (runtimeCatalog?.capabilities?.approvalModes?.[composerHarness] ?? []),
+	);
+	const approvalMode = $derived(
+		composerHarness === "cohub"
+			? null
+			: (approvalModesBySession[approvalSelectionKey] ??
+					resolveApprovalModeFromTurns(composerAgentTurns, composerHarness)),
+	);
 	async function loadRuntimeCatalog() {
 		const targetSpaceId = spaceId;
 		if (!targetSpaceId) return;
@@ -3015,6 +3033,15 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			setComposerError(m.runtime_harness_unavailable());
 			return;
 		}
+		const local = !isNote && harness !== "cohub";
+		const sentApprovalMode = local ? approvalMode : null;
+		// An approval mode the Runtime cannot enforce must not fall back to its defaults.
+		if (sentApprovalMode && !approvalModes.includes(sentApprovalMode)) {
+			setComposerError(m.runtime_approval_unsupported());
+			return;
+		}
+		const sentApprovalKey = approvalSelectionKey;
+		const serviceTier = local ? localModel?.serviceTier : undefined;
 		composer.sending = true;
 		const model = isNote
 			? null
@@ -3256,6 +3283,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						// Mirrors the server's request meta, which local model restore reads.
 						...(model ? { model: model.id, provider: model.provider } : {}),
 						...(thinkingLevel ? { requestedThinkingLevel: thinkingLevel } : {}),
+						...(sentApprovalMode ? { approvalMode: sentApprovalMode } : {}),
+						...(serviceTier ? { requestedServiceTier: serviceTier } : {}),
 						userId: currentUser.uuid,
 						clientMessageId,
 					},
@@ -3302,6 +3331,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 							provider: model?.provider,
 							harness,
 							...(thinkingLevel ? { thinkingLevel } : {}),
+							...(sentApprovalMode ? { approvalMode: sentApprovalMode } : {}),
+							...(serviceTier ? { serviceTier } : {}),
 							clientMessageId,
 							...(harness === "cohub"
 								? { generationPolicy: buildTurnGenerationPolicy() }
@@ -3313,6 +3344,13 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			);
 			if (sendResult.mode !== "immediate") {
 				throw new Error("Expected immediate prompt response");
+			}
+			if (
+				sentApprovalMode &&
+				approvalModesBySession[sentApprovalKey] === sentApprovalMode
+			) {
+				const { [sentApprovalKey]: _sent, ...unsent } = approvalModesBySession;
+				approvalModesBySession = unsent;
 			}
 			// The server accepted the prompt even if this host moved elsewhere.
 			// Invalidate before the UI-only early return so Recent revalidates later.
@@ -4594,6 +4632,18 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		},
 		get localModel() {
 			return localModel;
+		},
+		get approvalModes() {
+			return approvalModes;
+		},
+		get approvalMode() {
+			return approvalMode;
+		},
+		setApprovalMode(mode: ApprovalMode) {
+			approvalModesBySession = {
+				...approvalModesBySession,
+				[approvalSelectionKey]: mode,
+			};
 		},
 		setLocalModel(model: LocalModelSelection) {
 			localModelsBySession = {

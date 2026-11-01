@@ -4,7 +4,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { displaysSnapshotSchema, fileWatcherStatusSchema, isModelThinkingLevel, MODEL_THINKING_LEVELS, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, isSessionTurnReplyMode, isUuid, runtimeStopConfirmationSchema, type HarnessKind, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
+import { displaysSnapshotSchema, fileWatcherStatusSchema, isModelThinkingLevel, MODEL_THINKING_LEVELS, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, isSessionTurnReplyMode, isUuid, runtimeStopConfirmationSchema, type ApprovalMode, type HarnessKind, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
 import {
   HOME_SPACE_SLUG,
   parseSpaceSlug,
@@ -410,6 +410,8 @@ type SpacePromptInput = {
   provider?: string | null;
   harness?: HarnessKind | null;
   thinkingLevel?: string | null;
+  approvalMode?: ApprovalMode | null;
+  serviceTier?: string | null;
   clientMessageId?: string | null;
   generationPolicy?: unknown;
   intent?: SpacePromptIntent | null;
@@ -586,7 +588,9 @@ function promptInputError(error: unknown): string | null {
     error.message.includes("Invalid image") ||
     error.message.includes("Invalid content block") ||
     error.message.includes("shell command is empty") ||
-    error.message.includes("shell_command is not allowed")
+    error.message.includes("shell_command is not allowed") ||
+    error.message.startsWith("approvalMode") ||
+    error.message.startsWith("serviceTier")
   ) {
     return error.message;
   }
@@ -2233,6 +2237,8 @@ router.post("/:id/prompt", async (c) => {
         provider: requestedProvider,
         harness: body.harness ?? null,
         thinkingLevel: promptThinkingLevel ?? null,
+        approvalMode: body.approvalMode ?? null,
+        serviceTier: body.serviceTier ?? null,
         generationPolicy,
         intent: promptIntent,
         accessMode,

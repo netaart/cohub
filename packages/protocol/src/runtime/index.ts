@@ -5,7 +5,7 @@ import type { DisplayInfo } from "../display/index.js";
 import { contentBlockSchema } from "../core/content-schema.js";
 import { harnessArchiveSchema, type HarnessArchive } from "./archive.js";
 import { nativeRuntimeEventSchema } from "./native.js";
-import { LOCAL_HARNESSES, localHarnessSchema, type LocalHarness } from "./harnesses.js";
+import { isLocalHarness, LOCAL_HARNESSES, localHarnessSchema, type LocalHarness } from "./harnesses.js";
 import { clampThinkingLevel, isModelThinkingLevel, modelThinkingLevelSchema, type ModelThinkingLevel } from "../model/thinking.js";
 export * from "./archive.js";
 export * from "./harnesses.js";
@@ -88,13 +88,29 @@ export type RuntimeTraceContext = {
 };
 
 export const RUNTIME_MAX_SERVICE_TIERS = 20;
+export const runtimeServiceTierIdSchema = z.string().min(1).max(100);
 export const runtimeServiceTierSchema = z.object({
-  id: z.string().min(1).max(100),
+  id: runtimeServiceTierIdSchema,
   name: z.string().max(255),
   description: z.string().max(2000).optional(),
 });
+
+/**
+ * How far a local Turn may act without asking. Absent leaves the Harness's own settings untouched;
+ * `inherit` explicitly restores them. Interactive approval is never offered: an unattended Turn refuses.
+ */
+export const APPROVAL_MODES = ["inherit", "auto", "full_access", "read_only"] as const;
+export type ApprovalMode = typeof APPROVAL_MODES[number];
+export const approvalModeSchema = z.enum(APPROVAL_MODES);
+export const isApprovalMode = (value: unknown): value is ApprovalMode => (APPROVAL_MODES as readonly unknown[]).includes(value);
+
 export const runtimeCapabilitiesSchema = z.object({
   harnesses: z.array(localHarnessSchema).max(LOCAL_HARNESSES.length),
+  /** Approval modes each Harness enforces. Unknown Harnesses and modes are dropped, not rejected. */
+  approvalModes: z.record(z.string().max(32), z.array(z.string().max(32)).max(16))
+    .refine((map) => Object.keys(map).length <= 16, "Too many Harnesses")
+    .transform((map) => Object.fromEntries(Object.entries(map).flatMap(([harness, modes]) => isLocalHarness(harness) ? [[harness, [...new Set(modes.filter(isApprovalMode))]]] : [])) as Partial<Record<LocalHarness, ApprovalMode[]>>)
+    .optional().catch(undefined),
   models: z.array(z.object({
     harness: localHarnessSchema,
     provider: z.string().max(100),
@@ -111,7 +127,7 @@ export const runtimeCapabilitiesSchema = z.object({
       .optional(),
     /** Selectable service (speed) tiers; `id` is the Harness's own request value. */
     serviceTiers: z.array(runtimeServiceTierSchema).max(RUNTIME_MAX_SERVICE_TIERS).optional(),
-    defaultServiceTier: z.string().min(1).max(100).optional(),
+    defaultServiceTier: runtimeServiceTierIdSchema.optional(),
   })).max(2000),
 });
 export type RuntimeCapabilities = z.infer<typeof runtimeCapabilitiesSchema>;
@@ -135,6 +151,14 @@ export function runtimeHelloCapabilities(capabilities: RuntimeCapabilities): Run
 export function resolveRuntimeThinkingLevel(model: RuntimeModel | undefined, requested: string | null | undefined): string | null | undefined {
   const declared = model && (model.reasoning !== undefined || model.thinkingLevelMap !== undefined);
   return declared && isModelThinkingLevel(requested) ? clampThinkingLevel(model, requested) : requested;
+}
+
+export const supportsApprovalMode = (capabilities: RuntimeCapabilities | null | undefined, harness: LocalHarness, mode: ApprovalMode) =>
+  capabilities?.approvalModes?.[harness]?.includes(mode) === true;
+
+/** A tier the model does not declare is dropped: the Harness then runs its own default. */
+export function resolveRuntimeServiceTier(model: RuntimeModel | undefined, requested: string | null | undefined): string | undefined {
+  return requested && model?.serviceTiers?.some((tier) => tier.id === requested) ? requested : undefined;
 }
 
 /** The requested model, or the Harness default when none is requested. */
@@ -220,6 +244,9 @@ export type RuntimeTurnInput = {
   provider?: string | null;
   model?: string | null;
   thinkingLevel?: string | null;
+  approvalMode?: ApprovalMode;
+  /** Service tier for this Turn only; absent runs the Harness default. */
+  serviceTier?: string | null;
   requestId?: string | null;
   traceContext?: RuntimeTraceContext;
   accessMode: "read_only" | "full_access";
@@ -297,6 +324,7 @@ export const runtimeCommandSchema = z.discriminatedUnion("type", [
     messages: z.array(z.object({ turnId: id, userMessageId: id, userId: z.string().nullable(), content })).min(1).max(RUNTIME_MAX_BATCH_MESSAGES),
     context: runtimeContextSchema,
     provider: z.string().nullable().optional(), model: z.string().nullable().optional(), thinkingLevel: z.string().nullable().optional(),
+    approvalMode: approvalModeSchema.optional(), serviceTier: runtimeServiceTierIdSchema.nullable().optional(),
     requestId: z.string().regex(/^[a-zA-Z0-9._:-]{1,128}$/).nullable().optional(),
     traceContext: runtimeTraceContextSchema.optional(),
     accessMode: z.enum(["read_only", "full_access"]),

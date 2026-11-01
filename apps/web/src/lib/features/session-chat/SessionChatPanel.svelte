@@ -493,6 +493,9 @@ async function handleDraftDrop(event: DragEvent) {
 					localModels={host.runtimeCatalog?.capabilities?.models.filter((model) => model.harness === host.composerHarness) ?? []}
 					localModel={host.localModel}
 					onlocalmodelchange={host.setLocalModel}
+					approvalModes={host.approvalModes}
+					approvalMode={host.approvalMode}
+					onapprovalmodechange={host.setApprovalMode}
 					thinkingLevelLabel={host.composerMode === "agent" ? host.activeSessionThinkingLevelLabel : null}
 					generationPolicyLabel={host.composerMode === "agent" ? host.generationPolicyLabel : null}
 					quickActions={host.composerMode === "note" ? [] : host.quickPromptActions}

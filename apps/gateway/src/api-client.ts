@@ -3,7 +3,7 @@ import { AuthorizationError, verifyUserAccessToken } from "@cohub/identity";
 import { buildTraceHeaders, getTraceResponseHeaders, type TraceIdentifiers } from "@cohub/infra/tracing";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { RealtimeRoom, RealtimeRoomDescriptor, RealtimeRoomRejection } from "@cohub/protocol/realtime";
-import type { BillingPayload, HarnessKind } from "@cohub/protocol";
+import type { ApprovalMode, BillingPayload, HarnessKind } from "@cohub/protocol";
 import type { GatewayAuthUser } from "./config.js";
 import { gatewayConfig } from "./config.js";
 import { verifyLocalSandboxAccessToken } from "./local-sandbox-auth.js";
@@ -268,6 +268,8 @@ export const submitInternalSessionPrompt = async (input: {
   provider?: string | null;
   harness?: HarnessKind;
   thinkingLevel?: string | null;
+  approvalMode?: ApprovalMode;
+  serviceTier?: string;
   context?: Record<string, unknown> | null;
 }): Promise<{ ok: true; turnId: string; userMessageId: string; trace: TraceIdentifiers }> => {
   const requestId = typeof input.context?.requestId === "string" ? input.context.requestId : null;
@@ -288,6 +290,8 @@ export const submitInternalSessionPrompt = async (input: {
       provider: input.provider ?? null,
       harness: input.harness ?? "cohub",
       thinkingLevel: input.thinkingLevel ?? null,
+      ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
+      ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
       context: input.context ?? null,
     }),
   });
