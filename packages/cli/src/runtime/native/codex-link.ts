@@ -10,6 +10,8 @@ import { atLeast, harnessVersion, type Version } from "./version.js";
 export const CODEX_SHARED_MIN_VERSION: Version = [0, 156, 0];
 
 const REQUEST_TIMEOUT_MS = 60_000;
+/** An optional probe of a running shared server must not hold up Runtime startup. */
+const PROBE_TIMEOUT_MS = 3_000;
 const JOIN_ATTEMPTS = 20;
 const JOIN_RETRY_MS = 100;
 const CLOSING_ATTEMPTS = 100;
@@ -63,6 +65,16 @@ async function ensureSharedServer(binary: string, cwd: string): Promise<boolean>
   catch { return false; }
 }
 
+/** Version of a shared app-server already running, which Cohub's Turns would use instead of the binary. */
+export async function runningSharedVersion(): Promise<Version | null> {
+  if (!sharedServerAvailable || !existsSync(codexControlSocket())) return null;
+  try {
+    const channel = await openShared(PROBE_TIMEOUT_MS);
+    await channel.close();
+    return channel.version;
+  } catch { return null; }
+}
+
 async function probe(): Promise<boolean> {
   try {
     const channel = await openShared();
@@ -71,14 +83,15 @@ async function probe(): Promise<boolean> {
   } catch { return false; }
 }
 
-async function openShared(): Promise<CodexChannel> {
-  const socket = new WebSocket(`ws+unix://${codexControlSocket()}:/`);
+async function openShared(timeoutMs?: number): Promise<CodexChannel> {
+  const socket = new WebSocket(`ws+unix://${codexControlSocket()}:/`, timeoutMs ? { handshakeTimeout: timeoutMs } : {});
   await new Promise<void>((resolve, reject) => {
     socket.once("open", () => resolve());
     socket.once("error", reject);
   });
   const channel = new SocketChannel(socket);
-  await initialize(channel);
+  try { await initialize(channel, timeoutMs); }
+  catch (error) { await channel.close(); throw error; }
   return channel;
 }
 
@@ -159,8 +172,8 @@ export function userAgentVersion(userAgent: unknown): Version | null {
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
-async function initialize(channel: SocketChannel | StdioChannel) {
-  const result = await channel.request("initialize", { clientInfo: { name: "cohub-runtime", title: "Cohub", version: "1" }, capabilities: { experimentalApi: true } });
+async function initialize(channel: SocketChannel | StdioChannel, timeoutMs?: number) {
+  const result = await channel.request("initialize", { clientInfo: { name: "cohub-runtime", title: "Cohub", version: "1" }, capabilities: { experimentalApi: true } }, timeoutMs);
   channel.version = userAgentVersion(result.userAgent);
   // The notification completes the handshake; responses are not expected.
   channel.notify("initialized");

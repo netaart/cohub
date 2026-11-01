@@ -41,14 +41,14 @@ export async function resolveSessionReplyRuntime(
 	return {
 		harness,
 		...(approvalMode ? { approvalMode } : {}),
-		...(local
+		...(local?.serviceTier ? { serviceTier: local.serviceTier } : {}),
+		...(local?.id !== undefined
 			? {
 					model: local.id,
 					provider: local.provider,
 					...(local.thinkingLevel
 						? { thinkingLevel: local.thinkingLevel }
 						: {}),
-					...(local.serviceTier ? { serviceTier: local.serviceTier } : {}),
 				}
 			: {}),
 	};

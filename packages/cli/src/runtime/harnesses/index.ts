@@ -33,10 +33,10 @@ export async function installedHarnesses(cwd: string, executables: HarnessExecut
   return found.filter((harness): harness is LocalHarness => harness !== null);
 }
 
-/** Whatever a harness offers beyond its models; a failed probe offers nothing rather than failing discovery. */
-async function harnessFeatures(harnesses: LocalHarness[], executables: HarnessExecutables): Promise<Pick<RuntimeCapabilities, "approvalModes">> {
+/** Whatever a harness offers beyond its models. A failed probe keeps `previous`, never failing discovery. */
+async function harnessFeatures(harnesses: LocalHarness[], executables: HarnessExecutables, previous?: RuntimeCapabilities): Promise<Pick<RuntimeCapabilities, "approvalModes">> {
   const entries = await Promise.all(harnesses.map(async (harness) => {
-    const modes = await adapters()[harness].approvalModes?.(harnessExecutable(harness, executables)).catch(() => []);
+    const modes = await adapters()[harness].approvalModes?.(harnessExecutable(harness, executables)).catch(() => previous?.approvalModes?.[harness] ?? []);
     return modes?.length ? [[harness, modes] as const] : [];
   }));
   const approvalModes = Object.fromEntries(entries.flat());
@@ -69,5 +69,5 @@ export async function refreshHarnesses(current: RuntimeCapabilities, executables
       return current.models.filter((model) => model.harness === harness);
     }
   }));
-  return { harnesses: current.harnesses, models: catalogs.flat(), ...await harnessFeatures(current.harnesses, executables) };
+  return { harnesses: current.harnesses, models: catalogs.flat(), ...await harnessFeatures(current.harnesses, executables, current) };
 }

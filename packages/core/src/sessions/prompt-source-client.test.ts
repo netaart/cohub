@@ -122,5 +122,6 @@ test("local approval mode and service tier are validated and recorded in turn me
   await assert.rejects(submitSessionPrompt(deps, { ...createInput(null), harness: "pi", approvalMode: "read_only" }), HarnessUnavailableError);
   await assert.rejects(submitSessionPrompt(deps, { ...createInput(null), approvalMode: "read_only" }), /require a local Harness/);
   await assert.rejects(submitSessionPrompt(deps, { ...createInput(null), harness: "codex", approvalMode: "ask" as never }), /approvalMode must be/);
+  await assert.rejects(submitSessionPrompt(deps, { ...createInput(null), harness: "codex", approvalMode: "auto", accessMode: "read_only" }), /conflicts with read-only/);
   assert.equal(metas.length, 1);
 });

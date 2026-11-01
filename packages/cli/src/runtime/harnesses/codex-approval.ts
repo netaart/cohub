@@ -4,8 +4,11 @@ import { record, type JsonRecord } from "../json-rpc.js";
 import type { CodexChannel } from "../native/codex-link.js";
 import { atLeast, type Version } from "../native/version.js";
 
-/** First app-server whose thread settings, permission profiles and per-Turn service tier Cohub has verified. */
-export const CODEX_APPROVAL_MIN_VERSION: Version = [0, 162, 1];
+/**
+ * First app-server whose thread settings and permission profiles Cohub has verified, and which
+ * honours the per-thread unload delay a loaded thread needs to be reopened with Cohub's profile.
+ */
+export const CODEX_APPROVAL_MIN_VERSION: Version = [0, 164, 0];
 
 // Profiles name POSIX paths; Codex's Windows sandbox is not covered.
 export const codexApprovalModes = (version: Version | null): ApprovalMode[] =>
@@ -33,6 +36,9 @@ export type CodexApproval = {
 
 /** The platform's read-only access always wins; `null` keeps the legacy behaviour. */
 export function codexApprovalMode(input: RuntimeTurnInput, version: Version | null): ApprovalMode | null {
+  if (input.accessMode === "read_only" && input.approvalMode && input.approvalMode !== "read_only") {
+    throw new Error("The approval mode conflicts with read-only access");
+  }
   const mode = input.accessMode === "read_only" ? "read_only" : input.approvalMode;
   if (!mode || codexApprovalModes(version).includes(mode)) return mode ?? null;
   if (!input.approvalMode) return null;
@@ -76,10 +82,20 @@ function confirms(current: JsonRecord, approval: CodexApproval): boolean {
 
 /**
  * Make the mode the thread's next-Turn settings, and send nothing unless Codex reports exactly them:
- * a loaded thread ignores open-time overrides, and an unchanged update reports nothing.
+ * a loaded thread ignores open-time overrides, and an unchanged update reports nothing. A thread
+ * loaded before Cohub defined its profile there is reopened with it (`reopen`).
  */
-export async function applyCodexApproval(approval: CodexApproval, codex: CodexChannel, threadId: string, opened: JsonRecord): Promise<void> {
+export async function applyCodexApproval(approval: CodexApproval, codex: CodexChannel, threadId: string, opened: JsonRecord, reopen: () => Promise<JsonRecord>): Promise<void> {
   if (confirms(opened, approval)) return;
+  try { await update(approval, codex, threadId); }
+  catch (error) {
+    if (!approval.settings.permissions) throw error;
+    if (confirms(await reopen(), approval)) return;
+    await update(approval, codex, threadId);
+  }
+}
+
+async function update(approval: CodexApproval, codex: CodexChannel, threadId: string): Promise<void> {
   let off = () => {};
   const updated = new Promise<JsonRecord>((resolve, reject) => {
     const timer = setTimeout(() => { off(); reject(new Error("Codex did not confirm the selected approval mode; nothing was sent")); }, SETTINGS_TIMEOUT_MS);
@@ -94,10 +110,23 @@ export async function applyCodexApproval(approval: CodexApproval, codex: CodexCh
   try { await codex.request("thread/settings/update", { threadId, ...approval.settings }); }
   catch (error) {
     off();
-    // Typically a thread another client loaded before Cohub defined its read-only profile there.
-    throw new Error(`Codex refused the selected approval mode (${error instanceof Error ? error.message : String(error)}); if this conversation is open in another Codex client, close it there and retry`);
+    throw new Error(`Codex refused the selected approval mode: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (!confirms(await updated, approval)) throw new Error("Codex did not confirm the selected approval mode; nothing was sent");
+}
+
+const UNLOAD_TIMEOUT_MS = 15_000;
+
+/** Wait until no client holds the thread, so the next resume applies Cohub's thread config. */
+export async function waitForUnload(codex: CodexChannel, threadId: string): Promise<void> {
+  await codex.request("thread/unsubscribe", { threadId });
+  const deadline = Date.now() + UNLOAD_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const loaded = await codex.request("thread/loaded/list", {});
+    if (!(Array.isArray(loaded.data) && loaded.data.includes(threadId))) return;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error("This Codex conversation is open in another Codex client; close it there to change its approval mode, then retry");
 }
 
 const text = (value: unknown) => typeof value === "string" ? value : "";

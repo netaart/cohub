@@ -251,6 +251,20 @@ test("Fast follows to models that offer it and restores from the request", () =>
 		resolveLocalModelFromTurns([sent], "codex")?.serviceTier,
 		"priority",
 	);
+	// A request for the Harness default still restores its tier, without naming a model.
+	const defaultRequest = {
+		...sent,
+		meta: { harness: "codex", requestedServiceTier: "priority" },
+	};
+	const restored = resolveLocalModelFromTurns([defaultRequest], "codex");
+	assert.deepEqual(restored, { serviceTier: "priority" });
+	assert.deepEqual(resolveLocalModel(fastCatalog, restored), {
+		provider: "openai",
+		id: "default",
+		name: "Default model",
+		thinkingLevel: "medium",
+		serviceTier: "priority",
+	});
 });
 
 test("the approval mode restores from the last Turn that chose one", () => {

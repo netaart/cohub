@@ -23,6 +23,16 @@ export type LocalModelSelection = {
 	serviceTier?: string;
 };
 
+/** A restored request; without a model the Harness default runs. */
+export type LocalModelRequest =
+	| LocalModelSelection
+	| {
+			id?: undefined;
+			provider?: undefined;
+			thinkingLevel?: undefined;
+			serviceTier?: string;
+	  };
+
 /** The tier the Fast switch selects (Codex `priority`); models without it show no switch. */
 export const FAST_SERVICE_TIER = "priority";
 
@@ -74,13 +84,14 @@ export function toLocalModelCatalog(
  */
 export function resolveLocalModel(
 	models: RuntimeCapabilities["models"],
-	requested: LocalModelSelection | null,
+	requested: LocalModelRequest | null,
 ): LocalModelSelection | null {
+	const selection = requested?.id !== undefined ? requested : null;
 	const match =
-		requested &&
+		selection &&
 		models.find(
 			(model) =>
-				model.provider === requested.provider && model.id === requested.id,
+				model.provider === selection.provider && model.id === selection.id,
 		);
 	const model = match ?? models.find((entry) => entry.isDefault);
 	if (!model) return null;
@@ -89,7 +100,7 @@ export function resolveLocalModel(
 		getSupportedThinkingLevels(item).length > 1
 			? resolveCandidateThinkingLevel(
 					item,
-					match ? requested?.thinkingLevel : null,
+					match ? selection?.thinkingLevel : null,
 				)
 			: undefined;
 	const serviceTier = model.serviceTiers?.some(

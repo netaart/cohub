@@ -83,6 +83,11 @@ import type { TimelineItem } from "$lib/session-tree";
 import { createTurnTimelineBuilder } from "$lib/session-turn-render";
 import type { NewChatComposerApplyPayload } from "$lib/space-config";
 import { materializeSpaceEntries } from "$lib/space-upload";
+import {
+	approvalChoiceKey,
+	readApprovalChoice,
+	writeApprovalChoice,
+} from "$lib/stores/approval-choices";
 import { authStore } from "$lib/stores/auth.svelte";
 import {
 	billingConversion,
@@ -401,23 +406,26 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const models = runtimeCatalog?.capabilities?.models.filter(
 			(model) => model.harness === composerHarness,
 		);
-		return models ? resolveLocalModel(models, requested) : requested;
+		if (models) return resolveLocalModel(models, requested);
+		return requested?.id !== undefined ? requested : null;
 	});
 	// Unsent choices only: once sent, the Turn's own record is the source, so other clients' choices show.
-	let approvalModesBySession = $state<Record<string, ApprovalMode>>({});
-	const approvalSelectionKey = $derived(
-		`${harnessSelectionKey}:${composerHarness}`,
+	let approvalChoices = $state<Record<string, ApprovalMode | null>>({});
+	const approvalChoiceStorageKey = $derived(
+		approvalChoiceKey(spaceId, activeSessionId, composerHarness),
 	);
 	const approvalModes = $derived(
 		composerHarness === "cohub"
 			? []
 			: (runtimeCatalog?.capabilities?.approvalModes?.[composerHarness] ?? []),
 	);
+	// Kept even when the Runtime stops offering it: sending then fails instead of dropping a limit.
 	const approvalMode = $derived(
 		composerHarness === "cohub"
 			? null
-			: (approvalModesBySession[approvalSelectionKey] ??
-					resolveApprovalModeFromTurns(composerAgentTurns, composerHarness)),
+			: (approvalChoices[approvalChoiceStorageKey] ??
+					readApprovalChoice(approvalChoiceStorageKey)) ||
+					resolveApprovalModeFromTurns(composerAgentTurns, composerHarness),
 	);
 	async function loadRuntimeCatalog() {
 		const targetSpaceId = spaceId;
@@ -3034,13 +3042,21 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			return;
 		}
 		const local = !isNote && harness !== "cohub";
-		const sentApprovalMode = local ? approvalMode : null;
-		// An approval mode the Runtime cannot enforce must not fall back to its defaults.
-		if (sentApprovalMode && !approvalModes.includes(sentApprovalMode)) {
+		const chosenApprovalMode = local ? approvalMode : null;
+		// Only local settings may run without the Runtime enforcing the mode: they are its defaults.
+		if (
+			chosenApprovalMode &&
+			chosenApprovalMode !== "inherit" &&
+			!approvalModes.includes(chosenApprovalMode)
+		) {
 			setComposerError(m.runtime_approval_unsupported());
 			return;
 		}
-		const sentApprovalKey = approvalSelectionKey;
+		const sentApprovalMode =
+			chosenApprovalMode && approvalModes.includes(chosenApprovalMode)
+				? chosenApprovalMode
+				: null;
+		const sentApprovalKey = approvalChoiceStorageKey;
 		const serviceTier = local ? localModel?.serviceTier : undefined;
 		composer.sending = true;
 		const model = isNote
@@ -3347,10 +3363,11 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			}
 			if (
 				sentApprovalMode &&
-				approvalModesBySession[sentApprovalKey] === sentApprovalMode
+				(approvalChoices[sentApprovalKey] ??
+					readApprovalChoice(sentApprovalKey)) === sentApprovalMode
 			) {
-				const { [sentApprovalKey]: _sent, ...unsent } = approvalModesBySession;
-				approvalModesBySession = unsent;
+				writeApprovalChoice(sentApprovalKey, null);
+				approvalChoices = { ...approvalChoices, [sentApprovalKey]: null };
 			}
 			// The server accepted the prompt even if this host moved elsewhere.
 			// Invalidate before the UI-only early return so Recent revalidates later.
@@ -4640,9 +4657,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			return approvalMode;
 		},
 		setApprovalMode(mode: ApprovalMode) {
-			approvalModesBySession = {
-				...approvalModesBySession,
-				[approvalSelectionKey]: mode,
+			writeApprovalChoice(approvalChoiceStorageKey, mode);
+			approvalChoices = {
+				...approvalChoices,
+				[approvalChoiceStorageKey]: mode,
 			};
 		},
 		setLocalModel(model: LocalModelSelection) {

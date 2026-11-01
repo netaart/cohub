@@ -5,14 +5,14 @@ import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { codexModelCatalog } from "../model-catalog.js";
 import { describeError } from "../../network-error.js";
 import type { Executor } from "../native/execution.js";
-import { CODEX_UNLOAD_DELAY_SECS, openPrivateServer, resumeThread, type CodexChannel } from "../native/codex-link.js";
+import { CODEX_UNLOAD_DELAY_SECS, openPrivateServer, resumeThread, runningSharedVersion, type CodexChannel } from "../native/codex-link.js";
 import { ArchiveNotRestorableError, copyNativeArchive } from "../native/archive.js";
 import {
   codexArchivedSessionsDirectory, codexRolloutBytes, codexRolloutIdOf, codexSessionsDirectory, ensurePlainCodexRollout, readFirstRecord, readNativeTranscript,
 } from "../native/transcript.js";
 import { codexTranslator } from "../native/translate.js";
-import { harnessVersion } from "../native/version.js";
-import { applyCodexApproval, CODEX_APPROVAL_CONFIG, codexApprovalMode, codexApprovalModes, resolveCodexApproval } from "./codex-approval.js";
+import { atLeast, harnessVersion } from "../native/version.js";
+import { applyCodexApproval, CODEX_APPROVAL_CONFIG, codexApprovalMode, codexApprovalModes, resolveCodexApproval, waitForUnload } from "./codex-approval.js";
 import { array, closeHost, harnessCommand, inlineImage, text, turnEnvironment, watchHost } from "./process.js";
 import type { HarnessRun, HarnessTurn, LocalHarnessAdapter, ThreadKind } from "./types.js";
 
@@ -85,7 +85,12 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
       session = { ...session, nativeSessionId: threadId, path: thread.path };
       executor.ingest.adopt(session, input.sessionId);
     }
-    if (approval) await applyCodexApproval(approval, codex, threadId, opened);
+    if (approval) {
+      await applyCodexApproval(approval, codex, threadId, opened, async () => {
+        await waitForUnload(codex, threadId);
+        return await resumeThread(codex, { ...existing, threadId, path: thread.path });
+      });
+    }
     const translator = codexTranslator(turn.emit, { provider: text(opened.modelProvider) || "codex", model: text(opened.model) || input.model || null });
     const content = await codexPrompt(input);
     signal.throwIfAborted();
@@ -176,7 +181,13 @@ export const codexHarness: LocalHarnessAdapter = {
       return codexModelCatalog(config, entries);
     } finally { await rpc.close(); }
   },
-  approvalModes: async (executable) => codexApprovalModes(await harnessVersion(executable)),
+  async approvalModes(executable) {
+    const [binary, running] = await Promise.all([harnessVersion(executable), runningSharedVersion()]);
+    // A failed probe keeps the previous modes; Turns still check the server they run on.
+    if (!binary) throw new Error("Codex did not report its version");
+    // Turns use the binary or, when sharing, a server already running: offer only what both support.
+    return codexApprovalModes(running && !atLeast(running, binary) ? running : binary);
+  },
   run: runCodex,
   session: {
     path: (nativeSessionId) => codexSessionPath(nativeSessionId),

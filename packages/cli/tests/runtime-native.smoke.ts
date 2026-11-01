@@ -351,7 +351,8 @@ try {
         assert.deepEqual(await codexHarness.approvalModes?.(codexBinary), ["inherit", "auto", "full_access", "read_only"]);
         const fast = (await codexHarness.models(codexBinary, project)).find((entry) => entry.serviceTiers?.some((tier) => tier.id === "priority"));
         const marker = join(project, "approval-marker");
-        let previous = turn("codex", "start", { approvalMode: "full_access" });
+        // Read-only right after a Turn without a choice reopens the loaded thread with Cohub's profile.
+        let previous = turn("codex", "start");
         await dispatch(native, server, previous, "codex-approval-0");
         const step = async (label: string, options: Partial<RuntimeTurnInput>, prompt = `run[touch ${marker}]`) => {
           await rm(marker, { force: true });

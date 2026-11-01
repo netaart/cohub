@@ -403,6 +403,7 @@ export const submitSessionPrompt = async (
   if (input.approvalMode != null && !isApprovalMode(input.approvalMode)) throw new Error("approvalMode must be one of: inherit, auto, full_access, read_only");
   if (input.serviceTier != null && !runtimeServiceTierIdSchema.safeParse(input.serviceTier).success) throw new Error("serviceTier must be a non-empty string of at most 100 characters");
   if (!localHarness && (input.approvalMode != null || input.serviceTier != null)) throw new Error("approvalMode and serviceTier require a local Harness");
+  if (input.accessMode === "read_only" && input.approvalMode != null && input.approvalMode !== "read_only") throw new Error("approvalMode conflicts with read-only access");
   if (localHarness) {
     assertHarnessAccess(input.harness, input.accessMode);
     if (input.env && Object.keys(input.env).length) throw new Error("Local Harness uses its native environment; per-turn environment overrides are unavailable");

@@ -63,7 +63,7 @@ const approvalLabel = (mode: ApprovalMode) =>
 		full_access: m.runtime_approval_full_access,
 		read_only: m.runtime_approval_read_only,
 	})[mode]({}, { locale });
-// A recorded mode stays visible even if the Runtime stops offering it, so sending can explain why it fails.
+// A recorded mode stays visible after the Runtime stops offering it, so local settings can replace it.
 const showApproval = $derived(
 	local &&
 		Boolean(onapprovalchange) &&
@@ -152,7 +152,7 @@ function navigate(event: KeyboardEvent) {
 			<p class="menu-heading">{m.runtime_approval_mode({}, { locale })}</p>
 			{#each APPROVAL_MODES as mode}
 				{@const Icon = approvalIcons[mode]}
-				<button type="button" class="harness-option compact" role="menuitemradio" aria-checked={selectedApproval === mode} disabled={!approvalModes.includes(mode)} onclick={() => { onapprovalchange(mode); close(); }}>
+				<button type="button" class="harness-option compact" role="menuitemradio" aria-checked={selectedApproval === mode} disabled={mode !== "inherit" && !approvalModes.includes(mode)} onclick={() => { onapprovalchange(mode); close(); }}>
 					<span class="approval-icon"><Icon class="h-4 w-4" /></span>
 					<span class="option-content"><span class="option-title">{approvalLabel(mode)}</span></span>
 					{#if selectedApproval === mode}<Check class="h-4 w-4 shrink-0 text-brand" />{/if}
