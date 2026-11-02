@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { LocalHarness, RuntimeExecutionEvent, RuntimeTurnInput } from "@neta-art/cohub";
+import type { ApprovalDecision, LocalHarness, RuntimeApproval, RuntimeExecutionEvent, RuntimeTurnInput } from "@neta-art/cohub";
 import { resolveRuntimeThinkingLevel } from "@cohub/protocol";
 import { RuntimeArchiveStore } from "../src/runtime/archive-store.js";
 import { RuntimeDiagnostics } from "../src/runtime/diagnostics.js";
@@ -48,7 +48,7 @@ async function streamJsonTurns(harness: Extract<LocalHarness, "claude" | "workbu
     return native;
   };
   const native = runtime(join(root, "state"));
-  type TurnOptions = { access?: RuntimeTurnInput["accessMode"]; archive?: RuntimeTurnInput["context"]["archive"]; prompt?: string; session?: string } & Pick<RuntimeTurnInput, "model" | "thinkingLevel">;
+  type TurnOptions = { access?: RuntimeTurnInput["accessMode"]; archive?: RuntimeTurnInput["context"]["archive"]; prompt?: string; session?: string } & Pick<RuntimeTurnInput, "model" | "thinkingLevel" | "approvalMode">;
   const turn = (throughTurnId: string, { access = "full_access", archive, prompt = "continue", session = sessionId, ...model }: TurnOptions = {}): RuntimeTurnInput => {
     const turnId = randomUUID();
     return {
@@ -109,6 +109,27 @@ async function streamJsonTurns(harness: Extract<LocalHarness, "claude" | "workbu
     const stopped = await executeTurn(cold.executor, turn(randomUUID(), { session: randomUUID(), prompt: "wait" }), (event) => { if (event.type === "text.delta") stop.abort(); }, stop.signal, null);
     assert.deepEqual([stopped.event.message.stopReason, stopped.event.message.errorMessage], ["aborted", null]);
     assert.deepEqual(stopped.event.message.content, [{ type: "text", text: "partial reply" }]);
+
+    if (harness !== "claude") return;
+    // Claude Code's permission prompts become cards; other tools and read-only Turns are denied without one.
+    const cards: RuntimeApproval[] = [];
+    const decisions: ApprovalDecision[] = ["accept", "decline"];
+    cold.executor.approvals.connect(async (event) => {
+      if (event.type !== "approval") return;
+      cards.push(event.approval);
+      cold.executor.approvals.decide({ sessionId: event.sessionId, turnId: event.turnId, approvalId: event.approval.id, decision: decisions.shift() ?? "decline" });
+    });
+    const reply = async (prompt: string, options: TurnOptions = {}) => {
+      const run = await executeTurn(cold.executor, turn(randomUUID(), { session: randomUUID(), prompt, ...options }), () => {}, new AbortController().signal, null);
+      return run.event.message.content;
+    };
+    assert.deepEqual(await reply("approve:Bash"), [{ type: "text", text: "allow stdio acceptEdits" }]);
+    assert.deepEqual(await reply("approve:Bash"), [{ type: "text", text: "deny stdio acceptEdits" }]);
+    assert.deepEqual(await reply("approve:WebFetch"), [{ type: "text", text: "deny stdio acceptEdits" }]);
+    assert.deepEqual(await reply("approve:Bash", { access: "read_only" }), [{ type: "text", text: "deny null plan" }]);
+    assert.deepEqual(cards.map((card) => [card.kind, card.command, card.reason, card.decisions]), Array(2).fill(["command", "make clean", "Clean the build", ["accept", "accept_for_session", "decline"]]));
+    assert.deepEqual(await reply("continue", { approvalMode: "full_access" }), [{ type: "text", text: "no history bypassPermissions" }]);
+    assert.deepEqual(await reply("continue", { approvalMode: "inherit" }), [{ type: "text", text: "no history null" }]);
   } finally {
     for (const { native, diagnostics } of runtimes) { await native.close(AbortSignal.timeout(2_000)); await diagnostics.close(); }
     for (const key of ENV) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }
@@ -145,6 +166,9 @@ test("discovery checks the CLI, lists models with a default and skips unusable h
     assert.deepEqual(failures, ["claude"]);
     const aliases = await discoverHarnesses(["claude"], { claude: fixture }, tmpdir());
     assert.deepEqual(aliases.models.map((model) => [model.id, model.isDefault ?? false, model.thinkingLevelMap?.minimal]), [["default", true, null], ["opus", false, null], ["sonnet", false, null], ["haiku", false, undefined]]);
+    assert.deepEqual([claude.approvalModes, catalog.approvalModes], [{ claude: ["inherit", "full_access", "read_only"] }, undefined]);
+    process.env.STREAM_JSON_FIXTURE_HELP = "no-prompt-tool";
+    assert.equal((await refreshHarnesses(claude, { claude: fixture }, tmpdir(), () => {})).approvalModes, undefined);
     process.env.STREAM_JSON_FIXTURE_HELP = "legacy";
     await assert.rejects(discoverHarnesses(["claude"], { claude: fixture }, tmpdir()), /missing --tools/);
     process.env.STREAM_JSON_FIXTURE_HELP = "no-models";

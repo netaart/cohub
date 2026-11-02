@@ -20,7 +20,7 @@ const FLUSH_TIMEOUT_MS = 10_000;
  * Plan mode still honours the user's allow rules, so a read-only Turn also gets only these
  * built-in tools and no configured MCP servers.
  */
-const READ_ONLY_TOOLS = "Read,Glob,Grep";
+export const READ_ONLY_ARGS = ["--permission-mode", "plan", "--tools", "Read,Glob,Grep", "--strict-mcp-config"];
 /** Flags every Turn relies on; an executable whose help lacks one is an older or unrelated CLI. */
 const REQUIRED_FLAGS = ["--input-format", "--output-format", "--include-partial-messages", "--session-id", "--resume", "--permission-mode", "--tools", "--strict-mcp-config", "--model", "--effort"];
 /** Runs without `--model`, so the CLI's own configuration and account default apply. */
@@ -39,6 +39,15 @@ export type StreamJsonProfile = {
   effortLevels: readonly string[];
   /** The CLI keeps a stream-json prompt's `uuid` as its record id, so the file names the Cohub Turn. */
   promptUuid: boolean;
+  /** Without it, a Turn with full access runs `acceptEdits` and every permission prompt is denied. */
+  approvals?(executor: Executor, input: RuntimeTurnInput): Promise<StreamJsonApprovals | null>;
+};
+
+export type StreamJsonApprovals = {
+  /** Replaces `--permission-mode acceptEdits`. */
+  args: string[];
+  /** Answers a `can_use_tool` request; absent, it is denied. */
+  answer?(request: JsonRecord, signal: AbortSignal): Promise<JsonRecord>;
 };
 
 /** The CLI's help, after checking it offers every flag a Turn uses. */
@@ -204,8 +213,8 @@ function streamJsonTranslator(emit: (event: RuntimeExecutionEvent) => void, iden
 }
 
 /**
- * One Turn per process. Unattended execution never grants an approval: workspace edits follow
- * `acceptEdits` and every other tool follows the user's own permission rules.
+ * One Turn per process. Cohub grants a permission prompt only through the profile's approvals;
+ * otherwise workspace edits follow `acceptEdits` and every other tool the user's own rules.
  */
 export async function runStreamJson(profile: StreamJsonProfile, executor: Executor, turn: HarnessTurn): Promise<HarnessRun> {
   const { input, signal, context } = turn;
@@ -218,12 +227,13 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
   // A retried Turn whose prompt is already in the file would be dropped, so it continues from history.
   if (profile.promptUuid && prepared.resume === "native" && await holdsPrompt(prepared.session.path, input.turnId, signal)) prepared = await prepare(() => false);
   let session = prepared.session;
+  const approvals = await profile.approvals?.(executor, input) ?? null;
   // Cohub has already fitted the level to the levels the model declares; these CLIs have no `off` effort.
   const effort = isModelThinkingLevel(input.thinkingLevel) && input.thinkingLevel !== "off" ? input.thinkingLevel : null;
   const args = [
     "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     ...(prepared.resume === "new" ? ["--session-id", session.nativeSessionId] : ["--resume", session.nativeSessionId]),
-    ...(input.accessMode === "read_only" ? ["--permission-mode", "plan", "--tools", READ_ONLY_TOOLS, "--strict-mcp-config"] : ["--permission-mode", "acceptEdits"]),
+    ...(input.accessMode === "read_only" ? READ_ONLY_ARGS : approvals?.args ?? ["--permission-mode", "acceptEdits"]),
     ...(input.model && input.model !== DEFAULT_MODEL ? ["--model", input.model] : []),
     ...(effort ? ["--effort", effort] : []),
   ];
@@ -234,6 +244,8 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
   const translator = streamJsonTranslator(turn.emit, { provider: input.provider || profile.provider, model: input.model && input.model !== DEFAULT_MODEL ? input.model : null });
   let message: RuntimeMessage = { ordinal: 0, content: [] };
   let begun = false;
+  // Open approvals close with the process, not only when the Turn is stopped.
+  const approvalScope = new AbortController();
   try {
     await turn.started(session);
     begun = true;
@@ -244,13 +256,24 @@ export async function runStreamJson(profile: StreamJsonProfile, executor: Execut
         if (done) return;
         done = true;
         off(); offFailure(); signal.removeEventListener("abort", abort); clearTimeout(escalation);
+        approvalScope.abort();
         if (error) reject(error); else resolve();
       };
       const offFailure = host.onFailure((error) => finish(error));
       const off = host.onEvent((event) => {
-        // An unattended Cohub Turn never grants a permission request.
         if (event.type === "control_request") {
-          try { host.write({ type: "control_response", response: { subtype: "success", request_id: event.request_id, response: { behavior: "deny", message: "Approval requires an interactive local client" } } }); }
+          const respond = (response: JsonRecord) => host.write({ type: "control_response", response: { subtype: "success", request_id: event.request_id, response } });
+          const request = record(event.request);
+          if (approvals?.answer && request.subtype === "can_use_tool" && input.accessMode !== "read_only") {
+            void approvals.answer(request, AbortSignal.any([signal, approvalScope.signal]))
+              .catch((): JsonRecord => ({ behavior: "deny", message: "Approval failed" }))
+              .then((response) => {
+                if (done) return;
+                try { respond(response); } catch (error) { finish(error); }
+              });
+            return;
+          }
+          try { respond({ behavior: "deny", message: "Approval requires an interactive local client" }); }
           catch (error) { finish(error); }
           return;
         }

@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import type { ContentBlock, NativeProjection } from "@neta-art/cohub";
+import type { ApprovalMode, ContentBlock, NativeProjection } from "@neta-art/cohub";
 import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { copyNativeArchive } from "../native/archive.js";
 import { projectChainedSession, projectionMeta, projectionToolId, rebindSessionId } from "./chained-projection.js";
 import { chainedSessionHeader, projectDirectory, projectTranscript } from "./chained-transcript.js";
+import { answerClaudeApproval, claudeApprovalMode, claudeApprovalModes, claudePermissionMode, SessionGrants } from "./claude-approval.js";
 import { CLAUDE_REPLY_ENDED, readClaudeTranscript } from "./claude-transcript.js";
 import { array, harnessCommand, text } from "./process.js";
-import { DEFAULT_MODEL, runStreamJson, streamJsonHelp, streamJsonModel, type StreamJsonProfile } from "./stream-json.js";
+import { DEFAULT_MODEL, READ_ONLY_ARGS, runStreamJson, streamJsonHelp, streamJsonModel, type StreamJsonProfile } from "./stream-json.js";
 import type { HarnessModel, LocalHarnessAdapter } from "./types.js";
 
 const MAX_PROJECT_NAME = 200;
@@ -31,6 +32,29 @@ const projectsRoot = () => join(dataRoot(), "projects");
 /** Every subdirectory's project name starts with this; a hashed long name keeps its first 200 units. */
 const projectPrefix = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, "-").slice(0, MAX_PROJECT_NAME);
 
+const grants = new SessionGrants();
+/** Probed once per executable and again with each catalog refresh; a failed probe is retried. */
+const supportedModes = new Map<string, Promise<ApprovalMode[]>>();
+
+/**
+ * `--permission-prompt-tool` is hidden from `--help`, so the CLI must accept it to answer `initialize`.
+ * A CLI that rejects it offers no modes; any other failure is retried.
+ */
+function probeApprovalModes(executable: string, cwd: string): Promise<ApprovalMode[]> {
+  const probe = (async () => {
+    const help = await streamJsonHelp(profile, executable, cwd);
+    try { await claudeInitialize(executable, cwd, ["--permission-prompt-tool", "stdio"]); }
+    catch (error) {
+      if (error instanceof Error && /unknown option '--permission-prompt-tool'/.test(error.message)) return [];
+      throw error;
+    }
+    return claudeApprovalModes(help);
+  })();
+  supportedModes.set(executable, probe);
+  probe.catch(() => { if (supportedModes.get(executable) === probe) supportedModes.delete(executable); });
+  return probe;
+}
+
 const profile: StreamJsonProfile = {
   harness: "claude",
   label: "Claude Code",
@@ -40,6 +64,17 @@ const profile: StreamJsonProfile = {
   projectDirectory: claudeProjectDirectory,
   effortLevels: ["low", "medium", "high", "xhigh", "max"],
   promptUuid: true,
+  async approvals(executor, input) {
+    const executable = executor.executables.claude || profile.binary;
+    const modes = await (supportedModes.get(executable) ?? probeApprovalModes(executable, executor.cwd)).catch((): ApprovalMode[] => []);
+    const mode = claudeApprovalMode(input, modes);
+    if (mode === "read_only") return { args: READ_ONLY_ARGS };
+    const permission = claudePermissionMode(mode);
+    return {
+      args: [...(modes.length ? ["--permission-prompt-tool", "stdio"] : []), ...(permission ? ["--permission-mode", permission] : [])],
+      ...(modes.length ? { answer: (request, signal) => answerClaudeApproval(request, input, executor.approvals, grants, signal) } : {}),
+    };
+  },
 };
 
 function anthropicBlock(block: ContentBlock): Record<string, unknown> | null {
@@ -61,8 +96,8 @@ function withAssistantIds(projection: NativeProjection): NativeProjection {
 }
 
 /** Claude Code's own `/model` list (what the SDK's `supportedModels()` reads), gateway-discovered models included. */
-async function claudeInitialize(executable: string, cwd: string): Promise<JsonRecord> {
-  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config"];
+async function claudeInitialize(executable: string, cwd: string, extra: string[] = []): Promise<JsonRecord> {
+  const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config", ...extra];
   const host = new JsonRpcProcess(...harnessCommand(executable, args, cwd), cwd, "stream");
   const requestId = randomUUID();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -123,6 +158,7 @@ export const claudeHarness: LocalHarnessAdapter = {
       streamJsonModel(profile, "haiku", "Claude Haiku", { reasoning: false }),
     ];
   },
+  approvalModes: probeApprovalModes,
   run: (executor, turn) => runStreamJson(profile, executor, turn),
   session: {
     path: (nativeSessionId, cwd) => join(claudeProjectDirectory(cwd), `${nativeSessionId}.jsonl`),

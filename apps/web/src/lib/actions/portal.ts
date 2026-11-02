@@ -20,6 +20,11 @@ type FloatOptions = {
 	width?: number;
 	/** z-index for the floated panel. */
 	zIndex?: number;
+	/**
+	 * right-start: with no room on either side, stack below (or above) the anchor instead of covering it.
+	 * On narrow screens "above" can overlap the menu the anchor sits in; staying in the viewport wins.
+	 */
+	stackWhenCramped?: boolean;
 };
 
 function isUsableAnchor(el: HTMLElement | null | undefined): el is HTMLElement {
@@ -91,6 +96,14 @@ export function floatNear(
 			left = rect.right + gap;
 			if (left + panelW > window.innerWidth - pad) {
 				left = rect.left - gap - panelW;
+			}
+			if (opts.stackWhenCramped && left < pad) {
+				left = rect.right - panelW;
+				const below = rect.bottom + gap;
+				top =
+					below + panelH <= window.innerHeight - pad
+						? below
+						: rect.top - gap - panelH;
 			}
 		}
 
