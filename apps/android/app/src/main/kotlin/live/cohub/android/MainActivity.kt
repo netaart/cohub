@@ -5,6 +5,8 @@ import android.app.AppOpsManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Color
+import android.media.projection.MediaProjectionConfig
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -52,11 +54,13 @@ import live.cohub.android.host.HostProtocol
 import live.cohub.android.host.IncomingShare
 import live.cohub.android.host.LastPage
 import live.cohub.android.host.LauncherShortcuts
+import live.cohub.android.host.ScreenCaptureGrant
 import live.cohub.android.host.SurfaceListener
 import live.cohub.android.host.WebOrigin
 import live.cohub.android.host.WebSurface
 import live.cohub.android.host.WebWarmup
 import live.cohub.android.runtime.DeviceRuntime
+import live.cohub.android.runtime.RuntimeService
 import live.cohub.android.runtime.toJson
 import live.cohub.android.ui.ShellAppearance
 import live.cohub.android.ui.SurfaceContainer
@@ -75,6 +79,8 @@ class MainActivity : ComponentActivity(), HostActions {
     private lateinit var mediaCapture: MediaCapture
     private lateinit var customTabs: ActivityResultLauncher<Intent>
     private lateinit var allFilesAccess: ActivityResultLauncher<Intent>
+    private lateinit var screenCapture: ActivityResultLauncher<Intent>
+    private var pendingCapture: CompletableDeferred<ScreenCaptureGrant?>? = null
     private lateinit var hostPermissions: HostPermissions
     private var incomingShare: IncomingShare? = null
     private var takenShare: IncomingShare? = null
@@ -169,6 +175,9 @@ class MainActivity : ComponentActivity(), HostActions {
         customTabs = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
         allFilesAccess = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             pendingResult?.complete(Unit)
+        }
+        screenCapture = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            pendingCapture?.complete(result.data?.takeIf { result.resultCode == RESULT_OK }?.let { ScreenCaptureGrant(result.resultCode, it) })
         }
         hostPermissions = HostPermissions(this, runtime.takeIf { it.available }?.let { it::hasStorageAccess }, ::prepareRuntime)
 
@@ -431,6 +440,26 @@ class MainActivity : ComponentActivity(), HostActions {
     override fun openPhoneControlSettings(intent: Intent): Boolean = runCatching {
         startActivity(if (isInMultiWindowMode) intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT) else intent)
     }.isSuccess
+
+    override suspend fun requestScreenCapture(): ScreenCaptureGrant? = preparing.withLock {
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        // The whole screen: one app alone would move every input off target.
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            manager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
+        } else {
+            manager.createScreenCaptureIntent()
+        }
+        val result = CompletableDeferred<ScreenCaptureGrant?>()
+        pendingCapture = result
+        try {
+            screenCapture.launch(intent)
+            result.await()
+        } finally {
+            pendingCapture = null
+        }
+    }
+
+    override fun startSharing(spaceId: String, grant: ScreenCaptureGrant) = RuntimeService.share(this, spaceId, grant)
 
     override fun openControlSettings(): Boolean = runCatching {
         if (isControlRestrictionAcknowledged()) {

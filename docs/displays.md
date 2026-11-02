@@ -170,6 +170,16 @@ no computer.
   moves to the phone's screen; plans refuse with `preempted` until **Hand back**). It steps aside
   inside Cohub unless a person is needed, and shows the same `activity`, `held` and `handover` the
   web sees, which offers **Stop** and **Hand back** too.
+- **Without phone control** (no Wi-Fi to start it, or never set up), the phone's own screen can still be
+  shared, the way it was before the helper: `display.share` asks for screen recording each time
+  (the whole screen, so input lands where it is aimed), the foreground service takes the media
+  projection type only while it lasts, and input goes through the accessibility service, which the
+  person turns on: fingers as gestures streamed in continued strokes, back, home and recents as global
+  actions, Enter, deletion and characters as edits of the focused field. One projection gives one
+  virtual display, so the newest stream or still holds it and change detection runs only when
+  nothing else does (window changes still report). There is no agent screen, no app launching and
+  no pasting; a share recorded stays so until it stops, even if the helper starts meanwhile.
+  `ScreenSource` and `Injector` are the two seams; everything else is shared.
 - Host bridge: `display.status` (with `phoneControl`), `display.setup`, `display.pair`, `display.share`,
   `display.stop`, `display.openControlSettings`, and the `display.changed` event (capability
   `display`).

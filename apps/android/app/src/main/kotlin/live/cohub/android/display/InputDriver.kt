@@ -18,7 +18,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
-import live.cohub.android.helper.ICohubHelper
 
 sealed interface InputEvent {
     val at: Long?
@@ -57,7 +56,7 @@ sealed interface InputEvent {
 
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 internal class InputDriver(
-    private val helper: ICohubHelper,
+    private val injector: Injector,
     private val screen: Screen,
     private val elements: ElementTree,
     private val service: () -> AccessibilityService?,
@@ -129,7 +128,7 @@ internal class InputDriver(
     private fun point(x: Float, y: Float) = floatArrayOf(x * (screen.size.width - 1).coerceAtLeast(0), y * (screen.size.height - 1).coerceAtLeast(0))
 
     private fun touch(action: Int, x: Float, y: Float) {
-        if (!helper.touch(screen.displayId, action, x, y, downTime)) throw DisplayError(DisplayError.FAILED, "the phone refused the touch")
+        injector.touch(action, x, y, downTime)
         finger = if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) null else floatArrayOf(x, y)
     }
 
@@ -176,7 +175,7 @@ internal class InputDriver(
     }
 
     private fun send(action: Int, code: Int, metaState: Int) {
-        if (!helper.key(screen.displayId, action, code, metaState)) throw DisplayError(DisplayError.FAILED, "the phone refused the key")
+        injector.key(action, code, metaState)
     }
 
     private suspend fun type(text: String) {
@@ -213,8 +212,7 @@ internal class InputDriver(
         if (!node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         delay(FOCUS_MS)
         requireFocus(node)
-        chord(KeyEvent.KEYCODE_A)
-        paste(node, text)
+        paste(node, text, replace = true)
         if (!holds(node, text)) throw DisplayError(DisplayError.FAILED, "the field refused text")
     }
 
@@ -238,18 +236,15 @@ internal class InputDriver(
         if (!node.refresh() || !node.isFocused) throw DisplayError(DisplayError.FAILED, "the field does not have focus")
     }
 
-    private suspend fun paste(node: AccessibilityNodeInfo, text: String) = clipboard.withLock {
+    private suspend fun paste(node: AccessibilityNodeInfo, text: String, replace: Boolean = false) = clipboard.withLock {
         requireFocus(node)
-        val previous = try {
-            helper.putClip(text)
-        } catch (error: IllegalStateException) {
-            throw DisplayError(DisplayError.FAILED, error.message ?: "the phone refused the clipboard")
-        }
+        val previous = injector.putClip(text)
         try {
+            if (replace) chord(KeyEvent.KEYCODE_A)
             chord(KeyEvent.KEYCODE_V)
             delay(PASTE_MS)
         } finally {
-            runCatching { helper.restoreClip(previous, text) }
+            runCatching { injector.restoreClip(previous, text) }
         }
     }
 

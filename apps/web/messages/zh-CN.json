@@ -255,6 +255,8 @@
 	"runtime_displays": "屏幕",
 	"runtime_display_open": "查看",
 	"runtime_display_share": "共享屏幕",
+	"runtime_display_share_recording": "改为共享此屏幕",
+	"runtime_display_share_recording_hint": "没有手机操作时，Agent 直接操作你共享的这块屏幕，共享期间请先别用手机。每次共享 Android 都会询问，Cohub 还需要在无障碍中获得控制权限。",
 	"runtime_display_not_shared": "未共享",
 	"runtime_display_stop": "停止共享",
 	"runtime_display_allow_control": "允许控制",

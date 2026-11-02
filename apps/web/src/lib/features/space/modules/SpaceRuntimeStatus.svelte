@@ -513,15 +513,18 @@ $effect(() => {
 									<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(setupPhoneControl)}>{phoneSteps ? m.runtime_phone_control_open_settings({}, { locale }) : m.runtime_phone_control_setup({}, { locale })}</button>
 								{/if}
 							{/if}
-							{#if screen && phoneReady && !screen.control}
+							{#if screen && !screen.control && (phoneReady || sharingHere)}
 								<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(openDeviceControlSettings)}>{m.runtime_display_allow_control({}, { locale })}</button>
-								{#if !phoneControl}<p class="runtime-meta w-full">{hostPlatform() === "android" ? m.runtime_display_control_hint({}, { locale }) : m.runtime_display_control_hint_desktop({}, { locale })}</p>{/if}
+								{#if !phoneReady || !phoneControl}<p class="runtime-meta w-full">{hostPlatform() === "android" ? m.runtime_display_control_hint({}, { locale }) : m.runtime_display_control_hint_desktop({}, { locale })}</p>{/if}
 							{/if}
-							{#if screen && phoneReady}
+							{#if screen}
 								{#if sharingHere}
 									<button type="button" class="runtime-device-action" data-secondary="true" disabled={deviceBusy} onclick={() => void updateScreen(stopDeviceDisplay)}>{m.runtime_display_stop({}, { locale })}</button>
-								{:else}
+								{:else if phoneReady}
 									<button type="button" class="runtime-device-action" disabled={deviceBusy} onclick={() => void updateScreen(() => shareDeviceDisplay(spaceId))}>{m.runtime_display_share({}, { locale })}</button>
+								{:else}
+									<p class="runtime-meta w-full">{m.runtime_display_share_recording_hint({}, { locale })}</p>
+									<button type="button" class="runtime-device-action" data-secondary="true" disabled={deviceBusy} onclick={() => void updateScreen(() => shareDeviceDisplay(spaceId))}>{m.runtime_display_share_recording({}, { locale })}</button>
 								{/if}
 							{/if}
 							{#if confirmingStop}<p class="runtime-meta w-full">{m.runtime_device_unconfirmed({}, { locale })}</p>{/if}

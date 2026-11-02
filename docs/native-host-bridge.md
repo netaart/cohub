@@ -74,7 +74,7 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `navigation.interceptBack` | `navigation.back` | While enabled, system back emits `navigation.back` |
 | `shortcuts.push` | `shortcuts` | Launcher shortcut to an in-app path, ranked by recency |
 | `display.status` | `display` | The Space this screen is shared with, and whether control is on |
-| `display.share` | `display` | Asks for screen capture consent, then shares with a Space this device serves |
+| `display.share` | `display` | Shares with a Space this device serves; asks for screen capture consent where it needs it (Android without phone control, desktops) |
 | `display.stop` | `display` | Stops sharing; every stream ends |
 | `display.openControlSettings` | `display` | Opens Accessibility settings, where the user allows control |
 | `display.setup` | `display` | Android: starts phone control, or its pairing, and opens the Settings page the current step needs |

@@ -284,7 +284,13 @@ class HostBridge(
             val spaceId = requireSpaceId(params)
             val serving = requireRuntime().instances.value.any { it.spaceId == spaceId && isRunning(it.state) }
             if (!serving) throw IllegalStateException("This device does not serve that Space")
-            requireDisplay().share(spaceId).toJson()
+            val display = requireDisplay()
+            if (display.phone.helper.value != null) {
+                display.share(spaceId).toJson()
+            } else {
+                val grant = actions.requestScreenCapture() ?: throw CancellationSignal("Screen recording was not allowed")
+                display.awaitShare(spaceId) { actions.startSharing(spaceId, grant) }.toJson()
+            }
         }
 
         HostProtocol.Methods.DISPLAY_SETUP -> {
@@ -417,6 +423,8 @@ private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.
 /** Raised when the user or platform aborts a native surface; maps to `canceled`. */
 class CancellationSignal(message: String) : Exception(message)
 
+class ScreenCaptureGrant(val resultCode: Int, val data: Intent)
+
 /** Native effects the bridge may request; an interface keeps it testable. */
 interface HostActions {
     fun hostId(): String
@@ -440,6 +448,10 @@ interface HostActions {
     fun openControlSettings(): Boolean
 
     fun openPhoneControlSettings(intent: Intent): Boolean
+
+    suspend fun requestScreenCapture(): ScreenCaptureGrant?
+
+    fun startSharing(spaceId: String, grant: ScreenCaptureGrant)
 
     fun permissions(): HostPermissions
 

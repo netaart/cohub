@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.projection.MediaProjectionManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
@@ -14,6 +16,8 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +29,7 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import live.cohub.android.BuildConfig
@@ -33,6 +38,7 @@ import live.cohub.android.MainActivity
 import live.cohub.android.R
 import live.cohub.android.auth.Account
 import live.cohub.android.display.DisplayStatus
+import live.cohub.android.host.ScreenCaptureGrant
 import live.cohub.android.host.WebOrigin
 import java.io.File
 import java.util.UUID
@@ -70,10 +76,13 @@ class RuntimeService : Service() {
             }
         }
         createChannel()
-        if (!enterForeground()) {
+        val share = intent?.takeIf { it.action == ACTION_SHARE }?.let(ShareRequest::from)
+        val projecting = (share != null || app.display?.projecting == true) && enterForeground(projecting = true)
+        if (!projecting && !enterForeground()) {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (share != null) if (projecting) record(share) else app.display?.fail()
         if (watching == null) {
             getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(networkCallback)
             watching = scope.launch(Dispatchers.Main.immediate) {
@@ -84,17 +93,46 @@ class RuntimeService : Service() {
                 combine(runtime.instances, app.display?.status ?: flowOf(null)) { instances, display -> instances to display }
                     .collect { (instances, display) -> showNotification(instances, display) }
             }
+            scope.launch(Dispatchers.Main.immediate) {
+                app.display?.projectingChanges?.drop(1)?.collect { if (app.display?.projecting == false) enterForeground() }
+            }
         }
         return START_STICKY
     }
 
-    private fun enterForeground(): Boolean = try {
-        val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+    private fun enterForeground(projecting: Boolean = false): Boolean = try {
+        val types = when {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> 0
+            projecting -> ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            else -> ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        }
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification(app.runtime.instances.value, app.display?.status?.value), types)
         true
     } catch (error: RuntimeException) {
         Log.w(TAG, "Runtime could not enter the foreground", error)
         false
+    }
+
+    private fun record(share: ShareRequest) {
+        val display = app.display ?: return
+        val projection = runCatching { getSystemService(MediaProjectionManager::class.java).getMediaProjection(share.resultCode, share.data) }
+            .onFailure { Log.w(TAG, "Screen recording was not granted", it) }
+            .getOrNull()
+        val status = if (projection == null) null else display.share(share.spaceId, projection)
+        if (status?.sharedWith != share.spaceId) {
+            display.fail()
+            enterForeground()
+        }
+    }
+
+    private class ShareRequest(val spaceId: String, val resultCode: Int, val data: Intent) {
+        companion object {
+            fun from(intent: Intent): ShareRequest? {
+                val spaceId = intent.getStringExtra(EXTRA_SPACE_ID) ?: return null
+                val data = IntentCompat.getParcelableExtra(intent, EXTRA_DATA, Intent::class.java) ?: return null
+                return ShareRequest(spaceId, intent.getIntExtra(EXTRA_RESULT_CODE, 0), data)
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -237,5 +275,20 @@ class RuntimeService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val ACTION_STOP_ALL = "live.cohub.android.runtime.STOP_ALL"
         private const val ACTION_STOP_SHARING = "live.cohub.android.runtime.STOP_SHARING"
+        private const val ACTION_SHARE = "live.cohub.android.runtime.SHARE"
+        private const val EXTRA_SPACE_ID = "spaceId"
+        private const val EXTRA_RESULT_CODE = "resultCode"
+        private const val EXTRA_DATA = "data"
+
+        fun share(context: Context, spaceId: String, grant: ScreenCaptureGrant) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, RuntimeService::class.java)
+                    .setAction(ACTION_SHARE)
+                    .putExtra(EXTRA_SPACE_ID, spaceId)
+                    .putExtra(EXTRA_RESULT_CODE, grant.resultCode)
+                    .putExtra(EXTRA_DATA, grant.data),
+            )
+        }
     }
 }

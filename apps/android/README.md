@@ -39,12 +39,15 @@ app/src/main/kotlin/live/cohub/android/
   display/
     DeviceDisplay.kt         the phone's screens as Spaces see them: shared, and each Space's agent screen
     Screen.kt                one display through mirrors: stills, streams, change detection
+    ScreenSource.kt          where a screen's pixels come from: the helper, or screen recording
     ScreenEncoder.kt         hardware H.264 from a Surface, live bitrate and key frames
     DisplayProvider.kt       the display wire protocol on a per-Space private socket
     DisplayWire.kt           frames, mirroring apps/sandbox/display/wire.go
     ControlService.kt        AccessibilityService: controls, window changes, focus, the overlay's host
     ElementTree.kt           a display's windows as elements, the one in front first
     InputDriver.kt           touches and keys injected into one display, text through accessibility
+    Injector.kt              how input reaches a display; the helper's real touches and keys
+    GestureInjector.kt       without the helper: accessibility gestures, keys as actions and edits
     Overlay.kt               the floating indicator: what agents do, stop, take over
   helper/
     PhoneControl.kt          pairing with Wireless debugging, starting the helper, its state

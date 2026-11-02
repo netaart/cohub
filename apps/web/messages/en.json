@@ -255,6 +255,8 @@
 	"runtime_displays": "Screens",
 	"runtime_display_open": "View",
 	"runtime_display_share": "Share screen",
+	"runtime_display_share_recording": "Share this screen instead",
+	"runtime_display_share_recording_hint": "Without phone control, agents work on the screen you share, so leave the phone to them meanwhile. Android asks each time; Cohub also needs control in Accessibility.",
 	"runtime_display_not_shared": "Not shared",
 	"runtime_display_stop": "Stop sharing",
 	"runtime_display_allow_control": "Allow control",

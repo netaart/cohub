@@ -19,7 +19,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import live.cohub.android.helper.ICohubHelper
 import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 
@@ -39,7 +38,7 @@ internal class Screen(
     val id: String,
     val displayId: Int,
     size: ScreenSize,
-    private val helper: ICohubHelper,
+    private val source: ScreenSource,
     private val changes: FrameChanges,
 ) {
     private val captures = Mutex()
@@ -55,27 +54,29 @@ internal class Screen(
 
     val agent: Boolean get() = displayId != android.view.Display.DEFAULT_DISPLAY
 
+    val recording: Boolean get() = source.recording
+
     val streaming: Boolean get() = synchronized(lock) { sinks.isNotEmpty() }
 
-    fun mirror(surface: Surface, width: Int, height: Int): IBinder {
+    fun mirror(surface: Surface, width: Int, height: Int, background: Boolean = false): IBinder {
         if (released) throw DisplayError(DisplayError.UNAVAILABLE, "the screen is gone")
         return try {
-            helper.mirror(displayId, width, height, surface)
+            source.mirror(surface, width, height, background)
+        } catch (error: DisplayError) {
+            throw error
         } catch (error: Exception) {
             throw DisplayError(DisplayError.FAILED, error.message ?: "the phone could not mirror the screen")
         }
     }
 
-    fun unmirror(token: IBinder) {
-        runCatching { helper.releaseMirror(token) }
-    }
+    fun unmirror(token: IBinder) = source.unmirror(token)
 
     fun watch(on: Boolean) {
         changes.reporting = on
         if (agent) return
         synchronized(lock) {
             watch?.let(::unmirror)
-            watch = if (on && !released) changes.size(size).let { (width, height) -> mirror(changes.surface, width, height) } else null
+            watch = if (on && !released) changes.size(size).let { (width, height) -> mirror(changes.surface, width, height, background = true) } else null
         }
     }
 
@@ -201,7 +202,7 @@ internal class Screen(
             size = next
             watch?.let {
                 unmirror(it)
-                watch = runCatching { changes.size(next).let { (width, height) -> mirror(changes.surface, width, height) } }.getOrNull()
+                watch = runCatching { changes.size(next).let { (width, height) -> mirror(changes.surface, width, height, background = true) } }.getOrNull()
             }
             if (encoder == null) return@synchronized false
             stopEncoder()
@@ -222,7 +223,7 @@ internal class Screen(
             }
         }
         ended.forEach { it.ended(null) }
-        if (agent) runCatching { helper.releaseDisplay(displayId) }
+        source.release()
         changes.close()
     }
 

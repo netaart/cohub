@@ -3,6 +3,7 @@ package live.cohub.android.display
 import android.annotation.SuppressLint
 import android.content.Context
 import android.hardware.display.DisplayManager
+import android.media.projection.MediaProjection
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -14,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -31,6 +34,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -56,7 +60,9 @@ data class Activity(val sessionId: String?, val turnId: String?, val label: Stri
 data class HandoverAsk(val reason: String, val sessionId: String?, val turnId: String?)
 
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-internal class Served(val spaceId: String, val screen: Screen, val elements: ElementTree, val input: InputDriver) {
+internal class Served(val spaceId: String, val screen: Screen, injector: Injector) {
+    val elements = ElementTree()
+    val input = InputDriver(injector, screen, elements) { DisplayControl.service.value }
     val inputs = Mutex()
     @Volatile var activity: Activity? = null
     @Volatile var handover: HandoverAsk? = null
@@ -68,6 +74,8 @@ internal class Served(val spaceId: String, val screen: Screen, val elements: Ele
 }
 
 internal class DisplayEvent(val spaceId: String, val message: JsonObject)
+
+private class Backing(val displayId: Int, val source: ScreenSource, val injector: Injector)
 
 @SuppressLint("NewApi")
 class DeviceDisplay(private val context: Context, private val scope: CoroutineScope, val phone: PhoneControl, private val stopTurn: suspend (Activity) -> Unit) {
@@ -87,13 +95,17 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     /** [status] settles a dispatch later; answers to calls must already show their effect. */
     fun current() = DisplayStatus(shared.value?.spaceId, DisplayControl.service.value != null, phone.state.value, failure.value)
 
+    val projecting: Boolean get() = shared.value?.screen?.recording == true
+
+    val projectingChanges: Flow<Boolean> = shared.map { it?.screen?.recording == true }.distinctUntilChanged()
+
     internal val changes: StateFlow<Any> = combine(shared, agents, phone.helper, DisplayControl.service, revision) { a, b, c, d, e -> listOf(a, b, c, d, e) }
         .stateIn(scope, SharingStarted.Eagerly, Unit)
 
     internal fun served(): List<Served> = listOfNotNull(shared.value) + agents.value.values
 
     init {
-        scope.launch { phone.helper.collect { helper -> if (helper == null) releaseAll() } }
+        scope.launch { phone.helper.collect { helper -> if (helper == null) helperGone() } }
         scope.launch {
             DisplayControl.windows.collect { displayId ->
                 servedOn(displayId)?.takeIf { it.watched }?.let(::changed)
@@ -128,41 +140,69 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     private fun requireHelper(): ICohubHelper =
         phone.helper.value ?: throw DisplayError(DisplayError.UNAVAILABLE, "phone control is off; set it up in the Cohub app")
 
-    private fun open(spaceId: String, id: String, displayId: Int?, size: ScreenSize): Served {
-        val helper = requireHelper()
+    private fun open(spaceId: String, id: String, back: (ScreenSize, FrameChanges) -> Backing): Served {
+        val size = phoneSize()
         lateinit var served: Served
         val frames = FrameChanges(size) { changed(served) }
-        val displayIdOrNew = try {
-            displayId ?: helper.createDisplay("Cohub", size.width, size.height, size.densityDpi, frames.surface)
+        val backing = try {
+            back(size, frames)
         } catch (error: Exception) {
             frames.close()
-            throw DisplayError(DisplayError.FAILED, error.message ?: "the phone could not start a screen for agents")
+            throw error as? DisplayError ?: DisplayError(DisplayError.FAILED, error.message ?: "the phone could not show the screen")
         }
-        val screen = Screen(id, displayIdOrNew, size, helper, frames)
-        val elements = ElementTree()
-        served = Served(spaceId, screen, elements, InputDriver(helper, screen, elements) { DisplayControl.service.value })
+        served = Served(spaceId, Screen(id, backing.displayId, size, backing.source, frames), backing.injector)
         return served
     }
 
-    fun share(spaceId: String): DisplayStatus {
+    private fun helped(spaceId: String, id: String, displayId: Int?) = open(spaceId, id) { size, frames ->
+        val helper = requireHelper()
+        val shown = displayId ?: helper.createDisplay("Cohub", size.width, size.height, size.densityDpi, frames.surface)
+        Backing(shown, HelperSource(helper, shown), HelperInjector(helper, shown))
+    }
+
+    private fun recorded(spaceId: String, projection: MediaProjection) = open(spaceId, SCREEN_ID) { size, _ ->
+        val source = ProjectionSource(projection, size) { stopShared(recording = true) }
+        Backing(Display.DEFAULT_DISPLAY, source, GestureInjector({ DisplayControl.service.value }, size.densityDpi / 160f * TOUCH_SLOP_DP))
+    }
+
+    fun share(spaceId: String, projection: MediaProjection? = null): DisplayStatus {
         failure.value = null
         stop()
         try {
-            shared.value = open(spaceId, SCREEN_ID, Display.DEFAULT_DISPLAY, phoneSize())
+            shared.value = if (projection != null) recorded(spaceId, projection) else helped(spaceId, SCREEN_ID, Display.DEFAULT_DISPLAY)
         } catch (error: DisplayError) {
-            failure.value = if (phone.helper.value == null) "phone_control_off" else "failed"
+            projection?.stop()
+            failure.value = if (projection == null && phone.helper.value == null) "phone_control_off" else "failed"
         }
         return current()
+    }
+
+    suspend fun awaitShare(spaceId: String, start: () -> Unit): DisplayStatus {
+        failure.value = null
+        start()
+        withTimeoutOrNull(SHARE_TIMEOUT_MS) {
+            combine(shared, failure) { served, error -> served?.takeIf { it.spaceId == spaceId && it.screen.recording } != null || error != null }.first { it }
+        } ?: fail()
+        return current()
+    }
+
+    fun fail() {
+        failure.value = "failed"
     }
 
     fun stop() {
         shared.getAndUpdate { null }?.screen?.release()
     }
 
+    private fun stopShared(recording: Boolean) {
+        val current = shared.value?.takeIf { it.screen.recording == recording } ?: return
+        if (shared.compareAndSet(current, null)) current.screen.release()
+    }
+
     @Synchronized
     internal fun startAgent(spaceId: String) {
         if (agents.value.containsKey(spaceId)) return
-        val served = open(spaceId, AGENT_ID, null, phoneSize())
+        val served = helped(spaceId, AGENT_ID, null)
         agents.update { it + (spaceId to served) }
     }
 
@@ -182,13 +222,12 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
         served.screen.release()
     }
 
-    private fun releaseAll() {
-        stop()
+    private fun helperGone() {
+        stopShared(recording = false)
         agents.getAndUpdate { emptyMap() }.values.forEach { it.screen.release() }
     }
 
     internal fun displays(spaceId: String): List<DisplayInfo> {
-        if (phone.helper.value == null) return emptyList()
         val control = DisplayControl.service.value != null
         val needs = if (control) emptyList() else listOf("accessibility")
         return listOfNotNull(shared.value?.takeIf { it.spaceId == spaceId }, agents.value[spaceId]).map { served ->
@@ -197,7 +236,7 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
             DisplayInfo(
                 id = served.screen.id,
                 name = android.os.Build.MODEL ?: "Android",
-                width = size.width, height = size.height, stream = true, capture = true, input = true,
+                width = size.width, height = size.height, stream = true, capture = true, input = control || !served.screen.recording,
                 system = InputDriver.systemButtons(agent), platform = "android", tree = control, focus = control, needs = needs,
                 kind = if (agent) "agent" else "screen", apps = agent, changes = true,
             )
@@ -363,6 +402,8 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
         private const val IDLE_MS = 10 * 60_000L
         private const val IDLE_CHECK_MS = 60_000L
         private const val RECENT_STEPS = 3
+        private const val SHARE_TIMEOUT_MS = 10_000L
+        private const val TOUCH_SLOP_DP = 8f
         private const val TAG = "CohubDisplay"
     }
 }
