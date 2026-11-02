@@ -76,11 +76,15 @@ jobs:
           ./android-configure patch
           # zlib reaches for the NDK's deprecated cpufeatures on Android; getauxval, its Linux path, works there too.
           sed -i "s/'ARMV8_OS_ANDROID'/'ARMV8_OS_LINUX'/" deps/zlib/zlib.gyp
-          # API 30: the device Runtime needs Android 11. V8's build tools run here, so build them for here.
-          CC_host=gcc CXX_host=g++ ./android-configure "$NDK" 30 arm64
+          # What android-configure sets, plus: API 30, as the device Runtime needs Android 11; V8's build
+          # tools built for this host, where they run; no Temporal, whose Rust crates Node builds for one
+          # target only, and the CLI does not use.
+          toolchain="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export PATH="$PATH:$toolchain" CC="$toolchain/aarch64-linux-android30-clang" CXX="$toolchain/aarch64-linux-android30-clang++" CC_host=gcc CXX_host=g++
+          export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$NDK"
+          ./configure --dest-cpu=arm64 --dest-os=android --openssl-no-asm --cross-compiling --v8-disable-temporal-support
           export CCACHE_DIR=~/.cache/ccache CCACHE_BASEDIR="$PWD" CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=3G
-          clang="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang"
-          make -j"$(nproc)" CC.target="ccache $clang" CXX.target="ccache $clang++" CC.host="ccache gcc" CXX.host="ccache g++"
+          make -j"$(nproc)" CC.target="ccache $CC" CXX.target="ccache $CXX" CC.host="ccache gcc" CXX.host="ccache g++"
           ccache --show-stats
           mkdir -p ../dist
           "$NDK"/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip -o ../dist/node out/Release/node
