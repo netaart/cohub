@@ -1,5 +1,5 @@
 ---
-"@neta-art/cohub": major
+"@neta-art/cohub": minor
 "@neta-art/cohub-cli": minor
 ---
 
