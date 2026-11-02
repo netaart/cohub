@@ -12,7 +12,7 @@ import {
 } from "../native/transcript.js";
 import { codexTranslator } from "../native/translate.js";
 import { atLeast, harnessVersion } from "../native/version.js";
-import { codexApprovalMode, codexApprovalModes, resolveCodexApproval } from "./codex-approval.js";
+import { codexApprovalMode, codexApprovalModes, codexApprovalRequest, codexDecision, resolveCodexApproval } from "./codex-approval.js";
 import { array, closeHost, harnessCommand, inlineImage, text, turnEnvironment, watchHost } from "./process.js";
 import type { HarnessRun, HarnessTurn, LocalHarnessAdapter, ThreadKind } from "./types.js";
 
@@ -90,6 +90,7 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
     await turn.started(session);
     begun = true;
     let nativeTurnId: string | null = null;
+    const changedPaths = new Map<string, string[]>();
     executor.codex.driving.add(threadId);
     await new Promise<void>((resolve, reject) => {
       let escalation: ReturnType<typeof setTimeout> | undefined;
@@ -104,11 +105,18 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
       const off = codex.onEvent((event) => {
         const params = event.params;
         if (event.id != null) {
-          // An unattended Cohub Turn never grants an escalation.
-          if (!codex.shared || params.threadId === threadId && (!nativeTurnId || params.turnId === nativeTurnId)) codex.refuse(event.id, "Approval requires an interactive local client");
+          // A terminal user's requests on the shared server are theirs to answer.
+          if (codex.shared && (params.threadId !== threadId || nativeTurnId && params.turnId !== nativeTurnId)) return;
+          const request = codexApprovalRequest(event.method, params, changedPaths.get(text(params.itemId)));
+          // A platform read-only Turn is never widened, whoever approves.
+          if (!request || input.accessMode === "read_only" || !executor.approvals.available) { codex.refuse(event.id, "Approval requires an interactive local client"); return; }
+          const requestId = event.id;
+          void executor.approvals.request(input.sessionId, input.turnId, request, signal).then((decision) => codex.respond(requestId, codexDecision(decision)));
           return;
         }
         if (params.threadId !== threadId) return;
+        const item = record(params.item);
+        if (item.type === "fileChange" && Array.isArray(item.changes)) changedPaths.set(text(item.id), item.changes.map((change) => text(record(change).path)).filter(Boolean));
         // A resumed thread replays its last usage; only this Turn's counts belong to it.
         if (event.method === "thread/tokenUsage/updated" && params.turnId !== nativeTurnId) return;
         if (event.method === "turn/started" && !nativeTurnId) { nativeTurnId = text(record(params.turn).id) || null; if (signal.aborted) interrupt(); }

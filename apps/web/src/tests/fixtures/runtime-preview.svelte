@@ -8,6 +8,7 @@ import {
 	type RuntimeStatus,
 } from "@neta-art/cohub";
 import SessionComposer from "$lib/components/SessionComposer.svelte";
+import SessionApprovals from "$lib/features/session-chat/SessionApprovals.svelte";
 import SpaceWorkspaceHeader, {
 	type SpaceWorkspaceHeaderContext,
 } from "$lib/features/space/modules/SpaceWorkspaceHeader.svelte";
@@ -123,6 +124,24 @@ function makeStatus(): RuntimeStatus {
 const fixtureSpace = sdk.space(spaceId);
 fixtureSpace.getRuntime = async () => status;
 fixtureSpace.subscribe = () => () => {};
+const approvalAt = Date.now();
+fixtureSpace.getSessionApprovals = async () => ({
+	canDecide: true,
+	approvals: [
+		{
+			id: "33333333-3333-4333-8333-333333333333",
+			turnId: "44444444-4444-4444-8444-444444444444",
+			kind: "command",
+			command: "/bin/bash -lc 'pnpm install && pnpm test'",
+			cwd: "/Users/me/project",
+			reason: "Needs network access to install packages",
+			decisions: ["accept", "accept_for_session", "decline"],
+			requestedAt: new Date(approvalAt).toISOString(),
+			expiresAt: new Date(approvalAt + 30 * 60_000).toISOString(),
+		},
+	],
+});
+fixtureSpace.decideApproval = async () => ({ accepted: true });
 sdk.space = () => fixtureSpace;
 async function choose(next: PreviewState) {
 	previewState = next;
@@ -169,6 +188,7 @@ const noop = () => {};
 		<div class="flex-1 text-sm text-text-tertiary">Isolated fixtures · no account or model requests</div>
 		<output aria-label="Approval selection">{approvalMode ?? "unset"}</output>
 		<output aria-label="Model selection">{JSON.stringify(localModel)}</output>
+		<SessionApprovals {spaceId} sessionId="55555555-5555-4555-8555-555555555555" />
 		<SessionComposer bind:value={input} {harness} harnesses={["cohub", ...(status.capabilities?.harnesses ?? [])]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} approvalModes={harness === "codex" ? (status.capabilities?.approvalModes?.codex ?? []) : []} approvalMode={harness === "codex" ? approvalMode : null} onapprovalmodechange={(next) => { approvalMode = next; }} onsubmit={noop} onpickattachment={noop} />
 	</main>
 </div>

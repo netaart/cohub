@@ -33,6 +33,7 @@ import { insertComposerSnippet } from "$lib/stores/composer-insert";
 import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 import { modelsStatusStore } from "$lib/stores/models-status.svelte";
 import { entriesFromDataTransfer } from "$lib/upload-entries";
+import SessionApprovals from "./SessionApprovals.svelte";
 import SessionRuntimeRecovery from "./SessionRuntimeRecovery.svelte";
 import type { SessionChatHost } from "./session-chat-host.controller.svelte";
 
@@ -460,6 +461,9 @@ async function handleDraftDrop(event: DragEvent) {
 						</div>
 					</div>
 				</div>
+			{/if}
+			{#if activeSessionId && host.runtimeCatalog?.kind === "local"}
+				<SessionApprovals spaceId={host.spaceId} sessionId={activeSessionId} />
 			{/if}
 			{#if activeSessionId && runtimeRecoveryTurn}
 				<SessionRuntimeRecovery spaceId={host.spaceId} sessionId={activeSessionId} turnId={runtimeRecoveryTurn.id} />

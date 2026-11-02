@@ -82,11 +82,33 @@ const nativeIngestSchema = z.object({
 /** Which of these Turns the Space already recorded; lets a restart resume without local receipts. */
 const nativeKnownSchema = z.object({ turnIds: z.array(id).min(1).max(NATIVE_INGEST_MAX_TURNS) }).strict();
 
+export const APPROVAL_DECISIONS = ["accept", "accept_for_session", "decline"] as const;
+export const approvalDecisionSchema = z.enum(APPROVAL_DECISIONS);
+export type ApprovalDecision = z.infer<typeof approvalDecisionSchema>;
+
+/** What a local Harness asks before acting; shown as a card until decided, withdrawn or expired. */
+export const runtimeApprovalSchema = z.object({
+  id,
+  kind: z.enum(["command", "file_change"]),
+  command: z.string().max(16_384).optional(),
+  cwd: z.string().max(4096).optional(),
+  reason: z.string().max(4096).optional(),
+  paths: z.array(z.string().max(4096)).max(100).optional(),
+  decisions: z.array(approvalDecisionSchema).min(1).max(APPROVAL_DECISIONS.length),
+  requestedAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime(),
+}).strict();
+export type RuntimeApproval = z.infer<typeof runtimeApprovalSchema>;
+export type SessionApproval = RuntimeApproval & { turnId: string };
+
 export const nativeRuntimeEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ingest"), input: nativeIngestSchema }).strict(),
   z.object({ type: z.literal("known"), input: nativeKnownSchema }).strict(),
   z.object({ type: z.literal("progress"), sessionId: id, turnId: id, progress: nativeTurnProgressSchema }).strict(),
   z.object({ type: z.literal("status"), sessionId: id, turnId: id, controllable: z.boolean().optional() }).strict(),
+  z.object({ type: z.literal("approval"), sessionId: id, turnId: id, approval: runtimeApprovalSchema }).strict(),
+  /** The Runtime stopped waiting: decided, timed out, or the Turn ended. */
+  z.object({ type: z.literal("approval.closed"), sessionId: id, turnId: id, approvalId: id }).strict(),
 ]);
 export type NativeRuntimeEvent = z.infer<typeof nativeRuntimeEventSchema>;
 export type NativeIngest = z.infer<typeof nativeIngestSchema>;
@@ -98,6 +120,15 @@ export type NativeKnownResult = { turns: Array<{ turnId: string; sessionId: stri
 /** Pushed to the Runtime: stop a running native Turn, as the web's stop button asks. */
 export const runtimeNativeStopSchema = z.object({ type: z.literal("runtime.native.stop"), spaceId: id, sessionId: id, turnId: id }).strict();
 export type RuntimeNativeStop = z.infer<typeof runtimeNativeStopSchema>;
+
+/** Pushed to the Runtime: a person's answer to an approval card. */
+export const runtimeApprovalDecisionSchema = z.object({
+  type: z.literal("runtime.approval.decision"), spaceId: id, sessionId: id, turnId: id, approvalId: id, decision: approvalDecisionSchema,
+}).strict();
+export type RuntimeApprovalDecision = z.infer<typeof runtimeApprovalDecisionSchema>;
+/** Every Gateway listens; the one holding the Space's Runtime forwards the decision. */
+export const RUNTIME_APPROVAL_CHANNEL = "pubsub:runtime:approval_decision";
+export const runtimeApprovalsKey = (spaceId: string, sessionId: string) => `runtime:approvals:${spaceId}:${sessionId}`;
 
 export const NATIVE_SYNC_SOURCE = "native_client" as const;
 export const isNativeClientTurn = (meta: unknown): boolean => {

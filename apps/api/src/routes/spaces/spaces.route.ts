@@ -4,7 +4,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { displaysSnapshotSchema, fileWatcherStatusSchema, isModelThinkingLevel, MODEL_THINKING_LEVELS, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, isSessionTurnReplyMode, isUuid, runtimeStopConfirmationSchema, type ApprovalMode, type HarnessKind, runtimeWorkspaceKey, runtimeWorkspaceStatus } from "@cohub/protocol";
+import { displaysSnapshotSchema, fileWatcherStatusSchema, isModelThinkingLevel, MODEL_THINKING_LEVELS, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, isSessionTurnReplyMode, isUuid, runtimeStopConfirmationSchema, type ApprovalMode, type HarnessKind, runtimeWorkspaceKey, approvalDecisionSchema, APPROVAL_DECISIONS, runtimeWorkspaceStatus } from "@cohub/protocol";
 import {
   HOME_SPACE_SLUG,
   parseSpaceSlug,
@@ -78,6 +78,7 @@ import { dispatchSpaceListChanged } from "../../space-list-events.js";
 import { parseSpaceGuestInput, readSpaceGuestConfig, resolveSpaceGuestAppId } from "../../space-guest.js";
 import { decodeSpaceListCursor, isSpaceListFilter, listLegacySpaces, listMemberSpaces, listRecentSpaces, parseSpaceVisits, type SpaceListRow } from "../../space-list.js";
 import { getRuntimeRegistration, getSessionRuntimeRecovery, confirmRuntimeStopped } from "../../runtime.js";
+import { ApprovalError, decideRuntimeApproval, listRuntimeApprovals } from "../../runtime-approvals.js";
 import runtimeArchivesRouter from "./runtime-archives.route.js";
 import { HarnessUnavailableError, ModelUnavailableError, parsePromptEnv, RelayConflictError, PromptEnvValidationError, resolveSessionTurnOrigin } from "@cohub/core/sessions";
 import { delegatedPromptAuthFromAppSession, promptAuthContextFromAppSession } from "../../prompt-auth-context.js";
@@ -2039,6 +2040,39 @@ router.get("/:id/sessions/:sessionId/runtime", async (c) => {
     hasPermission(user, "sandbox.manage", { spaceId }),
   ]);
   return c.json({ ...recovery, canManage });
+});
+
+router.get("/:id/sessions/:sessionId/approvals", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const spaceId = c.req.param("id");
+  const sessionId = c.req.param("sessionId");
+  if (!requireValidId(spaceId) || !requireValidId(sessionId)) return c.json({ message: "Session not found" }, 404);
+  if (!(await hasPermission(user, "session.view", { spaceId, sessionId }))) return authzDenied(c);
+  const [approvals, canDecide] = await Promise.all([
+    listRuntimeApprovals(spaceId, sessionId),
+    hasPermission(user, "session.prompt.fullaccess", { spaceId, sessionId }),
+  ]);
+  return c.json({ approvals, canDecide });
+});
+
+// Approving runs the request on the Runtime's machine, which a full-access prompt could ask for anyway.
+router.post("/:id/sessions/:sessionId/approvals/:approvalId", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const spaceId = c.req.param("id");
+  const sessionId = c.req.param("sessionId");
+  const approvalId = c.req.param("approvalId");
+  if (!requireValidId(spaceId) || !requireValidId(sessionId) || !requireValidId(approvalId)) return c.json({ message: "Approval not found" }, 404);
+  if (!(await hasPermission(user, "session.prompt.fullaccess", { spaceId, sessionId }))) return authzDenied(c);
+  const parsed = approvalDecisionSchema.safeParse((await c.req.json().catch(() => null) as { decision?: unknown } | null)?.decision);
+  if (!parsed.success) return c.json({ message: `decision must be one of: ${APPROVAL_DECISIONS.join(", ")}` }, 400);
+  try { await decideRuntimeApproval(spaceId, sessionId, approvalId, parsed.data); }
+  catch (error) {
+    if (error instanceof ApprovalError) return c.json({ message: error.message }, error.status);
+    throw error;
+  }
+  return c.json({ accepted: true }, 202);
 });
 
 router.post("/:id/sessions/:sessionId/runtime/confirm-stopped", async (c) => {

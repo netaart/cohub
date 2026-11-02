@@ -6,7 +6,7 @@ export {
   LOCAL_HARNESSES, LOCAL_HARNESS_SPECS, harnessSchema, localHarnessSchema,
   fingerprintProjectionTurns, isProjectionCompaction, isProjectionPendingGeneration, projectNativeMessageMeta, projectNativeSession, serializeProjection, serializeProjectionRecords, trimProjectionTurnsToCompaction,
   RUNTIME_ARCHIVE_SEGMENT_BYTES, harnessArchiveIndexSchema, validateArchiveBoundary,
-  nativeTurnCompleteSchema, nativeTurnProgressSchema, nativeIngestTurnSchema, nativeRuntimeEventSchema, runtimeNativeStopSchema, NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, NATIVE_SYNC_SOURCE, isNativeClientTurn,
+  nativeTurnCompleteSchema, nativeTurnProgressSchema, nativeIngestTurnSchema, nativeRuntimeEventSchema, runtimeNativeStopSchema, runtimeApprovalDecisionSchema, runtimeApprovalSchema, approvalDecisionSchema, APPROVAL_DECISIONS, NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, NATIVE_SYNC_SOURCE, isNativeClientTurn,
 } from "@cohub/protocol";
 export type {
   ApprovalMode, ContentBlock, HarnessKind, LocalHarness, LocalHarnessSpec, RuntimeCapabilities, RuntimeModel, RuntimeCommand, RuntimeContext, RuntimePendingExecution,
@@ -14,7 +14,7 @@ export type {
   CanonicalProjectionMessage, CanonicalProjectionTurn, NativeProjection, ProjectionCursor, ProjectionInput, ProjectionRecord, ProjectionTarget, ProjectionWarning,
   RuntimeStatus, RuntimeSessionRecoveryStatus, RuntimeStopConfirmation, HarnessArchiveIndex, RuntimeArchiveSegment, RuntimeArchiveUpload, RuntimeArchivePage,
   RuntimeTraceContext, MessageToolCallsFile, SessionTurnRecord, StoredIntermediateMessage, StoredToolCall, TurnIntermediateMessagesFile,
-  NativeTurnMessage, NativeTurnComplete, NativeTurnProgress, NativeRuntimeEvent, NativeIngest, NativeIngestTurn, NativeIngestResult, NativeKnownResult, RuntimeNativeStop,
+  NativeTurnMessage, NativeTurnComplete, NativeTurnProgress, NativeRuntimeEvent, NativeIngest, NativeIngestTurn, NativeIngestResult, NativeKnownResult, RuntimeNativeStop, RuntimeApproval, RuntimeApprovalDecision, SessionApproval, ApprovalDecision,
 } from "@cohub/protocol";
 export { buildViewportContentBlock } from "@cohub/protocol";
 export type {

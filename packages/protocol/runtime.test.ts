@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { nativeRuntimeEventSchema, runtimeApprovalDecisionSchema } from "./src/runtime/native.js";
 import { fileWatcherStatusSchema, resolveRuntimeServiceTier, resolveRuntimeThinkingLevel, runtimeCapabilitiesSchema, runtimeClientFrameSchema, runtimeCommandSchema, runtimeReadySchema, parseRuntimeRegistration, contextToPiMessages, RUNTIME_MAX_BATCH_MESSAGES } from "./src/runtime/index.js";
 import { getSessionStreamSnapshotKey, SESSION_STREAM_SNAPSHOT_CLEAR_TURN_LUA } from "./src/realtime/index.js";
 
@@ -148,4 +149,14 @@ test("approval modes and service tiers survive the wire; unknown ones are droppe
   assert.equal(resolveRuntimeServiceTier(model, null), undefined);
   assert.equal(resolveRuntimeServiceTier(model, "default"), "default");
   assert.equal(resolveRuntimeServiceTier({ ...model, serviceTiers: undefined }, "default"), undefined);
+});
+
+test("approval cards and decisions are validated on the wire", () => {
+  const id = "123e4567-e89b-42d3-a456-426614174000";
+  const approval = { id, kind: "command", command: "touch x", decisions: ["accept", "decline"], requestedAt: new Date().toISOString(), expiresAt: new Date().toISOString() };
+  assert.equal(nativeRuntimeEventSchema.safeParse({ type: "approval", sessionId: id, turnId: id, approval }).success, true);
+  assert.equal(nativeRuntimeEventSchema.safeParse({ type: "approval", sessionId: id, turnId: id, approval: { ...approval, decisions: [] } }).success, false);
+  assert.equal(nativeRuntimeEventSchema.safeParse({ type: "approval.closed", sessionId: id, turnId: id, approvalId: id }).success, true);
+  assert.equal(runtimeApprovalDecisionSchema.safeParse({ type: "runtime.approval.decision", spaceId: id, sessionId: id, turnId: id, approvalId: id, decision: "accept_for_session" }).success, true);
+  assert.equal(runtimeApprovalDecisionSchema.safeParse({ type: "runtime.approval.decision", spaceId: id, sessionId: id, turnId: id, approvalId: id, decision: "always" }).success, false);
 });

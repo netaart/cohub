@@ -1,5 +1,5 @@
 import { createAgentTurnsQueue, enqueueRuntimeRecovery } from "@cohub/infra/agent-queue";
-import { AGENT_TURN_ABORT_CHANNEL, runtimeRegistrationKey, type RuntimeRegistration } from "@cohub/protocol";
+import { AGENT_TURN_ABORT_CHANNEL, RUNTIME_APPROVAL_CHANNEL, runtimeApprovalDecisionSchema, runtimeRegistrationKey, type RuntimeRegistration } from "@cohub/protocol";
 import { createLogger } from "@cohub/infra/logging";
 import { authorizeLocalSandbox } from "../api-client.js";
 import { gatewayConfig } from "../config.js";
@@ -60,7 +60,7 @@ export const handleRuntimePeer = relay.peer;
 const logger = createLogger({ serviceName: "cohub-gateway" });
 
 /**
- * Stop requests reach a Runtime as a push, not by the Runtime polling: every Gateway listens and
+ * Stop requests and approval decisions reach a Runtime as a push, not by the Runtime polling: every Gateway listens and
  * the one holding the Space's Runtime connection forwards the request.
  */
 let stopSubscriber: ReturnType<typeof createPubSubRedisClient> | null = null;
@@ -70,8 +70,14 @@ export async function startRuntimeStopSubscriber() {
   const client = createPubSubRedisClient();
   stopSubscriber = client;
   if (client.status === "wait") await client.connect();
-  await client.subscribe(AGENT_TURN_ABORT_CHANNEL);
+  await client.subscribe(AGENT_TURN_ABORT_CHANNEL, RUNTIME_APPROVAL_CHANNEL);
   client.on("message", (channel, message) => {
+    if (channel === RUNTIME_APPROVAL_CHANNEL) {
+      const decision = (() => { try { return runtimeApprovalDecisionSchema.safeParse(JSON.parse(message)); } catch { return null; } })();
+      if (decision?.success) relay.decide(decision.data);
+      else logger.warn("runtime.approval.decision_invalid");
+      return;
+    }
     if (channel !== AGENT_TURN_ABORT_CHANNEL) return;
     try {
       const event = JSON.parse(message) as { spaceId?: unknown; sessionId?: unknown; turnId?: unknown; reason?: unknown };

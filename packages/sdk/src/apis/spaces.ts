@@ -2119,6 +2119,17 @@ export class SpaceClient {
     return this.transport.request<{ accepted: true }>(`/api/spaces/${this.id}/sessions/${sessionId}/runtime/confirm-stopped`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(confirmation) });
   }
 
+  /** Pending local Harness approvals of a Session, and whether the caller may answer them. */
+  getSessionApprovals(sessionId: string, customFetch?: Fetch) {
+    return this.transport.request<{ approvals: import("@cohub/protocol").SessionApproval[]; canDecide: boolean }>(
+      `/api/spaces/${this.id}/sessions/${sessionId}/approvals`, { fetch: customFetch },
+    );
+  }
+
+  decideApproval(sessionId: string, approvalId: string, decision: import("@cohub/protocol").ApprovalDecision) {
+    return this.transport.request<{ accepted: true }>(`/api/spaces/${this.id}/sessions/${sessionId}/approvals/${approvalId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision }) });
+  }
+
   getStartup(customFetch?: Fetch) {
     return this.transport.request<SpaceStartupResponse>(
       `/api/spaces/${this.id}/startup`,

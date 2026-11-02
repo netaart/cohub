@@ -29,6 +29,7 @@ import { nativeRuntimeEventSchema } from "@cohub/protocol";
 import { NativeTurnError, ingestNativeTurns, knownNativeTurns, observeNativeTurn } from "../../native-turns.js";
 import { publishNativeIngest } from "../../native-ingest-events.js";
 import { publishNativeProgress } from "../../native-turn-progress.js";
+import { ApprovalError, closeRuntimeApproval, openRuntimeApproval } from "../../runtime-approvals.js";
 
 const nativeLogger = createLogger({ serviceName: "cohub-api" });
 const nativeErrorFields = ["code", "detail", "hint", "constraint", "table", "column", "schema", "position"] as const;
@@ -328,10 +329,13 @@ router.post("/native-runtime-event", async (c) => {
     }
     if (event.type === "known") return c.json({ result: await knownNativeTurns(spaceId, event.input.turnIds) });
     if (event.type === "progress") return c.json({ result: await publishNativeProgress(spaceId, ownerUserId, event.sessionId, event.turnId, event.progress) });
+    if (event.type === "approval") return c.json({ result: await openRuntimeApproval(spaceId, event.sessionId, event.turnId, event.approval) });
+    if (event.type === "approval.closed") return c.json({ result: await closeRuntimeApproval(spaceId, event.sessionId, event.approvalId) });
     return c.json({ result: await observeNativeTurn(spaceId, ownerUserId, event.sessionId, event.turnId, event.controllable) });
   } catch (error) {
     // Business rejections keep their status; unexpected failures stay 500 so the Daemon retries the same batch.
     if (error instanceof NativeTurnError) return c.json({ message: error.message }, error.status);
+    if (error instanceof ApprovalError) return c.json({ message: error.message }, error.status);
     const identity = event.type === "ingest"
       ? { sessionId: null, turnId: event.input.turns[0]?.turnId ?? null }
       : event.type === "known" ? { sessionId: null, turnId: null } : { sessionId: event.sessionId, turnId: event.turnId };

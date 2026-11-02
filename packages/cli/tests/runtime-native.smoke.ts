@@ -70,7 +70,9 @@ const model = createServer(async (request, response) => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     const bash = request_.tools?.some((tool) => tool.name === "bash");
     const command = run ?? "echo turn=$COHUB_TURN_ID session=$COHUB_SESSION_ID";
-    const call = { id: "fc_1", type: "function_call", call_id: `call_${Date.now()}`, name: bash ? "bash" : "exec_command", arguments: JSON.stringify(bash ? { command } : { cmd: command }) };
+    // "escalate" asks to run it outside the sandbox, which needs an approval.
+    const escalate = /escalate/.test(lastUser) ? { sandbox_permissions: "require_escalated", justification: "needs to write" } : {};
+    const call = { id: "fc_1", type: "function_call", call_id: `call_${Date.now()}`, name: bash ? "bash" : "exec_command", arguments: JSON.stringify(bash ? { command } : { cmd: command, ...escalate }) };
     send({ type: "response.created", response: { id: "resp_fc", status: "in_progress", output: [] } });
     send({ type: "response.output_item.added", output_index: 0, item: call });
     send({ type: "response.output_item.done", output_index: 0, item: call });
@@ -361,6 +363,22 @@ try {
         assert.equal(await step("inherit", { approvalMode: "inherit" }), true, "local settings replace the earlier read-only on the loaded thread");
         // Whether auto's sandbox lets the write through depends on the host's sandbox, which this container lacks.
         await step("auto", { approvalMode: "auto" }, "hello auto");
+        // An approval card answered on the web reaches Codex: allowed runs, declined does not.
+        const cards: string[] = [];
+        let answer: "accept" | "decline" = "accept";
+        native.executor.approvals.connect(async (event) => {
+          if (event.type === "approval") {
+            cards.push(event.approval.command ?? "");
+            setImmediate(() => native.executor.approvals.decide({ sessionId: event.sessionId, turnId: event.turnId, approvalId: event.approval.id, decision: answer }));
+          }
+          return { accepted: true };
+        });
+        assert.equal(await step("approve", { approvalMode: "read_only" }, `escalate run[touch ${marker}]`), true, "an allowed request runs");
+        answer = "decline";
+        assert.equal(await step("decline", { approvalMode: "read_only" }, `escalate run[touch ${marker}]`), false, "a declined request does not");
+        assert.equal(cards.length, 2);
+        assert.match(cards[0] ?? "", /touch/);
+        native.executor.approvals.connect(null);
         if (fast) {
           serviceTiers.length = 0;
           await step("fast", { model: fast.id, serviceTier: "priority" }, "hello fast");
@@ -368,7 +386,7 @@ try {
           await step("inherit", { model: fast.id }, "hello again");
           assert.deepEqual(serviceTiers, ["priority", null, null], "Fast applies to its Turn only");
         }
-        console.log(`codex: approval modes switch on a loaded thread and local settings restore the machine's${fast ? "; Fast applies per Turn" : ""} ✓`);
+        console.log(`codex: approval modes switch on a loaded thread, local settings restore the machine's and approval cards reach Codex${fast ? "; Fast applies per Turn" : ""} ✓`);
       } else {
         assert.deepEqual(await codexHarness.approvalModes?.(codexBinary), [], "an older Codex offers no approval modes");
         const explicit = turn("codex", "hello", { approvalMode: "read_only" });

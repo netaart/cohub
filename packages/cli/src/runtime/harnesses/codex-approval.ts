@@ -1,4 +1,5 @@
-import { APPROVAL_MODES, type ApprovalMode, type RuntimeTurnInput } from "@neta-art/cohub";
+import { APPROVAL_DECISIONS, APPROVAL_MODES, type ApprovalDecision, type ApprovalMode, type RuntimeTurnInput } from "@neta-art/cohub";
+import type { ApprovalRequest } from "../native/approvals.js";
 import { record, type JsonRecord } from "../json-rpc.js";
 import type { CodexChannel } from "../native/codex-link.js";
 import { atLeast, type Version } from "../native/version.js";
@@ -52,4 +53,25 @@ export async function resolveCodexApproval(mode: ApprovalMode, codex: CodexChann
   const profile = record(probe.activePermissionProfile).id;
   // A named profile carries more than its sandbox policy; built-in ones are exactly it.
   return { thread: {}, turn: typeof profile === "string" && profile && !profile.startsWith(":") ? { ...approval, permissions: profile } : { ...approval, sandboxPolicy: probe.sandbox } };
+}
+
+const CODEX_DECISIONS: Record<ApprovalDecision, string> = { accept: "accept", accept_for_session: "acceptForSession", decline: "decline" };
+export const codexDecision = (decision: ApprovalDecision) => ({ decision: CODEX_DECISIONS[decision] });
+
+const clip = (value: unknown, max: number) => typeof value === "string" && value ? value.slice(0, max) : undefined;
+
+/** A Codex request a person can answer on a card; others are refused as before. */
+export function codexApprovalRequest(method: string, params: JsonRecord, paths: string[] | undefined): ApprovalRequest | null {
+  if (method !== "item/commandExecution/requestApproval" && method !== "item/fileChange/requestApproval") return null;
+  // Codex may leave `decline` out of its list but accepts it; a card can always say no.
+  const offered = Array.isArray(params.availableDecisions) ? params.availableDecisions : null;
+  const decisions = APPROVAL_DECISIONS.filter((decision) => decision === "decline" || !offered || offered.includes(CODEX_DECISIONS[decision]));
+  const reason = clip(params.reason, 4096);
+  if (method === "item/fileChange/requestApproval") {
+    const changed = [...paths ?? [], ...typeof params.grantRoot === "string" ? [params.grantRoot] : []].slice(0, 100).map((path) => path.slice(0, 4096));
+    return { kind: "file_change", decisions, ...(reason ? { reason } : {}), ...(changed.length ? { paths: changed } : {}) };
+  }
+  const command = clip(params.command, 16_384);
+  const cwd = clip(params.cwd, 4096);
+  return { kind: "command", decisions, ...(command ? { command } : {}), ...(cwd ? { cwd } : {}), ...(reason ? { reason } : {}) };
 }

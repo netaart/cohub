@@ -29,6 +29,7 @@ export type CodexEvent = { method: string; params: JsonRecord };
 export interface CodexChannel {
   request(method: string, params?: JsonRecord, timeoutMs?: number): Promise<JsonRecord>;
   refuse(id: string | number, message: string): void;
+  respond(id: string | number, result: JsonRecord): void;
   onEvent(listener: (event: CodexEvent & { id?: string | number }) => void): () => void;
   onClose(listener: (error: Error) => void): () => void;
   close(): Promise<void>;
@@ -233,6 +234,7 @@ class SocketChannel implements CodexChannel {
 
   notify(method: string, params: JsonRecord = {}) { this.socket.send(JSON.stringify({ method, params })); }
   refuse(id: string | number, message: string) { if (!this.closedError) this.socket.send(JSON.stringify({ id, error: { code: -32000, message } })); }
+  respond(id: string | number, result: JsonRecord) { if (!this.closedError) this.socket.send(JSON.stringify({ id, result })); }
   onEvent(listener: (event: CodexEvent & { id?: string | number }) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   onClose(listener: (error: Error) => void) {
     if (this.closedError) { const error = this.closedError; queueMicrotask(() => listener(error)); return () => undefined; }
@@ -251,6 +253,7 @@ class StdioChannel implements CodexChannel {
   request(method: string, params: JsonRecord = {}, timeoutMs?: number) { return this.rpc.request(method, params, timeoutMs); }
   notify(method: string, params: JsonRecord = {}) { this.rpc.write({ method, params }); }
   refuse(id: string | number, message: string) { try { this.rpc.write({ id, error: { code: -32000, message } }); } catch { /* The process is gone. */ } }
+  respond(id: string | number, result: JsonRecord) { try { this.rpc.write({ id, result }); } catch { /* The process is gone. */ } }
   onClose(listener: (error: Error) => void) { return this.rpc.onFailure(listener); }
   onEvent(listener: (event: CodexEvent & { id?: string | number }) => void) {
     return this.rpc.onEvent((event) => {

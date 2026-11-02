@@ -353,8 +353,9 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
       onReady: () => { update({ harnessConnected: true }); retryDisconnectedBridge?.(); },
       onDisconnected: () => { native.connect(null); update({ harnessConnected: false }); retryDisconnectedBridge?.(); },
       onNativeStop: (stop) => { native.stop(stop.sessionId, stop.turnId); },
-      onNativeChannel: (send) => {
-        native.connect(send);
+      onApprovalDecision: (decision) => { native.executor.approvals.decide(decision); },
+      onNativeChannel: (send, features) => {
+        native.connect(send, features);
         if (!importRequested) return;
         importRequested = false;
         void native.control("import", { command: "start" }).catch((error: unknown) => diagnostics.log("warn", "native.import_failed", { error: serializeDiagnosticError(error) }));
