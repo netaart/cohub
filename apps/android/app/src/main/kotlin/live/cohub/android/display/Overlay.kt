@@ -28,6 +28,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
+import androidx.core.view.updateLayoutParams
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -71,6 +72,7 @@ internal class Overlay(private val service: ControlService, private val display:
     private val dim = Runnable { if (!open) card.animate().alpha(IDLE_ALPHA).setDuration(FADE_MS).start() }
     private var shown: Served? = null
     private var asked = false
+    private var quiet = false
     private var open = false
     private var attached = false
     private var mirror: IBinder? = null
@@ -132,6 +134,13 @@ internal class Overlay(private val service: ControlService, private val display:
         recent.setTextColor(palette.secondary)
         (dot.background as GradientDrawable).setColor(color)
         label.text = text
+        card.contentDescription = text
+        val wasQuiet = quiet
+        quiet = next.activity == null && ask == null && !next.held
+        if (quiet != wasQuiet) {
+            shape()
+            if (attached) windows.updateViewLayout(root, params())
+        }
         recent.text = next.recent.dropLast(1).joinToString("\n")
         if ((next.activity != null || ask != null) && !next.held) pulse.start() else {
             pulse.end()
@@ -174,6 +183,7 @@ internal class Overlay(private val service: ControlService, private val display:
 
     private fun setOpen(value: Boolean) {
         open = value
+        shape()
         layoutPreview()
         actions.visibility = if (open) View.VISIBLE else View.GONE
         label.maxWidth = dp(if (open) PREVIEW_WIDTH else PILL_WIDTH).toInt()
@@ -187,6 +197,15 @@ internal class Overlay(private val service: ControlService, private val display:
             card.animate().scaleX(1f).scaleY(1f).setInterpolator(DecelerateInterpolator()).setDuration(OPEN_MS).start()
         }
         awake()
+    }
+
+    // Only sharing, nothing to say: a dot until tapped.
+    private fun shape() {
+        val dotOnly = quiet && !open
+        label.visibility = if (dotOnly) View.GONE else View.VISIBLE
+        dot.updateLayoutParams<LinearLayout.LayoutParams> { marginEnd = if (dotOnly) 0 else dp(8).toInt() }
+        val (h, v) = if (dotOnly) DOT_PADDING to DOT_PADDING else 12 to 10
+        card.setPadding(dp(h).toInt(), dp(v).toInt(), dp(h).toInt(), dp(v).toInt())
     }
 
     private fun layoutPreview() {
@@ -344,6 +363,7 @@ internal class Overlay(private val service: ControlService, private val display:
         const val Y = "y"
         const val EDGE = 12
         const val PILL_WIDTH = 200
+        const val DOT_PADDING = 10
         const val PREVIEW_WIDTH = 180
         const val IDLE_ALPHA = 0.72f
         const val IDLE_MS = 5_000L

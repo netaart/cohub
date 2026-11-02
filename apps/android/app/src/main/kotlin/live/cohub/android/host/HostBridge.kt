@@ -278,7 +278,7 @@ class HostBridge(
             requireRuntime().instances.value.toJson()
         }
 
-        HostProtocol.Methods.DISPLAY_STATUS -> requireDisplay().status.value.toJson()
+        HostProtocol.Methods.DISPLAY_STATUS -> requireDisplay().current().toJson()
 
         HostProtocol.Methods.DISPLAY_SHARE -> {
             val spaceId = requireSpaceId(params)
@@ -292,18 +292,18 @@ class HostBridge(
             actions.permissions().requestLocalNetwork()
             val phone = display.phone.setup()
             if (phone.guiding) actions.openPhoneControlSettings(display.phone.settingsIntent())
-            display.status.value.copy(phoneControl = phone).toJson()
+            display.current().copy(phoneControl = phone).toJson()
         }
 
         HostProtocol.Methods.DISPLAY_PAIR -> {
             val display = requireDisplay()
             val code = params.string("code")?.takeIf(PAIRING_CODE::matches) ?: throw IllegalArgumentException("display.pair requires a six-digit code")
-            display.status.value.copy(phoneControl = display.phone.pair(code).await()).toJson()
+            display.current().copy(phoneControl = display.phone.pair(code).await()).toJson()
         }
 
         HostProtocol.Methods.DISPLAY_STOP -> {
             requireDisplay().stop()
-            requireDisplay().status.value.toJson()
+            requireDisplay().current().toJson()
         }
 
         HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS -> JsonPrimitive(display?.phone?.enableControl() == true || actions.openControlSettings())

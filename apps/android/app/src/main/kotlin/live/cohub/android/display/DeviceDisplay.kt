@@ -82,7 +82,10 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
 
     val status: StateFlow<DisplayStatus> = combine(shared, DisplayControl.service, phone.state, failure) { current, control, phoneControl, error ->
         DisplayStatus(current?.spaceId, control != null, phoneControl, error)
-    }.stateIn(scope, SharingStarted.Eagerly, DisplayStatus(null, DisplayControl.service.value != null, phone.state.value))
+    }.stateIn(scope, SharingStarted.Eagerly, current())
+
+    /** [status] settles a dispatch later; answers to calls must already show their effect. */
+    fun current() = DisplayStatus(shared.value?.spaceId, DisplayControl.service.value != null, phone.state.value, failure.value)
 
     internal val changes: StateFlow<Any> = combine(shared, agents, phone.helper, DisplayControl.service, revision) { a, b, c, d, e -> listOf(a, b, c, d, e) }
         .stateIn(scope, SharingStarted.Eagerly, Unit)
@@ -149,7 +152,7 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
         } catch (error: DisplayError) {
             failure.value = if (phone.helper.value == null) "phone_control_off" else "failed"
         }
-        return status.value
+        return current()
     }
 
     fun stop() {
