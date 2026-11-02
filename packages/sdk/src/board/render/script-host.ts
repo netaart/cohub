@@ -4,6 +4,7 @@ import { boardBitmapResolution } from "./bitmap-resolution.js";
 import { getBoardResolution } from "./text-resolution.js";
 import { boardScriptAttachments } from "../model/script-index.js";
 import { boardScriptScope, diffBoardScriptItems } from "../model/script-scope.js";
+import { sameJson } from "../model/json.js";
 import { boardScriptHitVisible, resolveBoardScriptHit } from "../model/script-hit.js";
 import type { BoardScene } from "../model/scene.js";
 import type { BoardViewport } from "../model/geometry.js";
@@ -31,7 +32,7 @@ type Entry = {
   token: number;
   graph: string | null;
   copy: Map<string, BoardItem>;
-  document: BoardDocument | null;
+  items: BoardDocument["items"] | null;
   width: number;
   height: number;
   snapshot?: BoardScriptSnapshot;
@@ -102,6 +103,7 @@ export type BrowserBoardScriptHost = BoardScriptHost & {
   output(id: string): BoardScriptOutput | null;
   snapshot(id: string): Promise<BoardScriptSnapshot | null>;
   clock(id: string): number;
+  settled(id: string): boolean;
   restore(id: string, snapshot: BoardScriptSnapshot): void;
   fault(id: string, message: string): void;
   restart(id: string): void;
@@ -139,18 +141,23 @@ export function createBoardScriptHost(
   let brokerReady = false;
   let broker: HTMLIFrameElement | null = null;
   const signatures = new WeakMap<BoardScript, string>();
+  // Params reach a running instance as input, so tuning or animating them keeps its state.
   function entrySignature(script: BoardScript): string {
     let value = signatures.get(script);
     if (value === undefined) {
-      value = JSON.stringify(script);
+      value = JSON.stringify({ ...script, params: undefined });
       signatures.set(script, value);
     }
     return value;
   }
-  function track(entry: Entry, board: BoardDocument, width: number, height: number) {
+  function track(entry: Entry, board: BoardDocument, script: BoardScript, width: number, height: number) {
     const delta: ScriptRuntimeInputDelta = {};
-    if (entry.document !== board) {
-      entry.document = board;
+    if (entry.script !== script) {
+      if (!sameJson(entry.script.params, script.params)) delta.script = script;
+      entry.script = script;
+    }
+    if (entry.items !== board.items) {
+      entry.items = board.items;
       const items = diffBoardScriptItems(entry.copy, board, boardScriptScope(board, entry.id));
       if (items) delta.items = items;
       if (items && entry.item && Object.hasOwn(items, entry.id)) delta.item = entry.item;
@@ -383,7 +390,7 @@ export function createBoardScriptHost(
       fail(entry, error instanceof Error ? error.message : String(error));
       return;
     }
-    if (changed) options.onFrame();
+    if (changed || options.export) options.onFrame();
     else if (needsTick(entry)) schedule();
   };
   window.addEventListener("message", onMessage);
@@ -417,6 +424,10 @@ export function createBoardScriptHost(
     revision: (id) => revisions.get(id) ?? 0,
     ready: (id) =>
       entries.get(id)?.output !== null && entries.get(id)?.output !== undefined,
+    settled: (id) => {
+      const entry = entries.get(id);
+      return Boolean(entry?.output && !entry.pending && !entry.dirty);
+    },
     frame: (item) => entries.get(item.id)?.texture.current ?? null,
     error: (id) => entries.get(id)?.error ?? (limited.has(id) ? `A Board runs at most ${BOARD_SCRIPT_INSTANCE_LIMIT} scripts.` : null),
     release: () => {}, // Render culling never disposes the script instance.
@@ -513,7 +524,7 @@ export function createBoardScriptHost(
             token: ++nextToken,
             graph: null,
             copy: new Map(),
-            document: null,
+            items: null,
             width: box.width,
             height: box.height,
             snapshot,
@@ -556,9 +567,8 @@ export function createBoardScriptHost(
           );
         }
         if (entry.error) continue;
-        entry.script = script;
         entry.item = item;
-        track(entry, board, box.width, box.height);
+        track(entry, board, script, box.width, box.height);
         const visible = !item || !visibleIds || visibleIds.has(id);
         if (entry.visible !== visible) {
           entry.visible = visible;

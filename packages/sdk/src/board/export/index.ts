@@ -23,6 +23,7 @@ import {
 import { flattenBoardEffects } from "../render/effects.js";
 import { ensureBoardTextMeasurement } from "../render/text-measurement.js";
 import type { BoardCardRendererResolver, BoardScriptHost } from "../render/renderers/board-renderer-registry.js";
+import type { BoardShaderLayers } from "../render/shader/layers.js";
 import { createBoardExportScene } from "./scene.js";
 
 export type {
@@ -50,6 +51,7 @@ export type BoardExportOptions = {
   textures?: Map<string, Texture>;
   viewTextures?: ReadonlyMap<string, Texture>;
   scripts?: BoardScriptHost;
+  shaderLayers?: BoardShaderLayers;
   assetKey?: (item: BoardSceneItem) => string | null;
   renderers?: BoardCardRendererResolver;
   backgroundTexture?: Texture;
@@ -132,7 +134,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     renderers: options.renderers,
     backdrop: resolveBackdrop(options, document, { palette, colors: options.colors ?? buildFallbackShapeColors(colorScheme), colorScheme }),
     backdropTexture: options.backgroundTexture,
-    ...(gpu && owners.length ? { shaders: { renderer, owners } } : {}),
+    ...(gpu && owners.length ? { shaders: { renderer, owners, layers: options.shaderLayers } } : {}),
   });
 
   const flattened = renderer.type === RendererType.CANVAS ? flattenBoardEffects(renderer, exportScene.root, plan.scale) : null;

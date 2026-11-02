@@ -197,6 +197,7 @@ export type BoardShader = {
     height: number;
     glsl: string;
     precision?: "byte" | "half";
+    bounds?: { x: number; y: number; width: number; height: number };
   };
   passes: BoardShaderPass[];
 };

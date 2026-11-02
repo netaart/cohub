@@ -1,4 +1,4 @@
-import type { BoardDocument, BoardItem, BoardScript } from "@cohub/protocol";
+import type { BoardDocument, BoardItem, BoardPatch, BoardScript } from "@cohub/protocol";
 
 export type BoardScriptAttachment = {
   readonly id: string;
@@ -29,4 +29,13 @@ export function hasBoardScripts(document: ScriptSource): boolean {
 
 export function isBoardRootScript(document: ScriptSource, id: string): boolean {
   return Boolean(document.board?.scripts && Object.hasOwn(document.board.scripts, id));
+}
+
+export function removeBoardScriptPatch(document: BoardDocument, id: string): BoardPatch {
+  const animations: NonNullable<BoardPatch["animations"]> = {};
+  for (const [animationId, animation] of Object.entries(document.animations)) {
+    const tracks = Object.keys(animation.tracks).filter((trackId) => animation.tracks[trackId]?.target === id);
+    if (tracks.length) animations[animationId] = { tracks: Object.fromEntries(tracks.map((trackId) => [trackId, null])) };
+  }
+  return { board: { scripts: { [id]: null } }, ...(Object.keys(animations).length ? { animations } : {}) };
 }

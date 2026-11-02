@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { createNodeBoardRenderer, type BoardNodeRenderer, exportBoardImageBytes } from "../../src/board/export/node/index.js";
 import { boardScriptScope, validateBoardScriptCommit } from "../../src/board/model/script-scene.js";
+import { applyBoardPatchToDocument } from "@cohub/protocol";
+import { boardDocumentAt, withBoardScripts } from "../../src/board/model/animation.js";
+import { removeBoardScriptPatch } from "../../src/board/model/script-index.js";
 import { boardShaderSignature } from "../../src/board/model/shader.js";
 import { buildBoardShaderProgram, describeBoardShaderError, prepareBoardShaderSource } from "../../src/board/render/shader/program.js";
 import { createBoardScriptHarness } from "../../src/board/testing/index.js";
@@ -97,4 +100,26 @@ export function draw(ctx, { width, height }) { ctx.fillRect(0, 0, width, height)
     const result = exportBoardImageBytes(renderer, document, { scripts });
     assert.deepEqual(result?.warnings.find((warning) => warning.kind === "shaders-unsupported"), { kind: "shaders-unsupported", drawn: ["card"], omitted: ["weather"] });
   } finally { board.destroy(); }
+});
+
+test("tracks animate a Board script's params, and go with the script", () => {
+  const document = boardDocument({
+    board: { scripts: { rain: { src: "rain.js", params: { density: 0.2, tint: "#000000" } } } },
+    animations: { storm: { duration: 1000, tracks: {
+      density: { target: "rain", property: "params.density", keyframes: [{ at: 0, value: 0.2 }, { at: 1000, value: 1 }] },
+      tint: { target: "rain", property: "params.tint", keyframes: [{ at: 0, value: "#000000" }, { at: 1000, value: "#ffffff" }] },
+    } } },
+  });
+  const params = boardDocumentAt(document, "storm", 500).document.board.scripts?.rain?.params;
+  assert.ok(Math.abs((params?.density as number) - 0.6) < 1e-9);
+  assert.equal(params?.tint, "#808080");
+  const edited = boardDocument({ board: { scripts: { rain: { src: "new.js", enabled: false } } } });
+  const animated = withBoardScripts(edited, new Map([["rain", { src: "rain.js", params: { density: 1 }, targets: {}, enabled: true }], ["gone", { src: "x.js", params: {}, targets: {}, enabled: true }]]));
+  assert.deepEqual(animated.board.scripts, { rain: { src: "new.js", params: { density: 1 }, targets: {}, enabled: false } });
+  const invalid = applyBoardPatchToDocument(document, { animations: { storm: { tracks: { src: { target: "rain", property: "src", keyframes: [{ at: 0, value: "x.js" }] } } } } });
+  assert.equal(invalid.ok, false);
+  assert.equal(applyBoardPatchToDocument(document, { board: { scripts: { rain: null } } }).ok, false);
+  const removed = applyBoardPatchToDocument(document, removeBoardScriptPatch(document, "rain"));
+  assert.ok(removed.ok);
+  assert.deepEqual(removed.document.animations.storm?.tracks, {});
 });

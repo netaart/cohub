@@ -787,8 +787,8 @@ export type BoardKeyframe = z.infer<typeof BoardKeyframeSchema>;
 
 export const BoardTrackSchema = z
 	.object({
-		target: z.string().min(1).max(BOARD_ID_MAX_LENGTH).describe("An item id, camera, or another animation id (its time property nests that timeline)."),
-		property: z.string().min(1).max(200).describe("JSON path in the target, e.g. position, opacity, style.fill, props.text."),
+		target: z.string().min(1).max(BOARD_ID_MAX_LENGTH).describe("An item id, camera, a Board script id, or another animation id (its time property nests that timeline)."),
+		property: z.string().min(1).max(200).describe("JSON path in the target, e.g. position, opacity, style.fill, props.text; params.<name> for a Board script."),
 		keyframes: z.array(BoardKeyframeSchema).min(1).max(100_000).describe("Ordered by at. The value holds before the first and after the last keyframe."),
 		composite: z.enum(["replace", "add"]).default("replace").describe("replace: the latest-started track wins. add: positions and rotations add; scale and opacity multiply."),
 		interpolation: z.enum(["auto", "step", "spline"]).default("auto").describe("auto blends numbers, vectors and colors and steps other values; spline smooths position paths."),

@@ -355,6 +355,9 @@ Steps are {"steps": [...]}, points in board coordinates, run on a virtual clock:
   {"wait": "500ms"}  {"tool": "draw"}  {"tap": [x, y]}  {"drag": [[x, y], ...], "pointerType": "pen"}
   {"pointer": "down", "at": [x, y]}  {"key": "Enter"}  {"select": ["id"]}
 
+Shaders are compiled with a local Chrome, Chromium or Edge when one is found, and
+their errors join the scripts' errors.
+
 Examples:
   cohub boards simulate farm.board '{"steps":[{"wait":"2s"}]}' -o farm.png
   cohub boards simulate farm.board -i steps.json --json`)
@@ -390,6 +393,8 @@ Examples:
         const changed = Object.keys((result.changes as { items?: object }).items ?? {}).length;
         ok(`Simulated ${formatBoardTime(result.time)}: ${result.commits} commit${result.commits === 1 ? "" : "s"}, ${changed} item${changed === 1 ? "" : "s"} changed (not saved)`);
         for (const [id, message] of Object.entries(result.errors)) console.log(`  ! ${id}: ${message.split("\n")[0]}`);
+        if (result.shaders && !result.shaders.compiled)
+          console.log("  Shaders were checked but not compiled; install Chrome, Chromium or Edge, or set COHUB_CHROME, to compile them.");
         if (out && image) console.log(`  Rendered ${image.width}×${image.height} to ${out}`);
         else if (out) console.log("  ! Nothing to render: the region contains no items.");
       } catch (cause) {
@@ -506,7 +511,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
     .description("Merge a patch into the Board: fields merge, null deletes")
     .option("-i, --input <file>", "Patch JSON; - for stdin")
     .option("--replace", "Make the document equal to the input instead of merging")
-    .option("--cascade", "Also delete children and tracks of deleted items")
+    .option("--cascade", "Also delete children and tracks of deleted items, and tracks of deleted Board scripts")
     .option("--dry-run", "Validate without writing")
     .option("--base-version <n>", "Fail if the Board moved past this version")
     .option("--mutation-id <id>", "Stable id; retries never apply twice"))

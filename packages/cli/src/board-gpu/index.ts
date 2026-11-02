@@ -7,9 +7,9 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import type { BoardGpuFrame, BoardGpuInit, BoardGpuResult } from "./protocol.js";
+import type { BoardGpuFrame, BoardGpuInit, BoardGpuResult, BoardGpuShader } from "./protocol.js";
 
-export type { BoardGpuFrame, BoardGpuResult } from "./protocol.js";
+export type { BoardGpuFrame, BoardGpuResult, BoardGpuShader } from "./protocol.js";
 
 export function findBoardGpuBrowser(env: NodeJS.ProcessEnv = process.env): string | null {
   const named = env.COHUB_CHROME?.trim();
@@ -87,11 +87,13 @@ export type BoardGpuResources = {
 
 export type BoardGpuExporter = {
   readonly browser: string;
+  init(init: BoardGpuInit): Promise<void>;
   render(frame: BoardGpuFrame): Promise<Omit<BoardGpuResult, "data"> & { bytes: Uint8Array }>;
+  compile(shaders: BoardGpuShader[]): Promise<Record<string, string>>;
   close(): Promise<void>;
 };
 
-export async function launchBoardGpuExporter(init: BoardGpuInit, resources: BoardGpuResources, options: { browser: string; signal?: AbortSignal }): Promise<BoardGpuExporter> {
+export async function launchBoardGpuExporter(resources: BoardGpuResources, options: { browser: string; signal?: AbortSignal }): Promise<BoardGpuExporter> {
   const bundle = fileURLToPath(new URL("./page.js", import.meta.url));
   if (!existsSync(bundle)) throw new Error("This CLI build has no GPU exporter; reinstall @neta-art/cohub-cli.");
   const token = randomBytes(16).toString("hex");
@@ -180,9 +182,12 @@ export async function launchBoardGpuExporter(init: BoardGpuInit, resources: Boar
       if (crashed || Date.now() - started > 20_000) throw new Error(crashed ?? "The GPU exporter did not start.");
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    await call(`cohubBoardGpu.init(${JSON.stringify(init)})`);
     return {
       browser: options.browser,
+      async init(init) {
+        await call(`cohubBoardGpu.init(${JSON.stringify(init)})`);
+      },
+      compile: (shaders) => call<Record<string, string>>(`cohubBoardGpu.compile(${JSON.stringify(shaders)})`),
       async render(frame) {
         const { data, ...rest } = await call<BoardGpuResult>(`cohubBoardGpu.render(${JSON.stringify(frame)})`);
         return { ...rest, bytes: new Uint8Array(Buffer.from(data, "base64")) };

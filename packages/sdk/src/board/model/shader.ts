@@ -89,6 +89,9 @@ export function validateBoardShader(shader: unknown): asserts shader is BoardSha
         throw new Error(`shader.state width and height must be integers from 1 to ${BOARD_SHADER_LIMITS.stateEdge}.`);
     if (state.precision !== undefined && state.precision !== "byte" && state.precision !== "half")
       throw new Error("shader.state.precision must be byte or half.");
+    const bounds = state.bounds;
+    if (bounds !== undefined && !(bounds && [bounds.x, bounds.y].every(Number.isFinite) && [bounds.width, bounds.height].every((edge) => Number.isFinite(edge) && edge > 0)))
+      throw new Error("shader.state.bounds must be { x, y, width, height } with a positive size.");
   }
 }
 

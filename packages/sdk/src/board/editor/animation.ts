@@ -229,7 +229,7 @@ export function createAnimationModule(ctx: EditorContext) {
 		const pasted: BoardKeyRef[] = [];
 		for (const { target, property, ...keyframe } of clip) {
 			const nested = state.base.animations[target] !== undefined;
-			if (nested ? plays(target, id) : target !== BOARD_CAMERA_TARGET && !state.base.items[target]) continue;
+			if (nested ? plays(target, id) : target !== BOARD_CAMERA_TARGET && !state.base.items[target] && !state.base.board.scripts?.[target]) continue;
 			const [trackId, track]: [string, BoardTrack] = findBoardKeyTrack(tracks, target, property) ?? [
 				newBoardTrackId(tracks, target, property),
 				{ target, property, keyframes: [], composite: "replace", interpolation: "auto" },

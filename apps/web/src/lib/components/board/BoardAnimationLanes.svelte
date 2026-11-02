@@ -321,6 +321,7 @@ function wheel(event: WheelEvent) {
 function rowIcon(group: BoardTrackGroup) {
 	if (group.kind === "camera") return Camera;
 	if (group.kind === "animation") return Film;
+	if (group.kind === "script") return Code;
 	switch (group.itemType) {
 		case "text":
 			return Type;

@@ -366,7 +366,13 @@ rebuilt only when the scene or the region changes.
 
 A Canvas renderer cannot run shaders: those exports draw `draw()` where a module has
 one and report the rest. The CLI's GPU exporter (`packages/cli/src/board-gpu`) runs
-this same export pipeline in local Chrome.
+this same export pipeline in local Chrome. A frame sequence keeps one
+`createBrowserBoardScriptExport()` and one shader layer set (`shaderLayers`) for the
+whole export, so scripts and state advance from frame to frame instead of replaying.
+
+Params are input, not configuration: instances survive param edits, and animation
+tracks may target a Board script's `params.*`. The evaluated values reach scripts
+through `BoardEvaluation.scripts`; the stored document keeps the authored ones.
 
 ## Adding an item type
 

@@ -450,7 +450,13 @@ export async function runBoardExport(
       options.onProgress?.(completed, times.length);
     };
     const launchGpu = async (browser: string) => {
-      const exporter = await launchBoardGpuExporter({ document, animation: options.animation ?? null, theme: options.theme }, gpuResources(options, document), { browser, signal: options.signal });
+      const exporter = await launchBoardGpuExporter(gpuResources(options.spaceId, document), { browser, signal: options.signal });
+      try {
+        await exporter.init({ document, animation: options.animation ?? null, theme: options.theme });
+      } catch (error) {
+        await exporter.close();
+        throw error;
+      }
       scriptHost?.destroy();
       scriptHost = null;
       return exporter;
@@ -570,21 +576,21 @@ export async function runBoardExport(
   }
 }
 
-function gpuResources(options: BoardExportRunOptions, document: BoardDocument): BoardGpuResources {
+export function gpuResources(spaceId: string, document: BoardDocument): BoardGpuResources {
   const client = createClient();
   const scene = buildBoardScene(document);
   return {
     fonts: resolveBundledFonts().flatMap(({ path, family }) => (family ? [{ path, family }] : [])),
-    readModule: async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes),
+    readModule: async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, spaceId, path)).bytes),
     async readPicture(request) {
       if ("background" in request) {
         const source = document.board.background.image && parseBoardMediaSource(document.board.background.image.src);
         if (!source) return null;
-        return source.kind === "url" ? downloadPublicImage(source.value) : readSpaceFileBytes(client, options.spaceId, source.value);
+        return source.kind === "url" ? downloadPublicImage(source.value) : readSpaceFileBytes(client, spaceId, source.value);
       }
       const source = boardAssetKeySource(request.key);
       const item = scene.items.find((entry) => boardAssetKey(entry) === request.key);
-      return source && item ? fetchBoardPicture(client, options.spaceId, source, item, request.edge) : null;
+      return source && item ? fetchBoardPicture(client, spaceId, source, item, request.edge) : null;
     },
   };
 }

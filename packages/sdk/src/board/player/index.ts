@@ -1,5 +1,5 @@
 
-import type { BoardDocument, BoardItem } from "@cohub/protocol/board-model";
+import type { BoardDocument, BoardItem, BoardScript } from "@cohub/protocol/board-model";
 import type { BoardPlaybackCommand, BoardPlaybackSnapshot } from "@cohub/protocol";
 import type {
 	BoardCameraOverride,
@@ -20,6 +20,7 @@ const ENTER_MAX_ITEMS = 80;
 
 export type BoardPlayerFrame = {
 	items: ReadonlyMap<string, BoardItem>;
+	scripts: ReadonlyMap<string, BoardScript>;
 	camera: BoardCameraOverride;
 	time: number;
 	playbackTime: number | null;
@@ -49,7 +50,7 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 	let entrance: { ids: string[]; startedAt: number; duration: number } | null = null;
 
 	function compile(next: BoardDocument) {
-		if (document?.animations === next.animations && document?.items === next.items && compiled) return compiled;
+		if (document?.animations === next.animations && document?.items === next.items && document?.board.scripts === next.board.scripts && compiled) return compiled;
 		document = next;
 		let source = next;
 		const preset = next.board.enter?.preset;
@@ -118,6 +119,7 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 			const evaluation = times.size ? evaluateBoardAnimations(animations, times, options) : null;
 			return {
 				items: evaluation?.items ?? new Map(),
+				scripts: evaluation?.scripts ?? new Map(),
 				camera: evaluation?.camera ?? {},
 				time: playbackTime ?? now - openedAt,
 				playbackTime,

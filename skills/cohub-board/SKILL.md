@@ -157,8 +157,10 @@ cohub boards examples rain --module > scripts/rain.js
 cohub boards apply <board> '{"board":{"scripts":{"rain":{"src":"scripts/rain.js"}}}}'
 ```
 
-Exports render shaders in a local Chrome automatically; check the result with an
-exported image, since `inspect` does not see shader pixels.
+Animate a Board script with tracks on `params.<name>`, targeting the script's id.
+After writing a shader, run `cohub boards simulate <board>` to compile it and see
+errors. Exports render shaders in a local Chrome automatically; check the result
+with an exported image, since `inspect` does not see shader pixels.
 
 Verify interaction before handing over: `cohub boards simulate <board> -i steps.json
 -o shot.png` runs the scripts through taps, drags and pen strokes without saving,

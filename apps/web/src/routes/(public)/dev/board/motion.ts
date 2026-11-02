@@ -121,6 +121,25 @@ const script = (name: string) => ({ src: `${MOTION_SCRIPT_PREFIX}${name}` });
 
 export const MOTION_BOARD_SCRIPTS = { rain: script("rain.js") };
 
+export const MOTION_BOARD_SCRIPT_ANIMATIONS = {
+	storm: {
+		name: "Storm",
+		duration: 8000,
+		play: "always",
+		tracks: {
+			density: {
+				target: "rain",
+				property: "params.density",
+				keyframes: [
+					{ at: 0, value: 0.15 },
+					{ at: 4000, value: 1, ease: "ease-in-out" },
+					{ at: 8000, value: 0.15, ease: "ease-in-out" },
+				],
+			},
+		},
+	},
+};
+
 export function motionItems(stress = 0): Record<string, unknown> {
 	const dots: Record<string, unknown> = {};
 	for (let index = 0; index < stress; index += 1)

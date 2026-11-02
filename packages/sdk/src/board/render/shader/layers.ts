@@ -44,6 +44,7 @@ export type BoardShaderPlacement = {
 
 export type BoardShaderHost = {
   attach(owner: BoardShaderOwner, layer: BoardShaderLayer | null): BoardShaderPlacement | null;
+  fault(id: string, message: string): void;
   zoom: number;
   density: number;
   quality: number;
@@ -123,7 +124,7 @@ function sameOutlines(a: readonly (readonly number[])[], b: readonly (readonly n
   return true;
 }
 
-export function createBoardShaderLayers(options: { onError(id: string, message: string): void }) {
+export function createBoardShaderLayers() {
   const entries = new Map<string, Entry>();
   const failed = new Map<string, string>();
   let animated = false;
@@ -207,7 +208,7 @@ export function createBoardShaderLayers(options: { onError(id: string, message: 
           host.attach(owner, null);
           drop(owner.id, host);
           failed.set(owner.id, signature);
-          options.onError(owner.id, error instanceof Error ? error.message : String(error));
+          host.fault(owner.id, error instanceof Error ? error.message : String(error));
         }
       }
       for (const id of [...entries.keys()]) if (!alive.has(id)) drop(id, host);
@@ -217,6 +218,12 @@ export function createBoardShaderLayers(options: { onError(id: string, message: 
       pending = false;
       for (const entry of entries.values())
         if (entry.placed && entry.layer.prepare(renderer, { catchUp })) pending = true;
+    },
+    detach() {
+      for (const entry of entries.values()) {
+        entry.layer.container?.removeFromParent();
+        entry.placed = false;
+      }
     },
     destroy() {
       for (const id of [...entries.keys()]) drop(id);

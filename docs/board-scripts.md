@@ -364,7 +364,15 @@ game loop needs no frame around everything:
 ```
 
 Keys share the id space of items and animations, and a Board takes at most 32 of
-its own scripts. They run before item scripts, so an item's own script has the last
+its own scripts. A track whose `target` is the script's id animates its params, so a
+storm can build through a chapter:
+
+```json
+{"target": "rain", "property": "params.density", "keyframes": [{"at": 0, "value": 0.1}, {"at": 4000, "value": 1}]}
+```
+
+Removing the script needs `--cascade` to drop such tracks too. Params, whether edited
+or animated, reach a running instance without restarting it. They run before item scripts, so an item's own script has the last
 word on what it presents. The Board has no box, so `ctx.self.base` is null, the
 frame's `width` and `height` are 0, and the module draws with `shader` passes or
 `scene()` rather than `draw()`. Its world scene sits over every item; its screen
@@ -445,16 +453,23 @@ whole view whose drops splash and bounce off the top of every card.
 
 `state: { width, height, glsl }` keeps a texture that `vec4 simulate(Fragment f)`
 advances in fixed 60 Hz steps from its previous value, `state(uv)`. Every pass reads
-it with `state(uv)` too: ripples, trails, fluids, cellular automata. It covers the
-owner's box; a Board script's state covers the view, like glass in front of it.
-`precision: "byte"` stores 8 bits per channel instead of half floats. Seeking
-backwards or exporting at a time replays the steps from the start, so results are
-the same everywhere.
+it too, by texture coordinate with `state(uv)` or by position with `stateAt(f.local)`:
+ripples, trails, fluids, cellular automata. It covers the owner's box; a Board
+script's state covers the view, like glass in front of it. Give `bounds: { x, y,
+width, height }` in owner units (world units for a Board script) to pin it to an
+area instead, such as puddles that stay where they fell. `precision: "byte"` stores
+8 bits per channel instead of half floats.
+
+Seeking backwards or exporting a single frame replays the steps from the start (at
+most ten minutes of them), so results are the same everywhere. A frame sequence or
+video continues each frame's simulation from the last, so when params are animated
+the state carries their history, as on the live Board.
 
 ### Performance and fallbacks
 
 Shaders render only while their owner is drawn and on screen; `board.quality`
-(lower on phones) scales sprite counts, and reduced motion holds the clock. A
+(lower on phones, and lowered while frames fall behind what the display shows)
+scales sprite counts, and reduced motion holds the clock. A
 shader that was running when the GPU reset is paused for the rest of the session
 until it is restarted. Where shaders cannot run, a module's `draw()` is its
 fallback: when shaders run, `draw()` is not called, and a shader that fails to
@@ -465,6 +480,9 @@ Node and moves to a local Chrome, Chromium or Edge (headless, software WebGL whe
 there is no GPU) once a script draws with a shader; `--renderer canvas` stays in
 Node and names the shaders it drew with `draw()` or left out, and `--renderer gpu`
 always uses the browser. Set `COHUB_CHROME` to choose the browser.
+`cohub boards simulate <board>` compiles every shader the scripts declare with that
+browser and reports errors with the scripts' own, so check there before applying a
+change; without a browser it checks the source but cannot compile it.
 
 ## Execution boundary and capabilities
 

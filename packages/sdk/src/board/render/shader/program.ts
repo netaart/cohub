@@ -1,4 +1,5 @@
-import type { BoardShaderParameter, BoardShaderUniform } from "../../model/shader.js";
+import type { BoardShader } from "../../model/script.js";
+import { type BoardShaderParameter, type BoardShaderUniform, boardShaderUniforms, validateBoardShader } from "../../model/shader.js";
 import { BOARD_SHADER_LIBRARY } from "./library.js";
 
 export type BoardShaderProgramKind = "box" | "sprites" | "filter" | "simulate";
@@ -146,7 +147,16 @@ function declarations(input: BoardShaderProgramInput, stage: "vertex" | "fragmen
       "  return Surface(s.r, s.gb, s.a > 0.5);",
       "}",
     );
-  if (input.state) lines.push("uniform sampler2D uCohubState;", "vec4 state(vec2 uv) { return texture(uCohubState, uv); }");
+  if (input.state)
+    lines.push(
+      "uniform sampler2D uCohubState;",
+      "uniform vec4 uCohubStateRegion;",
+      "vec4 state(vec2 uv) { return texture(uCohubState, uv); }",
+      "vec4 stateAt(vec2 local) {",
+      "  vec2 uv = (local - uCohubStateRegion.xy) / uCohubStateRegion.zw;",
+      "  return any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) ? vec4(0.0) : state(uv);",
+      "}",
+    );
   if (input.kind === "filter") {
     lines.push(
       "uniform sampler2D uTexture;",
@@ -269,4 +279,28 @@ export function describeBoardShaderError(log: string, firstLine: number, label: 
       return line >= 1 ? `line ${line}: ` : "";
     }));
   return `${label}: ${lines.slice(0, 4).join("; ") || "the shader failed to compile"}`;
+}
+
+export type BoardShaderStage = { name: string; kind: BoardShaderProgramKind; glsl: string };
+
+export function boardShaderStages(shader: BoardShader, label: string): BoardShaderStage[] {
+  const stages = shader.passes.map((pass, index): BoardShaderStage => ({
+    name: `${label} pass ${index + 1}`,
+    kind: shader.layer === "filter" ? "filter" : pass.sprites ? "sprites" : "box",
+    glsl: pass.glsl,
+  }));
+  if (shader.state) stages.push({ name: `${label} state`, kind: "simulate", glsl: shader.state.glsl });
+  return stages;
+}
+
+export function checkBoardShader(shader: unknown, parameters: readonly BoardShaderParameter[], label: string): void {
+  validateBoardShader(shader);
+  const base = { parameters, uniforms: boardShaderUniforms(shader.uniforms), surfaces: shader.surfaces === true, state: shader.state !== undefined };
+  for (const stage of boardShaderStages(shader, label)) {
+    try {
+      buildBoardShaderProgram({ ...base, kind: stage.kind, glsl: stage.glsl });
+    } catch (error) {
+      throw new Error(`${stage.name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }

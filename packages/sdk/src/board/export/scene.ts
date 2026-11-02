@@ -26,7 +26,7 @@ import { textureIsCutout } from "../render/cutout.js";
 import { setBoardShaderFilters } from "../render/effects.js";
 import { positionShell } from "../render/renderers/base-card-renderer.js";
 import type { BoardShaderLayer } from "../render/shader/layer.js";
-import { type BoardShaderOwner, type BoardShaderPlacement, boardShaderColor, createBoardShaderLayers } from "../render/shader/layers.js";
+import { type BoardShaderLayers, type BoardShaderOwner, type BoardShaderPlacement, boardShaderColor, createBoardShaderLayers } from "../render/shader/layers.js";
 import { boardItemLocalToWorld, boardLocalView } from "../render/shader/placement.js";
 
 export type BoardExportSceneInput = {
@@ -49,7 +49,7 @@ export type BoardExportSceneInput = {
   renderers?: BoardCardRendererResolver;
   backdrop?: BoardBackdrop | null;
   backdropTexture?: Texture;
-  shaders?: { renderer: Renderer; owners: readonly BoardShaderOwner[]; quality?: number };
+  shaders?: { renderer: Renderer; owners: readonly BoardShaderOwner[]; quality?: number; layers?: BoardShaderLayers };
 };
 
 export type BoardExportScene = {
@@ -153,7 +153,7 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
   }
   root.addChild(world);
   const shaderErrors: Array<{ id: string; message: string }> = [];
-  const layers = input.shaders?.owners.length ? createBoardShaderLayers({ onError: (id, message) => shaderErrors.push({ id, message }) }) : null;
+  const layers = input.shaders?.owners.length ? (input.shaders.layers ?? createBoardShaderLayers()) : null;
   if (layers && input.shaders) {
     const toOutput = [input.scale, 0, 0, input.scale, -input.world.x * input.scale, -input.world.y * input.scale] as const;
     const layer = (label: string) => {
@@ -202,6 +202,7 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
       quality: input.shaders.quality ?? 1,
       dark: input.colorScheme === "dark",
       color: (value) => boardShaderColor(context, value),
+      fault: (id, message) => shaderErrors.push({ id, message }),
       attach,
     }, input.scene);
     layers.prepare(input.shaders.renderer, true);
@@ -217,7 +218,8 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
     missingImageKeys: [...missing],
     shaderErrors,
     destroy: () => {
-      layers?.destroy();
+      if (layers === input.shaders?.layers) layers?.detach();
+      else layers?.destroy();
       backdrop?.destroy();
       root.destroy({ children: true });
     },

@@ -16,7 +16,7 @@ export * from "./script-host.js";
 export * from "./script-export.js";
 export * from "./shader/layers.js";
 export { type BoardShaderFrame, type BoardShaderLayer, createBoardShaderLayer } from "./shader/layer.js";
-export { buildBoardShaderProgram, prepareBoardShaderSource, type BoardShaderProgram } from "./shader/program.js";
+export { buildBoardShaderProgram, checkBoardShader, prepareBoardShaderSource, type BoardShaderProgram } from "./shader/program.js";
 export * from "./stroke.js";
 export * from "./style.js";
 export * from "./surface.js";

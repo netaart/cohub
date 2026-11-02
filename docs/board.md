@@ -268,10 +268,11 @@ written without `duration` lasts until its last keyframe.
 
 A track drives one property of one target:
 
-- `target`: an item id, `camera`, or another animation id.
+- `target`: an item id, `camera`, a Board script id, or another animation id.
 - `property`: the JSON path in the target (`position`, `position.x`, `opacity`,
   `style.fill`, `props.text`, …). Camera: `focus` (item id or rect), `zoom`, `shake`.
   Animation: `time` (nesting, speed, reverse and hold are all time remapping).
+  Board script: `params.<name>`; numbers blend, colors mix and other values step.
 - `keyframes`: `{ at, value, ease? }`. Easing defaults to linear; the destination
   keyframe's CSS easing controls the incoming segment. Before the first keyframe
   and after the last, the property holds its boundary value.

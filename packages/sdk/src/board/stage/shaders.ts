@@ -13,6 +13,7 @@ import type { BoardScene as BoardStageScene } from "./scene.js";
 const QUALITY: Record<BoardDeviceTier, number> = { low: 0.5, standard: 0.75, high: 1 };
 const MIN_QUALITY = 0.25;
 const FRAME_MS = 1000 / 60;
+const WINDOW = 30;
 const SUSPENDED_KEY = "cohub.board.shaders.suspended";
 const IDENTITY: BoardMatrix = [1, 0, 0, 1, 0, 0];
 
@@ -26,6 +27,44 @@ function readSuspended(): Set<string> {
   } catch {
     return new Set();
   }
+}
+
+// Steps down only while that speeds frames up, so a display capped below 60 Hz keeps its quality.
+function createBoardShaderQuality(ceiling: number) {
+  const intervals = new Float32Array(WINDOW);
+  let filled = 0;
+  let value = ceiling;
+  let pace = FRAME_MS;
+  let probe: { value: number; interval: number } | null = null;
+  let steady = 0;
+  const change = (next: number) => {
+    value = next;
+    filled = 0;
+    steady = 0;
+  };
+  return {
+    get value() {
+      return value;
+    },
+    sample(interval: number) {
+      if (interval > 250) return;
+      intervals[filled++ % WINDOW] = interval;
+      if (filled < WINDOW) return;
+      const mean = intervals.reduce((sum, entry) => sum + entry, 0) / WINDOW;
+      if (mean < pace * 0.8) pace = Math.max(FRAME_MS, mean);
+      if (probe) {
+        const helped = mean < probe.interval * 0.85;
+        if (!helped) pace = mean;
+        change(helped ? value : probe.value);
+        probe = null;
+      } else if (mean > pace * 1.6 && value > MIN_QUALITY) {
+        probe = { value, interval: mean };
+        change(Math.max(MIN_QUALITY, value * 0.75));
+      } else if (mean < pace * 1.15 && value < ceiling && ++steady > 180) {
+        change(Math.min(ceiling, value / 0.75));
+      }
+    },
+  };
 }
 
 export function createBoardStageShaders(options: {
@@ -44,33 +83,15 @@ export function createBoardStageShaders(options: {
   color(value: unknown): [number, number, number, number];
 }) {
   const { editor, renderer, scene, nodes } = options;
-  const layers = createBoardShaderLayers({ onError: options.fault });
+  const layers = createBoardShaderLayers();
   const rootFilters = new Map<string, readonly Filter[]>();
   const rootContainers = new Map<string, Container>();
   const suspended = readSuspended();
   const paused = new Map<string, string>();
   let running: BoardShaderOwner[] = [];
   const supported = renderer.type === RendererType.WEBGL;
-  const ceiling = QUALITY[options.tier];
-  let quality = ceiling;
-  let frameMs = FRAME_MS;
+  const quality = createBoardShaderQuality(QUALITY[options.tier]);
   let lastSync = 0;
-  let steady = 0;
-
-  function adapt(now: number) {
-    const interval = now - lastSync;
-    lastSync = now;
-    if (!layers.animated || interval > 250) return;
-    frameMs += (interval - frameMs) * 0.1;
-    if (frameMs > FRAME_MS * 1.6 && quality > MIN_QUALITY) {
-      quality = Math.max(MIN_QUALITY, quality * 0.75);
-      frameMs = FRAME_MS;
-      steady = 0;
-    } else if (frameMs < FRAME_MS * 1.15 && quality < ceiling && ++steady > 180) {
-      quality = Math.min(ceiling, quality / 0.75);
-      steady = 0;
-    }
-  }
 
   function applyRootFilters() {
     const filters = [...rootFilters.values()].flat();
@@ -151,14 +172,17 @@ export function createBoardStageShaders(options: {
       }
       running = owners;
       if (!owners.length && !layers.size) return;
-      adapt(performance.now());
+      const now = performance.now();
+      if (layers.animated && lastSync) quality.sample(now - lastSync);
+      lastSync = now;
       const view = visibleWorldRect(camera, surface.width, surface.height);
       layers.sync(renderer, owners, {
         zoom: camera.zoom,
         density: renderer.resolution,
-        quality,
+        quality: quality.value,
         dark: options.dark(),
         color: options.color,
+        fault: options.fault,
         attach: (owner, layer) => (owner.root ? attachRoot : attachItem)(owner, layer, camera, view),
       }, editor.scene as BoardScene, (world) => editor.idsInRect(world));
     },

@@ -1,8 +1,10 @@
-import type { BoardDocument, BoardPatch, BoardVec2 } from "@cohub/protocol";
+import type { BoardDocument, BoardPatch, BoardScript, BoardVec2 } from "@cohub/protocol";
 import { BOARD_TEXT_FONT_SIZE } from "@cohub/protocol/board-constants";
 import { applyMatrix, invertMatrix, layoutBoardText } from "@cohub/protocol/board-layout";
 import { boardDragSlop, type BoardEditor, type BoardPointerEvent, selectionTransformControlAt } from "../editor/index.js";
+import { withBoardScripts } from "../model/animation.js";
 import type { BoardViewport, Rect } from "../model/geometry.js";
+import { sameJson } from "../model/json.js";
 import { boardScriptTarget } from "../model/script-hit.js";
 import { createBoardScriptObservers, type BoardScriptWorldGesture } from "../model/script-observers.js";
 import { isBoardRootScript } from "../model/script-index.js";
@@ -68,6 +70,16 @@ export function createBoardScriptController(options: BoardScriptControllerOption
   const router = createBoardScriptPointerRouter();
   const presses = new Map<number, { target: BoardScriptPointerTarget; down: BoardPointerEvent; mode: "tap" | "drag" }>();
   let gesture: (Gesture & { key: string }) | null = null;
+  let animated: ReadonlyMap<string, BoardScript> = new Map();
+  let running = { base: null as BoardDocument | null, animated, document: null as BoardDocument | null };
+
+  function scriptDocument(): BoardDocument {
+    const base = editor.document;
+    if (!animated.size) return base;
+    if (running.base !== base || running.animated !== animated)
+      running = { base, animated, document: withBoardScripts(base, animated) };
+    return running.document as BoardDocument;
+  }
 
   const send = (owner: string, event: BoardScriptEvent) => {
     if (isUserEvent(event)) activations.set(owner, now());
@@ -251,7 +263,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       }), editor.itemSource);
       if (observers.gestures) syncGesture();
     }
-    host.sync(editor.document, editor.scene, view.camera, time, !paused, view.visibleIds);
+    host.sync(scriptDocument(), editor.scene, view.camera, time, !paused, view.visibleIds);
   }
 
   function pointerEvent(target: BoardScriptPointerTarget, type: string, input: BoardPointerEvent, related?: BoardScriptPointerTarget | null) {
@@ -337,6 +349,10 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       lastTick = now();
     },
     update,
+    animate(next: ReadonlyMap<string, BoardScript>) {
+      if (next.size === animated.size && [...next].every(([id, script]) => sameJson(animated.get(id), script))) return;
+      animated = next;
+    },
     compose,
     sync,
     pointer,
@@ -361,7 +377,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     output: (id: string) => host?.output(id) ?? null,
     shaderOwners(): BoardShaderOwner[] {
       const current = host;
-      return current && !paused ? boardShaderOwners(editor.document, outputs, (id) => current.clock(id)) : [];
+      return current && !paused ? boardShaderOwners(scriptDocument(), outputs, (id) => current.clock(id)) : [];
     },
     error: (id: string) => host?.error(id) ?? null,
     async snapshot(): Promise<Record<string, BoardScriptSnapshot>> {

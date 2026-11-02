@@ -50,6 +50,8 @@ export type BoardShaderLayer = {
 
 const STEP_MS = 1000 / 60;
 const STEPS_PER_FRAME = 8;
+const MAX_LAG = 60;
+const MAX_REPLAY = 10 * 60 * 60;
 const PIXI_TYPES = { float: "f32", int: "i32", vec2: "vec2<f32>", vec3: "vec3<f32>", vec4: "vec4<f32>" } as const;
 const SIZES = { float: 1, int: 1, vec2: 2, vec3: 3, vec4: 4 } as const;
 
@@ -106,6 +108,7 @@ function boardUniforms(parameters: readonly BoardShaderParameter[], uniforms: re
     uCohubGeometry: { value: vec(4), type: "vec4<f32>" },
     uCohubRegion: { value: vec(4), type: "vec4<f32>" },
     uCohubSurfaceRegion: { value: new Float32Array([0, 0, 1, 1]), type: "vec4<f32>" },
+    uCohubStateRegion: { value: new Float32Array([0, 0, 1, 1]), type: "vec4<f32>" },
     uCohubGlobalToLocal: { value: vec(9), type: "mat3x3<f32>" },
     uCohubLocalToGlobal: { value: vec(9), type: "mat3x3<f32>" },
   };
@@ -150,7 +153,12 @@ export function createBoardShaderLayer(
   const hasState = shader.state !== undefined;
   const base = { parameters, uniforms, surfaces, state: hasState };
   const program = (kind: BoardShaderProgramKind, glsl: string, name: string) => {
-    const built = buildBoardShaderProgram({ ...base, kind, glsl });
+    let built: BoardShaderProgram;
+    try {
+      built = buildBoardShaderProgram({ ...base, kind, glsl });
+    } catch (error) {
+      throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
     check(renderer, built, name);
     return built;
   };
@@ -196,7 +204,10 @@ export function createBoardShaderLayer(
   let quality = 1;
   let last: BoardShaderFrame | null = null;
 
+  const stateRegion = (frame: BoardShaderFrame): Rect => shader.state?.bounds ?? frame.region;
+
   function fill(target: UniformGroup, frame: BoardShaderFrame, geometry: Rect, step?: number) {
+    const region = step === undefined ? frame.region : stateRegion(frame);
     const values = target.uniforms as Record<string, unknown>;
     values["board.time"] = (step === undefined ? frame.time : step * STEP_MS) / 1000;
     values["board.delta"] = step === undefined ? Math.max(0, frame.time - time) / 1000 : STEP_MS / 1000;
@@ -209,7 +220,11 @@ export function createBoardShaderLayer(
     values["board.quality"] = frame.quality;
     values["board.dark"] = frame.dark ? 1 : 0;
     setUniform(target, "uCohubGeometry", [geometry.x, geometry.y, geometry.width, geometry.height]);
-    setUniform(target, "uCohubRegion", [frame.region.x, frame.region.y, frame.region.width, frame.region.height]);
+    setUniform(target, "uCohubRegion", [region.x, region.y, region.width, region.height]);
+    if (shader.state) {
+      const area = stateRegion(frame);
+      setUniform(target, "uCohubStateRegion", [area.x, area.y, area.width, area.height]);
+    }
     setUniform(target, "uCohubLocalToGlobal", columns(frame.localToGlobal));
     setUniform(target, "uCohubGlobalToLocal", columns(inverse(frame.localToGlobal)));
     for (const { name, type } of parameters) {
@@ -245,8 +260,9 @@ export function createBoardShaderLayer(
       const wanted = Math.floor(last.time / STEP_MS);
       if (wanted < state.steps || state.steps < 0) {
         for (const texture of [state.read, state.write]) target.render({ container: blank, target: texture, clear: true, clearColor: [0, 0, 0, 0] });
-        state.steps = 0;
+        state.steps = Math.max(0, wanted - MAX_REPLAY);
       }
+      if (!options?.catchUp && wanted - state.steps > MAX_LAG) state.steps = wanted - STEPS_PER_FRAME;
       const limit = options?.catchUp ? Number.POSITIVE_INFINITY : STEPS_PER_FRAME;
       let ran = 0;
       while (state.steps < wanted && ran < limit) {

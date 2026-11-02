@@ -294,7 +294,7 @@ function createNodeScriptLanes(
       const lane = laneOf(input.id);
       const src = input.script.src;
       return request<Sample>(lane, {
-        input, src, signature: JSON.stringify(input.script), time, scale, events, draw, shaders,
+        input, src, signature: JSON.stringify({ ...input.script, params: undefined }), time, scale, events, draw, shaders,
         sources: lane.graphs.has(src) ? undefined : graph,
       }, () => lane.graphs.add(src));
     },
@@ -532,13 +532,17 @@ export function createNodeBoardScriptRuntime(
       return false;
     },
     clock: (id) => syncedAt - (entries.get(id)?.startedAt ?? syncedAt),
+    settled: (id) => {
+      const entry = entries.get(id);
+      return Boolean(entry?.output && !entry.busy && !entry.dirty);
+    },
     sync(document, scene, _camera, time) {
       syncedAt = time;
       const alive = new Set<string>();
       for (const attachment of boardScriptAttachments(document)) {
         const { id, script, item } = attachment;
         alive.add(id);
-        const signature = JSON.stringify(script);
+        const signature = JSON.stringify({ ...script, params: undefined });
         let entry = entries.get(id);
         if (entry && entry.signature !== signature) {
           drop(id);

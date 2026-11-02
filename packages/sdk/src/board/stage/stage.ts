@@ -948,9 +948,12 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			effectSampler = createBoardAnimationSampler(editor.document, animationId);
 		}
 		if (editor.playhead && effectSampler) {
-			frame.camera = effectSampler.at(editor.playhead.time).evaluation.camera;
+			const { evaluation } = effectSampler.at(editor.playhead.time);
+			frame.camera = evaluation.camera;
+			frame.scripts = evaluation.scripts.size ? new Map([...frame.scripts, ...evaluation.scripts]) : frame.scripts;
 			frame.time = editor.playhead.time;
 		}
+		scripts.animate(frame.scripts);
 		const follows = editor.cameraPolicy === "follow" && Object.keys(frame.camera).length > 0;
 		playbackCamera = follows ? followCamera(frame, editor.scene) : null;
 		const camera = renderCamera();

@@ -149,6 +149,11 @@ const ANIMATION_PROPERTIES: Record<string, BoardPropertySpec> = {
 	time: { kind: "number", schema: z.number().finite().nonnegative() },
 };
 
+const SCRIPT_PARAMETER: BoardPropertySpec = {
+	kind: "discrete",
+	schema: z.json().describe("Numbers blend and colors mix between keyframes; other values step."),
+};
+
 function kindOf(schema: unknown, path: readonly string[]): BoardValueKind {
 	const leaf = path[path.length - 1];
 	if (path.length === 1 && leaf === "scale") return "scale";
@@ -171,6 +176,11 @@ export function resolveBoardProperty(
 	if (targetType === "animation") {
 		const spec = ANIMATION_PROPERTIES[property];
 		return spec ? { ok: true, spec } : { ok: false, message: `animations are driven through time` };
+	}
+	if (targetType === "script") {
+		return /^params\.[^.]+$/.test(property)
+			? { ok: true, spec: SCRIPT_PARAMETER }
+			: { ok: false, message: `Board scripts animate params.<name>, not ${property}` };
 	}
 	const path = property.split(".");
 	if (path.some((segment) => !segment) || NOT_ANIMATABLE.has(path[0] as string)) {
@@ -448,7 +458,9 @@ export function applyBoardPatch(
 	for (const id of nextItems.keys()) {
 		if (nextItems.get(id) && animation(id)) diagnostics.push(error(`items.${id}`, "ID_CONFLICT", `${id} is already an animation id`));
 	}
-	for (const id of Object.keys((nextSettings ?? state.settings()).scripts ?? {})) {
+	const scripts = (nextSettings ?? state.settings()).scripts ?? {};
+	const script = (id: string) => Object.hasOwn(scripts, id);
+	for (const id of Object.keys(scripts)) {
 		const taken = item(id) ? "an item" : animation(id) ? "an animation" : null;
 		if (!taken) continue;
 		const path = nextItems.get(id) ? `items.${id}` : nextAnimations.get(id) ? `animations.${id}` : `board.scripts.${id}`;
@@ -487,6 +499,14 @@ export function applyBoardPatch(
 			if (!current || !trackReferences(current).includes(id)) continue;
 			if (options.cascade) setTrack(ref.animation, ref.track, pruneBoardTrack(current, new Set([id])));
 			else diagnostics.push(error(`items.${id}`, "ITEM_REFERENCED", `${id} is animated by ${ref.animation}.${ref.track}; delete the track or use cascade`));
+		}
+	}
+	for (const id of Object.keys(state.settings().scripts ?? {})) {
+		if (script(id)) continue;
+		for (const ref of state.trackRefs(id)) {
+			if (track(ref.animation, ref.track)?.target !== id) continue;
+			if (options.cascade) setTrack(ref.animation, ref.track, null);
+			else diagnostics.push(error(`board.scripts.${id}`, "SCRIPT_REFERENCED", `${id} is animated by ${ref.animation}.${ref.track}; delete the track or use cascade`));
 		}
 	}
 	for (const [id, value] of nextAnimations) {
@@ -558,7 +578,7 @@ export function applyBoardPatch(
 		}
 		for (const ref of state.trackRefs(id)) {
 			const current = track(ref.animation, ref.track);
-			if (current) diagnostics.push(...validateTrack(`animations.${ref.animation}.tracks.${ref.track}`, ref.animation, current, item, animation, track, validationState, options.keepUnknown));
+			if (current) diagnostics.push(...validateTrack(`animations.${ref.animation}.tracks.${ref.track}`, ref.animation, current, item, animation, track, script, validationState, options.keepUnknown));
 		}
 	}
 	for (const [animationId, tracks] of nextTracks) {
@@ -569,7 +589,7 @@ export function applyBoardPatch(
 		for (const [trackId, value] of tracks) {
 			if (!value) continue;
 			const stored = options.keepUnknown || state.track(animationId, trackId)?.property === value.property;
-			diagnostics.push(...validateTrack(`animations.${animationId}.tracks.${trackId}`, animationId, value, item, animation, track, validationState, stored));
+			diagnostics.push(...validateTrack(`animations.${animationId}.tracks.${trackId}`, animationId, value, item, animation, track, script, validationState, stored));
 		}
 	}
 	if (diagnostics.length) return { ok: false, diagnostics };
@@ -608,6 +628,7 @@ function validateTrack(
 	item: (id: string) => BoardItem | undefined,
 	animation: (id: string) => BoardAnimationHeader | undefined,
 	track: (animationId: string, trackId: string) => BoardTrack | undefined,
+	script: (id: string) => boolean,
 	state: BoardState,
 	keepUnknownProperty = false,
 ): BoardDiagnostic[] {
@@ -620,7 +641,8 @@ function validateTrack(
 		if (value.target === animationId || nestsInto(value.target, animationId, animation, track, state)) {
 			return [error(`${path}.target`, "ANIMATION_CYCLE", `${animationId} cannot contain itself through ${value.target}`)];
 		}
-	} else return [error(`${path}.target`, "TARGET_NOT_FOUND", `target ${value.target} is not an item, animation or camera`)];
+	} else if (script(value.target)) targetType = "script";
+	else return [error(`${path}.target`, "TARGET_NOT_FOUND", `target ${value.target} is not an item, animation, Board script or camera`)];
 	const resolved = resolveBoardProperty(targetType, value.property);
 	if (!resolved.ok) return keepUnknownProperty ? [] : [error(`${path}.property`, "INVALID_PROPERTY", resolved.message)];
 	for (const [index, keyframe] of value.keyframes.entries()) {

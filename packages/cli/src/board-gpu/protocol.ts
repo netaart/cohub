@@ -1,4 +1,5 @@
 import type { BoardDocument } from "@neta-art/cohub";
+import type { BoardScriptParameter, BoardShader } from "@neta-art/cohub/board";
 import type { BoardExportRegion, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardExportWarning } from "@neta-art/cohub/board/export";
 
@@ -23,3 +24,4 @@ export type BoardGpuResult = {
   itemCount: number;
   warnings: BoardExportWarning[];
 };
+export type BoardGpuShader = { id: string; shader: BoardShader; parameters?: Record<string, BoardScriptParameter> };

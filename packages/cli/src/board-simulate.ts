@@ -2,8 +2,9 @@ import { diffMergePatch } from "@neta-art/cohub/board";
 import type { BoardDocument, BoardExportRegion, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
 import type { BoardScriptHarness, BoardScriptHarnessPointer } from "@neta-art/cohub/board/testing";
-import { loadBoardDocument, readSpaceFileBytes, resolveBundledFonts, runBoardExport } from "./board-export.js";
-import { createBoardScriptHarness, createNodeBoardRenderer } from "./board-kernel.js";
+import { gpuResources, loadBoardDocument, readSpaceFileBytes, resolveBundledFonts, runBoardExport } from "./board-export.js";
+import { type BoardGpuShader, findBoardGpuBrowser, launchBoardGpuExporter } from "./board-gpu/index.js";
+import { boardScriptAttachments, boardShaderParameters, checkBoardShader, createBoardScriptHarness, createNodeBoardRenderer } from "./board-kernel.js";
 import { settleBoardDocument } from "./board-media.js";
 import { parseBoardTime } from "./board-time.js";
 import { createClient } from "./client.js";
@@ -104,8 +105,30 @@ export type BoardSimulationResult = {
   commits: number;
   changes: Record<string, unknown>;
   errors: Record<string, string>;
+  shaders?: { count: number; compiled: boolean };
   image?: { bytes: Uint8Array; width: number; height: number };
 };
+
+async function checkShaders(shaders: BoardGpuShader[], spaceId: string, document: BoardDocument): Promise<{ errors: Record<string, string>; compiled: boolean }> {
+  const browser = findBoardGpuBrowser();
+  const exporter = browser ? await launchBoardGpuExporter(gpuResources(spaceId, document), { browser }).catch(() => null) : null;
+  if (exporter) {
+    try {
+      return { errors: await exporter.compile(shaders), compiled: true };
+    } finally {
+      await exporter.close();
+    }
+  }
+  const errors: Record<string, string> = {};
+  for (const { id, shader, parameters } of shaders) {
+    try {
+      checkBoardShader(shader, boardShaderParameters(parameters), id);
+    } catch (error) {
+      errors[id] = error instanceof Error ? error.message : String(error);
+    }
+  }
+  return { errors, compiled: false };
+}
 
 export async function runBoardSimulation(options: {
   spaceId: string;
@@ -134,15 +157,21 @@ export async function runBoardSimulation(options: {
     await harness.flush();
     const shown = options.image ? await harness.shown(options.image.scale) : null;
     const errors: Record<string, string> = {};
-    for (const [id, item] of Object.entries(harness.document.items)) {
-      const message = item.script?.enabled ? harness.error(id) : null;
+    const shaders: BoardGpuShader[] = [];
+    for (const { id } of boardScriptAttachments(harness.document)) {
+      const message = harness.error(id);
+      const output = harness.output(id);
       if (message) errors[id] = message;
+      else if (output?.shader) shaders.push({ id, shader: output.shader, ...(output.parameters ? { parameters: output.parameters } : {}) });
     }
+    const checked = shaders.length ? await checkShaders(shaders, options.spaceId, harness.document) : null;
+    Object.assign(errors, checked?.errors);
     const result: BoardSimulationResult = {
       time: Math.round(harness.time),
       commits: harness.commits.length,
       changes: (diffMergePatch(document, harness.document) as Record<string, unknown> | undefined) ?? {},
       errors,
+      ...(checked ? { shaders: { count: shaders.length, compiled: checked.compiled } } : {}),
     };
     if (options.image && shown) {
       const exported = await runBoardExport({

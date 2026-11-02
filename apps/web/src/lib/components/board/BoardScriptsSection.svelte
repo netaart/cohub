@@ -1,5 +1,8 @@
 <script lang="ts">
-import { isSafeBoardSourcePath } from "@neta-art/cohub/board";
+import {
+	isSafeBoardSourcePath,
+	removeBoardScriptPatch,
+} from "@neta-art/cohub/board";
 import type { BoardStage } from "@neta-art/cohub/board/stage";
 import { ChevronDown, Plus, Trash2 } from "lucide-svelte";
 import { untrack } from "svelte";
@@ -85,7 +88,7 @@ function setEnabled(id: string, enabled: boolean) {
 
 function remove(id: string) {
 	if (expanded === id) expanded = null;
-	void editor.commitPatch({ board: { scripts: { [id]: null } } });
+	void editor.commitPatch(removeBoardScriptPatch(editor.document, id));
 }
 </script>
 

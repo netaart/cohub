@@ -1,6 +1,11 @@
 import type { BoardDocument } from "@neta-art/cohub/board";
 import { parseBoardDocument } from "@neta-art/cohub/board";
-import { MOTION_BOARD_SCRIPTS, motionAnimations, motionItems } from "./motion";
+import {
+	MOTION_BOARD_SCRIPT_ANIMATIONS,
+	MOTION_BOARD_SCRIPTS,
+	motionAnimations,
+	motionItems,
+} from "./motion";
 
 export const GALLERY_ASSET_PREFIX = "dev/";
 
@@ -711,7 +716,10 @@ export function boardGalleryDocument(
 				: options.motion
 					? motionItems(options.tracks)
 					: galleryItems();
-	const animations = options.motion ? motionAnimations(options.tracks) : {};
+	const animations = {
+		...(options.motion ? motionAnimations(options.tracks) : {}),
+		...(options.shaders ? MOTION_BOARD_SCRIPT_ANIMATIONS : {}),
+	};
 	const board = {
 		...(options.effects ? { atmosphere: { vignette: 0.5, grain: 0.2 } } : {}),
 		...(options.shaders ? { scripts: MOTION_BOARD_SCRIPTS } : {}),

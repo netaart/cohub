@@ -76,7 +76,8 @@ NODE_DEBUG=cohub:board-export cohub boards export lesson.board --animation lectu
 Boards whose scripts draw with shaders render in a local Chrome, Chromium or Edge (headless;
 software WebGL without a GPU) so frames match the web app; the rest render in Node.
 `--renderer canvas` keeps Node and warns about the shaders it could not run, `--renderer gpu`
-always uses the browser, and `COHUB_CHROME` picks the browser executable.
+always uses the browser, and `COHUB_CHROME` picks the browser executable. `boards simulate`
+compiles the same shaders with that browser and reports their errors.
 
 Debug output reports render stages, RSS, heap, external buffers, reserved image bytes,
 and available/constrained process memory. Video encoding is reported separately.

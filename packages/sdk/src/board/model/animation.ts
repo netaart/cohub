@@ -4,8 +4,10 @@ import {
 	type BoardAnimation,
 	type BoardAnimationHeader,
 	type BoardColor,
+	BoardColorSchema,
 	type BoardDocument,
 	type BoardItem,
+	type BoardScript,
 	type BoardTrack,
 	type BoardValueKind,
 	type BoardVec2,
@@ -134,10 +136,17 @@ export type CompiledBoardAnimations = {
 	readonly document: BoardDocument;
 };
 
+function parameterKind(track: BoardTrack): Kind {
+	const values = track.keyframes.map((keyframe) => keyframe.value);
+	if (values.every((value) => typeof value === "number")) return "number";
+	if (values.every((value) => BoardColorSchema.safeParse(value).success)) return "color";
+	return "discrete";
+}
+
 function compileTrack(animationId: string, id: string, track: BoardTrack, targetType: string): CompiledTrack | null {
 	const resolved = resolveBoardProperty(targetType, track.property);
 	if (!resolved.ok) return null;
-	const { spec } = resolved;
+	const kind = targetType === "script" ? parameterKind(track) : resolved.spec.kind;
 	const times = new Float64Array(track.keyframes.length);
 	const values: unknown[] = [];
 	const eases: BoardEaseFunction[] = [];
@@ -152,12 +161,12 @@ function compileTrack(animationId: string, id: string, track: BoardTrack, target
 		target: track.target,
 		property: track.property,
 		path: track.property.split("."),
-		kind: spec.kind,
-		multiplicative: Boolean(spec.multiplicative),
+		kind,
+		multiplicative: Boolean(resolved.spec.multiplicative),
 		composite: track.composite,
-		spline: track.interpolation === "spline" && spec.kind === "vec2",
-		step: track.interpolation === "step" || spec.kind === "discrete",
-		orient: Boolean(track.orient) && spec.kind === "vec2" && track.property === "position",
+		spline: track.interpolation === "spline" && kind === "vec2",
+		step: track.interpolation === "step" || kind === "discrete",
+		orient: Boolean(track.orient) && kind === "vec2" && track.property === "position",
 		times,
 		values,
 		eases,
@@ -196,7 +205,9 @@ function compileAnimation(animationId: string, animation: BoardAnimation, docume
 			? BOARD_CAMERA_TARGET
 			: document.animations[track.target]
 				? "animation"
-				: document.items[track.target]?.type;
+				: document.board.scripts?.[track.target]
+					? "script"
+					: document.items[track.target]?.type;
 		if (!targetType) continue;
 		const entry = compileTrack(animationId, id, track, targetType);
 		if (!entry) continue;
@@ -329,6 +340,7 @@ export type BoardCameraOverride = {
 
 export type BoardEvaluation = {
 	items: ReadonlyMap<string, BoardItem>;
+	scripts: ReadonlyMap<string, BoardScript>;
 	camera: BoardCameraOverride;
 	times: ReadonlyMap<string, number>;
 };
@@ -427,13 +439,15 @@ export function evaluateBoardAnimations(
 	}
 
 	const items = new Map<string, BoardItem>();
+	const scripts = new Map<string, BoardScript>();
 	const camera: BoardCameraOverride = {};
 	const ordered = [...groups.values()].sort((a, b) => a.path.length - b.path.length);
 	for (const group of ordered) {
 		const isCamera = group.target === BOARD_CAMERA_TARGET;
-		const base = isCamera ? undefined : (items.get(group.target) ?? compiled.document.items[group.target]);
-		if (!isCamera && !base) continue;
-		let value = isCamera ? (camera as Record<string, unknown>)[group.path[0] as string] : readPath(base, group.path);
+		const script = isCamera ? undefined : (scripts.get(group.target) ?? compiled.document.board.scripts?.[group.target]);
+		const base = isCamera || script ? undefined : (items.get(group.target) ?? compiled.document.items[group.target]);
+		if (!isCamera && !script && !base) continue;
+		let value = isCamera ? (camera as Record<string, unknown>)[group.path[0] as string] : readPath(script ?? base, group.path);
 		let orientTrack: [CompiledTrack, number] | null = null;
 		if (group.winner) {
 			value = sampleBoardTrack(group.winner, group.winnerTime, resolveColor);
@@ -447,6 +461,10 @@ export function evaluateBoardAnimations(
 			(camera as Record<string, unknown>)[group.path[0] as string] = value;
 			continue;
 		}
+		if (script) {
+			scripts.set(group.target, writePath(script, group.path, value) as BoardScript);
+			continue;
+		}
 		let next = writePath(base as unknown as Record<string, unknown>, group.path, value) as unknown as BoardItem;
 		if (orientTrack) {
 			const angle = orientation(orientTrack[0], orientTrack[1], resolveColor);
@@ -454,14 +472,26 @@ export function evaluateBoardAnimations(
 		}
 		items.set(group.target, next);
 	}
-	return { items, camera, times: local };
+	return { items, scripts, camera, times: local };
+}
+
+export function withBoardScripts(document: BoardDocument, scripts: ReadonlyMap<string, BoardScript>): BoardDocument {
+	const stored = document.board.scripts;
+	if (scripts.size === 0 || !stored) return document;
+	const next = { ...stored };
+	for (const [id, script] of scripts) {
+		const base = stored[id];
+		if (base) next[id] = { ...base, params: script.params };
+	}
+	return { ...document, board: { ...document.board, scripts: next } };
 }
 
 export function applyBoardEvaluation(document: BoardDocument, evaluation: BoardEvaluation): BoardDocument {
-	if (evaluation.items.size === 0) return document;
+	const scripted = withBoardScripts(document, evaluation.scripts);
+	if (evaluation.items.size === 0) return scripted;
 	const items = { ...document.items };
 	for (const [id, item] of evaluation.items) items[id] = item;
-	return { ...document, items };
+	return { ...scripted, items };
 }
 
 export function boardDocumentAt(document: BoardDocument, animationId: string | null, time: number, options: BoardEvaluateOptions = {}): { document: BoardDocument; evaluation: BoardEvaluation } {

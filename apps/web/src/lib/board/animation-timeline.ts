@@ -1,4 +1,9 @@
-import type { BoardAnimation, BoardItem, BoardKeyframe } from "@cohub/protocol";
+import type {
+	BoardAnimation,
+	BoardItem,
+	BoardKeyframe,
+	BoardScript,
+} from "@cohub/protocol";
 import { BOARD_CAMERA_TARGET } from "@cohub/protocol";
 import {
 	type BoardValueKind,
@@ -24,7 +29,7 @@ export type BoardTrackRow = {
 
 export type BoardTrackGroup = {
 	target: string;
-	kind: "camera" | "item" | "animation";
+	kind: "camera" | "item" | "animation" | "script";
 	label: string;
 	itemType: string | null;
 	rows: BoardTrackRow[];
@@ -87,6 +92,7 @@ function propertyKind(targetType: string, property: string): BoardValueKind {
 export function boardTrackGroups(input: {
 	items: Readonly<Record<string, BoardItem>>;
 	animations: Readonly<Record<string, BoardAnimation>>;
+	scripts?: Readonly<Record<string, BoardScript>>;
 	animation: BoardAnimation;
 	selection: readonly string[];
 	order: (id: string) => number;
@@ -98,11 +104,19 @@ export function boardTrackGroups(input: {
 		if (existing) return existing;
 		const item = items[target];
 		const nested = animations[target];
-		if (target !== BOARD_CAMERA_TARGET && !item && !nested) return null;
+		const script = input.scripts?.[target];
+		if (target !== BOARD_CAMERA_TARGET && !item && !nested && !script)
+			return null;
 		const created: BoardTrackGroup = {
 			target,
 			kind:
-				target === BOARD_CAMERA_TARGET ? "camera" : item ? "item" : "animation",
+				target === BOARD_CAMERA_TARGET
+					? "camera"
+					: item
+						? "item"
+						: nested
+							? "animation"
+							: "script",
 			label: item ? boardItemLabel(item, target) : (nested?.name ?? target),
 			itemType: item?.type ?? null,
 			rows: [],
@@ -119,11 +133,7 @@ export function boardTrackGroups(input: {
 			target: entry.target,
 			property,
 			kind: propertyKind(
-				entry.kind === "item"
-					? (entry.itemType ?? "")
-					: entry.kind === "camera"
-						? BOARD_CAMERA_TARGET
-						: "animation",
+				entry.kind === "item" ? (entry.itemType ?? "") : entry.kind,
 				property,
 			),
 			keyable:
@@ -177,7 +187,13 @@ export function boardTrackGroups(input: {
 		entry.times = [...times].sort((a, b) => a - b);
 	}
 	const rank = (entry: BoardTrackGroup) =>
-		entry.kind === "camera" ? -2 : entry.kind === "animation" ? -1 : 0;
+		entry.kind === "camera"
+			? -3
+			: entry.kind === "script"
+				? -2
+				: entry.kind === "animation"
+					? -1
+					: 0;
 	return [...groups.values()].sort(
 		(a, b) =>
 			rank(a) - rank(b) ||

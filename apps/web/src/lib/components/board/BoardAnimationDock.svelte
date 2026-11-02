@@ -104,6 +104,7 @@ const groups = $derived(
 		? boardTrackGroups({
 				items: editor.document.items,
 				animations: editor.animations,
+				scripts: editor.settings.scripts,
 				animation,
 				selection: editor.selection,
 				order,
