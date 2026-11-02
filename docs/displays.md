@@ -139,9 +139,12 @@ no computer.
   service on and exempts it from battery limits. After that the app starts the helper by itself
   whenever it serves a Space, turning Wireless debugging on when the phone is on Wi-Fi; there is no
   prompt and nothing to grant again. Starting needs Wi-Fi (any network, a hotspot too), since
-  Wireless debugging runs on nothing else (`wifi_off`). What last went wrong (`detail`: a refused key,
-  a port that did not answer, a helper that did not attach or stopped) shows under the menu's
-  Diagnostics, so a phone with no computer can still tell.
+  Wireless debugging runs on nothing else (`wifi_off`). A start replaces any helper left behind; one
+  that does not attach, or a Wireless debugging that does not answer, gets Wireless debugging
+  restarted and one more try, and a helper attaching rebinds the accessibility service if it crashed,
+  so nothing asks for a reboot. What last went wrong (`detail`: a refused key, a port that did not
+  answer, where a helper that did not attach stopped) shows under the menu's Diagnostics, so a phone
+  with no computer can still tell.
 - **The helper** (`helper/Helper.kt`, `ICohubHelper.aidl`) runs `app_process` from Cohub's own APK
   and hands its binder over through a provider only the shell may call, with a nonce of the start.
   It answers the app alone, does only what its typed calls name (no commands), and lives as long as

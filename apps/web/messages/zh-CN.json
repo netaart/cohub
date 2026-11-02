@@ -295,7 +295,7 @@
 	"runtime_phone_control_error_pairing_timed_out": "配对已超时，准备好后请重新设置。",
 	"runtime_phone_control_error_wireless_debugging_off": "请连接 Wi-Fi，并在开发者选项中开启“无线调试”。",
 	"runtime_phone_control_error_wireless_debugging_unreachable": "Cohub 连不上无线调试。请连接 Wi-Fi 并重新开启。",
-	"runtime_phone_control_error_helper_did_not_start": "手机操作未能启动。请重试；如果一直失败，请重启手机。",
+	"runtime_phone_control_error_helper_did_not_start": "重启无线调试后，手机操作仍未能启动。请重试；诊断信息里有它停在哪一步。",
 	"runtime_phone_control_error_helper_stopped": "手机操作已停止，正在重新启动。",
 	"runtime_phone_control_error_unpaired": "配对已失效，请重新设置手机操作。",
 	"runtime_display_needs_you": "Agent 需要你处理：{reason}",

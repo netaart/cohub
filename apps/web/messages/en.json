@@ -295,7 +295,7 @@
 	"runtime_phone_control_error_pairing_timed_out": "Pairing timed out. Set it up again when you are ready.",
 	"runtime_phone_control_error_wireless_debugging_off": "Connect to Wi-Fi and turn on Wireless debugging in Developer options.",
 	"runtime_phone_control_error_wireless_debugging_unreachable": "Cohub cannot reach Wireless debugging. Connect to Wi-Fi and turn it on again.",
-	"runtime_phone_control_error_helper_did_not_start": "Phone control did not start. Try again; if it keeps failing, restart the phone.",
+	"runtime_phone_control_error_helper_did_not_start": "Phone control did not start, even after restarting Wireless debugging. Try again; Diagnostics says where it stopped.",
 	"runtime_phone_control_error_helper_stopped": "Phone control stopped and is restarting.",
 	"runtime_phone_control_error_unpaired": "Pairing was revoked. Set up phone control again.",
 	"runtime_display_needs_you": "Agent needs you: {reason}",

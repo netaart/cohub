@@ -142,17 +142,26 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         return Bundle().apply { putBinder(HelperHandoff.KEY_APP, token) }
     }
 
-    private fun prepare(helper: ICohubHelper) {
+    private suspend fun prepare(helper: ICohubHelper) {
         runCatching { helper.prepare() }
-        if (prefs.getBoolean(PREPARED, false)) return
-        if (enableControl()) prefs.edit { putBoolean(PREPARED, true) }
+        if (!prefs.getBoolean(PREPARED, false)) {
+            if (enableControl()) prefs.edit { putBoolean(PREPARED, true) }
+            return
+        }
+        delay(BIND_MS)
+        if (DisplayControl.service.value == null && controlService in accessibilityServices()) enableControl()
     }
+
+    private val controlService get() = ComponentName(context, ControlService::class.java).flattenToString()
+
+    private fun accessibilityServices() =
+        Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').filter { it.isNotEmpty() }
 
     fun enableControl(): Boolean {
         if (!canWriteSecureSettings()) return false
         val resolver = context.contentResolver
-        val service = ComponentName(context, ControlService::class.java).flattenToString()
-        val listed = Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').filter { it.isNotEmpty() }
+        val service = controlService
+        val listed = accessibilityServices()
         fun list(services: List<String>) = Settings.Secure.putString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, services.joinToString(":"))
         when {
             service !in listed -> list(listed + service)
@@ -178,7 +187,8 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
             starting.withLock {
                 if (_helper.value != null) return@withLock
                 enter(Stage.STARTING)
-                val error = launchHelper()
+                var error = launchHelper()
+                if (error in RECOVERABLE && restartWirelessDebugging()) error = launchHelper()
                 if (error != null && _helper.value == null) {
                     enter(if (error == "unpaired") Stage.OFF else Stage.STOPPED, error)
                 }
@@ -192,7 +202,8 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         val next = token()
         nonce = next
         val info = context.applicationInfo
-        val command = "CLASSPATH=${info.sourceDir} setsid app_process /system/bin --nice-name=${context.packageName}:helper " +
+        // A helper left from an earlier app can hold on; the new one replaces it.
+        val command = "pkill -f '^${context.packageName}:helper$'; CLASSPATH=${info.sourceDir} setsid app_process /system/bin --nice-name=${context.packageName}:helper " +
             "${HelperMain::class.java.name} ${context.packageName} ${info.uid} $next </dev/null >$HELPER_OUT 2>&1 &"
         val last = prefs.getInt(PORT, 0)
         val launched = System.currentTimeMillis()
@@ -206,6 +217,16 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         if (withTimeoutOrNull(ATTACH_MS) { _helper.first { it != null } } != null) return null
         note("the helper did not attach within ${ATTACH_MS / 1000} s: ${helperFailure(key, launched)}")
         return "helper_did_not_start"
+    }
+
+    /** What a reboot would clear: adbd's connections, and the port it listens on. */
+    private suspend fun restartWirelessDebugging(): Boolean {
+        if (!canWriteSecureSettings()) return false
+        note("restarting Wireless debugging")
+        runCatching { Settings.Global.putInt(context.contentResolver, ADB_WIFI_ENABLED, 0) }.getOrElse { return false }
+        prefs.edit { remove(PORT) }
+        delay(ADB_RESTART_MS)
+        return true
     }
 
     /** The helper logs as the shell, which only adbd can read back. */
@@ -495,6 +516,9 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         const val PAIRED = "paired"
         const val PREPARED = "prepared"
         const val REBIND_MS = 500L
+        const val BIND_MS = 3_000L
+        const val ADB_RESTART_MS = 1_000L
+        val RECOVERABLE = setOf("helper_did_not_start", "wireless_debugging_unreachable")
         const val HELPER_OUT = "/data/local/tmp/cohub-helper.out"
         const val PORT = "port"
         const val PAIRING_PORT = "pairingPort"
