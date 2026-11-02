@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: node-android
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -32,7 +32,8 @@ jobs:
           version="$(sed -n 's/^const NODE_VERSION = "\(.*\)";$/\1/p' scripts/stage-runtime.mjs)"
           name="node-v${version}-android-arm64.gz"
           published=false
-          if curl -fsI "https://public.cohub.live/node/v${version}/${name}" > /dev/null; then published=true; fi
+          # The checksum goes up last, so it marks a complete publish.
+          if curl -fsI "https://public.cohub.live/node/v${version}/${name}.sha256" > /dev/null; then published=true; fi
           {
             echo "version=$version"
             echo "name=$name"
@@ -112,4 +113,6 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.aws
           printf '[default]\nrequest_checksum_calculation = when_required\nresponse_checksum_validation = when_required\ns3 =\n    addressing_style = virtual\n' > ~/.aws/config
-          aws s3 cp dist "s3://cohub-public/node/v${VERSION}/" --endpoint-url https://oss-us-west-1.aliyuncs.com --recursive --cache-control 'public, max-age=31536000, immutable'
+          upload() { aws s3 cp "$@" --endpoint-url https://oss-us-west-1.aliyuncs.com --cache-control 'public, max-age=31536000, immutable'; }
+          upload dist "s3://cohub-public/node/v${VERSION}/" --recursive --exclude '*.sha256'
+          upload dist "s3://cohub-public/node/v${VERSION}/" --recursive --exclude '*' --include '*.sha256'
