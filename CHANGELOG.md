@@ -4,6 +4,22 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.89 — 2026-11-02
+
+- **Phone control and agent screens**: Android 14 phones pair once through Wireless debugging, then a shell helper gives each Space a trusted agent screen with its own focus, mirrors screens without MediaProjection, and injects real touches and keys. A floating edge indicator shows the agent live with Stop, Take over and Hand back, while `display.act` plans target by text, wait for the screen to settle, and stop at the first surprise; without phone control, the phone's own screen can still be shared through accessibility.
+- **Local-first Runtimes**: desktop and Android reach a served Space's files and screens through a private sandboxd loopback API, bypassing API, gateway and relay with ranged streaming and a fallback that never retries a delivered mutation. `cohub runtime up` now serves a folder with no Harness on the Cohub Harness, and a new Linux desktop app (C#/.NET 10, GTK 4, WebKitGTK) joins macOS and Windows with AppImage delta updates, D-Bus single instance and deep links.
+- **Board GPU shaders**: Board scripts become Board-wide modules with WebGL 2 passes written as GLSL functions — above or below the owner or as pixel filters, instanced sprites, a jump-flooded `surfaces` distance field for collisions, 60 Hz state, declared uniforms and `cohub:` includes. Loops are bounded, compile errors map to author lines, quality adapts to frame time, and Web exports run shaders through a local Chrome while Canvas exports name fallbacks.
+- **Board visual effects and reactions**: items gain animatable `style.filter`, `style.shadow` and `style.blend` (a frame layers its contents), `board.atmosphere` vignette and grain, effect shapes and colors on a pooled particle container, one-raster text reveals, and viewer heart/star/spark/confetti reactions through `BoardStage.burst`. WebGL uses one color-matrix pass and a shared shadow atlas, low-tier devices skip blur and shadows, and reads preserve fields written by newer clients.
+- **Approval cards for local agents**: Codex and Claude Code Turns gain `inherit`, `auto`, `full_access` and `read_only` approval modes, and command or file permission requests become web approval cards with Allow, Allow for this chat and Decline, relayed to the Runtime and declined after 30 minutes or a stop. Codex adds a per-Turn Fast `priority` service tier, and `cohub spaces prompt` exposes `--approval-mode` and `--service-tier`.
+
+### Bug Fixes
+
+- Android's share indicator no longer renders as a full-width white bar: a collapsed zero-height SurfaceView is replaced by an edge-held dot that becomes a pill only while an agent works or asks for a person.
+- Display share, stop, status, setup and pair now answer the state after the call, so a share that worked no longer reports that it failed.
+- Phone control pairing now follows the Wireless debugging dialog instead of settings flags, retries a failed code on the dialog's new port, and asks for local network access before mDNS discovery.
+- Android's bundled Node links libc++ statically, so `cohub` starts on phones instead of failing to load `libc++_shared.so`.
+- Blocked upstream replays are classified as retryable, so bounded session recovery resumes after a failed model round without overriding terminal errors or cancellation.
+
 ## v2.88 — 2026-10-31
 
 - **Live Board backgrounds for New Chat**: Spaces can point `ui.newChat.background` at a `.board` file to render it live and editable behind New Chat, sharing one replica with Board windows so writes have a single owner; shortcuts and paste route to the Board last interacted with, and the Board menu sets or clears the background without disturbing other `space.json` fields.
