@@ -52,6 +52,22 @@ var macCharKeys = map[rune]uint16{
 	'\\': 0x2a, ',': 0x2b, '/': 0x2c, 'n': 0x2d, 'm': 0x2e, '.': 0x2f, '`': 0x32,
 }
 
+var macShifted = map[rune]rune{
+	'~': '`', '!': '1', '@': '2', '#': '3', '$': '4', '%': '5', '^': '6', '&': '7', '*': '8', '(': '9',
+	')': '0', '_': '-', '+': '=', '{': '[', '}': ']', '|': '\\', ':': ';', '"': '\'', '<': ',', '>': '.', '?': '/',
+}
+
+func macKey(r rune) (code uint16, shift bool, ok bool) {
+	switch base, shifted := macShifted[r]; {
+	case shifted:
+		r, shift = base, true
+	case r >= 'A' && r <= 'Z':
+		r, shift = r-'A'+'a', true
+	}
+	code, ok = macCharKeys[r]
+	return code, shift, ok
+}
+
 func x11Keysym(key string) (uint32, bool) {
 	if named, ok := namedKeys[key]; ok {
 		return named.x11, true

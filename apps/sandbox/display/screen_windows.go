@@ -381,7 +381,7 @@ func (s *windowsScreen) Key(down bool, key string) error {
 				return errorf(CodeUnsupported, "key %q is not supported", key)
 			}
 			// Shortcuts match virtual keys (Ctrl+C), not the characters a layout produces.
-			if (s.keys["Control"] != nil || s.keys["Alt"] != nil || s.keys["Meta"] != nil) && runes[0] <= 0xffff {
+			if (s.keys["Control"] != nil || s.keys["Alt"] != nil || s.keys["Meta"] != nil || s.keys["Shift"] != nil) && runes[0] <= 0xffff {
 				if scan, _, _ := procVkKeyScanW.Call(uintptr(runes[0])); int16(scan) != -1 {
 					events = []input{virtualKey(uint16(scan&0xff), true)}
 				}

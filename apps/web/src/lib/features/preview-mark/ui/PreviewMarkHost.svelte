@@ -3,6 +3,7 @@ import { Loader2, Scissors } from "lucide-svelte";
 import { onDestroy, tick } from "svelte";
 import { fade, scale } from "svelte/transition";
 import { portal } from "$lib/actions/portal";
+import { isApplePlatform } from "$lib/keyboard";
 import {
 	DURATION_MODAL_IN,
 	DURATION_MODAL_OUT,
@@ -63,20 +64,13 @@ let panelEl: HTMLDivElement | null = $state(null);
 let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 let softNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 
-const isApplePlatform = $derived.by(() => {
-	if (typeof navigator === "undefined") return false;
-	const platform = navigator.platform ?? "";
-	const ua = navigator.userAgent ?? "";
-	return /Mac|iPhone|iPad|iPod/.test(platform) || /Mac OS X/.test(ua);
-});
-const triggerTitle = $derived(
-	isApplePlatform ? "Capture & mark (⌘⇧S)" : "Capture & mark (Ctrl+Shift+S)",
-);
-const triggerAriaLabel = $derived(
-	isApplePlatform
-		? "Capture and mark preview (Command Shift S)"
-		: "Capture and mark preview (Control Shift S)",
-);
+const apple = isApplePlatform();
+const triggerTitle = apple
+	? "Capture & mark (⌘⇧S)"
+	: "Capture & mark (Ctrl+Shift+S)";
+const triggerAriaLabel = apple
+	? "Capture and mark preview (Command Shift S)"
+	: "Capture and mark preview (Control Shift S)";
 
 const usesDisplayMedia = $derived(
 	Boolean(target?.kind === "iframe" || (!target && allowViewport)),

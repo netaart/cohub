@@ -4,6 +4,14 @@ export function isComposingKeyboardEvent(
 	return event.isComposing || event.key === "Process" || event.keyCode === 229;
 }
 
+export function isApplePlatform(): boolean {
+	if (typeof navigator === "undefined") return false;
+	return (
+		/Mac|iPhone|iPad|iPod/.test(navigator.platform ?? "") ||
+		/Mac OS X/.test(navigator.userAgent ?? "")
+	);
+}
+
 export function isEditableShortcutTarget(target: EventTarget | null): boolean {
 	if (!(target instanceof HTMLElement)) return false;
 	return Boolean(

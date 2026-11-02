@@ -8,7 +8,6 @@ import {
 	type DisplayInputEvent,
 	type DisplayModifierKey,
 	type DisplayPlatform,
-	displayKeyEvents,
 } from "@cohub/protocol/display";
 import { ChevronDown, ClipboardPaste } from "lucide-svelte";
 import { onDestroy } from "svelte";
@@ -16,18 +15,20 @@ import { portal } from "$lib/actions/portal";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
-import { isNamedKey, keyboardInput, textBatches } from "./display-input";
+import { eventModifiers, isNamedKey, keyboardInput, textBatches } from "./display-input";
 import { diffText } from "./display-text";
 
 type Props = {
 	desktop: boolean;
 	platform: DisplayPlatform | undefined;
+	meta: DisplayModifierKey;
 	password: boolean;
-	send: (events: DisplayInputEvent[]) => void;
+	send: (events: DisplayInputEvent[], held?: readonly DisplayModifierKey[]) => void;
+	onKeyUp: (event: KeyboardEvent) => void;
 	onOpenChange: (open: boolean) => void;
 };
 
-const { desktop, platform, password, send, onOpenChange }: Props = $props();
+const { desktop, platform, meta, password, send, onKeyUp, onOpenChange }: Props = $props();
 
 const SENTINEL = " ";
 const MAX_BUFFER = 256;
@@ -122,6 +123,15 @@ export function hide() {
 	field?.blur();
 }
 
+export function modifiers(): DisplayModifierKey[] {
+	return held();
+}
+
+export function consume() {
+	const kept = Object.entries(latches).filter(([, latch]) => latch === "locked");
+	if (kept.length !== Object.keys(latches).length) latches = Object.fromEntries(kept);
+}
+
 export function reset() {
 	if (!composing) resetBuffer();
 }
@@ -139,13 +149,8 @@ function resetBuffer() {
 	caretToEnd();
 }
 
-function held(extra: Partial<Record<DisplayModifierKey, boolean>> = {}): DisplayModifierKey[] {
-	return DISPLAY_MODIFIER_KEYS.filter((key) => latches[key] || extra[key]);
-}
-
-function releaseOnce() {
-	const kept = Object.entries(latches).filter(([, latch]) => latch === "locked");
-	if (kept.length !== Object.keys(latches).length) latches = Object.fromEntries(kept);
+function held(extra: readonly DisplayModifierKey[] = []): DisplayModifierKey[] {
+	return DISPLAY_MODIFIER_KEYS.filter((key) => latches[key] || extra.includes(key));
 }
 
 function toggle(key: DisplayModifierKey) {
@@ -154,10 +159,11 @@ function toggle(key: DisplayModifierKey) {
 	latches = next ? { ...rest, [key]: next } : rest;
 }
 
-function press(key: string, own: Partial<Record<DisplayModifierKey, boolean>> = {}) {
+function press(key: string, own: readonly DisplayModifierKey[] = []) {
 	const printable = [...key].length === 1;
-	send(desktop ? displayKeyEvents(printable ? key.toLowerCase() : key, held(own)) : [{ type: "key", action: "press", key }]);
-	releaseOnce();
+	send([{ type: "key", action: "press", key: desktop && printable ? key.toLowerCase() : key }], held(own));
+	send([], []);
+	consume();
 	reset();
 }
 
@@ -166,14 +172,13 @@ function onKeyDown(event: KeyboardEvent) {
 	const printable = [...event.key].length === 1;
 	if (desktop && held().length && (printable || isNamedKey(event.key))) {
 		event.preventDefault();
-		press(event.key, { Control: event.ctrlKey, Alt: event.altKey, Shift: event.shiftKey, Meta: event.metaKey });
+		press(event.key, eventModifiers(event, meta));
 		return;
 	}
-	if (printable && !event.ctrlKey && !event.metaKey) return;
-	const input = keyboardInput(event, desktop);
-	if (!input.length) return;
+	const input = keyboardInput(event, desktop, meta);
+	if (!input || input.events.some((item) => item.type === "text")) return;
 	event.preventDefault();
-	send(input);
+	send(input.events, input.held);
 	reset();
 }
 
@@ -193,8 +198,8 @@ function sync() {
 	} else if (erase || text) {
 		const backspaces = Array.from({ length: erase }, (): DisplayInputEvent => ({ type: "key", action: "press", key: "Backspace" }));
 		const [first = [], ...rest] = textBatches(text);
-		send([...backspaces, ...first]);
-		for (const batch of rest) send(batch);
+		send([...backspaces, ...first], []);
+		for (const batch of rest) send(batch, []);
 	}
 	if (!value.startsWith(SENTINEL) || value.length > MAX_BUFFER) resetBuffer();
 	else caretToEnd();
@@ -219,7 +224,7 @@ function onBlur() {
 async function pasteClipboard() {
 	const text = await navigator.clipboard?.readText().catch(() => "");
 	if (!text) return;
-	for (const batch of textBatches(text)) send(batch);
+	for (const batch of textBatches(text)) send(batch, []);
 	reset();
 }
 
@@ -243,6 +248,7 @@ function keepFocus(event: PointerEvent) {
 	onfocus={onFocus}
 	onblur={onBlur}
 	onkeydown={onKeyDown}
+	onkeyup={onKeyUp}
 	onbeforeinput={onBeforeInput}
 	oninput={() => {
 		if (!composing) sync();

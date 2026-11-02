@@ -1,5 +1,8 @@
 <script lang="ts">
-import type { DisplayInputEvent } from "@cohub/protocol/display";
+import type {
+	DisplayInputEvent,
+	DisplayModifierKey,
+} from "@cohub/protocol/display";
 import type { SpaceDisplaysApi, SpacePresenceUser } from "@neta-art/cohub";
 import {
 	ChevronLeft,
@@ -26,7 +29,10 @@ import DisplayViewers from "./DisplayViewers.svelte";
 import { createDisplayCamera } from "./display-camera.svelte";
 import {
 	containedRect,
+	createModifierSync,
+	eventModifiers,
 	keyboardInput,
+	remoteMeta,
 	textBatches,
 	toDisplayPoint,
 	wheelFraction,
@@ -94,6 +100,7 @@ const controllable = $derived(
 		view.connection?.control === true,
 );
 const desktop = $derived(display?.desktop === true);
+const meta = $derived(remoteMeta(display?.platform));
 const remoteFocus = $derived(controllable ? view.focus : null);
 
 let video = $state<HTMLVideoElement | null>(null);
@@ -128,11 +135,17 @@ $effect(() => {
 });
 
 $effect(() => {
+	const release = () => send([], []);
 	const update = () => {
 		pageVisible = document.visibilityState === "visible";
+		if (!pageVisible) release();
 	};
 	document.addEventListener("visibilitychange", update);
-	return () => document.removeEventListener("visibilitychange", update);
+	window.addEventListener("blur", release);
+	return () => {
+		document.removeEventListener("visibilitychange", update);
+		window.removeEventListener("blur", release);
+	};
 });
 
 // Access can arrive after the window opened, e.g. from a link: follow it.
@@ -149,7 +162,13 @@ $effect(() => {
 });
 
 $effect(() => {
-	if (view.inputError > 0) flash(m.display_input_failed({}, { locale }));
+	if (view.inputError === 0) return;
+	flash(m.display_input_failed({}, { locale }));
+	untrack(() => {
+		if (!modifiers.held.length) return;
+		modifiers.forget();
+		send([], []);
+	});
 });
 
 $effect(() => {
@@ -205,8 +224,32 @@ function flash(text: string) {
 	}, NOTICE_MS);
 }
 
-function send(events: DisplayInputEvent[]) {
-	if (controllable) view.connection?.sendInput(events);
+const modifiers = createModifierSync();
+let modifiersOn: typeof view.connection = null;
+
+function send(
+	events: DisplayInputEvent[],
+	held?: readonly DisplayModifierKey[],
+) {
+	const connection = view.connection;
+	if (!controllable || !connection) return;
+	if (connection !== modifiersOn) {
+		modifiersOn = connection;
+		modifiers.clear();
+	}
+	const lead = held && desktop ? modifiers.to(held) : [];
+	const batch = [...lead, ...events];
+	if (batch.length && !connection.sendInput(batch) && lead.length)
+		modifiers.clear();
+}
+
+function latched(): DisplayModifierKey[] {
+	return keyboard?.modifiers() ?? [];
+}
+
+function unlatch() {
+	keyboard?.consume();
+	send([], []);
 }
 
 function contentRect() {
@@ -243,10 +286,14 @@ function queueMove(point: Point) {
 
 function click(point: Point, button: (typeof POINTER_BUTTONS)[number]) {
 	flushMove();
-	send([
-		{ type: "pointer", action: "down", ...point, button },
-		{ type: "pointer", action: "up", ...point, button },
-	]);
+	send(
+		[
+			{ type: "pointer", action: "down", ...point, button },
+			{ type: "pointer", action: "up", ...point, button },
+		],
+		latched(),
+	);
+	unlatch();
 }
 
 function focusSurface() {
@@ -282,7 +329,10 @@ function onPointerDown(event: PointerEvent) {
 	pointerId = event.pointerId;
 	pointerButton = button;
 	noteTap(point);
-	send([{ type: "pointer", action: "down", ...point, button }]);
+	send(
+		[{ type: "pointer", action: "down", ...point, button }],
+		eventModifiers(event, meta),
+	);
 }
 
 function onPointerMove(event: PointerEvent) {
@@ -315,7 +365,10 @@ function onPointerEnd(event: PointerEvent) {
 		send([{ type: "pointer", action: "cancel", x: 0, y: 0 }]);
 		return;
 	}
-	send([{ type: "pointer", action: "up", ...point, button: pointerButton }]);
+	send(
+		[{ type: "pointer", action: "up", ...point, button: pointerButton }],
+		eventModifiers(event, meta),
+	);
 }
 
 let cursor: Point | null = null;
@@ -394,7 +447,10 @@ function onTouch(intent: DisplayTouchIntent) {
 			pressed = point !== null;
 			if (!point) return;
 			noteTap(point);
-			send([{ type: "pointer", action: "down", ...point, button: "primary" }]);
+			send(
+				[{ type: "pointer", action: "down", ...point, button: "primary" }],
+				latched(),
+			);
 			return;
 		}
 		case "drag": {
@@ -414,6 +470,7 @@ function onTouch(intent: DisplayTouchIntent) {
 					...(point ?? { x: 0, y: 0 }),
 				},
 			]);
+			unlatch();
 			if (point) tapField(point);
 			return;
 		}
@@ -438,14 +495,19 @@ function onTouch(intent: DisplayTouchIntent) {
 				return;
 			}
 			flushMove();
-			send([
-				{
-					type: "pointer",
-					action: intent.type === "hold" ? "down" : "up",
-					...point,
-					button: "primary",
-				},
-			]);
+			const hold = intent.type === "hold";
+			send(
+				[
+					{
+						type: "pointer",
+						action: hold ? "down" : "up",
+						...point,
+						button: "primary",
+					},
+				],
+				hold ? latched() : undefined,
+			);
+			if (!hold) unlatch();
 			return;
 		}
 		case "secondary": {
@@ -476,7 +538,13 @@ function onTouch(intent: DisplayTouchIntent) {
 	}
 }
 
-let wheelScroll = { dx: 0, dy: 0, x: 0.5, y: 0.5 };
+let wheelScroll = {
+	dx: 0,
+	dy: 0,
+	x: 0.5,
+	y: 0.5,
+	held: [] as DisplayModifierKey[],
+};
 let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onWheel(event: WheelEvent) {
@@ -492,27 +560,43 @@ function onWheel(event: WheelEvent) {
 			wheelScroll.dy +
 			wheelFraction(event.deltaY, event.deltaMode, rect.height),
 		...point,
+		// The browser has already turned ⇧-wheel sideways; ⌃-wheel (and a pinch) zooms.
+		held: eventModifiers(event, meta).filter((key) => key !== "Shift"),
 	};
 	scrollTimer ??= setTimeout(() => {
 		scrollTimer = null;
 		const clamp = (value: number) => Math.max(-1, Math.min(1, value));
-		const { dx, dy, x, y } = wheelScroll;
-		wheelScroll = { dx: 0, dy: 0, x, y };
-		if (dx || dy)
-			send([{ type: "scroll", x, y, dx: clamp(dx), dy: clamp(dy) }]);
+		const { dx, dy, x, y, held } = wheelScroll;
+		wheelScroll = { dx: 0, dy: 0, x, y, held: [] };
+		const scroll: DisplayInputEvent = {
+			type: "scroll",
+			x,
+			y,
+			dx: clamp(dx),
+			dy: clamp(dy),
+		};
+		if (dx || dy) send(desktop ? modifiers.around(held, [scroll]) : [scroll]);
 	}, SCROLL_INTERVAL_MS);
 }
 
-function remoteKeys(event: KeyboardEvent): DisplayInputEvent[] {
-	return controllable ? keyboardInput(event, desktop) : [];
+function remoteKeys(event: KeyboardEvent) {
+	return controllable ? keyboardInput(event, desktop, meta) : null;
 }
 
 function onKeyDown(event: KeyboardEvent) {
 	const input = remoteKeys(event);
-	if (!input.length) return;
+	if (!input) return;
 	event.preventDefault();
 	event.stopPropagation();
-	send(input);
+	send(input.events, input.held);
+}
+
+function onKeyUp(event: KeyboardEvent) {
+	const still = eventModifiers(event, meta);
+	send(
+		[],
+		modifiers.held.filter((key) => still.includes(key)),
+	);
 }
 
 function onPaste(event: ClipboardEvent) {
@@ -520,7 +604,7 @@ function onPaste(event: ClipboardEvent) {
 	const text = event.clipboardData?.getData("text/plain");
 	if (!text) return;
 	event.preventDefault();
-	for (const batch of textBatches(text)) send(batch);
+	for (const batch of textBatches(text)) send(batch, []);
 }
 
 /**
@@ -542,12 +626,14 @@ function remoteInput(node: HTMLElement, enabled: boolean) {
 		["wheel", onWheel, { passive: false }],
 		["gesturestart", keepStill, { passive: false }],
 		["keydown", onKeyDown],
+		["keyup", onKeyUp],
+		["blur", () => send([], [])],
 		["paste", onPaste],
 		["contextmenu", keepStill],
 	];
 	for (const [type, listener, options] of listeners)
 		node.addEventListener(type, listener as EventListener, options);
-	const release = claimKeyboard(node, (event) => remoteKeys(event).length > 0);
+	const release = claimKeyboard(node, (event) => remoteKeys(event) !== null);
 	const focusable = (value: boolean) => {
 		node.tabIndex = value ? 0 : -1;
 	};
@@ -613,6 +699,7 @@ function onKeyboardOpen(open: boolean) {
 	}
 	autoKeyboard = false;
 	zoomedFor = "";
+	send([], []);
 	camera.refit();
 }
 
@@ -851,8 +938,10 @@ const problemCopy = $derived.by(() => {
 			bind:this={keyboard}
 			{desktop}
 			platform={display?.platform}
+			{meta}
 			password={remoteFocus?.password === true}
 			{send}
+			{onKeyUp}
 			onOpenChange={onKeyboardOpen}
 		/>
 

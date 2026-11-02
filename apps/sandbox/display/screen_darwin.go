@@ -289,12 +289,16 @@ func (s *macScreen) captureInProcess() image.Image {
 }
 
 func (s *macScreen) post(event uintptr) error {
+	return s.postFlags(event, s.flags)
+}
+
+func (s *macScreen) postFlags(event uintptr, flags uint64) error {
 	if event == 0 {
 		return errorf(CodeFailed, "Quartz refused the event")
 	}
 	defer cg.release(event)
-	if s.flags != 0 {
-		cg.setFlags(event, s.flags)
+	if flags != 0 {
+		cg.setFlags(event, flags)
 	}
 	cg.post(cgHIDEventTap, event)
 	return nil
@@ -381,8 +385,19 @@ func (s *macScreen) Key(down bool, key string) error {
 	if len(runes) != 1 {
 		return errorf(CodeUnsupported, "key %q is not supported", key)
 	}
-	if code, ok := macCharKeys[runes[0]]; ok && s.flags&(cgFlagCommand|cgFlagControl|cgFlagAlt) != 0 {
-		return s.post(cg.keyboardEvent(0, code, down))
+	if s.flags == 0 {
+		return s.unicode(key, down)
+	}
+	if code, shift, ok := macKey(runes[0]); ok {
+		flags := s.flags
+		if shift {
+			flags |= cgFlagShift
+		}
+		return s.postFlags(cg.keyboardEvent(0, code, down), flags)
+	}
+	// A Unicode event rides key code 0, the A key: under a shortcut modifier it would press ⌘A.
+	if s.flags&(cgFlagCommand|cgFlagControl|cgFlagAlt) != 0 {
+		return errorf(CodeUnsupported, "key %q has no key to hold modifiers with", key)
 	}
 	return s.unicode(key, down)
 }
