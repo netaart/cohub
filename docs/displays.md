@@ -164,9 +164,10 @@ no computer.
   only what the keyboard map can type goes in. The agent screen lists only `back`.
 - **Elements** come from every window on the display, the one in front first: a window floating over
   another is a `dialog`, and the tree names the app in front.
-- **The floating indicator** is an accessibility overlay (no overlay permission): a pill with the
-  agent's own `label` while it works and a dot while the screen is only shared, dragged to either edge and fading when idle; opened, the agent
-  screen live, its last steps and **Stop** (the plan at once and its Turn), **Take over** (its app
+- **The floating indicator** is an accessibility overlay (no overlay permission) held to the left or
+  right edge and dragged along it: a slim green tab while the screen is only shared, a pill with the
+  agent's own `label` while it works, fading when idle. Opened, it offers **Stop sharing**, or the
+  agent screen live, its last steps and **Stop** (the plan at once and its Turn), **Take over** (its app
   moves to the phone's screen; plans refuse with `preempted` until **Hand back**). It steps aside
   inside Cohub unless a person is needed, and shows the same `activity`, `held` and `handover` the
   web sees, which offers **Stop** and **Hand back** too.

@@ -1,6 +1,7 @@
 package live.cohub.android.display
 
 import android.accessibilityservice.AccessibilityService
+import android.content.res.Configuration
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
@@ -32,6 +33,11 @@ class ControlService : AccessibilityService() {
         DisplayControl.connected(this)
         val app = application as CohubApplication
         overlay = app.display?.let { Overlay(this, it, app.scope) }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        overlay?.refresh()
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
