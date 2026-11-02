@@ -36,6 +36,7 @@ import { entriesFromDataTransfer } from "$lib/upload-entries";
 import SessionApprovals from "./SessionApprovals.svelte";
 import SessionRuntimeRecovery from "./SessionRuntimeRecovery.svelte";
 import type { SessionChatHost } from "./session-chat-host.controller.svelte";
+import { resolveTurnHarness } from "./session-utils";
 
 let {
 	host,
@@ -463,7 +464,7 @@ async function handleDraftDrop(event: DragEvent) {
 				</div>
 			{/if}
 			{#if activeSessionId && host.runtimeCatalog?.kind === "local"}
-				<SessionApprovals spaceId={host.spaceId} sessionId={activeSessionId} />
+				<SessionApprovals spaceId={host.spaceId} sessionId={activeSessionId} harnessOf={(turnId) => resolveTurnHarness(activeSessionState?.turns.find((turn) => turn.id === turnId) ?? activeSessionState?.turns.findLast((turn) => resolveTurnHarness(turn) !== "cohub"))} />
 			{/if}
 			{#if activeSessionId && runtimeRecoveryTurn}
 				<SessionRuntimeRecovery spaceId={host.spaceId} sessionId={activeSessionId} turnId={runtimeRecoveryTurn.id} />

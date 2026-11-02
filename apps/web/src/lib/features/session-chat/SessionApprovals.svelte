@@ -1,4 +1,5 @@
 <script lang="ts">
+import { type HarnessKind, harnessLabel } from "@cohub/protocol/runtime";
 import type { ApprovalDecision, SessionApproval } from "@neta-art/cohub";
 import { FileDiff, Loader2, TerminalSquare } from "lucide-svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -6,7 +7,15 @@ import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { subscribeSpaceChannel } from "./space-channel";
 
-const { spaceId, sessionId }: { spaceId: string; sessionId: string } = $props();
+const {
+	spaceId,
+	sessionId,
+	harnessOf,
+}: {
+	spaceId: string;
+	sessionId: string;
+	harnessOf: (turnId: string) => HarnessKind;
+} = $props();
 const locale = $derived(getLocale());
 let approvals = $state<SessionApproval[]>([]);
 let canDecide = $state(false);
@@ -19,6 +28,14 @@ const decisionLabel = (decision: ApprovalDecision) =>
 		accept_for_session: m.runtime_approval_accept_for_session,
 		decline: m.runtime_approval_decline,
 	})[decision]({}, { locale });
+
+const requestLabel = (approval: SessionApproval) =>
+	(approval.kind === "command"
+		? m.runtime_approval_request_command
+		: m.runtime_approval_request_file_change)(
+		{ harness: harnessLabel(harnessOf(approval.turnId)) },
+		{ locale },
+	);
 
 $effect(() => {
 	const target = { spaceId, sessionId };
@@ -78,11 +95,11 @@ async function decide(approval: SessionApproval, decision: ApprovalDecision) {
 </script>
 
 {#each approvals as approval (approval.id)}
-	<div class="border-t border-border-subtle bg-bg-elevated px-3 py-2.5 text-sm" role="group" aria-label={approval.kind === "command" ? m.runtime_approval_request_command({}, { locale }) : m.runtime_approval_request_file_change({}, { locale })}>
+	<div class="border-t border-border-subtle bg-bg-elevated px-3 py-2.5 text-sm" role="group" aria-label={requestLabel(approval)}>
 		<div class="mx-auto flex max-w-3xl flex-col gap-2">
 			<div class="flex min-w-0 items-center gap-2 text-text-primary">
 				{#if approval.kind === "command"}<TerminalSquare class="h-4 w-4 shrink-0 text-text-tertiary" />{:else}<FileDiff class="h-4 w-4 shrink-0 text-text-tertiary" />{/if}
-				<span class="font-medium">{approval.kind === "command" ? m.runtime_approval_request_command({}, { locale }) : m.runtime_approval_request_file_change({}, { locale })}</span>
+				<span class="font-medium">{requestLabel(approval)}</span>
 			</div>
 			{#if approval.command}
 				<pre class="max-h-32 overflow-auto whitespace-pre-wrap break-all rounded-md bg-bg-hover px-2.5 py-1.5 font-mono text-[12px] text-text-secondary">{approval.command}</pre>

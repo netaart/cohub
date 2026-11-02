@@ -89,7 +89,7 @@ export type LocalHarnessAdapter = {
   /** Fails when the harness cannot run; with `strict`, also instead of falling back to a reduced catalog. */
   models(executable: string, cwd: string, options?: { strict?: boolean }): Promise<HarnessModel[]>;
   /** Approval modes this installation enforces; absent or empty hides the choice. */
-  approvalModes?(executable: string): Promise<ApprovalMode[]>;
+  approvalModes?(executable: string, cwd: string): Promise<ApprovalMode[]>;
   run(executor: Executor, turn: HarnessTurn): Promise<HarnessRun>;
   session: NativeSessionFormat;
   /** Every harness reads its own transcripts, so terminal conversations sync to the Space. */

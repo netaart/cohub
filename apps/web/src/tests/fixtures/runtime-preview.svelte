@@ -104,7 +104,12 @@ function makeStatus(): RuntimeStatus {
 			harnesses: ["pi", "codex", "claude", "workbuddy", "cursor"],
 			...(previewState === "limited"
 				? {}
-				: { approvalModes: { codex: [...APPROVAL_MODES] } }),
+				: {
+						approvalModes: {
+							codex: [...APPROVAL_MODES],
+							claude: [...APPROVAL_MODES],
+						},
+					}),
 			models,
 		},
 		workspace: {
@@ -188,7 +193,7 @@ const noop = () => {};
 		<div class="flex-1 text-sm text-text-tertiary">Isolated fixtures · no account or model requests</div>
 		<output aria-label="Approval selection">{approvalMode ?? "unset"}</output>
 		<output aria-label="Model selection">{JSON.stringify(localModel)}</output>
-		<SessionApprovals {spaceId} sessionId="55555555-5555-4555-8555-555555555555" />
-		<SessionComposer bind:value={input} {harness} harnesses={["cohub", ...(status.capabilities?.harnesses ?? [])]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} approvalModes={harness === "codex" ? (status.capabilities?.approvalModes?.codex ?? []) : []} approvalMode={harness === "codex" ? approvalMode : null} onapprovalmodechange={(next) => { approvalMode = next; }} onsubmit={noop} onpickattachment={noop} />
+		<SessionApprovals {spaceId} sessionId="55555555-5555-4555-8555-555555555555" harnessOf={() => (harness === "cohub" ? "codex" : harness)} />
+		<SessionComposer bind:value={input} {harness} harnesses={["cohub", ...(status.capabilities?.harnesses ?? [])]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} approvalModes={harness === "cohub" ? [] : (status.capabilities?.approvalModes?.[harness] ?? [])} approvalMode={harness === "cohub" ? null : approvalMode} onapprovalmodechange={(next) => { approvalMode = next; }} onsubmit={noop} onpickattachment={noop} />
 	</main>
 </div>

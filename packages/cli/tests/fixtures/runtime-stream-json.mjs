@@ -7,7 +7,8 @@ import { createInterface } from "node:readline";
 const args = process.argv.slice(2);
 if (args[0] === "--help") {
   const variant = process.env.STREAM_JSON_FIXTURE_HELP;
-  const flags = ["--input-format", "--output-format", "--include-partial-messages", "--session-id", "--resume", "--permission-mode", "--strict-mcp-config", "--effort", ...(variant === "legacy" ? [] : ["--tools <tools...>"])];
+  const flags = ["--input-format", "--output-format", "--include-partial-messages", "--session-id", "--resume", "--strict-mcp-config", "--effort", ...(variant === "legacy" ? [] : ["--tools <tools...>"])];
+  process.stdout.write(`  --permission-mode <mode>  Permission mode (choices: "acceptEdits",\n                            "bypassPermissions", "default", "plan")\n`);
   const models = variant === "no-models" ? "" : "fixture-a, fixture-b";
   process.stdout.write(`${flags.map((flag) => `  ${flag}  option\n`).join("")}  --model <model>  Model for the session. Currently supported: (${models})\n`);
   process.exit(0);
@@ -15,6 +16,10 @@ if (args[0] === "--help") {
 if (!args.includes("--session-id") && !args.includes("--resume")) {
   // Model discovery: answer `initialize` like Claude Code, gateway models included.
   if (process.env.STREAM_JSON_FIXTURE_HELP === "no-initialize") process.exit(1);
+  if (process.env.STREAM_JSON_FIXTURE_HELP === "no-prompt-tool" && args.includes("--permission-prompt-tool")) {
+    process.stderr.write("error: unknown option '--permission-prompt-tool'\n");
+    process.exit(1);
+  }
   for await (const line of createInterface({ input: process.stdin })) {
     const { request_id } = JSON.parse(line);
     const models = [
@@ -43,8 +48,16 @@ const history = existsSync(file) ? readFileSync(file, "utf8") : "";
 mkdirSync(directory, { recursive: true });
 const record = (value) => appendFileSync(file, `${JSON.stringify({ sessionId: id, ...value })}\n`);
 let waiting = false;
+let asked = null;
 for await (const line of createInterface({ input: process.stdin })) {
   const prompt = JSON.parse(line);
+  // `approve:<tool>` asks for permission like Claude Code and replies with the answer it got.
+  if (prompt.type === "control_response" && prompt.response?.request_id === asked) {
+    const answer = `${prompt.response.response.behavior} ${flag("--permission-prompt-tool")} ${flag("--permission-mode")}`;
+    write({ type: "assistant", message: { id: "m3", content: [{ type: "text", text: answer }] } });
+    write({ type: "result", subtype: "success", is_error: false, result: answer, session_id: id });
+    continue;
+  }
   if (prompt.type === "control_request" && prompt.request?.subtype === "interrupt" && waiting) {
     write({ type: "result", subtype: "error_during_execution", is_error: true, result: "Request interrupted by user", session_id: id });
     continue;
@@ -52,6 +65,13 @@ for await (const line of createInterface({ input: process.stdin })) {
   record({ type: "user", uuid: "u1", message: prompt.message });
   write({ type: "system", subtype: "init", session_id: id, model: "fixture-model" });
   const said = JSON.stringify(prompt);
+  const tool = /approve:(\w+)/.exec(said)?.[1];
+  if (tool) {
+    asked = `request-${tool}`;
+    const input = tool === "Bash" ? { command: "make clean", description: "Clean the build" } : { url: "https://example.com" };
+    write({ type: "control_request", request_id: asked, request: { subtype: "can_use_tool", tool_name: tool, input, decision_reason: "This command requires approval" } });
+    continue;
+  }
   if (said.includes("crash") || said.includes("wait")) {
     write({ type: "stream_event", event: { type: "message_start", message: { id: "m0" } } });
     write({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial " } } });

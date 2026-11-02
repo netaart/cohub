@@ -303,8 +303,8 @@ not replay model or tool work, and a disconnect does not confirm a task stopped.
 Local harnesses are Pi, Codex, Claude Code (`claude`), WorkBuddy (`codebuddy`) and Cursor (`cursor-agent`). Without
 `--harness`, every installed one is tried and one that cannot start is skipped with a warning.
 `cohub spaces prompt --harness codex --approval-mode read_only` picks one of `inherit`, `auto`,
-`full_access` or `read_only` for that Turn, and `--service-tier priority` runs it with Codex Fast.
-Both need a connected Runtime that offers them.
+`full_access` or `read_only` for that Turn (Codex and Claude Code), and `--service-tier priority` runs
+it with Codex Fast. Both need a connected Runtime that offers them.
 
 ### Displays
 

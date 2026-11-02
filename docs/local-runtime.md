@@ -87,7 +87,8 @@ CLI 参数、Web 选择器、API 校验与归档结构均由注册表派生。�
 Claude Code and WorkBuddy run one stream-json process per Turn (`-p --input-format stream-json`). Full
 access maps to `--permission-mode acceptEdits`. Read-only maps to `plan` with only the Read, Glob and Grep
 tools and no MCP servers, since plan mode still honours the user's allow rules. Other tools follow the
-user's own permission rules and permission requests are always denied, never granted. Cohub history is projected
+user's own permission rules. WorkBuddy's permission requests are always denied; Claude Code's become
+approval cards (below). Cohub history is projected
 into their native transcript (`~/.claude/projects`, `~/.codebuddy/projects`) and continued with
 `--resume`; thinking blocks and tool calls without results are left out. Startup checks the CLI's help
 for every flag a Turn uses, so an older or unrelated executable is skipped. The `default` model passes no
@@ -123,7 +124,8 @@ prompt no other user line follows) starts a Turn, keyed by the file's checksum t
 records the Turn Cohub is running, as for CodeBuddy.
 
 Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`；只读映射为 `plan`，
-且仅开放 Read、Glob、Grep 工具、不加载 MCP（plan 模式仍会执行本机允许规则）。其他工具遵循本机权限规则，权限请求一律拒绝。云端历史投影到原生会话文件并通过 `--resume` 续接。
+且仅开放 Read、Glob、Grep 工具、不加载 MCP（plan 模式仍会执行本机允许规则）。其他工具遵循本机权限规则；WorkBuddy 的权限请求一律拒绝，
+Claude Code 的权限请求转为审批卡（见下）。云端历史投影到原生会话文件并通过 `--resume` 续接。
 启动时检查 CLI 是否提供 Turn 所需的全部参数，旧版或无关的同名程序会被跳过。`default` 模型不传 `--model`，沿用用户自己的配置；思考等级映射为 `--effort`。
 二者的终端会话只读同步：没有控制面，Web 无法停止终端 Turn，结果未知时仍需显式确认停止，Cohub 只续接自己写的文件。
 记录按 `parentUuid` / `parentId` 链接，从最后一条沿当前分支回溯；本地 `/命令`、`!shell` 输出与子 Agent 文件不同步。
@@ -242,6 +244,27 @@ without a card. Other requests (permission profiles, tool input, MCP elicitation
 before. Gateways announce the `approvals` feature in `runtime.ready`; against an older Gateway or
 API the Runtime declines at once, as before.
 
+**Claude Code approval modes and cards.** When Claude Code accepts `--permission-prompt-tool stdio`
+(hidden from `--help`, so the Runtime probes it with `initialize`), Cohub's Turns pass it and the
+Runtime offers the modes its `--permission-mode` choices support:
+
+| Mode | Claude Code flags |
+| --- | --- |
+| No mode | `--permission-mode acceptEdits`, as before |
+| Use local settings (`inherit`) | no `--permission-mode` |
+| Auto approval (`auto`) | `--permission-mode auto` |
+| Full access (`full_access`) | `--permission-mode bypassPermissions` (Claude Code refuses it as root) |
+| Read only (`read_only`) | `plan` with only Read, Glob and Grep and no MCP servers; prompts are denied |
+
+A `can_use_tool` request for Bash becomes a command card and one for Edit, Write, MultiEdit or
+NotebookEdit a file card; the answer is `allow` with the unchanged input or `deny`. Other tools, a command
+or path too long to show in full, platform
+read-only Turns, an older Gateway or API, and stopped or expired Turns are denied without a card. Each
+Turn is a new process, so Allow for this chat is kept by the Runtime per Cohub chat (the exact command
+or file path, at most 200 per chat for 200 chats, forgotten after a day unused or when the Runtime
+restarts); Claude Code's own settings are never written. A Claude Code without the flag offers no modes
+and keeps today's behaviour. WorkBuddy offers no modes.
+
 **Fast.** A Codex model whose catalog lists the `priority` service tier shows a Fast switch next
 to its thinking level. Untouched, it shows the model's default: the configured `service_tier`
 (`fast` is its legacy name for `priority`), else the catalog's, and sends nothing. On sends
@@ -261,6 +284,13 @@ Runtime 不再支持已记录的模式时，需改选“沿用本机设置”才
 Cohub 发起的 Turn 中，Codex 请求运行命令或修改文件时，网页输入框上方会出现审批卡（命令或文件、原因、工作目录），
 可选允许、本对话内都允许（Codex 提供时）、拒绝；需要 `session.prompt.fullaccess` 权限，先到先得。30 分钟无人处理、
 Turn 结束或被停止、Runtime 断开时一律拒绝；平台只读的 Turn 不出卡片、直接拒绝；旧版 Gateway / API 下仍立即拒绝。
+Claude Code 接受 `--permission-prompt-tool stdio` 时（`--help` 不列出，Runtime 用 `initialize` 探测），Cohub 的 Turn 会带上它，
+并按 `--permission-mode` 的可选值提供审批模式：未选择时仍为 `acceptEdits`；沿用本机设置不传 `--permission-mode`；自动审批为 `auto`；
+完全访问为 `bypassPermissions`（root 下 Claude Code 自己会报错）；只读为 `plan` 加只读工具，权限请求直接拒绝。
+Bash 的 `can_use_tool` 请求出“运行命令”卡，Edit / Write / MultiEdit / NotebookEdit 出“修改文件”卡；其他工具、过长无法完整显示的命令或路径、平台只读 Turn、
+旧版 Gateway / API、已停止或超时的 Turn 直接拒绝。每个 Turn 都是新进程，“本对话内都允许”由 Runtime 按 Cohub 对话记住
+（同一命令或文件路径；每个对话最多 200 条、最多 200 个对话，一天未用或 Runtime 重启后失效），不写 Claude Code 自己的设置。
+不支持该参数的 Claude Code 不提供审批模式，行为不变；WorkBuddy 不提供审批模式。
 模型目录声明 `priority` 档位时显示 Fast：未操作时显示模型默认档位（`config.toml` 的 `service_tier`，否则取目录默认值）且不发送；
 开启时该 Turn 发送 `serviceTierForTurn: "priority"`，默认为 Fast 时关闭发送 `"default"`，否则不发送。只作用于该 Turn，不影响后续 Turn
 或终端；生效档位记入 `effectiveServiceTier`。旧版 Codex 不提供这些选项。
@@ -648,8 +678,9 @@ Never infer that a disconnected execution has stopped.
   survive between such Turns. A shared Codex app-server keeps its threads loaded across Turns.
 - Verified with Pi 0.86.1 and Codex 0.156.1; approval modes and Fast with Codex 0.162.1 and 0.166.0 (0.156.1 hides them). Codex rollout-path recovery is an upstream
   experimental API; incompatible versions fail explicitly.
-- Cohub never grants an escalation by itself: Codex approvals are answered on a web card by a
-  person (or by Codex's own reviewer in Auto approval) and declined when nobody answers. Pi
+- Cohub never grants an escalation by itself: Codex and Claude Code approvals are answered on a web
+  card by a person (or by the Harness's own reviewer in Auto approval) and declined when nobody
+  answers; Allow for this chat only repeats a person's answer. Pi
   read-only execution is rejected because it cannot enforce the requested limit.
 - Unknown execution outcomes remain active and block automatic takeover. Local
   unconfirmed state requires reconciliation; it is not silently discarded or replayed.
