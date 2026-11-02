@@ -40,12 +40,26 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Install NDK
+        id: ndk
         if: steps.node.outputs.published == 'false'
         run: |
           set -euo pipefail
           ndk="$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' apps/android/app/build.gradle.kts)"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null
           echo "NDK=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+          echo "version=$ndk" >> "$GITHUB_OUTPUT"
+          sudo apt-get update -qq && sudo apt-get install -y -qq ccache > /dev/null
+
+      # A rerun or the next version recompiles only what changed; saved even when the build fails.
+      - name: Restore compiler cache
+        if: steps.node.outputs.published == 'false'
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ccache
+          key: node-android-ndk${{ steps.ndk.outputs.version }}-${{ steps.node.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            node-android-ndk${{ steps.ndk.outputs.version }}-${{ steps.node.outputs.version }}-
+            node-android-ndk${{ steps.ndk.outputs.version }}-
 
       - name: Build
         if: steps.node.outputs.published == 'false'
@@ -64,7 +78,10 @@ jobs:
           sed -i "s/'ARMV8_OS_ANDROID'/'ARMV8_OS_LINUX'/" deps/zlib/zlib.gyp
           # API 30: the device Runtime needs Android 11. V8's build tools run here, so build them for here.
           CC_host=gcc CXX_host=g++ ./android-configure "$NDK" 30 arm64
-          make -j"$(nproc)"
+          export CCACHE_DIR=~/.cache/ccache CCACHE_BASEDIR="$PWD" CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=3G
+          clang="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang"
+          make -j"$(nproc)" CC.target="ccache $clang" CXX.target="ccache $clang++" CC.host="ccache gcc" CXX.host="ccache g++"
+          ccache --show-stats
           mkdir -p ../dist
           "$NDK"/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip -o ../dist/node out/Release/node
           cp LICENSE ../dist/LICENSE
@@ -72,6 +89,13 @@ jobs:
           gzip -n node
           mv node.gz "$NAME"
           sha256sum "$NAME" > "$NAME.sha256"
+
+      - name: Save compiler cache
+        if: always() && steps.node.outputs.published == 'false'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ccache
+          key: node-android-ndk${{ steps.ndk.outputs.version }}-${{ steps.node.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Publish
         if: steps.node.outputs.published == 'false'
