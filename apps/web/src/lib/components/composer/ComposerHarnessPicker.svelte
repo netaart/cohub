@@ -1,6 +1,5 @@
 <script lang="ts">
 import {
-	APPROVAL_MODES,
 	type ApprovalMode,
 	type HarnessKind,
 	harnessLabel,
@@ -8,6 +7,7 @@ import {
 import {
 	Check,
 	ChevronDown,
+	ChevronRight,
 	Eye,
 	Shield,
 	ShieldCheck,
@@ -19,6 +19,11 @@ import { harnessOptions } from "$lib/features/space/runtime-status-view";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import HarnessIcon from "./HarnessIcon.svelte";
+import {
+	approvalMenuOptions,
+	harnessMenuKey,
+	movedIndex,
+} from "./harness-menu";
 
 type Harness = HarnessKind;
 const {
@@ -48,6 +53,9 @@ const locale = $derived(getLocale());
 let open = $state(false);
 let trigger = $state<HTMLButtonElement | null>(null);
 let panel = $state<HTMLDivElement | null>(null);
+let approvalOpen = $state(false);
+let approvalRow = $state<HTMLButtonElement | null>(null);
+let approvalPanel = $state<HTMLDivElement | null>(null);
 const options = $derived(harnessOptions(available, online));
 const local = $derived(value !== "cohub");
 const approvalIcons = {
@@ -76,9 +84,45 @@ const shownApproval = $derived(
 const ShownApprovalIcon = $derived(
 	shownApproval ? approvalIcons[shownApproval] : null,
 );
+const SelectedApprovalIcon = $derived(approvalIcons[selectedApproval]);
+const approvalOptions = $derived(
+	approvalMenuOptions(approvalModes, selectedApproval),
+);
+// A capability refresh can remove the row; its submenu goes with it, and focus stays in the menu.
+$effect(() => {
+	if (!approvalOpen || showApproval) return;
+	approvalOpen = false;
+	(enabledItems(panel)[0] ?? panel)?.focus();
+});
 function close() {
 	open = false;
+	approvalOpen = false;
 	trigger?.focus();
+}
+function dismiss() {
+	open = false;
+	approvalOpen = false;
+}
+const enabledItems = (root: HTMLElement | null) =>
+	Array.from(
+		root?.querySelectorAll<HTMLButtonElement>(
+			"button[role^='menuitem']:not(:disabled)",
+		) ?? [],
+	);
+async function openApproval() {
+	approvalOpen = true;
+	await tick();
+	(
+		approvalPanel?.querySelector<HTMLButtonElement>(
+			'[aria-checked="true"]:not(:disabled)',
+		) ?? enabledItems(approvalPanel)[0]
+	)?.focus();
+}
+function move(event: KeyboardEvent, root: HTMLElement | null) {
+	event.preventDefault();
+	const items = enabledItems(root);
+	const index = items.indexOf(document.activeElement as HTMLButtonElement);
+	items[movedIndex(event.key, index, items.length)]?.focus();
 }
 async function show() {
 	open = true;
@@ -94,31 +138,31 @@ async function show() {
 	)?.focus();
 }
 function navigate(event: KeyboardEvent) {
-	if (event.key === "Escape") {
+	const action = harnessMenuKey(
+		event.key,
+		document.activeElement === approvalRow ? "submenu-row" : "menu",
+	);
+	if (action === "dismiss") dismiss();
+	else if (action === "move") {
+		approvalOpen = false;
+		move(event, panel);
+	} else if (action === "open-submenu") {
+		event.preventDefault();
+		void openApproval();
+	} else if (action === "close") {
 		event.preventDefault();
 		close();
-		return;
 	}
-	if (event.key === "Tab") {
-		open = false;
-		return;
+}
+function navigateApproval(event: KeyboardEvent) {
+	const action = harnessMenuKey(event.key, "submenu");
+	if (action === "dismiss") dismiss();
+	else if (action === "move") move(event, approvalPanel);
+	else if (action === "back") {
+		event.preventDefault();
+		approvalOpen = false;
+		approvalRow?.focus();
 	}
-	if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-	event.preventDefault();
-	const items = Array.from(
-		panel?.querySelectorAll<HTMLButtonElement>(
-			'[role="menuitemradio"]:not(:disabled)',
-		) ?? [],
-	);
-	const index = items.indexOf(document.activeElement as HTMLButtonElement);
-	const next =
-		event.key === "Home"
-			? 0
-			: event.key === "End"
-				? items.length - 1
-				: (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) %
-					items.length;
-	items[next]?.focus();
 }
 </script>
 
@@ -147,19 +191,27 @@ function navigate(event: KeyboardEvent) {
 				{#if value === harness}<Check class="h-4 w-4 shrink-0 text-brand" />{/if}
 			</button>
 		{/each}
-		{#if showApproval && onapprovalchange}
+		{#if showApproval}
 			<div class="menu-separator" role="separator"></div>
-			<p class="menu-heading">{m.runtime_approval_mode({}, { locale })}</p>
-			{#each APPROVAL_MODES as mode}
-				{@const Icon = approvalIcons[mode]}
-				<button type="button" class="harness-option compact" role="menuitemradio" aria-checked={selectedApproval === mode} disabled={mode !== "inherit" && !approvalModes.includes(mode)} onclick={() => { onapprovalchange(mode); close(); }}>
-					<span class="approval-icon"><Icon class="h-4 w-4" /></span>
-					<span class="option-content"><span class="option-title">{approvalLabel(mode)}</span></span>
-					{#if selectedApproval === mode}<Check class="h-4 w-4 shrink-0 text-brand" />{/if}
-				</button>
-			{/each}
+			<button bind:this={approvalRow} type="button" class="harness-option compact" class:active={approvalOpen} role="menuitem" aria-haspopup="menu" aria-expanded={approvalOpen} aria-label={`${m.runtime_approval_mode({}, { locale })}: ${approvalLabel(selectedApproval)}`} title={m.runtime_approval_mode({}, { locale })} onclick={() => approvalOpen ? (approvalOpen = false) : void openApproval()}>
+				<span class="approval-icon"><SelectedApprovalIcon class="h-4 w-4" /></span>
+				<span class="option-content"><span class="option-title">{approvalLabel(selectedApproval)}</span></span>
+				<ChevronRight class="h-4 w-4 shrink-0 text-text-tertiary" />
+			</button>
 		{/if}
 	</div>
+	{#if approvalOpen && showApproval && onapprovalchange}
+		<div bind:this={approvalPanel} class="harness-menu approval-menu menu-surface" role="menu" aria-label={m.runtime_approval_mode({}, { locale })} tabindex="-1" onkeydown={navigateApproval} use:floatNear={{ getAnchor: () => approvalRow, placement: "right-start", gap: 10, zIndex: 122, stackWhenCramped: true }}>
+			{#each approvalOptions as { mode, checked, disabled: unavailable }}
+				{@const Icon = approvalIcons[mode]}
+				<button type="button" class="harness-option compact" role="menuitemradio" aria-checked={checked} disabled={unavailable} onclick={() => { onapprovalchange(mode); close(); }}>
+					<span class="approval-icon"><Icon class="h-4 w-4" /></span>
+					<span class="option-content"><span class="option-title">{approvalLabel(mode)}</span></span>
+					<Check class={`h-4 w-4 shrink-0 text-brand ${checked ? "" : "invisible"}`} />
+				</button>
+			{/each}
+		</div>
+	{/if}
 {/if}
 
 <style>
@@ -178,7 +230,10 @@ function navigate(event: KeyboardEvent) {
 .harness-option { display: flex; width: 100%; min-height: 52px; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; text-align: left; cursor: pointer; }
 .harness-option.compact { min-height: 36px; padding-block: 6px; }
 .menu-separator { height: 1px; margin: 4px 2px; background: var(--border-subtle); }
-.harness-option:hover:not(:disabled), .harness-option:focus-visible { background: var(--bg-hover); }
+.harness-option:hover:not(:disabled), .harness-option:focus-visible, .harness-option.active { background: var(--bg-hover); }
+/* Sized by its labels; the row's own gap keeps it clear of the Harness menu. */
+.approval-menu { min-width: 180px; }
+.approval-menu .option-title { white-space: nowrap; }
 .harness-option:disabled { opacity: .5; cursor: not-allowed; }
 .option-content { display: flex; flex: 1; flex-direction: column; gap: 2px; }
 .option-title { color: var(--text-primary); font-size: 13px; }

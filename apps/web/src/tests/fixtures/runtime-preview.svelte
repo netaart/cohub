@@ -107,7 +107,8 @@ function makeStatus(): RuntimeStatus {
 				: {
 						approvalModes: {
 							codex: [...APPROVAL_MODES],
-							claude: [...APPROVAL_MODES],
+							// Leaves one mode out to preview a disabled item.
+							claude: ["inherit", "full_access", "read_only"],
 						},
 					}),
 			models,
