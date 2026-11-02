@@ -1099,16 +1099,20 @@ export async function loadOrCreateSessionHandle(input: {
   const spaceWorkspaceDir = getAgentWorkspacePath(input.spaceId);
   const spaceSessionsDir = getAgentSpaceSessionsPath(input.spaceId);
   const fileSignature = await getSessionFileSignature(existingSessionFile);
-  const cachedHandle = input.sessionHandles.get(sessionKey);
   const projectionOptions: ContextProjectionOptions = {
     resolveApi: ({ provider, model }) => provider && model ? input.modelRegistry.find(provider, model)?.api ?? null : null,
   };
   const durableHead = await loadRuntimeContext({ spaceId: input.spaceId, sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined, headOnly: true });
-  const cachedMarker = cachedHandle?.sessionManager.getCustomEntries("cohub.context").at(-1)?.data as { revision?: string } | undefined;
-  const durableContext = cachedMarker?.revision === durableHead.revision && fileSignature
-    && sameSessionFileSignature(cachedHandle?.sessionFileSignature ?? null, fileSignature)
-    ? durableHead
-    : await loadRuntimeContext({ spaceId: input.spaceId, sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined });
+  // The session file's own marker says which durable revision it already holds, in memory or on disk
+  // after a restart; history is read only when syncCloudContext would actually append something.
+  const loadDurableContext = async (manager: SessionManager) => {
+    const marker = manager.getCustomEntries("cohub.context").at(-1)?.data as { revision?: string } | undefined;
+    if (marker?.revision === durableHead.revision) return durableHead;
+    const startedAt = performance.now();
+    const context = await loadRuntimeContext({ spaceId: input.spaceId, sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined });
+    logger.info("[SessionContext] full load", { sessionId: input.sessionId, reason: marker ? "stale" : "missing", messages: context.messages.length, durationMs: Math.round(performance.now() - startedAt) });
+    return context;
+  };
 
   const spaceInfo = await getSpace({ spaceId: input.spaceId }).catch((error: unknown) => {
     logger.warn(`[Agent] Failed to load space info for ${input.spaceId}; falling back to platform config`, error);
@@ -1120,7 +1124,7 @@ export async function loadOrCreateSessionHandle(input: {
   if (existing) {
     if (sameSessionFileSignature(existing.sessionFileSignature, fileSignature)) {
       existing.spaceOwnerUserId = spaceOwnerUserId;
-      if (!existing.currentUserMessageId && syncCloudContext(existing.sessionManager, durableContext, projectionOptions)) {
+      if (!existing.currentUserMessageId && syncCloudContext(existing.sessionManager, await loadDurableContext(existing.sessionManager), projectionOptions)) {
         await existing.session.reload();
         const appended = await syncGenerationMessagesToSessionFile(input.sessionId, existing.sessionManager, input.beforeTurnSequence);
         if (appended.length > 0) existing.session.agent.state.messages.push(...appended);
@@ -1152,7 +1156,7 @@ export async function loadOrCreateSessionHandle(input: {
     sessionManager = tmpManager;
   }
 
-  syncCloudContext(sessionManager, durableContext, projectionOptions);
+  syncCloudContext(sessionManager, await loadDurableContext(sessionManager), projectionOptions);
   await syncGenerationMessagesToSessionFile(input.sessionId, sessionManager, input.beforeTurnSequence).catch((error) => {
     logger.warn(`[Session] failed to project generation messages sessionId=${input.sessionId}:`, error);
   });

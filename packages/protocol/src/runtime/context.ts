@@ -38,7 +38,8 @@ const isPendingGenerationResult = (message: RuntimeContextMessage) =>
   && message.meta?.generationStatus !== "completed"
   && message.meta?.generationStatus !== "failed";
 
-export function selectRuntimeContextMessages(messages: RuntimeContextMessage[]): RuntimeContextMessage[] {
+/** Index of the compaction that bounds the context, or -1. Readers use it to skip history before it. */
+export function findLatestCompactionIndex(messages: RuntimeContextMessage[]): number {
   let boundary = -1;
   let latest = -1;
   messages.forEach((message, index) => {
@@ -48,6 +49,11 @@ export function selectRuntimeContextMessages(messages: RuntimeContextMessage[]):
     const order = Number.isFinite(timestamp) ? timestamp : index;
     if (order >= latest) { latest = order; boundary = index; }
   });
+  return boundary;
+}
+
+export function selectRuntimeContextMessages(messages: RuntimeContextMessage[]): RuntimeContextMessage[] {
+  const boundary = findLatestCompactionIndex(messages);
   const compaction = messages[boundary];
   if (!compaction) return messages;
   // Compression entries are inserted at their retained-tail boundary, not in creation order.
