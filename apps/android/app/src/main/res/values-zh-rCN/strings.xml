@@ -25,11 +25,11 @@
     <string name="phone_control_pairing_title">将 Cohub 与无线调试配对</string>
     <string name="phone_control_pairing_text">保持弹窗打开，点按“输入配对码”，填入弹窗中的六位数字。</string>
     <string name="phone_control_pairing_wrong">配对码不对，请输入弹窗中当前显示的配对码。</string>
-    <string name="phone_control_pairing_closed">配对弹窗已关闭。请重新点按“使用配对码配对设备”，再在这条通知中输入配对码。</string>
+    <string name="phone_control_pairing_closed">没有打开的配对弹窗。请点按“使用配对码配对设备”，再在这里输入配对码。</string>
     <string name="phone_control_pairing_code">配对码</string>
     <string name="phone_control_pairing_enter">输入配对码</string>
     <string name="phone_control_guide_developer">开启开发者选项。找不到时，在“关于手机”中连续点按“版本号”七次。</string>
-    <string name="phone_control_guide_pairing">开启“无线调试”，点按“使用配对码配对设备”，配对码在这条通知中输入。</string>
+    <string name="phone_control_guide_pairing">开启“无线调试”，点按“使用配对码配对设备”，然后在这里点按“输入配对码”。</string>
     <string name="overlay_needs_you">Agent 需要你处理</string>
     <string name="overlay_done_hint">处理完请点交还</string>
     <string name="overlay_working">Agent 正在操作</string>

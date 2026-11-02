@@ -66,7 +66,8 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
     enum class Stage(val wire: String) { OFF("off"), DEVELOPER("developer"), PAIRING("pairing"), CODE("code"), STARTING("starting"), READY("ready"), STOPPED("stopped") }
 
     data class State(val stage: Stage, val error: String? = null, val codeInput: Boolean = false) {
-        val guiding: Boolean get() = stage == Stage.DEVELOPER || stage == Stage.PAIRING || stage == Stage.CODE
+        val searching: Boolean get() = stage == Stage.DEVELOPER || stage == Stage.PAIRING
+        val guiding: Boolean get() = searching || stage == Stage.CODE
 
         fun toJson(): JsonObject = buildJsonObject {
             put("stage", stage.wire)
@@ -194,7 +195,9 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
     }
 
     private val developerOptions: Boolean
-        get() = Settings.Global.getInt(context.contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1
+        get() = global(Settings.Global.DEVELOPMENT_SETTINGS_ENABLED) || global(ADB_WIFI_ENABLED)
+
+    private fun global(name: String) = runCatching { Settings.Global.getInt(context.contentResolver, name, 0) == 1 }.getOrDefault(false)
 
     fun setup(): State {
         val current = _state.value
@@ -219,15 +222,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         val state = enter(if (developerOptions) Stage.PAIRING else Stage.DEVELOPER, error)
         pairing = scope.launch(Dispatchers.IO) {
             val settled = withTimeoutOrNull(PAIRING_MS) {
-                if (!developerOptions) {
-                    guide(R.string.phone_control_guide_developer)
-                    while (!developerOptions) delay(DEVELOPER_POLL_MS)
-                }
-                guide(if (error == null) R.string.phone_control_guide_pairing else R.string.phone_control_pairing_closed)
-                val port = awaitPairingDialog(error)
-                prefs.edit { putInt(PAIRING_PORT, port) }
-                enter(Stage.CODE)
-                notifyPairing(null)
+                awaitPairingDialog(error)
                 _state.first { it.stage != Stage.CODE }
             }
             if (settled == null) enter(Stage.OFF, "pairing_timed_out")
@@ -235,21 +230,45 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         return state
     }
 
-    private suspend fun awaitPairingDialog(error: String?): Int {
-        while (true) {
-            enter(Stage.PAIRING, if (onWifi()) error else "wireless_debugging_off")
-            findPort(PAIRING_SERVICE, FIND_MS)?.let { return it }
-            delay(RETRY_MS)
+    @Synchronized
+    private fun stopPairing() {
+        pairing?.cancel()
+    }
+
+    // The dialog being advertised is the truth; settings flags only shape the hint, as some phones misreport them.
+    private suspend fun awaitPairingDialog(error: String?) {
+        var shown: Int? = null
+        while (_state.value.searching) {
+            val stage = if (developerOptions) Stage.PAIRING else Stage.DEVELOPER
+            enter(stage, if (stage == Stage.PAIRING && !onWifi()) "wireless_debugging_off" else error)
+            val text = when {
+                error != null -> R.string.phone_control_pairing_closed
+                stage == Stage.DEVELOPER -> R.string.phone_control_guide_developer
+                else -> R.string.phone_control_guide_pairing
+            }
+            if (text != shown) {
+                notifyPairing(context.getString(text))
+                shown = text
+            }
+            val port = findPort(PAIRING_SERVICE, FIND_MS)
+            if (port == null) {
+                delay(RETRY_MS)
+                continue
+            }
+            if (!_state.value.searching) break
+            prefs.edit { putInt(PAIRING_PORT, port) }
+            enter(Stage.CODE)
+            notifyPairing(context.getString(R.string.phone_control_pairing_text))
         }
     }
 
     fun pair(code: String): Deferred<State> = scope.async(Dispatchers.IO) {
         pairingLock.withLock {
-            if (_state.value.stage != Stage.CODE) return@withLock _state.value
+            if (!_state.value.guiding) return@withLock _state.value
             val key = key(create = true) ?: return@withLock _state.value
             val digits = code.filter(Char::isDigit)
-            val last = prefs.getInt(PAIRING_PORT, 0)
-            var result = pairOnce(key, last, digits)
+            val last = prefs.getInt(PAIRING_PORT, 0).takeIf { _state.value.stage == Stage.CODE }
+            var result = last?.let { pairOnce(key, it, digits) }
             val port = if (result == true) last else findPort(PAIRING_SERVICE, FIND_MS)
             if (port != null && port != last) {
                 prefs.edit { putInt(PAIRING_PORT, port) }
@@ -258,6 +277,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
             when {
                 result == true -> {
                     prefs.edit { putBoolean(PAIRED, true).putBoolean(PREPARED, false) }
+                    stopPairing()
                     notifications().cancel(NOTIFICATION_ID)
                     enter(Stage.STARTING).also {
                         start()
@@ -265,7 +285,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
                     }
                 }
                 result == false && port != null -> {
-                    notifyPairing(context.getString(R.string.phone_control_pairing_wrong))
+                    notifyPairing(context.getString(R.string.phone_control_pairing_wrong), alert = true)
                     enter(Stage.CODE, "pairing_wrong")
                 }
                 else -> awaitPairing("pairing_closed")
@@ -326,6 +346,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
                         trySend(service)
                     }
                     override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                        Log.i(TAG, "discovering $serviceType failed: $errorCode")
                         close()
                     }
                     override fun onDiscoveryStarted(serviceType: String) = Unit
@@ -362,19 +383,6 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    private fun guide(text: Int) {
-        val notification = NotificationCompat.Builder(context, channel())
-            .setSmallIcon(R.drawable.ic_runtime)
-            .setContentTitle(context.getString(R.string.phone_control_pairing_title))
-            .setContentText(context.getString(text))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(context.getString(text)))
-            .setContentIntent(settingsPendingIntent())
-            .setOnlyAlertOnce(true)
-            .setTimeoutAfter(PAIRING_MS)
-            .build()
-        notifications().notify(NOTIFICATION_ID, notification)
-    }
-
     fun notifyHandover(reason: String) {
         val take = PendingIntent.getBroadcast(context, 0, Intent(context, HandoverReceiver::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val text = context.getString(R.string.overlay_activity, reason)
@@ -393,7 +401,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
 
     fun cancelHandover() = notifications().cancel(HANDOVER_NOTIFICATION_ID)
 
-    private fun notifyPairing(problem: String?) {
+    private fun notifyPairing(text: String, alert: Boolean = false) {
         val manager = notifications()
         val reply = PendingIntent.getBroadcast(
             context, 0, Intent(context, PairingReceiver::class.java),
@@ -406,10 +414,11 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
             .setSmallIcon(R.drawable.ic_runtime)
             .setContentTitle(context.getString(R.string.phone_control_pairing_title))
             .setContentIntent(settingsPendingIntent())
-            .setContentText(problem ?: context.getString(R.string.phone_control_pairing_text))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setOnlyAlertOnce(problem == null)
+            .setOnlyAlertOnce(!alert)
             .addAction(action)
             .setTimeoutAfter(PAIRING_MS)
             .build()
@@ -443,7 +452,6 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         const val CHANNEL_ID = "phone_control"
         const val NOTIFICATION_ID = 7
         const val HANDOVER_NOTIFICATION_ID = 8
-        const val DEVELOPER_POLL_MS = 1_000L
         const val RETRY_MS = 1_000L
         const val KEY_CODE = "code"
         const val FIND_MS = 5_000L

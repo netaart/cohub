@@ -127,8 +127,9 @@ no computer.
 - **Setup, once.** From a Space's Runtime menu the user chooses **Set up phone control** (which needs
   notifications): Cohub opens Developer options (About phone where they cannot open) and waits for
   Wireless debugging's *Pair device with pairing code* dialog (discovered over mDNS, which needs
-  Wi-Fi), guiding each stage in a notification and the menu, whose steps tick off as they complete.
-  The code goes into that notification, since leaving Settings closes the dialog; when Cohub shares
+  Wi-Fi; the dialog being advertised moves setup on, whatever the settings flags say), guiding each
+  stage in the menu and in one notification that takes the code from the start, since leaving
+  Settings closes the dialog. Its steps tick off as they complete; when Cohub shares
   the screen with Settings (split screen or a window), the menu takes it too (`codeInput`, then
   `display.pair`). A code that fails is retried on the dialog's new port, and a closed dialog sends
   the setup back to waiting for it. It
