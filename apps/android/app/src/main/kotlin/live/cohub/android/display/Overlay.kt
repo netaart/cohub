@@ -91,7 +91,6 @@ internal class Overlay(private val service: ControlService, private val display:
 
     fun refresh() = show()
 
-    /** The page opens it in place; without one listening, Cohub opens at it. */
     private fun openInCohub() {
         val served = shown?.first ?: return
         setOpen(false)

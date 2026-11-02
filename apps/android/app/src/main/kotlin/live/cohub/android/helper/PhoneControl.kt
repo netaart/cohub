@@ -202,7 +202,6 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         val next = token()
         nonce = next
         val info = context.applicationInfo
-        // A helper left from an earlier app can hold on; the new one replaces it.
         val command = "pkill -f '^${context.packageName}:helper$'; CLASSPATH=${info.sourceDir} setsid app_process /system/bin --nice-name=${context.packageName}:helper " +
             "${HelperMain::class.java.name} ${context.packageName} ${info.uid} $next </dev/null >$HELPER_OUT 2>&1 &"
         val last = prefs.getInt(PORT, 0)
@@ -219,7 +218,6 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         return "helper_did_not_start"
     }
 
-    /** What a reboot would clear: adbd's connections, and the port it listens on. */
     private suspend fun restartWirelessDebugging(): Boolean {
         if (!canWriteSecureSettings()) return false
         note("restarting Wireless debugging")
@@ -229,7 +227,6 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         return true
     }
 
-    /** The helper logs as the shell, which only adbd can read back. */
     private fun helperFailure(key: AdbKey, since: Long): String {
         val time = "%d.%03d".format(since / 1000, since % 1000)
         val log = runCatching { Adb.exec(key, prefs.getInt(PORT, 0), "cat $HELPER_OUT; logcat -d -b main,crash -v brief -t $time -s ${Helper.TAG}:I AndroidRuntime:E") }
