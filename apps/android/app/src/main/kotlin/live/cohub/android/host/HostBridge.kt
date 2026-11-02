@@ -315,10 +315,11 @@ class HostBridge(
         }
 
         HostProtocol.Methods.DISPLAY_PRESENTING -> {
-            val shown = if (params.isEmpty()) null else DisplayRef(requireSpaceId(params), params.string("display")?.takeIf(DISPLAY_ID::matches) ?: throw IllegalArgumentException("display.presenting requires a display id"))
-            requireDisplay().page.value = CohubPage(shown)
+            requireDisplay().page.value = CohubPage(if (params.isEmpty()) null else requireDisplayRef(params))
             JsonPrimitive(true)
         }
+
+        HostProtocol.Methods.DISPLAY_FLOAT -> requireDisplayRef(params).let { JsonPrimitive(requireDisplay().float(it.spaceId, it.id)) }
 
         HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS -> JsonPrimitive(display?.phone?.enableControl() == true || actions.openControlSettings())
 
@@ -332,6 +333,9 @@ class HostBridge(
     }
 
     private fun requireKind(params: JsonObject): String = params.string("kind") ?: throw IllegalArgumentException("A permission kind is required")
+
+    private fun requireDisplayRef(params: JsonObject) =
+        DisplayRef(requireSpaceId(params), params.string("display")?.takeIf(DISPLAY_ID::matches) ?: throw IllegalArgumentException("A display id is required"))
 
     private fun requireDisplay(): DeviceDisplay = display ?: throw IllegalStateException("This device cannot share its screen")
 
@@ -395,6 +399,7 @@ class HostBridge(
             HostProtocol.Methods.DISPLAY_SETUP,
             HostProtocol.Methods.DISPLAY_PAIR,
             HostProtocol.Methods.DISPLAY_PRESENTING,
+            HostProtocol.Methods.DISPLAY_FLOAT,
         )
         val DISPLAY_ID = Regex("^[A-Za-z0-9._-]{1,64}$")
         val PAIRING_CODE = Regex("^\\d{6}$")

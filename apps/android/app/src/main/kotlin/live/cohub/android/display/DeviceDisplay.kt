@@ -95,6 +95,7 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     private val events = MutableSharedFlow<DisplayEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val revision = MutableStateFlow(0)
     private val opening = MutableSharedFlow<DisplayRef>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    private val floating = MutableSharedFlow<Served>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     internal val messages: SharedFlow<DisplayEvent> = events.asSharedFlow()
 
@@ -102,6 +103,8 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     val page = MutableStateFlow<CohubPage?>(null)
 
     val opens: SharedFlow<DisplayRef> = opening.asSharedFlow()
+
+    internal val floats: SharedFlow<Served> = floating.asSharedFlow()
 
     val status: StateFlow<DisplayStatus> = combine(shared, DisplayControl.service, phone.state, failure) { current, control, phoneControl, error ->
         DisplayStatus(current?.spaceId, control != null, phoneControl, error)
@@ -150,6 +153,11 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
 
     internal fun openInCohub(served: Served): Boolean =
         page.value != null && opening.subscriptionCount.value > 0 && opening.tryEmit(DisplayRef(served.spaceId, served.screen.id))
+
+    fun float(spaceId: String, id: String): Boolean {
+        val served = runCatching { served(spaceId, id) }.getOrNull()?.takeIf { it.screen.agent } ?: return false
+        return DisplayControl.service.value != null && floating.tryEmit(served)
+    }
 
     private fun changed(served: Served) {
         events.tryEmit(DisplayEvent(served.spaceId, DisplayWire.changed(served.screen.id)))

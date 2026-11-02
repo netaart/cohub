@@ -15,5 +15,6 @@ class IndicatorTest {
         assertEquals(working, Indicator.pick(listOf(sharing, working), inCohub = true))
         assertNull(Indicator.pick(listOf(sharing, working), inCohub = true, shown = "agent"))
         assertEquals(held, Indicator.pick(listOf(held), inCohub = true, shown = "agent"))
+        assertEquals(sharing, Indicator.pick(listOf(sharing, working), inCohub = true, pinned = "screen"))
     }
 }

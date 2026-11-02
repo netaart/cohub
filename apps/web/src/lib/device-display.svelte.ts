@@ -57,6 +57,14 @@ export async function shareDeviceDisplay(
 	}
 }
 
+export function canFloatDeviceDisplay(): boolean {
+	return supportsHostCapability("display.float");
+}
+
+export function floatDeviceDisplay(ref: DeviceDisplayRef): Promise<boolean> {
+	return callHost("display.float", ref).catch(() => false);
+}
+
 export async function stopDeviceDisplay(): Promise<void> {
 	status = await callHost("display.stop");
 }

@@ -28,7 +28,8 @@
     "share.incoming",
     "workspace",
     "workspace.files",
-    "display.presenting"
+    "display.presenting",
+    "display.float"
   ],
   "methods": [
     "host.describe",
@@ -69,6 +70,7 @@
     "display.setup",
     "display.pair",
     "display.presenting",
+    "display.float",
     "workspace.call"
   ],
   "events": [

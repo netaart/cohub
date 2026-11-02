@@ -34,6 +34,7 @@
     <string name="overlay_needs_you">Agent needs you</string>
     <string name="overlay_done_hint">Hand back when you\'re done</string>
     <string name="overlay_working">Agent is working</string>
+    <string name="overlay_agent_screen">Agent\'s screen</string>
     <string name="overlay_activity">Agent: %1$s</string>
     <string name="overlay_held">You\'re in control</string>
     <string name="overlay_sharing">Sharing your screen</string>

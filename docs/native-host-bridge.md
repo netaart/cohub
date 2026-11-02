@@ -80,6 +80,7 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `display.setup` | `display` | Android: starts phone control, or its pairing, and opens the Settings page the current step needs |
 | `display.pair` | `display` | Android: pairs with a six-digit code; only offered while `phoneControl.codeInput` |
 | `display.presenting` | `display.presenting` | The display (`spaceId`, `display`) the page shows now, none without params; calling it at all says the page opens `display.open` |
+| `display.float` | `display.float` | Android: opens the floating indicator on an agent screen (`spaceId`, `display`); `false` when it cannot show |
 | `workspace.call` | `workspace` | One `fs.*` call on a Space this device's Runtime serves: `{result}` or the sandbox's `{error}`. `unavailable` means it never reached the Runtime, so the page uses the API |
 
 `runtime.changed` pushes the whole `DeviceRuntime` on every change, `display.changed` the whole

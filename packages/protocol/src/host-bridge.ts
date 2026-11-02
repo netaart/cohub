@@ -40,6 +40,7 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "workspace",
   "workspace.files",
   "display.presenting",
+  "display.float",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -322,6 +323,7 @@ export const HOST_BRIDGE_METHODS = {
   "display.setup": { params: z.undefined(), result: deviceDisplayStatusSchema },
   "display.pair": { params: z.object({ code: z.string().regex(/^\d{6}$/) }).strict(), result: deviceDisplayStatusSchema },
   "display.presenting": { params: deviceDisplayRefSchema.optional(), result: z.boolean() },
+  "display.float": { params: deviceDisplayRefSchema, result: z.boolean() },
   "workspace.call": {
     params: z.object({
       spaceId: z.uuid(),

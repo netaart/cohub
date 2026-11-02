@@ -21,6 +21,7 @@ import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -50,6 +51,8 @@ internal class Overlay(private val service: ControlService, private val display:
     private var fromTop = prefs.getFloat(TOP, DEFAULT_TOP)
     private var shown: Pair<Served, Indicator>? = null
     private var open = false
+    private val pinned = MutableStateFlow<Served?>(null)
+    private var opening: Served? = null
     private var attached = false
     private val job: Job
 
@@ -64,8 +67,16 @@ internal class Overlay(private val service: ControlService, private val display:
             false
         }
         job = scope.launch(Dispatchers.Main) {
-            combine(display.changes, DisplayControl.foreground, display.page) { _, foreground, _ ->
-                Indicator.pick(display.served().mapNotNull { served -> served.indicator()?.let { served to it } }, foreground == service.packageName, display.shownInCohub())
+            launch {
+                display.floats.collect { served ->
+                    opening = served
+                    pinned.value = served
+                    if (shown?.first === served) render(shown)
+                }
+            }
+            combine(display.changes, DisplayControl.foreground, display.page, pinned) { _, foreground, _, pin ->
+                val all = display.served().mapNotNull { served -> served.indicator(served === pin)?.let { served to it } }
+                Indicator.pick(all, foreground == service.packageName, display.shownInCohub(), pin)
             }.distinctUntilChanged { a, b -> a?.first === b?.first && a?.second == b?.second }.collect(::render)
         }
     }
@@ -77,6 +88,7 @@ internal class Overlay(private val service: ControlService, private val display:
         val asking = next.second.mode == Mode.ASKING
         val wasAsking = previous?.takeIf { it.first === next.first }?.second?.mode == Mode.ASKING
         open = when {
+            next.first === opening -> true.also { opening = null }
             asking != wasAsking -> asking
             previous?.first !== next.first -> false
             else -> open
@@ -86,6 +98,7 @@ internal class Overlay(private val service: ControlService, private val display:
 
     private fun setOpen(value: Boolean) {
         open = value
+        if (!value) pinned.value = null
         show()
     }
 
@@ -120,6 +133,7 @@ internal class Overlay(private val service: ControlService, private val display:
     private fun hide() {
         main.removeCallbacks(dim)
         open = false
+        pinned.value = null
         if (attached) runCatching { windows.removeView(root) }
         attached = false
         root.removeAllViews()
@@ -162,6 +176,7 @@ internal class Overlay(private val service: ControlService, private val display:
         Mode.HELD -> Look(Tone.WARNING, false, service.getString(if (indicator.label != null) R.string.overlay_done_hint else R.string.overlay_held))
         Mode.ASKING -> Look(Tone.WARNING, true, service.getString(R.string.overlay_activity, indicator.label))
         Mode.WORKING -> Look(Tone.ACCENT, true, indicator.label?.let { service.getString(R.string.overlay_activity, it) } ?: service.getString(R.string.overlay_working))
+        Mode.WATCHING -> Look(Tone.ACCENT, false, service.getString(R.string.overlay_agent_screen))
         Mode.SHARING -> Look(Tone.READY, false, service.getString(R.string.overlay_sharing))
     }
 
@@ -176,6 +191,7 @@ internal class Overlay(private val service: ControlService, private val display:
             Mode.HELD -> listOf(Action(service.getString(R.string.overlay_hand_back)) { display.handBack(served) })
             Mode.ASKING -> listOf(stop, takeOver)
             Mode.WORKING -> listOf(takeOver, stop)
+            Mode.WATCHING -> listOf(takeOver)
             Mode.SHARING -> listOf(Action(service.getString(R.string.overlay_stop_sharing)) { display.stop() })
         }
     }
@@ -242,4 +258,4 @@ internal class Overlay(private val service: ControlService, private val display:
 }
 
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-private fun Served.indicator() = Indicator.of(screen.agent, screen.size, activity, handover, held, recent)
+private fun Served.indicator(pinned: Boolean) = Indicator.of(screen.agent, screen.size, activity, handover, held, recent, pinned)

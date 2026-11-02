@@ -33,6 +33,7 @@
     <string name="overlay_needs_you">Agent 需要你处理</string>
     <string name="overlay_done_hint">处理完请点交还</string>
     <string name="overlay_working">Agent 正在操作</string>
+    <string name="overlay_agent_screen">Agent 的屏幕</string>
     <string name="overlay_activity">Agent：%1$s</string>
     <string name="overlay_held">由你操作中</string>
     <string name="overlay_sharing">正在共享屏幕</string>

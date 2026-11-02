@@ -14,7 +14,9 @@ import HarnessIcon from "$lib/components/composer/HarnessIcon.svelte";
 import DeviceFolderPicker from "$lib/components/DeviceFolderPicker.svelte";
 import HostPermissionNotice from "$lib/components/HostPermissionNotice.svelte";
 import {
+	canFloatDeviceDisplay,
 	deviceDisplayStatus,
+	floatDeviceDisplay,
 	openDeviceControlSettings,
 	pairPhoneControl,
 	setupPhoneControl,
@@ -133,6 +135,7 @@ const displays = $derived(
 );
 const screen = $derived(serving ? deviceDisplayStatus() : null);
 const sharingHere = $derived(screen?.sharedWith === spaceId);
+const floats = $derived(screen !== null && canFloatDeviceDisplay());
 const phoneControl = $derived(screen?.phoneControl ?? null);
 const phoneReady = $derived(!phoneControl || phoneControl.stage === "ready");
 const phoneControlLabel = $derived.by(() => {
@@ -272,6 +275,12 @@ async function showVirtual() {
 function openDisplay(displayId: string) {
 	close();
 	onOpenDisplay?.(displayId);
+}
+
+async function floatDisplay(displayId: string) {
+	close();
+	if (!(await floatDeviceDisplay({ spaceId, display: displayId })))
+		onOpenDisplay?.(displayId);
 }
 
 const deviceLabel = $derived(
@@ -479,6 +488,7 @@ $effect(() => {
 							<div class="runtime-display">
 								<span class="runtime-display-name">{item.kind === "agent" ? m.runtime_display_agent({}, { locale }) : item.name || item.id}<span class="runtime-meta">{item.handover && !item.held ? m.runtime_display_needs_you({ reason: item.handover.reason }, { locale }) : item.held ? m.runtime_display_held({}, { locale }) : item.activity ? item.activity.label ? m.runtime_display_activity({ label: item.activity.label }, { locale }) : m.runtime_display_working({}, { locale }) : `${item.width}×${item.height}`}</span></span>
 								<DisplayViewers viewers={item.viewers} {people} />
+								{#if canView && floats && item.kind === "agent"}<button type="button" class="runtime-display-open" onclick={() => void floatDisplay(item.id)}>{m.runtime_display_float({}, { locale })}</button>{/if}
 								{#if canView && onOpenDisplay}<button type="button" class="runtime-display-open" onclick={() => openDisplay(item.id)}>{m.runtime_display_open({}, { locale })}</button>{/if}
 							</div>
 						{/each}
