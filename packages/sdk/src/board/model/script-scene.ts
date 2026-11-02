@@ -11,6 +11,11 @@ import {
 import type { BoardScriptOutput } from "./script.js";
 import { applyMatrix, createBoardLayout } from "@cohub/protocol/board-layout";
 import type { BoardScene } from "./scene.js";
+import { boardScriptAttachments, isBoardRootScript } from "./script-index.js";
+import { boardScriptScope } from "./script-scope.js";
+import { validateBoardShader } from "./shader.js";
+
+export { boardScriptOf, boardScriptScope, diffBoardScriptItems } from "./script-scope.js";
 
 function parseBoardItem(value: unknown): BoardItem {
   const parsed = parseItem(value);
@@ -32,30 +37,7 @@ const DISPLAY_FIELDS = new Set([
 const CURSORS = new Set(["default", "pointer", "grab", "grabbing", "crosshair", "text", "move", "ew-resize", "ns-resize", "not-allowed"]);
 const TOOLS = new Set(["select", "hand", "text", "shape", "draw", "arrow", "frame"]);
 const SCREEN_Z = 1e9;
-
-export function boardScriptScope(
-  document: Pick<BoardDocument, "items">,
-  id: string,
-): Set<string> {
-  const scope = new Set([
-    id,
-    ...Object.values(document.items[id]?.script?.targets ?? {}).filter(
-      (target) => Boolean(document.items[target]),
-    ),
-  ]);
-  if (document.items[id]?.type !== "frame") return scope;
-  for (const candidate of Object.keys(document.items)) {
-    let parent = document.items[candidate]?.parent;
-    for (let depth = 0; parent && depth < 64; depth++) {
-      if (parent === id) {
-        scope.add(candidate);
-        break;
-      }
-      parent = document.items[parent]?.parent;
-    }
-  }
-  return scope;
-}
+const ROOT_WORLD_Z = 1e8;
 
 export function validateBoardScriptOutput(output: BoardScriptOutput): void {
   if (
@@ -74,6 +56,7 @@ export function validateBoardScriptOutput(output: BoardScriptOutput): void {
         (point && ![point.x, point.y].every((n) => Number.isFinite(n) && n >= 0 && n <= 1)))
       throw new Error("Invalid screen scene anchor.");
   }
+  if (output.shader !== undefined) validateBoardShader(output.shader);
   if (output.frameRate !== undefined && !(Number.isFinite(output.frameRate) && output.frameRate >= 1 && output.frameRate <= 60))
     throw new Error("frameRate must be a number from 1 to 60.");
   if (output.parameters) {
@@ -130,8 +113,10 @@ export function validateBoardScriptOutput(output: BoardScriptOutput): void {
   }
 }
 
-function scopedModules(document: BoardDocument, scope: ReadonlySet<string>): Set<string> {
+function scopedModules(document: BoardDocument, owner: string, scope: ReadonlySet<string>): Set<string> {
   const modules = new Set<string>();
+  if (isBoardRootScript(document, owner))
+    for (const { script } of boardScriptAttachments(document)) modules.add(script.src);
   for (const id of scope) {
     const script = document.items[id]?.script;
     if (script?.enabled) modules.add(script.src);
@@ -151,6 +136,7 @@ export function validateBoardScriptCommit(
   )
     throw new Error("Scripts may only commit items in their scope.");
   const scope = boardScriptScope(document, id);
+  const root = isBoardRootScript(document, id);
   const items = patch.items ?? {};
   const created = new Set(Object.keys(items).filter((target) => !scope.has(target) && !document.items[target]));
   const reachable = (target: string) => scope.has(target) || created.has(target);
@@ -162,6 +148,10 @@ export function validateBoardScriptCommit(
         throw new Error(`Item is outside the script scope: ${target}`);
       if (!record || !("type" in record))
         throw new Error(`Item no longer exists: ${target}`);
+      if (root && record.parent === undefined) {
+        if (record.script) scripted.push(target);
+        continue;
+      }
       if (
         typeof record.parent !== "string" ||
         !reachable(record.parent) ||
@@ -178,11 +168,12 @@ export function validateBoardScriptCommit(
   if (!result.ok)
     throw new Error(result.diagnostics[0]?.message ?? "Invalid script commit.");
   if (!scripted.length) return result.document;
-  const modules = scopedModules(document, scope);
+  const modules = scopedModules(document, id, scope);
   for (const target of scripted) {
     const script = result.document.items[target]?.script;
     if (script?.enabled && !modules.has(script.src))
       throw new Error("Scripts may only attach modules already running in their scope.");
+    if (root) continue;
     for (const reached of boardScriptScope(result.document, target))
       if (!reachable(reached)) throw new Error("A script cannot start a script that reaches beyond its scope.");
   }
@@ -205,24 +196,12 @@ type PreparedOutput = {
   presented: Map<string, { base: BoardItem; item: BoardItem }>;
 };
 const preparedOutputs = new WeakMap<BoardScriptOutput, PreparedOutput>();
-const preparedScopes = new WeakMap<BoardDocument, Map<string, Set<string>>>();
-const itemOrders = new WeakMap<BoardDocument["items"], Map<string, number>>();
-
-function documentOrder(document: BoardDocument): Map<string, number> {
-  let order = itemOrders.get(document.items);
-  if (!order) {
-    order = new Map(Object.keys(document.items).map((id, index) => [id, index]));
-    itemOrders.set(document.items, order);
-  }
-  return order;
-}
-
+const preparedScopes = new WeakMap<BoardDocument, Map<string, ReadonlySet<string>>>();
 function orderedScriptOwners(document: BoardDocument, outputs: ReadonlyMap<string, BoardScriptOutput>): string[] {
-  const order = documentOrder(document);
-  return [...outputs.keys()].filter(id => order.has(id)).sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  return boardScriptAttachments(document).map(({ id }) => id).filter((id) => outputs.has(id));
 }
 
-function scopeOf(document: BoardDocument, owner: string): Set<string> {
+function scopeOf(document: BoardDocument, owner: string): ReadonlySet<string> {
   let scopes = preparedScopes.get(document);
   if (!scopes) {
     scopes = new Map();
@@ -294,6 +273,8 @@ export function prepareBoardScriptOutput(
     return previous;
   const scope = scopeOf(document, owner);
   validateBoardScriptOutput(output);
+  if (isBoardRootScript(document, owner) && Object.values(output.hits).some((hit) => !("item" in hit)))
+    throw new Error("A Board script takes input only on its scene items.");
   const presented = new Map<string, { base: BoardItem; item: BoardItem }>();
   for (const [id, patch] of Object.entries(output.patches)) {
     const base = document.items[id];
@@ -317,15 +298,15 @@ export function composeBoardScriptItems(
   scene: BoardScene,
   outputs: ReadonlyMap<string, BoardScriptOutput>,
   incoming: ReadonlyMap<string, BoardItem> = new Map(),
-  screen?: { zoom: number },
+  screen?: { zoom: number; x?: number; y?: number },
   onError?: (owner: string, error: unknown) => void,
   gestureLayout?: BoardScene["layout"],
 ): Map<string, BoardItem> {
   const result = new Map(incoming);
   const screenRoots = new Map<string, string>();
   if (outputs.size === 0) return result;
-  const order = documentOrder(document);
-  for (const owner of orderedScriptOwners(document, outputs)) {
+  const owners = orderedScriptOwners(document, outputs);
+  for (const [rank, owner] of owners.entries()) {
     const output = outputs.get(owner);
     if (!output) continue;
     try {
@@ -341,8 +322,17 @@ export function composeBoardScriptItems(
         }
         changes.set(id, current.item);
       }
+      const root = isBoardRootScript(document, owner);
       const owned = changes.get(owner) ?? result.get(owner) ?? document.items[owner];
-      if (owned && prepared.world.items.size) {
+      if (root && prepared.world.items.size) {
+        changes.set(prepared.world.root, parseBoardItem({
+          type: "frame",
+          size: { width: 1, height: 1 },
+          z: ROOT_WORLD_Z + rank,
+          props: { decoration: "none", clip: false },
+        }));
+        for (const [id, item] of prepared.world.items) changes.set(id, item);
+      } else if (owned && prepared.world.items.size) {
         const box = scene.layout.box(owner);
         changes.set(prepared.world.root, parseBoardItem({
           type: "frame",
@@ -365,7 +355,7 @@ export function composeBoardScriptItems(
           scale: 1 / screen.zoom,
           origin: { x: 0, y: 0 },
           size: { width: 1, height: 1 },
-          z: SCREEN_Z + (order.get(owner) ?? 0),
+          z: SCREEN_Z + rank,
           props: { decoration: "none", clip: false },
         }));
         for (const [id, item] of prepared.screen.items) changes.set(id, item);
@@ -384,6 +374,10 @@ export function composeBoardScriptItems(
     for (const [owner, rootId] of screenRoots) {
       const root = result.get(rootId);
       const anchor = outputs.get(owner)?.anchor;
+      if (!anchor && isBoardRootScript(document, owner)) {
+        if (root) result.set(rootId, { ...root, position: { x: -(screen?.x ?? 0) / (screen?.zoom ?? 1), y: -(screen?.y ?? 0) / (screen?.zoom ?? 1) } });
+        continue;
+      }
       const target = anchor?.item ?? owner;
       const shown = Boolean(document.items[target]) && scopeOf(document, owner).has(target);
       const box = shown ? layout.box(target) : { width: 0, height: 0 };

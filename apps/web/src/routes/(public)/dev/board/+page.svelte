@@ -35,6 +35,7 @@ const document = boardGalleryDocument({
 	deck: page.url.searchParams.has("deck"),
 	effects: page.url.searchParams.has("effects"),
 	motion: page.url.searchParams.has("motion"),
+	shaders: page.url.searchParams.has("shaders"),
 	tracks: Number(page.url.searchParams.get("tracks") ?? 0) || undefined,
 });
 const readonly = page.url.searchParams.has("view");

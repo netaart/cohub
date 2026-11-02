@@ -286,6 +286,22 @@ function resolveShadow(shadow: BoardShadow, context: BoardEffectsContext) {
 	};
 }
 
+const shaderFilters = new WeakMap<Container, readonly Filter[]>();
+
+function applyFilters(container: Container, parts: EffectFilters | undefined) {
+	const effects = parts ? [parts.color, parts.blur, parts.shadow].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)) : [];
+	const all = [...(shaderFilters.get(container) ?? []), ...effects];
+	container.filters = all.length ? all : null;
+}
+
+export function setBoardShaderFilters(container: Container, filters: readonly Filter[] | null) {
+	const current = shaderFilters.get(container) ?? null;
+	if (current === filters || (!current?.length && !filters?.length)) return;
+	if (filters?.length) shaderFilters.set(container, filters);
+	else shaderFilters.delete(container);
+	applyFilters(container, filtersByContainer.get(container));
+}
+
 export function syncBoardEffects(container: Container, style: BoardStyle | undefined, context: BoardEffectsContext) {
 	container.blendMode = style?.blend && style.blend !== "normal" ? style.blend : "inherit";
 	const filter = style?.filter;
@@ -296,8 +312,8 @@ export function syncBoardEffects(container: Container, style: BoardStyle | undef
 	let parts = filtersByContainer.get(container);
 	if (!colored && blur <= 0 && !shadow) {
 		if (parts) {
-			container.filters = null;
 			filtersByContainer.delete(container);
+			applyFilters(container, undefined);
 		}
 		return;
 	}
@@ -313,7 +329,7 @@ export function syncBoardEffects(container: Container, style: BoardStyle | undef
 	if (blur > 0) parts.blur?.set(blur, zoom);
 	if (shadow) parts.shadow?.set(shadow, zoom);
 	filtersByContainer.set(container, parts);
-	container.filters = [parts.color, parts.blur, parts.shadow].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+	applyFilters(container, parts);
 }
 
 export function rescaleBoardEffects(container: Container, style: BoardStyle | undefined, context: BoardEffectsContext) {

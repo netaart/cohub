@@ -8,7 +8,7 @@ const fontPath = (pkg: string, file: string) =>
   join(dirname(require.resolve(`${pkg}/package.json`)), "files", file);
 
 /** Runs after `tsc`: bundles the Board renderer and PixiJS so neither is installed at runtime. */
-export default defineConfig({
+export default defineConfig([{
   entry: { "board-kernel": "src/board-kernel.ts" },
   format: "esm",
   platform: "node",
@@ -26,4 +26,17 @@ export default defineConfig({
     neverBundle: ["@napi-rs/canvas"],
     onlyBundle: false,
   },
-});
+}, {
+  entry: { "board-gpu/page": "src/board-gpu/page.ts" },
+  format: "esm",
+  platform: "browser",
+  target: "chrome120",
+  tsconfig: false,
+  dts: false,
+  clean: false,
+  hash: false,
+  fixedExtension: false,
+  outExtensions: () => ({ js: ".js" }),
+  outputOptions: { codeSplitting: false },
+  deps: { alwaysBundle: [/.*/], onlyBundle: false },
+}]);

@@ -1,9 +1,9 @@
-import type { BoardDocument, BoardItem } from "@cohub/protocol";
+import type { BoardDocument, BoardItem, BoardScript } from "@cohub/protocol";
 import { BoardBitmapTexture } from "./bitmap-texture.js";
 import { boardBitmapResolution } from "./bitmap-resolution.js";
 import { getBoardResolution } from "./text-resolution.js";
-import { boardScriptItems } from "../model/script-index.js";
-import { boardScriptScope } from "../model/script-scene.js";
+import { boardScriptAttachments } from "../model/script-index.js";
+import { boardScriptScope, diffBoardScriptItems } from "../model/script-scope.js";
 import { boardScriptHitVisible, resolveBoardScriptHit } from "../model/script-hit.js";
 import type { BoardScene } from "../model/scene.js";
 import type { BoardViewport } from "../model/geometry.js";
@@ -19,19 +19,24 @@ import {
   type BoardScriptSources,
 } from "./script-modules.js";
 import { boardScriptFrameSource } from "./script-sandbox.js";
-import type { ScriptRuntimeInput } from "./script-runtime.js";
+import type { ScriptRuntimeInput, ScriptRuntimeInputDelta } from "./script-runtime.js";
 
 type Graph = { key: string; sources: BoardScriptSources };
 
 type Entry = {
   id: string;
   signature: string;
+  script: BoardScript;
+  item: BoardItem | null;
   token: number;
   graph: string | null;
-  input: ScriptRuntimeInput;
-  sentInput?: ScriptRuntimeInput;
-  inputKey: string;
-  inputDocument: BoardDocument | null;
+  copy: Map<string, BoardItem>;
+  document: BoardDocument | null;
+  width: number;
+  height: number;
+  snapshot?: BoardScriptSnapshot;
+  sent: boolean;
+  delta: ScriptRuntimeInputDelta | null;
   startedAt: number;
   capture?: {
     promise: Promise<BoardScriptSnapshot | null>;
@@ -56,6 +61,7 @@ type Entry = {
 
 export type BoardScriptHostOptions = {
   readModule(path: string): Promise<string>;
+  shaders?: boolean;
   host: HTMLElement;
   onFrame(): void;
   onSchedule?(): void;
@@ -81,6 +87,7 @@ export type BoardScriptHostCallbacks = {
 };
 
 export const BOARD_SCRIPT_INSTANCE_LIMIT = 1000;
+const NO_BOX = { width: 0, height: 0 };
 
 export type BrowserBoardScriptHost = BoardScriptHost & {
   sync(
@@ -94,6 +101,7 @@ export type BrowserBoardScriptHost = BoardScriptHost & {
   event(id: string, event: BoardScriptEvent): void;
   output(id: string): BoardScriptOutput | null;
   snapshot(id: string): Promise<BoardScriptSnapshot | null>;
+  clock(id: string): number;
   restore(id: string, snapshot: BoardScriptSnapshot): void;
   fault(id: string, message: string): void;
   restart(id: string): void;
@@ -130,14 +138,46 @@ export function createBoardScriptHost(
   let nextGraph = 0;
   let brokerReady = false;
   let broker: HTMLIFrameElement | null = null;
-  const signatures = new WeakMap<BoardItem, string>();
-  function entrySignature(item: BoardItem): string {
-    let value = signatures.get(item);
+  const signatures = new WeakMap<BoardScript, string>();
+  function entrySignature(script: BoardScript): string {
+    let value = signatures.get(script);
     if (value === undefined) {
-      value = JSON.stringify(item.script);
-      signatures.set(item, value);
+      value = JSON.stringify(script);
+      signatures.set(script, value);
     }
     return value;
+  }
+  function track(entry: Entry, board: BoardDocument, width: number, height: number) {
+    const delta: ScriptRuntimeInputDelta = {};
+    if (entry.document !== board) {
+      entry.document = board;
+      const items = diffBoardScriptItems(entry.copy, board, boardScriptScope(board, entry.id));
+      if (items) delta.items = items;
+      if (items && entry.item && Object.hasOwn(items, entry.id)) delta.item = entry.item;
+    }
+    if (entry.width !== width || entry.height !== height) {
+      entry.width = width;
+      entry.height = height;
+      delta.width = width;
+      delta.height = height;
+    }
+    if (!Object.keys(delta).length) return;
+    entry.dirty = true;
+    if (!entry.sent) return;
+    const pending = entry.delta ?? {};
+    entry.delta = { ...pending, ...delta, ...(pending.items || delta.items ? { items: { ...pending.items, ...delta.items } } : {}) };
+  }
+  function fullInput(entry: Entry): ScriptRuntimeInput {
+    return {
+      id: entry.id,
+      script: entry.script,
+      item: entry.item,
+      items: Object.fromEntries(entry.copy),
+      width: entry.width,
+      height: entry.height,
+      capabilities: Object.keys(options.capabilities ?? {}),
+      snapshot: entry.snapshot,
+    };
   }
   const focusTargets = new Map<string, HTMLButtonElement>();
   const focusStyles = new WeakMap<HTMLButtonElement, string>();
@@ -152,8 +192,9 @@ export function createBoardScriptHost(
   let lastZoom = Number.NaN;
   let settledAt = 0;
   let resolutionTimer: ReturnType<typeof setTimeout> | undefined;
-  const needsTick = (entry: Entry) => !entry.error && brokerReady && entry.graph !== null && !entry.pending &&
-    (entry.dirty || Boolean(entry.output?.updating || (entry.output?.animated && entry.draw)));
+  const moving = (entry: Entry) => Boolean(entry.output?.updating || (entry.output?.animated && entry.output.draws !== false && entry.draw));
+  const needsTick = (entry: Entry) => !entry.error && brokerReady && entry.graph !== null && !entry.pending && (entry.dirty || moving(entry));
+  let syncedAt = 0;
   const retiredTextures = new Set<BoardBitmapTexture>();
   let retirementFrame = 0;
 
@@ -431,8 +472,10 @@ export function createBoardScriptHost(
       for (const entry of entries.values()) if (needsTick(entry)) return true;
       return false;
     },
+    clock: (id) => syncedAt - (entries.get(id)?.startedAt ?? syncedAt),
     sync(board, scene, camera, time, inputEnabled, visibleIds) {
       if (disposed) return;
+      syncedAt = time;
       interactive = inputEnabled;
       const now = performance.now();
       if (!options.export && camera.zoom !== lastZoom) {
@@ -445,53 +488,38 @@ export function createBoardScriptHost(
       const alive = new Set<string>();
       const liveFocusTargets = new Set<string>();
       let focusSurface: { width: number; height: number } | undefined;
-      for (const [id, item] of boardScriptItems(board)) {
-        if (!item.script?.enabled) continue;
+      for (const attachment of boardScriptAttachments(board)) {
+        const { id, script, item } = attachment;
         alive.add(id);
-        const signature = entrySignature(item);
+        const signature = entrySignature(script);
         let entry = entries.get(id);
         if (entry && entry.signature !== signature) {
           release(entry);
           entry = undefined;
         }
-        const box = scene.layout.box(id);
-        const scoped: Record<string, BoardItem> =
-          entry?.inputDocument === board ? entry.input.items : { [id]: item };
-        if (entry?.inputDocument !== board)
-          for (const child of boardScriptScope(board, id)) {
-            const value = board.items[child];
-            if (value) scoped[child] = value;
-          }
-        const input: ScriptRuntimeInput =
-          entry?.inputDocument === board &&
-          entry.input.width === box.width &&
-          entry.input.height === box.height
-            ? entry.input
-            : {
-                id,
-                item,
-                items: scoped,
-                width: box.width,
-                height: box.height,
-                capabilities: Object.keys(options.capabilities ?? {}),
-                snapshot: restored.get(id),
-              };
         if (!entry && entries.size >= BOARD_SCRIPT_INSTANCE_LIMIT) {
           limited.add(id);
           continue;
         }
         limited.delete(id);
+        const box = item ? scene.layout.box(id) : NO_BOX;
         if (!entry) {
+          const snapshot = restored.get(id);
           entry = {
             id,
             signature,
+            script,
+            item,
             token: ++nextToken,
             graph: null,
-            input,
-            inputKey: "",
-            inputDocument: null,
-            startedAt:
-              (options.export ? 0 : time) - (input.snapshot?.time ?? 0),
+            copy: new Map(),
+            document: null,
+            width: box.width,
+            height: box.height,
+            snapshot,
+            sent: false,
+            delta: null,
+            startedAt: (options.export ? 0 : time) - (snapshot?.time ?? 0),
             texture: new BoardBitmapTexture(),
             error: null,
             output: null,
@@ -514,7 +542,7 @@ export function createBoardScriptHost(
             () => fail(current, "Script loading timed out."),
             15_000,
           );
-          void loadGraph(item.script.src).then(
+          void loadGraph(script.src).then(
             (graph) => {
               if (disposed || entries.get(id) !== current) return;
               clearTimeout(current.timer);
@@ -528,12 +556,16 @@ export function createBoardScriptHost(
           );
         }
         if (entry.error) continue;
-        const visible = !visibleIds || visibleIds.has(id);
+        entry.script = script;
+        entry.item = item;
+        track(entry, board, box.width, box.height);
+        const visible = !item || !visibleIds || visibleIds.has(id);
         if (entry.visible !== visible) {
           entry.visible = visible;
           if (visible) entry.dirty = true;
         }
-        const draw = Boolean(options.export || (visible && (options.isMaterialized?.(id) ?? true)));
+        const shaded = Boolean(options.shaders && entry.output?.shader);
+        const draw = Boolean(item && !shaded && (options.export || (visible && (options.isMaterialized?.(id) ?? true))));
         if (entry.draw !== draw) {
           entry.draw = draw;
           if (draw) entry.dirty = true;
@@ -550,15 +582,6 @@ export function createBoardScriptHost(
         if (scale !== entry.scale) {
           entry.scale = scale;
           if (draw) entry.dirty = true;
-        }
-        if (entry.input !== input || entry.inputDocument !== board) {
-          const inputKey = JSON.stringify(input);
-          if (entry.inputKey !== inputKey) {
-            entry.inputKey = inputKey;
-            entry.input = input;
-            entry.dirty = true;
-          }
-          entry.inputDocument = board;
         }
         if (entry.output && !options.export) {
           for (const [target, hit] of Object.entries(entry.output.hits)) {
@@ -585,13 +608,7 @@ export function createBoardScriptHost(
         if (!brokerReady || !entry.graph || entry.pending) continue;
         const elapsed = time - entry.startedAt;
         const tick = entry.output?.frameRate ? Math.floor((elapsed * entry.output.frameRate) / 1000) : elapsed;
-        if (
-          !entry.dirty &&
-          (!entry.output?.animated ||
-            (!entry.draw && !entry.output.updating) ||
-            entry.tick === tick)
-        )
-          continue;
+        if (!entry.dirty && (!moving(entry) || entry.tick === tick)) continue;
         entry.pending = true;
         entry.dirty = false;
         entry.time = time;
@@ -605,13 +622,16 @@ export function createBoardScriptHost(
         toBroker({
           request: entry.request,
           graph: entry.graph,
-          input: entry.sentInput === entry.input ? undefined : entry.input,
+          input: entry.sent ? undefined : fullInput(entry),
+          delta: entry.sent ? (entry.delta ?? undefined) : undefined,
           draw: entry.draw,
+          shaders: options.shaders,
           t: elapsed,
           scale: entry.scale,
           events: entry.events.splice(0),
         }, entry.token);
-        entry.sentInput = entry.input;
+        entry.sent = true;
+        entry.delta = null;
       }
       for (const [key, button] of focusTargets)
         if (!liveFocusTargets.has(key)) {
@@ -647,7 +667,7 @@ export function createBoardScriptHost(
       for (const src of affected) dropGraph(src);
       let changed = false;
       for (const entry of [...entries.values()]) {
-        const src = entry.input.item.script?.src ?? "";
+        const src = entry.script.src;
         if (path && !affected.has(src) && src !== path) continue;
         restored.delete(entry.id);
         release(entry);

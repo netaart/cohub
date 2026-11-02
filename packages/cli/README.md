@@ -73,6 +73,11 @@ cohub boards export lesson.board --animation lecture --at 0:92s:40ms --camera --
 NODE_DEBUG=cohub:board-export cohub boards export lesson.board --animation lecture --at 0:92s:40ms -o lecture.mp4
 ```
 
+Boards whose scripts draw with shaders render in a local Chrome, Chromium or Edge (headless;
+software WebGL without a GPU) so frames match the web app; the rest render in Node.
+`--renderer canvas` keeps Node and warns about the shaders it could not run, `--renderer gpu`
+always uses the browser, and `COHUB_CHROME` picks the browser executable.
+
 Debug output reports render stages, RSS, heap, external buffers, reserved image bytes,
 and available/constrained process memory. Video encoding is reported separately.
 MP4 exports require even output dimensions and fail before rendering if the initial

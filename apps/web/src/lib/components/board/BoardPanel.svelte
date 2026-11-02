@@ -1108,8 +1108,12 @@ function retrySync() {
 	void onRetrySync?.();
 }
 
-function reactAt(reaction: BoardReaction, point: { x: number; y: number } | null) {
-	if (point && scriptStage) awareness.react(reaction, scriptStage.toWorld(point.x, point.y));
+function reactAt(
+	reaction: BoardReaction,
+	point: { x: number; y: number } | null,
+) {
+	if (point && scriptStage)
+		awareness.react(reaction, scriptStage.toWorld(point.x, point.y));
 }
 
 function handleContextMenu(request: BoardContextMenuRequest): boolean {
@@ -1355,9 +1359,9 @@ onDestroy(() => {
 			{#if scriptPanelOpen && scriptItemId && scriptStatus}
 				<BoardScriptPanel
 					{editor}
-					itemId={scriptItemId}
+					ownerId={scriptItemId}
 					status={scriptStatus}
-					sheet={isMobile}
+					placement={isMobile ? "sheet" : "floating"}
 					onOpenSource={openFile}
 					onRestart={() => { if (scriptItemId) restartScript(scriptItemId); }}
 					onClose={() => { scriptPanelOpen = false; }}
@@ -1383,6 +1387,8 @@ onDestroy(() => {
 					<BoardAppearancePopover
 						{editor}
 						{backdropStatus}
+						stage={scriptStage}
+						onOpenSource={openFile}
 						onClose={() => { appearanceOpen = false; }}
 					/>
 				</div>

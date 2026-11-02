@@ -10,31 +10,31 @@ import { m } from "$lib/paraglide/messages.js";
 
 const {
 	editor,
-	itemId,
+	ownerId,
 	status,
-	sheet = false,
+	placement = "floating",
 	onOpenSource,
 	onRestart,
 	onClose,
 }: {
 	editor: BoardEditor;
-	itemId: string;
+	ownerId: string;
 	status: BoardScriptStatus;
-	sheet?: boolean;
+	placement?: "floating" | "sheet" | "inline";
 	onOpenSource?: (path: string) => void;
 	onRestart: () => void;
-	onClose: () => void;
+	onClose?: () => void;
 } = $props();
 
 const locale = $derived(getLocale());
-const item = $derived(editor.itemById(itemId));
-const script = $derived(item?.script);
+const boardScript = $derived(editor.settings.scripts?.[ownerId]);
+const script = $derived(boardScript ?? editor.itemById(ownerId)?.script);
 const fileName = $derived(script?.src.split("/").pop() ?? "");
 const parameters = $derived(Object.entries(status.parameters));
 let copied = $state(false);
 
 const position = $derived.by(() => {
-	if (sheet) return null;
+	if (placement !== "floating") return null;
 	const bounds = editor.bounds;
 	if (!bounds) return null;
 	const { zoom, x, y } = editor.camera;
@@ -50,9 +50,12 @@ function paramValue(key: string, spec: BoardScriptParameter) {
 
 function write(key: string, value: string | number | boolean) {
 	if (!script || script.params[key] === value) return;
-	void editor.commitPatch({
-		items: { [itemId]: { script: { params: { [key]: value } } } },
-	});
+	const params = { params: { [key]: value } };
+	void editor.commitPatch(
+		boardScript
+			? { board: { scripts: { [ownerId]: params } } }
+			: { items: { [ownerId]: { script: params } } },
+	);
 }
 
 function writeNumber(key: string, spec: BoardScriptParameter, raw: string) {
@@ -75,7 +78,7 @@ async function copyError() {
 }
 
 function stopKeys(event: KeyboardEvent) {
-	if (event.key === "Escape") {
+	if (event.key === "Escape" && onClose) {
 		event.preventDefault();
 		onClose();
 	}
@@ -83,10 +86,12 @@ function stopKeys(event: KeyboardEvent) {
 }
 </script>
 
-{#if script && !editor.gestureActive && (sheet || position)}
+{#if script && !editor.gestureActive && (placement !== "floating" || position)}
 	<div
-		class="script-panel menu-surface"
-		class:script-panel--sheet={sheet}
+		class="script-panel"
+		class:menu-surface={placement !== "inline"}
+		class:script-panel--sheet={placement === "sheet"}
+		class:script-panel--inline={placement === "inline"}
 		style:left={position ? `${position.left}px` : undefined}
 		style:top={position ? `${position.top}px` : undefined}
 		role="dialog"
@@ -95,20 +100,24 @@ function stopKeys(event: KeyboardEvent) {
 		onkeydown={stopKeys}
 		onpointerdown={(event) => event.stopPropagation()}
 	>
-		<header class="script-head">
-			<span class="script-dot" data-state={status.state} aria-hidden="true"></span>
-			<span class="script-name" title={script.src}>{fileName}</span>
-			<span class="script-state">
-				{status.state === "error"
-					? m.board_script_failed({}, { locale })
-					: status.state === "running"
-						? m.board_script_running({}, { locale })
-						: m.board_script_starting({}, { locale })}
-			</span>
-			<button type="button" class="script-icon" title={m.board_close({}, { locale })} aria-label={m.board_close({}, { locale })} onclick={onClose}>
-				<X class="h-3.5 w-3.5" />
-			</button>
-		</header>
+		{#if placement !== "inline"}
+			<header class="script-head">
+				<span class="script-dot" data-state={status.state} aria-hidden="true"></span>
+				<span class="script-name" title={script.src}>{fileName}</span>
+				<span class="script-state">
+					{status.state === "error"
+						? m.board_script_failed({}, { locale })
+						: status.state === "running"
+							? m.board_script_running({}, { locale })
+							: m.board_script_starting({}, { locale })}
+				</span>
+				{#if onClose}
+					<button type="button" class="script-icon" title={m.board_close({}, { locale })} aria-label={m.board_close({}, { locale })} onclick={onClose}>
+						<X class="h-3.5 w-3.5" />
+					</button>
+				{/if}
+			</header>
+		{/if}
 
 		{#if status.error}
 			<div class="script-error">
@@ -201,6 +210,13 @@ function stopKeys(event: KeyboardEvent) {
 		padding: 8px;
 		color: var(--text-primary);
 		font-size: 12px;
+	}
+	.script-panel--inline {
+		position: static;
+		width: auto;
+		max-width: none;
+		transform: none;
+		padding: 2px 0 0;
 	}
 	.script-panel--sheet {
 		right: 8px;

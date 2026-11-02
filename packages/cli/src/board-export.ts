@@ -20,6 +20,7 @@ import type {
   BoardNodeTexture,
 } from "@neta-art/cohub/board/export/node";
 import type { BoardScriptHost } from "@neta-art/cohub/board/render";
+import type { BoardExportWarning } from "@neta-art/cohub/board/export";
 import {
   hasBoardScripts,
   boardAssetKey,
@@ -32,6 +33,7 @@ import {
   buildBoardScene,
   createNodeBoardRenderer,
   createNodeBoardScriptHost,
+  describeBoardExportWarning,
   exportBoardImageBytes,
   parseBoardDocument,
   planBoardExport,
@@ -39,11 +41,13 @@ import {
   selectBoardExportAssets,
 } from "./board-kernel.js";
 import { settleBoardDocument } from "./board-media.js";
+import { type BoardGpuExporter, type BoardGpuResources, findBoardGpuBrowser, launchBoardGpuExporter } from "./board-gpu/index.js";
 import { BOARD_EXPORT_FONTS, type BoardExportFont } from "./board-fonts.js";
 import { createClient } from "./client.js";
 import { downloadPublicAudio, downloadPublicImage } from "./safe-remote-image.js";
 import {
   BOARD_EXPORT_IMAGE_MEMORY_MIB,
+  type BoardExportRenderer,
   type BoardExportDecodeImage,
   BoardExportResourceError,
   createBoardExportImageBudget,
@@ -239,6 +243,7 @@ export type BoardExportRunOptions = {
   camera?: { width: number; height: number };
   document?: BoardDocument;
   scripts?: BoardScriptHost;
+  renderer?: BoardExportRenderer;
   signal?: AbortSignal;
   imageMemoryMiB?: number;
   onPlan?: (plan: { width: number; height: number; frames: number }) => void;
@@ -373,6 +378,7 @@ export async function runBoardExport(
     });
   };
   let scriptHost: ReturnType<typeof createNodeBoardScriptHost> | null = null;
+  let gpu: BoardGpuExporter | null = null;
   const textureCache: BoardExportTextureCache = { textures: new Map(), edges: new Map(), missed: new Map() };
   let backgroundTexture: BoardNodeTexture | undefined;
   try {
@@ -416,14 +422,13 @@ export async function runBoardExport(
       }
     }
 
-    if (!options.scripts && hasBoardScripts(document)) scriptHost = createNodeBoardScriptHost(renderer, {
+    if (!options.scripts && options.renderer !== "gpu" && hasBoardScripts(document)) scriptHost = createNodeBoardScriptHost(renderer, {
       concurrency: 2,
       readModule: async (src) => {
         const { bytes } = await readSpaceFileBytes(createClient(), options.spaceId, src);
         return new TextDecoder().decode(bytes);
       },
     });
-    const host = scriptHost;
 
     const assetKey = (item: BoardSceneItem) => {
       const key = boardExportAssetKey(item);
@@ -431,24 +436,82 @@ export async function runBoardExport(
     };
     const frames: BoardExportFrame[] = [];
     const reported = new Set<string>();
+    const report = (text: string) => {
+      if (reported.has(text)) return;
+      reported.add(text);
+      warnings.push(text);
+    };
     let completed = 0;
+    let decided = options.renderer === "canvas";
+    const emit = async (frame: BoardExportFrame) => {
+      if (options.onFrame) await options.onFrame(frame, completed);
+      else frames.push(frame);
+      completed++;
+      options.onProgress?.(completed, times.length);
+    };
+    const launchGpu = async (browser: string) => {
+      const exporter = await launchBoardGpuExporter({ document, animation: options.animation ?? null, theme: options.theme }, gpuResources(options, document), { browser, signal: options.signal });
+      scriptHost?.destroy();
+      scriptHost = null;
+      return exporter;
+    };
+    if (options.renderer === "gpu") {
+      const browser = findBoardGpuBrowser();
+      if (!browser) throw new Error("GPU export needs Chrome, Chromium or Edge. Install one, or set COHUB_CHROME to its path.");
+      gpu = await launchGpu(browser);
+    }
     for (const time of times) {
       options.signal?.throwIfAborted();
+      const host = scriptHost;
       host?.clearFrames();
       const frameOptions = { sampler, camera: options.camera, ...(time === null ? {} : { at: { animation: options.animation, time } }), region, scale: options.scale, padding: times.length > 1 ? 0 : options.padding };
       const initial = prepareBoardExport(document, frameOptions);
       if (!initial) continue;
       let prepared = initial;
       trace("prepare", completed, initial.plan);
-      if (host) {
-        await host.prepare(initial.scene.items, [time ?? 0], initial.plan.scale);
-        for (const item of initial.scene.items) {
-          const error = host.error(item.id);
-          if (error) throw new Error(`${item.script?.src ?? item.id}: ${error}`);
+      const prepareScripts = async (scripts: NonNullable<typeof host>, shaders: boolean) => {
+        await scripts.prepare(initial.scene.items, [time ?? 0], initial.plan.scale, initial.document.board, { shaders });
+        for (const id of [...Object.keys(initial.document.board.scripts ?? {}), ...initial.scene.items.map((item) => item.id)]) {
+          const error = scripts.error(id);
+          if (error) throw new Error(`${initial.document.board.scripts?.[id]?.src ?? initial.scene.get(id)?.script?.src ?? id}: ${error}`);
         }
-        const scripted = prepareBoardExport(document, { ...frameOptions, scripts: host });
+        return prepareBoardExport(document, { ...frameOptions, scripts });
+      };
+      if (host && !gpu) {
+        const scripted = await prepareScripts(host, !decided);
         if (!scripted) continue;
         prepared = scripted;
+      }
+      if (!decided) {
+        decided = true;
+        const shaded = (host?.shaders?.(prepared.document, time ?? 0) ?? []).map((owner) => owner.id);
+        const browser = shaded.length ? findBoardGpuBrowser() : null;
+        if (browser) gpu = await launchGpu(browser);
+        else if (host && shaded.length) {
+          report(`Shaders in ${shaded.join(", ")} need Chrome, Chromium or Edge; install one or set COHUB_CHROME to draw them.`);
+          host.clearFrames();
+          const scripted = await prepareScripts(host, false);
+          if (!scripted) continue;
+          prepared = scripted;
+        }
+      }
+      if (gpu) {
+        trace("gpu", completed, prepared.plan);
+        const result = await gpu.render({
+          time,
+          region,
+          ...(options.camera ? { camera: options.camera } : {}),
+          scale: options.scale,
+          ...(times.length > 1 || options.padding === undefined ? {} : { padding: options.padding }),
+          background: options.background,
+          format: options.format,
+          ...(options.quality === undefined ? {} : { quality: options.quality }),
+          withImages: options.withImages,
+          imageMemory: imageMemoryBytes,
+        });
+        for (const warning of result.warnings) report(options.withImages && warning.kind === "images-missing" ? describeBoardExportWarning(warning) : describeWarning(warning));
+        await emit({ time, bytes: result.bytes, width: result.width, height: result.height, scale: result.scale, itemCount: result.itemCount, format: options.format });
+        continue;
       }
       trace("images", completed, prepared.plan);
       if (options.withImages) {
@@ -483,11 +546,10 @@ export async function runBoardExport(
       if (!result) continue;
       for (const warning of result.warnings) {
         if (warning.kind === "images-missing" && options.withImages) continue;
-        const text = describeWarning(warning);
-        if (!reported.has(text)) warnings.push(text);
-        reported.add(text);
+        if (warning.kind === "shaders-unsupported" && options.renderer !== "canvas") continue;
+        report(describeWarning(warning));
       }
-      const frame: BoardExportFrame = {
+      await emit({
         time,
         bytes: result.bytes,
         width: result.plan.width,
@@ -495,15 +557,12 @@ export async function runBoardExport(
         scale: result.plan.scale,
         itemCount: result.plan.items.length,
         format: result.format,
-      };
-      if (options.onFrame) await options.onFrame(frame, completed);
-      else frames.push(frame);
-      completed++;
-      options.onProgress?.(completed, times.length);
+      });
       trace("rendered", completed, result.plan);
     }
     return completed ? { frames, warnings } : null;
   } finally {
+    await gpu?.close();
     scriptHost?.destroy();
     for (const texture of textureCache.textures.values()) texture.destroy(true);
     backgroundTexture?.destroy(true);
@@ -511,7 +570,26 @@ export async function runBoardExport(
   }
 }
 
-function describeWarning(warning: { kind: string; [key: string]: unknown }): string {
+function gpuResources(options: BoardExportRunOptions, document: BoardDocument): BoardGpuResources {
+  const client = createClient();
+  const scene = buildBoardScene(document);
+  return {
+    fonts: resolveBundledFonts().flatMap(({ path, family }) => (family ? [{ path, family }] : [])),
+    readModule: async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes),
+    async readPicture(request) {
+      if ("background" in request) {
+        const source = document.board.background.image && parseBoardMediaSource(document.board.background.image.src);
+        if (!source) return null;
+        return source.kind === "url" ? downloadPublicImage(source.value) : readSpaceFileBytes(client, options.spaceId, source.value);
+      }
+      const source = boardAssetKeySource(request.key);
+      const item = scene.items.find((entry) => boardAssetKey(entry) === request.key);
+      return source && item ? fetchBoardPicture(client, options.spaceId, source, item, request.edge) : null;
+    },
+  };
+}
+
+function describeWarning(warning: BoardExportWarning): string {
   if (warning.kind === "scale-clamped") {
     return `Scale reduced from ${warning.requested}x to ${Number(warning.applied).toFixed(2)}x to stay within the size limit.`;
   }
@@ -522,5 +600,5 @@ function describeWarning(warning: { kind: string; [key: string]: unknown }): str
   if (warning.kind === "many-items") {
     return `${warning.count} items exported.`;
   }
-  return warning.kind;
+  return describeBoardExportWarning(warning);
 }

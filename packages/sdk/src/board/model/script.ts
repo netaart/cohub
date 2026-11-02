@@ -94,7 +94,7 @@ export type BoardScriptSnapshot = {
   time: number;
   random: number;
   configuration?: string;
-  effects?: Pick<BoardScriptOutput, "patches" | "world" | "screen" | "anchor" | "hits">;
+  effects?: Pick<BoardScriptOutput, "patches" | "world" | "screen" | "anchor" | "hits" | "uniforms">;
 };
 export type BoardScriptParameter = {
   type: "number" | "boolean" | "string" | "color";
@@ -114,9 +114,12 @@ export type BoardScriptOutput = {
   hits: Record<string, BoardScriptHit>;
   listens: string[];
   animated: boolean;
+  draws?: boolean;
   updating?: boolean;
   frameRate?: number;
   pixelated?: boolean;
+  shader?: BoardShader;
+  uniforms?: BoardShaderUniformValues;
   version: number;
 };
 
@@ -132,7 +135,7 @@ export type BoardScriptTextInput = {
 export type BoardScriptContext = {
   readonly self: {
     readonly id: string;
-    readonly base: BoardItem;
+    readonly base: BoardItem | null;
     present(patch: BoardScriptItemPatch | null): void;
   };
   readonly params: BoardScript["params"];
@@ -156,6 +159,7 @@ export type BoardScriptContext = {
   hitRegions(hits: Record<string, BoardScriptHit>): void;
   commit(patch: BoardPatch): Promise<boolean>;
   layoutText(text: BoardScriptTextInput): Promise<{ width: number; height: number }>;
+  uniforms(values: BoardShaderUniformValues): void;
   capabilities: {
     has(name: string): boolean;
     call(name: string, input?: unknown): Promise<unknown>;
@@ -168,7 +172,33 @@ export type BoardScriptModule = {
     | ((context: BoardScriptContext) => void)
     | ((context: BoardScriptContext) => () => void);
   draw?: (context: CanvasRenderingContext2D, frame: BoardScriptFrame) => void;
+  shader?: BoardShader;
   animated?: boolean;
   frameRate?: number;
   pixelated?: boolean;
 };
+
+export const BOARD_SHADER_LAYERS = ["below", "above", "filter"] as const;
+export const BOARD_SHADER_BLENDS = ["normal", "add", "screen", "multiply"] as const;
+export const BOARD_SHADER_UNIFORM_TYPES = ["float", "vec2", "vec3", "vec4", "int"] as const;
+
+export type BoardShaderPass = {
+  glsl: string;
+  sprites?: number;
+  blend?: (typeof BOARD_SHADER_BLENDS)[number];
+};
+
+export type BoardShader = {
+  layer?: (typeof BOARD_SHADER_LAYERS)[number];
+  surfaces?: boolean;
+  uniforms?: Record<string, string>;
+  state?: {
+    width: number;
+    height: number;
+    glsl: string;
+    precision?: "byte" | "half";
+  };
+  passes: BoardShaderPass[];
+};
+
+export type BoardShaderUniformValues = Record<string, number | readonly number[]>;

@@ -294,6 +294,11 @@ and composes local effects. `render/script-runtime.ts` is a self-contained kerne
 serialized into browser workers and Node VM workers so execution semantics do not
 drift. Keep it free of imported runtime values and bundler-only helpers.
 
+A script belongs to an item or, under `board.scripts`, to the Board
+(`model/script-index.ts` lists both as attachments; `model/script-scope.ts` resolves
+what each reaches). Hosts keep each worker's copy of its scope current by identity
+(`diffBoardScriptItems`), so an edit sends only what it changed.
+
 `render/script-modules.ts` resolves the ESM graph before code enters an isolated
 realm. Browser hosting lives in `render/script-host.ts`; Node hosting (export
 samples and the interactive runtime) in `export/node/scripts.ts`. Everything
@@ -338,6 +343,30 @@ simulation or reload modules.
 Temporary items are absent from editor selection, clipboard subtrees and writes.
 Explicit commits reuse the normal transaction and undo path. Future host capabilities
 extend the context without adding business-specific fields to Board items.
+
+## Shaders
+
+A script module's `shader` (see `model/shader.ts` and `model/shader-api.ts`) is data:
+the worker reports it once with the output, and the main thread runs it, so a moving
+shader costs no message per frame. `render/shader/program.ts` wraps author GLSL into
+complete programs and bounds its loops; it is pure and tested in Node, while
+`render/shader/layer.ts` checks each program with the driver once to report errors
+on the author's lines. One layer per owner holds its passes (meshes, instanced for
+sprites, or filters), one uniform group they share, and its optional state textures,
+stepped at 60 Hz before the frame renders.
+
+`render/shader/layers.ts` owns the layers of every script with a shader and the
+per-frame uniforms. Hosts only place them: the stage (`stage/shaders.ts`) attaches
+item layers through `scene.decorate`, which keeps them on whichever container draws
+the owner (its card, or the group of a scripted frame) and composes filters with the
+item's own effects; Board scripts draw in containers under and over the item nodes.
+Exports place them the same way in `export/scene.ts`. Surfaces are a signed distance
+field of item outlines, rasterized and jump-flooded on the GPU (`render/shader/surfaces.ts`),
+rebuilt only when the scene or the region changes.
+
+A Canvas renderer cannot run shaders: those exports draw `draw()` where a module has
+one and report the rest. The CLI's GPU exporter (`packages/cli/src/board-gpu`) runs
+this same export pipeline in local Chrome.
 
 ## Adding an item type
 

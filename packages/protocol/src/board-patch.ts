@@ -448,6 +448,12 @@ export function applyBoardPatch(
 	for (const id of nextItems.keys()) {
 		if (nextItems.get(id) && animation(id)) diagnostics.push(error(`items.${id}`, "ID_CONFLICT", `${id} is already an animation id`));
 	}
+	for (const id of Object.keys((nextSettings ?? state.settings()).scripts ?? {})) {
+		const taken = item(id) ? "an item" : animation(id) ? "an animation" : null;
+		if (!taken) continue;
+		const path = nextItems.get(id) ? `items.${id}` : nextAnimations.get(id) ? `animations.${id}` : `board.scripts.${id}`;
+		diagnostics.push(error(path, "ID_CONFLICT", path.startsWith("board") ? `${id} is already ${taken} id` : `${id} is already a Board script id`));
+	}
 	if (diagnostics.length) return { ok: false, diagnostics };
 
 	const deletedItems = [...nextItems].filter(([, value]) => value === null).map(([id]) => id);

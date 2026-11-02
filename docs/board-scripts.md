@@ -1,7 +1,8 @@
 # Board scripts
 
 Attach a module to an existing item to add behavior. Create a `custom` item when the
-module supplies the content. Both use the same `script` field and runtime.
+module supplies the content, or attach it to the Board itself under `board.scripts`.
+All use the same `script` field and runtime.
 
 ```json
 {
@@ -351,6 +352,119 @@ stay local. Read-only viewers cannot commit.
 
 `layoutText({ text, fontSize?, fontWeight?, font?, lineHeight?, width? })` resolves
 to the size a native text item would take, for laying out controls.
+
+## Script the whole Board
+
+A module can also belong to the Board itself, under `board.scripts`. It reaches every
+item, sees every change and draws over the whole view, so weather, lighting or a
+game loop needs no frame around everything:
+
+```json
+{"board":{"scripts":{"rain":{"src":"scripts/rain.js","params":{"density":0.8}}}}}
+```
+
+Keys share the id space of items and animations, and a Board takes at most 32 of
+its own scripts. They run before item scripts, so an item's own script has the last
+word on what it presents. The Board has no box, so `ctx.self.base` is null, the
+frame's `width` and `height` are 0, and the module draws with `shader` passes or
+`scene()` rather than `draw()`. Its world scene sits over every item; its screen
+scene starts at the view's top-left unless anchored. It takes input only on its
+scene items, never on `self`, and may commit new top-level items. The web app lists
+these scripts under **Board appearance**, where they can be added, paused, tuned
+and restarted.
+
+Every script, whatever its scope, receives document changes incrementally: an
+edit costs the worker what it changed, not the size of the Board.
+
+## Draw on the GPU
+
+`shader` puts WebGL 2 passes next to an item, or over the whole view for a Board
+script. A module that only declares a shader is evaluated once; from then on it
+runs entirely on the GPU, with no message per frame:
+
+```js
+export const animated = true;
+export const parameters = { tint: { type: "color", default: "teal" } };
+
+export const shader = {
+  layer: "above",
+  passes: [{ glsl: `
+    #include "cohub:noise"
+    vec4 effect(Fragment f) {
+      float glow = fbm(f.local * 0.02 + board.time * 0.3, 4);
+      return vec4(params.tint.rgb, glow * 0.6);
+    }` }],
+};
+```
+
+`layer` places the passes `above` (the default) or `below` the owner and its
+contents, or makes them a `filter` that transforms the owner's pixels, which each
+pass reads with `scene(uv)`. A Board script's filter transforms every item. Passes
+draw one quad over the box; with `sprites: n` a pass draws `n` instanced quads that
+`Sprite sprite(int id)` places, for particles, rain or confetti without a draw call
+each.
+
+Shaders are written in GLSL ES 3.00 as functions; Cohub owns every declaration:
+
+| Name | What it is |
+|---|---|
+| `vec4 effect(Fragment f)` | A pass's color, unpremultiplied. `f.uv` is 0–1 across the box or sprite, `f.local` the position in owner units (world units for a Board script), `f.color` and `f.data` come from the sprite. |
+| `Sprite sprite(int id)` | Where sprite `id` goes: `position`, `size`, `rotation` (radians), `color`, `data` and `visible`, in local units. `makeSprite(position, size)` fills the rest. |
+| `board` | `time` and `delta` in seconds on the script clock, `frame` (60 Hz steps), `size` (the box; the view for a Board script), `view` (the visible rectangle in local units), `resolution`, `zoom`, `seed`, `quality` and `dark`. |
+| `params.*` | Number and boolean parameters as `float`, colors as `vec4` resolved for the viewer's theme. |
+| `uniforms.*` | Values declared in `shader.uniforms`, such as `{ drops: "vec4[32]" }`, and set from setup code with `ctx.uniforms({ drops })`. At most 128 vectors. |
+| `#include "cohub:…"` | `hash` (identical on every GPU), `noise`, `shapes` (signed distances) and `color`. |
+
+The same source compiles for both stages; guard stage-only code with
+`#ifdef COHUB_FRAGMENT`. Uniform, input and output declarations, `#version`,
+`#extension`, and `while` or `do` loops are rejected; every `for` loop shares a
+budget of 65536 iterations per invocation, so no shader can hang the GPU. Compile
+errors name the pass and the line in your source.
+
+### Surfaces
+
+`surfaces: true` provides `surface(local)`: the `distance` to the nearest edge of
+the Board's items (negative inside), the outward `normal` and whether the point is
+`inside`. Frames, arrows, drawings and effects are left out, as is the owner. The
+field follows animation and edits, so motion can collide with cards:
+
+```glsl
+// March a falling drop down to the first card below it.
+float travelled = 0.0;
+for (int i = 0; i < 40; i++) {
+  float gap = surface(start + vec2(0.0, travelled)).distance;
+  if (gap < 1.0 / board.zoom) break;
+  travelled += gap;
+}
+```
+
+`cohub boards examples rain --module` prints a complete Board script: rain over the
+whole view whose drops splash and bounce off the top of every card.
+
+### State
+
+`state: { width, height, glsl }` keeps a texture that `vec4 simulate(Fragment f)`
+advances in fixed 60 Hz steps from its previous value, `state(uv)`. Every pass reads
+it with `state(uv)` too: ripples, trails, fluids, cellular automata. It covers the
+owner's box; a Board script's state covers the view, like glass in front of it.
+`precision: "byte"` stores 8 bits per channel instead of half floats. Seeking
+backwards or exporting at a time replays the steps from the start, so results are
+the same everywhere.
+
+### Performance and fallbacks
+
+Shaders render only while their owner is drawn and on screen; `board.quality`
+(lower on phones) scales sprite counts, and reduced motion holds the clock. A
+shader that was running when the GPU reset is paused for the rest of the session
+until it is restarted. Where shaders cannot run, a module's `draw()` is its
+fallback: when shaders run, `draw()` is not called, and a shader that fails to
+compile reports its error rather than falling back.
+
+The web export draws shaders like the live Board. `cohub boards export` draws in
+Node and moves to a local Chrome, Chromium or Edge (headless, software WebGL when
+there is no GPU) once a script draws with a shader; `--renderer canvas` stays in
+Node and names the shaders it drew with `draw()` or left out, and `--renderer gpu`
+always uses the browser. Set `COHUB_CHROME` to choose the browser.
 
 ## Execution boundary and capabilities
 

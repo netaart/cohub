@@ -2,6 +2,9 @@ import type { BoardNodeRenderer } from "@neta-art/cohub/board/export/node";
 
 export const BOARD_EXPORT_IMAGE_MEMORY_MIB = 256;
 
+export const BOARD_EXPORT_RENDERERS = ["auto", "canvas", "gpu"] as const;
+export type BoardExportRenderer = (typeof BOARD_EXPORT_RENDERERS)[number];
+
 export class BoardExportResourceError extends Error {}
 
 export type BoardExportDecodeImage = (bytes: Uint8Array, mimeType?: string, maxEdge?: number) => ReturnType<BoardNodeRenderer["decodeImage"]>;

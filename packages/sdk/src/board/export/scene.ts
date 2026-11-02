@@ -1,5 +1,6 @@
 
-import { Container, Graphics, Sprite, type Texture } from "pixi.js";
+import { multiplyMatrix } from "@cohub/protocol/board-layout";
+import { Container, type Filter, Graphics, type Renderer, Sprite, type Texture } from "pixi.js";
 import type { BoardShapeColors } from "../model/palette.js";
 import { buildFallbackShapeColors } from "../model/palette.js";
 import { boardAssetKey } from "../model/asset-key.js";
@@ -22,6 +23,11 @@ import type { Rect } from "../model/geometry.js";
 import { createBoardAtmosphereLayer } from "../render/atmosphere.js";
 import { type FrameGroup, groupingAncestor, isGroupingFrame, isSelfGroupedFrame, syncBoardItemEffects, syncFrameGroup } from "../render/frame-group.js";
 import { textureIsCutout } from "../render/cutout.js";
+import { setBoardShaderFilters } from "../render/effects.js";
+import { positionShell } from "../render/renderers/base-card-renderer.js";
+import type { BoardShaderLayer } from "../render/shader/layer.js";
+import { type BoardShaderOwner, type BoardShaderPlacement, boardShaderColor, createBoardShaderLayers } from "../render/shader/layers.js";
+import { boardItemLocalToWorld, boardLocalView } from "../render/shader/placement.js";
 
 export type BoardExportSceneInput = {
   settings: BoardSettings;
@@ -43,11 +49,13 @@ export type BoardExportSceneInput = {
   renderers?: BoardCardRendererResolver;
   backdrop?: BoardBackdrop | null;
   backdropTexture?: Texture;
+  shaders?: { renderer: Renderer; owners: readonly BoardShaderOwner[]; quality?: number };
 };
 
 export type BoardExportScene = {
   root: Container;
   missingImageKeys: string[];
+  shaderErrors: Array<{ id: string; message: string }>;
   destroy: () => void;
 };
 
@@ -126,11 +134,13 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
     const frame = input.scene.get(groupingAncestor(input.scene, item) ?? "");
     return frame ? groupOf(frame).content : world;
   }
+  const containers = new Map<string, Container>();
   for (const item of input.items) {
     const opacity = input.scene.opacity(item.id);
     if (opacity <= 0) continue;
     const host = isSelfGroupedFrame(item) ? groupOf(item).group : outerHost(item);
     const container = resolve(item, context).create(item, context);
+    containers.set(item.id, container);
     container.alpha = opacity;
     syncBoardItemEffects(container, item, context);
     const view = input.viewTextures?.get(item.id);
@@ -142,6 +152,60 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
     }
   }
   root.addChild(world);
+  const shaderErrors: Array<{ id: string; message: string }> = [];
+  const layers = input.shaders?.owners.length ? createBoardShaderLayers({ onError: (id, message) => shaderErrors.push({ id, message }) }) : null;
+  if (layers && input.shaders) {
+    const toOutput = [input.scale, 0, 0, input.scale, -input.world.x * input.scale, -input.world.y * input.scale] as const;
+    const layer = (label: string) => {
+      const container = new Container({ label });
+      container.scale.set(input.scale);
+      container.position.copyFrom(world.position);
+      return container;
+    };
+    const below = root.addChildAt(layer("board-shaders-below"), root.getChildIndex(world));
+    const above = root.addChildAt(layer("board-shaders-above"), root.getChildIndex(world) + 1);
+    const filters = new Map<string, readonly Filter[]>();
+    const attach = (owner: BoardShaderOwner, layer: BoardShaderLayer | null): BoardShaderPlacement | null => {
+      if (!layer) return null;
+      if (owner.root) {
+        if (layer.container) (layer.layer === "below" ? below : above).addChild(layer.container);
+        if (layer.filters) {
+          filters.set(owner.id, layer.filters);
+          setBoardShaderFilters(world, [...filters.values()].flat());
+        }
+        return { region: input.world, view: input.world, localToWorld: [1, 0, 0, 1, 0, 0], localToGlobal: toOutput };
+      }
+      const item = input.scene.get(owner.id);
+      const container = containers.get(owner.id);
+      if (!item || !container) return null;
+      const group = isSelfGroupedFrame(item) ? groups.get(item.id)?.group : undefined;
+      if (layer.layer === "below" && layer.container) container.addChildAt(layer.container, 0);
+      if (layer.layer === "above" && layer.container) {
+        if (group) {
+          positionShell(layer.container, item);
+          layer.container.zIndex = Number.MAX_SAFE_INTEGER;
+        }
+        (group ?? container).addChild(layer.container);
+      }
+      if (layer.filters) setBoardShaderFilters(group ?? container, layer.filters);
+      const localToWorld = boardItemLocalToWorld(item.frame);
+      return {
+        region: { x: 0, y: 0, width: item.frame.width, height: item.frame.height },
+        view: boardLocalView(input.world, localToWorld),
+        localToWorld,
+        localToGlobal: multiplyMatrix(toOutput, localToWorld),
+      };
+    };
+    layers.sync(input.shaders.renderer, input.shaders.owners, {
+      zoom: input.scale,
+      density: 1,
+      quality: input.shaders.quality ?? 1,
+      dark: input.colorScheme === "dark",
+      color: (value) => boardShaderColor(context, value),
+      attach,
+    }, input.scene);
+    layers.prepare(input.shaders.renderer, true);
+  }
   if (input.settings.atmosphere) {
     const atmosphere = createBoardAtmosphereLayer();
     atmosphere.sync(input.settings.atmosphere, { width: outputWidth, height: outputHeight, density: 1 });
@@ -151,7 +215,9 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
   return {
     root,
     missingImageKeys: [...missing],
+    shaderErrors,
     destroy: () => {
+      layers?.destroy();
       backdrop?.destroy();
       root.destroy({ children: true });
     },

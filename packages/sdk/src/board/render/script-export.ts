@@ -5,7 +5,9 @@ import type {
   BoardScriptOutput,
   BoardScriptSnapshot,
 } from "../model/script.js";
+import { boardScriptAttachments } from "../model/script-index.js";
 import { createBoardScriptHost } from "./script-host.js";
+import { boardShaderOwners } from "./shader/layers.js";
 import type { BoardScriptHost } from "./renderers/board-renderer-registry.js";
 
 export async function prepareBrowserBoardScripts(
@@ -13,6 +15,7 @@ export async function prepareBrowserBoardScripts(
   time: number,
   readModule: (path: string) => Promise<string>,
   snapshots?: Readonly<Record<string, BoardScriptSnapshot>>,
+  options: { shaders?: boolean } = {},
 ): Promise<{ host: BoardScriptHost; dispose(): void }> {
   if (!Number.isFinite(time) || time < 0 || time > 600_000)
     throw new Error("Script export time must be between 0 and 600000 ms.");
@@ -22,14 +25,13 @@ export async function prepareBrowserBoardScripts(
   globalThis.document.body.appendChild(element);
   const outputs = new Map<string, BoardScriptOutput>();
   const scene = buildBoardScene(document);
-  const ids = Object.entries(document.items)
-    .filter(([, item]) => item.script?.enabled)
-    .map(([id]) => id);
+  const ids = boardScriptAttachments(document).map(({ id }) => id);
   let schedule = () => {};
   const host = createBoardScriptHost({
     host: element,
     readModule,
     export: true,
+    shaders: options.shaders ?? true,
     snapshots,
     timeoutMs: 15_000,
     onFrame: () => schedule(),
@@ -80,6 +82,7 @@ export async function prepareBrowserBoardScripts(
     return {
       host: {
         ...host,
+        shaders: (input) => boardShaderOwners(input, outputs, () => time),
         document(input) {
           const items = { ...input.items };
           for (const [id, item] of composeBoardScriptItems(

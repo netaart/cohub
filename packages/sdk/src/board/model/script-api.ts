@@ -6,6 +6,7 @@ import type {
   BoardScriptSceneOptions,
   BoardScriptView,
 } from "./script.js";
+import { BOARD_SHADER_API } from "./shader-api.js";
 
 /**
  * A compact reference for Board script authors, printed by `cohub boards schema script`.
@@ -24,6 +25,7 @@ export const BOARD_SCRIPT_API = {
     pixelated: "true draws one canvas pixel per board unit and scales without smoothing, for crisp pixel art.",
     parameters: "Declares params as { name: { type: number | boolean | string | color, label?, default?, min?, max?, step? } }.",
     default: "Setup function (ctx) for behavior; may return a cleanup function.",
+    shader: "GPU passes drawn with the owner: { layer?, inputs?, uniforms?, state?, passes: [{ glsl, sprites?, blend? }] }. See shader.",
   } satisfies Record<keyof BoardScriptModule, string>,
   frame: {
     t: "Clock time in milliseconds.",
@@ -54,9 +56,12 @@ export const BOARD_SCRIPT_API = {
     emit: "emit(id, type, data?): send a custom event to another scripted item in scope.",
     commit: "commit(patch): save a Board patch; resolves true once written here. Within 5 s of this viewer's input, outside onFrame steps, it saves undoably; otherwise one live editor saves it and others resolve false. It may edit items in scope, add children to a scoped frame, and attach modules already running in scope.",
     layoutText: "layoutText({ text, fontSize?, fontWeight?, font?, lineHeight?, width? }): the size a native text item would take.",
+    uniforms: "uniforms(values): set the shader's declared uniforms from numbers or number arrays; kept until changed.",
     capabilities: "has(name) and call(name, input?) for adapters the host provides.",
   } satisfies Record<keyof BoardScriptContext, string>,
-  scope: "The owner, a Frame owner's descendants, and script.targets.",
+  scope: "The owner, a Frame owner's descendants, and script.targets. A Board script (board.scripts) reaches every item.",
+  board: "A script in board.scripts has no box: ctx.self.base is null, frame width and height are 0, and it draws with shader passes or scene(). Its world scene sits over every item; its screen scene starts at the view's top-left. It takes input only on its scene items, and may commit new top-level items.",
+  shader: BOARD_SHADER_API,
   hitRegions: {
     forms: [
       "{ target: \"self\" }: the owner.",

@@ -45,7 +45,8 @@ test("DOM modules are rejected before setup executes", () => {
   const item = document.items.owner;
   assert.ok(item);
   const module = { default() { assert.fail("Unexpected execution"); }, mount() {}, draw() {} };
-  assert.throws(() => createScriptRuntime(module, { id: "owner", item, items: document.items, width: 100, height: 100 }, { call: async () => undefined, invalidate() {} }), /do not support DOM mount/);
+  assert.ok(item.script);
+  assert.throws(() => createScriptRuntime(module, { id: "owner", script: item.script, item, items: document.items, width: 100, height: 100 }, { call: async () => undefined, invalidate() {} }), /do not support DOM mount/);
 });
 
 test("removing scripts still finishes editor gestures before the fast path resumes", () => {

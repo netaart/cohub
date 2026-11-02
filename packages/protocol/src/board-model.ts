@@ -157,9 +157,9 @@ export const BoardScriptSchema = z.object({
 	src: srcSchema.refine((path) => /\.m?js$/.test(path), "script src must be a .js or .mjs module").describe("A .js or .mjs Space file."),
 	params: z.record(z.string(), z.json()).default({}).describe("Values the module reads as params."),
 	targets: z.record(z.string().min(1).max(80), BoardIdSchema).default({}).describe("Named items the module can reach, as ctx.targets."),
-	seed: z.string().min(1).max(160).optional().describe("Seed for ctx.random(); defaults to the item id."),
+	seed: z.string().min(1).max(160).optional().describe("Seed for ctx.random() and shaders; defaults to the owner's id."),
 	enabled: z.boolean().default(true),
-}).strict().describe("A JavaScript module attached to the item; `cohub boards schema script` lists its API.");
+}).strict().describe("A JavaScript module attached to an item or the Board; `cohub boards schema script` lists its API.");
 export type BoardScript = z.infer<typeof BoardScriptSchema>;
 
 const itemEnvelope = {
@@ -873,6 +873,7 @@ export const BoardAtmosphereSchema = z
 	.describe("Screen effects over every item, for viewers and exports alike.");
 export type BoardAtmosphere = z.infer<typeof BoardAtmosphereSchema>;
 
+export const BOARD_ROOT_SCRIPT_LIMIT = 32;
 export const BOARD_GRID_MIN_SIZE = 4;
 export const BOARD_GRID_MAX_SIZE = 512;
 export const BOARD_GRID_DEFAULT_SIZE = 24;
@@ -901,6 +902,11 @@ export const BoardSettingsSchema = z
 			.strict()
 			.optional()
 			.describe("Motion for items as they are added."),
+		scripts: z
+			.record(BoardIdSchema, BoardScriptSchema)
+			.refine((scripts) => Object.keys(scripts).length <= BOARD_ROOT_SCRIPT_LIMIT, `A Board takes at most ${BOARD_ROOT_SCRIPT_LIMIT} scripts of its own.`)
+			.optional()
+			.describe("Modules attached to the Board itself, by id: every item is in their scope and they draw over the whole view. Ids are shared with items and animations."),
 	})
 	.strict();
 export type BoardSettings = z.infer<typeof BoardSettingsSchema>;

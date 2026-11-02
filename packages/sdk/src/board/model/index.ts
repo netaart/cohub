@@ -31,6 +31,7 @@ export * from "./script-hit.js";
 export * from "./script-api.js";
 export * from "./script-example.js";
 export * from "./script-scene.js";
+export * from "./shader.js";
 export * from "./animation.js";
 export * from "./sampling.js";
 export * from "./authoring.js";

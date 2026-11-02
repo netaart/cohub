@@ -166,7 +166,7 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
       await host.draw(scale);
       return {
         document: host.document(editor.document, editor.scene),
-        scripts: { frame: host.frame, error: host.error, ready: host.ready, release() {} },
+        scripts: { frame: host.frame, error: host.error, ready: host.ready, release() {}, shaders: () => controller.shaderOwners() },
       };
     },
     async render(region: BoardExportRegion = { kind: "all" }, scale = 1): Promise<Uint8Array> {

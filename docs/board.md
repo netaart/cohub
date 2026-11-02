@@ -101,6 +101,9 @@ color in them animates by path (`style.filter.blur`, `style.shadow.color`, …):
 - `blend`: `normal`, `multiply`, `screen` or `add`.
 - On a frame they apply to the frame and its contents as one layer.
 - `board.atmosphere` adds `vignette` and `grain` (0–1) over the whole view.
+- For anything else, `board.scripts` attaches modules to the Board itself; their
+  `shader` passes draw over or under every item, such as rain that splashes on cards.
+  See [Board scripts](board-scripts.md#script-the-whole-board).
 
 Exports draw all of them. Low-end devices skip blur and shadows and keep the rest.
 
@@ -390,6 +393,12 @@ and video first frames, so only what the export needs is downloaded and decoded.
 Board uses the same frames; videos elsewhere decode in the page there, and are drawn
 without a cover in Node exports. Previews beyond the image memory budget (`--image-memory`) are drawn as
 placeholders, with a warning.
+
+Exports draw in Node until a script draws with a shader; then `--renderer auto` (the
+default) renders every frame in a local Chrome, Chromium or Edge, headless and with
+software WebGL where there is no GPU, so the result matches the web app. Set
+`COHUB_CHROME` to pick the browser. `--renderer canvas` stays in Node and warns which
+shaders fell back to `draw()` or were left out; `--renderer gpu` always uses the browser.
 
 Camera and fixed region options are mutually exclusive. `--size` sets camera output
 pixels and never sizes frames; `--scale` applies to fixed regions. In the web export

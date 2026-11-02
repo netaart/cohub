@@ -17,13 +17,15 @@ import {
 	isGroupingFrame,
 	isSelfGroupedFrame,
 	rescaleBoardItemEffects,
+	setBoardShaderFilters,
 	syncBoardItemEffects,
 	syncFrameGroup,
 } from "../render/index.js";
+import { positionShell } from "../render/renderers/base-card-renderer.js";
 import { BOARD_LOD_HYSTERESIS, type BoardLod, boardCardDetailed, boardLodRatio, boardLodSize, DEFAULT_BOARD_LOD } from "../render/lod.js";
 import { textZoomBucket } from "../render/text-resolution.js";
 import { type BoardFrameBudget, fixedBoardFrameBudget } from "./frame-budget.js";
-import { type Container, Graphics, Sprite, Text, type Texture } from "pixi.js";
+import { type Container, type Filter, Graphics, Sprite, Text, type Texture } from "pixi.js";
 
 type CardEntry = {
 	item: BoardItem;
@@ -104,9 +106,16 @@ export type BoardSceneNode = {
 	container: Container;
 };
 
+export type BoardSceneDecoration = {
+	below: Container | null;
+	above: Container | null;
+	filters: readonly Filter[] | null;
+};
+
 export type BoardScene = {
 	sync: (input: SceneSyncInput) => void;
 	getNode: (itemId: string) => BoardSceneNode | null;
+	decorate: (itemId: string, decoration: BoardSceneDecoration | null) => boolean;
 	holders: (key: string) => ReadonlySet<string>;
 	repaintFar: (keys: ReadonlySet<string>, assetKey: (item: BoardItem) => string | null) => void;
 	readonly liveVersion: number;
@@ -148,6 +157,8 @@ export function createBoardScene(options: {
 	const fixedBudget = fixedBoardFrameBudget();
 	let budget: BoardFrameBudget = fixedBudget;
 	const viewSprites = new Map<string, Sprite>();
+	const decorations = new Map<string, BoardSceneDecoration>();
+	const decorated = new Map<string, Container>();
 	const liveStrokes = new Map<
 		string,
 		{
@@ -191,6 +202,7 @@ export function createBoardScene(options: {
 		context: BoardRenderContext,
 		destroyed: boolean,
 	) {
+		undecorate(id);
 		dropViewSprite(id);
 		setHeldKey(context, id, null);
 		cards.delete(id);
@@ -271,6 +283,51 @@ export function createBoardScene(options: {
 			const frame = scene.get(id);
 			if (frame) syncFrameGroup(entry, frame, context);
 		}
+	}
+
+	function undecorate(id: string) {
+		const host = decorated.get(id);
+		if (!host) return;
+		decorated.delete(id);
+		const decoration = decorations.get(id);
+		for (const layer of [decoration?.below, decoration?.above]) if (layer?.parent) layer.parent.removeChild(layer);
+		setBoardShaderFilters(host, null);
+	}
+
+	function applyDecoration(id: string): boolean {
+		const decoration = decorations.get(id);
+		const entry = cards.get(id);
+		if (!decoration || !entry) {
+			undecorate(id);
+			return false;
+		}
+		const group = isSelfGroupedFrame(entry.item) ? groups.get(id)?.group : undefined;
+		const host = group ?? entry.container;
+		if (decorated.get(id) !== host) undecorate(id);
+		decorated.set(id, host);
+		const { below, above, filters } = decoration;
+		if (below && entry.container.children[0] !== below) entry.container.addChildAt(below, 0);
+		if (above) {
+			if (group) {
+				positionShell(above, entry.item);
+				above.zIndex = Number.MAX_SAFE_INTEGER;
+			}
+			if (host.children.at(-1) !== above) host.addChild(above);
+		}
+		setBoardShaderFilters(host, filters);
+		return entry.container.visible && !entry.container.culled;
+	}
+
+	function decorate(id: string, decoration: BoardSceneDecoration | null): boolean {
+		const previous = decorations.get(id);
+		const same = previous && decoration && previous.below === decoration.below && previous.above === decoration.above && previous.filters === decoration.filters;
+		if (previous && !same) {
+			undecorate(id);
+			decorations.delete(id);
+		}
+		if (!decoration) return false;
+		if (!same) decorations.set(id, decoration);
+		return applyDecoration(id);
 	}
 
 	function materialize(
@@ -671,6 +728,7 @@ export function createBoardScene(options: {
 		const liftChanged = context.liftedIds !== lifted;
 		lifted = context.liftedIds;
 		if (structureChanged || liveSetChanged || liftChanged) applyChildOrder(scene);
+		for (const id of decorations.keys()) applyDecoration(id);
 		syncLiveStrokes(input);
 	}
 
@@ -689,7 +747,9 @@ export function createBoardScene(options: {
 			}
 			sprite.texture = texture;
 			sprite.setSize(entry.item.frame.width, entry.item.frame.height);
-			if (entry.container.children.at(-1) !== sprite) entry.container.addChild(sprite);
+			const above = decorated.get(id) === entry.container ? decorations.get(id)?.above : null;
+			const top = entry.container.children.at(above?.parent === entry.container ? -2 : -1);
+			if (top !== sprite) entry.container.addChildAt(sprite, entry.container.children.length - (above?.parent === entry.container ? 1 : 0));
 		}
 	}
 
@@ -777,6 +837,8 @@ export function createBoardScene(options: {
 	}
 
 	function destroy(context: BoardRenderContext) {
+		for (const id of [...decorations.keys()]) undecorate(id);
+		decorations.clear();
 		for (const id of [...viewSprites.keys()]) dropViewSprite(id);
 		for (const entry of cards.values())
 			entry.renderer.destroy?.(entry.container, context);
@@ -810,6 +872,7 @@ export function createBoardScene(options: {
 			const entry = cards.get(itemId);
 			return entry ? { item: entry.item, container: entry.container } : null;
 		},
+		decorate,
 		holders: (key) => holders.get(key) ?? EMPTY_IDS,
 		repaintFar,
 		get liveVersion() {

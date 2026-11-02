@@ -1,6 +1,6 @@
 import type { BoardDocument } from "@neta-art/cohub/board";
 import { parseBoardDocument } from "@neta-art/cohub/board";
-import { motionAnimations, motionItems } from "./motion";
+import { MOTION_BOARD_SCRIPTS, motionAnimations, motionItems } from "./motion";
 
 export const GALLERY_ASSET_PREFIX = "dev/";
 
@@ -375,7 +375,10 @@ function galleryItems(): Record<string, unknown> {
 			size: { width: 680, height: 320 },
 			props: { label: "Apps", clip: true },
 		},
-		app: { ...benchApp(0, 24, 40, { width: 360, height: 240 }), parent: "apps" },
+		app: {
+			...benchApp(0, 24, 40, { width: 360, height: 240 }),
+			parent: "apps",
+		},
 		"app-faded": {
 			...benchApp(1, 440, 70, { width: 300, height: 200 }),
 			parent: "apps",
@@ -550,7 +553,13 @@ function benchItems(
 
 function effectItems(): Record<string, unknown> {
 	const solid = (fill: string) => ({ fill, fillOpacity: 1 });
-	const shape = (x: number, y: number, style: object, text: string, geometry = "rounded") => ({
+	const shape = (
+		x: number,
+		y: number,
+		style: object,
+		text: string,
+		geometry = "rounded",
+	) => ({
 		type: "shape",
 		position: { x, y },
 		size: { width: 160, height: 100 },
@@ -559,38 +568,93 @@ function effectItems(): Record<string, unknown> {
 	});
 	return {
 		plain: shape(0, 0, solid("blue"), "plain"),
-		hue: shape(200, 0, { ...solid("blue"), filter: { hue: 120, saturate: 1.6 } }, "hue"),
+		hue: shape(
+			200,
+			0,
+			{ ...solid("blue"), filter: { hue: 120, saturate: 1.6 } },
+			"hue",
+		),
 		blur: shape(400, 0, { ...solid("blue"), filter: { blur: 4 } }, "blur"),
-		shadow: shape(600, 0, { ...solid("amber"), shadow: { blur: 24, y: 10, opacity: 0.8 } }, "shadow", "ellipse"),
+		shadow: shape(
+			600,
+			0,
+			{ ...solid("amber"), shadow: { blur: 24, y: 10, opacity: 0.8 } },
+			"shadow",
+			"ellipse",
+		),
 		glow: {
 			type: "text",
 			position: { x: 0, y: 160 },
-			style: { fill: "white", shadow: { color: "rose", blur: 16, x: 0, y: 0, opacity: 1 } },
+			style: {
+				fill: "white",
+				shadow: { color: "rose", blur: 16, x: 0, y: 0, opacity: 1 },
+			},
 			props: { text: "Glow", fontSize: 56 },
 		},
-		gray: shape(200, 140, { ...solid("green"), filter: { grayscale: 1 } }, "gray"),
+		gray: shape(
+			200,
+			140,
+			{ ...solid("green"), filter: { grayscale: 1 } },
+			"gray",
+		),
 		under: shape(400, 140, solid("rose"), "", "ellipse"),
-		screen: shape(460, 170, { ...solid("blue"), blend: "screen" }, "screen", "ellipse"),
+		screen: shape(
+			460,
+			170,
+			{ ...solid("blue"), blend: "screen" },
+			"screen",
+			"ellipse",
+		),
 		group: {
 			type: "frame",
 			position: { x: 660, y: 140 },
 			size: { width: 200, height: 140 },
-			style: { shadow: { blur: 20, y: 12, opacity: 0.9 }, filter: { sepia: 1 } },
+			style: {
+				shadow: { blur: 20, y: 12, opacity: 0.9 },
+				filter: { sepia: 1 },
+			},
 			props: { label: "", decoration: "none", clip: false },
 		},
-		g1: { ...shape(10, 10, solid("blue"), "", "ellipse"), parent: "group", size: { width: 80, height: 80 } },
-		g2: { ...shape(70, 40, solid("green"), "group"), parent: "group", size: { width: 100, height: 70 } },
+		g1: {
+			...shape(10, 10, solid("blue"), "", "ellipse"),
+			parent: "group",
+			size: { width: 80, height: 80 },
+		},
+		g2: {
+			...shape(70, 40, solid("green"), "group"),
+			parent: "group",
+			size: { width: 100, height: 70 },
+		},
 		confetti: {
 			type: "effect",
 			position: { x: 0, y: 320 },
 			size: { width: 420, height: 80 },
-			props: { kind: "particles", rate: 60, life: 3000, speed: 40, direction: 90, spread: 40, gravity: 30, particleSize: 14, shape: "square", colors: ["rose", "amber", "blue", "green", "violet"] },
+			props: {
+				kind: "particles",
+				rate: 60,
+				life: 3000,
+				speed: 40,
+				direction: 90,
+				spread: 40,
+				gravity: 30,
+				particleSize: 14,
+				shape: "square",
+				colors: ["rose", "amber", "blue", "green", "violet"],
+			},
 		},
 		stars: {
 			type: "effect",
 			position: { x: 460, y: 320 },
 			size: { width: 200, height: 200 },
-			props: { kind: "impact", rate: 30, life: 1500, speed: 120, particleSize: 18, shape: "star", colors: ["amber", "white"] },
+			props: {
+				kind: "impact",
+				rate: 30,
+				life: 1500,
+				speed: 120,
+				particleSize: 18,
+				shape: "star",
+				colors: ["amber", "white"],
+			},
 		},
 	};
 }
@@ -634,6 +698,7 @@ export function boardGalleryDocument(
 		deck?: boolean;
 		effects?: boolean;
 		motion?: boolean;
+		shaders?: boolean;
 		tracks?: number;
 	} = {},
 ): BoardDocument {
@@ -643,11 +708,14 @@ export function boardGalleryDocument(
 			? deckItems()
 			: options.effects
 				? effectItems()
-			: options.motion
-				? motionItems(options.tracks)
-				: galleryItems();
+				: options.motion
+					? motionItems(options.tracks)
+					: galleryItems();
 	const animations = options.motion ? motionAnimations(options.tracks) : {};
-	const board = options.effects ? { atmosphere: { vignette: 0.5, grain: 0.2 } } : {};
+	const board = {
+		...(options.effects ? { atmosphere: { vignette: 0.5, grain: 0.2 } } : {}),
+		...(options.shaders ? { scripts: MOTION_BOARD_SCRIPTS } : {}),
+	};
 	const parsed = parseBoardDocument({ board, items, animations });
 	if (!parsed.ok)
 		throw new Error(

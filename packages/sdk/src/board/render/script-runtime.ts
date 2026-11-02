@@ -1,4 +1,4 @@
-import type { BoardItem } from "@cohub/protocol";
+import type { BoardItem, BoardScript } from "@cohub/protocol";
 import type {
   BoardScriptContext,
   BoardScriptEvent,
@@ -12,13 +12,28 @@ import type {
 
 export type ScriptRuntimeInput = {
   id: string;
-  item: BoardItem;
+  script: BoardScript;
+  item: BoardItem | null;
   items: Record<string, BoardItem>;
   width: number;
   height: number;
   capabilities?: string[];
   snapshot?: BoardScriptSnapshot;
 };
+
+export type ScriptRuntimeInputDelta = Partial<Pick<ScriptRuntimeInput, "script" | "item" | "width" | "height">> & {
+  items?: Record<string, BoardItem | null>;
+};
+
+export function applyScriptInputDelta(input: ScriptRuntimeInput, delta: ScriptRuntimeInputDelta): ScriptRuntimeInput {
+  const items = { ...input.items };
+  for (const [id, item] of Object.entries(delta.items ?? {})) {
+    if (item) items[id] = item;
+    else delete items[id];
+  }
+  const { items: _items, ...fields } = delta;
+  return { ...input, ...fields, items };
+}
 
 /** Self-contained so browser workers and Node execute exactly the same kernel. */
 export function createScriptRuntime(
@@ -37,13 +52,15 @@ export function createScriptRuntime(
     throw new Error("frameRate must be a number from 1 to 60.");
   if (module.pixelated !== undefined && typeof module.pixelated !== "boolean")
     throw new Error("pixelated must be a boolean.");
+  if (!initial.item && module.draw)
+    throw new Error("A Board script has no box to draw(); use shader passes or scene().");
   const DISPLAY = ["position", "size", "rotation", "scale", "opacity", "style", "props", "z"];
   let input = initial;
   let disposed = false;
   let stepping = false;
   let revision = 0;
   let randomState = 2166136261;
-  for (const char of initial.item.script?.seed ?? initial.id)
+  for (const char of initial.script.seed ?? initial.id)
     randomState = Math.imul(randomState ^ char.charCodeAt(0), 16777619) >>> 0;
   const parameterDefaults = Object.fromEntries(
     Object.entries(module.parameters ?? {})
@@ -52,7 +69,7 @@ export function createScriptRuntime(
   );
   let params = {
     ...parameterDefaults,
-    ...initial.item.script?.params,
+    ...initial.script.params,
   } as BoardScriptFrame["params"];
   const state = structuredClone(initial.snapshot?.state ?? {});
   if (initial.snapshot) randomState = initial.snapshot.random;
@@ -64,7 +81,7 @@ export function createScriptRuntime(
     dt: 0,
     width: initial.width,
     height: initial.height,
-    seed: initial.item.script?.seed ?? initial.id,
+    seed: initial.script.seed ?? initial.id,
     params,
     state,
   };
@@ -80,6 +97,7 @@ export function createScriptRuntime(
   let anchor = effects?.anchor;
   let view: BoardScriptView | null = null;
   let hits: BoardScriptOutput["hits"] = effects?.hits ?? {};
+  let uniforms: BoardScriptOutput["uniforms"] = effects?.uniforms;
   const invalidate = () => {
     if (disposed) return;
     revision++;
@@ -103,13 +121,16 @@ export function createScriptRuntime(
       get base() {
         return input.item;
       },
-      present: (patch) => present(initial.id, patch),
+      present: (patch) => {
+        if (!input.item) throw new Error("A Board script has no item to present; present() items in scope instead.");
+        present(initial.id, patch);
+      },
     },
     get params() {
       return params;
     },
     get targets() {
-      return input.item.script?.targets ?? {};
+      return input.script.targets ?? {};
     },
     async emit(target, type, data) {
       await host.call("board.emit", { target, type, data });
@@ -169,6 +190,18 @@ export function createScriptRuntime(
       hits = structuredClone(next);
       invalidate();
     },
+    uniforms(next) {
+      if (!next || typeof next !== "object") throw new Error("uniforms() takes a record of numbers and number arrays.");
+      const values: Record<string, number | number[]> = {};
+      for (const [name, value] of Object.entries(next)) {
+        const list: unknown[] = typeof value === "number" ? [value] : Array.isArray(value) ? value : [Number.NaN];
+        if (!list.every((entry) => typeof entry === "number" && Number.isFinite(entry)))
+          throw new Error(`Uniform ${name} must be a finite number or an array of them.`);
+        values[name] = typeof value === "number" ? value : [...(list as number[])];
+      }
+      uniforms = { ...uniforms, ...values };
+      invalidate();
+    },
     async commit(patch) {
       return (await host.call("board.commit", { patch, frame: stepping })) === true;
     },
@@ -195,7 +228,7 @@ export function createScriptRuntime(
         }
       params = {
         ...parameterDefaults,
-        ...next.item.script?.params,
+        ...next.script.params,
       } as BoardScriptFrame["params"];
     },
     step(t: number) {
@@ -262,10 +295,13 @@ export function createScriptRuntime(
         screen: layers.screen,
         anchor,
         hits,
+        shader: module.shader,
+        uniforms,
         listens: [...handlers]
           .filter(([, callbacks]) => callbacks.size)
           .map(([type]) => type),
         animated: this.animated,
+        draws: typeof module.draw === "function",
         updating: frames.size > 0,
         frameRate: module.frameRate,
         pixelated: module.pixelated,
@@ -277,7 +313,7 @@ export function createScriptRuntime(
         state,
         time,
         random: randomState,
-        effects: includeEffects ? { patches, world: layers.world, screen: layers.screen, anchor, hits } : undefined,
+        effects: includeEffects ? { patches, world: layers.world, screen: layers.screen, anchor, hits, uniforms } : undefined,
       };
       return clone ? structuredClone(snapshot) : snapshot;
     },
@@ -290,6 +326,7 @@ export function createScriptRuntime(
       layers.world = {};
       layers.screen = {};
       hits = {};
+      uniforms = undefined;
     },
   };
 }

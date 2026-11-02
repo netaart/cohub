@@ -1,6 +1,9 @@
+import { BOARD_SCRIPT_RAIN_EXAMPLE } from "@neta-art/cohub/board";
+
 export const MOTION_SCRIPT_PREFIX = "dev/scripts/";
 
 const SCRIPTS: Record<string, string> = {
+	"rain.js": BOARD_SCRIPT_RAIN_EXAMPLE,
 	"counter.js": `export const parameters = {
   label: { type: "string", label: "Label", default: "Tap to count" },
   color: { type: "color", label: "Color", default: "#e67845" },
@@ -115,6 +118,8 @@ export function motionScriptUrl(path: string): string | null {
 }
 
 const script = (name: string) => ({ src: `${MOTION_SCRIPT_PREFIX}${name}` });
+
+export const MOTION_BOARD_SCRIPTS = { rain: script("rain.js") };
 
 export function motionItems(stress = 0): Record<string, unknown> {
 	const dots: Record<string, unknown> = {};

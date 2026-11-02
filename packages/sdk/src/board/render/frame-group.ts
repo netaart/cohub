@@ -9,11 +9,11 @@ export function isClippingFrame(item: BoardSceneItem): boolean {
 }
 
 export function isGroupingFrame(item: BoardSceneItem): boolean {
-	return item.type === "frame" && (isClippingFrame(item) || hasBoardEffects(item.style));
+	return item.type === "frame" && (isClippingFrame(item) || isSelfGroupedFrame(item));
 }
 
 export function isSelfGroupedFrame(item: BoardSceneItem): boolean {
-	return item.type === "frame" && hasBoardEffects(item.style);
+	return item.type === "frame" && (hasBoardEffects(item.style) || item.script?.enabled === true);
 }
 
 export function groupingAncestor(scene: BoardScene, item: BoardSceneItem): string | undefined {

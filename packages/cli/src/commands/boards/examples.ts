@@ -1,6 +1,11 @@
 import type { Command } from "commander";
 import { json } from "../../output.js";
-import { BOARD_SCRIPT_DRAWING_EXAMPLE } from "../../board-kernel.js";
+import { BOARD_SCRIPT_DRAWING_EXAMPLE, BOARD_SCRIPT_RAIN_EXAMPLE } from "../../board-kernel.js";
+
+const MODULES: Record<string, string> = {
+  custom: BOARD_SCRIPT_DRAWING_EXAMPLE,
+  rain: BOARD_SCRIPT_RAIN_EXAMPLE,
+};
 
 /**
  * Starter documents for `boards create -i` and patches for `boards apply -i`.
@@ -75,20 +80,32 @@ export const BOARD_EXAMPLES: Record<string, { description: string; value: Record
       },
     },
   },
+  rain: {
+    description: "A Board script whose shader rains over the view and splashes on cards; use --module to print scripts/rain.js.",
+    value: {
+      board: { scripts: { rain: { src: "scripts/rain.js", params: { density: 0.7 } } } },
+      items: {
+        title: { type: "text", position: { x: 80, y: 40 }, props: { text: "Rainy day", fontSize: 48 } },
+        left: { type: "shape", position: { x: 80, y: 180 }, size: { width: 320, height: 180 }, style: { fill: "blue", fillOpacity: 0.16, radius: 16 }, props: { text: "Drops land on top" } },
+        right: { type: "shape", position: { x: 480, y: 300 }, size: { width: 280, height: 160 }, rotation: -6, style: { fill: "green", fillOpacity: 0.16, radius: 16 }, props: { text: "and bounce off edges" } },
+      },
+    },
+  },
 };
 
 export function registerBoardExampleCommands(boards: Command): void {
   boards.command("examples [name]")
     .description("Print a starter Board document or list the examples")
-    .option("--module", "Print the custom example's JavaScript module")
+    .option("--module", `Print the example's JavaScript module (${Object.keys(MODULES).join(", ")})`)
     .addHelpText("after", `
 Examples are valid input for create and apply:
   cohub boards examples lesson > lesson.json
   cohub boards create lesson.board -i lesson.json`)
     .action((name: string | undefined, options: { module?: boolean }) => {
       if (options.module) {
-        if (name !== "custom") throw new Error("--module requires the custom example.");
-        process.stdout.write(BOARD_SCRIPT_DRAWING_EXAMPLE);
+        const module = name ? MODULES[name] : undefined;
+        if (!module) throw new Error(`--module needs one of these examples: ${Object.keys(MODULES).join(", ")}.`);
+        process.stdout.write(module);
         return;
       }
       if (!name) {

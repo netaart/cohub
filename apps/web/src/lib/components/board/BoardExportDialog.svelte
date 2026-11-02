@@ -177,6 +177,16 @@ function warningText(warning: BoardImageExportWarning) {
 				{ count: warning.count },
 				{ locale },
 			);
+		case "shaders-unsupported":
+			return m.board_export_warning_shaders_unsupported(
+				{ count: warning.drawn.length + warning.omitted.length },
+				{ locale },
+			);
+		case "shader-failed":
+			return m.board_export_warning_shader_failed(
+				{ id: warning.id },
+				{ locale },
+			);
 	}
 }
 

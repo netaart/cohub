@@ -1,9 +1,9 @@
 import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
-import type { BoardDocument, BoardItem } from "@cohub/protocol";
+import type { BoardDocument, BoardItem, BoardSettings } from "@cohub/protocol";
 import type { Texture } from "pixi.js";
 import { buildBoardScene, type BoardScene, type BoardSceneItem } from "../../model/scene.js";
-import { boardScriptItems } from "../../model/script-index.js";
+import { type BoardScriptAttachment, boardScriptAttachments } from "../../model/script-index.js";
 import {
   boardScriptScope,
   composeBoardScriptItems,
@@ -19,6 +19,7 @@ import {
   type ScriptRuntimeInput,
 } from "../../render/script-runtime.js";
 import type { BoardScriptHost } from "../../render/renderers/board-renderer-registry.js";
+import { boardShaderOwners } from "../../render/shader/layers.js";
 import type { BoardScriptHostCallbacks, BoardScriptRuntimeHost } from "../../render/script-host.js";
 import type { BoardNodeRenderer } from "./index.js";
 import { initializeBoardFonts } from "./fonts.js";
@@ -78,7 +79,7 @@ async function create(data) {
  });
  context.__invalidate=()=>parentPort.postMessage({kind:'dirty',id:data.input.id});
  new Script('globalThis.__runtime=('+workerData.runtime+')(__module,JSON.parse(__inputJson),{call:(name,input)=>__call(name,input),invalidate:__invalidate})').runInContext(context,{timeout:workerData.timeout});
- return {context,signature:data.signature,time:-1,draw:!!root.namespace.draw,pixelated:root.namespace.pixelated===true,canvas:null};
+ return {context,signature:data.signature,time:-1,draw:!!root.namespace.draw,shader:!!root.namespace.shader,pixelated:root.namespace.pixelated===true,canvas:null};
 }
 parentPort.on('message',async data=>{
  if(data.kind==='result') {
@@ -105,7 +106,7 @@ parentPort.on('message',async data=>{
   update.runInContext(context,{timeout:workerData.timeout});entry.time=data.time;
   await new Promise(resolve=>setImmediate(resolve));
   let png;
-  if(entry.draw && data.draw!==false) {
+  if(entry.draw && data.draw!==false && !(entry.shader && data.shaders)) {
    const area=Math.max(1,data.input.width)*Math.max(1,data.input.height);
    const scale=Math.min(entry.pixelated?1:data.scale,2048/Math.max(1,data.input.width,data.input.height),Math.sqrt(2097152/area));
    const width=Math.max(1,Math.round(data.input.width*scale));
@@ -140,6 +141,7 @@ type SampleRequest = {
   scale: number;
   events?: BoardScriptEvent[];
   draw?: boolean;
+  shaders?: boolean;
 };
 
 export type BoardNodeScriptOptions = {
@@ -286,13 +288,13 @@ function createNodeScriptLanes(
       }
       return graph;
     },
-    sample({ input, graph, time, scale, events, draw }: SampleRequest): Promise<Sample> {
+    sample({ input, graph, time, scale, events, draw, shaders }: SampleRequest): Promise<Sample> {
       if (!Number.isFinite(time) || time < 0 || time > 600_000)
         return Promise.reject(new Error("Script time must be between 0 and 600000 ms."));
       const lane = laneOf(input.id);
-      const src = input.item.script?.src ?? "";
+      const src = input.script.src;
       return request<Sample>(lane, {
-        input, src, signature: JSON.stringify(input.item.script), time, scale, events, draw,
+        input, src, signature: JSON.stringify(input.script), time, scale, events, draw, shaders,
         sources: lane.graphs.has(src) ? undefined : graph,
       }, () => lane.graphs.add(src));
     },
@@ -328,13 +330,13 @@ function createNodeScriptLanes(
   };
 }
 
-function scopedInput(document: BoardDocument, id: string, item: BoardItem, size: { width: number; height: number }): ScriptRuntimeInput {
+function scopedInput(document: BoardDocument, { id, script, item }: BoardScriptAttachment, size: { width: number; height: number }): ScriptRuntimeInput {
   const items: Record<string, BoardItem> = {};
   for (const scoped of boardScriptScope(document, id)) {
     const value = document.items[scoped];
     if (value) items[scoped] = value;
   }
-  return { id, item, items, width: size.width, height: size.height };
+  return { id, script, item, items, width: size.width, height: size.height };
 }
 
 export function createNodeBoardScriptHost(
@@ -345,6 +347,8 @@ export function createNodeBoardScriptHost(
     items: readonly BoardSceneItem[],
     times: readonly number[],
     zoom: number,
+    board?: Pick<BoardSettings, "scripts">,
+    options?: { shaders?: boolean },
   ): Promise<void>;
   clearFrames(): void;
   destroy(): void;
@@ -360,6 +364,7 @@ export function createNodeBoardScriptHost(
     frame: (item, time) => textures.get(key(item.id, time)) ?? null,
     error: (id) => errors.get(id) ?? null,
     release() {},
+    shaders: (document, time) => boardShaderOwners(document, outputs.get(time) ?? [], () => time),
     document(document, time) {
       const at = outputs.get(time);
       if (!at?.size) return document;
@@ -374,29 +379,29 @@ export function createNodeBoardScriptHost(
       outputs.clear();
       errors.clear();
     },
-    async prepare(items, times, zoom) {
-      const scripted = items.filter((item) => item.script?.enabled);
-      const alive = new Set(scripted.map((item) => item.id));
+    async prepare(items, times, zoom, board, options) {
+      const all = Object.fromEntries(items.map(({ id, frame: _frame, ...item }) => [id, item as BoardItem]));
+      const document = { board: { scripts: board?.scripts }, items: all } as BoardDocument;
+      const scripted = boardScriptAttachments(document);
+      const alive = new Set(scripted.map(({ id }) => id));
       for (const id of [...lanes.assigned()]) if (!alive.has(id)) lanes.release(id);
       if (!scripted.length) return;
-      const all = Object.fromEntries(items.map(({ id, frame: _frame, ...item }) => [id, item as BoardItem]));
-      const document = { items: all } as BoardDocument;
+      const frames = new Map(items.map((item) => [item.id, item.frame]));
       await Promise.all(
-        scripted.map(async (item) => {
-          const base = all[item.id];
-          const src = item.script?.src;
-          if (!base || !src) return;
+        scripted.map(async (attachment) => {
+          const { id, item } = attachment;
           try {
-            const graph = await lanes.graph(src);
-            const width = "size" in item ? item.size.width : item.frame.width;
-            const height = "size" in item ? item.size.height : item.frame.height;
+            const graph = await lanes.graph(attachment.script.src);
+            const frame = frames.get(id);
+            const width = item ? ("size" in item ? item.size.width : (frame?.width ?? 0)) : 0;
+            const height = item ? ("size" in item ? item.size.height : (frame?.height ?? 0)) : 0;
             const scale = Math.min(4, Math.max(0.25, zoom), 2048 / Math.max(1, width, height));
-            const input = scopedInput(document, item.id, base, { width, height });
+            const input = scopedInput(document, attachment, { width, height });
             for (const time of times) {
-              const result = await lanes.sample({ input, graph, time, scale });
+              const result = await lanes.sample({ input, graph, time, scale, draw: Boolean(item), shaders: options?.shaders });
               if (disposed) return;
               if (result.png) {
-                const frameKey = key(item.id, time);
+                const frameKey = key(id, time);
                 textures.get(frameKey)?.destroy(true);
                 const texture = (await renderer.decodeImage(result.png)) as unknown as Texture;
                 if (result.output.pixelated) texture.source.scaleMode = "nearest";
@@ -407,10 +412,10 @@ export function createNodeBoardScriptHost(
                 at = new Map();
                 outputs.set(time, at);
               }
-              at.set(item.id, result.output);
+              at.set(id, result.output);
             }
           } catch (error) {
-            errors.set(item.id, error instanceof Error ? error.message : String(error));
+            errors.set(id, error instanceof Error ? error.message : String(error));
           }
         }),
       );
@@ -469,6 +474,7 @@ export function createNodeBoardScriptRuntime(
   });
   const entries = new Map<string, RuntimeEntry>();
   const revisions = new Map<string, number>();
+  let syncedAt = 0;
   const pending = new Set<Promise<unknown>>();
   let disposed = false;
   const bump = (id: string) => revisions.set(id, (revisions.get(id) ?? 0) + 1);
@@ -493,7 +499,7 @@ export function createNodeBoardScriptRuntime(
     if (entry.output) callbacks.onOutput(id, null);
   }
   async function step(id: string, entry: RuntimeEntry, input: ScriptRuntimeInput, time: number, scale?: number) {
-    const src = input.item.script?.src ?? "";
+    const src = input.script.src;
     try {
       const graph = await lanes.graph(src);
       const events = entry.events.splice(0);
@@ -525,12 +531,14 @@ export function createNodeBoardScriptRuntime(
       for (const entry of entries.values()) if (!entry.error && (entry.events.length || entry.output?.updating || entry.output?.animated)) return true;
       return false;
     },
+    clock: (id) => syncedAt - (entries.get(id)?.startedAt ?? syncedAt),
     sync(document, scene, _camera, time) {
+      syncedAt = time;
       const alive = new Set<string>();
-      for (const [id, item] of boardScriptItems(document)) {
-        if (!item.script?.enabled) continue;
+      for (const attachment of boardScriptAttachments(document)) {
+        const { id, script, item } = attachment;
         alive.add(id);
-        const signature = JSON.stringify(item.script);
+        const signature = JSON.stringify(script);
         let entry = entries.get(id);
         if (entry && entry.signature !== signature) {
           drop(id);
@@ -541,7 +549,7 @@ export function createNodeBoardScriptRuntime(
           entries.set(id, entry);
         }
         if (entry.error || entry.busy) continue;
-        const input = scopedInput(document, id, item, scene.layout.box(id));
+        const input = scopedInput(document, attachment, item ? scene.layout.box(id) : { width: 0, height: 0 });
         const inputKey = JSON.stringify(input);
         const changed = inputKey !== entry.inputKey;
         const waiting = changed || entry.dirty || entry.events.length > 0;

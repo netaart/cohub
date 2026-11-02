@@ -1,9 +1,9 @@
 import type { BoardDocument, BoardItem, BoardVec2 } from "@cohub/protocol";
 import { applyMatrix, invertMatrix } from "@cohub/protocol/board-layout";
 import { rectsIntersect, type Rect } from "./geometry.js";
-import { sameJson } from "./json.js";
 import type { BoardScene } from "./scene.js";
-import { boardScriptScope } from "./script-scene.js";
+import { isBoardRootScript } from "./script-index.js";
+import { boardScriptScope, diffBoardScriptItems } from "./script-scope.js";
 import type { BoardScriptChangeSource, BoardScriptEvent, BoardScriptGesture, BoardScriptOutput, BoardScriptView } from "./script.js";
 
 const EVENTS = ["viewchange", "selectionchange", "transformend", "change", "gesture"] as const;
@@ -47,27 +47,18 @@ export function createBoardScriptObservers(send: (owner: string, event: BoardScr
     }
     return entry.scope;
   }
-  function scopedItems(document: BoardDocument, allowed: ReadonlySet<string>) {
-    const items = new Map<string, BoardItem>();
-    for (const id of allowed) {
-      const item = document.items[id];
-      if (item) items.set(id, item);
-    }
-    return items;
-  }
   function diff(
     owner: string,
     entry: Subscription,
     document: BoardDocument,
     sourceOf: (id: string) => BoardScriptChangeSource | undefined,
   ) {
-    const next = scopedItems(document, scope(owner, entry, document));
-    const previous = entry.items;
-    entry.items = next;
+    const first = !entry.items;
+    const copy = entry.items ?? new Map<string, BoardItem>();
+    entry.items = copy;
     entry.diffed = document;
-    if (!previous) return;
     const groups = new Map<BoardScriptChangeSource, { added: string[]; changed: string[]; removed: string[] }>();
-    const note = (id: string, kind: "added" | "changed" | "removed") => {
+    diffBoardScriptItems(copy, document, scope(owner, entry, document), first ? undefined : (id, kind) => {
       const source = sourceOf(id) ?? "remote";
       let group = groups.get(source);
       if (!group) {
@@ -75,13 +66,7 @@ export function createBoardScriptObservers(send: (owner: string, event: BoardScr
         groups.set(source, group);
       }
       group[kind].push(id);
-    };
-    for (const [id, item] of next) {
-      const before = previous.get(id);
-      if (!before) note(id, "added");
-      else if (before !== item && !sameJson(before, item)) note(id, "changed");
-    }
-    for (const id of previous.keys()) if (!next.has(id)) note(id, "removed");
+    });
     for (const [source, group] of groups) send(owner, { type: "change", data: { ...group, source } });
   }
   return {
@@ -143,10 +128,11 @@ export function createBoardScriptObservers(send: (owner: string, event: BoardScr
     gesture(document: BoardDocument, scene: BoardScene, gesture: BoardScriptWorldGesture) {
       const bounds = pointsRect(gesture.points);
       for (const [owner, entry] of subscribers) {
-        if (!entry.listens.has("gesture") || !scene.get(owner)) continue;
+        const root = isBoardRootScript(document, owner);
+        if (!entry.listens.has("gesture") || (!root && !scene.get(owner))) continue;
         const allowed = scope(owner, entry, document);
         const item = gesture.item && allowed.has(gesture.item) ? gesture.item : undefined;
-        if (!item && !rectsIntersect(scene.layout.bounds(owner), bounds)) continue;
+        if (!item && !root && !rectsIntersect(scene.layout.bounds(owner), bounds)) continue;
         const local = invertMatrix(scene.layout.matrix(owner));
         const data: BoardScriptGesture = {
           id: gesture.id,

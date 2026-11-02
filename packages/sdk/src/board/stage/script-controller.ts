@@ -5,7 +5,9 @@ import { boardDragSlop, type BoardEditor, type BoardPointerEvent, selectionTrans
 import type { BoardViewport, Rect } from "../model/geometry.js";
 import { boardScriptTarget } from "../model/script-hit.js";
 import { createBoardScriptObservers, type BoardScriptWorldGesture } from "../model/script-observers.js";
+import { isBoardRootScript } from "../model/script-index.js";
 import { boardScriptScope, composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
+import { type BoardShaderOwner, boardShaderOwners } from "../render/shader/layers.js";
 import type { BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot, BoardScriptTextInput } from "../model/script.js";
 import type { BoardScriptHostCallbacks, BoardScriptRuntimeHost } from "../render/script-host.js";
 import { type BoardScriptTimer, createBoardScriptCommits } from "./script-commits.js";
@@ -60,7 +62,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
   const activations = new Map<string, number>();
   const listeners = new Set<() => void>();
   let version = 0;
-  let composed = { version: -1, document: null as BoardDocument | null, zoom: 0, playhead: "", moving: false, gesture: false };
+  let composed = { version: -1, document: null as BoardDocument | null, zoom: 0, pan: "", playhead: "", moving: false, gesture: false };
   let hover: BoardScriptPointerTarget | null = null;
   let focus: string | null = null;
   const router = createBoardScriptPointerRouter();
@@ -196,9 +198,10 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     if (!host || (!outputs.size && composed.version === version)) return;
     const playhead = `${editor.playhead?.animationId ?? ""}:${editor.playhead?.time ?? ""}`;
     const gesture = screens.size > 0 && editor.gestureActive;
+    const pan = [...screens].some((id) => isBoardRootScript(editor.document, id)) ? `${camera.x},${camera.y}` : "";
     if (
       composed.version === version && composed.document === editor.document && !gesture && !composed.gesture &&
-      !moving && !composed.moving && composed.zoom === camera.zoom && composed.playhead === playhead
+      !moving && !composed.moving && composed.zoom === camera.zoom && composed.pan === pan && composed.playhead === playhead
     )
       return;
     const animation = editor.animationItems();
@@ -208,7 +211,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     const presented = new Set([...outputs.values()].flatMap((output) => Object.keys(output.patches)));
     for (const id of animation.keys()) if (!presented.has(id)) items.delete(id);
     editor.setScriptItems(items);
-    composed = { version, document: editor.document, zoom: camera.zoom, playhead, moving, gesture };
+    composed = { version, document: editor.document, zoom: camera.zoom, pan, playhead, moving, gesture };
   }
 
   function localGesture(): Gesture | null {
@@ -356,6 +359,10 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     },
     invalidate: (path: string) => host?.invalidate(path),
     output: (id: string) => host?.output(id) ?? null,
+    shaderOwners(): BoardShaderOwner[] {
+      const current = host;
+      return current && !paused ? boardShaderOwners(editor.document, outputs, (id) => current.clock(id)) : [];
+    },
     error: (id: string) => host?.error(id) ?? null,
     async snapshot(): Promise<Record<string, BoardScriptSnapshot>> {
       const result: Record<string, BoardScriptSnapshot> = {};

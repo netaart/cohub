@@ -60,7 +60,9 @@ export type BoardExportOptions = {
 export type BoardExportWarning =
   | { kind: "scale-clamped"; requested: number; applied: number }
   | { kind: "images-missing"; keys: string[] }
-  | { kind: "many-items"; count: number };
+  | { kind: "many-items"; count: number }
+  | { kind: "shaders-unsupported"; drawn: string[]; omitted: string[] }
+  | { kind: "shader-failed"; id: string; message: string };
 
 export type BoardExportResult = {
   canvas: ICanvas;
@@ -109,6 +111,8 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
   const { document, scene, plan, sampler } = prepared;
   const colorScheme = options.colorScheme ?? "dark";
   const palette = { ...defaultBoardPalette(colorScheme), ...options.palette };
+  const owners = options.scripts?.shaders?.(document, options.at?.time ?? 0) ?? [];
+  const gpu = renderer.type === RendererType.WEBGL;
   const exportScene = createBoardExportScene({
     settings: document.board,
     scene,
@@ -128,6 +132,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     renderers: options.renderers,
     backdrop: resolveBackdrop(options, document, { palette, colors: options.colors ?? buildFallbackShapeColors(colorScheme), colorScheme }),
     backdropTexture: options.backgroundTexture,
+    ...(gpu && owners.length ? { shaders: { renderer, owners } } : {}),
   });
 
   const flattened = renderer.type === RendererType.CANVAS ? flattenBoardEffects(renderer, exportScene.root, plan.scale) : null;
@@ -166,11 +171,20 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     if (plan.items.length > BOARD_EXPORT_ITEM_WARN_THRESHOLD) {
       warnings.push({ kind: "many-items", count: plan.items.length });
     }
+    if (owners.length && !gpu) {
+      const drawn = owners.filter((owner) => !owner.root && owner.output.draws).map((owner) => owner.id);
+      warnings.push({ kind: "shaders-unsupported", drawn, omitted: owners.map((owner) => owner.id).filter((id) => !drawn.includes(id)) });
+    }
+    for (const failure of exportScene.shaderErrors) warnings.push({ kind: "shader-failed", ...failure });
     return { canvas, plan, warnings };
   } finally {
     exportScene.destroy();
     flattened?.();
   }
+}
+
+function listIds(ids: readonly string[]): string {
+  return ids.length > 3 ? `${ids.slice(0, 3).join(", ")} and ${ids.length - 3} more` : ids.join(", ");
 }
 
 export function describeBoardExportWarning(warning: BoardExportWarning): string {
@@ -183,5 +197,14 @@ export function describeBoardExportWarning(warning: BoardExportWarning): string 
         : `${warning.keys.length} images could not be loaded and were drawn as placeholders.`;
     case "many-items":
       return `${warning.count} items exported; this may take a moment.`;
+    case "shaders-unsupported": {
+      const parts = [
+        warning.omitted.length ? `left out ${listIds(warning.omitted)}` : "",
+        warning.drawn.length ? `drew ${listIds(warning.drawn)} with draw()` : "",
+      ].filter(Boolean);
+      return `Shaders need a WebGL renderer; this export ${parts.join(" and ")}.`;
+    }
+    case "shader-failed":
+      return `Shader ${warning.id} was left out: ${warning.message}`;
   }
 }

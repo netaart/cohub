@@ -147,6 +147,19 @@ within `width` × `height`; export `pixelated` and `frameRate` for pixel art. Pr
 native text for editable, inspectable labels; Canvas text can use `Geist` or
 `Geist Mono`.
 
+`board.scripts` attaches a module to the Board itself: it reaches every item and
+draws over the whole view. For GPU effects a module exports `shader` (GLSL passes,
+instanced sprites, filters, state and `surface()` collisions with cards); rain that
+splashes on cards is one example:
+
+```bash
+cohub boards examples rain --module > scripts/rain.js
+cohub boards apply <board> '{"board":{"scripts":{"rain":{"src":"scripts/rain.js"}}}}'
+```
+
+Exports render shaders in a local Chrome automatically; check the result with an
+exported image, since `inspect` does not see shader pixels.
+
 Verify interaction before handing over: `cohub boards simulate <board> -i steps.json
 -o shot.png` runs the scripts through taps, drags and pen strokes without saving,
 reports script errors, and renders screen UI that `export` leaves out.

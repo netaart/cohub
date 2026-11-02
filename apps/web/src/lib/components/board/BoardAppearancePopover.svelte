@@ -13,20 +13,28 @@ import {
 	normalizeBoardRemoteUrl,
 	parseBoardMediaSource,
 } from "@neta-art/cohub/board";
-import type { BoardBackdropStatus } from "@neta-art/cohub/board/stage";
+import type {
+	BoardBackdropStatus,
+	BoardStage,
+} from "@neta-art/cohub/board/stage";
 import { Image, Palette, RotateCcw, Trash2, X } from "lucide-svelte";
 import { untrack } from "svelte";
 import type { BoardEditor } from "$lib/board/editor.svelte";
+import BoardScriptsSection from "$lib/components/board/BoardScriptsSection.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
 const {
 	editor,
 	backdropStatus = null,
+	stage = null,
+	onOpenSource,
 	onClose,
 }: {
 	editor: BoardEditor;
 	backdropStatus?: BoardBackdropStatus | null;
+	stage?: BoardStage | null;
+	onOpenSource?: (path: string) => void;
 	onClose: () => void;
 } = $props();
 
@@ -267,6 +275,8 @@ function reset() {
 		<p class="section-hint">{m.board_motion_hint({}, { locale })}</p>
 	</div>
 
+	<BoardScriptsSection {editor} {stage} {onOpenSource} />
+
 	<div class="appearance-footer">
 		{#if editor.saving}
 			<span class="save-status" role="status">{m.common_saving({}, { locale })}</span>
@@ -276,7 +286,7 @@ function reset() {
 </div>
 
 <style>
-	.appearance-popover { width: min(320px, calc(100vw - 24px)); border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-elevated); box-shadow: 0 14px 32px color-mix(in srgb, var(--overlay-scrim-strong) 20%, transparent); padding: 10px; color: var(--text-primary); }
+	.appearance-popover { width: min(320px, calc(100vw - 24px)); max-height: calc(100dvh - 96px); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-elevated); box-shadow: 0 14px 32px color-mix(in srgb, var(--overlay-scrim-strong) 20%, transparent); padding: 10px; color: var(--text-primary); }
 	.appearance-header, .appearance-title, .mode-tabs, .url-row, .color-input, .appearance-footer { display: flex; align-items: center; }
 	.appearance-header { justify-content: space-between; margin-bottom: 10px; }
 	.appearance-title { gap: 6px; font-size: 12px; font-weight: 600; }

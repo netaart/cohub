@@ -31,7 +31,7 @@ import {
   readBoardJsonObject,
   writeBoardOutput,
 } from "../board-command-support.js";
-import { BOARD_EXPORT_IMAGE_MEMORY_MIB } from "../board-export-resources.js";
+import { BOARD_EXPORT_IMAGE_MEMORY_MIB, BOARD_EXPORT_RENDERERS } from "../board-export-resources.js";
 import { settleBoardPatch } from "../board-media.js";
 import { formatBoardTime, parseBoardTime, parseBoardTimes } from "../board-time.js";
 import { createClient, createRealtimeClient } from "../client.js";
@@ -142,6 +142,7 @@ type ExportOptions = JsonOptions & {
   quality?: string;
   images?: boolean;
   imageMemory?: string;
+  renderer?: string;
   fps?: string;
   force?: boolean;
 };
@@ -216,6 +217,7 @@ function registerExportCommand(boards: Command): void {
     .option("--fps <rate>", "Video frame rate; defaults to the --at step")
     .option("--image-memory <mib>", "Decoded image memory budget in MiB", String(BOARD_EXPORT_IMAGE_MEMORY_MIB))
     .option("--no-images", "Draw placeholders instead of downloading images")
+    .option("--renderer <renderer>", "auto draws in Node and uses local Chrome for shaders; canvas or gpu forces one", "auto")
     .option("--force", "Replace existing output files"))
     .addHelpText("after", `
 Examples:
@@ -280,6 +282,7 @@ Examples:
             output: out,
             quality: parseNumber(options.quality ?? "0.92", "--quality", { min: 0, max: 1 }),
             withImages: options.images !== false,
+            renderer: parseChoice(options.renderer, "--renderer", BOARD_EXPORT_RENDERERS),
           });
           if (jsonRequested(options)) return outJson({ file: out, ...result });
           ok(`Exported ${result.width}×${result.height} ${videoFormat.toUpperCase()} to ${out}`);
@@ -316,6 +319,7 @@ Examples:
           format: parseExportFormat(options, out),
           quality: parseNumber(options.quality ?? "0.92", "--quality", { min: 0, max: 1 }),
           withImages: options.images !== false,
+          renderer: parseChoice(options.renderer, "--renderer", BOARD_EXPORT_RENDERERS),
         });
         if (!result) return error("Nothing to export: the region contains no items.");
         if (jsonRequested(options)) return outJson({ files: written, warnings: result.warnings });

@@ -50,6 +50,7 @@ import {
 	getBoardCardRenderer,
 	itemAlpha,
 	boardLodRatio,
+	boardShaderColor,
 	boardLodSize,
 	getBoardResolution,
 	onBoardTextFontsChange,
@@ -70,6 +71,7 @@ import { scheduleBoardIdle } from "./idle.js";
 import { toBoardPointerEvent } from "./pointer.js";
 import { createBoardPointerGestures } from "./pointer-gestures.js";
 import { createBoardScriptController } from "./script-controller.js";
+import { type BoardStageShaders, createBoardStageShaders } from "./shaders.js";
 import { type BoardLiveStroke, createBoardScene } from "./scene.js";
 import { drawBoardFrameMask, drawBoardOverlay } from "./overlay.js";
 import { createTextResolutionTracker } from "./text-resolution-tracker.js";
@@ -231,6 +233,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let atmosphere: BoardAtmosphereLayer | null = null;
 	let bursts: ReturnType<typeof createBoardBursts> | null = null;
 	let scene: ReturnType<typeof createBoardScene> | null = null;
+	let shaders: BoardStageShaders | null = null;
 	const scripts = createBoardScriptController({
 		editor,
 		capabilities: options.scriptCapabilities,
@@ -240,6 +243,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		createHost: (callbacks) => createBoardScriptHost({
 			...callbacks,
 			host,
+			shaders: app?.renderer.type === RendererType.WEBGL,
 			isMaterialized: (id) => Boolean(scene?.getNode(id)),
 			readModule: async (src) => {
 				const url = (await options.source.resolveFile(src))?.url;
@@ -775,7 +779,11 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			if (synced) sync();
 			else if (work & FRAME_SCRIPTS) {
 				syncScripts();
-				if (scripts.animated) frameWork |= FRAME_SCRIPTS;
+				if (shaders?.active) {
+					shaders.sync(camera, surface);
+					work |= FRAME_RENDER;
+				}
+				if (scripts.animated || shaders?.animated) frameWork |= FRAME_SCRIPTS;
 			}
 			if (work & FRAME_CARDS && !synced && scene) {
 				const next = scene.tick(performance.now());
@@ -785,6 +793,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			if ((work | frameWork) & FRAME_RENDER) {
 				frameWork &= ~FRAME_RENDER;
 				if (bursts?.tick(now, camera.zoom)) frameWork |= FRAME_RENDER;
+				shaders?.prepare();
 				app.render();
 				if (app.canvas.style.visibility) app.canvas.style.visibility = "";
 			}
@@ -1025,6 +1034,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		adoptNaturalSizes();
 		scheduleRefine();
 		syncScripts();
+		shaders?.sync(camera, surface);
 
 		drawInteraction();
 
@@ -1033,7 +1043,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 		scheduleRender();
 		if (frame.running || scene.animated) scheduleTick();
-		if (scripts.animated) scheduleScriptTick();
+		if (scripts.animated || shaders?.animated) scheduleScriptTick();
 		const cardWait = scene.tick(performance.now());
 		if (cardWait !== null) scheduleCardTick(cardWait);
 	}
@@ -1318,9 +1328,26 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		overlay = new Graphics({ label: "board-interaction-overlay" });
 		atmosphere = createBoardAtmosphereLayer();
 		bursts = createBoardBursts();
-		world.addChild(nodes, atmosphere.container, bursts.container, overlay);
+		const shadersBelow = new Container({ label: "board-shaders-below" });
+		const shadersAbove = new Container({ label: "board-shaders-above" });
+		world.addChild(shadersBelow, nodes, shadersAbove, atmosphere.container, bursts.container, overlay);
 		instance.stage.addChild(world);
 		scene = createBoardScene({ world: nodes, overlay, getRenderer: resolveRenderer, requestFrame: scheduleTick });
+		shaders = createBoardStageShaders({
+			editor,
+			renderer: instance.renderer,
+			canvas: instance.canvas,
+			scene,
+			nodes,
+			below: shadersBelow,
+			above: shadersAbove,
+			tier: device.tier,
+			owners: () => scripts.shaderOwners(),
+			fault: (id, message) => scripts.host?.fault(id, message),
+			dark: () => theme().colorScheme === "dark",
+			reducedMotion: () => options.reducedMotion?.() ?? false,
+			color: (value) => (lastContext ? boardShaderColor(lastContext, value) : [1, 1, 1, 1]),
+		});
 
 		for (const [type, listener, listenerOptions] of listeners)
 			host.addEventListener(type, listener as EventListener, listenerOptions);
@@ -1352,7 +1379,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			scripts.setPaused(paused);
 			scheduleTick();
 		},
-		resetScripts: (id) => scripts.reset(id),
+		resetScripts: (id) => {
+			if (id) shaders?.restart(id);
+			scripts.reset(id);
+		},
 		invalidateScript: (path) => scripts.invalidate(path),
 		scriptOutput: (id) => scripts.output(id),
 		snapshotScripts: () => scripts.snapshot(),
@@ -1433,6 +1463,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			for (const [type, listener] of listeners) host.removeEventListener(type, listener as EventListener);
 			editor.setPlayedItems(new Map());
 			editor.setScriptItems(new Map());
+			shaders?.destroy();
+			shaders = null;
 			scene?.destroy(renderContext(theme(), editor.scene, 0));
 			scene = null;
 			scripts.destroy();

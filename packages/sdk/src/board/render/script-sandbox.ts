@@ -1,7 +1,9 @@
 import type { BoardScriptEvent, BoardScriptModule } from "../model/script.js";
 import {
+  applyScriptInputDelta,
   createScriptRuntime,
   type ScriptRuntimeInput,
+  type ScriptRuntimeInputDelta,
 } from "./script-runtime.js";
 import { scriptModuleUrls, type BoardScriptSources } from "./script-modules.js";
 
@@ -10,12 +12,14 @@ type Message = {
   kind?: string;
   request?: number;
   input?: ScriptRuntimeInput;
+  delta?: ScriptRuntimeInputDelta;
   graph?: string;
   key?: string;
   sources?: BoardScriptSources;
   t?: number;
   scale?: number;
   draw?: boolean;
+  shaders?: boolean;
   events?: BoardScriptEvent[];
   call?: number;
   value?: unknown;
@@ -24,6 +28,7 @@ type Message = {
 
 function scriptAgent(
   runtimeFactory: typeof createScriptRuntime,
+  applyDelta: typeof applyScriptInputDelta,
   moduleUrls: typeof scriptModuleUrls,
   load: (url: string) => Promise<BoardScriptModule>,
 ) {
@@ -73,13 +78,14 @@ function scriptAgent(
     current = token;
     try {
       if (data.input) instance.input = data.input;
+      else if (data.delta && instance.input) instance.input = applyDelta(instance.input, data.delta);
       const input = instance.input;
       if (!input) throw new Error("Missing script input.");
       if (!instance.runtime) {
         const sources = data.graph ? graphs.get(data.graph) : undefined;
         if (!sources) throw new Error("Missing script modules.");
         instance.urls = moduleUrls(sources);
-        const src = input.item.script?.src;
+        const src = input.script.src;
         const url = src ? instance.urls.urls[src] : undefined;
         if (!url) throw new Error("Missing entry module.");
         instance.module = await load(url);
@@ -98,11 +104,11 @@ function scriptAgent(
         });
       }
       const runtime = instance.runtime;
-      if (data.input) runtime.update(input);
+      if (data.input || data.delta) runtime.update(input);
       for (const event of data.events ?? []) runtime.event(event);
       runtime.step(data.t ?? 0);
       let bitmap: ImageBitmap | undefined;
-      if (instance.module?.draw && data.draw !== false) {
+      if (instance.module?.draw && data.draw !== false && !(data.shaders && instance.module.shader)) {
         const scale = data.scale ?? 1;
         const width = Math.max(1, Math.round(input.width * scale));
         const height = Math.max(1, Math.round(input.height * scale));
@@ -301,7 +307,7 @@ function scriptBroker(workerUrl: string, poolSize: number, timeoutMs: number) {
 export function boardScriptFrameSource(options: { timeoutMs?: number; poolSize?: number } = {}): string {
   const prelude =
     "const __name = (value, name) => Object.defineProperty(value, 'name', { value: name, configurable: true });";
-  const worker = `${prelude} (${scriptAgent.toString()})(${createScriptRuntime.toString()}, ${scriptModuleUrls.toString()}, url => import(url));`;
+  const worker = `${prelude} (${scriptAgent.toString()})(${createScriptRuntime.toString()}, ${applyScriptInputDelta.toString()}, ${scriptModuleUrls.toString()}, url => import(url));`;
   const cores = typeof navigator === "undefined" ? 4 : navigator.hardwareConcurrency || 4;
   const poolSize = options.poolSize ?? Math.max(1, Math.min(4, cores - 1));
   return `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src 'none'; form-action 'none'; base-uri 'none'"><script>
