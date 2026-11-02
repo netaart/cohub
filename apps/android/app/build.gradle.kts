@@ -210,6 +210,7 @@ val buildSandboxd = tasks.register<BuildSandboxd>("buildSandboxd") {
 
 // `cohub` for what a Runtime runs, as on computers: this commit's CLI under Node built for Android
 // (arm64; scripts/stage-runtime.mjs). Both executables live in nativeLibraryDir, the CLI is an asset.
+@CacheableTask
 abstract class StageCli : DefaultTask() {
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
