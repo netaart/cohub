@@ -582,6 +582,13 @@
       "when": 1793588184625,
       "tag": "0082_resource_like_counts",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1793602864033,
+      "tag": "0083_session_messages_compaction",
+      "breakpoints": true
     }
   ]
 }

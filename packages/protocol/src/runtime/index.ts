@@ -28,7 +28,7 @@ export {
   type ProjectionTarget,
   type ProjectionWarning,
 } from "./projection.js";
-export { contextToPiMessages, selectRuntimeContextMessages, type ContextProjectionOptions } from "./context.js";
+export { contextToPiMessages, findLatestCompactionIndex, selectRuntimeContextMessages, type ContextProjectionOptions } from "./context.js";
 
 export const RUNTIME_PROTOCOL_VERSION = 1 as const;
 export const RUNTIME_MAX_FRAME_BYTES = 32 * 1024 * 1024;

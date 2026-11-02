@@ -907,6 +907,8 @@ export const sessionMessages = v2.table(
     turnSequenceIdx: index("v2_idx_session_messages_turn_sequence")
       .on(table.turnId, table.sequence)
       .where(sql`${table.turnId} is not null`),
+    // Only compaction summaries are system messages; context loads start from the latest one.
+    compactionIdx: index("v2_idx_session_messages_compaction").on(table.sessionId).where(sql`${table.role} = 'system'`),
     sessionSequenceUniqueIdx: uniqueIndex("v2_uq_session_messages_session_sequence").on(
       table.sessionId,
       table.sequence,
