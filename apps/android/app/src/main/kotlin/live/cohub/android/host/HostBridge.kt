@@ -289,6 +289,7 @@ class HostBridge(
 
         HostProtocol.Methods.DISPLAY_SETUP -> {
             val display = requireDisplay()
+            actions.permissions().requestLocalNetwork()
             val phone = display.phone.setup()
             if (phone.guiding) actions.openPhoneControlSettings(display.phone.settingsIntent())
             display.status.value.copy(phoneControl = phone).toJson()

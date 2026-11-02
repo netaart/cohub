@@ -17,6 +17,7 @@ import android.net.NetworkRequest
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Binder
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -177,7 +178,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
             "${HelperMain::class.java.name} ${context.packageName} ${info.uid} $next </dev/null >/dev/null 2>&1 &"
         val last = prefs.getInt(PORT, 0)
         val ran = (last > 0 && exec(key, last, command)) || findPort(CONNECT_SERVICE, FIND_MS)?.takeIf { it != last }?.let { exec(key, it, command) } == true
-        if (!ran) return if (key() == null) "unpaired" else "wireless_debugging_unreachable"
+        if (!ran) return if (key() == null) "unpaired" else if (!localNetwork) LOCAL_NETWORK_OFF else "wireless_debugging_unreachable"
         return if (withTimeoutOrNull(ATTACH_MS) { _helper.first { it != null } } != null) null else "helper_did_not_start"
     }
 
@@ -202,6 +203,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
     fun setup(): State {
         val current = _state.value
         if (current.stage == Stage.READY || current.stage == Stage.STARTING) return current
+        if (!localNetwork) return enter(if (paired) Stage.STOPPED else Stage.OFF, LOCAL_NETWORK_OFF)
         if (paired) {
             start()
             return current
@@ -240,7 +242,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         var shown: Int? = null
         while (_state.value.searching) {
             val stage = if (developerOptions) Stage.PAIRING else Stage.DEVELOPER
-            enter(stage, if (stage == Stage.PAIRING && !onWifi()) "wireless_debugging_off" else error)
+            enter(stage, if (!localNetwork) LOCAL_NETWORK_OFF else if (stage == Stage.PAIRING && !onWifi()) "wireless_debugging_off" else error)
             val text = when {
                 error != null -> R.string.phone_control_pairing_closed
                 stage == Stage.DEVELOPER -> R.string.phone_control_guide_developer
@@ -337,7 +339,13 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         })
     }
 
+    // Without the permission Android 17 answers every discovery with a device picker.
+    private val localNetwork: Boolean
+        get() = Build.VERSION.SDK_INT < Build.VERSION_CODES.CINNAMON_BUN ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_LOCAL_NETWORK) == PackageManager.PERMISSION_GRANTED
+
     private suspend fun findPort(type: String, timeoutMs: Long): Int? {
+        if (!localNetwork) return null
         val nsd = context.getSystemService(NsdManager::class.java)
         return withTimeoutOrNull(timeoutMs) {
             callbackFlow {
@@ -447,6 +455,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         const val PORT = "port"
         const val PAIRING_PORT = "pairingPort"
         const val ADB_WIFI_ENABLED = "adb_wifi_enabled"
+        const val LOCAL_NETWORK_OFF = "local_network_off"
         const val CONNECT_SERVICE = "_adb-tls-connect._tcp"
         const val PAIRING_SERVICE = "_adb-tls-pairing._tcp"
         const val CHANNEL_ID = "phone_control"

@@ -170,6 +170,7 @@ const phoneError = $derived.by(() => {
 		case "unpaired": return m.runtime_phone_control_error_unpaired({}, { locale });
 		case "pairing_wrong": return m.runtime_phone_control_error_pairing_wrong({}, { locale });
 		case "pairing_closed": return m.runtime_phone_control_error_pairing_closed({}, { locale });
+		case "local_network_off": return m.runtime_phone_control_error_local_network_off({}, { locale });
 		default: return null;
 	}
 });

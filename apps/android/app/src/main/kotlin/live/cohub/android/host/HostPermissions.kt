@@ -62,6 +62,12 @@ class HostPermissions(
         return notificationState()
     }
 
+    suspend fun requestLocalNetwork() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.CINNAMON_BUN) return
+        val permission = Manifest.permission.ACCESS_LOCAL_NETWORK
+        if (activity.checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) askFor(permission)
+    }
+
     fun openSettings(kind: String): Boolean {
         val intent = when (kind) {
             "files" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

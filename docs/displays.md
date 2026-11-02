@@ -125,7 +125,8 @@ starts through the phone's own Wireless debugging, the way scrcpy or a computer'
 no computer.
 
 - **Setup, once.** From a Space's Runtime menu the user chooses **Set up phone control** (which needs
-  notifications): Cohub opens Developer options (About phone where they cannot open) and waits for
+  notifications, and on Android 17 local network access, asked for there: without it every
+  discovery opens a device picker, so Cohub does not discover at all): Cohub opens Developer options (About phone where they cannot open) and waits for
   Wireless debugging's *Pair device with pairing code* dialog (discovered over mDNS, which needs
   Wi-Fi; the dialog being advertised moves setup on, whatever the settings flags say), guiding each
   stage in the menu and in one notification that takes the code from the start, since leaving

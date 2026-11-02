@@ -287,6 +287,7 @@
 	"runtime_phone_control_open_settings": "Open Settings",
 	"runtime_phone_control_error_pairing_wrong": "That code didn't work. Enter the code the dialog shows now.",
 	"runtime_phone_control_error_pairing_closed": "No pairing dialog is open. Tap Pair device with pairing code.",
+	"runtime_phone_control_error_local_network_off": "Allow Cohub to find devices on your local network: it looks for the pairing dialog on this phone. Set up again, or allow Nearby devices in App info.",
 	"runtime_phone_control_error_notifications_off": "Allow Cohub's notifications first: the pairing code is entered there.",
 	"runtime_phone_control_error_pairing_timed_out": "Pairing timed out. Set it up again when you are ready.",
 	"runtime_phone_control_error_wireless_debugging_off": "Connect to Wi-Fi and turn on Wireless debugging in Developer options.",
