@@ -193,31 +193,27 @@ archived so a conversation can be restored natively on another machine.
   Declining, an older Codex or a failed start degrade the same way: Cohub Turns use a private
   `codex app-server --listen stdio://`, and terminal Codex sessions sync read-only.
 
-**Codex approval modes.** With Codex app-server 0.164+ (not on Windows) the Runtime advertises
-four modes, chosen in the composer's Harness menu and applied from the next message:
+**Codex approval modes.** With Codex app-server 0.162.1+ the Runtime advertises four modes, chosen
+in the composer's Harness menu and applied from the next message. They are Codex's own settings,
+as in its `/permissions` picker:
 
-| Mode | Thread settings |
+| Mode | Codex settings |
 | --- | --- |
 | Use local settings (`inherit`) | What a fresh thread on this machine gets, read from Codex itself (profiles and requirements included) |
-| Auto approval (`auto`) | Workspace-write sandbox without network; escalations go to Codex's automatic reviewer |
-| Full access (`full_access`) | No sandbox, network allowed, never asks |
-| Read only (`read_only`) | Read-only sandbox without network, never asks |
+| Auto approval (`auto`) | `workspace-write`, `on-request`, escalations reviewed by Codex's `auto_review` |
+| Full access (`full_access`) | `danger-full-access`, `never` |
+| Read only (`read_only`) | `read-only`, `on-request`; Cohub refuses the approvals it asks for |
 
-Codex runs a command its rules pre-approve (for example `prefix_rule(pattern=["touch"], decision="allow")`)
-outside its sandbox, so a plain `sandbox: "read-only"` lets it write. Read only therefore selects a
-Cohub permissions profile that extends `:read-only` and denies reading one nonexistent path; any
-denied read keeps rule-approved commands inside the sandbox. Codex keeps that denial on a loaded
-thread, so its later sandboxed Turns (not Full access) also keep such commands sandboxed. A platform
-read-only prompt uses the same profile.
-
-The mode is written to the thread's settings for the next Turn (`thread/settings/update`; a loaded
-thread ignores open-time overrides) and the Turn starts only after Codex reports exactly those
-settings; otherwise it fails before the prompt is sent. A thread loaded before Cohub defined its
-profile there is released and reopened with it once it unloads (Codex 0.164+ honours the 10 s
-per-thread delay); one another client keeps open fails with a message to close it there. Only the
-Cohub thread changes, never `config.toml`; a terminal client continuing the same loaded thread sees
-its current settings. Requests for a human decision are still refused. A prompt without a mode keeps
-today's behaviour; an explicit mode that conflicts with platform read-only access is rejected.
+The mode is sent when the thread opens (`sandbox`, `approvalPolicy`, `approvalsReviewer`) and with
+each `turn/start` (`sandboxPolicy`, `approvalPolicy`, `approvalsReviewer`), since a loaded thread
+ignores open-time overrides. A loaded thread keeps Turn overrides for later Turns, so Use local
+settings on an existing thread sends the machine's resolved settings (read from an ephemeral
+thread) rather than nothing. Only the Cohub thread changes, never `config.toml`; a terminal client
+continuing the same loaded thread sees its current settings. Settings Codex refuses (for example
+under its requirements) fail the Turn with Codex's error. Read only is Codex's read-only sandbox:
+like Codex itself, it still runs commands its rules pre-approve (`prefix_rule(..., decision="allow")`).
+A platform read-only prompt runs as Read only; an explicit mode that conflicts with it is rejected.
+Requests for a human decision are still refused. A prompt without a mode keeps today's behaviour.
 The choice is stored in turn meta (`approvalMode`), restored after refresh, kept for queued
 follow-ups (a change of mode ends a batch), not inherited by new chats, and a choice not yet sent
 stays local across reloads. A Runtime offers only modes that both its Codex binary and an already
@@ -235,12 +231,12 @@ records the tier the Turn runs with (requested, else the model's default) as `ef
 before dispatch; the request (`requestedServiceTier`) restores the switch after refresh and survives
 thinking-level and model changes where the model offers it.
 
-**Codex 审批模式与 Fast。** Codex app-server 0.164+（Windows 除外）在输入框的 Harness 菜单中提供四档审批模式，
-下一条消息生效：沿用本机设置、自动审批、完全访问、只读。只读使用 Cohub 的权限配置（继承 `:read-only` 并拒绝读取一个不存在的路径），
-使 Codex 规则预先允许的命令（如 `touch`）也留在沙盒内；平台只读同样如此。模式写入该线程的下一轮设置，Codex 确认后才发送消息，
-否则在发送前报错；只改变 Cohub 线程，不改 `config.toml`。人工审批请求仍一律拒绝。未选择时保持原有行为；与平台只读冲突的模式会被拒绝。
-选择写入 turn meta，刷新后恢复，未发送的选择在刷新后保留，新对话不继承。Runtime 不再支持已记录的模式时，
-需改选“沿用本机设置”才能继续发送。
+**Codex 审批模式与 Fast。** Codex app-server 0.162.1+ 在输入框的 Harness 菜单中提供四档审批模式，下一条消息生效：
+沿用本机设置、自动审批、完全访问、只读，对应 Codex 自己 `/permissions` 中的设置。模式在打开线程和每次 `turn/start` 时下发；
+已加载的线程会保留上一轮的设置，所以在已有线程上切回“沿用本机设置”时，会读取本机默认设置并显式下发。只改变 Cohub 线程，
+不改 `config.toml`。只读即 Codex 的只读沙盒，与 Codex 本身一样，规则预先允许的命令仍会执行。人工审批请求仍一律拒绝。
+未选择时保持原有行为；与平台只读冲突的模式会被拒绝。选择写入 turn meta，刷新后恢复，未发送的选择在刷新后保留，新对话不继承。
+Runtime 不再支持已记录的模式时，需改选“沿用本机设置”才能继续发送。
 模型目录声明 `priority` 档位时显示 Fast：未操作时显示模型默认档位（`config.toml` 的 `service_tier`，否则取目录默认值）且不发送；
 开启时该 Turn 发送 `serviceTierForTurn: "priority"`，默认为 Fast 时关闭发送 `"default"`，否则不发送。只作用于该 Turn，不影响后续 Turn
 或终端；生效档位记入 `effectiveServiceTier`。旧版 Codex 不提供这些选项。
@@ -624,7 +620,7 @@ Never infer that a disconnected execution has stopped.
 - A Turn sent to a live terminal client runs in that process. Otherwise Cohub starts a Pi (or a
   private Codex app-server) for the Turn; in-process PTY handles and background terminals do not
   survive between such Turns. A shared Codex app-server keeps its threads loaded across Turns.
-- Verified with Pi 0.86.1 and Codex 0.156.1; approval modes with Codex 0.166.0 (0.162.1 and 0.156.1 hide them), Fast with 0.162.1 and 0.166.0. Codex rollout-path recovery is an upstream
+- Verified with Pi 0.86.1 and Codex 0.156.1; approval modes and Fast with Codex 0.162.1 and 0.166.0 (0.156.1 hides them). Codex rollout-path recovery is an upstream
   experimental API; incompatible versions fail explicitly.
 - Native approval escalation is never granted by Cohub; only Codex's own reviewer decides in
   Auto approval. Requests requiring an interactive local approval are rejected by the unattended adapter. Pi

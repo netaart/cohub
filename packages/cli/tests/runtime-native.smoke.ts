@@ -296,15 +296,10 @@ try {
     await mkdir(join(home, "codex"), { recursive: true });
     await writeFile(join(home, "codex", "config.toml"), [
       // The user's own policy applies to Cohub's Turns; this container cannot nest a sandbox.
-      'model = "gpt-5"', 'model_provider = "offline"', 'sandbox_mode = "danger-full-access"', 'approval_policy = "never"',
-      // Profiles that deny a read load project docs inside the sandbox, which this container cannot nest either.
-      "project_doc_max_bytes = 0", "[features]", "plugins = false", "recommended_plugins = false",
+      'model = "gpt-5"', 'model_provider = "offline"', 'sandbox_mode = "danger-full-access"', 'approval_policy = "never"', "[features]", "plugins = false", "recommended_plugins = false",
       "[model_providers.offline]", 'name = "Offline fixture"', `base_url = ${JSON.stringify(modelUrl)}`, 'wire_api = "responses"', "requires_openai_auth = false",
       `[projects.${JSON.stringify(project)}]`, 'trust_level = "trusted"', "",
     ].join("\n"));
-    // A pre-approved command, which Codex runs outside its sandbox unless Cohub's read-only profile holds it.
-    await mkdir(join(home, "codex", "rules"), { recursive: true });
-    await writeFile(join(home, "codex", "rules", "default.rules"), 'prefix_rule(pattern=["touch"], decision="allow")\n');
     // 5. Without the shared server, Cohub Turns run on a private one.
     {
       const { native, server, close } = await runtime("codex", false);
@@ -351,7 +346,6 @@ try {
         assert.deepEqual(await codexHarness.approvalModes?.(codexBinary), ["inherit", "auto", "full_access", "read_only"]);
         const fast = (await codexHarness.models(codexBinary, project)).find((entry) => entry.serviceTiers?.some((tier) => tier.id === "priority"));
         const marker = join(project, "approval-marker");
-        // Read-only right after a Turn without a choice reopens the loaded thread with Cohub's profile.
         let previous = turn("codex", "start");
         await dispatch(native, server, previous, "codex-approval-0");
         const step = async (label: string, options: Partial<RuntimeTurnInput>, prompt = `run[touch ${marker}]`) => {
@@ -361,10 +355,10 @@ try {
           previous = next;
           return existsSync(marker);
         };
-        assert.equal(await step("read-only", { approvalMode: "read_only" }), false, "read-only holds a pre-approved command");
+        assert.equal(await step("read-only", { approvalMode: "read_only" }), false, "read-only applies on a loaded thread");
         assert.equal(await step("full", { approvalMode: "full_access" }), true);
-        assert.equal(await step("platform-read-only", { accessMode: "read_only" }), false, "platform read-only holds without a selection");
-        assert.equal(await step("inherit", { approvalMode: "inherit" }), true, "inherit restores the local full access");
+        assert.equal(await step("platform-read-only", { accessMode: "read_only" }), false, "platform read-only applies without a selection");
+        assert.equal(await step("inherit", { approvalMode: "inherit" }), true, "local settings replace the earlier read-only on the loaded thread");
         // Whether auto's sandbox lets the write through depends on the host's sandbox, which this container lacks.
         await step("auto", { approvalMode: "auto" }, "hello auto");
         if (fast) {
@@ -374,7 +368,7 @@ try {
           await step("inherit", { model: fast.id }, "hello again");
           assert.deepEqual(serviceTiers, ["priority", null, null], "Fast applies to its Turn only");
         }
-        console.log(`codex: approval modes switch on a loaded thread and read-only holds a pre-approved command${fast ? "; Fast applies per Turn" : ""} ✓`);
+        console.log(`codex: approval modes switch on a loaded thread and local settings restore the machine's${fast ? "; Fast applies per Turn" : ""} ✓`);
       } else {
         assert.deepEqual(await codexHarness.approvalModes?.(codexBinary), [], "an older Codex offers no approval modes");
         const explicit = turn("codex", "hello", { approvalMode: "read_only" });

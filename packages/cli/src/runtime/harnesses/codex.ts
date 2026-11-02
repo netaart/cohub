@@ -12,7 +12,7 @@ import {
 } from "../native/transcript.js";
 import { codexTranslator } from "../native/translate.js";
 import { atLeast, harnessVersion } from "../native/version.js";
-import { applyCodexApproval, CODEX_APPROVAL_CONFIG, codexApprovalMode, codexApprovalModes, resolveCodexApproval, waitForUnload } from "./codex-approval.js";
+import { codexApprovalMode, codexApprovalModes, resolveCodexApproval } from "./codex-approval.js";
 import { array, closeHost, harnessCommand, inlineImage, text, turnEnvironment, watchHost } from "./process.js";
 import type { HarnessRun, HarnessTurn, LocalHarnessAdapter, ThreadKind } from "./types.js";
 
@@ -60,17 +60,16 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
     }
     const codex = channel;
     const mode = codexApprovalMode(input, codex.version);
-    const approval = mode ? await resolveCodexApproval(mode, codex, executor.cwd) : null;
+    const approval = mode ? await resolveCodexApproval(mode, codex, executor.cwd, prepared.resume !== "new") : null;
     const threadOptions = {
       cwd: executor.cwd,
       ...(input.model ? { model: input.model } : {}),
       ...(input.provider && input.provider !== "codex" ? { modelProvider: input.provider } : {}),
-      ...(approval ? approval.open : input.accessMode === "read_only" ? { sandbox: "read-only" } : {}),
+      ...(approval ? approval.thread : input.accessMode === "read_only" ? { sandbox: "read-only" } : {}),
       // Tools of a shared server otherwise see the environment of whoever started that server.
       config: {
         "shell_environment_policy.set.COHUB_SPACE_ID": input.spaceId, "shell_environment_policy.set.COHUB_SESSION_ID": input.sessionId,
         ...(codex.shared ? { thread_unload_delay_secs: CODEX_UNLOAD_DELAY_SECS } : {}),
-        ...(approval ? CODEX_APPROVAL_CONFIG : {}),
       },
     };
     const existing = { ...threadOptions, threadId: session.nativeSessionId, path: session.path, excludeTurns: true };
@@ -84,12 +83,6 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
     if (thread.path !== session.path || threadId !== session.nativeSessionId) {
       session = { ...session, nativeSessionId: threadId, path: thread.path };
       executor.ingest.adopt(session, input.sessionId);
-    }
-    if (approval) {
-      await applyCodexApproval(approval, codex, threadId, opened, async () => {
-        await waitForUnload(codex, threadId);
-        return await resumeThread(codex, { ...existing, threadId, path: thread.path });
-      });
     }
     const translator = codexTranslator(turn.emit, { provider: text(opened.modelProvider) || "codex", model: text(opened.model) || input.model || null });
     const content = await codexPrompt(input);
@@ -130,6 +123,8 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
       signal.addEventListener("abort", abort, { once: true });
       codex.request("turn/start", {
         threadId, clientUserMessageId: input.turnId, input: content,
+        // A loaded thread ignores open-time overrides and keeps these for later Turns.
+        ...approval?.turn,
         ...(input.thinkingLevel ? { effort: input.thinkingLevel === "off" ? "none" : input.thinkingLevel } : {}),
         // Only this Turn: the thread's own tier, and so a terminal user's, stays as it was.
         ...(input.serviceTier ? { serviceTierForTurn: input.serviceTier } : {}),
