@@ -28,6 +28,8 @@ const (
 	maxTargetScrolls = 20
 )
 
+var pressMs = map[string]int{"click": 60, "longPress": 800}
+
 type ActParams struct {
 	Display string   `json:"display"`
 	Plan    string   `json:"plan,omitempty"`
@@ -76,10 +78,11 @@ type ActResult struct {
 }
 
 type StepResult struct {
-	Effect   string `json:"effect"`
-	FindMs   int    `json:"findMs"`
-	ActMs    int    `json:"actMs"`
-	WaitedMs int    `json:"waitedMs"`
+	Effect   string      `json:"effect"`
+	Target   *StepTarget `json:"target,omitempty"`
+	FindMs   int         `json:"findMs"`
+	ActMs    int         `json:"actMs"`
+	WaitedMs int         `json:"waitedMs"`
 }
 
 type ActStop struct {
@@ -101,6 +104,7 @@ type observation struct {
 	session string
 	tree    string
 	screen  uint64
+	shown   *Tree
 }
 
 func (p *ActParams) Validate() error {
@@ -269,7 +273,7 @@ func (h *Hub) runnable(params ActParams) (Info, error) {
 	switch {
 	case !ok:
 		return Info{}, errorf(CodeNotFound, "display %q not found", params.Display)
-	case len(params.Steps) > 0 && !info.Input:
+	case !info.Input && slices.ContainsFunc(params.Steps, func(step Step) bool { return step.Type != "wait" }):
 		return Info{}, errorf(CodeUnavailable, "input is not available on display %q", params.Display)
 	}
 	for index, step := range params.Steps {
@@ -285,19 +289,21 @@ func (h *Hub) runnable(params ActParams) (Info, error) {
 }
 
 type actRun struct {
-	hub    *Hub
-	ctx    context.Context
-	info   Info
-	actor  Activity
-	result ActResult
-	tree   *Tree // as last read: after the previous step
-	readAt time.Time
+	hub     *Hub
+	ctx     context.Context
+	info    Info
+	actor   Activity
+	result  ActResult
+	tree    *Tree // as last read: after the previous step
+	readAt  time.Time
+	changed bool
 }
 
 func (r *actRun) read() (*Tree, error) {
 	r.readAt = time.Now()
 	tree, err := r.hub.Tree(r.ctx, TreeParams{Display: r.info.ID, MaxElements: MaxTreeElements})
 	if err != nil {
+		r.tree = nil
 		return nil, err
 	}
 	r.tree = &tree
@@ -401,13 +407,18 @@ func (r *actRun) steps(steps []Step) {
 		if !ok {
 			return
 		}
+		target, batch := r.aim(step, ref)
+		if !r.changed && r.moved(index, step, target) {
+			return
+		}
 		found := time.Now()
-		if !r.perform(index, step, ref) {
+		if !r.perform(index, step, batch) {
 			return
 		}
 		acted := time.Now()
 		met := r.wait(step)
 		result := StepResult{
+			Target:   target,
 			FindMs:   int(found.Sub(started).Milliseconds()),
 			ActMs:    int(acted.Sub(found).Milliseconds()),
 			WaitedMs: int(time.Since(acted).Milliseconds()),
@@ -417,7 +428,9 @@ func (r *actRun) steps(steps []Step) {
 			after, _ = r.read()
 		}
 		now, _, _ := r.hub.changeState(r.info.ID)
-		result.Effect = effectOf(before, after, r.info.Changes && now != seq)
+		pixels := r.info.Changes && now != seq && (step.Type != "element" || after == nil || quality(*after) != "good")
+		result.Effect = effectOf(before, after, pixels)
+		r.changed = r.changed || result.Effect != "none"
 		r.result.Steps = append(r.result.Steps, result)
 		if err := context.Cause(r.ctx); err != nil {
 			r.stop(index, err)
@@ -448,13 +461,103 @@ func (r *actRun) locate(index int, step Step) (string, bool) {
 	return element.Ref, element.Ref != ""
 }
 
-func (r *actRun) perform(index int, step Step, ref string) bool {
-	var err error
+// Touch screens get a real tap where the element shows: apps may ignore an accessibility click.
+func (r *actRun) aim(step Step, ref string) (*StepTarget, []InputEvent) {
 	switch step.Type {
 	case "element":
-		err = r.hub.send(r.ctx, InputBatch{Display: r.info.ID, Events: []InputEvent{{Type: "element", Ref: ref, Action: step.Action, Text: step.Text}}})
+		events := []InputEvent{{Type: "element", Ref: ref, Action: step.Action, Text: step.Text}}
+		index := r.indexOf(ref)
+		if index < 0 {
+			return nil, events
+		}
+		if hold, ok := pressMs[step.Action]; ok && !r.info.Desktop && !typing(r.tree) {
+			if x, y, ok := reachable(r.tree, index); ok {
+				events = []InputEvent{pointerAt("down", x, y, 0), pointerAt("up", x, y, hold)}
+			}
+		}
+		return targetAt(r.tree, index), events
 	case "input":
-		err = r.hub.send(r.ctx, InputBatch{Display: r.info.ID, Events: step.Events})
+		if x, y, ok := tapPoint(step); ok && r.tree != nil {
+			return targetAt(r.tree, hit(r.tree, x, y)), step.Events
+		}
+		return nil, step.Events
+	}
+	return nil, nil
+}
+
+// A focused field may have a keyboard over the screen that the tree does not show.
+func typing(tree *Tree) bool {
+	return slices.ContainsFunc(tree.Elements, func(e Element) bool {
+		return slices.Contains(e.States, "focused") && slices.Contains(e.States, "editable")
+	})
+}
+
+func pointerAt(action string, x, y float64, t int) InputEvent {
+	return InputEvent{Type: "pointer", Action: action, X: &x, Y: &y, T: &t}
+}
+
+func tapPoint(step Step) (float64, float64, bool) {
+	if step.Type != "input" || len(step.Events) == 0 {
+		return 0, 0, false
+	}
+	first := step.Events[0]
+	if first.Type != "pointer" || first.Action != "down" || first.X == nil || first.Y == nil {
+		return 0, 0, false
+	}
+	if slices.ContainsFunc(step.Events, func(event InputEvent) bool { return event.Type == "pointer" && event.Action == "move" }) {
+		return 0, 0, false
+	}
+	return *first.X, *first.Y, true
+}
+
+func (r *actRun) indexOf(ref string) int {
+	if r.tree == nil {
+		return -1
+	}
+	byRef := func(elements []Element) int {
+		return slices.IndexFunc(elements, func(e Element) bool { return e.Ref == ref })
+	}
+	if index := byRef(r.tree.Elements); index >= 0 {
+		return index
+	}
+	seen := r.hub.shown(r.info.ID, r.actor.SessionID)
+	if seen == nil {
+		return -1
+	}
+	old := byRef(seen.Elements)
+	if old < 0 {
+		return -1
+	}
+	was := seen.Elements[old]
+	return slices.IndexFunc(r.tree.Elements, func(e Element) bool {
+		return e.Role == was.Role && e.Name == was.Name && e.Value == was.Value && e.Bounds == was.Bounds
+	})
+}
+
+// moved stops a tap whose point no longer lands on what the session last saw there.
+func (r *actRun) moved(index int, step Step, now *StepTarget) bool {
+	x, y, ok := tapPoint(step)
+	if !ok || now == nil {
+		return false
+	}
+	seen := r.hub.shown(r.info.ID, r.actor.SessionID)
+	if seen == nil {
+		return false
+	}
+	was := targetAt(seen, hit(seen, x, y))
+	if was == nil || was.Role == now.Role && was.Name == now.Name {
+		return false
+	}
+	r.result.Stopped = &ActStop{Step: index, Reason: "moved",
+		Message: fmt.Sprintf("step %d: the point now lands on %s, not on %s as last seen; run `look` again", index+1, now, was)}
+	return true
+}
+
+func (r *actRun) perform(index int, step Step, events []InputEvent) bool {
+	var err error
+	switch step.Type {
+	case "element", "input":
+		err = r.hub.send(r.ctx, InputBatch{Display: r.info.ID, Events: events})
 	case "launch", "open":
 		err = r.hub.launch(r.ctx, r.info, step)
 	case "wait":
@@ -678,7 +781,7 @@ func (r *actRun) observe(o Observe, acted bool) error {
 		screen.App = tree.App
 		screen.Quality = quality(*tree)
 		if o.Tree != "none" {
-			now := observation{session: r.actor.SessionID, tree: o.Tree, screen: signature(tree)}
+			now := observation{session: r.actor.SessionID, tree: o.Tree, screen: signature(tree), shown: tree}
 			seen := r.hub.observe(r.info.ID, now)
 			if acted && seen && now.session != "" && screen.Quality == "good" {
 				screen.Unchanged = true
@@ -698,9 +801,12 @@ func (r *actRun) observe(o Observe, acted bool) error {
 		if !r.info.Capture {
 			return nil
 		}
-		image, err := r.hub.Capture(r.ctx, CaptureParams{Display: r.info.ID, MaxSize: cmp.Or(o.MaxSize, actImageSize), Quality: actImageJPEG})
+		image, err := r.hub.capture(r.ctx, CaptureParams{Display: r.info.ID, MaxSize: cmp.Or(o.MaxSize, actImageSize), Quality: actImageJPEG})
 		if err != nil {
 			return err
+		}
+		if screen.Tree == nil && !screen.Unchanged {
+			r.hub.forget(r.info.ID)
 		}
 		screen.Image = &image
 	}
@@ -710,9 +816,27 @@ func (r *actRun) observe(o Observe, acted bool) error {
 func (h *Hub) observe(display string, now observation) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	same := h.observed[display] == now
+	was := h.observed[display]
 	h.observed[display] = now
-	return same
+	return was.session == now.session && was.tree == now.tree && was.screen == now.screen
+}
+
+func (h *Hub) forget(display string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if seen, ok := h.observed[display]; ok {
+		seen.shown = nil
+		h.observed[display] = seen
+	}
+}
+
+func (h *Hub) shown(display, session string) *Tree {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if seen, ok := h.observed[display]; ok && seen.session == session {
+		return seen.shown
+	}
+	return nil
 }
 
 func quality(tree Tree) string {

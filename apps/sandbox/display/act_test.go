@@ -47,3 +47,27 @@ func TestStopKeepsTheTurnFromGoingOn(t *testing.T) {
 	}
 	release()
 }
+
+func TestTapsLandOnlyOnWhatWasSeen(t *testing.T) {
+	tree := func(open bool) *Tree {
+		elements := []Element{
+			{Ref: "e1.1", Role: "window", Bounds: [4]float64{0, 0, 1, 1}},
+			{Ref: "e1.2", Depth: 1, Role: "button", Name: "Card", Bounds: [4]float64{0, 0.4, 1, 0.2}, Actions: []string{"click"}},
+			{Ref: "e1.3", Depth: 2, Role: "button", Name: "Delete", Bounds: [4]float64{0.4, 0.45, 0.2, 0.1}, Actions: []string{"click"}},
+		}
+		if open {
+			elements = append(elements, Element{Ref: "e1.4", Depth: 1, Role: "button", Name: "World", Bounds: [4]float64{0, 0.4, 0.3, 0.1}, Actions: []string{"click"}})
+		}
+		return &Tree{Elements: elements}
+	}
+	run := &actRun{hub: stubHub(), info: Info{ID: "agent"}, tree: tree(true)}
+	if _, events := run.aim(Step{Type: "element", Action: "click"}, "e1.2"); events[0].Type != "element" {
+		t.Errorf("a tap on the card would press its Delete: %+v", events)
+	}
+	tap := Step{Type: "input", Events: []InputEvent{pointerAt("down", 0.1, 0.45, 0), pointerAt("up", 0.1, 0.45, 60)}}
+	target, _ := run.aim(tap, "")
+	run.hub.observe("agent", observation{shown: tree(false)})
+	if !run.moved(0, tap, target) || run.result.Stopped.Reason != "moved" {
+		t.Errorf("tapped %v where the card was seen", target)
+	}
+}

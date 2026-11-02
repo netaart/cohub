@@ -265,7 +265,12 @@ Pixels are a fallback: where the platform has an accessibility API, a display re
 - **Acting**: `element` input events (`click`, `longPress`, `focus`, `setText`, `scrollForward`,
   `scrollBackward`) ride the same input path as pointers, with the same permission, rate limits
   and timeline. An element that cannot click itself falls back to a clickable ancestor, then to a
-  tap at its center.
+  tap at its center. In a plan, a touch screen's `click` and `longPress` are a finger at the
+  element's center instead, as apps answer a real touch even where their accessibility action
+  reports success and does nothing; the action stays where a finger would reach something else
+  (another control on top of the element or inside it at its center, a window other than the front
+  one) or where a focused field may have a keyboard, which the tree does not show, over the screen. Desktops keep their accessibility
+  actions, which do not move the person's pointer.
 - **Providers**:
   - **Android** reads every window on the display through its accessibility service.
   - **macOS** reads the window in front through the Accessibility API, with the same grant as
@@ -316,12 +321,18 @@ wait ends.
   that report `changes` push them while a plan waits (desktops compare small grey thumbnails, phones
   their mirrors and window events), so waits end the moment the screen does.
 - **A plan stops** at the first surprise, with a reason: `not_found`, `ambiguous` (with candidates),
+  `moved` (a tap at a point that now lands on something other than the session was last shown there by
+  `act`, checked until the plan itself changes the screen, while no other session looked since and no
+  image without a tree was shown since),
   `timeout`, `dialog` (one opened that the next step does not act in), `app_changed`, `failed`,
   `preempted` — a person took over, live or at the machine (`held`) — or `interrupted`: a person
   stopped it. That Turn's later plans on the display are refused too, so what it tries before it
   hears does not reach the screen; a new Turn may act.
-- **The result** lists each step's `effect` (`none`, `changed`, `navigated`) and time spent finding,
-  acting and waiting, then the screen: the app in front, the tree (compact by default), its
+- **The result** lists each step's `effect` (`none`, `changed`, `navigated`), its `target` (the
+  control it acted on, or the one its point landed on: the element on top there and the control
+  holding it, named by what it says) and time spent finding, acting and waiting. A named control
+  answers in the tree, so for element steps on a good tree pixels alone (a ripple, an animation) do
+  not count as a change. Then the screen: the app in front, the tree (compact by default), its
   `quality`, and an image when the tree is `poor` or there is none (`observe.image` overrides). A
   plan that leaves a good tree as its session last saw it reports `unchanged` instead of the tree;
   the refs an agent holds are stale by then and refused, so it targets by name or looks again.
@@ -363,8 +374,11 @@ cohub spaces displays tap 300 200 --count 2          # a point of the latest ima
 cohub spaces displays press back
 ```
 
-Every action goes through `act` and prints the step results and the screen after; an image is saved
-when the tree misses much of it, and its pixels become the coordinates of later actions. `capture` and
+Every action goes through `act` and prints the step results and the screen after, flagging a step
+that changed nothing; an image is saved when the tree misses much of it (or with `--screenshot`), and
+its pixels become the coordinates of later actions. Images go to `.cache/cohub/displays/` in the
+working directory, where the agent's file tools reach them (a Runtime fences them to its folder),
+outside git and photo galleries, the latest 20 kept. `capture` and
 `tree` remain for looking alone. The CLI passes `COHUB_SESSION_ID` and `COHUB_TURN_ID` as the actor.
 
 ## Vocabulary

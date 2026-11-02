@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -13,17 +13,19 @@ import {
   DisplayActionError,
   type DisplayAction,
   type DisplayActResult,
+  type DisplayActStepResult,
   type DisplayCapture,
   type DisplayElement,
   type DisplayHandoverState,
   type DisplayInfo,
+  type DisplayStepTarget,
   type DisplayTree,
   type DisplayUntil,
   type SpaceDisplaysApi,
 } from "@neta-art/cohub";
-import type { Command } from "commander";
+import { type Command, Option } from "commander";
 import { createClient } from "../client.js";
-import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
+import { error, handleHttp, json as outJson, jsonRequested, ok, table, warn } from "../output.js";
 import { resolveSpace } from "../space.js";
 import { webUrl } from "../web.js";
 
@@ -51,6 +53,9 @@ const HANDOVER_RETRY_MS = 60_000;
 const HANDOVER_RETRY_GAP_MS = 2_000;
 const CACHE_DIR = join(homedir(), ".cache", "cohub-cli");
 const FRAMES_PATH = join(CACHE_DIR, "display-frames.json");
+// In the workspace, where a Runtime's fenced file tools reach them.
+const IMAGE_DIR = join(".cache", "cohub", "displays");
+const KEPT_IMAGES = 20;
 const NO_DISPLAY_HINT =
   "Share one first: set up phone control in the Cohub Android app, run `cohub runtime up --display` on a computer, or `cohub spaces displays start` for a virtual screen.";
 
@@ -132,12 +137,24 @@ function needsHint(display: DisplayInfo) {
   return `${display.name || display.id} needs ${names}: allow it for the Runtime's terminal in System Settings → Privacy & Security, then restart the Runtime.`;
 }
 
-function imagePath(display: DisplayInfo, output?: string) {
-  return resolve(output ?? join(CACHE_DIR, "displays", `${display.id}-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`));
+async function writeOnce(path: string, content: string) {
+  await writeFile(path, content, { flag: "wx" }).catch((e: NodeJS.ErrnoException) => {
+    if (e.code !== "EEXIST") throw e;
+  });
+}
+
+async function imageDir() {
+  const dir = resolve(IMAGE_DIR);
+  await mkdir(dir, { recursive: true });
+  await Promise.all([writeOnce(join(dir, "..", ".gitignore"), "*\n"), writeOnce(join(dir, ".nomedia"), "")]);
+  const images = (await readdir(dir)).filter((name) => name.endsWith(".jpg")).sort();
+  await Promise.all(images.slice(0, -(KEPT_IMAGES - 1)).map((name) => rm(join(dir, name), { force: true })));
+  return dir;
 }
 
 async function saveImage(spaceId: string, display: DisplayInfo, image: DisplayCapture, output?: string) {
-  const path = imagePath(display, output);
+  const name = `${new Date().toISOString().replace(/[:.]/g, "-")}-${display.id}.jpg`;
+  const path = output ? resolve(output) : join(await imageDir().catch(() => join(CACHE_DIR, "displays")), name);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, Buffer.from(image.data, "base64"));
   await rememberFrame(spaceId, display, image);
@@ -145,7 +162,7 @@ async function saveImage(spaceId: string, display: DisplayInfo, image: DisplayCa
 }
 
 async function screenshot(api: SpaceDisplaysApi, spaceId: string, display: DisplayInfo, maxSize: number, output?: string) {
-  return saveImage(spaceId, display, await api.capture(display.id, { maxSize }), output ?? resolve(`${display.id}-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`));
+  return saveImage(spaceId, display, await api.capture(display.id, { maxSize }), output);
 }
 
 function formatElement(element: DisplayElement, frame: Size, indent = true, box = true) {
@@ -184,7 +201,7 @@ async function act(spacesCmd: Command, opts: ActOptions, actions: DisplayAction[
   try {
     const launching = actions.some((action) => action.type === "launch" || action.type === "open");
     const { spaceId, api, display } = await target(spacesCmd, opts, launching);
-    if (!display.input && actions.length > 0) return error("This display is view only", needsHint(display) ?? "Allow control on the device first.");
+    if (!display.input && actions.some((action) => action.type !== "wait")) return error("This display is view only", needsHint(display) ?? "Allow control on the device first.");
     const frame = await frameOf(spaceId, display, opts.size);
     const tree = opts.tree ?? "compact";
     if (!(TREES as readonly string[]).includes(tree)) return error("Invalid tree", `Use one of: ${TREES.join(", ")}`);
@@ -210,7 +227,7 @@ async function act(spacesCmd: Command, opts: ActOptions, actions: DisplayAction[
       const { image: _, ...screen } = result.screen;
       return outJson({ display: display.id, ...result, screen: { ...screen, ...(image ? { image } : {}) }, frame: { width: shown.width, height: shown.height } });
     }
-    printResult(display, result, shown, tree === "compact", image?.path);
+    printResult(display, actions, result, shown, tree === "compact", image?.path);
   } catch (e: unknown) {
     if (e instanceof DisplayActionError) return error("Invalid action", e.message);
     if (sent && isLostAnswer(e)) return error("The answer was lost", "The plan may have run, in part or whole: `look` before repeating any step.");
@@ -223,12 +240,48 @@ function isLostAnswer(e: unknown) {
   return status === undefined ? e instanceof TypeError : status >= 500 && status !== 501;
 }
 
-function printResult(display: DisplayInfo, result: DisplayActResult, frame: Size, compact: boolean, imageFile?: string) {
+function targetText(target: DisplayStepTarget) {
+  return target.name ? `${target.role} ${JSON.stringify(target.name)}` : target.role;
+}
+
+function atPoint(action: DisplayAction) {
+  return action.x !== undefined && action.ref === undefined && action.name === undefined && action.role === undefined;
+}
+
+function actionText(action: DisplayAction) {
+  const point = atPoint(action) ? ` (${action.x},${action.y})` : "";
+  switch (action.type) {
+    case "tap": return `${action.count === 2 ? "double-tap" : action.count === 3 ? "triple-tap" : "tap"}${point}`;
+    case "long_press": return `long press${point}`;
+    case "swipe": return `swipe${point} to (${action.to_x},${action.to_y})`;
+    case "scroll": return `scroll ${action.direction ?? "down"}`;
+    case "type": return `type ${[...(action.text ?? "")].length} characters`; // never echo it: it may be a secret
+    case "key": return `key ${action.key}`;
+    case "system": return `press ${action.action}`;
+    case "launch": return `launch ${action.app}`;
+    case "open": return `open ${action.url}`;
+    case "wait": return "wait";
+  }
+}
+
+function stepText(action: DisplayAction | undefined, step: DisplayActStepResult) {
+  const parts = [action ? actionText(action) : "step"];
+  if (step.target) parts.push(`${action && atPoint(action) ? "on " : action?.type === "type" ? "into " : ""}${targetText(step.target)}`);
+  if (action?.type !== "wait") parts.push(`· ${step.effect}`);
+  parts.push(`· ${step.findMs + step.actMs + step.waitedMs} ms`);
+  return parts.join(" ");
+}
+
+function printResult(display: DisplayInfo, actions: DisplayAction[], result: DisplayActResult, frame: Size, compact: boolean, imageFile?: string) {
   const name = display.name || display.id;
   if (result.steps.length > 0 || result.stopped) {
     const done = result.steps.length;
-    if (!result.stopped) ok(`${done} step${done === 1 ? "" : "s"} on ${name}`);
-    for (const [index, step] of result.steps.entries()) console.log(`  ${index + 1}. ${step.effect} · ${step.findMs + step.actMs + step.waitedMs} ms`);
+    const still = result.steps.findIndex((step, index) => step.effect === "none" && actions[index]?.type !== "wait");
+    if (!result.stopped) {
+      if (still >= 0) warn(`Step ${still + 1} changed nothing on ${name}: it may not have landed. Look before repeating it.`);
+      else ok(`${done} step${done === 1 ? "" : "s"} on ${name}`);
+    }
+    for (const [index, step] of result.steps.entries()) console.log(`  ${index + 1}. ${stepText(actions[index], step)}`);
     if (result.stopped) {
       console.log(`✗ Stopped (${result.stopped.reason}): ${result.stopped.message}`);
       for (const candidate of result.stopped.candidates ?? []) console.log(`    ${formatElement(candidate, frame, false)}`);
@@ -416,7 +469,7 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
     .command("capture")
     .description("Save a screenshot; later coordinates are its pixels")
     .option("-d, --display <id>", "Display id; defaults to the only one, or the agent screen")
-    .option("-o, --output <path>", "Where to write the image (default: <display>-<time>.jpg)")
+    .option("-o, --output <path>", `Where to write the image (default: ${IMAGE_DIR}/, the latest ${KEPT_IMAGES} kept)`)
     .option("--max-size <px>", `Longest edge in pixels (default ${DEFAULT_MAX_SIZE})`)
     .option("--json", "Output as JSON")
     .action(async (opts: { display?: string; output?: string; maxSize?: string; json?: boolean }) => {
@@ -436,20 +489,21 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
     .description("Read the interface as elements: refs to act on, roles, names and boxes")
     .option("-d, --display <id>", "Display id; defaults to the only one, or the agent screen")
     .option("--max <n>", "Most elements to return (default 300)")
-    .option("--compact", "What can be acted on or read, flat: fewer tokens")
+    .option("--full", "Every element, nested, instead of what can be acted on or read")
+    .addOption(new Option("--compact").hideHelp())
     .option("--json", "Output as JSON")
-    .action(async (opts: { display?: string; max?: string; compact?: boolean; json?: boolean }) => {
+    .action(async (opts: { display?: string; max?: string; full?: boolean; json?: boolean }) => {
       try {
         const { spaceId, api, display } = await target(spacesCmd, opts);
         if (!display.tree) return error("This display has no element tree", "Use capture and coordinates instead.");
         const tree = await api.tree(display.id, {
           ...(opts.max ? { maxElements: parseNumber("max", opts.max) } : {}),
-          ...(opts.compact ? { compact: true } : {}),
+          ...(opts.full ? {} : { compact: true }),
         });
         if (jsonRequested(opts)) return outJson(tree);
         const frame = await frameOf(spaceId, display);
         if (tree.app) console.log(tree.app);
-        console.log(formatTree(tree, frame, opts.compact));
+        console.log(formatTree(tree, frame, !opts.full));
         console.log(`\n  Boxes are x,y and size in ${frame.width}x${frame.height} pixels. Act with: tap --name <text> · type <text> --into <ref> · act < plan.json`);
         if (tree.truncated) console.log("  More elements exist; pass --max to read more.");
       } catch (e: unknown) {
@@ -474,8 +528,8 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
       }
     });
 
-  withAct(displays.command("look").description("Read the screen as `act` reports it, without acting"))
-    .action((opts: ActOptions) => act(spacesCmd, opts, []));
+  withAct(displays.command("look").description("Read the screen as `act` reports it, without acting; --until-* waits first"))
+    .action((opts: ActOptions) => act(spacesCmd, opts, untilOf(opts) ? [{ type: "wait" }] : []));
 
   withAct(displays.command("launch <app>").description("Launch an app by id (see `apps`) and wait until it is in front"))
     .action((app: string, opts: ActOptions) => act(spacesCmd, { untilApp: app, ...opts }, [{ type: "launch", app }]));

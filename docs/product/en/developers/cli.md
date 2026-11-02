@@ -310,14 +310,14 @@ it with Codex Fast. Both need a connected Runtime that offers them.
 
 Screens a Space's machine shares: a phone from the Android app, a computer from
 `cohub runtime up --display`, or a sandbox's virtual screen. Coordinates are pixels of your latest
-`capture` (or of `--size`); where a display has an element tree, refs from `tree` are more precise:
+`capture` (or of `--size`); where a display has an element tree, names and refs from `tree` are more precise:
 
 ```bash
 cohub spaces displays ls
 cohub spaces displays start                   # a virtual screen, where available; stop ends it
-cohub spaces displays capture -o screen.jpg   # longest edge 1280 by default
-cohub spaces displays tree                    # e3.12 button "Send" (980,2210 120x80)
-cohub spaces displays tree --compact          # what can be acted on or read
+cohub spaces displays capture                 # into .cache/cohub/displays/; longest edge 1280 by default
+cohub spaces displays tree                    # e3.12 button "Send" (980,2210 120x80); --full for everything
+cohub spaces displays tap --name Send         # taps where it shows, then reports what changed
 cohub spaces displays tap e3.12 --screenshot  # act, then save a screenshot
 cohub spaces displays type "hello" --into e3.4
 cohub spaces displays tap 540 1200
@@ -332,8 +332,11 @@ On macOS, the terminal running the Runtime needs Screen Recording, and Accessibi
 the screen (System Settings → Privacy & Security). Linux needs an X11 session; Wayland is not
 supported yet.
 
-`act` runs a JSON array of actions from `--actions` or stdin, in one timeline. When a person acts on
-the screen, the action stops with `display_preempted`: look again before acting. Watching, `capture`
+`act` runs a JSON array of actions from `--actions` or stdin, in one timeline. Each step waits for
+the screen to settle, or for `--until-text`, `--until-gone`, `--until-app` or `--until-stable`, and
+reports what it acted on and whether anything changed; a step that changed nothing is flagged. A tap
+at a point stops with `moved` when something other than what you last saw is there now. When a person
+acts on the screen, the action stops with `display_preempted`: look again before acting. Watching, `capture`
 and `tree` take view access to the sandbox; acting and `start` / `stop` take what running commands
 does.
 

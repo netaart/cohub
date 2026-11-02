@@ -35,7 +35,7 @@ export const DISPLAY_URL_BLOCKED_SCHEMES = ["file", "content", "data", "javascri
 
 export const DISPLAY_EFFECTS = ["none", "changed", "navigated"] as const;
 export type DisplayEffect = (typeof DISPLAY_EFFECTS)[number];
-export const DISPLAY_ACT_STOPS = ["not_found", "ambiguous", "timeout", "dialog", "app_changed", "failed", "preempted", "interrupted"] as const;
+export const DISPLAY_ACT_STOPS = ["not_found", "ambiguous", "moved", "timeout", "dialog", "app_changed", "failed", "preempted", "interrupted"] as const;
 export type DisplayActStop = (typeof DISPLAY_ACT_STOPS)[number];
 export const DISPLAY_HANDOVER_STATES = ["waiting", "returned", "stopped", "expired", "gone"] as const;
 export type DisplayHandoverState = (typeof DISPLAY_HANDOVER_STATES)[number];
@@ -147,7 +147,9 @@ export const displayHandoverParamsSchema = z.object({
 export type DisplayHandoverParams = z.infer<typeof displayHandoverParamsSchema>;
 export type DisplayHandoverResult = { state: DisplayHandoverState; held?: boolean };
 
-export type DisplayActStepResult = { effect: DisplayEffect; findMs: number; actMs: number; waitedMs: number };
+export type DisplayStepTarget = Pick<DisplayElement, "role" | "name" | "bounds">;
+
+export type DisplayActStepResult = { effect: DisplayEffect; target?: DisplayStepTarget; findMs: number; actMs: number; waitedMs: number };
 
 export type DisplayScreen = {
   app?: string;

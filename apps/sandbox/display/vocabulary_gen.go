@@ -49,6 +49,6 @@ var (
 	elementActions    = names("click", "longPress", "focus", "setText", "scrollForward", "scrollBackward")
 	kinds             = names("screen", "agent")
 	effects           = names("none", "changed", "navigated")
-	actStops          = names("not_found", "ambiguous", "timeout", "dialog", "app_changed", "failed", "preempted", "interrupted")
+	actStops          = names("not_found", "ambiguous", "moved", "timeout", "dialog", "app_changed", "failed", "preempted", "interrupted")
 	blockedSchemes    = names("file", "content", "data", "javascript", "intent")
 )

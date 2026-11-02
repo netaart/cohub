@@ -40,6 +40,6 @@ internal object DisplayVocabulary {
     val ELEMENT_ACTIONS = setOf("click", "longPress", "focus", "setText", "scrollForward", "scrollBackward")
     val KINDS = setOf("screen", "agent")
     val EFFECTS = setOf("none", "changed", "navigated")
-    val ACT_STOPS = setOf("not_found", "ambiguous", "timeout", "dialog", "app_changed", "failed", "preempted", "interrupted")
+    val ACT_STOPS = setOf("not_found", "ambiguous", "moved", "timeout", "dialog", "app_changed", "failed", "preempted", "interrupted")
     val BLOCKED_SCHEMES = setOf("file", "content", "data", "javascript", "intent")
 }

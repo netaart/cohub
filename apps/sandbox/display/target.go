@@ -2,6 +2,7 @@ package display
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -184,6 +185,78 @@ func scroller(tree Tree) Element {
 		}
 	}
 	return best
+}
+
+type StepTarget struct {
+	Role   string     `json:"role"`
+	Name   string     `json:"name,omitempty"`
+	Bounds [4]float64 `json:"bounds"`
+}
+
+func (t StepTarget) String() string {
+	if t.Name == "" {
+		return t.Role
+	}
+	return fmt.Sprintf("%s %q", t.Role, t.Name)
+}
+
+func contains(element Element, x, y float64) bool {
+	b := element.Bounds
+	return visible(element) && x >= b[0] && x < b[0]+b[2] && y >= b[1] && y < b[1]+b[3]
+}
+
+// hit is the last element painted at a point, in the front window holding it; elements paint in tree order.
+func hit(tree *Tree, x, y float64) int {
+	window, top := false, -1
+	for index, element := range tree.Elements {
+		if element.Depth == 0 {
+			if window {
+				break
+			}
+			window = contains(element, x, y)
+		}
+		if window && contains(element, x, y) {
+			top = index
+		}
+	}
+	return top
+}
+
+func control(elements []Element, index int) int {
+	parents := parentsOf(elements)
+	for at := index; at >= 0; at = parents[at] {
+		if actionable(elements[at]) {
+			return at
+		}
+	}
+	return index
+}
+
+func targetAt(tree *Tree, index int) *StepTarget {
+	if index < 0 {
+		return nil
+	}
+	elements := tree.Elements
+	index = control(elements, index)
+	element := elements[index]
+	name := element.Name
+	for i := index + 1; name == "" && element.Depth > 0 && i < len(elements) && elements[i].Depth > element.Depth; i++ {
+		name = elements[i].Name
+	}
+	if textLen(name) > compactNameLen {
+		name = string([]rune(name)[:compactNameLen-1]) + "…"
+	}
+	return &StepTarget{Role: element.Role, Name: name, Bounds: element.Bounds}
+}
+
+func reachable(tree *Tree, index int) (float64, float64, bool) {
+	if index < 0 || !within(tree.Elements, 0, index) {
+		return 0, 0, false
+	}
+	b := tree.Elements[index].Bounds
+	x, y := b[0]+b[2]/2, b[1]+b[3]/2
+	at := hit(tree, x, y)
+	return x, y, at >= 0 && control(tree.Elements, at) == control(tree.Elements, index)
 }
 
 func within(elements []Element, root, index int) bool {

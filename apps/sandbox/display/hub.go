@@ -407,6 +407,14 @@ func (h *Hub) currentConn() (*providerConn, error) {
 }
 
 func (h *Hub) Capture(ctx context.Context, params CaptureParams) (CaptureResult, error) {
+	result, err := h.capture(ctx, params)
+	if err == nil {
+		h.forget(params.Display)
+	}
+	return result, err
+}
+
+func (h *Hub) capture(ctx context.Context, params CaptureParams) (CaptureResult, error) {
 	if err := params.normalize(); err != nil {
 		return CaptureResult{}, err
 	}
