@@ -35,6 +35,7 @@ export type BoardScene = {
 	descendants(id: string): string[];
 	binders(id: string): readonly string[];
 	opacity(id: string): number;
+	shown(id: string): boolean;
 };
 
 const EPSILON = 1e-6;
@@ -128,16 +129,18 @@ export function buildBoardScene(document: BoardDocument, previous?: BoardScene |
 		},
 		binders: (id) => binders.get(id) ?? [],
 		opacity: (id) => cumulativeOpacity((key) => items[key], id),
+		shown: (id) => cumulativeOpacity((key) => items[key], id, true) > 0,
 	};
 }
 
-function cumulativeOpacity(lookup: BoardItemLookup, id: string): number {
+function cumulativeOpacity(lookup: BoardItemLookup, id: string, presence = false): number {
 	let value = 1;
 	let cursor: string | undefined = id;
 	for (let depth = 0; cursor && depth < 64; depth += 1) {
 		const item: BoardItem | undefined = lookup(cursor);
 		if (!item) break;
-		value *= item.opacity;
+		if (item.visible === false) return 0;
+		if (!presence) value *= item.opacity;
 		cursor = item.parent;
 	}
 	return value;
@@ -175,6 +178,7 @@ export function refreshBoardScene(previous: BoardScene, lookup: BoardItemLookup,
 		get: (id) => overrides.get(id) ?? base.get(id),
 		layout,
 		opacity: (id) => cumulativeOpacity(lookup, id),
+		shown: (id) => cumulativeOpacity(lookup, id, true) > 0,
 	};
 	refreshed.set(scene, { base, overrides });
 	return scene;

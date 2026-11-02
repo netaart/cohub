@@ -22,6 +22,7 @@ const AUDIO_MIME_TYPES = new Set([
   "audio/wav", "audio/x-wav", "audio/wave", "audio/flac", "audio/x-flac",
   "audio/webm", "audio/opus", "application/ogg",
 ]);
+const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/ogg", "video/x-matroska"]);
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 type ResolvedAddress = { address: string; family: 4 | 6 };
@@ -201,6 +202,17 @@ export function downloadPublicAudio(
   return downloadPublicMedia(input, AUDIO_MIME_TYPES, {
     maxBytes: 64 * 1024 * 1024,
     timeoutMs: 30_000,
+    ...options,
+  });
+}
+
+export function downloadPublicVideo(
+  input: string,
+  options: RemoteImageDownloadOptions = {},
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
+  return downloadPublicMedia(input, VIDEO_MIME_TYPES, {
+    maxBytes: 512 * 1024 * 1024,
+    timeoutMs: 120_000,
     ...options,
   });
 }

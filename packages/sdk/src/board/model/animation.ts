@@ -143,7 +143,7 @@ function parameterKind(track: BoardTrack): Kind {
 	return "discrete";
 }
 
-function compileTrack(animationId: string, id: string, track: BoardTrack, targetType: string): CompiledTrack | null {
+export function compileBoardTrack(animationId: string, id: string, track: BoardTrack, targetType: string): CompiledTrack | null {
 	const resolved = resolveBoardProperty(targetType, track.property);
 	if (!resolved.ok) return null;
 	const kind = targetType === "script" ? parameterKind(track) : resolved.spec.kind;
@@ -209,7 +209,7 @@ function compileAnimation(animationId: string, animation: BoardAnimation, docume
 					? "script"
 					: document.items[track.target]?.type;
 		if (!targetType) continue;
-		const entry = compileTrack(animationId, id, track, targetType);
+		const entry = compileBoardTrack(animationId, id, track, targetType);
 		if (!entry) continue;
 		(targetType === "animation" ? children : compiled).push(entry);
 	}

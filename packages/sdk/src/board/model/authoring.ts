@@ -8,6 +8,7 @@ import {
   type BoardTrack,
   type BoardVec2,
 } from "@cohub/protocol";
+import { type BoardTimelinePlacement, boardPlaceTarget, boardTargetSpan } from "./timeline.js";
 
 export type BoardChapter = { animation: string; frame?: string; label?: string; gap?: number; pause?: boolean };
 
@@ -123,6 +124,28 @@ export function boardSequencePatch(document: BoardDocument, id: string, chapters
     if (!(key in tracks)) tracks[key] = null;
   }
   const patch: BoardPatch = { animations: { [id]: { ...animation, tracks } } };
+  const result = applyBoardPatchToDocument(document, patch);
+  if (!result.ok) throw new Error(result.diagnostics.map((entry) => `${entry.path}: ${entry.message}`).join("; "));
+  return patch;
+}
+
+export function boardPlacePatch(
+  document: BoardDocument,
+  id: string,
+  targets: readonly string[],
+  placement: BoardTimelinePlacement & { together?: boolean },
+): BoardPatch {
+  BoardIdSchema.parse(id);
+  const existing = document.animations[id];
+  let animation: BoardAnimation = existing ?? { duration: 1, play: "manual", delay: 0, loop: false, end: "hold", markers: [], tracks: {} };
+  let at = placement.at;
+  for (const target of targets) {
+    if (target === id || (!document.items[target] && !document.animations[target])) throw new Error(`${target} is not an item or animation on this Board.`);
+    animation = boardPlaceTarget(document, animation, target, { ...placement, at });
+    if (!placement.together) at = boardTargetSpan(document, animation, target)?.end ?? at;
+  }
+  const tracks = Object.fromEntries(Object.entries(animation.tracks).filter(([key, track]) => existing?.tracks[key] !== track));
+  const patch: BoardPatch = { animations: { [id]: existing ? { duration: animation.duration, tracks } : { ...animation, tracks } } };
   const result = applyBoardPatchToDocument(document, patch);
   if (!result.ok) throw new Error(result.diagnostics.map((entry) => `${entry.path}: ${entry.message}`).join("; "));
   return patch;

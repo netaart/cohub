@@ -2,10 +2,11 @@ import type { Command } from "commander";
 import type { BoardChapter, BoardRegionDirection, BoardVec2 } from "@neta-art/cohub/board";
 import { readBoardJsonObject } from "../../board-command-support.js";
 import { loadBoardDocument, resolveBundledFonts } from "../../board-export.js";
-import { settleBoardDocument } from "../../board-media.js";
+import { settleBoardDocument, settleBoardMediaDurations } from "../../board-media.js";
 import {
   boardFrameRegions,
   boardPathTrack,
+  boardPlacePatch,
   boardRegionStep,
   boardSequencePatch,
   buildBoardScene,
@@ -13,7 +14,7 @@ import {
   createNodeBoardRenderer,
   inspectBoardItems,
 } from "../../board-kernel.js";
-import { parseBoardTimes } from "../../board-time.js";
+import { parseBoardTime, parseBoardTimes } from "../../board-time.js";
 import { handleHttp, json as outJson, jsonRequested, table } from "../../output.js";
 import { resolveSpace } from "../../space.js";
 
@@ -107,6 +108,46 @@ Viewers step with N, the arrow keys and swipes; #focus=<frame>&present presents.
           throw new Error("Input needs a chapters array with animation IDs.");
         const { document } = await loadBoardDocument(await resolveSpace(boards), target);
         outJson(boardSequencePatch(document, options.animation, input.chapters as BoardChapter[]));
+      } catch (cause) {
+        handleHttp(cause);
+      }
+    });
+
+  boards
+    .command("place <board>")
+    .description("Put items or animations on a timeline as clips; prints a patch for apply, does not write")
+    .requiredOption("--animation <id>", "Animation to place them in; created when missing")
+    .requiredOption("--targets <ids>", "Comma-separated item or animation ids, laid end to end")
+    .option("--at <time>", "Where the first one starts", "0")
+    .option("--duration <time>", "Length of each; defaults to what is left of the media or animation, else 3s")
+    .option("--from <time>", "Where media or an animation starts playing in its own time", "0")
+    .option("--rate <number>", "Playback speed of media and animations", "1")
+    .option("--together", "Start them all at --at instead of one after another")
+    .addHelpText("after", `
+Each target is shown only during its clip (a visible track); video, audio and
+animations also play (a props.time or time track), and sound in exports while
+their time moves forward. Placing a target that is already on the timeline moves it.
+  cohub boards place cut.board --animation cut --targets intro,talk,outro | cohub boards apply cut.board -i -
+  cohub boards place cut.board --animation cut --targets music --at 0 --duration 30s --from 12s`)
+    .action(async (target: string, options: { animation: string; targets: string; at: string; duration?: string; from: string; rate: string; together?: boolean }) => {
+      try {
+        const targets = options.targets.split(",").map((id) => id.trim()).filter(Boolean);
+        if (!targets.length) throw new Error("--targets needs at least one id.");
+        const rate = Number(options.rate);
+        if (!Number.isFinite(rate) || rate <= 0) throw new Error("--rate must be a positive number.");
+        const spaceId = await resolveSpace(boards);
+        const { document: loaded } = await loadBoardDocument(spaceId, target);
+        const durations = options.duration ? {} : await settleBoardMediaDurations(spaceId, loaded, targets);
+        const document = { ...loaded, items: { ...loaded.items, ...durations } };
+        const patch = boardPlacePatch(document, options.animation, targets, {
+          at: parseBoardTime(options.at, "--at"),
+          from: parseBoardTime(options.from, "--from"),
+          rate,
+          ...(options.duration ? { duration: parseBoardTime(options.duration, "--duration") } : {}),
+          together: options.together,
+        });
+        const items = Object.fromEntries(Object.entries(durations).map(([id, item]) => [id, { props: { snapshot: { durationMs: (item.props as { snapshot?: { durationMs?: number } }).snapshot?.durationMs } } }]));
+        outJson(Object.keys(items).length ? { ...patch, items } : patch);
       } catch (cause) {
         handleHttp(cause);
       }

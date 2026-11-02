@@ -5,14 +5,28 @@ import {
 	type BoardChapter,
 	type BoardKeyframe,
 	type BoardMarker,
+	type BoardDocument,
+	type BoardItem,
+	type BoardTimelinePlacement,
 	type BoardTrack,
+	boardInsertTime,
+	boardPlaceTarget,
+	boardRemoveTarget,
+	boardRemoveTime,
 	boardSequence,
+	boardShiftTargets,
+	boardSplitTarget,
+	boardTargetSpan,
+	boardTrimTarget,
 	compileBoardAnimations,
+	findBoardKeyTrack,
+	newBoardTrackId,
 	createBoardItemId,
 	evaluateBoardAnimations,
 } from "../model/index.js";
+import { remapItems } from "./clipboard.js";
 import type { BoardPlayhead, EditorContext } from "./context.js";
-import { diffBoardEdits, findBoardKeyTrack, newBoardTrackId, readPath, sameJson } from "./document-edits.js";
+import { diffBoardEdits, readPath, sameJson } from "./document-edits.js";
 
 export type BoardKeyRef = { trackId: string; at: number };
 
@@ -68,8 +82,10 @@ export function createAnimationModule(ctx: EditorContext) {
 		return playhead && animation ? { id: playhead.animationId, time: ms(playhead.time), animation } : null;
 	}
 
-	function commitAnimation(id: string, animation: BoardAnimation): boolean {
-		const patch = diffBoardEdits(state.base, { ...state.base, animations: { ...state.base.animations, [id]: animation } }, []);
+	function commitAnimation(id: string, animation: BoardAnimation, items: Record<string, BoardItem> = {}): boolean {
+		if (animation === state.base.animations[id] && Object.keys(items).length === 0) return true;
+		const next: BoardDocument = { ...state.base, items: { ...state.base.items, ...items }, animations: { ...state.base.animations, [id]: animation } };
+		const patch = diffBoardEdits(state.base, next, Object.keys(items));
 		try {
 			void ctx.document.commitPatch(patch)?.catch(() => {});
 			return true;
@@ -292,7 +308,79 @@ export function createAnimationModule(ctx: EditorContext) {
 		return id;
 	}
 
+	function placeOnTimeline(targets: readonly string[], at: number, options: { together?: boolean } & Omit<BoardTimelinePlacement, "at"> = {}): boolean {
+		const found = editing();
+		if (!found) return false;
+		let animation = found.animation;
+		let cursor = Math.max(0, at);
+		for (const target of targets) {
+			if (target === found.id || (state.base.animations[target] ? plays(target, found.id) : !state.base.items[target])) continue;
+			animation = boardPlaceTarget(state.base, animation, target, { ...options, at: cursor });
+			const span = boardTargetSpan(state.base, animation, target);
+			if (!options.together && span) cursor = span.end;
+		}
+		return commitAnimation(found.id, animation);
+	}
+
+	function shiftOnTimeline(targets: readonly string[], delta: number) {
+		const found = editing();
+		if (found) commitAnimation(found.id, boardShiftTargets(state.base, found.animation, targets, delta));
+	}
+
+	function trimOnTimeline(target: string, edge: "start" | "end", at: number) {
+		const found = editing();
+		if (found) commitAnimation(found.id, boardTrimTarget(state.base, found.animation, target, edge, at));
+	}
+
+	function removeFromTimeline(targets: readonly string[]) {
+		const found = editing();
+		if (!found) return;
+		let animation = found.animation;
+		for (const target of targets) animation = boardRemoveTarget(animation, target);
+		commitAnimation(found.id, animation);
+	}
+
+	function splitAtPlayhead(targets: readonly string[]): string[] {
+		const found = editing();
+		if (!found) return [];
+		let animation = found.animation;
+		const items: Record<string, BoardItem> = {};
+		const roots: string[] = [];
+		for (const target of ctx.query.rootsOf(targets)) {
+			if (!state.base.items[target]) continue;
+			const subtree = [...ctx.query.withSubtrees([target])];
+			const source = Object.fromEntries(subtree.flatMap((id) => (state.base.items[id] ? [[id, state.base.items[id] as BoardItem]] : [])));
+			const idMap = new Map(subtree.map((id) => [id, createBoardItemId()]));
+			const split = boardSplitTarget(state.base, animation, target, idMap, found.time);
+			if (!split) continue;
+			animation = split;
+			Object.assign(items, remapItems(source, idMap));
+			const copy = idMap.get(target) as string;
+			const { parent } = state.base.items[target] as BoardItem;
+			if (parent) items[copy] = { ...(items[copy] as BoardItem), parent };
+			roots.push(copy);
+		}
+		return roots.length && commitAnimation(found.id, animation, items) ? roots : [];
+	}
+
+	function insertTime(at: number, length: number) {
+		const found = editing();
+		if (found) commitAnimation(found.id, boardInsertTime(state.base, found.animation, at, length));
+	}
+
+	function removeTime(from: number, to: number) {
+		const found = editing();
+		if (found) commitAnimation(found.id, boardRemoveTime(state.base, found.animation, from, to));
+	}
+
 	return {
+		placeOnTimeline,
+		shiftOnTimeline,
+		trimOnTimeline,
+		removeFromTimeline,
+		splitAtPlayhead,
+		insertTime,
+		removeTime,
 		setPlayhead,
 		setRecording,
 		keyProperty,

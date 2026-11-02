@@ -45,8 +45,13 @@ const Z_LIVE_STROKE = Number.MAX_SAFE_INTEGER - 1;
 const Z_OVERLAY = Number.MAX_SAFE_INTEGER;
 
 const POOL_LIMIT_PER_RENDERER = 48;
+const GHOST_ALPHA = 0.28;
 const EMPTY_IDS: ReadonlySet<string> = new Set();
 const NO_PLATES: ReadonlyMap<string, FarPlate> = new Map();
+
+function cardAlpha(id: string, scene: BoardModelScene, context: BoardRenderContext): number {
+	return scene.shown(id) ? scene.opacity(id) : context.selectedIds.has(id) ? GHOST_ALPHA : 0;
+}
 
 function idSetSignature(ids: Set<string>): number {
 	let hash = ids.size;
@@ -342,7 +347,7 @@ export function createBoardScene(options: {
 		container.visible = true;
 		container.culled = false;
 		if (pooled) renderer.update(container, item, context);
-		container.alpha = scene.opacity(item.id);
+		container.alpha = cardAlpha(item.id, scene, context);
 		syncBoardItemEffects(container, item, context);
 		hostFor(item, scene, context).addChild(container);
 		if (renderer.animated) animatedIds.add(item.id);
@@ -498,7 +503,7 @@ export function createBoardScene(options: {
 			}
 			const { graphics } = plate;
 			graphics.clear();
-			for (const item of run.items) getRenderer(item, context).renderFar?.(graphics, item, context);
+			for (const item of run.items) if (scene.shown(item.id)) getRenderer(item, context).renderFar?.(graphics, item, context);
 			plate.items = run.items;
 			plate.sig = globalSig;
 			graphics.zIndex = run.order;
@@ -703,9 +708,9 @@ export function createBoardScene(options: {
 			entry.resizing = resizing;
 			entry.globalSig = globalSig;
 			setHeldKey(context, id, item);
+			entry.container.alpha = cardAlpha(id, scene, context);
 			if (changed) {
 				entry.renderer.update(entry.container, item, context);
-				entry.container.alpha = scene.opacity(id);
 				syncBoardItemEffects(entry.container, item, context);
 				if (entry.renderer.tick) tickingIds.add(id);
 				pendingResolution.delete(id);

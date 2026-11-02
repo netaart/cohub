@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { BoardAnimation, BoardKeyframe } from "@cohub/protocol";
+import { BOARD_SPAN_MIN_MS } from "@neta-art/cohub/board";
 import type { BoardKeyRef } from "@neta-art/cohub/board/editor";
 import {
 	ArrowUpRight,
@@ -52,6 +53,10 @@ const {
 	onMoveKeys,
 	onMoveMarker,
 	onAddMarker,
+	dropAt = null,
+	onSelectClips,
+	onShiftClips,
+	onTrimClip,
 }: {
 	groups: readonly BoardTrackGroup[];
 	animation: BoardAnimation;
@@ -68,6 +73,10 @@ const {
 	onMoveKeys: (keys: BoardKeyRef[], delta: number) => void;
 	onMoveMarker: (from: number, to: number) => void;
 	onAddMarker: (at: number) => void;
+	dropAt?: number | null;
+	onSelectClips: (targets: ReadonlySet<string>) => void;
+	onShiftClips: (targets: string[], delta: number) => void;
+	onTrimClip: (target: string, edge: "start" | "end", at: number) => void;
 } = $props();
 
 const PAD = 14;
@@ -92,6 +101,9 @@ const ticks = $derived(boardRulerTicks(scale, extent));
 
 const selectedKeys = $derived(
 	selection?.type === "keys" ? selection.ids : new Set<string>(),
+);
+const selectedClips = $derived(
+	selection?.type === "clips" ? selection.targets : new Set<string>(),
 );
 
 type KeyDrag = {
@@ -122,7 +134,23 @@ type Marquee = {
 	moved: boolean;
 };
 
+type ClipDrag = {
+	pointerId: number;
+	startX: number;
+	mode: "move" | "start" | "end";
+	target: string;
+	targets: string[];
+	anchor: number;
+	earliest: number;
+	candidates: number[];
+	moved: boolean;
+	delta: number;
+};
+type RangeDrag = { pointerId: number; from: number; to: number };
+
 let keyDrag = $state<KeyDrag | null>(null);
+let clipDrag = $state<ClipDrag | null>(null);
+let rangeDrag = $state<RangeDrag | null>(null);
 let markerDrag = $state<MarkerDrag | null>(null);
 let marquee = $state<Marquee | null>(null);
 let scrubbing = $state<{ pointerId: number; candidates: number[] } | null>(
@@ -151,6 +179,103 @@ function allTimes(exclude: ReadonlySet<string>): number[] {
 				times.add(keyframe.at);
 	return [...times];
 }
+
+function clipEdges(exclude: ReadonlySet<string>): number[] {
+	const times = new Set<number>([0, animation.duration, Math.round(time)]);
+	for (const marker of animation.markers) times.add(marker.at);
+	for (const group of groups)
+		if (group.span && !exclude.has(group.target)) {
+			times.add(group.span.start);
+			times.add(group.span.end);
+		}
+	return [...times];
+}
+
+export function timeAtPoint(
+	clientX: number,
+	clientY: number,
+	free = false,
+): number | null {
+	const rect = scroller?.getBoundingClientRect();
+	if (
+		!rect ||
+		clientY < rect.top ||
+		clientY > rect.bottom ||
+		clientX > rect.right ||
+		clientX < rect.left + treeWidth
+	)
+		return null;
+	const at = timeAt(clientX);
+	return Math.round(
+		free ? at : snapBoardTime(at, clipEdges(new Set()), SNAP_PX / scale),
+	);
+}
+
+function pressClip(
+	event: PointerEvent,
+	target: string,
+	mode: ClipDrag["mode"],
+) {
+	if (event.button !== 0) return;
+	event.stopPropagation();
+	let targets = new Set(selectedClips);
+	if (event.shiftKey || event.metaKey || event.ctrlKey) {
+		if (targets.has(target)) targets.delete(target);
+		else targets.add(target);
+	} else if (!targets.has(target) || mode !== "move")
+		targets = new Set([target]);
+	onSelectClips(targets);
+	if (!targets.has(target)) return;
+	const spans = groups.filter(
+		(group) => targets.has(group.target) && group.span,
+	);
+	const span = groups.find((group) => group.target === target)?.span;
+	if (!span) return;
+	scroller?.setPointerCapture(event.pointerId);
+	clipDrag = {
+		pointerId: event.pointerId,
+		startX: event.clientX,
+		mode,
+		target,
+		targets: [...targets],
+		anchor: mode === "end" ? span.end : span.start,
+		earliest: Math.min(...spans.map((group) => group.span?.start ?? 0)),
+		candidates: clipEdges(new Set(targets)),
+		moved: false,
+		delta: 0,
+	};
+}
+
+function clipSpan(group: BoardTrackGroup) {
+	const span = group.span;
+	const drag = clipDrag;
+	if (!span || !drag?.moved) return span;
+	if (drag.mode === "move")
+		return drag.targets.includes(group.target)
+			? { start: span.start + drag.delta, end: span.end + drag.delta }
+			: span;
+	if (drag.target !== group.target) return span;
+	return drag.mode === "start"
+		? {
+				start: Math.min(span.start + drag.delta, span.end - BOARD_SPAN_MIN_MS),
+				end: span.end,
+			}
+		: {
+				start: span.start,
+				end: Math.max(span.end + drag.delta, span.start + BOARD_SPAN_MIN_MS),
+			};
+}
+
+const shownRange = $derived(
+	rangeDrag
+		? {
+				from: Math.min(rangeDrag.from, rangeDrag.to),
+				to: Math.max(rangeDrag.from, rangeDrag.to),
+			}
+		: selection?.type === "range"
+			? selection
+			: null,
+);
 
 function snap(at: number, event: PointerEvent, candidates: number[]) {
 	return event.altKey ? at : snapBoardTime(at, candidates, SNAP_PX / scale);
@@ -202,6 +327,13 @@ function pressMarker(event: PointerEvent, at: number) {
 function pressRuler(event: PointerEvent) {
 	if (event.button !== 0) return;
 	scroller?.setPointerCapture(event.pointerId);
+	if (event.shiftKey) {
+		const at = Math.round(
+			snap(timeAt(event.clientX), event, allTimes(new Set())),
+		);
+		rangeDrag = { pointerId: event.pointerId, from: at, to: at };
+		return;
+	}
 	scrubbing = { pointerId: event.pointerId, candidates: allTimes(new Set()) };
 	onSeek(snap(timeAt(event.clientX), event, scrubbing.candidates));
 }
@@ -222,7 +354,25 @@ function pressLane(event: PointerEvent) {
 }
 
 function move(event: PointerEvent) {
-	if (keyDrag?.pointerId === event.pointerId) {
+	if (clipDrag?.pointerId === event.pointerId) {
+		const dx = event.clientX - clipDrag.startX;
+		if (!clipDrag.moved && Math.abs(dx) < DRAG_PX) return;
+		clipDrag.moved = true;
+		const target = snap(
+			clipDrag.anchor + dx / scale,
+			event,
+			clipDrag.candidates,
+		);
+		clipDrag.delta = Math.round(
+			clipDrag.mode === "move"
+				? Math.max(target - clipDrag.anchor, -clipDrag.earliest)
+				: Math.max(0, target) - clipDrag.anchor,
+		);
+	} else if (rangeDrag?.pointerId === event.pointerId) {
+		rangeDrag.to = Math.round(
+			snap(timeAt(event.clientX), event, allTimes(new Set())),
+		);
+	} else if (keyDrag?.pointerId === event.pointerId) {
 		const dx = event.clientX - keyDrag.startX;
 		if (!keyDrag.moved && Math.abs(dx) < DRAG_PX) return;
 		keyDrag.moved = true;
@@ -253,7 +403,19 @@ function move(event: PointerEvent) {
 }
 
 function release(event: PointerEvent) {
-	if (keyDrag?.pointerId === event.pointerId) {
+	if (clipDrag?.pointerId === event.pointerId) {
+		const drag = clipDrag;
+		clipDrag = null;
+		if (!drag.moved || drag.delta === 0) return;
+		if (drag.mode === "move") onShiftClips(drag.targets, drag.delta);
+		else onTrimClip(drag.target, drag.mode, drag.anchor + drag.delta);
+	} else if (rangeDrag?.pointerId === event.pointerId) {
+		const drag = rangeDrag;
+		rangeDrag = null;
+		const from = Math.min(drag.from, drag.to);
+		const to = Math.max(drag.from, drag.to);
+		onSelect(to > from ? { type: "range", from, to } : null);
+	} else if (keyDrag?.pointerId === event.pointerId) {
 		const drag = keyDrag;
 		keyDrag = null;
 		if (drag.moved && drag.delta !== 0) onMoveKeys(drag.refs, drag.delta);
@@ -291,6 +453,8 @@ function release(event: PointerEvent) {
 }
 
 function cancel(event: PointerEvent) {
+	if (clipDrag?.pointerId === event.pointerId) clipDrag = null;
+	if (rangeDrag?.pointerId === event.pointerId) rangeDrag = null;
 	if (keyDrag?.pointerId === event.pointerId) keyDrag = null;
 	if (markerDrag?.pointerId === event.pointerId) markerDrag = null;
 	if (marquee?.pointerId === event.pointerId) marquee = null;
@@ -408,7 +572,7 @@ function segmentSelected(trackId: string, keyframe: BoardKeyframe) {
 	role="presentation"
 	onscroll={(event) => { scrollTop = event.currentTarget.scrollTop; }}
 	class="lanes"
-	class:lanes--dragging={keyDrag?.moved}
+	class:lanes--dragging={keyDrag?.moved || clipDrag?.moved}
 	style:--pad="{PAD}px"
 	style:--scale={scale}
 	style:--time={time}
@@ -524,6 +688,7 @@ function segmentSelected(trackId: string, keyframe: BoardKeyframe) {
 				{@const open = isOpen(group.target)}
 				{@const Icon = rowIcon(group)}
 				{@const label = boardGroupLabel(group, { locale })}
+				{@const span = clipSpan(group)}
 				<div class="row row--group" class:row--camera={group.kind === "camera"}>
 					<div class="label">
 						<button type="button" class="chevron" class:chevron--open={open} aria-expanded={open} aria-label={label} onclick={() => onToggleGroup(group.target)}>
@@ -534,8 +699,26 @@ function segmentSelected(trackId: string, keyframe: BoardKeyframe) {
 					</div>
 					<div class="lane" role="presentation" onpointerdown={pressLane}>
 						<div class="lane-line"></div>
-						{#if group.kind === "animation" && group.times.length > 1}
-							<div class="clip" style:--from={group.times[0]} style:--to={group.times.at(-1)}>{label}</div>
+						{#if span}
+							<div
+								class="clip"
+								class:clip--animation={group.kind === "animation"}
+								class:clip--audio={group.itemType === "audio"}
+								class:clip--selected={selectedClips.has(group.target)}
+								style:--from={span.start}
+								style:--to={span.end}
+								style:--cover={group.cover ? `url("${group.cover}")` : undefined}
+								role="button"
+								tabindex="-1"
+								title="{label} · {formatBoardTime(span.start)}–{formatBoardTime(span.end)}"
+								aria-label={label}
+								aria-pressed={selectedClips.has(group.target)}
+								onpointerdown={(event) => pressClip(event, group.target, "move")}
+							>
+								<span class="clip-label">{label}</span>
+								<span class="clip-edge clip-edge--start" role="presentation" onpointerdown={(event) => pressClip(event, group.target, "start")}></span>
+								<span class="clip-edge clip-edge--end" role="presentation" onpointerdown={(event) => pressClip(event, group.target, "end")}></span>
+							</div>
 						{/if}
 						{#if !open}
 							{#each group.times as at (at)}
@@ -548,6 +731,12 @@ function segmentSelected(trackId: string, keyframe: BoardKeyframe) {
 		{/each}
 		<div style:height="{visible.after * rowHeight}px"></div>
 
+		{#if shownRange}
+			<div class="range" style:--from={shownRange.from} style:--to={shownRange.to} aria-hidden="true"></div>
+		{/if}
+		{#if dropAt !== null}
+			<div class="drop" style:--at={dropAt} aria-hidden="true"></div>
+		{/if}
 		<div class="playhead" aria-hidden="true"></div>
 		{#if marquee?.moved}
 			<div
@@ -727,19 +916,70 @@ function segmentSelected(trackId: string, keyframe: BoardKeyframe) {
 
 	.clip {
 		position: absolute;
-		top: 4px;
-		bottom: 4px;
+		top: 3px;
+		bottom: 3px;
 		left: calc(var(--pad) + var(--from) * var(--scale) * 1px);
-		width: calc((var(--to) - var(--from)) * var(--scale) * 1px);
+		z-index: 1;
+		display: flex;
+		align-items: center;
+		width: max(4px, calc((var(--to) - var(--from)) * var(--scale) * 1px));
 		overflow: hidden;
+		border: 1px solid color-mix(in srgb, var(--text-secondary) 35%, transparent);
 		border-radius: 4px;
-		background: color-mix(in srgb, var(--brand) 18%, transparent);
-		padding: 1px 6px;
-		color: var(--brand-muted-fg);
+		background: var(--cover, none) left center / auto 100% repeat-x, color-mix(in srgb, var(--text-secondary) 16%, var(--bg-elevated));
+		color: var(--text-primary);
+		cursor: grab;
+		touch-action: none;
+	}
+	.clip--animation { background-color: color-mix(in srgb, var(--brand) 18%, var(--bg-elevated)); color: var(--brand-muted-fg); }
+	.clip--audio { background-color: color-mix(in srgb, var(--success-500) 20%, var(--bg-elevated)); }
+	.clip--selected { border-color: var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+	.lanes--dragging .clip { cursor: grabbing; }
+	.clip-label {
+		min-width: 0;
+		overflow: hidden;
+		margin: 0 8px;
+		border-radius: 3px;
+		background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+		padding: 0 4px;
 		font-size: 10px;
+		line-height: 14px;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		pointer-events: none;
+	}
+	.clip-edge {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		width: 7px;
+		cursor: ew-resize;
+	}
+	.clip-edge--start { left: 0; }
+	.clip-edge--end { right: 0; }
+	.clip-edge:hover,
+	.clip--selected .clip-edge { background: color-mix(in srgb, var(--brand) 55%, transparent); }
+
+	.range,
+	.drop {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		z-index: 2;
+		pointer-events: none;
+	}
+	.range {
+		left: calc(var(--tree) + var(--pad) + var(--from) * var(--scale) * 1px);
+		width: calc((var(--to) - var(--from)) * var(--scale) * 1px);
+		background: color-mix(in srgb, var(--brand) 12%, transparent);
+		box-shadow: inset 1px 0 var(--brand), inset -1px 0 var(--brand);
+	}
+	.drop {
+		left: calc(var(--tree) + var(--pad) + var(--at) * var(--scale) * 1px);
+		width: 2px;
+		translate: -1px 0;
+		background: var(--brand);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 25%, transparent);
 	}
 
 	.segment {
@@ -830,6 +1070,7 @@ function segmentSelected(trackId: string, keyframe: BoardKeyframe) {
 		.row { height: 34px; }
 		.row--ruler { height: 38px; }
 		.key { width: 13px; height: 13px; }
+		.clip-edge { width: 12px; }
 		.chevron, .key-toggle, .zoom-key { width: 28px; height: 28px; }
 	}
 

@@ -466,6 +466,13 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		deleteAnimation: animation.deleteAnimation,
 		createAnimation: animation.createAnimation,
 		createSequence: animation.createSequence,
+		placeOnTimeline: animation.placeOnTimeline,
+		shiftOnTimeline: animation.shiftOnTimeline,
+		trimOnTimeline: animation.trimOnTimeline,
+		removeFromTimeline: animation.removeFromTimeline,
+		splitAtPlayhead: animation.splitAtPlayhead,
+		insertTime: animation.insertTime,
+		removeTime: animation.removeTime,
 
 		pointerDown: interaction.pointerDown,
 		pointerMove: interaction.pointerMove,

@@ -28,11 +28,13 @@ shared runtime used by native items and custom content.
 ## Items
 
 Common fields: `type`, `parent`, `z`, `position`, `size`, `rotation` (degrees),
-`scale`, `origin` (normalized transform origin, default center), `opacity`,
+`scale`, `origin` (normalized transform origin, default center), `opacity`, `visible`,
 `style`, `props`, `locked`, `metadata`, optional `script` (`src`, `params`, `targets`, `seed`, `enabled`).
 
 - `position` is relative to `parent`; a root item is in world space.
-- Children inherit the parent's transform and opacity. Only `frame` items can be parents.
+- Children inherit the parent's transform, opacity and visibility. Only `frame` items can be parents.
+- `visible: false` hides an item and cannot be hit; key it on a timeline to show an item
+  only during its clip (see [Clips](#clips)).
 - Draw points and unbound arrow endpoints use item-local coordinates, transformed
   by the item's position and parent frame. Bound endpoints follow the referenced item.
   Shape paths are fitted to the shape's size.
@@ -59,7 +61,7 @@ Common fields: `type`, `parent`, `z`, `position`, `size`, `rotation` (degrees),
 | `shape` | `geometry` (`rectangle` `rounded` `ellipse` `diamond` `triangle` `path`), `path`, `text`, `fontSize`, `align` |
 | `draw` | `points` (`{x, y, p}` relative to `position`) |
 | `arrow` | `start`, `end` (a point, or `{ "item": id, "anchor"?, "port"? }`), `route`, `bend`, `waypoints`, `arrowStart`, `arrowEnd`, `label`, `fontSize`, `relation` |
-| `image` `video` `audio` `file` | `src` (public HTTP(S) URL or relative Space file path), `crop` (image: `{x, y, w, h}` as 0–1 fractions of the source), `snapshot` (cached media facts), `origin` (media: `{ taskRunId, artifactId }` of the run that produced it) |
+| `image` `video` `audio` `file` | `src` (public HTTP(S) URL or relative Space file path), `crop` (image: `{x, y, w, h}` as 0–1 fractions of the source), `snapshot` (cached media facts), `origin` (media: `{ taskRunId, artifactId }` of the run that produced it); video and audio: `time` (playback position in ms) and `volume` (0–1) |
 | `task` | `taskRunId`, `snapshot` (server-maintained; see [Tasks on Boards](#tasks-on-boards)) |
 | `session` | `sessionId`, `snapshot` (server-maintained; see [Sessions on Boards](#sessions-on-boards)) |
 | `effect` | `kind` (`particles` `trail` `impact` `flash` `glow`) and its parameters; `shape` (`circle` `square` `star` `heart` `spark`) and `colors` for particles and impacts |
@@ -305,6 +307,40 @@ selecting the segment between two keyframes edits its easing, including a
 `cubic-bezier` curve. Double-click the ruler to add a marker. Animation settings set
 the name, duration, delay, play mode, loop and end, and **Key current view** records
 the camera. Viewers get a playback bar instead of the timeline.
+
+### Clips
+
+A clip is any target on a timeline for a span: an item, a frame with its children, or a
+nested animation. Its span is a `visible` step track (`false` before, `true` from its
+start, `false` from its end); a video, audio or animation also gets a play track
+(`props.time` or `time`) whose slope is its speed. Nothing else is special: transitions
+are `opacity` or `style.filter` tracks, titles are text items, fades are `props.volume`
+tracks, and layering is `z`. A video or audio plays, and sounds, while it is shown and its
+time moves forward between 0.25× and 4×; elsewhere it holds the frame at its time.
+
+```sh
+cohub boards place cut.board --animation cut --targets intro,talk,outro \
+  | cohub boards apply cut.board -i -
+cohub boards place cut.board --animation cut --targets music --duration 30s --from 12s
+```
+
+`place` prints a patch: targets go end to end from `--at` (`--together` starts them all
+there), media play from `--from` at `--rate`, and a target already on the timeline moves.
+It reads the length of Space media when the Board does not know it; otherwise pass
+`--duration`. Exports draw each video's frame at its time and mix the sound of every
+playing clip with its speed and volume; both need ffmpeg.
+
+In the web app, with the timeline open, each clip is a bar on its item's row. Drag
+selected items from the canvas, or files and generation results from elsewhere, onto
+the timeline to place them where they land; hold Shift to start a selection together,
+and new items land on the canvas where the timeline shows something then. **Add to
+timeline** places the selection at the playhead. Drag a bar to move its clip, its edges
+to trim it (media keep their speed, so the in or out point moves), press S to split it
+at the playhead into a copy for the part after, and Delete to take it off the timeline.
+Shift-drag the ruler to select a range; Delete removes that time and closes the gap, and
+**More** inserts time. Hidden items stay faintly visible while selected, so they can
+be edited at any playhead. Video and audio play on the canvas; when a browser holds
+back sound, **Turn on sound** lets it play.
 
 ### Compose chapters
 

@@ -15,6 +15,7 @@ export type BoardGpuFrame = {
   quality?: number;
   withImages: boolean;
   imageMemory: number;
+  assetKeys?: Record<string, string>;
 };
 export type BoardGpuResult = {
   data: string;

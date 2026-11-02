@@ -20,7 +20,8 @@ export function mediaPlayBadgeVisible(
 	options: { materialized: boolean; hasVideoPreview: boolean },
 ): boolean {
 	if (!options.materialized) return false;
-	if (item.type === "video" || item.type === "audio") return true;
+	if (item.type === "video") return item.props.time === undefined;
+	if (item.type === "audio") return true;
 	if (isBoardModelItem(item)) return boardCardDetailed(zoom);
 	if (item.type !== "task" || !boardCardDetailed(zoom)) return false;
 	const artifact = featuredTaskArtifact(item.props.snapshot.artifacts);

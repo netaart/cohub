@@ -37,12 +37,15 @@ import {
 import type { Graphics } from "pixi.js";
 import { onDestroy, onMount, untrack } from "svelte";
 import { MediaQuery } from "svelte/reactivity";
-import { boardAppFace, boardAppMeta } from "$lib/board/board-app";
+import { boardAppMeta } from "$lib/board/board-app";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
 import type { BoardAwarenessController } from "$lib/board/board-awareness";
 import { drawAwarenessOverlay } from "$lib/board/board-awareness-overlay";
-import { reactionBurst } from "$lib/board/board-reactions";
-import { readBoardResourceDrop } from "$lib/board/board-drop";
+import {
+	type BoardResourceDrop,
+	boardPointerResources,
+	readBoardResourceDrop,
+} from "$lib/board/board-drop";
 import {
 	fileAvailability,
 	filePreviewVersion,
@@ -54,6 +57,7 @@ import type { BoardStageExportBridge } from "$lib/board/board-image-export";
 import { createBoardLiveSessions } from "$lib/board/board-live-sessions.svelte";
 import { createBoardLiveTasks } from "$lib/board/board-live-tasks";
 import { opensInPlace } from "$lib/board/board-media-playback";
+import { reactionBurst } from "$lib/board/board-reactions";
 import { boardSessionDropSnapshot } from "$lib/board/board-session";
 import {
 	type BoardThemeSnapshot,
@@ -66,10 +70,7 @@ import {
 	type CustomThemeChangedDetail,
 } from "$lib/custom-theme/events";
 import { pointerDropZone } from "$lib/drag/pointer-drag.svelte";
-import {
-	type BoardDropItem,
-	toBoardDropItems,
-} from "$lib/drag/pointer-drag-core";
+import { toBoardDropItems } from "$lib/drag/pointer-drag-core";
 import { haptic } from "$lib/haptics";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -88,6 +89,7 @@ const {
 	awarenessVersion,
 	views = [],
 	onPointerPresence,
+	onPointer,
 	onSurfaceChange,
 	onOpenFile,
 	onAddLinks,
@@ -120,6 +122,10 @@ const {
 			pointerType: "mouse" | "pen" | "touch";
 		} | null,
 	) => void;
+	onPointer?: (
+		phase: "down" | "move" | "up" | "leave",
+		event: PointerEvent,
+	) => boolean | undefined;
 	onSurfaceChange?: (size: { width: number; height: number }) => void;
 	onOpenFile?: (path: string) => void | Promise<void>;
 	onAddLinks?: (urls: string[], at: WorldPoint) => void;
@@ -385,12 +391,13 @@ function handlePointer(
 	phase: "down" | "move" | "up" | "leave",
 	event: PointerEvent,
 	input: BoardPointerEvent,
-): undefined {
+): boolean | undefined {
 	const gone =
 		phase === "leave" ||
 		(phase === "up" &&
 			(event.type === "pointercancel" || event.pointerType !== "mouse"));
 	presence(event, gone ? null : input);
+	return onPointer?.(phase, event);
 }
 
 function handleDoubleClick(item: BoardSceneItem | null): boolean {
@@ -409,79 +416,53 @@ function handleDoubleClick(item: BoardSceneItem | null): boolean {
 	return false;
 }
 
-function spread(clientX: number, clientY: number, index: number): WorldPoint {
-	const origin = stage?.toWorld(clientX, clientY) ?? worldPoint(0, 0);
-	return worldPoint(origin.x + index * 36, origin.y);
-}
-
-function dropFiles(clientX: number, clientY: number, files: BoardDropItem[]) {
-	const created = files.map((entry, index) => {
-		const at = spread(clientX, clientY, index);
-		return createMediaBoardItem(entry.path, at.x, at.y, entry.snapshot);
-	});
-	if (created.length === 0) return;
-	editor.addItems(created, { select: true });
-	void enrichFileCards(
-		created.flatMap(({ id, item }) =>
-			item.type === "file" ? [{ id, path: item.props.src }] : [],
-		),
-	);
-}
-
-function dropApps(
-	clientX: number,
-	clientY: number,
-	apps: Parameters<BoardEditor["addApp"]>[0][],
-) {
-	if (apps.length === 0) return;
-	editor.setSelection(
-		apps.map((app, index) =>
-			editor.addApp(app, spread(clientX, clientY, index)),
-		),
-	);
-}
-
-function dropSessions(
-	clientX: number,
-	clientY: number,
-	sessions: Array<{ sessionId: string; title?: string }>,
-) {
-	const ids = sessions.flatMap(({ sessionId, title }, index) => {
+export function addResources(
+	drop: BoardResourceDrop,
+	at: WorldPoint,
+): string[] {
+	const { files, tasks, sessions, apps, urls } = drop;
+	const ids: string[] = [];
+	const next = () => worldPoint(at.x + ids.length * 36, at.y);
+	for (const { sessionId, title } of sessions) {
 		const record = sessionStore.get(sessionId);
-		if (record && record.spaceId !== spaceId) return [];
-		return [
+		if (record && record.spaceId !== spaceId) continue;
+		ids.push(
 			editor.addSession(
 				sessionId,
 				boardSessionDropSnapshot(record, title),
-				spread(clientX, clientY, index),
+				next(),
 			),
-		];
+		);
+	}
+	for (const task of tasks)
+		ids.push(editor.addTask(task.taskRunId, task.snapshot, next()));
+	const created = files.map((entry, index) => {
+		const point = worldPoint(next().x + index * 36, at.y);
+		return createMediaBoardItem(entry.path, point.x, point.y, entry.snapshot);
 	});
+	if (created.length) {
+		editor.addItems(created);
+		ids.push(...created.map(({ id }) => id));
+		void enrichFileCards(
+			created.flatMap(({ id, item }) =>
+				item.type === "file" ? [{ id, path: item.props.src }] : [],
+			),
+		);
+	}
+	for (const app of apps) ids.push(editor.addApp(app, next()));
+	if (urls.length) onAddLinks?.(urls, next());
 	if (ids.length) editor.setSelection(ids);
+	return ids;
 }
 
 function handleDrop(event: DragEvent) {
 	event.preventDefault();
 	dropActive = false;
-	if (!editable) return;
-	const { files, tasks, sessions, apps, urls } = readBoardResourceDrop(
-		event.dataTransfer,
+	if (!editable || !stage) return;
+	addResources(
+		readBoardResourceDrop(event.dataTransfer),
+		stage.toWorld(event.clientX, event.clientY),
 	);
-	const { clientX, clientY } = event;
-	dropSessions(clientX, clientY, sessions);
-	if (tasks.length > 0)
-		editor.setSelection(
-			tasks.map((task, index) =>
-				editor.addTask(
-					task.taskRunId,
-					task.snapshot,
-					spread(clientX, clientY, index),
-				),
-			),
-		);
-	dropFiles(clientX, clientY, files);
-	dropApps(clientX, clientY, apps);
-	if (urls.length) onAddLinks?.(urls, spread(clientX, clientY, 0));
 }
 
 onMount(() => {
@@ -621,12 +602,7 @@ onDestroy(() => {
 			return { label: m.board_add_to_board({}, { locale }), effect: "copy" };
 		},
 		drop: (payload, point) => {
-			if (!editable) return;
-			const apps = payload.items
-				.filter((item) => item.type === "app" && item.appId && item.appRef && item.appUrl)
-				.map((item) => ({ appId: item.appId as string, ref: item.appRef as string, url: item.appUrl as string, name: item.name, icon: item.icon, ...boardAppFace(item) }));
-			dropApps(point.clientX, point.clientY, apps);
-			dropFiles(point.clientX, point.clientY, toBoardDropItems(payload));
+			if (editable && stage) addResources(boardPointerResources(payload), stage.toWorld(point.clientX, point.clientY));
 		},
 	}}
 	ondragover={(event) => {

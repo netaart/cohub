@@ -13,6 +13,7 @@ import {
 	type BoardShapeColors,
 	type BoardViewport,
 	boardTextureEdge,
+	boardTimedMedia,
 	createBoardAnimationSampler,
 	resolveBoardAnimationCamera,
 	featuredTaskArtifact,
@@ -71,6 +72,7 @@ import { scheduleBoardIdle } from "./idle.js";
 import { toBoardPointerEvent } from "./pointer.js";
 import { createBoardPointerGestures } from "./pointer-gestures.js";
 import { createBoardScriptController } from "./script-controller.js";
+import { type BoardMediaClock, createBoardMediaClock } from "./media-clock.js";
 import { type BoardStageShaders, createBoardStageShaders } from "./shaders.js";
 import { type BoardLiveStroke, createBoardScene } from "./scene.js";
 import { drawBoardFrameMask, drawBoardOverlay } from "./overlay.js";
@@ -164,6 +166,8 @@ export type BoardStage = {
 	invalidate(options?: { cards?: boolean; items?: Iterable<string> }): void;
 	isMaterialized(id: string): boolean;
 	toWorld(clientX: number, clientY: number): WorldPoint;
+	/** Video and audio a timeline plays; `blocked` while the browser holds back sound until an interaction. */
+	readonly media: Pick<BoardMediaClock, "blocked" | "unlock" | "subscribe">;
 	/** Play a short particle burst at a world point, such as a reaction; never written to the Board. */
 	burst(burst: BoardBurst): void;
 	stats(): BoardStageStats;
@@ -265,6 +269,22 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	const clock = createBoardFrameClock();
 	const device = defaultBoardDeviceBudget();
 	const currentLod = () => options.lod?.() ?? device.lod;
+	const media = createBoardMediaClock({
+		source: options.source,
+		limit: device.media,
+		onFrame: (id, changed) => {
+			if (changed) {
+				staleIds.add(id);
+				scheduleTick();
+			} else scheduleRender();
+		},
+	});
+	let mediaIds: { items: BoardEditor["document"]["items"]; ids: string[] } | null = null;
+	function timedMediaIds(): string[] {
+		const { items } = editor.document;
+		if (mediaIds?.items !== items) mediaIds = { items, ids: Object.keys(items).filter((id) => items[id]?.type === "video" || items[id]?.type === "audio") };
+		return mediaIds.ids;
+	}
 	const frameTimes = new Float32Array(FRAME_SAMPLES);
 	let frameCount = 0;
 	let frameCamera: BoardViewport | null = null;
@@ -471,6 +491,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			},
 			releaseTexture: (key) => assets.release(key),
 			hoveredHit,
+			mediaTexture: (id) => media.texture(id),
 		};
 	}
 
@@ -978,6 +999,12 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			toned.clear();
 		}
 		textResolution.update(textureScale());
+		media.sync({
+			media: boardTimedMedia(renderScene, timedMediaIds()),
+			now: performance.now(),
+			scrubbing: editor.playhead !== null,
+			onScreen: (id) => (ids ? ids.has(id) : true),
+		});
 		const context = renderContext(current, renderScene, frame.time);
 		lastContext = context;
 		if (animationId && effectSampler) {
@@ -1173,8 +1200,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (script === "capture") return;
 		longPress.move(event);
 		taps.move(event);
+		if (options.onPointer?.("move", event, input) === false) return autoPan.stop();
 		autoPan.move(event);
-		if (options.onPointer?.("move", event, input) === false || script === "tap") return;
+		if (script === "tap") return;
 		if (keyPress?.input.pointerId === event.pointerId) {
 			const { press } = keyPress;
 			if (Math.hypot(event.clientX - press.clientX, event.clientY - press.clientY) <= boardDragSlop(event.pointerType)) return;
@@ -1190,7 +1218,11 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (script === "capture") return;
 		longPress.end(event);
 		autoPan.stop();
-		if (options.onPointer?.("up", event, input) === false) return;
+		if (options.onPointer?.("up", event, input) === false) {
+			held = null;
+			taps.cancel();
+			return settlePointer(event);
+		}
 		if (script) {
 			if (script === "click" && event.pointerType !== "mouse") ghostClicks.arm();
 			taps.cancel();
@@ -1408,6 +1440,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 				scripts.flush();
 				cancelFrames();
 				stopPrefetch();
+				media.pause();
 				return;
 			}
 			player.reset();
@@ -1439,6 +1472,13 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			};
 		},
 		toWorld: (clientX, clientY) => pointToWorld(localPoint(clientX, clientY), renderCamera()),
+		media: {
+			get blocked() {
+				return media.blocked;
+			},
+			unlock: () => media.unlock(),
+			subscribe: (listener) => media.subscribe(listener),
+		},
 		burst(burst) {
 			bursts?.add(burst, performance.now(), options.reducedMotion?.() ?? false);
 			scheduleRender();
@@ -1471,6 +1511,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			scene?.destroy(renderContext(theme(), editor.scene, 0));
 			scene = null;
 			scripts.destroy();
+			media.destroy();
 			backdrop?.destroy();
 			backdrop = null;
 			atmosphere = null;

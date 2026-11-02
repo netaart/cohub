@@ -54,6 +54,7 @@ import {
 	Settings2,
 	Square,
 	TriangleAlert,
+	VolumeX,
 } from "lucide-svelte";
 import { onDestroy, onMount, untrack } from "svelte";
 import { SvelteSet } from "svelte/reactivity";
@@ -70,6 +71,7 @@ import {
 	createBoardAwarenessController,
 	isBoardScriptLeader,
 } from "$lib/board/board-awareness";
+import { readBoardResourceDrop } from "$lib/board/board-drop";
 import {
 	generationPromptFromContent,
 	pendingGenerationTaskSnapshot,
@@ -97,6 +99,7 @@ import {
 	watchBoardScriptStatus,
 } from "$lib/board/board-script-status";
 import { createBoardSessionActions } from "$lib/board/board-session-actions.svelte";
+import { boardTimelineLanding } from "$lib/board/board-timeline";
 import {
 	boardViewKey,
 	readBoardView,
@@ -175,6 +178,54 @@ const {
 const locale = $derived(getLocale());
 
 let scriptStage = $state.raw<BoardStageController | null>(null);
+let stageView = $state<ReturnType<typeof BoardStage> | null>(null);
+let dock = $state<ReturnType<typeof BoardAnimationDock> | null>(null);
+let soundBlocked = $state(false);
+
+$effect(() => {
+	const media = scriptStage?.media;
+	if (!media) return;
+	soundBlocked = media.blocked;
+	return media.subscribe(() => {
+		soundBlocked = media.blocked;
+	});
+});
+
+function dragToTimeline(
+	phase: "down" | "move" | "up" | "leave",
+	event: PointerEvent,
+) {
+	const interaction = editor.interaction;
+	if (!dock || interaction.type !== "translating" || !interaction.moved) {
+		dock?.showDrop(null);
+		return undefined;
+	}
+	const at =
+		phase === "leave"
+			? null
+			: dock.dropTime(event.clientX, event.clientY, event.altKey);
+	dock.showDrop(phase === "move" ? at : null);
+	if (phase === "move") return at === null ? undefined : false;
+	if (phase !== "up" || at === null || event.type === "pointercancel")
+		return undefined;
+	const ids = [...editor.selection];
+	editor.cancelPointerInteraction();
+	dock.place(ids, at, event.shiftKey);
+	return false;
+}
+
+function dropOnTimeline(data: DataTransfer, at: number) {
+	const animation = editor.playhead
+		? editor.animations[editor.playhead.animationId]
+		: undefined;
+	const landing =
+		(animation &&
+			boardTimelineLanding(editor.document, animation, editor.items, at)) ??
+		editor.viewCenter();
+	const ids =
+		stageView?.addResources(readBoardResourceDrop(data), landing) ?? [];
+	dock?.place(ids, at);
+}
 // Mode and scope are fixed for a Board's lifetime: writes need `edit`, Space services need a Space.
 const editable = untrack(() => mode === "edit");
 const spaceId = untrack(() => (scope.kind === "space" ? scope.spaceId : null));
@@ -1222,6 +1273,12 @@ onDestroy(() => {
 		role="application"
 		use:blockPageZoom
 	>
+		{#if soundBlocked && !presenting}
+			<button type="button" class="board-sound" onclick={() => scriptStage?.media.unlock()}>
+				<VolumeX class="h-3.5 w-3.5" />
+				{m.board_sound_enable({}, { locale })}
+			</button>
+		{/if}
 		{#if notice}
 			<div class="board-notice" class:board-notice--error={notice.error} role="status" aria-live="polite">
 				{notice.text}
@@ -1229,6 +1286,8 @@ onDestroy(() => {
 		{/if}
 
 		<BoardStage
+			bind:this={stageView}
+			onPointer={dragToTimeline}
 			onStageReady={(stage) => {
 				scriptStage = stage;
 				onStageReady?.(stage);
@@ -1459,6 +1518,8 @@ onDestroy(() => {
 
 	{#if animationOpen && editable && !presenting}
 		<BoardAnimationDock
+			bind:this={dock}
+			onDropResources={dropOnTimeline}
 			{editor}
 			{isMobile}
 			playback={activePlayback}
@@ -1534,6 +1595,27 @@ onDestroy(() => {
 		font-size: 11px;
 		box-shadow: 0 8px 20px color-mix(in srgb, var(--overlay-scrim-strong) 12%, transparent);
 	}
+
+	.board-sound {
+		position: absolute;
+		bottom: 16px;
+		left: 50%;
+		z-index: 32;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		height: 32px;
+		transform: translateX(-50%);
+		border: 1px solid var(--border-subtle);
+		border-radius: 999px;
+		background: var(--bg-elevated);
+		padding: 0 14px;
+		color: var(--text-primary);
+		font-size: 12px;
+		font-weight: 500;
+		box-shadow: 0 8px 20px color-mix(in srgb, var(--overlay-scrim-strong) 12%, transparent);
+	}
+	.board-sound:hover { background: var(--bg-hover); }
 
 	.board-notice--error {
 		border-color: var(--color-error-soft);

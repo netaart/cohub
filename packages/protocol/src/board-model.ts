@@ -171,6 +171,7 @@ const itemEnvelope = {
 	scale: z.union([finite, BoardVec2Schema]).default(1),
 	origin: BoardVec2Schema.default({ x: 0.5, y: 0.5 }).describe("Rotation and scale origin as fractions of the size."),
 	opacity: ratio.default(1),
+	visible: z.boolean().optional().describe("false hides the item and its children; key it on a timeline to show the item only for a span."),
 	style: BoardStyleSchema.default({}),
 	locked: z.boolean().optional(),
 	metadata: z.record(z.string(), z.unknown()).optional(),
@@ -350,7 +351,8 @@ export type BoardMediaOrigin = z.infer<typeof BoardMediaOriginSchema>;
 const mediaProps = { ...fileProps, origin: BoardMediaOriginSchema.optional() };
 const timedFileProps = {
 	...mediaProps,
-	time: nonNegative.optional().describe("Playback position in milliseconds; animate props.time to play it on a timeline."),
+	time: nonNegative.optional().describe("Playback position in milliseconds; animate props.time to play it on a timeline. It sounds while its time moves forward."),
+	volume: ratio.optional().describe("Loudness from 0 to 1; defaults to 1. Animate it to fade."),
 };
 
 export const BoardCropSchema = z

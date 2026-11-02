@@ -1,17 +1,21 @@
 import type {
 	BoardAnimation,
+	BoardDocument,
 	BoardItem,
 	BoardKeyframe,
-	BoardScript,
+	BoardTrack,
 } from "@cohub/protocol";
 import { BOARD_CAMERA_TARGET } from "@cohub/protocol";
 import {
+	type BoardSpan,
 	type BoardValueKind,
+	boardClipSpan,
 	getMediaResourceTitle,
 	listBoardProperties,
 	resolveBoardProperty,
 } from "@neta-art/cohub/board";
 import type { BoardKeyRef } from "@neta-art/cohub/board/editor";
+import { imageVariantUrl, videoFrameUrl } from "@neta-art/cohub/media";
 
 export type BoardTrackRow = {
 	key: string;
@@ -34,9 +38,13 @@ export type BoardTrackGroup = {
 	itemType: string | null;
 	rows: BoardTrackRow[];
 	times: number[];
+	span: BoardSpan | null;
+	cover: string | null;
 };
 
 const SUGGESTED = ["position", "rotation", "scale", "opacity"];
+const SUGGESTED_MEDIA = [...SUGGESTED, "props.volume"];
+const CLIP_PROPERTY = "visible";
 const ORDER = [
 	"position",
 	"size.width",
@@ -50,6 +58,8 @@ const ORDER = [
 	"focus",
 	"shake",
 	"time",
+	"props.time",
+	"props.volume",
 ];
 
 function propertyRank(property: string) {
@@ -84,27 +94,35 @@ export function boardItemLabel(item: BoardItem, fallback: string): string {
 	}
 }
 
+function clipCover(item: BoardItem): string | null {
+	if (item.type !== "video" && item.type !== "image") return null;
+	const { src } = item.props;
+	if (!/^https:/i.test(src)) return item.props.snapshot?.coverUrl ?? null;
+	return item.type === "video"
+		? (item.props.snapshot?.coverUrl ?? videoFrameUrl(src, 192))
+		: imageVariantUrl(src, 192);
+}
+
 function propertyKind(targetType: string, property: string): BoardValueKind {
 	const resolved = resolveBoardProperty(targetType, property);
 	return resolved.ok ? resolved.spec.kind : "discrete";
 }
 
 export function boardTrackGroups(input: {
-	items: Readonly<Record<string, BoardItem>>;
-	animations: Readonly<Record<string, BoardAnimation>>;
-	scripts?: Readonly<Record<string, BoardScript>>;
+	document: BoardDocument;
 	animation: BoardAnimation;
 	selection: readonly string[];
 	order: (id: string) => number;
 }): BoardTrackGroup[] {
-	const { items, animations, animation } = input;
+	const { document, animation } = input;
+	const { items, animations } = document;
 	const groups = new Map<string, BoardTrackGroup>();
 	const group = (target: string): BoardTrackGroup | null => {
 		const existing = groups.get(target);
 		if (existing) return existing;
 		const item = items[target];
 		const nested = animations[target];
-		const script = input.scripts?.[target];
+		const script = document.board.scripts?.[target];
 		if (target !== BOARD_CAMERA_TARGET && !item && !nested && !script)
 			return null;
 		const created: BoardTrackGroup = {
@@ -121,6 +139,8 @@ export function boardTrackGroups(input: {
 			itemType: item?.type ?? null,
 			rows: [],
 			times: [],
+			span: null,
+			cover: item ? clipCover(item) : null,
 		};
 		groups.set(target, created);
 		return created;
@@ -148,9 +168,20 @@ export function boardTrackGroups(input: {
 		return created;
 	};
 
+	const clips = new Map<string, { visible?: BoardTrack; play?: BoardTrack }>();
 	for (const [trackId, track] of Object.entries(animation.tracks)) {
 		const entry = group(track.target);
 		if (!entry) continue;
+		if (track.composite === "replace" && entry.kind !== "camera") {
+			const clip = clips.get(track.target) ?? {};
+			if (track.property === CLIP_PROPERTY) clip.visible ??= track;
+			else if (
+				track.property === (entry.kind === "animation" ? "time" : "props.time")
+			)
+				clip.play ??= track;
+			clips.set(track.target, clip);
+		}
+		if (track.property === CLIP_PROPERTY) continue;
 		const target = row(entry, track.property);
 		if (track.composite === "replace" && target.trackId === null) {
 			target.trackId = trackId;
@@ -168,11 +199,18 @@ export function boardTrackGroups(input: {
 		const available = new Set(
 			listBoardProperties(item.type).map((entry) => entry.property),
 		);
-		for (const property of SUGGESTED)
+		const suggested =
+			item.type === "video" || item.type === "audio"
+				? SUGGESTED_MEDIA
+				: SUGGESTED;
+		for (const property of suggested)
 			if (available.has(property)) row(entry, property);
 	}
 
 	for (const entry of groups.values()) {
+		const clip = clips.get(entry.target);
+		if (clip && (entry.kind === "item" || entry.kind === "animation"))
+			entry.span = boardClipSpan(clip, animation.duration);
 		entry.rows.sort(
 			(a, b) =>
 				propertyRank(a.property) - propertyRank(b.property) ||
@@ -331,4 +369,6 @@ export type BoardDockSelection =
 	| { type: "keys"; ids: ReadonlySet<string> }
 	| { type: "segment"; key: BoardKeyRef }
 	| { type: "marker"; at: number }
+	| { type: "clips"; targets: ReadonlySet<string> }
+	| { type: "range"; from: number; to: number }
 	| null;

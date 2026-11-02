@@ -20,6 +20,8 @@ const LABELS: Record<string, (locale: Locale) => string> = {
 	focus: (locale) => m.board_camera_focus({}, locale),
 	shake: (locale) => m.board_camera_shake({}, locale),
 	time: (locale) => m.board_prop_time({}, locale),
+	"props.time": (locale) => m.board_prop_time({}, locale),
+	"props.volume": (locale) => m.board_prop_volume({}, locale),
 };
 
 export function boardPropertyLabel(property: string, locale: Locale): string {

@@ -189,6 +189,22 @@ cohub boards path ship -i path.json > ship-track.json
 - `path` turns `{"points":[{"x":0,"y":0}, …],"duration":2000,"orient":true}` into a
   position track.
 
+### Clips and video editing
+
+A clip shows a target only for a span (a `visible` track) and plays video, audio or
+a nested animation (a `props.time` or `time` track whose slope is its speed). Media
+sound while shown and moving forward; `props.volume` fades them. Cut, trim and
+transition with ordinary tracks; titles are text items and layers are `z`.
+
+```bash
+cohub boards place <board> --animation cut --targets intro,talk,outro | cohub boards apply <board> -i -
+cohub boards place <board> --animation cut --targets music --at 0 --duration 30s --from 12s --together
+cohub boards export <board> --animation cut --at 0:30s:40ms --camera --size 1920x1080 -o /tmp/cut.mp4
+```
+
+`place` lays targets end to end, moves ones already placed, and prints a patch.
+Video exports draw each video at its time and mix every playing clip's sound.
+
 ## Check and export
 
 `-o` picks the format; a `--at` range with `%d` writes a frame sequence, and a video

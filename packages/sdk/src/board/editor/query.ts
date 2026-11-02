@@ -165,7 +165,7 @@ export function createQueryModule(ctx: EditorContext) {
 		ensureSpatial();
 		for (const id of spatial.idsAtPoint(point)) {
 			const item = state.scene.get(id);
-			if (!state.base.items[id] || item?.type !== "frame" || exclude?.has(id)) continue;
+			if (!state.base.items[id] || item?.type !== "frame" || exclude?.has(id) || !state.scene.shown(id)) continue;
 			if (registry.hitTest(item, point)) return item;
 		}
 		return null;
@@ -195,6 +195,7 @@ export function createQueryModule(ctx: EditorContext) {
 	}
 
 	function hitsItem(item: BoardSceneItem, point: WorldPoint): boolean {
+		if (!state.scene.shown(item.id) && !state.selection.includes(item.id)) return false;
 		if (item.type === "arrow") {
 			const resolved = resolveSceneArrow(item as SceneItem<BoardArrowItem>, state.scene);
 			return distanceToArrow(resolved, point) <= arrowHitRadius(item.style.strokeWidth) / Math.min(1, state.camera.zoom);
@@ -229,7 +230,7 @@ export function createQueryModule(ctx: EditorContext) {
 		let best = reach;
 		for (const id of spatial.idsInRect({ x: point.x - reach, y: point.y - reach, width: reach * 2, height: reach * 2 })) {
 			const item = state.scene.get(id);
-			if (!pickable(item, id)) continue;
+			if (!pickable(item, id) || !(state.scene.shown(id) || state.selection.includes(id))) continue;
 			const distance =
 				item.type === "arrow"
 					? distanceToArrow(resolveSceneArrow(item as SceneItem<BoardArrowItem>, state.scene), point) -
@@ -251,7 +252,7 @@ export function createQueryModule(ctx: EditorContext) {
 		const candidates = selection.length === 1 ? [...selection, ...nearby] : nearby;
 		for (const id of new Set(candidates)) {
 			const item = scene.get(id);
-			if (!item || !state.base.items[id] || isLocked(item)) continue;
+			if (!item || !state.base.items[id] || isLocked(item) || !scene.shown(id)) continue;
 			if (
 				item.type === "frame" &&
 				rectContainsPoint(frameLabelHitRect(item.frame, frameLabelSize), point)

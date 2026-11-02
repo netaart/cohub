@@ -7,11 +7,12 @@ import {
 	diffMergePatch,
 	listBoardProperties,
 	scaleVector,
-	createBoardEntityId,
+	findBoardKeyTrack,
+	newBoardTrackId,
 } from "../model/index.js";
 import { sameJson } from "../model/json.js";
 
-export { sameJson };
+export { findBoardKeyTrack, newBoardTrackId, sameJson };
 
 export function readPath(value: unknown, path: readonly string[]): unknown {
 	let current = value;
@@ -54,30 +55,6 @@ function unchanged(next: unknown, shown: unknown): boolean {
 const STRUCTURAL_KEYS = ["parent", "z", "locked", "metadata"] as const;
 
 export type BoardEditPlayhead = { animationId: string; time: number };
-
-export function newBoardTrackId(
-	tracks: Readonly<Record<string, BoardTrack>>,
-	target: string,
-	property: string,
-): string {
-	const id = `${target}-${property.replaceAll(".", "-")}`;
-	return id.length <= 160 && !Object.hasOwn(tracks, id)
-		? id
-		: createBoardEntityId();
-}
-
-export function findBoardKeyTrack(
-	tracks: Readonly<Record<string, BoardTrack>>,
-	target: string,
-	property: string,
-): [string, BoardTrack] | undefined {
-	return Object.entries(tracks).find(
-		([, track]) =>
-			track.target === target &&
-			track.property === property &&
-			track.composite === "replace",
-	);
-}
 
 function keyframe(
 	animations: Record<string, BoardAnimation>,

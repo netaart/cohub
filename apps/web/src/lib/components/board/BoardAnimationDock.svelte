@@ -29,6 +29,8 @@ import {
 	Ellipsis,
 	Pause,
 	Play,
+	Plus,
+	Scissors,
 	Settings2,
 	SkipBack,
 	SkipForward,
@@ -62,12 +64,14 @@ const {
 	playback,
 	isMobile = false,
 	onPlayback,
+	onDropResources,
 	onClose,
 }: {
 	editor: BoardEditor;
 	playback: BoardPlaybackSnapshot | null;
 	isMobile?: boolean;
 	onPlayback: (command: BoardPlaybackCommand) => unknown;
+	onDropResources?: (data: DataTransfer, at: number) => void;
 	onClose: () => void;
 } = $props();
 
@@ -90,6 +94,8 @@ let moreAnchor = $state<HTMLButtonElement | null>(null);
 let menu = $state<"picker" | "settings" | "more" | null>(null);
 let sequenceOpen = $state(false);
 let selection = $state.raw<BoardDockSelection>(null);
+let lanes = $state<ReturnType<typeof BoardAnimationLanes> | null>(null);
+let dropAt = $state<number | null>(null);
 const opened = new SvelteMap<string, boolean>();
 
 const order = $derived.by(() => {
@@ -102,9 +108,7 @@ const order = $derived.by(() => {
 const groups = $derived(
 	animation
 		? boardTrackGroups({
-				items: editor.document.items,
-				animations: editor.animations,
-				scripts: editor.settings.scripts,
+				document: editor.document,
 				animation,
 				selection: editor.selection,
 				order,
@@ -114,6 +118,21 @@ const groups = $derived(
 const extent = $derived(animation ? boardAnimationExtent(animation) : 1);
 const recordingTargets = $derived(
 	editor.recording ? new Set(editor.selection) : new Set<string>(),
+);
+const spans = $derived(
+	new Map(groups.flatMap((group) => (group.span ? [[group.target, group.span] as const] : []))),
+);
+const unplaced = $derived(
+	animation ? editor.selection.filter((id) => !spans.has(id)) : [],
+);
+const clipTargets = $derived(
+	selection?.type === "clips" ? [...selection.targets] : [],
+);
+const splitTargets = $derived(
+	(clipTargets.length ? clipTargets : editor.selection).filter((id) => {
+		const span = spans.get(id);
+		return span !== undefined && time > span.start && time < span.end;
+	}),
 );
 const manualCount = $derived(
 	Object.values(editor.animations).filter((entry) => entry.play === "manual")
@@ -177,6 +196,61 @@ function addMarker(at: number) {
 	selection = { type: "marker", at };
 }
 
+export function dropTime(clientX: number, clientY: number, free = false): number | null {
+	return animation ? (lanes?.timeAtPoint(clientX, clientY, free) ?? null) : null;
+}
+
+export function showDrop(at: number | null) {
+	dropAt = at;
+}
+
+export function place(ids: readonly string[], at: number, together = false) {
+	if (!ids.length || !edit(() => editor.placeOnTimeline(ids, at, { together }))) return;
+	selection = { type: "clips", targets: new Set(ids) };
+}
+
+function selectClips(targets: ReadonlySet<string>) {
+	selection = targets.size ? { type: "clips", targets } : null;
+	const items = [...targets].filter((id) => editor.itemById(id));
+	if (items.length) editor.setSelection(items);
+}
+
+function split() {
+	const copies = edit(() => editor.splitAtPlayhead(splitTargets));
+	if (copies.length) selectClips(new Set(copies));
+}
+
+function insertTime() {
+	const range = selection?.type === "range" ? selection : null;
+	edit(() =>
+		editor.insertTime(range?.from ?? time, range ? range.to - range.from : 1000),
+	);
+}
+
+function removeTime() {
+	if (selection?.type !== "range") return;
+	const { from, to } = selection;
+	edit(() => editor.removeTime(from, to));
+	selection = null;
+	transport.seek(from);
+}
+
+function dragOver(event: DragEvent) {
+	if (!onDropResources || !event.dataTransfer?.types.length) return;
+	event.preventDefault();
+	event.dataTransfer.dropEffect = "copy";
+	dropAt = dropTime(event.clientX, event.clientY, event.altKey);
+}
+
+function drop(event: DragEvent) {
+	const at = dropAt;
+	dropAt = null;
+	if (!onDropResources || !event.dataTransfer || at === null) return;
+	event.preventDefault();
+	transport.hold();
+	onDropResources(event.dataTransfer, at);
+}
+
 function focusTarget(target: string) {
 	if (!editor.itemById(target)) return;
 	editor.setSelection([target]);
@@ -212,8 +286,18 @@ function handleKeydown(event: KeyboardEvent) {
 			selection = null;
 			return true;
 		}
+		if (event.key.toLowerCase() === "s" && !mod && splitTargets.length) {
+			split();
+			return true;
+		}
 		if ((event.key === "Delete" || event.key === "Backspace") && selection) {
-			if (selection.type === "marker") {
+			if (selection.type === "clips") {
+				const targets = [...selection.targets];
+				edit(() => editor.removeFromTimeline(targets));
+			} else if (selection.type === "range") {
+				removeTime();
+				return true;
+			} else if (selection.type === "marker") {
 				const at = selection.at;
 				edit(() =>
 					editor.setMarkers(
@@ -327,6 +411,24 @@ const moreItems = $derived<BoardMenuItem[]>([
 		label: m.board_marker_add({}, { locale }),
 		run: () => addMarker(Math.round(time)),
 	},
+	{ id: "time-separator", separator: true as const },
+	{
+		id: "insert-time",
+		label:
+			selection?.type === "range"
+				? m.board_timeline_insert_range({}, { locale })
+				: m.board_timeline_insert_second({}, { locale }),
+		run: insertTime,
+	},
+	...(selection?.type === "range"
+		? [
+				{
+					id: "remove-time",
+					label: m.board_timeline_remove_range({}, { locale }),
+					run: removeTime,
+				},
+			]
+		: []),
 ]);
 </script>
 
@@ -389,6 +491,28 @@ const moreItems = $derived<BoardMenuItem[]>([
 			</span>
 		{/if}
 		<span class="spacer"></span>
+		{#if animation && unplaced.length}
+			<button
+				type="button"
+				class="timeline-add"
+				title={m.board_timeline_add_hint({}, { locale })}
+				onclick={() => place(unplaced, time)}
+			>
+				<Plus class="h-3 w-3" />
+				<span class="timeline-add-label">{m.board_timeline_add({}, { locale })}</span>
+			</button>
+		{/if}
+		{#if animation && splitTargets.length}
+			<button
+				type="button"
+				class="key"
+				title={m.board_timeline_split({}, { locale })}
+				aria-label={m.board_timeline_split({}, { locale })}
+				onclick={split}
+			>
+				<Scissors class="h-3.5 w-3.5" />
+			</button>
+		{/if}
 		{#if animation}
 			<button
 				type="button"
@@ -426,9 +550,17 @@ const moreItems = $derived<BoardMenuItem[]>([
 			<button type="button" class="primary-key empty-action" onclick={create}>{m.board_animation_new({}, { locale })}</button>
 		</div>
 	{:else}
-		<div class="body">
+		<div
+			class="body"
+			role="presentation"
+			ondragover={dragOver}
+			ondragleave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) dropAt = null; }}
+			ondrop={drop}
+		>
 			<BoardAnimationLanes
+				bind:this={lanes}
 				{groups}
+				{dropAt}
 				{animation}
 				{extent}
 				{time}
@@ -443,12 +575,15 @@ const moreItems = $derived<BoardMenuItem[]>([
 				onMoveKeys={moveKeys}
 				onMoveMarker={moveMarker}
 				onAddMarker={addMarker}
+				onSelectClips={selectClips}
+				onShiftClips={(targets, delta) => edit(() => editor.shiftOnTimeline(targets, delta))}
+				onTrimClip={(target, edge, at) => edit(() => editor.trimOnTimeline(target, edge, at))}
 			/>
 			{#if groups.length === 0}
 				<p class="hint">{m.board_animation_select_hint({}, { locale })}</p>
 			{/if}
 		</div>
-		{#if selection}
+		{#if selection && selection.type !== "clips" && selection.type !== "range"}
 			<BoardAnimationInspector
 				{editor}
 				{edit}
@@ -557,6 +692,22 @@ const moreItems = $derived<BoardMenuItem[]>([
 	.time-now { color: var(--text-primary); }
 	.time-total { color: var(--text-tertiary); }
 	.spacer { flex: 1; }
+	.timeline-add {
+		display: inline-flex;
+		flex: none;
+		align-items: center;
+		gap: 4px;
+		height: 26px;
+		margin-right: 4px;
+		border-radius: 999px;
+		background: var(--brand-muted);
+		padding: 0 10px;
+		color: var(--brand-muted-fg);
+		font-size: 11px;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+	.timeline-add:hover { background: color-mix(in srgb, var(--brand) 22%, transparent); }
 	.autokey {
 		display: inline-flex;
 		flex: none;
@@ -626,6 +777,7 @@ const moreItems = $derived<BoardMenuItem[]>([
 	@container (max-width: 560px) {
 		.time-total,
 		.autokey-label,
+		.timeline-add-label,
 		.key--start { display: none; }
 		.autokey { width: 34px; justify-content: center; padding: 0; }
 		.picker { max-width: 128px; }
@@ -634,7 +786,8 @@ const moreItems = $derived<BoardMenuItem[]>([
 	@media (pointer: coarse) {
 		.key { width: 38px; height: 38px; }
 		.picker { height: 38px; }
-		.autokey { height: 34px; }
+		.autokey,
+		.timeline-add { height: 34px; }
 		.hint { left: 132px; }
 	}
 </style>

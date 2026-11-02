@@ -5,7 +5,11 @@ import {
 } from "@neta-art/cohub/board";
 import type { BoardAppMetadata } from "@neta-art/cohub/board/editor";
 import { boardAppFace } from "$lib/board/board-app";
-import type { BoardDropItem } from "$lib/drag/pointer-drag-core";
+import {
+	type BoardDropItem,
+	type PointerDragPayload,
+	toBoardDropItems,
+} from "$lib/drag/pointer-drag-core";
 
 export type BoardResourceDrop = {
 	files: BoardDropItem[];
@@ -123,4 +127,30 @@ export function readBoardResourceDrop(
 		];
 	}
 	return drop;
+}
+
+export function boardPointerResources(
+	payload: PointerDragPayload,
+): BoardResourceDrop {
+	const apps = payload.items.flatMap((item) =>
+		item.type === "app" && item.appId && item.appRef && item.appUrl
+			? [
+					{
+						appId: item.appId,
+						ref: item.appRef,
+						url: item.appUrl,
+						name: item.name,
+						icon: item.icon,
+						...boardAppFace(item),
+					},
+				]
+			: [],
+	);
+	return {
+		files: toBoardDropItems(payload),
+		tasks: [],
+		sessions: [],
+		apps,
+		urls: [],
+	};
 }

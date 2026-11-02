@@ -36,9 +36,9 @@ async function fetchTexture(query: string): Promise<Texture | null> {
   return new Texture({ source: new ImageSource({ resource: bitmap }) });
 }
 
-async function loadTextures(items: readonly BoardSceneItem[], scale: number, maxBytes: number): Promise<Map<string, Texture>> {
+async function loadTextures(items: readonly BoardSceneItem[], scale: number, maxBytes: number, overrides: Record<string, string>): Promise<Map<string, Texture>> {
   const exportKey = (item: BoardSceneItem) => {
-    const key = boardAssetKey(item);
+    const key = overrides[item.id] ?? boardAssetKey(item);
     return key && boardAssetKeySource(key)?.media !== "model" ? key : null;
   };
   const selection = selectBoardExportAssets([...items], exportKey, { scale, maxBytes });
@@ -128,7 +128,8 @@ const api = {
     const prepared = prepareBoardExport(document, options);
     if (!prepared) throw new Error("Nothing to export: the region contains no items.");
     const visible = prepared.plan.items.filter((item) => prepared.scene.opacity(item.id) > 0);
-    const loaded = frame.withImages ? await loadTextures(visible, prepared.plan.scale, frame.imageMemory) : new Map<string, Texture>();
+    const overrides = frame.assetKeys ?? {};
+    const loaded = frame.withImages ? await loadTextures(visible, prepared.plan.scale, frame.imageMemory, overrides) : new Map<string, Texture>();
     if (frame.withImages && frame.background === "paper" && document.board.background.image && background === undefined)
       background = await fetchTexture("background=1").catch(() => null);
     const result = renderBoardExport(renderer, document, {
@@ -136,6 +137,7 @@ const api = {
       ...theme,
       background: frame.background,
       textures: loaded,
+      assetKey: (item: BoardSceneItem) => overrides[item.id] ?? boardAssetKey(item),
       backgroundTexture: frame.background === "paper" ? (background ?? undefined) : undefined,
       shaderLayers: session.layers,
     });

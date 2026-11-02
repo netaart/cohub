@@ -20,11 +20,13 @@ export type BoardDeviceBudget = {
 	drawViews: boolean;
 	/** Blur and shadow filters; color filters and blend modes always apply. */
 	blurs: boolean;
+	/** Video and audio a timeline can play at once. */
+	media: number;
 };
 
 const BUDGETS: Record<BoardDeviceTier, Omit<BoardDeviceBudget, "tier">> = {
-	low: { lod: COMPACT_BOARD_LOD, lru: COMPACT_LRU_BUDGET, concurrency: 4, prefetch: 0, drawViews: false, blurs: false },
-	standard: { lod: DEFAULT_BOARD_LOD, lru: DEFAULT_LRU_BUDGET, concurrency: 6, prefetch: 0.5, drawViews: true, blurs: true },
+	low: { lod: COMPACT_BOARD_LOD, lru: COMPACT_LRU_BUDGET, concurrency: 4, prefetch: 0, drawViews: false, blurs: false, media: 2 },
+	standard: { lod: DEFAULT_BOARD_LOD, lru: DEFAULT_LRU_BUDGET, concurrency: 6, prefetch: 0.5, drawViews: true, blurs: true, media: 4 },
 	// Memory and cores say nothing about the GPU, so no tier raises the live budget.
 	high: {
 		lod: DEFAULT_BOARD_LOD,
@@ -33,6 +35,7 @@ const BUDGETS: Record<BoardDeviceTier, Omit<BoardDeviceBudget, "tier">> = {
 		prefetch: 1,
 		drawViews: true,
 		blurs: true,
+		media: 6,
 	},
 };
 
