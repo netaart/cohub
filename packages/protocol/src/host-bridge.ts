@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { displayIdSchema } from "./display/schema.js";
 
 /**
  * Contract between a Cohub web surface and the native host embedding it.
@@ -38,6 +39,7 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "share.incoming",
   "workspace",
   "workspace.files",
+  "display.presenting",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -156,6 +158,9 @@ export const deviceDisplayStatusSchema = z.object({
   }).optional(),
 }).strict();
 export type DeviceDisplayStatus = z.infer<typeof deviceDisplayStatusSchema>;
+
+export const deviceDisplayRefSchema = z.object({ spaceId: z.uuid(), display: displayIdSchema }).strict();
+export type DeviceDisplayRef = z.infer<typeof deviceDisplayRefSchema>;
 
 export const HOST_PERMISSIONS = ["files", "microphone", "camera", "notifications", "background", "screen", "control"] as const;
 export type HostPermission = (typeof HOST_PERMISSIONS)[number];
@@ -316,6 +321,7 @@ export const HOST_BRIDGE_METHODS = {
   "display.openControlSettings": { params: z.undefined(), result: z.boolean() },
   "display.setup": { params: z.undefined(), result: deviceDisplayStatusSchema },
   "display.pair": { params: z.object({ code: z.string().regex(/^\d{6}$/) }).strict(), result: deviceDisplayStatusSchema },
+  "display.presenting": { params: deviceDisplayRefSchema.optional(), result: z.boolean() },
   "workspace.call": {
     params: z.object({
       spaceId: z.uuid(),
@@ -327,7 +333,7 @@ export const HOST_BRIDGE_METHODS = {
 } as const;
 export type HostBridgeMethod = keyof typeof HOST_BRIDGE_METHODS;
 
-export const HOST_BRIDGE_EVENTS = ["auth.changed", "auth.signedOut", "navigation.back", "app.foreground", "app.background", "runtime.changed", "display.changed"] as const;
+export const HOST_BRIDGE_EVENTS = ["auth.changed", "auth.signedOut", "navigation.back", "app.foreground", "app.background", "runtime.changed", "display.changed", "display.open"] as const;
 export type HostBridgeEventName = (typeof HOST_BRIDGE_EVENTS)[number];
 
 export const HOST_BRIDGE_ERROR = {

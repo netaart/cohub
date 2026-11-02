@@ -36,6 +36,7 @@ object HostProtocol {
         const val DISPLAY_OPEN_CONTROL_SETTINGS = "display.openControlSettings"
         const val DISPLAY_SETUP = "display.setup"
         const val DISPLAY_PAIR = "display.pair"
+        const val DISPLAY_PRESENTING = "display.presenting"
         const val PERMISSIONS_STATUS = "permissions.status"
         const val PERMISSIONS_REQUEST = "permissions.request"
         const val PERMISSIONS_OPEN_SETTINGS = "permissions.openSettings"
@@ -72,6 +73,7 @@ object HostProtocol {
         const val APP_BACKGROUND = "app.background"
         const val RUNTIME_CHANGED = "runtime.changed"
         const val DISPLAY_CHANGED = "display.changed"
+        const val DISPLAY_OPEN = "display.open"
     }
 
     private val COLOR = Regex("^#[0-9a-fA-F]{6}$")

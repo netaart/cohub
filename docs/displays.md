@@ -168,9 +168,11 @@ no computer.
   right edge and dragged along it: a slim green tab while the screen is only shared, a pill with the
   agent's own `label` while it works, fading when idle. Opened, it offers **Stop sharing**, or the
   agent screen live, its last steps and **Stop** (the plan at once and its Turn), **Take over** (its app
-  moves to the phone's screen; plans refuse with `preempted` until **Hand back**). It steps aside
-  inside Cohub unless a person is needed, and shows the same `activity`, `held` and `handover` the
-  web sees, which offers **Stop** and **Hand back** too.
+  moves to the phone's screen; plans refuse with `preempted` until **Hand back**). Inside Cohub it
+  leaves the shared screen to the Runtime menu and the screen the page shows to its window (unless
+  a person holds it: only the indicator hands back), so an agent at work elsewhere stays in view,
+  and a tap on it opens that screen in its Space (`display.presenting`, `display.open`). It shows
+  the same `activity`, `held` and `handover` the web sees, which offers **Stop** and **Hand back** too.
 - **Without phone control** (no Wi-Fi to start it, or never set up), the phone's own screen can still be
   shared, the way it was before the helper: `display.share` asks for screen recording each time
   (the whole screen, so input lands where it is aimed), the foreground service takes the media
@@ -183,7 +185,7 @@ no computer.
   `ScreenSource` and `Injector` are the two seams; everything else is shared.
 - Host bridge: `display.status` (with `phoneControl`), `display.setup`, `display.pair`, `display.share`,
   `display.stop`, `display.openControlSettings`, and the `display.changed` event (capability
-  `display`).
+  `display`); `display.presenting` and the `display.open` event (capability `display.presenting`).
 - pion enumerates interfaces through `wlynxg/anet`, which links a private symbol of `net`; the
   Android build passes `-ldflags=-checklinkname=0` for it.
 

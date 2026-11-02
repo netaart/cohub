@@ -22,6 +22,7 @@ object HostCapabilities {
     const val NAVIGATION_BACK = "navigation.back"
     const val SHORTCUTS = "shortcuts"
     const val DISPLAY = "display"
+    const val DISPLAY_PRESENTING = "display.presenting"
     const val MEDIA_CAPTURE = "media.capture"
     const val PERMISSIONS = "permissions"
     const val SHARE_INCOMING = "share.incoming"
@@ -47,5 +48,5 @@ object HostCapabilities {
 
     fun advertised(runtime: Boolean, files: Boolean): List<String> =
         always + listOfNotNull(FILES.takeIf { files }) +
-            if (runtime) listOf(RUNTIME, DISPLAY, WORKSPACE, WORKSPACE_FILES) else emptyList()
+            if (runtime) listOf(RUNTIME, DISPLAY, DISPLAY_PRESENTING, WORKSPACE, WORKSPACE_FILES) else emptyList()
 }

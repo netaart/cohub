@@ -59,6 +59,15 @@ data class Activity(val sessionId: String?, val turnId: String?, val label: Stri
 
 data class HandoverAsk(val reason: String, val sessionId: String?, val turnId: String?)
 
+data class DisplayRef(val spaceId: String, val id: String) {
+    fun toJson(): JsonObject = buildJsonObject {
+        put("spaceId", spaceId)
+        put("display", id)
+    }
+}
+
+data class CohubPage(val shown: DisplayRef?)
+
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 internal class Served(val spaceId: String, val screen: Screen, injector: Injector) {
     val elements = ElementTree()
@@ -85,8 +94,14 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     private val displays = context.getSystemService(DisplayManager::class.java)
     private val events = MutableSharedFlow<DisplayEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val revision = MutableStateFlow(0)
+    private val opening = MutableSharedFlow<DisplayRef>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     internal val messages: SharedFlow<DisplayEvent> = events.asSharedFlow()
+
+    /** Null until a page says what it shows; older pages never do. */
+    val page = MutableStateFlow<CohubPage?>(null)
+
+    val opens: SharedFlow<DisplayRef> = opening.asSharedFlow()
 
     val status: StateFlow<DisplayStatus> = combine(shared, DisplayControl.service, phone.state, failure) { current, control, phoneControl, error ->
         DisplayStatus(current?.spaceId, control != null, phoneControl, error)
@@ -130,6 +145,11 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
     }
 
     private fun servedOn(displayId: Int): Served? = served().firstOrNull { it.screen.displayId == displayId }
+
+    internal fun shownInCohub(): Served? = page.value?.shown?.let { ref -> served().firstOrNull { it.spaceId == ref.spaceId && it.screen.id == ref.id } }
+
+    internal fun openInCohub(served: Served): Boolean =
+        page.value != null && opening.subscriptionCount.value > 0 && opening.tryEmit(DisplayRef(served.spaceId, served.screen.id))
 
     private fun changed(served: Served) {
         events.tryEmit(DisplayEvent(served.spaceId, DisplayWire.changed(served.screen.id)))

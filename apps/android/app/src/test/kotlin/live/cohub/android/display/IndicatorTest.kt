@@ -7,12 +7,13 @@ import org.junit.Test
 
 class IndicatorTest {
     @Test
-    fun `pick speaks for the most urgent screen and steps aside inside Cohub`() {
+    fun `pick speaks for the most urgent screen, and inside Cohub for agents the page does not show`() {
         val sharing = "screen" to Indicator(Mode.SHARING)
         val working = "agent" to Indicator(Mode.WORKING)
-        val asking = "agent" to Indicator(Mode.ASKING, "Pay")
+        val held = "agent" to Indicator(Mode.HELD)
         assertEquals(working, Indicator.pick(listOf(sharing, working), inCohub = false))
-        assertEquals(asking, Indicator.pick(listOf(sharing, asking), inCohub = true))
-        assertNull(Indicator.pick(listOf(sharing, working), inCohub = true))
+        assertEquals(working, Indicator.pick(listOf(sharing, working), inCohub = true))
+        assertNull(Indicator.pick(listOf(sharing, working), inCohub = true, shown = "agent"))
+        assertEquals(held, Indicator.pick(listOf(held), inCohub = true, shown = "agent"))
     }
 }

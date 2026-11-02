@@ -108,7 +108,10 @@ export function withWindowParam(
 		typeof search === "string"
 			? new URLSearchParams(search.startsWith("?") ? search.slice(1) : search)
 			: new URLSearchParams(search ?? undefined);
-	if (ref?.kind !== "app") params.delete("appHash");
+	if (ref?.kind !== "app") {
+		params.delete("appHash");
+		writeResourceAppTarget(params, null);
+	}
 	if (ref) params.set(WINDOW_QUERY_KEY, encodeWindowParam(ref));
 	else {
 		params.delete(WINDOW_QUERY_KEY);
@@ -155,6 +158,20 @@ export function withSidebarMainWindow(
 ): string {
 	if (options.isMobile) return pathname;
 	return withCurrentWindow(pathname, options.currentSearch);
+}
+
+export function buildDisplayWindowRoute(
+	spaceId: string,
+	display: string,
+	current?: URL | null,
+): string {
+	const root = buildSpaceRootRoute(spaceId);
+	const path = current?.pathname ?? "";
+	const stay = path === root || path.startsWith(`${root}/sessions/`);
+	return withWindowParam(stay ? path : root, stay ? current?.search : null, {
+		kind: "display",
+		key: display,
+	});
 }
 
 /** Deterministic ingress for legacy `/spaces/:id/files/...` routes. */

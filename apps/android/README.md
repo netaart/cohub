@@ -49,7 +49,7 @@ app/src/main/kotlin/live/cohub/android/
     Injector.kt              how input reaches a display; the helper's real touches and keys
     GestureInjector.kt       without the helper: accessibility gestures, keys as actions and edits
     Indicator.kt             what the floating indicator says: which screen, sharing, working, asking, held
-    Overlay.kt               the floating indicator's window: edge, dragging, tab, pill or panel
+    Overlay.kt               the floating indicator's window: edge, dragging, tab, pill or panel, handing off to the page
     OverlayViews.kt          the tab, the pill and the panel with the agent screen live
   helper/
     PhoneControl.kt          pairing with Wireless debugging, starting the helper, its state

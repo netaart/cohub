@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity(), HostActions {
 
         override fun onPageStarted() {
             layerBack.isEnabled = false
+            app.display?.page?.value = null
         }
 
         override fun onNavigated(url: String) {
@@ -191,6 +192,11 @@ class MainActivity : ComponentActivity(), HostActions {
                 app.display?.status?.collect { bridge.emit(HostProtocol.Events.DISPLAY_CHANGED, it.toJson()) }
             }
         }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                app.display?.opens?.collect { bridge.emit(HostProtocol.Events.DISPLAY_OPEN, it.toJson()) }
+            }
+        }
 
         addOnMultiWindowModeChangedListener { app.display?.phone?.multiWindow = it.isInMultiWindowMode }
         onBackPressedDispatcher.addCallback(this, historyBack)
@@ -210,6 +216,7 @@ class MainActivity : ComponentActivity(), HostActions {
     }
 
     override fun onDestroy() {
+        app.display?.page?.value = null
         container.removeAllViews()
         surface?.destroy()
         super.onDestroy()

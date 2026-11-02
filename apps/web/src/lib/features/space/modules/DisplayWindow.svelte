@@ -14,6 +14,7 @@ import {
 } from "lucide-svelte";
 import { onDestroy, untrack } from "svelte";
 import { MediaQuery } from "svelte/reactivity";
+import { presentDeviceDisplay } from "$lib/device-display.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { claimKeyboard } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
@@ -123,6 +124,10 @@ $effect(() => {
 });
 
 $effect(() => {
+	if (active) return presentDeviceDisplay({ spaceId, display: displayId });
+});
+
+$effect(() => {
 	const update = () => {
 		pageVisible = document.visibilityState === "visible";
 	};
@@ -182,7 +187,9 @@ onDestroy(() => {
 	if (scrollFrame) cancelAnimationFrame(scrollFrame);
 });
 
-async function agentAction(action: (displays: SpaceDisplaysApi) => Promise<unknown>) {
+async function agentAction(
+	action: (displays: SpaceDisplaysApi) => Promise<unknown>,
+) {
 	try {
 		await action(sdk.space(spaceId).displays);
 	} catch {

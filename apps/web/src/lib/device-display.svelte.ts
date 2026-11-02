@@ -1,5 +1,7 @@
 import {
+	type DeviceDisplayRef,
 	type DeviceDisplayStatus,
+	deviceDisplayRefSchema,
 	deviceDisplayStatusSchema,
 	HOST_BRIDGE_INTERACTIVE_TIMEOUT_MS,
 } from "@cohub/protocol/host-bridge";
@@ -65,6 +67,66 @@ export async function openDeviceControlSettings(): Promise<void> {
 
 export async function setupPhoneControl(): Promise<void> {
 	status = await callHost("display.setup");
+}
+
+let linked = false;
+let shown: DeviceDisplayRef | null = null;
+let told: string | null = null;
+let telling = false;
+let scheduled = false;
+
+const keyOf = (ref: DeviceDisplayRef | null) =>
+	ref ? `${ref.spaceId}/${ref.display}` : "";
+
+function tell() {
+	scheduled = false;
+	const ref = shown;
+	const key = keyOf(ref);
+	if (!linked || telling || key === told) return;
+	told = key;
+	telling = true;
+	callHost("display.presenting", ref ?? undefined)
+		.catch(() => {
+			if (told === key) told = null;
+		})
+		.finally(() => {
+			telling = false;
+			if (keyOf(shown) !== key) tell();
+		});
+}
+
+function schedule() {
+	if (scheduled) return;
+	scheduled = true;
+	queueMicrotask(tell);
+}
+
+let opener: ((ref: DeviceDisplayRef) => void) | null = null;
+
+export function linkDeviceDisplays(open: (ref: DeviceDisplayRef) => void) {
+	const first = opener === null;
+	opener = open;
+	if (!first) return;
+	void readyHost().then(() => {
+		if (!supportsHostCapability("display.presenting")) return;
+		onHostEvent((event) => {
+			if (event.name !== "display.open") return;
+			const parsed = deviceDisplayRefSchema.safeParse(event.payload);
+			if (parsed.success) opener?.(parsed.data);
+		});
+		linked = true;
+		schedule();
+	});
+}
+
+export function presentDeviceDisplay(ref: DeviceDisplayRef): () => void {
+	shown = ref;
+	schedule();
+	return () => {
+		if (shown !== ref) return;
+		shown = null;
+		schedule();
+	};
 }
 
 export async function pairPhoneControl(code: string): Promise<void> {

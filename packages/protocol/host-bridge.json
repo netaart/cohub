@@ -27,7 +27,8 @@
     "runtime.keepAwake",
     "share.incoming",
     "workspace",
-    "workspace.files"
+    "workspace.files",
+    "display.presenting"
   ],
   "methods": [
     "host.describe",
@@ -67,6 +68,7 @@
     "display.openControlSettings",
     "display.setup",
     "display.pair",
+    "display.presenting",
     "workspace.call"
   ],
   "events": [
@@ -76,7 +78,8 @@
     "app.foreground",
     "app.background",
     "runtime.changed",
-    "display.changed"
+    "display.changed",
+    "display.open"
   ],
   "errors": [
     "unsupported",

@@ -27,8 +27,9 @@ internal data class Indicator(
             )
         }
 
-        fun <T> pick(all: List<Pair<T, Indicator>>, inCohub: Boolean): Pair<T, Indicator>? =
-            all.minByOrNull { it.second.mode.rank }?.takeIf { !inCohub || it.second.needsPerson }
+        /** Held stays: only the indicator hands back. */
+        fun <T> pick(all: List<Pair<T, Indicator>>, inCohub: Boolean, shown: T? = null): Pair<T, Indicator>? =
+            all.filter { !inCohub || (it.second.mode != Mode.SHARING && (it.first != shown || it.second.mode == Mode.HELD)) }.minByOrNull { it.second.mode.rank }
 
         private val Mode.rank: Int get() = when (this) {
             Mode.HELD -> 0

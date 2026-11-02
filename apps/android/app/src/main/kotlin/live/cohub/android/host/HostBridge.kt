@@ -23,7 +23,9 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import live.cohub.android.auth.AuthSession
+import live.cohub.android.display.CohubPage
 import live.cohub.android.display.DeviceDisplay
+import live.cohub.android.display.DisplayRef
 import live.cohub.android.files.FileSaver
 import live.cohub.android.runtime.DeviceRuntime
 import live.cohub.android.runtime.FolderUnavailable
@@ -312,6 +314,12 @@ class HostBridge(
             requireDisplay().current().toJson()
         }
 
+        HostProtocol.Methods.DISPLAY_PRESENTING -> {
+            val shown = if (params.isEmpty()) null else DisplayRef(requireSpaceId(params), params.string("display")?.takeIf(DISPLAY_ID::matches) ?: throw IllegalArgumentException("display.presenting requires a display id"))
+            requireDisplay().page.value = CohubPage(shown)
+            JsonPrimitive(true)
+        }
+
         HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS -> JsonPrimitive(display?.phone?.enableControl() == true || actions.openControlSettings())
 
         HostProtocol.Methods.WORKSPACE_CALL -> {
@@ -386,7 +394,9 @@ class HostBridge(
             HostProtocol.Methods.DISPLAY_OPEN_CONTROL_SETTINGS,
             HostProtocol.Methods.DISPLAY_SETUP,
             HostProtocol.Methods.DISPLAY_PAIR,
+            HostProtocol.Methods.DISPLAY_PRESENTING,
         )
+        val DISPLAY_ID = Regex("^[A-Za-z0-9._-]{1,64}$")
         val PAIRING_CODE = Regex("^\\d{6}$")
         val RUNTIME_METHODS = setOf(
             HostProtocol.Methods.RUNTIME_LIST,

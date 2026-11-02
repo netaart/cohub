@@ -47,12 +47,13 @@ internal class Overlay(private val service: ControlService, private val display:
     private var fromTop = prefs.getFloat(TOP, DEFAULT_TOP)
     private var shown: Pair<Served, Indicator>? = null
     private var open = false
+    private var inCohub = false
     private var attached = false
     private val job: Job
 
     init {
         tab.setOnClickListener { setOpen(true) }
-        pill.setOnClickListener { setOpen(true) }
+        pill.setOnClickListener { if (!showInCohub()) setOpen(true) }
         panel.setOnClickListener { setOpen(false) }
         listOf(tab, pill, panel).forEach { it.setOnTouchListener(Dragger()) }
         root.setOnTouchListener { _, event ->
@@ -60,8 +61,9 @@ internal class Overlay(private val service: ControlService, private val display:
             false
         }
         job = scope.launch(Dispatchers.Main) {
-            combine(display.changes, DisplayControl.foreground) { _, foreground ->
-                Indicator.pick(display.served().mapNotNull { served -> served.indicator()?.let { served to it } }, foreground == service.packageName)
+            combine(display.changes, DisplayControl.foreground, display.page) { _, foreground, _ ->
+                inCohub = foreground == service.packageName
+                Indicator.pick(display.served().mapNotNull { served -> served.indicator()?.let { served to it } }, inCohub, display.shownInCohub())
             }.distinctUntilChanged { a, b -> a?.first === b?.first && a?.second == b?.second }.collect(::render)
         }
     }
@@ -86,6 +88,11 @@ internal class Overlay(private val service: ControlService, private val display:
     }
 
     fun refresh() = show()
+
+    private fun showInCohub(): Boolean {
+        val (served, indicator) = shown ?: return false
+        return inCohub && indicator.mode == Mode.WORKING && display.openInCohub(served)
+    }
 
     private fun show() {
         val (served, indicator) = shown ?: return

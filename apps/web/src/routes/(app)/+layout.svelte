@@ -1,7 +1,7 @@
 <script lang="ts">
 import "../../app.css";
 import { onMount } from "svelte";
-import { onNavigate } from "$app/navigation";
+import { goto, onNavigate } from "$app/navigation";
 import { page } from "$app/state";
 import { scheduleCacheCleanup } from "$lib/cache/cleanup";
 import BillingConversionCenter from "$lib/components/BillingConversionCenter.svelte";
@@ -19,10 +19,12 @@ import Sidebar from "$lib/components/Sidebar.svelte";
 import TurnNotificationStack from "$lib/components/TurnNotificationStack.svelte";
 import CustomThemeLayers from "$lib/custom-theme/CustomThemeLayers.svelte";
 import { createDeferredMount } from "$lib/deferred-mount.svelte";
+import { linkDeviceDisplays } from "$lib/device-display.svelte";
 import { pointerDrag } from "$lib/drag/pointer-drag.svelte";
 import CheckoutReturnHandler from "$lib/features/billing/CheckoutReturnHandler.svelte";
 import { startDesktopCommandListener } from "$lib/features/desktop-command/bus";
 import GlobalMarkCapture from "$lib/features/preview-mark/ui/GlobalMarkCapture.svelte";
+import { buildDisplayWindowRoute } from "$lib/features/space/modules/window-route";
 import {
 	type DrawerGestureDirection,
 	type DrawerGesturePhase,
@@ -553,6 +555,11 @@ onMount(() => {
 			// Listen in the shell, not a page, so delivery never depends on route.
 			stopDesktopCommands = startDesktopCommandListener();
 			stopLiveLists = startLiveLists();
+			linkDeviceDisplays(({ spaceId, display }) => {
+				void goto(
+					buildDisplayWindowRoute(spaceId, display, new URL(location.href)),
+				);
+			});
 		}
 		initSpacePinRealtime();
 	});
