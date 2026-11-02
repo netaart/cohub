@@ -7,13 +7,18 @@ import {
 export type DirectoryListing = { entries: SpaceFsEntry[]; truncated: boolean };
 
 const DIRECTORY_RETRY_DELAYS = [100, 250] as const;
+// A cold local sandbox connect can outlast one request; ride it out silently.
+const SANDBOX_OFFLINE_GRACE_MS = 15_000;
 
 export async function readDirectoryPages(
 	readPage: (cursor?: string) => Promise<SpaceFsTreePage>,
 	onFirstPage?: (entries: SpaceFsEntry[]) => void,
 ): Promise<DirectoryListing> {
 	let shown = false;
-	for (let attempt = 0; ; attempt += 1) {
+	let conflicts = 0;
+	let offlineRetries = 0;
+	const startedAt = Date.now();
+	for (;;) {
 		try {
 			return await readDirectoryAttempt(readPage, (entries) => {
 				if (shown) return;
@@ -21,9 +26,15 @@ export async function readDirectoryPages(
 				onFirstPage?.(entries);
 			});
 		} catch (error) {
-			const delay = DIRECTORY_RETRY_DELAYS[attempt];
-			if (!isHttpErrorCode(error, "directory_changed") || delay === undefined)
-				throw error;
+			let delay: number | undefined;
+			if (isHttpErrorCode(error, "directory_changed"))
+				delay = DIRECTORY_RETRY_DELAYS[conflicts++];
+			else if (isHttpErrorCode(error, "sandbox_offline")) {
+				const next = Math.min(500 * 2 ** offlineRetries++, 4_000);
+				if (Date.now() + next - startedAt <= SANDBOX_OFFLINE_GRACE_MS)
+					delay = next;
+			}
+			if (delay === undefined) throw error;
 			await new Promise((resolve) => setTimeout(resolve, delay));
 		}
 	}

@@ -3,7 +3,7 @@ import type {
 	SpaceFsFileResponse,
 	SpacePendingDiffFileResponse,
 } from "@neta-art/cohub";
-import { HttpError, isHttpErrorCode } from "@neta-art/cohub";
+import { HttpError } from "@neta-art/cohub";
 
 import { ensureBoardExtension } from "$lib/board/board-file";
 import {
@@ -704,14 +704,9 @@ export function createFileWorkspaceController(
 		return getActiveFsClient().read(path, signal);
 	}
 
-	function directoryLoadError(error: unknown, hasEntries: boolean) {
-		if (isHttpErrorCode(error, "directory_changed")) {
-			return hasEntries
-				? m.files_refresh_failed({}, { locale: getLocale() })
-				: m.files_load_failed({}, { locale: getLocale() });
-		}
-		return error instanceof Error
-			? error.message
+	function directoryLoadError(hasEntries: boolean) {
+		return hasEntries
+			? m.files_refresh_failed({}, { locale: getLocale() })
 			: m.files_load_failed({}, { locale: getLocale() });
 	}
 
@@ -768,13 +763,13 @@ export function createFileWorkspaceController(
 			)
 				return;
 			setActiveFileTree(makeFsNodes(entries, fileTree));
-		} catch (error) {
+		} catch {
 			if (
 				requestToken !== fileTreeRequestToken ||
 				sourceKey !== options.getActiveFsSourceKey()
 			)
 				return;
-			fileTreeError = directoryLoadError(error, fileTree.length > 0);
+			fileTreeError = directoryLoadError(fileTree.length > 0);
 		} finally {
 			if (
 				requestToken === fileTreeRequestToken &&
@@ -861,13 +856,13 @@ export function createFileWorkspaceController(
 			setActiveFileTree(
 				replaceNodeChildren(fileTree, node.path, makeFsNodes(entries)),
 			);
-		} catch (error) {
+		} catch {
 			if (!isCurrentRequest()) return;
 			setActiveFileTree(
 				updateNodeState(fileTree, node.path, (item) => ({
 					...item,
 					isLoading: false,
-					loadError: directoryLoadError(error, item.children.length > 0),
+					loadError: directoryLoadError(item.children.length > 0),
 				})),
 			);
 		}
