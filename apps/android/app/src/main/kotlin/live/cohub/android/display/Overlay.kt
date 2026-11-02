@@ -2,6 +2,7 @@ package live.cohub.android.display
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
@@ -16,6 +17,7 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
+import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import live.cohub.android.R
 import live.cohub.android.display.Indicator.Mode
+import live.cohub.android.host.WebOrigin
 import kotlin.math.abs
 
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
@@ -47,23 +50,22 @@ internal class Overlay(private val service: ControlService, private val display:
     private var fromTop = prefs.getFloat(TOP, DEFAULT_TOP)
     private var shown: Pair<Served, Indicator>? = null
     private var open = false
-    private var inCohub = false
     private var attached = false
     private val job: Job
 
     init {
         tab.setOnClickListener { setOpen(true) }
-        pill.setOnClickListener { if (!showInCohub()) setOpen(true) }
+        pill.setOnClickListener { setOpen(true) }
         panel.setOnClickListener { setOpen(false) }
-        listOf(tab, pill, panel).forEach { it.setOnTouchListener(Dragger()) }
+        panel.preview.setOnClickListener { openInCohub() }
+        listOf(tab, pill, panel, panel.preview).forEach { it.setOnTouchListener(Dragger()) }
         root.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_OUTSIDE && open && shown?.second?.mode != Mode.ASKING) setOpen(false)
             false
         }
         job = scope.launch(Dispatchers.Main) {
             combine(display.changes, DisplayControl.foreground, display.page) { _, foreground, _ ->
-                inCohub = foreground == service.packageName
-                Indicator.pick(display.served().mapNotNull { served -> served.indicator()?.let { served to it } }, inCohub, display.shownInCohub())
+                Indicator.pick(display.served().mapNotNull { served -> served.indicator()?.let { served to it } }, foreground == service.packageName, display.shownInCohub())
             }.distinctUntilChanged { a, b -> a?.first === b?.first && a?.second == b?.second }.collect(::render)
         }
     }
@@ -89,9 +91,13 @@ internal class Overlay(private val service: ControlService, private val display:
 
     fun refresh() = show()
 
-    private fun showInCohub(): Boolean {
-        val (served, indicator) = shown ?: return false
-        return inCohub && indicator.mode == Mode.WORKING && display.openInCohub(served)
+    /** The page opens it in place; without one listening, Cohub opens at it. */
+    private fun openInCohub() {
+        val served = shown?.first ?: return
+        setOpen(false)
+        if (display.openInCohub(served)) return
+        val url = WebOrigin.urlOf("/spaces/${served.spaceId}?window=display%3A${served.screen.id}")
+        runCatching { service.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).setPackage(service.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 
     private fun show() {

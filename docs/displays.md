@@ -171,7 +171,7 @@ no computer.
   moves to the phone's screen; plans refuse with `preempted` until **Hand back**). Inside Cohub it
   leaves the shared screen to the Runtime menu and the screen the page shows to its window (unless
   a person holds it: only the indicator hands back), so an agent at work elsewhere stays in view,
-  and a tap on it opens that screen in its Space (`display.presenting`, `display.open`). It shows
+  and its live preview opens that screen in its Space (`display.presenting`, `display.open`). It shows
   the same `activity`, `held` and `handover` the web sees, which offers **Stop** and **Hand back** too.
 - **Without phone control** (no Wi-Fi to start it, or never set up), the phone's own screen can still be
   shared, the way it was before the helper: `display.share` asks for screen recording each time

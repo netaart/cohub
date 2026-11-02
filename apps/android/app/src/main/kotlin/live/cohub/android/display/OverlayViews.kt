@@ -156,7 +156,7 @@ internal class Panel(context: Context) : LinearLayout(context), SurfaceHolder.Ca
     private val dot = Dot(context)
     private val title = text(context, 13f).apply { maxLines = 3 }
     private val steps = text(context, 12f).apply { setLineSpacing(dp(2).toFloat(), 1f) }
-    private val preview = SurfaceView(context).apply { visibility = GONE }
+    val preview = SurfaceView(context).apply { visibility = GONE }
     private val primary = button()
     private val secondary = button()
     private var screen: Screen? = null
