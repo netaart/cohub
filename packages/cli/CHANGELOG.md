@@ -1,5 +1,39 @@
 # @neta-art/cohub-cli
 
+## 10.18.0
+
+### Minor Changes
+
+- 3e1a150: Apps can be liked. `client.user.likes.isLiked("app", id)` and `client.user.likes.set("app", id, liked)` read and set the viewer's like, which is stored as their `Liked` label; App details carry the public `likeCount`, and App stats add `summary.totalLikes`. `LabelResourceType` gains `app`. The CLI adds `cohub apps like <app>` and `cohub apps unlike <app>`, and `apps get` and `apps stats` show likes.
+- 6e5ef5b: Board scripts can draw on the GPU and belong to the Board itself. `board.scripts` attaches modules to the Board: they reach every item, draw over the whole view and run before item scripts. A module's `shader` declares WebGL 2 passes written as GLSL functions: above or below its owner, or a `filter` over the owner's pixels; instanced `sprites`; `surfaces`, a distance field of the Board's item edges for collisions; `state` advanced at 60 Hz; declared `uniforms` set with `ctx.uniforms()`; and `cohub:` includes. Loops are bounded, compile errors point at the author's lines, quality adapts to the frame rate, and a shader running when the GPU resets is paused for the session. Hosts now send each script only the items an edit changed. Web exports draw shaders as the Board shows them; `cohub boards export --renderer auto` (the default) moves to a local Chrome, Chromium or Edge when a script has a shader, `canvas` names the shaders it drew with `draw()` or left out. `cohub boards examples rain --module` prints rain that splashes on cards.
+  
+  Hosts: no action. Hosts that pass `scripts` to `renderBoardExport` get shader layers on WebGL renderers and a `shaders-unsupported` warning on Canvas renderers; implement `BoardScriptHost.shaders` to export shaders from a custom host.
+- 8b91abb: Boards gain visual capabilities that agents, scripts and exports share: `style.filter` (blur, brightness, contrast, saturate, hue, grayscale, sepia, invert), `style.shadow` and `style.blend` on any item, animatable by path, with a frame and its contents taking them as one layer; `board.atmosphere` (vignette, grain); effect `shape` and `colors`; and text `revealBy` (char, word, line) with `revealMotion` (cut, fade, rise). Canvas exports draw what WebGL shows, and `inspect` reports `visualBounds`. Reads keep fields written by newer clients, so older SDKs and caches open newer Boards and carry those fields through edits. `BoardStage.burst` plays transient particle bursts such as reactions, and `BoardDeviceBudget.blurs` turns blur and shadows off on low-tier devices. Effects render on a pooled `ParticleContainer`, card shadows from a shared atlas, and typing text no longer re-rasterizes every frame.
+- e688135: Local Claude Code Turns pass `--permission-prompt-tool stdio` when the CLI accepts it: Bash and file-edit permission prompts become the same web approval cards as Codex, and Runtimes advertise the `inherit`, `auto`, `full_access` and `read_only` approval modes Claude Code supports. Allow for this chat is remembered by the Runtime per chat; other tools stay denied.
+- 4368d0e: Local Codex Turns take an approval mode (`inherit`, `auto`, `full_access`, `read_only`) and the Fast service tier. Runtimes with Codex app-server 0.162.1+ advertise the modes in `capabilities.approvalModes`; each maps to Codex's own sandbox and approval settings, sent with the thread and every Turn, and local settings restore the machine's defaults on an existing thread. Codex approval requests during Cohub Turns become cards on the web (`getSessionApprovals`, `decideApproval`), relayed back to the Runtime and declined after 30 minutes. The Fast switch shows the model's default tier (Codex `service_tier` first) and is sent for its Turn only. `cohub spaces prompt` gains `--approval-mode` and `--service-tier`; prompt inputs gain `approvalMode` and `serviceTier`.
+- f16c2cc: Act on displays in plans: `displays.act()` and `cohub spaces displays act` run several steps on the machine, find each target by what it says, wait for the screen to settle or for `until`, stop at the first surprise and report the screen after. New `launch`, `open`, `look`, `wait` and `apps` commands, `--name`/`--role`/`--nth` targets and `--until-*` on every action; `handover` asks a person to do what an agent must not and waits until they hand back; `--scroll` pages a list to its target; phones give agents a screen of their own. Breaking: `compileDisplayActions` is replaced by `compileDisplayPlan`, which compiles actions into `act` steps; `tree --actionable` is now `--compact`, which also keeps text to read.
+- 58063f4: Direct local access: on the machine whose Runtime serves a Space, files and screens skip the API, gateway and relay. sandboxd serves a private loopback API whose token only its supervisor holds; `cohub spaces files` and `cohub spaces displays` use it automatically (uploads stream from disk without the API's size limit), and fall back to the API when it cannot be reached, never retrying a mutation it may have run. The SDK adds a `localWorkspace` client option, `files.workspace()` and `loopbackWorkspace()`, and the desktop and Android apps read and write their own folders through the host bridge (`workspace.call`) and stream media with ranges (`workspace.files`). `COHUB_NO_DIRECT=1` keeps every request on the API; scoped execution tokens always do.
+- ee78752: Local Runtimes without a Harness: `cohub runtime up` now serves the folder when no local Harness can run, with Turns on the Cohub Harness. The host service reports why a connection failed, refuses to disconnect over unconfirmed work unless forced, stops an account's Runtimes at sign-out, shares a screen without restarting the Runtime, and keeps the machine awake during tasks. The host bridge adds permissions, the app badge, launch at login, a global shortcut, incoming shares and `runtime.keepAwake`.
+
+### Patch Changes
+
+- c2d831a: Animation tracks can target a Board script by id and animate its `params.<name>`: numbers blend, colors mix and other values step. Changing params no longer restarts a script, so its state survives tuning and animation. Removing a Board script that tracks animate needs `--cascade`, or `removeBoardScriptPatch()` to drop them too. Shader `state` takes an optional `bounds` area, so a Board script's state can stay on the Board rather than the view, and `stateAt(local)` reads it by position. Adaptive shader quality follows the display's frame rate instead of assuming 60 Hz. `cohub boards export` through Chrome continues scripts and shader state from frame to frame instead of replaying them for every frame, and an untimed web export draws shaders at the Board's current script time. `cohub boards simulate` compiles shaders with a local Chrome, Chromium or Edge when one is found, or checks them without one, and reports Board script errors.
+  
+  Hosts: no action. `createBrowserBoardScriptExport()` keeps scripts running across export frames, and `renderBoardExport` accepts `shaderLayers` to carry shader state between them.
+- 14b1862: `cohub runtime up` puts its own CLI last on the `PATH` of what it runs, so agents can always call `cohub`, while a `cohub` already on `PATH` (such as a self-updating global install) still comes first.
+- Updated dependencies [3e1a150]
+- Updated dependencies [b0cb2fc]
+- Updated dependencies [c2d831a]
+- Updated dependencies [6e5ef5b]
+- Updated dependencies [8b91abb]
+- Updated dependencies [4368d0e]
+- Updated dependencies [ecb040e]
+- Updated dependencies [f16c2cc]
+- Updated dependencies [58063f4]
+- Updated dependencies [ee78752]
+- Updated dependencies [4a58b40]
+  - @neta-art/cohub@13.9.0
+
 ## 10.17.1
 
 ### Patch Changes
