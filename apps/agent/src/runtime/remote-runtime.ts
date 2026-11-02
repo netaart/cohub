@@ -2,7 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { sessionTurns } from "@cohub/db";
 import { readRuntimeRecovery, runtimeRecoveryActive, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { db } from "../db.js";
-import { assertHarnessAccess, findRuntimeModel, resolveRuntimeThinkingLevel, runtimeRegistrationKey, parseRuntimeRegistration, type LocalHarness, type RuntimeExecutionEvent, type RuntimeTurnInput, type RuntimeRecoveryState } from "@cohub/protocol";
+import { assertHarnessAccess, findRuntimeModel, resolveRuntimeServiceTier, resolveRuntimeThinkingLevel, runtimeRegistrationKey, parseRuntimeRegistration, supportsApprovalMode, type ApprovalMode, type LocalHarness, type RuntimeExecutionEvent, type RuntimeTurnInput, type RuntimeRecoveryState } from "@cohub/protocol";
 import { redis, sendOutput } from "../redis.js";
 import { env } from "../env.js";
 import { logger } from "../logger.js";
@@ -37,6 +37,7 @@ export async function markRuntimeRecovery(turnId: string, recovery: RuntimeRecov
 export async function executeRemoteHarnessTurn(input: {
   spaceId: string; sessionId: string; batch: ClaimedTurnBatch; actorUserId: string | null;
   accessMode: PromptAccessMode; requestedThinkingLevel?: string | null;
+  approvalMode?: ApprovalMode; requestedServiceTier?: string | null;
   harness: LocalHarness; provider?: string | null; model?: string | null; requestId?: string | null; abortSignal: AbortSignal;
   recovery?: boolean;
   leaseSignal?: AbortSignal;
@@ -54,9 +55,12 @@ export async function executeRemoteHarnessTurn(input: {
   const previousRecovery = readRuntimeRecovery(input.batch.ownerTurn.meta);
   if (input.recovery && previousRecovery?.ownerUserId && previousRecovery.ownerUserId !== registration.ownerUserId) throw new RuntimeExecutionUncertainError("Runtime owner changed");
   if (!input.recovery && !capabilities.harnesses.includes(input.harness)) throw new Error("Harness is unavailable on this Runtime");
+  // A Runtime that does not enforce the mode would silently run with its own settings.
+  if (!input.recovery && input.approvalMode && !supportsApprovalMode(capabilities, input.harness, input.approvalMode)) throw new Error("The Local Runtime does not support this approval mode; update Cohub Local");
   const runtimeModel = findRuntimeModel(capabilities, input);
   if (!input.recovery && input.model && !runtimeModel) throw new Error("Model is unavailable on this Runtime");
   const thinkingLevel = resolveRuntimeThinkingLevel(runtimeModel, input.requestedThinkingLevel);
+  const serviceTier = resolveRuntimeServiceTier(runtimeModel, input.requestedServiceTier);
   const users = buildUserMessagesForBatch(input.batch);
   const user = users.at(-1);
   const first = users[0];
@@ -72,6 +76,8 @@ export async function executeRemoteHarnessTurn(input: {
       userId: input.batch.turns[index]?.userUuid ?? null, content: message.content })),
     context, provider: input.provider, model: input.model,
     thinkingLevel,
+    ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
+    ...(serviceTier ? { serviceTier } : {}),
     requestId: traceIdentifiers.requestId,
     traceContext: {
       requestId: traceIdentifiers.requestId,
@@ -95,8 +101,11 @@ export async function executeRemoteHarnessTurn(input: {
   let finalRevision: string | null = null;
   try {
     if (!input.recovery) {
-      // Recorded before dispatch so recovery keeps the level this execution ran with.
-      await markRuntimeRecovery(user.turnId, { state: "executing", ownerUserId: registration.ownerUserId }, thinkingLevel ? { effectiveThinkingLevel: thinkingLevel } : {});
+      // Recorded before dispatch so recovery keeps what this execution ran with.
+      await markRuntimeRecovery(user.turnId, { state: "executing", ownerUserId: registration.ownerUserId }, {
+        ...(thinkingLevel ? { effectiveThinkingLevel: thinkingLevel } : {}),
+        ...(serviceTier ?? runtimeModel?.defaultServiceTier ? { effectiveServiceTier: serviceTier ?? runtimeModel?.defaultServiceTier } : {}),
+      });
     }
     if (!input.recovery) await sendOutput({ type: "turn_lifecycle", spaceId: input.spaceId, sessionId: input.sessionId, turnId: user.turnId, anchorUserMessageId: userMessageId, phase: "llm_call_started", llmRound: 1, provider: input.provider, model: input.model, at: new Date().toISOString(), timestamp: Date.now() }).catch((error) => logger.warn("[Runtime] lifecycle delivery failed", error));
     await exchangeRuntimeTurn({

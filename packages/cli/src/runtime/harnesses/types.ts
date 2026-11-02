@@ -1,5 +1,5 @@
 import type {
-  LocalHarness, NativeProjection, ProjectionInput, ProjectionRecord, RuntimeCapabilities, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput,
+  ApprovalMode, LocalHarness, NativeProjection, ProjectionInput, ProjectionRecord, RuntimeCapabilities, RuntimeExecutionEvent, RuntimeMessage, RuntimeTurnInput,
 } from "@neta-art/cohub";
 import type { JsonRpcProcess } from "../json-rpc.js";
 import type { RuntimeDiagnosticContext } from "../diagnostics.js";
@@ -88,6 +88,8 @@ export type LocalHarnessAdapter = {
   binary: string;
   /** Fails when the harness cannot run; with `strict`, also instead of falling back to a reduced catalog. */
   models(executable: string, cwd: string, options?: { strict?: boolean }): Promise<HarnessModel[]>;
+  /** Approval modes this installation enforces; absent or empty hides the choice. */
+  approvalModes?(executable: string): Promise<ApprovalMode[]>;
   run(executor: Executor, turn: HarnessTurn): Promise<HarnessRun>;
   session: NativeSessionFormat;
   /** Every harness reads its own transcripts, so terminal conversations sync to the Space. */

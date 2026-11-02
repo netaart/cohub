@@ -110,3 +110,13 @@ test("custom Codex providers retain an unlisted configured model without guessin
     { harness: "codex", provider: "custom", id: "listed", name: "listed" },
   ]);
 });
+
+test("a configured Codex service_tier is the default where the model offers it", () => {
+  const entry = { id: "m", serviceTiers: [{ id: "priority", name: "Fast" }] };
+  const tierOf = (service_tier?: string, model: Record<string, unknown> = entry) => codexModelCatalog({ config: { service_tier } }, [model])[0]?.defaultServiceTier;
+  assert.equal(tierOf("priority"), "priority");
+  assert.equal(tierOf("fast"), "priority");
+  assert.equal(tierOf("default", { ...entry, defaultServiceTier: "priority" }), undefined);
+  assert.equal(tierOf(undefined, { ...entry, defaultServiceTier: "priority" }), "priority");
+  assert.equal(tierOf("priority", { id: "plain" }), undefined);
+});

@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
 import { createLogger } from "@cohub/infra/logging";
-import { isUuid, RUNTIME_CONTROL_FEATURES, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
+import { isUuid, RUNTIME_CONTROL_FEATURES, type RuntimeApprovalDecision, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
 
 const logger = createLogger({ serviceName: "cohub-gateway" });
 
@@ -424,6 +424,16 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       return false;
     }
   }
+  /** Forward a person's approval decision to the Space's Runtime if it is connected here. */
+  function decide(input: Omit<RuntimeApprovalDecision, "type">): boolean {
+    const registration = registrations.get(input.spaceId);
+    if (!registration) return false;
+    try { send(registration.socket, { type: "runtime.approval.decision", ...input }); return true; }
+    catch (error) {
+      logger.warn("runtime.approval.decision_failed", { spaceId: input.spaceId, turnId: input.turnId, error });
+      return false;
+    }
+  }
   /** Tell every Runtime this pod is going away, so its logs name the cause and it reconnects at once. */
   async function closeAll() {
     await Promise.allSettled([...registrations].map(async ([spaceId, registration]) => {
@@ -433,5 +443,5 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       await deps.release(spaceId, registration.record);
     }));
   }
-  return { control, peer, stop, closeAll };
+  return { control, peer, stop, decide, closeAll };
 }

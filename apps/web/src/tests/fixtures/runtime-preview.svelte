@@ -1,8 +1,14 @@
 <script lang="ts">
 // Local-only browser fixture. Mounted temporarily by scripts/preview-runtime-ui.mjs.
 import "../../app.css";
-import type { HarnessKind, RuntimeStatus } from "@neta-art/cohub";
+import {
+	APPROVAL_MODES,
+	type ApprovalMode,
+	type HarnessKind,
+	type RuntimeStatus,
+} from "@neta-art/cohub";
 import SessionComposer from "$lib/components/SessionComposer.svelte";
+import SessionApprovals from "$lib/features/session-chat/SessionApprovals.svelte";
 import SpaceWorkspaceHeader, {
 	type SpaceWorkspaceHeaderContext,
 } from "$lib/features/space/modules/SpaceWorkspaceHeader.svelte";
@@ -42,6 +48,8 @@ const models = [
 		isDefault: true,
 		reasoning: true,
 		defaultThinkingLevel: "medium" as const,
+		serviceTiers: [{ id: "priority", name: "Fast" }],
+		defaultServiceTier: "priority",
 		thinkingLevelMap: {
 			off: "none",
 			minimal: null,
@@ -82,6 +90,7 @@ let previewState = $state<PreviewState>("ready");
 let input = $state("");
 let harness = $state<HarnessKind>("pi");
 let model = $state<LocalModelSelection | null>(null);
+let approvalMode = $state<ApprovalMode | null>(null);
 const localModels = $derived(models.filter((item) => item.harness === harness));
 // Mirrors the session host: the composer always shows a resolved model and level.
 const localModel = $derived(resolveLocalModel(localModels, model));
@@ -93,6 +102,9 @@ function makeStatus(): RuntimeStatus {
 		runtimeId: "22222222-2222-4222-8222-222222222222",
 		capabilities: {
 			harnesses: ["pi", "codex", "claude", "workbuddy", "cursor"],
+			...(previewState === "limited"
+				? {}
+				: { approvalModes: { codex: [...APPROVAL_MODES] } }),
 			models,
 		},
 		workspace: {
@@ -112,6 +124,24 @@ function makeStatus(): RuntimeStatus {
 const fixtureSpace = sdk.space(spaceId);
 fixtureSpace.getRuntime = async () => status;
 fixtureSpace.subscribe = () => () => {};
+const approvalAt = Date.now();
+fixtureSpace.getSessionApprovals = async () => ({
+	canDecide: true,
+	approvals: [
+		{
+			id: "33333333-3333-4333-8333-333333333333",
+			turnId: "44444444-4444-4444-8444-444444444444",
+			kind: "command",
+			command: "/bin/bash -lc 'pnpm install && pnpm test'",
+			cwd: "/Users/me/project",
+			reason: "Needs network access to install packages",
+			decisions: ["accept", "accept_for_session", "decline"],
+			requestedAt: new Date(approvalAt).toISOString(),
+			expiresAt: new Date(approvalAt + 30 * 60_000).toISOString(),
+		},
+	],
+});
+fixtureSpace.decideApproval = async () => ({ accepted: true });
 sdk.space = () => fixtureSpace;
 async function choose(next: PreviewState) {
 	previewState = next;
@@ -156,7 +186,9 @@ const noop = () => {};
 			<button class="rounded border border-border-subtle px-2 py-1" onclick={() => document.documentElement.dataset.theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark"}>Theme</button>
 		</div>
 		<div class="flex-1 text-sm text-text-tertiary">Isolated fixtures · no account or model requests</div>
+		<output aria-label="Approval selection">{approvalMode ?? "unset"}</output>
 		<output aria-label="Model selection">{JSON.stringify(localModel)}</output>
-		<SessionComposer bind:value={input} {harness} harnesses={["cohub", ...(status.capabilities?.harnesses ?? [])]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} onsubmit={noop} onpickattachment={noop} />
+		<SessionApprovals {spaceId} sessionId="55555555-5555-4555-8555-555555555555" />
+		<SessionComposer bind:value={input} {harness} harnesses={["cohub", ...(status.capabilities?.harnesses ?? [])]} localRuntime runtimeOnline={status.online} onharnesschange={(next) => { harness = next; model = null; }} {localModels} {localModel} onlocalmodelchange={(next) => { model = next; }} approvalModes={harness === "codex" ? (status.capabilities?.approvalModes?.codex ?? []) : []} approvalMode={harness === "codex" ? approvalMode : null} onapprovalmodechange={(next) => { approvalMode = next; }} onsubmit={noop} onpickattachment={noop} />
 	</main>
 </div>

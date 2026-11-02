@@ -10,7 +10,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { httpInstrumentationMiddleware } from "@hono/otel";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
-import { isLocalHarness } from "@cohub/protocol/runtime";
+import { isApprovalMode, isLocalHarness } from "@cohub/protocol/runtime";
 import { sanitizeSessionStatsEvent } from "@cohub/protocol/model";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { isModelThinkingLevel, MODEL_THINKING_LEVELS } from "@cohub/protocol";
@@ -916,6 +916,9 @@ const submitWebsocketSessionMessage = async (ctx: WsConnectionContext, requestId
     provider,
     harness: isLocalHarness(payload.harness) ? payload.harness : "cohub",
     thinkingLevel,
+    // The WS schema has validated both.
+    approvalMode: isApprovalMode(payload.approvalMode) ? payload.approvalMode : undefined,
+    serviceTier: typeof payload.serviceTier === "string" ? payload.serviceTier : undefined,
     context: {
       kind: "websocket",
       requestId: effectiveRequestId,

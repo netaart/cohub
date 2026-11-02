@@ -4,6 +4,7 @@ import { serializeDiagnosticError, type RuntimeDiagnosticContext, type RuntimeDi
 import { harnessAdapter } from "../harnesses/index.js";
 import { closeHost } from "../harnesses/process.js";
 import type { HarnessExecutables, HarnessResult, HarnessRun, HarnessTurn } from "../harnesses/types.js";
+import type { ApprovalBroker } from "./approvals.js";
 import type { CodexShared } from "./codex-link.js";
 import type { NativeIngest } from "./ingest.js";
 import type { PiLink } from "./pi-link.js";
@@ -21,6 +22,7 @@ export type Executor = {
   archives: RuntimeArchiveStore;
   pi: PiLink;
   codex: CodexShared;
+  approvals: ApprovalBroker;
   piExtension: string;
   diagnostics?: RuntimeDiagnostics;
 };

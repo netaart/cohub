@@ -3,6 +3,7 @@
  * Shell uses a small Handle surface; Panel uses the host as view-model.
  */
 import {
+	type ApprovalMode,
 	buildFileReferencesText,
 	buildImageReferencesText,
 	buildViewportContentBlock,
@@ -82,6 +83,11 @@ import type { TimelineItem } from "$lib/session-tree";
 import { createTurnTimelineBuilder } from "$lib/session-turn-render";
 import type { NewChatComposerApplyPayload } from "$lib/space-config";
 import { materializeSpaceEntries } from "$lib/space-upload";
+import {
+	approvalChoiceKey,
+	readApprovalChoice,
+	writeApprovalChoice,
+} from "$lib/stores/approval-choices";
 import { authStore } from "$lib/stores/auth.svelte";
 import {
 	billingConversion,
@@ -169,6 +175,7 @@ import {
 	normalizeTurnDuplicates,
 	preserveSessionTurnRefs,
 	reconcileOptimisticTurn,
+	resolveApprovalModeFromTurns,
 	resolveComposerSelectionFromTurn,
 	resolveLastAgentTurnModel,
 	resolveLocalModelFromTurns,
@@ -399,8 +406,27 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const models = runtimeCatalog?.capabilities?.models.filter(
 			(model) => model.harness === composerHarness,
 		);
-		return models ? resolveLocalModel(models, requested) : requested;
+		if (models) return resolveLocalModel(models, requested);
+		return requested?.id !== undefined ? requested : null;
 	});
+	// Unsent choices only: once sent, the Turn's own record is the source, so other clients' choices show.
+	let approvalChoices = $state<Record<string, ApprovalMode | null>>({});
+	const approvalChoiceStorageKey = $derived(
+		approvalChoiceKey(spaceId, activeSessionId, composerHarness),
+	);
+	const approvalModes = $derived(
+		composerHarness === "cohub"
+			? []
+			: (runtimeCatalog?.capabilities?.approvalModes?.[composerHarness] ?? []),
+	);
+	// Kept even when the Runtime stops offering it: sending then fails instead of dropping a limit.
+	const approvalMode = $derived(
+		composerHarness === "cohub"
+			? null
+			: (approvalChoices[approvalChoiceStorageKey] ??
+					readApprovalChoice(approvalChoiceStorageKey)) ||
+					resolveApprovalModeFromTurns(composerAgentTurns, composerHarness),
+	);
 	async function loadRuntimeCatalog() {
 		const targetSpaceId = spaceId;
 		if (!targetSpaceId) return;
@@ -3015,6 +3041,23 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			setComposerError(m.runtime_harness_unavailable());
 			return;
 		}
+		const local = !isNote && harness !== "cohub";
+		const chosenApprovalMode = local ? approvalMode : null;
+		// Only local settings may run without the Runtime enforcing the mode: they are its defaults.
+		if (
+			chosenApprovalMode &&
+			chosenApprovalMode !== "inherit" &&
+			!approvalModes.includes(chosenApprovalMode)
+		) {
+			setComposerError(m.runtime_approval_unsupported());
+			return;
+		}
+		const sentApprovalMode =
+			chosenApprovalMode && approvalModes.includes(chosenApprovalMode)
+				? chosenApprovalMode
+				: null;
+		const sentApprovalKey = approvalChoiceStorageKey;
+		const serviceTier = local ? localModel?.serviceTier : undefined;
 		composer.sending = true;
 		const model = isNote
 			? null
@@ -3256,6 +3299,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						// Mirrors the server's request meta, which local model restore reads.
 						...(model ? { model: model.id, provider: model.provider } : {}),
 						...(thinkingLevel ? { requestedThinkingLevel: thinkingLevel } : {}),
+						...(sentApprovalMode ? { approvalMode: sentApprovalMode } : {}),
+						...(serviceTier ? { requestedServiceTier: serviceTier } : {}),
 						userId: currentUser.uuid,
 						clientMessageId,
 					},
@@ -3302,6 +3347,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 							provider: model?.provider,
 							harness,
 							...(thinkingLevel ? { thinkingLevel } : {}),
+							...(sentApprovalMode ? { approvalMode: sentApprovalMode } : {}),
+							...(serviceTier ? { serviceTier } : {}),
 							clientMessageId,
 							...(harness === "cohub"
 								? { generationPolicy: buildTurnGenerationPolicy() }
@@ -3313,6 +3360,14 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			);
 			if (sendResult.mode !== "immediate") {
 				throw new Error("Expected immediate prompt response");
+			}
+			if (
+				sentApprovalMode &&
+				(approvalChoices[sentApprovalKey] ??
+					readApprovalChoice(sentApprovalKey)) === sentApprovalMode
+			) {
+				writeApprovalChoice(sentApprovalKey, null);
+				approvalChoices = { ...approvalChoices, [sentApprovalKey]: null };
 			}
 			// The server accepted the prompt even if this host moved elsewhere.
 			// Invalidate before the UI-only early return so Recent revalidates later.
@@ -4594,6 +4649,19 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		},
 		get localModel() {
 			return localModel;
+		},
+		get approvalModes() {
+			return approvalModes;
+		},
+		get approvalMode() {
+			return approvalMode;
+		},
+		setApprovalMode(mode: ApprovalMode) {
+			writeApprovalChoice(approvalChoiceStorageKey, mode);
+			approvalChoices = {
+				...approvalChoices,
+				[approvalChoiceStorageKey]: mode,
+			};
 		},
 		setLocalModel(model: LocalModelSelection) {
 			localModelsBySession = {

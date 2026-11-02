@@ -194,10 +194,76 @@ archived so a conversation can be restored natively on another machine.
   by default, so web and terminal drive the same live thread. Cohub never restarts or stops it:
   `detach` and `down` print `codex app-server daemon stop` instead. The server is started with the
   login environment minus Cohub credentials; each thread only gets its cwd, an explicitly chosen
-  model, a read-only sandbox when requested, and `COHUB_SPACE_ID` / `COHUB_SESSION_ID`. Cohub
-  refuses approvals of the Turns it started and never answers a terminal user's approvals.
+  model, the selected approval mode (below), and `COHUB_SPACE_ID` / `COHUB_SESSION_ID`. Approvals
+  of the Turns Cohub started become cards on the web (below); Cohub never answers a terminal
+  user's approvals.
   Declining, an older Codex or a failed start degrade the same way: Cohub Turns use a private
   `codex app-server --listen stdio://`, and terminal Codex sessions sync read-only.
+
+**Codex approval modes.** With Codex app-server 0.162.1+ the Runtime advertises four modes, chosen
+in the composer's Harness menu and applied from the next message. They are Codex's own settings,
+as in its `/permissions` picker:
+
+| Mode | Codex settings |
+| --- | --- |
+| Use local settings (`inherit`) | What a fresh thread on this machine gets, read from Codex itself (profiles and requirements included) |
+| Auto approval (`auto`) | `workspace-write`, `on-request`, escalations reviewed by Codex's `auto_review` |
+| Full access (`full_access`) | `danger-full-access`, `never` |
+| Read only (`read_only`) | `read-only`, `on-request`; edits and network ask on a card |
+
+The mode is sent when the thread opens (`sandbox`, `approvalPolicy`, `approvalsReviewer`) and with
+each `turn/start` (`sandboxPolicy`, `approvalPolicy`, `approvalsReviewer`), since a loaded thread
+ignores open-time overrides. A loaded thread keeps Turn overrides for later Turns, so Use local
+settings on an existing thread sends the machine's resolved settings (read from an ephemeral
+thread) rather than nothing. Only the Cohub thread changes, never `config.toml`; a terminal client
+continuing the same loaded thread sees its current settings. Settings Codex refuses (for example
+under its requirements) fail the Turn with Codex's error. Read only is Codex's read-only sandbox:
+like Codex itself, it still runs commands its rules pre-approve (`prefix_rule(..., decision="allow")`).
+A platform read-only prompt runs as Read only; an explicit mode that conflicts with it is rejected.
+A prompt without a mode keeps today's behaviour.
+
+The choice is stored in turn meta (`approvalMode`), restored after refresh, kept for queued
+follow-ups (a change of mode ends a batch), not inherited by new chats, and a choice not yet sent
+stays local across reloads. A Runtime offers only modes that both its Codex binary and an already
+running shared server support; an older Codex offers none, so the menu hides them and an explicit
+mode is refused before running. A recorded mode the Runtime no longer offers blocks sending until
+Use local settings replaces it, which then runs the Runtime's defaults.
+
+**Approval cards.** When Codex asks to run a command or change files during a Cohub Turn
+(`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`), the Runtime sends an
+`approval` native event through the Gateway; the API keeps it in Redis (`runtime:approvals:*`) and
+tells the Space room (`space.session.approvals.changed`), and the composer shows a card with the
+command or files, its reason and working directory. Allow, Allow for this chat (where Codex offers
+it) and Decline need `session.prompt.fullaccess`; the first answer wins and reaches the Runtime as
+a `runtime.approval.decision` push from whichever Gateway holds its connection. A card nobody
+answers within 30 minutes, a Turn that ends or is stopped, and a Runtime that loses its connection
+decline the request. Platform read-only Turns are never widened: their requests are declined
+without a card. Other requests (permission profiles, tool input, MCP elicitation) are refused as
+before. Gateways announce the `approvals` feature in `runtime.ready`; against an older Gateway or
+API the Runtime declines at once, as before.
+
+**Fast.** A Codex model whose catalog lists the `priority` service tier shows a Fast switch next
+to its thinking level. Untouched, it shows the model's default: the configured `service_tier`
+(`fast` is its legacy name for `priority`), else the catalog's, and sends nothing. On sends
+`serviceTierForTurn: "priority"`; off sends `"default"` where Fast is the default and nothing
+otherwise. Either way it applies to that Turn only, so nothing carries over to later Turns or
+reaches the thread's or a terminal's tier. The Agent drops a tier the model does not declare and
+records the tier the Turn runs with (requested, else the model's default) as `effectiveServiceTier`
+before dispatch; the request (`requestedServiceTier`) restores the switch after refresh and survives
+thinking-level and model changes where the model offers it.
+
+**Codex 审批模式与 Fast。** Codex app-server 0.162.1+ 在输入框的 Harness 菜单中提供四档审批模式，下一条消息生效：
+沿用本机设置、自动审批、完全访问、只读，对应 Codex 自己 `/permissions` 中的设置。模式在打开线程和每次 `turn/start` 时下发；
+已加载的线程会保留上一轮的设置，所以在已有线程上切回“沿用本机设置”时，会读取本机默认设置并显式下发。只改变 Cohub 线程，
+不改 `config.toml`。只读即 Codex 的只读沙盒，与 Codex 本身一样，规则预先允许的命令仍会执行。
+未选择时保持原有行为；与平台只读冲突的模式会被拒绝。选择写入 turn meta，刷新后恢复，未发送的选择在刷新后保留，新对话不继承。
+Runtime 不再支持已记录的模式时，需改选“沿用本机设置”才能继续发送。
+Cohub 发起的 Turn 中，Codex 请求运行命令或修改文件时，网页输入框上方会出现审批卡（命令或文件、原因、工作目录），
+可选允许、本对话内都允许（Codex 提供时）、拒绝；需要 `session.prompt.fullaccess` 权限，先到先得。30 分钟无人处理、
+Turn 结束或被停止、Runtime 断开时一律拒绝；平台只读的 Turn 不出卡片、直接拒绝；旧版 Gateway / API 下仍立即拒绝。
+模型目录声明 `priority` 档位时显示 Fast：未操作时显示模型默认档位（`config.toml` 的 `service_tier`，否则取目录默认值）且不发送；
+开启时该 Turn 发送 `serviceTierForTurn: "priority"`，默认为 Fast 时关闭发送 `"default"`，否则不发送。只作用于该 Turn，不影响后续 Turn
+或终端；生效档位记入 `effectiveServiceTier`。旧版 Codex 不提供这些选项。
 
 **Realtime.** Previews of a Turn someone runs in a terminal stream from the control plane — Pi's
 extension events, and for Codex the shared server's events (the Runtime joins every busy thread of
@@ -580,10 +646,10 @@ Never infer that a disconnected execution has stopped.
 - A Turn sent to a live terminal client runs in that process. Otherwise Cohub starts a Pi (or a
   private Codex app-server) for the Turn; in-process PTY handles and background terminals do not
   survive between such Turns. A shared Codex app-server keeps its threads loaded across Turns.
-- Verified with Pi 0.86.1 and Codex 0.156.1. Codex rollout-path recovery is an upstream
+- Verified with Pi 0.86.1 and Codex 0.156.1; approval modes and Fast with Codex 0.162.1 and 0.166.0 (0.156.1 hides them). Codex rollout-path recovery is an upstream
   experimental API; incompatible versions fail explicitly.
-- Native approval escalation is never automatically granted. Requests requiring
-  an interactive local approval are rejected by the unattended adapter. Pi
+- Cohub never grants an escalation by itself: Codex approvals are answered on a web card by a
+  person (or by Codex's own reviewer in Auto approval) and declined when nobody answers. Pi
   read-only execution is rejected because it cannot enforce the requested limit.
 - Unknown execution outcomes remain active and block automatic takeover. Local
   unconfirmed state requires reconciliation; it is not silently discarded or replayed.

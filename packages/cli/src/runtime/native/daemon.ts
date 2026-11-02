@@ -5,6 +5,7 @@ import type { HarnessExecutables } from "../harnesses/types.js";
 import { record } from "../json-rpc.js";
 import type { SessionTurnProjectionClient } from "../turn-projection.js";
 import { readTranscript, type Harness } from "./adapters.js";
+import { ApprovalBroker } from "./approvals.js";
 import { CodexShared, type CodexChannel, type CodexEvent } from "./codex-link.js";
 import { readNativeConfig, type NativeConfig } from "./config.js";
 import type { Executor } from "./execution.js";
@@ -52,6 +53,7 @@ export class NativeRuntime {
   private readonly watched = new Map<string, { path: string | null }>();
   private readonly active = new Set<string>();
   private send: ((event: NativeRuntimeEvent) => Promise<unknown>) | null = null;
+  private readonly approvals = new ApprovalBroker();
   private extension: PiExtensionState = "missing";
 
   constructor(private readonly options: {
@@ -126,6 +128,7 @@ export class NativeRuntime {
       archives: options.archives,
       pi: this.pi,
       codex: this.codex,
+      approvals: this.approvals,
       piExtension: piExtensionSource(),
       diagnostics: options.diagnostics,
     };
@@ -154,9 +157,11 @@ export class NativeRuntime {
     if (this.codex.enabled) void this.codex.get();
   }
 
-  connect(send: ((event: NativeRuntimeEvent) => Promise<unknown>) | null): void {
+  /** `approvals`: the Gateway relays approval decisions back. */
+  connect(send: ((event: NativeRuntimeEvent) => Promise<unknown>) | null, features: { approvals?: boolean } = {}): void {
     this.send = send;
     this.ingest.connect(send ? nativeWebSocketTransport(send) : null);
+    this.approvals.connect(send && features.approvals ? send : null);
   }
 
   stop(sessionId: string, turnId: string): boolean {

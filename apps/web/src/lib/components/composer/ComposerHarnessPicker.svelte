@@ -1,6 +1,18 @@
 <script lang="ts">
-import { type HarnessKind, harnessLabel } from "@cohub/protocol/runtime";
-import { Check, ChevronDown } from "lucide-svelte";
+import {
+	APPROVAL_MODES,
+	type ApprovalMode,
+	type HarnessKind,
+	harnessLabel,
+} from "@cohub/protocol/runtime";
+import {
+	Check,
+	ChevronDown,
+	Eye,
+	Shield,
+	ShieldCheck,
+	ShieldOff,
+} from "lucide-svelte";
 import { tick } from "svelte";
 import { floatNear, portal } from "$lib/actions/portal";
 import { harnessOptions } from "$lib/features/space/runtime-status-view";
@@ -15,6 +27,9 @@ const {
 	online,
 	disabled = false,
 	onchange,
+	approvalModes = [],
+	approvalMode = null,
+	onapprovalchange,
 	onopen,
 }: {
 	value: Harness;
@@ -22,6 +37,11 @@ const {
 	online: boolean;
 	disabled?: boolean;
 	onchange: (value: Harness) => void;
+	/** Approval modes the selected local Harness enforces. */
+	approvalModes?: ApprovalMode[];
+	/** `null` leaves the Harness's own settings. */
+	approvalMode?: ApprovalMode | null;
+	onapprovalchange?: (mode: ApprovalMode) => void;
 	onopen?: () => void;
 } = $props();
 const locale = $derived(getLocale());
@@ -30,6 +50,32 @@ let trigger = $state<HTMLButtonElement | null>(null);
 let panel = $state<HTMLDivElement | null>(null);
 const options = $derived(harnessOptions(available, online));
 const local = $derived(value !== "cohub");
+const approvalIcons = {
+	inherit: Shield,
+	auto: ShieldCheck,
+	full_access: ShieldOff,
+	read_only: Eye,
+};
+const approvalLabel = (mode: ApprovalMode) =>
+	({
+		inherit: m.runtime_approval_inherit,
+		auto: m.runtime_approval_auto,
+		full_access: m.runtime_approval_full_access,
+		read_only: m.runtime_approval_read_only,
+	})[mode]({}, { locale });
+// A recorded mode stays visible after the Runtime stops offering it, so local settings can replace it.
+const showApproval = $derived(
+	local &&
+		Boolean(onapprovalchange) &&
+		(approvalModes.length > 0 || approvalMode !== null),
+);
+const selectedApproval = $derived(approvalMode ?? "inherit");
+const shownApproval = $derived(
+	showApproval && selectedApproval !== "inherit" ? selectedApproval : null,
+);
+const ShownApprovalIcon = $derived(
+	shownApproval ? approvalIcons[shownApproval] : null,
+);
 function close() {
 	open = false;
 	trigger?.focus();
@@ -76,9 +122,13 @@ function navigate(event: KeyboardEvent) {
 }
 </script>
 
-<button bind:this={trigger} type="button" class="harness-trigger" {disabled} aria-haspopup="menu" aria-expanded={open} aria-label={`${m.runtime_harness({}, { locale })}: ${harnessLabel(value)}`} title={local ? m.runtime_local({}, { locale }) : m.runtime_cloud({}, { locale })} onclick={() => open ? close() : void show()}>
+<button bind:this={trigger} type="button" class="harness-trigger" {disabled} aria-haspopup="menu" aria-expanded={open} aria-label={[`${m.runtime_harness({}, { locale })}: ${harnessLabel(value)}`, showApproval ? `${m.runtime_approval_mode({}, { locale })}: ${approvalLabel(selectedApproval)}` : null].filter(Boolean).join(", ")} title={local ? m.runtime_local({}, { locale }) : m.runtime_cloud({}, { locale })} onclick={() => open ? close() : void show()}>
 	<HarnessIcon harness={value} size={14} />
-	<span>{harnessLabel(value)}</span>
+	<span class="trigger-label">{harnessLabel(value)}</span>
+	{#if shownApproval && ShownApprovalIcon}
+		<ShownApprovalIcon class="h-3 w-3 shrink-0" />
+		<span class="trigger-label">{approvalLabel(shownApproval)}</span>
+	{/if}
 	{#if local && !online}<span class="offline-dot" aria-label={m.runtime_offline({}, { locale })}></span>{/if}
 	<ChevronDown class="h-3 w-3 shrink-0 opacity-50" />
 </button>
@@ -97,6 +147,18 @@ function navigate(event: KeyboardEvent) {
 				{#if value === harness}<Check class="h-4 w-4 shrink-0 text-brand" />{/if}
 			</button>
 		{/each}
+		{#if showApproval && onapprovalchange}
+			<div class="menu-separator" role="separator"></div>
+			<p class="menu-heading">{m.runtime_approval_mode({}, { locale })}</p>
+			{#each APPROVAL_MODES as mode}
+				{@const Icon = approvalIcons[mode]}
+				<button type="button" class="harness-option compact" role="menuitemradio" aria-checked={selectedApproval === mode} disabled={mode !== "inherit" && !approvalModes.includes(mode)} onclick={() => { onapprovalchange(mode); close(); }}>
+					<span class="approval-icon"><Icon class="h-4 w-4" /></span>
+					<span class="option-content"><span class="option-title">{approvalLabel(mode)}</span></span>
+					{#if selectedApproval === mode}<Check class="h-4 w-4 shrink-0 text-brand" />{/if}
+				</button>
+			{/each}
+		{/if}
 	</div>
 {/if}
 
@@ -105,6 +167,9 @@ function navigate(event: KeyboardEvent) {
 .harness-trigger:hover { background: var(--bg-hover); color: var(--text-secondary); }
 .harness-trigger:focus-visible, .harness-option:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .harness-trigger:disabled { opacity: .5; cursor: not-allowed; }
+/* Narrow composers keep only icons, leaving room for the model. */
+@media (max-width: 639px) { .trigger-label { display: none; } }
+.approval-icon { display: inline-flex; width: 20px; justify-content: center; color: var(--text-tertiary); }
 .offline-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--color-warning); }
 .harness-backdrop { position: fixed; inset: 0; z-index: 120; cursor: default; }
 .harness-menu { padding: 6px; max-width: calc(100vw - 16px); }

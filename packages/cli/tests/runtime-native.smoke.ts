@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,15 +40,21 @@ const { installPiExtension } = await import("../src/runtime/native/install.js");
 const { RuntimeArchiveStore } = await import("../src/runtime/archive-store.js");
 const { RuntimeDiagnostics } = await import("../src/runtime/diagnostics.js");
 const { atLeast, harnessVersion } = await import("../src/runtime/native/version.js");
+const { CODEX_APPROVAL_MIN_VERSION } = await import("../src/runtime/harnesses/codex-approval.js");
+const { codexHarness } = await import("../src/runtime/harnesses/codex.js");
 const { runtimeProjectionSource } = await import("./fixtures/runtime-projection-source.js");
 const { fakeNativeServer } = await import("./fixtures/native-server.js");
+
+/** Service tier of each model request, in order. */
+const serviceTiers: Array<string | null> = [];
 
 /** Responses API stream. A prompt containing "slow" streams for half a minute unless stopped. */
 const model = createServer(async (request, response) => {
   let body = "";
   for await (const chunk of request) body += chunk;
   if (request.method !== "POST") { response.writeHead(200, { "content-type": "application/json" }); response.end('{"data":[]}'); return; }
-  const request_ = JSON.parse(body) as { input?: Array<{ role?: string; type?: string; output?: unknown }>; tools?: Array<{ name?: string }> };
+  const request_ = JSON.parse(body) as { input?: Array<{ role?: string; type?: string; output?: unknown }>; tools?: Array<{ name?: string }>; service_tier?: string };
+  serviceTiers.push(request_.service_tier ?? null);
   const input = request_.input ?? [];
   const lastUser = JSON.stringify(input.filter((item) => item.role === "user").at(-1) ?? "");
   const slow = /slow/.test(lastUser);
@@ -56,13 +63,16 @@ const model = createServer(async (request, response) => {
   response.on("close", () => { closed = true; });
   response.writeHead(200, { "content-type": "text/event-stream" });
   const last = input.at(-1);
-  // "envcheck" asks the harness to run a shell command that prints what its tools see.
-  if (/envcheck/.test(lastUser) && last?.type !== "function_call_output") {
+  // "envcheck" asks the harness to run a shell command that prints what its tools see; "run[...]" runs that command.
+  const run = /run\[(.*?)\]/.exec(lastUser)?.[1];
+  if ((run || /envcheck/.test(lastUser)) && last?.type !== "function_call_output") {
     // A real model takes a moment before its first tool call; the Runtime's context lands meanwhile.
     await new Promise((resolve) => setTimeout(resolve, 500));
     const bash = request_.tools?.some((tool) => tool.name === "bash");
-    const command = "echo turn=$COHUB_TURN_ID session=$COHUB_SESSION_ID";
-    const call = { id: "fc_1", type: "function_call", call_id: `call_${Date.now()}`, name: bash ? "bash" : "exec_command", arguments: JSON.stringify(bash ? { command } : { cmd: command }) };
+    const command = run ?? "echo turn=$COHUB_TURN_ID session=$COHUB_SESSION_ID";
+    // "escalate" asks to run it outside the sandbox, which needs an approval.
+    const escalate = /escalate/.test(lastUser) ? { sandbox_permissions: "require_escalated", justification: "needs to write" } : {};
+    const call = { id: "fc_1", type: "function_call", call_id: `call_${Date.now()}`, name: bash ? "bash" : "exec_command", arguments: JSON.stringify(bash ? { command } : { cmd: command, ...escalate }) };
     send({ type: "response.created", response: { id: "resp_fc", status: "in_progress", output: [] } });
     send({ type: "response.output_item.added", output_index: 0, item: call });
     send({ type: "response.output_item.done", output_index: 0, item: call });
@@ -331,6 +341,58 @@ try {
           server.turns.delete(blocked.turnId);
         } finally { desktop.close(); await desktop.exited; }
         console.log("codex: Codex Desktop can continue the thread after a Cohub Turn, which then says so ✓");
+      }
+
+      // 6c. Approval modes and Fast on the shared server, switching on the same loaded thread.
+      if (atLeast(await harnessVersion(codexBinary), CODEX_APPROVAL_MIN_VERSION)) {
+        assert.deepEqual(await codexHarness.approvalModes?.(codexBinary), ["inherit", "auto", "full_access", "read_only"]);
+        const fast = (await codexHarness.models(codexBinary, project)).find((entry) => entry.serviceTiers?.some((tier) => tier.id === "priority"));
+        const marker = join(project, "approval-marker");
+        let previous = turn("codex", "start");
+        await dispatch(native, server, previous, "codex-approval-0");
+        const step = async (label: string, options: Partial<RuntimeTurnInput>, prompt = `run[touch ${marker}]`) => {
+          await rm(marker, { force: true });
+          const next = turn("codex", prompt, { sessionId: previous.sessionId, context: { complete: true, revision: "r", throughTurnId: previous.turnId, settledTurnIds: [previous.turnId], messages: [] }, ...options });
+          await dispatch(native, server, next, `codex-approval-${label}`, previous.turnId);
+          previous = next;
+          return existsSync(marker);
+        };
+        assert.equal(await step("read-only", { approvalMode: "read_only" }), false, "read-only applies on a loaded thread");
+        assert.equal(await step("full", { approvalMode: "full_access" }), true);
+        assert.equal(await step("platform-read-only", { accessMode: "read_only" }), false, "platform read-only applies without a selection");
+        assert.equal(await step("inherit", { approvalMode: "inherit" }), true, "local settings replace the earlier read-only on the loaded thread");
+        // Whether auto's sandbox lets the write through depends on the host's sandbox, which this container lacks.
+        await step("auto", { approvalMode: "auto" }, "hello auto");
+        // An approval card answered on the web reaches Codex: allowed runs, declined does not.
+        const cards: string[] = [];
+        let answer: "accept" | "decline" = "accept";
+        native.executor.approvals.connect(async (event) => {
+          if (event.type === "approval") {
+            cards.push(event.approval.command ?? "");
+            setImmediate(() => native.executor.approvals.decide({ sessionId: event.sessionId, turnId: event.turnId, approvalId: event.approval.id, decision: answer }));
+          }
+          return { accepted: true };
+        });
+        assert.equal(await step("approve", { approvalMode: "read_only" }, `escalate run[touch ${marker}]`), true, "an allowed request runs");
+        answer = "decline";
+        assert.equal(await step("decline", { approvalMode: "read_only" }, `escalate run[touch ${marker}]`), false, "a declined request does not");
+        assert.equal(cards.length, 2);
+        assert.match(cards[0] ?? "", /touch/);
+        native.executor.approvals.connect(null);
+        if (fast) {
+          serviceTiers.length = 0;
+          await step("fast", { model: fast.id, serviceTier: "priority" }, "hello fast");
+          await step("standard", { model: fast.id, serviceTier: "default" }, "hello standard");
+          await step("inherit", { model: fast.id }, "hello again");
+          assert.deepEqual(serviceTiers, ["priority", null, null], "Fast applies to its Turn only");
+        }
+        console.log(`codex: approval modes switch on a loaded thread, local settings restore the machine's and approval cards reach Codex${fast ? "; Fast applies per Turn" : ""} ✓`);
+      } else {
+        assert.deepEqual(await codexHarness.approvalModes?.(codexBinary), [], "an older Codex offers no approval modes");
+        const explicit = turn("codex", "hello", { approvalMode: "read_only" });
+        await assert.rejects(dispatch(native, server, explicit, "codex-approval-old"), /approval modes need app-server/);
+        server.turns.delete(explicit.turnId);
+        console.log("codex: an older Codex hides approval modes and refuses an explicit one before running ✓");
       }
 
       // 7. Another client of the same server (the terminal) continues the thread; the Turn syncs

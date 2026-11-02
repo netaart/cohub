@@ -33,6 +33,16 @@ export async function installedHarnesses(cwd: string, executables: HarnessExecut
   return found.filter((harness): harness is LocalHarness => harness !== null);
 }
 
+/** Whatever a harness offers beyond its models. A failed probe keeps `previous`, never failing discovery. */
+async function harnessFeatures(harnesses: LocalHarness[], executables: HarnessExecutables, previous?: RuntimeCapabilities): Promise<Pick<RuntimeCapabilities, "approvalModes">> {
+  const entries = await Promise.all(harnesses.map(async (harness) => {
+    const modes = await adapters()[harness].approvalModes?.(harnessExecutable(harness, executables)).catch(() => previous?.approvalModes?.[harness] ?? []);
+    return modes?.length ? [[harness, modes] as const] : [];
+  }));
+  const approvalModes = Object.fromEntries(entries.flat());
+  return Object.keys(approvalModes).length ? { approvalModes } : {};
+}
+
 /**
  * Explicitly requested harnesses must all work. With `onUnavailable`, a failing harness is reported
  * and left out instead, so auto-discovery still starts with the ones that work.
@@ -46,8 +56,8 @@ export async function discoverHarnesses(harnesses: LocalHarness[], executables: 
       return null;
     }
   }));
-  const available = catalogs.filter((catalog) => catalog !== null);
-  return { harnesses: available.map((catalog) => catalog.harness), models: available.flatMap((catalog) => catalog.models) };
+  const available = catalogs.filter((catalog) => catalog !== null).map((catalog) => catalog.harness);
+  return { harnesses: available, models: catalogs.flatMap((catalog) => catalog?.models ?? []), ...await harnessFeatures(available, executables) };
 }
 
 /** Rediscover the running harnesses' models; a harness that fails keeps its previous models. */
@@ -59,5 +69,5 @@ export async function refreshHarnesses(current: RuntimeCapabilities, executables
       return current.models.filter((model) => model.harness === harness);
     }
   }));
-  return { harnesses: current.harnesses, models: catalogs.flat() };
+  return { harnesses: current.harnesses, models: catalogs.flat(), ...await harnessFeatures(current.harnesses, executables, current) };
 }

@@ -1,13 +1,16 @@
 import {
+	type ApprovalMode,
 	type HarnessKind,
+	isApprovalMode,
 	type LocalHarness,
 	resolveHarness,
 } from "@cohub/protocol";
 import { isAgentTurn, type SessionTurnRecord } from "@cohub/protocol/model";
 import type { SessionRecord, TaskRunRecord } from "@neta-art/cohub";
 import {
+	getRequestedServiceTier,
 	getRequestedThinkingLevel,
-	type LocalModelSelection,
+	type LocalModelRequest,
 	type ModelCatalogItem,
 } from "$lib/model-catalog";
 import { mergeTurnsById } from "$lib/stores/turn-cache";
@@ -47,18 +50,37 @@ type ComposerTurnSource = Pick<
 export function resolveLocalModelFromTurns(
 	turns: ComposerTurnSource[],
 	harness: LocalHarness,
-): LocalModelSelection | null {
+): LocalModelRequest | null {
 	const meta = turns.findLast(
 		(turn) => isAgentTurn(turn) && resolveTurnHarness(turn) === harness,
 	)?.meta;
-	if (typeof meta?.model !== "string" || typeof meta.provider !== "string")
-		return null;
+	if (typeof meta?.model !== "string" || typeof meta.provider !== "string") {
+		// The Harness default ran; only a tier the request named carries over.
+		const serviceTier = getRequestedServiceTier(meta);
+		return serviceTier ? { serviceTier } : null;
+	}
 	const thinkingLevel = getRequestedThinkingLevel(meta);
+	const serviceTier = getRequestedServiceTier(meta);
 	return {
 		id: meta.model,
 		provider: meta.provider,
 		...(thinkingLevel ? { thinkingLevel } : {}),
+		...(serviceTier ? { serviceTier } : {}),
 	};
+}
+
+/** The last approval mode chosen for this Harness; a Turn without one left the thread's settings as they were. */
+export function resolveApprovalModeFromTurns(
+	turns: ComposerTurnSource[],
+	harness: LocalHarness,
+): ApprovalMode | null {
+	const mode = turns.findLast(
+		(turn) =>
+			isAgentTurn(turn) &&
+			resolveTurnHarness(turn) === harness &&
+			isApprovalMode(turn.meta?.approvalMode),
+	)?.meta?.approvalMode;
+	return isApprovalMode(mode) ? mode : null;
 }
 
 export function mergeComposerTurnSources(

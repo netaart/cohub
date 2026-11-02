@@ -5,12 +5,14 @@ import { JsonRpcProcess, record, type JsonRecord } from "../json-rpc.js";
 import { codexModelCatalog } from "../model-catalog.js";
 import { describeError } from "../../network-error.js";
 import type { Executor } from "../native/execution.js";
-import { CODEX_UNLOAD_DELAY_SECS, openPrivateServer, resumeThread, type CodexChannel } from "../native/codex-link.js";
+import { CODEX_UNLOAD_DELAY_SECS, openPrivateServer, resumeThread, runningSharedVersion, type CodexChannel } from "../native/codex-link.js";
 import { ArchiveNotRestorableError, copyNativeArchive } from "../native/archive.js";
 import {
   codexArchivedSessionsDirectory, codexRolloutBytes, codexRolloutIdOf, codexSessionsDirectory, ensurePlainCodexRollout, readFirstRecord, readNativeTranscript,
 } from "../native/transcript.js";
 import { codexTranslator } from "../native/translate.js";
+import { atLeast, harnessVersion } from "../native/version.js";
+import { codexApprovalMode, codexApprovalModes, codexApprovalRequest, codexDecision, resolveCodexApproval } from "./codex-approval.js";
 import { array, closeHost, harnessCommand, inlineImage, text, turnEnvironment, watchHost } from "./process.js";
 import type { HarnessRun, HarnessTurn, LocalHarnessAdapter, ThreadKind } from "./types.js";
 
@@ -57,11 +59,13 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
       channel = await openPrivateServer(host);
     }
     const codex = channel;
+    const mode = codexApprovalMode(input, codex.version);
+    const approval = mode ? await resolveCodexApproval(mode, codex, executor.cwd, prepared.resume !== "new") : null;
     const threadOptions = {
       cwd: executor.cwd,
       ...(input.model ? { model: input.model } : {}),
       ...(input.provider && input.provider !== "codex" ? { modelProvider: input.provider } : {}),
-      ...(input.accessMode === "read_only" ? { sandbox: "read-only" } : {}),
+      ...(approval ? approval.thread : input.accessMode === "read_only" ? { sandbox: "read-only" } : {}),
       // Tools of a shared server otherwise see the environment of whoever started that server.
       config: {
         "shell_environment_policy.set.COHUB_SPACE_ID": input.spaceId, "shell_environment_policy.set.COHUB_SESSION_ID": input.sessionId,
@@ -86,6 +90,7 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
     await turn.started(session);
     begun = true;
     let nativeTurnId: string | null = null;
+    const changedPaths = new Map<string, string[]>();
     executor.codex.driving.add(threadId);
     await new Promise<void>((resolve, reject) => {
       let escalation: ReturnType<typeof setTimeout> | undefined;
@@ -100,11 +105,18 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
       const off = codex.onEvent((event) => {
         const params = event.params;
         if (event.id != null) {
-          // An unattended Cohub Turn never grants an escalation.
-          if (!codex.shared || params.threadId === threadId && (!nativeTurnId || params.turnId === nativeTurnId)) codex.refuse(event.id, "Approval requires an interactive local client");
+          // A terminal user's requests on the shared server are theirs to answer.
+          if (codex.shared && (params.threadId !== threadId || nativeTurnId && params.turnId !== nativeTurnId)) return;
+          const request = codexApprovalRequest(event.method, params, changedPaths.get(text(params.itemId)));
+          // A platform read-only Turn is never widened, whoever approves.
+          if (!request || input.accessMode === "read_only" || !executor.approvals.available) { codex.refuse(event.id, "Approval requires an interactive local client"); return; }
+          const requestId = event.id;
+          void executor.approvals.request(input.sessionId, input.turnId, request, signal).then((decision) => codex.respond(requestId, codexDecision(decision)));
           return;
         }
         if (params.threadId !== threadId) return;
+        const item = record(params.item);
+        if (item.type === "fileChange" && Array.isArray(item.changes)) changedPaths.set(text(item.id), item.changes.map((change) => text(record(change).path)).filter(Boolean));
         // A resumed thread replays its last usage; only this Turn's counts belong to it.
         if (event.method === "thread/tokenUsage/updated" && params.turnId !== nativeTurnId) return;
         if (event.method === "turn/started" && !nativeTurnId) { nativeTurnId = text(record(params.turn).id) || null; if (signal.aborted) interrupt(); }
@@ -117,7 +129,14 @@ async function runCodex(executor: Executor, turn: HarnessTurn): Promise<HarnessR
         if (host) escalation = setTimeout(() => void host?.close().catch(() => undefined), ABORT_ESCALATION_MS);
       };
       signal.addEventListener("abort", abort, { once: true });
-      codex.request("turn/start", { threadId, clientUserMessageId: input.turnId, input: content, ...(input.thinkingLevel ? { effort: input.thinkingLevel === "off" ? "none" : input.thinkingLevel } : {}) })
+      codex.request("turn/start", {
+        threadId, clientUserMessageId: input.turnId, input: content,
+        // A loaded thread ignores open-time overrides and keeps these for later Turns.
+        ...approval?.turn,
+        ...(input.thinkingLevel ? { effort: input.thinkingLevel === "off" ? "none" : input.thinkingLevel } : {}),
+        // Only this Turn: the thread's own tier, and so a terminal user's, stays as it was.
+        ...(input.serviceTier ? { serviceTierForTurn: input.serviceTier } : {}),
+      })
         .then((result) => { nativeTurnId ??= text(record(result.turn).id) || null; if (signal.aborted) interrupt(); })
         .catch(finish);
     }).finally(() => executor.codex.driving.delete(threadId));
@@ -164,6 +183,13 @@ export const codexHarness: LocalHarnessAdapter = {
       } while (cursor);
       return codexModelCatalog(config, entries);
     } finally { await rpc.close(); }
+  },
+  async approvalModes(executable) {
+    const [binary, running] = await Promise.all([harnessVersion(executable), runningSharedVersion()]);
+    // A failed probe keeps the previous modes; Turns still check the server they run on.
+    if (!binary) throw new Error("Codex did not report its version");
+    // Turns use the binary or, when sharing, a server already running: offer only what both support.
+    return codexApprovalModes(running && !atLeast(running, binary) ? running : binary);
   },
   run: runCodex,
   session: {

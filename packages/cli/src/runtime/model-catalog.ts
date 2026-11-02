@@ -1,4 +1,4 @@
-import { isModelThinkingLevel, MODEL_THINKING_LEVELS as thinkingLevels, RUNTIME_MAX_SERVICE_TIERS, runtimeServiceTierSchema, thinkingLevelMapFor, type RuntimeModel as Model } from "@neta-art/cohub";
+import { isModelThinkingLevel, MODEL_THINKING_LEVELS as thinkingLevels, RUNTIME_MAX_SERVICE_TIERS, runtimeServiceTierSchema, STANDARD_SERVICE_TIER, thinkingLevelMapFor, type RuntimeModel as Model } from "@neta-art/cohub";
 import { record, type JsonRecord } from "./json-rpc.js";
 
 const thinkingLevel = (value: unknown) => isModelThinkingLevel(value) ? value : undefined;
@@ -48,7 +48,7 @@ function codexThinking(model: JsonRecord, configuredEffort: unknown): Pick<Model
 }
 
 /** `serviceTiers` supersedes the deprecated `additionalSpeedTiers`, which only names tier ids. */
-function codexServiceTiers(model: JsonRecord): Pick<Model, "serviceTiers" | "defaultServiceTier"> {
+function codexServiceTiers(model: JsonRecord, configuredTier: unknown): Pick<Model, "serviceTiers" | "defaultServiceTier"> {
   const candidates = Array.isArray(model.serviceTiers)
     ? model.serviceTiers.map((entry) => {
       const tier = record(entry);
@@ -60,7 +60,10 @@ function codexServiceTiers(model: JsonRecord): Pick<Model, "serviceTiers" | "def
     const parsed = runtimeServiceTierSchema.safeParse(tier);
     return parsed.success ? [parsed.data] : [];
   }).slice(0, RUNTIME_MAX_SERVICE_TIERS);
-  const defaultServiceTier = typeof model.defaultServiceTier === "string" && tiers.some((tier) => tier.id === model.defaultServiceTier) ? model.defaultServiceTier : undefined;
+  // A configured `service_tier` replaces the catalog default; `fast` is its legacy name for `priority`.
+  const configured = configuredTier === "fast" ? "priority" : configuredTier;
+  const preferred = configured === STANDARD_SERVICE_TIER ? undefined : typeof configured === "string" && configured ? configured : model.defaultServiceTier;
+  const defaultServiceTier = typeof preferred === "string" && tiers.some((tier) => tier.id === preferred) ? preferred : undefined;
   return { ...(tiers.length ? { serviceTiers: tiers } : {}), ...(defaultServiceTier ? { defaultServiceTier } : {}) };
 }
 
@@ -75,7 +78,7 @@ export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[]
     if (!id || model.hidden) return [];
     // A configured model replaces the catalog's own default.
     const isDefault = configuredModel ? id === configuredModel : model.isDefault === true;
-    return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id, ...(isDefault ? { isDefault } : {}), ...codexThinking(model, config.model_reasoning_effort), ...codexServiceTiers(model) }];
+    return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id, ...(isDefault ? { isDefault } : {}), ...codexThinking(model, config.model_reasoning_effort), ...codexServiceTiers(model, config.service_tier) }];
   });
   if (configuredModel && !models.some((model) => model.id === configuredModel)) models.unshift({ harness: "codex", provider, id: configuredModel, name: configuredModel, isDefault: true });
   return models;

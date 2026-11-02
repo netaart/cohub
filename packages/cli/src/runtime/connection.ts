@@ -9,7 +9,9 @@ import {
   runtimeHelloCapabilities,
   runtimeReadySchema,
   runtimeNativeStopSchema,
+  runtimeApprovalDecisionSchema,
   type RuntimeNativeStop,
+  type RuntimeApprovalDecision,
   type RuntimeCapabilities,
   type RuntimeContext,
   type RuntimeExecutionEvent,
@@ -58,9 +60,10 @@ export type RuntimeConnectionOptions = {
   runtimeId?: string;
   diagnostics?: RuntimeDiagnostics;
   leaseConflictTimeoutMs?: number;
-  onNativeChannel?: (send: (event: NativeRuntimeEvent) => Promise<unknown>) => void;
+  onNativeChannel?: (send: (event: NativeRuntimeEvent) => Promise<unknown>, features: { approvals: boolean }) => void;
   /** The web asked to stop a Turn; one running in a native client is stopped there. */
   onNativeStop?: (stop: RuntimeNativeStop) => void;
+  onApprovalDecision?: (decision: RuntimeApprovalDecision) => void;
   executions?: Map<string, Execution>;
 };
 
@@ -500,7 +503,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         }, { connectionId });
         nativeChannelReady = true;
         capabilitiesFrame = frame.features?.includes("capabilities") === true;
-        options.onNativeChannel?.(sendNative);
+        options.onNativeChannel?.(sendNative, { approvals: frame.features?.includes("approvals") === true });
         options.onReady();
         options.announce.current = announceHere;
         options.catalog.publish = publishCatalog;
@@ -524,6 +527,12 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         const stop = runtimeNativeStopSchema.safeParse(raw);
         if (!stop.success) { log("warn", "runtime.protocol.invalid_native_stop", { error: stop.error.message }, { connectionId }); return; }
         if (stop.data.spaceId === options.spaceId) options.onNativeStop?.(stop.data);
+        return;
+      }
+      if (raw.type === "runtime.approval.decision") {
+        const decision = runtimeApprovalDecisionSchema.safeParse(raw);
+        if (!decision.success) { log("warn", "runtime.protocol.invalid_approval_decision", { error: decision.error.message }, { connectionId }); return; }
+        if (decision.data.spaceId === options.spaceId) options.onApprovalDecision?.(decision.data);
         return;
       }
       if (raw.type === "runtime.native.result") {

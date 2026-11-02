@@ -10,6 +10,8 @@ import { atLeast, harnessVersion, type Version } from "./version.js";
 export const CODEX_SHARED_MIN_VERSION: Version = [0, 156, 0];
 
 const REQUEST_TIMEOUT_MS = 60_000;
+/** An optional probe of a running shared server must not hold up Runtime startup. */
+const PROBE_TIMEOUT_MS = 3_000;
 const JOIN_ATTEMPTS = 20;
 const JOIN_RETRY_MS = 100;
 const CLOSING_ATTEMPTS = 100;
@@ -27,11 +29,14 @@ export type CodexEvent = { method: string; params: JsonRecord };
 export interface CodexChannel {
   request(method: string, params?: JsonRecord, timeoutMs?: number): Promise<JsonRecord>;
   refuse(id: string | number, message: string): void;
+  respond(id: string | number, result: JsonRecord): void;
   onEvent(listener: (event: CodexEvent & { id?: string | number }) => void): () => void;
   onClose(listener: (error: Error) => void): () => void;
   close(): Promise<void>;
   readonly shared: boolean;
   readonly closed: boolean;
+  /** The app-server's own version, which may differ from the binary on PATH. */
+  readonly version: Version | null;
 }
 
 const codexHome = () => process.env.CODEX_HOME?.trim() || join(homedir(), ".codex");
@@ -61,6 +66,16 @@ async function ensureSharedServer(binary: string, cwd: string): Promise<boolean>
   catch { return false; }
 }
 
+/** Version of a shared app-server already running, which Cohub's Turns would use instead of the binary. */
+export async function runningSharedVersion(): Promise<Version | null> {
+  if (!sharedServerAvailable || !existsSync(codexControlSocket())) return null;
+  try {
+    const channel = await openShared(PROBE_TIMEOUT_MS);
+    await channel.close();
+    return channel.version;
+  } catch { return null; }
+}
+
 async function probe(): Promise<boolean> {
   try {
     const channel = await openShared();
@@ -69,14 +84,15 @@ async function probe(): Promise<boolean> {
   } catch { return false; }
 }
 
-async function openShared(): Promise<CodexChannel> {
-  const socket = new WebSocket(`ws+unix://${codexControlSocket()}:/`);
+async function openShared(timeoutMs?: number): Promise<CodexChannel> {
+  const socket = new WebSocket(`ws+unix://${codexControlSocket()}:/`, timeoutMs ? { handshakeTimeout: timeoutMs } : {});
   await new Promise<void>((resolve, reject) => {
     socket.once("open", () => resolve());
     socket.once("error", reject);
   });
   const channel = new SocketChannel(socket);
-  await initialize(channel);
+  try { await initialize(channel, timeoutMs); }
+  catch (error) { await channel.close(); throw error; }
   return channel;
 }
 
@@ -151,14 +167,22 @@ export class CodexShared {
   }
 }
 
-async function initialize(channel: CodexChannel) {
-  await channel.request("initialize", { clientInfo: { name: "cohub-runtime", title: "Cohub", version: "1" }, capabilities: { experimentalApi: true } });
+/** `userAgent` starts with `<client name>/<server version>`. */
+export function userAgentVersion(userAgent: unknown): Version | null {
+  const match = typeof userAgent === "string" ? /^[^/\s]+\/(\d+)\.(\d+)\.(\d+)/.exec(userAgent) : null;
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+async function initialize(channel: SocketChannel | StdioChannel, timeoutMs?: number) {
+  const result = await channel.request("initialize", { clientInfo: { name: "cohub-runtime", title: "Cohub", version: "1" }, capabilities: { experimentalApi: true } }, timeoutMs);
+  channel.version = userAgentVersion(result.userAgent);
   // The notification completes the handshake; responses are not expected.
-  (channel as SocketChannel | StdioChannel).notify("initialized");
+  channel.notify("initialized");
 }
 
 class SocketChannel implements CodexChannel {
   readonly shared = true;
+  version: Version | null = null;
   private readonly pending = new Map<string, { resolve: (value: JsonRecord) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private readonly listeners = new Set<(event: CodexEvent & { id?: string | number }) => void>();
   private readonly closeListeners = new Set<(error: Error) => void>();
@@ -210,6 +234,7 @@ class SocketChannel implements CodexChannel {
 
   notify(method: string, params: JsonRecord = {}) { this.socket.send(JSON.stringify({ method, params })); }
   refuse(id: string | number, message: string) { if (!this.closedError) this.socket.send(JSON.stringify({ id, error: { code: -32000, message } })); }
+  respond(id: string | number, result: JsonRecord) { if (!this.closedError) this.socket.send(JSON.stringify({ id, result })); }
   onEvent(listener: (event: CodexEvent & { id?: string | number }) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   onClose(listener: (error: Error) => void) {
     if (this.closedError) { const error = this.closedError; queueMicrotask(() => listener(error)); return () => undefined; }
@@ -221,12 +246,14 @@ class SocketChannel implements CodexChannel {
 
 class StdioChannel implements CodexChannel {
   readonly shared = false;
+  version: Version | null = null;
   private failed = false;
   constructor(private readonly rpc: JsonRpcProcess) { rpc.onFailure(() => { this.failed = true; }); }
   get closed() { return this.failed; }
   request(method: string, params: JsonRecord = {}, timeoutMs?: number) { return this.rpc.request(method, params, timeoutMs); }
   notify(method: string, params: JsonRecord = {}) { this.rpc.write({ method, params }); }
   refuse(id: string | number, message: string) { try { this.rpc.write({ id, error: { code: -32000, message } }); } catch { /* The process is gone. */ } }
+  respond(id: string | number, result: JsonRecord) { try { this.rpc.write({ id, result }); } catch { /* The process is gone. */ } }
   onClose(listener: (error: Error) => void) { return this.rpc.onFailure(listener); }
   onEvent(listener: (event: CodexEvent & { id?: string | number }) => void) {
     return this.rpc.onEvent((event) => {

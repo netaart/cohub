@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { limitBatchSize } from "../runtime/batch-limit.js";
+import { limitBatchSize, limitBatchToApprovalMode } from "../runtime/batch-limit.js";
 
 const turn = (size: number) => ({ size });
 
@@ -11,4 +11,13 @@ test("batches are bounded by message count, byte budget and always keep the owne
   // A single input larger than the whole budget still runs alone; it cannot be split further.
   assert.deepEqual(limitBatchSize([turn(50), turn(1)], sizeOf, { messages: 10, bytes: 9 }), [turn(50)]);
   assert.deepEqual(limitBatchSize([], sizeOf, { messages: 10, bytes: 9 }), []);
+});
+
+test("a change of approval mode ends a batch so the owner's mode never covers earlier inputs", () => {
+  const turn = (approvalMode?: string) => ({ meta: approvalMode ? { approvalMode } : {} });
+  const same = [turn("read_only"), turn("read_only")];
+  assert.deepEqual(limitBatchToApprovalMode(same), same);
+  assert.deepEqual(limitBatchToApprovalMode([turn("read_only"), turn("full_access")]), [turn("read_only")]);
+  assert.deepEqual(limitBatchToApprovalMode([turn(), turn("auto")]), [turn()]);
+  assert.deepEqual(limitBatchToApprovalMode([turn(), turn()]), [turn(), turn()]);
 });

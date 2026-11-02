@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RuntimeCapabilities } from "@neta-art/cohub";
-import { resolveLocalModelFromTurns } from "../lib/features/session-chat/session-utils.ts";
 import {
+	resolveApprovalModeFromTurns,
+	resolveLocalModelFromTurns,
+} from "../lib/features/session-chat/session-utils.ts";
+import {
+	fastServiceTierChoice,
 	getSupportedThinkingLevels,
+	isFastServiceTier,
 	resolveLocalModel,
 	toLocalModelCatalog,
 } from "../lib/model-catalog.ts";
@@ -216,5 +221,110 @@ test("Claude Code offers its default model and effort levels", () => {
 			>[number],
 		),
 		["low", "medium", "high", "xhigh", "max"],
+	);
+});
+
+test("Fast follows to models that offer it and restores from the request", () => {
+	const fastCatalog: RuntimeCapabilities["models"] = [
+		{ ...catalog[0], serviceTiers: [{ id: "priority", name: "Fast" }] },
+		{ ...catalog[1], serviceTiers: [{ id: "priority", name: "Fast" }] },
+		catalog[2],
+	];
+	const fast = { provider: "openai", id: "default", serviceTier: "priority" };
+	assert.equal(resolveLocalModel(fastCatalog, fast)?.serviceTier, "priority");
+	assert.equal(
+		resolveLocalModel(fastCatalog, { ...fast, id: "deep" })?.serviceTier,
+		"priority",
+	);
+	assert.equal(
+		resolveLocalModel(fastCatalog, { ...fast, id: "plain" })?.serviceTier,
+		undefined,
+	);
+	const sent = {
+		...turn(1, "codex", { model: "default" }),
+		meta: {
+			harness: "codex",
+			provider: "openai",
+			model: "default",
+			requestedServiceTier: "priority",
+		},
+	};
+	assert.equal(
+		resolveLocalModelFromTurns([sent], "codex")?.serviceTier,
+		"priority",
+	);
+	// A request for the Harness default still restores its tier, without naming a model.
+	const defaultRequest = {
+		...sent,
+		meta: { harness: "codex", requestedServiceTier: "priority" },
+	};
+	const restored = resolveLocalModelFromTurns([defaultRequest], "codex");
+	assert.deepEqual(restored, { serviceTier: "priority" });
+	assert.deepEqual(resolveLocalModel(fastCatalog, restored), {
+		provider: "openai",
+		id: "default",
+		name: "Default model",
+		thinkingLevel: "medium",
+		serviceTier: "priority",
+	});
+});
+
+test("the approval mode restores from the last Turn that chose one", () => {
+	const withMode = (
+		sequence: number,
+		harness: "codex" | "pi",
+		approvalMode?: string,
+	) => ({
+		...turn(sequence, harness),
+		meta: { harness, ...(approvalMode ? { approvalMode } : {}) },
+	});
+	const turns = [
+		withMode(1, "codex", "read_only"),
+		withMode(2, "codex"),
+		withMode(3, "pi"),
+	];
+	assert.equal(resolveApprovalModeFromTurns(turns, "codex"), "read_only");
+	assert.equal(resolveApprovalModeFromTurns(turns, "pi"), null);
+	assert.equal(
+		resolveApprovalModeFromTurns(
+			[...turns, withMode(4, "codex", "full_access")],
+			"codex",
+		),
+		"full_access",
+	);
+	assert.equal(
+		resolveApprovalModeFromTurns([withMode(1, "codex", "ask")], "codex"),
+		null,
+	);
+});
+
+test("the Fast switch shows the model's default tier and turns it off explicitly", () => {
+	const [fastByDefault, standard] = toLocalModelCatalog([
+		{
+			...catalog[0],
+			serviceTiers: [{ id: "priority", name: "Fast" }],
+			defaultServiceTier: "priority",
+		},
+		{ ...catalog[1], serviceTiers: [{ id: "priority", name: "Fast" }] },
+	]);
+	assert.equal(isFastServiceTier(fastByDefault, undefined), true);
+	assert.equal(isFastServiceTier(fastByDefault, "default"), false);
+	assert.equal(isFastServiceTier(standard, undefined), false);
+	assert.equal(fastServiceTierChoice(fastByDefault, false), "default");
+	assert.equal(fastServiceTierChoice(standard, false), null);
+	assert.equal(fastServiceTierChoice(standard, true), "priority");
+	assert.equal(
+		resolveLocalModel(
+			catalog.slice(0, 1).map((model) => ({
+				...model,
+				serviceTiers: [{ id: "priority", name: "Fast" }],
+			})),
+			{
+				provider: "openai",
+				id: "default",
+				serviceTier: "default",
+			},
+		)?.serviceTier,
+		"default",
 	);
 });

@@ -20,3 +20,12 @@ export function limitBatchSize<T>(
   }
   return batch.length ? batch : turns.slice(0, 1);
 }
+
+/** The owner's approval mode governs a merged execution, so a change of mode ends the batch. */
+export function limitBatchToApprovalMode<T extends { meta: unknown }>(turns: T[]): T[] {
+  const modeOf = (turn: T) => turn.meta && typeof turn.meta === "object" ? (turn.meta as { approvalMode?: unknown }).approvalMode : undefined;
+  const first = turns[0];
+  if (!first) return turns;
+  const end = turns.findIndex((turn) => modeOf(turn) !== modeOf(first));
+  return end === -1 ? turns : turns.slice(0, end);
+}
