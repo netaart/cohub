@@ -195,6 +195,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         val command = "CLASSPATH=${info.sourceDir} setsid app_process /system/bin --nice-name=${context.packageName}:helper " +
             "${HelperMain::class.java.name} ${context.packageName} ${info.uid} $next </dev/null >/dev/null 2>&1 &"
         val last = prefs.getInt(PORT, 0)
+        val launched = System.currentTimeMillis()
         val ran = (last > 0 && exec(key, last, command)) || connectPort(last)?.let { exec(key, it, command) } == true
         if (!ran) return when {
             !paired -> "unpaired"
@@ -203,8 +204,16 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
             else -> "wireless_debugging_unreachable"
         }
         if (withTimeoutOrNull(ATTACH_MS) { _helper.first { it != null } } != null) return null
-        note("adbd ran the helper, but it did not attach within ${ATTACH_MS / 1000} s")
+        note(helperFailure(key, launched)?.let { "the helper did not attach: $it" } ?: "adbd ran the helper, but it did not attach within ${ATTACH_MS / 1000} s")
         return "helper_did_not_start"
+    }
+
+    /** The helper logs as the shell, which only adbd can read back. */
+    private fun helperFailure(key: AdbKey, since: Long): String? {
+        val time = "%d.%03d".format(since / 1000, since % 1000)
+        val log = runCatching { Adb.exec(key, prefs.getInt(PORT, 0), "logcat -d -b main,crash -v brief -t $time -s ${Helper.TAG}:I AndroidRuntime:E") }.getOrNull() ?: return null
+        val lines = log.lines().map { it.substringAfter("): ").trim() }.filter { it.isNotEmpty() && !it.startsWith("at ") && !it.startsWith("-----") }
+        return lines.lastOrNull { it.startsWith("Caused by:") } ?: lines.firstOrNull { "Exception" in it || "Error" in it } ?: lines.lastOrNull()
     }
 
     private suspend fun connectPort(last: Int): Int? {

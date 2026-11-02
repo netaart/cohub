@@ -22,7 +22,10 @@ object HelperMain {
         val appUid = uid.toIntOrNull() ?: exitProcess(2)
         Looper.prepareMainLooper()
         val helper = Helper(appUid, appPackage)
-        val app = handOff(appPackage, appUid, nonce, helper) ?: exitProcess(1)
+        val app = handOff(appPackage, appUid, nonce, helper) ?: run {
+            Log.w(Helper.TAG, "the app refused the helper")
+            exitProcess(1)
+        }
         try {
             app.linkToDeath({
                 helper.releaseAll()
