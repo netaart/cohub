@@ -153,7 +153,7 @@ export function createBoardStageShaders(options: {
 
   return {
     get animated() {
-      return layers.animated;
+      return layers.animated && !options.reducedMotion();
     },
     get active() {
       return layers.size > 0;

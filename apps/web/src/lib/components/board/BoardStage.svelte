@@ -36,6 +36,7 @@ import {
 } from "@neta-art/cohub/board/stage";
 import type { Graphics } from "pixi.js";
 import { onDestroy, onMount, untrack } from "svelte";
+import { MediaQuery } from "svelte/reactivity";
 import { boardAppFace, boardAppMeta } from "$lib/board/board-app";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
 import type { BoardAwarenessController } from "$lib/board/board-awareness";
@@ -205,10 +206,7 @@ const liveSessions = spaceId
 		})
 	: null;
 
-const reducedMotion =
-	typeof window === "undefined"
-		? null
-		: window.matchMedia("(prefers-reduced-motion: reduce)");
+const reducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
 
 function renderLabels(): BoardRenderLabels {
 	return {
@@ -508,7 +506,7 @@ onMount(() => {
 		labels: renderLabels,
 		taskRun: (taskRunId) => liveTasks?.get(taskRunId) ?? null,
 		session: (sessionId) => liveSessions?.get(sessionId) ?? null,
-		reducedMotion: () => reducedMotion?.matches ?? false,
+		reducedMotion: () => reducedMotion.current,
 		fileState: (path) => (spaceId ? fileAvailability(spaceId, path) : "ok"),
 		previews: remotePreviews,
 		strokes: remoteStrokes,
@@ -577,6 +575,7 @@ $effect(() => {
 	awarenessVersion;
 	getResolvedTheme();
 	customThemeVersion;
+	reducedMotion.current;
 	untrack(() => stage?.invalidate());
 });
 

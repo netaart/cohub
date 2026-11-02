@@ -40,10 +40,10 @@ const glsl = \`
 const float SPEED = 1400.0;  // screen pixels per second, at any zoom
 const float SPLASH = 0.38;   // seconds a splash lasts
 
-struct Drop { vec2 start; vec2 heading; float reach; float age; float landing; bool lands; };
+struct Drop { vec2 start; vec2 heading; float reach; float travelled; float landing; bool lands; };
 
 // Drops respawn every cycle at new seeded places, anywhere in view.
-Drop drop(int index, float pixel) {
+Drop drop(int index, float pixel, bool streak) {
   float speed = SPEED * pixel;
   float cycle = board.view.w * 0.6 / speed + SPLASH;
   float clock = board.time + hash(index, 7) * cycle;
@@ -52,17 +52,18 @@ Drop drop(int index, float pixel) {
   d.heading = normalize(vec2(params.wind, 1.0));
   d.start = board.view.xy + vec2(hash(key, 1) * 1.2 - 0.1, hash(key, 2) * 0.9 - 0.15) * board.view.zw;
   d.reach = (0.25 + hash(key, 3) * 0.55) * board.view.w;
-  d.age = mod(clock, cycle);
+  d.travelled = mod(clock, cycle) * speed;
   d.lands = false;
   d.landing = d.reach;
   if (surface(d.start).inside) { d.reach = 0.0; return d; }
+  float limit = min(d.reach, streak ? d.travelled + 0.15 * d.reach : d.travelled);
   // Sphere-trace the item edges along the drop's path.
-  float travelled = 0.0;
+  float ahead = 0.0;
   for (int i = 0; i < 40 && params.splash > 0.5; i++) {
-    float gap = surface(d.start + d.heading * travelled).distance;
-    if (gap < pixel) { d.lands = true; d.landing = travelled; break; }
-    travelled += max(gap, 2.0 * pixel);
-    if (travelled > d.reach) break;
+    float gap = surface(d.start + d.heading * ahead).distance;
+    if (gap < pixel) { d.lands = true; d.landing = ahead; break; }
+    ahead += max(gap, 2.0 * pixel);
+    if (ahead > limit) break;
   }
   return d;
 }
@@ -71,15 +72,14 @@ Sprite sprite(int id) {
   int index = id / PARTS;
   int part = id - index * PARTS;
   Sprite s = makeSprite(vec2(0.0), vec2(0.0));
-  if (hash(index, 11) > params.density) { s.visible = false; return s; }
+  if (hash(index, 11) > params.density || (part > 0 && params.splash < 0.5)) { s.visible = false; return s; }
   float pixel = 1.0 / board.zoom;
   vec4 tint = board.dark > 0.5 ? vec4(0.75, 0.84, 1.0, 0.5) : vec4(0.3, 0.4, 0.55, 0.45);
-  Drop d = drop(index, pixel);
-  float travelled = d.age * SPEED * pixel;
+  Drop d = drop(index, pixel, part == 0);
   if (part == 0) {
     float end = d.lands ? d.landing : d.reach;
-    float head = min(travelled, end);
-    float tail = max(0.0, head - 34.0 * pixel);
+    float head = min(d.travelled, end);
+    float tail = max(0.0, d.travelled - 34.0 * pixel);
     s.visible = head > tail;
     vec2 a = d.start + d.heading * tail;
     vec2 b = d.start + d.heading * head;
@@ -90,7 +90,7 @@ Sprite sprite(int id) {
     s.color = vec4(tint.rgb, tint.a * smoothstep(0.0, 0.08 * d.reach, head) * fade);
     return s;
   }
-  float age = (travelled - d.landing) / (SPEED * pixel);
+  float age = (d.travelled - d.landing) / (SPEED * pixel);
   if (!d.lands || age < 0.0 || age > SPLASH) { s.visible = false; return s; }
   vec2 hit = d.start + d.heading * d.landing;
   vec2 normal = surface(hit - d.heading * 2.0 * pixel).normal;

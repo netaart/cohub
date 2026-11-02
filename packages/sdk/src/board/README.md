@@ -78,7 +78,9 @@ pooled `ParticleContainer`s, so a frame rewrites attributes only.
 
 Item effects (`render/effects.ts`) are applied by the scene, not by renderers:
 `style.filter` composes into one color matrix pass, blur and shadows use one clamped
-Gaussian pass, and `style.blend` sets the container's blend mode. Every filter also
+Gaussian pass, and `style.blend` sets the container's blend mode. Filters render at the
+device resolution; wide blurs first halve the layer with box samples until the
+Gaussian spans four to eight texels per deviation, so their cost stays near a copy. Every filter also
 returns a CSS filter string for Canvas; exports run `flattenBoardEffects`, which
 draws each blurred or shadowed layer into one picture first, since Canvas filters
 apply per draw call. A frame with effects draws inside a group with its descendants, so they take its
@@ -353,7 +355,9 @@ complete programs and bounds its loops; it is pure and tested in Node, while
 `render/shader/layer.ts` checks each program with the driver once to report errors
 on the author's lines. One layer per owner holds its passes (meshes, instanced for
 sprites, or filters), one uniform group they share, and its optional state textures,
-stepped at 60 Hz before the frame renders.
+stepped at 60 Hz before the frame renders. Sprite passes evaluate `sprite(id)` once per
+sprite into four float placement textures, one texel each, that the instanced quads
+read; without float render targets they evaluate it per vertex instead.
 
 `render/shader/layers.ts` owns the layers of every script with a shader and the
 per-frame uniforms. Hosts only place them: the stage (`stage/shaders.ts`) attaches
@@ -362,7 +366,8 @@ the owner (its card, or the group of a scripted frame) and composes filters with
 item's own effects; Board scripts draw in containers under and over the item nodes.
 Exports place them the same way in `export/scene.ts`. Surfaces are a signed distance
 field of item outlines, rasterized and jump-flooded on the GPU (`render/shader/surfaces.ts`),
-rebuilt only when the scene or the region changes.
+rebuilt only when the scene or the region changes. A Board script's field covers the
+view with a margin, so panning and small zooms keep it.
 
 A Canvas renderer cannot run shaders: those exports draw `draw()` where a module has
 one and report the rest. The CLI's GPU exporter (`packages/cli/src/board-gpu`) runs

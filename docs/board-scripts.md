@@ -433,7 +433,8 @@ errors name the pass and the line in your source.
 
 `surfaces: true` provides `surface(local)`: the `distance` to the nearest edge of
 the Board's items (negative inside), the outward `normal` and whether the point is
-`inside`. Frames, arrows, drawings and effects are left out, as is the owner. The
+`inside`. Frames, arrows, drawings, effects, text and items that blend as light
+(`screen` or `add`) are left out, as is the owner. Shapes keep their outline. The
 field follows animation and edits, so motion can collide with cards:
 
 ```glsl
@@ -469,7 +470,9 @@ the state carries their history, as on the live Board.
 
 Shaders render only while their owner is drawn and on screen; `board.quality`
 (lower on phones, and lowered while frames fall behind what the display shows)
-scales sprite counts, and reduced motion holds the clock. A
+scales sprite counts, and reduced motion holds the clock and stops redrawing.
+`sprite(id)` runs once per sprite per frame, not per corner, so shared work such as
+tracing a drop belongs in it; trace only as far as the sprite needs. A
 shader that was running when the GPU reset is paused for the rest of the session
 until it is restarted. Where shaders cannot run, a module's `draw()` is its
 fallback: when shaders run, `draw()` is not called, and a shader that fails to

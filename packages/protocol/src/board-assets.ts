@@ -13,6 +13,13 @@ export function collectBoardAssetReferences(
 		if (source?.kind === "file") files.add(source.value);
 		else if (source?.kind === "url") urls.add(source.value);
 	};
+	const script = (value: unknown) => {
+		const src = (value as { src?: unknown } | undefined)?.src;
+		if (typeof src !== "string") return;
+		scripts.add(src);
+		add(src);
+	};
+	for (const value of Object.values((board.board.scripts ?? {}) as Record<string, unknown>)) script(value);
 	for (const item of Object.values(board.items)) {
 		const props = item.props as {
 			src?: unknown;
@@ -22,8 +29,7 @@ export function collectBoardAssetReferences(
 				artifacts?: Array<{ url?: unknown; previewUrl?: unknown }>;
 			};
 		} | undefined;
-		const src = (item.script as { src?: unknown } | undefined)?.src;
-		if (typeof src === "string") { scripts.add(src); add(src); }
+		script(item.script);
 		add(props?.src);
 		const preview = (item as { preview?: { cover?: unknown; src?: unknown } }).preview;
 		add(preview?.cover);

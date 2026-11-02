@@ -1,10 +1,11 @@
 
-import type { BoardDash } from "@cohub/protocol";
+import type { BoardDash, BoardShapeItem } from "@cohub/protocol";
 import type { Graphics } from "pixi.js";
 import type { WorldPoint } from "../model/geometry.js";
 import { worldPoint } from "../model/geometry.js";
 
 const HEAD_SPREAD = Math.PI / 6;
+export const DEFAULT_ROUNDED_RADIUS = 8;
 
 export function dashPattern(dash: BoardDash | undefined, width: number): [number, number] | null {
 	if (dash === "dashed") return [Math.max(6, width * 4), Math.max(4, width * 3)];
@@ -115,4 +116,23 @@ export function roundRectPoints(width: number, height: number, radius: number): 
 		...corner(r, r, Math.PI),
 		worldPoint(width - r, 0),
 	];
+}
+
+export function shapeOutlinePoints(geometry: BoardShapeItem["props"]["geometry"], width: number, height: number, radius: number): WorldPoint[] {
+	const p = (x: number, y: number) => worldPoint(x, y);
+	switch (geometry) {
+		case "ellipse": {
+			const segments = 64;
+			return Array.from({ length: segments + 1 }, (_, index) => {
+				const angle = -Math.PI / 2 + (index / segments) * Math.PI * 2;
+				return p(width / 2 + (Math.cos(angle) * width) / 2, height / 2 + (Math.sin(angle) * height) / 2);
+			});
+		}
+		case "diamond":
+			return [p(width / 2, 0), p(width, height / 2), p(width / 2, height), p(0, height / 2), p(width / 2, 0)];
+		case "triangle":
+			return [p(width / 2, 0), p(width, height), p(0, height), p(width / 2, 0)];
+		default:
+			return roundRectPoints(width, height, radius);
+	}
 }

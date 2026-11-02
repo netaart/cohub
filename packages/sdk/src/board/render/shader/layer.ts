@@ -4,9 +4,11 @@ import {
   Filter,
   GlProgram,
   type Renderer,
+  RenderTarget,
   type RenderTexture,
   RendererType,
   Texture,
+  TextureSource,
   UniformGroup,
   type WebGLRenderer,
 } from "pixi.js";
@@ -19,7 +21,14 @@ import {
   boardShaderUniformValue,
 } from "../../model/shader.js";
 import type { BoardShader, BoardShaderUniformValues } from "../../model/script.js";
-import { type BoardShaderProgram, type BoardShaderProgramKind, buildBoardShaderProgram, describeBoardShaderError } from "./program.js";
+import {
+  BOARD_SPRITE_COLUMNS,
+  BOARD_SPRITE_PLACEMENTS,
+  type BoardShaderProgram,
+  type BoardShaderProgramKind,
+  buildBoardShaderProgram,
+  describeBoardShaderError,
+} from "./program.js";
 import { type BoardShaderMesh, boardQuadGeometry, boardRenderTarget, boardShaderMesh, destroyBoardShaderMesh, setUniform } from "./quad.js";
 
 export type BoardShaderFrame = {
@@ -92,6 +101,47 @@ function check(renderer: Renderer, program: BoardShaderProgram, label: string) {
   if (error) throw new Error(error);
 }
 
+const placing = new WeakMap<Renderer, boolean>();
+
+function canPlaceSprites(renderer: Renderer): boolean {
+  let supported = placing.get(renderer);
+  if (supported === undefined) {
+    const gl = renderer.type === RendererType.WEBGL ? (renderer as WebGLRenderer).gl : null;
+    supported = Boolean(gl?.getExtension("EXT_color_buffer_float") && gl.getParameter(gl.MAX_DRAW_BUFFERS) >= BOARD_SPRITE_PLACEMENTS.length);
+    placing.set(renderer, supported);
+  }
+  return supported;
+}
+
+type Placement = { mesh: BoardShaderMesh; uniforms: UniformGroup; target: RenderTarget; textures: TextureSource[] };
+
+function createPlacement(mesh: BoardShaderMesh, uniforms: UniformGroup, sprites: number): Placement {
+  // Blending into 32-bit float targets needs EXT_float_blend.
+  mesh.mesh.blendMode = "none";
+  const height = Math.ceil(sprites / BOARD_SPRITE_COLUMNS);
+  const textures = BOARD_SPRITE_PLACEMENTS.map(() =>
+    new TextureSource({ width: BOARD_SPRITE_COLUMNS, height, resolution: 1, format: "rgba32float", scaleMode: "nearest", autoGenerateMipmaps: false }));
+  return { mesh, uniforms, target: new RenderTarget({ colorTextures: textures, width: BOARD_SPRITE_COLUMNS, height, resolution: 1 }), textures };
+}
+
+// Pixi has no public release for a render target it did not create.
+function destroyPlacement(renderer: Renderer, placement: Placement) {
+  const system = renderer.renderTarget as unknown as {
+    _renderSurfaceToRenderTargetHash?: Map<unknown, unknown>;
+    _gpuRenderTargetHash?: Record<number, unknown>;
+    adaptor?: { destroyGpuRenderTarget(target: unknown): void };
+  };
+  const gpu = system._gpuRenderTargetHash?.[placement.target.uid];
+  if (gpu && system._gpuRenderTargetHash) {
+    system._gpuRenderTargetHash[placement.target.uid] = null;
+    system.adaptor?.destroyGpuRenderTarget(gpu);
+  }
+  system._renderSurfaceToRenderTargetHash?.delete(placement.target);
+  placement.target.destroy();
+  for (const texture of placement.textures) texture.destroy();
+  destroyBoardShaderMesh(placement.mesh);
+}
+
 function boardUniforms(parameters: readonly BoardShaderParameter[], uniforms: readonly BoardShaderUniform[]): UniformGroup {
   const vec = (size: number) => new Float32Array(size);
   const fields: Record<string, { value: unknown; type: string; size?: number }> = {
@@ -106,6 +156,7 @@ function boardUniforms(parameters: readonly BoardShaderParameter[], uniforms: re
     "board.quality": { value: 1, type: "f32" },
     "board.dark": { value: 0, type: "f32" },
     uCohubGeometry: { value: vec(4), type: "vec4<f32>" },
+    uCohubSpriteCount: { value: 0, type: "i32" },
     uCohubRegion: { value: vec(4), type: "vec4<f32>" },
     uCohubSurfaceRegion: { value: new Float32Array([0, 0, 1, 1]), type: "vec4<f32>" },
     uCohubStateRegion: { value: new Float32Array([0, 0, 1, 1]), type: "vec4<f32>" },
@@ -167,9 +218,11 @@ export function createBoardShaderLayer(
   if (surfaces) textures.uCohubSurfaces = Texture.EMPTY.source;
   if (hasState) textures.uCohubState = Texture.EMPTY.source;
 
-  const meshes: Array<BoardShaderMesh & { sprites: number }> = [];
+  const meshes: Array<BoardShaderMesh & { sprites: number; placement: Placement | null }> = [];
   const filters: Filter[] = [];
   const container = layer === "filter" ? null : new Container({ label: `board-shader-${label}` });
+  const place = canPlaceSprites(renderer);
+  let placementsStale = true;
   shader.passes.forEach((pass, index) => {
     const name = `${label} pass ${index + 1}`;
     if (layer === "filter") {
@@ -178,16 +231,24 @@ export function createBoardShaderLayer(
         glProgram: GlProgram.from({ name: `board-shader-filter`, vertex: built.vertex, fragment: built.fragment, preferredFragmentPrecision: "highp" }),
         resources: { cohubUniforms: group, ...textures },
         padding: 0,
+        resolution: "inherit",
       });
       filters.push(filter);
       return;
     }
     const sprites = pass.sprites ?? 0;
-    const built = program(sprites ? "sprites" : "box", pass.glsl, name);
-    const drawn = boardShaderMesh("board-shader", built, { cohubUniforms: group, ...textures }, boardQuadGeometry(Math.max(1, sprites)));
+    let placement: Placement | null = null;
+    if (sprites && place) {
+      const own = boardUniforms(parameters, uniforms);
+      placement = createPlacement(boardShaderMesh("board-shader-place", program("place", pass.glsl, name), { cohubUniforms: own, ...textures }), own, sprites);
+    }
+    const kind = !sprites ? "box" : placement ? "placed" : "sprites";
+    const resources: Record<string, unknown> = { cohubUniforms: group, ...textures };
+    placement?.textures.forEach((texture, slot) => { resources[BOARD_SPRITE_PLACEMENTS[slot] as string] = texture; });
+    const drawn = boardShaderMesh("board-shader", program(kind, pass.glsl, name), resources, boardQuadGeometry(Math.max(1, sprites)));
     drawn.mesh.blendMode = (pass.blend ?? "normal") as BLEND_MODES;
     container?.addChild(drawn.mesh);
-    meshes.push({ ...drawn, sprites });
+    meshes.push({ ...drawn, sprites, placement });
   });
 
   let state: { simulate: BoardShaderMesh; uniforms: UniformGroup; read: RenderTexture; write: RenderTexture; steps: number } | null = null;
@@ -239,6 +300,33 @@ export function createBoardShaderLayer(
     target.update();
   }
 
+  type State = NonNullable<typeof state>;
+  function advance(target: Renderer, state: State, frame: BoardShaderFrame, catchUp: boolean): { ran: number; behind: boolean } {
+    const wanted = Math.floor(frame.time / STEP_MS);
+    if (wanted < state.steps || state.steps < 0) {
+      for (const texture of [state.read, state.write]) target.render({ container: blank, target: texture, clear: true, clearColor: [0, 0, 0, 0] });
+      state.steps = Math.max(0, wanted - MAX_REPLAY);
+    }
+    if (!catchUp && wanted - state.steps > MAX_LAG) state.steps = wanted - STEPS_PER_FRAME;
+    const limit = catchUp ? Number.POSITIVE_INFINITY : STEPS_PER_FRAME;
+    let ran = 0;
+    while (state.steps < wanted && ran < limit) {
+      fill(state.uniforms, frame, { x: 0, y: 0, width: state.write.width, height: state.write.height }, state.steps);
+      state.simulate.shader.resources.uCohubState = state.read.source;
+      target.render({ container: state.simulate.mesh, target: state.write, clear: true });
+      [state.read, state.write] = [state.write, state.read];
+      state.steps++;
+      ran++;
+    }
+    const source = state.read.source;
+    for (const { shader, placement } of meshes) {
+      shader.resources.uCohubState = source;
+      if (placement) placement.mesh.shader.resources.uCohubState = source;
+    }
+    for (const filter of filters) filter.resources.uCohubState = source;
+    return { ran, behind: state.steps < wanted };
+  }
+
   return {
     layer,
     container,
@@ -246,49 +334,48 @@ export function createBoardShaderLayer(
     surfaces,
     animated: hasState,
     update(frame) {
-      fill(group, frame, frame.region);
-      time = frame.time;
-      last = frame;
       if (frame.quality !== quality) {
         quality = frame.quality;
         for (const { geometry, sprites } of meshes)
           if (sprites) geometry.instanceCount = Math.max(1, Math.round(sprites * quality));
       }
+      fill(group, frame, frame.region);
+      for (const { geometry, placement } of meshes) {
+        if (!placement) continue;
+        (placement.uniforms.uniforms as Record<string, unknown>).uCohubSpriteCount = geometry.instanceCount;
+        fill(placement.uniforms, frame, { x: 0, y: 0, width: BOARD_SPRITE_COLUMNS, height: Math.ceil(geometry.instanceCount / BOARD_SPRITE_COLUMNS) });
+      }
+      time = frame.time;
+      last = frame;
+      placementsStale = true;
     },
     prepare(target, options) {
-      if (!state || !last) return false;
-      const wanted = Math.floor(last.time / STEP_MS);
-      if (wanted < state.steps || state.steps < 0) {
-        for (const texture of [state.read, state.write]) target.render({ container: blank, target: texture, clear: true, clearColor: [0, 0, 0, 0] });
-        state.steps = Math.max(0, wanted - MAX_REPLAY);
+      if (!last) return false;
+      const stepped = state ? advance(target, state, last, options?.catchUp === true) : { ran: 0, behind: false };
+      if (placementsStale || stepped.ran) {
+        for (const { placement } of meshes)
+          if (placement) target.render({ container: placement.mesh.mesh, target: placement.target, clear: true, clearColor: [0, 0, 0, 0] });
+        placementsStale = false;
       }
-      if (!options?.catchUp && wanted - state.steps > MAX_LAG) state.steps = wanted - STEPS_PER_FRAME;
-      const limit = options?.catchUp ? Number.POSITIVE_INFINITY : STEPS_PER_FRAME;
-      let ran = 0;
-      while (state.steps < wanted && ran < limit) {
-        fill(state.uniforms, last, { x: 0, y: 0, width: state.write.width, height: state.write.height }, state.steps);
-        state.simulate.shader.resources.uCohubState = state.read.source;
-        target.render({ container: state.simulate.mesh, target: state.write, clear: true });
-        [state.read, state.write] = [state.write, state.read];
-        state.steps++;
-        ran++;
-      }
-      const source = state.read.source;
-      for (const { shader } of meshes) shader.resources.uCohubState = source;
-      for (const filter of filters) filter.resources.uCohubState = source;
-      return state.steps < wanted;
+      return stepped.behind;
     },
     setSurfaces(texture, region) {
-      for (const { shader } of meshes) shader.resources.uCohubSurfaces = texture.source;
-      for (const filter of filters) filter.resources.uCohubSurfaces = texture.source;
-      if (state) state.simulate.shader.resources.uCohubSurfaces = texture.source;
-      for (const target of state ? [group, state.uniforms] : [group]) {
+      const shaders = [...meshes.flatMap(({ shader, placement }) => (placement ? [shader, placement.mesh.shader] : [shader])), ...filters];
+      if (state) shaders.push(state.simulate.shader);
+      for (const target of shaders) target.resources.uCohubSurfaces = texture.source;
+      const groups = [group, ...meshes.flatMap(({ placement }) => (placement ? [placement.uniforms] : []))];
+      if (state) groups.push(state.uniforms);
+      for (const target of groups) {
         setUniform(target, "uCohubSurfaceRegion", [region.x, region.y, region.width, region.height]);
         target.update();
       }
+      placementsStale = true;
     },
     destroy() {
-      for (const drawn of meshes) destroyBoardShaderMesh(drawn);
+      for (const drawn of meshes) {
+        destroyBoardShaderMesh(drawn);
+        if (drawn.placement) destroyPlacement(renderer, drawn.placement);
+      }
       container?.destroy();
       for (const filter of filters) filter.destroy();
       blank.destroy();

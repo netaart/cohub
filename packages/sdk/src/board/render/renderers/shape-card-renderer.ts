@@ -2,16 +2,13 @@ import { Container, Graphics, GraphicsPath, Matrix, Text } from "pixi.js";
 import type { BoardShapeItem } from "@cohub/protocol";
 import type { SceneItem } from "../../model/scene.js";
 import { layoutShapeLabel, SHAPE_LABEL_PADDING } from "../../model/text-metrics.js";
-import { type WorldPoint, worldPoint } from "../../model/geometry.js";
-import { dashPattern, roundRectPoints, tracePolyline, trimPolyline } from "../stroke.js";
+import { DEFAULT_ROUNDED_RADIUS, dashPattern, shapeOutlinePoints, tracePolyline, trimPolyline } from "../stroke.js";
 import { itemAlpha, itemColor } from "../palette.js";
 import { boardTextStyle, cssBaselineShift } from "../text-measurement.js";
 import { syncTextResolution } from "../text-resolution.js";
 import { positionShell } from "./base-card-renderer.js";
 import type { BoardCardRenderer, BoardRenderContext } from "./board-renderer-registry.js";
 import { drawFarPlate } from "./far-plate.js";
-
-const DEFAULT_ROUNDED_RADIUS = 8;
 
 type ShapeParts = {
 	root: Container;
@@ -72,25 +69,6 @@ export function traceShapeOutline(graphics: Graphics, props: BoardShapeItem["pro
 	}
 }
 
-function outlinePoints(geometry: BoardShapeItem["props"]["geometry"], width: number, height: number, radius: number): WorldPoint[] {
-	const p = (x: number, y: number) => worldPoint(x, y);
-	switch (geometry) {
-		case "ellipse": {
-			const segments = 64;
-			return Array.from({ length: segments + 1 }, (_, index) => {
-				const angle = -Math.PI / 2 + (index / segments) * Math.PI * 2;
-				return p(width / 2 + (Math.cos(angle) * width) / 2, height / 2 + (Math.sin(angle) * height) / 2);
-			});
-		}
-		case "diamond":
-			return [p(width / 2, 0), p(width, height / 2), p(width / 2, height), p(0, height / 2), p(width / 2, 0)];
-		case "triangle":
-			return [p(width / 2, 0), p(width, height), p(0, height), p(width / 2, 0)];
-		default:
-			return roundRectPoints(width, height, radius);
-	}
-}
-
 function sync(container: Container, item: SceneItem<BoardShapeItem>, context: BoardRenderContext) {
 	const parts = partsByContainer.get(container);
 	if (!parts) return;
@@ -116,7 +94,7 @@ function sync(container: Container, item: SceneItem<BoardShapeItem>, context: Bo
 		if (strokeWidth > 0 && (!partial || style.trim)) {
 			if ((pattern || partial) && props.geometry !== "path") {
 				const radius = style.radius ?? (props.geometry === "rounded" ? DEFAULT_ROUNDED_RADIUS : 0);
-				tracePolyline(parts.shape, trimPolyline(outlinePoints(props.geometry, width, height, radius), style.trim), pattern);
+				tracePolyline(parts.shape, trimPolyline(shapeOutlinePoints(props.geometry, width, height, radius), style.trim), pattern);
 			} else traceShapeOutline(parts.shape, props, width, height, style.radius);
 			parts.shape.stroke({
 				color: stroke,

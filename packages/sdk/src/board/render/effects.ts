@@ -114,6 +114,10 @@ function colorSteps(filter: BoardFilter | undefined) {
 class BoardColorFilter extends ColorMatrixFilter {
 	css = "";
 
+	constructor() {
+		super({ resolution: "inherit" });
+	}
+
 	set(filter: BoardFilter | undefined) {
 		const steps = colorSteps(filter);
 		this.css = steps.map(({ step, value }) => step.css(value)).join(" ");
@@ -186,14 +190,38 @@ function shaderPasses() {
 	return passes;
 }
 
-function gaussian(filters: FilterSystem, input: Texture, output: RenderSurface, deviation: number, clear: boolean) {
-	const { horizontal, vertical } = shaderPasses();
+const TEXELS_PER_DEVIATION = 4;
+const MAX_HALVINGS = 5;
+
+function gaussian(filters: FilterSystem, input: Texture, output: RenderSurface, deviation: number, clear: boolean, first?: Filter) {
+	const { horizontal, vertical, copy } = shaderPasses();
+	const resolution = input.source.resolution;
+	const halvings = Math.max(0, Math.min(MAX_HALVINGS, Math.floor(Math.log2((deviation * resolution) / TEXELS_PER_DEVIATION))));
+	const borrowed: Texture[] = [];
+	const borrow = (scale: number) => {
+		const texture = TexturePool.getOptimalTexture(input.frame.width, input.frame.height, resolution * scale, false);
+		borrowed.push(texture);
+		return texture;
+	};
+	let source = input;
+	let scale = 1;
+	for (let step = 0; step < Math.max(halvings, first ? 1 : 0); step++) {
+		if (step < halvings) scale /= 2;
+		const next = borrow(scale);
+		filters.applyFilter(step === 0 && first ? first : copy, source, next, true);
+		source = next;
+	}
 	horizontal.resources.blurUniforms.uniforms.uStep = [deviation / 4, 0];
 	vertical.resources.blurUniforms.uniforms.uStep = [0, deviation / 4];
-	const between = TexturePool.getSameSizeTexture(input);
-	filters.applyFilter(horizontal, input, between, true);
-	filters.applyFilter(vertical, between, output, clear);
-	TexturePool.returnTexture(between);
+	const between = borrow(scale);
+	filters.applyFilter(horizontal, source, between, true);
+	if (scale === 1) filters.applyFilter(vertical, between, output, clear);
+	else {
+		const blurred = borrow(scale);
+		filters.applyFilter(vertical, between, blurred, true);
+		filters.applyFilter(copy, blurred, output, clear);
+	}
+	for (const texture of borrowed) TexturePool.returnTexture(texture);
 }
 
 class BoardBlurFilter extends Filter {
@@ -202,7 +230,7 @@ class BoardBlurFilter extends Filter {
 	private deviation = 0;
 
 	constructor() {
-		super({ glProgram: program("board-copy", COPY_FRAGMENT) });
+		super({ glProgram: program("board-copy", COPY_FRAGMENT), resolution: "inherit" });
 	}
 
 	set(radius: number, zoom: number) {
@@ -230,6 +258,7 @@ class BoardShadowFilter extends Filter {
 
 	constructor() {
 		super({
+			resolution: "inherit",
 			glProgram: program("board-shadow", SHADOW_FRAGMENT),
 			resources: {
 				shadowUniforms: {
@@ -255,12 +284,9 @@ class BoardShadowFilter extends Filter {
 
 	override apply(filters: FilterSystem, input: Texture, output: RenderSurface, clearMode: boolean) {
 		const { copy } = shaderPasses();
-		const shadow = TexturePool.getSameSizeTexture(input);
-		filters.applyFilter(this, input, shadow, true);
-		if (this.deviation > 0) gaussian(filters, shadow, output, this.deviation, clearMode);
-		else filters.applyFilter(copy, shadow, output, clearMode);
+		if (this.deviation > 0) gaussian(filters, input, output, this.deviation, clearMode, this);
+		else filters.applyFilter(this, input, output, clearMode);
 		filters.applyFilter(copy, input, output, false);
-		TexturePool.returnTexture(shadow);
 	}
 
 	getCanvasFilterString(): string {

@@ -2,7 +2,7 @@ import type { BoardShader } from "../../model/script.js";
 import { type BoardShaderParameter, type BoardShaderUniform, boardShaderUniforms, validateBoardShader } from "../../model/shader.js";
 import { BOARD_SHADER_LIBRARY } from "./library.js";
 
-export type BoardShaderProgramKind = "box" | "sprites" | "filter" | "simulate";
+export type BoardShaderProgramKind = "box" | "place" | "placed" | "sprites" | "filter" | "simulate";
 
 export type BoardShaderProgramInput = {
   kind: BoardShaderProgramKind;
@@ -20,6 +20,8 @@ export type BoardShaderProgram = {
 };
 
 export const BOARD_SHADER_ITERATIONS = 65_536;
+export const BOARD_SPRITE_COLUMNS = 256;
+export const BOARD_SPRITE_PLACEMENTS = ["uCohubSpriteGeometry", "uCohubSpriteColor", "uCohubSpriteData", "uCohubSpriteRotation"] as const;
 
 const FORBIDDEN = [
   [/#\s*(version|extension|pragma|line)\b/, "#version, #extension, #pragma and #line are set by Cohub"],
@@ -114,6 +116,7 @@ function declarations(input: BoardShaderProgramInput, stage: "vertex" | "fragmen
     "precision highp int;",
     "precision highp sampler2D;",
     stage === "vertex" ? "#define COHUB_VERTEX 1" : "#define COHUB_FRAGMENT 1",
+    `#define COHUB_SPRITE_COLUMNS ${BOARD_SPRITE_COLUMNS}`,
   ];
   if (stage === "vertex")
     lines.push("#define dFdx(x) ((x) * 0.0)", "#define dFdy(x) ((x) * 0.0)", "#define fwidth(x) ((x) * 0.0)", "#define discard return vec4(0.0)");
@@ -186,6 +189,23 @@ vec4 cohubClip(vec2 local) {
 
 const VARYINGS = "vec2 vCohubUv; vec2 vCohubLocal; vec4 vCohubColor; vec4 vCohubData;";
 
+function spriteVertex(out: string): string {
+  return `in vec2 aPosition;
+${CLIP}
+${out}
+void cohubEmit(vec2 position, vec2 size, float rotation, vec4 color, vec4 data) {
+  vec2 corner = (aPosition - 0.5) * size;
+  float c = cos(rotation);
+  float r = sin(rotation);
+  vec2 local = position + vec2(corner.x * c - corner.y * r, corner.x * r + corner.y * c);
+  gl_Position = cohubClip(local);
+  vCohubUv = aPosition;
+  vCohubLocal = local;
+  vCohubColor = color;
+  vCohubData = data;
+}`;
+}
+
 function vertexMain(kind: BoardShaderProgramKind): string {
   const out = VARYINGS.split(" ").reduce((text, part, index) => text + (index % 2 ? `${part} ` : `out ${part} `), "");
   if (kind === "filter")
@@ -203,23 +223,22 @@ void main() {
   vCohubColor = vec4(1.0);
   vCohubData = vec4(0.0);
 }`;
+  if (kind === "placed")
+    return `${spriteVertex(out)}
+${BOARD_SPRITE_PLACEMENTS.map((name) => `uniform sampler2D ${name};`).join("\n")}
+void main() {
+  ivec2 at = ivec2(gl_InstanceID % COHUB_SPRITE_COLUMNS, gl_InstanceID / COHUB_SPRITE_COLUMNS);
+  vec4 placed = texelFetch(uCohubSpriteGeometry, at, 0);
+  if (placed.z <= 0.0 || placed.w <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  cohubEmit(placed.xy, placed.zw, texelFetch(uCohubSpriteRotation, at, 0).x, texelFetch(uCohubSpriteColor, at, 0), texelFetch(uCohubSpriteData, at, 0));
+}`;
   if (kind === "sprites")
-    return `in vec2 aPosition;
-${CLIP}
-${out}
+    return `${spriteVertex(out)}
 void main() {
   cohubIterations = 0;
   Sprite s = sprite(gl_InstanceID);
   if (!s.visible || s.size.x <= 0.0 || s.size.y <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-  vec2 corner = (aPosition - 0.5) * s.size;
-  float c = cos(s.rotation);
-  float r = sin(s.rotation);
-  vec2 local = s.position + vec2(corner.x * c - corner.y * r, corner.x * r + corner.y * c);
-  gl_Position = cohubClip(local);
-  vCohubUv = aPosition;
-  vCohubLocal = local;
-  vCohubColor = s.color;
-  vCohubData = s.data;
+  cohubEmit(s.position, s.size, s.rotation, s.color, s.data);
 }`;
   return `in vec2 aPosition;
 uniform vec4 uCohubGeometry;
@@ -237,6 +256,24 @@ void main() {
 
 function fragmentMain(kind: BoardShaderProgramKind): string {
   const inputs = VARYINGS.split(" ").reduce((text, part, index) => text + (index % 2 ? `${part} ` : `in ${part} `), "");
+  if (kind === "place")
+    return `uniform int uCohubSpriteCount;
+layout(location = 0) out vec4 cohubGeometry;
+layout(location = 1) out vec4 cohubColor;
+layout(location = 2) out vec4 cohubData;
+layout(location = 3) out vec4 cohubRotation;
+void main() {
+  cohubIterations = 0;
+  ivec2 at = ivec2(gl_FragCoord.xy);
+  int id = at.y * COHUB_SPRITE_COLUMNS + at.x;
+  if (id >= uCohubSpriteCount) { cohubGeometry = vec4(0.0); return; }
+  Sprite s = sprite(id);
+  bool shown = s.visible && s.size.x > 0.0 && s.size.y > 0.0;
+  cohubGeometry = shown ? vec4(s.position, s.size) : vec4(0.0);
+  cohubColor = s.color;
+  cohubData = s.data;
+  cohubRotation = vec4(s.rotation, 0.0, 0.0, 0.0);
+}`;
   const entry = kind === "simulate" ? "simulate" : "effect";
   const write = kind === "simulate"
     ? "finalColor = color;"
@@ -259,13 +296,14 @@ function lineCount(text: string): number {
 export function buildBoardShaderProgram(input: BoardShaderProgramInput): BoardShaderProgram {
   const { code, includes } = prepareBoardShaderSource(input.glsl);
   const library = includes.map((name) => BOARD_SHADER_LIBRARY[name]).join("\n");
-  const stage = (name: "vertex" | "fragment") => {
-    const head = `${declarations(input, name)}\n${library}`;
-    const main = name === "vertex" ? vertexMain(input.kind) : fragmentMain(input.kind);
+  const author = (role: "vertex" | "fragment", main: string) => {
+    const head = `${declarations(input, role)}\n${library}`;
     return { source: `${head}\n${code}\n${main}\n`, firstLine: lineCount(head) + 1 };
   };
-  const vertex = stage("vertex");
-  const fragment = stage("fragment");
+  const vertex = input.kind === "sprites"
+    ? author("vertex", vertexMain(input.kind))
+    : { source: `${declarations(input, "vertex")}\n${vertexMain(input.kind)}\n`, firstLine: 1 };
+  const fragment = author(input.kind === "place" ? "vertex" : "fragment", fragmentMain(input.kind));
   return { vertex: vertex.source, fragment: fragment.source, firstLine: { vertex: vertex.firstLine, fragment: fragment.firstLine } };
 }
 
@@ -284,11 +322,12 @@ export function describeBoardShaderError(log: string, firstLine: number, label: 
 export type BoardShaderStage = { name: string; kind: BoardShaderProgramKind; glsl: string };
 
 export function boardShaderStages(shader: BoardShader, label: string): BoardShaderStage[] {
-  const stages = shader.passes.map((pass, index): BoardShaderStage => ({
-    name: `${label} pass ${index + 1}`,
-    kind: shader.layer === "filter" ? "filter" : pass.sprites ? "sprites" : "box",
-    glsl: pass.glsl,
-  }));
+  const stages = shader.passes.flatMap((pass, index): BoardShaderStage[] => {
+    const name = `${label} pass ${index + 1}`;
+    if (shader.layer === "filter") return [{ name, kind: "filter", glsl: pass.glsl }];
+    if (!pass.sprites) return [{ name, kind: "box", glsl: pass.glsl }];
+    return [{ name, kind: "place", glsl: pass.glsl }, { name, kind: "placed", glsl: pass.glsl }];
+  });
   if (shader.state) stages.push({ name: `${label} state`, kind: "simulate", glsl: shader.state.glsl });
   return stages;
 }

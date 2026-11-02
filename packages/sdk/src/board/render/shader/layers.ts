@@ -7,8 +7,9 @@ import type { BoardDocument } from "@cohub/protocol";
 import { isBoardRootScript } from "../../model/script-index.js";
 import { boardScriptOf, scriptTemporaryPrefix } from "../../model/script-scene.js";
 import { boardShaderParameters, boardShaderSignature } from "../../model/shader.js";
-import type { BoardColor } from "@cohub/protocol";
+import type { BoardColor, BoardShapeItem } from "@cohub/protocol";
 import { itemAlpha, itemColor } from "../palette.js";
+import { DEFAULT_ROUNDED_RADIUS, roundRectPoints, shapeOutlinePoints } from "../stroke.js";
 import type { BoardRenderContext } from "../renderers/board-renderer-registry.js";
 import { type BoardShaderLayer, boardShaderSeed, createBoardShaderLayer } from "./layer.js";
 import { type BoardSurfaceField, createBoardSurfaceField } from "./surfaces.js";
@@ -57,8 +58,21 @@ export function boardShaderColor(context: Pick<BoardRenderContext, "colors" | "c
   return [((color >> 16) & 255) / 255, ((color >> 8) & 255) / 255, (color & 255) / 255, itemAlpha(context, value as BoardColor | undefined)];
 }
 
-const SKIPPED = new Set(["frame", "arrow", "draw", "effect"]);
+const SKIPPED = new Set(["frame", "arrow", "draw", "effect", "text"]);
+const LIGHT_BLENDS = new Set(["screen", "add"]);
 const SURFACE_EDGE = 512;
+const SURFACE_MARGIN = 0.25;
+const SURFACE_COARSEN = 1.5;
+
+function surfaceOutline(item: BoardSceneItem): ReadonlyArray<{ x: number; y: number }> {
+  const { width, height } = item.frame;
+  const radius = item.style?.radius;
+  if (item.type === "shape") {
+    const { geometry } = item.props as BoardShapeItem["props"];
+    return shapeOutlinePoints(geometry, width, height, radius ?? (geometry === "rounded" ? DEFAULT_ROUNDED_RADIUS : 0));
+  }
+  return roundRectPoints(width, height, radius ?? 0);
+}
 
 export function boardSurfaceOutlines(scene: BoardScene, owner: string, world: Rect, worldToLocal: BoardMatrix, candidates?: Iterable<string>): number[][] {
   const prefix = scriptTemporaryPrefix(owner);
@@ -67,23 +81,33 @@ export function boardSurfaceOutlines(scene: BoardScene, owner: string, world: Re
     ? [...candidates].map((id) => scene.get(id)).filter((item): item is BoardSceneItem => Boolean(item))
     : scene.items;
   for (const item of items) {
-    if (item.id === owner || SKIPPED.has(item.type) || item.id.startsWith(prefix) || scene.opacity(item.id) <= 0) continue;
+    if (item.id === owner || SKIPPED.has(item.type) || LIGHT_BLENDS.has(item.style?.blend ?? "") || item.id.startsWith(prefix) || scene.opacity(item.id) <= 0) continue;
     if (!rectsIntersect(itemBounds(item.frame), world)) continue;
-    const ellipse = item.type === "shape" && (item.props as { geometry?: string }).geometry === "ellipse";
+    const { width, height } = item.frame;
     const points: number[] = [];
-    const corners = ellipse
-      ? Array.from({ length: 24 }, (_, index) => {
-          const angle = (index / 24) * Math.PI * 2;
-          return [0.5 + Math.cos(angle) / 2, 0.5 + Math.sin(angle) / 2] as const;
-        })
-      : ([[0, 0], [1, 0], [1, 1], [0, 1]] as const);
-    for (const [u, v] of corners) {
-      const local = applyMatrix(worldToLocal, framePoint(item.frame, u, v));
+    for (const point of surfaceOutline(item)) {
+      const local = applyMatrix(worldToLocal, framePoint(item.frame, width ? point.x / width : 0, height ? point.y / height : 0));
       points.push(local.x, local.y);
     }
     outlines.push(points);
   }
   return outlines;
+}
+
+export function boardSurfaceRegion(previous: Rect | null, region: Rect, margin: number): Rect {
+  if (!margin) return region;
+  if (
+    previous && previous.x <= region.x && previous.y <= region.y &&
+    previous.x + previous.width >= region.x + region.width && previous.y + previous.height >= region.y + region.height &&
+    previous.width <= region.width * (1 + 2 * margin) * SURFACE_COARSEN
+  )
+    return previous;
+  return {
+    x: region.x - region.width * margin,
+    y: region.y - region.height * margin,
+    width: region.width * (1 + 2 * margin),
+    height: region.height * (1 + 2 * margin),
+  };
 }
 
 function parameterValues(
@@ -186,13 +210,15 @@ export function createBoardShaderLayers() {
             uniforms: output.uniforms,
           });
           if (entry.layer.surfaces) {
-            const { region, localToWorld } = placement;
+            const { localToWorld } = placement;
+            const margin = owner.root ? SURFACE_MARGIN : 0;
+            const region = boardSurfaceRegion(entry.surfaces?.region ?? null, placement.region, margin);
             const corners = [applyMatrix(localToWorld, region), applyMatrix(localToWorld, { x: region.x + region.width, y: region.y + region.height }),
               applyMatrix(localToWorld, { x: region.x + region.width, y: region.y }), applyMatrix(localToWorld, { x: region.x, y: region.y + region.height })];
             const xs = corners.map((point) => point.x);
             const ys = corners.map((point) => point.y);
             const world = { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
-            const edge = Math.max(64, Math.round(SURFACE_EDGE * host.quality));
+            const edge = Math.max(64, Math.round(SURFACE_EDGE * (1 + 2 * margin) * host.quality));
             const key = `${[region.x, region.y, region.width, region.height, ...localToWorld].map((n) => n.toFixed(3)).join(",")}|${edge}`;
             entry.surfaces ??= createBoardSurfaceField();
             if (key !== entry.surfaceKey || entry.surfaceScene !== scene) {
