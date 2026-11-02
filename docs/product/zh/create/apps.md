@@ -110,11 +110,14 @@ cohub -s <spaceId> apps publish app --port 5173
 cohub -s <spaceId> apps ls --json
 cohub apps get <appId|url|username/space/app> --json
 cohub apps stats <appId|url|username/space/app>
+cohub apps like <appId|url|username/space/app>
 cohub apps download <appId|url|username/space/app> --output <path>
 cohub apps publish-version <appId>
 ```
 
 `apps download` 直接从 CDN 恢复新发布的文件或目录产物，并校验 checksum。带有配套资源的 HTML 文件会恢复为目录 bundle。Board 和 port App 不支持下载。
+
+`apps like` 和 `apps unlike` 设置你的点赞；`apps get` 显示公开的点赞总数。
 
 ## 推广链接
 

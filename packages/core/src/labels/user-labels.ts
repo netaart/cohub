@@ -1,15 +1,17 @@
 import { and, asc, eq, inArray, max, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { labelAssignments, labels } from "@cohub/db";
+import { LIKED_LABEL_SYSTEM_KEY } from "@cohub/protocol";
 import { parseLabelRef, parseLabelRefs, resolveLabelPaths, resolveOrCreateLabelPaths } from "./index.js";
 import type { LabelResourceType } from "./resource-events.js";
+import { applySystemLabelEffects, assertSystemLabelsApplicable, loadSystemLabelEffects } from "./system-effects.js";
 
 type LabelsDb = PostgresJsDatabase<Record<string, unknown>>;
 export const USER_LABEL_SCOPE_TYPE = "user";
 export const PINNED_LABEL_NAME = "Pinned";
 export const PINNED_LABEL_SYSTEM_KEY = "user:pinned";
 export const ARCHIVED_LABEL_SYSTEM_KEY = "user:archived";
-export const USER_SYSTEM_LABELS = { pinned: PINNED_LABEL_SYSTEM_KEY, archived: ARCHIVED_LABEL_SYSTEM_KEY } as const;
+export const USER_SYSTEM_LABELS = { pinned: PINNED_LABEL_SYSTEM_KEY, archived: ARCHIVED_LABEL_SYSTEM_KEY, liked: LIKED_LABEL_SYSTEM_KEY } as const;
 export type UserLabelAssignment = typeof labelAssignments.$inferSelect & {
   labelSystemKey: string | null;
   labelName: string;
@@ -98,19 +100,27 @@ export async function patchUserResourcesLabels(db: LabelsDb, userUuid: string, r
   }
   const addIds = await resolveOrCreateUserLabelRefs(db, userUuid, adds);
   const { labelIds: removeIds } = await resolveLabelPaths({ db, spaceId: userUuid, scopeType: "user", paths: parseLabelRefs([...new Set(removes)]) });
-  if (removeIds.length) await db.delete(labelAssignments).where(and(
-    eq(labelAssignments.scopeType, "user"), eq(labelAssignments.scopeId, userUuid),
-    eq(labelAssignments.resourceType, resourceType), inArray(labelAssignments.resourceRef, refs), inArray(labelAssignments.labelId, removeIds),
-  ));
-  if (addIds.length) {
+  const insertIds = addIds.filter((id) => !removeIds.includes(id));
+  const effects = await loadSystemLabelEffects(db, [...insertIds, ...removeIds]);
+  assertSystemLabelsApplicable(effects, insertIds, resourceType);
+  const changed = { labelId: labelAssignments.labelId, resourceRef: labelAssignments.resourceRef };
+  const removed = removeIds.length
+    ? await db.delete(labelAssignments).where(and(
+      eq(labelAssignments.scopeType, "user"), eq(labelAssignments.scopeId, userUuid),
+      eq(labelAssignments.resourceType, resourceType), inArray(labelAssignments.resourceRef, refs), inArray(labelAssignments.labelId, removeIds),
+    )).returning(changed)
+    : [];
+  let added: typeof removed = [];
+  if (insertIds.length) {
     const ranks = await db.select({ labelId: labelAssignments.labelId, rank: max(labelAssignments.rank) }).from(labelAssignments)
-      .where(inArray(labelAssignments.labelId, addIds)).groupBy(labelAssignments.labelId);
+      .where(inArray(labelAssignments.labelId, insertIds)).groupBy(labelAssignments.labelId);
     const byLabel = new Map(ranks.map((row) => [row.labelId, row.rank ?? 0]));
-    await db.insert(labelAssignments).values(addIds.filter((id) => !removeIds.includes(id)).flatMap((labelId) => refs.map((resourceRef, i) => ({
+    added = await db.insert(labelAssignments).values(insertIds.flatMap((labelId) => refs.map((resourceRef, i) => ({
       labelId, scopeType: "user", scopeId: userUuid, resourceType, resourceRef,
       rank: (byLabel.get(labelId) ?? 0) + (i + 1) * 10, source: "user", createdBy: userUuid,
-    })))).onConflictDoNothing();
+    })))).onConflictDoNothing().returning(changed);
   }
+  await applySystemLabelEffects(db, effects, resourceType, { added, removed });
   const rows = await db.select({ resourceRef: labelAssignments.resourceRef, labelSystemKey: labels.systemKey, labelName: labels.name, labelId: labelAssignments.labelId, rank: labelAssignments.rank, createdAt: labelAssignments.createdAt })
     .from(labelAssignments).innerJoin(labels, eq(labels.id, labelAssignments.labelId))
     .where(and(eq(labelAssignments.scopeType, "user"), eq(labelAssignments.scopeId, userUuid), eq(labelAssignments.resourceType, resourceType), inArray(labelAssignments.resourceRef, refs)))

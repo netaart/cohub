@@ -96,7 +96,7 @@ function sourcePercent(views: number) {
 			</button>
 		</div>
 	{:else if stats}
-		<div class="grid grid-cols-3 gap-4 sm:max-w-xl sm:gap-8">
+		<div class="grid gap-4 sm:max-w-xl sm:gap-8 {stats.summary.totalLikes === undefined ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}">
 			<div class="min-w-0" title={m.app_stats_total_views_title({ count: exactCount(stats.summary.totalViews) }, { locale })}>
 				<div class="truncate font-mono text-[18px] font-semibold text-text-primary">{compactCount(stats.summary.totalViews)}</div>
 				<div class="mt-0.5 text-[10px] text-text-placeholder">{m.app_stats_total({}, { locale })}</div>
@@ -109,6 +109,12 @@ function sourcePercent(views: number) {
 				<div class="truncate font-mono text-[18px] font-semibold text-text-primary">{compactCount(stats.summary.views7d)}</div>
 				<div class="mt-0.5 text-[10px] text-text-placeholder">{m.app_stats_last_7d({}, { locale })}</div>
 			</div>
+			{#if stats.summary.totalLikes !== undefined}
+				<div class="min-w-0" title={m.app_like_count_title({ count: exactCount(stats.summary.totalLikes) }, { locale })}>
+					<div class="truncate font-mono text-[18px] font-semibold text-text-primary">{compactCount(stats.summary.totalLikes)}</div>
+					<div class="mt-0.5 text-[10px] text-text-placeholder">{m.app_stats_likes({}, { locale })}</div>
+				</div>
+			{/if}
 		</div>
 
 		<div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_220px] lg:gap-10">

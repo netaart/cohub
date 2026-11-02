@@ -231,6 +231,7 @@ export { assignSessionParticipantSystemLabels, getSessionUserLabelSystemKey, par
 export { assignSessionSourceSystemLabel, getSessionSourceLabelSystemKey, resolveKnownSessionSourceLabelSystemKey, resolveSessionSourceKey, resolveSessionSourceLabelRef, resolveSessionSourceLabelSystemKey, SESSION_SOURCE_KEYS, SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX, SESSION_SOURCE_ROOT_LABEL_SYSTEM_KEY } from "./session-source.js";
 export { assignSessionChannelSystemLabel, getSessionChannelLabelSystemKey, parseSessionChannelLabelSystemKey, SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX, SESSION_CHANNEL_ROOT_LABEL_SYSTEM_KEY } from "./session-channel.js";
 export { listResourceLabelRefs } from "./resource-events.js";
+export { getLikeCount } from "./likes.js";
 export type { LabelResourceType } from "./resource-events.js";
 export type { UserLabelAssignment } from "./user-labels.js";
 export {

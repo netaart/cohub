@@ -1556,7 +1556,7 @@ export type LabelScopeType = "space" | "user" | "org";
 
 export type LabelSource = "user" | "system";
 
-export type LabelResourceType = "session" | "checkpoint" | "file" | "space";
+export type LabelResourceType = "session" | "checkpoint" | "file" | "space" | "app";
 
 export type LabelRecord = {
   id: string;

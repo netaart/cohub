@@ -10,6 +10,7 @@ import type { AuthUser } from "../lib/middleware.js";
 import { hasPermission, filterSpaceIdsByPermission } from "../permissions.js";
 import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
 import { dispatchRealtimeEvent } from "../channels.js";
+import { canViewPublishedApp } from "../app-access.js";
 
 const router = new Hono();
 const MAX_BATCH = 200;
@@ -170,7 +171,7 @@ router.get("/resources/:resourceType/labels", async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
   const resourceType = parseResourceType(c.req.param("resourceType") ?? "");
-  const resourceRef = c.req.query("resourceRef")?.trim() ?? "";
+  const resourceRef = resourceType ? parseResourceRef(resourceType, c.req.query("resourceRef")) : "";
   if (!resourceType || !resourceRef) return c.json({ message: "resource not found" }, 404);
   return c.json({ assignments: await getUserResourceLabelAssignments(db, user.uuid, resourceType, resourceRef) });
 });
@@ -179,7 +180,7 @@ router.patch("/resources/:resourceType/labels", async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
   const resourceType = parseResourceType(c.req.param("resourceType") ?? "");
-  const resourceRef = c.req.query("resourceRef")?.trim() ?? "";
+  const resourceRef = resourceType ? parseResourceRef(resourceType, c.req.query("resourceRef")) : "";
   if (!resourceType || !resourceRef) return c.json({ message: "resource not found" }, 404);
   if (!(await canLabelResource(user, resourceType, resourceRef))) return c.json({ message: "forbidden" }, 403);
   const body = await c.req.json().catch(() => null);
@@ -211,17 +212,25 @@ router.patch("/resources/:resourceType/labels/batch", async (c) => {
   }
 });
 
-const USER_LABEL_RESOURCE_TYPES = new Set(["space", "session", "checkpoint", "file"] as const);
-type UserLabelResourceType = "space" | "session" | "checkpoint" | "file";
+const USER_LABEL_RESOURCE_TYPES = new Set(["space", "session", "checkpoint", "file", "app"] as const);
+type UserLabelResourceType = "space" | "session" | "checkpoint" | "file" | "app";
 
 function parseResourceType(value: string): UserLabelResourceType | null {
   return USER_LABEL_RESOURCE_TYPES.has(value as UserLabelResourceType) ? value as UserLabelResourceType : null;
+}
+
+function parseResourceRef(resourceType: UserLabelResourceType, value: string | undefined) {
+  const ref = value?.trim() ?? "";
+  if (resourceType !== "app" || !requireValidId(ref)) return ref;
+  const hex = ref.replaceAll("-", "").toLowerCase();
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 async function canLabelResource(user: AuthUser, resourceType: UserLabelResourceType, resourceRef: string) {
   if (resourceType === "file") return true;
   if (!requireValidId(resourceRef)) return false;
   if (resourceType === "space") return hasPermission(user, "space.view", { spaceId: resourceRef });
+  if (resourceType === "app") return canViewPublishedApp(user, resourceRef);
   if (resourceType === "session") {
     const [session] = await db.select({ spaceId: spaceSessions.spaceId }).from(spaceSessions).where(eq(spaceSessions.id, resourceRef)).limit(1);
     return Boolean(session && await hasPermission(user, "session.view", { spaceId: session.spaceId }));

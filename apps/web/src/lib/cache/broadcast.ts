@@ -11,7 +11,8 @@ export type CacheBroadcastStore =
 	| "label_items"
 	| "resource_labels"
 	| "user_profiles"
-	| "palette_overview";
+	| "palette_overview"
+	| "viewer_likes";
 
 export type CacheBroadcastMessage = {
 	type: "cache-updated" | "cache-deleted" | "cache-scope-invalidated";

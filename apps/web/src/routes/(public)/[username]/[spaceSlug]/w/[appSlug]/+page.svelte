@@ -37,6 +37,7 @@ type ReadyView = {
 	content: AppDetailResponse["content"];
 	publicUrl: AppDetailResponse["publicUrl"];
 	totalViews: number | null;
+	likeCount: number | null;
 	version: PublicAppVersionSummary | null;
 	pathname: string;
 	origin: string;
@@ -220,6 +221,7 @@ function toReadyView(
 		content: detail.content,
 		publicUrl: detail.publicUrl,
 		totalViews: detail.totalViews ?? null,
+		likeCount: detail.likeCount ?? null,
 		version: detail.version ?? null,
 		pathname,
 		origin,
@@ -461,6 +463,7 @@ function handleSelectVersion(version: number | null) {
 		publisher={ready.publisher}
 		content={ready.content}
 		totalViews={ready.totalViews}
+		likeCount={ready.likeCount}
 		{launchState}
 		{shell}
 		{invocation}

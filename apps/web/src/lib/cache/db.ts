@@ -20,7 +20,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 27;
+export const DB_VERSION = 28;
 
 export type SessionListForkRecord = Partial<
 	Omit<SessionForkRecord, "parentSessionId">
@@ -287,6 +287,16 @@ export type AppDomainsCacheRecord = {
 	lastAccessedAt: number;
 };
 
+export type ViewerLikeCacheRecord = {
+	key: string;
+	userKey: string;
+	resourceType: string;
+	resourceId: string;
+	liked: boolean;
+	updatedAt: number;
+	lastAccessedAt: number;
+};
+
 export type StoreName =
 	| "session_lists"
 	| "session_list_indexes"
@@ -307,7 +317,8 @@ export type StoreName =
 	| "task_run_summaries"
 	| "task_run_details"
 	| "session_files"
-	| "app_domains";
+	| "app_domains"
+	| "viewer_likes";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 /** Resolved connection for O(1) reuse after open; cleared on versionchange/reset. */
@@ -820,6 +831,9 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
 			defineStore(db, tx, "app_domains", [
+				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
+			]);
+			defineStore(db, tx, "viewer_likes", [
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
 			defineStore(db, tx, "task_run_details", [

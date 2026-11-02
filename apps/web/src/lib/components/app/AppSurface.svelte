@@ -100,6 +100,7 @@ type Props = {
 	content?: AppContent | null;
 	/** All-time view count shown in the public Cohub bar. */
 	totalViews?: number | null;
+	likeCount?: number | null;
 	mode?: AppSurfaceMode;
 	launchState?: AppLaunchState | null;
 	invocation?: AppRuntimeInvocationContext;
@@ -146,6 +147,7 @@ const {
 	publisher = null,
 	content = null,
 	totalViews = null,
+	likeCount = null,
 	mode = "page",
 	launchState = null,
 	invocation = undefined,
@@ -639,6 +641,7 @@ onMount(() => {
 			{space}
 			publisher={publisherIdentity}
 			{totalViews}
+			{likeCount}
 			actions={barActions || devices.granted.length > 0 ? barControls : undefined}
 		/>
 	{/if}

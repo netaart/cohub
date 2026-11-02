@@ -51,6 +51,8 @@ import { applyRequestSourceToMeta, getRequestSource } from "../lib/request-sourc
 import { dispatchAppVersionPublished } from "../app-events.js";
 import { parseHttpsOriginHostname, releaseAppDomainsInTransaction, resolveCustomDomainBinding } from "../app-domains.js";
 import { resolveAppVersionSources } from "../app-version-source.js";
+import { requiresSpaceAppAccess } from "../app-access.js";
+import { getLikeCount } from "@cohub/core/labels";
 import { ensureUserProfileByUuid, fallbackPublicUserProfile, type PublicUserProfile } from "../user-profiles.js";
 import {
   getAppTotalViews,
@@ -165,7 +167,6 @@ async function ensureAppPresentationAllowed(c: Context, input: { userId: string;
 const isAppSlugConflict = (error: unknown) => isPostgresUniqueViolation(error, "v2_uq_apps_space_slug");
 const invalidAppStatusResponse = (c: Context) => c.json({ message: "status must be one of: published, disabled" }, 400);
 const invalidAppVisibilityResponse = (c: Context) => c.json({ message: "visibility must be one of: public, space" }, 400);
-const requiresSpaceAppAccess = (app: Pick<typeof apps.$inferSelect, "visibility">) => (app.visibility ?? "public") === "space";
 const appHideCohubBarRequiredResponse = (c: Context) =>
   featureGateResponse(c, {
     source: "work_hide_cohub_bar",
@@ -592,9 +593,10 @@ async function getStandaloneAppDetail(app: typeof apps.$inferSelect) {
 async function getPublicAppDetail(app: typeof apps.$inferSelect) {
   const identity = await getPublishedAppPublicIdentity(app);
   if (!identity) return null;
-  const [content, totalViews, publisher] = await Promise.all([
+  const [content, totalViews, likeCount, publisher] = await Promise.all([
     getPublishedAppContent(app),
     getAppTotalViews(app.id),
+    getLikeCount(db, "app", app.id),
     resolveAppPublisher(app.userUuid),
   ]);
   return {
@@ -603,6 +605,7 @@ async function getPublicAppDetail(app: typeof apps.$inferSelect) {
     publicUrl: createAppPublicUrl({ ownerUsername: identity.owner.username, spaceSlug: identity.space.slug, appSlug: app.slug, status: app.status }),
     content,
     totalViews,
+    likeCount,
   };
 }
 
@@ -692,9 +695,10 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
   if (requested.version !== null && !version) return c.json({ message: "app version not found" }, 404);
 
   recordResolvedAppView(c, row.app, "web");
-  const [content, totalViews] = await Promise.all([
+  const [content, totalViews, likeCount] = await Promise.all([
     getAppVersionContent(row.app, version),
     getAppTotalViews(row.app.id),
+    getLikeCount(db, "app", row.app.id),
   ]);
 
   // Public apps are anonymous-readable; space apps depend on the caller. The
@@ -713,6 +717,7 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
     content,
     version: version ? publicVersionSummary(version, null) : null,
     totalViews,
+    likeCount,
   });
 });
 
@@ -800,7 +805,8 @@ router.get("/:id/stats", async (c) => {
   const app = await getAppById(id);
   if (!app) return c.json({ message: "app not found" }, 404);
   if (!(await hasPermission(user, "app.manage", { spaceId: app.spaceId }))) return authzDenied(c);
-  return c.json(await getAppViewStats(app.id));
+  const [stats, totalLikes] = await Promise.all([getAppViewStats(app.id), getLikeCount(db, "app", app.id)]);
+  return c.json({ ...stats, summary: { ...stats.summary, totalLikes } });
 });
 
 router.get("/:id", async (c) => {
@@ -827,9 +833,10 @@ router.get("/:id", async (c) => {
   const shouldRecordCliView = getRequestSource(c)?.via === "cli"
     && getExecutionPrincipal(c)?.source !== APP_ACTION_EXECUTION_SOURCE;
   if (shouldRecordCliView) recordResolvedAppView(c, app, "cli");
-  const [content, totalViews] = await Promise.all([
+  const [content, totalViews, likeCount] = await Promise.all([
     getPublishedAppContent(app),
     getAppTotalViews(app.id),
+    getLikeCount(db, "app", app.id),
   ]);
   return c.json({
     ...wrapAppRecord(wire, serializeApp(app)),
@@ -839,6 +846,7 @@ router.get("/:id", async (c) => {
     publicUrl: createAppPublicUrl({ ownerUsername: row.owner.username, spaceSlug: row.space.slug, appSlug: app.slug, status: app.status }),
     content,
     totalViews,
+    likeCount,
   });
 });
 

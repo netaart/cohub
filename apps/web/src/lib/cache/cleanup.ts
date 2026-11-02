@@ -11,6 +11,7 @@ import {
 	type SessionListIndexCacheRecord,
 	type SessionTurnsCacheRecord,
 	type SpaceFsDirCacheRecord,
+	type ViewerLikeCacheRecord,
 } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
 import type { ActivityCacheRecord } from "$lib/cache/repositories/activity-repo";
@@ -34,6 +35,7 @@ const MAX_ENTRIES = {
 	activity: 30,
 	boardManifests: 2000,
 	appDomains: 500,
+	viewerLikes: 2000,
 };
 
 function shouldRunCleanup() {
@@ -68,7 +70,8 @@ async function cleanupStore<
 		| "resource_labels"
 		| "activity"
 		| "board_manifests"
-		| "app_domains",
+		| "app_domains"
+		| "viewer_likes",
 	maxEntries: number,
 ) {
 	const userKey = getCacheUserKey();
@@ -144,6 +147,10 @@ export function scheduleCacheCleanup() {
 			cleanupStore<AppDomainsCacheRecord>(
 				"app_domains",
 				MAX_ENTRIES.appDomains,
+			),
+			cleanupStore<ViewerLikeCacheRecord>(
+				"viewer_likes",
+				MAX_ENTRIES.viewerLikes,
 			),
 		])
 			.then(markCleanupDone)

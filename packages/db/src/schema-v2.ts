@@ -13,6 +13,7 @@ import {
   jsonb,
   uniqueIndex,
   unique,
+  primaryKey,
   check,
   doublePrecision,
   type AnyPgColumn,
@@ -1263,6 +1264,21 @@ export const labelAssignments = v2.table(
       table.labelId,
     ),
     resourceRefSearchIdx: index("v2_idx_label_assignments_resource_ref_trgm").using("gin", table.resourceRef.op("gin_trgm_ops")),
+  }),
+);
+
+export const resourceLikeCounts = v2.table(
+  "resource_like_counts",
+  {
+    resourceType: varchar("resource_type", { length: 20 }).notNull(),
+    resourceId: uuid("resource_id").notNull(),
+    likeCount: bigint("like_count", { mode: "number" }).notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ name: "v2_pk_resource_like_counts", columns: [table.resourceType, table.resourceId] }),
+    resourceTypeCheck: check("v2_chk_resource_like_counts_resource_type", sql`${table.resourceType} in ('app')`),
+    likeCountCheck: check("v2_chk_resource_like_counts_like_count", sql`${table.likeCount} >= 0`),
   }),
 );
 

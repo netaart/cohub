@@ -4,6 +4,7 @@ import { Eye } from "lucide-svelte";
 import type { Snippet } from "svelte";
 import { page } from "$app/state";
 import { appDisplayTitle } from "$lib/app-page-meta";
+import AppLikeButton from "$lib/components/app/AppLikeButton.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import { formatCompactNumber, formatNumber } from "$lib/i18n/format";
@@ -26,12 +27,13 @@ export type CohubBarOwner = {
 } | null;
 
 type Props = {
-	app: Pick<AppRecord, "slug" | "meta">;
+	app: Pick<AppRecord, "id" | "slug" | "meta">;
 	space?: CohubBarSpace | null;
 	/** Author identity to credit ("Published by"): the App publisher, or the Space owner when unknown. */
 	publisher?: CohubBarOwner;
 	/** All-time view count; null hides the stat instead of rendering 0. */
 	totalViews?: number | null;
+	likeCount?: number | null;
 	/** Extra controls rendered before the stats (e.g. version switcher). */
 	actions?: Snippet;
 };
@@ -41,6 +43,7 @@ const {
 	space = null,
 	publisher = null,
 	totalViews = null,
+	likeCount = null,
 	actions = undefined,
 }: Props = $props();
 
@@ -120,6 +123,11 @@ const totalViewsTitle = $derived(
 		<div class="hidden h-4 w-px shrink-0 bg-border-subtle sm:block"></div>
 	{/if}
 	<div class="flex min-w-0 shrink-0 items-center gap-2 overflow-hidden">
+		{#if typeof likeCount === "number"}
+			{#key app.id}
+				<AppLikeButton appId={app.id} count={likeCount} />
+			{/key}
+		{/if}
 		{#if totalViewsText}
 			<span
 				class="flex shrink-0 items-center gap-1.5 text-text-tertiary"

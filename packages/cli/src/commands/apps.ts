@@ -204,10 +204,11 @@ function printApp(app: Record<string, unknown>): void {
   ]);
 }
 
-function printAppUrls(result: { publicUrl?: string | null; content?: { url: string } | null }): void {
+function printAppDetails(result: { publicUrl?: string | null; content?: { url: string } | null; likeCount?: number }): void {
   const lines = [
     result.publicUrl ? `Public URL: ${result.publicUrl}` : null,
     result.content?.url ? `Content URL: ${result.content.url}` : null,
+    typeof result.likeCount === "number" ? `Likes: ${result.likeCount}` : null,
   ].filter((line): line is string => Boolean(line));
   if (lines.length) console.log(`\n${lines.join("\n")}`);
 }
@@ -226,6 +227,7 @@ function printAppStats(stats: AppViewStatsResponse): void {
     { key: "views24h", label: "24h" },
     { key: "views7d", label: "7d" },
     { key: "views30d", label: "30d" },
+    ...(stats.summary.totalLikes === undefined ? [] : [{ key: "totalLikes", label: "Likes" }]),
   ]);
   if (stats.sources.length) {
     console.log("");
@@ -345,7 +347,7 @@ export function registerApps(program: Command): void {
         const result = await getAppByRef(client, app);
         if (jsonRequested(opts)) return outJson(result);
         printApp(result.app);
-        printAppUrls(result);
+        printAppDetails(result);
       } catch (e: unknown) {
         handleHttp(e);
       }
@@ -365,6 +367,25 @@ export function registerApps(program: Command): void {
         handleHttp(e);
       }
     });
+
+  for (const liked of [true, false]) {
+    appsCmd
+      .command(`${liked ? "like" : "unlike"} <app>`)
+      .description(`${liked ? "Like" : "Unlike"} an app by id, URL, mention URI, or username/space/app`)
+      .option("--json", "Output as JSON")
+      .action(async (app: string, opts: { json?: boolean }) => {
+        const client = createClient();
+        try {
+          const ref = parseAppRef(app);
+          const appId = "id" in ref ? ref.id : (await getAppByRef(client, app)).app.id;
+          const result = { appId, liked: await client.user.likes.set("app", appId, liked) };
+          if (jsonRequested(opts)) return outJson(result);
+          ok(result.liked ? "Liked" : "Unliked");
+        } catch (e: unknown) {
+          handleHttp(e);
+        }
+      });
+  }
 
   appsCmd
     .command("download <app>")
@@ -423,7 +444,7 @@ export function registerApps(program: Command): void {
         const result = await client.apps.getBySlug(opts.owner.trim(), opts.spaceSlug.trim(), appSlug);
         if (jsonRequested(opts)) return outJson(result);
         printApp(result.app);
-        printAppUrls(result);
+        printAppDetails(result);
       } catch (e: unknown) {
         handleHttp(e);
       }

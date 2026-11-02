@@ -183,6 +183,7 @@ export type AppDetailResponse = {
   version?: PublicAppVersionSummary | null;
   /** All-time view count; `null` when the rollup total is unavailable. */
   totalViews?: number | null;
+  likeCount?: number;
 };
 
 export type AppGetResponse = AppDetailResponse;
@@ -193,6 +194,7 @@ export type AppViewSource = "web" | "cli" | "api";
 
 export type AppViewStatsResponse = {
   summary: {
+    totalLikes?: number;
     totalViews: number;
     views24h: number;
     views7d: number;

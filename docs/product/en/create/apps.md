@@ -113,11 +113,14 @@ Useful follow-ups:
 cohub -s <spaceId> apps ls --json
 cohub apps get <appId|url|username/space/app> --json
 cohub apps stats <appId|url|username/space/app>
+cohub apps like <appId|url|username/space/app>
 cohub apps download <appId|url|username/space/app> --output <path>
 cohub apps publish-version <appId>
 ```
 
 `apps download` restores newly published file and directory artifacts directly from the CDN and verifies their checksums. HTML files with companion assets are restored as directory bundles. Board and port apps are not downloadable.
+
+`apps like` and `apps unlike` set your like; `apps get` shows the public like total.
 
 ## Promote an App
 

@@ -3,7 +3,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { checkpoints, labelAssignments, type labels, spaceSessions } from "@cohub/db";
 import { listLabelsByRank } from "./index.js";
 
-export type LabelResourceType = "session" | "checkpoint" | "file" | "space";
+export type LabelResourceType = "session" | "checkpoint" | "file" | "space" | "app";
 
 type LabelsDb = PostgresJsDatabase<Record<string, unknown>>;
 

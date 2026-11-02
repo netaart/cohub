@@ -171,6 +171,16 @@ export function normalizeDirPath(dirPath: string) {
 	return dirPath.trim().replace(/^\/+|\/+$/g, "");
 }
 
+export function viewerLikeKey(
+	userKey: string,
+	resourceType: string,
+	resourceId: string,
+) {
+	return [userKey, "like", resourceType, resourceId]
+		.map(encodeKeyPart)
+		.join(":");
+}
+
 export function appDomainsKey(userKey: string, spaceId: string, appId: string) {
 	return [userKey, spaceId, appId, "domains"].map(encodeKeyPart).join(":");
 }

@@ -1,3 +1,4 @@
+import { LIKED_LABEL_NAME, LIKED_LABEL_SYSTEM_KEY, type LikeResourceType } from "@cohub/protocol";
 import { HttpError, type HttpTransport, type Fetch } from "../transport.js";
 import type { LabelAssignmentRecord, LabelListItem, LabelResourceType, MeResponse, SessionRecord, SpaceRecord, UserActivityQuery, UserActivityResponse, UserProfile, UserRulesResponse, UserSessionsResponse, UserSessionSourceKey } from "../types.js";
 
@@ -5,6 +6,7 @@ const usageDate = (value: string | Date) => value instanceof Date ? value.toISOS
 
 export class UserApi {
   readonly labels: UserLabelsApi;
+  readonly likes: UserLikesApi;
 
   constructor(
     private readonly transport: HttpTransport,
@@ -13,6 +15,7 @@ export class UserApi {
     private readonly clearStoredAuthToken?: () => void,
   ) {
     this.labels = new UserLabelsApi(transport);
+    this.likes = new UserLikesApi(this.labels);
   }
 
   getMe(
@@ -152,5 +155,21 @@ export class UserLabelsApi {
         body: JSON.stringify(input),
       },
     );
+  }
+}
+
+const hasLike = ({ assignments }: { assignments: LabelAssignmentRecord[] }) =>
+  assignments.some((assignment) => assignment.labelSystemKey === LIKED_LABEL_SYSTEM_KEY);
+
+export class UserLikesApi {
+  constructor(private readonly labels: UserLabelsApi) {}
+
+  async isLiked(resourceType: LikeResourceType, resourceId: string): Promise<boolean> {
+    return hasLike(await this.labels.getResourceLabels(resourceType, resourceId));
+  }
+
+  async set(resourceType: LikeResourceType, resourceId: string, liked: boolean): Promise<boolean> {
+    const patch = liked ? { addLabelRefs: [LIKED_LABEL_NAME] } : { removeLabelRefs: [LIKED_LABEL_NAME] };
+    return hasLike(await this.labels.patchResourceLabels(resourceType, resourceId, patch));
   }
 }

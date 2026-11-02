@@ -76,6 +76,8 @@ export {
 } from "./app-ref.js";
 export type { ParsedAppRef, AppPublicRef } from "./app-ref.js";
 export { isUuid } from "@cohub/protocol/identifiers";
+export { LIKE_RESOURCE_TYPES, LIKED_LABEL_SYSTEM_KEY, isLikeResourceType } from "@cohub/protocol";
+export type { LikeResourceType } from "@cohub/protocol";
 export { parseSpaceRef } from "./space-ref.js";
 export { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 export {

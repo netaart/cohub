@@ -46,6 +46,7 @@ export const load: PageServerLoad = async ({
 			content: result.detail.content,
 			publicUrl: result.detail.publicUrl,
 			totalViews: result.detail.totalViews ?? null,
+			likeCount: result.detail.likeCount ?? null,
 			version: result.detail.version ?? null,
 			requestedVersion,
 			pathname: url.pathname,
