@@ -60,6 +60,8 @@ jobs:
           tar -xJf "${source}.tar.xz"
           cd "$source"
           ./android-configure patch
+          # zlib reaches for the NDK's deprecated cpufeatures on Android; getauxval, its Linux path, works there too.
+          sed -i "s/'ARMV8_OS_ANDROID'/'ARMV8_OS_LINUX'/" deps/zlib/zlib.gyp
           # API 30: the device Runtime needs Android 11. V8's build tools run here, so build them for here.
           CC_host=gcc CXX_host=g++ ./android-configure "$NDK" 30 arm64
           make -j"$(nproc)"
