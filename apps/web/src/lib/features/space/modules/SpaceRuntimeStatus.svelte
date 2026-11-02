@@ -171,6 +171,7 @@ const phoneError = $derived.by(() => {
 		case "pairing_wrong": return m.runtime_phone_control_error_pairing_wrong({}, { locale });
 		case "pairing_closed": return m.runtime_phone_control_error_pairing_closed({}, { locale });
 		case "local_network_off": return m.runtime_phone_control_error_local_network_off({}, { locale });
+		case "wifi_off": return m.runtime_phone_control_error_wifi_off({}, { locale });
 		default: return null;
 	}
 });
@@ -486,7 +487,7 @@ $effect(() => {
 				{#if tone !== "online"}
 					<p class="runtime-hint">{tone === "attention" ? m.runtime_degraded_hint({}, { locale }) : tone === "unknown" ? m.runtime_unknown_hint({}, { locale }) : m.runtime_disconnected_hint({}, { locale })}</p>
 				{/if}
-				{#if status.runtimeId}<details class="runtime-details"><summary>{m.runtime_diagnostics({}, { locale })}</summary><dl><dt>{m.runtime_id({}, { locale })}</dt><dd><code>{status.runtimeId}</code></dd></dl><code>cohub runtime logs --follow</code></details>{/if}
+				{#if status.runtimeId}<details class="runtime-details"><summary>{m.runtime_diagnostics({}, { locale })}</summary><dl><dt>{m.runtime_id({}, { locale })}</dt><dd><code>{status.runtimeId}</code></dd>{#if phoneControl?.detail}<dt>{m.runtime_phone_control({}, { locale })}</dt><dd><code>{phoneControl.detail}</code></dd>{/if}</dl><code>cohub runtime logs --follow</code></details>{/if}
 				{#if deviceInstances && canManage}
 					{#if deviceHint}<div class="runtime-hint">{#if devicePermission}<HostPermissionNotice kind={devicePermission} message={deviceHint} />{:else}{deviceHint}{/if}</div>{:else if devicePermission && device?.state === "error"}<div class="runtime-hint"><HostPermissionNotice kind={devicePermission} /></div>{/if}
 					{#if device?.error === "no_shell"}<p class="runtime-hint">{m.runtime_device_no_shell({}, { locale })} <a class="runtime-link" href="https://git-scm.com/download/win" target="_blank" rel="noreferrer">{m.runtime_device_install_git({}, { locale })}</a></p>{/if}

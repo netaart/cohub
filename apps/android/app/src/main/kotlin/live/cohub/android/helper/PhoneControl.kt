@@ -66,7 +66,7 @@ import kotlin.coroutines.resume
 class PhoneControl(private val context: Context, private val scope: CoroutineScope) {
     enum class Stage(val wire: String) { OFF("off"), DEVELOPER("developer"), PAIRING("pairing"), CODE("code"), STARTING("starting"), READY("ready"), STOPPED("stopped") }
 
-    data class State(val stage: Stage, val error: String? = null, val codeInput: Boolean = false) {
+    data class State(val stage: Stage, val error: String? = null, val codeInput: Boolean = false, val detail: String? = null) {
         val searching: Boolean get() = stage == Stage.DEVELOPER || stage == Stage.PAIRING
         val guiding: Boolean get() = searching || stage == Stage.CODE
 
@@ -74,6 +74,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
             put("stage", stage.wire)
             put("error", error)
             if (codeInput) put("codeInput", true)
+            if (detail != null) put("detail", detail)
         }
     }
 
@@ -101,7 +102,12 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         }
 
     private fun enter(stage: Stage, error: String? = null): State =
-        State(stage, error, stage == Stage.CODE && multiWindow).also { _state.value = it }
+        State(stage, error, stage == Stage.CODE && multiWindow, _state.value.detail.takeUnless { stage == Stage.READY }).also { _state.value = it }
+
+    private fun note(detail: String) {
+        Log.i(TAG, detail)
+        _state.update { it.copy(detail = detail.take(DETAIL_MAX)) }
+    }
 
     private fun initialStage() = if (prefs.getBoolean(PAIRED, false)) Stage.STOPPED else Stage.OFF
 
@@ -118,6 +124,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         try {
             binder.linkToDeath({
                 if (_helper.compareAndSet(helper, null)) {
+                    note("the helper stopped")
                     enter(Stage.STOPPED, "helper_stopped")
                     scope.launch {
                         delay(RESTART_MS)
@@ -163,7 +170,6 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
                 enter(Stage.STARTING)
                 val error = launchHelper()
                 if (error != null && _helper.value == null) {
-                    Log.i(TAG, "phone control did not start: $error")
                     enter(if (error == "unpaired") Stage.OFF else Stage.STOPPED, error)
                 }
             }
@@ -179,14 +185,22 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         val command = "CLASSPATH=${info.sourceDir} setsid app_process /system/bin --nice-name=${context.packageName}:helper " +
             "${HelperMain::class.java.name} ${context.packageName} ${info.uid} $next </dev/null >/dev/null 2>&1 &"
         val last = prefs.getInt(PORT, 0)
-        val ran = (last > 0 && exec(key, last, command)) || findPort(CONNECT_SERVICE, FIND_MS)?.takeIf { it != last }?.let { exec(key, it, command) } == true
+        val ran = (last > 0 && exec(key, last, command)) || connectPort(last)?.let { exec(key, it, command) } == true
         if (!ran) return when {
             !paired -> "unpaired"
             !localNetwork -> LOCAL_NETWORK_OFF
-            !onWifi() -> "wireless_debugging_off"
+            !onWifi() -> WIFI_OFF
             else -> "wireless_debugging_unreachable"
         }
-        return if (withTimeoutOrNull(ATTACH_MS) { _helper.first { it != null } } != null) null else "helper_did_not_start"
+        if (withTimeoutOrNull(ATTACH_MS) { _helper.first { it != null } } != null) return null
+        note("adbd ran the helper, but it did not attach within ${ATTACH_MS / 1000} s")
+        return "helper_did_not_start"
+    }
+
+    private suspend fun connectPort(last: Int): Int? {
+        val port = findPort(CONNECT_SERVICE, FIND_MS)
+        if (port == null) note("Wireless debugging is not advertised on this phone")
+        return port?.takeIf { it != last }
     }
 
     private fun exec(key: AdbKey, port: Int, command: String): Boolean = try {
@@ -194,11 +208,11 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         prefs.edit { putInt(PORT, port) }
         true
     } catch (error: Adb.Unauthorized) {
-        Log.i(TAG, "adbd on port $port refused the key")
+        note("adbd on port $port refused the key")
         prefs.edit { putBoolean(PAIRED, false) }
         false
     } catch (error: Exception) {
-        Log.i(TAG, "adbd is not on port $port: ${error.message}")
+        note("adbd is not on port $port: ${error.message}")
         false
     }
 
@@ -249,7 +263,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         var shown: Int? = null
         while (_state.value.searching) {
             val stage = if (developerOptions) Stage.PAIRING else Stage.DEVELOPER
-            enter(stage, if (!localNetwork) LOCAL_NETWORK_OFF else if (stage == Stage.PAIRING && !onWifi()) "wireless_debugging_off" else error)
+            enter(stage, if (!localNetwork) LOCAL_NETWORK_OFF else if (stage == Stage.PAIRING && !onWifi()) WIFI_OFF else error)
             val text = when {
                 error != null -> R.string.phone_control_pairing_closed
                 stage == Stage.DEVELOPER -> R.string.phone_control_guide_developer
@@ -309,7 +323,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
     } catch (_: AdbPairing.WrongCode) {
         false
     } catch (error: Exception) {
-        Log.i(TAG, "no pairing on port $port: ${error.message}")
+        note("no pairing on port $port: ${error.message}")
         null
     }
 
@@ -361,7 +375,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
                         trySend(service)
                     }
                     override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                        Log.i(TAG, "discovering $serviceType failed: $errorCode")
+                        note("discovering $serviceType failed: $errorCode")
                         close()
                     }
                     override fun onDiscoveryStarted(serviceType: String) = Unit
@@ -463,6 +477,8 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         const val PAIRING_PORT = "pairingPort"
         const val ADB_WIFI_ENABLED = "adb_wifi_enabled"
         const val LOCAL_NETWORK_OFF = "local_network_off"
+        const val WIFI_OFF = "wifi_off"
+        const val DETAIL_MAX = 240
         const val CONNECT_SERVICE = "_adb-tls-connect._tcp"
         const val PAIRING_SERVICE = "_adb-tls-pairing._tcp"
         const val CHANNEL_ID = "phone_control"

@@ -152,7 +152,8 @@ export const deviceDisplayStatusSchema = z.object({
     stage: z.enum(PHONE_CONTROL_STAGES),
     error: z.string().min(1).max(64).nullable(),
     codeInput: z.boolean().optional(),
-  }).strict().optional(),
+    detail: z.string().max(512).optional(),
+  }).optional(),
 }).strict();
 export type DeviceDisplayStatus = z.infer<typeof deviceDisplayStatusSchema>;
 
