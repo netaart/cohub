@@ -12,6 +12,7 @@ import { parseArgs } from "node:util";
 import { gunzipSync } from "node:zlib";
 
 const NODE_VERSION = "26.13.0";
+const NODE_ANDROID_BUILD = 2;
 const PLATFORMS = { darwin: "darwin", linux: "linux", win32: "win", android: "android" };
 const GOOS = { darwin: "darwin", linux: "linux", win32: "windows" };
 const GOARCH = { arm64: "arm64", x64: "amd64" };
@@ -43,7 +44,7 @@ async function download(url, path) {
 }
 
 async function stageAndroidNode() {
-  const archive = `node-v${NODE_VERSION}-android-${arch}.gz`;
+  const archive = `node-v${NODE_VERSION}-android-${arch}-${NODE_ANDROID_BUILD}.gz`;
   const base = `https://public.cohub.live/node/v${NODE_VERSION}`;
   await download(`${base}/${archive}`, join(work, archive));
   await download(`${base}/${archive}.sha256`, join(work, `${archive}.sha256`));

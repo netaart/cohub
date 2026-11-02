@@ -30,7 +30,8 @@ jobs:
         run: |
           set -euo pipefail
           version="$(sed -n 's/^const NODE_VERSION = "\(.*\)";$/\1/p' scripts/stage-runtime.mjs)"
-          name="node-v${version}-android-arm64.gz"
+          build="$(sed -n 's/^const NODE_ANDROID_BUILD = \(.*\);$/\1/p' scripts/stage-runtime.mjs)"
+          name="node-v${version}-android-arm64-${build}.gz"
           published=false
           # The checksum goes up last, so it marks a complete publish.
           if curl -fsI "https://public.cohub.live/node/v${version}/${name}.sha256" > /dev/null; then published=true; fi
@@ -85,8 +86,10 @@ jobs:
           export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$NDK"
           ./configure --dest-cpu=arm64 --dest-os=android --openssl-no-asm --cross-compiling --v8-disable-temporal-support
           export CCACHE_DIR=~/.cache/ccache CCACHE_BASEDIR="$PWD" CCACHE_NOHASHDIR=true CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=3G
-          make -j"$(nproc)" CC.target="ccache $CC" CXX.target="ccache $CXX" CC.host="ccache gcc" CXX.host="ccache g++"
+          make -j"$(nproc)" CC.target="ccache $CC" CXX.target="ccache $CXX" CC.host="ccache gcc" CXX.host="ccache g++" LDFLAGS.target=-static-libstdc++
           ccache --show-stats
+          needed="$("$toolchain/llvm-readelf" -d out/Release/node | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort | tr '\n' ' ')"
+          [ "$needed" = "libc.so libdl.so liblog.so libm.so " ] || { echo "node needs libraries Android lacks: $needed"; exit 1; }
           mkdir -p ../dist
           "$NDK"/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip -o ../dist/node out/Release/node
           cp LICENSE ../dist/LICENSE
