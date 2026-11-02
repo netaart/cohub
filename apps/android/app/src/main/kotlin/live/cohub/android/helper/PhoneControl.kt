@@ -53,6 +53,7 @@ import live.cohub.android.R
 import live.cohub.android.auth.CredentialCipher
 import live.cohub.android.auth.KeystoreKey
 import live.cohub.android.display.ControlService
+import live.cohub.android.display.DisplayControl
 import live.cohub.android.helper.adb.Adb
 import live.cohub.android.helper.adb.AdbKey
 import live.cohub.android.helper.adb.AdbPairing
@@ -151,9 +152,18 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         if (!canWriteSecureSettings()) return false
         val resolver = context.contentResolver
         val service = ComponentName(context, ControlService::class.java).flattenToString()
-        val enabled = Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
-        if (service !in enabled.split(':')) {
-            Settings.Secure.putString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, listOf(enabled, service).filter { it.isNotEmpty() }.joinToString(":"))
+        val listed = Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').filter { it.isNotEmpty() }
+        fun list(services: List<String>) = Settings.Secure.putString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, services.joinToString(":"))
+        when {
+            service !in listed -> list(listed + service)
+            DisplayControl.service.value == null -> {
+                // The system leaves a service that crashed unbound until it leaves the list.
+                list(listed - service)
+                scope.launch {
+                    delay(REBIND_MS)
+                    list(listed)
+                }
+            }
         }
         Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
         return true
@@ -473,6 +483,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         const val TAG = "CohubPhoneControl"
         const val PAIRED = "paired"
         const val PREPARED = "prepared"
+        const val REBIND_MS = 500L
         const val PORT = "port"
         const val PAIRING_PORT = "pairingPort"
         const val ADB_WIFI_ENABLED = "adb_wifi_enabled"

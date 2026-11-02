@@ -173,7 +173,7 @@ internal class Screen(
         val token = try {
             mirror(reader.surface, width, height)
         } catch (error: DisplayError) {
-            reader.close()
+            FrameChanges.close(reader)
             throw error
         }
         try {
@@ -183,7 +183,7 @@ internal class Screen(
             throw DisplayError(DisplayError.FAILED, "the screen produced no frame")
         } finally {
             unmirror(token)
-            reader.close()
+            FrameChanges.close(reader)
         }
     }
 
@@ -281,7 +281,7 @@ internal class FrameChanges(size: ScreenSize, private val onChanged: () -> Unit)
         return changed > a.size * SHARE
     }
 
-    fun close() = reader.close()
+    fun close() = close(reader)
 
     companion object {
         private const val THUMB_WIDTH = 96
@@ -289,5 +289,10 @@ internal class FrameChanges(size: ScreenSize, private val onChanged: () -> Unit)
         private const val SHARE = 0.004
         private val thread = HandlerThread("cohub-frames").apply { start() }
         val handler = Handler(thread.looper)
+
+        /** Readers here read frames on this thread; closing one under a frame being read kills the app. */
+        fun close(reader: ImageReader) {
+            handler.post(reader::close)
+        }
     }
 }
