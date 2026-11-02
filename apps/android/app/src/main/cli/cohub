@@ -1,0 +1,4 @@
+#!/system/bin/sh
+# Linked as bin/cohub beside bin/node by BundledCli. npm is not on a phone: the CLI updates with the app.
+dir=${0%/*}
+COHUB_CLI_AUTO_UPDATE=0 exec "$dir/node" "$dir/../cli/node_modules/@neta-art/cohub-cli/bin/cohub.js" "$@"

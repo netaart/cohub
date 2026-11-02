@@ -1,0 +1,85 @@
+name: Node for Android
+
+# Builds the Node that scripts/stage-runtime.mjs pins for Android, once per version, and publishes
+# it to the CDN where the APK build fetches it.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/stage-runtime.mjs'
+      - '.github/workflows/node-android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: node-android
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version
+        id: node
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^const NODE_VERSION = "\(.*\)";$/\1/p' scripts/stage-runtime.mjs)"
+          name="node-v${version}-android-arm64.gz"
+          published=false
+          if curl -fsI "https://public.cohub.live/node/v${version}/${name}" > /dev/null; then published=true; fi
+          {
+            echo "version=$version"
+            echo "name=$name"
+            echo "published=$published"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install NDK
+        if: steps.node.outputs.published == 'false'
+        run: |
+          set -euo pipefail
+          ndk="$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' apps/android/app/build.gradle.kts)"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null
+          echo "NDK=$ANDROID_HOME/ndk/$ndk" >> "$GITHUB_ENV"
+
+      - name: Build
+        if: steps.node.outputs.published == 'false'
+        env:
+          VERSION: ${{ steps.node.outputs.version }}
+          NAME: ${{ steps.node.outputs.name }}
+        run: |
+          set -euo pipefail
+          source="node-v${VERSION}"
+          curl -fsSLO "https://nodejs.org/dist/v${VERSION}/${source}.tar.xz"
+          curl -fsSL "https://nodejs.org/dist/v${VERSION}/SHASUMS256.txt" | grep "  ${source}.tar.xz$" | sha256sum -c -
+          tar -xJf "${source}.tar.xz"
+          cd "$source"
+          ./android-configure patch
+          # API 30: the device Runtime needs Android 11.
+          ./android-configure "$NDK" 30 arm64
+          make -j"$(nproc)"
+          mkdir -p ../dist
+          "$NDK"/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip -o ../dist/node out/Release/node
+          cp LICENSE ../dist/LICENSE
+          cd ../dist
+          gzip -n node
+          mv node.gz "$NAME"
+          sha256sum "$NAME" > "$NAME.sha256"
+
+      - name: Publish
+        if: steps.node.outputs.published == 'false'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.PUBLIC_ASSET_OSS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_ASSET_OSS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-west-1
+          VERSION: ${{ steps.node.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.aws
+          printf '[default]\nrequest_checksum_calculation = when_required\nresponse_checksum_validation = when_required\ns3 =\n    addressing_style = virtual\n' > ~/.aws/config
+          aws s3 cp dist "s3://cohub-public/node/v${VERSION}/" --endpoint-url https://oss-us-west-1.aliyuncs.com --recursive --cache-control 'public, max-age=31536000, immutable'

@@ -20,6 +20,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import live.cohub.android.BuildConfig
 import java.io.File
 import java.security.SecureRandom
 import java.util.Base64
@@ -36,6 +37,7 @@ class SandboxBridge(
     private val relayUrl: String,
     private val runtimeId: String,
     private val displaySocket: File,
+    private val cli: BundledCli,
     private val token: suspend () -> String,
     private val onEndpoint: (LocalEndpoint?) -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
@@ -83,6 +85,9 @@ class SandboxBridge(
                     "FS_WATCH_IGNORE" to "Android/data,Android/obb,.thumbnails",
                 ),
             )
+            if (BuildConfig.COHUB_ENV == "dev") environment()["ENV"] = "dev"
+            val bin = runCatching { cli.bin() }.onFailure { Log.w(TAG, "cohub is unavailable", it) }.getOrNull()
+            if (bin != null) environment()["PATH"] = listOfNotNull(environment()["PATH"], bin.path).joinToString(":")
         }.start()
         try {
             coroutineScope {

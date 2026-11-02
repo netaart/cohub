@@ -17,6 +17,7 @@ import { readRuntimePreferences } from "./preferences.js";
 import { createDiagnosticConsole, type RuntimeSummary } from "./presentation.js";
 import { join } from "node:path";
 import { RuntimeArchiveStore } from "./archive-store.js";
+import { appendCliToPath } from "./cli-path.js";
 import { readNativeConfig, runtimeStateRoot } from "./native/config.js";
 import { NativeRuntime } from "./native/daemon.js";
 
@@ -67,6 +68,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   const signal = externalSignal ? AbortSignal.any([externalSignal, controller.signal]) : controller.signal;
   const stop = () => controller.abort();
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
+  appendCliToPath();
   const client = createClient();
   const space = client.space(config.spaceId);
   const stateRoot = runtimeStateRoot(config.spaceId);

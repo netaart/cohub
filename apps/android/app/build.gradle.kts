@@ -1,3 +1,5 @@
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import javax.inject.Inject
 
 plugins {
@@ -206,9 +208,63 @@ val buildSandboxd = tasks.register<BuildSandboxd>("buildSandboxd") {
     outputDirectory.set(layout.buildDirectory.dir("generated/sandboxd"))
 }
 
+// `cohub` for what a Runtime runs, as on computers: this commit's CLI under Node built for Android
+// (arm64; scripts/stage-runtime.mjs). Both executables live in nativeLibraryDir, the CLI is an asset.
+abstract class StageCli : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val script: RegularFileProperty
+
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sources: ConfigurableFileCollection
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val launcher: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val jniLibs: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val assets: DirectoryProperty
+
+    @get:Inject
+    abstract val exec: ExecOperations
+
+    @TaskAction
+    fun stage() {
+        val staged = temporaryDir.apply { deleteRecursively() }
+        exec.exec { commandLine("node", script.get().asFile.path, "--platform", "android", "--arch", "arm64", "--out", staged.path) }
+        val libs = jniLibs.get().asFile.apply { deleteRecursively() }.resolve("arm64-v8a").apply { mkdirs() }
+        staged.resolve("node").copyTo(libs.resolve("libcohub_node.so"))
+        launcher.get().asFile.copyTo(libs.resolve("libcohub_cli.so"))
+        val cli = staged.resolve("cli")
+        val zip = assets.get().asFile.apply { deleteRecursively(); mkdirs() }.resolve("cli.zip")
+        ZipOutputStream(zip.outputStream()).use { out ->
+            cli.walkTopDown().onEnter { it.name != ".bin" }.filter { it.isFile }.sortedBy { it.path }.forEach { file ->
+                out.putNextEntry(ZipEntry(file.relativeTo(cli).invariantSeparatorsPath))
+                file.inputStream().use { it.copyTo(out) }
+                out.closeEntry()
+            }
+        }
+    }
+}
+
+val stageCli = tasks.register<StageCli>("stageCli") {
+    val repo = rootProject.layout.projectDirectory.dir("../..")
+    script.set(repo.file("scripts/stage-runtime.mjs"))
+    sources.from(listOf("cli", "sdk").flatMap { listOf(repo.dir("packages/$it/dist"), repo.file("packages/$it/package.json")) })
+    launcher.set(layout.projectDirectory.file("src/main/cli/cohub"))
+    jniLibs.set(layout.buildDirectory.dir("generated/cli/jniLibs"))
+    assets.set(layout.buildDirectory.dir("generated/cli/assets"))
+}
+
 androidComponents {
     onVariants { variant ->
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildSandboxd, BuildSandboxd::outputDirectory)
+        variant.sources.jniLibs?.addGeneratedSourceDirectory(stageCli, StageCli::jniLibs)
+        variant.sources.assets?.addGeneratedSourceDirectory(stageCli, StageCli::assets)
     }
 }
 

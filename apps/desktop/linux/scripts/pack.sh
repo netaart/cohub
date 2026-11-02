@@ -31,7 +31,7 @@ dotnet publish "$here/Cohub/Cohub.csproj" -c Release -r "linux-$arch" --self-con
   -p:PublishReadyToRun=true -p:Version="$version" -p:CohubEnvironment="$env" -o "$publish"
 
 echo "==> Runtime"
-node "$repo/apps/desktop/scripts/stage-runtime.mjs" --platform linux --arch "$arch" --out "$publish/runtime"
+node "$repo/scripts/stage-runtime.mjs" --platform linux --arch "$arch" --out "$publish/runtime"
 
 echo "==> Packaging"
 rm -rf "$output"

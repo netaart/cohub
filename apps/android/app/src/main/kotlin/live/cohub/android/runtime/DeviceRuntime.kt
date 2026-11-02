@@ -96,6 +96,8 @@ class DeviceRuntime(private val context: Context, private val account: () -> Str
     val bridgeBinary: File
         get() = File(context.applicationInfo.nativeLibraryDir, "libcohub_sandboxd.so")
 
+    val cli = BundledCli(context)
+
     fun hasStorageAccess(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()
 

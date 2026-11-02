@@ -23,7 +23,7 @@ dotnet publish "$here/Cohub/Cohub.csproj" -c Release -r "win-$Arch" --self-conta
 if ($LASTEXITCODE) { throw "dotnet publish failed" }
 
 Write-Host "==> Runtime"
-node "$repo/apps/desktop/scripts/stage-runtime.mjs" --platform win32 --arch $Arch --out "$publish/runtime"
+node "$repo/scripts/stage-runtime.mjs" --platform win32 --arch $Arch --out "$publish/runtime"
 if ($LASTEXITCODE) { throw "Staging the runtime failed" }
 
 Write-Host "==> Packaging"

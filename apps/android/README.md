@@ -72,7 +72,10 @@ cd apps/android
 
 The APK embeds `apps/sandbox`, cross-compiled by `:app:buildSandboxd` with Go
 (on `PATH`) and the NDK pinned in `app/build.gradle.kts`
-(`sdkmanager "ndk;<version>"`).
+(`sdkmanager "ndk;<version>"`). `:app:stageCli` adds `cohub` for what a Runtime runs: this
+commit's CLI (build it first: `pnpm install && pnpm --filter @neta-art/cohub-cli... build`) and
+the Node that `scripts/stage-runtime.mjs` pins, built for Android arm64 by
+`.github/workflows/node-android.yml`; `runtime/BundledCli.kt` installs and links them.
 
 Debug builds and every dev-environment build (`BuildConfig.WEB_DEBUGGING`) are
 inspectable at `chrome://inspect` and mirror the page console, uncaught errors

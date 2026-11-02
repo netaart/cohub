@@ -47,7 +47,7 @@ node "$repo/apps/desktop/scripts/icons.mjs" --macos "$iconset"
 iconutil -c icns "$iconset" -o "$contents/Resources/AppIcon.icns"
 
 echo "==> Runtime"
-node "$repo/apps/desktop/scripts/stage-runtime.mjs" --platform darwin --arch "$node_arch" --out "$contents/Resources/runtime"
+node "$repo/scripts/stage-runtime.mjs" --platform darwin --arch "$node_arch" --out "$contents/Resources/runtime"
 
 echo "==> Signing"
 identity="${CODESIGN_IDENTITY:--}"

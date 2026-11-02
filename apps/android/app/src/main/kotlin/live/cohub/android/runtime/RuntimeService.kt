@@ -201,6 +201,7 @@ class RuntimeService : Service() {
             relayUrl = "${BuildConfig.GATEWAY_ORIGIN}/sandbox/relay",
             runtimeId = runtimeId,
             displaySocket = displaySocket,
+            cli = runtime.cli,
             token = { token(false) },
             onEndpoint = { app.workspaces.update(spaceId, it) },
         )

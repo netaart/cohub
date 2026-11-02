@@ -28,6 +28,12 @@ now the boolean shorthand for `--new`, not `--name`. Naming uses `--name <name>`
 Even with `-n`, interactive startup shows an existing binding and recommends reuse.
 An explicit `--space` or `COHUB_SPACE_ID` overrides and updates the directory binding.
 
+What a Runtime runs can always call `cohub`: the Runtime puts its own CLI last on `PATH` (a
+`~/.cache/cohub/cli/<hash>/cohub` launcher), so a `cohub` already there, such as a global install that
+updates itself, still comes first. Android does the same with the CLI its APK carries.
+
+Runtime 运行的命令总能调用 `cohub`：Runtime 把自己的 CLI 放在 `PATH` 末尾，已有的 `cohub`（例如会自更新的全局安装）仍然优先。Android 用 APK 自带的 CLI 做同样的事。
+
 普通使用只需 `cohub runtime up`：首次提示创建及命名，后续优先复用。
 `-n` 是 `--new` 的简写，`--name` 单独指定名称。已有绑定时仍提示优先复用。
 `--yes` accepts defaults and local execution consent; with explicit `--new`, it creates
@@ -325,7 +331,9 @@ reconnects at once instead of waiting out a backoff.
 All agent tools keep their meaning. File tools are fenced to the folder; `bash` runs as the app, like
 the CLI runs as the OS user, and uses `sh` (Android's mksh with toybox) because the device has no bash;
 `find` and `grep` use the bridge's built-in walker because it has no `fd` or `rg` (see
-[Agent / Sandbox Runtime](agent-sandbox-runtime.md#optional-executables)). Each binding costs what one
+[Agent / Sandbox Runtime](agent-sandbox-runtime.md#optional-executables)). `cohub` and `node` are on
+its `PATH`: the APK carries this commit's CLI and Node built for Android (arm64 only), installed under
+the app's no-backup files once per update; the CLI updates with the app, as npm is not there. Each binding costs what one
 `runtime up` costs: a sandboxd process, its file watcher over the folder, and two long-lived
 connections, so a narrower folder is cheaper to watch.
 
@@ -334,7 +342,7 @@ Android 应用像 `runtime up` 一样为手机上的文件夹提供本地 Runtim
 相同的两部分：声明 `harnesses: []` 的 Runtime 连接（只持有租约，Turn 由 Cohub Harness 执行），以及以该文件夹为根目录、为 Android
 交叉编译的 sandboxd 文件桥（受管模式，生命周期事件改走 stderr）。绑定规则与 CLI 一致：新建 Space 时选择文件夹并以其命名；已关联的
 文件夹可打开原 Space 或改绑；运行中的文件夹或 Space 不会被抢占。前台服务在后台保持所有绑定连接，退出登录时全部停止；未断开的绑定在服务被系统重启或下次打开应用时恢复，不随开机自启。
-文件工具限定在文件夹内，`bash` 以应用身份运行并使用 `sh`，`find` / `grep` 在缺少 `fd` / `rg` 时使用内置实现。
+文件工具限定在文件夹内，`bash` 以应用身份运行并使用 `sh`，`find` / `grep` 在缺少 `fd` / `rg` 时使用内置实现。`PATH` 上有 APK 自带的 `cohub` 与 Node（仅 arm64），随应用更新。
 
 ### Screen sharing / 屏幕共享
 
