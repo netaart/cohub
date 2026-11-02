@@ -162,7 +162,10 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
                 if (_helper.value != null) return@withLock
                 enter(Stage.STARTING)
                 val error = launchHelper()
-                if (error != null && _helper.value == null) enter(if (error == "unpaired") Stage.OFF else Stage.STOPPED, error)
+                if (error != null && _helper.value == null) {
+                    Log.i(TAG, "phone control did not start: $error")
+                    enter(if (error == "unpaired") Stage.OFF else Stage.STOPPED, error)
+                }
             }
         }
     }
@@ -170,7 +173,6 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
     private suspend fun launchHelper(): String? {
         val key = key() ?: return "unpaired"
         if (canWriteSecureSettings()) runCatching { Settings.Global.putInt(context.contentResolver, ADB_WIFI_ENABLED, 1) }
-        if (Settings.Global.getInt(context.contentResolver, ADB_WIFI_ENABLED, 0) != 1) return "wireless_debugging_off"
         val next = token()
         nonce = next
         val info = context.applicationInfo
@@ -178,7 +180,12 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
             "${HelperMain::class.java.name} ${context.packageName} ${info.uid} $next </dev/null >/dev/null 2>&1 &"
         val last = prefs.getInt(PORT, 0)
         val ran = (last > 0 && exec(key, last, command)) || findPort(CONNECT_SERVICE, FIND_MS)?.takeIf { it != last }?.let { exec(key, it, command) } == true
-        if (!ran) return if (key() == null) "unpaired" else if (!localNetwork) LOCAL_NETWORK_OFF else "wireless_debugging_unreachable"
+        if (!ran) return when {
+            !paired -> "unpaired"
+            !localNetwork -> LOCAL_NETWORK_OFF
+            !onWifi() -> "wireless_debugging_off"
+            else -> "wireless_debugging_unreachable"
+        }
         return if (withTimeoutOrNull(ATTACH_MS) { _helper.first { it != null } } != null) null else "helper_did_not_start"
     }
 
@@ -187,8 +194,8 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         prefs.edit { putInt(PORT, port) }
         true
     } catch (error: Adb.Unauthorized) {
+        Log.i(TAG, "adbd on port $port refused the key")
         prefs.edit { putBoolean(PAIRED, false) }
-        keyFile.delete()
         false
     } catch (error: Exception) {
         Log.i(TAG, "adbd is not on port $port: ${error.message}")
