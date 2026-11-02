@@ -193,7 +193,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         nonce = next
         val info = context.applicationInfo
         val command = "CLASSPATH=${info.sourceDir} setsid app_process /system/bin --nice-name=${context.packageName}:helper " +
-            "${HelperMain::class.java.name} ${context.packageName} ${info.uid} $next </dev/null >/dev/null 2>&1 &"
+            "${HelperMain::class.java.name} ${context.packageName} ${info.uid} $next </dev/null >$HELPER_OUT 2>&1 &"
         val last = prefs.getInt(PORT, 0)
         val launched = System.currentTimeMillis()
         val ran = (last > 0 && exec(key, last, command)) || connectPort(last)?.let { exec(key, it, command) } == true
@@ -204,16 +204,18 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
             else -> "wireless_debugging_unreachable"
         }
         if (withTimeoutOrNull(ATTACH_MS) { _helper.first { it != null } } != null) return null
-        note(helperFailure(key, launched)?.let { "the helper did not attach: $it" } ?: "adbd ran the helper, but it did not attach within ${ATTACH_MS / 1000} s")
+        note("the helper did not attach within ${ATTACH_MS / 1000} s: ${helperFailure(key, launched)}")
         return "helper_did_not_start"
     }
 
     /** The helper logs as the shell, which only adbd can read back. */
-    private fun helperFailure(key: AdbKey, since: Long): String? {
+    private fun helperFailure(key: AdbKey, since: Long): String {
         val time = "%d.%03d".format(since / 1000, since % 1000)
-        val log = runCatching { Adb.exec(key, prefs.getInt(PORT, 0), "logcat -d -b main,crash -v brief -t $time -s ${Helper.TAG}:I AndroidRuntime:E") }.getOrNull() ?: return null
+        val log = runCatching { Adb.exec(key, prefs.getInt(PORT, 0), "cat $HELPER_OUT; logcat -d -b main,crash -v brief -t $time -s ${Helper.TAG}:I AndroidRuntime:E") }
+            .getOrElse { return "its log could not be read (${it.message})" }
         val lines = log.lines().map { it.substringAfter("): ").trim() }.filter { it.isNotEmpty() && !it.startsWith("at ") && !it.startsWith("-----") }
-        return lines.lastOrNull { it.startsWith("Caused by:") } ?: lines.firstOrNull { "Exception" in it || "Error" in it } ?: lines.lastOrNull()
+        return lines.lastOrNull { it.startsWith("Caused by:") } ?: lines.firstOrNull { "Exception" in it || "Error" in it }
+            ?: lines.lastOrNull()?.let { "it stopped after \"$it\"" } ?: "it logged nothing"
     }
 
     private suspend fun connectPort(last: Int): Int? {
@@ -493,6 +495,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         const val PAIRED = "paired"
         const val PREPARED = "prepared"
         const val REBIND_MS = 500L
+        const val HELPER_OUT = "/data/local/tmp/cohub-helper.out"
         const val PORT = "port"
         const val PAIRING_PORT = "pairingPort"
         const val ADB_WIFI_ENABLED = "adb_wifi_enabled"

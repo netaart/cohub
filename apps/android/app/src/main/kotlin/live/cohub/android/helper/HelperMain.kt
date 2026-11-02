@@ -20,8 +20,10 @@ object HelperMain {
     fun main(args: Array<String>) {
         val (appPackage, uid, nonce) = args.takeIf { it.size == 3 } ?: exitProcess(2)
         val appUid = uid.toIntOrNull() ?: exitProcess(2)
+        Log.i(Helper.TAG, "starting")
         Looper.prepareMainLooper()
         val helper = Helper(appUid, appPackage)
+        Log.i(Helper.TAG, "handing over")
         val app = handOff(appPackage, appUid, nonce, helper) ?: run {
             Log.w(Helper.TAG, "the app refused the helper")
             exitProcess(1)
