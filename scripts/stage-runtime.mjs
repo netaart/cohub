@@ -31,7 +31,7 @@ if (!PLATFORMS[platform] || !ARCHS.includes(arch) || (android && arch !== "arm64
   process.exit(1);
 }
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = resolve(values.out);
 const work = await mkdtemp(join(tmpdir(), "cohub-runtime-"));
 const run = (command, args, options = {}) => execFileSync(command, args, { stdio: ["ignore", "pipe", "inherit"], encoding: "utf8", ...options });

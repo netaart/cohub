@@ -60,8 +60,8 @@ jobs:
           tar -xJf "${source}.tar.xz"
           cd "$source"
           ./android-configure patch
-          # API 30: the device Runtime needs Android 11.
-          ./android-configure "$NDK" 30 arm64
+          # API 30: the device Runtime needs Android 11. V8's build tools run here, so build them for here.
+          CC_host=gcc CXX_host=g++ ./android-configure "$NDK" 30 arm64
           make -j"$(nproc)"
           mkdir -p ../dist
           "$NDK"/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip -o ../dist/node out/Release/node
