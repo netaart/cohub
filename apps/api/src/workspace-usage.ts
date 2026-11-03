@@ -20,7 +20,7 @@ export const workspaceUsageQueue = createBullmqQueue(WORKSPACE_USAGE_QUEUE, {
  */
 export async function readWorkspaceUsage(
   spaceId: string,
-  sandbox: { provider: string; status: string; stoppedAt: Date | null } | null,
+  sandbox: { provider: string; status: string; stoppedAt: Date | null; lastActivityAt: Date | null } | null,
 ): Promise<WorkspaceUsage | null> {
   if (sandbox?.provider === "local") return null;
   const [row] = await db.select().from(spaceWorkspaceUsage).where(eq(spaceWorkspaceUsage.spaceId, spaceId)).limit(1);
