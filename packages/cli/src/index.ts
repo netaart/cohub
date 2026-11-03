@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { readFileSync } from "node:fs";
 import { registerEndpointOptions } from "./endpoint-options.js";
 import { registerAuth } from "./commands/auth.js";
 import { registerBoards } from "./commands/boards.js";
@@ -23,18 +22,11 @@ import { registerRuntime } from "./commands/runtime.js";
 import { registerTasks } from "./commands/tasks.js";
 import { registerDesktop, registerLegacyUi } from "./commands/desktop.js";
 import { registerHost } from "./commands/host.js";
+import { registerVersion } from "./commands/version.js";
 import { registerApps } from "./commands/apps.js";
 import { registerRooms } from "./commands/rooms.js";
 import { formatUnknownCommandError, resolveHelpPath } from "./help-path.js";
-
-const VERSION = (() => {
-  try {
-    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
-    return pkg.version as string;
-  } catch {
-    return "1.0.0";
-  }
-})();
+import { CLI_VERSION } from "./version.js";
 
 const program = registerEndpointOptions(new Command("cohub"));
 
@@ -42,7 +34,7 @@ program
   .name("cohub")
   .summary("Work with Cohub from your terminal")
   .description("Send prompts, manage Space files, and publish public output.")
-  .version(VERSION, "-v, --version", "Show version")
+  .version(CLI_VERSION, "-v, --version", "Show version")
   .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
   .option("--json", "Print machine-readable JSON when supported")
   .helpOption("-h, --help", "Show help")
@@ -119,6 +111,7 @@ registerFeedback(program);
 registerDesktop(program);
 registerLegacyUi(program);
 registerHost(program);
+registerVersion(program);
 
 const argv = process.argv.slice(2);
 const help = resolveHelpPath(program, argv);

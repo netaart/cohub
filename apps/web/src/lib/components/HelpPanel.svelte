@@ -1,8 +1,9 @@
 <script lang="ts">
-import { latestEntry } from "$lib/changelog";
+import { ArrowUpRight } from "lucide-svelte";
 import Dialog from "$lib/components/Dialog.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import { LICENSE, RELEASE, REPO_URL } from "$lib/project";
 
 const locale = $derived(getLocale());
 const keyChoices = $derived(
@@ -186,15 +187,21 @@ const sections: ShortcutSection[] = $derived([
 							<div class="doc-title">{m.help_changelog({}, { locale })}</div>
 							<div class="doc-copy">{m.help_changelog_copy({}, { locale })}</div>
 						</div>
-						<span class="doc-status">{latestEntry ? `v${latestEntry.version}` : m.help_open({}, { locale })}</span>
+						{#if RELEASE}<span class="doc-status">{RELEASE}</span>{/if}
 					</a>
-					<div class="doc-card">
+					<a href={locale === "zh-CN" ? "/zh/docs" : "/docs"} class="doc-card doc-card-link" onclick={onClose}>
 						<div class="doc-copy-wrap">
 							<div class="doc-title">{m.help_docs({}, { locale })}</div>
 							<div class="doc-copy">{m.help_docs_copy({}, { locale })}</div>
 						</div>
-						<span class="doc-status">{m.help_soon({}, { locale })}</span>
-					</div>
+					</a>
+					<a href={REPO_URL} target="_blank" rel="noopener noreferrer" class="doc-card doc-card-link">
+						<div class="doc-copy-wrap">
+							<div class="doc-title">{m.help_source({}, { locale })}</div>
+							<div class="doc-copy">{m.help_source_copy({ license: LICENSE }, { locale })}</div>
+						</div>
+						<ArrowUpRight class="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+					</a>
 				</div>
 			</section>
 		</div>

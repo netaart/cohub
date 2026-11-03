@@ -280,6 +280,7 @@ cohub runtime up
 # after one consent (default yes).
 cohub runtime up -d
 cohub runtime status
+cohub version            # this CLI, the cohub on PATH, and what each running Runtime serves
 cohub runtime logs --level warn --follow
 cohub runtime down
 

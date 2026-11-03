@@ -6,8 +6,10 @@ import Dialog from "$lib/components/Dialog.svelte";
 import { saveCohubDebugBundle } from "$lib/debugger";
 import { createDebugLogFile, submitFeedback } from "$lib/feedback";
 import { formatBytes } from "$lib/format-bytes";
+import { hostPlatform } from "$lib/host-bridge";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import { BUILD_LABEL } from "$lib/project";
 import { authStore } from "$lib/stores/auth.svelte";
 
 const { open, onClose }: { open: boolean; onClose: () => void } = $props();
@@ -67,6 +69,8 @@ function buildExtra() {
 		params: page.params,
 		locale,
 		env: PUBLIC_COHUB_ENV || null,
+		web_version: BUILD_LABEL,
+		host: hostPlatform(),
 		viewport: `${window.innerWidth}x${window.innerHeight}`,
 		dpr: window.devicePixelRatio,
 		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,

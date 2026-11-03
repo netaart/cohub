@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import {
   HOST_BRIDGE_ERROR,
   HOST_BRIDGE_METHODS,
+  HOST_SERVICE_CLI_ABOUT,
   HOST_SERVICE_VERSION,
   HOST_SERVICE_WORKSPACE_ENDPOINT,
   HostBridgeErrorClass,
@@ -11,6 +12,7 @@ import {
   type HostBridgeMethod,
   type HostServiceHello,
 } from "@neta-art/cohub/host-bridge";
+import { describeCli } from "../about.js";
 import { findLocalWorkspace } from "../runtime/local-workspace.js";
 import { currentIdentityKey } from "../space.js";
 import { HostAuth } from "./auth.js";
@@ -34,9 +36,11 @@ const write = (message: unknown) => process.stdout.write(`${JSON.stringify(messa
 export async function serveHost(entry = fileURLToPath(new URL("../../bin/cohub.js", import.meta.url))) {
   const emit: HostEmit = (name, payload) => write({ type: "event", name, ...(payload === undefined ? {} : { payload }) });
   let environment: Promise<NodeJS.ProcessEnv> | null = null;
+  const env = () => (environment ??= loginShellEnv());
+  const about = async () => describeCli(await env(), currentIdentityKey());
   const runtime = new DeviceRuntimeHost(emit, {
     cli: entry,
-    env: () => (environment ??= loginShellEnv()),
+    env,
     account: currentIdentityKey,
   });
   const auth = new HostAuth(emit, () => {
@@ -66,8 +70,9 @@ export async function serveHost(entry = fileURLToPath(new URL("../../bin/cohub.j
     } : {}),
     "workspace.call": (params) => callLocalWorkspace(String(params.spaceId), String(params.method), params.params),
   };
-  // Asked by the shell itself to proxy file URLs; absent from hello, so a page can never reach it.
+  // Asked by the shell itself; absent from hello, so a page can never reach them.
   const shellHandlers: Record<string, Handler> = {
+    [HOST_SERVICE_CLI_ABOUT]: about,
     [HOST_SERVICE_WORKSPACE_ENDPOINT]: (params) => {
       const spaceId = String(params.spaceId ?? "");
       if (!SPACE_ID.test(spaceId)) throw new Error("A Space id is required");
@@ -108,6 +113,8 @@ export async function serveHost(entry = fileURLToPath(new URL("../../bin/cohub.j
   write(hello);
   auth.watch();
   runtime.watch();
+  // Probed once off the start-up path, so an About panel opens with its answer ready.
+  setTimeout(() => void about().catch(() => undefined), 3_000).unref();
 
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
   input.on("line", (line) => { if (line.length <= MAX_LINE) void answer(line); });

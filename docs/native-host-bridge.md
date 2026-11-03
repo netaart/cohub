@@ -65,6 +65,7 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `badge.set` | `badge` | The count on the app's icon |
 | `app.launchAtLogin` | `app.launchAtLogin` | Opens the app at login; `enabled` changes it |
 | `app.globalShortcut` | `app.globalShortcut` | ⌃⌥Space or Ctrl+Alt+Space brings the app forward; `enabled` changes it |
+| `app.about` | `app.about` | Shows the native About panel and returns without waiting for it to close: app, `web` (from the page) and, on hosts with a CLI, its version, the `cohub` on the terminal's PATH and each Runtime's version |
 | `share.take` | `share.incoming` | What another app shared here, once |
 | `share.readFile` | `share.incoming` | One shared file as base64, up to 12 MiB |
 | `appearance.set` | `appearance` | Edge color (`#rrggbb`) for the window and system bars |
@@ -200,6 +201,9 @@ GTK 4, libadwaita, WebKitGTK) shells load the web origin like Android does, and 
 The CLI answers `workspace.call` from this account's ready Runtimes. To stream file URLs the shell
 asks it for a Runtime's loopback endpoint with `workspace.endpoint`, a method absent from `hello`, so
 the page can never reach it or the token.
+`cli.about`, also absent from `hello`, answers the About panel: this CLI's version, the `cohub` a new
+terminal would run (resolved through the login shell, or the registry PATH on Windows, and asked for
+`--version` only when that file changes), and the version each of the account's running Runtimes serves.
 
 The service pushes `auth.changed` (with the `redirectPath` a sign-in asked for) and
 `runtime.changed` when the session file or a Runtime changes, from file watches and

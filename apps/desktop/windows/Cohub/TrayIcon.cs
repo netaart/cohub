@@ -14,6 +14,7 @@ internal sealed class TrayIcon : IDisposable
         Action NewSpace,
         Action StopSharing,
         Action InstallCommandLineTool,
+        Action About,
         Action RestartToUpdate,
         Action Quit);
 
@@ -88,6 +89,7 @@ internal sealed class TrayIcon : IDisposable
         menu.Items.Add(Strings.L("New Space…"), null, (_, _) => actions.NewSpace());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Strings.L("Install Command Line Tool"), null, (_, _) => actions.InstallCommandLineTool());
+        menu.Items.Add(Strings.L("About Cohub"), null, (_, _) => actions.About());
         if (updateReady) menu.Items.Add(Strings.L("Restart to Update"), null, (_, _) => actions.RestartToUpdate());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(Strings.L("Quit Cohub"), null, (_, _) => actions.Quit());

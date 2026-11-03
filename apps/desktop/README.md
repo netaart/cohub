@@ -93,6 +93,9 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
   page never sees its token.
 - **Staying awake.** While a Runtime has work, its sandboxd holds off idle sleep. Settings → General
   turns it off, and holds the options to open at login and to bring Cohub up with ⌃⌥Space (Ctrl+Alt+Space).
+- **About.** The native panel (standard panel on macOS, a small window on Windows, `GtkAboutDialog` on Linux)
+  shows the app, its CLI, the `cohub` a terminal runs and what each Runtime serves, and says when one is
+  behind. The CLI probes `cohub` soon after start, so the panel opens with its answer ready.
 - **Badge.** The Dock icon and taskbar button count what is waiting to be looked at.
 - **Runtime copy.** Runtimes outlive the app, so they never run from inside it: on its first
   start each app version copies its bundled runtime to a directory of its own

@@ -1,6 +1,7 @@
 package live.cohub.android.runtime
 
 import kotlinx.coroutines.CancellationException
+import live.cohub.android.BuildConfig
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -49,6 +50,10 @@ internal object RuntimeFrames {
         putJsonObject("capabilities") {
             put("harnesses", buildJsonArray {})
             put("models", buildJsonArray {})
+        }
+        putJsonObject("client") {
+            put("name", "android")
+            put("version", BuildConfig.VERSION_NAME)
         }
     }.toString()
 

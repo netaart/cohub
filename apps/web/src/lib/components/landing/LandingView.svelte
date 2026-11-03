@@ -26,6 +26,7 @@ import {
 	resolvePublicLocale,
 } from "$lib/i18n/public-locale";
 import { m } from "$lib/paraglide/messages.js";
+import { CLI_NPM_URL, REPO_URL, repoFileUrl } from "$lib/project";
 import { canonicalUrl as buildCanonical } from "$lib/seo";
 import { authStore } from "$lib/stores/auth.svelte";
 import { getResolvedTheme } from "$lib/theme.svelte";
@@ -221,7 +222,7 @@ const cliLines = [
 								<ArrowRight class="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
 							</button>
 							<a
-								href="https://github.com/talesofai/cohub"
+								href={REPO_URL}
 								target="_blank"
 								rel="noopener noreferrer"
 								class="cta cta-secondary"
@@ -384,7 +385,7 @@ const cliLines = [
 							<ul class="footer-list">
 								<li>
 									<a
-										href="https://github.com/talesofai/cohub"
+										href={REPO_URL}
 										target="_blank"
 										rel="noopener noreferrer"
 										class="footer-link">{m.landing_footer_github({}, { locale })}</a
@@ -392,7 +393,7 @@ const cliLines = [
 								</li>
 								<li>
 									<a
-										href="https://www.npmjs.com/package/@neta-art/cohub-cli"
+										href={CLI_NPM_URL}
 										target="_blank"
 										rel="noopener noreferrer"
 										class="footer-link">{m.landing_footer_cli_npm({}, { locale })}</a
@@ -401,7 +402,7 @@ const cliLines = [
 								<li><a href={zh ? "/zh/docs/developers/cli" : "/docs/developers/cli"} class="footer-link">{m.landing_footer_cli_docs({}, { locale })}</a></li>
 								<li>
 									<a
-										href="https://github.com/talesofai/cohub/blob/main/docs/self-hosting.md"
+										href={repoFileUrl("docs/self-hosting.md")}
 										target="_blank"
 										rel="noopener noreferrer"
 										class="footer-link">{m.landing_footer_self_hosting({}, { locale })}</a

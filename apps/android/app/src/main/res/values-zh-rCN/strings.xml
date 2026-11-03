@@ -41,4 +41,8 @@
     <string name="overlay_stop_sharing">停止共享</string>
     <string name="overlay_take_over">我来</string>
     <string name="overlay_hand_back">交还</string>
+    <string name="about_title">关于 Cohub</string>
+    <string name="about_message">版本 %1$s\n网页版 %2$s\n命令行 %3$s\n\n基于 Apache-2.0 开源。</string>
+    <string name="about_cli_unavailable">此设备未包含</string>
+    <string name="about_source">源代码</string>
 </resources>

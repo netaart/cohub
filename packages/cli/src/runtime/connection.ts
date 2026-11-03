@@ -19,6 +19,7 @@ import {
   type NativeRuntimeEvent,
 } from "@neta-art/cohub";
 import { describeError } from "../network-error.js";
+import { CLI_VERSION } from "../version.js";
 import { executeTurn, type Executor, type HarnessResult } from "./native/execution.js";
 import { ContextRequiredError } from "./native/results.js";
 import { SizeLimitError } from "./native/transcript.js";
@@ -470,6 +471,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         spaceId: options.spaceId,
         token: currentToken,
         capabilities: registered,
+        client: { name: "cli", version: CLI_VERSION },
       });
     } catch (error) {
       log("error", "runtime.hello_failed", { error: serializeDiagnosticError(error) });

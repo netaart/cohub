@@ -7,6 +7,7 @@ import {
   HOST_BRIDGE_GLOBAL,
   HOST_BRIDGE_METHODS,
   HOST_BRIDGE_VERSION,
+  HOST_SERVICE_CLI_ABOUT,
   HOST_SERVICE_SHELL_EVENTS,
   HOST_SERVICE_VERSION,
   HOST_SERVICE_WORKSPACE_ENDPOINT,
@@ -27,6 +28,7 @@ export const hostBridgeManifest = () => ({
     version: HOST_SERVICE_VERSION,
     shellEvents: Object.values(HOST_SERVICE_SHELL_EVENTS),
     workspaceEndpoint: HOST_SERVICE_WORKSPACE_ENDPOINT,
+    cliAbout: HOST_SERVICE_CLI_ABOUT,
   },
   workspace: { scheme: HOST_WORKSPACE_SCHEME, path: HOST_WORKSPACE_PATH },
 });

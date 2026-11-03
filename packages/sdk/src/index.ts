@@ -9,7 +9,7 @@ export {
   nativeTurnCompleteSchema, nativeTurnProgressSchema, nativeIngestTurnSchema, nativeRuntimeEventSchema, runtimeNativeStopSchema, runtimeApprovalDecisionSchema, runtimeApprovalSchema, approvalDecisionSchema, APPROVAL_DECISIONS, NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, NATIVE_SYNC_SOURCE, isNativeClientTurn,
 } from "@cohub/protocol";
 export type {
-  ApprovalMode, ContentBlock, HarnessKind, LocalHarness, LocalHarnessSpec, RuntimeCapabilities, RuntimeModel, RuntimeCommand, RuntimeContext, RuntimePendingExecution,
+  ApprovalMode, ContentBlock, HarnessKind, LocalHarness, LocalHarnessSpec, RuntimeCapabilities, RuntimeClient, RuntimeModel, RuntimeCommand, RuntimeContext, RuntimePendingExecution,
   RuntimeContextMessage, RuntimeTurnInput, RuntimeTurnUserMessage, RuntimeMessage, RuntimeExecutionEvent, HarnessArchive,
   CanonicalProjectionMessage, CanonicalProjectionTurn, NativeProjection, ProjectionCursor, ProjectionInput, ProjectionRecord, ProjectionTarget, ProjectionWarning,
   RuntimeStatus, RuntimeSessionRecoveryStatus, RuntimeStopConfirmation, HarnessArchiveIndex, RuntimeArchiveSegment, RuntimeArchiveUpload, RuntimeArchivePage,

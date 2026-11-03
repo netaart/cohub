@@ -25,6 +25,7 @@ public static class HostProtocol
         public const string Workspace = "workspace";
         public const string WorkspaceFiles = "workspace.files";
         public const string Tabs = "tabs";
+        public const string About = "app.about";
     }
 
     public static class Methods
@@ -54,6 +55,7 @@ public static class HostProtocol
         public const string LaunchAtLogin = "app.launchAtLogin";
         public const string GlobalShortcut = "app.globalShortcut";
         public const string WorkspaceCall = "workspace.call";
+        public const string AppAbout = "app.about";
     }
 
     public static class Events
@@ -77,10 +79,11 @@ public static class HostProtocol
         public const string Open = "shell.open";
     }
 
-    /// <summary>Asked of the CLI by the shell itself; the page can never reach it.</summary>
+    /// <summary>Asked of the CLI by the shell itself; the page can never reach them.</summary>
     public static class ServiceMethods
     {
         public const string WorkspaceEndpoint = "workspace.endpoint";
+        public const string CliAbout = "cli.about";
     }
 
     public const string WorkspacePath = "/__cohub/workspace/";

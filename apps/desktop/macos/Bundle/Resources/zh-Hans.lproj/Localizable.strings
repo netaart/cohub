@@ -73,3 +73,13 @@
 "Your changes will be lost." = "你的更改将会丢失。";
 "Close" = "关闭";
 "Quit" = "退出";
+"Web %@" = "网页版 %@";
+"Command line %@ · Node %@" = "命令行 %@ · Node %@";
+"Terminal: %@ at %@" = "终端：%@，位于 %@";
+"unknown version" = "版本未知";
+"Older than this app. Choose Install Command Line Tool… to use this one." = "比此应用内置的旧。选择“安装命令行工具…”改用内置版本。";
+"No cohub in the terminal. Choose Install Command Line Tool… to add it." = "终端中没有 cohub。选择“安装命令行工具…”添加。";
+"%@: %@ · reconnect to update" = "%1$@：%2$@ · 重新连接以更新";
+"older version" = "旧版本";
+"%@: %@" = "%1$@：%2$@";
+"Open source under Apache-2.0" = "基于 Apache-2.0 开源";

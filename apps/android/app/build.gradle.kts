@@ -49,6 +49,16 @@ val logtoAppId: String = prop("cohubLogtoAppId") ?: deployment.logtoAppId
 val logtoApiResource: String = prop("cohubLogtoApiResource") ?: "https://api.talesofai"
 val oauthRedirectPath: String = prop("cohubOauthRedirectPath") ?: "/mobile/auth/callback"
 
+val repoRoot: File = rootProject.layout.projectDirectory.dir("../..").asFile
+val cliVersion: String = Regex("\"version\"\\s*:\\s*\"([^\"]+)\"")
+    .find(repoRoot.resolve("packages/cli/package.json").readText())?.groupValues?.get(1) ?: ""
+val commit: String = runCatching {
+    providers.exec {
+        commandLine("git", "-C", repoRoot.path, "rev-parse", "--short=7", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim()
+}.getOrDefault("")
+
 val signingKeystore: String? = providers.environmentVariable("COHUB_ANDROID_KEYSTORE").orNull
 val signingPassword: String? = providers.environmentVariable("COHUB_ANDROID_KEYSTORE_PASSWORD").orNull
 
@@ -79,6 +89,8 @@ android {
         buildConfigField("String", "LOGTO_API_RESOURCE", "\"$logtoApiResource\"")
         buildConfigField("String", "OAUTH_REDIRECT_URI", "\"$webOrigin$oauthRedirectPath\"")
         buildConfigField("boolean", "WEB_DEBUGGING", "${cohubEnv == "dev"}")
+        buildConfigField("String", "CLI_VERSION", "\"$cliVersion\"")
+        buildConfigField("String", "COMMIT", "\"$commit\"")
     }
 
     buildFeatures {

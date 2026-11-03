@@ -50,6 +50,11 @@ import {
 } from "../runtime-status-view";
 import DisplayViewers from "./DisplayViewers.svelte";
 
+const RUNTIME_CLIENT_NAMES: Record<string, string> = {
+	cli: "cohub",
+	android: "Android",
+};
+
 // Cloud sandbox displays stay hidden until they ship; flip to restore the entry.
 const CLOUD_DISPLAY_ENTRY = false;
 
@@ -94,6 +99,11 @@ const label = $derived(
 				: m.runtime_offline({}, { locale }),
 );
 const counts = $derived(harnessModelCounts(status));
+const clientLabel = $derived(
+	status?.client
+		? `${RUNTIME_CLIENT_NAMES[status.client.name] ?? status.client.name} ${status.client.version}`
+		: m.runtime_client_outdated({}, { locale }),
+);
 const watcherLabel = $derived(
 	watcher?.state === "running"
 		? m.runtime_watcher_running({}, { locale })
@@ -140,42 +150,80 @@ const phoneControl = $derived(screen?.phoneControl ?? null);
 const phoneReady = $derived(!phoneControl || phoneControl.stage === "ready");
 const phoneControlLabel = $derived.by(() => {
 	switch (phoneControl?.stage) {
-		case "ready": return m.runtime_phone_control_ready({}, { locale });
-		case "developer": return m.runtime_phone_control_developer({}, { locale });
-		case "pairing": return m.runtime_phone_control_pairing({}, { locale });
-		case "code": return m.runtime_phone_control_code({}, { locale });
-		case "starting": return m.runtime_phone_control_starting({}, { locale });
-		case "stopped": return m.runtime_phone_control_stopped({}, { locale });
-		default: return m.runtime_phone_control_off({}, { locale });
+		case "ready":
+			return m.runtime_phone_control_ready({}, { locale });
+		case "developer":
+			return m.runtime_phone_control_developer({}, { locale });
+		case "pairing":
+			return m.runtime_phone_control_pairing({}, { locale });
+		case "code":
+			return m.runtime_phone_control_code({}, { locale });
+		case "starting":
+			return m.runtime_phone_control_starting({}, { locale });
+		case "stopped":
+			return m.runtime_phone_control_stopped({}, { locale });
+		default:
+			return m.runtime_phone_control_off({}, { locale });
 	}
 });
-const canSetupPhone = $derived(phoneControl !== null && !["starting", "ready"].includes(phoneControl.stage));
+const canSetupPhone = $derived(
+	phoneControl !== null && !["starting", "ready"].includes(phoneControl.stage),
+);
 const PHONE_STEPS = ["developer", "pairing", "code"] as const;
-const phoneStep = $derived(PHONE_STEPS.indexOf(phoneControl?.stage as (typeof PHONE_STEPS)[number]));
-const phoneCodeInput = $derived(phoneControl?.stage === "code" && phoneControl.codeInput === true);
+const phoneStep = $derived(
+	PHONE_STEPS.indexOf(phoneControl?.stage as (typeof PHONE_STEPS)[number]),
+);
+const phoneCodeInput = $derived(
+	phoneControl?.stage === "code" && phoneControl.codeInput === true,
+);
 const phoneSteps = $derived.by(() => {
 	if (phoneStep < 0) return null;
 	const text = {
 		developer: m.runtime_phone_control_step_developer({}, { locale }),
 		pairing: m.runtime_phone_control_step_pairing({}, { locale }),
-		code: phoneCodeInput ? m.runtime_phone_control_step_code_here({}, { locale }) : m.runtime_phone_control_step_code({}, { locale }),
+		code: phoneCodeInput
+			? m.runtime_phone_control_step_code_here({}, { locale })
+			: m.runtime_phone_control_step_code({}, { locale }),
 	};
-	return PHONE_STEPS.map((id, index) => ({ id, text: text[id], done: index < phoneStep, current: index === phoneStep }));
+	return PHONE_STEPS.map((id, index) => ({
+		id,
+		text: text[id],
+		done: index < phoneStep,
+		current: index === phoneStep,
+	}));
 });
 const phoneError = $derived.by(() => {
 	switch (phoneControl?.error) {
-		case "notifications_off": return m.runtime_phone_control_error_notifications_off({}, { locale });
-		case "pairing_timed_out": return m.runtime_phone_control_error_pairing_timed_out({}, { locale });
-		case "wireless_debugging_off": return m.runtime_phone_control_error_wireless_debugging_off({}, { locale });
-		case "wireless_debugging_unreachable": return m.runtime_phone_control_error_wireless_debugging_unreachable({}, { locale });
-		case "helper_did_not_start": return m.runtime_phone_control_error_helper_did_not_start({}, { locale });
-		case "helper_stopped": return m.runtime_phone_control_error_helper_stopped({}, { locale });
-		case "unpaired": return m.runtime_phone_control_error_unpaired({}, { locale });
-		case "pairing_wrong": return m.runtime_phone_control_error_pairing_wrong({}, { locale });
-		case "pairing_closed": return m.runtime_phone_control_error_pairing_closed({}, { locale });
-		case "local_network_off": return m.runtime_phone_control_error_local_network_off({}, { locale });
-		case "wifi_off": return m.runtime_phone_control_error_wifi_off({}, { locale });
-		default: return null;
+		case "notifications_off":
+			return m.runtime_phone_control_error_notifications_off({}, { locale });
+		case "pairing_timed_out":
+			return m.runtime_phone_control_error_pairing_timed_out({}, { locale });
+		case "wireless_debugging_off":
+			return m.runtime_phone_control_error_wireless_debugging_off(
+				{},
+				{ locale },
+			);
+		case "wireless_debugging_unreachable":
+			return m.runtime_phone_control_error_wireless_debugging_unreachable(
+				{},
+				{ locale },
+			);
+		case "helper_did_not_start":
+			return m.runtime_phone_control_error_helper_did_not_start({}, { locale });
+		case "helper_stopped":
+			return m.runtime_phone_control_error_helper_stopped({}, { locale });
+		case "unpaired":
+			return m.runtime_phone_control_error_unpaired({}, { locale });
+		case "pairing_wrong":
+			return m.runtime_phone_control_error_pairing_wrong({}, { locale });
+		case "pairing_closed":
+			return m.runtime_phone_control_error_pairing_closed({}, { locale });
+		case "local_network_off":
+			return m.runtime_phone_control_error_local_network_off({}, { locale });
+		case "wifi_off":
+			return m.runtime_phone_control_error_wifi_off({}, { locale });
+		default:
+			return null;
 	}
 });
 const screenLabel = $derived(
@@ -474,7 +522,7 @@ $effect(() => {
 							{#each status.capabilities.harnesses as harness}<span class="harness-line"><HarnessIcon {harness} size={14} />{harnessLabel(harness)}<span class="runtime-meta">{m.runtime_model_count({ count: counts[harness] }, { locale })}</span></span>{/each}
 						{:else}—{/if}
 					</dd></div>
-					<div class="runtime-row"><dt>{m.runtime_connection({}, { locale })}</dt><dd>{tone === "unknown" ? m.runtime_watcher_unknown({}, { locale }) : status.online ? m.runtime_online({}, { locale }) : m.runtime_offline({}, { locale })}</dd></div>
+					<div class="runtime-row"><dt>{m.runtime_connection({}, { locale })}</dt><dd>{tone === "unknown" ? m.runtime_watcher_unknown({}, { locale }) : status.online ? m.runtime_online({}, { locale }) : m.runtime_offline({}, { locale })}{#if status.online && status.kind === "local"}<span class="runtime-meta block">{clientLabel}</span>{/if}</dd></div>
 					<div class="runtime-row"><dt>{m.runtime_workspace_bridge({}, { locale })}</dt><dd>{bridgeLabel}</dd></div>
 					<div class="runtime-row"><dt>{m.runtime_file_watcher({}, { locale })}</dt><dd>{watcherLabel}{#if watcher}<span class="runtime-meta block">{watcher.backend} · {ageLabel(Date.parse(watcher.observedAt))}</span>{/if}</dd></div>
 					{#if deviceInstances}<div class="runtime-row"><dt>{m.runtime_this_device({}, { locale })}</dt><dd class:is-failed={device?.state === "error"}>{deviceLabel}{#if device}<span class="runtime-meta block">{device.label}</span>{/if}</dd></div>{/if}

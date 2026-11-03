@@ -199,6 +199,11 @@ class HostBridge(
             JsonPrimitive(true)
         }
 
+        HostProtocol.Methods.APP_ABOUT -> {
+            actions.showAbout(params.string("web"))
+            JsonPrimitive(true)
+        }
+
         HostProtocol.Methods.HAPTICS_PERFORM -> {
             val kind = HostProtocol.Haptic.of(params.string("kind"))
                 ?: throw IllegalArgumentException("haptics.perform requires a known kind")
@@ -421,6 +426,7 @@ class HostBridge(
             HostProtocol.Methods.CACHE_CLEAR,
             HostProtocol.Methods.APPEARANCE_SET,
             HostProtocol.Methods.APP_READY,
+            HostProtocol.Methods.APP_ABOUT,
             HostProtocol.Methods.HAPTICS_PERFORM,
             HostProtocol.Methods.NAVIGATION_INTERCEPT_BACK,
             HostProtocol.Methods.SHORTCUTS_PUSH,
@@ -451,6 +457,8 @@ interface HostActions {
     fun setAppearance(backgroundColor: Int)
 
     fun appReady()
+
+    fun showAbout(web: String?)
 
     fun performHaptic(kind: HostProtocol.Haptic): Boolean
 

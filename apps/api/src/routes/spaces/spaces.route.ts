@@ -2025,7 +2025,7 @@ router.get("/:id/runtime", async (c) => {
   }
   const rawWorkspace = registration ? await redisCommandClient.get(runtimeWorkspaceKey(spaceId)) : null;
   const workspace = runtimeWorkspaceStatus(registration?.runtimeId, rawWorkspace);
-  return c.json({ kind: sandbox?.provider ?? "cloud", online: Boolean(registration), runtimeId: registration?.runtimeId ?? null, capabilities: registration?.capabilities ?? null, fileWatcher: workspace.online ? fileWatcher : null, displays: workspace.online ? displays : null, workspace, observedAt: new Date().toISOString() });
+  return c.json({ kind: sandbox?.provider ?? "cloud", online: Boolean(registration), runtimeId: registration?.runtimeId ?? null, capabilities: registration?.capabilities ?? null, client: registration?.client ?? null, fileWatcher: workspace.online ? fileWatcher : null, displays: workspace.online ? displays : null, workspace, observedAt: new Date().toISOString() });
 });
 
 router.get("/:id/sessions/:sessionId/runtime", async (c) => {

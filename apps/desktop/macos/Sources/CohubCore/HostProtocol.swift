@@ -21,6 +21,7 @@ public enum HostProtocol {
         public static let workspace = "workspace"
         public static let workspaceFiles = "workspace.files"
         public static let tabs = "tabs"
+        public static let about = "app.about"
     }
 
     public enum Method {
@@ -50,6 +51,7 @@ public enum HostProtocol {
         public static let launchAtLogin = "app.launchAtLogin"
         public static let globalShortcut = "app.globalShortcut"
         public static let workspaceCall = "workspace.call"
+        public static let appAbout = "app.about"
     }
 
     public enum Event {
@@ -70,9 +72,10 @@ public enum HostProtocol {
         public static let open = "shell.open"
     }
 
-    /// Asked of the CLI by the shell itself; the page can never reach it.
+    /// Asked of the CLI by the shell itself; the page can never reach them.
     public enum ServiceMethod {
         public static let workspaceEndpoint = "workspace.endpoint"
+        public static let cliAbout = "cli.about"
     }
 
     public static let serviceVersion = 1

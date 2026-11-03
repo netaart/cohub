@@ -77,6 +77,23 @@ const COMMANDS: CommandPaletteItem[] = [
 		updatedAt: null,
 		source: "default",
 	},
+	{
+		type: "command",
+		id: "about",
+		spaceId: "",
+		sessionId: null,
+		title: "About Cohub",
+		excerpt: "Versions, source code, and license",
+		spaceName: null,
+		matchedField: "command",
+		href: "#",
+		score: 0.88,
+		textScore: 0.88,
+		recencyScore: 0.4,
+		typePriorityScore: 0.5,
+		updatedAt: null,
+		source: "default",
+	},
 ];
 
 const SETTINGS_COMMAND_PREFIX = "settings:";
@@ -139,6 +156,8 @@ function commandAliases(item: CommandPaletteItem) {
 			"updates",
 			"version",
 		];
+	if (item.id === "about")
+		return ["about", "version", "license", "source code", "github"];
 	return [item.title];
 }
 
@@ -185,7 +204,7 @@ export function searchCommandItems(
 				source: "default" as const,
 			}));
 		return COMMANDS.filter(
-			(item) => item.id !== "open-changelog" && item.id !== "manage-spaces",
+			(item) => !["open-changelog", "manage-spaces", "about"].includes(item.id),
 		).map((item) => ({ ...item, source: "default" as const }));
 	}
 	const items: CommandPaletteItem[] = [];

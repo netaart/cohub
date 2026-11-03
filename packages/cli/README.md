@@ -174,6 +174,7 @@ cohub runtime up ./project --harness pi --harness codex
 cohub runtime up ./project --space <spaceId> --harness codex
 cohub -s <spaceId> spaces prompt "Continue" --harness codex
 cohub runtime status --space <spaceId>
+cohub version  # this CLI, the cohub on PATH, and each running Runtime's version
 cohub runtime logs --space <spaceId> --follow
 cohub runtime up -d
 cohub runtime down

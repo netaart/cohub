@@ -30,7 +30,8 @@
     "workspace.files",
     "display.presenting",
     "display.float",
-    "tabs"
+    "tabs",
+    "app.about"
   ],
   "methods": [
     "host.describe",
@@ -56,6 +57,7 @@
     "badge.set",
     "app.launchAtLogin",
     "app.globalShortcut",
+    "app.about",
     "share.take",
     "share.readFile",
     "appearance.set",
@@ -98,7 +100,8 @@
     "shellEvents": [
       "shell.open"
     ],
-    "workspaceEndpoint": "workspace.endpoint"
+    "workspaceEndpoint": "workspace.endpoint",
+    "cliAbout": "cli.about"
   },
   "workspace": {
     "scheme": "cohub-workspace",

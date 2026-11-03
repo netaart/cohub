@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import { sveltekit } from "@sveltejs/kit/vite";
@@ -19,6 +21,26 @@ function shikiPackageChunkName(id: string) {
 	return null;
 }
 
+function buildInfo() {
+	const [latest] = JSON.parse(
+		readFileSync(
+			new URL("./src/lib/changelog/entries.json", import.meta.url),
+			"utf8",
+		),
+	) as { tags?: string[] }[];
+	let commit = process.env.GITHUB_SHA || null;
+	try {
+		commit ??= execFileSync("git", ["rev-parse", "HEAD"], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+	} catch {}
+	return {
+		release: latest?.tags?.[0] ?? null,
+		commit: commit?.slice(0, 7) || null,
+	};
+}
+
 const docsProductDir = fileURLToPath(
 	new URL("../../docs/product", import.meta.url),
 );
@@ -31,6 +53,7 @@ export default defineConfig(({ mode }) => {
 		loadEnv(mode, process.cwd(), "").PUBLIC_COHUB_ENV === "prod";
 
 	return {
+		define: { __COHUB_BUILD__: JSON.stringify(buildInfo()) },
 		resolve: {
 			// Workspace package aliases (@cohub/protocol, @neta-art/cohub) live in
 			// svelte.config.js `kit.alias`, which SvelteKit injects into Vite for us.

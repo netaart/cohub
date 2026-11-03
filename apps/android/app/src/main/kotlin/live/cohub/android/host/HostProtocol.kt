@@ -44,6 +44,7 @@ object HostProtocol {
         const val SHARE_TAKE = "share.take"
         const val SHARE_READ_FILE = "share.readFile"
         const val WORKSPACE_CALL = "workspace.call"
+        const val APP_ABOUT = "app.about"
     }
 
     enum class Haptic(val wire: String) {

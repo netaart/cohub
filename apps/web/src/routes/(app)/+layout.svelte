@@ -3,7 +3,9 @@ import "../../app.css";
 import { onMount } from "svelte";
 import { goto, onNavigate } from "$app/navigation";
 import { page } from "$app/state";
+import { OPEN_ABOUT_EVENT } from "$lib/about";
 import { scheduleCacheCleanup } from "$lib/cache/cleanup";
+import AboutDialog from "$lib/components/AboutDialog.svelte";
 import BillingConversionCenter from "$lib/components/BillingConversionCenter.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import CommandPalette from "$lib/components/CommandPalette.svelte";
@@ -96,6 +98,7 @@ const currentLayoutSpaceId = $derived(
 	}),
 );
 let showHelpPanel = $state(false);
+let showAbout = $state(false);
 let showFeedback = $state(false);
 let authReady = $state(false);
 
@@ -410,6 +413,9 @@ $effect(() => {
 	function openFeedback() {
 		showFeedback = true;
 	}
+	function openAbout() {
+		showAbout = true;
+	}
 	function handleKeydown(e: KeyboardEvent) {
 		if (
 			e.defaultPrevented ||
@@ -443,10 +449,12 @@ $effect(() => {
 	}
 	window.addEventListener("cohub:open-help-panel", openHelpPanel);
 	window.addEventListener("cohub:open-feedback", openFeedback);
+	window.addEventListener(OPEN_ABOUT_EVENT, openAbout);
 	window.addEventListener("keydown", handleKeydown, { capture: true });
 	return () => {
 		window.removeEventListener("cohub:open-help-panel", openHelpPanel);
 		window.removeEventListener("cohub:open-feedback", openFeedback);
+		window.removeEventListener(OPEN_ABOUT_EVENT, openAbout);
 		window.removeEventListener("keydown", handleKeydown, { capture: true });
 	};
 });
@@ -647,6 +655,7 @@ onMount(() => {
   <CommandPalette />
   <DragGhostLayer />
   <HelpPanel open={showHelpPanel} onClose={() => { showHelpPanel = false; }} />
+  <AboutDialog open={showAbout} onClose={() => { showAbout = false; }} />
   <FeedbackDialog open={showFeedback} onClose={() => { showFeedback = false; }} />
   <BillingConversionCenter />
   <CheckoutReturnHandler />

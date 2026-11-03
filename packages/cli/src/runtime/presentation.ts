@@ -69,6 +69,7 @@ export type RuntimeSummary = {
   root: string;
   harnesses: string[];
   pid: number;
+  version?: string;
   state: "starting" | "ready" | "reconnecting" | "attention" | "stopping";
   harnessConnected: boolean;
   workspaceConnected: boolean;
@@ -91,6 +92,7 @@ export function printRuntimeSummary(summary: RuntimeSummary, json = false, reuse
     ["URL", value.url],
     ["Directory", summary.root],
     ["Harness", summary.harnesses.join(" · ") || "Cohub"],
+    ...(summary.version ? [["CLI", summary.version]] : []),
     ["Mode", summary.background ? "Background" : "Foreground"],
     ...(summary.display ? [["Screen", summary.display === "auto" ? "This computer" : summary.display]] : []),
     ...(summary.direct ? [["Direct", "Files and screens on this machine skip the network"]] : []),

@@ -48,4 +48,15 @@
   <data name="Your changes will be lost." xml:space="preserve"><value>Your changes will be lost.</value></data>
   <data name="Close" xml:space="preserve"><value>Close</value></data>
   <data name="Quit" xml:space="preserve"><value>Quit</value></data>
+  <data name="About Cohub" xml:space="preserve"><value>About Cohub</value></data>
+  <data name="Command line {0} · Node {1}" xml:space="preserve"><value>Command line {0} · Node {1}</value></data>
+  <data name="Terminal: {0} at {1}" xml:space="preserve"><value>Terminal: {0} at {1}</value></data>
+  <data name="unknown version" xml:space="preserve"><value>unknown version</value></data>
+  <data name="older version" xml:space="preserve"><value>older version</value></data>
+  <data name="No cohub in the terminal. Choose Install Command Line Tool to add it." xml:space="preserve"><value>No cohub in the terminal. Choose Install Command Line Tool to add it.</value></data>
+  <data name="Older than this app. Choose Install Command Line Tool to use this one." xml:space="preserve"><value>Older than this app. Choose Install Command Line Tool to use this one.</value></data>
+  <data name="{0}: {1} · reconnect to update" xml:space="preserve"><value>{0}: {1} · reconnect to update</value></data>
+  <data name="{0}: {1}" xml:space="preserve"><value>{0}: {1}</value></data>
+  <data name="Open source under Apache-2.0" xml:space="preserve"><value>Open source under Apache-2.0</value></data>
+  <data name="Web {0}" xml:space="preserve"><value>Web {0}</value></data>
 </root>

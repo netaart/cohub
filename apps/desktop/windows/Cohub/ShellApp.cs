@@ -74,6 +74,7 @@ internal sealed class ShellApp : Application, IDisposable
             NewSpace: () => Open("/spaces/new"),
             StopSharing: StopSharing,
             InstallCommandLineTool: InstallCommandLineTool,
+            About: () => ShowAbout(null),
             RestartToUpdate: () => updates?.RestartNow(),
             Quit: Quit));
         instance.Listen(Config.InstanceName, argument => Dispatcher.BeginInvoke(() => Handle(argument)));
@@ -248,10 +249,15 @@ internal sealed class ShellApp : Application, IDisposable
             HostProtocol.Capabilities.Cache, HostProtocol.Capabilities.Notifications, HostProtocol.Capabilities.Shortcuts,
             HostProtocol.Capabilities.MediaCapture, HostProtocol.Capabilities.Permissions, HostProtocol.Capabilities.Badge,
             HostProtocol.Capabilities.LaunchAtLogin, HostProtocol.Capabilities.GlobalShortcut, HostProtocol.Capabilities.Launch,
-            HostProtocol.Capabilities.Tabs,
+            HostProtocol.Capabilities.Tabs, HostProtocol.Capabilities.About,
         ];
         var handlers = new Dictionary<string, BridgeRouter.Handler>
         {
+            [HostProtocol.Methods.AppAbout] = parameters =>
+            {
+                ShowAbout(JsonFields.Text(parameters, "web"));
+                return Ok();
+            },
             [HostProtocol.Methods.AppReady] = _ =>
             {
                 tab.ReportReady();
@@ -484,6 +490,24 @@ internal sealed class ShellApp : Application, IDisposable
         }
         if (!Registration.IsOnPath(tool)) Registration.SetOnPath(tool, true);
         Inform(Strings.L("The cohub command is installed."), Strings.L("Open a new terminal and run cohub."));
+    }
+
+    private AboutWindow? about;
+
+    private async void ShowAbout(string? web)
+    {
+        if (about is not null)
+        {
+            about.Activate();
+            return;
+        }
+        var (version, commit) = CliAbout.AppVersion(typeof(ShellApp).Assembly);
+        var window = about = new AboutWindow(EdgeColor(null), WindowIcon, commit is null ? $"Cohub {version}" : $"Cohub {version} ({commit})", web);
+        window.Closed += (_, _) => about = null;
+        window.Owner = windows.FirstOrDefault(item => item.IsVisible);
+        window.WindowStartupLocation = window.Owner is null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner;
+        window.Show();
+        if (await CliAbout.FetchAsync(service) is { } cli && about == window) window.ShowCommandLine(cli);
     }
 
     private bool webViewMissingShown;

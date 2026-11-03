@@ -42,6 +42,7 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "display.presenting",
   "display.float",
   "tabs",
+  "app.about",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -280,6 +281,16 @@ export function hostWorkspaceFileUrl(input: { platform: HostPlatform; origin: st
 
 export const HOST_SERVICE_WORKSPACE_ENDPOINT = "workspace.endpoint";
 
+export const HOST_SERVICE_CLI_ABOUT = "cli.about";
+
+export type CliAbout = {
+  version: string;
+  commit: string | null;
+  node: string;
+  path: { path: string; version: string | null } | null;
+  runtimes: { spaceId: string; root: string; version: string | null }[];
+};
+
 /**
  * Methods the web surface may call. Both ends validate with these schemas, so
  * a host cannot answer a shape the web side misreads.
@@ -314,6 +325,7 @@ export const HOST_BRIDGE_METHODS = {
   "badge.set": { params: z.object({ count: z.number().int().nonnegative() }).strict(), result: z.boolean() },
   "app.launchAtLogin": { params: settingParams, result: z.boolean() },
   "app.globalShortcut": { params: settingParams, result: z.boolean() },
+  "app.about": { params: z.object({ web: z.string().min(1).max(64) }).strict(), result: z.boolean() },
   "share.take": { params: z.undefined(), result: hostIncomingShareSchema.nullable() },
   "share.readFile": {
     params: z.object({ id: identifier, index: z.number().int().nonnegative() }).strict(),

@@ -22,7 +22,7 @@ class FakeSocket extends EventEmitter {
   receive(frame: unknown) { this.emit("message", Buffer.from(typeof frame === "string" ? frame : JSON.stringify(frame))); return tick(); }
 }
 
-async function connect(deps: Partial<Parameters<typeof createRuntimeRelay>[0]> = {}) {
+async function connect(deps: Partial<Parameters<typeof createRuntimeRelay>[0]> = {}, hello: Record<string, unknown> = {}) {
   const socket = new FakeSocket();
   sockets.add(socket);
   createRuntimeRelay({
@@ -35,7 +35,7 @@ async function connect(deps: Partial<Parameters<typeof createRuntimeRelay>[0]> =
     nativeEvent: async () => ({}),
     ...deps,
   }).control(socket as unknown as WebSocket);
-  await socket.receive({ type: "runtime.hello", version: 1, token: "token", spaceId, capabilities: { harnesses: ["pi"], models: [] } });
+  await socket.receive({ type: "runtime.hello", version: 1, token: "token", spaceId, capabilities: { harnesses: ["pi"], models: [] }, ...hello });
   return socket;
 }
 
@@ -51,6 +51,14 @@ test("a bad native request is answered on its channel; the connection stays", as
   await unsupported.receive({ type: "runtime.native", requestId, event: { type: "status", sessionId: requestId, turnId: requestId } });
   assert.match(nativeError(unsupported) ?? "", /unavailable/);
   assert.equal(unsupported.closeCode, null);
+});
+
+test("registration keeps the client a Runtime reports; older Runtimes omit it", async () => {
+  const records: unknown[] = [];
+  const claim = async (_spaceId: string, record: { client?: unknown }) => { records.push(record.client); return true; };
+  await connect({ claim }, { client: { name: "cli", version: "10.21.0" } });
+  await connect({ claim });
+  assert.deepEqual(records, [{ name: "cli", version: "10.21.0" }, undefined]);
 });
 
 test("protocol errors close with 4400, server faults with 1011", async () => {

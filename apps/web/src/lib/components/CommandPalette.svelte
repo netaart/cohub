@@ -13,6 +13,7 @@ import { onMount, tick, untrack } from "svelte";
 import { MediaQuery, SvelteMap } from "svelte/reactivity";
 import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
 import { page } from "$app/state";
+import { openAbout } from "$lib/about";
 import { getCacheUserKey } from "$lib/cache/keys";
 import {
 	getCachedSpacePage,
@@ -266,6 +267,7 @@ const recentItems = $derived.by(() => {
 // Local commands are always resolved synchronously — never blocked by network/IDB.
 function localizedCommandTitle(item: CommandPaletteItem) {
 	if (item.id === "manage-spaces") return m.spaces_manage({}, { locale });
+	if (item.id === "about") return m.about_title({}, { locale });
 	const section = settingsCommandSection(item);
 	return section ? settingsSectionLabel(section, locale) : null;
 }
@@ -273,6 +275,7 @@ function localizedCommandTitle(item: CommandPaletteItem) {
 function localizedCommandExcerpt(item: CommandPaletteItem) {
 	if (item.id === "manage-spaces")
 		return m.spaces_search_placeholder({}, { locale });
+	if (item.id === "about") return m.about_excerpt({}, { locale });
 	return settingsCommandSection(item) ? m.nav_settings({}, { locale }) : null;
 }
 
@@ -992,6 +995,10 @@ async function activate(
 		// Not meaningful while picking a space for new chat.
 		if (openIntent === "new-chat") return;
 		openRunCommandMode();
+		return;
+	}
+	if (item.id === "about") {
+		if (openIntent !== "new-chat") await leavePalette(openAbout);
 		return;
 	}
 	// New-chat intent: only space (or create-space) actions are valid.

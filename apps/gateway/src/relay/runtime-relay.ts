@@ -204,7 +204,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           }
           if (closed) return;
           const connectionId = randomUUID();
-          const record: RuntimeRegistration = { connectionId, runtimeId: advertisedRuntimeId, ownerUserId: auth.userId, capabilities: frame.capabilities, endpoint: deps.endpoint(frame.spaceId, connectionId) };
+          const record: RuntimeRegistration = { connectionId, runtimeId: advertisedRuntimeId, ownerUserId: auth.userId, capabilities: frame.capabilities, ...(frame.client ? { client: frame.client } : {}), endpoint: deps.endpoint(frame.spaceId, connectionId) };
           if (!await deps.claim(frame.spaceId, record)) {
             logger.warn("runtime.control.registration_conflict", { spaceId: frame.spaceId, runtimeId: advertisedRuntimeId, connectionId });
             socket.close(4409, "Space already has a Runtime");
@@ -221,6 +221,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
             connectionId,
             harnesses: frame.capabilities.harnesses,
             modelCount: frame.capabilities.models.length,
+            runtimeClient: frame.client,
             handshakeMs: registeredAt - connectedAt,
             ...client,
           });

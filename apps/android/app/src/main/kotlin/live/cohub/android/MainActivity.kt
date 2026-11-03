@@ -369,6 +369,17 @@ class MainActivity : ComponentActivity(), HostActions {
         if (auth.account is Account.SignedIn) LauncherShortcuts.pushNewChat(this)
     }
 
+    override fun showAbout(web: String?) {
+        val version = listOf(BuildConfig.VERSION_NAME, BuildConfig.COMMIT).filter { it.isNotEmpty() }.joinToString(" · ")
+        val cli = if (runtime.cli.bundled) BuildConfig.CLI_VERSION else getString(R.string.about_cli_unavailable)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.about_title)
+            .setMessage(getString(R.string.about_message, version, web.orEmpty(), cli))
+            .setPositiveButton(android.R.string.ok, null)
+            .setNeutralButton(R.string.about_source) { _, _ -> openExternally(Uri.parse(REPOSITORY)) }
+            .show()
+    }
+
     private fun lift() {
         launched = true
     }
@@ -549,6 +560,7 @@ class MainActivity : ComponentActivity(), HostActions {
         const val KEY_INSTALL_ID = "install_id"
         const val KEY_FORCE_LOGIN = "force_login"
         const val KEY_RUNTIME_CONSENT = "runtime_consent"
+        const val REPOSITORY = "https://github.com/netaart/cohub"
 
         const val OP_ACCESS_RESTRICTED_SETTINGS = "android:access_restricted_settings"
 

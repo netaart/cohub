@@ -42,4 +42,8 @@
     <string name="overlay_stop_sharing">Stop sharing</string>
     <string name="overlay_take_over">Take over</string>
     <string name="overlay_hand_back">Hand back</string>
+    <string name="about_title">About Cohub</string>
+    <string name="about_message">Version %1$s\nWeb %2$s\nCommand line %3$s\n\nOpen source under Apache-2.0.</string>
+    <string name="about_cli_unavailable">not included on this device</string>
+    <string name="about_source">Source code</string>
 </resources>

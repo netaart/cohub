@@ -8,10 +8,10 @@
   "sideEffects": false,
   "repository": {
     "type": "git",
-    "url": "https://github.com/talesofai/cohub.git",
+    "url": "https://github.com/netaart/cohub.git",
     "directory": "packages/sdk"
   },
-  "homepage": "https://github.com/talesofai/cohub",
+  "homepage": "https://github.com/netaart/cohub",
   "keywords": [
     "cohub",
     "sdk",

@@ -29,6 +29,7 @@ object HostCapabilities {
     const val SHARE_INCOMING = "share.incoming"
     const val WORKSPACE = "workspace"
     const val WORKSPACE_FILES = "workspace.files"
+    const val ABOUT = "app.about"
 
     private val always: List<String> = listOf(
         AUTH_TOKEN,
@@ -45,6 +46,7 @@ object HostCapabilities {
         MEDIA_CAPTURE,
         PERMISSIONS,
         SHARE_INCOMING,
+        ABOUT,
     )
 
     fun advertised(runtime: Boolean, files: Boolean): List<String> =

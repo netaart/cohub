@@ -20,6 +20,7 @@ internal sealed class ShellApp : IDisposable
     private RuntimeOverview overview = RuntimeOverview.Empty;
     private string? appliedEdge;
     private bool saveQueued;
+    private Gtk.AboutDialog? about;
 
     public ShellApp(ShellConfig config)
     {
@@ -235,6 +236,7 @@ internal sealed class ShellApp : IDisposable
         Add("quit", Quit, "<Control>q");
         Add("install-command-line-tool", () => _ = InstallCommandLineToolAsync());
         Add("restart-to-update", () => updates?.RestartNow());
+        Add("about", () => ShowAbout(null));
         AddWithText("open-path", Open);
         AddWithText("open-space", spaceId => Open($"/spaces/{spaceId}"));
         AddWithText("show-folder", root => ShellWindow.OpenExternally(new Uri(root).AbsoluteUri));
@@ -250,6 +252,7 @@ internal sealed class ShellApp : IDisposable
         windowSection.AppendItem(WithAccel(Strings.L("Reopen Closed Tab"), "win.reopen-closed-tab", TabCommand.ReopenClosedTab));
         var toolSection = Gio.Menu.New();
         toolSection.Append(Strings.L("Install Command Line Tool"), "app.install-command-line-tool");
+        toolSection.Append(Strings.L("About Cohub"), "app.about");
         var quitSection = Gio.Menu.New();
         quitSection.Append(Strings.L("Quit Cohub"), "app.quit");
         Menu.AppendSection(null, windowSection);
@@ -332,6 +335,7 @@ internal sealed class ShellApp : IDisposable
             HostProtocol.Capabilities.Launch, HostProtocol.Capabilities.Appearance, HostProtocol.Capabilities.Navigation,
             HostProtocol.Capabilities.Notifications, HostProtocol.Capabilities.Shortcuts, HostProtocol.Capabilities.MediaCapture,
             HostProtocol.Capabilities.Tabs,
+            HostProtocol.Capabilities.About,
         ];
         var handlers = new Dictionary<string, BridgeRouter.Handler>
         {
@@ -360,6 +364,11 @@ internal sealed class ShellApp : IDisposable
             [HostProtocol.Methods.TabsUpdate] = parameters =>
             {
                 tab.Update(parameters);
+                return Ok();
+            },
+            [HostProtocol.Methods.AppAbout] = parameters =>
+            {
+                ShowAbout(JsonFields.Text(parameters, "web"));
                 return Ok();
             },
             [HostProtocol.Methods.NotificationsRegister] = _ => Ok(),
@@ -478,6 +487,36 @@ internal sealed class ShellApp : IDisposable
         if (JsonFields.Text(reply.Result, "refused") is null || Primary is not { } window) return;
         if (await window.ConfirmAsync(Strings.L("A task’s result hasn’t been confirmed yet"), Strings.L("Disconnecting stops the Runtime. Results and files are kept."), Strings.L("Disconnect")))
             Disconnect(spaceId, force: true);
+    }
+
+    private async void ShowAbout(string? web)
+    {
+        if (about is not null)
+        {
+            about.Present();
+            return;
+        }
+        var (version, commit) = CliAbout.AppVersion(typeof(ShellApp).Assembly);
+        var dialog = about = Gtk.AboutDialog.New();
+        dialog.ProgramName = Config.Title;
+        dialog.LogoIconName = Config.AppId;
+        dialog.Version = commit is null ? version : $"{version} ({commit})";
+        dialog.Website = CliAbout.Repository;
+        dialog.WebsiteLabel = "github.com/netaart/cohub";
+        dialog.LicenseType = Gtk.License.Apache20;
+        dialog.TransientFor = Primary?.Window;
+        dialog.OnCloseRequest += (_, _) =>
+        {
+            about = null;
+            return false;
+        };
+        var webLine = web is null ? null : Strings.Format("Web {0}", web);
+        if (webLine is not null) dialog.SystemInformation = webLine;
+        dialog.Present();
+        if (await CliAbout.FetchAsync(service) is not { } cli || about != dialog) return;
+        var lines = cli.Describe(key => Strings.L(key)).ToList();
+        if (lines.Any(line => line.Attention)) dialog.Comments = string.Join("\n", lines.Where(line => line.Attention).Select(line => line.Text));
+        dialog.SystemInformation = string.Join("\n", lines.Select(line => line.Text).Prepend(webLine).OfType<string>());
     }
 
     private async Task InstallCommandLineToolAsync()

@@ -177,12 +177,19 @@ export const runtimePendingExecutionSchema = z.object({
   harness: localHarnessSchema,
 }).strict();
 export type RuntimePendingExecution = z.infer<typeof runtimePendingExecutionSchema>;
+export const runtimeClientSchema = z.object({
+  name: z.string().min(1).max(32),
+  version: z.string().min(1).max(64),
+});
+export type RuntimeClient = z.infer<typeof runtimeClientSchema>;
+
 export const runtimeRegistrationSchema = z.object({
   connectionId: z.string().uuid(),
   runtimeId: z.string().uuid().optional(),
   endpoint: z.url({ protocol: /^wss?$/ }),
   ownerUserId: z.string().min(1),
   capabilities: runtimeCapabilitiesSchema,
+  client: runtimeClientSchema.optional(),
 });
 export type RuntimeRegistration = z.infer<typeof runtimeRegistrationSchema>;
 
@@ -213,6 +220,7 @@ export const fileWatcherStatusSchema = z.object({
 });
 export type RuntimeStatus = {
   kind: "cloud" | "local"; online: boolean; runtimeId?: string | null; capabilities: RuntimeCapabilities | null;
+  client?: RuntimeClient | null;
   fileWatcher: z.infer<typeof fileWatcherStatusSchema> | null;
   displays?: DisplayInfo[] | null;
   /** Authoritative file-bridge lease; absent on older servers. */
@@ -303,7 +311,7 @@ export const runtimeEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("turn.error"), message: z.string().max(16_384), uncertain: z.boolean().optional() }),
 ]);
 export const runtimeClientFrameSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("runtime.hello"), version: z.literal(RUNTIME_PROTOCOL_VERSION), spaceId: id, token: z.string().min(1).max(16_384), capabilities: runtimeCapabilitiesSchema }).strict(),
+  z.object({ type: z.literal("runtime.hello"), version: z.literal(RUNTIME_PROTOCOL_VERSION), spaceId: id, token: z.string().min(1).max(16_384), capabilities: runtimeCapabilitiesSchema, client: runtimeClientSchema.optional() }).strict(),
   /** A changed catalog replaces the registered one without reconnecting. */
   z.object({ type: z.literal("runtime.capabilities"), capabilities: runtimeCapabilitiesSchema }).strict(),
   z.object({ type: z.literal("runtime.recovery"), executions: z.array(runtimePendingExecutionSchema).min(1).max(RUNTIME_RECOVERY_BATCH_SIZE) }).strict(),

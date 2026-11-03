@@ -365,7 +365,7 @@ execution.spaceId;      // home Space
 - 输入与 Task Run 一起存储，App owner 和 Space 成员可见 —— 永远不是秘密通道。
 - Action 不能递归调用 `app.actions.run()`。
 - Space Hooks 可用 `uses: user/space/app/action` 运行 Action —— 见
-  [Space Hooks](https://github.com/talesofai/cohub/blob/main/docs/space-hooks.md)。
+  [Space Hooks](https://github.com/netaart/cohub/blob/main/docs/space-hooks.md)。
 
 ## 形态
 
@@ -637,9 +637,9 @@ if (state.orderId) await client.app.commerce.getOrder(state.orderId);
 - Space 积分计量 Space 内 App 的动作；Cohub Balance 是独立的全局平台托管商品组件（`cohubBalanceUsd`，整数美元，不可变）。
 - 商品价格不可变。变更价格的做法是新建版本化 product key（`image_credit_pack_050`），重绑 benefit，归档旧商品。
 - 商业化与 Action 搭配：Action 由你出钱运行并报告访客权益；`consumeCredits` 回收成本。这是 owner 出钱生成的标准模式 —— 见
-  [whale-shrine](https://github.com/talesofai/cohub/blob/main/cohub-apps/whale-shrine/README.md)。
+  [whale-shrine](https://github.com/netaart/cohub/blob/main/cohub-apps/whale-shrine/README.md)。
 - 配置在 CLI 侧：`cohub spaces commerce setup`、`benefits create`、`products create`。最小闭环见
-  [示例 App 索引](https://github.com/talesofai/cohub/blob/main/cohub-apps/README.md)。
+  [示例 App 索引](https://github.com/netaart/cohub/blob/main/cohub-apps/README.md)。
 
 ## 发布与验证
 
@@ -666,4 +666,4 @@ if (state.orderId) await client.app.commerce.getOrder(state.orderId);
 - [Apps](/zh/docs/create/apps) —— 发布与管理
 - [SDK](/zh/docs/developers/sdk) —— 客户端全貌
 - [CLI](/zh/docs/developers/cli) —— 终端工作流
-- [示例 App](https://github.com/talesofai/cohub/blob/main/cohub-apps/README.md) —— 按场景的可运行示例
+- [示例 App](https://github.com/netaart/cohub/blob/main/cohub-apps/README.md) —— 按场景的可运行示例

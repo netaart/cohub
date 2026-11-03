@@ -241,13 +241,17 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     func router(for window: ShellWindow) -> BridgeRouter {
         typealias M = HostProtocol.Method
         typealias C = HostProtocol.Capability
-        var capabilities = [C.launch, C.appearance, C.navigation, C.share, C.files, C.cache, C.shortcuts, C.mediaCapture, C.permissions, C.badge, C.globalShortcut, C.tabs]
+        var capabilities = [C.launch, C.appearance, C.navigation, C.share, C.files, C.cache, C.shortcuts, C.mediaCapture, C.permissions, C.badge, C.globalShortcut, C.tabs, C.about]
         if notifications != nil { capabilities.append(C.notifications) }
         if Bundle.main.bundleIdentifier != nil { capabilities.append(C.launchAtLogin) }
         if service != nil { capabilities.append(C.runtimePicker) }
         if workspaceFiles != nil { capabilities.append(C.workspaceFiles) }
         var handlers: [String: BridgeRouter.Handler] = [
             M.appReady: { [weak window] _ in window?.reveal(); return true },
+            M.appAbout: { [weak self] params in
+                Task { await AboutPanel.show(service: self?.service, web: params["web"]?.string) }
+                return true
+            },
             M.appearanceSet: { [weak window] params in
                 guard let color = params["backgroundColor"]?.string.flatMap(NSColor.init(hex:)) else { throw BridgeFailure.failed("appearance.set requires a #rrggbb backgroundColor") }
                 ShellState.edgeColor = color
@@ -450,6 +454,10 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc func installCommandLineTool(_ sender: Any?) {
         CommandLineTool.install(config.commandLineTool)
+    }
+
+    @objc func showAbout(_ sender: Any?) {
+        Task { await AboutPanel.show(service: service) }
     }
 
     @objc func openHelp(_ sender: Any?) {

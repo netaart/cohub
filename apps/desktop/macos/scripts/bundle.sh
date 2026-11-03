@@ -16,6 +16,7 @@ while (($#)); do
 done
 case "$arch" in arm64) node_arch=arm64 ;; x86_64 | x64) arch=x86_64 node_arch=x64 ;; *) echo "Unsupported arch: $arch" >&2; exit 1 ;; esac
 build="${build:-$(date +%s)}"
+commit="$(git -C "$repo" rev-parse --short=7 HEAD 2>/dev/null || true)"
 
 if [[ "$env" == dev ]]; then
   name="Cohub Dev" bundle_id="live.cohub.desktop.dev" scheme="cohub-dev" origin="https://dev.cohub.live"
@@ -36,7 +37,7 @@ mkdir -p "$contents/MacOS" "$contents/Resources" "$contents/Frameworks"
 cp "$binaries/Cohub" "$contents/MacOS/Cohub"
 ditto "$binaries/Sparkle.framework" "$contents/Frameworks/Sparkle.framework"
 cp -R "$here/Bundle/Resources/"*.lproj "$contents/Resources/"
-sed -e "s|__NAME__|$name|g" -e "s|__BUNDLE_ID__|$bundle_id|g" -e "s|__VERSION__|$version|g" -e "s|__BUILD__|$build|g" \
+sed -e "s|__NAME__|$name|g" -e "s|__BUNDLE_ID__|$bundle_id|g" -e "s|__VERSION__|$version|g" -e "s|__BUILD__|$build|g" -e "s|__COMMIT__|$commit|g" \
   -e "s|__URL_SCHEME__|$scheme|g" -e "s|__ENV__|$env|g" -e "s|__WEB_ORIGIN__|$origin|g" -e "s|__FEED_URL__|$feed|g" \
   -e "s|__SPARKLE_PUBLIC_KEY__|${SPARKLE_PUBLIC_KEY:-}|g" "$here/Bundle/Info.plist" > "$contents/Info.plist"
 plutil -lint "$contents/Info.plist" >/dev/null

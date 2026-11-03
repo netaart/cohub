@@ -75,6 +75,8 @@
 	<string>Cohub reads and changes folders on removable drives that you connect to a Space.</string>
 	<key>NSNetworkVolumesUsageDescription</key>
 	<string>Cohub reads and changes folders on network drives that you connect to a Space.</string>
+	<key>CohubCommit</key>
+	<string>__COMMIT__</string>
 	<key>CohubEnvironment</key>
 	<string>__ENV__</string>
 	<key>CohubWebOrigin</key>

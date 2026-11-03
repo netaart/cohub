@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
+import { lstatSync, mkdirSync, statSync, unlinkSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type BoardGpuExporter, type BoardGpuResources, launchBoardGpuExporter } from "./index.js";
 import type { BoardGpuResult } from "./protocol.js";
+import { CLI_VERSION } from "../version.js";
 
 
 const IDLE_MS = 5 * 60_000;
@@ -43,21 +44,13 @@ function lines(socket: Socket, handle: (message: Message) => void) {
   return (message: Message) => socket.write(`${JSON.stringify(message)}\n`);
 }
 
-function version(): string {
-  try {
-    return (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }).version;
-  } catch {
-    return "dev";
-  }
-}
-
 export function boardGpuSocket(browser: string): string {
   let page = 0;
   try {
     page = statSync(fileURLToPath(new URL("./page.js", import.meta.url))).mtimeMs;
   } catch {}
   const { uid } = userInfo();
-  const key = createHash("sha256").update(`${version()}\0${browser}\0${page}\0${uid}`).digest("hex").slice(0, 16);
+  const key = createHash("sha256").update(`${CLI_VERSION}\0${browser}\0${page}\0${uid}`).digest("hex").slice(0, 16);
   if (process.platform === "win32") return join("\\\\.\\pipe", `cohub-board-gpu-${key}`);
   const dir = join(process.env.XDG_RUNTIME_DIR || tmpdir(), `cohub-${uid}`);
   mkdirSync(dir, { recursive: true, mode: 0o700 });

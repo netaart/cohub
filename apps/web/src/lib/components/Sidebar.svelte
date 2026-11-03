@@ -26,6 +26,7 @@ import {
 	FolderKanban,
 	Gift,
 	History,
+	Info,
 	Keyboard,
 	Loader2,
 	LogOut,
@@ -45,6 +46,7 @@ import {
 import { onDestroy, onMount, tick, untrack } from "svelte";
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
+import { openAbout } from "$lib/about";
 import { floatNear } from "$lib/actions/portal";
 import { appHomeHref } from "$lib/app-entry";
 import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
@@ -120,6 +122,7 @@ import {
 	resolveAppArea,
 } from "$lib/mobile-nav";
 import { m } from "$lib/paraglide/messages.js";
+import { RELEASE } from "$lib/project";
 import { createRefreshCoordinator } from "$lib/refresh-coordinator";
 import { appActionName } from "$lib/resource-kit/task-run";
 import { sdk } from "$lib/sdk";
@@ -2263,6 +2266,13 @@ function openHelpPanel() {
 	window.dispatchEvent(new CustomEvent("cohub:open-help-panel"));
 }
 
+function showAbout() {
+	showUserMenu = false;
+	showHelpMenu = false;
+	onClose?.();
+	void openAbout();
+}
+
 function openSearch() {
 	onClose?.();
 	openCommandPalette();
@@ -3731,6 +3741,7 @@ $effect(() => {
             {/if}
             <a href="/trending" class="rail-menu-item" onclick={(e) => { e.preventDefault(); showUserMenu = false; handleNavigate('/trending'); }}><BarChart3 class="h-3.5 w-3.5" /><span>{m.sidebar_trending({}, { locale })}</span></a>
             <button type="button" class="rail-menu-item w-full" onclick={openHelpPanel}><Keyboard class="h-3.5 w-3.5" /><span>{m.sidebar_help({}, { locale })}</span></button>
+            <button type="button" class="rail-menu-item w-full" onclick={showAbout}><Info class="h-3.5 w-3.5" /><span>{m.about_title({}, { locale })}</span></button>
             <button type="button" class="rail-menu-item w-full" onclick={openFeedback}><MessageSquareText class="h-3.5 w-3.5" /><span>{m.sidebar_feedback({}, { locale })}</span></button>
             <button type="button" class="rail-menu-item w-full hover:text-error-soft" onclick={() => { showUserMenu = false; void handleLogout(); }}><LogOut class="h-3.5 w-3.5" /><span>{m.sidebar_sign_out({}, { locale })}</span></button>
           </div>
@@ -4338,6 +4349,16 @@ $effect(() => {
               <BookOpen class="h-4 w-4 shrink-0 text-text-tertiary" />
               <span>{m.sidebar_docs({}, { locale })}</span>
             </a>
+            <div class="mx-3 my-1 h-px bg-border-subtle"></div>
+            <button
+              type="button"
+              class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+              onclick={showAbout}
+            >
+              <Info class="h-4 w-4 shrink-0 text-text-tertiary" />
+              <span class="min-w-0 flex-1">{m.about_title({}, { locale })}</span>
+              {#if RELEASE}<span class="shrink-0 font-mono text-[11px] text-text-placeholder">{RELEASE}</span>{/if}
+            </button>
           </div>
         {/if}
         <button

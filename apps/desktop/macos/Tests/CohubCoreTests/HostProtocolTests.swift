@@ -14,6 +14,7 @@ import Testing
         #expect(manifest["service"]?["version"] == .number(Double(HostProtocol.serviceVersion)))
         #expect(manifest["service"]?["shellEvents"]?.array?.compactMap(\.string) == [HostProtocol.ShellEvent.open])
         #expect(manifest["service"]?["workspaceEndpoint"]?.string == HostProtocol.ServiceMethod.workspaceEndpoint)
+        #expect(manifest["service"]?["cliAbout"]?.string == HostProtocol.ServiceMethod.cliAbout)
         #expect(manifest["workspace"]?["scheme"]?.string == WorkspaceFiles.scheme)
     }
 
@@ -25,5 +26,6 @@ import Testing
         #expect(Set([R.unsupported, R.canceled, R.failed, R.denied, R.unavailable]).isSubset(of: names("errors")))
         #expect(Set([C.workspace, C.workspaceFiles]).isSubset(of: names("capabilities")))
         #expect(names("methods").contains(M.workspaceCall))
+        #expect(names("capabilities").contains(C.about) && names("methods").contains(M.appAbout))
     }
 }

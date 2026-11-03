@@ -7,6 +7,12 @@
     "node": ">=24"
   },
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/netaart/cohub.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/netaart/cohub",
   "bin": {
     "cohub": "./bin/cohub.js"
   },
@@ -18,7 +24,7 @@
     "NOTICE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsdown",
+    "build": "tsc -p tsconfig.build.json && tsdown && node scripts/stamp-build.mjs",
     "verify:sandboxd": "node --import tsx scripts/verify-sandboxd-release.ts",
     "verify:rtc": "node --import tsx scripts/verify-rtc-release.ts",
     "verify:board-kernel": "node --import tsx scripts/verify-board-kernel.ts",

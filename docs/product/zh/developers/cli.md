@@ -252,6 +252,7 @@ cohub runtime up
 # 再次运行优先复用；-d 在后台运行；原生对话同步默认开启（确认一次，默认 yes）
 cohub runtime up -d
 cohub runtime status
+cohub version            # 当前 CLI、PATH 上的 cohub，以及各运行中 Runtime 的版本
 cohub runtime logs --level warn --follow
 cohub runtime down
 

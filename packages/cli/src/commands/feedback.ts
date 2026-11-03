@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { arch, platform, release } from "node:os";
 import { basename, resolve } from "node:path";
 import type { Command } from "commander";
+import { cliCommit } from "../version.js";
 import { mimeTypeForPath, readRequestSourceFromEnv, resolveApiBaseUrl, resolveCohubEnvironment } from "@neta-art/cohub";
 import { authSource } from "../auth.js";
 import { createClient } from "../client.js";
@@ -105,6 +106,7 @@ Examples:
       const extra = {
         user_uuid: userUuid,
         cli_version: program.version() ?? null,
+        cli_commit: cliCommit(),
         node: process.versions.node,
         os: `${platform()} ${release()}`,
         arch: arch(),

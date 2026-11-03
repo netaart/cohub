@@ -8,6 +8,7 @@ import { resolveWebsocketUrl, type LocalHarness, type RuntimeCapabilities } from
 import { AuthRequiredError, resolveAccessToken } from "../auth.js";
 import { createClient } from "../client.js";
 import { currentIdentityKey } from "../space.js";
+import { CLI_VERSION } from "../version.js";
 import { ensureSandboxdBinary } from "../commands/sandboxd-binary.js";
 import { serveRuntime, type Execution } from "./connection.js";
 import { discoverHarnesses, refreshHarnesses, type HarnessExecutables } from "./harnesses/index.js";
@@ -88,7 +89,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
   });
   let status: RuntimeSummary = {
     spaceId: config.spaceId, root: config.root, runtimeId: diagnostics.runtimeId,
-    pid: process.pid, harnesses: config.harnesses, background: config.background,
+    pid: process.pid, version: CLI_VERSION, harnesses: config.harnesses, background: config.background,
     ...(config.display ? { display: config.display } : {}),
     state: "starting", harnessConnected: false, workspaceConnected: false,
     diagnosticsPath: diagnostics.directory,

@@ -10,6 +10,7 @@
 import { ArrowUpRight } from "lucide-svelte";
 import type { PublicLocale } from "$lib/i18n/public-locale";
 import { m } from "$lib/paraglide/messages.js";
+import { REPO_URL } from "$lib/project";
 
 type Props = { locale?: PublicLocale };
 
@@ -29,7 +30,7 @@ const proofs = $derived([
 	{
 		value: m.proof_apache({}, { locale }),
 		label: m.proof_apache_sub({}, { locale }),
-		href: "https://github.com/talesofai/cohub",
+		href: REPO_URL,
 	},
 ]);
 </script>

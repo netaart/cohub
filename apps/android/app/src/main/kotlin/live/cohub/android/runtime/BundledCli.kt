@@ -10,12 +10,16 @@ class BundledCli(private val context: Context) {
     private val libs = File(context.applicationInfo.nativeLibraryDir)
     private val root = File(context.noBackupFilesDir, "cli")
 
+    private val node = File(libs, "libcohub_node.so")
+    private val launcher = File(libs, "libcohub_cli.so")
+
+    val bundled: Boolean
+        get() = node.canExecute() && launcher.canExecute()
+
     /** The directory to put on PATH, or null where the APK carries no Node (x86_64). */
     @Synchronized
     fun bin(): File? {
-        val node = File(libs, "libcohub_node.so")
-        val launcher = File(libs, "libcohub_cli.so")
-        if (!node.canExecute() || !launcher.canExecute()) return null
+        if (!bundled) return null
         val stamp = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime.toString()
         val marker = File(root, ".installed")
         if (!marker.isFile || marker.readText() != stamp) install(node, launcher, marker, stamp)

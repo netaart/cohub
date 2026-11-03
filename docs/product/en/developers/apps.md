@@ -461,7 +461,7 @@ execution.spaceId;      // the home Space
   members — never a secret channel.
 - Actions cannot invoke `app.actions.run()` recursively.
 - Space Hooks can run an Action with `uses: user/space/app/action` — see
-  [Space Hooks](https://github.com/talesofai/cohub/blob/main/docs/space-hooks.md).
+  [Space Hooks](https://github.com/netaart/cohub/blob/main/docs/space-hooks.md).
 
 ## Surfaces and forms
 
@@ -829,10 +829,10 @@ Key rules:
 - Pair commerce with Actions: the Action runs at your cost and reports the
   viewer's entitlements; `consumeCredits` recovers the cost. This is the
   standard pattern for owner-funded generation — see
-  [whale-shrine](https://github.com/talesofai/cohub/blob/main/cohub-apps/whale-shrine/README.md).
+  [whale-shrine](https://github.com/netaart/cohub/blob/main/cohub-apps/whale-shrine/README.md).
 - Setup is CLI-side: `cohub spaces commerce setup`, `benefits create`,
   `products create`. See the
-  [sample Apps index](https://github.com/talesofai/cohub/blob/main/cohub-apps/README.md)
+  [sample Apps index](https://github.com/netaart/cohub/blob/main/cohub-apps/README.md)
   for the minimal commerce loop.
 
 ## Publishing and verifying
@@ -870,4 +870,4 @@ real runtime, publish a new version after changes.
 - [Apps](/docs/create/apps) — publishing and management
 - [SDK](/docs/developers/sdk) — the client surface
 - [CLI](/docs/developers/cli) — terminal workflows
-- [Sample Apps](https://github.com/talesofai/cohub/blob/main/cohub-apps/README.md) — runnable examples per scenario
+- [Sample Apps](https://github.com/netaart/cohub/blob/main/cohub-apps/README.md) — runnable examples per scenario

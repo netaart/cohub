@@ -6,7 +6,7 @@ enum MainMenu {
         let bar = NSMenu()
 
         let app = submenu(bar, "Cohub")
-        app.addItem(withTitle: L("About Cohub"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        app.addItem(withTitle: L("About Cohub"), action: #selector(Shell.showAbout(_:)), keyEquivalent: "")
         if let updater { app.addItem(updater) }
         app.addItem(.separator())
         app.addItem(withTitle: L("Settings…"), action: #selector(Shell.openSettings(_:)), keyEquivalent: ",")
