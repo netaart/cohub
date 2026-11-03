@@ -73,7 +73,9 @@ const chatMessage = $derived({
 		stopReason: message.stopReason,
 		errorMessage: message.errorMessage,
 	},
-	toolCallsLoader: onLoadToolCalls,
+	// Without an archived tool-calls object the content is already complete; a load would only
+	// snapshot it and pin live tool input to whatever had streamed so far.
+	toolCallsLoader: message.toolCallsObjectKey ? onLoadToolCalls : undefined,
 } satisfies ChatMessage);
 </script>
 
