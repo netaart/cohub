@@ -36,7 +36,7 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
     private val displays = ConcurrentHashMap<Int, VirtualDisplay>()
     private val mirrors = ConcurrentHashMap<IBinder, VirtualDisplay>()
     private val muted = ConcurrentHashMap<String, String>()
-    private val ledger = File(MUTE_LEDGER)
+    private val ledger = File(TMP, "$appPackage.muted")
     private val clipboard by lazy { context.getSystemService(ClipboardManager::class.java) }
 
     private val tasks: Any by lazy { Class.forName("android.app.ActivityTaskManager").getMethod("getService").invoke(null)!! }
@@ -207,13 +207,12 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
             .onFailure { Log.w(TAG, "the mute ledger could not be saved", it) }
     }
 
-    private fun restoreMuted() {
-        if (!ledger.isFile) return
-        ledger.readLines().forEach { line ->
+    private fun restoreMuted() = listOf(ledger, File(TMP, LEGACY_LEDGER)).filter { it.isFile }.forEach { file ->
+        file.readLines().forEach { line ->
             val (target, mode) = line.split(' ').takeIf { it.size == 2 } ?: return@forEach
             sh("appops", "set", target, "PLAY_AUDIO", mode)
         }
-        ledger.delete()
+        file.delete()
     }
 
     private fun unmuteGone() {
@@ -246,7 +245,8 @@ internal class Helper(private val appUid: Int, private val appPackage: String) :
         private const val INJECT_ASYNC = 0
         private const val MAX_TASKS = 50
         private const val IME_POLICY_LOCAL = 0
-        private const val MUTE_LEDGER = "/data/local/tmp/cohub-muted"
+        const val TMP = "/data/local/tmp"
+        private const val LEGACY_LEDGER = "cohub-muted"
 
         // DisplayManager.VIRTUAL_DISPLAY_FLAG_*: public, own content only, touch,
         // rotates with content, destroys its apps when removed, no touch feedback,

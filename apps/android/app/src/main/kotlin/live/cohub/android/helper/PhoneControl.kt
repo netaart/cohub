@@ -94,6 +94,9 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
     private val _state = MutableStateFlow(State(initialStage()))
     val state: StateFlow<State> = _state.asStateFlow()
 
+    private val helperName = "${context.packageName}:helper"
+    private val helperOut = "${Helper.TMP}/${context.packageName}.helper.out"
+
     private val paired: Boolean get() = prefs.getBoolean(PAIRED, false) && keyFile.isFile
 
     @Volatile var multiWindow = false
@@ -202,8 +205,9 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         val next = token()
         nonce = next
         val info = context.applicationInfo
-        val command = "pkill -f '^${context.packageName}:helper$'; CLASSPATH=${info.sourceDir} setsid app_process /system/bin --nice-name=${context.packageName}:helper " +
-            "${HelperMain::class.java.name} ${context.packageName} ${info.uid} $next </dev/null >$HELPER_OUT 2>&1 &"
+        val command = "pkill -f '^$helperName\$'; CLASSPATH=${info.sourceDir} setsid app_process /system/bin --nice-name=$helperName " +
+            "${HelperMain::class.java.name} ${context.packageName} ${info.uid} $next </dev/null >$helperOut 2>&1 & p=\$!; s=\$(cut -d' ' -f6 /proc/\$\$/stat); " +
+            "for i in \$(seq 40); do [ \"\$(cut -d' ' -f6 /proc/\$p/stat 2>/dev/null)\" = \"\$s\" ] || break; sleep 0.05; done"
         val last = prefs.getInt(PORT, 0)
         val launched = System.currentTimeMillis()
         val ran = (last > 0 && exec(key, last, command)) || connectPort(last)?.let { exec(key, it, command) } == true
@@ -229,11 +233,14 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
 
     private fun helperFailure(key: AdbKey, since: Long): String {
         val time = "%d.%03d".format(since / 1000, since % 1000)
-        val log = runCatching { Adb.exec(key, prefs.getInt(PORT, 0), "cat $HELPER_OUT; logcat -d -b main,crash -v brief -t $time -s ${Helper.TAG}:I AndroidRuntime:E") }
-            .getOrElse { return "its log could not be read (${it.message})" }
+        val log = runCatching {
+            Adb.exec(key, prefs.getInt(PORT, 0), "cat $helperOut; logcat -d -b main,crash -v brief -t $time -s ${Helper.TAG}:I AndroidRuntime:E; pgrep -f '^$helperName\$' >/dev/null || echo $GONE")
+        }.getOrElse { return "its log could not be read (${it.message})" }
         val lines = log.lines().map { it.substringAfter("): ").trim() }.filter { it.isNotEmpty() && !it.startsWith("at ") && !it.startsWith("-----") }
-        return lines.lastOrNull { it.startsWith("Caused by:") } ?: lines.firstOrNull { "Exception" in it || "Error" in it }
-            ?: lines.lastOrNull()?.let { "it stopped after \"$it\"" } ?: "it logged nothing"
+        val gone = GONE in lines
+        val logged = lines - GONE
+        return logged.lastOrNull { it.startsWith("Caused by:") } ?: logged.firstOrNull { "Exception" in it || "Error" in it }
+            ?: logged.lastOrNull()?.let { "it stopped after \"$it\"" } ?: if (gone) "it never ran" else "it runs but logged nothing"
     }
 
     private suspend fun connectPort(last: Int): Int? {
@@ -516,7 +523,7 @@ class PhoneControl(private val context: Context, private val scope: CoroutineSco
         const val BIND_MS = 3_000L
         const val ADB_RESTART_MS = 1_000L
         val RECOVERABLE = setOf("helper_did_not_start", "wireless_debugging_unreachable")
-        const val HELPER_OUT = "/data/local/tmp/cohub-helper.out"
+        const val GONE = "cohub-helper-gone"
         const val PORT = "port"
         const val PAIRING_PORT = "pairingPort"
         const val ADB_WIFI_ENABLED = "adb_wifi_enabled"
