@@ -146,7 +146,7 @@ cohub spaces sessions -h
 
 ## Files
 
-Prefer file tools for normal inspection and edits. read/ls/find/grep query the current space by default — do not pass `space_id` for it. Pass `space_id` only to inspect another space whose ID you already have; otherwise use CLI with `-s <spaceId>`.
+Prefer file tools for normal inspection and edits. For cross-space work, prefer file tools with `space_id` when supported; otherwise use CLI with `-s <spaceId>`.
 
 Use CLI file commands when tools are unavailable, or for platform-side upload, copy, move, rename, delete, or diff.
 

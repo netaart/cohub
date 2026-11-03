@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import { getCurrentToolExecutionContext, runWithToolExecutionContext } from "../tool-context.js";
 import { createSpaceAwareReadTool } from "../runtime/tools/space-aware-query-tools.js";
 import type { AgentFileVisibility } from "../runtime/workspace-visibility.js";
@@ -26,7 +27,7 @@ const SHORT_TARGET_SPACE_ID = "33333333333343338333333333333333";
 async function runReadTool(input: {
   targetProvider: "cloud" | "local";
   visibility?: AgentFileVisibility;
-  spaceId?: string;
+  spaceId?: string | null;
 }) {
   const tool = createSpaceAwareReadTool({
     sandboxTool: createStubTool("sandbox"),
@@ -36,8 +37,22 @@ async function runReadTool(input: {
   });
 
   return runWithToolExecutionContext({ spaceId: CURRENT_SPACE_ID, sessionId: "session-a" }, () =>
-    tool.execute("tool-call-a", { path: "README.md", space_id: input.spaceId ?? TARGET_SPACE_ID }));
+    tool.execute("tool-call-a", { path: "README.md", space_id: input.spaceId === undefined ? TARGET_SPACE_ID : input.spaceId }));
 }
+
+const schemaTool = createSpaceAwareReadTool({
+  sandboxTool: createStubTool("read"),
+  crossSpaceTool: createStubTool("read"),
+  checkAccess: async () => "full",
+  resolveSandboxProvider: async () => "cloud",
+});
+assert.equal(validateToolArguments(schemaTool, {
+  type: "toolCall", id: "call-null", name: "read", arguments: { path: "README.md", space_id: null },
+}).space_id, null);
+
+const nullResult = await runReadTool({ targetProvider: "cloud", spaceId: null });
+assert.deepEqual(nullResult.content, [{ type: "text", text: "sandbox" }]);
+assert.deepEqual(nullResult.details, { params: { path: "README.md" }, spaceId: CURRENT_SPACE_ID });
 
 const cloudResult = await runReadTool({ targetProvider: "cloud" });
 assert.equal(cloudResult.content[0]?.type, "text");

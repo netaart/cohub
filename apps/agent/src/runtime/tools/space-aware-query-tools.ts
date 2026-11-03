@@ -5,7 +5,7 @@ import { assertValidSpaceId, UUID_OR_SHORT_UUID_PATTERN } from "../ids.js";
 import type { AgentFileVisibility } from "../workspace-visibility.js";
 import { assertCrossSpaceQueryPathAllowed } from "./query-path-policy.js";
 
-const SPACE_ID_DESCRIPTION = "Omit for the current space (default). Only set this to another space's ID obtained from Cohub (e.g. `cohub spaces list`); never guess one.";
+const SPACE_ID_DESCRIPTION = "UUID of another space to query. Omit for the current space.";
 
 type AccessCheck = (spaceId: string) => Promise<AgentFileVisibility>;
 type SandboxProvider = "cloud" | "local";
@@ -26,10 +26,11 @@ function getRequestedSpaceId(params: unknown) {
   return trimmed ? assertValidSpaceId(trimmed) : null;
 }
 
-const SPACE_ID_PARAMETER = Type.Optional(Type.String({
-  description: SPACE_ID_DESCRIPTION,
-  pattern: UUID_OR_SHORT_UUID_PATTERN,
-}));
+// GPT fills every field; without null it invents a pattern-valid UUID for the current space.
+const SPACE_ID_PARAMETER = Type.Optional(Type.Union([
+  Type.String({ pattern: UUID_OR_SHORT_UUID_PATTERN }),
+  Type.Null(),
+], { description: SPACE_ID_DESCRIPTION }));
 
 function getQueryPath(params: unknown) {
   if (!params || typeof params !== "object") return undefined;
@@ -58,10 +59,7 @@ function routeExecute(options: SpaceAwareToolOptions) {
 
     if (isCrossSpace) {
       assertCrossSpaceQueryPathAllowed(getQueryPath(params));
-      visibility = await checkAccess(targetSpaceId).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`${message} Omit space_id to query the current space.`);
-      });
+      visibility = await checkAccess(targetSpaceId);
       const provider = await options.resolveSandboxProvider(targetSpaceId);
       if (provider === "local") {
         if (visibility === "filtered") {
