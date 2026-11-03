@@ -6,6 +6,9 @@ All notable changes to Cohub are documented in this file.
 
 ## v2.90 — 2026-11-03
 
+- **Reliable Android helper startup**: The phone helper launch now waits up to 2 s for the new process to become its own session leader before returning, so adbd can no longer terminate it mid-`setsid` and leave the helper silently absent.
+- **Per-build helper isolation**: Helper logs and mute ledgers are namespaced by package name, so debug and production builds installed on the same phone no longer overwrite each other's logs or restore each other's muted apps; the legacy shared mute ledger is migrated on first run.
+- **Actionable helper diagnostics**: Startup failures now distinguish a helper that never ran from one that runs but logs nothing, using a process check alongside the helper log and logcat output.
 - **Board timeline and video editing**: Any Board item can become a clip through the new animatable `visible` property, while video, audio and nested animations play via `props.time` or `time` tracks. A per-stage media clock keeps playback in sync at 0.25–4×, decodes visible video into textures and stays within the device budget. The timeline adds drag, trim, split, range-cut and insert-time editing, drop-in placement, and `cohub boards place` for laying clips end to end.
 - **In-editor MP4 export**: The Board export dialog renders a chosen animation to MP4 at 25 fps through the Space sandbox, reports live frame progress, waits for pending edits to reach the server and is limited to viewers who can run commands. `cohub boards export` draws each video frame at its time, mixes every playing clip with its speed and volume, and pads odd dimensions instead of failing. A new Fill frame action scales selected boxes to cover a frame while preserving aspect.
 - **High-fidelity display control**: Touch-screen taps land as real touches where elements render, each step reports its target and flags no-op steps, and a tap that no longer hits what the session last saw stops with `moved`. Held modifiers and shortcuts reach remote macOS, Windows and Linux desktops correctly, including ⇧/⌘-click, ⌥-drag, AltGr characters and ⌘ mapped to Control; soft-keyboard latches apply to the next tap. Display trees are compact by default, and screenshots are cached under `.cache/cohub/displays/`.
@@ -14,6 +17,8 @@ All notable changes to Cohub are documented in this file.
 
 ### Bug Fixes
 
+- The Android helper could be killed by adbd before `setsid` detached it from the launch command, causing startup to fail while diagnostics reported only "it logged nothing".
+- Debug and production builds on one phone no longer clobber each other's helper logs or mute state through shared paths under `/data/local/tmp`.
 - Board-level script modules now publish with Apps, so Board-wide effects such as rain run on published pages.
 - Closing an Android agent screen while a frame is being read no longer crashes the app; capture readers close on the frames thread and a crashed accessibility service is rebound automatically.
 - Directory listings retry through a cold sandbox connect for up to 15 seconds instead of failing immediately.
