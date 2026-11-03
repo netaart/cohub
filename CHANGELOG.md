@@ -4,6 +4,22 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.91 — 2026-11-03
+
+- **Shader rendering overhaul**: Board shaders now paint the full view from the first frame — a Board script's filter covers the whole view instead of only the items drawn so far, eliminating the dark first frame and clipped edges. Full-box passes shade at most 1.5 device pixels per CSS pixel scaled by quality, programs compile once in the background while the previous version keeps drawing, script modules load in parallel, and uniform or pass changes reach the GPU without recomposing the Board.
+- **Named passes and an expanded script API**: shader passes can declare their own `layer` and a `name`, switching at runtime via `ctx.passes()` with zero cost while off. Hit regions accept `over: true` to receive presses through overlapping items, `emit` now reaches any Board script by key, items' `script.params.*` can be animated by tracks, and `Math.random()` follows the script's seed so scripts replay deterministically.
+- **Shared GPU browser for the CLI**: consecutive commands reuse one headless Chrome over a private per-user socket instead of paying startup and shader compilation each time. The daemon exits after a few idle minutes, `COHUB_BOARD_GPU_DAEMON=0` restores one browser per command, and Boards without shaders never start it.
+- **`boards profile` command**: measures a frame's p50/p95 cost, attributes milliseconds to each shader owner with sprite, state and filter traits, and prints targeted hints — such as a full-view filter that redraws every frame or an oversized owner whose shaders never leave the screen.
+- **Faster, more faithful exports**: `boards export --async` runs the render as a Space Task and returns immediately; `boards simulate` gains `move` steps for hover effects and draws shaders with `-o`; exports replay animated script params span by span with state checkpoints, keeping single-frame output consistent with video.
+
+### Bug Fixes
+
+- Shader filters covered only the items drawn so far, leaving dark or cropped edges on first paint and while panning.
+- Exports failed when scripts called `emit` or `commit`; they now resolve deterministically instead.
+- Animation tracks targeting an item's `script.params.*` had no effect.
+- Zero-opacity shadows and neutral color filters still allocated an offscreen pass every frame.
+- Collision fields rebuilt every frame and on sub-texel moves; they now rebuild at most 30 times a second live.
+
 ## v2.90 — 2026-11-03
 
 - **Board clipboard**: Copy, cut, and paste now move Board items through the system clipboard with a Board-specific MIME payload, so selections transfer between tabs, survive reloads, stay compatible with older Cohub JSON copies, and yield to ordinary page text selection instead of hijacking it.
