@@ -51,10 +51,22 @@ const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
 
 export function createModelViewer(
 	canvas: HTMLCanvasElement,
-	{ onContextLost }: { onContextLost: () => void },
+	{
+		onContextLost,
+		onRender,
+		pixelRatio = Math.min(devicePixelRatio || 1, MAX_PIXEL_RATIO),
+		frameMs = 0,
+	}: {
+		onContextLost: () => void;
+		onRender?: () => void;
+		pixelRatio?: number;
+		frameMs?: number;
+	},
 ) {
-	const renderer = createModelRenderer(canvas);
-	renderer.setPixelRatio(Math.min(devicePixelRatio || 1, MAX_PIXEL_RATIO));
+	const renderer = createModelRenderer(canvas, {
+		preserveDrawingBuffer: Boolean(onRender),
+	});
+	renderer.setPixelRatio(pixelRatio);
 	const studio = createStudioScene(renderer);
 	const { scene } = studio;
 
@@ -107,6 +119,10 @@ export function createModelViewer(
 
 	function tick(now: number) {
 		frame = 0;
+		if (lastFrameAt && now - lastFrameAt < frameMs - 1) {
+			request();
+			return;
+		}
 		const delta = lastFrameAt ? Math.min((now - lastFrameAt) / 1000, 0.1) : 0;
 		lastFrameAt = now;
 		let moving = stepTransition(now);
@@ -116,6 +132,7 @@ export function createModelViewer(
 			moving = true;
 		}
 		renderer.render(scene, camera);
+		onRender?.();
 		if (moving || controls.autoRotate) request();
 		else lastFrameAt = 0;
 	}
@@ -234,6 +251,11 @@ export function createModelViewer(
 				if ("wireframe" in material) material.wireframe = on;
 			}
 			request();
+		},
+		setPixelRatio(ratio: number) {
+			if (renderer.getPixelRatio() === ratio) return;
+			renderer.setPixelRatio(ratio);
+			resize(canvas.clientWidth, canvas.clientHeight);
 		},
 		setPlaying(on: boolean) {
 			playing = on && Boolean(mixer);

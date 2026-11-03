@@ -24,6 +24,7 @@ async function ffmpeg(args: string[], signal?: AbortSignal) {
 export function createBoardMediaFiles(spaceId: string, dir: string, signal?: AbortSignal) {
   const files = new Map<string, Promise<string>>();
   const audible = new Map<string, Promise<boolean>>();
+  const durations = new Map<string, Promise<number>>();
   const client = createClient();
   return {
     path(src: string, kind: "video" | "audio"): Promise<string> {
@@ -51,6 +52,17 @@ export function createBoardMediaFiles(spaceId: string, dir: string, signal?: Abo
           return stdout.trim().length > 0;
         });
         audible.set(src, pending);
+      }
+      return pending;
+    },
+    async duration(src: string): Promise<number> {
+      let pending = durations.get(src);
+      if (!pending) {
+        pending = this.path(src, "video").then(async (path) => {
+          const { stdout } = await execFile("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path], { signal });
+          return Math.max(0, Number(stdout.trim()) * 1000 || 0);
+        }).catch(() => 0);
+        durations.set(src, pending);
       }
       return pending;
     },
@@ -92,6 +104,10 @@ export function createBoardVideoFrames(files: BoardMediaFiles, dir: string, opti
 
   return {
     async frame(state: BoardMediaState, rate: number, edge: number): Promise<Uint8Array | null> {
+      if (state.loop) {
+        const duration = await files.duration(state.src);
+        if (duration > 0) state = { ...state, time: state.time % duration };
+      }
       const current = chunks.get(state.id);
       let file = current?.src === state.src ? lookup(current, state.time, edge) : null;
       if (!file) file = lookup(await decode(state, rate, edge), state.time, edge);

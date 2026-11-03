@@ -1,6 +1,6 @@
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppDetailResponse, AppMeta } from "@neta-art/cohub";
-import type { BoardSceneItem } from "@neta-art/cohub/board";
+import { type BoardSceneItem, boardAppMetadata } from "@neta-art/cohub/board";
 import type { BoardAppMetadata } from "@neta-art/cohub/board/editor";
 import { appCoverUrl, appThemeColor } from "$lib/app-page-meta";
 import { sdk } from "$lib/sdk";
@@ -39,19 +39,10 @@ export function boardAppFace(face: {
 }
 
 export function boardAppMeta(item: BoardSceneItem): BoardAppMeta | null {
-	if (item.type !== "frame" || !item.metadata) return null;
-	const value = (item.metadata as { cohubApp?: unknown }).cohubApp;
-	if (!value || typeof value !== "object") return null;
-	const meta = value as Partial<BoardAppMeta>;
-	if (!meta.appId || !meta.ref || !meta.url || !meta.name) return null;
-	return {
-		appId: meta.appId,
-		ref: meta.ref,
-		url: meta.url,
-		name: meta.name,
-		icon: meta.icon,
-		...boardAppFace(meta),
-	};
+	const meta = boardAppMetadata(item);
+	if (!meta) return null;
+	const { cover: _cover, themeColor: _themeColor, ...identity } = meta;
+	return { ...identity, ...boardAppFace(meta) };
 }
 
 export function boardAppCover(meta: AppMeta | null | undefined): BoardAppFace {

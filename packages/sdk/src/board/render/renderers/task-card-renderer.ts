@@ -327,7 +327,8 @@ function sync(
 		parts.assetKey = key;
 		if (key) context.acquireTexture(key, item);
 	}
-	const texture = key ? context.getTexture(key) : null;
+	const live = context.mediaTexture?.(item.id) ?? null;
+	const texture = live ?? (key ? context.getTexture(key) : null);
 	const previewFailed = Boolean(key && !texture && context.hasError(key));
 	const artifact = featuredTaskArtifact(snapshot.artifacts);
 	const kind = previewKindFor(artifact);
@@ -450,7 +451,7 @@ function sync(
 		if (
 			full &&
 			(artifact?.type === "audio" ||
-				(artifact?.type === "video" && texture))
+				(artifact?.type === "video" && texture && !live))
 		) {
 			drawPlayBadge(parts.previewArt, frame, context);
 		}

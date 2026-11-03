@@ -72,6 +72,7 @@ export function boardMediaActionAt(
 const PLAY_HIT: BoardCardHit = { action: BOARD_PLAY_MEDIA, cursor: "pointer" };
 
 export function mediaPlayHit(item: BoardSceneItem, point: WorldPoint, context: BoardRenderContext): BoardCardHit | null {
+	if (context.covered?.(item.id) || context.mediaTexture?.(item.id)) return null;
 	const key = context.assetKey(item);
 	const action = boardMediaActionAt(item, point, context.zoom, {
 		materialized: true,

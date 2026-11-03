@@ -27,7 +27,6 @@ const {
 	meta,
 	context,
 	details,
-	live,
 	onRun,
 	shell,
 	onNavigationOpen,
@@ -35,7 +34,6 @@ const {
 	meta: BoardAppMeta;
 	context: BoardItemViewContext;
 	details: BoardAppDetails;
-	live: boolean;
 	onRun: () => void;
 	shell?: AppRuntimeShellContext;
 	onNavigationOpen?: AppNavigationHandler;
@@ -44,7 +42,7 @@ const {
 const locale = $derived(getLocale());
 const appId = $derived(meta.appId);
 const detailed = $derived(context.detailed);
-const running = $derived(live && detailed);
+const running = $derived(context.running);
 
 let loaded = $state.raw<{
 	appId: string;
@@ -57,7 +55,7 @@ const detail = $derived(
 
 $effect(() => {
 	const id = appId;
-	if (!detailed) return;
+	if (!detailed && !running) return;
 	let current = true;
 	void details.load(id).then((value) => {
 		if (current) loaded = { appId: id, detail: value };
@@ -84,7 +82,7 @@ const readable = $derived(
 		(src) => src && unreadableImages.has(src),
 	),
 );
-const drawable = $derived(!live && readable);
+const drawable = $derived(!running && readable);
 const cors = $derived(
 	drawable && context.canDraw ? ("anonymous" as const) : undefined,
 );
@@ -105,7 +103,7 @@ function unreadable(src: string | null | undefined) {
 			<img src={meta.icon} alt="" crossorigin={cors} onerror={() => unreadable(meta.icon)} />
 		{/if}
 		<span>{meta.name}</span>
-		{#if live}<i class="board-app-live" aria-hidden="true"></i>{/if}
+		{#if running}<i class="board-app-live" aria-hidden="true"></i>{/if}
 	</div>
 	<div class="board-app-content">
 		{#if running && detail}

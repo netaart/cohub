@@ -8,6 +8,7 @@ export type BoardMediaState = {
 	time: number;
 	volume: number;
 	shown: boolean;
+	loop?: boolean;
 };
 
 export type BoardMediaSpan = {

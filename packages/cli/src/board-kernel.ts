@@ -6,6 +6,7 @@ export {
   boardAnimatesScriptParams,
   boardAssetKey,
   boardAssetKeySource,
+  boardAutoplayLoops,
   boardMediaRate,
   boardMediaSpans,
   boardTimedMedia,

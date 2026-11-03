@@ -88,6 +88,8 @@ const {
 	awareness,
 	awarenessVersion,
 	views = [],
+	autoplay = true,
+	onRunningChange,
 	onPointerPresence,
 	onPointer,
 	onSurfaceChange,
@@ -115,6 +117,8 @@ const {
 	awareness: BoardAwarenessController;
 	awarenessVersion: number;
 	views?: readonly BoardItemView[];
+	autoplay?: boolean;
+	onRunningChange?: (ids: ReadonlySet<string>) => void;
 	onPointerPresence?: (
 		cursor: {
 			x: number;
@@ -488,6 +492,9 @@ onMount(() => {
 		taskRun: (taskRunId) => liveTasks?.get(taskRunId) ?? null,
 		session: (sessionId) => liveSessions?.get(sessionId) ?? null,
 		reducedMotion: () => reducedMotion.current,
+		autoplay: (kind) =>
+			autoplay && (kind !== "video" || !reducedMotion.current),
+		onRunningChange: (ids) => onRunningChange?.(ids),
 		fileState: (path) => (spaceId ? fileAvailability(spaceId, path) : "ok"),
 		previews: remotePreviews,
 		strokes: remoteStrokes,

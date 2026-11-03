@@ -76,7 +76,7 @@ function sync(container: Container, item: SceneItem<BoardVideoItem>, context: Bo
 
 	parts.chrome.clear();
 	const detailed = boardCardDetailed(context.zoom);
-	if (detailed && item.props.time === undefined) drawMediaPlayKey(parts.chrome, screen.x + screen.width / 2, screen.y + screen.height / 2, Math.min(18, Math.min(screen.width, screen.height) * 0.16), context);
+	if (detailed && !live && item.props.time === undefined) drawMediaPlayKey(parts.chrome, screen.x + screen.width / 2, screen.y + screen.height / 2, Math.min(18, Math.min(screen.width, screen.height) * 0.16), context);
 }
 
 function drawFilmRails(graphics: Graphics, width: number, height: number, rail: number, hole: number) {

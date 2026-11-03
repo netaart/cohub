@@ -6,6 +6,8 @@ import { boardDragSlop, boardTextGestureWrap, isCreationBoardTool, isTouchLikePo
 import {
 	type BoardArrowItem,
 	type BoardAssetSource,
+	type BoardAutoplayKind,
+	boardAutoplayVideo,
 	type BoardTaskItem,
 	type BoardItem,
 	type BoardScene,
@@ -72,7 +74,8 @@ import { scheduleBoardIdle } from "./idle.js";
 import { toBoardPointerEvent } from "./pointer.js";
 import { createBoardPointerGestures } from "./pointer-gestures.js";
 import { createBoardScriptController } from "./script-controller.js";
-import { type BoardMediaClock, createBoardMediaClock } from "./media-clock.js";
+import { type BoardMediaClock, type BoardMediaLoop, createBoardMediaClock } from "./media-clock.js";
+import { createBoardLiveScheduler } from "./live.js";
 import { type BoardStageShaders, createBoardStageShaders } from "./shaders.js";
 import { type BoardLiveStroke, createBoardScene } from "./scene.js";
 import { drawBoardFrameMask, drawBoardOverlay } from "./overlay.js";
@@ -141,6 +144,8 @@ export type BoardStageOptions = {
 	onBackdropChange?: (status: BoardBackdropStatus | null) => void;
 	onVisibleChange?: (ids: ReadonlySet<string> | null) => void;
 	onLiveChange?: (ids: ReadonlySet<string>) => void;
+	onRunningChange?: (ids: ReadonlySet<string>) => void;
+	autoplay?: (kind: BoardAutoplayKind) => boolean;
 	safeRect?: () => Rect;
 	scriptCapabilities?: Record<string, (id: string, input: unknown) => Promise<unknown>>;
 	scriptLeader?: () => boolean;
@@ -165,6 +170,7 @@ export type BoardStage = {
 	subscribeScripts(listener: () => void): () => void;
 	invalidate(options?: { cards?: boolean; items?: Iterable<string> }): void;
 	isMaterialized(id: string): boolean;
+	setRunning(id: string, running: boolean | null): void;
 	toWorld(clientX: number, clientY: number): WorldPoint;
 	/** Video and audio a timeline plays; `blocked` while the browser holds back sound until an interaction. */
 	readonly media: Pick<BoardMediaClock, "blocked" | "unlock" | "subscribe">;
@@ -279,6 +285,25 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			} else scheduleRender();
 		},
 	});
+	const live = createBoardLiveScheduler({ video: device.media, model: device.models, app: device.apps });
+	let liveTimer: ReturnType<typeof setTimeout> | null = null;
+	const allowAutoplay = (kind: BoardAutoplayKind) => options.autoplay?.(kind) ?? true;
+	function syncLive(ids: ReadonlySet<string> | null, camera: BoardViewport, renderScene: BoardScene): BoardMediaLoop[] {
+		if (live.sync({ items: editor.document.items, scene: renderScene, visible: ids, camera, surface, allow: allowAutoplay, now: performance.now() }))
+			options.onRunningChange?.(live.running);
+		if (liveTimer !== null) clearTimeout(liveTimer);
+		liveTimer = live.wake === null ? null : setTimeout(() => {
+			liveTimer = null;
+			scheduleTick();
+		}, live.wake + 1);
+		const loops: BoardMediaLoop[] = [];
+		for (const id of live.running) {
+			const item = renderScene.get(id);
+			const src = item && boardAutoplayVideo(item);
+			if (src) loops.push({ id, src });
+		}
+		return loops;
+	}
 	let mediaIds: { items: BoardEditor["document"]["items"]; ids: string[] } | null = null;
 	function timedMediaIds(): string[] {
 		const { items } = editor.document;
@@ -320,7 +345,21 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	});
 	const renderCamera = () => playbackCamera ?? editor.camera;
 	const toWorldPoint = (clientX: number, clientY: number) => pointToWorld(localPoint(clientX, clientY), renderCamera());
-	const views = createBoardItemViewLayer(host, editor, options.views ?? [], renderCamera, scheduleTick, options.viewLayer, options.drawViews ?? device.drawViews);
+	const views = createBoardItemViewLayer(
+		host,
+		editor,
+		options.views ?? [],
+		renderCamera,
+		{
+			invalidate(covered) {
+				if (covered) staleIds.add(covered);
+				scheduleTick();
+			},
+			repaint: () => scheduleRender(),
+		},
+		options.viewLayer,
+		options.drawViews ?? device.drawViews,
+	);
 	const autoPan = createBoardAutoPan(host, editor);
 
 	const player = createBoardPlayer({
@@ -494,6 +533,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			releaseTexture: (key) => assets.release(key),
 			hoveredHit,
 			mediaTexture: (id) => media.texture(id),
+			covered: (id) => views.covered.has(id),
 		};
 	}
 
@@ -1003,6 +1043,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		textResolution.update(textureScale());
 		media.sync({
 			media: boardTimedMedia(renderScene, timedMediaIds()),
+			loops: syncLive(ids, camera, renderScene),
 			now: performance.now(),
 			scrubbing: editor.playhead !== null,
 			onScreen: (id) => (ids ? ids.has(id) : true),
@@ -1057,6 +1098,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			enteredId: editor.enteredId,
 			resolution: context.textResolution,
 			live: (id) => Boolean(scene?.getNode(id)),
+			running: (id) => live.running.has(id),
 		});
 		scene.syncViews(views.textures);
 		schedulePrefetch(camera, context);
@@ -1458,6 +1500,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			scheduleTick();
 		},
 		isMaterialized: (id) => Boolean(scene?.getNode(id)),
+		setRunning(id, running) {
+			live.override(id, running);
+			scheduleTick();
+		},
 		stats() {
 			const { textures, cooling, bytes, loading, prefetching } = assets.stats();
 			return {
@@ -1488,6 +1534,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		},
 		destroy() {
 			disposed = true;
+			if (liveTimer !== null) clearTimeout(liveTimer);
 			pointers.cancel();
 			stopMarch();
 			stopRefine();

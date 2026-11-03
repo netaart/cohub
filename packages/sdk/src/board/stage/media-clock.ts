@@ -18,13 +18,16 @@ type Entry = {
 	ready: boolean;
 	failed: boolean;
 	pendingSeek: number | null;
+	loop: boolean;
 	frameHandle: number;
 	idleSince: number | null;
 	dispose: () => void;
 };
 
+export type BoardMediaLoop = { id: string; src: string };
+
 export type BoardMediaClock = {
-	sync(input: { media: readonly BoardMediaState[]; now: number; scrubbing: boolean; onScreen: (id: string) => boolean }): void;
+	sync(input: { media: readonly BoardMediaState[]; loops: readonly BoardMediaLoop[]; now: number; scrubbing: boolean; onScreen: (id: string) => boolean }): void;
 	texture(id: string): Texture | null;
 	readonly blocked: boolean;
 	unlock(): void;
@@ -103,6 +106,7 @@ export function createBoardMediaClock(options: {
 			ready: false,
 			failed: false,
 			pendingSeek: null,
+			loop: false,
 			frameHandle: 0,
 			idleSince: null,
 			dispose: () => {},
@@ -173,8 +177,16 @@ export function createBoardMediaClock(options: {
 		});
 	}
 
+	function loop(entry: Entry) {
+		const { element } = entry;
+		entry.loop = element.loop = element.muted = true;
+		if (element.playbackRate !== 1) element.playbackRate = 1;
+		if (element.paused) play(entry);
+	}
+
 	function drive(entry: Entry, state: BoardMediaState, rate: number) {
 		const { element } = entry;
+		if (entry.loop) entry.loop = element.loop = false;
 		const target = state.time / 1000;
 		const volume = Math.min(1, Math.max(0, state.volume));
 		if (Math.abs(element.volume - volume) > 0.001) element.volume = volume;
@@ -197,6 +209,11 @@ export function createBoardMediaClock(options: {
 		if (entry.kind === "video" && Math.abs((entry.pendingSeek ?? element.currentTime) - target) > HOLD_DRIFT_S) seek(entry, target);
 	}
 
+	function stopTimed() {
+		for (const entry of entries.values()) if (!entry.loop && !entry.element.paused) entry.element.pause();
+		samples.clear();
+	}
+
 	function stopAll() {
 		for (const entry of entries.values()) if (!entry.element.paused) entry.element.pause();
 		samples.clear();
@@ -206,14 +223,14 @@ export function createBoardMediaClock(options: {
 		if (watchdog !== null) clearTimeout(watchdog);
 		watchdog = setTimeout(() => {
 			watchdog = null;
-			stopAll();
+			stopTimed();
 		}, WATCHDOG_MS);
 	}
 
 	return {
-		sync({ media, now, scrubbing, onScreen }) {
+		sync({ media, loops, now, scrubbing, onScreen }) {
 			if (destroyed) return;
-			const wanted: Array<{ state: BoardMediaState; rate: number; rank: number }> = [];
+			const wanted: Array<{ state: BoardMediaState; rate: number; rank: number; loop?: true }> = [];
 			const seen = new Set<string>();
 			for (const state of media) {
 				seen.add(state.id);
@@ -228,11 +245,18 @@ export function createBoardMediaClock(options: {
 				if (advancing || visible)
 					wanted.push({ state, rate: advancing ? rate : 0, rank: state.kind === "audio" ? 0 : visible ? (advancing ? 1 : 2) : 3 });
 			}
+			for (const { id, src } of loops) {
+				if (seen.has(id)) continue;
+				seen.add(id);
+				const known = entries.get(id);
+				if (!(known?.failed && known.src === src))
+					wanted.push({ state: { id, kind: "video", src, time: 0, volume: 0, shown: true }, rate: 0, rank: 2.5, loop: true });
+			}
 			for (const id of samples.keys()) if (!seen.has(id)) samples.delete(id);
 			wanted.sort((a, b) => a.rank - b.rank);
 			const kept = new Set<string>();
 			let playing = false;
-			for (const { state, rate } of wanted.slice(0, options.limit)) {
+			for (const { state, rate, loop: looping } of wanted.slice(0, options.limit)) {
 				let entry = entries.get(state.id);
 				if (entry && (entry.src !== state.src || entry.kind !== state.kind)) {
 					release(state.id);
@@ -242,6 +266,10 @@ export function createBoardMediaClock(options: {
 				entry.idleSince = null;
 				kept.add(state.id);
 				if (!entry.element.src) continue;
+				if (looping) {
+					loop(entry);
+					continue;
+				}
 				drive(entry, state, rate);
 				playing ||= rate > 0;
 			}
@@ -263,7 +291,7 @@ export function createBoardMediaClock(options: {
 		unlock() {
 			setBlocked(false);
 			for (const entry of entries.values()) {
-				if (entry.element.paused) continue;
+				if (entry.loop || entry.element.paused) continue;
 				entry.element.muted = entry.element.volume === 0;
 				play(entry);
 			}

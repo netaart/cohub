@@ -174,6 +174,7 @@ const itemEnvelope = {
 	visible: z.boolean().optional().describe("false hides the item and its children; key it on a timeline to show the item only for a span."),
 	style: BoardStyleSchema.default({}),
 	locked: z.boolean().optional(),
+	autoplay: z.boolean().optional().describe("true shows live content as the Board opens: an app runs, a video loops muted, a 3D model renders. Ignored for other items and for a video whose props.time follows a timeline."),
 	metadata: z.record(z.string(), z.unknown()).optional(),
 };
 const boxed = (size: { width: number; height: number }) => ({

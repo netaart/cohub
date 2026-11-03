@@ -198,6 +198,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 				return items.length > 0 && items.every((item) => item.locked);
 			});
 		},
+		get selectionAutoplay() {
+			return read(["scene", "selection"], selection.autoplay);
+		},
 		get bounds() {
 			return read(["scene", "selection"], selection.bounds);
 		},
@@ -419,6 +422,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		},
 		fillFrame: selection.fillFrame,
 		toggleSelectionLock: selection.toggleLock,
+		setSelectionAutoplay: selection.setAutoplay,
 		setSelectionColor: selection.setColor,
 		setSelectionStyle: selection.setStyle,
 		setSelectionProps: selection.setProps,

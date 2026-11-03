@@ -1,6 +1,5 @@
-import { parseBoardMediaSource } from "@cohub/protocol/board-model";
+import { type BoardItem, parseBoardMediaSource } from "@cohub/protocol/board-model";
 import { type ModelFormat, modelFormatForPath } from "@cohub/protocol/fs";
-import type { BoardSceneItem } from "./scene.js";
 
 const IMAGE_EXTENSIONS = new Set([
 	"png",
@@ -94,7 +93,7 @@ export function boardModelFormat(
 }
 
 export function isBoardModelItem(
-	item: BoardSceneItem | null | undefined,
+	item: BoardItem | null | undefined,
 ): boolean {
 	return (
 		item?.type === "file" &&

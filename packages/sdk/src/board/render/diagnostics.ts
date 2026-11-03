@@ -1,12 +1,13 @@
 import { layoutBoardText, type BoardTextItem } from "@cohub/protocol";
 import { DOMAdapter } from "pixi.js";
 import type { BoardScene } from "../model/scene.js";
+import { boardAutoplayKind } from "../model/autoplay.js";
 import { effectBounds, itemBounds, rectsIntersect } from "../model/geometry.js";
 import { boardFontFamily } from "../model/text-metrics.js";
 import { BOARD_FONT_STACKS, ensureBoardTextMeasurement } from "./text-measurement.js";
 
 export type BoardRenderDiagnostic = {
-  code: "text-clipped" | "text-overlap" | "glyph-unavailable" | "effect-follow-unused";
+  code: "text-clipped" | "text-overlap" | "glyph-unavailable" | "effect-follow-unused" | "autoplay-unused";
   item: string;
   related?: string;
   characters?: string;
@@ -83,6 +84,8 @@ export function inspectBoardScene(scene: BoardScene, limit = 100, ids?: Readonly
     if (diagnostics.length >= limit) break;
     if (item.type === "effect" && item.props.follow && item.props.kind !== "trail")
       push({ code: "effect-follow-unused", item: item.id });
+    const unfinished = item.type === "task" && (item.props.snapshot.status === "pending" || item.props.snapshot.status === "running");
+    if (item.autoplay && !unfinished && !boardAutoplayKind(item)) push({ code: "autoplay-unused", item: item.id });
   }
   let glyphBudget = 256;
   for (const item of texts) {

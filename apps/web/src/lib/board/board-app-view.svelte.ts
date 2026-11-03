@@ -20,7 +20,6 @@ type AppItemProps = {
 
 export function createBoardAppItemView(options: {
 	details: BoardAppDetails;
-	isLive: (itemId: string) => boolean;
 	onRun: (itemId: string) => void;
 	shell: () => AppRuntimeShellContext | undefined;
 	onNavigationOpen: () => AppNavigationHandler | undefined;
@@ -44,9 +43,6 @@ export function createBoardAppItemView(options: {
 						return props.context;
 					},
 					details: options.details,
-					get live() {
-						return options.isLive(props.id);
-					},
 					onRun: () => options.onRun(props.id),
 					get shell() {
 						return options.shell();

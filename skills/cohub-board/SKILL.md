@@ -69,6 +69,8 @@ Worth knowing before you build:
   `props.decoration: "none"` for invisible groups; use child text items for captions.
 - Animations default to `play: "manual"` and run only on `boards play`; `auto` plays
   when the Board opens, `always` loops.
+- Apps, videos and 3D models show a still card until opened; `"autoplay": true` on the
+  item runs the app, loops the video muted, or renders the model as the Board opens.
 - Palette tokens (`blue`, `green`, …) and `{ "light": …, "dark": … }` follow the
   viewer's theme; a fixed CSS color can vanish on one of them. Exports default to
   `--theme dark`; `--theme` takes any built-in theme, such as `light` or `neta-pixel`.

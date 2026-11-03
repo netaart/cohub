@@ -52,7 +52,7 @@ function unchanged(next: unknown, shown: unknown): boolean {
 	}
 	return sameJson(next, shown);
 }
-const STRUCTURAL_KEYS = ["parent", "z", "locked", "metadata"] as const;
+const STRUCTURAL_KEYS = ["parent", "z", "locked", "autoplay", "metadata"] as const;
 
 export type BoardEditPlayhead = { animationId: string; time: number };
 

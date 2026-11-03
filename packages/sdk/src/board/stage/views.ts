@@ -1,4 +1,4 @@
-import type { Texture } from "pixi.js";
+import { ImageSource, Texture } from "pixi.js";
 import type { BoardEditor, BoardPointerEvent } from "../editor/index.js";
 import { itemBounds, type BoardFrame, type BoardScene, type BoardSceneItem, type BoardViewport } from "../model/index.js";
 import { boardBitmapResolution } from "../render/bitmap-resolution.js";
@@ -11,10 +11,14 @@ export type BoardItemViewContext = {
 	selected: boolean;
 	/** The item is entered (`editor.enteredId`): its view takes input, like an embedded page. */
 	entered: boolean;
+	running: boolean;
 	drawn: boolean;
 	canDraw: boolean;
 	/** Draw the view into the canvas where supported. Only readable content draws: no cross-origin frames, CORS images. */
 	setDrawable(drawable: boolean): void;
+	setCovering(covering: boolean): void;
+	/** Draw this canvas in the item's place and layer instead of the view; call again after each repaint, null to stop. */
+	present(canvas: HTMLCanvasElement | null): void;
 	toPointerEvent(event: PointerEvent): BoardPointerEvent;
 };
 
@@ -30,7 +34,7 @@ export type BoardItemView = {
 	mount(element: HTMLElement, item: BoardSceneItem, context: BoardItemViewContext): BoardItemViewInstance;
 };
 
-type ViewState = Pick<BoardItemViewContext, "detailed" | "selected" | "entered">;
+type ViewState = Pick<BoardItemViewContext, "detailed" | "selected" | "entered" | "running">;
 
 type ViewMode = "dom" | "drawn" | "hidden";
 
@@ -43,6 +47,7 @@ type Mounted = {
 	surface: BoardViewSurface | null;
 	instance: BoardItemViewInstance | null;
 	drawable: boolean;
+	presented: Texture | null;
 	item: BoardSceneItem;
 	shown: BoardSceneItem;
 	context: BoardItemViewContext;
@@ -81,6 +86,7 @@ export type BoardItemViewStats = { drawn: number; rasters: number; rasterMs: num
 export type BoardItemViewLayer = {
 	readonly element: HTMLElement;
 	readonly textures: ReadonlyMap<string, Texture>;
+	readonly covered: ReadonlySet<string>;
 	sync(input: {
 		ids: ReadonlySet<string> | null;
 		scene: BoardScene;
@@ -90,6 +96,7 @@ export type BoardItemViewLayer = {
 		enteredId: string | null;
 		resolution: number;
 		live: (id: string) => boolean;
+		running: (id: string) => boolean;
 	}): void;
 	stats(): BoardItemViewStats;
 	destroy(): void;
@@ -100,7 +107,10 @@ export function createBoardItemViewLayer(
 	editor: BoardEditor,
 	views: readonly BoardItemView[],
 	camera: () => BoardViewport,
-	onInvalidate: () => void = () => {},
+	notify: {
+		invalidate(covered?: string): void;
+		repaint(): void;
+	} = { invalidate() {}, repaint() {} },
 	layer: "above" | "below" = "above",
 	draw = true,
 ): BoardItemViewLayer {
@@ -113,9 +123,12 @@ export function createBoardItemViewLayer(
 	world.style.cssText = "position:absolute;inset:0;transform-origin:0 0;pointer-events:none";
 	element.appendChild(world);
 	let cameraStyle = "";
+	const onInvalidate = notify.invalidate;
 	let drawing = draw && views.length > 0 && boardViewDrawingSupported();
 	let resolution = 1;
 	let live: (id: string) => boolean = () => false;
+	let running: (id: string) => boolean = () => false;
+	const covered = new Set<string>();
 	const rasters = { count: 0, ms: 0 };
 	let spent = 0;
 	let budgetFrame = 0;
@@ -124,7 +137,7 @@ export function createBoardItemViewLayer(
 	const textures = new Map<string, Texture>();
 	const pointers = new Map<number, string>();
 	const retained = (id: string, entry: Mounted) =>
-		entry.node.contains(doc.activeElement) || [...pointers.values()].includes(id);
+		running(id) || entry.node.contains(doc.activeElement) || [...pointers.values()].includes(id);
 	const pointerDown = (event: PointerEvent) => {
 		const target = event.target as Element | null;
 		const id = target?.closest<HTMLElement>("[data-board-item]")?.dataset.boardItem;
@@ -134,7 +147,8 @@ export function createBoardItemViewLayer(
 		if (pointers.delete(event.pointerId)) onInvalidate();
 	};
 	element.addEventListener("pointerdown", pointerDown, true);
-	element.addEventListener("focusout", onInvalidate);
+	const focusOut = () => onInvalidate();
+	element.addEventListener("focusout", focusOut);
 	doc.addEventListener("pointerup", pointerEnd, true);
 	doc.addEventListener("pointercancel", pointerEnd, true);
 	const toPointerEvent = (event: PointerEvent) => toBoardPointerEvent(event, host, camera());
@@ -144,7 +158,26 @@ export function createBoardItemViewLayer(
 	function retire(entry: Mounted) {
 		if (entry.surface) retired.push(entry.surface);
 		entry.surface = null;
-		textures.delete(entry.id);
+		if (!entry.presented) textures.delete(entry.id);
+	}
+
+	function showCanvas(entry: Mounted, canvas: HTMLCanvasElement | null) {
+		if (mounted.get(entry.id) !== entry) return;
+		const shown = entry.presented;
+		if (shown && canvas && shown.source.resource === canvas) {
+			const { pixelWidth, pixelHeight } = shown.source;
+			shown.source.update();
+			if (shown.source.pixelWidth !== pixelWidth || shown.source.pixelHeight !== pixelHeight) onInvalidate();
+			else notify.repaint();
+			return;
+		}
+		shown?.destroy(true);
+		// An ImageSource reads the canvas as it is; a CanvasSource would resize it, clearing a WebGL canvas.
+		entry.presented = canvas ? new Texture({ source: new ImageSource({ resource: canvas }), dynamic: true }) : null;
+		if (entry.presented) textures.set(entry.id, entry.presented);
+		else textures.delete(entry.id);
+		entry.node.style.cssText = nodeStyle(entry);
+		onInvalidate();
 	}
 
 	function spend(ms: number) {
@@ -166,7 +199,7 @@ export function createBoardItemViewLayer(
 		entry.content.style.cssText = `position:relative;width:${frame.width}px;height:${frame.height}px`;
 	}
 
-	const nodeStyle = (entry: Mounted) => (entry.mode === "hidden" ? `${entry.style};visibility:hidden` : entry.style);
+	const nodeStyle = (entry: Mounted) => (entry.mode === "hidden" || entry.presented ? `${entry.style};visibility:hidden` : entry.style);
 
 	function resize(entry: Mounted) {
 		const { surface, item } = entry;
@@ -180,14 +213,14 @@ export function createBoardItemViewLayer(
 		const { context, instance } = entry;
 		const drawn = entry.mode !== "dom";
 		if (!instance) return;
-		if (entry.shown === item && context.detailed === state.detailed && context.selected === state.selected && context.entered === state.entered && context.drawn === drawn && context.canDraw === drawing) return;
+		if (entry.shown === item && context.detailed === state.detailed && context.selected === state.selected && context.entered === state.entered && context.running === state.running && context.drawn === drawn && context.canDraw === drawing) return;
 		entry.shown = item;
 		entry.context = { ...context, ...state, drawn, canDraw: drawing };
 		instance.update?.(item, entry.context);
 	}
 
 	function modeOf(entry: Mounted, detailed: boolean): ViewMode {
-		if (!drawing || !entry.drawable) return "dom";
+		if (!drawing || !entry.drawable || entry.presented) return "dom";
 		return detailed && live(entry.id) ? "drawn" : "hidden";
 	}
 
@@ -245,6 +278,7 @@ export function createBoardItemViewLayer(
 			surface: null,
 			instance: null,
 			drawable: false,
+			presented: null,
 			item,
 			shown: item,
 			style: "",
@@ -258,6 +292,13 @@ export function createBoardItemViewLayer(
 					entry.drawable = drawable;
 					reconcile(entry);
 				},
+				setCovering: (covering) => {
+					if (mounted.get(entry.id) !== entry || covered.has(entry.id) === covering) return;
+					if (covering) covered.add(entry.id);
+					else covered.delete(entry.id);
+					onInvalidate(entry.id);
+				},
+				present: (canvas) => showCanvas(entry, canvas),
 				toPointerEvent,
 			},
 		};
@@ -270,6 +311,9 @@ export function createBoardItemViewLayer(
 
 	function unmount(id: string, entry: Mounted) {
 		entry.instance?.destroy?.();
+		if (covered.delete(id)) onInvalidate(id);
+		entry.presented?.destroy(true);
+		entry.presented = null;
 		retire(entry);
 		entry.node.remove();
 		mounted.delete(id);
@@ -279,11 +323,13 @@ export function createBoardItemViewLayer(
 	return {
 		element,
 		textures,
-		sync({ ids, scene, camera: view, surface, selection, enteredId, resolution: density, live: isLive }) {
+		covered,
+		sync({ ids, scene, camera: view, surface, selection, enteredId, resolution: density, live: isLive, running: isRunning }) {
 			if (views.length === 0) return;
 			for (const old of retired.splice(0)) old.destroy();
 			resolution = density;
 			live = isLive;
+			running = isRunning;
 			const transform = `translate(${view.x}px,${view.y}px) scale(${view.zoom})`;
 			if (transform !== cameraStyle) world.style.transform = cameraStyle = transform;
 			const shown = new Set<string>();
@@ -300,7 +346,7 @@ export function createBoardItemViewLayer(
 				const minimum = itemView.contentSize;
 				const threshold = entry?.context.detailed ? 0.85 : 1;
 				const detailed = held || !minimum || (item.frame.width * view.zoom >= minimum.width * threshold && item.frame.height * view.zoom >= minimum.height * threshold);
-				const state = { detailed, selected: selection.has(item.id), entered: enteredId === item.id };
+				const state = { detailed, selected: selection.has(item.id), entered: enteredId === item.id, running: running(item.id) };
 				const order = scene.indexOf(item.id);
 				if (entry && entry.view !== itemView) {
 					unmount(item.id, entry);
@@ -320,7 +366,7 @@ export function createBoardItemViewLayer(
 		stats: () => ({ drawn: textures.size, rasters: rasters.count, rasterMs: rasters.ms }),
 		destroy() {
 			element.removeEventListener("pointerdown", pointerDown, true);
-			element.removeEventListener("focusout", onInvalidate);
+			element.removeEventListener("focusout", focusOut);
 			doc.removeEventListener("pointerup", pointerEnd, true);
 			doc.removeEventListener("pointercancel", pointerEnd, true);
 			for (const [id, entry] of mounted) unmount(id, entry);

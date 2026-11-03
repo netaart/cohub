@@ -59,7 +59,6 @@ import {
 	X,
 } from "lucide-svelte";
 import { onDestroy, onMount, untrack } from "svelte";
-import { SvelteSet } from "svelte/reactivity";
 import {
 	boardAppMeta,
 	boardAppOpenUrl,
@@ -97,6 +96,7 @@ import {
 } from "$lib/board/board-keyboard";
 import { opensInPlace } from "$lib/board/board-media-playback";
 import { createBoardModelPreviews } from "$lib/board/board-model";
+import { createBoardModelItemView } from "$lib/board/board-model-view.svelte";
 import {
 	enterPresentationFullscreen,
 	holdPresentation,
@@ -270,25 +270,28 @@ const assets = createBoardAssetManager({
 });
 const boardLod = $derived(lod ?? forced?.lod);
 const appDetails = createBoardAppDetailLoader();
-const liveApps = new SvelteSet<string>();
+let running = $state.raw<ReadonlySet<string>>(new Set());
 const itemViews = [
 	createBoardAppItemView({
 		details: appDetails,
-		isLive: (id) => liveApps.has(id),
 		onRun: runApp,
 		shell: () => shell,
 		onNavigationOpen: () => onNavigationOpen,
 	}),
+	createBoardModelItemView({
+		assetSource: resolvedAssetSource,
+		isMobile: () => isMobile,
+	}),
 ];
 
 function runApp(id: string) {
-	liveApps.add(id);
+	scriptStage?.setRunning(id, true);
 	editor.setSelection([id]);
 	editor.enteredId = id;
 }
 
 function stopApp(id: string) {
-	liveApps.delete(id);
+	scriptStage?.setRunning(id, editor.itemById(id)?.autoplay ? false : null);
 	if (editor.enteredId === id) editor.enteredId = null;
 }
 
@@ -297,9 +300,8 @@ const appActions = $derived.by<BoardMenuAction[]>(() => {
 	const app =
 		editor.selectedItems.length === 1 && item ? boardAppMeta(item) : null;
 	if (!item || !app) return [];
-	const live = liveApps.has(item.id);
 	const actions: BoardMenuAction[] = [
-		live
+		running.has(item.id)
 			? {
 					id: "app-stop",
 					label: m.board_app_stop({}, { locale }),
@@ -714,12 +716,15 @@ function addSelectionToGeneration() {
 function openInPlace(itemId: string) {
 	const item = editor.itemById(itemId);
 	if (!opensInPlace(item, resolvedAssetSource)) return;
-	const model = isBoardModelItem(item);
-	modelId = model ? itemId : null;
-	playingId = model ? null : itemId;
+	closeInPlace();
+	scriptStage?.setRunning(itemId, false);
+	if (isBoardModelItem(item)) modelId = itemId;
+	else playingId = itemId;
 }
 
 function closeInPlace() {
+	const opened = modelId ?? playingId;
+	if (opened) scriptStage?.setRunning(opened, null);
 	playingId = null;
 	modelId = null;
 }
@@ -1406,6 +1411,8 @@ onDestroy(() => {
 			onOpenInPlace={openInPlace}
 			onPointerPresence={(cursor) => { if (presence) awareness.setCursor(cursor); }}
 			views={itemViews}
+			autoplay={!saveData}
+			onRunningChange={(ids) => { running = ids; }}
 			onSurfaceChange={handleSurfaceChange}
 			onExportReady={(bridge) => { exportBridge = bridge; }}
 			onBackdropChange={(status) => { backdropStatus = status; }}

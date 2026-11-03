@@ -3,6 +3,7 @@ import {
 	type BoardItem,
 	type BoardMatrix,
 	type BoardSceneItem,
+	boardAutoplayKind,
 	hasAuthoredSize,
 	IDENTITY_MATRIX,
 	placeItem,
@@ -165,6 +166,22 @@ export function createSelectionModule(ctx: EditorContext) {
 		}, state.selection);
 	}
 
+	const autoplayable = () => items().filter((item) => !item.locked && boardAutoplayKind(item));
+
+	function autoplay(): boolean | null {
+		const eligible = autoplayable();
+		return eligible.length > 0 ? eligible.every((item) => item.autoplay) : null;
+	}
+
+	function setAutoplay(on: boolean) {
+		edit((item) => {
+			if (!boardAutoplayKind(item) || Boolean(item.autoplay) === on) return null;
+			if (on) return { ...item, autoplay: true };
+			const { autoplay: _autoplay, ...rest } = item;
+			return rest as BoardItem;
+		}, autoplayable().map((item) => item.id));
+	}
+
 	function setColor(color: string) {
 		edit((item) => {
 			switch (item.type) {
@@ -238,6 +255,8 @@ export function createSelectionModule(ctx: EditorContext) {
 		canFillFrame: () => framed().length > 0,
 		fillFrame,
 		toggleLock,
+		autoplay,
+		setAutoplay,
 		setColor,
 		setStyle,
 		setProps,

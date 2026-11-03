@@ -1931,6 +1931,7 @@
 	"board_video_exported": "Video saved",
 	"board_video_open": "Open",
 	"board_video_failed": "Video export failed",
+	"board_autoplay": "Autoplay",
 	"board_fill_frame": "Fill frame",
 	"board_export_scale": "Export scale",
 	"board_export_warning_scale_clamped": "Scale reduced from {requested}x to {applied}x to stay within the size limit.",

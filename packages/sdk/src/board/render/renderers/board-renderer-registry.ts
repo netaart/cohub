@@ -122,8 +122,9 @@ export type BoardRenderContext = {
 	acquireTexture: (key: string, item: BoardSceneItem) => void;
 	releaseTexture: (key: string) => void;
 	hoveredHit?: { itemId: string; action: string } | null;
-	/** The current frame of a video a timeline plays, drawn instead of its cover. */
+	/** The current frame of a video a timeline or a muted loop plays, drawn instead of its cover. */
 	mediaTexture?: (id: string) => Texture | null;
+	covered?: (id: string) => boolean;
 };
 
 export type BoardCardHit = { action: string; cursor?: string };

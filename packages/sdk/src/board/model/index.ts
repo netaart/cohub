@@ -60,6 +60,7 @@ export * from "./asset-key.js";
 export * from "./media-sizes.js";
 export * from "./items/index.js";
 export * from "./media.js";
+export * from "./autoplay.js";
 export * from "./media-playback.js";
 export * from "./read.js";
 export * from "./version-diff.js";

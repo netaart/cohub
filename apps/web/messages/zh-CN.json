@@ -1931,6 +1931,7 @@
 	"board_video_exported": "视频已导出",
 	"board_video_open": "打开",
 	"board_video_failed": "视频导出失败",
+	"board_autoplay": "默认打开",
 	"board_fill_frame": "铺满画框",
 	"board_export_scale": "导出比例",
 	"board_export_warning_scale_clamped": "倍率已从 {requested}x 降至 {applied}x，以免超出尺寸上限。",

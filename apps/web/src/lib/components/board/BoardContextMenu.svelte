@@ -8,6 +8,7 @@ export type BoardMenuAction = {
 	danger?: boolean;
 	warning?: boolean;
 	expanded?: boolean;
+	checked?: boolean;
 	disabled?: boolean;
 	run: () => void;
 };
@@ -20,6 +21,7 @@ import {
 	ArrowDownToLine,
 	ArrowUpToLine,
 	BoxSelect,
+	Check,
 	Clapperboard,
 	ClipboardCopy,
 	Copy,
@@ -34,6 +36,7 @@ import {
 	Link2,
 	LocateFixed,
 	Maximize,
+	MonitorPlay,
 	PartyPopper,
 	Pencil,
 	Play,
@@ -232,6 +235,15 @@ const actions = $derived.by<BoardMenuAction[]>(() => {
 				editor.editingId = editor.selectedItems[0]?.id ?? null;
 			},
 		});
+	const autoplay = editable ? editor.selectionAutoplay : null;
+	if (autoplay !== null)
+		list.push({
+			id: "autoplay",
+			label: m.board_autoplay({}, { locale }),
+			icon: MonitorPlay,
+			checked: autoplay,
+			run: () => editor.setSelectionAutoplay(!autoplay),
+		});
 	if (hasSelection && onCopy)
 		list.push({
 			id: "copy",
@@ -393,11 +405,13 @@ onDestroy(() => {
 			class="ctx-item"
 			class:ctx-item--danger={action.danger}
 			disabled={action.disabled}
-			role="menuitem"
+			role={action.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+			aria-checked={action.checked}
 			onclick={() => run(action)}
 		>
 			<action.icon class={action.warning ? "h-3.5 w-3.5 text-error" : "h-3.5 w-3.5"} />
 			<span>{action.label}</span>
+			{#if action.checked}<Check class="ctx-check h-3.5 w-3.5" />{/if}
 		</button>
 	{/each}
 </div>
@@ -479,5 +493,6 @@ onDestroy(() => {
 	}
 	.ctx-item:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.ctx-item:disabled { cursor: default; opacity: 0.55; }
+	.ctx-item :global(.ctx-check) { margin-left: auto; color: var(--brand); }
 	.ctx-item--danger:hover { background: var(--color-error-bg); color: var(--error-700); }
 </style>

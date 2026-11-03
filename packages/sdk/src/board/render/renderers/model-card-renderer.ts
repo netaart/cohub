@@ -46,10 +46,12 @@ function sync(container: Container, item: SceneItem<BoardFileItem>, context: Boa
 	const failed = Boolean(key && !texture && context.hasError(key));
 	const detailed = boardCardDetailed(context.zoom);
 	const elevation = cardElevation(context, item.id);
+	const covered = context.covered?.(item.id) ?? false;
 	const sig = [
 		key ?? "",
 		texture?.uid ?? "none",
 		failed,
+		covered,
 		width,
 		height,
 		elevation,
@@ -67,7 +69,11 @@ function sync(container: Container, item: SceneItem<BoardFileItem>, context: Boa
 	});
 
 	if (texture && parts.sprite.texture !== texture) parts.sprite.texture = texture;
-	parts.sprite.visible = Boolean(texture);
+	parts.sprite.visible = Boolean(texture) && !covered;
+	if (covered) {
+		parts.chrome.clear();
+		return;
+	}
 	if (texture) {
 		const inset = Math.min(width, height) * INSET_RATIO;
 		const fitted = containRect(width - inset * 2, height - inset * 2, texture.width, texture.height);

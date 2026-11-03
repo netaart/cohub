@@ -27,6 +27,7 @@ import {
   boardAnimatesScriptParams,
   boardAssetKey,
   boardAssetKeySource,
+  boardAutoplayLoops,
   boardMediaRate,
   boardMediaSpans,
   boardRenderTheme,
@@ -524,7 +525,8 @@ export async function runBoardExport(
       framePictures.clear();
       if (options.withImages) {
         const planned = new Set(prepared.plan.items.map((item) => item.id));
-        for (const state of timed) {
+        const loops = time === null ? [] : boardAutoplayLoops(prepared.scene, time);
+        for (const state of [...timed, ...loops]) {
           const item = prepared.scene.get(state.id);
           const base = item && state.kind === "video" && state.shown && planned.has(state.id) ? boardExportAssetKey(item) : null;
           if (!item || !base) continue;
