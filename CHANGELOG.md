@@ -4,6 +4,21 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.90 — 2026-11-03
+
+- **Board timeline and video editing**: Any Board item can become a clip through the new animatable `visible` property, while video, audio and nested animations play via `props.time` or `time` tracks. A per-stage media clock keeps playback in sync at 0.25–4×, decodes visible video into textures and stays within the device budget. The timeline adds drag, trim, split, range-cut and insert-time editing, drop-in placement, and `cohub boards place` for laying clips end to end.
+- **In-editor MP4 export**: The Board export dialog renders a chosen animation to MP4 at 25 fps through the Space sandbox, reports live frame progress, waits for pending edits to reach the server and is limited to viewers who can run commands. `cohub boards export` draws each video frame at its time, mixes every playing clip with its speed and volume, and pads odd dimensions instead of failing. A new Fill frame action scales selected boxes to cover a frame while preserving aspect.
+- **High-fidelity display control**: Touch-screen taps land as real touches where elements render, each step reports its target and flags no-op steps, and a tap that no longer hits what the session last saw stops with `moved`. Held modifiers and shortcuts reach remote macOS, Windows and Linux desktops correctly, including ⇧/⌘-click, ⌥-drag, AltGr characters and ⌘ mapped to Control; soft-keyboard latches apply to the next tap. Display trees are compact by default, and screenshots are cached under `.cache/cohub/displays/`.
+- **Android floating agent screens**: Agent displays in the Runtime menu can float in the phone indicator, the indicator opens as a panel, and tapping a live preview opens the screen in its Space. The host bridge adds `display.float`, `display.presenting` and `display.open` so the page and host stay aligned on the presented screen. Phone control now recovers by restarting Wireless debugging and rebinding the accessibility service rather than asking for a reboot.
+- **Board rendering performance**: Shader sprite passes evaluate `sprite(id)` once per sprite into float placement textures instead of once per corner, wide blurs and shadows downsample before the Gaussian, and item effects render at device resolution so filtered frames keep text sharp. Board script surfaces cover the view with a margin to survive panning and small zooms, and reduced-motion mode stops redrawing held shaders.
+
+### Bug Fixes
+
+- Board-level script modules now publish with Apps, so Board-wide effects such as rain run on published pages.
+- Closing an Android agent screen while a frame is being read no longer crashes the app; capture readers close on the frames thread and a crashed accessibility service is rebound automatically.
+- Directory listings retry through a cold sandbox connect for up to 15 seconds instead of failing immediately.
+- MP4 exports pad an odd width or height by one pixel instead of rejecting the export.
+
 ## v2.89 — 2026-11-02
 
 - **Phone control and agent screens**: Android 14 phones pair once through Wireless debugging, then a shell helper gives each Space a trusted agent screen with its own focus, mirrors screens without MediaProjection, and injects real touches and keys. A floating edge indicator shows the agent live with Stop, Take over and Hand back, while `display.act` plans target by text, wait for the screen to settle, and stop at the first surprise; without phone control, the phone's own screen can still be shared through accessibility.
