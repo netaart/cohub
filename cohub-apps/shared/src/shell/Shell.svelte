@@ -245,7 +245,7 @@ function restoreScroll() {
 }
 
 $effect(() => {
-  if (!detail.denied || !target || (kind !== "task" && kind !== "checkpoint")) return;
+  if (!detail.denied || !target || (kind !== "task" && kind !== "checkpoint" && kind !== "app")) return;
   if (autoAccessKey === viewKey) return;
   autoAccessKey = viewKey;
   void requestAccess();

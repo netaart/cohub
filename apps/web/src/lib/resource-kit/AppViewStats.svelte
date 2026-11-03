@@ -2,17 +2,20 @@
 import type { AppViewSource, AppViewStatsResponse } from "@neta-art/cohub";
 import { Eye, RefreshCw } from "lucide-svelte";
 import { m } from "$messages";
+import type { AppTotals } from "./app";
 import { intlTag, type Locale } from "./core";
 
 type Props = {
 	locale: Locale;
 	stats: AppViewStatsResponse | null;
+	totals?: AppTotals | null;
 	loading: boolean;
 	error: string;
 	onRetry: () => void;
+	onReveal?: () => void;
 };
 
-let { locale, stats, loading, error, onRetry }: Props = $props();
+let { locale, stats, totals = null, loading, error, onRetry, onReveal }: Props = $props();
 
 const compactFormatter = $derived(
 	new Intl.NumberFormat(intlTag(locale), {
@@ -29,6 +32,17 @@ const dayFormatter = $derived(
 	}),
 );
 
+const waiting = $derived(!stats && (loading || (!error && !onReveal)));
+const metrics = $derived.by(() => {
+	const summary = stats?.summary;
+	const likes = summary ? summary.totalLikes : totals?.likeCount;
+	return [
+		{ value: summary?.totalViews ?? totals?.totalViews ?? null, label: m.app_stats_total, title: m.app_stats_total_views_title },
+		{ value: summary?.views24h ?? null, label: m.app_stats_last_24h, title: m.app_stats_24h_title },
+		{ value: summary?.views7d ?? null, label: m.app_stats_last_7d, title: m.app_stats_7d_title },
+		...(likes === undefined ? [] : [{ value: likes, label: m.app_stats_likes, title: m.app_like_count_title }]),
+	];
+});
 const maxDailyViews = $derived(
 	Math.max(0, ...(stats?.daily.map((point) => point.views) ?? [])),
 );
@@ -78,45 +92,33 @@ function sourcePercent(views: number) {
 		{/if}
 	</div>
 
-	{#if loading && !stats}
-		<div class="space-y-5" aria-label={m.app_stats_loading({}, { locale })}>
-			<div class="grid grid-cols-3 gap-4">
-				{#each Array(3) as _}
-					<div class="space-y-2"><div class="h-5 w-16 animate-pulse rounded bg-bg-elevated"></div><div class="h-3 w-12 animate-pulse rounded bg-bg-elevated/70"></div></div>
-				{/each}
+	<div class="grid gap-4 sm:max-w-xl sm:gap-8 {metrics.length === 3 ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}">
+		{#each metrics as metric (metric.label)}
+			<div class="min-w-0" title={metric.value === null ? undefined : metric.title({ count: exactCount(metric.value) }, { locale })}>
+				<div class="truncate font-mono text-[18px] font-semibold {metric.value === null ? 'text-text-placeholder' : 'text-text-primary'}" class:animate-pulse={waiting && metric.value === null}>{metric.value === null ? "—" : compactCount(metric.value)}</div>
+				<div class="mt-0.5 text-[10px] text-text-placeholder">{metric.label({}, { locale })}</div>
 			</div>
-			<div class="h-24 animate-pulse rounded-[4px] bg-bg-elevated/50"></div>
-		</div>
-	{:else if error && !stats}
-		<div class="flex min-h-20 items-center justify-between gap-4 text-[12px] text-text-tertiary">
-			<span>{m.app_stats_unavailable({}, { locale })}</span>
-			<button type="button" class="inline-flex min-h-8 items-center gap-1.5 rounded-[5px] px-2.5 text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary" onclick={onRetry}>
-				<RefreshCw class="h-3.5 w-3.5" />
-				<span>{m.common_retry({}, { locale })}</span>
-			</button>
-		</div>
-	{:else if stats}
-		<div class="grid gap-4 sm:max-w-xl sm:gap-8 {stats.summary.totalLikes === undefined ? 'grid-cols-3' : 'grid-cols-2 sm:grid-cols-4'}">
-			<div class="min-w-0" title={m.app_stats_total_views_title({ count: exactCount(stats.summary.totalViews) }, { locale })}>
-				<div class="truncate font-mono text-[18px] font-semibold text-text-primary">{compactCount(stats.summary.totalViews)}</div>
-				<div class="mt-0.5 text-[10px] text-text-placeholder">{m.app_stats_total({}, { locale })}</div>
-			</div>
-			<div class="min-w-0" title={m.app_stats_24h_title({ count: exactCount(stats.summary.views24h) }, { locale })}>
-				<div class="truncate font-mono text-[18px] font-semibold text-text-primary">{compactCount(stats.summary.views24h)}</div>
-				<div class="mt-0.5 text-[10px] text-text-placeholder">{m.app_stats_last_24h({}, { locale })}</div>
-			</div>
-			<div class="min-w-0" title={m.app_stats_7d_title({ count: exactCount(stats.summary.views7d) }, { locale })}>
-				<div class="truncate font-mono text-[18px] font-semibold text-text-primary">{compactCount(stats.summary.views7d)}</div>
-				<div class="mt-0.5 text-[10px] text-text-placeholder">{m.app_stats_last_7d({}, { locale })}</div>
-			</div>
-			{#if stats.summary.totalLikes !== undefined}
-				<div class="min-w-0" title={m.app_like_count_title({ count: exactCount(stats.summary.totalLikes) }, { locale })}>
-					<div class="truncate font-mono text-[18px] font-semibold text-text-primary">{compactCount(stats.summary.totalLikes)}</div>
-					<div class="mt-0.5 text-[10px] text-text-placeholder">{m.app_stats_likes({}, { locale })}</div>
-				</div>
+		{/each}
+	</div>
+
+	{#if !stats}
+		<div class="mt-6 flex h-36 items-center justify-center gap-3 rounded-[4px] bg-bg-elevated/30 text-[12px] text-text-tertiary" class:animate-pulse={waiting} aria-busy={waiting}>
+			{#if waiting}
+				<span class="sr-only">{m.app_stats_loading({}, { locale })}</span>
+			{:else if error}
+				<span>{m.app_stats_unavailable({}, { locale })}</span>
+				<button type="button" class="inline-flex min-h-8 items-center gap-1.5 rounded-[5px] px-2.5 text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary" onclick={onRetry}>
+					<RefreshCw class="h-3.5 w-3.5" />
+					<span>{m.common_retry({}, { locale })}</span>
+				</button>
+			{:else if onReveal}
+				<button type="button" class="inline-flex min-h-8 items-center gap-1.5 rounded-[5px] px-2.5 text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary" onclick={onReveal}>
+					<Eye class="h-3.5 w-3.5" />
+					<span>{m.resource_app_show_stats({}, { locale })}</span>
+				</button>
 			{/if}
 		</div>
-
+	{:else}
 		<div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_220px] lg:gap-10">
 			<div class="min-w-0">
 				<div class="mb-2 flex items-center justify-between gap-3 text-[10px] text-text-placeholder">

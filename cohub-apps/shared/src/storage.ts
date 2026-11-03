@@ -6,7 +6,7 @@
 
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem" | "removeItem">;
 
-const CACHE_PREFIX = "resource-app:cache:v2:";
+const CACHE_PREFIX = "resource-app:cache:v3:";
 const MAX_ENTRY_CHARS = 512 * 1024;
 
 function sessionStore(): Storage | null {

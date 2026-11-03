@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { AppDomainListResponse, AppRecord, AppUpdateInput, AppVersionRecord, AppViewStatsResponse, PublicUserProfile } from "@neta-art/cohub";
+import type { AppDomainListResponse, AppRecord, AppUpdateInput, AppVersionRecord, AppViewStatsResponse } from "@neta-art/cohub";
 import { BarChart3, ExternalLink, Globe, MessageSquare, PanelRight, Pencil, Power, Rocket, Trash2 } from "lucide-svelte";
 import { onDestroy, onMount, untrack } from "svelte";
 import { m } from "$messages";
@@ -28,15 +28,16 @@ import { cardClass, eyebrowClass, labelClass } from "../../shared/src/ui/classes
 import CopyButton from "../../shared/src/ui/CopyButton.svelte";
 import { feedback } from "../../shared/src/ui/feedback.svelte";
 import type { LucideIcon } from "../../shared/src/ui/icon";
-import Notice from "../../shared/src/ui/Notice.svelte";
 import StatusBadge from "../../shared/src/ui/StatusBadge.svelte";
 import type { ViewProps } from "../../shared/src/view-types";
 import AppForm, { type AppValues } from "./AppForm.svelte";
 
-let { spaceId, detail, busy, draft, action, authorize, updateDraft, setDetail, removed, navigateRelated }: ViewProps = $props();
+let { spaceId, detail, busy, draft, action, authorize, updateDraft, setDetail, refresh, removed, navigateRelated }: ViewProps = $props();
 
 const locale = $derived(getLocale());
-const app = $derived(detail?.kind === "app" ? detail.data : null);
+const appDetail = $derived(detail?.kind === "app" ? detail : null);
+const app = $derived(appDetail?.data ?? null);
+const publicUrl = $derived(app?.status === "published" ? (appDetail?.publicUrl ?? null) : null);
 const status = $derived(app ? appStatus(app.status, locale) : null);
 const visibility = $derived(app ? appVisibility(app.visibility, locale) : null);
 const hiddenBar = $derived(hidesCohubBar(app?.meta));
@@ -46,10 +47,6 @@ let editGranted = $state(false);
 const canManage = $derived(manageGranted || hasScopes(runtime.context, spaceId, ["app.manage"]));
 const canEditSpace = $derived(editGranted || hasScopes(runtime.context, spaceId, ["space.edit"]));
 let editing = $state(untrack(() => draft !== null));
-let publicUrl = $state<string | null>(null);
-let publisher = $state<PublicUserProfile | null>(null);
-let versions = $state<AppVersionRecord[] | null>(null);
-let versionsFailed = $state(false);
 let stats = $state<AppViewStatsResponse | null>(null);
 let statsLoading = $state(false);
 let statsError = $state("");
@@ -69,16 +66,6 @@ function initialValues(current: AppRecord): AppValues {
   };
 }
 
-async function loadVersions(id: string) {
-  versionsFailed = false;
-  try {
-    const result = await client.apps.listVersions(id);
-    if (!disposed) versions = (versions ?? []).reduce(upsertAppVersion, result.versions);
-  } catch {
-    if (!disposed) versionsFailed = true;
-  }
-}
-
 async function loadStats(id: string) {
   if (statsLoading) return;
   statsLoading = true;
@@ -90,22 +77,6 @@ async function loadStats(id: string) {
     if (!disposed) statsError = m.app_stats_unavailable({}, { locale });
   } finally {
     if (!disposed) statsLoading = false;
-  }
-}
-
-async function loadPublicUrl(id: string) {
-  try {
-    const result = await client.apps.getPublicById(id);
-    if (!disposed) publicUrl = result.publicUrl;
-  } catch {
-  }
-}
-
-async function loadPublisher(userUuid: string) {
-  try {
-    const { profiles } = await client.users.getProfiles({ userUuids: [userUuid] });
-    if (!disposed) publisher = profiles[userUuid] ?? null;
-  } catch {
   }
 }
 
@@ -148,14 +119,10 @@ function confirmDomainRemoval(hostname: string) {
 onMount(() => {
   const current = untrack(() => app);
   if (!current) return;
-  void loadVersions(current.id);
-  void loadPublisher(current.userUuid);
-  if (current.status === "published") void loadPublicUrl(current.id);
   const stop = subscribeSpace(spaceId, (event) => {
     const published = parseAppVersionPublished(event);
     if (published?.app.id === current.id) {
-      if (isNewerAppSnapshot(app, published.app)) show(published.app);
-      versions = upsertAppVersion(versions ?? [], published.version);
+      show(isNewerAppSnapshot(app, published.app) ? published.app : null, published.version);
       return;
     }
     const change = parseAppDomainEvent(event);
@@ -164,9 +131,12 @@ onMount(() => {
   return () => stop?.();
 });
 
-function show(next: AppRecord) {
-  setDetail({ kind: "app", data: next });
-  if (next.status === "published" && !publicUrl) void loadPublicUrl(next.id);
+function show(next: AppRecord | null, version?: AppVersionRecord) {
+  const current = appDetail;
+  if (!current) return;
+  const data = next ?? current.data;
+  setDetail({ ...current, data, versions: version ? upsertAppVersion(current.versions, version) : current.versions });
+  if (data.slug !== current.data.slug || data.status !== current.data.status) void refresh();
 }
 
 async function manage(run: (current: AppRecord) => Promise<void>) {
@@ -194,8 +164,7 @@ async function publish() {
   const saved = await manage(async (current) => {
     const result = await client.apps.publishVersion(current.id);
     published = result.version.version;
-    show(result.app);
-    versions = upsertAppVersion(versions ?? [], result.version);
+    show(result.app, result.version);
   });
   if (saved) feedback.notify(m.resource_app_published_version({ version: published }, { locale }));
 }
@@ -207,17 +176,17 @@ async function disable() {
 }
 
 async function remove() {
-  const current = app;
+  const current = appDetail;
   if (!current) return;
   const confirmed = await feedback.ask({
     title: m.resource_app_delete_app_title({}, { locale }),
-    message: m.resource_app_delete_app_message({ title: resourceTitle({ kind: "app", data: current }, locale) }, { locale }),
+    message: m.resource_app_delete_app_message({ title: resourceTitle(current, locale) }, { locale }),
     confirmLabel: m.common_delete({}, { locale }),
     cancelLabel: m.common_cancel({}, { locale }),
     danger: true,
   });
   if (!confirmed) return;
-  const deleted = await action(["app.manage"], () => client.apps.delete(current.id).then(() => {}));
+  const deleted = await action(["app.manage"], () => client.apps.delete(current.data.id).then(() => {}));
   if (deleted) removed(m.resource_app_deleted({}, { locale }));
 }
 </script>
@@ -229,11 +198,11 @@ async function remove() {
   </div>
 {/snippet}
 
-{#if app && detail && status && visibility}
+{#if appDetail && app && status && visibility}
   <article class="space-y-6 px-4 py-5 sm:space-y-8 sm:px-6">
     <header class="flex flex-col gap-4 border-b border-border-subtle/70 pb-5 lg:flex-row lg:items-start lg:justify-between">
       <div class="min-w-0 space-y-2">
-        <h1 class="text-[24px] font-semibold tracking-tight break-words text-text-primary sm:text-[28px]">{resourceTitle(detail, locale)}</h1>
+        <h1 class="text-[24px] font-semibold tracking-tight break-words text-text-primary sm:text-[28px]">{resourceTitle(appDetail, locale)}</h1>
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <StatusBadge tone={status.tone} label={status.label} />
           <StatusBadge tone={visibility.tone} label={visibility.label} />
@@ -261,12 +230,8 @@ async function remove() {
     {#if editing}
       <AppForm initial={initialValues(app)} {busy} onchange={(values) => updateDraft(values)} onsubmit={save} oncancel={() => { updateDraft(null); editing = false; }} />
     {:else}
-      {#if stats || statsLoading || statsError}
-        <AppViewStats {locale} {stats} loading={statsLoading} error={statsError} onRetry={() => void loadStats(app.id)} />
-      {:else if !canManage}
-        {@render reveal(BarChart3, m.app_stats_views({}, { locale }), m.resource_app_show_stats({}, { locale }), () => void grant("app.manage"))}
-      {/if}
-      {#if publicUrl && app.status === "published"}
+      <AppViewStats {locale} {stats} totals={appDetail.totals} loading={statsLoading} error={statsError} onRetry={() => void loadStats(app.id)} onReveal={canManage ? undefined : () => void grant("app.manage")} />
+      {#if publicUrl}
         {#if canEditSpace}
           <AppPromotions {locale} appId={app.id} {publicUrl} api={client.apps} />
         {:else}
@@ -313,7 +278,7 @@ async function remove() {
           </section>
         </div>
         <aside class="space-y-5 text-[13px]">
-          {#if publicUrl && app.status === "published"}
+          {#if publicUrl}
             <div class="flex min-w-0 items-center gap-2 rounded-[6px] bg-bg-elevated/30 px-3 py-2">
               <a href={publicUrl} target="_blank" rel="noopener noreferrer" class="min-w-0 flex-1 truncate font-mono text-[12px] text-text-secondary hover:text-brand">{publicUrl.replace(/^https?:\/\//, "")}</a>
               <CopyButton variant="action" value={publicUrl} label={m.app_view_copy_url({}, { locale })} text="" />
@@ -326,7 +291,7 @@ async function remove() {
               <dt class="text-text-placeholder">{m.cron_updated({}, { locale })}</dt><dd class="text-text-secondary">{formatDateTime(app.updatedAt, locale)}</dd>
               <dt class="text-text-placeholder">{m.resource_app_published({}, { locale })}</dt><dd class="text-text-secondary">{formatDateTime(app.publishedAt, locale)}</dd>
               <dt class="text-text-placeholder">{m.resource_app_publisher({}, { locale })}</dt>
-              <dd class="min-w-0">{#if publisher}<span class="block truncate text-text-secondary" title={app.userUuid}>{publisher.displayName}</span>{:else}<CopyButton value={app.userUuid} label={m.resource_app_publisher({}, { locale })} />{/if}</dd>
+              <dd class="min-w-0">{#if appDetail.publisher}<span class="block truncate text-text-secondary" title={app.userUuid}>{appDetail.publisher.displayName}</span>{:else}<CopyButton value={app.userUuid} label={m.resource_app_publisher({}, { locale })} />{/if}</dd>
             </dl>
           </div>
         </aside>
@@ -334,13 +299,9 @@ async function remove() {
 
       <section class="border-t border-border-subtle/70 pt-6" aria-labelledby="app-versions">
         <h2 id="app-versions" class="mb-3 {eyebrowClass}">{m.resource_app_versions({}, { locale })}</h2>
-        {#if versionsFailed}
-          <Notice>{m.resource_app_error({}, { locale })}{#snippet action()}<Button variant="ghost" onclick={() => loadVersions(app.id)}>{m.common_retry({}, { locale })}</Button>{/snippet}</Notice>
-        {:else if !versions}
-          <div class="space-y-1.5" aria-busy="true">{#each Array(3) as _, index}<div class="h-10 animate-pulse rounded bg-bg-elevated/40" style:opacity={1 - index * 0.25}></div>{/each}</div>
-        {:else if versions.length}
+        {#if appDetail.versions.length}
           <ul class="divide-y divide-border-subtle/50">
-            {#each versions as version (version.id)}
+            {#each appDetail.versions as version (version.id)}
               {@const session = version.source?.session}
               <li class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-1 py-2.5 text-[12px] sm:grid-cols-[96px_minmax(0,1fr)_minmax(0,200px)_150px]">
                 <span class="flex items-center gap-2">

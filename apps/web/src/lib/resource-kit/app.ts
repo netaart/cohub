@@ -1,5 +1,6 @@
 import type { ChannelEnvelope } from "@cohub/protocol/realtime";
 import type {
+	AppDetailResponse,
 	AppDomainListResponse,
 	AppDomainRecord,
 	AppMeta,
@@ -9,6 +10,8 @@ import type {
 } from "@neta-art/cohub";
 import { m } from "$messages";
 import { asRecord, type Locale } from "./core";
+
+export type AppTotals = Pick<AppDetailResponse, "totalViews" | "likeCount">;
 
 type Message = (
 	inputs?: Record<string, never>,

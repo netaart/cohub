@@ -11,6 +11,7 @@ import {
 import {
 	APP_HIDE_COHUB_BAR_FEATURE,
 	APP_SCOPE_OPTIONS,
+	type AppTotals,
 	hidesCohubBar,
 	isNewerAppSnapshot,
 	scopeState,
@@ -61,6 +62,7 @@ export function createAppDetailController(options: {
 	let versions = $state<AppVersionRecord[]>([]);
 	let versionsLoading = $state(false);
 	let versionsError = $state("");
+	let totals = $state<AppTotals | null>(null);
 	let stats = $state<AppViewStatsResponse | null>(null);
 	let statsLoading = $state(false);
 	let statsError = $state("");
@@ -140,8 +142,9 @@ export function createAppDetailController(options: {
 		loading = true;
 		error = "";
 		try {
-			const { app } = await sdk.apps.get(appId);
+			const { app, totalViews, likeCount } = await sdk.apps.get(appId);
 			if (!isCurrentRequest()) return;
+			totals = { totalViews, likeCount };
 			if (isNewerAppSnapshot(detail, app)) {
 				detail = app;
 				notify(app);
@@ -390,6 +393,7 @@ export function createAppDetailController(options: {
 		versions = [];
 		versionsLoading = false;
 		versionsError = "";
+		totals = null;
 		stats = null;
 		statsLoading = false;
 		statsError = "";
@@ -528,6 +532,9 @@ export function createAppDetailController(options: {
 		},
 		get versionsError() {
 			return versionsError;
+		},
+		get totals() {
+			return totals;
 		},
 		get stats() {
 			return stats;

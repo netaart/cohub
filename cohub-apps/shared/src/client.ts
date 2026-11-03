@@ -2,8 +2,10 @@ import {
   createCohubClient,
   resolveWebBaseUrl,
   type AppRecord,
+  type AppVersionRecord,
   type CronJobRecord,
   type CheckpointRecord,
+  type PublicUserProfile,
   type TaskRunDetailResponse,
 } from "@neta-art/cohub";
 import {
@@ -12,6 +14,7 @@ import {
   type ResourceAppTarget,
 } from "@cohub/protocol";
 import type { AppNavigationTarget } from "@cohub/protocol/app-navigation";
+import type { AppTotals } from "$kit/app";
 
 const environment = import.meta.env.VITE_COHUB_ENV === "dev" ? "dev" : "prod";
 export const client = createCohubClient({ env: environment });
@@ -83,7 +86,28 @@ export type ResourceDetail =
   | { kind: "task"; data: TaskRunDetailResponse }
   | { kind: "checkpoint"; data: CheckpointRecord }
   | { kind: "cronjob"; data: CronJobRecord }
-  | { kind: "app"; data: AppRecord };
+  | AppDetail;
+
+export type AppDetail = {
+  kind: "app";
+  data: AppRecord;
+  versions: AppVersionRecord[];
+  publicUrl: string | null;
+  publisher: PublicUserProfile | null;
+  totals: AppTotals;
+};
+
+async function loadApp(id: string): Promise<AppDetail> {
+  const [detail, { versions }] = await Promise.all([client.apps.get(id), client.apps.listVersions(id)]);
+  return {
+    kind: "app",
+    data: detail.app,
+    versions,
+    publicUrl: detail.publicUrl,
+    publisher: detail.publisher ?? null,
+    totals: { totalViews: detail.totalViews, likeCount: detail.likeCount },
+  };
+}
 
 export async function loadResource(
   spaceId: string,
@@ -108,7 +132,7 @@ export async function loadResource(
       };
       break;
     case "app":
-      result = { kind: "app", data: (await client.apps.get(target.id)).app };
+      result = await loadApp(target.id);
       break;
   }
   const resource = result.kind === "task" ? result.data.run : result.data;

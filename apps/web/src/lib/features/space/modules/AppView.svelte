@@ -236,6 +236,7 @@ onDestroy(() => {
           <AppViewStats
             {locale}
             stats={workStats}
+            totals={appDetailController.totals}
             loading={workStatsLoading}
             error={workStatsError}
             onRetry={() => void appDetailController.loadStats(appDetail.id)}
