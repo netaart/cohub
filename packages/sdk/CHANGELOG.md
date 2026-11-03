@@ -1,5 +1,22 @@
 # @neta-art/cohub
 
+## 13.10.0
+
+### Minor Changes
+
+- f3e7764: Boards edit video. Any item can be a clip on a timeline: `visible` (new, animatable) shows it only for a span, and video, audio and nested animations play through their `props.time` or `time` track. Video and audio play on the canvas and sound while their time moves forward; `props.volume` (new) fades them. The timeline shows clips as bars to drag, trim and split, takes items dragged from the canvas or files dropped on it, and cuts or inserts time. `cohub boards place` prints a patch that lays clips end to end, and video exports draw each video's frame at its time and mix the sound of every playing clip with its speed and volume; audio that no track plays is no longer mixed in. The SDK adds `boardPlaceTarget`, `boardTrimTarget`, `boardSplitTarget`, `boardInsertTime`, `boardRemoveTime`, `boardMediaSpans` and `BoardStage.media`.
+  
+  Hosts: no action.
+- 4ff8eea: Displays: on a touch screen a tap on a named element is a real touch where it shows, each step reports what it acted on, a step that changed nothing is flagged, and a tap at a point that now lands on something other than you last saw stops with `moved`. Images are saved under `.cache/cohub/displays/` in the working directory, where agents' file tools reach them; `tree` is compact by default (`--full` for everything) and `look --until-*` waits.
+- b60747a: Host bridge: `display.presenting` tells a host which display the page shows, and the `display.open` event asks the page to open one. On Android an agent's screen stays in the floating indicator inside Cohub, steps aside for the one the page has open, and tapping its live preview opens it in its Space. `display.float` opens an agent screen in that indicator.
+
+### Patch Changes
+
+- b4f53c5: Board scripts attached to the Board itself now publish with their App, so rain and other Board-wide effects run on the published page. Wide blurs and shadows halve the layer before blurring, at a fraction of the cost and without gaps between samples, and item effects render at the device resolution, so a frame with a color filter keeps its text sharp. Shader sprites call `sprite(id)` once per sprite rather than once per corner. A Board script's collision field covers the view with a margin, so panning and small zooms reuse it; text and items blended as light (`screen`, `add`) are no longer surfaces, and shapes keep their outlines. Reduced motion stops redrawing held shaders. The rain example traces each drop only as far as it shows and drains streaks into their splash.
+  
+  Hosts: no action.
+- 94c8cf9: MP4 exports pad an odd width or height by a pixel instead of failing. The editor adds `fillFrame()`, which scales the selected boxes inside a frame to cover it.
+
 ## 13.9.0
 
 ### Minor Changes
