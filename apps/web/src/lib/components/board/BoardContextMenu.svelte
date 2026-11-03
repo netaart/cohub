@@ -33,6 +33,7 @@ import {
 	Link,
 	Link2,
 	LocateFixed,
+	Maximize,
 	PartyPopper,
 	Pencil,
 	Play,
@@ -246,6 +247,16 @@ const actions = $derived.by<BoardMenuAction[]>(() => {
 				icon: Copy,
 				run: () => editor.duplicateSelection(),
 			},
+			...(editor.canFillFrame
+				? [
+						{
+							id: "fill-frame",
+							label: m.board_fill_frame({}, { locale }),
+							icon: Maximize,
+							run: () => editor.fillFrame(),
+						},
+					]
+				: []),
 			{
 				id: "bring-front",
 				label: m.board_bring_front({}, { locale }),

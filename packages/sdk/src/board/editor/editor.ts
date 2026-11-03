@@ -414,6 +414,10 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		nudgeSelection: selection.nudge,
 		alignSelection: selection.align,
 		distributeSelection: selection.distribute,
+		get canFillFrame() {
+			return read(["selection", "scene"], () => selection.canFillFrame());
+		},
+		fillFrame: selection.fillFrame,
 		toggleSelectionLock: selection.toggleLock,
 		setSelectionColor: selection.setColor,
 		setSelectionStyle: selection.setStyle,

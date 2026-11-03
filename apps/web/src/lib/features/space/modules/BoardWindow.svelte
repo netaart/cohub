@@ -158,6 +158,7 @@ const boardRuntimeModulePromise = $derived.by(() => {
 						{activities}
 						{onOpenActivity}
 						syncError={board.saveError}
+						syncing={board.saving}
 						onCommit={(patch) => onCommit(board.boardId as string, patch)}
 						onPlayback={(command) => onPlayback(board.boardId as string, command)}
 						onRetrySync={() => onRetrySave(board.boardId as string)}

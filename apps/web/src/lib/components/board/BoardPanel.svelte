@@ -55,6 +55,7 @@ import {
 	Square,
 	TriangleAlert,
 	VolumeX,
+	X,
 } from "lucide-svelte";
 import { onDestroy, onMount, untrack } from "svelte";
 import { SvelteSet } from "svelte/reactivity";
@@ -101,6 +102,11 @@ import {
 import { createBoardSessionActions } from "$lib/board/board-session-actions.svelte";
 import { boardTimelineLanding } from "$lib/board/board-timeline";
 import {
+	type BoardVideoExportRequest,
+	createBoardVideoExport,
+	readBoardVideoExportAccess,
+} from "$lib/board/board-video-export.svelte";
+import {
 	boardViewKey,
 	readBoardView,
 	writeBoardView,
@@ -132,6 +138,7 @@ import BoardSessionReply from "$lib/components/board/BoardSessionReply.svelte";
 import BoardStage from "$lib/components/board/BoardStage.svelte";
 import BoardTextEditor from "$lib/components/board/BoardTextEditor.svelte";
 import BoardZoomMenu from "$lib/components/board/BoardZoomMenu.svelte";
+import Spinner from "$lib/components/Spinner.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
@@ -156,6 +163,7 @@ const {
 	active = true,
 	keysWhenUsed = false,
 	syncError = null,
+	syncing = false,
 	isMobile = false,
 	collaborators = new Map(),
 	activities = [],
@@ -675,10 +683,33 @@ function closeInPlace() {
 	modelId = null;
 }
 
+const videoExport =
+	spaceId && editable ? createBoardVideoExport(spaceId) : null;
+let canExportVideo = $state(false);
+
 function openExport() {
 	if (!exportBridge) return;
 	contextMenu = null;
 	exportOpen = true;
+	if (spaceId && videoExport)
+		void readBoardVideoExportAccess(spaceId, (allowed) => {
+			canExportVideo = allowed;
+		});
+}
+
+async function exportVideo(request: BoardVideoExportRequest) {
+	if (!videoExport || videoExport.running) return;
+	const name =
+		editor.animations[request.animationId]?.name || request.animationId;
+	// The sandbox renders what the server has, so pending edits must land first.
+	await videoExport.start(path, name, request, async () => {
+		const deadline = Date.now() + 10_000;
+		const unsaved = () => editor.saving || syncing;
+		while (unsaved() && !syncError && Date.now() < deadline)
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		if (unsaved() || syncError || editor.saveError)
+			throw new Error(m.board_sync_paused({}, { locale }));
+	});
 }
 
 function showNotice(text: string, error = false) {
@@ -1232,6 +1263,7 @@ $effect(() => {
 });
 
 onDestroy(() => {
+	videoExport?.destroy();
 	destroyed = true;
 	if (noticeTimer) clearTimeout(noticeTimer);
 	flushView();
@@ -1273,6 +1305,23 @@ onDestroy(() => {
 		role="application"
 		use:blockPageZoom
 	>
+		{#if videoExport?.state && !presenting}
+			{@const job = videoExport.state}
+			<div class="board-job" class:board-job--error={job.status === "failed"} role="status" aria-live="polite">
+				{#if job.status === "running"}
+					<Spinner class="h-3.5 w-3.5" />
+					<span>{job.progress === null ? m.board_video_exporting({}, { locale }) : m.board_video_exporting_percent({ percent: Math.round(job.progress * 100) }, { locale })}</span>
+				{:else if job.status === "done"}
+					<span>{m.board_video_exported({}, { locale })}</span>
+					<button type="button" class="board-job-action" onclick={() => { void openFile(job.path); videoExport.dismiss(); }}>{m.board_video_open({}, { locale })}</button>
+				{:else}
+					<span class="min-w-0 truncate" title={job.message}>{m.board_video_failed({}, { locale })}{job.message ? ` · ${job.message}` : ""}</span>
+				{/if}
+				{#if job.status !== "running"}
+					<button type="button" class="board-job-close" aria-label={m.common_close({}, { locale })} onclick={() => videoExport.dismiss()}><X class="h-3 w-3" /></button>
+				{/if}
+			</div>
+		{/if}
 		{#if soundBlocked && !presenting}
 			<button type="button" class="board-sound" onclick={() => scriptStage?.media.unlock()}>
 				<VolumeX class="h-3.5 w-3.5" />
@@ -1537,6 +1586,7 @@ onDestroy(() => {
 	title={path}
 	selection={editor.selection}
 	onLocate={(id) => { editor.setSelection([id]); editor.focusItems([id]); }}
+	onExportVideo={canExportVideo && !videoExport?.running ? (request) => void exportVideo(request) : undefined}
 />
 
 <style>
@@ -1594,6 +1644,44 @@ onDestroy(() => {
 		color: var(--text-secondary);
 		font-size: 11px;
 		box-shadow: 0 8px 20px color-mix(in srgb, var(--overlay-scrim-strong) 12%, transparent);
+	}
+
+	.board-job {
+		position: absolute;
+		top: 12px;
+		left: 50%;
+		z-index: 32;
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		max-width: min(420px, calc(100% - 24px));
+		height: 30px;
+		transform: translateX(-50%);
+		border: 1px solid var(--border-subtle);
+		border-radius: 999px;
+		background: var(--bg-elevated);
+		padding: 0 6px 0 12px;
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-variant-numeric: tabular-nums;
+		box-shadow: 0 8px 20px color-mix(in srgb, var(--overlay-scrim-strong) 12%, transparent);
+	}
+	.board-job--error { color: var(--color-error-soft); }
+	.board-job-action {
+		border-radius: 999px;
+		padding: 2px 8px;
+		color: var(--brand-muted-fg);
+		font-weight: 600;
+	}
+	.board-job-action:hover,
+	.board-job-close:hover { background: var(--bg-hover); }
+	.board-job-close {
+		display: inline-grid;
+		place-items: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 999px;
+		color: var(--text-tertiary);
 	}
 
 	.board-sound {

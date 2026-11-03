@@ -21,6 +21,7 @@ import {
 	downloadBlob,
 	exportBoardImage,
 } from "$lib/board/board-image-export";
+import type { BoardVideoExportRequest } from "$lib/board/board-video-export.svelte";
 import Dialog from "$lib/components/Dialog.svelte";
 import Spinner from "$lib/components/Spinner.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -34,6 +35,7 @@ const {
 	title,
 	selection,
 	onLocate,
+	onExportVideo,
 }: {
 	open: boolean;
 	onClose: () => void;
@@ -42,6 +44,7 @@ const {
 	title: string | null;
 	selection: string[];
 	onLocate?: (id: string) => void;
+	onExportVideo?: (request: BoardVideoExportRequest) => void;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -58,7 +61,7 @@ const FORMATS: Array<{ id: BoardImageFormat; label: string }> = [
 let scope = $state<Scope>("all");
 let frameId = $state<string | null>(null);
 let scale = $state<number>(2);
-let format = $state<BoardImageFormat>("png");
+let format = $state<BoardImageFormat | "mp4">("png");
 let transparent = $state(false);
 let busy = $state<"download" | "copy" | null>(null);
 let copied = $state(false);
@@ -146,7 +149,15 @@ const sizeLabel = $derived(
 );
 const clamped = $derived(Boolean(plan?.clamped));
 
-const transparencySupported = $derived(format !== "jpeg");
+const video = $derived(format === "mp4");
+const animation = $derived(
+	animationId ? boardDocument.animations[animationId] : undefined,
+);
+const transparencySupported = $derived(format !== "jpeg" && !video);
+
+$effect(() => {
+	if (video && !(sampler && onExportVideo)) format = "png";
+});
 
 function warningText(warning: BoardImageExportWarning) {
 	switch (warning.kind) {
@@ -190,14 +201,28 @@ function warningText(warning: BoardImageExportWarning) {
 	}
 }
 
+function exportVideo() {
+	if (!animation || !plan) return;
+	onExportVideo?.({
+		animationId,
+		duration: animation.duration,
+		region,
+		...(scope === "camera" ? { camera: cameraSize } : {}),
+		scale,
+	});
+	onClose();
+}
+
 async function run(mode: "download" | "copy") {
+	if (video) return exportVideo();
 	if (!bridge || !plan || busy) return;
 	busy = mode;
 	failure = null;
 	warnings = [];
 	copied = false;
 	try {
-		const outputFormat: BoardImageFormat = mode === "copy" ? "png" : format;
+		const outputFormat: BoardImageFormat =
+			mode === "copy" ? "png" : (format as BoardImageFormat);
 		const result = await exportBoardImage(bridge, boardDocument, {
 			region,
 			...(scope === "camera" ? { camera: cameraSize } : {}),
@@ -306,7 +331,7 @@ async function run(mode: "download" | "copy") {
 						{#each animationIds as id (id)}<option value={id}>{boardDocument.animations[id]?.name || id}</option>{/each}
 					</select>
 				</label>
-				<label class="flex min-w-0 flex-col gap-1 text-xs text-text-secondary">{m.board_export_time({}, { locale })}<input class="export-select" type="number" min="0" max={(boardDocument.animations[animationId]?.duration ?? 0) / 1000} step="0.1" bind:value={seconds} disabled={!sampler} /></label>
+				<label class="flex min-w-0 flex-col gap-1 text-xs text-text-secondary">{m.board_export_time({}, { locale })}<input class="export-select" type="number" min="0" max={(animation?.duration ?? 0) / 1000} step="0.1" bind:value={seconds} disabled={!sampler || video} /></label>
 			</div>
 		{/if}
 		{#if scope === "camera"}
@@ -355,7 +380,13 @@ async function run(mode: "download" | "copy") {
 						{option.label}
 					</button>
 				{/each}
+				{#if sampler && onExportVideo}
+					<button type="button" class="chip" class:chip--active={video} aria-pressed={video} onclick={() => { format = "mp4"; }}>MP4</button>
+				{/if}
 			</div>
+			{#if video}
+				<p class="mt-1 text-[12px] text-text-tertiary">{m.board_video_export_note({}, { locale })}</p>
+			{:else}
 			<label class="mt-1 flex items-center gap-2 text-[12px] text-text-secondary">
 				<input
 					type="checkbox"
@@ -367,10 +398,11 @@ async function run(mode: "download" | "copy") {
 					<span class="text-text-tertiary">{m.board_jpeg_no_alpha({}, { locale })}</span>
 				{/if}
 			</label>
+			{/if}
 		</fieldset>
 
 		<p class="text-[12px] text-text-tertiary" aria-live="polite">
-			{sizeLabel}
+			{sizeLabel}{#if video && animation} · {(animation.duration / 1000).toFixed(1)}s{/if}
 			{#if clamped}
 				<span class="text-warning">
 					· {m.board_reduced_to({ max: BOARD_EXPORT_MAX_EDGE }, { locale })}
@@ -388,6 +420,7 @@ async function run(mode: "download" | "copy") {
 
 	{#snippet footer()}
 		<div class="flex justify-end gap-2">
+			{#if !video}
 			<button
 				type="button"
 				class="export-btn"
@@ -403,6 +436,7 @@ async function run(mode: "download" | "copy") {
 				{/if}
 				{copied ? m.board_copied({}, { locale }) : m.board_copy({}, { locale })}
 			</button>
+			{/if}
 			<button
 				type="button"
 				class="primary-key"
@@ -414,7 +448,7 @@ async function run(mode: "download" | "copy") {
 				{:else}
 					<Download size={14} />
 				{/if}
-				{m.download({}, { locale })}
+				{video ? m.board_video_export_start({}, { locale }) : m.download({}, { locale })}
 			</button>
 		</div>
 	{/snippet}

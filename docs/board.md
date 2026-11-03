@@ -342,6 +342,13 @@ Shift-drag the ruler to select a range; Delete removes that time and closes the 
 be edited at any playhead. Video and audio play on the canvas; when a browser holds
 back sound, **Turn on sound** lets it play.
 
+A frame makes a good screen: put the media in it, and **Fill frame** in the context menu
+scales selected items inside a frame to cover it, keeping their aspect. To export, pick
+the animation and **MP4** in the export dialog: the Space's sandbox runs `cohub boards
+export` for the whole animation at 25 fps and saves the video next to the Board, while a
+pill on the Board shows its progress and opens the result. It needs permission to run
+commands in the Space. MP4 exports pad an odd width or height by a pixel.
+
 ### Compose chapters
 
 Write each chapter's keyframes relative to its own start, then compile a sequence:

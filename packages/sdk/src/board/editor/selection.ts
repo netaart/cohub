@@ -2,6 +2,7 @@ import {
 	type BoardFrame,
 	type BoardItem,
 	type BoardSceneItem,
+	hasAuthoredSize,
 	sceneItemToItem,
 	selectionBounds,
 } from "../model/index.js";
@@ -103,6 +104,27 @@ export function createSelectionModule(ctx: EditorContext) {
 		ctx.document.commitItems(placed(distributeFrames(framesFor(ids), axis)));
 	}
 
+	function framed(): Array<[string, BoardFrame]> {
+		return movable().flatMap((id) => {
+			const item = state.scene.get(id);
+			const parent = item?.parent ? state.scene.get(item.parent) : undefined;
+			return item && parent?.type === "frame" && hasAuthoredSize(item.type) ? [[id, parent.frame] as [string, BoardFrame]] : [];
+		});
+	}
+
+	function fillFrame() {
+		const frames = new Map<string, BoardFrame>();
+		for (const [id, outer] of framed()) {
+			const own = state.scene.get(id)?.frame;
+			if (!own?.width || !own.height) continue;
+			const scale = Math.max(outer.width / own.width, outer.height / own.height);
+			const width = own.width * scale;
+			const height = own.height * scale;
+			frames.set(id, { x: outer.x + (outer.width - width) / 2, y: outer.y + (outer.height - height) / 2, width, height, rotation: outer.rotation });
+		}
+		ctx.document.commitItems(placed(frames));
+	}
+
 	function edit(update: (item: BoardItem) => BoardItem | null, ids = ctx.query.unlockedIds(state.selection)) {
 		const changes = new Map<string, BoardItem>();
 		for (const id of ids) {
@@ -192,6 +214,8 @@ export function createSelectionModule(ctx: EditorContext) {
 		nudge,
 		align,
 		distribute,
+		canFillFrame: () => framed().length > 0,
+		fillFrame,
 		toggleLock,
 		setColor,
 		setStyle,

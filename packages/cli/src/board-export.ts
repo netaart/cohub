@@ -296,12 +296,7 @@ export async function runBoardVideoExport(options: BoardVideoExportOptions): Pro
     let count = 0;
     let dimensions = { width: 0, height: 0 };
     const mediaFiles = createBoardMediaFiles(options.spaceId, tempDir, options.signal);
-    const result = await runBoardExport({ ...options, document, format: "png", mediaFiles, onPlan: (plan) => {
-      if (options.format === "mp4" && (plan.width % 2 || plan.height % 2)) {
-        throw new Error(`MP4 needs even dimensions, but the export is ${plan.width}x${plan.height}. Use --camera --size with even dimensions, or adjust the export region.`);
-      }
-      options.onPlan?.(plan);
-    }, onFrame: async (frame, index) => {
+    const result = await runBoardExport({ ...options, document, format: "png", mediaFiles, onFrame: async (frame, index) => {
       if (count && (frame.width !== dimensions.width || frame.height !== dimensions.height)) throw new Error("Video frame dimensions changed. Use a fixed export region or a smaller camera viewport.");
       await writeFile(join(tempDir, `${String(index + 1).padStart(6, "0")}.png`), frame.bytes, { signal: options.signal });
       dimensions = { width: frame.width, height: frame.height };
@@ -316,6 +311,7 @@ export async function runBoardVideoExport(options: BoardVideoExportOptions): Pro
     const args = ["-y", "-f", "image2", "-framerate", String(options.fps), "-i", join(tempDir, "%06d.png"), ...(mix?.inputs ?? [])];
     if (mix) args.push("-filter_complex", mix.filter, "-map", "0:v:0", "-map", "[aout]");
     else args.push("-map", "0:v:0");
+    if (options.format === "mp4" && (dimensions.width % 2 || dimensions.height % 2)) args.push("-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2");
     if (options.format === "mp4") args.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", "-f", "mp4");
     else args.push("-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0", "-c:a", "libopus", "-f", "webm");
     const encoded = join(tempDir, `video.${options.format}`);

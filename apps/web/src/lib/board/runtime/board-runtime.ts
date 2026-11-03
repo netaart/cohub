@@ -50,6 +50,7 @@ export type BoardRuntimeProps = {
 	active?: boolean;
 	keysWhenUsed?: boolean;
 	syncError?: string | null;
+	syncing?: boolean;
 	isMobile?: boolean;
 	collaborators?: Map<string, BoardCollaboratorProfile>;
 	activities?: BoardAutomationActivity[];
