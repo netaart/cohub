@@ -28,6 +28,7 @@ import {
 	worldPoint,
 } from "@neta-art/cohub/board";
 import {
+	type BoardClipboardPayload,
 	type BoardKeyCommand,
 	defaultBoardTool,
 	handleBoardKeyDown,
@@ -72,6 +73,11 @@ import {
 	createBoardAwarenessController,
 	isBoardScriptLeader,
 } from "$lib/board/board-awareness";
+import {
+	hasPageTextSelection,
+	readBoardClipboard,
+	writeBoardClipboard,
+} from "$lib/board/board-clipboard";
 import { readBoardResourceDrop } from "$lib/board/board-drop";
 import {
 	generationPromptFromContent,
@@ -486,6 +492,11 @@ function handlePaste(event: ClipboardEvent) {
 	)
 		return;
 	event.preventDefault();
+	const copied = readBoardClipboard(event.clipboardData);
+	if (copied || clipboardUnsynced) {
+		editor.pasteClipboard(copied ?? undefined);
+		return;
+	}
 	const images = clipboardImageFiles(event.clipboardData);
 	const tooLarge = images.filter(exceedsUploadFileLimit);
 	if (tooLarge.length)
@@ -503,7 +514,36 @@ function handlePaste(event: ClipboardEvent) {
 	}
 	const text = event.clipboardData?.getData("text/plain");
 	if (text) pasteText(text);
-	else editor.pasteClipboard();
+}
+
+/** The last Board copy, until a copy or cut event writes it to the system clipboard. */
+let pendingClipboard: BoardClipboardPayload | null = null;
+/** No copy event wrote the last Board copy, so a paste falls back to the editor's own. */
+let clipboardUnsynced = false;
+let copyingFromMenu = false;
+
+function takeClipboard(payload: BoardClipboardPayload | null) {
+	if (!payload) return false;
+	pendingClipboard = payload;
+	clipboardUnsynced = true;
+	return true;
+}
+
+function handleCopy(event: ClipboardEvent) {
+	if (
+		!copyingFromMenu &&
+		(isEditableTarget(event.target) || hasPageTextSelection())
+	) {
+		// Something else was copied after the Board copy.
+		pendingClipboard = null;
+		clipboardUnsynced = false;
+		return;
+	}
+	if (!pendingClipboard || !event.clipboardData) return;
+	writeBoardClipboard(event.clipboardData, pendingClipboard);
+	event.preventDefault();
+	pendingClipboard = null;
+	clipboardUnsynced = false;
 }
 
 const checkedTasks = new Set<string>();
@@ -981,10 +1021,16 @@ $effect(() => {
 	untrack(() => scheduleView(view));
 });
 
+/** From the context menu: no shortcut follows, so ask the browser for the copy event. */
 function copySelection() {
-	const payload = editor.copySelection();
-	if (payload) void writeClipboard(payload);
-	return payload !== null;
+	if (!takeClipboard(editor.copySelection())) return;
+	copyingFromMenu = true;
+	try {
+		document.execCommand("copy");
+	} catch {
+	} finally {
+		copyingFromMenu = false;
+	}
 }
 
 async function copyViewLink() {
@@ -1082,14 +1128,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
 	);
 }
 
-async function writeClipboard(payload: unknown) {
-	const text = JSON.stringify(payload);
-	try {
-		if (navigator.clipboard?.writeText)
-			await navigator.clipboard.writeText(text);
-	} catch {}
-}
-
 function openItem(item: BoardSceneItem): boolean {
 	if (boardAppMeta(item)) {
 		runApp(item.id);
@@ -1111,14 +1149,17 @@ function openItem(item: BoardSceneItem): boolean {
 function runHostCommand(command: BoardKeyCommand): boolean {
 	switch (command.type) {
 		case "copy":
-			return copySelection();
-		case "cut": {
-			const payload = editor.cutSelection();
-			if (payload) void writeClipboard(payload);
-			return payload !== null;
-		}
+		case "cut":
+			if (hasPageTextSelection()) return false;
+			takeClipboard(
+				command.type === "copy"
+					? editor.copySelection()
+					: editor.cutSelection(),
+			);
+			// Leave the shortcut to the browser: its copy or cut event writes the system clipboard.
+			return false;
 		case "paste":
-			// Leave the shortcut to the browser so its paste event carries files as well as text.
+			// Leave the shortcut to the browser so its paste event carries what was copied last.
 			return false;
 		case "export":
 			openExport();
@@ -1233,6 +1274,8 @@ onMount(() => {
 		});
 	}
 	window.addEventListener("paste", handlePaste);
+	window.addEventListener("copy", handleCopy);
+	window.addEventListener("cut", handleCopy);
 	window.addEventListener("keydown", handleKeydown);
 	window.addEventListener("keyup", handleKeyup);
 	window.addEventListener("blur", clearSpaceHeld);
@@ -1240,6 +1283,8 @@ onMount(() => {
 	document.addEventListener("visibilitychange", handleVisibilityChange);
 	return () => {
 		window.removeEventListener("paste", handlePaste);
+		window.removeEventListener("copy", handleCopy);
+		window.removeEventListener("cut", handleCopy);
 		window.removeEventListener("keydown", handleKeydown);
 		window.removeEventListener("keyup", handleKeyup);
 		window.removeEventListener("blur", clearSpaceHeld);
@@ -1268,6 +1313,8 @@ onDestroy(() => {
 	if (noticeTimer) clearTimeout(noticeTimer);
 	flushView();
 	window.removeEventListener("paste", handlePaste);
+	window.removeEventListener("copy", handleCopy);
+	window.removeEventListener("cut", handleCopy);
 	window.removeEventListener("keydown", handleKeydown);
 	window.removeEventListener("keyup", handleKeyup);
 	window.removeEventListener("blur", clearSpaceHeld);
