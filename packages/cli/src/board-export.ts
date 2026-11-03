@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 
 const execFile = promisify(execFileCallback);
 import { boardMediaNaturalSize, parseBoardMediaSource } from "@neta-art/cohub/board";
-import type { BoardAssetKeySource, BoardDocument, BoardExportRegion, BoardMediaState, BoardSceneItem, BoardThemeId } from "@neta-art/cohub/board";
+import type { BoardAssetKeySource, BoardDocument, BoardExportRegion, BoardMediaState, BoardSceneItem, BoardScriptSnapshot, BoardThemeId } from "@neta-art/cohub/board";
 import { imageVariantUrl, MEDIA_VARIANT_MAX, mediaVariantSize, videoFrameUrl } from "@neta-art/cohub/media";
 import type {
   BoardNodeExportFormat,
@@ -23,6 +23,7 @@ import type { BoardScriptHost } from "@neta-art/cohub/board/render";
 import type { BoardExportWarning } from "@neta-art/cohub/board/export";
 import {
   hasBoardScripts,
+  boardAnimatesScriptParams,
   boardAssetKey,
   boardAssetKeySource,
   boardMediaRate,
@@ -43,7 +44,8 @@ import {
   selectBoardExportAssets,
 } from "./board-kernel.js";
 import { settleBoardDocument } from "./board-media.js";
-import { type BoardGpuExporter, type BoardGpuResources, findBoardGpuBrowser, launchBoardGpuExporter } from "./board-gpu/index.js";
+import { openBoardGpu } from "./board-gpu/daemon.js";
+import { type BoardGpuExporter, type BoardGpuResources, findBoardGpuBrowser } from "./board-gpu/index.js";
 import { BOARD_EXPORT_FONTS, type BoardExportFont } from "./board-fonts.js";
 import { createClient } from "./client.js";
 import { downloadPublicImage } from "./safe-remote-image.js";
@@ -246,6 +248,7 @@ export type BoardExportRunOptions = {
   camera?: { width: number; height: number };
   document?: BoardDocument;
   scripts?: BoardScriptHost;
+  snapshots?: Record<string, BoardScriptSnapshot>;
   renderer?: BoardExportRenderer;
   signal?: AbortSignal;
   imageMemoryMiB?: number;
@@ -371,6 +374,7 @@ export async function runBoardExport(
     const theme = boardRenderTheme(options.theme);
     const sampler = createBoardRenderSampler(document, options.animation ?? null, theme);
     const documentAt = (time: number | null) => time === null ? document : sampler.at(time).document;
+    const history = options.animation !== undefined && boardAnimatesScriptParams(document);
 
     const plan = planBoardExport({
       scene: buildBoardScene(documentAt(times[0] ?? null)),
@@ -448,9 +452,9 @@ export async function runBoardExport(
       options.onProgress?.(completed, times.length);
     };
     const launchGpu = async (browser: string) => {
-      const exporter = await launchBoardGpuExporter(gpuResources(options.spaceId, document, (key) => framePictures.get(key)), { browser, signal: options.signal });
+      const exporter = await openBoardGpu(gpuResources(options.spaceId, document, (key) => framePictures.get(key)), { browser, signal: options.signal });
       try {
-        await exporter.init({ document, animation: options.animation ?? null, theme: options.theme });
+        await exporter.init({ document, animation: options.animation ?? null, theme: options.theme, ...(options.snapshots ? { snapshots: options.snapshots } : {}) });
       } catch (error) {
         await exporter.close();
         throw error;
@@ -474,7 +478,10 @@ export async function runBoardExport(
       let prepared = initial;
       trace("prepare", completed, initial.plan);
       const prepareScripts = async (scripts: NonNullable<typeof host>, shaders: boolean) => {
-        await scripts.prepare(initial.scene.items, [time ?? 0], initial.plan.scale, initial.document.board, { shaders });
+        await scripts.prepare(initial.scene.items, [time ?? 0], initial.plan.scale, initial.document.board, {
+          shaders,
+          ...(history ? { history: (at: number) => documentAt(at) } : {}),
+        });
         for (const id of [...Object.keys(initial.document.board.scripts ?? {}), ...initial.scene.items.map((item) => item.id)]) {
           const error = scripts.error(id);
           if (error) throw new Error(`${initial.document.board.scripts?.[id]?.src ?? initial.scene.get(id)?.script?.src ?? id}: ${error}`);

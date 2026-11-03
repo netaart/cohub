@@ -1,5 +1,6 @@
 import {
   type BoardSceneItem,
+  boardAnimatesScriptParams,
   boardAssetKey,
   boardShaderParameters,
   boardAssetKeySource,
@@ -7,7 +8,7 @@ import {
   normalizeBoardDocument,
   selectBoardExportAssets,
 } from "@neta-art/cohub/board";
-import { prepareBoardExport, renderBoardExport } from "@neta-art/cohub/board/export";
+import { createBoardExportScene, prepareBoardExport, renderBoardExport } from "@neta-art/cohub/board/export";
 import {
   type BrowserBoardScriptExport,
   boardRenderTheme,
@@ -15,9 +16,10 @@ import {
   createBoardShaderLayer,
   createBoardShaderLayers,
   createBrowserBoardScriptExport,
+  hasBoardEffects,
 } from "@neta-art/cohub/board/render";
-import { autoDetectRenderer, ImageSource, type Renderer, Texture } from "pixi.js";
-import type { BoardGpuFrame, BoardGpuInit, BoardGpuResult, BoardGpuShader } from "./protocol.js";
+import { autoDetectRenderer, ImageSource, type Renderer, RenderTexture, Texture, type WebGLRenderer } from "pixi.js";
+import type { BoardGpuFrame, BoardGpuInit, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
 
 let renderer: Renderer | null = null;
 let session: {
@@ -83,7 +85,7 @@ const api = {
     const errors: Record<string, string> = {};
     for (const { id, shader, parameters } of shaders) {
       try {
-        createBoardShaderLayer(target, shader, boardShaderParameters(parameters), id).destroy();
+        createBoardShaderLayer(target, shader, boardShaderParameters(parameters), id, { wait: true }).destroy();
       } catch (error) {
         errors[id] = error instanceof Error ? error.message : String(error);
       }
@@ -95,18 +97,117 @@ const api = {
     await document.fonts.ready;
     const board = normalizeBoardDocument(init.document);
     session?.scripts.dispose();
-    session?.layers.destroy();
+    const layers = session?.layers ?? createBoardShaderLayers({ wait: true });
+    layers.rewind();
+    for (const [key, entry] of textures)
+      if (!/^([a-z]+-)?url:/.test(key)) {
+        entry?.texture.destroy(true);
+        textures.delete(key);
+      }
+    background?.destroy(true);
+    background = undefined;
+    const sampler = createBoardRenderSampler(board, init.animation, boardRenderTheme(init.theme));
     session = {
       init: { ...init, document: board },
-      sampler: createBoardRenderSampler(board, init.animation, boardRenderTheme(init.theme)),
+      sampler,
       scripts: createBrowserBoardScriptExport(async (path) => {
         const response = await fetch(`module?path=${encodeURIComponent(path)}`);
         if (!response.ok) throw new Error(`${path} is not available.`);
         return response.text();
+      }, {
+        ...(init.snapshots ? { snapshots: init.snapshots } : {}),
+        ...(init.animation && boardAnimatesScriptParams(board) ? { documentAt: (time: number) => sampler.at(time).document } : {}),
       }),
-      layers: createBoardShaderLayers(),
+      layers,
     };
     return { renderer: renderer.name };
+  },
+  async profile(input: BoardGpuProfileInput): Promise<BoardGpuProfile> {
+    if (!renderer || !session) throw new Error("The GPU exporter is not ready.");
+    const target = renderer;
+    const { document, animation, theme: themeId } = session.init;
+    const theme = boardRenderTheme(themeId);
+    const at = input.time === null ? undefined : { animation: animation ?? undefined, time: input.time };
+    const time = input.time ?? 0;
+    const scripts = await session.scripts.at(at ? session.sampler.at(time).document : document, time);
+    const prepared = prepareBoardExport(document, { sampler: session.sampler, region: input.region, camera: input.camera, scale: input.scale, ...(at ? { at } : {}), scripts });
+    if (!prepared) throw new Error("Nothing to profile: the region contains no items.");
+    const visible = prepared.plan.items.filter((item) => prepared.scene.opacity(item.id) > 0);
+    const loaded = input.withImages ? await loadTextures(visible, prepared.plan.scale, input.imageMemory, {}) : new Map<string, Texture>();
+    const owners = scripts.shaders?.(prepared.document, time) ?? [];
+    const layers = createBoardShaderLayers({ wait: true });
+    const scene = createBoardExportScene({
+      settings: prepared.document.board,
+      scene: prepared.scene,
+      items: prepared.plan.items,
+      time,
+      frameAt: session.sampler.frameAt,
+      world: prepared.plan.world,
+      scale: prepared.plan.scale,
+      colorScheme: theme.colorScheme,
+      palette: theme.palette,
+      colors: theme.colors,
+      style: theme.style,
+      textures: loaded,
+      scripts,
+      assetKey: boardAssetKey,
+      ...(owners.length ? { shaders: { renderer: target, owners, layers } } : {}),
+    });
+    const { width, height } = prepared.plan;
+    const output = RenderTexture.create({ width, height });
+    const gl = (target as WebGLRenderer).gl;
+    const pixel = new Uint8Array(4);
+    const measure = () => {
+      const samples: number[] = [];
+      for (let frame = 0; frame < Math.max(3, input.frames); frame++) {
+        const start = performance.now();
+        target.render({ container: scene.root, target: output, clear: true });
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+        samples.push(performance.now() - start);
+      }
+      return samples.sort((a, b) => a - b);
+    };
+    try {
+      measure();
+      const all = measure();
+      const median = (samples: number[]) => samples[Math.floor(samples.length / 2)] ?? 0;
+      const base = median(all);
+      const costs = owners.map((owner) => {
+        const layer = layers.layer(owner.id);
+        const shader = owner.output.shader;
+        const parts = [layer?.below, layer?.above].filter((part) => part !== null && part !== undefined);
+        const filters = layer?.filters ?? [];
+        const shown = parts.map((part) => part.visible);
+        const enabled = filters.map((filter) => filter.enabled);
+        for (const part of parts) part.visible = false;
+        for (const filter of filters) filter.enabled = false;
+        const without = median(measure());
+        parts.forEach((part, index) => { part.visible = shown[index] as boolean; });
+        filters.forEach((filter, index) => { filter.enabled = enabled[index] as boolean; });
+        const filterPasses = shader?.passes.filter((pass) => (pass.layer ?? shader.layer) === "filter") ?? [];
+        return {
+          id: owner.id,
+          ms: Math.max(0, base - without),
+          filter: !filterPasses.length ? ("none" as const) : filterPasses.every((pass) => pass.name) ? ("switchable" as const) : ("always" as const),
+          sprites: shader?.passes.reduce((sum, pass) => sum + (pass.sprites ?? 0), 0) ?? 0,
+          state: shader?.state ? { width: shader.state.width, height: shader.state.height } : null,
+        };
+      });
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      return {
+        renderer: String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)),
+        width,
+        height,
+        frame: { p50: base, p95: all[Math.min(all.length - 1, Math.floor(all.length * 0.95))] ?? base },
+        owners: costs.sort((a, b) => b.ms - a.ms),
+        effects: visible.filter((item) => hasBoardEffects(item.style)).length,
+        items: visible.length,
+      };
+    } finally {
+      output.destroy(true);
+      scene.destroy();
+      layers.destroy();
+    }
   },
   async render(frame: BoardGpuFrame): Promise<BoardGpuResult> {
     if (!renderer || !session) throw new Error("The GPU exporter is not ready.");

@@ -4,6 +4,8 @@ import {
   type BOARD_SHADER_UNIFORM_TYPES,
   type BoardScriptParameter,
   type BoardShader,
+  type BoardShaderPass,
+  type BoardShaderPassStates,
   type BoardShaderUniformValues,
 } from "./script.js";
 
@@ -48,6 +50,14 @@ export function boardShaderUniformValue(uniform: BoardShaderUniform, value: Boar
   return list;
 }
 
+export function boardShaderPassLayer(shader: BoardShader, pass: BoardShaderPass): NonNullable<BoardShader["layer"]> {
+  return pass.layer ?? shader.layer ?? "above";
+}
+
+export function boardShaderPassOn(pass: BoardShaderPass, states: BoardShaderPassStates | undefined): boolean {
+  return (pass.name !== undefined ? states?.[pass.name] : undefined) ?? pass.enabled ?? true;
+}
+
 export type BoardShaderParameter = { name: string; type: "float" | "vec4" };
 
 export function boardShaderParameters(parameters: Record<string, BoardScriptParameter> | undefined): BoardShaderParameter[] {
@@ -68,14 +78,24 @@ export function validateBoardShader(shader: unknown): asserts shader is BoardSha
   if (value.surfaces !== undefined && typeof value.surfaces !== "boolean") throw new Error("shader.surfaces must be a boolean.");
   if (!Array.isArray(value.passes) || value.passes.length < 1 || value.passes.length > BOARD_SHADER_LIMITS.passes)
     throw new Error(`shader.passes takes 1 to ${BOARD_SHADER_LIMITS.passes} passes.`);
+  const names = new Set<string>();
   for (const pass of value.passes) {
     if (!pass || typeof pass.glsl !== "string" || !pass.glsl.trim()) throw new Error("Each shader pass needs glsl source.");
     if (pass.glsl.length > BOARD_SHADER_LIMITS.source) throw new Error("A shader pass exceeds 64 KB of source.");
+    if (pass.layer !== undefined && !BOARD_SHADER_LAYERS.includes(pass.layer))
+      throw new Error(`A pass layer must be ${BOARD_SHADER_LAYERS.join(", ")}.`);
     if (pass.sprites !== undefined) {
       if (!Number.isSafeInteger(pass.sprites) || pass.sprites < 1 || pass.sprites > BOARD_SHADER_LIMITS.sprites)
         throw new Error(`sprites must be an integer from 1 to ${BOARD_SHADER_LIMITS.sprites}.`);
-      if (value.layer === "filter") throw new Error("Filter passes draw over the owner's box; they cannot draw sprites.");
+      if (boardShaderPassLayer(value, pass) === "filter") throw new Error("Filter passes draw over the owner's box; they cannot draw sprites.");
     }
+    if (pass.name !== undefined) {
+      if (typeof pass.name !== "string" || !IDENTIFIER.test(pass.name)) throw new Error(`Invalid pass name: ${String(pass.name)}`);
+      if (names.has(pass.name)) throw new Error(`Pass names must be unique: ${pass.name}`);
+      names.add(pass.name);
+    }
+    if (pass.enabled !== undefined && typeof pass.enabled !== "boolean") throw new Error("A pass's enabled must be a boolean.");
+    if (pass.enabled === false && pass.name === undefined) throw new Error("A pass that starts off needs a name to turn it on.");
     if (pass.blend !== undefined && !BOARD_SHADER_BLENDS.includes(pass.blend))
       throw new Error(`blend must be ${BOARD_SHADER_BLENDS.join(", ")}.`);
   }

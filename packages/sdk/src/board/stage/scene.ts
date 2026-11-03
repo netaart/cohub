@@ -25,7 +25,7 @@ import { positionShell } from "../render/renderers/base-card-renderer.js";
 import { BOARD_LOD_HYSTERESIS, type BoardLod, boardCardDetailed, boardLodRatio, boardLodSize, DEFAULT_BOARD_LOD } from "../render/lod.js";
 import { textZoomBucket } from "../render/text-resolution.js";
 import { type BoardFrameBudget, fixedBoardFrameBudget } from "./frame-budget.js";
-import { type Container, type Filter, Graphics, Sprite, Text, type Texture } from "pixi.js";
+import { type Container, type Filter, Graphics, Rectangle, Sprite, Text, type Texture } from "pixi.js";
 
 type CardEntry = {
 	item: BoardItem;
@@ -297,6 +297,7 @@ export function createBoardScene(options: {
 		const decoration = decorations.get(id);
 		for (const layer of [decoration?.below, decoration?.above]) if (layer?.parent) layer.parent.removeChild(layer);
 		setBoardShaderFilters(host, null);
+		host.filterArea = null as unknown as Rectangle;
 	}
 
 	function applyDecoration(id: string): boolean {
@@ -320,6 +321,15 @@ export function createBoardScene(options: {
 			if (host.children.at(-1) !== above) host.addChild(above);
 		}
 		setBoardShaderFilters(host, filters);
+		if (filters?.length) {
+			const area = host.filterArea ?? new Rectangle();
+			const box = group ? itemBounds(entry.item.frame) : { x: 0, y: 0, width: entry.item.frame.width, height: entry.item.frame.height };
+			area.x = box.x;
+			area.y = box.y;
+			area.width = box.width;
+			area.height = box.height;
+			host.filterArea = area;
+		}
 		return entry.container.visible && !entry.container.culled;
 	}
 

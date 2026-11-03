@@ -59,6 +59,7 @@ export function createScriptRuntime(
   let disposed = false;
   let stepping = false;
   let revision = 0;
+  let sceneRevision = 0;
   let randomState = 2166136261;
   for (const char of initial.script.seed ?? initial.id)
     randomState = Math.imul(randomState ^ char.charCodeAt(0), 16777619) >>> 0;
@@ -98,9 +99,11 @@ export function createScriptRuntime(
   let view: BoardScriptView | null = null;
   let hits: BoardScriptOutput["hits"] = effects?.hits ?? {};
   let uniforms: BoardScriptOutput["uniforms"] = effects?.uniforms;
-  const invalidate = () => {
+  let passes: BoardScriptOutput["passes"] = effects?.passes;
+  const invalidate = (scene = true) => {
     if (disposed) return;
     revision++;
+    if (scene) sceneRevision++;
     host.invalidate();
   };
   const present: BoardScriptContext["present"] = (id, patch) => {
@@ -170,7 +173,7 @@ export function createScriptRuntime(
       };
     },
     onDispose: (handler) => cleanups.push(handler),
-    invalidate,
+    invalidate: () => invalidate(),
     get: (id) => input.items[id],
     present,
     scene(next, options) {
@@ -200,7 +203,14 @@ export function createScriptRuntime(
         values[name] = typeof value === "number" ? value : [...(list as number[])];
       }
       uniforms = { ...uniforms, ...values };
-      invalidate();
+      invalidate(false);
+    },
+    passes(next) {
+      if (!next || typeof next !== "object" || Object.values(next).some((on) => typeof on !== "boolean"))
+        throw new Error("passes() takes a record of pass names and booleans.");
+      if (Object.entries(next).every(([name, on]) => passes?.[name] === on)) return;
+      passes = { ...passes, ...next };
+      invalidate(false);
     },
     async commit(patch) {
       return (await host.call("board.commit", { patch, frame: stepping })) === true;
@@ -213,7 +223,17 @@ export function createScriptRuntime(
       call: (name, value) => host.call(name, value),
     },
   };
-  const setup = module.default?.(context);
+  // Instances share a worker's globals, so Math.random follows the instance seed only while its code runs.
+  const seeded = <T>(run: () => T): T => {
+    const random = Math.random;
+    Math.random = context.random;
+    try {
+      return run();
+    } finally {
+      Math.random = random;
+    }
+  };
+  const setup = seeded(() => module.default?.(context));
   if (typeof setup === "function") cleanups.push(setup);
   return {
     get animated() {
@@ -225,6 +245,7 @@ export function createScriptRuntime(
         if (!next.items[id]) {
           delete patches[id];
           revision++;
+          sceneRevision++;
         }
       params = {
         ...parameterDefaults,
@@ -246,11 +267,13 @@ export function createScriptRuntime(
         };
         stepping = true;
         try {
-          for (const handler of frames) {
-            const result: unknown = handler(frame);
-            if (result && typeof (result as { then?: unknown }).then === "function")
-              throw new Error("onFrame() handlers must be synchronous.");
-          }
+          seeded(() => {
+            for (const handler of frames) {
+              const result: unknown = handler(frame);
+              if (result && typeof (result as { then?: unknown }).then === "function")
+                throw new Error("onFrame() handlers must be synchronous.");
+            }
+          });
         } finally {
           stepping = false;
         }
@@ -279,11 +302,13 @@ export function createScriptRuntime(
       if (event.type === "viewchange") view = event.data as BoardScriptView;
       const listeners = handlers.get(event.type);
       if (!listeners?.size) return;
-      for (const handler of listeners) handler(event);
+      seeded(() => {
+        for (const handler of listeners) handler(event);
+      });
       invalidate();
     },
     draw(canvas: CanvasRenderingContext2D) {
-      const result: unknown = module.draw?.(canvas, frame);
+      const result: unknown = seeded(() => module.draw?.(canvas, frame));
       if (result && typeof (result as { then?: unknown }).then === "function")
         throw new Error("draw() must be synchronous.");
     },
@@ -297,6 +322,7 @@ export function createScriptRuntime(
         hits,
         shader: module.shader,
         uniforms,
+        passes,
         listens: [...handlers]
           .filter(([, callbacks]) => callbacks.size)
           .map(([type]) => type),
@@ -306,6 +332,7 @@ export function createScriptRuntime(
         frameRate: module.frameRate,
         pixelated: module.pixelated,
         version: revision,
+        sceneVersion: sceneRevision,
       };
     },
     snapshot(includeEffects = true, clone = true): BoardScriptSnapshot {
@@ -313,7 +340,7 @@ export function createScriptRuntime(
         state,
         time,
         random: randomState,
-        effects: includeEffects ? { patches, world: layers.world, screen: layers.screen, anchor, hits, uniforms } : undefined,
+        effects: includeEffects ? { patches, world: layers.world, screen: layers.screen, anchor, hits, uniforms, passes } : undefined,
       };
       return clone ? structuredClone(snapshot) : snapshot;
     },
@@ -327,6 +354,7 @@ export function createScriptRuntime(
       layers.screen = {};
       hits = {};
       uniforms = undefined;
+      passes = undefined;
     },
   };
 }

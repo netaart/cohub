@@ -34,7 +34,7 @@ function capture(run: () => void | Promise<void>): Promise<string[]> {
 test("Board commands are one small, flat set and all expose -h", () => {
   const { boards } = createProgram();
   assert.deepEqual(boards.commands.map((command) => command.name()), [
-    "create", "get", "apply", "history", "schema", "preset", "examples", "export", "simulate", "inspect", "frames", "sequence", "place", "path",
+    "create", "get", "apply", "history", "schema", "preset", "examples", "export", "simulate", "profile", "gpu-daemon", "inspect", "frames", "sequence", "place", "path",
     "play", "pause", "resume", "seek", "next", "stop", "watch",
   ]);
   for (const command of boards.commands) {

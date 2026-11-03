@@ -6,6 +6,7 @@ import type {
 } from "@neta-art/cohub/board";
 import {
 	type BoardExportRegion,
+	boardAnimatesScriptParams,
 	hasBoardScripts,
 	selectBoardExportAssets,
 } from "@neta-art/cohub/board";
@@ -212,6 +213,9 @@ export async function exportBoardImage(
 					exportOptions.at?.time ?? 0,
 					bridge.readModule,
 					exportOptions.at ? undefined : await bridge.snapshotScripts?.(),
+					sampler && boardAnimatesScriptParams(document)
+						? { documentAt: (time) => sampler.at(time).document }
+						: {},
 				)
 			: null;
 	try {

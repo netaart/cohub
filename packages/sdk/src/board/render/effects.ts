@@ -299,7 +299,9 @@ type EffectFilters = { color?: BoardColorFilter; blur?: BoardBlurFilter; shadow?
 const filtersByContainer = new WeakMap<Container, EffectFilters>();
 
 export function hasBoardEffects(style: BoardStyle | undefined): boolean {
-	return Boolean(style && (style.filter || style.shadow || (style.blend && style.blend !== "normal")));
+	if (!style) return false;
+	const shadow = style.shadow && (style.shadow.opacity ?? BOARD_SHADOW_DEFAULTS.opacity) > 0;
+	return Boolean(shadow || (style.filter && (style.filter.blur || colorSteps(style.filter).length)) || (style.blend && style.blend !== "normal"));
 }
 
 function resolveShadow(shadow: BoardShadow, context: BoardEffectsContext) {
@@ -333,7 +335,8 @@ export function syncBoardEffects(container: Container, style: BoardStyle | undef
 	const filter = style?.filter;
 	const blurs = context.blurs !== false;
 	const blur = blurs ? (filter?.blur ?? 0) : 0;
-	const shadow = blurs && style?.shadow ? resolveShadow(style.shadow, context) : null;
+	const resolved = blurs && style?.shadow ? resolveShadow(style.shadow, context) : null;
+	const shadow = resolved && resolved.alpha > 0 ? resolved : null;
 	const colored = colorSteps(filter).length > 0;
 	let parts = filtersByContainer.get(container);
 	if (!colored && blur <= 0 && !shadow) {

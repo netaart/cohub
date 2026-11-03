@@ -1,5 +1,7 @@
 import type { BoardDocument } from "@cohub/protocol";
+import { BOARD_SCRIPT_HISTORY_MS, boardScriptParamsKey } from "../model/animation.js";
 import { buildBoardScene } from "../model/scene.js";
+import { BOARD_SCRIPT_EXPORT_CALLS } from "../model/script-calls.js";
 import { composeBoardScriptItems } from "../model/script-scene.js";
 import type {
   BoardScriptOutput,
@@ -25,7 +27,11 @@ type Run = {
 
 export function createBrowserBoardScriptExport(
   readModule: (path: string) => Promise<string>,
-  options: { snapshots?: Readonly<Record<string, BoardScriptSnapshot>>; shaders?: boolean } = {},
+  options: {
+    snapshots?: Readonly<Record<string, BoardScriptSnapshot>>;
+    shaders?: boolean;
+    documentAt?: (time: number) => BoardDocument;
+  } = {},
 ): BrowserBoardScriptExport {
   let run: Run | null = null;
 
@@ -47,6 +53,7 @@ export function createBrowserBoardScriptExport(
         shaders: options.shaders ?? true,
         snapshots: options.snapshots,
         timeoutMs: 15_000,
+        capabilities: Object.fromEntries(Object.entries(BOARD_SCRIPT_EXPORT_CALLS).map(([name, call]) => [name, async (_id: string, input: unknown) => call(input)])),
         onFrame: () => started.wake(),
         onOutput(id, output) {
           if (output) outputs.set(id, output);
@@ -65,46 +72,70 @@ export function createBrowserBoardScriptExport(
     run = null;
   }
 
+  function settle(current: Run, document: BoardDocument, time: number): Promise<void> {
+    current.time = time;
+    const { host } = current;
+    const scene = buildBoardScene(document);
+    const ids = boardScriptAttachments(document).map(({ id }) => id);
+    return new Promise<void>((resolve, reject) => {
+      const finish = (error?: unknown) => {
+        clearTimeout(timer);
+        current.wake = () => {};
+        if (error) reject(error);
+        else resolve();
+      };
+      const timer = setTimeout(() => finish(new Error("Script export preparation timed out.")), 20_000);
+      let queued = false;
+      const sync = () => {
+        queued = false;
+        try {
+          host.sync(document, scene, { x: 0, y: 0, zoom: 1 }, time, false);
+          for (const id of ids) {
+            const error = host.error(id);
+            if (error) throw new Error(error);
+          }
+          if (ids.every((id) => host.settled(id))) finish();
+        } catch (error) {
+          finish(error);
+        }
+      };
+      current.wake = () => {
+        if (queued) return;
+        queued = true;
+        queueMicrotask(sync);
+      };
+      current.wake();
+    });
+  }
+
   return {
     async at(document, time) {
       if (!Number.isFinite(time) || time < 0 || time > 600_000)
         throw new Error("Script export time must be between 0 and 600000 ms.");
       if (run && time < run.time) stop();
+      const fresh = !run;
       const current = run ?? start();
       run = current;
-      current.time = time;
       const { host, outputs } = current;
-      const scene = buildBoardScene(document);
-      const ids = boardScriptAttachments(document).map(({ id }) => id);
-      await new Promise<void>((resolve, reject) => {
-        const finish = (error?: unknown) => {
-          clearTimeout(timer);
-          current.wake = () => {};
-          if (error) reject(error);
-          else resolve();
-        };
-        const timer = setTimeout(() => finish(new Error("Script export preparation timed out.")), 20_000);
-        let queued = false;
-        const sync = () => {
-          queued = false;
-          try {
-            host.sync(document, scene, { x: 0, y: 0, zoom: 1 }, time, false);
-            for (const id of ids) {
-              const error = host.error(id);
-              if (error) throw new Error(error);
-            }
-            if (ids.every((id) => host.settled(id))) finish();
-          } catch (error) {
-            finish(error);
+      if (options.documentAt) {
+        let before = { at: current.time, document: options.documentAt(current.time) };
+        let previous = boardScriptParamsKey(before.document);
+        let ran = current.time;
+        if (fresh) await settle(current, before.document, before.at);
+        for (let at = current.time + BOARD_SCRIPT_HISTORY_MS; at < time; at += BOARD_SCRIPT_HISTORY_MS) {
+          const sample = options.documentAt(at);
+          const key = boardScriptParamsKey(sample);
+          if (key !== previous) {
+            if (before.at > ran) await settle(current, before.document, before.at);
+            await settle(current, sample, at);
+            previous = key;
+            ran = at;
           }
-        };
-        current.wake = () => {
-          if (queued) return;
-          queued = true;
-          queueMicrotask(sync);
-        };
-        current.wake();
-      });
+          before = { at, document: sample };
+        }
+        if (boardScriptParamsKey(document) !== previous && before.at > ran) await settle(current, before.document, before.at);
+      }
+      await settle(current, document, time);
       return {
         ...host,
         shaders: (input) => boardShaderOwners(input, outputs, (id) => host.clock(id)),
@@ -125,7 +156,7 @@ export async function prepareBrowserBoardScripts(
   time: number,
   readModule: (path: string) => Promise<string>,
   snapshots?: Readonly<Record<string, BoardScriptSnapshot>>,
-  options: { shaders?: boolean } = {},
+  options: { shaders?: boolean; documentAt?: (time: number) => BoardDocument } = {},
 ): Promise<{ host: BoardScriptHost; dispose(): void }> {
   const session = createBrowserBoardScriptExport(readModule, { snapshots, ...options });
   try {

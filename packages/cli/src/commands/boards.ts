@@ -145,7 +145,28 @@ type ExportOptions = JsonOptions & {
   renderer?: string;
   fps?: string;
   force?: boolean;
+  async?: boolean;
 };
+
+const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
+async function runExportTask(boards: Command, options: ExportOptions): Promise<void> {
+  try {
+    const command = ["cohub", ...process.argv.slice(2).filter((arg) => arg !== "--async")].map(shellQuote).join(" ");
+    const { taskRunId } = await createClient().space(await resolveSpace(boards)).runCommand({ command });
+    if (jsonRequested(options)) return outJson({ taskRunId, command });
+    ok(`Exporting as Task ${taskRunId}`);
+    console.log(`  Follow it with: cohub tasks get ${taskRunId}`);
+  } catch (cause) {
+    handleHttp(cause);
+  }
+}
+
+function parseSize(value: string): { width: number; height: number } {
+  const size = /^(\d+)x(\d+)$/.exec(value);
+  if (!size?.[1] || !size[2]) throw new Error("--size must be widthxheight, e.g. 1600x900.");
+  return { width: parseNumber(size[1], "width", { min: 1, max: 8192 }), height: parseNumber(size[2], "height", { min: 1, max: 8192 }) };
+}
 
 /** One region flag at most: being told to pick beats guessing which one wins. */
 function parseExportRegion(options: ExportOptions): BoardExportRegion {
@@ -218,14 +239,20 @@ function registerExportCommand(boards: Command): void {
     .option("--image-memory <mib>", "Decoded image memory budget in MiB", String(BOARD_EXPORT_IMAGE_MEMORY_MIB))
     .option("--no-images", "Draw placeholders instead of downloading images")
     .option("--renderer <renderer>", "auto draws in Node and uses local Chrome for shaders; canvas or gpu forces one", "auto")
-    .option("--force", "Replace existing output files"))
+    .option("--force", "Replace existing output files")
+    .option("--async", "Run as a Task in the Space's sandbox and return at once; paths are Space paths"))
     .addHelpText("after", `
+Shaders draw in a shared headless Chrome that stays up a few minutes between calls;
+Boards without shaders never start it. Set COHUB_BOARD_GPU_DAEMON=0 to start one per call.
+
 Examples:
   cohub boards export plan.board -o plan.png
+  cohub boards export plan.board --animation intro --at 0:20s:40ms -o intro.mp4 --async
   cohub boards export plan.board --frame s2 -o slide-2.png
   cohub boards export plan.board --animation lecture --at 4.5s -o moment.png
   cohub boards export plan.board --animation lecture --at 0:6s:40ms -o frames/%04d.png`)
     .action(async (target: string, options: ExportOptions) => {
+      if (options.async) return runExportTask(boards, options);
       const controller = new AbortController();
       const cancel = () => controller.abort(new Error("Export cancelled."));
       process.once("SIGINT", cancel);
@@ -235,9 +262,7 @@ Examples:
         let camera: { width: number; height: number } | undefined;
         if (options.camera) {
           if (!options.animation || !times) throw new Error("--camera needs --animation and --at.");
-          const size = /^(\d+)x(\d+)$/.exec(options.size ?? "1600x900");
-          if (!size?.[1] || !size[2]) throw new Error("--size must be widthxheight, e.g. 1600x900.");
-          camera = { width: parseNumber(size[1], "width", { min: 1, max: 8192 }), height: parseNumber(size[2], "height", { min: 1, max: 8192 }) };
+          camera = parseSize(options.size ?? "1600x900");
         }
         const progress = (completed: number, total: number) => {
           if (!jsonRequested(options) && (completed === total || completed % 30 === 0)) process.stderr.write(`Rendered ${completed}/${total} frames\n`);
@@ -400,6 +425,58 @@ Examples:
       } catch (cause) {
         handleHttp(cause);
       }
+    });
+}
+
+function registerProfileCommand(boards: Command): void {
+  withJson(boards.command("profile <board>")
+    .description("Measure what a Board costs to draw, shader by shader, and say what to change")
+    .option("--at <time>", "A moment of --animation, or a script time without one", "2s")
+    .option("--animation <id>", "Animation --at refers to")
+    .option("--frame <item-id>", "Profile one frame")
+    .option("--items <ids>", "Profile comma-separated item ids")
+    .option("--rect <rect>", "Profile a world rect as x,y,width,height")
+    .option("--size <widthxheight>", "Fit the region into this many pixels, like a screen", "1600x900")
+    .option("--frames <count>", "Frames to time per measurement", "5")
+    .option("--no-images", "Draw placeholders instead of downloading images"))
+    .addHelpText("after", `
+Draws in a headless Chrome; without a GPU it uses software WebGL, so compare the
+numbers with each other rather than with a real display.
+
+Examples:
+  cohub boards profile demo.board
+  cohub boards profile demo.board --rect 0,0,1600,900 --at 8s --json`)
+    .action(async (target: string, options: ExportOptions & { frames?: string }) => {
+      try {
+        const { profileBoard } = await import("../board-profile.js");
+        const profile = await profileBoard({
+          spaceId: await resolveSpace(boards),
+          target,
+          time: parseBoardTime(options.at ?? "2s", "--at"),
+          ...(options.animation ? { animation: options.animation } : {}),
+          region: parseExportRegion(options),
+          size: parseSize(options.size ?? "1600x900"),
+          frames: parseNumber(options.frames ?? "5", "--frames", { min: 3, max: 240, integer: true }),
+          withImages: options.images !== false,
+        });
+        if (jsonRequested(options)) return outJson(profile);
+        const ms = (value: number) => `${value.toFixed(1)} ms`;
+        ok(`${profile.width}×${profile.height} in ${profile.renderer}: ${ms(profile.frame.p50)} a frame (p95 ${ms(profile.frame.p95)}), ${profile.items} items`);
+        for (const owner of profile.owners) {
+          const traits = [owner.filter !== "none" && `filter ${owner.filter}`, owner.sprites && `${owner.sprites} sprites`, owner.state && `state ${owner.state.width}×${owner.state.height}`].filter(Boolean);
+          console.log(`  ${owner.id.padEnd(24)} ${ms(owner.ms).padStart(9)}${traits.length ? `  ${traits.join(", ")}` : ""}`);
+        }
+        for (const hint of profile.hints) console.log(`  ! ${hint}`);
+      } catch (cause) {
+        handleHttp(cause);
+      }
+    });
+
+  boards.command("gpu-daemon", { hidden: true })
+    .requiredOption("--browser <path>")
+    .action(async (options: { browser: string }) => {
+      const { serveBoardGpu } = await import("../board-gpu/daemon.js");
+      await serveBoardGpu(options.browser);
     });
 }
 
@@ -631,6 +708,7 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
   registerBoardExampleCommands(boards);
   registerExportCommand(boards);
   registerSimulateCommand(boards);
+  registerProfileCommand(boards);
   registerBoardAuthoringCommands(boards);
   registerPlaybackCommands(boards);
 

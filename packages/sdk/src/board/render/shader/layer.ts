@@ -1,12 +1,15 @@
 import {
+  AlphaFilter,
   type BLEND_MODES,
   Container,
   Filter,
-  GlProgram,
+  type GlProgram,
+  Rectangle,
   type Renderer,
   RenderTarget,
   type RenderTexture,
   RendererType,
+  Sprite,
   Texture,
   TextureSource,
   UniformGroup,
@@ -17,19 +20,23 @@ import type { Rect } from "../../model/geometry.js";
 import {
   type BoardShaderParameter,
   type BoardShaderUniform,
+  boardShaderPassLayer,
+  boardShaderPassOn,
   boardShaderUniforms,
   boardShaderUniformValue,
 } from "../../model/shader.js";
-import type { BoardShader, BoardShaderUniformValues } from "../../model/script.js";
+import type { BoardShader, BoardShaderPass, BoardShaderPassStates, BoardShaderUniformValues } from "../../model/script.js";
+import { type BoardProgramCompile, compileBoardProgram } from "./compile.js";
+import { BOARD_SPRITE_COLUMNS, BOARD_SPRITE_PLACEMENTS, type BoardShaderProgramKind, buildBoardShaderProgram } from "./program.js";
 import {
-  BOARD_SPRITE_COLUMNS,
-  BOARD_SPRITE_PLACEMENTS,
-  type BoardShaderProgram,
-  type BoardShaderProgramKind,
-  buildBoardShaderProgram,
-  describeBoardShaderError,
-} from "./program.js";
-import { type BoardShaderMesh, boardQuadGeometry, boardRenderTarget, boardShaderMesh, destroyBoardShaderMesh, setUniform } from "./quad.js";
+  type BoardShaderMesh,
+  boardGlProgram,
+  boardQuadGeometry,
+  boardRenderTarget,
+  boardShaderMesh,
+  destroyBoardShaderMesh,
+  setUniform,
+} from "./quad.js";
 
 export type BoardShaderFrame = {
   time: number;
@@ -43,17 +50,21 @@ export type BoardShaderFrame = {
   dark: boolean;
   params: Readonly<Record<string, number | readonly number[]>>;
   uniforms?: BoardShaderUniformValues;
+  passes?: BoardShaderPassStates;
+  shading?: number;
 };
 
 export type BoardShaderLayer = {
-  readonly layer: NonNullable<BoardShader["layer"]>;
-  readonly container: Container | null;
+  readonly below: Container | null;
+  readonly above: Container | null;
   readonly filters: readonly Filter[] | null;
   readonly surfaces: boolean;
   readonly animated: boolean;
+  ready(): boolean;
   update(frame: BoardShaderFrame): void;
   prepare(renderer: Renderer, options?: { catchUp?: boolean }): boolean;
-  setSurfaces(texture: Texture, region: Rect): void;
+  setSurfaces(texture: Texture, region: Rect, key?: string): void;
+  rewind(): void;
   destroy(): void;
 };
 
@@ -61,45 +72,10 @@ const STEP_MS = 1000 / 60;
 const STEPS_PER_FRAME = 8;
 const MAX_LAG = 60;
 const MAX_REPLAY = 10 * 60 * 60;
+const CHECKPOINT_STEPS = 10 * 60;
+const CHECKPOINTS = 6;
 const PIXI_TYPES = { float: "f32", int: "i32", vec2: "vec2<f32>", vec3: "vec3<f32>", vec4: "vec4<f32>" } as const;
 const SIZES = { float: 1, int: 1, vec2: 2, vec3: 3, vec4: 4 } as const;
-
-const compiled = new Map<string, string | null>();
-
-function check(renderer: Renderer, program: BoardShaderProgram, label: string) {
-  if (renderer.type !== RendererType.WEBGL) return;
-  const key = `${program.vertex}\u0000${program.fragment}`;
-  let error = compiled.get(key);
-  if (error === undefined) {
-    const gl = (renderer as WebGLRenderer).gl;
-    error = null;
-    const shaders: WebGLShader[] = [];
-    const glProgram = gl.createProgram();
-    for (const [stage, type, source, first] of [
-      ["vertex", gl.VERTEX_SHADER, program.vertex, program.firstLine.vertex],
-      ["fragment", gl.FRAGMENT_SHADER, program.fragment, program.firstLine.fragment],
-    ] as const) {
-      const shader = gl.createShader(type);
-      if (!shader) continue;
-      gl.shaderSource(shader, source);
-      gl.compileShader(shader);
-      shaders.push(shader);
-      if (!error && !gl.getShaderParameter(shader, gl.COMPILE_STATUS) && !gl.isContextLost())
-        error = describeBoardShaderError(gl.getShaderInfoLog(shader) ?? "", first, `${label} (${stage})`);
-      gl.attachShader(glProgram, shader);
-    }
-    if (!error) {
-      gl.linkProgram(glProgram);
-      if (!gl.getProgramParameter(glProgram, gl.LINK_STATUS) && !gl.isContextLost())
-        error = `${label}: ${gl.getProgramInfoLog(glProgram) ?? "the shader failed to link"}`;
-    }
-    for (const shader of shaders) gl.deleteShader(shader);
-    gl.deleteProgram(glProgram);
-    if (compiled.size > 256) compiled.clear();
-    compiled.set(key, error);
-  }
-  if (error) throw new Error(error);
-}
 
 const placing = new WeakMap<Renderer, boolean>();
 
@@ -197,43 +173,47 @@ export function createBoardShaderLayer(
   shader: BoardShader,
   parameters: readonly BoardShaderParameter[],
   label: string,
+  options: { wait?: boolean } = {},
 ): BoardShaderLayer {
-  const layer = shader.layer ?? "above";
   const uniforms = boardShaderUniforms(shader.uniforms);
   const surfaces = shader.surfaces === true;
   const hasState = shader.state !== undefined;
   const base = { parameters, uniforms, surfaces, state: hasState };
-  const program = (kind: BoardShaderProgramKind, glsl: string, name: string) => {
-    let built: BoardShaderProgram;
+  const compiles: BoardProgramCompile[] = [];
+  const program = (kind: BoardShaderProgramKind, glsl: string, name: string): GlProgram => {
     try {
-      built = buildBoardShaderProgram({ ...base, kind, glsl });
+      const built = buildBoardShaderProgram({ ...base, kind, glsl });
+      const glProgram = boardGlProgram(`board-shader-${kind}`, built);
+      compiles.push(compileBoardProgram(renderer, glProgram, built, name, options.wait === true));
+      return glProgram;
     } catch (error) {
-      throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(message.startsWith(name) ? message : `${name}: ${message}`);
     }
-    check(renderer, built, name);
-    return built;
   };
   const group = boardUniforms(parameters, uniforms);
   const textures: Record<string, unknown> = {};
   if (surfaces) textures.uCohubSurfaces = Texture.EMPTY.source;
   if (hasState) textures.uCohubState = Texture.EMPTY.source;
 
-  const meshes: Array<BoardShaderMesh & { sprites: number; placement: Placement | null }> = [];
-  const filters: Filter[] = [];
-  const container = layer === "filter" ? null : new Container({ label: `board-shader-${label}` });
+  type Drawn = BoardShaderMesh & { pass: BoardShaderPass; sprites: number; placement: Placement | null; scaler: AlphaFilter | null };
+  const meshes: Drawn[] = [];
+  const filters: Array<{ filter: Filter; pass: BoardShaderPass }> = [];
+  const containers: { below: Container | null; above: Container | null } = { below: null, above: null };
+  const area = new Rectangle();
   const place = canPlaceSprites(renderer);
   let placementsStale = true;
   shader.passes.forEach((pass, index) => {
     const name = `${label} pass ${index + 1}`;
+    const layer = boardShaderPassLayer(shader, pass);
     if (layer === "filter") {
-      const built = program("filter", pass.glsl, name);
       const filter = new Filter({
-        glProgram: GlProgram.from({ name: `board-shader-filter`, vertex: built.vertex, fragment: built.fragment, preferredFragmentPrecision: "highp" }),
+        glProgram: program("filter", pass.glsl, name),
         resources: { cohubUniforms: group, ...textures },
         padding: 0,
         resolution: "inherit",
       });
-      filters.push(filter);
+      filters.push({ filter, pass });
       return;
     }
     const sprites = pass.sprites ?? 0;
@@ -247,8 +227,11 @@ export function createBoardShaderLayer(
     placement?.textures.forEach((texture, slot) => { resources[BOARD_SPRITE_PLACEMENTS[slot] as string] = texture; });
     const drawn = boardShaderMesh("board-shader", program(kind, pass.glsl, name), resources, boardQuadGeometry(Math.max(1, sprites)));
     drawn.mesh.blendMode = (pass.blend ?? "normal") as BLEND_MODES;
-    container?.addChild(drawn.mesh);
-    meshes.push({ ...drawn, sprites, placement });
+    containers[layer] ??= new Container({ label: `board-shader-${label}-${layer}` });
+    const container = containers[layer];
+    container.boundsArea = area;
+    container.addChild(drawn.mesh);
+    meshes.push({ ...drawn, pass, sprites, placement, scaler: null });
   });
 
   let state: { simulate: BoardShaderMesh; uniforms: UniformGroup; read: RenderTexture; write: RenderTexture; steps: number } | null = null;
@@ -263,10 +246,10 @@ export function createBoardShaderLayer(
   const blank = new Container();
   let time = 0;
   let quality = 1;
+  let compiled = compiles.length === 0;
   let last: BoardShaderFrame | null = null;
 
   const stateRegion = (frame: BoardShaderFrame): Rect => shader.state?.bounds ?? frame.region;
-
   function fill(target: UniformGroup, frame: BoardShaderFrame, geometry: Rect, step?: number) {
     const region = step === undefined ? frame.region : stateRegion(frame);
     const values = target.uniforms as Record<string, unknown>;
@@ -301,11 +284,40 @@ export function createBoardShaderLayer(
   }
 
   type State = NonNullable<typeof state>;
+  const checkpoints: Array<{ steps: number; key: string; texture: RenderTexture }> = [];
+  let surfaceKey = "";
+  const copier = new Sprite();
+  copier.blendMode = "none";
+  const copy = (target: Renderer, from: RenderTexture, to: RenderTexture) => {
+    copier.texture = from;
+    target.render({ container: copier, target: to, clear: true, clearColor: [0, 0, 0, 0] });
+  };
+  const inputs = ({ time: _time, ...frame }: BoardShaderFrame) => JSON.stringify([frame, surfaceKey]);
+
+  function checkpoint(target: Renderer, state: State, key: string) {
+    if (checkpoints.some((entry) => entry.steps === state.steps && entry.key === key)) return;
+    const reused = checkpoints.length >= CHECKPOINTS ? checkpoints.shift() : undefined;
+    const texture = reused?.texture ?? boardRenderTarget(state.read.width, state.read.height, state.read.source.format);
+    copy(target, state.read, texture);
+    checkpoints.push({ steps: state.steps, key, texture });
+  }
+
   function advance(target: Renderer, state: State, frame: BoardShaderFrame, catchUp: boolean): { ran: number; behind: boolean } {
     const wanted = Math.floor(frame.time / STEP_MS);
+    const key = catchUp ? inputs(frame) : "";
+    let replaying = false;
     if (wanted < state.steps || state.steps < 0) {
+      replaying = catchUp;
       for (const texture of [state.read, state.write]) target.render({ container: blank, target: texture, clear: true, clearColor: [0, 0, 0, 0] });
       state.steps = Math.max(0, wanted - MAX_REPLAY);
+      const resume = catchUp
+        ? checkpoints.reduce<(typeof checkpoints)[number] | null>((best, entry) =>
+            entry.key === key && entry.steps <= wanted && entry.steps > (best?.steps ?? state.steps - 1) ? entry : best, null)
+        : null;
+      if (resume) {
+        copy(target, resume.texture, state.read);
+        state.steps = resume.steps;
+      }
     }
     if (!catchUp && wanted - state.steps > MAX_LAG) state.steps = wanted - STEPS_PER_FRAME;
     const limit = catchUp ? Number.POSITIVE_INFINITY : STEPS_PER_FRAME;
@@ -317,28 +329,63 @@ export function createBoardShaderLayer(
       [state.read, state.write] = [state.write, state.read];
       state.steps++;
       ran++;
+      if (replaying && state.steps % CHECKPOINT_STEPS === 0) checkpoint(target, state, key);
     }
     const source = state.read.source;
     for (const { shader, placement } of meshes) {
       shader.resources.uCohubState = source;
       if (placement) placement.mesh.shader.resources.uCohubState = source;
     }
-    for (const filter of filters) filter.resources.uCohubState = source;
+    for (const { filter } of filters) filter.resources.uCohubState = source;
     return { ran, behind: state.steps < wanted };
   }
 
+  function shade(drawn: Drawn, frame: BoardShaderFrame) {
+    const resolution = frame.density * Math.min(1, frame.shading ?? 1);
+    const blend = (drawn.pass.blend ?? "normal") as BLEND_MODES;
+    if (resolution >= frame.density * 0.99) {
+      if (!drawn.scaler) return;
+      drawn.mesh.filters = null;
+      drawn.mesh.filterArea = null as unknown as Rectangle;
+      drawn.mesh.blendMode = blend;
+      drawn.scaler.destroy();
+      drawn.scaler = null;
+      return;
+    }
+    if (!drawn.scaler) {
+      drawn.scaler = new AlphaFilter({ alpha: 1, blendMode: blend });
+      drawn.mesh.blendMode = "normal";
+      drawn.mesh.filters = [drawn.scaler];
+      drawn.mesh.filterArea = area;
+    }
+    drawn.scaler.resolution = resolution;
+  }
+
   return {
-    layer,
-    container,
-    filters: layer === "filter" ? filters : null,
+    below: containers.below,
+    above: containers.above,
+    filters: filters.length ? filters.map(({ filter }) => filter) : null,
     surfaces,
     animated: hasState,
+    ready() {
+      if (!compiled) compiled = compiles.every((compile) => compile.poll());
+      return compiled;
+    },
     update(frame) {
       if (frame.quality !== quality) {
         quality = frame.quality;
         for (const { geometry, sprites } of meshes)
           if (sprites) geometry.instanceCount = Math.max(1, Math.round(sprites * quality));
       }
+      area.x = frame.region.x;
+      area.y = frame.region.y;
+      area.width = frame.region.width;
+      area.height = frame.region.height;
+      for (const drawn of meshes) {
+        drawn.mesh.visible = boardShaderPassOn(drawn.pass, frame.passes);
+        if (!drawn.sprites) shade(drawn, frame);
+      }
+      for (const { filter, pass } of filters) filter.enabled = boardShaderPassOn(pass, frame.passes);
       fill(group, frame, frame.region);
       for (const { geometry, placement } of meshes) {
         if (!placement) continue;
@@ -353,14 +400,18 @@ export function createBoardShaderLayer(
       if (!last) return false;
       const stepped = state ? advance(target, state, last, options?.catchUp === true) : { ran: 0, behind: false };
       if (placementsStale || stepped.ran) {
-        for (const { placement } of meshes)
-          if (placement) target.render({ container: placement.mesh.mesh, target: placement.target, clear: true, clearColor: [0, 0, 0, 0] });
+        for (const { placement, mesh } of meshes)
+          if (placement && mesh.visible) target.render({ container: placement.mesh.mesh, target: placement.target, clear: true, clearColor: [0, 0, 0, 0] });
         placementsStale = false;
       }
       return stepped.behind;
     },
-    setSurfaces(texture, region) {
-      const shaders = [...meshes.flatMap(({ shader, placement }) => (placement ? [shader, placement.mesh.shader] : [shader])), ...filters];
+    rewind() {
+      if (state) state.steps = -1;
+    },
+    setSurfaces(texture, region, key = "") {
+      surfaceKey = key;
+      const shaders = [...meshes.flatMap(({ shader, placement }) => (placement ? [shader, placement.mesh.shader] : [shader])), ...filters.map(({ filter }) => filter)];
       if (state) shaders.push(state.simulate.shader);
       for (const target of shaders) target.resources.uCohubSurfaces = texture.source;
       const groups = [group, ...meshes.flatMap(({ placement }) => (placement ? [placement.uniforms] : []))];
@@ -372,18 +423,23 @@ export function createBoardShaderLayer(
       placementsStale = true;
     },
     destroy() {
+      for (const compile of compiles) compile.cancel();
       for (const drawn of meshes) {
+        drawn.scaler?.destroy();
         destroyBoardShaderMesh(drawn);
         if (drawn.placement) destroyPlacement(renderer, drawn.placement);
       }
-      container?.destroy();
-      for (const filter of filters) filter.destroy();
+      containers.below?.destroy();
+      containers.above?.destroy();
+      for (const { filter } of filters) filter.destroy();
       blank.destroy();
       if (state) {
         destroyBoardShaderMesh(state.simulate);
         state.read.destroy(true);
         state.write.destroy(true);
       }
+      for (const { texture } of checkpoints) texture.destroy(true);
+      copier.destroy();
     },
   };
 }

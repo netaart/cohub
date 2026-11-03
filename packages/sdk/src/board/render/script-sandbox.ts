@@ -125,9 +125,11 @@ function scriptAgent(
       }
       const output = runtime.output();
       const changed = output.version !== instance.outputVersion;
+      const { shader: _shader, parameters: _parameters, ...repeat } = output;
+      const sent = changed ? (instance.outputVersion < 0 ? output : repeat) : undefined;
       instance.outputVersion = output.version;
       send(
-        { token, kind: "frame", request: data.request, output: changed ? output : undefined, bitmap },
+        { token, kind: "frame", request: data.request, output: sent, bitmap },
         bitmap ? [bitmap] : [],
       );
     } catch (error) {

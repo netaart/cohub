@@ -182,6 +182,7 @@ export function resolveBoardProperty(
 			? { ok: true, spec: SCRIPT_PARAMETER }
 			: { ok: false, message: `Board scripts animate params.<name>, not ${property}` };
 	}
+	if (/^script\.params\.[^.]+$/.test(property)) return { ok: true, spec: SCRIPT_PARAMETER };
 	const path = property.split(".");
 	if (path.some((segment) => !segment) || NOT_ANIMATABLE.has(path[0] as string)) {
 		return { ok: false, message: `${property} cannot be animated` };
@@ -643,6 +644,8 @@ function validateTrack(
 		}
 	} else if (script(value.target)) targetType = "script";
 	else return [error(`${path}.target`, "TARGET_NOT_FOUND", `target ${value.target} is not an item, animation, Board script or camera`)];
+	if (!keepUnknownProperty && value.property.startsWith("script.") && !item(value.target)?.script)
+		return [error(`${path}.property`, "INVALID_PROPERTY", `${value.target} has no script to animate`)];
 	const resolved = resolveBoardProperty(targetType, value.property);
 	if (!resolved.ok) return keepUnknownProperty ? [] : [error(`${path}.property`, "INVALID_PROPERTY", resolved.message)];
 	for (const [index, keyframe] of value.keyframes.entries()) {

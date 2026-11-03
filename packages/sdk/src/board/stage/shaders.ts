@@ -1,5 +1,5 @@
 import { type BoardMatrix, multiplyMatrix } from "@cohub/protocol/board-layout";
-import { type Container, type Filter, type Renderer, RendererType } from "pixi.js";
+import { type Container, type Filter, Rectangle, type Renderer, RendererType } from "pixi.js";
 import type { BoardEditor } from "../editor/index.js";
 import { type BoardViewport, type Rect, visibleWorldRect } from "../model/geometry.js";
 import { boardItemLocalToWorld, boardLocalView } from "../render/shader/placement.js";
@@ -13,7 +13,8 @@ import type { BoardScene as BoardStageScene } from "./scene.js";
 const QUALITY: Record<BoardDeviceTier, number> = { low: 0.5, standard: 0.75, high: 1 };
 const MIN_QUALITY = 0.25;
 const FRAME_MS = 1000 / 60;
-const WINDOW = 30;
+const WINDOW = 20;
+const SHADING_DENSITY = 1.5;
 const SUSPENDED_KEY = "cohub.board.shaders.suspended";
 const IDENTITY: BoardMatrix = [1, 0, 0, 1, 0, 0];
 
@@ -85,7 +86,9 @@ export function createBoardStageShaders(options: {
   const { editor, renderer, scene, nodes } = options;
   const layers = createBoardShaderLayers();
   const rootFilters = new Map<string, readonly Filter[]>();
-  const rootContainers = new Map<string, Container>();
+  const rootLayers = new Map<string, BoardShaderLayer>();
+  // The root filter's area is the view: left to Pixi, it shrinks to the items drawn so far.
+  const rootArea = new Rectangle();
   const suspended = readSuspended();
   const paused = new Map<string, string>();
   let running: BoardShaderOwner[] = [];
@@ -96,24 +99,31 @@ export function createBoardStageShaders(options: {
   function applyRootFilters() {
     const filters = [...rootFilters.values()].flat();
     nodes.filters = filters.length ? filters : null;
+    nodes.filterArea = (filters.length ? rootArea : null) as Rectangle;
+  }
+
+  function detachRoot(id: string) {
+    const layer = rootLayers.get(id);
+    rootLayers.delete(id);
+    layer?.below?.removeFromParent();
+    layer?.above?.removeFromParent();
+    if (rootFilters.delete(id)) applyRootFilters();
   }
 
   function attachRoot(owner: BoardShaderOwner, layer: BoardShaderLayer | null, camera: BoardViewport, view: Rect): BoardShaderPlacement | null {
-    if (!layer) {
-      rootContainers.get(owner.id)?.removeFromParent();
-      rootContainers.delete(owner.id);
-      if (rootFilters.delete(owner.id)) applyRootFilters();
-      return null;
-    }
-    if (layer.container) {
-      const parent = layer.layer === "below" ? options.below : options.above;
-      if (layer.container.parent !== parent) parent.addChild(layer.container);
-      rootContainers.set(owner.id, layer.container);
-    }
+    if (rootLayers.get(owner.id) !== layer) detachRoot(owner.id);
+    if (!layer) return null;
+    rootLayers.set(owner.id, layer);
+    if (layer.below && layer.below.parent !== options.below) options.below.addChild(layer.below);
+    if (layer.above && layer.above.parent !== options.above) options.above.addChild(layer.above);
     if (layer.filters && rootFilters.get(owner.id) !== layer.filters) {
       rootFilters.set(owner.id, layer.filters);
       applyRootFilters();
     }
+    rootArea.x = view.x;
+    rootArea.y = view.y;
+    rootArea.width = view.width;
+    rootArea.height = view.height;
     return { region: view, view, localToWorld: IDENTITY, localToGlobal: [camera.zoom, 0, 0, camera.zoom, camera.x, camera.y] };
   }
 
@@ -122,11 +132,7 @@ export function createBoardStageShaders(options: {
       scene.decorate(owner.id, null);
       return null;
     }
-    const drawn = scene.decorate(owner.id, {
-      below: layer.layer === "below" ? layer.container : null,
-      above: layer.layer === "above" ? layer.container : null,
-      filters: layer.filters,
-    });
+    const drawn = scene.decorate(owner.id, { below: layer.below, above: layer.above, filters: layer.filters });
     const item = editor.scene.get(owner.id);
     if (!drawn || !item) return null;
     const localToWorld = boardItemLocalToWorld(item.frame);
@@ -153,7 +159,7 @@ export function createBoardStageShaders(options: {
 
   return {
     get animated() {
-      return layers.animated && !options.reducedMotion();
+      return (layers.animated && !options.reducedMotion()) || layers.compiling;
     },
     get active() {
       return layers.size > 0;
@@ -180,6 +186,7 @@ export function createBoardStageShaders(options: {
         zoom: camera.zoom,
         density: renderer.resolution,
         quality: quality.value,
+        shading: Math.min(1, SHADING_DENSITY / renderer.resolution) * quality.value,
         dark: options.dark(),
         color: options.color,
         fault: options.fault,
@@ -202,6 +209,7 @@ export function createBoardStageShaders(options: {
       options.canvas.removeEventListener("webglcontextlost", lost);
       layers.destroy();
       rootFilters.clear();
+      rootLayers.clear();
     },
   };
 }

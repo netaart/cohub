@@ -67,7 +67,7 @@ export type BoardScriptHostOptions = {
   onFrame(): void;
   onSchedule?(): void;
   isMaterialized?(id: string): boolean;
-  onOutput(id: string, output: BoardScriptOutput | null): void;
+  onOutput(id: string, output: BoardScriptOutput | null): boolean | undefined;
   onInput?(id: string, event: BoardScriptEvent): void;
   capabilities?: Record<
     string,
@@ -80,7 +80,7 @@ export type BoardScriptHostOptions = {
 };
 
 export type BoardScriptHostCallbacks = {
-  onOutput(id: string, output: BoardScriptOutput | null): void;
+  onOutput(id: string, output: BoardScriptOutput | null): boolean | undefined;
   onInput(id: string, event: BoardScriptEvent): void;
   onFrame(): void;
   onSchedule(): void;
@@ -379,11 +379,15 @@ export function createBoardScriptHost(
     const acceptsBitmap = Boolean(data.bitmap) && (options.export || !options.isMaterialized || options.isMaterialized(entry.id)) && entry.draw;
     if (acceptsBitmap) entry.texture.update(data.bitmap, (output ?? entry.output)?.pixelated === true);
     else data.bitmap?.close?.();
-    const changed = acceptsBitmap || Boolean(output);
-    if (changed) revisions.set(entry.id, (revisions.get(entry.id) ?? 0) + 1);
+    if (output && entry.output) {
+      output.shader ??= entry.output.shader;
+      output.parameters ??= entry.output.parameters;
+    }
+    let changed = acceptsBitmap;
+    if (acceptsBitmap || output) revisions.set(entry.id, (revisions.get(entry.id) ?? 0) + 1);
     try {
       if (output) {
-        options.onOutput(entry.id, output);
+        changed = options.onOutput(entry.id, output) !== false || changed;
         entry.output = output;
       }
     } catch (error) {
@@ -391,7 +395,7 @@ export function createBoardScriptHost(
       return;
     }
     if (changed || options.export) options.onFrame();
-    else if (needsTick(entry)) schedule();
+    else if (output || needsTick(entry)) schedule();
   };
   window.addEventListener("message", onMessage);
 

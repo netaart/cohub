@@ -81,7 +81,7 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     }
   }
 
-  function pointerEvent(point: BoardVec2, phase: "down" | "move" | "up", input: BoardScriptHarnessPointer = {}): BoardPointerEvent {
+  function pointerEvent(point: BoardVec2, phase: "down" | "move" | "up", input: BoardScriptHarnessPointer = {}, pressed = phase !== "up"): BoardPointerEvent {
     const { x, y, zoom } = editor.camera;
     return {
       pointerId: input.pointerId ?? 1,
@@ -92,15 +92,15 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
       ctrlKey: input.ctrlKey ?? false,
       metaKey: input.metaKey ?? false,
       button: 0,
-      buttons: phase === "up" ? 0 : 1,
+      buttons: pressed ? 1 : 0,
       pointerType: input.pointerType ?? "mouse",
       cancelled: false,
       pressure: 0.5,
     };
   }
 
-  async function pointer(phase: "down" | "move" | "up", point: BoardVec2, input?: BoardScriptHarnessPointer) {
-    const event = pointerEvent(point, phase, input);
+  async function pointer(phase: "down" | "move" | "up", point: BoardVec2, input?: BoardScriptHarnessPointer, pressed?: boolean) {
+    const event = pointerEvent(point, phase, input, pressed);
     const routed = controller.pointer(phase, event);
     if (!routed) {
       if (phase === "down") editor.pointerDown(event);
@@ -145,6 +145,10 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
       for (const point of rest) await pointer("move", point, input);
       await pointer("up", points.at(-1) ?? first, input);
     },
+    async move(points: readonly BoardVec2[], input?: BoardScriptHarnessPointer) {
+      for (const point of points) await pointer("move", point, input, false);
+    },
+    snapshot: () => controller.snapshot(),
     async key(type: "keydown" | "keyup", key: string) {
       controller.key({ type, key });
       await frame();

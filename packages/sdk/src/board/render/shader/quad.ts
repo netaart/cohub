@@ -10,16 +10,18 @@ export function boardQuadGeometry(instanceCount = 1): Geometry {
 
 export type BoardShaderMesh = { mesh: Mesh<Geometry, Shader>; shader: Shader; geometry: Geometry };
 
+export function boardGlProgram(name: string, source: { vertex: string; fragment: string }): GlProgram {
+  return GlProgram.from({ name, vertex: source.vertex, fragment: source.fragment, preferredFragmentPrecision: "highp" });
+}
+
 export function boardShaderMesh(
   name: string,
-  source: { vertex: string; fragment: string },
+  source: GlProgram | { vertex: string; fragment: string },
   resources: Record<string, unknown>,
   geometry = boardQuadGeometry(),
 ): BoardShaderMesh {
-  const shader = new Shader({
-    glProgram: GlProgram.from({ name, vertex: source.vertex, fragment: source.fragment, preferredFragmentPrecision: "highp" }),
-    resources,
-  });
+  const glProgram = source instanceof GlProgram ? source : boardGlProgram(name, source);
+  const shader = new Shader({ glProgram, resources });
   return { mesh: new Mesh<Geometry, Shader>({ geometry, shader, label: name }), shader, geometry };
 }
 

@@ -1,5 +1,5 @@
 import type { BoardShader } from "../../model/script.js";
-import { type BoardShaderParameter, type BoardShaderUniform, boardShaderUniforms, validateBoardShader } from "../../model/shader.js";
+import { type BoardShaderParameter, type BoardShaderUniform, boardShaderPassLayer, boardShaderUniforms, validateBoardShader } from "../../model/shader.js";
 import { BOARD_SHADER_LIBRARY } from "./library.js";
 
 export type BoardShaderProgramKind = "box" | "place" | "placed" | "sprites" | "filter" | "simulate";
@@ -324,7 +324,7 @@ export type BoardShaderStage = { name: string; kind: BoardShaderProgramKind; gls
 export function boardShaderStages(shader: BoardShader, label: string): BoardShaderStage[] {
   const stages = shader.passes.flatMap((pass, index): BoardShaderStage[] => {
     const name = `${label} pass ${index + 1}`;
-    if (shader.layer === "filter") return [{ name, kind: "filter", glsl: pass.glsl }];
+    if (boardShaderPassLayer(shader, pass) === "filter") return [{ name, kind: "filter", glsl: pass.glsl }];
     if (!pass.sprites) return [{ name, kind: "box", glsl: pass.glsl }];
     return [{ name, kind: "place", glsl: pass.glsl }, { name, kind: "placed", glsl: pass.glsl }];
   });

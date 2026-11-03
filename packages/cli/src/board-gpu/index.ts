@@ -7,9 +7,9 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
-import type { BoardGpuFrame, BoardGpuInit, BoardGpuResult, BoardGpuShader } from "./protocol.js";
+import type { BoardGpuFrame, BoardGpuInit, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
 
-export type { BoardGpuFrame, BoardGpuResult, BoardGpuShader } from "./protocol.js";
+export type { BoardGpuFrame, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
 
 export function findBoardGpuBrowser(env: NodeJS.ProcessEnv = process.env): string | null {
   const named = env.COHUB_CHROME?.trim();
@@ -90,6 +90,7 @@ export type BoardGpuExporter = {
   init(init: BoardGpuInit): Promise<void>;
   render(frame: BoardGpuFrame): Promise<Omit<BoardGpuResult, "data"> & { bytes: Uint8Array }>;
   compile(shaders: BoardGpuShader[]): Promise<Record<string, string>>;
+  profile(input: BoardGpuProfileInput): Promise<BoardGpuProfile>;
   close(): Promise<void>;
 };
 
@@ -188,6 +189,7 @@ export async function launchBoardGpuExporter(resources: BoardGpuResources, optio
         await call(`cohubBoardGpu.init(${JSON.stringify(init)})`);
       },
       compile: (shaders) => call<Record<string, string>>(`cohubBoardGpu.compile(${JSON.stringify(shaders)})`),
+      profile: (input) => call<BoardGpuProfile>(`cohubBoardGpu.profile(${JSON.stringify(input)})`),
       async render(frame) {
         const { data, ...rest } = await call<BoardGpuResult>(`cohubBoardGpu.render(${JSON.stringify(frame)})`);
         return { ...rest, bytes: new Uint8Array(Buffer.from(data, "base64")) };

@@ -99,48 +99,47 @@ export async function loadBoardScriptSources(
   const { init, parse } = await import("es-module-lexer");
   await init;
   const sources: BoardScriptSources = {};
-  const visiting = new Set<string>();
+  const loading = new Map<string, Promise<void>>();
+  const edges = new Map<string, readonly string[]>();
   let bytes = 0;
-  async function visit(path: string): Promise<void> {
-    if (visiting.has(path))
-      throw new Error(`Circular module dependency: ${path}`);
-    if (sources[path]) return;
-    if (Object.keys(sources).length + visiting.size >= 64)
-      throw new Error("A script may load at most 64 modules.");
-    visiting.add(path);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const code = await Promise.race([
-      Promise.resolve().then(() => read(path)),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`Module read timed out: ${path}`)),
-          timeoutMs,
-        );
-      }),
-    ]).finally(() => clearTimeout(timer));
-    bytes += new TextEncoder().encode(code).byteLength;
-    if (bytes > BOARD_SCRIPT_MAX_BYTES)
-      throw new Error("Script modules exceed the 2 MB limit.");
-    const [imports] = parse(code, path);
-    const resolved: BoardScriptSource["imports"] = [];
-    for (const entry of imports) {
-      if (entry.d === -2)
-        throw new Error("import.meta is not available in Board scripts.");
-      if (entry.n === undefined)
-        throw new Error("Dynamic imports must use a literal relative path.");
-      const dependency = resolveScriptImport(path, entry.n);
-      await visit(dependency);
-      resolved.push({
-        start: entry.s,
-        end: entry.e,
-        path: dependency,
-        dynamic: entry.d >= 0,
-      });
-    }
-    sources[path] = { code, imports: resolved };
-    visiting.delete(path);
+  function load(path: string): Promise<void> {
+    let promise = loading.get(path);
+    if (promise) return promise;
+    if (loading.size >= 64) throw new Error("A script may load at most 64 modules.");
+    promise = (async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const code = await Promise.race([
+        Promise.resolve().then(() => read(path)),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error(`Module read timed out: ${path}`)), timeoutMs);
+        }),
+      ]).finally(() => clearTimeout(timer));
+      bytes += new TextEncoder().encode(code).byteLength;
+      if (bytes > BOARD_SCRIPT_MAX_BYTES) throw new Error("Script modules exceed the 2 MB limit.");
+      const [imports] = parse(code, path);
+      const resolved: BoardScriptSource["imports"] = [];
+      for (const entry of imports) {
+        if (entry.d === -2) throw new Error("import.meta is not available in Board scripts.");
+        if (entry.n === undefined) throw new Error("Dynamic imports must use a literal relative path.");
+        resolved.push({ start: entry.s, end: entry.e, path: resolveScriptImport(path, entry.n), dynamic: entry.d >= 0 });
+      }
+      // Waiting on a module that imports this one would never settle, so cycles fail here.
+      const dependencies = resolved.map((entry) => entry.path);
+      edges.set(path, dependencies);
+      if (dependencies.some((dependency) => importsReach(dependency, path))) throw new Error(`Circular module dependency: ${path}`);
+      await Promise.all(dependencies.map(load));
+      sources[path] = { code, imports: resolved };
+    })();
+    loading.set(path, promise);
+    return promise;
   }
-  await visit(src);
+  function importsReach(from: string, target: string, seen = new Set<string>()): boolean {
+    if (from === target) return true;
+    if (seen.has(from)) return false;
+    seen.add(from);
+    return (edges.get(from) ?? []).some((next) => importsReach(next, target, seen));
+  }
+  await load(src);
   return sources;
 }
 

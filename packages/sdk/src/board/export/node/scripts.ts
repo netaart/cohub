@@ -5,9 +5,12 @@ import type { Texture } from "pixi.js";
 import { buildBoardScene, type BoardScene, type BoardSceneItem } from "../../model/scene.js";
 import { type BoardScriptAttachment, boardScriptAttachments } from "../../model/script-index.js";
 import {
+  boardScriptOf,
   boardScriptScope,
   composeBoardScriptItems,
 } from "../../model/script-scene.js";
+import { BOARD_SCRIPT_HISTORY_MS } from "../../model/animation.js";
+import { BOARD_SCRIPT_EXPORT_CALLS } from "../../model/script-calls.js";
 import type { BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot } from "../../model/script.js";
 import {
   loadBoardScriptSources,
@@ -240,8 +243,11 @@ function createNodeScriptLanes(
       };
       void Promise.resolve()
         .then(() => {
-          if (!options.call) throw new Error("Capabilities are unavailable during export.");
-          return options.call(message.id ?? "", message.name ?? "", message.input);
+          const name = message.name ?? "";
+          if (options.call) return options.call(message.id ?? "", name, message.input);
+          const call = BOARD_SCRIPT_EXPORT_CALLS[name];
+          if (!call) throw new Error("Capabilities are unavailable during export.");
+          return call(message.input);
         })
         .then((value) => answer(value), (error: unknown) => answer(undefined, error instanceof Error ? error.message : String(error)));
     });
@@ -348,7 +354,7 @@ export function createNodeBoardScriptHost(
     times: readonly number[],
     zoom: number,
     board?: Pick<BoardSettings, "scripts">,
-    options?: { shaders?: boolean },
+    options?: { shaders?: boolean; history?: (time: number) => BoardDocument },
   ): Promise<void>;
   clearFrames(): void;
   destroy(): void;
@@ -357,6 +363,7 @@ export function createNodeBoardScriptHost(
   const textures = new Map<string, Texture>();
   const outputs = new Map<number, Map<string, BoardScriptOutput>>();
   const errors = new Map<string, string>();
+  const sampled = new Map<string, number>();
   const key = (id: string, time: number) => `${id}|${time}`;
   let disposed = false;
   return {
@@ -380,8 +387,9 @@ export function createNodeBoardScriptHost(
       errors.clear();
     },
     async prepare(items, times, zoom, board, options) {
-      const all = Object.fromEntries(items.map(({ id, frame: _frame, ...item }) => [id, item as BoardItem]));
-      const document = { board: { scripts: board?.scripts }, items: all } as BoardDocument;
+      const documentOf = (list: readonly BoardSceneItem[]) =>
+        ({ board: { scripts: board?.scripts }, items: Object.fromEntries(list.map(({ id, frame: _frame, ...item }) => [id, item as BoardItem])) }) as BoardDocument;
+      const document = documentOf(items);
       const scripted = boardScriptAttachments(document);
       const alive = new Set(scripted.map(({ id }) => id));
       for (const id of [...lanes.assigned()]) if (!alive.has(id)) lanes.release(id);
@@ -398,6 +406,32 @@ export function createNodeBoardScriptHost(
             const scale = Math.min(4, Math.max(0.25, zoom), 2048 / Math.max(1, width, height));
             const input = scopedInput(document, attachment, { width, height });
             for (const time of times) {
+              const last = sampled.get(id) ?? 0;
+              if (options?.history) {
+                const from = last <= time ? last : 0;
+                const run = async (at: number, document: BoardDocument) => {
+                  const script = boardScriptOf(document, id);
+                  if (script) await lanes.sample({ input: scopedInput(document, { ...attachment, script }, { width, height }), graph, time: at, scale, draw: false, shaders: options.shaders });
+                };
+                let before = { at: from, document: options.history(from) };
+                let previous = JSON.stringify(boardScriptOf(before.document, id)?.params);
+                let ran = from;
+                if (from === 0) await run(from, before.document);
+                for (let at = from + BOARD_SCRIPT_HISTORY_MS; at < time; at += BOARD_SCRIPT_HISTORY_MS) {
+                  const sample = options.history(at);
+                  const key = JSON.stringify(boardScriptOf(sample, id)?.params);
+                  if (key !== previous) {
+                    if (before.at > ran) await run(before.at, before.document);
+                    await run(at, sample);
+                    previous = key;
+                    ran = at;
+                    if (disposed) return;
+                  }
+                  before = { at, document: sample };
+                }
+                if (JSON.stringify(input.script.params) !== previous && before.at > ran) await run(before.at, before.document);
+              }
+              sampled.set(id, time);
               const result = await lanes.sample({ input, graph, time, scale, draw: Boolean(item), shaders: options?.shaders });
               if (disposed) return;
               if (result.png) {

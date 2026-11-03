@@ -441,8 +441,11 @@ placeholders, with a warning.
 Exports draw in Node until a script draws with a shader; then `--renderer auto` (the
 default) renders every frame in a local Chrome, Chromium or Edge, headless and with
 software WebGL where there is no GPU, so the result matches the web app. Set
-`COHUB_CHROME` to pick the browser. `--renderer canvas` stays in Node and warns which
-shaders fell back to `draw()` or were left out; `--renderer gpu` always uses the browser.
+`COHUB_CHROME` to pick the browser. Consecutive commands share that browser, which exits
+after a few idle minutes (`COHUB_BOARD_GPU_DAEMON=0` starts one per command). `--renderer
+canvas` stays in Node and warns which shaders fell back to `draw()` or were left out;
+`--renderer gpu` always uses the browser. `--async` runs the export as a Task in the
+Space's sandbox and returns its id at once; paths are then Space paths.
 
 Camera and fixed region options are mutually exclusive. `--size` sets camera output
 pixels and never sizes frames; `--scale` applies to fixed regions. In the web export

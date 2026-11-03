@@ -3,6 +3,7 @@ export {
   BOARD_SCRIPT_DRAWING_EXAMPLE,
   BOARD_SCRIPT_RAIN_EXAMPLE,
   hasBoardScripts,
+  boardAnimatesScriptParams,
   boardAssetKey,
   boardAssetKeySource,
   boardMediaRate,
@@ -20,8 +21,10 @@ export {
   boardTextureEdge,
   boardTexturePixels,
   buildBoardScene,
+  itemBounds,
   parseBoardDocument,
   planBoardExport,
+  rectsIntersect,
   selectBoardExportAssets,
 } from "@neta-art/cohub/board";
 export { describeBoardExportWarning, prepareBoardExport } from "@neta-art/cohub/board/export";

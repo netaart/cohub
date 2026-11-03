@@ -211,6 +211,10 @@ the pen; read-only viewers reach every region:
 ```js
 ctx.hitRegions({ canvas: { target: "self", tools: ["select", "hand", "draw"] } });
 ```
+
+A region normally yields to items drawn over it; `over: true` takes presses there too,
+such as a deck the drawn cards sit on.
+
 Labels create keyboard focus targets from the same declarations; there is no
 implicit focus target for the owner. Event `target` is the declaration's key.
 
@@ -320,7 +324,9 @@ ctx.present(ctx.targets.label, { props: { text: "Ready" } });
 await ctx.emit(ctx.targets.label, "refresh", { value: 42 });
 ```
 
-`get(id)` reads author values in scope. Custom events are local to the viewer.
+`get(id)` reads author values in scope. `emit` also reaches any Board script by its
+key, so a Frame can hand a cast or a hit to a script drawing over the whole view.
+Custom events are local to the viewer, and exports drop them.
 Missing references grant no access. Duplicating items remaps references when the
 referenced item is included in the copy. Copy, cut and duplicate exclude local script
 presentation effects and temporary items, including effects on parent transforms
@@ -365,10 +371,11 @@ game loop needs no frame around everything:
 
 Keys share the id space of items and animations, and a Board takes at most 32 of
 its own scripts. A track whose `target` is the script's id animates its params, so a
-storm can build through a chapter:
+storm can build through a chapter; on an item, the property is `script.params.<name>`:
 
 ```json
 {"target": "rain", "property": "params.density", "keyframes": [{"at": 0, "value": 0.1}, {"at": 4000, "value": 1}]}
+{"target": "swamp", "property": "script.params.depth", "keyframes": [{"at": 0, "value": 0}, {"at": 4000, "value": 1}]}
 ```
 
 Removing the script needs `--cascade` to drop such tracks too. Params, whether edited
@@ -407,10 +414,27 @@ export const shader = {
 
 `layer` places the passes `above` (the default) or `below` the owner and its
 contents, or makes them a `filter` that transforms the owner's pixels, which each
-pass reads with `scene(uv)`. A Board script's filter transforms every item. Passes
-draw one quad over the box; with `sprites: n` a pass draws `n` instanced quads that
-`Sprite sprite(int id)` places, for particles, rain or confetti without a draw call
-each.
+pass reads with `scene(uv)`. A Board script's filter transforms every item, across the
+whole view. A pass may set its own `layer`, so one script can paint a background below
+and bend the picture above. Passes draw one quad over the box; with `sprites: n` a
+pass draws `n` instanced quads that `Sprite sprite(int id)` places, for particles,
+rain or confetti without a draw call each.
+
+A pass with a `name` can be switched from setup code; `enabled: false` starts it off.
+A pass that is off costs nothing, so keep heavy effects, above all a full-view
+filter, off until they show:
+
+```js
+export const shader = {
+  passes: [
+    { layer: "below", glsl: GROUND },
+    { layer: "filter", name: "shatter", enabled: false, glsl: SHATTER },
+  ],
+};
+export default function (ctx) {
+  ctx.on("click", () => ctx.passes({ shatter: true }));
+}
+```
 
 Shaders are written in GLSL ES 3.00 as functions; Cohub owns every declaration:
 
@@ -462,15 +486,23 @@ area instead, such as puddles that stay where they fell. `precision: "byte"` sto
 8 bits per channel instead of half floats.
 
 Seeking backwards or exporting a single frame replays the steps from the start (at
-most ten minutes of them), so results are the same everywhere. A frame sequence or
-video continues each frame's simulation from the last, so when params are animated
-the state carries their history, as on the live Board.
+most ten minutes of them) with that moment's inputs, so results are the same
+everywhere; replays keep checkpoints, so a later replay with the same inputs resumes
+from the nearest one. A frame sequence or video continues each frame's simulation from
+the last, so when params are animated the state carries their history, as on the live
+Board.
 
 ### Performance and fallbacks
 
 Shaders render only while their owner is drawn and on screen; `board.quality`
 (lower on phones, and lowered while frames fall behind what the display shows)
-scales sprite counts, and reduced motion holds the clock and stops redrawing.
+scales sprite counts and the resolution of full-box passes, which shade at most 1.5
+device pixels per CSS pixel and scale up; reduced motion holds the clock and stops
+redrawing. Programs compile in the background where the browser allows, and a
+changed shader keeps drawing its previous version until the new one is ready.
+Uniforms and pass switches reach the GPU without recomposing the Board, so drive
+motion with them rather than presenting items every frame where you can; each item
+presented with a shadow, blur or color filter draws in its own offscreen pass.
 `sprite(id)` runs once per sprite per frame, not per corner, so shared work such as
 tracing a drop belongs in it; trace only as far as the sprite needs. A
 shader that was running when the GPU reset is paused for the rest of the session
@@ -482,10 +514,16 @@ The web export draws shaders like the live Board. `cohub boards export` draws in
 Node and moves to a local Chrome, Chromium or Edge (headless, software WebGL when
 there is no GPU) once a script draws with a shader; `--renderer canvas` stays in
 Node and names the shaders it drew with `draw()` or left out, and `--renderer gpu`
-always uses the browser. Set `COHUB_CHROME` to choose the browser.
+always uses the browser. Set `COHUB_CHROME` to choose the browser. The browser is
+shared by consecutive commands and exits after a few idle minutes, so only the first
+pays for starting it and compiling shaders; `COHUB_BOARD_GPU_DAEMON=0` starts one per
+command. Boards without shaders never start it.
 `cohub boards simulate <board>` compiles every shader the scripts declare with that
 browser and reports errors with the scripts' own, so check there before applying a
-change; without a browser it checks the source but cannot compile it.
+change; without a browser it checks the source but cannot compile it. With `-o` it
+draws the shaders too, resumed from where the simulated scripts stand.
+`cohub boards profile <board>` times a frame, and what each shader owner adds to it,
+and says what to change.
 
 ## Execution boundary and capabilities
 
@@ -530,7 +568,10 @@ renderers. Failures are reported instead of silently exporting an empty result.
 A timed sample exports the initial state advanced to the requested time. An untimed
 web export captures the stage's managed state and presentation effects. Module-local
 variables cannot be serialized: keep restorable values in `ctx.state` and derive
-the drawing and native scene from those values.
+the drawing and native scene from those values. While script code runs, `Math.random()`
+draws from the same seeded sequence as `ctx.random()`. When an animation drives script
+params, a timed sample replays them as they change along the way, so a counter or a
+threshold crossed by a param fires in a single-frame export as it does in a video.
 
 The runtime and browser host expose snapshot/restore interfaces. `await stage.snapshotScripts()`
 captures state on demand; frame messages do not stream complete state. Complete interaction
@@ -569,7 +610,9 @@ board.destroy();
 ```
 
 `cohub boards simulate <board>` does the same against a Space Board without saving,
-reports changes and script errors, and renders the result with `-o`.
+reports changes and script errors, and renders the result with `-o`. `{"move": [[x, y], …]}`
+hovers through points with no button held, for umbrellas, lanterns and other
+effects that follow the pointer.
 
 Boards with no enabled scripts skip the script runtime entirely. Native animation,
 input and export do not prepare script effects. Attaching the first script starts

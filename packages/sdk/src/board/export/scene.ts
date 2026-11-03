@@ -1,6 +1,6 @@
 
 import { multiplyMatrix } from "@cohub/protocol/board-layout";
-import { Container, type Filter, Graphics, type Renderer, Sprite, type Texture } from "pixi.js";
+import { Container, type Filter, Graphics, Rectangle, type Renderer, Sprite, type Texture } from "pixi.js";
 import type { BoardShapeColors } from "../model/palette.js";
 import { buildFallbackShapeColors } from "../model/palette.js";
 import { boardAssetKey } from "../model/asset-key.js";
@@ -19,7 +19,7 @@ import {
 } from "../render/index.js";
 import type { BoardSettings } from "@cohub/protocol";
 import type { BoardScene, BoardSceneItem } from "../model/scene.js";
-import type { Rect } from "../model/geometry.js";
+import { itemBounds, type Rect } from "../model/geometry.js";
 import { createBoardAtmosphereLayer } from "../render/atmosphere.js";
 import { type FrameGroup, groupingAncestor, isGroupingFrame, isSelfGroupedFrame, syncBoardItemEffects, syncFrameGroup } from "../render/frame-group.js";
 import { textureIsCutout } from "../render/cutout.js";
@@ -153,7 +153,7 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
   }
   root.addChild(world);
   const shaderErrors: Array<{ id: string; message: string }> = [];
-  const layers = input.shaders?.owners.length ? (input.shaders.layers ?? createBoardShaderLayers()) : null;
+  const layers = input.shaders?.owners.length ? (input.shaders.layers ?? createBoardShaderLayers({ wait: true })) : null;
   if (layers && input.shaders) {
     const toOutput = [input.scale, 0, 0, input.scale, -input.world.x * input.scale, -input.world.y * input.scale] as const;
     const layer = (label: string) => {
@@ -168,10 +168,12 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
     const attach = (owner: BoardShaderOwner, layer: BoardShaderLayer | null): BoardShaderPlacement | null => {
       if (!layer) return null;
       if (owner.root) {
-        if (layer.container) (layer.layer === "below" ? below : above).addChild(layer.container);
+        if (layer.below) below.addChild(layer.below);
+        if (layer.above) above.addChild(layer.above);
         if (layer.filters) {
           filters.set(owner.id, layer.filters);
           setBoardShaderFilters(world, [...filters.values()].flat());
+          world.filterArea = new Rectangle(input.world.x, input.world.y, input.world.width, input.world.height);
         }
         return { region: input.world, view: input.world, localToWorld: [1, 0, 0, 1, 0, 0], localToGlobal: toOutput };
       }
@@ -179,15 +181,20 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
       const container = containers.get(owner.id);
       if (!item || !container) return null;
       const group = isSelfGroupedFrame(item) ? groups.get(item.id)?.group : undefined;
-      if (layer.layer === "below" && layer.container) container.addChildAt(layer.container, 0);
-      if (layer.layer === "above" && layer.container) {
+      if (layer.below) container.addChildAt(layer.below, 0);
+      if (layer.above) {
         if (group) {
-          positionShell(layer.container, item);
-          layer.container.zIndex = Number.MAX_SAFE_INTEGER;
+          positionShell(layer.above, item);
+          layer.above.zIndex = Number.MAX_SAFE_INTEGER;
         }
-        (group ?? container).addChild(layer.container);
+        (group ?? container).addChild(layer.above);
       }
-      if (layer.filters) setBoardShaderFilters(group ?? container, layer.filters);
+      if (layer.filters) {
+        const host = group ?? container;
+        setBoardShaderFilters(host, layer.filters);
+        const box = group ? itemBounds(item.frame) : { x: 0, y: 0, width: item.frame.width, height: item.frame.height };
+        host.filterArea = new Rectangle(box.x, box.y, box.width, box.height);
+      }
       const localToWorld = boardItemLocalToWorld(item.frame);
       return {
         region: { x: 0, y: 0, width: item.frame.width, height: item.frame.height },

@@ -157,14 +157,27 @@ cohub boards examples rain --module > scripts/rain.js
 cohub boards apply <board> '{"board":{"scripts":{"rain":{"src":"scripts/rain.js"}}}}'
 ```
 
-Animate a Board script with tracks on `params.<name>`, targeting the script's id.
-After writing a shader, run `cohub boards simulate <board>` to compile it and see
-errors. Exports render shaders in a local Chrome automatically; check the result
-with an exported image, since `inspect` does not see shader pixels.
+Animate a Board script with tracks on `params.<name>`, targeting the script's id,
+and an item's script with `script.params.<name>`. After writing a shader, run
+`cohub boards simulate <board>` to compile it and see errors. Exports render shaders
+in a shared local Chrome automatically; check the result with an exported image,
+since `inspect` does not see shader pixels.
+
+Design a playful Board as one world before splitting it: one controller script (on
+the Board or one Frame) with regions as data reads as a whole and moves cards across
+regions, where a script per Frame becomes separate mini-games. Confirm that
+direction with the user before building out every region.
+
+Keep it smooth: a pass with a `name` switches with `ctx.passes()` and costs nothing
+while off, so turn a full-view `filter` on only while it shows; drive motion through
+`ctx.uniforms()` rather than presenting items every frame, and present shadows or
+filters only while they change. `cohub boards profile <board>` times each shader
+owner and names what to change.
 
 Verify interaction before handing over: `cohub boards simulate <board> -i steps.json
--o shot.png` runs the scripts through taps, drags and pen strokes without saving,
-reports script errors, and renders screen UI that `export` leaves out.
+-o shot.png` runs the scripts through taps, drags, pen strokes and hovers
+(`{"move": [[x, y], …]}`) without saving, reports script errors, and renders shaders
+and screen UI that `export` leaves out.
 
 ## Animation
 
@@ -220,6 +233,11 @@ cohub boards export <board> --animation intro --at 0:10s:40ms --camera -o /tmp/i
 ```
 
 `--size` sets the output pixels of a camera export; it never sizes frames.
+
+A long video with shaders renders slowly on a CPU. Add `--async` to run the export as
+a Task in the Space's sandbox and return at once (`cohub tasks get <id>` follows it);
+never sleep and poll for it. Viewers can also export MP4 from the web app, which
+draws on their GPU.
 
 `inspect` checks the static document unless `--animation` is given. `bounds` uses
 world units with `x/y` at the top left, regardless of text alignment; `worldBounds`

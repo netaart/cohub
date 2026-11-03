@@ -1,16 +1,16 @@
 import type { BoardDocument, BoardPatch, BoardScript, BoardVec2 } from "@cohub/protocol";
-import { BOARD_TEXT_FONT_SIZE } from "@cohub/protocol/board-constants";
-import { applyMatrix, invertMatrix, layoutBoardText } from "@cohub/protocol/board-layout";
+import { applyMatrix, invertMatrix } from "@cohub/protocol/board-layout";
 import { boardDragSlop, type BoardEditor, type BoardPointerEvent, selectionTransformControlAt } from "../editor/index.js";
 import { withBoardScripts } from "../model/animation.js";
 import type { BoardViewport, Rect } from "../model/geometry.js";
 import { sameJson } from "../model/json.js";
+import { layoutBoardScriptText } from "../model/script-calls.js";
 import { boardScriptTarget } from "../model/script-hit.js";
 import { createBoardScriptObservers, type BoardScriptWorldGesture } from "../model/script-observers.js";
 import { isBoardRootScript } from "../model/script-index.js";
 import { boardScriptScope, composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
 import { type BoardShaderOwner, boardShaderOwners } from "../render/shader/layers.js";
-import type { BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot, BoardScriptTextInput } from "../model/script.js";
+import type { BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot } from "../model/script.js";
 import type { BoardScriptHostCallbacks, BoardScriptRuntimeHost } from "../render/script-host.js";
 import { type BoardScriptTimer, createBoardScriptCommits } from "./script-commits.js";
 import {
@@ -138,7 +138,8 @@ export function createBoardScriptController(options: BoardScriptControllerOption
         ...options.capabilities,
         "board.emit": async (id, value) => {
           const message = value as { target?: string; type?: string; data?: unknown };
-          if (!message || typeof message.target !== "string" || typeof message.type !== "string" || !boardScriptScope(editor.document, id).has(message.target))
+          if (!message || typeof message.target !== "string" || typeof message.type !== "string" ||
+            !(isBoardRootScript(editor.document, message.target) || boardScriptScope(editor.document, id).has(message.target)))
             throw new Error("Invalid script event target.");
           if (activated(id)) activations.set(message.target, activations.get(id) ?? now());
           host?.event(message.target, { type: message.type, data: message.data });
@@ -147,16 +148,14 @@ export function createBoardScriptController(options: BoardScriptControllerOption
           const { patch, frame } = value as { patch: BoardPatch; frame: boolean };
           return commits.commit(id, patch, !frame && activated(id));
         },
-        "board.layoutText": async (_id, value) => {
-          const input = value as BoardScriptTextInput;
-          if (!input || typeof input.text !== "string" || input.text.length > 10_000) throw new Error("layoutText() needs text of at most 10000 characters.");
-          for (const key of ["fontSize", "fontWeight", "lineHeight", "width"] as const)
-            if (input[key] !== undefined && !(Number.isFinite(input[key]) && (input[key] as number) > 0)) throw new Error(`layoutText() ${key} must be a positive number.`);
-          const { width, height } = layoutBoardText({ fontSize: BOARD_TEXT_FONT_SIZE, fontWeight: 500, font: "sans", lineHeight: 4 / 3, ...input });
-          return { width, height };
-        },
+        "board.layoutText": async (_id, value) => layoutBoardScriptText(value),
       },
       onOutput: (id, output) => {
+        const previous = outputs.get(id);
+        if (output && previous && output.sceneVersion !== undefined && output.sceneVersion === previous.sceneVersion) {
+          Object.assign(previous, { uniforms: output.uniforms, passes: output.passes, version: output.version });
+          return false;
+        }
         if (output) {
           prepareBoardScriptOutput(editor.document, id, output);
           cancelPointers(id, output.hits);

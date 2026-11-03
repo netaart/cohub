@@ -88,13 +88,14 @@ export type BoardScriptHit = ({
   label?: string;
   cursor?: string;
   tools?: BoardScriptTool[];
+  over?: boolean;
 };
 export type BoardScriptSnapshot = {
   state: Record<string, unknown>;
   time: number;
   random: number;
   configuration?: string;
-  effects?: Pick<BoardScriptOutput, "patches" | "world" | "screen" | "anchor" | "hits" | "uniforms">;
+  effects?: Pick<BoardScriptOutput, "patches" | "world" | "screen" | "anchor" | "hits" | "uniforms" | "passes">;
 };
 export type BoardScriptParameter = {
   type: "number" | "boolean" | "string" | "color";
@@ -120,7 +121,9 @@ export type BoardScriptOutput = {
   pixelated?: boolean;
   shader?: BoardShader;
   uniforms?: BoardShaderUniformValues;
+  passes?: BoardShaderPassStates;
   version: number;
+  sceneVersion?: number;
 };
 
 export type BoardScriptTextInput = {
@@ -160,6 +163,7 @@ export type BoardScriptContext = {
   commit(patch: BoardPatch): Promise<boolean>;
   layoutText(text: BoardScriptTextInput): Promise<{ width: number; height: number }>;
   uniforms(values: BoardShaderUniformValues): void;
+  passes(states: BoardShaderPassStates): void;
   capabilities: {
     has(name: string): boolean;
     call(name: string, input?: unknown): Promise<unknown>;
@@ -186,6 +190,9 @@ export type BoardShaderPass = {
   glsl: string;
   sprites?: number;
   blend?: (typeof BOARD_SHADER_BLENDS)[number];
+  layer?: (typeof BOARD_SHADER_LAYERS)[number];
+  name?: string;
+  enabled?: boolean;
 };
 
 export type BoardShader = {
@@ -203,3 +210,4 @@ export type BoardShader = {
 };
 
 export type BoardShaderUniformValues = Record<string, number | readonly number[]>;
+export type BoardShaderPassStates = Record<string, boolean>;

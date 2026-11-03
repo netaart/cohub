@@ -3,8 +3,19 @@ import type { BoardDocument, BoardExportRegion, BoardThemeId } from "@neta-art/c
 import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
 import type { BoardScriptHarness, BoardScriptHarnessPointer } from "@neta-art/cohub/board/testing";
 import { gpuResources, loadBoardDocument, readSpaceFileBytes, resolveBundledFonts, runBoardExport } from "./board-export.js";
-import { type BoardGpuShader, findBoardGpuBrowser, launchBoardGpuExporter } from "./board-gpu/index.js";
-import { boardScriptAttachments, boardShaderParameters, checkBoardShader, createBoardScriptHarness, createNodeBoardRenderer } from "./board-kernel.js";
+import { openBoardGpu } from "./board-gpu/daemon.js";
+import { type BoardGpuShader, findBoardGpuBrowser } from "./board-gpu/index.js";
+import {
+  boardScriptAttachments,
+  boardShaderParameters,
+  buildBoardScene,
+  checkBoardShader,
+  createBoardScriptHarness,
+  createNodeBoardRenderer,
+  itemBounds,
+  planBoardExport,
+  rectsIntersect,
+} from "./board-kernel.js";
 import { settleBoardDocument } from "./board-media.js";
 import { parseBoardTime } from "./board-time.js";
 import { createClient } from "./client.js";
@@ -21,6 +32,7 @@ export type BoardSimulationStep =
   | { tool: (typeof TOOLS)[number] }
   | { tap: Point; input: BoardScriptHarnessPointer }
   | { drag: Point[]; input: BoardScriptHarnessPointer }
+  | { move: Point[]; input: BoardScriptHarnessPointer }
   | { pointer: "down" | "move" | "up"; at: Point; input: BoardScriptHarnessPointer }
   | { key: string }
   | { select: string[] };
@@ -48,7 +60,7 @@ export function parseBoardSimulationSteps(value: unknown): BoardSimulationStep[]
   if (value.length > MAX_STEPS) throw new Error(`steps exceed the limit of ${MAX_STEPS}`);
   const steps = value.map(parseStep);
   const elapsed = steps.reduce((total, step) =>
-    total + ("wait" in step ? step.wait : "tap" in step ? 2 * FRAME_MS : "drag" in step ? (step.drag.length + 1) * FRAME_MS : "pointer" in step ? FRAME_MS : 0), 0);
+    total + ("wait" in step ? step.wait : "tap" in step ? 2 * FRAME_MS : "drag" in step ? (step.drag.length + 1) * FRAME_MS : "move" in step ? step.move.length * FRAME_MS : "pointer" in step ? FRAME_MS : 0), 0);
   if (elapsed > MAX_TIME_MS) throw new Error(`steps exceed ${MAX_TIME_MS / 60_000} minutes of simulated time`);
   return steps;
 }
@@ -71,6 +83,10 @@ function parseStep(entry: unknown, index: number): BoardSimulationStep {
     if (!Array.isArray(step.drag) || step.drag.length < 2) throw new Error(`${name}.drag must list at least two points`);
     return { drag: step.drag.map((entry, at) => point(entry, `${name}.drag[${at}]`)), input: pointerInput(step, name) };
   }
+  if ("move" in step) {
+    if (!Array.isArray(step.move) || !step.move.length) throw new Error(`${name}.move must list points`);
+    return { move: step.move.map((entry, at) => point(entry, `${name}.move[${at}]`)), input: pointerInput(step, name) };
+  }
   if ("pointer" in step) {
     if (step.pointer !== "down" && step.pointer !== "move" && step.pointer !== "up") throw new Error(`${name}.pointer must be down, move or up`);
     return { pointer: step.pointer, at: point(step.at, `${name}.at`), input: pointerInput(step, name) };
@@ -83,7 +99,7 @@ function parseStep(entry: unknown, index: number): BoardSimulationStep {
     if (!Array.isArray(step.select) || !step.select.every((id) => typeof id === "string")) throw new Error(`${name}.select must list item ids`);
     return { select: step.select as string[] };
   }
-  throw new Error(`${name} must be one of wait, tool, tap, drag, pointer, key or select`);
+  throw new Error(`${name} must be one of wait, tool, tap, drag, move, pointer, key or select`);
 }
 
 async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationStep[]) {
@@ -92,6 +108,7 @@ async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationS
     else if ("tool" in step) harness.tool = step.tool;
     else if ("tap" in step) await harness.tap(step.tap, step.input);
     else if ("drag" in step) await harness.drag(step.drag, step.input);
+    else if ("move" in step) await harness.move(step.move, step.input);
     else if ("pointer" in step) await harness.pointer(step.pointer, step.at, step.input);
     else if ("key" in step) {
       await harness.key("keydown", step.key);
@@ -111,7 +128,7 @@ export type BoardSimulationResult = {
 
 async function checkShaders(shaders: BoardGpuShader[], spaceId: string, document: BoardDocument): Promise<{ errors: Record<string, string>; compiled: boolean }> {
   const browser = findBoardGpuBrowser();
-  const exporter = browser ? await launchBoardGpuExporter(gpuResources(spaceId, document), { browser }).catch(() => null) : null;
+  const exporter = browser ? await openBoardGpu(gpuResources(spaceId, document), { browser }).catch(() => null) : null;
   if (exporter) {
     try {
       return { errors: await exporter.compile(shaders), compiled: true };
@@ -174,11 +191,13 @@ export async function runBoardSimulation(options: {
       ...(checked ? { shaders: { count: shaders.length, compiled: checked.compiled } } : {}),
     };
     if (options.image && shown) {
+      const gpu = checked?.compiled && !Object.keys(checked.errors).length && shaderShown(harness.document, shaders, options.image.region);
       const exported = await runBoardExport({
         spaceId: options.spaceId,
         target: options.target,
-        document: shown.document,
-        ...(shown.scripts ? { scripts: shown.scripts } : {}),
+        ...(gpu
+          ? { document: harness.document, snapshots: await harness.snapshot(), renderer: "gpu" as const }
+          : { document: shown.document, ...(shown.scripts ? { scripts: shown.scripts } : {}) }),
         region: options.image.region,
         scale: options.image.scale,
         theme: options.image.theme,
@@ -194,4 +213,14 @@ export async function runBoardSimulation(options: {
     harness.destroy();
     renderer.destroy();
   }
+}
+
+function shaderShown(document: BoardDocument, shaders: readonly BoardGpuShader[], region: BoardExportRegion): boolean {
+  const scene = buildBoardScene(document);
+  const plan = planBoardExport({ scene, region, scale: 1 });
+  if (!plan) return false;
+  return shaders.some(({ id }) => {
+    const item = scene.get(id);
+    return !item || rectsIntersect(itemBounds(item.frame), plan.world);
+  });
 }
