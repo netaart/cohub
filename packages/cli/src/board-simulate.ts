@@ -1,7 +1,7 @@
 import { diffMergePatch } from "@neta-art/cohub/board";
 import type { BoardDocument, BoardExportRegion, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
-import type { BoardScriptHarness, BoardScriptHarnessPointer } from "@neta-art/cohub/board/testing";
+import type { BoardScriptHarness, BoardScriptHarnessPointer, BoardScriptHarnessPress } from "@neta-art/cohub/board/testing";
 import { gpuResources, loadBoardDocument, readSpaceFileBytes, resolveBundledFonts, runBoardExport } from "./board-export.js";
 import { openBoardGpu } from "./board-gpu/daemon.js";
 import { type BoardGpuShader, findBoardGpuBrowser } from "./board-gpu/index.js";
@@ -12,6 +12,7 @@ import {
   checkBoardShader,
   createBoardScriptHarness,
   createNodeBoardRenderer,
+  describeBoardScriptLanes,
   itemBounds,
   planBoardExport,
   rectsIntersect,
@@ -102,18 +103,23 @@ function parseStep(entry: unknown, index: number): BoardSimulationStep {
   throw new Error(`${name} must be one of wait, tool, tap, drag, move, pointer, key or select`);
 }
 
-async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationStep[]) {
-  for (const step of steps) {
+export type BoardSimulationPress = BoardScriptHarnessPress & { step: number };
+
+async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationStep[], progress: { step: number }, presses: BoardSimulationPress[]) {
+  for (const [index, step] of steps.entries()) {
+    progress.step = index;
+    let press: BoardScriptHarnessPress | null = null;
     if ("wait" in step) await harness.advance(step.wait);
     else if ("tool" in step) harness.tool = step.tool;
-    else if ("tap" in step) await harness.tap(step.tap, step.input);
-    else if ("drag" in step) await harness.drag(step.drag, step.input);
+    else if ("tap" in step) press = await harness.tap(step.tap, step.input);
+    else if ("drag" in step) press = await harness.drag(step.drag, step.input);
     else if ("move" in step) await harness.move(step.move, step.input);
-    else if ("pointer" in step) await harness.pointer(step.pointer, step.at, step.input);
+    else if ("pointer" in step) press = await harness.pointer(step.pointer, step.at, step.input);
     else if ("key" in step) {
       await harness.key("keydown", step.key);
       await harness.key("keyup", step.key);
     } else await harness.select(step.select);
+    if (press) presses.push({ step: index, ...press });
   }
 }
 
@@ -122,9 +128,25 @@ export type BoardSimulationResult = {
   commits: number;
   changes: Record<string, unknown>;
   errors: Record<string, string>;
+  presses: BoardSimulationPress[];
+  warnings: string[];
   shaders?: { count: number; compiled: boolean };
   image?: { bytes: Uint8Array; width: number; height: number };
 };
+
+export const BOARD_SIMULATION_TIMEOUT_MS = 120_000;
+
+function shadersOf(harness: BoardScriptHarness): { shaders: BoardGpuShader[]; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+  const shaders: BoardGpuShader[] = [];
+  for (const { id } of boardScriptAttachments(harness.document)) {
+    const message = harness.error(id);
+    const output = harness.output(id);
+    if (message) errors[id] = message;
+    else if (output?.shader) shaders.push({ id, shader: output.shader, ...(output.parameters ? { parameters: output.parameters } : {}) });
+  }
+  return { shaders, errors };
+}
 
 async function checkShaders(shaders: BoardGpuShader[], spaceId: string, document: BoardDocument): Promise<{ errors: Record<string, string>; compiled: boolean }> {
   const browser = findBoardGpuBrowser();
@@ -152,6 +174,7 @@ export async function runBoardSimulation(options: {
   target: string;
   steps: readonly BoardSimulationStep[];
   leader: boolean;
+  timeoutMs?: number;
   image?: {
     region: BoardExportRegion;
     scale: number;
@@ -163,40 +186,77 @@ export async function runBoardSimulation(options: {
   const client = createClient();
   const document: BoardDocument = await settleBoardDocument(options.spaceId, (await loadBoardDocument(options.spaceId, options.target)).document);
   const renderer = await createNodeBoardRenderer({ fonts: resolveBundledFonts() });
-  const harness = await createBoardScriptHarness({
-    document,
-    renderer,
-    leader: options.leader,
-    readModule: async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes),
+  const progress = { step: -1, phase: "starting the scripts" };
+  let harness: BoardScriptHarness | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutMs = options.timeoutMs ?? BOARD_SIMULATION_TIMEOUT_MS;
+  let stopped = false;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      stopped = true;
+      const busy = harness ? describeBoardScriptLanes(harness.status()) : [];
+      const at = harness ? ` at ${Math.round(harness.time)} ms of simulated time` : "";
+      const step = progress.step >= 0 ? `, step ${progress.step + 1} of ${options.steps.length}` : "";
+      reject(new Error([
+        `The simulation did not finish in ${timeoutMs / 1000} s${at}${step}, while ${progress.phase}.`,
+        ...busy.map((line) => `  ${line}`),
+        ...(!busy.length && progress.phase === "running the steps" ? ["  No script was busy: the scripts keep handing each other work, or a step waits on something else."] : []),
+      ].join("\n")));
+    }, timeoutMs);
   });
-  try {
-    await run(harness, options.steps);
-    await harness.flush();
-    const shown = options.image ? await harness.shown(options.image.scale) : null;
-    const errors: Record<string, string> = {};
-    const shaders: BoardGpuShader[] = [];
-    for (const { id } of boardScriptAttachments(harness.document)) {
-      const message = harness.error(id);
-      const output = harness.output(id);
-      if (message) errors[id] = message;
-      else if (output?.shader) shaders.push({ id, shader: output.shader, ...(output.parameters ? { parameters: output.parameters } : {}) });
+  const work = async (): Promise<BoardSimulationResult> => {
+    harness = await createBoardScriptHarness({
+      document,
+      renderer,
+      leader: options.leader,
+      readModule: async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes),
+    });
+    const current = harness;
+    if (stopped) {
+      current.destroy();
+      throw new Error("The simulation timed out.");
     }
-    const checked = shaders.length ? await checkShaders(shaders, options.spaceId, harness.document) : null;
-    Object.assign(errors, checked?.errors);
+    progress.phase = "compiling shaders";
+    const initial = shadersOf(current);
+    const early = initial.shaders.length ? await checkShaders(initial.shaders, options.spaceId, current.document) : null;
+    const presses: BoardSimulationPress[] = [];
+    if (early && Object.keys(early.errors).length) {
+      return {
+        time: Math.round(current.time), commits: 0, changes: {}, errors: { ...initial.errors, ...early.errors }, presses,
+        warnings: ["Stopped before the steps: fix the shader errors first."],
+        shaders: { count: initial.shaders.length, compiled: early.compiled },
+      };
+    }
+    progress.phase = "running the steps";
+    await run(current, options.steps, progress, presses);
+    progress.phase = "settling the scripts";
+    await current.flush();
+    const { shaders, errors } = shadersOf(current);
+    const checked = new Set(initial.shaders.map(({ id }) => id));
+    const added = shaders.filter(({ id }) => !checked.has(id));
+    progress.phase = "compiling shaders";
+    const late = added.length ? await checkShaders(added, options.spaceId, current.document) : null;
+    Object.assign(errors, late?.errors);
+    const compiled = (early?.compiled ?? true) && (late?.compiled ?? true);
+    const warnings = [...current.emitFailures].map(([id, message]) => `${id}: ${message}`);
     const result: BoardSimulationResult = {
-      time: Math.round(harness.time),
-      commits: harness.commits.length,
-      changes: (diffMergePatch(document, harness.document) as Record<string, unknown> | undefined) ?? {},
+      time: Math.round(current.time),
+      commits: current.commits.length,
+      changes: (diffMergePatch(document, current.document) as Record<string, unknown> | undefined) ?? {},
       errors,
-      ...(checked ? { shaders: { count: shaders.length, compiled: checked.compiled } } : {}),
+      presses,
+      warnings,
+      ...(shaders.length ? { shaders: { count: shaders.length, compiled } } : {}),
     };
-    if (options.image && shown) {
-      const gpu = checked?.compiled && !Object.keys(checked.errors).length && shaderShown(harness.document, shaders, options.image.region);
+    if (options.image) {
+      progress.phase = "rendering the image";
+      const shown = await current.shown(options.image.scale);
+      const gpu = compiled && shaders.length > 0 && !Object.keys(errors).length && shaderShown(current.document, shaders, options.image.region);
       const exported = await runBoardExport({
         spaceId: options.spaceId,
         target: options.target,
         ...(gpu
-          ? { document: harness.document, snapshots: await harness.snapshot(), renderer: "gpu" as const }
+          ? { document: current.document, snapshots: await current.snapshot(), renderer: "gpu" as const }
           : { document: shown.document, ...(shown.scripts ? { scripts: shown.scripts } : {}) }),
         region: options.image.region,
         scale: options.image.scale,
@@ -207,10 +267,15 @@ export async function runBoardSimulation(options: {
       });
       const frame = exported?.frames[0];
       if (frame) result.image = { bytes: frame.bytes, width: frame.width, height: frame.height };
+      warnings.push(...(exported?.warnings ?? []));
     }
     return result;
+  };
+  try {
+    return await Promise.race([work(), expired]);
   } finally {
-    harness.destroy();
+    clearTimeout(timer);
+    (harness as BoardScriptHarness | null)?.destroy();
     renderer.destroy();
   }
 }

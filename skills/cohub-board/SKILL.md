@@ -96,6 +96,8 @@ cohub boards apply <board> -i -                # patch from stdin
 
 - Fields merge, arrays replace, `null` deletes, anything unmentioned stays.
 - `--replace` makes the document equal to the patch; anything it leaves out is deleted.
+  First run `cohub boards diff <board> --from <version you read>` to see what others
+  changed since (cards moved by someone playing on the web), and keep it.
 - Deleting a referenced item fails and lists the references; `--cascade` also
   deletes its children and tracks.
 - Concurrent writes merge; `--base-version <n>` fails instead — use it when
@@ -172,12 +174,27 @@ Keep it smooth: a pass with a `name` switches with `ctx.passes()` and costs noth
 while off, so turn a full-view `filter` on only while it shows; drive motion through
 `ctx.uniforms()` rather than presenting items every frame, and present shadows or
 filters only while they change. `cohub boards profile <board>` times each shader
-owner and names what to change.
+owner (median and range over rounds), says whether it ran on software WebGL, and
+names what to change; it stays within `--budget` by measuring smaller.
+
+Scripts work together through `emit`: a Frame hands a cast to a Board script, which
+can answer. A handler may emit back, but a chain of handlers answering each other
+rejects after 16 hops; send follow-ups from `onFrame()`. A clipping Frame keeps its own
+shader passes in its box; set `clip: false` to let rain spill out. `present()` is
+never saved, even when the user drags or resizes a presented card.
 
 Verify interaction before handing over: `cohub boards simulate <board> -i steps.json
 -o shot.png` runs the scripts through taps, drags, pen strokes and hovers
 (`{"move": [[x, y], …]}`) without saving, reports script errors, and renders shaders
-and screen UI that `export` leaves out.
+and screen UI that `export` leaves out. With `--json`, `presses` says for every tap and
+drag where it landed (a script's hit region, a selection handle, an item, empty board)
+and what took it, so a stroke that started on a caption or a drag that grabbed a resize
+handle shows at once. It compiles shaders first and stops on errors, and gives up after
+`--timeout` (2m) naming the scripts still busy.
+
+Long runs: wrap them in `timeout` (`timeout 300 cohub boards simulate …`) so a stuck run
+cannot hold the shell. To stop a stray process, use `pkill -f '[c]ohub boards simulate'`:
+the bracket keeps the pattern from matching the shell running `pkill` itself.
 
 ## Animation
 
@@ -228,6 +245,7 @@ cohub boards inspect <board> --animation lecture --at 0:10s:1s --json  # final t
 cohub boards inspect <board> --items title,formula --json     # static layout
 cohub boards export <board> -o /tmp/board.png
 cohub boards export <board> --items a,b -o /tmp/part.png       # or --frame <id>, --rect x,y,w,h
+cohub boards export <board> --frame s2 -o /tmp/page.png        # the frame as a page, its shaders included
 cohub boards export <board> --animation intro --at 1s,5s,9s --camera --size 1600x900 -o /tmp/preview-%d.png
 cohub boards export <board> --animation intro --at 0:10s:40ms --camera -o /tmp/intro.mp4
 ```
@@ -238,6 +256,10 @@ A long video with shaders renders slowly on a CPU. Add `--async` to run the expo
 a Task in the Space's sandbox and return at once (`cohub tasks get <id>` follows it);
 never sleep and poll for it. Viewers can also export MP4 from the web app, which
 draws on their GPU.
+
+Exports give scripts the exported area as their view and deliver `emit` within the same
+moment. Warnings name any shader that did not draw and why (outside the area, hidden,
+clipped, every pass off, failed to compile).
 
 `inspect` checks the static document unless `--animation` is given. `bounds` uses
 world units with `x/y` at the top left, regardless of text alignment; `worldBounds`
@@ -262,6 +284,7 @@ cohub boards watch <board>       # stream changes and playback
 
 ```bash
 cohub boards history <board>                 # recent versions
+cohub boards diff <board> --from 12          # what changed since version 12, field by field
 cohub boards history <board> --restore 12    # restore as a new write
 ```
 

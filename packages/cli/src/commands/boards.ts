@@ -146,6 +146,7 @@ type ExportOptions = JsonOptions & {
   fps?: string;
   force?: boolean;
   async?: boolean;
+  timeout?: string;
 };
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -240,6 +241,7 @@ function registerExportCommand(boards: Command): void {
     .option("--no-images", "Draw placeholders instead of downloading images")
     .option("--renderer <renderer>", "auto draws in Node and uses local Chrome for shaders; canvas or gpu forces one", "auto")
     .option("--force", "Replace existing output files")
+    .option("--timeout <time>", "Fail a frame that takes longer, naming the scripts still running", "2m")
     .option("--async", "Run as a Task in the Space's sandbox and return at once; paths are Space paths"))
     .addHelpText("after", `
 Shaders draw in a shared headless Chrome that stays up a few minutes between calls;
@@ -250,7 +252,11 @@ Examples:
   cohub boards export plan.board --animation intro --at 0:20s:40ms -o intro.mp4 --async
   cohub boards export plan.board --frame s2 -o slide-2.png
   cohub boards export plan.board --animation lecture --at 4.5s -o moment.png
-  cohub boards export plan.board --animation lecture --at 0:6s:40ms -o frames/%04d.png`)
+  cohub boards export plan.board --animation lecture --at 0:6s:40ms -o frames/%04d.png
+
+Scripts see the exported area as their view (viewchange), and emit() between them is
+delivered within the same moment, in document order. --frame draws the frame as a
+page: its fill and shaders, without its outline and label.`)
     .action(async (target: string, options: ExportOptions) => {
       if (options.async) return runExportTask(boards, options);
       const controller = new AbortController();
@@ -290,6 +296,7 @@ Examples:
             spaceId: await resolveSpace(boards),
             target,
             camera,
+            timeoutMs: parseBoardTime(options.timeout ?? "2m", "--timeout"),
             onProgress: progress,
             onPlan,
             imageMemoryMiB,
@@ -324,6 +331,7 @@ Examples:
           spaceId: await resolveSpace(boards),
           target,
           camera,
+          timeoutMs: parseBoardTime(options.timeout ?? "2m", "--timeout"),
           onProgress: progress,
           onPlan,
           imageMemoryMiB,
@@ -368,6 +376,7 @@ function registerSimulateCommand(boards: Command): void {
     .option("-i, --input <file>", "Steps JSON; - for stdin")
     .option("-o, --out <file>", "Also render the result, screen UI included; the extension picks the format")
     .option("--follower", "Simulate an editor that does not write autonomous commits")
+    .option("--timeout <time>", "Give up after this long and report what is still running", "2m")
     .option("--frame <item-id>", "Render one frame")
     .option("--items <ids>", "Render comma-separated item ids")
     .option("--rect <rect>", "Render a world rect as x,y,width,height")
@@ -380,13 +389,15 @@ Steps are {"steps": [...]}, points in board coordinates, run on a virtual clock:
   {"wait": "500ms"}  {"tool": "draw"}  {"tap": [x, y]}  {"drag": [[x, y], ...], "pointerType": "pen"}
   {"pointer": "down", "at": [x, y]}  {"key": "Enter"}  {"select": ["id"]}
 
-Shaders are compiled with a local Chrome, Chromium or Edge when one is found, and
-their errors join the scripts' errors.
+Shaders are compiled with a local Chrome, Chromium or Edge when one is found, before
+the steps run; their errors join the scripts' errors and stop the run.
+Each tap and drag reports where it landed (a script's hit region, a selection handle,
+an item, or empty board) and what took it (a script, move, resize, rotate, select box).
 
 Examples:
   cohub boards simulate farm.board '{"steps":[{"wait":"2s"}]}' -o farm.png
   cohub boards simulate farm.board -i steps.json --json`)
-    .action(async (target: string, inline: string | undefined, options: ExportOptions & { input?: string; follower?: boolean }) => {
+    .action(async (target: string, inline: string | undefined, options: ExportOptions & { input?: string; follower?: boolean; timeout?: string }) => {
       try {
         if (inline !== undefined && options.input !== undefined) throw new Error("Pass steps inline or with --input, not both.");
         const input = inline !== undefined
@@ -401,6 +412,7 @@ Examples:
           target,
           steps,
           leader: !options.follower,
+          timeoutMs: parseBoardTime(options.timeout ?? "2m", "--timeout"),
           ...(out ? { image: {
             region: parseExportRegion(options),
             scale: parseNumber(options.scale ?? "2", "--scale", { min: 0.01, max: 16 }),
@@ -417,7 +429,9 @@ Examples:
         if (jsonRequested(options)) return outJson({ ...summary, ...(out && image ? { file: out, width: image.width, height: image.height } : {}) });
         const changed = Object.keys((result.changes as { items?: object }).items ?? {}).length;
         ok(`Simulated ${formatBoardTime(result.time)}: ${result.commits} commit${result.commits === 1 ? "" : "s"}, ${changed} item${changed === 1 ? "" : "s"} changed (not saved)`);
+        for (const press of result.presses) console.log(`  step ${press.step + 1}: ${describePress(press)}`);
         for (const [id, message] of Object.entries(result.errors)) console.log(`  ! ${id}: ${message.split("\n")[0]}`);
+        for (const warning of result.warnings) console.log(`  ! ${warning}`);
         if (result.shaders && !result.shaders.compiled)
           console.log("  Shaders were checked but not compiled; install Chrome, Chromium or Edge, or set COHUB_CHROME, to compile them.");
         if (out && image) console.log(`  Rendered ${image.width}×${image.height} to ${out}`);
@@ -426,6 +440,14 @@ Examples:
         handleHttp(cause);
       }
     });
+}
+
+function describePress({ down, taken }: { down: { on: string; owner?: string; target?: string; handle?: string; id?: string; type?: string; under?: string }; taken: string }): string {
+  const where = down.on === "script" ? `script ${down.owner}/${down.target}`
+    : down.on === "handle" ? `${down.handle} handle`
+    : down.on === "item" ? `${down.type} ${down.id}`
+    : `empty board${down.under ? ` over ${down.under}` : ""}`;
+  return `pressed on ${where}, taken by ${taken}`;
 }
 
 function registerProfileCommand(boards: Command): void {
@@ -438,15 +460,18 @@ function registerProfileCommand(boards: Command): void {
     .option("--rect <rect>", "Profile a world rect as x,y,width,height")
     .option("--size <widthxheight>", "Fit the region into this many pixels, like a screen", "1600x900")
     .option("--frames <count>", "Frames to time per measurement", "5")
+    .option("--rounds <count>", "Measurements per shader owner; reports their median and range", "3")
+    .option("--budget <time>", "Time the measurements may take; past it, size and frames go down", "60s")
     .option("--no-images", "Draw placeholders instead of downloading images"))
     .addHelpText("after", `
-Draws in a headless Chrome; without a GPU it uses software WebGL, so compare the
-numbers with each other rather than with a real display.
+Draws in a headless Chrome; without a GPU it uses software WebGL (reported as
+"software"), so compare the numbers with each other rather than with a real display.
+Scripts receive the profiled view as viewchange, as on a screen of --size.
 
 Examples:
   cohub boards profile demo.board
   cohub boards profile demo.board --rect 0,0,1600,900 --at 8s --json`)
-    .action(async (target: string, options: ExportOptions & { frames?: string }) => {
+    .action(async (target: string, options: ExportOptions & { frames?: string; rounds?: string; budget?: string }) => {
       try {
         const { profileBoard } = await import("../board-profile.js");
         const profile = await profileBoard({
@@ -457,14 +482,20 @@ Examples:
           region: parseExportRegion(options),
           size: parseSize(options.size ?? "1600x900"),
           frames: parseNumber(options.frames ?? "5", "--frames", { min: 3, max: 240, integer: true }),
+          rounds: parseNumber(options.rounds ?? "3", "--rounds", { min: 1, max: 20, integer: true }),
+          budgetMs: parseBoardTime(options.budget ?? "60s", "--budget"),
           withImages: options.images !== false,
         });
         if (jsonRequested(options)) return outJson(profile);
         const ms = (value: number) => `${value.toFixed(1)} ms`;
-        ok(`${profile.width}×${profile.height} in ${profile.renderer}: ${ms(profile.frame.p50)} a frame (p95 ${ms(profile.frame.p95)}), ${profile.items} items`);
+        ok(`${profile.width}×${profile.height} on ${profile.gpu} WebGL (${profile.renderer}): ${ms(profile.frame.p50)} a frame (p95 ${ms(profile.frame.p95)}), ${profile.items} items`);
+        if (profile.reduced)
+          console.log(`  ! ${profile.reduced.width}×${profile.reduced.height} × ${profile.reduced.frames} frames took ${ms(profile.reduced.frameMs)} a frame, past the budget; measured ${profile.width}×${profile.height} × ${profile.frames} frames instead.`);
+        console.log(`  ${profile.rounds} round${profile.rounds === 1 ? "" : "s"} × ${profile.frames} frames in ${(profile.elapsedMs / 1000).toFixed(1)} s; owner cost is the median, with the range across rounds`);
         for (const owner of profile.owners) {
           const traits = [owner.filter !== "none" && `filter ${owner.filter}`, owner.sprites && `${owner.sprites} sprites`, owner.state && `state ${owner.state.width}×${owner.state.height}`].filter(Boolean);
-          console.log(`  ${owner.id.padEnd(24)} ${ms(owner.ms).padStart(9)}${traits.length ? `  ${traits.join(", ")}` : ""}`);
+          const range = profile.rounds > 1 ? ` (${owner.range[0].toFixed(0)}–${owner.range[1].toFixed(0)})` : "";
+          console.log(`  ${owner.id.padEnd(24)} ${ms(owner.ms).padStart(9)}${range.padEnd(12)}${traits.length ? `  ${traits.join(", ")}` : ""}`);
         }
         for (const hint of profile.hints) console.log(`  ! ${hint}`);
       } catch (cause) {
@@ -501,6 +532,7 @@ A Board is one JSON document: { board, items, animations }.
   play      shared playback; also pause, resume, next, seek, stop
   watch     stream changes and playback
   history   list versions, or restore one
+  diff      what changed between two versions
 Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
 
   withJson(boards.command("create <path>")
@@ -650,6 +682,41 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
           { key: "animations", label: "Animations" },
         ]);
         if (page.nextBefore) console.log(`  More: --before ${page.nextBefore}`);
+      } catch (cause) {
+        handleHttp(cause);
+      }
+    });
+
+  withJson(boards.command("diff <board>")
+    .description("List what changed between two versions, element by element")
+    .requiredOption("--from <version>", "The version to compare from")
+    .option("--to <version>", "The version to compare to; the latest by default"))
+    .addHelpText("after", `
+Before rewriting a Board with apply --replace, see what others changed since the version you read:
+  cohub boards diff plan.board --from 41
+  cohub boards diff plan.board --from 41 --to 44 --json`)
+    .action(async (target: string, options: JsonOptions & { from: string; to?: string }) => {
+      try {
+        const board = await boardClient(boards, target);
+        const result = await board.diff(
+          parseNumber(options.from, "--from", { min: 0, integer: true }),
+          options.to === undefined ? undefined : parseNumber(options.to, "--to", { min: 1, integer: true }),
+        );
+        if (jsonRequested(options)) return outJson(result);
+        const by = new Map<string, number>();
+        for (const { kind } of result.versions) by.set(kind, (by.get(kind) ?? 0) + 1);
+        ok(`v${result.from} → v${result.to}: ${result.changes.length} element${result.changes.length === 1 ? "" : "s"} changed in ${result.versions.length} version${result.versions.length === 1 ? "" : "s"}${by.size ? ` (${[...by].map(([kind, count]) => `${count} by ${kind}`).join(", ")})` : ""}`);
+        const show = (value: unknown) => {
+          const text = value === undefined ? "∅" : JSON.stringify(value);
+          return text.length > 60 ? `${text.slice(0, 57)}…` : text;
+        };
+        for (const change of result.changes) {
+          const sign = change.change === "added" ? "+" : change.change === "removed" ? "-" : "~";
+          const name = change.kind === "board" ? "board" : `${change.kind} ${change.id}${change.type ? ` (${change.type})` : ""}`;
+          console.log(`  ${sign} ${name}`);
+          for (const field of change.fields.slice(0, 12)) console.log(`      ${field.path}: ${show(field.from)} → ${show(field.to)}`);
+          if (change.fields.length > 12) console.log(`      … ${change.fields.length - 12} more fields; --json lists them all`);
+        }
       } catch (cause) {
         handleHttp(cause);
       }

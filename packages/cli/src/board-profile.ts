@@ -20,6 +20,8 @@ export async function profileBoard(options: {
   region: BoardExportRegion;
   size: { width: number; height: number };
   frames: number;
+  rounds: number;
+  budgetMs: number;
   withImages: boolean;
 }): Promise<BoardProfile> {
   const browser = findBoardGpuBrowser();
@@ -37,6 +39,8 @@ export async function profileBoard(options: {
       region: options.region,
       scale,
       frames: options.frames,
+      rounds: options.rounds,
+      budgetMs: options.budgetMs,
       withImages: options.withImages,
       imageMemory: BOARD_EXPORT_IMAGE_MEMORY_MIB * 1024 ** 2,
     });
@@ -58,6 +62,9 @@ export function boardProfileHints(document: BoardDocument, profile: BoardGpuProf
     if (owner.state && owner.state.width * owner.state.height > LARGE_STATE)
       hints.push(`${owner.id} steps a ${owner.state.width}×${owner.state.height} state 60 times a second and replays it from the start in exports; keep it as small as reads well.`);
   }
+  const noisy = profile.owners.filter((owner) => owner.ms > 1 && owner.range[1] - owner.range[0] > owner.ms);
+  if (noisy.length)
+    hints.push(`${noisy.map((owner) => owner.id).join(", ")} varied more between rounds than ${noisy.length === 1 ? "its" : "their"} median; compare the frame time, or raise --rounds.`);
   if (profile.effects > MANY_EFFECTS)
     hints.push(`${profile.effects} items draw with shadows, blurs or color filters, each in its own offscreen pass; present them only while they change, and drop neutral values.`);
   return hints;

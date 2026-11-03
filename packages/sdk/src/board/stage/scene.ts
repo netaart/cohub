@@ -12,6 +12,7 @@ import type {
 	BoardRenderContext,
 } from "../render/index.js";
 import {
+	clipFrameShaderLayer,
 	type FrameGroup,
 	groupingAncestor,
 	isGroupingFrame,
@@ -312,6 +313,7 @@ export function createBoardScene(options: {
 		if (decorated.get(id) !== host) undecorate(id);
 		decorated.set(id, host);
 		const { below, above, filters } = decoration;
+		for (const part of [below, above]) if (part && entry.item.type === "frame") clipFrameShaderLayer(part, entry.item);
 		if (below && entry.container.children[0] !== below) entry.container.addChildAt(below, 0);
 		if (above) {
 			if (group) {

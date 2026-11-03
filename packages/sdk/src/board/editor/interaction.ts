@@ -33,6 +33,7 @@ import {
 import { CONNECTION_PORT_RADIUS, type ConnectionPort, connectionPorts, connectionPortAt as portAt, portHitRadius } from "./connection-ports.js";
 import type { EditorContext } from "./context.js";
 import { BOARD_INPUT, boardDragSlop, isTouchLikePointer } from "./input.js";
+import type { BoardGrabbed } from "./selection.js";
 import { selectionTransformControlAt } from "./selection-transform.js";
 import { computeSnap, type SnapGuide } from "./snapping.js";
 import { memo } from "./state.js";
@@ -69,6 +70,7 @@ export type BoardInteraction =
 			type: "translating";
 			start: WorldPoint;
 			origin: Map<string, BoardFrame>;
+			grabbed: BoardGrabbed;
 			moved: boolean;
 			duplicate: boolean;
 			tap?: BoardTap;
@@ -81,6 +83,7 @@ export type BoardInteraction =
 			single: BoardFrame | null;
 			bounds: Rect;
 			origin: Map<string, BoardFrame>;
+			grabbed: BoardGrabbed;
 			grab: { x: number; y: number };
 			moved: boolean;
 	  }
@@ -90,6 +93,7 @@ export type BoardInteraction =
 			startAngle: number;
 			current: WorldPoint;
 			origin: Map<string, BoardFrame>;
+			grabbed: BoardGrabbed;
 			moved: boolean;
 	  }
 	| {
@@ -445,7 +449,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		const translating: Extract<BoardInteraction, { type: "translating" }> = {
 			type: "translating",
 			start: gesture.world,
-			origin: ctx.selection.framesFor([gesture.itemId]),
+			...ctx.selection.grab([gesture.itemId]),
 			moved: false,
 			duplicate: false,
 		};
@@ -471,7 +475,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		state.interaction = {
 			type: "translating",
 			start: last?.world ?? (gesture.type === "pressing" ? gesture.world : rectCenter(item.frame)),
-			origin: ctx.selection.framesFor([item.id]),
+			...ctx.selection.grab([item.id]),
 			moved: false,
 			duplicate: false,
 			held: true,
@@ -512,7 +516,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		state.interaction = {
 			type: "translating",
 			start: event.world,
-			origin: ctx.selection.framesFor(ctx.selection.movable()),
+			...ctx.selection.grab(ctx.selection.movable()),
 			moved: false,
 			duplicate: event.altKey,
 			...(tap ? { tap } : {}),
@@ -639,17 +643,17 @@ export function createInteractionModule(ctx: EditorContext) {
 				pivot,
 				startAngle: angleFrom(pivot, event.world),
 				current: event.world,
-				origin: ctx.selection.framesFor(ctx.selection.movable()),
+				...ctx.selection.grab(ctx.selection.movable()),
 				moved: false,
 			};
 			return;
 		}
 		if (control?.kind === "resize" && bounds && transform) {
-			const origin = ctx.selection.framesFor(ctx.selection.movable());
+			const { origin, grabbed } = ctx.selection.grab(ctx.selection.movable());
 			const single = origin.size === 1 ? { ...([...origin.values()][0] as BoardFrame) } : null;
 			const edge = frameHandlePosition(transform.frame, control.handle);
 			const grab = { x: edge.x - event.world.x, y: edge.y - event.world.y };
-			state.interaction = { type: "resizing", handle: control.handle, single, bounds, origin, grab, moved: false };
+			state.interaction = { type: "resizing", handle: control.handle, single, bounds, origin, grabbed, grab, moved: false };
 			return;
 		}
 
@@ -713,7 +717,7 @@ export function createInteractionModule(ctx: EditorContext) {
 					ctx.document.writeDraft(clones, true);
 					const roots = ctx.copy.rootsOfCopies(clones);
 					state.selection = roots;
-					current = { ...current, origin: ctx.selection.framesFor(roots), duplicate: false };
+					current = { ...current, ...ctx.selection.grab(roots), duplicate: false };
 				}
 			}
 			state.interaction = current;
@@ -735,7 +739,7 @@ export function createInteractionModule(ctx: EditorContext) {
 			ty += snap.dy;
 			state.snapGuides = snap.guides;
 		} else state.snapGuides = [];
-		ctx.document.writeDraft(ctx.selection.placed(shift(tx, ty)));
+		ctx.document.writeDraft(ctx.selection.placed(shift(tx, ty), current.grabbed), false, current.grabbed);
 		let dropTargetId: string | null = null;
 		for (const parent of dropParents(current.origin, true).values()) if (parent) dropTargetId = parent;
 		if ((current.dropTargetId ?? null) !== dropTargetId) state.interaction = { ...current, dropTargetId };
@@ -760,7 +764,7 @@ export function createInteractionModule(ctx: EditorContext) {
 				if (frame) frames.set(id, frame);
 			});
 		}
-		ctx.document.writeDraft(ctx.selection.placed(frames));
+		ctx.document.writeDraft(ctx.selection.placed(frames, gesture.grabbed), false, gesture.grabbed);
 	}
 
 	function rotate(gesture: Extract<BoardInteraction, { type: "rotating" }>, event: BoardPointerEvent) {
@@ -774,7 +778,7 @@ export function createInteractionModule(ctx: EditorContext) {
 			const frame = rotated[index];
 			if (frame) frames.set(id, { ...frame, rotation: normalizeRotation(frame.rotation) });
 		});
-		ctx.document.writeDraft(ctx.selection.placed(frames));
+		ctx.document.writeDraft(ctx.selection.placed(frames, gesture.grabbed), false, gesture.grabbed);
 	}
 
 	function dragArrowHandle(gesture: Extract<BoardInteraction, { type: "draggingArrowHandle" }>, event: BoardPointerEvent) {

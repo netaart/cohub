@@ -3,6 +3,7 @@ import { BoardBitmapTexture } from "./bitmap-texture.js";
 import { boardBitmapResolution } from "./bitmap-resolution.js";
 import { getBoardResolution } from "./text-resolution.js";
 import { boardScriptAttachments } from "../model/script-index.js";
+import { boardScriptListens, queueBoardScriptEvent } from "../model/script-events.js";
 import { boardScriptScope, diffBoardScriptItems } from "../model/script-scope.js";
 import { sameJson } from "../model/json.js";
 import { boardScriptHitVisible, resolveBoardScriptHit } from "../model/script-hit.js";
@@ -99,7 +100,7 @@ export type BrowserBoardScriptHost = BoardScriptHost & {
     interactive: boolean,
     visibleIds?: ReadonlySet<string> | null,
   ): void;
-  event(id: string, event: BoardScriptEvent): void;
+  event(id: string, event: BoardScriptEvent): boolean;
   output(id: string): BoardScriptOutput | null;
   snapshot(id: string): Promise<BoardScriptSnapshot | null>;
   clock(id: string): number;
@@ -113,16 +114,6 @@ export type BrowserBoardScriptHost = BoardScriptHost & {
 };
 
 export type BoardScriptRuntimeHost = Omit<BrowserBoardScriptHost, "document">;
-
-function supersedes(pending: BoardScriptEvent, event: BoardScriptEvent): boolean {
-  if (pending.type !== event.type) return false;
-  if (event.type === "viewchange" || event.type === "selectionchange") return true;
-  if (event.type === "pointermove") return pending.pointerId === event.pointerId;
-  if (event.type !== "gesture") return false;
-  const a = pending.data as { id: string; phase: string };
-  const b = event.data as { id: string; phase: string };
-  return a.id === b.id && a.phase === "update" && b.phase === "update";
-}
 
 export function createBoardScriptHost(
   options: BoardScriptHostOptions,
@@ -658,20 +649,11 @@ export function createBoardScriptHost(
     },
     event(id, event) {
       const entry = entries.get(id);
-      if (
-        !entry ||
-        entry.error ||
-        (entry.output && !entry.output.listens.includes(event.type))
-      )
-        return;
-      let queued = entry.events.length - 1;
-      while (queued >= 0 && !supersedes(entry.events[queued] as BoardScriptEvent, event)) queued--;
-      if (queued >= 0 && (event.type !== "pointermove" || queued === entry.events.length - 1))
-        entry.events.splice(queued, 1);
-      if (entry.events.length >= 128) return;
-      entry.events.push(event);
+      if (!entry || entry.error || !boardScriptListens(entry.output, event)) return true;
+      if (!queueBoardScriptEvent(entry.events, event)) return false;
       entry.dirty = true;
       options.onFrame();
+      return true;
     },
     invalidate(path) {
       modules.invalidate(path);

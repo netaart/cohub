@@ -282,8 +282,10 @@ ctx.on("gesture", ({ data }) => {
 });
 ```
 
-`ctx.view` is null until a view event arrives; Node exports have no interactive
-view or user events. The embedding stage may provide a `safeRect` callback to
+`ctx.view` is null until a view event arrives. Exports and `boards profile` send the
+area they draw: the animation camera for camera exports, otherwise the region at the
+output's pixels, so code that switches passes by zoom or view draws there as it does
+live. They have no user events. The embedding stage may provide a `safeRect` callback to
 exclude its chrome, then call `stage.invalidate()` when that area changes. Without
 an override, the safe rectangle is the stage surface. Neither view state nor
 selection enters the document, history, or shared playback.
@@ -326,7 +328,16 @@ await ctx.emit(ctx.targets.label, "refresh", { value: 42 });
 
 `get(id)` reads author values in scope. `emit` also reaches any Board script by its
 key, so a Frame can hand a cast or a hit to a script drawing over the whole view.
-Custom events are local to the viewer, and exports drop them.
+Custom events are local to the viewer. Exports deliver them too, in the same host and
+in document order, and finish handling them before time moves on, so a hand-off shows in
+the exported frame.
+
+A handler may answer an emitted event with emits of its own, back to the sender
+included. Each such answer counts one deeper; past 16 in a row the `emit` rejects and
+says so, rather than letting two scripts that keep answering each other stall the
+Board. Emit from `onFrame()` to send on the next step instead. An instance holds at most
+128 waiting events; an emit to a full queue rejects as well. `boards simulate` lists
+rejected emits under `warnings`.
 Missing references grant no access. Duplicating items remaps references when the
 referenced item is included in the copy. Copy, cut and duplicate exclude local script
 presentation effects and temporary items, including effects on parent transforms
@@ -412,13 +423,18 @@ export const shader = {
 };
 ```
 
-`layer` places the passes `above` (the default) or `below` the owner and its
+`layer` places the passes, up to 16, `above` (the default) or `below` the owner and its
 contents, or makes them a `filter` that transforms the owner's pixels, which each
 pass reads with `scene(uv)`. A Board script's filter transforms every item, across the
 whole view. A pass may set its own `layer`, so one script can paint a background below
 and bend the picture above. Passes draw one quad over the box; with `sprites: n` a
 pass draws `n` instanced quads that `Sprite sprite(int id)` places, for particles,
 rain or confetti without a draw call each.
+
+A Frame's own passes follow its `props.clip`: a clipping Frame (the default) keeps
+below, above and filter output inside its box, as it does its children, so rain stays
+in its world; with `clip: false` sprites may fall past its edges. A filter covers the
+Frame's bounding box.
 
 A pass with a `name` can be switched from setup code; `enabled: false` starts it off.
 A pass that is off costs nothing, so keep heavy effects, above all a full-view
@@ -519,11 +535,15 @@ shared by consecutive commands and exits after a few idle minutes, so only the f
 pays for starting it and compiling shaders; `COHUB_BOARD_GPU_DAEMON=0` starts one per
 command. Boards without shaders never start it.
 `cohub boards simulate <board>` compiles every shader the scripts declare with that
-browser and reports errors with the scripts' own, so check there before applying a
-change; without a browser it checks the source but cannot compile it. With `-o` it
-draws the shaders too, resumed from where the simulated scripts stand.
+browser before it runs the steps, and stops at once with the errors, such as a pass
+that reads a uniform its shader does not declare; without a browser it checks the
+source but cannot compile it. With `-o` it draws the shaders too, resumed from where
+the simulated scripts stand, and warns about any it did not draw, and why.
 `cohub boards profile <board>` times a frame, and what each shader owner adds to it,
-and says what to change.
+and says what to change. It says whether the browser draws with software WebGL or a
+GPU, measures each owner over `--rounds` (3) and reports the median and range, and
+keeps within `--budget` (60 s): past it, it times fewer frames at a smaller size and
+says which.
 
 ## Execution boundary and capabilities
 
@@ -609,10 +629,20 @@ await board.render();      // PNG with screen UI
 board.destroy();
 ```
 
+`tap()` and `drag()` resolve to where the press landed (`down`: a script's hit region,
+a selection `handle`, an `item`, or `empty` board) and what `taken` it: the script, or
+what the editor did (`move`, `resize`, `rotate`, `select box`, `draw`, `pan`). Moving,
+resizing and rotating save the authored item: what a script presents, such as a lift
+on the selected card, never reaches the document or the undo history.
+`board.emitFailures` holds rejected emits by sender, and `board.status()` what each
+worker lane is running.
+
 `cohub boards simulate <board>` does the same against a Space Board without saving,
-reports changes and script errors, and renders the result with `-o`. `{"move": [[x, y], …]}`
-hovers through points with no button held, for umbrellas, lanterns and other
-effects that follow the pointer.
+reports changes, script errors and, per step, `presses`, and renders the result with
+`-o`. `{"move": [[x, y], …]}` hovers through points with no button held, for umbrellas,
+lanterns and other effects that follow the pointer. A run longer than `--timeout`
+(2 minutes) stops and names the scripts still running, their worker lane, and the last
+event or call each got.
 
 Boards with no enabled scripts skip the script runtime entirely. Native animation,
 input and export do not prepare script effects. Attaching the first script starts

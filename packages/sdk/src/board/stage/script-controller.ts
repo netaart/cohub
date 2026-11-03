@@ -8,7 +8,8 @@ import { layoutBoardScriptText } from "../model/script-calls.js";
 import { boardScriptTarget } from "../model/script-hit.js";
 import { createBoardScriptObservers, type BoardScriptWorldGesture } from "../model/script-observers.js";
 import { isBoardRootScript } from "../model/script-index.js";
-import { boardScriptScope, composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
+import { BOARD_SCRIPT_EVENT_QUEUE, boardScriptEmit } from "../model/script-events.js";
+import { composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
 import { type BoardShaderOwner, boardShaderOwners } from "../render/shader/layers.js";
 import type { BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot } from "../model/script.js";
 import type { BoardScriptHostCallbacks, BoardScriptRuntimeHost } from "../render/script-host.js";
@@ -62,6 +63,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
   const interactive = new Set<string>();
   const screens = new Set<string>();
   const activations = new Map<string, number>();
+  const emitFailures = new Map<string, string>();
   const listeners = new Set<() => void>();
   let version = 0;
   let composed = { version: -1, document: null as BoardDocument | null, zoom: 0, pan: "", playhead: "", moving: false, gesture: false };
@@ -137,12 +139,15 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       capabilities: {
         ...options.capabilities,
         "board.emit": async (id, value) => {
-          const message = value as { target?: string; type?: string; data?: unknown };
-          if (!message || typeof message.target !== "string" || typeof message.type !== "string" ||
-            !(isBoardRootScript(editor.document, message.target) || boardScriptScope(editor.document, id).has(message.target)))
-            throw new Error("Invalid script event target.");
-          if (activated(id)) activations.set(message.target, activations.get(id) ?? now());
-          host?.event(message.target, { type: message.type, data: message.data });
+          try {
+            const { target, event } = boardScriptEmit(editor.document, id, value);
+            if (activated(id)) activations.set(target, activations.get(id) ?? now());
+            if (host && !host.event(target, event))
+              throw new Error(`emit(${target}, "${event.type}") from ${id}: ${target} already has ${BOARD_SCRIPT_EVENT_QUEUE} events waiting.`);
+          } catch (error) {
+            emitFailures.set(id, error instanceof Error ? error.message : String(error));
+            throw error;
+          }
         },
         "board.commit": (id, value) => {
           const { patch, frame } = value as { patch: BoardPatch; frame: boolean };
@@ -188,6 +193,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     screens.clear();
     outputs.clear();
     activations.clear();
+    emitFailures.clear();
     presses.clear();
     gesture = null;
     router.clear();
@@ -340,6 +346,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     get host() { return host; },
     get animated() { return !paused && Boolean(host?.animated); },
     get hovering() { return hover !== null; },
+    get hovered(): BoardScriptPointerTarget | null { return hover; },
     get paused() { return paused; },
     setPaused(next: boolean) {
       if (next === paused) return;
@@ -379,6 +386,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       return current && !paused ? boardShaderOwners(scriptDocument(), outputs, (id) => current.clock(id)) : [];
     },
     error: (id: string) => host?.error(id) ?? null,
+    emitFailures: emitFailures as ReadonlyMap<string, string>,
     async snapshot(): Promise<Record<string, BoardScriptSnapshot>> {
       const result: Record<string, BoardScriptSnapshot> = {};
       await Promise.all([...outputs.keys()].map(async (id) => {

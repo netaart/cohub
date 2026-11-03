@@ -147,10 +147,10 @@ export function createDocumentModule(ctx: EditorContext) {
 		state.geometryVersion += 1;
 	}
 
-	function setDraftItem(id: string, item: BoardItem | null) {
+	function setDraftItem(id: string, item: BoardItem | null, shown?: BoardItem) {
 		if (!draft.has(id)) {
-			const shown = displayItem(id);
-			if (shown) draftOrigins.set(id, shown);
+			const origin = shown ?? displayItem(id);
+			if (origin) draftOrigins.set(id, origin);
 		}
 		draft.set(id, item);
 	}
@@ -163,9 +163,9 @@ export function createDocumentModule(ctx: EditorContext) {
 		draft.delete(id);
 	}
 
-	function writeDraft(changes: ReadonlyMap<string, BoardItem | null>, structural = false) {
+	function writeDraft(changes: ReadonlyMap<string, BoardItem | null>, structural = false, shown?: ReadonlyMap<string, { item: BoardItem }>) {
 		if (changes.size === 0) return;
-		for (const [id, item] of changes) setDraftItem(id, item);
+		for (const [id, item] of changes) setDraftItem(id, item, shown?.get(id)?.item);
 		if (!structural) {
 			for (const [id, item] of changes) {
 				const before = state.scene.get(id);

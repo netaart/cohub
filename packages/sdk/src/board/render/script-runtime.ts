@@ -58,6 +58,7 @@ export function createScriptRuntime(
   let input = initial;
   let disposed = false;
   let stepping = false;
+  let depth = 0;
   let revision = 0;
   let sceneRevision = 0;
   let randomState = 2166136261;
@@ -136,7 +137,7 @@ export function createScriptRuntime(
       return input.script.targets ?? {};
     },
     async emit(target, type, data) {
-      await host.call("board.emit", { target, type, data });
+      await host.call("board.emit", { target, type, data, depth: depth + 1 });
     },
     get items() {
       return input.items;
@@ -302,9 +303,15 @@ export function createScriptRuntime(
       if (event.type === "viewchange") view = event.data as BoardScriptView;
       const listeners = handlers.get(event.type);
       if (!listeners?.size) return;
-      seeded(() => {
-        for (const handler of listeners) handler(event);
-      });
+      const outer = depth;
+      depth = event.depth ?? 0;
+      try {
+        seeded(() => {
+          for (const handler of listeners) handler(event);
+        });
+      } finally {
+        depth = outer;
+      }
       invalidate();
     },
     draw(canvas: CanvasRenderingContext2D) {

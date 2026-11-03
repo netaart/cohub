@@ -67,3 +67,23 @@ export function syncBoardItemEffects(container: Container, item: BoardSceneItem,
 export function rescaleBoardItemEffects(container: Container, item: BoardSceneItem, context: BoardEffectsContext) {
 	if (item.type !== "frame") rescaleBoardEffects(container, item.style, context);
 }
+
+const shaderClips = new WeakMap<Container, { mask: Graphics; sig: string }>();
+
+export function clipFrameShaderLayer(layer: Container, item: BoardSceneItem) {
+	const entry = shaderClips.get(layer);
+	if (!isClippingFrame(item)) {
+		if (!entry) return;
+		layer.mask = null;
+		entry.mask.destroy();
+		shaderClips.delete(layer);
+		return;
+	}
+	const { width, height } = item.frame;
+	const sig = `${width},${height}`;
+	if (entry?.sig === sig) return;
+	const mask = entry?.mask ?? layer.addChild(new Graphics());
+	mask.clear().rect(0, 0, width, height).fill(0xffffff);
+	layer.mask = mask;
+	shaderClips.set(layer, { mask, sig });
+}

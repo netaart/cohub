@@ -31,15 +31,25 @@ export type BoardGpuResult = {
   warnings: BoardExportWarning[];
 };
 export type BoardGpuShader = { id: string; shader: BoardShader; parameters?: Record<string, BoardScriptParameter> };
-export type BoardGpuProfileInput = Pick<BoardGpuFrame, "time" | "region" | "camera" | "scale" | "withImages" | "imageMemory"> & { frames: number };
+export type BoardGpuProfileInput = Pick<BoardGpuFrame, "time" | "region" | "camera" | "scale" | "withImages" | "imageMemory"> & {
+  frames: number;
+  rounds: number;
+  budgetMs: number;
+};
 export type BoardGpuProfile = {
   renderer: string;
+  gpu: "software" | "hardware";
   width: number;
   height: number;
+  frames: number;
+  rounds: number;
+  reduced: { width: number; height: number; frames: number; frameMs: number } | null;
+  elapsedMs: number;
   frame: { p50: number; p95: number };
   owners: Array<{
     id: string;
     ms: number;
+    range: [number, number];
     filter: "none" | "always" | "switchable";
     sprites: number;
     state: { width: number; height: number } | null;

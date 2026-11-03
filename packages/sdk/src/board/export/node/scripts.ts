@@ -11,7 +11,8 @@ import {
 } from "../../model/script-scene.js";
 import { BOARD_SCRIPT_HISTORY_MS } from "../../model/animation.js";
 import { BOARD_SCRIPT_EXPORT_CALLS } from "../../model/script-calls.js";
-import type { BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot } from "../../model/script.js";
+import type { BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot, BoardScriptView } from "../../model/script.js";
+import { BOARD_SCRIPT_EMIT_DEPTH, boardScriptEmit, boardScriptListens, createBoardScriptOutbox, queueBoardScriptEvent } from "../../model/script-events.js";
 import {
   loadBoardScriptSources,
   createBoardScriptModuleReader,
@@ -136,7 +137,35 @@ type Lane = {
   tail: Promise<unknown>;
   graphs: Set<string>;
   reject?: (error: Error) => void;
+  running: { id: string; since: number } | null;
+  waiting: number;
 };
+
+export type BoardScriptLaneStatus = {
+  lane: number;
+  thread: number | null;
+  running: { id: string; ms: number; event?: string; call?: string } | null;
+  waiting: number;
+  scripts: string[];
+};
+
+export function describeBoardScriptLanes(lanes: readonly BoardScriptLaneStatus[]): string[] {
+  return lanes.flatMap(({ lane, thread, running, waiting, scripts }) => {
+    if (!running && !waiting) return [];
+    const where = `lane ${lane}${thread === null ? "" : ` (worker thread ${thread})`}`;
+    const what = running
+      ? `${running.id} busy for ${(running.ms / 1000).toFixed(1)} s${running.event ? `, last event ${running.event}` : ""}${running.call ? `, last call ${running.call}` : ""}`
+      : "idle";
+    return [`${where}: ${what}${waiting ? `; ${waiting} more request${waiting === 1 ? "" : "s"} queued` : ""} (runs ${scripts.join(", ")})`];
+  });
+}
+
+function describeCall(name: string, input: unknown): string {
+  const message = input as { target?: unknown; type?: unknown } | null;
+  return name === "board.emit" && message && typeof message.target === "string"
+    ? `emit(${message.target}, "${String(message.type)}")`
+    : name;
+}
 type SampleRequest = {
   input: ScriptRuntimeInput;
   graph: BoardScriptSources;
@@ -166,7 +195,8 @@ function createNodeScriptLanes(
   const settled = new Set<Promise<void>>();
   const concurrency = options.concurrency ?? 4;
   if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error("Script concurrency must be an integer between 1 and 4.");
-  const lanes: Lane[] = Array.from({ length: concurrency }, () => ({ worker: null, tail: Promise.resolve(), graphs: new Set() }));
+  const lanes: Lane[] = Array.from({ length: concurrency }, () => ({ worker: null, tail: Promise.resolve(), graphs: new Set(), running: null, waiting: 0 }));
+  const activity = new Map<string, { event?: string; call?: string }>();
   const assignments = new Map<string, Lane>();
   const sources = new Map<string, Promise<BoardScriptSources>>();
   const modules = createBoardScriptModuleReader(options.readModule, options.readTimeoutMs);
@@ -223,6 +253,7 @@ function createNodeScriptLanes(
         calls.delete(key);
       }
       if (message.kind !== "call") return;
+      activity.set(message.id ?? "", { ...activity.get(message.id ?? ""), call: describeCall(message.name ?? "", message.input) });
       const answer = (value: unknown, error?: string) => {
         if (lane.worker !== worker) return;
         const done = new Promise<void>((resolve) => {
@@ -253,14 +284,18 @@ function createNodeScriptLanes(
     });
     return worker;
   }
-  function request<T>(lane: Lane, message: unknown, register?: () => void): Promise<T> {
+  function request<T>(lane: Lane, message: unknown, register?: () => void, id?: string): Promise<T> {
+    lane.waiting++;
     const task = lane.tail.then(() => new Promise<T>((resolve, reject) => {
+      lane.waiting--;
       if (disposed) return reject(new Error("Script host is disposed."));
       const worker = start(lane);
+      if (id) lane.running = { id, since: performance.now() };
       const cleanup = () => {
         clearTimeout(timer);
         worker.off("message", reply);
         lane.reject = undefined;
+        lane.running = null;
       };
       const reply = (value: { kind: string } & Sample) => {
         if (value.kind !== "sample") return;
@@ -299,10 +334,21 @@ function createNodeScriptLanes(
         return Promise.reject(new Error("Script time must be between 0 and 600000 ms."));
       const lane = laneOf(input.id);
       const src = input.script.src;
+      if (events?.length) activity.set(input.id, { ...activity.get(input.id), event: events.map((event) => event.type).join(", ") });
       return request<Sample>(lane, {
         input, src, signature: JSON.stringify({ ...input.script, params: undefined }), time, scale, events, draw, shaders,
         sources: lane.graphs.has(src) ? undefined : graph,
-      }, () => lane.graphs.add(src));
+      }, () => lane.graphs.add(src), input.id);
+    },
+    status(): BoardScriptLaneStatus[] {
+      const now = performance.now();
+      return lanes.map((lane, index) => ({
+        lane: index + 1,
+        thread: lane.worker?.threadId ?? null,
+        running: lane.running && { id: lane.running.id, ms: now - lane.running.since, ...activity.get(lane.running.id) },
+        waiting: lane.waiting,
+        scripts: [...assignments].flatMap(([id, assigned]) => (assigned === lane ? [id] : [])),
+      }));
     },
     async snapshot(id: string): Promise<BoardScriptSnapshot | null> {
       const lane = assignments.get(id);
@@ -312,6 +358,7 @@ function createNodeScriptLanes(
     release(id: string) {
       const lane = assignments.get(id);
       assignments.delete(id);
+      activity.delete(id);
       if (lane) lane.tail = lane.tail.then(() => lane.worker?.postMessage({ release: [id] }));
     },
     assigned: () => assignments.keys(),
@@ -354,16 +401,40 @@ export function createNodeBoardScriptHost(
     times: readonly number[],
     zoom: number,
     board?: Pick<BoardSettings, "scripts">,
-    options?: { shaders?: boolean; history?: (time: number) => BoardDocument },
+    options?: { shaders?: boolean; history?: (time: number) => BoardDocument; view?: BoardScriptView },
   ): Promise<void>;
   clearFrames(): void;
+  readonly emitFailures: ReadonlyMap<string, string>;
+  status(): BoardScriptLaneStatus[];
   destroy(): void;
 } {
-  const lanes = createNodeScriptLanes(renderer, options);
+  let current: BoardDocument | null = null;
+  let ranks = new Map<string, number>();
+  const outbox = createBoardScriptOutbox(() => ranks);
+  const emitFailures = new Map<string, string>();
+  const lanes = createNodeScriptLanes(renderer, {
+    ...options,
+    async call(id, name, input) {
+      if (name === "board.emit" && current) {
+        try {
+          const { target, event } = boardScriptEmit(current, id, input);
+          outbox.push(id, target, event);
+        } catch (error) {
+          emitFailures.set(id, error instanceof Error ? error.message : String(error));
+          throw error;
+        }
+        return undefined;
+      }
+      const call = BOARD_SCRIPT_EXPORT_CALLS[name];
+      if (!call) throw new Error("Capabilities are unavailable during export.");
+      return call(input);
+    },
+  });
   const textures = new Map<string, Texture>();
   const outputs = new Map<number, Map<string, BoardScriptOutput>>();
   const errors = new Map<string, string>();
   const sampled = new Map<string, number>();
+  const views = new Map<string, string>();
   const key = (id: string, time: number) => `${id}|${time}`;
   let disposed = false;
   return {
@@ -371,6 +442,8 @@ export function createNodeBoardScriptHost(
     frame: (item, time) => textures.get(key(item.id, time)) ?? null,
     error: (id) => errors.get(id) ?? null,
     release() {},
+    emitFailures,
+    status: () => lanes.status(),
     shaders: (document, time) => boardShaderOwners(document, outputs.get(time) ?? [], () => time),
     document(document, time) {
       const at = outputs.get(time);
@@ -390,69 +463,112 @@ export function createNodeBoardScriptHost(
       const documentOf = (list: readonly BoardSceneItem[]) =>
         ({ board: { scripts: board?.scripts }, items: Object.fromEntries(list.map(({ id, frame: _frame, ...item }) => [id, item as BoardItem])) }) as BoardDocument;
       const document = documentOf(items);
+      current = document;
+      emitFailures.clear();
       const scripted = boardScriptAttachments(document);
+      ranks = new Map(scripted.map(({ id }, index) => [id, index]));
       const alive = new Set(scripted.map(({ id }) => id));
-      for (const id of [...lanes.assigned()]) if (!alive.has(id)) lanes.release(id);
+      for (const id of [...lanes.assigned()])
+        if (!alive.has(id)) {
+          lanes.release(id);
+          views.delete(id);
+          sampled.delete(id);
+        }
       if (!scripted.length) return;
       const frames = new Map(items.map((item) => [item.id, item.frame]));
-      await Promise.all(
-        scripted.map(async (attachment) => {
-          const { id, item } = attachment;
+      const viewKey = options?.view ? JSON.stringify(options.view) : null;
+      type Prepared = { attachment: BoardScriptAttachment; graph: BoardScriptSources; input: ScriptRuntimeInput; width: number; height: number; scale: number };
+      const prepared = new Map<string, Prepared>();
+      await Promise.all(scripted.map(async (attachment) => {
+        const { id, item } = attachment;
+        try {
+          const graph = await lanes.graph(attachment.script.src);
+          const frame = frames.get(id);
+          const width = item ? ("size" in item ? item.size.width : (frame?.width ?? 0)) : 0;
+          const height = item ? ("size" in item ? item.size.height : (frame?.height ?? 0)) : 0;
+          const scale = Math.min(4, Math.max(0.25, zoom), 2048 / Math.max(1, width, height));
+          prepared.set(id, { attachment, graph, input: scopedInput(document, attachment, { width, height }), width, height, scale });
+        } catch (error) {
+          errors.set(id, error instanceof Error ? error.message : String(error));
+        }
+      }));
+      const keep = async (id: string, time: number, events: BoardScriptEvent[]) => {
+        const entry = prepared.get(id);
+        if (!entry || errors.has(id)) return;
+        const { attachment, graph, input, scale } = entry;
+        try {
+          const result = await lanes.sample({ input, graph, time, scale, events, draw: Boolean(attachment.item), shaders: options?.shaders });
+          if (disposed) return;
+          if (result.png) {
+            const frameKey = key(id, time);
+            textures.get(frameKey)?.destroy(true);
+            const texture = (await renderer.decodeImage(result.png)) as unknown as Texture;
+            if (result.output.pixelated) texture.source.scaleMode = "nearest";
+            textures.set(frameKey, texture);
+          }
+          let at = outputs.get(time);
+          if (!at) {
+            at = new Map();
+            outputs.set(time, at);
+          }
+          at.set(id, result.output);
+        } catch (error) {
+          errors.set(id, error instanceof Error ? error.message : String(error));
+        }
+      };
+      for (const time of times) {
+        await Promise.all([...prepared].map(async ([id, { attachment, graph, input, width, height, scale }]) => {
           try {
-            const graph = await lanes.graph(attachment.script.src);
-            const frame = frames.get(id);
-            const width = item ? ("size" in item ? item.size.width : (frame?.width ?? 0)) : 0;
-            const height = item ? ("size" in item ? item.size.height : (frame?.height ?? 0)) : 0;
-            const scale = Math.min(4, Math.max(0.25, zoom), 2048 / Math.max(1, width, height));
-            const input = scopedInput(document, attachment, { width, height });
-            for (const time of times) {
-              const last = sampled.get(id) ?? 0;
-              if (options?.history) {
-                const from = last <= time ? last : 0;
-                const run = async (at: number, document: BoardDocument) => {
-                  const script = boardScriptOf(document, id);
-                  if (script) await lanes.sample({ input: scopedInput(document, { ...attachment, script }, { width, height }), graph, time: at, scale, draw: false, shaders: options.shaders });
-                };
-                let before = { at: from, document: options.history(from) };
-                let previous = JSON.stringify(boardScriptOf(before.document, id)?.params);
-                let ran = from;
-                if (from === 0) await run(from, before.document);
-                for (let at = from + BOARD_SCRIPT_HISTORY_MS; at < time; at += BOARD_SCRIPT_HISTORY_MS) {
-                  const sample = options.history(at);
-                  const key = JSON.stringify(boardScriptOf(sample, id)?.params);
-                  if (key !== previous) {
-                    if (before.at > ran) await run(before.at, before.document);
-                    await run(at, sample);
-                    previous = key;
-                    ran = at;
-                    if (disposed) return;
-                  }
-                  before = { at, document: sample };
+            const last = sampled.get(id) ?? 0;
+            if (time < last) views.delete(id);
+            if (options?.history) {
+              const from = last <= time ? last : 0;
+              const run = async (at: number, document: BoardDocument) => {
+                const script = boardScriptOf(document, id);
+                if (script) await lanes.sample({ input: scopedInput(document, { ...attachment, script }, { width, height }), graph, time: at, scale, draw: false, shaders: options.shaders });
+              };
+              let before = { at: from, document: options.history(from) };
+              let previous = JSON.stringify(boardScriptOf(before.document, id)?.params);
+              let ran = from;
+              if (from === 0) await run(from, before.document);
+              for (let at = from + BOARD_SCRIPT_HISTORY_MS; at < time; at += BOARD_SCRIPT_HISTORY_MS) {
+                const sample = options.history(at);
+                const key = JSON.stringify(boardScriptOf(sample, id)?.params);
+                if (key !== previous) {
+                  if (before.at > ran) await run(before.at, before.document);
+                  await run(at, sample);
+                  previous = key;
+                  ran = at;
+                  if (disposed) return;
                 }
-                if (JSON.stringify(input.script.params) !== previous && before.at > ran) await run(before.at, before.document);
+                before = { at, document: sample };
               }
-              sampled.set(id, time);
-              const result = await lanes.sample({ input, graph, time, scale, draw: Boolean(item), shaders: options?.shaders });
-              if (disposed) return;
-              if (result.png) {
-                const frameKey = key(id, time);
-                textures.get(frameKey)?.destroy(true);
-                const texture = (await renderer.decodeImage(result.png)) as unknown as Texture;
-                if (result.output.pixelated) texture.source.scaleMode = "nearest";
-                textures.set(frameKey, texture);
-              }
-              let at = outputs.get(time);
-              if (!at) {
-                at = new Map();
-                outputs.set(time, at);
-              }
-              at.set(id, result.output);
+              if (JSON.stringify(input.script.params) !== previous && before.at > ran) await run(before.at, before.document);
             }
           } catch (error) {
             errors.set(id, error instanceof Error ? error.message : String(error));
+            return;
           }
-        }),
-      );
+          sampled.set(id, time);
+          const events: BoardScriptEvent[] = [];
+          const shown = viewKey && `${JSON.stringify({ ...attachment.script, params: undefined })}|${viewKey}`;
+          if (shown && views.get(id) !== shown) {
+            views.set(id, shown);
+            events.push({ type: "viewchange", data: options?.view });
+          }
+          await keep(id, time, events);
+        }));
+        for (let round = 0; outbox.size && round <= BOARD_SCRIPT_EMIT_DEPTH && !disposed; round++) {
+          const delivered = [...outbox.take()].flatMap(([id, events]) => {
+            const output = outputs.get(time)?.get(id);
+            const wanted = events.filter((event) => boardScriptListens(output, event));
+            return wanted.length ? [keep(id, time, wanted)] : [];
+          });
+          await Promise.all(delivered);
+        }
+        outbox.take();
+      }
+      await lanes.idle();
     },
     destroy() {
       disposed = true;
@@ -485,6 +601,7 @@ export function createNodeBoardScriptRuntime(
   settle(): Promise<void>;
   draw(scale?: number): Promise<void>;
   readonly queued: boolean;
+  status(): BoardScriptLaneStatus[];
   document(document: BoardDocument, scene?: BoardScene): BoardDocument;
 } {
   const { callbacks } = options;
@@ -613,10 +730,12 @@ export function createNodeBoardScriptRuntime(
     },
     event(id, event) {
       const entry = entries.get(id);
-      if (!entry || entry.error || (entry.output && !entry.output.listens.includes(event.type))) return;
-      entry.events.push(event);
+      if (!entry || entry.error || !boardScriptListens(entry.output, event)) return true;
+      if (!queueBoardScriptEvent(entry.events, event)) return false;
       callbacks.onFrame();
+      return true;
     },
+    status: () => lanes.status(),
     output: (id) => entries.get(id)?.output ?? null,
     snapshot: (id) => lanes.snapshot(id),
     restore() {

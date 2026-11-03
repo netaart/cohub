@@ -27,6 +27,7 @@ export {
 export * from "./overlay-placement.js";
 export * from "./script.js";
 export * from "./script-index.js";
+export * from "./script-events.js";
 export * from "./script-hit.js";
 export * from "./script-api.js";
 export * from "./script-example.js";
@@ -61,4 +62,5 @@ export * from "./items/index.js";
 export * from "./media.js";
 export * from "./media-playback.js";
 export * from "./read.js";
+export * from "./version-diff.js";
 export * from "./replay.js";

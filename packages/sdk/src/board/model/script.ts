@@ -37,6 +37,7 @@ export type BoardScriptEvent = {
   ctrlKey?: boolean;
   metaKey?: boolean;
   data?: unknown;
+  depth?: number;
 };
 
 export type BoardScriptChangeSource = "user" | "script" | "remote";

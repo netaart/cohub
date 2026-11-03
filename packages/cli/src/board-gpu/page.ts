@@ -2,6 +2,7 @@ import {
   type BoardSceneItem,
   boardAnimatesScriptParams,
   boardAssetKey,
+  boardExportView,
   boardShaderParameters,
   boardAssetKeySource,
   boardTextureEdge,
@@ -18,7 +19,7 @@ import {
   createBrowserBoardScriptExport,
   hasBoardEffects,
 } from "@neta-art/cohub/board/render";
-import { autoDetectRenderer, ImageSource, type Renderer, RenderTexture, Texture, type WebGLRenderer } from "pixi.js";
+import { autoDetectRenderer, ImageSource, Matrix, type Renderer, RenderTexture, Texture, type WebGLRenderer } from "pixi.js";
 import type { BoardGpuFrame, BoardGpuInit, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
 
 let renderer: Renderer | null = null;
@@ -124,24 +125,33 @@ const api = {
   },
   async profile(input: BoardGpuProfileInput): Promise<BoardGpuProfile> {
     if (!renderer || !session) throw new Error("The GPU exporter is not ready.");
+    const started = performance.now();
     const target = renderer;
     const { document, animation, theme: themeId } = session.init;
     const theme = boardRenderTheme(themeId);
     const at = input.time === null ? undefined : { animation: animation ?? undefined, time: input.time };
     const time = input.time ?? 0;
-    const scripts = await session.scripts.at(at ? session.sampler.at(time).document : document, time);
-    const prepared = prepareBoardExport(document, { sampler: session.sampler, region: input.region, camera: input.camera, scale: input.scale, ...(at ? { at } : {}), scripts });
+    const sampler = session.sampler;
+    const options = { sampler, region: input.region, camera: input.camera, scale: input.scale, padding: 0, ...(at ? { at } : {}) };
+    const planned = prepareBoardExport(document, options);
+    if (!planned) throw new Error("Nothing to profile: the region contains no items.");
+    const scripts = await session.scripts.at(at ? sampler.at(time).document : document, time, boardExportView(planned.plan));
+    const gl = (target as WebGLRenderer).gl;
+    const info = gl.getExtension("WEBGL_debug_renderer_info");
+    const rendererName = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    const prepared = prepareBoardExport(document, { ...options, scripts });
     if (!prepared) throw new Error("Nothing to profile: the region contains no items.");
     const visible = prepared.plan.items.filter((item) => prepared.scene.opacity(item.id) > 0);
     const loaded = input.withImages ? await loadTextures(visible, prepared.plan.scale, input.imageMemory, {}) : new Map<string, Texture>();
-    const owners = scripts.shaders?.(prepared.document, time) ?? [];
+    const inside = new Set(prepared.plan.items.map((item) => item.id));
+    const owners = (scripts.shaders?.(prepared.document, time) ?? []).filter((owner) => owner.root || inside.has(owner.id));
     const layers = createBoardShaderLayers({ wait: true });
     const scene = createBoardExportScene({
       settings: prepared.document.board,
       scene: prepared.scene,
       items: prepared.plan.items,
       time,
-      frameAt: session.sampler.frameAt,
+      frameAt: sampler.frameAt,
       world: prepared.plan.world,
       scale: prepared.plan.scale,
       colorScheme: theme.colorScheme,
@@ -151,55 +161,98 @@ const api = {
       textures: loaded,
       scripts,
       assetKey: boardAssetKey,
+      ...(prepared.plan.page ? { page: prepared.plan.page } : {}),
       ...(owners.length ? { shaders: { renderer: target, owners, layers } } : {}),
     });
-    const { width, height } = prepared.plan;
-    const output = RenderTexture.create({ width, height });
-    const gl = (target as WebGLRenderer).gl;
     const pixel = new Uint8Array(4);
-    const measure = () => {
-      const samples: number[] = [];
-      for (let frame = 0; frame < Math.max(3, input.frames); frame++) {
-        const start = performance.now();
-        target.render({ container: scene.root, target: output, clear: true });
-        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-        samples.push(performance.now() - start);
-      }
-      return samples.sort((a, b) => a - b);
+    // Lowering the resolution draws the same scene smaller: rebuilding it would compile everything again.
+    let size = { width: prepared.plan.width, height: prepared.plan.height };
+    let output = RenderTexture.create(size);
+    let transform: Matrix | undefined;
+    const resize = (factor: number) => {
+      output.destroy(true);
+      size = { width: Math.max(1, Math.round(prepared.plan.width * factor)), height: Math.max(1, Math.round(prepared.plan.height * factor)) };
+      output = RenderTexture.create(size);
+      transform = new Matrix().scale(factor, factor);
+    };
+    const render = () => {
+      const start = performance.now();
+      target.render({ container: scene.root, target: output, clear: true, ...(transform ? { transform } : {}) });
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+      return performance.now() - start;
     };
     try {
-      measure();
-      const all = measure();
-      const median = (samples: number[]) => samples[Math.floor(samples.length / 2)] ?? 0;
-      const base = median(all);
-      const costs = owners.map((owner) => {
-        const layer = layers.layer(owner.id);
+      render();
+      const renders = (frames: number) => frames * input.rounds * (1 + owners.length);
+      let frames = input.frames;
+      let frameMs = Math.max(render(), 0.1);
+      let reduced: BoardGpuProfile["reduced"] = null;
+      let factor = 1;
+      const budget = Math.max(input.budgetMs / 4, input.budgetMs - (performance.now() - started));
+      for (let attempt = 0; attempt < 3 && frameMs * renders(frames) > budget; attempt++) {
+        reduced ??= { ...size, frames, frameMs };
+        frames = Math.max(3, Math.min(frames, Math.floor(budget / (frameMs * renders(1)))));
+        const next = Math.max(factor * Math.sqrt(Math.min(1, budget / (frameMs * renders(frames)))), Math.min(1, 320 / Math.max(prepared.plan.width, prepared.plan.height)));
+        if (next > factor * 0.98) break;
+        factor = next;
+        resize(factor);
+        render();
+        frameMs = Math.max(render(), 0.1);
+      }
+      const measure = () => {
+        const samples: number[] = [];
+        for (let frame = 0; frame < frames; frame++) samples.push(render());
+        return samples.sort((a, b) => a - b);
+      };
+      const median = (samples: readonly number[]) => [...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)] ?? 0;
+      const all: number[] = [];
+      const costs = new Map<string, number[]>(owners.map((owner) => [owner.id, []]));
+      const measuring = performance.now();
+      let rounds = 0;
+      for (; rounds < input.rounds; rounds++) {
+        if (rounds && (performance.now() - measuring) * (rounds + 1) / rounds > budget * 1.25) break;
+        const samples = measure();
+        all.push(...samples);
+        const base = median(samples);
+        for (const owner of owners) {
+          const layer = layers.layer(owner.id);
+          const parts = [layer?.below, layer?.above].filter((part) => part !== null && part !== undefined);
+          const filters = layer?.filters ?? [];
+          const shown = parts.map((part) => part.visible);
+          const enabled = filters.map((filter) => filter.enabled);
+          for (const part of parts) part.visible = false;
+          for (const filter of filters) filter.enabled = false;
+          const without = median(measure());
+          parts.forEach((part, index) => { part.visible = shown[index] as boolean; });
+          filters.forEach((filter, index) => { filter.enabled = enabled[index] as boolean; });
+          costs.get(owner.id)?.push(Math.max(0, base - without));
+        }
+      }
+      all.sort((a, b) => a - b);
+      const p50 = median(all);
+      const results = owners.map((owner) => {
         const shader = owner.output.shader;
-        const parts = [layer?.below, layer?.above].filter((part) => part !== null && part !== undefined);
-        const filters = layer?.filters ?? [];
-        const shown = parts.map((part) => part.visible);
-        const enabled = filters.map((filter) => filter.enabled);
-        for (const part of parts) part.visible = false;
-        for (const filter of filters) filter.enabled = false;
-        const without = median(measure());
-        parts.forEach((part, index) => { part.visible = shown[index] as boolean; });
-        filters.forEach((filter, index) => { filter.enabled = enabled[index] as boolean; });
+        const rounds = costs.get(owner.id) ?? [0];
         const filterPasses = shader?.passes.filter((pass) => (pass.layer ?? shader.layer) === "filter") ?? [];
         return {
           id: owner.id,
-          ms: Math.max(0, base - without),
+          ms: median(rounds),
+          range: [Math.min(...rounds), Math.max(...rounds)] as [number, number],
           filter: !filterPasses.length ? ("none" as const) : filterPasses.every((pass) => pass.name) ? ("switchable" as const) : ("always" as const),
           sprites: shader?.passes.reduce((sum, pass) => sum + (pass.sprites ?? 0), 0) ?? 0,
           state: shader?.state ? { width: shader.state.width, height: shader.state.height } : null,
         };
       });
-      const info = gl.getExtension("WEBGL_debug_renderer_info");
       return {
-        renderer: String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)),
-        width,
-        height,
-        frame: { p50: base, p95: all[Math.min(all.length - 1, Math.floor(all.length * 0.95))] ?? base },
-        owners: costs.sort((a, b) => b.ms - a.ms),
+        renderer: rendererName,
+        gpu: /swiftshader|llvmpipe|softpipe|software|basic render/i.test(rendererName) ? "software" : "hardware",
+        ...size,
+        frames,
+        rounds,
+        reduced,
+        elapsedMs: performance.now() - started,
+        frame: { p50, p95: all[Math.min(all.length - 1, Math.floor(all.length * 0.95))] ?? p50 },
+        owners: results.sort((a, b) => b.ms - a.ms),
         effects: visible.filter((item) => hasBoardEffects(item.style)).length,
         items: visible.length,
       };
@@ -216,7 +269,8 @@ const api = {
     const at = frame.time === null ? undefined : { animation: animation ?? undefined, time: frame.time };
     const time = frame.time ?? 0;
     const sample = at ? session.sampler.at(time).document : document;
-    const scripts = await session.scripts.at(sample, time);
+    const planned = prepareBoardExport(document, { sampler: session.sampler, region: frame.region, camera: frame.camera, scale: frame.scale, padding: frame.padding, ...(at ? { at } : {}) });
+    const scripts = await session.scripts.at(sample, time, planned ? boardExportView(planned.plan) : undefined);
     const options = {
       sampler: session.sampler,
       region: frame.region,

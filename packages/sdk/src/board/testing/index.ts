@@ -1,5 +1,5 @@
 import type { BoardDocument, BoardPatch, BoardVec2 } from "@cohub/protocol";
-import { type BoardEditor, type BoardPointerEvent, type BoardToolId, createBoardEditor } from "../editor/index.js";
+import { type BoardEditor, type BoardPointerEvent, type BoardToolId, createBoardEditor, selectionTransformControlAt } from "../editor/index.js";
 import type { BoardExportRegion } from "../model/export-plan.js";
 import { worldPoint, screenPoint } from "../model/geometry.js";
 import type { BoardScriptOutput } from "../model/script.js";
@@ -27,7 +27,45 @@ export type BoardScriptHarnessPointer = {
   metaKey?: boolean;
 };
 
+export type BoardScriptHarnessHit =
+  | { on: "script"; owner: string; target: string }
+  | { on: "handle"; handle: string }
+  | { on: "item"; id: string; type: string }
+  | { on: "empty"; under?: string };
+
+export type BoardScriptHarnessPress = { down: BoardScriptHarnessHit; taken: string };
+
 const FRAME_MS = 1000 / 60;
+
+function describeInteraction(editor: BoardEditor): string | null {
+  const interaction = editor.interaction;
+  const ids = () => editor.selection.join(", ");
+  switch (interaction.type) {
+    case "idle":
+    case "pressing":
+      return null;
+    case "translating":
+      return interaction.moved ? `move ${[...interaction.origin.keys()].join(", ")}` : null;
+    case "resizing":
+      return `resize ${ids()}`;
+    case "rotating":
+      return `rotate ${ids()}`;
+    case "brushing":
+      return "select box";
+    case "panning":
+      return interaction.moved ? "pan" : null;
+    case "drawing":
+      return "draw";
+    case "creatingBox":
+      return `create ${interaction.kind}`;
+    case "creatingArrow":
+      return "create arrow";
+    case "creatingText":
+      return "create text";
+    case "draggingArrowHandle":
+      return `arrow ${interaction.which} handle`;
+  }
+}
 
 export async function createBoardScriptHarness(options: BoardScriptHarnessOptions) {
   const renderer = options.renderer ?? await createNodeBoardRenderer();
@@ -99,16 +137,35 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     };
   }
 
-  async function pointer(phase: "down" | "move" | "up", point: BoardVec2, input?: BoardScriptHarnessPointer, pressed?: boolean) {
+  let press: { down: BoardScriptHarnessHit; taken: string | null } | null = null;
+
+  function editorHit(event: BoardPointerEvent): BoardScriptHarnessHit {
+    const control = editor.tool === "select" && selectionTransformControlAt(editor.selectionTransform, event.world, editor.camera.zoom, event.pointerType, editor.controlOutset);
+    if (control) return { on: "handle", handle: control.kind === "rotate" ? "rotate" : control.handle };
+    const item = editor.pickAt(event.world, event.pointerType);
+    if (item) return { on: "item", id: item.id, type: item.type };
+    const under = editor.itemAt(event.world);
+    return { on: "empty", ...(under ? { under: under.id } : {}) };
+  }
+
+  async function pointer(phase: "down" | "move" | "up", point: BoardVec2, input?: BoardScriptHarnessPointer, pressed?: boolean): Promise<BoardScriptHarnessPress | null> {
     const event = pointerEvent(point, phase, input, pressed);
+    const hit = phase === "down" ? editorHit(event) : null;
     const routed = controller.pointer(phase, event);
+    const target = routed ? controller.hovered : null;
+    if (phase === "down") press = { down: target ? { on: "script", ...target } : (hit as BoardScriptHarnessHit), taken: target ? `script ${target.owner}/${target.target}` : null };
     if (!routed) {
       if (phase === "down") editor.pointerDown(event);
       else if (phase === "move") editor.pointerMove(event);
       else editor.pointerUp(event);
     }
+    if (press && !routed) press.taken = describeInteraction(editor) ?? press.taken;
     clock += FRAME_MS;
     await frame();
+    if (phase !== "up" || !press) return null;
+    const done = { down: press.down, taken: press.taken ?? (press.down.on === "empty" ? "nothing" : "tap") };
+    press = null;
+    return done;
   }
 
   await frame();
@@ -126,6 +183,10 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     },
     output: (id: string): BoardScriptOutput | null => controller.output(id),
     error: (id: string): string | null => controller.error(id),
+    get emitFailures(): ReadonlyMap<string, string> {
+      return controller.emitFailures;
+    },
+    status: () => runtime?.status() ?? [],
     async advance(ms = FRAME_MS) {
       const end = clock + ms;
       while (clock < end) {
@@ -136,14 +197,14 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     pointer,
     async tap(point: BoardVec2, input?: BoardScriptHarnessPointer) {
       await pointer("down", point, input);
-      await pointer("up", point, input);
+      return (await pointer("up", point, input)) as BoardScriptHarnessPress;
     },
     async drag(points: readonly BoardVec2[], input?: BoardScriptHarnessPointer) {
       const [first, ...rest] = points;
-      if (!first) return;
+      if (!first) return null;
       await pointer("down", first, input);
       for (const point of rest) await pointer("move", point, input);
-      await pointer("up", points.at(-1) ?? first, input);
+      return pointer("up", points.at(-1) ?? first, input);
     },
     async move(points: readonly BoardVec2[], input?: BoardScriptHarnessPointer) {
       for (const point of points) await pointer("move", point, input, false);

@@ -3,6 +3,7 @@ import { arrowBindings, type BoardDocument, parseBoardDocument } from "@cohub/pr
 import { effectBounds, itemBounds, type Rect, rectsIntersect, unionRects } from "./geometry.js";
 import { arrowPathBounds, resolveSceneArrow } from "./arrow-geometry.js";
 import type { BoardScene, BoardSceneItem } from "./scene.js";
+import type { BoardScriptView } from "./script.js";
 
 export type BoardExportRegion =
   | { kind: "all" }
@@ -27,6 +28,7 @@ export type BoardExportPlan = {
   height: number;
   items: BoardSceneItem[];
   clamped: boolean;
+  page?: string;
 };
 
 export function normalizeBoardDocument(document: unknown): BoardDocument {
@@ -67,7 +69,7 @@ function intersectRects(a: Rect, b: Rect): Rect | null {
 function resolveRegion(
   scene: BoardScene,
   region: BoardExportRegion,
-): { items: BoardSceneItem[]; rect: Rect | null; padding: number | null } {
+): { items: BoardSceneItem[]; rect: Rect | null; padding: number | null; page?: string } {
   const boundsOf = new Map<string, Rect | null>();
   const bounds = (item: BoardSceneItem) => {
     if (!boundsOf.has(item.id)) boundsOf.set(item.id, exportItemBounds(item, scene));
@@ -97,8 +99,8 @@ function resolveRegion(
       const frame = scene.get(region.id);
       if (!frame) return { items: [], rect: null, padding: null };
       const rect = itemBounds(frame.frame);
-      const items = scene.items.filter((item) => item.id !== region.id && visible(item, rect));
-      return { items, rect, padding: 0 };
+      const items = scene.items.filter((item) => item.id === region.id || visible(item, rect));
+      return { items, rect, padding: 0, page: region.id };
     }
     case "rect": {
       const rect = region.rect;
@@ -146,5 +148,11 @@ export function planBoardExport(input: BoardExportPlanInput): BoardExportPlan | 
     height: Math.max(1, Math.floor(world.height * scale)),
     items: resolved.items,
     clamped: scale < safeRequest - 1e-6,
+    ...(resolved.page ? { page: resolved.page } : {}),
   };
+}
+
+export function boardExportView(plan: Pick<BoardExportPlan, "world" | "scale" | "width" | "height">): BoardScriptView {
+  const { world, scale, width, height } = plan;
+  return { camera: { x: -world.x * scale, y: -world.y * scale, zoom: scale }, width, height, safeRect: { x: 0, y: 0, width, height } };
 }

@@ -111,6 +111,7 @@ export type BoardRenderContext = {
 	/** Live state of a Session card; `unavailable` when the viewer can no longer see it. */
 	session?: (sessionId: string) => BoardSessionLive | "unavailable" | null;
 	frameAt?: (id: string, time: number) => BoardFrame | undefined;
+	page?: string;
 	scripts?: BoardScriptHost;
 	assetKey: (item: BoardSceneItem) => string | null;
 	getTexture: (key: string) => Texture | null;

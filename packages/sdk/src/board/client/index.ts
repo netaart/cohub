@@ -24,6 +24,8 @@ import type {
 import type { WebsocketClient } from "../../websocket.js";
 import type { ResolvedFile, ResolveFileOptions } from "../../media.js";
 import { type BoardAssetSource, type BoardDocument, isBoardPath, parseBoardManifest, readBoardDocument } from "../model/index.js";
+import { type BoardReplayEntry, createBoardReplayPlayer } from "../model/replay.js";
+import { type BoardElementChange, diffBoardVersions } from "../model/version-diff.js";
 import { createBoardEntityId } from "../model/items/id.js";
 import type { BoardRemote } from "../replica/index.js";
 
@@ -185,6 +187,34 @@ export class BoardClient implements BoardRemote {
     if (input.limit !== undefined) params.set("limit", String(input.limit));
     const query = params.toString();
     return this.http.request<BoardHistoryPage>(`${this.path}/history${query ? `?${query}` : ""}`, { fetch: customFetch });
+  }
+
+  async diff(from: number, to?: number): Promise<{ from: number; to: number; versions: BoardReplayEntry[]; changes: BoardElementChange[] }> {
+    for (let attempt = 0; ; attempt++) {
+      const live = await this.sync();
+      let page = await this.history({ limit: 500 });
+      if (page.version !== live.version) {
+        if (attempt < 2) continue;
+        throw new Error("The Board kept changing while reading its history; try again.");
+      }
+      const target = to ?? live.version;
+      if (!Number.isSafeInteger(from) || !Number.isSafeInteger(target) || from < 0 || from >= target || target > live.version)
+        throw new Error(`Versions must satisfy 0 ≤ from < to ≤ ${live.version}.`);
+      const player = createBoardReplayPlayer(live.document, page);
+      while (player.floor > from && page.nextBefore) {
+        page = await this.history({ before: page.nextBefore, limit: 500 });
+        player.prepend(page);
+      }
+      if (player.floor > from) throw new Error(`History before version ${player.floor} is not available.`);
+      const after = player.documentAt(target);
+      const before = player.documentAt(from);
+      return {
+        from,
+        to: target,
+        versions: player.entries.filter(({ version }) => version > from && version <= target),
+        changes: diffBoardVersions(before, after),
+      };
+    }
   }
 
   /** Return the Board to an earlier version as a new write. */

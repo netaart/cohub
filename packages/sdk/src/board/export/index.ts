@@ -9,9 +9,13 @@ import {
   BOARD_EXPORT_ITEM_WARN_THRESHOLD,
   type BoardExportPlan,
   type BoardExportRegion,
+  exportItemBounds,
   normalizeBoardDocument,
   planBoardExport,
 } from "../model/export-plan.js";
+import type { BoardScene } from "../model/scene.js";
+import { boardShaderPassOn } from "../model/shader.js";
+import type { BoardShaderOwner } from "../render/shader/layers.js";
 import {
   type BoardBackdrop,
   type BoardBackdropTheme,
@@ -64,7 +68,8 @@ export type BoardExportWarning =
   | { kind: "images-missing"; keys: string[] }
   | { kind: "many-items"; count: number }
   | { kind: "shaders-unsupported"; drawn: string[]; omitted: string[] }
-  | { kind: "shader-failed"; id: string; message: string };
+  | { kind: "shader-failed"; id: string; message: string }
+  | { kind: "shader-hidden"; ids: string[]; reason: string };
 
 export type BoardExportResult = {
   canvas: ICanvas;
@@ -134,6 +139,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     renderers: options.renderers,
     backdrop: resolveBackdrop(options, document, { palette, colors: options.colors ?? buildFallbackShapeColors(colorScheme), colorScheme }),
     backdropTexture: options.backgroundTexture,
+    ...(plan.page ? { page: plan.page } : {}),
     ...(gpu && owners.length ? { shaders: { renderer, owners, layers: options.shaderLayers } } : {}),
   });
 
@@ -178,11 +184,37 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
       warnings.push({ kind: "shaders-unsupported", drawn, omitted: owners.map((owner) => owner.id).filter((id) => !drawn.includes(id)) });
     }
     for (const failure of exportScene.shaderErrors) warnings.push({ kind: "shader-failed", ...failure });
+    if (gpu) for (const miss of boardShaderMisses(scene, plan, owners, exportScene.shaderErrors)) warnings.push({ kind: "shader-hidden", ...miss });
     return { canvas, plan, warnings };
   } finally {
     exportScene.destroy();
     flattened?.();
   }
+}
+
+export function boardShaderMisses(
+  scene: BoardScene,
+  plan: Pick<BoardExportPlan, "items" | "world">,
+  owners: readonly BoardShaderOwner[],
+  failed: readonly { id: string }[] = [],
+): Array<{ ids: string[]; reason: string }> {
+  const planned = new Set(plan.items.map((item) => item.id));
+  const misses = owners.flatMap(({ id, root, output }) => {
+    if (failed.some((failure) => failure.id === id)) return [];
+    const shader = output.shader;
+    if (shader && !shader.state && shader.passes.every((pass) => !boardShaderPassOn(pass, output.passes)))
+      return [{ id, reason: "every pass is switched off (ctx.passes() or enabled: false)" }];
+    if (root) return [];
+    const item = scene.get(id);
+    if (!item) return [{ id, reason: "its item is not in the document" }];
+    if (scene.opacity(id) <= 0) return [{ id, reason: "its item is hidden (opacity 0 or invisible)" }];
+    if (planned.has(id)) return [];
+    const bounds = exportItemBounds(item, scene);
+    return [{ id, reason: bounds ? "its item is outside the exported area" : "its item is clipped away by a parent frame" }];
+  });
+  const grouped = new Map<string, string[]>();
+  for (const { id, reason } of misses) grouped.set(reason, [...(grouped.get(reason) ?? []), id]);
+  return [...grouped].map(([reason, ids]) => ({ ids, reason }));
 }
 
 function listIds(ids: readonly string[]): string {
@@ -208,5 +240,7 @@ export function describeBoardExportWarning(warning: BoardExportWarning): string 
     }
     case "shader-failed":
       return `Shader ${warning.id} was left out: ${warning.message}`;
+    case "shader-hidden":
+      return `${warning.ids.length === 1 ? "Shader" : "Shaders"} of ${listIds(warning.ids)} drew nothing: ${warning.reason.replace(/^its item is/, warning.ids.length === 1 ? "its item is" : "their items are")}.`;
   }
 }

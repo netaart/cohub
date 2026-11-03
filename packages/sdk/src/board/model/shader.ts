@@ -10,7 +10,7 @@ import {
 } from "./script.js";
 
 export const BOARD_SHADER_LIMITS = {
-  passes: 8,
+  passes: 16,
   source: 64 * 1024,
   sprites: 65_536,
   stateEdge: 1024,

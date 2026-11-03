@@ -35,22 +35,24 @@ function sync(container: Container, item: SceneItem<BoardFrameItem>, context: Bo
 	const alpha = (style.stroke ? 1 : 0.55) * itemAlpha(context, style.stroke);
 	const radius = style.radius ?? 4;
 	const strokeWidth = style.strokeWidth ?? 1.5;
-	const decorated = props.decoration !== "none";
-	const visualSig = [props.decoration, frame.width, frame.height, fill, fillAlpha, baseStroke, alpha, radius, strokeWidth, style.dash, style.trim].join("|");
+	const page = context.page === item.id;
+	const decorated = props.decoration !== "none" && (!page || style.fill !== undefined);
+	const outlined = decorated && !page;
+	const visualSig = [props.decoration, page, frame.width, frame.height, fill, fillAlpha, baseStroke, alpha, radius, strokeWidth, style.dash, style.trim].join("|");
 	if (visualSig !== parts.visualSig) {
 		parts.visualSig = visualSig;
 		parts.box.clear();
 		if (decorated) parts.box.roundRect(0, 0, frame.width, frame.height, radius).fill({ color: fill, alpha: fillAlpha });
 		const pattern = dashPattern(style.dash, strokeWidth);
 		const trim = style.trim ?? 1;
-		if (decorated && strokeWidth > 0 && trim > 0) {
+		if (outlined && strokeWidth > 0 && trim > 0) {
 			if (pattern || trim < 1) tracePolyline(parts.box, trimPolyline(roundRectPoints(frame.width, frame.height, radius), trim), pattern);
 			else parts.box.roundRect(0, 0, frame.width, frame.height, radius);
 			parts.box.stroke({ color: baseStroke, width: strokeWidth, alpha, cap: pattern || trim < 1 ? "round" : "butt", join: "round" });
 		}
 	}
 
-	parts.label.visible = decorated;
+	parts.label.visible = outlined;
 	const title = locked ? `🔒 ${props.label}`.trim() : props.label;
 	const labelColor = style.stroke ? baseStroke : context.palette.muted;
 	const size = context.style.frameLabelSize;

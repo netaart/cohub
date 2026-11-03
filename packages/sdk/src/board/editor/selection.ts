@@ -1,8 +1,12 @@
 import {
 	type BoardFrame,
 	type BoardItem,
+	type BoardMatrix,
 	type BoardSceneItem,
 	hasAuthoredSize,
+	IDENTITY_MATRIX,
+	placeItem,
+	type Rect,
 	sceneItemToItem,
 	selectionBounds,
 } from "../model/index.js";
@@ -11,6 +15,9 @@ import type { EditorContext } from "./context.js";
 import { resolveSelectionTransform } from "./selection-transform.js";
 import { memo } from "./state.js";
 import { isTouchLikePointer } from "./input.js";
+
+/** What a gesture picked up, as shown when it started: it places items from this, never from what scripts present later. */
+export type BoardGrabbed = ReadonlyMap<string, { item: BoardItem; parent: BoardMatrix; box: Rect }>;
 
 const NUDGE_STEP = 1;
 const NUDGE_STEP_LARGE = 10;
@@ -61,11 +68,24 @@ export function createSelectionModule(ctx: EditorContext) {
 		return frames;
 	}
 
-	function placed(frames: ReadonlyMap<string, BoardFrame>): Map<string, BoardItem> {
+	function grab(ids: Iterable<string>): { origin: Map<string, BoardFrame>; grabbed: BoardGrabbed } {
+		const { layout } = state.scene;
+		const origin = framesFor(ids);
+		const grabbed = new Map<string, { item: BoardItem; parent: BoardMatrix; box: Rect }>();
+		for (const id of origin.keys()) {
+			const item = ctx.document.displayItem(id);
+			if (item) grabbed.set(id, { item, parent: item.parent && layout.has(item.parent) ? layout.matrix(item.parent) : IDENTITY_MATRIX, box: layout.box(id) });
+		}
+		return { origin, grabbed };
+	}
+
+	function placed(frames: ReadonlyMap<string, BoardFrame>, from?: BoardGrabbed): Map<string, BoardItem> {
 		const changes = new Map<string, BoardItem>();
 		for (const [id, frame] of frames) {
+			const grabbed = from?.get(id);
 			const item = state.scene.get(id);
-			if (item) changes.set(id, sceneItemToItem({ ...item, frame }, state.scene.layout));
+			if (grabbed) changes.set(id, placeItem(grabbed.item, frame, grabbed.parent, grabbed.box));
+			else if (item) changes.set(id, sceneItemToItem({ ...item, frame }, state.scene.layout));
 		}
 		return changes;
 	}
@@ -208,6 +228,7 @@ export function createSelectionModule(ctx: EditorContext) {
 		clear: () => set([]),
 		selectAll: () => set(state.scene.children(undefined).slice()),
 		framesFor,
+		grab,
 		placed,
 		movable,
 		carries,

@@ -417,10 +417,19 @@ and a write that changed nothing records that patch alone. Versions are ordered
 but not contiguous. Without `baseVersion` concurrent writers merge
 field by field; with it a stale write fails.
 
+`boards diff <board> --from <v> [--to <v>]` lists, element by element, what was added,
+removed or changed between two versions, field by field, and who wrote them; `--json`
+gives the same as data. It replays history from the current document, so it reaches as
+far back as history does. Before rewriting a Board with `apply --replace`, diff from the
+version you read: anything others did since, such as cards moved by someone playing on
+the web, would otherwise be overwritten. The SDK's `board.diff(from, to?)` returns it, and
+`diffBoardVersions(before, after)` compares two documents the same way.
+
 ## Export
 
 Use `--frame`, `--items` or `--rect` for a fixed region, or `--camera` for the animation's
-view at a specified time:
+view at a specified time. `--frame` exports the frame as a page: its children, its own
+fill and the shaders of its script, without its outline and label:
 
 ```sh
 cohub boards export lesson.board --frame lab -o lab.png
@@ -446,6 +455,13 @@ after a few idle minutes (`COHUB_BOARD_GPU_DAEMON=0` starts one per command). `-
 canvas` stays in Node and warns which shaders fell back to `draw()` or were left out;
 `--renderer gpu` always uses the browser. `--async` runs the export as a Task in the
 Space's sandbox and returns its id at once; paths are then Space paths.
+
+Scripts see what is exported as their view: the camera for `--camera`, otherwise the
+fixed region at the output's pixels, delivered as `viewchange` like on a screen. A
+shader a script declares that the image does not show is named in the warnings with the
+reason: outside the area, hidden, clipped by a frame, every pass switched off, or a
+failed compile. A frame that runs longer than `--timeout` (2 minutes) fails and names
+the scripts still running, the worker lane each is on, and the last event or call it got.
 
 Camera and fixed region options are mutually exclusive. `--size` sets camera output
 pixels and never sizes frames; `--scale` applies to fixed regions. In the web export

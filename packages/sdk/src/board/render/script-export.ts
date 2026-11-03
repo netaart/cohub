@@ -6,14 +6,16 @@ import { composeBoardScriptItems } from "../model/script-scene.js";
 import type {
   BoardScriptOutput,
   BoardScriptSnapshot,
+  BoardScriptView,
 } from "../model/script.js";
 import { boardScriptAttachments } from "../model/script-index.js";
+import { BOARD_SCRIPT_EMIT_DEPTH, boardScriptEmit, createBoardScriptOutbox } from "../model/script-events.js";
 import { type BrowserBoardScriptHost, createBoardScriptHost } from "./script-host.js";
 import { boardShaderOwners } from "./shader/layers.js";
 import type { BoardScriptHost } from "./renderers/board-renderer-registry.js";
 
 export type BrowserBoardScriptExport = {
-  at(document: BoardDocument, time: number): Promise<BoardScriptHost>;
+  at(document: BoardDocument, time: number, view?: BoardScriptView): Promise<BoardScriptHost>;
   dispose(): void;
 };
 
@@ -22,6 +24,11 @@ type Run = {
   element: HTMLElement;
   outputs: Map<string, BoardScriptOutput>;
   time: number;
+  document: BoardDocument | null;
+  ranks: Map<string, number>;
+  outbox: ReturnType<typeof createBoardScriptOutbox>;
+  views: Map<string, string>;
+  last: Map<string, string>;
   wake(): void;
 };
 
@@ -41,10 +48,17 @@ export function createBrowserBoardScriptExport(
       "position:fixed;left:-10000px;top:0;width:1px;height:1px;visibility:hidden;pointer-events:none";
     globalThis.document.body.appendChild(element);
     const outputs = new Map<string, BoardScriptOutput>();
+    const ranks = new Map<string, number>();
+    const last = new Map<string, string>();
     const started: Run = {
       element,
       outputs,
       time: 0,
+      document: null,
+      ranks,
+      outbox: createBoardScriptOutbox(() => ranks),
+      views: new Map(),
+      last,
       wake: () => {},
       host: createBoardScriptHost({
         host: element,
@@ -53,7 +67,15 @@ export function createBrowserBoardScriptExport(
         shaders: options.shaders ?? true,
         snapshots: options.snapshots,
         timeoutMs: 15_000,
-        capabilities: Object.fromEntries(Object.entries(BOARD_SCRIPT_EXPORT_CALLS).map(([name, call]) => [name, async (_id: string, input: unknown) => call(input)])),
+        capabilities: {
+          ...Object.fromEntries(Object.entries(BOARD_SCRIPT_EXPORT_CALLS).map(([name, call]) => [name, async (_id: string, input: unknown) => call(input)])),
+          "board.emit": async (id, input) => {
+            if (!started.document) return;
+            const { target, event } = boardScriptEmit(started.document, id, input);
+            last.set(id, `emit(${target}, "${event.type}")`);
+            started.outbox.push(id, target, event);
+          },
+        },
         onFrame: () => started.wake(),
         onOutput(id, output) {
           if (output) outputs.set(id, output);
@@ -72,11 +94,17 @@ export function createBrowserBoardScriptExport(
     run = null;
   }
 
-  function settle(current: Run, document: BoardDocument, time: number): Promise<void> {
+  function settle(current: Run, document: BoardDocument, time: number, view?: BoardScriptView): Promise<void> {
     current.time = time;
+    current.document = document;
     const { host } = current;
     const scene = buildBoardScene(document);
     const ids = boardScriptAttachments(document).map(({ id }) => id);
+    current.ranks.clear();
+    for (const [index, id] of ids.entries()) current.ranks.set(id, index);
+    const viewKey = view ? JSON.stringify(view) : null;
+    let viewed = false;
+    let rounds = 0;
     return new Promise<void>((resolve, reject) => {
       const finish = (error?: unknown) => {
         clearTimeout(timer);
@@ -84,17 +112,35 @@ export function createBrowserBoardScriptExport(
         if (error) reject(error);
         else resolve();
       };
-      const timer = setTimeout(() => finish(new Error("Script export preparation timed out.")), 20_000);
+      const timer = setTimeout(() => finish(new Error(["Scripts did not settle in 20 s.", ...status(current, ids)].join(" "))), 20_000);
       let queued = false;
       const sync = () => {
         queued = false;
         try {
           host.sync(document, scene, { x: 0, y: 0, zoom: 1 }, time, false);
+          if (viewKey && !viewed) {
+            viewed = true;
+            for (const id of ids)
+              if (current.views.get(id) !== viewKey) {
+                current.views.set(id, viewKey);
+                host.event(id, { type: "viewchange", data: view });
+              }
+          }
           for (const id of ids) {
             const error = host.error(id);
             if (error) throw new Error(error);
           }
-          if (ids.every((id) => host.settled(id))) finish();
+          if (!ids.every((id) => host.settled(id))) return;
+          if (current.outbox.size && rounds++ <= BOARD_SCRIPT_EMIT_DEPTH) {
+            for (const [target, events] of current.outbox.take()) {
+              current.last.set(target, `event ${events.map((event) => event.type).join(", ")}`);
+              for (const event of events) host.event(target, event);
+            }
+            current.wake();
+            return;
+          }
+          current.outbox.take();
+          finish();
         } catch (error) {
           finish(error);
         }
@@ -108,8 +154,17 @@ export function createBrowserBoardScriptExport(
     });
   }
 
+  function status(current: Run, ids: readonly string[]): string[] {
+    return ids.flatMap((id) => {
+      if (current.host.settled(id)) return [];
+      const state = current.host.output(id) ? "is still running" : "has not started";
+      const last = current.last.get(id);
+      return [`${id} ${state}${last ? `; last ${last}` : ""}.`];
+    });
+  }
+
   return {
-    async at(document, time) {
+    async at(document, time, view) {
       if (!Number.isFinite(time) || time < 0 || time > 600_000)
         throw new Error("Script export time must be between 0 and 600000 ms.");
       if (run && time < run.time) stop();
@@ -135,7 +190,7 @@ export function createBrowserBoardScriptExport(
         }
         if (boardScriptParamsKey(document) !== previous && before.at > ran) await settle(current, before.document, before.at);
       }
-      await settle(current, document, time);
+      await settle(current, document, time, view);
       return {
         ...host,
         shaders: (input) => boardShaderOwners(input, outputs, (id) => host.clock(id)),

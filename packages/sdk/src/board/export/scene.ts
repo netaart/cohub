@@ -21,7 +21,7 @@ import type { BoardSettings } from "@cohub/protocol";
 import type { BoardScene, BoardSceneItem } from "../model/scene.js";
 import { itemBounds, type Rect } from "../model/geometry.js";
 import { createBoardAtmosphereLayer } from "../render/atmosphere.js";
-import { type FrameGroup, groupingAncestor, isGroupingFrame, isSelfGroupedFrame, syncBoardItemEffects, syncFrameGroup } from "../render/frame-group.js";
+import { clipFrameShaderLayer, type FrameGroup, groupingAncestor, isGroupingFrame, isSelfGroupedFrame, syncBoardItemEffects, syncFrameGroup } from "../render/frame-group.js";
 import { textureIsCutout } from "../render/cutout.js";
 import { setBoardShaderFilters } from "../render/effects.js";
 import { positionShell } from "../render/renderers/base-card-renderer.js";
@@ -49,6 +49,7 @@ export type BoardExportSceneInput = {
   renderers?: BoardCardRendererResolver;
   backdrop?: BoardBackdrop | null;
   backdropTexture?: Texture;
+  page?: string;
   shaders?: { renderer: Renderer; owners: readonly BoardShaderOwner[]; quality?: number; layers?: BoardShaderLayers };
 };
 
@@ -70,6 +71,7 @@ function buildContext(input: BoardExportSceneInput): {
     scene: input.scene,
     time: input.time ?? 0,
     frameAt: input.frameAt,
+    ...(input.page ? { page: input.page } : {}),
     selectedIds: new Set(),
     hoveredId: null,
     resizingIds: new Set(),
@@ -181,6 +183,7 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
       const container = containers.get(owner.id);
       if (!item || !container) return null;
       const group = isSelfGroupedFrame(item) ? groups.get(item.id)?.group : undefined;
+      for (const part of [layer.below, layer.above]) if (part && item.type === "frame") clipFrameShaderLayer(part, item);
       if (layer.below) container.addChildAt(layer.below, 0);
       if (layer.above) {
         if (group) {

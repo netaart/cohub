@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
+import type { BoardFrame } from "@cohub/protocol";
 import { createNodeBoardRenderer, type BoardNodeRenderer } from "../../src/board/export/node/index.js";
+import { frameHandlePosition } from "../../src/board/model/geometry.js";
 import { createBoardScriptHarness } from "../../src/board/testing/index.js";
 import { boardDocument } from "./fixtures.js";
 
@@ -104,5 +106,36 @@ test("screen controls take taps, setup saves only from the leader, and deleting 
     assert.equal(harness.error("farm"), null);
     const png = await harness.render();
     assert.ok(png.byteLength > 100);
+  } finally { harness.destroy(); }
+});
+
+test("moving and resizing a lifted card saves the authored item, never what the script presents", async () => {
+  const harness = await createBoardScriptHarness({
+    renderer,
+    readModule: async () => `export default function (ctx) {
+  ctx.on("selectionchange", ({ data }) => {
+    for (const id of Object.keys(ctx.items)) if (id !== ctx.self.id) ctx.present(id, data.ids.includes(id) ? { scale: 1.06, rotation: 2 } : null);
+  });
+}`,
+    document: boardDocument({ items: {
+      table: { type: "frame", size: { width: 1000, height: 800 }, props: { decoration: "none" }, script: { src: "lift.js" } },
+      card: { type: "shape", parent: "table", position: { x: 100, y: 100 }, size: { width: 170, height: 255 } },
+    } }),
+  });
+  try {
+    await harness.drag([{ x: 180, y: 220 }, { x: 230, y: 260 }, { x: 280, y: 300 }]);
+    assert.deepEqual(harness.commits.at(-1), { items: { card: { position: { x: 200, y: 180 } } } });
+    const corner = frameHandlePosition(harness.editor.selectionTransform?.frame as BoardFrame, "se");
+    await harness.drag([corner, { x: corner.x + 10.6, y: corner.y }, { x: corner.x + 10.6, y: corner.y + 15.9 }]);
+    const card = harness.document.items.card as { size: { width: number; height: number }; scale: number; rotation: number };
+    assert.equal(card.scale, 1);
+    assert.equal(card.rotation, 0);
+    assert.ok(card.size.width > 170 && card.size.height > 255);
+    harness.editor.undo();
+    harness.editor.undo();
+    assert.deepEqual(harness.document.items.card, boardDocument({ items: {
+      table: { type: "frame", size: { width: 1000, height: 800 }, props: { decoration: "none" }, script: { src: "lift.js" } },
+      card: { type: "shape", parent: "table", position: { x: 100, y: 100 }, size: { width: 170, height: 255 } },
+    } }).items.card);
   } finally { harness.destroy(); }
 });

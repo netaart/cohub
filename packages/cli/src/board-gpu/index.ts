@@ -189,7 +189,7 @@ export async function launchBoardGpuExporter(resources: BoardGpuResources, optio
         await call(`cohubBoardGpu.init(${JSON.stringify(init)})`);
       },
       compile: (shaders) => call<Record<string, string>>(`cohubBoardGpu.compile(${JSON.stringify(shaders)})`),
-      profile: (input) => call<BoardGpuProfile>(`cohubBoardGpu.profile(${JSON.stringify(input)})`),
+      profile: (input) => call<BoardGpuProfile>(`cohubBoardGpu.profile(${JSON.stringify(input)})`, Math.max(CALL_TIMEOUT_MS, input.budgetMs * 2 + 60_000)),
       async render(frame) {
         const { data, ...rest } = await call<BoardGpuResult>(`cohubBoardGpu.render(${JSON.stringify(frame)})`);
         return { ...rest, bytes: new Uint8Array(Buffer.from(data, "base64")) };

@@ -11,13 +11,14 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
 const execFile = promisify(execFileCallback);
-import { boardMediaNaturalSize, parseBoardMediaSource } from "@neta-art/cohub/board";
+import { boardExportView, boardMediaNaturalSize, parseBoardMediaSource } from "@neta-art/cohub/board";
 import type { BoardAssetKeySource, BoardDocument, BoardExportRegion, BoardMediaState, BoardSceneItem, BoardScriptSnapshot, BoardThemeId } from "@neta-art/cohub/board";
 import { imageVariantUrl, MEDIA_VARIANT_MAX, mediaVariantSize, videoFrameUrl } from "@neta-art/cohub/media";
 import type {
   BoardNodeExportFormat,
   BoardNodeFont,
   BoardNodeTexture,
+  BoardScriptLaneStatus,
 } from "@neta-art/cohub/board/export/node";
 import type { BoardScriptHost } from "@neta-art/cohub/board/render";
 import type { BoardExportWarning } from "@neta-art/cohub/board/export";
@@ -37,6 +38,7 @@ import {
   createNodeBoardRenderer,
   createNodeBoardScriptHost,
   describeBoardExportWarning,
+  describeBoardScriptLanes,
   exportBoardImageBytes,
   parseBoardDocument,
   planBoardExport,
@@ -252,6 +254,7 @@ export type BoardExportRunOptions = {
   renderer?: BoardExportRenderer;
   signal?: AbortSignal;
   imageMemoryMiB?: number;
+  timeoutMs?: number;
   onPlan?: (plan: { width: number; height: number; frames: number }) => void;
   onFrame?: (frame: BoardExportFrame, index: number) => Promise<void>;
   onProgress?: (completed: number, total: number) => void;
@@ -350,12 +353,16 @@ export async function runBoardExport(
     throw new Error(`Animation ${options.animation} does not exist.`);
   }
   const times: Array<number | null> = options.times?.length ? options.times : [null];
+  const timeoutMs = options.timeoutMs ?? BOARD_EXPORT_FRAME_TIMEOUT_MS;
   const imageMemoryBytes = (options.imageMemoryMiB ?? BOARD_EXPORT_IMAGE_MEMORY_MIB) * 1024 ** 2;
   if (!Number.isSafeInteger(imageMemoryBytes) || imageMemoryBytes <= 0) throw new Error("Image memory budget must be a positive integer.");
   const nodeRenderer = await createNodeBoardRenderer({ fonts: resolveBundledFonts() });
   const images = createBoardExportImageBudget(nodeRenderer, imageMemoryBytes);
   const renderer = { ...nodeRenderer, decodeImage: images.decodeImage };
+  const STAGES: Record<string, string> = { prepare: "running the scripts", gpu: "drawing in the browser", images: "loading images", render: "drawing" };
+  let doing = "preparing";
   const trace = (stage: string, completed: number, dimensions?: { width: number; height: number }) => {
+    doing = STAGES[stage] ?? doing;
     if (!debugExport.enabled || completed % 30 !== 0) return;
     debugExport("%j", {
       stage, completed, total: times.length,
@@ -452,6 +459,7 @@ export async function runBoardExport(
       options.onProgress?.(completed, times.length);
     };
     const launchGpu = async (browser: string) => {
+      doing = "starting the browser";
       const exporter = await openBoardGpu(gpuResources(options.spaceId, document, (key) => framePictures.get(key)), { browser, signal: options.signal });
       try {
         await exporter.init({ document, animation: options.animation ?? null, theme: options.theme, ...(options.snapshots ? { snapshots: options.snapshots } : {}) });
@@ -468,20 +476,22 @@ export async function runBoardExport(
       if (!browser) throw new Error("GPU export needs Chrome, Chromium or Edge. Install one, or set COHUB_CHROME to its path.");
       gpu = await launchGpu(browser);
     }
-    for (const time of times) {
+    const renderFrame = async (time: number | null) => {
       options.signal?.throwIfAborted();
       const host = scriptHost;
       host?.clearFrames();
       const frameOptions = { sampler, camera: options.camera, ...(time === null ? {} : { at: { animation: options.animation, time } }), region, scale: options.scale, padding: times.length > 1 ? 0 : options.padding };
       const initial = prepareBoardExport(document, frameOptions);
-      if (!initial) continue;
+      if (!initial) return;
       let prepared = initial;
       trace("prepare", completed, initial.plan);
       const prepareScripts = async (scripts: NonNullable<typeof host>, shaders: boolean) => {
         await scripts.prepare(initial.scene.items, [time ?? 0], initial.plan.scale, initial.document.board, {
           shaders,
+          view: boardExportView(initial.plan),
           ...(history ? { history: (at: number) => documentAt(at) } : {}),
         });
+        for (const [id, message] of scripts.emitFailures) report(`${id}: ${message}`);
         for (const id of [...Object.keys(initial.document.board.scripts ?? {}), ...initial.scene.items.map((item) => item.id)]) {
           const error = scripts.error(id);
           if (error) throw new Error(`${initial.document.board.scripts?.[id]?.src ?? initial.scene.get(id)?.script?.src ?? id}: ${error}`);
@@ -490,7 +500,7 @@ export async function runBoardExport(
       };
       if (host && !gpu) {
         const scripted = await prepareScripts(host, !decided);
-        if (!scripted) continue;
+        if (!scripted) return;
         prepared = scripted;
       }
       if (!decided) {
@@ -502,7 +512,7 @@ export async function runBoardExport(
           report(`Shaders in ${shaded.join(", ")} need Chrome, Chromium or Edge; install one or set COHUB_CHROME to draw them.`);
           host.clearFrames();
           const scripted = await prepareScripts(host, false);
-          if (!scripted) continue;
+          if (!scripted) return;
           prepared = scripted;
         }
       }
@@ -550,7 +560,7 @@ export async function runBoardExport(
         });
         for (const warning of result.warnings) report(options.withImages && warning.kind === "images-missing" ? describeBoardExportWarning(warning) : describeWarning(warning));
         await emit({ time, bytes: result.bytes, width: result.width, height: result.height, scale: result.scale, itemCount: result.itemCount, format: options.format });
-        continue;
+        return;
       }
       trace("images", completed, prepared.plan);
       if (options.withImages) {
@@ -582,7 +592,7 @@ export async function runBoardExport(
         format: options.format,
         quality: options.quality,
       });
-      if (!result) continue;
+      if (!result) return;
       for (const warning of result.warnings) {
         if (warning.kind === "images-missing" && options.withImages) continue;
         if (warning.kind === "shaders-unsupported" && options.renderer !== "canvas") continue;
@@ -598,6 +608,17 @@ export async function runBoardExport(
         format: result.format,
       });
       trace("rendered", completed, result.plan);
+    };
+    for (const time of times) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const stalled = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(describeStall(time, timeoutMs, doing, scriptHost?.status() ?? null))), timeoutMs);
+      });
+      try {
+        await Promise.race([renderFrame(time), stalled]);
+      } finally {
+        clearTimeout(timer);
+      }
     }
     return completed ? { frames, warnings, media } : null;
   } finally {
@@ -630,6 +651,15 @@ export function gpuResources(spaceId: string, document: BoardDocument, framePict
       return source && item ? fetchBoardPicture(client, spaceId, source, item, request.edge) : null;
     },
   };
+}
+
+export const BOARD_EXPORT_FRAME_TIMEOUT_MS = 120_000;
+
+function describeStall(time: number | null, timeoutMs: number, doing: string, lanes: BoardScriptLaneStatus[] | null): string {
+  const at = time === null ? "The export" : `The frame at ${time} ms`;
+  const busy = lanes ? describeBoardScriptLanes(lanes) : [];
+  const hint = doing === "drawing in the browser" ? " The browser runs the scripts and shaders there; a shader may be too heavy." : "";
+  return [`${at} did not finish in ${timeoutMs / 1000} s, while ${doing}.${hint}`, ...busy.map((line) => `  ${line}`)].join("\n");
 }
 
 function describeWarning(warning: BoardExportWarning): string {

@@ -58,7 +58,7 @@ test("items region keeps only the requested ids", () => {
   );
 });
 
-test("frame region excludes the frame itself but keeps what it contains", () => {
+test("frame region draws the frame as a page, with what it contains", () => {
   const result = planFor(
     {
       f: { type: "frame", size: { width: 500, height: 400 }, props: { label: "Page" } },
@@ -68,7 +68,8 @@ test("frame region excludes the frame itself but keeps what it contains", () => 
     { region: { kind: "frame", id: "f" }, scale: 1 },
   );
   assert.ok(result);
-  assert.deepEqual(result.items.map((item) => item.id), ["inside"]);
+  assert.deepEqual(result.items.map((item) => item.id), ["f", "inside"]);
+  assert.equal(result.page, "f");
   // A frame is a page: it gets no padding, so the image is exactly the frame.
   assert.deepEqual(result.world, { x: 0, y: 0, width: 500, height: 400 });
 });
