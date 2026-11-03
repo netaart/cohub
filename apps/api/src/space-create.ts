@@ -1,8 +1,12 @@
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import { createLogger } from "@cohub/infra/logging";
 import type { SandboxSpecId } from "@cohub/sandbox-controller";
 import { spaceChannels, spaceMembers, spaceMods, spaces } from "@cohub/db";
 import { eq, sql } from "drizzle-orm";
 import { db } from "./db/index.js";
+import { config } from "./config.js";
 import type { AuthUser } from "./lib/middleware.js";
 import {
   type ChannelModelSelection,
@@ -11,6 +15,7 @@ import {
 import { scheduleSandboxAutoDestroy } from "./sandbox-idle-scheduler.js";
 import type { PreparedSpaceModInsert } from "./space-mods.js";
 import { ensureSpaceSandbox, reconcileSpaceSandbox } from "./space-sandboxes.js";
+import { dispatchSpaceDomainEvent, dispatchSpaceFsChanged } from "./space-events.js";
 import { setSpaceEnv } from "./space-sessions.js";
 import { enqueueTask } from "./tasks.js";
 import { ensurePersistedCurrentUserProfile } from "./user-profiles.js";
@@ -118,6 +123,79 @@ async function markBootstrapFailed(
     .where(eq(spaces.id, space.id))
     .returning();
   return updated ?? space;
+}
+
+/**
+ * Blank bootstrap is only mkdir + an async init Save, so it runs inline instead
+ * of waiting behind long jobs in the shared task queue. Runs before the sandbox
+ * pod is created so kubelet never auto-creates the subPath with root perms.
+ */
+async function prepareBlankWorkspace(spaceId: string): Promise<boolean> {
+  if (!config.spaceStorageRoot) return false;
+  const spaceBaseDir = resolve(config.spaceStorageRoot, spaceId);
+  const workspaceDir = resolve(spaceBaseDir, "workspace");
+  try {
+    await mkdir(workspaceDir, { recursive: true, mode: 0o775 });
+    await Promise.all([
+      chmod(spaceBaseDir, 0o775).catch(() => undefined),
+      chmod(workspaceDir, 0o775).catch(() => undefined),
+    ]);
+    return true;
+  } catch (error) {
+    logger.warn("[SpaceCreate] inline workspace prepare failed; falling back to create_space task", { spaceId, error });
+    return false;
+  }
+}
+
+async function finalizeBlankBootstrap(
+  space: typeof spaces.$inferSelect,
+  bootstrapSource: SpaceBootstrapSource,
+): Promise<ProvisionCreatedSpaceResult> {
+  const startedAt = new Date().toISOString();
+  const { taskRunId: initialCheckpointTaskRunId } = await enqueueTask({
+    type: "save_checkpoint",
+    spaceId: space.id,
+    userId: space.userUuid,
+    data: { description: "Initialize space", reason: "create_space_init" },
+  });
+  if (!initialCheckpointTaskRunId) throw new Error("failed to allocate initial checkpoint task id");
+
+  const bootstrap = {
+    taskRunId: null,
+    source: bootstrapSource,
+    status: "ready",
+    stage: "finalize",
+    errorMessage: null,
+    errorCode: null,
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    stageTimings: {},
+    initialCheckpointTaskRunId,
+  };
+  const [updated] = await db
+    .update(spaces)
+    .set({
+      meta: sql`coalesce(${spaces.meta}, '{}'::jsonb) || ${JSON.stringify({ bootstrap })}::jsonb`,
+      updatedAt: new Date(),
+      lastActivityAt: new Date(),
+    })
+    .where(eq(spaces.id, space.id))
+    .returning();
+
+  await Promise.all([
+    dispatchSpaceFsChanged(space.id, { source: "bootstrap", resync: true, changes: [] }),
+    dispatchSpaceDomainEvent({
+      id: randomUUID(),
+      timestamp: Date.now(),
+      domain: "space",
+      type: "space.workspace.ready",
+      spaceId: space.id,
+      sessionId: null,
+      payload: { source: bootstrapSource, stage: "finalize", initialCheckpointTaskRunId },
+    }),
+  ]).catch((error) => logger.warn("[SpaceCreate] failed to publish workspace ready", { spaceId: space.id, error }));
+
+  return { space: updated ?? space, taskRunId: initialCheckpointTaskRunId };
 }
 
 async function insertOwnedSpaceRecord(
@@ -244,6 +322,7 @@ export async function provisionCreatedSpace(
 
   try {
     await setSpaceEnv(space.id, extraEnv);
+    const blankWorkspaceReady = bootstrapSource.type === "blank" && await prepareBlankWorkspace(space.id);
 
     if (sandbox.provider === "local") {
       try {
@@ -284,6 +363,8 @@ export async function provisionCreatedSpace(
         }),
       );
     }
+
+    if (blankWorkspaceReady) return await finalizeBlankBootstrap(space, bootstrapSource);
 
     const job = await enqueueTask({
       type: "create_space",
