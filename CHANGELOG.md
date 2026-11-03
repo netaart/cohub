@@ -6,6 +6,8 @@ All notable changes to Cohub are documented in this file.
 
 ## v2.90 — 2026-11-03
 
+- **Board clipboard**: Copy, cut, and paste now move Board items through the system clipboard with a Board-specific MIME payload, so selections transfer between tabs, survive reloads, stay compatible with older Cohub JSON copies, and yield to ordinary page text selection instead of hijacking it.
+- **Inline blank space bootstrap**: New blank spaces no longer wait in the shared task queue — the workspace directory is created and the initial checkpoint Save dispatched inline before the sandbox pod boots, shortening time to a usable workspace and keeping kubelet from creating root-owned subPath directories.
 - **Reliable Android helper startup**: The phone helper launch now waits up to 2 s for the new process to become its own session leader before returning, so adbd can no longer terminate it mid-`setsid` and leave the helper silently absent.
 - **Per-build helper isolation**: Helper logs and mute ledgers are namespaced by package name, so debug and production builds installed on the same phone no longer overwrite each other's logs or restore each other's muted apps; the legacy shared mute ledger is migrated on first run.
 - **Actionable helper diagnostics**: Startup failures now distinguish a helper that never ran from one that runs but logs nothing, using a process check alongside the helper log and logcat output.
@@ -17,6 +19,7 @@ All notable changes to Cohub are documented in this file.
 
 ### Bug Fixes
 
+- Agent space-aware query tools now accept `space_id: null` and resolve it to the current space, instead of forcing models like GPT to invent a pattern-valid UUID for the space they are already in.
 - The Android helper could be killed by adbd before `setsid` detached it from the launch command, causing startup to fail while diagnostics reported only "it logged nothing".
 - Debug and production builds on one phone no longer clobber each other's helper logs or mute state through shared paths under `/data/local/tmp`.
 - Board-level script modules now publish with Apps, so Board-wide effects such as rain run on published pages.
