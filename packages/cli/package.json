@@ -1,6 +1,6 @@
 {
   "name": "@neta-art/cohub-cli",
-  "version": "10.20.0",
+  "version": "10.21.0",
   "description": "CLI for Cohub — spaces, sessions, and agent collaboration.",
   "type": "module",
   "engines": {
