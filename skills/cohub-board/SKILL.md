@@ -173,7 +173,10 @@ direction with the user before building out every region.
 Keep it smooth: a pass with a `name` switches with `ctx.passes()` and costs nothing
 while off, so turn a full-view `filter` on only while it shows; drive motion through
 `ctx.uniforms()` rather than presenting items every frame, and present shadows or
-filters only while they change. `cohub boards profile <board>` times each shader
+filters only while they change. Give a box pass `texel` when its picture changes only
+every few units (pixel art, maps), keep shared data such as sprite sheets in a `.json`
+module imported `with { type: "json" }`, and compress large models before placing them.
+`cohub boards profile <board>` times each shader
 owner (median and range over rounds), says whether it ran on software WebGL, and
 names what to change; it stays within `--budget` by measuring smaller.
 

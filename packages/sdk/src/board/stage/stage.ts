@@ -341,9 +341,11 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			cull.rect.width === rect.width &&
 			cull.rect.height === rect.height;
 		if (same && cull.scene === editor.scene) return cull.ids;
-		cull = { rect: same ? cull.rect : rect, ids: new Set(editor.idsInRect(rect, true)), scene: editor.scene };
-		options.onVisibleChange?.(cull.ids);
-		return cull.ids;
+		const ids = new Set(editor.idsInRect(rect, true));
+		const kept = cull.ids && sameIdSet(cull.ids, ids) ? cull.ids : ids;
+		cull = { rect: same ? cull.rect : rect, ids: kept, scene: editor.scene };
+		if (kept === ids) options.onVisibleChange?.(ids);
+		return kept;
 	}
 
 	const textureScale = () => renderCamera().zoom * (app?.renderer.resolution ?? 1);
@@ -1017,6 +1019,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			if (item.type === "effect" && item.props.kind === "trail" && renderScene.opacity(item.id) > 0) pinnedIds.add(item.id);
 		}
 		for (const id of previews.keys()) pinnedIds.add(id);
+		for (const id of scripts.moving()) if (!ids || ids.has(id)) pinnedIds.add(id);
 		if (editor.editingId) pinnedIds.add(editor.editingId);
 		if (editor.editingId !== shownEditingId) {
 			for (const id of [shownEditingId, editor.editingId]) if (id) staleIds.add(id);
@@ -1523,4 +1526,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			app = null;
 		},
 	};
+}
+
+function sameIdSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+	if (a.size !== b.size) return false;
+	for (const id of a) if (!b.has(id)) return false;
+	return true;
 }

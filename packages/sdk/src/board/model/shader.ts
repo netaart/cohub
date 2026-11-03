@@ -14,6 +14,7 @@ export const BOARD_SHADER_LIMITS = {
   source: 64 * 1024,
   sprites: 65_536,
   stateEdge: 1024,
+  texel: 1024,
   uniformSlots: 128,
 } as const;
 
@@ -88,6 +89,12 @@ export function validateBoardShader(shader: unknown): asserts shader is BoardSha
       if (!Number.isSafeInteger(pass.sprites) || pass.sprites < 1 || pass.sprites > BOARD_SHADER_LIMITS.sprites)
         throw new Error(`sprites must be an integer from 1 to ${BOARD_SHADER_LIMITS.sprites}.`);
       if (boardShaderPassLayer(value, pass) === "filter") throw new Error("Filter passes draw over the owner's box; they cannot draw sprites.");
+    }
+    if (pass.texel !== undefined) {
+      if (typeof pass.texel !== "number" || !(pass.texel > 0 && pass.texel <= BOARD_SHADER_LIMITS.texel))
+        throw new Error(`texel must be a number above 0 and up to ${BOARD_SHADER_LIMITS.texel}.`);
+      if (pass.sprites !== undefined || boardShaderPassLayer(value, pass) === "filter")
+        throw new Error("texel shades a pass over its box; sprite and filter passes cannot take it.");
     }
     if (pass.name !== undefined) {
       if (typeof pass.name !== "string" || !IDENTIFIER.test(pass.name)) throw new Error(`Invalid pass name: ${String(pass.name)}`);

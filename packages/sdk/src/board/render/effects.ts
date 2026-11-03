@@ -191,6 +191,7 @@ function shaderPasses() {
 }
 
 const TEXELS_PER_DEVIATION = 4;
+const SAMPLED_TEXELS_PER_DEVIATION = 8;
 const MAX_HALVINGS = 5;
 
 function gaussian(filters: FilterSystem, input: Texture, output: RenderSurface, deviation: number, clear: boolean, first?: Filter) {
@@ -237,6 +238,8 @@ class BoardBlurFilter extends Filter {
 		this.radius = radius;
 		this.deviation = radius * zoom;
 		this.padding = Math.ceil(radius * 3 * zoom);
+		// Pixi renders a filter chain at its lowest resolution.
+		this.resolution = this.deviation > SAMPLED_TEXELS_PER_DEVIATION ? SAMPLED_TEXELS_PER_DEVIATION / this.deviation : "inherit";
 		this.css = `blur(${radius * zoom}px)`;
 	}
 

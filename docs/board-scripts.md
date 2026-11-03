@@ -50,6 +50,14 @@ imports can reference relative modules. Cycles, bare packages, remote imports,
 `import.meta` and computed import paths are rejected. Bundle external packages into
 Space modules first. A graph is limited to 64 modules and 2 MB of source.
 
+Keep large data, such as sprite sheets or level maps, in `.json` files imported with
+`with { type: "json" }`. Every instance shares one parsed, frozen copy, where a `.js`
+data module is parsed again by each instance that imports it:
+
+```js
+import sprites from "./sprites.json" with { type: "json" };
+```
+
 ## Draw without setup
 
 ```js
@@ -429,7 +437,10 @@ pass reads with `scene(uv)`. A Board script's filter transforms every item, acro
 whole view. A pass may set its own `layer`, so one script can paint a background below
 and bend the picture above. Passes draw one quad over the box; with `sprites: n` a
 pass draws `n` instanced quads that `Sprite sprite(int id)` places, for particles,
-rain or confetti without a draw call each.
+rain or confetti without a draw call each. A box pass whose picture changes only every
+few units, such as pixel art or a map, takes `texel: 6`: it shades once per 6×6-unit
+cell on a grid from the box's origin and scales up without smoothing, so zooming in
+costs nothing more.
 
 A Frame's own passes follow its `props.clip`: a clipping Frame (the default) keeps
 below, above and filter output inside its box, as it does its children, so rain stays
@@ -510,6 +521,8 @@ Board.
 
 ### Performance and fallbacks
 
+Off screen, an instance that presents nothing but its own item steps four times a
+second; `onFrame()` still runs every 60 Hz step in between, so its state is the same.
 Shaders render only while their owner is drawn and on screen; `board.quality`
 (lower on phones, and lowered while frames fall behind what the display shows)
 scales sprite counts and the resolution of full-box passes, which shade at most 1.5

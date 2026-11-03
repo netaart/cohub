@@ -12,6 +12,7 @@ export const BOARD_SHADER_API = {
   pass: {
     glsl: "Defines vec4 effect(Fragment f) returning straight (unpremultiplied) color; with sprites, also Sprite sprite(int id). The same source compiles for both stages: guard stage-only code with #ifdef COHUB_FRAGMENT.",
     sprites: "Draw this many instanced quads (up to 65536, scaled by board.quality) placed by sprite(id), evaluated once per sprite per frame, instead of one quad over the box.",
+    texel: "For a box pass that changes only every texel local units, such as pixel art or a map: one sample per texel on a grid from the box's origin, scaled up without smoothing, so zooming in costs no more.",
     blend: "normal (default), add, screen or multiply.",
     layer: "below, above or filter for this pass alone, overriding shader.layer, so one script can paint a background and bend the picture.",
     name: "A name ctx.passes() switches the pass by.",

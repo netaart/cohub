@@ -59,6 +59,7 @@ type Entry = {
   visible: boolean;
   draw: boolean;
   scale: number;
+  calledAt?: number;
 };
 
 export type BoardScriptHostOptions = {
@@ -90,6 +91,17 @@ export type BoardScriptHostCallbacks = {
 
 export const BOARD_SCRIPT_INSTANCE_LIMIT = 1000;
 const NO_BOX = { width: 0, height: 0 };
+const OFFSCREEN_FRAME_RATE = 4;
+const CALL_QUIET_MS = 1_000;
+
+function selfContained(entry: Entry, now: number): boolean {
+  const output = entry.output;
+  if (!entry.item || !output || now - (entry.calledAt ?? -Infinity) < CALL_QUIET_MS) return false;
+  for (const id in output.patches) if (id !== entry.id) return false;
+  for (const _ in output.world) return false;
+  for (const _ in output.screen) return false;
+  return true;
+}
 
 export type BrowserBoardScriptHost = BoardScriptHost & {
   sync(
@@ -320,6 +332,7 @@ export function createBoardScriptHost(
       return;
     }
     if (data.kind === "call") {
+      entry.calledAt = performance.now();
       const capability =
         typeof data.name === "string" &&
         options.capabilities &&
@@ -612,7 +625,8 @@ export function createBoardScriptHost(
         }
         if (!brokerReady || !entry.graph || entry.pending) continue;
         const elapsed = time - entry.startedAt;
-        const tick = entry.output?.frameRate ? Math.floor((elapsed * entry.output.frameRate) / 1000) : elapsed;
+        const rate = entry.visible || !selfContained(entry, now) ? entry.output?.frameRate : Math.min(entry.output?.frameRate ?? OFFSCREEN_FRAME_RATE, OFFSCREEN_FRAME_RATE);
+        const tick = rate ? Math.floor((elapsed * rate) / 1000) : elapsed;
         if (!entry.dirty && (!moving(entry) || entry.tick === tick)) continue;
         entry.pending = true;
         entry.dirty = false;

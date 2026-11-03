@@ -5,7 +5,7 @@ import type {
 	BoardScene as BoardModelScene,
 	SceneItem,
 } from "../model/index.js";
-import { drawPointsBounds, itemBounds, parseBoardItem, type Rect, rectsIntersect } from "../model/index.js";
+import { boardSceneChangedIds, drawPointsBounds, itemBounds, parseBoardItem, type Rect, rectsIntersect } from "../model/index.js";
 import type {
 	BoardCardRenderer,
 	BoardCardRendererResolver,
@@ -420,7 +420,7 @@ export function createBoardScene(options: {
 		const at = cell ? `${Math.round((input.focus?.x ?? 0) / cell)},${Math.round((input.focus?.y ?? 0) / cell)}` : "";
 		const inputs = [visibleIds, input.structureVersion, idSetSignature(pinnedIds), step, at, lod.media, lod.text, lod.card, lod.live];
 		const reusable = plan && inputs.every((value, index) => value === planInputs[index]);
-		if (plan && reusable && !plan.deferred && (input.gestureActive || plan.scene === scene)) return plan;
+		if (plan && reusable && !plan.deferred && (input.gestureActive || onlyLiveChanged(plan, scene))) return plan;
 		planInputs = inputs;
 
 		const ids = orderedIds(visibleIds);
@@ -474,6 +474,13 @@ export function createBoardScene(options: {
 		}
 		plan = { scene, live, far, runs, limited, deferred };
 		return plan;
+	}
+
+	function onlyLiveChanged(current: LodPlan, scene: BoardModelScene): boolean {
+		const changed = boardSceneChangedIds(current.scene, scene);
+		if (!changed) return false;
+		for (const id of changed) if (!current.live.has(id)) return false;
+		return true;
 	}
 
 	const plates = new Map<string, FarPlate>();

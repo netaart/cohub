@@ -172,7 +172,7 @@ export default {
       upstreamRequest.headers.delete("If-None-Match");
       upstreamRequest.headers.delete("If-Modified-Since");
     }
-    const upstream = await fetch(upstreamRequest);
+    const upstream = await fetch(upstreamRequest, navigation ? undefined : { cf: { cacheEverything: true } });
     const headers = new Headers(upstream.headers);
     const html = (headers.get("Content-Type") ?? "").split(";", 1)[0]?.trim().toLowerCase() === "text/html";
     if (html) varyByNavigation(headers);

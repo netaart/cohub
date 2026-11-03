@@ -79,8 +79,9 @@ pooled `ParticleContainer`s, so a frame rewrites attributes only.
 Item effects (`render/effects.ts`) are applied by the scene, not by renderers:
 `style.filter` composes into one color matrix pass, blur and shadows use one clamped
 Gaussian pass, and `style.blend` sets the container's blend mode. Filters render at the
-device resolution; wide blurs first halve the layer with box samples until the
-Gaussian spans four to eight texels per deviation, so their cost stays near a copy. Every filter also
+device resolution, except that a chain with a wide blur renders at eight texels per
+deviation, since the blur keeps nothing finer; the Gaussian then halves the layer with box
+samples until it spans four to eight texels per deviation, so its cost stays near a copy. Every filter also
 returns a CSS filter string for Canvas; exports run `flattenBoardEffects`, which
 draws each blurred or shadowed layer into one picture first, since Canvas filters
 apply per draw call. A frame with effects draws inside a group with its descendants, so they take its
@@ -119,8 +120,10 @@ Text draws its lines as bars, and pictures as their average color once loaded
 (`farPictureTone`): the asset manager reads it while idle and keeps it after the
 texture leaves, and the stage repaints only the plates showing it. Beyond
 `BoardLod.live`, the on-screen cards nearest the view center stay live; pinned
-cards and cards without `renderFar` are always live. Live cards outside the
-screen skip rendering. Pass `lod` to `mountBoardStage`.
+cards and cards without `renderFar` are always live, as are items an animation plays
+and items a script moved within the last second, so motion repaints no plate and keeps
+the plan, which is rebuilt only when a card that is not live changes (`boardSceneChangedIds`).
+Live cards outside the screen skip rendering. Pass `lod` to `mountBoardStage`.
 
 ## Frames and devices
 
@@ -167,6 +170,8 @@ slow lookup never blocks a texture that is ready; a retry passes `{ fresh: true 
 invalidation notify with the resource key, and the stage refreshes only the cards that
 hold it, a bounded number of texture pixels per frame; pictures that arrive after their
 card fade in. Natural media sizes are recorded once per frame after scene synchronization.
+Video decoders (`BoardDeviceBudget.media`) go to audio, then videos on screen, playing ones
+first; a video off screen takes a decoder only when one is free, and catches up on return.
 `onLiveChange` reports the live set for other per-card work such as file previews.
 
 Hosts add pictures for their own items through `itemAsset`, which maps an item to
@@ -318,7 +323,8 @@ stays isolated), watches them for hangs and never executes user modules. DOM
 so scripts cannot impersonate another instance. Output validation compiles only changed
 instances; the stage composes them once per frame. Texture revisions invalidate
 only their own card. Spatially hidden or far-covered draws are omitted while simulation
-continues. The stage queries actual Scene materialization after scene synchronization;
+continues, and an off-screen instance that presents only its own item steps at 4 Hz; the
+runtime replays the 60 Hz steps between, so its state does not depend on the rate. The stage queries actual Scene materialization after scene synchronization;
 it does not maintain a second LOD state. Execution-only responses wake the script clock,
 not the scene renderer. Static scripts redraw when rematerialized or when density changes.
 

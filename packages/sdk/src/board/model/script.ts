@@ -190,6 +190,7 @@ export const BOARD_SHADER_UNIFORM_TYPES = ["float", "vec2", "vec3", "vec4", "int
 export type BoardShaderPass = {
   glsl: string;
   sprites?: number;
+  texel?: number;
   blend?: (typeof BOARD_SHADER_BLENDS)[number];
   layer?: (typeof BOARD_SHADER_LAYERS)[number];
   name?: string;

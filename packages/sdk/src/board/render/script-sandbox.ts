@@ -41,6 +41,7 @@ function scriptAgent(
     outputVersion: number;
   };
   const graphs = new Map<string, BoardScriptSources>();
+  const json = new Map<string, { url: string; users: number }>();
   const instances = new Map<number, Instance>();
   const calls = new Map<number, { token: number; resolve(value: unknown): void; reject(error: Error): void }>();
   let callId = 0;
@@ -56,6 +57,18 @@ function scriptAgent(
     if (!announced) return;
     announced = false;
     send({ kind: "idle" });
+  };
+  const freeze = (value: unknown) => {
+    if (!value || typeof value !== "object" || Object.isFrozen(value)) return;
+    Object.freeze(value);
+    for (const child of Object.values(value)) freeze(child);
+  };
+  // Kept out of the worker source so engines without import attributes still run other scripts.
+  let jsonReader: Promise<(url: string) => Promise<{ default: unknown }>> | null = null;
+  const readJson = async (url: string) => {
+    jsonReader ??= load(URL.createObjectURL(new Blob(['export default (url) => import(url, { with: { type: "json" } });'], { type: "text/javascript" })))
+      .then((module) => (module as unknown as { default: (url: string) => Promise<{ default: unknown }> }).default);
+    return (await (await jsonReader)(url)).default;
   };
   const describe = (error: unknown) =>
     error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -84,10 +97,12 @@ function scriptAgent(
       if (!instance.runtime) {
         const sources = data.graph ? graphs.get(data.graph) : undefined;
         if (!sources) throw new Error("Missing script modules.");
-        instance.urls = moduleUrls(sources);
+        instance.urls = moduleUrls(sources, json);
         const src = input.script.src;
         const url = src ? instance.urls.urls[src] : undefined;
         if (!url) throw new Error("Missing entry module.");
+        for (const [path, url] of Object.entries(instance.urls.urls))
+          if (path.endsWith(".json")) freeze(await readJson(url));
         instance.module = await load(url);
         if (instances.get(token) !== instance) throw new Error("Script stopped.");
         current = token;
@@ -312,7 +327,7 @@ export function boardScriptFrameSource(options: { timeoutMs?: number; poolSize?:
   const worker = `${prelude} (${scriptAgent.toString()})(${createScriptRuntime.toString()}, ${applyScriptInputDelta.toString()}, ${scriptModuleUrls.toString()}, url => import(url));`;
   const cores = typeof navigator === "undefined" ? 4 : navigator.hardwareConcurrency || 4;
   const poolSize = options.poolSize ?? Math.max(1, Math.min(4, cores - 1));
-  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src 'none'; form-action 'none'; base-uri 'none'"><script>
+  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src blob:; form-action 'none'; base-uri 'none'"><script>
 ${prelude}
 (${scriptBroker.toString()})(URL.createObjectURL(new Blob([${JSON.stringify(worker)}], {type:'text/javascript'})), ${poolSize}, ${options.timeoutMs ?? 2_000});
 </script>`;

@@ -30,7 +30,7 @@ import { initializeBoardFonts } from "./fonts.js";
 
 const WORKER = `
 const {parentPort, workerData} = require('node:worker_threads');
-const {createContext, Script, SourceTextModule} = require('node:vm');
+const {createContext, Script, SourceTextModule, SyntheticModule} = require('node:vm');
 const {createCanvas, GlobalFonts} = require(workerData.canvasModule);
 (${initializeBoardFonts.toString()})(GlobalFonts, workerData.fonts);
 const instances = new Map();
@@ -61,10 +61,15 @@ async function create(data) {
   return parts.join('/');
  };
  const link = (name,ref) => load(resolve(ref.identifier,name));
+ const json = new Script('(text)=>{const freeze=v=>{if(v&&typeof v==="object"&&!Object.isFrozen(v)){Object.freeze(v);for(const k in v)freeze(v[k]);}return v};return freeze(JSON.parse(text))}').runInContext(context);
  function load(path) {
   if(modules.has(path)) return modules.get(path);
   const source=sources[path];
   if(!source) throw new Error('Module is unavailable: '+path);
+  if(path.endsWith('.json')) {
+   const module=new SyntheticModule(['default'],function(){this.setExport('default',json(source.code));},{context,identifier:path});
+   modules.set(path,module);return module;
+  }
   const module=new SourceTextModule(source.code,{context,identifier:path,importModuleDynamically:async name=>{
    const child=load(resolve(path,name));
    if(child.status==='unlinked') await child.link(link);

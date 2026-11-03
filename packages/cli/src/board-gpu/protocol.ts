@@ -52,6 +52,7 @@ export type BoardGpuProfile = {
     range: [number, number];
     filter: "none" | "always" | "switchable";
     sprites: number;
+    boxes: number;
     state: { width: number; height: number } | null;
   }>;
   effects: number;

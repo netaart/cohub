@@ -92,11 +92,11 @@ export function createDocumentModule(ctx: EditorContext) {
 		if (changed.size) rescene(changed);
 	}
 
-	function setScriptItems(items: ReadonlyMap<string, BoardItem>) {
+	function setScriptItems(items: ReadonlyMap<string, BoardItem>): string[] {
 		const previous = scripted;
 		scripted = items;
 		const changed = [...new Set([...previous.keys(), ...items.keys()])].filter((id) => !sameJson(previous.get(id), items.get(id)));
-		if (!changed.length) return;
+		if (!changed.length) return changed;
 		const restacked = new Set<string>();
 		const structural = changed.some((id) => {
 			const before = previous.get(id) ?? state.base.items[id];
@@ -106,6 +106,7 @@ export function createDocumentModule(ctx: EditorContext) {
 			return false;
 		});
 		rescene(structural || [...restacked].some(reordered) ? undefined : changed);
+		return changed;
 	}
 
 	function reordered(parent: string): boolean {

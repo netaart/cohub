@@ -213,7 +213,7 @@ export function createBoardMediaClock(options: {
 	return {
 		sync({ media, now, scrubbing, onScreen }) {
 			if (destroyed) return;
-			const wanted: Array<{ state: BoardMediaState; rate: number }> = [];
+			const wanted: Array<{ state: BoardMediaState; rate: number; rank: number }> = [];
 			const seen = new Set<string>();
 			for (const state of media) {
 				seen.add(state.id);
@@ -224,10 +224,12 @@ export function createBoardMediaClock(options: {
 				const advancing = !scrubbing && state.shown && (steady || (rate > 0 && entries.get(state.id)?.element.paused === false));
 				const known = entries.get(state.id);
 				if (known?.failed && known.src === state.src) continue;
-				if (advancing || (state.kind === "video" && state.shown && onScreen(state.id))) wanted.push({ state, rate: advancing ? rate : 0 });
+				const visible = state.kind === "video" && state.shown && onScreen(state.id);
+				if (advancing || visible)
+					wanted.push({ state, rate: advancing ? rate : 0, rank: state.kind === "audio" ? 0 : visible ? (advancing ? 1 : 2) : 3 });
 			}
 			for (const id of samples.keys()) if (!seen.has(id)) samples.delete(id);
-			wanted.sort((a, b) => Number(b.rate > 0) - Number(a.rate > 0));
+			wanted.sort((a, b) => a.rank - b.rank);
 			const kept = new Set<string>();
 			let playing = false;
 			for (const { state, rate } of wanted.slice(0, options.limit)) {

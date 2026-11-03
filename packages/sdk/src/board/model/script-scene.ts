@@ -24,6 +24,32 @@ function parseBoardItem(value: unknown): BoardItem {
   return parsed.item;
 }
 
+function presentItem(base: BoardItem, patch: Record<string, unknown>): BoardItem {
+  return presentTransform(base, patch) ?? parseBoardItem(mergePatch(base, patch));
+}
+
+function presentTransform(base: BoardItem, patch: Record<string, unknown>): BoardItem | null {
+  const next: Record<string, unknown> = { ...base };
+  for (const key in patch) {
+    const value = patch[key];
+    if (key === "position") {
+      if (!value || typeof value !== "object") return null;
+      const { x = base.position.x, y = base.position.y, ...rest } = value as { x?: unknown; y?: unknown };
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      for (const _ in rest) return null;
+      next.position = { x, y };
+      continue;
+    }
+    if (key === "rotation" || key === "z") {
+      if (!Number.isFinite(value)) return null;
+    } else if (key === "opacity") {
+      if (typeof value !== "number" || !(value >= 0 && value <= 1)) return null;
+    } else if (key !== "visible" || typeof value !== "boolean") return null;
+    next[key] = value;
+  }
+  return next as BoardItem;
+}
+
 const DISPLAY_FIELDS = new Set([
   "position",
   "size",
@@ -279,7 +305,7 @@ export function prepareBoardScriptOutput(
   for (const [id, patch] of Object.entries(output.patches)) {
     const base = document.items[id];
     if (base && scope.has(id))
-      presented.set(id, { base, item: parseBoardItem(mergePatch(base, patch)) });
+      presented.set(id, { base, item: presentItem(base, patch) });
   }
   const prefix = scriptTemporaryPrefix(owner);
   const prepared = {
@@ -317,7 +343,7 @@ export function composeBoardScriptItems(
         if (!base) continue;
         let current = cached;
         if (current.base !== base) {
-          current = { base, item: parseBoardItem(mergePatch(base, output.patches[id])) };
+          current = { base, item: presentItem(base, output.patches[id] ?? {}) };
           prepared.presented.set(id, current);
         }
         changes.set(id, current.item);

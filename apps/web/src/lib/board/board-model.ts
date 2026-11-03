@@ -72,7 +72,7 @@ export function boardModelSource(
 
 export function createBoardModelPreviews(
 	assetSource: () => BoardAssetSource,
-	{ isMobile }: { isMobile: boolean },
+	{ isMobile, published }: { isMobile: boolean; published: boolean },
 ): BoardModelPreviews {
 	const maxBytes = (isMobile ? 16 : 64) * 1024 ** 2;
 	return {
@@ -83,8 +83,20 @@ export function createBoardModelPreviews(
 				assetSource(),
 			);
 			if (!source) throw new Error("Model source is invalid");
+			const file = parseBoardMediaSource(src);
+			const stillKey =
+				published && file?.kind === "file"
+					? (await assetSource().resolveFile(file.value))?.url
+					: null;
+			const { readModelStill, saveModelStill } = await import(
+				"$lib/model3d/still-cache"
+			);
+			const cached = stillKey && (await readModelStill(stillKey));
+			if (cached) return cached;
 			const { renderModelStill } = await import("$lib/model3d/poster");
-			return renderModelStill(source, { maxBytes });
+			const still = await renderModelStill(source, { maxBytes });
+			if (stillKey) saveModelStill(stillKey, still);
+			return still;
 		},
 	};
 }

@@ -4,10 +4,11 @@ import {
   Container,
   Filter,
   type GlProgram,
+  Mesh,
   Rectangle,
   type Renderer,
   RenderTarget,
-  type RenderTexture,
+  RenderTexture,
   RendererType,
   Sprite,
   Texture,
@@ -168,6 +169,68 @@ export function boardShaderSeed(seed: string): number {
   return seedOf(seed);
 }
 
+type Texels = { size: number; root: Container; sprite: Sprite; target: RenderTexture | null; rect: Rect | null };
+
+const TEXEL_GROWTH = 128;
+
+function createTexels(drawn: BoardShaderMesh, pass: BoardShaderPass): Texels {
+  const root = new Container();
+  root.addChild(new Mesh({ geometry: drawn.geometry, shader: drawn.shader }));
+  const sprite = new Sprite({ texture: Texture.EMPTY, label: "board-shader-texels" });
+  sprite.blendMode = (pass.blend ?? "normal") as BLEND_MODES;
+  sprite.visible = false;
+  return { size: pass.texel ?? 1, root, sprite, target: null, rect: null };
+}
+
+function texelRect(frame: BoardShaderFrame, size: number): Rect | null {
+  const [a, b] = frame.localToGlobal;
+  if (Math.hypot(a, b) * frame.density * Math.min(1, frame.shading ?? 1) * size <= 1) return null;
+  const { region, view } = frame;
+  const left = Math.floor(Math.max(region.x, view.x) / size) * size;
+  const top = Math.floor(Math.max(region.y, view.y) / size) * size;
+  const right = Math.ceil(Math.min(region.x + region.width, view.x + view.width) / size) * size;
+  const bottom = Math.ceil(Math.min(region.y + region.height, view.y + view.height) / size) * size;
+  return right > left && bottom > top ? { x: left, y: top, width: right - left, height: bottom - top } : null;
+}
+
+function drawTexels(renderer: Renderer, texels: Texels, rect: Rect) {
+  const width = Math.round(rect.width / texels.size);
+  const height = Math.round(rect.height / texels.size);
+  let target = texels.target;
+  if (!target || target.width < width || target.height < height) {
+    releaseTexels(texels);
+    const grow = (edge: number) => Math.ceil(edge / TEXEL_GROWTH) * TEXEL_GROWTH;
+    target = RenderTexture.create({ width: grow(width), height: grow(height), resolution: 1, scaleMode: "nearest", antialias: false, autoGenerateMipmaps: false });
+    texels.target = target;
+    texels.sprite.texture = new Texture({ source: target.source, frame: new Rectangle(0, 0, width, height), dynamic: true });
+  }
+  const texture = texels.sprite.texture;
+  if (texture.frame.width !== width || texture.frame.height !== height) {
+    texture.frame.width = width;
+    texture.frame.height = height;
+    texture.update();
+  }
+  texels.root.scale.set(1 / texels.size);
+  texels.root.position.set(-rect.x / texels.size, -rect.y / texels.size);
+  renderer.render({ container: texels.root, target, clear: true, clearColor: [0, 0, 0, 0] });
+  texels.sprite.position.set(rect.x, rect.y);
+  texels.sprite.scale.set(texels.size);
+}
+
+function releaseTexels(texels: Texels) {
+  if (!texels.target) return;
+  texels.sprite.texture.destroy();
+  texels.sprite.texture = Texture.EMPTY;
+  texels.target.destroy(true);
+  texels.target = null;
+}
+
+function destroyTexels(texels: Texels) {
+  releaseTexels(texels);
+  texels.sprite.destroy();
+  texels.root.destroy({ children: true });
+}
+
 export function createBoardShaderLayer(
   renderer: Renderer,
   shader: BoardShader,
@@ -196,7 +259,7 @@ export function createBoardShaderLayer(
   if (surfaces) textures.uCohubSurfaces = Texture.EMPTY.source;
   if (hasState) textures.uCohubState = Texture.EMPTY.source;
 
-  type Drawn = BoardShaderMesh & { pass: BoardShaderPass; sprites: number; placement: Placement | null; scaler: AlphaFilter | null };
+  type Drawn = BoardShaderMesh & { pass: BoardShaderPass; sprites: number; placement: Placement | null; scaler: AlphaFilter | null; texels: Texels | null };
   const meshes: Drawn[] = [];
   const filters: Array<{ filter: Filter; pass: BoardShaderPass }> = [];
   const containers: { below: Container | null; above: Container | null } = { below: null, above: null };
@@ -231,7 +294,9 @@ export function createBoardShaderLayer(
     const container = containers[layer];
     container.boundsArea = area;
     container.addChild(drawn.mesh);
-    meshes.push({ ...drawn, pass, sprites, placement, scaler: null });
+    const texels = pass.texel ? createTexels(drawn, pass) : null;
+    if (texels) container.addChild(texels.sprite);
+    meshes.push({ ...drawn, pass, sprites, placement, scaler: null, texels });
   });
 
   let state: { simulate: BoardShaderMesh; uniforms: UniformGroup; read: RenderTexture; write: RenderTexture; steps: number } | null = null;
@@ -382,8 +447,14 @@ export function createBoardShaderLayer(
       area.width = frame.region.width;
       area.height = frame.region.height;
       for (const drawn of meshes) {
-        drawn.mesh.visible = boardShaderPassOn(drawn.pass, frame.passes);
-        if (!drawn.sprites) shade(drawn, frame);
+        const on = boardShaderPassOn(drawn.pass, frame.passes);
+        const texels = drawn.texels;
+        if (texels) {
+          texels.rect = on ? texelRect(frame, texels.size) : null;
+          texels.sprite.visible = texels.rect !== null;
+        }
+        drawn.mesh.visible = on && !texels?.rect;
+        if (drawn.mesh.visible && !drawn.sprites) shade(drawn, frame);
       }
       for (const { filter, pass } of filters) filter.enabled = boardShaderPassOn(pass, frame.passes);
       fill(group, frame, frame.region);
@@ -399,6 +470,7 @@ export function createBoardShaderLayer(
     prepare(target, options) {
       if (!last) return false;
       const stepped = state ? advance(target, state, last, options?.catchUp === true) : { ran: 0, behind: false };
+      for (const { texels } of meshes) if (texels?.rect) drawTexels(target, texels, texels.rect);
       if (placementsStale || stepped.ran) {
         for (const { placement, mesh } of meshes)
           if (placement && mesh.visible) target.render({ container: placement.mesh.mesh, target: placement.target, clear: true, clearColor: [0, 0, 0, 0] });
@@ -426,6 +498,7 @@ export function createBoardShaderLayer(
       for (const compile of compiles) compile.cancel();
       for (const drawn of meshes) {
         drawn.scaler?.destroy();
+        if (drawn.texels) destroyTexels(drawn.texels);
         destroyBoardShaderMesh(drawn);
         if (drawn.placement) destroyPlacement(renderer, drawn.placement);
       }

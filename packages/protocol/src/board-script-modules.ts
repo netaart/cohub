@@ -84,9 +84,13 @@ export function resolveScriptImport(from: string, specifier: string): string {
     } else parts.push(part);
   }
   const path = parts.join("/");
-  if (!isSafeBoardSourcePath(path) || !/\.m?js$/.test(path))
+  if (!isSafeBoardSourcePath(path) || !/\.(m?js|json)$/.test(path))
     throw new Error(`Invalid module path: ${path}`);
   return path;
+}
+
+function isBoardScriptJson(path: string): boolean {
+  return path.endsWith(".json");
 }
 
 export async function loadBoardScriptSources(
@@ -116,11 +120,25 @@ export async function loadBoardScriptSources(
       ]).finally(() => clearTimeout(timer));
       bytes += new TextEncoder().encode(code).byteLength;
       if (bytes > BOARD_SCRIPT_MAX_BYTES) throw new Error("Script modules exceed the 2 MB limit.");
+      if (isBoardScriptJson(path)) {
+        try {
+          JSON.parse(code);
+        } catch {
+          throw new Error(`${path} is not valid JSON.`);
+        }
+        sources[path] = { code, imports: [] };
+        return;
+      }
       const [imports] = parse(code, path);
       const resolved: BoardScriptSource["imports"] = [];
       for (const entry of imports) {
         if (entry.d === -2) throw new Error("import.meta is not available in Board scripts.");
         if (entry.n === undefined) throw new Error("Dynamic imports must use a literal relative path.");
+        const typed = entry.d >= 0
+          ? entry.a >= 0 && /\btype\s*:\s*["']json["']/.test(code.slice(entry.a, entry.se))
+          : Boolean(entry.at?.some(([key, value]) => key === "type" && value === "json"));
+        if (typed !== isBoardScriptJson(entry.n))
+          throw new Error(typed ? `Only .json files import with type "json": ${entry.n}` : `Import ${entry.n} with { type: "json" }.`);
         resolved.push({ start: entry.s, end: entry.e, path: resolveScriptImport(path, entry.n), dynamic: entry.d >= 0 });
       }
       // Waiting on a module that imports this one would never settle, so cycles fail here.
@@ -143,12 +161,29 @@ export async function loadBoardScriptSources(
   return sources;
 }
 
-export function scriptModuleUrls(sources: BoardScriptSources): {
+export function scriptModuleUrls(
+  sources: BoardScriptSources,
+  shared: Map<string, { url: string; users: number }> = new Map(),
+): {
   urls: Record<string, string>;
   dispose(): void;
 } {
   const urls: Record<string, string> = {};
+  const owned: string[] = [];
+  const held: string[] = [];
   for (const [path, source] of Object.entries(sources)) {
+    if (path.endsWith(".json")) {
+      const key = `${path}\n${source.code}`;
+      let json = shared.get(key);
+      if (!json) {
+        json = { url: URL.createObjectURL(new Blob([source.code], { type: "application/json" })), users: 0 };
+        shared.set(key, json);
+      }
+      json.users++;
+      held.push(key);
+      urls[path] = json.url;
+      continue;
+    }
     let code = source.code;
     for (const entry of [...source.imports].reverse()) {
       const url = urls[entry.path];
@@ -158,7 +193,7 @@ export function scriptModuleUrls(sources: BoardScriptSources): {
         (entry.dynamic ? JSON.stringify(url) : url) +
         code.slice(entry.end);
     }
-    urls[path] = URL.createObjectURL(
+    const url = URL.createObjectURL(
       new Blob(
         [
           `${code}\n//# sourceURL=cohub-script/${path.split("/").map(encodeURIComponent).join("/")}`,
@@ -166,11 +201,19 @@ export function scriptModuleUrls(sources: BoardScriptSources): {
         { type: "text/javascript" },
       ),
     );
+    urls[path] = url;
+    owned.push(url);
   }
   return {
     urls,
     dispose: () => {
-      for (const url of Object.values(urls)) URL.revokeObjectURL(url);
+      for (const url of owned) URL.revokeObjectURL(url);
+      for (const key of held) {
+        const json = shared.get(key);
+        if (!json || --json.users > 0) continue;
+        URL.revokeObjectURL(json.url);
+        shared.delete(key);
+      }
     },
   };
 }

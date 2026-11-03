@@ -186,6 +186,15 @@ export function refreshBoardScene(previous: BoardScene, lookup: BoardItemLookup,
 
 const refreshed = new WeakMap<BoardScene, { base: BoardScene; overrides: Map<string, BoardSceneItem> }>();
 
+export function boardSceneChangedIds(previous: BoardScene, next: BoardScene): string[] | null {
+	if (previous === next) return [];
+	const chain = refreshed.get(next);
+	if (!chain || chain.base !== (refreshed.get(previous)?.base ?? previous)) return null;
+	const changed: string[] = [];
+	for (const [id, item] of chain.overrides) if (previous.get(id) !== item) changed.push(id);
+	return changed;
+}
+
 const sources = new WeakMap<BoardSceneItem, BoardItem>();
 
 function stripSceneSource(scene: BoardSceneItem): BoardItem | undefined {

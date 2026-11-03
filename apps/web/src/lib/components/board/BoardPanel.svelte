@@ -265,6 +265,7 @@ const assets = createBoardAssetManager({
 		? undefined
 		: createBoardModelPreviews(() => resolvedAssetSource, {
 				isMobile: untrack(() => isMobile),
+				published: !spaceId,
 			}),
 });
 const boardLod = $derived(lod ?? forced?.lod);

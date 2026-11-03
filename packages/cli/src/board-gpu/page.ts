@@ -177,6 +177,7 @@ const api = {
     };
     const render = () => {
       const start = performance.now();
+      layers.prepare(target);
       target.render({ container: scene.root, target: output, clear: true, ...(transform ? { transform } : {}) });
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
       return performance.now() - start;
@@ -240,6 +241,7 @@ const api = {
           range: [Math.min(...rounds), Math.max(...rounds)] as [number, number],
           filter: !filterPasses.length ? ("none" as const) : filterPasses.every((pass) => pass.name) ? ("switchable" as const) : ("always" as const),
           sprites: shader?.passes.reduce((sum, pass) => sum + (pass.sprites ?? 0), 0) ?? 0,
+          boxes: shader?.passes.filter((pass) => !pass.sprites && !pass.texel && (pass.layer ?? shader.layer) !== "filter").length ?? 0,
           state: shader?.state ? { width: shader.state.width, height: shader.state.height } : null,
         };
       });

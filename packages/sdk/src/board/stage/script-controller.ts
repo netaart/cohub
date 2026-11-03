@@ -37,6 +37,7 @@ export type BoardScriptControllerOptions = {
 export type BoardScriptPointerResult = false | "capture" | "tap" | "click";
 
 const ACTIVATION_MS = 5_000;
+const MOTION_MS = 1_000;
 const USER_EVENTS = new Set(["pointerdown", "pointerup", "click", "keydown", "keyup", "transformend", "gesture"]);
 
 function isUserEvent(event: BoardScriptEvent): boolean {
@@ -64,6 +65,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
   const screens = new Set<string>();
   const activations = new Map<string, number>();
   const emitFailures = new Map<string, string>();
+  const moved = new Map<string, number>();
   const listeners = new Set<() => void>();
   let version = 0;
   let composed = { version: -1, document: null as BoardDocument | null, zoom: 0, pan: "", playhead: "", moving: false, gesture: false };
@@ -198,6 +200,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     gesture = null;
     router.clear();
     editor.setScriptItems(new Map());
+    moved.clear();
     hover = null;
     composed = { ...composed, version: -1, document: null };
   }
@@ -227,7 +230,8 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       editor.gestureActive ? editor.scene.layout : undefined);
     const presented = new Set([...outputs.values()].flatMap((output) => Object.keys(output.patches)));
     for (const id of animation.keys()) if (!presented.has(id)) items.delete(id);
-    editor.setScriptItems(items);
+    const at = now();
+    for (const id of editor.setScriptItems(items)) if (items.has(id)) moved.set(id, at);
     composed = { version, document: editor.document, zoom: camera.zoom, pan, playhead, moving, gesture };
   }
 
@@ -360,6 +364,11 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       animated = next;
     },
     compose,
+    moving(): Iterable<string> {
+      const at = now();
+      for (const [id, changed] of moved) if (at - changed > MOTION_MS) moved.delete(id);
+      return moved.keys();
+    },
     sync,
     pointer,
     key(event: Pick<BoardScriptEvent, "type" | "key" | "shiftKey" | "altKey" | "ctrlKey" | "metaKey">): boolean {

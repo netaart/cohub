@@ -25,7 +25,7 @@ export const BOARD_SCRIPT_API = {
     pixelated: "true draws one canvas pixel per board unit and scales without smoothing, for crisp pixel art.",
     parameters: "Declares params as { name: { type: number | boolean | string | color, label?, default?, min?, max?, step? } }.",
     default: "Setup function (ctx) for behavior; may return a cleanup function.",
-    shader: "GPU passes drawn with the owner: { layer?, inputs?, uniforms?, state?, passes: [{ glsl, sprites?, blend? }] }. See shader.",
+    shader: "GPU passes drawn with the owner: { layer?, inputs?, uniforms?, state?, passes: [{ glsl, sprites?, texel?, blend? }] }. See shader.",
   } satisfies Record<keyof BoardScriptModule, string>,
   frame: {
     t: "Clock time in milliseconds.",

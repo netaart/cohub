@@ -7,6 +7,7 @@ import type { BoardScriptOutput } from "../../src/board/model/script.js";
 import { createScriptRuntime } from "../../src/board/render/script-runtime.js";
 import { createBoardScriptPointerRouter } from "../../src/board/stage/script-pointer.js";
 import { createNodeBoardRenderer, createNodeBoardScriptHost } from "../../src/board/export/node/index.js";
+import { loadBoardScriptSources } from "../../src/board/render/script-modules.js";
 import { boardDocument } from "./fixtures.js";
 
 test("script effects stay local, copy excludes temporary items, and commits enforce scope", () => {
@@ -80,4 +81,28 @@ test("Node exports isolate instances, reuse sequential samples, and reset backwa
       }
     }
   } finally { host.destroy(); renderer.destroy(); }
+});
+
+test("JSON modules import read-only with type json", async () => {
+  const files: Record<string, string> = {
+    "main.js": `import data from "./data.json" with { type: "json" };
+export default function (ctx) {
+  let frozen = false;
+  try { data.levels.push(4); } catch { frozen = true; }
+  ctx.self.present({ opacity: frozen ? data.levels.length / 10 : 1 });
+}`,
+    "data.json": '{"levels":[1,2,3]}',
+  };
+  const renderer = await createNodeBoardRenderer();
+  const document = boardDocument({ items: { a: { type: "custom", size: { width: 4, height: 4 }, script: { src: "main.js" } } } });
+  const host = createNodeBoardScriptHost(renderer, { readModule: async (path) => files[path] ?? "" });
+  try {
+    await host.prepare(buildBoardScene(document).items, [0], 1);
+    assert.equal(host.error("a"), null);
+    assert.equal(host.document?.(document, 0)?.items.a?.opacity, 0.3);
+  } finally { host.destroy(); renderer.destroy(); }
+  const read = async (path: string) => ({ ...files, "plain.js": 'import data from "./data.json";', "typed.js": 'import x from "./x.js" with { type: "json" };' })[path] ?? "";
+  await assert.rejects(loadBoardScriptSources("plain.js", read), /with \{ type: "json" \}/);
+  await assert.rejects(loadBoardScriptSources("typed.js", read), /Only \.json files/);
+  await assert.rejects(loadBoardScriptSources("main.js", async (path) => (path === "data.json" ? "{" : files[path] ?? "")), /not valid JSON/);
 });
