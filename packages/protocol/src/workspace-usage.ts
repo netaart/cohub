@@ -2,7 +2,10 @@ export const WORKSPACE_USAGE_QUEUE = "cohub-workspace-usage";
 export const WORKSPACE_USAGE_SWEEP_JOB = "workspace_usage.sweep";
 export const WORKSPACE_USAGE_UPDATED_EVENT = "space.workspace_usage.updated";
 
-/** Allocated bytes of a cloud workspace, as of the start of the last successful scan. */
+/**
+ * Allocated bytes of a cloud workspace, as of the start of the last successful scan.
+ * `stale` means a stop, write, or sandbox activity is newer than the measurement.
+ */
 export type WorkspaceUsage = {
   bytes: number | null;
   measuredAt: string | null;
@@ -15,20 +18,27 @@ const time = (value: DateLike) => (value ? new Date(value).getTime() : Number.Na
 const iso = (value: DateLike) => (value ? new Date(value).toISOString() : null);
 
 const IDLE_SANDBOX_STATUSES: ReadonlySet<string> = new Set(["stopped", "terminated"]);
+const LIVE_SANDBOX_STATUSES: ReadonlySet<string> = new Set(["ready", "running"]);
 
 export function isSandboxIdleForWorkspaceUsage(status: string | null | undefined) {
   return !status || IDLE_SANDBOX_STATUSES.has(status);
 }
 
+function isSandboxLiveForWorkspaceUsage(status: string | null | undefined) {
+  return !!status && LIVE_SANDBOX_STATUSES.has(status);
+}
+
 export function toWorkspaceUsage(
   row: { bytes: number | null; measuredAt: DateLike; changedAt: DateLike; error: string | null } | null | undefined,
-  sandbox: { status: string; stoppedAt: DateLike } | null | undefined,
+  sandbox: { status: string; stoppedAt: DateLike; lastActivityAt: DateLike } | null | undefined,
 ): WorkspaceUsage {
   const measuredAt = time(row?.measuredAt);
   const measured = row?.bytes != null && Number.isFinite(measuredAt);
-  const changed = !isSandboxIdleForWorkspaceUsage(sandbox?.status)
+  const transient = !isSandboxIdleForWorkspaceUsage(sandbox?.status) && !isSandboxLiveForWorkspaceUsage(sandbox?.status);
+  const changed = transient
     || time(sandbox?.stoppedAt) > measuredAt
-    || time(row?.changedAt) > measuredAt;
+    || time(row?.changedAt) > measuredAt
+    || time(sandbox?.lastActivityAt) > measuredAt;
   return {
     bytes: measured ? row.bytes : null,
     measuredAt: measured ? iso(row.measuredAt) : null,

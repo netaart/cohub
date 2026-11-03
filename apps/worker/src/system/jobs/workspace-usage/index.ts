@@ -4,7 +4,6 @@ import { spaceSandboxes, spaces, spaceWorkspaceUsage } from "@cohub/db";
 import { attachWorkerEventLogger, closeWorkerGracefully, createBullmqQueue, createBullmqWorker, defaultJobRetention } from "@cohub/infra/bullmq";
 import { createLogger } from "@cohub/infra/logging";
 import {
-  isSandboxIdleForWorkspaceUsage,
   isUuidLike,
   toWorkspaceUsage,
   WORKSPACE_USAGE_QUEUE,
@@ -18,11 +17,11 @@ import { publishSpaceEvent } from "../../../space-events.js";
 import { registerSystemJob } from "../../registry.js";
 import { isPduAvailable, pduBinary, runPdu } from "./pdu.js";
 import { acquireScanLock } from "./scan-lock.js";
-import { claimScan, findDueWorkspaces, finishScan, isQuietForScan, PDU_THREADS, resolveWorkspacePath, SCAN_TIMEOUT_MS, SWEEP_BATCH, withDeadline } from "./policy.js";
+import { claimScan, findDueWorkspaces, finishScan, PDU_THREADS, resolveWorkspacePath, SCAN_CONCURRENCY, SCAN_LEASE_MS, SCAN_TIMEOUT_MS, SWEEP_BATCH, withDeadline } from "./policy.js";
 
 const logger = createLogger({ serviceName: "cohub-worker" });
 
-const SWEEP_INTERVAL_MS = 5 * 60_000;
+const SWEEP_INTERVAL_MS = 60_000;
 const SWEEP_SCHEDULER_ID = "workspace-usage-sweep";
 const SCAN_JOB = "workspace_usage.scan";
 
@@ -39,12 +38,14 @@ export function getWorkspaceUsageQueue() {
 
 registerSystemJob(WORKSPACE_USAGE_SWEEP_JOB, async () => {
   const scanQueue = getWorkspaceUsageQueue();
-  const backlog = await scanQueue.getWaitingCount();
-  const { spaceIds, due } = await findDueWorkspaces(db, SWEEP_BATCH);
-  // Already-queued spaces stay first in this order and are deduplicated.
-  const batch = spaceIds.slice(0, Math.max(0, SWEEP_BATCH - backlog));
-  for (const spaceId of batch) {
+  // Prioritized jobs are not counted as waiting by BullMQ.
+  const backlog = await scanQueue.getJobCountByTypes("waiting", "prioritized");
+  const { candidates, due } = await findDueWorkspaces(db, SWEEP_BATCH);
+  // Already-queued spaces are deduplicated and keep their first priority.
+  const batch = candidates.slice(0, Math.max(0, SWEEP_BATCH - backlog));
+  for (const { spaceId, priority } of batch) {
     await scanQueue.add(SCAN_JOB, { spaceId }, {
+      priority,
       deduplication: { id: `workspace-usage-${spaceId}` },
       attempts: 1,
       removeOnComplete: { age: 24 * 3600, count: 100 },
@@ -63,15 +64,12 @@ async function loadState(spaceId: string) {
   return row;
 }
 
-// Outlives the hard scan deadline, so the lock cannot lapse while pdu runs.
-const SCAN_LOCK_TTL_MS = SCAN_TIMEOUT_MS + 2 * 60_000;
-
 export async function processWorkspaceUsageScan(job: Job<ScanJobData>) {
   const spaceId = job.data?.spaceId;
   if (!isUuidLike(spaceId)) throw new Error("workspace usage scan requires a valid spaceId");
   // Fixed before the lock request: a delayed OK must not restart the budget.
   const deadline = Date.now() + SCAN_TIMEOUT_MS;
-  const lock = await acquireScanLock(redisCommandClient, SCAN_LOCK_TTL_MS);
+  const lock = await acquireScanLock(redisCommandClient, SCAN_LEASE_MS, SCAN_CONCURRENCY);
   if (!lock) return { skipped: "busy" };
   try {
     return await scanWorkspace(spaceId, deadline);
@@ -81,25 +79,25 @@ export async function processWorkspaceUsageScan(job: Job<ScanJobData>) {
 }
 
 async function scanWorkspace(spaceId: string, deadline: number) {
-  const state = await loadState(spaceId);
-  if (!state) return { skipped: "deleted" };
-  if (state.sandbox?.provider === "local") return { skipped: "local" };
-  if (!isSandboxIdleForWorkspaceUsage(state.sandbox?.status)) return { skipped: "running" };
-  if (!isQuietForScan(state.sandbox, state.usage)) return { skipped: "not_quiet" };
+  // Same rule as the sweep: state may have changed since enqueue, or a
+  // replacement execution may already have scanned it.
+  const [due] = (await findDueWorkspaces(db, 1, spaceId)).candidates;
+  if (!due) return { skipped: "not_due" };
 
   // measuredAt is the claim time, so anything that changes during the scan is
   // newer than the measurement and keeps the workspace due.
   // An execution whose deadline passed (e.g. a delayed lock reply) must not
   // claim: the space may already belong to its replacement.
   if (Date.now() >= deadline - 1000) return { skipped: "expired" };
-  const attemptedAt = await claimScan(db, spaceId, SCAN_LOCK_TTL_MS);
+  // Fenced on the attempt the due check saw, so nothing can start in between.
+  const attemptedAt = await claimScan(db, spaceId, due.attemptedAt, SCAN_LEASE_MS);
   if (!attemptedAt) return { skipped: "claimed_elsewhere" };
   let result: Record<string, unknown>;
   try {
     const path = await withDeadline(resolveWorkspacePath(config.spaceStorageRoot, spaceId), deadline);
     const bytes = await runPdu({ path, threads: PDU_THREADS, deadline });
     const owned = await finishScan(db, spaceId, attemptedAt, { bytes });
-    result = { spaceId, bytes, owned, durationMs: Date.now() - attemptedAt.getTime() };
+    result = { spaceId, bytes, owned, priority: due.priority, durationMs: Date.now() - attemptedAt.getTime() };
   } catch (error) {
     // The last complete measurement stays; the sweep retries with backoff.
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 500);
@@ -129,11 +127,11 @@ export async function startWorkspaceUsage(systemQueue: Queue) {
     logger.warn(`[WorkspaceUsage] disabled: ${config.spaceStorageRoot ? `pdu ${pduBinary()} unavailable` : "SPACE_STORAGE_ROOT unset"}`);
     return async () => undefined;
   }
-  await getWorkspaceUsageQueue().setGlobalConcurrency(1);
+  await getWorkspaceUsageQueue().setGlobalConcurrency(SCAN_CONCURRENCY);
   const { worker, connection } = createBullmqWorker<ScanJobData>(WORKSPACE_USAGE_QUEUE, processWorkspaceUsageScan, {
     redisUrl: config.bullmqRedisUrl,
     telemetryServiceName: "cohub-workspace-usage",
-    concurrency: 1,
+    concurrency: SCAN_CONCURRENCY,
   });
   attachWorkerEventLogger(worker, { serviceName: "WorkspaceUsage", queueName: WORKSPACE_USAGE_QUEUE });
   await systemQueue.upsertJobScheduler(SWEEP_SCHEDULER_ID, { every: SWEEP_INTERVAL_MS }, {
@@ -141,7 +139,7 @@ export async function startWorkspaceUsage(systemQueue: Queue) {
     data: {},
     opts: { attempts: 1, ...defaultJobRetention },
   });
-  logger.info("[WorkspaceUsage] started", { threads: PDU_THREADS, timeoutMs: SCAN_TIMEOUT_MS });
+  logger.info("[WorkspaceUsage] started", { concurrency: SCAN_CONCURRENCY, threads: PDU_THREADS, timeoutMs: SCAN_TIMEOUT_MS });
   return async () => {
     await closeWorkerGracefully(worker, { serviceName: "WorkspaceUsage", timeoutMs: 10_000 });
     await queue?.close().catch(() => undefined);
