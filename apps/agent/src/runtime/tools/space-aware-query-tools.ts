@@ -26,10 +26,11 @@ function getRequestedSpaceId(params: unknown) {
   return trimmed ? assertValidSpaceId(trimmed) : null;
 }
 
-const SPACE_ID_PARAMETER = Type.Optional(Type.String({
-  description: SPACE_ID_DESCRIPTION,
-  pattern: UUID_OR_SHORT_UUID_PATTERN,
-}));
+// GPT fills every field; without null it invents a pattern-valid UUID for the current space.
+const SPACE_ID_PARAMETER = Type.Optional(Type.Union([
+  Type.String({ pattern: UUID_OR_SHORT_UUID_PATTERN }),
+  Type.Null(),
+], { description: SPACE_ID_DESCRIPTION }));
 
 function getQueryPath(params: unknown) {
   if (!params || typeof params !== "object") return undefined;
