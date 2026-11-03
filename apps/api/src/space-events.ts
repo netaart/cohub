@@ -5,7 +5,7 @@ import { COHUB_SYSTEM_QUEUE, createBullmqQueue, defaultCriticalJobOptions } from
 import { config } from "./config.js";
 import { enqueueFsCdnWarmForChanges } from "./space-fs-cdn-prewarm.js";
 import { dispatchRealtimeEvent } from "./channels.js";
-import type { RealtimeRoom, RealtimeServerEvent } from "@cohub/protocol/realtime";
+import type { RealtimeEnvelope, RealtimeRoom, RealtimeServerEvent } from "@cohub/protocol/realtime";
 import { createLogger } from "@cohub/infra/logging";
 import { redisCommandClient } from "./redis.js";
 
@@ -46,7 +46,7 @@ type SpaceEventDispatchOptions = {
   skipRealtime?: boolean;
 };
 
-export async function dispatchSpaceDomainEvent(input: RealtimeServerEvent & {
+export async function dispatchSpaceDomainEvent(input: (RealtimeServerEvent | RealtimeEnvelope) & {
   rooms?: RealtimeRoom[];
 }, options?: SpaceEventDispatchOptions) {
   const deliveries: Promise<unknown>[] = [];
