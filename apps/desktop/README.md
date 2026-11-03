@@ -23,7 +23,8 @@ terminal share one sign-in and one set of Runtimes.
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| Shell | Swift 6, AppKit | C# (.NET 10), WPF | C# (.NET 10), GTK 4 via GirCore |
+| Shell | Swift 6, AppKit | C# (.NET 10), WPF | C# (.NET 10), GTK 4 and libadwaita via GirCore |
+| Tabs | Native window tabs | Tab strip under the title bar | `AdwTabView` and `AdwTabBar` |
 | WebView | WKWebView | WebView2 | WebKitGTK 6.0 (from the system) |
 | Updates | Sparkle (EdDSA-signed appcast) | Velopack (delta packages) | Velopack (AppImage, delta packages) |
 | Tray | Menu bar item | Notification area icon | Header bar menu, tinted by state |
@@ -47,16 +48,36 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
 ## Behaviour
 
 - **Start-up.** The CLI service starts with the app and says hello in about 100 ms; the
-  last hello is remembered, so a page never waits to learn what the host can do. The window
-  opens at its saved frame over the page's last edge color, so a cold start never flashes
-  white; on macOS the page fades in once it reports its first screen (`app.ready`).
-- **Navigation.** Only the web origin loads in a window, and only its top-level page gets
-  the bridge. Other links open in the browser; `window.open` to a Cohub page opens a new
-  window (a tab on macOS when windows are tabbed). `cohub://open/<path>` deep links
-  (`cohub-dev://` for dev builds) open a page in the frontmost window.
-- **Closing.** Closing the last window hides it, so reopening is instant and realtime stays
-  connected. Quitting leaves Runtimes running; disconnecting a folder is explicit (in the
-  page, the tray, or `cohub runtime down`).
+  last hello is remembered, so a page never waits to learn what the host can do. Windows and
+  tabs reopen where they were, each tab over its page's last edge color, so a cold start never
+  flashes white; only the tab each window shows loads, the rest when first shown. The page
+  fades in once it reports its first screen (`app.ready`), and the log says how long that took.
+- **Tabs.** Each tab is its own WebView and bridge, so switching never reloads and one page
+  crashing leaves the others. A window shows its tab bar from the second tab. The shell takes
+  its keys before the page can: ⌘T / Ctrl+T new tab, ⌘W / Ctrl+W (Ctrl+F4) close tab,
+  ⌘⇧W / Ctrl+Shift+W close window, ⌘⇧T / Ctrl+Shift+T reopen a closed tab, ⌃Tab / Ctrl+Tab
+  (and ⌘⇧] / Ctrl+PgDn) to move between tabs, ⌘1–8 / Ctrl+1–8 to pick one and 9 for the last.
+  A page forwarding keys to a remote screen takes them over (`tabs.update` `captureKeys`),
+  except ⌘Q. The Windows and Linux keys are `ShellShortcuts` in the .NET core; macOS keeps them
+  in its menus.
+- **Navigation.** Only the web origin loads in a tab, and only its top-level page gets the
+  bridge. Other links open in the browser. `window.open` to a Cohub page opens a tab beside the
+  one asking, after the tabs it opened before; ⌘-click and Ctrl-click open it in the background,
+  with Shift in front, and so does middle-click on macOS and Linux (WebView2 does not say which
+  button asked, so on Windows it opens in front). Notifications, the tray, the Dock, the Jump List, launcher
+  actions, `cohub://open/<path>` deep links (`cohub-dev://` for dev builds) and folders switch to
+  a tab already showing the page, reuse a tab still on `/`, or open a tab in the front window.
+- **Background tabs.** A tab out of sight is hidden to its page, which slows down on its own; a
+  new account or service reloads it when next shown rather than at once. A page that finished
+  a reply while hidden marks its tab (`attention`). The same notification from several tabs
+  shows once. On Windows a tab hidden for five minutes with no unsaved work, captured keys,
+  audio or camera freezes until shown, and hears the latest Runtime and screen state on waking.
+- **Closing.** A tab with unsaved work (`tabs.update` `dirty`) asks before it closes, and so does
+  quitting. Closing a tab returns to the tab that opened it when it came straight from there.
+  Closing the last window hides it, so reopening is instant and realtime stays connected; on
+  macOS, where each tab is a window, its other tabs go to Reopen Closed Tab first. Signing out
+  leaves one tab on the home page and nothing of the account to reopen. Quitting leaves Runtimes
+  running; disconnecting a folder is explicit (in the page, the tray, or `cohub runtime down`).
 - **Account.** Signing in opens the CLI's device sign-in in the browser; when it completes,
   the frontmost window lands where the sign-in started and Cohub comes forward. Signing in
   or out in a terminal does the same to the app.
@@ -87,7 +108,7 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
 
 ### Linux
 
-- **Toolkit.** GTK 4.10+ and WebKitGTK 6.0 come from the distribution (Ubuntu 24.04, Debian 13,
+- **Toolkit.** GTK 4.10+, libadwaita 1.2+ and WebKitGTK 6.0 come from the distribution (Ubuntu 24.04, Debian 13,
   Fedora 40, Arch and later); the AppImage bundles .NET, Node, the CLI and sandboxd but not the
   toolkit, and says what to install when it is missing.
 - **Single instance.** The app is a `GtkApplication` (`live.cohub.desktop`, `live.cohub.desktop.dev`):
@@ -96,7 +117,8 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
   pointing at the AppImage, registers it for the URL scheme and lists recent Spaces as actions.
 - **Bridge.** The page's `cohubHost` relays to an isolated script world, the only one that can
   reach the native message handler, so frames and page scripts never touch it directly.
-- **Edge color.** The header bar takes the page's edge color; its menu lists connected folders,
+- **Tabs.** Tabs drag between windows and out into new ones.
+- **Edge color.** The header bar and tab bar take the front tab's edge color; its menu lists connected folders,
   and its icon turns green, yellow or red with them, like the tray icon elsewhere.
 - **Folders.** `Cohub <folder>` lands on a new Space with that folder chosen.
 - **Not yet.** Screen sharing (the CLI offers `display` on macOS and Windows only), streaming
@@ -114,6 +136,10 @@ dotnet build apps/desktop/windows/Cohub/Cohub.csproj   # compiles on macOS and L
 dotnet build apps/desktop/linux/Cohub/Cohub.csproj     # compiles anywhere; runs on Linux
 ```
 
+The cores also hold what the shells share about tabs (`Tabs.swift`, `Tabs.cs`): the saved
+session, where a tab opens and which one a closed tab hands over to, Reopen Closed Tab, and
+the repeat filter for notifications.
+
 Run an app against a CLI from this checkout instead of a bundled one:
 
 ```bash
@@ -123,7 +149,7 @@ COHUB_DESKTOP_NODE=$(which node) COHUB_DESKTOP_CLI=$PWD/packages/cli/bin/cohub.j
 ```
 
 On Windows, set the same variables and `dotnet run --project apps/desktop/windows/Cohub`; on
-Linux, `dotnet run --project apps/desktop/linux/Cohub` (with `libwebkitgtk-6.0-4` installed).
+Linux, `dotnet run --project apps/desktop/linux/Cohub` (with `libadwaita-1-0` and `libwebkitgtk-6.0-4` installed).
 `COHUB_DESKTOP_ENV=dev` and `COHUB_DESKTOP_WEB_ORIGIN` select another environment or a local web
 server. Without a CLI the app still runs; the page then signs in as it would in a browser.
 `swift run` has no app bundle, so updates and notifications are off there.

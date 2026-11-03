@@ -29,7 +29,8 @@
     "workspace",
     "workspace.files",
     "display.presenting",
-    "display.float"
+    "display.float",
+    "tabs"
   ],
   "methods": [
     "host.describe",
@@ -63,6 +64,7 @@
     "files.save",
     "navigation.interceptBack",
     "shortcuts.push",
+    "tabs.update",
     "display.status",
     "display.share",
     "display.stop",

@@ -13,6 +13,7 @@
     <AssemblyMetadata Include="CohubEnvironment" Value="$(CohubEnvironment)" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="GirCore.Adw-1" Version="0.8.1" />
     <PackageReference Include="GirCore.Gtk-4.0" Version="0.8.1" />
     <PackageReference Include="GirCore.WebKit-6.0" Version="0.8.1" />
     <PackageReference Include="Velopack" Version="1.2.161" />

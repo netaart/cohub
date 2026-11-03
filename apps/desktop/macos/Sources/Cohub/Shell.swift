@@ -6,16 +6,20 @@ import Sparkle
 import WebKit
 
 @MainActor
-final class Shell: NSObject, NSApplicationDelegate {
+final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     let config = ShellConfig.load()
-    private let log = Logger(subsystem: "live.cohub.desktop", category: "shell")
+    let log = Logger(subsystem: "live.cohub.desktop", category: "shell")
     private var windows: [ShellWindow] = []
+    private var closedTabs = ClosedTabs()
+    private var repeats = RepeatFilter()
+    private var saving: Task<Void, Never>?
+    private var remembersClosedTabs = true
     private var service: HostService?
     private(set) var workspaceFiles: WorkspaceFiles?
     private var updater: SPUStandardUpdaterController?
     private var notifications: Notifications?
     private var launched = false
-    private var pendingPath: String?
+    private var pendingPaths: [String] = []
     private lazy var shortcut = GlobalShortcut { [weak self] in self?.showPrimary() }
     private lazy var status = StatusMenu(actions: .init(
         openSpace: { [weak self] spaceId in self?.open(path: "/spaces/\(spaceId)") },
@@ -38,9 +42,10 @@ final class Shell: NSObject, NSApplicationDelegate {
         })
         startService()
         if ShellState.globalShortcut { shortcut.set(enabled: true) }
-        openWindow(path: pendingPath ?? ShellState.lastPath ?? "/")
-        pendingPath = nil
+        restore(ShellState.session)
         launched = true
+        for path in pendingPaths { open(path: path) }
+        pendingPaths = []
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -50,7 +55,14 @@ final class Shell: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if windows.contains(where: \.dirty), !confirmQuit() { return .terminateCancel }
+        remembersClosedTabs = false
+        return .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        saveSession()
         service?.stop()
     }
 
@@ -58,7 +70,7 @@ final class Shell: NSObject, NSApplicationDelegate {
         for url in urls {
             let folder = url.isFileURL ? WebOrigin.newSpacePath(folder: url.path) : nil
             guard let path = folder ?? WebOrigin.path(fromDeepLink: url, scheme: config.urlScheme) ?? config.origin.path(of: url) else { continue }
-            if launched { open(path: path) } else { pendingPath = path }
+            if launched { open(path: path) } else { pendingPaths.append(path) }
         }
     }
 
@@ -72,42 +84,144 @@ final class Shell: NSObject, NSApplicationDelegate {
         return menu
     }
 
+    private func restore(_ session: TabSession?) {
+        guard let session, !session.windows.isEmpty else {
+            openWindow(path: "/")
+            return
+        }
+        for saved in session.windows {
+            let tabs = saved.tabs.enumerated().map { index, tab in ShellWindow(shell: self, tab: tab, loads: index == saved.selected) }
+            guard let first = tabs.first?.window else { continue }
+            tabs[0].place(frame: saved.frame)
+            first.tabbingMode = .disallowed
+            first.orderFront(nil)
+            first.tabbingMode = .automatic
+            for (previous, next) in zip(tabs, tabs.dropFirst()) {
+                if let added = next.window { previous.window?.addTabbedWindow(added, ordered: .above) }
+            }
+            windows += tabs.enumerated().filter { $0.offset != saved.selected }.map(\.element) + [tabs[saved.selected]]
+            tabs[saved.selected].showWindow(nil)
+        }
+    }
+
     @discardableResult
-    func openWindow(path: String, tabbedWith tab: NSWindow? = nil) -> ShellWindow {
-        let window = ShellWindow(shell: self, path: path, cascadeFrom: windows.isEmpty ? nil : (tab ?? NSApp.keyWindow ?? windows.last?.window))
-        windows.append(window)
-        if let tab, let added = window.window { tab.addTabbedWindow(added, ordered: .above) }
-        window.showWindow(nil)
-        return window
+    func openWindow(path: String) -> ShellWindow {
+        let tab = ShellWindow(shell: self, tab: .init(path: path), loads: true)
+        tab.place(cascadingFrom: primary?.window)
+        windows.append(tab)
+        tab.window?.tabbingMode = .disallowed
+        tab.showWindow(nil)
+        tab.window?.tabbingMode = .automatic
+        sessionChanged()
+        return tab
+    }
+
+    @discardableResult
+    func openTab(_ tab: TabSession.Tab, beside anchor: ShellWindow, at index: Int? = nil, background: Bool = false) -> ShellWindow {
+        let group = anchor.tabs
+        let position = index.map { min(max($0, 0), group.count) } ?? TabOrder.insertion(after: ObjectIdentifier(anchor), in: Self.order(group))
+        let opened = ShellWindow(shell: self, tab: tab, loads: true)
+        if index == nil { opened.opener = anchor }
+        guard let added = opened.window else { return opened }
+        if position == 0 { group[0].window?.addTabbedWindow(added, ordered: .below) } else { group[position - 1].window?.addTabbedWindow(added, ordered: .above) }
+        if background {
+            windows.insert(opened, at: 0)
+            if let shown = anchor.window, shown.tabGroup?.selectedWindow !== shown { shown.tabGroup?.selectedWindow = shown }
+        } else {
+            windows.append(opened)
+            opened.showWindow(nil)
+        }
+        sessionChanged()
+        return opened
     }
 
     func open(path: String) {
         guard WebOrigin.isInAppPath(path) else { return }
-        if let window = primary {
-            window.load(path)
-            window.showWindow(nil)
+        defer { activate() }
+        if let shown = windows.last(where: { TabSession.samePage($0.path, path) && ($0.path == path || !$0.dirty) }) {
+            if shown.path != path { shown.load(path) }
+            shown.showWindow(nil)
         } else {
-            openWindow(path: path)
+            show(.init(path: path), reusing: { $0.path == "/" })
         }
-        activate()
+    }
+
+    private func show(_ tab: TabSession.Tab, at index: Int? = nil, reusing reuses: (ShellWindow) -> Bool = { _ in false }) {
+        guard let front = primary else {
+            openWindow(path: tab.path)
+            return
+        }
+        if (front.parked || reuses(front)) && !front.dirty {
+            front.load(tab.path)
+            front.showWindow(nil)
+        } else {
+            openTab(tab, beside: front, at: index ?? front.tabs.count)
+        }
     }
 
     func isLastWindow(_ window: ShellWindow) -> Bool { windows.count == 1 && windows.first === window }
 
-    func closed(_ window: ShellWindow) {
-        windows.removeAll { $0 === window }
+    func isOnlyWindow(_ tabs: [ShellWindow]) -> Bool { windows.allSatisfy { tab in tabs.contains { $0 === tab } } }
+
+    func willClose(_ window: ShellWindow) {
+        guard window.window?.tabGroup?.selectedWindow === window.window else { return }
+        guard let next = TabOrder.successor(of: ObjectIdentifier(window), selected: ObjectIdentifier(window), in: Self.order(window.tabs)),
+              let successor = window.tabs.first(where: { ObjectIdentifier($0) == next })
+        else { return }
+        successor.showWindow(nil)
     }
 
-    func navigated(to path: String) {
-        ShellState.lastPath = path
+    private static func order(_ tabs: [ShellWindow]) -> [(id: ObjectIdentifier, opener: ObjectIdentifier?)] {
+        tabs.map { tab in (id: ObjectIdentifier(tab), opener: tab.opener.map { ObjectIdentifier($0) }) }
+    }
+
+    func closed(_ window: ShellWindow) {
+        if remembersClosedTabs {
+            let tabs = window.tabs
+            closedTabs.push(window.tab, index: tabs.firstIndex { $0 === window } ?? tabs.count)
+        }
+        windows.removeAll { $0 === window }
+        for tab in windows where tab.opener === window { tab.opener = nil }
+        sessionChanged()
+    }
+
+    func activated(_ window: ShellWindow) {
+        if let previous = windows.last, previous !== window, window.opener !== previous { window.opener = nil }
+        windows.removeAll { $0 === window }
+        windows.append(window)
+        sessionChanged()
+    }
+
+    func sessionChanged() {
+        saving?.cancel()
+        saving = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.saveSession()
+        }
+    }
+
+    private func saveSession() {
+        saving?.cancel()
+        var groups: [ObjectIdentifier] = []
+        var saved: [ObjectIdentifier: TabSession.Window] = [:]
+        for window in windows {
+            let tabs = window.tabs
+            let key = ObjectIdentifier(tabs[0])
+            let selected = tabs.firstIndex { $0.window === $0.window?.tabGroup?.selectedWindow } ?? 0
+            groups.removeAll { $0 == key }
+            groups.append(key)
+            saved[key] = TabSession.Window(tabs: tabs.map(\.tab), selected: selected, frame: window.window?.frameDescriptor)
+        }
+        ShellState.session = TabSession(windows: groups.compactMap { saved[$0] }).sanitized()
     }
 
     private var primary: ShellWindow? {
-        windows.first { $0.window === NSApp.keyWindow } ?? windows.first { $0.window?.isVisible == true } ?? windows.first
+        windows.first { $0.window === NSApp.keyWindow } ?? windows.last { $0.window?.isVisible == true } ?? windows.last
     }
 
     private func showPrimary() {
-        if let window = primary { window.showWindow(nil) } else { openWindow(path: ShellState.lastPath ?? "/") }
+        if let window = primary { window.showWindow(nil) } else { openWindow(path: "/") }
         activate()
     }
 
@@ -115,10 +229,19 @@ final class Shell: NSObject, NSApplicationDelegate {
         if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
     }
 
+    private func confirmQuit() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = L("Some tabs have unsaved changes")
+        alert.informativeText = L("Your changes will be lost.")
+        alert.addButton(withTitle: L("Quit"))
+        alert.addButton(withTitle: L("Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     func router(for window: ShellWindow) -> BridgeRouter {
         typealias M = HostProtocol.Method
         typealias C = HostProtocol.Capability
-        var capabilities = [C.launch, C.appearance, C.navigation, C.share, C.files, C.cache, C.shortcuts, C.mediaCapture, C.permissions, C.badge, C.globalShortcut]
+        var capabilities = [C.launch, C.appearance, C.navigation, C.share, C.files, C.cache, C.shortcuts, C.mediaCapture, C.permissions, C.badge, C.globalShortcut, C.tabs]
         if notifications != nil { capabilities.append(C.notifications) }
         if Bundle.main.bundleIdentifier != nil { capabilities.append(C.launchAtLogin) }
         if service != nil { capabilities.append(C.runtimePicker) }
@@ -134,6 +257,10 @@ final class Shell: NSObject, NSApplicationDelegate {
             M.navigationOpenPath: { [weak window] params in
                 guard let path = params["path"]?.string, WebOrigin.isInAppPath(path) else { throw BridgeFailure.failed("navigation.openPath requires an in-app path") }
                 window?.load(path)
+                return true
+            },
+            M.tabsUpdate: { [weak window] params in
+                window?.update(dirty: params["dirty"]?.bool, attention: params["attention"]?.bool == true, capturesKeys: params["captureKeys"]?.bool)
                 return true
             },
             M.shareText: { [weak window] params in
@@ -180,7 +307,11 @@ final class Shell: NSObject, NSApplicationDelegate {
         ]
         if let notifications {
             handlers[M.notificationsRegister] = { _ in .bool(await notifications.register()) }
-            handlers[M.notificationsShow] = { params in .bool(try await notifications.show(params)) }
+            handlers[M.notificationsShow] = { [weak self] params in
+                let key = ["id", "title", "body"].map { params[$0]?.string ?? "" }.joined(separator: "\n")
+                if self?.repeats.admits(key) == false { return true }
+                return .bool(try await notifications.show(params))
+            }
         }
         if let service {
             handlers[M.runtimePickFolder] = { [weak window] params in
@@ -249,12 +380,20 @@ final class Shell: NSObject, NSApplicationDelegate {
     private func accountChanged(_ payload: JSON?) {
         let authenticated = payload?["authenticated"]?.bool ?? false
         let redirect = payload?["redirectPath"]?.string.flatMap { WebOrigin.isInAppPath($0) ? $0 : nil }
-        if !authenticated { ShellState.lastPath = nil }
         let front = primary
-        for window in windows {
-            if !authenticated { window.load("/") } else if window === front, let redirect { window.load(redirect) } else { window.webView.reload() }
+        if !authenticated {
+            closedTabs.removeAll()
+            remembersClosedTabs = false
+            for window in windows where window !== front { window.window?.close() }
+            remembersClosedTabs = true
+            front?.load("/")
+            sessionChanged()
+            return
         }
-        if authenticated, redirect != nil { showPrimary() }
+        for window in windows {
+            if window === front, let redirect { window.load(redirect) } else { window.refresh() }
+        }
+        if redirect != nil { showPrimary() }
     }
 
     private func disconnect(_ spaceId: String, force: Bool = false) {
@@ -285,8 +424,19 @@ final class Shell: NSObject, NSApplicationDelegate {
         Task { _ = await service.call(BridgeRequest(id: "stop", method: HostProtocol.Method.displayStop)) }
     }
 
+    @objc func newTab(_ sender: Any?) {
+        show(.init(path: "/"))
+        activate()
+    }
+
     @objc func newWindow(_ sender: Any?) {
         openWindow(path: "/")
+        activate()
+    }
+
+    @objc func reopenClosedTab(_ sender: Any?) {
+        guard let entry = closedTabs.pop() else { return }
+        show(entry.tab, at: entry.index)
         activate()
     }
 
@@ -304,6 +454,10 @@ final class Shell: NSObject, NSApplicationDelegate {
 
     @objc func openHelp(_ sender: Any?) {
         if let url = config.origin.url(for: "/docs") { NSWorkspace.shared.open(url) }
+    }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        item.action == #selector(reopenClosedTab(_:)) ? !closedTabs.isEmpty : true
     }
 }
 

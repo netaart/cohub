@@ -24,6 +24,7 @@ public static class HostProtocol
         public const string GlobalShortcut = "app.globalShortcut";
         public const string Workspace = "workspace";
         public const string WorkspaceFiles = "workspace.files";
+        public const string Tabs = "tabs";
     }
 
     public static class Methods
@@ -37,6 +38,7 @@ public static class HostProtocol
         public const string NotificationsRegister = "notifications.register";
         public const string NotificationsShow = "notifications.show";
         public const string ShortcutsPush = "shortcuts.push";
+        public const string TabsUpdate = "tabs.update";
         public const string RuntimeList = "runtime.list";
         public const string RuntimeBrowse = "runtime.browse";
         public const string RuntimeStart = "runtime.start";

@@ -95,9 +95,15 @@ enum ShellState {
         return id
     }
 
-    static var lastPath: String? {
-        get { defaults.string(forKey: "lastPath").flatMap { WebOrigin.isInAppPath($0) ? $0 : nil } }
-        set { defaults.set(newValue, forKey: "lastPath") }
+    static var session: TabSession? {
+        get {
+            TabSession.decode(defaults.data(forKey: "tabSession"))
+                ?? defaults.string(forKey: "lastPath").flatMap { WebOrigin.isInAppPath($0) ? TabSession(windows: [.init(tabs: [.init(path: $0)])]) : nil }
+        }
+        set {
+            defaults.set(newValue?.encoded(), forKey: "tabSession")
+            defaults.removeObject(forKey: "lastPath")
+        }
     }
 
     static var globalShortcut: Bool {

@@ -21,12 +21,17 @@ enum MainMenu {
         app.addItem(withTitle: L("Hide Others"), action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h").keyEquivalentModifierMask = [.command, .option]
         app.addItem(withTitle: L("Show All"), action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         app.addItem(.separator())
-        app.addItem(withTitle: L("Quit Cohub"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        ShellKeys.always.addItem(copy(app.addItem(withTitle: L("Quit Cohub"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")))
 
         let file = submenu(bar, L("File"))
-        file.addItem(withTitle: L("New Window"), action: #selector(Shell.newWindow(_:)), keyEquivalent: "n")
+        reserve(file.addItem(withTitle: L("New Tab"), action: #selector(Shell.newTab(_:)), keyEquivalent: "t"))
+        reserve(file.addItem(withTitle: L("New Window"), action: #selector(Shell.newWindow(_:)), keyEquivalent: "n"))
         file.addItem(withTitle: L("New Space…"), action: #selector(Shell.newSpace(_:)), keyEquivalent: "n").keyEquivalentModifierMask = [.command, .shift]
-        file.addItem(withTitle: L("Close Window"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        file.addItem(.separator())
+        reserve(file.addItem(withTitle: L("Reopen Closed Tab"), action: #selector(Shell.reopenClosedTab(_:)), keyEquivalent: "t"), [.command, .shift])
+        file.addItem(.separator())
+        reserve(file.addItem(withTitle: L("Close Tab"), action: #selector(ShellWindow.closeTab(_:)), keyEquivalent: "w"))
+        reserve(file.addItem(withTitle: L("Close Window"), action: #selector(ShellWindow.closeWindow(_:)), keyEquivalent: "w"), [.command, .shift])
 
         let edit = submenu(bar, L("Edit"))
         edit.addItem(withTitle: L("Undo"), action: Selector(("undo:")), keyEquivalent: "z")
@@ -57,6 +62,21 @@ enum MainMenu {
         window.addItem(.separator())
         window.addItem(withTitle: L("Bring All to Front"), action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         NSApp.windowsMenu = window
+        for number in 1...9 {
+            let item = NSMenuItem(title: "", action: #selector(ShellWindow.selectTab(_:)), keyEquivalent: "\(number)")
+            item.tag = number
+            ShellKeys.tabs.addItem(item)
+        }
+        for (action, key, modifiers) in [
+            (#selector(NSWindow.selectNextTab(_:)), "}", NSEvent.ModifierFlags.command),
+            (#selector(NSWindow.selectPreviousTab(_:)), "{", .command),
+            (#selector(NSWindow.selectNextTab(_:)), "\t", .control),
+            (#selector(NSWindow.selectPreviousTab(_:)), "\t", [.control, .shift]),
+        ] {
+            let item = NSMenuItem(title: "", action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            ShellKeys.tabs.addItem(item)
+        }
 
         let help = submenu(bar, L("Help"))
         help.addItem(withTitle: L("Cohub Help"), action: #selector(Shell.openHelp(_:)), keyEquivalent: "?")
@@ -65,9 +85,29 @@ enum MainMenu {
         return bar
     }
 
+    private static func reserve(_ item: NSMenuItem, _ modifiers: NSEvent.ModifierFlags = .command) {
+        item.keyEquivalentModifierMask = modifiers
+        ShellKeys.tabs.addItem(copy(item))
+    }
+
+    private static func copy(_ item: NSMenuItem) -> NSMenuItem {
+        item.copy() as! NSMenuItem
+    }
+
     private static func submenu(_ bar: NSMenu, _ title: String) -> NSMenu {
         let menu = NSMenu(title: title)
         bar.addItem(withTitle: title, action: nil, keyEquivalent: "").submenu = menu
         return menu
+    }
+}
+
+/// Keys the shell keeps from the page: a page claims most shortcuts first, so these are matched in the window before it.
+@MainActor
+enum ShellKeys {
+    static let tabs = NSMenu()
+    static let always = NSMenu()
+
+    static func perform(_ event: NSEvent, capturing: Bool) -> Bool {
+        always.performKeyEquivalent(with: event) || (!capturing && tabs.performKeyEquivalent(with: event))
     }
 }

@@ -10,12 +10,14 @@ public sealed class ShellState
     public sealed record Placement(double Left, double Top, double Width, double Height, bool Maximized);
 
     public string HostId { get; set; } = Guid.NewGuid().ToString();
-    public string? LastPath { get; set; }
+    public TabSession? Session { get; set; }
     public string? EdgeColor { get; set; }
     public ServiceHello? ServiceHello { get; set; }
     public List<Shortcut> Shortcuts { get; set; } = [];
-    public Placement? Window { get; set; }
     public bool GlobalShortcut { get; set; }
+
+    [JsonInclude] internal string? LastPath { get; set; }
+    [JsonInclude] internal Placement? Window { get; set; }
 
     private string path = "";
 
@@ -27,7 +29,11 @@ public sealed class ShellState
         catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException) { }
         state ??= new ShellState();
         state.path = path;
-        if (!WebOrigin.IsInAppPath(state.LastPath)) state.LastPath = null;
+        state.Session = state.Session?.Sanitized() is { Windows.Count: > 0 } session ? session
+            : WebOrigin.IsInAppPath(state.LastPath) || state.Window is not null ? TabSession.Of(WebOrigin.IsInAppPath(state.LastPath) ? state.LastPath! : "/", state.Window)
+            : null;
+        state.LastPath = null;
+        state.Window = null;
         return state;
     }
 

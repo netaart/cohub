@@ -965,8 +965,29 @@ async function submitRunCommand() {
 	}
 }
 
-async function activate(item: CommandPaletteItem | undefined) {
+function wantsNewTab(event: KeyboardEvent | MouseEvent) {
+	return (
+		event.metaKey ||
+		event.ctrlKey ||
+		(event instanceof MouseEvent && event.button === 1)
+	);
+}
+
+function openInNewTab(item: CommandPaletteItem | undefined) {
+	if (!item?.href || item.id === "run-command" || openIntent !== "navigate")
+		return false;
+	rememberCommandItem(item);
+	window.open(item.href, "_blank", "noopener");
+	closePalette();
+	return true;
+}
+
+async function activate(
+	item: CommandPaletteItem | undefined,
+	event?: KeyboardEvent | MouseEvent,
+) {
 	if (!item) return;
+	if (event && wantsNewTab(event) && openInNewTab(item)) return;
 	if (item.id === "run-command") {
 		// Not meaningful while picking a space for new chat.
 		if (openIntent === "new-chat") return;
@@ -1059,7 +1080,7 @@ function handlePaletteKeydown(event: KeyboardEvent) {
 	}
 	if (event.key === "Enter") {
 		event.preventDefault();
-		void activate(renderedItems[activeIndex]);
+		void activate(renderedItems[activeIndex], event);
 	}
 }
 
@@ -1344,7 +1365,7 @@ onMount(() => {
 											density={rowDensity}
 											active={active && itemIndex === activeIndex}
 											pinnable={active && isSpacePickerMode && item.type === "space" && !item.isArchived}
-											onActivate={() => void activate(item)}
+											onActivate={(event) => void activate(item, event)}
 											onHover={() => handleResultPointerMove(itemIndex)}
 											onTogglePin={() => togglePin(item)}
 										/>

@@ -27,7 +27,7 @@ const {
 	density: FixedListRowDensity;
 	active: boolean;
 	pinnable: boolean;
-	onActivate: () => void;
+	onActivate: (event: MouseEvent) => void;
 	onHover: () => void;
 	onTogglePin: () => void;
 } = $props();
@@ -140,7 +140,14 @@ const timestamp = $derived.by(() => {
 	aria-selected={active}
 	tabindex="-1"
 >
-	<button type="button" class="command-result-main" onclick={onActivate}>
+	<button
+		type="button"
+		class="command-result-main"
+		onclick={onActivate}
+		onauxclick={(event) => {
+			if (event.button === 1) onActivate(event);
+		}}
+	>
 		<span class="list-row-leading flex shrink-0 items-center justify-center">
 			{#if showsSpaceAvatar}
 				<SpaceAvatar name={item.spaceName || item.title || item.spaceId} profile={item.spaceProfile} seed={item.spaceId} size={LIST_ROW_AVATAR[density]} />

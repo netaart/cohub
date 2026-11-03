@@ -6,6 +6,7 @@ import {
 	hostPermissions,
 	requestHostPermission,
 } from "$lib/host-permissions.svelte";
+import { flagHostTabAttention } from "$lib/host-tabs";
 import type { Locale } from "$lib/i18n/locale";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
@@ -457,13 +458,11 @@ class TurnNotificationsStore {
 			this.desktopPermission = Notification.permission;
 		const current = currentRouteTarget();
 		const activelyObserved = this.visible && this.focused;
-		if (
-			activelyObserved &&
+		const shownHere =
 			current.spaceId === payload.spaceId &&
-			current.sessionId === payload.sessionId
-		) {
-			return;
-		}
+			current.sessionId === payload.sessionId;
+		if (activelyObserved && shownHere) return;
+		if (shownHere) flagHostTabAttention();
 		this.markSeen(payload.turnId);
 
 		const cachedSpace =

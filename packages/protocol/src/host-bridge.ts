@@ -41,6 +41,7 @@ export const HOST_BRIDGE_CAPABILITIES = [
   "workspace.files",
   "display.presenting",
   "display.float",
+  "tabs",
 ] as const;
 export type HostBridgeCapability = (typeof HOST_BRIDGE_CAPABILITIES)[number];
 export const hostBridgeCapabilitySchema = z.enum(HOST_BRIDGE_CAPABILITIES);
@@ -50,7 +51,6 @@ export type HostPlatform = z.infer<typeof hostPlatformSchema>;
 
 const identifier = z.string().min(1).max(128);
 
-/** Unknown capabilities from a newer host are dropped, not rejected. */
 const knownCapabilitiesSchema = z
   .array(z.string().min(1).max(64))
   .max(64)
@@ -58,7 +58,6 @@ const knownCapabilitiesSchema = z
     names.filter((name): name is HostBridgeCapability => hostBridgeCapabilitySchema.safeParse(name).success),
   );
 
-/** Pushed by hosts that predate the `host.describe` handshake. */
 export const hostBridgeHelloSchema = z.object({
   type: z.literal("hello"),
   version: z.number().int().positive(),
@@ -198,7 +197,6 @@ export const hostColorSchema = z.string().regex(/^#[0-9a-f]{6}$/i);
 export const HOST_HAPTICS = ["tick", "confirm", "reject", "longPress"] as const;
 export type HostHaptic = (typeof HOST_HAPTICS)[number];
 
-/** Hosts parse messages on their UI thread; larger files go by URL. */
 export const HOST_FILE_DATA_MAX_LENGTH = 16 * 1024 * 1024;
 
 const savedFileSchema = z.object({
@@ -230,6 +228,19 @@ export const hostNotificationSchema = z.object({
   path: inAppPath,
 }).strict();
 export type HostNotification = z.infer<typeof hostNotificationSchema>;
+
+/**
+ * What only the page knows about its own tab: `dirty` asks before the tab
+ * closes, `attention` marks a background tab until it is shown, and
+ * `captureKeys` hands the shell's tab shortcuts to the page while it forwards
+ * keys elsewhere, such as a remote screen.
+ */
+export const hostTabStateSchema = z.object({
+  dirty: z.boolean().optional(),
+  attention: z.literal(true).optional(),
+  captureKeys: z.boolean().optional(),
+}).strict();
+export type HostTabState = z.infer<typeof hostTabStateSchema>;
 
 export const hostAuthChangedSchema = z.object({
   authenticated: z.boolean(),
@@ -267,7 +278,6 @@ export function hostWorkspaceFileUrl(input: { platform: HostPlatform; origin: st
     : `${input.origin}${HOST_WORKSPACE_PATH}${input.spaceId}/${query}`;
 }
 
-/** Asked by a desktop shell to proxy file URLs; never forwarded from the page. */
 export const HOST_SERVICE_WORKSPACE_ENDPOINT = "workspace.endpoint";
 
 /**
@@ -278,7 +288,6 @@ export const HOST_BRIDGE_METHODS = {
   "host.describe": { params: z.undefined(), result: hostDescriptionSchema },
   "auth.getAccessToken": { params: accessTokenParams, result: z.string().min(1).nullable() },
   "auth.getSessionVersion": { params: z.undefined(), result: z.number().int().nonnegative() },
-  /** ID token claims never cross the bridge; this is the only identity source. */
   "auth.getSession": { params: z.undefined(), result: sessionIdentitySchema },
   "auth.signIn": { params: z.object({ redirectPath: z.string().max(2_048).optional() }).strict(), result: z.boolean() },
   "auth.signOut": { params: z.undefined(), result: z.boolean() },
@@ -316,6 +325,7 @@ export const HOST_BRIDGE_METHODS = {
   "files.save": { params: hostFileSaveParamsSchema, result: z.boolean() },
   "navigation.interceptBack": { params: z.object({ enabled: z.boolean() }).strict(), result: z.boolean() },
   "shortcuts.push": { params: hostShortcutSchema, result: z.boolean() },
+  "tabs.update": { params: hostTabStateSchema, result: z.boolean() },
   "display.status": { params: z.undefined(), result: deviceDisplayStatusSchema },
   "display.share": { params: z.object({ spaceId: z.uuid() }).strict(), result: deviceDisplayStatusSchema },
   "display.stop": { params: z.undefined(), result: deviceDisplayStatusSchema },
@@ -366,5 +376,4 @@ export const hostShellOpenSchema = z.object({ url: z.url({ protocol: /^https?$/ 
 
 export const HOST_BRIDGE_REQUEST_TIMEOUT_MS = 30_000;
 export const HOST_BRIDGE_INTERACTIVE_TIMEOUT_MS = 5 * 60_000;
-/** Short on purpose: a missing host must not delay the first screen. */
 export const HOST_BRIDGE_HANDSHAKE_TIMEOUT_MS = 2_000;

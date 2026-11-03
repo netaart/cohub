@@ -20,6 +20,7 @@ public enum HostProtocol {
         public static let globalShortcut = "app.globalShortcut"
         public static let workspace = "workspace"
         public static let workspaceFiles = "workspace.files"
+        public static let tabs = "tabs"
     }
 
     public enum Method {
@@ -33,6 +34,7 @@ public enum HostProtocol {
         public static let notificationsRegister = "notifications.register"
         public static let notificationsShow = "notifications.show"
         public static let shortcutsPush = "shortcuts.push"
+        public static let tabsUpdate = "tabs.update"
         public static let runtimeList = "runtime.list"
         public static let runtimeBrowse = "runtime.browse"
         public static let runtimeStart = "runtime.start"

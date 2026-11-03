@@ -38,4 +38,14 @@
   <data name="New Space…" xml:space="preserve"><value>新建 Space…</value></data>
   <data name="A task’s result hasn’t been confirmed yet" xml:space="preserve"><value>有任务的结果尚未确认</value></data>
   <data name="Disconnecting stops the Runtime. Results and files are kept." xml:space="preserve"><value>断开会停止 Runtime，结果和文件都会保留。</value></data>
+  <data name="New Tab" xml:space="preserve"><value>新建标签页</value></data>
+  <data name="Duplicate Tab" xml:space="preserve"><value>复制标签页</value></data>
+  <data name="Move Tab to New Window" xml:space="preserve"><value>将标签页移到新窗口</value></data>
+  <data name="Close Tab" xml:space="preserve"><value>关闭标签页</value></data>
+  <data name="Close Other Tabs" xml:space="preserve"><value>关闭其他标签页</value></data>
+  <data name="Reopen Closed Tab" xml:space="preserve"><value>重新打开关闭的标签页</value></data>
+  <data name="This tab has unsaved changes" xml:space="preserve"><value>此标签页有未保存的更改</value></data>
+  <data name="Some tabs have unsaved changes" xml:space="preserve"><value>有标签页存在未保存的更改</value></data>
+  <data name="Your changes will be lost." xml:space="preserve"><value>你的更改将会丢失。</value></data>
+  <data name="Close" xml:space="preserve"><value>关闭</value></data>
 </root>

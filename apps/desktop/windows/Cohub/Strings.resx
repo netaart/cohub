@@ -38,4 +38,14 @@
   <data name="New Space…" xml:space="preserve"><value>New Space…</value></data>
   <data name="A task’s result hasn’t been confirmed yet" xml:space="preserve"><value>A task’s result hasn’t been confirmed yet</value></data>
   <data name="Disconnecting stops the Runtime. Results and files are kept." xml:space="preserve"><value>Disconnecting stops the Runtime. Results and files are kept.</value></data>
+  <data name="New Tab" xml:space="preserve"><value>New Tab</value></data>
+  <data name="Duplicate Tab" xml:space="preserve"><value>Duplicate Tab</value></data>
+  <data name="Move Tab to New Window" xml:space="preserve"><value>Move Tab to New Window</value></data>
+  <data name="Close Tab" xml:space="preserve"><value>Close Tab</value></data>
+  <data name="Close Other Tabs" xml:space="preserve"><value>Close Other Tabs</value></data>
+  <data name="Reopen Closed Tab" xml:space="preserve"><value>Reopen Closed Tab</value></data>
+  <data name="This tab has unsaved changes" xml:space="preserve"><value>This tab has unsaved changes</value></data>
+  <data name="Some tabs have unsaved changes" xml:space="preserve"><value>Some tabs have unsaved changes</value></data>
+  <data name="Your changes will be lost." xml:space="preserve"><value>Your changes will be lost.</value></data>
+  <data name="Close" xml:space="preserve"><value>Close</value></data>
 </root>

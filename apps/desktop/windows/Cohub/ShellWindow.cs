@@ -1,106 +1,199 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.IO;
-using System.Net.Http;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Cohub.Core;
-using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.Wpf;
 
 namespace Cohub;
 
-internal sealed class ShellWindow : Window, IDisposable
+internal sealed class ShellWindow : Window
 {
     private readonly ShellApp app;
-    private readonly WebView2 webView = new();
-    private BridgeRouter? router;
-    private string? pendingPath;
-    private bool closed;
+    private readonly List<ShellTab> tabs = [];
+    private readonly Grid pages = new();
+    private readonly TabStrip strip;
+    private readonly DispatcherTimer idle = new() { Interval = TimeSpan.FromMinutes(1) };
+    private bool discarding;
 
-    public ShellWindow(ShellApp app, string path, Window? cascadeFrom)
+    public ShellWindow(ShellApp app, Window? cascadeFrom, ShellState.Placement? placement = null)
     {
         this.app = app;
-        pendingPath = path;
         Title = "Cohub";
         Width = 1280;
         Height = 820;
         MinWidth = 480;
         MinHeight = 360;
         Icon = app.WindowIcon;
-        Content = webView;
-        Place(cascadeFrom);
-        ApplyEdge(app.EdgeColor);
-        InputBindings.Add(new KeyBinding(new Command(() => app.OpenWindow("/")), Key.N, ModifierKeys.Control));
-        InputBindings.Add(new KeyBinding(new Command(Close), Key.W, ModifierKeys.Control));
-        SourceInitialized += (_, _) => Native.TintTitleBar(Handle, app.EdgeColor);
-        Loaded += async (_, _) =>
+        strip = new TabStrip(this);
+        var layout = new DockPanel();
+        DockPanel.SetDock(strip, Dock.Top);
+        layout.Children.Add(strip);
+        layout.Children.Add(pages);
+        Content = layout;
+        Place(cascadeFrom, placement);
+        PreviewKeyDown += OnPreviewKeyDown;
+        SourceInitialized += (_, _) => Native.TintTitleBar(Handle, Edge);
+        Activated += (_, _) =>
         {
-            try { await InitializeAsync(); }
-            catch (WebView2RuntimeNotFoundException) { app.WebViewMissing(); }
+            app.WindowActivated(this);
+            if (Selected is not { } shown) return;
+            shown.Show();
+            UpdateChrome();
         };
+        LocationChanged += (_, _) => app.SessionChanged();
+        SizeChanged += (_, _) => app.SessionChanged();
+        StateChanged += (_, _) => app.SessionChanged();
+        idle.Tick += (_, _) =>
+        {
+            var now = DateTimeOffset.Now;
+            foreach (var tab in tabs) if (tab != Selected) tab.SuspendIfIdle(now);
+        };
+        idle.Start();
     }
 
     public IntPtr Handle => new WindowInteropHelper(this).Handle;
-    public CoreWebView2? Core => closed ? null : webView.CoreWebView2;
+    public IReadOnlyList<ShellTab> Tabs => tabs;
+    public ShellTab? Selected { get; private set; }
+    public int SelectedIndex => Selected is null ? 0 : Math.Max(tabs.IndexOf(Selected), 0);
+    private Color Edge => app.EdgeColor(Selected?.Edge);
 
-    private async Task InitializeAsync()
+    public ShellTab Add(SessionTab session, int? index = null, bool select = true, bool loads = true)
     {
-        await webView.EnsureCoreWebView2Async(await app.WebEnvironment);
-        var core = webView.CoreWebView2;
-        core.Settings.AreDevToolsEnabled = app.Config.IsDevelopment;
-        core.Settings.IsStatusBarEnabled = false;
-        core.Settings.IsPasswordAutosaveEnabled = false;
-        await core.AddScriptToExecuteOnDocumentCreatedAsync(BridgeScript);
-        core.WebMessageReceived += OnWebMessage;
-        core.NavigationStarting += OnNavigationStarting;
-        core.NewWindowRequested += OnNewWindowRequested;
-        core.PermissionRequested += OnPermissionRequested;
-        if (app.WorkspaceFiles is { } files)
+        var tab = new ShellTab(app, this, session);
+        Insert(tab, index ?? tabs.Count);
+        if (select) Select(tab);
+        else if (loads) tab.Load(tab.Path);
+        return tab;
+    }
+
+    public void OpenBeside(SessionTab session, ShellTab anchor, bool background = false)
+    {
+        var index = TabOrder.Insertion<ShellTab>(anchor, [.. tabs.Select(tab => (tab, tab.Opener))]);
+        Add(session, index, select: !background).Opener = anchor;
+    }
+
+    public void NewTab()
+    {
+        Add(new SessionTab("/"));
+        Reveal();
+    }
+
+    public void Adopt(ShellTab tab, int index, bool select = true)
+    {
+        var from = tab.Window;
+        from.Detach(tab);
+        tab.Window = this;
+        tab.Opener = null;
+        Insert(tab, index);
+        if (tab.View is { } view) pages.Children.Add(view);
+        if (select) Select(tab);
+        if (from.tabs.Count == 0) from.Discard();
+        app.SessionChanged();
+    }
+
+    private void Insert(ShellTab tab, int index)
+    {
+        tabs.Insert(Math.Clamp(index, 0, tabs.Count), tab);
+        UpdateChrome();
+    }
+
+    private void Detach(ShellTab tab)
+    {
+        var successor = TabOrder.Successor<ShellTab>(tab, Selected, [.. tabs.Select(item => (item, item.Opener))]);
+        if (tab.View is { } view) pages.Children.Remove(view);
+        tabs.Remove(tab);
+        foreach (var other in tabs.Where(other => other.Opener == tab)) other.Opener = null;
+        if (Selected != tab) { UpdateChrome(); return; }
+        Selected = null;
+        if (successor is not null) Select(successor);
+        else UpdateChrome();
+    }
+
+    public void Host(ShellTab tab)
+    {
+        if (tab.View is { } view && !pages.Children.Contains(view)) pages.Children.Add(view);
+    }
+
+    public void Select(ShellTab tab)
+    {
+        if (Selected is { } previous && previous != tab)
         {
-            core.AddWebResourceRequestedFilter($"{app.Config.Origin.Origin}{HostProtocol.WorkspacePath}*", CoreWebView2WebResourceContext.All);
-            core.WebResourceRequested += (_, e) => ServeWorkspaceFile(core, files, e);
+            if (tab.Opener != previous) tab.Opener = null;
+            previous.Hide();
         }
-        core.ProcessFailed += (_, e) => { if (e.ProcessFailedKind is CoreWebView2ProcessFailedKind.RenderProcessExited or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive) core.Reload(); };
-        core.DocumentTitleChanged += (_, _) => Title = string.IsNullOrWhiteSpace(core.DocumentTitle) ? "Cohub" : core.DocumentTitle;
-        core.SourceChanged += (_, _) =>
+        Selected = tab;
+        tab.Show();
+        UpdateChrome();
+        app.SessionChanged();
+    }
+
+    public void Move(TabMove move)
+    {
+        if (Selected is { } selected && TabOrder.Target(move, tabs.IndexOf(selected), tabs.Count) is { } index) Select(tabs[index]);
+    }
+
+    public void SelectNumbered(int number)
+    {
+        if (TabOrder.Numbered(number, tabs.Count) is { } index) Select(tabs[index]);
+    }
+
+    public void CloseTab(ShellTab tab)
+    {
+        if (tabs.Count == 1 && app.IsLastWindow(this))
         {
-            if (Uri.TryCreate(core.Source, UriKind.Absolute, out var url) && app.Config.Origin.PathOf(url) is { } path) app.Visited(path);
-        };
-        router = app.Router(this);
-        if (pendingPath is { } initial) Load(initial);
+            Hide();
+            return;
+        }
+        if (tab.Dirty && !ConfirmDiscard(Strings.L("This tab has unsaved changes"))) return;
+        app.Closed(tab, tabs.IndexOf(tab));
+        Release(tab);
+        if (tabs.Count == 0) Discard();
     }
 
-    public void Load(string path)
+    public void CloseOthers(ShellTab kept)
     {
-        if (app.Config.Origin.UrlFor(path) is not { } url) return;
-        if (Core is null) { pendingPath = path; return; }
-        pendingPath = null;
-        Core.Navigate(url.ToString());
+        var others = tabs.Where(tab => tab != kept).ToList();
+        if (others.Any(tab => tab.Dirty) && !ConfirmDiscard(Strings.L("Some tabs have unsaved changes"))) return;
+        Select(kept);
+        foreach (var tab in others)
+        {
+            app.Closed(tab, tabs.IndexOf(tab));
+            Release(tab);
+        }
     }
 
-    public void Reload() => Core?.Reload();
-
-    public void ApplyEdge(Color color)
+    public void Release(ShellTab tab)
     {
-        Background = new SolidColorBrush(color);
-        webView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(color.R, color.G, color.B);
-        if (Handle != IntPtr.Zero) Native.TintTitleBar(Handle, color);
+        Detach(tab);
+        tab.Dispose();
+        app.SessionChanged();
     }
 
-    public void Emit(string name, System.Text.Json.Nodes.JsonNode? payload)
+    public void Discard()
     {
-        if (!closed) router?.Emit(name, payload);
+        discarding = true;
+        Close();
     }
 
-    public void ServiceStarted()
+    public void TabChanged(ShellTab tab)
     {
-        if (router?.DescribedWithoutService == true) Reload();
+        if (tab == Selected) UpdateChrome();
+        else strip.Update(tabs, Selected, Edge);
+        app.SessionChanged();
     }
 
-    public void Deliver(string text) => Core?.PostWebMessageAsString(text);
+    private void UpdateChrome()
+    {
+        var edge = Edge;
+        Title = Selected?.Title ?? "Cohub";
+        Background = new SolidColorBrush(edge);
+        if (Handle != IntPtr.Zero) Native.TintTitleBar(Handle, edge);
+        strip.Update(tabs, Selected, edge);
+    }
 
     public void Reveal()
     {
@@ -109,76 +202,42 @@ internal sealed class ShellWindow : Window, IDisposable
         Activate();
     }
 
-    private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+    public void ShowBadge(ImageSource? overlay)
     {
-        // Only the top-level Cohub page may drive native behaviour.
-        if (!Uri.TryCreate(e.Source, UriKind.Absolute, out var source) || !app.Config.Origin.Contains(source)) return;
-        string text;
-        try { text = e.TryGetWebMessageAsString(); }
-        catch (ArgumentException) { return; }
-        router?.Receive(text);
+        TaskbarItemInfo ??= new System.Windows.Shell.TaskbarItemInfo();
+        TaskbarItemInfo.Overlay = overlay;
     }
 
-    private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var url)) { e.Cancel = true; return; }
-        switch (app.Config.Origin.NavigationTo(url))
-        {
-            case WebOrigin.Navigation.Allow: return;
-            case WebOrigin.Navigation.External: e.Cancel = true; OpenExternally(url); return;
-            default: e.Cancel = url.Scheme != "about"; return;
-        }
-    }
-
-    private void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
-    {
+        var modifiers = Keyboard.Modifiers;
+        if (!modifiers.HasFlag(ModifierKeys.Control) || modifiers.HasFlag(ModifierKeys.Alt) || Selected?.CapturesKeys == true) return;
+        if (KeyName(e.Key == Key.System ? e.SystemKey : e.Key) is not { } key || ShellShortcuts.Find(key, modifiers.HasFlag(ModifierKeys.Shift)) is not { } shortcut) return;
         e.Handled = true;
-        if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var url)) return;
-        if (app.Config.Origin.PathOf(url) is { } path) app.OpenWindow(path);
-        else if (app.Config.Origin.NavigationTo(url) == WebOrigin.Navigation.External) OpenExternally(url);
+        if (e.IsRepeat && !ShellShortcuts.Repeats(shortcut.Command)) return;
+        switch (shortcut.Command)
+        {
+            case TabCommand.NewTab: NewTab(); break;
+            case TabCommand.NewWindow: app.OpenWindow("/"); break;
+            case TabCommand.CloseTab: if (Selected is { } tab) CloseTab(tab); break;
+            case TabCommand.CloseWindow: Close(); break;
+            case TabCommand.ReopenClosedTab: app.ReopenClosedTab(this); break;
+            case TabCommand.NextTab: Move(TabMove.Next); break;
+            case TabCommand.PreviousTab: Move(TabMove.Previous); break;
+            case TabCommand.SelectTab: SelectNumbered(shortcut.Tab); break;
+        }
     }
 
-    private void OnPermissionRequested(object? sender, CoreWebView2PermissionRequestedEventArgs e)
+    private static string? KeyName(Key key) => key switch
     {
-        var ours = Uri.TryCreate(e.Uri, UriKind.Absolute, out var url) && app.Config.Origin.Contains(url);
-        e.State = e.PermissionKind switch
-        {
-            CoreWebView2PermissionKind.Microphone or CoreWebView2PermissionKind.Camera or CoreWebView2PermissionKind.ClipboardRead when ours => CoreWebView2PermissionState.Allow,
-            CoreWebView2PermissionKind.Notifications => CoreWebView2PermissionState.Deny,
-            _ => e.State,
-        };
-    }
-
-    private async void ServeWorkspaceFile(CoreWebView2 core, WorkspaceFiles files, CoreWebView2WebResourceRequestedEventArgs e)
-    {
-        if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var url) || WorkspaceFiles.Target(url, app.Config.Origin) is not { } target) return;
-        var deferral = e.GetDeferral();
-        try
-        {
-            var headers = e.Request.Headers.ToList();
-            // Never as a document: workspace files are untrusted and this path is on the app's origin.
-            var servable = e.Request.Method == "GET" && e.ResourceContext != CoreWebView2WebResourceContext.Document;
-            var response = servable ? await files.SendAsync(target.SpaceId, target.Path, headers, CancellationToken.None) : null;
-            if (response is null)
-            {
-                e.Response = core.Environment.CreateWebResourceResponse(null, 503, "Service Unavailable", "Cache-Control: no-store");
-                return;
-            }
-            var passed = response.Headers.Concat(response.Content.Headers)
-                .Where(header => WorkspaceFiles.PassedHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase))
-                .Select(header => $"{header.Key}: {string.Join(", ", header.Value)}");
-            e.Response = core.Environment.CreateWebResourceResponse(
-                await response.Content.ReadAsStreamAsync(), (int)response.StatusCode, response.ReasonPhrase ?? "OK", string.Join("\r\n", passed));
-        }
-        catch (Exception error) when (error is HttpRequestException or IOException or TaskCanceledException)
-        {
-            e.Response = core.Environment.CreateWebResourceResponse(null, 502, "Bad Gateway", "Cache-Control: no-store");
-        }
-        finally
-        {
-            deferral.Complete();
-        }
-    }
+        >= Key.A and <= Key.Z => key.ToString(),
+        >= Key.D1 and <= Key.D9 => $"{key - Key.D0}",
+        Key.Tab => "Tab",
+        Key.PageUp => "PageUp",
+        Key.PageDown => "PageDown",
+        Key.F4 => "F4",
+        _ => null,
+    };
 
     public static void OpenExternally(Uri url) => Process.Start(new ProcessStartInfo(url.AbsoluteUri) { UseShellExecute = true })?.Dispose();
 
@@ -198,63 +257,76 @@ internal sealed class ShellWindow : Window, IDisposable
     public Task<bool> ConfirmConnectAsync(string root)
     {
         var name = System.IO.Path.GetFileName(root.TrimEnd('\\', '/'));
-        var connect = new System.Windows.Forms.TaskDialogButton(Strings.L("Connect"));
+        return Task.FromResult(Confirm(
+            Strings.Format("Connect “{0}” to a Space?", string.IsNullOrEmpty(name) ? root : name),
+            Strings.L("People and agents in the Space can change files in this folder and run commands as you on this PC. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space."),
+            Strings.L("Connect"),
+            System.Windows.Forms.TaskDialogIcon.ShieldWarningYellowBar));
+    }
+
+    public Task<bool> ConfirmShareAsync() => Task.FromResult(Confirm(
+        Strings.L("Share this screen with the Space?"),
+        Strings.L("People and agents in the Space can see this screen and control this PC until you stop sharing or quit Cohub."),
+        Strings.L("Share"),
+        System.Windows.Forms.TaskDialogIcon.ShieldWarningYellowBar));
+
+    public bool ConfirmDiscard(string heading)
+    {
+        Reveal();
+        return Confirm(heading, Strings.L("Your changes will be lost."), Strings.L("Close"), System.Windows.Forms.TaskDialogIcon.Warning);
+    }
+
+    private bool Confirm(string heading, string text, string accept, System.Windows.Forms.TaskDialogIcon icon)
+    {
+        var button = new System.Windows.Forms.TaskDialogButton(accept);
         var page = new System.Windows.Forms.TaskDialogPage
         {
             Caption = "Cohub",
-            Heading = Strings.Format("Connect “{0}” to a Space?", string.IsNullOrEmpty(name) ? root : name),
-            Text = Strings.L("People and agents in the Space can change files in this folder and run commands as you on this PC. Your local Pi, Codex, Claude Code and Cursor chats in this folder, including earlier ones, sync to the Space."),
-            Icon = System.Windows.Forms.TaskDialogIcon.ShieldWarningYellowBar,
-            Buttons = { connect, System.Windows.Forms.TaskDialogButton.Cancel },
-            DefaultButton = connect,
+            Heading = heading,
+            Text = text,
+            Icon = icon,
+            Buttons = { button, System.Windows.Forms.TaskDialogButton.Cancel },
+            DefaultButton = button,
         };
-        return Task.FromResult(System.Windows.Forms.TaskDialog.ShowDialog(Handle, page) == connect);
-    }
-
-    public Task<bool> ConfirmShareAsync()
-    {
-        var share = new System.Windows.Forms.TaskDialogButton(Strings.L("Share"));
-        var page = new System.Windows.Forms.TaskDialogPage
-        {
-            Caption = "Cohub",
-            Heading = Strings.L("Share this screen with the Space?"),
-            Text = Strings.L("People and agents in the Space can see this screen and control this PC until you stop sharing or quit Cohub."),
-            Icon = System.Windows.Forms.TaskDialogIcon.ShieldWarningYellowBar,
-            Buttons = { share, System.Windows.Forms.TaskDialogButton.Cancel },
-            DefaultButton = share,
-        };
-        return Task.FromResult(System.Windows.Forms.TaskDialog.ShowDialog(Handle, page) == share);
-    }
-
-    public void ShowBadge(ImageSource? overlay)
-    {
-        TaskbarItemInfo ??= new System.Windows.Shell.TaskbarItemInfo();
-        TaskbarItemInfo.Overlay = overlay;
+        return System.Windows.Forms.TaskDialog.ShowDialog(Handle, page) == button;
     }
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        app.Remember(this);
-        if (!app.Quitting && app.IsLastWindow(this))
+        base.OnClosing(e);
+        if (app.Quitting || discarding) return;
+        if (app.IsLastWindow(this))
         {
             e.Cancel = true;
             Hide();
+            return;
         }
-        base.OnClosing(e);
+        if (tabs.Any(tab => tab.Dirty) && !ConfirmDiscard(Strings.L("Some tabs have unsaved changes")))
+        {
+            e.Cancel = true;
+            return;
+        }
+        for (var index = 0; index < tabs.Count; index++) app.Closed(tabs[index], index);
     }
 
     protected override void OnClosed(EventArgs e)
     {
-        closed = true;
+        idle.Stop();
+        foreach (var tab in tabs) tab.Dispose();
+        tabs.Clear();
         app.Closed(this);
-        Dispose();
         base.OnClosed(e);
     }
 
-    public void Dispose() => webView.Dispose();
-
-    private void Place(Window? cascadeFrom)
+    private void Place(Window? cascadeFrom, ShellState.Placement? saved)
     {
+        if (saved is not null && IsOnScreen(saved))
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            (Left, Top, Width, Height) = (saved.Left, saved.Top, saved.Width, saved.Height);
+            if (saved.Maximized) WindowState = WindowState.Maximized;
+            return;
+        }
         if (cascadeFrom is not null)
         {
             WindowStartupLocation = WindowStartupLocation.Manual;
@@ -262,13 +334,6 @@ internal sealed class ShellWindow : Window, IDisposable
             Height = cascadeFrom.ActualHeight;
             Left = cascadeFrom.Left + 28;
             Top = cascadeFrom.Top + 28;
-            return;
-        }
-        if (app.State.Window is { } saved && IsOnScreen(saved))
-        {
-            WindowStartupLocation = WindowStartupLocation.Manual;
-            (Left, Top, Width, Height) = (saved.Left, saved.Top, saved.Width, saved.Height);
-            if (saved.Maximized) WindowState = WindowState.Maximized;
             return;
         }
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -285,26 +350,5 @@ internal sealed class ShellWindow : Window, IDisposable
     {
         var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
         return new(bounds.Left, bounds.Top, bounds.Width, bounds.Height, WindowState == WindowState.Maximized);
-    }
-
-    private const string BridgeScript = """
-        (() => {
-          const view = window.chrome?.webview;
-          if (!view || window.top !== window || window.cohubHost) return;
-          Object.defineProperty(window, "cohubHost", {
-            value: Object.freeze({
-              postMessage: (message) => view.postMessage(String(message)),
-              addEventListener: (type, listener) => view.addEventListener(type, listener),
-              removeEventListener: (type, listener) => view.removeEventListener(type, listener),
-            }),
-          });
-        })();
-        """;
-
-    private sealed class Command(Action run) : ICommand
-    {
-        public event EventHandler? CanExecuteChanged { add { } remove { } }
-        public bool CanExecute(object? parameter) => true;
-        public void Execute(object? parameter) => run();
     }
 }

@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shell;
+using System.Windows.Threading;
 using Cohub.Core;
 using Microsoft.Web.WebView2.Core;
 
@@ -17,6 +18,10 @@ internal sealed class ShellApp : Application, IDisposable
     private readonly SingleInstance instance;
     private readonly string? startArgument;
     private readonly List<ShellWindow> windows = [];
+    private readonly ClosedTabs closedTabs = new();
+    private readonly RepeatFilter repeats = new();
+    private readonly Dictionary<string, JsonNode?> latestEvents = [];
+    private readonly DispatcherTimer saving = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly CancellationTokenSource stopping = new();
     private HostService? service;
     private TrayIcon? tray;
@@ -32,6 +37,7 @@ internal sealed class ShellApp : Application, IDisposable
         this.instance = instance;
         this.startArgument = startArgument;
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        saving.Tick += (_, _) => SaveSession();
         using var stream = typeof(ShellApp).Assembly.GetManifestResourceStream("Cohub.ico");
         if (stream is not null) WindowIcon = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
     }
@@ -42,7 +48,14 @@ internal sealed class ShellApp : Application, IDisposable
     public ImageSource? WindowIcon { get; }
     public bool Quitting { get; private set; }
 
-    public Color EdgeColor => State.EdgeColor is { } hex && TryParseColor(hex, out var color) ? color : SystemColors.WindowColor;
+    public bool CanReopenClosedTab => !closedTabs.IsEmpty;
+
+    public IEnumerable<(string Name, JsonNode? Payload)> LatestEvents => latestEvents.Select(entry => (entry.Key, entry.Value));
+
+    public Color EdgeColor(string? hex) =>
+        hex is not null && TryParseColor(hex, out var color) ? color
+        : State.EdgeColor is { } fallback && TryParseColor(fallback, out var last) ? last
+        : SystemColors.WindowColor;
 
     public Task<CoreWebView2Environment> WebEnvironment => environment ??= CoreWebView2Environment.CreateAsync(null, Path.Combine(Config.DataDirectory, "WebView2"));
 
@@ -66,7 +79,8 @@ internal sealed class ShellApp : Application, IDisposable
         instance.Listen(Config.InstanceName, argument => Dispatcher.BeginInvoke(() => Handle(argument)));
         shortcut = new GlobalShortcut(ShowPrimary);
         shortcut.Set(State.GlobalShortcut);
-        OpenWindow(PathOf(startArgument) ?? State.LastPath ?? "/");
+        Restore();
+        if (PathOf(startArgument) is { } path) Open(path);
         UpdateJumpList();
         updates = new Updates(Config.FeedUrl, () => Dispatcher.BeginInvoke(() => tray?.UpdateReady()), Log);
         _ = updates.RunAsync(stopping.Token);
@@ -88,23 +102,70 @@ internal sealed class ShellApp : Application, IDisposable
         shortcut?.Dispose();
     }
 
-    public ShellWindow OpenWindow(string path)
+    private void Restore()
     {
-        var window = new ShellWindow(this, path, windows.LastOrDefault(item => item.IsVisible));
+        if (State.Session is not { Windows.Count: > 0 } session)
+        {
+            OpenWindow("/");
+            return;
+        }
+        foreach (var saved in session.Windows)
+        {
+            var window = NewWindow(saved.Placement);
+            for (var index = 0; index < saved.Tabs.Count; index++) window.Add(saved.Tabs[index], select: false, loads: false);
+            window.Select(window.Tabs[saved.Selected]);
+            window.Show();
+        }
+        windows[^1].Activate();
+    }
+
+    private ShellWindow NewWindow(ShellState.Placement? placement = null)
+    {
+        var window = new ShellWindow(this, Primary is { IsVisible: true } front ? front : null, placement);
         windows.Add(window);
         if (badge is not null) window.ShowBadge(badge);
+        return window;
+    }
+
+    public ShellWindow OpenWindow(string path)
+    {
+        var window = NewWindow();
+        window.Add(new SessionTab(path));
         window.Show();
         window.Activate();
         return window;
     }
 
+    public void MoveToNewWindow(ShellTab tab)
+    {
+        var window = NewWindow();
+        window.Show();
+        window.Adopt(tab, 0);
+        window.Activate();
+    }
+
+    public void ReopenClosedTab(ShellWindow window)
+    {
+        if (closedTabs.Pop() is not { } closed) return;
+        window.Add(closed.Tab, closed.Index);
+        window.Reveal();
+    }
+
     public void Open(string path)
     {
         if (!WebOrigin.IsInAppPath(path)) return;
-        if (Primary is { } window)
+        var shown = windows.SelectMany(window => window.Tabs).LastOrDefault(tab => TabSession.SamePage(tab.Path, path) && (tab.Path == path || !tab.Dirty));
+        if (shown is not null)
         {
-            window.Load(path);
-            window.Reveal();
+            if (shown.Path != path) shown.Load(path);
+            shown.Window.Select(shown);
+            shown.Window.Reveal();
+        }
+        else if (Primary is { } front)
+        {
+            if (front.Selected is { Path: "/" } home) home.Load(path);
+            else front.Add(new SessionTab(path));
+            front.Reveal();
         }
         else
         {
@@ -114,28 +175,46 @@ internal sealed class ShellApp : Application, IDisposable
 
     public bool IsLastWindow(ShellWindow window) => windows.Count == 1 && windows[0] == window;
 
-    public void Closed(ShellWindow window) => windows.Remove(window);
-
-    public void Visited(string path)
+    public void WindowActivated(ShellWindow window)
     {
-        if (State.LastPath == path) return;
-        State.LastPath = path;
+        windows.Remove(window);
+        windows.Add(window);
+        SessionChanged();
+    }
+
+    public void Closed(ShellTab tab, int index)
+    {
+        if (!Quitting) closedTabs.Push(tab.Session, index);
+    }
+
+    public void Closed(ShellWindow window)
+    {
+        windows.Remove(window);
+        SessionChanged();
+    }
+
+    public void SessionChanged()
+    {
+        if (Quitting) return;
+        saving.Stop();
+        saving.Start();
+    }
+
+    private void SaveSession()
+    {
+        saving.Stop();
+        var saved = windows.Where(window => window.Tabs.Count > 0).Select(window =>
+            new SessionWindow([.. window.Tabs.Select(tab => tab.Session)], window.SelectedIndex, window.Placement()));
+        State.Session = new TabSession([.. saved]).Sanitized();
         State.Save();
     }
 
-    public void Remember(ShellWindow window)
-    {
-        if (windows.FirstOrDefault() != window) return;
-        State.Window = window.Placement();
-        State.Save();
-    }
-
-    private ShellWindow? Primary => windows.FirstOrDefault(window => window.IsActive) ?? windows.FirstOrDefault(window => window.IsVisible) ?? windows.FirstOrDefault();
+    private ShellWindow? Primary => windows.LastOrDefault(window => window.IsActive) ?? windows.LastOrDefault(window => window.IsVisible) ?? windows.LastOrDefault();
 
     private void ShowPrimary()
     {
         if (Primary is { } window) window.Reveal();
-        else OpenWindow(State.LastPath ?? "/");
+        else OpenWindow("/");
     }
 
     private void Handle(string argument)
@@ -155,44 +234,60 @@ internal sealed class ShellApp : Application, IDisposable
 
     private void Quit()
     {
+        if (windows.SelectMany(window => window.Tabs).FirstOrDefault(tab => tab.Dirty) is { } dirty && !dirty.Window.ConfirmDiscard(Strings.L("Some tabs have unsaved changes"))) return;
+        SaveSession();
         Quitting = true;
         foreach (var window in windows.ToList()) window.Close();
         Shutdown();
     }
 
-    public BridgeRouter Router(ShellWindow window)
+    public BridgeRouter Router(ShellTab tab)
     {
         List<string> capabilities = [
             HostProtocol.Capabilities.Appearance, HostProtocol.Capabilities.Navigation, HostProtocol.Capabilities.Share,
             HostProtocol.Capabilities.Cache, HostProtocol.Capabilities.Notifications, HostProtocol.Capabilities.Shortcuts,
             HostProtocol.Capabilities.MediaCapture, HostProtocol.Capabilities.Permissions, HostProtocol.Capabilities.Badge,
-            HostProtocol.Capabilities.LaunchAtLogin, HostProtocol.Capabilities.GlobalShortcut,
+            HostProtocol.Capabilities.LaunchAtLogin, HostProtocol.Capabilities.GlobalShortcut, HostProtocol.Capabilities.Launch,
+            HostProtocol.Capabilities.Tabs,
         ];
         var handlers = new Dictionary<string, BridgeRouter.Handler>
         {
+            [HostProtocol.Methods.AppReady] = _ =>
+            {
+                tab.ReportReady();
+                return Ok();
+            },
             [HostProtocol.Methods.AppearanceSet] = parameters =>
             {
-                if (JsonFields.Text(parameters, "backgroundColor") is not { } hex || !TryParseColor(hex, out var color)) throw BridgeException.Failed("appearance.set requires a #rrggbb backgroundColor");
-                State.EdgeColor = hex;
-                State.Save();
-                window.ApplyEdge(color);
+                if (JsonFields.Text(parameters, "backgroundColor") is not { } hex || !TryParseColor(hex, out _)) throw BridgeException.Failed("appearance.set requires a #rrggbb backgroundColor");
+                if (State.EdgeColor != hex)
+                {
+                    State.EdgeColor = hex;
+                    SessionChanged();
+                }
+                tab.ApplyEdge(hex);
                 return Ok();
             },
             [HostProtocol.Methods.NavigationOpenPath] = parameters =>
             {
                 if (JsonFields.Text(parameters, "path") is not { } path || !WebOrigin.IsInAppPath(path)) throw BridgeException.Failed("navigation.openPath requires an in-app path");
-                window.Load(path);
+                tab.Load(path);
+                return Ok();
+            },
+            [HostProtocol.Methods.TabsUpdate] = parameters =>
+            {
+                tab.Update(parameters);
                 return Ok();
             },
             [HostProtocol.Methods.ShareText] = parameters =>
             {
                 if (JsonFields.Text(parameters, "text") is not { } text) throw BridgeException.Failed("share.text requires text");
-                Native.Share(window.Handle, text, JsonFields.Text(parameters, "title"));
+                Native.Share(tab.Window.Handle, text, JsonFields.Text(parameters, "title"));
                 return Ok();
             },
             [HostProtocol.Methods.CacheClear] = async _ =>
             {
-                if (window.Core is { } core) await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);
+                if (tab.Core is { } core) await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);
                 return true;
             },
             [HostProtocol.Methods.NotificationsRegister] = _ => Task.FromResult<JsonNode?>(Toasts.Enabled),
@@ -200,7 +295,9 @@ internal sealed class ShellApp : Application, IDisposable
             {
                 if (JsonFields.Text(parameters, "id") is not { } id || JsonFields.Text(parameters, "title") is not { } title || JsonFields.Text(parameters, "path") is not { } path || !WebOrigin.IsInAppPath(path))
                     throw BridgeException.Failed("notifications.show requires an id, a title and an in-app path");
-                return Task.FromResult<JsonNode?>(Toasts.Show(id, title, JsonFields.Text(parameters, "body"), path));
+                var body = JsonFields.Text(parameters, "body");
+                if (!repeats.Admits($"{id}\n{title}\n{body}", DateTimeOffset.Now)) return Ok();
+                return Task.FromResult<JsonNode?>(Toasts.Show(id, title, body, path));
             },
             [HostProtocol.Methods.PermissionsStatus] = _ => Task.FromResult<JsonNode?>(new JsonObject { ["notifications"] = NotificationState }),
             [HostProtocol.Methods.PermissionsRequest] = parameters =>
@@ -246,9 +343,9 @@ internal sealed class ShellApp : Application, IDisposable
         {
             capabilities.Add(HostProtocol.Capabilities.RuntimePicker);
             capabilities.Add(HostProtocol.Capabilities.WorkspaceFiles);
-            handlers[HostProtocol.Methods.RuntimePickFolder] = parameters => window.PickFolderAsync(host, JsonFields.Text(parameters, "path"));
+            handlers[HostProtocol.Methods.RuntimePickFolder] = parameters => tab.Window.PickFolderAsync(host, JsonFields.Text(parameters, "path"));
         }
-        return new BridgeRouter("windows", State.HostId, capabilities, handlers, service, request => request.Root is { } root ? window.ConfirmConnectAsync(root) : window.ConfirmShareAsync(), window.Deliver);
+        return new BridgeRouter("windows", State.HostId, capabilities, handlers, service, request => request.Root is { } root ? tab.Window.ConfirmConnectAsync(root) : tab.Window.ConfirmShareAsync(), tab.Deliver);
     }
 
     private static Task<JsonNode?> Ok() => Task.FromResult<JsonNode?>(true);
@@ -270,7 +367,7 @@ internal sealed class ShellApp : Application, IDisposable
             {
                 State.ServiceHello = hello;
                 State.Save();
-                foreach (var window in windows) window.ServiceStarted();
+                foreach (var tab in AllTabs) tab.ServiceStarted();
             }),
             Log);
         WorkspaceFiles = new WorkspaceFiles(service);
@@ -287,34 +384,44 @@ internal sealed class ShellApp : Application, IDisposable
                 return;
             case HostProtocol.Events.RuntimeChanged:
                 if (RuntimeOverview.From(payload) is { } overview) tray?.Update(overview);
+                latestEvents[name] = payload;
                 break;
             case HostProtocol.Events.DisplayChanged:
                 tray?.UpdateSharing(JsonFields.Text(payload, "sharedWith") is not null);
+                latestEvents[name] = payload;
                 break;
             case HostProtocol.Events.AuthChanged:
                 AccountChanged(payload);
                 break;
         }
-        foreach (var window in windows) window.Emit(name, payload);
+        foreach (var tab in AllTabs) tab.Emit(name, payload);
     }
+
+    private IEnumerable<ShellTab> AllTabs => windows.SelectMany(window => window.Tabs).ToList();
 
     private void AccountChanged(JsonNode? payload)
     {
         var authenticated = JsonFields.Bool(payload, "authenticated") ?? false;
         var redirect = JsonFields.Text(payload, "redirectPath") is { } path && WebOrigin.IsInAppPath(path) ? path : null;
+        var front = Primary;
         if (!authenticated)
         {
-            State.LastPath = null;
-            State.Save();
+            closedTabs.Clear();
+            foreach (var window in windows.Where(window => window != front).ToList()) window.Discard();
+            if (front?.Selected is { } kept)
+            {
+                foreach (var tab in front.Tabs.Where(tab => tab != kept).ToList()) front.Release(tab);
+                kept.Load("/");
+            }
+            SessionChanged();
+            return;
         }
-        var front = Primary;
-        foreach (var window in windows)
+        foreach (var tab in AllTabs)
         {
-            if (!authenticated) window.Load("/");
-            else if (window == front && redirect is not null) window.Load(redirect);
-            else window.Reload();
+            if (tab == front?.Selected && redirect is not null) tab.Load(redirect);
+            else tab.Refresh();
         }
-        if (authenticated && redirect is not null) front?.Reveal();
+        if (redirect is not null) front?.Reveal();
     }
 
     private async void Disconnect(string spaceId, bool force = false)
@@ -408,5 +515,5 @@ internal sealed class ShellApp : Application, IDisposable
         return true;
     }
 
-    private static void Log(string line) => Trace.WriteLine(line, "Cohub");
+    public static void Log(string line) => Trace.WriteLine(line, "Cohub");
 }

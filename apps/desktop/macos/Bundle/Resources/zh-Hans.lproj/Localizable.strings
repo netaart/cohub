@@ -65,3 +65,11 @@
 "Share" = "共享";
 "A task’s result hasn’t been confirmed yet" = "有任务的结果尚未确认";
 "Disconnecting stops the Runtime. Results and files are kept." = "断开会停止 Runtime，结果和文件都会保留。";
+"New Tab" = "新建标签页";
+"Reopen Closed Tab" = "重新打开关闭的标签页";
+"Close Tab" = "关闭标签页";
+"This tab has unsaved changes" = "此标签页有未保存的更改";
+"Some tabs have unsaved changes" = "有标签页存在未保存的更改";
+"Your changes will be lost." = "你的更改将会丢失。";
+"Close" = "关闭";
+"Quit" = "退出";

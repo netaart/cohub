@@ -18,6 +18,7 @@ import {
 import { onDestroy, untrack } from "svelte";
 import { MediaQuery } from "svelte/reactivity";
 import { presentDeviceDisplay } from "$lib/device-display.svelte";
+import { holdHostKeys } from "$lib/host-tabs";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { claimKeyboard } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
@@ -616,6 +617,18 @@ function remoteInput(node: HTMLElement, enabled: boolean) {
 	const keepStill = (event: Event) => {
 		if (controllable) event.preventDefault();
 	};
+	let releaseKeys: (() => void) | null = null;
+	const holdKeys = () => {
+		if (controllable) releaseKeys ??= holdHostKeys();
+	};
+	const freeKeys = () => {
+		releaseKeys?.();
+		releaseKeys = null;
+	};
+	const onBlur = () => {
+		send([], []);
+		freeKeys();
+	};
 	const listeners: Array<
 		[string, (event: never) => void, AddEventListenerOptions?]
 	> = [
@@ -627,7 +640,8 @@ function remoteInput(node: HTMLElement, enabled: boolean) {
 		["gesturestart", keepStill, { passive: false }],
 		["keydown", onKeyDown],
 		["keyup", onKeyUp],
-		["blur", () => send([], [])],
+		["focus", holdKeys],
+		["blur", onBlur],
 		["paste", onPaste],
 		["contextmenu", keepStill],
 	];
@@ -636,6 +650,8 @@ function remoteInput(node: HTMLElement, enabled: boolean) {
 	const release = claimKeyboard(node, (event) => remoteKeys(event) !== null);
 	const focusable = (value: boolean) => {
 		node.tabIndex = value ? 0 : -1;
+		if (!value) freeKeys();
+		else if (document.activeElement === node) holdKeys();
 	};
 	focusable(enabled);
 	return {
@@ -644,6 +660,7 @@ function remoteInput(node: HTMLElement, enabled: boolean) {
 			for (const [type, listener] of listeners)
 				node.removeEventListener(type, listener as EventListener);
 			release();
+			freeKeys();
 		},
 	};
 }

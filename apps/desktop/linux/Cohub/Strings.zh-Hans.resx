@@ -9,7 +9,7 @@
   <data name="Cancel" xml:space="preserve"><value>取消</value></data>
   <data name="Choose" xml:space="preserve"><value>选择</value></data>
   <data name="Choose a folder for agents to work in." xml:space="preserve"><value>选择一个文件夹，供 Agent 在其中工作。</value></data>
-  <data name="Cohub needs GTK 4.10 and WebKitGTK 6.0." xml:space="preserve"><value>Cohub 需要 GTK 4.10 和 WebKitGTK 6.0。</value></data>
+  <data name="Cohub needs GTK 4.10, libadwaita 1.2 and WebKitGTK 6.0." xml:space="preserve"><value>Cohub 需要 GTK 4.10、libadwaita 1.2 和 WebKitGTK 6.0。</value></data>
   <data name="Connect" xml:space="preserve"><value>连接</value></data>
   <data name="Connect “{0}” to a Space?" xml:space="preserve"><value>将“{0}”连接到 Space？</value></data>
   <data name="Connected" xml:space="preserve"><value>已连接</value></data>
@@ -21,7 +21,7 @@
   <data name="Disconnecting stops the Runtime. Results and files are kept." xml:space="preserve"><value>断开会停止 Runtime，结果和文件都会保留。</value></data>
   <data name="Install Command Line Tool" xml:space="preserve"><value>安装命令行工具</value></data>
   <data name="Install it with npm install -g @neta-art/cohub-cli." xml:space="preserve"><value>请使用 npm install -g @neta-art/cohub-cli 安装。</value></data>
-  <data name="Install libwebkitgtk-6.0-4 (Debian, Ubuntu), webkitgtk6.0 (Fedora) or webkitgtk-6.0 (Arch), then open Cohub again." xml:space="preserve"><value>请安装 libwebkitgtk-6.0-4（Debian、Ubuntu）、webkitgtk6.0（Fedora）或 webkitgtk-6.0（Arch），然后重新打开 Cohub。</value></data>
+  <data name="Install libadwaita-1-0 and libwebkitgtk-6.0-4 (Debian, Ubuntu), libadwaita and webkitgtk6.0 (Fedora) or libadwaita and webkitgtk-6.0 (Arch), then open Cohub again." xml:space="preserve"><value>请安装 libadwaita-1-0 和 libwebkitgtk-6.0-4（Debian、Ubuntu）、libadwaita 和 webkitgtk6.0（Fedora）或 libadwaita 和 webkitgtk-6.0（Arch），然后重新打开 Cohub。</value></data>
   <data name="Needs attention" xml:space="preserve"><value>需要处理</value></data>
   <data name="New Window" xml:space="preserve"><value>新建窗口</value></data>
   <data name="Not connected" xml:space="preserve"><value>未连接</value></data>
@@ -37,4 +37,15 @@
   <data name="The cohub command is installed." xml:space="preserve"><value>cohub 命令已安装。</value></data>
   <data name="This build has no command line tool." xml:space="preserve"><value>此版本未包含命令行工具。</value></data>
   <data name="{0} already exists, for example from npm. Cohub will link it to the version inside this app." xml:space="preserve"><value>{0} 已存在（例如通过 npm 安装）。Cohub 会将其链接到此应用内置的版本。</value></data>
+  <data name="New Tab" xml:space="preserve"><value>新建标签页</value></data>
+  <data name="Duplicate Tab" xml:space="preserve"><value>复制标签页</value></data>
+  <data name="Move Tab to New Window" xml:space="preserve"><value>将标签页移到新窗口</value></data>
+  <data name="Close Tab" xml:space="preserve"><value>关闭标签页</value></data>
+  <data name="Close Other Tabs" xml:space="preserve"><value>关闭其他标签页</value></data>
+  <data name="Reopen Closed Tab" xml:space="preserve"><value>重新打开关闭的标签页</value></data>
+  <data name="This tab has unsaved changes" xml:space="preserve"><value>此标签页有未保存的更改</value></data>
+  <data name="Some tabs have unsaved changes" xml:space="preserve"><value>有标签页存在未保存的更改</value></data>
+  <data name="Your changes will be lost." xml:space="preserve"><value>你的更改将会丢失。</value></data>
+  <data name="Close" xml:space="preserve"><value>关闭</value></data>
+  <data name="Quit" xml:space="preserve"><value>退出</value></data>
 </root>

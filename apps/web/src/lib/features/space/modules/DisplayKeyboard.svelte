@@ -12,6 +12,7 @@ import {
 import { ChevronDown, ClipboardPaste } from "lucide-svelte";
 import { onDestroy } from "svelte";
 import { portal } from "$lib/actions/portal";
+import { holdHostKeys } from "$lib/host-tabs";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
@@ -99,8 +100,11 @@ $effect(() => {
 	};
 });
 
+let releaseKeys: (() => void) | null = null;
+
 onDestroy(() => {
 	if (verifyTimer) clearTimeout(verifyTimer);
+	releaseKeys?.();
 });
 
 export function show(verify = false) {
@@ -206,11 +210,14 @@ function sync() {
 }
 
 function onFocus() {
+	releaseKeys ??= holdHostKeys();
 	open = true;
 	onOpenChange(true);
 }
 
 function onBlur() {
+	releaseKeys?.();
+	releaseKeys = null;
 	if (verifyTimer) clearTimeout(verifyTimer);
 	verifyTimer = null;
 	open = false;

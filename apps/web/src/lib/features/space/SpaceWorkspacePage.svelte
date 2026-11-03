@@ -111,6 +111,7 @@ import {
 import SessionChatPanel from "$lib/features/session-chat/SessionChatPanel.svelte";
 import { createSessionRenameController } from "$lib/features/session-chat/session-rename-controller.svelte";
 import { pushHostShortcut } from "$lib/host-bridge";
+import { setHostTabDirty } from "$lib/host-tabs";
 import { getLocale } from "$lib/i18n/locale.svelte";
 // SettingsOverlay removed — settings merged inline into detail page
 import {
@@ -2140,6 +2141,7 @@ async function handleWsEvent(payload: ChannelEnvelope) {
 	}
 }
 onDestroy(() => {
+	setHostTabDirty(false);
 	if (activeSessionId) sessionChat.captureCurrentScrollAnchor(activeSessionId);
 	sessionChat.flushComposerDraft();
 	sessionChat.dispose();
@@ -2242,6 +2244,11 @@ onNavigate(() => {
 	if (fileWorkspace.hasDirtyInlineFiles())
 		return fileWorkspace.persistInlineFileDrafts();
 });
+
+const unsavedWork = $derived(
+	appPreview.hasDirty() || fileWorkspace.hasDirtyInlineFiles(),
+);
+$effect(() => setHostTabDirty(unsavedWork));
 
 function resizeFilesTree(): ResizeSession | null {
 	if (isMobile || effectiveRightSidebarCollapsed || !workspaceBodyEl)

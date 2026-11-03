@@ -73,6 +73,7 @@ immediately, so a browser pays nothing; with a silent host it gives up after
 | `files.save` | `files` | Saves an https `url` (downloaded natively) or base64 `data` to shared storage |
 | `navigation.interceptBack` | `navigation.back` | While enabled, system back emits `navigation.back` |
 | `shortcuts.push` | `shortcuts` | Launcher shortcut to an in-app path, ranked by recency |
+| `tabs.update` | `tabs` | Desktop: what only the page knows about its tab. `dirty` asks before the tab closes, `attention` marks it while out of sight, `captureKeys` hands the shell's tab keys to the page while it forwards keys to a remote screen. A new document starts clean |
 | `display.status` | `display` | The Space this screen is shared with, and whether control is on |
 | `display.share` | `display` | Shares with a Space this device serves; asks for screen capture consent where it needs it (Android without phone control, desktops) |
 | `display.stop` | `display` | Stops sharing; every stream ends |
@@ -182,12 +183,12 @@ application):
 ## Desktop
 
 The macOS (Swift, AppKit, WKWebView), Windows (C#, WPF, WebView2) and Linux (C#,
-GTK 4, WebKitGTK) shells load the web origin like Android does, and split the bridge in two:
+GTK 4, libadwaita, WebKitGTK) shells load the web origin like Android does, and split the bridge in two:
 
-- **Shell methods** stay native: windows, `appearance`, `navigation`, `share` (macOS,
+- **Shell methods** stay native: windows and `tabs`, `appearance`, `navigation`, `share` (macOS,
   Windows), `files` (macOS; Windows and Linux keep the WebView's own downloads), `cache`
   (macOS, Windows), `notifications`, `shortcuts` (Dock menu, Jump List, launcher actions),
-  `media.capture`, `runtime.pickFolder`, and `launch` (macOS, Linux).
+  `media.capture`, `runtime.pickFolder`, and `launch`.
 - **Account, Runtime and screen methods** are forwarded verbatim to the bundled CLI,
   `cohub host serve`, over stdio (one JSON message per line). It answers `auth.*` from
   the CLI's own session, so signing in on the desktop signs in the terminal too and
