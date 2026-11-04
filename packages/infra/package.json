@@ -60,10 +60,6 @@
       "types": "./dist/board-session-sync-queue.d.ts",
       "default": "./dist/board-session-sync-queue.js"
     },
-    "./session-turn-reply-queue": {
-      "types": "./dist/session-turn-reply-queue.d.ts",
-      "default": "./dist/session-turn-reply-queue.js"
-    },
     "./session-title-queue": {
       "types": "./dist/session-title-queue.d.ts",
       "default": "./dist/session-title-queue.js"

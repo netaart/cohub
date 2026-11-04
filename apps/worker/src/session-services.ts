@@ -12,14 +12,8 @@ import { dispatchLabelAssignmentsUpdated } from "./label-events.js";
 import { enqueueReferences } from "./reference-index-queue.js";
 import { dispatchTurnCreated, dispatchTurnUpdated } from "./realtime-events.js";
 import { spaceWalletBilling } from "./space-wallet-billing.js";
-import { createTurnReplyEnqueuer } from "@cohub/infra/session-turn-reply-queue";
 
 const AGENT_TURN_JOB_NAME = "agent_turns";
-
-const deliverTurnReplyLater = createTurnReplyEnqueuer({
-  redisUrl: config.bullmqRedisUrl,
-  telemetryServiceName: "cohub-worker-turn-reply",
-});
 
 const billingUsageGate = spaceWalletBilling.gate;
 
@@ -62,10 +56,7 @@ export function getSessionDomainServices(input: {
     injectTrace,
     getRequestId: () => null,
     onSessionTurnCreated: dispatchTurnCreated,
-    onSessionTurnUpdated: (update) => {
-      void deliverTurnReplyLater(update.turn);
-      return dispatchTurnUpdated(update);
-    },
+    onSessionTurnUpdated: dispatchTurnUpdated,
     onSessionParticipantsUpdated: async ({ spaceId, sessionId, userUuids }) => {
       const affectedLabelIds = await assignSessionParticipantSystemLabels({ db, spaceId, sessionId, userUuids });
       if (affectedLabelIds.length === 0) return;

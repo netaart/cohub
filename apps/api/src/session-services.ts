@@ -11,7 +11,7 @@ import { expandSkillCommand, type ExpandedSkill, type LoadSkillsOptions } from "
 import { recoverSpaceSandbox } from "./space-sandboxes.js";
 import { announceRecordedUserMessage, assignSessionUserLabelsAndDispatch, getSpaceSessionById, getSpaceById } from "./space-sessions.js";
 import { touchSpaceActivity } from "./space-activity.js";
-import { dispatchLabelAssignmentsUpdated, dispatchSessionCreated, dispatchSessionUpdated, dispatchTurnCreated } from "./realtime-events.js";
+import { dispatchSessionUpdated, dispatchTurnCreated } from "./realtime-events.js";
 import { dispatchTurnUpdated } from "./session-output.js";
 import { hydrateTurnAuthorProfiles } from "./session-turns.js";
 import { createLogger } from "@cohub/infra/logging";
@@ -19,7 +19,6 @@ import { validatePromptModel } from "./llm/models.js";
 import { enqueueReferences } from "./reference-index-queue.js";
 import { getRuntimeRegistration } from "./runtime.js";
 import { spaceWalletBilling } from "./space-wallet-billing.js";
-import { deliverTurnReplyLater } from "./turn-reply.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -101,7 +100,6 @@ export function getSessionDomainServices(input?: {
       await dispatchTurnCreated({ spaceId, sessionId: turn.sessionId, turn });
     },
     onSessionTurnUpdated: async ({ spaceId, turn: turnRecord }) => {
-      void deliverTurnReplyLater(turnRecord);
       const [turn = turnRecord] = await hydrateTurnAuthorProfiles([turnRecord]);
       await dispatchTurnUpdated({ spaceId, sessionId: turn.sessionId, turn });
     },
@@ -114,10 +112,6 @@ export function getSessionDomainServices(input?: {
       await dispatchSessionUpdated({ session, changed });
     },
     onSessionParticipantsUpdated: assignSessionUserLabelsAndDispatch,
-    onSessionCreated: async (session) => {
-      await dispatchSessionCreated(session);
-      await dispatchLabelAssignmentsUpdated({ spaceId: session.spaceId, resourceType: "session", resourceRef: session.id, sessionId: session.id });
-    },
     onUserMessageRecorded: announceRecordedUserMessage,
     agentTurnQueue: {
       enqueue: (job) => agentTurnQueue.add(AGENT_TURN_JOB_NAME, {

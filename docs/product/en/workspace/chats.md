@@ -69,12 +69,6 @@ Use `@space` mentions when the Agent should pull context from another Space you 
 
 Mentions are for deliberate context references, not every message.
 
-### Sending to another Space
-
-Start a message with `@space` to send it to that Space instead of this Chat's Agent; the composer shows where it goes. It starts a new Chat there. Choose **Reply** on a reply, or start with a link to another Chat, even one in this Space, to continue that Chat instead.
-
-Your message stays here as a note, the other Space works in its own Chat with the model you picked, and its reply comes back here when it finishes. This Chat's Agent sees both in later turns. It works the same from the CLI and scheduled prompts. The other Space's members can see the Chat it creates there. Without access to send there, the mention is context for this Chat's Agent, as anywhere else in a message.
-
 ## Working with turns
 
 Chats are turn-based:

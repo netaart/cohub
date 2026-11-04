@@ -1,15 +1,10 @@
 import { getContext, setContext } from "svelte";
 import type { RelatedSessionView } from "$lib/related-sessions";
-import type {
-	RelatedSessionRef,
-	RelayFailure,
-	SentSession,
-} from "$lib/sent-turns";
+import type { RelatedSessionRef, SentSession } from "$lib/sent-turns";
 
 export type SessionRelations = {
 	sentByTurn(turnId: string): readonly SentSession[];
 	sentByToolCall(toolCallId: string): readonly SentSession[];
-	relayFailure(turnId: string): RelayFailure | null;
 	session(ref: RelatedSessionRef): RelatedSessionView;
 	request(refs: Iterable<RelatedSessionRef>): void;
 };

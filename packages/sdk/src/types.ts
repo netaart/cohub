@@ -43,7 +43,7 @@ import type {
   ListGenerationModelsResponse,
   PublicGenerationDeclaration,
 } from "@cohub/protocol/generation";
-import type { MessageRecord, SessionTurnReplyMode } from "@cohub/protocol/model";
+import type { MessageRecord } from "@cohub/protocol/model";
 import type { ApprovalMode, HarnessKind, ModelThinkingLevel, SearchTextRange } from "@cohub/protocol";
 import type { TaskRunBoard } from "@cohub/protocol/task";
 export type { TaskRunBoard } from "@cohub/protocol/task";
@@ -1302,11 +1302,6 @@ export type PromptAccessMode = "read_only" | "full_access";
 export type CreateSpacePromptInput = {
   /** `note` records `content` without a reply and cannot be scheduled. */
   mode?: "agent" | "create" | "note";
-  /**
-   * Deliver this Turn's final result back to the calling Turn's Chat: `note` records it,
-   * `prompt` also runs that Chat's Agent. Needs an immediate prompt sent from a Cohub Turn.
-   */
-  reply?: SessionTurnReplyMode | null;
   generation?: {
     model: string;
     content: GenerationContentBlock[];

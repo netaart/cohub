@@ -71,7 +71,6 @@ type PromptOptions = {
   env?: string[];
   image?: string[];
   note?: boolean;
-  reply?: boolean;
   json?: boolean;
 };
 
@@ -269,9 +268,6 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
     }).flatMap(([flag, value]) => value ? [flag] : []);
     if (agentOnly.length) return error("Conflicting options", `--note cannot be combined with ${agentOnly.join(", ")}`);
   }
-  if (opts.reply && (opts.note || scheduleFlags.length)) {
-    return error("Conflicting options", "--reply cannot be combined with --note or scheduling");
-  }
 
   const requestedThinkingLevel = opts.thinkingLevel?.trim() || undefined;
   const thinkingLevel = isModelThinkingLevel(requestedThinkingLevel) ? requestedThinkingLevel : undefined;
@@ -336,13 +332,9 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
       env: parseEnvOptions(opts.env),
       schedule,
       labelRefs: opts.label?.length ? opts.label : undefined,
-      ...(opts.reply ? { reply: "prompt" as const } : {}),
     });
     if (jsonRequested(opts)) return outJson(result);
-    if (result.mode === "immediate") {
-      const label = opts.note ? "Note recorded" : opts.reply ? "Prompt sent; the reply will come back to this Chat" : "Prompt sent";
-      return ok(`${label} — sessionId: ${result.session.id}, turnId: ${result.turn.id}`);
-    }
+    if (result.mode === "immediate") return ok(`${opts.note ? "Note recorded" : "Prompt sent"} — sessionId: ${result.session.id}, turnId: ${result.turn.id}`);
     if (result.mode === "repeat") return ok(`Prompt scheduled — cronJobId: ${result.cronJobId}, nextRunAt: ${result.nextRunAt}`);
     return ok(`Prompt scheduled — taskRunId: ${result.taskRunId}, scheduledAt: ${result.scheduledAt}`);
   } catch (e: unknown) {
@@ -450,7 +442,6 @@ export function registerPrompt(program: Command): void {
     .option("--env <key=value>", "Set an environment variable for this turn", collectOption, [])
     .option("--image <path>", "Attach an image", collectOption, [])
     .option("--note", "Record the message without an AI reply")
-    .option("--reply", "Send the final reply back to the calling Chat and run its Agent")
     .option("--json", "Output as JSON")
     .action((words: string[], opts: PromptOptions) => sendPrompt(program, words, opts));
 
@@ -813,7 +804,6 @@ export function registerSpaces(program: Command): void {
     .option("--env <key=value>", "Set an environment variable for this turn", collectOption, [])
     .option("--image <path>", "Attach an image", collectOption, [])
     .option("--note", "Record the message without an AI reply")
-    .option("--reply", "Send the final reply back to the calling Chat and run its Agent")
     .option("--json", "Output as JSON")
     .action((words: string[], opts: PromptOptions) => sendPrompt(spacesCmd, words, opts));
 

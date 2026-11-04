@@ -1,7 +1,7 @@
 import { isUuidLike } from "./identifiers.js";
 import { normalizeRequestSource, type RequestSource } from "./provenance.js";
 
-export const SESSION_TURN_ORIGIN_KINDS = ["prompt", "scheduled_prompt", "background_task", "hook", "reply"] as const;
+export const SESSION_TURN_ORIGIN_KINDS = ["prompt", "scheduled_prompt", "background_task", "hook"] as const;
 
 export type SessionTurnOriginKind = typeof SESSION_TURN_ORIGIN_KINDS[number];
 

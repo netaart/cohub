@@ -1,30 +1,18 @@
 import {
 	readSentTurns,
 	readSessionTurnOrigin,
-	readSessionTurnRelay,
 	type SentTurnRef,
 	type SessionTurnRecord,
-	type SessionTurnRelay,
-	splitLeadingSpaceMention,
 } from "@cohub/protocol/model";
 
 export type RelatedSessionRef = { spaceId: string; sessionId: string };
 
-export type SentSession = RelatedSessionRef & {
-	count: number;
-	awaiting?: number;
-};
-
-export type RelayFailure = NonNullable<SessionTurnRelay["error"]> & {
-	spaceId: string;
-	label: string | null;
-};
+export type SentSession = RelatedSessionRef & { count: number };
 
 export type SentTurnIndex = {
 	key: string;
 	byCallerTurn: ReadonlyMap<string, readonly SentSession[]>;
 	byToolCall: ReadonlyMap<string, readonly SentSession[]>;
-	failedRelays: ReadonlyMap<string, RelayFailure>;
 };
 
 export const NO_SENT_SESSIONS: readonly SentSession[] = [];
@@ -33,7 +21,6 @@ export const EMPTY_SENT_TURNS: SentTurnIndex = {
 	key: "",
 	byCallerTurn: new Map(),
 	byToolCall: new Map(),
-	failedRelays: new Map(),
 };
 
 function readFanOut(turn: Pick<SessionTurnRecord, "sessionId" | "meta">) {
@@ -45,40 +32,20 @@ function readFanOut(turn: Pick<SessionTurnRecord, "sessionId" | "meta">) {
 export function hasSentTurns(
 	turn: Pick<SessionTurnRecord, "sessionId" | "meta">,
 ): boolean {
-	return (
-		readFanOut(turn).length > 0 ||
-		Boolean(readSessionTurnRelay(turn.meta)?.error)
-	);
-}
-
-function readRelayFailure(turn: SessionTurnRecord): RelayFailure | null {
-	const relay = readSessionTurnRelay(turn.meta);
-	if (!relay?.error) return null;
-	const first = turn.userContent?.[0];
-	const label =
-		first?.type === "text"
-			? (splitLeadingSpaceMention(first.text)?.label ?? null)
-			: null;
-	return { ...relay.error, spaceId: relay.spaceId, label };
+	return readFanOut(turn).length > 0;
 }
 
 function groupBySession(
 	refs: readonly SentTurnRef[],
 	fallbackSpaceId: string,
-	replied: ReadonlySet<string>,
 ): SentSession[] {
 	const sessions = new Map<string, SentSession>();
 	for (const ref of refs) {
 		const spaceId = ref.spaceId ?? fallbackSpaceId;
 		const key = `${spaceId}:${ref.sessionId}`;
-		let session = sessions.get(key);
-		if (!session) {
-			session = { spaceId, sessionId: ref.sessionId, count: 0 };
-			sessions.set(key, session);
-		}
-		session.count += 1;
-		if (ref.reply && !replied.has(ref.turnId))
-			session.awaiting = (session.awaiting ?? 0) + 1;
+		const current = sessions.get(key);
+		if (current) current.count += 1;
+		else sessions.set(key, { spaceId, sessionId: ref.sessionId, count: 1 });
 	}
 	return [...sessions.values()];
 }
@@ -90,33 +57,21 @@ export function buildSentTurnIndex(
 ): SentTurnIndex {
 	if (!spaceId || turns.length === 0) return EMPTY_SENT_TURNS;
 	const fanOut: Array<[turnId: string, refs: SentTurnRef[]]> = [];
-	const failures: Array<[turnId: string, failure: RelayFailure]> = [];
-	const replied = new Set<string>();
 	let key = "";
 	for (const turn of turns) {
-		const origin = readSessionTurnOrigin(turn.meta);
-		if (origin?.kind === "reply") {
-			replied.add(origin.turnId);
-			key += `r${origin.turnId};`;
-		}
-		const failure = readRelayFailure(turn);
-		if (failure) {
-			failures.push([turn.id, failure]);
-			key += `f${turn.id}:${failure.code ?? ""}:${failure.message};`;
-		}
 		const refs = readFanOut(turn);
 		if (refs.length === 0) continue;
 		fanOut.push([turn.id, refs]);
 		key += `${turn.id}:${refs.map((ref) => ref.turnId).join(",")};`;
 	}
-	if (fanOut.length === 0 && failures.length === 0) return EMPTY_SENT_TURNS;
+	if (fanOut.length === 0) return EMPTY_SENT_TURNS;
 	key = `${spaceId}|${key}`;
 	if (previous.key === key) return previous;
 
 	const byCallerTurn = new Map<string, readonly SentSession[]>();
 	const byToolCall = new Map<string, SentTurnRef[]>();
 	for (const [turnId, refs] of fanOut) {
-		byCallerTurn.set(turnId, groupBySession(refs, spaceId, replied));
+		byCallerTurn.set(turnId, groupBySession(refs, spaceId));
 		for (const ref of refs) {
 			if (!ref.toolCallId) continue;
 			const own = byToolCall.get(ref.toolCallId);
@@ -130,10 +85,9 @@ export function buildSentTurnIndex(
 		byToolCall: new Map(
 			[...byToolCall].map(([toolCallId, refs]) => [
 				toolCallId,
-				groupBySession(refs, spaceId, replied),
+				groupBySession(refs, spaceId),
 			]),
 		),
-		failedRelays: new Map(failures),
 	};
 }
 

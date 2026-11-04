@@ -1,7 +1,7 @@
 import { BillingAccessBlockedError, type BillingAccessDecision, type BillingUsageGate } from "@cohub/billing";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { GenerationPolicy } from "@cohub/protocol/generation";
-import { normalizeSessionTurnOrigin, type SessionTurnIntent, type SessionTurnOrigin, type SessionTurnOriginKind, type SessionTurnReply } from "@cohub/protocol/model";
+import { normalizeSessionTurnOrigin, type SessionTurnIntent, type SessionTurnOrigin, type SessionTurnOriginKind } from "@cohub/protocol/model";
 import { isRequestSourceClientId, normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
 import { assertHarnessAccess, harnessSchema, isApprovalMode, isLocalHarness, runtimeServiceTierIdSchema, supportsApprovalMode, type ApprovalMode, type HarnessKind, type RuntimeRegistration } from "@cohub/protocol/runtime";
 import { findRuntimeModel, isModelThinkingLevel } from "@cohub/protocol";
@@ -144,7 +144,6 @@ export type SubmitSessionPromptInput = {
   requestSource?: RequestSource | null;
   /** Server-resolved provenance, including snapshots retained by scheduled tasks. */
   origin?: SessionTurnOrigin | null;
-  reply?: SessionTurnReply | null;
   model?: string | null;
   provider?: string | null;
   /** Agent implementation for this turn. Cloud/local runtime is resolved by the Space. */
@@ -493,7 +492,6 @@ export const submitSessionPrompt = async (
     source: input.source,
     ...(requestSource ? { requestSource } : {}),
     ...(origin ? { origin } : {}),
-    ...(origin && input.reply ? { reply: input.reply } : {}),
     ...(sourceClientId ? { sourceClientId } : {}),
     userId,
     clientMessageId,

@@ -1,21 +1,14 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { sessionTurns } from "@cohub/db";
-import { normalizeSentTurnRef, readSessionTurnReply, type SentTurnRef, type SessionTurnOrigin } from "@cohub/protocol/model";
+import { normalizeSentTurnRef, type SentTurnRef, type SessionTurnOrigin } from "@cohub/protocol/model";
 
 export const sentTurnRefFor = (
   origin: SessionTurnOrigin | null | undefined,
-  child: { spaceId: string; sessionId: string; turnId: string; meta?: unknown },
+  child: { spaceId: string; sessionId: string; turnId: string },
 ): SentTurnRef | null => {
   if (origin?.kind !== "prompt" || origin.turnId === child.turnId) return null;
-  return normalizeSentTurnRef({
-    spaceId: child.spaceId,
-    sessionId: child.sessionId,
-    turnId: child.turnId,
-    kind: origin.kind,
-    toolCallId: origin.toolCallId,
-    reply: readSessionTurnReply(child.meta)?.mode,
-  });
+  return normalizeSentTurnRef({ ...child, kind: origin.kind, toolCallId: origin.toolCallId });
 };
 
 /** Appends at one jsonb path, so concurrent children never overwrite each other. */

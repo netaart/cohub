@@ -20,10 +20,3 @@ export type BoardSessionSyncJobData = {
   sessionId: string;
   trace?: Record<string, unknown>;
 };
-
-export const SESSION_TURN_REPLY_JOB = "session.turn.reply";
-
-export type SessionTurnReplyJobData = {
-  turnId: string;
-  trace?: Record<string, unknown>;
-};

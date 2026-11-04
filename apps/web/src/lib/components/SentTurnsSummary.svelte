@@ -1,5 +1,5 @@
 <script lang="ts">
-import { ArrowUpRight, TriangleAlert } from "lucide-svelte";
+import { ArrowUpRight } from "lucide-svelte";
 import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -11,10 +11,6 @@ const { turnId }: { turnId: string } = $props();
 const locale = $derived(getLocale());
 const relations = useSessionRelations();
 const sessions = $derived(relations?.sentByTurn(turnId) ?? NO_SENT_SESSIONS);
-const failure = $derived(relations?.relayFailure(turnId) ?? null);
-const awaiting = $derived(
-	sessions.reduce((sum, session) => sum + (session.awaiting ?? 0), 0),
-);
 
 let expanded = $state(false);
 const entries = $derived(summarizeSentSessions(sessions, locale, { expanded }));
@@ -28,15 +24,7 @@ const targetLabel =
 </script>
 
 <!-- Gaps are explicit margins: flex layout drops whitespace-only text nodes. -->
-{#if failure}
-	<p class="flex flex-wrap items-center px-[var(--chat-msg-inset)] text-[13px] leading-6 text-text-tertiary">
-		<TriangleAlert class="mr-1.5 h-3.5 w-3.5 shrink-0 text-warning-soft/80" aria-hidden="true" />
-		<span class="mr-1.5">{m.relay_failed({ space: failure.label ? `@${failure.label}` : m.relay_other_space({}, { locale }) }, { locale })}</span>
-		<span class="text-text-placeholder" title={failure.message}>
-			· {failure.code === "billing" ? m.relay_failed_billing({}, { locale }) : m.relay_failed_generic({}, { locale })}
-		</span>
-	</p>
-{:else if sessions.length > 0}
+{#if sessions.length > 0}
 	<p class="flex flex-wrap items-center px-[var(--chat-msg-inset)] text-[13px] leading-6 text-text-tertiary">
 		<ArrowUpRight class="mr-1.5 h-3.5 w-3.5 shrink-0 text-brand/70" aria-hidden="true" />
 		<span class="mr-1.5 shrink-0">{m.sent_to_label({}, { locale })}</span>
@@ -67,11 +55,5 @@ const targetLabel =
 				{/if}
 			</span>
 		{/each}
-		{#if awaiting > 0}
-			<span class="ml-1.5 inline-flex shrink-0 items-center gap-1.5 text-text-placeholder">
-				<span class="h-1.5 w-1.5 rounded-full bg-brand/60 motion-safe:animate-pulse" aria-hidden="true"></span>
-				{awaiting === 1 ? m.relay_awaiting_reply({}, { locale }) : m.relay_awaiting_replies({ count: awaiting }, { locale })}
-			</span>
-		{/if}
 	</p>
 {/if}

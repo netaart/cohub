@@ -90,63 +90,6 @@ Session are not shown, since they appear in the same timeline. Titles come from 
 loaded Space list, then the Session cache, then a bounded fetch of only the links on
 screen; a 403/404 renders the Session as unavailable rather than as a link.
 
-## Replies and relays
-
-A child Turn with `meta.reply = { mode }` delivers its final result back to the Session
-in its `meta.origin` once it settles (completed, failed, interrupted or cancelled):
-
-- `note` records a note there; `prompt` also runs that Session's Agent with the caller
-  Turn's Harness, model and access mode.
-- The delivered Turn has `origin = { kind: "reply", …child Turn, depth: child + 1 }`, and
-  the caller's `messagesSent` entry carries `reply` so clients show it as awaited.
-- Content is a header block (`Reply from @[Space](cohub://spaces/…/sessions/…):`), the
-  child's final text and images, and a status block when it did not complete. Both
-  frame blocks carry `_meta.reply` so clients render them natively, while every Harness
-  reads the reply as an ordinary user message with no Agent-side change.
-- A merged follow-up is answered with its owner's result. A child that failed before any
-  Agent claimed it was already reported to its sender, so it is delivered as a note. Waking stops at
-  `MAX_REPLY_WAKE_DEPTH` (4), apps' delegated authority is never reused, and a wake the
-  Session cannot run (permission, billing, Harness) becomes a note instead; nothing is
-  delivered when the sender can no longer write to the caller's Session.
-
-Settling Turns are checked in memory (`needsTurnReplyDelivery`); only matches queue a
-`session.turn.reply` system job keyed by Turn. Delivery is idempotent through the
-`reply:<childTurnId>` client message ID, so retries and duplicate settle events converge.
-
-A relay is the user-facing form, resolved like a prompt template inside the Session
-service's `submitPrompt`, so every entry point behaves alike. An agent prompt whose first
-text starts with a mention of another Space, or of another Chat in any Space, is recorded
-here as a note with
-`meta.relay = { spaceId, sessionId? }`, then forwarded without that mention to the target
-with `reply: { mode: "note" }`, the cloud Harness and the prompt's model. A Chat mention
-continues that Chat; a Space mention starts one, whose ID is written back to
-`meta.relay.sessionId` before sending so a retry with the same client message ID resumes
-it. Prompts the sender may not run there, carrying delegated app authority, from hooks
-or channels, or delivering replies are not relayed; the mention stays context. A failed forward leaves
-the note in place with `meta.relay.error`. Reusing a client message ID forwards again only
-when one request atomically claims the note — after a recorded failure, or once an unsent
-attempt is a minute old, skipping a forwarded Turn unless it failed before an Agent
-claimed it — and is re-authorized against the Chat the note targets; a
-different target is a 409 conflict.
-
-Every relay and reply is queryable through `resource_references`, written live and
-rebuilt by the backfill from the same stored data:
-
-| Edge | Source → target | Meta |
-|---|---|---|
-| `mention` | relay note → mentioned Space or Chat | `label` |
-| `turn_trigger` | relay note (or calling Turn) → forwarded Turn | `kind: "prompt"`, `reply` |
-| `turn_trigger` | forwarded Turn → delivered reply | `kind: "reply"` |
-
-Notes never finalize on an Agent, so the Session service indexes their mentions as they
-are written. A reply's header and status blocks are not mentions; its body is. The
-durable records stay authoritative: `meta.relay` on the note, `meta.origin` and
-`meta.reply` on the forwarded Turn, `meta.origin` on the Session a relay started, the
-caller's `messagesSent`, and `meta.origin` on the delivered reply.
-
-CLI callers delegate with `cohub -s <spaceId> spaces prompt --reply "…"`, which needs the
-`COHUB_*` caller headers of a running Turn.
-
 ## Recovery and validation
 
 No DB schema migration is required. Index writes use the existing asynchronous queue;

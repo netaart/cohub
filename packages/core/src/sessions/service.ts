@@ -11,9 +11,6 @@ import { resolveSessionTurnOrigin } from "./turn-origin.js";
 import { requestAgentTurnAbort, type AgentTurnAbortRedis } from "./turn-abort.js";
 import { appendSentTurn, sentTurnRefFor } from "./sent-turns.js";
 import { withNextSessionMessageSequence } from "./message-sequence.js";
-import { relayPrompt, resolveRelayTarget, type RelayDependencies } from "./relay.js";
-import { createDrizzlePermissionStore, type PermissionStore } from "../permissions/index.js";
-import { assignSessionSourceSystemLabel } from "../labels/session-source.js";
 import { extractTurnReferences } from "../references/extract.js";
 import { turnTriggerReference } from "../references/turn-trigger.js";
 import type { ReferenceInput } from "../references/types.js";
@@ -169,9 +166,7 @@ export function createSessionServices(input: {
   onSessionTurnUpdated?: (input: { spaceId: string; turn: SessionTurnRecord }) => void | Promise<void>;
   onSessionActivityUpdated?: (input: { sessionId: string; changed: string[] }) => void | Promise<void>;
   onSessionParticipantsUpdated?: (input: { spaceId: string; sessionId: string; userUuids: string[] }) => void | Promise<void>;
-  onSessionCreated?: (session: typeof spaceSessions.$inferSelect) => void | Promise<void>;
   onUserMessageRecorded?: (input: { spaceId: string; sessionId: string; idempotencyKey: string; userId: string }) => void | Promise<void>;
-  permissions?: PermissionStore;
 }) {
   const randomUUID = input.randomUUID ?? defaultRandomUUID;
   const injectTrace = input.injectTrace ?? (() => ({}));
@@ -191,7 +186,7 @@ export function createSessionServices(input: {
     });
   }
 
-  async function registerSession(spaceId: string, options: { createdBy: string; source: string; title?: string | null; userUuid: string; origin?: SessionTurnOrigin | null; requestSource?: RequestSource | null }) {
+  async function registerCronjobSession(spaceId: string, options: { source: string; title?: string | null; userUuid: string; origin?: SessionTurnOrigin | null; requestSource?: RequestSource | null }) {
     const userUuid = options.userUuid.trim();
     if (!userUuid) throw new Error("userUuid is required");
     const [space] = await input.db.select({ id: spaces.id }).from(spaces).where(eq(spaces.id, spaceId)).limit(1);
@@ -201,7 +196,7 @@ export function createSessionServices(input: {
     const title = normalizeSessionTitle(options.title);
     const requestSource = normalizeRequestSource(options.requestSource);
     const participantMeta = initializeSessionParticipantsMeta({
-      createdBy: options.createdBy,
+      createdBy: "cronjob",
       ...(options.origin ? { origin: options.origin } : {}),
       ...(requestSource ? { requestSource } : {}),
     }, userUuid);
@@ -217,7 +212,7 @@ export function createSessionServices(input: {
       lastMessageAt: new Date(),
       lastMessageId: null,
     }).returning();
-    if (!session) throw new Error("failed to register session");
+    if (!session) throw new Error("failed to register cronjob session");
     await ensureRootSessionTurnSegment(session.id);
     await Promise.resolve(input.onSessionParticipantsUpdated?.({
       spaceId,
@@ -227,20 +222,9 @@ export function createSessionServices(input: {
     return session;
   }
 
-  const registerCronjobSession = (spaceId: string, options: Omit<Parameters<typeof registerSession>[1], "createdBy">) =>
-    registerSession(spaceId, { ...options, createdBy: "cronjob" });
-
-  async function startRelaySession(relay: { spaceId: string; userUuid: string; source: string; origin: SessionTurnOrigin }) {
-    const session = await registerSession(relay.spaceId, { ...relay, createdBy: "relay" });
-    await assignSessionSourceSystemLabel({ db: input.db, spaceId: relay.spaceId, sessionId: session.id, source: relay.source })
-      .catch((error) => logger.warn("[Relay] failed to assign source label", error));
-    await Promise.resolve(input.onSessionCreated?.(session)).catch((error) => logger.warn("[Relay] failed to publish created session", error));
-    return session.id;
-  }
-
   async function recordSentTurn(meta: unknown, child: { spaceId: string; sessionId: string; turnId: string }) {
     const origin = readSessionTurnOrigin(meta, child.spaceId);
-    const ref = sentTurnRefFor(origin, { ...child, meta });
+    const ref = sentTurnRefFor(origin, child);
     if (!origin || !ref) return;
     try {
       const caller = await appendSentTurn(input.db, origin, ref);
@@ -463,29 +447,7 @@ export function createSessionServices(input: {
     });
   }
 
-  const relayDeps: RelayDependencies = {
-    db: input.db,
-    permissions: input.permissions ?? createDrizzlePermissionStore(input.db),
-    recordNote,
-    startSession: startRelaySession,
-    submit: (promptInput) => submitDirect(promptInput),
-    publishTurn: async (spaceId, row) => {
-      await Promise.resolve(input.onSessionTurnUpdated?.({ spaceId, turn: toSessionTurnRecord(row) }))
-        .catch((error) => logger.warn("[Relay] failed to publish note update", error));
-    },
-    logger,
-  };
-
   async function submitPrompt(
-    promptInput: SubmitSessionPromptInput,
-    hooks: SubmitSessionPromptHooks = {},
-    options: SubmitSessionPromptOptions = {},
-  ) {
-    const relay = await resolveRelayTarget(relayDeps, promptInput);
-    return relay ? relayPrompt(relayDeps, promptInput, relay) : submitDirect(promptInput, hooks, options);
-  }
-
-  async function submitDirect(
     promptInput: SubmitSessionPromptInput,
     hooks: SubmitSessionPromptHooks = {},
     options: SubmitSessionPromptOptions = {},

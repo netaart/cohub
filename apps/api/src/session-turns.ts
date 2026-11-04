@@ -172,7 +172,7 @@ const summarizeIntermediateContent = (content: ContentBlock[], tools: StoredTool
   });
 };
 
-export const toTurnRecord = (row: typeof sessionTurns.$inferSelect): SessionTurnRecord => ({
+const toTurnRecord = (row: typeof sessionTurns.$inferSelect): SessionTurnRecord => ({
   id: row.id,
   sessionId: row.sessionId,
   userUuid: row.userUuid ?? null,
