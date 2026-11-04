@@ -16,7 +16,7 @@ import { recordLlmUsage, startLlmRoundSpan, getAgentTracer } from "@cohub/infra/
 import { getCurrentToolExecutionContext, runWithToolExecutionContext, type ToolExecutionContext } from "../tool-context.js";
 import { applyRoundBoundaryAbort } from "../active-turns.js";
 import { isToolFailureDetails } from "./tools/index.js";
-import { clampModelMaxContext, mergeHeaders } from "@cohub/infra/config-runtime/models";
+import { clampContextWindow, mergeHeaders } from "@cohub/infra/config-runtime/models";
 import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
 import { ModelUnavailableError } from "@cohub/core/sessions";
 import { prepareAgentImagesForModel } from "./image-to-text.js";
@@ -48,7 +48,7 @@ export type CohubAgentSession = {
   enqueueSteer(text: string, images?: ImageContent[]): void;
   waitForIdle(): Promise<void>;
   setModel(model: Model<Api>): Promise<void>;
-  configureRuntimeIdentity(input: { userId?: string | null; spaceOwnerUserId?: string | null; modelRegistry: CohubModelRegistry; imageToTextConfig?: ImageToTextConfig | null; requestedModel?: { provider: string; id: string }; requestedThinkingLevel?: string | null; requestedMaxContext?: number | null }): Promise<void>;
+  configureRuntimeIdentity(input: { userId?: string | null; spaceOwnerUserId?: string | null; modelRegistry: CohubModelRegistry; imageToTextConfig?: ImageToTextConfig | null; requestedModel?: { provider: string; id: string }; requestedThinkingLevel?: string | null; requestedContextWindow?: number | null }): Promise<void>;
   configureTools(tools: ToolLike[]): Promise<void>;
   reload(): Promise<void>;
   abort(): Promise<void>;
@@ -1048,26 +1048,17 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
         ?? input.modelRegistry.find(currentModel.provider, currentModel.id)
         ?? input.modelRegistry.getDefault();
       if (!target) throw new Error("No model available. Check platform models.json");
-      const requestedMaxContext = clampModelMaxContext(input.requestedMaxContext ?? undefined, target.contextWindow);
-      const activeTarget = requestedMaxContext
-        ? {
-            ...target,
-            maxContext: requestedMaxContext,
-            maxContextSource: "prompt" as const,
-            maxContextSourceRef: undefined,
-          }
-        : target;
 
       const nextKey = systemPromptStateKeyFor(nextUserId, nextSpaceOwnerUserId, runtimeTools);
       const nextSystemPrompt = systemPromptStateKey === nextKey
         ? runtimeSystemPrompt
         : await buildSystemPromptForTools(runtimeTools, { userId: nextUserId, spaceOwnerUserId: nextSpaceOwnerUserId });
-      const shouldChangeModel = activeTarget.provider !== currentModel.provider || activeTarget.id !== currentModel.id;
+      const shouldChangeModel = target.provider !== currentModel.provider || target.id !== currentModel.id;
       const hasRequestedThinkingLevel = input.requestedThinkingLevel !== undefined && input.requestedThinkingLevel !== null;
       const nextThinkingLevel = hasRequestedThinkingLevel
-        ? resolveThinkingLevelForModel(activeTarget as CohubModel, input.requestedThinkingLevel)
+        ? resolveThinkingLevelForModel(target as CohubModel, input.requestedThinkingLevel)
         : shouldChangeModel
-          ? resolveThinkingLevelForModel(activeTarget as CohubModel, agent.state.thinkingLevel)
+          ? resolveThinkingLevelForModel(target as CohubModel, agent.state.thinkingLevel)
           : agent.state.thinkingLevel;
 
       runtimeUserId = nextUserId;
@@ -1079,9 +1070,13 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
       const shouldChangeThinkingLevel = nextThinkingLevel !== agent.state.thinkingLevel;
       // IDs can stay the same while credentials, headers and endpoints change.
       // Bind the model and its auth registry to the same runtime configuration.
-      agent.state.model = activeTarget;
+      // A prompt window applies to this Turn only; the next Turn rebinds the registry model.
+      const promptContextWindow = clampContextWindow(input.requestedContextWindow ?? undefined, (target as CohubModel).contextWindowLimit);
+      agent.state.model = promptContextWindow
+        ? { ...target, contextWindow: promptContextWindow, contextWindowSource: "prompt" } as CohubModel
+        : target;
       if (shouldChangeModel) {
-        options.sessionManager.appendModelChange(activeTarget.provider, activeTarget.id);
+        options.sessionManager.appendModelChange(target.provider, target.id);
       }
       if (shouldChangeModel || shouldChangeThinkingLevel) {
         agent.state.thinkingLevel = nextThinkingLevel;

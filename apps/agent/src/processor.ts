@@ -12,7 +12,7 @@ import { getSpace } from "./api.js";
 import { abortSessionTurn, failSessionTurn, interruptSessionTurn, persistAssistantMessage, persistUserMessage, publishSessionTurnsUpdated } from "./persistence.js";
 import { ensureSandboxConnection } from "./sandbox-pool.js";
 import { createSandboxCodingTools } from "./sandbox/tools.js";
-import { CohubModelRegistry, type CohubModel } from "./runtime/model-registry.js";
+import { CohubModelRegistry } from "./runtime/model-registry.js";
 import { loadRuntimeModelsConfigs } from "./runtime/models-loader.js";
 import { loadImageToTextConfig } from "./runtime/image-to-text-config.js";
 import { loadSpaceEnvSnapshot } from "./runtime/env-cache.js";
@@ -576,7 +576,6 @@ async function runDirectShellCommandTurn(input: {
       completedAt,
       thinkingLevel: handle.session.agent.state.thinkingLevel,
       contextWindow: handle.session.agent.state.model.contextWindow,
-      maxContext: (handle.session.agent.state.model as CohubModel).maxContext,
     });
 
     input.turnMetrics.toolCallCount += 1;
@@ -594,7 +593,7 @@ async function prepareHandle(input: {
   actorUserId: string;
   requestedModel?: { provider: string; id: string };
   requestedThinkingLevel?: string | null;
-  requestedMaxContext?: number | null;
+  requestedContextWindow?: number | null;
   beforeTurnSequence?: number | null;
 }) {
   const [modelRegistry, imageToTextConfig] = await Promise.all([
@@ -623,7 +622,7 @@ async function prepareHandle(input: {
     imageToTextConfig,
     requestedModel: input.requestedModel,
     requestedThinkingLevel: input.requestedThinkingLevel,
-    requestedMaxContext: input.requestedMaxContext,
+    requestedContextWindow: input.requestedContextWindow,
   });
 
   return handle;
@@ -641,8 +640,8 @@ function resolveRequestedThinkingLevel(ownerMeta: Record<string, unknown>): stri
   return trimmed || null;
 }
 
-function resolveRequestedMaxContext(ownerMeta: Record<string, unknown>): number | null | undefined {
-  const value = ownerMeta.requestedMaxContext;
+function resolveRequestedContextWindow(ownerMeta: Record<string, unknown>): number | null | undefined {
+  const value = ownerMeta.requestedContextWindow;
   if (value === undefined) return undefined;
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
@@ -910,7 +909,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
         actorUserId,
         requestedModel: resolveRequestedModel(ownerMeta),
         requestedThinkingLevel: resolveRequestedThinkingLevel(ownerMeta),
-        requestedMaxContext: resolveRequestedMaxContext(ownerMeta),
+        requestedContextWindow: resolveRequestedContextWindow(ownerMeta),
         beforeTurnSequence: batch.turns[0]?.sequence ?? batch.ownerTurn.sequence,
       });
       const activeHandle = handle;

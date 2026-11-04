@@ -411,8 +411,8 @@ type SpacePromptInput = {
   provider?: string | null;
   harness?: HarnessKind | null;
   thinkingLevel?: string | null;
-  /** Optional context threshold for this prompt, clamped to the model context window. */
-  maxContext?: number | null;
+  /** Optional context window for this prompt, capped at the platform value. */
+  contextWindow?: number | null;
   approvalMode?: ApprovalMode | null;
   serviceTier?: string | null;
   clientMessageId?: string | null;
@@ -2148,16 +2148,16 @@ router.post("/:id/prompt", async (c) => {
   if (!promptIntent) return c.json({ message: "intent must be one of: followup, steer" }, 400);
   const promptThinkingLevel = normalizePromptThinkingLevel(body.thinkingLevel);
   if (promptThinkingLevel === null) return c.json({ message: `thinkingLevel must be one of: ${MODEL_THINKING_LEVELS.join(", ")}` }, 400);
-  if (body.maxContext !== undefined && body.maxContext !== null
-    && (!Number.isSafeInteger(body.maxContext) || body.maxContext <= 0)) {
-    return c.json({ message: "maxContext must be a positive integer" }, 400);
+  if (body.contextWindow !== undefined && body.contextWindow !== null
+    && (!Number.isSafeInteger(body.contextWindow) || body.contextWindow <= 0)) {
+    return c.json({ message: "contextWindow must be a positive integer" }, 400);
   }
-  const promptMaxContext = typeof body.maxContext === "number" ? body.maxContext : null;
+  const promptContextWindow = typeof body.contextWindow === "number" ? body.contextWindow : null;
   if (body.harness !== undefined && body.harness !== null && !harnessSchema.safeParse(body.harness).success) {
     return c.json({ message: `harness must be one of: ${harnessSchema.options.join(", ")}` }, 400);
   }
-  if (promptMaxContext && isLocalHarness(body.harness)) {
-    return c.json({ message: "maxContext is only supported by the cohub harness" }, 400);
+  if (promptContextWindow && isLocalHarness(body.harness)) {
+    return c.json({ message: "contextWindow is only supported by the cohub harness" }, 400);
   }
   const promptPermission = accessMode === "read_only" ? "session.prompt.readonly" : "session.prompt.fullaccess";
   if (!(await hasPermission(user, promptPermission, { spaceId }))) return authzDenied(c);
@@ -2245,7 +2245,7 @@ router.post("/:id/prompt", async (c) => {
     ...(body.model ? { model: body.model } : {}),
     ...(body.provider ? { provider: body.provider } : {}),
     ...(promptThinkingLevel ? { thinkingLevel: promptThinkingLevel } : {}),
-    ...(promptMaxContext ? { maxContext: promptMaxContext } : {}),
+    ...(promptContextWindow ? { contextWindow: promptContextWindow } : {}),
     ...(promptLabelIds.length > 0 ? { labelIds: promptLabelIds } : {}),
     ...(scheduledAuth ? { auth: scheduledAuth } : {}),
   };
@@ -2282,7 +2282,7 @@ router.post("/:id/prompt", async (c) => {
         provider: requestedProvider,
         harness: body.harness ?? null,
         thinkingLevel: promptThinkingLevel ?? null,
-        maxContext: promptMaxContext,
+        contextWindow: promptContextWindow,
         approvalMode: body.approvalMode ?? null,
         serviceTier: body.serviceTier ?? null,
         generationPolicy,

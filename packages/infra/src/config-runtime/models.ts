@@ -17,8 +17,8 @@ export type ModelCost = {
 export type ModelThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelRequestProfile = "codex" | "claude-code";
 export type ThinkingLevelMap = Partial<Record<ModelThinkingLevel, string | null>>;
-/** Where the effective `maxContext` came from. Runtime-only, never read from config files. */
-export type ModelMaxContextSource = "platform" | "mod" | "user" | "prompt" | "default";
+/** Where the effective `contextWindow` came from. Runtime-only, never read from config files. */
+export type ModelContextWindowSource = "platform" | "mod" | "user" | "prompt" | "default";
 
 export type ModelDef = {
   id: string;
@@ -32,14 +32,14 @@ export type ModelDef = {
   hidden?: boolean;
   input?: Array<"text" | "image">;
   cost?: ModelCost;
-  /** The model's real context limit. Platform-owned for platform models. */
+  /** Effective context window; overrides of a platform model are capped at the platform value. */
   contextWindow?: number;
-  /** Effective context threshold used for compaction and truncation. Clamped to `contextWindow`. */
-  maxContext?: number;
-  /** Runtime-only source of the effective `maxContext`. */
-  maxContextSource?: ModelMaxContextSource;
-  /** Runtime-only reference for the source (for example a mod mount slug). */
-  maxContextSourceRef?: string;
+  /** Runtime-only: platform cap for overrides of `contextWindow`. */
+  contextWindowLimit?: number;
+  /** Runtime-only: which layer set `contextWindow`. */
+  contextWindowSource?: ModelContextWindowSource;
+  /** Runtime-only: source detail, for example a mod mount slug. */
+  contextWindowSourceRef?: string;
   maxTokens?: number;
   requestProfile?: ModelRequestProfile;
   /** `false` sends remote images inline instead of as URLs. */
@@ -127,7 +127,6 @@ export function isModelDefinition(value: unknown, options: { partial?: boolean }
     && (value.input === undefined || (Array.isArray(value.input) && value.input.length > 0 && value.input.every((item) => item === "text" || item === "image")))
     && (value.cost === undefined || isModelCost(value.cost, partial))
     && (value.contextWindow === undefined || isPositiveInteger(value.contextWindow))
-    && (value.maxContext === undefined || isPositiveInteger(value.maxContext))
     && (value.maxTokens === undefined || isPositiveInteger(value.maxTokens))
     && (value.requestProfile === undefined || REQUEST_PROFILES.has(value.requestProfile as ModelRequestProfile))
     && (value.imageUrlInput === undefined || typeof value.imageUrlInput === "boolean")
@@ -251,7 +250,7 @@ export function parseCachedModelsConfig(rawText: string): CachedModelsConfig | n
 
 const MODEL_PARAMETER_FIELDS = new Set([
   "id", "name", "reasoning", "defaultThinkingLevel", "thinkingLevelMap",
-  "hidden", "input", "contextWindow", "maxContext", "maxTokens",
+  "hidden", "input", "contextWindow", "maxTokens",
 ]);
 
 const PROTECTED_MODEL_FIELDS = new Set([
@@ -376,18 +375,17 @@ export type ModelsConfigModLayer = {
   ref?: string;
 };
 
-/** Lowest effective threshold; smaller values would compact on nearly every LLM round. */
-export const MIN_MAX_CONTEXT = 65_536;
+/** Window runtimes assume when a model declares none. */
+export const DEFAULT_CONTEXT_WINDOW = 128_000;
 
-/** Clamp a threshold to `[MIN_MAX_CONTEXT, contextWindow]`; the real window always wins. */
-export function clampModelMaxContext(value: number | undefined, contextWindow: number | undefined): number | undefined {
+/** Overrides may tighten or relax a window but never exceed the platform value. */
+export function clampContextWindow(value: number | undefined, limit: number | undefined): number | undefined {
   if (!isPositiveInteger(value)) return undefined;
-  const floored = Math.max(value, MIN_MAX_CONTEXT);
-  return isPositiveInteger(contextWindow) ? Math.min(floored, contextWindow) : floored;
+  return isPositiveInteger(limit) ? Math.min(value, limit) : value;
 }
 
-/** Mods may only tune the threshold of an existing platform model. */
-export function selectModModelMaxContextOverrides(
+/** Mods may only tune `contextWindow` of an existing platform model. */
+export function selectModContextWindowOverrides(
   platform: ModelsConfig | null | undefined,
   config: ModelsConfig,
 ): ModelsConfig {
@@ -396,9 +394,9 @@ export function selectModModelMaxContextOverrides(
     const platformModels = platform?.providers[provider]?.models;
     if (!platformModels) continue;
     const models = (providerConfig.models ?? []).flatMap((model) => {
-      if (!isPositiveInteger(model.maxContext)) return [];
+      if (!isPositiveInteger(model.contextWindow)) return [];
       if (!platformModels.some((item) => item.id === model.id)) return [];
-      return [{ id: model.id, maxContext: model.maxContext }];
+      return [{ id: model.id, contextWindow: model.contextWindow }];
     });
     if (models.length > 0) providers[provider] = { models };
   }
@@ -406,9 +404,8 @@ export function selectModModelMaxContextOverrides(
 }
 
 /**
- * Merge platform, mod and user catalogs, then resolve each model's effective
- * `maxContext`. `contextWindow` stays the real limit; user/mod overrides of it
- * act as legacy threshold values and are clamped to the platform limit.
+ * Merge platform, mod and user catalogs and resolve each model's `contextWindow`
+ * (platform < mod < user), capped at the platform value, with its source.
  */
 export function resolveModelsConfigContext(input: {
   platform?: ModelsConfig | null;
@@ -416,7 +413,7 @@ export function resolveModelsConfigContext(input: {
   user?: ModelsConfig | null;
 }): ModelsConfig {
   const modLayers = (input.mods ?? [])
-    .map((layer) => ({ ...layer, config: selectModModelMaxContextOverrides(input.platform, layer.config) }))
+    .map((layer) => ({ ...layer, config: selectModContextWindowOverrides(input.platform, layer.config) }))
     .filter((layer) => Object.keys(layer.config.providers).length > 0);
   const merged = mergeModelsConfigs(input.platform, ...modLayers.map((layer) => layer.config), input.user);
   const platformProviders = input.platform?.providers ?? {};
@@ -428,61 +425,33 @@ export function resolveModelsConfigContext(input: {
     const usesPlatform = provider === "cohub"
       || Boolean(platformProvider && (!userProvider || isPlatformModelOverride(provider, userProvider)));
 
-    const models = (providerConfig.models ?? []).map((model) => {
+    const models = (providerConfig.models ?? []).map((model): ModelDef => {
       if (!usesPlatform) {
-        const contextWindow = isPositiveInteger(model.contextWindow) ? model.contextWindow : undefined;
-        const configured = isPositiveInteger(model.maxContext) ? model.maxContext : contextWindow;
-        return {
-          ...model,
-          ...(contextWindow ? { contextWindow } : {}),
-          ...(configured ? { maxContext: clampModelMaxContext(configured, contextWindow) } : {}),
-          ...(configured ? { maxContextSource: (isPositiveInteger(model.maxContext) ? "user" : "default") as ModelMaxContextSource } : {}),
-        };
+        return isPositiveInteger(model.contextWindow) ? { ...model, contextWindowSource: "user" } : model;
       }
 
       const platformModel = platformProvider?.models?.find((item) => item.id === model.id);
       const userModel = userProvider?.models?.find((item) => item.id === model.id);
-      const hardLimit = isPositiveInteger(platformModel?.contextWindow)
-        ? platformModel.contextWindow
-        : isPositiveInteger(model.contextWindow) ? model.contextWindow : undefined;
+      // Without a declared platform window there is no known cap; overrides apply as-is, as before.
+      const limit = isPositiveInteger(platformModel?.contextWindow) ? platformModel.contextWindow : undefined;
+      const modLayer = [...modLayers].reverse().find((layer) =>
+        layer.config.providers[provider]?.models?.some((item) => item.id === model.id));
+      const modValue = modLayer?.config.providers[provider]?.models?.find((item) => item.id === model.id)?.contextWindow;
 
-      let configured: number | undefined;
-      let source: ModelMaxContextSource = "default";
-      let sourceRef: string | undefined;
-      if (isPositiveInteger(userModel?.maxContext)) {
-        configured = userModel.maxContext;
-        source = "user";
-      } else if (isPositiveInteger(userModel?.contextWindow)
-        && isPositiveInteger(hardLimit) && userModel.contextWindow < hardLimit) {
-        // Legacy contextWindow only counts when it tightens; values clamped to a no-op must not shadow mods.
-        configured = userModel.contextWindow;
-        source = "user";
-      } else {
-        const modLayer = [...modLayers].reverse().find((layer) =>
-          layer.config.providers[provider]?.models?.some((item) => item.id === model.id));
-        const modModel = modLayer?.config.providers[provider]?.models?.find((item) => item.id === model.id);
-        if (modModel && isPositiveInteger(modModel.maxContext)) {
-          configured = modModel.maxContext;
-          source = "mod";
-          sourceRef = modLayer?.ref;
-        } else if (isPositiveInteger(platformModel?.maxContext)) {
-          configured = platformModel.maxContext;
-          source = "platform";
-        } else if (isPositiveInteger(platformModel?.contextWindow)) {
-          configured = platformModel.contextWindow;
-          source = "platform";
-        } else if (isPositiveInteger(model.contextWindow)) {
-          configured = model.contextWindow;
-          source = "default";
-        }
-      }
+      // A user value equal to the platform one is a copied catalog entry, not an override.
+      const userValue = userModel?.contextWindow !== limit ? userModel?.contextWindow : undefined;
+      const [value, source, sourceRef]: [number | undefined, ModelContextWindowSource, string | undefined] =
+        isPositiveInteger(userValue) ? [userValue, "user", undefined]
+          : isPositiveInteger(modValue) ? [modValue, "mod", modLayer?.ref]
+            : [limit, limit ? "platform" : "default", undefined];
 
+      const contextWindow = clampContextWindow(value, limit);
       return {
         ...model,
-        ...(hardLimit ? { contextWindow: hardLimit } : {}),
-        ...(configured ? { maxContext: clampModelMaxContext(configured, hardLimit) } : {}),
-        maxContextSource: source,
-        ...(sourceRef ? { maxContextSourceRef: sourceRef } : {}),
+        ...(contextWindow ? { contextWindow } : {}),
+        ...(limit ? { contextWindowLimit: limit } : {}),
+        contextWindowSource: source,
+        ...(sourceRef ? { contextWindowSourceRef: sourceRef } : {}),
       };
     });
     return [provider, { ...providerConfig, models }];

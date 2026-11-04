@@ -87,11 +87,15 @@ export async function listEnabledSpaceMods(db: SpaceModsDb, spaceId: string): Pr
   return (await listSpaceMods(db, spaceId)).filter((mod) => mod.enabled);
 }
 
+const MOD_MODEL_LAYERS_TTL_MS = 15_000;
+const modModelLayersCache = new Map<string, { expiresAt: number; layers: Promise<ModelsConfigModLayer[]> }>();
+
 /**
  * Read enabled mods' `.cohub/models.json` from their latest checkpoint snapshot,
  * in mount order. Mod config never fails the caller: problems go to `warn`.
+ * Results are memoized per space for a few seconds because this runs on every Turn.
  */
-export async function loadSpaceModModelLayers(
+export function loadSpaceModModelLayers(
   db: SpaceModsDb,
   spaceId: string | null | undefined,
   options: {
@@ -101,12 +105,27 @@ export async function loadSpaceModModelLayers(
   },
 ): Promise<ModelsConfigModLayer[]> {
   const id = spaceId?.trim();
-  if (!id) return [];
+  if (!id) return Promise.resolve([]);
+  const key = `${options.checkpointCacheRoot}\0${id}`;
+  const now = Date.now();
+  const cached = modModelLayersCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.layers;
+  for (const [entryKey, entry] of modModelLayersCache) if (entry.expiresAt <= now) modModelLayersCache.delete(entryKey);
+  const layers = readSpaceModModelLayers(db, id, options);
+  modModelLayersCache.set(key, { expiresAt: now + MOD_MODEL_LAYERS_TTL_MS, layers });
+  return layers;
+}
+
+async function readSpaceModModelLayers(
+  db: SpaceModsDb,
+  spaceId: string,
+  options: Parameters<typeof loadSpaceModModelLayers>[2],
+): Promise<ModelsConfigModLayer[]> {
   let mods: SpaceModListItem[];
   try {
-    mods = await listEnabledSpaceMods(db, id);
+    mods = await listEnabledSpaceMods(db, spaceId);
   } catch (error) {
-    options.warn(`Cannot list mods for space ${id}: ${error instanceof Error ? error.message : String(error)}`);
+    options.warn(`Cannot list mods for space ${spaceId}: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
   const read = options.readFile ?? readFile;

@@ -40,7 +40,7 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
   const requestSource = normalizeRequestSource(payload.data?.requestSource);
   const origin = normalizeSessionTurnOrigin(payload.data?.origin);
   const spaceId = payload.spaceId;
-  const { content, sessionId, title, source: payloadSource, model, provider, thinkingLevel, maxContext, clientMessageId, generationPolicy, accessMode: payloadAccessMode, intent, labelIds, auth, env } = (payload.data ?? {}) as {
+  const { content, sessionId, title, source: payloadSource, model, provider, thinkingLevel, contextWindow, clientMessageId, generationPolicy, accessMode: payloadAccessMode, intent, labelIds, auth, env } = (payload.data ?? {}) as {
     content?: ContentBlock[];
     sessionId?: string;
     title?: string;
@@ -48,7 +48,7 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
     model?: string;
     provider?: string;
     thinkingLevel?: string | null;
-    maxContext?: number | null;
+    contextWindow?: number | null;
     clientMessageId?: string;
     generationPolicy?: GenerationPolicy | null;
     accessMode?: PromptAccessMode | null;
@@ -115,7 +115,7 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
     model: model ?? null,
     provider: provider ?? null,
     thinkingLevel: thinkingLevel ?? null,
-    maxContext: typeof maxContext === "number" ? maxContext : null,
+    contextWindow: typeof contextWindow === "number" ? contextWindow : null,
     generationPolicy: generationPolicy ?? null,
     accessMode,
     env: promptEnv,

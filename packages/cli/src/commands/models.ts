@@ -172,16 +172,11 @@ function printMultimodalModel(model: PublicGenerationDeclaration): void {
   }));
 }
 
-function readModelContext(model: Record<string, unknown>): number | null {
-  const value = model.maxContext ?? model.contextWindow;
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
-}
-
 function formatModelContext(model: Record<string, unknown>): string {
-  const value = readModelContext(model);
-  if (value == null) return "";
-  const source = typeof model.maxContextSource === "string" ? model.maxContextSource : null;
-  const ref = typeof model.maxContextSourceRef === "string" ? `:${model.maxContextSourceRef}` : "";
+  const value = model.contextWindow;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "";
+  const source = typeof model.contextWindowSource === "string" ? model.contextWindowSource : null;
+  const ref = typeof model.contextWindowSourceRef === "string" ? `:${model.contextWindowSourceRef}` : "";
   return source ? `${formatTokenCount(value)} (${source}${ref})` : formatTokenCount(value);
 }
 
@@ -259,7 +254,7 @@ Examples:
           })), [
             { key: "id", label: "ID" },
             { key: "provider", label: "Provider" },
-            { key: "context", label: "Max context" },
+            { key: "context", label: "Context" },
             { key: "cost", label: "Cost" },
           ]);
         }

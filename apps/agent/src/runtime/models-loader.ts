@@ -60,6 +60,10 @@ export async function loadRuntimeModelsConfigs(
   userId?: string | null,
   spaceId?: string | null,
 ): Promise<ModelsConfig[]> {
+  const modsPromise = loadSpaceModModelLayers(db, spaceId, {
+    checkpointCacheRoot: getAgentCheckpointCacheRoot(),
+    warn: (message) => logger.warn(`[Models] ${message}`),
+  });
   const platform = await loadCachedModels({
     redisKey: PLATFORM_MODELS_REDIS_KEY,
     modelsPath: getAgentPlatformModelsPath(),
@@ -75,10 +79,5 @@ export async function loadRuntimeModelsConfigs(
       })
     : null;
 
-  const mods = await loadSpaceModModelLayers(db, spaceId, {
-    checkpointCacheRoot: getAgentCheckpointCacheRoot(),
-    warn: (message) => logger.warn(`[Models] ${message}`),
-  });
-
-  return [resolveRuntimeModelsConfig({ platform, mods, user })];
+  return [resolveRuntimeModelsConfig({ platform, mods: await modsPromise, user })];
 }

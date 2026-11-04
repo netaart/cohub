@@ -31,7 +31,7 @@ test("loads enabled mod models.json files and reports bad ones without failing",
   try {
     const good = join(root, "good", "latest", ".cohub");
     await mkdir(good, { recursive: true });
-    await writeFile(join(good, "models.json"), JSON.stringify({ providers: { cohub: { models: [{ id: "chat", maxContext: 120000 }] } } }));
+    await writeFile(join(good, "models.json"), JSON.stringify({ providers: { cohub: { models: [{ id: "chat", contextWindow: 120000 }] } } }));
     const bad = join(root, "bad", "latest", ".cohub");
     await mkdir(bad, { recursive: true });
     await writeFile(join(bad, "models.json"), "{not json");
@@ -44,7 +44,7 @@ test("loads enabled mod models.json files and reports bad ones without failing",
 
     assert.equal(layers.length, 1);
     assert.equal(layers[0]?.ref, "mod-good");
-    assert.equal(layers[0]?.config.providers.cohub?.models?.[0]?.maxContext, 120000);
+    assert.equal(layers[0]?.config.providers.cohub?.models?.[0]?.contextWindow, 120000);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0] ?? "", /invalid mod models\.json/);
   } finally {

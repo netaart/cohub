@@ -10,6 +10,7 @@ import {
   parseCachedModelsConfig,
   parseModelsConfig,
   PLATFORM_MODELS_REDIS_KEY,
+  DEFAULT_CONTEXT_WINDOW,
   resolveModelsConfigContext,
   type CachedModelsConfig,
   type ModelCatalogEntry,
@@ -98,6 +99,10 @@ async function loadCachedModels(input: {
 }
 
 async function fetchModelsCatalog(userId: string, spaceId?: string | null): Promise<ModelCatalogEntry[]> {
+  const modsPromise = loadSpaceModModelLayers(db, spaceId, {
+    checkpointCacheRoot: config.checkpointCacheRoot,
+    warn: (message) => logger.warn(`[models] ${message}`),
+  });
   const platformModels = await loadCachedModels({
     redisKey: PLATFORM_MODELS_REDIS_KEY,
     modelsPath: PLATFORM_MODELS_PATH,
@@ -111,16 +116,10 @@ async function fetchModelsCatalog(userId: string, spaceId?: string | null): Prom
     allowMissing: true,
   });
 
-  const mods = await loadSpaceModModelLayers(db, spaceId, {
-    checkpointCacheRoot: config.checkpointCacheRoot,
-    warn: (message) => logger.warn(`[models] ${message}`),
-  });
-
-  return flattenModelsCatalog(resolveModelsConfigContext({
-    platform: platformModels,
-    mods,
-    user: userModels,
-  }));
+  const resolved = resolveModelsConfigContext({ platform: platformModels, mods: await modsPromise, user: userModels });
+  return flattenModelsCatalog(resolved).map((entry) => entry.model.contextWindow === undefined
+    ? { ...entry, model: { ...entry.model, contextWindow: DEFAULT_CONTEXT_WINDOW, contextWindowSource: "default" } }
+    : entry);
 }
 
 const router = new Hono();

@@ -1,6 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
-  clampModelMaxContext,
+  DEFAULT_CONTEXT_WINDOW,
   mergeHeaders,
   mergeModelsConfigs,
   type ModelDef,
@@ -13,10 +13,8 @@ export type CohubModel<TApi extends Api = Api> = Model<TApi> & {
   defaultThinkingLevel?: ModelThinkingLevel;
   requestProfile?: ModelRequestProfile;
   imageUrlInput?: boolean;
-  /** Effective context threshold, clamped by `clampModelMaxContext`. */
-  maxContext?: number;
-  maxContextSource?: ModelDef["maxContextSource"];
-  maxContextSourceRef?: string;
+  contextWindowLimit?: number;
+  contextWindowSource?: ModelDef["contextWindowSource"];
 };
 
 function finiteNumberOrZero(value: unknown): number {
@@ -59,7 +57,6 @@ export class CohubModelRegistry {
         const api = modelDef.api ?? providerConfig.api;
         const baseUrl = modelDef.baseUrl ?? providerConfig.baseUrl;
         if (!api || !baseUrl || !modelDef.id) continue;
-        const contextWindow = modelDef.contextWindow ?? 128000;
         mergedModels.set(`${provider}:${modelDef.id}`, {
           id: modelDef.id,
           name: modelDef.name ?? modelDef.id,
@@ -71,10 +68,9 @@ export class CohubModelRegistry {
           thinkingLevelMap: modelDef.thinkingLevelMap,
           input: modelDef.input ?? ["text"],
           cost: normalizeModelCost(modelDef.cost),
-          contextWindow,
-          maxContext: clampModelMaxContext(modelDef.maxContext ?? contextWindow, contextWindow),
-          maxContextSource: modelDef.maxContextSource,
-          maxContextSourceRef: modelDef.maxContextSourceRef,
+          contextWindow: modelDef.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+          contextWindowLimit: modelDef.contextWindowLimit,
+          contextWindowSource: modelDef.contextWindowSource,
           maxTokens: modelDef.maxTokens ?? 16384,
           requestProfile: modelDef.requestProfile ?? providerConfig.requestProfile,
           imageUrlInput: modelDef.imageUrlInput ?? providerConfig.imageUrlInput,

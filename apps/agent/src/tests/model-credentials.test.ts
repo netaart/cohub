@@ -48,7 +48,6 @@ test("agent registry keeps platform connection and sibling models when parameter
   } } };
   const registry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform: source, user })] });
   assert.equal(registry.find("cohub", "platform")?.contextWindow, 100000);
-  assert.equal(registry.find("cohub", "platform")?.maxContext, 100000);
   assert.equal(registry.find("cohub", "platform")?.baseUrl, "https://platform.example.test/v1");
   assert.deepEqual(registry.getHeaders("cohub", "platform"), { "X-Key": "synthetic-platform-header" });
   assert.equal(registry.find("cohub", "sibling")?.id, "sibling");

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CONTEXT_WINDOW,
   mergeHeaders,
   mergeModelsConfigs,
   type ModelDef,
@@ -54,7 +55,7 @@ export class CompletionModelRegistry {
           thinkingLevelMap: modelDef.thinkingLevelMap,
           input: modelDef.input ?? ["text"],
           cost: normalizeModelCost(modelDef.cost),
-          contextWindow: modelDef.contextWindow ?? 128000,
+          contextWindow: modelDef.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
           maxTokens: modelDef.maxTokens ?? 16384,
           requestProfile: modelDef.requestProfile ?? providerConfig.requestProfile,
           imageUrlInput: modelDef.imageUrlInput ?? providerConfig.imageUrlInput,

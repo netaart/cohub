@@ -46,8 +46,7 @@ test("a single parameter override keeps every other model and connection field",
   } } });
   const runtimeModels = resolveRuntimeModelsConfig({ platform, user }).providers.cohub?.models;
   assert.equal(runtimeModels?.[0]?.contextWindow, 100000);
-  assert.equal(runtimeModels?.[0]?.maxContext, 100000);
-  assert.equal(runtimeModels?.[0]?.maxContextSource, "platform");
+  assert.equal(runtimeModels?.[0]?.contextWindowSource, "user");
   assert.deepEqual(flattenModelsCatalog(merged).map(({ id }) => id), ["chat", "sibling"]);
   assert.equal(isRuntimeModelAvailable([platform, user], "cohub", "chat"), true);
   assert.equal(isRuntimeModelAvailable([platform, user], "cohub", "sibling"), true);

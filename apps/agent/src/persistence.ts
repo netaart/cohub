@@ -811,9 +811,9 @@ export async function persistUserMessage(input: { spaceId: string; sessionId: st
 
 const EMPTY_ASSISTANT_MESSAGE_ERROR = "LLM returned an empty assistant message after streaming completed.";
 
-export async function persistAssistantMessage(input: { spaceId: string; spaceSessionId: string; userMessageId: string; event: Record<string, unknown>; userId?: string | null; turnId?: string | null; startedAt?: string | null; completedAt?: string | null; messageOrdinal?: number | null; thinkingLevel?: string | null; contextWindow?: number | null; maxContext?: number | null; idempotencyKey?: string }) {
+export async function persistAssistantMessage(input: { spaceId: string; spaceSessionId: string; userMessageId: string; event: Record<string, unknown>; userId?: string | null; turnId?: string | null; startedAt?: string | null; completedAt?: string | null; messageOrdinal?: number | null; thinkingLevel?: string | null; contextWindow?: number | null; idempotencyKey?: string }) {
   const assistantMessage = input.event.message;
-  const contextMeta = { ...(typeof input.contextWindow === "number" && input.contextWindow > 0 ? { contextWindow: input.contextWindow } : {}), ...(typeof input.maxContext === "number" && input.maxContext > 0 ? { maxContext: input.maxContext } : {}) };
+  const contextMeta = typeof input.contextWindow === "number" && input.contextWindow > 0 ? { contextWindow: input.contextWindow } : {};
   const toolResultsRaw = Array.isArray(input.event.toolResults) ? input.event.toolResults as Array<Record<string, unknown>> : [];
   if (!assistantMessage || typeof assistantMessage !== "object") {
     logger.warn("[Persist] turn_end event missing assistant message payload.");
@@ -1012,7 +1012,6 @@ type PersistCompactionEventInput = {
   firstKeptEntryId: string;
   model: { provider: string; id: string };
   contextWindow: number;
-  maxContext?: number;
   keepRecentTokens: number;
   summarizedMessageCount: number;
   attemptCount: number;
@@ -1126,7 +1125,6 @@ export async function persistCompactionEvent(
         llmRound: input.llmRound,
         triggerReason: input.triggerReason,
         contextWindow: input.contextWindow,
-        ...(input.maxContext ? { maxContext: input.maxContext } : {}),
         tokensBefore: input.tokensBefore,
         estimatedTokensAfter: input.estimatedTokensAfter,
         provider: input.model.provider,
