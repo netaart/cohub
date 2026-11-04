@@ -589,6 +589,13 @@
       "when": 1793602864033,
       "tag": "0083_session_messages_compaction",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1793763514102,
+      "tag": "0084_wide_hulk",
+      "breakpoints": true
     }
   ]
 }

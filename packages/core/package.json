@@ -127,6 +127,10 @@
     "./app-domains": {
       "types": "./dist/app-domains/index.d.ts",
       "default": "./dist/app-domains/index.js"
+    },
+    "./generation-billing": {
+      "types": "./dist/generation-billing/index.d.ts",
+      "default": "./dist/generation-billing/index.js"
     }
   },
   "types": "./dist/index.d.ts",

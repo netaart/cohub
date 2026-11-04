@@ -6,7 +6,9 @@ export type SpaceWalletSummary = {
 
 export type SpaceWalletActivity = {
   id: string;
-  kind: "grant" | "usage" | "refund" | "expire" | "revoke" | "adjust";
+  kind: "grant" | "usage" | "reversal" | "refund" | "expire" | "revoke" | "adjust";
+  title: string;
+  description: string | null;
   amountUsd: number;
   actorUserId: string | null;
   sourceId: string | null;

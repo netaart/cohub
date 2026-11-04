@@ -491,6 +491,7 @@ export type BillingUsagePreflight = {
 export type BillingBalanceActivityKind =
   | "grant"
   | "usage"
+  | "reversal"
   | "refund"
   | "expire"
   | "revoke"
@@ -544,6 +545,51 @@ export type BillingUsageRecordResult = {
   amountUsd: number;
   status: "disabled" | "skipped" | "recorded" | "overage";
   response: BillingConsumeCreditsResponseRaw | null;
+};
+
+export type BillingUsageReversalInput = BillingUserRef & {
+  /** Positive USD amount to return from the original consumption. */
+  amountUsd: number;
+  originalOperationId: string;
+  operationId: string;
+  tokenType?: CohubBillingTokenType;
+  reason?: string;
+};
+
+/**
+ * Provider-side reversal receipt. Amounts sum to the requested reversal amount,
+ * but only `availableCreditReturnedUsd` describes spendable credit at decision time.
+ */
+export type BillingUsageReversalReceipt = {
+  reversalId: string;
+  originalOperationId: string;
+  operationId: string;
+  amountUsd: number;
+  openOverageCancelledUsd: number;
+  writtenOffMatchedUsd: number;
+  availableCreditReturnedUsd: number;
+  suppressedCreditReturnedUsd: number;
+  expiredCreditReturnedUsd: number;
+  closedSourceCreditReturnedUsd: number;
+  totalReversedUsd: number;
+  remainingReversibleUsd: number;
+  decisionAt: string;
+};
+
+export type BillingUsageReversalResult = {
+  tokenType: string;
+  amountUsd: number;
+  status: "disabled" | "skipped" | "reversed";
+  receipt: BillingUsageReversalReceipt | null;
+};
+
+export type BillingUsageConsumption = {
+  originalOperationId: string;
+  tokenType: string;
+  originalAmountUsd: number;
+  totalReversedUsd: number;
+  remainingReversibleUsd: number;
+  reversalStatus: "not_reversed" | "partially_reversed" | "fully_reversed";
 };
 
 export type BillingFeatureEntitlementInput = BillingUserRef & {
@@ -627,6 +673,8 @@ export interface BillingOperations {
   grantReferralReward(input: BillingReferralRewardInput): Promise<BillingReferralRewardResult>;
   preflightUsage(input: BillingUsagePreflightInput): Promise<BillingUsagePreflight>;
   recordUsage(input: BillingUsageRecordInput): Promise<BillingUsageRecordResult>;
+  reverseUsage(input: BillingUsageReversalInput): Promise<BillingUsageReversalResult>;
+  getUsageConsumption(input: BillingUserRef & { operationId: string; tokenType?: CohubBillingTokenType }): Promise<BillingUsageConsumption | null>;
   listBalanceActivities(input: BillingBalanceActivityListInput): Promise<BillingBalanceActivityList>;
   getFeatureEntitlement(input: BillingFeatureEntitlementInput): Promise<BillingFeatureEntitlement | null>;
   checkFeatureLimit(input: BillingFeatureLimitInput): Promise<BillingFeatureLimitCheck>;

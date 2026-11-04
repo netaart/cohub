@@ -33,6 +33,7 @@ const checkoutPrefix = () => `cohub:wallet-checkout:${getCacheUserKey()}:${space
 const money = (amount: number, maximumFractionDigits = 2) => formatCurrency(amount, "USD", { locale, maximumFractionDigits });
 const kinds = $derived({
   grant: m.wallet_activity_recharge({}, { locale }), usage: m.wallet_activity_usage({}, { locale }),
+  reversal: m.wallet_activity_reversal({}, { locale }),
   refund: m.wallet_activity_refund({}, { locale }), expire: m.billing_expired({}, { locale }),
   revoke: m.wallet_activity_revoke({}, { locale }), adjust: m.wallet_activity_adjust({}, { locale }),
 });
@@ -167,7 +168,7 @@ onMount(() => {
       <div class="mt-3 min-h-24 divide-y divide-border-subtle">
         {#each activities?.items ?? [] as item (item.id)}
           <div class="flex items-start justify-between gap-4 py-3">
-            <div class="min-w-0"><p class="text-sm text-text-primary">{kinds[item.kind]}</p><p class="mt-1 text-xs text-text-tertiary">{formatDateTime(item.createdAt, locale)}</p>{#if item.actorUserId}<p class="mt-1 truncate font-mono text-xs text-text-tertiary" title={item.actorUserId}>{item.actorUserId}</p>{/if}</div>
+            <div class="min-w-0"><p class="text-sm text-text-primary">{item.title || kinds[item.kind]}</p>{#if item.description}<p class="mt-1 line-clamp-2 text-xs text-text-tertiary">{item.description}</p>{/if}<p class="mt-1 text-xs text-text-tertiary">{formatDateTime(item.createdAt, locale)}</p>{#if item.actorUserId}<p class="mt-1 truncate font-mono text-xs text-text-tertiary" title={item.actorUserId}>{item.actorUserId}</p>{/if}</div>
             <span class="shrink-0 font-mono text-sm tabular-nums text-text-secondary">{money(item.amountUsd, 8)}</span>
           </div>
         {:else}<p class="py-5 text-sm text-text-tertiary">{activity.loading ? m.common_loading({}, { locale }) : m.billing_no_activity({}, { locale })}</p>{/each}

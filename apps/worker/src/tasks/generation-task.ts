@@ -10,6 +10,8 @@ import {
   resolveGenerationUsageType,
 } from "@cohub/billing";
 import type { Job } from "bullmq";
+import type { GenerationBillingReservation } from "@cohub/core/generation-billing";
+import { generationBilling } from "../generation-billing.js";
 import {
   createGenerationClient,
   GenerationConfigError,
@@ -198,6 +200,7 @@ async function enqueueGenerationBillingRetry(input: {
   spaceId: string;
   sessionId?: string | null;
 }) {
+  if (input.amountUsd <= 0) return;
   const data: GenerationBillingRetryTaskData = {
     schemaVersion: 2,
     taskRunId: input.taskRunId,
@@ -218,6 +221,7 @@ async function enqueueGenerationBillingRetry(input: {
     data,
   }, {
     attempts: 8,
+    delay: 30_000,
     backoff: { type: "exponential", delay: 5_000 },
     ...defaultJobRetention,
   });
@@ -234,15 +238,78 @@ async function recordGenerationUsageBilling(input: {
   usageType: ReturnType<typeof resolveGenerationUsageType>;
   spaceId: string;
   sessionId?: string | null;
+  reservation: GenerationBillingReservation | null;
 }): Promise<GenerationUsageBilling> {
   const pricing = calculateGenerationUsageCharge(input.officialCostUsd, input.modelDiscount);
   const { officialCostUsd, amountUsd } = pricing;
+  const reservedAmountUsd = input.reservation ? Number(input.reservation.reserveUsd) : undefined;
   const billingPricing = {
     officialCostUsd,
     amountUsd,
     discountMultiplier: pricing.discountMultiplier,
     usageType: input.usageType,
+    ...(reservedAmountUsd !== undefined ? { reservedAmountUsd } : {}),
   };
+  if (!input.taskRunId) {
+    return { ...billingPricing, status: "skipped", reason: "missing_task_run_id" };
+  }
+  if (input.reservation) {
+    const reservedUsd = reservedAmountUsd ?? 0;
+    const actualUsd = pricing.skipReason ? 0 : amountUsd;
+    try {
+      const settlement = await generationBilling.settle({
+        taskRunId: input.taskRunId,
+        actualUsd,
+        reason: `Generation settlement ${input.model}`,
+      });
+      if (settlement.status === "settled") {
+        return {
+          ...billingPricing,
+          amountUsd: actualUsd,
+          status: settlement.overage ? "overage" : "recorded",
+          refundedAmountUsd: Math.max(0, Number((reservedUsd - actualUsd).toFixed(8))),
+          additionalAmountUsd: Math.max(0, Number((actualUsd - reservedUsd).toFixed(8))),
+        };
+      }
+      if (settlement.status === "released" || settlement.status === "missing") {
+        return {
+          ...billingPricing,
+          status: "skipped",
+          reason: settlement.status === "released" ? "reservation_released" : "missing_reservation",
+          ...(settlement.status === "released" ? { refundedAmountUsd: reservedAmountUsd } : {}),
+        };
+      }
+      await enqueueGenerationBillingRetry({
+        userId: input.userId,
+        taskRunId: input.taskRunId,
+        amountUsd: actualUsd,
+        officialCostUsd,
+        modelDiscount: input.modelDiscount,
+        usageType: input.usageType,
+        model: input.model,
+        adapterType: input.adapterType,
+        spaceId: input.spaceId,
+        sessionId: input.sessionId,
+      }).catch((enqueueError) => {
+        console.warn("[Billing] failed to enqueue reservation settlement retry", {
+          taskRunId: input.taskRunId,
+          error: enqueueError,
+        });
+      });
+      return { ...billingPricing, status: "skipped", reason: "record_failed" };
+    } catch (error) {
+      console.warn("[Billing] failed to settle generation reservation", {
+        userId: input.userId,
+        taskRunId: input.taskRunId,
+        officialCostUsd,
+        amountUsd: actualUsd,
+        model: input.model,
+        usageType: input.usageType,
+        error,
+      });
+      return { ...billingPricing, status: "skipped", reason: "record_failed" };
+    }
+  }
   if (pricing.skipReason) {
     return {
       ...billingPricing,
@@ -252,9 +319,6 @@ async function recordGenerationUsageBilling(input: {
   }
   if (!billingOperations.status.configured) {
     return { ...billingPricing, status: "skipped", reason: "billing_not_configured" };
-  }
-  if (!input.taskRunId) {
-    return { ...billingPricing, status: "skipped", reason: "missing_task_run_id" };
   }
 
   try {
@@ -369,12 +433,20 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
       });
     }
 
+    const reservation = await generationBilling.getReservation(taskRunId);
+    if (reservation) {
+      if (reservation.status !== "held") throw new Error(`Generation billing reservation is not held: ${reservation.status}`);
+      if (reservation.userId !== userId || reservation.model !== data.model || (reservation.spaceId ?? null) !== spaceId) {
+        throw new Error("Generation billing reservation does not match the task payload.");
+      }
+    }
+
     // Gate uses request-side modality; billing/stats re-resolve with output after success.
     const gateUsageType = resolveGenerationUsageType({
       adapterType: declaration.adapter?.type,
       contentTypes: contentTypesFromBlocks(data.content),
     });
-    const billingDecision = isGenerationModelDiscountFree(modelDiscount)
+    const billingDecision = reservation || isGenerationModelDiscountFree(modelDiscount)
       ? { status: "allowed" as const, balanceState: "zero" as const, netUsd: 0 }
       : await billingUsageGate.evaluate({
           userId,
@@ -418,6 +490,7 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
       usageType,
       spaceId,
       sessionId,
+      reservation,
     });
     if (billing.status === "skipped" && billing.reason === "missing_cost") {
       console.warn("[Billing] generation completed without provider cost", {

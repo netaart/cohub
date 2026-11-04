@@ -76,10 +76,14 @@ import {
   type BillingRedemptionResult,
   type BillingSubscriptionHistoryList,
   type BillingSubscriptionHistoryStatus,
+  type BillingUsageConsumption,
   type BillingUsagePreflight,
   type BillingUsagePreflightInput,
   type BillingUsageRecordInput,
   type BillingUsageRecordResult,
+  type BillingUsageReversalInput,
+  type BillingUsageReversalReceipt,
+  type BillingUsageReversalResult,
   type BillingUserRef,
 } from "./interfaces.js";
 import { resolveGenerationModelDiscount } from "./generation-usage.js";
@@ -234,6 +238,41 @@ function usdToAmount(amountUsd: number, tokenType: string): number {
   const roundedUsd = roundUsd(amountUsd, unit.usdDecimalPlaces);
   if (roundedUsd <= 0) return 0;
   return Math.round(roundedUsd * unit.unitsPerUsd);
+}
+
+function mapUsageReversalReceipt(
+  receipt: {
+    reversal_id: string;
+    original_operation_id: string;
+    operation_id: string;
+    amount: number;
+    open_overage_cancelled_amount: number;
+    written_off_matched_amount: number;
+    available_credit_returned_amount: number;
+    suppressed_credit_returned_amount: number;
+    expired_credit_returned_amount: number;
+    closed_source_credit_returned_amount: number;
+    total_reversed_after: number;
+    remaining_reversible_after: number;
+    decision_at: string;
+  },
+  tokenType: string,
+): BillingUsageReversalReceipt {
+  return {
+    reversalId: receipt.reversal_id,
+    originalOperationId: receipt.original_operation_id,
+    operationId: receipt.operation_id,
+    amountUsd: amountToUsd(receipt.amount, tokenType),
+    openOverageCancelledUsd: amountToUsd(receipt.open_overage_cancelled_amount, tokenType),
+    writtenOffMatchedUsd: amountToUsd(receipt.written_off_matched_amount, tokenType),
+    availableCreditReturnedUsd: amountToUsd(receipt.available_credit_returned_amount, tokenType),
+    suppressedCreditReturnedUsd: amountToUsd(receipt.suppressed_credit_returned_amount, tokenType),
+    expiredCreditReturnedUsd: amountToUsd(receipt.expired_credit_returned_amount, tokenType),
+    closedSourceCreditReturnedUsd: amountToUsd(receipt.closed_source_credit_returned_amount, tokenType),
+    totalReversedUsd: amountToUsd(receipt.total_reversed_after, tokenType),
+    remainingReversibleUsd: amountToUsd(receipt.remaining_reversible_after, tokenType),
+    decisionAt: receipt.decision_at,
+  };
 }
 
 function mapCreditBalance(
@@ -568,10 +607,20 @@ function formatBillingLabel(value: string | null): string {
     .join(" ");
 }
 
+function generationActivityTitle(operationId: string | null | undefined): string | null {
+  if (!operationId?.startsWith("generation:")) return null;
+  if (operationId.startsWith("generation:reserve:")) return "Generation reserve";
+  if (operationId.startsWith("generation:extra:")) return "Generation settlement";
+  if (operationId.startsWith("generation:settle-refund:") || operationId.startsWith("generation:release-refund:") || operationId.startsWith("generation:refund:")) return "Generation refund";
+  return "Generation charge";
+}
+
 function transactionActivityTitle(type: CreditTransaction["type"]): string {
   switch (type) {
     case "grant":
       return "Credits added";
+    case "reversal":
+      return "Usage refund";
     case "refund":
       return "Refund";
     case "expire":
@@ -593,6 +642,7 @@ function transactionActivityAmountUsd(transaction: CreditTransaction): number {
     case "revoke":
       return -amountUsd;
     case "grant":
+    case "reversal":
     case "refund":
     case "adjust":
       return amountUsd;
@@ -615,7 +665,7 @@ function mapTransactionActivity(
     id: `transaction:${transaction.id}`,
     kind: transaction.type,
     tokenType: transaction.token_type,
-    title: transactionActivityTitle(transaction.type),
+    title: generationActivityTitle(transaction.operation_id) ?? transactionActivityTitle(transaction.type),
     description: transaction.reason ?? transaction.source_type ?? null,
     sourceType: transaction.source_type ?? null,
     sourceId: transaction.source_id ?? null,
@@ -676,7 +726,7 @@ function mapUsageActivity(draft: UsageActivityDraft): BillingBalanceActivity | n
     id: `usage:${draft.id}`,
     kind: "usage",
     tokenType: draft.tokenType,
-    title: formatBillingLabel(draft.usageType),
+    title: generationActivityTitle(draft.operationId) ?? formatBillingLabel(draft.usageType),
     description: draft.reason ?? draft.sourceType,
     sourceType: draft.sourceType,
     sourceId: draft.sourceId,
@@ -1838,7 +1888,7 @@ export function createTalesofaiBillingOperations(
         if (transaction.type === "consume" || transaction.type === "settlement") {
           return [{
             id: `transaction:${transaction.id}`, kind: "usage", tokenType,
-            title: transaction.type === "settlement" ? "Overage settlement" : "Usage",
+            title: generationActivityTitle(transaction.operation_id) ?? (transaction.type === "settlement" ? "Overage settlement" : "Usage"),
             description: transaction.reason ?? null,
             sourceType: transaction.source_type, sourceId: transaction.source_id,
             operationId: transaction.operation_id,
@@ -3183,6 +3233,71 @@ export function createTalesofaiBillingOperations(
         status: response.overage ? "overage" : "recorded",
         response,
       };
+    },
+
+    async reverseUsage(
+      input: BillingUsageReversalInput,
+    ): Promise<BillingUsageReversalResult> {
+      const tokenType =
+        input.tokenType ?? COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
+      const amountUsd = roundUsd(
+        input.amountUsd,
+        getCreditUnit(tokenType).usdDecimalPlaces,
+      );
+      const amount = usdToAmount(amountUsd, tokenType);
+      if (amount === 0) {
+        return { tokenType, amountUsd, status: "skipped", receipt: null };
+      }
+
+      await ensureCustomer({ userId: input.userId });
+      const receipt = await sdk.admin.credits.reverseConsume(
+        {
+          business_key: businessKey,
+          external_user_id: input.userId,
+          token_type: tokenType,
+          original_operation_id: input.originalOperationId,
+          amount,
+          operation_id: input.operationId,
+          reason: input.reason ?? "Usage adjustment",
+        },
+        { idempotencyKey: input.operationId },
+      );
+
+      return {
+        tokenType,
+        amountUsd,
+        status: "reversed",
+        receipt: mapUsageReversalReceipt(receipt, tokenType),
+      };
+    },
+
+    async getUsageConsumption(
+      input: BillingUserRef & {
+        operationId: string;
+        tokenType?: string;
+      },
+    ): Promise<BillingUsageConsumption | null> {
+      const tokenType =
+        input.tokenType ?? COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
+      try {
+        const consumption = await sdk.admin.credits.getConsumption({
+          business_key: businessKey,
+          external_user_id: input.userId,
+          token_type: tokenType,
+          operation_id: input.operationId,
+        });
+        return {
+          originalOperationId: consumption.original_operation_id,
+          tokenType: consumption.token_type,
+          originalAmountUsd: amountToUsd(consumption.original_amount, tokenType),
+          totalReversedUsd: amountToUsd(consumption.total_reversed, tokenType),
+          remainingReversibleUsd: amountToUsd(consumption.remaining_reversible_amount, tokenType),
+          reversalStatus: consumption.reversal_status,
+        };
+      } catch (error) {
+        if (isNotFound(error)) return null;
+        throw error;
+      }
     },
 
     listBalanceActivities,

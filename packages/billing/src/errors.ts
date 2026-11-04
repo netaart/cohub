@@ -5,11 +5,13 @@ export class BillingAccessBlockedError extends Error {
 
   constructor(
     public readonly decision: Extract<BillingAccessDecision, { status: "blocked" }>,
+    message?: string,
   ) {
     super(
-      decision.conversion.reason === "minimum_balance_not_met"
-        ? "Insufficient balance for video generation."
-        : "Add credits to continue.",
+      message ??
+        (decision.conversion.reason === "minimum_balance_not_met"
+          ? "Insufficient balance for video generation."
+          : "Add credits to continue."),
     );
     this.name = "BillingAccessBlockedError";
   }

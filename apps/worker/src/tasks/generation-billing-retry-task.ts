@@ -10,6 +10,10 @@ import { parseGenerationBillingRetryData } from "./generation-billing-retry-data
 import { registerTask } from "./registry.js";
 import { updateGenerationTurnBilling } from "./generation-session.js";
 import { spaceWalletBilling } from "../space-wallet-billing.js";
+import { generationBilling } from "../generation-billing.js";
+import { db } from "../db.js";
+import { taskRuns } from "@cohub/db";
+import { eq, sql } from "drizzle-orm";
 
 /**
  * Personal billing retries retain the original idempotency key. With Space
@@ -24,6 +28,44 @@ registerTask(GENERATION_BILLING_RETRY_TASK_TYPE, async (job: Job) => {
   }
   if (!billingOperations.status.configured) {
     return { status: "skipped", reason: "billing_not_configured", taskRunId: data.taskRunId };
+  }
+  const reservation = await generationBilling.getReservation(data.taskRunId);
+  if (reservation) {
+    const settlement = await generationBilling.settle({
+      taskRunId: data.taskRunId,
+      actualUsd: data.amountUsd,
+      reason: `Generation settlement ${data.model}`,
+    });
+    if (settlement.status === "pending") throw settlement.error;
+    const reservedUsd = Number(reservation.reserveUsd);
+    const billing = {
+      status: settlement.status === "settled"
+        ? settlement.overage ? "overage" : "recorded"
+        : "skipped",
+      officialCostUsd: data.officialCostUsd,
+      amountUsd: data.amountUsd,
+      discountMultiplier: data.modelDiscount.multiplier,
+      usageType: data.usageType,
+      reservedAmountUsd: reservedUsd,
+      ...(settlement.status === "settled"
+        ? {
+            refundedAmountUsd: Math.max(0, Number((reservedUsd - data.amountUsd).toFixed(8))),
+            additionalAmountUsd: Math.max(0, Number((data.amountUsd - reservedUsd).toFixed(8))),
+          }
+        : {}),
+      ...(settlement.status === "released" || settlement.status === "missing"
+        ? {
+            reason: settlement.status === "released" ? "reservation_released" : "missing_reservation",
+            ...(settlement.status === "released" ? { refundedAmountUsd: reservedUsd } : {}),
+          }
+        : {}),
+    } satisfies GenerationUsageBilling;
+    await updateGenerationTurnBilling(data.taskRunId, billing);
+    await db.update(taskRuns).set({
+      result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object('billing', ${JSON.stringify(billing)}::jsonb)`,
+      updatedAt: new Date(),
+    }).where(eq(taskRuns.id, data.taskRunId)).catch(() => undefined);
+    return { ...billing, taskRunId: data.taskRunId };
   }
 
   const result = await spaceWalletBilling.recordUsage({
