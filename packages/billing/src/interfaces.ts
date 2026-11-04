@@ -587,15 +587,6 @@ export type BillingUsageReversalResult = {
   receipt: BillingUsageReversalReceipt | null;
 };
 
-export type BillingUsageConsumption = {
-  originalOperationId: string;
-  tokenType: string;
-  originalAmountUsd: number;
-  totalReversedUsd: number;
-  remainingReversibleUsd: number;
-  reversalStatus: "not_reversed" | "partially_reversed" | "fully_reversed";
-};
-
 export type BillingFeatureEntitlementInput = BillingUserRef & {
   featureKey: CohubBillingFeatureKey;
 };
@@ -678,7 +669,6 @@ export interface BillingOperations {
   preflightUsage(input: BillingUsagePreflightInput): Promise<BillingUsagePreflight>;
   recordUsage(input: BillingUsageRecordInput): Promise<BillingUsageRecordResult>;
   reverseUsage(input: BillingUsageReversalInput): Promise<BillingUsageReversalResult>;
-  getUsageConsumption(input: BillingUserRef & { operationId: string; tokenType?: CohubBillingTokenType }): Promise<BillingUsageConsumption | null>;
   listBalanceActivities(input: BillingBalanceActivityListInput): Promise<BillingBalanceActivityList>;
   getFeatureEntitlement(input: BillingFeatureEntitlementInput): Promise<BillingFeatureEntitlement | null>;
   checkFeatureLimit(input: BillingFeatureLimitInput): Promise<BillingFeatureLimitCheck>;

@@ -116,18 +116,6 @@ function fakeBilling(initialBalance: number) {
         },
       };
     },
-    async getUsageConsumption(input: { operationId: string }) {
-      const consumption = consumptions.get(input.operationId);
-      if (!consumption) return null;
-      return {
-        originalOperationId: input.operationId,
-        tokenType: "usd_micro_cent",
-        originalAmountUsd: consumption.amount,
-        totalReversedUsd: consumption.reversed,
-        remainingReversibleUsd: consumption.amount - consumption.reversed,
-        reversalStatus: consumption.reversed === 0 ? "not_reversed" as const : consumption.reversed >= consumption.amount ? "fully_reversed" as const : "partially_reversed" as const,
-      };
-    },
   } as unknown as BillingOperations;
   return { operations, reversals, consumes, failNext, balance: () => balance };
 }
@@ -141,8 +129,14 @@ async function setup(balance = 10) {
   await engine.exec(DDL);
   const db = drizzle(engine) as unknown as PostgresJsDatabase<Record<string, unknown>>;
   const fake = fakeBilling(balance);
-  const service = createGenerationBillingReservations({ db, billing: fake.operations, walletBilling: disabledWallet() });
-  return { engine, service, fake };
+  const notified: string[] = [];
+  const service = createGenerationBillingReservations({
+    db,
+    billing: fake.operations,
+    walletBilling: disabledWallet(),
+    onReconcileSettled: async (reservation) => { notified.push(reservation.taskRunId); },
+  });
+  return { engine, service, fake, notified };
 }
 
 const reserveInput = (taskRunId: string, reserveUsd = 10) => ({
@@ -166,7 +160,7 @@ async function withSetup(balance: number, run: (ctx: Awaited<ReturnType<typeof s
   }
 }
 
-test("reserve, settle with refund, and duplicate settlement", () => withSetup(10, async ({ service, fake }) => {
+test("reserve, settle with refund, and duplicate settlement", () => withSetup(10, async ({ service, fake, notified }) => {
   assert.equal((await service.reserve(reserveInput(taskId(1)))).status, "held");
   assert.equal(fake.balance(), 0);
 
@@ -175,6 +169,7 @@ test("reserve, settle with refund, and duplicate settlement", () => withSetup(10
 
   await service.settle({ taskRunId: taskId(1), actualUsd: 6 });
   assert.deepEqual(fake.reversals, [4]);
+  assert.deepEqual(notified, []);
 }));
 
 test("settlement charges the shortfall and keeps the overage outcome on replay", () => withSetup(10, async ({ service, fake }) => {
@@ -194,7 +189,7 @@ test("submit-side cleanup cannot release a reservation a worker has claimed", ()
   assert.deepEqual(fake.reversals, [4]);
 }));
 
-test("a lost refund response replays identical values through reconcile", () => withSetup(10, async ({ engine, service, fake }) => {
+test("a lost refund response replays identical values through reconcile", () => withSetup(10, async ({ engine, service, fake, notified }) => {
   await service.reserve(reserveInput(taskId(1)));
   fake.failNext.reverseAfterCommit = 1;
   assert.equal((await service.settle({ taskRunId: taskId(1), actualUsd: 6 })).status, "pending");
@@ -208,6 +203,7 @@ test("a lost refund response replays identical values through reconcile", () => 
   assert.equal(retried.status === "settled" && settledReservationBilling(retried.reservation).amountUsd, 6);
   assert.deepEqual(fake.reversals, [4]);
   assert.equal(fake.balance(), 4);
+  assert.deepEqual(notified, [taskId(1)]);
 }));
 
 test("a short reversal receipt keeps the settlement retryable", () => withSetup(10, async ({ service, fake }) => {

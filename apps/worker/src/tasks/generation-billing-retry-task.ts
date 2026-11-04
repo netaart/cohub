@@ -8,13 +8,10 @@ import { GENERATION_BILLING_RETRY_TASK_TYPE, type GenerationUsageBilling } from 
 import type { TaskPayload } from "@cohub/protocol/task";
 import { parseGenerationBillingRetryData } from "./generation-billing-retry-data.js";
 import { registerTask } from "./registry.js";
-import { updateGenerationTurnBilling } from "./generation-session.js";
+import { recordGenerationTaskBilling, updateGenerationTurnBilling } from "./generation-session.js";
 import { spaceWalletBilling } from "../space-wallet-billing.js";
 import { generationBilling } from "../generation-billing.js";
 import { settledReservationBilling } from "@cohub/core/generation-billing";
-import { db } from "../db.js";
-import { taskRuns } from "@cohub/db";
-import { eq, sql } from "drizzle-orm";
 
 /**
  * Personal billing retries retain the original idempotency key. With Space
@@ -52,11 +49,7 @@ registerTask(GENERATION_BILLING_RETRY_TASK_TYPE, async (job: Job) => {
           }
         : {}),
     } satisfies GenerationUsageBilling;
-    await updateGenerationTurnBilling(data.taskRunId, billing);
-    await db.update(taskRuns).set({
-      result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object('billing', ${JSON.stringify(billing)}::jsonb)`,
-      updatedAt: new Date(),
-    }).where(eq(taskRuns.id, data.taskRunId)).catch(() => undefined);
+    await recordGenerationTaskBilling(data.taskRunId, billing);
     return { ...billing, taskRunId: data.taskRunId };
   }
 

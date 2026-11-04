@@ -22,7 +22,6 @@ import {
   type BillingReferralRewardResult,
   type BillingSubscriptionHistoryList,
   type BillingSubscriptionHistoryStatus,
-  type BillingUsageConsumption,
   type BillingUsagePreflight,
   type BillingUsagePreflightInput,
   type BillingUsageRecordInput,
@@ -415,10 +414,6 @@ export function createDisabledBillingOperations(
         status: "disabled",
         receipt: null,
       };
-    },
-
-    async getUsageConsumption(): Promise<BillingUsageConsumption | null> {
-      return null;
     },
 
     async listBalanceActivities(

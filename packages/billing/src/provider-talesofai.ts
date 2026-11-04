@@ -77,7 +77,6 @@ import {
   type BillingRedemptionResult,
   type BillingSubscriptionHistoryList,
   type BillingSubscriptionHistoryStatus,
-  type BillingUsageConsumption,
   type BillingUsagePreflight,
   type BillingUsagePreflightInput,
   type BillingUsageRecordInput,
@@ -3284,35 +3283,6 @@ export function createTalesofaiBillingOperations(
         status: "reversed",
         receipt: mapUsageReversalReceipt(receipt, tokenType),
       };
-    },
-
-    async getUsageConsumption(
-      input: BillingUserRef & {
-        operationId: string;
-        tokenType?: string;
-      },
-    ): Promise<BillingUsageConsumption | null> {
-      const tokenType =
-        input.tokenType ?? COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
-      try {
-        const consumption = await sdk.admin.credits.getConsumption({
-          business_key: businessKey,
-          external_user_id: input.userId,
-          token_type: tokenType,
-          operation_id: input.operationId,
-        });
-        return {
-          originalOperationId: consumption.original_operation_id,
-          tokenType: consumption.token_type,
-          originalAmountUsd: amountToUsd(consumption.original_amount, tokenType),
-          totalReversedUsd: amountToUsd(consumption.total_reversed, tokenType),
-          remainingReversibleUsd: amountToUsd(consumption.remaining_reversible_amount, tokenType),
-          reversalStatus: consumption.reversal_status,
-        };
-      } catch (error) {
-        if (isNotFound(error)) return null;
-        throw error;
-      }
     },
 
     listBalanceActivities,

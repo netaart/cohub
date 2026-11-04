@@ -164,7 +164,8 @@ export function createGenerationBillingReservations(input: {
   billing: BillingOperations;
   walletBilling: SpaceWalletBillingOperations;
   warn?: (message: string, context: Record<string, unknown>) => void;
-  onSettled?: (reservation: GenerationBillingReservation, overage: boolean) => Promise<void>;
+  /** Fires only when reconciliation settles a reservation; inline callers persist their own result. */
+  onReconcileSettled?: (reservation: GenerationBillingReservation, overage: boolean) => Promise<void>;
 }) {
   const { db, billing, walletBilling } = input;
   const warn = input.warn;
@@ -210,11 +211,13 @@ export function createGenerationBillingReservations(input: {
       try {
         const credit = await walletBilling.getCreditStatus({ userId: walletId, createCustomer: false });
         if (walletCreditsUsable(credit) && credit.netUsd >= input.reserveUsd) {
-          candidates.push(await previewPayer({
+          const wallet = await previewPayer({
             payer: { type: "space_wallet", id: walletId },
             reserveUsd: input.reserveUsd,
             usageType: input.usageType,
-          }));
+          });
+          if (wallet.allowed) return { payer: wallet.payer, availableUsd: wallet.availableUsd };
+          candidates.push(wallet);
         }
       } catch (error) {
         warn?.("Space wallet generation reserve preview failed", { spaceId: input.spaceId, error });
@@ -410,10 +413,10 @@ export function createGenerationBillingReservations(input: {
     return await transition(row.id, ["held"], { status: "running" }) ?? await loadReservation(taskRunId);
   }
 
-  async function settle(input: {
-    taskRunId: string;
-    actualUsd: number;
-  }): Promise<GenerationBillingSettleResult> {
+  async function settle(
+    input: { taskRunId: string; actualUsd: number },
+    notify = false,
+  ): Promise<GenerationBillingSettleResult> {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const row = await loadReservation(input.taskRunId);
       if (!row) return { status: "missing" };
@@ -425,7 +428,7 @@ export function createGenerationBillingReservations(input: {
         case "releasing":
           return { status: "pending", reservation: row, error: new Error("Generation reservation is releasing.") };
         case "settling":
-          return finishSettlement(row);
+          return finishSettlement(row, notify);
         case "reserving":
           throw new GenerationBillingUnavailableError("Generation reserve has not been recorded yet.");
         case "held":
@@ -439,7 +442,7 @@ export function createGenerationBillingReservations(input: {
             reversalOperationId: plan.refundUsd > 0 ? generationSettleRefundOperationId(row.taskRunId) : null,
             settleOperationId: plan.extraUsd > 0 ? generationSettleOperationId(row.taskRunId) : null,
           });
-          if (claimed) return finishSettlement(claimed);
+          if (claimed) return finishSettlement(claimed, notify);
           continue;
         }
         default:
@@ -449,7 +452,10 @@ export function createGenerationBillingReservations(input: {
     throw new GenerationBillingUnavailableError("Generation reservation kept changing during settlement.");
   }
 
-  async function finishSettlement(row: GenerationBillingReservation): Promise<GenerationBillingSettleResult> {
+  async function finishSettlement(
+    row: GenerationBillingReservation,
+    notify = false,
+  ): Promise<GenerationBillingSettleResult> {
     const actualUsd = rowUsd(row.actualUsd);
     const plan = planGenerationSettlement(rowUsd(row.reserveUsd), actualUsd);
     const payer = payerOf(row);
@@ -504,7 +510,7 @@ export function createGenerationBillingReservations(input: {
           ? { status: "settled", reservation: latest, overage: latest.settleOverage }
           : { status: "missing" };
       }
-      await input.onSettled?.(settled, overage).catch((error) => {
+      if (notify) await input.onReconcileSettled?.(settled, overage).catch((error) => {
         warn?.("Generation billing settlement notification failed", { taskRunId: settled.taskRunId, error });
       });
       return { status: "settled", reservation: settled, overage };
@@ -642,7 +648,7 @@ export function createGenerationBillingReservations(input: {
               multiplier: rowUsd(row.discountMultiplier),
             }));
             if (actual !== null) {
-              const result = await settle({ taskRunId: row.taskRunId, actualUsd: actual });
+              const result = await settle({ taskRunId: row.taskRunId, actualUsd: actual }, true);
               if (result.status === "pending") throw result.error;
             } else {
               await releaseRow(row, "missing_cost");
@@ -657,7 +663,7 @@ export function createGenerationBillingReservations(input: {
         }
 
         if (row.status === "settling") {
-          const result = await finishSettlement(row);
+          const result = await finishSettlement(row, true);
           if (result.status === "pending") throw result.error;
           continue;
         }
@@ -674,7 +680,7 @@ export function createGenerationBillingReservations(input: {
   return {
     reserve,
     claim,
-    settle,
+    settle: (input: { taskRunId: string; actualUsd: number }) => settle(input),
     release,
     reconcile,
     getReservation: loadReservation,

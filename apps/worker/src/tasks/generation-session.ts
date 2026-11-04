@@ -144,6 +144,15 @@ export async function updateGenerationTurnBilling(taskRunId: string, billing: Ge
   return turn ?? null;
 }
 
+/** Writes billing settled outside the generation task to both the turn and the task result. */
+export async function recordGenerationTaskBilling(taskRunId: string, billing: GenerationUsageBilling) {
+  await updateGenerationTurnBilling(taskRunId, billing);
+  await db.update(taskRuns).set({
+    result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object('billing', ${JSON.stringify(billing)}::jsonb)`,
+    updatedAt: new Date(),
+  }).where(eq(taskRuns.id, taskRunId)).catch(() => undefined);
+}
+
 export async function failGenerationSession(input: { taskRunId: string; payload: TaskPayload; error: unknown }) {
   const sessionId = input.payload.sessionId;
   const turnId = input.payload.turnId;

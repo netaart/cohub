@@ -54,7 +54,6 @@ export type {
   BillingReferralRewardInput,
   BillingReferralRewardResult,
   BillingSubscriptionSummary,
-  BillingUsageConsumption,
   BillingUsagePreflight,
   BillingUsagePreflightInput,
   BillingUsageRecordInput,
