@@ -437,3 +437,31 @@ function taskResultItem(
 		}),
 	};
 }
+
+export type BoardImageSource = { url: string; snapshot: BoardMediaSnapshot };
+
+export function layoutBoardImages(
+	images: readonly BoardImageSource[],
+	view: { x: number; y: number; width: number; height: number },
+	options: { gap?: number; inset?: number } = {},
+): BoardItemEntry[] {
+	const entries = images.map((image) => createMediaBoardItem(image.url, 0, 0, image.snapshot, undefined, "image"));
+	if (entries.length === 0) return entries;
+	const gap = options.gap ?? 24;
+	const chrome = (options.inset ?? 0) * 2;
+	const pictures = entries.map(({ item }) => ("size" in item ? item.size : { width: 0, height: 0 }));
+	const fixed = gap * (entries.length - 1) + chrome * entries.length;
+	const width = pictures.reduce((sum, size) => sum + size.width, 0);
+	const height = Math.max(...pictures.map((size) => size.height));
+	const room = { width: view.width * 0.8 - fixed, height: view.height * 0.8 - chrome };
+	const scale = room.width > 0 && room.height > 0 ? Math.min(1, room.width / width, room.height / height) : 1;
+	const centerY = view.y + view.height / 2;
+	let x = view.x + view.width / 2 - (width * scale + fixed) / 2;
+	return entries.map(({ id, item }, index) => {
+		const picture = pictures[index] ?? { width: 0, height: 0 };
+		const size = { width: picture.width * scale + chrome, height: picture.height * scale + chrome };
+		const position = { x, y: centerY - size.height / 2 };
+		x += size.width + gap;
+		return { id, item: { ...item, position, size } as BoardItem };
+	});
+}

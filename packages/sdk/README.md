@@ -158,6 +158,7 @@ Board is layered by dependency, so each use pulls in only what it needs:
 | `@neta-art/cohub/board/replica` | A local copy kept in step with the server, with offline writes | — |
 | `@neta-art/cohub/board/editor` | The editor engine: selection, tools, gestures, undo, camera | — |
 | `@neta-art/cohub/board/player` | Animation playback | — |
+| `@neta-art/cohub/board/presence` | Others on the Board: cursors, selections, gestures, Agent writes | — |
 | `@neta-art/cohub/board/render` | Canvas renderers for each item type | `pixi.js` |
 | `@neta-art/cohub/board/stage` | An editor drawn into a DOM element, with input and DOM item views | `pixi.js` |
 | `@neta-art/cohub/board/export` | Render a document to an image | `pixi.js` |
@@ -171,12 +172,13 @@ and servers never load them.
 
 The editor has no framework. Read state through its getters and listen with
 `subscribe(channel, listener)`; snapshots keep their identity until they
-change, so they work directly with `useSyncExternalStore`:
+change, so they work directly with `useSyncExternalStore`. For derived values,
+`selectBoardEditor(editor, selector, shallowEqual)` recomputes only when a
+channel the selector read changes:
 
 ```ts
 import { createBoardRegistry, defineBoardItem, worldPoint } from "@neta-art/cohub/board";
-import { createBoardEditor } from "@neta-art/cohub/board/editor";
-import { createBoardReplica, createIndexedDbBoardReplicaStorage } from "@neta-art/cohub/board/replica";
+import { createBoardEditor, selectBoardEditor } from "@neta-art/cohub/board/editor";
 import { createBoardAssetManager, mountBoardStage } from "@neta-art/cohub/board/stage";
 import { z } from "zod";
 
@@ -189,14 +191,11 @@ const order = defineBoardItem({
   capabilities: { canRotate: false },
 });
 
-// Cached documents and unsent writes survive a reload; clear them on sign-out
-// with `clearBoardReplicaStorage({ userKey })`. The replica reads the Board again
-// after a realtime reconnect and resends pending writes when the network returns.
-const replica = createBoardReplica({
-  remote: space.board(boardId),
-  storage: createIndexedDbBoardReplicaStorage({ userKey, spaceId: space.id, boardId }),
-});
-await replica.start();
+// Cached documents and unsent writes survive a reload, and every view of the
+// Board shares this one copy until each releases it. Call `claimBoardCaches(userKey)`
+// once the user is known: it removes another user's copies. The replica reads the
+// Board again after a realtime reconnect and resends writes when the network returns.
+const { replica, release } = space.board(boardId).replica({ userKey });
 
 const editor = createBoardEditor({
   document: replica.state.document!,
@@ -236,7 +235,8 @@ const stage = mountBoardStage(element, {
 
 editor.addItem("acme.order", { at: editor.viewCenter(), props: { orderId: "o-1", status: "open" } });
 
-// React: const selection = useSyncExternalStore((fn) => editor.subscribe("selection", fn), () => editor.selection);
+// React: const count = useMemo(() => selectBoardEditor(editor, (e) => e.selection.length), [editor]);
+//        useSyncExternalStore(count.subscribe, count.getSnapshot);
 ```
 
 For draggable DOM item views, use `createBoardPointerGestures(element, { move, end })`
@@ -250,6 +250,22 @@ and keep every field, so documents written by newer clients are never
 rewritten by older ones. For a canvas look instead of DOM, pass renderers to
 `createBoardCardRendererResolver` from `board/render` and hand the result to
 the stage or to `renderBoardExport` as `renderers`.
+
+### Multiplayer
+
+```ts
+import { createBoardPresence } from "@neta-art/cohub/board/presence";
+
+const presence = createBoardPresence({ editor, channel: space.board(boardId), publish: canEdit ? "all" : "none" });
+const stage = mountBoardStage(element, { editor, source, assets, presence });
+presence.subscribe(() => drawNames(presence.cursors, presence.activities)); // surface pixels
+// on unmount: await presence.destroy()
+```
+
+The stage sends the cursor and draws others' selections, drags, strokes and
+reactions; the host draws names, avatars and Agent markers. One client per Board
+saves script commits. Send nothing else through `updateAwareness`: each update
+replaces what the client shared before.
 
 ### Hosting a Board
 

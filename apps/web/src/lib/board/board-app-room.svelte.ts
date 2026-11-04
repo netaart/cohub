@@ -1,10 +1,10 @@
 import { BoardAwarenessUpdateSchema } from "@cohub/protocol/realtime";
 import type { AppRoom, AppRoomEvent } from "@neta-art/cohub";
-import type { BoardCollaboratorProfile } from "$lib/board/board-activity";
 import type {
-	BoardAwarenessPayload,
 	BoardPresenceChannel,
-} from "$lib/board/board-awareness";
+	BoardPresencePayload,
+} from "@neta-art/cohub/board/presence";
+import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
 import { sdk } from "$lib/sdk";
 
 const EVENT = "board.awareness";
@@ -14,11 +14,15 @@ const JOIN_DELAY_MS = 1_000;
 
 type Profile = { name: string };
 
+export type BoardRoomChannel = BoardPresenceChannel & {
+	readonly profiles: ReadonlyMap<string, BoardCollaboratorProfile>;
+};
+
 export function createBoardAppRoom(input: {
 	appId: string;
 	versionId: string;
 	profile: () => Profile;
-}): BoardPresenceChannel & { destroy(): void } {
+}): BoardRoomChannel & { destroy(): void } {
 	let room: AppRoom<Record<string, unknown>> | null = null;
 	let destroyed = false;
 	let attempt = 0;
@@ -27,7 +31,8 @@ export function createBoardAppRoom(input: {
 	let profiles = $state.raw<ReadonlyMap<string, BoardCollaboratorProfile>>(
 		new Map(),
 	);
-	const receivers = new Set<(payload: BoardAwarenessPayload) => void>();
+	const receivers = new Set<(payload: BoardPresencePayload) => void>();
+	let seq = 0;
 
 	function readProfiles(current: AppRoom<Record<string, unknown>>) {
 		const next = new Map<string, BoardCollaboratorProfile>();
@@ -65,7 +70,7 @@ export function createBoardAppRoom(input: {
 			return;
 		const update = parsed.data;
 		if (update.type !== "state" && update.type !== "reaction") return;
-		const payload: BoardAwarenessPayload = {
+		const payload: BoardPresencePayload = {
 			connectionId: member.participantId,
 			actorId: member.userKey,
 			actorName: profiles.get(member.userKey)?.displayName ?? "",
@@ -135,8 +140,9 @@ export function createBoardAppRoom(input: {
 		get profiles() {
 			return profiles;
 		},
-		async send(seq, update) {
+		async updateAwareness(update) {
 			if (room?.state !== "joined") return;
+			seq += 1;
 			if (update.type === "state")
 				room.send(EVENT, {
 					seq,
@@ -149,7 +155,9 @@ export function createBoardAppRoom(input: {
 				});
 			else if (update.type === "reaction") room.send(EVENT, { seq, update });
 		},
-		subscribe(receive) {
+		subscribe({ awareness }) {
+			if (!awareness) return () => undefined;
+			const receive = (payload: BoardPresencePayload) => awareness({ payload });
 			receivers.add(receive);
 			return () => receivers.delete(receive);
 		},
@@ -159,6 +167,38 @@ export function createBoardAppRoom(input: {
 			retry = null;
 			receivers.clear();
 			release();
+		},
+	};
+}
+
+const NO_PROFILES: ReadonlyMap<string, BoardCollaboratorProfile> = new Map();
+
+export function createBoardRoomRelay(): BoardRoomChannel & {
+	use(room: BoardRoomChannel | null): void;
+} {
+	let room = $state.raw<BoardRoomChannel | null>(null);
+	type Handlers = Parameters<BoardPresenceChannel["subscribe"]>[0];
+	const subscribers = new Map<Handlers, () => void>();
+	return {
+		get profiles() {
+			return room?.profiles ?? NO_PROFILES;
+		},
+		updateAwareness: (update) =>
+			room ? room.updateAwareness(update) : Promise.resolve(),
+		subscribe(handlers) {
+			subscribers.set(handlers, room?.subscribe(handlers) ?? (() => {}));
+			return () => {
+				subscribers.get(handlers)?.();
+				subscribers.delete(handlers);
+			};
+		},
+		use(next) {
+			room = next;
+			for (const [handlers, stop] of subscribers) {
+				stop();
+				subscribers.set(handlers, next?.subscribe(handlers) ?? (() => {}));
+				handlers.resync?.();
+			}
 		},
 	};
 }

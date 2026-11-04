@@ -6,14 +6,12 @@ import type {
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppRuntimeShellContext } from "@neta-art/cohub";
 import type { BoardDocument, BoardLaunch } from "@neta-art/cohub/board";
+import type { BoardAutomationActivity } from "@neta-art/cohub/board/presence";
 import type { BoardLod } from "@neta-art/cohub/board/render";
 import type { BoardDeviceTier, BoardStage } from "@neta-art/cohub/board/stage";
-import type {
-	BoardAutomationActivity,
-	BoardCollaboratorProfile,
-} from "$lib/board/board-activity";
+import type { BoardRoomChannel } from "$lib/board/board-app-room.svelte";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
-import type { BoardPresenceChannel } from "$lib/board/board-awareness";
+import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
 import { isBoardFile } from "$lib/board/board-file";
 import { createLazyModuleLoader, pending } from "$lib/lazy-module";
 
@@ -51,7 +49,7 @@ export type BoardRuntimeProps = {
 	mode?: BoardRuntimeMode;
 	onReset?: () => void;
 	onTogglePlay?: () => void;
-	presence?: BoardPresenceChannel;
+	presence?: BoardRoomChannel;
 	launch?: BoardLaunch | null;
 	shareUrl?: () => string;
 	active?: boolean;
@@ -60,7 +58,6 @@ export type BoardRuntimeProps = {
 	syncing?: boolean;
 	isMobile?: boolean;
 	collaborators?: Map<string, BoardCollaboratorProfile>;
-	activities?: BoardAutomationActivity[];
 	onOpenActivity?: (activity: BoardAutomationActivity) => void | Promise<void>;
 	onCommit?: BoardCommitHandler;
 	onPlayback?: (

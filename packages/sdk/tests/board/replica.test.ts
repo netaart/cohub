@@ -10,7 +10,9 @@ import {
 	type BoardPendingPatch,
 	type BoardReplicaState,
 	createBoardReplica,
+	staticBoardRemote,
 } from "../../src/board/replica/index.js";
+import { leaseBoardReplica } from "../../src/board/client/replicas.js";
 import { boardDocument } from "./fixtures.js";
 
 /** An in-memory server and cache; `fail` makes the next applies throw. */
@@ -262,3 +264,16 @@ for (const status of [401, 403]) {
 		board.replica.dispose();
 	});
 }
+
+test("shared replicas never cross users", (t) => {
+	const http = {} as Parameters<typeof leaseBoardReplica>[0];
+	const remote = staticBoardRemote("b", boardDocument({}));
+	const alice = leaseBoardReplica(http, "s", "b", remote, { userKey: "alice" });
+	const again = leaseBoardReplica(http, "s", "b", remote, { userKey: "alice" });
+	const bob = leaseBoardReplica(http, "s", "b", remote, { userKey: "bob" });
+	t.after(() => {
+		for (const lease of [alice, again, bob]) lease.release();
+	});
+	assert.equal(again.replica, alice.replica);
+	assert.notEqual(bob.replica, alice.replica);
+});

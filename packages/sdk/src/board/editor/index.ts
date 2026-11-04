@@ -18,6 +18,7 @@ export type { BoardFrameGoOptions, BoardFrameInset, BoardFrameView } from "./fra
 export * from "./input.js";
 export * from "./keymap.js";
 export type { BoardActivation, BoardInteraction, BoardPointerEvent, BoardTap, BoardTransformEnd } from "./interaction.js";
+export * from "./select.js";
 export * from "./selection-transform.js";
 export type { BoardNaturalSize } from "./snapshots.js";
 export * from "./snapping.js";

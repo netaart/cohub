@@ -9,10 +9,11 @@ const LAYERS = {
   player: ["model"],
   replica: ["model"],
   editor: ["model"],
+  presence: ["model", "editor"],
   render: ["model"],
   export: ["model", "render"],
   "export/node": ["model", "render", "export"],
-  stage: ["model", "player", "render", "editor"],
+  stage: ["model", "player", "render", "editor", "presence"],
   client: ["model", "replica"],
   testing: ["model", "render", "export", "export/node", "editor", "stage"],
 } satisfies Record<string, string[]>;

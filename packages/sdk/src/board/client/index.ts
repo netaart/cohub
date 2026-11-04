@@ -28,6 +28,9 @@ import { type BoardReplayEntry, createBoardReplayPlayer } from "../model/replay.
 import { type BoardElementChange, diffBoardVersions } from "../model/version-diff.js";
 import { createBoardEntityId } from "../model/items/id.js";
 import type { BoardRemote } from "../replica/index.js";
+import { type BoardReplicaLease, type BoardReplicaLeaseOptions, leaseBoardReplica, shareBoardPlayback } from "./replicas.js";
+
+export { type BoardReplicaLease, type BoardReplicaLeaseOptions, claimBoardCaches } from "./replicas.js";
 
 export type BoardChangedEvent = ProtocolBoardChangedEvent;
 export type BoardAwarenessUpdatedEvent = ProtocolBoardAwarenessUpdatedEvent;
@@ -226,45 +229,53 @@ export class BoardClient implements BoardRemote {
     });
   }
 
-  private playback(command: BoardPlaybackCommand) {
-    return this.http
-      .request<{ playback: BoardPlaybackSnapshot | null }>(`${this.path}/playback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(command),
-      })
-      .then((response) => response.playback);
+  replica(options: BoardReplicaLeaseOptions = {}): BoardReplicaLease {
+    return leaseBoardReplica(this.http, this.spaceId, this.id, this, options);
+  }
+
+  async control(command: BoardPlaybackCommand) {
+    const { playback } = await this.http.request<{ playback: BoardPlaybackSnapshot | null }>(`${this.path}/playback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(command),
+    });
+    shareBoardPlayback(this.http, this.spaceId, this.id, playback);
+    return playback;
   }
 
   /** Shared playback: every viewer follows the same clock. */
   play(animationId: string, options: { position?: number; timeScale?: number; seed?: string } = {}) {
-    return this.playback({ commandId: createBoardEntityId(), type: "play", animationId, ...options });
+    return this.control({ commandId: createBoardEntityId(), type: "play", animationId, ...options });
   }
 
   pause() {
-    return this.playback({ commandId: createBoardEntityId(), type: "pause" });
+    return this.control({ commandId: createBoardEntityId(), type: "pause" });
   }
 
   resume() {
-    return this.playback({ commandId: createBoardEntityId(), type: "resume" });
+    return this.control({ commandId: createBoardEntityId(), type: "resume" });
   }
 
   seek(position: number) {
-    return this.playback({ commandId: createBoardEntityId(), type: "seek", position });
+    return this.control({ commandId: createBoardEntityId(), type: "seek", position });
   }
 
   /** Continue past the marker a presentation is holding at. */
   next() {
-    return this.playback({ commandId: createBoardEntityId(), type: "next" });
+    return this.control({ commandId: createBoardEntityId(), type: "next" });
   }
 
   stop() {
-    return this.playback({ commandId: createBoardEntityId(), type: "stop" });
+    return this.control({ commandId: createBoardEntityId(), type: "stop" });
   }
 
-  updateAwareness(seq: number, update: BoardAwarenessUpdate) {
+  updateAwareness(update: BoardAwarenessUpdate): Promise<void>;
+  /** @deprecated The SDK orders updates itself; `seq` is ignored. */
+  updateAwareness(seq: number, update: BoardAwarenessUpdate): Promise<void>;
+  updateAwareness(...args: [BoardAwarenessUpdate] | [number, BoardAwarenessUpdate]) {
+    const update = args.length === 2 ? args[1] : args[0];
     if (!this.websocket) return Promise.resolve();
-    return this.websocket.updateBoardAwareness({ spaceId: this.spaceId, boardId: this.id, seq, update });
+    return this.websocket.updateBoardAwareness({ spaceId: this.spaceId, boardId: this.id, update });
   }
 
   subscribe(handlers: BoardSubscriptionHandlers) {

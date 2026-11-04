@@ -32,7 +32,7 @@ import { createQueryModule } from "./query.js";
 import { createRemoteModule } from "./remote.js";
 import { createSelectionModule } from "./selection.js";
 import { createSnapshotsModule } from "./snapshots.js";
-import { type BoardEditorChannel, createChannels, observable } from "./state.js";
+import { type BoardEditorChannel, createChannels, memo, observable } from "./state.js";
 import { type BoardToolId, isCreationBoardTool } from "./tool.js";
 
 function styledToolId(tool: BoardToolId): BoardStyledToolId | null {
@@ -52,6 +52,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	const registry = options.registry ?? defaultBoardRegistry;
 	const channels = createChannels();
 	const track = options.track ?? (() => {});
+	let collecting: Set<BoardEditorChannel> | null = null;
 	const preferences = options.preferences;
 	const state = observable<BoardEditorState>(
 		{
@@ -140,11 +141,18 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		ctx.preferencesChanged();
 	}
 
+	function note(channel: BoardEditorChannel) {
+		track(channel);
+		collecting?.add(channel);
+	}
+
 	function read<T>(channel: BoardEditorChannel | readonly BoardEditorChannel[], value: () => T): T {
-		if (typeof channel === "string") track(channel);
-		else for (const each of channel) track(each);
+		if (typeof channel === "string") note(channel);
+		else for (const each of channel) note(each);
 		return value();
 	}
+
+	const visibleRect = memo(() => [state.camera, state.surfaceSize] as const, (_camera, _surface) => camera.visibleRect());
 
 	function tracked<A extends unknown[], R>(
 		channels: readonly BoardEditorChannel[],
@@ -157,6 +165,17 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		registry,
 		readonly: options.readonly === true,
 		subscribe: channels.subscribe,
+		collect<T>(read: () => T): { value: T; channels: ReadonlySet<BoardEditorChannel> } {
+			const outer = collecting;
+			const seen = new Set<BoardEditorChannel>();
+			collecting = seen;
+			try {
+				return { value: read(), channels: seen };
+			} finally {
+				collecting = outer;
+				if (outer) for (const channel of seen) outer.add(channel);
+			}
+		},
 
 		get hasScripts() { return read("document", () => hasBoardScripts(state.base)); },
 		get document(): BoardDocument {
@@ -209,6 +228,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		},
 		get camera() {
 			return read("camera", () => state.camera);
+		},
+		get visibleRect() {
+			return read("camera", visibleRect);
 		},
 		get cameraPolicy() {
 			return read("camera", () => state.cameraPolicy);

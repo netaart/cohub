@@ -11,7 +11,7 @@ import {
 	X,
 } from "lucide-svelte";
 import { identityColor } from "$lib/avatar-identity";
-import type { BoardCollaboratorProfile } from "$lib/board/board-activity";
+import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
 import {
 	BOARD_REPLAY_SPEEDS,
 	type BoardReplaySpeed,

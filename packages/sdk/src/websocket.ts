@@ -241,6 +241,7 @@ export class WebsocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimerResolver: (() => void) | null = null;
   private reconnectAttempt = 0;
+  private boardAwarenessSeq = 0;
   private resubscribeTimer: ReturnType<typeof setTimeout> | null = null;
   private resubscribeAttempt = 0;
   private authReconnectAttempted = false;
@@ -516,18 +517,18 @@ export class WebsocketClient {
   async updateBoardAwareness(input: {
     spaceId: string;
     boardId: string;
-    seq: number;
     update: BoardAwarenessUpdate;
     requestId?: string;
   }) {
     await this.ensureOpen();
+    this.boardAwarenessSeq += 1;
     this.send({
       type: "board.awareness.update",
       requestId: input.requestId,
       payload: {
         spaceId: input.spaceId,
         boardId: input.boardId,
-        seq: input.seq,
+        seq: this.boardAwarenessSeq,
         update: input.update,
       },
     });

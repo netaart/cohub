@@ -14,11 +14,9 @@ import type {
 	SpaceRecord,
 } from "@neta-art/cohub";
 import type { BoardDocument } from "@neta-art/cohub/board";
+import type { BoardAutomationActivity } from "@neta-art/cohub/board/presence";
 import { fade } from "svelte/transition";
-import type {
-	BoardAutomationActivity,
-	BoardCollaboratorProfile,
-} from "$lib/board/board-activity";
+import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
 import AppPublishDialog from "$lib/components/AppPublishDialog.svelte";
 import ResizeHandle from "$lib/components/ResizeHandle.svelte";
 import WorkspaceWindowsPane from "$lib/components/WorkspaceWindowsPane.svelte";
@@ -86,8 +84,6 @@ export type SpaceFileDomainProps = {
 	activeInlineBoardPath: string | null;
 	/** Display identities for board collaborator cursors and automation markers. */
 	boardCollaborators?: Map<string, BoardCollaboratorProfile>;
-	/** Recent CLI / Agent board transactions. */
-	boardActivities?: BoardAutomationActivity[];
 	onOpenBoardActivity?: (
 		activity: BoardAutomationActivity,
 	) => void | Promise<void>;
@@ -263,7 +259,6 @@ let {
 	inlineBoardTabs,
 	activeInlineBoardPath,
 	boardCollaborators,
-	boardActivities,
 	onOpenBoardActivity,
 	inlinePortPreview,
 	inlinePortTabs,
@@ -572,7 +567,6 @@ function previewContentOut(node: Element) {
 		onCloseWindow={closeWindow}
 		{isMobile}
 		collaborators={boardCollaborators}
-		activities={boardActivities}
 		onOpenActivity={onOpenBoardActivity}
 		onCommit={onCommitInlineBoard}
 		onPlayback={onPlayInlineBoard}

@@ -310,13 +310,15 @@ export {
   SpaceWebhooksApi,
 } from "./apis/spaces.js";
 export { clearFileUrlCache } from "./apis/space-file-url-store.js";
-export { BoardClient } from "./board/client/index.js";
+export { BoardClient, claimBoardCaches } from "./board/client/index.js";
 export type {
   BoardAwarenessUpdatedEvent,
   BoardChangedEvent,
   BoardClientOptions,
   BoardEventName,
   BoardPlaybackChangedEvent,
+  BoardReplicaLease,
+  BoardReplicaLeaseOptions,
   BoardSubscriptionHandlers,
   BoardSyncResult,
 } from "./board/client/index.js";

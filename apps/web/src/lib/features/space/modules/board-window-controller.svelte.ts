@@ -1,9 +1,7 @@
 import type {
-	Actor,
 	BoardPatch,
 	BoardPlaybackCommand,
 	BoardPlaybackSnapshot,
-	RequestSource,
 } from "@cohub/protocol";
 import type {
 	SpaceFsFileResponse,
@@ -15,20 +13,9 @@ import type {
 	BoardReplica,
 	BoardReplicaState,
 } from "@neta-art/cohub/board/replica";
-import {
-	BOARD_AUTOMATION_ACTIVE_MS,
-	type BoardAutomationActivity,
-	boardAutomationExpiresAt,
-	boardAutomationKind,
-	createBoardAutomationActivity,
-	mergeBoardAutomationActivity,
-} from "$lib/board/board-activity";
 import { readBoardManifestId } from "$lib/board/board-manifest-text";
-import {
-	acquireBoardReplica,
-	playBoardReplica,
-} from "$lib/board/board-replica-registry";
 import { boardPathMatchesTarget } from "$lib/board/board-sync-policy";
+import { loadedCacheUserKey } from "$lib/cache/keys";
 import {
 	readBoardManifestCache,
 	writeBoardManifestCache,
@@ -74,91 +61,12 @@ export function createBoardWindowController(
 	>();
 	const manifestRefreshByPath = new Map<string, Promise<void>>();
 	const manifestRefreshRequested = new Set<string>();
-	let automationActivities = $state<BoardAutomationActivity[]>([]);
-	const activityTimers = new Map<
-		string,
-		{
-			settle: ReturnType<typeof setTimeout>;
-			expire: ReturnType<typeof setTimeout>;
-		}
-	>();
-
 	function updateBoards(
 		boardId: string,
 		update: (board: InlineBoardPanelState) => InlineBoardPanelState,
 	) {
 		boards = boards.map((board) =>
 			board.boardId === boardId ? update(board) : board,
-		);
-	}
-
-	function clearActivityTimers(id: string) {
-		const timers = activityTimers.get(id);
-		if (!timers) return;
-		clearTimeout(timers.settle);
-		clearTimeout(timers.expire);
-		activityTimers.delete(id);
-	}
-
-	function scheduleActivityLifecycle(activity: BoardAutomationActivity) {
-		clearActivityTimers(activity.id);
-		const settle = setTimeout(() => {
-			automationActivities = automationActivities.map((item) =>
-				item.id === activity.id && item.updatedAt === activity.updatedAt
-					? { ...item, status: "settled" }
-					: item,
-			);
-		}, BOARD_AUTOMATION_ACTIVE_MS);
-		const expire = setTimeout(
-			() => {
-				clearActivityTimers(activity.id);
-				automationActivities = automationActivities.filter(
-					(item) => item.id !== activity.id,
-				);
-			},
-			Math.max(0, boardAutomationExpiresAt(activity) - Date.now()),
-		);
-		activityTimers.set(activity.id, { settle, expire });
-	}
-
-	function noteAutomation(
-		boardId: string,
-		event: {
-			actorId: string;
-			mutationId: string;
-			itemIds: string[];
-			source: RequestSource;
-			actor?: Actor;
-		},
-	) {
-		const document = boards.find((item) => item.boardId === boardId)?.document;
-		if (!document) return;
-		const activity = createBoardAutomationActivity(document, {
-			boardId,
-			actorId: event.actorId,
-			txId: event.mutationId,
-			itemIds: event.itemIds,
-			source: event.source,
-			actor: event.actor,
-		});
-		if (!activity) return;
-		const previous = automationActivities;
-		automationActivities = mergeBoardAutomationActivity(previous, activity);
-		const retained = new Set(automationActivities.map((item) => item.id));
-		for (const item of previous)
-			if (!retained.has(item.id)) clearActivityTimers(item.id);
-		const current = automationActivities.find(
-			(item) => item.id === activity.id,
-		);
-		if (!current) return;
-		scheduleActivityLifecycle(current);
-	}
-
-	function clearActivitiesForBoard(boardId: string) {
-		for (const activity of automationActivities)
-			if (activity.boardId === boardId) clearActivityTimers(activity.id);
-		automationActivities = automationActivities.filter(
-			(item) => item.boardId !== boardId,
 		);
 	}
 
@@ -176,34 +84,17 @@ export function createBoardWindowController(
 	function ensureReplica(boardId: string): BoardReplica {
 		const existing = replicas.get(boardId);
 		if (existing) return existing.replica;
-		const spaceId = options.getSpaceId();
-		const client = sdk.space(spaceId).board(boardId);
-		const { replica, release } = acquireBoardReplica(spaceId, boardId);
+		const { replica, release } = sdk
+			.space(options.getSpaceId())
+			.board(boardId)
+			.replica({ userKey: loadedCacheUserKey() });
 		const stopState = replica.subscribe((state) =>
 			adoptReplicaState(boardId, state),
 		);
-		const stopActivity = client.subscribe({
-			changed: ({ payload }) => {
-				if (
-					payload.source &&
-					payload.changed.items.length &&
-					boardAutomationKind(payload.source, payload.actor)
-				) {
-					noteAutomation(boardId, {
-						actorId: payload.actorId,
-						mutationId: payload.mutationId,
-						itemIds: payload.changed.items,
-						source: payload.source,
-						actor: payload.actor,
-					});
-				}
-			},
-		});
 		replicas.set(boardId, {
 			replica,
 			release: () => {
 				stopState();
-				stopActivity();
 				release();
 			},
 		});
@@ -215,7 +106,6 @@ export function createBoardWindowController(
 		if (!entry) return;
 		entry.release();
 		replicas.delete(boardId);
-		clearActivitiesForBoard(boardId);
 	}
 
 	function hasBoard(path: string) {
@@ -439,13 +329,11 @@ export function createBoardWindowController(
 	}
 
 	function playBoard(boardId: string, command: BoardPlaybackCommand) {
-		return playBoardReplica(options.getSpaceId(), boardId, command);
+		return sdk.space(options.getSpaceId()).board(boardId).control(command);
 	}
 
 	function dispose() {
 		for (const boardId of [...replicas.keys()]) releaseReplica(boardId);
-		for (const activity of automationActivities)
-			clearActivityTimers(activity.id);
 		boards = [];
 	}
 
@@ -458,9 +346,6 @@ export function createBoardWindowController(
 		},
 		get activeBoardPath() {
 			return activeBoardPath;
-		},
-		get automationActivities() {
-			return automationActivities;
 		},
 		hasBoard,
 		openBoard,

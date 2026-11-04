@@ -54,6 +54,7 @@ const config = {
 			"@neta-art/cohub/board/export": `${sdkDir}/board/export/index.ts`,
 			"@neta-art/cohub/board/editor": `${sdkDir}/board/editor/index.ts`,
 			"@neta-art/cohub/board/player": `${sdkDir}/board/player/index.ts`,
+			"@neta-art/cohub/board/presence": `${sdkDir}/board/presence/index.ts`,
 			"@neta-art/cohub/board/render": `${sdkDir}/board/render/index.ts`,
 			"@neta-art/cohub/board/replica": `${sdkDir}/board/replica/index.ts`,
 			"@neta-art/cohub/board/stage": `${sdkDir}/board/stage/index.ts`,

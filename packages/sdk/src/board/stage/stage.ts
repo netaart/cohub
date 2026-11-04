@@ -83,6 +83,8 @@ import { createTextResolutionTracker } from "./text-resolution-tracker.js";
 import { type BoardItemView, type BoardItemViewStats, createBoardItemViewLayer } from "./views.js";
 import { createBoardWheel } from "./wheel.js";
 import type { BoardLod } from "../render/lod.js";
+import type { BoardPresence } from "../presence/index.js";
+import { boardReactionBurst, defaultBoardPeerColor, drawBoardPresence } from "./presence.js";
 
 export type BoardStageTheme = {
 	key: string;
@@ -123,6 +125,8 @@ export type BoardStageOptions = {
 	reducedMotion?: () => boolean;
 	playback?: () => BoardPlaybackSnapshot | null;
 	fileState?: (path: string) => "ok" | "missing" | "unavailable";
+	presence?: BoardPresence;
+	peerColor?: (actorId: string) => number;
 	previews?: () => ReadonlyMap<string, BoardItem>;
 	strokes?: () => readonly BoardLiveStroke[];
 	drawOverlay?: (overlay: Graphics, frame: { zoom: number; theme: BoardStageTheme; scene: BoardScene }) => void;
@@ -233,7 +237,7 @@ function styleOf(theme: BoardStageTheme): BoardRenderStyle {
 
 export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): BoardStage {
 	if (options.viewLayer === "below" && !options.transparent) throw new Error("A below view layer needs a transparent stage.");
-	const { editor, assets } = options;
+	const { editor, assets, presence } = options;
 	const theme = options.theme ?? (() => DEFAULT_THEME);
 	const resolveRenderer = options.renderers ?? getBoardCardRenderer;
 	let app: Application | null = null;
@@ -247,7 +251,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	const scripts = createBoardScriptController({
 		editor,
 		capabilities: options.scriptCapabilities,
-		leader: options.scriptLeader,
+		leader: options.scriptLeader ?? (presence ? () => presence.leadsScripts() : undefined),
 		requestFrame: () => scheduleTick(),
 		requestScriptFrame: () => scheduleScriptTick(),
 		createHost: (callbacks) => createBoardScriptHost({
@@ -575,7 +579,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	function previewItems(): Map<string, BoardItem> {
 		const previews = new Map<string, BoardItem>();
-		const remote = options.previews?.();
+		const remote = options.previews?.() ?? presence?.previews();
 		if (!remote?.size) return previews;
 		const local = localGestureItemIds();
 		for (const [id, item] of remote) if (!local.has(id)) previews.set(id, item);
@@ -583,7 +587,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	}
 
 	function liveStrokes(): BoardLiveStroke[] {
-		const strokes = [...(options.strokes?.() ?? [])];
+		const strokes = [...(options.strokes?.() ?? presence?.strokes() ?? [])];
 		const interaction = editor.interaction;
 		if (interaction.type === "drawing")
 			strokes.push({ id: interaction.id, points: interaction.points, color: interaction.color, size: interaction.size });
@@ -722,6 +726,12 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			hoveredPort: editor.hoveredConnectionPort,
 			bindTarget: editor.bindTargetFrame ?? editor.arrowDraft?.targetFrame ?? dropTargetFrame(),
 		});
+		if (presence?.peers.length)
+			drawBoardPresence(overlay, presence.peers, {
+				zoom: camera.zoom,
+				look: current,
+				color: options.peerColor ?? ((actorId) => defaultBoardPeerColor(actorId, current)),
+			});
 		options.drawOverlay?.(overlay, { zoom: camera.zoom, theme: current, scene: renderScene });
 		drawTransient(overlay, current);
 		const marching = style.selection.dash > 0 && selected.length > 0 && !(options.reducedMotion?.() ?? false);
@@ -1156,6 +1166,15 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	const pointers = createBoardPointerGestures(host, { move: routePointerMove, end: handlePointerUp });
 
+	function onPointer(phase: BoardStagePointerPhase, event: PointerEvent, input: BoardPointerEvent) {
+		if (presence) {
+			const gone = phase === "leave" || (phase === "up" && (event.type === "pointercancel" || event.pointerType !== "mouse"));
+			const pointerType = event.pointerType === "pen" || event.pointerType === "touch" ? event.pointerType : "mouse";
+			presence.setCursor(gone ? null : { x: input.world.x, y: input.world.y, pointerType });
+		}
+		return options.onPointer?.(phase, event, input);
+	}
+
 	function handlePointerDown(event: PointerEvent) {
 		if (!active || inViews(event)) return;
 		lastPointerType = event.pointerType;
@@ -1168,7 +1187,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			pointers.start(event);
 			return;
 		}
-		if (options.onPointer?.("down", event, input) === false) {
+		if (onPointer("down", event, input) === false) {
 			if (script === "tap") scripts.pointer("up", { ...input, cancelled: true });
 			return;
 		}
@@ -1247,7 +1266,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (script === "capture") return;
 		longPress.move(event);
 		taps.move(event);
-		if (options.onPointer?.("move", event, input) === false) return autoPan.stop();
+		if (onPointer("move", event, input) === false) return autoPan.stop();
 		autoPan.move(event);
 		if (script === "tap") return;
 		if (keyPress?.input.pointerId === event.pointerId) {
@@ -1265,7 +1284,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (script === "capture") return;
 		longPress.end(event);
 		autoPan.stop();
-		if (options.onPointer?.("up", event, input) === false) {
+		if (onPointer("up", event, input) === false) {
 			held = null;
 			taps.cancel();
 			return settlePointer(event);
@@ -1306,7 +1325,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	function handlePointerLeave(event: PointerEvent) {
 		if (event.buttons !== 0) return;
 		scripts.pointer("leave", toInput(event));
-		if (options.onPointer?.("leave", event, toInput(event)) === false) return;
+		if (onPointer("leave", event, toInput(event)) === false) return;
 		editor.pointerLeave();
 		hoverHit(null);
 	}
@@ -1345,7 +1364,21 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		["dblclick", handleDoubleClick],
 	];
 
+	function burst(next: BoardBurst) {
+		bursts?.add(next, performance.now(), options.reducedMotion?.() ?? false);
+		scheduleRender();
+	}
+
 	const stopEditor = editor.subscribe(LIVE_CHANNELS, scheduleTick);
+	const presenceStops = presence
+		? [
+				presence.subscribe(scheduleTick),
+				presence.onReaction(({ reaction, at }) => burst(boardReactionBurst(reaction, at, theme()))),
+			]
+		: [];
+	const stopPresence = () => {
+		for (const stop of presenceStops) stop();
+	};
 	const stopActivations = editor.subscribeActivations((activation) => {
 		const item = editor.itemById(activation.itemId);
 		if (!item) return;
@@ -1474,6 +1507,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		setActive(next) {
 			if (active === next) return;
 			active = next;
+			presence?.setActive(next);
 			if (!active) {
 				pointers.cancel();
 				longPress.cancel();
@@ -1530,12 +1564,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			unlock: () => media.unlock(),
 			subscribe: (listener) => media.subscribe(listener),
 		},
-		burst(burst) {
-			bursts?.add(burst, performance.now(), options.reducedMotion?.() ?? false);
-			scheduleRender();
-		},
+		burst,
 		destroy() {
 			disposed = true;
+			stopPresence();
 			if (liveTimer !== null) clearTimeout(liveTimer);
 			pointers.cancel();
 			stopMarch();

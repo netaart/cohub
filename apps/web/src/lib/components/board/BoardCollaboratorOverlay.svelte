@@ -1,12 +1,14 @@
 <script lang="ts">
-import type { BoardViewport } from "@neta-art/cohub/board";
-import { Bot, Check, Scan, Smartphone, Terminal } from "lucide-svelte";
-import { identityColor } from "$lib/avatar-identity";
 import type {
 	BoardAutomationActivity,
-	BoardCollaboratorProfile,
-} from "$lib/board/board-activity";
-import type { RemoteBoardAwarenessPeer } from "$lib/board/board-awareness";
+	BoardPresence,
+	BoardPresenceAction,
+	BoardPresenceActivity,
+} from "@neta-art/cohub/board/presence";
+import { Bot, Check, Scan, Smartphone, Terminal } from "lucide-svelte";
+import { createSubscriber } from "svelte/reactivity";
+import { identityColor } from "$lib/avatar-identity";
+import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { getModelDisplayName } from "$lib/model-catalog";
@@ -14,73 +16,16 @@ import { m } from "$lib/paraglide/messages.js";
 import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 
 type Props = {
-	peers: RemoteBoardAwarenessPeer[];
-	activities: BoardAutomationActivity[];
+	presence: BoardPresence;
 	profiles: ReadonlyMap<string, BoardCollaboratorProfile>;
-	camera: BoardViewport;
-	surface: { width: number; height: number };
-	cursorVisibleMs: number;
-	isMobile: boolean;
 	onOpenActivity?: (activity: BoardAutomationActivity) => void;
 };
 
-let {
-	peers,
-	activities,
-	profiles,
-	camera,
-	surface,
-	cursorVisibleMs,
-	isMobile,
-	onOpenActivity,
-}: Props = $props();
+let { presence, profiles, onOpenActivity }: Props = $props();
 
 const locale = $derived(getLocale());
-
-const TOUCH_HOLD_MS = 1_500;
-const TOUCH_FADE_MS = 250;
-const CURSOR_LABEL_MS = 2_500;
-const EDGE_INSET = 14;
-
-let now = $state(Date.now());
-
-const TICK_MS = 100;
-
-const pendingCursorDeadline = $derived.by(() => {
-	let deadline = 0;
-	for (const peer of peers) {
-		if (!(peer.state?.cursor ?? peer.lastCursor ?? peer.state?.viewport))
-			continue;
-		const until = Math.max(
-			peer.cursorClearedAt == null
-				? 0
-				: peer.cursorClearedAt + TOUCH_HOLD_MS + TOUCH_FADE_MS,
-			peer.cursorMovedAt + CURSOR_LABEL_MS,
-			peer.viewportMovedAt + CURSOR_LABEL_MS,
-		);
-		deadline = Math.max(deadline, until);
-	}
-	return deadline;
-});
-
-$effect(() => {
-	peers;
-	now = Date.now();
-	const deadline = pendingCursorDeadline;
-	if (deadline <= Date.now()) return;
-	const timer = setInterval(() => {
-		now = Date.now();
-		if (now >= deadline) clearInterval(timer);
-	}, TICK_MS);
-	return () => clearInterval(timer);
-});
-
-function toScreen(point: { x: number; y: number }) {
-	return {
-		x: point.x * camera.zoom + camera.x,
-		y: point.y * camera.zoom + camera.y,
-	};
-}
+const LABEL_WIDTH = 148;
+const changes = createSubscriber((update) => presence.subscribe(update));
 
 function displayName(actorId: string, fallback: string) {
 	return profiles.get(actorId)?.displayName ?? fallback;
@@ -90,117 +35,48 @@ function avatarUrl(actorId: string) {
 	return profiles.get(actorId)?.avatarUrl ?? null;
 }
 
-function cursorAction(peer: RemoteBoardAwarenessPeer): string | null {
-	const gesture = peer.gesture;
-	if (gesture?.kind === "draw") return m.collab_drawing({}, { locale });
-	if (gesture?.kind === "arrow" && gesture.startItemId)
-		return m.collab_connecting({}, { locale });
-	if (gesture?.kind === "arrow" || gesture?.kind === "box")
-		return m.collab_creating({}, { locale });
-	if (gesture?.kind === "transform") {
-		if (gesture.mode === "translate") return m.collab_moving({}, { locale });
-		if (gesture.mode === "resize") return m.collab_resizing({}, { locale });
-		if (gesture.mode === "rotate") return m.collab_rotating({}, { locale });
-		return m.collab_adjusting({}, { locale });
+function actionLabel(action: BoardPresenceAction | null): string | null {
+	switch (action) {
+		case "drawing":
+			return m.collab_drawing({}, { locale });
+		case "connecting":
+			return m.collab_connecting({}, { locale });
+		case "creating":
+			return m.collab_creating({}, { locale });
+		case "moving":
+			return m.collab_moving({}, { locale });
+		case "resizing":
+			return m.collab_resizing({}, { locale });
+		case "rotating":
+			return m.collab_rotating({}, { locale });
+		case "adjusting":
+			return m.collab_adjusting({}, { locale });
+		case "editing":
+			return m.collab_editing({}, { locale });
+		case "viewing":
+			return m.collab_viewing({}, { locale });
+		default:
+			return null;
 	}
-	if (peer.state?.editingId) return m.collab_editing({}, { locale });
-	return null;
 }
 
-$effect(() => {
-	if (
-		!activities.some((activity) => activity.kind === "agent" && activity.model)
-	)
-		return;
-	void modelsCatalogStore.load().catch(() => undefined);
-});
+let width = $state(0);
 
 const cursors = $derived.by(() => {
-	return peers.flatMap((peer) => {
-		if (now - peer.lastSeenAt > cursorVisibleMs) return [];
-		const mobile = peer.state?.client?.formFactor === "mobile";
-		const liveCursor = peer.state?.cursor ?? null;
-		let cursor = liveCursor ?? peer.lastCursor;
-		let released = !liveCursor && Boolean(cursor);
-		let opacity = 1;
-		if (released) {
-			const heldFor = peer.cursorClearedAt ? now - peer.cursorClearedAt : 0;
-			if (heldFor > TOUCH_HOLD_MS + TOUCH_FADE_MS) {
-				cursor = null;
-				released = false;
-			} else if (heldFor > TOUCH_HOLD_MS) {
-				opacity = Math.max(0, 1 - (heldFor - TOUCH_HOLD_MS) / TOUCH_FADE_MS);
-			}
-		}
-
-		const viewport = mobile ? peer.state?.viewport : null;
-		const viewportMode = !cursor && Boolean(viewport);
-		const point =
-			cursor ??
-			(viewport
-				? {
-						x: viewport.x + viewport.width / 2,
-						y: viewport.y + viewport.height / 2,
-					}
-				: null);
-		if (!point) return [];
-
-		const screen = toScreen(point);
-		const offscreen =
-			screen.x < 0 ||
-			screen.y < 0 ||
-			screen.x > surface.width ||
-			screen.y > surface.height;
-		if (offscreen && !mobile) return [];
-
-		const flip = screen.x > surface.width - 148;
-		const action = viewportMode
-			? m.collab_viewing({}, { locale })
-			: cursorAction(peer);
-		const movedAt = viewportMode ? peer.viewportMovedAt : peer.cursorMovedAt;
-		return [
-			{
-				key: peer.connectionId,
-				actorId: peer.actorId,
-				name: displayName(peer.actorId, peer.actorName),
-				action,
-				avatar: avatarUrl(peer.actorId),
-				color: identityColor(peer.actorId),
-				pointerType: cursor?.pointerType ?? null,
-				viewportMode,
-				mobile,
-				released,
-				opacity,
-				offscreen,
-				flip,
-				showName: viewportMode
-					? now - movedAt < CURSOR_LABEL_MS
-					: action !== null || now - movedAt < CURSOR_LABEL_MS,
-				x: offscreen
-					? Math.min(Math.max(screen.x, EDGE_INSET), surface.width - EDGE_INSET)
-					: screen.x,
-				y: offscreen
-					? Math.min(
-							Math.max(screen.y, EDGE_INSET),
-							surface.height - EDGE_INSET,
-						)
-					: screen.y,
-			},
-		];
-	});
+	changes();
+	return presence.cursors.map((cursor) => ({
+		...cursor,
+		name: displayName(cursor.actorId, cursor.actorName),
+		label: actionLabel(cursor.action),
+		avatar: avatarUrl(cursor.actorId),
+		color: identityColor(cursor.actorId),
+		flip: cursor.x > width - LABEL_WIDTH,
+	}));
 });
 
-const automation = $derived.by(() => {
-	return activities.flatMap((activity) => {
-		const screen = toScreen(activity.focus);
-		const x = Math.min(
-			Math.max(screen.x, EDGE_INSET),
-			Math.max(surface.width - EDGE_INSET, EDGE_INSET),
-		);
-		const y = Math.min(
-			Math.max(screen.y, EDGE_INSET),
-			Math.max(surface.height - EDGE_INSET, EDGE_INSET),
-		);
+const activities = $derived.by(() => {
+	changes();
+	return presence.activities.map((activity) => {
 		const name = displayName(activity.actorId, "Someone");
 		const actionable =
 			activity.kind === "agent" && Boolean(activity.source.sessionId);
@@ -216,41 +92,42 @@ const automation = $derived.by(() => {
 					? `${modelName} · ${name}`
 					: `${name}'s agent`
 				: `${name} · CLI`;
-		return [
-			{
-				key: activity.id,
-				activity,
-				kind: activity.kind,
-				label,
-				title: actionable
-					? `${label} \u2014 ${m.collab_open_chat({}, { locale })}`
-					: label,
-				color: identityColor(activity.actorId),
-				avatar: avatarUrl(activity.actorId),
-				name,
-				actionable,
-				status: activity.status,
-				x,
-				y,
-			},
-		];
+		return {
+			activity,
+			label,
+			title: actionable
+				? `${label} \u2014 ${m.collab_open_chat({}, { locale })}`
+				: label,
+			color: identityColor(activity.actorId),
+			avatar: avatarUrl(activity.actorId),
+			name,
+			actionable,
+		};
 	});
+});
+
+$effect(() => {
+	if (
+		!activities.some(
+			({ activity }) => activity.kind === "agent" && activity.model,
+		)
+	)
+		return;
+	void modelsCatalogStore.load().catch(() => undefined);
 });
 </script>
 
 {#snippet ActivityBody(marker: {
-	activity: BoardAutomationActivity;
-	kind: "cli" | "agent";
+	activity: BoardPresenceActivity;
 	label: string;
 	name: string;
 	avatar: string | null;
-	status: "active" | "settled";
 })}
 	<span class="collab-activity-icon">
-		{#if marker.kind === "agent"}
+		{#if marker.activity.kind === "agent"}
 			<Bot class="h-3 w-3" />
 			<span class="collab-activity-corner">
-				{#if marker.status === "settled"}
+				{#if marker.activity.status === "settled"}
 					<Check class="h-2 w-2" />
 				{:else}
 					<Terminal class="h-1.5 w-1.5" />
@@ -264,18 +141,18 @@ const automation = $derived.by(() => {
 	<UserAvatar name={marker.name} avatarUrl={marker.avatar} seed={marker.activity.actorId} size="xxs" class="collab-activity-avatar" />
 {/snippet}
 
-<div class="collab-overlay">
-	{#each cursors as cursor (cursor.key)}
+<div class="collab-overlay" bind:clientWidth={width}>
+	{#each cursors as cursor (cursor.connectionId)}
 		<div
 			class="collab-cursor"
 			class:collab-cursor--flip={cursor.flip}
 			class:collab-cursor--edge={cursor.offscreen}
 			style:--collab-color={cursor.color}
 			style:transform={`translate3d(${cursor.x}px, ${cursor.y}px, 0)`}
-			style:opacity={cursor.opacity}
+			style:opacity={cursor.fading ? 0 : 1}
 			aria-hidden="true"
 		>
-			{#if cursor.viewportMode}
+			{#if cursor.pointerType === null}
 				<span class="collab-view-focus"><Scan class="h-3 w-3" /></span>
 			{:else if cursor.pointerType === "touch"}
 				<span class="collab-touch-ring" class:collab-touch-ring--released={cursor.released}></span>
@@ -300,21 +177,21 @@ const automation = $derived.by(() => {
 						<span class="collab-badge"><Smartphone class="h-2 w-2" /></span>
 					{/if}
 				</span>
-				{#if cursor.showName}
+				{#if cursor.labelled}
 					<span class="collab-name">
-						{cursor.name}{cursor.action ? ` · ${cursor.action}` : ""}
+						{cursor.name}{cursor.label ? ` · ${cursor.label}` : ""}
 					</span>
 				{/if}
 			</span>
 		</div>
 	{/each}
 
-	{#each automation as marker (marker.key)}
+	{#each activities as marker (marker.activity.id)}
 		<div
 			class="collab-activity"
-			class:collab-activity--settled={marker.status === "settled"}
+			class:collab-activity--settled={marker.activity.status === "settled"}
 			style:--collab-color={marker.color}
-			style:transform={`translate3d(${marker.x}px, ${marker.y}px, 0)`}
+			style:transform={`translate3d(${marker.activity.x}px, ${marker.activity.y}px, 0)`}
 		>
 			{#if marker.actionable}
 				<button
@@ -355,7 +232,7 @@ const automation = $derived.by(() => {
 	}
 
 	.collab-cursor {
-		transition: transform 90ms linear, opacity 160ms ease-out;
+		transition: transform 90ms linear, opacity 250ms ease-out;
 	}
 
 	.collab-cursor--flip {

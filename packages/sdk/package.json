@@ -72,6 +72,10 @@
         "types": "./dist/board/player/index.d.ts",
         "import": "./dist/board/player/index.js"
       },
+      "./board/presence": {
+        "types": "./dist/board/presence/index.d.ts",
+        "import": "./dist/board/presence/index.js"
+      },
       "./board/render": {
         "types": "./dist/board/render/index.d.ts",
         "import": "./dist/board/render/index.js"
@@ -143,6 +147,10 @@
     "./board/player": {
       "types": "./src/board/player/index.ts",
       "import": "./src/board/player/index.ts"
+    },
+    "./board/presence": {
+      "types": "./src/board/presence/index.ts",
+      "import": "./src/board/presence/index.ts"
     },
     "./board/render": {
       "types": "./src/board/render/index.ts",

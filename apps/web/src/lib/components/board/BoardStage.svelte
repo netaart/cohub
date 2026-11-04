@@ -2,7 +2,6 @@
 import type { BoardPlaybackSnapshot } from "@cohub/protocol";
 import type {
 	BoardFileSnapshotFacts,
-	BoardItem,
 	BoardScene,
 	BoardSceneItem,
 	WorldPoint,
@@ -13,10 +12,9 @@ import {
 	isBoardModelItem,
 	parseBoardMediaSource,
 	resolveBoardMediaUrl,
-	sceneItemToItem,
 	worldPoint,
 } from "@neta-art/cohub/board";
-import type { BoardPointerEvent } from "@neta-art/cohub/board/editor";
+import type { BoardPresence } from "@neta-art/cohub/board/presence";
 import {
 	BOARD_PLAY_MEDIA,
 	type BoardLod,
@@ -30,7 +28,6 @@ import {
 	type BoardContextMenuRequest,
 	type BoardFeedback,
 	type BoardItemView,
-	type BoardLiveStroke,
 	type BoardStage,
 	mountBoardStage,
 } from "@neta-art/cohub/board/stage";
@@ -39,8 +36,6 @@ import { onDestroy, onMount, untrack } from "svelte";
 import { MediaQuery } from "svelte/reactivity";
 import { boardAppMeta } from "$lib/board/board-app";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
-import type { BoardAwarenessController } from "$lib/board/board-awareness";
-import { drawAwarenessOverlay } from "$lib/board/board-awareness-overlay";
 import {
 	type BoardResourceDrop,
 	boardPointerResources,
@@ -57,10 +52,10 @@ import type { BoardStageExportBridge } from "$lib/board/board-image-export";
 import { createBoardLiveSessions } from "$lib/board/board-live-sessions.svelte";
 import { createBoardLiveTasks } from "$lib/board/board-live-tasks";
 import { opensInPlace } from "$lib/board/board-media-playback";
-import { reactionBurst } from "$lib/board/board-reactions";
 import { boardSessionDropSnapshot } from "$lib/board/board-session";
 import {
 	type BoardThemeSnapshot,
+	boardIdentityColor,
 	boardThemeKey,
 	resolveBoardTheme,
 } from "$lib/board/board-theme";
@@ -85,12 +80,10 @@ const {
 	assetSource,
 	editable = true,
 	active = true,
-	awareness,
-	awarenessVersion,
+	presence,
 	views = [],
 	autoplay = true,
 	onRunningChange,
-	onPointerPresence,
 	onPointer,
 	onSurfaceChange,
 	onOpenFile,
@@ -105,7 +98,6 @@ const {
 	lod,
 	prefetch,
 	drawViews,
-	scriptLeader,
 }: {
 	editor: BoardEditor;
 	playback?: BoardPlaybackSnapshot | null;
@@ -114,18 +106,10 @@ const {
 	assetSource: BoardAssetSource;
 	editable?: boolean;
 	active?: boolean;
-	awareness: BoardAwarenessController;
-	awarenessVersion: number;
+	presence?: BoardPresence | null;
 	views?: readonly BoardItemView[];
 	autoplay?: boolean;
 	onRunningChange?: (ids: ReadonlySet<string>) => void;
-	onPointerPresence?: (
-		cursor: {
-			x: number;
-			y: number;
-			pointerType: "mouse" | "pen" | "touch";
-		} | null,
-	) => void;
 	onPointer?: (
 		phase: "down" | "move" | "up" | "leave",
 		event: PointerEvent,
@@ -143,7 +127,6 @@ const {
 	lod?: BoardLod;
 	prefetch?: number;
 	drawViews?: boolean;
-	scriptLeader?: () => boolean;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -153,7 +136,6 @@ const syncsFiles = untrack(() => editable) && spaceId !== null;
 
 let host: HTMLDivElement | null = $state(null);
 let stage: BoardStage | null = null;
-let stopReactions: (() => void) | null = null;
 let dropActive = $state(false);
 let liveIds = $state.raw<ReadonlySet<string> | null>(null);
 let customThemeVersion = $state(0);
@@ -303,48 +285,10 @@ function enrichFileCards(targets: Array<{ id: string; path: string }>) {
 	}
 }
 
-function remotePreviews(): Map<string, BoardItem> {
-	const previews = new Map<string, BoardItem>();
-	const peers = [...awareness.peers].sort(
-		(a, b) => a.lastSeenAt - b.lastSeenAt,
-	);
-	for (const peer of peers) {
-		if (peer.gesture?.kind !== "transform") continue;
-		for (const preview of peer.gesture.items) {
-			const item = editor.itemById(preview.itemId);
-			if (item)
-				previews.set(
-					preview.itemId,
-					sceneItemToItem(
-						{ ...item, frame: preview.frame },
-						editor.scene.layout,
-					),
-				);
-		}
-	}
-	return previews;
-}
-
-function remoteStrokes(): BoardLiveStroke[] {
-	const strokes: BoardLiveStroke[] = [];
-	for (const peer of awareness.peers) {
-		const gesture = peer.gesture;
-		if (gesture?.kind !== "draw") continue;
-		strokes.push({
-			id: gesture.itemId,
-			points: gesture.points,
-			color: gesture.color,
-			size: gesture.size,
-		});
-	}
-	return strokes;
-}
-
 function drawOverlay(
 	overlay: Graphics,
 	frame: { zoom: number; scene: BoardScene },
 ) {
-	drawAwarenessOverlay(overlay, awareness.peers, resolveTheme(), frame.zoom);
 	const inv = 1 / Math.max(frame.zoom, 0.0001);
 	const { palette, style } = resolveTheme();
 	for (const id of relatedIds ?? []) {
@@ -379,29 +323,6 @@ function handleHit(item: BoardSceneItem): boolean {
 	editor.setSelection([item.id]);
 	onOpenInPlace?.(item.id);
 	return true;
-}
-
-function presence(event: PointerEvent, input: BoardPointerEvent | null) {
-	const pointerType =
-		event.pointerType === "pen" || event.pointerType === "touch"
-			? event.pointerType
-			: "mouse";
-	onPointerPresence?.(
-		input ? { x: input.world.x, y: input.world.y, pointerType } : null,
-	);
-}
-
-function handlePointer(
-	phase: "down" | "move" | "up" | "leave",
-	event: PointerEvent,
-	input: BoardPointerEvent,
-): boolean | undefined {
-	const gone =
-		phase === "leave" ||
-		(phase === "up" &&
-			(event.type === "pointercancel" || event.pointerType !== "mouse"));
-	presence(event, gone ? null : input);
-	return onPointer?.(phase, event);
 }
 
 function handleDoubleClick(item: BoardSceneItem | null): boolean {
@@ -496,10 +417,10 @@ onMount(() => {
 			autoplay && (kind !== "video" || !reducedMotion.current),
 		onRunningChange: (ids) => onRunningChange?.(ids),
 		fileState: (path) => (spaceId ? fileAvailability(spaceId, path) : "ok"),
-		previews: remotePreviews,
-		strokes: remoteStrokes,
+		presence: presence ?? undefined,
+		peerColor: (actorId) => boardIdentityColor(resolveTheme(), actorId),
 		drawOverlay,
-		onPointer: handlePointer,
+		onPointer: (phase, event) => onPointer?.(phase, event),
 		onHit: handleHit,
 		handlesHit,
 		onActivate: (item) => onActivate?.(item) ?? false,
@@ -514,12 +435,8 @@ onMount(() => {
 		lod: () => lod,
 		prefetch,
 		drawViews,
-		scriptLeader: () => scriptLeader?.() ?? true,
 	});
 	stage = mounted;
-	stopReactions = awareness.onReaction((event) =>
-		mounted.burst(reactionBurst(event.reaction, event.at, resolveTheme())),
-	);
 	onStageReady?.(mounted);
 	void mounted.ready.then((ready) => {
 		if (!ready || stage !== mounted) return;
@@ -560,7 +477,6 @@ $effect(() => {
 	playback;
 	relatedIds;
 	lod;
-	awarenessVersion;
 	getResolvedTheme();
 	customThemeVersion;
 	reducedMotion.current;
@@ -582,7 +498,6 @@ onDestroy(() => {
 	cancelAnimationFrame(snapshotFrame);
 	liveTasks?.destroy();
 	liveSessions?.destroy();
-	stopReactions?.();
 	stage?.destroy();
 	stage = null;
 	onStageReady?.(null);

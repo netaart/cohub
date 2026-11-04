@@ -8,9 +8,8 @@ import {
 } from "@neta-art/cohub/board";
 import type { BoardAssetManager } from "@neta-art/cohub/board/stage";
 import { onDestroy, onMount, untrack } from "svelte";
-import type { BoardCollaboratorProfile } from "$lib/board/board-activity";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
-import { createBoardAwarenessController } from "$lib/board/board-awareness";
+import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
 import {
 	BOARD_REPLAY_PAGE_SIZE,
 	BOARD_REPLAY_STEP_MS,
@@ -71,11 +70,6 @@ let follow = $state(true);
 let surfaceSize = $state({ width: 0, height: 0 });
 let timer: ReturnType<typeof setTimeout> | null = null;
 let revision = $state(0);
-
-const awareness = createBoardAwarenessController({
-	send: async () => {},
-	onChange: () => {},
-});
 
 const replayKey = `${untrack(() => path)}#replay`;
 
@@ -302,7 +296,6 @@ $effect(() => {
 onDestroy(() => {
 	disposed = true;
 	stopTimer();
-	void awareness.destroy();
 	editor.destroy();
 });
 </script>
@@ -313,8 +306,6 @@ onDestroy(() => {
 		{assets}
 		space={spaceId}
 		{assetSource}
-		{awareness}
-		awarenessVersion={0}
 		editable={false}
 		onSurfaceChange={(size) => {
 			surfaceSize = size;

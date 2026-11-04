@@ -7,11 +7,9 @@ import type {
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppRuntimeShellContext } from "@neta-art/cohub";
 import type { BoardDocument } from "@neta-art/cohub/board";
+import type { BoardAutomationActivity } from "@neta-art/cohub/board/presence";
 import { Wallpaper } from "lucide-svelte";
-import type {
-	BoardAutomationActivity,
-	BoardCollaboratorProfile,
-} from "$lib/board/board-activity";
+import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
 import {
 	type BoardRuntimeViewState,
 	cohubPixiRuntime,
@@ -49,7 +47,6 @@ type Props = {
 	chrome: PreviewChrome;
 	isMobile: boolean;
 	collaborators?: Map<string, BoardCollaboratorProfile>;
-	activities?: BoardAutomationActivity[];
 	onOpenActivity?: (activity: BoardAutomationActivity) => void | Promise<void>;
 	onCommit: (boardId: string, patch: BoardPatch) => void | Promise<void>;
 	onPlayback: (
@@ -80,7 +77,6 @@ let {
 	chrome,
 	isMobile,
 	collaborators = new Map(),
-	activities = [],
 	onOpenActivity,
 	onCommit,
 	onPlayback,
@@ -181,7 +177,6 @@ const boardRuntimeModulePromise = $derived.by(() => {
 						{active}
 						{isMobile}
 						{collaborators}
-						{activities}
 						{onOpenActivity}
 						syncError={playDocument ? null : board.saveError}
 						syncing={!playDocument && board.saving}

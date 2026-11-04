@@ -55,6 +55,7 @@ export type BoardReplicaOptions = {
 	remote: BoardRemote;
 	storage?: BoardReplicaStorage;
 	clientId?: string;
+	readonly?: boolean;
 	persistIntervalMs?: number;
 };
 
@@ -238,7 +239,7 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 	}
 
 	async function flush() {
-		if (sending || disposed || !loaded || !restored) return;
+		if (sending || disposed || !loaded || !restored || options.readonly) return;
 		sending = true;
 		let latest = 0;
 		try {
@@ -368,6 +369,7 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 			await flush();
 		},
 		apply(patch: BoardPatch): Promise<void> {
+			if (options.readonly) return Promise.reject(new Error("Board is read-only."));
 			const entry = { mutationId: createBoardEntityId(), patch };
 			pending = [...pending, entry];
 			recompute();
@@ -394,6 +396,22 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 }
 
 export type BoardReplica = ReturnType<typeof createBoardReplica>;
+
+export function staticBoardRemote(id: string, document: BoardDocument): BoardRemote {
+	return {
+		get: async () => ({
+			id,
+			title: "",
+			version: 1,
+			updatedAt: null,
+			board: document.board,
+			items: document.items,
+			animations: document.animations,
+			playback: null,
+		}),
+		apply: () => Promise.reject(new Error("Board is read-only.")),
+	};
+}
 
 export {
 	type BoardReplicaDatabaseOptions,

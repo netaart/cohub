@@ -9,11 +9,8 @@ import { parseBoardLaunch } from "@neta-art/cohub/board";
 import type { BoardReplica } from "@neta-art/cohub/board/replica";
 import type { AppNavigationHandler } from "$lib/board/board-app";
 import { readBoardManifestId } from "$lib/board/board-manifest-text";
-import {
-	acquireBoardReplica,
-	playBoardReplica,
-} from "$lib/board/board-replica-registry";
 import { cohubPixiRuntime } from "$lib/board/runtime/board-runtime";
+import { loadedCacheUserKey } from "$lib/cache/keys";
 import {
 	readBoardManifestCache,
 	writeBoardManifestCache,
@@ -111,7 +108,10 @@ $effect(() => {
 $effect(() => {
 	const id = boardId;
 	if (!id) return;
-	const { replica, release } = acquireBoardReplica(spaceId, id);
+	const { replica, release } = sdk
+		.space(spaceId)
+		.board(id)
+		.replica({ userKey: loadedCacheUserKey() });
 	const adopt = () => {
 		board = { boardId: id, replica, state: replica.state };
 	};
@@ -149,7 +149,7 @@ function navigate(target: AppNavigationTarget) {
 				keysWhenUsed
 				syncError={state.error}
 				onCommit={(patch) => replica.apply(patch)}
-				onPlayback={(command) => playBoardReplica(spaceId, id, command)}
+				onPlayback={(command) => sdk.space(spaceId).board(id).control(command)}
 				onRetrySync={() => replica.retry()}
 				onOpenFile={(file) => navigate({ kind: "file", spaceId, path: file })}
 				onOpenTask={(taskRunId) => navigate({ kind: "task", spaceId, taskRunId })}

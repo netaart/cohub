@@ -8,8 +8,10 @@ import type {
 import type { BoardStage } from "@neta-art/cohub/board/stage";
 import { Info } from "lucide-svelte";
 import type { AppNavigationHandler } from "$lib/board/board-app";
-import { createBoardAppRoom } from "$lib/board/board-app-room.svelte";
-import type { BoardPresenceChannel } from "$lib/board/board-awareness";
+import {
+	createBoardAppRoom,
+	createBoardRoomRelay,
+} from "$lib/board/board-app-room.svelte";
 import { type BoardPlay, loadBoardPlay } from "$lib/board/board-play.svelte";
 import {
 	type BoardScope,
@@ -93,7 +95,7 @@ $effect(() => {
 
 $effect(() => current?.play?.saveOnHide());
 
-let room = $state.raw<BoardPresenceChannel | null>(null);
+const room = createBoardRoomRelay();
 
 $effect(() => {
 	const versionId = content.versionId;
@@ -106,10 +108,10 @@ $effect(() => {
 				authStore.profile?.displayName?.trim() || m.common_user({}, { locale }),
 		}),
 	});
-	room = opened;
+	room.use(opened);
 	return () => {
+		room.use(null);
 		opened.destroy();
-		room = null;
 	};
 });
 
@@ -173,7 +175,7 @@ function handleStage(stage: BoardStage | null) {
 					{isMobile}
 					onCommit={play ? (_patch, next) => play.commit(next) : undefined}
 					onReset={play?.changed ? reset : undefined}
-					presence={room ?? undefined}
+					presence={playable ? room : undefined}
 					onStageReady={handleStage}
 				/>
 				{#if undo}

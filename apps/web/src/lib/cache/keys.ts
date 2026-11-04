@@ -34,6 +34,12 @@ export function canUseUserScopedCache(userKey = getCacheUserKey()) {
 	return !authStore.isAuthenticated;
 }
 
+export function loadedCacheUserKey(): string | undefined {
+	if (!authStore.loaded) return undefined;
+	const userKey = getCacheUserKey();
+	return canUseUserScopedCache(userKey) ? userKey : undefined;
+}
+
 /**
  * Prefer this for IndexedDB / localStorage IO that is user-scoped.
  * Waits for auth hydration so cold start does not briefly use the wrong key.

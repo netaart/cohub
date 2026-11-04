@@ -24,6 +24,7 @@ import type {
 	UserProfile,
 } from "@neta-art/cohub";
 import type { BoardDocument } from "@neta-art/cohub/board";
+import type { BoardAutomationActivity } from "@neta-art/cohub/board/presence";
 import type { Navigation } from "@sveltejs/kit";
 import { Check, Copy } from "lucide-svelte";
 import { flushSync, onDestroy, onMount, tick, untrack } from "svelte";
@@ -42,10 +43,7 @@ import {
 } from "$lib/access/access-state";
 import { appDisplayTitle } from "$lib/app-page-meta";
 import { sortAppsByRecentUpdate } from "$lib/app-sort";
-import type {
-	BoardAutomationActivity,
-	BoardCollaboratorProfile,
-} from "$lib/board/board-activity";
+import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
 import { invalidateFilePreviews } from "$lib/board/board-file-preview-source";
 import { spaceFsRepo } from "$lib/cache/repositories/space-fs-repo";
 import { spaceRecordRepo } from "$lib/cache/repositories/space-record-repo";
@@ -3174,7 +3172,6 @@ const spaceFileDomainProps = $derived.by<
 	inlineBoardTabs,
 	activeInlineBoardPath,
 	boardCollaborators,
-	boardActivities: boardPreview.automationActivities,
 	onOpenBoardActivity: openBoardActivity,
 	inlinePortPreview,
 	inlinePortTabs,

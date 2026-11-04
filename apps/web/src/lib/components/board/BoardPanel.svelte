@@ -20,6 +20,7 @@ import {
 	formatBoardLaunch,
 	inferBoardMediaKind,
 	isBoardModelItem,
+	layoutBoardImages,
 	normalizeBoardRemoteUrl,
 	parseBoardDocument,
 	parseBoardMediaSource,
@@ -38,6 +39,7 @@ import {
 	nextLocalPlayback,
 	playbackClockAt,
 } from "@neta-art/cohub/board/player";
+import { createBoardPresence } from "@neta-art/cohub/board/presence";
 import {
 	BOARD_PRESENT_BACKDROP,
 	type BoardBackdropStatus,
@@ -68,12 +70,6 @@ import {
 import { createBoardAppItemView } from "$lib/board/board-app-view.svelte";
 import { createSpaceBoardAssetSource } from "$lib/board/board-asset-source";
 import {
-	type BoardAwarenessController,
-	boardAwarenessViewportFromCamera,
-	createBoardAwarenessController,
-	isBoardScriptLeader,
-} from "$lib/board/board-awareness";
-import {
 	hasPageTextSelection,
 	readBoardClipboard,
 	writeBoardClipboard,
@@ -88,7 +84,6 @@ import {
 import type { BoardStageExportBridge } from "$lib/board/board-image-export";
 import {
 	clipboardImageFiles,
-	layoutBoardImages,
 	uploadBoardImage,
 } from "$lib/board/board-image-paste";
 import {
@@ -177,7 +172,6 @@ const {
 	syncing = false,
 	isMobile = false,
 	collaborators = new Map(),
-	activities = [],
 	onOpenActivity,
 	onCommit,
 	onPlayback,
@@ -250,7 +244,6 @@ const editable = untrack(() => mode !== "view");
 const playing = untrack(() => mode === "play");
 const spaceId = untrack(() => (scope.kind === "space" ? scope.spaceId : null));
 const liveSpaceId = playing ? null : spaceId;
-const channel = $derived(presence ?? null);
 const resolvedAssetSource = untrack(() =>
 	scope.kind === "app"
 		? scope.assetSource
@@ -450,16 +443,6 @@ function pasteText(text: string) {
 let imageUploads = 0;
 let destroyed = false;
 
-function pastedView() {
-	const { x, y, zoom } = editor.camera;
-	return {
-		x: -x / zoom,
-		y: -y / zoom,
-		width: surfaceSize.width / zoom,
-		height: surfaceSize.height / zoom,
-	};
-}
-
 async function pasteImages(files: File[]) {
 	imageUploads += 1;
 	const uploading = m.board_image_uploading({}, { locale });
@@ -478,7 +461,13 @@ async function pasteImages(files: File[]) {
 	);
 	const failure = results.find((result) => result.status === "rejected");
 	if (images.length)
-		editor.addItems(layoutBoardImages(images, pastedView()), { select: true });
+		editor.addItems(
+			layoutBoardImages(
+				images,
+				editor.visibleRect ?? { x: 0, y: 0, width: 0, height: 0 },
+			),
+			{ select: true },
+		);
 	if (failure?.status === "rejected") {
 		console.warn("[board] pasted image upload failed", failure.reason);
 		showNotice(
@@ -702,13 +691,11 @@ let modelId = $state<string | null>(null);
 let regeneratingItemId = $state<string | null>(null);
 let notice = $state<{ text: string; error: boolean } | null>(null);
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
-let awarenessVersion = $state(0);
-let pageVisible = $state(true);
 let surfaceSize = $state<{ width: number; height: number }>({
 	width: 0,
 	height: 0,
 });
-let unsubscribeAwareness: (() => void) | null = null;
+let unsubscribeBoard: (() => void) | null = null;
 const viewUserKey = untrack(() => getCacheUserKey());
 const viewKey = untrack(() => boardViewKey(scope, boardId));
 const remembersView = canUseUserScopedCache(viewUserKey);
@@ -853,20 +840,7 @@ const history = boardClient && {
 		return { version: result.version, document: parsed.document };
 	},
 };
-const awarenessClient = editable ? boardClient : null;
-const sharesAwareness = $derived(Boolean(awarenessClient ?? channel));
 const generates = editable && liveSpaceId !== null;
-const awareness: BoardAwarenessController = createBoardAwarenessController({
-	send: (seq, update) => {
-		if (channel) return channel.send(seq, update);
-		const client = update.type === "reaction" ? boardClient : awarenessClient;
-		return client ? client.updateAwareness(seq, update) : Promise.resolve();
-	},
-	onChange: () => {
-		awarenessVersion += 1;
-	},
-	cursorIntervalMs: playing ? 100 : undefined,
-});
 
 const editor = createBoardEditor({
 	document: untrack(() => initialDocument),
@@ -882,6 +856,18 @@ const editor = createBoardEditor({
 		onViewStateChange?.({ path, ...state });
 	},
 });
+
+const room = untrack(() => presence);
+const presenceChannel = room ?? boardClient;
+const collaboration = presenceChannel
+	? createBoardPresence({
+			editor,
+			channel: presenceChannel,
+			publish: room || editable ? "all" : "reactions",
+			formFactor: untrack(() => isMobile) ? "mobile" : "desktop",
+			cursorInterval: playing ? 100 : undefined,
+		})
+	: null;
 
 const authoring = $derived(
 	mode === "edit" || (playing && editor.tool !== "play"),
@@ -1116,60 +1102,6 @@ $effect(() => {
 	});
 });
 
-$effect(() => {
-	const current = channel;
-	if (!current) return;
-	return current.subscribe((payload) => awareness.receive(payload));
-});
-
-$effect(() => {
-	if (!sharesAwareness) return;
-	const viewport = boardAwarenessViewportFromCamera(editor.camera, surfaceSize);
-	untrack(() => awareness.setViewport(viewport));
-});
-
-$effect(() => {
-	if (!sharesAwareness) return;
-	const tool = editor.tool;
-	const selection = editor.selection;
-	const bounds = editor.bounds;
-	const editingId = editor.editingId;
-	const formFactor = isMobile ? ("mobile" as const) : ("desktop" as const);
-	const scripts = active && pageVisible && editor.hasScripts;
-	untrack(() =>
-		awareness.updateLocalState({
-			client: { formFactor, scripts },
-			tool,
-			selection,
-			bounds,
-			editingId,
-		}),
-	);
-});
-
-$effect(() => {
-	if (!awarenessClient) return;
-	editor.interaction;
-	editor.geometryVersion;
-	untrack(() => awareness.syncGesture(editor));
-});
-
-$effect(() => {
-	if (!boardClient) return;
-	awarenessVersion;
-	const items = editor.items;
-	untrack(() => awareness.reconcile(items));
-});
-
-const boardActivities = $derived(
-	activities.filter((activity) => activity.boardId === boardId),
-);
-
-const peers = $derived.by(() => {
-	awarenessVersion;
-	return awareness.peers;
-});
-
 function isEditableTarget(target: EventTarget | null): boolean {
 	if (!(target instanceof HTMLElement)) return false;
 	const tag = target.tagName;
@@ -1269,11 +1201,9 @@ function handleKeyup(event: KeyboardEvent) {
 
 function clearSpaceHeld() {
 	editor.spaceHeld = false;
-	awareness.setCursor(null);
 }
 
 function handleVisibilityChange() {
-	pageVisible = document.visibilityState !== "hidden";
 	clearSpaceHeld();
 	if (document.visibilityState === "hidden") flushView();
 }
@@ -1291,7 +1221,7 @@ function reactAt(
 	point: { x: number; y: number } | null,
 ) {
 	if (point && scriptStage)
-		awareness.react(reaction, scriptStage.toWorld(point.x, point.y));
+		collaboration?.react(reaction, scriptStage.toWorld(point.x, point.y));
 }
 
 function handleContextMenu(request: BoardContextMenuRequest): boolean {
@@ -1319,10 +1249,15 @@ function blockPageZoom(node: HTMLElement) {
 	};
 }
 
+function leaveBoard() {
+	unsubscribeBoard?.();
+	unsubscribeBoard = null;
+	void collaboration?.destroy();
+}
+
 onMount(() => {
 	if (boardClient) {
-		unsubscribeAwareness = boardClient.subscribe({
-			awareness: (event) => awareness.receive(event.payload),
+		unsubscribeBoard = boardClient.subscribe({
 			changed: (event) => {
 				liveVersion = Math.max(liveVersion, event.payload.version);
 			},
@@ -1345,9 +1280,7 @@ onMount(() => {
 		window.removeEventListener("blur", clearSpaceHeld);
 		window.removeEventListener("pagehide", flushView);
 		document.removeEventListener("visibilitychange", handleVisibilityChange);
-		const unsubscribe = unsubscribeAwareness;
-		unsubscribeAwareness = null;
-		void awareness.destroy().finally(() => unsubscribe?.());
+		leaveBoard();
 	};
 });
 
@@ -1376,9 +1309,7 @@ onDestroy(() => {
 	window.removeEventListener("pagehide", flushView);
 	document.removeEventListener("visibilitychange", handleVisibilityChange);
 	editor.spaceHeld = false;
-	const unsubscribe = unsubscribeAwareness;
-	unsubscribeAwareness = null;
-	void awareness.destroy().finally(() => unsubscribe?.());
+	leaveBoard();
 	editor.destroy();
 	assets.destroy();
 });
@@ -1461,15 +1392,13 @@ onDestroy(() => {
 			playback={activePlayback}
 			{assets}
 			{active}
-			{awareness}
-			{awarenessVersion}
+			presence={collaboration}
 			space={spaceId}
 			editable={editable && !presenting}
 			assetSource={resolvedAssetSource}
 			onOpenFile={openMediaSource}
 			onAddLinks={addLinks}
 			onOpenInPlace={openInPlace}
-			onPointerPresence={(cursor) => { if (sharesAwareness) awareness.setCursor(cursor); }}
 			views={itemViews}
 			autoplay={!saveData}
 			onRunningChange={(ids) => { running = ids; }}
@@ -1479,18 +1408,12 @@ onDestroy(() => {
 			onContextMenu={handleContextMenu}
 			onActivate={openItem}
 			{relatedIds}
-			scriptLeader={() => !boardClient || (active && pageVisible && isBoardScriptLeader(boardClient.connectionId, awareness.peers))}
 		/>
 
-		{#if (boardClient || channel) && !presenting}
+		{#if collaboration && !presenting}
 			<BoardCollaboratorOverlay
-				peers={peers}
-				activities={boardActivities}
-				profiles={channel ? channel.profiles : collaborators}
-				camera={editor.camera}
-				surface={surfaceSize}
-				cursorVisibleMs={awareness.cursorVisibleMs}
-				{isMobile}
+				presence={collaboration}
+				profiles={room ? room.profiles : collaborators}
 				onOpenActivity={(activity) => { void onOpenActivity?.(activity); }}
 			/>
 		{/if}
@@ -1527,7 +1450,7 @@ onDestroy(() => {
 			{editor}
 			{isMobile}
 			onPresent={() => present()}
-			onReact={boardClient || channel ? (reaction, at) => awareness.react(reaction, at) : undefined}
+			onReact={collaboration ? (reaction, at) => collaboration.react(reaction, at) : undefined}
 		/>
 		{#if !presenting}
 			{#if authoring && !isMobile}
@@ -1673,7 +1596,7 @@ onDestroy(() => {
 				onCopy={() => { copySelection(); }}
 				onCopyLink={shareUrl ? () => void copyViewLink() : undefined}
 				onPresent={present}
-				onReact={(boardClient || channel) && scriptStage ? (reaction) => reactAt(reaction, contextMenu) : undefined}
+				onReact={collaboration && scriptStage ? (reaction) => reactAt(reaction, contextMenu) : undefined}
 				onExport={exportBridge ? openExport : undefined}
 				onReplay={history ? () => { contextMenu = null; replayOpen = true; } : undefined}
 				onAnimate={authoring ? () => { contextMenu = null; animationOpen = true; } : undefined}

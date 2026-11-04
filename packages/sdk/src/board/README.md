@@ -12,7 +12,8 @@ below it; `tests/board/layers.test.ts` fails on anything else.
 ```
 testing  ──► stage, export/node, editor     (headless scripts on Node)
 client   ──► replica, model                 (space.board(id), part of the root entry)
-stage    ──► editor, player, render, model  (pixi.js, DOM)
+stage    ──► presence, editor, player, render, model  (pixi.js, DOM)
+presence ──► editor, model                  (others on the Board)
 export/node ──► export ──► render ──► model (pixi.js; export/node adds Node.js)
 editor   ──► model                          (no framework, no pixi.js)
 replica  ──► model
@@ -26,12 +27,13 @@ model    ──► @cohub/protocol                (runs anywhere)
 | `replica` | The local copy of a Board: pending writes, remote merge, retry |
 | `editor` | Everything a user does to a Board, minus pixels |
 | `player` | Playback frames and timing |
+| `presence` | Others on the Board: what this client shares, what peers show, script leader |
 | `render` | One canvas renderer per item type |
 | `stage` | The PixiJS scene, textures, input and DOM views for a live editor |
 | `export` | Images of a document, given a renderer |
 | `client` | HTTP and realtime transport; the only layer that knows about Spaces |
 
-Cohub's own UI (toolbars, menus, i18n, generation, collaboration cursors) stays
+Cohub's own UI (toolbars, menus, i18n, generation, cursor labels) stays
 in `apps/web` and talks to these layers through their public entries. Anything
 that must line up with canvas pixels (editor boxes, label geometry, overlays on
 a card) is computed here and shared with the renderers, never in a component:
