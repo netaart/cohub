@@ -119,10 +119,19 @@ async function claudeInitialize(executable: string, cwd: string, extra: string[]
   }
 }
 
-/** Gateway models are served by `ANTHROPIC_BASE_URL`, so they carry its host as provider. */
+/**
+ * A gateway at `ANTHROPIC_BASE_URL` serves every model, built-in aliases included, so all carry its host.
+ * Discovered gateway models without a visible base URL (e.g. set in Claude settings) get a generic name.
+ */
+function claudeProvider(baseUrl: string | undefined, discovered = false): string {
+  let host = "";
+  try { if (baseUrl) host = new URL(baseUrl).hostname.slice(0, 100); } catch { /* Unparsable; use the generic name. */ }
+  if (host === "api.anthropic.com") return profile.provider;
+  return host || (baseUrl || discovered ? "gateway" : profile.provider);
+}
+
 function claudeModelCatalog(entries: unknown[], baseUrl?: string): HarnessModel[] {
-  let gateway = "gateway";
-  try { if (baseUrl) gateway = new URL(baseUrl).hostname.slice(0, 100) || gateway; } catch { /* Keep the generic name. */ }
+  const provider = claudeProvider(baseUrl, entries.some((value) => text(record(value).description).startsWith("From gateway")));
   const seen = new Set<string>();
   return entries.flatMap((value) => {
     const model = record(value);
@@ -131,8 +140,7 @@ function claudeModelCatalog(entries: unknown[], baseUrl?: string): HarnessModel[
     seen.add(id);
     const effortLevels = model.supportsEffort === true ? array(model.supportedEffortLevels).filter((level): level is string => typeof level === "string") : [];
     return [streamJsonModel(profile, id, (text(model.displayName) || id).slice(0, 255), {
-      reasoning: effortLevels.length > 0, effortLevels, isDefault: id === DEFAULT_MODEL,
-      provider: text(model.description).startsWith("From gateway") ? gateway : profile.provider,
+      reasoning: effortLevels.length > 0, effortLevels, isDefault: id === DEFAULT_MODEL, provider,
     })];
   });
 }
@@ -151,11 +159,12 @@ export const claudeHarness: LocalHarnessAdapter = {
       if (options?.strict) throw error;
     }
     // Aliases follow the signed-in account; Haiku takes no effort level.
+    const provider = claudeProvider(process.env.ANTHROPIC_BASE_URL);
     return [
-      streamJsonModel(profile, DEFAULT_MODEL, "Default", { reasoning: true, isDefault: true }),
-      streamJsonModel(profile, "opus", "Claude Opus", { reasoning: true }),
-      streamJsonModel(profile, "sonnet", "Claude Sonnet", { reasoning: true }),
-      streamJsonModel(profile, "haiku", "Claude Haiku", { reasoning: false }),
+      streamJsonModel(profile, DEFAULT_MODEL, "Default", { reasoning: true, isDefault: true, provider }),
+      streamJsonModel(profile, "opus", "Claude Opus", { reasoning: true, provider }),
+      streamJsonModel(profile, "sonnet", "Claude Sonnet", { reasoning: true, provider }),
+      streamJsonModel(profile, "haiku", "Claude Haiku", { reasoning: false, provider }),
     ];
   },
   approvalModes: probeApprovalModes,

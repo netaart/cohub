@@ -143,6 +143,7 @@ test("WorkBuddy Turns run codebuddy, carry Cohub history and resume natively", (
 
 test("discovery checks the CLI, lists models with a default and skips unusable harnesses when asked", async () => {
   const previous = process.env.STREAM_JSON_FIXTURE_HELP;
+  const previousBaseUrl = process.env.ANTHROPIC_BASE_URL;
   try {
     const missing = join(tmpdir(), randomUUID());
     const skipped: string[] = [];
@@ -150,12 +151,10 @@ test("discovery checks the CLI, lists models with a default and skips unusable h
     assert.deepEqual([catalog.harnesses, catalog.models.map((model) => model.id), skipped], [["workbuddy"], ["default", "fixture-a", "fixture-b"], ["claude"]]);
     assert.deepEqual([catalog.models[0]?.isDefault, catalog.models[0]?.reasoning, catalog.models[0]?.thinkingLevelMap?.off, catalog.models[0]?.thinkingLevelMap?.max], [true, true, null, "max"]);
     await assert.rejects(discoverHarnesses(["claude", "workbuddy"], { claude: missing, workbuddy: fixture }, tmpdir()));
-    const previousBaseUrl = process.env.ANTHROPIC_BASE_URL;
     process.env.ANTHROPIC_BASE_URL = "https://gateway.example.com/v1";
-    const claude = await discoverHarnesses(["claude"], { claude: fixture }, tmpdir()).finally(() => {
-      if (previousBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL; else process.env.ANTHROPIC_BASE_URL = previousBaseUrl;
-    });
-    assert.deepEqual(claude.models.map((model) => [model.id, model.provider, model.isDefault ?? false, model.thinkingLevelMap?.high]), [["default", "anthropic", true, "high"], ["opus", "anthropic", false, "high"], ["gw-model", "gateway.example.com", false, undefined]]);
+    const claude = await discoverHarnesses(["claude"], { claude: fixture }, tmpdir());
+    delete process.env.ANTHROPIC_BASE_URL;
+    assert.deepEqual(claude.models.map((model) => [model.id, model.provider, model.isDefault ?? false, model.thinkingLevelMap?.high]), [["default", "gateway.example.com", true, "high"], ["opus", "gateway.example.com", false, "high"], ["gw-model", "gateway.example.com", false, undefined]]);
     // A level the CLI lists for a model is offered beyond the profile's fallback levels; a model without effort runs `off`.
     assert.equal(claude.models[0]?.thinkingLevelMap?.ultra, "ultra");
     assert.equal(resolveRuntimeThinkingLevel(claude.models[2], "ultra"), "off");
@@ -165,7 +164,7 @@ test("discovery checks the CLI, lists models with a default and skips unusable h
     assert.deepEqual(await refreshHarnesses(claude, { claude: fixture }, tmpdir(), (harness) => failures.push(harness)), claude);
     assert.deepEqual(failures, ["claude"]);
     const aliases = await discoverHarnesses(["claude"], { claude: fixture }, tmpdir());
-    assert.deepEqual(aliases.models.map((model) => [model.id, model.isDefault ?? false, model.thinkingLevelMap?.minimal]), [["default", true, null], ["opus", false, null], ["sonnet", false, null], ["haiku", false, undefined]]);
+    assert.deepEqual(aliases.models.map((model) => [model.id, model.provider, model.isDefault ?? false, model.thinkingLevelMap?.minimal]), [["default", "anthropic", true, null], ["opus", "anthropic", false, null], ["sonnet", "anthropic", false, null], ["haiku", "anthropic", false, undefined]]);
     assert.deepEqual([claude.approvalModes, catalog.approvalModes], [{ claude: ["inherit", "full_access", "read_only"] }, undefined]);
     process.env.STREAM_JSON_FIXTURE_HELP = "no-prompt-tool";
     assert.equal((await refreshHarnesses(claude, { claude: fixture }, tmpdir(), () => {})).approvalModes, undefined);
@@ -175,6 +174,7 @@ test("discovery checks the CLI, lists models with a default and skips unusable h
     await assert.rejects(discoverHarnesses(["workbuddy"], { workbuddy: fixture }, tmpdir()), /lists no models/);
   } finally {
     if (previous === undefined) delete process.env.STREAM_JSON_FIXTURE_HELP; else process.env.STREAM_JSON_FIXTURE_HELP = previous;
+    if (previousBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL; else process.env.ANTHROPIC_BASE_URL = previousBaseUrl;
   }
 });
 
