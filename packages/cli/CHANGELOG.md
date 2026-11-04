@@ -1,5 +1,19 @@
 # @neta-art/cohub-cli
 
+## 10.22.0
+
+### Minor Changes
+
+- 50acd34: Board Apps open in play. Every visitor gets a local copy of the Board: dragging an unlocked item moves it, dragging elsewhere pans, script regions take every press, and script commits succeed on that copy. The new `play` tool does this in any editor, and `cohub boards simulate` accepts `{"tool": "play"}` to check what visitors get. Read-only viewers now see `ctx.capabilities.has("board.commit")` as false, in the app and in `boards simulate`. Board App content carries its `versionId`, and `client.rooms.open({ appId, code, create })` joins an App's room by code on the viewer's behalf, creating it when nobody has.
+  
+  Hosts: no action.
+
+### Patch Changes
+
+- 35c1401: Claude Code: when `ANTHROPIC_BASE_URL` points at a gateway, the built-in Opus, Sonnet, and Haiku models show the gateway as their provider instead of `anthropic`, since Claude Code sends them there too. A Turn with no approval mode now follows Claude Code's own settings, as the picker's "Use local settings" shows, instead of forcing `acceptEdits`; a Claude Code without approval modes keeps `acceptEdits`.
+- Updated dependencies [50acd34]
+  - @neta-art/cohub@13.13.0
+
 ## 10.21.0
 
 ### Minor Changes
