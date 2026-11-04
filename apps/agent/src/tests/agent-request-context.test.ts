@@ -130,7 +130,7 @@ test("runtime identity refresh replaces a same-ID user endpoint before using pla
   assert.equal(after.headers.get("x-r02-origin"), null);
 });
 
-test("a prompt context window may exceed a mod value up to the platform cap and lasts one Turn", async (t) => {
+test("a prompt context window may exceed a mod value up to the platform cap and sticks to the session", async (t) => {
   const platform: ModelsConfig = { providers: { test: {
     ...config.providers.test,
     models: [{ id: "claude-sonnet-5", reasoning: true, contextWindow: 200_000 }],
@@ -141,15 +141,21 @@ test("a prompt context window may exceed a mod value up to the platform cap and 
   assert.equal(model?.contextWindow, 120_000);
   const sessionManager = SessionManager.create(root, join(root, "sessions"));
   sessionManager.newSession({ id: "session-prompt-window" });
-  const { session } = await createCohubAgentSession({ cwd: root, sessionManager, modelRegistry, tools: [echoTool], model });
+  const { session } = await createCohubAgentSession({
+    cwd: root, sessionManager, modelRegistry, tools: [echoTool], model,
+    loadSelectedContextWindow: async () => 150_000,
+  });
   t.after(() => session.dispose());
+
+  await session.configureRuntimeIdentity({ modelRegistry });
+  assert.equal(session.agent.state.model.contextWindow, 150_000, "a restored handle picks up the session's last prompt value");
 
   await session.configureRuntimeIdentity({ modelRegistry, requestedContextWindow: 1_000_000 });
   assert.equal(session.agent.state.model.contextWindow, 200_000);
   assert.equal((session.agent.state.model as CohubModel).contextWindowSource, "prompt");
 
   await session.configureRuntimeIdentity({ modelRegistry });
-  assert.equal(session.agent.state.model, model);
+  assert.equal(session.agent.state.model.contextWindow, 200_000);
 });
 
 test("a prompt context window on a custom provider is not capped by its configured value", async (t) => {

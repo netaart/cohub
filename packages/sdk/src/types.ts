@@ -1318,7 +1318,7 @@ export type CreateSpacePromptInput = {
   harness?: HarnessKind | null;
   /** Optional thinking level override for this turn. Omit to inherit session default. */
   thinkingLevel?: ModelThinkingLevel | null;
-  /** Optional context window for this turn, capped at the platform value. */
+  /** Optional context window for this session from this turn on, capped at the platform value. */
   contextWindow?: number | null;
   /** Local Harness approval mode; requires Runtime support. Omit to keep the Harness's own settings. */
   approvalMode?: ApprovalMode | null;

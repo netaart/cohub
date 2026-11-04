@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { createRequestedThinkingLevelReader } from "../runtime/context-reader.js";
+import { createRequestedContextWindowReader, createRequestedThinkingLevelReader } from "../runtime/context-reader.js";
 import type { CohubModel } from "../runtime/model-registry.js";
 import { resolveInitialThinkingLevel } from "../runtime/thinking-level.js";
 
@@ -86,4 +86,11 @@ test("the selection reader walks fork segments from newest to oldest", async () 
 test("the selection reader returns null when nothing was selected", async () => {
   const { database } = scriptedDatabase([[], []]);
   assert.equal(await createRequestedThinkingLevelReader(database)({ sessionId: "s1" }), null);
+});
+
+test("the context window reader reads the same selection history as a positive integer", async () => {
+  const { database, queries } = scriptedDatabase([[], [{ level: "300000" }]]);
+  assert.equal(await createRequestedContextWindowReader(database)({ sessionId: "s1", beforeSequence: 7 }), 300_000);
+  assert.match(queries[1] ?? "", /->>'requestedContextWindow' is not null/);
+  assert.equal(await createRequestedContextWindowReader(scriptedDatabase([[], []]).database)({ sessionId: "s1" }), null);
 });

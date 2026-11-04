@@ -171,15 +171,15 @@ export function createRuntimeContextReader(database: ContextReaderDatabase) {
 }
 
 /**
- * The thinking level the user last selected explicitly (composer model picker),
- * i.e. the newest settled `meta.requestedThinkingLevel` before `beforeSequence`,
- * following fork segments from newest to oldest.
+ * The newest settled explicit selection stored as `meta.<key>` before
+ * `beforeSequence`, following fork segments from newest to oldest. Thinking level
+ * comes from the composer model picker; context window from the prompt API.
  */
-export function createRequestedThinkingLevelReader(database: ContextDatabase) {
+function createRequestedTurnMetaReader(database: ContextDatabase, key: "requestedThinkingLevel" | "requestedContextWindow") {
   return async function load(input: { sessionId: string; beforeSequence?: number }): Promise<string | null> {
     const segments = await database.select().from(sessionTurnSegments).where(eq(sessionTurnSegments.sessionId, input.sessionId)).orderBy(desc(sessionTurnSegments.ordinal));
     const ranges = segments.length ? segments : [{ sourceSessionId: input.sessionId, fromSequence: 1, toSequence: null }];
-    const requested = sql<string | null>`${sessionTurns.meta}->>'requestedThinkingLevel'`;
+    const requested = sql<string | null>`${sessionTurns.meta}->>${sql.raw(`'${key}'`)}`;
     for (const range of ranges) {
       const [row] = await database.select({ level: requested }).from(sessionTurns)
         .where(and(
@@ -192,5 +192,17 @@ export function createRequestedThinkingLevelReader(database: ContextDatabase) {
       if (row?.level) return row.level;
     }
     return null;
+  };
+}
+
+export function createRequestedThinkingLevelReader(database: ContextDatabase) {
+  return createRequestedTurnMetaReader(database, "requestedThinkingLevel");
+}
+
+export function createRequestedContextWindowReader(database: ContextDatabase) {
+  const load = createRequestedTurnMetaReader(database, "requestedContextWindow");
+  return async (input: { sessionId: string; beforeSequence?: number }): Promise<number | null> => {
+    const value = Number(await load(input));
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
   };
 }

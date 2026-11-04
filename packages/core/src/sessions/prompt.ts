@@ -151,7 +151,7 @@ export type SubmitSessionPromptInput = {
   harness?: PromptHarness | null;
   /** Optional thinking level override for this turn. Omit to inherit session default. */
   thinkingLevel?: string | null;
-  /** Optional context window for this Turn, capped at the platform value. */
+  /** Optional context window for this session from this Turn on, capped at the platform value. */
   contextWindow?: number | null;
   /** Local Harness approval mode for this Turn; omit to keep the Harness's own settings. */
   approvalMode?: ApprovalMode | null;

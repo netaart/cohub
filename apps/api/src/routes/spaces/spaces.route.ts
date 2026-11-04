@@ -411,7 +411,7 @@ type SpacePromptInput = {
   provider?: string | null;
   harness?: HarnessKind | null;
   thinkingLevel?: string | null;
-  /** Optional context window for this prompt, capped at the platform value. */
+  /** Optional context window for this session from this prompt on, capped at the platform value. */
   contextWindow?: number | null;
   approvalMode?: ApprovalMode | null;
   serviceTier?: string | null;
