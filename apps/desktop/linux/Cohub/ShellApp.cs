@@ -69,7 +69,8 @@ internal sealed class ShellApp : IDisposable
         try { DesktopEntry.Write(Config, State.Shortcuts); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { Log($"Could not write the desktop entry: {error.Message}"); }
         StartService();
-        updates = new Updates(Config.FeedUrl, () => Post(() => { updateSection.RemoveAll(); updateSection.Append(Strings.L("Restart to Update"), "app.restart-to-update"); }), Log);
+        updates = new Updates(Config.FeedUrl, () => Post(() => { updateSection.RemoveAll(); updateSection.Append(Strings.L("Restart to Update"), "app.restart-to-update"); }), Log,
+            new Updates.Gate(Path.Combine(Config.DataDirectory, "update.lock"), AppImage.Superseded, () => AppImage.Relaunch([])));
         _ = updates.RunAsync(stopping.Token);
     }
 

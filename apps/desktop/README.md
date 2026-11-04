@@ -115,7 +115,12 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
   Fedora 40, Arch and later); the AppImage bundles .NET, Node, the CLI and sandboxd but not the
   toolkit, and says what to install when it is missing.
 - **Single instance.** The app is a `GtkApplication` (`live.cohub.desktop`, `live.cohub.desktop.dev`):
-  a second launch hands its `cohub://` link to the running one over D-Bus and exits.
+  a second launch hands its `cohub://` link to the running one over D-Bus and exits. Before Velopack
+  or GTK start, each launch locks `instance.lock` in its data directory, so dev and prod run side by side
+  but a second launch never applies an update or opens WebKit data under the running one.
+- **Updates.** An update is applied once: under `update.lock`, and only if the AppImage on disk is still
+  the one running. A process whose AppImage was replaced, or is being replaced, starts the installed one
+  instead of applying again; a skipped apply happens on the next launch.
 - **Launcher.** On start the app writes `live.cohub.desktop.desktop` to `~/.local/share/applications`,
   pointing at the AppImage, registers it for the URL scheme and lists recent Spaces as actions.
 - **Bridge.** The page's `cohubHost` relays to an isolated script world, the only one that can
