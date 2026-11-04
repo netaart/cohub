@@ -50,6 +50,7 @@ import {
 import {
 	AppWindow,
 	ExternalLink,
+	Gamepad2,
 	Play,
 	RotateCcw,
 	Settings2,
@@ -138,6 +139,7 @@ import BoardMediaPlayer from "$lib/components/board/BoardMediaPlayer.svelte";
 import BoardMobileChrome from "$lib/components/board/BoardMobileChrome.svelte";
 import BoardModelViewer from "$lib/components/board/BoardModelViewer.svelte";
 import BoardPlaybackBar from "$lib/components/board/BoardPlaybackBar.svelte";
+import BoardPlayKeys from "$lib/components/board/BoardPlayKeys.svelte";
 import BoardScriptPanel from "$lib/components/board/BoardScriptPanel.svelte";
 import BoardSelectionToolbar from "$lib/components/board/BoardSelectionToolbar.svelte";
 import BoardSessionReply from "$lib/components/board/BoardSessionReply.svelte";
@@ -164,6 +166,9 @@ const {
 	shell,
 	onNavigationOpen,
 	mode = "edit",
+	onReset,
+	onTogglePlay,
+	presence,
 	launch = null,
 	shareUrl,
 	active = true,
@@ -240,9 +245,12 @@ function dropOnTimeline(data: DataTransfer, at: number) {
 		stageView?.addResources(readBoardResourceDrop(data), landing) ?? [];
 	dock?.place(ids, at);
 }
-// Mode and scope are fixed for a Board's lifetime: writes need `edit`, Space services need a Space.
-const editable = untrack(() => mode === "edit");
+// Mode and scope are fixed for a Board's lifetime; only `edit` reaches the Space.
+const editable = untrack(() => mode !== "view");
+const playing = untrack(() => mode === "play");
 const spaceId = untrack(() => (scope.kind === "space" ? scope.spaceId : null));
+const liveSpaceId = playing ? null : spaceId;
+const channel = $derived(presence ?? null);
 const resolvedAssetSource = untrack(() =>
 	scope.kind === "app"
 		? scope.assetSource
@@ -359,7 +367,7 @@ function restartScript(id: string) {
 }
 
 const scriptSettingsAction = $derived.by<BoardMenuAction | null>(() => {
-	if (!editable || !scriptItemId) return null;
+	if (!authoring || !scriptItemId) return null;
 	const failed = scriptStatus?.state === "error";
 	return {
 		id: "script-settings",
@@ -460,7 +468,7 @@ async function pasteImages(files: File[]) {
 	notice = { text: uploading, error: false };
 	const results = await Promise.allSettled(
 		files.map((file) =>
-			uploadBoardImage(file, { spaceId: spaceId ?? undefined }),
+			uploadBoardImage(file, { spaceId: liveSpaceId ?? undefined }),
 		),
 	);
 	imageUploads -= 1;
@@ -484,7 +492,7 @@ async function pasteImages(files: File[]) {
 function handlePaste(event: ClipboardEvent) {
 	if (
 		!receivesKeys() ||
-		!editable ||
+		!authoring ||
 		presenting ||
 		generationOpen ||
 		replayOpen ||
@@ -551,7 +559,7 @@ function handleCopy(event: ClipboardEvent) {
 
 const checkedTasks = new Set<string>();
 $effect(() => {
-	if (!editable || !spaceId) return;
+	if (!editable || !liveSpaceId) return;
 	const unsettled = new Map<string, string[]>();
 	for (const item of editor.items) {
 		if (item.type !== "task" || checkedTasks.has(item.id)) continue;
@@ -730,7 +738,7 @@ function closeInPlace() {
 }
 
 const videoExport =
-	spaceId && editable ? createBoardVideoExport(spaceId) : null;
+	liveSpaceId && editable ? createBoardVideoExport(liveSpaceId) : null;
 let canExportVideo = $state(false);
 
 function openExport() {
@@ -829,8 +837,8 @@ async function regenerateTask(itemId: string) {
 	}
 }
 
-const boardClient = spaceId
-	? sdk.space(spaceId).board(untrack(() => boardId))
+const boardClient = liveSpaceId
+	? sdk.space(liveSpaceId).board(untrack(() => boardId))
 	: null;
 const history = boardClient && {
 	fetchHistory: boardClient.history.bind(boardClient),
@@ -845,32 +853,60 @@ const history = boardClient && {
 		return { version: result.version, document: parsed.document };
 	},
 };
-const presence = editable ? boardClient : null;
-const generates = editable && spaceId !== null;
+const awarenessClient = editable ? boardClient : null;
+const sharesAwareness = $derived(Boolean(awarenessClient ?? channel));
+const generates = editable && liveSpaceId !== null;
 const awareness: BoardAwarenessController = createBoardAwarenessController({
 	send: (seq, update) => {
-		const client = update.type === "reaction" ? boardClient : presence;
+		if (channel) return channel.send(seq, update);
+		const client = update.type === "reaction" ? boardClient : awarenessClient;
 		return client ? client.updateAwareness(seq, update) : Promise.resolve();
 	},
 	onChange: () => {
 		awarenessVersion += 1;
 	},
+	cursorIntervalMs: playing ? 100 : undefined,
 });
 
 const editor = createBoardEditor({
 	document: untrack(() => initialDocument),
-	initialTool: editable ? untrack(() => defaultBoardTool(isMobile)) : "hand",
+	initialTool: playing
+		? "play"
+		: editable
+			? untrack(() => defaultBoardTool(isMobile))
+			: "hand",
 	key: untrack(() => path),
 	readonly: !editable,
-	onCommit: (patch) => onCommit?.(patch),
+	onCommit: (patch) => onCommit?.(patch, editor.document),
 	onViewStateChange: (state) => {
 		onViewStateChange?.({ path, ...state });
 	},
 });
 
+const authoring = $derived(
+	mode === "edit" || (playing && editor.tool !== "play"),
+);
+const hasPlayKeys = $derived(
+	playing || (mode === "edit" && Boolean(onTogglePlay) && editor.hasScripts),
+);
+
+let wasAuthoring = untrack(() => authoring);
+$effect(() => {
+	const now = authoring;
+	if (wasAuthoring && !now)
+		untrack(() => {
+			if (animationOpen) closeAnimation();
+			appearanceOpen = false;
+			generationOpen = false;
+			linkRequest = null;
+			scriptPanelOpen = false;
+		});
+	wasAuthoring = now;
+});
+
 const sessionActions = createBoardSessionActions({
 	editor,
-	spaceId,
+	spaceId: liveSpaceId,
 	isMobile: () => isMobile,
 	fetchHistory: history ? history.fetchHistory : undefined,
 	onOpen: () => onOpenSession,
@@ -1067,20 +1103,33 @@ async function copyViewLink() {
 	} catch {}
 }
 
+let shownDocument = untrack(() => initialDocument);
 $effect(() => {
 	const doc = initialDocument;
 	const k = path;
-	untrack(() => editor.loadDocument(doc, k));
+	untrack(() => {
+		if (playing && doc !== shownDocument) {
+			editor.loadDocument(doc);
+			scriptStage?.resetScripts();
+		} else editor.loadDocument(doc, k);
+		shownDocument = doc;
+	});
 });
 
 $effect(() => {
-	if (!presence) return;
+	const current = channel;
+	if (!current) return;
+	return current.subscribe((payload) => awareness.receive(payload));
+});
+
+$effect(() => {
+	if (!sharesAwareness) return;
 	const viewport = boardAwarenessViewportFromCamera(editor.camera, surfaceSize);
 	untrack(() => awareness.setViewport(viewport));
 });
 
 $effect(() => {
-	if (!presence) return;
+	if (!sharesAwareness) return;
 	const tool = editor.tool;
 	const selection = editor.selection;
 	const bounds = editor.bounds;
@@ -1099,7 +1148,7 @@ $effect(() => {
 });
 
 $effect(() => {
-	if (!presence) return;
+	if (!awarenessClient) return;
 	editor.interaction;
 	editor.geometryVersion;
 	untrack(() => awareness.syncGesture(editor));
@@ -1199,7 +1248,7 @@ function handleKeydown(event: KeyboardEvent) {
 	}
 	if (isEditableTarget(event.target)) return;
 	if (
-		editable &&
+		authoring &&
 		!presenting &&
 		event.shiftKey &&
 		event.code === "KeyA" &&
@@ -1273,7 +1322,7 @@ function blockPageZoom(node: HTMLElement) {
 onMount(() => {
 	if (boardClient) {
 		unsubscribeAwareness = boardClient.subscribe({
-			awareness: (event) => awareness.receive(event),
+			awareness: (event) => awareness.receive(event.payload),
 			changed: (event) => {
 				liveVersion = Math.max(liveVersion, event.payload.version);
 			},
@@ -1335,6 +1384,10 @@ onDestroy(() => {
 });
 </script>
 
+{#snippet playKeys()}
+	<BoardPlayKeys {editor} {playing} {isMobile} {onReset} {onTogglePlay} />
+{/snippet}
+
 <div
 	bind:this={panel}
 	class="board-panel flex h-full min-w-0 flex-col bg-bg-primary"
@@ -1353,7 +1406,7 @@ onDestroy(() => {
 
 	<div
 		class="board-surface relative min-h-0 flex-1 bg-bg-primary"
-		class:board-surface--animating={animationOpen && editable && !presenting}
+		class:board-surface--animating={animationOpen && authoring && !presenting}
 		class:board-surface--recording={editor.recording}
 		role="application"
 		use:blockPageZoom
@@ -1373,6 +1426,13 @@ onDestroy(() => {
 				{#if job.status !== "running"}
 					<button type="button" class="board-job-close" aria-label={m.common_close({}, { locale })} onclick={() => videoExport.dismiss()}><X class="h-3 w-3" /></button>
 				{/if}
+			</div>
+		{/if}
+		{#if playing && onTogglePlay && !presenting}
+			<div class="board-job" role="status">
+				<Gamepad2 class="h-3.5 w-3.5" />
+				<span class="min-w-0 truncate">{m.board_play_banner({}, { locale })}</span>
+				<button type="button" class="board-job-action" onclick={onTogglePlay}>{m.board_play_exit({}, { locale })}</button>
 			</div>
 		{/if}
 		{#if soundBlocked && !presenting}
@@ -1409,7 +1469,7 @@ onDestroy(() => {
 			onOpenFile={openMediaSource}
 			onAddLinks={addLinks}
 			onOpenInPlace={openInPlace}
-			onPointerPresence={(cursor) => { if (presence) awareness.setCursor(cursor); }}
+			onPointerPresence={(cursor) => { if (sharesAwareness) awareness.setCursor(cursor); }}
 			views={itemViews}
 			autoplay={!saveData}
 			onRunningChange={(ids) => { running = ids; }}
@@ -1422,11 +1482,11 @@ onDestroy(() => {
 			scriptLeader={() => !boardClient || (active && pageVisible && isBoardScriptLeader(boardClient.connectionId, awareness.peers))}
 		/>
 
-		{#if boardClient && !presenting}
+		{#if (boardClient || channel) && !presenting}
 			<BoardCollaboratorOverlay
 				peers={peers}
 				activities={boardActivities}
-				profiles={collaborators}
+				profiles={channel ? channel.profiles : collaborators}
 				camera={editor.camera}
 				surface={surfaceSize}
 				cursorVisibleMs={awareness.cursorVisibleMs}
@@ -1435,7 +1495,7 @@ onDestroy(() => {
 			/>
 		{/if}
 
-		{#if !editor.hasContent && editable}
+		{#if !editor.hasContent && authoring}
 			<BoardEmptyState
 				onAddText={() => editor.beginTextDraft(editor.viewCenter())}
 				onAddShape={() => editor.addShape(editor.viewCenter())}
@@ -1467,10 +1527,10 @@ onDestroy(() => {
 			{editor}
 			{isMobile}
 			onPresent={() => present()}
-			onReact={boardClient ? (reaction, at) => awareness.react(reaction, at) : undefined}
+			onReact={boardClient || channel ? (reaction, at) => awareness.react(reaction, at) : undefined}
 		/>
 		{#if !presenting}
-			{#if editable && !isMobile}
+			{#if authoring && !isMobile}
 				<BoardSelectionToolbar
 					{editor}
 					itemActions={toolbarActions}
@@ -1506,17 +1566,18 @@ onDestroy(() => {
 				<BoardMobileChrome
 					onAddLink={() => openLink()}
 					{editor}
-					readonly={!editable}
+					readonly={!authoring}
 					{appearanceOpen}
 					{generationOpen}
 					timelineOpen={animationOpen}
 					onToggleAppearance={toggleAppearance}
 					onToggleGeneration={generates ? toggleGeneration : undefined}
-					onToggleTimeline={editable || hasAnimations ? toggleAnimation : undefined}
+					onToggleTimeline={authoring || hasAnimations ? toggleAnimation : undefined}
 					onExport={exportBridge ? openExport : undefined}
 					onReplay={history ? () => { replayOpen = true; } : undefined}
 					onPresent={hasFrames ? () => present() : undefined}
 					contextMenuOpen={contextMenu !== null}
+					lead={hasPlayKeys ? playKeys : undefined}
 				/>
 			{/if}
 			{#if scriptPanelOpen && scriptItemId && scriptStatus}
@@ -1530,7 +1591,7 @@ onDestroy(() => {
 					onClose={() => { scriptPanelOpen = false; }}
 				/>
 			{/if}
-			{#if editable && linkRequest}
+			{#if authoring && linkRequest}
 				{#key linkRequest}
 					<BoardLinkPopover initialUrl={linkRequest.url} onAdd={addLink} onClose={() => { linkRequest = null; }} />
 				{/key}
@@ -1545,7 +1606,7 @@ onDestroy(() => {
 					onClose={() => { generationOpen = false; }}
 				/>
 			{/if}
-			{#if editable && appearanceOpen}
+			{#if authoring && appearanceOpen}
 				<div class="board-appearance-anchor">
 					<BoardAppearancePopover
 						{editor}
@@ -1559,11 +1620,12 @@ onDestroy(() => {
 			{#if !isMobile}
 				<BoardZoomMenu
 					{editor} timelineOpen={animationOpen}
-					onToggleTimeline={!editable && hasAnimations ? toggleAnimation : undefined}
+					onToggleTimeline={!authoring && hasAnimations ? toggleAnimation : undefined}
 					onPresent={hasFrames ? () => present() : undefined}
+					lead={hasPlayKeys ? playKeys : undefined}
 				/>
 			{/if}
-			{#if animationOpen && !editable && hasAnimations}
+			{#if animationOpen && !authoring && hasAnimations}
 				<BoardPlaybackBar
 					{editor}
 					playback={activePlayback}
@@ -1596,11 +1658,11 @@ onDestroy(() => {
 		{#if contextMenu}
 			<BoardContextMenu
 				{editor}
-				{editable}
+				editable={authoring}
 				itemActions={menuActions}
 				onOpenFile={openMediaSource}
-				onAddLink={editable ? () => openLink() : undefined}
-				onAddTaskResults={editable ? addTaskResults : undefined}
+				onAddLink={authoring ? () => openLink() : undefined}
+				onAddTaskResults={authoring ? addTaskResults : undefined}
 				onShowSource={showSource}
 				{onOpenTask}
 				onRegenerateTask={generates ? regenerateTask : undefined}
@@ -1611,16 +1673,16 @@ onDestroy(() => {
 				onCopy={() => { copySelection(); }}
 				onCopyLink={shareUrl ? () => void copyViewLink() : undefined}
 				onPresent={present}
-				onReact={boardClient && scriptStage ? (reaction) => reactAt(reaction, contextMenu) : undefined}
+				onReact={(boardClient || channel) && scriptStage ? (reaction) => reactAt(reaction, contextMenu) : undefined}
 				onExport={exportBridge ? openExport : undefined}
 				onReplay={history ? () => { contextMenu = null; replayOpen = true; } : undefined}
-				onAnimate={editable ? () => { contextMenu = null; animationOpen = true; } : undefined}
+				onAnimate={authoring ? () => { contextMenu = null; animationOpen = true; } : undefined}
 				onClose={() => { contextMenu = null; }}
 			/>
 		{/if}
 	</div>
 
-	{#if animationOpen && editable && !presenting}
+	{#if animationOpen && authoring && !presenting}
 		<BoardAnimationDock
 			bind:this={dock}
 			onDropResources={dropOnTimeline}

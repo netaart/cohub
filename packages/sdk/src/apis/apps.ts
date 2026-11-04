@@ -153,6 +153,8 @@ export type AppContent =
       path: string;
       boardId: string;
       boardVersion: number;
+      /** The App version this content belongs to. */
+      versionId: string;
     };
 
 export type AppPublicSpaceRecord = {

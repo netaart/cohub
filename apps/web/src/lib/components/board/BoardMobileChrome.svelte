@@ -35,6 +35,7 @@ import {
 	Triangle,
 	Type,
 } from "lucide-svelte";
+import type { Snippet } from "svelte";
 import { boardSelectionColor } from "$lib/board/board-selection-color";
 import type { BoardEditor, BoardToolId } from "$lib/board/editor.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -54,6 +55,7 @@ const {
 	onPresent,
 	onAddLink,
 	contextMenuOpen = false,
+	lead,
 }: {
 	editor: BoardEditor;
 	readonly?: boolean;
@@ -68,6 +70,7 @@ const {
 	onPresent?: () => void;
 	onAddLink?: () => void;
 	contextMenuOpen?: boolean;
+	lead?: Snippet;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -235,26 +238,29 @@ function focusContent() {
 {/if}
 
 <div class="board-mobile-bar toolbar-surface" role="toolbar" aria-label={m.board_tools({}, { locale })}>
-	<button
-		type="button"
-		class="tool-key"
-		title={m.board_hand({}, { locale })}
-		aria-label={m.board_hand({}, { locale })}
-		aria-pressed={activeTool === "hand"}
-		onclick={() => setTool("hand")}
-	>
-		<Hand class="h-4 w-4" />
-	</button>
-	<button
-		type="button"
-		class="tool-key"
-		title={m.board_select({}, { locale })}
-		aria-label={m.board_select({}, { locale })}
-		aria-pressed={activeTool === "select"}
-		onclick={() => setTool("select")}
-	>
-		<MousePointer2 class="h-4 w-4" />
-	</button>
+	{@render lead?.()}
+	{#if !readonly || !lead}
+		<button
+			type="button"
+			class="tool-key"
+			title={m.board_hand({}, { locale })}
+			aria-label={m.board_hand({}, { locale })}
+			aria-pressed={activeTool === "hand"}
+			onclick={() => setTool("hand")}
+		>
+			<Hand class="h-4 w-4" />
+		</button>
+		<button
+			type="button"
+			class="tool-key"
+			title={m.board_select({}, { locale })}
+			aria-label={m.board_select({}, { locale })}
+			aria-pressed={activeTool === "select"}
+			onclick={() => setTool("select")}
+		>
+			<MousePointer2 class="h-4 w-4" />
+		</button>
+	{/if}
 
 	{#if !readonly}
 		<button

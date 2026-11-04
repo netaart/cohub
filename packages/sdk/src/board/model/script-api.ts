@@ -54,7 +54,7 @@ export const BOARD_SCRIPT_API = {
     scene: "scene(items, options?): replace this instance's world or screen layer of temporary Board items; never saved. IDs are unique across both layers.",
     hitRegions: "hitRegions(regions): replace the input declarations.",
     emit: "emit(id, type, data?): send a custom event to another scripted item in scope, or to any Board script by its key. Exports deliver it within the same moment, in document order. A handler may answer with emits; past 16 in a row the emit rejects, so emit from onFrame() to send on the next step.",
-    commit: "commit(patch): save a Board patch; resolves true once written here. Within 5 s of this viewer's input, outside onFrame steps, it saves undoably; otherwise one live editor saves it and others resolve false. It may edit items in scope, add children to a scoped frame, and attach modules already running in scope.",
+    commit: "commit(patch): save a Board patch; resolves true once written here. Within 5 s of this viewer's input, outside onFrame steps, it saves undoably; otherwise one live editor saves it and others resolve false. It may edit items in scope, add children to a scoped frame, and attach modules already running in scope. Read-only viewers cannot commit: capabilities.has(\"board.commit\") is false there.",
     layoutText: "layoutText({ text, fontSize?, fontWeight?, font?, lineHeight?, width? }): the size a native text item would take.",
     uniforms: "uniforms(values): set the shader's declared uniforms from numbers or number arrays; kept until changed.",
     passes: "passes({ name: on }): switch named shader passes on or off; kept until changed. Turn heavy passes, such as a full-view filter, on only while they show.",

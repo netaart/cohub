@@ -38,7 +38,11 @@ const document = boardGalleryDocument({
 	shaders: page.url.searchParams.has("shaders"),
 	tracks: Number(page.url.searchParams.get("tracks") ?? 0) || undefined,
 });
-const readonly = page.url.searchParams.has("view");
+const mode = page.url.searchParams.has("play")
+	? "play"
+	: page.url.searchParams.has("view")
+		? "view"
+		: "edit";
 if (bench) {
 	for (const key of Object.keys(localStorage))
 		if (key.startsWith("cohub:board:view")) localStorage.removeItem(key);
@@ -108,7 +112,7 @@ const runtime = cohubPixiRuntime.load();
 			{document}
 			playback={null}
 			scope={{ kind: "app", appId: "dev-gallery", assetSource }}
-			mode={readonly ? "view" : "edit"}
+			{mode}
 			launch={parseBoardLaunch(page.url.hash)}
 			{isMobile}
 			{lod}

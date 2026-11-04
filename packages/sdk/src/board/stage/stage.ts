@@ -701,7 +701,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			const resolved = resolveSceneArrow(single as SceneItem<BoardArrowItem>, renderScene);
 			arrowEndpoints = [resolved.start.point, resolved.mid, resolved.end.point];
 		}
-		const hoverId = interaction.type === "idle" ? editor.hoverId : null;
+		const hoverId = interaction.type === "idle" && editor.tool !== "play" ? editor.hoverId : null;
 		const hovered = hoverId && !editor.selection.includes(hoverId) ? (renderScene.get(hoverId) ?? null) : null;
 		drawBoardOverlay(overlay, {
 			zoom: camera.zoom,
@@ -801,6 +801,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			return resizeCursorForHandle(control.handle, editor.selectionTransform?.frame.rotation ?? 0);
 		if (control?.kind === "rotate") return ROTATE_CURSOR;
 		const hovered = editor.hoverId ? editor.itemById(editor.hoverId) : null;
+		if (editor.tool === "play") return hovered ? "grab" : "default";
 		if (hovered && (editor.tool === "select" || editor.tool === "hand") && opensOnTap(hovered)) return "pointer";
 		if (editor.tool === "hand") return "grab";
 		if (isCreationBoardTool(editor.tool)) return "crosshair";
@@ -1188,7 +1189,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	}
 
 	function holdable(event: PointerEvent): boolean {
-		if (!isTouchLikePointer(event.pointerType) || (editor.readonly && !options.onContextMenu)) return false;
+		if (!isTouchLikePointer(event.pointerType) || editor.tool === "play" || (editor.readonly && !options.onContextMenu)) return false;
 		const interaction = editor.interaction;
 		return (
 			interaction.type === "pressing" ||
@@ -1215,6 +1216,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		const world = toWorldPoint(clientX, clientY);
 		const item = editor.pickAt(world, pointerType) ?? editor.itemAt(world);
 		if (options.onContextMenu({ item, world, clientX, clientY, pointerType }) === false) return false;
+		if (editor.tool === "play") return true;
 		if (!item) editor.clearSelection();
 		else if (!editor.selection.includes(item.id)) editor.setSelection([item.id]);
 		return true;
@@ -1313,7 +1315,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (editor.frameView?.present) return;
 		const item = editor.pickAt(point, pointerType);
 		if (options.onDoubleClick?.(item, point) === true) return;
-		if (editor.readonly) return editor.toggleFrameAt(point);
+		if (editor.readonly || editor.tool === "play") return editor.toggleFrameAt(point);
 		if (item && editor.registry.capabilities(item).canEdit) {
 			editor.editingId = item.id;
 			return;

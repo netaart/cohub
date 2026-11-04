@@ -1,6 +1,8 @@
 export type BoardToolId =
 	| "select"
 	| "hand"
+	/** Drags what is unlocked, pans elsewhere, and gives script regions every press. */
+	| "play"
 	| "text"
 	| "shape"
 	| "draw"

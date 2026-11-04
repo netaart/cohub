@@ -144,18 +144,23 @@ function isTypingTarget(target: EventTarget | null): boolean {
 	return element.isContentEditable || element.closest("input, textarea, select, [contenteditable='true']") !== null;
 }
 
+const SELECTION_EDITS: ReadonlySet<BoardKeyCommand["type"]> = new Set(["duplicate", "selectAll", "delete", "lock"]);
+
 export function runBoardKeyCommand(editor: BoardEditor, command: BoardKeyCommand): boolean {
+	if (editor.tool === "play" && SELECTION_EDITS.has(command.type)) return false;
 	switch (command.type) {
 		case "tool":
-			if (editor.readonly && command.tool !== "select" && command.tool !== "hand") return false;
+			if (editor.tool === "play" || (editor.readonly && command.tool !== "select" && command.tool !== "hand")) return false;
 			editor.tool = command.tool;
 			return true;
-		case "nudge":
-			if (editor.frameView && (editor.readonly || editor.selection.length === 0))
+		case "nudge": {
+			const browsing = editor.readonly || editor.tool === "play" || editor.selection.length === 0;
+			if (editor.frameView && browsing)
 				return editor.stepFrame(command.dx ? (command.dx > 0 ? "right" : "left") : command.dy > 0 ? "down" : "up");
-			if (editor.readonly || editor.selection.length === 0) return false;
+			if (browsing) return false;
 			editor.nudgeSelection(command.dx, command.dy, command.large);
 			return true;
+		}
 		case "frame":
 			if (!command.enter && !editor.frameView) return false;
 			return editor.stepFrame(command.step);
@@ -187,7 +192,7 @@ export function runBoardKeyCommand(editor: BoardEditor, command: BoardKeyCommand
 			else if (editor.editingId) editor.editingId = null;
 			else if (editor.selection.length > 0) editor.clearSelection();
 			else if (editor.frameView) editor.exitFrameView();
-			else if (editor.tool !== "select" && editor.tool !== "hand") editor.tool = "select";
+			else if (editor.tool !== "select" && editor.tool !== "hand" && editor.tool !== "play") editor.tool = "select";
 			else return false;
 			return true;
 		case "zoomIn":

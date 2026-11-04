@@ -23,6 +23,7 @@ import type {
 	BoardEditor,
 	BoardInteraction,
 } from "@neta-art/cohub/board/editor";
+import type { BoardCollaboratorProfile } from "$lib/board/board-activity";
 
 const SEND_INTERVAL_MS = 40;
 const VIEWPORT_SEND_INTERVAL_MS = 100;
@@ -96,6 +97,17 @@ type CursorInput = BoardAwarenessCursor;
 
 type ViewportInput = BoardAwarenessViewport;
 
+export type BoardAwarenessPayload = Pick<
+	BoardAwarenessUpdatedEvent["payload"],
+	"connectionId" | "actorId" | "actorName" | "seq" | "update"
+>;
+
+export type BoardPresenceChannel = {
+	readonly profiles: ReadonlyMap<string, BoardCollaboratorProfile>;
+	send(seq: number, update: BoardAwarenessUpdate): Promise<void>;
+	subscribe(receive: (payload: BoardAwarenessPayload) => void): () => void;
+};
+
 export type BoardReactionEvent = {
 	reaction: BoardReaction;
 	at: BoardAwarenessPoint;
@@ -106,6 +118,7 @@ type ControllerOptions = {
 	send: (seq: number, update: BoardAwarenessUpdate) => Promise<void>;
 	onChange: () => void;
 	now?: () => number;
+	cursorIntervalMs?: number;
 };
 
 function frameFromBounds(
@@ -362,10 +375,13 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 		if (destroyed || timestamp - lastReactionAt < REACTION_INTERVAL_MS) return;
 		lastReactionAt = timestamp;
 		emit({ type: "reaction", reaction, at });
-		for (const listener of reactionListeners) listener({ reaction, at, actorId: null });
+		for (const listener of reactionListeners)
+			listener({ reaction, at, actorId: null });
 	}
 
-	function onReaction(listener: (event: BoardReactionEvent) => void): () => void {
+	function onReaction(
+		listener: (event: BoardReactionEvent) => void,
+	): () => void {
 		reactionListeners.add(listener);
 		return () => reactionListeners.delete(listener);
 	}
@@ -406,7 +422,7 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 
 	function scheduleState(
 		immediate = false,
-		minimumInterval = SEND_INTERVAL_MS,
+		minimumInterval = options.cursorIntervalMs ?? SEND_INTERVAL_MS,
 	) {
 		if (stateTimer) return;
 		const delay = immediate
@@ -502,8 +518,7 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 		scheduleGesture(sentDrawPoints === 0);
 	}
 
-	function receive(event: BoardAwarenessUpdatedEvent) {
-		const payload = event.payload;
+	function receive(payload: BoardAwarenessPayload) {
 		const existing = peers.get(payload.connectionId);
 		if (existing && payload.seq <= existing.seq) return;
 		const timestamp = now();
@@ -534,7 +549,12 @@ export function createBoardAwarenessController(options: ControllerOptions) {
 		const update = payload.update;
 		if (update.type === "reaction") {
 			peers.set(peer.connectionId, peer);
-			for (const listener of reactionListeners) listener({ reaction: update.reaction, at: update.at, actorId: payload.actorId });
+			for (const listener of reactionListeners)
+				listener({
+					reaction: update.reaction,
+					at: update.at,
+					actorId: payload.actorId,
+				});
 			if (changed) options.onChange();
 			return;
 		}

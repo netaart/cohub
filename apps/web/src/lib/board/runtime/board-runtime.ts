@@ -13,6 +13,7 @@ import type {
 	BoardCollaboratorProfile,
 } from "$lib/board/board-activity";
 import type { BoardAssetSource } from "$lib/board/board-asset-source";
+import type { BoardPresenceChannel } from "$lib/board/board-awareness";
 import { isBoardFile } from "$lib/board/board-file";
 import { createLazyModuleLoader, pending } from "$lib/lazy-module";
 
@@ -22,13 +23,16 @@ export type BoardRuntimeViewState = {
 	selectedNodes: Array<{ id: string; type: string; title?: string }>;
 };
 
-export type BoardRuntimeMode = "edit" | "view";
+export type BoardRuntimeMode = "edit" | "play" | "view";
 
 export type BoardScope =
 	| { kind: "space"; spaceId: string }
 	| { kind: "app"; appId: string; assetSource: BoardAssetSource };
 
-export type BoardCommitHandler = (patch: BoardPatch) => void | Promise<void>;
+export type BoardCommitHandler = (
+	patch: BoardPatch,
+	document: BoardDocument,
+) => void | Promise<void>;
 
 export type BoardRuntimeProps = {
 	path: string;
@@ -45,6 +49,9 @@ export type BoardRuntimeProps = {
 			| { ok: false; code: string; message: string };
 	}>;
 	mode?: BoardRuntimeMode;
+	onReset?: () => void;
+	onTogglePlay?: () => void;
+	presence?: BoardPresenceChannel;
 	launch?: BoardLaunch | null;
 	shareUrl?: () => string;
 	active?: boolean;

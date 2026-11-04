@@ -1,6 +1,7 @@
 import {
 	type AppDomainsCacheRecord,
 	type BoardManifestCacheRecord,
+	type BoardPlaySaveCacheRecord,
 	idbDeleteWhere,
 	idbGetAll,
 	type LabelItemsCacheRecord,
@@ -34,6 +35,7 @@ const MAX_ENTRIES = {
 	resourceLabels: 5000,
 	activity: 30,
 	boardManifests: 2000,
+	boardPlaySaves: 50,
 	appDomains: 500,
 	viewerLikes: 2000,
 };
@@ -70,6 +72,7 @@ async function cleanupStore<
 		| "resource_labels"
 		| "activity"
 		| "board_manifests"
+		| "board_play_saves"
 		| "app_domains"
 		| "viewer_likes",
 	maxEntries: number,
@@ -143,6 +146,10 @@ export function scheduleCacheCleanup() {
 			cleanupStore<BoardManifestCacheRecord>(
 				"board_manifests",
 				MAX_ENTRIES.boardManifests,
+			),
+			cleanupStore<BoardPlaySaveCacheRecord>(
+				"board_play_saves",
+				MAX_ENTRIES.boardPlaySaves,
 			),
 			cleanupStore<AppDomainsCacheRecord>(
 				"app_domains",

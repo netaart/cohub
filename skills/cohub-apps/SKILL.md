@@ -27,7 +27,8 @@ When the target Space is unclear, ask for the Space.
 
 Choose one target:
 
-- `--file <path>` for an HTML page, board, or any other file
+- `--file <path>` for an HTML page, board, or any other file; visitors play a
+  board on their own local copy, so lock what they should not move
 - `--dir <path>` for a directory site with `index.html`
 - `--port 3000` or `--port 5173` for a running preview
 

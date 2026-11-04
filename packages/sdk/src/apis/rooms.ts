@@ -3,9 +3,10 @@ import type {
   RealtimeRoomHistoryEvent,
   RealtimeRoomMember,
 } from "@cohub/protocol/realtime";
-import type { HttpTransport } from "../transport.js";
+import { HttpError, type HttpTransport } from "../transport.js";
 import type { WebsocketClient } from "../websocket.js";
-import type { AppRoom, AppRoomAdmissionResponse } from "./app-realtime.js";
+import type { AppRoom, AppRoomAdmissionResponse, AppRoomCreateInput } from "./app-realtime.js";
+import type { AppSessionResponse } from "./apps.js";
 
 export type RoomView = {
   room: RealtimeRoomDescriptor;
@@ -65,6 +66,36 @@ export class RoomsApi {
       return await room.connect({ after: options.after });
     } catch (error) {
       await room.disconnect();
+      throw error;
+    }
+  }
+
+  /** Joins an App's room by code on the viewer's behalf, creating it with `create` when nobody has. */
+  async open(input: { appId: string; code: string; create?: Omit<AppRoomCreateInput, "code"> }) {
+    if (!this.websocket) throw new Error("Room realtime requires CohubClient; CohubHttpClient supports HTTP only");
+    const base = `/api/apps/${encodeURIComponent(input.appId)}`;
+    const { token } = await this.transport.request<AppSessionResponse>(`${base}/session`, { method: "POST" });
+    const admit = (path: string, body: object) =>
+      this.transport.request<AppRoomAdmissionResponse>(`${base}/realtime/rooms${path}`, {
+        method: "POST",
+        accessToken: token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const join = () => admit("/join", { code: input.code });
+    const admission = await join().catch((error: unknown) => {
+      if (!(error instanceof HttpError) || error.status !== 404) throw error;
+      return admit("", { ...input.create, code: input.code }).catch((created: unknown) => {
+        if (created instanceof HttpError && created.code === "ROOM_CODE_TAKEN") return join();
+        throw created;
+      });
+    });
+    const { AppRoom } = await import("./app-realtime.js");
+    const room = new AppRoom<Record<string, unknown>>(this.websocket, admission);
+    try {
+      return await room.connect();
+    } catch (error) {
+      await room.disconnect().catch(() => undefined);
       throw error;
     }
   }

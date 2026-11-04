@@ -108,6 +108,14 @@ export function filePendingDraftKey(
 	return [userKey, spaceId, path, "file-draft"].map(encodeKeyPart).join(":");
 }
 
+export function boardPlaySaveKey(
+	userKey: string,
+	appId: string,
+	versionId: string,
+) {
+	return [userKey, appId, versionId, "board-play"].map(encodeKeyPart).join(":");
+}
+
 export function boardManifestKey(
 	userKey: string,
 	spaceId: string,

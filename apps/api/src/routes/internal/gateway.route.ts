@@ -14,6 +14,7 @@ import type { Permission } from "@cohub/core/permissions";
 import { hasPermission } from "../../permissions.js";
 import { ensureInternalRequest, getOptionalAuth, getAppSessionPrincipal, requireValidId, useAccountPrincipal } from "../../lib/middleware.js";
 import { getSpaceById } from "../../space-sessions.js";
+import { canViewPublishedApp } from "../../app-access.js";
 import { getSpaceSandboxBySpaceId } from "../../space-sandboxes.js";
 import { reportLocalRuntimeStatus, type LocalRuntimeStatusReport } from "../../lib/sandbox/local-runtime-status.js";
 import { runtimeWorkspaceKey } from "@cohub/protocol";
@@ -203,8 +204,11 @@ router.post("/authorize-app-room", async (c) => {
   const forbidden = ensureInternalRequest(c);
   if (forbidden) return forbidden;
 
+  // Accounts join rooms the host opens on an App's behalf, such as a Board App's.
   const principal = getAppSessionPrincipal(c);
-  if (!principal) return c.json({ ok: false, message: "an App session is required" }, 403);
+  const account = principal ? null : getOptionalAuth(c);
+  const userUuid = principal?.userUuid ?? account?.uuid;
+  if (!userUuid) return c.json({ ok: false, message: "an App session or account is required" }, 403);
   const body = await c.req.json<{ roomId?: string; ticket?: string }>().catch(() => null);
   const roomId = typeof body?.roomId === "string" ? body.roomId.trim() : "";
   const ticket = typeof body?.ticket === "string" ? body.ticket.trim() : "";
@@ -213,20 +217,20 @@ router.post("/authorize-app-room", async (c) => {
     return c.json({ ok: false, message: "invalid room admission" }, 403);
   }
   if (
-    ticketPayload.appId !== principal.appId ||
-    ticketPayload.userUuid !== principal.userUuid ||
-    principal.spaceId.length === 0
+    ticketPayload.userUuid !== userUuid ||
+    (principal && (ticketPayload.appId !== principal.appId || principal.spaceId.length === 0))
   ) return c.json({ ok: false, message: "invalid room admission" }, 403);
 
   const room = await getAppRoomById(roomId);
-  if (!room || room.appId !== principal.appId) {
+  if (!room || room.appId !== ticketPayload.appId) {
     return c.json({ ok: false, message: "room not found" }, 404);
   }
   const [app] = await db.select({ status: apps.status, spaceId: apps.spaceId })
     .from(apps)
-    .where(eq(apps.id, principal.appId))
+    .where(eq(apps.id, ticketPayload.appId))
     .limit(1);
-  if (app?.status !== "published" || app.spaceId !== principal.spaceId) {
+  const available = principal ? app?.spaceId === principal.spaceId : await canViewPublishedApp(account, ticketPayload.appId);
+  if (app?.status !== "published" || !available) {
     return c.json({ ok: false, message: "app is unavailable" }, 403);
   }
 

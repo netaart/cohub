@@ -239,7 +239,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			ctx.chosenTool = value;
 			state.tool = value;
 			if (isCreationBoardTool(value)) state.hoverId = null;
-			if (value === "draw" || value === "arrow") {
+			if (value === "draw" || value === "arrow" || value === "play") {
 				state.selection = [];
 				state.editingId = null;
 			}

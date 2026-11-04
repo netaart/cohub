@@ -21,7 +21,7 @@ import { settleBoardDocument } from "./board-media.js";
 import { parseBoardTime } from "./board-time.js";
 import { createClient } from "./client.js";
 
-const TOOLS = ["select", "hand", "text", "shape", "draw", "arrow", "frame"] as const;
+const TOOLS = ["select", "hand", "play", "text", "shape", "draw", "arrow", "frame"] as const;
 const POINTER_TYPES = ["mouse", "pen", "touch"] as const;
 const MAX_STEPS = 10_000;
 const MAX_TIME_MS = 600_000;

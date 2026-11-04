@@ -151,10 +151,12 @@ export function createBoardScriptController(options: BoardScriptControllerOption
             throw error;
           }
         },
-        "board.commit": (id, value) => {
-          const { patch, frame } = value as { patch: BoardPatch; frame: boolean };
-          return commits.commit(id, patch, !frame && activated(id));
-        },
+        ...(editor.readonly ? {} : {
+          "board.commit": async (id: string, value: unknown) => {
+            const { patch, frame } = value as { patch: BoardPatch; frame: boolean };
+            return commits.commit(id, patch, !frame && activated(id));
+          },
+        }),
         "board.layoutText": async (_id, value) => layoutBoardScriptText(value),
       },
       onOutput: (id, output) => {

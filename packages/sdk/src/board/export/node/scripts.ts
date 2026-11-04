@@ -610,6 +610,7 @@ export function createNodeBoardScriptRuntime(
   document(document: BoardDocument, scene?: BoardScene): BoardDocument;
 } {
   const { callbacks } = options;
+  const capabilities = Object.keys(callbacks.capabilities);
   const lanes = createNodeScriptLanes(renderer, {
     ...options,
     call: (id, name, input) => {
@@ -709,7 +710,7 @@ export function createNodeBoardScriptRuntime(
           entries.set(id, entry);
         }
         if (entry.error || entry.busy) continue;
-        const input = scopedInput(document, attachment, item ? scene.layout.box(id) : { width: 0, height: 0 });
+        const input = { ...scopedInput(document, attachment, item ? scene.layout.box(id) : { width: 0, height: 0 }), capabilities };
         const inputKey = JSON.stringify(input);
         const changed = inputKey !== entry.inputKey;
         const waiting = changed || entry.dirty || entry.events.length > 0;

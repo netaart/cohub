@@ -214,6 +214,7 @@ export function createScriptRuntime(
       invalidate(false);
     },
     async commit(patch) {
+      if (input.capabilities && !input.capabilities.includes("board.commit")) throw new Error("This viewer cannot edit the Board.");
       return (await host.call("board.commit", { patch, frame: stepping })) === true;
     },
     async layoutText(text) {

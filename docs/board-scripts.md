@@ -214,7 +214,7 @@ a script after a press on one of its regions.
 
 Regions take presses from the select tool and taps from the hand tool (the default
 on phones). `tools` opts a region into others, e.g. a canvas you paint into with
-the pen; read-only viewers reach every region:
+the pen; read-only viewers and the play tool reach every region:
 
 ```js
 ctx.hitRegions({ canvas: { target: "self", tools: ["select", "hand", "draw"] } });
@@ -373,7 +373,18 @@ others resolve `false`. Commits coalesce into at most ten writes a second for
 input and one for autonomous work, and wait while the user is mid-gesture or
 editing text. Present every frame, commit when things settle. Other
 clients receive document changes; hover, simulation state and temporary scenes
-stay local. Read-only viewers cannot commit.
+stay local. Read-only viewers cannot commit, and `ctx.capabilities.has("board.commit")`
+is false for them.
+
+### Board Apps
+
+A published Board App opens in play: each visitor gets their own copy of the
+Board, where dragging an unlocked item moves it, dragging elsewhere pans, and script
+regions take every press. Their changes and commits stay on their device, saved per
+App version, so a new version starts fresh. Lock what visitors should not move.
+Keep progress that should survive a reload in the document, such as item
+`metadata`; `ctx.state` starts over. Editors try the same thing with **Play** on a
+scripted Board, and `cohub boards simulate` with `{"tool": "play"}`.
 
 `layoutText({ text, fontSize?, fontWeight?, font?, lineHeight?, width? })` resolves
 to the size a native text item would take, for laying out controls.

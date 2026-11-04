@@ -79,6 +79,10 @@ Apps are versioned snapshots of the chosen target.
 
 That means you can iterate in the Space, then deliberately publish when the output is ready. Treat version publish as a release action, not an autosave.
 
+## Board Apps
+
+Publishing a `.board` file makes a Board App. Visitors play it right away: dragging an unlocked item moves it, dragging elsewhere pans, and scripts take every press; ✏️ unfolds the full editing tools. Changes stay on the visitor's device, saved per App version: a new version starts fresh, and **Reset** returns to the published Board. Lock (`locked`) what visitors should not move. Signed-in visitors see each other's cursors and reactions on the same version.
+
 ## Permissions
 
 An App's effective permission is the union of publisher-granted app scopes and

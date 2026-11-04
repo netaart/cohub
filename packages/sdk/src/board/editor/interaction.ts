@@ -198,7 +198,11 @@ export function createInteractionModule(ctx: EditorContext) {
 	}
 
 	function browsing(): boolean {
-		return options.readonly === true || ctx.frames.view()?.present === true;
+		return options.readonly === true || state.tool === "play" || ctx.frames.view()?.present === true;
+	}
+
+	function movable(item: BoardSceneItem | null | undefined): item is BoardSceneItem {
+		return Boolean(item && !ctx.query.isLocked(item) && registry.capabilities(item).canMove);
 	}
 
 	function opensOnTap(item: BoardSceneItem) {
@@ -435,13 +439,12 @@ export function createInteractionModule(ctx: EditorContext) {
 		const dx = event.screen.x - gesture.start.x;
 		const dy = event.screen.y - gesture.start.y;
 		const item = state.scene.get(gesture.itemId);
-		const movable =
-			!browsing() &&
-			state.tool === "select" &&
-			item &&
-			!ctx.query.isLocked(item) &&
-			registry.capabilities(item).canMove;
-		if (!movable) {
+		const moves =
+			!options.readonly &&
+			!ctx.frames.view()?.present &&
+			(state.tool === "select" || state.tool === "play") &&
+			movable(item);
+		if (!moves) {
 			state.interaction = { type: "panning", start: gesture.start, origin: gesture.camera, moved: true, tapSelection: null };
 			pan(gesture.camera, dx, dy, event.pointerType);
 			return;
@@ -469,7 +472,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		const id =
 			gesture.type === "pressing" ? gesture.itemId : gesture.type === "panning" && !gesture.moved ? gesture.tapSelection?.targetId : null;
 		const item = id ? state.scene.get(id) : null;
-		if (!item || ctx.query.isLocked(item) || !registry.capabilities(item).canMove) return null;
+		if (!movable(item)) return null;
 		state.selection = [item.id];
 		state.tool = "select";
 		state.interaction = {
@@ -510,6 +513,14 @@ export function createInteractionModule(ctx: EditorContext) {
 			const item = state.scene.get(id);
 			return item?.type === "frame" && registry.hitTest(item, point);
 		});
+	}
+
+	function play(event: BoardPointerEvent) {
+		if (!state.spaceHeld && pressCard(event)) return;
+		const item = !state.spaceHeld && event.button === 0 ? ctx.query.pickAt(event.world, event.pointerType) : null;
+		state.interaction = movable(item)
+			? { type: "translating", start: event.world, ...ctx.selection.grab([item.id]), moved: false, duplicate: false }
+			: { type: "panning", start: event.screen, origin: { ...state.camera }, moved: false, tapSelection: null };
 	}
 
 	function translateSelection(event: BoardPointerEvent, tap?: BoardTap) {
@@ -554,6 +565,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		browseByTouch(event);
 
 		const { tool, spaceHeld } = state;
+		if (tool === "play") return play(event);
 		const additive = event.shiftKey || event.metaKey || event.ctrlKey;
 		if (!spaceHeld && (tool === "hand" || options.readonly) && pressCard(event)) return;
 		const fingerOnPenCanvas = tool === "draw" && event.pointerType === "touch" && penSeen;
@@ -733,7 +745,8 @@ export function createInteractionModule(ctx: EditorContext) {
 		};
 		let tx = dx;
 		let ty = dy;
-		if (!event.metaKey && !event.ctrlKey) {
+		const playing = state.tool === "play";
+		if (!playing && !event.metaKey && !event.ctrlKey) {
 			const snap = computeTranslationSnap(shift(dx, dy), movingWith(current.origin));
 			tx += snap.dx;
 			ty += snap.dy;
@@ -741,7 +754,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		} else state.snapGuides = [];
 		ctx.document.writeDraft(ctx.selection.placed(shift(tx, ty), current.grabbed), false, current.grabbed);
 		let dropTargetId: string | null = null;
-		for (const parent of dropParents(current.origin, true).values()) if (parent) dropTargetId = parent;
+		if (!playing) for (const parent of dropParents(current.origin, true).values()) if (parent) dropTargetId = parent;
 		if ((current.dropTargetId ?? null) !== dropTargetId) state.interaction = { ...current, dropTargetId };
 	}
 

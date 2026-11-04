@@ -197,6 +197,11 @@ and what took it, so a stroke that started on a caption or a drag that grabbed a
 handle shows at once. It compiles shaders first and stops on errors, and gives up after
 `--timeout` (2m) naming the scripts still busy.
 
+Published as an App, a Board opens in play: every visitor gets a local copy where
+drags move unlocked items and script regions take every press, saved per App version.
+Lock what visitors should not move, keep progress in the document (`ctx.state` starts
+over), and check the visitor's view with `{"tool": "play"}` in the steps.
+
 Long runs: wrap them in `timeout` (`timeout 300 cohub boards simulate …`) so a stuck run
 cannot hold the shell. To stop a stray process, use `pkill -f '[c]ohub boards simulate'`:
 the bracket keeps the pattern from matching the shell running `pkill` itself.

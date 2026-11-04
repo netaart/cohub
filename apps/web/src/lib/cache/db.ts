@@ -1,3 +1,4 @@
+import type { BoardPatch } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type {
 	SessionFileRecord,
@@ -20,7 +21,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 28;
+export const DB_VERSION = 29;
 
 export type SessionListForkRecord = Partial<
 	Omit<SessionForkRecord, "parentSessionId">
@@ -297,6 +298,19 @@ export type ViewerLikeCacheRecord = {
 	lastAccessedAt: number;
 };
 
+/** A visitor's play of one App version's Board: a patch over the published snapshot, never applied to another version. */
+export type BoardPlaySaveCacheRecord = {
+	key: string;
+	userKey: string;
+	appId: string;
+	versionId: string;
+	boardId: string;
+	boardVersion: number;
+	overlay: BoardPatch;
+	updatedAt: number;
+	lastAccessedAt: number;
+};
+
 export type StoreName =
 	| "session_lists"
 	| "session_list_indexes"
@@ -314,6 +328,7 @@ export type StoreName =
 	| "user_profiles"
 	| "file_pending_drafts"
 	| "board_manifests"
+	| "board_play_saves"
 	| "task_run_summaries"
 	| "task_run_details"
 	| "session_files"
@@ -811,6 +826,9 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 			]);
 			defineStore(db, tx, "board_manifests", [
 				{ name: "by_user_space", keyPath: ["userKey", "spaceId"] },
+				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
+			]);
+			defineStore(db, tx, "board_play_saves", [
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
 			defineStore(db, tx, "task_run_summaries", [

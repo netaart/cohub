@@ -16,7 +16,7 @@ import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 type Props = {
 	peers: RemoteBoardAwarenessPeer[];
 	activities: BoardAutomationActivity[];
-	profiles: Map<string, BoardCollaboratorProfile>;
+	profiles: ReadonlyMap<string, BoardCollaboratorProfile>;
 	camera: BoardViewport;
 	surface: { width: number; height: number };
 	cursorVisibleMs: number;

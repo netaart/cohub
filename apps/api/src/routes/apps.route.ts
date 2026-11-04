@@ -470,6 +470,7 @@ async function cleanupAppAssets(assetKey: string | null | undefined, context: { 
 }
 
 const getAppContent = (input: {
+  versionId: string;
   spaceId: string;
   targetType: string;
   targetRef: string;
@@ -495,6 +496,7 @@ const getAppContent = (input: {
       path: input.targetRef,
       boardId: String(input.artifact.boardId),
       boardVersion: Number(input.artifact.boardVersion),
+      versionId: input.versionId,
     };
   }
   const rawDownload = isRecord(input.artifact?.download) ? input.artifact.download : null;
@@ -532,6 +534,7 @@ async function getAppVersionContent(
 ) {
   if (app.status !== "published" || !version) return null;
   return getAppContent({
+    versionId: version.id,
     spaceId: app.spaceId,
     targetType: version.targetType,
     targetRef: version.targetRef,

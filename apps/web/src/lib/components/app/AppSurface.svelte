@@ -651,6 +651,7 @@ onMount(() => {
 			<WorkBoardSurface
 				content={boardContent}
 				appId={app.id}
+				playable={!isBackground}
 				{isMobile}
 				launch={boardLaunch}
 				shareUrl={boardShareUrl}

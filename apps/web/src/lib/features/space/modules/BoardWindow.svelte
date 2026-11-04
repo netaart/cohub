@@ -113,6 +113,29 @@ const headerActions = $derived.by((): PreviewHeaderAction[] => {
 	];
 });
 
+let played = $state.raw<{ boardId: string; document: BoardDocument } | null>(
+	null,
+);
+const playDocument = $derived(
+	played && played.boardId === board.boardId ? played.document : null,
+);
+
+$effect(() => {
+	if (played && played.boardId !== board.boardId) played = null;
+});
+
+function startPlay() {
+	played =
+		board.boardId && board.document
+			? { boardId: board.boardId, document: { ...board.document } }
+			: null;
+}
+
+function togglePlay() {
+	if (playDocument) played = null;
+	else startPlay();
+}
+
 let boardRuntimeLoadAttempt = $state(0);
 const boardRuntimeModulePromise = $derived.by(() => {
 	boardRuntimeLoadAttempt;
@@ -143,13 +166,16 @@ const boardRuntimeModulePromise = $derived.by(() => {
 		{:then boardRuntimeModule}
 			{@const BoardRuntime = boardRuntimeModule.default}
 			<div class="min-h-0 flex-1">
-				{#key board.boardId}
+				{#key `${board.boardId}:${playDocument ? "play" : "edit"}`}
 					<BoardRuntime
+						mode={playDocument ? "play" : "edit"}
 						path={board.path}
 						boardId={board.boardId}
-						document={board.document}
-						playback={board.playback}
+						document={playDocument ?? board.document}
+						playback={playDocument ? null : board.playback}
 						scope={{ kind: "space", spaceId }}
+						onTogglePlay={togglePlay}
+						onReset={playDocument ? startPlay : undefined}
 						shell={shell}
 						onNavigationOpen={onNavigationOpen}
 						{active}
@@ -157,10 +183,10 @@ const boardRuntimeModulePromise = $derived.by(() => {
 						{collaborators}
 						{activities}
 						{onOpenActivity}
-						syncError={board.saveError}
-						syncing={board.saving}
-						onCommit={(patch) => onCommit(board.boardId as string, patch)}
-						onPlayback={(command) => onPlayback(board.boardId as string, command)}
+						syncError={playDocument ? null : board.saveError}
+						syncing={!playDocument && board.saving}
+						onCommit={playDocument ? undefined : (patch) => onCommit(board.boardId as string, patch)}
+						onPlayback={playDocument ? undefined : (command) => onPlayback(board.boardId as string, command)}
 						onRetrySync={() => onRetrySave(board.boardId as string)}
 						{onViewStateChange}
 						{onOpenFile}

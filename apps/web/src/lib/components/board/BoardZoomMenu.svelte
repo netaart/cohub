@@ -1,5 +1,6 @@
 <script lang="ts">
 import { Clapperboard, LocateFixed, Minus, Play, Plus } from "lucide-svelte";
+import type { Snippet } from "svelte";
 import type { BoardEditor } from "$lib/board/editor.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -9,11 +10,13 @@ const {
 	timelineOpen = false,
 	onToggleTimeline,
 	onPresent,
+	lead,
 }: {
 	editor: BoardEditor;
 	timelineOpen?: boolean;
 	onToggleTimeline?: () => void;
 	onPresent?: () => void;
+	lead?: Snippet;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -33,6 +36,10 @@ function focusContent() {
 </script>
 
 <div class="board-zoom-menu toolbar-surface">
+	{#if lead}
+		{@render lead()}
+		<div class="toolbar-divider"></div>
+	{/if}
 	{#if onToggleTimeline}
 		<button type="button" class="tool-key" title={m.board_play_animation({}, { locale })} aria-label={m.board_play_animation({}, { locale })} aria-expanded={timelineOpen} onclick={onToggleTimeline}>
 			<Clapperboard class="h-3.5 w-3.5" />

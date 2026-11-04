@@ -86,7 +86,7 @@ export function boardScriptsMayTakeInput(
 }
 
 export function boardScriptTakesTool(tools: readonly BoardScriptTool[] | undefined, tool: string, readonly: boolean): boolean {
-  return readonly || (tools ?? DEFAULT_TOOLS).includes(tool as BoardScriptTool);
+  return readonly || tool === "play" || (tools ?? DEFAULT_TOOLS).includes(tool as BoardScriptTool);
 }
 
 const DEFAULT_TOOLS: readonly BoardScriptTool[] = ["select", "hand"];

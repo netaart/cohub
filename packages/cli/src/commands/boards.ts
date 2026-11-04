@@ -388,6 +388,8 @@ function registerSimulateCommand(boards: Command): void {
 Steps are {"steps": [...]}, points in board coordinates, run on a virtual clock:
   {"wait": "500ms"}  {"tool": "draw"}  {"tap": [x, y]}  {"drag": [[x, y], ...], "pointerType": "pen"}
   {"pointer": "down", "at": [x, y]}  {"key": "Enter"}  {"select": ["id"]}
+{"tool": "play"} acts like an App visitor: drags move unlocked items, empty space pans,
+and script regions take every press.
 
 Shaders are compiled with a local Chrome, Chromium or Edge when one is found, before
 the steps run; their errors join the scripts' errors and stop the run.
