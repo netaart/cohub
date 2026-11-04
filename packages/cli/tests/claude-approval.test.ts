@@ -16,6 +16,7 @@ test("modes follow the permission modes the CLI lists", () => {
 
   const input = (patch: Partial<RuntimeTurnInput>) => ({ accessMode: "full_access", ...patch }) as RuntimeTurnInput;
   assert.equal(claudeApprovalMode(input({}), []), null);
+  assert.equal(claudeApprovalMode(input({}), ["inherit", "full_access"]), "inherit");
   assert.equal(claudeApprovalMode(input({ accessMode: "read_only" }), []), "read_only");
   assert.throws(() => claudeApprovalMode(input({ accessMode: "read_only", approvalMode: "auto" }), ["auto"]), /conflicts/);
   assert.throws(() => claudeApprovalMode(input({ approvalMode: "auto" }), ["inherit"]), /update Claude Code/);

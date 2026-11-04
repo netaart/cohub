@@ -14,13 +14,17 @@ export function claudeApprovalModes(help: string): ApprovalMode[] {
   return APPROVAL_MODES.filter((mode) => mode === "inherit" || choices.has(PERMISSION_MODES[mode] ?? ""));
 }
 
-/** The platform's read-only access always wins; `null` keeps `acceptEdits`. */
+/**
+ * The platform's read-only access always wins. No mode follows local settings, as the picker shows;
+ * a CLI that cannot ask (no modes) keeps `acceptEdits` (`null`), since its prompts would be denied.
+ */
 export function claudeApprovalMode(input: RuntimeTurnInput, modes: readonly ApprovalMode[]): ApprovalMode | null {
   if (input.accessMode === "read_only" && input.approvalMode && input.approvalMode !== "read_only") {
     throw new Error("The approval mode conflicts with read-only access");
   }
   if (input.accessMode === "read_only") return "read_only";
-  if (!input.approvalMode || modes.includes(input.approvalMode)) return input.approvalMode ?? null;
+  if (!input.approvalMode) return modes.includes("inherit") ? "inherit" : null;
+  if (modes.includes(input.approvalMode)) return input.approvalMode;
   throw new Error(`This Claude Code does not support the ${input.approvalMode} approval mode; update Claude Code and restart the Runtime`);
 }
 

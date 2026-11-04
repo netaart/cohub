@@ -85,7 +85,8 @@ Live control of terminal sessions stays harness-specific: the Pi extension and C
 CLI 参数、Web 选择器、API 校验与归档结构均由注册表派生。终端会话的实时控制仍由 Pi 扩展与 Codex 共享 app-server 各自实现。
 
 Claude Code and WorkBuddy run one stream-json process per Turn (`-p --input-format stream-json`). Full
-access maps to `--permission-mode acceptEdits`. Read-only maps to `plan` with only the Read, Glob and Grep
+access maps to `--permission-mode acceptEdits`, except that a Claude Code offering approval modes
+follows its own settings when no mode is chosen (below). Read-only maps to `plan` with only the Read, Glob and Grep
 tools and no MCP servers, since plan mode still honours the user's allow rules. Other tools follow the
 user's own permission rules. WorkBuddy's permission requests are always denied; Claude Code's become
 approval cards (below). Cohub history is projected
@@ -123,7 +124,7 @@ prompt no other user line follows) starts a Turn, keyed by the file's checksum t
 `turn_ended` settles it; tool results, model names and exact times are not recorded there. The ledger
 records the Turn Cohub is running, as for CodeBuddy.
 
-Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`；只读映射为 `plan`，
+Claude Code 与 WorkBuddy 每个 Turn 启动一个 stream-json 进程：完整权限映射为 `acceptEdits`（提供审批模式的 Claude Code 未选择模式时沿用本机设置，见下）；只读映射为 `plan`，
 且仅开放 Read、Glob、Grep 工具、不加载 MCP（plan 模式仍会执行本机允许规则）。其他工具遵循本机权限规则；WorkBuddy 的权限请求一律拒绝，
 Claude Code 的权限请求转为审批卡（见下）。云端历史投影到原生会话文件并通过 `--resume` 续接。
 启动时检查 CLI 是否提供 Turn 所需的全部参数，旧版或无关的同名程序会被跳过。`default` 模型不传 `--model`，沿用用户自己的配置；思考等级映射为 `--effort`。
@@ -250,8 +251,7 @@ Runtime offers the modes its `--permission-mode` choices support:
 
 | Mode | Claude Code flags |
 | --- | --- |
-| No mode | `--permission-mode acceptEdits`, as before |
-| Use local settings (`inherit`) | no `--permission-mode` |
+| No mode, or Use local settings (`inherit`) | no `--permission-mode`, as the picker shows |
 | Auto approval (`auto`) | `--permission-mode auto` |
 | Full access (`full_access`) | `--permission-mode bypassPermissions` (Claude Code refuses it as root) |
 | Read only (`read_only`) | `plan` with only Read, Glob and Grep and no MCP servers; prompts are denied |
@@ -285,7 +285,7 @@ Cohub 发起的 Turn 中，Codex 请求运行命令或修改文件时，网页�
 可选允许、本对话内都允许（Codex 提供时）、拒绝；需要 `session.prompt.fullaccess` 权限，先到先得。30 分钟无人处理、
 Turn 结束或被停止、Runtime 断开时一律拒绝；平台只读的 Turn 不出卡片、直接拒绝；旧版 Gateway / API 下仍立即拒绝。
 Claude Code 接受 `--permission-prompt-tool stdio` 时（`--help` 不列出，Runtime 用 `initialize` 探测），Cohub 的 Turn 会带上它，
-并按 `--permission-mode` 的可选值提供审批模式：未选择时仍为 `acceptEdits`；沿用本机设置不传 `--permission-mode`；自动审批为 `auto`；
+并按 `--permission-mode` 的可选值提供审批模式：未选择时与沿用本机设置相同（与选择器显示一致），不传 `--permission-mode`；自动审批为 `auto`；
 完全访问为 `bypassPermissions`（root 下 Claude Code 自己会报错）；只读为 `plan` 加只读工具，权限请求直接拒绝。
 Bash 的 `can_use_tool` 请求出“运行命令”卡，Edit / Write / MultiEdit / NotebookEdit 出“修改文件”卡；其他工具、过长无法完整显示的命令或路径、平台只读 Turn、
 旧版 Gateway / API、已停止或超时的 Turn 直接拒绝。每个 Turn 都是新进程，“本对话内都允许”由 Runtime 按 Cohub 对话记住

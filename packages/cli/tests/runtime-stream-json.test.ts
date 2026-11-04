@@ -57,12 +57,14 @@ async function streamJsonTurns(harness: Extract<LocalHarness, "claude" | "workbu
       context: { revision: randomUUID(), throughTurnId, messages: [], ...(archive ? { archive } : {}) },
     };
   };
+  // Without a mode Claude Code follows local settings; WorkBuddy keeps `acceptEdits`.
+  const unset = harness === "claude" ? "null" : "acceptEdits";
   try {
     const events: RuntimeExecutionEvent[] = [];
     const first = turn(history);
     const result = await executeTurn(native.executor, first, (event) => events.push(event), new AbortController().signal, null);
     assert.equal(result.event.resume, "handoff");
-    assert.deepEqual(result.event.message.content, [{ type: "text", text: "history retained acceptEdits" }]);
+    assert.deepEqual(result.event.message.content, [{ type: "text", text: `history retained ${unset}` }]);
     const commit = events.find((event) => event.type === "message.commit");
     assert.deepEqual(commit?.type === "message.commit" && commit.message.content.map((block) => block.type), ["text", "tool_use", "tool_result"]);
     assert(!JSON.stringify(events).includes("sub-agent"), "sub-agent traffic stays native");
@@ -84,7 +86,7 @@ async function streamJsonTurns(harness: Extract<LocalHarness, "claude" | "workbu
     const restored = await executeTurn(cold.executor, restoredInput, () => {}, new AbortController().signal, null);
     assert.equal(restored.event.resume, "restored");
     assert.notEqual(restored.session.path, second.session.path);
-    assert.deepEqual(restored.event.message.content, [{ type: "text", text: "history retained acceptEdits" }]);
+    assert.deepEqual(restored.event.message.content, [{ type: "text", text: `history retained ${unset}` }]);
     assert.deepEqual(await readFile(second.session.path), original);
     const ids = new Set((await readFile(restored.session.path, "utf8")).trim().split("\n").map((line) => JSON.parse(line).sessionId));
     assert.deepEqual([...ids], [restored.session.nativeSessionId]);
@@ -102,7 +104,7 @@ async function streamJsonTurns(harness: Extract<LocalHarness, "claude" | "workbu
     source.addTurn(empty, emptyHistory, { userContent: [{ type: "image", source: { type: "url", url: "https://example.com/a.png" } }], assistantContent: [] });
     const fresh = await executeTurn(cold.executor, turn(emptyHistory, { session: empty, model: "default", thinkingLevel: "ultra" }), () => {}, new AbortController().signal, null);
     assert.equal(fresh.event.resume, "new");
-    assert.deepEqual(fresh.event.message.content, [{ type: "text", text: "no history acceptEdits effort:ultra" }]);
+    assert.deepEqual(fresh.event.message.content, [{ type: "text", text: `no history ${unset} effort:ultra` }]);
 
     // A stop interrupts the CLI and is not reported as an error.
     const stop = new AbortController();
@@ -123,9 +125,9 @@ async function streamJsonTurns(harness: Extract<LocalHarness, "claude" | "workbu
       const run = await executeTurn(cold.executor, turn(randomUUID(), { session: randomUUID(), prompt, ...options }), () => {}, new AbortController().signal, null);
       return run.event.message.content;
     };
-    assert.deepEqual(await reply("approve:Bash"), [{ type: "text", text: "allow stdio acceptEdits" }]);
-    assert.deepEqual(await reply("approve:Bash"), [{ type: "text", text: "deny stdio acceptEdits" }]);
-    assert.deepEqual(await reply("approve:WebFetch"), [{ type: "text", text: "deny stdio acceptEdits" }]);
+    assert.deepEqual(await reply("approve:Bash"), [{ type: "text", text: "allow stdio null" }]);
+    assert.deepEqual(await reply("approve:Bash"), [{ type: "text", text: "deny stdio null" }]);
+    assert.deepEqual(await reply("approve:WebFetch"), [{ type: "text", text: "deny stdio null" }]);
     assert.deepEqual(await reply("approve:Bash", { access: "read_only" }), [{ type: "text", text: "deny null plan" }]);
     assert.deepEqual(cards.map((card) => [card.kind, card.command, card.reason, card.decisions]), Array(2).fill(["command", "make clean", "Clean the build", ["accept", "accept_for_session", "decline"]]));
     assert.deepEqual(await reply("continue", { approvalMode: "full_access" }), [{ type: "text", text: "no history bypassPermissions" }]);
