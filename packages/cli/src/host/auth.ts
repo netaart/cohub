@@ -15,6 +15,8 @@ import type { HostEmit } from "./serve.js";
 
 type Snapshot = { subject: string | null; revision: string | null };
 
+const REOPEN_AFTER_MS = 10_000;
+
 function snapshot(): Snapshot {
   const session = readAuthSession();
   if (!session) return { subject: null, revision: null };
@@ -30,7 +32,9 @@ export class HostAuth {
   #watcher: FSWatcher | null = null;
   #debounce: NodeJS.Timeout | undefined;
   #rewatch: NodeJS.Timeout | undefined;
-  #pending: { url: string; expiresAt: number; redirectPath?: string } | null = null;
+  #pending: { url: string; expiresAt: number; openedAt: number } | null = null;
+  #requesting: Promise<void> | null = null;
+  #redirectPath: string | undefined;
 
   constructor(
     private readonly emit: HostEmit,
@@ -80,21 +84,31 @@ export class HostAuth {
   }
 
   async signIn(redirectPath?: string): Promise<boolean> {
-    const destination = hostAuthChangedSchema.shape.redirectPath.safeParse(redirectPath).data;
-    if (this.#pending && this.#pending.expiresAt > Date.now()) {
-      this.#pending.redirectPath = destination;
-      this.#open(this.#pending.url);
+    this.#redirectPath = hostAuthChangedSchema.shape.redirectPath.safeParse(redirectPath).data;
+    const pending = this.#pending;
+    if (pending && pending.expiresAt > Date.now()) {
+      if (Date.now() - pending.openedAt >= REOPEN_AFTER_MS) this.#openPending(pending);
       return true;
     }
+    this.#requesting ??= this.#request().finally(() => { this.#requesting = null; });
+    await this.#requesting;
+    return true;
+  }
+
+  async #request() {
     const code = await requestDeviceCode();
-    const pending = { url: code.verificationUriComplete, expiresAt: code.expiresAt, redirectPath: destination };
+    const pending = { url: code.verificationUriComplete, expiresAt: code.expiresAt, openedAt: 0 };
     this.#pending = pending;
-    this.#open(pending.url);
+    this.#openPending(pending);
     void pollDeviceCode(code)
-      .then(() => this.#sync({ redirectPath: pending.redirectPath, signedIn: true }))
+      .then(() => this.#sync({ redirectPath: this.#redirectPath, signedIn: true }))
       .catch((error: unknown) => process.stderr.write(`Sign-in did not complete: ${error instanceof Error ? error.message : String(error)}\n`))
       .finally(() => { if (this.#pending === pending) this.#pending = null; });
-    return true;
+  }
+
+  #openPending(pending: { url: string; openedAt: number }) {
+    pending.openedAt = Date.now();
+    this.#open(pending.url);
   }
 
   async signOut(): Promise<boolean> {
