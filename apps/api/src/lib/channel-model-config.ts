@@ -3,13 +3,16 @@ import { join } from "node:path";
 import {
   createCachedModelsConfig,
   getUserModelsRedisKey,
-  mergeModelsConfigs,
   MODELS_CACHE_TTL_SEC,
   parseCachedModelsConfig,
   parseModelsConfig,
   PLATFORM_MODELS_REDIS_KEY,
+  resolveModelsConfigContext,
   type ModelsConfig,
+  type ModelsConfigModLayer,
 } from "@cohub/infra/config-runtime/models";
+import { loadSpaceModModelsConfigs } from "@cohub/core/space-mods";
+import { createLogger } from "@cohub/infra/logging";
 import type { ChannelConfig } from "@cohub/protocol/gateway";
 import type { InferSelectModel } from "drizzle-orm";
 import { eq } from "drizzle-orm";
@@ -17,6 +20,8 @@ import { spaces } from "@cohub/db";
 import type { db as dbClient } from "../db/index.js";
 import { config } from "../config.js";
 import { redisCommandClient } from "../redis.js";
+
+const logger = createLogger({ serviceName: "cohub-api" });
 
 type DbClient = typeof dbClient;
 type SpaceRow = InferSelectModel<typeof spaces>;
@@ -61,7 +66,16 @@ const loadModelsConfig = async (input: {
     throw error;
   }
 
-  const content = parseModelsConfig(rawText);
+  let content: ModelsConfig;
+  try {
+    content = parseModelsConfig(rawText);
+  } catch (error) {
+    if (input.allowMissing) {
+      logger.warn(`[Models] ignoring invalid user models config at ${input.modelsPath}:`, error);
+      return null;
+    }
+    throw error;
+  }
   const cacheValue = createCachedModelsConfig({ rawText, content });
   await redisCommandClient.set(input.redisKey, JSON.stringify(cacheValue), "EX", MODELS_CACHE_TTL_SEC).catch(() => undefined);
   return content;
@@ -90,14 +104,25 @@ export async function loadMergedModelsCatalog(db: DbClient, spaceOrId: Pick<Spac
     modelsPath: PLATFORM_MODELS_PATH,
     allowMissing: false,
   });
-  const userModels = space?.userUuid
-    ? await loadModelsConfig({
-        redisKey: getUserModelsRedisKey(space.userUuid),
-        modelsPath: getUserModelsPath(space.userUuid),
-        allowMissing: true,
-      })
-    : null;
-  return mergeModelsConfigs(platformModels, userModels);
+  const [userModels, mods] = await Promise.all([
+    space?.userUuid
+      ? loadModelsConfig({
+          redisKey: getUserModelsRedisKey(space.userUuid),
+          modelsPath: getUserModelsPath(space.userUuid),
+          allowMissing: true,
+        })
+      : null,
+    loadModModelsConfigs(db, space?.id),
+  ]);
+  return resolveModelsConfigContext({ platform: platformModels, mods, user: userModels });
+}
+
+async function loadModModelsConfigs(db: DbClient, spaceId?: string | null): Promise<ModelsConfigModLayer[]> {
+  if (!spaceId?.trim()) return [];
+  const loaded = await loadSpaceModModelsConfigs(db, spaceId.trim(), {
+    checkpointCacheRoot: config.checkpointCacheRoot,
+  }).catch(() => null);
+  return (loaded?.configs ?? []).map((item) => ({ config: item.config, ref: item.ref }));
 }
 
 export function splitProviderModelInput(value: string): { provider: string | null; id: string } {

@@ -13,7 +13,7 @@ import type {
 } from "./session-tree";
 
 function getTurnContextWindow(turn: SessionTurnRecord) {
-	const raw = turn.meta?.contextWindow;
+	const raw = turn.meta?.maxContext ?? turn.meta?.contextWindow;
 	return typeof raw === "number" && raw > 0 ? raw : null;
 }
 

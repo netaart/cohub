@@ -12,7 +12,7 @@ import { getSpace } from "./api.js";
 import { abortSessionTurn, failSessionTurn, interruptSessionTurn, persistAssistantMessage, persistUserMessage, publishSessionTurnsUpdated } from "./persistence.js";
 import { ensureSandboxConnection } from "./sandbox-pool.js";
 import { createSandboxCodingTools } from "./sandbox/tools.js";
-import { CohubModelRegistry } from "./runtime/model-registry.js";
+import { CohubModelRegistry, type CohubModel } from "./runtime/model-registry.js";
 import { loadRuntimeModelsConfigs } from "./runtime/models-loader.js";
 import { loadImageToTextConfig } from "./runtime/image-to-text-config.js";
 import { loadSpaceEnvSnapshot } from "./runtime/env-cache.js";
@@ -126,8 +126,8 @@ function warmupSandboxConnection(spaceId: string) {
   });
 }
 
-async function getModelRegistryForUser(userId: string | null | undefined) {
-  const configs = await loadRuntimeModelsConfigs(userId?.trim() || null);
+async function getModelRegistryForUser(userId: string | null | undefined, spaceId?: string | null) {
+  const configs = await loadRuntimeModelsConfigs(userId?.trim() || null, spaceId?.trim() || null);
   const registry = new CohubModelRegistry({ configs });
   if (registry.getError()) {
     logger.warn(`[Agent] Model registry warning for ${userId?.trim() || "__platform__"}:`, registry.getError());
@@ -575,6 +575,8 @@ async function runDirectShellCommandTurn(input: {
       startedAt: toolStartedAt,
       completedAt,
       thinkingLevel: handle.session.agent.state.thinkingLevel,
+      contextWindow: handle.session.agent.state.model.contextWindow,
+      maxContext: (handle.session.agent.state.model as CohubModel).maxContext,
     });
 
     input.turnMetrics.toolCallCount += 1;
@@ -592,10 +594,11 @@ async function prepareHandle(input: {
   actorUserId: string;
   requestedModel?: { provider: string; id: string };
   requestedThinkingLevel?: string | null;
+  requestedMaxContext?: number | null;
   beforeTurnSequence?: number | null;
 }) {
   const [modelRegistry, imageToTextConfig] = await Promise.all([
-    getModelRegistryForUser(input.actorUserId),
+    getModelRegistryForUser(input.actorUserId, input.spaceId),
     loadImageToTextConfig(input.actorUserId).catch((error) => {
       logger.warn("[ImageToText] config unavailable; continuing without fallback", error);
       return null;
@@ -620,6 +623,7 @@ async function prepareHandle(input: {
     imageToTextConfig,
     requestedModel: input.requestedModel,
     requestedThinkingLevel: input.requestedThinkingLevel,
+    requestedMaxContext: input.requestedMaxContext,
   });
 
   return handle;
@@ -635,6 +639,12 @@ function resolveRequestedThinkingLevel(ownerMeta: Record<string, unknown>): stri
   if (typeof ownerMeta.requestedThinkingLevel !== "string") return undefined;
   const trimmed = ownerMeta.requestedThinkingLevel.trim();
   return trimmed || null;
+}
+
+function resolveRequestedMaxContext(ownerMeta: Record<string, unknown>): number | null | undefined {
+  const value = ownerMeta.requestedMaxContext;
+  if (value === undefined) return undefined;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function resolveActorUserId(ownerMeta: Record<string, unknown>) {
@@ -900,6 +910,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
         actorUserId,
         requestedModel: resolveRequestedModel(ownerMeta),
         requestedThinkingLevel: resolveRequestedThinkingLevel(ownerMeta),
+        requestedMaxContext: resolveRequestedMaxContext(ownerMeta),
         beforeTurnSequence: batch.turns[0]?.sequence ?? batch.ownerTurn.sequence,
       });
       const activeHandle = handle;

@@ -17,6 +17,8 @@ export type ModelCost = {
 export type ModelThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelRequestProfile = "codex" | "claude-code";
 export type ThinkingLevelMap = Partial<Record<ModelThinkingLevel, string | null>>;
+/** Where the effective `maxContext` came from. Runtime-only, never read from config files. */
+export type ModelMaxContextSource = "platform" | "mod" | "user" | "prompt" | "default";
 
 export type ModelDef = {
   id: string;
@@ -30,7 +32,14 @@ export type ModelDef = {
   hidden?: boolean;
   input?: Array<"text" | "image">;
   cost?: ModelCost;
+  /** The model's real context limit. Platform-owned for platform models. */
   contextWindow?: number;
+  /** Effective context threshold used for compaction and truncation. Clamped to `contextWindow`. */
+  maxContext?: number;
+  /** Runtime-only source of the effective `maxContext`. */
+  maxContextSource?: ModelMaxContextSource;
+  /** Runtime-only reference for the source (for example a mod mount slug). */
+  maxContextSourceRef?: string;
   maxTokens?: number;
   requestProfile?: ModelRequestProfile;
   /** `false` sends remote images inline instead of as URLs. */
@@ -118,6 +127,7 @@ export function isModelDefinition(value: unknown, options: { partial?: boolean }
     && (value.input === undefined || (Array.isArray(value.input) && value.input.length > 0 && value.input.every((item) => item === "text" || item === "image")))
     && (value.cost === undefined || isModelCost(value.cost, partial))
     && (value.contextWindow === undefined || isPositiveInteger(value.contextWindow))
+    && (value.maxContext === undefined || isPositiveInteger(value.maxContext))
     && (value.maxTokens === undefined || isPositiveInteger(value.maxTokens))
     && (value.requestProfile === undefined || REQUEST_PROFILES.has(value.requestProfile as ModelRequestProfile))
     && (value.imageUrlInput === undefined || typeof value.imageUrlInput === "boolean")
@@ -241,7 +251,7 @@ export function parseCachedModelsConfig(rawText: string): CachedModelsConfig | n
 
 const MODEL_PARAMETER_FIELDS = new Set([
   "id", "name", "reasoning", "defaultThinkingLevel", "thinkingLevelMap",
-  "hidden", "input", "contextWindow", "maxTokens",
+  "hidden", "input", "contextWindow", "maxContext", "maxTokens",
 ]);
 
 const PROTECTED_MODEL_FIELDS = new Set([
@@ -360,6 +370,121 @@ export function mergeModelsConfigs(
   return { providers: Object.fromEntries(providers) };
 }
 
+export type ModelsConfigModLayer = {
+  config: ModelsConfig;
+  /** Human-readable source, for example the mod mount slug. */
+  ref?: string;
+};
+
+function clampMaxContext(value: number | undefined, contextWindow: number | undefined): number | undefined {
+  if (!isPositiveInteger(value)) return undefined;
+  if (!isPositiveInteger(contextWindow)) return value;
+  return Math.min(value, contextWindow);
+}
+
+/** Mods may only tune the threshold of an existing platform model. */
+export function selectModModelMaxContextOverrides(
+  platform: ModelsConfig | null | undefined,
+  config: ModelsConfig,
+): ModelsConfig {
+  const providers: Record<string, ProviderConfig> = {};
+  for (const [provider, providerConfig] of Object.entries(config.providers)) {
+    const platformModels = platform?.providers[provider]?.models;
+    if (!platformModels) continue;
+    const models = (providerConfig.models ?? []).flatMap((model) => {
+      if (!isPositiveInteger(model.maxContext)) return [];
+      if (!platformModels.some((item) => item.id === model.id)) return [];
+      return [{ id: model.id, maxContext: model.maxContext }];
+    });
+    if (models.length > 0) providers[provider] = { models };
+  }
+  return { providers };
+}
+
+/**
+ * Merge platform, mod and user catalogs, then resolve each model's effective
+ * `maxContext`. `contextWindow` stays the real limit; user/mod overrides of it
+ * act as legacy threshold values and are clamped to the platform limit.
+ */
+export function resolveModelsConfigContext(input: {
+  platform?: ModelsConfig | null;
+  mods?: ModelsConfigModLayer[] | null;
+  user?: ModelsConfig | null;
+}): ModelsConfig {
+  const modLayers = (input.mods ?? [])
+    .map((layer) => ({ ...layer, config: selectModModelMaxContextOverrides(input.platform, layer.config) }))
+    .filter((layer) => Object.keys(layer.config.providers).length > 0);
+  const merged = mergeModelsConfigs(input.platform, ...modLayers.map((layer) => layer.config), input.user);
+  const platformProviders = input.platform?.providers ?? {};
+  const userProviders = input.user?.providers ?? {};
+
+  const providers = Object.fromEntries(Object.entries(merged.providers).map(([provider, providerConfig]) => {
+    const platformProvider = platformProviders[provider];
+    const userProvider = userProviders[provider];
+    const usesPlatform = provider === "cohub"
+      || Boolean(platformProvider && (!userProvider || isPlatformModelOverride(provider, userProvider)));
+
+    const models = (providerConfig.models ?? []).map((model) => {
+      if (!usesPlatform) {
+        const contextWindow = isPositiveInteger(model.contextWindow) ? model.contextWindow : undefined;
+        const configured = isPositiveInteger(model.maxContext) ? model.maxContext : contextWindow;
+        return {
+          ...model,
+          ...(contextWindow ? { contextWindow } : {}),
+          ...(configured ? { maxContext: clampMaxContext(configured, contextWindow) } : {}),
+          ...(configured ? { maxContextSource: (userProvider ? "user" : "platform") as ModelMaxContextSource } : {}),
+        };
+      }
+
+      const platformModel = platformProvider?.models?.find((item) => item.id === model.id);
+      const userModel = userProvider?.models?.find((item) => item.id === model.id);
+      const hardLimit = isPositiveInteger(platformModel?.contextWindow)
+        ? platformModel.contextWindow
+        : isPositiveInteger(model.contextWindow) ? model.contextWindow : undefined;
+
+      let configured: number | undefined;
+      let source: ModelMaxContextSource = "default";
+      let sourceRef: string | undefined;
+      if (isPositiveInteger(userModel?.maxContext)) {
+        configured = userModel.maxContext;
+        source = "user";
+      } else if (isPositiveInteger(userModel?.contextWindow)
+        && userModel.contextWindow !== platformModel?.contextWindow) {
+        configured = userModel.contextWindow;
+        source = "user";
+      } else {
+        const modLayer = [...modLayers].reverse().find((layer) =>
+          layer.config.providers[provider]?.models?.some((item) => item.id === model.id));
+        const modModel = modLayer?.config.providers[provider]?.models?.find((item) => item.id === model.id);
+        if (modModel && isPositiveInteger(modModel.maxContext)) {
+          configured = modModel.maxContext;
+          source = "mod";
+          sourceRef = modLayer?.ref;
+        } else if (isPositiveInteger(platformModel?.maxContext)) {
+          configured = platformModel.maxContext;
+          source = "platform";
+        } else if (isPositiveInteger(platformModel?.contextWindow)) {
+          configured = platformModel.contextWindow;
+          source = "platform";
+        } else if (isPositiveInteger(model.contextWindow)) {
+          configured = model.contextWindow;
+          source = "default";
+        }
+      }
+
+      return {
+        ...model,
+        ...(hardLimit ? { contextWindow: hardLimit } : {}),
+        ...(configured ? { maxContext: clampMaxContext(configured, hardLimit) } : {}),
+        maxContextSource: source,
+        ...(sourceRef ? { maxContextSourceRef: sourceRef } : {}),
+      };
+    });
+    return [provider, { ...providerConfig, models }];
+  }));
+  return { providers };
+}
+
 /** 仅解析经过来源校验的平台密钥声明。 */
 export function resolvePlatformModelApiKey(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -404,9 +529,10 @@ export function assertUserModelCredentials(model: {
 
 export function resolveRuntimeModelsConfig(input: {
   platform?: ModelsConfig | null;
+  mods?: ModelsConfigModLayer[] | null;
   user?: ModelsConfig | null;
 }): ModelsConfig {
-  const merged = mergeModelsConfigs(input.platform, input.user);
+  const merged = resolveModelsConfigContext(input);
   return {
     providers: Object.fromEntries(Object.entries(merged.providers).map(([provider, config]) => {
       const user = Object.hasOwn(input.user?.providers ?? {}, provider) ? input.user?.providers[provider] : undefined;

@@ -92,8 +92,9 @@ const getModelContextWindow = async (spaceId: string, provider?: string | null, 
 
   for (const [, providerConfig] of providers) {
     const modelDef = providerConfig?.models?.find((item) => item.id === modelId);
-    if (typeof modelDef?.contextWindow === "number" && Number.isFinite(modelDef.contextWindow) && modelDef.contextWindow > 0) {
-      return modelDef.contextWindow;
+    const limit = modelDef?.maxContext ?? modelDef?.contextWindow;
+    if (typeof limit === "number" && Number.isFinite(limit) && limit > 0) {
+      return limit;
     }
   }
 

@@ -52,7 +52,8 @@ test("completion registry never resolves user key literals from the service envi
   const registry = new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]);
   assert.equal(registry.getApiKey("cohub"), "synthetic-completion-secret");
   assert.equal(registry.find("cohub", "platform")?.baseUrl, "https://platform.example.test");
-  assert.equal(registry.find("cohub", "platform")?.contextWindow, 200000);
+  assert.equal(registry.find("cohub", "platform")?.contextWindow, 100000);
+  assert.equal(registry.find("cohub", "platform")?.maxContext, 100000);
   assert.equal(registry.getApiKey("custom"), "R02_COMPLETION_SECRET");
   assert.equal(registry.find("custom", "custom")?.baseUrl, "https://user.example.test");
 });
@@ -81,7 +82,8 @@ test("completion registry merges model parameters and preserves platform default
   ]);
   const user: ModelsConfig = { providers: { cohub: { models: [{ id: "visible", contextWindow: 200000 }] } } };
   const registry = new CompletionModelRegistry([resolveRuntimeModelsConfig({ platform, user })]);
-  assert.equal(registry.find("cohub", "visible")?.contextWindow, 200000);
+  assert.equal(registry.find("cohub", "visible")?.contextWindow, 100000);
+  assert.equal(registry.find("cohub", "visible")?.maxContext, 100000);
   assert.equal(registry.find("cohub", "visible")?.maxTokens, 4096);
   assert.equal(registry.find("cohub", "visible")?.baseUrl, "https://example.test");
   assert.equal(registry.find("cohub", "hidden")?.hidden, true);

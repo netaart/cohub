@@ -10,6 +10,10 @@ export type RuntimeLlmModel = Model<Api> & {
   defaultThinkingLevel?: ModelDef["defaultThinkingLevel"];
   requestProfile?: ModelDef["requestProfile"];
   imageUrlInput?: boolean;
+  /** Effective context threshold, clamped to `contextWindow`. */
+  maxContext?: number;
+  maxContextSource?: ModelDef["maxContextSource"];
+  maxContextSourceRef?: string;
   /** Discovery hint: hidden models stay resolvable by id but never become implicit defaults. */
   hidden?: boolean;
 };
@@ -43,6 +47,7 @@ export class CompletionModelRegistry {
         const api = modelDef.api ?? providerConfig.api;
         const baseUrl = modelDef.baseUrl ?? providerConfig.baseUrl;
         if (!api || !baseUrl || !modelDef.id) continue;
+        const contextWindow = modelDef.contextWindow ?? 128000;
         mergedModels.set(`${provider}:${modelDef.id}`, {
           id: modelDef.id,
           name: modelDef.name ?? modelDef.id,
@@ -54,7 +59,10 @@ export class CompletionModelRegistry {
           thinkingLevelMap: modelDef.thinkingLevelMap,
           input: modelDef.input ?? ["text"],
           cost: normalizeModelCost(modelDef.cost),
-          contextWindow: modelDef.contextWindow ?? 128000,
+          contextWindow,
+          maxContext: Math.min(modelDef.maxContext ?? contextWindow, contextWindow),
+          maxContextSource: modelDef.maxContextSource,
+          maxContextSourceRef: modelDef.maxContextSourceRef,
           maxTokens: modelDef.maxTokens ?? 16384,
           requestProfile: modelDef.requestProfile ?? providerConfig.requestProfile,
           imageUrlInput: modelDef.imageUrlInput ?? providerConfig.imageUrlInput,

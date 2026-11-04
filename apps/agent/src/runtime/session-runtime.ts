@@ -48,7 +48,7 @@ export type CohubAgentSession = {
   enqueueSteer(text: string, images?: ImageContent[]): void;
   waitForIdle(): Promise<void>;
   setModel(model: Model<Api>): Promise<void>;
-  configureRuntimeIdentity(input: { userId?: string | null; spaceOwnerUserId?: string | null; modelRegistry: CohubModelRegistry; imageToTextConfig?: ImageToTextConfig | null; requestedModel?: { provider: string; id: string }; requestedThinkingLevel?: string | null }): Promise<void>;
+  configureRuntimeIdentity(input: { userId?: string | null; spaceOwnerUserId?: string | null; modelRegistry: CohubModelRegistry; imageToTextConfig?: ImageToTextConfig | null; requestedModel?: { provider: string; id: string }; requestedThinkingLevel?: string | null; requestedMaxContext?: number | null }): Promise<void>;
   configureTools(tools: ToolLike[]): Promise<void>;
   reload(): Promise<void>;
   abort(): Promise<void>;
@@ -1048,17 +1048,29 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
         ?? input.modelRegistry.find(currentModel.provider, currentModel.id)
         ?? input.modelRegistry.getDefault();
       if (!target) throw new Error("No model available. Check platform models.json");
+      const requestedMaxContext = typeof input.requestedMaxContext === "number"
+        && Number.isSafeInteger(input.requestedMaxContext) && input.requestedMaxContext > 0
+        ? input.requestedMaxContext
+        : undefined;
+      const activeTarget = requestedMaxContext
+        ? {
+            ...target,
+            maxContext: Math.min(requestedMaxContext, target.contextWindow > 0 ? target.contextWindow : requestedMaxContext),
+            maxContextSource: "prompt" as const,
+            maxContextSourceRef: undefined,
+          }
+        : target;
 
       const nextKey = systemPromptStateKeyFor(nextUserId, nextSpaceOwnerUserId, runtimeTools);
       const nextSystemPrompt = systemPromptStateKey === nextKey
         ? runtimeSystemPrompt
         : await buildSystemPromptForTools(runtimeTools, { userId: nextUserId, spaceOwnerUserId: nextSpaceOwnerUserId });
-      const shouldChangeModel = target.provider !== currentModel.provider || target.id !== currentModel.id;
+      const shouldChangeModel = activeTarget.provider !== currentModel.provider || activeTarget.id !== currentModel.id;
       const hasRequestedThinkingLevel = input.requestedThinkingLevel !== undefined && input.requestedThinkingLevel !== null;
       const nextThinkingLevel = hasRequestedThinkingLevel
-        ? resolveThinkingLevelForModel(target as CohubModel, input.requestedThinkingLevel)
+        ? resolveThinkingLevelForModel(activeTarget as CohubModel, input.requestedThinkingLevel)
         : shouldChangeModel
-          ? resolveThinkingLevelForModel(target as CohubModel, agent.state.thinkingLevel)
+          ? resolveThinkingLevelForModel(activeTarget as CohubModel, agent.state.thinkingLevel)
           : agent.state.thinkingLevel;
 
       runtimeUserId = nextUserId;
@@ -1070,9 +1082,9 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
       const shouldChangeThinkingLevel = nextThinkingLevel !== agent.state.thinkingLevel;
       // IDs can stay the same while credentials, headers and endpoints change.
       // Bind the model and its auth registry to the same runtime configuration.
-      agent.state.model = target;
+      agent.state.model = activeTarget;
       if (shouldChangeModel) {
-        options.sessionManager.appendModelChange(target.provider, target.id);
+        options.sessionManager.appendModelChange(activeTarget.provider, activeTarget.id);
       }
       if (shouldChangeModel || shouldChangeThinkingLevel) {
         agent.state.thinkingLevel = nextThinkingLevel;

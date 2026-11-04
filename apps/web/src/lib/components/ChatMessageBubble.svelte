@@ -542,12 +542,17 @@ const tokenDetailText = $derived.by(() => {
 });
 
 const modelContextWindow = $derived.by(() => {
+	const maxContext =
+		(message.meta?.maxContext as number | null | undefined) ??
+		modelMatch?.model?.maxContext;
 	const contextWindow =
 		(message.meta?.contextWindow as number | null | undefined) ??
 		modelMatch?.model?.contextWindow;
-	return typeof contextWindow === "number" && contextWindow > 0
-		? contextWindow
-		: null;
+	const limit =
+		typeof maxContext === "number" && maxContext > 0
+			? maxContext
+			: contextWindow;
+	return typeof limit === "number" && limit > 0 ? limit : null;
 });
 
 const inputContextPercent = $derived(

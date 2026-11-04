@@ -1,6 +1,9 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { asc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { spaceMods, spaces } from "@cohub/db";
+import { parseModelsConfig, type ModelsConfig } from "@cohub/infra/config-runtime/models";
 
 export const SANDBOX_MODS_PATH = "/mods";
 
@@ -82,4 +85,48 @@ export async function listSpaceMods(db: SpaceModsDb, spaceId: string): Promise<S
 
 export async function listEnabledSpaceMods(db: SpaceModsDb, spaceId: string): Promise<SpaceModListItem[]> {
   return (await listSpaceMods(db, spaceId)).filter((mod) => mod.enabled);
+}
+
+export type LoadedSpaceModModelsConfig = {
+  modSpaceId: string;
+  /** Mount slug used as the source reference in diagnostics. */
+  ref: string;
+  config: ModelsConfig;
+};
+
+/**
+ * Read enabled mods' `.cohub/models.json` from their latest checkpoint snapshot.
+ * A broken or missing mod config never fails the caller; it is reported instead.
+ */
+export async function loadSpaceModModelsConfigs(
+  db: SpaceModsDb,
+  spaceId: string,
+  options: {
+    checkpointCacheRoot: string;
+    readFile?: (path: string, encoding: "utf-8") => Promise<string>;
+  },
+): Promise<{ configs: LoadedSpaceModModelsConfig[]; warnings: string[] }> {
+  const mods = await listEnabledSpaceMods(db, spaceId);
+  const configs: LoadedSpaceModModelsConfig[] = [];
+  const warnings: string[] = [];
+  const read = options.readFile ?? readFile;
+
+  for (const mod of mods) {
+    const path = join(options.checkpointCacheRoot, mod.modSpaceId, "latest", ".cohub", "models.json");
+    let rawText: string;
+    try {
+      rawText = await read(path, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      warnings.push(`Cannot read mod models.json at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    try {
+      configs.push({ modSpaceId: mod.modSpaceId, ref: mod.mountSlug, config: parseModelsConfig(rawText) });
+    } catch (error) {
+      warnings.push(`Ignoring invalid mod models.json at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return { configs, warnings };
 }

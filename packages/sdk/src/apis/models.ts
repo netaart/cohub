@@ -12,9 +12,11 @@ export type ModelsCatalog = Record<string, ModelCatalogEntry[]>;
 export class ModelsApi {
   constructor(private readonly transport: HttpTransport) {}
 
-  async list() {
+  async list(options: { spaceId?: string | null } = {}) {
+    const spaceId = options.spaceId?.trim();
+    const query = spaceId ? `?spaceId=${encodeURIComponent(spaceId)}` : "";
     return this.transport.request<ModelsCatalog>(
-      "/api/models",
+      `/api/models${query}`,
     );
   }
 

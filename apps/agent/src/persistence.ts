@@ -811,7 +811,7 @@ export async function persistUserMessage(input: { spaceId: string; sessionId: st
 
 const EMPTY_ASSISTANT_MESSAGE_ERROR = "LLM returned an empty assistant message after streaming completed.";
 
-export async function persistAssistantMessage(input: { spaceId: string; spaceSessionId: string; userMessageId: string; event: Record<string, unknown>; userId?: string | null; turnId?: string | null; startedAt?: string | null; completedAt?: string | null; messageOrdinal?: number | null; thinkingLevel?: string | null; idempotencyKey?: string }) {
+export async function persistAssistantMessage(input: { spaceId: string; spaceSessionId: string; userMessageId: string; event: Record<string, unknown>; userId?: string | null; turnId?: string | null; startedAt?: string | null; completedAt?: string | null; messageOrdinal?: number | null; thinkingLevel?: string | null; contextWindow?: number | null; maxContext?: number | null; idempotencyKey?: string }) {
   const assistantMessage = input.event.message;
   const toolResultsRaw = Array.isArray(input.event.toolResults) ? input.event.toolResults as Array<Record<string, unknown>> : [];
   if (!assistantMessage || typeof assistantMessage !== "object") {
@@ -843,7 +843,7 @@ export async function persistAssistantMessage(input: { spaceId: string; spaceSes
     // 与 stream-snapshot API 重新编号的 ordinal:N 不在同一套去重 key 体系里，
     // 导致同一条中间消息在快照恢复与实时事件两条路径里无法合并，最终在
     // ProcessCard/ToolCallList 的 {#each ... (id)} 产生重复 key(each_key_duplicate)。
-    meta: { ...(normalizeRecord(assistant.meta) ?? {}), turnId: input.turnId ?? null, spaceId: input.spaceId, sessionId: input.spaceSessionId, nativeApi: typeof assistant.api === "string" ? assistant.api : null, rawStopReason: stopReason, messageOrdinal: input.messageOrdinal ?? null, ...(isEmptySuccessfulAssistant ? { emptyAssistantMessageConvertedToError: true } : {}), thinking: normalized.thinking, thinkingSummary: normalized.thinkingSummary, toolCallRenderStates: normalized.toolCallRenderStates, agentSessionEntryId: typeof assistant.sessionEntryId === "string" ? assistant.sessionEntryId : null },
+    meta: { ...(normalizeRecord(assistant.meta) ?? {}), turnId: input.turnId ?? null, spaceId: input.spaceId, sessionId: input.spaceSessionId, nativeApi: typeof assistant.api === "string" ? assistant.api : null, rawStopReason: stopReason, messageOrdinal: input.messageOrdinal ?? null, ...(typeof input.contextWindow === "number" && input.contextWindow > 0 ? { contextWindow: input.contextWindow } : {}), ...(typeof input.maxContext === "number" && input.maxContext > 0 ? { maxContext: input.maxContext } : {}), ...(isEmptySuccessfulAssistant ? { emptyAssistantMessageConvertedToError: true } : {}), thinking: normalized.thinking, thinkingSummary: normalized.thinkingSummary, toolCallRenderStates: normalized.toolCallRenderStates, agentSessionEntryId: typeof assistant.sessionEntryId === "string" ? assistant.sessionEntryId : null },
     usage: normalizeUsage(assistant.usage as PersistMessageInput["message"]["usage"]),
     ...timing,
   };
@@ -1011,6 +1011,7 @@ type PersistCompactionEventInput = {
   firstKeptEntryId: string;
   model: { provider: string; id: string };
   contextWindow: number;
+  maxContext?: number;
   keepRecentTokens: number;
   summarizedMessageCount: number;
   attemptCount: number;
@@ -1124,6 +1125,7 @@ export async function persistCompactionEvent(
         llmRound: input.llmRound,
         triggerReason: input.triggerReason,
         contextWindow: input.contextWindow,
+        ...(input.maxContext ? { maxContext: input.maxContext } : {}),
         tokensBefore: input.tokensBefore,
         estimatedTokensAfter: input.estimatedTokensAfter,
         provider: input.model.provider,

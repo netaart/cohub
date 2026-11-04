@@ -12,6 +12,10 @@ export type CohubModel<TApi extends Api = Api> = Model<TApi> & {
   defaultThinkingLevel?: ModelThinkingLevel;
   requestProfile?: ModelRequestProfile;
   imageUrlInput?: boolean;
+  /** Effective context threshold, clamped to `contextWindow`. */
+  maxContext?: number;
+  maxContextSource?: ModelDef["maxContextSource"];
+  maxContextSourceRef?: string;
 };
 
 function finiteNumberOrZero(value: unknown): number {
@@ -54,6 +58,7 @@ export class CohubModelRegistry {
         const api = modelDef.api ?? providerConfig.api;
         const baseUrl = modelDef.baseUrl ?? providerConfig.baseUrl;
         if (!api || !baseUrl || !modelDef.id) continue;
+        const contextWindow = modelDef.contextWindow ?? 128000;
         mergedModels.set(`${provider}:${modelDef.id}`, {
           id: modelDef.id,
           name: modelDef.name ?? modelDef.id,
@@ -65,7 +70,10 @@ export class CohubModelRegistry {
           thinkingLevelMap: modelDef.thinkingLevelMap,
           input: modelDef.input ?? ["text"],
           cost: normalizeModelCost(modelDef.cost),
-          contextWindow: modelDef.contextWindow ?? 128000,
+          contextWindow,
+          maxContext: Math.min(modelDef.maxContext ?? contextWindow, contextWindow),
+          maxContextSource: modelDef.maxContextSource,
+          maxContextSourceRef: modelDef.maxContextSourceRef,
           maxTokens: modelDef.maxTokens ?? 16384,
           requestProfile: modelDef.requestProfile ?? providerConfig.requestProfile,
           imageUrlInput: modelDef.imageUrlInput ?? providerConfig.imageUrlInput,

@@ -11,14 +11,19 @@ import {
   resolveRuntimeModelsConfig,
   type CachedModelsConfig,
   type ModelsConfig,
+  type ModelsConfigModLayer,
 } from "@cohub/infra/config-runtime/models";
+import { loadSpaceModModelsConfigs } from "@cohub/core/space-mods";
+import { createLogger } from "@cohub/infra/logging";
 import { config } from "../config.js";
+import { db } from "../db/index.js";
 import { redisCommandClient } from "../redis.js";
 import { CompletionModelRegistry, type RuntimeLlmModel } from "./completion-registry.js";
 
 const PLATFORM_MODELS_PATH = join(config.platformConfigRoot, "platform", ".cohub", "models.json");
 const getUserModelsPath = (userId: string) => join(config.platformConfigRoot, "users", userId, ".cohub", "models.json");
 
+const logger = createLogger({ serviceName: "cohub-api" });
 const inflightByKey = new Map<string, Promise<ModelsConfig | null>>();
 
 async function loadModelsFromFile(input: {
@@ -46,6 +51,12 @@ async function loadModelsFromFile(input: {
   try {
     content = parseModelsConfig(rawText);
   } catch (error) {
+    if (input.allowMissing) {
+      logger.warn(`[Models] ignoring invalid user models config at ${input.modelsPath}:`, error);
+      const cached = createCachedModelsConfig({ content: null });
+      await redisCommandClient.set(input.redisKey, JSON.stringify(cached), "EX", MODELS_CACHE_TTL_SEC);
+      return cached;
+    }
     if (error instanceof SyntaxError) throw new Error("Models catalog file is invalid JSON");
     throw error;
   }
@@ -84,40 +95,60 @@ async function loadCachedModels(input: {
   }
 }
 
-export async function loadRuntimeModelsConfigs(userId?: string | null): Promise<ModelsConfig[]> {
+async function loadModModelsConfigs(spaceId?: string | null): Promise<ModelsConfigModLayer[]> {
+  if (!spaceId?.trim()) return [];
+  const loaded = await loadSpaceModModelsConfigs(db, spaceId.trim(), {
+    checkpointCacheRoot: config.checkpointCacheRoot,
+  }).catch((error) => {
+    logger.warn(`[Models] failed to load mod models configs spaceId=${spaceId}:`, error);
+    return null;
+  });
+  for (const warning of loaded?.warnings ?? []) logger.warn(`[Models] ${warning}`);
+  return (loaded?.configs ?? []).map((item) => ({ config: item.config, ref: item.ref }));
+}
+
+export async function loadRuntimeModelsConfigs(
+  userId?: string | null,
+  spaceId?: string | null,
+): Promise<ModelsConfig[]> {
   const platform = await loadCachedModels({
     redisKey: PLATFORM_MODELS_REDIS_KEY,
     modelsPath: PLATFORM_MODELS_PATH,
     allowMissing: false,
   });
   const trimmedUserId = userId?.trim();
-  const user = trimmedUserId
-    ? await loadCachedModels({
-        redisKey: getUserModelsRedisKey(trimmedUserId),
-        modelsPath: getUserModelsPath(trimmedUserId),
-        allowMissing: true,
-      })
-    : null;
-  return [resolveRuntimeModelsConfig({ platform, user })];
+  const [user, mods] = await Promise.all([
+    trimmedUserId
+      ? loadCachedModels({
+          redisKey: getUserModelsRedisKey(trimmedUserId),
+          modelsPath: getUserModelsPath(trimmedUserId),
+          allowMissing: true,
+        })
+      : null,
+    loadModModelsConfigs(spaceId),
+  ]);
+  return [resolveRuntimeModelsConfig({ platform, mods, user })];
 }
 
 export async function validatePromptModel(input: {
   userId: string;
   provider?: string | null;
   model?: string | null;
+  spaceId?: string | null;
 }) {
   const modelId = input.model?.trim();
   if (!modelId) return true;
   const provider = input.provider?.trim() || "cohub";
-  return isRuntimeModelAvailable(await loadRuntimeModelsConfigs(input.userId), provider, modelId);
+  return isRuntimeModelAvailable(await loadRuntimeModelsConfigs(input.userId, input.spaceId), provider, modelId);
 }
 
 export async function resolveCompletionModel(input: {
   userId: string;
   provider?: string | null;
   model?: string | null;
+  spaceId?: string | null;
 }) {
-  const configs = await loadRuntimeModelsConfigs(input.userId);
+  const configs = await loadRuntimeModelsConfigs(input.userId, input.spaceId);
   const registry = new CompletionModelRegistry(configs);
   const provider = input.provider?.trim() || null;
   const modelId = input.model?.trim() || null;

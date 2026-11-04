@@ -571,6 +571,7 @@ export type BillingResponsePayload = {
 export type BillingBalanceActivityKind =
   | "grant"
   | "usage"
+  | "reversal"
   | "refund"
   | "expire"
   | "revoke"
@@ -1318,6 +1319,8 @@ export type CreateSpacePromptInput = {
   harness?: HarnessKind | null;
   /** Optional thinking level override for this turn. Omit to inherit session default. */
   thinkingLevel?: ModelThinkingLevel | null;
+  /** Optional context threshold for this turn, clamped to the selected model's context window. */
+  maxContext?: number | null;
   /** Local Harness approval mode; requires Runtime support. Omit to keep the Harness's own settings. */
   approvalMode?: ApprovalMode | null;
   /** Local Harness service tier (for example Codex `priority`); omit for the Harness default. */

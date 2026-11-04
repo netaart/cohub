@@ -26,6 +26,7 @@ const COMPACTION_META_KEYS = [
   "llmRound",
   "triggerReason",
   "contextWindow",
+  "maxContext",
   "tokensBefore",
   "estimatedTokensAfter",
   "provider",
@@ -78,6 +79,8 @@ export const REALTIME_MESSAGE_META_KEYS = [
   "turnId",
   "messageId",
   "messageOrdinal",
+  "contextWindow",
+  "maxContext",
   "compaction",
 ] as const;
 

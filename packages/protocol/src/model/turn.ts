@@ -55,6 +55,8 @@ export type ContextCompactionMeta = {
   llmRound: number | null;
   triggerReason: ContextCompactionTriggerReason;
   contextWindow: number;
+  /** Effective threshold used for the decision; defaults to contextWindow. */
+  maxContext?: number;
   tokensBefore: number;
   estimatedTokensAfter: number | null;
   provider: string;

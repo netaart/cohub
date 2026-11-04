@@ -85,7 +85,7 @@ test("persisted catalog copies survive platform connection changes and model ret
   const cached = parseCachedModelsConfig(JSON.stringify(createCachedModelsConfig({ content: user })));
   const expected = mergeModelsConfigs(platform, { providers: { cohub: { models: [{ id: "chat", contextWindow: 200000 }] } } });
   assert.deepEqual(mergeModelsConfigs(platform, parseModelsConfig(JSON.stringify(user))), expected);
-  assert.deepEqual(resolveRuntimeModelsConfig({ platform, user: cached?.content }), resolveRuntimeModelsConfig({ platform: expected }));
+  assert.deepEqual(resolveRuntimeModelsConfig({ platform, user: cached?.content }), resolveRuntimeModelsConfig({ platform, user }));
   assert.equal(isRuntimeModelAvailable([platform, user], "cohub", "chat"), true);
   assert.equal(isRuntimeModelAvailable([platform, user], "cohub", "sibling"), false);
   assert.deepEqual({ platform, user }, before);

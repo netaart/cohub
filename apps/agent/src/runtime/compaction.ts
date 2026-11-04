@@ -6,6 +6,7 @@ import {
 import type { Usage } from "@earendil-works/pi-ai";
 import { logger } from "../logger.js";
 import type { SessionHandle } from "../session.js";
+import type { CohubModel } from "./model-registry.js";
 import { persistCompactionEvent } from "../persistence.js";
 import { refreshSessionHandleFileSignature } from "../session.js";
 import { getAgentTracer } from "@cohub/infra/tracing/agent";
@@ -95,11 +96,12 @@ export async function maybeAutoCompact(
   handle: SessionHandle,
   input: { actorUserId: string | null; abortSignal?: AbortSignal; force?: boolean },
 ): Promise<CompactionOutcome> {
-  const model = handle.session.agent.state.model;
+  const model = handle.session.agent.state.model as CohubModel;
   const contextWindow = model.contextWindow ?? 0;
-  if (!contextWindow) return { compacted: false, reason: "no_context_window" };
+  const maxContext = model.maxContext ?? contextWindow;
+  if (!maxContext) return { compacted: false, reason: "no_context_window" };
 
-  const settings = resolveCompactionSettings(contextWindow);
+  const settings = resolveCompactionSettings(maxContext);
   if (!settings.enabled) return { compacted: false, reason: "disabled" };
 
   const force = input.force === true;
@@ -114,14 +116,14 @@ export async function maybeAutoCompact(
   const thresholdTokens = Math.max(tokenBudget?.estimatedTokens ?? Math.ceil(proxyTokens * ratio), proxyTokens);
   if (!force) {
     if (!tokenBudget && proxyTokens <= 0) return { compacted: false, reason: "no_usage_data" };
-    if (!shouldCompact(thresholdTokens, contextWindow, settings)) {
+    if (!shouldCompact(thresholdTokens, maxContext, settings)) {
       return { compacted: false, reason: "below_threshold" };
     }
   }
 
   const tokensLabel = tokenBudget?.estimatedTokens ?? "unknown";
   logger.info(
-    `[Compaction] ${force ? "overflow-compact" : "auto-compact"} triggered sessionId=${handle.sessionId} model=${model.provider}/${model.id} contextWindow=${contextWindow} reserve=${settings.reserveTokens} tokens=${tokensLabel} proxyTokens=${proxyTokens} ratio=${ratio.toFixed(2)} threshold=${thresholdTokens}`,
+    `[Compaction] ${force ? "overflow-compact" : "auto-compact"} triggered sessionId=${handle.sessionId} model=${model.provider}/${model.id} contextWindow=${contextWindow} maxContext=${maxContext} source=${model.maxContextSource ?? "unknown"} reserve=${settings.reserveTokens} tokens=${tokensLabel} proxyTokens=${proxyTokens} ratio=${ratio.toFixed(2)} threshold=${thresholdTokens}`,
   );
 
   let compactionEntryAppended = false;
@@ -132,6 +134,7 @@ export async function maybeAutoCompact(
   const outcome = await tracer.startActiveSpan("agent.compaction", async (span): Promise<CompactionOutcome> => {
     span.setAttribute("cohub.session_id", handle.sessionId);
     span.setAttribute("agent.context_window", contextWindow);
+    span.setAttribute("agent.max_context", maxContext);
     span.setAttribute("agent.compaction.force", force);
 
     try {
@@ -226,7 +229,7 @@ export async function maybeAutoCompact(
       const invalidEffect = validateCompactionEffect({
         estimatedTokensBefore: Math.max(thresholdTokens, result.tokensBefore),
         estimatedTokensAfter: Math.max(estimatedTokensAfter, Math.ceil(estimatedTokensAfter * ratio)),
-        inputBudget: Math.max(1, contextWindow - settings.reserveTokens),
+        inputBudget: Math.max(1, maxContext - settings.reserveTokens),
         force,
       });
       if (invalidEffect) {
@@ -320,6 +323,7 @@ export async function maybeAutoCompact(
         firstKeptEntryId,
         model: { provider: model.provider, id: model.id },
         contextWindow,
+        maxContext,
         keepRecentTokens: settings.keepRecentTokens,
         summarizedMessageCount,
         attemptCount: compactAttempt.attemptCount,

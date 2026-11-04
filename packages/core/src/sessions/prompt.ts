@@ -151,6 +151,8 @@ export type SubmitSessionPromptInput = {
   harness?: PromptHarness | null;
   /** Optional thinking level override for this turn. Omit to inherit session default. */
   thinkingLevel?: string | null;
+  /** Optional context threshold override for this Turn, clamped to the model context window. */
+  maxContext?: number | null;
   /** Local Harness approval mode for this Turn; omit to keep the Harness's own settings. */
   approvalMode?: ApprovalMode | null;
   /** Local Harness service tier for this Turn; omit for the Harness default. */
@@ -464,6 +466,7 @@ export const submitSessionPrompt = async (
   const turnIntent: SessionTurnIntent = isDirectShellCommand ? "steer" : (input.intent ?? "followup");
   const userMessageId = deps.randomUUID();
   const requestedThinkingLevel = typeof input.thinkingLevel === "string" && isModelThinkingLevel(input.thinkingLevel.trim()) ? input.thinkingLevel.trim() : undefined;
+  const requestedMaxContext = typeof input.maxContext === "number" && Number.isSafeInteger(input.maxContext) && input.maxContext > 0 ? input.maxContext : undefined;
   const billingDecision: BillingAccessDecision | null = isDirectShellCommand || localHarness
     ? null
     : (await deps.billingUsageGate?.evaluate({
@@ -505,6 +508,7 @@ export const submitSessionPrompt = async (
     provider: modelProvider.provider,
     harness: input.harness ?? "cohub",
     requestedThinkingLevel,
+    ...(requestedMaxContext ? { requestedMaxContext } : {}),
     ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
     ...(input.serviceTier ? { requestedServiceTier: input.serviceTier } : {}),
     promptTemplate,
