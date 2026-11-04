@@ -65,9 +65,9 @@ export async function loadGenerationBillingConfig(
   onError: (error: unknown) => void,
 ): Promise<GenerationBillingConfig> {
   const path = join(platformConfigRoot, CONFIG_PATH);
-  const cached = cache.get(platformConfigRoot);
   try {
     const info = await stat(path);
+    const cached = cache.get(platformConfigRoot);
     if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.config;
     const config = parseGenerationBillingConfig(await readFile(path, "utf-8"));
     cache.set(platformConfigRoot, { mtimeMs: info.mtimeMs, size: info.size, config });
@@ -78,7 +78,8 @@ export async function loadGenerationBillingConfig(
       return EMPTY_CONFIG;
     }
     onError(error);
-    return cached?.config ?? EMPTY_CONFIG;
+    // Re-read: a concurrent load may have cached a newer valid config during this one's I/O.
+    return cache.get(platformConfigRoot)?.config ?? EMPTY_CONFIG;
   }
 }
 
