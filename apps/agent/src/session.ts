@@ -11,7 +11,7 @@ import { interruptSessionTurn, persistAssistantMessage, persistUserMessage } fro
 import { sendOutput } from "./redis.js";
 import { logger } from "./logger.js";
 import { getAgentTracer } from "@cohub/infra/tracing/agent";
-import type { CohubModelRegistry } from "./runtime/model-registry.js";
+import type { CohubModel, CohubModelRegistry } from "./runtime/model-registry.js";
 import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
 import {
   ensureAgentSpaceSessionPath,
@@ -575,6 +575,7 @@ export async function persistInterruptedAssistantSnapshot(
       messageOrdinal: handle.activeAssistantContext?.assistantOrdinal ?? null,
       thinkingLevel: handle.session.agent.state.thinkingLevel,
       contextWindow: handle.session.agent.state.model.contextWindow,
+      contextWindowSource: (handle.session.agent.state.model as CohubModel).contextWindowSource,
     });
   });
 
@@ -1036,6 +1037,7 @@ export function subscribeSessionEvents(handle: SessionHandle) {
             messageOrdinal: assistantContext.assistantOrdinal,
             thinkingLevel: handle.session.agent.state.thinkingLevel,
             contextWindow: handle.session.agent.state.model.contextWindow,
+            contextWindowSource: (handle.session.agent.state.model as CohubModel).contextWindowSource,
           });
         } catch (error) {
           if (error instanceof Error) span.recordException(error);

@@ -29,3 +29,12 @@ export function limitBatchToApprovalMode<T extends { meta: unknown }>(turns: T[]
   const end = turns.findIndex((turn) => modeOf(turn) !== modeOf(first));
   return end === -1 ? turns : turns.slice(0, end);
 }
+
+/** Merged follow-ups run as one Turn, so the newest context window request in the batch wins. */
+export function resolveBatchContextWindow(turns: Array<{ meta: unknown }>): number | undefined {
+  for (const turn of [...turns].reverse()) {
+    const value = (turn.meta as Record<string, unknown> | null)?.requestedContextWindow;
+    if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  }
+  return undefined;
+}

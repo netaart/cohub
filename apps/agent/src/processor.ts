@@ -12,7 +12,8 @@ import { getSpace } from "./api.js";
 import { abortSessionTurn, failSessionTurn, interruptSessionTurn, persistAssistantMessage, persistUserMessage, publishSessionTurnsUpdated } from "./persistence.js";
 import { ensureSandboxConnection } from "./sandbox-pool.js";
 import { createSandboxCodingTools } from "./sandbox/tools.js";
-import { CohubModelRegistry } from "./runtime/model-registry.js";
+import { CohubModelRegistry, type CohubModel } from "./runtime/model-registry.js";
+import { resolveBatchContextWindow } from "./runtime/batch-limit.js";
 import { loadRuntimeModelsConfigs } from "./runtime/models-loader.js";
 import { loadImageToTextConfig } from "./runtime/image-to-text-config.js";
 import { loadSpaceEnvSnapshot } from "./runtime/env-cache.js";
@@ -576,6 +577,7 @@ async function runDirectShellCommandTurn(input: {
       completedAt,
       thinkingLevel: handle.session.agent.state.thinkingLevel,
       contextWindow: handle.session.agent.state.model.contextWindow,
+      contextWindowSource: (handle.session.agent.state.model as CohubModel).contextWindowSource,
     });
 
     input.turnMetrics.toolCallCount += 1;
@@ -638,12 +640,6 @@ function resolveRequestedThinkingLevel(ownerMeta: Record<string, unknown>): stri
   if (typeof ownerMeta.requestedThinkingLevel !== "string") return undefined;
   const trimmed = ownerMeta.requestedThinkingLevel.trim();
   return trimmed || null;
-}
-
-function resolveRequestedContextWindow(ownerMeta: Record<string, unknown>): number | null | undefined {
-  const value = ownerMeta.requestedContextWindow;
-  if (value === undefined) return undefined;
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function resolveActorUserId(ownerMeta: Record<string, unknown>) {
@@ -909,7 +905,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
         actorUserId,
         requestedModel: resolveRequestedModel(ownerMeta),
         requestedThinkingLevel: resolveRequestedThinkingLevel(ownerMeta),
-        requestedContextWindow: resolveRequestedContextWindow(ownerMeta),
+        requestedContextWindow: resolveBatchContextWindow(batch.turns),
         beforeTurnSequence: batch.turns[0]?.sequence ?? batch.ownerTurn.sequence,
       });
       const activeHandle = handle;

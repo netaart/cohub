@@ -42,7 +42,7 @@ This keeps the platform model's API, destination, key, headers, and remaining pa
 
 A non-positive or non-integer value fails schema validation: an invalid user file fails clearly, while an invalid mod file is ignored with a warning.
 
-Inspect the effective value and its source with `cohub -s <space> models ls` or `GET /api/models?spaceId=<spaceId>`. Each model reports `contextWindow`, `contextWindowSource` (`platform`, `mod`, `user`, `prompt`, or `default`), and `contextWindowSourceRef` (for example the mod mount slug).
+Inspect the configured value and its source with `cohub -s <space> models ls` or `GET /api/models?spaceId=<spaceId>`. Each model reports `contextWindow`, `contextWindowSource` (`platform`, `mod`, `user`, or `default`), and `contextWindowSourceRef` (for example the mod mount slug). A prompt value belongs to its session, so it shows on each Turn's meta instead: `contextWindow` with `contextWindowSource: "prompt"`.
 
 Allowed fields are `id`, `name`, `reasoning`, `defaultThinkingLevel`, `thinkingLevelMap`, `hidden`, `input`, `contextWindow`, and `maxTokens`. `thinkingLevelMap` merges its supplied entries; arrays such as `input` replace the previous array. Explicit `false` and thinking-level `null` values are preserved. An empty `models` list leaves the catalog intact.
 
