@@ -1,5 +1,31 @@
 # @neta-art/cohub-cli
 
+## 10.21.0
+
+### Minor Changes
+
+- 28f6f3b: `cohub version` shows this CLI, the `cohub` on PATH, and the version each running Runtime serves. Runtimes report their CLI version when they connect, so a Space's Runtime panel can show it, and desktop shells read the same answer for their About panels through `cli.about`.
+  
+  Hosts: deploy the Gateway before this CLI reaches clients. An older Gateway closes connections that report a client.
+- 329a52e: Board items can autoplay. Set `"autoplay": true` on an app, a video, a 3D model or a finished task with a video result, and it opens as the Board opens: the app runs, the video loops muted, the model renders in its card and plays its own animation, drawing nothing more while it is still. Every viewer sees the same thing. Only items on screen and large enough run, and each device runs as many as it can. The largest go first, and the rest keep their still card until there is room. An app that scrolls off screen keeps running for 30 seconds, so panning back does not reload it. Video exports draw autoplay videos looping. `boards inspect` flags `autoplay` on items with nothing to play.
+  
+  Hosts: no action.
+- b2bd021: Boards take scripts at their word. Dragging, resizing or rotating an item a script presents saves the authored item, so a lift on the selected card no longer shrinks it, and presentations never enter undo. Scripts that keep answering each other's `emit` no longer stall the Board: past 16 handlers in a row the emit rejects with the reason, and full event queues reject instead of dropping. Exports deliver `emit` in the same host, in document order, before time moves on, and give scripts the exported area as `viewchange`, so profiles and exports switch passes as a viewer would. `--frame` draws the frame as a page, with its fill and shaders. A clipping Frame keeps its own shader passes inside its box. Shader passes go up to 16. Exports warn about shaders they did not draw and why. `boards simulate` compiles shaders before stepping, reports per step where each press landed and what took it, lists rejected emits, and stops after `--timeout` naming the busy scripts and their lanes; `boards export` does the same per frame. `boards profile` reports software or hardware WebGL, the median and range of each owner over rounds, and keeps within `--budget` by measuring smaller. `boards diff` lists what changed between two versions; the SDK adds `board.diff()` and `diffBoardVersions()`.
+  
+  Hosts: no action.
+- a8a7430: Large, lively Boards stay smooth. Videos on screen get the decoders first, so looping videos elsewhere on the Board no longer freeze the ones in view. Off screen, a script that only moves or draws its own item steps four times a second, with the same state as before. Items a script walks across the Board stay live while they move, so they no longer repaint the cards around them or replan what is drawn, and moves and fades skip schema validation. A wide blur renders at the density it keeps, about half the cost. A shader pass whose picture changes only every few units takes `texel` and shades once per texel, so pixel maps cost the same at any zoom. Scripts import `.json` data `with { type: "json" }`, shared and frozen across instances instead of parsed by each. `boards profile` suggests `texel` for heavy full-box passes and names models too large for phones.
+  
+  Hosts: no action.
+
+### Patch Changes
+
+- Updated dependencies [28f6f3b]
+- Updated dependencies [329a52e]
+- Updated dependencies [b2bd021]
+- Updated dependencies [a8a7430]
+- Updated dependencies [096d18a]
+  - @neta-art/cohub@13.12.0
+
 ## 10.20.0
 
 ### Minor Changes
