@@ -209,7 +209,8 @@ Behavior:
   debit before reversing it; holds on unfinished tasks are released only after a
   24-hour hard cap.
 - Personal wallet activity: `cohub me billing-activity`; Space wallet: `cohub spaces wallet activity`.
-- Models absent from the config keep the existing post-success charge path.
+- Models absent from the config keep the existing post-success charge path. An invalid
+  config is logged and the last valid one stays in effect; it never blocks other models.
 
 Rollout: deploy the worker that understands reservations before adding the config,
 so an older worker cannot charge again after the reserve. Requires

@@ -136,13 +136,9 @@ router.post("/", async (c) => {
       resolvedAt: resolvedDiscount.resolvedAt,
     });
   }
-  let reserveConfig: Awaited<ReturnType<typeof loadGenerationBillingConfig>>;
-  try {
-    reserveConfig = await loadGenerationBillingConfig(config.platformConfigRoot);
-  } catch (error) {
-    logger.error("[Billing] failed to load generation billing config", { error });
-    return generationError(c, 503, "generation_billing_unavailable", "Generation billing configuration is invalid.");
-  }
+  const reserveConfig = await loadGenerationBillingConfig(config.platformConfigRoot, (error) => {
+    logger.error("[Billing] invalid generation billing config", { error });
+  });
   const reserveCap = resolveGenerationBillingReserve(reserveConfig, request.model);
   const reserveUsd = reserveCap === null || isGenerationModelDiscountFree(resolvedDiscount)
     ? 0

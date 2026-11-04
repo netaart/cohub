@@ -56,23 +56,30 @@ export function resolveGenerationBillingReserve(
   return config.reserves.get(model.trim()) ?? null;
 }
 
+/**
+ * Never throws: a broken config must not block non-whitelisted models. On error it reports and keeps the
+ * last valid config, or no whitelist (the original post-success charge path) if none was loaded yet.
+ */
 export async function loadGenerationBillingConfig(
   platformConfigRoot: string,
+  onError: (error: unknown) => void,
 ): Promise<GenerationBillingConfig> {
   const path = join(platformConfigRoot, CONFIG_PATH);
-  let info: Awaited<ReturnType<typeof stat>>;
-  try {
-    info = await stat(path);
-  } catch (error) {
-    if ((error as { code?: unknown }).code !== "ENOENT") throw error;
-    cache.delete(platformConfigRoot);
-    return EMPTY_CONFIG;
-  }
   const cached = cache.get(platformConfigRoot);
-  if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.config;
-  const config = parseGenerationBillingConfig(await readFile(path, "utf-8"));
-  cache.set(platformConfigRoot, { mtimeMs: info.mtimeMs, size: info.size, config });
-  return config;
+  try {
+    const info = await stat(path);
+    if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.config;
+    const config = parseGenerationBillingConfig(await readFile(path, "utf-8"));
+    cache.set(platformConfigRoot, { mtimeMs: info.mtimeMs, size: info.size, config });
+    return config;
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "ENOENT") {
+      cache.delete(platformConfigRoot);
+      return EMPTY_CONFIG;
+    }
+    onError(error);
+    return cached?.config ?? EMPTY_CONFIG;
+  }
 }
 
 export function clearGenerationBillingConfigCache(): void {

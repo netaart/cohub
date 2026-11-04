@@ -90,12 +90,9 @@ export async function createGenerationSessionExecution(input: {
   const discount = await billingOperations.getGenerationModelDiscount({ userId: input.userId, model: input.model }).catch(() => {
     throw new GenerationSessionExecutionError(503, "generation_pricing_unavailable", "Generation pricing is temporarily unavailable.");
   });
-  let reserveConfig: Awaited<ReturnType<typeof loadGenerationBillingConfig>>;
-  try {
-    reserveConfig = await loadGenerationBillingConfig(config.platformConfigRoot);
-  } catch {
-    throw new GenerationSessionExecutionError(503, "generation_billing_unavailable", "Generation billing configuration is invalid.");
-  }
+  const reserveConfig = await loadGenerationBillingConfig(config.platformConfigRoot, (error) => {
+    console.error("[Billing] invalid generation billing config", { error });
+  });
   const reserveCap = resolveGenerationBillingReserve(reserveConfig, input.model);
   const reserveUsd = reserveCap === null || isGenerationModelDiscountFree(discount)
     ? 0
