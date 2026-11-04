@@ -4,6 +4,20 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.92 — 2026-11-04
+
+- **Native desktop tabs**: the macOS, Windows and Linux shells now run each tab in its own WebView and bridge, so switching never reloads and a crashed page leaves the others intact. Windows and tabs restore at launch, tabs hidden for five minutes are frozen, tab/window/app close guards unsaved work, and a new `tabs` host-bridge capability reports dirty state, background attention and key capture (macOS native window tabs, Windows tab strip, Linux AdwTabView).
+- **Board autoplay**: mark an app, video, 3D model or finished task result with `autoplay: true` and every viewer sees it live as the Board opens. One scheduler runs on-screen items largest-first within per-device budgets, keeps scrolled-off apps warm for 30 seconds, defers to a viewer's local Run/Stop, pauses cards when the full player opens, and honors data saver and reduced motion; video exports draw autoplay clips looping.
+- **Lively Board performance overhaul**: video decoders prioritize audio then on-screen videos, off-screen scripts that only draw their own item step at 4 Hz while the runtime replays 60 Hz, items a script moves stay live without repainting or replanning far cards, wide blurs render at the density they keep, `texel` shader passes shade once per texel, and JSON script imports are shared and frozen per worker; published 3D model stills are cached in Cache Storage.
+- **Deterministic Board scripts, simulation and export**: emit rejects past 16 chained handlers instead of stalling the Board, exports deliver events in document order with the exported view, `--frame` renders a Frame as a page with its shaders, and `boards simulate`, `export` and `profile` compile shaders first and report rejected emits, busy scripts, per-owner timing ranges and software WebGL. `boards diff` and `board.diff()` list changes between versions, and shader passes take 16 layers.
+- **Unified About panels and version reporting**: web, macOS, Windows, Linux and Android gain native About surfaces plus help-menu, user-menu and command-palette entries, backed by one repository URL. `cohub version` and the shell-only `cli.about` report the active CLI, the `cohub` on PATH and each running Runtime, and Runtimes now advertise their client in `runtime.hello` for the Space Runtime panel.
+
+### Bug Fixes
+
+- **Running workspace measurement**: running cloud sandboxes are now re-measured 15 minutes after agent activity with a 2-hour safety pass, stopped spaces are measured 2 minutes after a stop or direct write, and at most two scans run deployment-wide with a 40-minute timeout.
+- **App Manager loading**: versions now arrive with the App detail in one cached response and render immediately, view stats show by default after a single grant, and opening the App Manager no longer counts as a view.
+- **Live tool call streaming**: the web client keeps tool call input streaming instead of stalling mid-response.
+
 ## v2.91 — 2026-11-03
 
 - **Shader rendering overhaul**: Board shaders now paint the full view from the first frame — a Board script's filter covers the whole view instead of only the items drawn so far, eliminating the dark first frame and clipped edges. Full-box passes shade at most 1.5 device pixels per CSS pixel scaled by quality, programs compile once in the background while the previous version keeps drawing, script modules load in parallel, and uniform or pass changes reach the GPU without recomposing the Board.
