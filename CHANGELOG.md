@@ -4,6 +4,17 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.93 — 2026-11-04
+
+- **Board App play mode**: published Board Apps now open in play, where each visitor drags unlocked items, pans empty space, and script regions take every press. Changes save as a patch over the published snapshot in IndexedDB, scoped to the App version, so a reload restores progress, a new version starts fresh, and a per-version cap keeps the cache bounded; editors get the same via a Play toggle with reset plus undo, the SDK adds a `play` tool, and `cohub boards simulate` accepts `{"tool": "play"}`.
+- **Realtime visitor presence in App Boards**: visitors see each other's cursors, selections and reactions through a shared App room instead of a Space connection. Awareness is now channel-based, `client.rooms.open({ appId, code, create })` joins or creates a room by code on the viewer's behalf, and the gateway admits signed-in accounts to rooms opened for published Apps, with bounded reconnect backoff.
+- **Script capability gating**: read-only viewers now see `ctx.capabilities.has("board.commit")` as false and commits reject instead of silently failing, consistent across the web app, exports and `boards simulate`; script controllers only expose the commit host when the editor can write.
+
+### Bug Fixes
+
+- **Linux desktop updates**: an update is applied once instead of replaying on every launch, a per-data-directory lock keeps one process per install with a D-Bus handoff to the running instance, and a launch superseded by a replaced AppImage restarts the installed one after the updater finishes.
+- **Claude Code gateway and approval modes**: when `ANTHROPIC_BASE_URL` points at a gateway, built-in Opus, Sonnet and Haiku show the gateway as their provider, and a turn with no approval mode now follows Claude Code's local settings rather than forcing `acceptEdits`.
+
 ## v2.92 — 2026-11-04
 
 - **Native desktop tabs**: the macOS, Windows and Linux shells now run each tab in its own WebView and bridge, so switching never reloads and a crashed page leaves the others intact. Windows and tabs restore at launch, tabs hidden for five minutes are frozen, tab/window/app close guards unsaved work, and a new `tabs` host-bridge capability reports dirty state, background attention and key capture (macOS native window tabs, Windows tab strip, Linux AdwTabView).

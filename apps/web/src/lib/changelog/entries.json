@@ -1,5 +1,19 @@
 [
 	{
+		"version": "2.93",
+		"date": "2026-11-04",
+		"tags": ["v2.93.0"],
+		"highlights": [
+			"**Board App play mode**: published Board Apps now open in play, where each visitor drags unlocked items, pans empty space, and script regions take every press. Changes save as a patch over the published snapshot in IndexedDB, scoped to the App version, so a reload restores progress, a new version starts fresh, and a per-version cap keeps the cache bounded; editors get the same via a Play toggle with reset plus undo, the SDK adds a `play` tool, and `cohub boards simulate` accepts `{\"tool\": \"play\"}`.",
+			"**Realtime visitor presence in App Boards**: visitors see each other's cursors, selections and reactions through a shared App room instead of a Space connection. Awareness is now channel-based, `client.rooms.open({ appId, code, create })` joins or creates a room by code on the viewer's behalf, and the gateway admits signed-in accounts to rooms opened for published Apps, with bounded reconnect backoff.",
+			"**Script capability gating**: read-only viewers now see `ctx.capabilities.has(\"board.commit\")` as false and commits reject instead of silently failing, consistent across the web app, exports and `boards simulate`; script controllers only expose the commit host when the editor can write."
+		],
+		"fixes": [
+			"**Linux desktop updates**: an update is applied once instead of replaying on every launch, a per-data-directory lock keeps one process per install with a D-Bus handoff to the running instance, and a launch superseded by a replaced AppImage restarts the installed one after the updater finishes.",
+			"**Claude Code gateway and approval modes**: when `ANTHROPIC_BASE_URL` points at a gateway, built-in Opus, Sonnet and Haiku show the gateway as their provider, and a turn with no approval mode now follows Claude Code's local settings rather than forcing `acceptEdits`."
+		]
+	},
+	{
 		"version": "2.92",
 		"date": "2026-11-04",
 		"tags": ["v2.92.0"],
