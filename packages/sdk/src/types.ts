@@ -584,6 +584,7 @@ export type BillingBalanceActivity = {
   kind: BillingBalanceActivityKind;
   tokenType: string;
   title: string;
+  generationPhase?: "reserve" | "settlement" | "refund" | null;
   description: string | null;
   sourceType: string | null;
   sourceId: string | null;

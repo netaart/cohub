@@ -45,11 +45,19 @@ function generationInput(payload: TaskPayload) {
   };
 }
 
-export async function markGenerationSessionRunning(taskRunId: string) {
+/** Moves the turn to running; returns false when the turn was cancelled while queued. */
+export async function markGenerationSessionRunning(taskRunId: string): Promise<boolean> {
   const [task] = await db.select({ spaceId: taskRuns.spaceId, sessionId: taskRuns.sessionId, turnId: taskRuns.turnId }).from(taskRuns).where(eq(taskRuns.id, taskRunId)).limit(1);
-  if (!task?.spaceId || !task.sessionId || !task.turnId) return;
+  if (!task?.spaceId || !task.sessionId || !task.turnId) return true;
   const [turn] = await db.update(sessionTurns).set({ status: "running", startedAt: new Date(), updatedAt: new Date() }).where(and(eq(sessionTurns.id, task.turnId), eq(sessionTurns.sessionId, task.sessionId), eq(sessionTurns.executionKind, "direct_generation"), inArray(sessionTurns.status, ["queued", "running"]))).returning();
-  if (turn) await dispatchTurnUpdated({ spaceId: task.spaceId, turn: toTurnRecord(turn) });
+  if (turn) {
+    await dispatchTurnUpdated({ spaceId: task.spaceId, turn: toTurnRecord(turn) }).catch((error) => {
+      console.warn("[GenerationSession] failed to dispatch running turn", error);
+    });
+    return true;
+  }
+  const [current] = await db.select({ status: sessionTurns.status }).from(sessionTurns).where(eq(sessionTurns.id, task.turnId)).limit(1);
+  return current?.status !== "cancelled";
 }
 
 export async function finalizeGenerationSession(input: { taskRunId: string; payload: TaskPayload; result: GenerationTaskResult }) {

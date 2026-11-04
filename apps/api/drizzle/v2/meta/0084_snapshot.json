@@ -1,5 +1,5 @@
 {
-  "id": "8f75a5b6-8f6f-4ec0-b154-310a7e183f1a",
+  "id": "2e843218-6e50-45df-b2b4-5e3ceaf937fb",
   "prevId": "f81c9b54-1c08-4f85-a870-bf32f62ca7c0",
   "version": "7",
   "dialect": "postgresql",
@@ -2380,6 +2380,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "settle_overage": {
+          "name": "settle_overage",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "discount_multiplier": {
           "name": "discount_multiplier",
           "type": "numeric(8, 5)",
@@ -2616,7 +2623,7 @@
       "checkConstraints": {
         "v2_chk_generation_billing_reservations_status": {
           "name": "v2_chk_generation_billing_reservations_status",
-          "value": "\"v2\".\"generation_billing_reservations\".\"status\" in ('reserving', 'held', 'settling', 'settled', 'releasing', 'released')"
+          "value": "\"v2\".\"generation_billing_reservations\".\"status\" in ('reserving', 'held', 'running', 'settling', 'settled', 'releasing', 'released')"
         },
         "v2_chk_generation_billing_reservations_reserve_usd": {
           "name": "v2_chk_generation_billing_reservations_reserve_usd",

@@ -52,7 +52,7 @@ router.get("/activities", async (c) => {
   if (!spaceWalletBillingOperations.status.configured) return c.json({ items: [], hasMore: false } satisfies SpaceWalletActivityPage);
   const activities = await spaceWalletBillingOperations.listBalanceActivities({ userId: spaceWalletCustomerId(spaceId), page: parsed.data, limit: 10, createCustomer: false, transactionLedger: true });
   return c.json({ items: activities.items.map((item) => ({
-    id: item.id, kind: item.kind, title: item.title, description: item.description,
+    id: item.id, kind: item.kind, title: item.title, generationPhase: item.generationPhase ?? null,
     amountUsd: item.amountUsd, createdAt: item.createdAt, sourceId: item.sourceId,
     actorUserId: null,
   })), hasMore: activities.pagination.hasMore } satisfies SpaceWalletActivityPage);

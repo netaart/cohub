@@ -1,3 +1,4 @@
+import { BillingApi } from "./apis/billing.js";
 import { ChannelsApi } from "./apis/channels.js";
 import { CronJobsApi } from "./apis/cron-jobs.js";
 import { GenerationsApi } from "./apis/generations.js";
@@ -28,6 +29,7 @@ export class CohubHttpClient {
   readonly spaces: SpacesApi;
   readonly channels: ChannelsApi;
   readonly user: UserApi;
+  readonly billing: BillingApi;
   readonly users: UsersApi;
   readonly generations: GenerationsApi;
   readonly models: ModelsApi;
@@ -73,6 +75,7 @@ export class CohubHttpClient {
     this.fileServices = createSpaceFileServices(this.transport, null, createLocalWorkspaces(options.localWorkspace));
     this.spaces = new SpacesApi(this.transport);
     this.channels = new ChannelsApi(this.transport);
+    this.billing = new BillingApi(this.transport);
     this.user = new UserApi(
       this.transport,
       apiBaseUrl,

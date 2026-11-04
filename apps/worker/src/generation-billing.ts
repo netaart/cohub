@@ -1,5 +1,5 @@
 import { billingOperations, spaceWalletBillingOperations } from "@cohub/billing";
-import { createGenerationBillingReservations, type GenerationBillingReservation } from "@cohub/core/generation-billing";
+import { createGenerationBillingReservations, settledReservationBilling, type GenerationBillingReservation } from "@cohub/core/generation-billing";
 import { taskRuns } from "@cohub/db";
 import { createLogger } from "@cohub/infra/logging";
 import { eq, sql } from "drizzle-orm";
@@ -9,14 +9,9 @@ const logger = createLogger({ serviceName: "cohub-worker" });
 
 async function notifySettled(reservation: GenerationBillingReservation, overage: boolean) {
   const { updateGenerationTurnBilling } = await import("./tasks/generation-session.js");
-  const reservedUsd = Number(reservation.reserveUsd);
-  const actualUsd = Number(reservation.actualUsd ?? 0);
   const billing = {
     status: overage ? "overage" as const : "recorded" as const,
-    amountUsd: actualUsd,
-    reservedAmountUsd: reservedUsd,
-    refundedAmountUsd: Math.max(0, Number((reservedUsd - actualUsd).toFixed(8))),
-    additionalAmountUsd: Math.max(0, Number((actualUsd - reservedUsd).toFixed(8))),
+    ...settledReservationBilling(reservation),
     usageType: reservation.usageType,
   };
   await updateGenerationTurnBilling(reservation.taskRunId, billing);

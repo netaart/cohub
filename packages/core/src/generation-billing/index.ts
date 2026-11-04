@@ -6,14 +6,16 @@ import {
   type BillingAccessDecision,
   type BillingOperations,
   type BillingUsageReversalReceipt,
+  type BillingUsageReversalResult,
   type SpaceWalletBillingOperations,
 } from "@cohub/billing";
 import { generationBillingReservations, taskRuns } from "@cohub/db";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { spaceWalletCustomerId, walletCreditsUsable } from "../space-wallet/index.js";
 
-const RESERVE_TTL_MS = 60 * 60 * 1000;
+// Hard cap for zombie tasks only; well past the longest provider wait (1h) plus queueing.
+const RESERVE_TTL_MS = 24 * 60 * 60 * 1000;
 const RESERVE_RECONCILE_GRACE_MS = 10 * 60 * 1000;
 const SETTLE_RECONCILE_GRACE_MS = 5 * 60 * 1000;
 const RECONCILE_BATCH_SIZE = 50;
@@ -125,6 +127,32 @@ export function planGenerationSettlement(reserveUsd: number, actualUsd: number):
   return { refundUsd: 0, extraUsd: 0 };
 }
 
+/** Billing must reverse exactly the requested amount; anything else keeps the row retryable. */
+function fullReversalReceipt(result: BillingUsageReversalResult, label: string): BillingUsageReversalReceipt {
+  if (result.status !== "reversed" || !result.receipt) {
+    throw new GenerationBillingUnavailableError(`${label} was not recorded.`);
+  }
+  if (Math.abs(result.receipt.amountUsd - result.amountUsd) > 1e-9) {
+    throw new GenerationBillingUnavailableError(
+      `${label} reversed ${result.receipt.amountUsd} of ${result.amountUsd} USD.`,
+    );
+  }
+  return result.receipt;
+}
+
+/** Billing metadata for a settled reservation, derived only from persisted values. */
+export function settledReservationBilling(reservation: GenerationBillingReservation): {
+  amountUsd: number;
+  reservedAmountUsd: number;
+  refundedAmountUsd: number;
+  additionalAmountUsd: number;
+} {
+  const reservedAmountUsd = rowUsd(reservation.reserveUsd);
+  const amountUsd = rowUsd(reservation.actualUsd);
+  const plan = planGenerationSettlement(reservedAmountUsd, amountUsd);
+  return { amountUsd, reservedAmountUsd, refundedAmountUsd: plan.refundUsd, additionalAmountUsd: plan.extraUsd };
+}
+
 type Candidate = {
   payer: GenerationBillingPayer;
   allowed: boolean;
@@ -144,7 +172,8 @@ export function createGenerationBillingReservations(input: {
   const operationsFor = (payer: GenerationBillingPayer): BillingOperations =>
     payer.type === "space_wallet" ? walletBilling : billing;
 
-  const reasonFor = (payer: GenerationBillingPayer, userId: string, reason: string | undefined) =>
+  // Billing reasons derive only from the row so every replay of an operation id sends identical values.
+  const reasonFor = (payer: GenerationBillingPayer, userId: string, reason: string) =>
     payer.type === "space_wallet" ? walletReason(userId, reason) : reason;
 
   async function previewPayer(input: {
@@ -245,125 +274,34 @@ export function createGenerationBillingReservations(input: {
     return existing;
   }
 
-  async function reserve(input: {
-    taskRunId: string;
-    userId: string;
-    spaceId: string | null;
-    model: string;
-    usageType: string;
-    reserveUsd: number;
-    discountMultiplier: number;
-    reason?: string;
-  }): Promise<GenerationBillingReserveResult> {
-    const reserveUsd = roundUsd(input.reserveUsd);
-    if (reserveUsd <= 0) return { status: "disabled" };
-    if (!billing.status.configured) return { status: "disabled" };
+  type ReservationStatus = "reserving" | "held" | "running" | "settling" | "settled" | "releasing" | "released";
+  type ReservationPatch = Partial<typeof generationBillingReservations.$inferInsert>;
 
-    const initial = await insertReservation({ ...input, reserveUsd });
-    if (initial.status !== "reserving") {
-      if (initial.status === "held") return { status: "held", reservation: initial };
-      throw new GenerationBillingUnavailableError(`Generation billing reservation is already ${initial.status}.`);
-    }
+  // Every state change is a compare-and-set so concurrent settle/release/reconcile cannot clobber each other.
+  async function transition(
+    id: string,
+    from: ReservationStatus[],
+    patch: ReservationPatch,
+  ): Promise<GenerationBillingReservation | null> {
+    const [row] = await db.update(generationBillingReservations)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(and(eq(generationBillingReservations.id, id), inArray(generationBillingReservations.status, from)))
+      .returning();
+    return row ?? null;
+  }
 
-    const lockKey = input.spaceId
-      ? `generation-reserve:space:${input.spaceId}`
-      : `generation-reserve:user:${input.userId}`;
+  async function recordError(row: GenerationBillingReservation, error: unknown): Promise<void> {
+    await db.update(generationBillingReservations).set({
+      lastError: error instanceof Error ? error.message : String(error),
+      updatedAt: new Date(),
+    }).where(and(
+      eq(generationBillingReservations.id, row.id),
+      eq(generationBillingReservations.status, row.status),
+    )).catch(() => undefined);
+  }
 
-    try {
-      return await db.transaction(async (tx) => {
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`);
-        const [row] = await tx.select().from(generationBillingReservations)
-          .where(eq(generationBillingReservations.taskRunId, input.taskRunId)).for("update");
-        if (!row) throw new GenerationBillingUnavailableError("Generation billing reservation disappeared.");
-        if (row.status === "held") return { status: "held", reservation: row };
-        if (row.status !== "reserving") {
-          throw new GenerationBillingUnavailableError(`Generation billing reservation is already ${row.status}.`);
-        }
-
-        const selected = await selectPayer({
-          userId: input.userId,
-          spaceId: input.spaceId,
-          reserveUsd,
-          usageType: input.usageType,
-        });
-        if (!selected.payer) {
-          const error = blockedError({ reserveUsd, availableUsd: selected.availableUsd });
-          await tx.update(generationBillingReservations).set({
-            status: "released",
-            payerType: "personal",
-            payerId: input.userId,
-            releasedAt: new Date(),
-            lastError: error.message,
-            updatedAt: new Date(),
-          }).where(and(
-            eq(generationBillingReservations.id, row.id),
-            eq(generationBillingReservations.status, "reserving"),
-          ));
-          return { status: "blocked", error };
-        }
-
-        const payer = selected.payer;
-        const operationId = generationReserveOperationId(input.taskRunId);
-        const result = await operationsFor(payer).recordUsage({
-          userId: payer.id,
-          amountUsd: reserveUsd,
-          tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-          usageType: input.usageType,
-          sourceId: input.taskRunId,
-          operationId,
-          reason: reasonFor(payer, input.userId, input.reason ?? `Generation reserve ${input.model}`),
-        });
-        if (result.status === "disabled" || result.status === "skipped") {
-          throw new GenerationBillingUnavailableError("Generation reserve debit was not recorded.");
-        }
-        if (result.status === "overage") {
-          const reversal = await operationsFor(payer).reverseUsage({
-            userId: payer.id,
-            amountUsd: reserveUsd,
-            tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-            originalOperationId: operationId,
-            operationId: generationReleaseRefundOperationId(input.taskRunId),
-            reason: `Generation reserve rejected ${input.model}`,
-          });
-          if (reversal.status !== "reversed") {
-            throw new GenerationBillingUnavailableError("Generation reserve rejection refund was not recorded.");
-          }
-          await tx.update(generationBillingReservations).set({
-            status: "released",
-            payerType: payer.type,
-            payerId: payer.id,
-            reversalOperationId: generationReleaseRefundOperationId(input.taskRunId),
-            reversalReceipt: reversal.receipt ? { ...reversal.receipt } : null,
-            releasedAt: new Date(),
-            lastError: "reserve_overage",
-            updatedAt: new Date(),
-          }).where(and(
-            eq(generationBillingReservations.id, row.id),
-            eq(generationBillingReservations.status, "reserving"),
-          ));
-          return {
-            status: "blocked",
-            error: blockedError({ reserveUsd, availableUsd: 0 }),
-          };
-        }
-
-        const [held] = await tx.update(generationBillingReservations).set({
-          status: "held",
-          payerType: payer.type,
-          payerId: payer.id,
-          updatedAt: new Date(),
-          lastError: null,
-        }).where(and(
-          eq(generationBillingReservations.id, row.id),
-          eq(generationBillingReservations.status, "reserving"),
-        )).returning();
-        if (!held) throw new GenerationBillingUnavailableError("Generation billing reservation could not be marked held.");
-        return { status: "held", reservation: held };
-      });
-    } catch (error) {
-      if (error instanceof BillingAccessBlockedError || error instanceof GenerationBillingUnavailableError) throw error;
-      throw new GenerationBillingUnavailableError(undefined, { cause: error });
-    }
+  function payerOf(row: GenerationBillingReservation): GenerationBillingPayer {
+    return { type: row.payerType === "space_wallet" ? "space_wallet" : "personal", id: row.payerId || row.userId };
   }
 
   async function loadReservation(taskRunId: string): Promise<GenerationBillingReservation | null> {
@@ -372,391 +310,362 @@ export function createGenerationBillingReservations(input: {
     return row ?? null;
   }
 
-  async function findReservePayer(row: GenerationBillingReservation): Promise<{
-    payer: GenerationBillingPayer;
-    remainingReversibleUsd: number;
-  } | null> {
-    const walletPayer: GenerationBillingPayer | null = row.spaceId && walletBilling.status.configured
-      ? { type: "space_wallet", id: spaceWalletCustomerId(row.spaceId) }
-      : null;
-    const candidates: GenerationBillingPayer[] = row.payerType === "space_wallet" && walletPayer
-      ? [walletPayer]
-      : row.payerType === "personal"
-        ? [{ type: "personal", id: row.userId }]
-        : walletPayer
-          ? [walletPayer, { type: "personal", id: row.userId }]
-          : [{ type: "personal", id: row.userId }];
-    for (const payer of candidates) {
-      const consumption = await operationsFor(payer).getUsageConsumption({
-        userId: payer.id,
-        operationId: row.reserveOperationId,
-        tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-      });
-      if (consumption) {
-        return { payer, remainingReversibleUsd: consumption.remainingReversibleUsd };
-      }
+  async function reserve(input: {
+    taskRunId: string;
+    userId: string;
+    spaceId: string | null;
+    model: string;
+    usageType: string;
+    reserveUsd: number;
+    discountMultiplier: number;
+  }): Promise<GenerationBillingReserveResult> {
+    const reserveUsd = roundUsd(input.reserveUsd);
+    if (reserveUsd <= 0) return { status: "disabled" };
+    if (!billing.status.configured) return { status: "disabled" };
+
+    const row = await insertReservation({ ...input, reserveUsd });
+    if (row.status === "held") return { status: "held", reservation: row };
+    if (row.status !== "reserving" || row.payerType !== "pending") {
+      throw new GenerationBillingUnavailableError(`Generation billing reservation is already ${row.status}.`);
     }
-    return null;
+
+    // No local lock: the reserve is a real debit, so a concurrent overdraft surfaces as overage and is reversed below.
+    try {
+      const selected = await selectPayer({
+        userId: input.userId,
+        spaceId: input.spaceId,
+        reserveUsd,
+        usageType: input.usageType,
+      });
+      if (!selected.payer) {
+        const error = blockedError({ reserveUsd, availableUsd: selected.availableUsd });
+        await transition(row.id, ["reserving"], {
+          status: "released",
+          payerType: "personal",
+          payerId: input.userId,
+          releasedAt: new Date(),
+          lastError: error.message,
+        });
+        return { status: "blocked", error };
+      }
+
+      const payer = selected.payer;
+      // Persist the payer before debiting so recovery only queries the identity that can hold the debit.
+      const [claimed] = await db.update(generationBillingReservations)
+        .set({ payerType: payer.type, payerId: payer.id, updatedAt: new Date() })
+        .where(and(
+          eq(generationBillingReservations.id, row.id),
+          eq(generationBillingReservations.status, "reserving"),
+          eq(generationBillingReservations.payerType, "pending"),
+        ))
+        .returning();
+      if (!claimed) throw new GenerationBillingUnavailableError("Generation billing reservation changed during reserve.");
+
+      const overage = await debitReserve(claimed);
+      if (overage) {
+        await releaseRow(claimed, "reserve_overage");
+        const refreshed = await previewPayer({ payer, reserveUsd, usageType: input.usageType }).catch(() => null);
+        return {
+          status: "blocked",
+          error: blockedError({ reserveUsd, availableUsd: refreshed?.availableUsd ?? selected.availableUsd }),
+        };
+      }
+
+      const held = await transition(row.id, ["reserving"], { status: "held", lastError: null });
+      if (!held) throw new GenerationBillingUnavailableError("Generation billing reservation could not be marked held.");
+      return { status: "held", reservation: held };
+    } catch (error) {
+      if (error instanceof BillingAccessBlockedError || error instanceof GenerationBillingUnavailableError) throw error;
+      throw new GenerationBillingUnavailableError(undefined, { cause: error });
+    }
   }
 
-  async function markSettled(
-    taskRunId: string,
-    actualUsd: number,
-    receipt?: BillingUsageReversalReceipt | null,
-  ): Promise<GenerationBillingReservation | null> {
-    const [row] = await db.update(generationBillingReservations).set({
-      status: "settled",
-      actualUsd: roundUsd(actualUsd).toFixed(8),
-      ...(receipt ? { reversalReceipt: { ...receipt } } : {}),
-      settledAt: new Date(),
-      lastError: null,
-      updatedAt: new Date(),
-    }).where(and(
-      eq(generationBillingReservations.taskRunId, taskRunId),
-      inArray(generationBillingReservations.status, ["held", "settling"]),
-    )).returning();
-    return row ?? null;
-  }
-
-  async function completeSettlement(
-    settled: GenerationBillingReservation | null,
-    overage: boolean,
-  ): Promise<GenerationBillingSettleResult> {
-    if (!settled) return { status: "missing" };
-    await input.onSettled?.(settled, overage).catch((error) => {
-      warn?.("Generation billing settlement notification failed", { taskRunId: settled.taskRunId, error });
+  /**
+   * Sends (or idempotently replays) the reserve debit from persisted row values; returns whether it created overage.
+   * Recovery replays it too, so a debit still in flight from a stalled caller can never land after a release.
+   */
+  async function debitReserve(row: GenerationBillingReservation): Promise<boolean> {
+    const payer = payerOf(row);
+    const operations = operationsFor(payer);
+    if (!operations.status.configured) throw new GenerationBillingUnavailableError("Generation billing is not configured.");
+    const result = await operations.recordUsage({
+      userId: payer.id,
+      amountUsd: rowUsd(row.reserveUsd),
+      tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
+      usageType: row.usageType,
+      sourceId: row.taskRunId,
+      operationId: row.reserveOperationId,
+      reason: reasonFor(payer, row.userId, `Generation reserve ${row.model}`),
     });
-    return { status: "settled", reservation: settled, overage };
+    if (result.status === "disabled" || result.status === "skipped") {
+      throw new GenerationBillingUnavailableError("Generation reserve debit was not recorded.");
+    }
+    return result.status === "overage";
+  }
+
+  /** Marks the reservation as used by a running worker; API-side releases no longer apply after this. */
+  async function claim(taskRunId: string): Promise<GenerationBillingReservation | null> {
+    const row = await loadReservation(taskRunId);
+    if (!row || row.status === "running") return row;
+    return await transition(row.id, ["held"], { status: "running" }) ?? await loadReservation(taskRunId);
   }
 
   async function settle(input: {
     taskRunId: string;
     actualUsd: number;
-    reason?: string;
   }): Promise<GenerationBillingSettleResult> {
-    const row = await loadReservation(input.taskRunId);
-    if (!row) return { status: "missing" };
-    if (row.status === "settled") return { status: "settled", reservation: row, overage: false };
-    if (row.status === "released") return { status: "released", reservation: row };
-    if (row.status === "releasing") {
-      return { status: "pending", reservation: row, error: new Error("Generation reservation is releasing.") };
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const row = await loadReservation(input.taskRunId);
+      if (!row) return { status: "missing" };
+      switch (row.status) {
+        case "settled":
+          return { status: "settled", reservation: row, overage: row.settleOverage };
+        case "released":
+          return { status: "released", reservation: row };
+        case "releasing":
+          return { status: "pending", reservation: row, error: new Error("Generation reservation is releasing.") };
+        case "settling":
+          return finishSettlement(row);
+        case "reserving":
+          throw new GenerationBillingUnavailableError("Generation reserve has not been recorded yet.");
+        case "held":
+        case "running": {
+          // The settlement amounts are fixed here; retries replay these exact values.
+          const actualUsd = roundUsd(Math.max(0, input.actualUsd));
+          const plan = planGenerationSettlement(rowUsd(row.reserveUsd), actualUsd);
+          const claimed = await transition(row.id, ["held", "running"], {
+            status: "settling",
+            actualUsd: actualUsd.toFixed(8),
+            reversalOperationId: plan.refundUsd > 0 ? generationSettleRefundOperationId(row.taskRunId) : null,
+            settleOperationId: plan.extraUsd > 0 ? generationSettleOperationId(row.taskRunId) : null,
+          });
+          if (claimed) return finishSettlement(claimed);
+          continue;
+        }
+        default:
+          throw new GenerationBillingUnavailableError(`Unknown generation reservation status: ${row.status}`);
+      }
     }
-    let workingRow = row;
-    if (row.status === "reserving" && (!billing.status.configured || (row.spaceId && !walletBilling.status.configured))) {
+    throw new GenerationBillingUnavailableError("Generation reservation kept changing during settlement.");
+  }
+
+  async function finishSettlement(row: GenerationBillingReservation): Promise<GenerationBillingSettleResult> {
+    const actualUsd = rowUsd(row.actualUsd);
+    const plan = planGenerationSettlement(rowUsd(row.reserveUsd), actualUsd);
+    const payer = payerOf(row);
+    const operations = operationsFor(payer);
+    if (!operations.status.configured) {
       return {
         status: "pending",
         reservation: row,
         error: new GenerationBillingUnavailableError("Generation settlement billing is not configured."),
       };
     }
-    if (row.status === "reserving") {
-      const found = await findReservePayer(row);
-      if (!found) throw new GenerationBillingUnavailableError("Generation reserve has not been recorded yet.");
-      workingRow = {
-        ...row,
-        payerType: found.payer.type,
-        payerId: found.payer.id,
-      };
-      await db.update(generationBillingReservations).set({
-        payerType: found.payer.type,
-        payerId: found.payer.id,
-        status: "held",
-        updatedAt: new Date(),
-      }).where(eq(generationBillingReservations.id, row.id));
-    }
-
-    const actualUsd = roundUsd(Math.max(0, input.actualUsd));
-    const plan = planGenerationSettlement(rowUsd(row.reserveUsd), actualUsd);
-    const payer: GenerationBillingPayer = {
-      type: workingRow.payerType === "space_wallet" ? "space_wallet" : "personal",
-      id: workingRow.payerId,
-    };
-    const operations = operationsFor(payer);
-    if (!operations.status.configured) {
-      return {
-        status: "pending",
-        reservation: workingRow,
-        error: new GenerationBillingUnavailableError("Generation settlement billing is not configured."),
-      };
-    }
 
     try {
+      let receipt: BillingUsageReversalReceipt | null = null;
+      let overage = false;
       if (plan.refundUsd > 0) {
-        const reversalOperationId = row.reversalOperationId ?? generationSettleRefundOperationId(input.taskRunId);
-        if (!row.reversalOperationId) {
-          const [updated] = await db.update(generationBillingReservations).set({
-            status: "settling",
-            actualUsd: actualUsd.toFixed(8),
-            reversalOperationId,
-            updatedAt: new Date(),
-          }).where(and(
-            eq(generationBillingReservations.id, row.id),
-            inArray(generationBillingReservations.status, ["held", "settling"]),
-          )).returning();
-          if (!updated) return await settle({ ...input, actualUsd });
-        }
-        const remaining = await operations.getUsageConsumption({
-          userId: payer.id,
-          operationId: row.reserveOperationId,
-          tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-        }).catch(() => null);
-        const amountUsd = remaining
-          ? Math.min(plan.refundUsd, remaining.remainingReversibleUsd)
-          : plan.refundUsd;
-        if (amountUsd <= 0) {
-          return completeSettlement(await markSettled(input.taskRunId, actualUsd), false);
-        }
         const reversal = await operations.reverseUsage({
           userId: payer.id,
-          amountUsd,
+          amountUsd: plan.refundUsd,
           tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
           originalOperationId: row.reserveOperationId,
-          operationId: reversalOperationId,
-          reason: reasonFor(payer, row.userId, input.reason ?? `Generation settlement refund ${row.model}`),
+          operationId: row.reversalOperationId ?? generationSettleRefundOperationId(row.taskRunId),
+          reason: reasonFor(payer, row.userId, `Generation settlement refund ${row.model}`),
         });
-        if (reversal.status !== "reversed") {
-          throw new GenerationBillingUnavailableError("Generation settlement refund was not recorded.");
-        }
-        return completeSettlement(await markSettled(input.taskRunId, actualUsd, reversal.receipt), false);
-      }
-
-      if (plan.extraUsd > 0) {
-        const settleOperationId = row.settleOperationId ?? generationSettleOperationId(input.taskRunId);
-        if (!row.settleOperationId) {
-          const [updated] = await db.update(generationBillingReservations).set({
-            status: "settling",
-            actualUsd: actualUsd.toFixed(8),
-            settleOperationId,
-            updatedAt: new Date(),
-          }).where(and(
-            eq(generationBillingReservations.id, row.id),
-            inArray(generationBillingReservations.status, ["held", "settling"]),
-          )).returning();
-          if (!updated) return await settle({ ...input, actualUsd });
-        }
+        receipt = fullReversalReceipt(reversal, "Generation settlement refund");
+      } else if (plan.extraUsd > 0) {
         const result = await operations.recordUsage({
           userId: payer.id,
           amountUsd: plan.extraUsd,
           tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
           usageType: row.usageType,
-          sourceId: input.taskRunId,
-          operationId: settleOperationId,
-          reason: reasonFor(payer, row.userId, input.reason ?? `Generation settlement ${row.model}`),
+          sourceId: row.taskRunId,
+          operationId: row.settleOperationId ?? generationSettleOperationId(row.taskRunId),
+          reason: reasonFor(payer, row.userId, `Generation settlement ${row.model}`),
         });
         if (result.status === "disabled" || result.status === "skipped") {
           throw new GenerationBillingUnavailableError("Generation settlement debit was not recorded.");
         }
-        return completeSettlement(await markSettled(input.taskRunId, actualUsd), result.status === "overage");
+        overage = result.status === "overage";
       }
 
-      return completeSettlement(await markSettled(input.taskRunId, actualUsd), false);
+      const settled = await transition(row.id, ["settling"], {
+        status: "settled",
+        settleOverage: overage,
+        ...(receipt ? { reversalReceipt: { ...receipt } } : {}),
+        settledAt: new Date(),
+        lastError: null,
+      });
+      if (!settled) {
+        const latest = await loadReservation(row.taskRunId);
+        return latest?.status === "settled"
+          ? { status: "settled", reservation: latest, overage: latest.settleOverage }
+          : { status: "missing" };
+      }
+      await input.onSettled?.(settled, overage).catch((error) => {
+        warn?.("Generation billing settlement notification failed", { taskRunId: settled.taskRunId, error });
+      });
+      return { status: "settled", reservation: settled, overage };
     } catch (error) {
-      await db.update(generationBillingReservations).set({
-        status: "settling",
-        actualUsd: actualUsd.toFixed(8),
-        lastError: error instanceof Error ? error.message : String(error),
-        updatedAt: new Date(),
-      }).where(eq(generationBillingReservations.id, row.id)).catch(() => undefined);
+      await recordError(row, error);
       return { status: "pending", reservation: row, error };
     }
   }
 
+  /**
+   * Reverses the full reserve. `unclaimedOnly` is for submit-side cleanup: once a worker has claimed the
+   * reservation, only the task outcome may release it.
+   */
   async function release(input: {
     taskRunId: string;
     reason?: string;
+    unclaimedOnly?: boolean;
   }): Promise<GenerationBillingReservation | null> {
     const row = await loadReservation(input.taskRunId);
     if (!row) return null;
-    if (row.status === "released" || row.status === "settled") return row;
+    return releaseRow(row, input.reason, input.unclaimedOnly === true);
+  }
 
-    let payer: GenerationBillingPayer = {
-      type: row.payerType === "space_wallet" ? "space_wallet" : "personal",
-      id: row.payerId || row.userId,
-    };
-    const reserveOperationId = row.reserveOperationId;
-    let operations = operationsFor(payer);
-    if (row.status !== "reserving" && row.status !== "settling" && !operations.status.configured) {
-      throw new GenerationBillingUnavailableError("Generation release billing is not configured.");
-    }
+  async function releaseRow(
+    initial: GenerationBillingReservation,
+    reason: string | undefined,
+    unclaimedOnly = false,
+  ): Promise<GenerationBillingReservation | null> {
+    let row: GenerationBillingReservation | null = initial;
+    for (let attempt = 0; row && attempt < 4; attempt += 1) {
+      // Once settlement starts the reserve belongs to the settlement; a release must never undo it.
+      if (row.status === "released" || row.status === "settled" || row.status === "settling") return row;
+      if (row.status === "running" && unclaimedOnly) return row;
+      if (row.status === "releasing") return replayRelease(row);
 
-    let amountUsd = rowUsd(row.reserveUsd);
-    if (row.status === "reserving") {
-      if (!billing.status.configured || (row.spaceId && !walletBilling.status.configured)) {
-        throw new GenerationBillingUnavailableError("Generation release billing is not configured.");
-      }
-      const found = await findReservePayer(row);
-      if (!found) {
+      if (row.status === "reserving" && row.payerType === "pending") {
+        // The debit is only sent after the payer is persisted, so this row never reached billing.
         const [released] = await db.update(generationBillingReservations).set({
           status: "released",
           releasedAt: new Date(),
-          lastError: input.reason ?? "released_before_debit",
+          lastError: reason ?? "released_before_debit",
           updatedAt: new Date(),
-        }).where(eq(generationBillingReservations.id, row.id)).returning();
-        return released ?? null;
-      }
-      payer = found.payer;
-      operations = operationsFor(payer);
-      amountUsd = found.remainingReversibleUsd;
-      await db.update(generationBillingReservations).set({
-        payerType: payer.type,
-        payerId: payer.id,
-        updatedAt: new Date(),
-      }).where(eq(generationBillingReservations.id, row.id));
-    } else if (row.status === "held" || row.status === "releasing") {
-      if (!operations.status.configured) {
-        throw new GenerationBillingUnavailableError("Generation release billing is not configured.");
-      }
-      const consumption = await operations.getUsageConsumption({
-        userId: payer.id,
-        operationId: reserveOperationId,
-        tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-      });
-      if (!consumption) {
-        const [released] = await db.update(generationBillingReservations).set({
-          status: "released",
-          releasedAt: new Date(),
-          lastError: input.reason ?? "released_before_debit",
-          updatedAt: new Date(),
-        }).where(eq(generationBillingReservations.id, row.id)).returning();
-        return released ?? null;
-      }
-      amountUsd = Math.min(amountUsd, consumption.remainingReversibleUsd);
-    } else if (row.status === "settling") {
-      return row;
-    }
-
-    const reversalOperationId = row.reversalOperationId ?? generationReleaseRefundOperationId(input.taskRunId);
-    if (row.status !== "releasing") {
-      await db.update(generationBillingReservations).set({
-        status: "releasing",
-        reversalOperationId,
-        updatedAt: new Date(),
-      }).where(eq(generationBillingReservations.id, row.id));
-    }
-
-    try {
-      if (amountUsd > 0) {
-        const reversal = await operations.reverseUsage({
-          userId: payer.id,
-          amountUsd,
-          tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
-          originalOperationId: reserveOperationId,
-          operationId: reversalOperationId,
-          reason: reasonFor(payer, row.userId, input.reason ?? `Generation released ${row.model}`),
+        }).where(and(
+          eq(generationBillingReservations.id, row.id),
+          eq(generationBillingReservations.status, "reserving"),
+          eq(generationBillingReservations.payerType, "pending"),
+        )).returning();
+        if (released) return released;
+      } else {
+        if (row.status === "reserving") await debitReserve(row);
+        const next = await transition(row.id, [row.status as ReservationStatus], {
+          status: "releasing",
+          reversalOperationId: generationReleaseRefundOperationId(row.taskRunId),
+          lastError: reason ?? null,
         });
-        if (reversal.status !== "reversed") {
-          throw new GenerationBillingUnavailableError("Generation release refund was not recorded.");
-        }
-        const [released] = await db.update(generationBillingReservations).set({
-          status: "released",
-          reversalReceipt: reversal.receipt ? { ...reversal.receipt } : null,
-          releasedAt: new Date(),
-          lastError: input.reason ?? null,
-          updatedAt: new Date(),
-        }).where(eq(generationBillingReservations.id, row.id)).returning();
-        return released ?? null;
+        if (next) return replayRelease(next);
       }
-      const [released] = await db.update(generationBillingReservations).set({
+      row = await loadReservation(initial.taskRunId);
+    }
+    if (!row) return null;
+    throw new GenerationBillingUnavailableError("Generation reservation kept changing during release.");
+  }
+
+  async function replayRelease(row: GenerationBillingReservation): Promise<GenerationBillingReservation | null> {
+    const payer = payerOf(row);
+    const operations = operationsFor(payer);
+    if (!operations.status.configured) throw new GenerationBillingUnavailableError("Generation release billing is not configured.");
+    try {
+      // A release always reverses the full reserve under one operation id, so a replay sends identical values.
+      const reversal = await operations.reverseUsage({
+        userId: payer.id,
+        amountUsd: rowUsd(row.reserveUsd),
+        tokenType: COHUB_BILLING_TOKEN_TYPES.usdMicroCent,
+        originalOperationId: row.reserveOperationId,
+        operationId: row.reversalOperationId ?? generationReleaseRefundOperationId(row.taskRunId),
+        reason: reasonFor(payer, row.userId, `Generation released ${row.model}`),
+      });
+      const receipt = fullReversalReceipt(reversal, "Generation release refund");
+      const released = await transition(row.id, ["releasing"], {
         status: "released",
+        reversalReceipt: { ...receipt },
         releasedAt: new Date(),
-        lastError: input.reason ?? null,
-        updatedAt: new Date(),
-      }).where(eq(generationBillingReservations.id, row.id)).returning();
-      return released ?? null;
+      });
+      return released ?? await loadReservation(row.taskRunId);
     } catch (error) {
-      await db.update(generationBillingReservations).set({
-        status: "releasing",
-        lastError: error instanceof Error ? error.message : String(error),
-        updatedAt: new Date(),
-      }).where(eq(generationBillingReservations.id, row.id)).catch(() => undefined);
+      await recordError(row, error);
       throw error;
     }
   }
 
   async function reconcile(now = new Date()): Promise<{ processed: number }> {
-    let processed = 0;
-    const stale = await db.select().from(generationBillingReservations)
-      .where(inArray(generationBillingReservations.status, ["reserving", "held", "settling", "releasing"]))
-      .orderBy(generationBillingReservations.updatedAt)
+    const reserveCutoff = new Date(now.getTime() - RESERVE_RECONCILE_GRACE_MS);
+    const retryCutoff = new Date(now.getTime() - SETTLE_RECONCILE_GRACE_MS);
+    const reservations = generationBillingReservations;
+    // Only actionable rows are selected, so long-running holds never occupy the batch.
+    const rows = await db.select({
+      reservation: reservations,
+      taskId: taskRuns.id,
+      taskStatus: taskRuns.status,
+      taskResult: taskRuns.result,
+    }).from(reservations)
+      .leftJoin(taskRuns, eq(taskRuns.id, reservations.taskRunId))
+      .where(or(
+        and(eq(reservations.status, "reserving"), lt(reservations.updatedAt, reserveCutoff)),
+        and(inArray(reservations.status, ["settling", "releasing"]), lt(reservations.updatedAt, retryCutoff)),
+        and(inArray(reservations.status, ["held", "running"]), or(
+          inArray(taskRuns.status, ["completed", "failed"]),
+          and(isNull(taskRuns.id), lt(reservations.createdAt, reserveCutoff)),
+          lte(reservations.expiresAt, now),
+        )),
+      ))
+      .orderBy(reservations.updatedAt)
       .limit(RECONCILE_BATCH_SIZE);
 
-    for (const row of stale) {
-      const updatedAt = row.updatedAt ?? row.createdAt ?? now;
-      if (row.status === "reserving" && updatedAt > new Date(now.getTime() - RESERVE_RECONCILE_GRACE_MS)) continue;
-      if ((row.status === "settling" || row.status === "releasing") && updatedAt > new Date(now.getTime() - SETTLE_RECONCILE_GRACE_MS)) continue;
+    let processed = 0;
+    for (const { reservation: row, taskId, taskStatus, taskResult } of rows) {
       processed += 1;
       try {
         if (row.status === "reserving") {
-          const found = await findReservePayer(row);
-          const [task] = await db.select({ status: taskRuns.status }).from(taskRuns)
-            .where(eq(taskRuns.id, row.taskRunId)).limit(1);
-          if (!found) {
-            await db.update(generationBillingReservations).set({
-              status: "released",
-              releasedAt: new Date(),
-              lastError: "reserve_missing",
-              updatedAt: new Date(),
-            }).where(eq(generationBillingReservations.id, row.id));
-            continue;
+          if (taskId && taskStatus !== "failed" && row.payerType !== "pending") {
+            await debitReserve(row);
+            await transition(row.id, ["reserving"], { status: "held" });
+          } else {
+            await releaseRow(row, !taskId ? "task_missing" : taskStatus === "failed" ? "task_failed" : "reserve_missing");
           }
-          await db.update(generationBillingReservations).set({
-            payerType: found.payer.type,
-            payerId: found.payer.id,
-            updatedAt: new Date(),
-          }).where(eq(generationBillingReservations.id, row.id));
-          if (!task) {
-            await release({ taskRunId: row.taskRunId, reason: "task_missing" });
-            continue;
-          }
-          await db.update(generationBillingReservations).set({
-            status: "held",
-            updatedAt: new Date(),
-          }).where(eq(generationBillingReservations.id, row.id));
           continue;
         }
 
-        if (row.status === "held") {
-          const [task] = await db.select({ status: taskRuns.status, result: taskRuns.result }).from(taskRuns)
-            .where(eq(taskRuns.id, row.taskRunId)).limit(1);
-          if (!task || task.status === "failed") {
-            await release({ taskRunId: row.taskRunId, reason: "task_failed" });
-            continue;
-          }
-          if (task.status === "completed") {
-            const billingRecord = isRecord(task.result) && isRecord(task.result.billing) ? task.result.billing : null;
+        if (row.status === "held" || row.status === "running") {
+          if (taskStatus === "completed") {
+            const billingRecord = isRecord(taskResult) && isRecord(taskResult.billing) ? taskResult.billing : null;
             const recorded = recordNumber(billingRecord, "amountUsd");
-            const cost = recordNumber(task.result, "cost");
+            const cost = recordNumber(taskResult, "cost");
             const actual = recorded ?? (cost === null ? null : applyGenerationModelDiscount(cost, {
               multiplier: rowUsd(row.discountMultiplier),
             }));
             if (actual !== null) {
-              await settle({ taskRunId: row.taskRunId, actualUsd: actual, reason: `Generation reconciliation ${row.model}` });
+              const result = await settle({ taskRunId: row.taskRunId, actualUsd: actual });
+              if (result.status === "pending") throw result.error;
             } else {
-              await release({ taskRunId: row.taskRunId, reason: "missing_cost" });
+              await releaseRow(row, "missing_cost");
             }
-            continue;
-          }
-          if (row.expiresAt <= now) {
-            warn?.("Generation reservation expired while the task was still running", { taskRunId: row.taskRunId, status: task.status });
-            await release({ taskRunId: row.taskRunId, reason: "reserve_expired" });
+          } else if (!taskId || taskStatus === "failed") {
+            await releaseRow(row, taskId ? "task_failed" : "task_missing");
+          } else {
+            warn?.("Generation reservation hit its hard limit while the task was unfinished", { taskRunId: row.taskRunId, status: taskStatus });
+            await releaseRow(row, "reserve_expired");
           }
           continue;
         }
 
         if (row.status === "settling") {
-          await settle({
-            taskRunId: row.taskRunId,
-            actualUsd: rowUsd(row.actualUsd),
-            reason: `Generation settlement retry ${row.model}`,
-          });
+          const result = await finishSettlement(row);
+          if (result.status === "pending") throw result.error;
           continue;
         }
 
-        if (row.status === "releasing") {
-          await release({ taskRunId: row.taskRunId, reason: "release_retry" });
-        }
+        if (row.status === "releasing") await replayRelease(row);
       } catch (error) {
-        input.warn?.("Generation billing reconciliation failed", { taskRunId: row.taskRunId, error });
+        await recordError(row, error);
+        warn?.("Generation billing reconciliation failed", { taskRunId: row.taskRunId, error });
       }
     }
     return { processed };
@@ -764,6 +673,7 @@ export function createGenerationBillingReservations(input: {
 
   return {
     reserve,
+    claim,
     settle,
     release,
     reconcile,

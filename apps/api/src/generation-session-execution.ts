@@ -130,7 +130,6 @@ export async function createGenerationSessionExecution(input: {
         usageType,
         reserveUsd,
         discountMultiplier: discount.multiplier,
-        reason: `Generation reserve ${input.model}`,
       });
       if (reserved.status === "blocked") throw reserved.error;
       if (reserved.status === "held") reservation = { taskRunId, reserveUsd };
@@ -180,7 +179,7 @@ export async function createGenerationSessionExecution(input: {
       const [task] = await db.select({ status: taskRuns.status }).from(taskRuns).where(eq(taskRuns.id, existingMeta.generationTaskId)).limit(1);
       if (!task) throw new GenerationSessionExecutionError(503, "generation_task_unavailable", "The existing generation task could not be found.");
       if (task.status === "failed" || existing.status === "failed") throw new GenerationSessionExecutionError(409, "generation_retry_required", "This generation already failed. Retry with a new client message ID.");
-      if (reservation) await generationBilling.release({ taskRunId: reservation.taskRunId, reason: "duplicate_client_message" }).catch(() => undefined);
+      if (reservation) await generationBilling.release({ taskRunId: reservation.taskRunId, reason: "duplicate_client_message", unclaimedOnly: true }).catch(() => undefined);
       return { taskRunId: existingMeta.generationTaskId, sessionId, turnId: existing.id, billing: null, reservation: null };
     }
     turnId = turn.id;
@@ -202,7 +201,7 @@ export async function createGenerationSessionExecution(input: {
     };
   } catch (error) {
     if (reservation && !enqueued) {
-      await generationBilling.release({ taskRunId: reservation.taskRunId, reason: "session_creation_failed" }).catch(() => undefined);
+      await generationBilling.release({ taskRunId: reservation.taskRunId, reason: "session_creation_failed", unclaimedOnly: true }).catch(() => undefined);
     }
     if (sessionId && turnId) {
       const failureSessionId = sessionId;

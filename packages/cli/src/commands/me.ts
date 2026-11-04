@@ -48,6 +48,34 @@ export function registerMe(program: Command): void {
     });
 
   meCmd
+    .command("billing-activity")
+    .description("List your personal wallet activity, including generation reserves and refunds")
+    .option("--page <n>", "Page number (default 1)")
+    .option("--json", "Output as JSON")
+    .action(async (opts: { page?: string; json?: boolean }) => {
+      const client = createClient();
+      try {
+        const { activities } = await client.billing.getBalanceActivities({
+          page: opts.page ? parseInteger(opts.page, "page", 1) : undefined,
+        });
+        if (jsonRequested(opts)) return outJson(activities);
+        if (activities.items.length === 0) {
+          console.log("  (empty)");
+          return;
+        }
+        table(activities.items, [
+          { key: "title", label: "Activity" },
+          { key: "amountUsd", label: "Amount (USD)" },
+          { key: "operationId", label: "Operation" },
+          { key: "createdAt", label: "Date" },
+        ]);
+        if (activities.pagination.hasMore) console.log(`  More: --page ${activities.page + 1}`);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  meCmd
     .command("activity")
     .description("Show your activity across all spaces")
     .option("--days <n>", "Show the last N days (default: 30)")

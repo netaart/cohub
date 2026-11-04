@@ -11,6 +11,7 @@ import { registerTask } from "./registry.js";
 import { updateGenerationTurnBilling } from "./generation-session.js";
 import { spaceWalletBilling } from "../space-wallet-billing.js";
 import { generationBilling } from "../generation-billing.js";
+import { settledReservationBilling } from "@cohub/core/generation-billing";
 import { db } from "../db.js";
 import { taskRuns } from "@cohub/db";
 import { eq, sql } from "drizzle-orm";
@@ -31,11 +32,7 @@ registerTask(GENERATION_BILLING_RETRY_TASK_TYPE, async (job: Job) => {
   }
   const reservation = await generationBilling.getReservation(data.taskRunId);
   if (reservation) {
-    const settlement = await generationBilling.settle({
-      taskRunId: data.taskRunId,
-      actualUsd: data.amountUsd,
-      reason: `Generation settlement ${data.model}`,
-    });
+    const settlement = await generationBilling.settle({ taskRunId: data.taskRunId, actualUsd: data.amountUsd });
     if (settlement.status === "pending") throw settlement.error;
     const reservedUsd = Number(reservation.reserveUsd);
     const billing = {
@@ -47,12 +44,7 @@ registerTask(GENERATION_BILLING_RETRY_TASK_TYPE, async (job: Job) => {
       discountMultiplier: data.modelDiscount.multiplier,
       usageType: data.usageType,
       reservedAmountUsd: reservedUsd,
-      ...(settlement.status === "settled"
-        ? {
-            refundedAmountUsd: Math.max(0, Number((reservedUsd - data.amountUsd).toFixed(8))),
-            additionalAmountUsd: Math.max(0, Number((data.amountUsd - reservedUsd).toFixed(8))),
-          }
-        : {}),
+      ...(settlement.status === "settled" ? settledReservationBilling(settlement.reservation) : {}),
       ...(settlement.status === "released" || settlement.status === "missing"
         ? {
             reason: settlement.status === "released" ? "reservation_released" : "missing_reservation",

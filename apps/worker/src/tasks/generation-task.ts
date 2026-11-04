@@ -10,7 +10,7 @@ import {
   resolveGenerationUsageType,
 } from "@cohub/billing";
 import type { Job } from "bullmq";
-import type { GenerationBillingReservation } from "@cohub/core/generation-billing";
+import { settledReservationBilling, type GenerationBillingReservation } from "@cohub/core/generation-billing";
 import { generationBilling } from "../generation-billing.js";
 import {
   createGenerationClient,
@@ -254,21 +254,14 @@ async function recordGenerationUsageBilling(input: {
     return { ...billingPricing, status: "skipped", reason: "missing_task_run_id" };
   }
   if (input.reservation) {
-    const reservedUsd = reservedAmountUsd ?? 0;
     const actualUsd = pricing.skipReason ? 0 : amountUsd;
     try {
-      const settlement = await generationBilling.settle({
-        taskRunId: input.taskRunId,
-        actualUsd,
-        reason: `Generation settlement ${input.model}`,
-      });
+      const settlement = await generationBilling.settle({ taskRunId: input.taskRunId, actualUsd });
       if (settlement.status === "settled") {
         return {
           ...billingPricing,
-          amountUsd: actualUsd,
+          ...settledReservationBilling(settlement.reservation),
           status: settlement.overage ? "overage" : "recorded",
-          refundedAmountUsd: Math.max(0, Number((reservedUsd - actualUsd).toFixed(8))),
-          additionalAmountUsd: Math.max(0, Number((actualUsd - reservedUsd).toFixed(8))),
         };
       }
       if (settlement.status === "released" || settlement.status === "missing") {
@@ -402,9 +395,8 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
   if (!userId) throw new Error("Invalid generation task payload: userId is required");
   const data = parseGenerationTaskData(payload.data);
   const taskRunId = context?.taskRunId ?? String(job.id ?? "");
-  await markGenerationSessionRunning(taskRunId).catch((error) => {
-    console.warn("[GenerationSession] failed to mark turn running", error);
-  });
+  // Fails closed: a cancelled queued turn (or an unverifiable one) must not reach the provider; failing releases any reserve.
+  if (!(await markGenerationSessionRunning(taskRunId))) throw new Error("Generation was cancelled before it started.");
 
   try {
     const declaration = await loader.loadGenerationDeclaration(userId, data.model);
@@ -433,11 +425,15 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
       });
     }
 
-    const reservation = await generationBilling.getReservation(taskRunId);
-    if (reservation) {
-      if (reservation.status !== "held") throw new Error(`Generation billing reservation is not held: ${reservation.status}`);
-      if (reservation.userId !== userId || reservation.model !== data.model || (reservation.spaceId ?? null) !== spaceId) {
+    const existingReservation = await generationBilling.getReservation(taskRunId);
+    let reservation: GenerationBillingReservation | null = null;
+    if (existingReservation) {
+      if (existingReservation.userId !== userId || existingReservation.model !== data.model || (existingReservation.spaceId ?? null) !== spaceId) {
         throw new Error("Generation billing reservation does not match the task payload.");
+      }
+      reservation = await generationBilling.claim(taskRunId);
+      if (reservation?.status !== "running") {
+        throw new Error(`Generation billing reservation is not held: ${reservation?.status ?? "missing"}`);
       }
     }
 

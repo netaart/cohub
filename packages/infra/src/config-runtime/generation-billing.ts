@@ -2,12 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parse } from "yaml";
 
-const CONFIG_PATHS = [
-  join("platform", ".cohub", "billing", "generation-reserves.yaml"),
-  join("platform", ".cohub", "billing", "generation-reserves.yml"),
-  join("platform", ".cohub", "generation-reserves.yaml"),
-  join("platform", ".cohub", "generation-reserves.yml"),
-] as const;
+const CONFIG_PATH = join("platform", ".cohub", "billing", "generation-reserves.yaml");
 
 export type GenerationBillingConfig = {
   /** Model id to reserve cap in USD. Only listed models are prepaid. */
@@ -61,36 +56,22 @@ export function resolveGenerationBillingReserve(
   return config.reserves.get(model.trim()) ?? null;
 }
 
-async function readConfigFile(platformConfigRoot: string): Promise<{ rawText: string; mtimeMs: number; size: number } | null> {
-  for (const relativePath of CONFIG_PATHS) {
-    const path = join(platformConfigRoot, relativePath);
-    try {
-      const info = await stat(path);
-      return { rawText: await readFile(path, "utf-8"), mtimeMs: info.mtimeMs, size: info.size };
-    } catch (error) {
-      const code = (error as { code?: unknown }).code;
-      if (code === "ENOENT") continue;
-      throw error;
-    }
-  }
-  return null;
-}
-
 export async function loadGenerationBillingConfig(
   platformConfigRoot: string,
 ): Promise<GenerationBillingConfig> {
-  const key = platformConfigRoot;
-  const file = await readConfigFile(platformConfigRoot);
-  if (!file) {
-    cache.delete(key);
+  const path = join(platformConfigRoot, CONFIG_PATH);
+  let info: Awaited<ReturnType<typeof stat>>;
+  try {
+    info = await stat(path);
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== "ENOENT") throw error;
+    cache.delete(platformConfigRoot);
     return EMPTY_CONFIG;
   }
-  const cached = cache.get(key);
-  if (cached && cached.mtimeMs === file.mtimeMs && cached.size === file.size) {
-    return cached.config;
-  }
-  const config = parseGenerationBillingConfig(file.rawText);
-  cache.set(key, { mtimeMs: file.mtimeMs, size: file.size, config });
+  const cached = cache.get(platformConfigRoot);
+  if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.config;
+  const config = parseGenerationBillingConfig(await readFile(path, "utf-8"));
+  cache.set(platformConfigRoot, { mtimeMs: info.mtimeMs, size: info.size, config });
   return config;
 }
 

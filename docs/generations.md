@@ -180,7 +180,6 @@ reversing the reserve (or charging the difference), and failed/timed-out tasks
 reverse the full reserve. Only models listed in the platform config are affected.
 
 Config path: `<platformConfigRoot>/platform/.cohub/billing/generation-reserves.yaml`
-(also read from `<platformConfigRoot>/platform/.cohub/generation-reserves.yaml`)
 
 ```yaml
 schema: cohub.generation.billing.v1
@@ -203,7 +202,13 @@ Behavior:
 - Successful generation reverses `reserve - actual` or charges `actual - reserve`.
 - Failure, timeout, cancellation, or a missing task reverses the full reserve.
 - `v2.generation_billing_reservations` records operation IDs and receipts for
-  idempotent recovery. A system job reconciles stale reservations every five minutes.
+  idempotent recovery. Settlement amounts are persisted before billing is called,
+  so retries replay identical requests. The worker claims the reservation before
+  calling the provider; submit-side cleanup cannot release a claimed reservation.
+  A system job reconciles every five minutes and replays an uncertain reserve
+  debit before reversing it; holds on unfinished tasks are released only after a
+  24-hour hard cap.
+- Personal wallet activity: `cohub me billing-activity`; Space wallet: `cohub spaces wallet activity`.
 - Models absent from the config keep the existing post-success charge path.
 
 Rollout: deploy the worker that understands reservations before adding the config,

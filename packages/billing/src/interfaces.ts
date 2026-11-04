@@ -499,11 +499,15 @@ export type BillingBalanceActivityKind =
 
 export type BillingBalanceActivityStatus = "covered" | "overage" | "partial" | null;
 
+export type BillingGenerationActivityPhase = "reserve" | "settlement" | "refund";
+
 export type BillingBalanceActivity = {
   id: string;
   kind: BillingBalanceActivityKind;
   tokenType: string;
   title: string;
+  /** Stable key for clients to localize prepaid generation rows; `title` stays English. */
+  generationPhase?: BillingGenerationActivityPhase | null;
   description: string | null;
   sourceType: string | null;
   sourceId: string | null;

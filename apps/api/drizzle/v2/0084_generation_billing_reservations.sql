@@ -9,6 +9,7 @@ CREATE TABLE "v2"."generation_billing_reservations" (
 	"payer_id" varchar(255) NOT NULL,
 	"reserve_usd" numeric(18, 8) NOT NULL,
 	"actual_usd" numeric(18, 8),
+	"settle_overage" boolean DEFAULT false NOT NULL,
 	"discount_multiplier" numeric(8, 5) DEFAULT '1' NOT NULL,
 	"reserve_operation_id" varchar(255) NOT NULL,
 	"settle_operation_id" varchar(255),
@@ -21,7 +22,7 @@ CREATE TABLE "v2"."generation_billing_reservations" (
 	"released_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now(),
 	"updated_at" timestamp with time zone DEFAULT now(),
-	CONSTRAINT "v2_chk_generation_billing_reservations_status" CHECK ("v2"."generation_billing_reservations"."status" in ('reserving', 'held', 'settling', 'settled', 'releasing', 'released')),
+	CONSTRAINT "v2_chk_generation_billing_reservations_status" CHECK ("v2"."generation_billing_reservations"."status" in ('reserving', 'held', 'running', 'settling', 'settled', 'releasing', 'released')),
 	CONSTRAINT "v2_chk_generation_billing_reservations_reserve_usd" CHECK ("v2"."generation_billing_reservations"."reserve_usd" > 0)
 );
 --> statement-breakpoint

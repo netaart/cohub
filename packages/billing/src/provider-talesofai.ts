@@ -47,6 +47,7 @@ import {
   type BillingBalanceActivity,
   type BillingBalanceActivityList,
   type BillingBalanceActivityListInput,
+  type BillingGenerationActivityPhase,
   type BillingCatalog,
   type BillingCatalogProduct,
   type BillingCheckoutInput,
@@ -607,12 +608,23 @@ function formatBillingLabel(value: string | null): string {
     .join(" ");
 }
 
-function generationActivityTitle(operationId: string | null | undefined): string | null {
+function generationActivityPhase(operationId: string | null | undefined): BillingGenerationActivityPhase | null {
   if (!operationId?.startsWith("generation:")) return null;
-  if (operationId.startsWith("generation:reserve:")) return "Generation reserve";
-  if (operationId.startsWith("generation:extra:")) return "Generation settlement";
-  if (operationId.startsWith("generation:settle-refund:") || operationId.startsWith("generation:release-refund:") || operationId.startsWith("generation:refund:")) return "Generation refund";
-  return "Generation charge";
+  if (operationId.startsWith("generation:reserve:")) return "reserve";
+  if (operationId.startsWith("generation:extra:")) return "settlement";
+  if (operationId.startsWith("generation:settle-refund:") || operationId.startsWith("generation:release-refund:")) return "refund";
+  return null;
+}
+
+const GENERATION_ACTIVITY_TITLES: Record<BillingGenerationActivityPhase, string> = {
+  reserve: "Generation reserve",
+  settlement: "Generation settlement",
+  refund: "Generation refund",
+};
+
+function generationActivityTitle(operationId: string | null | undefined): string | null {
+  const phase = generationActivityPhase(operationId);
+  return phase ? GENERATION_ACTIVITY_TITLES[phase] : null;
 }
 
 function transactionActivityTitle(type: CreditTransaction["type"]): string {
@@ -666,6 +678,7 @@ function mapTransactionActivity(
     kind: transaction.type,
     tokenType: transaction.token_type,
     title: generationActivityTitle(transaction.operation_id) ?? transactionActivityTitle(transaction.type),
+    generationPhase: generationActivityPhase(transaction.operation_id),
     description: transaction.reason ?? transaction.source_type ?? null,
     sourceType: transaction.source_type ?? null,
     sourceId: transaction.source_id ?? null,
@@ -727,6 +740,7 @@ function mapUsageActivity(draft: UsageActivityDraft): BillingBalanceActivity | n
     kind: "usage",
     tokenType: draft.tokenType,
     title: generationActivityTitle(draft.operationId) ?? formatBillingLabel(draft.usageType),
+    generationPhase: generationActivityPhase(draft.operationId),
     description: draft.reason ?? draft.sourceType,
     sourceType: draft.sourceType,
     sourceId: draft.sourceId,
@@ -1889,6 +1903,7 @@ export function createTalesofaiBillingOperations(
           return [{
             id: `transaction:${transaction.id}`, kind: "usage", tokenType,
             title: generationActivityTitle(transaction.operation_id) ?? (transaction.type === "settlement" ? "Overage settlement" : "Usage"),
+            generationPhase: generationActivityPhase(transaction.operation_id),
             description: transaction.reason ?? null,
             sourceType: transaction.source_type, sourceId: transaction.source_id,
             operationId: transaction.operation_id,

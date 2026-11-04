@@ -319,6 +319,16 @@ function activityStatusLabel(value: string | null): string {
 	return "";
 }
 
+function generationPhaseLabel(
+	phase: "reserve" | "settlement" | "refund",
+): string {
+	if (phase === "reserve")
+		return m.wallet_activity_generation_reserve({}, { locale });
+	if (phase === "settlement")
+		return m.wallet_activity_generation_settlement({}, { locale });
+	return m.wallet_activity_generation_refund({}, { locale });
+}
+
 function shortIdentifier(value: string | null): string {
 	if (!value) return "";
 	if (value.length <= 18) return value;
@@ -937,7 +947,7 @@ $effect(() => {
 								<div class="grid grid-cols-[minmax(0,1fr)_8rem] gap-3 px-3 py-3 text-[12px] sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_8rem]">
 									<div class="min-w-0">
 										<div class="flex min-w-0 items-center gap-2">
-											<div class="truncate font-medium text-text-primary">{item.title}</div>
+											<div class="truncate font-medium text-text-primary">{item.generationPhase ? generationPhaseLabel(item.generationPhase) : item.title}</div>
 											{#if activityStatusLabel(item.status)}
 												<span class="tag">{activityStatusLabel(item.status)}</span>
 											{/if}

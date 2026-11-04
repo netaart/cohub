@@ -1396,6 +1396,7 @@ export const generationBillingReservations = v2.table(
     payerId: varchar("payer_id", { length: 255 }).notNull(),
     reserveUsd: numeric("reserve_usd", { precision: 18, scale: 8 }).notNull(),
     actualUsd: numeric("actual_usd", { precision: 18, scale: 8 }),
+    settleOverage: boolean("settle_overage").notNull().default(false),
     discountMultiplier: numeric("discount_multiplier", { precision: 8, scale: 5 }).notNull().default("1"),
     reserveOperationId: varchar("reserve_operation_id", { length: 255 }).notNull(),
     settleOperationId: varchar("settle_operation_id", { length: 255 }),
@@ -1420,7 +1421,7 @@ export const generationBillingReservations = v2.table(
     spaceCreatedIdx: index("v2_idx_generation_billing_reservations_space_created").on(table.spaceId, table.createdAt),
     statusCheck: check(
       "v2_chk_generation_billing_reservations_status",
-      sql`${table.status} in ('reserving', 'held', 'settling', 'settled', 'releasing', 'released')`,
+      sql`${table.status} in ('reserving', 'held', 'running', 'settling', 'settled', 'releasing', 'released')`,
     ),
     reserveAmountCheck: check(
       "v2_chk_generation_billing_reservations_reserve_usd",

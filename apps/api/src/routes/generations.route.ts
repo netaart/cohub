@@ -187,7 +187,6 @@ router.post("/", async (c) => {
         usageType,
         reserveUsd,
         discountMultiplier: resolvedDiscount.multiplier,
-        reason: `Generation reserve ${request.model}`,
       });
       if (reserved.status === "blocked") return billingBlockedResponse(c, reserved.error);
       if (reserved.status === "held") reservation = { taskRunId, reserveUsd };
@@ -230,7 +229,7 @@ router.post("/", async (c) => {
     taskRunId = enqueued.taskRunId;
   } catch (error) {
     if (reservation) {
-      await generationBilling.release({ taskRunId: reservation.taskRunId, reason: "enqueue_failed" }).catch((releaseError) => {
+      await generationBilling.release({ taskRunId: reservation.taskRunId, reason: "enqueue_failed", unclaimedOnly: true }).catch((releaseError) => {
         logger.error("[Billing] failed to release generation reserve after enqueue failure", { taskRunId: reservation?.taskRunId, error: releaseError });
       });
     }
