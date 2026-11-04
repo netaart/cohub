@@ -14,9 +14,8 @@ import {
   type CachedModelsConfig,
   type ModelCatalogEntry,
   type ModelsConfig,
-  type ModelsConfigModLayer,
 } from "@cohub/infra/config-runtime/models";
-import { loadSpaceModModelsConfigs } from "@cohub/core/space-mods";
+import { loadSpaceModModelLayers } from "@cohub/core/space-mods";
 import { loadPublicGenerationModels } from "../generations/declarations.js";
 import { db } from "../db/index.js";
 import { config } from "../config.js";
@@ -112,17 +111,10 @@ async function fetchModelsCatalog(userId: string, spaceId?: string | null): Prom
     allowMissing: true,
   });
 
-  let mods: ModelsConfigModLayer[] = [];
-  if (spaceId?.trim()) {
-    const loaded = await loadSpaceModModelsConfigs(db, spaceId.trim(), {
-      checkpointCacheRoot: config.checkpointCacheRoot,
-    }).catch((error) => {
-      logger.warn(`[models] failed to load mod models configs spaceId=${spaceId}`, error);
-      return null;
-    });
-    for (const warning of loaded?.warnings ?? []) logger.warn(`[models] ${warning}`);
-    mods = (loaded?.configs ?? []).map((item) => ({ config: item.config, ref: item.ref }));
-  }
+  const mods = await loadSpaceModModelLayers(db, spaceId, {
+    checkpointCacheRoot: config.checkpointCacheRoot,
+    warn: (message) => logger.warn(`[models] ${message}`),
+  });
 
   return flattenModelsCatalog(resolveModelsConfigContext({
     platform: platformModels,

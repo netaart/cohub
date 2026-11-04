@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { asc, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { spaceMods, spaces } from "@cohub/db";
-import { parseModelsConfig, type ModelsConfig } from "@cohub/infra/config-runtime/models";
+import { parseModelsConfig, type ModelsConfigModLayer } from "@cohub/infra/config-runtime/models";
 
 export const SANDBOX_MODS_PATH = "/mods";
 
@@ -87,46 +87,46 @@ export async function listEnabledSpaceMods(db: SpaceModsDb, spaceId: string): Pr
   return (await listSpaceMods(db, spaceId)).filter((mod) => mod.enabled);
 }
 
-export type LoadedSpaceModModelsConfig = {
-  modSpaceId: string;
-  /** Mount slug used as the source reference in diagnostics. */
-  ref: string;
-  config: ModelsConfig;
-};
-
 /**
- * Read enabled mods' `.cohub/models.json` from their latest checkpoint snapshot.
- * A broken or missing mod config never fails the caller; it is reported instead.
+ * Read enabled mods' `.cohub/models.json` from their latest checkpoint snapshot,
+ * in mount order. Mod config never fails the caller: problems go to `warn`.
  */
-export async function loadSpaceModModelsConfigs(
+export async function loadSpaceModModelLayers(
   db: SpaceModsDb,
-  spaceId: string,
+  spaceId: string | null | undefined,
   options: {
     checkpointCacheRoot: string;
+    warn: (message: string) => void;
     readFile?: (path: string, encoding: "utf-8") => Promise<string>;
   },
-): Promise<{ configs: LoadedSpaceModModelsConfig[]; warnings: string[] }> {
-  const mods = await listEnabledSpaceMods(db, spaceId);
-  const configs: LoadedSpaceModModelsConfig[] = [];
-  const warnings: string[] = [];
+): Promise<ModelsConfigModLayer[]> {
+  const id = spaceId?.trim();
+  if (!id) return [];
+  let mods: SpaceModListItem[];
+  try {
+    mods = await listEnabledSpaceMods(db, id);
+  } catch (error) {
+    options.warn(`Cannot list mods for space ${id}: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
   const read = options.readFile ?? readFile;
-
-  for (const mod of mods) {
+  const layers = await Promise.all(mods.map(async (mod): Promise<ModelsConfigModLayer | null> => {
     const path = join(options.checkpointCacheRoot, mod.modSpaceId, "latest", ".cohub", "models.json");
     let rawText: string;
     try {
       rawText = await read(path, "utf-8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-      warnings.push(`Cannot read mod models.json at ${path}: ${error instanceof Error ? error.message : String(error)}`);
-      continue;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        options.warn(`Cannot read mod models.json at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return null;
     }
     try {
-      configs.push({ modSpaceId: mod.modSpaceId, ref: mod.mountSlug, config: parseModelsConfig(rawText) });
+      return { ref: mod.mountSlug, config: parseModelsConfig(rawText) };
     } catch (error) {
-      warnings.push(`Ignoring invalid mod models.json at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+      options.warn(`Ignoring invalid mod models.json at ${path}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
     }
-  }
-
-  return { configs, warnings };
+  }));
+  return layers.filter((layer): layer is ModelsConfigModLayer => layer !== null);
 }

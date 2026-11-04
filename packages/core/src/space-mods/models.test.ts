@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadSpaceModModelsConfigs } from "./index.js";
+import { loadSpaceModModelLayers } from "./index.js";
 
 const modRow = (id: string, sortOrder: number) => ({
   mod: {
@@ -36,15 +36,17 @@ test("loads enabled mod models.json files and reports bad ones without failing",
     await mkdir(bad, { recursive: true });
     await writeFile(join(bad, "models.json"), "{not json");
 
-    const loaded = await loadSpaceModModelsConfigs(fakeDb([modRow("good", 0), modRow("bad", 1), modRow("missing", 2)]), "space", {
+    const warnings: string[] = [];
+    const layers = await loadSpaceModModelLayers(fakeDb([modRow("good", 0), modRow("bad", 1), modRow("missing", 2)]), "space", {
       checkpointCacheRoot: root,
+      warn: (message) => warnings.push(message),
     });
 
-    assert.equal(loaded.configs.length, 1);
-    assert.equal(loaded.configs[0]?.ref, "mod-good");
-    assert.equal(loaded.configs[0]?.config.providers.cohub?.models?.[0]?.maxContext, 120000);
-    assert.equal(loaded.warnings.length, 1);
-    assert.match(loaded.warnings[0] ?? "", /invalid mod models\.json/);
+    assert.equal(layers.length, 1);
+    assert.equal(layers[0]?.ref, "mod-good");
+    assert.equal(layers[0]?.config.providers.cohub?.models?.[0]?.maxContext, 120000);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0] ?? "", /invalid mod models\.json/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

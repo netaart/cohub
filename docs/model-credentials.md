@@ -8,7 +8,7 @@ A provider's credentials and destination form one trust boundary. User model con
 - Mod: each enabled mod's `<checkpointCacheRoot>/<modSpaceId>/latest/.cohub/models.json`, read from the same immutable snapshot that serves `/mods`.
 - User: `<platformConfigRoot>/users/<userId>/.cohub/models.json`, loaded through `getUserModelsRedisKey(userId)`. This is the Home Space's `.cohub/models.json` after the worker publishes its checkpoint.
 
-Model context applies in this order (low to high): platform defaults, mods (in mount order, later mods win), user, then a single prompt's `maxContext` parameter. Mod files can only tune `maxContext` for models that already exist in the platform catalog; they cannot add models or change connections, credentials, or prices. A missing or invalid mod file is ignored with a warning so it cannot break a session.
+Model context applies in this order (low to high): platform defaults, mods (in mount order, later mods win), user, then a single prompt's `maxContext` (`cohub spaces prompt --max-context <tokens>` or the prompt API; cohub harness only). Mod files can only tune `maxContext` for models that already exist in the platform catalog; they cannot add models or change connections, credentials, or prices. A missing or invalid mod file is ignored with a warning so it cannot break a session.
 
 The loader determines the source from these paths and cache keys. A `scope` or `trusted` field in user JSON does not confer platform trust. Access to platform configuration must remain restricted to platform operators; this boundary does not protect a platform file or Redis key already writable by an attacker.
 
@@ -22,7 +22,7 @@ Raw file/cache values stay unresolved. Runtime resolution returns an in-memory c
 
 ## Model parameter overrides
 
-`contextWindow` is the model's real limit and is platform-owned for platform models. `maxContext` is the effective context threshold used by compaction, truncation, and handoff decisions. It defaults to `contextWindow` and is always clamped to it.
+`contextWindow` is the model's real limit and is platform-owned for platform models. `maxContext` is the effective context threshold used by compaction, truncation, and handoff decisions. It defaults to `contextWindow` and is clamped to `[65536, contextWindow]`; the floor keeps tiny values from compacting on every LLM round, and the real window always wins.
 
 To tighten or relax one platform model's threshold, put only its ID and `maxContext` in the user's (or a mod's) `.cohub/models.json`:
 
@@ -40,7 +40,7 @@ To tighten or relax one platform model's threshold, put only its ID and `maxCont
 
 This keeps the platform model's API, destination, key, headers, and remaining parameters. Every other platform model stays available. No user key is required for parameter-only overrides, including for platform cloud models.
 
-`contextWindow` overrides in user files remain accepted as a legacy threshold: they no longer raise the platform hard limit and are clamped to it. Use `maxContext` for new configuration. A value above the hard limit is clamped; a non-positive or non-integer value fails schema validation. Invalid user and mod files are ignored with a warning so a bad value cannot break a session.
+`contextWindow` overrides in user files remain accepted as a legacy threshold only when they are below the platform limit; equal or larger values are ignored and never shadow a mod. Use `maxContext` for new configuration. A non-positive or non-integer value fails schema validation: an invalid user file fails clearly as before, while an invalid mod file is ignored with a warning.
 
 Inspect the effective value and its source with `cohub models ls --space <spaceId>` or `GET /api/models?spaceId=<spaceId>`. Each model reports `maxContext`, `maxContextSource`, and `maxContextSourceRef`; the source is `platform`, `mod`, `user`, `prompt`, or `default`.
 

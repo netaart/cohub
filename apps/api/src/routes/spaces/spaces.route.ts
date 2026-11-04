@@ -2156,6 +2156,9 @@ router.post("/:id/prompt", async (c) => {
   if (body.harness !== undefined && body.harness !== null && !harnessSchema.safeParse(body.harness).success) {
     return c.json({ message: `harness must be one of: ${harnessSchema.options.join(", ")}` }, 400);
   }
+  if (promptMaxContext && isLocalHarness(body.harness)) {
+    return c.json({ message: "maxContext is only supported by the cohub harness" }, 400);
+  }
   const promptPermission = accessMode === "read_only" ? "session.prompt.readonly" : "session.prompt.fullaccess";
   if (!(await hasPermission(user, promptPermission, { spaceId }))) return authzDenied(c);
 
@@ -2197,7 +2200,7 @@ router.post("/:id/prompt", async (c) => {
     requestedModel &&
     requestedProvider &&
     !localHarness &&
-    !(await validatePromptModel({ userId: user.uuid, provider: requestedProvider, model: requestedModel, spaceId }))
+    !(await validatePromptModel({ userId: user.uuid, provider: requestedProvider, model: requestedModel }))
   ) {
     return c.json({ code: "model_unavailable", message: "requested model is not available" }, 422);
   }

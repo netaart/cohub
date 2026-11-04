@@ -2138,6 +2138,10 @@ export class SpaceClient {
   }
 
   prompt(input: CreateSpacePromptInput) {
+    // JSON turns NaN/Infinity into null, which the API reads as "not set".
+    if (input.maxContext != null && !(Number.isSafeInteger(input.maxContext) && input.maxContext > 0)) {
+      return Promise.reject(new Error("maxContext must be a positive integer"));
+    }
     return this.transport.request<CreateSpacePromptResponse>(
       `/api/spaces/${this.id}/prompt`,
       {

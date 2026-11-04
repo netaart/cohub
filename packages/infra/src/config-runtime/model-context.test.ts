@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   mergeModelsConfigs,
+  MIN_MAX_CONTEXT,
   parseModelsConfig,
   resolveModelsConfigContext,
   resolveRuntimeModelsConfig,
@@ -57,6 +58,21 @@ test("legacy user contextWindow is a threshold, not a new hard limit", () => {
   assert.equal(resolved.providers.cohub?.models?.[0]?.contextWindow, 200_000);
   assert.equal(resolved.providers.cohub?.models?.[0]?.maxContext, 80_000);
   assert.equal(resolved.providers.cohub?.models?.[0]?.maxContextSource, "user");
+
+  const mods = [{ config: mod(120_000), ref: "studio" }];
+  for (const contextWindow of [200_000, 1_000_000]) {
+    const legacy: ModelsConfig = { providers: { cohub: { models: [{ id: "chat", contextWindow }] } } };
+    const model = resolveModelsConfigContext({ platform, mods, user: legacy }).providers.cohub?.models?.[0];
+    assert.equal(model?.maxContext, 120_000);
+    assert.equal(model?.maxContextSource, "mod");
+  }
+});
+
+test("tiny thresholds are raised to the floor but never above the real window", () => {
+  const user: ModelsConfig = { providers: { cohub: { models: [{ id: "chat", maxContext: 1 }, { id: "small", maxContext: 1 }] } } };
+  const models = resolveModelsConfigContext({ platform, user }).providers.cohub?.models;
+  assert.equal(models?.[0]?.maxContext, MIN_MAX_CONTEXT);
+  assert.equal(models?.[1]?.maxContext, 32_000);
 });
 
 test("mods only contribute maxContext for models that already exist on the platform", () => {

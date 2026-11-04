@@ -9,9 +9,8 @@ import {
   PLATFORM_MODELS_REDIS_KEY,
   resolveModelsConfigContext,
   type ModelsConfig,
-  type ModelsConfigModLayer,
 } from "@cohub/infra/config-runtime/models";
-import { loadSpaceModModelsConfigs } from "@cohub/core/space-mods";
+import { loadSpaceModModelLayers } from "@cohub/core/space-mods";
 import { createLogger } from "@cohub/infra/logging";
 import type { ChannelConfig } from "@cohub/protocol/gateway";
 import type { InferSelectModel } from "drizzle-orm";
@@ -66,16 +65,7 @@ const loadModelsConfig = async (input: {
     throw error;
   }
 
-  let content: ModelsConfig;
-  try {
-    content = parseModelsConfig(rawText);
-  } catch (error) {
-    if (input.allowMissing) {
-      logger.warn(`[Models] ignoring invalid user models config at ${input.modelsPath}:`, error);
-      return null;
-    }
-    throw error;
-  }
+  const content = parseModelsConfig(rawText);
   const cacheValue = createCachedModelsConfig({ rawText, content });
   await redisCommandClient.set(input.redisKey, JSON.stringify(cacheValue), "EX", MODELS_CACHE_TTL_SEC).catch(() => undefined);
   return content;
@@ -112,17 +102,12 @@ export async function loadMergedModelsCatalog(db: DbClient, spaceOrId: Pick<Spac
           allowMissing: true,
         })
       : null,
-    loadModModelsConfigs(db, space?.id),
+    loadSpaceModModelLayers(db, space?.id, {
+      checkpointCacheRoot: config.checkpointCacheRoot,
+      warn: (message) => logger.warn(`[Models] ${message}`),
+    }),
   ]);
   return resolveModelsConfigContext({ platform: platformModels, mods, user: userModels });
-}
-
-async function loadModModelsConfigs(db: DbClient, spaceId?: string | null): Promise<ModelsConfigModLayer[]> {
-  if (!spaceId?.trim()) return [];
-  const loaded = await loadSpaceModModelsConfigs(db, spaceId.trim(), {
-    checkpointCacheRoot: config.checkpointCacheRoot,
-  }).catch(() => null);
-  return (loaded?.configs ?? []).map((item) => ({ config: item.config, ref: item.ref }));
 }
 
 export function splitProviderModelInput(value: string): { provider: string | null; id: string } {

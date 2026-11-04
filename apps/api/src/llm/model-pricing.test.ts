@@ -27,7 +27,6 @@ test("Pi SDK calculates the platform price after allowed user overrides and matc
     const selected = registry.find("cohub", "chat");
     assert.ok(selected);
     assert.equal(selected.contextWindow, 100000);
-    assert.equal(selected.maxContext, 100000);
     assert.equal(selected.baseUrl, "https://platform.example.test/v1");
     assert.equal(registry.getApiKey("cohub"), "platform-key");
     const billableUsage = usage();

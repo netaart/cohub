@@ -9,9 +9,8 @@ import {
   resolveRuntimeModelsConfig,
   type CachedModelsConfig,
   type ModelsConfig,
-  type ModelsConfigModLayer,
 } from "@cohub/infra/config-runtime/models";
-import { loadSpaceModModelsConfigs } from "@cohub/core/space-mods";
+import { loadSpaceModModelLayers } from "@cohub/core/space-mods";
 import { db } from "../db.js";
 import { logger } from "../logger.js";
 import { redis } from "../redis.js";
@@ -32,10 +31,7 @@ async function loadModelsFromFile(input: {
     const code = typeof error === "object" && error !== null && "code" in error
       ? String((error as { code?: unknown }).code)
       : undefined;
-    if (!input.allowMissing) throw error;
-    if (code !== "ENOENT") {
-      logger.warn(`[Models] ignoring invalid user models config at ${input.modelsPath}:`, error);
-    }
+    if (code !== "ENOENT" || !input.allowMissing) throw error;
     const cached = createCachedModelsConfig({ content: null });
     await redis.set(input.redisKey, JSON.stringify(cached), "EX", MODELS_CACHE_TTL_SEC);
     return cached;
@@ -79,17 +75,10 @@ export async function loadRuntimeModelsConfigs(
       })
     : null;
 
-  let mods: ModelsConfigModLayer[] = [];
-  if (spaceId?.trim()) {
-    const loaded = await loadSpaceModModelsConfigs(db, spaceId.trim(), {
-      checkpointCacheRoot: getAgentCheckpointCacheRoot(),
-    }).catch((error) => {
-      logger.warn(`[Models] failed to load mod models configs spaceId=${spaceId}:`, error);
-      return null;
-    });
-    for (const warning of loaded?.warnings ?? []) logger.warn(`[Models] ${warning}`);
-    mods = (loaded?.configs ?? []).map((item) => ({ config: item.config, ref: item.ref }));
-  }
+  const mods = await loadSpaceModModelLayers(db, spaceId, {
+    checkpointCacheRoot: getAgentCheckpointCacheRoot(),
+    warn: (message) => logger.warn(`[Models] ${message}`),
+  });
 
   return [resolveRuntimeModelsConfig({ platform, mods, user })];
 }

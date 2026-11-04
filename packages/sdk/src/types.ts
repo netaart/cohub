@@ -571,7 +571,6 @@ export type BillingResponsePayload = {
 export type BillingBalanceActivityKind =
   | "grant"
   | "usage"
-  | "reversal"
   | "refund"
   | "expire"
   | "revoke"

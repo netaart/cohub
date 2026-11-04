@@ -376,10 +376,14 @@ export type ModelsConfigModLayer = {
   ref?: string;
 };
 
-function clampMaxContext(value: number | undefined, contextWindow: number | undefined): number | undefined {
+/** Lowest effective threshold; smaller values would compact on nearly every LLM round. */
+export const MIN_MAX_CONTEXT = 65_536;
+
+/** Clamp a threshold to `[MIN_MAX_CONTEXT, contextWindow]`; the real window always wins. */
+export function clampModelMaxContext(value: number | undefined, contextWindow: number | undefined): number | undefined {
   if (!isPositiveInteger(value)) return undefined;
-  if (!isPositiveInteger(contextWindow)) return value;
-  return Math.min(value, contextWindow);
+  const floored = Math.max(value, MIN_MAX_CONTEXT);
+  return isPositiveInteger(contextWindow) ? Math.min(floored, contextWindow) : floored;
 }
 
 /** Mods may only tune the threshold of an existing platform model. */
@@ -431,8 +435,8 @@ export function resolveModelsConfigContext(input: {
         return {
           ...model,
           ...(contextWindow ? { contextWindow } : {}),
-          ...(configured ? { maxContext: clampMaxContext(configured, contextWindow) } : {}),
-          ...(configured ? { maxContextSource: (userProvider ? "user" : "platform") as ModelMaxContextSource } : {}),
+          ...(configured ? { maxContext: clampModelMaxContext(configured, contextWindow) } : {}),
+          ...(configured ? { maxContextSource: (isPositiveInteger(model.maxContext) ? "user" : "default") as ModelMaxContextSource } : {}),
         };
       }
 
@@ -449,7 +453,8 @@ export function resolveModelsConfigContext(input: {
         configured = userModel.maxContext;
         source = "user";
       } else if (isPositiveInteger(userModel?.contextWindow)
-        && userModel.contextWindow !== platformModel?.contextWindow) {
+        && isPositiveInteger(hardLimit) && userModel.contextWindow < hardLimit) {
+        // Legacy contextWindow only counts when it tightens; values clamped to a no-op must not shadow mods.
         configured = userModel.contextWindow;
         source = "user";
       } else {
@@ -475,7 +480,7 @@ export function resolveModelsConfigContext(input: {
       return {
         ...model,
         ...(hardLimit ? { contextWindow: hardLimit } : {}),
-        ...(configured ? { maxContext: clampMaxContext(configured, hardLimit) } : {}),
+        ...(configured ? { maxContext: clampModelMaxContext(configured, hardLimit) } : {}),
         maxContextSource: source,
         ...(sourceRef ? { maxContextSourceRef: sourceRef } : {}),
       };

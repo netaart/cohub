@@ -10,11 +10,8 @@ import {
   PLATFORM_MODELS_REDIS_KEY,
   type ModelsConfig,
 } from "@cohub/infra/config-runtime/models";
-import { createLogger } from "@cohub/infra/logging";
 import { config } from "./config.js";
 import { redisCommandClient } from "./redis.js";
-
-const logger = createLogger({ serviceName: "cohub-worker" });
 
 type ModelsCacheClient = Pick<typeof redisCommandClient, "get" | "set">;
 type ReadModelsFile = (path: string, encoding: "utf-8") => Promise<string>;
@@ -44,16 +41,7 @@ export async function loadConfig(
     return null;
   }
 
-  let content: ModelsConfig;
-  try {
-    content = parseModelsConfig(rawText);
-  } catch (error) {
-    if (!allowMissing) throw error;
-    logger.warn(`[Models] ignoring invalid user models config at ${filePath}:`, error);
-    const missing = createCachedModelsConfig({ content: null });
-    await deps.cache.set(redisKey, JSON.stringify(missing), "EX", MODELS_CACHE_TTL_SEC);
-    return null;
-  }
+  const content = parseModelsConfig(rawText);
   const refreshed = createCachedModelsConfig({ rawText, content });
   await deps.cache.set(redisKey, JSON.stringify(refreshed), "EX", MODELS_CACHE_TTL_SEC);
   return content;

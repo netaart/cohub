@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Command } from "commander";
 import type { PublicGenerationDeclaration } from "@neta-art/cohub";
-import { filterHiddenLlmModels, formatGenerationPrice, formatLlmModelCost, toMultimodalModelSummary } from "../src/commands/models.js";
+import { filterHiddenLlmModels, formatGenerationPrice, formatLlmModelCost, registerModels, toMultimodalModelSummary } from "../src/commands/models.js";
 
 test("formatGenerationPrice renders a flat unit price", () => {
 	assert.equal(formatGenerationPrice({ unit: "image", amount: 0.04 }), "$0.04 / image");
@@ -115,4 +116,30 @@ test("filterHiddenLlmModels removes providers with no visible models", () => {
 
 test("filterHiddenLlmModels returns an empty catalog when everything is hidden", () => {
 	assert.deepEqual(filterHiddenLlmModels({ anthropic: [{ model: { hidden: true } }] }), {});
+});
+
+test("models ls --space reaches the API through the global space option", async () => {
+	const spaceId = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+	const urls: string[] = [];
+	const saved = { fetch: globalThis.fetch, log: console.log, base: process.env.COHUB_BASE_URL, token: process.env.COHUB_EXECUTION_TOKEN };
+	process.env.COHUB_BASE_URL = "https://api.test";
+	process.env.COHUB_EXECUTION_TOKEN = "test-token";
+	globalThis.fetch = async (input) => {
+		urls.push(String(input));
+		return Response.json({});
+	};
+	console.log = () => {};
+	try {
+		const program = new Command("cohub").option("-s, --space <space>");
+		registerModels(program);
+		await program.parseAsync(["node", "cohub", "models", "ls", "--space", spaceId]);
+	} finally {
+		globalThis.fetch = saved.fetch;
+		console.log = saved.log;
+		if (saved.base === undefined) delete process.env.COHUB_BASE_URL;
+		else process.env.COHUB_BASE_URL = saved.base;
+		if (saved.token === undefined) delete process.env.COHUB_EXECUTION_TOKEN;
+		else process.env.COHUB_EXECUTION_TOKEN = saved.token;
+	}
+	assert.deepEqual(urls, [`https://api.test/api/models?spaceId=${spaceId}`]);
 });

@@ -52,3 +52,12 @@ test("reference queries expose causal edges through the existing API", async () 
   assert.equal(query.get("source"), `turn:${caller.turnId}`);
   assert.equal(query.get("direction"), "out");
 });
+
+test("prompt rejects thresholds that JSON would silently turn into null", async () => {
+  let calls = 0;
+  const client = createHttpClient({ baseUrl: "https://api.example.test", fetch: async () => { calls += 1; return new Response("{}"); } });
+  for (const maxContext of [Number.NaN, Number.POSITIVE_INFINITY, 0, 1.5]) {
+    await assert.rejects(client.space(caller.spaceId).prompt({ content: [{ type: "text", text: "hi" }], maxContext }), /maxContext must be a positive integer/);
+  }
+  assert.equal(calls, 0);
+});

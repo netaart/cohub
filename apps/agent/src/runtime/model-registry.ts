@@ -1,5 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
+  clampModelMaxContext,
   mergeHeaders,
   mergeModelsConfigs,
   type ModelDef,
@@ -12,7 +13,7 @@ export type CohubModel<TApi extends Api = Api> = Model<TApi> & {
   defaultThinkingLevel?: ModelThinkingLevel;
   requestProfile?: ModelRequestProfile;
   imageUrlInput?: boolean;
-  /** Effective context threshold, clamped to `contextWindow`. */
+  /** Effective context threshold, clamped by `clampModelMaxContext`. */
   maxContext?: number;
   maxContextSource?: ModelDef["maxContextSource"];
   maxContextSourceRef?: string;
@@ -71,7 +72,7 @@ export class CohubModelRegistry {
           input: modelDef.input ?? ["text"],
           cost: normalizeModelCost(modelDef.cost),
           contextWindow,
-          maxContext: Math.min(modelDef.maxContext ?? contextWindow, contextWindow),
+          maxContext: clampModelMaxContext(modelDef.maxContext ?? contextWindow, contextWindow),
           maxContextSource: modelDef.maxContextSource,
           maxContextSourceRef: modelDef.maxContextSourceRef,
           maxTokens: modelDef.maxTokens ?? 16384,

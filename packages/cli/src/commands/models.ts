@@ -7,6 +7,7 @@ import {
   type PublicGenerationDeclaration,
 } from "@neta-art/cohub";
 import { createClient } from "../client.js";
+import { explicitSpace, failSpaceTarget, resolveSpaceRef } from "../space.js";
 import { table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
 
 type MultimodalModelSummary = Pick<PublicGenerationDeclaration, "model" | "title" | "description" | "pricing">;
@@ -210,9 +211,8 @@ Examples:
     .alias("list")
     .description("List available models")
     .option("--model-type <type>", "Model type: llm | multimodal", "llm")
-    .option("--space <id>", "Apply a space's mod models.json overrides")
     .option("--json", "Output as JSON")
-    .action(async (opts: { modelType?: string; space?: string; json?: boolean }) => {
+    .action(async (opts: { modelType?: string; json?: boolean }, command: Command) => {
       const client = createClient();
       try {
         if (opts.modelType === "multimodal") {
@@ -241,7 +241,9 @@ Examples:
           return error("Invalid model type", "Use --model-type llm or --model-type multimodal");
         }
 
-        const catalog = await client.models.list({ spaceId: opts.space });
+        const spaceRef = explicitSpace(command);
+        const spaceId = spaceRef ? await resolveSpaceRef(spaceRef).catch(failSpaceTarget) : undefined;
+        const catalog = await client.models.list({ spaceId });
         const visibleCatalog = filterHiddenLlmModels(catalog);
         if (jsonRequested(opts)) return outJson(visibleCatalog);
         if (Object.keys(visibleCatalog).length === 0) return console.log("  (empty)");

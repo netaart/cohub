@@ -16,7 +16,7 @@ import { recordLlmUsage, startLlmRoundSpan, getAgentTracer } from "@cohub/infra/
 import { getCurrentToolExecutionContext, runWithToolExecutionContext, type ToolExecutionContext } from "../tool-context.js";
 import { applyRoundBoundaryAbort } from "../active-turns.js";
 import { isToolFailureDetails } from "./tools/index.js";
-import { mergeHeaders } from "@cohub/infra/config-runtime/models";
+import { clampModelMaxContext, mergeHeaders } from "@cohub/infra/config-runtime/models";
 import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
 import { ModelUnavailableError } from "@cohub/core/sessions";
 import { prepareAgentImagesForModel } from "./image-to-text.js";
@@ -1048,14 +1048,11 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
         ?? input.modelRegistry.find(currentModel.provider, currentModel.id)
         ?? input.modelRegistry.getDefault();
       if (!target) throw new Error("No model available. Check platform models.json");
-      const requestedMaxContext = typeof input.requestedMaxContext === "number"
-        && Number.isSafeInteger(input.requestedMaxContext) && input.requestedMaxContext > 0
-        ? input.requestedMaxContext
-        : undefined;
+      const requestedMaxContext = clampModelMaxContext(input.requestedMaxContext ?? undefined, target.contextWindow);
       const activeTarget = requestedMaxContext
         ? {
             ...target,
-            maxContext: Math.min(requestedMaxContext, target.contextWindow > 0 ? target.contextWindow : requestedMaxContext),
+            maxContext: requestedMaxContext,
             maxContextSource: "prompt" as const,
             maxContextSourceRef: undefined,
           }

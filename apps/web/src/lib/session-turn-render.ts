@@ -12,8 +12,11 @@ import type {
 	TurnFooterPhase,
 } from "./session-tree";
 
-function getTurnContextWindow(turn: SessionTurnRecord) {
-	const raw = turn.meta?.maxContext ?? turn.meta?.contextWindow;
+function getTurnPositiveMeta(
+	turn: SessionTurnRecord,
+	key: "contextWindow" | "maxContext",
+) {
+	const raw = turn.meta?.[key];
 	return typeof raw === "number" && raw > 0 ? raw : null;
 }
 
@@ -142,7 +145,8 @@ export function turnToAssistantMessage(
 			turn,
 			model: turn.model,
 			provider: turn.provider,
-			contextWindow: getTurnContextWindow(turn),
+			contextWindow: getTurnPositiveMeta(turn, "contextWindow"),
+			maxContext: getTurnPositiveMeta(turn, "maxContext"),
 			usage: turn.finalUsage,
 			durationMs: getFinalMessageDurationMs(turn),
 			stopReason: turn.stopReason,
