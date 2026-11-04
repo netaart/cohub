@@ -77,6 +77,7 @@ export class NativeRuntime {
         this.ingest.controlChanged("pi", link.sessionId);
         if (link.sessionFile) this.ingest.touch(link.sessionFile);
       },
+      onDroppedLine: (nativeSessionId, bytes) => options.diagnostics.log("warn", "native.pi_line_dropped", { nativeSessionId, bytes }, { component: "native", harness: "pi" }),
     });
     this.codex = new CodexShared(options.executables.codex || "codex", options.root, Boolean(options.config?.codexShared) && options.harnesses.includes("codex"));
     this.codex.onConnect((channel) => this.observeCodex(channel));

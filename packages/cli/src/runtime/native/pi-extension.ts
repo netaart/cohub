@@ -62,8 +62,24 @@ function locateSocket(cwd: string): string | null {
 /** How often a missing or lost Runtime is looked for again. */
 const RECONNECT_MS = 3_000;
 
-/** Streamed events the daemon uses; everything else Pi emits stays local. */
-const FORWARDED = new Set(["agent_start", "agent_end", "agent_settled", "turn_start", "turn_end", "message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_end"]);
+const MESSAGE_FIELDS = ["message", "assistantMessageEvent"];
+const TOOL_FIELDS = ["toolCallId", "toolName", "args", "result", "partialResult", "isError"];
+/**
+ * Streamed events the daemon uses, with the fields it reads; everything else Pi emits stays local.
+ * An allowlist, since Pi adds fields across versions, some with the whole context (`turn_end`).
+ */
+const FORWARDED: Record<string, string[]> = {
+  agent_start: [], agent_end: ["willRetry"], agent_settled: [], turn_start: [], turn_end: ["message", "toolResults"],
+  message_start: MESSAGE_FIELDS, message_update: MESSAGE_FIELDS, message_end: MESSAGE_FIELDS,
+  tool_execution_start: TOOL_FIELDS, tool_execution_update: TOOL_FIELDS, tool_execution_end: TOOL_FIELDS,
+};
+
+export function forwardedEvent(name: string, event: unknown): Record<string, unknown> {
+  const source = (event ?? {}) as Record<string, unknown>;
+  const forwarded: Record<string, unknown> = { type: name };
+  for (const field of FORWARDED[name] ?? []) if (field in source) forwarded[field] = source[field];
+  return forwarded;
+}
 
 export default function cohub(pi: Pi) {
   // Cohub may load this file explicitly into a Pi it starts; never attach twice.
@@ -141,11 +157,11 @@ export default function cohub(pi: Pi) {
   };
 
   pi.on("session_start", (_event, ctx) => attach(ctx));
-  for (const name of FORWARDED) {
+  for (const name of Object.keys(FORWARDED)) {
     pi.on(name, (event, ctx) => {
       context = ctx;
       if (!socket) attach(ctx);
-      send({ type: "event", sessionId: ctx.sessionManager.getSessionId(), event: { ...(event as object), type: name } });
+      send({ type: "event", sessionId: ctx.sessionManager.getSessionId(), event: forwardedEvent(name, event) });
     });
   }
   // Pi replaces this instance on /new, /resume, /fork and /reload, and loads the next one only

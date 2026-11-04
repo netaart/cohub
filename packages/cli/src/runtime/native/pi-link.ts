@@ -45,6 +45,8 @@ export class PiLink {
     onEvent?: (session: PiSessionLink, event: Record<string, unknown>) => void;
     onConnect?: (session: PiSessionLink) => void;
     onDisconnect?: (session: PiSessionLink) => void;
+    /** A line over the limit was skipped; the connection stays up. */
+    onDroppedLine?: (sessionId: string | null, bytes: number) => void;
   }) {}
 
   get socketPath() { return this.options.socketPath; }
@@ -170,9 +172,12 @@ export class PiLink {
   }
 
   private accept(socket: Socket) {
-    let buffer = "";
+    /** The line being received; an oversized one is only counted, until its newline arrives. */
+    let parts: Buffer[] = [];
+    let size = 0;
     /** This connection's link; a newer connection for the same session replaces it in the map. */
     let own: Live | null = null;
+    const dropped = (bytes: number) => this.options.onDroppedLine?.(own?.sessionId ?? null, bytes);
     socket.setNoDelay?.(true);
     socket.on("error", () => socket.destroy());
     socket.on("close", () => {
@@ -186,11 +191,19 @@ export class PiLink {
       const { socket: _socket, pending: _pending, ...link } = live;
       this.options.onDisconnect?.(link);
     });
-    socket.on("data", (bytes) => {
-      buffer += bytes.toString("utf8");
-      if (buffer.length > MAX_LINE_BYTES) { socket.destroy(); return; }
-      for (let end = buffer.indexOf("\n"); end >= 0; end = buffer.indexOf("\n")) {
-        const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
+    socket.on("data", (bytes: Buffer) => {
+      for (let start = 0; ;) {
+        const end = bytes.indexOf(0x0a, start);
+        const piece = bytes.subarray(start, end < 0 ? bytes.length : end);
+        size += piece.length;
+        if (size <= MAX_LINE_BYTES) parts.push(piece);
+        else parts = [];
+        if (end < 0) return;
+        start = end + 1;
+        const length = size, kept = parts;
+        parts = []; size = 0;
+        if (length > MAX_LINE_BYTES) { dropped(length); continue; }
+        const line = Buffer.concat(kept, length).toString("utf8");
         if (!line) continue;
         let message: Record<string, unknown>;
         try { message = JSON.parse(line) as Record<string, unknown>; } catch { continue; }

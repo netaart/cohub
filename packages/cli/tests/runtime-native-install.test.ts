@@ -59,6 +59,13 @@ test("runtime up repairs a legacy Pi extension before Pi starts, and installs no
   assert.deepEqual(lines, ["Pi extension updated; run /reload in open Pi sessions\n"]);
 });
 
+test("runtime up replaces an outdated managed Pi extension", async () => {
+  await writeFile(join(extensions, "cohub.ts"), "// Cohub control extension for Pi. Managed by `cohub runtime`; local edits are replaced on upgrade.\nexport default () => undefined;\n");
+  assert.equal(await piExtensionState(), "outdated");
+  await repairIntegrations(await fakePi(), () => undefined);
+  assert.equal(await piExtensionState(), "installed");
+});
+
 test("runtime up removes legacy Codex hooks and keeps the rest of the config", async () => {
   const config = join(home, "codex", "config.toml");
   await mkdir(join(home, "codex"));
