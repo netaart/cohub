@@ -178,7 +178,8 @@ apps/desktop/linux/scripts/pack.sh --version 1.2.3 [--env dev]     # needs vpk a
 
 `bundle.sh` builds `Cohub.app`, signs it inside-out with the hardened runtime (ad hoc without
 `CODESIGN_IDENTITY`), notarizes and staples when `NOTARY_KEY` is set, then writes a DMG and the
-update zip. `pack.ps1` publishes a self-contained ReadyToRun build and packs it with `vpk`,
+update zip. Without `SPARKLE_PUBLIC_KEY` the app carries no updater, since Sparkle refuses to start
+without a key. `pack.ps1` publishes a self-contained ReadyToRun build and packs it with `vpk`,
 signing through Azure Trusted Signing when `AZURE_TRUSTED_SIGNING_METADATA` is set. `pack.sh`
 publishes a self-contained build and packs it with `vpk` into an AppImage that updates itself.
 

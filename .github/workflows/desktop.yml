@@ -152,7 +152,11 @@ jobs:
           NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
           SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
-        run: apps/desktop/macos/scripts/bundle.sh --arch ${{ matrix.arch }} --version "$VERSION" --env "$ENVIRONMENT" --build "${{ github.run_number }}"
+        run: |
+          if [[ "$PUBLISH" == true && -z "$SPARKLE_PUBLIC_KEY" ]]; then
+            echo "::error::vars.SPARKLE_PUBLIC_KEY is required to publish macOS builds"; exit 1
+          fi
+          apps/desktop/macos/scripts/bundle.sh --arch ${{ matrix.arch }} --version "$VERSION" --env "$ENVIRONMENT" --build "${{ github.run_number }}"
 
       - name: Appcast
         if: env.PUBLISH == 'true' && !startsWith(env.CHANNEL, 'pr/')

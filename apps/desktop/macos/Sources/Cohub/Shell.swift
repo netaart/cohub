@@ -31,7 +31,8 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundled = Bundle.main.bundleIdentifier != nil
-        if bundled, Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil {
+        let updates = ["SUFeedURL", "SUPublicEDKey"].allSatisfy { (Bundle.main.object(forInfoDictionaryKey: $0) as? String)?.isEmpty == false }
+        if bundled, updates {
             updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         }
         if bundled { notifications = Notifications { [weak self] path in self?.open(path: path) } }

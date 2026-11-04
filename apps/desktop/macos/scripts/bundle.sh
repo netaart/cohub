@@ -40,6 +40,12 @@ cp -R "$here/Bundle/Resources/"*.lproj "$contents/Resources/"
 sed -e "s|__NAME__|$name|g" -e "s|__BUNDLE_ID__|$bundle_id|g" -e "s|__VERSION__|$version|g" -e "s|__BUILD__|$build|g" -e "s|__COMMIT__|$commit|g" \
   -e "s|__URL_SCHEME__|$scheme|g" -e "s|__ENV__|$env|g" -e "s|__WEB_ORIGIN__|$origin|g" -e "s|__FEED_URL__|$feed|g" \
   -e "s|__SPARKLE_PUBLIC_KEY__|${SPARKLE_PUBLIC_KEY:-}|g" "$here/Bundle/Info.plist" > "$contents/Info.plist"
+if [[ -z "${SPARKLE_PUBLIC_KEY:-}" ]]; then
+  echo "==> No SPARKLE_PUBLIC_KEY: building without updates"
+  for key in SUFeedURL SUPublicEDKey SUEnableAutomaticChecks SUAutomaticallyUpdate; do
+    /usr/libexec/PlistBuddy -c "Delete :$key" "$contents/Info.plist"
+  done
+fi
 plutil -lint "$contents/Info.plist" >/dev/null
 
 echo "==> Icon"
