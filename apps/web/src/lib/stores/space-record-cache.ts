@@ -31,8 +31,12 @@ function mergeSpaceRecord(
 		description: hasOwn(next, "description")
 			? (next.description ?? null)
 			: current.description,
+		// Lists send a slimmer profile; fields they omit keep their cached value.
 		publicProfile: hasOwn(next, "publicProfile")
-			? next.publicProfile
+			? next.publicProfile && {
+					...current.publicProfile,
+					...next.publicProfile,
+				}
 			: current.publicProfile,
 		ownerProfile: hasOwn(next, "ownerProfile")
 			? next.ownerProfile

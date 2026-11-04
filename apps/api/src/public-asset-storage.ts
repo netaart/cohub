@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { AVATAR_MAX_FILE_BYTES, UPLOAD_ERROR_FILE_TOO_LARGE, UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
+import { AVATAR_MAX_FILE_BYTES, LIKE_STICKER_MAX_FILE_BYTES, UPLOAD_ERROR_FILE_TOO_LARGE, UPLOAD_MAX_FILE_BYTES } from "@cohub/protocol";
 import { mimeTypeForPath } from "@cohub/protocol/fs";
 import { config } from "./config.js";
 import { createPresignedPutObjectUrl } from "./object-presign.js";
@@ -14,6 +14,7 @@ const IMMUTABLE_PUBLIC_CACHE_CONTROL = "public, max-age=31536000, immutable";
 export const PUBLIC_ASSET_PURPOSES = [
   "user_avatar",
   "space_avatar",
+  "space_like_sticker",
   "chat_attachment",
   "app_source",
   "generation_input",
@@ -69,6 +70,12 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/gif": "gif",
 };
 
+const LIKE_STICKER_EXTENSIONS: Record<string, string> = {
+  "image/webp": "webp",
+  "image/png": "png",
+  "image/gif": "gif",
+};
+
 /** Common mime → extension for chat attachments (fallback when filename has no ext). */
 const CHAT_MIME_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
@@ -108,6 +115,7 @@ export class PublicAssetValidationError extends Error {
 }
 
 const envPrefix = () => (config.env === "prod" ? "" : `${config.env}/`);
+const likeStickerKeyPrefix = (spaceId: string) => `${envPrefix()}like-stickers/spaces/${spaceId}/`;
 
 const safeExtensionFromFilename = (filename: string | undefined) => {
   if (!filename) return null;
@@ -226,6 +234,12 @@ export const buildPublicAssetObjectKey = (input: {
     if (!input.spaceId) throw new PublicAssetValidationError("spaceId is required for space avatar uploads");
     return `${envPrefix()}avatars/spaces/${input.spaceId}/${assetId}.${extension}`;
   }
+  if (input.purpose === "space_like_sticker") {
+    const extension = LIKE_STICKER_EXTENSIONS[input.mimeType];
+    if (!extension) throw new PublicAssetValidationError("like stickers must be WebP, PNG, or GIF");
+    if (!input.spaceId) throw new PublicAssetValidationError("spaceId is required for like sticker uploads");
+    return `${likeStickerKeyPrefix(input.spaceId)}${randomUUID()}.${extension}`;
+  }
   if (input.purpose === "session_image") {
     if (!input.spaceId) throw new PublicAssetValidationError("spaceId is required for session images");
     const subtype = input.mimeType.slice("image/".length).replace(/[^a-z0-9]/g, "").slice(0, 16);
@@ -293,6 +307,12 @@ export const isAllowedPublicAssetDownloadUrl = (value: string) => {
   return origins.size > 0 && origins.has(url.origin);
 };
 
+export const isSpaceLikeStickerUrl = (value: string, spaceId: string) => {
+  if (!isAllowedPublicAssetDownloadUrl(value)) return false;
+  const [, name] = new URL(value).pathname.split(`/${likeStickerKeyPrefix(spaceId)}`);
+  return /^[0-9a-f-]{36}\.(webp|png|gif)$/.test(name ?? "");
+};
+
 export const assertPublicAssetUploadFile = (input: {
   purpose: PublicAssetPurpose;
   file: CreatePublicAssetUploadInput["file"];
@@ -309,6 +329,12 @@ export const assertPublicAssetUploadFile = (input: {
     if (file.size > UPLOAD_MAX_FILE_BYTES) {
       throw new PublicAssetValidationError(`${input.purpose.replace("_", " ")} is too large`, UPLOAD_ERROR_FILE_TOO_LARGE);
     }
+    return;
+  }
+
+  if (input.purpose === "space_like_sticker") {
+    if (!LIKE_STICKER_EXTENSIONS[file.mimeType]) throw new PublicAssetValidationError("like stickers must be WebP, PNG, or GIF");
+    if (file.size > LIKE_STICKER_MAX_FILE_BYTES) throw new PublicAssetValidationError("like sticker is too large", UPLOAD_ERROR_FILE_TOO_LARGE);
     return;
   }
 

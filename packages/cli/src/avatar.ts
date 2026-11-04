@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { CohubHttpClient, PublicAssetPurpose } from "@neta-art/cohub";
+import { LIKE_STICKER_MAX_EDGE, LIKE_STICKER_MAX_FILE_BYTES, type CohubHttpClient, type PublicAssetPurpose } from "@neta-art/cohub";
 
 const loadSharp = async () => (await import("sharp")).default;
 
@@ -60,6 +60,38 @@ export async function uploadAvatarAsset(input: {
     file: new Blob([new Uint8Array(avatar.body)], { type: avatar.mimeType }),
     mimeType: avatar.mimeType,
     filename: `avatar.${avatar.extension}`,
+  });
+}
+
+export async function normalizeLikeStickerFile(path: string): Promise<PreparedAvatar> {
+  const original = await readFile(path);
+  const format = detectAvatarFormat(original);
+  if (!format) throw new Error("Like sticker must be a PNG, GIF, WebP, or JPEG image");
+  const sharp = await loadSharp().catch(() => null);
+  let prepared: PreparedAvatar = { body: original, ...format };
+  if (sharp) {
+    const body = await sharp(original, { animated: true })
+      .resize(LIKE_STICKER_MAX_EDGE, LIKE_STICKER_MAX_EDGE, { fit: "inside", withoutEnlargement: true })
+      .webp({ quality: AVATAR_QUALITY, effort: 5 })
+      .toBuffer();
+    prepared = { body, mimeType: "image/webp", extension: "webp" };
+  } else if (format.mimeType === "image/jpeg") {
+    throw new Error("Converting a JPEG like sticker needs sharp; use a PNG, GIF, or WebP image");
+  }
+  if (prepared.body.byteLength > LIKE_STICKER_MAX_FILE_BYTES) {
+    throw new Error(`Like sticker must be at most ${LIKE_STICKER_MAX_FILE_BYTES / 1024 / 1024} MiB after resizing`);
+  }
+  return prepared;
+}
+
+export async function uploadLikeStickerAsset(input: { client: CohubHttpClient; spaceId: string; path: string }) {
+  const sticker = await normalizeLikeStickerFile(input.path);
+  return input.client.publicAssets.upload({
+    purpose: "space_like_sticker",
+    spaceId: input.spaceId,
+    file: new Blob([new Uint8Array(sticker.body)], { type: sticker.mimeType }),
+    mimeType: sticker.mimeType,
+    filename: `like-sticker.${sticker.extension}`,
   });
 }
 

@@ -370,6 +370,7 @@ cohub spaces create --name "<name>" --checkpoint <checkpointId>
 cohub spaces rename <spaceId> "<new name>"
 cohub spaces update <spaceId> --slug <space-slug>
 cohub spaces avatar <path>
+cohub spaces like-sticker <path>   # replaces the heart on published Apps; --clear restores it
 cohub spaces config <spaceId>
 ```
 

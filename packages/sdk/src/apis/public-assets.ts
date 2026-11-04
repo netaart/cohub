@@ -3,6 +3,7 @@ import type { HttpTransport } from "../transport.js";
 export type PublicAssetPurpose =
   | "user_avatar"
   | "space_avatar"
+  | "space_like_sticker"
   | "chat_attachment"
   | "app_source"
   | "generation_input";

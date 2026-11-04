@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { AppRecord } from "@neta-art/cohub";
+import type { AppRecord, SpacePublicProfile } from "@neta-art/cohub";
 import { Eye } from "lucide-svelte";
 import type { Snippet } from "svelte";
 import { page } from "$app/state";
@@ -16,7 +16,7 @@ export type CohubBarSpace = {
 	id: string;
 	slug: string | null;
 	name: string | null;
-	publicProfile?: { avatarUrl: string | null } | null;
+	publicProfile?: SpacePublicProfile | null;
 };
 
 export type CohubBarOwner = {
@@ -122,10 +122,14 @@ const totalViewsTitle = $derived(
 		</div>
 		<div class="hidden h-4 w-px shrink-0 bg-border-subtle sm:block"></div>
 	{/if}
-	<div class="flex min-w-0 shrink-0 items-center gap-2 overflow-hidden">
+	<div class="flex min-w-0 shrink-0 items-center gap-2">
 		{#if typeof likeCount === "number"}
 			{#key app.id}
-				<AppLikeButton appId={app.id} count={likeCount} />
+				<AppLikeButton
+					appId={app.id}
+					count={likeCount}
+					likeSticker={space?.publicProfile?.likeSticker?.url}
+				/>
 			{/key}
 		{/if}
 		{#if totalViewsText}

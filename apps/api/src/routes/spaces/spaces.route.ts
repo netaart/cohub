@@ -18,6 +18,7 @@ import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, tas
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
 import { hostPromptImages } from "../../session-images.js";
 import { readWorkspaceUsage } from "../../workspace-usage.js";
+import { isSpaceLikeStickerUrl } from "../../public-asset-storage.js";
 import { useAuth, getOptionalAuth, getAppSessionPrincipal, requireValidId, buildSpaceListItems, authzDenied, getSpacePublicProfile, normalizePublicAvatarUrl } from "../../lib/middleware.js";
 import { getAllowedSandboxSpecId, getSandboxImageCatalog, resolveSpaceSandboxPreferences } from "../../space-sandbox-preferences.js";
 import { parseSandboxPreferences, type SandboxImageId } from "../../sandbox-preferences.js";
@@ -1387,7 +1388,7 @@ router.patch("/:id/profile", async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => null);
   if (!body || !isRecord(body)) return c.json({ message: "invalid body" }, 400);
 
-  let nextDescription = space.description;
+  const changes: { description?: string | null } = {};
   if ("description" in body) {
     if (body.description !== null && typeof body.description !== "string") {
       return c.json({ message: "description must be a string or null" }, 400);
@@ -1395,14 +1396,10 @@ router.patch("/:id/profile", async (c) => {
     if (typeof body.description === "string" && body.description.length > MAX_SPACE_DESCRIPTION_LENGTH) {
       return c.json({ message: `description must be at most ${MAX_SPACE_DESCRIPTION_LENGTH} characters` }, 400);
     }
-    nextDescription = body.description;
+    changes.description = body.description;
   }
 
-  const existingMeta = (space.meta as Record<string, unknown> | null) ?? {};
-  const existingProfile = typeof existingMeta.publicProfile === "object" && existingMeta.publicProfile !== null && !Array.isArray(existingMeta.publicProfile)
-    ? existingMeta.publicProfile as Record<string, unknown>
-    : {};
-  const nextProfile: Record<string, unknown> = { ...existingProfile };
+  const profilePatch: Record<string, unknown> = {};
   if ("avatarUrl" in body) {
     if (body.avatarUrl !== null && typeof body.avatarUrl !== "string") {
       return c.json({ message: "avatarUrl must be a URL string or null" }, 400);
@@ -1411,15 +1408,26 @@ router.patch("/:id/profile", async (c) => {
     if (body.avatarUrl !== null && !avatarUrl) {
       return c.json({ message: "avatarUrl must be a valid http(s) URL under 2048 characters" }, 400);
     }
-    nextProfile.avatarUrl = avatarUrl;
-    delete nextProfile.pictureUrl;
+    profilePatch.avatarUrl = avatarUrl;
+  }
+  if ("likeSticker" in body) {
+    const sticker = body.likeSticker;
+    if (sticker === null) {
+      profilePatch.likeSticker = null;
+    } else if (isRecord(sticker) && typeof sticker.url === "string" && isSpaceLikeStickerUrl(sticker.url, space.id)) {
+      profilePatch.likeSticker = { url: sticker.url };
+    } else {
+      return c.json({ message: "likeSticker must be null or { url } of an uploaded like sticker" }, 400);
+    }
   }
 
+  const meta = sql`case when jsonb_typeof(${spaces.meta}) = 'object' then ${spaces.meta} else '{}'::jsonb end`;
+  const profile = sql`case when jsonb_typeof(${spaces.meta}->'publicProfile') = 'object' then ${spaces.meta}->'publicProfile' else '{}'::jsonb end`;
   const [updated] = await db
     .update(spaces)
     .set({
-      description: nextDescription,
-      meta: { ...existingMeta, publicProfile: nextProfile },
+      ...changes,
+      meta: sql`jsonb_set(${meta}, '{publicProfile}', (${profile} - 'pictureUrl') || ${JSON.stringify(profilePatch)}::jsonb)`,
       updatedAt: new Date(),
       lastActivityAt: new Date(),
     })

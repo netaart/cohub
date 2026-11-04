@@ -71,6 +71,7 @@ import SettingsRow, {
 	SETTINGS_SELECT,
 } from "$lib/features/space-settings/SettingsRow.svelte";
 import SpaceInvitations from "$lib/features/space-settings/SpaceInvitations.svelte";
+import SpaceLikeStickerSetting from "$lib/features/space-settings/SpaceLikeStickerSetting.svelte";
 import { SandboxSettingsState } from "$lib/features/space-settings/sandbox-settings.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
@@ -1203,6 +1204,10 @@ $effect(() => {
 								</div>
 							{/if}
 							{#if spaceProfileError}<p class="mt-2 text-[12px] text-error-soft break-words">{spaceProfileError}</p>{/if}
+						</div>
+
+						<div class="border-t border-border-subtle">
+							<SpaceLikeStickerSetting {spaceId} likeSticker={space?.publicProfile?.likeSticker?.url ?? null} canEdit={canEditSpaceProfile} onSaved={(next) => { space = next; cacheSpaceRecordSoon(next); }} />
 						</div>
 						</section>
 

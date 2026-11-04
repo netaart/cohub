@@ -11,7 +11,7 @@ import type {
   SpaceRecord,
 } from "@neta-art/cohub";
 import type { Command } from "commander";
-import { uploadAvatarAsset, uploadChatImageAsset } from "../avatar.js";
+import { uploadAvatarAsset, uploadChatImageAsset, uploadLikeStickerAsset } from "../avatar.js";
 import { createClient } from "../client.js";
 import { collectOption, readPromptContent } from "../command-input.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
@@ -637,7 +637,8 @@ export function registerSpaces(program: Command): void {
         if (jsonRequested(opts)) return outJson(space);
         const usage = space.workspaceUsage;
         const storage = usage ? `${usage.bytes === null ? "-" : formatBytes(usage.bytes)} (${usage.status})` : undefined;
-        table([{ ...space, storage }], [
+        const likeSticker = space.publicProfile?.likeSticker?.url;
+        table([{ ...space, storage, likeSticker }], [
           { key: "id", label: "ID" },
           { key: "name", label: "Name" },
           { key: "slug", label: "Slug" },
@@ -645,6 +646,7 @@ export function registerSpaces(program: Command): void {
           { key: "status", label: "Status" },
           { key: "createdAt", label: "Created" },
           ...(storage ? [{ key: "storage", label: "Storage" }] : []),
+          ...(likeSticker ? [{ key: "likeSticker", label: "Like sticker" }] : []),
         ]);
       } catch (e: unknown) {
         handleHttp(e);
@@ -712,6 +714,26 @@ export function registerSpaces(program: Command): void {
         const result = await client.space(spaceId).profile({ avatarUrl: asset.publicUrl });
         if (jsonRequested(opts)) return outJson({ ...result, asset });
         ok("Space avatar updated");
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  // ── spaces like-sticker ──
+  spacesCmd
+    .command("like-sticker [path]")
+    .description("Set the image that replaces the heart on the space's published Apps")
+    .option("--clear", "Restore the default heart")
+    .option("--json", "Output as JSON")
+    .action(async (path: string | undefined, opts: { clear?: boolean; json?: boolean }) => {
+      if (Boolean(path) === Boolean(opts.clear)) return error("Pass an image path or --clear");
+      const spaceId = await resolveSpace(spacesCmd);
+      const client = createClient();
+      try {
+        const asset = path ? await uploadLikeStickerAsset({ client, spaceId, path }) : null;
+        const result = await client.space(spaceId).profile({ likeSticker: asset ? { url: asset.publicUrl } : null });
+        if (jsonRequested(opts)) return outJson({ ...result, ...(asset ? { asset } : {}) });
+        ok(asset ? "Like sticker updated" : "Like sticker cleared");
       } catch (e: unknown) {
         handleHttp(e);
       }

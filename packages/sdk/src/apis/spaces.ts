@@ -67,6 +67,7 @@ import type {
   SpaceCompletionStreamEvent,
   SpaceDecisionResult,
   SpaceEnvInput,
+  SpaceLikeSticker,
   SpaceFsCompleteUploadInput,
   SpaceFsCompleteUploadResponse,
   SpaceFsCopyInput,
@@ -2323,7 +2324,7 @@ export class SpaceClient {
     return this.update({ name });
   }
 
-  profile(body: { description?: string | null; avatarUrl?: string | null }) {
+  profile(body: { description?: string | null; avatarUrl?: string | null; likeSticker?: SpaceLikeSticker | null }) {
     return this.transport.request<{ space: SpaceRecord }>(
       `/api/spaces/${this.id}/profile`,
       {

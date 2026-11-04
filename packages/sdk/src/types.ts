@@ -876,8 +876,14 @@ export type SpaceBootstrapMeta = {
   initialCheckpointTaskRunId?: string | null;
 };
 
+export type SpaceLikeSticker = {
+  url: string;
+};
+
 export type SpacePublicProfile = {
   avatarUrl: string | null;
+  /** Replaces the heart on the Space's published Apps; null or absent keeps the heart. */
+  likeSticker?: SpaceLikeSticker | null;
 };
 
 export type SpaceMeta = JsonObject & {

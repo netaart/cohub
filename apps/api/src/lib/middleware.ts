@@ -17,6 +17,7 @@ export type RequestPrincipal =
   | { type: "app_session"; appSession: AppSessionPrincipal };
 
 import { config } from "../config.js";
+import { isSpaceLikeStickerUrl } from "../public-asset-storage.js";
 import { getProfilesByUuids } from "../user-profiles.js";
 import { getSpaceSandboxBySpaceId } from "../space-sandboxes.js";
 import { spaceSandboxes } from "@cohub/db";
@@ -179,10 +180,16 @@ export const normalizePublicAvatarUrl = (value: unknown): string | null => {
   }
 };
 
-export const getSpacePublicProfile = (space: Pick<typeof spaces.$inferSelect, "meta">) => {
+const normalizeLikeSticker = (value: unknown, spaceId: string): { url: string } | null =>
+  isRecord(value) && typeof value.url === "string" && isSpaceLikeStickerUrl(value.url, spaceId) ? { url: value.url } : null;
+
+export const getSpacePublicProfile = (space: Pick<typeof spaces.$inferSelect, "id" | "meta">) => {
   const meta = isRecord(space.meta) ? space.meta : {};
   const profile = isRecord(meta.publicProfile) ? meta.publicProfile : {};
-  return { avatarUrl: normalizePublicAvatarUrl(profile.avatarUrl) };
+  return {
+    avatarUrl: normalizePublicAvatarUrl(profile.avatarUrl),
+    likeSticker: normalizeLikeSticker(profile.likeSticker, space.id),
+  };
 };
 
 export const buildSpaceListItem = async (space: typeof spaces.$inferSelect) => {

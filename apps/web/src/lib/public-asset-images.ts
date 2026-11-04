@@ -1,8 +1,10 @@
-import type {
-	PublicAssetMimeType,
-	PublicAssetUploadProgress,
+import {
+	LIKE_STICKER_MAX_EDGE,
+	LIKE_STICKER_MAX_FILE_BYTES,
+	type PublicAssetMimeType,
+	type PublicAssetUploadProgress,
 } from "@neta-art/cohub";
-import { normalizeAvatarImage } from "$lib/avatar-image";
+import { assertAvatarInputFile, normalizeAvatarImage } from "$lib/avatar-image";
 import { sdk } from "$lib/sdk";
 
 export type PreparedChatImageAttachment = {
@@ -148,6 +150,78 @@ export async function uploadSpaceAvatarImage(input: {
 		filename: `avatar.${avatar.extension}`,
 		onProgress: input.onProgress,
 		signal: input.signal,
+	});
+}
+
+export class LikeStickerImageError extends Error {
+	constructor(readonly reason: "format" | "size") {
+		super(`Invalid like sticker image: ${reason}`);
+	}
+}
+
+async function isAnimatedWebp(file: File) {
+	const head = new Uint8Array(await file.slice(0, 21).arrayBuffer());
+	const chunk = String.fromCharCode(...head.subarray(12, 16));
+	return chunk === "VP8X" && (head[20] & 0x02) !== 0;
+}
+
+async function prepareLikeStickerImage(file: File) {
+	let mimeType: string;
+	try {
+		mimeType = assertAvatarInputFile(file);
+	} catch {
+		throw new LikeStickerImageError("format");
+	}
+	const animated =
+		mimeType === "image/gif" ||
+		(mimeType === "image/webp" && (await isAnimatedWebp(file)));
+	let prepared: { file: Blob; mimeType: string } = { file, mimeType };
+	if (!animated) {
+		const bitmap = await createImageBitmap(file, {
+			imageOrientation: "from-image",
+		}).catch(() => {
+			throw new LikeStickerImageError("format");
+		});
+		try {
+			const scale = Math.min(
+				1,
+				LIKE_STICKER_MAX_EDGE / Math.max(bitmap.width, bitmap.height),
+			);
+			const canvas = document.createElement("canvas");
+			canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+			canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+			const context = canvas.getContext("2d");
+			if (!context) throw new LikeStickerImageError("format");
+			context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+			const blob = await new Promise<Blob | null>((resolve) =>
+				canvas.toBlob(resolve, "image/webp", 0.9),
+			);
+			if (blob) prepared = { file: blob, mimeType: blob.type };
+		} finally {
+			bitmap.close();
+		}
+	}
+	if (prepared.mimeType === "image/jpeg")
+		throw new LikeStickerImageError("format");
+	if (prepared.file.size > LIKE_STICKER_MAX_FILE_BYTES) {
+		throw new LikeStickerImageError("size");
+	}
+	return prepared;
+}
+
+export async function uploadSpaceLikeStickerImage(input: {
+	spaceId: string;
+	file: File;
+	onProgress?: (progress: PublicAssetUploadProgress) => void;
+}) {
+	const sticker = await prepareLikeStickerImage(input.file);
+	return sdk.publicAssets.upload({
+		purpose: "space_like_sticker",
+		spaceId: input.spaceId,
+		file: sticker.file,
+		mimeType: sticker.mimeType,
+		filename: `like-sticker.${sticker.mimeType.slice("image/".length)}`,
+		onProgress: input.onProgress,
 	});
 }
 

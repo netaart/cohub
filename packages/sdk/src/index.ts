@@ -85,6 +85,8 @@ export { parseSpaceRef } from "./space-ref.js";
 export { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 export {
   batchUploadEntries,
+  LIKE_STICKER_MAX_EDGE,
+  LIKE_STICKER_MAX_FILE_BYTES,
   UPLOAD_ERROR_BATCH_TOO_LARGE,
   UPLOAD_ERROR_FILE_TOO_LARGE,
   UPLOAD_ERROR_RATE_LIMITED,

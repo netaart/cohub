@@ -15,7 +15,7 @@ const FAILED_HINT_MS = 3_000;
 export class ResourceLike {
 	liked = $state(false);
 	failed = $state(false);
-	likes = $state(0);
+	toggled = $state<{ liked: boolean } | null>(null);
 	#total = $state(0);
 	/** The liked state `#total` already includes. */
 	#counted = $state(false);
@@ -80,7 +80,7 @@ export class ResourceLike {
 			}
 		}
 		this.liked = !this.liked;
-		if (this.liked) this.likes += 1;
+		this.toggled = { liked: this.liked };
 		this.#setFailed(false);
 		haptic("tick");
 		await this.#sync();

@@ -24,6 +24,9 @@ export const UPLOAD_MAX_BATCH_FILES = 2000;
 
 export const AVATAR_MAX_FILE_BYTES = 4 * MiB;
 
+export const LIKE_STICKER_MAX_FILE_BYTES = 1 * MiB;
+export const LIKE_STICKER_MAX_EDGE = 256;
+
 // ── Inline uploads (memory-bound) ─────────────────────────────────────────────
 
 /** Direct multipart upload into a cloud sandbox workspace. */

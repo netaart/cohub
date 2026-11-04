@@ -30,9 +30,9 @@ router.post("/uploads", async (c) => {
     return c.json({ message: "presigned_put_v1 upload protocol is required" }, 400);
   }
 
-  if (body.purpose === "space_avatar" || body.purpose === "app_source") {
+  if (body.purpose === "space_avatar" || body.purpose === "space_like_sticker" || body.purpose === "app_source") {
     if (!body.spaceId || !requireValidId(body.spaceId)) return c.json({ message: "space not found" }, 404);
-    // App source uploads follow `app.manage`; space avatars stay on `space.edit`.
+    // App source uploads follow `app.manage`; Space profile images stay on `space.edit`.
     const permission = body.purpose === "app_source" ? "app.manage" : "space.edit";
     if (!(await hasPermission(user, permission, { spaceId: body.spaceId }))) return authzDenied(c);
     if (body.purpose === "app_source" && !body.sessionId) return c.json({ message: "sessionId is required" }, 400);

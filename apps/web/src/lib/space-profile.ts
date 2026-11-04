@@ -13,7 +13,11 @@ export function normalizeSpacePublicProfile(
 		typeof profile?.avatarUrl === "string" && profile.avatarUrl.trim()
 			? profile.avatarUrl.trim()
 			: null;
-	return { avatarUrl };
+	const stickerUrl = profile?.likeSticker?.url;
+	return {
+		avatarUrl,
+		likeSticker: typeof stickerUrl === "string" ? { url: stickerUrl } : null,
+	};
 }
 
 export function getSpacePublicProfile(
