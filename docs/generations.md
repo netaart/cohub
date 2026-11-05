@@ -212,10 +212,9 @@ Behavior:
   logged and the last valid one stays in effect; it never blocks other models.
 
 Upgrading from the prepaid design (#447): it debited a reserve only while this
-config existed. Keep the config absent until this version runs everywhere. If it
-was ever enabled, remove it first and let the old worker drain until
-`select count(*) from v2.generation_billing_reservations where status not in ('settled', 'released')`
-returns 0, then deploy.
+config existed, and migration 0085 drops its reservation table. The migration
+refuses to run while any reservation is unsettled; if the config was ever enabled,
+remove it and let the old worker settle them first.
 
 ## CLI
 

@@ -1379,57 +1379,6 @@ export const taskRuns = v2.table(
 );
 
 /**
- * Unused: generation reserves are Redis holds now. Dropped in a follow-up
- * migration once no deployed worker reads it.
- */
-export const generationBillingReservations = v2.table(
-  "generation_billing_reservations",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    taskRunId: uuid("task_run_id").notNull(),
-    userId: varchar("user_id", { length: 255 }).notNull(),
-    spaceId: uuid("space_id"),
-    model: varchar("model", { length: 255 }).notNull(),
-    usageType: varchar("usage_type", { length: 100 }).notNull(),
-    payerType: varchar("payer_type", { length: 20 }).notNull(),
-    payerId: varchar("payer_id", { length: 255 }).notNull(),
-    reserveUsd: numeric("reserve_usd", { precision: 18, scale: 8 }).notNull(),
-    actualUsd: numeric("actual_usd", { precision: 18, scale: 8 }),
-    settleOverage: boolean("settle_overage").notNull().default(false),
-    discountMultiplier: numeric("discount_multiplier", { precision: 8, scale: 5 }).notNull().default("1"),
-    reserveOperationId: varchar("reserve_operation_id", { length: 255 }).notNull(),
-    settleOperationId: varchar("settle_operation_id", { length: 255 }),
-    reversalOperationId: varchar("reversal_operation_id", { length: 255 }),
-    status: varchar("status", { length: 20 }).notNull().default("reserving"),
-    reversalReceipt: jsonb("reversal_receipt").$type<Record<string, unknown>>(),
-    lastError: text("last_error"),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    settledAt: timestamp("settled_at", { withTimezone: true }),
-    releasedAt: timestamp("released_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  },
-  (table) => ({
-    taskRunUniqueIdx: uniqueIndex("v2_uq_generation_billing_reservations_task_run").on(table.taskRunId),
-    reserveOperationUniqueIdx: uniqueIndex("v2_uq_generation_billing_reservations_reserve_operation").on(table.reserveOperationId),
-    settleOperationUniqueIdx: uniqueIndex("v2_uq_generation_billing_reservations_settle_operation").on(table.settleOperationId),
-    reversalOperationUniqueIdx: uniqueIndex("v2_uq_generation_billing_reservations_reversal_operation").on(table.reversalOperationId),
-    payerIdx: index("v2_idx_generation_billing_reservations_payer").on(table.payerType, table.payerId, table.status),
-    statusExpiresIdx: index("v2_idx_generation_billing_reservations_status_expires").on(table.status, table.expiresAt),
-    userCreatedIdx: index("v2_idx_generation_billing_reservations_user_created").on(table.userId, table.createdAt),
-    spaceCreatedIdx: index("v2_idx_generation_billing_reservations_space_created").on(table.spaceId, table.createdAt),
-    statusCheck: check(
-      "v2_chk_generation_billing_reservations_status",
-      sql`${table.status} in ('reserving', 'held', 'running', 'settling', 'settled', 'releasing', 'released')`,
-    ),
-    reserveAmountCheck: check(
-      "v2_chk_generation_billing_reservations_reserve_usd",
-      sql`${table.reserveUsd} > 0`,
-    ),
-  }),
-);
-
-/**
  * Unified index of references between resources — the raw material behind
  * relationship stats (collaboration networks, lineage, influence, file heat).
  *
