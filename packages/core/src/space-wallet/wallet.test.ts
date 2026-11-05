@@ -77,3 +77,15 @@ test("preview failures can fall back, debit failures cannot", async () => {
     assert.ok(fixture.warnings.some((message) => message.includes("manual billing verification")));
   }
 });
+
+test("a pinned payer is charged without routing, and its debit failures stay retryable", async () => {
+  const wallet = setup(0);
+  await wallet.service.recordUsage({ ...request, payer: "space_wallet", retryOnly: true, reason: "Generation" });
+  assert.equal(wallet.debits[0]?.userId, spaceWalletCustomerId("space"));
+  assert.equal(wallet.debits[0]?.reason, "actor_user_id=user; Generation");
+  assert.deepEqual(wallet.queries, []);
+
+  const personal = setup(10, { debitFails: true });
+  await assert.rejects(personal.service.recordUsage({ ...request, payer: "personal" }), /Debit response lost/);
+  assert.equal(personal.debits[0]?.userId, "user");
+});

@@ -28,6 +28,10 @@ function parseModelDiscountSnapshot(value: unknown): GenerationModelDiscountSnap
   return { multiplier: value.multiplier, resolvedAt: value.resolvedAt };
 }
 
+function parsePinnedPayer(value: unknown): "personal" | "space_wallet" | null {
+  return value === "personal" || value === "space_wallet" ? value : null;
+}
+
 export function parseGenerationBillingRetryData(data: unknown): GenerationBillingRetryTaskDataV2 {
   if (!isRecord(data)) throw new Error("Invalid generation billing retry payload: data is required");
   if (typeof data.taskRunId !== "string" || !data.taskRunId.trim()) {
@@ -45,6 +49,7 @@ export function parseGenerationBillingRetryData(data: unknown): GenerationBillin
   if (typeof data.amountUsd !== "number" || !Number.isFinite(data.amountUsd) || data.amountUsd <= 0) {
     throw new Error("Invalid generation billing retry payload: amountUsd must be a positive number");
   }
+  const payer = parsePinnedPayer(data.payer);
   const common = {
     taskRunId: data.taskRunId,
     userId: data.userId,
@@ -52,6 +57,7 @@ export function parseGenerationBillingRetryData(data: unknown): GenerationBillin
     usageType: data.usageType,
     model: data.model,
     adapterType: typeof data.adapterType === "string" ? data.adapterType : null,
+    ...(payer ? { payer } : {}),
   };
   if (data.schemaVersion === undefined || data.schemaVersion === 1) {
     return {

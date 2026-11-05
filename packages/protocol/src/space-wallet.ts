@@ -8,7 +8,6 @@ export type SpaceWalletActivity = {
   id: string;
   kind: "grant" | "usage" | "reversal" | "refund" | "expire" | "revoke" | "adjust";
   title: string;
-  generationPhase: "reserve" | "settlement" | "refund" | null;
   amountUsd: number;
   actorUserId: string | null;
   sourceId: string | null;

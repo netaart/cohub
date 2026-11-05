@@ -26,8 +26,6 @@ import {
   type BillingUsagePreflightInput,
   type BillingUsageRecordInput,
   type BillingUsageRecordResult,
-  type BillingUsageReversalInput,
-  type BillingUsageReversalResult,
   type BillingUserRef,
   type BusinessBillingOperations,
   type BusinessCreditConsumeResult,
@@ -397,22 +395,6 @@ export function createDisabledBillingOperations(
         ),
         status: "disabled",
         response: null,
-      };
-    },
-
-    async reverseUsage(
-      input: BillingUsageReversalInput,
-    ): Promise<BillingUsageReversalResult> {
-      const tokenType =
-        input.tokenType ?? COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
-      return {
-        tokenType,
-        amountUsd: roundUsd(
-          input.amountUsd,
-          getCreditUnit(tokenType).usdDecimalPlaces,
-        ),
-        status: "disabled",
-        receipt: null,
       };
     },
 

@@ -471,15 +471,6 @@ Examples:
             result.cost !== undefined ? `official cost: ${result.cost}` : null,
             result.billing ? `billing: ${result.billing.status}` : null,
             result.billing ? `effective amount: ${result.billing.amountUsd}` : null,
-            result.billing?.reservedAmountUsd !== undefined
-              ? `reserved: ${result.billing.reservedAmountUsd}`
-              : null,
-            result.billing?.refundedAmountUsd
-              ? `refunded: ${result.billing.refundedAmountUsd}`
-              : null,
-            result.billing?.additionalAmountUsd
-              ? `additional: ${result.billing.additionalAmountUsd}`
-              : null,
             result.billing?.discountMultiplier !== undefined
               ? `multiplier: ${result.billing.discountMultiplier}`
               : null,

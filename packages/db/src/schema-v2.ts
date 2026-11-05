@@ -1379,9 +1379,8 @@ export const taskRuns = v2.table(
 );
 
 /**
- * Durable journal for prepaid generation reservations. Provider credits are the
- * balance authority; this row only carries the stable operation IDs, payer
- * decision, and reversal receipt needed for idempotent settlement and recovery.
+ * Unused: generation reserves are Redis holds now. Dropped in a follow-up
+ * migration once no deployed worker reads it.
  */
 export const generationBillingReservations = v2.table(
   "generation_billing_reservations",

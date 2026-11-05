@@ -1,7 +1,7 @@
 import { BillingAccessBlockedError } from "@cohub/billing";
 import { DEFAULT_SANDBOX_SPEC_ID, SANDBOX_SPECS, getDefaultSandboxIdleTtl, getSandboxSpecRank, isSandboxSpecId, type SandboxSpecId } from "@cohub/sandbox-controller";
 import { createLogger } from "@cohub/infra/logging";
-import { generationBilling } from "../../generation-billing.js";
+import { releaseGenerationTaskHold } from "../../generation-billing.js";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
@@ -391,9 +391,9 @@ async function cancelQueuedTurn(input: {
   if (!updated) throw new Error("turn not found");
   const generationTaskId = updated.executionKind === "direct_generation" ? readMetaRecord(updated.meta).generationTaskId : null;
   if (typeof generationTaskId === "string") {
-    // The worker refuses cancelled turns; releasing here returns the reserve without waiting for the queue.
-    await generationBilling.release({ taskRunId: generationTaskId, reason: "turn_cancelled", unclaimedOnly: true }).catch((error) => {
-      logger.warn("[Billing] failed to release cancelled generation reserve", { taskRunId: generationTaskId, error });
+    // The worker refuses cancelled held turns, so the hold can be freed without waiting for the queue.
+    await releaseGenerationTaskHold(generationTaskId).catch((error) => {
+      logger.warn("[Billing] failed to release cancelled generation hold", { taskRunId: generationTaskId, error });
     });
   }
   const turn = await getSessionTurnById(input.sessionId, input.turnId);

@@ -4,7 +4,13 @@ import { walletCreditsUsable } from "./policy.js";
 export { claimMessageWalletBilling, resolveWalletMessageEligibility } from "./message-claim.js";
 export { walletCreditsUsable } from "./policy.js";
 export const spaceWalletCustomerId = (spaceId: string) => `cohub:space-wallet:${spaceId}`;
-export type WalletUsageInput = BillingUsageRecordInput & { spaceId?: string | null; retryOnly?: boolean };
+/** `payer` pins the charge to the payer a reserve hold was placed on; retries then cannot switch payers. */
+export type WalletUsageInput = BillingUsageRecordInput & { spaceId?: string | null; retryOnly?: boolean; payer?: "personal" | "space_wallet" | null };
+
+function walletReason(userId: string, reason: string | undefined): string {
+  const actorPrefix = `actor_user_id=${encodeURIComponent(userId)}; `;
+  return actorPrefix + (reason ?? "").slice(0, Math.max(0, 1024 - actorPrefix.length));
+}
 
 export function createSpaceWalletBilling(input: {
   billing: BillingOperations;
@@ -48,7 +54,13 @@ export function createSpaceWalletBilling(input: {
   };
 
   async function settle(request: WalletUsageInput): Promise<BillingUsageRecordResult> {
-    const { spaceId, retryOnly, ...usage } = request;
+    const { spaceId, retryOnly, payer, ...usage } = request;
+    // A pinned payer is idempotent under the same operation id, so its errors propagate for the caller to retry.
+    if (payer === "personal") return billing.recordUsage(usage);
+    if (payer === "space_wallet") {
+      if (!spaceId) throw new Error("A Space wallet charge requires a spaceId");
+      return walletBilling.recordUsage({ ...usage, userId: spaceWalletCustomerId(spaceId), reason: walletReason(usage.userId, usage.reason) });
+    }
     if (!spaceId || !billing.status.configured || !walletBilling.status.configured || usage.amountUsd <= 0) return billing.recordUsage(usage);
     const tokenType = usage.tokenType ?? COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
     const skipped = { tokenType, amountUsd: usage.amountUsd, status: "skipped" as const, response: null };
@@ -67,11 +79,10 @@ export function createSpaceWalletBilling(input: {
       input.warn?.("Space wallet preview failed; using original payer", { spaceId, operationId: usage.operationId, error });
     }
     try {
-      const actorPrefix = `actor_user_id=${encodeURIComponent(usage.userId)}; `;
       const result = await (walletPays ? walletBilling : billing).recordUsage({
         ...usage,
         userId: walletPays ? spaceWalletCustomerId(spaceId) : usage.userId,
-        reason: walletPays ? actorPrefix + (usage.reason ?? "").slice(0, Math.max(0, 1024 - actorPrefix.length)) : usage.reason,
+        reason: walletPays ? walletReason(usage.userId, usage.reason) : usage.reason,
       });
       if (walletPays && result.status === "overage") input.warn?.("Space wallet usage created overage", { spaceId, operationId: usage.operationId });
       return result;
