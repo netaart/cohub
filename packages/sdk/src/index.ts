@@ -191,6 +191,7 @@ export {
   filterDiscoverableGenerationModels,
   filterGenerationDeclarationsByPolicy,
   findGenerationModelPolicy,
+  generationOperations,
   getAllowedGenerationModelIds,
   isGenerationModelHidden,
   normalizeGenerationPolicy,
@@ -199,6 +200,7 @@ export {
 export type {
   GenerationModelPolicy,
   GenerationModelVisibility,
+  GenerationOperation,
   GenerationParameterConstraint,
   GenerationPolicy,
   GenerationUsageBilling,
