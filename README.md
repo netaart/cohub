@@ -15,7 +15,7 @@
   <img src="https://public.cohub.live/p/f7000115-55d8-4d97-a0e4-d2a55b6ffa41/screenshot.4bcbcab1.webp" alt="Cohub Space — a project chat with the repo README open in preview" width="800" />
 </p>
 
-We burn 100 billion tokens per week inside our company within Cohub Spaces.
+We burn 200 billion tokens per week inside our company within Cohub Spaces.
 
 **A living space where people and agents create, play, and build together.**
 
