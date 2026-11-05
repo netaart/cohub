@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { BillingOperations, SpaceWalletBillingOperations } from "@cohub/billing";
 import { createGenerationReserveHolds, type GenerationReserveRedis } from "./index.js";
 
-// Mirrors the Lua scripts: one hash per payer of taskRunId -> [amountMicros, expiresAtMs].
+// Mirrors the Lua scripts: one hash per payer of taskRunId -> [amountUnits, expiresAtMs].
 function fakeRedis(): GenerationReserveRedis {
   const hashes = new Map<string, Map<string, [number, number]>>();
   return {
@@ -22,12 +22,7 @@ function fakeRedis(): GenerationReserveRedis {
         hash.set(field, [amount, expiresAt]);
         return [1, total];
       }
-      const [target = 0, now = 0] = rest.map(Number);
-      const held = hash.get(field);
-      if (!held) return 0;
-      if (target <= now) hash.delete(field);
-      else if (held[1] > target) hash.set(field, [held[0], target]);
-      return 1;
+      return hash.delete(field) ? 1 : 0;
     },
   };
 }
@@ -78,7 +73,7 @@ test("holds must fit on top of live holds, Space wallet first", async () => {
   ]);
 });
 
-test("a settled hold stays counted briefly; a released one frees the balance", async () => {
+test("a released hold frees the balance at once", async () => {
   const holds = createGenerationReserveHolds({
     redis: fakeRedis(),
     billing: payer(20) as unknown as BillingOperations,
@@ -88,10 +83,8 @@ test("a settled hold stays counted briefly; a released one frees the balance", a
   assert.equal(held.status, "held");
   if (held.status !== "held") return;
 
-  await holds.release("task-1", held.hold.payer, "charged");
   assert.equal((await holds.hold(request(2, null))).status, "blocked");
-
-  await holds.release("task-1", held.hold.payer, "task_failed");
+  await holds.release("task-1", held.hold.payer, "charged");
   assert.equal((await holds.hold(request(2, null))).status, "held");
 });
 
