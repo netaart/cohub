@@ -202,9 +202,8 @@ Behavior:
   cannot oversubscribe the balance. The Space wallet is tried first when usable.
 - Insufficient balance rejects with 402 (reserve, available, shortfall) before the
   task is enqueued.
-- Success charges the actual cost and keeps the hold counted for one more minute,
-  covering balance reads taken before the charge. Failure, cancellation of a
-  queued turn, or an enqueue failure release the hold.
+- Success charges the actual cost and releases the hold; failure, cancellation of
+  a queued turn, or an enqueue failure release it too.
 - A hold expires after two hours. Expiry or Redis data loss never moves money; it
   only stops counting that amount for new submissions. If Redis is unavailable,
   submissions fall back to the regular usage gate.

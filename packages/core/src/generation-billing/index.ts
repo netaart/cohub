@@ -14,8 +14,6 @@ import { spaceWalletCustomerId, walletCreditsUsable } from "../space-wallet/inde
  * An expired or lost hold only frees the amount for new submissions.
  */
 const HOLD_TTL_MS = 2 * 60 * 60 * 1000;
-/** Keeps a settled hold counted briefly so a balance read taken before the charge cannot spend it twice. */
-const SETTLED_HOLD_GRACE_MS = 60_000;
 /** Billing's usd_micro_cent precision: eight USD decimal places. */
 const UNITS_PER_USD = 100_000_000;
 
@@ -41,15 +39,7 @@ if redis.call('PTTL', KEYS[1]) < ttl then redis.call('PEXPIRE', KEYS[1], ttl) en
 return {1, total}
 `;
 
-// Shortens a hold to ARGV[2] (ms epoch); never extends it.
-const EXPIRE_SCRIPT = `
-local value = redis.call('HGET', KEYS[1], ARGV[1])
-if not value then return 0 end
-local amount, expiresAt = string.match(value, '^(%d+)|(%d+)$')
-if not expiresAt or tonumber(ARGV[2]) <= tonumber(ARGV[3]) then return redis.call('HDEL', KEYS[1], ARGV[1]) end
-if tonumber(expiresAt) > tonumber(ARGV[2]) then redis.call('HSET', KEYS[1], ARGV[1], amount .. '|' .. ARGV[2]) end
-return 1
-`;
+const RELEASE_SCRIPT = "return redis.call('HDEL', KEYS[1], ARGV[1])";
 
 export type GenerationReserveRedis = {
   eval(script: string, numKeys: number, ...args: (string | number)[]): Promise<unknown>;
@@ -62,7 +52,7 @@ export type GenerationReserveHoldResult =
   | { status: "held"; hold: GenerationReserveHold }
   | { status: "blocked"; error: BillingAccessBlockedError };
 
-/** Why a hold was released; `charged` and `retry_charged` keep it counted for the settled grace. */
+/** Why a hold was released, for the release log. */
 export type GenerationReserveReleaseReason =
   | "charged"
   | "retry_charged"
@@ -153,7 +143,7 @@ export function createGenerationReserveHolds(input: {
       ) as [number, number];
     } catch (error) {
       // A timed-out script may still have run; the caller falls back without a hold, so drop it.
-      await redis.eval(EXPIRE_SCRIPT, 1, holdKey(payer), taskRunId, now, now).catch(() => undefined);
+      await redis.eval(RELEASE_SCRIPT, 1, holdKey(payer), taskRunId).catch(() => undefined);
       throw error;
     }
     const otherHeldUsd = toUsd(Number(result[1]));
@@ -225,11 +215,9 @@ export function createGenerationReserveHolds(input: {
 
   /** Best effort: a failed release only leaves the hold until its TTL. */
   async function release(taskRunId: string, payer: GenerationReservePayer, reason: GenerationReserveReleaseReason) {
-    const now = Date.now();
-    const graceMs = reason === "charged" || reason === "retry_charged" ? SETTLED_HOLD_GRACE_MS : 0;
-    const context = { taskRunId, payerType: payer.type, payerId: payer.id, reason, graceMs };
+    const context = { taskRunId, payerType: payer.type, payerId: payer.id, reason };
     try {
-      const found = Number(await redis.eval(EXPIRE_SCRIPT, 1, holdKey(payer), taskRunId, now + graceMs, now)) === 1;
+      const found = Number(await redis.eval(RELEASE_SCRIPT, 1, holdKey(payer), taskRunId)) === 1;
       info?.("[GenerationReserve] released", { ...context, found });
     } catch (error) {
       warn?.("[GenerationReserve] release failed; the hold expires on its TTL", { ...context, error });
