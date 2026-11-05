@@ -78,6 +78,7 @@ export const REALTIME_MESSAGE_META_KEYS = [
   "turnId",
   "messageId",
   "messageOrdinal",
+  "contextWindow",
   "compaction",
 ] as const;
 

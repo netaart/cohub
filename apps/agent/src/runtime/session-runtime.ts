@@ -16,7 +16,7 @@ import { recordLlmUsage, startLlmRoundSpan, getAgentTracer } from "@cohub/infra/
 import { getCurrentToolExecutionContext, runWithToolExecutionContext, type ToolExecutionContext } from "../tool-context.js";
 import { applyRoundBoundaryAbort } from "../active-turns.js";
 import { isToolFailureDetails } from "./tools/index.js";
-import { mergeHeaders } from "@cohub/infra/config-runtime/models";
+import { clampContextWindow, mergeHeaders } from "@cohub/infra/config-runtime/models";
 import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
 import { ModelUnavailableError } from "@cohub/core/sessions";
 import { prepareAgentImagesForModel } from "./image-to-text.js";
@@ -48,7 +48,7 @@ export type CohubAgentSession = {
   enqueueSteer(text: string, images?: ImageContent[]): void;
   waitForIdle(): Promise<void>;
   setModel(model: Model<Api>): Promise<void>;
-  configureRuntimeIdentity(input: { userId?: string | null; spaceOwnerUserId?: string | null; modelRegistry: CohubModelRegistry; imageToTextConfig?: ImageToTextConfig | null; requestedModel?: { provider: string; id: string }; requestedThinkingLevel?: string | null }): Promise<void>;
+  configureRuntimeIdentity(input: { userId?: string | null; spaceOwnerUserId?: string | null; modelRegistry: CohubModelRegistry; imageToTextConfig?: ImageToTextConfig | null; requestedModel?: { provider: string; id: string }; requestedThinkingLevel?: string | null; requestedContextWindow?: number | null }): Promise<void>;
   configureTools(tools: ToolLike[]): Promise<void>;
   reload(): Promise<void>;
   abort(): Promise<void>;
@@ -154,6 +154,8 @@ export type CreateCohubAgentSessionOptions = {
   model?: Model<Api>;
   /** Latest thinking level the user explicitly selected; read only when the session file lost its record. */
   loadSelectedThinkingLevel?: () => Promise<string | null>;
+  /** Latest context window requested by a prompt in this session; read once per handle. */
+  loadSelectedContextWindow?: () => Promise<number | null>;
 };
 
 function extractTextFromToolResultContent(content: unknown): string {
@@ -744,6 +746,8 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
   let runtimeImageToTextConfig = options.imageToTextConfig ?? null;
   let runtimeTools = options.tools;
   let runtimeSystemPrompt = "";
+  // undefined: not loaded yet; null: no prompt has set one.
+  let selectedContextWindow: number | null | undefined;
   let systemPromptStateKey: string | null = null;
   const sessionAffinity = options.sessionManager.getSessionAffinity();
   const getRuntime = (): StreamRuntime => ({
@@ -1070,7 +1074,13 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
       const shouldChangeThinkingLevel = nextThinkingLevel !== agent.state.thinkingLevel;
       // IDs can stay the same while credentials, headers and endpoints change.
       // Bind the model and its auth registry to the same runtime configuration.
-      agent.state.model = target;
+      // Like thinking level, a prompt's window sticks to the session until another prompt changes it.
+      if (input.requestedContextWindow) selectedContextWindow = input.requestedContextWindow;
+      else if (selectedContextWindow === undefined) selectedContextWindow = (await options.loadSelectedContextWindow?.()) ?? null;
+      const promptContextWindow = clampContextWindow(selectedContextWindow ?? undefined, (target as CohubModel).contextWindowLimit);
+      agent.state.model = promptContextWindow
+        ? { ...target, contextWindow: promptContextWindow, contextWindowSource: "prompt" } as CohubModel
+        : target;
       if (shouldChangeModel) {
         options.sessionManager.appendModelChange(target.provider, target.id);
       }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { limitBatchSize, limitBatchToApprovalMode } from "../runtime/batch-limit.js";
+import { limitBatchSize, limitBatchToApprovalMode, resolveBatchContextWindow } from "../runtime/batch-limit.js";
 
 const turn = (size: number) => ({ size });
 
@@ -20,4 +20,11 @@ test("a change of approval mode ends a batch so the owner's mode never covers ea
   assert.deepEqual(limitBatchToApprovalMode([turn("read_only"), turn("full_access")]), [turn("read_only")]);
   assert.deepEqual(limitBatchToApprovalMode([turn(), turn("auto")]), [turn()]);
   assert.deepEqual(limitBatchToApprovalMode([turn(), turn()]), [turn(), turn()]);
+});
+
+test("a context window request on any merged follow-up applies, newest first", () => {
+  const turn = (requestedContextWindow?: number) => ({ meta: requestedContextWindow ? { requestedContextWindow } : {} });
+  assert.equal(resolveBatchContextWindow([turn(150_000), turn()]), 150_000);
+  assert.equal(resolveBatchContextWindow([turn(150_000), turn(90_000)]), 90_000);
+  assert.equal(resolveBatchContextWindow([turn(), { meta: null }]), undefined);
 });

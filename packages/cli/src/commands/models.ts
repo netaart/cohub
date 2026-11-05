@@ -7,6 +7,7 @@ import {
   type PublicGenerationDeclaration,
 } from "@neta-art/cohub";
 import { createClient } from "../client.js";
+import { explicitSpace, failSpaceTarget, resolveSpaceRef } from "../space.js";
 import { table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
 
 type MultimodalModelSummary = Pick<PublicGenerationDeclaration, "model" | "title" | "description" | "pricing">;
@@ -171,6 +172,20 @@ function printMultimodalModel(model: PublicGenerationDeclaration): void {
   }));
 }
 
+function formatModelContext(model: Record<string, unknown>): string {
+  const value = model.contextWindow;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "";
+  const source = typeof model.contextWindowSource === "string" ? model.contextWindowSource : null;
+  const ref = typeof model.contextWindowSourceRef === "string" ? `:${model.contextWindowSourceRef}` : "";
+  return source ? `${formatTokenCount(value)} (${source}${ref})` : formatTokenCount(value);
+}
+
+function formatTokenCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
 export function registerModels(program: Command): void {
   const cmd = program
     .command("models")
@@ -179,6 +194,7 @@ export function registerModels(program: Command): void {
 
 Examples:
   cohub models ls
+  cohub models ls --space <spaceId>
   cohub models ls --model-type multimodal
   cohub models ls --model-type multimodal --json
   cohub models show <model>
@@ -191,7 +207,7 @@ Examples:
     .description("List available models")
     .option("--model-type <type>", "Model type: llm | multimodal", "llm")
     .option("--json", "Output as JSON")
-    .action(async (opts: { modelType?: string; json?: boolean }) => {
+    .action(async (opts: { modelType?: string; json?: boolean }, command: Command) => {
       const client = createClient();
       try {
         if (opts.modelType === "multimodal") {
@@ -220,7 +236,9 @@ Examples:
           return error("Invalid model type", "Use --model-type llm or --model-type multimodal");
         }
 
-        const catalog = await client.models.list();
+        const spaceRef = explicitSpace(command);
+        const spaceId = spaceRef ? await resolveSpaceRef(spaceRef).catch(failSpaceTarget) : undefined;
+        const catalog = await client.models.list({ spaceId });
         const visibleCatalog = filterHiddenLlmModels(catalog);
         if (jsonRequested(opts)) return outJson(visibleCatalog);
         if (Object.keys(visibleCatalog).length === 0) return console.log("  (empty)");
@@ -231,10 +249,12 @@ Examples:
           table(entries.map((entry) => ({
             id: entry.id,
             provider: entry.provider,
+            context: formatModelContext(entry.model),
             cost: formatLlmModelCost(entry.model),
           })), [
             { key: "id", label: "ID" },
             { key: "provider", label: "Provider" },
+            { key: "context", label: "Context" },
             { key: "cost", label: "Cost" },
           ]);
         }

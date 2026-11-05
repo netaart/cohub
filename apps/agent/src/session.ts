@@ -11,7 +11,7 @@ import { interruptSessionTurn, persistAssistantMessage, persistUserMessage } fro
 import { sendOutput } from "./redis.js";
 import { logger } from "./logger.js";
 import { getAgentTracer } from "@cohub/infra/tracing/agent";
-import type { CohubModelRegistry } from "./runtime/model-registry.js";
+import type { CohubModel, CohubModelRegistry } from "./runtime/model-registry.js";
 import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
 import {
   ensureAgentSpaceSessionPath,
@@ -27,7 +27,7 @@ import { createCohubAgentSession, type CohubAgentSession } from "./runtime/sessi
 import type { AgentTurnAbortEvent } from "@cohub/protocol";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ContextProjectionOptions } from "@cohub/protocol";
-import { loadRequestedThinkingLevel, loadRuntimeContext } from "./runtime/context-store.js";
+import { loadRequestedContextWindow, loadRequestedThinkingLevel, loadRuntimeContext } from "./runtime/context-store.js";
 import { appendTerminalGenerationMessages } from "./generation-session-sync.js";
 import { syncCloudContext } from "./runtime/cloud-context.js";
 import type { createSandboxCodingTools } from "./sandbox/tools.js";
@@ -574,6 +574,8 @@ export async function persistInterruptedAssistantSnapshot(
       completedAt: now,
       messageOrdinal: handle.activeAssistantContext?.assistantOrdinal ?? null,
       thinkingLevel: handle.session.agent.state.thinkingLevel,
+      contextWindow: handle.session.agent.state.model.contextWindow,
+      contextWindowSource: (handle.session.agent.state.model as CohubModel).contextWindowSource,
     });
   });
 
@@ -1034,6 +1036,8 @@ export function subscribeSessionEvents(handle: SessionHandle) {
             completedAt,
             messageOrdinal: assistantContext.assistantOrdinal,
             thinkingLevel: handle.session.agent.state.thinkingLevel,
+            contextWindow: handle.session.agent.state.model.contextWindow,
+            contextWindowSource: (handle.session.agent.state.model as CohubModel).contextWindowSource,
           });
         } catch (error) {
           if (error instanceof Error) span.recordException(error);
@@ -1177,6 +1181,10 @@ export async function loadOrCreateSessionHandle(input: {
     ...(resolvedModel ? { model: resolvedModel } : {}),
     loadSelectedThinkingLevel: () => loadRequestedThinkingLevel({ sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined }).catch((error: unknown) => {
       logger.warn(`[Session] failed to load selected thinking level sessionId=${input.sessionId}; using the lowest supported level`, error);
+      return null;
+    }),
+    loadSelectedContextWindow: () => loadRequestedContextWindow({ sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined }).catch((error: unknown) => {
+      logger.warn(`[Session] failed to load selected context window sessionId=${input.sessionId}; using the configured window`, error);
       return null;
     }),
   });

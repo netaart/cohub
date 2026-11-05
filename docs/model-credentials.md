@@ -5,7 +5,10 @@ A provider's credentials and destination form one trust boundary. User model con
 ## Configuration sources
 
 - Platform: `<platformConfigRoot>/platform/.cohub/models.json`, loaded through `PLATFORM_MODELS_REDIS_KEY`.
-- User: `<platformConfigRoot>/users/<userId>/.cohub/models.json`, loaded through `getUserModelsRedisKey(userId)`.
+- Mod: each enabled mod's `<checkpointCacheRoot>/<modSpaceId>/latest/.cohub/models.json`, read from the same immutable snapshot that serves `/mods`.
+- User: `<platformConfigRoot>/users/<userId>/.cohub/models.json`, loaded through `getUserModelsRedisKey(userId)`. This is the Home Space's `.cohub/models.json` after the worker publishes its checkpoint.
+
+A model's `contextWindow` applies in this order (low to high): platform, mods (in mount order, later mods win), user, then a prompt's `contextWindow` (`cohub spaces prompt --context-window <tokens>` or the prompt API; cohub harness only). Like thinking level, a prompt value sticks to the session until a later prompt sets another one. Mod files can only set `contextWindow` for models that already exist in the platform catalog; they cannot add models or change connections, credentials, or prices. A missing or invalid mod file is ignored with a warning so it cannot break a session.
 
 The loader determines the source from these paths and cache keys. A `scope` or `trusted` field in user JSON does not confer platform trust. Access to platform configuration must remain restricted to platform operators; this boundary does not protect a platform file or Redis key already writable by an attacker.
 
@@ -19,14 +22,16 @@ Raw file/cache values stay unresolved. Runtime resolution returns an in-memory c
 
 ## Model parameter overrides
 
-To change one platform model's context window, put only its ID and the changed parameter in the user's `.cohub/models.json`:
+`contextWindow` drives compaction, truncation, and handoff decisions. Overrides of a platform model may tighten or relax it but are capped at the platform value.
+
+To change one platform model's context window, put only its ID and `contextWindow` in the user's (or a mod's) `.cohub/models.json`:
 
 ```json
 {
   "providers": {
     "cohub": {
       "models": [
-        { "id": "claude-sonnet-5", "contextWindow": 200000 }
+        { "id": "claude-sonnet-5", "contextWindow": 150000 }
       ]
     }
   }
@@ -34,6 +39,10 @@ To change one platform model's context window, put only its ID and the changed p
 ```
 
 This keeps the platform model's API, destination, key, headers, and remaining parameters. Every other platform model stays available. No user key is required for parameter-only overrides, including for platform cloud models.
+
+A non-positive or non-integer value fails schema validation: an invalid user file fails clearly, while an invalid mod file is ignored with a warning.
+
+Inspect the configured value and its source with `cohub -s <space> models ls` or `GET /api/models?spaceId=<spaceId>`. Each model reports `contextWindow`, `contextWindowSource` (`platform`, `mod`, `user`, or `default`), and `contextWindowSourceRef` (for example the mod mount slug). A prompt value belongs to its session, so it shows on each Turn's meta instead: `contextWindow` with `contextWindowSource: "prompt"`.
 
 Allowed fields are `id`, `name`, `reasoning`, `defaultThinkingLevel`, `thinkingLevelMap`, `hidden`, `input`, `contextWindow`, and `maxTokens`. `thinkingLevelMap` merges its supplied entries; arrays such as `input` replace the previous array. Explicit `false` and thinking-level `null` values are preserved. An empty `models` list leaves the catalog intact.
 

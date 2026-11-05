@@ -10,8 +10,11 @@ import {
   type CachedModelsConfig,
   type ModelsConfig,
 } from "@cohub/infra/config-runtime/models";
+import { loadSpaceModModelLayers } from "@cohub/core/space-mods";
+import { db } from "../db.js";
+import { logger } from "../logger.js";
 import { redis } from "../redis.js";
-import { getAgentPlatformModelsPath, getAgentUserModelsPath } from "./paths.js";
+import { getAgentCheckpointCacheRoot, getAgentPlatformModelsPath, getAgentUserModelsPath } from "./paths.js";
 
 async function loadModelsFromFile(input: {
   modelsPath: string;
@@ -53,7 +56,14 @@ async function loadCachedModels(input: {
   return (await loadModelsFromFile(input)).content;
 }
 
-export async function loadRuntimeModelsConfigs(userId?: string | null): Promise<ModelsConfig[]> {
+export async function loadRuntimeModelsConfigs(
+  userId?: string | null,
+  spaceId?: string | null,
+): Promise<ModelsConfig[]> {
+  const modsPromise = loadSpaceModModelLayers(db, spaceId, {
+    checkpointCacheRoot: getAgentCheckpointCacheRoot(),
+    warn: (message) => logger.warn(`[Models] ${message}`),
+  });
   const platform = await loadCachedModels({
     redisKey: PLATFORM_MODELS_REDIS_KEY,
     modelsPath: getAgentPlatformModelsPath(),
@@ -69,5 +79,5 @@ export async function loadRuntimeModelsConfigs(userId?: string | null): Promise<
       })
     : null;
 
-  return [resolveRuntimeModelsConfig({ platform, user })];
+  return [resolveRuntimeModelsConfig({ platform, mods: await modsPromise, user })];
 }

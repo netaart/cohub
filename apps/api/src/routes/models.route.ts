@@ -6,18 +6,22 @@ import {
   createCachedModelsConfig,
   flattenModelsCatalog,
   getUserModelsRedisKey,
-  mergeModelsConfigs,
   MODELS_CACHE_TTL_SEC,
   parseCachedModelsConfig,
   parseModelsConfig,
   PLATFORM_MODELS_REDIS_KEY,
+  DEFAULT_CONTEXT_WINDOW,
+  resolveModelsConfigContext,
   type CachedModelsConfig,
   type ModelCatalogEntry,
   type ModelsConfig,
 } from "@cohub/infra/config-runtime/models";
+import { loadSpaceModModelLayers } from "@cohub/core/space-mods";
 import { loadPublicGenerationModels } from "../generations/declarations.js";
+import { db } from "../db/index.js";
 import { config } from "../config.js";
-import { useAuth } from "../lib/middleware.js";
+import { useAuth, authzDenied } from "../lib/middleware.js";
+import { hasPermission } from "../permissions.js";
 import { redisCommandClient } from "../redis.js";
 
 
@@ -94,7 +98,11 @@ async function loadCachedModels(input: {
   }
 }
 
-async function fetchModelsCatalog(userId: string): Promise<ModelCatalogEntry[]> {
+async function fetchModelsCatalog(userId: string, spaceId?: string | null): Promise<ModelCatalogEntry[]> {
+  const modsPromise = loadSpaceModModelLayers(db, spaceId, {
+    checkpointCacheRoot: config.checkpointCacheRoot,
+    warn: (message) => logger.warn(`[models] ${message}`),
+  });
   const platformModels = await loadCachedModels({
     redisKey: PLATFORM_MODELS_REDIS_KEY,
     modelsPath: PLATFORM_MODELS_PATH,
@@ -108,7 +116,10 @@ async function fetchModelsCatalog(userId: string): Promise<ModelCatalogEntry[]> 
     allowMissing: true,
   });
 
-  return flattenModelsCatalog(mergeModelsConfigs(platformModels, userModels));
+  const resolved = resolveModelsConfigContext({ platform: platformModels, mods: await modsPromise, user: userModels });
+  return flattenModelsCatalog(resolved).map((entry) => entry.model.contextWindow === undefined
+    ? { ...entry, model: { ...entry.model, contextWindow: DEFAULT_CONTEXT_WINDOW, contextWindowSource: "default" } }
+    : entry);
 }
 
 const router = new Hono();
@@ -126,7 +137,10 @@ router.get("/", async (c) => {
       return c.json(await loadPublicGenerationModels(user.uuid));
     }
 
-    const catalog = await fetchModelsCatalog(user.uuid);
+    const spaceId = c.req.query("spaceId")?.trim() || null;
+    if (spaceId && !(await hasPermission(user, "space.view", { spaceId }))) return authzDenied(c);
+
+    const catalog = await fetchModelsCatalog(user.uuid, spaceId);
     const grouped: Record<string, ModelCatalogEntry[]> = {};
     for (const entry of catalog) {
       let list = grouped[entry.provider];

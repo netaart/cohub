@@ -1,5 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
+  DEFAULT_CONTEXT_WINDOW,
   mergeHeaders,
   mergeModelsConfigs,
   type ModelDef,
@@ -12,6 +13,8 @@ export type CohubModel<TApi extends Api = Api> = Model<TApi> & {
   defaultThinkingLevel?: ModelThinkingLevel;
   requestProfile?: ModelRequestProfile;
   imageUrlInput?: boolean;
+  contextWindowLimit?: number;
+  contextWindowSource?: ModelDef["contextWindowSource"];
 };
 
 function finiteNumberOrZero(value: unknown): number {
@@ -65,7 +68,9 @@ export class CohubModelRegistry {
           thinkingLevelMap: modelDef.thinkingLevelMap,
           input: modelDef.input ?? ["text"],
           cost: normalizeModelCost(modelDef.cost),
-          contextWindow: modelDef.contextWindow ?? 128000,
+          contextWindow: modelDef.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+          contextWindowLimit: modelDef.contextWindowLimit,
+          contextWindowSource: modelDef.contextWindowSource,
           maxTokens: modelDef.maxTokens ?? 16384,
           requestProfile: modelDef.requestProfile ?? providerConfig.requestProfile,
           imageUrlInput: modelDef.imageUrlInput ?? providerConfig.imageUrlInput,

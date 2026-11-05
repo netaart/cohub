@@ -17,6 +17,8 @@ export type ModelCost = {
 export type ModelThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelRequestProfile = "codex" | "claude-code";
 export type ThinkingLevelMap = Partial<Record<ModelThinkingLevel, string | null>>;
+/** Where the effective `contextWindow` came from. Runtime-only, never read from config files. */
+export type ModelContextWindowSource = "platform" | "mod" | "user" | "prompt" | "default";
 
 export type ModelDef = {
   id: string;
@@ -30,7 +32,14 @@ export type ModelDef = {
   hidden?: boolean;
   input?: Array<"text" | "image">;
   cost?: ModelCost;
+  /** Effective context window; overrides of a platform model are capped at the platform value. */
   contextWindow?: number;
+  /** Runtime-only: platform cap for overrides of `contextWindow`. */
+  contextWindowLimit?: number;
+  /** Runtime-only: which layer set `contextWindow`. */
+  contextWindowSource?: ModelContextWindowSource;
+  /** Runtime-only: source detail, for example a mod mount slug. */
+  contextWindowSourceRef?: string;
   maxTokens?: number;
   requestProfile?: ModelRequestProfile;
   /** `false` sends remote images inline instead of as URLs. */
@@ -360,6 +369,96 @@ export function mergeModelsConfigs(
   return { providers: Object.fromEntries(providers) };
 }
 
+export type ModelsConfigModLayer = {
+  config: ModelsConfig;
+  /** Human-readable source, for example the mod mount slug. */
+  ref?: string;
+};
+
+/** Window runtimes assume when a model declares none. */
+export const DEFAULT_CONTEXT_WINDOW = 128_000;
+
+/** Overrides may tighten or relax a window but never exceed the platform value. */
+export function clampContextWindow(value: number | undefined, limit: number | undefined): number | undefined {
+  if (!isPositiveInteger(value)) return undefined;
+  return isPositiveInteger(limit) ? Math.min(value, limit) : value;
+}
+
+/** Mods may only tune `contextWindow` of an existing platform model. */
+export function selectModContextWindowOverrides(
+  platform: ModelsConfig | null | undefined,
+  config: ModelsConfig,
+): ModelsConfig {
+  const providers: Record<string, ProviderConfig> = {};
+  for (const [provider, providerConfig] of Object.entries(config.providers)) {
+    const platformModels = platform?.providers[provider]?.models;
+    if (!platformModels) continue;
+    const models = (providerConfig.models ?? []).flatMap((model) => {
+      if (!isPositiveInteger(model.contextWindow)) return [];
+      if (!platformModels.some((item) => item.id === model.id)) return [];
+      return [{ id: model.id, contextWindow: model.contextWindow }];
+    });
+    if (models.length > 0) providers[provider] = { models };
+  }
+  return { providers };
+}
+
+/**
+ * Merge platform, mod and user catalogs and resolve each model's `contextWindow`
+ * (platform < mod < user), capped at the platform value, with its source.
+ */
+export function resolveModelsConfigContext(input: {
+  platform?: ModelsConfig | null;
+  mods?: ModelsConfigModLayer[] | null;
+  user?: ModelsConfig | null;
+}): ModelsConfig {
+  const modLayers = (input.mods ?? [])
+    .map((layer) => ({ ...layer, config: selectModContextWindowOverrides(input.platform, layer.config) }))
+    .filter((layer) => Object.keys(layer.config.providers).length > 0);
+  const merged = mergeModelsConfigs(input.platform, ...modLayers.map((layer) => layer.config), input.user);
+  const platformProviders = input.platform?.providers ?? {};
+  const userProviders = input.user?.providers ?? {};
+
+  const providers = Object.fromEntries(Object.entries(merged.providers).map(([provider, providerConfig]) => {
+    const platformProvider = platformProviders[provider];
+    const userProvider = userProviders[provider];
+    const usesPlatform = provider === "cohub"
+      || Boolean(platformProvider && (!userProvider || isPlatformModelOverride(provider, userProvider)));
+
+    const models = (providerConfig.models ?? []).map((model): ModelDef => {
+      if (!usesPlatform) {
+        return isPositiveInteger(model.contextWindow) ? { ...model, contextWindowSource: "user" } : model;
+      }
+
+      const platformModel = platformProvider?.models?.find((item) => item.id === model.id);
+      const userModel = userProvider?.models?.find((item) => item.id === model.id);
+      // Without a declared platform window there is no known cap; overrides apply as-is, as before.
+      const limit = isPositiveInteger(platformModel?.contextWindow) ? platformModel.contextWindow : undefined;
+      const modLayer = [...modLayers].reverse().find((layer) =>
+        layer.config.providers[provider]?.models?.some((item) => item.id === model.id));
+      const modValue = modLayer?.config.providers[provider]?.models?.find((item) => item.id === model.id)?.contextWindow;
+
+      // A user value equal to the platform one is a copied catalog entry, not an override.
+      const userValue = userModel?.contextWindow !== limit ? userModel?.contextWindow : undefined;
+      const [value, source, sourceRef]: [number | undefined, ModelContextWindowSource, string | undefined] =
+        isPositiveInteger(userValue) ? [userValue, "user", undefined]
+          : isPositiveInteger(modValue) ? [modValue, "mod", modLayer?.ref]
+            : [limit, limit ? "platform" : "default", undefined];
+
+      const contextWindow = clampContextWindow(value, limit);
+      return {
+        ...model,
+        ...(contextWindow ? { contextWindow } : {}),
+        ...(limit ? { contextWindowLimit: limit } : {}),
+        contextWindowSource: source,
+        ...(sourceRef ? { contextWindowSourceRef: sourceRef } : {}),
+      };
+    });
+    return [provider, { ...providerConfig, models }];
+  }));
+  return { providers };
+}
+
 /** 仅解析经过来源校验的平台密钥声明。 */
 export function resolvePlatformModelApiKey(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -404,9 +503,10 @@ export function assertUserModelCredentials(model: {
 
 export function resolveRuntimeModelsConfig(input: {
   platform?: ModelsConfig | null;
+  mods?: ModelsConfigModLayer[] | null;
   user?: ModelsConfig | null;
 }): ModelsConfig {
-  const merged = mergeModelsConfigs(input.platform, input.user);
+  const merged = resolveModelsConfigContext(input);
   return {
     providers: Object.fromEntries(Object.entries(merged.providers).map(([provider, config]) => {
       const user = Object.hasOwn(input.user?.providers ?? {}, provider) ? input.user?.providers[provider] : undefined;

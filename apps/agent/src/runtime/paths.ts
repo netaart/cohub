@@ -66,8 +66,12 @@ export function getAgentWorkspacePath(spaceId: string) {
   return join(process.env.WORKSPACE_ROOT ?? "/space-storage", spaceId, "workspace");
 }
 
+export function getAgentCheckpointCacheRoot() {
+  return process.env.CHECKPOINT_CACHE_ROOT ?? "/checkpoint-cache";
+}
+
 export function getAgentModSnapshotPath(modSpaceId: string) {
-  return join(process.env.CHECKPOINT_CACHE_ROOT ?? "/checkpoint-cache", modSpaceId, "latest");
+  return join(getAgentCheckpointCacheRoot(), modSpaceId, "latest");
 }
 
 export function getAgentWorkspaceAgentsPath(spaceIdOrWorkspacePath: string) {

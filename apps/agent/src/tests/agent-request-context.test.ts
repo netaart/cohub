@@ -12,7 +12,7 @@ import {
   CLAUDE_CODE_VERSION,
 } from "@cohub/model-runtime/request-profile/claude-code";
 import { SessionManager } from "../runtime/local-session-manager.js";
-import { CohubModelRegistry } from "../runtime/model-registry.js";
+import { CohubModelRegistry, type CohubModel } from "../runtime/model-registry.js";
 
 process.env.DATABASE_URL ??= "postgres://localhost/cohub_test";
 process.env.APP_ENCRYPTION_KEY ??= "test-key";
@@ -128,6 +128,50 @@ test("runtime identity refresh replaces a same-ID user endpoint before using pla
   assert.equal(new URL(after.url).origin, "https://anthropic.test");
   assert.equal(after.headers.get("x-api-key"), "test-key");
   assert.equal(after.headers.get("x-r02-origin"), null);
+});
+
+test("a prompt context window may exceed a mod value up to the platform cap and sticks to the session", async (t) => {
+  const platform: ModelsConfig = { providers: { test: {
+    ...config.providers.test,
+    models: [{ id: "claude-sonnet-5", reasoning: true, contextWindow: 200_000 }],
+  } } };
+  const mods = [{ ref: "studio", config: { providers: { test: { models: [{ id: "claude-sonnet-5", contextWindow: 120_000 }] } } } }];
+  const modelRegistry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform, mods })] });
+  const model = modelRegistry.find("test", "claude-sonnet-5");
+  assert.equal(model?.contextWindow, 120_000);
+  const sessionManager = SessionManager.create(root, join(root, "sessions"));
+  sessionManager.newSession({ id: "session-prompt-window" });
+  const { session } = await createCohubAgentSession({
+    cwd: root, sessionManager, modelRegistry, tools: [echoTool], model,
+    loadSelectedContextWindow: async () => 150_000,
+  });
+  t.after(() => session.dispose());
+
+  await session.configureRuntimeIdentity({ modelRegistry });
+  assert.equal(session.agent.state.model.contextWindow, 150_000, "a restored handle picks up the session's last prompt value");
+
+  await session.configureRuntimeIdentity({ modelRegistry, requestedContextWindow: 1_000_000 });
+  assert.equal(session.agent.state.model.contextWindow, 200_000);
+  assert.equal((session.agent.state.model as CohubModel).contextWindowSource, "prompt");
+
+  await session.configureRuntimeIdentity({ modelRegistry });
+  assert.equal(session.agent.state.model.contextWindow, 200_000);
+});
+
+test("a prompt context window on a custom provider is not capped by its configured value", async (t) => {
+  const user: ModelsConfig = { providers: { custom: {
+    api: "anthropic-messages", baseUrl: "https://user.example.test", apiKey: "user-literal-key",
+    models: [{ id: "custom-model", contextWindow: 64_000 }],
+  } } };
+  const modelRegistry = new CohubModelRegistry({ configs: [resolveRuntimeModelsConfig({ platform: config, user })] });
+  const model = modelRegistry.find("custom", "custom-model");
+  const sessionManager = SessionManager.create(root, join(root, "sessions"));
+  sessionManager.newSession({ id: "session-custom-prompt-window" });
+  const { session } = await createCohubAgentSession({ cwd: root, sessionManager, modelRegistry, tools: [echoTool], model });
+  t.after(() => session.dispose());
+
+  await session.configureRuntimeIdentity({ modelRegistry, requestedContextWindow: 128_000 });
+  assert.equal(session.agent.state.model.contextWindow, 128_000);
 });
 
 test("agent requests carry the system prompt and tools, also after the transcript is rebuilt", async () => {

@@ -59,6 +59,7 @@ type PromptOptions = {
   provider?: string;
   harness?: HarnessKind;
   thinkingLevel?: string;
+  contextWindow?: string;
   approvalMode?: string;
   serviceTier?: string;
   readOnly?: boolean;
@@ -263,7 +264,7 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
   if (opts.note) {
     const agentOnly = Object.entries({
       "--delay-ms": opts.delayMs, "--at": opts.at, "--cron": opts.cron, "--model": opts.model, "--provider": opts.provider,
-      "--thinking-level": opts.thinkingLevel, "--approval-mode": opts.approvalMode, "--service-tier": opts.serviceTier,
+      "--thinking-level": opts.thinkingLevel, "--context-window": opts.contextWindow, "--approval-mode": opts.approvalMode, "--service-tier": opts.serviceTier,
       "--read-only": opts.readOnly, "--steer": opts.steer, "--env": opts.env?.length,
     }).flatMap(([flag, value]) => value ? [flag] : []);
     if (agentOnly.length) return error("Conflicting options", `--note cannot be combined with ${agentOnly.join(", ")}`);
@@ -275,6 +276,7 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
     return error("Invalid thinking level", `Use ${MODEL_THINKING_LEVELS.join("|")}`);
   }
   if (opts.approvalMode !== undefined && !isApprovalMode(opts.approvalMode)) return error("Invalid approval mode", `Use ${APPROVAL_MODES.join("|")}`);
+  const contextWindow = opts.contextWindow !== undefined ? parseInteger(opts.contextWindow, "context-window", { min: 1 }) : undefined;
 
   const spaceId = await resolveSpace(command, { home: true });
   const client = createClient();
@@ -325,6 +327,7 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
       provider: opts.provider,
       harness: opts.harness,
       thinkingLevel,
+      ...(contextWindow ? { contextWindow } : {}),
       ...(isApprovalMode(opts.approvalMode) ? { approvalMode: opts.approvalMode } : {}),
       ...(opts.serviceTier ? { serviceTier: opts.serviceTier } : {}),
       accessMode: opts.readOnly ? "read_only" : "full_access",
@@ -430,6 +433,7 @@ export function registerPrompt(program: Command): void {
     .option("-p, --provider <provider>", "Provider name")
     .option("--harness <harness>", `Harness: ${harnessSchema.options.join(", ")}`, "cohub")
     .option("--thinking-level <level>", `Thinking level: ${MODEL_THINKING_LEVELS.join("|")}`)
+    .option("--context-window <tokens>", "Context window for this session from this prompt on; capped at the platform value")
     .option("--approval-mode <mode>", `Local Harness approval mode: ${APPROVAL_MODES.join("|")}`)
     .option("--service-tier <tier>", "Local Harness service tier, e.g. priority for Codex Fast")
     .option("--read-only", "Use read-only tools")
@@ -792,6 +796,7 @@ export function registerSpaces(program: Command): void {
     .option("-m, --model <model>", "Model name")
     .option("-p, --provider <provider>", "Provider name")
     .option("--thinking-level <level>", `Thinking level: ${MODEL_THINKING_LEVELS.join("|")}`)
+    .option("--context-window <tokens>", "Context window for this session from this prompt on; capped at the platform value")
     .option("--approval-mode <mode>", `Local Harness approval mode: ${APPROVAL_MODES.join("|")}`)
     .option("--service-tier <tier>", "Local Harness service tier, e.g. priority for Codex Fast")
     .option("--read-only", "Use read-only tools")

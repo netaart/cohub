@@ -3,13 +3,15 @@ import { join } from "node:path";
 import {
   createCachedModelsConfig,
   getUserModelsRedisKey,
-  mergeModelsConfigs,
   MODELS_CACHE_TTL_SEC,
   parseCachedModelsConfig,
   parseModelsConfig,
   PLATFORM_MODELS_REDIS_KEY,
+  resolveModelsConfigContext,
   type ModelsConfig,
 } from "@cohub/infra/config-runtime/models";
+import { loadSpaceModModelLayers } from "@cohub/core/space-mods";
+import { createLogger } from "@cohub/infra/logging";
 import type { ChannelConfig } from "@cohub/protocol/gateway";
 import type { InferSelectModel } from "drizzle-orm";
 import { eq } from "drizzle-orm";
@@ -17,6 +19,8 @@ import { spaces } from "@cohub/db";
 import type { db as dbClient } from "../db/index.js";
 import { config } from "../config.js";
 import { redisCommandClient } from "../redis.js";
+
+const logger = createLogger({ serviceName: "cohub-api" });
 
 type DbClient = typeof dbClient;
 type SpaceRow = InferSelectModel<typeof spaces>;
@@ -90,14 +94,20 @@ export async function loadMergedModelsCatalog(db: DbClient, spaceOrId: Pick<Spac
     modelsPath: PLATFORM_MODELS_PATH,
     allowMissing: false,
   });
-  const userModels = space?.userUuid
-    ? await loadModelsConfig({
-        redisKey: getUserModelsRedisKey(space.userUuid),
-        modelsPath: getUserModelsPath(space.userUuid),
-        allowMissing: true,
-      })
-    : null;
-  return mergeModelsConfigs(platformModels, userModels);
+  const [userModels, mods] = await Promise.all([
+    space?.userUuid
+      ? loadModelsConfig({
+          redisKey: getUserModelsRedisKey(space.userUuid),
+          modelsPath: getUserModelsPath(space.userUuid),
+          allowMissing: true,
+        })
+      : null,
+    loadSpaceModModelLayers(db, space?.id, {
+      checkpointCacheRoot: config.checkpointCacheRoot,
+      warn: (message) => logger.warn(`[Models] ${message}`),
+    }),
+  ]);
+  return resolveModelsConfigContext({ platform: platformModels, mods, user: userModels });
 }
 
 export function splitProviderModelInput(value: string): { provider: string | null; id: string } {
