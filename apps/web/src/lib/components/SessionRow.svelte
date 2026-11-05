@@ -5,7 +5,14 @@ export const SESSION_ROW_NAVIGATE_DELAY_MS = 120;
 
 <script lang="ts">
 import type { SessionRecord } from "@neta-art/cohub";
-import { Check, Link2Off, Pencil, TextCursorInput, X } from "lucide-svelte";
+import {
+	Check,
+	ChevronRight,
+	Link2Off,
+	Pencil,
+	TextCursorInput,
+	X,
+} from "lucide-svelte";
 import type { Snippet } from "svelte";
 import { clock } from "$lib/clock.svelte";
 import ListRow from "$lib/components/list-page/ListRow.svelte";
@@ -27,7 +34,7 @@ import {
 	getSessionStoppedLabel,
 	type SessionRowStatusKind,
 } from "$lib/session-activity";
-import type { SessionRowTree } from "$lib/session-fork-tree";
+import type { SessionForkFold, SessionRowTree } from "$lib/session-fork-tree";
 import { getSessionPreview, getSessionPreviewText } from "$lib/session-preview";
 import { getSessionActivityAt } from "$lib/session-sort";
 import { authStore } from "$lib/stores/auth.svelte";
@@ -48,6 +55,7 @@ const {
 	showSourceBadge = false,
 	avatar,
 	tree,
+	fold,
 	tooltip,
 	draggable = false,
 	showInsert = true,
@@ -66,6 +74,7 @@ const {
 	onSubmitRename,
 	onCancelRename,
 	onRemoveLabel,
+	onToggleFold,
 	onDragStart,
 	onDragEnd,
 }: {
@@ -78,6 +87,7 @@ const {
 	showSourceBadge?: boolean;
 	avatar?: Snippet;
 	tree?: SessionRowTree | null;
+	fold?: SessionForkFold | null;
 	tooltip?: string;
 	draggable?: boolean;
 	showInsert?: boolean;
@@ -96,6 +106,7 @@ const {
 	onSubmitRename?: (session: SessionRecord) => void;
 	onCancelRename?: () => void;
 	onRemoveLabel?: () => void;
+	onToggleFold?: () => void;
 	onDragStart?: (
 		event: DragEvent,
 		session: SessionRecord,
@@ -200,6 +211,27 @@ const treeStyle = $derived(
 		: undefined,
 );
 
+const foldLabel = $derived(
+	fold
+		? [
+				fold.expanded
+					? m.sidebar_fork_collapse({}, { locale })
+					: m.sidebar_fork_expand({}, { locale }),
+				!fold.expanded && fold.hidden > 0
+					? m.sidebar_fork_hidden({ count: fold.hidden }, { locale })
+					: null,
+				!fold.expanded && fold.hiddenUnread > 0
+					? m.sidebar_fork_hidden_unread(
+							{ count: fold.hiddenUnread },
+							{ locale },
+						)
+					: null,
+			]
+				.filter(Boolean)
+				.join(", ")
+		: "",
+);
+
 function railX(level: number) {
 	return level === 1
 		? "var(--tree-root-x)"
@@ -296,6 +328,32 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		<span class="text-text-placeholder">{sourceName}</span>
 	{:else if !hasMessages}
 		<span class="text-text-placeholder">{m.chats_row_no_messages({}, { locale })}</span>
+	{/if}
+{/snippet}
+
+{#snippet foldToggle()}
+	{#if fold && onToggleFold}
+		<button
+			type="button"
+			class="-my-0.5 shrink-0 items-center gap-1 rounded px-0.5 py-0.5 text-[length:var(--list-meta-size)] leading-none tabular-nums text-text-tertiary transition-colors hover:bg-bg-hover-strong hover:text-text-primary {fold.expanded ? 'hidden group-hover/row:inline-flex group-focus-within/row:inline-flex' : 'inline-flex'}"
+			draggable="false"
+			aria-expanded={fold.expanded}
+			aria-label={foldLabel}
+			title={foldLabel}
+			onclick={(event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				onToggleFold();
+			}}
+			ondblclick={(event) => {
+				event.preventDefault();
+				event.stopPropagation();
+			}}
+		>
+			<ChevronRight class="h-3 w-3 transition-transform {fold.expanded ? 'rotate-90' : ''}" />
+			{#if !fold.expanded && fold.hidden > 0}<span>{fold.hidden}</span>{/if}
+			{#if !fold.expanded && fold.hiddenUnread > 0}<StatusGlyph tone="activity" class="[--status-glyph-size:5px]" />{/if}
+		</button>
 	{/if}
 {/snippet}
 
@@ -401,6 +459,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		{@render treeGuide()}
 		<ListRowText
 			{title}
+			badge={fold && onToggleFold ? foldToggle : undefined}
 			{meta}
 			lead={participants.length > 0 ? people : undefined}
 			subtitle={dense && !glyph ? undefined : secondLine}
