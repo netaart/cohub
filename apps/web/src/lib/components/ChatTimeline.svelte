@@ -71,6 +71,7 @@ const locale = $derived(getLocale());
 
 let observedNodes = new Map<HTMLElement, number>();
 let observer: IntersectionObserver | null = null;
+let farObserver: IntersectionObserver | null = null;
 let prevScrollHeight = $state(0);
 
 type TimelineScrollAnchor = {
@@ -130,13 +131,13 @@ export function finalizePrepend() {
 
 function observeItem(node: HTMLElement, originalIndex: number) {
 	observedNodes.set(node, originalIndex);
-	if (observer) {
-		observer.observe(node);
-	}
+	observer?.observe(node);
+	farObserver?.observe(node);
 	return {
 		destroy() {
 			observedNodes.delete(node);
 			observer?.unobserve(node);
+			farObserver?.unobserve(node);
 		},
 		update(newIndex: number) {
 			observedNodes.set(node, newIndex);
@@ -167,13 +168,26 @@ $effect(() => {
 		},
 	);
 
+	// Paint-contain offscreen items so streaming cost stays flat as history grows.
+	farObserver = new IntersectionObserver(
+		(entries) => {
+			for (const entry of entries) {
+				entry.target.toggleAttribute("data-far", !entry.isIntersecting);
+			}
+		},
+		{ root: bindListEl, rootMargin: "100% 0px" },
+	);
+
 	for (const [node] of observedNodes) {
 		observer.observe(node);
+		farObserver.observe(node);
 	}
 
 	return () => {
 		observer?.disconnect();
 		observer = null;
+		farObserver?.disconnect();
+		farObserver = null;
 	};
 });
 </script>
@@ -277,6 +291,10 @@ $effect(() => {
 
 	.chat-timeline-scroll::-webkit-scrollbar {
 		display: none;
+	}
+
+	.chat-timeline-scroll :global([data-far]) {
+		contain: paint;
 	}
 
 	/* Uniform spacing between items via gap on the parent flex container.

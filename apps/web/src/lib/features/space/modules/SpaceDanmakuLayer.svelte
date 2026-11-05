@@ -105,9 +105,7 @@ onMount(() => {
 		padding: 3px 12px 3px 3px;
 		border-radius: 999px;
 		border: 1px solid var(--border-subtle);
-		background: color-mix(in srgb, var(--bg-elevated) 80%, transparent);
-		backdrop-filter: blur(10px);
-		-webkit-backdrop-filter: blur(10px);
+		background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
 		box-shadow: 0 6px 18px
 			color-mix(in srgb, var(--overlay-scrim-strong) 10%, transparent);
 		font-size: 14px;
