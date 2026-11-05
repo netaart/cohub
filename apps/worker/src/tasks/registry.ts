@@ -155,7 +155,7 @@ export const registerTask = (type: string, handler: TaskHandler) => {
     } catch (error) {
       if (job.name === "generation") {
         const hold = parseGenerationReserveHold(payload.data?.reserveHold);
-        if (hold) await generationReserveHolds.release(taskRunId, hold.payer);
+        if (hold) await generationReserveHolds.release(taskRunId, hold.payer, "task_failed");
         await failGenerationSession({ taskRunId, payload, error }).catch((sessionError) => {
           logger.warn("[GenerationSession] failed to persist failure", sessionError);
         });

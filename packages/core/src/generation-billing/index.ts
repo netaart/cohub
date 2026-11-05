@@ -62,6 +62,18 @@ export type GenerationReserveHoldResult =
   | { status: "held"; hold: GenerationReserveHold }
   | { status: "blocked"; error: BillingAccessBlockedError };
 
+/** Why a hold was released; `charged` and `retry_charged` keep it counted for the settled grace. */
+export type GenerationReserveReleaseReason =
+  | "charged"
+  | "retry_charged"
+  | "task_failed"
+  | "turn_cancelled"
+  | "enqueue_failed"
+  | "session_creation_failed"
+  | "duplicate_client_message";
+
+type Log = (message: string, context: Record<string, unknown>) => void;
+
 export class GenerationBillingUnavailableError extends Error {
   constructor(message = "Generation billing is temporarily unavailable. Please try again.", options?: ErrorOptions) {
     super(message, options);
@@ -72,6 +84,7 @@ export class GenerationBillingUnavailableError extends Error {
 const holdKey = (payer: GenerationReservePayer) => `generation:reserve-holds:${payer.type}:${payer.id}`;
 const toUnits = (usd: number) => Math.round(usd * UNITS_PER_USD);
 const toUsd = (units: number) => units / UNITS_PER_USD;
+const roundUsd = (usd: number) => Math.round(usd * UNITS_PER_USD) / UNITS_PER_USD;
 
 function blockedError(reserveUsd: number, availableUsd: number): BillingAccessBlockedError {
   const available = Math.max(0, availableUsd);
@@ -106,9 +119,11 @@ export function createGenerationReserveHolds(input: {
   redis: GenerationReserveRedis;
   billing: BillingOperations;
   walletBilling: SpaceWalletBillingOperations;
-  warn?: (message: string, context: Record<string, unknown>) => void;
+  /** Every hold, block, and release is logged under `[GenerationReserve]` for troubleshooting. */
+  info?: Log;
+  warn?: Log;
 }) {
-  const { redis, billing, walletBilling, warn } = input;
+  const { redis, billing, walletBilling, info, warn } = input;
 
   /** Spendable balance after outstanding overage, which billing settles before any new usage. */
   async function availableBalance(payer: GenerationReservePayer, amountUsd: number, usageType: string): Promise<number> {
@@ -141,7 +156,8 @@ export function createGenerationReserveHolds(input: {
       await redis.eval(EXPIRE_SCRIPT, 1, holdKey(payer), taskRunId, now, now).catch(() => undefined);
       throw error;
     }
-    return { held: Number(result[0]) === 1, availableUsd: balanceUsd - toUsd(Number(result[1])) };
+    const otherHeldUsd = toUsd(Number(result[1]));
+    return { held: Number(result[0]) === 1, otherHeldUsd, availableUsd: roundUsd(balanceUsd - otherHeldUsd) };
   }
 
   /**
@@ -153,10 +169,23 @@ export function createGenerationReserveHolds(input: {
     taskRunId: string;
     userId: string;
     spaceId: string | null;
+    model: string;
     usageType: string;
     amountUsd: number;
   }): Promise<GenerationReserveHoldResult> {
-    let bestAvailableUsd = 0;
+    const context = {
+      taskRunId: request.taskRunId,
+      userId: request.userId,
+      spaceId: request.spaceId,
+      model: request.model,
+      amountUsd: request.amountUsd,
+    };
+    // Set when the Space wallet was tried and its live holds left too little.
+    let walletAvailableUsd: number | null = null;
+    const held = (payer: GenerationReservePayer, balanceUsd: number, otherHeldUsd: number): GenerationReserveHoldResult => {
+      info?.("[GenerationReserve] held", { ...context, payerType: payer.type, payerId: payer.id, balanceUsd, otherHeldUsd, walletAvailableUsd });
+      return { status: "held", hold: { payer, amountUsd: request.amountUsd } };
+    };
     if (request.spaceId && walletBilling.status.configured && billing.status.configured) {
       const payer: GenerationReservePayer = { type: "space_wallet", id: spaceWalletCustomerId(request.spaceId) };
       let balanceUsd: number | null = null;
@@ -164,12 +193,12 @@ export function createGenerationReserveHolds(input: {
         const credit = await walletBilling.getCreditStatus({ userId: payer.id, createCustomer: false });
         if (walletCreditsUsable(credit)) balanceUsd = await availableBalance(payer, request.amountUsd, request.usageType);
       } catch (error) {
-        warn?.("Space wallet reserve preview failed", { spaceId: request.spaceId, error });
+        warn?.("[GenerationReserve] Space wallet preview failed; trying the personal balance", { ...context, error });
       }
       if (balanceUsd !== null) {
         const attempt = await tryHold(payer, request.taskRunId, request.amountUsd, balanceUsd);
-        if (attempt.held) return { status: "held", hold: { payer, amountUsd: request.amountUsd } };
-        bestAvailableUsd = attempt.availableUsd;
+        if (attempt.held) return held(payer, balanceUsd, attempt.otherHeldUsd);
+        walletAvailableUsd = attempt.availableUsd;
       }
     }
 
@@ -181,26 +210,30 @@ export function createGenerationReserveHolds(input: {
       throw new GenerationBillingUnavailableError(undefined, { cause: error });
     }
     const attempt = await tryHold(payer, request.taskRunId, request.amountUsd, balanceUsd);
-    if (attempt.held) return { status: "held", hold: { payer, amountUsd: request.amountUsd } };
-    return {
-      status: "blocked",
-      error: blockedError(request.amountUsd, Math.max(bestAvailableUsd, attempt.availableUsd)),
-    };
+    if (attempt.held) return held(payer, balanceUsd, attempt.otherHeldUsd);
+    const availableUsd = Math.max(walletAvailableUsd ?? 0, attempt.availableUsd);
+    info?.("[GenerationReserve] blocked", {
+      ...context,
+      availableUsd,
+      shortfallUsd: roundUsd(Math.max(0, request.amountUsd - Math.max(0, availableUsd))),
+      personalBalanceUsd: balanceUsd,
+      personalHeldUsd: attempt.otherHeldUsd,
+      walletAvailableUsd,
+    });
+    return { status: "blocked", error: blockedError(request.amountUsd, availableUsd) };
   }
 
   /** Best effort: a failed release only leaves the hold until its TTL. */
-  async function release(taskRunId: string, payer: GenerationReservePayer, options: { settled?: boolean } = {}) {
+  async function release(taskRunId: string, payer: GenerationReservePayer, reason: GenerationReserveReleaseReason) {
     const now = Date.now();
-    await redis.eval(
-      EXPIRE_SCRIPT,
-      1,
-      holdKey(payer),
-      taskRunId,
-      options.settled ? now + SETTLED_HOLD_GRACE_MS : now,
-      now,
-    ).catch((error) => {
-      warn?.("Generation reserve hold release failed", { taskRunId, error });
-    });
+    const graceMs = reason === "charged" || reason === "retry_charged" ? SETTLED_HOLD_GRACE_MS : 0;
+    const context = { taskRunId, payerType: payer.type, payerId: payer.id, reason, graceMs };
+    try {
+      const found = Number(await redis.eval(EXPIRE_SCRIPT, 1, holdKey(payer), taskRunId, now + graceMs, now)) === 1;
+      info?.("[GenerationReserve] released", { ...context, found });
+    } catch (error) {
+      warn?.("[GenerationReserve] release failed; the hold expires on its TTL", { ...context, error });
+    }
   }
 
   return { hold, release };

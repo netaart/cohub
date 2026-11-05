@@ -436,9 +436,19 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
       sessionId,
       payer: data.reserveHold?.payer.type ?? null,
     });
-    // An uncommitted charge keeps its hold; the billing retry releases it once the debit lands, else the TTL does.
-    const chargePending = billing.status === "skipped" && billing.reason === "record_failed";
-    if (data.reserveHold && !chargePending) await generationReserveHolds.release(taskRunId, data.reserveHold.payer, { settled: true });
+    if (data.reserveHold) {
+      // An uncommitted charge keeps its hold; the billing retry releases it once the debit lands, else the TTL does.
+      if (billing.status === "skipped" && billing.reason === "record_failed") {
+        console.info("[GenerationReserve] kept until the billing retry charges", {
+          taskRunId,
+          payerType: data.reserveHold.payer.type,
+          payerId: data.reserveHold.payer.id,
+          amountUsd: billing.amountUsd,
+        });
+      } else {
+        await generationReserveHolds.release(taskRunId, data.reserveHold.payer, "charged");
+      }
+    }
     if (billing.status === "skipped" && billing.reason === "missing_cost") {
       console.warn("[Billing] generation completed without provider cost", {
         userId,

@@ -211,6 +211,13 @@ Behavior:
 - Models absent from the config keep the existing path. An invalid config is
   logged and the last valid one stays in effect; it never blocks other models.
 
+Troubleshooting: every step logs under `[GenerationReserve]` with `taskRunId`,
+payer, and USD amounts — `held` (balance and other live holds), `blocked`
+(available and shortfall), `released` (`reason`, `found`), `kept until the billing
+retry charges`, plus warnings when Redis is unavailable or a release fails. Live
+holds of a payer are in the Redis hash `generation:reserve-holds:<personal|space_wallet>:<payerId>`
+(`HGETALL`; each value is `<amount in 1e-8 USD>|<expiresAtMs>`).
+
 Upgrading from the prepaid design (#447): it debited a reserve only while this
 config existed, and migration 0085 drops its reservation table. The migration
 refuses to run while any reservation is unsettled; if the config was ever enabled,

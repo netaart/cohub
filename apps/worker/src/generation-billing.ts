@@ -9,5 +9,6 @@ export const generationReserveHolds = createGenerationReserveHolds({
   redis: redisBestEffortCommandClient,
   billing: billingOperations,
   walletBilling: spaceWalletBillingOperations,
+  info: (message, context) => logger.info(message, context),
   warn: (message, context) => logger.warn(message, context),
 });

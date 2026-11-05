@@ -34,7 +34,10 @@ registerTask(GENERATION_BILLING_RETRY_TASK_TYPE, async (job: Job) => {
   if (data.payer) {
     // A held generation that failed after its first charge attempt must not be charged; its hold is already released.
     const [task] = await db.select({ status: taskRuns.status }).from(taskRuns).where(eq(taskRuns.id, data.taskRunId)).limit(1);
-    if (task?.status === "failed") return { status: "skipped", reason: "task_failed", taskRunId: data.taskRunId };
+    if (task?.status === "failed") {
+      console.info("[GenerationReserve] skipped the billing retry of a failed task", { taskRunId: data.taskRunId, payerType: data.payer });
+      return { status: "skipped", reason: "task_failed", taskRunId: data.taskRunId };
+    }
   }
 
   const result = await spaceWalletBilling.recordUsage({
@@ -82,7 +85,7 @@ registerTask(GENERATION_BILLING_RETRY_TASK_TYPE, async (job: Job) => {
   await (data.payer ? recordGenerationTaskBilling : updateGenerationTurnBilling)(data.taskRunId, billing);
   const holdPayerId = data.payer === "space_wallet" ? payload.spaceId && spaceWalletCustomerId(payload.spaceId) : data.userId;
   if (data.payer && holdPayerId && billing.status !== "skipped") {
-    await generationReserveHolds.release(data.taskRunId, { type: data.payer, id: holdPayerId }, { settled: true });
+    await generationReserveHolds.release(data.taskRunId, { type: data.payer, id: holdPayerId }, "retry_charged");
   }
   return { ...billing, taskRunId: data.taskRunId };
 });

@@ -49,15 +49,18 @@ const request = (n: number, spaceId: string | null = "space") => ({
   taskRunId: `task-${n}`,
   userId: "user",
   spaceId,
+  model: "seedance-2-0",
   usageType: "generation.video",
   amountUsd: 15,
 });
 
 test("holds must fit on top of live holds, Space wallet first", async () => {
+  const logs: Array<[string, Record<string, unknown>]> = [];
   const holds = createGenerationReserveHolds({
     redis: fakeRedis(),
     billing: payer(20) as unknown as BillingOperations,
     walletBilling: payer(20) as unknown as SpaceWalletBillingOperations,
+    info: (message, context) => logs.push([message, context]),
   });
 
   const first = await holds.hold(request(1));
@@ -68,6 +71,11 @@ test("holds must fit on top of live holds, Space wallet first", async () => {
   const third = await holds.hold(request(3));
   assert.equal(third.status, "blocked");
   assert.match(third.status === "blocked" ? third.error.message : "", /Available balance is \$5\.00; add \$10\.00/);
+  assert.deepEqual(logs.map(([message, context]) => [message, context.payerType ?? context.shortfallUsd]), [
+    ["[GenerationReserve] held", "space_wallet"],
+    ["[GenerationReserve] held", "personal"],
+    ["[GenerationReserve] blocked", 10],
+  ]);
 });
 
 test("a settled hold stays counted briefly; a released one frees the balance", async () => {
@@ -80,10 +88,10 @@ test("a settled hold stays counted briefly; a released one frees the balance", a
   assert.equal(held.status, "held");
   if (held.status !== "held") return;
 
-  await holds.release("task-1", held.hold.payer, { settled: true });
+  await holds.release("task-1", held.hold.payer, "charged");
   assert.equal((await holds.hold(request(2, null))).status, "blocked");
 
-  await holds.release("task-1", held.hold.payer);
+  await holds.release("task-1", held.hold.payer, "task_failed");
   assert.equal((await holds.hold(request(2, null))).status, "held");
 });
 

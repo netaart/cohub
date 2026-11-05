@@ -33,6 +33,7 @@ export const generationReserveHolds = createGenerationReserveHolds({
   redis: redisBestEffortCommandClient,
   billing: billingOperations,
   walletBilling: spaceWalletBillingOperations,
+  info: (message, context) => logger.info(message, context),
   warn: (message, context) => logger.warn(message, context),
 });
 
@@ -63,6 +64,7 @@ export async function admitGeneration(input: {
         taskRunId: input.taskRunId,
         userId: input.userId,
         spaceId: input.spaceId,
+        model: input.model,
         usageType: input.usageType,
         amountUsd,
       });
@@ -71,7 +73,13 @@ export async function admitGeneration(input: {
     } catch (error) {
       if (error instanceof BillingAccessBlockedError || error instanceof GenerationBillingUnavailableError) throw error;
       // Redis is down: the hold is only a defense, so admit through the regular gate instead.
-      logger.warn("[Billing] generation reserve hold unavailable; using the usage gate", { model: input.model, error });
+      logger.warn("[GenerationReserve] Redis unavailable; admitting through the usage gate", {
+        taskRunId: input.taskRunId,
+        userId: input.userId,
+        model: input.model,
+        amountUsd,
+        error,
+      });
     }
   }
 
@@ -99,5 +107,5 @@ export async function releaseGenerationTaskHold(taskRunId: string): Promise<void
   const [task] = await db.select({ payload: taskRuns.payload }).from(taskRuns).where(eq(taskRuns.id, taskRunId)).limit(1);
   const data = (task?.payload as { data?: { reserveHold?: unknown } } | null | undefined)?.data;
   const hold = parseGenerationReserveHold(data?.reserveHold);
-  if (hold) await generationReserveHolds.release(taskRunId, hold.payer);
+  if (hold) await generationReserveHolds.release(taskRunId, hold.payer, "turn_cancelled");
 }

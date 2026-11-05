@@ -171,7 +171,7 @@ router.post("/", async (c) => {
     });
     taskRunId = enqueued.taskRunId;
   } catch (error) {
-    if (hold) await generationReserveHolds.release(reservedTaskRunId, hold.payer);
+    if (hold) await generationReserveHolds.release(reservedTaskRunId, hold.payer, "enqueue_failed");
     logger.error("[generations] failed to enqueue generation task", {
       userId: user.uuid,
       spaceId: request.spaceId,
