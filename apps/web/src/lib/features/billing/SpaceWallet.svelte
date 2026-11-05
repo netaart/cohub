@@ -70,11 +70,6 @@ const kinds = $derived({
 	revoke: m.wallet_activity_revoke({}, { locale }),
 	adjust: m.wallet_activity_adjust({}, { locale }),
 });
-const generationPhases = $derived({
-	reserve: m.wallet_activity_generation_reserve({}, { locale }),
-	settlement: m.wallet_activity_generation_settlement({}, { locale }),
-	refund: m.wallet_activity_generation_refund({}, { locale }),
-});
 
 async function refresh() {
 	if (!balance.refreshing) void balance.load({ force: true });
@@ -241,7 +236,7 @@ onMount(() => {
       <div class="mt-3 min-h-24 divide-y divide-border-subtle">
         {#each activities?.items ?? [] as item (item.id)}
           <div class="flex items-start justify-between gap-4 py-3">
-            <div class="min-w-0"><p class="text-sm text-text-primary">{item.generationPhase ? generationPhases[item.generationPhase] : kinds[item.kind]}</p><p class="mt-1 text-xs text-text-tertiary">{formatDateTime(item.createdAt, locale)}</p>{#if item.actorUserId}<p class="mt-1 truncate font-mono text-xs text-text-tertiary" title={item.actorUserId}>{item.actorUserId}</p>{/if}</div>
+            <div class="min-w-0"><p class="text-sm text-text-primary">{kinds[item.kind]}</p><p class="mt-1 text-xs text-text-tertiary">{formatDateTime(item.createdAt, locale)}</p>{#if item.actorUserId}<p class="mt-1 truncate font-mono text-xs text-text-tertiary" title={item.actorUserId}>{item.actorUserId}</p>{/if}</div>
             <span class="shrink-0 font-mono text-sm tabular-nums text-text-secondary">{money(item.amountUsd, 8)}</span>
           </div>
         {:else}<p class="py-5 text-sm text-text-tertiary">{activity.loading ? m.common_loading({}, { locale }) : m.billing_no_activity({}, { locale })}</p>{/each}

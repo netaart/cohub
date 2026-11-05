@@ -14,6 +14,7 @@ function generationRun() {
       data: {
         model: "gpt-image-2",
         modelDiscount: { multiplier: 0, resolvedAt: "2026-07-13T00:00:00.000Z" },
+        reserveHold: { payer: { type: "personal", id: "creator_1" }, amountUsd: 5.7 },
       },
     },
     result: {

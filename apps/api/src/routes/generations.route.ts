@@ -1,16 +1,10 @@
 import {
-  applyGenerationModelDiscount,
   BillingAccessBlockedError,
   billingOperations,
   contentTypesFromBlocks,
-  generationUsageKind,
-  isBillingUsageGateUnavailableError,
-  isGenerationModelDiscountFree,
   resolveGenerationUsageType,
   serializeBillingWarning,
 } from "@cohub/billing";
-import { GenerationBillingUnavailableError } from "@cohub/core/generation-billing";
-import { loadGenerationBillingConfig, resolveGenerationBillingReserve } from "@cohub/infra/config-runtime/generation-billing";
 import { Hono, type Context } from "hono";
 import { GenerationValidationError } from "@neta-art/generation";
 import {
@@ -29,14 +23,11 @@ import { enqueueTask } from "../tasks.js";
 import { defaultJobRetention } from "@cohub/infra/bullmq";
 import { createLogger } from "@cohub/infra/logging";
 import { getRequestSource } from "../lib/request-source.js";
-import { config } from "../config.js";
-import { generationBilling } from "../generation-billing.js";
-import { spaceWalletBilling } from "../space-wallet-billing.js";
+import { admitGeneration, GenerationBillingUnavailableError, generationReserveHolds } from "../generation-billing.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
 const router = new Hono();
-const billingUsageGate = spaceWalletBilling.gate;
 
 type ErrorStatus = 400 | 401 | 402 | 403 | 404 | 409 | 413 | 422 | 500 | 502 | 503;
 
@@ -136,72 +127,27 @@ router.post("/", async (c) => {
       resolvedAt: resolvedDiscount.resolvedAt,
     });
   }
-  const reserveConfig = await loadGenerationBillingConfig(config.platformConfigRoot, (error) => {
-    logger.error("[Billing] invalid generation billing config", { error });
-  });
-  const reserveCap = resolveGenerationBillingReserve(reserveConfig, request.model);
-  const reserveUsd = reserveCap === null || isGenerationModelDiscountFree(resolvedDiscount)
-    ? 0
-    : applyGenerationModelDiscount(reserveCap, resolvedDiscount);
-
-  let billingDecision: Awaited<ReturnType<typeof billingUsageGate.evaluate>> = {
-    status: "allowed",
-    balanceState: "zero",
-    netUsd: 0,
-  };
-  if (reserveUsd <= 0) {
-    try {
-      billingDecision = isGenerationModelDiscountFree(resolvedDiscount)
-        ? { status: "allowed", balanceState: "zero", netUsd: 0 }
-        : await billingUsageGate.evaluate({
-            userId: user.uuid,
-            usageKind: generationUsageKind(usageType),
-            source: "generation_task",
-            model: request.model,
-            spaceId: request.spaceId,
-            sessionId,
-            turnId,
-          });
-    } catch (error) {
-      if (!isBillingUsageGateUnavailableError(error)) throw error;
-      return generationError(c, 503, "generation_balance_unavailable", error.message);
-    }
-    if (billingDecision.status === "blocked") {
-      return billingBlockedResponse(c, new BillingAccessBlockedError(billingDecision));
-    }
+  const reservedTaskRunId = crypto.randomUUID();
+  let admission: Awaited<ReturnType<typeof admitGeneration>>;
+  try {
+    admission = await admitGeneration({
+      taskRunId: reservedTaskRunId,
+      userId: user.uuid,
+      spaceId: request.spaceId,
+      sessionId,
+      turnId,
+      model: request.model,
+      usageType,
+      discount: resolvedDiscount,
+    });
+  } catch (error) {
+    if (error instanceof BillingAccessBlockedError) return billingBlockedResponse(c, error);
+    if (!(error instanceof GenerationBillingUnavailableError)) throw error;
+    return generationError(c, 503, "generation_balance_unavailable", error.message);
   }
+  const { decision: billingDecision, hold } = admission;
 
-  let reservation: { taskRunId: string; reserveUsd: number } | null = null;
-  if (reserveUsd > 0) {
-    const taskRunId = crypto.randomUUID();
-    try {
-      const reserved = await generationBilling.reserve({
-        taskRunId,
-        userId: user.uuid,
-        spaceId: request.spaceId,
-        model: request.model,
-        usageType,
-        reserveUsd,
-        discountMultiplier: resolvedDiscount.multiplier,
-      });
-      if (reserved.status === "blocked") return billingBlockedResponse(c, reserved.error);
-      if (reserved.status === "held") reservation = { taskRunId, reserveUsd };
-    } catch (error) {
-      if (error instanceof BillingAccessBlockedError) return billingBlockedResponse(c, error);
-      if (error instanceof GenerationBillingUnavailableError) {
-        return generationError(c, 503, "generation_balance_unavailable", error.message);
-      }
-      logger.error("[Billing] failed to reserve generation billing", {
-        userId: user.uuid,
-        spaceId: request.spaceId,
-        model: request.model,
-        error,
-      });
-      return generationError(c, 503, "generation_balance_unavailable", "Generation billing is temporarily unavailable. Please try again.");
-    }
-  }
-
-  let taskRunId: string | null = reservation?.taskRunId ?? null;
+  let taskRunId: string;
   try {
     const enqueued = await enqueueTask({
       type: GENERATION_TASK_TYPE,
@@ -216,19 +162,16 @@ router.post("/", async (c) => {
         meta,
         requestSource,
         modelDiscount,
+        ...(hold ? { reserveHold: hold } : {}),
       },
     }, {
       attempts: 1,
       ...defaultJobRetention,
-      ...(reservation ? { taskRunId: reservation.taskRunId } : {}),
+      taskRunId: reservedTaskRunId,
     });
     taskRunId = enqueued.taskRunId;
   } catch (error) {
-    if (reservation) {
-      await generationBilling.release({ taskRunId: reservation.taskRunId, reason: "enqueue_failed", unclaimedOnly: true }).catch((releaseError) => {
-        logger.error("[Billing] failed to release generation reserve after enqueue failure", { taskRunId: reservation?.taskRunId, error: releaseError });
-      });
-    }
+    if (hold) await generationReserveHolds.release(reservedTaskRunId, hold.payer, "enqueue_failed");
     logger.error("[generations] failed to enqueue generation task", {
       userId: user.uuid,
       spaceId: request.spaceId,
@@ -237,14 +180,13 @@ router.post("/", async (c) => {
     });
     return generationError(c, 503, "generation_queue_unavailable", "Generation queue is temporarily unavailable. Please try again later.");
   }
-  if (!taskRunId) return generationError(c, 503, "generation_queue_unavailable", "Generation queue is temporarily unavailable. Please try again later.");
 
   return c.json({
     taskRunId,
     taskType: GENERATION_TASK_TYPE,
     status: "pending",
     billing: serializeBillingWarning(billingDecision),
-    ...(reservation ? { reservation: { amountUsd: reservation.reserveUsd, status: "held" as const } } : {}),
+    ...(hold ? { reservation: { amountUsd: hold.amountUsd, status: "held" as const } } : {}),
   } satisfies CreateGenerationTaskResponse, 202);
 });
 

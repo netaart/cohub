@@ -35,7 +35,7 @@ export type CreateGenerationTaskResponse = {
   taskType: typeof GENERATION_TASK_TYPE;
   status: "pending";
   billing?: BillingPayload | null;
-  /** Present when the request prepaid a provider reserve. */
+  /** Present when a whitelisted model held its reserve against the payer's balance. */
   reservation?: { amountUsd: number; status: "held" } | null;
 };
 
@@ -49,6 +49,14 @@ export type GenerationTaskData = {
   requestSource?: RequestSource | null;
   /** Server-resolved pricing snapshot. This field is never accepted from the public request. */
   modelDiscount?: GenerationModelDiscountSnapshot;
+  /** Submission-time balance hold for whitelisted models; released when the task ends. */
+  reserveHold?: GenerationReserveHold | null;
+};
+
+/** Persisted in the task payload so the worker and queued-turn cancellation can release it. */
+export type GenerationReserveHold = {
+  payer: { type: "personal" | "space_wallet"; id: string };
+  amountUsd: number;
 };
 
 export type GenerationModelDiscountSnapshot = {
@@ -63,6 +71,8 @@ type GenerationBillingRetryTaskDataBase = {
   usageType: string;
   model: string;
   adapterType?: string | null;
+  /** Payer pinned by a reserve hold; absent means the wallet router chooses. */
+  payer?: GenerationReserveHold["payer"]["type"] | null;
 };
 
 /** Legacy payloads already queued before model-discount snapshots were introduced. */
@@ -100,12 +110,6 @@ export type GenerationUsageBilling = {
   usageType: string;
   status: "recorded" | "overage" | "skipped";
   reason?: string | null;
-  /** Prepaid amount held before execution. */
-  reservedAmountUsd?: number;
-  /** Amount returned from the reserve after actual usage settled. */
-  refundedAmountUsd?: number;
-  /** Amount charged above the reserve for an underestimated request. */
-  additionalAmountUsd?: number;
 };
 
 export type GenerationTaskResult = {

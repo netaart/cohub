@@ -45,10 +45,14 @@ function generationInput(payload: TaskPayload) {
   };
 }
 
-/** Moves the turn to running; returns false when the turn was cancelled while queued. */
+/**
+ * Moves the task's direct-generation turn to running. Returns false when that turn is cancelled,
+ * finished, or missing; tasks without a turn, or attached to an agent turn they do not own, are runnable.
+ */
 export async function markGenerationSessionRunning(taskRunId: string): Promise<boolean> {
   const [task] = await db.select({ spaceId: taskRuns.spaceId, sessionId: taskRuns.sessionId, turnId: taskRuns.turnId }).from(taskRuns).where(eq(taskRuns.id, taskRunId)).limit(1);
-  if (!task?.spaceId || !task.sessionId || !task.turnId) return true;
+  if (!task) return false;
+  if (!task.spaceId || !task.sessionId || !task.turnId) return true;
   const [turn] = await db.update(sessionTurns).set({ status: "running", startedAt: new Date(), updatedAt: new Date() }).where(and(eq(sessionTurns.id, task.turnId), eq(sessionTurns.sessionId, task.sessionId), eq(sessionTurns.executionKind, "direct_generation"), inArray(sessionTurns.status, ["queued", "running"]))).returning();
   if (turn) {
     await dispatchTurnUpdated({ spaceId: task.spaceId, turn: toTurnRecord(turn) }).catch((error) => {
@@ -56,8 +60,8 @@ export async function markGenerationSessionRunning(taskRunId: string): Promise<b
     });
     return true;
   }
-  const [current] = await db.select({ status: sessionTurns.status }).from(sessionTurns).where(eq(sessionTurns.id, task.turnId)).limit(1);
-  return current?.status !== "cancelled";
+  const [current] = await db.select({ executionKind: sessionTurns.executionKind }).from(sessionTurns).where(and(eq(sessionTurns.id, task.turnId), eq(sessionTurns.sessionId, task.sessionId))).limit(1);
+  return !!current && current.executionKind !== "direct_generation";
 }
 
 export async function finalizeGenerationSession(input: { taskRunId: string; payload: TaskPayload; result: GenerationTaskResult }) {
@@ -144,7 +148,7 @@ export async function updateGenerationTurnBilling(taskRunId: string, billing: Ge
   return turn ?? null;
 }
 
-/** Writes billing settled outside the generation task to both the turn and the task result. */
+/** Writes a held task's retried billing to both the turn and the task result. */
 export async function recordGenerationTaskBilling(taskRunId: string, billing: GenerationUsageBilling) {
   await updateGenerationTurnBilling(taskRunId, billing);
   await db.update(taskRuns).set({

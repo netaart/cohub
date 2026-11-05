@@ -1,8 +1,8 @@
 schema: cohub.generation.billing.v1
 models:
   seedance-2-0:
-    reserveUsd: 15
+    reserveUsd: 5.70
   seedance-2-0-fast:
-    reserveUsd: 10
+    reserveUsd: 1.95
   seedance-2-5:
-    reserveUsd: 20
+    reserveUsd: 17.10

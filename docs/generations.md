@@ -172,12 +172,12 @@ See the full examples:
 - [`docs/examples/generations/seedance-2-5.yaml`](./examples/generations/seedance-2-5.yaml)
 - [`docs/examples/generations/suno_music.yaml`](./examples/generations/suno_music.yaml)
 
-## Prepaid generation reserves
+## Generation reserve holds
 
-Expensive models can require a reserve before execution. The reserve is a real
-billing `consume`, not a local freeze: successful tasks settle by partially
-reversing the reserve (or charging the difference), and failed/timed-out tasks
-reverse the full reserve. Only models listed in the platform config are affected.
+Expensive models can require their reserve to fit the payer's balance before the
+task is enqueued. A hold is a submission-time defense, not a charge: the task is
+still charged once after success through the regular path, so the actual cost
+is what the user pays. Only models listed in the platform config are affected.
 
 Config path: `<platformConfigRoot>/platform/.cohub/billing/generation-reserves.yaml`
 
@@ -185,38 +185,38 @@ Config path: `<platformConfigRoot>/platform/.cohub/billing/generation-reserves.y
 schema: cohub.generation.billing.v1
 models:
   seedance-2-0:
-    reserveUsd: 15
+    reserveUsd: 5.70   # $0.38/s × 15s
   seedance-2-0-fast:
-    reserveUsd: 10
+    reserveUsd: 1.95   # $0.13/s × 15s
   seedance-2-5:
-    reserveUsd: 20
+    reserveUsd: 17.10  # $0.57/s × 30s
 ```
 
 See [`docs/examples/generation-billing-reserves.yaml`](./examples/generation-billing-reserves.yaml).
+`reserveUsd` is the list price before the user's model discount.
 
 Behavior:
 
-- Submission previews and consumes `reserveUsd` from the Space wallet when usable
-  and sufficient, otherwise from the personal wallet. The payer is locked.
-- Insufficient effective balance rejects with 402 before the task is enqueued.
-- Successful generation reverses `reserve - actual` or charges `actual - reserve`.
-- Failure, timeout, cancellation, or a missing task reverses the full reserve.
-- `v2.generation_billing_reservations` records operation IDs and receipts for
-  idempotent recovery. Settlement amounts are persisted before billing is called,
-  so retries replay identical requests. The worker claims the reservation before
-  calling the provider; submit-side cleanup cannot release a claimed reservation.
-  A system job reconciles every five minutes and replays an uncertain reserve
-  debit before reversing it; holds on unfinished tasks are released only after a
-  24-hour hard cap.
-- Personal wallet activity: `cohub me billing-activity`; Space wallet: `cohub spaces wallet activity`.
-- Models absent from the config keep the existing post-success charge path. An invalid
-  config is logged and the last valid one stays in effect; it never blocks other models.
+- Holds live in Redis, one hash per payer. A Lua script admits a hold only if the
+  payer's balance covers it on top of their live holds, so concurrent submissions
+  cannot oversubscribe the balance. The Space wallet is tried first when usable.
+- Insufficient balance rejects with 402 (reserve, available, shortfall) before the
+  task is enqueued.
+- Success charges the actual cost and keeps the hold counted for one more minute,
+  covering balance reads taken before the charge. Failure, cancellation of a
+  queued turn, or an enqueue failure release the hold.
+- A hold expires after two hours. Expiry or Redis data loss never moves money; it
+  only stops counting that amount for new submissions. If Redis is unavailable,
+  submissions fall back to the regular usage gate.
+- Models absent from the config keep the existing path. An invalid config is
+  logged and the last valid one stays in effect; it never blocks other models.
 
-Rollout: deploy the worker that understands reservations before adding the config,
-so an older worker cannot charge again after the reserve. Requires
-`@talesofai-billing/sdk` 1.31+ and the deployed billing API plus Admin permissions
-for consumption reversal (`credits.consume.reverse`, `credits.consume.reverse.preview`,
-`credits.consumptions.read`, `credits.reversals.*`).
+Troubleshooting: every step logs under `[GenerationReserve]` with `taskRunId`,
+payer, and USD amounts — `held` (balance and other live holds), `blocked`
+(available and shortfall), `released` (`reason`, `found`), `kept until the billing
+retry charges`, plus warnings when Redis is unavailable or a release fails. Live
+holds of a payer are in the Redis hash `generation:reserve-holds:<personal|space_wallet>:<payerId>`
+(`HGETALL`; each value is `<amount in 1e-8 USD>|<expiresAtMs>`).
 
 ## CLI
 

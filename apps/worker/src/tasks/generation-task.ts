@@ -10,8 +10,8 @@ import {
   resolveGenerationUsageType,
 } from "@cohub/billing";
 import type { Job } from "bullmq";
-import { settledReservationBilling, type GenerationBillingReservation } from "@cohub/core/generation-billing";
-import { generationBilling } from "../generation-billing.js";
+import { parseGenerationReserveHold } from "@cohub/core/generation-billing";
+import { generationReserveHolds } from "../generation-billing.js";
 import {
   createGenerationClient,
   GenerationConfigError,
@@ -95,6 +95,7 @@ function parseGenerationTaskData(data: unknown): GenerationTaskData {
     ...(data.modelDiscount === undefined
       ? {}
       : { modelDiscount: parseModelDiscountSnapshot(data.modelDiscount) }),
+    reserveHold: parseGenerationReserveHold(data.reserveHold),
   };
 }
 
@@ -199,7 +200,8 @@ async function enqueueGenerationBillingRetry(input: {
   adapterType?: string | null;
   spaceId: string;
   sessionId?: string | null;
-}, options: { delay?: number } = {}) {
+  payer: GenerationBillingRetryTaskData["payer"];
+}) {
   const data: GenerationBillingRetryTaskData = {
     schemaVersion: 2,
     taskRunId: input.taskRunId,
@@ -210,6 +212,7 @@ async function enqueueGenerationBillingRetry(input: {
     usageType: input.usageType,
     model: input.model,
     adapterType: input.adapterType ?? null,
+    payer: input.payer ?? null,
   };
   // Credit consumption remains idempotent via operationId `generation:${taskRunId}`.
   await enqueueTask({
@@ -220,7 +223,8 @@ async function enqueueGenerationBillingRetry(input: {
     data,
   }, {
     attempts: 8,
-    ...options,
+    // A held task's retry waits for the generation to finalize, so a later task failure can still skip it.
+    ...(input.payer ? { delay: 30_000 } : {}),
     backoff: { type: "exponential", delay: 5_000 },
     ...defaultJobRetention,
   });
@@ -237,68 +241,16 @@ async function recordGenerationUsageBilling(input: {
   usageType: ReturnType<typeof resolveGenerationUsageType>;
   spaceId: string;
   sessionId?: string | null;
-  reservation: GenerationBillingReservation | null;
+  payer: GenerationBillingRetryTaskData["payer"];
 }): Promise<GenerationUsageBilling> {
   const pricing = calculateGenerationUsageCharge(input.officialCostUsd, input.modelDiscount);
   const { officialCostUsd, amountUsd } = pricing;
-  const reservedAmountUsd = input.reservation ? Number(input.reservation.reserveUsd) : undefined;
   const billingPricing = {
     officialCostUsd,
     amountUsd,
     discountMultiplier: pricing.discountMultiplier,
     usageType: input.usageType,
-    ...(reservedAmountUsd !== undefined ? { reservedAmountUsd } : {}),
   };
-  if (input.reservation && input.taskRunId) {
-    const actualUsd = pricing.skipReason ? 0 : amountUsd;
-    try {
-      const settlement = await generationBilling.settle({ taskRunId: input.taskRunId, actualUsd });
-      if (settlement.status === "settled") {
-        return {
-          ...billingPricing,
-          ...settledReservationBilling(settlement.reservation),
-          status: settlement.overage ? "overage" : "recorded",
-        };
-      }
-      if (settlement.status === "released" || settlement.status === "missing") {
-        return {
-          ...billingPricing,
-          status: "skipped",
-          reason: settlement.status === "released" ? "reservation_released" : "missing_reservation",
-          ...(settlement.status === "released" ? { refundedAmountUsd: reservedAmountUsd } : {}),
-        };
-      }
-      if (actualUsd > 0) await enqueueGenerationBillingRetry({
-        userId: input.userId,
-        taskRunId: input.taskRunId,
-        amountUsd: actualUsd,
-        officialCostUsd,
-        modelDiscount: input.modelDiscount,
-        usageType: input.usageType,
-        model: input.model,
-        adapterType: input.adapterType,
-        spaceId: input.spaceId,
-        sessionId: input.sessionId,
-      }, { delay: 30_000 }).catch((enqueueError) => {
-        console.warn("[Billing] failed to enqueue reservation settlement retry", {
-          taskRunId: input.taskRunId,
-          error: enqueueError,
-        });
-      });
-      return { ...billingPricing, status: "skipped", reason: "record_failed" };
-    } catch (error) {
-      console.warn("[Billing] failed to settle generation reservation", {
-        userId: input.userId,
-        taskRunId: input.taskRunId,
-        officialCostUsd,
-        amountUsd: actualUsd,
-        model: input.model,
-        usageType: input.usageType,
-        error,
-      });
-      return { ...billingPricing, status: "skipped", reason: "record_failed" };
-    }
-  }
   if (pricing.skipReason) {
     return {
       ...billingPricing,
@@ -316,6 +268,7 @@ async function recordGenerationUsageBilling(input: {
   try {
     const result = await spaceWalletBilling.recordUsage({
       retryOnly: input.retryOnly,
+      payer: input.payer,
       spaceId: input.spaceId,
       userId: input.userId,
       amountUsd,
@@ -371,6 +324,7 @@ async function recordGenerationUsageBilling(input: {
       adapterType: input.adapterType ?? null,
       spaceId: input.spaceId,
       sessionId: input.sessionId,
+      payer: input.payer,
     }).catch((enqueueError) => {
       console.warn("[Billing] failed to enqueue generation billing retry", {
         userId: input.userId,
@@ -426,27 +380,17 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
       });
     }
 
-    const existingReservation = await generationBilling.getReservation(taskRunId);
-    let reservation: GenerationBillingReservation | null = null;
-    if (existingReservation) {
-      // Prepaid tasks fail closed: a cancelled or unverifiable turn must not consume the reserve.
-      if (runnable === false) throw new Error("Generation was cancelled before it started.");
-      if (runnable === null) throw new Error("Generation turn state could not be verified.");
-      if (existingReservation.userId !== userId || existingReservation.model !== data.model || (existingReservation.spaceId ?? null) !== spaceId) {
-        throw new Error("Generation billing reservation does not match the task payload.");
-      }
-      reservation = await generationBilling.claim(taskRunId);
-      if (reservation?.status !== "running") {
-        throw new Error(`Generation billing reservation is not held: ${reservation?.status ?? "missing"}`);
-      }
-    }
-
     // Gate uses request-side modality; billing/stats re-resolve with output after success.
     const gateUsageType = resolveGenerationUsageType({
       adapterType: declaration.adapter?.type,
       contentTypes: contentTypesFromBlocks(data.content),
     });
-    const billingDecision = reservation || isGenerationModelDiscountFree(modelDiscount)
+    // A held task fails closed: a turn that was cancelled, finished, or cannot be read must not be charged.
+    if (data.reserveHold && runnable !== true) {
+      throw new Error(runnable === false ? "Generation turn is no longer runnable." : "Generation turn state could not be verified.");
+    }
+    // The submission hold already proved the balance; the gate would re-check a balance the hold reserved.
+    const billingDecision = data.reserveHold || isGenerationModelDiscountFree(modelDiscount)
       ? { status: "allowed" as const, balanceState: "zero" as const, netUsd: 0 }
       : await billingUsageGate.evaluate({
           userId,
@@ -490,8 +434,21 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
       usageType,
       spaceId,
       sessionId,
-      reservation,
+      payer: data.reserveHold?.payer.type ?? null,
     });
+    if (data.reserveHold) {
+      // An uncommitted charge keeps its hold; the billing retry releases it once the debit lands, else the TTL does.
+      if (billing.status === "skipped" && billing.reason === "record_failed") {
+        console.info("[GenerationReserve] kept until the billing retry charges", {
+          taskRunId,
+          payerType: data.reserveHold.payer.type,
+          payerId: data.reserveHold.payer.id,
+          amountUsd: billing.amountUsd,
+        });
+      } else {
+        await generationReserveHolds.release(taskRunId, data.reserveHold.payer, "charged");
+      }
+    }
     if (billing.status === "skipped" && billing.reason === "missing_cost") {
       console.warn("[Billing] generation completed without provider cost", {
         userId,
