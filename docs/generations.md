@@ -172,6 +172,52 @@ See the full examples:
 - [`docs/examples/generations/seedance-2-5.yaml`](./examples/generations/seedance-2-5.yaml)
 - [`docs/examples/generations/suno_music.yaml`](./examples/generations/suno_music.yaml)
 
+## Prepaid generation reserves
+
+Expensive models can require a reserve before execution. The reserve is a real
+billing `consume`, not a local freeze: successful tasks settle by partially
+reversing the reserve (or charging the difference), and failed/timed-out tasks
+reverse the full reserve. Only models listed in the platform config are affected.
+
+Config path: `<platformConfigRoot>/platform/.cohub/billing/generation-reserves.yaml`
+
+```yaml
+schema: cohub.generation.billing.v1
+models:
+  seedance-2-0:
+    reserveUsd: 15
+  seedance-2-0-fast:
+    reserveUsd: 10
+  seedance-2-5:
+    reserveUsd: 20
+```
+
+See [`docs/examples/generation-billing-reserves.yaml`](./examples/generation-billing-reserves.yaml).
+
+Behavior:
+
+- Submission previews and consumes `reserveUsd` from the Space wallet when usable
+  and sufficient, otherwise from the personal wallet. The payer is locked.
+- Insufficient effective balance rejects with 402 before the task is enqueued.
+- Successful generation reverses `reserve - actual` or charges `actual - reserve`.
+- Failure, timeout, cancellation, or a missing task reverses the full reserve.
+- `v2.generation_billing_reservations` records operation IDs and receipts for
+  idempotent recovery. Settlement amounts are persisted before billing is called,
+  so retries replay identical requests. The worker claims the reservation before
+  calling the provider; submit-side cleanup cannot release a claimed reservation.
+  A system job reconciles every five minutes and replays an uncertain reserve
+  debit before reversing it; holds on unfinished tasks are released only after a
+  24-hour hard cap.
+- Personal wallet activity: `cohub me billing-activity`; Space wallet: `cohub spaces wallet activity`.
+- Models absent from the config keep the existing post-success charge path. An invalid
+  config is logged and the last valid one stays in effect; it never blocks other models.
+
+Rollout: deploy the worker that understands reservations before adding the config,
+so an older worker cannot charge again after the reserve. Requires
+`@talesofai-billing/sdk` 1.31+ and the deployed billing API plus Admin permissions
+for consumption reversal (`credits.consume.reverse`, `credits.consume.reverse.preview`,
+`credits.consumptions.read`, `credits.reversals.*`).
+
 ## CLI
 
 ```bash

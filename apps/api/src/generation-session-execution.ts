@@ -1,4 +1,5 @@
 import {
+  applyGenerationModelDiscount,
   BillingAccessBlockedError,
   billingOperations,
   contentTypesFromBlocks,
@@ -7,6 +8,8 @@ import {
   isBillingUsageGateUnavailableError,
   resolveGenerationUsageType,
 } from "@cohub/billing";
+import { GenerationBillingUnavailableError } from "@cohub/core/generation-billing";
+import { loadGenerationBillingConfig, resolveGenerationBillingReserve } from "@cohub/infra/config-runtime/generation-billing";
 import { GenerationValidationError } from "@neta-art/generation";
 import { buildGenerationRequestMessage, buildGenerationResultMessage } from "@cohub/protocol/generation";
 import { createInitialSpaceSession, getSpaceSessionById, persistMessageNode } from "./space-sessions.js";
@@ -20,6 +23,8 @@ import { loadGenerationDeclaration } from "./generations/declarations.js";
 import { resolveGenerationRequestParameters } from "./generations/schema.js";
 import { enqueueTask } from "./tasks.js";
 import { defaultJobRetention } from "@cohub/infra/bullmq";
+import { config } from "./config.js";
+import { generationBilling } from "./generation-billing.js";
 import { spaceWalletBilling } from "./space-wallet-billing.js";
 
 const billingUsageGate = spaceWalletBilling.gate;
@@ -67,7 +72,7 @@ export async function createGenerationSessionExecution(input: {
         const [task] = await db.select({ status: taskRuns.status }).from(taskRuns).where(eq(taskRuns.id, existingMeta.generationTaskId)).limit(1);
         if (!task) throw new GenerationSessionExecutionError(503, "generation_task_unavailable", "The existing generation task could not be found.");
         if (task.status === "failed" || existing.status === "failed") throw new GenerationSessionExecutionError(409, "generation_retry_required", "This generation already failed. Retry with a new client message ID.");
-        return { taskRunId: existingMeta.generationTaskId, sessionId: requestedSessionId, turnId: existing.id, billing: null };
+        return { taskRunId: existingMeta.generationTaskId, sessionId: requestedSessionId, turnId: existing.id, billing: null, reservation: null };
       }
     }
   }
@@ -85,18 +90,56 @@ export async function createGenerationSessionExecution(input: {
   const discount = await billingOperations.getGenerationModelDiscount({ userId: input.userId, model: input.model }).catch(() => {
     throw new GenerationSessionExecutionError(503, "generation_pricing_unavailable", "Generation pricing is temporarily unavailable.");
   });
-  let billingDecision: Awaited<ReturnType<typeof billingUsageGate.evaluate>>;
-  try {
-    billingDecision = isGenerationModelDiscountFree(discount)
-      ? { status: "allowed" as const, balanceState: "zero" as const, netUsd: 0 }
-      : await billingUsageGate.evaluate({ userId: input.userId, usageKind: generationUsageKind(usageType), source: "generation_task", model: input.model, spaceId: input.spaceId, sessionId: input.sessionId ?? null });
-  } catch (error) {
-    if (isBillingUsageGateUnavailableError(error)) throw new GenerationSessionExecutionError(503, "generation_balance_unavailable", error.message);
-    throw error;
+  const reserveConfig = await loadGenerationBillingConfig(config.platformConfigRoot, (error) => {
+    console.error("[Billing] invalid generation billing config", { error });
+  });
+  const reserveCap = resolveGenerationBillingReserve(reserveConfig, input.model);
+  const reserveUsd = reserveCap === null || isGenerationModelDiscountFree(discount)
+    ? 0
+    : applyGenerationModelDiscount(reserveCap, discount);
+
+  let billingDecision: Awaited<ReturnType<typeof billingUsageGate.evaluate>> = {
+    status: "allowed",
+    balanceState: "zero",
+    netUsd: 0,
+  };
+  if (reserveUsd <= 0) {
+    try {
+      billingDecision = isGenerationModelDiscountFree(discount)
+        ? { status: "allowed" as const, balanceState: "zero" as const, netUsd: 0 }
+        : await billingUsageGate.evaluate({ userId: input.userId, usageKind: generationUsageKind(usageType), source: "generation_task", model: input.model, spaceId: input.spaceId, sessionId: input.sessionId ?? null });
+    } catch (error) {
+      if (isBillingUsageGateUnavailableError(error)) throw new GenerationSessionExecutionError(503, "generation_balance_unavailable", error.message);
+      throw error;
+    }
+    if (billingDecision.status === "blocked") throw new BillingAccessBlockedError(billingDecision);
   }
-  if (billingDecision.status === "blocked") throw new BillingAccessBlockedError(billingDecision);
 
   const taskRunId = crypto.randomUUID();
+  let reservation: { taskRunId: string; reserveUsd: number } | null = null;
+  if (reserveUsd > 0) {
+    try {
+      const reserved = await generationBilling.reserve({
+        taskRunId,
+        userId: input.userId,
+        spaceId: input.spaceId,
+        model: input.model,
+        usageType,
+        reserveUsd,
+        discountMultiplier: discount.multiplier,
+      });
+      if (reserved.status === "blocked") throw reserved.error;
+      if (reserved.status === "held") reservation = { taskRunId, reserveUsd };
+    } catch (error) {
+      if (error instanceof BillingAccessBlockedError) throw error;
+      if (error instanceof GenerationBillingUnavailableError) {
+        throw new GenerationSessionExecutionError(503, "generation_balance_unavailable", error.message);
+      }
+      throw new GenerationSessionExecutionError(503, "generation_balance_unavailable", "Generation billing is temporarily unavailable.");
+    }
+  }
+
+  let enqueued = false;
   let sessionId = input.sessionId?.trim() || null;
   let turnId: string | null = null;
   try {
@@ -133,7 +176,8 @@ export async function createGenerationSessionExecution(input: {
       const [task] = await db.select({ status: taskRuns.status }).from(taskRuns).where(eq(taskRuns.id, existingMeta.generationTaskId)).limit(1);
       if (!task) throw new GenerationSessionExecutionError(503, "generation_task_unavailable", "The existing generation task could not be found.");
       if (task.status === "failed" || existing.status === "failed") throw new GenerationSessionExecutionError(409, "generation_retry_required", "This generation already failed. Retry with a new client message ID.");
-      return { taskRunId: existingMeta.generationTaskId, sessionId, turnId: existing.id, billing: null };
+      if (reservation) await generationBilling.release({ taskRunId: reservation.taskRunId, reason: "duplicate_client_message", unclaimedOnly: true }).catch(() => undefined);
+      return { taskRunId: existingMeta.generationTaskId, sessionId, turnId: existing.id, billing: null, reservation: null };
     }
     turnId = turn.id;
     await persistMessageNode({ spaceId: input.spaceId, sessionId, userId: input.userId, idempotencyKey: `generation:${taskRunId}:request`, message: { role: "user", content: request.content, meta: { ...request.meta, messageKind: "generation_request", turnId, generationTaskId: taskRunId } } });
@@ -144,8 +188,18 @@ export async function createGenerationSessionExecution(input: {
     await enqueueTask({ type: "generation", spaceId: input.spaceId, sessionId, turnId, userId: input.userId, data: { model: input.model, content: input.content, parameters, meta: input.meta, requestSource: null, modelDiscount: { multiplier: discount.multiplier, resolvedAt: discount.resolvedAt } } }, { taskRunId, attempts: 1, ...defaultJobRetention }).catch(() => {
       throw new GenerationSessionExecutionError(503, "generation_queue_unavailable", "Generation queue is temporarily unavailable.");
     });
-    return { taskRunId, sessionId, turnId, billing: billingDecision };
+    enqueued = true;
+    return {
+      taskRunId,
+      sessionId,
+      turnId,
+      billing: billingDecision,
+      reservation: reservation ? { amountUsd: reservation.reserveUsd, status: "held" as const } : null,
+    };
   } catch (error) {
+    if (reservation && !enqueued) {
+      await generationBilling.release({ taskRunId: reservation.taskRunId, reason: "session_creation_failed", unclaimedOnly: true }).catch(() => undefined);
+    }
     if (sessionId && turnId) {
       const failureSessionId = sessionId;
       const failureTurnId = turnId;

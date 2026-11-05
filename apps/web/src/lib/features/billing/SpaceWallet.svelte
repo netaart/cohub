@@ -1,6 +1,15 @@
 <script lang="ts">
-import type { BillingCatalogProduct, SpaceWalletActivityPage } from "@neta-art/cohub";
-import { ArrowLeft, ChevronLeft, ChevronRight, Loader2, RefreshCw } from "lucide-svelte";
+import type {
+	BillingCatalogProduct,
+	SpaceWalletActivityPage,
+} from "@neta-art/cohub";
+import {
+	ArrowLeft,
+	ChevronLeft,
+	ChevronRight,
+	Loader2,
+	RefreshCw,
+} from "lucide-svelte";
 import { onMount, untrack } from "svelte";
 import { getCacheUserKey } from "$lib/cache/keys";
 import { AccountResource } from "$lib/features/settings/account-resource.svelte";
@@ -13,10 +22,25 @@ import { includedBalanceUsd } from "./product";
 const { spaceId }: { spaceId: string } = $props();
 const locale = $derived(getLocale());
 const api = untrack(() => sdk.space(spaceId).wallet);
-const balance = untrack(() => new AccountResource(`space-wallet:${spaceId}`, () => api.get()));
-const activity = untrack(() => new AccountResource(`space-wallet-activity:${spaceId}`, () => api.activities()));
-const catalog = untrack(() => new AccountResource(`space-wallet-catalog:${spaceId}`, () => api.catalog()));
-const space = untrack(() => new AccountResource(`space-wallet-name:${spaceId}`, () => sdk.space(spaceId).get()));
+const balance = untrack(
+	() => new AccountResource(`space-wallet:${spaceId}`, () => api.get()),
+);
+const activity = untrack(
+	() =>
+		new AccountResource(`space-wallet-activity:${spaceId}`, () =>
+			api.activities(),
+		),
+);
+const catalog = untrack(
+	() =>
+		new AccountResource(`space-wallet-catalog:${spaceId}`, () => api.catalog()),
+);
+const space = untrack(
+	() =>
+		new AccountResource(`space-wallet-name:${spaceId}`, () =>
+			sdk.space(spaceId).get(),
+		),
+);
 let buying = $state<string | null>(null);
 let checkoutError = $state(false);
 let confirmation = $state<"pending" | "settled" | "failed" | null>(null);
@@ -28,89 +52,139 @@ let paging = $state(false);
 let pagingError = $state(false);
 let disposed = false;
 const activities = $derived(page === 1 ? activity.data : laterActivity);
-const canRecharge = $derived(catalog.data?.supported && catalog.data.paymentAvailable && balance.data?.usable !== false);
-const checkoutPrefix = () => `cohub:wallet-checkout:${getCacheUserKey()}:${spaceId}:`;
-const money = (amount: number, maximumFractionDigits = 2) => formatCurrency(amount, "USD", { locale, maximumFractionDigits });
+const canRecharge = $derived(
+	catalog.data?.supported &&
+		catalog.data.paymentAvailable &&
+		balance.data?.usable !== false,
+);
+const checkoutPrefix = () =>
+	`cohub:wallet-checkout:${getCacheUserKey()}:${spaceId}:`;
+const money = (amount: number, maximumFractionDigits = 2) =>
+	formatCurrency(amount, "USD", { locale, maximumFractionDigits });
 const kinds = $derived({
-  grant: m.wallet_activity_recharge({}, { locale }), usage: m.wallet_activity_usage({}, { locale }),
-  refund: m.wallet_activity_refund({}, { locale }), expire: m.billing_expired({}, { locale }),
-  revoke: m.wallet_activity_revoke({}, { locale }), adjust: m.wallet_activity_adjust({}, { locale }),
+	grant: m.wallet_activity_recharge({}, { locale }),
+	usage: m.wallet_activity_usage({}, { locale }),
+	reversal: m.wallet_activity_reversal({}, { locale }),
+	refund: m.wallet_activity_refund({}, { locale }),
+	expire: m.billing_expired({}, { locale }),
+	revoke: m.wallet_activity_revoke({}, { locale }),
+	adjust: m.wallet_activity_adjust({}, { locale }),
+});
+const generationPhases = $derived({
+	reserve: m.wallet_activity_generation_reserve({}, { locale }),
+	settlement: m.wallet_activity_generation_settlement({}, { locale }),
+	refund: m.wallet_activity_generation_refund({}, { locale }),
 });
 
 async function refresh() {
-  if (!balance.refreshing) void balance.load({ force: true });
-  if (!activity.refreshing) void activity.load({ force: true });
+	if (!balance.refreshing) void balance.load({ force: true });
+	if (!activity.refreshing) void activity.load({ force: true });
 }
 
 async function changePage(next: number) {
-  if (paging) return;
-  if (next === 1) { page = 1; return; }
-  paging = true;
-  pagingError = false;
-  try { laterActivity = await api.activities(next); page = next; }
-  catch { pagingError = true; }
-  finally { paging = false; }
+	if (paging) return;
+	if (next === 1) {
+		page = 1;
+		return;
+	}
+	paging = true;
+	pagingError = false;
+	try {
+		laterActivity = await api.activities(next);
+		page = next;
+	} catch {
+		pagingError = true;
+	} finally {
+		paging = false;
+	}
 }
 
 async function buy(product: BillingCatalogProduct) {
-  if (buying || !canRecharge) return;
-  buying = product.key;
-  checkoutError = false;
-  const key = `${checkoutPrefix()}${product.key}`;
-  try {
-    let id = sessionStorage.getItem(key);
-    if (id) {
-      const previous = await api.confirmOrder(id).catch(() => null);
-      if (previous && (previous.settled || !previous.pending)) id = null;
-    }
-    id ??= crypto.randomUUID();
-    sessionStorage.setItem(key, id);
-    const { checkout } = await api.createOrder({ id, productKey: product.key });
-    if (!checkout.checkoutUsable || !checkout.checkoutUrl) {
-      if (checkout.orderId) sessionStorage.removeItem(key);
-      throw new Error("Checkout unavailable");
-    }
-    const url = new URL(checkout.checkoutUrl);
-    if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Invalid checkout URL");
-    window.location.assign(url.toString());
-  } catch { checkoutError = true; void refresh(); }
-  finally { buying = null; }
+	if (buying || !canRecharge) return;
+	buying = product.key;
+	checkoutError = false;
+	const key = `${checkoutPrefix()}${product.key}`;
+	try {
+		let id = sessionStorage.getItem(key);
+		if (id) {
+			const previous = await api.confirmOrder(id).catch(() => null);
+			if (previous && (previous.settled || !previous.pending)) id = null;
+		}
+		id ??= crypto.randomUUID();
+		sessionStorage.setItem(key, id);
+		const { checkout } = await api.createOrder({ id, productKey: product.key });
+		if (!checkout.checkoutUsable || !checkout.checkoutUrl) {
+			if (checkout.orderId) sessionStorage.removeItem(key);
+			throw new Error("Checkout unavailable");
+		}
+		const url = new URL(checkout.checkoutUrl);
+		if (url.protocol !== "https:" && url.protocol !== "http:")
+			throw new Error("Invalid checkout URL");
+		window.location.assign(url.toString());
+	} catch {
+		checkoutError = true;
+		void refresh();
+	} finally {
+		buying = null;
+	}
 }
 
 async function confirmPayment() {
-  if (!returnedOrderId || confirming) return;
-  confirming = true;
-  try {
-    const result = await api.confirmOrder(returnedOrderId);
-    if (disposed) return;
-    confirmation = result.settled ? "settled" : result.pending ? "pending" : "failed";
-    if (result.settled || !result.pending) {
-      for (let index = sessionStorage.length - 1; index >= 0; index--) {
-        const key = sessionStorage.key(index);
-        if (key?.startsWith(checkoutPrefix()) && sessionStorage.getItem(key) === returnedOrderId) sessionStorage.removeItem(key);
-      }
-      await refresh();
-    }
-  } catch { if (!disposed) confirmation = "pending"; }
-  finally { confirming = false; }
+	if (!returnedOrderId || confirming) return;
+	confirming = true;
+	try {
+		const result = await api.confirmOrder(returnedOrderId);
+		if (disposed) return;
+		confirmation = result.settled
+			? "settled"
+			: result.pending
+				? "pending"
+				: "failed";
+		if (result.settled || !result.pending) {
+			for (let index = sessionStorage.length - 1; index >= 0; index--) {
+				const key = sessionStorage.key(index);
+				if (
+					key?.startsWith(checkoutPrefix()) &&
+					sessionStorage.getItem(key) === returnedOrderId
+				)
+					sessionStorage.removeItem(key);
+			}
+			await refresh();
+		}
+	} catch {
+		if (!disposed) confirmation = "pending";
+	} finally {
+		confirming = false;
+	}
 }
 
 onMount(() => {
-  void balance.load(); void activity.load(); void catalog.load(); void space.load();
-  const url = new URL(window.location.href);
-  returnedOrderId = url.searchParams.get("wallet_order");
-  if (returnedOrderId) { confirmation = "pending"; void confirmPayment(); }
-  const onFocus = () => { void refresh(); if (confirmation === "pending") void confirmPayment(); };
-  const onVisible = () => { if (document.visibilityState === "visible") onFocus(); };
-  window.addEventListener("focus", onFocus);
-  document.addEventListener("visibilitychange", onVisible);
-  const interval = setInterval(onVisible, 30_000);
-  return () => {
-    disposed = true;
-    clearInterval(interval);
-    window.removeEventListener("focus", onFocus);
-    document.removeEventListener("visibilitychange", onVisible);
-  };
+	void balance.load();
+	void activity.load();
+	void catalog.load();
+	void space.load();
+	const url = new URL(window.location.href);
+	returnedOrderId = url.searchParams.get("wallet_order");
+	if (returnedOrderId) {
+		confirmation = "pending";
+		void confirmPayment();
+	}
+	const onFocus = () => {
+		void refresh();
+		if (confirmation === "pending") void confirmPayment();
+	};
+	const onVisible = () => {
+		if (document.visibilityState === "visible") onFocus();
+	};
+	window.addEventListener("focus", onFocus);
+	document.addEventListener("visibilitychange", onVisible);
+	const interval = setInterval(onVisible, 30_000);
+	return () => {
+		disposed = true;
+		clearInterval(interval);
+		window.removeEventListener("focus", onFocus);
+		document.removeEventListener("visibilitychange", onVisible);
+	};
 });
 </script>
 
@@ -167,7 +241,7 @@ onMount(() => {
       <div class="mt-3 min-h-24 divide-y divide-border-subtle">
         {#each activities?.items ?? [] as item (item.id)}
           <div class="flex items-start justify-between gap-4 py-3">
-            <div class="min-w-0"><p class="text-sm text-text-primary">{kinds[item.kind]}</p><p class="mt-1 text-xs text-text-tertiary">{formatDateTime(item.createdAt, locale)}</p>{#if item.actorUserId}<p class="mt-1 truncate font-mono text-xs text-text-tertiary" title={item.actorUserId}>{item.actorUserId}</p>{/if}</div>
+            <div class="min-w-0"><p class="text-sm text-text-primary">{item.generationPhase ? generationPhases[item.generationPhase] : kinds[item.kind]}</p><p class="mt-1 text-xs text-text-tertiary">{formatDateTime(item.createdAt, locale)}</p>{#if item.actorUserId}<p class="mt-1 truncate font-mono text-xs text-text-tertiary" title={item.actorUserId}>{item.actorUserId}</p>{/if}</div>
             <span class="shrink-0 font-mono text-sm tabular-nums text-text-secondary">{money(item.amountUsd, 8)}</span>
           </div>
         {:else}<p class="py-5 text-sm text-text-tertiary">{activity.loading ? m.common_loading({}, { locale }) : m.billing_no_activity({}, { locale })}</p>{/each}

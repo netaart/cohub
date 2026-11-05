@@ -35,6 +35,8 @@ export type CreateGenerationTaskResponse = {
   taskType: typeof GENERATION_TASK_TYPE;
   status: "pending";
   billing?: BillingPayload | null;
+  /** Present when the request prepaid a provider reserve. */
+  reservation?: { amountUsd: number; status: "held" } | null;
 };
 
 export type GenerationTaskData = {
@@ -98,6 +100,12 @@ export type GenerationUsageBilling = {
   usageType: string;
   status: "recorded" | "overage" | "skipped";
   reason?: string | null;
+  /** Prepaid amount held before execution. */
+  reservedAmountUsd?: number;
+  /** Amount returned from the reserve after actual usage settled. */
+  refundedAmountUsd?: number;
+  /** Amount charged above the reserve for an underestimated request. */
+  additionalAmountUsd?: number;
 };
 
 export type GenerationTaskResult = {

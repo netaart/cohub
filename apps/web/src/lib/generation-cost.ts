@@ -36,15 +36,29 @@ export function getGenerationCostPresentation(
 	const status = billing?.status;
 	const reason = billing?.reason;
 	const charged = formattedCost(billing?.amountUsd, locale);
+	const reserved = formattedCost(billing?.reservedAmountUsd, locale);
+	const refunded = formattedCost(billing?.refundedAmountUsd, locale);
+	const additional = formattedCost(billing?.additionalAmountUsd, locale);
 	const providerCost = formattedCost(generation?.officialCostUsd, locale);
 	const providerDetail = providerCost
 		? m.cost_provider({ cost: providerCost }, { locale })
 		: "";
+	const reservationDetail = [
+		reserved ? m.cost_reserved({ cost: reserved }, { locale }) : "",
+		refunded ? m.cost_refunded({ cost: refunded }, { locale }) : "",
+		additional ? m.cost_additional({ cost: additional }, { locale }) : "",
+	]
+		.filter(Boolean)
+		.join("  ·  ");
 
 	if ((status === "recorded" || status === "overage") && charged) {
 		return {
 			label: charged,
-			detail: [m.cost_charged({ cost: charged }, { locale }), providerDetail]
+			detail: [
+				m.cost_charged({ cost: charged }, { locale }),
+				reservationDetail,
+				providerDetail,
+			]
 				.filter(Boolean)
 				.join("  ·  "),
 		};
@@ -54,8 +68,22 @@ export function getGenerationCostPresentation(
 			label: m.cost_pending({ cost: charged }, { locale }),
 			detail: [
 				m.cost_pending_charge({ cost: charged }, { locale }),
+				reservationDetail,
 				providerDetail,
 				m.cost_billing_retry_scheduled({}, { locale }),
+			]
+				.filter(Boolean)
+				.join("  ·  "),
+		};
+	}
+	if (status === "skipped" && reserved) {
+		const reasonText = readableReason(reason);
+		return {
+			label: m.cost_not_charged({ cost: reserved }, { locale }),
+			detail: [
+				m.cost_not_charged_label({}, { locale }),
+				reservationDetail,
+				reasonText ? m.cost_reason({ reason: reasonText }, { locale }) : "",
 			]
 				.filter(Boolean)
 				.join("  ·  "),
@@ -67,6 +95,7 @@ export function getGenerationCostPresentation(
 			label: m.cost_not_charged({ cost: providerCost }, { locale }),
 			detail: [
 				m.cost_not_charged_label({}, { locale }),
+				reservationDetail,
 				providerDetail,
 				reasonText ? m.cost_reason({ reason: reasonText }, { locale }) : "",
 			]

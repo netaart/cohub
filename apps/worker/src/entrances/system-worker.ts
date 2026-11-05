@@ -24,6 +24,11 @@ import { SANDBOX_IDLE_REAPER_JOB } from "../system/jobs/sandbox-idle-reaper/type
 import { startSystemReferralRewardRetryLoop } from "../system/referral-reward-retry.js";
 import { startWorkspaceUsage } from "../system/jobs/workspace-usage/index.js";
 import {
+  GENERATION_BILLING_RECONCILE_INTERVAL_MS,
+  GENERATION_BILLING_RECONCILE_JOB,
+  GENERATION_BILLING_RECONCILE_SCHEDULER_ID,
+} from "../system/jobs/generation-billing-reconcile/index.js";
+import {
   APP_DOMAIN_SWEEP_JOB,
   APP_PROMOTION_STATS_FLUSH_INTERVAL_MS,
   APP_PROMOTION_STATS_FLUSH_JOB,
@@ -192,6 +197,26 @@ try {
   });
 } catch (error) {
   logger.error("[SystemWorker] Failed to ensure app RTC sweep schedule", {
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
+try {
+  await systemQueue.upsertJobScheduler(
+    GENERATION_BILLING_RECONCILE_SCHEDULER_ID,
+    { every: GENERATION_BILLING_RECONCILE_INTERVAL_MS },
+    {
+      name: GENERATION_BILLING_RECONCILE_JOB,
+      data: {},
+      opts: { attempts: 1, ...defaultJobRetention },
+    },
+  );
+  logger.info("[SystemWorker] Ensured generation billing reconcile schedule", {
+    schedulerId: GENERATION_BILLING_RECONCILE_SCHEDULER_ID,
+    intervalMs: GENERATION_BILLING_RECONCILE_INTERVAL_MS,
+  });
+} catch (error) {
+  logger.error("[SystemWorker] Failed to ensure generation billing reconcile schedule", {
     error: error instanceof Error ? error.message : String(error),
   });
 }

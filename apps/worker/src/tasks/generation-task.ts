@@ -10,6 +10,8 @@ import {
   resolveGenerationUsageType,
 } from "@cohub/billing";
 import type { Job } from "bullmq";
+import { settledReservationBilling, type GenerationBillingReservation } from "@cohub/core/generation-billing";
+import { generationBilling } from "../generation-billing.js";
 import {
   createGenerationClient,
   GenerationConfigError,
@@ -197,7 +199,7 @@ async function enqueueGenerationBillingRetry(input: {
   adapterType?: string | null;
   spaceId: string;
   sessionId?: string | null;
-}) {
+}, options: { delay?: number } = {}) {
   const data: GenerationBillingRetryTaskData = {
     schemaVersion: 2,
     taskRunId: input.taskRunId,
@@ -218,6 +220,7 @@ async function enqueueGenerationBillingRetry(input: {
     data,
   }, {
     attempts: 8,
+    ...options,
     backoff: { type: "exponential", delay: 5_000 },
     ...defaultJobRetention,
   });
@@ -234,15 +237,68 @@ async function recordGenerationUsageBilling(input: {
   usageType: ReturnType<typeof resolveGenerationUsageType>;
   spaceId: string;
   sessionId?: string | null;
+  reservation: GenerationBillingReservation | null;
 }): Promise<GenerationUsageBilling> {
   const pricing = calculateGenerationUsageCharge(input.officialCostUsd, input.modelDiscount);
   const { officialCostUsd, amountUsd } = pricing;
+  const reservedAmountUsd = input.reservation ? Number(input.reservation.reserveUsd) : undefined;
   const billingPricing = {
     officialCostUsd,
     amountUsd,
     discountMultiplier: pricing.discountMultiplier,
     usageType: input.usageType,
+    ...(reservedAmountUsd !== undefined ? { reservedAmountUsd } : {}),
   };
+  if (input.reservation && input.taskRunId) {
+    const actualUsd = pricing.skipReason ? 0 : amountUsd;
+    try {
+      const settlement = await generationBilling.settle({ taskRunId: input.taskRunId, actualUsd });
+      if (settlement.status === "settled") {
+        return {
+          ...billingPricing,
+          ...settledReservationBilling(settlement.reservation),
+          status: settlement.overage ? "overage" : "recorded",
+        };
+      }
+      if (settlement.status === "released" || settlement.status === "missing") {
+        return {
+          ...billingPricing,
+          status: "skipped",
+          reason: settlement.status === "released" ? "reservation_released" : "missing_reservation",
+          ...(settlement.status === "released" ? { refundedAmountUsd: reservedAmountUsd } : {}),
+        };
+      }
+      if (actualUsd > 0) await enqueueGenerationBillingRetry({
+        userId: input.userId,
+        taskRunId: input.taskRunId,
+        amountUsd: actualUsd,
+        officialCostUsd,
+        modelDiscount: input.modelDiscount,
+        usageType: input.usageType,
+        model: input.model,
+        adapterType: input.adapterType,
+        spaceId: input.spaceId,
+        sessionId: input.sessionId,
+      }, { delay: 30_000 }).catch((enqueueError) => {
+        console.warn("[Billing] failed to enqueue reservation settlement retry", {
+          taskRunId: input.taskRunId,
+          error: enqueueError,
+        });
+      });
+      return { ...billingPricing, status: "skipped", reason: "record_failed" };
+    } catch (error) {
+      console.warn("[Billing] failed to settle generation reservation", {
+        userId: input.userId,
+        taskRunId: input.taskRunId,
+        officialCostUsd,
+        amountUsd: actualUsd,
+        model: input.model,
+        usageType: input.usageType,
+        error,
+      });
+      return { ...billingPricing, status: "skipped", reason: "record_failed" };
+    }
+  }
   if (pricing.skipReason) {
     return {
       ...billingPricing,
@@ -338,8 +394,9 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
   if (!userId) throw new Error("Invalid generation task payload: userId is required");
   const data = parseGenerationTaskData(payload.data);
   const taskRunId = context?.taskRunId ?? String(job.id ?? "");
-  await markGenerationSessionRunning(taskRunId).catch((error) => {
+  const runnable = await markGenerationSessionRunning(taskRunId).catch((error) => {
     console.warn("[GenerationSession] failed to mark turn running", error);
+    return null;
   });
 
   try {
@@ -369,12 +426,27 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
       });
     }
 
+    const existingReservation = await generationBilling.getReservation(taskRunId);
+    let reservation: GenerationBillingReservation | null = null;
+    if (existingReservation) {
+      // Prepaid tasks fail closed: a cancelled or unverifiable turn must not consume the reserve.
+      if (runnable === false) throw new Error("Generation was cancelled before it started.");
+      if (runnable === null) throw new Error("Generation turn state could not be verified.");
+      if (existingReservation.userId !== userId || existingReservation.model !== data.model || (existingReservation.spaceId ?? null) !== spaceId) {
+        throw new Error("Generation billing reservation does not match the task payload.");
+      }
+      reservation = await generationBilling.claim(taskRunId);
+      if (reservation?.status !== "running") {
+        throw new Error(`Generation billing reservation is not held: ${reservation?.status ?? "missing"}`);
+      }
+    }
+
     // Gate uses request-side modality; billing/stats re-resolve with output after success.
     const gateUsageType = resolveGenerationUsageType({
       adapterType: declaration.adapter?.type,
       contentTypes: contentTypesFromBlocks(data.content),
     });
-    const billingDecision = isGenerationModelDiscountFree(modelDiscount)
+    const billingDecision = reservation || isGenerationModelDiscountFree(modelDiscount)
       ? { status: "allowed" as const, balanceState: "zero" as const, netUsd: 0 }
       : await billingUsageGate.evaluate({
           userId,
@@ -418,6 +490,7 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
       usageType,
       spaceId,
       sessionId,
+      reservation,
     });
     if (billing.status === "skipped" && billing.reason === "missing_cost") {
       console.warn("[Billing] generation completed without provider cost", {

@@ -54,6 +54,9 @@ function isGenerationTaskResult(value: unknown): value is GenerationTaskResult {
       usageType?: unknown;
       status?: unknown;
       reason?: unknown;
+      reservedAmountUsd?: unknown;
+      refundedAmountUsd?: unknown;
+      additionalAmountUsd?: unknown;
     };
     if (
       billing.officialCostUsd !== undefined &&
@@ -69,6 +72,10 @@ function isGenerationTaskResult(value: unknown): value is GenerationTaskResult {
         billing.discountMultiplier > 1
       )
     ) return false;
+    for (const key of ["reservedAmountUsd", "refundedAmountUsd", "additionalAmountUsd"] as const) {
+      const value = billing[key];
+      if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) return false;
+    }
     if (typeof billing.usageType !== "string") return false;
     if (billing.status !== "recorded" && billing.status !== "overage" && billing.status !== "skipped") return false;
     if (billing.reason !== undefined && billing.reason !== null && typeof billing.reason !== "string") return false;

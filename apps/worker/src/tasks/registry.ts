@@ -8,6 +8,7 @@ import { taskRuns } from "@cohub/db";
 import { dispatchTaskCreated, dispatchTaskUpdated } from "../realtime-events.js";
 import { createLogger } from "@cohub/infra/logging";
 import { failGenerationSession } from "./generation-session.js";
+import { generationBilling } from "../generation-billing.js";
 
 
 const logger = createLogger({ serviceName: "cohub-worker" });
@@ -152,6 +153,9 @@ export const registerTask = (type: string, handler: TaskHandler) => {
       return result;
     } catch (error) {
       if (job.name === "generation") {
+        await generationBilling.release({ taskRunId, reason: "task_failed" }).catch((billingError) => {
+          logger.warn("[Billing] failed to release generation reservation", billingError);
+        });
         await failGenerationSession({ taskRunId, payload, error }).catch((sessionError) => {
           logger.warn("[GenerationSession] failed to persist failure", sessionError);
         });

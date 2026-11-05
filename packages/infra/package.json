@@ -91,6 +91,10 @@
     "./safe-fetch": {
       "types": "./dist/safe-fetch/index.d.ts",
       "default": "./dist/safe-fetch/index.js"
+    },
+    "./config-runtime/generation-billing": {
+      "types": "./dist/config-runtime/generation-billing.d.ts",
+      "default": "./dist/config-runtime/generation-billing.js"
     }
   },
   "types": "./dist/index.d.ts",

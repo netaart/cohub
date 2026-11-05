@@ -25,7 +25,7 @@ export function registerSpaceWallet(spaces: Command): void {
       if (!Number.isInteger(page) || page < 1 || page > 10_000) throw new Error("Page must be an integer between 1 and 10000");
       const value = await createClient().space(await resolveSpace(spaces)).wallet.activities(page);
       if (jsonRequested(opts)) return outJson(value);
-      table(value.items, [{ key: "kind", label: "Activity" }, { key: "amountUsd", label: "Amount (USD)" }, { key: "actorUserId", label: "User" }, { key: "createdAt", label: "Date" }]);
+      table(value.items, [{ key: "title", label: "Activity" }, { key: "amountUsd", label: "Amount (USD)" }, { key: "actorUserId", label: "User" }, { key: "createdAt", label: "Date" }]);
     } catch (cause) { handleHttp(cause); }
   });
   wallet.command("recharge <product>").requiredOption("--request-id <uuid>", "Stable UUID; reuse when retrying this recharge").option("--json", "Output as JSON").action(async (productKey: string, opts: { requestId: string; json?: boolean }) => {
