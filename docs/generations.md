@@ -218,11 +218,6 @@ retry charges`, plus warnings when Redis is unavailable or a release fails. Live
 holds of a payer are in the Redis hash `generation:reserve-holds:<personal|space_wallet>:<payerId>`
 (`HGETALL`; each value is `<amount in 1e-8 USD>|<expiresAtMs>`).
 
-Upgrading from the prepaid design (#447): it debited a reserve only while this
-config existed, and migration 0085 drops its reservation table. The migration
-refuses to run while any reservation is unsettled; if the config was ever enabled,
-remove it and let the old worker settle them first.
-
 ## CLI
 
 ```bash
