@@ -21,10 +21,25 @@ export type SessionRowTree = {
 	rails: number[];
 };
 
+/** Present on rows with forks when folding is enabled. */
+export type SessionForkFold = {
+	expanded: boolean;
+	hidden: number;
+	hiddenUnread: number;
+};
+
 export type SessionTreeItem<T extends SessionRecord = SessionRecord> = {
 	session: T;
 	fork: SessionForkEdge | null;
 	tree: SessionRowTree;
+	fold?: SessionForkFold;
+};
+
+export type SessionForkFoldOptions<T extends SessionRecord> = {
+	collapsed: ReadonlySet<string>;
+	/** Descendants that stay visible under a collapsed row. */
+	keep?: (session: T) => boolean;
+	unread?: (session: T) => boolean;
 };
 
 const TITLE_LIMIT = 48;
@@ -109,6 +124,7 @@ export function readRealtimeSessionFork(
 export function buildSessionForkTree<T extends SessionRecord>(
 	sessions: readonly T[],
 	forks: readonly SessionForkEdge[] | null | undefined,
+	fold?: SessionForkFoldOptions<T>,
 ): SessionTreeItem<T>[] {
 	const byId = new Map(sessions.map((session) => [session.id, session]));
 	const forkByChild = new Map<string, SessionForkEdge>();
@@ -155,14 +171,40 @@ export function buildSessionForkTree<T extends SessionRecord>(
 	const compare = (a: T, b: T) =>
 		timeOf(b, new Set()) - timeOf(a, new Set()) || b.id.localeCompare(a.id);
 
-	const rows: { session: T; depth: number }[] = [];
+	const rows: { session: T; depth: number; fold?: SessionForkFold }[] = [];
 	const placed = new Set<string>();
+	const childrenOf = (session: T) =>
+		(children.get(session.id) ?? []).sort(compare);
+	// Collapsed rows keep matching descendants as their direct children.
+	const collapse = (session: T, depth: number, state: SessionForkFold) => {
+		for (const child of childrenOf(session)) {
+			if (placed.has(child.id)) continue;
+			placed.add(child.id);
+			if (fold?.keep?.(child)) rows.push({ session: child, depth });
+			else {
+				state.hidden++;
+				if (fold?.unread?.(child)) state.hiddenUnread++;
+			}
+			collapse(child, depth, state);
+		}
+	};
 	const append = (session: T, depth: number) => {
 		if (placed.has(session.id)) return;
 		placed.add(session.id);
-		rows.push({ session, depth });
-		for (const child of (children.get(session.id) ?? []).sort(compare))
-			append(child, depth + 1);
+		const row: (typeof rows)[number] = { session, depth };
+		rows.push(row);
+		if (fold && children.has(session.id)) {
+			row.fold = {
+				expanded: !fold.collapsed.has(session.id),
+				hidden: 0,
+				hiddenUnread: 0,
+			};
+			if (!row.fold.expanded) {
+				collapse(session, depth + 1, row.fold);
+				return;
+			}
+		}
+		for (const child of childrenOf(session)) append(child, depth + 1);
 	};
 	for (const root of roots.sort(compare)) append(root, 0);
 	for (const session of sessions) append(session, 0);
@@ -170,11 +212,12 @@ export function buildSessionForkTree<T extends SessionRecord>(
 	// Deeper forks flatten into the last level; rails follow the visible rows.
 	const items: SessionTreeItem<T>[] = [];
 	const nextAtOrAbove: number[] = [];
-	rows.reduceRight((nextDepth, { session, depth: rawDepth }) => {
+	rows.reduceRight((nextDepth, { session, depth: rawDepth, fold }) => {
 		const depth = Math.min(rawDepth, SESSION_TREE_MAX_DEPTH);
 		items.push({
 			session,
 			fork: rawDepth > 0 ? (forkByChild.get(session.id) ?? null) : null,
+			...(fold && { fold }),
 			tree: {
 				depth,
 				last: nextAtOrAbove[depth] !== depth,

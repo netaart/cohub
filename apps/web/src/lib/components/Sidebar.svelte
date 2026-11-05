@@ -171,7 +171,12 @@ import {
 	onSessionListCacheUpdated,
 	setCachedSessionList,
 } from "$lib/stores/session-list-cache";
+import { unreadTracker } from "$lib/stores/session-state.svelte";
 import { sessionStore, startSessionSync } from "$lib/stores/session-store";
+import {
+	getCachedCollapsedForkIds,
+	setCachedCollapsedForkIds,
+} from "$lib/stores/sidebar-fork-expanded";
 import {
 	getCachedExpandedLabelIdsSnapshot,
 	setCachedExpandedLabelIds,
@@ -277,6 +282,8 @@ let labelItemsPageInfoBySpace = $state<
 	>
 >({});
 let expandedLabelIdsBySpace = $state<Record<string, Set<string>>>({});
+/** Keyed by user + space, mirroring the persisted cache. */
+let collapsedForkIdsByScope = $state<Record<string, Set<string>>>({});
 let loadingLabelIdsBySpace = $state<Record<string, Set<string>>>({});
 /** Per space+label load tokens so stale finally blocks cannot clear a newer load. */
 const labelItemsLoadTokens = new Map<string, number>();
@@ -445,6 +452,15 @@ const activeApp = $derived(apps.find((app) => app.id === activeAppId) ?? null);
 const activeCheckpoint = $derived(
 	checkpoints.find((checkpoint) => checkpoint.id === activeCheckpointId) ??
 		null,
+);
+const currentForkScope = $derived(
+	currentSpaceId ? `${getCacheUserKey()}:${currentSpaceId}` : null,
+);
+const currentCollapsedForkIds = $derived(
+	currentSpaceId && currentForkScope
+		? (collapsedForkIdsByScope[currentForkScope] ??
+				getCachedCollapsedForkIds(currentSpaceId))
+		: new Set<string>(),
 );
 const sidebarSessionItems = $derived.by(() =>
 	buildSidebarSessionItems(sessions),
@@ -2618,19 +2634,47 @@ function forkTooltip(fork: SessionForkEdge) {
 
 function buildSidebarSessionItems(
 	sessionList: SessionRecord[],
+	foldable = true,
 ): SidebarSessionItem[] {
-	return buildSessionForkTree(sessionList, sessionForks).map((item) => ({
+	// Touch rows have no hover to reveal the toggle, so they stay fully expanded.
+	const fold =
+		foldable && !isMobile
+			? {
+					collapsed: currentCollapsedForkIds,
+					// The open chat and running forks stay visible inside a collapsed group.
+					keep: (session: SessionRecord) =>
+						Boolean(session.activeTurn) || session.id === activeSessionId,
+					unread: (session: SessionRecord) =>
+						unreadTracker.isUnread(session, session.lastMessageId),
+				}
+			: undefined;
+	return buildSessionForkTree(sessionList, sessionForks, fold).map((item) => ({
 		...item,
 		title: getSessionTreeTitle(item) ?? m.sidebar_new_chat({}, { locale }),
 		tooltip: item.fork ? forkTooltip(item.fork) : undefined,
 	}));
 }
 
-function buildLabelSessionItems(items: LabelAssignmentListItem[]) {
+function toggleForkExpanded(sessionId: string) {
+	if (!currentSpaceId || !currentForkScope) return;
+	const next = new Set(currentCollapsedForkIds);
+	if (next.has(sessionId)) next.delete(sessionId);
+	else next.add(sessionId);
+	collapsedForkIdsByScope = {
+		...collapsedForkIdsByScope,
+		[currentForkScope]: next,
+	};
+	setCachedCollapsedForkIds(currentSpaceId, next);
+}
+
+function buildLabelSessionItems(
+	items: LabelAssignmentListItem[],
+	foldable = true,
+) {
 	const labelSessions = items
 		.filter((item) => item.resourceType === "session")
 		.flatMap((item) => sessionStore.get(item.resourceRef) ?? []);
-	return buildSidebarSessionItems(labelSessions);
+	return buildSidebarSessionItems(labelSessions, foldable);
 }
 
 function orderLabelItemsBySessionTree(
@@ -3033,7 +3077,9 @@ $effect(() => {
 		{@const useSessionTreeOrder = isSessionActivityLabel(label)}
 		{@const labelSessionItems = useSessionTreeOrder ? buildLabelSessionItems(items) : []}
 		{@const labelSessionItemById = new Map(labelSessionItems.map((item) => [item.session.id, item]))}
-		{@const orderedItems = useSessionTreeOrder ? orderLabelItemsBySessionTree(items, labelSessionItems) : items}
+		{@const fullSessionItems = useSessionTreeOrder && currentCollapsedForkIds.size > 0 ? buildLabelSessionItems(items, false) : labelSessionItems}
+		{@const foldedSessionIds = new Set(fullSessionItems.flatMap((item) => labelSessionItemById.has(item.session.id) ? [] : [item.session.id]))}
+		{@const orderedItems = useSessionTreeOrder ? orderLabelItemsBySessionTree(items, fullSessionItems).filter((item) => item.resourceType !== "session" || !foldedSessionIds.has(item.resourceRef)) : items}
 		{@const canEditLabelItems = canAssignResourceToLabel(label)}
 		{@const itemIndentPx = Math.max(0, depth) * 16}
 		{@const itemIndentStyle = itemIndentPx > 0 ? `padding-left: ${itemIndentPx}px` : undefined}
@@ -3064,6 +3110,8 @@ $effect(() => {
 							renameValue={renameTitleValue}
 							renameSaving={renameSaving}
 							tree={sessionItem?.tree}
+							fold={sessionItem?.fold}
+							onToggleFold={() => toggleForkExpanded(session.id)}
 							tooltip={sessionItem?.tooltip}
 							draggable={itemDraggable}
 							removeLabelTitle={canRemoveItem ? labelRemoveTitle : undefined}
@@ -3398,6 +3446,8 @@ $effect(() => {
 					renameValue={renameTitleValue}
 					renameSaving={renameSaving}
 					tree={item.tree}
+					fold={item.fold}
+					onToggleFold={() => toggleForkExpanded(session.id)}
 					tooltip={item.tooltip}
 					draggable={!isMobile}
 					onNavigate={(event, target) => {
