@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/protocol"
 )
 
@@ -239,6 +240,22 @@ func writeMountFile(root string, file mountFile) error {
 		mode = 0o755
 	}
 	return os.WriteFile(target, content, mode)
+}
+
+// ClearMounts empties every mount and its bookkeeping; the agent re-syncs them on its next Turn.
+func ClearMounts(cfg env.Config) error {
+	if cfg.CacheDir == "" {
+		return nil
+	}
+	mountsMu.Lock()
+	defer mountsMu.Unlock()
+	return errors.Join(
+		resetDir(cfg.PlatformAgentsDir),
+		resetDir(cfg.UserAgentsDir),
+		resetDir(cfg.ModsDir),
+		os.RemoveAll(filepath.Join(cfg.CacheDir, mountStagingDir)),
+		os.RemoveAll(filepath.Join(cfg.CacheDir, mountStateFile)),
+	)
 }
 
 func resetDir(dir string) error {

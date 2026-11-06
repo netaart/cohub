@@ -77,6 +77,14 @@ func TestMountsSyncWriteAndFence(t *testing.T) {
 		t.Fatalf("mount state outside the mount roots must stay fenced")
 	}
 
+	if err := ClearMounts(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := syncedRevision(t, d.handleMountsSync(mutationRequest(t, "mounts.sync", mountSyncParams{Mounts: []mountSpec{{Path: "/mods/demo"}}})), "/mods/demo"); got != "" {
+		t.Fatalf("cleared mounts must be re-synced, got revision %q", got)
+	}
+	write("r2", []mountFile{{Path: "run.sh", ContentBase64: content}}, true)
+
 	d.handleMountsSync(mutationRequest(t, "mounts.sync", mountSyncParams{}))
 	if _, err := os.Stat(filepath.Join(cfg.ModsDir, "demo")); !os.IsNotExist(err) {
 		t.Fatalf("undesired mod should be removed: %v", err)

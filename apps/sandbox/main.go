@@ -405,6 +405,14 @@ func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 		logger.Error("failed to load local config", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+	// Mounts can hold the Space owner's user skills, so they live only while this
+	// sandbox runs: the next account signed in on the machine must not find them.
+	clearMounts := func() {
+		if err := rpc.ClearMounts(cfg); err != nil {
+			logger.Warn("failed to clear mounts", slog.String("error", err.Error()))
+		}
+	}
+	clearMounts()
 
 	runtimeID := strings.TrimSpace(os.Getenv("COHUB_RUNTIME_ID"))
 	if runtimeID != "" {
@@ -551,7 +559,9 @@ func runLocal(logger *slog.Logger, spaceID, root, relayURL string) {
 		slog.String("relay", cfg.RelayURL),
 	)
 
-	if err := client.Run(ctx); err != nil {
+	err = client.Run(ctx)
+	clearMounts()
+	if err != nil {
 		logger.Error("local sandbox stopped", slog.String("error", err.Error()))
 		os.Exit(1)
 	}

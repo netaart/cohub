@@ -427,7 +427,9 @@ reconnects at once instead of waiting out a backoff.
 All agent tools keep their meaning. File tools are fenced to the folder; `bash` runs as the app, like
 the CLI runs as the OS user, and uses `sh` (Android's mksh with toybox) because the device has no bash;
 `find` and `grep` use the bridge's built-in walker because it has no `fd` or `rg` (see
-[Agent / Sandbox Runtime](agent-sandbox-runtime.md#optional-executables)). `cohub` and `node` are on
+[Agent / Sandbox Runtime](agent-sandbox-runtime.md#optional-executables)). Platform, user and Mod files are mirrored into the app's
+private storage like on a computer (see [Agent / Sandbox Runtime](agent-sandbox-runtime.md#local-sandbox-dial-out-mode)); their
+scripts run through an interpreter such as `sh script.sh`, since Android does not execute files in app storage. `cohub` and `node` are on
 its `PATH`: the APK carries this commit's CLI and Node built for Android (arm64 only), installed under
 the app's no-backup files once per update; the CLI updates with the app, as npm is not there. Each binding costs what one
 `runtime up` costs: a sandboxd process, its file watcher over the folder, and two long-lived
@@ -438,7 +440,7 @@ Android 应用像 `runtime up` 一样为手机上的文件夹提供本地 Runtim
 相同的两部分：声明 `harnesses: []` 的 Runtime 连接（只持有租约，Turn 由 Cohub Harness 执行），以及以该文件夹为根目录、为 Android
 交叉编译的 sandboxd 文件桥（受管模式，生命周期事件改走 stderr）。绑定规则与 CLI 一致：新建 Space 时选择文件夹并以其命名；已关联的
 文件夹可打开原 Space 或改绑；运行中的文件夹或 Space 不会被抢占。前台服务在后台保持所有绑定连接，退出登录时全部停止；未断开的绑定在服务被系统重启或下次打开应用时恢复，不随开机自启。
-文件工具限定在文件夹内，`bash` 以应用身份运行并使用 `sh`，`find` / `grep` 在缺少 `fd` / `rg` 时使用内置实现。`PATH` 上有 APK 自带的 `cohub` 与 Node（仅 arm64），随应用更新。
+文件工具限定在文件夹内，`bash` 以应用身份运行并使用 `sh`，`find` / `grep` 在缺少 `fd` / `rg` 时使用内置实现。`PATH` 上有 APK 自带的 `cohub` 与 Node（仅 arm64），随应用更新。平台、用户与 Mod 文件同样镜像到应用私有存储，仅在 sandboxd 运行期间存在；其中的脚本需通过解释器运行（如 `sh script.sh`），Android 不执行应用存储里的文件。
 
 ### Screen sharing / 屏幕共享
 
