@@ -10,7 +10,7 @@ import type { PromptTemplateService } from "./prompt-templates.js";
 import type { SkillService } from "./skills.js";
 import { dispatchLabelAssignmentsUpdated } from "./label-events.js";
 import { enqueueReferences } from "./reference-index-queue.js";
-import { dispatchTurnCreated, dispatchTurnUpdated } from "./realtime-events.js";
+import { dispatchTurnCreated, dispatchTurnUpdated, scheduleSessionSnapshot } from "./realtime-events.js";
 import { spaceWalletBilling } from "./space-wallet-billing.js";
 
 const AGENT_TURN_JOB_NAME = "agent_turns";
@@ -67,6 +67,10 @@ export function getSessionDomainServices(input: {
         sessionId,
         affectedLabelIds,
       });
+    },
+    onSessionUnarchived: async ({ spaceId, sessionId, labelId }) => {
+      void scheduleSessionSnapshot(sessionId);
+      await dispatchLabelAssignmentsUpdated({ spaceId, resourceType: "session", resourceRef: sessionId, sessionId, affectedLabelIds: [labelId] });
     },
     agentTurnQueue: {
       enqueue: (job) => agentTurnQueue.add(AGENT_TURN_JOB_NAME, {

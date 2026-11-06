@@ -6,6 +6,8 @@ import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions } fro
 import { NATIVE_SYNC_SOURCE, SETTLED_TURN_STATUSES, isNativeClientTurn, type NativeTurnStart, type NativeTurnBinding, type NativeTurnComplete, type NativeIngest, type NativeIngestResult, type NativeKnownResult } from "@cohub/protocol";
 import { addSessionParticipantMeta, deriveMessagePreviewText, deriveSessionFallbackTitle, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
+import { unarchiveSessionInTx } from "@cohub/core/labels";
+import { publishSessionArchiveChange } from "./session-archive.js";
 import { db } from "./db/index.js";
 import { createSessionForkInTransaction, findSegmentForTurn, publishSessionFork } from "./session-forks.js";
 import { addUsage, buildIntermediateObjectsForTurn } from "./session-turns.js";
@@ -106,6 +108,7 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
 
     let sessionId = input.sessionId;
     let sessionCreated = false;
+    let unarchivedLabelId: string | null = null;
     let fork: Awaited<ReturnType<typeof createSessionForkInTransaction>> | null = null;
     let sequence = 1;
     if (sessionId) {
@@ -131,7 +134,10 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
       }
       const [unfinished] = await tx.select({ id: sessionTurns.id }).from(sessionTurns).where(and(eq(sessionTurns.sessionId, sessionId), notInArray(sessionTurns.status, [...SETTLED_TURN_STATUSES]))).limit(1);
       const canAppend = !unfinished && (head?.id ?? null) === input.parentTurnId && (!head || terminal.has(head.status));
-      if (canAppend) sequence = (head?.sequence ?? 0) + 1;
+      if (canAppend) {
+        sequence = (head?.sequence ?? 0) + 1;
+        unarchivedLabelId = await unarchiveSessionInTx(tx, { spaceId, sessionId });
+      }
       else if (anchor) {
         const [collision] = await tx.select({ id: spaceSessions.id }).from(spaceSessions).where(eq(spaceSessions.id, input.branchSessionId));
         if (collision) conflict("Branch Session identity already exists");
@@ -171,8 +177,11 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
     const [session] = await tx.select().from(spaceSessions).where(eq(spaceSessions.id, sessionId)).limit(1);
     if (!session) throw new Error("Native Session disappeared before commit");
     const binding: NativeTurnBinding = { sessionId, turnId: input.turnId, forked: input.sessionId !== null && sessionId !== input.sessionId };
-    return { binding, session, created: true, sessionCreated, fork, projection: { userText, userMessageId, startedAt, title: deriveSessionFallbackTitle({ content: userContent }) } };
+    return { binding, session, created: true, sessionCreated, fork, unarchivedLabelId, projection: { userText, userMessageId, startedAt, title: deriveSessionFallbackTitle({ content: userContent }) } };
   });
+  if ("unarchivedLabelId" in committed && committed.unarchivedLabelId) {
+    await publishSessionArchiveChange({ spaceId, sessionId: committed.binding.sessionId, labelId: committed.unarchivedLabelId, archived: false });
+  }
   if (!committed.projection) return committed;
   const projection = committed.projection;
   const session = await bestEffortNativeSessionProjection({ sessionId: committed.binding.sessionId, userId, title: projection.title,

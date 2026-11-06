@@ -6,6 +6,8 @@ export const SESSION_ROW_NAVIGATE_DELAY_MS = 120;
 <script lang="ts">
 import type { SessionRecord } from "@neta-art/cohub";
 import {
+	Archive,
+	ArchiveRestore,
 	Check,
 	ChevronRight,
 	Link2Off,
@@ -70,6 +72,7 @@ const {
 	onDoubleClick,
 	onInsert,
 	onRename,
+	onArchive,
 	onRenameValueChange,
 	onSubmitRename,
 	onCancelRename,
@@ -102,6 +105,7 @@ const {
 	onDoubleClick?: (event: MouseEvent, session: SessionRecord) => void;
 	onInsert?: (path: string) => void;
 	onRename?: (session: SessionRecord) => void;
+	onArchive?: (session: SessionRecord) => void;
 	onRenameValueChange?: (value: string) => void;
 	onSubmitRename?: (session: SessionRecord) => void;
 	onCancelRename?: () => void;
@@ -238,11 +242,16 @@ function railX(level: number) {
 		: `calc(var(--tree-origin) + ${level - 1} * var(--tree-step))`;
 }
 
+const archived = $derived(Boolean(session.archivedAt));
+const canToggleArchive = $derived(
+	Boolean(onArchive) && (archived || !session.activeTurn),
+);
 const actionCount = $derived(
 	isMobile
 		? 0
 		: (showInsert && onInsert ? 1 : 0) +
 				(showRename && onRename ? 1 : 0) +
+				(canToggleArchive ? 1 : 0) +
 				(onRemoveLabel ? 1 : 0),
 );
 const HOVER_ROOM = [
@@ -250,6 +259,7 @@ const HOVER_ROOM = [
 	"hover:pr-8 focus-within:pr-8",
 	"hover:pr-12 focus-within:pr-12",
 	"hover:pr-16 focus-within:pr-16",
+	"hover:pr-20 focus-within:pr-20",
 ] as const;
 const hoverRoomClass = $derived(HOVER_ROOM[actionCount] ?? "");
 
@@ -473,6 +483,13 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 					{/if}
 					{#if showRename && onRename}
 						<SidebarActionButton icon={Pencil} title={m.common_rename({}, { locale })} onClick={() => onRename(session)} />
+					{/if}
+					{#if canToggleArchive && onArchive}
+						<SidebarActionButton
+							icon={archived ? ArchiveRestore : Archive}
+							title={archived ? m.session_unarchive({}, { locale }) : m.session_archive({}, { locale })}
+							onClick={() => onArchive(session)}
+						/>
 					{/if}
 					{#if onRemoveLabel}
 						<SidebarActionButton icon={Link2Off} title={removeLabelTitle ?? m.sidebar_remove_from_label_generic({}, { locale })} disabled={removeLabelDisabled} tone="danger" onClick={onRemoveLabel} />

@@ -108,6 +108,7 @@ import {
 } from "$lib/features/session-chat";
 import SessionChatPanel from "$lib/features/session-chat/SessionChatPanel.svelte";
 import { createSessionRenameController } from "$lib/features/session-chat/session-rename-controller.svelte";
+import { setSessionArchived } from "$lib/features/sessions/session-archive";
 import { pushHostShortcut } from "$lib/host-bridge";
 import { setHostTabDirty } from "$lib/host-tabs";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -464,6 +465,21 @@ const sessionRename = createSessionRenameController({
 });
 
 let resourceActionMenuOpen = $state(false);
+let sessionArchiveFailed = $state(false);
+const activeSessionRecord = $derived(
+	activeSessionId ? sessionStore.get(activeSessionId) : undefined,
+);
+
+async function toggleActiveSessionArchive() {
+	const session = activeSessionRecord;
+	if (!session) return;
+	sessionArchiveFailed = false;
+	try {
+		await setSessionArchived(session, !session.archivedAt);
+	} catch {
+		sessionArchiveFailed = true;
+	}
+}
 let labelPickerResource = $state<{
 	type: "session" | "checkpoint" | "file";
 	ref: string;
@@ -3318,6 +3334,9 @@ const headerContext = $derived({
 	spaceId,
 	space,
 	activeSession: activeSessionState?.session,
+	activeSessionArchived: Boolean(activeSessionRecord?.archivedAt),
+	activeSessionRunning: Boolean(activeSessionRecord?.activeTurn),
+	sessionArchiveFailed,
 	activeSessionLoaded: activeSessionState?.loaded ?? false,
 	activeSessionLoading: activeSessionState?.loading ?? false,
 	isNewSessionRoute,
@@ -3388,6 +3407,7 @@ const headerActions = {
 			);
 	},
 	insertHeaderReference,
+	toggleSessionArchive: toggleActiveSessionArchive,
 	toggleRightSidebar,
 	pickSpace: () => scope.pickSpace?.(),
 };

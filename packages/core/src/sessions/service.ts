@@ -7,6 +7,7 @@ import { readSessionTurnOrigin, type SessionTurnIntent, type SessionTurnRecord, 
 import { isModelThinkingLevel } from "@cohub/protocol";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions, spaces } from "@cohub/db";
 import { sanitizePostgresJsonValue } from "../content/sanitize.js";
+import { nextSessionVersion, unarchiveSessionInTx } from "../labels/session-archive.js";
 import { resolveSessionTurnOrigin } from "./turn-origin.js";
 import { requestAgentTurnAbort, type AgentTurnAbortRedis } from "./turn-abort.js";
 import { appendSentTurn, sentTurnRefFor } from "./sent-turns.js";
@@ -166,6 +167,7 @@ export function createSessionServices(input: {
   onSessionTurnUpdated?: (input: { spaceId: string; turn: SessionTurnRecord }) => void | Promise<void>;
   onSessionActivityUpdated?: (input: { sessionId: string; changed: string[] }) => void | Promise<void>;
   onSessionParticipantsUpdated?: (input: { spaceId: string; sessionId: string; userUuids: string[] }) => void | Promise<void>;
+  onSessionUnarchived?: (input: { spaceId: string; sessionId: string; labelId: string }) => void | Promise<void>;
   onUserMessageRecorded?: (input: { spaceId: string; sessionId: string; idempotencyKey: string; userId: string }) => void | Promise<void>;
 }) {
   const randomUUID = input.randomUUID ?? defaultRandomUUID;
@@ -253,10 +255,10 @@ export function createSessionServices(input: {
     const model = typeof meta.model === "string" && meta.model.trim() ? meta.model.trim() : null;
     const provider = typeof meta.provider === "string" && meta.provider.trim() ? meta.provider.trim() : null;
     const note = turnInput.noteClientMessageId;
-    const touchedAt = new Date();
-    const { row, spaceId, created } = await input.db.transaction(async (tx) => {
+    const { row, spaceId, created, unarchivedLabelId } = await input.db.transaction(async (tx) => {
       const [sessionRow] = await tx.select({ meta: spaceSessions.meta, spaceId: spaceSessions.spaceId }).from(spaceSessions).where(eq(spaceSessions.id, turnInput.sessionId)).for("update").limit(1);
       if (!sessionRow) throw new Error("session not found");
+      const touchedAt = new Date();
       if (note) {
         const [existing] = await tx.select().from(sessionTurns).where(and(
           eq(sessionTurns.sessionId, turnInput.sessionId),
@@ -264,13 +266,14 @@ export function createSessionServices(input: {
           eq(sessionTurns.executionKind, "note"),
           sql`${sessionTurns.meta}->>'clientMessageId' = ${note}`,
         )).limit(1);
-        if (existing) return { row: existing, spaceId: sessionRow.spaceId, created: false };
+        if (existing) return { row: existing, spaceId: sessionRow.spaceId, created: false, unarchivedLabelId: null };
       }
       const sequence = await nextTurnSequence(tx, turnInput.sessionId);
+      const unarchivedLabelId = await unarchiveSessionInTx(tx, { spaceId: sessionRow.spaceId, sessionId: turnInput.sessionId });
       await tx.update(spaceSessions).set({
         latestMessageText: userText,
         lastMessageAt: touchedAt,
-        updatedAt: touchedAt,
+        updatedAt: nextSessionVersion(touchedAt),
         meta: sanitizePostgresJsonValue(addSessionParticipantMeta(sessionRow.meta, turnInput.userUuid)),
       }).where(eq(spaceSessions.id, turnInput.sessionId));
       const [row] = await tx.insert(sessionTurns).values({
@@ -288,7 +291,7 @@ export function createSessionServices(input: {
           ? { executionKind: "note" as const, status: "completed" as const, completedAt: touchedAt, durationMs: 0 }
           : { status: "queued" as const }),
       }).returning();
-      return { row, spaceId: sessionRow.spaceId, created: true };
+      return { row, spaceId: sessionRow.spaceId, created: true, unarchivedLabelId };
     });
     if (!row) throw new Error("failed to create session turn");
     // Also on reuse: a crash between the two writes must not leave a note without its message.
@@ -314,8 +317,12 @@ export function createSessionServices(input: {
       .catch((error) => logger.warn("[Session] failed to publish created turn", error));
     await Promise.resolve(input.onSessionActivityUpdated?.({
       sessionId: turnInput.sessionId,
-      changed: ["latestMessageText", "lastMessageAt", "updatedAt"],
+      changed: ["latestMessageText", "lastMessageAt", "updatedAt", ...(unarchivedLabelId ? ["archivedAt"] : [])],
     })).catch((error) => logger.warn("[Session] failed to publish session activity update", error));
+    if (unarchivedLabelId) {
+      await Promise.resolve(input.onSessionUnarchived?.({ spaceId, sessionId: turnInput.sessionId, labelId: unarchivedLabelId }))
+        .catch((error) => logger.warn("[Session] failed to publish session unarchive", error));
+    }
     await Promise.resolve(input.onSessionParticipantsUpdated?.({
       spaceId,
       sessionId: turnInput.sessionId,

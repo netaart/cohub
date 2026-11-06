@@ -1,7 +1,8 @@
-import type {
-	LabelAssignmentListItem,
-	LabelListItem,
-	SessionRecord,
+import {
+	type LabelAssignmentListItem,
+	type LabelListItem,
+	SESSION_ARCHIVED_LABEL_SYSTEM_KEY,
+	type SessionRecord,
 } from "@neta-art/cohub";
 import { buildSpaceSessionRoute } from "$lib/space-routes";
 
@@ -96,6 +97,24 @@ export function getSystemChannelLabels(labels: LabelListItem[]) {
 	return channelRootLabel ? [channelRootLabel] : [];
 }
 
+export function isArchivedLabel(label: LabelListItem) {
+	return label.systemKey === SESSION_ARCHIVED_LABEL_SYSTEM_KEY;
+}
+
+export function getArchivedLabels(labels: LabelListItem[]) {
+	return labels.filter(
+		(label) => label.parentId === null && isArchivedLabel(label),
+	);
+}
+
+export function showsSessionInLabel(
+	label: LabelListItem,
+	session: Pick<SessionRecord, "archivedAt">,
+) {
+	if (label.source !== "system") return true;
+	return Boolean(session.archivedAt) === isArchivedLabel(label);
+}
+
 export function getDisplayLabels(labels: LabelListItem[]) {
 	return labels.filter((label) => !isSystemLabel(label, labels));
 }
@@ -110,6 +129,7 @@ function hasSessionSystemKey(label: LabelListItem) {
 				SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX,
 				SESSION_USER_LABEL_SYSTEM_KEY_PREFIX,
 				SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX,
+				SESSION_ARCHIVED_LABEL_SYSTEM_KEY,
 			].some((prefix) => systemKey.startsWith(prefix)),
 	);
 }

@@ -51,6 +51,7 @@ import type {
   StoredToolCall,
   TurnIntermediateMessagesFile,
   SessionFilesResponse,
+  SessionArchiveFilter,
   SessionRecord,
   SpaceAccessPolicy,
   SpaceCheckpointDetailResponse,
@@ -1063,6 +1064,15 @@ export class SessionClient {
     );
   }
 
+  /** Archives the Session for every member; its runtime files are evicted after a grace period. */
+  archive(customFetch?: Fetch) {
+    return this.transport.request<{ session: SessionRecord }>(`/api/sessions/${this.id}/archive`, { method: "PUT", fetch: customFetch });
+  }
+
+  unarchive(customFetch?: Fetch) {
+    return this.transport.request<{ session: SessionRecord }>(`/api/sessions/${this.id}/archive`, { method: "DELETE", fetch: customFetch });
+  }
+
   steerTurn(turnId: string, customFetch?: Fetch) {
     return this.transport.request<{ ok: true; turn: SessionTurnRecord; affectedTurns: SessionTurnRecord[] }>(
       `/api/spaces/${this.spaceId}/sessions/${this.id}/turns/${turnId}/steer`,
@@ -1176,6 +1186,7 @@ export class SpaceSessionsApi {
       limit?: number;
       cursor?: string | null;
       includeForks?: boolean;
+      archived?: SessionArchiveFilter;
       /** Only these Sessions, at most 100, instead of a page. */
       ids?: string[];
     } | Fetch,
@@ -1188,6 +1199,7 @@ export class SpaceSessionsApi {
     if (options?.limit !== undefined) params.set("limit", String(options.limit));
     if (options?.cursor) params.set("cursor", options.cursor);
     if (options?.includeForks) params.set("includeForks", "1");
+    if (options?.archived && options.archived !== "exclude") params.set("archived", options.archived);
     const query = params.toString();
     return this.transport.request<SpaceSessionsResponse>(
       `/api/spaces/${this.spaceId}/sessions${query ? `?${query}` : ""}`,

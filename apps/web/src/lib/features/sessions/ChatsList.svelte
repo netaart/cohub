@@ -18,6 +18,7 @@ import {
 	chatsInbox,
 } from "$lib/features/sessions/chats-inbox.svelte";
 import { chatsWorkspaceScope } from "$lib/features/sessions/chats-workspace-scope";
+import { setSessionArchived } from "$lib/features/sessions/session-archive";
 import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
@@ -64,7 +65,9 @@ const scoped = $derived(Boolean(filter.space));
 const density = $derived<FixedListRowDensity>(
 	isPage ? "comfortable" : "compact",
 );
-const isDefaultFilter = $derived(filter.source === "web" && !filter.space);
+const isDefaultFilter = $derived(
+	filter.source === "web" && !filter.space && !filter.archived,
+);
 const sessions = $derived(view.sessions);
 const forks = $derived(view.forks);
 const rows = $derived(buildSessionForkTree(sessions, forks));
@@ -76,6 +79,7 @@ let renamingId = $state<string | null>(null);
 let renameValue = $state("");
 let renameSaving = $state(false);
 let renameError = $state("");
+let archiveFailed = $state(false);
 let navigateTimer: ReturnType<typeof setTimeout> | null = null;
 
 function cancelPendingNavigation() {
@@ -294,6 +298,16 @@ async function submitRename(session: SessionRecord, title: string) {
 	}
 }
 
+async function toggleArchive(session: SessionRecord) {
+	cancelPendingNavigation();
+	archiveFailed = false;
+	try {
+		await setSessionArchived(session, !session.archivedAt);
+	} catch {
+		archiveFailed = true;
+	}
+}
+
 function onScroll(event: Event) {
 	const element = event.currentTarget as HTMLElement;
 	scrollTop = element.scrollTop;
@@ -313,6 +327,9 @@ function onScroll(event: Event) {
 	onscroll={onScroll}
 	use:scrollMemory={{ key: `chats:${variant}:${chatsFilterScope(filter)}`, ready: rows.length > 0, onRestore: (offset) => { scrollTop = offset; } }}
 >
+	{#if archiveFailed}
+		<p role="alert" class="px-2 pb-1.5 text-[12px] text-error-soft">{m.session_archive_failed({}, { locale })}</p>
+	{/if}
 	{#if view.loading && sessions.length === 0}
 		<ListRowSkeleton {density} label={m.common_loading({}, { locale })} />
 	{:else if view.error && sessions.length === 0}
@@ -325,20 +342,22 @@ function onScroll(event: Event) {
 	{:else if sessions.length === 0}
 		<div class="flex flex-col items-center px-6 py-12 text-center">
 			<p class="text-[13px] font-medium text-text-secondary">
-				{isDefaultFilter ? m.sessions_no_chats({}, { locale }) : m.chats_empty_filtered({}, { locale })}
+				{filter.archived ? m.chats_empty_archived({}, { locale }) : isDefaultFilter ? m.sessions_no_chats({}, { locale }) : m.chats_empty_filtered({}, { locale })}
 			</p>
 			<p class="mt-1 max-w-[260px] text-[12px] text-text-tertiary">
-				{isDefaultFilter ? m.sessions_no_chats_hint({}, { locale }) : m.chats_empty_filtered_hint({}, { locale })}
+				{filter.archived ? m.chats_empty_archived_hint({}, { locale }) : isDefaultFilter ? m.sessions_no_chats_hint({}, { locale }) : m.chats_empty_filtered_hint({}, { locale })}
 			</p>
 			<div class="mt-4 flex items-center gap-2">
-				<button
-					type="button"
-					class="primary-key h-8 gap-1.5 bg-brand-muted px-3 text-[12px] text-brand-muted-fg hover:bg-brand-muted-hover"
-					onclick={() => void chatsInbox.newChat()}
-				>
-					<Plus class="h-3.5 w-3.5" />{m.sidebar_new_chat({}, { locale })}
-				</button>
-				{#if filter.source || filter.space}
+				{#if !filter.archived}
+					<button
+						type="button"
+						class="primary-key h-8 gap-1.5 bg-brand-muted px-3 text-[12px] text-brand-muted-fg hover:bg-brand-muted-hover"
+						onclick={() => void chatsInbox.newChat()}
+					>
+						<Plus class="h-3.5 w-3.5" />{m.sidebar_new_chat({}, { locale })}
+					</button>
+				{/if}
+				{#if filter.source || filter.space || filter.archived}
 					<button
 						type="button"
 						class="inline-flex h-8 items-center rounded-[6px] px-3 text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary"
@@ -382,6 +401,7 @@ function onScroll(event: Event) {
 							startRename(target, title);
 						}}
 						onRename={(target) => startRename(target, title)}
+						onArchive={canRename ? (target) => void toggleArchive(target) : undefined}
 						onRenameValueChange={(value) => renameValue = value}
 						onSubmitRename={(target) => void submitRename(target, title)}
 						onCancelRename={cancelRename}

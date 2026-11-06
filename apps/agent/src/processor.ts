@@ -23,7 +23,7 @@ import { resolveSpaceFileVisibility } from "./runtime/cross-space-query-access.j
 import { normalizeGenerationPolicy } from "@cohub/protocol/generation";
 import { runWithToolExecutionContext } from "./tool-context.js";
 import { createImageInputCache } from "@cohub/model-runtime/image-content";
-import { loadOrCreateSessionHandle, ensurePendingUserMessage, hasSessionUserMessage, removePendingUserMessage, resetStreamState, drainStreamStateBeforeReset, persistInterruptedAssistantSnapshot, refreshSessionHandleFileSignature, type SessionHandle } from "./session.js";
+import { loadOrCreateSessionHandle, ensurePendingUserMessage, hasSessionUserMessage, removePendingUserMessage, resetStreamState, drainStreamStateBeforeReset, persistInterruptedAssistantSnapshot, refreshSessionHandleFileSignature, getSessionKey, type SessionHandle } from "./session.js";
 import { claimNextTurnBatch, buildUserMessagesForBatch, enqueueNextRunnableTurn, resolveBatchAccessMode, type ClaimedTurnBatch } from "./batch.js";
 import { acquireSessionLock } from "./session-lock.js";
 import { defaultJobRetention } from "@cohub/infra/bullmq";
@@ -1290,16 +1290,26 @@ export function getActiveSessionHandles() {
   return sessionHandles;
 }
 
-export async function disposeAllSessionHandles() {
-  for (const handle of sessionHandles.values()) {
-    try {
-      await handle.sessionManager.close().catch(() => undefined);
-      await handle.persistenceChain.catch(() => undefined);
-      clearCurrentSessionExecutionAuth(handle.sessionId);
-      handle.session.dispose();
-    } catch (error) {
-      logger.error(`[Agent] failed to dispose session ${handle.sessionId}:`, error);
-    }
+async function disposeHandle(handle: SessionHandle) {
+  try {
+    await handle.sessionManager.close().catch(() => undefined);
+    await handle.persistenceChain.catch(() => undefined);
+    clearCurrentSessionExecutionAuth(handle.sessionId);
+    handle.session.dispose();
+  } catch (error) {
+    logger.error(`[Agent] failed to dispose session ${handle.sessionId}:`, error);
   }
+}
+
+export async function disposeSessionHandle(spaceId: string, sessionId: string) {
+  const key = getSessionKey(spaceId, sessionId);
+  const handle = sessionHandles.get(key);
+  if (!handle) return;
+  sessionHandles.delete(key);
+  await disposeHandle(handle);
+}
+
+export async function disposeAllSessionHandles() {
+  for (const handle of sessionHandles.values()) await disposeHandle(handle);
   sessionHandles.clear();
 }

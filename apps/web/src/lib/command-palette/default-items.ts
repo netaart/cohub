@@ -394,7 +394,7 @@ export async function getCommandPaletteDefaultItems(
 		const sessionsById = new Map<string, SessionRecord>();
 		for (const record of sessionListRecords) {
 			for (const session of record.sessions)
-				sessionsById.set(session.id, session);
+				if (!session.archivedAt) sessionsById.set(session.id, session);
 		}
 		[...sessionsById.values()]
 			.sort(

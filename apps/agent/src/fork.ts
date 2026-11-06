@@ -1,4 +1,4 @@
-import { rename, rm } from "node:fs/promises";
+import { rename, rm, stat } from "node:fs/promises";
 import { recordJobFailure } from "@cohub/infra/bullmq";
 import { extractTrace, runInActiveSpan } from "@cohub/infra/tracing/propagator";
 import { getAgentTracer } from "@cohub/infra/tracing/agent";
@@ -54,6 +54,10 @@ async function provisionForkFile(data: AgentSessionForkJobData) {
   let parentManager: SessionManager | null = null;
   let sessionManager: SessionManager | null = null;
   let result: { sessionId: string; branchFile: string } | null = null;
+
+  if (data.anchorEntryId && !(await stat(parentSessionFile).then(() => true, () => false))) {
+    return { sessionId: data.sessionId, branchFile: childSessionFile };
+  }
 
   try {
     await rm(workingSessionFile, { force: true });

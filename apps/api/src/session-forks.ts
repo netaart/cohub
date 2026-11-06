@@ -1,8 +1,8 @@
 import { createLogger } from "@cohub/infra/logging";
-import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
-import { sanitizeSessionRecordStats, type SessionForkRecord, type SessionTurnSegmentRecord } from "@cohub/protocol/model";
+import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { SESSION_ARCHIVED_LABEL_SYSTEM_KEY, sanitizeSessionRecordStats, type SessionForkRecord, type SessionTurnSegmentRecord } from "@cohub/protocol/model";
 import { db } from "./db/index.js";
-import { labelAssignments, sessionForks, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
+import { labelAssignments, labels, sessionForks, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { sessionForkReference } from "@cohub/core/references";
 import { enqueueReferences } from "./reference-index-queue.js";
@@ -284,7 +284,14 @@ export async function createSessionForkInTransaction(tx: Transaction, input: Ses
       meta: labelAssignments.meta,
     })
     .from(labelAssignments)
-    .where(and(eq(labelAssignments.scopeType, "space"), eq(labelAssignments.scopeId, input.spaceId), eq(labelAssignments.resourceType, "session"), eq(labelAssignments.resourceRef, parent.id)));
+    .innerJoin(labels, eq(labels.id, labelAssignments.labelId))
+    .where(and(
+      eq(labelAssignments.scopeType, "space"),
+      eq(labelAssignments.scopeId, input.spaceId),
+      eq(labelAssignments.resourceType, "session"),
+      eq(labelAssignments.resourceRef, parent.id),
+      sql`${labels.systemKey} is distinct from ${SESSION_ARCHIVED_LABEL_SYSTEM_KEY}`,
+    ));
   if (parentLabelAssignments.length > 0) {
     await tx
       .insert(labelAssignments)

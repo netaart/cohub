@@ -159,6 +159,9 @@ const context: SpaceWorkspaceHeaderContext = {
 	spaceId,
 	space: null,
 	activeSession: undefined,
+	activeSessionArchived: false,
+	activeSessionRunning: false,
+	sessionArchiveFailed: false,
 	activeSessionLoaded: true,
 	activeSessionLoading: false,
 	isNewSessionRoute: false,
@@ -183,7 +186,7 @@ const noop = () => {};
 
 <svelte:head><title>Runtime UI verification</title></svelte:head>
 <div class="flex h-dvh flex-col bg-bg-primary text-text-primary">
-	<SpaceWorkspaceHeader {context} sessionRename={{ renaming: false, value: "", saving: false, failed: false }} resourceActions={{ open: false, available: true }} actions={{ openShareModal: noop, startSessionRename: noop, cancelSessionRename: noop, submitSessionRename: noop, setSessionRenameValue: noop, toggleResourceActionMenu: noop, closeResourceActionMenu: noop, labelHeaderResource: noop, insertHeaderReference: noop, toggleRightSidebar: noop, openDisplay: noop }} />
+	<SpaceWorkspaceHeader {context} sessionRename={{ renaming: false, value: "", saving: false, failed: false }} resourceActions={{ open: false, available: true }} actions={{ openShareModal: noop, startSessionRename: noop, cancelSessionRename: noop, submitSessionRename: noop, setSessionRenameValue: noop, toggleResourceActionMenu: noop, closeResourceActionMenu: noop, labelHeaderResource: noop, insertHeaderReference: noop, toggleSessionArchive: noop, toggleRightSidebar: noop, openDisplay: noop }} />
 	<main class="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-8">
 		<div class="flex flex-wrap gap-2 text-sm">
 			{#each ["ready", "limited", "offline", "unknown"] as value}<button class="rounded border border-border-subtle px-2 py-1" onclick={() => void choose(value as PreviewState)}>{value}</button>{/each}

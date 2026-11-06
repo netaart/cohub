@@ -11,6 +11,7 @@ import { expandSkillCommand, type ExpandedSkill, type LoadSkillsOptions } from "
 import { recoverSpaceSandbox } from "./space-sandboxes.js";
 import { announceRecordedUserMessage, assignSessionUserLabelsAndDispatch, getSpaceSessionById, getSpaceById } from "./space-sessions.js";
 import { touchSpaceActivity } from "./space-activity.js";
+import { publishSessionArchiveChange } from "./session-archive.js";
 import { dispatchSessionUpdated, dispatchTurnCreated } from "./realtime-events.js";
 import { dispatchTurnUpdated } from "./session-output.js";
 import { hydrateTurnAuthorProfiles } from "./session-turns.js";
@@ -112,6 +113,7 @@ export function getSessionDomainServices(input?: {
       await dispatchSessionUpdated({ session, changed });
     },
     onSessionParticipantsUpdated: assignSessionUserLabelsAndDispatch,
+    onSessionUnarchived: (unarchived) => publishSessionArchiveChange({ ...unarchived, archived: false }),
     onUserMessageRecorded: announceRecordedUserMessage,
     agentTurnQueue: {
       enqueue: (job) => agentTurnQueue.add(AGENT_TURN_JOB_NAME, {

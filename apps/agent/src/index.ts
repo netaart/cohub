@@ -11,9 +11,10 @@ import {
 import { env } from "./env.js";
 import { AGENT_SANDBOX_BASH_JOB_NAME, AGENT_SANDBOX_BASH_ATOMIC_JOB_NAME, AGENT_RUN_COMMAND_JOB_NAME, AGENT_SESSION_FORK_JOB_NAME, AGENT_TURN_JOB_NAME, AGENT_TURN_QUEUE_NAME, AGENT_SANDBOX_FS_MUTATION_JOB_NAME, AGENT_SANDBOX_FS_INSTALL_JOB_NAME, type AgentJobData, type AgentTurnJobData, type AgentSessionForkJobData, type AgentSandboxBashUploadJobData, type AgentRunCommandJobData, type AgentSandboxFsMutationJobData, type AgentSandboxFsInstallJobData } from "./queue.js";
 import { processAgentTurnJob, disposeAllSessionHandles } from "./processor.js";
-import { AGENT_RUNTIME_RECOVERY_JOB_NAME, type AgentRuntimeRecoveryJobData } from "@cohub/infra/agent-queue";
+import { AGENT_RUNTIME_RECOVERY_JOB_NAME, AGENT_SESSION_ARCHIVE_JOB_NAME, type AgentRuntimeRecoveryJobData, type AgentSessionArchiveJobData } from "@cohub/infra/agent-queue";
 import { recoverRuntime } from "./runtime/recovery.js";
 import { processSessionForkJob } from "./fork.js";
+import { evictArchivedSessionRuntime } from "./session-archive.js";
 import { processSandboxBashJob } from "./sandbox-bash.js";
 import { processSandboxFsInstallJob } from "./sandbox-fs-install.js";
 import { processSandboxFsMutationJob, redactSandboxFsMutationJobPayload } from "./sandbox-fs-mutation.js";
@@ -36,6 +37,7 @@ const connection = createBullmqRedisConnection(env.BULLMQ_REDIS_URL);
 
 const processor: Processor<AgentJobData> = async (job) => {
   if (job.name === AGENT_RUNTIME_RECOVERY_JOB_NAME) return recoverRuntime(job.data as AgentRuntimeRecoveryJobData);
+  if (job.name === AGENT_SESSION_ARCHIVE_JOB_NAME) return evictArchivedSessionRuntime(job.data as AgentSessionArchiveJobData);
   if (job.name === AGENT_SESSION_FORK_JOB_NAME) {
     return processSessionForkJob(job as Job<AgentSessionForkJobData>);
   }

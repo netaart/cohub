@@ -6,6 +6,8 @@ import type {
 	SpaceRecord,
 } from "@neta-art/cohub";
 import {
+	Archive,
+	ArchiveRestore,
 	Check,
 	ChevronDown,
 	Gauge,
@@ -55,6 +57,9 @@ export type SpaceWorkspaceHeaderContext = {
 	spaceId: string;
 	space: SpaceRecord | null;
 	activeSession: SessionRecord | undefined;
+	activeSessionArchived: boolean;
+	activeSessionRunning: boolean;
+	sessionArchiveFailed: boolean;
 	activeSessionLoaded: boolean;
 	activeSessionLoading: boolean;
 	isNewSessionRoute: boolean;
@@ -99,6 +104,7 @@ export type SpaceWorkspaceHeaderActions = {
 	closeResourceActionMenu: () => void;
 	labelHeaderResource: (anchorEl?: HTMLElement | null) => void | Promise<void>;
 	insertHeaderReference: () => void;
+	toggleSessionArchive: () => void | Promise<void>;
 	toggleRightSidebar: () => void | Promise<void>;
 	openDisplay: (displayId: string) => void;
 	pickSpace?: () => void;
@@ -279,6 +285,22 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 						<TextCursorInput class="h-3.5 w-3.5" />
 						<span>{m.space_header_insert_reference({}, { locale })}</span>
 					</button>
+					{#if context.routeView === "session" && context.activeSession}
+						{@const archived = context.activeSessionArchived}
+						<button
+							type="button"
+							class="menu-item"
+							role="menuitem"
+							disabled={!archived && context.activeSessionRunning}
+							onclick={() => {
+								actions.closeResourceActionMenu();
+								runAction(actions.toggleSessionArchive);
+							}}
+						>
+							{#if archived}<ArchiveRestore class="h-3.5 w-3.5" />{:else}<Archive class="h-3.5 w-3.5" />{/if}
+							<span class="truncate">{archived ? m.session_unarchive({}, { locale }) : context.activeSessionRunning ? m.session_archive_running({}, { locale }) : m.session_archive({}, { locale })}</span>
+						</button>
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -392,6 +414,10 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 	{#if sessionRename.renaming && sessionRename.failed}
 		<div class="border-b border-border-subtle px-3 py-1.5 text-[12px] text-error-soft" role="alert">
 			{m.session_rename_failed({}, { locale })}
+		</div>
+	{:else if context.sessionArchiveFailed}
+		<div class="border-b border-border-subtle px-3 py-1.5 text-[12px] text-error-soft" role="alert">
+			{m.session_archive_failed({}, { locale })}
 		</div>
 	{/if}
 

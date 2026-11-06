@@ -27,6 +27,20 @@ export function enqueueRuntimeRecovery(queue: Queue, data: AgentRuntimeRecoveryJ
   });
 }
 
+export const AGENT_SESSION_ARCHIVE_JOB_NAME = "session_archive" as const;
+export const SESSION_ARCHIVE_EVICT_DELAY_MS = 10 * 60_000;
+export type AgentSessionArchiveJobData = { spaceId: string; sessionId: string };
+const sessionArchiveJobId = (sessionId: string) => `session-archive-${sessionId}`;
+export function enqueueSessionArchiveEviction(queue: Queue, data: AgentSessionArchiveJobData) {
+  return queue.add(AGENT_SESSION_ARCHIVE_JOB_NAME, data, {
+    jobId: sessionArchiveJobId(data.sessionId), delay: SESSION_ARCHIVE_EVICT_DELAY_MS,
+    attempts: 3, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: true, removeOnFail: true,
+  });
+}
+export function cancelSessionArchiveEviction(queue: Queue, sessionId: string) {
+  return queue.remove(sessionArchiveJobId(sessionId));
+}
+
 export type AgentSandboxBashUploadJobData = {
   spaceId: string;
   sessionId: string;

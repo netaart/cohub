@@ -1,7 +1,8 @@
 import { Hono, type Context } from "hono";
 import { and, asc, count, desc, eq, inArray, isNull, lt, max, or, sql } from "drizzle-orm";
 import { checkpoints, labelAssignments, labels, spaceSessions } from "@cohub/db";
-import { listLabelsByRank, normalizeLabelName, parseLabelRef, parseLabelRefs, resolveLabelPaths, resolveOrCreateLabelPaths, slugifyLabelName } from "@cohub/core/labels";
+import { listLabelsByRank, normalizeLabelName, parseLabelRef, parseLabelRefs, resolveLabelPaths, resolveOrCreateLabelPaths, sessionArchiveFilterCondition, slugifyLabelName } from "@cohub/core/labels";
+import { SESSION_ARCHIVED_LABEL_SYSTEM_KEY, type SessionArchiveFilter } from "@cohub/protocol/model";
 import { db } from "../../db/index.js";
 import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/postgres-error.js";
 import { authzDenied, getOptionalAuth, requireValidId, useAuth } from "../../lib/middleware.js";
@@ -193,6 +194,11 @@ async function validateResource(spaceId: string, resourceType: string, resourceR
   return Boolean(row);
 }
 
+function systemLabelDenied(c: Context, label: typeof labels.$inferSelect | null | undefined) {
+  if (label?.systemKey !== SESSION_ARCHIVED_LABEL_SYSTEM_KEY) return authzDenied(c);
+  return c.json({ message: "the Archived label is managed by session archive; archive or unarchive the session instead" }, 403);
+}
+
 async function getUserLabelIds(c: Context, spaceId: string, labelIds: string[]) {
   const uniqueLabelIds = [...new Set(labelIds)].filter(Boolean);
   if (uniqueLabelIds.length === 0) return { labelIds: [] };
@@ -329,6 +335,7 @@ async function listVisibleSystemLabelItems(input: {
   labelId: string;
   limit: number;
   cursor: SystemItemsCursor;
+  archive: SessionArchiveFilter;
 }) {
   const isMember = input.user?.uuid
     ? (await getSpaceMemberRole(input.spaceId, input.user.uuid)) !== null
@@ -348,6 +355,7 @@ async function listVisibleSystemLabelItems(input: {
       .where(and(
         eq(spaceSessions.spaceId, input.spaceId),
         buildSessionActivityItemsCursorCondition(input.cursor),
+        sessionArchiveFilterCondition(input.archive),
       ))
       .orderBy(sql`${spaceSessions.lastMessageAt} desc nulls last`, desc(spaceSessions.id))
       .limit(input.limit + 1);
@@ -382,6 +390,7 @@ async function listVisibleSystemLabelItems(input: {
       .where(and(
         eq(spaceSessions.spaceId, input.spaceId),
         buildSessionActivityItemsCursorCondition(cursor),
+        sessionArchiveFilterCondition(input.archive),
       ))
       .orderBy(sql`${spaceSessions.lastMessageAt} desc nulls last`, desc(spaceSessions.id))
       .limit(batchLimit);
@@ -675,8 +684,9 @@ router.get("/items", async (c) => {
   const system = label.source === "system";
   if (cursor && cursor.type !== (system ? "sessionActivity" : "manual")) return c.json({ message: "invalid cursor" }, 400);
   const input = { spaceId: access.spaceId, user: access.user, labelId: label.id, limit };
+  const archive = label.systemKey === SESSION_ARCHIVED_LABEL_SYSTEM_KEY ? "include" : "exclude";
   const page = system
-    ? await listVisibleSystemLabelItems({ ...input, cursor: cursor?.type === "sessionActivity" ? cursor : null })
+    ? await listVisibleSystemLabelItems({ ...input, archive, cursor: cursor?.type === "sessionActivity" ? cursor : null })
     : await listVisibleManualLabelItems({ ...input, cursor: cursor?.type === "manual" ? cursor : null });
   return c.json({ ...page, sessions: await attachActiveTurns(page.sessions) });
 });
@@ -699,7 +709,7 @@ router.post("/attach", async (c) => {
   const labelId = labelIds[0];
   if (!labelId) return c.json({ message: "label not found" }, 404);
   const label = await getLabelInSpace(access.spaceId, labelId);
-  if (label?.source !== "user") return authzDenied(c);
+  if (label?.source !== "user") return systemLabelDenied(c, label);
   const [{ value: maxRank } = { value: 0 }] = await db.select({ value: max(labelAssignments.rank) }).from(labelAssignments).where(eq(labelAssignments.labelId, labelId));
   const [assignment] = await db.insert(labelAssignments).values({
     labelId,
@@ -748,7 +758,7 @@ router.post("/detach", async (c) => {
     return c.json({ message: error instanceof Error ? error.message : String(error) }, 400);
   }
   if (!label) return c.json({ message: "label not found" }, 404);
-  if (label.source !== "user") return authzDenied(c);
+  if (label.source !== "user") return systemLabelDenied(c, label);
   await db.delete(labelAssignments).where(and(eq(labelAssignments.labelId, label.id), eq(labelAssignments.scopeType, SCOPE_TYPE), eq(labelAssignments.scopeId, access.spaceId), eq(labelAssignments.resourceType, resourceType), eq(labelAssignments.resourceRef, resourceRef)));
   await dispatchLabelAssignmentsUpdated({
     spaceId: access.spaceId,

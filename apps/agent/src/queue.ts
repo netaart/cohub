@@ -5,6 +5,7 @@ import { injectTrace } from "@cohub/infra/tracing/propagator";
 import {
   createAgentTurnsQueue,
   type AgentRuntimeRecoveryJobData,
+  type AgentSessionArchiveJobData,
   AGENT_SANDBOX_BASH_JOB_NAME,
   AGENT_SANDBOX_BASH_ATOMIC_JOB_NAME,
   AGENT_RUN_COMMAND_JOB_NAME,
@@ -68,7 +69,7 @@ export type AgentSessionForkJobData = {
   trace?: Record<string, unknown>;
 };
 
-export type AgentJobData = AgentRuntimeRecoveryJobData | AgentTurnJobData | AgentSessionForkJobData | AgentSandboxBashUploadJobData | AgentRunCommandJobData | AgentSandboxFsMutationJobData | AgentSandboxFsInstallJobData;
+export type AgentJobData = AgentRuntimeRecoveryJobData | AgentSessionArchiveJobData | AgentTurnJobData | AgentSessionForkJobData | AgentSandboxBashUploadJobData | AgentRunCommandJobData | AgentSandboxFsMutationJobData | AgentSandboxFsInstallJobData;
 
 export const agentTurnQueue = createAgentTurnsQueue<AgentJobData, unknown>(env.BULLMQ_REDIS_URL, "cohub-agent");
 export const buildSandboxBashJobId = buildAgentSandboxBashJobId;

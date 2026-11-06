@@ -15,6 +15,7 @@ import type {
 import { taskRunToBoardTaskSnapshot as taskBoardSnapshot } from "@neta-art/cohub/board";
 import {
 	Activity,
+	Archive,
 	ArrowLeft,
 	BarChart3,
 	BookOpen,
@@ -97,6 +98,7 @@ import {
 } from "$lib/features/app/app-realtime";
 import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
 import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
+import { setSessionArchived } from "$lib/features/sessions/session-archive";
 import { clearAccountSnapshots } from "$lib/features/settings/account-snapshots";
 import { resourceFromUrl } from "$lib/features/space/modules/resource-app-route";
 import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
@@ -188,13 +190,16 @@ import {
 	findSessionUserLabel,
 	findSessionUserRootLabel,
 	findWebAppSourceLabel,
+	getArchivedLabels,
 	getDisplayLabels,
 	getSourceLabels,
 	getSystemChannelLabels,
 	getSystemUserLabels,
+	isArchivedLabel,
 	isSystemLabel,
 	isWebSessionSource,
 	SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX,
+	showsSessionInLabel,
 } from "$lib/stores/sidebar-source-labels";
 import {
 	fetchLabelItemsFirstPageFresh,
@@ -347,6 +352,8 @@ let labelDropBusyId = $state<string | null>(null);
 let labelDropSuccessId = $state<string | null>(null);
 let labelDropErrorId = $state<string | null>(null);
 let labelDropErrorMessage = $state<string | null>(null);
+let sessionArchiveError = $state<string | null>(null);
+let sessionArchiveErrorTimer: ReturnType<typeof setTimeout> | null = null;
 type LabelDragOrigin = {
 	labelId: string;
 	labelRef: string;
@@ -442,7 +449,10 @@ const activeLabelResource = $derived(workspaceRoute.labelResource);
 
 const sessions = $derived(
 	sortSessionsByRecentActivity(
-		sessionIds.flatMap((id) => sessionStore.get(id) ?? []),
+		sessionIds.flatMap((id) => {
+			const session = sessionStore.get(id);
+			return session && !session.archivedAt ? [session] : [];
+		}),
 	),
 );
 const activeSession = $derived(
@@ -481,15 +491,27 @@ const canManageLabels = $derived(
 const checkpointsById = $derived.by(
 	() => new Map(checkpoints.map((checkpoint) => [checkpoint.id, checkpoint])),
 );
-const currentLabelItemsById = $derived.by(() =>
-	currentSpaceId
-		? hydrateLabelItemsById(
-				currentSpaceId,
-				labelItemsBySpace[currentSpaceId] ?? {},
-				(id) => sessionStore.get(id),
-			)
-		: {},
+const labelsById = $derived(
+	new Map(flattenLabels(labels).map((label) => [label.id, label])),
 );
+const currentLabelItemsById = $derived.by(() => {
+	if (!currentSpaceId) return {};
+	const hydrated = hydrateLabelItemsById(
+		currentSpaceId,
+		labelItemsBySpace[currentSpaceId] ?? {},
+		(id) => sessionStore.get(id),
+	);
+	for (const [labelId, items] of Object.entries(hydrated)) {
+		const label = labelsById.get(labelId);
+		if (label?.source !== "system") continue;
+		hydrated[labelId] = items.filter((item) => {
+			const session =
+				item.resourceType === "session" && sessionStore.get(item.resourceRef);
+			return !session || showsSessionInLabel(label, session);
+		});
+	}
+	return hydrated;
+});
 const currentLabelItemsPageInfoById = $derived(
 	currentSpaceId ? (labelItemsPageInfoBySpace[currentSpaceId] ?? {}) : {},
 );
@@ -507,6 +529,7 @@ const sourceLabels = $derived(getSourceLabels(labels));
 const systemChannelLabels = $derived(getSystemChannelLabels(labels));
 const systemUserLabels = $derived(getSystemUserLabels(labels));
 const displayLabels = $derived(getDisplayLabels(labels));
+const archivedLabels = $derived(getArchivedLabels(labels));
 const userDisplayName = $derived(
 	authStore.profile?.displayName?.trim() || m.common_user({}, { locale }),
 );
@@ -1057,6 +1080,7 @@ async function loadCheckpointsForSpace(spaceId: string, force = false) {
 }
 
 function getReactiveLabelDisplayName(label: LabelListItem) {
+	locale;
 	userLabelProfileVersion;
 	channelLabelDisplayVersion;
 	return getLabelDisplayName(label, {
@@ -1066,6 +1090,7 @@ function getReactiveLabelDisplayName(label: LabelListItem) {
 }
 
 function getReactiveLabelDisplayTitle(label: LabelListItem) {
+	locale;
 	userLabelProfileVersion;
 	channelLabelDisplayVersion;
 	return getLabelDisplayTitle(label);
@@ -1474,6 +1499,7 @@ function toggleLabelExpanded(labelId: string) {
 
 function isSessionActivityLabel(label: LabelListItem) {
 	return (
+		isArchivedLabel(label) ||
 		isSessionUserLabel(label) ||
 		isSessionChannelLabel(label) ||
 		label.systemKey?.startsWith(SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX)
@@ -1511,7 +1537,12 @@ function refreshExpandedSessionActivityLabels(
 	const expanded = expandedLabelIdsBySpace[spaceId];
 	if (!expanded || !isCurrentSpace(spaceId)) return;
 	for (const label of flattenLabels(labels)) {
-		if (!expanded.has(label.id) || !isSessionActivityLabel(label)) continue;
+		if (
+			!expanded.has(label.id) ||
+			!isSessionActivityLabel(label) ||
+			isArchivedLabel(label)
+		)
+			continue;
 		const listed = new Set(
 			(labelItemsBySpace[spaceId]?.[label.id] ?? [])
 				.filter((item) => item.resourceType === "session")
@@ -1781,9 +1812,65 @@ function canAssignResourceToLabel(label: LabelListItem) {
 	return canAssignLabels && !isSystemLabel(label, labels);
 }
 
+function showSessionArchiveError(message: string) {
+	if (sessionArchiveErrorTimer) clearTimeout(sessionArchiveErrorTimer);
+	sessionArchiveError = message;
+	sessionArchiveErrorTimer = setTimeout(() => {
+		sessionArchiveError = null;
+		sessionArchiveErrorTimer = null;
+	}, 2400);
+}
+
+async function setSessionArchivedFromSidebar(
+	session: SessionRecord,
+	archived: boolean,
+) {
+	try {
+		await setSessionArchived(session, archived);
+		return true;
+	} catch (error) {
+		console.warn("[sidebar] Failed to update session archive", {
+			sessionId: session.id,
+			error,
+		});
+		showSessionArchiveError(
+			(error as { status?: number }).status === 409
+				? m.session_archive_running({}, { locale })
+				: m.session_archive_failed({}, { locale }),
+		);
+		return false;
+	}
+}
+
+function toggleSessionArchive(session: SessionRecord) {
+	void setSessionArchivedFromSidebar(session, !session.archivedAt);
+}
+
+async function archiveDroppedSession(event: DragEvent, label: LabelListItem) {
+	const drop = getDropResource(event);
+	const session =
+		drop?.resource.type === "session"
+			? sessionStore.get(drop.resource.ref)
+			: null;
+	if (!session) return;
+	event.preventDefault();
+	event.stopPropagation();
+	clearLabelAutoExpandTimer();
+	labelDropTargetId = null;
+	if (session.archivedAt) return;
+	if (session.activeTurn) {
+		showSessionArchiveError(m.session_archive_running({}, { locale }));
+		return;
+	}
+	labelDropBusyId = label.id;
+	const archived = await setSessionArchivedFromSidebar(session, true);
+	labelDropBusyId = null;
+	if (archived) setLabelDropFeedback("success", label.id);
+}
+
 function handleLabelDragOver(event: DragEvent, label: LabelListItem) {
 	if (
-		!canAssignResourceToLabel(label) ||
+		!(isArchivedLabel(label) || canAssignResourceToLabel(label)) ||
 		!hasCohubResourceDragData(event.dataTransfer)
 	)
 		return;
@@ -1828,6 +1915,7 @@ function handleLabelDragLeave(event: DragEvent, label: LabelListItem) {
 }
 
 async function handleLabelDrop(event: DragEvent, label: LabelListItem) {
+	if (isArchivedLabel(label)) return archiveDroppedSession(event, label);
 	if (!canAssignResourceToLabel(label) || !currentSpaceId) return;
 	const spaceId = currentSpaceId;
 	const drop = getDropResource(event);
@@ -3123,6 +3211,7 @@ $effect(() => {
 							onDoubleClick={handleSessionRowDoubleClick}
 							onInsert={insertPathReference}
 							onRename={startRenameSession}
+							onArchive={toggleSessionArchive}
 							onRenameValueChange={(value) => { renameTitleValue = value; }}
 							onSubmitRename={(target) => void submitRenameSession(target)}
 							onCancelRename={cancelRenameSession}
@@ -3225,6 +3314,8 @@ $effect(() => {
 					<UserAvatar name={getReactiveLabelDisplayName(label)} avatarUrl={labelProfile?.avatarUrl} seed={getSessionUserUuidFromLabel(label)} size="xxs" class="border-0" />
 				{:else if labelChannel || isSessionChannelLabel(label)}
 					<ChannelProviderIcon provider={labelChannel?.provider} size="xxs" />
+				{:else if isArchivedLabel(label)}
+					<Archive class="h-3 w-3 shrink-0" />
 				{/if}
 				<span class="min-w-0 flex-1 truncate" title={getReactiveLabelDisplayTitle(label)}>{getReactiveLabelDisplayName(label)}</span>
 				{#if canManageUserLabel(label)}
@@ -3398,6 +3489,10 @@ $effect(() => {
 					{@render labelTreeRows(systemChannelLabels)}
 					{@render labelTreeRows(systemUserLabels)}
 					{@render allChatsLabelRow()}
+					{@render labelTreeRows(archivedLabels)}
+				{/if}
+				{#if sessionArchiveError}
+					<div class="label-drop-message" role="status">{sessionArchiveError}</div>
 				{/if}
 			</div>
 		{/if}
@@ -3457,6 +3552,7 @@ $effect(() => {
 					onDoubleClick={handleSessionRowDoubleClick}
 					onInsert={insertPathReference}
 					onRename={startRenameSession}
+					onArchive={toggleSessionArchive}
 					onRenameValueChange={(value) => { renameTitleValue = value; }}
 					onSubmitRename={(target) => void submitRenameSession(target)}
 					onCancelRename={cancelRenameSession}

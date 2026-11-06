@@ -152,7 +152,9 @@ class ChatsInbox {
 			const page = await this.#fetchPage(filter, cursor);
 			sessionStore.mergeAll(page.sessions.map(sessionOf));
 			return {
-				items: page.sessions,
+				items: page.sessions.filter(
+					(row) => Boolean(row.archivedAt) === filter.archived,
+				),
 				hasMore: page.pageInfo.hasMore,
 				cursor: page.pageInfo.nextCursor,
 				extra: page.forks,
@@ -163,7 +165,9 @@ class ChatsInbox {
 			if (cached) sessionStore.seedAll(cached.sessions.map(sessionOf));
 			return cached
 				? {
-						items: cached.sessions,
+						items: cached.sessions.filter(
+							(row) => Boolean(liveRow(row).archivedAt) === filter.archived,
+						),
 						hasMore: cached.pageInfo.hasMore,
 						cursor: null,
 						extra: cached.forks,
@@ -255,15 +259,23 @@ class ChatsInbox {
 	}
 
 	setSource(source: UserSessionSourceKey | null) {
-		this.#applyFilter({ ...this.filter, source });
+		this.#applyFilter({ ...this.filter, source, archived: false });
 	}
 
 	setSpace(space: UserSessionSpaceSummary | null) {
 		this.#applyFilter({ ...this.filter, space });
 	}
 
+	setArchived(archived: boolean) {
+		this.#applyFilter({ ...this.filter, archived });
+	}
+
 	showAll() {
-		this.#applyFilter({ source: null, space: null });
+		this.#applyFilter({ source: null, space: null, archived: false });
+	}
+
+	reflectArchive(session: SessionRecord) {
+		this.#applySession(session, { settled: true });
 	}
 
 	prewarm(filters: readonly ChatsFilter[]) {
@@ -416,16 +428,20 @@ class ChatsInbox {
 			}
 			return;
 		}
+		const known = sessionStore.get(record.id);
+		const current = known
+			? mergeSessionRecord(known, record as Omit<SessionRecord, "meta">)
+			: record;
 		const change: LiveChange<ChatsFilter, UserSessionListItem, Forks> = {
 			id: record.id,
-			fit: (filter) => sessionFit(record, filter, viewer),
+			fit: (filter) => sessionFit(current, filter, viewer),
 			merge,
 			create: (filter) => {
 				const space =
 					filter.space ?? options.space ?? this.spaceSummary(record.spaceId);
 				return space
 					? (mergeSessionRecord(undefined, {
-							...record,
+							...current,
 							space,
 						} as Omit<SessionRecord, "meta">) as UserSessionListItem)
 					: null;
@@ -455,6 +471,7 @@ class ChatsInbox {
 
 	async #readCachedPage(filter: ChatsFilter) {
 		const { space, source } = filter;
+		if (space && filter.archived) return null;
 		if (!space) {
 			const cached = await getCachedUserSessionListSnapshot(
 				chatsFilterScope(filter),
@@ -495,13 +512,14 @@ class ChatsInbox {
 	}
 
 	async #fetchPage(filter: ChatsFilter, cursor: string | null) {
-		const { space, source } = filter;
+		const { space, source, archived } = filter;
 		if (!space) {
 			const result = await sdk.user.listSessions({
 				limit: PAGE_SIZE,
 				cursor,
-				source: source ? [source] : null,
+				source: source && !archived ? [source] : null,
 				includeForks: true,
+				archived: archived ? "only" : undefined,
 			});
 			return {
 				sessions: result.sessions ?? [],
@@ -509,13 +527,16 @@ class ChatsInbox {
 				pageInfo: result.pageInfo ?? EMPTY_PAGE_INFO,
 			};
 		}
-		if (!source) {
-			const result = await sdk
-				.space(space.id)
-				.sessions.list({ limit: PAGE_SIZE, cursor, includeForks: true });
+		if (!source || archived) {
+			const result = await sdk.space(space.id).sessions.list({
+				limit: PAGE_SIZE,
+				cursor,
+				includeForks: true,
+				archived: archived ? "only" : undefined,
+			});
 			const pageInfo = result.pageInfo ?? EMPTY_PAGE_INFO;
 			const forks = result.forks ?? [];
-			if (!cursor)
+			if (!cursor && !archived)
 				void setCachedSessionList(
 					space.id,
 					result.sessions ?? [],

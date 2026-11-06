@@ -60,7 +60,7 @@ import { createCronJob, enqueueTask } from "../../tasks.js";
 import { RUN_COMMAND_TASK_TYPE } from "@cohub/core/commands";
 import { normalizeContentBlocks } from "@cohub/core/content/normalize";
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
-import { assignLabelsToSession, parseLabelRefs, resolveLabelPaths, resolveOrCreateLabelPaths } from "@cohub/core/labels";
+import { assignLabelsToSession, parseLabelRefs, parseSessionArchiveFilter, resolveLabelPaths, resolveOrCreateLabelPaths } from "@cohub/core/labels";
 import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
 import { asAccountIdentity, hasPermission, getSpaceMemberRole, filterSessionsByPermission, resolvePermissionAccess } from "../../permissions.js";
 import { checkpoints } from "@cohub/db";
@@ -2545,12 +2545,14 @@ router.get("/:id/sessions", async (c) => {
   const limitParam = Number(c.req.query("limit") ?? 20);
   const limit = Number.isFinite(limitParam) ? limitParam : 20;
   const cursor = c.req.query("cursor") ?? null;
+  const archive = parseSessionArchiveFilter(c.req.query("archived"));
+  if (!archive) return c.json({ message: "archived must be one of: exclude, only, include" }, 400);
   let sessions: Awaited<ReturnType<typeof listSpaceSessions>>["sessions"];
   let pageInfo: Awaited<ReturnType<typeof listSpaceSessions>>["pageInfo"];
   try {
     ({ sessions, pageInfo } = ids
       ? { sessions: await listSpaceSessionsByIds(spaceId, ids), pageInfo: { hasMore: false, nextCursor: null } }
-      : await listSpaceSessions(spaceId, { limit, cursor }));
+      : await listSpaceSessions(spaceId, { limit, cursor, archive }));
   } catch (error) {
     if (error instanceof InvalidSessionListCursorError) {
       return c.json({ message: "invalid cursor" }, 400);

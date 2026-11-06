@@ -256,9 +256,15 @@ cohub -s <spaceId> spaces sessions create "<title>" --json
 cohub -s <spaceId> spaces sessions get <sessionId> --json
 cohub -s <spaceId> spaces sessions files <sessionId> --json
 cohub -s <spaceId> spaces sessions rename <sessionId> "<new title>"
+cohub -s <spaceId> spaces sessions archive <sessionId...>
+cohub -s <spaceId> spaces sessions unarchive <sessionId...>
+cohub -s <spaceId> spaces sessions ls --archived   # --all includes archived Chats
 ```
 
 Use `spaces prompt --session <sessionId>` to send to a Chat.
+
+Archiving hides a Chat for every member and frees its runtime files after a
+short grace period. Sending a message to an archived Chat restores it.
 
 ## Space turns
 

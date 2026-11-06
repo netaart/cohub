@@ -17,6 +17,8 @@ import { db } from "./db/index.js";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
 import { addSessionParticipantMeta, interruptedSummaryPatch, interruptedTurnUsage, summarizeSessionTurnCompactions } from "@cohub/core/sessions";
 import { sanitizePostgresJsonValue, sanitizeContentBlocksForPostgresJson } from "@cohub/core/content/sanitize";
+import { unarchiveSessionInTx } from "@cohub/core/labels";
+import { publishSessionArchiveChange } from "./session-archive.js";
 import { ensureSessionTurnSegments, findSegmentForTurn, MAX_SESSION_TURN_SEGMENTS } from "./session-forks.js";
 import { fallbackPublicUserProfile, getProfilesByUuids } from "./user-profiles.js";
 import { buildTurnObjectPrefix, assertTurnObjectKeyForTurn, createTurnObjectCdnUrl, writeTurnObjectJson } from "./turn-object-storage.js";
@@ -295,9 +297,10 @@ export const createSessionTurn = async (input: {
   const userContent = sanitizeContentBlocksForPostgresJson(input.userContent);
   const meta = input.meta ? sanitizePostgresJsonValue(input.meta) : null;
   const userText = deriveMessagePreviewText({ content: userContent }) || null;
-  const [row] = await db.transaction(async (tx) => {
+  const { row, spaceId, unarchivedLabelId } = await db.transaction(async (tx) => {
     const [sessionRow] = await tx.select({ meta: spaceSessions.meta, spaceId: spaceSessions.spaceId }).from(spaceSessions).where(eq(spaceSessions.id, input.sessionId)).for("update").limit(1);
     if (!sessionRow) throw new Error("session not found");
+    const unarchivedLabelId = await unarchiveSessionInTx(tx, { spaceId: sessionRow.spaceId, sessionId: input.sessionId });
     const [seqRow] = await tx.select({ max: sql<number>`coalesce(max(${sessionTurns.sequence}), 0)::int` }).from(sessionTurns).where(eq(sessionTurns.sessionId, input.sessionId));
     const [localSegment] = await tx.select({ fromSequence: sessionTurnSegments.fromSequence }).from(sessionTurnSegments).where(and(
       eq(sessionTurnSegments.sessionId, input.sessionId),
@@ -310,7 +313,7 @@ export const createSessionTurn = async (input: {
         meta: sanitizePostgresJsonValue(addSessionParticipantMeta(sessionRow.meta, input.userUuid)),
       }).where(eq(spaceSessions.id, input.sessionId));
     }
-    return tx.insert(sessionTurns).values({
+    const [row] = await tx.insert(sessionTurns).values({
       ...(input.id ? { id: input.id } : {}),
       sessionId: input.sessionId,
       spaceId: sessionRow.spaceId,
@@ -323,8 +326,10 @@ export const createSessionTurn = async (input: {
       userText,
       meta,
     }).returning();
+    return { row, spaceId: sessionRow.spaceId, unarchivedLabelId };
   });
   if (!row) throw new Error("failed to create session turn");
+  if (unarchivedLabelId) await publishSessionArchiveChange({ spaceId, sessionId: input.sessionId, labelId: unarchivedLabelId, archived: false });
   return toTurnRecord(row);
 };
 

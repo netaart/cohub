@@ -5,7 +5,14 @@
  */
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
-import { ArrowDown, FileCode2, ListTree, Plus, Upload } from "lucide-svelte";
+import {
+	Archive,
+	ArrowDown,
+	FileCode2,
+	ListTree,
+	Plus,
+	Upload,
+} from "lucide-svelte";
 import type { Snippet } from "svelte";
 import { onMount, untrack } from "svelte";
 import AccessStateView from "$lib/components/AccessStateView.svelte";
@@ -21,6 +28,7 @@ import {
 	classifyChatDraftDrop,
 	readCohubPathFromDataTransfer,
 } from "$lib/drag/chat-draft-drop";
+import { setSessionArchived } from "$lib/features/sessions/session-archive";
 import SessionModelSelectorDialog from "$lib/features/space/modules/SessionModelSelectorDialog.svelte";
 import { takeHostShare } from "$lib/host-share";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -31,6 +39,7 @@ import type { NewChatBackgroundConfig } from "$lib/space-config";
 import { insertComposerSnippet } from "$lib/stores/composer-insert";
 import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 import { modelsStatusStore } from "$lib/stores/models-status.svelte";
+import { sessionStore } from "$lib/stores/session-store";
 import { entriesFromDataTransfer } from "$lib/upload-entries";
 import SessionApprovals from "./SessionApprovals.svelte";
 import SessionRuntimeRecovery from "./SessionRuntimeRecovery.svelte";
@@ -247,6 +256,25 @@ function handleDraftDragLeave(event: DragEvent) {
 }
 
 let shareNotice = $state<string | null>(null);
+const archivedSession = $derived.by(() => {
+	const session = activeSessionId ? sessionStore.get(activeSessionId) : null;
+	return session?.archivedAt ? session : null;
+});
+let restoringArchive = $state(false);
+let restoreFailed = $state(false);
+
+async function restoreArchivedSession() {
+	if (!archivedSession || restoringArchive) return;
+	restoringArchive = true;
+	restoreFailed = false;
+	try {
+		await setSessionArchived(archivedSession, false);
+	} catch {
+		restoreFailed = true;
+	} finally {
+		restoringArchive = false;
+	}
+}
 
 $effect(() => {
 	if (!host.isDraftNewSessionRoute) return;
@@ -470,6 +498,17 @@ async function handleDraftDrop(event: DragEvent) {
 				class:z-10={shouldShowNewChatBackground}
 			>
 				{#if shareNotice}<p class="chat-gutter-x pb-1 text-[12px] text-text-tertiary">{shareNotice}</p>{/if}
+				{#if archivedSession}
+					<div class="chat-gutter-x">
+						<div class="mx-auto flex max-w-[var(--chat-content-max-width)] items-center gap-2 pb-1 text-[12px] text-text-tertiary" role="status">
+							<Archive class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+							<span class="min-w-0 flex-1 truncate {restoreFailed ? 'text-error-soft' : ''}">{restoreFailed ? m.session_archive_failed({}, { locale }) : m.session_archived_notice({}, { locale })}</span>
+							<button type="button" class="shrink-0 rounded px-1.5 py-0.5 text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:opacity-50" disabled={restoringArchive} onclick={() => void restoreArchivedSession()}>
+								{m.session_unarchive({}, { locale })}
+							</button>
+						</div>
+					</div>
+				{/if}
 				<SessionComposer
 					bind:value={composerInput}
 					disabled={!activeSessionState && !isNewSessionRoute}

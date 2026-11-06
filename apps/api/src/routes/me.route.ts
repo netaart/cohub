@@ -4,6 +4,8 @@ import { Hono } from "hono";
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import * as schema from "@cohub/db";
 import { db } from "../db/index.js";
+import { parseSessionArchiveFilter } from "@cohub/core/labels";
+import type { SessionArchiveFilter } from "@cohub/protocol/model";
 import { config } from "../config.js";
 import { requireValidId, useAuth, authzDenied } from "../lib/middleware.js";
 import { ensureCurrentUserProfile, resolveCurrentUserEmail, updateCurrentUserProfile, LogtoUserRequiredError, UsernameClearError, UsernameConflictError, UsernameReservedError, validateUsername } from "../user-profiles.js";
@@ -198,7 +200,7 @@ router.get("/rules", async (c) => {
  */
 async function listVisibleUserSessions(
   user: { uuid: string },
-  options: { limit: number; cursor: string | null; source: SessionSourceFilter | null },
+  options: { limit: number; cursor: string | null; source: SessionSourceFilter | null; archive: SessionArchiveFilter },
 ) {
   const identity = asAccountIdentity(user);
   if (!identity) {
@@ -228,7 +230,7 @@ async function listVisibleUserSessions(
   while (visible.length < limit && hasMore && guard < 8) {
     guard += 1;
     const batchLimit = Math.min(100, Math.max(limit * 2, limit - visible.length + 4));
-    const batch = await listUserSessions(identity.uuid, { limit: batchLimit, cursor, source: options.source });
+    const batch = await listUserSessions(identity.uuid, { limit: batchLimit, cursor, source: options.source, archive: options.archive });
     hasMore = Boolean(batch.pageInfo.hasMore);
     cursor = batch.pageInfo.nextCursor;
 
@@ -304,8 +306,10 @@ router.get("/sessions", async (c) => {
     }
     throw error;
   }
+  const archive = parseSessionArchiveFilter(c.req.query("archived"));
+  if (!archive) return c.json({ message: "archived must be one of: exclude, only, include" }, 400);
   try {
-    const { sessions, fullViewSpaceIds, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source });
+    const { sessions, fullViewSpaceIds, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source, archive });
     const visibleSessionIds = sessions.map((session) => session.id);
     const [withSpaces, forks] = await Promise.all([
       hydrateSessionParticipantProfiles(sessions).then(attachSessionSpaceSummaries),

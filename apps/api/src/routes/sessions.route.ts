@@ -3,7 +3,8 @@ import { refreshSessionStats } from "@cohub/core/sessions";
 import { db } from "../db/index.js";
 import { createLogger } from "@cohub/infra/logging";
 import { randomUUID } from "node:crypto";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
+import { SessionRunningError } from "@cohub/core/labels";
 import { hasPermission } from "../permissions.js";
 import { getOptionalAuth, useAuth, requireValidId, authzDenied } from "../lib/middleware.js";
 import {
@@ -24,6 +25,7 @@ import { createSessionFork, listSessionForksForSessions } from "../session-forks
 import { dispatchLabelAssignmentsUpdated } from "../realtime-events.js";
 import { buildSessionTurnResponse } from "../session-turn-response.js";
 import { parseSessionTitleInput } from "../session-title-input.js";
+import { changeSessionArchive } from "../session-archive.js";
 import { isNativeClientTurn } from "@cohub/protocol";
 import type { SessionFilesResponse } from "@cohub/protocol/model";
 import { getSessionRuntimeTurn } from "../runtime.js";
@@ -157,6 +159,36 @@ router.patch("/:id", async (c) => {
   const [sessionWithActiveTurn] = await attachActiveTurns([hydratedSession ?? refreshed ?? session]);
   return c.json({ session: sessionWithActiveTurn ?? hydratedSession ?? refreshed ?? session });
 });
+
+// ── PUT / DELETE /api/sessions/:id/archive ─────────────────────────────────────
+
+const setArchived = (archived: boolean) => async (c: Context) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const sessionId = c.req.param("id");
+  if (!sessionId || !requireValidId(sessionId)) return c.json({ message: "session not found" }, 404);
+
+  const session = await getSpaceSessionById(sessionId);
+  if (!session) return c.json({ message: "session not found" }, 404);
+  if (!(await hasPermission(user, "session.edit", { spaceId: session.spaceId, sessionId: session.id }))) {
+    return authzDenied(c);
+  }
+
+  try {
+    await changeSessionArchive({ spaceId: session.spaceId, sessionId: session.id, archived, userId: user.uuid });
+  } catch (error) {
+    if (error instanceof SessionRunningError) return c.json({ message: error.message }, 409);
+    throw error;
+  }
+
+  const current = await getSpaceSessionById(sessionId) ?? session;
+  const [hydratedSession] = await hydrateSessionParticipantProfiles([current]);
+  const [sessionWithState] = await attachActiveTurns([hydratedSession ?? current]);
+  return c.json({ session: sessionWithState ?? hydratedSession ?? current });
+};
+
+router.put("/:id/archive", setArchived(true));
+router.delete("/:id/archive", setArchived(false));
 
 router.get("/:id/turns", async (c) => {
   const user = getOptionalAuth(c);

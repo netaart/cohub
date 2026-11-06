@@ -414,6 +414,7 @@ export type RealtimeSessionRecord = Pick<
   | "latestMessageText"
   | "lastMessageAt"
   | "lastMessageId"
+  | "archivedAt"
   | "createdAt"
   | "updatedAt"
 > & {

@@ -15,7 +15,7 @@ import { uploadAvatarAsset, uploadChatImageAsset, uploadLikeStickerAsset } from 
 import { createClient } from "../client.js";
 import { collectOption, readPromptContent } from "../command-input.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
-import { SESSION_STATUS_COLUMN } from "../session-status.js";
+import { SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
 import { resolveSpace } from "../space.js";
 import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
 import { registerDecisionCommand } from "./decision.js";
@@ -1485,13 +1485,15 @@ function registerSessions(spacesCmd: Command): void {
   sessionsCmd
     .command("ls")
     .alias("list")
-    .description("List sessions")
+    .description("List sessions (archived sessions are hidden by default)")
+    .option("--archived", "List only archived sessions")
+    .option("--all", "Include archived sessions")
     .option("--json", "Output as JSON")
-    .action(async (opts: { json?: boolean }) => {
+    .action(async (opts: { archived?: boolean; all?: boolean; json?: boolean }) => {
       const spaceId = await resolveSpace(spacesCmd);
       const client = createClient();
       try {
-        const result = await client.space(spaceId).sessions.list();
+        const result = await client.space(spaceId).sessions.list({ archived: sessionArchiveFilter(opts) });
         if (jsonRequested(opts)) return outJson(result);
         if (result.sessions.length === 0) {
           console.log("  (empty)");
@@ -1633,6 +1635,33 @@ function registerSessions(spacesCmd: Command): void {
         handleHttp(e);
       }
     });
+
+  for (const archived of [true, false]) {
+    const verb = archived ? "archive" : "unarchive";
+    const done = archived ? "archived" : "restored";
+    sessionsCmd
+      .command(`${verb} <ids...>`)
+      .description(archived
+        ? "Archive sessions for every member; a new message restores them"
+        : "Restore archived sessions to the active list")
+      .option("--json", "Output as JSON")
+      .action(async (ids: string[], opts: { json?: boolean }) => {
+        const spaceId = await resolveSpace(spacesCmd);
+        const client = createClient();
+        const sessions: unknown[] = [];
+        for (const id of ids) {
+          try {
+            const session = client.space(spaceId).session(id.trim());
+            sessions.push((await (archived ? session.archive() : session.unarchive())).session);
+          } catch (e: unknown) {
+            if (sessions.length > 0) process.stderr.write(`\n  ${sessions.length} of ${ids.length} sessions ${done} before ${id}\n`);
+            handleHttp(e);
+          }
+        }
+        if (jsonRequested(opts)) return outJson({ sessions });
+        ok(ids.length === 1 ? `Session ${done}` : `${ids.length} sessions ${done}`);
+      });
+  }
 
   // ── sessions tail ──
   sessionsCmd

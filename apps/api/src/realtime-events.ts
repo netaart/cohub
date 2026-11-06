@@ -62,6 +62,7 @@ type RealtimeSessionInput = SessionRecord | {
   activeTurn?: SessionActiveTurn | null;
   activeTurnSequence?: number;
   lastTurnIssue?: SessionTurnIssue | null;
+  archivedAt?: string | null;
   meta?: unknown;
 };
 
@@ -85,6 +86,7 @@ export const toRealtimeSessionRecord = (session: RealtimeSessionInput): Realtime
   latestMessageText: session.latestMessageText ?? null,
   lastMessageAt: toIsoOrNull(session.lastMessageAt),
   lastMessageId: session.lastMessageId,
+  ...(session.archivedAt !== undefined ? { archivedAt: session.archivedAt } : {}),
   createdAt: toIso(session.createdAt),
   updatedAt: toIso(session.updatedAt),
   ...("meta" in session ? { participantUserUuids: readSessionParticipantUserUuids(session.meta) } : {}),

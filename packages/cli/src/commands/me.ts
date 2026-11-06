@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { formatLocalDateTime, handleHttp, json as outJson, jsonRequested, table } from "../output.js";
-import { SESSION_STATUS_COLUMN } from "../session-status.js";
+import { SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
 
 function parseInteger(value: string, name: string, min: number): number {
   const parsed = Number.parseInt(value, 10);
@@ -18,16 +18,19 @@ export function registerMe(program: Command): void {
   meCmd
     .command("sessions")
     .alias("list-sessions")
-    .description("List sessions you created across all spaces")
+    .description("List sessions you created across all spaces (archived sessions are hidden by default)")
     .option("--limit <n>", "Maximum number of sessions (default 20)")
     .option("--cursor <cursor>", "Pagination cursor from a previous result")
+    .option("--archived", "List only archived sessions")
+    .option("--all", "Include archived sessions")
     .option("--json", "Output as JSON")
-    .action(async (opts: { limit?: string; cursor?: string; json?: boolean }) => {
+    .action(async (opts: { limit?: string; cursor?: string; archived?: boolean; all?: boolean; json?: boolean }) => {
       const client = createClient();
       try {
         const result = await client.user.listSessions({
           limit: opts.limit ? parseInteger(opts.limit, "limit", 1) : undefined,
           cursor: opts.cursor ?? null,
+          archived: sessionArchiveFilter(opts),
         });
         if (jsonRequested(opts)) return outJson(result);
         if (result.sessions.length === 0) {

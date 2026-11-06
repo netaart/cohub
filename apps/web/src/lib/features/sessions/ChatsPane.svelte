@@ -35,8 +35,11 @@ const filter = $derived(inbox.filter);
 const isPage = $derived(variant === "page");
 const chips = $derived(inbox.spaceChips);
 const source = $derived(filter.source);
+const archived = $derived(filter.archived);
 const pages = $derived<(UserSessionSpaceSummary | null)[]>([null, ...chips]);
-const pageFilters = $derived(pages.map((space) => ({ source, space })));
+const pageFilters = $derived(
+	pages.map((space) => ({ source, space, archived })),
+);
 const keys = $derived(pages.map((space) => space?.id ?? ALL_KEY));
 const pageIndex = $derived(
 	Math.max(0, keys.indexOf(filter.space?.id ?? ALL_KEY)),
@@ -79,7 +82,12 @@ onMount(() => {
 				{#if isPage}
 					<HeaderAction label={m.list_search({}, { locale })} icon={Search} onclick={() => openAreaSearch("chats")} />
 				{/if}
-				<ChatsSourcePicker value={filter.source} onChange={(source) => inbox.setSource(source)} />
+				<ChatsSourcePicker
+					value={filter.source}
+					{archived}
+					onChange={(source) => inbox.setSource(source)}
+					onArchived={() => inbox.setArchived(true)}
+				/>
 				<HeaderAction
 					label={m.sidebar_new_chat({}, { locale })}
 					icon={Plus}

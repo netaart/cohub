@@ -2,7 +2,7 @@ import { resolveWalletMessageEligibility } from "@cohub/core/space-wallet";
 import { createLogger } from "@cohub/infra/logging";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Usage } from "@cohub/protocol/core";
-import { sanitizeSessionRecordStats } from "@cohub/protocol/model";
+import { sanitizeSessionRecordStats, type SessionArchiveFilter } from "@cohub/protocol/model";
 import type { PersistMessageInput, RegisterSessionInput, SessionTurnRecord, UpdateSessionInfoInput } from "@cohub/protocol/model";
 import { isModelThinkingLevel, type ModelThinkingLevel } from "@cohub/protocol";
 import { getOrCreateRequestId } from "@cohub/infra/tracing";
@@ -11,6 +11,7 @@ import { SPACE_ENV_REDIS_KEY } from "@cohub/protocol/sandbox";
 import { isSandboxUsableStatus } from "@cohub/sandbox-controller";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
+import { sessionArchiveFilterCondition } from "@cohub/core/labels";
 import {
   claimSessionFallbackTitle,
   deriveSessionFallbackTitle,
@@ -364,17 +365,16 @@ export async function attachActiveTurns<T extends { id: string; meta?: unknown }
 
 export const listSpaceSessions = async (
   spaceId: string,
-  options?: { limit?: number; cursor?: string | null },
+  options?: { limit?: number; cursor?: string | null; archive?: SessionArchiveFilter },
 ) => {
   const limit = resolveSessionListLimit(options?.limit);
   const cursor = decodeSessionListCursor(options?.cursor);
-  const activityCursor = sessionListActivityCursorCondition(cursor);
 
-  const rows = await db.select().from(spaceSessions).where(
-    activityCursor
-      ? and(eq(spaceSessions.spaceId, spaceId), activityCursor)
-      : eq(spaceSessions.spaceId, spaceId),
-  ).orderBy(...sessionListOrderBy).limit(limit + 1);
+  const rows = await db.select().from(spaceSessions).where(and(
+    eq(spaceSessions.spaceId, spaceId),
+    sessionListActivityCursorCondition(cursor),
+    sessionArchiveFilterCondition(options?.archive),
+  )).orderBy(...sessionListOrderBy).limit(limit + 1);
 
   const page = paginateSessionRows(rows, limit);
   return {
@@ -458,21 +458,23 @@ export const attachSessionSpaceSummaries = async <T extends { spaceId: string }>
  */
 export const listUserSessions = async (
   userUuid: string,
-  options?: { limit?: number; cursor?: string | null; source?: SessionSourceFilter | null },
+  options?: { limit?: number; cursor?: string | null; source?: SessionSourceFilter | null; archive?: SessionArchiveFilter },
 ) => {
   const limit = resolveSessionListLimit(options?.limit);
   const cursor = decodeSessionListCursor(options?.cursor);
   const activityCursor = sessionListActivityCursorCondition(cursor);
   const sourceCondition = sessionListSourceCondition(options?.source ?? null);
+  const archiveCondition = sessionArchiveFilterCondition(options?.archive);
   const branchLimit = limit + 1;
 
-  const creatorWhere = and(eq(spaceSessions.userUuid, userUuid), activityCursor, sourceCondition);
+  const creatorWhere = and(eq(spaceSessions.userUuid, userUuid), activityCursor, sourceCondition, archiveCondition);
 
   const participantWhere = and(
     userSessionParticipantCondition(userUuid),
     sql`${spaceSessions.userUuid} is distinct from ${userUuid}`,
     activityCursor,
     sourceCondition,
+    archiveCondition,
   );
 
   const [creatorRows, participantRows] = await Promise.all([

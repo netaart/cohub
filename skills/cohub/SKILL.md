@@ -122,6 +122,9 @@ cohub spaces sessions create "<title>"
 cohub spaces sessions get <sessionId>
 cohub spaces sessions files <sessionId>          # Space files the Chat changed
 cohub spaces sessions rename <sessionId> "<new title>"
+cohub spaces sessions archive <sessionId...>     # hidden for every member; a new message restores it
+cohub spaces sessions unarchive <sessionId...>
+cohub spaces sessions ls --archived              # --all includes archived Chats
 ```
 
 Inspect turns:

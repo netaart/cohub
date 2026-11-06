@@ -1,6 +1,7 @@
-import { and, eq, max, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { labelAssignments, labels } from "@cohub/db";
+import { labelAssignments } from "@cohub/db";
+import { getOrCreateSpaceSystemLabel } from "./system-label.js";
 
 export type SessionChannelLabelInput = {
   db: PostgresJsDatabase<Record<string, unknown>>;
@@ -14,7 +15,6 @@ export type SessionChannelLabelInput = {
 
 const SCOPE_TYPE = "space";
 const ROOT_LABEL_NAME = "Channel";
-const CUSTOM_LABEL_NAME_SUFFIX = " (Custom)";
 const MAX_LABEL_NAME_LENGTH = 80;
 
 export const SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX = "session-channel:";
@@ -35,139 +35,11 @@ const normalizeChannelId = (channelId: string | null | undefined) => {
   return normalized;
 };
 
-const slugifyLabelName = (name: string) => {
-  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return slug || "label";
-};
-
-async function findLabelByName(
-  db: PostgresJsDatabase<Record<string, unknown>>,
-  spaceId: string,
-  name: string,
-  parentId: string | null,
-) {
-  const [row] = await db
-    .select()
-    .from(labels)
-    .where(and(
-      eq(labels.scopeType, SCOPE_TYPE),
-      eq(labels.scopeId, spaceId),
-      parentId ? eq(labels.parentId, parentId) : sql`${labels.parentId} is null`,
-      sql`lower(${labels.name}) = lower(${name})`,
-    ))
-    .limit(1);
-  return row ?? null;
-}
-
-async function findLabelBySystemKey(
-  db: PostgresJsDatabase<Record<string, unknown>>,
-  spaceId: string,
-  systemKey: string,
-) {
-  const [row] = await db
-    .select()
-    .from(labels)
-    .where(and(eq(labels.scopeType, SCOPE_TYPE), eq(labels.scopeId, spaceId), eq(labels.systemKey, systemKey)))
-    .limit(1);
-  return row ?? null;
-}
-
-async function nextLabelRank(
-  db: PostgresJsDatabase<Record<string, unknown>>,
-  spaceId: string,
-  parentId: string | null,
-) {
-  const [{ value } = { value: 0 }] = await db
-    .select({ value: max(labels.rank) })
-    .from(labels)
-    .where(and(
-      eq(labels.scopeType, SCOPE_TYPE),
-      eq(labels.scopeId, spaceId),
-      parentId ? eq(labels.parentId, parentId) : sql`${labels.parentId} is null`,
-    ));
-  return Number(value ?? 0) + 10;
-}
-
-function customFallbackLabelName(name: string, suffix: string) {
-  const base = name.length + suffix.length <= 80
-    ? name
-    : name.slice(0, 80 - suffix.length);
-  return `${base}${suffix}`;
-}
-
-async function nextAvailableCustomLabelName(
-  db: PostgresJsDatabase<Record<string, unknown>>,
-  input: { spaceId: string; name: string; parentId: string | null },
-) {
-  for (let index = 0; index < 100; index += 1) {
-    const suffix = index === 0 ? CUSTOM_LABEL_NAME_SUFFIX : ` (Custom ${index + 1})`;
-    const candidate = customFallbackLabelName(input.name, suffix);
-    const existing = await findLabelByName(db, input.spaceId, candidate, input.parentId);
-    if (!existing) return candidate;
-  }
-  throw new Error(`failed to rename conflicting user label: ${input.name}`);
-}
-
-async function moveConflictingUserLabel(
-  db: PostgresJsDatabase<Record<string, unknown>>,
-  input: { spaceId: string; name: string; parentId: string | null },
-) {
-  const existing = await findLabelByName(db, input.spaceId, input.name, input.parentId);
-  if (!existing || existing.source === "system") return;
-  const name = await nextAvailableCustomLabelName(db, input);
-  await db
-    .update(labels)
-    .set({ name, slug: slugifyLabelName(name), updatedAt: new Date() })
-    .where(and(eq(labels.id, existing.id), eq(labels.source, "user")));
-}
-
-async function getOrCreateSystemLabel(
-  db: PostgresJsDatabase<Record<string, unknown>>,
-  input: {
-    spaceId: string;
-    name: string;
-    parentId: string | null;
-    depth: 0 | 1;
-    systemKey: string;
-    userId: string | null;
-  },
-) {
-  const existingBySystemKey = await findLabelBySystemKey(db, input.spaceId, input.systemKey);
-  if (existingBySystemKey) return existingBySystemKey;
-
-  await moveConflictingUserLabel(db, {
-    spaceId: input.spaceId,
-    name: input.name,
-    parentId: input.parentId,
-  });
-  const existingByName = await findLabelByName(db, input.spaceId, input.name, input.parentId);
-  if (existingByName?.source === "system") return existingByName;
-
-  const [created] = await db.insert(labels).values({
-    scopeType: SCOPE_TYPE,
-    scopeId: input.spaceId,
-    name: input.name,
-    slug: slugifyLabelName(input.name),
-    parentId: input.parentId,
-    depth: input.depth,
-    rank: await nextLabelRank(db, input.spaceId, input.parentId),
-    source: "system",
-    systemKey: input.systemKey,
-    createdBy: input.userId,
-  }).onConflictDoNothing().returning();
-  if (created) return created;
-
-  const raced = await findLabelBySystemKey(db, input.spaceId, input.systemKey)
-    ?? await findLabelByName(db, input.spaceId, input.name, input.parentId);
-  if (!raced) throw new Error("failed to create channel label");
-  return raced;
-}
-
 export async function assignSessionChannelSystemLabel(input: SessionChannelLabelInput) {
   const channelId = normalizeChannelId(input.channelId);
   if (!channelId) return null;
 
-  const rootLabel = await getOrCreateSystemLabel(input.db, {
+  const rootLabel = await getOrCreateSpaceSystemLabel(input.db, {
     spaceId: input.spaceId,
     name: ROOT_LABEL_NAME,
     parentId: null,
@@ -176,7 +48,7 @@ export async function assignSessionChannelSystemLabel(input: SessionChannelLabel
     userId: input.userId ?? null,
   });
 
-  const childLabel = await getOrCreateSystemLabel(input.db, {
+  const childLabel = await getOrCreateSpaceSystemLabel(input.db, {
     spaceId: input.spaceId,
     name: channelId,
     parentId: rootLabel.id,

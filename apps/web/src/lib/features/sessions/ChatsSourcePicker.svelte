@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { UserSessionSourceKey } from "@neta-art/cohub";
-import { Check, ListFilter } from "lucide-svelte";
+import { Archive, Check, ListFilter } from "lucide-svelte";
 import AdaptivePopover from "$lib/components/list-page/AdaptivePopover.svelte";
 import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -14,10 +14,14 @@ import {
 
 const {
 	value,
+	archived = false,
 	onChange,
+	onArchived,
 }: {
 	value: UserSessionSourceKey | null;
+	archived?: boolean;
 	onChange: (source: UserSessionSourceKey | null) => void;
+	onArchived?: () => void;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -45,10 +49,14 @@ function pick(source: UserSessionSourceKey | null) {
 	open = false;
 	onChange(source);
 }
+
+const currentName = $derived(
+	archived ? m.chats_archived({}, { locale }) : sourceName(value),
+);
 </script>
 
 {#snippet option(source: UserSessionSourceKey | null)}
-	{@const selected = value === source}
+	{@const selected = !archived && value === source}
 	<button
 		type="button"
 		role="menuitemradio"
@@ -63,10 +71,10 @@ function pick(source: UserSessionSourceKey | null) {
 
 <HeaderAction
 	bind:ref={anchor}
-	label={m.chats_source_current({ source: sourceName(value) }, { locale })}
-	icon={ListFilter}
+	label={m.chats_source_current({ source: currentName }, { locale })}
+	icon={archived ? Archive : ListFilter}
 	expanded={open}
-	text={value === DEFAULT_CHATS_FILTER.source ? undefined : sourceName(value)}
+	text={!archived && value === DEFAULT_CHATS_FILTER.source ? undefined : currentName}
 	onclick={() => {
 		open = !open;
 	}}
@@ -85,6 +93,23 @@ function pick(source: UserSessionSourceKey | null) {
 				{@render option(source)}
 			{/each}
 		{/each}
+		{#if onArchived}
+			<div class="my-1 h-px bg-border-subtle" role="separator"></div>
+			<button
+				type="button"
+				role="menuitemradio"
+				aria-checked={archived}
+				class="source-option {archived ? 'text-text-primary' : 'text-text-secondary'}"
+				onclick={() => {
+					open = false;
+					onArchived();
+				}}
+			>
+				<Archive class="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+				<span class="min-w-0 flex-1 truncate">{m.chats_archived({}, { locale })}</span>
+				<Check class="h-3.5 w-3.5 shrink-0 text-brand {archived ? 'opacity-100' : 'opacity-0'}" />
+			</button>
+		{/if}
 	</div>
 </AdaptivePopover>
 

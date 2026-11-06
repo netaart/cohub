@@ -156,6 +156,10 @@ export type SessionTurnIssue = {
   errorMessage: string | null;
 };
 
+export const SESSION_ARCHIVED_LABEL_SYSTEM_KEY = "session:archived";
+
+export type SessionArchiveFilter = "exclude" | "only" | "include";
+
 export type SessionRecord = {
   id: string;
   spaceId: string;
@@ -174,6 +178,8 @@ export type SessionRecord = {
   latestMessageText: string | null;
   lastMessageAt: string | null;
   lastMessageId: string | null;
+  /** When the Session was archived; null when active, absent when the response did not resolve it. */
+  archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };

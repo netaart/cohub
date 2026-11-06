@@ -10,7 +10,7 @@ export type LabelSource = "user" | "system";
 const SCOPE_TYPE = "space";
 const MAX_LABEL_NAME_LENGTH = 80;
 const MAX_LABEL_REFS = 20;
-const RESERVED_SYSTEM_ROOT_LABELS = new Set(["source", "user", "channel"]);
+const RESERVED_SYSTEM_ROOT_LABELS = new Set(["source", "user", "channel", "archived"]);
 const pathKey = (path: LabelPath) => path.map((part) => part.toLowerCase()).join("/");
 const hasControlCharacter = (value: string) => [...value].some((char) => {
   const code = char.charCodeAt(0);
@@ -191,7 +191,7 @@ export async function assignLabelsToSession(input: {
   const existing = await input.db
     .select({ id: labels.id })
     .from(labels)
-    .where(and(eq(labels.scopeType, SCOPE_TYPE), eq(labels.scopeId, input.spaceId), inArray(labels.id, labelIds)));
+    .where(and(eq(labels.scopeType, SCOPE_TYPE), eq(labels.scopeId, input.spaceId), inArray(labels.id, labelIds), source === "user" ? eq(labels.source, "user") : undefined));
   const existingIds = existing.map((label) => label.id);
   if (existingIds.length === 0) return;
   const rows = await Promise.all(existingIds.map(async (labelId) => {
@@ -230,6 +230,7 @@ export async function listLabelsByRank(db: LabelsDb, spaceId: string) {
 export { assignSessionParticipantSystemLabels, getSessionUserLabelSystemKey, parseSessionUserLabelSystemKey, SESSION_USER_LABEL_SYSTEM_KEY_PREFIX, SESSION_USER_ROOT_LABEL_SYSTEM_KEY } from "./session-user.js";
 export { assignSessionSourceSystemLabel, getSessionSourceLabelSystemKey, resolveKnownSessionSourceLabelSystemKey, resolveSessionSourceKey, resolveSessionSourceLabelRef, resolveSessionSourceLabelSystemKey, SESSION_SOURCE_KEYS, SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX, SESSION_SOURCE_ROOT_LABEL_SYSTEM_KEY } from "./session-source.js";
 export { assignSessionChannelSystemLabel, getSessionChannelLabelSystemKey, parseSessionChannelLabelSystemKey, SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX, SESSION_CHANNEL_ROOT_LABEL_SYSTEM_KEY } from "./session-channel.js";
+export { parseSessionArchiveFilter, SESSION_ARCHIVED_LABEL_NAME, SessionRunningError, sessionArchivedCondition, sessionArchiveFilterCondition, setSessionArchived, unarchiveSessionInTx } from "./session-archive.js";
 export { listResourceLabelRefs } from "./resource-events.js";
 export { getLikeCount } from "./likes.js";
 export type { LabelResourceType } from "./resource-events.js";

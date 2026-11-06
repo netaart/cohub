@@ -3,11 +3,14 @@ import { and, desc, eq, gte, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
+  labelAssignments,
+  labels,
   sessionTurnIsActive,
   sessionTurnSegments,
   sessionTurns,
   spaceSessions,
 } from "@cohub/db";
+import { SESSION_ARCHIVED_LABEL_SYSTEM_KEY } from "@cohub/protocol/model";
 import {
   getRealtimeSpaceRoom,
   type RealtimeRoom,
@@ -36,16 +39,19 @@ const SNAPSHOT_FIELDS = [
   "activeTurn",
   "activeTurnSequence",
   "lastTurnIssue",
+  "archivedAt",
   "stats",
 ];
 const SETTLED_TURN_STATUSES = ["completed", "failed", "interrupted"] as const;
 const TURN_ISSUE_ERROR_LIMIT = 240;
 
+export type SessionLiveState = SessionActiveTurnState & { archivedAt: string | null };
+
 export async function readSessionActiveTurns(
   // biome-ignore lint/suspicious/noExplicitAny: any Postgres driver, including transactions.
   db: PgDatabase<PgQueryResultHKT, any, any>,
   sessionIds: string[],
-): Promise<Map<string, SessionActiveTurnState>> {
+): Promise<Map<string, SessionLiveState>> {
   const ids = [...new Set(sessionIds)];
   if (ids.length === 0) return new Map();
   const latestTurn = db
@@ -107,6 +113,21 @@ export async function readSessionActiveTurns(
     )
     .limit(1)
     .as("active_turn");
+  const archived = db
+    .select({ archivedAt: labelAssignments.createdAt })
+    .from(labelAssignments)
+    .innerJoin(labels, eq(labels.id, labelAssignments.labelId))
+    .where(
+      and(
+        eq(labelAssignments.scopeType, "space"),
+        sql`${labelAssignments.scopeId} = ${spaceSessions.spaceId}::text`,
+        eq(labelAssignments.resourceType, "session"),
+        sql`${labelAssignments.resourceRef} = ${spaceSessions.id}::text`,
+        eq(labels.systemKey, SESSION_ARCHIVED_LABEL_SYSTEM_KEY),
+      ),
+    )
+    .limit(1)
+    .as("archived");
   const rows = await db
     .select({
       sessionId: spaceSessions.id,
@@ -124,16 +145,19 @@ export async function readSessionActiveTurns(
       settledStatus: settledTurn.status,
       settledReason: settledTurn.reason,
       settledErrorMessage: settledTurn.errorMessage,
+      archivedAt: archived.archivedAt,
     })
     .from(spaceSessions)
     .leftJoinLateral(latestTurn, sql`true`)
     .leftJoinLateral(activeTurn, sql`true`)
     .leftJoinLateral(settledTurn, sql`true`)
+    .leftJoinLateral(archived, sql`true`)
     .where(inArray(spaceSessions.id, ids));
   return new Map(
     rows.map((row) => [
       row.sessionId,
-      sessionActiveTurnState(
+      {
+        ...sessionActiveTurnState(
         row.activeId && row.activeSequence != null && row.activeStatus
           ? {
               id: row.activeId,
@@ -156,7 +180,9 @@ export async function readSessionActiveTurns(
               errorMessage: row.settledErrorMessage,
             }
           : null,
-      ),
+        ),
+        archivedAt: row.archivedAt?.toISOString() ?? null,
+      },
     ]),
   );
 }
@@ -164,11 +190,12 @@ export async function readSessionActiveTurns(
 export async function readSessionActiveTurn(
   db: Database,
   sessionId: string,
-): Promise<SessionActiveTurnState> {
+): Promise<SessionLiveState> {
   return (
     (await readSessionActiveTurns(db, [sessionId])).get(sessionId) ?? {
       activeTurn: null,
       lastTurnIssue: null,
+      archivedAt: null,
     }
   );
 }

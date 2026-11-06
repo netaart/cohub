@@ -1,16 +1,18 @@
-import type {
-	LabelAssignmentListItem,
-	LabelAssignmentRecord,
-	LabelItemsResponse,
-	LabelListItem,
-	LabelResourceType,
-	SessionRecord,
+import {
+	type LabelAssignmentListItem,
+	type LabelAssignmentRecord,
+	type LabelItemsResponse,
+	type LabelListItem,
+	type LabelResourceType,
+	SESSION_ARCHIVED_LABEL_SYSTEM_KEY,
+	type SessionRecord,
 } from "@neta-art/cohub";
 import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
 import { labelItemsRepo } from "$lib/cache/repositories/label-items-repo";
 import { labelTreeRepo } from "$lib/cache/repositories/label-tree-repo";
 import { resourceLabelsRepo } from "$lib/cache/repositories/resource-labels-repo";
 import { userProfilesRepo } from "$lib/cache/repositories/user-profiles-repo";
+import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import {
 	formatChannelLabelName,
@@ -61,6 +63,8 @@ export function getLabelDisplayName(
 	label: LabelListItem,
 	options?: { channelIncludeProvider?: boolean },
 ) {
+	if (label.systemKey === SESSION_ARCHIVED_LABEL_SYSTEM_KEY)
+		return m.chats_archived();
 	if (label.systemKey === `${SESSION_USER_LABEL_SYSTEM_KEY_PREFIX}root`)
 		return "User";
 	if (label.systemKey === `${SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX}root`)
@@ -87,6 +91,8 @@ export function getLabelChannelInfo(label: LabelListItem) {
 }
 
 export function getLabelDisplayTitle(label: LabelListItem) {
+	if (label.systemKey === SESSION_ARCHIVED_LABEL_SYSTEM_KEY)
+		return m.chats_archived();
 	if (label.systemKey === `${SESSION_USER_LABEL_SYSTEM_KEY_PREFIX}root`)
 		return label.name === "User" ? "User" : `${label.name} · User`;
 	if (label.systemKey === `${SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX}root`)

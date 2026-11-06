@@ -10,9 +10,14 @@ import { m } from "$lib/paraglide/messages.js";
 export type ChatsFilter = {
 	source: UserSessionSourceKey | null;
 	space: UserSessionSpaceSummary | null;
+	archived: boolean;
 };
 
-export const DEFAULT_CHATS_FILTER: ChatsFilter = { source: "web", space: null };
+export const DEFAULT_CHATS_FILTER: ChatsFilter = {
+	source: "web",
+	space: null,
+	archived: false,
+};
 
 export const CHATS_SOURCE_GROUPS = [
 	{ id: "clients", sources: ["web", "cli", "websocket"] },
@@ -82,7 +87,7 @@ export function resolveSessionSourceKey(
 }
 
 export function chatsFilterScope(filter: ChatsFilter): string {
-	const source = filter.source ?? "all";
+	const source = filter.archived ? "archived" : (filter.source ?? "all");
 	return filter.space ? `space:${filter.space.id}:${source}` : source;
 }
 
@@ -97,6 +102,9 @@ export function sessionFit(
 	viewer: string | null,
 ): LiveFit {
 	if (filter.space && session.spaceId !== filter.space.id) return "out";
+	if (session.archivedAt === undefined) {
+		if (filter.archived) return "keep";
+	} else if (Boolean(session.archivedAt) !== filter.archived) return "out";
 	if (!filter.space) {
 		const participants = session.participantUserUuids;
 		const listed =
@@ -105,7 +113,7 @@ export function sessionFit(
 				Boolean(viewer && participants?.includes(viewer)));
 		if (!listed) return participants ? "out" : "keep";
 	}
-	if (!filter.source) return "in";
+	if (!filter.source || filter.archived) return "in";
 	// Source labels are server-attributed: a raw mismatch never removes a row.
 	return resolveSessionSourceKey(session.source) === filter.source
 		? "in"
@@ -113,9 +121,7 @@ export function sessionFit(
 }
 
 export function sameChatsFilter(a: ChatsFilter, b: ChatsFilter) {
-	return (
-		a.source === b.source && (a.space?.id ?? null) === (b.space?.id ?? null)
-	);
+	return chatsFilterScope(a) === chatsFilterScope(b) && a.source === b.source;
 }
 
 export function parseChatsFilter(raw: string | null): ChatsFilter {
@@ -151,7 +157,7 @@ export function parseChatsFilter(raw: string | null): ChatsFilter {
 								: null,
 					}
 				: null;
-		return { source, space };
+		return { source, space, archived: false };
 	} catch {
 		return DEFAULT_CHATS_FILTER;
 	}
@@ -176,6 +182,7 @@ export function readChatsFilter(userKey: string): ChatsFilter {
 export function writeChatsFilter(userKey: string, filter: ChatsFilter) {
 	if (typeof localStorage === "undefined") return;
 	try {
-		localStorage.setItem(storageKey(userKey), JSON.stringify(filter));
+		const { archived: _archived, ...persisted } = filter;
+		localStorage.setItem(storageKey(userKey), JSON.stringify(persisted));
 	} catch {}
 }

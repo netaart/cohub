@@ -83,6 +83,7 @@ export { LIKE_RESOURCE_TYPES, LIKED_LABEL_SYSTEM_KEY, isLikeResourceType } from 
 export type { LikeResourceType } from "@cohub/protocol";
 export { parseSpaceRef } from "./space-ref.js";
 export { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
+export { SESSION_ARCHIVED_LABEL_SYSTEM_KEY } from "@cohub/protocol/model";
 export {
   batchUploadEntries,
   LIKE_STICKER_MAX_EDGE,
