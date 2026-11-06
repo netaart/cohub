@@ -111,8 +111,8 @@ enum ShellState {
         set { defaults.set(newValue, forKey: "globalShortcut") }
     }
 
-    static var edgeColor: NSColor? {
-        get { defaults.string(forKey: "edgeColor").flatMap(NSColor.init(hex:)) }
+    static var edgeColor: RGB? {
+        get { defaults.string(forKey: "edgeColor").flatMap(RGB.init(hex:)) }
         set { defaults.set(newValue?.hex, forKey: "edgeColor") }
     }
 
@@ -134,25 +134,21 @@ enum ShellState {
 }
 
 extension NSColor {
-    convenience init?(hex: String) {
-        guard hex.count == 7, hex.first == "#", let value = UInt32(hex.dropFirst(), radix: 16) else { return nil }
-        self.init(
-            srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
-            green: CGFloat((value >> 8) & 0xFF) / 255,
-            blue: CGFloat(value & 0xFF) / 255,
-            alpha: 1
-        )
-    }
-
-    var hex: String? {
-        guard let rgb = usingColorSpace(.sRGB) else { return nil }
-        let channel = { (value: CGFloat) in Int((value * 255).rounded()).clamped(to: 0...255) }
-        return String(format: "#%02x%02x%02x", channel(rgb.redComponent), channel(rgb.greenComponent), channel(rgb.blueComponent))
+    convenience init(_ rgb: RGB) {
+        self.init(srgbRed: CGFloat(rgb.red) / 255, green: CGFloat(rgb.green) / 255, blue: CGFloat(rgb.blue) / 255, alpha: 1)
     }
 }
 
-extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self { min(max(self, range.lowerBound), range.upperBound) }
+extension RGB {
+    @MainActor static var window: RGB {
+        var rgb = RGB(0xFF, 0xFF, 0xFF)
+        NSApp.effectiveAppearance.performAsCurrentDrawingAppearance {
+            guard let color = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) else { return }
+            let channel = { (value: CGFloat) in UInt8((min(max(value, 0), 1) * 255).rounded()) }
+            rgb = RGB(channel(color.redComponent), channel(color.greenComponent), channel(color.blueComponent))
+        }
+        return rgb
+    }
 }
 
 func L(_ key: String.LocalizationValue) -> String {

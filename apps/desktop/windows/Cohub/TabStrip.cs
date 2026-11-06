@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using Cohub.Core;
 
 namespace Cohub;
 
@@ -17,15 +18,16 @@ internal sealed class TabStrip : Border
     private readonly TabRow row = new() { ClipToBounds = true };
     private readonly Border add;
     private readonly Dictionary<ShellTab, Chip> chips = [];
-    private Palette palette = Palette.For(Colors.White);
+    private Paints palette = Paints.For(EdgePalette.For(new Rgb(0xFF, 0xFF, 0xFF)));
 
     public TabStrip(ShellWindow window)
     {
         this.window = window;
         Height = 36;
-        Padding = new Thickness(6, 4, 6, 4);
+        Padding = new Thickness(6, 4, 6, 0);
         Visibility = Visibility.Collapsed;
         add = Button("\uE710", Strings.L("New Tab"), window.NewTab);
+        add.Margin = new Thickness(2, 0, 0, 4);
         var layout = new DockPanel { LastChildFill = false };
         DockPanel.SetDock(row, Dock.Left);
         DockPanel.SetDock(add, Dock.Left);
@@ -36,12 +38,15 @@ internal sealed class TabStrip : Border
 
     private static ShellApp App => (ShellApp)Application.Current;
 
-    public void Update(IReadOnlyList<ShellTab> tabs, ShellTab? selected, Color edge)
+    public void Update(IReadOnlyList<ShellTab> tabs, ShellTab? selected, EdgePalette edge)
     {
         Visibility = tabs.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-        palette = Palette.For(edge);
-        Background = new SolidColorBrush(edge);
-        ((TextBlock)add.Child).Foreground = palette.Text;
+        if (palette.Source != edge)
+        {
+            palette = Paints.For(edge);
+            Background = palette.Strip;
+            ((TextBlock)add.Child).Foreground = palette.Text;
+        }
         foreach (var gone in chips.Keys.Except(tabs).ToList())
         {
             row.Children.Remove(chips[gone]);
@@ -72,7 +77,7 @@ internal sealed class TabStrip : Border
             Child = new TextBlock { Text = glyph, FontFamily = new FontFamily(Glyphs), FontSize = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
         };
         AutomationProperties.SetName(button, label);
-        button.MouseEnter += (_, _) => button.Background = palette.Hover;
+        button.MouseEnter += (_, _) => button.Background = palette.Control;
         button.MouseLeave += (_, _) => button.Background = Brushes.Transparent;
         // Pressing a chip's button must not select the chip first.
         button.MouseLeftButtonDown += (_, e) => e.Handled = true;
@@ -84,18 +89,17 @@ internal sealed class TabStrip : Border
         return button;
     }
 
-    private sealed record Palette(Brush Text, Brush Selected, Brush Hover, Brush Dot)
+    private sealed record Paints(EdgePalette Source, Brush Strip, Brush Selected, Brush Hover, Brush Text, Brush Muted, Brush Dot, Brush Control)
     {
-        public static Palette For(Color edge)
-        {
-            var dark = 0.2126 * edge.R + 0.7152 * edge.G + 0.0722 * edge.B < 128;
-            var text = dark ? Colors.White : Color.FromRgb(0x1F, 0x1F, 0x1F);
-            return new(
-                Frozen(text),
-                Frozen(Color.FromArgb(dark ? (byte)0x2E : (byte)0x1A, text.R, text.G, text.B)),
-                Frozen(Color.FromArgb(dark ? (byte)0x18 : (byte)0x0D, text.R, text.G, text.B)),
-                Frozen(dark ? Color.FromRgb(0x60, 0xA5, 0xFA) : Color.FromRgb(0x25, 0x63, 0xEB)));
-        }
+        public static Paints For(EdgePalette palette) => new(
+            palette,
+            Frozen(palette.Strip.Media()),
+            Frozen(palette.Edge.Media()),
+            Frozen(palette.Hover.Media()),
+            Frozen(palette.Text.Media()),
+            Frozen(palette.Muted.Media()),
+            Frozen(palette.Accent.Media()),
+            Frozen(Color.FromArgb(0x1A, palette.Text.R, palette.Text.G, palette.Text.B)));
 
         private static SolidColorBrush Frozen(Color color)
         {
@@ -107,7 +111,12 @@ internal sealed class TabStrip : Border
 
     private sealed class Chip : Border
     {
+        private static readonly CornerRadius Raised = new(7, 7, 0, 0);
+        private static readonly CornerRadius Rounded = new(6);
+        private static readonly Thickness Inset = new(0, 0, 0, 4);
+
         private readonly TabStrip strip;
+        private readonly Border fill = new();
         private readonly ShellTab tab;
         private readonly TextBlock title = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         private readonly Ellipse dot = new() { Width = 6, Height = 6, Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -118,19 +127,21 @@ internal sealed class TabStrip : Border
         {
             this.strip = strip;
             this.tab = tab;
-            CornerRadius = new CornerRadius(6);
+            Background = Brushes.Transparent;
             Margin = new Thickness(0, 0, 2, 0);
-            Padding = new Thickness(10, 0, 4, 0);
             close = strip.Button("\uE8BB", Strings.L("Close Tab"), () => tab.Window.CloseTab(tab));
             close.Width = 22;
             close.Height = 22;
-            var content = new DockPanel();
+            var content = new DockPanel { Margin = new Thickness(10, 0, 4, 0) };
             DockPanel.SetDock(dot, Dock.Left);
             DockPanel.SetDock(close, Dock.Right);
             content.Children.Add(dot);
             content.Children.Add(close);
             content.Children.Add(title);
-            Child = content;
+            var layers = new Grid();
+            layers.Children.Add(fill);
+            layers.Children.Add(content);
+            Child = layers;
             MouseLeftButtonDown += (_, e) =>
             {
                 e.Handled = true;
@@ -148,12 +159,12 @@ internal sealed class TabStrip : Border
             ContextMenuOpening += (_, _) => BuildMenu();
         }
 
-        public void Update(bool selected, Palette palette)
+        public void Update(bool selected, Paints palette)
         {
             this.selected = selected;
             var label = tab.Title ?? "Cohub";
             title.Text = label;
-            title.Foreground = palette.Text;
+            title.Foreground = selected ? palette.Text : palette.Muted;
             dot.Fill = palette.Dot;
             dot.Visibility = tab.Attention && !selected ? Visibility.Visible : Visibility.Collapsed;
             ((TextBlock)close.Child).Foreground = palette.Text;
@@ -164,7 +175,9 @@ internal sealed class TabStrip : Border
 
         private void Paint()
         {
-            Background = selected ? strip.palette.Selected : IsMouseOver ? strip.palette.Hover : Brushes.Transparent;
+            fill.Background = selected ? strip.palette.Selected : IsMouseOver ? strip.palette.Hover : null;
+            fill.CornerRadius = selected ? Raised : Rounded;
+            fill.Margin = selected ? default : Inset;
             close.Visibility = selected || IsMouseOver ? Visibility.Visible : Visibility.Hidden;
         }
 

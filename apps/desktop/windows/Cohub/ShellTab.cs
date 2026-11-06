@@ -295,7 +295,7 @@ internal sealed class ShellTab : IDisposable
         view?.Dispose();
     }
 
-    private static System.Drawing.Color ToDrawing(System.Windows.Media.Color color) => System.Drawing.Color.FromArgb(color.R, color.G, color.B);
+    private static System.Drawing.Color ToDrawing(Rgb color) => System.Drawing.Color.FromArgb(color.R, color.G, color.B);
 
     private const string BridgeScript = """
         (() => {

@@ -157,12 +157,20 @@ internal sealed class ShellWindow
         if (TabOf(page) is not { } tab) return;
         tab.Window = this;
         tab.Page = page;
+        ShowTabbed();
         app.SessionChanged();
+    }
+
+    private void ShowTabbed()
+    {
+        if (TabView.NPages > 1) Window.AddCssClass("cohub-tabbed");
+        else Window.RemoveCssClass("cohub-tabbed");
     }
 
     private void Detached(Adw.TabPage page)
     {
         if (TabOf(page) is not { } tab) return;
+        ShowTabbed();
         if (tab == selected) selected = null;
         if (tab.Closing)
         {

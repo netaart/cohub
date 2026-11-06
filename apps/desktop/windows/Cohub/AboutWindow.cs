@@ -14,14 +14,14 @@ internal sealed class AboutWindow : Window
     private readonly Brush attention;
     private readonly List<string> report;
 
-    public AboutWindow(Color edge, ImageSource? icon, string heading, string? web)
+    public AboutWindow(Rgb edge, ImageSource? icon, string heading, string? web)
     {
-        var dark = 0.2126 * edge.R + 0.7152 * edge.G + 0.0722 * edge.B < 128;
+        var dark = edge.IsDark;
         attention = new SolidColorBrush(dark ? Color.FromRgb(0xFB, 0x92, 0x3C) : Color.FromRgb(0xC2, 0x41, 0x0C));
         report = [heading];
         Title = Strings.L("About Cohub");
         Icon = icon;
-        Background = new SolidColorBrush(edge);
+        Background = new SolidColorBrush(edge.Media());
         Foreground = dark ? Brushes.White : Brushes.Black;
         SizeToContent = SizeToContent.WidthAndHeight;
         ResizeMode = ResizeMode.NoResize;

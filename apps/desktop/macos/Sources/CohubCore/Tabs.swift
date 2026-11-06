@@ -66,7 +66,14 @@ public struct TabSession: Codable, Equatable, Sendable {
     }
 }
 
+public enum TabMove: Sendable { case next, previous }
+
 public enum TabOrder {
+    public static func target(_ move: TabMove, selected: Int, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        return move == .next ? (selected + 1) % count : (selected - 1 + count) % count
+    }
+
     public static func numbered(_ number: Int, count: Int) -> Int? {
         if number == 9 { return count > 0 ? count - 1 : nil }
         return (1...8).contains(number) && number <= count ? number - 1 : nil

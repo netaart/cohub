@@ -68,6 +68,10 @@
 "New Tab" = "新建标签页";
 "Reopen Closed Tab" = "重新打开关闭的标签页";
 "Close Tab" = "关闭标签页";
+"Close Other Tabs" = "关闭其他标签页";
+"Duplicate Tab" = "复制标签页";
+"Move Tab to New Window" = "将标签页移到新窗口";
+"Merge All Windows" = "合并所有窗口";
 "This tab has unsaved changes" = "此标签页有未保存的更改";
 "Some tabs have unsaved changes" = "有标签页存在未保存的更改";
 "Your changes will be lost." = "你的更改将会丢失。";

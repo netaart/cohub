@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows.Media;
+using Cohub.Core;
 using Microsoft.Win32;
 using Windows.ApplicationModel.DataTransfer;
 using WinRT;
@@ -30,9 +31,9 @@ internal static partial class Native
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool UnregisterHotKey(IntPtr hwnd, int id);
 
-    public static void TintTitleBar(IntPtr hwnd, Color color)
+    public static void TintTitleBar(IntPtr hwnd, Rgb color)
     {
-        var dark = 0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B < 128 ? 1 : 0;
+        var dark = color.IsDark ? 1 : 0;
         var caption = color.R | color.G << 8 | color.B << 16;
         var text = dark == 1 ? 0xFFFFFF : 0x000000;
         DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkMode, ref dark, sizeof(int));
@@ -136,4 +137,6 @@ internal static class Registration
         var raw = (environment ?? opened)?.GetValue("Path", "", RegistryValueOptions.DoNotExpandEnvironmentNames) as string ?? "";
         return [.. raw.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
     }
+
+    public static Color Media(this Rgb rgb) => Color.FromRgb(rgb.R, rgb.G, rgb.B);
 }

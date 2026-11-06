@@ -52,10 +52,8 @@ internal sealed class ShellApp : Application, IDisposable
 
     public IEnumerable<(string Name, JsonNode? Payload)> LatestEvents => latestEvents.Select(entry => (entry.Key, entry.Value));
 
-    public Color EdgeColor(string? hex) =>
-        hex is not null && TryParseColor(hex, out var color) ? color
-        : State.EdgeColor is { } fallback && TryParseColor(fallback, out var last) ? last
-        : SystemColors.WindowColor;
+    public Rgb EdgeColor(string? hex) =>
+        Rgb.Parse(hex) ?? Rgb.Parse(State.EdgeColor) ?? new Rgb(SystemColors.WindowColor.R, SystemColors.WindowColor.G, SystemColors.WindowColor.B);
 
     public Task<CoreWebView2Environment> WebEnvironment => environment ??= CoreWebView2Environment.CreateAsync(null, Path.Combine(Config.DataDirectory, "WebView2"));
 
@@ -265,7 +263,7 @@ internal sealed class ShellApp : Application, IDisposable
             },
             [HostProtocol.Methods.AppearanceSet] = parameters =>
             {
-                if (JsonFields.Text(parameters, "backgroundColor") is not { } hex || !TryParseColor(hex, out _)) throw BridgeException.Failed("appearance.set requires a #rrggbb backgroundColor");
+                if (JsonFields.Text(parameters, "backgroundColor") is not { } hex || Rgb.Parse(hex) is null) throw BridgeException.Failed("appearance.set requires a #rrggbb backgroundColor");
                 if (State.EdgeColor != hex)
                 {
                     State.EdgeColor = hex;
@@ -529,14 +527,6 @@ internal sealed class ShellApp : Application, IDisposable
     {
         using var stream = typeof(ShellApp).Assembly.GetManifestResourceStream("Cohub.ico");
         return stream is null ? (System.Drawing.Icon)System.Drawing.SystemIcons.Application.Clone() : new System.Drawing.Icon(stream, System.Windows.Forms.SystemInformation.SmallIconSize);
-    }
-
-    private static bool TryParseColor(string hex, out Color color)
-    {
-        color = default;
-        if (hex.Length != 7 || hex[0] != '#' || !uint.TryParse(hex.AsSpan(1), System.Globalization.NumberStyles.HexNumber, null, out var value)) return false;
-        color = Color.FromRgb((byte)(value >> 16), (byte)(value >> 8), (byte)value);
-        return true;
     }
 
     public static void Log(string line) => Trace.WriteLine(line, "Cohub");

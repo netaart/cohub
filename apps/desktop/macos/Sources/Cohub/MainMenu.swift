@@ -60,6 +60,9 @@ enum MainMenu {
         window.addItem(withTitle: L("Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         window.addItem(withTitle: L("Zoom"), action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         window.addItem(.separator())
+        window.addItem(withTitle: L("Move Tab to New Window"), action: #selector(ShellWindow.moveTabToNewWindow(_:)), keyEquivalent: "")
+        window.addItem(withTitle: L("Merge All Windows"), action: #selector(ShellWindow.mergeAllWindows(_:)), keyEquivalent: "")
+        window.addItem(.separator())
         window.addItem(withTitle: L("Bring All to Front"), action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         NSApp.windowsMenu = window
         for number in 1...9 {
@@ -68,10 +71,10 @@ enum MainMenu {
             ShellKeys.tabs.addItem(item)
         }
         for (action, key, modifiers) in [
-            (#selector(NSWindow.selectNextTab(_:)), "}", NSEvent.ModifierFlags.command),
-            (#selector(NSWindow.selectPreviousTab(_:)), "{", .command),
-            (#selector(NSWindow.selectNextTab(_:)), "\t", .control),
-            (#selector(NSWindow.selectPreviousTab(_:)), "\t", [.control, .shift]),
+            (#selector(ShellWindow.nextTab(_:)), "}", NSEvent.ModifierFlags.command),
+            (#selector(ShellWindow.previousTab(_:)), "{", .command),
+            (#selector(ShellWindow.nextTab(_:)), "\t", .control),
+            (#selector(ShellWindow.previousTab(_:)), "\t", [.control, .shift]),
         ] {
             let item = NSMenuItem(title: "", action: action, keyEquivalent: key)
             item.keyEquivalentModifierMask = modifiers

@@ -24,7 +24,7 @@ terminal share one sign-in and one set of Runtimes.
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
 | Shell | Swift 6, AppKit | C# (.NET 10), WPF | C# (.NET 10), GTK 4 and libadwaita via GirCore |
-| Tabs | Native window tabs | Tab strip under the title bar | `AdwTabView` and `AdwTabBar` |
+| Tabs | Tab strip in the title bar row | Tab strip under the title bar | `AdwTabView` and `AdwTabBar` |
 | WebView | WKWebView | WebView2 | WebKitGTK 6.0 (from the system) |
 | Updates | Sparkle (EdDSA-signed appcast) | Velopack (delta packages) | Velopack (AppImage, delta packages) |
 | Tray | Menu bar item | Notification area icon | Header bar menu, tinted by state |
@@ -53,7 +53,10 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
   flashes white; only the tab each window shows loads, the rest when first shown. The page
   fades in once it reports its first screen (`app.ready`), and the log says how long that took.
 - **Tabs.** Each tab is its own WebView and bridge, so switching never reloads and one page
-  crashing leaves the others. A window shows its tab bar from the second tab. The shell takes
+  crashing leaves the others. The selected tab takes the page's edge color and runs into it, and the
+  strip around it is shaded toward the text (`EdgePalette`). On macOS the strip always shows, in the
+  title bar row beside the window buttons; on Windows and Linux it shows from the second tab, and the
+  title bar takes the strip's shade with it. The shell takes
   its keys before the page can: ⌘T / Ctrl+T new tab, ⌘W / Ctrl+W (Ctrl+F4) close tab,
   ⌘⇧W / Ctrl+Shift+W close window, ⌘⇧T / Ctrl+Shift+T reopen a closed tab, ⌃Tab / Ctrl+Tab
   (and ⌘⇧] / Ctrl+PgDn) to move between tabs, ⌘1–8 / Ctrl+1–8 to pick one and 9 for the last.
@@ -74,8 +77,8 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
   audio or camera freezes until shown, and hears the latest Runtime and screen state on waking.
 - **Closing.** A tab with unsaved work (`tabs.update` `dirty`) asks before it closes, and so does
   quitting. Closing a tab returns to the tab that opened it when it came straight from there.
-  Closing the last window hides it, so reopening is instant and realtime stays connected; on
-  macOS, where each tab is a window, its other tabs go to Reopen Closed Tab first. Signing out
+  Closing the last window hides it, tabs and all, so reopening is instant and realtime stays
+  connected. Signing out
   leaves one tab on the home page and nothing of the account to reopen. Quitting leaves Runtimes
   running; disconnecting a folder is explicit (in the page, the tray, or `cohub runtime down`).
 - **Account.** Signing in opens the CLI's device sign-in in the browser; when it completes,
@@ -126,7 +129,7 @@ serves folders is in [`docs/local-runtime.md`](../../docs/local-runtime.md#deskt
 - **Bridge.** The page's `cohubHost` relays to an isolated script world, the only one that can
   reach the native message handler, so frames and page scripts never touch it directly.
 - **Tabs.** Tabs drag between windows and out into new ones.
-- **Edge color.** The header bar and tab bar take the front tab's edge color; its menu lists connected folders,
+- **Edge color.** The header bar takes the front tab's edge color, and the strip's shade while the tab bar shows; its menu lists connected folders,
   and its icon turns green, yellow or red with them, like the tray icon elsewhere.
 - **Folders.** `Cohub <folder>` lands on a new Space with that folder chosen.
 - **Not yet.** Screen sharing (the CLI offers `display` on macOS and Windows only), streaming
@@ -146,7 +149,8 @@ dotnet build apps/desktop/linux/Cohub/Cohub.csproj     # compiles anywhere; runs
 
 The cores also hold what the shells share about tabs (`Tabs.swift`, `Tabs.cs`): the saved
 session, where a tab opens and which one a closed tab hands over to, Reopen Closed Tab, and
-the repeat filter for notifications.
+the repeat filter for notifications; and the tab colors drawn from a page's edge color
+(`EdgePalette.swift`, `EdgePalette.cs`).
 
 Run an app against a CLI from this checkout instead of a bundled one:
 

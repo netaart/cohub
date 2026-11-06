@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json.Nodes;
 using Cohub.Core;
 
@@ -18,7 +17,7 @@ internal sealed class ShellApp : IDisposable
     private Updates? updates;
     private Gtk.CssProvider? edgeStyle;
     private RuntimeOverview overview = RuntimeOverview.Empty;
-    private string? appliedEdge;
+    private EdgePalette? appliedPalette;
     private bool saveQueued;
     private Gtk.AboutDialog? about;
 
@@ -44,7 +43,7 @@ internal sealed class ShellApp : IDisposable
     public WebKit.NetworkSession Session { get; private set; } = null!;
     public bool Quitting { get; private set; }
 
-    public string EdgeColor => State.EdgeColor is { } hex && IsColor(hex) ? hex : "#ffffff";
+    public string EdgeColor => Rgb.Parse(State.EdgeColor)?.Hex ?? "#ffffff";
     public bool CanReopenClosedTab => !closedTabs.IsEmpty;
 
     public int Run(string[] args)
@@ -314,16 +313,18 @@ internal sealed class ShellApp : IDisposable
 
     public void ApplyEdge(string? edge)
     {
-        var hex = edge is not null && IsColor(edge) ? edge : EdgeColor;
-        if (hex == appliedEdge) return;
-        appliedEdge = hex;
-        var value = uint.Parse(hex.AsSpan(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-        var dark = 0.2126 * (value >> 16 & 0xFF) + 0.7152 * (value >> 8 & 0xFF) + 0.0722 * (value & 0xFF) < 128;
-        Adw.StyleManager.GetDefault().ColorScheme = dark ? Adw.ColorScheme.ForceDark : Adw.ColorScheme.ForceLight;
-        var foreground = dark ? "#ffffff" : "#1f1f1f";
+        var palette = EdgePalette.For(Rgb.Parse(edge) ?? Rgb.Parse(EdgeColor)!.Value);
+        if (palette == appliedPalette) return;
+        appliedPalette = palette;
+        Adw.StyleManager.GetDefault().ColorScheme = palette.Dark ? Adw.ColorScheme.ForceDark : Adw.ColorScheme.ForceLight;
+        var (page, strip, text) = (palette.Edge.Hex, palette.Strip.Hex, palette.Text.Hex);
         edgeStyle?.LoadFromData($$"""
-            window.cohub, window.cohub headerbar, window.cohub tabbar .box { background: {{hex}}; color: {{foreground}}; }
+            window.cohub, window.cohub headerbar { background: {{page}}; color: {{text}}; }
+            window.cohub.cohub-tabbed headerbar, window.cohub tabbar .box { background: {{strip}}; color: {{text}}; }
             window.cohub headerbar, window.cohub tabbar .box { box-shadow: none; border-bottom: none; }
+            window.cohub tabbar tab { color: {{palette.Muted.Hex}}; }
+            window.cohub tabbar tab:hover { background: {{palette.Hover.Hex}}; }
+            window.cohub tabbar tab:selected { background: {{page}}; color: {{text}}; }
             menubutton.cohub-ready image { color: #16a34a; }
             menubutton.cohub-connecting image { color: #eab308; }
             menubutton.cohub-error image { color: #dc2626; }
@@ -347,7 +348,7 @@ internal sealed class ShellApp : IDisposable
             },
             [HostProtocol.Methods.AppearanceSet] = parameters =>
             {
-                if (JsonFields.Text(parameters, "backgroundColor") is not { } hex || !IsColor(hex)) throw BridgeException.Failed("appearance.set requires a #rrggbb backgroundColor");
+                if (JsonFields.Text(parameters, "backgroundColor") is not { } hex || Rgb.Parse(hex) is null) throw BridgeException.Failed("appearance.set requires a #rrggbb backgroundColor");
                 if (State.EdgeColor != hex)
                 {
                     State.EdgeColor = hex;
@@ -547,9 +548,6 @@ internal sealed class ShellApp : IDisposable
         var onPath = (System.Environment.GetEnvironmentVariable("PATH") ?? "").Split(':').Any(entry => entry.TrimEnd('/') == directory);
         window.Inform(Strings.L("The cohub command is installed."), onPath ? Strings.L("Open a new terminal and run cohub.") : Strings.Format("Add {0} to your PATH, then run cohub.", directory));
     }
-
-    private static bool IsColor(string hex) =>
-        hex.Length == 7 && hex[0] == '#' && uint.TryParse(hex.AsSpan(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out _);
 
     public static void Log(string line) => Console.Error.WriteLine($"Cohub: {line}");
 }

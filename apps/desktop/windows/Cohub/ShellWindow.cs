@@ -17,6 +17,8 @@ internal sealed class ShellWindow : Window
     private readonly Grid pages = new();
     private readonly TabStrip strip;
     private readonly DispatcherTimer idle = new() { Interval = TimeSpan.FromMinutes(1) };
+    private EdgePalette? palette;
+    private (EdgePalette Palette, bool Tabbed)? painted;
     private bool discarding;
 
     public ShellWindow(ShellApp app, Window? cascadeFrom, ShellState.Placement? placement = null)
@@ -36,7 +38,7 @@ internal sealed class ShellWindow : Window
         Content = layout;
         Place(cascadeFrom, placement);
         PreviewKeyDown += OnPreviewKeyDown;
-        SourceInitialized += (_, _) => Native.TintTitleBar(Handle, Edge);
+        SourceInitialized += (_, _) => Native.TintTitleBar(Handle, Caption);
         Activated += (_, _) =>
         {
             app.WindowActivated(this);
@@ -59,7 +61,17 @@ internal sealed class ShellWindow : Window
     public IReadOnlyList<ShellTab> Tabs => tabs;
     public ShellTab? Selected { get; private set; }
     public int SelectedIndex => Selected is null ? 0 : Math.Max(tabs.IndexOf(Selected), 0);
-    private Color Edge => app.EdgeColor(Selected?.Edge);
+    private Rgb Caption => tabs.Count > 1 ? Palette.Strip : Palette.Edge;
+
+    private EdgePalette Palette
+    {
+        get
+        {
+            var edge = app.EdgeColor(Selected?.Edge);
+            if (palette is null || palette.Edge != edge) palette = EdgePalette.For(edge);
+            return palette;
+        }
+    }
 
     public ShellTab Add(SessionTab session, int? index = null, bool select = true, bool loads = true)
     {
@@ -182,17 +194,21 @@ internal sealed class ShellWindow : Window
     public void TabChanged(ShellTab tab)
     {
         if (tab == Selected) UpdateChrome();
-        else strip.Update(tabs, Selected, Edge);
+        else strip.Update(tabs, Selected, Palette);
         app.SessionChanged();
     }
 
     private void UpdateChrome()
     {
-        var edge = Edge;
+        var current = Palette;
         Title = Selected?.Title ?? "Cohub";
-        Background = new SolidColorBrush(edge);
-        if (Handle != IntPtr.Zero) Native.TintTitleBar(Handle, edge);
-        strip.Update(tabs, Selected, edge);
+        if ((current, tabs.Count > 1) != painted)
+        {
+            painted = (current, tabs.Count > 1);
+            Background = new SolidColorBrush(current.Edge.Media());
+            if (Handle != IntPtr.Zero) Native.TintTitleBar(Handle, Caption);
+        }
+        strip.Update(tabs, Selected, current);
     }
 
     public void Reveal()
