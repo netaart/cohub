@@ -22,6 +22,7 @@ const mocks = [
     set: async (key: string, value: string) => { cache.set(key, value); },
   } } }),
   mock.module("../src/object-presign.js", { exports: { createPresignedGetObjectUrl: () => {} } }),
+  mock.module("../src/checkpoint-storage.js", { exports: { ensureCheckpointObjects: async () => undefined, CheckpointObjectsUnavailableError: class extends Error {} } }),
   mock.module("../src/space-sandbox-rpc.js", { exports: {
     getSandboxCapabilities: async () => ({ fsTreePagination: supportsPagination }),
     callSandboxRpc: async (_space: string, method: string, params: Record<string, unknown>) => { assert.equal(method, "fs.tree"); return rpc(params); },

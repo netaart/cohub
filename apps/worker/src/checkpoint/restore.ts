@@ -1,7 +1,7 @@
 import { createWriteStream } from "node:fs";
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { copyFile, lstat, mkdir, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, readdir, readlink, rm, symlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
@@ -9,9 +9,18 @@ import { eq } from "drizzle-orm";
 import { checkpoints, spaces } from "@cohub/db";
 import { db } from "../db.js";
 import { config } from "../config.js";
-import { getCheckpointSystemRepoDir, CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PATH } from "./paths.js";
-import { ensureGitRepo, runGit } from "./git.js";
-import { getCheckpointAssetClient } from "./assets.js";
+import {
+  checkpointGitDir,
+  hasCommit,
+  initCheckpointRepo,
+  installPacks,
+  markCheckpointCommitComplete,
+  readCheckpointManifest,
+  runCheckpointGit,
+} from "@cohub/core/checkpoint/storage";
+import { getCheckpointSystemRepoDir, CHECKPOINT_ASSET_MANIFEST_PATH, LEGACY_USER_GIT_REPOS_PATH, USER_GIT_REPOS_PATH } from "./paths.js";
+import { runGit } from "./git.js";
+import { checkpointObjectStore, getCheckpointAssetClient } from "./assets.js";
 import { assertDirectoryEmpty } from "../git.js";
 
 type AssetManifest = {
@@ -19,9 +28,20 @@ type AssetManifest = {
   assets?: Array<{ path: string; objectKey: string; size?: number; sha256?: string; mimeType?: string | null }>;
 };
 
+type RepoBundle = { objectKey: string; sha256: string; size: number };
+
 type UserGitReposManifest = {
   version: number;
-  repos?: Array<{ path: string; head: string | null; branch: string | null; bundle: { objectKey: string; sha256: string; size: number } | null }>;
+  repos?: Array<{
+    path: string;
+    head: string | null;
+    branch: string | null;
+    /** v1: one full bundle. */
+    bundle?: RepoBundle | null;
+    /** v2: bundle chain plus the refs at save time. */
+    bundles?: RepoBundle[];
+    refs?: Record<string, string>;
+  }>;
 };
 
 const toPosix = (value: string) => value.replace(/\\/g, "/");
@@ -98,11 +118,11 @@ async function readJson<T>(path: string, fallback: T): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
-async function archiveSourceCommit(input: { sourceRepoDir: string; commitHash: string; restoreTmpDir: string }) {
+async function archiveCommit(input: { repoDir: string; commitHash: string; restoreTmpDir: string }) {
   await rm(input.restoreTmpDir, { recursive: true, force: true });
   await mkdir(input.restoreTmpDir, { recursive: true, mode: 0o775 });
   await new Promise<void>((resolve, reject) => {
-    const archive = spawn("git", ["-c", `safe.directory=${input.sourceRepoDir}`, "archive", "--format=tar", input.commitHash], { cwd: input.sourceRepoDir, stdio: ["ignore", "pipe", "pipe"] });
+    const archive = spawn("git", ["-c", `safe.directory=${input.repoDir}`, "archive", "--format=tar", input.commitHash], { cwd: input.repoDir, stdio: ["ignore", "pipe", "pipe"] });
     const tar = spawn("tar", ["-xf", "-", "-C", input.restoreTmpDir], { stdio: ["pipe", "ignore", "pipe"] });
     let stderr = "";
     archive.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
@@ -147,62 +167,89 @@ function restoreBranchName(value: string | null) {
   return branch;
 }
 
+const SAFE_REF_REGEX = /^refs\/(heads|tags)\/[a-zA-Z0-9._/-]+$/;
+const OID_REGEX = /^[0-9a-f]{40}$/;
+
+async function restoreBundleChain(input: { repoDir: string; bundleDir: string; bundles: RepoBundle[]; refs: Record<string, string> }) {
+  for (const bundle of input.bundles) {
+    const bundlePath = join(input.bundleDir, `${bundle.sha256}.bundle`);
+    await downloadObjectToFile(bundle.objectKey, bundlePath);
+    await runGit(["bundle", "unbundle", bundlePath], input.repoDir);
+    await rm(bundlePath, { force: true });
+  }
+  for (const [ref, oid] of Object.entries(input.refs)) {
+    if (!SAFE_REF_REGEX.test(ref) || ref.includes("..") || !OID_REGEX.test(oid)) continue;
+    const target = ref.startsWith("refs/heads/") ? `refs/remotes/restore/${ref.slice("refs/heads/".length)}` : ref;
+    await runGit(["update-ref", target, oid], input.repoDir).catch(() => undefined);
+  }
+}
+
 async function restoreUserGitRepos(input: { workspaceDir: string; restoreTmpDir: string; manifest: UserGitReposManifest }) {
   const bundleDir = join(input.restoreTmpDir, ".cohub-restore-bundles");
   await mkdir(bundleDir, { recursive: true, mode: 0o775 });
   for (const repo of input.manifest.repos ?? []) {
-    if (!repo.bundle || !repo.head) continue;
+    const chain = repo.bundles ?? [];
+    if ((!repo.bundle && chain.length === 0) || !repo.head) continue;
     const repoPath = repo.path === "." ? "." : assertSafeRelativePath(repo.path);
     const repoDir = repoPath === "." ? input.workspaceDir : safeJoin(input.workspaceDir, repoPath);
     await mkdir(repoDir, { recursive: true, mode: 0o775 });
-    const bundlePath = join(bundleDir, `${repo.bundle.sha256}.bundle`);
-    await downloadObjectToFile(repo.bundle.objectKey, bundlePath);
     const branch = restoreBranchName(repo.branch);
     await runGit(["init"], repoDir);
-    await runGit(["fetch", bundlePath, "refs/heads/*:refs/remotes/restore/*", "refs/tags/*:refs/tags/*"], repoDir);
+    if (chain.length > 0) {
+      await restoreBundleChain({ repoDir, bundleDir, bundles: chain, refs: repo.refs ?? {} });
+    } else if (repo.bundle) {
+      const bundlePath = join(bundleDir, `${repo.bundle.sha256}.bundle`);
+      await downloadObjectToFile(repo.bundle.objectKey, bundlePath);
+      await runGit(["fetch", bundlePath, "refs/heads/*:refs/remotes/restore/*", "refs/tags/*:refs/tags/*"], repoDir);
+    }
     await runGit(["update-ref", `refs/heads/${branch}`, repo.head], repoDir);
     await runGit(["symbolic-ref", "HEAD", `refs/heads/${branch}`], repoDir);
     await runGit(["reset", "--mixed", repo.head], repoDir);
   }
 }
 
+/**
+ * Make `commitHash` readable in a space's cache repository: from its storage
+ * manifest when there is one, otherwise from the legacy source repository.
+ */
+export async function prepareCheckpointRepo(input: { sourceSpaceId: string; targetRepoDir: string; commitHash: string }) {
+  await initCheckpointRepo(input.targetRepoDir);
+  const manifest = await readCheckpointManifest(checkpointObjectStore, input.commitHash);
+  if (manifest) {
+    await installPacks(checkpointObjectStore, input.targetRepoDir, manifest.packs);
+    if (!await hasCommit(input.targetRepoDir, input.commitHash)) throw new Error(`checkpoint packs do not contain commit ${input.commitHash}`);
+    await markCheckpointCommitComplete(input.targetRepoDir, input.commitHash);
+  } else if (!await hasCommit(input.targetRepoDir, input.commitHash)) {
+    const sourceRepoDir = getCheckpointSystemRepoDir(input.sourceSpaceId);
+    await runCheckpointGit(["fetch", "-q", "--no-tags", sourceRepoDir, input.commitHash], { cwd: input.targetRepoDir });
+  }
+  await runCheckpointGit(["update-ref", "refs/heads/main", input.commitHash], { cwd: input.targetRepoDir, env: { GIT_DIR: checkpointGitDir(input.targetRepoDir) } });
+  return { fromManifest: Boolean(manifest) };
+}
+
+async function readCommitJson<T>(restoreTmpDir: string, paths: string[], fallback: T): Promise<T> {
+  for (const path of paths) {
+    const value = await readJson<T | null>(join(restoreTmpDir, path), null);
+    if (value) return value;
+  }
+  return fallback;
+}
+
 export async function restoreWorkspaceFromCheckpoint(input: {
   checkpointId: string;
   targetWorkspaceDir: string;
+  targetRepoDir: string;
   restoreTmpDir: string;
 }) {
   const [checkpoint] = await db.select().from(checkpoints).where(eq(checkpoints.id, input.checkpointId)).limit(1);
   if (!checkpoint) throw new Error("checkpoint not found");
   const [sourceSpace] = await db.select().from(spaces).where(eq(spaces.id, checkpoint.spaceId)).limit(1);
   if (!sourceSpace) throw new Error("checkpoint source space not found");
-  const sourceRepoDir = getCheckpointSystemRepoDir(sourceSpace.id);
-  await archiveSourceCommit({ sourceRepoDir, commitHash: checkpoint.commitHash, restoreTmpDir: input.restoreTmpDir });
+  const repo = await prepareCheckpointRepo({ sourceSpaceId: sourceSpace.id, targetRepoDir: input.targetRepoDir, commitHash: checkpoint.commitHash });
+  await archiveCommit({ repoDir: input.targetRepoDir, commitHash: checkpoint.commitHash, restoreTmpDir: input.restoreTmpDir });
   const assetManifest = await readJson<AssetManifest>(join(input.restoreTmpDir, CHECKPOINT_ASSET_MANIFEST_PATH), { version: 1, assets: [] });
-  const gitReposManifest = await readJson<UserGitReposManifest>(join(input.restoreTmpDir, USER_GIT_REPOS_PATH), { version: 1, repos: [] });
+  const gitReposManifest = await readCommitJson<UserGitReposManifest>(input.restoreTmpDir, [USER_GIT_REPOS_PATH, LEGACY_USER_GIT_REPOS_PATH], { version: 1, repos: [] });
   await restoreFilesFromArchive({ restoreTmpDir: input.restoreTmpDir, targetDir: input.targetWorkspaceDir, assetManifest });
   await restoreUserGitRepos({ workspaceDir: input.targetWorkspaceDir, restoreTmpDir: input.restoreTmpDir, manifest: gitReposManifest });
-  return { checkpoint, sourceSpace, assetManifest, gitReposManifest };
-}
-
-export async function restoreSystemRepoFromCheckpoint(input: {
-  sourceSpaceId: string;
-  targetRepoDir: string;
-  commitHash: string;
-}) {
-  await rm(input.targetRepoDir, { recursive: true, force: true });
-  await mkdir(input.targetRepoDir, { recursive: true, mode: 0o775 });
-  await ensureGitRepo(input.targetRepoDir, "main");
-  const sourceRepoDir = getCheckpointSystemRepoDir(input.sourceSpaceId);
-  await runGit(["remote", "add", "source", sourceRepoDir], input.targetRepoDir);
-  try {
-    await runGit(["fetch", "source", input.commitHash], input.targetRepoDir);
-    await runGit(["checkout", "-B", "main", "FETCH_HEAD"], input.targetRepoDir);
-  } finally {
-    await runGit(["remote", "remove", "source"], input.targetRepoDir).catch(() => undefined);
-  }
-}
-
-export async function writeLatestMeta(input: { latestDir: string; meta: Record<string, unknown> }) {
-  await mkdir(join(input.latestDir, dirname(CHECKPOINT_META_PATH)), { recursive: true, mode: 0o775 });
-  await writeFile(join(input.latestDir, CHECKPOINT_META_PATH), `${JSON.stringify(input.meta, null, 2)}\n`);
+  return { checkpoint, sourceSpace, assetManifest, gitReposManifest, repo };
 }

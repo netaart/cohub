@@ -14,6 +14,7 @@ import { isTextMime, mimeTypeForPath, type SpaceFsEntry, type SpaceFsFileRespons
 import { config } from "./config.js";
 import { db } from "./db/index.js";
 import { createPresignedGetObjectUrl } from "./object-presign.js";
+import { CheckpointObjectsUnavailableError, ensureCheckpointObjects } from "./checkpoint-storage.js";
 import { redisCommandClient } from "./redis.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -326,7 +327,20 @@ const normalizeCheckpointPath = (input = "", options: { allowEmpty?: boolean } =
   return parts.join("/");
 };
 
-export const getCheckpointRepoDir = (spaceId: string) => {
+/** Cache repository for a space's checkpoints, with `commits` ready to read. */
+export async function resolveCheckpointRepo(spaceId: string, commits: string[]) {
+  const repoDir = getCheckpointRepoDir(spaceId);
+  try {
+    await ensureCheckpointObjects(repoDir, commits);
+  } catch (error) {
+    if (error instanceof CheckpointObjectsUnavailableError) throw new CheckpointFsError(503, "checkpoint_repo_unavailable", "Checkpoint objects are unavailable.");
+    logger.warn("[checkpoint-fs] failed to prepare checkpoint objects", { spaceId, commits, error: errorTelemetry(error) });
+    throw new CheckpointFsError(503, "checkpoint_repo_unavailable", "Checkpoint storage is temporarily unavailable.");
+  }
+  return repoDir;
+}
+
+const getCheckpointRepoDir = (spaceId: string) => {
   if (!config.spaceSystemRoot) throw new CheckpointFsError(503, "checkpoint_repo_unavailable", "Checkpoint storage is not configured.");
   const root = resolve(config.spaceSystemRoot);
   const target = resolve(root, spaceId, "repo");
@@ -698,8 +712,8 @@ export async function listCheckpointDirectory(input: { spaceId: string; checkpoi
     const repoDir = await observeStage(
       observation,
       "repo_dir_resolve",
-      "Local checkpoint repository path is derived and constrained under the configured storage root.",
-      () => getCheckpointRepoDir(checkpoint.spaceId),
+      "Checkpoint cache repository is resolved under the storage root and its packs are fetched from object storage on first use.",
+      () => resolveCheckpointRepo(checkpoint.spaceId, [checkpoint.commitHash]),
       () => ({ repoConfigured: Boolean(config.spaceSystemRoot) }),
     );
     const finish = (tree: SpaceFsTreeResponse) => input.pagination
@@ -781,8 +795,8 @@ export async function readCheckpointFile(input: { spaceId: string; checkpointId:
     const repoDir = await observeStage(
       observation,
       "repo_dir_resolve",
-      "Local checkpoint repository path is derived and constrained under the configured storage root.",
-      () => getCheckpointRepoDir(checkpoint.spaceId),
+      "Checkpoint cache repository is resolved under the storage root and its packs are fetched from object storage on first use.",
+      () => resolveCheckpointRepo(checkpoint.spaceId, [checkpoint.commitHash]),
       () => ({ repoConfigured: Boolean(config.spaceSystemRoot) }),
     );
     await assertGitObjectType(repoDir, checkpoint, path, "blob", observation);

@@ -21,6 +21,10 @@ export type ScannedFile = {
   size: number;
   executable: boolean;
   mimeType: string | null;
+  /** Change detection fingerprint: nanosecond mtime/ctime and inode, as decimal strings. */
+  mtimeNs: string;
+  ctimeNs: string;
+  ino: string;
 };
 
 export type ScanWarning = {
@@ -83,8 +87,9 @@ export async function scanWorkspace(root: string) {
     await Promise.all(names.map(async (name) => {
       const absPath = join(dir, name);
       const rel = normalizeRel(root, absPath);
-      const st = await lstat(absPath).catch(() => null);
+      const st = await lstat(absPath, { bigint: true }).catch(() => null);
       if (!st) return;
+      const stamp = { mtimeNs: st.mtimeNs.toString(), ctimeNs: st.ctimeNs.toString(), ino: st.ino.toString() };
       const isDirectory = st.isDirectory() && !st.isSymbolicLink();
       const ignorePath = pathForIgnore(rel, isDirectory);
 
@@ -106,9 +111,10 @@ export async function scanWorkspace(root: string) {
           path: rel,
           absPath,
           type: "file",
-          size: st.size,
-          executable: (st.mode & 0o111) !== 0,
+          size: Number(st.size),
+          executable: (st.mode & 0o111n) !== 0n,
           mimeType: mimeTypeForPath(rel),
+          ...stamp,
         });
         return;
       }
@@ -118,7 +124,7 @@ export async function scanWorkspace(root: string) {
           warnings.push({ path: rel, type: "symlink", action: "skipped", reason: "unsafe_symlink_target" });
           return;
         }
-        candidates.push({ path: rel, absPath, type: "symlink", size: st.size, executable: false, mimeType: null });
+        candidates.push({ path: rel, absPath, type: "symlink", size: Number(st.size), executable: false, mimeType: null, ...stamp });
         return;
       }
       warnings.push({ path: rel, type: st.isSocket() ? "socket" : st.isFIFO() ? "fifo" : st.isBlockDevice() ? "block_device" : st.isCharacterDevice() ? "char_device" : "unknown", action: "skipped", reason: "unsupported_file_type" });

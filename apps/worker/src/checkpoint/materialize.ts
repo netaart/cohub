@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, readlink, rename, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, readdir, readlink, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import type { ScannedFile } from "./scan.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH } from "./paths.js";
@@ -43,6 +43,53 @@ async function collectExisting(root: string, dir = root): Promise<string[]> {
   return nested.flat();
 }
 
+async function writeLatestMetaFile(latestDir: string, meta: Record<string, unknown>) {
+  await mkdir(join(latestDir, metaDir), { recursive: true, mode: 0o775 });
+  const metaTarget = join(latestDir, CHECKPOINT_META_PATH);
+  const tmpMeta = `${metaTarget}.tmp-${crypto.randomUUID()}`;
+  await writeFile(tmpMeta, `${JSON.stringify(meta, null, 2)}\n`);
+  await rename(tmpMeta, metaTarget).finally(() => unlink(tmpMeta).catch(() => undefined));
+}
+
+export async function readLatestCommit(latestDir: string) {
+  const raw = await readFile(join(latestDir, CHECKPOINT_META_PATH), "utf8").catch(() => null);
+  if (!raw) return null;
+  try {
+    const meta = JSON.parse(raw) as { commitHash?: unknown };
+    return typeof meta.commitHash === "string" ? meta.commitHash : null;
+  } catch {
+    return null;
+  }
+}
+
+async function removeWithEmptyParents(latestDir: string, path: string) {
+  await removePath(join(latestDir, path));
+  const parts = toPosix(path).split("/").slice(0, -1);
+  while (parts.length > 0) {
+    if (await rmdir(join(latestDir, ...parts)).then(() => false, () => true)) return;
+    parts.pop();
+  }
+}
+
+/**
+ * Apply one save's changes to latest. The meta is cleared first, so an
+ * interrupted update is detected by the next save and rebuilt in full.
+ */
+export async function applyLatestChanges(input: {
+  latestDir: string;
+  upserts: ScannedFile[];
+  deletes: string[];
+  checkpointMeta: Record<string, unknown>;
+}) {
+  await writeLatestMetaFile(input.latestDir, { incomplete: true });
+  for (const path of input.deletes) await removeWithEmptyParents(input.latestDir, path);
+  const queue = [...input.upserts];
+  await Promise.all(Array.from({ length: Math.min(16, queue.length) }, async () => {
+    for (let file = queue.shift(); file; file = queue.shift()) await copyEntryToLatest(file, input.latestDir);
+  }));
+  await writeLatestMetaFile(input.latestDir, input.checkpointMeta);
+}
+
 export async function materializeLatest(input: {
   latestDir: string;
   files: ScannedFile[];
@@ -53,12 +100,8 @@ export async function materializeLatest(input: {
   for (const file of input.files) keepPathWithParents(keep, file.path);
   keepPathWithParents(keep, CHECKPOINT_META_PATH);
 
+  await writeLatestMetaFile(input.latestDir, { incomplete: true });
   await Promise.all(input.files.map((file) => copyEntryToLatest(file, input.latestDir)));
-  await mkdir(join(input.latestDir, metaDir), { recursive: true, mode: 0o775 });
-  const metaTarget = join(input.latestDir, CHECKPOINT_META_PATH);
-  const tmpMeta = `${metaTarget}.tmp-${crypto.randomUUID()}`;
-  await writeFile(tmpMeta, `${JSON.stringify(input.checkpointMeta, null, 2)}\n`);
-  await rename(tmpMeta, metaTarget).finally(() => unlink(tmpMeta).catch(() => undefined));
 
   const existing = (await collectExisting(input.latestDir)).sort((a, b) => b.length - a.length);
   for (const rel of existing) {
@@ -67,4 +110,5 @@ export async function materializeLatest(input: {
       await removePath(join(input.latestDir, rel));
     }
   }
+  await writeLatestMetaFile(input.latestDir, input.checkpointMeta);
 }

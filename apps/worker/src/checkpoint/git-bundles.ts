@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { CHECKPOINT_COVER_FANOUT, CHECKPOINT_COVER_MAX_LEVEL } from "@cohub/core/checkpoint/storage";
 import { uploadObjectFileIfMissing } from "./assets.js";
 import { runGitWithOutput } from "./git.js";
 import { ensureWorkerLocalTmpDir, getWorkerLocalTmpDir, removeWorkerLocalTmpDir } from "../local-tmp.js";
@@ -12,10 +13,18 @@ export type UserGitRemote = {
   credentialSanitized: boolean;
 };
 
+/**
+ * One link of a repository's bundle chain. Restoring unbundles the chain in
+ * order: each bundle holds what its repository gained after `base`, whose
+ * objects the earlier links already hold. A level-k bundle merges
+ * FANOUT^k level-0 links; the first full bundle is at the top level.
+ */
 export type UserGitRepoBundle = {
   sha256: string;
   size: number;
   objectKey: string;
+  level: number;
+  base: string[];
 };
 
 export type UserGitRepoRecord = {
@@ -24,19 +33,22 @@ export type UserGitRepoRecord = {
   branch: string | null;
   dirty: boolean;
   fingerprint: string | null;
-  bundle: UserGitRepoBundle | null;
+  refs: Record<string, string>;
+  bundles: UserGitRepoBundle[];
   remotes: UserGitRemote[];
 };
 
 type BundleCache = {
-  version: 1;
+  version: 2;
   repos: Record<string, {
     fingerprint: string;
-    bundle: UserGitRepoBundle;
+    refs: Record<string, string>;
+    bundles: UserGitRepoBundle[];
   }>;
 };
 
-const cacheFileName = "git-bundle-cache.v1.json";
+const cacheFileName = "git-bundle-cache.v2.json";
+const legacyCacheFileName = "git-bundle-cache.v1.json";
 
 const sha256File = (path: string) => new Promise<string>((resolve, reject) => {
   const hash = createHash("sha256");
@@ -53,18 +65,25 @@ const buildGitBundleObjectKey = (sha256: string) =>
 
 async function loadCache(systemDir: string): Promise<BundleCache> {
   const raw = await readFile(join(systemDir, cacheFileName), "utf8").catch(() => null);
-  if (!raw) return { version: 1, repos: {} };
+  if (!raw) return { version: 2, repos: {} };
   try {
     const parsed = JSON.parse(raw) as BundleCache;
-    return parsed?.version === 1 && parsed.repos ? parsed : { version: 1, repos: {} };
+    return parsed?.version === 2 && parsed.repos ? parsed : { version: 2, repos: {} };
   } catch {
-    return { version: 1, repos: {} };
+    return { version: 2, repos: {} };
   }
 }
 
 async function saveCache(systemDir: string, cache: BundleCache) {
   const path = join(systemDir, cacheFileName);
-  await writeFile(path, `${JSON.stringify(cache, null, 2)}\n`);
+  const tmp = `${path}.tmp-${crypto.randomUUID()}`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(cache)}\n`);
+    await rename(tmp, path);
+  } finally {
+    await rm(tmp, { force: true }).catch(() => undefined);
+  }
+  await rm(join(systemDir, legacyCacheFileName), { force: true }).catch(() => undefined);
 }
 
 const sanitizeRemoteUrl = (value: string): { url: string; credentialSanitized: boolean } => {
@@ -98,70 +117,112 @@ async function getRemotes(repoDir: string): Promise<UserGitRemote[]> {
   return remotes;
 }
 
-async function getRepoFingerprint(repoDir: string) {
+async function getRepoState(repoDir: string) {
   const head = await runGitWithOutput(["rev-parse", "HEAD"], repoDir).then((result) => result.stdout.trim(), () => null);
-  if (!head) return { head: null, branch: null, dirty: false, fingerprint: null };
+  if (!head) return { head: null, branch: null, dirty: false, fingerprint: null, refs: {} };
   const branchResult = await runGitWithOutput(["rev-parse", "--abbrev-ref", "HEAD"], repoDir).then((result) => result.stdout.trim(), () => null);
   const branch = branchResult && branchResult !== "HEAD" ? branchResult : null;
-  const refs = await runGitWithOutput(["for-each-ref", "--format=%(refname) %(objectname)"], repoDir).then((result) => result.stdout.split("\n").map((line) => line.trim()).filter(Boolean).sort().join("\n"), () => "");
+  const refLines = await runGitWithOutput(["for-each-ref", "--format=%(refname) %(objectname)"], repoDir).then((result) => result.stdout.split("\n").map((line) => line.trim()).filter(Boolean).sort(), () => []);
+  const refs: Record<string, string> = {};
+  for (const line of refLines) {
+    const space = line.lastIndexOf(" ");
+    if (space > 0) refs[line.slice(0, space)] = line.slice(space + 1);
+  }
   const dirty = await runGitWithOutput(["status", "--porcelain"], repoDir).then((result) => result.stdout.trim().length > 0, () => false);
-  return { head, branch, dirty, fingerprint: sha256Text(`${head}\n${refs}\n`) };
+  return { head, branch, dirty, fingerprint: sha256Text(`${head}\n${refLines.join("\n")}\n`), refs };
 }
 
-async function createBundle(input: { repoDir: string; tmpDir: string }) {
+async function existingObjects(repoDir: string, oids: string[]) {
+  const unique = [...new Set(oids)];
+  const present = await Promise.all(unique.map((oid) => runGitWithOutput(["cat-file", "-e", oid], repoDir).then(() => true, () => false)));
+  return unique.filter((_, index) => present[index]);
+}
+
+/** Bundle everything reachable from the repository's refs but not from `base`; null when that is nothing. */
+async function createBundle(input: { repoDir: string; tmpDir: string; base: string[]; level: number }): Promise<UserGitRepoBundle | null> {
   await mkdir(input.tmpDir, { recursive: true, mode: 0o775 });
   const bundlePath = join(input.tmpDir, `${crypto.randomUUID()}.bundle`);
   try {
-    await runGitWithOutput(["bundle", "create", bundlePath, "--all"], input.repoDir);
+    const base = await existingObjects(input.repoDir, input.base);
+    const args = ["bundle", "create", bundlePath, "--all", ...(base.length > 0 ? ["--not", ...base] : [])];
+    const created = await runGitWithOutput(args, input.repoDir).then(() => true, (error: Error) => {
+      if (/empty bundle/i.test(error.message)) return false;
+      throw error;
+    });
+    if (!created) return null;
     const [sha256, st] = await Promise.all([sha256File(bundlePath), stat(bundlePath)]);
     const objectKey = buildGitBundleObjectKey(sha256);
     await uploadObjectFileIfMissing({ filePath: bundlePath, objectKey, size: st.size, mimeType: "application/octet-stream" });
-    return { sha256, size: st.size, objectKey };
+    return { sha256, size: st.size, objectKey, level: input.level, base };
   } finally {
     await rm(bundlePath, { force: true }).catch(() => undefined);
+  }
+}
+
+/** Merge the newest FANOUT links of one level into one link of the next level. */
+async function compactChain(input: { repoDir: string; tmpDir: string; bundles: UserGitRepoBundle[] }) {
+  const bundles = [...input.bundles];
+  for (;;) {
+    const tail = bundles.slice(-CHECKPOINT_COVER_FANOUT);
+    const [first] = tail;
+    if (!first || tail.length < CHECKPOINT_COVER_FANOUT || first.level >= CHECKPOINT_COVER_MAX_LEVEL || tail.some((bundle) => bundle.level !== first.level)) return bundles;
+    const merged = await createBundle({ repoDir: input.repoDir, tmpDir: input.tmpDir, base: first.base, level: first.level + 1 });
+    if (!merged) return bundles;
+    bundles.splice(bundles.length - CHECKPOINT_COVER_FANOUT, CHECKPOINT_COVER_FANOUT, merged);
   }
 }
 
 export async function collectUserGitRepos(input: {
   workspaceDir: string;
   systemDir: string;
-  tmpDir: string;
   repoPaths: string[];
-}): Promise<UserGitRepoRecord[]> {
+}): Promise<{ repos: UserGitRepoRecord[]; uploadedBytes: number }> {
   const cache = await loadCache(input.systemDir);
   const bundleTmpDir = getWorkerLocalTmpDir("git-bundles", crypto.randomUUID());
   const records: UserGitRepoRecord[] = [];
+  const nextRepos: BundleCache["repos"] = {};
+  let uploadedBytes = 0;
 
   try {
     await ensureWorkerLocalTmpDir(bundleTmpDir);
     for (const repoPath of [...new Set(input.repoPaths)].sort()) {
       const repoDir = repoPath === "." ? input.workspaceDir : join(input.workspaceDir, repoPath);
-      const [fingerprint, remotes] = await Promise.all([getRepoFingerprint(repoDir), getRemotes(repoDir)]);
-      let bundle: UserGitRepoBundle | null = null;
+      const [state, remotes] = await Promise.all([getRepoState(repoDir), getRemotes(repoDir)]);
+      let bundles: UserGitRepoBundle[] = [];
 
-      if (fingerprint.fingerprint) {
+      if (state.fingerprint) {
         const cached = cache.repos[repoPath];
-        if (cached?.fingerprint === fingerprint.fingerprint) {
-          bundle = cached.bundle;
+        if (cached?.fingerprint === state.fingerprint) {
+          bundles = cached.bundles;
         } else {
-          bundle = await createBundle({ repoDir, tmpDir: bundleTmpDir });
-          cache.repos[repoPath] = { fingerprint: fingerprint.fingerprint, bundle };
+          const previous = cached?.bundles ?? [];
+          const added = await createBundle({
+            repoDir,
+            tmpDir: bundleTmpDir,
+            base: previous.length > 0 ? Object.values(cached?.refs ?? {}) : [],
+            level: previous.length > 0 ? 0 : CHECKPOINT_COVER_MAX_LEVEL,
+          });
+          uploadedBytes += added?.size ?? 0;
+          bundles = added ? await compactChain({ repoDir, tmpDir: bundleTmpDir, bundles: [...previous, added] }) : previous;
+          uploadedBytes += bundles.filter((bundle) => !previous.includes(bundle) && bundle !== added).reduce((sum, bundle) => sum + bundle.size, 0);
         }
+        nextRepos[repoPath] = { fingerprint: state.fingerprint, refs: state.refs, bundles };
       }
 
       records.push({
         path: repoPath,
-        head: fingerprint.head,
-        branch: fingerprint.branch,
-        dirty: fingerprint.dirty,
-        fingerprint: fingerprint.fingerprint,
-        bundle,
+        head: state.head,
+        branch: state.branch,
+        dirty: state.dirty,
+        fingerprint: state.fingerprint,
+        refs: state.refs,
+        bundles,
         remotes,
       });
     }
 
-    await saveCache(input.systemDir, cache);
-    return records;
+    await saveCache(input.systemDir, { version: 2, repos: nextRepos });
+    return { repos: records, uploadedBytes };
   } finally {
     await removeWorkerLocalTmpDir(bundleTmpDir).catch(() => undefined);
   }

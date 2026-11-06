@@ -112,6 +112,10 @@
       "types": "./dist/checkpoint/ignore.d.ts",
       "default": "./dist/checkpoint/ignore.js"
     },
+    "./checkpoint/storage": {
+      "types": "./dist/checkpoint/storage.d.ts",
+      "default": "./dist/checkpoint/storage.js"
+    },
     "./referrals": {
       "types": "./dist/referrals/index.d.ts",
       "default": "./dist/referrals/index.js"

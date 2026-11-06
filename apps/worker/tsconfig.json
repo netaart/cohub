@@ -102,6 +102,9 @@
       "@cohub/core/checkpoint/ignore": [
         "../../packages/core/src/checkpoint/ignore.ts"
       ],
+      "@cohub/core/checkpoint/storage": [
+        "../../packages/core/src/checkpoint/storage.ts"
+      ],
       "@cohub/core/permissions": [
         "../../packages/core/src/permissions/index.ts"
       ],

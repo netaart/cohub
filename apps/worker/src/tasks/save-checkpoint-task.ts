@@ -1,10 +1,19 @@
+import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Job } from "bullmq";
 import type { TaskPayload } from "@cohub/protocol/task";
 import { normalizeRequestSource } from "@cohub/protocol/provenance";
 import { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 import { checkpoints, spaces } from "@cohub/db";
+import {
+  checkpointGitDir,
+  ensureCheckpointCommits,
+  initCheckpointRepo,
+  markCheckpointCommitComplete,
+  readCheckpointManifest,
+  runCheckpointGit,
+} from "@cohub/core/checkpoint/storage";
 import { checkpointForkReference } from "@cohub/core/references";
 import { enqueueReferences } from "../reference-index-queue.js";
 import { registerTask } from "./registry.js";
@@ -18,24 +27,35 @@ import { publishDecisionsCacheFromFile } from "../decisions-cache.js";
 import { getPromptsDir, publishPromptsCacheFromDir } from "../prompts-cache.js";
 import { getSkillsDir, publishSkillsCacheFromDir } from "../skills-cache.js";
 import { publishSpaceEvent } from "../space-events.js";
-import { uploadAssetIfMissing } from "../checkpoint/assets.js";
+import { ensureWorkerLocalTmpDir, getWorkerLocalTmpDir, removeWorkerLocalTmpDir } from "../local-tmp.js";
+import { checkpointObjectStore } from "../checkpoint/assets.js";
 import {
-  buildStagedDiffSummary,
+  buildCommitDiffSummary,
   materializeDiffMeta,
   materializeFilePatches,
   type CheckpointDiffMeta,
 } from "../checkpoint/diff-precompute.js";
-import { ensureGitRepo, runGit, runGitWithOutput } from "../checkpoint/git.js";
 import { collectUserGitRepos } from "../checkpoint/git-bundles.js";
 import { saveBoardCheckpointSnapshots } from "../checkpoint/board.js";
-import { materializeLatest } from "../checkpoint/materialize.js";
+import { enqueueCheckpointCompaction } from "../checkpoint/compact.js";
+import { loadFileIndex, writeFileIndex } from "../checkpoint/file-index.js";
+import { foldCovers, tilesSequence, uploadPack, writeManifest } from "../checkpoint/manifest.js";
+import { applyLatestChanges, materializeLatest, readLatestCommit } from "../checkpoint/materialize.js";
 import { updateCheckpointMeta } from "../checkpoint/metadata.js";
+import { commitTree, createObjectBuilder, installLocalPack, packObjects, writeTree } from "../checkpoint/objects.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PATH, ensureCheckpointDirs, getCheckpointLatestSubPath } from "../checkpoint/paths.js";
-import { syncSystemRepo, type CheckpointAsset } from "../checkpoint/repo-sync.js";
 import { saveCheckpointWithLock, type SaveCheckpointInput, type SaveCheckpointResult } from "../checkpoint/save.js";
-import { hashFile, scanWorkspace, type ScannedFile } from "../checkpoint/scan.js";
+import { buildSnapshot } from "../checkpoint/snapshot.js";
+import { scanWorkspace } from "../checkpoint/scan.js";
 
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
+
+/** Saves before v3 kept a working tree in the cache repository; nothing reads it any more. */
+async function removeLegacyWorkingTree(repoDir: string) {
+  const names = await readdir(repoDir).catch(() => []);
+  await Promise.all(names.filter((name) => name !== ".git").map((name) => rm(join(repoDir, name), { recursive: true, force: true })));
+  await rm(join(repoDir, ".git", "index"), { force: true });
+}
 
 const buildCommitMessage = (description?: string | null) => {
   const trimmed = description?.trim();
@@ -66,6 +86,16 @@ const timeIt = async <T>(timings: SaveCheckpointTimings, label: string, fn: () =
 };
 
 export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promise<SaveCheckpointResult> => {
+  const localTmpDir = getWorkerLocalTmpDir("checkpoint-save", input.spaceId, crypto.randomUUID());
+  await ensureWorkerLocalTmpDir(localTmpDir);
+  try {
+    return await saveCheckpointInDir(input, localTmpDir);
+  } finally {
+    await removeWorkerLocalTmpDir(localTmpDir).catch(() => undefined);
+  }
+};
+
+const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: string): Promise<SaveCheckpointResult> => {
   const spaceId = input.spaceId;
   const description = input.description ?? null;
 
@@ -86,33 +116,35 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
   const branch = "main";
   const commitMessage = buildCommitMessage(description);
   const dirs = await timeIt(timings, "ensureCheckpointDirs", () => ensureCheckpointDirs(spaceId));
+  await timeIt(timings, "initCheckpointRepo", () => initCheckpointRepo(dirs.repoDir));
 
-  await timeIt(timings, "ensureGitRepo", () => ensureGitRepo(dirs.repoDir, branch));
+  const parentCheckpointId = space.headCheckpointId ?? null;
+  const parent = parentCheckpointId
+    ? (await db.select({ commitHash: checkpoints.commitHash, rootCheckpointId: checkpoints.rootCheckpointId }).from(checkpoints).where(eq(checkpoints.id, parentCheckpointId)).limit(1))[0] ?? null
+    : null;
+  if (parentCheckpointId && !parent) throw new Error(`head checkpoint ${parentCheckpointId} not found`);
+  const parentCommitHash = parent?.commitHash ?? null;
+  const rootCheckpointId = parentCheckpointId ? (parent?.rootCheckpointId ?? parentCheckpointId) : checkpointId;
+
+  const parentManifest = parentCommitHash
+    ? await timeIt(timings, "loadParentObjects", async () => {
+      await ensureCheckpointCommits(checkpointObjectStore, dirs.repoDir, [parentCommitHash]);
+      const manifest = await readCheckpointManifest(checkpointObjectStore, parentCommitHash);
+      return manifest && tilesSequence(manifest.packs, 0, manifest.seq) ? manifest : null;
+    })
+    : null;
+  const previousIndex = await timeIt(timings, "loadFileIndex", () => loadFileIndex(dirs.systemDir, parentCommitHash));
+
   await progress("scan_workspace");
+  const scanStartedAtNs = BigInt(Date.now()) * 1_000_000n;
   const scan = await timeIt(timings, "scanWorkspace", () => scanWorkspace(dirs.workspaceDir));
-  await progress("upload_assets", { fileCount: scan.files.length, gitRepoCount: scan.gitRepos.length });
-  const assets: CheckpointAsset[] = [];
-  const smallFiles: ScannedFile[] = [];
-  await timeIt(timings, "processAssets", async () => {
-    for (const file of scan.files) {
-      if (file.type === "file" && file.size > config.checkpointAssetThresholdBytes) {
-        const sha256 = await timeIt(timings, "hashAssets", () => hashFile(file.absPath));
-        const objectKey = await timeIt(timings, "uploadAssets", () => uploadAssetIfMissing({ filePath: file.absPath, sha256, size: file.size, mimeType: file.mimeType }));
-        assets.push({ path: file.path, sha256, size: file.size, mimeType: file.mimeType, objectKey });
-      } else {
-        smallFiles.push(file);
-      }
-    }
-  });
 
-  await progress("bundle_git_repos", { assetCount: assets.length });
+  await progress("bundle_git_repos", { fileCount: scan.files.length, gitRepoCount: scan.gitRepos.length });
   const userGitRepos = await timeIt(timings, "collectUserGitRepos", () => collectUserGitRepos({
     workspaceDir: dirs.workspaceDir,
     systemDir: dirs.systemDir,
-    tmpDir: dirs.tmpDir,
     repoPaths: scan.gitRepos.map((repo) => repo.path),
   }));
-  const userGitReposManifest = { version: 1, repos: userGitRepos };
 
   const gitCheckpointMeta = {
     version: 1,
@@ -124,57 +156,64 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
     branch,
   };
 
-  await progress("commit_checkpoint", { gitRepoCount: userGitRepos.length });
-  await timeIt(timings, "syncSystemRepo", () => syncSystemRepo({ repoDir: dirs.repoDir, smallFiles, assets, gitCheckpointMeta, userGitRepos: userGitReposManifest }));
-  await timeIt(timings, "gitAdd", () => runGit(["add", "-A"], dirs.repoDir));
+  await progress("upload_assets", { fileCount: scan.files.length });
+  const builder = await createObjectBuilder(dirs.repoDir, localTmpDir);
+  const snapshot = await timeIt(timings, "writeObjects", () => buildSnapshot({
+    builder,
+    files: scan.files,
+    previous: previousIndex,
+    assetThresholdBytes: config.checkpointAssetThresholdBytes,
+    scanStartedAtNs,
+    systemFiles: { checkpointMeta: gitCheckpointMeta, userGitRepos: { version: 2, repos: userGitRepos.repos } },
+    onAssetTiming: (label, ms) => { timings[label] = (timings[label] ?? 0) + Math.round(ms); },
+  }));
+  const tree = await timeIt(timings, "writeTree", () => writeTree(builder, snapshot.tree));
+  const commitHash = await timeIt(timings, "commitTree", () => commitTree(builder, { tree, parent: parentCommitHash, message: commitMessage, date: createdAt }));
 
-  // Resolve parent commit once — used both for lineage and precomputed diff.
-  const parentCheckpointId = space.headCheckpointId ?? null;
-  const parentCommitHash = await timeIt(timings, "resolveParentCommit", async () => {
-    if (!parentCheckpointId) return null;
-    const [parent] = await db
-      .select({ commitHash: checkpoints.commitHash, rootCheckpointId: checkpoints.rootCheckpointId })
-      .from(checkpoints)
-      .where(eq(checkpoints.id, parentCheckpointId))
-      .limit(1);
-    return parent?.commitHash ?? null;
+  await progress("commit_checkpoint", { commitHash });
+  const seq = parentManifest ? parentManifest.seq + 1 : 0;
+  const pack = await timeIt(timings, "packObjects", () => packObjects({
+    env: builder.env,
+    cwd: localTmpDir,
+    outDir: join(localTmpDir, "pack"),
+    include: [commitHash],
+    exclude: parentManifest && parentCommitHash ? [parentCommitHash] : [],
+    fast: true,
+  }));
+  const packRef = await timeIt(timings, "uploadPack", () => uploadPack(spaceId, pack, { first: seq, last: seq, tip: commitHash }));
+  await timeIt(timings, "installPack", async () => {
+    await installLocalPack(dirs.repoDir, pack);
+    await markCheckpointCommitComplete(dirs.repoDir, commitHash);
   });
 
-  // Staged diff summary is pure git metadata (name-status + numstat). No workspace walk.
-  const assetPaths = new Set(assets.map((asset) => asset.path));
-  const stagedDiff = await timeIt(timings, "buildStagedDiffSummary", () => buildStagedDiffSummary({
+  const assetPaths = new Set(snapshot.assets.map((asset) => asset.path));
+  const diff = await timeIt(timings, "buildDiffSummary", () => buildCommitDiffSummary({
     repoDir: dirs.repoDir,
-    spaceId,
     checkpointId,
+    commitHash,
     parentCheckpointId,
     parentCommitHash,
     assetPaths,
   }));
-  const diffStats = stagedDiff.stats;
+  const diffStats = diff.stats;
 
-  await timeIt(timings, "gitCommit", () => runGit(["commit", "--allow-empty", "-m", commitMessage], dirs.repoDir));
-  const head = await timeIt(timings, "gitRevParse", () => runGitWithOutput(["rev-parse", "HEAD"], dirs.repoDir));
-  const commitHash = head.stdout.trim();
-
-  // Persist precomputed parent diff: inline in meta when small, OSS when large.
-  // Also precompute a capped set of text file patches (sequential, NFS-friendly).
   let diffMeta: CheckpointDiffMeta | null = null;
   try {
     const filePatches = await timeIt(timings, "materializeFilePatches", () => materializeFilePatches({
       repoDir: dirs.repoDir,
       parentCommitHash,
       commitHash,
-      files: stagedDiff.summary.files,
+      files: diff.summary.files,
       spaceId,
       checkpointId,
-      tmpDir: dirs.tmpDir,
+      tmpDir: localTmpDir,
     }));
     diffMeta = await timeIt(timings, "materializeDiffMeta", () => materializeDiffMeta({
-      summary: stagedDiff.summary,
+      summary: diff.summary,
       commitHash,
       spaceId,
       checkpointId,
-      tmpDir: dirs.tmpDir,
+      tmpDir: localTmpDir,
       files: filePatches,
     }));
   } catch (error) {
@@ -182,17 +221,21 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
     console.warn(`[save_checkpoint] failed to materialize diff meta space=${spaceId} checkpoint=${checkpointId}:`, error);
   }
 
-  const latestMeta = { ...gitCheckpointMeta, commitHash, materializedAt: new Date().toISOString() };
-  await progress("materialize_latest", { commitHash });
-  await timeIt(timings, "materializeLatest", () => materializeLatest({ latestDir: dirs.latestDir, files: scan.files, checkpointMeta: latestMeta }));
+  const manifest = await timeIt(timings, "writeManifest", async () => {
+    const basePacks = parentManifest ? await foldCovers(parentManifest.packs) : [];
+    const value = { version: 1 as const, commit: commitHash, parent: parentCommitHash, seq, packs: [...basePacks, packRef] };
+    await writeManifest(value);
+    return value;
+  });
 
+  const smallFiles = scan.files.filter((file) => !assetPaths.has(file.path));
   const smallFileCount = smallFiles.length;
   const smallFileBytes = smallFiles.reduce((sum, file) => sum + file.size, 0);
-  const assetCount = assets.length;
-  const assetBytes = assets.reduce((sum, asset) => sum + asset.size, 0);
-  const detectedGitRepoCount = userGitRepos.length;
-  const bundledGitRepoCount = userGitRepos.filter((repo) => repo.bundle).length;
-  const gitBundleBytes = userGitRepos.reduce((sum, repo) => sum + (repo.bundle?.size ?? 0), 0);
+  const assetCount = snapshot.assets.length;
+  const assetBytes = snapshot.assets.reduce((sum, asset) => sum + asset.size, 0);
+  const detectedGitRepoCount = userGitRepos.repos.length;
+  const bundledGitRepoCount = userGitRepos.repos.filter((repo) => repo.bundles.length > 0).length;
+  const gitBundleBytes = userGitRepos.repos.reduce((sum, repo) => sum + repo.bundles.reduce((total, bundle) => total + bundle.size, 0), 0);
   const stats = {
     fileCount: smallFileCount + assetCount,
     fileBytes: smallFileBytes + assetBytes,
@@ -208,59 +251,74 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
     smallFileBytes,
     assetCount,
     assetBytes,
+    hashedFileCount: snapshot.hashedFileCount,
     ignoredCount: scan.ignoredCount,
     unsupportedCount: scan.warnings.length,
     detectedGitRepoCount,
     bundledGitRepoCount,
     gitBundleBytes,
+    gitBundleUploadedBytes: userGitRepos.uploadedBytes,
+    packBytes: pack.size,
   };
 
   await progress("write_checkpoint_record");
-  const rootCheckpointId = await timeIt(timings, "resolveRootCheckpoint", async () => (
-    parentCheckpointId ? ((await db.select({ rootCheckpointId: checkpoints.rootCheckpointId, id: checkpoints.id }).from(checkpoints).where(eq(checkpoints.id, parentCheckpointId)).limit(1))[0]?.rootCheckpointId ?? parentCheckpointId) : checkpointId
-  ));
-  const [checkpoint] = await timeIt(timings, "writeCheckpointRecord", () => db.insert(checkpoints).values({
-    id: checkpointId,
-    spaceId,
-    commitHash,
-    description: description?.trim() || "Checkpoint",
-    parentCheckpointId,
-    rootCheckpointId,
-    saveVersion: SAVE_VERSION,
-    meta: {
-      version: SAVE_VERSION,
-      branch,
-      commitMessage,
-      paths: {
-        assetManifest: CHECKPOINT_ASSET_MANIFEST_PATH,
-        checkpointMeta: CHECKPOINT_META_PATH,
-        userGitRepos: USER_GIT_REPOS_PATH,
-        latestSubPath: getCheckpointLatestSubPath(spaceId),
+  const checkpoint = await timeIt(timings, "writeCheckpointRecord", () => db.transaction(async (tx) => {
+    const [row] = await tx.insert(checkpoints).values({
+      id: checkpointId,
+      spaceId,
+      commitHash,
+      description: description?.trim() || "Checkpoint",
+      parentCheckpointId,
+      rootCheckpointId,
+      saveVersion: SAVE_VERSION,
+      meta: {
+        version: SAVE_VERSION,
+        branch,
+        commitMessage,
+        paths: {
+          assetManifest: CHECKPOINT_ASSET_MANIFEST_PATH,
+          checkpointMeta: CHECKPOINT_META_PATH,
+          userGitRepos: USER_GIT_REPOS_PATH,
+          latestSubPath: getCheckpointLatestSubPath(spaceId),
+        },
+        storage: { seq: manifest.seq, packCount: manifest.packs.length, baseline: !parentManifest },
+        stats,
+        timings,
+        ...(diffMeta ? { diffs: { parent: diffMeta } } : {}),
+        warnings: [
+          ...scan.warnings,
+          ...userGitRepos.repos.flatMap((repo) => repo.remotes.filter((remote) => remote.credentialSanitized).map((remote) => ({
+            path: repo.path,
+            type: "git_remote",
+            action: "sanitized" as const,
+            reason: "credential_in_remote_url",
+            remote: remote.name,
+          }))),
+        ],
+        source: input.reason ?? "save_checkpoint",
+        sourceTaskRunId: input.sourceTaskRunId ?? null,
+        savedBy: input.userId ?? null,
+        ...(input.requestSource ? { requestSource: input.requestSource } : {}),
       },
-      stats,
-      timings,
-      ...(diffMeta ? { diffs: { parent: diffMeta } } : {}),
-      warnings: [
-        ...scan.warnings,
-        ...userGitRepos.flatMap((repo) => repo.remotes.filter((remote) => remote.credentialSanitized).map((remote) => ({
-          path: repo.path,
-          type: "git_remote",
-          action: "sanitized" as const,
-          reason: "credential_in_remote_url",
-          remote: remote.name,
-        }))),
-      ],
-      source: input.reason ?? "save_checkpoint",
-      sourceTaskRunId: input.sourceTaskRunId ?? null,
-      savedBy: input.userId ?? null,
-      ...(input.requestSource ? { requestSource: input.requestSource } : {}),
-    },
-    createdAt,
-  }).returning());
+      createdAt,
+    }).returning();
+    if (!row) throw new Error("failed to create checkpoint record");
+    // Compare-and-swap: a save only lands on the head it was built from.
+    const moved = await tx.update(spaces)
+      .set({ headCheckpointId: row.id, updatedAt: new Date() })
+      .where(and(eq(spaces.id, spaceId), parentCheckpointId ? eq(spaces.headCheckpointId, parentCheckpointId) : isNull(spaces.headCheckpointId)))
+      .returning({ id: spaces.id });
+    if (moved.length === 0) throw new Error(`space ${spaceId} head moved during save; retry the save`);
+    return row;
+  }));
 
-  if (!checkpoint) throw new Error("failed to create checkpoint record");
-  // Index checkpoint lineage. Enqueued for async, retryable indexing so stats
-  // never block or fail the save.
+  await timeIt(timings, "finalizeRepo", async () => {
+    await runCheckpointGit(["update-ref", "refs/heads/main", commitHash], { cwd: dirs.repoDir, env: { GIT_DIR: checkpointGitDir(dirs.repoDir) } });
+    await removeLegacyWorkingTree(dirs.repoDir);
+    await writeFileIndex(dirs.systemDir, { version: 1, commit: commitHash, entries: snapshot.entries });
+  }).catch((error) => console.warn(`[save_checkpoint] failed to finalize cache repo space=${spaceId}:`, error));
+  enqueueCheckpointCompaction({ spaceId, commit: commitHash, seq: manifest.seq });
+
   if (checkpoint.parentCheckpointId) {
     enqueueReferences([
       checkpointForkReference({
@@ -271,9 +329,19 @@ export const saveCheckpointForSpace = async (input: SaveCheckpointInput): Promis
       }),
     ]);
   }
+
+  const latestMeta = { ...gitCheckpointMeta, commitHash, materializedAt: new Date().toISOString() };
+  await progress("materialize_latest", { commitHash });
+  await timeIt(timings, "materializeLatest", async () => {
+    const incremental = previousIndex && await readLatestCommit(dirs.latestDir) === parentCommitHash;
+    if (incremental) await applyLatestChanges({ latestDir: dirs.latestDir, upserts: snapshot.changed, deletes: snapshot.deleted, checkpointMeta: latestMeta });
+    else await materializeLatest({ latestDir: dirs.latestDir, files: scan.files, checkpointMeta: latestMeta });
+  }).catch((error) => {
+    throw new Error(`checkpoint ${checkpoint.id} was saved but refreshing the latest snapshot failed; the next save rebuilds it: ${formatErrorMessage(error)}`);
+  });
+
   const boardSnapshots = await timeIt(timings, "saveBoardCheckpointSnapshots", () => saveBoardCheckpointSnapshots({ checkpointId: checkpoint.id, spaceId }));
   await timeIt(timings, "updateCheckpointBoardMeta", () => updateCheckpointMeta(db, checkpoint.id, { board: { snapshotCount: boardSnapshots.count }, timings }));
-  await timeIt(timings, "updateSpaceHead", () => db.update(spaces).set({ headCheckpointId: checkpoint.id, updatedAt: new Date() }).where(eq(spaces.id, spaceId)));
 
   let publishedUserConfig: { targetDir: string; copiedPaths: string[]; meta: Record<string, unknown> } | null = null;
   if (space.slug === HOME_SPACE_SLUG) {

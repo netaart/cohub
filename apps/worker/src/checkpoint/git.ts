@@ -2,7 +2,6 @@ import { stat, unlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { config } from "../config.js";
 
 const STALE_GIT_LOCK_AGE_MS = 30_000;
 const GIT_LOCK_RETRY_DELAY_MS = 1_000;
@@ -81,17 +80,4 @@ export const runGitWithOutput = async (args: string[], cwd: string) => {
 
 export const runGit = async (args: string[], cwd: string) => {
   await runGitWithOutput(args, cwd);
-};
-
-export const ensureGitRepo = async (repoDir: string, branch = "main") => {
-  const hasGit = await runGit(["rev-parse", "--git-dir"], repoDir).then(() => true, () => false);
-  if (!hasGit) {
-    await runGit(["init", "-b", branch], repoDir).catch(async () => {
-      await runGit(["init"], repoDir);
-      await runGit(["checkout", "-B", branch], repoDir);
-    });
-  }
-  await runGit(["config", "user.name", "Cohub Worker"], repoDir);
-  await runGit(["config", "user.email", config.checkpointGitAuthorEmail], repoDir);
-  await runGit(["checkout", "-B", branch], repoDir);
 };
