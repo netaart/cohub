@@ -86,7 +86,7 @@ final class StatusMenu {
         }
     }
 
-    private static func icon(_ state: RuntimeOverview.State, sharing: Bool) -> NSImage {
+    private nonisolated static func icon(_ state: RuntimeOverview.State, sharing: Bool) -> NSImage {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
             let ring = NSBezierPath()
             ring.appendArc(withCenter: NSPoint(x: rect.midX, y: rect.midY), radius: 6.5, startAngle: 40, endAngle: 320)
@@ -108,7 +108,7 @@ final class StatusMenu {
         return image
     }
 
-    private static func dot(_ state: RuntimeOverview.State) -> NSImage {
+    private nonisolated static func dot(_ state: RuntimeOverview.State) -> NSImage {
         NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
             let color: NSColor = switch state {
             case .ready: .systemGreen

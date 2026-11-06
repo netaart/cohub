@@ -13,8 +13,8 @@ enum Permissions {
 
     static func request(_ kind: String?, notifications: Notifications?) async throws -> JSON {
         switch kind {
-        case "microphone": await ask(.audio); return .string(state(.audio))
-        case "camera": await ask(.video); return .string(state(.video))
+        case "microphone": _ = await AVCaptureDevice.requestAccess(for: .audio); return .string(state(.audio))
+        case "camera": _ = await AVCaptureDevice.requestAccess(for: .video); return .string(state(.video))
         case "notifications":
             guard let notifications else { throw BridgeFailure.failed("Notifications are not available") }
             _ = await notifications.register()
@@ -30,12 +30,6 @@ enum Permissions {
 
     static func setLaunchAtLogin(_ enabled: Bool) throws {
         if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-    }
-
-    private static func ask(_ media: AVMediaType) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            AVCaptureDevice.requestAccess(for: media) { _ in continuation.resume() }
-        }
     }
 
     private static func state(_ media: AVMediaType) -> String {
