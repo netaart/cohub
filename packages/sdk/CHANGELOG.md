@@ -1,5 +1,24 @@
 # @neta-art/cohub
 
+## 13.14.0
+
+### Minor Changes
+
+- 85b327d: Board presence moves into the SDK. `createBoardPresence({ editor, channel: space.board(id) })` from `@neta-art/cohub/board/presence` shares selection, tool, viewport, cursor and gestures, follows reactions, and shows Agent and CLI writes as they land. Pass it to `mountBoardStage({ presence })` and the stage sends the cursor and draws others' selections, drags, strokes and reactions; `presence.cursors` and `presence.activities` are in surface pixels for the host to draw names and markers. One client per Board saves script commits without a `scriptLeader`. `board.updateAwareness(update)` now orders updates per connection, so senders no longer drop each other's updates; the `seq` argument is ignored.
+  
+  Also: `board.replica({ userKey })` shares one started replica among a Board's views and follows playback commands sent through `board.control(command)` and `play`/`pause`/…; `claimBoardCaches(userKey)` removes another user's cached Boards and file URLs; replicas accept `readonly: true`, and `staticBoardRemote(id, document)` serves a fixed document. `selectBoardEditor(editor, selector)` gives framework stores a value that recomputes only when what it read changes; `editor.visibleRect` and `layoutBoardImages(images, view, { inset })` are public.
+  
+  Hosts: replace your own awareness controller and script leader with `createBoardPresence`, and send awareness only through it, or with `updateAwareness(update)`.
+- ad7243c: A model's `contextWindow` can now be set by a mod's `.cohub/models.json` as well as the user's, layered platform < mod < user < prompt and capped at the platform value. `models.list({ spaceId })` and `cohub -s <space> models ls` show each model's effective window and where it came from. A prompt can pass `contextWindow` (`cohub spaces prompt --context-window <tokens>`); like thinking level, it applies to the rest of the session until a later prompt changes it. The SDK rejects a non-integer or non-positive value before sending.
+  
+  Hosts: deploy the API first. An older API ignores `contextWindow` and `spaceId`.
+- f9e11db: Remove cross-Space relay and replies. A prompt that opens with a mention of another Space or Chat now runs here, with the mention as context. `space.prompt({ reply })`, `cohub spaces prompt --reply`, the `reply` origin kind, `SentTurnRef.reply`, and `readSessionTurnReply()`, `readSessionTurnRelay()` and `readReplyStatus()` are gone.
+- 6393999: Spaces can set a like sticker, an image that replaces the heart on their published Apps. `SpacePublicProfile.likeSticker` carries it as `{ url }`, `space(id).profile({ likeSticker })` sets or clears it, and the `space_like_sticker` upload purpose takes WebP, PNG or GIF up to `LIKE_STICKER_MAX_FILE_BYTES`. The CLI adds `cohub spaces like-sticker <path>` and `--clear`, and `spaces get` shows the sticker.
+
+### Patch Changes
+
+- e1a963a: The debugger truncates oversized captured payloads in a single pass instead of re-encoding them repeatedly, cutting its CPU cost on busy realtime streams.
+
 ## 13.13.0
 
 ### Minor Changes

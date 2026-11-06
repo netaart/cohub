@@ -1,5 +1,26 @@
 # @neta-art/cohub-cli
 
+## 10.23.0
+
+### Minor Changes
+
+- ad7243c: A model's `contextWindow` can now be set by a mod's `.cohub/models.json` as well as the user's, layered platform < mod < user < prompt and capped at the platform value. `models.list({ spaceId })` and `cohub -s <space> models ls` show each model's effective window and where it came from. A prompt can pass `contextWindow` (`cohub spaces prompt --context-window <tokens>`); like thinking level, it applies to the rest of the session until a later prompt changes it. The SDK rejects a non-integer or non-positive value before sending.
+  
+  Hosts: deploy the API first. An older API ignores `contextWindow` and `spaceId`.
+- f9e11db: Remove cross-Space relay and replies. A prompt that opens with a mention of another Space or Chat now runs here, with the mention as context. `space.prompt({ reply })`, `cohub spaces prompt --reply`, the `reply` origin kind, `SentTurnRef.reply`, and `readSessionTurnReply()`, `readSessionTurnRelay()` and `readReplyStatus()` are gone.
+- 6393999: Spaces can set a like sticker, an image that replaces the heart on their published Apps. `SpacePublicProfile.likeSticker` carries it as `{ url }`, `space(id).profile({ likeSticker })` sets or clears it, and the `space_like_sticker` upload purpose takes WebP, PNG or GIF up to `LIKE_STICKER_MAX_FILE_BYTES`. The CLI adds `cohub spaces like-sticker <path>` and `--clear`, and `spaces get` shows the sticker.
+
+### Patch Changes
+
+- 622c585: Desktop sign-in: requests that arrive together, such as from several windows on launch, now share one device code and open the browser once. Before, each one opened another sign-in page, and each open reset the form in the pages before it, so Logto showed "Session not found" there. Asking again more than 10 seconds later still reopens the page.
+- 155e805: Fix local Pi Turns failing with "Pi exited during the Turn" once a session's context grows past 8 MB. The Pi extension forwards only the event fields the Runtime reads, and an oversized line is skipped with a `native.pi_line_dropped` diagnostic instead of disconnecting Pi. Restart `cohub runtime` to apply; `runtime up` updates the installed Pi extension, and open terminal Pi sessions need `/reload`.
+- Updated dependencies [85b327d]
+- Updated dependencies [e1a963a]
+- Updated dependencies [ad7243c]
+- Updated dependencies [f9e11db]
+- Updated dependencies [6393999]
+  - @neta-art/cohub@13.14.0
+
 ## 10.22.0
 
 ### Minor Changes
