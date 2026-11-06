@@ -125,7 +125,7 @@ function areNumberRecordsEqual(
 
 const SESSION_SCROLL_ANCHOR_PERSIST_DEBOUNCE_MS = 500;
 const MAX_SESSION_SCROLL_ANCHORS = 200;
-const TURN_MARKER_CONTENT_MEASURE_MS = 150;
+const TURN_MARKER_CONTENT_MEASURE_MS = 500;
 
 export function createSessionScrollController() {
 	let listEl = $state<HTMLDivElement | null>(null);
