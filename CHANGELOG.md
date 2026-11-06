@@ -4,6 +4,20 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.94 — 2026-11-06
+
+- **Generation reserve holds**: expensive generations now reserve the model's list price against the Space wallet or personal balance in Redis before enqueueing, using an atomic Lua check so concurrent submissions cannot oversubscribe; holds release on charge, failure, or cancellation and expire after five minutes, falling back to the normal usage gate when Redis is unavailable.
+- **Board presence and shared replicas in the SDK**: `@neta-art/cohub/board/presence` now owns cursor, selection, viewport, gesture, and reaction sharing, draws peer activity through `mountBoardStage({ presence })`, elects a single script-commit writer, orders awareness updates per connection, and shares one replica per Board and user with read-only and playback support.
+- **Layered model context windows**: `contextWindow` now resolves platform < mod < user < prompt, is capped at the platform value, and reports its source; `models.list({ spaceId })` and `cohub models ls --space` expose it, while `cohub spaces prompt --context-window` pins it for the rest of a session.
+- **Space like stickers and no cross-Space relay**: published Apps can replace the heart with a custom PNG, GIF, or WebP sticker through `space(id).profile({ likeSticker })` or `cohub spaces like-sticker`; a prompt that mentions another Space or Chat now runs locally with the mention as context, and the `reply` APIs are gone.
+- **Collapsible fork groups**: sidebar fork parents get a persisted toggle that hides their subtree while keeping the top three forks plus running and open chats visible, and surfaces hidden unread forks on the toggle.
+- **Streaming chat performance**: settled markdown is appended instead of re-inserted on every commit, thinking text is batched, turn rails stop re-measuring and re-rendering every frame, and long timelines are paint-contained to cut work as history grows.
+
+### Bug Fixes
+
+- Pi runtime: local Pi Turns no longer fail with "Pi exited during the Turn" once a session context exceeds 8 MB; the extension forwards only fields the Runtime reads and oversized lines are skipped with a `native.pi_line_dropped` diagnostic instead of disconnecting.
+- Desktop sign-in: concurrent requests now share one device code and open the browser once, fixing "Session not found" errors caused by later opens resetting earlier Logto pages.
+
 ## v2.93 — 2026-11-04
 
 - **Board App play mode**: published Board Apps now open in play, where each visitor drags unlocked items, pans empty space, and script regions take every press. Changes save as a patch over the published snapshot in IndexedDB, scoped to the App version, so a reload restores progress, a new version starts fresh, and a per-version cap keeps the cache bounded; editors get the same via a Play toggle with reset plus undo, the SDK adds a `play` tool, and `cohub boards simulate` accepts `{"tool": "play"}`.
