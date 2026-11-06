@@ -1,5 +1,14 @@
 # @neta-art/cohub
 
+## 13.15.0
+
+### Minor Changes
+
+- 64612aa: Archive Chats for every member of a Space. `session(id).archive()` / `unarchive()` toggle the archive, session lists hide archived Chats unless `archived: "only" | "include"` is passed, and `SessionRecord.archivedAt` reports the state. The CLI adds `spaces sessions archive|unarchive <id...>` and `--archived` / `--all` on `spaces sessions ls` and `me sessions`. Sending a message to an archived Chat restores it.
+  
+  The first archive in a Space creates a system label named "Archived"; an existing top-level user label with that name is renamed to "Archived (Custom)", keeping its assignments.
+- 8363182: Space wallets accept funding from guests: hosts can turn on public funding, contributors pay a tier online or move purchased personal balance in whole dollars, and failed transfers return automatically. Adds `wallet.funding()`, `wallet.transfer()`, `wallet.getTransfer()`, `createOrder({ returnPath })`, and `profile({ fundingEnabled })`; the CLI gains `spaces wallet funding|transfer|transfer-status|public-funding`, and `--request-id` is now optional.
+
 ## 13.14.0
 
 ### Minor Changes
