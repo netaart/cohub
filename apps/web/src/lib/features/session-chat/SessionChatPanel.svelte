@@ -108,7 +108,6 @@ const runtimeRecoveryTurn = $derived.by(
 
 // Local DOM / UI binds synced into host (cannot bind directly to host getters).
 let listEl = $state<HTMLDivElement | null>(null);
-let chatTimelineRef = $state<unknown>(null);
 let composerHostEl = $state<HTMLDivElement | null>(null);
 let chatChromeEl = $state<HTMLDivElement | null>(null);
 let composerInput = $state("");
@@ -139,12 +138,6 @@ $effect(() => {
 	const el = listEl;
 	untrack(() => {
 		host.listEl = el;
-	});
-});
-$effect(() => {
-	const ref = chatTimelineRef;
-	untrack(() => {
-		host.chatTimelineRef = ref;
 	});
 });
 $effect(() => {
@@ -384,12 +377,11 @@ async function handleDraftDrop(event: DragEvent) {
 		{:else}
 			{#key activeSessionId ?? "none"}
 				<ChatTimeline
-					bind:this={chatTimelineRef}
 					bind:bindListEl={listEl}
 					sessionId={activeSessionId}
 					timeline={timeline}
-					preloadThreshold={10}
-					onFirstVisible={host.handleFirstVisible}
+					revealTurnSequence={host.revealTurnSequence}
+					onReachOldest={host.preloadOlderTurns}
 					onLoadToolCalls={host.onLoadToolCalls}
 					onLoadIntermediate={host.onLoadIntermediate}
 					onRequestIntermediateSync={host.onRequestIntermediateSync}
