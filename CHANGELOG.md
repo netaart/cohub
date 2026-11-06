@@ -4,6 +4,21 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.95 — 2026-11-06
+
+- **Guest funding and balance transfers**: Spaces can accept funding from viewers — or, with the public funding toggle on, anyone signed in — via the wallet page, Space app pages, or the new `/spaces/:id/fund` route. Balance pays first and checkout covers the rest from one shared tier set; transfers debit only purchased balance, credit fixed denominations, and automatically refund the uncredited remainder through a pre-debit recovery job. Ships with SDK funding/transfer APIs, CLI `transfer`/`transfer-status`/`public-funding` commands, optional request IDs for safe retries, and a `space.wallet.updated` realtime event.
+- **Chat archiving**: Sessions can now be archived for every Space member through a Space-scope `session:archived` system label that records who archived and when without a migration. Archive/unarchive is available from chat rows, the chat header menu, the composer notice, and by dropping a chat on the sidebar's Archived label, with an Archived list view and optimistic updates that roll back on failure. Archived Chats are hidden from lists and system label views (the API gains `archived=only|include`), and any new turn — prompt, note, generation, or native runtime — restores the Chat in the same transaction and row lock as archiving.
+- **Runtime file eviction**: A delayed agent job evicts native session files, compaction archives, and recoveries under the session lock, but only when the resume marker matches durable history; forks of an evicted parent rebuild from the database. Session records carry `archivedAt` read alongside turn state in the same lateral query, so every list response and `session.updated` event reports it with no extra round trip.
+- **Tabs in the desktop title bar**: macOS now hosts its tabs inside one window with the tab strip beside the window buttons — drag to reorder, tab menu, Move Tab to New Window, and Merge All Windows — instead of native window tabs. The selected tab takes the page's edge color and the strip is shaded toward the text from a shared `EdgePalette`; Windows and Linux show tabs from the second tab and closing the last macOS window parks it with all its tabs.
+- **Unified system labels**: One shared `getOrCreateSpaceSystemLabel` replaces three duplicated label-creation paths, and user label assignment can no longer attach system labels. Archive and turn writes bump `updatedAt` monotonically so clients order snapshots correctly, and forks never inherit the archive mark.
+
+### Bug Fixes
+
+- **NFS ESTALE resilience**: Space file reads reopen by path and retry up to three times when a sandbox's atomic rename frees the inode under an open handle, with inline size limits reserved from each opened handle so a retry cannot read an oversized replacement.
+- **CDN warm upload stability**: The warm job now feeds the S3 SDK through a `PassThrough` and aborts on source read errors instead of crashing `cohub-system-worker` and stalling the upload.
+- **macOS launch crash**: Notification and capture callbacks no longer run main-actor closures on system queues, which trapped and crashed the app at launch on macOS 27.
+- **Streaming thinking reveal**: Thinking text reveals per patch again instead of appearing in visible 80 ms chunks.
+
 ## v2.94 — 2026-11-06
 
 - **Generation reserve holds**: expensive generations now reserve the model's list price against the Space wallet or personal balance in Redis before enqueueing, using an atomic Lua check so concurrent submissions cannot oversubscribe; holds release on charge, failure, or cancellation and expire after five minutes, falling back to the normal usage gate when Redis is unavailable.
