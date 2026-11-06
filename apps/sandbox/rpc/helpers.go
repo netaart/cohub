@@ -347,15 +347,17 @@ func resolveSandboxPath(cfg env.Config, rawPath string, cwd string) (resolvedSan
 	return resolvedSandboxPath{path: cleaned}, nil
 }
 
-// ensureWithinRoots returns the first root that cleaned resolves inside.
+// ensureWithinRoots returns the first root that cleaned resolves inside, lexically and through
+// symlinks. The roots are assumed to be already symlink-resolved (see env.LoadLocal).
 func ensureWithinRoots(roots []string, cleaned string) (string, error) {
+	resolved, err := resolveWithinCheck(cleaned)
+	if err != nil {
+		return "", err
+	}
 	for _, root := range roots {
-		err := ensureWithinRoot(root, cleaned)
-		if err == nil {
+		root = filepath.Clean(root)
+		if cleaned == root || pathWithin(root, resolved) {
 			return root, nil
-		}
-		if !errors.Is(err, errPathOutsideRoot) {
-			return "", err
 		}
 	}
 	return "", errPathOutsideRoot
@@ -369,50 +371,31 @@ func (r resolvedSandboxPath) isReadOnly(cfg env.Config) bool {
 // would escape the workspace root, either lexically or via a symlink.
 var errPathOutsideRoot = errors.New("path escapes sandbox root")
 
-// ensureWithinRoot verifies that cleaned resolves inside root. It guards
-// against both lexical traversal (..) and symlink escape by resolving the
-// longest existing ancestor of the path before comparing.
-// The root itself is assumed to be already symlink-resolved (see env.LoadLocal).
-func ensureWithinRoot(root, cleaned string) error {
-	root = filepath.Clean(root)
-	if cleaned == root {
-		return nil
-	}
-
-	// Resolve symlinks on the longest existing ancestor so a symlinked
-	// directory cannot be used to step outside the root. Non-existent leaf
-	// components (e.g. a file about to be written) are re-appended afterwards.
+// resolveWithinCheck resolves symlinks on the longest existing ancestor so a
+// symlinked directory cannot be used to step outside a root. Non-existent leaf
+// components (e.g. a file about to be written) are re-appended afterwards; with
+// no existing ancestor the lexical path is compared.
+func resolveWithinCheck(cleaned string) (string, error) {
 	probe := cleaned
 	var trailing []string
 	for {
 		resolved, err := canonicalExistingPath(probe)
 		if err == nil {
-			full := resolved
 			for i := len(trailing) - 1; i >= 0; i-- {
-				full = filepath.Join(full, trailing[i])
+				resolved = filepath.Join(resolved, trailing[i])
 			}
-			if pathWithin(root, full) {
-				return nil
-			}
-			return errPathOutsideRoot
+			return resolved, nil
 		}
 		if !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTDIR) {
-			return err
+			return "", err
 		}
 		parent := filepath.Dir(probe)
 		if parent == probe {
-			// Reached the filesystem root without finding an existing ancestor.
-			break
+			return cleaned, nil
 		}
 		trailing = append(trailing, filepath.Base(probe))
 		probe = parent
 	}
-
-	// No existing ancestor resolved; fall back to a lexical prefix check.
-	if pathWithin(root, cleaned) {
-		return nil
-	}
-	return errPathOutsideRoot
 }
 
 func isReadOnlyPath(cfg env.Config, path string) bool {

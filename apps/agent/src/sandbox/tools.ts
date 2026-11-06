@@ -49,7 +49,6 @@ import {
   getAgentPlatformConfigPath,
   getAgentWorkspacePath,
   SANDBOX_PLATFORM_AGENTS_PATH,
-  SANDBOX_USER_AGENTS_PATH,
   SANDBOX_WORKSPACE_PATH,
 } from "../runtime/paths.js";
 import { getCurrentSessionExecutionAuth } from "../runtime/session-execution-auth.js";
@@ -73,6 +72,7 @@ import {
 } from "@cohub/sandbox-client";
 
 import { ensureSandboxConnection, pruneSandboxConnections } from "../sandbox-pool.js";
+import { toProcessSearchPath } from "./process-search-path.js";
 import { getSpaceSandbox, recoverSpaceSandbox } from "../api.js";
 import { classifySandboxInfrastructureError, type SandboxInfrastructureError } from "@cohub/sandbox-client";
 import { logger } from "../logger.js";
@@ -756,17 +756,9 @@ const FD_FIND_MAX_STDOUT_BYTES = DEFAULT_MAX_BYTES * 8;
 const FD_FIND_MAX_STDERR_BYTES = 8 * 1024;
 const FD_FIND_OUTPUT_LIMIT_MESSAGE = "Find output limit reached. Refine pattern or path.";
 
-// A Local Runtime maps these sandbox paths for cwd but cannot rewrite argv, so there
-// path arguments under them run from the root, relative to it; globs keep the same anchor.
-const MAPPED_SANDBOX_ROOTS = [SANDBOX_WORKSPACE_PATH, SANDBOX_PLATFORM_AGENTS_PATH, SANDBOX_USER_AGENTS_PATH, "/mods"];
-
-async function toProcessSearchPath(path: string): Promise<{ cwd: string; arg: string; base?: string }> {
-  const unchanged = { cwd: SANDBOX_WORKSPACE_PATH, arg: path };
-  if (!path.startsWith("/")) return unchanged;
-  const normalized = posix.normalize(path);
-  const root = MAPPED_SANDBOX_ROOTS.find((item) => normalized === item || normalized.startsWith(`${item}/`));
-  if (!root || await resolveSandboxProvider(getCurrentSpaceId()).catch(() => "cloud") !== "local") return unchanged;
-  return { cwd: root, arg: normalized === root ? "." : normalized.slice(root.length + 1), base: root };
+async function processSearchPath(path: string) {
+  const local = path.startsWith("/") && await resolveSandboxProvider(getCurrentSpaceId()).catch(() => "cloud") === "local";
+  return toProcessSearchPath(path, local);
 }
 
 function buildFdFindArgv(input: { pattern: string; path: string; limit: number; ignore?: string[] }) {
@@ -833,7 +825,7 @@ function createRemoteFindOperations(): FindOperations {
 
         const connection = await getCurrentConnection();
         if (runsExecutableDirectly(connection.capabilities, "processFd")) {
-          const processPath = await toProcessSearchPath(path);
+          const processPath = await processSearchPath(path);
           const argv = buildFdFindArgv({ pattern, path: processPath.arg, limit: options.limit, ignore: options.ignore });
           const stderrChunks: string[] = [];
           const matches: string[] = [];
@@ -1096,7 +1088,7 @@ function createRemoteGrepTool() {
       }
       try {
         if (runsExecutableDirectly(connection.capabilities, "processRg")) {
-          const processPath = await toProcessSearchPath(searchPath);
+          const processPath = await processSearchPath(searchPath);
           const collector = createRgJsonGrepCollector({ searchPath: grepInput.path, pathBase: processPath.base, limit: effectiveLimit });
           const stderrChunks: string[] = [];
           const updates = createThrottledTextToolUpdate(onUpdate, { maxChars: DEFAULT_MAX_BYTES });

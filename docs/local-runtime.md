@@ -440,7 +440,7 @@ Android 应用像 `runtime up` 一样为手机上的文件夹提供本地 Runtim
 相同的两部分：声明 `harnesses: []` 的 Runtime 连接（只持有租约，Turn 由 Cohub Harness 执行），以及以该文件夹为根目录、为 Android
 交叉编译的 sandboxd 文件桥（受管模式，生命周期事件改走 stderr）。绑定规则与 CLI 一致：新建 Space 时选择文件夹并以其命名；已关联的
 文件夹可打开原 Space 或改绑；运行中的文件夹或 Space 不会被抢占。前台服务在后台保持所有绑定连接，退出登录时全部停止；未断开的绑定在服务被系统重启或下次打开应用时恢复，不随开机自启。
-文件工具限定在文件夹内，`bash` 以应用身份运行并使用 `sh`，`find` / `grep` 在缺少 `fd` / `rg` 时使用内置实现。`PATH` 上有 APK 自带的 `cohub` 与 Node（仅 arm64），随应用更新。平台、用户与 Mod 文件同样镜像到应用私有存储，仅在 sandboxd 运行期间存在；其中的脚本需通过解释器运行（如 `sh script.sh`），Android 不执行应用存储里的文件。
+文件工具限定在文件夹内，`bash` 以应用身份运行并使用 `sh`，`find` / `grep` 在缺少 `fd` / `rg` 时使用内置实现。`PATH` 上有 APK 自带的 `cohub` 与 Node（仅 arm64），随应用更新。平台、用户与 Mod 文件同样镜像到应用私有存储，sandboxd 启动和退出时清空；其中的脚本需通过解释器运行（如 `sh script.sh`），Android 不执行应用存储里的文件。
 
 ### Screen sharing / 屏幕共享
 
