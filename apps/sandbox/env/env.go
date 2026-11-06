@@ -246,11 +246,12 @@ func LoadLocal(opts LocalOptions) (Config, error) {
 	}, nil
 }
 
-// prepareMountsDir creates the mount roots and returns the symlink-resolved cache dir the
-// fence compares against, or "" when the cache is unusable; the sandbox then holds no mounts.
+// prepareMountsDir creates the mount roots, private to this OS user, and returns the
+// symlink-resolved cache dir the fence compares against, or "" when the cache is unusable;
+// the sandbox then holds no mounts.
 func prepareMountsDir(cacheDir string) string {
 	for _, dir := range []string{"platform-agents", "user-agents", "mods"} {
-		if err := os.MkdirAll(filepath.Join(cacheDir, dir), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(cacheDir, dir), 0o700); err != nil {
 			return ""
 		}
 	}

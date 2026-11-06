@@ -422,7 +422,7 @@ func (d *Dispatcher) handleFSWrite(request protocol.RPCRequest) interface{} {
 	if !ok {
 		return errResponse
 	}
-	if isReadOnlyPath(d.cfg, resolved.path) {
+	if resolved.isReadOnly(d.cfg) {
 		return d.failed(request, "", "READ_ONLY_FILESYSTEM", fmt.Sprintf("path is read-only: %s", resolved.path))
 	}
 	if info, err := os.Stat(resolved.path); err == nil && info.IsDir() {
@@ -439,7 +439,7 @@ func (d *Dispatcher) handleFSWrite(request protocol.RPCRequest) interface{} {
 		if !sourceOK {
 			return sourceErrResponse
 		}
-		if isReadOnlyPath(d.cfg, resolvedSource.path) {
+		if resolvedSource.isReadOnly(d.cfg) {
 			return d.failed(request, "", "READ_ONLY_FILESYSTEM", fmt.Sprintf("source path is read-only: %s", resolvedSource.path))
 		}
 		if filepath.Base(resolvedSource.path) == filepath.Base(resolved.path) ||
@@ -611,7 +611,7 @@ func (d *Dispatcher) handleFSEdit(request protocol.RPCRequest) interface{} {
 	if !ok {
 		return errResponse
 	}
-	if isReadOnlyPath(d.cfg, resolved.path) {
+	if resolved.isReadOnly(d.cfg) {
 		return d.failed(request, "", "READ_ONLY_FILESYSTEM", fmt.Sprintf("path is read-only: %s", resolved.path))
 	}
 	if info, err := os.Stat(resolved.path); err == nil && info.IsDir() {
@@ -691,7 +691,7 @@ func (d *Dispatcher) handleFSMkdir(request protocol.RPCRequest) interface{} {
 	if !ok {
 		return errResponse
 	}
-	if isReadOnlyPath(d.cfg, resolved.path) {
+	if resolved.isReadOnly(d.cfg) {
 		return d.failed(request, "", "READ_ONLY_FILESYSTEM", fmt.Sprintf("path is read-only: %s", resolved.path))
 	}
 	createdDirs, err := ensureDirs(d.cfg.WorkspaceDir, resolved.path)

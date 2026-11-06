@@ -252,6 +252,8 @@ func nowMS() int64 {
 
 type resolvedSandboxPath struct {
 	path string
+	// readOnly is set when the path resolves into a read-only mount, including through a workspace symlink.
+	readOnly bool
 }
 
 const virtualWorkspaceRoot = "/workspace"
@@ -334,22 +336,33 @@ func resolveSandboxPath(cfg env.Config, rawPath string, cwd string) (resolvedSan
 	cleaned = mapVirtualWorkspacePath(cfg, cleaned)
 
 	if cfg.Fence {
-		if err := ensureWithinRoots(append([]string{cfg.WorkspaceDir}, readOnlyMountRoots(cfg)...), cleaned); err != nil {
+		// Mount roots first: the workspace may contain the cache (say, a home folder).
+		root, err := ensureWithinRoots(append(readOnlyMountRoots(cfg), cfg.WorkspaceDir), cleaned)
+		if err != nil {
 			return resolvedSandboxPath{}, err
 		}
+		return resolvedSandboxPath{path: cleaned, readOnly: root != cfg.WorkspaceDir}, nil
 	}
 
 	return resolvedSandboxPath{path: cleaned}, nil
 }
 
-func ensureWithinRoots(roots []string, cleaned string) error {
+// ensureWithinRoots returns the first root that cleaned resolves inside.
+func ensureWithinRoots(roots []string, cleaned string) (string, error) {
 	for _, root := range roots {
 		err := ensureWithinRoot(root, cleaned)
-		if err == nil || !errors.Is(err, errPathOutsideRoot) {
-			return err
+		if err == nil {
+			return root, nil
+		}
+		if !errors.Is(err, errPathOutsideRoot) {
+			return "", err
 		}
 	}
-	return errPathOutsideRoot
+	return "", errPathOutsideRoot
+}
+
+func (r resolvedSandboxPath) isReadOnly(cfg env.Config) bool {
+	return r.readOnly || isReadOnlyPath(cfg, r.path)
 }
 
 // errPathOutsideRoot is returned when a fenced sandbox receives a path that

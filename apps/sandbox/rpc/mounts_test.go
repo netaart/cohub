@@ -49,16 +49,19 @@ func syncedRevision(t *testing.T, result interface{}, mountPath string) string {
 func TestMountsSyncWriteAndFence(t *testing.T) {
 	d, cfg := newMountsDispatcher(t)
 	content := base64.StdEncoding.EncodeToString([]byte("skill"))
-	write := func(revision string, files []mountFile, final bool) interface{} {
-		return d.handleMountsWrite(mutationRequest(t, "mounts.write", mountWriteParams{Path: "/mods/demo", Revision: revision, UploadID: "u-" + revision, Files: files, Final: final}))
+	write := func(revision string, files ...mountFile) interface{} {
+		return d.handleMountsWrite(mutationRequest(t, "mounts.write", mountWriteParams{Path: "/mods/demo", Revision: revision, Files: files}))
 	}
 
-	if code := failureCode(t, write("r1", []mountFile{{Path: "../escape", ContentBase64: content}}, true)); code != "BAD_REQUEST" {
+	if code := failureCode(t, write("r1", mountFile{Path: "../escape", ContentBase64: content})); code != "BAD_REQUEST" {
 		t.Fatalf("escaping file path: got %q", code)
 	}
-	write("r1", []mountFile{{Path: ".agents/skills/demo/SKILL.md", ContentBase64: content}}, false)
-	if code := failureCode(t, write("r1", []mountFile{{Path: "run.sh", ContentBase64: content, Executable: true}}, true)); code != "" {
-		t.Fatalf("final write failed: %s", code)
+	if code := failureCode(t, write("r1", mountFile{Path: ".agents/skills/demo/SKILL.md", ContentBase64: content}, mountFile{Path: "run.sh", ContentBase64: content, Executable: true})); code != "" {
+		t.Fatalf("write failed: %s", code)
+	}
+	skill := filepath.Join(cfg.ModsDir, "demo", ".agents", "skills", "demo", "SKILL.md")
+	if info, err := os.Stat(skill); err != nil || info.Mode().Perm() != mountFileMode {
+		t.Fatalf("mount files must be private: %v %v", info, err)
 	}
 
 	result := d.handleMountsSync(mutationRequest(t, "mounts.sync", mountSyncParams{Mounts: []mountSpec{{Path: "/mods/demo"}, {Path: "/configs/platform/.agents"}}}))
@@ -67,14 +70,24 @@ func TestMountsSyncWriteAndFence(t *testing.T) {
 	}
 
 	resolved, err := resolveSandboxPath(cfg, "/mods/demo/.agents/skills/demo/SKILL.md", "/workspace")
-	if err != nil || resolved.path != filepath.Join(cfg.ModsDir, "demo", ".agents", "skills", "demo", "SKILL.md") {
-		t.Fatalf("virtual mount path: %v %q", err, resolved.path)
-	}
-	if !isReadOnlyPath(cfg, resolved.path) {
-		t.Fatalf("mount files must be read-only to tools")
+	if err != nil || resolved.path != skill || !resolved.isReadOnly(cfg) {
+		t.Fatalf("virtual mount path must resolve read-only: %v %+v", err, resolved)
 	}
 	if _, err := resolveSandboxPath(cfg, filepath.Join(cfg.CacheDir, "mounts.json"), "/workspace"); err == nil {
 		t.Fatalf("mount state outside the mount roots must stay fenced")
+	}
+	// A symlink into a mount stays read-only, also when the workspace contains the cache.
+	home := cfg
+	home.WorkspaceDir = filepath.Dir(cfg.CacheDir)
+	for _, c := range []env.Config{cfg, home} {
+		link := filepath.Join(c.WorkspaceDir, "linked")
+		_ = os.Remove(link)
+		if err := os.Symlink(filepath.Join(cfg.ModsDir, "demo"), link); err != nil {
+			t.Fatal(err)
+		}
+		if aliased, err := resolveSandboxPath(c, "/workspace/linked/run.sh", "/workspace"); err != nil || !aliased.isReadOnly(c) {
+			t.Fatalf("a workspace symlink into a mount must stay read-only: %v %+v", err, aliased)
+		}
 	}
 
 	if err := ClearMounts(cfg); err != nil {
@@ -83,8 +96,7 @@ func TestMountsSyncWriteAndFence(t *testing.T) {
 	if got := syncedRevision(t, d.handleMountsSync(mutationRequest(t, "mounts.sync", mountSyncParams{Mounts: []mountSpec{{Path: "/mods/demo"}}})), "/mods/demo"); got != "" {
 		t.Fatalf("cleared mounts must be re-synced, got revision %q", got)
 	}
-	write("r2", []mountFile{{Path: "run.sh", ContentBase64: content}}, true)
-
+	write("r2", mountFile{Path: "run.sh", ContentBase64: content})
 	d.handleMountsSync(mutationRequest(t, "mounts.sync", mountSyncParams{}))
 	if _, err := os.Stat(filepath.Join(cfg.ModsDir, "demo")); !os.IsNotExist(err) {
 		t.Fatalf("undesired mod should be removed: %v", err)

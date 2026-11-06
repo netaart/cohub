@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SpaceModListItem } from "@cohub/core/space-mods";
@@ -14,18 +14,26 @@ import {
 
 // A Local Runtime gets no Pod mounts, so the agent mirrors the same read-only
 // directories from its own copy into the Runtime's cache (mounts.sync/write).
-const MAX_MOUNT_BYTES = 64 * 1024 * 1024;
+// One mount goes in one message, well under the sandbox's 50 MiB frame limit.
+const MAX_MOUNT_BYTES = 16 * 1024 * 1024;
 const MAX_MOUNT_FILES = 5_000;
-const BATCH_BYTES = 8 * 1024 * 1024;
 const SCAN_TTL_MS = 15_000;
 
 export type LocalMountSource = { path: string; dir: string };
+export type RpcCall = <M extends RpcMethod>(method: M, params: RpcRequestMap[M]["params"]) => Promise<RpcRequestMap[M]["result"]>;
+
+/** Mounts a Runtime holds at their current revision. */
+export type LocalMounts = {
+  hostPaths: Record<string, string>;
+  revisions: Record<string, string>;
+  /** Every sandbox file path the held mounts contain. */
+  files: ReadonlySet<string>;
+};
 
 type SourceFile = { path: string; absolute: string; size: number; mtimeMs: number; executable: boolean };
-export type RpcCall = <M extends RpcMethod>(method: M, params: RpcRequestMap[M]["params"]) => Promise<RpcRequestMap[M]["result"]>;
-type ScannedSource = LocalMountSource & { revision: string; files: SourceFile[]; bytes: number };
+type Scan = { revision: string; files: SourceFile[] };
 
-const scanCache = new Map<string, { expiresAt: number; scan: Promise<Omit<ScannedSource, keyof LocalMountSource>> }>();
+const scanCache = new Map<string, { expiresAt: number; scan: Promise<Scan> }>();
 
 /** The cloud sandbox Pod's read-only mounts: platform and owner skills, and the latest snapshot of each enabled Mod. */
 export function localMountSources(input: { ownerUserId: string | null; mods: SpaceModListItem[] }): LocalMountSource[] {
@@ -38,12 +46,7 @@ export function localMountSources(input: { ownerUserId: string | null; mods: Spa
 
 // Symlinks are skipped: following one could copy agent files from outside the source directory.
 async function listFiles(root: string, dir = ""): Promise<SourceFile[]> {
-  let names: string[];
-  try {
-    names = await readdir(join(root, dir));
-  } catch {
-    return [];
-  }
+  const names = await readdir(join(root, dir)).catch(() => [] as string[]);
   const groups = await Promise.all(names.sort().map(async (name): Promise<SourceFile[]> => {
     if (name === ".git" || /[\\:]/.test(name)) return [];
     const path = dir ? `${dir}/${name}` : name;
@@ -56,14 +59,15 @@ async function listFiles(root: string, dir = ""): Promise<SourceFile[]> {
   return groups.flat();
 }
 
-function scanSource(dir: string) {
+// The sources live on PVCs shared by every agent instance, so path/size/mtime fingerprints agree across them.
+function scanSource(dir: string): Promise<Scan> {
   const now = Date.now();
   const cached = scanCache.get(dir);
   if (cached && cached.expiresAt > now) return cached.scan;
   const scan = listFiles(dir).then((files) => {
     const hash = createHash("sha256");
     for (const file of files) hash.update(`${file.path}\0${file.size}\0${file.mtimeMs}\0${file.executable}\n`);
-    return { revision: hash.digest("hex").slice(0, 32), files, bytes: files.reduce((sum, file) => sum + file.size, 0) };
+    return { revision: hash.digest("hex").slice(0, 32), files };
   });
   scanCache.set(dir, { expiresAt: now + SCAN_TTL_MS, scan });
   scan.catch(() => {
@@ -72,50 +76,55 @@ function scanSource(dir: string) {
   return scan;
 }
 
-async function uploadMount(rpc: RpcCall, source: ScannedSource) {
-  if (source.files.length > MAX_MOUNT_FILES || source.bytes > MAX_MOUNT_BYTES) {
+async function uploadMount(rpc: RpcCall, path: string, { revision, files }: Scan) {
+  const bytes = files.reduce((sum, file) => sum + file.size, 0);
+  if (files.length > MAX_MOUNT_FILES || bytes > MAX_MOUNT_BYTES) {
     throw new Error(`mount exceeds ${MAX_MOUNT_FILES} files or ${MAX_MOUNT_BYTES} bytes`);
   }
-  const uploadId = randomUUID();
-  let batch: Array<{ path: string; contentBase64: string; executable?: boolean }> = [];
-  let batchBytes = 0;
-  const send = (final: boolean) => rpc("mounts.write", { path: source.path, revision: source.revision, uploadId, files: batch, final });
-  for (const file of source.files) {
-    if (batch.length > 0 && batchBytes + file.size > BATCH_BYTES) {
-      await send(false);
-      batch = [];
-      batchBytes = 0;
-    }
-    batch.push({ path: file.path, contentBase64: (await readFile(file.absolute)).toString("base64"), ...(file.executable ? { executable: true } : {}) });
-    batchBytes += file.size;
-  }
-  await send(true);
+  await rpc("mounts.write", {
+    path,
+    revision,
+    files: await Promise.all(files.map(async (file) => ({
+      path: file.path,
+      contentBase64: (await readFile(file.absolute)).toString("base64"),
+      ...(file.executable ? { executable: true } : {}),
+    }))),
+  });
 }
 
 /**
- * Bring the Runtime's mounts to the current sources and return each mount's host path,
- * or null when this Runtime cannot hold mounts. A mount that fails to upload keeps its
- * previous content and is retried on the next Turn.
+ * Bring the Runtime's mounts to the current sources, or return null when this Runtime cannot
+ * hold mounts. A mount that fails to upload is left out, so nothing lists its files, and is
+ * retried on the next Turn.
  */
 export async function syncLocalMounts(input: {
   rpc: RpcCall;
   capabilities: SandboxCapabilities | undefined;
   spaceId: string;
   sources: LocalMountSource[];
-}): Promise<Record<string, string> | null> {
+}): Promise<LocalMounts | null> {
   if (!input.capabilities?.mounts) return null;
-  const { rpc } = input;
+  const scanned = await Promise.all(input.sources.map(async (source) => ({ path: source.path, scan: await scanSource(source.dir) })));
+  const { mounts } = await input.rpc("mounts.sync", { mounts: scanned.map(({ path, scan }) => ({ path, revision: scan.revision })) });
+  const holding = new Map(mounts.map((mount) => [mount.path, mount]));
 
-  const scanned = await Promise.all(input.sources.map(async (source): Promise<ScannedSource> => ({ ...source, ...(await scanSource(source.dir)) })));
-  const { mounts } = await rpc("mounts.sync", { mounts: scanned.map(({ path, revision }) => ({ path, revision })) });
-  const held = new Map(mounts.map((mount) => [mount.path, mount.revision]));
-  for (const source of scanned) {
-    if (held.get(source.path) === source.revision) continue;
-    try {
-      await uploadMount(rpc, source);
-    } catch (error) {
-      logger.warn(`[LocalMounts] failed to sync ${source.path} spaceId=${input.spaceId}`, error);
+  const hostPaths: Record<string, string> = {};
+  const revisions: Record<string, string> = {};
+  const files = new Set<string>();
+  for (const { path, scan } of scanned) {
+    const mount = holding.get(path);
+    if (!mount) continue;
+    if (mount.revision !== scan.revision) {
+      try {
+        await uploadMount(input.rpc, path, scan);
+      } catch (error) {
+        logger.warn(`[LocalMounts] failed to sync ${path} spaceId=${input.spaceId}`, error);
+        continue;
+      }
     }
+    hostPaths[path] = mount.hostPath;
+    revisions[path] = scan.revision;
+    for (const file of scan.files) files.add(`${path}/${file.path}`);
   }
-  return Object.fromEntries(mounts.map((mount) => [mount.path, mount.hostPath]));
+  return { hostPaths, revisions, files };
 }

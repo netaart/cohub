@@ -6,7 +6,6 @@ import {
   loadSkillsFromDirectory,
   mergeSkillsConfigs,
   type Skill,
-  type SkillDirectoryReader,
   type SkillScope,
 } from "@cohub/infra/config-runtime/skills";
 import {
@@ -16,9 +15,7 @@ import {
   getAgentUserAgentsPath,
   getAgentUserConfigPath,
   getAgentUserSkillsPath,
-  SANDBOX_PLATFORM_AGENTS_PATH,
   SANDBOX_PLATFORM_SKILLS_PATH,
-  SANDBOX_USER_AGENTS_PATH,
   SANDBOX_USER_CONFIG_PATH,
   SANDBOX_USER_SKILLS_PATH,
   SANDBOX_WORKSPACE_PATH,
@@ -32,15 +29,18 @@ type LoadedContextFile = {
   content: string;
 };
 
-/** Project files of a Local Runtime folder, read from the user's machine through `/workspace` paths. */
+/** Workspace-relative project files the prompt reads. */
+export const PROJECT_PROMPT_FILES = ["AGENTS.md", "CLAUDE.md", ".agents/SYSTEM.md", ".agents/APPEND_SYSTEM.md"] as const;
+
+/** A Local Runtime folder, read once from the user's machine. */
 export type LocalPromptWorkspace = {
   /** Host path of the folder, or null when the Local Runtime could not be reached. */
   hostRoot: string | null;
-  /** Host path of each read-only mount on the machine, by sandbox path; null when it holds none. */
-  mounts: Record<string, string> | null;
-  /** Workspace-relative file text; undefined when missing or unreadable. */
-  readText(relativePath: string): Promise<string | undefined>;
-  skillReader: SkillDirectoryReader;
+  /** Content of each PROJECT_PROMPT_FILES entry that exists. */
+  files: Partial<Record<(typeof PROJECT_PROMPT_FILES)[number], string>>;
+  skills: Skill[];
+  /** Read-only mounts the machine holds: host path by sandbox path, and every sandbox file path in them; null when it holds none. */
+  mounts: { hostPaths: Record<string, string>; files: ReadonlySet<string> } | null;
 };
 
 type ProjectFiles = {
@@ -144,27 +144,22 @@ function cloudProjectFiles(cwd: string): ProjectFiles {
 
 function localProjectFiles(workspace: LocalPromptWorkspace): ProjectFiles {
   return {
-    readText: (relativePath) => workspace.readText(relativePath),
-    loadSkills: async () => (await loadSkillsFromDirectory({
-      dir: SANDBOX_WORKSPACE_SKILLS_PATH,
-      sandboxDir: SANDBOX_WORKSPACE_SKILLS_PATH,
-      scope: "project",
-      reader: workspace.skillReader,
-    })).content.skills,
+    readText: async (relativePath) => workspace.files[relativePath as keyof LocalPromptWorkspace["files"]],
+    loadSkills: async () => workspace.skills,
   };
 }
 
-async function loadMergedSkills(project: ProjectFiles, userId?: string | null, spaceMods: SpaceModListItem[] = [], options: { includePlatformSkills?: boolean; includeUserSkills?: boolean } = {}): Promise<Skill[]> {
-  const modSkillGroups = await Promise.all(spaceMods.map(loadModSkills));
+async function loadMergedSkills(project: ProjectFiles, userId?: string | null, spaceMods: SpaceModListItem[] = [], options: { includeUserSkills?: boolean; reachable?: (skill: Skill) => boolean } = {}): Promise<Skill[]> {
+  // Unreachable skills drop out before the merge, so they cannot override a reachable one.
+  const reachable = (skills: Skill[]) => options.reachable ? skills.filter(options.reachable) : skills;
+  const modSkillGroups = await Promise.all(spaceMods.map(async (mod) => reachable(await loadModSkills(mod))));
 
   const [platformSkills, userSkills, workspaceSkills] = await Promise.all([
-    options.includePlatformSkills !== false
-      ? loadSkillsFromDir({
-          agentDir: getAgentPlatformSkillsPath(),
-          sandboxDir: SANDBOX_PLATFORM_SKILLS_PATH,
-          scope: "platform",
-        })
-      : Promise.resolve([]),
+    loadSkillsFromDir({
+      agentDir: getAgentPlatformSkillsPath(),
+      sandboxDir: SANDBOX_PLATFORM_SKILLS_PATH,
+      scope: "platform",
+    }),
     userId && options.includeUserSkills !== false
       ? loadSkillsFromDir({
           agentDir: getAgentUserSkillsPath(userId),
@@ -177,9 +172,9 @@ async function loadMergedSkills(project: ProjectFiles, userId?: string | null, s
 
   // Priority (later overrides earlier): platform < mods < user < workspace
   return mergeSkillsConfigs(
-    { skills: platformSkills },
+    { skills: reachable(platformSkills) },
     ...modSkillGroups.map((skills) => ({ skills })),
-    { skills: userSkills },
+    { skills: reachable(userSkills) },
     { skills: workspaceSkills },
   ).skills;
 }
@@ -206,7 +201,7 @@ function formatSkillsForPrompt(skills: Skill[]): string {
 }
 
 function formatLocalWorkspace(workspace: LocalPromptWorkspace): string {
-  const mappings = [[SANDBOX_WORKSPACE_PATH, workspace.hostRoot], ...Object.entries(workspace.mounts ?? {})]
+  const mappings = [[SANDBOX_WORKSPACE_PATH, workspace.hostRoot], ...Object.entries(workspace.mounts?.hostPaths ?? {})]
     .filter((entry): entry is [string, string] => Boolean(entry[1]));
   let out = `This Space runs on the user's own machine through Cohub Local. File tools take sandbox paths; shell commands run directly on the host, start in the ${SANDBOX_WORKSPACE_PATH} folder, and need host paths or paths relative to it.`;
   if (mappings.length > 0) out += `\nSandbox path → host path:\n${mappings.map(([sandboxPath, hostPath]) => `- ${sandboxPath} → ${hostPath}`).join("\n")}`;
@@ -223,8 +218,9 @@ export async function buildCohubSystemPrompt(options: BuildCohubSystemPromptOpti
     includeUserSkills = true,
     localWorkspace,
   } = options;
-  // A Local Runtime reaches only the mounts it holds; a cloud Pod holds them all.
-  const mounted = (path: string) => !localWorkspace || Boolean(localWorkspace.mounts?.[path]);
+  // A Local Runtime reaches only the mounts it holds, and in them only the files it was sent; a cloud Pod holds them all.
+  const mounted = (path: string) => !localWorkspace || Boolean(localWorkspace.mounts?.hostPaths[path]);
+  const reachable = (skill: Skill) => !localWorkspace || Boolean(localWorkspace.mounts?.files.has(skill.sandboxFilePath));
   const spaceMods = (options.spaceMods ?? []).filter((mod) => mounted(mod.mountPath));
   const project = localWorkspace ? localProjectFiles(localWorkspace) : cloudProjectFiles(cwd);
 
@@ -246,12 +242,7 @@ export async function buildCohubSystemPrompt(options: BuildCohubSystemPromptOpti
     userId ? loadContextFilesFromRoot(getAgentUserConfigPath(userId), SANDBOX_USER_CONFIG_PATH) : Promise.resolve([]),
     Promise.all(spaceMods.map((mod) => loadContextFilesFromRoot(getAgentModSnapshotPath(mod.modSpaceId), mod.mountPath))),
     loadContextFiles((name) => project.readText(name), SANDBOX_WORKSPACE_PATH),
-    selectedTools.includes("read")
-      ? loadMergedSkills(project, userId, spaceMods, {
-        includePlatformSkills: mounted(SANDBOX_PLATFORM_AGENTS_PATH),
-        includeUserSkills: includeUserSkills && mounted(SANDBOX_USER_AGENTS_PATH),
-      })
-      : Promise.resolve([]),
+    selectedTools.includes("read") ? loadMergedSkills(project, userId, spaceMods, { includeUserSkills, reachable }) : Promise.resolve([]),
   ]);
 
   const sections: string[] = [systemPrompt, ...appendSystemPrompts];

@@ -1111,7 +1111,10 @@ async function prepareLocalRuntime(input: { spaceId: string; sessionId: string; 
         return null;
       })
     : null;
-  return { connection, mounts, spaceMods: input.spaceMods };
+  // Rebuild the prompt when the Runtime connection or a held mount's content changes.
+  const key = !connection ? "local:offline"
+    : `local:${connection.connectionId}:${mounts ? Object.entries(mounts.revisions).sort(([a], [b]) => a.localeCompare(b)).map((entry) => entry.join("@")).join(",") : "unmounted"}`;
+  return { connection, mounts, spaceMods: input.spaceMods, key };
 }
 
 export async function loadOrCreateSessionHandle(input: {
@@ -1165,9 +1168,7 @@ export async function loadOrCreateSessionHandle(input: {
 
   // A Local Runtime's mounts are brought up to date every Turn, as a cloud Pod's mounts are always current.
   const local = sandboxProvider === "local" ? await prepareLocalRuntime({ spaceId: input.spaceId, sessionId: input.sessionId, ownerUserId: spaceOwnerUserId, spaceMods: await loadSpaceMods() }) : null;
-  const promptWorkspace = !local ? "cloud"
-    : !local.connection ? "local:offline"
-    : `local:${local.mounts ? Object.keys(local.mounts).sort().join(",") : "unmounted"}`;
+  const promptWorkspace = local?.key ?? "cloud";
 
   const existing = input.sessionHandles.get(sessionKey);
   if (existing) {
@@ -1191,7 +1192,7 @@ export async function loadOrCreateSessionHandle(input: {
 
   const [spaceMods, localWorkspace] = await Promise.all([
     local?.spaceMods ?? loadSpaceMods(),
-    local ? loadLocalPromptWorkspace({ connection: local.connection, spaceId: input.spaceId, sessionId: input.sessionId, mounts: local.mounts }) : null,
+    local ? loadLocalPromptWorkspace({ rpc: local.connection && createLocalRpc(local.connection, input), spaceId: input.spaceId, mounts: local.mounts }) : null,
   ]);
 
   let sessionManager: SessionManager;

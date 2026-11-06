@@ -50,7 +50,7 @@ func (d *Dispatcher) resolveMutablePath(request protocol.RPCRequest, rawPath, cw
 	if samePath(mutationTarget, d.cfg.WorkspaceDir) {
 		return "", d.failed(request, "", "INVALID_PATH", "cannot modify the workspace root"), false
 	}
-	if isReadOnlyPath(d.cfg, resolved.path) {
+	if resolved.isReadOnly(d.cfg) {
 		return "", d.failed(request, "", "READ_ONLY_FILESYSTEM", fmt.Sprintf("path is read-only: %s", resolved.path)), false
 	}
 	return resolved.path, nil, true

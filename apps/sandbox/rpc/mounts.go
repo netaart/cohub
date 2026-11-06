@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/cohub/apps/sandbox/env"
 	"github.com/cohub/apps/sandbox/protocol"
@@ -23,16 +22,18 @@ import (
 // fingerprints; this side only stores and compares them.
 
 var (
-	mountSlugPattern     = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$`)
-	mountUploadIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
-	mountsMu             sync.Mutex
+	mountSlugPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$`)
+	mountsMu         sync.Mutex
 )
 
 const (
 	mountStateFile      = "mounts.json"
 	mountStagingDir     = "mount-staging"
-	mountStagingMaxAge  = 10 * time.Minute
 	mountRevisionMaxLen = 256
+	// Mounts can hold the Space owner's private user skills: readable by this OS user only.
+	mountDirMode  = 0o700
+	mountFileMode = 0o600
+	mountExecMode = 0o700
 )
 
 type mountSpec struct {
@@ -53,9 +54,7 @@ type mountFile struct {
 type mountWriteParams struct {
 	Path     string      `json:"path"`
 	Revision string      `json:"revision"`
-	UploadID string      `json:"uploadId"`
 	Files    []mountFile `json:"files"`
-	Final    bool        `json:"final"`
 }
 
 type mountStatus struct {
@@ -93,11 +92,10 @@ func (d *Dispatcher) writeMountState(state map[string]string) error {
 		return err
 	}
 	target := filepath.Join(d.cfg.CacheDir, mountStateFile)
-	tmp := target + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+	if err := os.WriteFile(target+".tmp", raw, mountFileMode); err != nil {
 		return err
 	}
-	return os.Rename(tmp, target)
+	return os.Rename(target+".tmp", target)
 }
 
 func (d *Dispatcher) mountsSupported() bool {
@@ -130,7 +128,7 @@ func (d *Dispatcher) handleMountsSync(request protocol.RPCRequest) interface{} {
 			delete(state, mountPath)
 		}
 	}
-	// Clear what is no longer desired; the platform/user roots stay as empty fence roots.
+	// The platform/user roots stay as empty fence roots when not desired.
 	for _, mountPath := range []string{virtualPlatformAgentsRoot, virtualUserAgentsRoot} {
 		if _, ok := desired[mountPath]; !ok {
 			dir, _ := d.mountHostDir(mountPath)
@@ -138,6 +136,9 @@ func (d *Dispatcher) handleMountsSync(request protocol.RPCRequest) interface{} {
 				return d.failed(request, "", "IO_ERROR", err.Error())
 			}
 		}
+	}
+	if err := os.MkdirAll(d.cfg.ModsDir, mountDirMode); err != nil {
+		return d.failed(request, "", "IO_ERROR", err.Error())
 	}
 	entries, err := os.ReadDir(d.cfg.ModsDir)
 	if err != nil {
@@ -158,7 +159,6 @@ func (d *Dispatcher) handleMountsSync(request protocol.RPCRequest) interface{} {
 	if err := d.writeMountState(state); err != nil {
 		return d.failed(request, "", "IO_ERROR", err.Error())
 	}
-	d.pruneMountStaging()
 
 	statuses := make([]mountStatus, 0, len(params.Mounts))
 	for _, mount := range params.Mounts {
@@ -167,7 +167,7 @@ func (d *Dispatcher) handleMountsSync(request protocol.RPCRequest) interface{} {
 	return map[string]interface{}{"mounts": statuses}
 }
 
-// handleMountsWrite stages one batch of a mount's files; the final batch replaces the mount in one rename.
+// handleMountsWrite replaces a whole mount: files are staged, then swapped in with one rename.
 func (d *Dispatcher) handleMountsWrite(request protocol.RPCRequest) interface{} {
 	if !d.mountsSupported() {
 		return d.failed(request, "", "UNSUPPORTED_METHOD", "mounts are only synced to local sandboxes")
@@ -180,32 +180,28 @@ func (d *Dispatcher) handleMountsWrite(request protocol.RPCRequest) interface{} 
 	if err != nil {
 		return d.failed(request, "", "BAD_REQUEST", err.Error())
 	}
-	if !mountUploadIDPattern.MatchString(params.UploadID) {
-		return d.failed(request, "", "BAD_REQUEST", "invalid uploadId")
-	}
 	if params.Revision == "" || len(params.Revision) > mountRevisionMaxLen {
 		return d.failed(request, "", "BAD_REQUEST", "invalid revision")
 	}
 
-	staging := filepath.Join(d.cfg.CacheDir, mountStagingDir, params.UploadID)
-	if err := os.MkdirAll(staging, 0o755); err != nil {
+	stagingRoot := filepath.Join(d.cfg.CacheDir, mountStagingDir)
+	if err := os.MkdirAll(stagingRoot, mountDirMode); err != nil {
 		return d.failed(request, "", "IO_ERROR", err.Error())
 	}
+	staging, err := os.MkdirTemp(stagingRoot, "mount-")
+	if err != nil {
+		return d.failed(request, "", "IO_ERROR", err.Error())
+	}
+	defer os.RemoveAll(staging)
 	for _, file := range params.Files {
 		if err := writeMountFile(staging, file); err != nil {
 			return d.failed(request, "", "BAD_REQUEST", err.Error())
 		}
 	}
-	if !params.Final {
-		return map[string]interface{}{"path": params.Path, "written": len(params.Files)}
-	}
 
 	mountsMu.Lock()
 	defer mountsMu.Unlock()
 	previous := staging + ".previous"
-	if err := os.RemoveAll(previous); err != nil {
-		return d.failed(request, "", "IO_ERROR", err.Error())
-	}
 	if err := os.Rename(target, previous); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return d.failed(request, "", "IO_ERROR", err.Error())
 	}
@@ -232,17 +228,18 @@ func writeMountFile(root string, file mountFile) error {
 		return fmt.Errorf("invalid content for %s: %w", rel, err)
 	}
 	target := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), mountDirMode); err != nil {
 		return err
 	}
-	mode := os.FileMode(0o644)
+	mode := os.FileMode(mountFileMode)
 	if file.Executable {
-		mode = 0o755
+		mode = mountExecMode
 	}
 	return os.WriteFile(target, content, mode)
 }
 
-// ClearMounts empties every mount and its bookkeeping; the agent re-syncs them on its next Turn.
+// ClearMounts empties every mount; sandboxd calls it at start and on exit so mounts live
+// only while it runs, and the agent re-syncs them on its next Turn.
 func ClearMounts(cfg env.Config) error {
 	if cfg.CacheDir == "" {
 		return nil
@@ -265,20 +262,5 @@ func resetDir(dir string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
-	return os.MkdirAll(dir, 0o755)
-}
-
-// pruneMountStaging removes uploads an agent abandoned mid-way.
-func (d *Dispatcher) pruneMountStaging() {
-	root := filepath.Join(d.cfg.CacheDir, mountStagingDir)
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err == nil && time.Since(info.ModTime()) > mountStagingMaxAge {
-			_ = os.RemoveAll(filepath.Join(root, entry.Name()))
-		}
-	}
+	return os.MkdirAll(dir, mountDirMode)
 }

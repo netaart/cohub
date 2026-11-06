@@ -18,21 +18,28 @@ const { localMountSources, syncLocalMounts } = await import("../sandbox/local-mo
 
 const held = new Map<string, string>();
 const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+let failWrites = false;
 const rpc = async (method: string, params: Record<string, unknown>) => {
   calls.push({ method, params });
   if (method === "mounts.sync") {
     return { mounts: (params.mounts as Array<{ path: string }>).map(({ path }) => ({ path, hostPath: `/host${path}`, revision: held.get(path) })) };
   }
-  if (params.final) held.set(params.path as string, params.revision as string);
-  return { path: params.path, written: 0 };
+  if (failWrites) throw new Error("connection dropped");
+  held.set(params.path as string, params.revision as string);
+  return { path: params.path, hostPath: `/host${params.path}`, revision: params.revision };
 };
 const sources = localMountSources({ ownerUserId: null, mods: [{ modSpaceId, mountPath: "/mods/demo" }] as never });
 const sync = (capabilities: Record<string, boolean> = { mounts: true }) => syncLocalMounts({ rpc: rpc as never, capabilities: capabilities as never, spaceId: "s", sources });
 
-const mounts = await sync();
-assert.deepEqual(mounts, { "/configs/platform/.agents": "/host/configs/platform/.agents", "/mods/demo": "/host/mods/demo" });
-const modWrite = calls.find((call) => call.method === "mounts.write" && call.params.path === "/mods/demo");
-const files = modWrite?.params.files as Array<{ path: string; executable?: boolean }>;
+failWrites = true;
+assert.deepEqual((await sync())?.hostPaths, {}, "a mount whose upload failed is not reported as held");
+failWrites = false;
+
+calls.length = 0;
+const mounted = await sync();
+assert.deepEqual(mounted?.hostPaths, { "/configs/platform/.agents": "/host/configs/platform/.agents", "/mods/demo": "/host/mods/demo" });
+assert.ok(mounted?.files.has("/mods/demo/.agents/skills/demo/SKILL.md"));
+const files = calls.find((call) => call.method === "mounts.write" && call.params.path === "/mods/demo")?.params.files as Array<{ path: string; executable?: boolean }>;
 assert.deepEqual(files.map((file) => file.path).sort(), [".agents/skills/demo/SKILL.md", "run.sh"], "symlinks are not mirrored");
 assert.equal(files.find((file) => file.path === "run.sh")?.executable, true);
 

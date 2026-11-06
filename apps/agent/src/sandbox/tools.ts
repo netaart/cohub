@@ -756,16 +756,17 @@ const FD_FIND_MAX_STDOUT_BYTES = DEFAULT_MAX_BYTES * 8;
 const FD_FIND_MAX_STDERR_BYTES = 8 * 1024;
 const FD_FIND_OUTPUT_LIMIT_MESSAGE = "Find output limit reached. Refine pattern or path.";
 
-// A Local Runtime maps these sandbox paths for cwd but cannot rewrite argv, so
-// path arguments under them are passed relative to a mapped cwd.
+// A Local Runtime maps these sandbox paths for cwd but cannot rewrite argv, so there
+// path arguments under them run from the root, relative to it; globs keep the same anchor.
 const MAPPED_SANDBOX_ROOTS = [SANDBOX_WORKSPACE_PATH, SANDBOX_PLATFORM_AGENTS_PATH, SANDBOX_USER_AGENTS_PATH, "/mods"];
 
-function toProcessSearchPath(path: string): { cwd: string; arg: string; base?: string } {
+async function toProcessSearchPath(path: string): Promise<{ cwd: string; arg: string; base?: string }> {
+  const unchanged = { cwd: SANDBOX_WORKSPACE_PATH, arg: path };
+  if (!path.startsWith("/")) return unchanged;
   const normalized = posix.normalize(path);
-  const root = path.startsWith("/") ? MAPPED_SANDBOX_ROOTS.find((item) => normalized === item || normalized.startsWith(`${item}/`)) : undefined;
-  if (!root) return { cwd: SANDBOX_WORKSPACE_PATH, arg: path };
-  const cwd = normalized === root ? root : posix.dirname(normalized);
-  return { cwd, arg: normalized === root ? "." : posix.basename(normalized), base: cwd };
+  const root = MAPPED_SANDBOX_ROOTS.find((item) => normalized === item || normalized.startsWith(`${item}/`));
+  if (!root || await resolveSandboxProvider(getCurrentSpaceId()).catch(() => "cloud") !== "local") return unchanged;
+  return { cwd: root, arg: normalized === root ? "." : normalized.slice(root.length + 1), base: root };
 }
 
 function buildFdFindArgv(input: { pattern: string; path: string; limit: number; ignore?: string[] }) {
@@ -832,7 +833,7 @@ function createRemoteFindOperations(): FindOperations {
 
         const connection = await getCurrentConnection();
         if (runsExecutableDirectly(connection.capabilities, "processFd")) {
-          const processPath = toProcessSearchPath(path);
+          const processPath = await toProcessSearchPath(path);
           const argv = buildFdFindArgv({ pattern, path: processPath.arg, limit: options.limit, ignore: options.ignore });
           const stderrChunks: string[] = [];
           const matches: string[] = [];
@@ -1095,7 +1096,7 @@ function createRemoteGrepTool() {
       }
       try {
         if (runsExecutableDirectly(connection.capabilities, "processRg")) {
-          const processPath = toProcessSearchPath(searchPath);
+          const processPath = await toProcessSearchPath(searchPath);
           const collector = createRgJsonGrepCollector({ searchPath: grepInput.path, pathBase: processPath.base, limit: effectiveLimit });
           const stderrChunks: string[] = [];
           const updates = createThrottledTextToolUpdate(onUpdate, { maxChars: DEFAULT_MAX_BYTES });

@@ -1,9 +1,9 @@
-import type { SkillDirectoryReader } from "@cohub/infra/config-runtime/skills";
+import { loadSkillsFromDirectory, type SkillDirectoryReader } from "@cohub/infra/config-runtime/skills";
 import type { RpcMethod, RpcRequestMap } from "@cohub/protocol/sandbox";
 import { SandboxRpcError, type SandboxConnection } from "@cohub/sandbox-client";
 import { logger } from "../logger.js";
-import { SANDBOX_WORKSPACE_PATH } from "../runtime/paths.js";
-import type { LocalPromptWorkspace } from "../runtime/system-prompt-builder.js";
+import { SANDBOX_WORKSPACE_PATH, SANDBOX_WORKSPACE_SKILLS_PATH } from "../runtime/paths.js";
+import { PROJECT_PROMPT_FILES, type LocalPromptWorkspace } from "../runtime/system-prompt-builder.js";
 import type { RpcCall } from "./local-mounts.js";
 import { ensureSandboxConnection } from "../sandbox-pool.js";
 import { tracedRpc } from "./tools.js";
@@ -26,33 +26,19 @@ export async function connectLocalRuntime(spaceId: string): Promise<SandboxConne
   }
 }
 
-/** Reads a local Space's project files from the user's machine; without a connection there are none. */
+/** Reads a local Space's project files once from the user's machine; without a connection there are none. */
 export async function loadLocalPromptWorkspace(input: {
-  connection: SandboxConnection | null;
+  rpc: RpcCall | null;
   spaceId: string;
-  sessionId: string;
-  mounts: Record<string, string> | null;
+  mounts: LocalPromptWorkspace["mounts"];
 }): Promise<LocalPromptWorkspace> {
-  const { connection } = input;
-  if (!connection) {
-    return {
-      hostRoot: null,
-      mounts: null,
-      readText: async () => undefined,
-      skillReader: { listDirectories: async () => null, readText: async () => null },
-    };
-  }
-
-  const rpc = createLocalRpc(connection, input);
+  const { rpc } = input;
+  if (!rpc) return { hostRoot: null, files: {}, skills: [], mounts: input.mounts };
 
   const skillReader: SkillDirectoryReader = {
     async listDirectories(dir) {
-      try {
-        const { entries } = await rpc("fs.ls", { path: dir });
-        return entries.filter((entry) => entry.endsWith("/")).map((entry) => entry.slice(0, -1));
-      } catch {
-        return null;
-      }
+      const listing = await rpc("fs.ls", { path: dir }).catch(() => null);
+      return listing ? listing.entries.filter((entry) => entry.endsWith("/")).map((entry) => entry.slice(0, -1)) : null;
     },
     async readText(path) {
       try {
@@ -63,22 +49,25 @@ export async function loadLocalPromptWorkspace(input: {
       }
     },
   };
-
-  const hostRoot = await rpc("fs.stat", { path: SANDBOX_WORKSPACE_PATH })
-    .then((result) => result.path && result.path !== SANDBOX_WORKSPACE_PATH ? result.path : null)
-    .catch(() => null);
-
-  return {
-    hostRoot,
-    mounts: input.mounts,
-    readText: async (relativePath) => {
-      try {
-        return (await rpc("fs.read", { path: `${SANDBOX_WORKSPACE_PATH}/${relativePath}` })).content.trim() || undefined;
-      } catch (error) {
-        if (!isNotFound(error)) logger.warn(`[LocalWorkspace] failed to read ${relativePath} spaceId=${input.spaceId}`, error);
-        return undefined;
-      }
-    },
-    skillReader,
+  const readText = async (relativePath: string) => {
+    try {
+      return (await rpc("fs.read", { path: `${SANDBOX_WORKSPACE_PATH}/${relativePath}` })).content.trim() || undefined;
+    } catch (error) {
+      if (!isNotFound(error)) logger.warn(`[LocalWorkspace] failed to read ${relativePath} spaceId=${input.spaceId}`, error);
+      return undefined;
+    }
   };
+
+  const [hostRoot, texts, skills] = await Promise.all([
+    rpc("fs.stat", { path: SANDBOX_WORKSPACE_PATH })
+      .then((result) => result.path && result.path !== SANDBOX_WORKSPACE_PATH ? result.path : null)
+      .catch(() => null),
+    Promise.all(PROJECT_PROMPT_FILES.map(readText)),
+    loadSkillsFromDirectory({ dir: SANDBOX_WORKSPACE_SKILLS_PATH, sandboxDir: SANDBOX_WORKSPACE_SKILLS_PATH, scope: "project", reader: skillReader }),
+  ]);
+  const files: LocalPromptWorkspace["files"] = {};
+  PROJECT_PROMPT_FILES.forEach((name, index) => {
+    if (texts[index]) files[name] = texts[index];
+  });
+  return { hostRoot, files, skills: skills.content.skills, mounts: input.mounts };
 }

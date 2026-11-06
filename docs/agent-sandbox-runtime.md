@@ -35,9 +35,11 @@ turns a user's local folder into the sandbox of a Space:
   - The data channel pipes frames transparently; the gateway does not parse RPC
 - When `space_sandboxes.provider = "local"`, the controller short-circuits provision / idle-destroy / recover
 - Cohub Harness in a local Space matches the cloud sandbox prompt and mounts:
-  - Project `AGENTS.md` / `CLAUDE.md` / `.agents/` files and skills are read over sandbox RPC
-  - Each Turn the agent mirrors the cloud read-only mounts (`/configs/platform/.agents`, the owner's `/configs/user/.agents`, `/mods/<slug>` from each enabled Mod's latest Save) into `~/.cache/cohub/spaces/<id>/` with `mounts.sync` / `mounts.write` (capability `mounts`). Revisions are content fingerprints, so an up-to-date Runtime costs one `mounts.sync`; uploads are staged and swapped in with one rename, symlinks are not copied. The owner's user skills go only to a Runtime the Space owner registered, and sandboxd clears all mounts at start and on exit, so they never outlive the process (an account signed in later on the same machine or phone finds none)
-  - The fence exposes those directories read-only at their cloud paths; fd/rg argv get paths relative to a mapped cwd, since only cwd is mapped
+  - Project `AGENTS.md` / `CLAUDE.md` / `.agents/` files and skills are read over sandbox RPC when the session is created
+  - Each Turn the agent mirrors the cloud read-only mounts (`/configs/platform/.agents`, the owner's `/configs/user/.agents`, `/mods/<slug>` from each enabled Mod's latest Save) into `~/.cache/cohub/spaces/<id>/` with `mounts.sync` / `mounts.write` (capability `mounts`). Revisions fingerprint path, size and mtime on the agents' shared PVCs, so an up-to-date Runtime costs one `mounts.sync`. A mount (up to 16 MiB) is written in one message, staged and swapped in with one rename; symlinks are not copied
+  - The prompt lists only skills whose files a held mount contains, and is rebuilt when the connection or a held revision changes
+  - The owner's user skills go only to a Runtime the Space owner registered. Mount files are private to the OS user (0700/0600), and sandboxd clears them at start and on exit
+  - The fence exposes those directories read-only at their cloud paths, also through a workspace symlink. On a local sandbox fd/rg run from the mapped root with root-relative path arguments, since only cwd is mapped
   - Shell commands run on the host, so the prompt lists each sandbox path's host path
   - A Runtime without the `mounts` capability gets project skills only; an unreachable Runtime gets a prompt without project files, rebuilt on the next Turn
 - CLI: `cohub runtime up <dir>` creates and remembers the directory's Space on first use, then reuses it on later starts, while supervising the Workspace bridge and local Harness

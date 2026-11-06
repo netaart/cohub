@@ -150,32 +150,32 @@ assert.ok(!promptWithMod.includes("Live workspace Mod context."), "should not lo
 assert.ok(!promptWithMod.includes("Live workspace append prompt."), "should not load Mod append prompts from the live workspace");
 
 const hostRoot = "/Users/me/project";
-const localFiles = new Map([
-  ["/workspace/AGENTS.md", "Local project rule."],
-  ["/workspace/.agents/skills/local-skill/SKILL.md", "---\nname: local-skill\ndescription: Local skill description\n---\nLocal body."],
-]);
 const modHostPath = "/Users/me/.cache/cohub/spaces/s/mods/shared-mod";
-const buildLocalPrompt = (mounts: Record<string, string> | null) => buildCohubSystemPrompt({
+const localSkill = { name: "local-skill", description: "Local skill description", content: "", filePath: "", baseDir: "", sandboxFilePath: "/workspace/.agents/skills/local-skill/SKILL.md", sandboxBaseDir: "/workspace/.agents/skills/local-skill", scope: "project", disableModelInvocation: false } as const;
+const buildLocalPrompt = (mounts: { hostPaths: Record<string, string>; files: ReadonlySet<string> } | null) => buildCohubSystemPrompt({
   cwd: workspace,
   userId,
   selectedTools: ["read"],
   spaceMods: [spaceMod],
-  localWorkspace: {
-    hostRoot,
-    mounts,
-    readText: async (relativePath) => localFiles.get(`/workspace/${relativePath}`),
-    skillReader: {
-      listDirectories: async (dir) => dir === "/workspace/.agents/skills" ? ["local-skill"] : null,
-      readText: async (path) => localFiles.get(path) ?? null,
-    },
-  },
+  localWorkspace: { hostRoot, files: { "AGENTS.md": "Local project rule." }, skills: [localSkill], mounts },
 });
-const localPrompt = await buildLocalPrompt({ "/mods/shared-mod": modHostPath, "/configs/user/.agents": "/Users/me/.cache/cohub/spaces/s/user-agents" });
-assert.ok(localPrompt.includes("Local project rule."), "local Spaces should read project context from the Local Runtime");
-assert.ok(!localPrompt.includes("Project rule: run typecheck."), "local Spaces should not read the cloud workspace copy");
+const localPrompt = await buildLocalPrompt({
+  hostPaths: { "/mods/shared-mod": modHostPath, "/configs/user/.agents": "/Users/me/.cache/cohub/spaces/s/user-agents" },
+  files: new Set(["/mods/shared-mod/.agents/skills/shared-mod-skill/SKILL.md", "/configs/user/.agents/skills/owner-skill/SKILL.md"]),
+});
+assert.ok(localPrompt.includes("Local project rule.") && !localPrompt.includes("Project rule: run typecheck."), "local Spaces should use the Runtime's project files, not the cloud copy");
 assert.ok(localPrompt.includes("<location>/workspace/.agents/skills/local-skill/SKILL.md</location>"), "local project skills should be listed");
 assert.ok(localPrompt.includes("<location>/mods/shared-mod/.agents/skills/shared-mod-skill/SKILL.md</location>") && localPrompt.includes("owner-skill"), "mounted local Spaces should match the cloud sandbox prompt");
 assert.ok(localPrompt.includes(`- /workspace → ${hostRoot}`) && localPrompt.includes(`- /mods/shared-mod → ${modHostPath}`), "host paths should be mapped for shell commands");
 
 const unmountedPrompt = await buildLocalPrompt(null);
 assert.ok(unmountedPrompt.includes("local-skill") && !unmountedPrompt.includes("owner-skill") && !unmountedPrompt.includes("# Mods"), "a Runtime without mounts should list only project skills");
+
+const platformSkillDir = join(process.env.PLATFORM_CONFIG_ROOT, "platform", ".agents", "skills", "owner-skill");
+await mkdir(platformSkillDir, { recursive: true });
+await writeFile(join(platformSkillDir, "SKILL.md"), "---\nname: owner-skill\ndescription: Platform fallback\n---\nPlatform body.");
+const fallbackPrompt = await buildLocalPrompt({
+  hostPaths: { "/configs/platform/.agents": "/host/platform-agents", "/configs/user/.agents": "/host/user-agents" },
+  files: new Set(["/configs/platform/.agents/skills/owner-skill/SKILL.md"]),
+});
+assert.ok(fallbackPrompt.includes("Platform fallback"), "a skill that was not mirrored must not hide a mirrored lower-priority one");

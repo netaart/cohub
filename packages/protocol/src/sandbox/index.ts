@@ -356,13 +356,11 @@ export type MountsSyncParams = {
   mounts: Array<{ path: string; revision: string }>;
 };
 
-/** One batch of a mount's files; the final batch atomically replaces the mount. */
+/** A mount's whole file set; it replaces the mount atomically. */
 export type MountsWriteParams = {
   path: string;
   revision: string;
-  uploadId: string;
   files: Array<{ path: string; contentBase64: string; executable?: boolean }>;
-  final: boolean;
 };
 
 export type FsLsParams = {
@@ -584,7 +582,7 @@ export type RpcRequestMap = {
   };
   "mounts.write": {
     params: MountsWriteParams;
-    result: MountStatus | { path: string; written: number };
+    result: MountStatus;
   };
   "process.start": {
     params: ProcessStartParams;
