@@ -1,4 +1,5 @@
 <script lang="ts">
+import { onDestroy, untrack } from "svelte";
 import { splitStreamingText } from "$lib/streaming-text";
 
 type Props = {
@@ -13,18 +14,32 @@ let previousText = "";
 let stableText = $state("");
 let tailText = $state("");
 let tailKey = $state(0);
+let frame = 0;
 
-$effect(() => {
-	const currentText = text;
-	const next = splitStreamingText(previousText, currentText, active);
-	const tailChanged = next.tailText !== tailText;
-
+function show() {
+	const next = splitStreamingText(previousText, text, active);
+	if (next.tailText && next.tailText !== tailText) tailKey += 1;
 	stableText = next.stableText;
 	tailText = next.tailText;
-	if (tailChanged && next.tailText) tailKey += 1;
+	previousText = text;
+}
 
-	previousText = currentText;
+// Live text paints once per display frame; the first and the settled text paint at once.
+$effect(() => {
+	text;
+	if (!active || !previousText) {
+		cancelAnimationFrame(frame);
+		frame = 0;
+		untrack(show);
+		return;
+	}
+	frame ||= requestAnimationFrame(() => {
+		frame = 0;
+		show();
+	});
 });
+
+onDestroy(() => cancelAnimationFrame(frame));
 </script>
 
 <span

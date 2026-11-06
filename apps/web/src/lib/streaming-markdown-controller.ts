@@ -6,32 +6,26 @@ type StreamingMarkdownSubscriber = (
 	snapshot: StreamingMarkdownSnapshot,
 ) => void;
 
-const STREAM_COMMIT_INTERVAL_MS = 80;
-const STREAM_FRAME_MS = 24;
-const STREAM_MIN_STEP = 2;
-const STREAM_MAX_STEP = 14;
-const STREAM_PRESSURE_BACKLOG = 36;
-
-function getVisibleStepSize(remaining: number) {
-	const pressure = Math.min(
-		1,
-		Math.max(0, remaining / STREAM_PRESSURE_BACKLOG),
-	);
-	return Math.round(
-		STREAM_MIN_STEP + (STREAM_MAX_STEP - STREAM_MIN_STEP) * pressure,
-	);
-}
+// Reveal speed scales with the backlog and has no cap, so the display trails the stream by about this long.
+const REVEAL_LAG_MS = 120;
+const MIN_REVEAL_CHARS_PER_MS = 0.08;
+const FIRST_FRAME_MS = 1000 / 60;
+const WORD_SNAP_CHARS = 16;
 
 function isWordBoundary(value: string) {
 	return /[\s.,!?;:，。！？；：、）\]}"'`»]/u.test(value);
 }
 
-function advanceByWord(source: string, from: number, maxStep: number) {
-	const hardTarget = Math.min(source.length, from + maxStep);
+function revealLength(source: string, from: number, elapsedMs: number) {
+	const backlog = source.length - from;
+	const step = Math.ceil(
+		Math.max(MIN_REVEAL_CHARS_PER_MS, backlog / REVEAL_LAG_MS) * elapsedMs,
+	);
+	const hardTarget = Math.min(source.length, from + step);
 	if (hardTarget >= source.length) return source.length;
 
 	let cursor = hardTarget;
-	while (cursor < source.length && cursor - from < maxStep + 16) {
+	while (cursor < source.length && cursor - hardTarget < WORD_SNAP_CHARS) {
 		if (isWordBoundary(source[cursor] ?? "")) return cursor + 1;
 		cursor += 1;
 	}
@@ -42,16 +36,16 @@ function createEmptySnapshot(): StreamingMarkdownSnapshot {
 	return { stableSources: [], stableBlocks: [], tailHtml: "", source: "" };
 }
 
+// One reveal and commit per display frame. A render in flight holds the loop
+// (backpressure); the frame after it reveals everything that piled up meanwhile.
 export class StreamingMarkdownController {
 	#targetSource = "";
 	#displayedSource = "";
 	#snapshot = createEmptySnapshot();
 	#subscribers = new Set<StreamingMarkdownSubscriber>();
-	#textTimer: ReturnType<typeof setTimeout> | null = null;
-	#commitTimer: ReturnType<typeof setTimeout> | null = null;
-	#commitRaf = 0;
-	#renderSeq = 0;
-	#lastCommitAt = 0;
+	#frame = 0;
+	#lastFrameAt = 0;
+	#rendering = false;
 	#disposed = false;
 
 	subscribe(subscriber: StreamingMarkdownSubscriber) {
@@ -64,34 +58,18 @@ export class StreamingMarkdownController {
 		if (this.#disposed) return;
 		const nextSource = source.trimStart();
 		if (nextSource === this.#targetSource) return;
-		this.#renderSeq += 1;
 		if (!nextSource.startsWith(this.#displayedSource)) {
 			this.#displayedSource = "";
 			this.#publish(createEmptySnapshot());
 		}
 		this.#targetSource = nextSource;
-		// Streaming patches arrive far more often than the 24ms reveal cadence.
-		// If the reveal loop is already running it will pick up the new target on
-		// its next tick; tearing the timers down and re-arming them per patch was
-		// the dominant main-thread cost during streaming (clearTimeout/setTimeout
-		// churn), not the rendering itself.
-		if (this.#textTimer) return;
-		this.#advanceText();
-	}
-
-	flush(source = this.#targetSource) {
-		if (this.#disposed) return;
-		this.#renderSeq += 1;
-		this.#targetSource = source.trimStart();
-		this.#displayedSource = this.#targetSource;
-		this.#clearTextTimer();
-		this.#scheduleCommit(0);
+		this.#scheduleFrame();
 	}
 
 	dispose() {
 		this.#disposed = true;
-		this.#clearTextTimer();
-		this.#clearCommitTimer();
+		if (this.#frame) cancelAnimationFrame(this.#frame);
+		this.#frame = 0;
 		this.#subscribers.clear();
 	}
 
@@ -100,115 +78,50 @@ export class StreamingMarkdownController {
 		for (const subscriber of this.#subscribers) subscriber(snapshot);
 	}
 
-	#clearTextTimer() {
-		if (!this.#textTimer) return;
-		clearTimeout(this.#textTimer);
-		this.#textTimer = null;
+	#scheduleFrame() {
+		if (this.#frame || this.#rendering || this.#disposed) return;
+		this.#frame = requestAnimationFrame((now) => this.#onFrame(now));
 	}
 
-	#clearCommitTimer() {
-		if (this.#commitTimer) {
-			clearTimeout(this.#commitTimer);
-			this.#commitTimer = null;
-		}
-		if (this.#commitRaf) {
-			cancelAnimationFrame(this.#commitRaf);
-			this.#commitRaf = 0;
-		}
-	}
-
-	/**
-	 * One tick of the word-by-word reveal loop. Advances the displayed slice
-	 * toward the target, requests a (throttled) markdown commit, and re-arms
-	 * itself only while there is still text left to reveal.
-	 */
-	#advanceText() {
-		this.#textTimer = null;
+	#onFrame(now: number) {
+		this.#frame = 0;
 		if (this.#disposed) return;
-
-		if (this.#displayedSource !== this.#targetSource) {
-			if (!this.#targetSource.startsWith(this.#displayedSource)) {
-				this.#displayedSource = this.#targetSource;
-			} else {
-				const remaining =
-					this.#targetSource.length - this.#displayedSource.length;
-				const maxStep = Math.min(remaining, getVisibleStepSize(remaining));
-				const nextLength = advanceByWord(
-					this.#targetSource,
-					this.#displayedSource.length,
-					maxStep,
-				);
-				this.#displayedSource = this.#targetSource.slice(0, nextLength);
-			}
-		}
-
-		this.#scheduleCommit();
-		if (this.#displayedSource === this.#targetSource) return;
-		this.#textTimer = setTimeout(() => this.#advanceText(), STREAM_FRAME_MS);
-	}
-
-	/**
-	 * Request a markdown render of the current displayed source.
-	 *
-	 * Without an explicit delay this is a no-op when a commit is already
-	 * pending: the pending commit reads `#displayedSource` when it fires, so it
-	 * always renders the freshest text. Only `flush()` passes `0` to override a
-	 * pending throttled commit with an immediate one.
-	 */
-	#scheduleCommit(delay?: number) {
-		if (delay === undefined) {
-			if (this.#commitTimer || this.#commitRaf) return;
-		} else {
-			this.#clearCommitTimer();
-		}
-		const now = performance.now();
-		const nextDelay =
-			delay ??
-			Math.max(0, STREAM_COMMIT_INTERVAL_MS - (now - this.#lastCommitAt));
-		this.#commitTimer = setTimeout(() => {
-			this.#commitTimer = null;
-			this.#commitRaf = requestAnimationFrame(() => {
-				this.#commitRaf = 0;
-				this.#lastCommitAt = performance.now();
-				void this.#commitDisplayedSource();
-			});
-		}, nextDelay);
-	}
-
-	async #commitDisplayedSource() {
-		const source = this.#displayedSource;
-		const seq = ++this.#renderSeq;
-		if (!source.trim()) {
-			this.#publish(createEmptySnapshot());
+		const elapsed = this.#lastFrameAt
+			? now - this.#lastFrameAt
+			: FIRST_FRAME_MS;
+		this.#lastFrameAt = now;
+		const target = this.#targetSource;
+		this.#displayedSource = target.startsWith(this.#displayedSource)
+			? target.slice(
+					0,
+					revealLength(target, this.#displayedSource.length, elapsed),
+				)
+			: target;
+		if (this.#displayedSource === this.#snapshot.source) {
+			// Idle until the next target, so a stalled stream does not dump its next chunk at once.
+			this.#lastFrameAt = 0;
 			return;
 		}
-		// Skip the render entirely when the displayed text has not changed since
-		// the last published snapshot (e.g. the reveal loop caught up and the
-		// trailing commit fired with nothing new).
-		if (
-			source === this.#snapshot.source &&
-			(this.#snapshot.stableBlocks.length > 0 || this.#snapshot.tailHtml)
-		)
-			return;
+		void this.#commit(this.#displayedSource);
+	}
 
+	async #commit(source: string) {
+		this.#rendering = true;
 		try {
+			if (!source.trim()) {
+				this.#publish({ ...createEmptySnapshot(), source });
+				return;
+			}
 			const { renderStreamingMarkdownSplit } = await import("$lib/markdown");
 			const render = await renderStreamingMarkdownSplit(source, this.#snapshot);
-			if (
-				this.#disposed ||
-				seq !== this.#renderSeq ||
-				source !== this.#displayedSource
-			)
-				return;
-			this.#publish({ ...render, source });
+			if (!this.#disposed && source === this.#displayedSource)
+				this.#publish({ ...render, source });
 		} catch {
-			if (
-				this.#disposed ||
-				seq !== this.#renderSeq ||
-				source !== this.#displayedSource
-			)
-				return;
-			this.#publish({ ...createEmptySnapshot(), source });
+			if (!this.#disposed && source === this.#displayedSource)
+				this.#publish({ ...createEmptySnapshot(), source });
+		} finally {
+			this.#rendering = false;
+			this.#scheduleFrame();
 		}
 	}
 }
