@@ -14,6 +14,8 @@ const spaceId = "s"; // short: Unix socket paths are limited to 104 bytes on mac
 const workspace = join(storageRoot, spaceId, "workspace");
 const target = join(workspace, "AGENTS.md");
 const stale = new Map<string, Awaited<ReturnType<typeof realStat>>>();
+let staleHandleReads = 0;
+let onStaleRead = async () => {};
 
 // Simulates another API replica whose NFS attribute cache still holds an old version.
 const mocks = [
@@ -21,6 +23,20 @@ const mocks = [
     ...realFs,
     stat: async (path: string) => stale.get(path) ?? realFs.stat(path),
     lstat: async (path: string) => stale.get(path) ?? realFs.lstat(path),
+    // Simulates a handle whose inode another NFS client replaced via rename.
+    open: async (...args: Parameters<typeof realFs.open>) => {
+      const handle = await realFs.open(...args);
+      if (staleHandleReads === 0) return handle;
+      staleHandleReads--;
+      return Object.assign(Object.create(handle), {
+        stat: () => handle.stat(),
+        close: () => handle.close(),
+        readFile: async () => {
+          await onStaleRead();
+          throw Object.assign(new Error("Unknown system error -116, read"), { errno: -116 });
+        },
+      });
+    },
   } }),
   mock.module("../src/config.js", { exports: { config: { spaceStorageRoot: storageRoot } } }),
   mock.module("../src/space-fs-cdn-cache.js", { exports: {
@@ -35,6 +51,21 @@ after(async () => {
 });
 
 const { readSpaceFile, writeSpaceFile } = await import("../src/space-fs.js");
+
+test("reads reopen stale NFS handles a bounded number of times", async () => {
+  await mkdir(workspace, { recursive: true });
+  await writeFile(join(workspace, "tasks.json"), "{}");
+  staleHandleReads = 2;
+  assert.equal((await readSpaceFile(spaceId, "tasks.json")).content, "{}");
+  staleHandleReads = 3;
+  await assert.rejects(readSpaceFile(spaceId, "tasks.json"), { status: 500, code: "file_read_failed" });
+
+  staleHandleReads = 1;
+  onStaleRead = () => writeFile(join(workspace, "tasks.json"), Buffer.alloc(11 * 1024 * 1024));
+  await assert.rejects(readSpaceFile(spaceId, "tasks.json"), { status: 413 });
+  staleHandleReads = 0;
+  onStaleRead = async () => {};
+});
 
 test("file versions ignore stale path attributes", async () => {
   await mkdir(workspace, { recursive: true });

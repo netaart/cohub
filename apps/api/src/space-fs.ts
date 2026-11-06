@@ -3,6 +3,7 @@ import { directoryCursor, FsPaginationError } from "./fs-pagination.js";
 import type { SpaceFsListOptions, SpaceFsTreePage } from "@cohub/protocol/fs";
 import { constants, type Stats } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { constants as osConstants } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { context, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
@@ -47,6 +48,8 @@ export { assertSafeRelativePath, sanitizeFileName, SpaceFsError };
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_BATCH_READ_FILES = 50;
 const MAX_BATCH_READ_TOTAL_BYTES = 20 * 1024 * 1024;
+const fileTooLarge = () => new SpaceFsError(413, "file_too_large", "This file is larger than 10MB and cannot be opened in the web viewer.");
+const batchTooLarge = () => new SpaceFsError(413, "batch_too_large", "Total inline file size exceeds 20MB.");
 const MAX_BATCH_READ_CONCURRENCY = 8;
 const DIRECTORY_STAT_CONCURRENCY = 32;
 const SPACE_REAL_ROOT_CACHE_TTL_MS = 30_000;
@@ -186,20 +189,43 @@ async function writeFileWithDisposition(path: string, data: Buffer) {
   }
 }
 
+const STALE_READ_ATTEMPTS = 3;
+
+// Node has no name for ESTALE, so the code reads "Unknown system error -116".
+function isStaleFileHandle(error: NodeJS.ErrnoException) {
+  return error?.code === "ESTALE" || error?.errno === -osConstants.errno.ESTALE;
+}
+
 // Shared NFS caches attributes per fs-api replica, so path stat/lstat can be stale.
 // open() revalidates them (close-to-open), so versions must come from an open handle.
-async function readFileWithStats(path: string) {
-  let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    handle = await open(path, "r");
-  } catch (error) {
-    throw toFileReadError(error as NodeJS.ErrnoException);
+// NFSv3 has no open state: another client's atomic rename frees the inode under an
+// open handle and read() fails with ESTALE. Reopening by path reads the replacement, so
+// bytes are reserved from each opened handle's size rather than the earlier path stat.
+type ReadBudget = { remaining: number; tooLarge: () => SpaceFsError };
+
+async function readFileWithStats(path: string, budget: ReadBudget) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await readOpenedFileWithStats(path, budget);
+    } catch (error) {
+      if (error instanceof SpaceFsError) throw error;
+      const errno = error as NodeJS.ErrnoException;
+      if (attempt >= STALE_READ_ATTEMPTS || !isStaleFileHandle(errno)) throw toFileReadError(errno);
+    }
   }
+}
+
+async function readOpenedFileWithStats(path: string, budget: ReadBudget) {
+  const handle = await open(path, "r");
+  let reserved = 0;
   try {
     const stats = await handle.stat();
+    if (stats.size > budget.remaining) throw budget.tooLarge();
+    budget.remaining -= reserved = stats.size;
     return { stats, buffer: await handle.readFile() };
   } catch (error) {
-    throw toFileReadError(error as NodeJS.ErrnoException);
+    budget.remaining += reserved;
+    throw error;
   } finally {
     await handle.close();
   }
@@ -716,7 +742,7 @@ async function readSpaceFileMetadata(
       if (stats.isSymbolicLink()) throw new SpaceFsError(400, "symlink_not_supported", "Symlink preview is not supported.");
       if (!stats.isFile()) throw new SpaceFsError(400, "not_a_file", "The selected path is not a file.");
       if (options?.enforcePreviewLimit !== false && stats.size > MAX_FILE_BYTES) {
-        throw new SpaceFsError(413, "file_too_large", "This file is larger than 10MB and cannot be opened in the web viewer.");
+        throw fileTooLarge();
       }
     },
     () => ({
@@ -885,7 +911,7 @@ export async function readSpaceFile(
       "Validate the inline preview size limit before reading file content into memory.",
       () => {
         if (stats.size > MAX_FILE_BYTES) {
-          throw new SpaceFsError(413, "file_too_large", "This file is larger than 10MB and cannot be opened in the web viewer.");
+          throw fileTooLarge();
         }
       },
       () => ({
@@ -898,7 +924,7 @@ export async function readSpaceFile(
       observation,
       "inline_read",
       "Read file bytes from workspace storage; slow when the file is large, cold, or the backing volume is under IO pressure.",
-      () => readFileWithStats(target),
+      () => readFileWithStats(target, { remaining: MAX_FILE_BYTES, tooLarge: fileTooLarge }),
       (result) => ({
         fileSizeBytes: result.stats.size,
         bytesRead: result.buffer.byteLength,
@@ -1021,7 +1047,7 @@ export async function readSpaceFiles(
       () => {
         const totalBytes = inlineItems.reduce((sum, item) => sum + item.stats.size, 0);
         if (totalBytes > MAX_BATCH_READ_TOTAL_BYTES) {
-          throw new SpaceFsError(413, "batch_too_large", "Total inline file size exceeds 20MB.");
+          throw batchTooLarge();
         }
         return totalBytes;
       },
@@ -1090,11 +1116,13 @@ export async function readSpaceFiles(
       observation,
       "inline_read",
       "Read and encode inline files with bounded concurrency; slow when files are large or storage is cold.",
-      () =>
-        mapWithConcurrency(inlineItems, MAX_BATCH_READ_CONCURRENCY, async (item) => {
-          const { stats, buffer } = await readFileWithStats(item.target);
+      () => {
+        const budget = { remaining: MAX_BATCH_READ_TOTAL_BYTES, tooLarge: batchTooLarge };
+        return mapWithConcurrency(inlineItems, MAX_BATCH_READ_CONCURRENCY, async (item) => {
+          const { stats, buffer } = await readFileWithStats(item.target, budget);
           return toInlineFileResponse(item.target, item.relativePath, stats, buffer, item.mimeType);
-        }),
+        });
+      },
       (result) => ({ inlineFiles: result.length, inlineTotalBytes, concurrency: MAX_BATCH_READ_CONCURRENCY }),
     );
     files.push(...inlineFiles);

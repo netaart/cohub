@@ -2,6 +2,7 @@ import { createLogger } from "@cohub/infra/logging";
 import { createReadStream } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve } from "node:path";
+import { PassThrough } from "node:stream";
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { mediaFactsMetadata } from "@cohub/protocol/core";
 import type { Job } from "bullmq";
@@ -101,15 +102,34 @@ async function processWarmFile(job: Job<FsCdnWarmFileJob>) {
   });
 
   const media = await readMediaFacts(target, payload.mimeType);
-  await getS3Client().send(new PutObjectCommand({
-    Bucket: config.turnObjectS3Bucket,
-    Key: objectKey,
-    Body: createReadStream(target),
-    ContentType: payload.mimeType ?? "application/octet-stream",
-    ContentLength: before.size,
-    CacheControl: IMMUTABLE_PUBLIC_CACHE_CONTROL,
-    ...(media ? { Metadata: mediaFactsMetadata(media) } : {}),
-  }));
+  // The SDK does not handle Body stream errors (e.g. NFS ESTALE after a concurrent rename):
+  // they crash the process and the request never finishes. Give it an error-free stream and
+  // abort the upload on source failure so only the job fails.
+  const source = createReadStream(target);
+  const body = new PassThrough();
+  const upload = new AbortController();
+  let readError: unknown;
+  source.on("error", (error) => {
+    readError ??= error;
+    upload.abort(error);
+  });
+  source.pipe(body);
+  try {
+    await getS3Client().send(new PutObjectCommand({
+      Bucket: config.turnObjectS3Bucket,
+      Key: objectKey,
+      Body: body,
+      ContentType: payload.mimeType ?? "application/octet-stream",
+      ContentLength: before.size,
+      CacheControl: IMMUTABLE_PUBLIC_CACHE_CONTROL,
+      ...(media ? { Metadata: mediaFactsMetadata(media) } : {}),
+    }), { abortSignal: upload.signal });
+  } catch (error) {
+    throw readError ?? error;
+  } finally {
+    source.destroy();
+    body.destroy();
+  }
 
   const after = await lstat(target);
   if (after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
