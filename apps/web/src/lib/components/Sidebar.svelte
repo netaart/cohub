@@ -15,7 +15,6 @@ import type {
 import { taskRunToBoardTaskSnapshot as taskBoardSnapshot } from "@neta-art/cohub/board";
 import {
 	Activity,
-	Archive,
 	ArrowLeft,
 	BarChart3,
 	BookOpen,
@@ -3314,8 +3313,6 @@ $effect(() => {
 					<UserAvatar name={getReactiveLabelDisplayName(label)} avatarUrl={labelProfile?.avatarUrl} seed={getSessionUserUuidFromLabel(label)} size="xxs" class="border-0" />
 				{:else if labelChannel || isSessionChannelLabel(label)}
 					<ChannelProviderIcon provider={labelChannel?.provider} size="xxs" />
-				{:else if isArchivedLabel(label)}
-					<Archive class="h-3 w-3 shrink-0" />
 				{/if}
 				<span class="min-w-0 flex-1 truncate" title={getReactiveLabelDisplayTitle(label)}>{getReactiveLabelDisplayName(label)}</span>
 				{#if canManageUserLabel(label)}
