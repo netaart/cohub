@@ -7,8 +7,9 @@ import { sessionMessages, sessionTurns } from "@cohub/db";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { normalizeContentBlocksSafe } from "@cohub/core/content/normalize";
 import { getSpace } from "./api.js";
+import { parseRuntimeRegistration, runtimeRegistrationKey } from "@cohub/protocol/runtime";
 import { interruptSessionTurn, persistAssistantMessage, persistUserMessage } from "./persistence.js";
-import { sendOutput } from "./redis.js";
+import { redis, sendOutput } from "./redis.js";
 import { logger } from "./logger.js";
 import { getAgentTracer } from "@cohub/infra/tracing/agent";
 import type { CohubModel, CohubModelRegistry } from "./runtime/model-registry.js";
@@ -21,7 +22,7 @@ import {
 } from "./runtime/paths.js";
 import { clearCurrentSessionExecutionAuth, setCurrentSessionExecutionAuth } from "./runtime/session-execution-auth.js";
 import { getCurrentToolExecutionContext } from "./tool-context.js";
-import { listEnabledSpaceMods } from "@cohub/core/space-mods";
+import { listEnabledSpaceMods, type SpaceModListItem } from "@cohub/core/space-mods";
 import { db } from "./db.js";
 import { createCohubAgentSession, type CohubAgentSession } from "./runtime/session-runtime.js";
 import type { AgentTurnAbortEvent } from "@cohub/protocol";
@@ -30,7 +31,9 @@ import type { ContextProjectionOptions } from "@cohub/protocol";
 import { loadRequestedContextWindow, loadRequestedThinkingLevel, loadRuntimeContext } from "./runtime/context-store.js";
 import { appendTerminalGenerationMessages } from "./generation-session-sync.js";
 import { syncCloudContext } from "./runtime/cloud-context.js";
-import type { createSandboxCodingTools } from "./sandbox/tools.js";
+import { resolveSandboxProvider, type createSandboxCodingTools } from "./sandbox/tools.js";
+import { connectLocalRuntime, createLocalRpc, loadLocalPromptWorkspace } from "./sandbox/local-workspace.js";
+import { localMountSources, syncLocalMounts } from "./sandbox/local-mounts.js";
 import type { Permission } from "@cohub/core/permissions";
 import type { PromptAccessMode } from "@cohub/core/sessions";
 import {
@@ -164,6 +167,8 @@ export type SessionHandle = {
   };
   interruptedSnapshotTurnIds: Set<string>;
   sessionFileSignature: SessionFileSignature | null;
+  /** Workspace the prompt was built from: `cloud`, or the Local Runtime's reachability and mounts. */
+  promptWorkspace: string;
 };
 
 type SessionFileSignature = {
@@ -1085,6 +1090,30 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+/** The Space owner's user skills are copied only onto the owner's own machine. */
+async function isOwnersRuntime(spaceId: string, ownerUserId: string | null) {
+  if (!ownerUserId) return false;
+  const raw = await redis.get(runtimeRegistrationKey(spaceId)).catch(() => null);
+  return Boolean(raw && parseRuntimeRegistration(raw)?.ownerUserId === ownerUserId);
+}
+
+async function prepareLocalRuntime(input: { spaceId: string; sessionId: string; ownerUserId: string | null; spaceMods: SpaceModListItem[] }) {
+  const [connection, ownersRuntime] = await Promise.all([connectLocalRuntime(input.spaceId), isOwnersRuntime(input.spaceId, input.ownerUserId)]);
+  const mounts = connection
+    ? await syncLocalMounts({
+      rpc: createLocalRpc(connection, input),
+      capabilities: connection.capabilities,
+      spaceId: input.spaceId,
+      sources: localMountSources({ ownerUserId: ownersRuntime ? input.ownerUserId : null, mods: input.spaceMods }),
+    })
+      .catch((error: unknown) => {
+        logger.warn(`[Agent] Failed to sync Local Runtime mounts for ${input.spaceId}`, error);
+        return null;
+      })
+    : null;
+  return { connection, mounts, spaceMods: input.spaceMods };
+}
+
 export async function loadOrCreateSessionHandle(input: {
   spaceId: string;
   sessionId: string;
@@ -1118,15 +1147,31 @@ export async function loadOrCreateSessionHandle(input: {
     return context;
   };
 
-  const spaceInfo = await getSpace({ spaceId: input.spaceId }).catch((error: unknown) => {
-    logger.warn(`[Agent] Failed to load space info for ${input.spaceId}; falling back to platform config`, error);
-    return null;
-  });
+  const [spaceInfo, sandboxProvider] = await Promise.all([
+    getSpace({ spaceId: input.spaceId }).catch((error: unknown) => {
+      logger.warn(`[Agent] Failed to load space info for ${input.spaceId}; falling back to platform config`, error);
+      return null;
+    }),
+    resolveSandboxProvider(input.spaceId).catch((error: unknown) => {
+      logger.warn(`[Agent] Failed to resolve sandbox provider for ${input.spaceId}; assuming a cloud sandbox`, error);
+      return "cloud" as const;
+    }),
+  ]);
   const spaceOwnerUserId = spaceInfo?.space?.userUuid?.trim() || null;
+  const loadSpaceMods = () => listEnabledSpaceMods(db, input.spaceId).catch((error: unknown) => {
+    logger.warn(`[Agent] Failed to load space mods for ${input.spaceId}; continuing without mods`, error);
+    return [];
+  });
+
+  // A Local Runtime's mounts are brought up to date every Turn, as a cloud Pod's mounts are always current.
+  const local = sandboxProvider === "local" ? await prepareLocalRuntime({ spaceId: input.spaceId, sessionId: input.sessionId, ownerUserId: spaceOwnerUserId, spaceMods: await loadSpaceMods() }) : null;
+  const promptWorkspace = !local ? "cloud"
+    : !local.connection ? "local:offline"
+    : `local:${local.mounts ? Object.keys(local.mounts).sort().join(",") : "unmounted"}`;
 
   const existing = input.sessionHandles.get(sessionKey);
   if (existing) {
-    if (sameSessionFileSignature(existing.sessionFileSignature, fileSignature)) {
+    if (sameSessionFileSignature(existing.sessionFileSignature, fileSignature) && existing.promptWorkspace === promptWorkspace) {
       existing.spaceOwnerUserId = spaceOwnerUserId;
       if (!existing.currentUserMessageId && syncCloudContext(existing.sessionManager, await loadDurableContext(existing.sessionManager), projectionOptions)) {
         await existing.session.reload();
@@ -1144,10 +1189,10 @@ export async function loadOrCreateSessionHandle(input: {
     input.sessionHandles.delete(sessionKey);
   }
 
-  const spaceMods = await listEnabledSpaceMods(db, input.spaceId).catch((error: unknown) => {
-    logger.warn(`[Agent] Failed to load space mods for ${input.spaceId}; continuing without mods`, error);
-    return [];
-  });
+  const [spaceMods, localWorkspace] = await Promise.all([
+    local?.spaceMods ?? loadSpaceMods(),
+    local ? loadLocalPromptWorkspace({ connection: local.connection, spaceId: input.spaceId, sessionId: input.sessionId, mounts: local.mounts }) : null,
+  ]);
 
   let sessionManager: SessionManager;
   if (await pathExists(existingSessionFile)) {
@@ -1178,6 +1223,7 @@ export async function loadOrCreateSessionHandle(input: {
     imageToTextConfig: input.imageToTextConfig,
     tools: input.tools,
     spaceMods,
+    ...(localWorkspace ? { localWorkspace } : {}),
     ...(resolvedModel ? { model: resolvedModel } : {}),
     loadSelectedThinkingLevel: () => loadRequestedThinkingLevel({ sessionId: input.sessionId, beforeSequence: input.beforeTurnSequence ?? undefined }).catch((error: unknown) => {
       logger.warn(`[Session] failed to load selected thinking level sessionId=${input.sessionId}; using the lowest supported level`, error);
@@ -1240,6 +1286,7 @@ export async function loadOrCreateSessionHandle(input: {
     },
     interruptedSnapshotTurnIds: new Set(),
     sessionFileSignature: fileSignature,
+    promptWorkspace,
   };
 
   subscribeSessionEvents(handle);

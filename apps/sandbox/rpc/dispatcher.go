@@ -177,6 +177,10 @@ func (d *Dispatcher) handle(ctx context.Context, request protocol.RPCRequest, ow
 		return accepted, d.complete(request, accepted.OpID, d.handleFSGrep(request))
 	case "fs.search":
 		return accepted, d.complete(request, accepted.OpID, d.handleFSSearch(request))
+	case "mounts.sync":
+		return accepted, d.complete(request, accepted.OpID, d.handleMountsSync(request))
+	case "mounts.write":
+		return accepted, d.complete(request, accepted.OpID, d.handleMountsWrite(request))
 	case "process.start":
 		return accepted, d.handleProcessStart(request, accepted.OpID, ownerIdentity)
 	case "process.abort":

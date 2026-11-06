@@ -256,21 +256,54 @@ type resolvedSandboxPath struct {
 
 const virtualWorkspaceRoot = "/workspace"
 
+// Sandbox paths of the read-only mounts a cloud Pod gets; a local sandbox keeps them under CacheDir.
+const (
+	virtualPlatformAgentsRoot = "/configs/platform/.agents"
+	virtualUserAgentsRoot     = "/configs/user/.agents"
+	virtualModsRoot           = "/mods"
+)
+
+type virtualRoot struct {
+	virtual string
+	host    string
+}
+
+func virtualRoots(cfg env.Config) []virtualRoot {
+	roots := []virtualRoot{{virtualWorkspaceRoot, cfg.WorkspaceDir}}
+	if cfg.CacheDir != "" {
+		roots = append(roots,
+			virtualRoot{virtualPlatformAgentsRoot, cfg.PlatformAgentsDir},
+			virtualRoot{virtualUserAgentsRoot, cfg.UserAgentsDir},
+			virtualRoot{virtualModsRoot, cfg.ModsDir},
+		)
+	}
+	return roots
+}
+
+// readOnlyMountRoots are the fenced directories besides the workspace; all are read-only to tools.
+func readOnlyMountRoots(cfg env.Config) []string {
+	if !cfg.Fence || cfg.CacheDir == "" {
+		return nil
+	}
+	return []string{cfg.PlatformAgentsDir, cfg.UserAgentsDir, cfg.ModsDir}
+}
+
 func mapVirtualWorkspacePath(cfg env.Config, cleaned string) string {
 	if !cfg.Fence {
 		return cleaned
 	}
-	workspaceRoot := filepath.Clean(cfg.WorkspaceDir)
-	virtualRoot := filepath.Clean(virtualWorkspaceRoot)
-	if workspaceRoot == virtualRoot {
-		return cleaned
-	}
-	if cleaned == virtualRoot {
-		return workspaceRoot
-	}
-	if strings.HasPrefix(cleaned, virtualRoot+string(filepath.Separator)) {
-		relativePath := strings.TrimPrefix(cleaned, virtualRoot+string(filepath.Separator))
-		return filepath.Join(workspaceRoot, relativePath)
+	for _, root := range virtualRoots(cfg) {
+		hostRoot := filepath.Clean(root.host)
+		virtual := filepath.Clean(root.virtual)
+		if hostRoot == virtual {
+			continue
+		}
+		if cleaned == virtual {
+			return hostRoot
+		}
+		if strings.HasPrefix(cleaned, virtual+string(filepath.Separator)) {
+			return filepath.Join(hostRoot, strings.TrimPrefix(cleaned, virtual+string(filepath.Separator)))
+		}
 	}
 	return cleaned
 }
@@ -301,12 +334,22 @@ func resolveSandboxPath(cfg env.Config, rawPath string, cwd string) (resolvedSan
 	cleaned = mapVirtualWorkspacePath(cfg, cleaned)
 
 	if cfg.Fence {
-		if err := ensureWithinRoot(cfg.WorkspaceDir, cleaned); err != nil {
+		if err := ensureWithinRoots(append([]string{cfg.WorkspaceDir}, readOnlyMountRoots(cfg)...), cleaned); err != nil {
 			return resolvedSandboxPath{}, err
 		}
 	}
 
 	return resolvedSandboxPath{path: cleaned}, nil
+}
+
+func ensureWithinRoots(roots []string, cleaned string) error {
+	for _, root := range roots {
+		err := ensureWithinRoot(root, cleaned)
+		if err == nil || !errors.Is(err, errPathOutsideRoot) {
+			return err
+		}
+	}
+	return errPathOutsideRoot
 }
 
 // errPathOutsideRoot is returned when a fenced sandbox receives a path that
@@ -363,6 +406,9 @@ func isReadOnlyPath(cfg env.Config, path string) bool {
 	roots := []string{
 		filepath.Clean(cfg.PlatformAgentsDir),
 		filepath.Clean(cfg.UserAgentsDir),
+	}
+	if cfg.ModsDir != "" {
+		roots = append(roots, filepath.Clean(cfg.ModsDir))
 	}
 	candidate := filepath.Clean(path)
 	for _, root := range roots {

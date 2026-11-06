@@ -148,3 +148,34 @@ assert.ok(!promptWithMod.includes("Live workspace skill description"), "should n
 assert.ok(!promptWithMod.includes("live-only-skill"), "should not expose live-only Mod skills");
 assert.ok(!promptWithMod.includes("Live workspace Mod context."), "should not load Mod context from the live workspace");
 assert.ok(!promptWithMod.includes("Live workspace append prompt."), "should not load Mod append prompts from the live workspace");
+
+const hostRoot = "/Users/me/project";
+const localFiles = new Map([
+  ["/workspace/AGENTS.md", "Local project rule."],
+  ["/workspace/.agents/skills/local-skill/SKILL.md", "---\nname: local-skill\ndescription: Local skill description\n---\nLocal body."],
+]);
+const modHostPath = "/Users/me/.cache/cohub/spaces/s/mods/shared-mod";
+const buildLocalPrompt = (mounts: Record<string, string> | null) => buildCohubSystemPrompt({
+  cwd: workspace,
+  userId,
+  selectedTools: ["read"],
+  spaceMods: [spaceMod],
+  localWorkspace: {
+    hostRoot,
+    mounts,
+    readText: async (relativePath) => localFiles.get(`/workspace/${relativePath}`),
+    skillReader: {
+      listDirectories: async (dir) => dir === "/workspace/.agents/skills" ? ["local-skill"] : null,
+      readText: async (path) => localFiles.get(path) ?? null,
+    },
+  },
+});
+const localPrompt = await buildLocalPrompt({ "/mods/shared-mod": modHostPath, "/configs/user/.agents": "/Users/me/.cache/cohub/spaces/s/user-agents" });
+assert.ok(localPrompt.includes("Local project rule."), "local Spaces should read project context from the Local Runtime");
+assert.ok(!localPrompt.includes("Project rule: run typecheck."), "local Spaces should not read the cloud workspace copy");
+assert.ok(localPrompt.includes("<location>/workspace/.agents/skills/local-skill/SKILL.md</location>"), "local project skills should be listed");
+assert.ok(localPrompt.includes("<location>/mods/shared-mod/.agents/skills/shared-mod-skill/SKILL.md</location>") && localPrompt.includes("owner-skill"), "mounted local Spaces should match the cloud sandbox prompt");
+assert.ok(localPrompt.includes(`- /workspace → ${hostRoot}`) && localPrompt.includes(`- /mods/shared-mod → ${modHostPath}`), "host paths should be mapped for shell commands");
+
+const unmountedPrompt = await buildLocalPrompt(null);
+assert.ok(unmountedPrompt.includes("local-skill") && !unmountedPrompt.includes("owner-skill") && !unmountedPrompt.includes("# Mods"), "a Runtime without mounts should list only project skills");

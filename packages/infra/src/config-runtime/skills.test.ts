@@ -153,7 +153,7 @@ test("bindModSkillsConfig rejects paths outside the cached mod directory", () =>
 
 test("reachableSkillScopes grades scopes by execution target", () => {
   assert.deepEqual(reachableSkillScopes("cloud_sandbox"), ["platform", "mod", "user", "project"]);
-  assert.deepEqual(reachableSkillScopes("local_sandbox"), ["project"]);
+  assert.deepEqual(reachableSkillScopes("local_sandbox"), ["platform", "mod", "user", "project"]);
   assert.deepEqual(reachableSkillScopes("native_harness"), ["project"]);
 });
 
@@ -219,7 +219,7 @@ test("createSkillLoader fetches only reachable scopes and ignores reachability f
       user: scopeLoader("user"),
       project: scopeLoader("project"),
     },
-    getSandboxProvider: async () => "local",
+    getSandboxProvider: async () => { throw new Error("db down"); },
   });
 
   const reachable = await loader.fetch({ userId: "u1", spaceId: "s1", harness: "cohub" });
@@ -272,7 +272,7 @@ test("skillLoader.expand resolves one target for filtering, diagnosis, and locat
   assert.equal(cloud?.skill.name, "deploy");
   assert.match(cloud?.renderedText ?? "", /location="\/configs\/platform\/\.agents\/skills\/deploy\/SKILL\.md"/);
 
-  // Cohub on a local sandbox: a platform-only skill reports its unreachable scope.
+  // Cohub on an unverified sandbox: a platform-only skill reports its unreachable scope.
   const localLoader = createSkillLoader({
     scopes: {
       platform: async () => ({ skills: [platformSkill] }),
@@ -280,7 +280,7 @@ test("skillLoader.expand resolves one target for filtering, diagnosis, and locat
       user: async () => null,
       project: async () => null,
     },
-    getSandboxProvider: async () => "local",
+    getSandboxProvider: async () => { throw new Error("db down"); },
   });
   await assert.rejects(
     localLoader.expand("/skill:deploy", { userId: "u1", spaceId: "s1", harness: "cohub" }),

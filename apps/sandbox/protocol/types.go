@@ -65,6 +65,8 @@ type SandboxCapabilities struct {
 	ProcessFd          bool `json:"processFd"`
 	Display            bool `json:"display,omitempty"`
 	RTC                bool `json:"rtc,omitempty"`
+	// Mounts: mounts.sync / mounts.write mirror the cloud read-only mounts into a local sandbox.
+	Mounts bool `json:"mounts,omitempty"`
 }
 
 type SandboxProcessStats struct {

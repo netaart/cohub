@@ -82,3 +82,10 @@ test("a final line without a trailing newline is kept", () => {
   const result = collector.format();
   assert.equal(result.content[0]?.type === "text" ? result.content[0].text : "", "a.txt:4: hit");
 });
+
+test("relative paths from a mapped cwd format like absolute sandbox paths", () => {
+  const collector = createRgJsonGrepCollector({ searchPath: "/mods/demo/skills", pathBase: "/mods/demo", limit: 10 });
+  collector.push(`${JSON.stringify({ type: "match", data: { path: { text: "skills/a/SKILL.md" }, lines: { text: "hit\n" }, line_number: 1 } })}\n`);
+  const result = collector.format();
+  assert.equal(result.content[0]?.type === "text" ? result.content[0].text : "", "a/SKILL.md:1: hit");
+});
