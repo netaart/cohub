@@ -77,12 +77,15 @@ export function measureTurnRailMarkers(input: {
 	const heights: Record<number, number> = {};
 	for (const range of ranges) {
 		const turnHeight = Math.max(range.offsetHeight, range.end - range.start);
-		positions[range.sequence] = Math.min(
+		const position = Math.min(
 			100,
 			Math.max(0, (range.start / contentSpan) * 100),
 		);
+		positions[range.sequence] = Math.round(position * 10) / 10;
 		const heightPercent = (turnHeight / contentSpan) * 100;
-		heights[range.sequence] = Math.min(22, Math.max(8, heightPercent));
+		heights[range.sequence] = Math.round(
+			Math.min(22, Math.max(8, heightPercent)),
+		);
 	}
 	return { positions, heights };
 }

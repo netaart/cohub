@@ -966,6 +966,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			return;
 		}
 		void tick().then(() => {
+			updateTimelineScrollMetrics();
 			updateCurrentTurnSequence();
 			scroll.scheduleTurnMarkerMeasureThrottled();
 		});
@@ -3743,12 +3744,12 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	}
 
 	function updateCurrentTurnSequence() {
-		if (!activeSessionId) return;
-		const list = getSessionScrollList(activeSessionId);
-		if (!list) return;
+		if (!activeSessionId || !getSessionScrollList(activeSessionId)) return;
 		const geometry = scroll.getTurnAnchorGeometry(activeSessionId);
 		// Same probe as before: ~35% down the viewport, capped at 160px.
-		const probe = list.scrollTop + Math.min(160, list.clientHeight * 0.35);
+		const probe =
+			scroll.timelineScrollTop +
+			Math.min(160, scroll.timelineClientHeight * 0.35);
 		const next = findCurrentTurnAnchorSequence(geometry, probe);
 		if (currentTurnSequence !== next) currentTurnSequence = next;
 	}

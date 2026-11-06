@@ -351,7 +351,7 @@ onDestroy(() => {
 			>
 				<span
 					role="presentation"
-					class={`pointer-events-none block rounded-full ring-1 ring-bg-content/90 transition-[width,height,opacity,background-color,box-shadow] duration-150 ${statusClass(marker.turn.status)} ${marker.loaded ? 'opacity-85' : 'opacity-35'} ${marker.current ? 'w-3 bg-brand opacity-100 shadow-[0_0_0_3px_rgba(255,62,0,0.20)]' : 'w-1.5 group-hover:w-2.5 group-hover:opacity-100'}`}
+					class={`pointer-events-none block rounded-full ring-1 ring-bg-content/90 transition-[width,opacity,background-color,box-shadow] duration-150 ${statusClass(marker.turn.status)} ${marker.loaded ? 'opacity-85' : 'opacity-35'} ${marker.current ? 'w-3 bg-brand opacity-100 shadow-[0_0_0_3px_rgba(255,62,0,0.20)]' : 'w-1.5 group-hover:w-2.5 group-hover:opacity-100'}`}
 					style:height={`${marker.current ? Math.max(12, marker.height) : marker.height}px`}
 				></span>
 				{#if loadingSequence === marker.turn.sequence}
