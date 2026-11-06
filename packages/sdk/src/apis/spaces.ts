@@ -2340,7 +2340,7 @@ export class SpaceClient {
     return this.update({ name });
   }
 
-  profile(body: { description?: string | null; avatarUrl?: string | null; likeSticker?: SpaceLikeSticker | null }) {
+  profile(body: { description?: string | null; avatarUrl?: string | null; likeSticker?: SpaceLikeSticker | null; fundingEnabled?: boolean }) {
     return this.transport.request<{ space: SpaceRecord }>(
       `/api/spaces/${this.id}/profile`,
       {

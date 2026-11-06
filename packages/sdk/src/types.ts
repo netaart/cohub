@@ -1,4 +1,13 @@
-export type { SpaceWalletSummary, SpaceWalletActivity, SpaceWalletActivityPage, WorkspaceUsage } from "@cohub/protocol";
+export type {
+  SpaceWalletSummary,
+  SpaceWalletActivity,
+  SpaceWalletActivityPage,
+  SpaceWalletFunding,
+  SpaceWalletFundingTier,
+  SpaceWalletTransferState,
+  SpaceWalletTransferStatus,
+  WorkspaceUsage,
+} from "@cohub/protocol";
 import type { WorkspaceUsage } from "@cohub/protocol";
 export type { SessionArchiveFilter, SessionStats, ExecutionStats, TurnMetrics, RequestMetric } from "@cohub/protocol/model";
 import type { MediaFacts } from "@cohub/protocol/core";
@@ -885,6 +894,7 @@ export type SpacePublicProfile = {
   avatarUrl: string | null;
   /** Replaces the heart on the Space's published Apps; null or absent keeps the heart. */
   likeSticker?: SpaceLikeSticker | null;
+  fundingEnabled?: boolean;
 };
 
 export type SpaceMeta = JsonObject & {

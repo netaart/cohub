@@ -306,15 +306,22 @@ cohub -s <spaceId> spaces activity 365 --json
 
 ```bash
 cohub -s <spaceId> spaces wallet balance
-cohub -s <spaceId> spaces wallet catalog
-cohub -s <spaceId> spaces wallet recharge <productKey> --request-id <uuid>
+cohub -s <spaceId> spaces wallet funding
+cohub -s <spaceId> spaces wallet transfer 50
+cohub -s <spaceId> spaces wallet transfer-status <requestId>
+cohub -s <spaceId> spaces wallet recharge <productKey>
 cohub -s <spaceId> spaces wallet confirm <orderId>
+cohub -s <spaceId> spaces wallet public-funding on
 cohub -s <spaceId> spaces wallet activity --page 1 --json
 ```
 
-Recharge prints a payment URL. Reuse the request UUID when retrying the same
-recharge. Any signed-in user with access to the Space may contribute; payment
-does not grant additional permissions. Transfers and withdrawals are not supported.
+`transfer` moves purchased personal balance (whole USD) into the wallet;
+`recharge` prints a payment URL for a funding tier. Request IDs are generated
+automatically; when a result is uncertain the CLI prints a retry command with
+`--request-id` that continues the same transfer or order. Viewers of the Space
+can always fund it; with public funding on, anyone signed in can. Funding does
+not grant access, and wallet funds cannot be withdrawn. Transfers require a
+personal session, not an agent execution token.
 
 ## Boards
 

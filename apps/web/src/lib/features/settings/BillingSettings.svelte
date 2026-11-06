@@ -1,5 +1,6 @@
 <script lang="ts">
 import type {
+	BillingBalanceActivity,
 	BillingBalanceActivityList,
 	BillingCreditStatus,
 	BillingSubscriptionHistoryList,
@@ -25,6 +26,10 @@ import {
 	subscriptionDisplayState,
 } from "$lib/features/billing/product";
 import { PurchaseFlow } from "$lib/features/billing/purchase.svelte";
+import {
+	quotedName,
+	transferActivityKind,
+} from "$lib/features/billing/space-fund";
 import * as account from "$lib/features/settings/account-data";
 import {
 	onSettingsPageActive,
@@ -53,6 +58,20 @@ let activityPage = $state(1);
 let laterActivities = $state.raw<BillingBalanceActivityList | null>(null);
 let activityPaging = $state(false);
 let activityPagingError = $state("");
+function activityTitle(item: BillingBalanceActivity) {
+	const transfer = transferActivityKind(item);
+	if (transfer === "out") return m.wallet_transfer_out({}, { locale });
+	if (transfer === "returned")
+		return m.wallet_transfer_returned({}, { locale });
+	return item.title;
+}
+
+function activityDescription(item: BillingBalanceActivity) {
+	return transferActivityKind(item)
+		? (quotedName(item.description) ?? "")
+		: (item.description ?? item.sourceType ?? "");
+}
+
 const balanceActivities = $derived(
 	activityPage === 1 ? account.billingActivity.data : laterActivities,
 );
@@ -937,7 +956,7 @@ $effect(() => {
 								<div class="grid grid-cols-[minmax(0,1fr)_8rem] gap-3 px-3 py-3 text-[12px] sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_8rem]">
 									<div class="min-w-0">
 										<div class="flex min-w-0 items-center gap-2">
-											<div class="truncate font-medium text-text-primary">{item.title}</div>
+											<div class="truncate font-medium text-text-primary">{activityTitle(item)}</div>
 											{#if activityStatusLabel(item.status)}
 												<span class="tag">{activityStatusLabel(item.status)}</span>
 											{/if}
@@ -945,12 +964,12 @@ $effect(() => {
 										<div class="mt-0.5 text-[11px] text-text-tertiary">{formatBillingDate(item.createdAt)}</div>
 										<div class="mt-1 min-w-0 sm:hidden">
 											<div class="truncate font-mono text-[11px] text-text-tertiary" title={item.operationId ?? item.sourceId ?? ""}>{shortIdentifier(item.operationId ?? item.sourceId)}</div>
-											<div class="mt-0.5 truncate text-[11px] text-text-placeholder">{item.description ?? item.sourceType ?? ""}</div>
+											<div class="mt-0.5 truncate text-[11px] text-text-placeholder">{activityDescription(item)}</div>
 										</div>
 									</div>
 									<div class="hidden min-w-0 sm:block">
 										<div class="truncate font-mono text-[11px] text-text-tertiary" title={item.operationId ?? item.sourceId ?? ""}>{shortIdentifier(item.operationId ?? item.sourceId)}</div>
-										<div class="mt-0.5 truncate text-[11px] text-text-placeholder">{item.description ?? item.sourceType ?? ""}</div>
+										<div class="mt-0.5 truncate text-[11px] text-text-placeholder">{activityDescription(item)}</div>
 									</div>
 									<div class="font-mono text-[12px] {item.amountUsd < 0 ? 'text-text-primary' : 'text-success-soft'} sm:text-right">{formatUsdAmount(item.amountUsd)}</div>
 								</div>

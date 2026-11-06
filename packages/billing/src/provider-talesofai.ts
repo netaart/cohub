@@ -147,6 +147,7 @@ const CHECKOUT_LOCK_RETRY_DELAY_MS = 250;
 const CHECKOUT_LOCK_RETRY_COUNT = 24;
 const CREDIT_LIST_PAGE_LIMIT = 100;
 const CREDIT_LIST_MAX_PAGES = 20;
+const DENOMINATION_CACHE_TTL_MS = 5 * 60 * 1000;
 const CREDIT_GRANT_DISPLAY_STATUSES = [
   "active",
   "depleted",
@@ -1963,6 +1964,8 @@ export function createTalesofaiBillingOperations(
     );
   };
 
+  let denominationCache: { expiresAt: number; value: Promise<CreditsBenefit[]> } | null = null;
+
   const getDefaultPlanProduct = async (): Promise<Product | null> => {
     try {
       const defaultPlan = await sdk.admin.businesses.getDefaultPlan({
@@ -3186,6 +3189,91 @@ export function createTalesofaiBillingOperations(
         status: response.overage ? "overage" : "recorded",
         response,
       };
+    },
+
+    async listCreditDenominations(input) {
+      if (!denominationCache || denominationCache.expiresAt <= Date.now()) {
+        denominationCache = { expiresAt: Date.now() + DENOMINATION_CACHE_TTL_MS, value: listActiveCreditsBenefits() };
+        denominationCache.value.catch(() => { denominationCache = null; });
+      }
+      const tokenType = COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
+      return (await denominationCache.value)
+        .filter(({ key, config }) => key.startsWith(input.keyPrefix) && config.token_type === tokenType &&
+          config.grant_kind === "manual" && config.scope === "business" && config.expires_in_days == null && config.amount > 0)
+        .map(({ key, config }) => ({ key, amountUsd: amountToUsd(config.amount, tokenType) }))
+        .sort((a, b) => b.amountUsd - a.amountUsd);
+    },
+
+    async grantCredits(input) {
+      await ensureCustomer({ userId: input.userId });
+      const result = await sdk.admin.credits.grant({
+        business_key: businessKey,
+        external_user_id: input.userId,
+        benefit_key: input.benefitKey,
+        source_id: input.sourceId,
+        operation_id: input.operationId,
+        reason: input.reason.slice(0, 1024),
+      }, { idempotencyKey: input.operationId });
+      return { amountUsd: amountToUsd(result.grant.original_amount, result.grant.token_type) };
+    },
+
+    async sumTransactions(input) {
+      const tokenType = COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
+      const totals = { grantUsd: 0, consumeUsd: 0, reversalUsd: 0 };
+      for (let page = 1; ; page += 1) {
+        if (page > CREDIT_LIST_MAX_PAGES) throw billingApiError(503, "Transaction history too long to total", "transaction_history_too_long");
+        const result = await sdk.admin.credits.listTransactions({
+          business_key: businessKey,
+          external_user_id: input.userId,
+          token_type: tokenType,
+          operation_id: input.operationId,
+          usage_type: input.usageType,
+          include_count: false,
+          page,
+          limit: CREDIT_LIST_PAGE_LIMIT,
+        }).catch((error: unknown) => {
+          if (isNotFound(error)) return null;
+          throw error;
+        });
+        for (const transaction of result?.items ?? []) {
+          const key = transaction.type === "grant" ? "grantUsd" : transaction.type === "consume" ? "consumeUsd" : transaction.type === "reversal" ? "reversalUsd" : null;
+          if (key) totals[key] = roundUsd(totals[key] + amountToUsd(transaction.amount, tokenType));
+        }
+        if (!result?.pagination.has_more) return totals;
+      }
+    },
+
+    async getUsageConsumption(input) {
+      const tokenType = COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
+      try {
+        const consumption = await sdk.admin.credits.getConsumption({
+          business_key: businessKey,
+          external_user_id: input.userId,
+          token_type: tokenType,
+          operation_id: input.operationId,
+        });
+        return {
+          amountUsd: amountToUsd(consumption.original_amount, tokenType),
+          reversedUsd: amountToUsd(consumption.total_reversed, tokenType),
+        };
+      } catch (error) {
+        if (isNotFound(error)) return null;
+        throw error;
+      }
+    },
+
+    async reverseUsage(input) {
+      const tokenType = COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
+      const receipt = await sdk.admin.credits.reverseConsume({
+        business_key: businessKey,
+        external_user_id: input.userId,
+        token_type: tokenType,
+        original_operation_id: input.originalOperationId,
+        operation_id: input.operationId,
+        amount: usdToAmount(input.amountUsd, tokenType),
+        reason: input.reason.slice(0, 1024),
+      }, { idempotencyKey: input.operationId });
+      return { amountUsd: amountToUsd(receipt.amount, tokenType) };
     },
 
     listBalanceActivities,

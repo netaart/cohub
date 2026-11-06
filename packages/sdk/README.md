@@ -431,17 +431,32 @@ stop();
 ```ts
 const wallet = client.space(spaceId).wallet;
 const balance = await wallet.get();
-const catalog = await wallet.catalog();
 const activity = await wallet.activities(1);
+
+// Funding: tiers (shared by both payment paths) and your transferable balance.
+const funding = await wallet.funding();
+const tier = funding.tiers[0];
+
+// Pay from purchased personal balance. Reuse the ID to retry an uncertain request.
+const transfer = await wallet.transfer({ id: crypto.randomUUID(), amountUsd: tier.amountUsd });
+// transfer.state: "completed" | "processing" | "refunded"; poll wallet.getTransfer(transfer.id).
+
+// Or pay online.
 const { checkout, orderId } = await wallet.createOrder({
   id: crypto.randomUUID(), // Persist and reuse this ID when retrying.
-  productKey,
+  productKey: tier.productKey,
+  returnPath: "/spaces/" + spaceId + "/wallet",
 });
 const confirmation = await wallet.confirmOrder(orderId);
+
+// Hosts: let anyone signed in fund the wallet.
+await client.space(spaceId).profile({ fundingEnabled: true });
 ```
 
 Open `checkout.checkoutUrl` to pay. Confirmation requires the contributor's
-session; a payment redirect is not proof of settlement. Space funds pay whole
+session; a payment redirect is not proof of settlement. Only purchased balance
+can be transferred; a transfer that cannot be credited is returned to the
+original credits automatically. Space funds pay whole
 usage charges when sufficient, otherwise the original user's balance is used.
 Personal balance transfers and withdrawals are not supported.
 

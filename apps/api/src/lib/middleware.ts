@@ -189,6 +189,7 @@ export const getSpacePublicProfile = (space: Pick<typeof spaces.$inferSelect, "i
   return {
     avatarUrl: normalizePublicAvatarUrl(profile.avatarUrl),
     likeSticker: normalizeLikeSticker(profile.likeSticker, space.id),
+    fundingEnabled: profile.fundingEnabled === true,
   };
 };
 

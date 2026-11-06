@@ -398,6 +398,26 @@ export function createDisabledBillingOperations(
       };
     },
 
+    async listCreditDenominations() {
+      return [];
+    },
+
+    async grantCredits(): Promise<{ amountUsd: number }> {
+      throw new BillingConfigurationError(status.reason);
+    },
+
+    async sumTransactions() {
+      return { grantUsd: 0, consumeUsd: 0, reversalUsd: 0 };
+    },
+
+    async getUsageConsumption() {
+      return null;
+    },
+
+    async reverseUsage(): Promise<{ amountUsd: number }> {
+      throw new BillingConfigurationError(status.reason);
+    },
+
     async listBalanceActivities(
       input: BillingBalanceActivityListInput,
     ): Promise<BillingBalanceActivityList> {

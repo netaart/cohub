@@ -24,6 +24,7 @@ import { createDeferredMount } from "$lib/deferred-mount.svelte";
 import { linkDeviceDisplays } from "$lib/device-display.svelte";
 import { pointerDrag } from "$lib/drag/pointer-drag.svelte";
 import CheckoutReturnHandler from "$lib/features/billing/CheckoutReturnHandler.svelte";
+import SpaceWalletReturn from "$lib/features/billing/SpaceWalletReturn.svelte";
 import { startDesktopCommandListener } from "$lib/features/desktop-command/bus";
 import GlobalMarkCapture from "$lib/features/preview-mark/ui/GlobalMarkCapture.svelte";
 import { buildDisplayWindowRoute } from "$lib/features/space/modules/window-route";
@@ -659,6 +660,7 @@ onMount(() => {
   <FeedbackDialog open={showFeedback} onClose={() => { showFeedback = false; }} />
   <BillingConversionCenter />
   <CheckoutReturnHandler />
+  <SpaceWalletReturn />
   <TurnNotificationStack />
   <GlobalMarkCapture />
 

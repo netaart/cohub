@@ -1,16 +1,13 @@
 import { createBillingUsageGate, COHUB_BILLING_TOKEN_TYPES, type BillingOperations, type BillingUsageGate, type BillingUsageRecordInput, type BillingUsageRecordResult, type SpaceWalletBillingOperations } from "@cohub/billing";
+import { spaceWalletCustomerId, walletActorReason } from "./customer.js";
 import { walletCreditsUsable } from "./policy.js";
 
+export { spaceWalletCustomerId } from "./customer.js";
 export { claimMessageWalletBilling, resolveWalletMessageEligibility } from "./message-claim.js";
 export { walletCreditsUsable } from "./policy.js";
-export const spaceWalletCustomerId = (spaceId: string) => `cohub:space-wallet:${spaceId}`;
+export * from "./transfer.js";
 /** `payer` pins the charge to the payer a reserve hold was placed on; retries then cannot switch payers. */
 export type WalletUsageInput = BillingUsageRecordInput & { spaceId?: string | null; retryOnly?: boolean; payer?: "personal" | "space_wallet" | null };
-
-function walletReason(userId: string, reason: string | undefined): string {
-  const actorPrefix = `actor_user_id=${encodeURIComponent(userId)}; `;
-  return actorPrefix + (reason ?? "").slice(0, Math.max(0, 1024 - actorPrefix.length));
-}
 
 export function createSpaceWalletBilling(input: {
   billing: BillingOperations;
@@ -59,7 +56,7 @@ export function createSpaceWalletBilling(input: {
     if (payer === "personal") return billing.recordUsage(usage);
     if (payer === "space_wallet") {
       if (!spaceId) throw new Error("A Space wallet charge requires a spaceId");
-      return walletBilling.recordUsage({ ...usage, userId: spaceWalletCustomerId(spaceId), reason: walletReason(usage.userId, usage.reason) });
+      return walletBilling.recordUsage({ ...usage, userId: spaceWalletCustomerId(spaceId), reason: walletActorReason(usage.userId, usage.reason) });
     }
     if (!spaceId || !billing.status.configured || !walletBilling.status.configured || usage.amountUsd <= 0) return billing.recordUsage(usage);
     const tokenType = usage.tokenType ?? COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
@@ -82,7 +79,7 @@ export function createSpaceWalletBilling(input: {
       const result = await (walletPays ? walletBilling : billing).recordUsage({
         ...usage,
         userId: walletPays ? spaceWalletCustomerId(spaceId) : usage.userId,
-        reason: walletPays ? walletReason(usage.userId, usage.reason) : usage.reason,
+        reason: walletPays ? walletActorReason(usage.userId, usage.reason) : usage.reason,
       });
       if (walletPays && result.status === "overage") input.warn?.("Space wallet usage created overage", { spaceId, operationId: usage.operationId });
       return result;

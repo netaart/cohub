@@ -1,11 +1,16 @@
 <script lang="ts">
 import "../../app.css";
 import { onMount } from "svelte";
+import { browser } from "$app/environment";
 import { page } from "$app/state";
 import { markHostReady } from "$lib/host-bridge";
 import "$lib/theme.svelte";
 
 const { children } = $props();
+const walletReturn =
+	browser && page.url.searchParams.has("wallet_order")
+		? import("$lib/features/billing/SpaceWalletReturn.svelte")
+		: null;
 
 // The home page reports for itself once it picks marketing or the app.
 onMount(() => {
@@ -29,6 +34,10 @@ const isPublicAppPath = $derived.by(() => {
 		<link rel="apple-touch-icon" href="/pwa/icon-192x192.png" />
 	{/if}
 </svelte:head>
+
+{#if walletReturn}
+	{#await walletReturn then { default: SpaceWalletReturn }}<SpaceWalletReturn />{/await}
+{/if}
 
 {#if isPublicAppPath}
 	<!--

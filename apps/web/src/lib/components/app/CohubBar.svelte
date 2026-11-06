@@ -1,12 +1,17 @@
 <script lang="ts">
 import type { AppRecord, SpacePublicProfile } from "@neta-art/cohub";
-import { Eye } from "lucide-svelte";
-import type { Snippet } from "svelte";
+import { Eye, HandCoins } from "lucide-svelte";
+import { onMount, type Snippet } from "svelte";
+import { replaceState } from "$app/navigation";
 import { page } from "$app/state";
 import { appDisplayTitle } from "$lib/app-page-meta";
 import AppLikeButton from "$lib/components/app/AppLikeButton.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
+import {
+	currentReturnPath,
+	FUND_INTENT_PARAM,
+} from "$lib/features/billing/space-fund";
 import { formatCompactNumber, formatNumber } from "$lib/i18n/format";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { resolvePublicLocale } from "$lib/i18n/public-locale";
@@ -48,6 +53,30 @@ const {
 }: Props = $props();
 
 const locale = $derived(getLocale());
+const fundable = $derived(space?.publicProfile?.fundingEnabled === true);
+let fundDialog = $state<Promise<
+	typeof import("$lib/features/billing/SpaceFundDialog.svelte")
+> | null>(null);
+let fundOpen = $state(false);
+
+function openFund() {
+	fundDialog ??= import("$lib/features/billing/SpaceFundDialog.svelte");
+	fundOpen = true;
+}
+
+function fundSignInPath() {
+	const url = new URL(currentReturnPath(), window.location.origin);
+	url.searchParams.set(FUND_INTENT_PARAM, "1");
+	return `${url.pathname}${url.search}`;
+}
+
+onMount(() => {
+	const url = new URL(window.location.href);
+	if (!url.searchParams.has(FUND_INTENT_PARAM)) return;
+	url.searchParams.delete(FUND_INTENT_PARAM);
+	replaceState(url, history.state);
+	if (fundable) openFund();
+});
 // Brand link follows the page's URL locale, exactly like the public header.
 const zh = $derived(resolvePublicLocale(page.url.pathname) === "zh-CN");
 const homeHref = $derived(zh ? "/zh" : "/");
@@ -123,6 +152,18 @@ const totalViewsTitle = $derived(
 		<div class="hidden h-4 w-px shrink-0 bg-border-subtle sm:block"></div>
 	{/if}
 	<div class="flex min-w-0 shrink-0 items-center gap-2">
+		{#if fundable && space}
+			<button
+				type="button"
+				class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[5px] border border-border-subtle px-2 text-[12px] font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+				aria-label={m.wallet_fund({}, { locale })}
+				onclick={openFund}
+			>
+				<HandCoins class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+				<span class="hidden sm:inline">{m.wallet_fund({}, { locale })}</span>
+			</button>
+			<div class="hidden h-4 w-px shrink-0 bg-border-subtle sm:block"></div>
+		{/if}
 		{#if typeof likeCount === "number"}
 			{#key app.id}
 				<AppLikeButton
@@ -157,3 +198,9 @@ const totalViewsTitle = $derived(
 		/>
 	</div>
 </header>
+
+{#if fundDialog && space}
+	{#await fundDialog then { default: SpaceFundDialog }}
+		<SpaceFundDialog open={fundOpen} spaceId={space.id} signInPath={fundOpen ? fundSignInPath() : undefined} onClose={() => (fundOpen = false)} />
+	{/await}
+{/if}

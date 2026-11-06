@@ -547,6 +547,36 @@ export type BillingUsageRecordResult = {
   response: BillingConsumeCreditsResponseRaw | null;
 };
 
+export type BillingCreditDenomination = {
+  key: string;
+  amountUsd: number;
+};
+
+export type BillingCreditGrantInput = BillingUserRef & {
+  benefitKey: string;
+  sourceId: string;
+  operationId: string;
+  reason: string;
+};
+
+export type BillingTransactionTotals = {
+  grantUsd: number;
+  consumeUsd: number;
+  reversalUsd: number;
+};
+
+export type BillingUsageConsumption = {
+  amountUsd: number;
+  reversedUsd: number;
+};
+
+export type BillingUsageReversalInput = BillingUserRef & {
+  originalOperationId: string;
+  operationId: string;
+  amountUsd: number;
+  reason: string;
+};
+
 export type BillingFeatureEntitlementInput = BillingUserRef & {
   featureKey: CohubBillingFeatureKey;
 };
@@ -628,6 +658,11 @@ export interface BillingOperations {
   grantReferralReward(input: BillingReferralRewardInput): Promise<BillingReferralRewardResult>;
   preflightUsage(input: BillingUsagePreflightInput): Promise<BillingUsagePreflight>;
   recordUsage(input: BillingUsageRecordInput): Promise<BillingUsageRecordResult>;
+  listCreditDenominations(input: { keyPrefix: string }): Promise<BillingCreditDenomination[]>;
+  grantCredits(input: BillingCreditGrantInput): Promise<{ amountUsd: number }>;
+  sumTransactions(input: BillingUserRef & { operationId?: string; usageType?: string }): Promise<BillingTransactionTotals>;
+  getUsageConsumption(input: BillingUserRef & { operationId: string }): Promise<BillingUsageConsumption | null>;
+  reverseUsage(input: BillingUsageReversalInput): Promise<{ amountUsd: number }>;
   listBalanceActivities(input: BillingBalanceActivityListInput): Promise<BillingBalanceActivityList>;
   getFeatureEntitlement(input: BillingFeatureEntitlementInput): Promise<BillingFeatureEntitlement | null>;
   checkFeatureLimit(input: BillingFeatureLimitInput): Promise<BillingFeatureLimitCheck>;

@@ -1429,6 +1429,11 @@ router.patch("/:id/profile", async (c) => {
     }
   }
 
+  if ("fundingEnabled" in body) {
+    if (typeof body.fundingEnabled !== "boolean") return c.json({ message: "fundingEnabled must be a boolean" }, 400);
+    profilePatch.fundingEnabled = body.fundingEnabled;
+  }
+
   const meta = sql`case when jsonb_typeof(${spaces.meta}) = 'object' then ${spaces.meta} else '{}'::jsonb end`;
   const profile = sql`case when jsonb_typeof(${spaces.meta}->'publicProfile') = 'object' then ${spaces.meta}->'publicProfile' else '{}'::jsonb end`;
   const [updated] = await db
