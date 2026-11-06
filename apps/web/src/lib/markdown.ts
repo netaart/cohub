@@ -1134,14 +1134,49 @@ function renderStreamingPlainTail(source: string) {
 	);
 }
 
+// Lines that may continue the previous block after a blank line.
+const CONTINUATION_LINE = /^(?:\s|[-*+>|]|\d+[.)]\s)/;
+
+function splitStableChunks(text: string) {
+	const chunks: string[] = [];
+	let start = 0;
+	let scanned = 0;
+	let inMath = false;
+	for (const match of text.matchAll(/\n[ \t]*\n(?:[ \t]*\n)*/g)) {
+		const end = match.index + match[0].length;
+		if ((text.slice(scanned, end).match(/\$\$/g)?.length ?? 0) % 2 === 1)
+			inMath = !inMath;
+		scanned = end;
+		if (inMath || CONTINUATION_LINE.test(text.slice(end, end + 8))) continue;
+		chunks.push(text.slice(start, end));
+		start = end;
+	}
+	chunks.push(text.slice(start));
+	return chunks.filter((chunk) => chunk.trim());
+}
+
+export type StreamingMarkdownRender = {
+	stableSources: string[];
+	stableBlocks: string[];
+	tailHtml: string;
+};
+
+const EMPTY_STREAMING_RENDER: StreamingMarkdownRender = {
+	stableSources: [],
+	stableBlocks: [],
+	tailHtml: "",
+};
+
+/** Unchanged chunks reuse `previous` HTML so settled DOM is never re-inserted. */
 export const renderStreamingMarkdownSplit = async (
 	source: string,
-): Promise<{ stableHtml: string; tailHtml: string }> => {
+	previous?: StreamingMarkdownRender,
+): Promise<StreamingMarkdownRender> => {
 	const streamingSource = source.trimStart();
-	if (!streamingSource.trim()) return { stableHtml: "", tailHtml: "" };
+	if (!streamingSource.trim()) return EMPTY_STREAMING_RENDER;
 
 	const blocks = splitMarkdownBlocks(streamingSource);
-	if (blocks.length === 0) return { stableHtml: "", tailHtml: "" };
+	if (blocks.length === 0) return EMPTY_STREAMING_RENDER;
 
 	const stableSources: string[] = [];
 	let tailSource = "";
@@ -1162,39 +1197,32 @@ export const renderStreamingMarkdownSplit = async (
 		}
 
 		if (!isLast) {
-			stableSources.push(block.text);
+			stableSources.push(...splitStableChunks(block.text));
 			continue;
 		}
 
 		// Last text block: split at the most recent paragraph boundary so
 		// only the growing tail is re-rendered each commit.
 		const { stable, tail } = splitStreamingStableMarkdown(block.text);
-		if (stable.trim()) stableSources.push(stable);
+		stableSources.push(...splitStableChunks(stable));
 		tailSource = tail;
 		tailIsFence = false;
 	}
 
 	const hasTail = tailSource.trim().length > 0;
-	// Render each stable block independently. Stable blocks never change once
-	// promoted, so per-block caching means a new paragraph only costs one lexer +
-	// DOMPurify pass for itself. Keying the cache on the concatenated stable
-	// source instead would re-sanitize the entire message every time the
-	// stable/tail boundary moves, which grows linearly with answer length.
-	const stableHtml = (
-		await Promise.all(
-			stableSources.map((blockSource) =>
-				blockSource.trim()
-					? cacheMarkdownRender(`stream-stable-v3:${blockSource}`, () =>
-							renderMarkdownBlock(blockSource, {
-								highlight: false,
-								streamingSafe: true,
-								diagrams: true,
-							}),
-						)
-					: Promise.resolve(""),
-			),
-		)
-	).join("");
+	const stableBlocks = await Promise.all(
+		stableSources.map((chunk, index) =>
+			previous?.stableSources[index] === chunk
+				? previous.stableBlocks[index]
+				: cacheMarkdownRender(`stream-stable-v3:${chunk}`, () =>
+						renderMarkdownBlock(chunk, {
+							highlight: false,
+							streamingSafe: true,
+							diagrams: true,
+						}),
+					),
+		),
+	);
 
 	const tailHtml = !hasTail
 		? ""
@@ -1207,5 +1235,13 @@ export const renderStreamingMarkdownSplit = async (
 						streamingSafe: true,
 					});
 
-	return { stableHtml, tailHtml };
+	return {
+		stableSources,
+		stableBlocks:
+			previous?.stableBlocks.length === stableBlocks.length &&
+			stableBlocks.every((html, index) => html === previous.stableBlocks[index])
+				? previous.stableBlocks
+				: stableBlocks,
+		tailHtml,
+	};
 };

@@ -2190,34 +2190,9 @@ function truncateText(
     return text;
   }
 
-  // Find the largest UTF-16 prefix that fits the UTF-8 byte budget. This keeps
-  // the byte limit correct for CJK and emoji without encoding every character.
-  let low = 0;
-  let high = Math.min(text.length, maxBytes);
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2);
-    if (byteLength(text.slice(0, middle)) <= maxBytes) {
-      low = middle;
-    } else {
-      high = middle - 1;
-    }
-  }
-
-  // Never return half of a surrogate pair when the byte boundary falls there.
-  if (low > 0 && low < text.length) {
-    const previous = text.charCodeAt(low - 1);
-    const next = text.charCodeAt(low);
-    if (
-      previous >= 0xd800 &&
-      previous <= 0xdbff &&
-      next >= 0xdc00 &&
-      next <= 0xdfff
-    ) {
-      low -= 1;
-    }
-  }
-
-  return `${text.slice(0, low)}\n[truncated at ${maxBytes} bytes]`;
+  // encodeInto stops before the first code point that would overflow.
+  const { read } = textEncoder.encodeInto(text, new Uint8Array(maxBytes));
+  return `${text.slice(0, read)}\n[truncated at ${maxBytes} bytes]`;
 }
 
 function byteLength(text: string): number {

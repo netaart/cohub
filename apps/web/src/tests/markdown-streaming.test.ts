@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { renderMarkdown, renderStreamingMarkdownSplit } from "../lib/markdown";
 
+async function renderSplit(source: string) {
+	const { stableBlocks, tailHtml } = await renderStreamingMarkdownSplit(source);
+	return { stableHtml: stableBlocks.join(""), tailHtml };
+}
+
 test("renderMarkdown keeps nested fences inside markdown code blocks", async () => {
 	const html = await renderMarkdown(`\`\`\`markdown
 ---
@@ -97,7 +102,7 @@ test("renderMarkdown allows web and workspace URLs in source HTML", async () => 
 });
 
 test("renderStreamingMarkdownSplit escapes source HTML in the live tail", async () => {
-	const { stableHtml, tailHtml } = await renderStreamingMarkdownSplit(
+	const { stableHtml, tailHtml } = await renderSplit(
 		"<h1>Bad Request</h1>\n\n<img src=x onerror=alert(1)>",
 	);
 	const html = `${stableHtml}${tailHtml}`;
@@ -160,7 +165,7 @@ test("renderStreamingMarkdownSplit keeps cohub ask fence streaming-safe", async 
 	const source = `\`\`\`cohub-ask
 {"version":1,"questions":[{"question":"Continue?","header":"Next","options":[{"label":"Yes","description":"Continue.","value":"Yes"},{"label":"No","description":"Stop.","value":"No"}]}]}
 \`\`\``;
-	const { stableHtml, tailHtml } = await renderStreamingMarkdownSplit(source);
+	const { stableHtml, tailHtml } = await renderSplit(source);
 
 	assert.match(stableHtml, /<pre/);
 	assert.match(stableHtml, /language-cohub-ask/);
@@ -169,9 +174,7 @@ test("renderStreamingMarkdownSplit keeps cohub ask fence streaming-safe", async 
 });
 
 test("renderStreamingMarkdownSplit renders unclosed fence as plain code in tail", async () => {
-	const { stableHtml, tailHtml } = await renderStreamingMarkdownSplit(
-		"```ts\nconst value = 1;",
-	);
+	const { stableHtml, tailHtml } = await renderSplit("```ts\nconst value = 1;");
 
 	// Short source (< 140 chars) → everything in tail, stable empty
 	assert.equal(stableHtml, "");
@@ -181,7 +184,7 @@ test("renderStreamingMarkdownSplit renders unclosed fence as plain code in tail"
 });
 
 test("renderStreamingMarkdownSplit does not run shiki on closed fence", async () => {
-	const { stableHtml, tailHtml } = await renderStreamingMarkdownSplit(
+	const { stableHtml, tailHtml } = await renderSplit(
 		"```ts\nconst value = 1;\n```",
 	);
 
@@ -200,7 +203,7 @@ test("renderStreamingMarkdownSplit splits long content into stable and tail", as
 		"The answer ends with **bol and we need enough text here to ensure the tail is long enough for splitting.";
 	const source = `${stablePara}\n\n${tailPara}`;
 
-	const { stableHtml, tailHtml } = await renderStreamingMarkdownSplit(source);
+	const { stableHtml, tailHtml } = await renderSplit(source);
 
 	assert.match(stableHtml, /stable paragraph/);
 	assert.ok(tailHtml.length > 0, "tail should contain the growing paragraph");
@@ -210,7 +213,7 @@ test("renderStreamingMarkdownSplit splits long content into stable and tail", as
 
 test("renderStreamingMarkdownSplit renders very long tail as plain text", async () => {
 	const source = `The answer starts with **bold and keeps going ${"word ".repeat(420)}`;
-	const { stableHtml, tailHtml } = await renderStreamingMarkdownSplit(source);
+	const { stableHtml, tailHtml } = await renderSplit(source);
 
 	assert.equal(stableHtml, "");
 	assert.match(tailHtml, /markdown-streaming-tail/);
@@ -219,8 +222,26 @@ test("renderStreamingMarkdownSplit renders very long tail as plain text", async 
 });
 
 test("renderStreamingMarkdownSplit returns empty for empty source", async () => {
-	const { stableHtml, tailHtml } = await renderStreamingMarkdownSplit("");
+	const { stableHtml, tailHtml } = await renderSplit("");
 
 	assert.equal(stableHtml, "");
 	assert.equal(tailHtml, "");
+});
+
+test("renderStreamingMarkdownSplit keeps settled chunks and lists intact", async () => {
+	const intro = `Intro paragraph ${"words ".repeat(20)}`;
+	const list = "1. first\n\n2. second";
+	const tail = `Tail paragraph ${"more ".repeat(30)}`;
+	const first = await renderStreamingMarkdownSplit(
+		`${list}\n\n${intro}\n\n${tail}`,
+	);
+	const next = await renderStreamingMarkdownSplit(
+		`${list}\n\n${intro}\n\n${tail}\n\n${tail}`,
+		first,
+	);
+
+	assert.equal(first.stableBlocks.length, 2);
+	assert.match(first.stableBlocks[0], /<ol>[\s\S]*second[\s\S]*<\/ol>/);
+	assert.equal(next.stableBlocks[0], first.stableBlocks[0]);
+	assert.equal(next.stableBlocks[1], first.stableBlocks[1]);
 });

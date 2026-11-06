@@ -23,7 +23,7 @@ import {
 type MarkdownVariant = "chat" | "document";
 
 type Props = {
-	stableHtml: string;
+	stableBlocks: string[];
 	tailHtml: string;
 	variant?: MarkdownVariant;
 	streamingLive?: boolean;
@@ -34,7 +34,7 @@ type Props = {
 };
 
 const {
-	stableHtml,
+	stableBlocks,
 	tailHtml,
 	variant = "chat",
 	streamingLive = false,
@@ -98,7 +98,7 @@ function renderAssetFallback(
 }
 
 $effect(() => {
-	const _stableHtml = stableHtml;
+	const _stableBlocks = stableBlocks;
 	const _streamingLive = streamingLive;
 	if (!markdownEl) return;
 	// Sweep even while streaming: {@html} can drop mounted players when the
@@ -112,7 +112,7 @@ $effect(() => {
 });
 
 $effect(() => {
-	stableHtml;
+	stableBlocks;
 	const root = markdownEl;
 	const resolve = resolveWorkspaceAsset;
 	if (!root || !resolve) return;
@@ -607,8 +607,10 @@ onDestroy(() => {
 	class="markdown-content"
 	data-variant={variant}
 >
-	{#if stableHtml}
-		<div class="markdown-stable-region">{@html stableHtml}</div>
+	{#if stableBlocks.length > 0}
+		<div class="markdown-stable-region">
+			{#each stableBlocks as html}{@html html}{/each}
+		</div>
 	{/if}
 	{#if tailHtml || streamingLive}
 		<div

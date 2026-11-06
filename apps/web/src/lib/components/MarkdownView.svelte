@@ -23,7 +23,7 @@ function loadMarkdownModule() {
 // Lets a remounted settled view (live answer → persisted message) skip the plain-text flash.
 let streamHandoff: {
 	source: string;
-	stableHtml: string;
+	stableBlocks: string[];
 	tailHtml: string;
 } | null = null;
 </script>
@@ -76,7 +76,7 @@ const streaming = $derived(isStreaming);
 const assetBasePath = $derived(baseFilePath);
 const assetResolver = $derived(resolveWorkspaceAsset);
 
-let stableHtml = $state("");
+let stableBlocks = $state.raw<string[]>([]);
 let tailHtml = $state("");
 let renderSeq = 0;
 let hasRenderedMarkdown = false;
@@ -122,11 +122,11 @@ function ensureController() {
 	if (controller) return controller;
 	controller = new StreamingMarkdownController();
 	unsubscribeController = controller.subscribe((snapshot) => {
-		stableHtml = snapshot.stableHtml;
+		stableBlocks = snapshot.stableBlocks;
 		tailHtml = snapshot.tailHtml;
 		streamHandoff = {
 			source: untrack(() => renderSource).trim(),
-			stableHtml: snapshot.stableHtml,
+			stableBlocks: snapshot.stableBlocks,
 			tailHtml: snapshot.tailHtml,
 		};
 		notifyStreamingRenderedSoon();
@@ -152,7 +152,9 @@ function renderFullMarkdown(
 	if (!settling && !replacing) {
 		const handoff =
 			streamHandoff?.source === markdownSource.trim() ? streamHandoff : null;
-		stableHtml = handoff?.stableHtml ?? renderPlainTextFallback(markdownSource);
+		stableBlocks = handoff?.stableBlocks ?? [
+			renderPlainTextFallback(markdownSource),
+		];
 		tailHtml = handoff?.tailHtml ?? "";
 	}
 	untrack(() => onStart?.());
@@ -160,11 +162,13 @@ function renderFullMarkdown(
 		.then(({ renderMarkdown }) => renderMarkdown(markdownSource))
 		.then((html) => {
 			if (seq !== renderSeq) return;
-			stableHtml = prepareMarkdownAssetHtml(html, {
-				basePath,
-				extractWorkspaceAssets: Boolean(resolver),
-				publicFileUrl: buildPublicFileUrl,
-			});
+			stableBlocks = [
+				prepareMarkdownAssetHtml(html, {
+					basePath,
+					extractWorkspaceAssets: Boolean(resolver),
+					publicFileUrl: buildPublicFileUrl,
+				}),
+			];
 			tailHtml = "";
 			hasRenderedMarkdown = true;
 			void tick().then(() => {
@@ -174,7 +178,7 @@ function renderFullMarkdown(
 		.catch(() => {
 			if (seq !== renderSeq) return;
 			if (replacing && !settling) {
-				stableHtml = renderPlainTextFallback(markdownSource);
+				stableBlocks = [renderPlainTextFallback(markdownSource)];
 				tailHtml = "";
 			}
 			void tick().then(() => untrack(() => onRendered?.()));
@@ -218,7 +222,7 @@ onDestroy(() => {
 		/>
 	{/if}
 	<MarkdownSurface
-		{stableHtml}
+		{stableBlocks}
 		{tailHtml}
 		{variant}
 		streamingLive={streaming}

@@ -1,8 +1,6 @@
-type StreamingMarkdownSnapshot = {
-	stableHtml: string;
-	tailHtml: string;
-	source: string;
-};
+import type { StreamingMarkdownRender } from "$lib/markdown";
+
+type StreamingMarkdownSnapshot = StreamingMarkdownRender & { source: string };
 
 type StreamingMarkdownSubscriber = (
 	snapshot: StreamingMarkdownSnapshot,
@@ -41,7 +39,7 @@ function advanceByWord(source: string, from: number, maxStep: number) {
 }
 
 function createEmptySnapshot(): StreamingMarkdownSnapshot {
-	return { stableHtml: "", tailHtml: "", source: "" };
+	return { stableSources: [], stableBlocks: [], tailHtml: "", source: "" };
 }
 
 export class StreamingMarkdownController {
@@ -189,21 +187,20 @@ export class StreamingMarkdownController {
 		// trailing commit fired with nothing new).
 		if (
 			source === this.#snapshot.source &&
-			(this.#snapshot.stableHtml || this.#snapshot.tailHtml)
+			(this.#snapshot.stableBlocks.length > 0 || this.#snapshot.tailHtml)
 		)
 			return;
 
 		try {
 			const { renderStreamingMarkdownSplit } = await import("$lib/markdown");
-			const { stableHtml, tailHtml } =
-				await renderStreamingMarkdownSplit(source);
+			const render = await renderStreamingMarkdownSplit(source, this.#snapshot);
 			if (
 				this.#disposed ||
 				seq !== this.#renderSeq ||
 				source !== this.#displayedSource
 			)
 				return;
-			this.#publish({ stableHtml, tailHtml, source });
+			this.#publish({ ...render, source });
 		} catch {
 			if (
 				this.#disposed ||
@@ -211,7 +208,7 @@ export class StreamingMarkdownController {
 				source !== this.#displayedSource
 			)
 				return;
-			this.#publish({ stableHtml: "", tailHtml: "", source });
+			this.#publish({ ...createEmptySnapshot(), source });
 		}
 	}
 }
