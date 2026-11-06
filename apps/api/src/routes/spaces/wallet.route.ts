@@ -23,7 +23,7 @@ import { getProfilesByUuids } from "../../user-profiles.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 
-type WalletSpace = { id: string; name: string; avatarUrl: string | null; publicFunding: boolean };
+type WalletSpace = { id: string; name: string; avatarUrl: string | null; description: string | null; publicFunding: boolean };
 type WalletEnv = { Variables: { walletSpace: WalletSpace } };
 type WalletContext = Context<WalletEnv>;
 const router = new Hono<WalletEnv>();
@@ -49,10 +49,10 @@ const decodeActor = (value: string) => {
 router.use("*", async (c, next) => {
   const spaceId = c.req.param("id");
   if (!spaceId || !requireValidId(spaceId)) return c.json({ message: "Space not found" }, 404);
-  const [row] = await db.select({ id: spaces.id, name: spaces.name, meta: spaces.meta }).from(spaces).where(eq(spaces.id, spaceId)).limit(1);
+  const [row] = await db.select({ id: spaces.id, name: spaces.name, description: spaces.description, meta: spaces.meta }).from(spaces).where(eq(spaces.id, spaceId)).limit(1);
   if (!row) return c.json({ message: "Space not found" }, 404);
   const profile = getSpacePublicProfile(row);
-  c.set("walletSpace", { id: row.id, name: row.name?.trim() || "Space", avatarUrl: profile.avatarUrl, publicFunding: profile.fundingEnabled });
+  c.set("walletSpace", { id: row.id, name: row.name?.trim() || "Space", avatarUrl: profile.avatarUrl, description: row.description?.trim() || null, publicFunding: profile.fundingEnabled });
   await next();
 });
 
@@ -132,7 +132,7 @@ router.get("/funding", async (c) => {
     }) : null,
   ]);
   return c.json({
-    space: { id: space.id, name: space.name, avatarUrl: space.avatarUrl },
+    space: { id: space.id, name: space.name, avatarUrl: space.avatarUrl, description: space.description },
     publicFunding: space.publicFunding,
     checkout: catalog.paymentAvailable,
     tiers: catalog.products

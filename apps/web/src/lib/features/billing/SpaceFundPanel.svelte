@@ -272,6 +272,9 @@ onMount(() => {
 				{funding ? m.wallet_fund_title({ space: funding.space.name }, { locale }) : m.wallet_fund({}, { locale })}
 			</h1>
 		</div>
+		{#if funding?.space.description}
+			<p class="line-clamp-4 text-[13px] leading-5 whitespace-pre-line break-words text-text-secondary">{funding.space.description}</p>
+		{/if}
 	{:else if identity === "row"}
 		<div class="flex min-h-6 min-w-0 items-center gap-2.5">
 			<SpaceAvatar name={funding?.space.name} avatarUrl={funding?.space.avatarUrl} seed={spaceId} size="xs" />

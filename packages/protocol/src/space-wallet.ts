@@ -33,7 +33,7 @@ export type SpaceWalletFundingTier = {
 };
 
 export type SpaceWalletFunding = {
-  space: { id: string; name: string; avatarUrl: string | null };
+  space: { id: string; name: string; avatarUrl: string | null; description: string | null };
   publicFunding: boolean;
   checkout: boolean;
   tiers: SpaceWalletFundingTier[];
