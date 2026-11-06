@@ -159,6 +159,11 @@ internal class Panel(context: Context) : LinearLayout(context), SurfaceHolder.Ca
     val preview = SurfaceView(context).apply { visibility = GONE }
     private val primary = button()
     private val secondary = button()
+    private val row = LinearLayout(context).apply {
+        gravity = Gravity.END
+        addView(secondary)
+        addView(primary)
+    }
     private var screen: Screen? = null
     private var mirror: Pair<Screen, IBinder>? = null
 
@@ -170,11 +175,7 @@ internal class Panel(context: Context) : LinearLayout(context), SurfaceHolder.Ca
         header(dot, title)
         addView(steps, block(8))
         addView(preview, LayoutParams(dp(PREVIEW_WIDTH), 0).apply { topMargin = dp(10) })
-        addView(LinearLayout(context).apply {
-            gravity = Gravity.END
-            addView(secondary)
-            addView(primary)
-        }, block(8))
+        addView(row, block(8))
         preview.holder.addCallback(this)
     }
 
@@ -188,7 +189,21 @@ internal class Panel(context: Context) : LinearLayout(context), SurfaceHolder.Ca
         steps.visibility = if (recent.isEmpty()) GONE else VISIBLE
         style(primary, palette, Tone.ACCENT, actions.last())
         style(secondary, palette, palette.text, actions.getOrNull(actions.size - 2))
+        arrange()
         show(shows, maxPreview)
+    }
+
+    private fun arrange() {
+        val shown = listOf(secondary, primary).filter { it.visibility == VISIBLE }
+        val natural = shown.sumOf { it.paint.measureText(it.text.toString()).toDouble() + it.paddingLeft + it.paddingRight + dp(GAP) }
+        val stack = natural > dp(PREVIEW_WIDTH)
+        row.orientation = if (stack) VERTICAL else HORIZONTAL
+        shown.forEachIndexed { index, button ->
+            button.layoutParams = LayoutParams(if (stack) LayoutParams.MATCH_PARENT else LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                topMargin = if (stack && index > 0) dp(GAP) else 0
+                marginStart = if (stack) 0 else dp(GAP)
+            }
+        }
     }
 
     private fun show(target: Screen?, maxHeight: Int) {
@@ -224,8 +239,8 @@ internal class Panel(context: Context) : LinearLayout(context), SurfaceHolder.Ca
 
     private fun button() = text(context, 14f).apply {
         maxLines = 1
+        gravity = Gravity.CENTER
         setPadding(dp(12), dp(8), dp(12), dp(8))
-        layoutParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) }
     }
 
     private fun style(view: TextView, palette: Palette, color: Int, action: Action?) {
@@ -239,5 +254,6 @@ internal class Panel(context: Context) : LinearLayout(context), SurfaceHolder.Ca
 
     private companion object {
         const val PREVIEW_WIDTH = 180
+        const val GAP = 8
     }
 }
