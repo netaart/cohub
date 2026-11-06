@@ -9,11 +9,14 @@ const locale = $derived(getLocale());
 
 <svelte:head><title>{m.wallet_fund({}, { locale })} — Cohub</title></svelte:head>
 
-<div class="flex min-h-screen items-center justify-center bg-bg-primary px-4 py-10">
-	<main class="w-full max-w-[440px]">
-		<a href="/" class="mb-8 inline-flex h-9 w-9 items-center justify-center rounded-[7px] bg-brand text-[12px] font-bold text-brand-contrast-fg" aria-label="Cohub">C</a>
-		<div class="border-t border-border-subtle pt-7">
-			{#key props.params.id}<SpaceFundPanel spaceId={props.params.id} identity="heading" />{/key}
-		</div>
+<div class="safe-area-top min-h-screen bg-bg-primary">
+	<header class="mx-auto flex h-14 w-full max-w-[440px] items-center px-4 sm:h-16">
+		<a href="/" class="flex items-center gap-1.5 transition-opacity hover:opacity-80">
+			<img src="/favicon.svg" alt="" class="h-5 w-5 rounded-[5px]" />
+			<span class="text-[13px] font-semibold tracking-tight text-text-primary">Cohub</span>
+		</a>
+	</header>
+	<main class="mx-auto w-full max-w-[440px] px-4 pt-6 pb-10 sm:pt-[10vh]">
+		{#key props.params.id}<SpaceFundPanel spaceId={props.params.id} identity="heading" />{/key}
 	</main>
 </div>
