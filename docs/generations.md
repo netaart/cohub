@@ -204,9 +204,11 @@ Behavior:
   task is enqueued.
 - Success charges the actual cost and releases the hold; failure, cancellation of
   a queued turn, or an enqueue failure release it too.
-- A hold expires after two hours. Expiry or Redis data loss never moves money; it
-  only stops counting that amount for new submissions. If Redis is unavailable,
-  submissions fall back to the regular usage gate.
+- A hold expires after five minutes, so a hold a crashed worker never released
+  cannot block the payer for long. Tasks running longer stop being counted, which
+  may let a later submission overdraw the balance. Expiry or Redis data loss never
+  moves money; it only stops counting that amount for new submissions. If Redis is
+  unavailable, submissions fall back to the regular usage gate.
 - Models absent from the config keep the existing path. An invalid config is
   logged and the last valid one stays in effect; it never blocks other models.
 

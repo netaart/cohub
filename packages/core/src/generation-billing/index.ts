@@ -11,9 +11,10 @@ import { spaceWalletCustomerId, walletCreditsUsable } from "../space-wallet/inde
 
 /**
  * Holds are a submission-time defense, not money: the generation is still charged once after success.
- * An expired or lost hold only frees the amount for new submissions.
+ * An expired or lost hold only frees the amount for new submissions. The TTL only needs to cover a
+ * burst of concurrent submissions; a short one keeps a leaked hold from blocking the payer for long.
  */
-const HOLD_TTL_MS = 2 * 60 * 60 * 1000;
+const HOLD_TTL_MS = 5 * 60 * 1000;
 /** Billing's usd_micro_cent precision: eight USD decimal places. */
 const UNITS_PER_USD = 100_000_000;
 
