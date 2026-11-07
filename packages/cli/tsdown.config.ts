@@ -44,6 +44,7 @@ export default defineConfig([{
   entry: { "board-gpu/page": "src/board-gpu/page.ts" },
   platform: "browser",
   target: "chrome120",
+  minify: true,
   outputOptions: { codeSplitting: false },
   deps: { alwaysBundle: [/.*/], onlyBundle: false },
 }]);

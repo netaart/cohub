@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
 import type { SessionTurnIntermediateSummary } from "./turn.js";

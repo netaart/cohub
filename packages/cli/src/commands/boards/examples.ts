@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { json } from "../../output.js";
-import { BOARD_SCRIPT_DRAWING_EXAMPLE, BOARD_SCRIPT_RAIN_EXAMPLE } from "../../board-kernel.js";
+import { BOARD_SCRIPT_DRAWING_EXAMPLE, BOARD_SCRIPT_RAIN_EXAMPLE } from "@neta-art/cohub/board";
 
 const MODULES: Record<string, string> = {
   custom: BOARD_SCRIPT_DRAWING_EXAMPLE,

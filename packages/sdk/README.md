@@ -180,7 +180,7 @@ channel the selector read changes:
 import { createBoardRegistry, defineBoardItem, worldPoint } from "@neta-art/cohub/board";
 import { createBoardEditor, selectBoardEditor } from "@neta-art/cohub/board/editor";
 import { createBoardAssetManager, mountBoardStage } from "@neta-art/cohub/board/stage";
-import { z } from "zod";
+import * as z from "zod";
 
 // A business item type. The server stores extension props as they are; the
 // schema is checked when the editor creates or edits one.

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 import { fileExtensionOf, parseAppFileHandlers } from "./app-file-handlers.js";
 import { parseSpaceSlug, parseUsername } from "./public-identifiers.js";
 

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 import { LOCAL_HARNESS_SPECS, LOCAL_HARNESSES, localHarnessSchema } from "./harnesses.js";
 
 const nativeFormats = LOCAL_HARNESSES.map((harness) => LOCAL_HARNESS_SPECS[harness].nativeFormat) as [string, ...string[]];

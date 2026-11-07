@@ -1,5 +1,6 @@
 import { type BoardDocument, type BoardExportRegion, boardModelFormat } from "@neta-art/cohub/board";
-import { gpuResources, loadBoardDocument } from "./board-export.js";
+import { loadBoardDocument } from "./board-document.js";
+import { gpuResources } from "./board-export.js";
 import { openBoardGpu } from "./board-gpu/daemon.js";
 import { type BoardGpuProfile, findBoardGpuBrowser } from "./board-gpu/index.js";
 import { BOARD_EXPORT_IMAGE_MEMORY_MIB } from "./board-export-resources.js";

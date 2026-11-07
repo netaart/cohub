@@ -11,7 +11,7 @@ import {
   appRtcUnsubscribeRequestSchema,
   RTC_SDP_MAX,
 } from "@cohub/protocol/rtc";
-import type { z } from "zod";
+import type * as z from "zod";
 import { getAppRoomById, verifyAppRoomTicket, deriveAppRoomUserKey } from "../app-rooms.js";
 import { resolveHostedCaller, requireSeat, HostedRoomError } from "../app-room-seats.js";
 import { authzDenied, getAppSessionPrincipal, requireValidId } from "../lib/middleware.js";

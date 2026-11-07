@@ -4,7 +4,7 @@ import {
 	type BoardItemType,
 	isBuiltinItemType,
 } from "@cohub/protocol";
-import type { z } from "zod";
+import type * as z from "zod";
 import type { Rect, WorldPoint } from "../geometry.js";
 import type { BoardSceneItem } from "../scene.js";
 

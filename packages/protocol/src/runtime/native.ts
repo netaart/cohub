@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 import { contentBlockSchema } from "../core/content-schema.js";
 import { localHarnessSchema } from "./harnesses.js";
 

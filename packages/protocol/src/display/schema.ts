@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 
 const unit = z.number().min(0).max(1);
 

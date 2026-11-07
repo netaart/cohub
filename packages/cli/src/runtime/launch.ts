@@ -15,7 +15,7 @@ import { controlRuntimeInstance, requestRuntimeInstance, runtimeInstanceDirector
 import { ensureNativeSync, repairIntegrations } from "./native/attach.js";
 import { serializeDiagnosticError, type RuntimeDiagnostic } from "./diagnostics.js";
 import { createDiagnosticConsole, printRuntimeSummary, runtimeWebUrl, type RuntimeSummary } from "./presentation.js";
-import { runRuntime, type RuntimeLaunch } from "./supervisor.js";
+import type { RuntimeLaunch } from "./supervisor.js";
 import { standaloneModule } from "../package-paths.js";
 
 export const EXPECTED_IDENTITY_ENV = "COHUB_RUNTIME_EXPECTED_IDENTITY";
@@ -208,6 +208,7 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
     if (summary.state !== "ready") process.exitCode = 2;
   } else {
     let announced = false;
+    const { runRuntime } = await import("./supervisor.js");
     await runRuntime(config, (status) => {
       if (!announced && status.state === "ready") { announced = true; printRuntimeSummary(status, options.json, source === "binding"); }
       else if (!announced && status.state === "starting" && !options.json) process.stderr.write(`Connecting\n  ${runtimeWebUrl(spaceId)}\n  Logs  ${status.diagnosticsPath}\n`);

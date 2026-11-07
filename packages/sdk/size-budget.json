@@ -1,0 +1,20 @@
+{
+  ".": 145470,
+  "./http": 98226,
+  "./websocket": 6829,
+  "./voice-input": 3086,
+  "./debugger": 6897,
+  "./space-picker": 437,
+  "./host-bridge": 33611,
+  "./media": 3269,
+  "./board": 106030,
+  "./board/editor": 92545,
+  "./board/replica": 46594,
+  "./board/player": 41462,
+  "./board/presence": 6894,
+  "./board/render": 164054,
+  "./board/stage": 210912,
+  "./board/export": 143382,
+  "./board/export/node": 165924,
+  "./board/testing": 210474
+}

@@ -1,22 +1,20 @@
 import { defineConfig, type UserConfig } from "tsdown";
+import pkg from "./package.json" with { type: "json" };
+
+const entry = Object.fromEntries(
+  Object.values(pkg.exports).map(({ import: source }) => [source.replace(/^\.\/src\/(.+)\.ts$/, "$1"), source]),
+);
 
 const shared = {
+  entry,
   format: "esm",
-  // Resolve @cohub/protocol through its built exports. The bundled SDK inlines it,
-  // while the unbundled Board build emits private protocol modules under dist.
+  // Resolve @cohub/protocol through its built exports; the SDK inlines it.
   tsconfig: "tsconfig.build.json",
-  dts: true,
   target: "es2022",
   fixedExtension: false,
   hash: false,
   deps: {
     onlyBundle: false,
-  },
-  // The SDK inlines Generation SDK types, which reference @openrouter/sdk
-  // declarations. Its `declare global` augmentation would otherwise keep every
-  // transitively imported OpenRouter declaration file in the output.
-  treeshake: {
-    moduleSideEffects: [{ test: /[\\/]node_modules[\\/]@openrouter[\\/]sdk[\\/]/, sideEffects: false }],
   },
   outExtensions: () => ({
     js: ".js",
@@ -26,26 +24,24 @@ const shared = {
 
 export default defineConfig([
   {
+    // One file per module: entries share instances and consumers tree-shake per module.
     ...shared,
-    entry: {
-      index: "src/index.ts",
-      http: "src/http.ts",
-      websocket: "src/websocket.ts",
-      "voice-input": "src/voice-input.ts",
-      debugger: "src/debugger.ts",
-      "space-picker": "src/space-picker.ts",
-      "host-bridge": "src/host-bridge.ts",
-    },
+    unbundle: true,
+    root: "src",
+    dts: false,
     clean: true,
-    outputOptions: {
-      chunkFileNames: "chunks/[name].js",
-    },
   },
   {
     ...shared,
-    entry: ["src/board/**/*.ts", "!src/board/client/**", "src/media.ts"],
-    root: "src",
-    unbundle: true,
+    dts: { emitDtsOnly: true },
     clean: false,
+    // @openrouter/sdk's `declare global` augmentation would otherwise keep every
+    // transitively imported OpenRouter declaration file in the output.
+    treeshake: {
+      moduleSideEffects: [{ test: /[\\/]node_modules[\\/]@openrouter[\\/]sdk[\\/]/, sideEffects: false }],
+    },
+    outputOptions: {
+      chunkFileNames: "chunks/[name].js",
+    },
   },
 ]);

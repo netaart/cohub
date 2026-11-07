@@ -27,7 +27,18 @@
     "rules": {
       "preset": "recommended",
       "style": {
-        "useConst": "off"
+        "useConst": "off",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "zod": {
+                "importNames": ["z"],
+                "message": "Use `import * as z from \"zod\"` so bundlers can tree-shake Zod."
+              }
+            }
+          }
+        }
       }
     }
   },

@@ -2,7 +2,8 @@ import { diffMergePatch } from "@neta-art/cohub/board";
 import type { BoardDocument, BoardExportRegion, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
 import type { BoardScriptHarness, BoardScriptHarnessPointer, BoardScriptHarnessPress } from "@neta-art/cohub/board/testing";
-import { gpuResources, loadBoardDocument, readSpaceFileBytes, resolveBundledFonts, runBoardExport } from "./board-export.js";
+import { loadBoardDocument } from "./board-document.js";
+import { gpuResources, readSpaceFileBytes, resolveBundledFonts, runBoardExport } from "./board-export.js";
 import { openBoardGpu } from "./board-gpu/daemon.js";
 import { type BoardGpuShader, findBoardGpuBrowser } from "./board-gpu/index.js";
 import {

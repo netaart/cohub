@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 
 export const APPS_PATH = ".cohub/apps.json";
 export const CATALOG_ID = "cohub";

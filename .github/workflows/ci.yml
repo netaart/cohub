@@ -85,6 +85,11 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: SDK bundle size and CLI startup budgets
+        run: |
+          pnpm --filter @neta-art/cohub size
+          pnpm --filter @neta-art/cohub-cli startup
+
       - name: Typecheck
         run: pnpm typecheck
 

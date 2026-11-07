@@ -7,6 +7,17 @@ const argv = process.argv.slice(2);
 const entrypoint = process.argv[1];
 const isVersionRequest = argv.some((arg) => arg === "-v" || arg === "--version");
 
+process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code !== "EPIPE") throw error;
+  process.exit(0);
+});
+
+if (argv.length === 1 && isVersionRequest) {
+  const { CLI_VERSION } = await import("./version.js");
+  await new Promise((resolve) => process.stdout.write(`${CLI_VERSION}\n`, resolve));
+  process.exit(0);
+}
+
 if (process.env[SELF_UPDATE_WORKER_ENV] === "1") {
   // Self-update is best effort and must never affect the foreground command.
   await runCliSelfUpdate().catch(() => undefined);
@@ -18,11 +29,6 @@ if (!isVersionRequest && !enableEnvProxy() && entrypoint) {
     execArgv: [...envProxyExecArgv, ...process.execArgv],
   }));
 }
-
-process.stdout.on("error", (error: NodeJS.ErrnoException) => {
-  if (error.code !== "EPIPE") throw error;
-  process.exit(0);
-});
 
 if (argv[0] === "host" && argv[1] === "serve" && argv.length === 2) {
   const { serveHost } = await import("./host/serve.js");

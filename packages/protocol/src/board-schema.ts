@@ -1,5 +1,5 @@
 
-import { z } from "zod";
+import * as z from "zod";
 import { BOARD_DEFAULT_SIZES, BOARD_MEDIA_EDGE, BOARD_PAGE_SIZE, BOARD_TEXT_SCALE } from "./board-constants.js";
 import {
 	BOARD_CAMERA_TARGET,

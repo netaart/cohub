@@ -1,5 +1,5 @@
 
-import { z } from "zod";
+import * as z from "zod";
 import {
 	BOARD_DEFAULT_ITEM_SIZE,
 	BOARD_DEFAULT_SIZES,

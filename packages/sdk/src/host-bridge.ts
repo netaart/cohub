@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import type * as z from "zod";
 import {
   HOST_BRIDGE_ERROR,
   HOST_BRIDGE_GLOBAL,

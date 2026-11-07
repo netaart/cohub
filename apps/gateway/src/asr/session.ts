@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { WebSocket, type RawData } from "ws";
-import { z } from "zod";
+import * as z from "zod";
 import { createLogger } from "@cohub/infra/logging";
 import { authenticateRealtimeToken, type RealtimeAuthResult } from "../api-client.js";
 import { gatewayConfig } from "../config.js";

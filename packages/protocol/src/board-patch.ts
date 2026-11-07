@@ -1,5 +1,5 @@
 
-import { z } from "zod";
+import * as z from "zod";
 import { boardJsonEquals } from "./board-json.js";
 import { applyMatrix, arrowBindings, createBoardLayout, invertMatrix, isArrowBinding } from "./board-layout.js";
 import {

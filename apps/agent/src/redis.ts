@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { context, trace, type Span } from "@opentelemetry/api";
 import { Redis } from "ioredis";
-import { z } from "zod";
+import * as z from "zod";
 import type { ContentBlock } from "@cohub/protocol/core";
 import { AGENT_REALTIME_PATCH_CHANNEL, REALTIME_OUTBOUND_CHANNEL, SESSION_STREAM_SNAPSHOT_CLEAR_TURN_LUA, getSessionStreamSnapshotKey, type RealtimeEnvelope, type RealtimeRoom, type SessionStreamError, type SessionStreamEvent, type SessionTurnLifecycleOutput } from "@cohub/protocol/realtime";
 import type { SpaceFsChangedPayload } from "@cohub/protocol/fs";

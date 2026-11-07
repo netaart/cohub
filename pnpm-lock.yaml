@@ -1359,6 +1359,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.4
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       fake-indexeddb:
         specifier: ^6.2.6
         version: 6.2.6

@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import type { z } from "zod";
+import type * as z from "zod";
 
 export type RequestErrorStatus = 400 | 401 | 402 | 403 | 404 | 413 | 500 | 502 | 503;
 

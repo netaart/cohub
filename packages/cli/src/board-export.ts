@@ -40,11 +40,11 @@ import {
   describeBoardExportWarning,
   describeBoardScriptLanes,
   exportBoardImageBytes,
-  parseBoardDocument,
   planBoardExport,
   prepareBoardExport,
   selectBoardExportAssets,
 } from "./board-kernel.js";
+import { loadBoardDocument } from "./board-document.js";
 import { settleBoardDocument } from "./board-media.js";
 import { openBoardGpu } from "./board-gpu/daemon.js";
 import { type BoardGpuExporter, type BoardGpuResources, findBoardGpuBrowser } from "./board-gpu/index.js";
@@ -80,30 +80,6 @@ export function resolveBundledFonts(): BoardNodeFont[] {
     const path = locate(font);
     return path ? [{ path, family: font.family }] : [];
   });
-}
-
-export type BoardExportSource = {
-  document: BoardDocument;
-  boardId: string;
-  title: string | null;
-};
-
-export async function loadBoardDocument(
-  spaceId: string,
-  target: string,
-): Promise<BoardExportSource> {
-  const board = await createClient().space(spaceId).boards.open(target);
-  let result = await board.get();
-  const snapshot = result;
-  const items = { ...result.items };
-  while (result.next) {
-    result = await board.get({ only: ["items"], cursor: result.next });
-    if (result.version !== snapshot.version) throw new Error("Board changed while reading. Retry the export.");
-    Object.assign(items, result.items);
-  }
-  const parsed = parseBoardDocument({ board: snapshot.board, items, animations: snapshot.animations ?? {} }, { keepUnknown: true });
-  if (!parsed.ok) throw new Error(`Board ${result.id} could not be read: ${parsed.diagnostics[0]?.path}: ${parsed.diagnostics[0]?.message}`);
-  return { document: parsed.document, boardId: result.id, title: result.title };
 }
 
 type TextureMiss = "error" | "unavailable" | "omitted";

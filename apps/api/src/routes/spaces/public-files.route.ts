@@ -3,7 +3,7 @@ import { UPLOAD_MAX_BATCH_FILES, UPLOAD_MAX_FILE_BYTES, type PublicFileCreateUpl
 import { MEDIA_FACTS_LIMITS } from "@cohub/protocol/core";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { z } from "zod";
+import * as z from "zod";
 import { authzDenied, getExecutionPrincipal, requireValidId, useAuth } from "../../lib/middleware.js";
 import { hasPermission } from "../../permissions.js";
 import {

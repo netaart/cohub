@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 
 export const BOARD_REMOTE_URL_MAX_LENGTH = 4096;
 

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 
 export const appAuthorizationTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("account") }),

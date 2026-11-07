@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 import { BOARD_ARROW_STROKE_SIZE } from "../board-constants.js";
 
 const idSchema = z.string().min(1).max(160);

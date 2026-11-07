@@ -1,6 +1,6 @@
 import { createLogger } from "@cohub/infra/logging";
 import { rtcIceServerSchema, type RtcIceServer, type RtcIceServers } from "@cohub/protocol/rtc";
-import { z } from "zod";
+import * as z from "zod";
 import { getCloudflareRealtimeConfig } from "./config.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });

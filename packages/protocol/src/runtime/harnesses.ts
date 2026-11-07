@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 
 /** Single source of truth for local Harness identities. Adding a Harness starts here. */
 export const LOCAL_HARNESSES = ["pi", "codex", "claude", "workbuddy", "cursor"] as const;

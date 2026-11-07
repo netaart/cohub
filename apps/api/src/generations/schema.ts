@@ -1,5 +1,5 @@
 import { createGenerationClient, type GenerateRequest, type GenerationModelDeclaration } from "@neta-art/generation";
-import { z } from "zod";
+import * as z from "zod";
 
 const metaSchema = z.record(z.string(), z.unknown());
 const MAX_BASE64_CHARS = 14 * 1024 * 1024;

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { z } from "zod";
+import * as z from "zod";
 
 export const ENTRIES_PATH = join(
 	process.cwd(),

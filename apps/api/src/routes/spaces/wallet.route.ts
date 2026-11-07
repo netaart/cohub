@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { z } from "zod";
+import * as z from "zod";
 import { spaceWalletBillingOperations, COHUB_BILLING_TOKEN_TYPES, type BillingCatalogProduct } from "@cohub/billing";
 import { spaceWalletCustomerId, SpaceWalletTransferError, walletCreditsUsable } from "@cohub/core/space-wallet";
 import { spaces } from "@cohub/db";

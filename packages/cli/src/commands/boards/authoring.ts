@@ -1,9 +1,8 @@
 import type { Command } from "commander";
-import type { BoardChapter, BoardRegionDirection, BoardVec2 } from "@neta-art/cohub/board";
-import { readBoardJsonObject } from "../../board-command-support.js";
-import { loadBoardDocument, resolveBundledFonts } from "../../board-export.js";
-import { settleBoardDocument, settleBoardMediaDurations } from "../../board-media.js";
 import {
+  type BoardChapter,
+  type BoardRegionDirection,
+  type BoardVec2,
   boardFrameRegions,
   boardPathTrack,
   boardPlacePatch,
@@ -11,9 +10,10 @@ import {
   boardSequencePatch,
   buildBoardScene,
   createBoardAnimationSampler,
-  createNodeBoardRenderer,
-  inspectBoardItems,
-} from "../../board-kernel.js";
+} from "@neta-art/cohub/board";
+import { readBoardJsonObject } from "../../board-command-support.js";
+import { loadBoardDocument } from "../../board-document.js";
+import { settleBoardDocument, settleBoardMediaDurations } from "../../board-media.js";
 import { parseBoardTime, parseBoardTimes } from "../../board-time.js";
 import { handleHttp, json as outJson, jsonRequested, table } from "../../output.js";
 import { resolveSpace } from "../../space.js";
@@ -39,6 +39,10 @@ Example: cohub boards inspect lesson.board --animation lecture --at 0:20s:1s --j
         const document = await settleBoardDocument(spaceId, (await loadBoardDocument(spaceId, target)).document);
         const times = parseBoardTimes(options.at, "--at", 100);
         const sampler = options.animation ? createBoardAnimationSampler(document, options.animation) : null;
+        const [{ resolveBundledFonts }, { createNodeBoardRenderer, inspectBoardItems }] = await Promise.all([
+          import("../../board-export.js"),
+          import("../../board-kernel.js"),
+        ]);
         const renderer = await createNodeBoardRenderer({ fonts: resolveBundledFonts() });
         try {
           const ids = options.items ? new Set(options.items.split(",")) : null;

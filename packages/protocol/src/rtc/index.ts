@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 
 export const rtcIceServerSchema = z.object({
   urls: z.union([z.string().min(1).max(512), z.array(z.string().min(1).max(512)).min(1).max(16)]),

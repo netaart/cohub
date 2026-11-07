@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { RootCommandLine } from "./command-index.js";
 import { packagePath } from "./package-paths.js";
 
 export const CLI_VERSION = (() => {
@@ -9,10 +10,16 @@ export const CLI_VERSION = (() => {
   }
 })();
 
-export function cliCommit(): string | null {
+export type BuildInfo = { commit?: string | null; rootCommands?: RootCommandLine[] };
+
+export function buildInfo(): BuildInfo {
   try {
-    return (JSON.parse(readFileSync(packagePath("dist", "build.json"), "utf8")) as { commit?: string | null }).commit ?? null;
+    return JSON.parse(readFileSync(packagePath("dist", "build.json"), "utf8")) as BuildInfo;
   } catch {
-    return null;
+    return {};
   }
+}
+
+export function cliCommit(): string | null {
+  return buildInfo().commit ?? null;
 }

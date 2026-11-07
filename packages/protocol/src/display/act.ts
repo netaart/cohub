@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 import {
   DISPLAY_ELEMENT_ACTIONS,
   DISPLAY_ELEMENT_REF_PATTERN,

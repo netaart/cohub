@@ -24,7 +24,8 @@
     "NOTICE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsdown && node scripts/stamp-build.mjs",
+    "build": "tsc -p tsconfig.json && tsdown && node --import tsx scripts/stamp-build.ts",
+    "startup": "node scripts/startup.mjs",
     "verify:sandboxd": "node --import tsx scripts/verify-sandboxd-release.ts",
     "verify:rtc": "node --import tsx scripts/verify-rtc-release.ts",
     "prepublishOnly": "pnpm verify:sandboxd && pnpm verify:rtc",

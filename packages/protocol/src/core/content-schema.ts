@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 import type { ContentBlock } from "./content.js";
 
 const meta = z.record(z.string(), z.unknown());

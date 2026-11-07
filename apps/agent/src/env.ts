@@ -1,5 +1,5 @@
 import { DEFAULT_AGENT_WORKER_CONCURRENCY } from "@cohub/infra/bullmq";
-import { z } from "zod";
+import * as z from "zod";
 
 const redisUrlSchema = z
   .string()
