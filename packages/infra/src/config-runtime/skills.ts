@@ -23,9 +23,10 @@ export type SkillScope = "platform" | "mod" | "user" | "project";
 export const SANDBOX_WORKSPACE_ROOT = "/workspace";
 
 /** Where a turn's skills execute. Cloud sandboxes mount platform/user/Mod
- * skill directories read-only; local sandboxes and native Harnesses reach
- * workspace files only. `unverified_sandbox` marks a provider lookup failure
- * and fails closed to workspace files. */
+ * skill directories read-only, and the agent mirrors the same directories
+ * onto a local sandbox for Cohub turns; native Harnesses reach workspace files
+ * only. `unverified_sandbox` marks a provider lookup failure and fails closed
+ * to workspace files. */
 export type SkillExecutionTarget = "cloud_sandbox" | "local_sandbox" | "native_harness" | "unverified_sandbox";
 
 /** Skills whose files exist on the executing target. Unreachable scopes are
@@ -33,8 +34,8 @@ export type SkillExecutionTarget = "cloud_sandbox" | "local_sandbox" | "native_h
 export function reachableSkillScopes(target: SkillExecutionTarget): SkillScope[] {
   switch (target) {
     case "cloud_sandbox":
-      return ["platform", "mod", "user", "project"];
     case "local_sandbox":
+      return ["platform", "mod", "user", "project"];
     case "native_harness":
     case "unverified_sandbox":
       return ["project"];
@@ -374,14 +375,40 @@ export function parseSkillFrontmatter(markdown: string): {
   };
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
+/** Directory access for skill loading; paths use the reader's own separator. */
+export type SkillDirectoryReader = {
+  /** Child directory names, or null when `dir` cannot be listed. */
+  listDirectories(dir: string): Promise<string[] | null>;
+  /** File text, or null when the file does not exist. */
+  readText(path: string): Promise<string | null>;
+};
+
+const nodeSkillDirectoryReader: SkillDirectoryReader = {
+  async listDirectories(dir) {
+    let names: string[];
+    try {
+      names = await readdir(dir);
+    } catch {
+      return null;
+    }
+    const checks = await Promise.all(names.map(async (name) => {
+      try {
+        return (await stat(join(dir, name))).isDirectory();
+      } catch {
+        return false;
+      }
+    }));
+    return names.filter((_, index) => checks[index]);
+  },
+  async readText(path) {
+    try {
+      return await readFile(path, "utf-8");
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code === "ENOENT") return null;
+      throw error;
+    }
+  },
+};
 
 /**
  * Parse a frontmatter value as a YAML 1.2 core-schema boolean.
@@ -400,74 +427,62 @@ export async function loadSkillsFromDirectory(input: {
   sandboxDir: string;
   scope: SkillScope;
   maxContentChars?: number;
+  reader?: SkillDirectoryReader;
 }): Promise<{ rawText: string; content: SkillsConfig }> {
-  if (!(await pathExists(input.dir))) {
-    return { rawText: "", content: { skills: [] } };
-  }
-
+  const reader = input.reader ?? nodeSkillDirectoryReader;
   const maxContentChars = input.maxContentChars ?? MAX_SKILL_CONTENT_CHARS;
   const skills: Skill[] = [];
   const rawParts: string[] = [];
 
-  const walk = async (dir: string): Promise<void> => {
-    let entries: string[] = [];
-    try {
-      entries = await readdir(dir);
-    } catch {
-      return;
-    }
-
-    for (const name of entries.sort()) {
-      if (name.startsWith(".")) continue;
+  type Loaded = { rawPart: string; skill: Skill };
+  // Siblings load concurrently (a remote reader pays a round trip per call) but keep sorted order.
+  const walk = async (dir: string): Promise<Loaded[]> => {
+    const names = await reader.listDirectories(dir);
+    if (!names) return [];
+    const groups = await Promise.all(names.filter((name) => !name.startsWith(".")).sort().map(async (name): Promise<Loaded[]> => {
       const full = join(dir, name);
-      let stats: Awaited<ReturnType<typeof stat>>;
-      try {
-        stats = await stat(full);
-      } catch {
-        continue;
-      }
-      if (!stats.isDirectory()) continue;
-
       const skillFile = join(full, "SKILL.md");
       try {
-        const rawText = (await readFile(skillFile, "utf-8")).slice(0, maxContentChars);
+        const text = await reader.readText(skillFile);
+        // Missing SKILL.md means this is not a skill root; recurse into subdirectories.
+        if (text === null) return walk(full);
+        const rawText = text.slice(0, maxContentChars);
         const { attributes, body } = parseSkillFrontmatter(rawText);
         const relativePath = skillFile.slice(input.dir.length + 1).replaceAll("\\", "/");
         const relativeDir = full.slice(input.dir.length + 1).replaceAll("\\", "/");
         const skillName = attributes.name?.trim() || basename(full);
-        if (!isValidSkillName(skillName)) continue;
+        if (!isValidSkillName(skillName)) return [];
         const description = attributes.description?.trim()
           || body.split("\n").find((line) => line.trim())?.trim().slice(0, 80)
           || skillName;
-        rawParts.push(`${relativePath}\n${rawText}`);
-        skills.push({
-          name: skillName,
-          description,
-          content: rawText,
-          filePath: skillFile,
-          sandboxFilePath: `${input.sandboxDir}/${relativePath}`,
-          baseDir: full,
-          sandboxBaseDir: `${input.sandboxDir}/${relativeDir}`,
-          scope: input.scope,
-          disableModelInvocation: parseFrontmatterBoolean(attributes["disable-model-invocation"]),
-        });
+        return [{
+          rawPart: `${relativePath}\n${rawText}`,
+          skill: {
+            name: skillName,
+            description,
+            content: rawText,
+            filePath: skillFile,
+            sandboxFilePath: `${input.sandboxDir}/${relativePath}`,
+            baseDir: full,
+            sandboxBaseDir: `${input.sandboxDir}/${relativeDir}`,
+            scope: input.scope,
+            disableModelInvocation: parseFrontmatterBoolean(attributes["disable-model-invocation"]),
+          },
+        }];
       } catch (error) {
-        const code = typeof error === "object" && error !== null && "code" in error
-          ? String((error as { code?: unknown }).code)
-          : undefined;
-        // Missing SKILL.md means this is not a skill root; recurse into subdirectories.
-        if (code === "ENOENT") {
-          await walk(full);
-          continue;
-        }
         // Any other failure (permissions, I/O, parse) isolates to this skill: log and skip
         // so one broken optional skill never aborts the whole prompt build.
         logger.warn("failed to load skill", { skillFile, error: error instanceof Error ? error.message : String(error) });
+        return [];
       }
-    }
+    }));
+    return groups.flat();
   };
 
-  await walk(input.dir);
+  for (const { rawPart, skill } of await walk(input.dir)) {
+    rawParts.push(rawPart);
+    skills.push(skill);
+  }
   skills.sort((a, b) => a.name.localeCompare(b.name));
   return { rawText: rawParts.join("\n---\n"), content: { skills } };
 }

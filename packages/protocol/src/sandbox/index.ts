@@ -34,6 +34,8 @@ export const RPC_METHODS = [
   "fs.find",
   "fs.grep",
   "fs.search",
+  "mounts.sync",
+  "mounts.write",
   "process.start",
   "process.abort",
   "display.list",
@@ -173,6 +175,8 @@ export type SandboxCapabilities = {
   processFd?: boolean;
   display?: boolean;
   rtc?: boolean;
+  /** mounts.sync / mounts.write mirror the cloud read-only mounts into a local sandbox. */
+  mounts?: boolean;
 };
 
 export type SandboxFilesystemRoot = {
@@ -337,6 +341,26 @@ export type FsStatResult = {
   /** Metadata change time in epoch milliseconds when available. */
   ctimeMs?: number;
   isFile?: boolean;
+};
+
+/** A read-only mount at its cloud sandbox path: `/configs/platform/.agents`, `/configs/user/.agents` or `/mods/<slug>`. */
+export type MountStatus = {
+  path: string;
+  hostPath: string;
+  /** Revision the sandbox holds; absent when the mount must be (re)written. */
+  revision?: string;
+};
+
+/** The full desired set: mounts outside it are removed. */
+export type MountsSyncParams = {
+  mounts: Array<{ path: string; revision: string }>;
+};
+
+/** A mount's whole file set; it replaces the mount atomically. */
+export type MountsWriteParams = {
+  path: string;
+  revision: string;
+  files: Array<{ path: string; contentBase64: string; executable?: boolean }>;
 };
 
 export type FsLsParams = {
@@ -551,6 +575,14 @@ export type RpcRequestMap = {
   "fs.search": {
     params: FsSearchParams;
     result: FsSearchResult;
+  };
+  "mounts.sync": {
+    params: MountsSyncParams;
+    result: { mounts: MountStatus[] };
+  };
+  "mounts.write": {
+    params: MountsWriteParams;
+    result: MountStatus;
   };
   "process.start": {
     params: ProcessStartParams;

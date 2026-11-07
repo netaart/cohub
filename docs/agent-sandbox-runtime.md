@@ -23,7 +23,7 @@ turns a user's local folder into the sandbox of a Space:
 
 - `apps/sandbox --local --space <id> --root <dir> --relay wss://gateway/sandbox/relay`
   - Reuses the same dispatcher / process / filewatch / ws session code
-  - **Path fence**: fs RPC (read/write/stat/ls/find/grep) and process cwd are confined to `--root` (realpath + symlink escape prevention)
+  - **Path fence**: fs RPC (read/write/stat/ls/find/grep) and process cwd are confined to `--root` plus the read-only mount directories (realpath + symlink escape prevention)
   - **No OS-level isolation for process execution**: `bash` / argv run as the current user and can reach host resources outside `--root`. This matches the "run an AI coding agent on your own machine" trust model and is intentional; `runtime up` shows an explicit informed-consent prompt before starting. For strong isolation, run the runner inside a container / VM
   - The relay data channel is currently bound only through a one-time random channelId (issued over the authenticated control channel, 15s expiry, single pairing); per-channel HMAC can be added later
   - Authenticates to the gateway with `COHUB_RELAY_TOKEN` (user access token)
@@ -34,6 +34,14 @@ turns a user's local folder into the sandbox of a Space:
   - Once control is established, the gateway is the single status reporter: ready + `wsEndpoint`; disconnect -> stopped(disconnected)
   - The data channel pipes frames transparently; the gateway does not parse RPC
 - When `space_sandboxes.provider = "local"`, the controller short-circuits provision / idle-destroy / recover
+- Cohub Harness in a local Space matches the cloud sandbox prompt and mounts:
+  - Project `AGENTS.md` / `CLAUDE.md` / `.agents/` files and skills are read over sandbox RPC when the session is created
+  - Each Turn the agent mirrors the cloud read-only mounts (`/configs/platform/.agents`, the owner's `/configs/user/.agents`, `/mods/<slug>` from each enabled Mod's latest Save) into `~/.cache/cohub/spaces/<id>/` with `mounts.sync` / `mounts.write` (capability `mounts`). Revisions fingerprint path, size and mtime on the agents' shared PVCs, so an up-to-date Runtime costs one `mounts.sync`. A mount (up to 16 MiB) is written in one message, staged and swapped in with one rename; symlinks are not copied
+  - The prompt lists only skills whose files a held mount contains, and is rebuilt when the connection or a held revision changes
+  - The owner's user skills go only to a Runtime the Space owner registered. Mount files are private to the OS user (0700/0600), and sandboxd clears them at start and on exit
+  - The fence exposes those directories read-only at their cloud paths, also through a workspace symlink. On a local sandbox fd/rg run from the mapped root with root-relative path arguments, since only cwd is mapped
+  - Shell commands run on the host, so the prompt lists each sandbox path's host path
+  - A Runtime without the `mounts` capability gets project skills only; an unreachable Runtime gets a prompt without project files, rebuilt on the next Turn
 - CLI: `cohub runtime up <dir>` creates and remembers the directory's Space on first use, then reuses it on later starts, while supervising the Workspace bridge and local Harness
 
 ### Binary distribution

@@ -252,25 +252,60 @@ func nowMS() int64 {
 
 type resolvedSandboxPath struct {
 	path string
+	// readOnly is set when the path resolves into a read-only mount, including through a workspace symlink.
+	readOnly bool
 }
 
 const virtualWorkspaceRoot = "/workspace"
+
+// Sandbox paths of the read-only mounts a cloud Pod gets; a local sandbox keeps them under CacheDir.
+const (
+	virtualPlatformAgentsRoot = "/configs/platform/.agents"
+	virtualUserAgentsRoot     = "/configs/user/.agents"
+	virtualModsRoot           = "/mods"
+)
+
+type virtualRoot struct {
+	virtual string
+	host    string
+}
+
+func virtualRoots(cfg env.Config) []virtualRoot {
+	roots := []virtualRoot{{virtualWorkspaceRoot, cfg.WorkspaceDir}}
+	if cfg.CacheDir != "" {
+		roots = append(roots,
+			virtualRoot{virtualPlatformAgentsRoot, cfg.PlatformAgentsDir},
+			virtualRoot{virtualUserAgentsRoot, cfg.UserAgentsDir},
+			virtualRoot{virtualModsRoot, cfg.ModsDir},
+		)
+	}
+	return roots
+}
+
+// readOnlyMountRoots are the fenced directories besides the workspace; all are read-only to tools.
+func readOnlyMountRoots(cfg env.Config) []string {
+	if !cfg.Fence || cfg.CacheDir == "" {
+		return nil
+	}
+	return []string{cfg.PlatformAgentsDir, cfg.UserAgentsDir, cfg.ModsDir}
+}
 
 func mapVirtualWorkspacePath(cfg env.Config, cleaned string) string {
 	if !cfg.Fence {
 		return cleaned
 	}
-	workspaceRoot := filepath.Clean(cfg.WorkspaceDir)
-	virtualRoot := filepath.Clean(virtualWorkspaceRoot)
-	if workspaceRoot == virtualRoot {
-		return cleaned
-	}
-	if cleaned == virtualRoot {
-		return workspaceRoot
-	}
-	if strings.HasPrefix(cleaned, virtualRoot+string(filepath.Separator)) {
-		relativePath := strings.TrimPrefix(cleaned, virtualRoot+string(filepath.Separator))
-		return filepath.Join(workspaceRoot, relativePath)
+	for _, root := range virtualRoots(cfg) {
+		hostRoot := filepath.Clean(root.host)
+		virtual := filepath.Clean(root.virtual)
+		if hostRoot == virtual {
+			continue
+		}
+		if cleaned == virtual {
+			return hostRoot
+		}
+		if strings.HasPrefix(cleaned, virtual+string(filepath.Separator)) {
+			return filepath.Join(hostRoot, strings.TrimPrefix(cleaned, virtual+string(filepath.Separator)))
+		}
 	}
 	return cleaned
 }
@@ -301,68 +336,75 @@ func resolveSandboxPath(cfg env.Config, rawPath string, cwd string) (resolvedSan
 	cleaned = mapVirtualWorkspacePath(cfg, cleaned)
 
 	if cfg.Fence {
-		if err := ensureWithinRoot(cfg.WorkspaceDir, cleaned); err != nil {
+		// Mount roots first: the workspace may contain the cache (say, a home folder).
+		root, err := ensureWithinRoots(append(readOnlyMountRoots(cfg), cfg.WorkspaceDir), cleaned)
+		if err != nil {
 			return resolvedSandboxPath{}, err
 		}
+		return resolvedSandboxPath{path: cleaned, readOnly: root != cfg.WorkspaceDir}, nil
 	}
 
 	return resolvedSandboxPath{path: cleaned}, nil
+}
+
+// ensureWithinRoots returns the first root that cleaned resolves inside, lexically and through
+// symlinks. The roots are assumed to be already symlink-resolved (see env.LoadLocal).
+func ensureWithinRoots(roots []string, cleaned string) (string, error) {
+	resolved, err := resolveWithinCheck(cleaned)
+	if err != nil {
+		return "", err
+	}
+	for _, root := range roots {
+		root = filepath.Clean(root)
+		if cleaned == root || pathWithin(root, resolved) {
+			return root, nil
+		}
+	}
+	return "", errPathOutsideRoot
+}
+
+func (r resolvedSandboxPath) isReadOnly(cfg env.Config) bool {
+	return r.readOnly || isReadOnlyPath(cfg, r.path)
 }
 
 // errPathOutsideRoot is returned when a fenced sandbox receives a path that
 // would escape the workspace root, either lexically or via a symlink.
 var errPathOutsideRoot = errors.New("path escapes sandbox root")
 
-// ensureWithinRoot verifies that cleaned resolves inside root. It guards
-// against both lexical traversal (..) and symlink escape by resolving the
-// longest existing ancestor of the path before comparing.
-// The root itself is assumed to be already symlink-resolved (see env.LoadLocal).
-func ensureWithinRoot(root, cleaned string) error {
-	root = filepath.Clean(root)
-	if cleaned == root {
-		return nil
-	}
-
-	// Resolve symlinks on the longest existing ancestor so a symlinked
-	// directory cannot be used to step outside the root. Non-existent leaf
-	// components (e.g. a file about to be written) are re-appended afterwards.
+// resolveWithinCheck resolves symlinks on the longest existing ancestor so a
+// symlinked directory cannot be used to step outside a root. Non-existent leaf
+// components (e.g. a file about to be written) are re-appended afterwards; with
+// no existing ancestor the lexical path is compared.
+func resolveWithinCheck(cleaned string) (string, error) {
 	probe := cleaned
 	var trailing []string
 	for {
 		resolved, err := canonicalExistingPath(probe)
 		if err == nil {
-			full := resolved
 			for i := len(trailing) - 1; i >= 0; i-- {
-				full = filepath.Join(full, trailing[i])
+				resolved = filepath.Join(resolved, trailing[i])
 			}
-			if pathWithin(root, full) {
-				return nil
-			}
-			return errPathOutsideRoot
+			return resolved, nil
 		}
 		if !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTDIR) {
-			return err
+			return "", err
 		}
 		parent := filepath.Dir(probe)
 		if parent == probe {
-			// Reached the filesystem root without finding an existing ancestor.
-			break
+			return cleaned, nil
 		}
 		trailing = append(trailing, filepath.Base(probe))
 		probe = parent
 	}
-
-	// No existing ancestor resolved; fall back to a lexical prefix check.
-	if pathWithin(root, cleaned) {
-		return nil
-	}
-	return errPathOutsideRoot
 }
 
 func isReadOnlyPath(cfg env.Config, path string) bool {
 	roots := []string{
 		filepath.Clean(cfg.PlatformAgentsDir),
 		filepath.Clean(cfg.UserAgentsDir),
+	}
+	if cfg.ModsDir != "" {
+		roots = append(roots, filepath.Clean(cfg.ModsDir))
 	}
 	candidate := filepath.Clean(path)
 	for _, root := range roots {

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { posix } from "node:path";
 import {
   createBashTool,
   createToolFailure,
@@ -71,6 +72,7 @@ import {
 } from "@cohub/sandbox-client";
 
 import { ensureSandboxConnection, pruneSandboxConnections } from "../sandbox-pool.js";
+import { toProcessSearchPath } from "./process-search-path.js";
 import { getSpaceSandbox, recoverSpaceSandbox } from "../api.js";
 import { classifySandboxInfrastructureError, type SandboxInfrastructureError } from "@cohub/sandbox-client";
 import { logger } from "../logger.js";
@@ -754,6 +756,11 @@ const FD_FIND_MAX_STDOUT_BYTES = DEFAULT_MAX_BYTES * 8;
 const FD_FIND_MAX_STDERR_BYTES = 8 * 1024;
 const FD_FIND_OUTPUT_LIMIT_MESSAGE = "Find output limit reached. Refine pattern or path.";
 
+async function processSearchPath(path: string) {
+  const local = path.startsWith("/") && await resolveSandboxProvider(getCurrentSpaceId()).catch(() => "cloud") === "local";
+  return toProcessSearchPath(path, local);
+}
+
 function buildFdFindArgv(input: { pattern: string; path: string; limit: number; ignore?: string[] }) {
   const useFullPath = input.pattern.includes("/");
   let effectivePattern = input.pattern;
@@ -818,7 +825,8 @@ function createRemoteFindOperations(): FindOperations {
 
         const connection = await getCurrentConnection();
         if (runsExecutableDirectly(connection.capabilities, "processFd")) {
-          const argv = buildFdFindArgv({ pattern, path, limit: options.limit, ignore: options.ignore });
+          const processPath = await processSearchPath(path);
+          const argv = buildFdFindArgv({ pattern, path: processPath.arg, limit: options.limit, ignore: options.ignore });
           const stderrChunks: string[] = [];
           const matches: string[] = [];
           const updates = createThrottledTextToolUpdate(options.onUpdate, { maxChars: DEFAULT_MAX_BYTES });
@@ -842,7 +850,7 @@ function createRemoteFindOperations(): FindOperations {
           const pushMatch = (rawMatch: string) => {
             const trimmed = rawMatch.trim();
             if (!trimmed || matches.length >= options.limit) return;
-            const match = formatFdFindPath(trimmed, path);
+            const match = formatFdFindPath(processPath.base && !trimmed.startsWith("/") ? posix.join(processPath.base, trimmed) : trimmed, path);
             if (baseRelative != null) {
               const relativePath = match === "." ? baseRelative : baseRelative ? `${baseRelative}/${match}` : match;
               if (!filter.isVisible(relativePath)) return;
@@ -871,7 +879,7 @@ function createRemoteFindOperations(): FindOperations {
               "process.start",
               {
                 argv,
-                cwd: SANDBOX_WORKSPACE_PATH,
+                cwd: processPath.cwd,
                 timeoutSecs: FD_FIND_TIMEOUT_SECS,
               },
               {
@@ -1080,13 +1088,14 @@ function createRemoteGrepTool() {
       }
       try {
         if (runsExecutableDirectly(connection.capabilities, "processRg")) {
-          const collector = createRgJsonGrepCollector({ searchPath: grepInput.path, limit: effectiveLimit });
+          const processPath = await processSearchPath(searchPath);
+          const collector = createRgJsonGrepCollector({ searchPath: grepInput.path, pathBase: processPath.base, limit: effectiveLimit });
           const stderrChunks: string[] = [];
           const updates = createThrottledTextToolUpdate(onUpdate, { maxChars: DEFAULT_MAX_BYTES });
           let stdoutBytes = 0;
           let stderrBytes = 0;
           let stdoutLimitReached = false;
-          const argv = buildRgGrepArgv(grepInput, searchPath);
+          const argv = buildRgGrepArgv(grepInput, processPath.arg);
           const emitPartial = () => {
             const partial = collector.format();
             const partialText = partial.content[0]?.type === "text" ? partial.content[0].text : "";
@@ -1098,7 +1107,7 @@ function createRemoteGrepTool() {
             "process.start",
             {
               argv,
-              cwd: SANDBOX_WORKSPACE_PATH,
+              cwd: processPath.cwd,
               timeoutSecs: RG_GREP_TIMEOUT_SECS,
             },
             {
@@ -1284,7 +1293,7 @@ async function assertCurrentActorCanViewSpaceFiles(spaceId: string): Promise<Age
   return resolveSpaceFileVisibility({ actorUserId: actorUserId.trim(), spaceId });
 }
 
-async function resolveSandboxProvider(spaceId: string): Promise<"cloud" | "local"> {
+export async function resolveSandboxProvider(spaceId: string): Promise<"cloud" | "local"> {
   const now = Date.now();
   const cached = sandboxProviderCache.get(spaceId);
   if (cached && cached.expiresAt > now) return cached.provider;

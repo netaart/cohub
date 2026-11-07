@@ -11,7 +11,7 @@ import type { SessionManager } from "./local-session-manager.js";
 import type { CohubModel, CohubModelRegistry } from "./model-registry.js";
 import { normalizeThinkingLevel, resolveInitialThinkingLevel, resolveThinkingLevelForModel } from "./thinking-level.js";
 import { createModelsFromRegistry, streamSimpleWithModels } from "./pi-models-adapter.js";
-import { buildCohubSystemPrompt } from "./system-prompt-builder.js";
+import { buildCohubSystemPrompt, type LocalPromptWorkspace } from "./system-prompt-builder.js";
 import { recordLlmUsage, startLlmRoundSpan, getAgentTracer } from "@cohub/infra/tracing/agent";
 import { getCurrentToolExecutionContext, runWithToolExecutionContext, type ToolExecutionContext } from "../tool-context.js";
 import { applyRoundBoundaryAbort } from "../active-turns.js";
@@ -150,6 +150,7 @@ export type CreateCohubAgentSessionOptions = {
   modelRegistry: CohubModelRegistry;
   tools: ToolLike[];
   spaceMods?: SpaceModListItem[];
+  localWorkspace?: LocalPromptWorkspace;
   imageToTextConfig?: ImageToTextConfig | null;
   model?: Model<Api>;
   /** Latest thinking level the user explicitly selected; read only when the session file lost its record. */
@@ -788,6 +789,7 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
       toolSnippets: Object.fromEntries(tools.map((tool) => [tool.name, toolSnippets(tool.name)]).filter((entry): entry is [string, string] => Boolean(entry[1]))),
       spaceMods: options.spaceMods ?? [],
       includeUserSkills: shouldIncludeUserSkills(userId, spaceOwnerUserId),
+      localWorkspace: options.localWorkspace,
     });
   };
 

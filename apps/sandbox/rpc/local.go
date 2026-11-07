@@ -89,7 +89,7 @@ func (d *Dispatcher) PutFile(rawPath string, body io.Reader, exclusive bool, exp
 		return nil, pathFailure(err)
 	}
 	request := protocol.RPCRequest{Method: "fs.write"}
-	if isReadOnlyPath(d.cfg, resolved.path) {
+	if resolved.isReadOnly(d.cfg) {
 		return nil, failure("READ_ONLY_FILESYSTEM", fmt.Sprintf("path is read-only: %s", resolved.path))
 	}
 	if info, err := os.Stat(resolved.path); err == nil && info.IsDir() {

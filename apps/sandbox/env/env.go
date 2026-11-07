@@ -60,10 +60,14 @@ type Config struct {
 
 	// Local mode only. RelayURL is the gateway control endpoint the sandbox
 	// dials out to; RelayToken is the user's access token used to authorize the
-	// space binding. Fence, when true, restricts all path access to WorkspaceDir.
+	// space binding. Fence, when true, restricts path access to WorkspaceDir and
+	// the read-only mount directories. CacheDir holds those mounts (ModsDir,
+	// PlatformAgentsDir, UserAgentsDir), which the agent syncs over RPC.
 	RelayURL   string
 	RelayToken string
 	Fence      bool
+	CacheDir   string
+	ModsDir    string
 }
 
 // IsLocal reports whether the sandbox runs in local dial-out mode.
@@ -211,6 +215,10 @@ func LoadLocal(opts LocalOptions) (Config, error) {
 		return Config{}, fmt.Errorf("resolve home dir: %w", err)
 	}
 	cacheDir := filepath.Join(homeDir, ".cache", "cohub", "spaces", opts.SpaceID)
+	mountsDir := prepareMountsDir(cacheDir)
+	if mountsDir != "" {
+		cacheDir = mountsDir
+	}
 
 	imageVersion := ResolveSandboxVersion("sandboxd:dev")
 
@@ -233,7 +241,32 @@ func LoadLocal(opts LocalOptions) (Config, error) {
 		RelayURL:          strings.TrimSpace(opts.RelayURL),
 		RelayToken:        strings.TrimSpace(opts.RelayToken),
 		Fence:             true,
+		CacheDir:          mountsDir,
+		ModsDir:           modsDir(mountsDir),
 	}, nil
+}
+
+// prepareMountsDir creates the mount roots, private to this OS user, and returns the
+// symlink-resolved cache dir the fence compares against, or "" when the cache is unusable;
+// the sandbox then holds no mounts.
+func prepareMountsDir(cacheDir string) string {
+	for _, dir := range []string{"platform-agents", "user-agents", "mods"} {
+		if err := os.MkdirAll(filepath.Join(cacheDir, dir), 0o700); err != nil {
+			return ""
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(cacheDir)
+	if err != nil {
+		return ""
+	}
+	return resolved
+}
+
+func modsDir(cacheDir string) string {
+	if cacheDir == "" {
+		return ""
+	}
+	return filepath.Join(cacheDir, "mods")
 }
 
 func resolveSearchVersion() string {

@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead, truncateLine, type GrepToolDetails } from "./index.js";
 
 const GREP_MAX_LINE_LENGTH = 500;
@@ -34,6 +35,8 @@ export function formatGrepPath(filePath: string, searchPath: string | undefined)
 export function formatRgJsonGrepResult(input: {
   lines: string[];
   searchPath?: string;
+  /** Directory rg ran in; relative output paths are resolved against it. */
+  pathBase?: string;
   limit: number;
 }) {
   const outputLines: string[] = [];
@@ -70,7 +73,8 @@ export function formatRgJsonGrepResult(input: {
     if (wasTruncated) linesTruncated = true;
 
     const sep = event.type === "match" ? ":" : "-";
-    outputLines.push(`${formatGrepPath(filePath, input.searchPath)}${sep}${lineNumber}${sep} ${text}`);
+    const fullPath = input.pathBase && !filePath.startsWith("/") ? posix.join(input.pathBase, filePath) : filePath;
+    outputLines.push(`${formatGrepPath(fullPath, input.searchPath)}${sep}${lineNumber}${sep} ${text}`);
 
     if (event.type === "match") {
       matchCount += 1;
@@ -106,7 +110,7 @@ export function formatRgJsonGrepResult(input: {
  * Accumulates streamed `rg --json` stdout. Formatting always sees every line,
  * so the tool limit counts matches rather than rg's begin/end/context events.
  */
-export function createRgJsonGrepCollector(input: { searchPath?: string; limit: number }) {
+export function createRgJsonGrepCollector(input: { searchPath?: string; pathBase?: string; limit: number }) {
   const lines: string[] = [];
   let pending = "";
   const append = (line: string) => {
@@ -133,7 +137,7 @@ export function createRgJsonGrepCollector(input: { searchPath?: string; limit: n
       return added;
     },
     format() {
-      return formatRgJsonGrepResult({ lines, searchPath: input.searchPath, limit: input.limit });
+      return formatRgJsonGrepResult({ lines, searchPath: input.searchPath, pathBase: input.pathBase, limit: input.limit });
     },
   };
 }
