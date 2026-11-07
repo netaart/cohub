@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-// Pin only after all platform artifacts are published to the public CDN.
+// Bumped by a PR from sandbox-binaries-build.yml once every platform artifact is on the CDN.
 export const SANDBOXD_VERSION = "v2.95.0";
 
 const BINARY_NAME = "cohub-sandboxd";

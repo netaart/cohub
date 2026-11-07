@@ -7,7 +7,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 
-// Pin a global release tag after its helper artifacts are published.
+// Bumped by a PR from rtc-binaries-build.yml once the helper artifacts are on the CDN.
 export const RTC_HELPER_VERSION: string = "v2.68.0";
 const MAX_BINARY_BYTES = 128 * 1024 * 1024;
 

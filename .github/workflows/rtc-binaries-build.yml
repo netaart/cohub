@@ -129,3 +129,19 @@ jobs:
           mkdir -p ~/.aws
           printf '[default]\nrequest_checksum_calculation = when_required\nresponse_checksum_validation = when_required\ns3 =\n    addressing_style = virtual\n' > ~/.aws/config
           aws s3 cp upload "s3://cohub-public/rtc/${RELEASE_TAG}/" --endpoint-url https://oss-us-west-1.aliyuncs.com --recursive --cache-control 'public, max-age=31536000, immutable'
+
+  pin-cli:
+    needs: [scope, publish-cdn]
+    runs-on: ubuntu-latest
+    concurrency: pin-cli-rtc
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Open CLI pin PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node packages/cli/scripts/pin-binary.mjs rtc "${{ needs.scope.outputs.version }}"
