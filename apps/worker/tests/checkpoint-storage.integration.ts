@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, mock, test } from "node:test";
@@ -140,11 +140,20 @@ test("saves are incremental packs whose manifests rebuild every checkpoint byte 
   for (const name of ["cr\r", "space ", "back\\slash"]) await writeFile(join(workspace, name), name);
   await writeFile(join(workspace, "run.sh"), "#!/bin/sh\n", { mode: 0o755 });
   await symlink("src/a.txt", join(workspace, "link"));
+  await mkdir(join(workspace, "src/sub"), { recursive: true });
+  await mkdir(join(workspace, "d"), { recursive: true });
+  await symlink("../a.txt", join(workspace, "src/sub/up"));
+  await symlink("..", join(workspace, "d/up"));
+  await symlink("d/up/..", join(workspace, "chain"));
+  await symlink("../outside", join(workspace, "escape"));
   await writeFile(join(workspace, "weird\nname"), "x");
   await settle();
 
   const first = await save("first");
-  assert.equal(first.stats.hashedFileCount, 10);
+  assert.equal(first.stats.hashedFileCount, 12);
+  const firstMeta = state.checkpoints.get(first.checkpointId)?.meta as { warnings?: Array<{ path: string; reason: string }> } | undefined;
+  const skipped = firstMeta?.warnings ?? [];
+  assert.deepEqual(skipped.filter((warning) => warning.reason === "unsafe_symlink_target").map((warning) => warning.path).sort(), ["chain", "escape"]);
   const firstManifest = await manifestOf(first.commitHash);
   assert.equal(firstManifest.seq, 0);
   assert.equal(execFileSync("git", ["show", `${first.commitHash}:src/a.txt`], { cwd: repoDir, encoding: "utf8" }), "alpha\r\n");
@@ -179,6 +188,10 @@ test("saves are incremental packs whose manifests rebuild every checkpoint byte 
   assert.equal(await readFile(join(target, "weird\nname"), "utf8"), "x");
   assert.equal(await readFile(join(target, "kept/file"), "utf8"), "kept");
   for (const name of ["cr\r", "space ", "back\\slash"]) assert.equal(await readFile(join(target, name), "utf8"), name);
+  assert.equal(await readlink(join(target, "src/sub/up")), "../a.txt");
+  assert.equal(await readFile(join(target, "src/sub/up"), "utf8"), "alpha\r\n");
+  assert.equal(await readlink(join(target, "d/up")), "..");
+  assert.equal(await lstat(join(target, "chain")).then(() => true, () => false), false);
 });
 
 test("a save refuses to land when the head moved underneath it", async () => {

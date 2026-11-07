@@ -1,7 +1,7 @@
 import { createReadStream, createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { createHash } from "node:crypto";
-import { lstat, readFile, readlink, readdir } from "node:fs/promises";
+import { lstat, readFile, readlink, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, normalize, relative } from "node:path";
 import {
   CHECKPOINT_HARD_EXCLUDES,
@@ -67,11 +67,23 @@ export async function stageFile(path: string, stagedPath: string) {
   return { sha256: hash.digest("hex"), size };
 }
 
-const isSafeSymlinkTarget = (target: string) => {
-  if (isAbsolute(target)) return false;
-  const normalized = normalize(target).replace(/\\/g, "/");
-  return normalized !== ".." && !normalized.startsWith("../");
+const isInside = (root: string, path: string) => {
+  const rel = relative(root, path);
+  return rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel);
 };
+
+/**
+ * Keep a relative symlink whose target, fully resolved, stays inside the
+ * workspace. Resolving the real path catches chains such as `a -> d/up/..`
+ * with `d/up -> ..`; dangling links keep the textual rule.
+ */
+async function isContainedSymlink(absPath: string, target: string, rootReal: string) {
+  if (isAbsolute(target)) return false;
+  const resolved = await realpath(absPath).catch(() => null);
+  if (resolved) return isInside(rootReal, resolved);
+  const normalized = normalize(target);
+  return normalized !== ".." && !normalized.startsWith("../");
+}
 
 const isIgnoredByMatchers = (absPath: string, isDirectory: boolean, matchers: IgnoreMatcher[]) => {
   for (const { baseDir, matcher } of matchers) {
@@ -89,6 +101,7 @@ export async function scanWorkspace(root: string) {
   let ignoredCount = 0;
 
   const systemMatcher = ignore().add([...CHECKPOINT_HARD_EXCLUDES]).add(CHECKPOINT_PLATFORM_IGNORE);
+  const rootReal = await realpath(root);
 
   const walk = async (dir: string, inheritedMatchers: IgnoreMatcher[]) => {
     const localMatcher = await readGitignore(dir);
@@ -131,7 +144,7 @@ export async function scanWorkspace(root: string) {
       }
       if (st.isSymbolicLink()) {
         const target = await readlink(absPath).catch(() => null);
-        if (!target || !isSafeSymlinkTarget(target)) {
+        if (!target || !await isContainedSymlink(absPath, target, rootReal)) {
           warnings.push({ path: rel, type: "symlink", action: "skipped", reason: "unsafe_symlink_target" });
           return;
         }
