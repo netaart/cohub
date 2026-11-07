@@ -177,6 +177,12 @@ const userTextTokens = $derived.by(() =>
 	tokenizeUserText(userTextBlocks.map((block) => block.text).join("\n\n")),
 );
 
+function sameBlocks(a: readonly ContentBlock[], b: readonly ContentBlock[]) {
+	return a.length === b.length && a.every((block, index) => block === b[index]);
+}
+
+// Streaming changes only the last block; untouched segments keep their identity.
+let previousSegments: Segment[] = [];
 const segments = $derived.by(() => {
 	const result: Segment[] = [];
 	let i = 0;
@@ -225,7 +231,14 @@ const segments = $derived.by(() => {
 		// rendering orphaned result blocks out of context.
 		i += 1;
 	}
-	return result;
+	previousSegments = result.map((segment, index) => {
+		const prior = previousSegments[index];
+		return prior?.type === segment.type &&
+			sameBlocks(prior.blocks, segment.blocks)
+			? prior
+			: segment;
+	});
+	return previousSegments;
 });
 </script>
 

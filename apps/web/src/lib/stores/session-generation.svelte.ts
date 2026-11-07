@@ -304,7 +304,8 @@ function toSnapshotInput(state: SessionGenerationState) {
 }
 
 class SessionGenerationStore {
-	bySessionId = $state<Record<string, SessionGenerationState>>({});
+	// Immutable snapshots: unchanged parts keep their identity for render memo.
+	bySessionId = $state.raw<Record<string, SessionGenerationState>>({});
 	private persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private userKey = getCacheUserKey();
 

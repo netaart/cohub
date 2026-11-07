@@ -11,6 +11,7 @@ import type {
 	TimelineItem,
 	TurnFooterPhase,
 } from "./session-tree";
+import { reuseUnchangedItems } from "./structural-sharing";
 
 function getTurnContextWindow(turn: SessionTurnRecord) {
 	const raw = turn.meta?.contextWindow;
@@ -160,19 +161,14 @@ export function buildStreamingPreviewBlocks(
 	let appliedTruncatedPrefix = false;
 	return content.flatMap((block): ContentBlock[] => {
 		if (block.type === "text") {
-			const text = block.text;
-			if (!text.trim()) return [];
-			const nextText =
-				options?.truncatedStart && !appliedTruncatedPrefix
-					? `…${text.trimStart()}`
-					: text;
+			if (!block.text.trim()) return [];
+			const prefix = options?.truncatedStart && !appliedTruncatedPrefix;
 			appliedTruncatedPrefix = true;
-			return [{ ...block, text: nextText }];
+			return [
+				prefix ? { ...block, text: `…${block.text.trimStart()}` } : block,
+			];
 		}
-		if (block.type === "thinking") {
-			const thinking = block.thinking;
-			return thinking.trim() ? [{ ...block, thinking }] : [];
-		}
+		if (block.type === "thinking") return block.thinking.trim() ? [block] : [];
 		return [block];
 	});
 }
@@ -310,7 +306,12 @@ export function createTurnTimelineBuilder() {
 		orderedTurns: new WeakMap(),
 		messages: new WeakMap(),
 	};
-	return (input: TurnTimelineInput) => renderTurnTimelineItems(input, cache);
+	let previous: TimelineItem[] = [];
+	return (input: TurnTimelineInput) =>
+		(previous = reuseUnchangedItems(
+			previous,
+			renderTurnTimelineItems(input, cache),
+		));
 }
 
 export function buildTurnTimelineItems(

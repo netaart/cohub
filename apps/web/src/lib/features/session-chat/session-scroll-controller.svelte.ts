@@ -3,11 +3,6 @@ import {
 	type TurnRailMarkerAnchor,
 } from "./turn-rail-markers";
 
-export type ChatTimelineHandle = {
-	preparePrepend: () => void;
-	finalizePrepend: () => void;
-};
-
 export type SessionScrollAnchorKind =
 	| "user"
 	| "assistant"
@@ -129,7 +124,6 @@ const TURN_MARKER_CONTENT_MEASURE_MS = 500;
 
 export function createSessionScrollController() {
 	let listEl = $state<HTMLDivElement | null>(null);
-	let chatTimelineRef = $state<ChatTimelineHandle | null>(null);
 	let composerHeight = $state(0);
 	let chatChromeHeight = $state(0);
 	let shouldAutoFollow = $state(true);
@@ -481,12 +475,6 @@ export function createSessionScrollController() {
 		},
 		set listEl(value: HTMLDivElement | null) {
 			listEl = value;
-		},
-		get chatTimelineRef() {
-			return chatTimelineRef;
-		},
-		set chatTimelineRef(value: ChatTimelineHandle | null) {
-			chatTimelineRef = value;
 		},
 		get composerHeight() {
 			return composerHeight;

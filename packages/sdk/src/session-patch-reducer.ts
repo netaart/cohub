@@ -133,47 +133,15 @@ function decodePointerSegments(encoded: string): string[] {
   return encoded.split("/").map((s) => s.replace(/~1/g, "/").replace(/~0/g, "~"));
 }
 
-function ensureTextLikeBlock(
-  blocks: ContentBlock[],
-  streamIndex: number,
-  field: "text" | "thinking",
-) {
-  const existingIndex = findBlockByStreamIndex(blocks, streamIndex);
-  const existing = existingIndex >= 0 ? blocks[existingIndex] : undefined;
-  if (field === "text") {
-    if (existing?.type === "text") return existing;
-    const block: ContentBlock = {
-      type: "text",
-      text: "",
-      _meta: { streamIndex },
-    };
-    blocks.push(block);
-    return block;
+// Copies objects along the path so blocks shared with the previous state stay untouched.
+function writableParent(root: ContentBlock, segments: string[]): Record<string, unknown> | null {
+  let cur = root as Record<string, unknown>;
+  for (const key of segments.slice(0, -1)) {
+    const child = cur[key];
+    if (!isPlainObject(child)) return null;
+    cur = cur[key] = { ...child };
   }
-  if (existing?.type === "thinking") return existing;
-  const block: ContentBlock = {
-    type: "thinking",
-    thinking: "",
-    _meta: { streamIndex },
-  };
-  blocks.push(block);
-  return block;
-}
-
-function getOrCreateBlockForSubpath(
-  blocks: ContentBlock[],
-  streamIndex: number,
-  firstSegment: string,
-): ContentBlock | null {
-  const idx = findBlockByStreamIndex(blocks, streamIndex);
-  if (idx >= 0) return blocks[idx] ?? null;
-  if (firstSegment === "text") {
-    return ensureTextLikeBlock(blocks, streamIndex, "text");
-  }
-  if (firstSegment === "thinking") {
-    return ensureTextLikeBlock(blocks, streamIndex, "thinking");
-  }
-  return null;
+  return cur;
 }
 
 function setDeepOnContentBlock(
@@ -181,24 +149,13 @@ function setDeepOnContentBlock(
   segments: string[],
   value: unknown,
 ): boolean {
-  if (segments.length === 0) return false;
-  let cur: unknown = root;
-  for (let i = 0; i < segments.length - 1; i++) {
-    const k = segments[i];
-    if (k === undefined) return false;
-    if (!isPlainObject(cur)) return false;
-    const next = cur[k];
-    if (next === undefined) return false;
-    cur = next;
-  }
-  const last = segments[segments.length - 1];
-  if (last === undefined) return false;
-  if (!isPlainObject(cur)) return false;
-  const toAssign =
+  const last = segments.at(-1);
+  const parent = writableParent(root, segments);
+  if (last === undefined || !parent) return false;
+  parent[last] =
     value !== null && typeof value === "object"
       ? structuredClone(value)
       : value;
-  (cur as Record<string, unknown>)[last] = toAssign;
   return true;
 }
 
@@ -207,20 +164,9 @@ function appendDeepOnContentBlock(
   segments: string[],
   suffix: string,
 ): boolean {
-  if (segments.length === 0) return false;
-  let cur: unknown = root;
-  for (let i = 0; i < segments.length - 1; i++) {
-    const k = segments[i];
-    if (k === undefined) return false;
-    if (!isPlainObject(cur)) return false;
-    const next = cur[k];
-    if (next === undefined) return false;
-    cur = next;
-  }
-  const last = segments[segments.length - 1];
-  if (last === undefined) return false;
-  if (!isPlainObject(cur)) return false;
-  const parent = cur as Record<string, unknown>;
+  const last = segments.at(-1);
+  const parent = writableParent(root, segments);
+  if (last === undefined || !parent) return false;
   const leaf = parent[last];
   if (typeof leaf !== "string") return false;
   parent[last] = leaf + suffix;
@@ -233,8 +179,17 @@ function resolveBlockForSubpath(
   firstSegment: string,
 ): ContentBlock | null {
   const idx = findBlockByStreamIndex(blocks, streamIndex);
-  if (idx >= 0) return blocks[idx] ?? null;
-  return getOrCreateBlockForSubpath(blocks, streamIndex, firstSegment);
+  if (idx >= 0) {
+    const block = { ...blocks[idx] } as ContentBlock;
+    blocks[idx] = block;
+    return block;
+  }
+  let block: ContentBlock;
+  if (firstSegment === "text") block = { type: "text", text: "", _meta: { streamIndex } };
+  else if (firstSegment === "thinking") block = { type: "thinking", thinking: "", _meta: { streamIndex } };
+  else return null;
+  blocks.push(block);
+  return block;
 }
 
 function applyReplaceAtBlockSubpath(
@@ -275,7 +230,8 @@ function applyPatchOpsToBlocks(
   ops: RealtimePatchOperation[],
   initialAppendPath: string | null,
 ): PatchBlocksResult {
-  const next = current.map(cloneBlock);
+  // Untouched blocks keep their identity so renderers can skip them.
+  const next = [...current];
   let anchorUserMessageId: string | null | undefined;
   let appendPath = initialAppendPath;
   let failed = false;
@@ -313,7 +269,7 @@ function applyPatchOpsToBlocks(
       const blockIndex = findBlockByStreamIndex(next, streamIndex);
       const block = blockIndex >= 0 ? next[blockIndex] : undefined;
       if (!block) continue;
-      block._meta = { ...(block._meta ?? {}), ...op.v };
+      next[blockIndex] = { ...block, _meta: { ...(block._meta ?? {}), ...op.v } } as ContentBlock;
       continue;
     }
 

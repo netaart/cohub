@@ -204,7 +204,6 @@ import {
 	createViewportContextController,
 } from "./viewport-context-controller.svelte";
 
-const PRELOAD_THRESHOLD = 10;
 const TURN_SCROLL_ANCHOR_OFFSET = 16;
 const SESSION_INITIAL_LOADING_DELAY_MS = 160;
 const SESSION_SCROLL_RESTORE_TIMEOUT_MS = 3000;
@@ -564,7 +563,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	const composerHeight = $derived(scroll.composerHeight);
 	const chatChromeHeight = $derived(scroll.chatChromeHeight);
 	const listEl = $derived(scroll.listEl);
-	const chatTimelineRef = $derived(scroll.chatTimelineRef);
 	const turnIndexBySessionId = $derived(turnLoading.turnIndexBySessionId);
 	const loadingTurnSequence = $derived(turnLoading.loadingTurnSequence);
 	let currentTurnSequence = $state<number | null>(null);
@@ -576,6 +574,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	const timelineClientHeight = $derived(scroll.timelineClientHeight);
 	let showTurnBottomSheet = $state(false);
 	let appliedRouteTurnKey = $state<string | null>(null);
+	let revealTurn = $state<{ sessionId: string; sequence: number } | null>(null);
 	let lastTurnIndexRefreshKey = "";
 	let restoringBottomSessionId = $state<string | null>(null);
 	let pendingTailReconcileSessionId = $state<string | null>(null);
@@ -1096,6 +1095,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			return;
 		}
 		const restore = { ...anchor, sessionId: targetId };
+		untrack(() => {
+			revealTurn = { sessionId: targetId, sequence: anchor.turnSequence };
+		});
 		// Write untracked: this effect must not depend on the signal it writes
 		// (isSameActiveAnchorRestore reads scroll.activeAnchorRestore — a
 		// tracked read plus a write here is a self-invalidation cycle).
@@ -2233,6 +2235,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			clearComposerError();
 			if (scrollToTurnAnchor(sequence)) return;
 			await ensureTurnWindowLoaded(activeSessionId, sequence);
+			revealTurn = { sessionId: activeSessionId, sequence };
 			await tick();
 			requestAnimationFrame(() => scrollToTurnAnchor(sequence));
 		} catch (error) {
@@ -2324,7 +2327,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 	async function loadOlderTurns(sessionId: string) {
 		const state = sessionStateById[sessionId];
 		if (!state?.hasMore || state.loadingOlder) return;
-		chatTimelineRef?.preparePrepend();
 		workspace.sessionStateById = {
 			...sessionStateById,
 			[sessionId]: {
@@ -2367,10 +2369,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					oldestCursor: mergedTurns[0]?.sequence ?? undefined,
 				},
 			};
-			if (response.turns.length > 0) {
-				await tick();
-				chatTimelineRef?.finalizePrepend();
-			}
 		} catch (error) {
 			workspace.sessionStateById = {
 				...sessionStateById,
@@ -2389,20 +2387,16 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		}
 	}
 
-	function handleFirstVisible(index: number) {
+	function preloadOlderTurns() {
 		if (!activeSessionId) return;
 		const state = sessionStateById[activeSessionId];
 		if (!state?.hasMore || state.loadingOlder) return;
-		if (
-			index <= PRELOAD_THRESHOLD &&
-			!workspace.isPreloadingSession(activeSessionId)
-		) {
-			const sessionId = activeSessionId;
-			workspace.beginPreloadingSession(sessionId);
-			void loadOlderTurns(sessionId).finally(() =>
-				workspace.endPreloadingSession(sessionId),
-			);
-		}
+		if (workspace.isPreloadingSession(activeSessionId)) return;
+		const sessionId = activeSessionId;
+		workspace.beginPreloadingSession(sessionId);
+		void loadOlderTurns(sessionId).finally(() =>
+			workspace.endPreloadingSession(sessionId),
+		);
 	}
 
 	function restoreSessionStreamSnapshot(
@@ -4729,12 +4723,6 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		set listEl(v: HTMLDivElement | null) {
 			scroll.listEl = v;
 		},
-		get chatTimelineRef() {
-			return scroll.chatTimelineRef;
-		},
-		set chatTimelineRef(v: unknown) {
-			scroll.chatTimelineRef = v as typeof scroll.chatTimelineRef;
-		},
 		get shouldAutoFollow() {
 			return scroll.shouldAutoFollow;
 		},
@@ -4773,6 +4761,11 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		},
 		get activeTurnRailItems() {
 			return activeTurnRailItems;
+		},
+		get revealTurnSequence() {
+			return revealTurn?.sessionId === activeSessionId
+				? revealTurn.sequence
+				: null;
 		},
 		get unloadedOlderTurnCount() {
 			return unloadedOlderTurnCount;
@@ -4828,7 +4821,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		},
 		handleRemoveAttachment,
 		handleRemoveViewportContext,
-		handleFirstVisible,
+		preloadOlderTurns,
 		handleTimelineMarkdownRenderStart,
 		handleTimelineMarkdownRendered,
 		jumpToTurn,

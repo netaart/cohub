@@ -5,6 +5,7 @@ import type {
 	StoredIntermediateMessage,
 } from "@cohub/protocol/model";
 import { Loader2 } from "lucide-svelte";
+import { tick } from "svelte";
 import ChatMessageBubble from "$lib/components/ChatMessageBubble.svelte";
 import CompactionDivider from "$lib/components/CompactionDivider.svelte";
 import GenerationRuntimeStatusRow from "$lib/components/GenerationRuntimeStatusRow.svelte";
@@ -21,9 +22,10 @@ type Props = {
 	sessionId?: string | null;
 	timeline: TimelineItem[];
 	bindListEl?: HTMLDivElement | null;
-	/** Number of unseen items at the visual top before triggering preload */
-	preloadThreshold?: number;
-	onFirstVisible?: (index: number) => void;
+	/** Lowest turn that must be mounted, e.g. a jump or scroll-restore target. */
+	revealTurnSequence?: number | null;
+	/** Every loaded turn is mounted and the reader is near the top. */
+	onReachOldest?: () => void;
 	/** Whether the initial/tail turn window is loading */
 	loading?: boolean;
 	/** Whether older turns are currently being loaded (scroll-up pagination) */
@@ -51,8 +53,8 @@ let {
 	sessionId = null,
 	timeline,
 	bindListEl = $bindable(null),
-	preloadThreshold = 10,
-	onFirstVisible,
+	revealTurnSequence = null,
+	onReachOldest,
 	loading = false,
 	loadingOlder = false,
 	modelsCatalog,
@@ -69,10 +71,16 @@ let {
 
 const locale = $derived(getLocale());
 
-let observedNodes = new Map<HTMLElement, number>();
-let observer: IntersectionObserver | null = null;
+// Loaded history mounts from the tail in whole turns and grows upward as the
+// reader nears the top; mounted turns are never unmounted.
+const INITIAL_MOUNTED_TURNS = 2;
+const MOUNT_BATCH_TURNS = 3;
+const PRELOAD_VIEWPORTS = 3;
+
+let observedNodes = new Set<HTMLElement>();
 let farObserver: IntersectionObserver | null = null;
-let prevScrollHeight = $state(0);
+let mountFrom = $state<number | null>(null);
+let fillFrame = 0;
 
 type TimelineScrollAnchor = {
 	itemKey: string;
@@ -114,60 +122,94 @@ function getTimelineScrollAnchor(
 	return null;
 }
 
-export function preparePrepend() {
-	if (!bindListEl) return;
-	prevScrollHeight = bindListEl.scrollHeight;
+function getItemTurnSequence(item: TimelineItem) {
+	if (item.kind === "process" || item.kind === "compact")
+		return item.turn.sequence;
+	if (item.kind === "message") return item.message.meta?.turn?.sequence;
+	return undefined;
 }
 
-export function finalizePrepend() {
-	if (!bindListEl || prevScrollHeight === 0) return;
-	const newScrollHeight = bindListEl.scrollHeight;
-	const addedHeight = newScrollHeight - prevScrollHeight;
-	if (addedHeight > 0) {
-		bindListEl.scrollTop += addedHeight;
+const turnStarts = $derived.by(() => {
+	const starts: { sequence: number; index: number }[] = [];
+	timeline.forEach((item, index) => {
+		const sequence = getItemTurnSequence(item);
+		if (typeof sequence === "number" && sequence !== starts.at(-1)?.sequence)
+			starts.push({ sequence, index });
+	});
+	return starts;
+});
+const mountFloor = $derived(
+	Math.min(
+		mountFrom ??
+			(turnStarts.at(-INITIAL_MOUNTED_TURNS) ?? turnStarts[0])?.sequence ??
+			Number.NEGATIVE_INFINITY,
+		revealTurnSequence ?? Number.POSITIVE_INFINITY,
+	),
+);
+const mountStart = $derived.by(() => {
+	const index = turnStarts.findIndex((start) => start.sequence >= mountFloor);
+	return index < 0 ? turnStarts.length - 1 : index;
+});
+const oldestTurnSequence = $derived(turnStarts[0]?.sequence);
+const mountedTimeline = $derived(
+	mountStart > 0 ? timeline.slice(turnStarts[mountStart].index) : timeline,
+);
+
+$effect(() => {
+	if (turnStarts.length > 0 && mountFloor !== mountFrom) mountFrom = mountFloor;
+});
+
+function scheduleFill() {
+	fillFrame ||= requestAnimationFrame(() => void fillAbove());
+}
+
+async function fillAbove() {
+	fillFrame = 0;
+	const list = bindListEl;
+	if (!list || list.scrollTop > list.clientHeight * PRELOAD_VIEWPORTS) return;
+	if (mountStart < 0) return;
+	if (mountStart === 0) {
+		onReachOldest?.();
+		return;
 	}
-	prevScrollHeight = 0;
+	const anchor = list.querySelector<HTMLElement>("[data-kind]");
+	const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
+	mountFrom = turnStarts[Math.max(0, mountStart - MOUNT_BATCH_TURNS)].sequence;
+	await tick();
+	// Measured after layout, so this also holds when native scroll anchoring already corrected.
+	if (anchor?.isConnected)
+		list.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
+	scheduleFill();
 }
 
-function observeItem(node: HTMLElement, originalIndex: number) {
-	observedNodes.set(node, originalIndex);
-	observer?.observe(node);
+$effect(() => {
+	void [oldestTurnSequence, mountStart];
+	scheduleFill();
+});
+
+$effect(() => {
+	const list = bindListEl;
+	if (!list) return;
+	list.addEventListener("scroll", scheduleFill, { passive: true });
+	return () => {
+		list.removeEventListener("scroll", scheduleFill);
+		cancelAnimationFrame(fillFrame);
+		fillFrame = 0;
+	};
+});
+
+function observeItem(node: HTMLElement) {
+	observedNodes.add(node);
 	farObserver?.observe(node);
 	return {
 		destroy() {
 			observedNodes.delete(node);
-			observer?.unobserve(node);
 			farObserver?.unobserve(node);
-		},
-		update(newIndex: number) {
-			observedNodes.set(node, newIndex);
 		},
 	};
 }
 
 $effect(() => {
-	const _root = bindListEl;
-
-	observer = new IntersectionObserver(
-		(entries) => {
-			let minIdx = Number.POSITIVE_INFINITY;
-			for (const entry of entries) {
-				if (entry.isIntersecting) {
-					const idx = Number((entry.target as HTMLElement).dataset.idx);
-					if (idx < minIdx) minIdx = idx;
-				}
-			}
-			if (minIdx !== Number.POSITIVE_INFINITY) {
-				onFirstVisible?.(minIdx);
-			}
-		},
-		{
-			root: bindListEl,
-			rootMargin: "0px",
-			threshold: 0,
-		},
-	);
-
 	// Paint-contain offscreen items so streaming cost stays flat as history grows.
 	farObserver = new IntersectionObserver(
 		(entries) => {
@@ -178,14 +220,9 @@ $effect(() => {
 		{ root: bindListEl, rootMargin: "100% 0px" },
 	);
 
-	for (const [node] of observedNodes) {
-		observer.observe(node);
-		farObserver.observe(node);
-	}
+	for (const node of observedNodes) farObserver.observe(node);
 
 	return () => {
-		observer?.disconnect();
-		observer = null;
 		farObserver?.disconnect();
 		farObserver = null;
 	};
@@ -204,11 +241,9 @@ $effect(() => {
 				<span>{m.chat_loading_turns({}, { locale })}</span>
 			</div>
 		{/if}
-		{#each timeline as item, idx (item.id)}
-			{@const originalIdx = idx}
+		{#each mountedTimeline as item (item.id)}
 			{@const scrollAnchor = getTimelineScrollAnchor(item)}
 			<div
-				data-idx={originalIdx}
 				data-kind={item.kind}
 				data-scroll-anchor-key={scrollAnchor?.itemKey}
 				data-scroll-anchor-kind={scrollAnchor?.kind}
@@ -221,7 +256,7 @@ $effect(() => {
 					? 'user'
 					: undefined}
 				data-turn-sequence={scrollAnchor?.turnSequence}
-				use:observeItem={originalIdx}
+				use:observeItem
 			>
 				{#if item.kind === 'message'}
 					{@const forkTurn = item.message.meta?.turn ?? null}
