@@ -9,7 +9,7 @@ import {
   parseBoardManifest,
   serializeBoardManifest,
 } from "@cohub/protocol";
-import { captureBoardSnapshots, createBoard, deleteBoard } from "@cohub/core/board";
+import { type BoardDatabase, captureBoardSnapshots, createBoard, deleteBoard } from "@cohub/core/board";
 import { db } from "../db.js";
 
 async function listBoardFiles(root: string, directory = root): Promise<string[]> {
@@ -24,10 +24,11 @@ async function listBoardFiles(root: string, directory = root): Promise<string[]>
   return paths;
 }
 
-export async function saveBoardCheckpointSnapshots(input: { checkpointId: string; spaceId: string }) {
-  const snapshots = await captureBoardSnapshots(db, { spaceId: input.spaceId });
+/** Capture board snapshots with `executor`, so they commit atomically with the checkpoint row. */
+export async function saveBoardCheckpointSnapshots(executor: BoardDatabase, input: { checkpointId: string; spaceId: string }) {
+  const snapshots = await captureBoardSnapshots(executor, { spaceId: input.spaceId });
   if (snapshots.length > 0) {
-    await db.insert(boardCheckpoints).values(snapshots.map((snapshot) => ({
+    await executor.insert(boardCheckpoints).values(snapshots.map((snapshot) => ({
       checkpointId: input.checkpointId,
       sourceBoardId: snapshot.id,
       sourceSpaceId: input.spaceId,

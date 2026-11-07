@@ -82,6 +82,8 @@ FROM node:26-slim AS runtime
 
 ENV NODE_ENV=production
 ENV NODE_OPTIONS=--max-old-space-size-percentage=70
+# Checkpoint saves stat and copy files on NFS, where each call waits on the network; the default pool of 4 serializes them.
+ENV UV_THREADPOOL_SIZE=64
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && \
   rm -rf /var/lib/apt/lists/*

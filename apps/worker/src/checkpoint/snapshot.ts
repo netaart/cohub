@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { uploadAssetIfMissing } from "./assets.js";
+import { mapLimit } from "./limit.js";
 import { fileMode, isRacy, reusableEntry, type FileIndex, type FileIndexEntry } from "./file-index.js";
 import { writeBlobs, type BlobSource, type ObjectBuilder, type TreeEntry } from "./objects.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PATH } from "./paths.js";
@@ -27,15 +28,6 @@ export const assetPointerContent = (asset: CheckpointAsset) => [
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
 
-export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = [];
-  const queue = items.map((item, index) => [item, index] as const);
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (let entry = queue.shift(); entry; entry = queue.shift()) results[entry[1]] = await fn(entry[0]);
-  }));
-  return results;
-}
-
 /**
  * Turn a workspace scan into tree entries. Files whose stat matches the
  * previous index reuse their blob (or asset) without being read; everything
@@ -50,22 +42,22 @@ export async function buildSnapshot(input: {
   systemFiles: { checkpointMeta: unknown; userGitRepos: unknown };
   onAssetTiming?: (label: "hashAssets" | "uploadAssets", ms: number) => void;
 }) {
-  const previous = input.previous?.entries ?? {};
-  const entries: Record<string, FileIndexEntry> = {};
+  const previous = input.previous?.entries ?? new Map<string, FileIndexEntry>();
+  const entries = new Map<string, FileIndexEntry>();
   const assets: CheckpointAsset[] = [];
-  const changed: ScannedFile[] = [];
+  let hashedFileCount = 0;
   const blobFiles: ScannedFile[] = [];
   const assetFiles: ScannedFile[] = [];
 
   for (const file of input.files) {
     const isAsset = file.type === "file" && file.size > input.assetThresholdBytes;
-    const reused = reusableEntry(previous[file.path], file, isAsset);
+    const reused = reusableEntry(previous.get(file.path), file, isAsset);
     if (reused) {
-      entries[file.path] = reused;
+      entries.set(file.path, reused);
       if (reused.asset) assets.push({ path: file.path, size: file.size, ...reused.asset });
       continue;
     }
-    changed.push(file);
+    hashedFileCount += 1;
     (isAsset ? assetFiles : blobFiles).push(file);
   }
 
@@ -97,7 +89,7 @@ export async function buildSnapshot(input: {
   const [assetManifestOid, metaOid, userGitReposOid] = oids.slice(-3) as [string, string, string];
 
   const record = (file: ScannedFile, oid: string, asset: CheckpointAsset | null) => {
-    entries[file.path] = {
+    entries.set(file.path, {
       type: file.type,
       mode: fileMode(file),
       size: file.size,
@@ -107,19 +99,17 @@ export async function buildSnapshot(input: {
       oid,
       racy: isRacy(file, input.scanStartedAtNs),
       asset: asset ? { sha256: asset.sha256, objectKey: asset.objectKey, mimeType: asset.mimeType } : null,
-    };
+    });
   };
   for (const [index, file] of blobFiles.entries()) record(file, oids[index] as string, null);
   for (const [index, file] of assetFiles.entries()) record(file, oids[blobFiles.length + index] as string, uploaded[index] as CheckpointAsset);
 
-  const tree: TreeEntry[] = Object.entries(entries).map(([path, entry]) => ({ path, mode: entry.mode, oid: entry.oid }));
+  const tree: TreeEntry[] = Array.from(entries, ([path, entry]) => ({ path, mode: entry.mode, oid: entry.oid }));
   tree.push(
     { path: CHECKPOINT_ASSET_MANIFEST_PATH, mode: "100644", oid: assetManifestOid },
     { path: CHECKPOINT_META_PATH, mode: "100644", oid: metaOid },
     { path: USER_GIT_REPOS_PATH, mode: "100644", oid: userGitReposOid },
   );
 
-  const scanned = new Set(input.files.map((file) => file.path));
-  const deleted = Object.keys(previous).filter((path) => !scanned.has(path));
-  return { tree, entries, assets, changed, deleted };
+  return { tree, entries, assets, hashedFileCount };
 }

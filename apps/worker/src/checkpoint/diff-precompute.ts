@@ -2,6 +2,7 @@ import { writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { uploadObjectFileIfMissing } from "./assets.js";
+import { runCheckpointGit } from "@cohub/core/checkpoint/storage";
 import { runGitWithOutput } from "./git.js";
 
 const SYSTEM_PATH_PREFIX = ".cohub/system/";
@@ -237,19 +238,24 @@ export async function buildCommitDiffSummary(input: {
   assetPaths: Set<string>;
 }): Promise<{ summary: PrecomputedDiffSummary; stats: PrecomputedDiffStats }> {
   const range = input.parentCommitHash ? [input.parentCommitHash, input.commitHash] : ["--root", input.commitHash];
-  const [nameStatus, numstat] = await Promise.all([
-    runGitWithOutput(["diff-tree", "-r", "-z", "-M", "--no-commit-id", "--name-status", ...range], input.repoDir),
-    runGitWithOutput(["diff-tree", "-r", "-z", "-M", "--no-commit-id", "--numstat", ...range], input.repoDir),
-  ]);
+  const nameStatus = await runGitWithOutput(["diff-tree", "-r", "-z", "-M", "--no-commit-id", "--name-status", ...range], input.repoDir);
+  const nameEntries = parseNameStatusZ(nameStatus.stdout)
+    .filter((entry) => !isSystemPath(entry.path) && !(entry.oldPath && isSystemPath(entry.oldPath)));
 
-  const nameEntries = parseNameStatusZ(nameStatus.stdout);
-  const numstatMap = parseNumstatZ(numstat.stdout);
+  // Line counts read every changed blob. Past the summary cap only the listed files get them,
+  // and the totals stay 0 rather than undercount.
+  const complete = nameEntries.length <= DIFF_SUMMARY_MAX_FILES;
+  const listed = nameEntries.slice(0, DIFF_SUMMARY_MAX_FILES);
+  const pathspec = complete ? [] : ["--", ...listed.flatMap((entry) => (entry.oldPath ? [entry.oldPath, entry.path] : [entry.path]))];
+  const numstat = listed.length === 0
+    ? ""
+    : (await runCheckpointGit(["diff-tree", "-r", "-z", "-M", "--no-commit-id", "--numstat", ...range, ...pathspec], { cwd: input.repoDir, env: { GIT_LITERAL_PATHSPECS: "1" } })).stdout;
+  const numstatMap = parseNumstatZ(numstat);
   const stats = emptyStats();
   const files: PrecomputedDiffFile[] = [];
   let truncated = false;
 
   for (const entry of nameEntries) {
-    if (isSystemPath(entry.path) || (entry.oldPath && isSystemPath(entry.oldPath))) continue;
     const counts = numstatMap.get(entry.path);
     const asset = input.assetPaths.has(entry.path) || (entry.oldPath ? input.assetPaths.has(entry.oldPath) : false);
     const file: PrecomputedDiffFile = {
@@ -267,6 +273,11 @@ export async function buildCommitDiffSummary(input: {
       continue;
     }
     files.push(file);
+  }
+
+  if (!complete) {
+    stats.additions = 0;
+    stats.deletions = 0;
   }
 
   const summary: PrecomputedDiffSummary = {

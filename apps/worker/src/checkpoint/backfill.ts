@@ -8,7 +8,7 @@ import { ensureWorkerLocalTmpDir, getWorkerLocalTmpDir, removeWorkerLocalTmpDir 
 import { checkpointObjectExists } from "./assets.js";
 import { uploadPack, writeManifest } from "./manifest.js";
 import { packObjects } from "./objects.js";
-import { mapLimit } from "./snapshot.js";
+import { mapLimit } from "./limit.js";
 import { getCheckpointSystemRepoDir } from "./paths.js";
 
 export const CHECKPOINT_STORAGE_BACKFILL_JOB = "checkpoint.storage_backfill";

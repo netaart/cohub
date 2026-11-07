@@ -9,6 +9,10 @@ import {
 } from "@cohub/core/checkpoint/ignore";
 import { mimeTypeForPath } from "@cohub/protocol/fs";
 import ignore, { type Ignore } from "ignore";
+import { mapLimit } from "./limit.js";
+
+/** Per-directory lstat fan-out; NFS calls are latency-bound, so this rides on the libuv pool size. */
+const SCAN_CONCURRENCY = 64;
 
 export type DiscoveredGitRepo = {
   path: string;
@@ -91,7 +95,7 @@ export async function scanWorkspace(root: string) {
     const matchers = localMatcher ? [...inheritedMatchers, localMatcher] : inheritedMatchers;
     const names = await readdir(dir).catch(() => []);
 
-    await Promise.all(names.map(async (name) => {
+    await mapLimit(names, SCAN_CONCURRENCY, async (name) => {
       const absPath = join(dir, name);
       const rel = normalizeRel(root, absPath);
       const st = await lstat(absPath, { bigint: true }).catch(() => null);
@@ -135,7 +139,7 @@ export async function scanWorkspace(root: string) {
         return;
       }
       warnings.push({ path: rel, type: st.isSocket() ? "socket" : st.isFIFO() ? "fifo" : st.isBlockDevice() ? "block_device" : st.isCharacterDevice() ? "char_device" : "unknown", action: "skipped", reason: "unsupported_file_type" });
-    }));
+    });
   };
 
   await walk(root, []);

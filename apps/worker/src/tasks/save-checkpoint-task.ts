@@ -38,17 +38,20 @@ import {
 import { collectUserGitRepos } from "../checkpoint/git-bundles.js";
 import { saveBoardCheckpointSnapshots } from "../checkpoint/board.js";
 import { enqueueCheckpointCompaction } from "../checkpoint/compact.js";
-import { loadFileIndex, writeFileIndex } from "../checkpoint/file-index.js";
+import { type FileIndex, loadFileIndex, writeFileIndex } from "../checkpoint/file-index.js";
 import { foldCovers, tilesSequence, uploadPack, writeManifest } from "../checkpoint/manifest.js";
-import { applyLatestChanges, materializeLatest, readLatestCommit } from "../checkpoint/materialize.js";
-import { updateCheckpointMeta } from "../checkpoint/metadata.js";
+import { refreshLatest } from "../checkpoint/materialize.js";
+import { findCheckpointForTaskRun, updateCheckpointMeta } from "../checkpoint/metadata.js";
 import { commitTree, createObjectBuilder, installLocalPack, packObjects, writeTree } from "../checkpoint/objects.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PATH, ensureCheckpointDirs, getCheckpointLatestSubPath } from "../checkpoint/paths.js";
 import { saveCheckpointWithLock, type SaveCheckpointInput, type SaveCheckpointResult } from "../checkpoint/save.js";
 import { buildSnapshot } from "../checkpoint/snapshot.js";
-import { scanWorkspace } from "../checkpoint/scan.js";
+import { type ScannedFile, scanWorkspace } from "../checkpoint/scan.js";
 
 const SAVE_VERSION = 3;
+
+const isAncestor = (repoDir: string, ancestor: string, descendant: string) =>
+  runCheckpointGit(["merge-base", "--is-ancestor", ancestor, descendant], { cwd: repoDir }).then(() => true, () => false);
 
 /** Saves before v3 kept a working tree in the cache repository; nothing reads it any more. */
 async function removeLegacyWorkingTree(repoDir: string) {
@@ -103,20 +106,22 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
   if (!space) throw new Error("space not found");
 
   const timings: SaveCheckpointTimings = {};
-  const publishWarnings: ConfigPublishWarning[] = [];
-  const progress = (stage: string, extra?: Record<string, unknown>) => input.onProgress?.({ stage, updatedAt: new Date().toISOString(), timings, ...extra });
-  const recordPublishWarning = async (warning: ConfigPublishWarning, error: unknown) => {
-    publishWarnings.push(warning);
-    await progress("publish_config_warning", { publishWarnings });
-    console.warn(`[save_checkpoint] failed to publish ${warning.scope} ${warning.target}:`, error);
-  };
+  const progress = async (stage: string, extra?: Record<string, unknown>) => { await input.onProgress?.({ stage, updatedAt: new Date().toISOString(), timings, ...extra }); };
   await progress("prepare");
-  const checkpointId = crypto.randomUUID();
+  // The task run id doubles as the checkpoint id, so a retried run can find what it already committed.
+  const checkpointId = input.sourceTaskRunId ?? crypto.randomUUID();
   const createdAt = new Date();
   const branch = "main";
   const commitMessage = buildCommitMessage(description);
   const dirs = await timeIt(timings, "ensureCheckpointDirs", () => ensureCheckpointDirs(spaceId));
   await timeIt(timings, "initCheckpointRepo", () => initCheckpointRepo(dirs.repoDir));
+  const context: SaveContext = { input, space, dirs, timings, progress };
+
+  const committed = input.sourceTaskRunId ? await findCheckpointForTaskRun(db, spaceId, input.sourceTaskRunId) : null;
+  if (committed) {
+    await timeIt(timings, "loadCommittedObjects", () => ensureCheckpointCommits(checkpointObjectStore, dirs.repoDir, [committed.commitHash]));
+    return finishCheckpoint({ ...context, checkpoint: committed, index: null });
+  }
 
   const parentCheckpointId = space.headCheckpointId ?? null;
   const parent = parentCheckpointId
@@ -133,7 +138,13 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
       return manifest && tilesSequence(manifest.packs, 0, manifest.seq) ? manifest : null;
     })
     : null;
-  const previousIndex = await timeIt(timings, "loadFileIndex", () => loadFileIndex(dirs.systemDir, parentCommitHash));
+  // Any index recorded at the parent or one of its ancestors is valid: its blobs are all in the parent's closure.
+  const previousIndex = parentCommitHash
+    ? await timeIt(timings, "loadFileIndex", async () => {
+      const index = await loadFileIndex(dirs.systemDir);
+      return index && (index.commit === parentCommitHash || await isAncestor(dirs.repoDir, index.commit, parentCommitHash)) ? index : null;
+    })
+    : null;
 
   await progress("scan_workspace");
   const scanStartedAtNs = BigInt(Date.now()) * 1_000_000n;
@@ -251,7 +262,7 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
     smallFileBytes,
     assetCount,
     assetBytes,
-    hashedFileCount: snapshot.changed.length,
+    hashedFileCount: snapshot.hashedFileCount,
     ignoredCount: scan.ignoredCount,
     unsupportedCount: scan.warnings.length,
     detectedGitRepoCount,
@@ -262,6 +273,7 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
 
   await progress("write_checkpoint_record");
   const checkpoint = await timeIt(timings, "writeCheckpointRecord", () => db.transaction(async (tx) => {
+    const boards = await saveBoardCheckpointSnapshots(tx, { checkpointId, spaceId });
     const [row] = await tx.insert(checkpoints).values({
       id: checkpointId,
       spaceId,
@@ -281,6 +293,7 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
           latestSubPath: getCheckpointLatestSubPath(spaceId),
         },
         storage: { seq: manifest.seq, packCount: manifest.packs.length, baseline: !parentManifest },
+        board: { snapshotCount: boards.count },
         stats,
         timings,
         ...(diffMeta ? { diffs: { parent: diffMeta } } : {}),
@@ -311,13 +324,47 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
     return row;
   }));
 
-  await timeIt(timings, "finalizeRepo", async () => {
-    await runCheckpointGit(["update-ref", "refs/heads/main", commitHash], { cwd: dirs.repoDir, env: { GIT_DIR: checkpointGitDir(dirs.repoDir) } });
-    await removeLegacyWorkingTree(dirs.repoDir);
-    await writeFileIndex(dirs.systemDir, { version: 1, commit: commitHash, entries: snapshot.entries });
-  }).catch((error) => console.warn(`[save_checkpoint] failed to finalize cache repo space=${spaceId}:`, error));
-  enqueueCheckpointCompaction({ spaceId, commit: commitHash, seq: manifest.seq });
+  return finishCheckpoint({ ...context, checkpoint, index: { commit: commitHash, entries: snapshot.entries }, files: scan.files });
+};
 
+type SaveContext = {
+  input: SaveCheckpointInput;
+  space: typeof spaces.$inferSelect;
+  dirs: Awaited<ReturnType<typeof ensureCheckpointDirs>>;
+  timings: SaveCheckpointTimings;
+  progress: (stage: string, extra?: Record<string, unknown>) => Promise<void>;
+};
+
+type CheckpointMeta = {
+  commitMessage?: string;
+  storage?: { seq?: number };
+  stats?: { changedFileCount?: number; assetCount?: number; detectedGitRepoCount?: number };
+  savedBy?: string | null;
+};
+
+/**
+ * Everything after the checkpoint row commits. Idempotent, so a retried task
+ * whose worker died after the commit runs only this part.
+ */
+const finishCheckpoint = async (ctx: SaveContext & {
+  checkpoint: typeof checkpoints.$inferSelect;
+  /** Fresh stat index; null when resuming, where the next save falls back to an ancestor index. */
+  index: FileIndex | null;
+  files?: ScannedFile[];
+}): Promise<SaveCheckpointResult> => {
+  const { input, space, dirs, timings, progress, checkpoint } = ctx;
+  const spaceId = space.id;
+  const commitHash = checkpoint.commitHash;
+  const meta = (checkpoint.meta ?? {}) as CheckpointMeta;
+  const resumed = ctx.index === null;
+  const publishWarnings: ConfigPublishWarning[] = [];
+  const recordPublishWarning = async (warning: ConfigPublishWarning, error: unknown) => {
+    publishWarnings.push(warning);
+    await progress("publish_config_warning", { publishWarnings });
+    console.warn(`[save_checkpoint] failed to publish ${warning.scope} ${warning.target}:`, error);
+  };
+
+  if (typeof meta.storage?.seq === "number") enqueueCheckpointCompaction({ spaceId, commit: commitHash, seq: meta.storage.seq });
   if (checkpoint.parentCheckpointId) {
     enqueueReferences([
       checkpointForkReference({
@@ -329,21 +376,34 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
     ]);
   }
 
-  const boardSnapshots = await timeIt(timings, "saveBoardCheckpointSnapshots", () => saveBoardCheckpointSnapshots({ checkpointId: checkpoint.id, spaceId }));
-  await timeIt(timings, "updateCheckpointBoardMeta", () => updateCheckpointMeta(db, checkpoint.id, { board: { snapshotCount: boardSnapshots.count }, timings }));
+  await timeIt(timings, "finalizeRepo", async () => {
+    await runCheckpointGit(["update-ref", "refs/heads/main", commitHash], { cwd: dirs.repoDir, env: { GIT_DIR: checkpointGitDir(dirs.repoDir) } });
+    await removeLegacyWorkingTree(dirs.repoDir);
+    if (ctx.index) await writeFileIndex(dirs.systemDir, ctx.index);
+  }).catch((error) => console.warn(`[save_checkpoint] failed to finalize cache repo space=${spaceId}:`, error));
 
-  // The checkpoint is committed; a failed refresh leaves latest marked incomplete and the next save rebuilds it.
-  const latestMeta = { ...gitCheckpointMeta, commitHash, materializedAt: new Date().toISOString() };
+  // A failed refresh leaves latest marked incomplete; the next refresh rebuilds it.
+  const latestMeta = {
+    version: 1,
+    saveVersion: checkpoint.saveVersion,
+    spaceId,
+    checkpointId: checkpoint.id,
+    createdAt: (checkpoint.createdAt ?? new Date()).toISOString(),
+    description: checkpoint.description,
+    branch: "main",
+    commitHash,
+    materializedAt: new Date().toISOString(),
+  };
   await progress("materialize_latest", { commitHash });
-  const latestError = await timeIt(timings, "materializeLatest", async () => {
-    const incremental = previousIndex && await readLatestCommit(dirs.latestDir) === parentCommitHash;
-    if (incremental) await applyLatestChanges({ latestDir: dirs.latestDir, upserts: snapshot.changed, deletes: snapshot.deleted, checkpointMeta: latestMeta });
-    else await materializeLatest({ latestDir: dirs.latestDir, files: scan.files, checkpointMeta: latestMeta });
-  }).then(() => null, (error: unknown) => formatErrorMessage(error));
-  if (latestError) {
-    console.warn(`[save_checkpoint] failed to refresh latest space=${spaceId} checkpoint=${checkpoint.id}: ${latestError}`);
-    await updateCheckpointMeta(db, checkpoint.id, { latestRefreshError: latestError, timings }).catch(() => undefined);
-  }
+  const latestError = await timeIt(timings, "materializeLatest", () => refreshLatest({
+    latestDir: dirs.latestDir,
+    workspaceDir: dirs.workspaceDir,
+    repoDir: dirs.repoDir,
+    commitHash,
+    checkpointMeta: latestMeta,
+    scanFiles: async () => ctx.files ?? (await scanWorkspace(dirs.workspaceDir)).files,
+  })).then(() => null, (error: unknown) => formatErrorMessage(error));
+  if (latestError) console.warn(`[save_checkpoint] failed to refresh latest space=${spaceId} checkpoint=${checkpoint.id}: ${latestError}`);
 
   let publishedUserConfig: { targetDir: string; copiedPaths: string[]; meta: Record<string, unknown> } | null = null;
   if (!latestError && space.slug === HOME_SPACE_SLUG) {
@@ -372,9 +432,11 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
     await publishSkillsCacheFromDir({ skillsDir: getSkillsDir(publishedPlatformConfig.targetDir), scope: "platform", sourceCheckpointId: checkpoint.id, sandboxDir: "/configs/platform/.agents/skills" }).catch((error) => recordPublishWarning({ scope: "platform", target: "skills_cache", message: formatErrorMessage(error) }, error));
   }
 
-  if (publishWarnings.length > 0) {
-    await timeIt(timings, "updatePublishWarningsMeta", () => updateCheckpointMeta(db, checkpoint.id, { publishWarnings, timings }));
-  }
+  await timeIt(timings, "updateCheckpointMeta", () => updateCheckpointMeta(db, checkpoint.id, {
+    [resumed ? "resumedTimings" : "timings"]: timings,
+    ...(latestError ? { latestRefreshError: latestError } : {}),
+    ...(publishWarnings.length > 0 ? { publishWarnings } : {}),
+  })).catch((error) => console.warn(`[save_checkpoint] failed to record timings for checkpoint=${checkpoint.id}:`, error));
 
   await progress("completed", { checkpointId: checkpoint.id, commitHash, ...(publishWarnings.length > 0 ? { publishWarnings } : {}) });
   await publishSpaceEvent({
@@ -383,13 +445,29 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
     payload: {
       checkpointId: checkpoint.id,
       commitHash,
-      parentCheckpointId,
-      rootCheckpointId,
+      parentCheckpointId: checkpoint.parentCheckpointId,
+      rootCheckpointId: checkpoint.rootCheckpointId,
       description: checkpoint.description,
-      savedBy: input.userId ?? null,
+      savedBy: meta.savedBy ?? input.userId ?? null,
     },
   }).catch((error) => console.warn(`[save_checkpoint] failed to publish checkpoint.created for space=${spaceId}:`, error));
-  return { checkpointId: checkpoint.id, commitHash, branch, commitMessage, changedFiles: diffStats.changedFileCount, stats, assetCount, detectedGitRepoCount, timings, spaceId, latestSubPath: getCheckpointLatestSubPath(spaceId), ...(publishedUserConfig ? { publishedUserConfig } : {}), ...(publishedPlatformConfig ? { publishedPlatformConfig } : {}), ...(publishWarnings.length > 0 ? { publishWarnings } : {}) };
+  return {
+    checkpointId: checkpoint.id,
+    commitHash,
+    branch: "main",
+    commitMessage: meta.commitMessage ?? "",
+    changedFiles: meta.stats?.changedFileCount ?? 0,
+    stats: meta.stats,
+    assetCount: meta.stats?.assetCount ?? 0,
+    detectedGitRepoCount: meta.stats?.detectedGitRepoCount ?? 0,
+    timings,
+    spaceId,
+    latestSubPath: getCheckpointLatestSubPath(spaceId),
+    ...(resumed ? { resumed: true } : {}),
+    ...(publishedUserConfig ? { publishedUserConfig } : {}),
+    ...(publishedPlatformConfig ? { publishedPlatformConfig } : {}),
+    ...(publishWarnings.length > 0 ? { publishWarnings } : {}),
+  };
 };
 
 const saveCheckpointHandler = async (job: Job, context?: { taskRunId: string }) => {
