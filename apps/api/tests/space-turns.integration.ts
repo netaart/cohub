@@ -36,7 +36,7 @@ mock.module("../src/session-output.js", { namedExports: {
 mock.module("../src/space-activity.js", { namedExports: { touchSpaceActivity: async () => {} } });
 mock.module("../src/session-title-queue.js", { namedExports: { enqueueSessionTitleGeneration: async () => {} } });
 mock.module("../src/session-message-postprocess-queue.js", { namedExports: { enqueueSessionMessagePostprocess: async () => {} } });
-mock.module("../src/agent-turn-queue.js", { namedExports: { enqueueAgentSessionForkJob: async () => {} } });
+mock.module("../src/agent-turn-queue.js", { namedExports: { agentTurnQueue: {}, enqueueAgentSessionForkJob: async () => {} } });
 mock.module("../src/agent-turn-abort.js", { namedExports: { requestAgentTurnAbort: async () => {} } });
 mock.module("../src/space-sandboxes.js", { namedExports: { getSpaceSandboxBySpaceId: async () => null, updateSpaceSandbox: async () => null } });
 mock.module("../src/user-profiles.js", { namedExports: { fallbackPublicUserProfile: () => null, getProfilesByUuids: async () => new Map() } });

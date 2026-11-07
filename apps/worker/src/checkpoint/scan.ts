@@ -1,4 +1,5 @@
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import { createHash } from "node:crypto";
 import { lstat, readFile, readlink, readdir } from "node:fs/promises";
 import { isAbsolute, join, normalize, relative } from "node:path";
@@ -21,6 +22,10 @@ export type ScannedFile = {
   size: number;
   executable: boolean;
   mimeType: string | null;
+  /** Change detection fingerprint: nanosecond mtime/ctime and inode, as decimal strings. */
+  mtimeNs: string;
+  ctimeNs: string;
+  ino: string;
 };
 
 export type ScanWarning = {
@@ -35,7 +40,7 @@ type IgnoreMatcher = {
   matcher: Ignore;
 };
 
-const normalizeRel = (root: string, absPath: string) => relative(root, absPath).replace(/\\/g, "/");
+const normalizeRel = (root: string, absPath: string) => relative(root, absPath);
 const pathForIgnore = (path: string, isDirectory: boolean) => (isDirectory && !path.endsWith("/") ? `${path}/` : path);
 
 async function readGitignore(dir: string): Promise<IgnoreMatcher | null> {
@@ -44,13 +49,19 @@ async function readGitignore(dir: string): Promise<IgnoreMatcher | null> {
   return { baseDir: dir, matcher: ignore().add(content) };
 }
 
-export const hashFile = (path: string) => new Promise<string>((resolve, reject) => {
+/** Copy `path` to `stagedPath` and hash the copied bytes in the same read, so hash and content always agree. */
+export async function stageFile(path: string, stagedPath: string) {
   const hash = createHash("sha256");
-  const stream = createReadStream(path);
-  stream.on("data", (chunk) => hash.update(chunk));
-  stream.on("error", reject);
-  stream.on("end", () => resolve(hash.digest("hex")));
-});
+  let size = 0;
+  await pipeline(createReadStream(path), async function* (source: AsyncIterable<Buffer>) {
+    for await (const chunk of source) {
+      hash.update(chunk);
+      size += chunk.length;
+      yield chunk;
+    }
+  }, createWriteStream(stagedPath));
+  return { sha256: hash.digest("hex"), size };
+}
 
 const isSafeSymlinkTarget = (target: string) => {
   if (isAbsolute(target)) return false;
@@ -83,8 +94,9 @@ export async function scanWorkspace(root: string) {
     await Promise.all(names.map(async (name) => {
       const absPath = join(dir, name);
       const rel = normalizeRel(root, absPath);
-      const st = await lstat(absPath).catch(() => null);
+      const st = await lstat(absPath, { bigint: true }).catch(() => null);
       if (!st) return;
+      const stamp = { mtimeNs: st.mtimeNs.toString(), ctimeNs: st.ctimeNs.toString(), ino: st.ino.toString() };
       const isDirectory = st.isDirectory() && !st.isSymbolicLink();
       const ignorePath = pathForIgnore(rel, isDirectory);
 
@@ -106,9 +118,10 @@ export async function scanWorkspace(root: string) {
           path: rel,
           absPath,
           type: "file",
-          size: st.size,
-          executable: (st.mode & 0o111) !== 0,
+          size: Number(st.size),
+          executable: (st.mode & 0o111n) !== 0n,
           mimeType: mimeTypeForPath(rel),
+          ...stamp,
         });
         return;
       }
@@ -118,7 +131,7 @@ export async function scanWorkspace(root: string) {
           warnings.push({ path: rel, type: "symlink", action: "skipped", reason: "unsafe_symlink_target" });
           return;
         }
-        candidates.push({ path: rel, absPath, type: "symlink", size: st.size, executable: false, mimeType: null });
+        candidates.push({ path: rel, absPath, type: "symlink", size: Number(st.size), executable: false, mimeType: null, ...stamp });
         return;
       }
       warnings.push({ path: rel, type: st.isSocket() ? "socket" : st.isFIFO() ? "fifo" : st.isBlockDevice() ? "block_device" : st.isCharacterDevice() ? "char_device" : "unknown", action: "skipped", reason: "unsupported_file_type" });

@@ -13,7 +13,7 @@ import type {
 import {
   CheckpointFsError,
   getCheckpointForSpace,
-  getCheckpointRepoDir,
+  resolveCheckpointRepo,
   runGit,
   readAssetManifestMap,
 } from "./checkpoint-fs.js";
@@ -30,6 +30,8 @@ export const EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 /** Browser/CDN-friendly cache for immutable parent diffs (auth still required at origin). */
 export const CHECKPOINT_DIFF_CACHE_CONTROL = "private, max-age=604800, immutable";
+
+const diffCommits = (head: string, base: string) => (base === EMPTY_TREE_HASH ? [head] : [head, base]);
 
 const DIFF_SUMMARY_MAX_FILES = 500;
 const DIFF_PATCH_MAX_BYTES = 512 * 1024;
@@ -342,7 +344,7 @@ export async function getCheckpointDiffSummary(input: {
   const cached = await readCachedJson<CheckpointDiffSummary>(key);
   if (cached) return { ...cached, delivery: cached.delivery ?? "inline", precomputed: false };
 
-  const repoDir = getCheckpointRepoDir(head.spaceId);
+  const repoDir = await resolveCheckpointRepo(head.spaceId, diffCommits(head.commitHash, base.baseCommitHash));
   const assets = await readAssetManifestMap(repoDir, head).catch(() => new Map<string, { sha256: string; size: number; mimeType: string | null; objectKey: string }>());
 
   // Root checkpoints (no parent) use diff-tree against the empty tree; otherwise range diff.
@@ -498,7 +500,7 @@ export async function getCheckpointDiffFile(input: {
   const cached = await readCachedJson<CheckpointDiffFileResponse>(key);
   if (cached) return { ...cached, delivery: cached.delivery ?? "inline" };
 
-  const repoDir = getCheckpointRepoDir(head.spaceId);
+  const repoDir = await resolveCheckpointRepo(head.spaceId, diffCommits(head.commitHash, base.baseCommitHash));
   const assets = await readAssetManifestMap(repoDir, head).catch(() => new Map());
 
   // Resolve rename: if the path is only present as a rename target, capture oldPath from name-status.

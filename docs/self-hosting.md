@@ -13,8 +13,8 @@ Typical production shape:
 - **Sandbox**: per-space runtime (Kubernetes)
 - **Gateway**: external channels (Discord, Telegram, Feishu, WeChat, ...)
 - **Postgres** + **Redis**
-- **Local Git storage** for Space/Checkpoint repositories
-- **S3-compatible object storage** for session/public/work assets
+- **Shared filesystem** for Space workspaces and checkpoint cache repositories
+- **S3-compatible object storage** for session/public/work assets and checkpoint history
 - **OIDC provider** (Logto or compatible) for user auth
 
 ## Quick start (development)
@@ -29,7 +29,7 @@ pnpm dev
 
 ## Checkpoint storage
 
-Checkpoint content is stored in the local Git repository under `SPACE_SYSTEM_ROOT`; Postgres stores checkpoint metadata and commit hashes. No external Git host is required.
+Checkpoint history is stored as Git packs and manifests in the checkpoint object storage bucket (`CHECKPOINT_ASSET_OSS_*`). The repositories under `SPACE_SYSTEM_ROOT` are caches that are refilled from the bucket. Postgres stores checkpoint metadata and commit hashes. No external Git host is required. See [checkpoint-storage.md](checkpoint-storage.md).
 
 ## Billing
 

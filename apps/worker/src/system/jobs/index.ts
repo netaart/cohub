@@ -1,3 +1,5 @@
+import "./checkpoint-compact/index.js";
+import "./checkpoint-storage-backfill/index.js";
 import "./fs-cdn-cache/index.js";
 import "./index-references/index.js";
 import "./sandbox-idle-check/index.js";

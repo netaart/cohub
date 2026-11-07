@@ -13,6 +13,9 @@
       "@cohub/core/checkpoint/ignore": [
         "../../packages/core/dist/checkpoint/ignore.d.ts"
       ],
+      "@cohub/core/checkpoint/storage": [
+        "../../packages/core/dist/checkpoint/storage.d.ts"
+      ],
       "@cohub/core/permissions": [
         "../../packages/core/dist/permissions/index.d.ts"
       ],

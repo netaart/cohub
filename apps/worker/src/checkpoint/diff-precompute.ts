@@ -226,22 +226,20 @@ function accumulate(stats: PrecomputedDiffStats, file: PrecomputedDiffFile) {
   if (typeof file.deletions === "number") stats.deletions += file.deletions;
 }
 
-/**
- * Build a parent-diff summary from the staged index (before commit).
- * Only reads git metadata — no workspace walk, NFS-friendly.
- */
-export async function buildStagedDiffSummary(input: {
+/** Build a parent-diff summary by comparing two commit trees; reads git metadata only. */
+export async function buildCommitDiffSummary(input: {
   repoDir: string;
-  spaceId: string;
   checkpointId: string;
+  commitHash: string;
   parentCheckpointId: string | null;
   parentCommitHash: string | null;
-  /** Asset paths known at save time (from upload pass). */
+  /** Asset paths known at save time. */
   assetPaths: Set<string>;
 }): Promise<{ summary: PrecomputedDiffSummary; stats: PrecomputedDiffStats }> {
+  const range = input.parentCommitHash ? [input.parentCommitHash, input.commitHash] : ["--root", input.commitHash];
   const [nameStatus, numstat] = await Promise.all([
-    runGitWithOutput(["diff", "--cached", "--name-status", "-z", "-M"], input.repoDir),
-    runGitWithOutput(["diff", "--cached", "--numstat", "-z", "-M"], input.repoDir),
+    runGitWithOutput(["diff-tree", "-r", "-z", "-M", "--no-commit-id", "--name-status", ...range], input.repoDir),
+    runGitWithOutput(["diff-tree", "-r", "-z", "-M", "--no-commit-id", "--numstat", ...range], input.repoDir),
   ]);
 
   const nameEntries = parseNameStatusZ(nameStatus.stdout);
@@ -271,12 +269,11 @@ export async function buildStagedDiffSummary(input: {
     files.push(file);
   }
 
-  // headCommitHash filled in by caller after commit.
   const summary: PrecomputedDiffSummary = {
     baseCheckpointId: input.parentCheckpointId,
     baseCommitHash: input.parentCommitHash,
     headCheckpointId: input.checkpointId,
-    headCommitHash: "",
+    headCommitHash: input.commitHash,
     files,
     truncated,
     stats,

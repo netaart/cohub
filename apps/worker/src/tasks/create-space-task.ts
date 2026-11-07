@@ -13,7 +13,7 @@ import { assertDirectoryEmpty, ensureSpaceWorkspaceReady, getSpaceWorkspaceDir, 
 import { publishSpaceEvent, publishSpaceFsChanged } from "../space-events.js";
 import { enqueueTask } from "./enqueue.js";
 import { restoreBoardCheckpointSnapshots } from "../checkpoint/board.js";
-import { restoreWorkspaceFromCheckpoint, restoreSystemRepoFromCheckpoint } from "../checkpoint/restore.js";
+import { restoreWorkspaceFromCheckpoint } from "../checkpoint/restore.js";
 import { ensureCheckpointDirs, getCheckpointLatestSubPath } from "../checkpoint/paths.js";
 import { materializeLatest } from "../checkpoint/materialize.js";
 import { scanWorkspace } from "../checkpoint/scan.js";
@@ -24,7 +24,7 @@ import {
 } from "./create-space-source.js";
 
 const logger = createLogger({ serviceName: "cohub-worker" });
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 type BootstrapStatus = "pending" | "running" | "ready" | "failed";
 type BootstrapStage = "prepare" | "import" | "checkpoint_restore" | "finalize";
 
@@ -185,13 +185,9 @@ async function enqueueInitialCheckpoint(input: { space: typeof spaces.$inferSele
 async function postCheckpointRestore(input: {
   targetSpace: typeof spaces.$inferSelect;
   sourceCheckpoint: typeof checkpoints.$inferSelect;
-  sourceSpaceId: string;
 }) {
   const stages: Record<string, unknown> = {};
   const dirs = await ensureCheckpointDirs(input.targetSpace.id);
-  const { duration: systemRepoDuration } = await timeIt("restoreSystemRepo", () => restoreSystemRepoFromCheckpoint({ sourceSpaceId: input.sourceSpaceId, targetRepoDir: dirs.repoDir, commitHash: input.sourceCheckpoint.commitHash }));
-  const systemRepo = { status: "ready", durationMs: systemRepoDuration };
-  stages.systemRepoRestore = systemRepo;
 
   const latest = await timeIt("materializeLatest", async () => {
     const scan = await scanWorkspace(dirs.workspaceDir);
@@ -249,8 +245,9 @@ const createSpaceHandler = async (job: Job) => {
     if (source.type === "checkpoint") {
       const restoreTmpDir = getWorkerLocalTmpDir("restore", currentSpace.id, taskRunId);
       await ensureWorkerLocalTmpDir(restoreTmpDir);
+      const { repoDir } = await ensureCheckpointDirs(currentSpace.id);
       await progress("restore_workspace", { checkpointId: source.checkpointId });
-      const { result: restoreResult, duration: restoreDuration } = await timeIt("restoreWorkspaceFromCheckpoint", () => restoreWorkspaceFromCheckpoint({ checkpointId: source.checkpointId, targetWorkspaceDir: workspaceDir, restoreTmpDir })).finally(async () => {
+      const { result: restoreResult, duration: restoreDuration } = await timeIt("restoreWorkspaceFromCheckpoint", () => restoreWorkspaceFromCheckpoint({ checkpointId: source.checkpointId, targetWorkspaceDir: workspaceDir, targetRepoDir: repoDir, restoreTmpDir })).finally(async () => {
         await removeWorkerLocalTmpDir(restoreTmpDir).catch((error) => logger.warn(`[CreateSpace] failed to clean restore tmp ${restoreTmpDir}: ${error instanceof Error ? error.message : String(error)}`));
       });
       stageTimings.restoreWorkspaceFromCheckpoint = restoreDuration;
@@ -274,7 +271,7 @@ const createSpaceHandler = async (job: Job) => {
         },
       }).catch((error) => logger.warn(`[CreateSpace] Failed to publish workspace ready for ${currentSpace.id}: ${error instanceof Error ? error.message : String(error)}`));
       await progress("post_materialization");
-      const postStages = await postCheckpointRestore({ targetSpace: currentSpace, sourceCheckpoint: restoreResult.checkpoint, sourceSpaceId: restoreResult.sourceSpace.id });
+      const postStages = await postCheckpointRestore({ targetSpace: currentSpace, sourceCheckpoint: restoreResult.checkpoint });
       result = { ok: true, spaceId: currentSpace.id, checkpointAliasId: aliasResult.alias.id, commitHash: restoreResult.checkpoint.commitHash, source, stages: { workspaceRestore: { status: "ready", durationMs: restoreDuration }, checkpointAlias: { status: "ready", durationMs: aliasDuration }, boardRestore: { status: "ready", durationMs: boardRestoreDuration, count: boardRestoreResult.count }, ...postStages } };
     } else {
       if (source.type === "git_repo") {

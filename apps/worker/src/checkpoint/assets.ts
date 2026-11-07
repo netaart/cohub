@@ -1,5 +1,7 @@
-import { createReadStream } from "node:fs";
-import { HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { createReadStream, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import type { CheckpointObjectReader } from "@cohub/core/checkpoint/storage";
 import { config } from "../config.js";
 
 const IMMUTABLE_PUBLIC_CACHE_CONTROL = "public, max-age=31536000, immutable";
@@ -63,3 +65,51 @@ export const uploadAssetIfMissing = async (input: {
   mimeType: input.mimeType,
   metadata: { sha256: input.sha256 },
 });
+
+const isNotFound = (error: unknown) => {
+  const value = error as { name?: string; $metadata?: { httpStatusCode?: number } } | null;
+  return value?.name === "NoSuchKey" || value?.name === "NotFound" || value?.$metadata?.httpStatusCode === 404;
+};
+
+const getObject = (key: string) => getCheckpointAssetClient()
+  .send(new GetObjectCommand({ Bucket: config.checkpointAssetOssBucket, Key: key }))
+  .catch((error) => {
+    if (isNotFound(error)) return null;
+    throw error;
+  });
+
+export const checkpointObjectStore: CheckpointObjectReader = {
+  async download(key, filePath) {
+    const result = await getObject(key);
+    if (!result) return false;
+    if (!result.Body) throw new Error(`empty object body: ${key}`);
+    await pipeline(result.Body as NodeJS.ReadableStream, createWriteStream(filePath));
+    return true;
+  },
+  async readText(key) {
+    const result = await getObject(key);
+    if (!result) return null;
+    if (!result.Body) throw new Error(`empty object body: ${key}`);
+    return await result.Body.transformToString("utf8");
+  },
+};
+
+export const checkpointObjectExists = (key: string) => getCheckpointAssetClient()
+  .send(new HeadObjectCommand({ Bucket: config.checkpointAssetOssBucket, Key: key }))
+  .then(() => true, (error) => {
+    if (isNotFound(error)) return false;
+    throw error;
+  });
+
+/** Write an immutable JSON object unless it already exists. */
+export const putCheckpointJsonIfMissing = async (key: string, value: unknown) => {
+  if (await checkpointObjectExists(key)) return false;
+  await getCheckpointAssetClient().send(new PutObjectCommand({
+    Bucket: config.checkpointAssetOssBucket,
+    Key: key,
+    Body: `${JSON.stringify(value)}\n`,
+    ContentType: "application/json",
+    CacheControl: IMMUTABLE_PUBLIC_CACHE_CONTROL,
+  }));
+  return true;
+};
