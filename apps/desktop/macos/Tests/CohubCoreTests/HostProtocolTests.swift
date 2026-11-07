@@ -16,6 +16,7 @@ import Testing
         #expect(manifest["service"]?["workspaceEndpoint"]?.string == HostProtocol.ServiceMethod.workspaceEndpoint)
         #expect(manifest["service"]?["cliAbout"]?.string == HostProtocol.ServiceMethod.cliAbout)
         #expect(manifest["workspace"]?["scheme"]?.string == WorkspaceFiles.scheme)
+        #expect(manifest["share"]?["fileMaxBytes"] == .number(Double(HostProtocol.shareFileMaxBytes)))
     }
 
     @Test func everyNameIsKnownToTheWebSide() {
@@ -27,5 +28,8 @@ import Testing
         #expect(Set([C.workspace, C.workspaceFiles]).isSubset(of: names("capabilities")))
         #expect(names("methods").contains(M.workspaceCall))
         #expect(names("capabilities").contains(C.about) && names("methods").contains(M.appAbout))
+        #expect(Set([C.authToken, C.authSignIn, C.authSession, C.haptics, C.shareIncoming]).isSubset(of: names("capabilities")))
+        #expect(Set([M.authGetAccessToken, M.authGetSessionVersion, M.authGetSession, M.authSignIn, M.authSignOut, M.hapticsPerform, M.shareTake, M.shareReadFile]).isSubset(of: names("methods")))
+        #expect(Set([E.authSignedOut, E.appForeground, E.appBackground]).isSubset(of: names("events")))
     }
 }

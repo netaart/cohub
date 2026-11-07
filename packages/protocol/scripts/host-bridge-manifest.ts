@@ -11,6 +11,7 @@ import {
   HOST_SERVICE_SHELL_EVENTS,
   HOST_SERVICE_VERSION,
   HOST_SERVICE_WORKSPACE_ENDPOINT,
+  HOST_SHARE_FILE_MAX_BYTES,
   HOST_WORKSPACE_PATH,
   HOST_WORKSPACE_SCHEME,
 } from "../src/host-bridge.js";
@@ -31,6 +32,7 @@ export const hostBridgeManifest = () => ({
     cliAbout: HOST_SERVICE_CLI_ABOUT,
   },
   workspace: { scheme: HOST_WORKSPACE_SCHEME, path: HOST_WORKSPACE_PATH },
+  share: { fileMaxBytes: HOST_SHARE_FILE_MAX_BYTES },
 });
 
 if (fileURLToPath(import.meta.url) === process.argv[1]) {

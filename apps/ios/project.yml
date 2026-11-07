@@ -1,0 +1,99 @@
+name: Cohub
+options:
+  bundleIdPrefix: live.cohub
+  deploymentTarget:
+    iOS: "18.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+configs:
+  Debug: debug
+  Release: release
+  Debug Dev: debug
+  Release Dev: release
+configFiles:
+  Debug: Configs/Prod.xcconfig
+  Release: Configs/Prod.xcconfig
+  Debug Dev: Configs/Dev.xcconfig
+  Release Dev: Configs/Dev.xcconfig
+settings:
+  base:
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1,2"
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+
+targets:
+  CohubCore:
+    type: framework.static
+    platform: iOS
+    sources:
+      - path: ../desktop/macos/Sources/CohubCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: live.cohub.core
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+
+  Cohub:
+    type: application
+    platform: iOS
+    sources:
+      - Cohub
+    dependencies:
+      - target: CohubCore
+        embed: false
+      - target: CohubShare
+    settings:
+      base:
+        PRODUCT_NAME: Cohub
+        PRODUCT_BUNDLE_IDENTIFIER: $(COHUB_BUNDLE_ID)
+        INFOPLIST_FILE: Cohub/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Cohub/Cohub.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+
+  CohubShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - CohubShare
+    dependencies:
+      - target: CohubCore
+        embed: false
+    settings:
+      base:
+        PRODUCT_NAME: CohubShare
+        PRODUCT_BUNDLE_IDENTIFIER: $(COHUB_BUNDLE_ID).share
+        INFOPLIST_FILE: CohubShare/Info.plist
+        CODE_SIGN_ENTITLEMENTS: CohubShare/CohubShare.entitlements
+        APPLICATION_EXTENSION_API_ONLY: NO
+
+schemes:
+  Cohub:
+    build:
+      targets:
+        Cohub: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+  Cohub Dev:
+    build:
+      targets:
+        Cohub: all
+    run:
+      config: Debug Dev
+    profile:
+      config: Release Dev
+    analyze:
+      config: Debug Dev
+    archive:
+      config: Release Dev

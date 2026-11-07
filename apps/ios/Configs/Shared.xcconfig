@@ -1,0 +1,6 @@
+COHUB_LOGTO_API_RESOURCE = https:/$()/api.talesofai
+COHUB_COMMIT =
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+#include? "Local.xcconfig"

@@ -1,8 +1,14 @@
 public enum HostProtocol {
     public static let version = 1
     public static let global = "cohubHost"
+    public static let shareFileMaxBytes = 12 * 1024 * 1024
 
     public enum Capability {
+        public static let authToken = "auth.token"
+        public static let authSignIn = "auth.signIn"
+        public static let authSession = "auth.session"
+        public static let haptics = "haptics"
+        public static let shareIncoming = "share.incoming"
         public static let notifications = "notifications"
         public static let share = "share"
         public static let navigation = "navigation"
@@ -26,6 +32,14 @@ public enum HostProtocol {
 
     public enum Method {
         public static let describe = "host.describe"
+        public static let authGetAccessToken = "auth.getAccessToken"
+        public static let authGetSessionVersion = "auth.getSessionVersion"
+        public static let authGetSession = "auth.getSession"
+        public static let authSignIn = "auth.signIn"
+        public static let authSignOut = "auth.signOut"
+        public static let hapticsPerform = "haptics.perform"
+        public static let shareTake = "share.take"
+        public static let shareReadFile = "share.readFile"
         public static let appReady = "app.ready"
         public static let appearanceSet = "appearance.set"
         public static let navigationOpenPath = "navigation.openPath"
@@ -56,6 +70,9 @@ public enum HostProtocol {
 
     public enum Event {
         public static let authChanged = "auth.changed"
+        public static let authSignedOut = "auth.signedOut"
+        public static let appForeground = "app.foreground"
+        public static let appBackground = "app.background"
         public static let runtimeChanged = "runtime.changed"
         public static let displayChanged = "display.changed"
     }

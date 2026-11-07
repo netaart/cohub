@@ -39,7 +39,8 @@ backoff (`HostService`), the runtime copy (`RuntimeInstall`), the origin policy
 (`WebOrigin`) and the tray model (`RuntimeOverview`); the .NET core also keeps the shell
 state (`ShellState`). The app layers are thin adapters onto AppKit, WPF and GTK, and the
 Linux app links the .NET core rather than copying it. Their tests pin protocol names against
-`packages/protocol/host-bridge.json`.
+`packages/protocol/host-bridge.json`. The iOS shell (`apps/ios`) builds the Swift core too, so
+`HostService` is the one part it leaves out: shells reach a service through `BridgeService`.
 
 The contract and the desktop split are documented in
 [`docs/native-host-bridge.md`](../../docs/native-host-bridge.md#desktop); how the app

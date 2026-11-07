@@ -1,0 +1,10 @@
+COHUB_ENV = dev
+COHUB_APP_NAME = Cohub Dev
+COHUB_BUNDLE_ID = live.cohub.ios.dev
+COHUB_URL_SCHEME = cohub-dev
+COHUB_WEB_HOST = dev.cohub.live
+COHUB_API_ORIGIN = https:/$()/api-dev.cohub.live
+COHUB_LOGTO_ENDPOINT = https:/$()/dev-auth.neta.art/
+COHUB_LOGTO_APP_ID = grxctv83gvvo2wcmcb8xp
+
+#include "Shared.xcconfig"

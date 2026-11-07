@@ -106,5 +106,8 @@
   "workspace": {
     "scheme": "cohub-workspace",
     "path": "/__cohub/workspace/"
+  },
+  "share": {
+    "fileMaxBytes": 12582912
   }
 }

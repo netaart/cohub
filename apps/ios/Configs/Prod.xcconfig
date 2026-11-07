@@ -1,0 +1,11 @@
+// `//` starts a comment in xcconfig files, hence `https:/$()/`.
+COHUB_ENV = prod
+COHUB_APP_NAME = Cohub
+COHUB_BUNDLE_ID = live.cohub.ios
+COHUB_URL_SCHEME = cohub
+COHUB_WEB_HOST = cohub.live
+COHUB_API_ORIGIN = https:/$()/api.cohub.live
+COHUB_LOGTO_ENDPOINT = https:/$()/auth.neta.art/
+COHUB_LOGTO_APP_ID = kpwepos08jz70jy20d3hg
+
+#include "Shared.xcconfig"

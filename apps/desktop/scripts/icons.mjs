@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Usage: node apps/desktop/scripts/icons.mjs --macos <AppIcon.iconset> --windows <Cohub.ico> --linux <cohub.png>
+// Usage: node apps/desktop/scripts/icons.mjs --macos <AppIcon.iconset> --windows <Cohub.ico> --linux <cohub.png> --ios <Assets.xcassets>
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
@@ -8,7 +8,7 @@ import { parseArgs } from "node:util";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const sharp = createRequire(join(root, "packages/cli/package.json"))("sharp");
-const { values } = parseArgs({ options: { macos: { type: "string" }, windows: { type: "string" }, linux: { type: "string" } } });
+const { values } = parseArgs({ options: { macos: { type: "string" }, windows: { type: "string" }, linux: { type: "string" }, ios: { type: "string" } } });
 
 const favicon = await readFile(join(root, "apps/web/static/favicon.svg"), "utf8");
 const [, inner] = favicon.match(/<svg[^>]*>([\s\S]*)<\/svg>/) ?? [];
@@ -53,4 +53,10 @@ if (values.windows) {
 if (values.linux) {
   await mkdir(dirname(values.linux), { recursive: true });
   await writeFile(values.linux, await render(favicon, 512));
+}
+
+if (values.ios) {
+  const square = favicon.replace(/rx="32"/, 'rx="0"');
+  await writeFile(join(values.ios, "AppIcon.appiconset/AppIcon.png"), await sharp(Buffer.from(square), { density: 72 * (1024 / 192) }).resize(1024, 1024).flatten({ background: "#ff4500" }).png().toBuffer());
+  await writeFile(join(values.ios, "LaunchLogo.imageset/LaunchLogo.svg"), favicon.replace(/width="192" height="192"/, 'width="88" height="88"'));
 }

@@ -1,0 +1,3 @@
+"NSCameraUsageDescription" = "你为 Space 拍摄照片或视频时，Cohub 会使用相机。";
+"NSMicrophoneUsageDescription" = "你口述或与 Agent 语音交流时，Cohub 会使用麦克风。";
+"NSPhotoLibraryAddUsageDescription" = "Cohub 会把你下载的图片和视频存到照片图库。";

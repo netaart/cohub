@@ -1,13 +1,14 @@
 # Native host bridge
 
-Cohub ships a web surface and native shells (Android, macOS, Windows and Linux
-today, iOS later). The bridge lends a web surface what a browser cannot have: the
+Cohub ships a web surface and native shells (Android, iOS, macOS, Windows and
+Linux). The bridge lends a web surface what a browser cannot have: the
 credential store, the OAuth round trip, deep links, and system integration.
 
 Contract: `packages/protocol/src/host-bridge.ts` (single source of truth), with
 its names in `packages/protocol/host-bridge.json` for native tests to pin.
 Web client: `packages/sdk/src/host-bridge.ts`.
 Android: `apps/android/app/src/main/kotlin/live/cohub/android/host/`.
+iOS: `apps/ios/` (see its README).
 Desktop: `apps/desktop/` (see its README) and `packages/cli/src/host/`.
 
 ## Shape
@@ -110,13 +111,13 @@ back: `permissions.openSettings` lands on the right page of system settings, and
 host reports. `denied` from a host call (`HOST_BRIDGE_ERROR.denied`) means the system refused a
 folder, as distinct from `canceled`, the user's own choice.
 
-| | Android | macOS | Windows |
-| --- | --- | --- | --- |
-| `files` | All files access | Privacy → Files and Folders, per folder | None to ask for |
-| `microphone`, `camera` | Runtime permission | Privacy, through AVFoundation | Settings only; the system does not say |
-| `notifications` | Runtime permission | UserNotifications | Toast setting |
-| `background` | Battery optimization | — | — |
-| `screen`, `control` | Per share, through `display.*` | Settings only; the share's `needs` tell | Not needed |
+| | Android | iOS | macOS | Windows |
+| --- | --- | --- | --- | --- |
+| `files` | All files access | — | Privacy → Files and Folders, per folder | None to ask for |
+| `microphone`, `camera` | Runtime permission | AVFoundation | Privacy, through AVFoundation | Settings only; the system does not say |
+| `notifications` | Runtime permission | — (waits for push) | UserNotifications | Toast setting |
+| `background` | Battery optimization | — | — | — |
+| `screen`, `control` | Per share, through `display.*` | — | Settings only; the share's `needs` tell | Not needed |
 
 Connecting a folder lets a Space's people and agents change its files and run commands as the user,
 so every host says so before any Space depends on it: the desktop shells when a folder is chosen
@@ -130,7 +131,8 @@ then lifts it on `app.ready` or after 2.5 s, whichever comes first, so a cold
 start never flashes an empty surface. The page calls `app.ready` two frames
 after its first screen renders — from local data, not after the network. The
 same call marks the activity fully drawn, so time to full display is
-measurable (`adb logcat -s ActivityTaskManager` prints `Fully drawn`).
+measurable (`adb logcat -s ActivityTaskManager` prints `Fully drawn`). iOS holds
+a twin of its launch screen over the WebView the same way and logs `First screen in … ms`.
 
 ## Back
 
@@ -139,7 +141,8 @@ put while the page behind it changes. Dismissible layers register with
 `dismissOnBack` (`$lib/back-layers.svelte`); while any is open the page asks
 the host to intercept, and each back gesture closes the topmost layer. A new
 document resets interception, so a page that crashed or reloaded mid-dialog
-can never trap back.
+can never trap back. iOS has no system back and leaves `navigation.back` out; its
+edge swipe stays with the page, whose drawer uses it.
 
 ## Files
 
@@ -150,7 +153,9 @@ page routes every `<a download>` (markup or programmatic) through `files.save`:
 https URLs are fetched by the host, so large media never crosses the bridge;
 `blob:` and `data:` bytes go inline as base64. Files land in
 `Pictures/Cohub`, `Movies/Cohub`, `Music/Cohub` or `Download/Cohub` by type,
-through MediaStore, which is why `files` needs Android 10.
+through MediaStore, which is why `files` needs Android 10. iOS adds images and
+videos to Photos (asking for add-only access the first time) and offers anything else,
+or anything Photos refuses, to a folder the person picks in Files.
 
 ## Edge to edge
 
@@ -173,8 +178,9 @@ application):
 - System browser (Custom Tabs / `ASWebAuthenticationSession`), never a WebView.
 - PKCE with the verifier held in memory on the device.
 - Redirect is an HTTPS App Link / Universal Link (`/mobile/auth/callback`),
-  verified via `assetlinks.json` / `apple-app-site-association`. A custom scheme
-  would be claimable by any app.
+  verified via `assetlinks.json` / `apple-app-site-association` (`webcredentials`,
+  which `ASWebAuthenticationSession`'s HTTPS callback needs). A custom scheme
+  would be claimable by any app. Both files are routes of the web app.
 - `prompt=consent` with `offline_access`, as the web SDK sends, so Logto issues
   a refresh token.
 - Browsers may not hand a redirect the user did not trigger (a silent Logto
@@ -223,7 +229,7 @@ leaves the CLI's session file; the page asks for it per request, like on Android
 2. Implement it in the host; add the capability to `HostCapabilities.advertised`.
 3. Add the web-side caller behind `supportsHostCapability()`.
 4. Mirror the constant in `HostProtocol.kt` so `HostProtocolTest` passes, and run
-   `pnpm --filter @cohub/protocol generate:host-bridge`; the macOS and Windows shells
+   `pnpm --filter @cohub/protocol generate:host-bridge`; the macOS, iOS and Windows shells
    pin their names against `host-bridge.json`, and a protocol test fails until it is current.
 5. A method only the CLI can answer goes in `packages/cli/src/host/serve.ts`;
    desktop shells forward it without changes.

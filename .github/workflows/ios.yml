@@ -1,0 +1,74 @@
+name: iOS
+
+on:
+  pull_request:
+    paths:
+      - 'apps/ios/**'
+      - 'apps/desktop/macos/Sources/CohubCore/**'
+      - 'packages/protocol/host-bridge.json'
+      - '.github/workflows/ios.yml'
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+    paths:
+      - 'apps/ios/**'
+      - 'apps/desktop/macos/Sources/CohubCore/**'
+      - 'packages/protocol/host-bridge.json'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install xcodegen
+      - run: xcodegen generate --spec apps/ios/project.yml
+      - name: Build both environments for the simulator
+        run: |
+          set -euo pipefail
+          for scheme in Cohub "Cohub Dev"; do
+            xcodebuild -project apps/ios/Cohub.xcodeproj -scheme "$scheme" -destination 'generic/platform=iOS Simulator' \
+              CODE_SIGNING_ALLOWED=NO -quiet build
+          done
+
+  # Needs vars.IOS_TEAM_ID and an App Store Connect API key (App Manager) in secrets.
+  testflight:
+    name: TestFlight
+    needs: build
+    if: github.event_name != 'pull_request' && vars.IOS_TEAM_ID != ''
+    runs-on: macos-15
+    environment: ${{ github.ref_type == 'tag' && 'ios-release' || '' }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install xcodegen
+      - run: xcodegen generate --spec apps/ios/project.yml
+      - name: Archive and upload
+        env:
+          TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          scheme="Cohub Dev" version=""
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then scheme=Cohub version="${GITHUB_REF_NAME#v}"; fi
+          key="$RUNNER_TEMP/AuthKey.p8"
+          echo "$KEY_P8" > "$key"
+          auth=(-allowProvisioningUpdates -authenticationKeyPath "$key" -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID")
+          xcodebuild -project apps/ios/Cohub.xcodeproj -scheme "$scheme" -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Cohub.xcarchive" "${auth[@]}" -quiet archive \
+            DEVELOPMENT_TEAM="$TEAM_ID" ${version:+MARKETING_VERSION="$version"} CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" \
+            COHUB_COMMIT="$(git rev-parse --short=7 HEAD)"
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Cohub.xcarchive" -exportOptionsPlist apps/ios/ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" "${auth[@]}"
