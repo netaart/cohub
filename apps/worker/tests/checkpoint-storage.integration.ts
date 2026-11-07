@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, mock, test } from "node:test";
@@ -140,11 +140,20 @@ test("saves are incremental packs whose manifests rebuild every checkpoint byte 
   for (const name of ["cr\r", "space ", "back\\slash"]) await writeFile(join(workspace, name), name);
   await writeFile(join(workspace, "run.sh"), "#!/bin/sh\n", { mode: 0o755 });
   await symlink("src/a.txt", join(workspace, "link"));
+  await mkdir(join(workspace, "src/sub"), { recursive: true });
+  await mkdir(join(workspace, "d"), { recursive: true });
+  await symlink("../a.txt", join(workspace, "src/sub/up"));
+  await symlink("..", join(workspace, "d/up"));
+  await symlink("d/up/..", join(workspace, "chain"));
+  await symlink("../outside", join(workspace, "escape"));
   await writeFile(join(workspace, "weird\nname"), "x");
   await settle();
 
   const first = await save("first");
-  assert.equal(first.stats.hashedFileCount, 10);
+  assert.equal(first.stats.hashedFileCount, 12);
+  const firstMeta = state.checkpoints.get(first.checkpointId)?.meta as { warnings?: Array<{ path: string; reason: string }> } | undefined;
+  const skipped = firstMeta?.warnings ?? [];
+  assert.deepEqual(skipped.filter((warning) => warning.reason === "unsafe_symlink_target").map((warning) => warning.path).sort(), ["chain", "escape"]);
   const firstManifest = await manifestOf(first.commitHash);
   assert.equal(firstManifest.seq, 0);
   assert.equal(execFileSync("git", ["show", `${first.commitHash}:src/a.txt`], { cwd: repoDir, encoding: "utf8" }), "alpha\r\n");
@@ -179,6 +188,10 @@ test("saves are incremental packs whose manifests rebuild every checkpoint byte 
   assert.equal(await readFile(join(target, "weird\nname"), "utf8"), "x");
   assert.equal(await readFile(join(target, "kept/file"), "utf8"), "kept");
   for (const name of ["cr\r", "space ", "back\\slash"]) assert.equal(await readFile(join(target, name), "utf8"), name);
+  assert.equal(await readlink(join(target, "src/sub/up")), "../a.txt");
+  assert.equal(await readFile(join(target, "src/sub/up"), "utf8"), "alpha\r\n");
+  assert.equal(await readlink(join(target, "d/up")), "..");
+  assert.equal(await lstat(join(target, "chain")).then(() => true, () => false), false);
 });
 
 test("a save refuses to land when the head moved underneath it", async () => {
@@ -275,4 +288,26 @@ test("the first save on a pre-v3 repository uploads a baseline holding its histo
   await prepareCheckpointRepo({ sourceSpaceId: legacySpace, targetRepoDir: fresh, commitHash: saved.commitHash });
   assert.equal(git(fresh, "show", `${saved.commitHash}^:docs/old.md`), "old");
   state.currentSpace = spaceId;
+});
+
+test("restore refuses a symlink chain that escapes the workspace, whatever order the links come in", async () => {
+  const craftedSpace = "44444444-4444-4444-8444-444444444444";
+  const craftedRepo = join(root, "system", craftedSpace, "repo");
+  await mkdir(join(craftedRepo, "d"), { recursive: true });
+  await writeFile(join(craftedRepo, "kept.txt"), "kept");
+  await symlink("..", join(craftedRepo, "d/up"));
+  await symlink("d/up/..", join(craftedRepo, "chain"));
+  git(craftedRepo, "init", "-q", "-b", "main");
+  git(craftedRepo, "add", "-A");
+  git(craftedRepo, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "-m", "crafted");
+  state.checkpoints.set("crafted", { id: "crafted", spaceId: craftedSpace, commitHash: git(craftedRepo, "rev-parse", "HEAD") });
+  state.spaces.set(craftedSpace, { id: craftedSpace, headCheckpointId: "crafted", slug: null, userUuid: "user" });
+  state.lookup = "crafted";
+  const target = join(root, "crafted-restore");
+  await mkdir(target, { recursive: true });
+  await assert.rejects(
+    restoreWorkspaceFromCheckpoint({ checkpointId: "crafted", targetWorkspaceDir: target, targetRepoDir: join(root, "system", "crafted-restore", "repo"), restoreTmpDir: join(root, "crafted-tmp") }),
+    /escape the workspace while restoring: chain/,
+  );
+  assert.equal(await lstat(join(target, "chain")).then(() => true, () => false), false);
 });

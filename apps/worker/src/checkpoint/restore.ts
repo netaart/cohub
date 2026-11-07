@@ -1,8 +1,8 @@
 import { createWriteStream } from "node:fs";
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { copyFile, lstat, mkdir, readFile, readdir, readlink, rm, symlink } from "node:fs/promises";
-import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { copyFile, lstat, mkdir, readFile, readdir, readlink, realpath, rm, symlink } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { eq } from "drizzle-orm";
@@ -21,6 +21,9 @@ import { getCheckpointSystemRepoDir, CHECKPOINT_ASSET_MANIFEST_PATH, LEGACY_USER
 import { runGit } from "./git.js";
 import { checkpointObjectStore, getCheckpointAssetClient } from "./assets.js";
 import { assertDirectoryEmpty } from "../git.js";
+import { mapLimit } from "./limit.js";
+
+const SYMLINK_CONCURRENCY = 32;
 
 type AssetManifest = {
   version: number;
@@ -59,11 +62,34 @@ function safeJoin(root: string, path: string) {
   return target;
 }
 
-const isSafeSymlinkTarget = (target: string) => {
-  if (isAbsolute(target)) return false;
-  const normalized = normalize(target).replace(/\\/g, "/");
-  return normalized !== ".." && !normalized.startsWith("../");
+const isInside = (root: string, path: string) => {
+  const rel = relative(root, path);
+  return rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel);
 };
+
+/**
+ * Symlinks are created after every file, so no restored write passes through
+ * one. Each must point inside the workspace by its text, and, checked once
+ * all exist so chains resolve, by its real path.
+ */
+async function restoreSymlinks(input: { restoreTmpDir: string; targetDir: string; paths: string[] }) {
+  await mapLimit(input.paths, SYMLINK_CONCURRENCY, async (rel) => {
+    const target = safeJoin(input.targetDir, rel);
+    const link = await readlink(safeJoin(input.restoreTmpDir, rel));
+    if (isAbsolute(link) || !isInside(input.targetDir, resolve(dirname(target), link))) throw new Error(`unsafe symlink target while restoring ${rel}`);
+    await mkdir(dirname(target), { recursive: true, mode: 0o775 });
+    await symlink(link, target);
+  });
+  const rootReal = await realpath(input.targetDir);
+  const escaped = (await mapLimit(input.paths, SYMLINK_CONCURRENCY, async (rel) => {
+    const resolved = await realpath(safeJoin(input.targetDir, rel)).catch(() => null);
+    return resolved && !isInside(rootReal, resolved) ? rel : null;
+  })).filter((rel): rel is string => rel !== null);
+  if (escaped.length > 0) {
+    await Promise.all(escaped.map((rel) => rm(safeJoin(input.targetDir, rel), { force: true })));
+    throw new Error(`symlinks escape the workspace while restoring: ${escaped.slice(0, 5).join(", ")}`);
+  }
+}
 
 async function downloadObjectToFile(objectKey: string, targetPath: string) {
   await mkdir(dirname(targetPath), { recursive: true, mode: 0o775 });
@@ -95,12 +121,6 @@ async function copyEntry(source: string, target: string) {
   const st = await lstat(source);
   await mkdir(dirname(target), { recursive: true, mode: 0o775 });
   await rm(target, { recursive: true, force: true });
-  if (st.isSymbolicLink()) {
-    const link = await readlink(source);
-    if (!isSafeSymlinkTarget(link)) throw new Error(`unsafe symlink target while restoring ${source}`);
-    await symlink(link, target);
-    return;
-  }
   if (st.isDirectory()) {
     await mkdir(target, { recursive: true, mode: 0o775 });
     return;
@@ -142,6 +162,7 @@ async function restoreFilesFromArchive(input: { restoreTmpDir: string; targetDir
     if (safeRel === ".cohub" || safeRel === ".cohub/system" || safeRel.startsWith(".cohub/system/")) return;
     await mkdir(safeJoin(input.targetDir, safeRel), { recursive: true, mode: 0o775 });
   }));
+  const symlinks: string[] = [];
   await Promise.all(entries.files.map(async (rel) => {
     const safeRel = assertSafeRelativePath(rel);
     if (safeRel === ".cohub" || safeRel === ".cohub/system" || safeRel.startsWith(".cohub/system/")) return;
@@ -151,8 +172,14 @@ async function restoreFilesFromArchive(input: { restoreTmpDir: string; targetDir
       await downloadObjectToFile(asset.objectKey, target);
       return;
     }
-    await copyEntry(safeJoin(input.restoreTmpDir, safeRel), target);
+    const source = safeJoin(input.restoreTmpDir, safeRel);
+    if ((await lstat(source)).isSymbolicLink()) {
+      symlinks.push(safeRel);
+      return;
+    }
+    await copyEntry(source, target);
   }));
+  await restoreSymlinks({ restoreTmpDir: input.restoreTmpDir, targetDir: input.targetDir, paths: symlinks });
 }
 
 const SAFE_BRANCH_REGEX = /^[a-zA-Z0-9._/-]+$/;

@@ -18,7 +18,7 @@ checkpoint-assets/...                                   large files and nested-r
 ## Save
 
 1. Load the parent's objects and the per-space stat index (`checkpoint-index.v1.ndjson.gz` under the system dir, streamed in and out). An index recorded at the parent or any ancestor of it is usable, since every blob it names is in the parent's closure.
-2. Scan the workspace. A file whose type, mode, size, nanosecond mtime/ctime and inode all match the index reuses its blob without being read. Files touched within 3 seconds of a scan are marked racy and are hashed again next time.
+2. Scan the workspace. A file whose type, mode, size, nanosecond mtime/ctime and inode all match the index reuses its blob without being read. Files touched within 3 seconds of a scan are marked racy and are hashed again next time. Relative symlinks are kept when their resolved real path stays inside the workspace (dangling ones when their text does); others are skipped with an `unsafe_symlink_target` warning. Restore creates symlinks after all files and checks them the same way.
 3. Hash changed files with `git hash-object --no-filters` into a local object directory. Repository `.gitattributes` never change stored bytes. Files above `CHECKPOINT_ASSET_THRESHOLD_BYTES` are uploaded as assets and stored as pointers.
 4. Write the tree from a temporary index, then `commit-tree` on the parent.
 5. Pack `commit ^parent` into one pack, upload it, install it into the cache, and compute the parent diff with `diff-tree`. Line counts cover every file only when the summary lists all of them (500 files); larger diffs count lines for the listed files and leave the totals at 0.
