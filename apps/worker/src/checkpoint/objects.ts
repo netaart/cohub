@@ -54,7 +54,7 @@ const needsAlias = (path: string) => path.includes("\n") || path.includes("\r") 
 export type BlobSource = { kind: "file"; path: string } | { kind: "symlink"; path: string } | { kind: "content"; content: string | Buffer };
 
 const HASH_BATCH_MIN = 256;
-const HASH_PARALLELISM = 4;
+const HASH_PARALLELISM = 8;
 
 /** Write blobs and return their ids in input order. File content is stored as-is, without filters. */
 export async function writeBlobs(builder: ObjectBuilder, sources: BlobSource[]): Promise<string[]> {

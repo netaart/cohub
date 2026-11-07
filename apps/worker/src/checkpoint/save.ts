@@ -28,7 +28,7 @@ export async function saveCheckpointWithLock(
   input: SaveCheckpointInput,
   save: (input: SaveCheckpointInput) => Promise<SaveCheckpointResult>,
 ): Promise<{ skipped: true; reason: "save_checkpoint_lock_busy"; spaceId: string } | SaveCheckpointResult> {
-  const locked = await withSpaceSaveLock(input.spaceId, () => save(input));
+  const locked = await withSpaceSaveLock(input.spaceId, input.sourceTaskRunId ?? crypto.randomUUID(), () => save(input));
   if (!locked.acquired) return { skipped: true, reason: "save_checkpoint_lock_busy", spaceId: input.spaceId };
   return locked.result;
 }

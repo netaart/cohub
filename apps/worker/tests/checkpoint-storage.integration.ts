@@ -29,7 +29,7 @@ const put = async (key: string, body: string | Buffer) => {
 };
 
 type Row = Record<string, unknown> & { id: string; spaceId: string; commitHash: string };
-const state = { spaces: new Map<string, { id: string; headCheckpointId: string | null; slug: string | null; userUuid: string }>(), checkpoints: new Map<string, Row>(), currentSpace: spaceId, headMoved: false, lookup: "" };
+const state = { spaces: new Map<string, { id: string; headCheckpointId: string | null; slug: string | null; userUuid: string }>(), checkpoints: new Map<string, Row>(), currentSpace: spaceId, headMoved: false, crashAfterCommit: false, lookup: "" };
 const compactions: Array<{ commit: string; seq: number }> = [];
 
 const fakeDb = {
@@ -59,6 +59,7 @@ const fakeDb = {
       } }) }) }),
     });
     if (inserted) state.checkpoints.set(inserted.id, inserted);
+    if (state.crashAfterCommit) throw new Error("simulated crash after commit");
     return result;
   },
 };
@@ -96,7 +97,13 @@ const mocks = [
   } }),
   mock.module("../src/checkpoint/compact.js", { exports: { enqueueCheckpointCompaction: (data: { commit: string; seq: number }) => compactions.push(data) } }),
   mock.module("../src/checkpoint/board.js", { exports: { saveBoardCheckpointSnapshots: async () => ({ count: 0 }) } }),
-  mock.module("../src/checkpoint/metadata.js", { exports: { updateCheckpointMeta: async () => undefined } }),
+  mock.module("../src/checkpoint/metadata.js", { exports: {
+    updateCheckpointMeta: async () => undefined,
+    findCheckpointForTaskRun: async (_db: unknown, sid: string, taskRunId: string) => {
+      const row = state.checkpoints.get(taskRunId);
+      return row?.spaceId === sid ? row : null;
+    },
+  } }),
   mock.module("../src/checkpoint/lock.js", { exports: { withSpaceSaveLock: async () => ({ acquired: false }) } }),
   mock.module("../src/reference-index-queue.js", { exports: { enqueueReferences: () => undefined } }),
   mock.module("../src/space-events.js", { exports: { publishSpaceEvent: async () => undefined } }),
@@ -181,6 +188,27 @@ test("a save refuses to land when the head moved underneath it", async () => {
   await assert.rejects(save("conflict"), /head moved/);
   assert.equal(state.spaces.get(spaceId)?.headCheckpointId, head);
   state.headMoved = false;
+});
+
+test("a task retried after its worker died finishes the committed checkpoint instead of saving again", async () => {
+  const latest = join(root, "cache", spaceId, "latest");
+  await writeFile(join(workspace, "src/resume.txt"), "resume\n");
+  state.crashAfterCommit = true;
+  await assert.rejects(saveCheckpointForSpace({ spaceId, description: "crash", sourceTaskRunId: "run-crash" }), /simulated crash/);
+  state.crashAfterCommit = false;
+  const rows = state.checkpoints.size;
+
+  const resumed = await saveCheckpointForSpace({ spaceId, description: "crash", sourceTaskRunId: "run-crash" });
+  assert.equal(resumed.resumed, true);
+  assert.equal(state.checkpoints.size, rows);
+  assert.equal(await readFile(join(latest, "src/resume.txt"), "utf8"), "resume\n");
+
+  // The resumed run wrote no stat index; the next save reuses the ancestor's instead of hashing everything.
+  await writeFile(join(workspace, "src/after.txt"), "after\n");
+  const next = await save("after resume");
+  assert.ok(next.stats.hashedFileCount <= 5, `hashed ${next.stats.hashedFileCount} of ${next.stats.fileCount}`);
+  assert.ok(next.stats.fileCount > 10);
+  assert.equal(await readFile(join(latest, "src/after.txt"), "utf8"), "after\n");
 });
 
 test("compaction covers fold into later manifests and keep the closure", async () => {

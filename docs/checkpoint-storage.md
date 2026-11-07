@@ -17,14 +17,16 @@ checkpoint-assets/...                                   large files and nested-r
 
 ## Save
 
-1. Load the parent's objects and the per-space stat index (`checkpoint-index.v1.json.gz` under the system dir).
+1. Load the parent's objects and the per-space stat index (`checkpoint-index.v1.ndjson.gz` under the system dir, streamed in and out). An index recorded at the parent or any ancestor of it is usable, since every blob it names is in the parent's closure.
 2. Scan the workspace. A file whose type, mode, size, nanosecond mtime/ctime and inode all match the index reuses its blob without being read. Files touched within 3 seconds of a scan are marked racy and are hashed again next time.
 3. Hash changed files with `git hash-object --no-filters` into a local object directory. Repository `.gitattributes` never change stored bytes. Files above `CHECKPOINT_ASSET_THRESHOLD_BYTES` are uploaded as assets and stored as pointers.
 4. Write the tree from a temporary index, then `commit-tree` on the parent.
-5. Pack `commit ^parent` into one pack, upload it, install it into the cache, and compute the parent diff with `diff-tree`.
+5. Pack `commit ^parent` into one pack, upload it, install it into the cache, and compute the parent diff with `diff-tree`. Line counts cover every file only when the summary lists all of them (500 files); larger diffs count lines for the listed files and leave the totals at 0.
 6. Write the manifest: the parent's packs (with finished covers folded in) plus the new pack.
-7. In one transaction, insert the checkpoint and move the head only if it still equals the parent (`head_checkpoint_id IS NOT DISTINCT FROM parent`). If the head moved, the save fails and nothing changes.
-8. Update `latest` incrementally when its meta still names the parent; otherwise rebuild it. The meta is cleared first, so an interrupted update is rebuilt next time.
+7. In one transaction, capture board snapshots, insert the checkpoint and move the head only if it still equals the parent (`head_checkpoint_id IS NOT DISTINCT FROM parent`). If the head moved, the save fails and nothing changes.
+8. Finish: enqueue compaction, write the stat index, and bring `latest` from the commit its meta names to the new one by copying only the paths `diff-tree` reports; rebuild it from a scan when it names no commit in the cache. The meta is cleared first, so an interrupted update is rebuilt next time.
+
+Saves are serialized per space by a Redis lock owned by the task run (2-minute TTL, renewed while running). If a worker dies after step 7, the retried task takes its lock back, finds the checkpoint it already committed (`meta.sourceTaskRunId`) and runs only step 8. The next save reuses the last stat index through the ancestor rule above, so a crash never forces a full rehash.
 
 A parent without a manifest (pre-v3 history) makes the save a baseline: its pack holds the full closure and the manifest restarts at `seq` 0.
 

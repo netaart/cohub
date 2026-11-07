@@ -1,9 +1,15 @@
 import { constants } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, readdir, readlink, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
-import type { ScannedFile } from "./scan.js";
-import { mapLimit } from "./snapshot.js";
+import { hasCommit } from "@cohub/core/checkpoint/storage";
+import { runGitWithOutput } from "./git.js";
+import { mapLimit } from "./limit.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH } from "./paths.js";
+import type { ScannedFile } from "./scan.js";
+
+/** NFS copies and stats are latency-bound; keep enough in flight without queueing the whole tree. */
+const COPY_CONCURRENCY = Number(process.env.CHECKPOINT_COPY_CONCURRENCY ?? 64);
+const SYSTEM_PREFIX = ".cohub/system/";
 
 const metaDir = dirname(CHECKPOINT_META_PATH);
 
@@ -29,7 +35,7 @@ async function clearFileAncestors(latestDir: string, path: string) {
   }
 }
 
-export async function copyEntryToLatest(file: ScannedFile, latestDir: string) {
+export async function copyEntryToLatest(file: Pick<ScannedFile, "path" | "absPath" | "type">, latestDir: string) {
   const target = join(latestDir, file.path);
   await clearFileAncestors(latestDir, file.path);
   await mkdir(dirname(target), { recursive: true, mode: 0o775 });
@@ -48,14 +54,14 @@ export async function copyEntryToLatest(file: ScannedFile, latestDir: string) {
 
 async function collectExisting(root: string, dir = root): Promise<string[]> {
   const names = await readdir(dir).catch(() => []);
-  const nested = await Promise.all(names.map(async (name) => {
+  const nested = await mapLimit(names, COPY_CONCURRENCY, async (name) => {
     const absPath = join(dir, name);
     const rel = relative(root, absPath);
     const st = await lstat(absPath).catch(() => null);
     if (!st) return [];
     if (st.isDirectory() && !st.isSymbolicLink()) return [rel, ...await collectExisting(root, absPath)];
     return [rel];
-  }));
+  });
   return nested.flat();
 }
 
@@ -71,8 +77,8 @@ export async function readLatestCommit(latestDir: string) {
   const raw = await readFile(join(latestDir, CHECKPOINT_META_PATH), "utf8").catch(() => null);
   if (!raw) return null;
   try {
-    const meta = JSON.parse(raw) as { commitHash?: unknown };
-    return typeof meta.commitHash === "string" ? meta.commitHash : null;
+    const meta = JSON.parse(raw) as { commitHash?: unknown; incomplete?: unknown };
+    return typeof meta.commitHash === "string" && !meta.incomplete ? meta.commitHash : null;
   } catch {
     return null;
   }
@@ -87,20 +93,59 @@ async function removeWithEmptyParents(latestDir: string, path: string) {
   }
 }
 
+async function copyPathToLatest(workspaceDir: string, latestDir: string, path: string) {
+  const absPath = join(workspaceDir, path);
+  const st = await lstat(absPath).catch(() => null);
+  if (!st || !(st.isFile() || st.isSymbolicLink())) return removeWithEmptyParents(latestDir, path);
+  await copyEntryToLatest({ path, absPath, type: st.isSymbolicLink() ? "symlink" : "file" }, latestDir);
+}
+
 /**
- * Apply one save's changes to latest. The meta is cleared first, so an
- * interrupted update is detected by the next save and rebuilt in full.
+ * Bring latest from `fromCommit` to `toCommit` by copying only the paths
+ * whose tree entries differ. The meta is cleared first, so an interrupted
+ * update makes the next refresh rebuild in full.
  */
-export async function applyLatestChanges(input: {
-  latestDir: string;
-  upserts: ScannedFile[];
-  deletes: string[];
-  checkpointMeta: Record<string, unknown>;
-}) {
+async function applyLatestDiff(input: { latestDir: string; workspaceDir: string; repoDir: string; fromCommit: string; toCommit: string; checkpointMeta: Record<string, unknown> }) {
+  const { stdout } = await runGitWithOutput(["diff-tree", "-r", "-z", "--no-renames", "--name-status", input.fromCommit, input.toCommit], input.repoDir);
+  const fields = stdout.split("\0");
+  const deletes: string[] = [];
+  const upserts: string[] = [];
+  for (let index = 0; index + 1 < fields.length; index += 2) {
+    const status = fields[index] as string;
+    const path = fields[index + 1] as string;
+    if (path.startsWith(SYSTEM_PREFIX)) continue;
+    (status === "D" ? deletes : upserts).push(path);
+  }
   await writeLatestMetaFile(input.latestDir, { incomplete: true });
-  for (const path of input.deletes) await removeWithEmptyParents(input.latestDir, path);
-  await mapLimit(input.upserts, 16, (file) => copyEntryToLatest(file, input.latestDir));
+  for (const path of deletes) await removeWithEmptyParents(input.latestDir, path);
+  await mapLimit(upserts, COPY_CONCURRENCY, (path) => copyPathToLatest(input.workspaceDir, input.latestDir, path));
   await writeLatestMetaFile(input.latestDir, input.checkpointMeta);
+  return { mode: "diff" as const, copied: upserts.length, deleted: deletes.length };
+}
+
+/**
+ * Point latest at `commitHash`. Any complete commit latest already holds is a
+ * valid base for an incremental update; otherwise latest is rebuilt from a scan.
+ */
+export async function refreshLatest(input: {
+  latestDir: string;
+  workspaceDir: string;
+  repoDir: string;
+  commitHash: string;
+  checkpointMeta: Record<string, unknown>;
+  scanFiles: () => Promise<ScannedFile[]>;
+}) {
+  const fromCommit = await readLatestCommit(input.latestDir);
+  if (fromCommit && await hasCommit(input.repoDir, fromCommit)) {
+    const applied = await applyLatestDiff({ ...input, fromCommit, toCommit: input.commitHash }).catch((error: unknown) => {
+      console.warn(`[checkpoint] incremental latest update failed, rebuilding: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    if (applied) return applied;
+  }
+  const files = await input.scanFiles();
+  await materializeLatest({ latestDir: input.latestDir, files, checkpointMeta: input.checkpointMeta });
+  return { mode: "full" as const, copied: files.length, deleted: 0 };
 }
 
 export async function materializeLatest(input: {
@@ -114,7 +159,7 @@ export async function materializeLatest(input: {
   keepPathWithParents(keep, CHECKPOINT_META_PATH);
 
   await writeLatestMetaFile(input.latestDir, { incomplete: true });
-  await Promise.all(input.files.map((file) => copyEntryToLatest(file, input.latestDir)));
+  await mapLimit(input.files, COPY_CONCURRENCY, (file) => copyEntryToLatest(file, input.latestDir));
 
   const existing = (await collectExisting(input.latestDir)).sort((a, b) => b.length - a.length);
   for (const rel of existing) {

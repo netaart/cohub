@@ -31,7 +31,6 @@ export type UserGitRepoRecord = {
   path: string;
   head: string | null;
   branch: string | null;
-  dirty: boolean;
   fingerprint: string | null;
   refs: Record<string, string>;
   bundles: UserGitRepoBundle[];
@@ -117,7 +116,7 @@ async function getRemotes(repoDir: string): Promise<UserGitRemote[]> {
 
 async function getRepoState(repoDir: string) {
   const head = await runGitWithOutput(["rev-parse", "HEAD"], repoDir).then((result) => result.stdout.trim(), () => null);
-  if (!head) return { head: null, branch: null, dirty: false, fingerprint: null, refs: {} };
+  if (!head) return { head: null, branch: null, fingerprint: null, refs: {} };
   const branchResult = await runGitWithOutput(["rev-parse", "--abbrev-ref", "HEAD"], repoDir).then((result) => result.stdout.trim(), () => null);
   const branch = branchResult && branchResult !== "HEAD" ? branchResult : null;
   const refLines = await runGitWithOutput(["for-each-ref", "--format=%(refname) %(objectname)"], repoDir).then((result) => result.stdout.split("\n").map((line) => line.trim()).filter(Boolean).sort(), () => []);
@@ -126,8 +125,7 @@ async function getRepoState(repoDir: string) {
     const space = line.lastIndexOf(" ");
     if (space > 0) refs[line.slice(0, space)] = line.slice(space + 1);
   }
-  const dirty = await runGitWithOutput(["status", "--porcelain"], repoDir).then((result) => result.stdout.trim().length > 0, () => false);
-  return { head, branch, dirty, fingerprint: sha256Text(`${head}\n${refLines.join("\n")}\n`), refs };
+  return { head, branch, fingerprint: sha256Text(`${head}\n${refLines.join("\n")}\n`), refs };
 }
 
 async function existingObjects(repoDir: string, oids: string[]) {
@@ -208,7 +206,6 @@ export async function collectUserGitRepos(input: {
         path: repoPath,
         head: state.head,
         branch: state.branch,
-        dirty: state.dirty,
         fingerprint: state.fingerprint,
         refs: state.refs,
         bundles,
