@@ -127,6 +127,7 @@ export type SessionHandle = {
   idleTimer: ReturnType<typeof setTimeout> | null;
   onIdle?: ((handle: SessionHandle) => void) | null;
   pendingUserMessages: PendingUserMessage[];
+  userMessageIdentityError: Error | null;
   pendingExecutionAuths: Array<{ turnId?: string | null; actorUserId: string | null; executionToken: string | null; executionScopes?: Permission[] | null }>;
   steerDrainPromise: Promise<void> | null;
   pendingSteerCompletions: Array<{
@@ -139,9 +140,7 @@ export type SessionHandle = {
     abortController: AbortController;
   } | null;
   currentUserMessageId: string | null;
-  currentUserMessageContent: ContentBlock[] | null;
   currentUserMessageMeta: Record<string, unknown> | null;
-  currentUserMessageStartedAt: string | null;
   toolExecutionStartedAtById: Map<string, string>;
   activeAssistantContext: AssistantMessageContext | null;
   persistenceChain: Promise<void>;
@@ -775,6 +774,7 @@ function extractTextFromToolResult(result: unknown): string {
 }
 
 export function subscribeSessionEvents(handle: SessionHandle) {
+  const claimedUserMessages = new WeakMap<object, PendingUserMessage & { startedAt: string }>();
   handle.session.subscribe(async (event) => {
     if (event.type === "message_start") {
       const traceCtx = getCurrentSessionTraceContext(handle);
@@ -803,10 +803,23 @@ export function subscribeSessionEvents(handle: SessionHandle) {
       addLifecycleEvent("session.message_start", {
         "message.role": typeof message.role === "string" ? message.role : undefined,
       });
-      if (message.role === "user") {
+      const userMeta = message.role === "user" && message.meta && typeof message.meta === "object" && !Array.isArray(message.meta)
+        ? message.meta as Record<string, unknown>
+        : null;
+      // The loop guard nudge lives only in the pi context; it is not a platform user message.
+      if (message.role === "user" && userMeta?.internal !== true) {
         const previousTurnId = handle.currentTurnId;
-        const pending = handle.pendingUserMessages.shift();
-        if (pending) {
+        const userMessageId = typeof userMeta?.userMessageId === "string" ? userMeta.userMessageId.trim() : "";
+        const pendingIndex = userMessageId ? handle.pendingUserMessages.findIndex((item) => item.userMessageId === userMessageId) : -1;
+        const pending = pendingIndex >= 0 ? handle.pendingUserMessages.splice(pendingIndex, 1)[0] : undefined;
+        // Once one input is unidentified the whole run fails; later inputs must not restore an identity.
+        if (!pending || handle.userMessageIdentityError) {
+          handle.userMessageIdentityError ??= new Error(`Agent received a user message without a pending identity (userMessageId=${userMessageId || "none"})`);
+          handle.currentTurnId = null;
+          handle.currentUserMessageId = null;
+          handle.currentUserMessageMeta = null;
+          handle.session.agent.abort();
+        } else {
           const nextTurnId = pending.turnId ?? (typeof pending.meta?.turnId === "string" ? pending.meta.turnId : null);
           const sameExecutionBatch = previousTurnId && nextTurnId && handle.currentExecutionTurnIds.has(previousTurnId) && handle.currentExecutionTurnIds.has(nextTurnId);
           if (previousTurnId && nextTurnId && previousTurnId !== nextTurnId && !sameExecutionBatch) {
@@ -823,9 +836,8 @@ export function subscribeSessionEvents(handle: SessionHandle) {
           handle.currentAssistantMessageOrdinal = null;
           handle.currentStreamMessageId = null;
           handle.currentUserMessageId = pending.userMessageId;
-          handle.currentUserMessageContent = pending.content;
           handle.currentUserMessageMeta = pending.meta ?? null;
-          handle.currentUserMessageStartedAt = new Date().toISOString();
+          claimedUserMessages.set(event.message, { ...pending, turnId: nextTurnId, startedAt: new Date().toISOString() });
         }
         const nextExecutionAuth = handle.pendingExecutionAuths.shift();
         if (nextExecutionAuth) {
@@ -866,16 +878,14 @@ export function subscribeSessionEvents(handle: SessionHandle) {
       addLifecycleEvent("session.message_end", {
         "message.role": typeof message.role === "string" ? message.role : undefined,
       });
-      if (message.role === "user" && handle.currentUserMessageId && handle.currentUserMessageContent) {
-        const userMessageId = handle.currentUserMessageId;
-        const content = handle.currentUserMessageContent;
-        const meta = handle.currentUserMessageMeta;
-        const startedAt = handle.currentUserMessageStartedAt;
+      const claimed = message.role === "user" ? claimedUserMessages.get(event.message) : undefined;
+      if (claimed) {
+        claimedUserMessages.delete(event.message);
+        const { userMessageId, turnId, content, startedAt } = claimed;
+        const meta = claimed.meta ?? null;
         const agentSessionEntryId = typeof message.sessionEntryId === "string"
           ? message.sessionEntryId
           : null;
-        handle.currentUserMessageContent = null;
-        handle.currentUserMessageStartedAt = null;
 
         schedulePersistence(handle, `user:${userMessageId}`, async () => {
           const span = handle.turnTracer.startSpan("agent.persistence.user_message", {
@@ -883,12 +893,11 @@ export function subscribeSessionEvents(handle: SessionHandle) {
               "cohub.space_id": handle.spaceId,
               "cohub.session_id": handle.sessionId,
               "agent.input_message_id": userMessageId,
-              ...(handle.currentUserMessageId ? { "agent.anchor_user_message_id": handle.currentUserMessageId } : {}),
               ...getSessionTraceAttributes(handle),
+              ...(turnId ? { "agent.turn_id": turnId } : {}),
             },
           });
           try {
-            const turnId = handle.currentTurnId;
             if (!turnId) throw new Error("User message turn id is required");
             await persistUserMessage({
               spaceId: handle.spaceId,
@@ -1212,14 +1221,13 @@ export async function loadOrCreateSessionHandle(input: {
     idleTimer: null,
     onIdle: null,
     pendingUserMessages: [],
+    userMessageIdentityError: null,
     pendingExecutionAuths: [],
     steerDrainPromise: null,
     pendingSteerCompletions: [],
     activeDirectShellCommand: null,
     currentUserMessageId: null,
-    currentUserMessageContent: null,
     currentUserMessageMeta: null,
-    currentUserMessageStartedAt: null,
     toolExecutionStartedAtById: new Map(),
     activeAssistantContext: null,
     persistenceChain: Promise.resolve(),

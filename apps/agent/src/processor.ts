@@ -242,7 +242,6 @@ function clearActiveTurnContext(handle: SessionHandle, sessionId: string) {
   handle.currentStreamMessageId = null;
   handle.currentUserMessageId = null;
   handle.currentUserMessageMeta = null;
-  handle.currentUserMessageContent = null;
   handle.lastActiveAt = Date.now();
 }
 
@@ -356,7 +355,6 @@ async function runDirectShellCommandTurn(input: {
   });
   handle.currentAssistantMessageOrdinal = 0;
   handle.currentStreamMessageId = `turn:${user.turnId}:assistant:0`;
-  handle.currentUserMessageContent = user.content;
 
   setCurrentSessionExecutionAuth({
     sessionId: input.sessionId,
@@ -931,6 +929,9 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
           content: item.content,
           meta: item.meta,
         }));
+      const batchUserMessageIds = new Set(batch.executionBatch.userMessageIds);
+      activeHandle.pendingUserMessages = activeHandle.pendingUserMessages.filter((item) => batchUserMessageIds.has(item.userMessageId));
+      activeHandle.userMessageIdentityError = null;
       for (const item of turnUserMessages) {
         const meta = normalizeTurnUserMeta(item);
         ensurePendingUserMessage(activeHandle, {
@@ -1127,7 +1128,9 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
                 ]);
               }
             });
+            if (activeHandle.userMessageIdentityError) throw activeHandle.userMessageIdentityError;
           } catch (error) {
+            if (activeHandle.userMessageIdentityError) throw activeHandle.userMessageIdentityError;
             if (abortController.signal.aborted || (error instanceof Error && error.message === "aborted")) {
               const abortEvent = getActiveAbortEvent(batch.ownerTurn.id);
               await activeHandle.session.abort().catch(() => undefined);
@@ -1247,11 +1250,6 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
         await handle.session.abort().catch(() => undefined);
         clearActiveTurnContext(handle, data.sessionId);
         handle.toolExecutionStartedAtById.clear();
-        if (claimedBatch) {
-          for (const userMessageId of claimedBatch.executionBatch.userMessageIds) {
-            removePendingUserMessage(handle, userMessageId);
-          }
-        }
         if (caughtError instanceof CompactionStateRecoveryError) {
           sessionHandles.delete(handle.sessionKey);
           clearCurrentSessionExecutionAuth(handle.sessionId);
@@ -1260,6 +1258,12 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
           handle.session.dispose();
         } else {
           await settleSessionHandle(handle, terminalHandled ? "strict" : "best_effort");
+        }
+      }
+      // Abort exits before the prompt settle normally but never consume their pending messages.
+      if (handle && claimedBatch) {
+        for (const userMessageId of claimedBatch.executionBatch.userMessageIds) {
+          removePendingUserMessage(handle, userMessageId);
         }
       }
       if (handle && claimedBatch && terminalHandled) {
