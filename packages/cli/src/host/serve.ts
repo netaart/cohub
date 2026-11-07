@@ -1,5 +1,4 @@
 import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
 import {
   HOST_BRIDGE_ERROR,
   HOST_BRIDGE_METHODS,
@@ -19,6 +18,7 @@ import { HostAuth } from "./auth.js";
 import { loginShellEnv } from "./login-env.js";
 import { DeviceRuntimeHost } from "./runtime.js";
 import { callLocalWorkspace } from "./workspaces.js";
+import { packagePath } from "../package-paths.js";
 
 export type HostEmit = (name: string, payload?: unknown) => void;
 
@@ -33,7 +33,7 @@ const MAX_LINE = 8 * 1024 * 1024;
 
 const write = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`);
 
-export async function serveHost(entry = fileURLToPath(new URL("../../bin/cohub.js", import.meta.url))) {
+export async function serveHost(entry = packagePath("bin", "cohub.js")) {
   const emit: HostEmit = (name, payload) => write({ type: "event", name, ...(payload === undefined ? {} : { payload }) });
   let environment: Promise<NodeJS.ProcessEnv> | null = null;
   const env = () => (environment ??= loginShellEnv());

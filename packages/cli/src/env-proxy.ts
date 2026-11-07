@@ -1,3 +1,5 @@
+import * as http from "node:http";
+
 const PROXY_ENV_KEYS = ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"] as const;
 const USE_ENV_PROXY_FLAG = "--use-env-proxy";
 
@@ -28,3 +30,10 @@ export function shouldRelaunchWithEnvProxy(
 }
 
 export const envProxyExecArgv = [USE_ENV_PROXY_FLAG] as const;
+
+export function enableEnvProxy(): boolean {
+  if (!shouldRelaunchWithEnvProxy()) return true;
+  if (typeof http.setGlobalProxyFromEnv !== "function") return false;
+  http.setGlobalProxyFromEnv();
+  return true;
+}

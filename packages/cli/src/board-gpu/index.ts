@@ -6,8 +6,8 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { fileURLToPath } from "node:url";
 import type { BoardGpuFrame, BoardGpuInit, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
+import { packagePath } from "../package-paths.js";
 
 export type { BoardGpuFrame, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
 
@@ -95,7 +95,7 @@ export type BoardGpuExporter = {
 };
 
 export async function launchBoardGpuExporter(resources: BoardGpuResources, options: { browser: string; signal?: AbortSignal }): Promise<BoardGpuExporter> {
-  const bundle = fileURLToPath(new URL("./page.js", import.meta.url));
+  const bundle = packagePath("dist", "board-gpu", "page.js");
   if (!existsSync(bundle)) throw new Error("This CLI build has no GPU exporter; reinstall @neta-art/cohub-cli.");
   const token = randomBytes(16).toString("hex");
   const fonts = resources.fonts.map(({ family, path }) => ({ family, path, file: basename(path) }));

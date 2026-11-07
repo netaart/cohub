@@ -7,7 +7,6 @@ import { execFile as execFileCallback } from "node:child_process";
 import { debuglog, promisify } from "node:util";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
 const execFile = promisify(execFileCallback);
@@ -60,12 +59,13 @@ import {
   BoardExportResourceError,
   createBoardExportImageBudget,
 } from "./board-export-resources.js";
+import { packagePath } from "./package-paths.js";
 
 const debugExport = debuglog("cohub:board-export");
 
 export function resolveBundledFonts(): BoardNodeFont[] {
   const require = createRequire(import.meta.url);
-  const bundled = fileURLToPath(new URL("./fonts/", import.meta.url));
+  const bundled = packagePath("dist", "fonts");
   const locate = ({ pkg, file }: BoardExportFont): string | null => {
     const copied = join(bundled, file);
     if (existsSync(copied)) return copied;

@@ -267,7 +267,7 @@ abstract class StageCli : DefaultTask() {
 val stageCli = tasks.register<StageCli>("stageCli") {
     val repo = rootProject.layout.projectDirectory.dir("../..")
     script.set(repo.file("scripts/stage-runtime.mjs"))
-    sources.from(listOf("cli", "sdk").flatMap { listOf(repo.dir("packages/$it/dist"), repo.file("packages/$it/package.json")) })
+    sources.from(repo.dir("packages/cli/dist"), repo.file("packages/cli/package.json"))
     launcher.set(layout.projectDirectory.file("src/main/cli/cohub"))
     jniLibs.set(layout.buildDirectory.dir("generated/cli/jniLibs"))
     assets.set(layout.buildDirectory.dir("generated/cli/assets"))

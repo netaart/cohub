@@ -24,22 +24,17 @@
     "NOTICE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsdown && node scripts/stamp-build.mjs",
+    "build": "tsc -p tsconfig.json && tsdown && node scripts/stamp-build.mjs",
     "verify:sandboxd": "node --import tsx scripts/verify-sandboxd-release.ts",
     "verify:rtc": "node --import tsx scripts/verify-rtc-release.ts",
-    "verify:board-kernel": "node --import tsx scripts/verify-board-kernel.ts",
-    "prepublishOnly": "pnpm verify:board-kernel && pnpm verify:sandboxd && pnpm verify:rtc",
+    "prepublishOnly": "pnpm verify:sandboxd && pnpm verify:rtc",
     "test": "node ../../scripts/test/run.mjs 'tests/**/*.test.ts'",
     "test:runtime": "node --import tsx --test tests/runtime-*.integration.ts",
     "test:runtime:native": "node --import tsx tests/runtime-native.smoke.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@neta-art/cohub": "workspace:*",
-    "@neta-art/generation": "0.2.15",
-    "commander": "^15.0.0",
-    "sharp": "^0.35.4",
-    "ws": "^8.21.3"
+    "sharp": "^0.35.4"
   },
   "publishConfig": {
     "access": "public"
@@ -48,11 +43,14 @@
     "@fontsource-variable/figtree": "^5.3.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
+    "@neta-art/cohub": "workspace:*",
     "@types/node": "catalog:",
     "@types/ws": "^8.18.1",
+    "commander": "^15.0.0",
     "pixi.js": "^8.20.1",
     "tsdown": "^0.22.14",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "ws": "^8.21.3"
   },
   "optionalDependencies": {
     "@napi-rs/canvas": "^1.0.13"

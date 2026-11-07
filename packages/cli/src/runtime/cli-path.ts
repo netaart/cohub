@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { packagePath } from "../package-paths.js";
 
-const ENTRY = fileURLToPath(new URL("../../bin/cohub.js", import.meta.url));
+const ENTRY = packagePath("bin", "cohub.js");
 
 /**
  * Puts this Runtime's own `cohub` last on PATH, so what it runs can always call the CLI while a

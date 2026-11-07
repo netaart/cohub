@@ -79,9 +79,7 @@ async function stageNode() {
 async function stageCli() {
   const packs = join(work, "packs");
   await mkdir(packs);
-  for (const name of ["@neta-art/cohub", "@neta-art/cohub-cli"]) {
-    run("pnpm", ["--filter", name, "pack", "--pack-destination", packs], { cwd: root, shell: process.platform === "win32" });
-  }
+  run("pnpm", ["--filter", "@neta-art/cohub-cli", "pack", "--pack-destination", packs], { cwd: root, shell: process.platform === "win32" });
   const tarballs = (await readdir(packs)).filter((file) => file.endsWith(".tgz")).map((file) => join(packs, file));
   const cli = join(out, "cli");
   await mkdir(cli, { recursive: true });
@@ -106,7 +104,7 @@ async function stageSandboxd(cli) {
 }
 
 try {
-  if (!existsSync(join(root, "packages/cli/dist/index.js"))) {
+  if (!existsSync(join(root, "packages/cli/dist/bootstrap.js"))) {
     throw new Error("Build the CLI first: pnpm --filter @neta-art/cohub-cli... build");
   }
   await rm(out, { recursive: true, force: true });

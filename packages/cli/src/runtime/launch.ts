@@ -16,6 +16,7 @@ import { ensureNativeSync, repairIntegrations } from "./native/attach.js";
 import { serializeDiagnosticError, type RuntimeDiagnostic } from "./diagnostics.js";
 import { createDiagnosticConsole, printRuntimeSummary, runtimeWebUrl, type RuntimeSummary } from "./presentation.js";
 import { runRuntime, type RuntimeLaunch } from "./supervisor.js";
+import { standaloneModule } from "../package-paths.js";
 
 export const EXPECTED_IDENTITY_ENV = "COHUB_RUNTIME_EXPECTED_IDENTITY";
 
@@ -66,10 +67,10 @@ export async function resolveRuntimeTarget(program: Command, target?: string) {
 export async function startBackgroundRuntime(config: RuntimeLaunch): Promise<RuntimeSummary> {
   return new Promise((resolve, reject) => {
     // Keep the same Node executable and loader (also works from source in tests).
-    const workerUrl = new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.js", import.meta.url);
+    const worker = standaloneModule("runtime/worker");
     // fork forwards spawn options; windowsHide keeps a detached Windows worker from opening a console.
     const forkOptions: ForkOptions & { windowsHide: boolean } = { detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"], windowsHide: true };
-    const child = fork(workerUrl, [], forkOptions);
+    const child = fork(worker, [], forkOptions);
     const diagnosticConsole = createDiagnosticConsole(config.verbose);
     let last: RuntimeSummary | null = null;
     let settled = false;

@@ -1077,21 +1077,9 @@ importers:
 
   packages/cli:
     dependencies:
-      '@neta-art/cohub':
-        specifier: workspace:*
-        version: link:../sdk
-      '@neta-art/generation':
-        specifier: 0.2.15
-        version: 0.2.15
-      commander:
-        specifier: ^15.0.0
-        version: 15.0.0
       sharp:
         specifier: ^0.35.4
         version: 0.35.4(@types/node@26.6.4)
-      ws:
-        specifier: ^8.21.3
-        version: 8.21.3
     devDependencies:
       '@fontsource-variable/figtree':
         specifier: ^5.3.0
@@ -1102,12 +1090,18 @@ importers:
       '@fontsource-variable/geist-mono':
         specifier: ^5.3.0
         version: 5.3.0
+      '@neta-art/cohub':
+        specifier: workspace:*
+        version: link:../sdk
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.4
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      commander:
+        specifier: ^15.0.0
+        version: 15.0.0
       pixi.js:
         specifier: ^8.20.1
         version: 8.20.1
@@ -1117,6 +1111,9 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
+      ws:
+        specifier: ^8.21.3
+        version: 8.21.3
     optionalDependencies:
       '@napi-rs/canvas':
         specifier: ^1.0.13

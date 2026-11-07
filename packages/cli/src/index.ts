@@ -1,32 +1,38 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { registerEndpointOptions } from "./endpoint-options.js";
-import { registerAuth } from "./commands/auth.js";
-import { registerBoards } from "./commands/boards.js";
-import { registerChannels } from "./commands/channels.js";
-import { registerCronJobs } from "./commands/cron-jobs.js";
-import { registerFeedback } from "./commands/feedback.js";
-import { registerGenerations } from "./commands/generations.js";
-import { registerMe } from "./commands/me.js";
-import { registerModels } from "./commands/models.js";
-import { registerProfile } from "./commands/profile.js";
-import { registerPrompts } from "./commands/prompts.js";
-import { registerPublic } from "./commands/public.js";
-import { registerSkills } from "./commands/skills.js";
-import { registerSearch } from "./commands/search.js";
-import { registerReferences } from "./commands/references.js";
-import { registerReferrals } from "./commands/referrals.js";
-import { registerPrompt, registerSpaces } from "./commands/spaces.js";
-import { maybeHandleRunCommand, printRunHelp } from "./commands/run.js";
-import { registerRuntime } from "./commands/runtime.js";
-import { registerTasks } from "./commands/tasks.js";
-import { registerDesktop, registerLegacyUi } from "./commands/desktop.js";
-import { registerHost } from "./commands/host.js";
-import { registerVersion } from "./commands/version.js";
-import { registerApps } from "./commands/apps.js";
-import { registerRooms } from "./commands/rooms.js";
-import { formatUnknownCommandError, resolveHelpPath } from "./help-path.js";
+import { formatUnknownCommandError, resolveHelpPath, rootCommandName } from "./help-path.js";
 import { CLI_VERSION } from "./version.js";
+
+type Register = (program: Command) => unknown;
+
+const COMMANDS: ReadonlyArray<{ names: readonly string[]; load: () => Promise<Register> }> = [
+  { names: ["auth"], load: async () => (await import("./commands/auth.js")).registerAuth },
+  { names: ["boards"], load: async () => (await import("./commands/boards.js")).registerBoards },
+  { names: ["profile"], load: async () => (await import("./commands/profile.js")).registerProfile },
+  { names: ["me"], load: async () => (await import("./commands/me.js")).registerMe },
+  { names: ["prompt", "completion", "decision"], load: async () => (await import("./commands/spaces.js")).registerPrompt },
+  { names: ["spaces", "labels"], load: async () => (await import("./commands/spaces.js")).registerSpaces },
+  { names: ["runtime"], load: async () => (await import("./commands/runtime.js")).registerRuntime },
+  { names: ["channels"], load: async () => (await import("./commands/channels.js")).registerChannels },
+  { names: ["generate"], load: async () => (await import("./commands/generations.js")).registerGenerations },
+  { names: ["models"], load: async () => (await import("./commands/models.js")).registerModels },
+  { names: ["prompts"], load: async () => (await import("./commands/prompts.js")).registerPrompts },
+  { names: ["public"], load: async () => (await import("./commands/public.js")).registerPublic },
+  { names: ["skills"], load: async () => (await import("./commands/skills.js")).registerSkills },
+  { names: ["search"], load: async () => (await import("./commands/search.js")).registerSearch },
+  { names: ["references"], load: async () => (await import("./commands/references.js")).registerReferences },
+  { names: ["referrals"], load: async () => (await import("./commands/referrals.js")).registerReferrals },
+  { names: ["tasks"], load: async () => (await import("./commands/tasks.js")).registerTasks },
+  { names: ["cron-jobs"], load: async () => (await import("./commands/cron-jobs.js")).registerCronJobs },
+  { names: ["apps", "works"], load: async () => (await import("./commands/apps.js")).registerApps },
+  { names: ["rooms"], load: async () => (await import("./commands/rooms.js")).registerRooms },
+  { names: ["feedback"], load: async () => (await import("./commands/feedback.js")).registerFeedback },
+  { names: ["desktop"], load: async () => (await import("./commands/desktop.js")).registerDesktop },
+  { names: ["ui"], load: async () => (await import("./commands/desktop.js")).registerLegacyUi },
+  { names: ["host"], load: async () => (await import("./commands/host.js")).registerHost },
+  { names: ["version"], load: async () => (await import("./commands/version.js")).registerVersion },
+];
 
 const program = registerEndpointOptions(new Command("cohub"));
 
@@ -87,42 +93,22 @@ Environment:
   Runtime logs            ~/.local/state/cohub/runtime/<space-id>/diagnostics
 `);
 
-registerAuth(program);
-registerBoards(program);
-registerProfile(program);
-registerMe(program);
-registerPrompt(program);
-registerSpaces(program);
-registerRuntime(program);
-registerChannels(program);
-registerGenerations(program);
-registerModels(program);
-registerPrompts(program);
-registerPublic(program);
-registerSkills(program);
-registerSearch(program);
-registerReferences(program);
-registerReferrals(program);
-registerTasks(program);
-registerCronJobs(program);
-registerApps(program);
-registerRooms(program);
-registerFeedback(program);
-registerDesktop(program);
-registerLegacyUi(program);
-registerHost(program);
-registerVersion(program);
-
 const argv = process.argv.slice(2);
+const name = rootCommandName(program, argv);
+const named = COMMANDS.find((command) => name !== undefined && command.names.includes(name));
+const versionOnly = name === undefined && argv.some((arg) => arg === "-v" || arg === "--version") && !argv.some((arg) => arg === "-h" || arg === "--help");
+const loading = named ? [named] : name === "run" || versionOnly ? [] : COMMANDS;
+for (const register of await Promise.all(loading.map((command) => command.load()))) register(program);
+
 const help = resolveHelpPath(program, argv);
 if (help.kind === "help") {
   help.command.outputHelp();
 } else if (help.kind === "run-help") {
-  printRunHelp();
+  (await import("./commands/run.js")).printRunHelp();
 } else if (help.kind === "unknown") {
   process.stderr.write(formatUnknownCommandError(help));
   process.exit(1);
-} else if (await maybeHandleRunCommand(argv)) {
+} else if (name === "run" && await (await import("./commands/run.js")).maybeHandleRunCommand(argv)) {
   process.exit();
 } else {
   program.parse();

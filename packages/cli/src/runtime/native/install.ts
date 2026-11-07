@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { standaloneModule } from "../../package-paths.js";
 import { withRuntimeSpaceBindingsLock } from "../space-binding.js";
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
@@ -18,7 +18,7 @@ export const piAgentDirectory = () => process.env.PI_CODING_AGENT_DIR?.trim() ||
 const codexConfigPath = () => join(process.env.CODEX_HOME?.trim() || join(homedir(), ".codex"), "config.toml");
 
 /** The extension shipped with this CLI: one self-contained module, loadable by Pi as is. */
-export const piExtensionSource = () => fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./pi-extension.ts" : "./pi-extension.js", import.meta.url));
+export const piExtensionSource = () => standaloneModule("runtime/native/pi-extension");
 const piExtensionPath = (extension: string) => join(piAgentDirectory(), "extensions", `cohub${extension}`);
 const readOptional = (path: string) => readFile(path, "utf8").catch((error) => { if (missing(error)) return null; throw error; });
 const isLegacy = (text: string | null) => Boolean(text?.startsWith(LEGACY_PI_EXTENSION_HEADER));

@@ -4,10 +4,10 @@ import { lstatSync, mkdirSync, statSync, unlinkSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { type BoardGpuExporter, type BoardGpuResources, launchBoardGpuExporter } from "./index.js";
 import type { BoardGpuResult } from "./protocol.js";
 import { CLI_VERSION } from "../version.js";
+import { packagePath } from "../package-paths.js";
 
 
 const IDLE_MS = 5 * 60_000;
@@ -47,7 +47,7 @@ function lines(socket: Socket, handle: (message: Message) => void) {
 export function boardGpuSocket(browser: string): string {
   let page = 0;
   try {
-    page = statSync(fileURLToPath(new URL("./page.js", import.meta.url))).mtimeMs;
+    page = statSync(packagePath("dist", "board-gpu", "page.js")).mtimeMs;
   } catch {}
   const { uid } = userInfo();
   const key = createHash("sha256").update(`${CLI_VERSION}\0${browser}\0${page}\0${uid}`).digest("hex").slice(0, 16);

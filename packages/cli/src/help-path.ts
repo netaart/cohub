@@ -111,7 +111,7 @@ function walkCommandPath(program: Command, argv: string[]): Walk {
       index = skipOption(command, argv, index);
       continue;
     }
-    if (token === "help" && hasSubcommands(command)) {
+    if (token === "help" && (hasSubcommands(command) || path.length === 0)) {
       helpRequested = true;
       index += 1;
       continue;
@@ -123,7 +123,7 @@ function walkCommandPath(program: Command, argv: string[]): Walk {
       index += 1;
       continue;
     }
-    if (hasSubcommands(command)) {
+    if (hasSubcommands(command) || (token === "run" && path.length === 0)) {
       const remainder = argv.slice(index + 1);
       const helpAfter = token === "run" && path.length === 0
         ? runRemainderRequestsHelp(remainder)
@@ -139,6 +139,21 @@ function walkCommandPath(program: Command, argv: string[]): Walk {
   }
 
   return { command, path, helpRequested, unknown: null };
+}
+
+export function rootCommandName(program: Command, argv: string[]): string | undefined {
+  let index = 0;
+  while (index < argv.length) {
+    const token = argv[index] ?? "";
+    if (token === "--") return undefined;
+    if (token.startsWith("-")) {
+      index = skipOption(program, argv, index);
+      continue;
+    }
+    if (token !== "help") return token;
+    index += 1;
+  }
+  return undefined;
 }
 
 function stripRootCommand(program: Command, argv: string[], name: string): string[] | undefined {

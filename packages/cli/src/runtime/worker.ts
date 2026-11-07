@@ -1,5 +1,8 @@
+import { enableEnvProxy } from "../env-proxy.js";
 import { runRuntime, type RuntimeLaunch } from "./supervisor.js";
 import { serializeDiagnosticError } from "./diagnostics.js";
+
+enableEnvProxy();
 
 const notify = (message: Record<string, unknown>) => {
   // The launcher deliberately disconnects after its one-shot summary.

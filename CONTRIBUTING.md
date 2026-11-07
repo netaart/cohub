@@ -34,3 +34,5 @@ This repository ships directly on `main` (no long-lived feature branches).
 3. Ensure lint and typecheck pass before pushing.
 4. Changesets that touch Board end with a `Hosts:` line: what an app embedding the
    Board must change, with the code, or `Hosts: no action`.
+5. The CLI bundles the SDK: when an SDK change should reach CLI users, list
+   `@neta-art/cohub-cli` in its changeset too.

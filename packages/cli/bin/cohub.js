@@ -1,2 +1,5 @@
 #!/usr/bin/env node
-import "../dist/bootstrap.js";
+import { enableCompileCache } from "node:module";
+
+enableCompileCache();
+await import("../dist/bootstrap.js");
