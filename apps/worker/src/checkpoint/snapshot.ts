@@ -1,8 +1,10 @@
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import { uploadAssetIfMissing } from "./assets.js";
 import { fileMode, isRacy, reusableEntry, type FileIndex, type FileIndexEntry } from "./file-index.js";
 import { writeBlobs, type BlobSource, type ObjectBuilder, type TreeEntry } from "./objects.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PATH } from "./paths.js";
-import { hashFile, type ScannedFile } from "./scan.js";
+import { stageFile, type ScannedFile } from "./scan.js";
 
 const ASSET_CONCURRENCY = 4;
 
@@ -68,13 +70,18 @@ export async function buildSnapshot(input: {
   }
 
   const uploaded = await mapLimit(assetFiles, ASSET_CONCURRENCY, async (file) => {
-    let started = performance.now();
-    const sha256 = await hashFile(file.absPath);
-    input.onAssetTiming?.("hashAssets", performance.now() - started);
-    started = performance.now();
-    const objectKey = await uploadAssetIfMissing({ filePath: file.absPath, sha256, size: file.size, mimeType: file.mimeType });
-    input.onAssetTiming?.("uploadAssets", performance.now() - started);
-    return { path: file.path, sha256, size: file.size, mimeType: file.mimeType, objectKey } satisfies CheckpointAsset;
+    const stagedPath = join(input.builder.tmpDir, `asset-${crypto.randomUUID()}`);
+    try {
+      let started = performance.now();
+      const { sha256, size } = await stageFile(file.absPath, stagedPath);
+      input.onAssetTiming?.("hashAssets", performance.now() - started);
+      started = performance.now();
+      const objectKey = await uploadAssetIfMissing({ filePath: stagedPath, sha256, size, mimeType: file.mimeType });
+      input.onAssetTiming?.("uploadAssets", performance.now() - started);
+      return { path: file.path, sha256, size, mimeType: file.mimeType, objectKey } satisfies CheckpointAsset;
+    } finally {
+      await rm(stagedPath, { force: true });
+    }
   });
   assets.push(...uploaded);
   assets.sort((a, b) => a.path.localeCompare(b.path));
@@ -114,5 +121,5 @@ export async function buildSnapshot(input: {
 
   const scanned = new Set(input.files.map((file) => file.path));
   const deleted = Object.keys(previous).filter((path) => !scanned.has(path));
-  return { tree, entries, assets, changed, deleted, hashedFileCount: changed.length };
+  return { tree, entries, assets, changed, deleted };
 }

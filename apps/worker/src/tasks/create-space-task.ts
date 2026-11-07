@@ -272,7 +272,7 @@ const createSpaceHandler = async (job: Job) => {
       }).catch((error) => logger.warn(`[CreateSpace] Failed to publish workspace ready for ${currentSpace.id}: ${error instanceof Error ? error.message : String(error)}`));
       await progress("post_materialization");
       const postStages = await postCheckpointRestore({ targetSpace: currentSpace, sourceCheckpoint: restoreResult.checkpoint });
-      result = { ok: true, spaceId: currentSpace.id, checkpointAliasId: aliasResult.alias.id, commitHash: restoreResult.checkpoint.commitHash, source, stages: { workspaceRestore: { status: "ready", durationMs: restoreDuration, fromManifest: restoreResult.repo.fromManifest }, checkpointAlias: { status: "ready", durationMs: aliasDuration }, boardRestore: { status: "ready", durationMs: boardRestoreDuration, count: boardRestoreResult.count }, ...postStages } };
+      result = { ok: true, spaceId: currentSpace.id, checkpointAliasId: aliasResult.alias.id, commitHash: restoreResult.checkpoint.commitHash, source, stages: { workspaceRestore: { status: "ready", durationMs: restoreDuration }, checkpointAlias: { status: "ready", durationMs: aliasDuration }, boardRestore: { status: "ready", durationMs: boardRestoreDuration, count: boardRestoreResult.count }, ...postStages } };
     } else {
       if (source.type === "git_repo") {
         currentSpace = await updateBootstrap({ space: currentSpace, taskRunId, source, status: "running", stage: "import", stageTimings });

@@ -39,7 +39,7 @@ export async function readCover(tip: string, level: number): Promise<CheckpointC
 }
 
 /** Replace runs of packs with the cover packs compaction has already built for them. */
-export async function foldCovers(packs: CheckpointPackRef[], read: typeof readCover = readCover) {
+export async function foldCovers(packs: CheckpointPackRef[]) {
   let result = [...packs];
   for (let level = 1; level <= CHECKPOINT_COVER_MAX_LEVEL; level += 1) {
     const span = CHECKPOINT_COVER_FANOUT ** level;
@@ -47,17 +47,12 @@ export async function foldCovers(packs: CheckpointPackRef[], read: typeof readCo
       const first = end.last - span + 1;
       const inRange = result.filter((pack) => pack.first >= first && pack.last <= end.last);
       if (inRange.length < 2 || !tilesSequence(inRange, first, end.last)) continue;
-      const cover = await read(end.tip, level);
+      const cover = await readCover(end.tip, level);
       if (!cover || cover.pack.first !== first || cover.pack.last !== end.last || cover.pack.tip !== end.tip) continue;
       result = [...result.filter((pack) => !inRange.includes(pack)), cover.pack];
     }
   }
   return result.sort((a, b) => a.first - b.first);
-}
-
-export function buildManifest(input: { commit: string; parent: CheckpointStorageManifest | null; parentCommit: string | null; pack: CheckpointPackRef }): CheckpointStorageManifest {
-  if (!input.parent) return { version: 1, commit: input.commit, parent: input.parentCommit, seq: 0, packs: [input.pack] };
-  return { version: 1, commit: input.commit, parent: input.parentCommit, seq: input.parent.seq + 1, packs: [...input.parent.packs, input.pack] };
 }
 
 export const writeManifest = (manifest: CheckpointStorageManifest) =>

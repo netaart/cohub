@@ -48,8 +48,8 @@ export async function createObjectBuilder(repoDir: string, tmpDir: string): Prom
 const git = (builder: ObjectBuilder, args: string[], input?: string) =>
   runCheckpointGit(args, { cwd: builder.tmpDir, env: builder.env, input });
 
-/** hash-object --stdin-paths reads one path per line and unquotes a leading `"`. */
-const needsAlias = (path: string) => path.includes("\n") || path.startsWith("\"");
+/** hash-object --stdin-paths reads one path per line, drops a CR before LF and unquotes a leading `"`. */
+const needsAlias = (path: string) => path.includes("\n") || path.includes("\r") || path.startsWith("\"");
 
 export type BlobSource = { kind: "file"; path: string } | { kind: "symlink"; path: string } | { kind: "content"; content: string | Buffer };
 

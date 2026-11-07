@@ -48,7 +48,6 @@ type BundleCache = {
 };
 
 const cacheFileName = "git-bundle-cache.v2.json";
-const legacyCacheFileName = "git-bundle-cache.v1.json";
 
 const sha256File = (path: string) => new Promise<string>((resolve, reject) => {
   const hash = createHash("sha256");
@@ -83,7 +82,6 @@ async function saveCache(systemDir: string, cache: BundleCache) {
   } finally {
     await rm(tmp, { force: true }).catch(() => undefined);
   }
-  await rm(join(systemDir, legacyCacheFileName), { force: true }).catch(() => undefined);
 }
 
 const sanitizeRemoteUrl = (value: string): { url: string; credentialSanitized: boolean } => {
@@ -176,12 +174,11 @@ export async function collectUserGitRepos(input: {
   workspaceDir: string;
   systemDir: string;
   repoPaths: string[];
-}): Promise<{ repos: UserGitRepoRecord[]; uploadedBytes: number }> {
+}): Promise<UserGitRepoRecord[]> {
   const cache = await loadCache(input.systemDir);
   const bundleTmpDir = getWorkerLocalTmpDir("git-bundles", crypto.randomUUID());
   const records: UserGitRepoRecord[] = [];
   const nextRepos: BundleCache["repos"] = {};
-  let uploadedBytes = 0;
 
   try {
     await ensureWorkerLocalTmpDir(bundleTmpDir);
@@ -202,9 +199,7 @@ export async function collectUserGitRepos(input: {
             base: previous.length > 0 ? Object.values(cached?.refs ?? {}) : [],
             level: previous.length > 0 ? 0 : CHECKPOINT_COVER_MAX_LEVEL,
           });
-          uploadedBytes += added?.size ?? 0;
           bundles = added ? await compactChain({ repoDir, tmpDir: bundleTmpDir, bundles: [...previous, added] }) : previous;
-          uploadedBytes += bundles.filter((bundle) => !previous.includes(bundle) && bundle !== added).reduce((sum, bundle) => sum + bundle.size, 0);
         }
         nextRepos[repoPath] = { fingerprint: state.fingerprint, refs: state.refs, bundles };
       }
@@ -222,7 +217,7 @@ export async function collectUserGitRepos(input: {
     }
 
     await saveCache(input.systemDir, { version: 2, repos: nextRepos });
-    return { repos: records, uploadedBytes };
+    return records;
   } finally {
     await removeWorkerLocalTmpDir(bundleTmpDir).catch(() => undefined);
   }

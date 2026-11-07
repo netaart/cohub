@@ -71,26 +71,23 @@ const isNotFound = (error: unknown) => {
   return value?.name === "NoSuchKey" || value?.name === "NotFound" || value?.$metadata?.httpStatusCode === 404;
 };
 
+const getObject = (key: string) => getCheckpointAssetClient()
+  .send(new GetObjectCommand({ Bucket: config.checkpointAssetOssBucket, Key: key }))
+  .catch((error) => {
+    if (isNotFound(error)) return null;
+    throw error;
+  });
+
 export const checkpointObjectStore: CheckpointObjectReader = {
   async download(key, filePath) {
-    const result = await getCheckpointAssetClient()
-      .send(new GetObjectCommand({ Bucket: config.checkpointAssetOssBucket, Key: key }))
-      .catch((error) => {
-        if (isNotFound(error)) return null;
-        throw error;
-      });
+    const result = await getObject(key);
     if (!result) return false;
     if (!result.Body) throw new Error(`empty object body: ${key}`);
     await pipeline(result.Body as NodeJS.ReadableStream, createWriteStream(filePath));
     return true;
   },
   async readText(key) {
-    const result = await getCheckpointAssetClient()
-      .send(new GetObjectCommand({ Bucket: config.checkpointAssetOssBucket, Key: key }))
-      .catch((error) => {
-        if (isNotFound(error)) return null;
-        throw error;
-      });
+    const result = await getObject(key);
     if (!result) return null;
     if (!result.Body) throw new Error(`empty object body: ${key}`);
     return await result.Body.transformToString("utf8");

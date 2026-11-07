@@ -164,7 +164,7 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
     previous: previousIndex,
     assetThresholdBytes: config.checkpointAssetThresholdBytes,
     scanStartedAtNs,
-    systemFiles: { checkpointMeta: gitCheckpointMeta, userGitRepos: { version: 2, repos: userGitRepos.repos } },
+    systemFiles: { checkpointMeta: gitCheckpointMeta, userGitRepos: { version: 2, repos: userGitRepos } },
     onAssetTiming: (label, ms) => { timings[label] = (timings[label] ?? 0) + Math.round(ms); },
   }));
   const tree = await timeIt(timings, "writeTree", () => writeTree(builder, snapshot.tree));
@@ -233,9 +233,9 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
   const smallFileBytes = smallFiles.reduce((sum, file) => sum + file.size, 0);
   const assetCount = snapshot.assets.length;
   const assetBytes = snapshot.assets.reduce((sum, asset) => sum + asset.size, 0);
-  const detectedGitRepoCount = userGitRepos.repos.length;
-  const bundledGitRepoCount = userGitRepos.repos.filter((repo) => repo.bundles.length > 0).length;
-  const gitBundleBytes = userGitRepos.repos.reduce((sum, repo) => sum + repo.bundles.reduce((total, bundle) => total + bundle.size, 0), 0);
+  const detectedGitRepoCount = userGitRepos.length;
+  const bundledGitRepoCount = userGitRepos.filter((repo) => repo.bundles.length > 0).length;
+  const gitBundleBytes = userGitRepos.reduce((sum, repo) => sum + repo.bundles.reduce((total, bundle) => total + bundle.size, 0), 0);
   const stats = {
     fileCount: smallFileCount + assetCount,
     fileBytes: smallFileBytes + assetBytes,
@@ -251,13 +251,12 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
     smallFileBytes,
     assetCount,
     assetBytes,
-    hashedFileCount: snapshot.hashedFileCount,
+    hashedFileCount: snapshot.changed.length,
     ignoredCount: scan.ignoredCount,
     unsupportedCount: scan.warnings.length,
     detectedGitRepoCount,
     bundledGitRepoCount,
     gitBundleBytes,
-    gitBundleUploadedBytes: userGitRepos.uploadedBytes,
     packBytes: pack.size,
   };
 
@@ -287,7 +286,7 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
         ...(diffMeta ? { diffs: { parent: diffMeta } } : {}),
         warnings: [
           ...scan.warnings,
-          ...userGitRepos.repos.flatMap((repo) => repo.remotes.filter((remote) => remote.credentialSanitized).map((remote) => ({
+          ...userGitRepos.flatMap((repo) => repo.remotes.filter((remote) => remote.credentialSanitized).map((remote) => ({
             path: repo.path,
             type: "git_remote",
             action: "sanitized" as const,
@@ -330,21 +329,24 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
     ]);
   }
 
-  const latestMeta = { ...gitCheckpointMeta, commitHash, materializedAt: new Date().toISOString() };
-  await progress("materialize_latest", { commitHash });
-  await timeIt(timings, "materializeLatest", async () => {
-    const incremental = previousIndex && await readLatestCommit(dirs.latestDir) === parentCommitHash;
-    if (incremental) await applyLatestChanges({ latestDir: dirs.latestDir, upserts: snapshot.changed, deletes: snapshot.deleted, checkpointMeta: latestMeta });
-    else await materializeLatest({ latestDir: dirs.latestDir, files: scan.files, checkpointMeta: latestMeta });
-  }).catch((error) => {
-    throw new Error(`checkpoint ${checkpoint.id} was saved but refreshing the latest snapshot failed; the next save rebuilds it: ${formatErrorMessage(error)}`);
-  });
-
   const boardSnapshots = await timeIt(timings, "saveBoardCheckpointSnapshots", () => saveBoardCheckpointSnapshots({ checkpointId: checkpoint.id, spaceId }));
   await timeIt(timings, "updateCheckpointBoardMeta", () => updateCheckpointMeta(db, checkpoint.id, { board: { snapshotCount: boardSnapshots.count }, timings }));
 
+  // The checkpoint is committed; a failed refresh leaves latest marked incomplete and the next save rebuilds it.
+  const latestMeta = { ...gitCheckpointMeta, commitHash, materializedAt: new Date().toISOString() };
+  await progress("materialize_latest", { commitHash });
+  const latestError = await timeIt(timings, "materializeLatest", async () => {
+    const incremental = previousIndex && await readLatestCommit(dirs.latestDir) === parentCommitHash;
+    if (incremental) await applyLatestChanges({ latestDir: dirs.latestDir, upserts: snapshot.changed, deletes: snapshot.deleted, checkpointMeta: latestMeta });
+    else await materializeLatest({ latestDir: dirs.latestDir, files: scan.files, checkpointMeta: latestMeta });
+  }).then(() => null, (error: unknown) => formatErrorMessage(error));
+  if (latestError) {
+    console.warn(`[save_checkpoint] failed to refresh latest space=${spaceId} checkpoint=${checkpoint.id}: ${latestError}`);
+    await updateCheckpointMeta(db, checkpoint.id, { latestRefreshError: latestError, timings }).catch(() => undefined);
+  }
+
   let publishedUserConfig: { targetDir: string; copiedPaths: string[]; meta: Record<string, unknown> } | null = null;
-  if (space.slug === HOME_SPACE_SLUG) {
+  if (!latestError && space.slug === HOME_SPACE_SLUG) {
     publishedUserConfig = await timeIt(timings, "publishUserConfig", () => publishUserConfigFromWorkspace({ userId: space.userUuid, spaceId: space.id, checkpointId: checkpoint.id, workspaceDir: dirs.latestDir })).catch(async (error) => {
       await recordPublishWarning({ scope: "user", target: "config_files", message: formatErrorMessage(error) }, error);
       return null;
@@ -360,7 +362,7 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
   }
 
   let publishedPlatformConfig: { targetDir: string; copiedPaths: string[]; meta: Record<string, unknown> } | null = null;
-  if (config.platformSpaceId && spaceId === config.platformSpaceId) {
+  if (!latestError && config.platformSpaceId && spaceId === config.platformSpaceId) {
     publishedPlatformConfig = await timeIt(timings, "publishPlatformConfig", () => publishConfigFromWorkspace({ workspaceDir: dirs.latestDir, checkpointId: checkpoint.id, targetDir: "/configs/platform", whitelist: ["AGENTS.md", "CLAUDE.md", ".agents", ".cohub"], sourceLabel: "platform" }));
     await publishModelsCacheFromFile({ modelsPath: join(publishedPlatformConfig.targetDir, ".cohub", "models.json"), scope: "platform", sourceCheckpointId: checkpoint.id }).catch((error) => recordPublishWarning({ scope: "platform", target: "models_cache", message: formatErrorMessage(error) }, error));
     await publishModelTasksCacheFromFile({ configPath: join(publishedPlatformConfig.targetDir, ".cohub", "model-tasks.json"), scope: "platform", sourceCheckpointId: checkpoint.id }).catch((error) => recordPublishWarning({ scope: "platform", target: "model_tasks_cache", message: formatErrorMessage(error) }, error));

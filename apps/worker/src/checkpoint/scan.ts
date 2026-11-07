@@ -1,4 +1,5 @@
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import { createHash } from "node:crypto";
 import { lstat, readFile, readlink, readdir } from "node:fs/promises";
 import { isAbsolute, join, normalize, relative } from "node:path";
@@ -39,7 +40,7 @@ type IgnoreMatcher = {
   matcher: Ignore;
 };
 
-const normalizeRel = (root: string, absPath: string) => relative(root, absPath).replace(/\\/g, "/");
+const normalizeRel = (root: string, absPath: string) => relative(root, absPath);
 const pathForIgnore = (path: string, isDirectory: boolean) => (isDirectory && !path.endsWith("/") ? `${path}/` : path);
 
 async function readGitignore(dir: string): Promise<IgnoreMatcher | null> {
@@ -48,13 +49,19 @@ async function readGitignore(dir: string): Promise<IgnoreMatcher | null> {
   return { baseDir: dir, matcher: ignore().add(content) };
 }
 
-export const hashFile = (path: string) => new Promise<string>((resolve, reject) => {
+/** Copy `path` to `stagedPath` and hash the copied bytes in the same read, so hash and content always agree. */
+export async function stageFile(path: string, stagedPath: string) {
   const hash = createHash("sha256");
-  const stream = createReadStream(path);
-  stream.on("data", (chunk) => hash.update(chunk));
-  stream.on("error", reject);
-  stream.on("end", () => resolve(hash.digest("hex")));
-});
+  let size = 0;
+  await pipeline(createReadStream(path), async function* (source: AsyncIterable<Buffer>) {
+    for await (const chunk of source) {
+      hash.update(chunk);
+      size += chunk.length;
+      yield chunk;
+    }
+  }, createWriteStream(stagedPath));
+  return { sha256: hash.digest("hex"), size };
+}
 
 const isSafeSymlinkTarget = (target: string) => {
   if (isAbsolute(target)) return false;

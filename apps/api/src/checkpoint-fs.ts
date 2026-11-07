@@ -14,7 +14,8 @@ import { isTextMime, mimeTypeForPath, type SpaceFsEntry, type SpaceFsFileRespons
 import { config } from "./config.js";
 import { db } from "./db/index.js";
 import { createPresignedGetObjectUrl } from "./object-presign.js";
-import { CheckpointObjectsUnavailableError, ensureCheckpointObjects } from "./checkpoint-storage.js";
+import { CheckpointObjectsUnavailableError } from "@cohub/core/checkpoint/storage";
+import { ensureCheckpointObjects } from "./checkpoint-storage.js";
 import { redisCommandClient } from "./redis.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });

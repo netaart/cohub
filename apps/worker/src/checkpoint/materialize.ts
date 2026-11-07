@@ -2,13 +2,13 @@ import { constants } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, readdir, readlink, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import type { ScannedFile } from "./scan.js";
+import { mapLimit } from "./snapshot.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH } from "./paths.js";
 
-const toPosix = (value: string) => value.replace(/\\/g, "/");
 const metaDir = dirname(CHECKPOINT_META_PATH);
 
 function keepPathWithParents(keep: Set<string>, path: string) {
-  const parts = toPosix(path).split("/").filter(Boolean);
+  const parts = path.split("/").filter(Boolean);
   for (let index = 1; index <= parts.length; index += 1) keep.add(parts.slice(0, index).join("/"));
 }
 
@@ -16,25 +16,41 @@ async function removePath(path: string) {
   await rm(path, { recursive: true, force: true });
 }
 
+const isErrno = (error: unknown, ...codes: string[]) => codes.includes((error as NodeJS.ErrnoException)?.code ?? "");
+
+/** Remove a non-directory (including a symlink, which mkdir would follow) left where `path` needs a parent directory. */
+async function clearFileAncestors(latestDir: string, path: string) {
+  const parts = path.split("/").slice(0, -1);
+  for (let index = 1; index <= parts.length; index += 1) {
+    const ancestor = join(latestDir, ...parts.slice(0, index));
+    const st = await lstat(ancestor).catch(() => null);
+    if (!st) return;
+    if (!st.isDirectory()) return removePath(ancestor);
+  }
+}
+
 export async function copyEntryToLatest(file: ScannedFile, latestDir: string) {
   const target = join(latestDir, file.path);
+  await clearFileAncestors(latestDir, file.path);
   await mkdir(dirname(target), { recursive: true, mode: 0o775 });
   await removePath(target);
-  if (file.type === "symlink") {
-    const link = await readlink(file.absPath);
-    await symlink(link, target);
-    return;
+  try {
+    if (file.type === "symlink") {
+      await symlink(await readlink(file.absPath), target);
+      return;
+    }
+    await copyFile(file.absPath, target, constants.COPYFILE_FICLONE);
+  } catch (error) {
+    // Deleted since the scan; the next save records the deletion.
+    if (!isErrno(error, "ENOENT")) throw error;
   }
-  await copyFile(file.absPath, target, constants.COPYFILE_FICLONE).catch(async () => {
-    await copyFile(file.absPath, target);
-  });
 }
 
 async function collectExisting(root: string, dir = root): Promise<string[]> {
   const names = await readdir(dir).catch(() => []);
   const nested = await Promise.all(names.map(async (name) => {
     const absPath = join(dir, name);
-    const rel = toPosix(relative(root, absPath));
+    const rel = relative(root, absPath);
     const st = await lstat(absPath).catch(() => null);
     if (!st) return [];
     if (st.isDirectory() && !st.isSymbolicLink()) return [rel, ...await collectExisting(root, absPath)];
@@ -64,7 +80,7 @@ export async function readLatestCommit(latestDir: string) {
 
 async function removeWithEmptyParents(latestDir: string, path: string) {
   await removePath(join(latestDir, path));
-  const parts = toPosix(path).split("/").slice(0, -1);
+  const parts = path.split("/").slice(0, -1);
   while (parts.length > 0) {
     if (await rmdir(join(latestDir, ...parts)).then(() => false, () => true)) return;
     parts.pop();
@@ -83,10 +99,7 @@ export async function applyLatestChanges(input: {
 }) {
   await writeLatestMetaFile(input.latestDir, { incomplete: true });
   for (const path of input.deletes) await removeWithEmptyParents(input.latestDir, path);
-  const queue = [...input.upserts];
-  await Promise.all(Array.from({ length: Math.min(16, queue.length) }, async () => {
-    for (let file = queue.shift(); file; file = queue.shift()) await copyEntryToLatest(file, input.latestDir);
-  }));
+  await mapLimit(input.upserts, 16, (file) => copyEntryToLatest(file, input.latestDir));
   await writeLatestMetaFile(input.latestDir, input.checkpointMeta);
 }
 

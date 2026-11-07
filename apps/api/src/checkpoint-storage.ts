@@ -1,16 +1,11 @@
 import { createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import {
-  CheckpointObjectsUnavailableError,
-  ensureCheckpointCommits,
-  type CheckpointObjectReader,
-} from "@cohub/core/checkpoint/storage";
+import { ensureCheckpointCommits, type CheckpointObjectReader } from "@cohub/core/checkpoint/storage";
 import { createLogger } from "@cohub/infra/logging";
 import { config } from "./config.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
-const READY_LIMIT = 20_000;
 
 let client: S3Client | null = null;
 const getClient = () => {
@@ -52,24 +47,21 @@ const objectStore: CheckpointObjectReader = {
   },
 };
 
-const ready = new Set<string>();
 const pending = new Map<string, Promise<void>>();
 
 /**
  * Make checkpoint commits readable in a space's cache repository, fetching
- * their packs from object storage on first use. Concurrent callers share one
- * hydration per commit.
+ * their packs from object storage on first use. Completion is recorded in
+ * the repository itself, so a deleted cache is refilled on the next read.
+ * Concurrent callers share one hydration per commit.
  */
 export async function ensureCheckpointObjects(repoDir: string, commits: string[]) {
   await Promise.all([...new Set(commits)].map((commit) => {
     const key = `${repoDir}\0${commit}`;
-    if (ready.has(key)) return undefined;
     let task = pending.get(key);
     if (!task) {
       const started = performance.now();
       task = ensureCheckpointCommits(objectStore, repoDir, [commit]).then(({ installed }) => {
-        if (ready.size >= READY_LIMIT) ready.clear();
-        ready.add(key);
         if (installed > 0) logger.info("[checkpoint-storage] hydrated cache repository", { repoDir, commit, packs: installed, durationMs: Math.round(performance.now() - started) });
       }).finally(() => pending.delete(key));
       pending.set(key, task);
@@ -77,5 +69,3 @@ export async function ensureCheckpointObjects(repoDir: string, commits: string[]
     return task;
   }));
 }
-
-export { CheckpointObjectsUnavailableError };

@@ -10,8 +10,8 @@
  * reachable from commit `c`.
  */
 import { spawn } from "node:child_process";
-import { mkdir, open, rename, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 export const CHECKPOINT_COVER_FANOUT = 16;
 export const CHECKPOINT_COVER_MAX_LEVEL = 4;
@@ -72,7 +72,7 @@ export const checkpointCoverKey = (tip: string, level: number) => `checkpoint-co
 
 const isNonNegativeInt = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
 
-export function parsePackRef(value: unknown): CheckpointPackRef | null {
+function parsePackRef(value: unknown): CheckpointPackRef | null {
   if (!value || typeof value !== "object") return null;
   const ref = value as Record<string, unknown>;
   if (!isCommitOid(ref.checksum) || !isCommitOid(ref.tip)) return null;
@@ -82,7 +82,7 @@ export function parsePackRef(value: unknown): CheckpointPackRef | null {
   return { checksum: ref.checksum, packKey: ref.packKey, idxKey: ref.idxKey, size: ref.size, idxSize: ref.idxSize, first: ref.first, last: ref.last, tip: ref.tip };
 }
 
-export function parseCheckpointManifest(raw: string): CheckpointStorageManifest | null {
+function parseCheckpointManifest(raw: string): CheckpointStorageManifest | null {
   let value: unknown;
   try {
     value = JSON.parse(raw);
@@ -118,7 +118,7 @@ export async function readCheckpointManifest(store: CheckpointObjectReader, comm
   return manifest;
 }
 
-export type GitResult = { stdout: string; stderr: string };
+type GitResult = { stdout: string; stderr: string };
 
 export function runCheckpointGit(args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv; input?: string | Buffer }) {
   return new Promise<GitResult>((resolve, reject) => {
@@ -146,6 +146,8 @@ export function runCheckpointGit(args: string[], options: { cwd: string; env?: N
 export const checkpointGitDir = (repoDir: string) => join(repoDir, ".git");
 export const checkpointPackDir = (repoDir: string) => join(repoDir, ".git", "objects", "pack");
 
+const RAW_ATTRIBUTES = "* -text -eol -ident -filter -working-tree-encoding -export-ignore -export-subst\n";
+
 const objectsExist = (repoDir: string) => stat(join(repoDir, ".git", "objects")).then(() => true, () => false);
 const autoGcDisabled = (repoDir: string) =>
   runCheckpointGit(["config", "--get", "gc.auto"], { cwd: repoDir }).then((result) => result.stdout.trim() === "0", () => false);
@@ -165,6 +167,14 @@ export async function initCheckpointRepo(repoDir: string) {
     });
   }
   await mkdir(checkpointPackDir(repoDir), { recursive: true, mode: 0o775 });
+  // Checkpoint trees are raw bytes; in-tree .gitattributes must never filter, convert or drop them on read.
+  const attributes = join(repoDir, ".git", "info", "attributes");
+  if (await readFile(attributes, "utf8").catch(() => null) !== RAW_ATTRIBUTES) {
+    await mkdir(dirname(attributes), { recursive: true, mode: 0o775 });
+    const tmp = `${attributes}.tmp-${crypto.randomUUID()}`;
+    await writeFile(tmp, RAW_ATTRIBUTES);
+    await rename(tmp, attributes);
+  }
 }
 
 export async function hasCommit(repoDir: string, commit: string) {
@@ -197,7 +207,7 @@ async function fsyncFile(path: string) {
 }
 
 /** The pack trailer and the checksum recorded in its .idx must both match. */
-export async function verifyPackFiles(packPath: string, idxPath: string, checksum: string) {
+async function verifyPackFiles(packPath: string, idxPath: string, checksum: string) {
   const [packTrailer, idxPackChecksum] = await Promise.all([readTail(packPath, 20, 20), readTail(idxPath, 40, 20)]);
   if (packTrailer !== checksum || idxPackChecksum !== checksum) throw new Error(`pack ${checksum} failed checksum verification`);
 }
@@ -215,7 +225,7 @@ export async function installPackFiles(repoDir: string, checksum: string, files:
   await rename(files.idxPath, join(packDir, `pack-${checksum}.idx`));
 }
 
-export async function downloadPack(store: CheckpointObjectReader, repoDir: string, pack: CheckpointPackRef) {
+async function downloadPack(store: CheckpointObjectReader, repoDir: string, pack: CheckpointPackRef) {
   if (await isPackInstalled(repoDir, pack.checksum)) return false;
   const packDir = checkpointPackDir(repoDir);
   await mkdir(packDir, { recursive: true, mode: 0o775 });
@@ -270,14 +280,19 @@ export async function ensureCheckpointCommits(store: CheckpointObjectReader, rep
   let installed = 0;
   for (const commit of new Set(commits)) {
     if (await stat(completeMarker(repoDir, commit)).then(() => true, () => false)) continue;
-    // A legacy commit already in the cache stays readable while object storage is unreachable.
-    const manifest = await readCheckpointManifest(store, commit).catch(async (error) => {
-      if (await hasCommit(repoDir, commit)) return null;
-      throw error;
-    });
-    if (!manifest) {
+    let manifest: CheckpointStorageManifest | null;
+    try {
+      manifest = await readCheckpointManifest(store, commit);
+    } catch (error) {
+      // While object storage is unreachable, serve what the cache has without marking it complete.
       if (await hasCommit(repoDir, commit)) continue;
-      throw new CheckpointObjectsUnavailableError(commit);
+      throw error;
+    }
+    if (!manifest) {
+      // Legacy commits predate manifests; their repository holds the full closure.
+      if (!await hasCommit(repoDir, commit)) throw new CheckpointObjectsUnavailableError(commit);
+      await markCheckpointCommitComplete(repoDir, commit);
+      continue;
     }
     await initCheckpointRepo(repoDir);
     installed += await installPacks(store, repoDir, manifest.packs);

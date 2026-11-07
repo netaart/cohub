@@ -31,7 +31,7 @@ export function enqueueCheckpointCompaction(data: CheckpointCompactJobData) {
     telemetryServiceName: "cohub-worker-checkpoint-compact",
   });
   void queue.add(CHECKPOINT_COMPACT_JOB, data, {
-    jobId: `${CHECKPOINT_COMPACT_JOB}:${data.commit}`,
+    jobId: `${CHECKPOINT_COMPACT_JOB}-${data.commit}`,
     attempts: 5,
     backoff: { type: "exponential", delay: 30_000 },
     ...defaultJobRetention,

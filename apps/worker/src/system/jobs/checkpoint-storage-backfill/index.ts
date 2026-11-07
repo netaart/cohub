@@ -18,7 +18,7 @@ registerSystemJob(CHECKPOINT_STORAGE_BACKFILL_JOB, async (job: Job) => {
       redisUrl: config.bullmqRedisUrl,
       telemetryServiceName: "cohub-worker-checkpoint-backfill",
     });
-    await queue.add(CHECKPOINT_STORAGE_BACKFILL_JOB, { ...data, cursor: nextCursor }, { jobId: `${CHECKPOINT_STORAGE_BACKFILL_JOB}:${nextCursor}`, ...defaultJobRetention });
+    await queue.add(CHECKPOINT_STORAGE_BACKFILL_JOB, { ...data, cursor: nextCursor }, { jobId: `${CHECKPOINT_STORAGE_BACKFILL_JOB}-${nextCursor}`, ...defaultJobRetention });
   }
   return { processed: results.length, results, nextCursor };
 });

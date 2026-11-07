@@ -127,14 +127,17 @@ test("saves are incremental packs whose manifests rebuild every checkpoint byte 
   await mkdir(join(workspace, "src"), { recursive: true });
   await writeFile(join(workspace, "src/a.txt"), "alpha\r\n");
   await writeFile(join(workspace, "big.bin"), Buffer.alloc(4096, 7));
-  await writeFile(join(workspace, ".gitattributes"), "*.txt text eol=lf\n");
+  await writeFile(join(workspace, ".gitattributes"), "*.txt text eol=lf\n/kept export-ignore\n");
+  await mkdir(join(workspace, "kept"));
+  await writeFile(join(workspace, "kept/file"), "kept");
+  for (const name of ["cr\r", "space ", "back\\slash"]) await writeFile(join(workspace, name), name);
   await writeFile(join(workspace, "run.sh"), "#!/bin/sh\n", { mode: 0o755 });
   await symlink("src/a.txt", join(workspace, "link"));
   await writeFile(join(workspace, "weird\nname"), "x");
   await settle();
 
   const first = await save("first");
-  assert.equal(first.stats.hashedFileCount, 6);
+  assert.equal(first.stats.hashedFileCount, 10);
   const firstManifest = await manifestOf(first.commitHash);
   assert.equal(firstManifest.seq, 0);
   assert.equal(execFileSync("git", ["show", `${first.commitHash}:src/a.txt`], { cwd: repoDir, encoding: "utf8" }), "alpha\r\n");
@@ -163,11 +166,12 @@ test("saves are incremental packs whose manifests rebuild every checkpoint byte 
   state.lookup = second.checkpointId;
   const target = join(root, "fork-workspace");
   await mkdir(target, { recursive: true });
-  const restored = await restoreWorkspaceFromCheckpoint({ checkpointId: second.checkpointId, targetWorkspaceDir: target, targetRepoDir: join(root, "system", forkSpaceId, "repo"), restoreTmpDir: join(root, "restore-tmp") });
-  assert.equal(restored.repo.fromManifest, true);
+  await restoreWorkspaceFromCheckpoint({ checkpointId: second.checkpointId, targetWorkspaceDir: target, targetRepoDir: join(root, "system", forkSpaceId, "repo"), restoreTmpDir: join(root, "restore-tmp") });
   assert.equal(await readFile(join(target, "src/a.txt"), "utf8"), "alpha\r\n");
   assert.deepEqual(await readFile(join(target, "big.bin")), Buffer.alloc(4096, 7));
   assert.equal(await readFile(join(target, "weird\nname"), "utf8"), "x");
+  assert.equal(await readFile(join(target, "kept/file"), "utf8"), "kept");
+  for (const name of ["cr\r", "space ", "back\\slash"]) assert.equal(await readFile(join(target, name), "utf8"), name);
 });
 
 test("a save refuses to land when the head moved underneath it", async () => {
@@ -207,13 +211,12 @@ test("nested git repositories are stored as an incremental bundle chain", async 
   await mkdir(nested, { recursive: true });
   git(nested, "init", "-q", "-b", "main");
   git(nested, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "one");
-  const first = await save("nested one");
+  await save("nested one");
   git(nested, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "two");
   const second = await save("nested two");
   assert.equal(second.stats.bundledGitRepoCount, 1);
   const repos = JSON.parse(git(join(root, "system", spaceId, "repo"), "show", `${second.commitHash}:.cohub/system/user-git-repos.v2.json`));
   assert.deepEqual(repos.repos[0].bundles.map((bundle: { level: number; base: string[] }) => [bundle.level, bundle.base.length]), [[4, 0], [0, 1]]);
-  assert.ok(first.stats.gitBundleUploadedBytes);
   state.lookup = second.checkpointId;
   const target = join(root, "nested-restore");
   await mkdir(target, { recursive: true });

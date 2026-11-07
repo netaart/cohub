@@ -10,12 +10,11 @@ import { checkpoints, spaces } from "@cohub/db";
 import { db } from "../db.js";
 import { config } from "../config.js";
 import {
+  CheckpointObjectsUnavailableError,
   checkpointGitDir,
-  hasCommit,
+  ensureCheckpointCommits,
   initCheckpointRepo,
-  installPacks,
   markCheckpointCommitComplete,
-  readCheckpointManifest,
   runCheckpointGit,
 } from "@cohub/core/checkpoint/storage";
 import { getCheckpointSystemRepoDir, CHECKPOINT_ASSET_MANIFEST_PATH, LEGACY_USER_GIT_REPOS_PATH, USER_GIT_REPOS_PATH } from "./paths.js";
@@ -44,15 +43,12 @@ type UserGitReposManifest = {
   }>;
 };
 
-const toPosix = (value: string) => value.replace(/\\/g, "/");
-
 function assertSafeRelativePath(path: string) {
-  const normalized = toPosix(path).trim();
-  if (normalized === ".") return normalized;
-  if (!normalized || normalized.includes("\0") || isAbsolute(normalized) || normalized === ".." || normalized.startsWith("../") || normalized.includes("/../")) {
+  if (path === ".") return path;
+  if (!path || path.includes("\0") || isAbsolute(path) || path === ".." || path.startsWith("../") || path.includes("/../")) {
     throw new Error(`unsafe checkpoint path: ${path}`);
   }
-  return normalized;
+  return path;
 }
 
 function safeJoin(root: string, path: string) {
@@ -80,7 +76,7 @@ async function collectArchiveEntries(root: string, dir = root): Promise<{ dirs: 
   const names = await readdir(dir).catch(() => []);
   const entries = await Promise.all(names.map(async (name) => {
     const absPath = join(dir, name);
-    const rel = toPosix(relative(root, absPath));
+    const rel = relative(root, absPath);
     const st = await lstat(absPath).catch(() => null);
     if (!st) return { dirs: [], files: [] };
     if (st.isDirectory() && !st.isSymbolicLink()) {
@@ -214,17 +210,13 @@ async function restoreUserGitRepos(input: { workspaceDir: string; restoreTmpDir:
  */
 export async function prepareCheckpointRepo(input: { sourceSpaceId: string; targetRepoDir: string; commitHash: string }) {
   await initCheckpointRepo(input.targetRepoDir);
-  const manifest = await readCheckpointManifest(checkpointObjectStore, input.commitHash);
-  if (manifest) {
-    await installPacks(checkpointObjectStore, input.targetRepoDir, manifest.packs);
-    if (!await hasCommit(input.targetRepoDir, input.commitHash)) throw new Error(`checkpoint packs do not contain commit ${input.commitHash}`);
-    await markCheckpointCommitComplete(input.targetRepoDir, input.commitHash);
-  } else if (!await hasCommit(input.targetRepoDir, input.commitHash)) {
+  await ensureCheckpointCommits(checkpointObjectStore, input.targetRepoDir, [input.commitHash]).catch(async (error) => {
+    if (!(error instanceof CheckpointObjectsUnavailableError)) throw error;
     const sourceRepoDir = getCheckpointSystemRepoDir(input.sourceSpaceId);
     await runCheckpointGit(["fetch", "-q", "--no-tags", sourceRepoDir, input.commitHash], { cwd: input.targetRepoDir });
-  }
+    await markCheckpointCommitComplete(input.targetRepoDir, input.commitHash);
+  });
   await runCheckpointGit(["update-ref", "refs/heads/main", input.commitHash], { cwd: input.targetRepoDir, env: { GIT_DIR: checkpointGitDir(input.targetRepoDir) } });
-  return { fromManifest: Boolean(manifest) };
 }
 
 async function readCommitJson<T>(restoreTmpDir: string, paths: string[], fallback: T): Promise<T> {
@@ -245,11 +237,11 @@ export async function restoreWorkspaceFromCheckpoint(input: {
   if (!checkpoint) throw new Error("checkpoint not found");
   const [sourceSpace] = await db.select().from(spaces).where(eq(spaces.id, checkpoint.spaceId)).limit(1);
   if (!sourceSpace) throw new Error("checkpoint source space not found");
-  const repo = await prepareCheckpointRepo({ sourceSpaceId: sourceSpace.id, targetRepoDir: input.targetRepoDir, commitHash: checkpoint.commitHash });
+  await prepareCheckpointRepo({ sourceSpaceId: sourceSpace.id, targetRepoDir: input.targetRepoDir, commitHash: checkpoint.commitHash });
   await archiveCommit({ repoDir: input.targetRepoDir, commitHash: checkpoint.commitHash, restoreTmpDir: input.restoreTmpDir });
   const assetManifest = await readJson<AssetManifest>(join(input.restoreTmpDir, CHECKPOINT_ASSET_MANIFEST_PATH), { version: 1, assets: [] });
   const gitReposManifest = await readCommitJson<UserGitReposManifest>(input.restoreTmpDir, [USER_GIT_REPOS_PATH, LEGACY_USER_GIT_REPOS_PATH], { version: 1, repos: [] });
   await restoreFilesFromArchive({ restoreTmpDir: input.restoreTmpDir, targetDir: input.targetWorkspaceDir, assetManifest });
   await restoreUserGitRepos({ workspaceDir: input.targetWorkspaceDir, restoreTmpDir: input.restoreTmpDir, manifest: gitReposManifest });
-  return { checkpoint, sourceSpace, assetManifest, gitReposManifest, repo };
+  return { checkpoint, sourceSpace, assetManifest, gitReposManifest };
 }
