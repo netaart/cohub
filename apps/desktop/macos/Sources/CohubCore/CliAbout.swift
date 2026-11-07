@@ -23,7 +23,7 @@ public struct CliAbout: Equatable, Sendable {
         } ?? []
     }
 
-    public static func fetch(from service: HostService?) async -> CliAbout? {
+    public static func fetch(from service: (any BridgeService)?) async -> CliAbout? {
         guard let service else { return nil }
         let answers = AsyncStream<CliAbout?> { continuation in
             Task {

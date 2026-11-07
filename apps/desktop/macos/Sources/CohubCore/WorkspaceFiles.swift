@@ -16,9 +16,9 @@ public final class WorkspaceFiles: Sendable {
     /// `+` and `&` stay escaped, so a path never reads as a space or a second field.
     private static let queryValue = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "+&=?#"))
 
-    private let service: HostService
+    private let service: any BridgeService
 
-    public init(service: HostService) {
+    public init(service: any BridgeService) {
         self.service = service
     }
 

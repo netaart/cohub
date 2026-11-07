@@ -15,7 +15,7 @@ public final class BridgeRouter {
     private let hostId: String
     private let capabilities: [String]
     private let handlers: [String: Handler]
-    private let service: HostService?
+    private let service: (any BridgeService)?
     private let consent: Consent
     private let send: @MainActor (String) -> Void
     private var pendingConsent: (root: String, until: ContinuousClock.Instant)?
@@ -26,7 +26,7 @@ public final class BridgeRouter {
         hostId: String,
         capabilities: [String],
         handlers: [String: Handler],
-        service: HostService?,
+        service: (any BridgeService)?,
         consent: @escaping Consent,
         send: @escaping @MainActor (String) -> Void
     ) {
@@ -93,7 +93,7 @@ public final class BridgeRouter {
         pendingConsent = (root, .now + Self.consentLifetime)
     }
 
-    private func consented(to request: BridgeRequest, service: HostService) async -> Bool {
+    private func consented(to request: BridgeRequest, service: any BridgeService) async -> Bool {
         guard let root = request.params["root"]?.string, let spaceId = request.params["spaceId"]?.string else { return true }
         let spent = pendingConsent
         pendingConsent = nil

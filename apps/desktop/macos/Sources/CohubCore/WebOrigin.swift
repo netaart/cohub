@@ -26,6 +26,10 @@ public struct WebOrigin: Sendable, Equatable {
             && other.port == url.port
     }
 
+    public func isOrigin(scheme: String, host: String, port: Int) -> Bool {
+        "\(scheme.lowercased())://\(host.lowercased())\(port == 0 ? "" : ":\(port)")" == origin
+    }
+
     public func path(of other: URL) -> String? {
         guard contains(other), let components = URLComponents(url: other, resolvingAgainstBaseURL: false) else { return nil }
         var text = components.percentEncodedPath.isEmpty ? "/" : components.percentEncodedPath
@@ -39,8 +43,17 @@ public struct WebOrigin: Sendable, Equatable {
         return URL(string: origin + path)
     }
 
+    public static let newChatPath = "/sessions/new"
+
     public static func isInAppPath(_ path: String) -> Bool {
         path.hasPrefix("/") && !path.hasPrefix("//") && !path.contains("\\") && path.count <= 2_048
+    }
+
+    public static func isResumable(_ path: String) -> Bool {
+        guard isInAppPath(path) else { return false }
+        let route = String(path.prefix { $0 != "?" && $0 != "#" })
+        if route == "/" || route == "/zh" { return false }
+        return !["/callback", "/app-auth", "/mobile"].contains { route == $0 || route.hasPrefix($0 + "/") }
     }
 
     public static func newSpacePath(folder: String) -> String? {

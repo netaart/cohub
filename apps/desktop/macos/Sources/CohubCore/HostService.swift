@@ -10,7 +10,14 @@ public struct ServiceHello: Sendable, Equatable, Codable {
     }
 }
 
-public final class HostService: @unchecked Sendable {
+public protocol BridgeService: AnyObject, Sendable {
+    var hello: ServiceHello? { get }
+    func ready(timeout: Duration) async -> ServiceHello?
+    func call(_ request: BridgeRequest) async -> BridgeReply
+}
+
+#if os(macOS) || os(Linux) || os(Windows)
+public final class HostService: BridgeService, @unchecked Sendable {
     public struct Launch: Sendable {
         public let executable: URL
         public let arguments: [String]
@@ -243,3 +250,4 @@ public final class HostService: @unchecked Sendable {
         lock.withLock { waiters.removeValue(forKey: id) }?.resume(returning: hello)
     }
 }
+#endif

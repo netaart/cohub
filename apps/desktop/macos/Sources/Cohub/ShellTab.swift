@@ -76,7 +76,7 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.preferences.isElementFullscreenEnabled = true
-        configuration.userContentController.addUserScript(WKUserScript(source: Self.bridgeScript, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+        configuration.userContentController.addUserScript(WKUserScript(source: BridgeScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
         configuration.userContentController.add(messages, contentWorld: .page, name: HostProtocol.global)
         if let files = shell.workspaceFiles {
             configuration.setURLSchemeHandler(WorkspaceSchemeHandler(files: files, origin: shell.config.origin.origin), forURLScheme: WorkspaceFiles.scheme)
@@ -160,14 +160,14 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
         // Only the top-level Cohub page may drive native behaviour.
         let origin = message.frameInfo.securityOrigin
         guard message.frameInfo.isMainFrame,
-              "\(origin.protocol)://\(origin.host)\(origin.port == 0 ? "" : ":\(origin.port)")" == shell.config.origin.origin,
+              shell.config.origin.isOrigin(scheme: origin.protocol, host: origin.host, port: origin.port),
               let text = message.body as? String
         else { return }
         router?.receive(text)
     }
 
     func deliver(_ text: String) {
-        webView?.callAsyncJavaScript("window.__cohubHostReceive?.(data)", arguments: ["data": text], in: nil, in: .page, completionHandler: nil)
+        webView?.callAsyncJavaScript(BridgeScript.receive, arguments: ["data": text], in: nil, in: .page, completionHandler: nil)
     }
 
     func share(_ text: String) {
@@ -300,8 +300,7 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, decideMediaCapturePermissionsFor origin: WKSecurityOrigin, initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
-        let requester = "\(origin.protocol)://\(origin.host)\(origin.port == 0 ? "" : ":\(origin.port)")"
-        return frame.isMainFrame && requester == shell.config.origin.origin ? .grant : .prompt
+        frame.isMainFrame && shell.config.origin.isOrigin(scheme: origin.protocol, host: origin.host, port: origin.port) ? .grant : .prompt
     }
 
     private func panel(_ message: String, buttons: [String], accessory: NSView? = nil) async -> NSApplication.ModalResponse {
@@ -312,28 +311,6 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
         guard isShown, let sheet = window?.window else { return alert.runModal() }
         return await alert.beginSheetModal(for: sheet)
     }
-
-    private static let bridgeScript = """
-    (() => {
-      const handler = window.webkit?.messageHandlers?.\(HostProtocol.global);
-      if (!handler || window.\(HostProtocol.global)) return;
-      const listeners = new Set();
-      Object.defineProperty(window, "__cohubHostReceive", {
-        value: (data) => {
-          for (const listener of listeners) {
-            try { listener({ data }); } catch (error) { console.error(error); }
-          }
-        },
-      });
-      Object.defineProperty(window, "\(HostProtocol.global)", {
-        value: Object.freeze({
-          postMessage: (message) => handler.postMessage(String(message)),
-          addEventListener: (type, listener) => { if (type === "message") listeners.add(listener); },
-          removeEventListener: (type, listener) => { if (type === "message") listeners.delete(listener); },
-        }),
-      });
-    })();
-    """
 }
 
 @MainActor

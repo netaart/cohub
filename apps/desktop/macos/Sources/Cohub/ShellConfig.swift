@@ -121,15 +121,9 @@ enum ShellState {
         set { defaults.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: "serviceHello") }
     }
 
-    struct Shortcut: Codable, Equatable {
-        let id: String
-        let label: String
-        let path: String
-    }
-
-    static var shortcuts: [Shortcut] {
-        get { defaults.data(forKey: "shortcuts").flatMap { try? JSONDecoder().decode([Shortcut].self, from: $0) } ?? [] }
-        set { defaults.set(try? JSONEncoder().encode(Array(newValue.prefix(5))), forKey: "shortcuts") }
+    static var shortcuts: [HostShortcut] {
+        get { defaults.data(forKey: "shortcuts").flatMap { try? JSONDecoder().decode([HostShortcut].self, from: $0) } ?? [] }
+        set { defaults.set(try? JSONEncoder().encode(newValue), forKey: "shortcuts") }
     }
 }
 

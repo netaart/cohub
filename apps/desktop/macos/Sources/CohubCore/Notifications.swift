@@ -1,22 +1,22 @@
-import AppKit
-import CohubCore
+#if canImport(UserNotifications)
+import Foundation
 import UserNotifications
 
 @MainActor
-final class Notifications: NSObject, UNUserNotificationCenterDelegate {
+public final class Notifications: NSObject, UNUserNotificationCenterDelegate {
     private let open: @MainActor (String) -> Void
 
-    init(open: @escaping @MainActor (String) -> Void) {
+    public init(open: @escaping @MainActor (String) -> Void) {
         self.open = open
         super.init()
         UNUserNotificationCenter.current().delegate = self
     }
 
-    nonisolated func register() async -> Bool {
+    public nonisolated func register() async -> Bool {
         (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
 
-    nonisolated func state() async -> String {
+    public nonisolated func state() async -> String {
         switch await UNUserNotificationCenter.current().notificationSettings().authorizationStatus {
         case .authorized, .provisional: "granted"
         case .notDetermined: "prompt"
@@ -24,7 +24,7 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    nonisolated func show(_ params: JSON) async throws -> Bool {
+    public nonisolated func show(_ params: JSON) async throws -> Bool {
         guard let id = params["id"]?.string, let title = params["title"]?.string,
               let path = params["path"]?.string, WebOrigin.isInAppPath(path)
         else { throw BridgeFailure.failed("notifications.show requires an id, a title and an in-app path") }
@@ -38,12 +38,13 @@ final class Notifications: NSObject, UNUserNotificationCenterDelegate {
         return true
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard let path = response.notification.request.content.userInfo["path"] as? String else { return }
+    public nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard let path = response.notification.request.content.userInfo["path"] as? String, WebOrigin.isInAppPath(path) else { return }
         await MainActor.run { open(path) }
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+    public nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         [.banner, .list, .sound]
     }
 }
+#endif

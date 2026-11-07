@@ -254,8 +254,8 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 return true
             },
             M.filesSave: { params in try await Downloads.save(params); return true },
-            M.permissionsStatus: { [weak self] _ in await Permissions.status(notifications: self?.notifications) },
-            M.permissionsRequest: { [weak self] params in try await Permissions.request(params["kind"]?.string, notifications: self?.notifications) },
+            M.permissionsStatus: { [weak self] _ in await HostPermissions.status(notifications: self?.notifications) },
+            M.permissionsRequest: { [weak self] params in try await HostPermissions.request(params["kind"]?.string, notifications: self?.notifications) },
             M.permissionsOpenSettings: { params in .bool(Permissions.openSettings(params["kind"]?.string)) },
             M.displayOpenControlSettings: { _ in .bool(Permissions.openSettings("control")) },
             M.badgeSet: { params in
@@ -283,10 +283,8 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 return true
             },
             M.shortcutsPush: { params in
-                guard let id = params["id"]?.string, let label = params["label"]?.string, let path = params["path"]?.string, WebOrigin.isInAppPath(path) else {
-                    throw BridgeFailure.failed("shortcuts.push requires an id, a label and an in-app path")
-                }
-                ShellState.shortcuts = [.init(id: id, label: label, path: path)] + ShellState.shortcuts.filter { $0.id != id }
+                guard let shortcut = HostShortcut(params) else { throw BridgeFailure.failed("shortcuts.push requires an id, a label and an in-app path") }
+                ShellState.shortcuts = shortcut.pushed(onto: ShellState.shortcuts, limit: 5)
                 return true
             },
         ]
