@@ -1,5 +1,22 @@
 # @neta-art/cohub-cli
 
+## 10.25.0
+
+### Minor Changes
+
+- 4c2684d: The CLI starts several times faster and uses far less CPU. It ships as one bundle, loads only the command you run, and reuses V8's compile cache, so `cohub --version` takes about 50 ms instead of about 300 ms and API commands use about a third of the CPU. With `HTTPS_PROXY` set, the proxy now applies in the same process instead of a second Node process.
+  
+  Self-updates no longer pile up: however many commands finish at once, one background worker checks for a release, at the lowest CPU priority and after a random delay of up to a minute. A failed check retries after 30 minutes. An install that runs too long is interrupted, never killed, so npm can roll it back. It also installs less: the SDK and other bundled or unused packages are no longer dependencies.
+
+### Patch Changes
+
+- a744c22: Download sandboxd v2.95.0, bringing local Runtime workspace access, display control fixes and runtime bridge cleanup to npm installs.
+- e5b4b02: The SDK is much smaller in bundled apps. Zod is now imported as a namespace, so bundlers drop the parts that go unused, such as locales and JSON Schema. Gzipped through esm.sh-style bundling, the root entry drops from 206 KB to 142 KB, `/host-bridge` from 95 KB to 33 KB and `/board` from 166 KB to 104 KB. Every entry now comes from a single build that emits each module once. Before, the root entry carried its own copy of the Board model and layout, so text measurement installed by `/board/render` never reached `BoardClient`.
+  
+  `cohub --help` now prints from the command list captured at build time and loads no command code: about 70 ms instead of about 220 ms. `cohub --version` skips the command parser. `boards` and `runtime` commands load export rendering and the Runtime supervisor only when they need them, and the GPU export page ships minified. Together these make the package 1.4 MB smaller.
+  
+  Hosts: no action
+
 ## 10.24.0
 
 ### Minor Changes
