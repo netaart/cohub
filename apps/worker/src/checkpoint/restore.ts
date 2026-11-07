@@ -21,6 +21,9 @@ import { getCheckpointSystemRepoDir, CHECKPOINT_ASSET_MANIFEST_PATH, LEGACY_USER
 import { runGit } from "./git.js";
 import { checkpointObjectStore, getCheckpointAssetClient } from "./assets.js";
 import { assertDirectoryEmpty } from "../git.js";
+import { mapLimit } from "./limit.js";
+
+const SYMLINK_CONCURRENCY = 32;
 
 type AssetManifest = {
   version: number;
@@ -66,19 +69,25 @@ const isInside = (root: string, path: string) => {
 
 /**
  * Symlinks are created after every file, so no restored write passes through
- * one. A link must point inside the workspace both by its text and, when its
- * target exists, by its real path.
+ * one. Each must point inside the workspace by its text, and, checked once
+ * all exist so chains resolve, by its real path.
  */
-async function restoreSymlink(source: string, target: string, targetDir: string) {
-  const link = await readlink(source);
-  if (isAbsolute(link) || !isInside(targetDir, resolve(dirname(target), link))) throw new Error(`unsafe symlink target while restoring ${target}`);
-  await mkdir(dirname(target), { recursive: true, mode: 0o775 });
-  await rm(target, { recursive: true, force: true });
-  await symlink(link, target);
-  const resolved = await realpath(target).catch(() => null);
-  if (resolved && !isInside(await realpath(targetDir), resolved)) {
-    await rm(target, { force: true });
-    throw new Error(`symlink escapes the workspace while restoring ${target}`);
+async function restoreSymlinks(input: { restoreTmpDir: string; targetDir: string; paths: string[] }) {
+  await mapLimit(input.paths, SYMLINK_CONCURRENCY, async (rel) => {
+    const target = safeJoin(input.targetDir, rel);
+    const link = await readlink(safeJoin(input.restoreTmpDir, rel));
+    if (isAbsolute(link) || !isInside(input.targetDir, resolve(dirname(target), link))) throw new Error(`unsafe symlink target while restoring ${rel}`);
+    await mkdir(dirname(target), { recursive: true, mode: 0o775 });
+    await symlink(link, target);
+  });
+  const rootReal = await realpath(input.targetDir);
+  const escaped = (await mapLimit(input.paths, SYMLINK_CONCURRENCY, async (rel) => {
+    const resolved = await realpath(safeJoin(input.targetDir, rel)).catch(() => null);
+    return resolved && !isInside(rootReal, resolved) ? rel : null;
+  })).filter((rel): rel is string => rel !== null);
+  if (escaped.length > 0) {
+    await Promise.all(escaped.map((rel) => rm(safeJoin(input.targetDir, rel), { force: true })));
+    throw new Error(`symlinks escape the workspace while restoring: ${escaped.slice(0, 5).join(", ")}`);
   }
 }
 
@@ -170,7 +179,7 @@ async function restoreFilesFromArchive(input: { restoreTmpDir: string; targetDir
     }
     await copyEntry(source, target);
   }));
-  for (const rel of symlinks.sort()) await restoreSymlink(safeJoin(input.restoreTmpDir, rel), safeJoin(input.targetDir, rel), input.targetDir);
+  await restoreSymlinks({ restoreTmpDir: input.restoreTmpDir, targetDir: input.targetDir, paths: symlinks });
 }
 
 const SAFE_BRANCH_REGEX = /^[a-zA-Z0-9._/-]+$/;

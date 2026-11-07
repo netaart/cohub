@@ -289,3 +289,25 @@ test("the first save on a pre-v3 repository uploads a baseline holding its histo
   assert.equal(git(fresh, "show", `${saved.commitHash}^:docs/old.md`), "old");
   state.currentSpace = spaceId;
 });
+
+test("restore refuses a symlink chain that escapes the workspace, whatever order the links come in", async () => {
+  const craftedSpace = "44444444-4444-4444-8444-444444444444";
+  const craftedRepo = join(root, "system", craftedSpace, "repo");
+  await mkdir(join(craftedRepo, "d"), { recursive: true });
+  await writeFile(join(craftedRepo, "kept.txt"), "kept");
+  await symlink("..", join(craftedRepo, "d/up"));
+  await symlink("d/up/..", join(craftedRepo, "chain"));
+  git(craftedRepo, "init", "-q", "-b", "main");
+  git(craftedRepo, "add", "-A");
+  git(craftedRepo, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "-m", "crafted");
+  state.checkpoints.set("crafted", { id: "crafted", spaceId: craftedSpace, commitHash: git(craftedRepo, "rev-parse", "HEAD") });
+  state.spaces.set(craftedSpace, { id: craftedSpace, headCheckpointId: "crafted", slug: null, userUuid: "user" });
+  state.lookup = "crafted";
+  const target = join(root, "crafted-restore");
+  await mkdir(target, { recursive: true });
+  await assert.rejects(
+    restoreWorkspaceFromCheckpoint({ checkpointId: "crafted", targetWorkspaceDir: target, targetRepoDir: join(root, "system", "crafted-restore", "repo"), restoreTmpDir: join(root, "crafted-tmp") }),
+    /escape the workspace while restoring: chain/,
+  );
+  assert.equal(await lstat(join(target, "chain")).then(() => true, () => false), false);
+});
