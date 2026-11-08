@@ -326,6 +326,8 @@ const FEEDBACK: Record<BoardFeedback, Parameters<typeof haptic>[0]> = {
 };
 
 const scriptCapabilities = {
+	"navigator.vibrate": async (_id: string, pattern: unknown) =>
+		navigator.vibrate?.(pattern as VibratePattern) ?? false,
 	haptics: async (_id: string, input: unknown) => {
 		const kind = (input as { kind?: unknown } | null)?.kind;
 		if (!HOST_HAPTICS.includes(kind as HostHaptic))

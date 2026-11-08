@@ -52,7 +52,7 @@ export type BoardScriptGesture = {
   item?: string;
 };
 
-export const BOARD_SCRIPT_SENSES = ["motion", "gamepad", "audio", "location"] as const;
+export const BOARD_SCRIPT_SENSES = ["motion", "gamepad", "microphone", "camera", "location"] as const;
 export type BoardScriptSense = (typeof BOARD_SCRIPT_SENSES)[number];
 export type BoardScriptSenseState = "on" | "ask" | "denied" | "unavailable";
 
@@ -60,48 +60,64 @@ export type BoardScriptEnv = {
   mode: "edit" | "play" | "view" | "export";
   pointer: "fine" | "coarse";
   orientation: "portrait" | "landscape";
+  angle: number;
   reducedMotion: boolean;
   locale: string | null;
   senses: Record<BoardScriptSense, BoardScriptSenseState>;
 };
 
-export type BoardScriptVec3 = { x: number; y: number; z: number };
+type Xyz = { x: number | null; y: number | null; z: number | null };
 
-export type BoardScriptMotionSample = {
+export type BoardScriptBrowserEvents = {
+  "browser:devicemotion": {
+    acceleration: Xyz | null;
+    accelerationIncludingGravity: Xyz | null;
+    rotationRate: { alpha: number | null; beta: number | null; gamma: number | null } | null;
+    interval: number;
+    t: number;
+  };
+  "browser:deviceorientation": BoardScriptDeviceOrientation;
+  "browser:deviceorientationabsolute": BoardScriptDeviceOrientation;
+  "browser:gamepads": {
+    pads: Array<{
+      index: number;
+      id: string;
+      mapping: string;
+      connected: boolean;
+      timestamp: number;
+      buttons: Array<{ pressed: boolean; touched: boolean; value: number }>;
+      axes: number[];
+    }>;
+  };
+  "browser:position": {
+    coords: {
+      latitude: number;
+      longitude: number;
+      accuracy: number;
+      altitude: number | null;
+      altitudeAccuracy: number | null;
+      heading: number | null;
+      speed: number | null;
+    };
+    timestamp: number;
+  };
+  "browser:audio": { samples: Float32Array; sampleRate: number; t: number };
+  "browser:video": { frame: ImageBitmap; width: number; height: number; t: number };
+};
+
+export type BoardScriptDeviceOrientation = {
+  alpha: number | null;
+  beta: number | null;
+  gamma: number | null;
+  absolute: boolean;
+  webkitCompassHeading?: number;
+  webkitCompassAccuracy?: number;
   t: number;
-  acceleration: BoardScriptVec3;
-  gravity: BoardScriptVec3;
-  rotationRate: BoardScriptVec3;
 };
 
-export type BoardScriptMotion = {
-  samples: BoardScriptMotionSample[];
-  orientation: { x: number; y: number; z: number; w: number } | null;
-  heading: number | null;
-};
+export type BoardScriptBrowserEvent = keyof BoardScriptBrowserEvents;
 
-export type BoardScriptGamepad = { index: number; id: string; buttons: number[]; axes: number[] };
-
-export type BoardScriptAudio = { level: number; pitch: number | null; onset: boolean; spectrum: number[] };
-
-export type BoardScriptLocation = {
-  latitude: number;
-  longitude: number;
-  accuracy: number;
-  altitude: number | null;
-  heading: number | null;
-  speed: number | null;
-  t: number;
-};
-
-export type BoardScriptSenseEvents = {
-  motion: BoardScriptMotion;
-  gamepad: { pads: BoardScriptGamepad[] };
-  audio: BoardScriptAudio;
-  location: BoardScriptLocation;
-};
-
-export type BoardScriptHostEvents = BoardScriptSenseEvents & {
+export type BoardScriptHostEvents = BoardScriptBrowserEvents & {
   viewchange: BoardScriptView;
   envchange: BoardScriptEnv;
   selectionchange: { ids: string[]; total: number };

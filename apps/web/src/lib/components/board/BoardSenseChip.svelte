@@ -5,7 +5,7 @@ import {
 	type BoardConsentSense,
 	type BoardStage,
 } from "@neta-art/cohub/board/stage";
-import { Compass, MapPin, Mic, X } from "lucide-svelte";
+import { Camera, Circle, Compass, MapPin, Mic, Square, X } from "lucide-svelte";
 import type { BoardSenseConsent } from "$lib/board/board-senses.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -13,10 +13,17 @@ import { m } from "$lib/paraglide/messages.js";
 const {
 	stage,
 	consent,
-}: { stage: BoardStage | null; consent: BoardSenseConsent } = $props();
+	recording = false,
+	onRecord,
+}: {
+	stage: BoardStage | null;
+	consent: BoardSenseConsent;
+	recording?: boolean;
+	onRecord?: () => void;
+} = $props();
 
 const locale = $derived(getLocale());
-const ICONS = { audio: Mic, location: MapPin } as const;
+const ICONS = { microphone: Mic, camera: Camera, location: MapPin } as const;
 const NO_STATES = {} as Record<BoardScriptSense, string>;
 
 let wanted = $state.raw<readonly BoardScriptSense[]>([]);
@@ -46,21 +53,23 @@ const motion = $derived(wanted.includes("motion") && states.motion === "ask");
 function label(senses: readonly BoardConsentSense[]) {
 	return new Intl.ListFormat(locale, { type: "conjunction" }).format(
 		senses.map((sense) =>
-			sense === "audio"
+			sense === "microphone"
 				? m.app_devices_microphone({}, { locale })
-				: m.app_devices_location({}, { locale }),
+				: sense === "camera"
+					? m.app_devices_camera({}, { locale })
+					: m.app_devices_location({}, { locale }),
 		),
 	);
 }
 </script>
 
 {#if asking.length && asking.join() !== dismissed}
-	<div class="board-sense" role="status">
+	<div class="board-sense board-sense--ask" role="status">
 		{#each asking as sense (sense)}
 			{@const Icon = ICONS[sense]}
 			<Icon class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 		{/each}
-		<span class="min-w-0 truncate">{m.board_senses_allow({ senses: label(asking) }, { locale })}</span>
+		<span class="min-w-0">{m.board_senses_allow({ senses: label(asking) }, { locale })}</span>
 		<button type="button" class="board-sense-action" onclick={() => consent.allow(asking)}>{m.app_devices_allow({}, { locale })}</button>
 		<button type="button" class="board-sense-close" aria-label={m.common_close({}, { locale })} onclick={() => { dismissed = asking.join(); }}><X class="h-3 w-3" /></button>
 	</div>
@@ -77,6 +86,12 @@ function label(senses: readonly BoardConsentSense[]) {
 			{@const Icon = ICONS[sense]}
 			<Icon class="h-3.5 w-3.5" aria-hidden="true" />
 		{/each}
+	</button>
+{/if}
+{#if onRecord && (recording || wanted.length)}
+	<button type="button" class="board-sense" class:board-sense--recording={recording} aria-pressed={recording} onclick={onRecord}>
+		{#if recording}<Square class="h-3 w-3" aria-hidden="true" />{:else}<Circle class="h-3 w-3" aria-hidden="true" />{/if}
+		{recording ? m.board_input_stop({}, { locale }) : m.board_input_record({}, { locale })}
 	</button>
 {/if}
 
@@ -100,7 +115,16 @@ function label(senses: readonly BoardConsentSense[]) {
 	}
 	button.board-sense { padding: 0 14px; }
 	button.board-sense:hover { background: var(--bg-hover); }
+	.board-sense--ask {
+		height: auto;
+		min-height: 32px;
+		border-radius: 16px;
+		padding-block: 4px;
+		white-space: normal;
+		line-height: 1.35;
+	}
 	.board-sense--using { color: var(--brand-muted-fg); }
+	.board-sense--recording { color: var(--color-error-soft); }
 	.board-sense-action {
 		border-radius: 999px;
 		padding: 2px 8px;

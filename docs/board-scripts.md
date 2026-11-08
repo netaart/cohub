@@ -303,65 +303,85 @@ selection enters the document, history, or shared playback.
 `ctx.env` describes the viewer and stays current; `envchange` reports changes:
 
 ```js
-ctx.env; // { mode: "play", pointer: "coarse", orientation: "portrait", reducedMotion: false,
-         //   locale: "en", senses: { motion: "on", gamepad: "on", audio: "ask", location: "ask" } }
+ctx.env; // { mode: "play", pointer: "coarse", orientation: "portrait", angle: 0, reducedMotion: false,
+         //   locale: "en", senses: { motion: "on", gamepad: "on", microphone: "ask", camera: "ask", location: "ask" } }
 ctx.on("envchange", ({ data }) => layout(data.orientation));
 ```
 
 `mode` is `edit`, `play` (a Board App or **Play**), `view` (read-only) or `export`.
-Exports and profiles report `export`, a fine pointer and every sense `unavailable`,
-so they replay without a device.
+Exports and profiles report `export`, a fine pointer and every source `unavailable`.
 
-Device senses arrive as events. Listening is the whole API: a sense starts while some
-script listens, the Board is on screen and the page visible, and stops otherwise, so a
-Board that never listens attaches nothing. While one runs, the screen stays on.
+Scripts run in a worker, where the browser offers no device APIs, so the app reads the
+devices and forwards what the browser reports, field for field, as `browser:*` events.
+Listening is the whole API: a source starts while some script listens to one of its
+events, the Board is on screen and the page visible, and stops otherwise, so a Board
+that never listens attaches nothing. While one runs, the screen stays on.
 
 ```js
-ctx.on("motion", ({ data }) => {
-  for (const { rotationRate, acceleration, gravity } of data.samples) steer(rotationRate);
-  data.orientation; // quaternion { x, y, z, w }, or null
-  data.heading;     // compass degrees, or null
-});
-ctx.on("gamepad", ({ data }) => move(data.pads[0]?.axes));
-ctx.on("audio", ({ data }) => { if (data.onset) blowOut(data.level, data.pitch); });
-ctx.on("location", ({ data }) => center(data.latitude, data.longitude));
+ctx.on("browser:devicemotion", ({ data }) => data.rotationRate);      // DeviceMotionEvent
+ctx.on("browser:deviceorientation", ({ data }) => data.alpha);        // also …absolute
+ctx.on("browser:gamepads", ({ data }) => data.pads[0]?.axes);         // navigator.getGamepads()
+ctx.on("browser:audio", ({ data }) => analyse(data.samples, data.sampleRate)); // mono PCM, ~20 ms
+ctx.on("browser:video", ({ data }) => { ctx.state.frame = data.frame; ctx.invalidate(); }); // ImageBitmap
+ctx.on("browser:position", ({ data }) => center(data.coords.latitude, data.coords.longitude));
 ```
 
-Motion vectors use screen axes (x right, y up, z out of the screen) in m/s² and rad/s,
-whichever way the screen is turned. A busy worker receives every motion sample since
-its last event in one batch; gamepads (standard mapping, sent when they change) and
-locations keep the latest reading; audio carries level (0–1), pitch in Hz, onsets and a
-32-band spectrum from 50 Hz to 12 kHz, never the sound itself: Board scripts run without
-a DOM, so the app reads devices for them, and features keep speech out of anything a
-script can save. Apps that need the recording itself get the microphone directly.
+Motion arrives in device axes and the browser's units, one event per reading; turn it
+by `ctx.env.angle` for screen axes. Gamepads, positions and camera frames keep only the
+latest reading while a worker is busy. A camera frame stays usable until the next one
+arrives, up to 30 a second; draw it in `draw()`. `cohub boards examples senses --module`
+prints optional helpers to copy into the Space: `onMotion()` batches motion once a frame
+in screen axes with gravity split out, and `onAudio()` turns samples into level, pitch,
+onsets and a 32-band spectrum; `cohub boards examples tilt` uses them.
 
 `senses` says what listening would bring: `on`, `ask`, `denied` or `unavailable`.
 Motion and gamepads need nothing else, except that iOS asks for motion on the viewer's
-first tap on the Board, and a pad appears once a button is pressed. The microphone
-and location also need the viewer's consent for this Board, which the Cohub app asks
-for while a script listens and remembers on the device; every Board shares one
+first tap on the Board, and a pad appears once a button is pressed. The microphone,
+camera and location also need the viewer's consent for this Board, which the Cohub app
+asks for while a script listens and remembers on the device; every Board shares one
 origin, so the browser's own grant cannot tell them apart. Show your own hint while a
-sense is `ask`, and a fallback for `denied` and `unavailable`.
+source is `ask`, and a fallback for `denied` and `unavailable`.
 
 Readings go only to scripts on this device; Cohub never saves or shares them. What a
-script commits from them is saved like any other edit: it does not count as the
-viewer's input, so it saves through one live editor, as from `onFrame()`, and in a
-Board App only to the visitor's own copy. Save no more than the Board needs. In play,
-keys without modifiers reach every script listening for `keydown` or `keyup` unless a
-field or button has focus, for WASD and arrow controls.
+script commits or sends from them is its own: a commit does not count as the viewer's
+input, so it saves through one live editor, as from `onFrame()`, and in a Board App only
+to the visitor's own copy. Save and send no more than the Board needs. In play, keys
+without modifiers reach every script listening for `keydown` or `keyup` unless a field
+or button has focus, for WASD and arrow controls.
 
-The Cohub app also provides two outputs:
+Live Boards may also `fetch()` and open `WebSocket`s from scripts, to reach a service or
+link devices. Exports and simulations have no network.
+
+The Cohub app also provides outputs:
 
 ```js
+ctx.capabilities.call("navigator.vibrate", [12, 24, 12]);
 ctx.capabilities.call("haptics", { kind: "confirm" }); // tick | confirm | reject | longPress
 ctx.capabilities.call("fullscreen", { orientation: "landscape" }); // { exit: true } leaves
 ```
 
-Haptics are silent where the device has none, such as Safari on iPhone. Fullscreen
-works in play and read-only views and resolves true once entered; when the browser
-needs a tap it waits for the viewer's next tap on the Board. Exports provide neither, so check `capabilities.has()` first.
-`cohub boards simulate` turns every sense on and delivers readings with
-`{"sense": "motion", "data": {…}}` steps; the test harness has `board.sense(type, data)`.
+`haptics` also reaches the native engines of the Cohub apps, where `navigator.vibrate`
+does nothing, such as on iPhone. Fullscreen works in play and read-only views and
+resolves true once entered; when the browser needs a tap it waits for the viewer's next
+tap on the Board. Exports provide none of these, so check `capabilities.has()` first.
+
+### Record and replay input
+
+**Record input** beside the Board's sense controls records the browser input scripts
+receive, apart from camera frames, into `<board>.inputs/<time>.json` next to the Board.
+A recording stops by itself at about 9 MB, half a minute of microphone or many minutes
+of motion.
+A video export can replay the latest recording, and so can the CLI:
+
+```bash
+cohub boards export wand.board --animation demo --at 0:10s:33ms --inputs wand.inputs/2026-11-08-09-30-00.json -o demo.mp4
+cohub boards simulate wand.board '{"steps":[{"inputs":"wand.inputs/2026-11-08-09-30-00.json"}]}'
+```
+
+Inputs replay from time 0, each in the frame it was recorded in, so the export moves
+as the Board did live. `simulate` turns every source on, delivers one event with
+`{"input": "browser:devicemotion", "data": {…}}` and replays a recording with
+`{"inputs": "…"}`; the test harness has `board.input(type, data)` and `board.replay(log)`.
 
 ## Anchor screen UI
 
@@ -642,8 +662,9 @@ in both browser and CLI, even if the module also exports `draw()`. Use Apps for
 HTML/JavaScript content; Board does not execute arbitrary module code in an iframe.
 The shared broker iframe executes only the host's fixed routing code.
 
-Browser modules have no Space credentials or direct network access. The embedding
-host can provide typed application adapters through `scriptCapabilities`:
+Browser modules have no Space credentials. Live Boards may reach the network; exports
+cannot. The embedding host can provide typed application adapters through
+`scriptCapabilities`:
 
 ```js
 if (ctx.capabilities.has("example.lookup")) {

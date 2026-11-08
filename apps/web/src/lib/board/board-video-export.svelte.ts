@@ -15,6 +15,7 @@ export type BoardVideoExportRequest = {
 	region: BoardExportRegion;
 	camera?: { width: number; height: number };
 	scale: number;
+	inputs?: string;
 };
 
 export type BoardVideoExportState =
@@ -54,6 +55,7 @@ export function boardVideoExportCommand(
 		"-o",
 		output,
 	];
+	if (request.inputs) args.push("--inputs", request.inputs);
 	if (camera)
 		args.push("--camera", "--size", `${camera.width}x${camera.height}`);
 	else {

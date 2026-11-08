@@ -102,6 +102,7 @@ export function createScriptRuntime(
   let view: BoardScriptView | null = null;
   let hits: BoardScriptOutput["hits"] = effects?.hits ?? {};
   let uniforms: BoardScriptOutput["uniforms"] = effects?.uniforms;
+  let videoFrame: { close?(): void } | undefined;
   let passes: BoardScriptOutput["passes"] = effects?.passes;
   const invalidate = (scene = true) => {
     if (disposed) return;
@@ -307,6 +308,10 @@ export function createScriptRuntime(
     event(event: BoardScriptEvent) {
       if (disposed) return;
       if (event.type === "viewchange") view = event.data as BoardScriptView;
+      if (event.type === "browser:video") {
+        videoFrame?.close?.();
+        videoFrame = (event.data as { frame?: { close?(): void } }).frame;
+      }
       const listeners = handlers.get(event.type);
       if (!listeners?.size) return;
       const outer = depth;
@@ -359,6 +364,7 @@ export function createScriptRuntime(
     },
     destroy() {
       disposed = true;
+      videoFrame?.close?.();
       for (const cleanup of cleanups.reverse()) cleanup();
       handlers.clear();
       frames.clear();

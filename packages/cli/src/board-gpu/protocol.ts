@@ -8,6 +8,7 @@ export type BoardGpuInit = {
   animation: string | null;
   theme: BoardThemeId;
   snapshots?: Record<string, BoardScriptSnapshot>;
+  inputs?: string;
 };
 export type BoardGpuFrame = {
   time: number | null;

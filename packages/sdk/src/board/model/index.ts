@@ -28,6 +28,7 @@ export * from "./overlay-placement.js";
 export * from "./script.js";
 export * from "./script-index.js";
 export * from "./script-events.js";
+export * from "./script-senses.js";
 export * from "./script-hit.js";
 export * from "./script-api.js";
 export * from "./script-example.js";

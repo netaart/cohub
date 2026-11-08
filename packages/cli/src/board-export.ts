@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 const execFile = promisify(execFileCallback);
-import { boardExportView, boardMediaNaturalSize, parseBoardMediaSource } from "@neta-art/cohub/board";
+import { boardExportView, boardMediaNaturalSize, parseBoardMediaSource, parseBoardScriptInputs } from "@neta-art/cohub/board";
 import type { BoardAssetKeySource, BoardDocument, BoardExportRegion, BoardMediaState, BoardSceneItem, BoardScriptSnapshot, BoardThemeId } from "@neta-art/cohub/board";
 import { imageVariantUrl, MEDIA_VARIANT_MAX, mediaVariantSize, videoFrameUrl } from "@neta-art/cohub/media";
 import type {
@@ -228,6 +228,7 @@ export type BoardExportRunOptions = {
   document?: BoardDocument;
   scripts?: BoardScriptHost;
   snapshots?: Record<string, BoardScriptSnapshot>;
+  inputs?: string;
   renderer?: BoardExportRenderer;
   signal?: AbortSignal;
   imageMemoryMiB?: number;
@@ -326,6 +327,7 @@ export async function runBoardExport(
 ): Promise<BoardExportRunResult | null> {
   options.signal?.throwIfAborted();
   const document = options.document ?? await settleBoardDocument(options.spaceId, (await loadBoardDocument(options.spaceId, options.target)).document);
+  const inputs = options.inputs ? parseBoardScriptInputs(options.inputs) : undefined;
   if (options.animation && !document.animations[options.animation]) {
     throw new Error(`Animation ${options.animation} does not exist.`);
   }
@@ -439,7 +441,7 @@ export async function runBoardExport(
       doing = "starting the browser";
       const exporter = await openBoardGpu(gpuResources(options.spaceId, document, (key) => framePictures.get(key)), { browser, signal: options.signal });
       try {
-        await exporter.init({ document, animation: options.animation ?? null, theme: options.theme, ...(options.snapshots ? { snapshots: options.snapshots } : {}) });
+        await exporter.init({ document, animation: options.animation ?? null, theme: options.theme, ...(options.snapshots ? { snapshots: options.snapshots } : {}), ...(options.inputs ? { inputs: options.inputs } : {}) });
       } catch (error) {
         await exporter.close();
         throw error;
@@ -466,6 +468,7 @@ export async function runBoardExport(
         await scripts.prepare(initial.scene.items, [time ?? 0], initial.plan.scale, initial.document.board, {
           shaders,
           view: boardExportView(initial.plan),
+          ...(inputs ? { inputs } : {}),
           ...(history ? { history: (at: number) => documentAt(at) } : {}),
         });
         for (const [id, message] of scripts.emitFailures) report(`${id}: ${message}`);

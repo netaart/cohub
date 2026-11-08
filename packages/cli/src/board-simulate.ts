@@ -1,5 +1,5 @@
-import { BOARD_SCRIPT_SENSES, diffMergePatch } from "@neta-art/cohub/board";
-import type { BoardDocument, BoardExportRegion, BoardScriptSense, BoardScriptSenseEvents, BoardThemeId } from "@neta-art/cohub/board";
+import { boardScriptSenseOf, diffMergePatch, parseBoardScriptInputs } from "@neta-art/cohub/board";
+import type { BoardDocument, BoardExportRegion, BoardScriptBrowserEvent, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
 import type { BoardScriptHarness, BoardScriptHarnessPointer, BoardScriptHarnessPress } from "@neta-art/cohub/board/testing";
 import { loadBoardDocument } from "./board-document.js";
@@ -38,7 +38,8 @@ export type BoardSimulationStep =
   | { pointer: "down" | "move" | "up"; at: Point; input: BoardScriptHarnessPointer }
   | { key: string }
   | { select: string[] }
-  | { sense: BoardScriptSense; data: BoardScriptSenseEvents[BoardScriptSense] };
+  | { input: BoardScriptBrowserEvent; data: unknown }
+  | { inputs: string };
 
 function point(value: unknown, name: string): Point {
   if (!Array.isArray(value) || value.length !== 2 || !value.every((n) => typeof n === "number" && Number.isFinite(n)))
@@ -102,17 +103,21 @@ function parseStep(entry: unknown, index: number): BoardSimulationStep {
     if (!Array.isArray(step.select) || !step.select.every((id) => typeof id === "string")) throw new Error(`${name}.select must list item ids`);
     return { select: step.select as string[] };
   }
-  if ("sense" in step) {
-    if (!BOARD_SCRIPT_SENSES.includes(step.sense as never)) throw new Error(`${name}.sense must be one of ${BOARD_SCRIPT_SENSES.join(", ")}`);
+  if ("input" in step) {
+    if (typeof step.input !== "string" || !boardScriptSenseOf(step.input)) throw new Error(`${name}.input must be a browser event, such as browser:devicemotion`);
     if (!step.data || typeof step.data !== "object" || Array.isArray(step.data)) throw new Error(`${name}.data must be an object`);
-    return { sense: step.sense as BoardScriptSense, data: step.data as BoardScriptSenseEvents[BoardScriptSense] };
+    return { input: step.input as BoardScriptBrowserEvent, data: step.data };
   }
-  throw new Error(`${name} must be one of wait, tool, tap, drag, move, pointer, key, select or sense`);
+  if ("inputs" in step) {
+    if (typeof step.inputs !== "string" || !step.inputs) throw new Error(`${name}.inputs must be a Space file path`);
+    return { inputs: step.inputs };
+  }
+  throw new Error(`${name} must be one of wait, tool, tap, drag, move, pointer, key, select, input or inputs`);
 }
 
 export type BoardSimulationPress = BoardScriptHarnessPress & { step: number };
 
-async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationStep[], progress: { step: number }, presses: BoardSimulationPress[]) {
+async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationStep[], progress: { step: number }, presses: BoardSimulationPress[], readInputs: (path: string) => Promise<string>) {
   for (const [index, step] of steps.entries()) {
     progress.step = index;
     let press: BoardScriptHarnessPress | null = null;
@@ -125,7 +130,8 @@ async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationS
     else if ("key" in step) {
       await harness.key("keydown", step.key);
       await harness.key("keyup", step.key);
-    } else if ("sense" in step) await harness.sense(step.sense, step.data);
+    } else if ("input" in step) await harness.input(step.input, step.data as never);
+    else if ("inputs" in step) await harness.replay(parseBoardScriptInputs(await readInputs(step.inputs)));
     else await harness.select(step.select);
     if (press) presses.push({ step: index, ...press });
   }
@@ -236,7 +242,7 @@ export async function runBoardSimulation(options: {
       };
     }
     progress.phase = "running the steps";
-    await run(current, options.steps, progress, presses);
+    await run(current, options.steps, progress, presses, async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes));
     progress.phase = "settling the scripts";
     await current.flush();
     const { shaders, errors } = shadersOf(current);

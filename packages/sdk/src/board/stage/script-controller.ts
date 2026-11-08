@@ -10,15 +10,23 @@ import { createBoardScriptObservers, type BoardScriptWorldGesture } from "../mod
 import { isBoardRootScript } from "../model/script-index.js";
 import { BOARD_SCRIPT_EVENT_QUEUE, boardScriptEmit } from "../model/script-events.js";
 import { composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
-import { BOARD_SCRIPT_EXPORT_ENV, sameBoardScriptEnv } from "../model/script-senses.js";
+import {
+  BOARD_SCRIPT_EXPORT_ENV,
+  BOARD_SCRIPT_INPUT_LOG_BYTES,
+  type BoardScriptInputLog,
+  boardScriptInputBytes,
+  boardScriptSenseOf,
+  sameBoardScriptEnv,
+} from "../model/script-senses.js";
 import { type BoardShaderOwner, boardShaderOwners } from "../render/shader/layers.js";
 import {
   BOARD_SCRIPT_SENSES,
+  type BoardScriptBrowserEvent,
+  type BoardScriptBrowserEvents,
   type BoardScriptEnv,
   type BoardScriptEvent,
   type BoardScriptOutput,
   type BoardScriptSense,
-  type BoardScriptSenseEvents,
   type BoardScriptSnapshot,
 } from "../model/script.js";
 import type { BoardScriptHostCallbacks, BoardScriptRuntimeHost } from "../render/script-host.js";
@@ -85,6 +93,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
   const moved = new Map<string, number>();
   const listeners = new Set<() => void>();
   const sensing = new Map<BoardScriptSense, Set<string>>(BOARD_SCRIPT_SENSES.map((sense) => [sense, new Set<string>()]));
+  let recording: { from: number; bytes: number; log: BoardScriptInputLog; onFull?: () => void } | null = null;
   const keyListeners = new Set<string>();
   let env: BoardScriptEnv = BOARD_SCRIPT_EXPORT_ENV;
   let version = 0;
@@ -143,9 +152,10 @@ export function createBoardScriptController(options: BoardScriptControllerOption
 
   function track(id: string, listens: readonly string[] | null) {
     let changed = false;
+    const senses = new Set(listens?.map(boardScriptSenseOf));
     for (const [sense, ids] of sensing) {
       const before = ids.size;
-      if (listens?.includes(sense)) ids.add(id);
+      if (senses.has(sense)) ids.add(id);
       else ids.delete(id);
       changed ||= ids.size !== before;
     }
@@ -442,9 +452,38 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     get senses(): BoardScriptSense[] {
       return paused ? [] : BOARD_SCRIPT_SENSES.filter((sense) => (sensing.get(sense)?.size ?? 0) > 0);
     },
-    sense<Type extends BoardScriptSense>(type: Type, data: BoardScriptSenseEvents[Type]) {
-      if (paused) return;
-      for (const id of sensing.get(type) ?? []) host?.event(id, { type, data });
+    input<Type extends BoardScriptBrowserEvent>(type: Type, data: BoardScriptBrowserEvents[Type]) {
+      const sense = boardScriptSenseOf(type);
+      if (paused || !sense) return;
+      const targets = [...(sensing.get(sense) ?? [])].filter((id) => outputs.get(id)?.listens.includes(type));
+      if (type !== "browser:video") {
+        if (recording) {
+          recording.bytes += boardScriptInputBytes(data);
+          if (recording.bytes > BOARD_SCRIPT_INPUT_LOG_BYTES) {
+            const full = recording;
+            recording = null;
+            full.onFull?.();
+          } else recording.log.inputs.push({ t: now() - recording.from, type, data });
+        }
+        for (const id of targets) host?.event(id, { type, data });
+        return;
+      }
+      const { frame } = data as BoardScriptBrowserEvents["browser:video"];
+      if (!targets.length) return frame.close();
+      void Promise.all(targets.slice(1).map(() => createImageBitmap(frame))).then((copies) => {
+        for (const [index, id] of targets.entries())
+          host?.event(id, { type, data: { ...data, frame: index ? copies[index - 1] : frame } });
+      }, () => frame.close());
+    },
+    record(onFull?: () => void): { stop(): BoardScriptInputLog } {
+      const current = { from: now(), bytes: 0, log: { version: 1, inputs: [] } as BoardScriptInputLog, onFull };
+      recording = current;
+      return {
+        stop() {
+          if (recording === current) recording = null;
+          return current.log;
+        },
+      };
     },
     cursor(): string | null {
       if (!hover) return null;

@@ -1,5 +1,5 @@
 import type { BoardPlaybackSnapshot } from "@cohub/protocol";
-import type { BoardScriptOutput, BoardScriptSense, BoardScriptSenseState, BoardScriptSnapshot } from "../model/index.js";
+import type { BoardScriptInputLog, BoardScriptOutput, BoardScriptSense, BoardScriptSenseState, BoardScriptSnapshot } from "../model/index.js";
 import { Application, Container, Graphics, type Renderer, RendererType, type Texture } from "pixi.js";
 import type { BoardActivation, BoardEditor, BoardPointerEvent } from "../editor/index.js";
 import { boardDragSlop, boardTextGestureWrap, isCreationBoardTool, isTouchLikePointer, resizeCursorForHandle } from "../editor/index.js";
@@ -188,6 +188,7 @@ export type BoardStage = {
 	};
 	key(event: KeyboardEvent): boolean;
 	whenGesture(run: () => void): () => void;
+	recordInputs(onFull?: () => void): { stop(): BoardScriptInputLog };
 	/** Video and audio a timeline plays; `blocked` while the browser holds back sound until an interaction. */
 	readonly media: Pick<BoardMediaClock, "blocked" | "unlock" | "subscribe">;
 	/** Play a short particle burst at a world point, such as a reaction; never written to the Board. */
@@ -265,7 +266,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		for (const listener of senseListeners) listener();
 	};
 	const senses = createBoardSenses({
-		onReading: (type, data) => scripts.sense(type, data),
+		onReading: (type, data) => scripts.input(type, data),
 		onChange: () => {
 			scheduleTick();
 			notifySenses();
@@ -286,6 +287,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		device: () => ({
 			pointer: coarsePointer?.matches ? "coarse" : "fine",
 			orientation: portrait?.matches ? "portrait" : "landscape",
+			angle: typeof screen === "undefined" ? 0 : (screen.orientation?.angle ?? 0),
 			reducedMotion: options.reducedMotion?.() ?? false,
 			locale: options.locale?.() ?? (typeof navigator === "undefined" ? null : navigator.language || null),
 			senses: senses.states,
@@ -1624,6 +1626,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			return true;
 		},
 		whenGesture: (run) => senses.whenGesture(run),
+		recordInputs: (onFull) => scripts.record(onFull),
 		media: {
 			get blocked() {
 				return media.blocked;

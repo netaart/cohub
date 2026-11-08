@@ -1,48 +1,48 @@
 import {
   BOARD_SCRIPT_SENSES,
-  type BoardScriptMotionSample,
+  type BoardScriptBrowserEvent,
+  type BoardScriptBrowserEvents,
   type BoardScriptSense,
-  type BoardScriptSenseEvents,
   type BoardScriptSenseState,
-  type BoardScriptVec3,
 } from "../model/script.js";
 
-/** Senses that also need the viewer's consent in the host: one origin serves every Board. */
-export const BOARD_CONSENT_SENSES = ["audio", "location"] as const;
+export const BOARD_CONSENT_SENSES = ["microphone", "camera", "location"] as const;
 export type BoardConsentSense = (typeof BOARD_CONSENT_SENSES)[number];
 
+type Emit = <Type extends BoardScriptBrowserEvent>(type: Type, data: BoardScriptBrowserEvents[Type]) => void;
+
 export type BoardSensesOptions = {
-  onReading<Type extends BoardScriptSense>(type: Type, data: BoardScriptSenseEvents[Type]): void;
+  onReading: Emit;
   onChange(): void;
   consent?: (sense: BoardConsentSense) => boolean;
 };
 
-type Emit = <Type extends BoardScriptSense>(type: Type, data: BoardScriptSenseEvents[Type]) => void;
 type Source = {
   available(): boolean;
   permit?(): Promise<boolean>;
   start(emit: Emit, fail: (state: "denied" | "unavailable") => void): () => void;
 };
 
-const DEG = Math.PI / 180;
-const AWAKE: ReadonlySet<BoardScriptSense> = new Set(["motion", "audio", "location"]);
-const isConsent = (sense: BoardScriptSense): sense is BoardConsentSense => sense === "audio" || sense === "location";
+const AWAKE: ReadonlySet<BoardScriptSense> = new Set(["motion", "microphone", "camera", "location"]);
+const isConsent = (sense: BoardScriptSense): sense is BoardConsentSense => (BOARD_CONSENT_SENSES as readonly string[]).includes(sense);
 const coarse = () => typeof matchMedia === "function" && matchMedia("(any-pointer: coarse)").matches;
 
-function screenAngle(): number {
-  const angle = screen.orientation?.angle ?? (globalThis as { orientation?: number }).orientation ?? 0;
-  return ((angle % 360) + 360) % 360;
+function plain(value: unknown, depth = 3): unknown {
+  if (value === null || typeof value !== "object") return typeof value === "function" ? undefined : value;
+  if (depth === 0) return undefined;
+  if (Array.isArray(value)) return value.map((entry) => plain(entry, depth - 1) ?? null);
+  const result: Record<string, unknown> = {};
+  for (const key in value) {
+    const field = plain((value as Record<string, unknown>)[key], depth - 1);
+    if (field !== undefined) result[key] = field;
+  }
+  return result;
 }
 
-function toScreen(v: BoardScriptVec3, angle: number): BoardScriptVec3 {
-  if (angle === 0) return v;
-  const c = Math.round(Math.cos(angle * DEG));
-  const s = Math.round(Math.sin(angle * DEG));
-  return { x: v.x * c - v.y * s, y: v.x * s + v.y * c, z: v.z };
-}
+const pick = <T>(event: object, keys: readonly string[]) =>
+  Object.fromEntries(keys.flatMap((key) => (key in event ? [[key, plain((event as Record<string, unknown>)[key])]] : []))) as T;
 
-const vec = (value: { x?: number | null; y?: number | null; z?: number | null } | null | undefined): BoardScriptVec3 | null =>
-  value && value.x != null && value.y != null && value.z != null ? { x: value.x, y: value.y, z: value.z } : null;
+const ORIENTATION_KEYS = ["alpha", "beta", "gamma", "absolute", "webkitCompassHeading", "webkitCompassAccuracy"] as const;
 
 function motionSource(): Source {
   type Permission = { requestPermission?: () => Promise<string> };
@@ -57,53 +57,22 @@ function motionSource(): Source {
         }
       : undefined,
     start(emit) {
-      let samples: BoardScriptMotionSample[] = [];
-      let orientation: { x: number; y: number; z: number; w: number } | null = null;
-      let heading: number | null = null;
-      let gravity: BoardScriptVec3 = { x: 0, y: 0, z: 0 };
-      let frame = 0;
-      const flush = () => {
-        frame = 0;
-        const data = { samples, orientation, heading };
-        samples = [];
-        emit("motion", data);
-      };
-      const onMotion = (event: DeviceMotionEvent) => {
-        const angle = screenAngle();
-        const total = vec(event.accelerationIncludingGravity);
-        let acceleration = vec(event.acceleration);
-        if (total && acceleration) gravity = { x: total.x - acceleration.x, y: total.y - acceleration.y, z: total.z - acceleration.z };
-        else if (total) {
-          gravity = { x: gravity.x + (total.x - gravity.x) * 0.1, y: gravity.y + (total.y - gravity.y) * 0.1, z: gravity.z + (total.z - gravity.z) * 0.1 };
-          acceleration = { x: total.x - gravity.x, y: total.y - gravity.y, z: total.z - gravity.z };
-        }
-        const rate = event.rotationRate;
-        samples.push({
+      const onMotion = (event: DeviceMotionEvent) =>
+        emit("browser:devicemotion", {
+          ...pick<Omit<BoardScriptBrowserEvents["browser:devicemotion"], "t">>(event, ["acceleration", "accelerationIncludingGravity", "rotationRate", "interval"]),
           t: event.timeStamp,
-          acceleration: toScreen(acceleration ?? { x: 0, y: 0, z: 0 }, angle),
-          gravity: toScreen(gravity, angle),
-          rotationRate: toScreen({ x: (rate?.beta ?? 0) * DEG, y: (rate?.gamma ?? 0) * DEG, z: (rate?.alpha ?? 0) * DEG }, angle),
         });
-        frame ||= requestAnimationFrame(flush);
-      };
-      const onOrientation = (event: DeviceOrientationEvent) => {
-        if (event.alpha == null || event.beta == null || event.gamma == null) return;
-        const angle = screenAngle();
-        const [x, y, z] = [event.beta * DEG / 2, event.gamma * DEG / 2, event.alpha * DEG / 2];
-        const [cx, cy, cz, sx, sy, sz] = [Math.cos(x), Math.cos(y), Math.cos(z), Math.sin(x), Math.sin(y), Math.sin(z)];
-        const q = { x: sx * cy * cz - cx * sy * sz, y: cx * sy * cz + sx * cy * sz, z: cx * cy * sz + sx * sy * cz, w: cx * cy * cz - sx * sy * sz };
-        const [hz, hw] = [Math.sin(-angle * DEG / 2), Math.cos(-angle * DEG / 2)];
-        orientation = { x: q.x * hw + q.y * hz, y: q.y * hw - q.x * hz, z: q.z * hw + q.w * hz, w: q.w * hw - q.z * hz };
-        const compass = (event as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading;
-        heading = compass ?? (event.absolute ? (360 - event.alpha + angle) % 360 : heading);
-      };
-      const orientationType = "ondeviceorientationabsolute" in globalThis ? "deviceorientationabsolute" : "deviceorientation";
+      const onOrientation = (event: Event) =>
+        emit(`browser:${event.type as "deviceorientation" | "deviceorientationabsolute"}`, {
+          ...pick<Omit<BoardScriptBrowserEvents["browser:deviceorientation"], "t">>(event, ORIENTATION_KEYS),
+          t: event.timeStamp,
+        });
+      const types = ["deviceorientation", ...("ondeviceorientationabsolute" in globalThis ? ["deviceorientationabsolute"] : [])];
       addEventListener("devicemotion", onMotion);
-      addEventListener(orientationType, onOrientation as EventListener);
+      for (const type of types) addEventListener(type, onOrientation);
       return () => {
         removeEventListener("devicemotion", onMotion);
-        removeEventListener(orientationType, onOrientation as EventListener);
-        cancelAnimationFrame(frame);
+        for (const type of types) removeEventListener(type, onOrientation);
       };
     },
   };
@@ -116,16 +85,12 @@ function gamepadSource(): Source {
       let frame = 0;
       let last = "";
       const poll = () => {
-        const pads = [...navigator.getGamepads()].flatMap((pad) => (pad?.connected ? [{
-          index: pad.index,
-          id: pad.id,
-          buttons: pad.buttons.map((button) => Math.round(button.value * 100) / 100),
-          axes: pad.axes.map((axis) => Math.round(axis * 100) / 100),
-        }] : []));
+        const pads = [...navigator.getGamepads()].flatMap((pad) =>
+          pad ? [pick<BoardScriptBrowserEvents["browser:gamepads"]["pads"][number]>(pad, ["index", "id", "mapping", "connected", "timestamp", "buttons", "axes"])] : []);
         const key = JSON.stringify(pads);
         if (key !== last) {
           last = key;
-          emit("gamepad", { pads });
+          emit("browser:gamepads", { pads });
         }
         frame = pads.length ? requestAnimationFrame(poll) : 0;
       };
@@ -142,98 +107,112 @@ function gamepadSource(): Source {
   };
 }
 
-const AUDIO_MS = 33;
-const SPECTRUM_BANDS = 32;
-const SPECTRUM_HZ = [50, 12_000] as const;
+const failure = (error: unknown) => {
+  const name = error instanceof DOMException ? error.name : "";
+  return name === "NotAllowedError" || name === "SecurityError" ? "denied" : "unavailable";
+};
 
-function spectrumBands(bins: number, rate: number): Array<[number, number]> {
-  const [low, high] = SPECTRUM_HZ;
-  const bin = (hz: number) => Math.min(bins - 1, Math.round((hz / (rate / 2)) * bins));
-  return Array.from({ length: SPECTRUM_BANDS }, (_, i) => {
-    const from = bin(low * (high / low) ** (i / SPECTRUM_BANDS));
-    return [from, Math.max(from + 1, bin(low * (high / low) ** ((i + 1) / SPECTRUM_BANDS)))];
-  });
-}
-
-function pitchOf(buffer: Float32Array, rate: number): number | null {
-  const min = Math.floor(rate / 1000);
-  const max = Math.min(buffer.length >> 1, Math.ceil(rate / 60));
-  const at = (i: number) => buffer[i] as number;
-  let energy = 0;
-  for (let i = 0; i < max; i += 2) energy += at(i) * at(i);
-  if (!energy) return null;
-  let best = 0;
-  let lag = 0;
-  for (let offset = min; offset < max; offset++) {
-    let sum = 0;
-    for (let i = 0; i < max; i += 2) sum += at(i) * at(i + offset);
-    if (sum > best) {
-      best = sum;
-      lag = offset;
+const AUDIO_WORKLET = `registerProcessor("cohub-board-audio", class extends AudioWorkletProcessor {
+  buffer = new Float32Array(8192);
+  length = 0;
+  process([input]) {
+    const channel = input && input[0];
+    if (channel) {
+      this.buffer.set(channel, this.length);
+      this.length += channel.length;
+      if (this.length >= sampleRate / 50) {
+        this.port.postMessage(this.buffer.slice(0, this.length));
+        this.length = 0;
+      }
     }
+    return true;
   }
-  return lag && best / energy > 0.5 ? Math.round(rate / lag) : null;
-}
+});`;
 
-function audioSource(context: { resume: Set<AudioContext> }): Source {
+function microphoneSource(context: { resume: Set<AudioContext> }): Source {
   return {
-    available: () => typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && typeof AudioContext !== "undefined",
+    available: () => typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && typeof AudioWorkletNode !== "undefined",
     start(emit, fail) {
       // Made now, inside the tap or consent click when there is one, so Safari lets it run.
       const audio = new AudioContext();
       if (audio.state === "suspended") context.resume.add(audio);
       let stopped = false;
-      let release = () => {};
-      void navigator.mediaDevices
+      let stream: MediaStream | null = null;
+      const module = URL.createObjectURL(new Blob([AUDIO_WORKLET], { type: "text/javascript" }));
+      const opened = navigator.mediaDevices
         .getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } })
-        .then((stream) => {
-          const stopTracks = () => {
-            for (const track of stream.getTracks()) track.stop();
-          };
-          if (stopped) return stopTracks();
-          const analyser = audio.createAnalyser();
-          analyser.fftSize = 2048;
-          audio.createMediaStreamSource(stream).connect(analyser);
-          const buffer = new Float32Array(analyser.fftSize);
-          const frequencies = new Float32Array(analyser.frequencyBinCount);
-          const bands = spectrumBands(frequencies.length, audio.sampleRate);
-          const range = analyser.maxDecibels - analyser.minDecibels;
-          let smooth = 0;
-          let onsetAt = -Infinity;
-          const timer = setInterval(() => {
-            if (audio.state !== "running") return;
-            analyser.getFloatTimeDomainData(buffer);
-            let sum = 0;
-            for (const sample of buffer) sum += sample * sample;
-            const rms = Math.sqrt(sum / buffer.length);
-            const level = Math.min(1, Math.max(0, (20 * Math.log10(rms || 1e-6) + 60) / 60));
-            const now = performance.now();
-            const onset = level > 0.3 && level - smooth > 0.15 && now - onsetAt > 100;
-            if (onset) onsetAt = now;
-            smooth += (level - smooth) * 0.2;
-            analyser.getFloatFrequencyData(frequencies);
-            const spectrum = bands.map(([from, to]) => {
-              let sum = 0;
-              for (let i = from; i < to; i++) sum += frequencies[i] as number;
-              const value = (sum / (to - from) - analyser.minDecibels) / range;
-              return Math.round(Math.min(1, Math.max(0, value)) * 100) / 100;
-            });
-            emit("audio", { level: Math.round(level * 1000) / 1000, pitch: level > 0.2 ? pitchOf(buffer, audio.sampleRate) : null, onset, spectrum });
-          }, AUDIO_MS);
-          release = () => {
-            clearInterval(timer);
-            stopTracks();
-          };
-        }, (error: unknown) => {
-          if (stopped) return;
-          const name = error instanceof DOMException ? error.name : "";
-          fail(name === "NotAllowedError" || name === "SecurityError" ? "denied" : "unavailable");
-        });
+        .then((media) => (stream = media));
+      void Promise.all([opened, audio.audioWorklet.addModule(module)]).then(([media]) => {
+        if (stopped) return stop();
+        const node = new AudioWorkletNode(audio, "cohub-board-audio");
+        const silent = audio.createGain();
+        silent.gain.value = 0;
+        audio.createMediaStreamSource(media).connect(node).connect(silent).connect(audio.destination);
+        node.port.onmessage = ({ data }: MessageEvent<Float32Array>) =>
+          emit("browser:audio", { samples: data, sampleRate: audio.sampleRate, t: audio.currentTime * 1000 });
+      }, (error: unknown) => {
+        void opened.then(stop, () => {});
+        if (!stopped) fail(failure(error));
+      });
+      function stop() {
+        for (const track of stream?.getTracks() ?? []) track.stop();
+      }
       return () => {
         stopped = true;
-        release();
+        stop();
+        URL.revokeObjectURL(module);
         context.resume.delete(audio);
         void audio.close().catch(() => {});
+      };
+    },
+  };
+}
+
+const VIDEO_MS = 1000 / 30;
+
+function cameraSource(): Source {
+  return {
+    available: () => typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && typeof createImageBitmap === "function",
+    start(emit, fail) {
+      let stopped = false;
+      let stream: MediaStream | null = null;
+      let frame = 0;
+      const video = document.createElement("video");
+      video.muted = true;
+      video.playsInline = true;
+      let last = -Infinity;
+      let capturing = false;
+      const next = () => { if (!stopped) frame = requestAnimationFrame(capture); };
+      const capture = (now: number) => {
+        if (capturing || now - last < VIDEO_MS || video.readyState < 2) return next();
+        capturing = true;
+        last = now;
+        createImageBitmap(video).then((bitmap) => {
+          capturing = false;
+          if (stopped) return bitmap.close();
+          emit("browser:video", { frame: bitmap, width: bitmap.width, height: bitmap.height, t: now });
+        }, () => { capturing = false; });
+        next();
+      };
+      void navigator.mediaDevices
+        .getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" } })
+        .then((media) => {
+          stream = media;
+          if (stopped) return stop();
+          video.srcObject = media;
+          void video.play().catch(() => {});
+          next();
+        }, (error: unknown) => {
+          if (!stopped) fail(failure(error));
+        });
+      function stop() {
+        for (const track of stream?.getTracks() ?? []) track.stop();
+      }
+      return () => {
+        stopped = true;
+        cancelAnimationFrame(frame);
+        stop();
+        video.srcObject = null;
       };
     },
   };
@@ -244,15 +223,7 @@ function locationSource(): Source {
     available: () => typeof navigator !== "undefined" && Boolean(navigator.geolocation),
     start(emit, fail) {
       const watch = navigator.geolocation.watchPosition(
-        ({ coords, timestamp }) => emit("location", {
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          accuracy: coords.accuracy,
-          altitude: coords.altitude,
-          heading: coords.heading != null && Number.isFinite(coords.heading) ? coords.heading : null,
-          speed: coords.speed,
-          t: timestamp,
-        }),
+        (position) => emit("browser:position", pick<BoardScriptBrowserEvents["browser:position"]>(position, ["coords", "timestamp"])),
         (error) => { if (error.code === error.PERMISSION_DENIED) fail("denied"); },
         { enableHighAccuracy: false, maximumAge: 10_000 },
       );
@@ -266,7 +237,8 @@ export function createBoardSenses(options: BoardSensesOptions) {
   const sources: Record<BoardScriptSense, Source> = {
     motion: motionSource(),
     gamepad: gamepadSource(),
-    audio: audioSource({ resume }),
+    microphone: microphoneSource({ resume }),
+    camera: cameraSource(),
     location: locationSource(),
   };
   const available = new Map<BoardScriptSense, boolean>();

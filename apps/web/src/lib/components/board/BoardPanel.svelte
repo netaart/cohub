@@ -10,6 +10,7 @@ import {
 	type BoardLaunch,
 	type BoardMediaItemKind,
 	type BoardSceneItem,
+	type BoardScriptInputLog,
 	boardItemOrigin,
 	boardModelFormat,
 	boardOriginKey,
@@ -24,6 +25,7 @@ import {
 	normalizeBoardRemoteUrl,
 	parseBoardDocument,
 	parseBoardMediaSource,
+	stringifyBoardScriptInputs,
 	taskRunArtifacts,
 	type WorldPoint,
 	worldPoint,
@@ -761,6 +763,35 @@ async function exportVideo(request: BoardVideoExportRequest) {
 	});
 }
 
+const canRecord = $derived(Boolean(liveSpaceId && editable && path));
+let recorder = $state.raw<{ stop(): BoardScriptInputLog } | null>(null);
+let recordedInputs = $state<string | null>(null);
+
+async function toggleRecording() {
+	if (!recorder) {
+		recorder = scriptStage?.recordInputs(() => void toggleRecording()) ?? null;
+		return;
+	}
+	const log = recorder.stop();
+	recorder = null;
+	if (!liveSpaceId || !path) return;
+	if (!log.inputs.length)
+		return showNotice(m.board_input_empty({}, { locale }));
+	const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+	const target = `${path.replace(/\.board$/i, "")}.inputs/${stamp}.json`;
+	try {
+		await sdk.space(liveSpaceId).files.write({
+			path: target,
+			content: stringifyBoardScriptInputs(log),
+			encoding: "utf-8",
+		});
+		recordedInputs = target;
+		showNotice(m.board_input_saved({ path: target }, { locale }));
+	} catch {
+		showNotice(m.board_input_save_failed({}, { locale }), true);
+	}
+}
+
 function showNotice(text: string, error = false) {
 	notice = { text, error };
 	if (noticeTimer) clearTimeout(noticeTimer);
@@ -1320,6 +1351,7 @@ $effect(() => {
 });
 
 onDestroy(() => {
+	recorder?.stop();
 	videoExport?.destroy();
 	destroyed = true;
 	if (noticeTimer) clearTimeout(noticeTimer);
@@ -1397,7 +1429,7 @@ onDestroy(() => {
 					{m.board_sound_enable({}, { locale })}
 				</button>
 			{/if}
-			<BoardSenseChip stage={scriptStage} consent={senseConsent} />
+			<BoardSenseChip stage={scriptStage} consent={senseConsent} recording={recorder !== null} onRecord={canRecord ? toggleRecording : undefined} />
 		</div>
 		{#if notice}
 			<div class="board-notice" class:board-notice--error={notice.error} role="status" aria-live="polite">
@@ -1656,6 +1688,7 @@ onDestroy(() => {
 	selection={editor.selection}
 	onLocate={(id) => { editor.setSelection([id]); editor.focusItems([id]); }}
 	onExportVideo={canExportVideo && !videoExport?.running ? (request) => void exportVideo(request) : undefined}
+	inputs={recordedInputs}
 />
 
 <style>

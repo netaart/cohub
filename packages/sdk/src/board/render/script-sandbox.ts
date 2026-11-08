@@ -316,18 +316,20 @@ function scriptBroker(workerUrl: string, poolSize: number, timeoutMs: number) {
       if (!slot.owed.length) slot.seen = performance.now();
       slot.owed.push(token);
     }
-    slot.worker.postMessage({ ...data, token });
+    const frames = (data.events ?? []).flatMap((event: { type: string; data?: { frame?: ImageBitmap } }) =>
+      event.type === "browser:video" && event.data?.frame ? [event.data.frame] : []);
+    slot.worker.postMessage({ ...data, token }, frames);
   });
   toParent({ kind: "ready" });
 }
 
-export function boardScriptFrameSource(options: { timeoutMs?: number; poolSize?: number } = {}): string {
+export function boardScriptFrameSource(options: { timeoutMs?: number; poolSize?: number; network?: boolean } = {}): string {
   const prelude =
     "const __name = (value, name) => Object.defineProperty(value, 'name', { value: name, configurable: true });";
   const worker = `${prelude} (${scriptAgent.toString()})(${createScriptRuntime.toString()}, ${applyScriptInputDelta.toString()}, ${scriptModuleUrls.toString()}, url => import(url));`;
   const cores = typeof navigator === "undefined" ? 4 : navigator.hardwareConcurrency || 4;
   const poolSize = options.poolSize ?? Math.max(1, Math.min(4, cores - 1));
-  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src blob:; form-action 'none'; base-uri 'none'"><script>
+  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; worker-src blob:; connect-src ${options.network ? "https: wss: http: ws: " : ""}blob:; form-action 'none'; base-uri 'none'"><script>
 ${prelude}
 (${scriptBroker.toString()})(URL.createObjectURL(new Blob([${JSON.stringify(worker)}], {type:'text/javascript'})), ${poolSize}, ${options.timeoutMs ?? 2_000});
 </script>`;

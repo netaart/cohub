@@ -9,7 +9,8 @@ import type {
   BoardScriptView,
 } from "../model/script.js";
 import { boardScriptAttachments } from "../model/script-index.js";
-import { BOARD_SCRIPT_EMIT_DEPTH, boardScriptEmit, createBoardScriptOutbox } from "../model/script-events.js";
+import { BOARD_SCRIPT_EMIT_DEPTH, BOARD_SCRIPT_EVENT_QUEUE, boardScriptEmit, createBoardScriptOutbox } from "../model/script-events.js";
+import { type BoardScriptInputLog, boardScriptInputsBetween } from "../model/script-senses.js";
 import { type BrowserBoardScriptHost, createBoardScriptHost } from "./script-host.js";
 import { boardShaderOwners } from "./shader/layers.js";
 import type { BoardScriptHost } from "./renderers/board-renderer-registry.js";
@@ -29,6 +30,7 @@ type Run = {
   outbox: ReturnType<typeof createBoardScriptOutbox>;
   views: Map<string, string>;
   last: Map<string, string>;
+  inputsAt: number;
   wake(): void;
 };
 
@@ -38,6 +40,7 @@ export function createBrowserBoardScriptExport(
     snapshots?: Readonly<Record<string, BoardScriptSnapshot>>;
     shaders?: boolean;
     documentAt?: (time: number) => BoardDocument;
+    inputs?: BoardScriptInputLog;
   } = {},
 ): BrowserBoardScriptExport {
   let run: Run | null = null;
@@ -59,6 +62,7 @@ export function createBrowserBoardScriptExport(
       outbox: createBoardScriptOutbox(() => ranks),
       views: new Map(),
       last,
+      inputsAt: -1,
       wake: () => {},
       host: createBoardScriptHost({
         host: element,
@@ -105,6 +109,8 @@ export function createBrowserBoardScriptExport(
     const viewKey = view ? JSON.stringify(view) : null;
     let viewed = false;
     let rounds = 0;
+    const inputs = current.inputsAt < time ? boardScriptInputsBetween(options.inputs, current.inputsAt, time) : [];
+    current.inputsAt = Math.max(current.inputsAt, time);
     return new Promise<void>((resolve, reject) => {
       const finish = (error?: unknown) => {
         clearTimeout(timer);
@@ -114,6 +120,11 @@ export function createBrowserBoardScriptExport(
       };
       const timer = setTimeout(() => finish(new Error(["Scripts did not settle in 20 s.", ...status(current, ids)].join(" "))), 20_000);
       let queued = false;
+      const deliver = () => {
+        for (const event of inputs.splice(0, BOARD_SCRIPT_EVENT_QUEUE >> 1))
+          for (const id of ids) host.event(id, event);
+      };
+      if (ids.every((id) => host.output(id))) deliver();
       const sync = () => {
         queued = false;
         try {
@@ -131,6 +142,11 @@ export function createBrowserBoardScriptExport(
             if (error) throw new Error(error);
           }
           if (!ids.every((id) => host.settled(id))) return;
+          if (inputs.length) {
+            deliver();
+            current.wake();
+            return;
+          }
           if (current.outbox.size && rounds++ <= BOARD_SCRIPT_EMIT_DEPTH) {
             for (const [target, events] of current.outbox.take()) {
               current.last.set(target, `event ${events.map((event) => event.type).join(", ")}`);
@@ -211,7 +227,7 @@ export async function prepareBrowserBoardScripts(
   time: number,
   readModule: (path: string) => Promise<string>,
   snapshots?: Readonly<Record<string, BoardScriptSnapshot>>,
-  options: { shaders?: boolean; documentAt?: (time: number) => BoardDocument } = {},
+  options: { shaders?: boolean; documentAt?: (time: number) => BoardDocument; inputs?: BoardScriptInputLog } = {},
 ): Promise<{ host: BoardScriptHost; dispose(): void }> {
   const session = createBrowserBoardScriptExport(readModule, { snapshots, ...options });
   try {

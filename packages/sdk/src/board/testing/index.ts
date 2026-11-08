@@ -2,8 +2,8 @@ import type { BoardDocument, BoardPatch, BoardVec2 } from "@cohub/protocol";
 import { type BoardEditor, type BoardPointerEvent, type BoardToolId, createBoardEditor, selectionTransformControlAt } from "../editor/index.js";
 import type { BoardExportRegion } from "../model/export-plan.js";
 import { worldPoint, screenPoint } from "../model/geometry.js";
-import type { BoardScriptOutput, BoardScriptSense, BoardScriptSenseEvents } from "../model/script.js";
-import { BOARD_SCRIPT_EXPORT_ENV, boardScriptSenseStates } from "../model/script-senses.js";
+import type { BoardScriptBrowserEvent, BoardScriptBrowserEvents, BoardScriptOutput, BoardScriptSense } from "../model/script.js";
+import { BOARD_SCRIPT_EXPORT_ENV, type BoardScriptInputLog, boardScriptSenseStates } from "../model/script-senses.js";
 import type { BoardScriptHost } from "../render/renderers/board-renderer-registry.js";
 import { createNodeBoardRenderer, exportBoardImageBytes, type BoardNodeRenderer } from "../export/node/index.js";
 import { createNodeBoardScriptRuntime } from "../export/node/scripts.js";
@@ -225,8 +225,16 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
       controller.key({ type, key });
       await frame();
     },
-    async sense<Type extends BoardScriptSense>(type: Type, data: BoardScriptSenseEvents[Type]) {
-      controller.sense(type, data);
+    async input<Type extends BoardScriptBrowserEvent>(type: Type, data: BoardScriptBrowserEvents[Type]) {
+      controller.input(type, data);
+      await frame();
+    },
+    async replay(log: BoardScriptInputLog) {
+      const start = clock;
+      for (const { t, type, data } of log.inputs) {
+        if (start + t > clock) await this.advance(start + t - clock);
+        controller.input(type as BoardScriptBrowserEvent, data as never);
+      }
       await frame();
     },
     async flush() {
