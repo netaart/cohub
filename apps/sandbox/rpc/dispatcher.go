@@ -53,13 +53,20 @@ type gitignoreMatcher struct {
 	gi *ignore.GitIgnore
 }
 
-// ignore reports whether a workspace-root-relative path should be hidden. It
-// always hides the .git directory and, when a .gitignore is present, applies
-// its rules (checking the directory form so ignored dirs are pruned).
-func (m *gitignoreMatcher) ignore(relPath string, isDir bool) bool {
-	if relPath == ".git" || strings.HasPrefix(relPath, ".git/") {
-		return true
+// vcsPath reports a Git directory at any depth: a workspace may hold a clone or
+// a submodule, and those keep their own .git below the root.
+func vcsPath(relPath string) bool {
+	for _, segment := range strings.Split(relPath, "/") {
+		if segment == ".git" {
+			return true
+		}
 	}
+	return false
+}
+
+// ignores reports whether the workspace .gitignore hides a path, checking the
+// directory form so ignored dirs are pruned.
+func (m *gitignoreMatcher) ignores(relPath string, isDir bool) bool {
 	if m.gi == nil {
 		return false
 	}
@@ -69,10 +76,54 @@ func (m *gitignoreMatcher) ignore(relPath string, isDir bool) bool {
 	return isDir && m.gi.MatchesPath(relPath+"/")
 }
 
+// ignore reports whether a workspace-root-relative path should be hidden: a Git
+// directory at any depth, or a path matched by the workspace .gitignore.
+func (m *gitignoreMatcher) ignore(relPath string, isDir bool) bool {
+	return vcsPath(relPath) || m.ignores(relPath, isDir)
+}
+
+// treeIgnore hides the entries of one listing. A Git directory is hidden at any
+// depth; the workspace rules apply unless the requested directory is itself
+// ignored, in which case its contents are listed like a shell would show them.
+type treeIgnore struct {
+	matcher *gitignoreMatcher
+	rules   bool
+}
+
+func newTreeIgnore(matcher *gitignoreMatcher, respect bool, rootRel string, inside bool) treeIgnore {
+	rules := respect
+	if rules && inside && rootRel != "" && matcher.ignores(rootRel, true) {
+		rules = false
+	}
+	return treeIgnore{matcher: matcher, rules: rules}
+}
+
+func (t treeIgnore) hide(relPath string, isDir bool) bool {
+	return vcsPath(relPath) || (t.rules && t.matcher.ignores(relPath, isDir))
+}
+
 type gitignoreCacheEntry struct {
 	matcher   *gitignoreMatcher
 	signature string
 	expiresAt time.Time
+}
+
+// workspaceRelative is the form a rule matches: slash-separated and relative to
+// the workspace root, which is where the loaded .gitignore is anchored. The
+// workspace root itself is "", and a path outside it reports false so callers
+// can fall back to the name the entry is listed under.
+func (d *Dispatcher) workspaceRelative(absPath string) (string, bool) {
+	rel, err := filepath.Rel(d.cfg.WorkspaceDir, absPath)
+	if err != nil {
+		return "", false
+	}
+	if rel == "." {
+		return "", true
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }
 
 const gitignoreCacheTTL = 30 * time.Second
@@ -873,6 +924,14 @@ func (d *Dispatcher) handleFSTree(request protocol.RPCRequest) interface{} {
 		relPath string
 		level   int
 	}
+	// Rules are anchored at the workspace root, so a walk that starts deeper
+	// matches on the requested directory's own path as a prefix, while the
+	// entries keep reporting paths relative to the requested directory.
+	base, inside := d.workspaceRelative(resolved.path)
+	if !inside {
+		base = ""
+	}
+	filter := newTreeIgnore(matcher, respectGitignore, base, inside)
 	queue := []queued{{absPath: resolved.path, relPath: "", level: 0}}
 
 	for len(queue) > 0 {
@@ -902,7 +961,11 @@ func (d *Dispatcher) handleFSTree(request protocol.RPCRequest) interface{} {
 			if current.relPath != "" {
 				relPath = current.relPath + "/" + name
 			}
-			if matcher != nil && matcher.ignore(relPath, entry.IsDir()) {
+			matchPath := relPath
+			if base != "" {
+				matchPath = base + "/" + relPath
+			}
+			if filter.hide(matchPath, entry.IsDir()) {
 				continue
 			}
 

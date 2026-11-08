@@ -48,10 +48,19 @@ func (d *Dispatcher) listTreePage(request protocol.RPCRequest, params fsTreePara
 	start := sort.Search(len(names), func(i int) bool { return names[i].Name() > cursor.After })
 	end := min(start+limit, len(names))
 	matcher := d.loadGitignore(respectGitignore)
+	rootRel, inside := d.workspaceRelative(root)
+	if !inside {
+		rootRel = ""
+	}
+	filter := newTreeIgnore(matcher, respectGitignore, rootRel, inside)
 	entries := make([]fsTreeEntry, 0, end-start)
 	for _, entry := range names[start:end] {
 		name := entry.Name()
-		if matcher != nil && matcher.ignore(name, entry.IsDir()) {
+		relPath, inWorkspace := d.workspaceRelative(filepath.Join(root, name))
+		if !inWorkspace {
+			relPath = name
+		}
+		if filter.hide(relPath, entry.IsDir()) {
 			continue
 		}
 		stats, err := os.Lstat(filepath.Join(root, name))
