@@ -1,5 +1,8 @@
-import { error } from "@sveltejs/kit";
-import { loadPublicAppDetail } from "$lib/server/public-api";
+import { error, redirect } from "@sveltejs/kit";
+import {
+	loadPublicAppDetail,
+	publicSlugRedirectLocation,
+} from "$lib/server/public-api";
 import { setPublicAppPageCache } from "$lib/server/public-cache";
 import type { PageServerLoad } from "./$types";
 
@@ -29,6 +32,8 @@ export const load: PageServerLoad = async ({
 	});
 
 	if (result.ok) {
+		const location = publicSlugRedirectLocation(result.detail.redirectTo, url);
+		if (location) redirect(308, location);
 		// This loader fetches the API anonymously, so the rendered document can only
 		// ever reflect anonymous-visible data — app visibility alone governs caching.
 		setPublicAppPageCache(setHeaders, {

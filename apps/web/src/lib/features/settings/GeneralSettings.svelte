@@ -1,5 +1,6 @@
 <script lang="ts">
 import { SPACE_CUSTOM_THEME_CSS_PATH } from "@cohub/protocol";
+import { HttpError } from "@neta-art/cohub";
 import {
 	Check,
 	Copy,
@@ -22,6 +23,7 @@ import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getThemeCss } from "$lib/custom-theme/theme-css.svelte";
 import { userTheme } from "$lib/custom-theme/user-theme.svelte";
 import DeviceSettings from "$lib/features/settings/DeviceSettings.svelte";
+import { formatDateTime } from "$lib/i18n/format";
 import type { LocalePreference } from "$lib/i18n/locale";
 import {
 	getLocale,
@@ -169,11 +171,25 @@ async function saveEditingField() {
 		editingField = null;
 		draftValue = "";
 	} catch (error) {
-		inlineError =
-			error instanceof Error ? error.message : "Failed to save profile";
+		inlineError = profileSaveErrorMessage(error);
 	} finally {
 		savingField = null;
 	}
+}
+
+function profileSaveErrorMessage(error: unknown): string {
+	if (error instanceof HttpError && error.code === "username_retired") {
+		return m.settings_username_retired({}, { locale });
+	}
+	if (error instanceof HttpError && error.code === "username_change_too_soon") {
+		const body = error.body as { nextAllowedAt?: unknown } | null;
+		const date = formatDateTime(
+			typeof body?.nextAllowedAt === "string" ? body.nextAllowedAt : null,
+			locale,
+		);
+		if (date) return m.settings_username_change_too_soon({ date }, { locale });
+	}
+	return error instanceof Error ? error.message : "Failed to save profile";
 }
 
 async function uploadAvatar(file: File) {
@@ -267,7 +283,7 @@ onMount(() => {
 							<div class="h-4 w-32 rounded bg-bg-hover-strong" aria-hidden="true"></div><div class="mt-2 h-3 w-20 rounded bg-bg-hover-strong" aria-hidden="true"></div><div class="mt-2 h-3 w-36 rounded bg-bg-hover-strong" aria-hidden="true"></div>
 						{:else}
 							<div class="min-w-0">{#if editingField === "displayName"}<div class="flex min-w-0 items-center gap-2"><input aria-label={m.settings_display_name({}, { locale })} bind:value={draftValue} maxlength="120" onkeydown={handleEditKeydown} disabled={savingField === "displayName"} class="min-w-0 flex-1 rounded-[5px] border border-brand/40 bg-bg-input px-2.5 py-1.5 text-[15px] font-medium text-text-primary focus:outline-none" /><button type="button" onclick={() => void saveEditingField()} disabled={savingField === "displayName"} class="shrink-0 rounded-[5px] p-1.5 text-text-tertiary hover:bg-bg-hover hover:text-text-secondary disabled:opacity-50" title={m.settings_save_display_name({}, { locale })}>{#if savingField === "displayName"}<Loader2 class="h-3.5 w-3.5 animate-spin" />{:else}<Check class="h-3.5 w-3.5" />{/if}</button><button type="button" onclick={cancelEdit} disabled={savingField === "displayName"} class="shrink-0 rounded-[5px] p-1.5 text-text-tertiary hover:bg-bg-hover hover:text-text-secondary disabled:opacity-50" title={m.common_cancel({}, { locale })}><X class="h-3.5 w-3.5" /></button></div>{:else}<button type="button" onclick={() => beginEdit("displayName")} class="group/edit -ml-1 flex max-w-full items-center gap-1.5 rounded-[5px] px-1 py-0.5 text-left hover:bg-bg-hover" title={m.settings_edit_display_name({}, { locale })}><span class="min-w-0 truncate text-[15px] font-medium text-text-primary group-hover/edit:text-brand">{profileTitle}</span><Pencil class="h-3 w-3 shrink-0 text-text-placeholder opacity-0 group-hover/edit:opacity-100" /></button>{/if}</div>
-							<div class="mt-1 min-w-0">{#if editingField === "username"}<div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><div class="flex min-w-0 flex-1 items-center rounded-[5px] border border-brand/40 bg-bg-input px-2.5 py-1.5"><span class="mr-1 shrink-0 text-[13px] text-text-tertiary">@</span><input aria-label={m.settings_username({}, { locale })} bind:value={draftValue} placeholder="your-handle" maxlength="39" onkeydown={handleEditKeydown} disabled={savingField === "username"} class="min-w-0 flex-1 bg-transparent text-[13px] text-text-primary placeholder:text-text-placeholder focus:outline-none" /></div><button type="button" onclick={() => void saveEditingField()} disabled={savingField === "username"} class="shrink-0 rounded-[5px] p-1.5 text-text-tertiary hover:bg-bg-hover hover:text-text-secondary disabled:opacity-50" title={m.settings_save_username({}, { locale })}>{#if savingField === "username"}<Loader2 class="h-3.5 w-3.5 animate-spin" />{:else}<Check class="h-3.5 w-3.5" />{/if}</button><button type="button" onclick={cancelEdit} disabled={savingField === "username"} class="shrink-0 rounded-[5px] p-1.5 text-text-tertiary hover:bg-bg-hover hover:text-text-secondary disabled:opacity-50" title={m.common_cancel({}, { locale })}><X class="h-3.5 w-3.5" /></button></div><p class="mt-1.5 text-[11px] leading-4 text-text-tertiary">{m.settings_username_help({}, { locale })}</p></div>{:else}<button type="button" onclick={() => beginEdit("username")} class="group/edit -ml-1 inline-flex max-w-full items-center gap-1.5 rounded-[5px] px-1 py-0.5 text-left hover:bg-bg-hover" title={m.settings_edit_username({}, { locale })}><span class="min-w-0 truncate text-[12px] {username ? 'text-text-tertiary' : 'text-text-placeholder'}">{usernameLabel}</span><Pencil class="h-3 w-3 shrink-0 text-text-placeholder opacity-0 group-hover/edit:opacity-100" /></button>{/if}</div>
+							<div class="mt-1 min-w-0">{#if editingField === "username"}<div class="min-w-0"><div class="flex min-w-0 items-center gap-2"><div class="flex min-w-0 flex-1 items-center rounded-[5px] border border-brand/40 bg-bg-input px-2.5 py-1.5"><span class="mr-1 shrink-0 text-[13px] text-text-tertiary">@</span><input aria-label={m.settings_username({}, { locale })} bind:value={draftValue} placeholder="your-handle" maxlength="39" onkeydown={handleEditKeydown} disabled={savingField === "username"} class="min-w-0 flex-1 bg-transparent text-[13px] text-text-primary placeholder:text-text-placeholder focus:outline-none" /></div><button type="button" onclick={() => void saveEditingField()} disabled={savingField === "username"} class="shrink-0 rounded-[5px] p-1.5 text-text-tertiary hover:bg-bg-hover hover:text-text-secondary disabled:opacity-50" title={m.settings_save_username({}, { locale })}>{#if savingField === "username"}<Loader2 class="h-3.5 w-3.5 animate-spin" />{:else}<Check class="h-3.5 w-3.5" />{/if}</button><button type="button" onclick={cancelEdit} disabled={savingField === "username"} class="shrink-0 rounded-[5px] p-1.5 text-text-tertiary hover:bg-bg-hover hover:text-text-secondary disabled:opacity-50" title={m.common_cancel({}, { locale })}><X class="h-3.5 w-3.5" /></button></div><p class="mt-1.5 text-[11px] leading-4 text-text-tertiary">{username ? m.settings_username_change_help({}, { locale }) : m.settings_username_help({}, { locale })}</p></div>{:else}<button type="button" onclick={() => beginEdit("username")} class="group/edit -ml-1 inline-flex max-w-full items-center gap-1.5 rounded-[5px] px-1 py-0.5 text-left hover:bg-bg-hover" title={m.settings_edit_username({}, { locale })}><span class="min-w-0 truncate text-[12px] {username ? 'text-text-tertiary' : 'text-text-placeholder'}">{usernameLabel}</span><Pencil class="h-3 w-3 shrink-0 text-text-placeholder opacity-0 group-hover/edit:opacity-100" /></button>{/if}</div>
 							{#if email}<div class="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-text-tertiary"><span class="shrink-0 uppercase tracking-wider">Email</span><span class="min-w-0 truncate" title={email}>{email}</span></div>{/if}
 							<div class="mt-1 flex min-w-0 items-center gap-1.5 text-[11px] text-text-tertiary"><span class="shrink-0 uppercase tracking-wider">ID</span><code class="min-w-0 truncate font-mono" title={userUuid}>{uuidLabel}</code><button type="button" onclick={copyUuid} class="shrink-0 rounded-[4px] p-1 text-text-tertiary hover:bg-bg-hover hover:text-text-secondary" title={m.settings_copy_uuid({}, { locale })}>{#if uuidCopied}<Check class="h-3 w-3 text-status-running" />{:else}<Copy class="h-3 w-3" />{/if}</button></div>
 						{/if}

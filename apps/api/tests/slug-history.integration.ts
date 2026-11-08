@@ -1,0 +1,156 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { mock, test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { PGlite } from "@electric-sql/pglite";
+import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
+import * as schema from "@cohub/db";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/pglite";
+
+process.env.LOG_LEVEL = "silent";
+
+const migrations = join(dirname(fileURLToPath(import.meta.url)), "../drizzle/v2");
+const client = new PGlite({ extensions: { pg_trgm } });
+const journal = JSON.parse(readFileSync(join(migrations, "meta/_journal.json"), "utf8")) as { entries: Array<{ tag: string }> };
+for (const entry of journal.entries) {
+  await client.exec(readFileSync(join(migrations, `${entry.tag}.sql`), "utf8").replaceAll("--> statement-breakpoint", ""));
+}
+const db = drizzle(client, { schema });
+
+const logtoUsers = new Map<string, Record<string, unknown>>();
+let failLogtoUpdate = false;
+mock.module("../src/db/index.js", { namedExports: { db } });
+mock.module("../src/logto-management.js", {
+  namedExports: {
+    getLogtoUser: async (id: string) => ({ ...logtoUsers.get(id) }),
+    updateLogtoUserProfile: async (id: string, input: { username?: string | null }) => {
+      if (failLogtoUpdate) throw new Error("Logto management request failed: 500");
+      const user = logtoUsers.get(id) ?? {};
+      if (input.username !== undefined) user.username = input.username;
+      logtoUsers.set(id, user);
+    },
+  },
+});
+
+const { isSpaceSlugRetired, recordSpaceSlugChange, resolveOwnerByUsername, resolvePublicSpace } = await import("../src/slug-history.js");
+const { isPostgresUniqueViolation } = await import("../src/db/postgres-error.js");
+const { updateCurrentUserProfile, UsernameChangeTooSoonError, UsernameRetiredError } = await import("../src/user-profiles.js");
+
+async function createUser(uuid: string, username: string) {
+  logtoUsers.set(`logto-${uuid}`, { id: `logto-${uuid}`, username, name: uuid });
+  await client.query(
+    `INSERT INTO v2.user_profiles (user_uuid, logto_user_id, username, display_name, source) VALUES ($1, $2, $3, $1, '{}')`,
+    [uuid, `logto-${uuid}`, username],
+  );
+  return { uuid, sub: `logto-${uuid}` } as Parameters<typeof updateCurrentUserProfile>[0];
+}
+
+async function createSpace(userUuid: string, slug: string) {
+  const { rows } = await client.query<{ id: string }>(
+    `INSERT INTO v2.spaces (user_uuid, name, slug) VALUES ($1, gen_random_uuid()::text, $2) RETURNING id`,
+    [userUuid, slug],
+  );
+  const id = rows[0]?.id;
+  assert.ok(id);
+  return id;
+}
+
+const renameSpace = (id: string, userUuid: string, from: string, to: string) => db.transaction(async (tx) => {
+  await recordSpaceSlugChange(tx, { id, userUuid }, from);
+  await tx.update(schema.spaces).set({ slug: to }).where(eq(schema.spaces.id, id));
+});
+
+const historyCount = async (entityId: string) =>
+  (await client.query<{ n: number }>(`SELECT count(*)::int AS n FROM v2.slug_history WHERE entity_id = $1`, [entityId])).rows[0]?.n;
+
+const backdateHistory = (entityId: string) =>
+  client.query(`UPDATE v2.slug_history SET created_at = now() - interval '8 days' WHERE entity_id = $1`, [entityId]);
+
+test("username renames record history, retire old names, and are rate limited", async () => {
+  const alice = await createUser("alice-uuid", "alice");
+  await createUser("bob-uuid", "bob");
+
+  await updateCurrentUserProfile(alice, { username: "alice2" });
+  assert.equal(await historyCount("alice-uuid"), 1);
+
+  await assert.rejects(updateCurrentUserProfile(alice, { username: "alice3" }), (error) => {
+    assert.ok(error instanceof UsernameChangeTooSoonError);
+    assert.ok(error.nextAllowedAt.getTime() > Date.now());
+    return true;
+  });
+  assert.equal(await historyCount("alice-uuid"), 1);
+
+  await backdateHistory("alice-uuid");
+  await updateCurrentUserProfile(alice, { username: "alice3" });
+  assert.equal(await historyCount("alice-uuid"), 2);
+
+  const bob = { uuid: "bob-uuid", sub: "logto-bob-uuid" } as typeof alice;
+  await assert.rejects(updateCurrentUserProfile(bob, { username: "alice" }), UsernameRetiredError);
+  await backdateHistory("alice-uuid");
+  await assert.rejects(updateCurrentUserProfile(alice, { username: "alice" }), UsernameRetiredError);
+
+  for (const old of ["alice", "alice2", "alice3"]) {
+    const owner = await resolveOwnerByUsername(old);
+    assert.equal(owner?.profile.username, "alice3");
+    assert.equal(owner?.redirected, old !== "alice3");
+  }
+});
+
+test("a failed Logto write leaves no history row", async () => {
+  const carol = await createUser("carol-uuid", "carol");
+  failLogtoUpdate = true;
+  await assert.rejects(updateCurrentUserProfile(carol, { username: "carol2" }));
+  failLogtoUpdate = false;
+  assert.equal(await historyCount("carol-uuid"), 0);
+});
+
+test("public Space paths resolve retired username and slug in one step", async () => {
+  await createUser("dan-uuid", "dan");
+  await createUser("erin-uuid", "erin");
+  const danSpace = await createSpace("dan-uuid", "notes");
+  const erinSpace = await createSpace("erin-uuid", "notes");
+
+  await renameSpace(danSpace, "dan-uuid", "notes", "notes-v2");
+  await renameSpace(danSpace, "dan-uuid", "notes-v2", "journal");
+  await client.query(`INSERT INTO v2.slug_history (entity_type, entity_id, old_slug) VALUES ('username', 'dan-uuid', 'danny')`);
+
+  for (const slug of ["notes", "notes-v2"]) {
+    const resolved = await resolvePublicSpace("danny", slug);
+    assert.equal(resolved?.space.id, danSpace);
+    assert.equal(resolved?.space.slug, "journal");
+    assert.equal(resolved?.owner.username, "dan");
+    assert.equal(resolved?.redirected, true);
+  }
+  assert.equal((await resolvePublicSpace("dan", "journal"))?.redirected, false);
+
+  // Another owner's identical slug is unaffected.
+  const erin = await resolvePublicSpace("erin", "notes");
+  assert.equal(erin?.space.id, erinSpace);
+  assert.equal(erin?.redirected, false);
+  await renameSpace(erinSpace, "erin-uuid", "notes", "notes-v2");
+
+  // A retired slug can't be inserted twice for the same owner.
+  await assert.rejects(
+    renameSpace(danSpace, "dan-uuid", "notes", "other"),
+    (error) => isPostgresUniqueViolation(error, "v2_uq_slug_history_space"),
+  );
+
+  await client.query(`DELETE FROM v2.spaces WHERE id = $1`, [danSpace]);
+  assert.equal(await resolvePublicSpace("dan", "notes"), null);
+});
+
+test("Home stays claimable and its old address follows the latest former Home", async () => {
+  await createUser("fay-uuid", "fay");
+
+  const first = await createSpace("fay-uuid", "home");
+  await renameSpace(first, "fay-uuid", "home", "first");
+  assert.equal((await resolvePublicSpace("fay", "home"))?.space.id, first);
+  assert.equal(await isSpaceSlugRetired("fay-uuid", "home"), false);
+
+  const second = await createSpace("fay-uuid", "home");
+  assert.equal((await resolvePublicSpace("fay", "home"))?.redirected, false);
+  await renameSpace(second, "fay-uuid", "home", "second");
+  assert.equal((await resolvePublicSpace("fay", "home"))?.space.id, second);
+});

@@ -6,10 +6,10 @@ import { db } from "../db/index.js";
 import { getSpacePublicProfile, requireValidId, useAuth } from "../lib/middleware.js";
 import { createAppPublicUrl } from "../lib/app-public-url.js";
 import {
-  getProfileByUsername,
   getProfilesByUuids,
   normalizeUsername,
 } from "../user-profiles.js";
+import { redirectTarget, resolveOwnerByUsername } from "../slug-history.js";
 
 const router = new Hono();
 
@@ -68,8 +68,14 @@ router.get("/by-username/:username", async (c) => {
   const username = normalizeUsername(c.req.param("username"));
   if (!username) return c.json({ message: "user not found" }, 404);
 
-  const profile = await getProfileByUsername(username);
-  if (!profile?.username) return c.json({ message: "user not found" }, 404);
+  const owner = await resolveOwnerByUsername(username);
+  if (!owner) return c.json({ message: "user not found" }, 404);
+  const profile = {
+    userUuid: owner.profile.userUuid,
+    username: owner.profile.username,
+    displayName: owner.profile.displayName,
+    avatarUrl: owner.profile.avatarUrl ?? null,
+  };
   const ownerUsername = profile.username;
 
   // Discoverable spaces only: join access policy + limit in SQL.
@@ -179,6 +185,9 @@ router.get("/by-username/:username", async (c) => {
     profile,
     spaces: publicSpaces,
     apps: publicWorks,
+    ...(owner.redirected
+      ? { redirectTo: redirectTarget(c.req.url, `/${encodeURIComponent(ownerUsername)}`) }
+      : {}),
   });
 });
 

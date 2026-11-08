@@ -1,5 +1,5 @@
 import type {
-	AppDetailResponse,
+	AppResolveResponse,
 	PublicUserPageResponse,
 } from "@neta-art/cohub";
 import { PUBLIC_API_ORIGIN } from "$env/static/public";
@@ -18,13 +18,13 @@ async function readJson(response: Response): Promise<unknown> {
 	return response.json().catch(() => null);
 }
 
-function asAppDetail(value: unknown): AppDetailResponse | null {
+function asAppDetail(value: unknown): AppResolveResponse | null {
 	if (!isRecord(value)) return null;
 	if (!isRecord(value.app) || typeof value.app.id !== "string") return null;
 	if (!isRecord(value.space) || typeof value.space.id !== "string") return null;
 	if (!isRecord(value.owner) || typeof value.owner.userUuid !== "string")
 		return null;
-	return value as AppDetailResponse;
+	return value as AppResolveResponse;
 }
 
 function asPublicUserPage(value: unknown): PublicUserPageResponse | null {
@@ -50,7 +50,7 @@ export async function loadPublicAppDetail(
 	path: PublicAppPath | null,
 	fetcher: typeof fetch,
 	options: { version?: number | null } = {},
-): Promise<{ ok: true; detail: AppDetailResponse } | PublicApiFailure> {
+): Promise<{ ok: true; detail: AppResolveResponse } | PublicApiFailure> {
 	if (!path) return { ok: false, status: 0 };
 	const query = options.version != null ? `?cohub_v=${options.version}` : "";
 	const url = apiUrl(
@@ -71,6 +71,35 @@ export async function loadPublicAppDetail(
 	const detail = asAppDetail(await readJson(response));
 	if (!detail) return { ok: false, status: 502 };
 	return { ok: true, detail };
+}
+
+/**
+ * Page URL for an API `redirectTo` (retired username / Space slug): the canonical
+ * pathname with the page's own query string. Null when there is nothing to follow.
+ */
+export function publicSlugRedirectLocation(
+	redirectTo: unknown,
+	url: URL,
+): string | null {
+	if (typeof redirectTo !== "string") return null;
+	const pathname = new URL(redirectTo, url.origin).pathname;
+	return pathname === url.pathname ? null : `${pathname}${url.search}`;
+}
+
+/** `redirectTo` for a `/:username/:spaceSlug` Space page; null on a miss or any failure. */
+export async function loadPublicSpaceRedirect(
+	username: string,
+	spaceSlug: string,
+	fetcher: typeof fetch,
+): Promise<unknown> {
+	const response = await fetcher(
+		apiUrl(
+			`/api/spaces/by-slug/${encodeURIComponent(username)}/${encodeURIComponent(spaceSlug)}`,
+		),
+	).catch(() => null);
+	if (!response?.ok) return null;
+	const body = await readJson(response);
+	return isRecord(body) ? body.redirectTo : null;
 }
 
 /** Public profile page payload for SSR. */

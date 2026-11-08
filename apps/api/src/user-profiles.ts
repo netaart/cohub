@@ -10,6 +10,13 @@ import {
   parseUsername,
   validatePublicIdentifierAssignment,
 } from "@cohub/protocol/public-identifiers";
+import {
+  isUsernameRetired,
+  nextUsernameChangeAt,
+  recordUsernameChange,
+  retiredUsernames,
+  USERNAME_HISTORY_UNIQUE,
+} from "./slug-history.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -27,6 +34,17 @@ export type UserProfile = PublicUserProfile & {
 
 export class UsernameConflictError extends Error {
   override name = "UsernameConflictError";
+}
+
+export class UsernameRetiredError extends UsernameConflictError {
+  override name = "UsernameRetiredError";
+}
+
+export class UsernameChangeTooSoonError extends Error {
+  override name = "UsernameChangeTooSoonError";
+  constructor(readonly nextAllowedAt: Date) {
+    super(`username can be changed again after ${nextAllowedAt.toISOString()}`);
+  }
 }
 
 export class UsernameClearError extends Error {
@@ -166,7 +184,8 @@ async function filterLocallyAvailableUsernames(input: {
       ne(userProfiles.userUuid, input.userUuid),
     ));
   const taken = new Set(takenRows.map((row) => row.username).filter((value): value is string => Boolean(value)));
-  return input.candidates.filter((candidate) => !taken.has(candidate));
+  const retired = await retiredUsernames(input.candidates);
+  return input.candidates.filter((candidate) => !taken.has(candidate) && !retired.has(candidate));
 }
 
 function getLogtoManagementErrorStatus(error: unknown): number | null {
@@ -290,24 +309,34 @@ async function upsertUserProfile(input: {
   userUuid: string;
   logtoUserId: string;
   fields: UserProfileFields;
+  /** Explicit renames honor the weekly limit; Logto-driven syncs only record history. */
+  limitUsernameChange?: boolean;
 }) {
   const now = new Date();
   // Logto is the source of truth: persist fields.username as-is (including null).
   // Never rehydrate a local-only username that Logto does not have.
   const fields = input.fields;
   try {
-    const [row] = await db.insert(userProfiles).values({
-      userUuid: input.userUuid,
-      logtoUserId: input.logtoUserId,
-      username: fields.username,
-      displayName: fields.displayName,
-      avatarUrl: fields.avatarUrl,
-      source: fields.source,
-      syncedAt: now,
-      updatedAt: now,
-    }).onConflictDoUpdate({
-      target: userProfiles.userUuid,
-      set: {
+    const row = await db.transaction(async (tx) => {
+      const [current] = await tx
+        .select({ username: userProfiles.username })
+        .from(userProfiles)
+        .where(eq(userProfiles.userUuid, input.userUuid))
+        .for("update")
+        .limit(1);
+      const previousUsername = current?.username ?? null;
+      if (previousUsername !== fields.username) {
+        if (fields.username && await isUsernameRetired(fields.username, tx)) {
+          throw new UsernameRetiredError("username was used before and cannot be reused");
+        }
+        if (previousUsername) {
+          const nextAllowedAt = input.limitUsernameChange ? await nextUsernameChangeAt(input.userUuid, tx) : null;
+          if (nextAllowedAt) throw new UsernameChangeTooSoonError(nextAllowedAt);
+          await recordUsernameChange(tx, input.userUuid, previousUsername);
+        }
+      }
+      const [row] = await tx.insert(userProfiles).values({
+        userUuid: input.userUuid,
         logtoUserId: input.logtoUserId,
         username: fields.username,
         displayName: fields.displayName,
@@ -315,8 +344,20 @@ async function upsertUserProfile(input: {
         source: fields.source,
         syncedAt: now,
         updatedAt: now,
-      },
-    }).returning();
+      }).onConflictDoUpdate({
+        target: userProfiles.userUuid,
+        set: {
+          logtoUserId: input.logtoUserId,
+          username: fields.username,
+          displayName: fields.displayName,
+          avatarUrl: fields.avatarUrl,
+          source: fields.source,
+          syncedAt: now,
+          updatedAt: now,
+        },
+      }).returning();
+      return row;
+    });
 
     if (!row) throw new Error("failed to upsert user profile");
     return toUserProfile(row);
@@ -324,6 +365,9 @@ async function upsertUserProfile(input: {
     const constraint = getPostgresErrorConstraint(error);
     if (isPostgresUniqueViolation(error) && constraint === "v2_uq_user_profiles_username") {
       throw new UsernameConflictError("username is already taken");
+    }
+    if (isPostgresUniqueViolation(error) && constraint === USERNAME_HISTORY_UNIQUE) {
+      throw new UsernameConflictError("username change conflicted with another change; retry");
     }
     throw error;
   }
@@ -713,12 +757,19 @@ export async function updateCurrentUserProfile(user: AuthUser, input: { displayN
     throw new UsernameClearError("username cannot be cleared once set");
   }
 
-  if (username) {
+  if (username && username !== trustedStoredProfile?.username) {
     const existing = await db.select({ userUuid: userProfiles.userUuid }).from(userProfiles).where(
       and(eq(userProfiles.username, username), ne(userProfiles.userUuid, user.uuid)),
     ).limit(1);
     if (existing.length > 0) {
       throw new UsernameConflictError("username is already taken");
+    }
+    if (await isUsernameRetired(username)) {
+      throw new UsernameRetiredError("username was used before and cannot be reused");
+    }
+    if (trustedStoredProfile?.username) {
+      const nextAllowedAt = await nextUsernameChangeAt(user.uuid);
+      if (nextAllowedAt) throw new UsernameChangeTooSoonError(nextAllowedAt);
     }
   }
 
@@ -748,12 +799,15 @@ export async function updateCurrentUserProfile(user: AuthUser, input: { displayN
       userUuid: user.uuid,
       logtoUserId,
       fields: updatedFields,
+      limitUsernameChange: username !== undefined,
     });
   } catch (error) {
+    // A concurrent rename may have committed meanwhile; restore Logto to the committed local username.
+    const committedUsername = (await getStoredUserProfile(user.uuid).catch(() => null))?.username;
     await updateLogtoUserProfile(logtoUserId, {
       displayName: previousFields.displayName,
       avatarUrl: previousFields.avatarUrl,
-      username: previousFields.username,
+      username: committedUsername ?? previousFields.username,
     }).catch((rollbackError) => {
       logger.warn("[user-profile] Failed to roll back Logto profile after local update failure:", rollbackError);
     });
@@ -777,13 +831,6 @@ export async function getProfilesByUsernames(usernames: string[]): Promise<Map<s
   return new Map(rows
     .filter((row): row is typeof row & { username: string } => Boolean(row.username))
     .map((row) => [row.username, toPublicUserProfile(row)]));
-}
-
-export async function getProfileByUsername(username: string): Promise<PublicUserProfile | null> {
-  const normalized = normalizeUsername(username);
-  if (!normalized) return null;
-  const [row] = await db.select().from(userProfiles).where(eq(userProfiles.username, normalized)).limit(1);
-  return row ? toPublicUserProfile(row) : null;
 }
 
 export function fallbackPublicUserProfile(userUuid: string): PublicUserProfile {

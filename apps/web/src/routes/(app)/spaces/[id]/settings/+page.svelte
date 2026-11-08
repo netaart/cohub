@@ -6,6 +6,7 @@ import {
 	normalizeCohubRuntimeEnv,
 	WORKSPACE_USAGE_UPDATED_EVENT,
 } from "@cohub/protocol";
+import { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 import type {
 	AppRecord,
 	Channel,
@@ -19,6 +20,7 @@ import type {
 	SpaceRecord,
 	SpaceRole,
 } from "@neta-art/cohub";
+import { HttpError } from "@neta-art/cohub";
 import {
 	ArrowLeft,
 	Check,
@@ -145,6 +147,7 @@ let editingSpaceSlug = $state(false);
 let spaceSlugDraft = $state("");
 let spaceSlugSaving = $state(false);
 let spaceSlugError = $state("");
+let retiredSpacePath = $state("");
 let copiedSpaceId = $state(false);
 let copiedSpaceIdTimer: ReturnType<typeof setTimeout> | null = null;
 let copiedSpaceSlugLink = $state(false);
@@ -303,15 +306,21 @@ async function saveSpaceSlug() {
 		return;
 	}
 	spaceSlugSaving = true;
+	const previousPath = getSpacePublicPath(space);
 	try {
 		const updateResult = await sdk.space(spaceId).update({ slug: nextSlug });
 		space = updateResult.space;
 		cacheSpaceRecordSoon(updateResult.space);
 		editingSpaceSlug = false;
 		spaceSlugDraft = "";
+		retiredSpacePath = previousPath;
 	} catch (err) {
 		spaceSlugError =
-			err instanceof Error ? err.message : m.space_failed_slug({}, { locale });
+			err instanceof HttpError && err.code === "space_slug_retired"
+				? m.space_slug_retired({}, { locale })
+				: err instanceof Error
+					? err.message
+					: m.space_failed_slug({}, { locale });
 	} finally {
 		spaceSlugSaving = false;
 	}
@@ -1191,6 +1200,7 @@ $effect(() => {
 									{/if}
 								</div>
 								{#if spaceSlugError}<p class="mt-1 text-[11px] text-error-soft break-words">{spaceSlugError}</p>{/if}
+								{#if editingSpaceSlug && space?.slug && space.slug !== HOME_SPACE_SLUG}<p class="mt-1 text-[11px] leading-4 text-text-placeholder">{m.space_slug_change_help({}, { locale })}</p>{:else if retiredSpacePath && !editingSpaceSlug}<p class="mt-1 text-[11px] leading-4 text-text-placeholder break-words">{m.space_slug_redirect_notice({ path: retiredSpacePath }, { locale })}</p>{/if}
 								{#if getSpacePrettyUrlHint(space) && !editingSpaceSlug}<p class="mt-1 text-[11px] leading-4 text-text-placeholder">{getSpacePrettyUrlHint(space)}</p>{/if}
 							</div>
 						</div>

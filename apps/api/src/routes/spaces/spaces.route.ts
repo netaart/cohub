@@ -15,7 +15,7 @@ import { normalizeGenerationPolicy, type GenerationContentBlock } from "@cohub/p
 import * as cronParser from "cron-parser";
 import { db } from "../../db/index.js";
 import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/postgres-error.js";
-import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels, userProfiles } from "@cohub/db";
+import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels } from "@cohub/db";
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
 import { hostPromptImages } from "../../session-images.js";
 import { readWorkspaceUsage } from "../../workspace-usage.js";
@@ -65,6 +65,14 @@ import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-sourc
 import { asAccountIdentity, hasPermission, getSpaceMemberRole, filterSessionsByPermission, resolvePermissionAccess } from "../../permissions.js";
 import { checkpoints } from "@cohub/db";
 import { LogtoUserRequiredError } from "../../user-profiles.js";
+import {
+  isSpaceSlugRetired,
+  publicSpacePath,
+  recordSpaceSlugChange,
+  redirectTarget,
+  resolvePublicSpace,
+  SPACE_SLUG_HISTORY_UNIQUE,
+} from "../../slug-history.js";
 import {
   CHECKPOINT_DIFF_CACHE_CONTROL,
   getCheckpointDiffFile,
@@ -474,6 +482,12 @@ const reservedSpaceSlugResponse = (c: Context) => c.json({
   field: "slug",
   message: "This Space slug is reserved.",
 }, 400);
+
+const retiredSpaceSlugResponse = (c: Context) => c.json({
+  code: "space_slug_retired",
+  field: "slug",
+  message: "This Space slug was used before and cannot be reused.",
+}, 409);
 
 const uniqueViolationConstraint = (error: unknown): string | null =>
   isPostgresUniqueViolation(error) ? getPostgresErrorConstraint(error) : null;
@@ -941,6 +955,7 @@ router.post("/", async (c) => {
   if (slug && validatePublicIdentifierAssignment("spaceSlug", slug).reason === "reserved") {
     return reservedSpaceSlugResponse(c);
   }
+  if (slug && await isSpaceSlugRetired(user.uuid, slug)) return retiredSpaceSlugResponse(c);
 
   const existingSpace = await db
     .select({ id: spaces.id })
@@ -1252,25 +1267,18 @@ router.get("/by-slug/:username/:slug", async (c) => {
   const { slug, error: slugError } = normalizeSpaceSlug(rawSlug);
   if (slugError || !slug) return c.json({ message: "space not found" }, 404);
 
-  const [profile] = await db
-    .select({ userUuid: userProfiles.userUuid })
-    .from(userProfiles)
-    .where(eq(userProfiles.username, username))
-    .limit(1);
-  if (!profile) return c.json({ message: "space not found" }, 404);
-
-  const [space] = await db
-    .select()
-    .from(spaces)
-    .where(and(eq(spaces.userUuid, profile.userUuid), eq(spaces.slug, slug)))
-    .limit(1);
-  if (!space) return c.json({ message: "space not found" }, 404);
+  const resolved = await resolvePublicSpace(username, slug);
+  if (!resolved) return c.json({ message: "space not found" }, 404);
+  const { space } = resolved;
+  const redirect = resolved.redirected
+    ? { redirectTo: redirectTarget(c.req.url, publicSpacePath(resolved.owner.username, space.slug)) }
+    : {};
 
   if (await hasPermission(user, "space.view", { spaceId: space.id })) {
-    return c.json(await buildSpaceResponse(c, space, user));
+    return c.json({ ...(await buildSpaceResponse(c, space, user)), ...redirect });
   }
 
-  return c.json(await buildMinimalSpaceResponse(space));
+  return c.json({ ...(await buildMinimalSpaceResponse(space)), ...redirect });
 });
 
 // ── GET /api/me/spaces/by-slug/:slug ───────────────────────────────────────
@@ -1357,7 +1365,10 @@ router.patch("/:id", async (c) => {
     ) {
       return reservedSpaceSlugResponse(c);
     }
-    if (slug !== space.slug) updates.slug = slug;
+    if (slug !== space.slug) {
+      if (slug && await isSpaceSlugRetired(space.userUuid, slug)) return retiredSpaceSlugResponse(c);
+      updates.slug = slug;
+    }
   }
 
   if (updates.name === undefined && updates.slug === undefined) {
@@ -1365,11 +1376,18 @@ router.patch("/:id", async (c) => {
   }
 
   try {
-    const [updated] = await db
+    const applyUpdates = (executor: Pick<typeof db, "update">) => executor
       .update(spaces)
       .set({ ...updates, updatedAt: new Date(), lastActivityAt: new Date() })
       .where(eq(spaces.id, spaceId))
       .returning();
+    const retiredSlug = updates.slug ? space.slug : null;
+    const [updated] = retiredSlug
+      ? await db.transaction(async (tx) => {
+          await recordSpaceSlugChange(tx, space, retiredSlug);
+          return await applyUpdates(tx);
+        })
+      : await applyUpdates(db);
 
     const result = updated ?? space;
     await dispatchSpaceListChanged(spaceId);
@@ -1377,6 +1395,9 @@ router.patch("/:id", async (c) => {
   } catch (error) {
     const constraint = uniqueViolationConstraint(error);
     if (constraint?.includes("user_slug")) return c.json({ message: "space slug already exists" }, 409);
+    if (constraint === SPACE_SLUG_HISTORY_UNIQUE) {
+      return c.json({ message: "space slug was changed by another request; reload and retry" }, 409);
+    }
     throw error;
   }
 });

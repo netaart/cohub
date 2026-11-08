@@ -112,6 +112,7 @@ import type {
   SpaceConfigUpdateResponse,
   ChannelConfig,
   ChannelHealth,
+  PublicSlugRedirect,
 } from "../types.js";
 import type { ResolvedFile } from "../media.js";
 import { SpaceInvitationsApi } from "./invitations.js";
@@ -270,7 +271,7 @@ export class SpacesApi {
   }
 
   getBySlug(username: string, slug: string, customFetch?: Fetch) {
-    return this.transport.request<SpaceRecord>(
+    return this.transport.request<SpaceRecord & PublicSlugRedirect>(
       `/api/spaces/by-slug/${encodeURIComponent(username)}/${encodeURIComponent(slug)}`,
       { fetch: customFetch },
     );

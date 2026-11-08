@@ -152,7 +152,13 @@ export type PublicUserAppItem = {
   updatedAt: string | null;
 };
 
-export type PublicUserPageResponse = {
+/**
+ * Public slug lookups carry the canonical public path (request query preserved)
+ * when the request used a retired username or Space slug.
+ */
+export type PublicSlugRedirect = { redirectTo?: string };
+
+export type PublicUserPageResponse = PublicSlugRedirect & {
   profile: PublicUserProfile;
   spaces: PublicUserSpaceItem[];
   apps: PublicUserAppItem[];
