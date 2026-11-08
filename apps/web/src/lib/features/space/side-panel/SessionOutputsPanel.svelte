@@ -8,6 +8,7 @@ import LoadMoreButton from "./LoadMoreButton.svelte";
 import SessionFileList from "./SessionFileList.svelte";
 import SidePanelSection from "./SidePanelSection.svelte";
 import type { SessionFilesFeed } from "./session-files.svelte";
+import { createSectionState } from "./side-panel-sections.svelte";
 
 type Props = {
 	hasSession: boolean;
@@ -35,27 +36,13 @@ const {
 	onJumpToTurn,
 }: Props = $props();
 
-const SECTIONS_KEY = "cohub:side-panel:session-sections:v1";
-type SectionId = "media" | "files";
-
-function readCollapsed(): Record<SectionId, boolean> {
-	try {
-		const value = JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "{}");
-		return { media: value?.media === true, files: value?.files === true };
-	} catch {
-		return { media: false, files: false };
-	}
-}
-
 const locale = $derived(getLocale());
-let collapsed = $state(readCollapsed());
-
-function toggle(section: SectionId) {
-	collapsed = { ...collapsed, [section]: !collapsed[section] };
-	try {
-		localStorage.setItem(SECTIONS_KEY, JSON.stringify(collapsed));
-	} catch {}
-}
+const sections = createSectionState("cohub:side-panel:session-sections:v1", [
+	"media",
+	"files",
+]);
+const collapsed = $derived(sections.collapsed);
+const toggle = sections.toggle;
 
 const tasks = $derived(generations?.tasks ?? []);
 const fileEntries = $derived(files?.files ?? []);

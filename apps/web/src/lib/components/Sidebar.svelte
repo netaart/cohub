@@ -2,10 +2,8 @@
 import { resourceAppLaunch, resourceAppRef } from "@cohub/protocol";
 import { buildAppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type {
-	AppRecord,
 	BillingCreditStatus,
 	CheckpointRecord,
-	CronJobRecord,
 	LabelAssignmentListItem,
 	LabelListItem,
 	SessionRecord,
@@ -21,7 +19,6 @@ import {
 	Check,
 	ChevronDown,
 	CircleHelp,
-	Clock,
 	CreditCard,
 	FolderKanban,
 	Gift,
@@ -35,7 +32,6 @@ import {
 	PanelLeftOpen,
 	Pencil,
 	Plus,
-	Rocket,
 	Save,
 	Settings,
 	Sparkles,
@@ -49,11 +45,8 @@ import { page } from "$app/state";
 import { openAbout } from "$lib/about";
 import { floatNear } from "$lib/actions/portal";
 import { appHomeHref } from "$lib/app-entry";
-import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
-import { sortAppsByRecentUpdate } from "$lib/app-sort";
 import { signOut } from "$lib/auth";
 import { handleUnauthorizedError } from "$lib/auth-redirect";
-import { boardAppCover } from "$lib/board/board-app";
 import { removeLegacyLocalStorage } from "$lib/cache/cleanup";
 import { clearAllIndexedDbCache } from "$lib/cache/clear";
 import type { SessionListForkRecord } from "$lib/cache/db";
@@ -74,7 +67,6 @@ import {
 	SETTINGS_SECTION_ICONS,
 	settingsSectionLabel,
 } from "$lib/components/settings-section";
-import SidebarAppRow from "$lib/components/sidebar/SidebarAppRow.svelte";
 import SidebarCheckpointRow from "$lib/components/sidebar/SidebarCheckpointRow.svelte";
 import SidebarFallbackResourceRow from "$lib/components/sidebar/SidebarFallbackResourceRow.svelte";
 import SidebarFileRow from "$lib/components/sidebar/SidebarFileRow.svelte";
@@ -89,12 +81,6 @@ import {
 	setCohubResourceDragData,
 } from "$lib/drag/cohub-resource-drag";
 import { requestAppNavigation } from "$lib/features/app/app-navigation-request";
-import {
-	APPS_CHANGED_EVENT,
-	type AppsChangedDetail,
-	createAppMutationBuffer,
-	upsertAppSnapshot,
-} from "$lib/features/app/app-realtime";
 import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
 import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
 import { setSessionArchived } from "$lib/features/sessions/session-archive";
@@ -146,11 +132,8 @@ import {
 import {
 	buildSessionsRoute,
 	buildSpaceActivityRoute,
-	buildSpaceAppRoute,
 	buildSpaceCheckpointNewRoute,
 	buildSpaceCheckpointRoute,
-	buildSpaceCronjobNewRoute,
-	buildSpaceCronjobRoute,
 	buildSpaceLandingRoute,
 	buildSpaceNewSessionRoute,
 	buildSpaceSessionRoute,
@@ -361,9 +344,7 @@ type LabelDragOrigin = {
 let activeLabelDragOrigin: LabelDragOrigin | null = null;
 let labelAutoExpandTimer: ReturnType<typeof setTimeout> | null = null;
 let labelDropFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
-let cronjobsCollapsed = $state(false);
 let tasksCollapsed = $state(true);
-let worksCollapsed = $state(false);
 let creatingSession = $state(false);
 let createSessionError = $state("");
 const sidebarFlyoutPreviewLimit = 24;
@@ -382,19 +363,9 @@ let renameLabelSaving = $state(false);
 let renameLabelInputElement: HTMLInputElement | null = $state(null);
 let deletingLabelId = $state<string | null>(null);
 
-let cronjobs = $state<CronJobRecord[]>([]);
 let tasks = $state<TaskRunRecord[]>([]);
-let apps = $state<AppRecord[]>([]);
-/**
- * Realtime mutations seen while a full list request is in flight, replayed onto
- * the response so a publish mid-load cannot hide the Space's other apps.
- */
-const appsBuffer = createAppMutationBuffer();
-let loadingCronjobs = $state(false);
 let refreshingCheckpoints = $state(false);
-let loadingCronjobsSpaceId = $state<string | null>(null);
 let loadingTasks = $state(false);
-let refreshingCronjobs = $state(false);
 let loadingTasksSpaceId = $state<string | null>(null);
 let refreshingTasks = $state(false);
 let loadingMoreTasks = $state(false);
@@ -402,9 +373,6 @@ let tasksPageInfo = $state<{ hasMore: boolean; nextCursor: string | null }>({
 	hasMore: false,
 	nextCursor: null,
 });
-let loadingApps = $state(false);
-let loadingAppsSpaceId = $state<string | null>(null);
-let refreshingApps = $state(false);
 
 const currentPath = $derived(page.url.pathname);
 const activeInboxSessionId = $derived(
@@ -440,9 +408,7 @@ function isCurrentSpace(spaceId: string) {
 	return !destroyed && spaceId === currentSpaceId;
 }
 const activeSessionId = $derived(workspaceRoute.sessionId);
-const activeAppId = $derived(workspaceRoute.appId);
 const activeCheckpointId = $derived(workspaceRoute.checkpointId);
-const activeCronjobId = $derived(workspaceRoute.cronjobId);
 const activeTaskId = $derived(workspaceRoute.taskId);
 const activeLabelResource = $derived(workspaceRoute.labelResource);
 
@@ -457,7 +423,6 @@ const sessions = $derived(
 const activeSession = $derived(
 	activeSessionId ? (sessionStore.get(activeSessionId) ?? null) : null,
 );
-const activeApp = $derived(apps.find((app) => app.id === activeAppId) ?? null);
 const activeCheckpoint = $derived(
 	checkpoints.find((checkpoint) => checkpoint.id === activeCheckpointId) ??
 		null,
@@ -473,9 +438,6 @@ const currentCollapsedForkIds = $derived(
 );
 const sidebarSessionItems = $derived.by(() =>
 	buildSidebarSessionItems(sessions),
-);
-const activeCronjob = $derived(
-	cronjobs.find((job) => job.id === activeCronjobId) ?? null,
 );
 
 const currentSpace = $derived(
@@ -758,47 +720,6 @@ function getTaskRunTitle(run: TaskRunRecord) {
 
 function getTaskRunMeta(run: TaskRunRecord) {
 	return `${formatTaskTypeLabel(run.taskType)} · ${run.status} · ${formatTaskRunTime(run)}`;
-}
-
-function handleAppDragStart(event: DragEvent, app: AppRecord) {
-	const href = currentSpaceId ? buildSpaceAppRoute(currentSpaceId, app.id) : "";
-	const icon = appIconUrl(app.meta);
-	setCohubResourceDragData(event.dataTransfer, {
-		version: 1,
-		resources: [
-			{
-				type: "app",
-				ref: app.slug,
-				appId: app.id,
-				title: appDisplayTitle(app.meta, app.slug),
-				href,
-				...(icon ? { icon } : {}),
-				...boardAppCover(app.meta),
-			},
-		],
-		origin: { kind: "sidebar-session-list" },
-	});
-}
-
-function appPointerDragPayload(app: AppRecord) {
-	const icon = appIconUrl(app.meta);
-	return {
-		origin: "apps-sidebar" as const,
-		items: [
-			{
-				type: "app" as const,
-				path: "",
-				name: appDisplayTitle(app.meta, app.slug),
-				appId: app.id,
-				appRef: app.slug,
-				appUrl: currentSpaceId
-					? buildSpaceAppRoute(currentSpaceId, app.id)
-					: "",
-				...(icon ? { icon } : {}),
-				...boardAppCover(app.meta),
-			},
-		],
-	};
 }
 
 function handleTaskDragStart(event: DragEvent, run: TaskRunRecord) {
@@ -2140,31 +2061,6 @@ function isLabelAssignmentActive(item: LabelAssignmentListItem) {
 	return item.resourceRef === activeLabelResource.ref;
 }
 
-async function loadCronjobsForSpace(spaceId: string, force = false) {
-	await authStore.ensureLoaded();
-	if (!isCurrentSpace(spaceId)) return;
-	if (!force && loadingCronjobs && loadingCronjobsSpaceId === spaceId) return;
-	const shouldShowLoading = cronjobs.length === 0;
-	if (shouldShowLoading) {
-		loadingCronjobs = true;
-		loadingCronjobsSpaceId = spaceId;
-	} else {
-		refreshingCronjobs = true;
-	}
-	try {
-		const result = await sdk.cronJobs.list(spaceId);
-		if (isCurrentSpace(spaceId)) cronjobs = result.jobs ?? [];
-	} catch (error) {
-		console.warn("[sidebar] Failed to load cronjobs", { spaceId, error });
-	} finally {
-		if (loadingCronjobsSpaceId === spaceId) {
-			loadingCronjobs = false;
-			loadingCronjobsSpaceId = null;
-		}
-		refreshingCronjobs = false;
-	}
-}
-
 async function restoreTasksForSpace(spaceId: string) {
 	const cachedRuns = getCachedTaskRuns(spaceId);
 	if (cachedRuns.length > 0 && isCurrentSpace(spaceId)) {
@@ -2236,37 +2132,6 @@ async function loadMoreTasksForSpace(spaceId: string) {
 		console.warn("[sidebar] Failed to load more tasks", { spaceId, error });
 	} finally {
 		loadingMoreTasks = false;
-	}
-}
-
-/** Fold buffered realtime mutations onto a freshly fetched list. */
-async function loadAppsForSpace(spaceId: string, force = false) {
-	await authStore.ensureLoaded();
-	if (!isCurrentSpace(spaceId)) return;
-	if (!force && loadingApps && loadingAppsSpaceId === spaceId) return;
-	const shouldShowLoading = apps.length === 0;
-	if (shouldShowLoading) {
-		loadingApps = true;
-		loadingAppsSpaceId = spaceId;
-	} else {
-		refreshingApps = true;
-	}
-	appsBuffer.reset();
-	try {
-		const result = await sdk.apps.listBySpace(spaceId);
-		if (isCurrentSpace(spaceId)) {
-			// The API serves newest-updated-first; sorting again keeps a realtime
-			// snapshot replayed mid-request in its right place.
-			apps = sortAppsByRecentUpdate(appsBuffer.apply(result.apps ?? []));
-		}
-	} catch (error) {
-		console.warn("[sidebar] Failed to load apps", { spaceId, error });
-	} finally {
-		if (loadingAppsSpaceId === spaceId) {
-			loadingApps = false;
-			loadingAppsSpaceId = null;
-		}
-		refreshingApps = false;
 	}
 }
 
@@ -2438,16 +2303,6 @@ async function handleNavigateToNewCheckpoint() {
 	await navigateToResource(buildSpaceCheckpointNewRoute(currentSpaceId));
 }
 
-async function handleNavigateToCronjob(cronjobId: string) {
-	if (!currentSpaceId) return;
-	await navigateToResource(buildSpaceCronjobRoute(currentSpaceId, cronjobId));
-}
-
-async function handleNavigateToNewCronjob() {
-	if (!currentSpaceId) return;
-	await navigateToResource(buildSpaceCronjobNewRoute(currentSpaceId));
-}
-
 async function handleNavigateToTask(taskId: string) {
 	if (!currentSpaceId) return;
 	await navigateToResource(buildSpaceTaskRoute(currentSpaceId, taskId));
@@ -2460,27 +2315,6 @@ function getCurrentSpaceOwnerUsername() {
 			? authStore.profile?.username
 			: null)
 	);
-}
-
-async function handleNavigateToApp(appId: string) {
-	if (!currentSpaceId) return;
-	await navigateToResource(buildSpaceAppRoute(currentSpaceId, appId));
-}
-
-function handleWorksChanged(event: Event) {
-	const detail = (event as CustomEvent<AppsChangedDetail>).detail;
-	if (!currentSpaceId || detail?.spaceId !== currentSpaceId) return;
-	if (detail.app) {
-		appsBuffer.upsert(detail.app);
-		apps = upsertAppSnapshot(apps, detail.app);
-		return;
-	}
-	if (detail.deletedAppId) {
-		appsBuffer.remove(detail.deletedAppId);
-		apps = apps.filter((app) => app.id !== detail.deletedAppId);
-		return;
-	}
-	void loadAppsForSpace(currentSpaceId, true);
 }
 
 async function handleCreateNewSession() {
@@ -2912,17 +2746,8 @@ function subscribeSidebarUpdates() {
 		},
 	);
 	window.addEventListener(
-		APPS_CHANGED_EVENT,
-		handleWorksChanged as EventListener,
-	);
-
-	window.addEventListener(
 		"cohub:checkpoints-updated",
 		handleCheckpointsUpdated as EventListener,
-	);
-	window.addEventListener(
-		"cohub:cronjobs-updated",
-		handleCronjobsUpdated as EventListener,
 	);
 	window.addEventListener(
 		"cohub:label-assignments-updated",
@@ -2933,13 +2758,6 @@ function subscribeSidebarUpdates() {
 		const custom = e as CustomEvent;
 		if (custom.detail?.spaceId === currentSpaceId && currentSpaceId) {
 			void loadCheckpointsForSpace(currentSpaceId, true);
-		}
-	}
-
-	function handleCronjobsUpdated(e: Event) {
-		const custom = e as CustomEvent;
-		if (custom.detail?.spaceId === currentSpaceId && currentSpaceId) {
-			void loadCronjobsForSpace(currentSpaceId, true);
 		}
 	}
 
@@ -2988,16 +2806,8 @@ function subscribeSidebarUpdates() {
 		offTaskRunsCacheUpdated();
 		document.removeEventListener("click", handleClickOutside);
 		window.removeEventListener(
-			APPS_CHANGED_EVENT,
-			handleWorksChanged as EventListener,
-		);
-		window.removeEventListener(
 			"cohub:checkpoints-updated",
 			handleCheckpointsUpdated as EventListener,
-		);
-		window.removeEventListener(
-			"cohub:cronjobs-updated",
-			handleCronjobsUpdated as EventListener,
 		);
 		window.removeEventListener(
 			"cohub:label-assignments-updated",
@@ -3043,9 +2853,7 @@ $effect(() => {
 		sessionForks = [];
 		labels = [];
 		checkpoints = [];
-		cronjobs = [];
 		tasks = [];
-		apps = [];
 		sessionsPageInfo = { hasMore: false, nextCursor: null };
 		exhaustedFallbackSessionCursor = null;
 		loadingSessions = false;
@@ -3059,17 +2867,11 @@ $effect(() => {
 		loadingCheckpoints = false;
 		loadingCheckpointsSpaceId = null;
 		refreshingCheckpoints = false;
-		loadingCronjobs = false;
-		loadingCronjobsSpaceId = null;
-		refreshingCronjobs = false;
 		loadingTasks = false;
 		loadingTasksSpaceId = null;
 		refreshingTasks = false;
 		loadingMoreTasks = false;
 		tasksPageInfo = { hasMore: false, nextCursor: null };
-		loadingApps = false;
-		loadingAppsSpaceId = null;
-		refreshingApps = false;
 		labelDropTargetId = null;
 		labelDropBusyId = null;
 		labelDropErrorMessage = null;
@@ -3084,8 +2886,6 @@ $effect(() => {
 			});
 			void loadLabelsForSpace(id);
 			void loadCheckpointsForSpace(id, true);
-			void loadCronjobsForSpace(id, true);
-			void loadAppsForSpace(id, true);
 		});
 	} else {
 		sessionIds = [];
@@ -3095,9 +2895,7 @@ $effect(() => {
 		sessionsPageInfo = { hasMore: false, nextCursor: null };
 		exhaustedFallbackSessionCursor = null;
 		checkpoints = [];
-		cronjobs = [];
 		tasks = [];
-		apps = [];
 		loadingSessions = false;
 		loadingSessionsSpaceId = null;
 		refreshingSessions = false;
@@ -3107,9 +2905,6 @@ $effect(() => {
 		loadingCheckpoints = false;
 		loadingCheckpointsSpaceId = null;
 		refreshingCheckpoints = false;
-		loadingCronjobs = false;
-		loadingCronjobsSpaceId = null;
-		refreshingCronjobs = false;
 		loadingTasks = false;
 		loadingTasksSpaceId = null;
 		refreshingTasks = false;
@@ -3585,51 +3380,6 @@ $effect(() => {
 	{/if}
 {/snippet}
 
-{#snippet cronjobsFlyoutList()}
-	<div class="mb-1 flex justify-end">
-		<button type="button" class="inline-flex items-center gap-1 rounded-[5px] px-2 py-1 text-[11px] font-medium text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35" onclick={handleNavigateToNewCronjob}>
-			<Plus class="h-3 w-3" /> {m.sidebar_new_scheduled({}, { locale })}
-		</button>
-	</div>
-	{#if loadingCronjobs && cronjobs.length === 0}
-		{@render sidebarEmptyState(m.sidebar_loading_scheduled({}, { locale }), true)}
-	{:else if cronjobs.length === 0}
-		{@render sidebarEmptyState(m.sidebar_no_scheduled({}, { locale }))}
-	{:else}
-		<div class="space-y-[2px]">
-			{#each cronjobs.slice(0, sidebarFlyoutPreviewLimit) as job (job.id)}
-				{@const isActive = activeCronjobId === job.id}
-				<a href={buildSpaceCronjobRoute(currentSpaceId!, job.id)} class="sidebar-flyout-item flex items-center gap-2 rounded-[var(--sidebar-item-radius)] px-1.5 py-1.5 text-[13px] {isActive ? 'bg-[var(--sidebar-item-active-bg)] font-medium text-[var(--sidebar-item-active-fg)]' : 'text-text-tertiary hover:bg-[var(--sidebar-item-hover-bg)] hover:text-text-secondary'}" onclick={(e) => { e.preventDefault(); handleNavigateToCronjob(job.id); }}>
-					<div class="min-w-0 flex-1"><div class="truncate leading-tight">{job.title}</div></div>
-					<span class="h-1.5 w-1.5 shrink-0 rounded-full {job.enabled ? 'bg-status-running' : 'bg-text-placeholder'}"></span>
-				</a>
-			{/each}
-		</div>
-	{/if}
-{/snippet}
-
-{#snippet appsFlyoutList()}
-	{#if loadingApps && apps.length === 0}
-		{@render sidebarEmptyState(m.sidebar_loading_apps({}, { locale }), true)}
-	{:else if apps.length === 0}
-		{@render sidebarEmptyState(m.sidebar_no_apps({}, { locale }))}
-	{:else}
-		<div class="space-y-[2px]">
-			{#each apps.slice(0, sidebarFlyoutPreviewLimit) as app (app.id)}
-				<SidebarAppRow
-					{app}
-					href={currentSpaceId ? buildSpaceAppRoute(currentSpaceId, app.id) : "#"}
-					active={activeApp?.id === app.id}
-					{isMobile}
-					getPayload={() => appPointerDragPayload(app)}
-					onDragStart={handleAppDragStart}
-					onNavigate={(id) => void handleNavigateToApp(id)}
-				/>
-			{/each}
-		</div>
-	{/if}
-{/snippet}
-
 {#snippet tasksFlyoutList()}
 	{#if loadingTasks && tasks.length === 0}
 		{@render sidebarEmptyState(m.sidebar_loading_tasks({}, { locale }), true)}
@@ -3789,23 +3539,11 @@ $effect(() => {
               {/snippet}
               {@render chatsSection(false)}
             </SidebarFlyout>
-            <SidebarFlyout label={m.sidebar_apps({}, { locale })} active={Boolean(activeApp)} onTriggerClick={() => uiState.setLeftSidebarCollapsed(false)}>
-              {#snippet trigger()}
-                <Rocket class="h-4 w-4" />
-              {/snippet}
-              {@render appsFlyoutList()}
-            </SidebarFlyout>
             <SidebarFlyout label={m.sidebar_saves({}, { locale })} active={Boolean(activeCheckpointId)} onTriggerClick={() => uiState.setLeftSidebarCollapsed(false)}>
               {#snippet trigger()}
                 <History class="h-4 w-4" />
               {/snippet}
               {@render checkpointsFlyoutList()}
-            </SidebarFlyout>
-            <SidebarFlyout label={m.sidebar_scheduled({}, { locale })} active={Boolean(activeCronjobId)} onTriggerClick={() => uiState.setLeftSidebarCollapsed(false)}>
-              {#snippet trigger()}
-                <Clock class="h-4 w-4" />
-              {/snippet}
-              {@render cronjobsFlyoutList()}
             </SidebarFlyout>
             <SidebarFlyout label={m.sidebar_tasks({}, { locale })} active={Boolean(activeTaskId)} onTriggerClick={() => uiState.setLeftSidebarCollapsed(false)}>
               {#snippet trigger()}
@@ -4056,55 +3794,6 @@ $effect(() => {
           {@render labelsSection()}
           {@render chatsSection()}
 
-          <!-- Apps -->
-          <div class="mt-3">
-            <button
-              type="button"
-              class="flex items-center gap-2 px-1.5 py-1.5 w-full text-left hover:bg-bg-hover transition-colors duration-100 rounded-[6px]"
-              onclick={() => { worksCollapsed = !worksCollapsed; }}
-              title={worksCollapsed ? m.sidebar_expand_apps({}, { locale }) : m.sidebar_collapse_apps({}, { locale })}
-            >
-              <ChevronDown class="w-3 h-3 text-text-tertiary shrink-0 transition-transform duration-150 {worksCollapsed ? 'rotate-180' : ''}" />
-              <Rocket class="w-3.5 h-3.5 shrink-0 text-text-placeholder" />
-              <span class="text-[11px] text-text-placeholder select-none">{m.sidebar_apps({}, { locale })}</span>
-              {@render syncSpinner(refreshingApps, "ml-auto")}
-            </button>
-
-            {#if !worksCollapsed}
-              {#if loadingApps && apps.length === 0}
-                {@render sidebarEmptyState(m.sidebar_loading_apps({}, { locale }), true)}
-              {:else if apps.length === 0}
-                {@render sidebarEmptyState(m.sidebar_no_apps({}, { locale }))}
-              {:else}
-                <div class="space-y-[2px] mt-1">
-                  {#each apps as app (app.id)}
-                    <SidebarAppRow
-                      {app}
-                      href={currentSpaceId ? buildSpaceAppRoute(currentSpaceId, app.id) : "#"}
-                      active={activeApp?.id === app.id}
-                      {isMobile}
-                      getPayload={() => appPointerDragPayload(app)}
-                      onDragStart={handleAppDragStart}
-                      onNavigate={(id) => void handleNavigateToApp(id)}
-                    />
-                  {/each}
-                </div>
-              {/if}
-            {:else if activeApp}
-              <div class="mt-1">
-                <SidebarAppRow
-                  app={activeApp}
-                  href={currentSpaceId ? buildSpaceAppRoute(currentSpaceId, activeApp.id) : "#"}
-                  active
-                  {isMobile}
-                  getPayload={() => appPointerDragPayload(activeApp)}
-                  onDragStart={handleAppDragStart}
-                  onNavigate={(id) => void handleNavigateToApp(id)}
-                />
-              </div>
-            {/if}
-          </div>
-
           <div class="mt-3">
             <button
               type="button"
@@ -4159,69 +3848,6 @@ $effect(() => {
                   onNavigate={(target) => void handleNavigateToCheckpoint(target.id)}
                 />
               </div>
-            {/if}
-          </div>
-
-
-          <!-- Scheduled Jobs -->
-          <div class="mt-3">
-            <div
-              class="flex items-center gap-2 px-1.5 py-1.5 w-full text-left hover:bg-bg-hover transition-colors duration-100 rounded-[6px] cursor-pointer"
-              onclick={() => { cronjobsCollapsed = !cronjobsCollapsed; }}
-              title={cronjobsCollapsed ? m.sidebar_expand_scheduled({}, { locale }) : m.sidebar_collapse_scheduled({}, { locale })}
-              role="button"
-              tabindex="0"
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cronjobsCollapsed = !cronjobsCollapsed; } }}
-            >
-              <ChevronDown class="w-3 h-3 text-text-tertiary shrink-0 transition-transform duration-150 {cronjobsCollapsed ? 'rotate-180' : ''}" />
-              <Clock class="w-3.5 h-3.5 shrink-0 text-text-placeholder" />
-              <span class="text-[11px] text-text-placeholder select-none">{m.sidebar_scheduled({}, { locale })}</span>
-              {@render syncSpinner(refreshingCronjobs, "ml-auto")}
-              <span
-                class="{refreshingCronjobs ? '' : 'ml-auto'} p-0.5 rounded hover:bg-bg-hover text-text-placeholder hover:text-text-secondary transition-colors cursor-pointer"
-                onclick={(e) => { e.stopPropagation(); handleNavigateToNewCronjob(); }}
-                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); handleNavigateToNewCronjob(); } }}
-                title={m.sidebar_new_scheduled({}, { locale })}
-                role="button"
-                tabindex="0"
-              >
-                <Plus class="w-3 h-3" />
-              </span>
-            </div>
-
-            {#if !cronjobsCollapsed}
-              {#if loadingCronjobs && cronjobs.length === 0}
-                {@render sidebarEmptyState(m.sidebar_loading_scheduled({}, { locale }), true)}
-              {:else if cronjobs.length === 0}
-                {@render sidebarEmptyState(m.sidebar_no_scheduled({}, { locale }))}
-              {:else}
-                <div class="space-y-[2px] mt-1">
-                  {#each cronjobs as job (job.id)}
-                    {@const isActive = activeCronjobId === job.id}
-                    <a
-                      href={buildSpaceCronjobRoute(currentSpaceId!, job.id)}
-                      class="flex items-center gap-2 px-1.5 py-1.5 rounded-[var(--sidebar-item-radius)] text-[13px] transition-colors duration-100 {isActive ? 'text-[var(--sidebar-item-active-fg)] bg-[var(--sidebar-item-active-bg)] font-medium' : 'text-text-tertiary hover:text-text-secondary hover:bg-[var(--sidebar-item-hover-bg)]'}"
-                      onclick={(e) => { e.preventDefault(); handleNavigateToCronjob(job.id); }}
-                    >
-                      <div class="min-w-0 flex-1">
-                        <div class="truncate leading-tight">{job.title}</div>
-                      </div>
-                      <span class="w-[6px] h-[6px] rounded-full shrink-0 {job.enabled ? 'bg-status-running' : 'bg-text-placeholder'}"></span>
-                    </a>
-                  {/each}
-                </div>
-              {/if}
-            {:else if activeCronjob}
-              <a
-                href={buildSpaceCronjobRoute(currentSpaceId!, activeCronjob.id)}
-                class="flex items-center gap-2 px-1.5 py-1.5 mt-1 rounded-[var(--sidebar-item-radius)] text-[13px] transition-colors duration-100 text-[var(--sidebar-item-active-fg)] bg-[var(--sidebar-item-active-bg)] font-medium"
-                onclick={(e) => { e.preventDefault(); handleNavigateToCronjob(activeCronjob.id); }}
-              >
-                <div class="min-w-0 flex-1">
-                  <div class="truncate leading-tight">{activeCronjob.title}</div>
-                </div>
-                <span class="w-[6px] h-[6px] rounded-full shrink-0 {activeCronjob.enabled ? 'bg-status-running' : 'bg-text-placeholder'}"></span>
-              </a>
             {/if}
           </div>
 

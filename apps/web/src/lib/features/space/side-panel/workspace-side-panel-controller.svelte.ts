@@ -1,6 +1,15 @@
 import type { RealtimeTaskRecord } from "@cohub/protocol";
-import { untrack } from "svelte";
+import { onMount, untrack } from "svelte";
+import {
+	APPS_CHANGED_EVENT,
+	type AppsChangedDetail,
+} from "$lib/features/app/app-realtime";
 import { sessionGenerationStore } from "$lib/stores/session-generation.svelte";
+import { SpaceAppsFeed } from "../resources/space-apps-feed.svelte";
+import {
+	CRONJOBS_UPDATED_EVENT,
+	SpaceCronjobsFeed,
+} from "../resources/space-cronjobs-feed.svelte";
 import {
 	GenerationFeed,
 	ingestGenerationTaskEvent,
@@ -21,11 +30,15 @@ export function createWorkspaceSidePanelController(options: {
 	getSessionId: () => string | null;
 	getCanViewTasks: () => boolean;
 	getCanViewFiles: () => boolean;
+	getCanViewApps: () => boolean;
+	getCanViewCronjobs: () => boolean;
 	getVisible: () => boolean;
 }) {
 	let sessionGenerations = $state.raw<GenerationFeed | null>(null);
 	let sessionFiles = $state.raw<SessionFilesFeed | null>(null);
 	let spaceGenerations = $state.raw<GenerationFeed | null>(null);
+	let apps = $state.raw<SpaceAppsFeed | null>(null);
+	let cronjobs = $state.raw<SpaceCronjobsFeed | null>(null);
 	let spaceMediaRequested = $state(false);
 	let hasBeenVisible = $state(false);
 	// Rebuild feeds only when these values change.
@@ -33,6 +46,8 @@ export function createWorkspaceSidePanelController(options: {
 	const sessionId = $derived(options.getSessionId());
 	const canViewTasks = $derived(options.getCanViewTasks());
 	const canViewFiles = $derived(options.getCanViewFiles());
+	const canViewApps = $derived(options.getCanViewApps());
+	const canViewCronjobs = $derived(options.getCanViewCronjobs());
 
 	$effect(() => {
 		if (options.getVisible()) hasBeenVisible = true;
@@ -63,6 +78,38 @@ export function createWorkspaceSidePanelController(options: {
 				: null;
 		spaceGenerations = feed;
 		return () => feed?.dispose();
+	});
+
+	$effect(() => {
+		const feed = spaceId && canViewApps ? new SpaceAppsFeed(spaceId) : null;
+		apps = feed;
+		untrack(() => feed?.start());
+		return () => feed?.dispose();
+	});
+
+	$effect(() => {
+		const feed =
+			spaceId && canViewCronjobs ? new SpaceCronjobsFeed(spaceId) : null;
+		cronjobs = feed;
+		return () => feed?.dispose();
+	});
+
+	onMount(() => {
+		const onAppsChanged = (event: Event) => {
+			const detail = (event as CustomEvent<AppsChangedDetail>).detail;
+			if (apps && detail?.spaceId === apps.spaceId) apps.apply(detail);
+		};
+		const onCronjobsUpdated = (event: Event) => {
+			const detail = (event as CustomEvent<{ spaceId?: string }>).detail;
+			if (cronjobs && detail?.spaceId === cronjobs.spaceId)
+				void cronjobs.refresh();
+		};
+		window.addEventListener(APPS_CHANGED_EVENT, onAppsChanged);
+		window.addEventListener(CRONJOBS_UPDATED_EVENT, onCronjobsUpdated);
+		return () => {
+			window.removeEventListener(APPS_CHANGED_EVENT, onAppsChanged);
+			window.removeEventListener(CRONJOBS_UPDATED_EVENT, onCronjobsUpdated);
+		};
 	});
 
 	$effect(() => {
@@ -113,6 +160,13 @@ export function createWorkspaceSidePanelController(options: {
 		void sessionGenerations?.refresh();
 		void sessionFiles?.refresh();
 		if (spaceMediaRequested) void spaceGenerations?.refresh();
+		void cronjobs?.refresh();
+	}
+
+	function showCronjobs() {
+		if (!cronjobs) return;
+		if (cronjobs.started) void cronjobs.refresh();
+		else cronjobs.start();
 	}
 
 	return {
@@ -125,6 +179,12 @@ export function createWorkspaceSidePanelController(options: {
 		get spaceGenerations() {
 			return spaceGenerations;
 		},
+		get apps() {
+			return apps;
+		},
+		get cronjobs() {
+			return cronjobs;
+		},
 		get sessionBusy() {
 			return (
 				(sessionGenerations?.activeCount ?? 0) > 0 ||
@@ -134,6 +194,7 @@ export function createWorkspaceSidePanelController(options: {
 		requestSpaceMedia() {
 			spaceMediaRequested = true;
 		},
+		showCronjobs,
 		ingest,
 		refresh,
 	};

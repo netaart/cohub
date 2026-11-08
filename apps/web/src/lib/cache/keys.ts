@@ -198,3 +198,11 @@ export function viewerLikeKey(
 export function appDomainsKey(userKey: string, spaceId: string, appId: string) {
 	return [userKey, spaceId, appId, "domains"].map(encodeKeyPart).join(":");
 }
+
+export function spaceResourceListKey(
+	userKey: string,
+	spaceId: string,
+	kind: string,
+) {
+	return [userKey, spaceId, kind, "list"].map(encodeKeyPart).join(":");
+}
