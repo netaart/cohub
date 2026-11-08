@@ -11,7 +11,8 @@ import {
 } from "../../model/script-scene.js";
 import { BOARD_SCRIPT_HISTORY_MS } from "../../model/animation.js";
 import { BOARD_SCRIPT_EXPORT_CALLS } from "../../model/script-calls.js";
-import type { BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot, BoardScriptView } from "../../model/script.js";
+import { BOARD_SCRIPT_EXPORT_ENV, type BoardScriptInputLog, boardScriptInputsBetween } from "../../model/script-senses.js";
+import type { BoardScriptEnv, BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot, BoardScriptView } from "../../model/script.js";
 import { BOARD_SCRIPT_EMIT_DEPTH, boardScriptEmit, boardScriptListens, createBoardScriptOutbox, queueBoardScriptEvent } from "../../model/script-events.js";
 import {
   loadBoardScriptSources,
@@ -37,7 +38,7 @@ const instances = new Map();
 const graphs = new Map();
 const calls = new Map();
 let callId = 0;
-const update = new Script('__runtime.update(JSON.parse(__inputJson)); for (const event of JSON.parse(__eventsJson)) __runtime.event(event); __runtime.step(__time)');
+const update = new Script('__runtime.update(JSON.parse(__inputJson)); for (const event of JSON.parse(__eventsJson, (_key, value) => value && Array.isArray(value.$f32) ? new Float32Array(value.$f32) : value)) __runtime.event(event); __runtime.step(__time)');
 const draw = new Script('__runtime.draw(__drawing)');
 const output = new Script('JSON.stringify(__runtime.output())');
 const snapshot = new Script('JSON.stringify(__runtime.snapshot())');
@@ -111,7 +112,7 @@ parentPort.on('message',async data=>{
    entry=await create(data);instances.set(data.input.id,entry);
   }
   const context=entry.context;
-  context.__inputJson=JSON.stringify(data.input);context.__eventsJson=JSON.stringify(data.events??[]);context.__time=data.time;
+  context.__inputJson=JSON.stringify(data.input);context.__eventsJson=JSON.stringify(data.events??[],(_key,value)=>value instanceof Float32Array?{$f32:Array.from(value)}:value);context.__time=data.time;
   update.runInContext(context,{timeout:workerData.timeout});entry.time=data.time;
   await new Promise(resolve=>setImmediate(resolve));
   let png;
@@ -388,13 +389,18 @@ function createNodeScriptLanes(
   };
 }
 
-function scopedInput(document: BoardDocument, { id, script, item }: BoardScriptAttachment, size: { width: number; height: number }): ScriptRuntimeInput {
+function scopedInput(
+  document: BoardDocument,
+  { id, script, item }: BoardScriptAttachment,
+  size: { width: number; height: number },
+  env: BoardScriptEnv = BOARD_SCRIPT_EXPORT_ENV,
+): ScriptRuntimeInput {
   const items: Record<string, BoardItem> = {};
   for (const scoped of boardScriptScope(document, id)) {
     const value = document.items[scoped];
     if (value) items[scoped] = value;
   }
-  return { id, script, item, items, width: size.width, height: size.height };
+  return { id, script, item, items, width: size.width, height: size.height, env };
 }
 
 export function createNodeBoardScriptHost(
@@ -406,7 +412,7 @@ export function createNodeBoardScriptHost(
     times: readonly number[],
     zoom: number,
     board?: Pick<BoardSettings, "scripts">,
-    options?: { shaders?: boolean; history?: (time: number) => BoardDocument; view?: BoardScriptView },
+    options?: { shaders?: boolean; history?: (time: number) => BoardDocument; view?: BoardScriptView; inputs?: BoardScriptInputLog },
   ): Promise<void>;
   clearFrames(): void;
   readonly emitFailures: ReadonlyMap<string, string>;
@@ -523,8 +529,8 @@ export function createNodeBoardScriptHost(
       };
       for (const time of times) {
         await Promise.all([...prepared].map(async ([id, { attachment, graph, input, width, height, scale }]) => {
+          const last = sampled.get(id) ?? 0;
           try {
-            const last = sampled.get(id) ?? 0;
             if (time < last) views.delete(id);
             if (options?.history) {
               const from = last <= time ? last : 0;
@@ -554,8 +560,8 @@ export function createNodeBoardScriptHost(
             errors.set(id, error instanceof Error ? error.message : String(error));
             return;
           }
+          const events = boardScriptInputsBetween(options?.inputs, sampled.has(id) && time >= last ? last : -1, time);
           sampled.set(id, time);
-          const events: BoardScriptEvent[] = [];
           const shown = viewKey && `${JSON.stringify({ ...attachment.script, params: undefined })}|${viewKey}`;
           if (shown && views.get(id) !== shown) {
             views.set(id, shown);
@@ -710,7 +716,7 @@ export function createNodeBoardScriptRuntime(
           entries.set(id, entry);
         }
         if (entry.error || entry.busy) continue;
-        const input = { ...scopedInput(document, attachment, item ? scene.layout.box(id) : { width: 0, height: 0 }), capabilities };
+        const input = { ...scopedInput(document, attachment, item ? scene.layout.box(id) : { width: 0, height: 0 }, callbacks.env()), capabilities };
         const inputKey = JSON.stringify(input);
         const changed = inputKey !== entry.inputKey;
         const waiting = changed || entry.dirty || entry.events.length > 0;

@@ -147,6 +147,7 @@ type ExportOptions = JsonOptions & {
   force?: boolean;
   async?: boolean;
   timeout?: string;
+  inputs?: string;
 };
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -161,6 +162,11 @@ async function runExportTask(boards: Command, options: ExportOptions): Promise<v
   } catch (cause) {
     handleHttp(cause);
   }
+}
+
+async function readBoardInputs(spaceId: string, path: string): Promise<string> {
+  const { readSpaceFileBytes } = await import("../board-export.js");
+  return new TextDecoder().decode((await readSpaceFileBytes(createClient(), spaceId, path)).bytes);
 }
 
 function parseSize(value: string): { width: number; height: number } {
@@ -242,6 +248,7 @@ function registerExportCommand(boards: Command): void {
     .option("--renderer <renderer>", "auto draws in Node and uses local Chrome for shaders; canvas or gpu forces one", "auto")
     .option("--force", "Replace existing output files")
     .option("--timeout <time>", "Fail a frame that takes longer, naming the scripts still running", "2m")
+    .option("--inputs <file>", "A Space file of recorded browser input for scripts to replay from time 0")
     .option("--async", "Run as a Task in the Space's sandbox and return at once; paths are Space paths"))
     .addHelpText("after", `
 Shaders draw in a shared headless Chrome that stays up a few minutes between calls;
@@ -255,7 +262,8 @@ Examples:
   cohub boards export plan.board --animation lecture --at 0:6s:40ms -o frames/%04d.png
 
 Scripts see the exported area as their view (viewchange), and emit() between them is
-delivered within the same moment, in document order. --frame draws the frame as a
+delivered within the same moment, in document order. Exports have no network or
+device; --inputs replays a recording made with Record input in the Board's Scripts panel. --frame draws the frame as a
 page: its fill and shaders, without its outline and label.`)
     .action(async (target: string, options: ExportOptions) => {
       if (options.async) return runExportTask(boards, options);
@@ -277,6 +285,8 @@ page: its fill and shaders, without its outline and label.`)
         const onPlan = ({ width, height, frames }: { width: number; height: number; frames: number }) => {
           if (!jsonRequested(options)) process.stderr.write(`Rendering ${width}x${height}, ${frames} frame(s)\n`);
         };
+        const spaceId = await resolveSpace(boards);
+        const inputs = options.inputs ? await readBoardInputs(spaceId, options.inputs) : undefined;
         const pathVideoFormat = videoFormatFromPath(out);
         const requestedFormat = options.format?.toLowerCase();
         if (requestedFormat && ![...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].includes(requestedFormat as BoardNodeExportFormat | BoardVideoExportFormat)) throw new Error(`--format must be one of ${[...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].join(", ")}.`);
@@ -293,8 +303,9 @@ page: its fill and shaders, without its outline and label.`)
           await mkdir(dirname(out), { recursive: true });
           const { runBoardVideoExport } = await import("../board-export.js");
           const result = await runBoardVideoExport({
-            spaceId: await resolveSpace(boards),
+            spaceId,
             target,
+            ...(inputs ? { inputs } : {}),
             camera,
             timeoutMs: parseBoardTime(options.timeout ?? "2m", "--timeout"),
             onProgress: progress,
@@ -328,8 +339,9 @@ page: its fill and shaders, without its outline and label.`)
         }
         const { runBoardExport } = await import("../board-export.js");
         const result = await runBoardExport({
-          spaceId: await resolveSpace(boards),
+          spaceId,
           target,
+          ...(inputs ? { inputs } : {}),
           camera,
           timeoutMs: parseBoardTime(options.timeout ?? "2m", "--timeout"),
           onProgress: progress,
@@ -388,8 +400,12 @@ function registerSimulateCommand(boards: Command): void {
 Steps are {"steps": [...]}, points in board coordinates, run on a virtual clock:
   {"wait": "500ms"}  {"tool": "draw"}  {"tap": [x, y]}  {"drag": [[x, y], ...], "pointerType": "pen"}
   {"pointer": "down", "at": [x, y]}  {"key": "Enter"}  {"select": ["id"]}
+  {"input": "browser:devicemotion", "data": {...}}  {"inputs": "takes/flick.json"}
 {"tool": "play"} acts like an App visitor: drags move unlocked items, empty space pans,
-and script regions take every press.
+script regions take every press, and keys reach scripts that listen for them.
+Every source (motion, gamepad, microphone, camera, location) is on. An input step
+delivers one browser event to the scripts listening, shaped as \`cohub boards schema
+script\` describes; an inputs step replays a recording on the virtual clock.
 
 Shaders are compiled with a local Chrome, Chromium or Edge when one is found, before
 the steps run; their errors join the scripts' errors and stop the run.

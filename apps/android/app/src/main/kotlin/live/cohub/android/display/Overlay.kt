@@ -175,7 +175,8 @@ internal class Overlay(private val service: ControlService, private val display:
     private fun look(indicator: Indicator) = when (indicator.mode) {
         Mode.HELD -> Look(Tone.WARNING, false, service.getString(if (indicator.label != null) R.string.overlay_done_hint else R.string.overlay_held))
         Mode.ASKING -> Look(Tone.WARNING, true, service.getString(R.string.overlay_activity, indicator.label))
-        Mode.WORKING -> Look(Tone.ACCENT, true, indicator.label?.let { service.getString(R.string.overlay_activity, it) } ?: service.getString(R.string.overlay_working))
+        Mode.WORKING -> Look(if (indicator.recording) Tone.RECORDING else Tone.ACCENT, true, indicator.label?.let { service.getString(R.string.overlay_activity, it) } ?: service.getString(R.string.overlay_working))
+        Mode.RECORDING -> Look(Tone.RECORDING, true, service.getString(R.string.overlay_recording))
         Mode.WATCHING -> Look(Tone.ACCENT, false, service.getString(R.string.overlay_agent_screen))
         Mode.SHARING -> Look(Tone.READY, false, service.getString(R.string.overlay_sharing))
     }
@@ -192,6 +193,10 @@ internal class Overlay(private val service: ControlService, private val display:
             Mode.ASKING -> listOf(stop, takeOver)
             Mode.WORKING -> listOf(takeOver, stop)
             Mode.WATCHING -> listOf(takeOver)
+            Mode.RECORDING -> listOf(
+                if (served.screen.agent) takeOver else Action(service.getString(R.string.overlay_stop_sharing)) { display.stop() },
+                Action(service.getString(R.string.overlay_stop_recording)) { display.stopRecording(served) },
+            )
             Mode.SHARING -> listOf(Action(service.getString(R.string.overlay_stop_sharing)) { display.stop() })
         }
     }
@@ -258,4 +263,4 @@ internal class Overlay(private val service: ControlService, private val display:
 }
 
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
-private fun Served.indicator(pinned: Boolean) = Indicator.of(screen.agent, screen.size, activity, handover, held, recent, pinned)
+private fun Served.indicator(pinned: Boolean) = Indicator.of(screen.agent, screen.size, activity, handover, held, recent, pinned, recording)

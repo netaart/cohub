@@ -40,6 +40,7 @@ type Props = {
 	onMarkdownSegmentRendered?: () => void;
 	onMarkdownSegmentStart?: () => void;
 	onLoadToolCalls?: () => Promise<MessageToolCallsFile | null>;
+	turnId?: string | null;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
 	onOpenUrl?: (href: string, event: MouseEvent) => void | Promise<void>;
 };
@@ -61,6 +62,7 @@ const {
 	onMarkdownSegmentRendered,
 	onMarkdownSegmentStart,
 	onLoadToolCalls,
+	turnId = null,
 	onOpenFile,
 	onOpenUrl,
 }: Props = $props();
@@ -300,7 +302,7 @@ const segments = $derived.by(() => {
 			{:else if segment.type === 'image'}
 				<AttachmentBlocks blocks={segment.blocks} />
 			{:else if segment.type === 'tool' && showToolCalls}
-				<ToolCallList content={segment.blocks} streaming={isStreaming} defaultExpanded={defaultExpandToolCalls} {onLoadToolCalls} flush {onOpenFile} />
+				<ToolCallList content={segment.blocks} streaming={isStreaming} defaultExpanded={defaultExpandToolCalls} {onLoadToolCalls} {turnId} flush {onOpenFile} />
 			{/if}
 		</div>
 	{/each}

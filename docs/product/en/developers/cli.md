@@ -327,6 +327,10 @@ cohub spaces displays tap 300 200 --count 2   # double-click; --button secondary
 cohub spaces displays type "hello"
 cohub spaces displays key Control+a
 cohub spaces displays press back              # phones list their system buttons
+cohub spaces displays windows                 # a desktop's windows; --window <id> on look, capture, tree or act reads one alone
+cohub spaces displays record start            # record into .cache/cohub/displays/recordings/; --auto records agents' plans instead
+cohub spaces displays record stop
+cohub spaces displays record ls
 ```
 
 On macOS, the terminal running the Runtime needs Screen Recording, and Accessibility to control
@@ -337,9 +341,16 @@ supported yet.
 the screen to settle, or for `--until-text`, `--until-gone`, `--until-app` or `--until-stable`, and
 reports what it acted on and whether anything changed; a step that changed nothing is flagged. A tap
 at a point stops with `moved` when something other than what you last saw is there now. When a person
-acts on the screen, the action stops with `display_preempted`: look again before acting. Watching, `capture`
-and `tree` take view access to the sandbox; acting and `start` / `stop` take what running commands
-does.
+acts on the screen, the action stops with `display_preempted`: look again before acting. A plan that
+stops prints what to do next, and `--json` carries it as `stopped.hint` and `stopped.next`, a command
+that only reads. Watching, `capture` and `tree` take view access to the sandbox; acting, recording
+and `start` / `stop` take what running commands does.
+
+Recordings keep the video the screen already streams, without encoding it again, as MP4 in the
+Space folder, outside checkpoints: at most two hours each and 2 GB in all, the oldest going first.
+Recording pauses while the screen reports a focused password field, or a person was asked to step in. Every plan an
+agent runs also leaves its steps under `.cache/cohub/displays/turns/`, so the chat can replay a Turn
+on its recording, or on the screens it returned.
 
 ### Boards
 

@@ -2,11 +2,11 @@
 
 A display is a screen a Space's machine shares: a phone through the Android app, a Mac, Windows or Linux
 desktop through `cohub runtime up --display`, or a virtual screen sandboxd starts. People watch and steer it live over WebRTC; agents use the
-same display through screenshots and input. Nothing about a display is stored — every call reaches
-the machine live, and media never touches Cohub servers.
+same display through screenshots and input. Live media never passes through Cohub servers; recordings
+and agents' steps stay in the Space folder under `.cache/cohub/displays/`, outside checkpoints.
 
 显示（Display）是 Space 所在机器共享出来的屏幕：Android 应用共享的手机屏幕，`cohub runtime up --display` 共享的 Mac / Windows / Linux 桌面，或 sandboxd 启动的虚拟屏。
-人通过 WebRTC 实时查看和操作，Agent 通过截图和输入使用同一块屏幕。显示相关内容一律不落库，媒体也不经过 Cohub 服务端。
+人通过 WebRTC 实时查看和操作，Agent 通过截图和输入使用同一块屏幕。实时媒体不经过 Cohub 服务端；录像和 Agent 的操作步骤保存在 Space 文件夹的 `.cache/cohub/displays/` 中，不进入 Checkpoint。
 
 ## Shape
 
@@ -85,6 +85,8 @@ All routes are under `/api/spaces/:id`.
 | `POST displays/:display/interrupt` | `command.execute` | A person stops what agents do there, and the Turn doing it |
 | `POST`, `DELETE displays/:display/handover` | `command.execute` | `{ id, reason, timeoutMs?, waitMs?, actor? }` asks for a person or checks on it; `DELETE` is a person saying it is done, see [Handover](#handover) |
 | `GET displays/:display/apps` | `sandbox.view` | What a display can launch |
+| `GET displays/:display/windows` | `sandbox.view` | A desktop's windows, front first, see [Windows](#windows) |
+| `POST`, `DELETE displays/:display/recording` | `command.execute` | `{ auto?, actor? }` starts a recording, or with `auto` records agents' plans; `DELETE` stops it, `?auto=true` stops recording plans, see [Recording](#recording) |
 | `POST displays/:display/sessions` | `sandbox.view`, `command.execute` with control | `{ offer, control? }` → `201 { sessionId, answer }` |
 | `DELETE displays/:display/sessions/:session` | `sandbox.view` | |
 | `POST`, `DELETE displays/virtual` | `command.execute` | Start or stop a virtual screen |
@@ -300,6 +302,16 @@ read as elements. Nothing runs until someone starts it. Cloud sandboxes offer it
 screen button; a sandbox that predates virtual screens (no `virtual` field, or `display_unsupported`)
 is updated by recovering it from the Space settings.
 
+## Windows
+
+Desktops that list their windows report `windows`, and `display.windows` lists them front first:
+an id, the app, the title and normalized bounds. Linux reads the window manager's EWMH list (the root's
+mapped children without one), macOS `CGWindowListCopyWindowInfo` (titles need Screen Recording),
+Windows `EnumWindows`. `capture`, `tree` and `act` take `window`: the image is the window's part of
+the screen, the tree keeps what lies in it, and every coordinate, a step's points as much as the
+tree's boxes, is the window's own. The default stays the whole display. Input still goes to the
+screen, so a window behind another is read, not reached.
+
 ## Act
 
 `display.act` (`POST displays/:id/act`, `command.execute`) runs a plan of up to 32 steps on the
@@ -342,6 +354,68 @@ wait ends.
 - **Activity.** While a plan runs, and 30 s after, the display carries `activity` — the agent's
   session, Turn and step `label` — on every snapshot, so the web and the phone show who acts and why.
   One plan acts on a display at a time.
+- **Where it acts.** Each step tells viewers where it lands as it acts — an `agent` control message
+  with the point, its kind (`click`, `type`, `scroll`) and a sequence — so the web draws the agent's
+  pointer gliding there and rippling on a click. It goes to live sessions only.
+- **Read back.** A step that set a field with `setText` says `readBack` when the field now holds the
+  text (never echoed); otherwise its `effect` is all there is.
+- **Hints.** A stop carries `hint`, one sentence of what to do next that names no command or flag,
+  and where one is safe as is, `next`: `look`, `lookImage` or `list`. sandboxd picks them from what the
+  plan last saw: a list that scrolls when nothing matched, the permissions a display still `needs`
+  when it refused. The CLI turns `next` into its command.
+
+## Recording
+
+A recording is the video a display already streams, taken by a passive subscriber of
+`display.Hub` and written by sandboxd as fragmented MP4 without encoding again: no second encoder,
+and when people watch, only the disk write. A recorder never steers the encoder: the slowest
+*viewer* sets bitrate and frame rate, a recorder that falls behind waits for the next key frame
+(asking only when none came for 5 s), and alone it gets the recording profile, 1.5 Mbps at 15 fps
+(a still screen sends one frame every 2 s). A fragment per key frame, at most 2 s, so a file cut
+short still plays to its last fragment; closing writes the duration into the init segment.
+
+- **Files.** `recordings/<id>/meta.json` (`DisplayRecordingMeta`: display, size, start and end,
+  who asked, pauses, the Turns recorded, bytes, why it stopped) and `000.mp4`, a new file when the
+  resolution changes. Sample times follow the encoder's clock, and the wall clock across restarts,
+  so video time is wall time from `files[].at`.
+- **Privacy.** No frame is written while the display reports a focused password field (it polls focus,
+  so a frame may slip in as focus moves; a Linux screen without AT-SPI reports none), a person was asked
+  to step in (`handover`) or holds the display; each is a pause in `meta.json`, and the snapshot says
+  `paused`.
+- **Limits.** Two hours each; 2 GB for a Space's recordings, the oldest finished ones removed first;
+  under 1 GB free on the disk, it stops (`stop`: `limit`, `disk`). A sandboxd stopped mid-recording
+  leaves files that play; the next start closes their `meta.json`.
+- **Automatic.** With `auto`, agents' plans record themselves: a plan starts the recording, which
+  ends 15 s after the last plan, so plans close together share one.
+- **State.** The snapshot carries `record` (sandboxd can record it) and `recording`: `id`, `since`
+  and `paused` while one runs, `auto` while agents' plans record themselves (on the Android indicator
+  a working agent's dot turns red while recording) through `space.runtime.changed`; providers hear it as a `recording` call,
+  and a person at the machine stops it with a `record` message (the Android indicator's
+  **Stop recording**).
+
+Recordings play from the Space folder like any file, with ranges for seeking. **Save to files** in
+the web copies one to `recordings/`, where it becomes an ordinary file.
+
+## Replay
+
+Every plan an agent runs with a Turn leaves a line in `turns/<turnId>.ndjson`
+(`DisplayPlanLog`): its steps with their label, target, point, effect, read-back and timings, the
+stop, the recording running then, and the image the plan returned (`turns/<turnId>/<plan>.jpg`,
+never a second capture; 256 MB of them at most, the oldest Turns' going first). Typed text never
+appears. sandboxd writes it after answering, so a slow
+disk costs the agent nothing.
+
+The chat offers **Replay** on a shell call that acted on a display. It plays the Turn on the
+recording that covered it, its steps as chapters with the agent's pointer drawn where each landed,
+or, without one, steps through the screens the plans returned. The web keeps both lists in
+IndexedDB and refreshes them from the Space folder.
+
+## Cursors
+
+Viewers share where they point: the web sends its mouse position on the control channel (`cursor`,
+at most every 33 ms, the latest only), sandboxd passes every other viewer's to each session
+(`cursors`), and the web draws them with names, 100 ms smoothed and fading when still. Nothing is
+kept.
 
 ## Handover
 
@@ -372,6 +446,8 @@ echo '[{"type":"tap","name":"Search"},{"type":"type","text":"Ada"},{"type":"key"
 cohub spaces displays look                           # the screen, without acting
 cohub spaces displays tap 300 200 --count 2          # a point of the latest image
 cohub spaces displays press back
+cohub spaces displays windows                        # then --window <id> on look, capture, tree or act
+cohub spaces displays record start                   # --auto records agents' plans; stop; ls
 ```
 
 Every action goes through `act` and prints the step results and the screen after, flagging a step
@@ -399,7 +475,7 @@ An older sandboxd answers display routes with `display_unsupported`; older web c
 ## Verification
 
 ```bash
-cd apps/sandbox && go test ./rtc ./display   # pion-to-pion end to end; the shared cases
+cd apps/sandbox && go test ./rtc ./display   # pion-to-pion end to end; the shared cases; recordings (needs ffmpeg)
 pnpm --filter @cohub/protocol test           # the shared cases; generated files are current
 cd apps/android && ./gradlew :app:lintDebug
 ```

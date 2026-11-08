@@ -139,3 +139,41 @@ test("moving and resizing a lifted card saves the authored item, never what the 
     } }).items.card);
   } finally { harness.destroy(); }
 });
+
+test("listening turns a source on: browser input, env changes and play keys reach the script without saving", async () => {
+  const harness = await createBoardScriptHarness({
+    renderer,
+    readModule: async () => `export default function (ctx) {
+  const show = (env) => { ctx.state.env = env.mode + ":" + env.senses.motion + ":" + env.pointer; };
+  show(ctx.env);
+  ctx.on("envchange", ({ data }) => show(data));
+  ctx.on("browser:devicemotion", () => { ctx.state.readings = (ctx.state.readings ?? 0) + 1; });
+  ctx.on("keydown", ({ key }) => { ctx.state.key = key; });
+}`,
+    device: { pointer: "coarse" },
+    document: boardDocument({ items: { wand: { type: "frame", size: { width: 400, height: 400 }, script: { src: "wand.js" } } } }),
+  });
+  try {
+    await harness.advance(50);
+    assert.deepEqual(harness.senses, ["motion"]);
+    await harness.input("browser:devicemotion", motion(0, 0));
+    await harness.key("keydown", "w");
+    let state = (await harness.snapshot()).wand?.state;
+    assert.equal(state?.env, "edit:on:coarse");
+    assert.equal(state?.readings, 1);
+    assert.equal(state?.key, undefined);
+    harness.tool = "play";
+    await harness.advance(50);
+    await harness.key("keydown", "w");
+    await harness.replay({ version: 1, inputs: [{ t: 0, type: "browser:devicemotion", data: motion(0, 0) }, { t: 500, type: "browser:devicemotion", data: motion(0, 0) }] });
+    state = (await harness.snapshot()).wand?.state;
+    assert.equal(state?.env, "play:on:coarse");
+    assert.equal(state?.key, "w");
+    assert.equal(state?.readings, 3);
+    assert.equal(harness.commits.length, 0);
+  } finally { harness.destroy(); }
+});
+
+function motion(x: number, y: number) {
+  return { acceleration: { x: 0, y: 0, z: 0 }, accelerationIncludingGravity: { x, y, z: 0 }, rotationRate: { alpha: 0, beta: 0, gamma: 0 }, interval: 16, t: 0 };
+}

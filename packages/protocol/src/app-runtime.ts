@@ -264,6 +264,31 @@ const boundedText = (value: unknown, max: number): string | null => {
 	return text ? text.slice(0, max) : null;
 };
 
+export const APP_RUNTIME_HAPTICS = ["tick", "confirm", "reject", "longPress"] as const;
+export type AppRuntimeHaptic = (typeof APP_RUNTIME_HAPTICS)[number];
+
+export const APP_RUNTIME_HAPTIC_VIBRATION: Record<AppRuntimeHaptic, number | number[]> = {
+	tick: 8,
+	confirm: [12, 24, 12],
+	reject: [24, 32, 24],
+	longPress: 14,
+};
+
+export type AppRuntimeHapticMessage = RuntimeEnvelope & { type: "haptic"; kind: AppRuntimeHaptic };
+
+export const buildAppRuntimeHaptic = (kind: AppRuntimeHaptic): AppRuntimeHapticMessage => ({
+	...envelope("haptic"),
+	kind,
+});
+
+export const parseAppRuntimeHaptic = (
+	value: unknown,
+): AppRuntimeHapticMessage | null =>
+	isRuntimeMessage(value, "haptic") &&
+	(APP_RUNTIME_HAPTICS as readonly unknown[]).includes(value.kind)
+		? buildAppRuntimeHaptic(value.kind as AppRuntimeHaptic)
+		: null;
+
 /** After each frame load, the host asks the document to announce its state again. */
 export type AppRuntimeAnnounceMessage = RuntimeEnvelope & { type: "announce" };
 

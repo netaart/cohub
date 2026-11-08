@@ -10,6 +10,7 @@ import {
   DISPLAY_HANDOVER_DEFAULT_MS,
   DISPLAY_HANDOVER_MAX_MS,
   DISPLAY_HANDOVER_WAIT_MS,
+  DISPLAY_RECORDINGS_DIR,
   DisplayActionError,
   type DisplayAction,
   type DisplayActResult,
@@ -18,7 +19,9 @@ import {
   type DisplayElement,
   type DisplayHandoverState,
   type DisplayInfo,
+  type DisplayRecordingMeta,
   type DisplayStepTarget,
+  type DisplayStopNext,
   type DisplayTree,
   type DisplayUntil,
   type SpaceDisplaysApi,
@@ -32,6 +35,7 @@ import { webUrl } from "../web.js";
 type Size = { width: number; height: number };
 type ActOptions = {
   display?: string;
+  window?: string;
   size?: string;
   untilText?: string;
   untilGone?: string;
@@ -46,6 +50,7 @@ type ActOptions = {
 type TargetOptions = { name?: string; role?: string; nth?: string; scroll?: boolean };
 
 const DIRECTIONS = ["up", "down", "left", "right"] as const;
+const NEXT_COMMANDS: Record<DisplayStopNext, string> = { look: "look", lookImage: "look --screenshot", list: "ls" };
 const BUTTONS = ["primary", "secondary", "middle"] as const;
 const TREES = ["compact", "full", "none"] as const;
 const DEFAULT_MAX_SIZE = 1280;
@@ -88,17 +93,24 @@ async function readFrames(): Promise<Frames> {
   }
 }
 
-async function rememberFrame(spaceId: string, display: DisplayInfo, size: Size) {
+const frameKey = (spaceId: string, display: DisplayInfo, window?: string) => `${spaceId}/${display.id}${window ? `#${window}` : ""}`;
+
+async function rememberFrame(spaceId: string, display: DisplayInfo, size: Size, window?: string) {
   const frames = await readFrames();
-  frames[`${spaceId}/${display.id}`] = { width: size.width, height: size.height, display: { width: display.width, height: display.height } };
+  frames[frameKey(spaceId, display, window)] = { width: size.width, height: size.height, display: { width: display.width, height: display.height } };
   await mkdir(dirname(FRAMES_PATH), { recursive: true });
   await writeFile(FRAMES_PATH, JSON.stringify(frames));
 }
 
-async function frameOf(spaceId: string, display: DisplayInfo, size?: string): Promise<Size> {
+async function frameOf(spaceId: string, display: DisplayInfo, size?: string, window?: string, api?: SpaceDisplaysApi): Promise<Size> {
   if (size) return parseSize(size);
-  const frame = (await readFrames())[`${spaceId}/${display.id}`];
+  const frame = (await readFrames())[frameKey(spaceId, display, window)];
   if (frame && frame.display.width === display.width && frame.display.height === display.height) return frame;
+  if (window && api) {
+    const found = (await api.windows(display.id)).windows.find((item) => item.id === window);
+    if (!found) return error(`Window "${window}" is not on ${display.name || display.id}`, "List them with `cohub spaces displays windows`.");
+    return { width: Math.max(1, Math.round(found.bounds[2] * display.width)), height: Math.max(1, Math.round(found.bounds[3] * display.height)) };
+  }
   return { width: display.width, height: display.height };
 }
 
@@ -152,17 +164,17 @@ async function imageDir() {
   return dir;
 }
 
-async function saveImage(spaceId: string, display: DisplayInfo, image: DisplayCapture, output?: string) {
+async function saveImage(spaceId: string, display: DisplayInfo, image: DisplayCapture, output?: string, window?: string) {
   const name = `${new Date().toISOString().replace(/[:.]/g, "-")}-${display.id}.jpg`;
   const path = output ? resolve(output) : join(await imageDir().catch(() => join(CACHE_DIR, "displays")), name);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, Buffer.from(image.data, "base64"));
-  await rememberFrame(spaceId, display, image);
+  await rememberFrame(spaceId, display, image, window);
   return { path, width: image.width, height: image.height };
 }
 
-async function screenshot(api: SpaceDisplaysApi, spaceId: string, display: DisplayInfo, maxSize: number, output?: string) {
-  return saveImage(spaceId, display, await api.capture(display.id, { maxSize }), output);
+async function screenshot(api: SpaceDisplaysApi, spaceId: string, display: DisplayInfo, maxSize: number, output?: string, window?: string) {
+  return saveImage(spaceId, display, await api.capture(display.id, { maxSize, ...(window ? { window } : {}) }), output, window);
 }
 
 function formatElement(element: DisplayElement, frame: Size, indent = true, box = true) {
@@ -202,7 +214,7 @@ async function act(spacesCmd: Command, opts: ActOptions, actions: DisplayAction[
     const launching = actions.some((action) => action.type === "launch" || action.type === "open");
     const { spaceId, api, display } = await target(spacesCmd, opts, launching);
     if (!display.input && actions.some((action) => action.type !== "wait")) return error("This display is view only", needsHint(display) ?? "Allow control on the device first.");
-    const frame = await frameOf(spaceId, display, opts.size);
+    const frame = await frameOf(spaceId, display, opts.size, opts.window, api);
     const tree = opts.tree ?? "compact";
     if (!(TREES as readonly string[]).includes(tree)) return error("Invalid tree", `Use one of: ${TREES.join(", ")}`);
     const last = actions.at(-1);
@@ -217,9 +229,10 @@ async function act(spacesCmd: Command, opts: ActOptions, actions: DisplayAction[
       steps,
       observe: { tree: tree as (typeof TREES)[number], image: opts.screenshot ? "always" : "auto", maxSize: DEFAULT_MAX_SIZE },
       ...(ACTOR ? { actor: ACTOR } : {}),
+      ...(opts.window ? { window: opts.window } : {}),
     });
     const image = result.screen.image
-      ? await saveImage(spaceId, display, result.screen.image, typeof opts.screenshot === "string" ? opts.screenshot : undefined)
+      ? await saveImage(spaceId, display, result.screen.image, typeof opts.screenshot === "string" ? opts.screenshot : undefined, opts.window)
       : undefined;
     const shown = image ?? frame;
     if (result.stopped) process.exitCode = 1;
@@ -268,6 +281,7 @@ function stepText(action: DisplayAction | undefined, step: DisplayActStepResult)
   const parts = [action ? actionText(action) : "step"];
   if (step.target) parts.push(`${action && atPoint(action) ? "on " : action?.type === "type" ? "into " : ""}${targetText(step.target)}`);
   if (action?.type !== "wait") parts.push(`· ${step.effect}`);
+  if (step.readBack) parts.push("· read back");
   parts.push(`· ${step.findMs + step.actMs + step.waitedMs} ms`);
   return parts.join(" ");
 }
@@ -285,6 +299,9 @@ function printResult(display: DisplayInfo, actions: DisplayAction[], result: Dis
     if (result.stopped) {
       console.log(`✗ Stopped (${result.stopped.reason}): ${result.stopped.message}`);
       for (const candidate of result.stopped.candidates ?? []) console.log(`    ${formatElement(candidate, frame, false)}`);
+      const { hint, next } = result.stopped;
+      if (hint) console.log(`  ${hint}`);
+      if (next) console.log(`  Next: cohub spaces displays ${NEXT_COMMANDS[next]}${next === "list" ? "" : ` --display ${display.id}`}`);
     }
   }
   const { screen } = result;
@@ -343,6 +360,7 @@ async function handover(spacesCmd: Command, opts: { reason: string; display?: st
 function withAct(command: Command): Command {
   return command
     .option("-d, --display <id>", "Display id; defaults to the only one, or the agent screen")
+    .option("-w, --window <id>", "Read and show this window alone (see `windows`); coordinates are its pixels")
     .option("--size <WxH>", "Coordinates are pixels of an image this size (default: the latest image)")
     .option("--until-text <text>", "Wait until this text shows")
     .option("--until-gone <text>", "Wait until this text is gone, e.g. a loading label")
@@ -403,11 +421,12 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
               ...display,
               size: `${display.width}x${display.height}`,
               kind: display.kind ?? "screen",
-              abilities: [display.stream && "view", display.capture && "capture", display.input && "control", display.tree && "tree", display.apps && "apps", display.desktop && "desktop"].filter(Boolean).join(", "),
+              abilities: [display.stream && "view", display.capture && "capture", display.input && "control", display.tree && "tree", display.apps && "apps", display.windows && "windows", display.record && "record", display.desktop && "desktop"].filter(Boolean).join(", "),
               using: [
                 display.held && "a person at the device",
                 display.activity && `an agent${display.activity.label ? `: ${display.activity.label}` : ""}`,
                 display.viewers?.length && `${display.viewers.length} watching${display.viewers.some((viewer) => viewer.control) ? " (controlling)" : ""}`,
+                display.recording?.id ? `recording${display.recording.paused ? " (paused)" : ""}` : display.recording?.auto && "recording agents' plans",
               ].filter(Boolean).join("; ") || "—",
             })),
             [
@@ -471,12 +490,13 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
     .option("-d, --display <id>", "Display id; defaults to the only one, or the agent screen")
     .option("-o, --output <path>", `Where to write the image (default: ${IMAGE_DIR}/, the latest ${KEPT_IMAGES} kept)`)
     .option("--max-size <px>", `Longest edge in pixels (default ${DEFAULT_MAX_SIZE})`)
+    .option("-w, --window <id>", "Capture this window alone (see `windows`)")
     .option("--json", "Output as JSON")
-    .action(async (opts: { display?: string; output?: string; maxSize?: string; json?: boolean }) => {
+    .action(async (opts: { display?: string; output?: string; maxSize?: string; window?: string; json?: boolean }) => {
       try {
         const { spaceId, api, display } = await target(spacesCmd, opts);
         const maxSize = opts.maxSize ? parseNumber("max-size", opts.maxSize) : DEFAULT_MAX_SIZE;
-        const shot = await screenshot(api, spaceId, display, maxSize, opts.output);
+        const shot = await screenshot(api, spaceId, display, maxSize, opts.output, opts.window);
         if (jsonRequested(opts)) return outJson({ display: display.id, ...shot });
         ok(`Saved ${shot.width}x${shot.height} screenshot to ${shot.path}`);
       } catch (e: unknown) {
@@ -490,18 +510,20 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
     .option("-d, --display <id>", "Display id; defaults to the only one, or the agent screen")
     .option("--max <n>", "Most elements to return (default 300)")
     .option("--full", "Every element, nested, instead of what can be acted on or read")
+    .option("-w, --window <id>", "Read this window alone (see `windows`)")
     .addOption(new Option("--compact").hideHelp())
     .option("--json", "Output as JSON")
-    .action(async (opts: { display?: string; max?: string; full?: boolean; json?: boolean }) => {
+    .action(async (opts: { display?: string; max?: string; full?: boolean; window?: string; json?: boolean }) => {
       try {
         const { spaceId, api, display } = await target(spacesCmd, opts);
         if (!display.tree) return error("This display has no element tree", "Use capture and coordinates instead.");
         const tree = await api.tree(display.id, {
           ...(opts.max ? { maxElements: parseNumber("max", opts.max) } : {}),
           ...(opts.full ? {} : { compact: true }),
+          ...(opts.window ? { window: opts.window } : {}),
         });
         if (jsonRequested(opts)) return outJson(tree);
-        const frame = await frameOf(spaceId, display);
+        const frame = await frameOf(spaceId, display, undefined, opts.window, api);
         if (tree.app) console.log(tree.app);
         console.log(formatTree(tree, frame, !opts.full));
         console.log(`\n  Boxes are x,y and size in ${frame.width}x${frame.height} pixels. Act with: tap --name <text> · type <text> --into <ref> · act < plan.json`);
@@ -510,6 +532,35 @@ export function registerSpaceDisplays(spacesCmd: Command): void {
         handleHttp(e);
       }
     });
+
+  displays
+    .command("windows")
+    .description("List a desktop's windows, front first; pass an id as --window to read one alone")
+    .option("-d, --display <id>", "Display id; defaults to the only one, or the agent screen")
+    .option("--json", "Output as JSON")
+    .action(async (opts: { display?: string; json?: boolean }) => {
+      try {
+        const { api, display } = await target(spacesCmd, opts);
+        if (!display.windows) return error("This display does not list its windows");
+        const { windows } = await api.windows(display.id);
+        if (jsonRequested(opts)) return outJson({ windows });
+        table(windows.map((item) => ({
+          ...item,
+          front: item.focused ? "●" : "",
+          size: `${Math.round(item.bounds[2] * display.width)}x${Math.round(item.bounds[3] * display.height)}`,
+        })), [
+          { key: "id", label: "ID" },
+          { key: "front", label: "" },
+          { key: "app", label: "App" },
+          { key: "title", label: "Title" },
+          { key: "size", label: "Size" },
+        ]);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  registerRecord(displays, spacesCmd);
 
   displays
     .command("apps")
@@ -639,5 +690,88 @@ and "label": what it does, shown to people watching; name matches take "role" an
       }
       if (!Array.isArray(actions) || actions.length === 0) return error("Invalid actions", "Pass a non-empty JSON array.");
       return act(spacesCmd, opts, actions as DisplayAction[]);
+    });
+}
+
+function duration(ms: number) {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  return minutes ? `${minutes}m ${String(seconds % 60).padStart(2, "0")}s` : `${seconds}s`;
+}
+
+function bytes(value: number) {
+  return value >= 1 << 30 ? `${(value / (1 << 30)).toFixed(1)} GB` : `${Math.max(0.1, value / (1 << 20)).toFixed(1)} MB`;
+}
+
+function registerRecord(displays: Command, spacesCmd: Command) {
+  const record = displays
+    .command("record")
+    .description(`Record a display into the Space folder (${DISPLAY_RECORDINGS_DIR}), outside checkpoints`);
+
+  record
+    .command("start")
+    .description("Start recording now; nothing is recorded while a password field has focus or a person steps in")
+    .option("-d, --display <id>", "Display id; defaults to the only one, or the agent screen")
+    .option("--auto", "Record agents' plans from now on instead, each from its start until shortly after")
+    .option("--json", "Output as JSON")
+    .action(async (opts: { display?: string; auto?: boolean; json?: boolean }) => {
+      try {
+        const { spaceId, api, display } = await target(spacesCmd, opts);
+        if (display.record === false || !display.stream) return error("This display cannot be recorded", "It has no live video, or the machine runs an older Runtime.");
+        const recording = await api.record(display.id, { ...(opts.auto ? { auto: true } : {}), ...(ACTOR ? { actor: ACTOR } : {}) });
+        if (jsonRequested(opts)) return outJson({ display: display.id, ...recording });
+        ok(opts.auto ? `Recording agents' plans on ${display.name || display.id}` : `Recording ${display.name || display.id}`);
+        console.log(`  Watch it live: ${displayUrl(spaceId, display.id)}\n  Stop with: cohub spaces displays record stop`);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  record
+    .command("stop")
+    .description("Stop recording")
+    .option("-d, --display <id>", "Display id; defaults to the only one, or the agent screen")
+    .option("--auto", "Stop recording agents' plans instead")
+    .option("--json", "Output as JSON")
+    .action(async (opts: { display?: string; auto?: boolean; json?: boolean }) => {
+      try {
+        const { api, display } = await target(spacesCmd, opts);
+        await api.stopRecording(display.id, opts.auto ? { auto: true } : {});
+        if (jsonRequested(opts)) return outJson({ display: display.id, stopped: true });
+        ok(opts.auto ? `Stopped recording agents' plans on ${display.name || display.id}` : `Stopped recording ${display.name || display.id}`);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  record
+    .command("ls")
+    .alias("list")
+    .description("List the recordings kept in the Space folder, newest first")
+    .option("--json", "Output as JSON")
+    .action(async (opts: { json?: boolean }) => {
+      try {
+        const spaceId = await resolveSpace(spacesCmd);
+        const recordings: DisplayRecordingMeta[] = await createClient().space(spaceId).displays.recordings();
+        if (jsonRequested(opts)) return outJson({ recordings });
+        if (recordings.length === 0) return console.log("  (no recordings)");
+        table(recordings.map((item) => ({
+          id: item.id,
+          display: item.name || item.display,
+          started: new Date(item.since).toLocaleString(),
+          length: item.endedAt ? duration(item.endedAt - item.since) : "recording…",
+          size: bytes(item.bytes),
+          files: item.files.map((file) => `${DISPLAY_RECORDINGS_DIR}/${item.id}/${file.name}`).join(" "),
+        })), [
+          { key: "id", label: "ID" },
+          { key: "display", label: "Display" },
+          { key: "started", label: "Started" },
+          { key: "length", label: "Length" },
+          { key: "size", label: "Size" },
+          { key: "files", label: "Files" },
+        ]);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
     });
 }

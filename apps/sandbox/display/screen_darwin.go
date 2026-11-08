@@ -214,7 +214,7 @@ func (s *macScreen) Info() (Info, error) {
 	width, height := s.size()
 	info := Info{
 		ID: "screen", Name: s.name, Width: int(width), Height: int(height),
-		Capture: cg.preflightCapture(), Input: cg.trusted(), Desktop: true, Platform: "macos", Tree: cg.trusted(), Focus: cg.trusted(),
+		Capture: cg.preflightCapture(), Input: cg.trusted(), Desktop: true, Platform: "macos", Tree: cg.trusted(), Focus: cg.trusted(), Windows: true,
 	}
 	if !info.Capture {
 		info.Needs = append(info.Needs, "screenRecording")

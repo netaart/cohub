@@ -10,6 +10,9 @@ output/
 # Git worktrees (local checkouts, do not commit)
 /worktrees/
 
+# Cohub sandbox setup logs
+/.cohub/system/
+
 # Local rendered manifests (do not commit)
 rendered/
 

@@ -125,7 +125,7 @@ func (s *windowsScreen) size() (int, int) {
 
 func (s *windowsScreen) Info() (Info, error) {
 	width, height := s.size()
-	return Info{ID: "screen", Name: s.name, Width: width, Height: height, Capture: true, Input: true, Desktop: true, Platform: "windows", Focus: true}, nil
+	return Info{ID: "screen", Name: s.name, Width: width, Height: height, Capture: true, Input: true, Desktop: true, Platform: "windows", Focus: true, Windows: true}, nil
 }
 
 type guiThreadInfo struct {

@@ -1,4 +1,5 @@
 <script lang="ts">
+import type { ResourceAppTarget } from "@cohub/protocol";
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppWindowState } from "@cohub/protocol/app-runtime";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
@@ -57,6 +58,9 @@ export type SpaceFileDomainProps = {
 	sidePanel: WorkspaceSidePanelController;
 	hasSession: boolean;
 	canViewTasks: boolean;
+	canManageCronjobs: boolean;
+	activeSpaceResource: ResourceAppTarget | null;
+	onOpenResource: (target: ResourceAppTarget) => void;
 	spaceOwnerUsername: string | null;
 	spaceSlug: string | null;
 	spaceHasMinimalAccess: boolean;
@@ -233,6 +237,9 @@ let {
 	sidePanel,
 	hasSession,
 	canViewTasks,
+	canManageCronjobs,
+	activeSpaceResource,
+	onOpenResource,
 	spaceOwnerUsername,
 	spaceSlug,
 	spaceHasMinimalAccess,
@@ -668,6 +675,12 @@ function previewContentOut(node: Element) {
 	{sidePanel}
 	{hasSession}
 	canViewTasks={canViewTasks && !spaceHasMinimalAccess}
+	{canManageCronjobs}
+	{activeSpaceResource}
+	onOpenResource={(target, options) => {
+		onOpenResource(target);
+		closeMobileDrawerIfNeeded(options.mobile);
+	}}
 	nodes={spaceHasMinimalAccess ? [] : fileTree}
 	selectedPath={selectedFilePath}
 	loading={!spaceHasMinimalAccess && fileTreeLoading}

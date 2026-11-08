@@ -15,3 +15,4 @@ export * from "./overlay.js";
 export { boardReactionBurst, drawBoardPresence } from "./presence.js";
 export type { BoardStagePress } from "./presses.js";
 export { isWheelStep, normalizeWheelDelta, wheelZoomFactor } from "./wheel.js";
+export { BOARD_CONSENT_SENSES, type BoardConsentSense } from "./senses.js";

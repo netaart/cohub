@@ -1,8 +1,11 @@
 import {
   DISPLAY_CONTROL_CHANNEL,
+  DISPLAY_CURSOR_INTERVAL_MS,
   DISPLAY_INPUT_CHANNEL,
   DISPLAY_PING_INTERVAL_MS,
+  type DisplayAgentPointer,
   type DisplayControlMessage,
+  type DisplayCursor,
   type DisplayFocus,
   type DisplayInfo,
   type DisplayInputEvent,
@@ -20,6 +23,8 @@ type Events = {
   state: DisplayConnectionState;
   display: DisplayInfo;
   focus: DisplayFocus | null;
+  pointer: DisplayAgentPointer;
+  cursors: DisplayCursor[];
   error: { code: string; message: string };
 };
 
@@ -51,6 +56,9 @@ export class DisplayConnection {
   private rtt: number | null = null;
   private counters: DisplayStatsCounters | null = null;
   private isPaused = false;
+  private cursorAt: { x: number; y: number } | null = null;
+  private cursorSent = 0;
+  private cursorTimer: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(
     private readonly api: SpaceDisplaysApi,
@@ -146,6 +154,23 @@ export class DisplayConnection {
     return true;
   }
 
+  sendCursor(point: { x: number; y: number } | null) {
+    const changed = point ? this.cursorAt?.x !== point.x || this.cursorAt?.y !== point.y : this.cursorAt !== null;
+    if (!changed) return;
+    this.cursorAt = point;
+    if (this.cursorTimer) return;
+    const wait = this.cursorSent + DISPLAY_CURSOR_INTERVAL_MS - performance.now();
+    if (!point || wait <= 0) return this.flushCursor();
+    this.cursorTimer = setTimeout(() => this.flushCursor(), wait);
+  }
+
+  private flushCursor() {
+    if (this.cursorTimer) clearTimeout(this.cursorTimer);
+    this.cursorTimer = null;
+    this.cursorSent = performance.now();
+    this.sendControl(this.cursorAt ? { type: "cursor", ...this.cursorAt } : { type: "cursor" });
+  }
+
   requestKeyframe() {
     this.sendControl({ type: "keyframe" });
   }
@@ -178,6 +203,7 @@ export class DisplayConnection {
     this.reason = reason;
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.connectTimer) clearTimeout(this.connectTimer);
+    if (this.cursorTimer) clearTimeout(this.cursorTimer);
     if (this.sessionId) void this.api.closeSession(this.displayId, this.sessionId).catch(() => undefined);
     this.sessionId = null;
     for (const track of this.stream.getTracks()) track.stop();
@@ -224,6 +250,12 @@ export class DisplayConnection {
         break;
       case "focus":
         this.setFocus(message.focus);
+        break;
+      case "agent":
+        if (message.pointer) this.emit("pointer", message.pointer);
+        break;
+      case "cursors":
+        this.emit("cursors", message.cursors ?? []);
         break;
       case "pong":
         if (message.id === this.pingId) this.rtt = Math.round(performance.now() - this.lastPingAt);

@@ -43,6 +43,7 @@ const DEVICE_LABEL: Record<AppDevice, (locale: Locale) => string> = {
 	camera: (locale) => m.app_devices_camera({}, { locale }),
 	microphone: (locale) => m.app_devices_microphone({}, { locale }),
 	screen: (locale) => m.app_devices_screen({}, { locale }),
+	location: (locale) => m.app_devices_location({}, { locale }),
 };
 
 export function appDevicesLabel(devices: readonly AppDevice[], locale: Locale) {

@@ -49,6 +49,7 @@ import {
   type AppAuthorizationRequest,
   type AppRuntimeConfigureRequest,
 } from "./app-runtime.js";
+import type { AppRuntimeHaptic } from "@cohub/protocol/app-runtime";
 import type { CreateSpaceInput, Permission } from "./types.js";
 import type { AppCommerceCheckoutStatus } from "./apis/app-commerce.js";
 
@@ -267,6 +268,7 @@ export class CohubClient {
     requestClose: () => this.appRuntime.requestClose(),
     devices: {
       request: (devices: AppDevice[]) => this.appRuntime.requestDevices(devices),
+      haptics: (kind: AppRuntimeHaptic) => this.appRuntime.haptics(kind),
     },
     /**
      * Request that the host update this overlay's geometry or pointer hit

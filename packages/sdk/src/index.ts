@@ -32,7 +32,7 @@ export { DesktopCommandsApi } from "./apis/desktop-commands.js";
 export { SpaceDisplaysApi } from "./apis/displays.js";
 export { DisplayConnection, connectDisplay } from "./display-session.js";
 export type { ConnectDisplayOptions, DisplayConnectionState, DisplayConnectionStats } from "./display-session.js";
-export { compileDisplayPlan, DISPLAY_ACTION_TYPES, DISPLAY_ELEMENT_REF_PATTERN, DISPLAY_HANDOVER_DEFAULT_MS, DISPLAY_HANDOVER_MAX_MS, DISPLAY_HANDOVER_WAIT_MS, DISPLAY_ELEMENT_ROLES, DISPLAY_SYSTEM_ACTIONS, DisplayActionError, normalizeDisplayPoint } from "@cohub/protocol";
+export { compileDisplayPlan, DISPLAY_ACTION_TYPES, DISPLAY_ELEMENT_REF_PATTERN, DISPLAY_HANDOVER_DEFAULT_MS, DISPLAY_HANDOVER_MAX_MS, DISPLAY_HANDOVER_WAIT_MS, DISPLAY_ELEMENT_ROLES, DISPLAY_RECORDINGS_DIR, DISPLAY_SYSTEM_ACTIONS, DISPLAY_TURNS_DIR, DisplayActionError, displayRecordingDir, normalizeDisplayPoint } from "@cohub/protocol";
 export type {
   DisplayAction,
   DisplayActParams,
@@ -40,7 +40,9 @@ export type {
   DisplayActStep,
   DisplayActStepResult,
   DisplayActStop,
+  DisplayActStopped,
   DisplayActivity,
+  DisplayAgentPointer,
   DisplayApp,
   DisplayApps,
   DisplayHandoverInfo,
@@ -49,14 +51,22 @@ export type {
   DisplayHandoverState,
   DisplayCapture,
   DisplayCaptureParams,
+  DisplayCursor,
   DisplayElement,
   DisplayFocus,
   DisplayInfo,
   DisplayInputEvent,
   DisplayKind,
   DisplayList,
+  DisplayLoggedStep,
+  DisplayPlanLog,
   DisplayPlatform,
+  DisplayPointerKind,
+  DisplayRecorder,
+  DisplayRecording,
+  DisplayRecordingMeta,
   DisplaySession,
+  DisplayStopNext,
   DisplayStepTarget,
   DisplaySystemAction,
   DisplayTarget,
@@ -65,6 +75,8 @@ export type {
   DisplayUntil,
   DisplayViewer,
   DisplayVirtualStart,
+  DisplayWindow,
+  DisplayWindows,
   RtcIceServer,
   RtcIceServers,
 } from "@cohub/protocol";
@@ -132,7 +144,7 @@ export { attachAppEmbed } from "./app-embed.js";
 export { AppWindowApi, applyAppAppearance } from "./app-window.js";
 export type { AppDropEvent, AppDropHandler, AppDropPoint, AppDropResource, AppDropResourceType, AppLaunch, AppWindowState } from "./app-window.js";
 export { APP_APPEARANCE_TOKENS, appAppearanceVar } from "@cohub/protocol/app-runtime";
-export type { AppAppearance, AppAppearanceToken, AppWindowStatus } from "@cohub/protocol/app-runtime";
+export type { AppAppearance, AppAppearanceToken, AppRuntimeHaptic, AppWindowStatus } from "@cohub/protocol/app-runtime";
 export type { AppEmbedAttachOptions, AppEmbedHandle, AppEmbedShell } from "./app-embed.js";
 export type { AppNavigationCall, AppNavigationLaunch, AppNavigationOpenMessage, AppNavigationOpenResponse, AppNavigationTarget } from "@cohub/protocol/app-navigation";
 export { createAppBridgeCore } from "./app-bridge-core.js";

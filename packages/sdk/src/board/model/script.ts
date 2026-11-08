@@ -52,8 +52,74 @@ export type BoardScriptGesture = {
   item?: string;
 };
 
-export type BoardScriptHostEvents = {
+export const BOARD_SCRIPT_SENSES = ["motion", "gamepad", "microphone", "camera", "location"] as const;
+export type BoardScriptSense = (typeof BOARD_SCRIPT_SENSES)[number];
+export type BoardScriptSenseState = "on" | "ask" | "denied" | "unavailable";
+
+export type BoardScriptEnv = {
+  mode: "edit" | "play" | "view" | "export";
+  pointer: "fine" | "coarse";
+  orientation: "portrait" | "landscape";
+  angle: number;
+  reducedMotion: boolean;
+  locale: string | null;
+  senses: Record<BoardScriptSense, BoardScriptSenseState>;
+};
+
+type Xyz = { x: number | null; y: number | null; z: number | null };
+
+export type BoardScriptBrowserEvents = {
+  "browser:devicemotion": {
+    acceleration: Xyz | null;
+    accelerationIncludingGravity: Xyz | null;
+    rotationRate: { alpha: number | null; beta: number | null; gamma: number | null } | null;
+    interval: number;
+    t: number;
+  };
+  "browser:deviceorientation": BoardScriptDeviceOrientation;
+  "browser:deviceorientationabsolute": BoardScriptDeviceOrientation;
+  "browser:gamepads": {
+    pads: Array<{
+      index: number;
+      id: string;
+      mapping: string;
+      connected: boolean;
+      timestamp: number;
+      buttons: Array<{ pressed: boolean; touched: boolean; value: number }>;
+      axes: number[];
+    }>;
+  };
+  "browser:position": {
+    coords: {
+      latitude: number;
+      longitude: number;
+      accuracy: number;
+      altitude: number | null;
+      altitudeAccuracy: number | null;
+      heading: number | null;
+      speed: number | null;
+    };
+    timestamp: number;
+  };
+  "browser:audio": { samples: Float32Array; sampleRate: number; t: number };
+  "browser:video": { frame: ImageBitmap; width: number; height: number; t: number };
+};
+
+export type BoardScriptDeviceOrientation = {
+  alpha: number | null;
+  beta: number | null;
+  gamma: number | null;
+  absolute: boolean;
+  webkitCompassHeading?: number;
+  webkitCompassAccuracy?: number;
+  t: number;
+};
+
+export type BoardScriptBrowserEvent = keyof BoardScriptBrowserEvents;
+
+export type BoardScriptHostEvents = BoardScriptBrowserEvents & {
   viewchange: BoardScriptView;
+  envchange: BoardScriptEnv;
   selectionchange: { ids: string[]; total: number };
   transformend: { ids: string[]; operation: "move" | "resize" | "rotate" | "arrow"; cancelled: boolean };
   change: { added: string[]; changed: string[]; removed: string[]; source: BoardScriptChangeSource };
@@ -149,6 +215,7 @@ export type BoardScriptContext = {
   readonly state: Record<string, unknown>;
   readonly frame: BoardScriptFrame;
   readonly view: BoardScriptView | null;
+  readonly env: BoardScriptEnv;
   random(): number;
   on<Type extends string>(type: Type, handler: (event: BoardScriptEventOf<Type>) => void): () => void;
   onFrame(handler: (frame: BoardScriptFrame) => void): () => void;

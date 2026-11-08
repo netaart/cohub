@@ -42,7 +42,6 @@ import {
 	isBlockingAccessState,
 } from "$lib/access/access-state";
 import { appDisplayTitle } from "$lib/app-page-meta";
-import { sortAppsByRecentUpdate } from "$lib/app-sort";
 import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
 import { invalidateFilePreviews } from "$lib/board/board-file-preview-source";
 import { spaceFsRepo } from "$lib/cache/repositories/space-fs-repo";
@@ -80,11 +79,9 @@ import {
 } from "$lib/features/app/app-open";
 import {
 	APPS_CHANGED_EVENT,
-	createAppMutationBuffer,
 	dispatchAppDomainsChanged,
 	dispatchAppsChanged,
 	dispatchInstalledAppsChanged,
-	upsertAppSnapshot,
 } from "$lib/features/app/app-realtime";
 import {
 	createFileHandlerResolver,
@@ -1058,6 +1055,9 @@ const sidePanel = createWorkspaceSidePanelController({
 	getCanViewTasks: () => rightSidebarAvailable && canViewTaskRuns,
 	getCanViewFiles: () =>
 		rightSidebarAvailable && hasAccessPermission("file.view"),
+	getCanViewApps: () => rightSidebarAvailable,
+	getCanViewCronjobs: () =>
+		rightSidebarAvailable && hasAccessPermission("cronjob.view"),
 	getVisible: () =>
 		isMobile
 			? isRightDrawerVisible
@@ -1175,17 +1175,12 @@ const openAppPublish = (
 	appPublishTarget = { targetType, targetRef };
 };
 const inlineFilePreview = $derived(fileWorkspace.inlineFilePreview);
-let previewApps = $state<AppRecord[]>([]);
-let previewAppsLoadedFor = $state<string | null>(null);
-/** Realtime mutations seen while the full list request is in flight. */
-const previewAppsBuffer = createAppMutationBuffer();
-let previewAppsToken = 0;
 const inlineFileApp = $derived.by(() => {
 	const filePath = inlineFile?.response?.path ?? null;
 	if (!filePath || activeFsReadonly || authStore.userUuid !== space?.userUuid)
 		return null;
 	return (
-		previewApps.find(
+		sidePanel.apps?.items.find(
 			(work) =>
 				work.status === "published" &&
 				work.targetType === "file" &&
@@ -1196,46 +1191,22 @@ const inlineFileApp = $derived.by(() => {
 const inlineFileDownloadUrl = $derived(fileWorkspace.inlineFileDownloadUrl);
 const inlineFileDownloadName = $derived(fileWorkspace.inlineFileDownloadName);
 
-$effect(() => {
-	const currentSpaceId = spaceId;
-	const currentOwnerId = space?.userUuid ?? null;
-	if (
-		!currentSpaceId ||
-		!currentOwnerId ||
-		activeFsReadonly ||
-		previewAppsLoadedFor === currentSpaceId
-	)
-		return;
-	const token = ++previewAppsToken;
-	previewAppsBuffer.reset();
-	void (async () => {
-		try {
-			await authStore.ensureLoaded();
-			if (token !== previewAppsToken) return;
-			if (!authStore.userUuid || authStore.userUuid !== currentOwnerId) {
-				previewApps = [];
-				previewAppsLoadedFor = currentSpaceId;
-				return;
-			}
-			const { apps } = await sdk.apps.listBySpace(currentSpaceId);
-			if (token !== previewAppsToken) return;
-			// Replay what realtime delivered mid-request instead of dropping the
-			// response, which would hide every other app until the next reload.
-			// The API serves newest-updated-first, so sort the replay the same way.
-			previewApps = sortAppsByRecentUpdate(previewAppsBuffer.apply(apps));
-			previewAppsLoadedFor = currentSpaceId;
-		} catch {
-			if (token !== previewAppsToken) return;
-			previewApps = [];
-			previewAppsLoadedFor = currentSpaceId;
-		}
-	})();
-});
 const inlinePortEndpoint = $derived.by(() => {
 	if (!inlinePortPreview) return null;
 	return previewEndpoints[inlinePortPreview.port] ?? null;
 });
 const activeWindowKind = $derived(windowManager.activeKind);
+const activeSpaceResource = $derived.by<ResourceAppTarget | null>(() => {
+	if (activeWindowKind === "app") {
+		const hash = inlineAppTabs.find((tab) => tab.key === activeInlineAppKey)
+			?.launch?.hash;
+		const launch = hash ? readResourceAppLaunch(hash) : null;
+		if (launch?.spaceId === spaceId) return launch.target;
+	}
+	if (routeAppId) return { kind: "app", id: routeAppId };
+	if (routeCronjobId) return { kind: "cronjob", id: routeCronjobId };
+	return null;
+});
 const selectedFilePath = $derived(
 	activeWindowFilePath(
 		activeWindowKind,
@@ -1489,7 +1460,6 @@ const spaceRealtime = createSpaceRealtimeController({
 	onConnectionRecovered: () => {
 		void sessionChat.onConnectionRecovered();
 		sidePanel.refresh();
-		previewAppsLoadedFor = null;
 		dispatchAppsChanged({ spaceId });
 		scheduleDanmakuCatchup();
 	},
@@ -2045,8 +2015,6 @@ async function handleWsEvent(payload: ChannelEnvelope) {
 		} else if (payload.type === "app.version.published") {
 			const published = parseAppVersionPublished(payload);
 			if (published) {
-				previewAppsBuffer.upsert(published.app);
-				previewApps = upsertAppSnapshot(previewApps, published.app);
 				dispatchAppsChanged({
 					spaceId,
 					app: published.app,
@@ -3162,6 +3130,7 @@ const spaceFileDomainProps = $derived.by<
 	sidePanel,
 	hasSession: Boolean(activeSessionId && !isNewSessionRoute),
 	canViewTasks: canViewTaskRuns,
+	canManageCronjobs: hasAccessPermission("cronjob.manage"),
 	spaceOwnerUsername,
 	spaceSlug,
 	spaceHasMinimalAccess,
@@ -3244,6 +3213,8 @@ const spaceFileDomainProps = $derived.by<
 	onOpenLinkedInlineFile: openLinkedInlineFile,
 	resolveWorkspaceAsset,
 	onOpenTask: openTask,
+	activeSpaceResource,
+	onOpenResource: (target) => void openResourceOrFallback(target),
 	onOpenApp: ({ appId, name }) =>
 		windowManager.openApp({
 			appId,

@@ -2,11 +2,12 @@ import type { BoardDocument, BoardPatch, BoardVec2 } from "@cohub/protocol";
 import { type BoardEditor, type BoardPointerEvent, type BoardToolId, createBoardEditor, selectionTransformControlAt } from "../editor/index.js";
 import type { BoardExportRegion } from "../model/export-plan.js";
 import { worldPoint, screenPoint } from "../model/geometry.js";
-import type { BoardScriptOutput } from "../model/script.js";
+import type { BoardScriptBrowserEvent, BoardScriptBrowserEvents, BoardScriptOutput, BoardScriptSense } from "../model/script.js";
+import { BOARD_SCRIPT_EXPORT_ENV, type BoardScriptInputLog, boardScriptSenseStates } from "../model/script-senses.js";
 import type { BoardScriptHost } from "../render/renderers/board-renderer-registry.js";
 import { createNodeBoardRenderer, exportBoardImageBytes, type BoardNodeRenderer } from "../export/node/index.js";
 import { createNodeBoardScriptRuntime } from "../export/node/scripts.js";
-import { createBoardScriptController } from "../stage/script-controller.js";
+import { type BoardScriptDevice, createBoardScriptController } from "../stage/script-controller.js";
 
 export type BoardScriptHarnessOptions = {
   document: BoardDocument;
@@ -16,6 +17,7 @@ export type BoardScriptHarnessOptions = {
   tool?: BoardToolId;
   leader?: boolean;
   timeoutMs?: number;
+  device?: Partial<BoardScriptDevice>;
 };
 
 export type BoardScriptHarnessPointer = {
@@ -83,8 +85,14 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
   });
   const surface = { width: 1280, height: 800 };
   editor.surfaceSize = surface;
+  const device: BoardScriptDevice = {
+    ...BOARD_SCRIPT_EXPORT_ENV,
+    senses: boardScriptSenseStates("on"),
+    ...options.device,
+  };
   const controller = createBoardScriptController({
     editor,
+    device: () => device,
     leader: () => options.leader ?? true,
     now: () => clock,
     setTimer(run, ms) {
@@ -187,6 +195,9 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
       return controller.emitFailures;
     },
     status: () => runtime?.status() ?? [],
+    get senses(): BoardScriptSense[] {
+      return controller.senses;
+    },
     async advance(ms = FRAME_MS) {
       const end = clock + ms;
       while (clock < end) {
@@ -212,6 +223,18 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     snapshot: () => controller.snapshot(),
     async key(type: "keydown" | "keyup", key: string) {
       controller.key({ type, key });
+      await frame();
+    },
+    async input<Type extends BoardScriptBrowserEvent>(type: Type, data: BoardScriptBrowserEvents[Type]) {
+      controller.input(type, data);
+      await frame();
+    },
+    async replay(log: BoardScriptInputLog) {
+      const start = clock;
+      for (const { t, type, data } of log.inputs) {
+        if (start + t > clock) await this.advance(start + t - clock);
+        controller.input(type as BoardScriptBrowserEvent, data as never);
+      }
       await frame();
     },
     async flush() {

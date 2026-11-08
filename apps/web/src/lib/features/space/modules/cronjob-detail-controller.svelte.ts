@@ -20,6 +20,7 @@ import {
 } from "$lib/space-routes";
 import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 import { mergeCachedCronJobTaskRuns } from "$lib/stores/task-runs-cache";
+import { dispatchCronjobsUpdated } from "../resources/space-cronjobs-feed.svelte";
 import { createKeyedRouteRequestGuard } from "./route-request-guard";
 import type { TaskRealtimeEvent } from "./task-run-detail-controller.svelte";
 
@@ -164,12 +165,7 @@ export function createCronjobDetailController(options: {
 	}
 
 	function notifyCronjobsUpdated() {
-		if (typeof window === "undefined") return;
-		window.dispatchEvent(
-			new CustomEvent("cohub:cronjobs-updated", {
-				detail: { spaceId: options.getSpaceId() },
-			}),
-		);
+		dispatchCronjobsUpdated(options.getSpaceId());
 	}
 
 	async function loadModelsCatalog() {

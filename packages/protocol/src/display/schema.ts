@@ -4,6 +4,8 @@ const unit = z.number().min(0).max(1);
 
 export const DISPLAY_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 export const displayIdSchema = z.string().regex(DISPLAY_ID_PATTERN);
+export const DISPLAY_WINDOW_ID_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
+export const displayWindowIdSchema = z.string().regex(DISPLAY_WINDOW_ID_PATTERN);
 
 export const DISPLAYS_MAX = 16;
 export const DISPLAY_NAME_MAX = 200;
@@ -55,6 +57,23 @@ export const displayHandoverInfoSchema = z.object({
 });
 export type DisplayHandoverInfo = z.infer<typeof displayHandoverInfoSchema>;
 
+export const DISPLAY_RECORDING_ID_PATTERN = /^[0-9A-Za-z_-]{1,64}$/;
+
+export const displayRecorderSchema = z.object({
+  userId: z.string().min(1).max(64).optional(),
+  sessionId: z.string().min(1).max(64).optional(),
+  turnId: z.string().min(1).max(64).optional(),
+});
+export type DisplayRecorder = z.infer<typeof displayRecorderSchema>;
+
+export const displayRecordingSchema = z.object({
+  id: z.string().regex(DISPLAY_RECORDING_ID_PATTERN).optional(),
+  since: z.number().int().min(0).optional(),
+  paused: z.boolean().optional(),
+  auto: z.boolean().optional(),
+});
+export type DisplayRecording = z.infer<typeof displayRecordingSchema>;
+
 export const displayInfoSchema = z.object({
   id: displayIdSchema,
   name: z.string().max(DISPLAY_NAME_MAX),
@@ -76,6 +95,9 @@ export const displayInfoSchema = z.object({
   activity: displayActivitySchema.optional(),
   held: z.boolean().optional(),
   handover: displayHandoverInfoSchema.optional(),
+  recording: displayRecordingSchema.optional(),
+  record: z.boolean().optional(),
+  windows: z.boolean().optional(),
 });
 export type DisplayInfo = z.infer<typeof displayInfoSchema>;
 
@@ -133,6 +155,7 @@ export type DisplayElement = z.infer<typeof displayElementSchema>;
 export const displayTreeParamsSchema = z.object({
   maxElements: z.number().int().min(1).max(DISPLAY_TREE_MAX_ELEMENTS).optional(),
   compact: z.boolean().optional(),
+  window: displayWindowIdSchema.optional(),
 });
 export type DisplayTreeParams = z.infer<typeof displayTreeParamsSchema>;
 
@@ -223,6 +246,7 @@ export const displayCaptureParamsSchema = z.object({
   format: z.enum(["jpeg", "png"]).optional(),
   quality: z.number().int().min(1).max(100).optional(),
   maxSize: z.number().int().min(1).max(DISPLAY_DIMENSION_MAX).optional(),
+  window: displayWindowIdSchema.optional(),
 });
 export type DisplayCaptureParams = z.infer<typeof displayCaptureParamsSchema>;
 
@@ -261,15 +285,49 @@ export const DISPLAY_SESSION_CLOSE_REASONS = [
 ] as const;
 export type DisplaySessionCloseReason = (typeof DISPLAY_SESSION_CLOSE_REASONS)[number];
 
+export const DISPLAY_POINTER_KINDS = ["move", "click", "type", "scroll"] as const;
+export type DisplayPointerKind = (typeof DISPLAY_POINTER_KINDS)[number];
+
+export type DisplayAgentPointer = {
+  sessionId?: string;
+  x: number;
+  y: number;
+  kind: DisplayPointerKind;
+  seq: number;
+};
+
+export type DisplayCursor = { userId: string; x: number; y: number };
+
+export const DISPLAY_CURSOR_INTERVAL_MS = 33;
+
 export type DisplayControlMessage =
   | { type: "ready"; display: DisplayInfo; control: boolean; focus?: DisplayFocus }
   | { type: "display"; display: DisplayInfo }
   | { type: "focus"; focus?: DisplayFocus }
+  | { type: "agent"; pointer?: DisplayAgentPointer }
+  | { type: "cursors"; cursors: DisplayCursor[] }
   | { type: "pong"; id: number }
   | { type: "closed"; reason: DisplaySessionCloseReason | (string & {}) }
   | { type: "error"; code: string; message: string };
 
-export type DisplayViewerMessage = { type: "ping"; id: number } | { type: "keyframe" } | { type: "pause" } | { type: "resume" };
+export type DisplayViewerMessage =
+  | { type: "ping"; id: number }
+  | { type: "keyframe" }
+  | { type: "pause" }
+  | { type: "resume" }
+  | { type: "cursor"; x?: number; y?: number };
+
+export const DISPLAY_WINDOWS_MAX = 200;
+
+export const displayWindowSchema = z.object({
+  id: displayWindowIdSchema,
+  app: z.string().max(255).optional(),
+  title: z.string().max(DISPLAY_ELEMENT_TEXT_MAX).optional(),
+  bounds: z.tuple([unit, unit, unit, unit]),
+  focused: z.boolean().optional(),
+});
+export type DisplayWindow = z.infer<typeof displayWindowSchema>;
+export type DisplayWindows = { windows: DisplayWindow[] };
 
 export function normalizeDisplayPoint(x: number, y: number, width: number, height: number): { x: number; y: number } {
   const unit = (value: number, extent: number) => Math.min(1, Math.max(0, extent > 1 ? value / (extent - 1) : 0));

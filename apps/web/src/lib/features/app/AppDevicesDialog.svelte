@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { AppDevice } from "@neta-art/cohub";
-import { Camera, Mic } from "lucide-svelte";
+import { Camera, MapPin, Mic } from "lucide-svelte";
 import Dialog from "$lib/components/Dialog.svelte";
 import { appDevicesLabel } from "$lib/features/app/app-devices";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -33,6 +33,9 @@ const locale = $derived(getLocale());
 					{/if}
 					{#if devices.includes("microphone")}
 						<Mic class="h-4 w-4" />
+					{/if}
+					{#if devices.includes("location")}
+						<MapPin class="h-4 w-4" />
 					{/if}
 				</div>
 				<div class="min-w-0">

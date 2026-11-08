@@ -14,6 +14,7 @@ type Props = {
 	defaultExpanded?: boolean;
 	onLoadToolCalls?: () => Promise<MessageToolCallsFile | null>;
 	flush?: boolean;
+	turnId?: string | null;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
 };
 
@@ -24,6 +25,7 @@ const {
 	defaultExpanded = false,
 	onLoadToolCalls,
 	flush = false,
+	turnId = null,
 	onOpenFile,
 }: Props = $props();
 
@@ -70,7 +72,7 @@ function retryLoad() {
 			</button>
 		{/if}
 		{#each tools as tool (tool.id)}
-			<ToolCallItem {tool} loading={loading && requestedLoad && !effectiveFile} needsDetails={Boolean(onLoadToolCalls) && !effectiveFile} defaultExpanded={defaultExpanded || (streaming && tool.status === 'running')} autoExpandWhileRunning={streaming} onExpand={ensureLoaded} {onOpenFile} />
+			<ToolCallItem {tool} loading={loading && requestedLoad && !effectiveFile} needsDetails={Boolean(onLoadToolCalls) && !effectiveFile} defaultExpanded={defaultExpanded || (streaming && tool.status === 'running')} autoExpandWhileRunning={streaming} onExpand={ensureLoaded} {turnId} {onOpenFile} />
 		{/each}
 	</div>
 {/if}

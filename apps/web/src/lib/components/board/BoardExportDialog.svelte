@@ -36,6 +36,7 @@ const {
 	selection,
 	onLocate,
 	onExportVideo,
+	inputs = null,
 }: {
 	open: boolean;
 	onClose: () => void;
@@ -45,7 +46,9 @@ const {
 	selection: string[];
 	onLocate?: (id: string) => void;
 	onExportVideo?: (request: BoardVideoExportRequest) => void;
+	inputs?: string | null;
 } = $props();
+let replayInputs = $state(true);
 
 const locale = $derived(getLocale());
 
@@ -208,6 +211,7 @@ function exportVideo() {
 		duration: animation.duration,
 		region,
 		...(scope === "camera" ? { camera: cameraSize } : {}),
+		...(inputs && replayInputs ? { inputs } : {}),
 		scale,
 	});
 	onClose();
@@ -386,6 +390,12 @@ async function run(mode: "download" | "copy") {
 			</div>
 			{#if video}
 				<p class="mt-1 text-[12px] text-text-tertiary">{m.board_video_export_note({}, { locale })}</p>
+				{#if inputs}
+					<label class="mt-1 flex min-w-0 items-center gap-2 text-[12px] text-text-secondary" title={inputs}>
+						<input type="checkbox" bind:checked={replayInputs} />
+						<span class="truncate">{m.board_export_replay_input({}, { locale })}</span>
+					</label>
+				{/if}
 			{:else}
 			<label class="mt-1 flex items-center gap-2 text-[12px] text-text-secondary">
 				<input

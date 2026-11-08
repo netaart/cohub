@@ -87,6 +87,8 @@
 	<string>Cohub uses the camera when you capture photos or video for a Space.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Cohub uses the microphone when you dictate or talk with agents.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Cohub shares your location with a Board or App only after you allow it there.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Cohub saves the images and videos you download to your photo library.</string>
 	<key>CohubEnvironment</key>

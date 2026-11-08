@@ -47,10 +47,7 @@ export type PointerDragItem = {
 	themeColor?: string;
 };
 
-export type PointerDragOrigin =
-	| "space-file-tree"
-	| "apps-sidebar"
-	| "side-panel";
+export type PointerDragOrigin = "space-file-tree" | "side-panel";
 
 export type PointerDragPayload = {
 	origin: PointerDragOrigin;

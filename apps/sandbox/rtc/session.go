@@ -34,14 +34,18 @@ const (
 )
 
 type controlMessage struct {
-	Type    string         `json:"type"`
-	ID      *int64         `json:"id,omitempty"`
-	Display *display.Info  `json:"display,omitempty"`
-	Control *bool          `json:"control,omitempty"`
-	Focus   *display.Focus `json:"focus,omitempty"`
-	Reason  string         `json:"reason,omitempty"`
-	Code    string         `json:"code,omitempty"`
-	Message string         `json:"message,omitempty"`
+	Type    string                `json:"type"`
+	ID      *int64                `json:"id,omitempty"`
+	Display *display.Info         `json:"display,omitempty"`
+	Control *bool                 `json:"control,omitempty"`
+	Focus   *display.Focus        `json:"focus,omitempty"`
+	Pointer *display.AgentPointer `json:"pointer,omitempty"`
+	Cursors *[]Cursor             `json:"cursors,omitempty"`
+	X       *float64              `json:"x,omitempty"`
+	Y       *float64              `json:"y,omitempty"`
+	Reason  string                `json:"reason,omitempty"`
+	Code    string                `json:"code,omitempty"`
+	Message string                `json:"message,omitempty"`
 }
 
 type session struct {
@@ -215,6 +219,12 @@ func (s *session) run() {
 	go s.resyncOnBind()
 	stopWatch := s.manager.hub.OnChange(s.onDisplays)
 	defer stopWatch()
+	stopPointer := s.manager.hub.OnPointer(func(id string, pointer display.AgentPointer) {
+		if id == s.display {
+			s.send(controlMessage{Type: "agent", Pointer: &pointer})
+		}
+	})
+	defer stopPointer()
 	if s.control {
 		stopFocus := s.manager.hub.OnFocus(s.onFocus)
 		defer stopFocus()
@@ -441,6 +451,8 @@ func (s *session) onControl(message webrtc.DataChannelMessage) {
 		s.pause()
 	case "resume":
 		go s.resume()
+	case "cursor":
+		s.manager.cursor(s, incoming.X, incoming.Y)
 	}
 }
 
@@ -551,6 +563,7 @@ func (s *session) close(reason string) {
 		s.cancel()
 		s.pause()
 		_ = s.pc.Close()
+		s.manager.forgetCursor(s)
 		s.manager.forget(s)
 		s.logger.Info("rtc session closed",
 			slog.String("reason", reason), slog.String("path", path),

@@ -161,6 +161,28 @@ func (d *Dispatcher) handleDisplay(ctx context.Context, request protocol.RPCRequ
 			err = hub.Handback(params.Display)
 			result = struct{}{}
 		}
+	case "display.windows":
+		var params display.AppsParams
+		if err = json.Unmarshal(request.Params, &params); err == nil {
+			result, err = hub.Windows(ctx, params.Display)
+		}
+	case "display.record.start":
+		var params struct {
+			Display string           `json:"display"`
+			By      display.Recorder `json:"by"`
+			Auto    bool             `json:"auto"`
+		}
+		if err = json.Unmarshal(request.Params, &params); err == nil {
+			result, err = hub.StartRecording(params.Display, params.By, params.Auto)
+		}
+	case "display.record.stop":
+		var params struct {
+			Display string `json:"display"`
+			Auto    bool   `json:"auto"`
+		}
+		if err = json.Unmarshal(request.Params, &params); err == nil {
+			result = hub.StopRecording(params.Display, params.Auto)
+		}
 	case "rtc.open", "rtc.close":
 		if !strings.HasPrefix(identity, rtcIdentityPrefix) {
 			return d.failed(request, "", "ACCESS_DENIED", "viewer sessions are opened through the API")

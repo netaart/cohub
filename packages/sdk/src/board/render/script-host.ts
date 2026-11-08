@@ -4,12 +4,14 @@ import { boardBitmapResolution } from "./bitmap-resolution.js";
 import { getBoardResolution } from "./text-resolution.js";
 import { boardScriptAttachments } from "../model/script-index.js";
 import { boardScriptListens, queueBoardScriptEvent } from "../model/script-events.js";
+import { BOARD_SCRIPT_EXPORT_ENV, releaseBoardScriptEvent } from "../model/script-senses.js";
 import { boardScriptScope, diffBoardScriptItems } from "../model/script-scope.js";
 import { sameJson } from "../model/json.js";
 import { boardScriptHitVisible, resolveBoardScriptHit } from "../model/script-hit.js";
 import type { BoardScene } from "../model/scene.js";
 import type { BoardViewport } from "../model/geometry.js";
 import type {
+  BoardScriptEnv,
   BoardScriptEvent,
   BoardScriptOutput,
   BoardScriptSnapshot,
@@ -36,6 +38,7 @@ type Entry = {
   items: BoardDocument["items"] | null;
   width: number;
   height: number;
+  env: BoardScriptEnv;
   snapshot?: BoardScriptSnapshot;
   sent: boolean;
   delta: ScriptRuntimeInputDelta | null;
@@ -71,6 +74,7 @@ export type BoardScriptHostOptions = {
   isMaterialized?(id: string): boolean;
   onOutput(id: string, output: BoardScriptOutput | null): boolean | undefined;
   onInput?(id: string, event: BoardScriptEvent): void;
+  env?(): BoardScriptEnv;
   capabilities?: Record<
     string,
     (id: string, input: unknown) => Promise<unknown>
@@ -86,6 +90,7 @@ export type BoardScriptHostCallbacks = {
   onInput(id: string, event: BoardScriptEvent): void;
   onFrame(): void;
   onSchedule(): void;
+  env(): BoardScriptEnv;
   capabilities: Record<string, (id: string, input: unknown) => Promise<unknown>>;
 };
 
@@ -93,6 +98,9 @@ export const BOARD_SCRIPT_INSTANCE_LIMIT = 1000;
 const NO_BOX = { width: 0, height: 0 };
 const OFFSCREEN_FRAME_RATE = 4;
 const CALL_QUIET_MS = 1_000;
+
+const framesOf = (events: readonly BoardScriptEvent[]): Transferable[] =>
+  events.flatMap((event) => (event.type === "browser:video" ? [(event.data as { frame: ImageBitmap }).frame] : []));
 
 function selfContained(entry: Entry, now: number): boolean {
   const output = entry.output;
@@ -153,8 +161,13 @@ export function createBoardScriptHost(
     }
     return value;
   }
-  function track(entry: Entry, board: BoardDocument, script: BoardScript, width: number, height: number) {
+  const readEnv = () => options.env?.() ?? BOARD_SCRIPT_EXPORT_ENV;
+  function track(entry: Entry, board: BoardDocument, script: BoardScript, width: number, height: number, env: BoardScriptEnv) {
     const delta: ScriptRuntimeInputDelta = {};
+    if (entry.env !== env) {
+      entry.env = env;
+      delta.env = env;
+    }
     if (entry.script !== script) {
       if (!sameJson(entry.script.params, script.params)) delta.script = script;
       entry.script = script;
@@ -185,6 +198,7 @@ export function createBoardScriptHost(
       items: Object.fromEntries(entry.copy),
       width: entry.width,
       height: entry.height,
+      env: entry.env,
       capabilities: Object.keys(options.capabilities ?? {}),
       snapshot: entry.snapshot,
     };
@@ -230,11 +244,11 @@ export function createBoardScriptHost(
     broker.tabIndex = -1;
     broker.style.cssText =
       "position:absolute;visibility:hidden;width:0;height:0;border:0";
-    broker.srcdoc = boardScriptFrameSource({ timeoutMs: options.timeoutMs, poolSize: options.poolSize });
+    broker.srcdoc = boardScriptFrameSource({ timeoutMs: options.timeoutMs, poolSize: options.poolSize, network: !options.export });
     layer.appendChild(broker);
   }
-  function toBroker(data: unknown, token?: number) {
-    broker?.contentWindow?.postMessage({ token, data }, "*");
+  function toBroker(data: unknown, token?: number, transfer: Transferable[] = []) {
+    broker?.contentWindow?.postMessage({ token, data }, "*", transfer);
   }
   function removeFrame(entry: Entry) {
     if (entry.capture) {
@@ -504,6 +518,7 @@ export function createBoardScriptHost(
         clearTimeout(resolutionTimer);
         if (!first) resolutionTimer = setTimeout(schedule, 120);
       }
+      const env = readEnv();
       const alive = new Set<string>();
       const liveFocusTargets = new Set<string>();
       let focusSurface: { width: number; height: number } | undefined;
@@ -535,6 +550,7 @@ export function createBoardScriptHost(
             items: null,
             width: box.width,
             height: box.height,
+            env,
             snapshot,
             sent: false,
             delta: null,
@@ -576,7 +592,7 @@ export function createBoardScriptHost(
         }
         if (entry.error) continue;
         entry.item = item;
-        track(entry, board, script, box.width, box.height);
+        track(entry, board, script, box.width, box.height, env);
         const visible = !item || !visibleIds || visibleIds.has(id);
         if (entry.visible !== visible) {
           entry.visible = visible;
@@ -638,6 +654,7 @@ export function createBoardScriptHost(
           unsent.delete(entry.graph);
           toBroker({ kind: "graph", key: entry.graph, sources });
         }
+        const events = entry.events.splice(0);
         toBroker({
           request: entry.request,
           graph: entry.graph,
@@ -647,8 +664,8 @@ export function createBoardScriptHost(
           shaders: options.shaders,
           t: elapsed,
           scale: entry.scale,
-          events: entry.events.splice(0),
-        }, entry.token);
+          events,
+        }, entry.token, framesOf(events));
         entry.sent = true;
         entry.delta = null;
       }
@@ -663,7 +680,10 @@ export function createBoardScriptHost(
     },
     event(id, event) {
       const entry = entries.get(id);
-      if (!entry || entry.error || !boardScriptListens(entry.output, event)) return true;
+      if (!entry || entry.error || !boardScriptListens(entry.output, event)) {
+        releaseBoardScriptEvent(event);
+        return true;
+      }
       if (!queueBoardScriptEvent(entry.events, event)) return false;
       entry.dirty = true;
       options.onFrame();

@@ -1,6 +1,7 @@
 import type { BoardItem, BoardScript } from "@cohub/protocol";
 import type {
   BoardScriptContext,
+  BoardScriptEnv,
   BoardScriptEvent,
   BoardScriptEventOf,
   BoardScriptFrame,
@@ -17,11 +18,12 @@ export type ScriptRuntimeInput = {
   items: Record<string, BoardItem>;
   width: number;
   height: number;
+  env: BoardScriptEnv;
   capabilities?: string[];
   snapshot?: BoardScriptSnapshot;
 };
 
-export type ScriptRuntimeInputDelta = Partial<Pick<ScriptRuntimeInput, "script" | "item" | "width" | "height">> & {
+export type ScriptRuntimeInputDelta = Partial<Pick<ScriptRuntimeInput, "script" | "item" | "width" | "height" | "env">> & {
   items?: Record<string, BoardItem | null>;
 };
 
@@ -100,6 +102,7 @@ export function createScriptRuntime(
   let view: BoardScriptView | null = null;
   let hits: BoardScriptOutput["hits"] = effects?.hits ?? {};
   let uniforms: BoardScriptOutput["uniforms"] = effects?.uniforms;
+  let videoFrame: { close?(): void } | undefined;
   let passes: BoardScriptOutput["passes"] = effects?.passes;
   const invalidate = (scene = true) => {
     if (disposed) return;
@@ -147,6 +150,7 @@ export function createScriptRuntime(
       return frame;
     },
     get view() { return view; },
+    get env() { return input.env; },
     random() {
       randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0;
       return randomState / 4294967296;
@@ -242,7 +246,9 @@ export function createScriptRuntime(
       return frames.size > 0 || module.animated === true;
     },
     update(next: ScriptRuntimeInput) {
+      const env = JSON.stringify(input.env) === JSON.stringify(next.env) ? null : next.env;
       input = next;
+      if (env) this.event({ type: "envchange", data: env });
       for (const id of Object.keys(patches))
         if (!next.items[id]) {
           delete patches[id];
@@ -302,6 +308,10 @@ export function createScriptRuntime(
     event(event: BoardScriptEvent) {
       if (disposed) return;
       if (event.type === "viewchange") view = event.data as BoardScriptView;
+      if (event.type === "browser:video") {
+        videoFrame?.close?.();
+        videoFrame = (event.data as { frame?: { close?(): void } }).frame;
+      }
       const listeners = handlers.get(event.type);
       if (!listeners?.size) return;
       const outer = depth;
@@ -354,6 +364,7 @@ export function createScriptRuntime(
     },
     destroy() {
       disposed = true;
+      videoFrame?.close?.();
       for (const cleanup of cleanups.reverse()) cleanup();
       handlers.clear();
       frames.clear();

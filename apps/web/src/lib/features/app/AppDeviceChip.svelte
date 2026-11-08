@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { AppDevice } from "@neta-art/cohub";
-import { Camera, Mic } from "lucide-svelte";
+import { Camera, MapPin, Mic } from "lucide-svelte";
 import { appDevicesLabel } from "$lib/features/app/app-devices";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
@@ -11,7 +11,7 @@ const {
 }: { devices: AppDevice[]; onTurnOff: (device: AppDevice) => void } = $props();
 
 const locale = $derived(getLocale());
-const ICONS = { camera: Camera, microphone: Mic } as const;
+const ICONS = { camera: Camera, microphone: Mic, location: MapPin } as const;
 const shown = $derived(
 	devices.filter((device): device is keyof typeof ICONS => device in ICONS),
 );

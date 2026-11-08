@@ -1,4 +1,4 @@
-export const APP_DEVICES = ["camera", "microphone", "screen"] as const;
+export const APP_DEVICES = ["camera", "microphone", "screen", "location"] as const;
 export type AppDevice = (typeof APP_DEVICES)[number];
 
 export const appDeviceNeedsConsent = (device: AppDevice) => device !== "screen";
@@ -16,7 +16,7 @@ export function parseAppDevices(value: unknown): AppDevice[] {
   return APP_DEVICES.filter((device) => wanted.has(device));
 }
 
-const PERMISSION_POLICY: Record<AppDevice, string> = { camera: "camera", microphone: "microphone", screen: "display-capture" };
+const PERMISSION_POLICY: Record<AppDevice, string> = { camera: "camera", microphone: "microphone", screen: "display-capture", location: "geolocation" };
 
 export const appDevicesPermissionPolicy = (devices: readonly AppDevice[]) =>
   devices.map((device) => PERMISSION_POLICY[device]).join("; ");

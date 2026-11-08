@@ -203,6 +203,7 @@ func buildRuntime(
 		logger.Warn("display provider disabled", slog.String("error", err.Error()))
 	}
 	displays := display.NewHub(dial, logger)
+	displays.SetStore(display.NewStore(cfg.WorkspaceDir, logger))
 	viewers := rtc.NewManager(displays, logger)
 	var virtual *display.Virtual
 	if dial == nil {
@@ -268,6 +269,7 @@ func buildRuntime(
 
 	closers = append(closers, searchManager.Close, keeper.Close, func() {
 		viewers.CloseAll(rtc.ReasonShutdown)
+		displays.StopRecordings()
 		stopDisplays()
 		if virtual != nil {
 			virtual.Stop()

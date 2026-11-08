@@ -42,6 +42,7 @@ internal object Tone {
     val ACCENT = Color.rgb(76, 141, 255)
     val WARNING = Color.rgb(255, 159, 10)
     val READY = Color.rgb(48, 209, 88)
+    val RECORDING = Color.rgb(255, 69, 58)
 }
 
 internal fun View.dp(value: Number): Int = (value.toFloat() * resources.displayMetrics.density).toInt()

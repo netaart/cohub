@@ -21,7 +21,16 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 29;
+export const DB_VERSION = 31;
+
+export type DisplayReplayCacheRecord = {
+	key: string;
+	userKey: string;
+	spaceId: string;
+	value: unknown;
+	updatedAt: number;
+	lastAccessedAt: number;
+};
 
 export type SessionListForkRecord = Partial<
 	Omit<SessionForkRecord, "parentSessionId">
@@ -289,6 +298,16 @@ export type AppDomainsCacheRecord = {
 	lastAccessedAt: number;
 };
 
+export type SpaceResourceListCacheRecord = {
+	key: string;
+	userKey: string;
+	spaceId: string;
+	kind: string;
+	items: unknown[];
+	updatedAt: number;
+	lastAccessedAt: number;
+};
+
 export type ViewerLikeCacheRecord = {
 	key: string;
 	userKey: string;
@@ -334,7 +353,9 @@ export type StoreName =
 	| "task_run_details"
 	| "session_files"
 	| "app_domains"
-	| "viewer_likes";
+	| "space_resource_lists"
+	| "viewer_likes"
+	| "display_replays";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 /** Resolved connection for O(1) reuse after open; cleared on versionchange/reset. */
@@ -736,6 +757,9 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
 			]);
+			defineStore(db, tx, "display_replays", [
+				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
+			]);
 			defineStore(db, tx, "activity", [
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 				{ name: "by_updated_at", keyPath: "updatedAt" },
@@ -850,6 +874,9 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
 			defineStore(db, tx, "app_domains", [
+				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
+			]);
+			defineStore(db, tx, "space_resource_lists", [
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
 			defineStore(db, tx, "viewer_likes", [

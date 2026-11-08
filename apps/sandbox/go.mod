@@ -3,6 +3,7 @@ module github.com/cohub/apps/sandbox
 go 1.27.2
 
 require (
+	github.com/Eyevinn/mp4ff v0.62.0
 	github.com/coder/websocket v1.8.15
 	github.com/ebitengine/purego v0.11.1
 	github.com/fsnotify/fsevents v0.2.0

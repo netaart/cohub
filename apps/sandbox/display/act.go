@@ -36,6 +36,7 @@ type ActParams struct {
 	Steps   []Step   `json:"steps"`
 	Observe *Observe `json:"observe,omitempty"`
 	Actor   *Actor   `json:"actor,omitempty"`
+	Window  string   `json:"window,omitempty"`
 }
 
 type Actor struct {
@@ -75,11 +76,13 @@ type ActResult struct {
 	Steps   []StepResult `json:"steps"`
 	Stopped *ActStop     `json:"stopped,omitempty"`
 	Screen  ActScreen    `json:"screen"`
+	Window  *Window      `json:"window,omitempty"`
 }
 
 type StepResult struct {
 	Effect   string      `json:"effect"`
 	Target   *StepTarget `json:"target,omitempty"`
+	ReadBack bool        `json:"readBack,omitempty"`
 	FindMs   int         `json:"findMs"`
 	ActMs    int         `json:"actMs"`
 	WaitedMs int         `json:"waitedMs"`
@@ -90,6 +93,8 @@ type ActStop struct {
 	Reason     string    `json:"reason"`
 	Message    string    `json:"message"`
 	Candidates []Element `json:"candidates,omitempty"`
+	Hint       string    `json:"hint,omitempty"`
+	Next       string    `json:"next,omitempty"`
 }
 
 type ActScreen struct {
@@ -121,6 +126,9 @@ func (p *ActParams) Validate() error {
 	}
 	if p.Plan != "" && !actorIDPattern.MatchString(p.Plan) {
 		return errorf(CodeInvalid, "plan must be a UUID")
+	}
+	if p.Window != "" && !windowIDPattern.MatchString(p.Window) {
+		return errorf(CodeInvalid, "window must be a window id")
 	}
 	if p.Observe == nil {
 		p.Observe = &Observe{}
@@ -241,10 +249,18 @@ func (h *Hub) Act(ctx context.Context, params ActParams) (ActResult, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, MaxActMs*time.Millisecond)
 	defer cancel()
+	run := &actRun{hub: h, info: info, result: ActResult{Steps: []StepResult{}}, started: time.Now()}
+	if params.Window != "" {
+		window, err := h.window(ctx, info, params.Window)
+		if err != nil {
+			return ActResult{}, err
+		}
+		run.window = &window
+		params.Steps = window.steps(params.Steps)
+	}
 	if info.Changes {
 		defer h.watchChanges(ctx, params.Display)()
 	}
-	run := &actRun{hub: h, info: info, result: ActResult{Steps: []StepResult{}}}
 	if params.Actor != nil {
 		run.actor = Activity{SessionID: params.Actor.SessionID, TurnID: params.Actor.TurnID}
 	}
@@ -255,6 +271,8 @@ func (h *Hub) Act(ctx context.Context, params ActParams) (ActResult, error) {
 		} else {
 			defer done()
 			defer h.endActivity(params.Display)
+			h.planStarted(params.Display, run.actor.TurnID)
+			defer h.planEnded(params.Display)
 			run.ctx = scripted
 			run.steps(params.Steps)
 		}
@@ -265,6 +283,9 @@ func (h *Hub) Act(ctx context.Context, params ActParams) (ActResult, error) {
 	if err := run.observe(*params.Observe, len(params.Steps) > 0); err != nil && len(run.result.Steps) == 0 && run.result.Stopped == nil {
 		return ActResult{}, err
 	}
+	run.hint()
+	run.inWindow()
+	run.logPlan(params)
 	return run.result, nil
 }
 
@@ -297,6 +318,9 @@ type actRun struct {
 	tree    *Tree // as last read: after the previous step
 	readAt  time.Time
 	changed bool
+	window  *Window
+	started time.Time
+	logged  []LoggedStep
 }
 
 func (r *actRun) read() (*Tree, error) {
@@ -412,6 +436,10 @@ func (r *actRun) steps(steps []Step) {
 			return
 		}
 		found := time.Now()
+		point := r.pointOf(step, batch)
+		if point != nil {
+			r.hub.point(r.info.ID, r.actor.SessionID, *point)
+		}
 		if !r.perform(index, step, batch) {
 			return
 		}
@@ -430,8 +458,10 @@ func (r *actRun) steps(steps []Step) {
 		now, _, _ := r.hub.changeState(r.info.ID)
 		pixels := r.info.Changes && now != seq && (step.Type != "element" || after == nil || quality(*after) != "good")
 		result.Effect = effectOf(before, after, pixels)
+		result.ReadBack = readBack(step, target, after)
 		r.changed = r.changed || result.Effect != "none"
 		r.result.Steps = append(r.result.Steps, result)
+		r.logged = append(r.logged, LoggedStep{Type: step.Type, Label: step.Label, At: found.UnixMilli(), Point: point, StepResult: result})
 		if err := context.Cause(r.ctx); err != nil {
 			r.stop(index, err)
 			return
@@ -776,7 +806,10 @@ func (r *actRun) observe(o Observe, acted bool) error {
 	if r.info.Tree {
 		tree, err := r.read()
 		if err != nil {
-			return err
+			if !r.info.Capture || o.Image == "never" {
+				return err
+			}
+			return r.observeImage(o)
 		}
 		screen.App = tree.App
 		screen.Quality = quality(*tree)
@@ -788,6 +821,9 @@ func (r *actRun) observe(o Observe, acted bool) error {
 			} else {
 				limit := cmp.Or(o.MaxElements, DefaultTreeElements)
 				shown := *tree
+				if r.window != nil {
+					shown = r.window.tree(shown)
+				}
 				if o.Tree == "compact" {
 					shown = shown.compact(limit)
 				} else {
@@ -798,18 +834,28 @@ func (r *actRun) observe(o Observe, acted bool) error {
 		}
 	}
 	if o.Image == "always" || o.Image == "auto" && screen.Quality != "good" {
-		if !r.info.Capture {
-			return nil
-		}
-		image, err := r.hub.capture(r.ctx, CaptureParams{Display: r.info.ID, MaxSize: cmp.Or(o.MaxSize, actImageSize), Quality: actImageJPEG})
-		if err != nil {
-			return err
-		}
-		if screen.Tree == nil && !screen.Unchanged {
-			r.hub.forget(r.info.ID)
-		}
-		screen.Image = &image
+		return r.observeImage(o)
 	}
+	return nil
+}
+
+func (r *actRun) observeImage(o Observe) error {
+	if !r.info.Capture {
+		return nil
+	}
+	params := CaptureParams{Display: r.info.ID, MaxSize: cmp.Or(o.MaxSize, actImageSize), Quality: actImageJPEG}
+	if r.window != nil {
+		params.Region = r.window.region()
+	}
+	image, err := r.hub.capture(r.ctx, params)
+	if err != nil {
+		return err
+	}
+	screen := &r.result.Screen
+	if screen.Tree == nil && !screen.Unchanged {
+		r.hub.forget(r.info.ID)
+	}
+	screen.Image = &image
 	return nil
 }
 

@@ -117,3 +117,129 @@ export const shader = {
   passes: [{ glsl, sprites: DROPS * PARTS }],
 };
 `;
+
+export const BOARD_SCRIPT_SENSES_EXAMPLE = `// Helpers over raw browser:* input. import { onMotion, onAudio } from "./senses.js";
+
+const DEG = Math.PI / 180;
+const vec = (v) => ({ x: v?.x ?? 0, y: v?.y ?? 0, z: v?.z ?? 0 });
+const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+
+// Device axes to screen axes: x right, y up, z out of the screen, however it is turned.
+export function toScreen({ x, y, z }, angle) {
+  const c = Math.round(Math.cos(angle * DEG));
+  const s = Math.round(Math.sin(angle * DEG));
+  return { x: x * c - y * s, y: x * s + y * c, z };
+}
+
+// Calls handler once a frame with the samples since the last one: acceleration and
+// gravity in m/s², rotationRate in rad/s, all in screen axes.
+export function onMotion(ctx, handler) {
+  let samples = [];
+  let up = { x: 0, y: 0, z: 0 };
+  const stops = [
+    ctx.on("browser:devicemotion", ({ data }) => {
+      const total = vec(data.accelerationIncludingGravity);
+      let acceleration = data.acceleration && vec(data.acceleration);
+      if (acceleration) up = sub(total, acceleration);
+      else {
+        up = { x: up.x + (total.x - up.x) * 0.1, y: up.y + (total.y - up.y) * 0.1, z: up.z + (total.z - up.z) * 0.1 };
+        acceleration = sub(total, up);
+      }
+      const rate = data.rotationRate ?? {};
+      const angle = ctx.env.angle;
+      samples.push({
+        t: data.t,
+        acceleration: toScreen(acceleration, angle),
+        gravity: toScreen({ x: -up.x, y: -up.y, z: -up.z }, angle),
+        rotationRate: toScreen({ x: (rate.beta ?? 0) * DEG, y: (rate.gamma ?? 0) * DEG, z: (rate.alpha ?? 0) * DEG }, angle),
+      });
+    }),
+    ctx.onFrame(() => {
+      if (!samples.length) return;
+      const batch = samples;
+      samples = [];
+      handler(batch);
+    }),
+  ];
+  return () => stops.forEach((stop) => stop());
+}
+
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let size = 2; size <= n; size <<= 1) {
+    const step = (-2 * Math.PI) / size;
+    for (let start = 0; start < n; start += size)
+      for (let k = 0; k < size / 2; k++) {
+        const cos = Math.cos(step * k), sin = Math.sin(step * k);
+        const a = start + k, b = a + size / 2;
+        const tr = re[b] * cos - im[b] * sin, ti = re[b] * sin + im[b] * cos;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+      }
+  }
+}
+
+// Calls handler for each microphone chunk with level (0–1), pitch in Hz or null,
+// onset (a sound started) and spectrum: 32 log-spaced bands from 50 Hz to 12 kHz, 0–1.
+export function onAudio(ctx, handler) {
+  let smooth = 0;
+  let onsetAt = -Infinity;
+  return ctx.on("browser:audio", ({ data: { samples, sampleRate, t } }) => {
+    let sum = 0;
+    for (const sample of samples) sum += sample * sample;
+    const level = Math.min(1, Math.max(0, (20 * Math.log10(Math.sqrt(sum / samples.length) || 1e-6) + 60) / 60));
+    const onset = level > 0.3 && level - smooth > 0.15 && t - onsetAt > 100;
+    if (onset) onsetAt = t;
+    smooth += (level - smooth) * 0.2;
+    const re = new Float64Array(1024), im = new Float64Array(1024);
+    re.set(samples.subarray(0, 1024));
+    fft(re, im);
+    const bin = (hz) => Math.min(511, Math.round((hz / sampleRate) * 1024));
+    const spectrum = Array.from({ length: 32 }, (_, i) => {
+      const from = bin(50 * 240 ** (i / 32)), to = Math.max(from + 1, bin(50 * 240 ** ((i + 1) / 32)));
+      let power = 0;
+      for (let k = from; k < to; k++) power += re[k] * re[k] + im[k] * im[k];
+      return Math.min(1, Math.max(0, (10 * Math.log10(power / (to - from) || 1e-12) + 40) / 70));
+    });
+    handler({ level, pitch: level > 0.2 ? pitchOf(samples, sampleRate) : null, onset, spectrum });
+  });
+}
+
+function pitchOf(samples, rate) {
+  const min = Math.floor(rate / 1000), max = Math.min(samples.length >> 1, Math.ceil(rate / 60));
+  let energy = 0, best = 0, lag = 0;
+  for (let i = 0; i < max; i++) energy += samples[i] * samples[i];
+  for (let offset = min; offset < max; offset++) {
+    let sum = 0;
+    for (let i = 0; i < max; i++) sum += samples[i] * samples[i + offset];
+    if (sum > best) { best = sum; lag = offset; }
+  }
+  return energy && lag && best / energy > 0.5 ? Math.round(rate / lag) : null;
+}
+`;
+
+export const BOARD_SCRIPT_TILT_EXAMPLE = `import { onMotion } from "./senses.js";
+
+export default function (ctx) {
+  ctx.state.ball ??= { x: 0.5, y: 0.5 };
+  onMotion(ctx, (samples) => {
+    const { gravity } = samples.at(-1);
+    const ball = ctx.state.ball;
+    ball.x = Math.min(1, Math.max(0, ball.x + gravity.x * 0.0015 * samples.length));
+    ball.y = Math.min(1, Math.max(0, ball.y - gravity.y * 0.0015 * samples.length));
+    ctx.invalidate();
+  });
+}
+
+export function draw(ctx, { width, height, state }) {
+  ctx.fillStyle = "#e67845";
+  ctx.beginPath();
+  ctx.arc(state.ball.x * width, state.ball.y * height, 16, 0, Math.PI * 2);
+  ctx.fill();
+}
+`;

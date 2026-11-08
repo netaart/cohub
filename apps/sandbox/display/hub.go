@@ -83,6 +83,11 @@ type Hub struct {
 	observed   map[string]observation
 	handovers  map[string]*handover
 	handedOver map[string]finishedHandover
+	store      *Store
+	recordings map[string]*recording
+	autoRecord map[string]*Recorder
+	pointerTo  map[int]func(string, AgentPointer)
+	pointerSeq uint64
 }
 
 type scriptedInput struct {
@@ -111,7 +116,19 @@ func NewHub(dial Dialer, logger *slog.Logger) *Hub {
 		observed:   map[string]observation{},
 		handovers:  map[string]*handover{},
 		handedOver: map[string]finishedHandover{},
+		recordings: map[string]*recording{},
+		autoRecord: map[string]*Recorder{},
+		pointerTo:  map[int]func(string, AgentPointer){},
 	}
+}
+
+func (h *Hub) SetStore(store *Store) {
+	if store != nil {
+		store.recover()
+	}
+	h.mu.Lock()
+	h.store = store
+	h.publishUnlock()
 }
 
 func (h *Hub) Run(ctx context.Context) {
@@ -292,11 +309,27 @@ func (h *Hub) publishUnlock() {
 			handover := current.info
 			info.Handover = &handover
 		}
+		info.Record = h.store != nil && info.Stream
+		info.Recording = h.recordingLocked(info.ID)
 		snapshot = append(snapshot, info)
 	}
 	if slices.EqualFunc(h.snapshot, snapshot, Info.equal) {
 		h.mu.Unlock()
 		return
+	}
+	var told []recordingParams
+	for _, info := range snapshot {
+		was := slices.IndexFunc(h.snapshot, func(old Info) bool { return old.ID == info.ID })
+		if was < 0 && info.Recording != nil || was >= 0 && !h.snapshot[was].Recording.equal(info.Recording) {
+			told = append(told, recordingParams{Display: info.ID, Recording: info.Recording})
+		}
+	}
+	if conn := h.conn; conn != nil && len(told) > 0 {
+		defer func() {
+			for _, params := range told {
+				_ = conn.notify("recording", params)
+			}
+		}()
 	}
 	h.snapshot = snapshot
 	listeners := make([]func([]Info), 0, len(h.listeners))
@@ -368,6 +401,12 @@ func (h *Hub) handleMessage(conn *providerConn, message wireMessage) {
 		h.hold(message.Display, message.Held)
 	case "interrupt":
 		h.Stop(message.Display)
+	case "record":
+		// A person at the machine said no: recording agents' plans stops too.
+		if !message.Record {
+			h.StopRecording(message.Display, true)
+			h.StopRecording(message.Display, false)
+		}
 	case "reply":
 		conn.resolve(message)
 	case "ended":
@@ -421,6 +460,14 @@ func (h *Hub) capture(ctx context.Context, params CaptureParams) (CaptureResult,
 	if err := h.requireAbility(params.Display, func(info Info) bool { return info.Capture }, "capture"); err != nil {
 		return CaptureResult{}, err
 	}
+	if params.Window != "" {
+		info, _ := h.Display(params.Display)
+		window, err := h.window(ctx, info, params.Window)
+		if err != nil {
+			return CaptureResult{}, err
+		}
+		params.Window, params.Region = "", window.region()
+	}
 	conn, err := h.currentConn()
 	if err != nil {
 		return CaptureResult{}, err
@@ -442,21 +489,36 @@ func (h *Hub) Tree(ctx context.Context, params TreeParams) (Tree, error) {
 	if err := h.requireAbility(params.Display, func(info Info) bool { return info.Tree }, "tree"); err != nil {
 		return Tree{}, err
 	}
+	var window *Window
+	if params.Window != "" {
+		info, _ := h.Display(params.Display)
+		found, err := h.window(ctx, info, params.Window)
+		if err != nil {
+			return Tree{}, err
+		}
+		window = &found
+	}
 	conn, err := h.currentConn()
 	if err != nil {
 		return Tree{}, err
 	}
-	limit := params.MaxElements
-	if params.Compact {
-		params.MaxElements = MaxTreeElements
+	limit, read := params.MaxElements, params.MaxElements
+	if params.Compact || window != nil {
+		read = MaxTreeElements
 	}
 	var tree Tree
-	if err := conn.call(ctx, "tree", TreeParams{Display: params.Display, MaxElements: params.MaxElements}, &tree, callTimeout); err != nil {
+	if err := conn.call(ctx, "tree", TreeParams{Display: params.Display, MaxElements: read}, &tree, callTimeout); err != nil {
 		return Tree{}, err
 	}
-	tree = tree.sanitize(params.MaxElements)
+	tree = tree.sanitize(read)
+	if window != nil {
+		tree = window.tree(tree)
+	}
 	if params.Compact {
-		tree = tree.compact(limit)
+		return tree.compact(limit), nil
+	}
+	if len(tree.Elements) > limit {
+		tree.Elements, tree.Truncated = tree.Elements[:limit], true
 	}
 	return tree, nil
 }
@@ -619,16 +681,18 @@ type stream struct {
 }
 
 type Subscriber struct {
-	hub     *Hub
-	stream  *stream
-	viewer  Viewer
-	samples chan Sample
-	done    chan struct{}
-	err     error
-	needKey bool
-	bitrate int
-	fps     int
-	closed  atomic.Bool
+	hub       *Hub
+	stream    *stream
+	viewer    Viewer
+	samples   chan Sample
+	done      chan struct{}
+	err       error
+	needKey   bool
+	bitrate   int
+	fps       int
+	closed    atomic.Bool
+	passive   bool
+	keyWanted time.Time
 }
 
 func (s *stream) viewersLocked() []Viewer {
@@ -663,6 +727,10 @@ func (s *Subscriber) Err() error {
 func (s *Subscriber) Display() string { return s.stream.display }
 
 func (h *Hub) Subscribe(ctx context.Context, display string, viewer Viewer) (*Subscriber, error) {
+	return h.subscribe(ctx, display, viewer, false)
+}
+
+func (h *Hub) subscribe(ctx context.Context, display string, viewer Viewer, passive bool) (*Subscriber, error) {
 	h.mu.Lock()
 	info, ok := h.displayLocked(display)
 	switch {
@@ -680,6 +748,9 @@ func (h *Hub) Subscribe(ctx context.Context, display string, viewer Viewer) (*Su
 	if current == nil {
 		h.nextStream++
 		current = &stream{id: h.nextStream, display: display, conn: h.conn, subs: map[*Subscriber]struct{}{}, ready: make(chan struct{}), bitrate: DefaultBitrate, fps: DefaultFPS}
+		if passive {
+			current.bitrate, current.fps = recordBitrate, recordFPS
+		}
 		h.streams[display] = current
 		h.byID[current.id] = current
 		go h.start(current)
@@ -688,8 +759,13 @@ func (h *Hub) Subscribe(ctx context.Context, display string, viewer Viewer) (*Su
 		current.lingerTimer.Stop()
 		current.lingerTimer = nil
 	}
-	sub := &Subscriber{hub: h, stream: current, viewer: viewer, samples: make(chan Sample, subscriberBuffer), done: make(chan struct{}), needKey: true}
+	buffer := subscriberBuffer
+	if passive {
+		buffer = recordBuffer
+	}
+	sub := &Subscriber{hub: h, stream: current, viewer: viewer, samples: make(chan Sample, buffer), done: make(chan struct{}), needKey: true, passive: passive}
 	current.subs[sub] = struct{}{}
+	h.scheduleUpdateLocked(current)
 	h.publishUnlock()
 
 	select {
@@ -812,7 +888,17 @@ func (s *Subscriber) Resync() {
 }
 
 func (current *stream) targetsLocked() (bitrate, fps int) {
+	watched := false
 	for sub := range current.subs {
+		watched = watched || !sub.passive
+	}
+	if !watched {
+		return recordBitrate, recordFPS
+	}
+	for sub := range current.subs {
+		if sub.passive {
+			continue
+		}
 		if sub.bitrate > 0 && (bitrate == 0 || sub.bitrate < bitrate) {
 			bitrate = sub.bitrate
 		}
@@ -890,15 +976,18 @@ func (h *Hub) deliver(id uint32, sample Sample) {
 	starved, waiting := false, false
 	for sub := range current.subs {
 		if sub.needKey && !sample.Key {
-			waiting = true
+			waiting = waiting || !sub.passive || time.Since(sub.keyWanted) >= passiveKeyPatience
 			continue
 		}
 		select {
 		case sub.samples <- sample:
 			sub.needKey = false
 		default:
+			if !sub.needKey {
+				sub.keyWanted = time.Now()
+			}
 			sub.needKey = true
-			starved = true
+			starved = starved || !sub.passive
 		}
 	}
 	// A requested key frame may have been dropped; keep asking while anyone waits.

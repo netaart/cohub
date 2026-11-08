@@ -10,8 +10,25 @@ import { createBoardScriptObservers, type BoardScriptWorldGesture } from "../mod
 import { isBoardRootScript } from "../model/script-index.js";
 import { BOARD_SCRIPT_EVENT_QUEUE, boardScriptEmit } from "../model/script-events.js";
 import { composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
+import {
+  BOARD_SCRIPT_EXPORT_ENV,
+  BOARD_SCRIPT_INPUT_LOG_BYTES,
+  type BoardScriptInputLog,
+  boardScriptInputBytes,
+  boardScriptSenseOf,
+  sameBoardScriptEnv,
+} from "../model/script-senses.js";
 import { type BoardShaderOwner, boardShaderOwners } from "../render/shader/layers.js";
-import type { BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot } from "../model/script.js";
+import {
+  BOARD_SCRIPT_SENSES,
+  type BoardScriptBrowserEvent,
+  type BoardScriptBrowserEvents,
+  type BoardScriptEnv,
+  type BoardScriptEvent,
+  type BoardScriptOutput,
+  type BoardScriptSense,
+  type BoardScriptSnapshot,
+} from "../model/script.js";
 import type { BoardScriptHostCallbacks, BoardScriptRuntimeHost } from "../render/script-host.js";
 import { type BoardScriptTimer, createBoardScriptCommits } from "./script-commits.js";
 import {
@@ -26,6 +43,8 @@ export type BoardScriptControllerOptions = {
   editor: BoardEditor;
   createHost(callbacks: BoardScriptHostCallbacks): BoardScriptRuntimeHost;
   capabilities?: Record<string, (id: string, input: unknown) => Promise<unknown>>;
+  device?: () => BoardScriptDevice;
+  onSensesChange?(): void;
   leader?: () => boolean;
   now?: () => number;
   setTimer?: BoardScriptTimer;
@@ -35,6 +54,12 @@ export type BoardScriptControllerOptions = {
 };
 
 export type BoardScriptPointerResult = false | "capture" | "tap" | "click";
+
+export type BoardScriptDevice = Omit<BoardScriptEnv, "mode">;
+
+type Key = Pick<BoardScriptEvent, "type" | "key" | "shiftKey" | "altKey" | "ctrlKey" | "metaKey">;
+
+const playKey = (event: Key) => !event.altKey && !event.ctrlKey && !event.metaKey && event.key !== "Tab" && event.key !== "Escape";
 
 const ACTIVATION_MS = 5_000;
 const MOTION_MS = 1_000;
@@ -67,6 +92,10 @@ export function createBoardScriptController(options: BoardScriptControllerOption
   const emitFailures = new Map<string, string>();
   const moved = new Map<string, number>();
   const listeners = new Set<() => void>();
+  const sensing = new Map<BoardScriptSense, Set<string>>(BOARD_SCRIPT_SENSES.map((sense) => [sense, new Set<string>()]));
+  let recording: { from: number; bytes: number; log: BoardScriptInputLog; onFull?: () => void } | null = null;
+  const keyListeners = new Set<string>();
+  let env: BoardScriptEnv = BOARD_SCRIPT_EXPORT_ENV;
   let version = 0;
   let composed = { version: -1, document: null as BoardDocument | null, zoom: 0, pan: "", playhead: "", moving: false, gesture: false };
   let hover: BoardScriptPointerTarget | null = null;
@@ -113,6 +142,27 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     }
   }
   const activated = (owner: string) => now() - (activations.get(owner) ?? -Infinity) < ACTIVATION_MS;
+
+  function readEnv(): BoardScriptEnv {
+    const device = options.device?.() ?? BOARD_SCRIPT_EXPORT_ENV;
+    const next = { ...device, mode: editor.readonly ? "view" : editor.tool === "play" ? "play" : "edit" } as const;
+    if (!sameBoardScriptEnv(env, next)) env = next;
+    return env;
+  }
+
+  function track(id: string, listens: readonly string[] | null) {
+    let changed = false;
+    const senses = new Set(listens?.map(boardScriptSenseOf));
+    for (const [sense, ids] of sensing) {
+      const before = ids.size;
+      if (senses.has(sense)) ids.add(id);
+      else ids.delete(id);
+      changed ||= ids.size !== before;
+    }
+    if (listens?.includes("keydown") || listens?.includes("keyup")) keyListeners.add(id);
+    else keyListeners.delete(id);
+    if (changed) options.onSensesChange?.();
+  }
   const notify = () => {
     for (const listener of listeners) listener();
   };
@@ -131,6 +181,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
   function createHost(): BoardScriptRuntimeHost {
     return options.createHost({
       onSchedule: options.requestScriptFrame,
+      env: () => env,
       onFrame: () => {
         options.requestFrame();
         notify();
@@ -171,12 +222,14 @@ export function createBoardScriptController(options: BoardScriptControllerOption
           outputs.set(id, output);
           if (Object.keys(output.hits).length) interactive.add(id); else interactive.delete(id);
           if (Object.keys(output.screen).length) screens.add(id); else screens.delete(id);
+          track(id, output.listens);
         } else {
           cancelPointers(id);
           outputs.delete(id);
           interactive.delete(id);
           screens.delete(id);
           activations.delete(id);
+          track(id, null);
         }
         observers.update(id, output);
         syncTransformSubscription();
@@ -198,6 +251,11 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     outputs.clear();
     activations.clear();
     emitFailures.clear();
+    keyListeners.clear();
+    if ([...sensing.values()].some((ids) => ids.size)) {
+      for (const ids of sensing.values()) ids.clear();
+      options.onSensesChange?.();
+    }
     presses.clear();
     gesture = null;
     router.clear();
@@ -210,6 +268,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
   function update() {
     const wanted = editor.hasScripts;
     if (wanted && !host) {
+      readEnv();
       host = createHost();
       time = 0;
       lastTick = now();
@@ -264,6 +323,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
 
   function sync(view: { camera: BoardViewport; surface: { width: number; height: number }; safeRect?: Rect; visibleIds: ReadonlySet<string> | null }) {
     if (!host) return;
+    readEnv();
     const current = now();
     if (!paused) time += Math.min(250, Math.max(0, current - lastTick));
     lastTick = current;
@@ -359,6 +419,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       if (next) cancelPointers();
       paused = next;
       lastTick = now();
+      options.onSensesChange?.();
     },
     update,
     animate(next: ReadonlyMap<string, BoardScript>) {
@@ -373,10 +434,56 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     },
     sync,
     pointer,
-    key(event: Pick<BoardScriptEvent, "type" | "key" | "shiftKey" | "altKey" | "ctrlKey" | "metaKey">): boolean {
-      if (paused || !hover || (!editor.readonly && focus !== hover.owner) || !outputs.get(hover.owner)?.listens.includes(event.type)) return false;
-      send(hover.owner, { ...event, target: hover.target });
-      return true;
+    key(event: Key): boolean {
+      if (paused) return false;
+      if (hover && (editor.readonly || focus === hover.owner) && outputs.get(hover.owner)?.listens.includes(event.type)) {
+        send(hover.owner, { ...event, target: hover.target });
+        return true;
+      }
+      if (editor.tool !== "play" || !playKey(event)) return false;
+      let taken = false;
+      for (const id of keyListeners)
+        if (outputs.get(id)?.listens.includes(event.type)) {
+          send(id, { ...event });
+          taken = true;
+        }
+      return taken;
+    },
+    get senses(): BoardScriptSense[] {
+      return paused ? [] : BOARD_SCRIPT_SENSES.filter((sense) => (sensing.get(sense)?.size ?? 0) > 0);
+    },
+    input<Type extends BoardScriptBrowserEvent>(type: Type, data: BoardScriptBrowserEvents[Type]) {
+      const sense = boardScriptSenseOf(type);
+      if (paused || !sense) return;
+      const targets = [...(sensing.get(sense) ?? [])].filter((id) => outputs.get(id)?.listens.includes(type));
+      if (type !== "browser:video") {
+        if (recording) {
+          recording.bytes += boardScriptInputBytes(data);
+          if (recording.bytes > BOARD_SCRIPT_INPUT_LOG_BYTES) {
+            const full = recording;
+            recording = null;
+            full.onFull?.();
+          } else recording.log.inputs.push({ t: now() - recording.from, type, data });
+        }
+        for (const id of targets) host?.event(id, { type, data });
+        return;
+      }
+      const { frame } = data as BoardScriptBrowserEvents["browser:video"];
+      if (!targets.length) return frame.close();
+      void Promise.all(targets.slice(1).map(() => createImageBitmap(frame))).then((copies) => {
+        for (const [index, id] of targets.entries())
+          host?.event(id, { type, data: { ...data, frame: index ? copies[index - 1] : frame } });
+      }, () => frame.close());
+    },
+    record(onFull?: () => void): { stop(): BoardScriptInputLog } {
+      const current = { from: now(), bytes: 0, log: { version: 1, inputs: [] } as BoardScriptInputLog, onFull };
+      recording = current;
+      return {
+        stop() {
+          if (recording === current) recording = null;
+          return current.log;
+        },
+      };
     },
     cursor(): string | null {
       if (!hover) return null;

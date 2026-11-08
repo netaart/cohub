@@ -1,4 +1,10 @@
-export const SIDE_PANEL_TABS = ["session", "files", "media", "apps"] as const;
+export const SIDE_PANEL_TABS = [
+	"session",
+	"files",
+	"media",
+	"apps",
+	"scheduled",
+] as const;
 export type SidePanelTab = (typeof SIDE_PANEL_TABS)[number];
 
 const STORAGE_KEY = "cohub:right-sidebar-panel:v2";

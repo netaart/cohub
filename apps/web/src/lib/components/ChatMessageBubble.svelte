@@ -592,6 +592,7 @@ function handleCopy() {
         onMarkdownSegmentRendered={handleMarkdownSegmentRendered}
         onMarkdownSegmentStart={handleMarkdownSegmentStart}
         onLoadToolCalls={message.toolCallsLoader ?? undefined}
+        turnId={message.meta?.turnId ?? message.meta?.turn?.id ?? null}
         {onOpenFile}
         {onOpenUrl}
       />

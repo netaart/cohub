@@ -7,6 +7,7 @@ import {
   boardAssetKeySource,
   boardTextureEdge,
   normalizeBoardDocument,
+  parseBoardScriptInputs,
   selectBoardExportAssets,
 } from "@neta-art/cohub/board";
 import { createBoardExportScene, prepareBoardExport, renderBoardExport } from "@neta-art/cohub/board/export";
@@ -117,6 +118,7 @@ const api = {
         return response.text();
       }, {
         ...(init.snapshots ? { snapshots: init.snapshots } : {}),
+        ...(init.inputs ? { inputs: parseBoardScriptInputs(init.inputs) } : {}),
         ...(init.animation && boardAnimatesScriptParams(board) ? { documentAt: (time: number) => sampler.at(time).document } : {}),
       }),
       layers,

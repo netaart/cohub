@@ -11,6 +11,7 @@ type TreeParams struct {
 	Display     string `json:"display"`
 	MaxElements int    `json:"maxElements,omitempty"`
 	Compact     bool   `json:"compact,omitempty"`
+	Window      string `json:"window,omitempty"`
 }
 
 type Tree struct {
@@ -38,6 +39,9 @@ func (p *TreeParams) normalize() error {
 	}
 	if p.MaxElements < 1 || p.MaxElements > MaxTreeElements {
 		return errorf(CodeInvalid, "maxElements must be within 1..%d", MaxTreeElements)
+	}
+	if p.Window != "" && !windowIDPattern.MatchString(p.Window) {
+		return errorf(CodeInvalid, "window must be a window id")
 	}
 	return nil
 }

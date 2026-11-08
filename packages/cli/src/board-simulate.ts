@@ -1,5 +1,5 @@
-import { diffMergePatch } from "@neta-art/cohub/board";
-import type { BoardDocument, BoardExportRegion, BoardThemeId } from "@neta-art/cohub/board";
+import { boardScriptSenseOf, diffMergePatch, parseBoardScriptInputs } from "@neta-art/cohub/board";
+import type { BoardDocument, BoardExportRegion, BoardScriptBrowserEvent, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
 import type { BoardScriptHarness, BoardScriptHarnessPointer, BoardScriptHarnessPress } from "@neta-art/cohub/board/testing";
 import { loadBoardDocument } from "./board-document.js";
@@ -37,7 +37,9 @@ export type BoardSimulationStep =
   | { move: Point[]; input: BoardScriptHarnessPointer }
   | { pointer: "down" | "move" | "up"; at: Point; input: BoardScriptHarnessPointer }
   | { key: string }
-  | { select: string[] };
+  | { select: string[] }
+  | { input: BoardScriptBrowserEvent; data: unknown }
+  | { inputs: string };
 
 function point(value: unknown, name: string): Point {
   if (!Array.isArray(value) || value.length !== 2 || !value.every((n) => typeof n === "number" && Number.isFinite(n)))
@@ -101,12 +103,21 @@ function parseStep(entry: unknown, index: number): BoardSimulationStep {
     if (!Array.isArray(step.select) || !step.select.every((id) => typeof id === "string")) throw new Error(`${name}.select must list item ids`);
     return { select: step.select as string[] };
   }
-  throw new Error(`${name} must be one of wait, tool, tap, drag, move, pointer, key or select`);
+  if ("input" in step) {
+    if (typeof step.input !== "string" || !boardScriptSenseOf(step.input)) throw new Error(`${name}.input must be a browser event, such as browser:devicemotion`);
+    if (!step.data || typeof step.data !== "object" || Array.isArray(step.data)) throw new Error(`${name}.data must be an object`);
+    return { input: step.input as BoardScriptBrowserEvent, data: step.data };
+  }
+  if ("inputs" in step) {
+    if (typeof step.inputs !== "string" || !step.inputs) throw new Error(`${name}.inputs must be a Space file path`);
+    return { inputs: step.inputs };
+  }
+  throw new Error(`${name} must be one of wait, tool, tap, drag, move, pointer, key, select, input or inputs`);
 }
 
 export type BoardSimulationPress = BoardScriptHarnessPress & { step: number };
 
-async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationStep[], progress: { step: number }, presses: BoardSimulationPress[]) {
+async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationStep[], progress: { step: number }, presses: BoardSimulationPress[], readInputs: (path: string) => Promise<string>) {
   for (const [index, step] of steps.entries()) {
     progress.step = index;
     let press: BoardScriptHarnessPress | null = null;
@@ -119,7 +130,9 @@ async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationS
     else if ("key" in step) {
       await harness.key("keydown", step.key);
       await harness.key("keyup", step.key);
-    } else await harness.select(step.select);
+    } else if ("input" in step) await harness.input(step.input, step.data as never);
+    else if ("inputs" in step) await harness.replay(parseBoardScriptInputs(await readInputs(step.inputs)));
+    else await harness.select(step.select);
     if (press) presses.push({ step: index, ...press });
   }
 }
@@ -229,7 +242,7 @@ export async function runBoardSimulation(options: {
       };
     }
     progress.phase = "running the steps";
-    await run(current, options.steps, progress, presses);
+    await run(current, options.steps, progress, presses, async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes));
     progress.phase = "settling the scripts";
     await current.flush();
     const { shaders, errors } = shadersOf(current);

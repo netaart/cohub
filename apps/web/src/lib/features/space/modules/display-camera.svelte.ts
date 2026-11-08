@@ -13,6 +13,7 @@ import {
 type CameraOptions = {
 	surface: () => HTMLElement | null;
 	video: () => HTMLVideoElement | null;
+	stage: () => HTMLElement | null;
 	covered: () => number;
 };
 
@@ -65,13 +66,13 @@ export function createDisplayCamera(options: CameraOptions) {
 
 	function render() {
 		frame = 0;
-		const video = options.video();
-		if (!video) return;
-		video.style.transition = smooth ? "" : "none";
+		const stage = options.stage();
+		if (!stage) return;
+		stage.style.transition = smooth ? "" : "none";
 		smooth = false;
 		const still =
 			isFit(view) && Math.abs(view.x) < 0.5 && Math.abs(view.y) < 0.5;
-		video.style.transform = still
+		stage.style.transform = still
 			? ""
 			: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`;
 	}

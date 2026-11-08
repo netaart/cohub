@@ -11,9 +11,12 @@ import {
   DISPLAY_DIMENSION_MAX,
   type DisplayCapture,
   type DisplayElement,
+  type DisplayPointerKind,
+  type DisplayRecorder,
   type DisplayTree,
   displayInputBatchSchema,
   displayInputEventSchema,
+  displayWindowIdSchema,
 } from "./schema.js";
 
 export const DISPLAY_ACT_MAX_STEPS = 32;
@@ -35,6 +38,8 @@ export const DISPLAY_URL_BLOCKED_SCHEMES = ["file", "content", "data", "javascri
 
 export const DISPLAY_EFFECTS = ["none", "changed", "navigated"] as const;
 export type DisplayEffect = (typeof DISPLAY_EFFECTS)[number];
+export const DISPLAY_STOP_NEXTS = ["look", "lookImage", "list"] as const;
+export type DisplayStopNext = (typeof DISPLAY_STOP_NEXTS)[number];
 export const DISPLAY_ACT_STOPS = ["not_found", "ambiguous", "moved", "timeout", "dialog", "app_changed", "failed", "preempted", "interrupted"] as const;
 export type DisplayActStop = (typeof DISPLAY_ACT_STOPS)[number];
 export const DISPLAY_HANDOVER_STATES = ["waiting", "returned", "stopped", "expired", "gone"] as const;
@@ -134,6 +139,7 @@ export const displayActParamsSchema = z.object({
   steps: z.array(displayActStepSchema).max(DISPLAY_ACT_MAX_STEPS),
   observe: displayObserveSchema.optional(),
   actor: displayActorSchema.optional(),
+  window: displayWindowIdSchema.optional(),
 });
 export type DisplayActParams = z.infer<typeof displayActParamsSchema>;
 
@@ -149,7 +155,14 @@ export type DisplayHandoverResult = { state: DisplayHandoverState; held?: boolea
 
 export type DisplayStepTarget = Pick<DisplayElement, "role" | "name" | "bounds">;
 
-export type DisplayActStepResult = { effect: DisplayEffect; target?: DisplayStepTarget; findMs: number; actMs: number; waitedMs: number };
+export type DisplayActStepResult = {
+  effect: DisplayEffect;
+  target?: DisplayStepTarget;
+  readBack?: true;
+  findMs: number;
+  actMs: number;
+  waitedMs: number;
+};
 
 export type DisplayScreen = {
   app?: string;
@@ -159,15 +172,67 @@ export type DisplayScreen = {
   image?: DisplayCapture;
 };
 
+export type DisplayActStopped = {
+  step: number;
+  reason: DisplayActStop;
+  message: string;
+  candidates?: DisplayElement[];
+  hint?: string;
+  next?: DisplayStopNext;
+};
+
 export type DisplayActResult = {
   steps: DisplayActStepResult[];
-  stopped?: {
-    step: number;
-    reason: DisplayActStop;
-    message: string;
-    candidates?: DisplayElement[];
-  };
+  stopped?: DisplayActStopped;
   screen: DisplayScreen;
+  window?: { id: string; bounds: [number, number, number, number] };
+};
+
+export const DISPLAY_CACHE_DIR = ".cache/cohub/displays";
+export const DISPLAY_TURNS_DIR = `${DISPLAY_CACHE_DIR}/turns`;
+export const DISPLAY_RECORDINGS_DIR = `${DISPLAY_CACHE_DIR}/recordings`;
+
+export const displayTurnLogPath = (turnId: string) => `${DISPLAY_TURNS_DIR}/${turnId}.ndjson`;
+export const displayRecordingDir = (id: string) => `${DISPLAY_RECORDINGS_DIR}/${id}`;
+
+export type DisplayLoggedStep = {
+  type: "element" | "input" | "launch" | "open" | "wait";
+  label?: string;
+  at: number;
+  point?: { x: number; y: number; kind: DisplayPointerKind };
+} & DisplayActStepResult;
+
+export type DisplayPlanLog = {
+  plan: string;
+  display: string;
+  sessionId?: string;
+  turnId: string;
+  at: number;
+  endedAt: number;
+  width: number;
+  height: number;
+  steps: DisplayLoggedStep[];
+  stopped?: Omit<DisplayActStopped, "candidates">;
+  image?: string;
+  recording?: string;
+};
+
+export type DisplayRecordingMeta = {
+  id: string;
+  display: string;
+  name?: string;
+  platform?: string;
+  width: number;
+  height: number;
+  since: number;
+  endedAt?: number;
+  by?: DisplayRecorder;
+  auto?: boolean;
+  files: { name: string; at: number; width: number; height: number }[];
+  pauses: [number, number | null][];
+  turns: string[];
+  bytes: number;
+  stop?: "stopped" | "limit" | "disk" | "display_ended" | "failed";
 };
 
 export type DisplayApp = { id: string; name: string };

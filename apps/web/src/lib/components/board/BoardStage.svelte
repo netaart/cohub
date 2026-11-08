@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { BoardPlaybackSnapshot } from "@cohub/protocol";
+import { HOST_HAPTICS, type HostHaptic } from "@cohub/protocol/host-bridge";
 import type {
 	BoardFileSnapshotFacts,
 	BoardScene,
@@ -25,6 +26,7 @@ import {
 import {
 	type BoardAssetManager,
 	type BoardBackdropStatus,
+	type BoardConsentSense,
 	type BoardContextMenuRequest,
 	type BoardFeedback,
 	type BoardItemView,
@@ -52,6 +54,10 @@ import type { BoardStageExportBridge } from "$lib/board/board-image-export";
 import { createBoardLiveSessions } from "$lib/board/board-live-sessions.svelte";
 import { createBoardLiveTasks } from "$lib/board/board-live-tasks";
 import { opensInPlace } from "$lib/board/board-media-playback";
+import {
+	boardFullscreen,
+	cancelBoardFullscreen,
+} from "$lib/board/board-present";
 import { boardSessionDropSnapshot } from "$lib/board/board-session";
 import {
 	type BoardThemeSnapshot,
@@ -98,6 +104,8 @@ const {
 	lod,
 	prefetch,
 	drawViews,
+	senseConsent,
+	fullscreenElement,
 }: {
 	editor: BoardEditor;
 	playback?: BoardPlaybackSnapshot | null;
@@ -127,6 +135,8 @@ const {
 	lod?: BoardLod;
 	prefetch?: number;
 	drawViews?: boolean;
+	senseConsent?: (sense: BoardConsentSense) => boolean;
+	fullscreenElement?: () => HTMLElement | null;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -315,6 +325,24 @@ const FEEDBACK: Record<BoardFeedback, Parameters<typeof haptic>[0]> = {
 	redo: "tick",
 };
 
+const scriptCapabilities = {
+	"navigator.vibrate": async (_id: string, pattern: unknown) =>
+		navigator.vibrate?.(pattern as VibratePattern) ?? false,
+	haptics: async (_id: string, input: unknown) => {
+		const kind = (input as { kind?: unknown } | null)?.kind;
+		if (!HOST_HAPTICS.includes(kind as HostHaptic))
+			throw new Error(`haptics takes { kind: ${HOST_HAPTICS.join(" | ")} }.`);
+		haptic(kind as HostHaptic);
+		return true;
+	},
+	fullscreen: async (_id: string, input: unknown) => {
+		const element = fullscreenElement?.() ?? host;
+		if (!element || !stage || (editable && editor.tool !== "play"))
+			return false;
+		return boardFullscreen(element, input, stage.whenGesture);
+	},
+};
+
 function handlesHit(item: BoardSceneItem, action: string): boolean {
 	return action === BOARD_PLAY_MEDIA && opensInPlace(item, assetSource);
 }
@@ -435,6 +463,9 @@ onMount(() => {
 		lod: () => lod,
 		prefetch,
 		drawViews,
+		scriptCapabilities,
+		senseConsent: (sense) => senseConsent?.(sense) ?? false,
+		locale: () => locale,
 	});
 	stage = mounted;
 	onStageReady?.(mounted);
@@ -498,6 +529,7 @@ onDestroy(() => {
 	cancelAnimationFrame(snapshotFrame);
 	liveTasks?.destroy();
 	liveSessions?.destroy();
+	cancelBoardFullscreen();
 	stage?.destroy();
 	stage = null;
 	onStageReady?.(null);

@@ -534,7 +534,7 @@ $effect(() => {
 						<h3>{m.runtime_displays({}, { locale })}</h3>
 						{#each displays as item (item.id)}
 							<div class="runtime-display">
-								<span class="runtime-display-name">{item.kind === "agent" ? m.runtime_display_agent({}, { locale }) : item.name || item.id}<span class="runtime-meta">{item.handover && !item.held ? m.runtime_display_needs_you({ reason: item.handover.reason }, { locale }) : item.held ? m.runtime_display_held({}, { locale }) : item.activity ? item.activity.label ? m.runtime_display_activity({ label: item.activity.label }, { locale }) : m.runtime_display_working({}, { locale }) : `${item.width}×${item.height}`}</span></span>
+								<span class="runtime-display-name">{item.kind === "agent" ? m.runtime_display_agent({}, { locale }) : item.name || item.id}{#if item.recording?.id}<span class="runtime-recording" title={m.runtime_display_recording({}, { locale })}><span class="sr-only">{m.runtime_display_recording({}, { locale })}</span></span>{/if}<span class="runtime-meta">{item.handover && !item.held ? m.runtime_display_needs_you({ reason: item.handover.reason }, { locale }) : item.held ? m.runtime_display_held({}, { locale }) : item.activity ? item.activity.label ? m.runtime_display_activity({ label: item.activity.label }, { locale }) : m.runtime_display_working({}, { locale }) : `${item.width}×${item.height}`}</span></span>
 								<DisplayViewers viewers={item.viewers} {people} />
 								{#if canView && floats && item.kind === "agent"}<button type="button" class="runtime-display-open" onclick={() => void floatDisplay(item.id)}>{m.runtime_display_float({}, { locale })}</button>{/if}
 								{#if canView && onOpenDisplay}<button type="button" class="runtime-display-open" onclick={() => openDisplay(item.id)}>{m.runtime_display_open({}, { locale })}</button>{/if}
@@ -720,4 +720,13 @@ $effect(() => {
 	.runtime-code input { height: 44px; }
 	.runtime-display-open { height: 36px; padding: 0 14px; }
 }
+	.runtime-recording {
+		display: inline-block;
+		width: 6px;
+		height: 6px;
+		margin-left: 6px;
+		border-radius: 999px;
+		background: var(--error-700);
+		vertical-align: middle;
+	}
 </style>

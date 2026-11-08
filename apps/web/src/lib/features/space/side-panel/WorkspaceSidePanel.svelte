@@ -1,4 +1,5 @@
 <script lang="ts">
+import type { InstalledApp, ResourceAppTarget } from "@cohub/protocol";
 import type { SpacePublicEndpoints } from "@cohub/protocol/ports";
 import { compactOnOverflow } from "$lib/actions/compact-on-overflow";
 import EntityIcon, {
@@ -10,14 +11,15 @@ import MobileRightDrawer from "$lib/components/MobileRightDrawer.svelte";
 import SpaceFileSidebar from "$lib/components/SpaceFileSidebar.svelte";
 import { createDeferredMount } from "$lib/deferred-mount.svelte";
 import { pointerDrag } from "$lib/drag/pointer-drag.svelte";
-import AppsSidebarPanel from "$lib/features/space/modules/AppsSidebarPanel.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { DURATION_PANEL } from "$lib/motion.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import type { SpaceFsNode } from "$lib/space-fs";
 import { uiState } from "$lib/stores/ui.svelte";
 import type { LocalUploadEntry } from "$lib/upload-entries";
+import AppsPanel from "./AppsPanel.svelte";
 import MediaPanel from "./MediaPanel.svelte";
+import ScheduledPanel from "./ScheduledPanel.svelte";
 import SessionOutputsPanel from "./SessionOutputsPanel.svelte";
 import {
 	readSidePanelTab,
@@ -31,6 +33,8 @@ type Props = {
 	sidePanel: WorkspaceSidePanelController;
 	hasSession: boolean;
 	canViewTasks: boolean;
+	canManageCronjobs: boolean;
+	activeSpaceResource: ResourceAppTarget | null;
 	nodes: SpaceFsNode[];
 	selectedPath: string;
 	loading: boolean;
@@ -75,7 +79,11 @@ type Props = {
 	onUploadPaneClose: () => void;
 	onUploadComplete: () => void | Promise<void>;
 	onOpenMarketplace: () => void;
-	onOpenInstalledApp: (app: import("@cohub/protocol").InstalledApp) => void;
+	onOpenInstalledApp: (app: InstalledApp) => void;
+	onOpenResource: (
+		target: ResourceAppTarget,
+		options: { mobile: boolean },
+	) => void;
 };
 
 let {
@@ -83,6 +91,8 @@ let {
 	sidePanel,
 	hasSession,
 	canViewTasks,
+	canManageCronjobs,
+	activeSpaceResource,
 	nodes,
 	selectedPath,
 	loading,
@@ -125,6 +135,7 @@ let {
 	onUploadComplete,
 	onOpenMarketplace,
 	onOpenInstalledApp,
+	onOpenResource,
 }: Props = $props();
 
 type TabDefinition = { id: SidePanelTab; label: string; icon: EntityIconName };
@@ -146,7 +157,16 @@ const tabs = $derived<TabDefinition[]>([
 				},
 			]
 		: []),
-	{ id: "apps", label: m.sidebar_apps({}, { locale }), icon: "apps" },
+	{ id: "apps", label: m.side_panel_tab_apps({}, { locale }), icon: "apps" },
+	...(sidePanel.cronjobs
+		? [
+				{
+					id: "scheduled" as const,
+					label: m.side_panel_tab_scheduled({}, { locale }),
+					icon: "scheduled" as const,
+				},
+			]
+		: []),
 ]);
 
 let preferredTab = $state<SidePanelTab>(readSidePanelTab());
@@ -158,6 +178,27 @@ function selectTab(tab: SidePanelTab) {
 	preferredTab = tab;
 	writeSidePanelTab(tab);
 }
+
+const activeAppId = $derived(
+	activeSpaceResource?.kind === "app" ? activeSpaceResource.id : null,
+);
+const activeCronjobId = $derived(
+	activeSpaceResource?.kind === "cronjob" ? activeSpaceResource.id : null,
+);
+
+let followedResource = "";
+$effect(() => {
+	const target = activeSpaceResource;
+	const key = target ? `${target.kind}:${target.id}` : "";
+	if (
+		key === followedResource ||
+		(target?.kind === "cronjob" && !sidePanel.cronjobs)
+	)
+		return;
+	followedResource = key;
+	if (target?.kind === "app") preferredTab = "apps";
+	else if (target?.kind === "cronjob") preferredTab = "scheduled";
+});
 
 async function revealPath(path: string, mobile: boolean) {
 	selectTab("files");
@@ -258,7 +299,25 @@ $effect(() => {
 			{onOpenTaskBrowser}
 		/>
 	{:else if activeTab === "apps"}
-		<AppsSidebarPanel {spaceId} {canWrite} {onOpenMarketplace} onOpenInstalled={onOpenInstalledApp} />
+		<AppsPanel
+			{spaceId}
+			feed={sidePanel.apps}
+			{activeAppId}
+			{canWrite}
+			draggable={draggable && !mobile}
+			touchDraggable={draggable}
+			onOpenApp={(id) => onOpenResource({ kind: "app", id }, { mobile })}
+			{onOpenMarketplace}
+			onOpenInstalled={onOpenInstalledApp}
+		/>
+	{:else if activeTab === "scheduled"}
+		<ScheduledPanel
+			feed={sidePanel.cronjobs}
+			{activeCronjobId}
+			canManage={canManageCronjobs}
+			onVisible={sidePanel.showCronjobs}
+			onOpenCronjob={(id) => onOpenResource({ kind: "cronjob", id }, { mobile })}
+		/>
 	{/if}
 	<div class="h-full min-h-0" hidden={activeTab !== "files"}>
 		<SpaceFileSidebar
