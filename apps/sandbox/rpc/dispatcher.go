@@ -185,7 +185,7 @@ func (d *Dispatcher) handle(ctx context.Context, request protocol.RPCRequest, ow
 		return accepted, d.handleProcessStart(request, accepted.OpID, ownerIdentity)
 	case "process.abort":
 		return accepted, d.complete(request, accepted.OpID, d.handleProcessAbort(request))
-	case "display.list", "display.capture", "display.input", "display.tree", "display.act", "display.apps", "display.interrupt", "display.handover", "display.handback", "display.start", "display.stop", "rtc.open", "rtc.close":
+	case "display.list", "display.capture", "display.input", "display.tree", "display.act", "display.apps", "display.interrupt", "display.handover", "display.handback", "display.start", "display.stop", "display.windows", "display.record.start", "display.record.stop", "rtc.open", "rtc.close":
 		return accepted, d.complete(request, accepted.OpID, d.handleDisplay(ctx, request, ownerIdentity))
 	default:
 		return accepted, d.failed(request, accepted.OpID, "UNSUPPORTED_METHOD", fmt.Sprintf("unsupported method: %s", request.Method))

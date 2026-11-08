@@ -250,6 +250,10 @@ internal class DisplayProvider(
                     display.handover(spaceId, id, ask?.let { HandoverAsk(it.string("reason").orEmpty(), it.string("sessionId"), it.string("turnId")) })
                     null
                 }
+                "recording" -> {
+                    display.recording(spaceId, id, (params["recording"] as? JsonObject)?.string("id") != null)
+                    null
+                }
                 "launch", "open" -> {
                     display.launch(spaceId, id, params.string("app"), params.string("url"))
                     JsonNull

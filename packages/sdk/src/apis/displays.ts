@@ -1,23 +1,36 @@
-import type {
-  DisplayActParams,
-  DisplayActResult,
-  DisplayApps,
-  DisplayCapture,
-  DisplayCaptureParams,
-  DisplayHandoverParams,
-  DisplayHandoverResult,
-  DisplayInputEvent,
-  DisplayList,
-  DisplaySession,
-  DisplayTree,
-  DisplayTreeParams,
-  DisplayVirtualStart,
-  RtcIceServers,
+import {
+  DISPLAY_ACTOR_ID_PATTERN,
+  DISPLAY_RECORDINGS_DIR,
+  type DisplayActor,
+  type DisplayActParams,
+  type DisplayActResult,
+  type DisplayApps,
+  type DisplayCapture,
+  type DisplayCaptureParams,
+  type DisplayHandoverParams,
+  type DisplayHandoverResult,
+  type DisplayInputEvent,
+  type DisplayList,
+  type DisplayPlanLog,
+  type DisplayRecording,
+  type DisplayRecordingMeta,
+  type DisplaySession,
+  type DisplayTree,
+  type DisplayTreeParams,
+  type DisplayVirtualStart,
+  type DisplayWindows,
+  displayRecordingDir,
+  displayTurnLogPath,
+  type RtcIceServers,
 } from "@cohub/protocol";
+import { SpaceFsError } from "@cohub/protocol/fs";
 import { type ConnectDisplayOptions, connectDisplay } from "../display-session.js";
 import { createLocalWorkspaces, type LocalWorkspace, type LocalWorkspaces } from "../local-workspace.js";
 import { IceServerCache } from "../rtc/index.js";
-import type { HttpTransport } from "../transport.js";
+import { HttpError, type HttpTransport } from "../transport.js";
+import type { SpaceFilesApi } from "./spaces.js";
+
+const READ_BATCH = 50;
 
 export class SpaceDisplaysApi {
   private readonly ice = new IceServerCache((signal) =>
@@ -28,6 +41,7 @@ export class SpaceDisplaysApi {
     private readonly transport: HttpTransport,
     readonly spaceId: string,
     private readonly workspaces: LocalWorkspaces = createLocalWorkspaces(),
+    private readonly files?: SpaceFilesApi,
   ) {}
 
   private serve<T>(mode: "read" | "write", local: (workspace: LocalWorkspace) => Promise<T>, remote: () => Promise<T>): Promise<T> {
@@ -64,6 +78,7 @@ export class SpaceDisplaysApi {
     const query = new URLSearchParams();
     if (params.maxElements) query.set("maxElements", String(params.maxElements));
     if (params.compact) query.set("compact", "true");
+    if (params.window) query.set("window", params.window);
     const search = query.size ? `?${query}` : "";
     return this.serve(
       "read",
@@ -77,6 +92,7 @@ export class SpaceDisplaysApi {
     if (params.format) query.set("format", params.format);
     if (params.quality) query.set("quality", String(params.quality));
     if (params.maxSize) query.set("maxSize", String(params.maxSize));
+    if (params.window) query.set("window", params.window);
     const search = query.size ? `?${query}` : "";
     return this.serve(
       "read",
@@ -140,6 +156,56 @@ export class SpaceDisplaysApi {
     );
   }
 
+  windows(displayId: string, options: { signal?: AbortSignal } = {}) {
+    return this.serve(
+      "read",
+      (workspace) => workspace.call("display.windows", { display: displayId }, options.signal),
+      () => this.transport.request<DisplayWindows>(this.path(displayId, "/windows"), { signal: options.signal }),
+    );
+  }
+
+  record(displayId: string, params: { auto?: boolean; actor?: DisplayActor } = {}) {
+    return this.serve(
+      "write",
+      (workspace) => workspace.call("display.record.start", { display: displayId, ...(params.auto ? { auto: true } : {}), ...(params.actor ? { by: params.actor } : {}) }),
+      () => this.transport.request<DisplayRecording>(this.path(displayId, "/recording"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+      }),
+    );
+  }
+
+  stopRecording(displayId: string, params: { auto?: boolean } = {}) {
+    const auto = params.auto ? { auto: true } : {};
+    return this.serve("write", (workspace) => workspace.call("display.record.stop", { display: displayId, ...auto }).then(() => undefined), () =>
+      this.transport.request<void>(this.path(displayId, `/recording${params.auto ? "?auto=true" : ""}`), { method: "DELETE" }));
+  }
+
+  async recordings(): Promise<DisplayRecordingMeta[]> {
+    const files = this.requireFiles();
+    const listing = await files.list(DISPLAY_RECORDINGS_DIR).catch(missing({ entries: [] }));
+    const paths = listing.entries.filter((entry) => entry.type === "dir").map((entry) => `${displayRecordingDir(entry.name)}/meta.json`);
+    const batches = Array.from({ length: Math.ceil(paths.length / READ_BATCH) }, (_, index) => paths.slice(index * READ_BATCH, (index + 1) * READ_BATCH));
+    const metas = (await Promise.all(batches.map((batch) => files.readMany(batch)))).flatMap((read) => read.files);
+    return metas
+      .flatMap((file) => parseJson<DisplayRecordingMeta>(file.content))
+      .filter((meta) => meta.files.length > 0)
+      .sort((a, b) => b.since - a.since);
+  }
+
+  async steps(turnId: string): Promise<DisplayPlanLog[]> {
+    if (!DISPLAY_ACTOR_ID_PATTERN.test(turnId)) throw new Error("Invalid Turn id");
+    const file = await this.requireFiles().read(displayTurnLogPath(turnId)).catch(missing(null));
+    if (!file || !("content" in file)) return [];
+    return file.content.split("\n").flatMap((line) => parseJson<DisplayPlanLog>(line));
+  }
+
+  private requireFiles() {
+    if (!this.files) throw new Error("This client reads no Space files");
+    return this.files;
+  }
+
   iceServers(options: { signal?: AbortSignal } = {}): Promise<RtcIceServers> {
     return this.ice.get(options.signal);
   }
@@ -160,4 +226,21 @@ export class SpaceDisplaysApi {
   closeSession(displayId: string, sessionId: string) {
     return this.transport.request<{ closed: boolean }>(this.path(displayId, `/sessions/${sessionId}`), { method: "DELETE" });
   }
+}
+
+function parseJson<T>(text: string): T[] {
+  if (!text.trim()) return [];
+  try {
+    return [JSON.parse(text) as T];
+  } catch {
+    return [];
+  }
+}
+
+function missing<T>(fallback: T) {
+  return (error: unknown): T => {
+    const status = error instanceof HttpError || error instanceof SpaceFsError ? error.status : null;
+    if (status === 404) return fallback;
+    throw error;
+  };
 }

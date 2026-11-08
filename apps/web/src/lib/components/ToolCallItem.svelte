@@ -1,5 +1,5 @@
 <script lang="ts">
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-svelte";
+import { ChevronDown, ChevronRight, Loader2, Play } from "lucide-svelte";
 import ImageBlocks from "$lib/components/ImageBlocks.svelte";
 import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
 import StatusGlyph from "$lib/components/StatusGlyph.svelte";
@@ -11,6 +11,7 @@ import {
 	summarizeToolInput,
 	type ToolCallViewModel,
 } from "$lib/components/tool-call-format";
+import { actsOnDisplay, useDisplayReplay } from "$lib/display-replay-context";
 import {
 	formatDurationDetail,
 	formatDurationMs,
@@ -30,6 +31,7 @@ type Props = {
 	autoExpandWhileRunning?: boolean;
 	showDuration?: boolean;
 	onExpand?: () => void | Promise<void>;
+	turnId?: string | null;
 	onOpenFile?: (target: OpenWorkspaceFileTarget) => void;
 };
 
@@ -41,6 +43,7 @@ const {
 	autoExpandWhileRunning = false,
 	showDuration = true,
 	onExpand,
+	turnId = null,
 	onOpenFile,
 }: Props = $props();
 
@@ -123,6 +126,23 @@ const statusLabel = $derived(
 const inputSummary = $derived(summarizeToolInput(tool.name, tool.input));
 const detailIdPrefix = $derived(`tool-call-${sanitizeToolDomId(tool.id)}`);
 const relations = useSessionRelations();
+const replaySpace = useDisplayReplay();
+const replayable = $derived(
+	Boolean(replaySpace && turnId && tool.status !== "running") &&
+		actsOnDisplay(tool.name, tool.input),
+);
+let replay = $state<
+	| typeof import("$lib/features/space/modules/DisplayReplayDialog.svelte").default
+	| null
+>(null);
+let replaying = $state(false);
+
+async function openReplay() {
+	replay ??= (
+		await import("$lib/features/space/modules/DisplayReplayDialog.svelte")
+	).default;
+	replaying = true;
+}
 const sentSessions = $derived(
 	relations?.sentByToolCall(tool.id) ?? NO_SENT_SESSIONS,
 );
@@ -151,41 +171,55 @@ function handleFileClick(e: MouseEvent | KeyboardEvent) {
 }
 </script>
 
+{#if replaying && replay && replaySpace && turnId}
+	{@const Replay = replay}
+	<Replay spaceId={replaySpace()} {turnId} onClose={() => (replaying = false)} />
+{/if}
+
 <div class="group/tool rounded-md">
-	<button
-		type="button"
-		class="relative flex min-h-7 w-full items-center gap-2 rounded-md py-1 px-0 text-left transition-colors duration-150 hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35"
-		onclick={toggle}
-	>
-		<StatusGlyph tone={statusTone[tool.status]} motion={isRunning ? "active" : "none"} soft={tool.status === "done"} class="[--status-glyph-size:6px]" />
-		<span class="w-[3.25rem] shrink-0 truncate font-mono text-[13px] text-text-tertiary">{tool.name}</span>
-		{#if filePath}
-			<span
-				role="link"
-				tabindex="0"
-				class="min-w-0 max-w-[56%] truncate font-mono text-[13px] text-text-secondary/85 underline-offset-2 transition-colors hover:text-text-primary hover:underline hover:decoration-brand/35 sm:max-w-[68%]"
-				onclick={handleFileClick}
-				onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleFileClick(e); } }}
-				title={m.tool_open_file({}, { locale })}
-			>{filePath}</span>
-		{:else if inputSummary}
-			<span class="min-w-0 flex-1 truncate font-mono text-[13px] text-text-placeholder">{inputSummary}</span>
-		{:else}
-			<span class="min-w-0 flex-1"></span>
-		{/if}
-		<span class={`ml-auto shrink-0 text-[11px] tabular-nums ${isRunning ? 'text-brand/75' : tool.status === 'failed' ? 'text-status-error' : 'text-text-placeholder'}`} title={durationTitle || undefined}>
-			{statusLabel}
-		</span>
-		<span class="shrink-0 text-text-tertiary">
-			{#if loading && expanded}
-				<Loader2 class="h-3.5 w-3.5 animate-spin text-text-placeholder" />
-			{:else if expanded}
-				<ChevronDown class="h-3.5 w-3.5" />
+	<div class="flex items-center gap-1">
+		<button
+			type="button"
+			class="relative flex min-h-7 min-w-0 flex-1 items-center gap-2 rounded-md py-1 px-0 text-left transition-colors duration-150 hover:bg-bg-hover/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35"
+			onclick={toggle}
+		>
+			<StatusGlyph tone={statusTone[tool.status]} motion={isRunning ? "active" : "none"} soft={tool.status === "done"} class="[--status-glyph-size:6px]" />
+			<span class="w-[3.25rem] shrink-0 truncate font-mono text-[13px] text-text-tertiary">{tool.name}</span>
+			{#if filePath}
+				<span
+					role="link"
+					tabindex="0"
+					class="min-w-0 max-w-[56%] truncate font-mono text-[13px] text-text-secondary/85 underline-offset-2 transition-colors hover:text-text-primary hover:underline hover:decoration-brand/35 sm:max-w-[68%]"
+					onclick={handleFileClick}
+					onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleFileClick(e); } }}
+					title={m.tool_open_file({}, { locale })}
+				>{filePath}</span>
+			{:else if inputSummary}
+				<span class="min-w-0 flex-1 truncate font-mono text-[13px] text-text-placeholder">{inputSummary}</span>
 			{:else}
-				<ChevronRight class="h-3.5 w-3.5" />
+				<span class="min-w-0 flex-1"></span>
 			{/if}
-		</span>
-	</button>
+			<span class={`ml-auto shrink-0 text-[11px] tabular-nums ${isRunning ? 'text-brand/75' : tool.status === 'failed' ? 'text-status-error' : 'text-text-placeholder'}`} title={durationTitle || undefined}>
+				{statusLabel}
+			</span>
+			<span class="shrink-0 text-text-tertiary">
+				{#if loading && expanded}
+					<Loader2 class="h-3.5 w-3.5 animate-spin text-text-placeholder" />
+				{:else if expanded}
+					<ChevronDown class="h-3.5 w-3.5" />
+				{:else}
+					<ChevronRight class="h-3.5 w-3.5" />
+				{/if}
+			</span>
+		</button>
+		{#if replayable}
+			<button
+				type="button"
+				class="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-text-tertiary transition-colors hover:bg-bg-hover/50 hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/35"
+				onclick={() => void openReplay()}
+			><Play class="h-3 w-3" />{m.display_replay_open({}, { locale })}</button>
+		{/if}
+	</div>
 
 	{#if expanded}
 		<div class="ml-[3px] border-l border-border-subtle/70 py-1 pl-[21px] pr-2 max-sm:pl-3 max-sm:pr-1">

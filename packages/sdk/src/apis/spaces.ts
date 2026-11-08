@@ -2084,7 +2084,7 @@ export class SpaceClient {
     this.webhooks = new SpaceWebhooksApi(transport, id);
     this.env = new SpaceEnvApi(transport, id);
     this.sandbox = new SpaceSandboxApi(transport, id);
-    this.displays = new SpaceDisplaysApi(transport, id, fileServices?.local);
+    this.displays = new SpaceDisplaysApi(transport, id, fileServices?.local, this.files);
     this.invitations = new SpaceInvitationsApi(transport, id);
     this.labels = new SpaceLabelsApi(transport, id);
     this.boards = new SpaceBoardsApi(transport, id, websocketClient, this.files);

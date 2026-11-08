@@ -63,13 +63,18 @@ type Manager struct {
 	hub    *display.Hub
 	logger *slog.Logger
 
-	mu       sync.Mutex
-	sessions map[string]*session
-	reserved int
+	mu           sync.Mutex
+	sessions     map[string]*session
+	reserved     int
+	cursors      map[string]cursorState
+	cursorTimers map[string]*time.Timer
 }
 
 func NewManager(hub *display.Hub, logger *slog.Logger) *Manager {
-	return &Manager{hub: hub, logger: logger.With(slog.String("component", "rtc")), sessions: map[string]*session{}}
+	return &Manager{
+		hub: hub, logger: logger.With(slog.String("component", "rtc")), sessions: map[string]*session{},
+		cursors: map[string]cursorState{}, cursorTimers: map[string]*time.Timer{},
+	}
 }
 
 func invalid(format string, args ...any) error {

@@ -110,6 +110,12 @@ internal object DisplayWire {
         put("held", held)
     }
 
+    fun record(display: String, on: Boolean) = buildJsonObject {
+        put("type", "record")
+        put("display", display)
+        put("record", on)
+    }
+
     fun interrupt(display: String) = buildJsonObject {
         put("type", "interrupt")
         put("display", display)

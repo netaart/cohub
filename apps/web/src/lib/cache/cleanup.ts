@@ -2,6 +2,7 @@ import {
 	type AppDomainsCacheRecord,
 	type BoardManifestCacheRecord,
 	type BoardPlaySaveCacheRecord,
+	type DisplayReplayCacheRecord,
 	idbDeleteWhere,
 	idbGetAll,
 	type LabelItemsCacheRecord,
@@ -38,6 +39,7 @@ const MAX_ENTRIES = {
 	boardPlaySaves: 50,
 	appDomains: 500,
 	viewerLikes: 2000,
+	displayReplays: 300,
 };
 
 function shouldRunCleanup() {
@@ -74,7 +76,8 @@ async function cleanupStore<
 		| "board_manifests"
 		| "board_play_saves"
 		| "app_domains"
-		| "viewer_likes",
+		| "viewer_likes"
+		| "display_replays",
 	maxEntries: number,
 ) {
 	const userKey = getCacheUserKey();
@@ -158,6 +161,10 @@ export function scheduleCacheCleanup() {
 			cleanupStore<ViewerLikeCacheRecord>(
 				"viewer_likes",
 				MAX_ENTRIES.viewerLikes,
+			),
+			cleanupStore<DisplayReplayCacheRecord>(
+				"display_replays",
+				MAX_ENTRIES.displayReplays,
 			),
 		])
 			.then(markCleanupDone)

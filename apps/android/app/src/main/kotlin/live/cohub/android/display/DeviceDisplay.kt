@@ -80,6 +80,7 @@ internal class Served(val spaceId: String, val screen: Screen, injector: Injecto
     @Volatile var watched = false
     @Volatile var usedAt = SystemClock.elapsedRealtime()
     @Volatile var takenTask = -1
+    @Volatile var recording = false
 }
 
 internal class DisplayEvent(val spaceId: String, val message: JsonObject)
@@ -361,6 +362,19 @@ class DeviceDisplay(private val context: Context, private val scope: CoroutineSc
             activity.label == null || activity.label == served.recent.lastOrNull() -> served.recent
             else -> (served.recent + activity.label).takeLast(RECENT_STEPS)
         }
+        bump()
+    }
+
+    internal fun recording(spaceId: String, id: String, on: Boolean) {
+        val served = runCatching { served(spaceId, id) }.getOrNull() ?: return
+        if (served.recording == on) return
+        served.recording = on
+        bump()
+    }
+
+    internal fun stopRecording(served: Served) {
+        events.tryEmit(DisplayEvent(served.spaceId, DisplayWire.record(served.screen.id, false)))
+        served.recording = false
         bump()
     }
 

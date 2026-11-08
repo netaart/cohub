@@ -292,11 +292,17 @@ cohub spaces displays tap 300 200 --count 2   # 双击；--button secondary 为�
 cohub spaces displays type "hello"
 cohub spaces displays key Control+a
 cohub spaces displays press back              # 手机会列出它支持的系统按键
+cohub spaces displays windows                 # 列出电脑上的窗口；look、capture、tree、act 加 --window <id> 只看这个窗口
+cohub spaces displays record start            # 录屏到 .cache/cohub/displays/recordings/；--auto 改为自动录制 Agent 的操作
+cohub spaces displays record stop
+cohub spaces displays record ls
 ```
 
 在 macOS 上，运行 Runtime 的终端需要「屏幕录制」权限，操作屏幕还需要「辅助功能」权限（系统设置 → 隐私与安全性）。Linux 需要 X11 会话，暂不支持 Wayland。
 
-`act` 从 `--actions` 或 stdin 读取 JSON 动作数组，按同一时间线执行。每一步都会等界面稳定，或等到 `--until-text`、`--until-gone`、`--until-app`、`--until-stable` 满足，并报告作用在哪个元素上、界面是否变化；没有带来变化的步骤会被标出。按坐标点击时，如果那里已不是你上次看到的元素，会以 `moved` 停止。有人在操作屏幕时，动作会以 `display_preempted` 停止，先重新看一眼屏幕再继续。查看画面、`capture` 和 `tree` 需要沙箱的查看权限；操作屏幕和 `start` / `stop` 需要执行命令的权限。
+`act` 从 `--actions` 或 stdin 读取 JSON 动作数组，按同一时间线执行。每一步都会等界面稳定，或等到 `--until-text`、`--until-gone`、`--until-app`、`--until-stable` 满足，并报告作用在哪个元素上、界面是否变化；没有带来变化的步骤会被标出。按坐标点击时，如果那里已不是你上次看到的元素，会以 `moved` 停止。有人在操作屏幕时，动作会以 `display_preempted` 停止，先重新看一眼屏幕再继续。计划停下时会给出下一步建议，`--json` 中为 `stopped.hint` 和 `stopped.next`（只读、可直接执行的命令）。查看画面、`capture` 和 `tree` 需要沙箱的查看权限；操作屏幕、录屏和 `start` / `stop` 需要执行命令的权限。
+
+录屏直接保存屏幕已有的视频流，不重新编码，以 MP4 存在 Space 文件夹中，不进入 Checkpoint：单次最长 2 小时，总共最多 2 GB，超出时先删最旧的。屏幕报告焦点在密码框，或请人接手期间，录屏会暂停。Agent 每次执行计划还会把步骤记在 `.cache/cohub/displays/turns/` 下，聊天里可以在录像上回放这个 Turn，没有录像时回放它返回的画面。
 
 ### Boards
 

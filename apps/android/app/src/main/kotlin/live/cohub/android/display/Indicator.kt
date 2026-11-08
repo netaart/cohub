@@ -5,17 +5,19 @@ internal data class Indicator(
     val label: String? = null,
     val steps: List<String> = emptyList(),
     val preview: ScreenSize? = null,
+    val recording: Boolean = false,
 ) {
-    enum class Mode { SHARING, WATCHING, WORKING, ASKING, HELD }
+    enum class Mode { SHARING, WATCHING, RECORDING, WORKING, ASKING, HELD }
 
     val needsPerson: Boolean get() = mode == Mode.ASKING || mode == Mode.HELD
 
     companion object {
-        fun of(agent: Boolean, size: ScreenSize, activity: Activity?, handover: HandoverAsk?, held: Boolean, recent: List<String>, pinned: Boolean = false): Indicator? {
+        fun of(agent: Boolean, size: ScreenSize, activity: Activity?, handover: HandoverAsk?, held: Boolean, recent: List<String>, pinned: Boolean = false, recording: Boolean = false): Indicator? {
             val mode = when {
                 held -> Mode.HELD
                 handover != null -> Mode.ASKING
                 activity != null -> Mode.WORKING
+                recording -> Mode.RECORDING
                 !agent -> Mode.SHARING
                 pinned -> Mode.WATCHING
                 else -> return null
@@ -25,6 +27,7 @@ internal data class Indicator(
                 label = if (mode == Mode.WORKING) activity?.label else handover?.reason,
                 steps = if (mode == Mode.WORKING || mode == Mode.ASKING) recent.dropLast(1) else emptyList(),
                 preview = size.takeIf { agent && !held },
+                recording = recording,
             )
         }
 
@@ -37,8 +40,9 @@ internal data class Indicator(
             Mode.HELD -> 0
             Mode.ASKING -> 1
             Mode.WORKING -> 2
-            Mode.WATCHING -> 3
-            Mode.SHARING -> 4
+            Mode.RECORDING -> 3
+            Mode.WATCHING -> 4
+            Mode.SHARING -> 5
         }
     }
 }

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { Hono, type Context } from "hono";
+import * as z from "zod";
 import { createLogger } from "@cohub/infra/logging";
 import {
+  displayActorSchema,
   displayActParamsSchema,
   displayCaptureParamsSchema,
   displayHandoverParamsSchema,
@@ -67,6 +69,7 @@ router.get("/:id/displays/:displayId/capture", async (c) => {
     ...(query.format ? { format: query.format } : {}),
     ...(query.quality ? { quality: Number(query.quality) } : {}),
     ...(query.maxSize ? { maxSize: Number(query.maxSize) } : {}),
+    ...(query.window ? { window: query.window } : {}),
   });
   if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid capture" }, 400);
   try {
@@ -87,6 +90,7 @@ router.get("/:id/displays/:displayId/tree", async (c) => {
   const parsed = displayTreeParamsSchema.safeParse({
     ...(maxElements ? { maxElements: Number(maxElements) } : {}),
     ...(c.req.query("compact") === "true" ? { compact: true } : {}),
+    ...(c.req.query("window") ? { window: c.req.query("window") } : {}),
   });
   if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid tree" }, 400);
   try {
@@ -202,6 +206,55 @@ router.delete("/:id/displays/:displayId/handover", async (c) => {
   if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
   try {
     await callSandboxRpc(auth.spaceId, "display.handback", { display });
+    return c.body(null, 204);
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  }
+});
+
+router.get("/:id/displays/:displayId/windows", async (c) => {
+  const auth = await authorize(c, "sandbox.view");
+  if (auth instanceof Response) return auth;
+  const display = displayParam(c);
+  if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
+  try {
+    c.header("Cache-Control", "no-store");
+    return c.json(await callSandboxRpc(auth.spaceId, "display.windows", { display }));
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  }
+});
+
+const recordingRequestSchema = z.object({ auto: z.boolean().optional(), actor: displayActorSchema.optional() });
+
+router.post("/:id/displays/:displayId/recording", async (c) => {
+  const auth = await authorize(c, "command.execute");
+  if (auth instanceof Response) return auth;
+  const display = displayParam(c);
+  if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
+  const parsed = recordingRequestSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ code: "invalid_request", message: parsed.error.issues[0]?.message ?? "invalid recording" }, 400);
+  const { auto, actor } = parsed.data;
+  try {
+    const result = await callSandboxRpc(auth.spaceId, "display.record.start", {
+      display, by: { userId: auth.user.uuid, ...actor }, ...(auto ? { auto } : {}),
+    });
+    logger.info("[Displays] recording started", { spaceId: auth.spaceId, display, userId: auth.user.uuid, auto: Boolean(auto), sessionId: actor?.sessionId });
+    return c.json(result);
+  } catch (error) {
+    return displayError(c, error, auth.spaceId);
+  }
+});
+
+router.delete("/:id/displays/:displayId/recording", async (c) => {
+  const auth = await authorize(c, "command.execute");
+  if (auth instanceof Response) return auth;
+  const display = displayParam(c);
+  if (!display) return c.json({ code: "display_not_found", message: "display not found" }, 404);
+  const auto = c.req.query("auto") === "true";
+  try {
+    await callSandboxRpc(auth.spaceId, "display.record.stop", { display, ...(auto ? { auto } : {}) });
+    logger.info("[Displays] recording stopped", { spaceId: auth.spaceId, display, userId: auth.user.uuid, auto });
     return c.body(null, 204);
   } catch (error) {
     return displayError(c, error, auth.spaceId);

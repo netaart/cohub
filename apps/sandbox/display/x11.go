@@ -93,7 +93,7 @@ func (s *x11Screen) Info() (Info, error) {
 	}
 	return Info{
 		ID: "screen", Name: s.name, Width: width, Height: height,
-		Capture: s.lsb32, Input: s.xtest, Desktop: true, Platform: "linux", Tree: atspiAvailable(), Focus: atspiAvailable(),
+		Capture: s.lsb32, Input: s.xtest, Desktop: true, Platform: "linux", Tree: atspiAvailable(), Focus: atspiAvailable(), Windows: true,
 	}, nil
 }
 

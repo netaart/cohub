@@ -32,6 +32,7 @@ const lists = {
   kinds: display.DISPLAY_KINDS,
   effects: display.DISPLAY_EFFECTS,
   actStops: display.DISPLAY_ACT_STOPS,
+  stopNexts: display.DISPLAY_STOP_NEXTS,
   blockedSchemes: display.DISPLAY_URL_BLOCKED_SCHEMES,
 };
 
@@ -62,6 +63,8 @@ const limits = {
   defaultHandoverMs: display.DISPLAY_HANDOVER_DEFAULT_MS,
   maxHandoverMs: display.DISPLAY_HANDOVER_MAX_MS,
   maxHandoverWaitMs: display.DISPLAY_HANDOVER_WAIT_MS,
+  maxWindows: display.DISPLAY_WINDOWS_MAX,
+  cursorIntervalMs: display.DISPLAY_CURSOR_INTERVAL_MS,
 };
 
 const patterns = {
@@ -69,6 +72,8 @@ const patterns = {
   elementRefPattern: display.DISPLAY_ELEMENT_REF_PATTERN,
   appIDPattern: display.DISPLAY_APP_ID_PATTERN,
   actorIDPattern: display.DISPLAY_ACTOR_ID_PATTERN,
+  windowIDPattern: display.DISPLAY_WINDOW_ID_PATTERN,
+  recordingIDPattern: display.DISPLAY_RECORDING_ID_PATTERN,
 };
 
 const upper = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);

@@ -23,6 +23,7 @@ import NewChatBackground from "$lib/components/NewChatBackground.svelte";
 import SessionComposer from "$lib/components/SessionComposer.svelte";
 import TurnBottomSheet from "$lib/components/TurnBottomSheet.svelte";
 import TurnRail from "$lib/components/TurnRail.svelte";
+import { provideDisplayReplay } from "$lib/display-replay-context";
 import {
 	type ChatDraftDropKind,
 	classifyChatDraftDrop,
@@ -93,6 +94,7 @@ onMount(() => {
 // files. Provide it once here instead of threading it through the timeline.
 provideMarkdownWorkspaceAsset(untrack(() => host.resolveWorkspaceAsset));
 provideSessionRelations(untrack(() => host.relations));
+provideDisplayReplay(() => host.spaceId);
 
 const access = $derived(host.access);
 const activeSessionState = $derived(host.activeSessionState);

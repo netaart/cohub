@@ -1,5 +1,5 @@
 import type { SandboxSetupInfo } from "./setup.js";
-import type { DisplayActParams, DisplayActResult, DisplayActivity, DisplayApps, DisplayCapture, DisplayCaptureParams, DisplayHandoverParams, DisplayHandoverResult, DisplayInputBatch, DisplayList, DisplayTree, DisplayTreeParams, DisplayVirtualStart } from "../display/index.js";
+import type { DisplayActParams, DisplayActResult, DisplayActivity, DisplayApps, DisplayCapture, DisplayCaptureParams, DisplayHandoverParams, DisplayHandoverResult, DisplayInputBatch, DisplayList, DisplayRecorder, DisplayRecording, DisplayTree, DisplayTreeParams, DisplayVirtualStart, DisplayWindows } from "../display/index.js";
 import type { RtcIceServer } from "../rtc/index.js";
 import type { WORKSPACE_CANDIDATE_INDEX_FAMILY } from "../search/index.js";
 
@@ -49,6 +49,9 @@ export const RPC_METHODS = [
   "display.handback",
   "display.start",
   "display.stop",
+  "display.windows",
+  "display.record.start",
+  "display.record.stop",
   "rtc.open",
   "rtc.close",
 ] as const;
@@ -635,6 +638,18 @@ export type RpcRequestMap = {
   "display.stop": {
     params: Record<string, never>;
     result: DisplayList;
+  };
+  "display.windows": {
+    params: { display: string };
+    result: DisplayWindows;
+  };
+  "display.record.start": {
+    params: { display: string; by?: DisplayRecorder; auto?: boolean };
+    result: DisplayRecording;
+  };
+  "display.record.stop": {
+    params: { display: string; auto?: boolean };
+    result: DisplayRecording;
   };
   "rtc.open": {
     params: RtcOpenParams;

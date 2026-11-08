@@ -31,6 +31,7 @@ import (
 //	                     {"type":"changed","display":ID}                 what it shows changed, while watched
 //	                     {"type":"hold","display":ID,"held":bool}        a person at the machine took it over, or handed it back
 //	                     {"type":"interrupt","display":ID}               a person at the machine stopped what agents do
+//	                     {"type":"record","display":ID,"record":false}   a person at the machine stopped its recording
 //	                     {"type":"reply","id":N,"result":…|"error":{…}}  answers a call
 //	sandboxd → provider  {"type":"call","id":N,"method":…,"params":…}    id 0 expects no reply
 //
@@ -42,7 +43,8 @@ import (
 // that say so also take: changes {display, watch}, answered once the provider
 // has seen the screen, to report changes while watched; launch {display, app}; open {display, url}; apps {display}
 // → {apps}; activity {display, activity?} (id 0), what agents do on it; handover
-// {display, handover?} (id 0), a person being asked for; and,
+// {display, handover?} (id 0), a person being asked for; recording {display,
+// recording?} (id 0), what sandboxd records of it; windows {display} → {windows}; and,
 // where the snapshot reports `virtual`, virtual.start {size?} and virtual.stop.
 const (
 	WireVersion = 1
@@ -69,6 +71,7 @@ type wireMessage struct {
 	Display  string          `json:"display,omitempty"`
 	Focus    *Focus          `json:"focus,omitempty"`
 	Held     bool            `json:"held,omitempty"`
+	Record   bool            `json:"record,omitempty"`
 	Virtual  string          `json:"virtual,omitempty"`
 }
 

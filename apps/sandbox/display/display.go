@@ -30,6 +30,10 @@ type Info struct {
 	Activity *Activity `json:"activity,omitempty"`
 	Held     bool      `json:"held,omitempty"` // a person at the machine took it over
 	Handover *Handover `json:"handover,omitempty"`
+	Windows  bool      `json:"windows,omitempty"`
+
+	Record    bool       `json:"record,omitempty"`
+	Recording *Recording `json:"recording,omitempty"`
 }
 
 type Activity struct {
@@ -97,6 +101,7 @@ func (i Info) known() Info {
 		i.Kind = ""
 	}
 	i.Viewers, i.Activity, i.Held, i.Handover = nil, nil, false, nil
+	i.Record, i.Recording = false, nil
 	return i
 }
 
@@ -115,8 +120,10 @@ func (i Info) equal(other Info) bool {
 		i.Stream == other.Stream && i.Capture == other.Capture && i.Input == other.Input &&
 		i.Desktop == other.Desktop && i.Platform == other.Platform && i.Tree == other.Tree && i.Focus == other.Focus &&
 		i.Kind == other.Kind && i.Apps == other.Apps && i.Changes == other.Changes && i.Held == other.Held &&
+		i.Windows == other.Windows && i.Record == other.Record &&
 		slices.Equal(i.System, other.System) && slices.Equal(i.Needs, other.Needs) &&
-		slices.Equal(i.Viewers, other.Viewers) && i.Activity.equal(other.Activity) && i.Handover.equal(other.Handover)
+		slices.Equal(i.Viewers, other.Viewers) && i.Activity.equal(other.Activity) && i.Handover.equal(other.Handover) &&
+		i.Recording.equal(other.Recording)
 }
 
 type Sample struct {
@@ -156,10 +163,12 @@ func ErrorCode(err error) string {
 }
 
 type CaptureParams struct {
-	Display string `json:"display"`
-	Format  string `json:"format,omitempty"`
-	Quality int    `json:"quality,omitempty"`
-	MaxSize int    `json:"maxSize,omitempty"`
+	Display string      `json:"display"`
+	Format  string      `json:"format,omitempty"`
+	Quality int         `json:"quality,omitempty"`
+	MaxSize int         `json:"maxSize,omitempty"`
+	Window  string      `json:"window,omitempty"`
+	Region  *[4]float64 `json:"region,omitempty"`
 }
 
 func (p *CaptureParams) normalize() error {
@@ -181,6 +190,9 @@ func (p *CaptureParams) normalize() error {
 	}
 	if p.MaxSize < 0 || p.MaxSize > MaxDimension {
 		return errorf(CodeInvalid, "maxSize must be within 0..%d", MaxDimension)
+	}
+	if p.Window != "" && !windowIDPattern.MatchString(p.Window) {
+		return errorf(CodeInvalid, "window must be a window id")
 	}
 	return nil
 }

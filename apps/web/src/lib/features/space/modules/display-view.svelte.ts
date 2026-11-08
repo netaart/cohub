@@ -1,6 +1,8 @@
 import {
+	type DisplayAgentPointer,
 	type DisplayConnection,
 	type DisplayConnectionStats,
+	type DisplayCursor,
 	type DisplayFocus,
 	type DisplayInfo,
 	HttpError,
@@ -49,6 +51,8 @@ export function createDisplayView(
 	let display = $state<DisplayInfo | null>(null);
 	let stats = $state<DisplayConnectionStats | null>(null);
 	let focus = $state<DisplayFocus | null>(null);
+	let pointer = $state<DisplayAgentPointer | null>(null);
+	let cursors = $state<DisplayCursor[]>([]);
 	let inputError = $state(0);
 	let wanted = false;
 	let opening = false;
@@ -103,6 +107,12 @@ export function createDisplayView(
 			next.on("focus", (value) => {
 				if (current === generation) focus = value;
 			});
+			next.on("pointer", (value) => {
+				if (current === generation) pointer = value;
+			});
+			next.on("cursors", (value) => {
+				if (current === generation) cursors = value;
+			});
 			next.on("error", () => {
 				inputError += 1;
 			});
@@ -143,6 +153,8 @@ export function createDisplayView(
 		connection = null;
 		stats = null;
 		focus = null;
+		pointer = null;
+		cursors = [];
 		if (!wanted) {
 			phase = { kind: "idle" };
 			return;
@@ -183,6 +195,8 @@ export function createDisplayView(
 		connection = null;
 		stats = null;
 		focus = null;
+		pointer = null;
+		cursors = [];
 		current?.close();
 		phase = { kind: "idle" };
 	}
@@ -202,6 +216,12 @@ export function createDisplayView(
 		},
 		get focus() {
 			return focus;
+		},
+		get pointer() {
+			return pointer;
+		},
+		get cursors() {
+			return cursors;
 		},
 		get inputError() {
 			return inputError;

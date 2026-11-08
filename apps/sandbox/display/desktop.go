@@ -110,6 +110,9 @@ func (d *desktop) publish() bool {
 	if _, ok := d.screen.(FocusScreen); !ok {
 		info.Focus = false
 	}
+	if _, ok := d.screen.(WindowScreen); !ok {
+		info.Windows = false
+	}
 	info.Changes = info.Capture
 	d.mu.Lock()
 	changed := !info.equal(d.info)
@@ -216,7 +219,20 @@ func (d *desktop) handle(ctx context.Context, method string, raw json.RawMessage
 		if err != nil {
 			return nil, err
 		}
+		if params.Region != nil {
+			img = crop(img, *params.Region)
+		}
 		return encodeImage(img, params)
+	case "windows":
+		screen, ok := d.screen.(WindowScreen)
+		if !ok {
+			return nil, errorf(CodeUnsupported, "this display does not list its windows")
+		}
+		windows, err := screen.Windows(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return WindowsResult{Windows: windows}, nil
 	case "tree":
 		screen, ok := d.screen.(ElementScreen)
 		if !ok {
@@ -257,7 +273,7 @@ func (d *desktop) handle(ctx context.Context, method string, raw json.RawMessage
 		}
 		d.mu.Unlock()
 		return nil, nil
-	case "activity", "handover":
+	case "activity", "handover", "recording":
 		return nil, nil
 	default:
 		return nil, errorf(CodeUnsupported, "unsupported method %q", method)
@@ -472,6 +488,26 @@ func (d *desktop) apply(event InputEvent) error {
 	default:
 		return errorf(CodeInvalid, "unknown event type %q", event.Type)
 	}
+}
+
+func crop(img image.Image, region [4]float64) image.Image {
+	bounds := img.Bounds()
+	at := func(origin, extent int, value float64) int { return origin + int(unit(value)*float64(extent)+0.5) }
+	part := image.Rect(
+		at(bounds.Min.X, bounds.Dx(), region[0]), at(bounds.Min.Y, bounds.Dy(), region[1]),
+		at(bounds.Min.X, bounds.Dx(), region[0]+region[2]), at(bounds.Min.Y, bounds.Dy(), region[1]+region[3]),
+	).Intersect(bounds)
+	if part.Dx() < 1 || part.Dy() < 1 {
+		return img
+	}
+	if sub, ok := img.(interface {
+		SubImage(image.Rectangle) image.Image
+	}); ok {
+		return sub.SubImage(part)
+	}
+	cropped := image.NewRGBA(image.Rect(0, 0, part.Dx(), part.Dy()))
+	draw.Copy(cropped, image.Point{}, img, part, draw.Src, nil)
+	return cropped
 }
 
 func encodeImage(img image.Image, params CaptureParams) (CaptureResult, error) {

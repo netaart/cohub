@@ -3,10 +3,17 @@ import type {
 	DisplayInputEvent,
 	DisplayModifierKey,
 } from "@cohub/protocol/display";
-import type { SpaceDisplaysApi, SpacePresenceUser } from "@neta-art/cohub";
+import type {
+	DisplayRecordingMeta,
+	SpaceDisplaysApi,
+	SpacePresenceUser,
+} from "@neta-art/cohub";
 import {
+	Bot,
 	ChevronLeft,
 	Circle,
+	Disc,
+	Film,
 	Keyboard,
 	Loader2,
 	MonitorOff,
@@ -17,15 +24,24 @@ import {
 } from "lucide-svelte";
 import { onDestroy, untrack } from "svelte";
 import { MediaQuery } from "svelte/reactivity";
+import { identityColor } from "$lib/avatar-identity";
 import { presentDeviceDisplay } from "$lib/device-display.svelte";
+import { formatBytes } from "$lib/format-bytes";
 import { holdHostKeys } from "$lib/host-tabs";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { claimKeyboard } from "$lib/keyboard";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import { displayUserName } from "../space-utils";
+import DisplayCursors, {
+	type DisplayCursorMark,
+	type DisplayRect,
+} from "./DisplayCursors.svelte";
 import DisplayKeyboard, {
 	DISPLAY_KEY_BAR_HEIGHT,
 } from "./DisplayKeyboard.svelte";
+import DisplayRecordings from "./DisplayRecordings.svelte";
+import DisplayReplayDialog from "./DisplayReplayDialog.svelte";
 import DisplayViewers from "./DisplayViewers.svelte";
 import { createDisplayCamera } from "./display-camera.svelte";
 import {
@@ -38,6 +54,8 @@ import {
 	toDisplayPoint,
 	wheelFraction,
 } from "./display-input";
+import { createDisplayRecording } from "./display-recording.svelte";
+import { formatClock } from "./display-replay";
 import {
 	createDisplayTouch,
 	type DisplayTouchIntent,
@@ -105,6 +123,7 @@ const meta = $derived(remoteMeta(display?.platform));
 const remoteFocus = $derived(controllable ? view.focus : null);
 
 let video = $state<HTMLVideoElement | null>(null);
+let stage = $state<HTMLDivElement | null>(null);
 let surface = $state<HTMLDivElement | null>(null);
 let keyboard = $state<DisplayKeyboard | null>(null);
 let keyboardOpen = $state(false);
@@ -120,8 +139,58 @@ let showDetails = $state(false);
 const camera = createDisplayCamera({
 	surface: () => surface,
 	video: () => video,
+	stage: () => stage,
 	covered: () => (keyboardOpen ? DISPLAY_KEY_BAR_HEIGHT : 0),
 });
+
+let overlay = $state<DisplayRect | null>(null);
+function measureOverlay() {
+	const box = surface?.getBoundingClientRect();
+	overlay =
+		box && video?.videoWidth
+			? containedRect(
+					{ left: 0, top: 0, width: box.width, height: box.height },
+					video.videoWidth,
+					video.videoHeight,
+				)
+			: null;
+}
+const profiles = $derived(
+	new Map(people.map((user) => [user.userId, user.profile])),
+);
+const cursorMarks = $derived.by((): DisplayCursorMark[] => {
+	if (phase.kind !== "live") return [];
+	const marks: DisplayCursorMark[] = view.cursors.map((cursor) => ({
+		key: `user:${cursor.userId}`,
+		x: cursor.x,
+		y: cursor.y,
+		color: identityColor(cursor.userId),
+		label: displayUserName(profiles.get(cursor.userId), cursor.userId),
+	}));
+	const pointer = view.pointer;
+	if (pointer)
+		marks.push({
+			key: "agent",
+			agent: true,
+			x: pointer.x,
+			y: pointer.y,
+			kind: pointer.kind,
+			seq: pointer.seq,
+			color: identityColor(pointer.sessionId ?? "agent"),
+		});
+	return marks;
+});
+
+const recorder = createDisplayRecording({
+	spaceId: () => spaceId,
+	displayId: () => displayId,
+	display: () => display,
+	onError: () => flash(m.display_record_failed({}, { locale })),
+});
+const canRecord = $derived(canControl && display?.record === true);
+let showRecordings = $state(false);
+let replaying = $state<DisplayRecordingMeta | null>(null);
+
 const touch = createDisplayTouch({
 	mode: () => pointerMode,
 	emit: onTouch,
@@ -181,6 +250,7 @@ $effect(() => {
 	if (!element) return;
 	const refit = () => {
 		camera.refit();
+		measureOverlay();
 		if (keyboardOpen) scheduleReveal();
 	};
 	const observer = new ResizeObserver(refit);
@@ -199,6 +269,7 @@ $effect(() => {
 
 onDestroy(() => {
 	view.dispose();
+	recorder.dispose();
 	touch.dispose();
 	camera.dispose();
 	for (const timer of [noticeTimer, scrollTimer, focusLostTimer, revealTimer])
@@ -337,6 +408,8 @@ function onPointerDown(event: PointerEvent) {
 }
 
 function onPointerMove(event: PointerEvent) {
+	if (event.pointerType === "mouse")
+		view.connection?.sendCursor(pointAt(event.clientX, event.clientY));
 	if (event.pointerType === "touch") {
 		touch.move(event.pointerId, event.clientX, event.clientY);
 		return;
@@ -636,6 +709,7 @@ function remoteInput(node: HTMLElement, enabled: boolean) {
 		["pointermove", onPointerMove],
 		["pointerup", onPointerEnd],
 		["pointercancel", onPointerEnd],
+		["pointerleave", () => view.connection?.sendCursor(null)],
 		["wheel", onWheel, { passive: false }],
 		["gesturestart", keepStill, { passive: false }],
 		["keydown", onKeyDown],
@@ -745,6 +819,7 @@ function setTouchMode(mode: DisplayTouchMode) {
 function onVideoResize() {
 	cursor = null;
 	camera.reset();
+	measureOverlay();
 }
 
 const statusLabel = $derived.by(() => {
@@ -865,6 +940,34 @@ const headerActions = $derived.by((): PreviewHeaderAction[] => {
 			...system("recents"),
 		},
 		{
+			id: "record",
+			label: coarse.current
+				? m.display_record_start({}, { locale })
+				: `${m.display_record_start({}, { locale })} (${/Mac|iPhone|iPad/.test(navigator.platform) ? "⌥⇧R" : "Alt+Shift+R"})`,
+			icon: Disc,
+			primary: true,
+			hidden: !canRecord || recorder.running,
+			run: () => void recorder.toggle(),
+		},
+		{
+			id: "record-auto",
+			label: m.display_record_auto({}, { locale }),
+			icon: Bot,
+			active: recorder.auto,
+			hidden: !canRecord,
+			run: () => void recorder.toggle(true),
+		},
+		{
+			id: "recordings",
+			label: m.display_recordings({}, { locale }),
+			icon: Film,
+			active: showRecordings,
+			hidden: display?.record !== true,
+			run: () => {
+				showRecordings = !showRecordings;
+			},
+		},
+		{
 			id: "reconnect",
 			label: m.display_reconnect({}, { locale }),
 			icon: RefreshCw,
@@ -872,6 +975,20 @@ const headerActions = $derived.by((): PreviewHeaderAction[] => {
 		},
 	];
 });
+
+function onWindowKey(event: KeyboardEvent) {
+	if (!active || !canRecord || coarse.current) return;
+	if (
+		event.altKey &&
+		event.shiftKey &&
+		event.code === "KeyR" &&
+		!event.metaKey &&
+		!event.ctrlKey
+	) {
+		event.preventDefault();
+		void recorder.toggle();
+	}
+}
 
 const problemCopy = $derived.by(() => {
 	if (phase.kind !== "problem") return null;
@@ -906,6 +1023,12 @@ const problemCopy = $derived.by(() => {
 });
 </script>
 
+<svelte:window onkeydown={onWindowKey} />
+
+{#if replaying}
+	<DisplayReplayDialog {spaceId} recording={replaying} onClose={() => (replaying = null)} />
+{/if}
+
 <div class="flex h-full min-w-0 flex-col bg-bg-content">
 	<PreviewHeader
 		{windows}
@@ -927,6 +1050,20 @@ const problemCopy = $derived.by(() => {
 				>{statusLabel}</button>
 			{/if}
 			{#if phase.kind === "live"}<DisplayViewers viewers={display?.viewers} {people} />{/if}
+			{#if recorder.running}
+				<button
+					type="button"
+					class="display-rec"
+					class:is-paused={recorder.paused}
+					disabled={!canRecord}
+					title={recorder.paused ? m.display_record_paused({}, { locale }) : m.display_record_stop({}, { locale })}
+					aria-label={m.display_record_stop({}, { locale })}
+					onclick={() => void recorder.toggle()}
+				>
+					<span class="display-rec-dot" aria-hidden="true"></span>
+					<span>{formatClock(recorder.elapsed)}</span>
+				</button>
+			{/if}
 		{/snippet}
 	</PreviewHeader>
 
@@ -939,17 +1076,23 @@ const problemCopy = $derived.by(() => {
 			aria-label={display?.name ?? displayId}
 			use:remoteInput={controllable}
 		>
-			<video
-				bind:this={video}
-				class="display-video"
-				class:is-hidden={phase.kind !== "live"}
-				autoplay
-				muted
-				playsinline
-				disablepictureinpicture
-				onloadeddata={() => view.frameShown()}
-				onresize={onVideoResize}
-			></video>
+			<div bind:this={stage} class="display-stage">
+				<video
+					bind:this={video}
+					class="display-video"
+					class:is-hidden={phase.kind !== "live"}
+					autoplay
+					muted
+					playsinline
+					disablepictureinpicture
+					onloadeddata={() => {
+						view.frameShown();
+						measureOverlay();
+					}}
+					onresize={onVideoResize}
+				></video>
+				<DisplayCursors rect={overlay} marks={cursorMarks} scale={camera.scale} />
+			</div>
 		</div>
 		<DisplayKeyboard
 			bind:this={keyboard}
@@ -961,6 +1104,12 @@ const problemCopy = $derived.by(() => {
 			{onKeyUp}
 			onOpenChange={onKeyboardOpen}
 		/>
+
+		{#if showRecordings}
+			<div class="display-recordings">
+				<DisplayRecordings {spaceId} canEdit={canControl} refreshKey={recorder.ended} onPlay={(item) => (replaying = item)} />
+			</div>
+		{/if}
 
 		{#if showDetails && details.length}
 			<dl class="display-details">
@@ -1002,6 +1151,12 @@ const problemCopy = $derived.by(() => {
 				<div class="display-pill">{m.display_view_only_permission({}, { locale })}</div>
 			{:else if notice}
 				<div class="display-pill" role="status">{notice}</div>
+			{:else if recorder.saved}
+				{@const saved = recorder.saved}
+				<button type="button" class="display-chip" onclick={() => { replaying = saved; recorder.dismissSaved(); }}>
+					<Film class="h-4 w-4" />
+					<span>{m.display_record_saved({ length: formatClock((saved.endedAt ?? saved.since) - saved.since), size: formatBytes(saved.bytes) }, { locale })}</span>
+				</button>
 			{:else if phase.kind === "live" && display?.handover && !display.held}
 				<div class="display-pill is-asking" role="status">{m.runtime_display_needs_you({ reason: display.handover.reason }, { locale })}</div>
 				{#if controllable}
@@ -1115,21 +1270,82 @@ const problemCopy = $derived.by(() => {
 	.display-surface.is-controllable:focus-visible {
 		box-shadow: inset 0 0 0 1px var(--border-strong);
 	}
+	.display-stage {
+		position: absolute;
+		inset: 0;
+		transform-origin: 0 0;
+		transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+		will-change: transform;
+		pointer-events: none;
+	}
 	.display-video {
-		max-height: 100%;
-		max-width: 100%;
 		height: 100%;
 		width: 100%;
 		object-fit: contain;
 		pointer-events: none;
-		transform-origin: 0 0;
-		transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
-		will-change: transform;
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.display-video {
+		.display-stage {
 			transition: none;
 		}
+	}
+	.display-rec {
+		display: inline-flex;
+		flex: 0 0 auto;
+		align-items: center;
+		gap: 5px;
+		height: 22px;
+		padding: 0 8px;
+		border: 0;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--error-700) 14%, transparent);
+		color: var(--error-700);
+		font: inherit;
+		font-size: 11px;
+		font-variant-numeric: tabular-nums;
+		cursor: pointer;
+	}
+	.display-rec:hover:not(:disabled) {
+		background: color-mix(in srgb, var(--error-700) 22%, transparent);
+	}
+	.display-rec:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: 2px;
+	}
+	.display-rec-dot {
+		width: 7px;
+		height: 7px;
+		border-radius: 999px;
+		background: currentColor;
+		animation: display-rec-pulse 1.6s ease-in-out infinite;
+	}
+	.display-rec.is-paused {
+		color: var(--text-tertiary);
+		background: var(--bg-hover);
+	}
+	.display-rec.is-paused .display-rec-dot {
+		animation: none;
+	}
+	@keyframes display-rec-pulse {
+		50% {
+			opacity: 0.35;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.display-rec-dot {
+			animation: none;
+		}
+	}
+	.display-recordings {
+		position: absolute;
+		top: 8px;
+		right: 8px;
+		bottom: 8px;
+		z-index: 2;
+		display: flex;
+		width: min(320px, calc(100% - 16px));
+		flex-direction: column;
+		justify-content: flex-start;
 	}
 	.display-video.is-hidden {
 		visibility: hidden;
