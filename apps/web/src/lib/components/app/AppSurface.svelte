@@ -23,6 +23,7 @@ import {
 	parseAppRuntimeCloseRequest,
 	parseAppRuntimeConfigureRequest,
 	parseAppRuntimeDropConfig,
+	parseAppRuntimeHaptic,
 	parseAppRuntimeKey,
 	parseAppRuntimePointer,
 	parseAppRuntimeReady,
@@ -67,6 +68,7 @@ import {
 	type AppSurfaceHost,
 	createAppSurfaceHost,
 } from "$lib/features/app/surface-host";
+import { haptic } from "$lib/haptics";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { parseNewChatBackgroundAction } from "$lib/new-chat-background-bridge";
@@ -311,6 +313,8 @@ const frameSandbox = $derived(
 );
 const BASE_FRAME_PERMISSIONS =
 	"clipboard-read; clipboard-write; fullscreen; web-share";
+const SENSOR_FRAME_PERMISSIONS =
+	"accelerometer; gyroscope; magnetometer; gamepad; screen-wake-lock";
 
 const devices = untrack(() =>
 	createAppDeviceAccess({
@@ -324,6 +328,7 @@ const devices = untrack(() =>
 const framePermissions = $derived(
 	[
 		BASE_FRAME_PERMISSIONS,
+		isBackground ? "" : SENSOR_FRAME_PERMISSIONS,
 		devices.declared.length > 0 ? "autoplay" : "",
 		appDevicesPermissionPolicy(devices.allowed),
 	]
@@ -566,6 +571,11 @@ async function onFrameMessage(event: MessageEvent) {
 			status: windowState.status,
 			dirty: windowState.dirty,
 		});
+		return;
+	}
+	const hapticMessage = parseAppRuntimeHaptic(event.data);
+	if (hapticMessage) {
+		if (!isBackground) haptic(hapticMessage.kind);
 		return;
 	}
 	const key = parseAppRuntimeKey(event.data);

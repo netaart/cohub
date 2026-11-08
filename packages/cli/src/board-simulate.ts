@@ -1,5 +1,5 @@
-import { diffMergePatch } from "@neta-art/cohub/board";
-import type { BoardDocument, BoardExportRegion, BoardThemeId } from "@neta-art/cohub/board";
+import { BOARD_SCRIPT_SENSES, diffMergePatch } from "@neta-art/cohub/board";
+import type { BoardDocument, BoardExportRegion, BoardScriptSense, BoardScriptSenseEvents, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
 import type { BoardScriptHarness, BoardScriptHarnessPointer, BoardScriptHarnessPress } from "@neta-art/cohub/board/testing";
 import { loadBoardDocument } from "./board-document.js";
@@ -37,7 +37,8 @@ export type BoardSimulationStep =
   | { move: Point[]; input: BoardScriptHarnessPointer }
   | { pointer: "down" | "move" | "up"; at: Point; input: BoardScriptHarnessPointer }
   | { key: string }
-  | { select: string[] };
+  | { select: string[] }
+  | { sense: BoardScriptSense; data: BoardScriptSenseEvents[BoardScriptSense] };
 
 function point(value: unknown, name: string): Point {
   if (!Array.isArray(value) || value.length !== 2 || !value.every((n) => typeof n === "number" && Number.isFinite(n)))
@@ -101,7 +102,12 @@ function parseStep(entry: unknown, index: number): BoardSimulationStep {
     if (!Array.isArray(step.select) || !step.select.every((id) => typeof id === "string")) throw new Error(`${name}.select must list item ids`);
     return { select: step.select as string[] };
   }
-  throw new Error(`${name} must be one of wait, tool, tap, drag, move, pointer, key or select`);
+  if ("sense" in step) {
+    if (!BOARD_SCRIPT_SENSES.includes(step.sense as never)) throw new Error(`${name}.sense must be one of ${BOARD_SCRIPT_SENSES.join(", ")}`);
+    if (!step.data || typeof step.data !== "object" || Array.isArray(step.data)) throw new Error(`${name}.data must be an object`);
+    return { sense: step.sense as BoardScriptSense, data: step.data as BoardScriptSenseEvents[BoardScriptSense] };
+  }
+  throw new Error(`${name} must be one of wait, tool, tap, drag, move, pointer, key, select or sense`);
 }
 
 export type BoardSimulationPress = BoardScriptHarnessPress & { step: number };
@@ -119,7 +125,8 @@ async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationS
     else if ("key" in step) {
       await harness.key("keydown", step.key);
       await harness.key("keyup", step.key);
-    } else await harness.select(step.select);
+    } else if ("sense" in step) await harness.sense(step.sense, step.data);
+    else await harness.select(step.select);
     if (press) presses.push({ step: index, ...press });
   }
 }

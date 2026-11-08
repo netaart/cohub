@@ -758,12 +758,12 @@ this together: poses on a `latest` channel, proximity voices that `select()`
 only the people in earshot, simulcast cameras that sharpen as people walk
 closer, and room history as the state of a game.
 
-### Camera, microphone, and screen
+### Camera, microphone, screen, and location
 
 An App that needs a device declares it in the page head:
 
 ```html
-<meta name="cohub:devices" content="camera microphone screen" />
+<meta name="cohub:devices" content="camera microphone screen location" />
 ```
 
 ```ts
@@ -783,9 +783,24 @@ which loads the App again without it.
 every `getDisplayMedia()` call, so a declared screen is ready at once, without
 a reload. An App that declares devices may also play sound without a click.
 
+`location` works like the camera: allow it once and the App loads again, then
+`navigator.geolocation` asks the browser as usual.
+
 `unavailable` means the App did not declare the device, or the surface or
 host cannot use it — screen sharing needs a desktop browser. Overlays and
 background surfaces never get devices.
+
+### Motion, gamepads, and haptics
+
+Motion sensors (`devicemotion`, `deviceorientation`, the Generic Sensor API),
+gamepads and the screen wake lock work in every App surface without declaring
+anything; iOS still asks for motion through `DeviceMotionEvent.requestPermission()`
+inside a tap. Background surfaces go without. A frame cannot vibrate, so ask the
+host instead:
+
+```ts
+client.app.devices.haptics("confirm"); // tick | confirm | reject | longPress
+```
 
 ## Commerce
 

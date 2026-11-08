@@ -1,19 +1,19 @@
+import { APP_RUNTIME_HAPTIC_VIBRATION } from "@cohub/protocol/app-runtime";
 import type { HostHaptic } from "@cohub/protocol/host-bridge";
 import { callHost, supportsHostCapability } from "$lib/host-bridge";
 
-const VIBRATION: Record<HostHaptic, number | number[]> = {
-	tick: 8,
-	confirm: [12, 24, 12],
-	reject: [24, 32, 24],
-	longPress: 14,
-};
+const GAP_MS = 40;
+let lastAt = 0;
 
 export function haptic(kind: HostHaptic) {
+	const now = performance.now();
+	if (now - lastAt < GAP_MS) return;
+	lastAt = now;
 	if (supportsHostCapability("haptics")) {
 		callHost("haptics.perform", { kind }).catch(() => {});
 		return;
 	}
 	try {
-		navigator.vibrate?.(VIBRATION[kind]);
+		navigator.vibrate?.(APP_RUNTIME_HAPTIC_VIBRATION[kind]);
 	} catch {}
 }

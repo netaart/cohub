@@ -52,8 +52,58 @@ export type BoardScriptGesture = {
   item?: string;
 };
 
-export type BoardScriptHostEvents = {
+export const BOARD_SCRIPT_SENSES = ["motion", "gamepad", "audio", "location"] as const;
+export type BoardScriptSense = (typeof BOARD_SCRIPT_SENSES)[number];
+export type BoardScriptSenseState = "on" | "ask" | "denied" | "unavailable";
+
+export type BoardScriptEnv = {
+  mode: "edit" | "play" | "view" | "export";
+  pointer: "fine" | "coarse";
+  orientation: "portrait" | "landscape";
+  reducedMotion: boolean;
+  locale: string | null;
+  senses: Record<BoardScriptSense, BoardScriptSenseState>;
+};
+
+export type BoardScriptVec3 = { x: number; y: number; z: number };
+
+export type BoardScriptMotionSample = {
+  t: number;
+  acceleration: BoardScriptVec3;
+  gravity: BoardScriptVec3;
+  rotationRate: BoardScriptVec3;
+};
+
+export type BoardScriptMotion = {
+  samples: BoardScriptMotionSample[];
+  orientation: { x: number; y: number; z: number; w: number } | null;
+  heading: number | null;
+};
+
+export type BoardScriptGamepad = { index: number; id: string; buttons: number[]; axes: number[] };
+
+export type BoardScriptAudio = { level: number; pitch: number | null; onset: boolean; spectrum: number[] };
+
+export type BoardScriptLocation = {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  altitude: number | null;
+  heading: number | null;
+  speed: number | null;
+  t: number;
+};
+
+export type BoardScriptSenseEvents = {
+  motion: BoardScriptMotion;
+  gamepad: { pads: BoardScriptGamepad[] };
+  audio: BoardScriptAudio;
+  location: BoardScriptLocation;
+};
+
+export type BoardScriptHostEvents = BoardScriptSenseEvents & {
   viewchange: BoardScriptView;
+  envchange: BoardScriptEnv;
   selectionchange: { ids: string[]; total: number };
   transformend: { ids: string[]; operation: "move" | "resize" | "rotate" | "arrow"; cancelled: boolean };
   change: { added: string[]; changed: string[]; removed: string[]; source: BoardScriptChangeSource };
@@ -149,6 +199,7 @@ export type BoardScriptContext = {
   readonly state: Record<string, unknown>;
   readonly frame: BoardScriptFrame;
   readonly view: BoardScriptView | null;
+  readonly env: BoardScriptEnv;
   random(): number;
   on<Type extends string>(type: Type, handler: (event: BoardScriptEventOf<Type>) => void): () => void;
   onFrame(handler: (frame: BoardScriptFrame) => void): () => void;

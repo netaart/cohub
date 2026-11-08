@@ -3,6 +3,7 @@ package live.cohub.android.host
 import android.net.Uri
 import android.util.Log
 import android.webkit.ConsoleMessage
+import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -20,6 +21,11 @@ class CohubWebChromeClient(private val listener: SurfaceListener) : WebChromeCli
     override fun onPermissionRequest(request: PermissionRequest) = listener.onPermissionRequest(request)
 
     override fun onPermissionRequestCanceled(request: PermissionRequest) = listener.onPermissionRequestCanceled(request)
+
+    override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) =
+        listener.onGeolocationPrompt(origin, callback)
+
+    override fun onGeolocationPermissionsHidePrompt() = listener.onGeolocationPromptHidden()
 
     override fun onConsoleMessage(message: ConsoleMessage): Boolean {
         if (!BuildConfig.WEB_DEBUGGING) return false

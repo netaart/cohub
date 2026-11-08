@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient.FileChooserParams
@@ -29,6 +30,8 @@ interface SurfaceListener {
     fun onShowFileChooser(callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean
     fun onPermissionRequest(request: PermissionRequest)
     fun onPermissionRequestCanceled(request: PermissionRequest)
+    fun onGeolocationPrompt(origin: String, callback: GeolocationPermissions.Callback)
+    fun onGeolocationPromptHidden()
     fun onDownload(url: String, contentDisposition: String?, mimeType: String?)
 }
 

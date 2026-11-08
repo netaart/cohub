@@ -585,12 +585,12 @@ rtc.select((candidate) => nearby.has(candidate.participantId)); // null 表示�
 
 [篝火（Campfire）](https://cohub.live/tzwm/cohub-example-apps/w/campfire) 把这些能力放在了一起：位置走 `latest` 通道，语音按距离只 `select()` 听得见的人，摄像头用 simulcast 随距离变清晰，房间历史就是游戏的状态。
 
-### 摄像头、麦克风与屏幕
+### 摄像头、麦克风、屏幕与位置
 
 需要设备的 App 在页面 head 中声明：
 
 ```html
-<meta name="cohub:devices" content="camera microphone screen" />
+<meta name="cohub:devices" content="camera microphone screen location" />
 ```
 
 ```ts
@@ -603,7 +603,17 @@ const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: t
 
 `screen` 不需要这一步：每次调用 `getDisplayMedia()` 浏览器都会让访客自己选择共享什么，所以声明后立即可用，不会重新加载。声明了设备的 App 也可以不经点击直接播放声音。
 
+`location` 和摄像头一样：首次允许后 App 会重新加载一次，之后 `navigator.geolocation` 照常由浏览器询问。
+
 返回 `unavailable` 表示 App 没有声明该设备，或当前形态、宿主无法使用 —— 屏幕共享需要桌面浏览器。浮层和后台形态不会获得设备权限。
+
+### 体感、手柄与振动
+
+体感传感器（`devicemotion`、`deviceorientation`、Generic Sensor API）、手柄和屏幕常亮在所有 App 形态中都可直接使用，无需声明；iOS 仍需在点击中调用 `DeviceMotionEvent.requestPermission()`。后台形态不提供这些能力。frame 内无法直接振动，请交给宿主：
+
+```ts
+client.app.devices.haptics("confirm"); // tick | confirm | reject | longPress
+```
 
 ## 商业化
 

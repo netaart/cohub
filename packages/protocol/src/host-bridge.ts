@@ -1,4 +1,5 @@
 import * as z from "zod";
+import { APP_RUNTIME_HAPTICS, type AppRuntimeHaptic } from "./app-runtime.js";
 import { displayIdSchema } from "./display/schema.js";
 
 /**
@@ -195,8 +196,8 @@ export type HostIncomingShare = z.infer<typeof hostIncomingShareSchema>;
 
 export const hostColorSchema = z.string().regex(/^#[0-9a-f]{6}$/i);
 
-export const HOST_HAPTICS = ["tick", "confirm", "reject", "longPress"] as const;
-export type HostHaptic = (typeof HOST_HAPTICS)[number];
+export const HOST_HAPTICS = APP_RUNTIME_HAPTICS;
+export type HostHaptic = AppRuntimeHaptic;
 
 export const HOST_FILE_DATA_MAX_LENGTH = 16 * 1024 * 1024;
 

@@ -1,4 +1,4 @@
-import { buildAppRuntimeCloseRequest, buildAppRuntimeReady, parseAppRuntimeAnnounce, buildAppRuntimeConfigureRequest, buildAppRuntimePointer, type AppAppearance, type AppRuntimeConfigureRequest, type AppRuntimeAnchor, type AppRuntimeRect } from "@cohub/protocol/app-runtime";
+import { APP_RUNTIME_HAPTIC_VIBRATION, buildAppRuntimeCloseRequest, buildAppRuntimeHaptic, buildAppRuntimeReady, type AppRuntimeHaptic, parseAppRuntimeAnnounce, buildAppRuntimeConfigureRequest, buildAppRuntimePointer, type AppAppearance, type AppRuntimeConfigureRequest, type AppRuntimeAnchor, type AppRuntimeRect } from "@cohub/protocol/app-runtime";
 
 // Re-export configure types so tsdown can emit them in the DTS bundle.
 export type { AppAppearance, AppRuntimeConfigureRequest, AppRuntimeAnchor, AppRuntimeRect };
@@ -1028,6 +1028,13 @@ export class AppRuntimeApi {
    */
   requestClose() {
     this.transport.notify?.(buildAppRuntimeCloseRequest());
+  }
+
+  haptics(kind: AppRuntimeHaptic) {
+    if (this.transport.notify) return this.transport.notify(buildAppRuntimeHaptic(kind));
+    try {
+      navigator.vibrate?.(APP_RUNTIME_HAPTIC_VIBRATION[kind]);
+    } catch {}
   }
 
   /**

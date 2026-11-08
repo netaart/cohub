@@ -139,3 +139,36 @@ test("moving and resizing a lifted card saves the authored item, never what the 
     } }).items.card);
   } finally { harness.destroy(); }
 });
+
+test("listening turns a sense on: readings, env changes and play keys reach the script without saving", async () => {
+  const harness = await createBoardScriptHarness({
+    renderer,
+    readModule: async () => `export default function (ctx) {
+  const show = (env) => { ctx.state.env = env.mode + ":" + env.senses.motion + ":" + env.pointer; };
+  show(ctx.env);
+  ctx.on("envchange", ({ data }) => show(data));
+  ctx.on("motion", ({ data }) => { ctx.state.samples = (ctx.state.samples ?? 0) + data.samples.length; });
+  ctx.on("keydown", ({ key }) => { ctx.state.key = key; });
+}`,
+    device: { pointer: "coarse" },
+    document: boardDocument({ items: { wand: { type: "frame", size: { width: 400, height: 400 }, script: { src: "wand.js" } } } }),
+  });
+  try {
+    await harness.advance(50);
+    assert.deepEqual(harness.senses, ["motion"]);
+    const sample = { t: 0, acceleration: { x: 0, y: 0, z: 0 }, gravity: { x: 0, y: -9.8, z: 0 }, rotationRate: { x: 0, y: 1, z: 0 } };
+    await harness.sense("motion", { samples: [sample, sample], orientation: null, heading: null });
+    await harness.key("keydown", "w");
+    let state = (await harness.snapshot()).wand?.state;
+    assert.equal(state?.env, "edit:on:coarse");
+    assert.equal(state?.samples, 2);
+    assert.equal(state?.key, undefined);
+    harness.tool = "play";
+    await harness.advance(50);
+    await harness.key("keydown", "w");
+    state = (await harness.snapshot()).wand?.state;
+    assert.equal(state?.env, "play:on:coarse");
+    assert.equal(state?.key, "w");
+    assert.equal(harness.commits.length, 0);
+  } finally { harness.destroy(); }
+});

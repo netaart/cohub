@@ -13,11 +13,11 @@ import { hostAllowsMediaCapture } from "$lib/host-bridge";
 import { authStore } from "$lib/stores/auth.svelte";
 
 function hostSupports(device: AppDevice) {
-	if (device !== "screen") return hostAllowsMediaCapture();
-	return (
-		typeof navigator !== "undefined" &&
-		typeof navigator.mediaDevices?.getDisplayMedia === "function"
-	);
+	if (typeof navigator === "undefined") return false;
+	if (device === "screen")
+		return typeof navigator.mediaDevices?.getDisplayMedia === "function";
+	if (device === "location") return Boolean(navigator.geolocation);
+	return hostAllowsMediaCapture();
 }
 
 export function createAppDeviceAccess(input: {

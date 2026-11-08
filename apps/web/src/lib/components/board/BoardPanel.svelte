@@ -101,6 +101,7 @@ import {
 	type BoardScriptStatus,
 	watchBoardScriptStatus,
 } from "$lib/board/board-script-status";
+import { createBoardSenseConsent } from "$lib/board/board-senses.svelte";
 import { createBoardSessionActions } from "$lib/board/board-session-actions.svelte";
 import { boardTimelineLanding } from "$lib/board/board-timeline";
 import {
@@ -137,6 +138,7 @@ import BoardPlaybackBar from "$lib/components/board/BoardPlaybackBar.svelte";
 import BoardPlayKeys from "$lib/components/board/BoardPlayKeys.svelte";
 import BoardScriptPanel from "$lib/components/board/BoardScriptPanel.svelte";
 import BoardSelectionToolbar from "$lib/components/board/BoardSelectionToolbar.svelte";
+import BoardSenseChip from "$lib/components/board/BoardSenseChip.svelte";
 import BoardSessionReply from "$lib/components/board/BoardSessionReply.svelte";
 import BoardStage from "$lib/components/board/BoardStage.svelte";
 import BoardTextEditor from "$lib/components/board/BoardTextEditor.svelte";
@@ -145,6 +147,7 @@ import Spinner from "$lib/components/Spinner.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import { authStore } from "$lib/stores/auth.svelte";
 import { mergeCachedTaskRun } from "$lib/stores/task-runs-cache";
 import {
 	describeUploadError,
@@ -194,6 +197,11 @@ let scriptStage = $state.raw<BoardStageController | null>(null);
 let stageView = $state<ReturnType<typeof BoardStage> | null>(null);
 let dock = $state<ReturnType<typeof BoardAnimationDock> | null>(null);
 let soundBlocked = $state(false);
+const senseConsent = createBoardSenseConsent({
+	board: () => boardId ?? path ?? null,
+	viewer: () => authStore.userUuid,
+	onChange: () => scriptStage?.senses.refresh(),
+});
 
 $effect(() => {
 	const media = scriptStage?.media;
@@ -1102,6 +1110,19 @@ $effect(() => {
 	});
 });
 
+function scriptKey(event: KeyboardEvent): boolean {
+	const target = event.target;
+	return (
+		editor.tool === "play" &&
+		!isEditableTarget(target) &&
+		!(
+			target instanceof Element &&
+			target.closest("button, a[href], [role='button']")
+		) &&
+		Boolean(scriptStage?.key(event))
+	);
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
 	if (!(target instanceof HTMLElement)) return false;
 	const tag = target.tagName;
@@ -1179,6 +1200,7 @@ function handleKeydown(event: KeyboardEvent) {
 		return;
 	}
 	if (isEditableTarget(event.target)) return;
+	if (scriptKey(event)) return;
 	if (
 		authoring &&
 		!presenting &&
@@ -1196,7 +1218,9 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 function handleKeyup(event: KeyboardEvent) {
-	if (active) handleBoardKeyUp(editor, event);
+	if (!active) return;
+	if (receivesKeys() && scriptKey(event)) return;
+	handleBoardKeyUp(editor, event);
 }
 
 function clearSpaceHeld() {
@@ -1366,12 +1390,15 @@ onDestroy(() => {
 				<button type="button" class="board-job-action" onclick={onTogglePlay}>{m.board_play_exit({}, { locale })}</button>
 			</div>
 		{/if}
-		{#if soundBlocked && !presenting}
-			<button type="button" class="board-sound" onclick={() => scriptStage?.media.unlock()}>
-				<VolumeX class="h-3.5 w-3.5" />
-				{m.board_sound_enable({}, { locale })}
-			</button>
-		{/if}
+		<div class="board-prompts">
+			{#if soundBlocked && !presenting}
+				<button type="button" class="board-sound" onclick={() => scriptStage?.media.unlock()}>
+					<VolumeX class="h-3.5 w-3.5" />
+					{m.board_sound_enable({}, { locale })}
+				</button>
+			{/if}
+			<BoardSenseChip stage={scriptStage} consent={senseConsent} />
+		</div>
 		{#if notice}
 			<div class="board-notice" class:board-notice--error={notice.error} role="status" aria-live="polite">
 				{notice.text}
@@ -1408,6 +1435,8 @@ onDestroy(() => {
 			onContextMenu={handleContextMenu}
 			onActivate={openItem}
 			{relatedIds}
+			senseConsent={senseConsent.has}
+			fullscreenElement={() => panel}
 		/>
 
 		{#if collaboration && !presenting}
@@ -1724,16 +1753,23 @@ onDestroy(() => {
 		color: var(--text-tertiary);
 	}
 
-	.board-sound {
+	.board-prompts {
 		position: absolute;
 		bottom: 16px;
 		left: 50%;
 		z-index: 32;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		transform: translateX(-50%);
+		pointer-events: none;
+	}
+	.board-sound {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
 		height: 32px;
-		transform: translateX(-50%);
+		pointer-events: auto;
 		border: 1px solid var(--border-subtle);
 		border-radius: 999px;
 		background: var(--bg-elevated);

@@ -2,13 +2,14 @@ import type { BoardDocument } from "@cohub/protocol";
 import type { BoardScriptEvent, BoardScriptOutput } from "./script.js";
 import { isBoardRootScript } from "./script-index.js";
 import { boardScriptScope } from "./script-scope.js";
+import { isBoardScriptSense, mergeBoardScriptSense } from "./script-senses.js";
 
 export const BOARD_SCRIPT_EVENT_QUEUE = 128;
 export const BOARD_SCRIPT_EMIT_DEPTH = 16;
 
 function supersedes(pending: BoardScriptEvent, event: BoardScriptEvent): boolean {
   if (pending.type !== event.type) return false;
-  if (event.type === "viewchange" || event.type === "selectionchange") return true;
+  if (event.type === "viewchange" || event.type === "selectionchange" || isBoardScriptSense(event.type)) return true;
   if (event.type === "pointermove") return pending.pointerId === event.pointerId;
   if (event.type !== "gesture") return false;
   const a = pending.data as { id: string; phase: string };
@@ -23,6 +24,7 @@ export function boardScriptListens(output: BoardScriptOutput | null | undefined,
 export function queueBoardScriptEvent(queue: BoardScriptEvent[], event: BoardScriptEvent): boolean {
   let queued = queue.length - 1;
   while (queued >= 0 && !supersedes(queue[queued] as BoardScriptEvent, event)) queued--;
+  if (queued >= 0 && isBoardScriptSense(event.type)) event = mergeBoardScriptSense(queue[queued] as BoardScriptEvent, event);
   if (queued >= 0 && (event.type !== "pointermove" || queued === queue.length - 1)) queue.splice(queued, 1);
   if (queue.length >= BOARD_SCRIPT_EVENT_QUEUE) return false;
   queue.push(event);

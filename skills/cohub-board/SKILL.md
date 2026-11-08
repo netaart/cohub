@@ -197,6 +197,12 @@ and what took it, so a stroke that started on a caption or a drag that grabbed a
 handle shows at once. It compiles shaders first and stops on errors, and gives up after
 `--timeout` (2m) naming the scripts still busy.
 
+Scripts sense the viewer through `ctx.env` (mode, pointer, orientation, senses) and
+by listening to `motion`, `gamepad`, `audio` or `location`: a sense runs only while a
+script listens, Cohub never saves readings (commit only what the Board needs), and
+`simulate` delivers them with `{"sense": "motion", "data": {…}}`.
+`capabilities.call("haptics" | "fullscreen")` answers back. Check `ctx.env.senses` and offer a fallback when one is unavailable.
+
 Published as an App, a Board opens in play: every visitor gets a local copy where
 drags move unlocked items and script regions take every press, saved per App version.
 Lock what visitors should not move, keep progress in the document (`ctx.state` starts

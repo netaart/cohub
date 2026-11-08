@@ -11,7 +11,8 @@ import {
 } from "../../model/script-scene.js";
 import { BOARD_SCRIPT_HISTORY_MS } from "../../model/animation.js";
 import { BOARD_SCRIPT_EXPORT_CALLS } from "../../model/script-calls.js";
-import type { BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot, BoardScriptView } from "../../model/script.js";
+import { BOARD_SCRIPT_EXPORT_ENV } from "../../model/script-senses.js";
+import type { BoardScriptEnv, BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot, BoardScriptView } from "../../model/script.js";
 import { BOARD_SCRIPT_EMIT_DEPTH, boardScriptEmit, boardScriptListens, createBoardScriptOutbox, queueBoardScriptEvent } from "../../model/script-events.js";
 import {
   loadBoardScriptSources,
@@ -388,13 +389,18 @@ function createNodeScriptLanes(
   };
 }
 
-function scopedInput(document: BoardDocument, { id, script, item }: BoardScriptAttachment, size: { width: number; height: number }): ScriptRuntimeInput {
+function scopedInput(
+  document: BoardDocument,
+  { id, script, item }: BoardScriptAttachment,
+  size: { width: number; height: number },
+  env: BoardScriptEnv = BOARD_SCRIPT_EXPORT_ENV,
+): ScriptRuntimeInput {
   const items: Record<string, BoardItem> = {};
   for (const scoped of boardScriptScope(document, id)) {
     const value = document.items[scoped];
     if (value) items[scoped] = value;
   }
-  return { id, script, item, items, width: size.width, height: size.height };
+  return { id, script, item, items, width: size.width, height: size.height, env };
 }
 
 export function createNodeBoardScriptHost(
@@ -710,7 +716,7 @@ export function createNodeBoardScriptRuntime(
           entries.set(id, entry);
         }
         if (entry.error || entry.busy) continue;
-        const input = { ...scopedInput(document, attachment, item ? scene.layout.box(id) : { width: 0, height: 0 }), capabilities };
+        const input = { ...scopedInput(document, attachment, item ? scene.layout.box(id) : { width: 0, height: 0 }, callbacks.env()), capabilities };
         const inputKey = JSON.stringify(input);
         const changed = inputKey !== entry.inputKey;
         const waiting = changed || entry.dirty || entry.events.length > 0;
