@@ -269,7 +269,8 @@ $effect(() => {
 			{subtitle}
 			{onToggle}
 			onSelect={(node) => {
-				if (node.type === "file") onOpenPath(node.path, { mobile });
+				if (node.type === "file" || node.type === "symlink")
+					onOpenPath(node.path, { mobile });
 			}}
 			{onRefresh}
 			{onCreateFile}

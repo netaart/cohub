@@ -1,5 +1,5 @@
 import { SPACE_CUSTOM_THEME_CSS_PATH } from "@cohub/protocol";
-import { HttpError } from "@neta-art/cohub";
+import { HttpError, isSpaceFsSymlink, symlinkReadError } from "@neta-art/cohub";
 import { SvelteMap } from "svelte/reactivity";
 import { sdk } from "$lib/sdk";
 
@@ -94,6 +94,7 @@ async function load(spaceId: string, seq: number, attempt = 0) {
 			.space(spaceId)
 			.files.read(SPACE_CUSTOM_THEME_CSS_PATH);
 		if (!isLatest()) return;
+		if (isSpaceFsSymlink(file)) throw symlinkReadError(file);
 		if (!("content" in file)) {
 			scheduleRetry(spaceId, seq, attempt, file.retryAfterMs);
 			return;

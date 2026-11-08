@@ -1,8 +1,14 @@
 import { createLocalWorkspaces, type LocalWorkspaces } from "../local-workspace.js";
 import { HttpError, type HttpTransport } from "../transport.js";
-import type { SpaceFsFileResponse, SpaceFsPreparingFile, SpaceFsReadFilesResponse } from "../types.js";
+import type { SpaceFsFileResponse, SpaceFsPreparingFile, SpaceFsReadFilesResponse, SpaceFsSymlink } from "../types.js";
 
-export type SpaceFileRead = SpaceFsFileResponse | SpaceFsPreparingFile;
+export type SpaceFileRead = SpaceFsFileResponse | SpaceFsPreparingFile | SpaceFsSymlink;
+
+/** For readers that need file bytes: a symlink fails the way it did before reads could describe one. */
+export function symlinkReadError(file: SpaceFsSymlink) {
+	const message = `${file.path} is a symbolic link to ${file.target}.`;
+	return new HttpError(message, 400, { code: "symlink_not_supported", message });
+}
 
 const BATCH_SIZE = 32;
 const BATCH_CONCURRENCY = 2;
@@ -128,6 +134,8 @@ export function createSpaceFileReads(transport: HttpTransport, local: LocalWorks
 			if (pending) settle(pending, { file });
 		}
 		for (const { path, status, code, message } of response.errors) {
+			// Batch reads reject symlinks; leave them in byPath so the single read below describes them.
+			if (code === "symlink_not_supported") continue;
 			const pending = take(path);
 			if (pending) settle(pending, { error: new HttpError(message, status, { code, message }) });
 		}

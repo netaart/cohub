@@ -8,7 +8,12 @@ import {
 	type SpaceInstalledApps,
 	SpaceInstalledAppsSchema,
 } from "@cohub/protocol";
-import { HttpError, type SpaceFsFileResponse } from "@neta-art/cohub";
+import {
+	HttpError,
+	isSpaceFsSymlink,
+	type SpaceFsFileResponse,
+	symlinkReadError,
+} from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
 
 const MAX_CATALOG_BYTES = 5 * 1024 * 1024;
@@ -73,6 +78,7 @@ export function readInstalledApps(
 			const file = await sdk
 				.space(spaceId)
 				.files.read(SPACE_INSTALLED_APPS_PATH);
+			if (isSpaceFsSymlink(file)) throw symlinkReadError(file);
 			if (!("content" in file)) {
 				throw new Error("The installed Apps file is still being prepared.");
 			}

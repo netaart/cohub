@@ -4,6 +4,7 @@ import {
   type BoardPlaybackChangedEvent as ProtocolBoardPlaybackChangedEvent,
   getRealtimeBoardRoom,
 } from "@cohub/protocol/realtime/types";
+import { isSpaceFsSymlink } from "@cohub/protocol/fs";
 import type { BoardAwarenessUpdate } from "@cohub/protocol/realtime";
 import { ensureRealtimeConnected } from "../../realtime.js";
 import type { Fetch, HttpTransport } from "../../transport.js";
@@ -20,6 +21,7 @@ import type {
   BoardReadResult,
   SpaceFsFileResponse,
   SpaceFsPreparingFile,
+  SpaceFsSymlink,
 } from "../../types.js";
 import type { WebsocketClient } from "../../websocket.js";
 import type { ResolvedFile, ResolveFileOptions } from "../../media.js";
@@ -299,7 +301,7 @@ export class BoardClient implements BoardRemote {
 }
 
 type BoardFiles = {
-  read(path: string, customFetch?: Fetch): Promise<SpaceFsFileResponse | SpaceFsPreparingFile>;
+  read(path: string, customFetch?: Fetch): Promise<SpaceFsFileResponse | SpaceFsPreparingFile | SpaceFsSymlink>;
   resolve(path: string, options?: ResolveFileOptions): Promise<ResolvedFile | null>;
   onUrlChange(listener: (path: string) => void): () => void;
 };
@@ -339,6 +341,7 @@ export class SpaceBoardsApi {
 
   async resolveId(path: string, customFetch?: Fetch): Promise<string> {
     const file = await this.files.read(path, customFetch);
+    if (isSpaceFsSymlink(file)) throw new Error(`${path} is a symbolic link to ${file.target}.`);
     if (!("content" in file)) throw new Error(`${path} is being prepared; try again shortly.`);
     return parseBoardManifest(await fileText(file, customFetch)).boardId;
   }

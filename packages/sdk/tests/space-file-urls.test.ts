@@ -96,3 +96,23 @@ test("reads share a request only when they carry the same credential", async () 
 	assert.deepEqual(byToken.get("guest"), ["secret.md"]);
 	assert.deepEqual(byToken.get(null), ["notes.md"]);
 });
+
+test("a batched symlink falls back to a single read that describes it", async () => {
+	const link = { kind: "symlink", path: "AGENTS.md", name: "AGENTS.md", size: 9, mtimeMs: 1, target: "CLAUDE.md", targetPath: "CLAUDE.md" };
+	const singles: string[] = [];
+	const transport = {
+		credential: async () => "a",
+		async requestRevalidated(url: string) {
+			singles.push(new URL(url, "http://x").searchParams.get("path") as string);
+			return link;
+		},
+		request: async () => ({
+			files: [file("a.png")],
+			errors: [{ path: "AGENTS.md", code: "symlink_not_supported", message: "Symlink preview is not supported.", status: 400 }],
+		}),
+	} as unknown as HttpTransport;
+	const reads = createSpaceFileReads(transport);
+	const [symlink] = await Promise.all([reads.read("s", "AGENTS.md"), reads.read("s", "a.png")]);
+	assert.deepEqual(symlink, link);
+	assert.deepEqual(singles, ["AGENTS.md"]);
+});

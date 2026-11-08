@@ -2,14 +2,15 @@ import type {
 	SpaceFsEntry,
 	SpaceFsFileResponse,
 	SpaceFsPreparingFile,
+	SpaceFsSymlink,
 } from "@neta-art/cohub";
-import { readDirectoryPages, type DirectoryListing } from "$lib/space-fs-list";
 import { sdk } from "$lib/sdk";
 import {
 	buildSpaceFileDownloadUrl,
 	downloadFileResponse,
 	downloadSpaceFile,
 } from "$lib/space-file-download";
+import { type DirectoryListing, readDirectoryPages } from "$lib/space-fs-list";
 
 export type ActiveFsSource =
 	| { kind: "live" }
@@ -26,7 +27,7 @@ export type ActiveFsClient = {
 	read: (
 		path: string,
 		signal?: AbortSignal,
-	) => Promise<SpaceFsFileResponse | SpaceFsPreparingFile>;
+	) => Promise<SpaceFsFileResponse | SpaceFsPreparingFile | SpaceFsSymlink>;
 	download: (
 		path: string,
 		knownFile?: SpaceFsFileResponse | null,

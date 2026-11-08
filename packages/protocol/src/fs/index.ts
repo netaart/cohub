@@ -87,6 +87,23 @@ export type SpaceFsPreparingFile = {
   retryAfterMs: number;
 };
 
+/** A symlink read from a cloud Space: its link text only, never the target's content. */
+export type SpaceFsSymlink = {
+  kind: "symlink";
+  path: string;
+  name: string;
+  size: number;
+  mtimeMs: number;
+  /** Link text as stored on disk. */
+  target: string;
+  /** Workspace-relative target path, only when the link text resolves inside the workspace. */
+  targetPath?: string;
+};
+
+export function isSpaceFsSymlink(value: object): value is SpaceFsSymlink {
+  return "kind" in value && value.kind === "symlink";
+}
+
 export type SpaceFsReadFilesResponse = {
   files: SpaceFsFileResponse[];
   preparing?: SpaceFsPreparingFile[];

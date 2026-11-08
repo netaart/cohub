@@ -6,6 +6,7 @@ import type {
 import type {
 	SpaceFsFileResponse,
 	SpaceFsPreparingFile,
+	SpaceFsSymlink,
 } from "@neta-art/cohub";
 import { HttpError } from "@neta-art/cohub";
 import type { BoardDocument } from "@neta-art/cohub/board";
@@ -22,7 +23,10 @@ import {
 } from "$lib/cache/repositories/board-repo";
 import { sdk } from "$lib/sdk";
 
-type BoardFileResponse = SpaceFsFileResponse | SpaceFsPreparingFile;
+type BoardFileResponse =
+	| SpaceFsFileResponse
+	| SpaceFsPreparingFile
+	| SpaceFsSymlink;
 
 export type InlineBoardPanelState = {
 	path: string;

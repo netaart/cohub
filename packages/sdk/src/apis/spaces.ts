@@ -78,7 +78,6 @@ import type {
   SpaceFsCreateUploadInput,
   SpaceFsCreateUploadResponse,
   SpaceFsFileResponse,
-  SpaceFsPreparingFile,
   SpaceFsReadFilesResponse,
   SpaceFsCreateDirectoryResult,
   SpaceFsDeleteResult,
@@ -116,10 +115,10 @@ import type {
 } from "../types.js";
 import type { ResolvedFile } from "../media.js";
 import { SpaceInvitationsApi } from "./invitations.js";
-import { fileReadPath } from "./space-file-reads.js";
+import { fileReadPath, symlinkReadError, type SpaceFileRead } from "./space-file-reads.js";
 import { inlineFileDataUrl, type ResolveSpaceFileOptions, type SpaceFileServices } from "./space-file-urls.js";
 import { LocalWorkspaceUnavailableError, type LocalWorkspace } from "../local-workspace.js";
-import { base64ToBytes, SpaceFsError } from "@cohub/protocol/fs";
+import { base64ToBytes, isSpaceFsSymlink, SpaceFsError } from "@cohub/protocol/fs";
 
 
 async function fetchTurnObject<T>(url: string, fetchImpl: Fetch = globalThis.fetch, signal?: AbortSignal): Promise<T> {
@@ -443,7 +442,7 @@ export class SpaceFilesApi {
     return this.services.local.run(this.spaceId, mode, local, remote);
   }
 
-  read(path: string, customFetch?: Fetch, signal?: AbortSignal): Promise<SpaceFsFileResponse | SpaceFsPreparingFile> {
+  read(path: string, customFetch?: Fetch, signal?: AbortSignal): Promise<SpaceFileRead> {
     if (customFetch)
       return this.transport.requestRevalidated(fileReadPath(this.spaceId, path), { fetch: customFetch, signal });
     return this.services.reads.read(this.spaceId, path, { signal });
@@ -485,6 +484,7 @@ export class SpaceFilesApi {
           if (file.delivery === "url" && file.url) return file.media ? { url: file.url, media: file.media } : { url: file.url };
           return purpose === "preview" ? { url: inlineFileDataUrl(file) } : null;
         }
+        if (isSpaceFsSymlink(file)) throw symlinkReadError(file);
         const remainingMs = deadlineAt - Date.now();
         if (remainingMs <= 0) return null;
         const retryAfterMs = Math.max(250, Math.min(file.retryAfterMs, 2_000));

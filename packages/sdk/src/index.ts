@@ -96,7 +96,8 @@ export {
   UPLOAD_MAX_BATCH_FILES,
   UPLOAD_MAX_FILE_BYTES,
 } from "@cohub/protocol";
-export { isTextMime, mimeTypeForPath } from "@cohub/protocol/fs";
+export { isSpaceFsSymlink, isTextMime, mimeTypeForPath } from "@cohub/protocol/fs";
+export { symlinkReadError } from "./apis/space-file-reads.js";
 export type { SpaceRef } from "./space-ref.js";
 export { AppCommerceApi } from "./apis/app-commerce.js";
 export { AppRealtimeApi, AppRoom } from "./apis/app-realtime.js";
