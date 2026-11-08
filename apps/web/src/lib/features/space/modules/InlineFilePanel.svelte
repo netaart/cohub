@@ -2,6 +2,7 @@
 import type {
 	AppRecord,
 	SpaceFsFileResponse,
+	SpaceFsSymlink,
 	SpacePendingDiffFileResponse,
 } from "@neta-art/cohub";
 import {
@@ -12,6 +13,7 @@ import {
 	Download,
 	Eye,
 	GitCompare,
+	Link2,
 	ListTree,
 	Pencil,
 	RefreshCw,
@@ -46,6 +48,8 @@ import type { Window } from "./windows";
 
 type InlineFilePanelState = {
 	response: SpaceFsFileResponse | null;
+	symlink: SpaceFsSymlink | null;
+	symlinkTargetIsFile: boolean;
 	draft: string;
 	path: string;
 	position: WorkspaceFilePosition | null;
@@ -531,6 +535,26 @@ $effect(() => {
 			detail: inlineFile?.error ?? m.inline_failed_open({}, { locale }),
 			variant: "error",
 		})}
+	{:else if inlineFile?.symlink}
+		{@const link = inlineFile.symlink}
+		<div class="flex flex-1 items-center justify-center p-4">
+			<div class="flex min-w-0 max-w-full items-center gap-2 text-sm">
+				<Link2 class="h-4 w-4 shrink-0 text-text-tertiary" />
+				<span class="shrink-0 text-text-secondary">{m.inline_symlink({}, { locale })}</span>
+				<span class="shrink-0 text-text-tertiary" aria-hidden="true">→</span>
+				{#if link.targetPath && inlineFile.symlinkTargetIsFile}
+					{@const targetPath = link.targetPath}
+					<button
+						type="button"
+						class="min-w-0 truncate font-mono text-brand hover:underline"
+						title={targetPath}
+						onclick={() => void onOpenLinkedInlineFile(targetPath)}
+					>{link.target}</button>
+				{:else}
+					<span class="min-w-0 break-all font-mono text-text-primary">{link.target}</span>
+				{/if}
+			</div>
+		</div>
 	{:else if inlineFile?.response}
 		{@render SoftFailBanner()}
 		{@render SyncIssueBanner()}

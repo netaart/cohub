@@ -1766,6 +1766,7 @@
 	"inline_loading_file": "Loading file…",
 	"inline_too_large_title": "File too large to preview",
 	"inline_too_large_detail": "This file exceeds 10MB and cannot be opened in the web editor.",
+	"inline_symlink": "Symbolic link",
 	"inline_failed_open": "Failed to open file",
 	"inline_preview_markdown": "Preview markdown",
 	"inline_preview_table": "Preview table",

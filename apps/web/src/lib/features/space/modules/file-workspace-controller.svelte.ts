@@ -1,9 +1,10 @@
 import type {
 	SpaceFsEntry,
 	SpaceFsFileResponse,
+	SpaceFsSymlink,
 	SpacePendingDiffFileResponse,
 } from "@neta-art/cohub";
-import { HttpError } from "@neta-art/cohub";
+import { HttpError, isSpaceFsSymlink } from "@neta-art/cohub";
 
 import { ensureBoardExtension } from "$lib/board/board-file";
 import {
@@ -57,6 +58,9 @@ type FileDiffState = {
 
 export type FileWorkspaceInlineFile = {
 	response: SpaceFsFileResponse | null;
+	symlink: SpaceFsSymlink | null;
+	/** Only a target listed as a file, reached through real directories, is a link. */
+	symlinkTargetIsFile: boolean;
 	draft: string;
 	path: string;
 	position: WorkspaceFilePosition | null;
@@ -178,6 +182,8 @@ export function createFileWorkspaceController(
 	): FileWorkspaceInlineFile {
 		return {
 			response: null,
+			symlink: null,
+			symlinkTargetIsFile: false,
 			draft: "",
 			path,
 			position,
@@ -583,6 +589,11 @@ export function createFileWorkspaceController(
 				markInlineFileExternalChange(path);
 				return;
 			}
+			if (isSpaceFsSymlink(rawFile)) {
+				setInlineFileTab(path, (tab) => ({ ...tab, draft: "", error: null }));
+				await showSymlink(path, rawFile, requestToken);
+				return;
+			}
 			if (!("content" in rawFile)) {
 				const retrying = prepareAttempt < 4;
 				setInlineFileTab(path, (tab) => ({
@@ -954,7 +965,8 @@ export function createFileWorkspaceController(
 			setInlineFileTab(path, (tab) => ({
 				...tab,
 				position: optionsArg.position ?? tab.position,
-				loading: needsReload,
+				// A symlink view stays up while its link text reloads.
+				loading: needsReload && !tab.symlink,
 				error: needsReload ? null : tab.error,
 				tooLarge: false,
 				requestToken,
@@ -988,10 +1000,22 @@ export function createFileWorkspaceController(
 				sourceKey !== options.getActiveFsSourceKey()
 			)
 				return;
+			if (isSpaceFsSymlink(rawFile)) {
+				setInlineFileTab(path, (tab) => ({
+					...tab,
+					draft: "",
+					loading: false,
+					error: null,
+					tooLarge: false,
+				}));
+				await showSymlink(path, rawFile, requestToken);
+				return;
+			}
 			if (!("content" in rawFile)) {
 				// Preparing: keep meta so the panel can offer Download + Retry.
 				setInlineFileTab(path, (tab) => ({
 					...tab,
+					symlink: null,
 					response: {
 						path: rawFile.path,
 						name: rawFile.name,
@@ -1024,6 +1048,7 @@ export function createFileWorkspaceController(
 			setInlineFileTab(path, (tab) => ({
 				...tab,
 				response: file,
+				symlink: null,
 				draft: textReady ? file.content : "",
 				loading: false,
 				saving: false,
@@ -1051,6 +1076,7 @@ export function createFileWorkspaceController(
 				setInlineFileTab(path, (tab) => ({
 					...tab,
 					// Keep a minimal response so Download remains available.
+					symlink: null,
 					response: tab.response ?? {
 						path,
 						name: path.split("/").pop() ?? path,
@@ -1078,6 +1104,52 @@ export function createFileWorkspaceController(
 				}));
 			}
 		}
+	}
+
+	async function showSymlink(
+		path: string,
+		symlink: SpaceFsSymlink,
+		requestToken: number,
+	) {
+		const isCurrent = (tab: FileWorkspaceInlineFile) =>
+			tab.requestToken === requestToken;
+		setInlineFileTab(path, (tab) => ({
+			...tab,
+			response: null,
+			symlink,
+			// Keep a known answer while the same link reloads, so it doesn't flicker.
+			symlinkTargetIsFile:
+				tab.symlinkTargetIsFile &&
+				tab.symlink?.targetPath === symlink.targetPath,
+		}));
+		if (!symlink.targetPath) return;
+		const isFile = await isListedFile(symlink.targetPath).catch(() => false);
+		setInlineFileTab(path, (tab) =>
+			isCurrent(tab) ? { ...tab, symlinkTargetIsFile: isFile } : tab,
+		);
+	}
+
+	/**
+	 * Uses only directory listings, as the tree does, so the target's content is
+	 * never read and a path through a linked directory never counts.
+	 */
+	async function isListedFile(path: string) {
+		const segments = path.split("/");
+		let dirPath = "";
+		for (const [index, name] of segments.entries()) {
+			const loaded = dirPath ? findFsNode(dirPath) : null;
+			const entries: SpaceFsEntry[] =
+				dirPath === "" && fileTree.length > 0
+					? fileTree
+					: loaded?.isLoaded
+						? loaded.children
+						: (await getActiveFsClient().list(dirPath)).entries;
+			const entry = entries.find((item) => item.name === name);
+			if (index === segments.length - 1) return entry?.type === "file";
+			if (entry?.type !== "dir") return false;
+			dirPath = entry.path;
+		}
+		return false;
 	}
 
 	function closeInlineFile(path = activeInlineFilePath, skipConfirm = false) {

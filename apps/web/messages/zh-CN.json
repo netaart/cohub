@@ -1766,6 +1766,7 @@
 	"inline_loading_file": "正在加载文件…",
 	"inline_too_large_title": "文件过大无法预览",
 	"inline_too_large_detail": "该文件超过 10MB，无法在 Web 编辑器中打开。",
+	"inline_symlink": "符号链接",
 	"inline_failed_open": "打开文件失败",
 	"inline_preview_markdown": "预览 Markdown",
 	"inline_preview_table": "预览表格",

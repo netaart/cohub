@@ -4,7 +4,7 @@ import {
 	buildAppNavigationOpenMessage,
 } from "@cohub/protocol/app-navigation";
 import type { AppRuntimeShellContext } from "@neta-art/cohub";
-import { HttpError } from "@neta-art/cohub";
+import { HttpError, isSpaceFsSymlink } from "@neta-art/cohub";
 import { parseBoardLaunch } from "@neta-art/cohub/board";
 import type { BoardReplica } from "@neta-art/cohub/board/replica";
 import type { AppNavigationHandler } from "$lib/board/board-app";
@@ -55,7 +55,12 @@ const shown = $derived(boardId && board?.boardId === boardId ? board : null);
 
 async function readManifest(live: () => boolean, attempt = 0): Promise<string> {
 	const file = await sdk.space(spaceId).files.read(path);
-	if ("content" in file || attempt >= MAX_PREPARING_RETRIES || !live())
+	if (
+		"content" in file ||
+		isSpaceFsSymlink(file) ||
+		attempt >= MAX_PREPARING_RETRIES ||
+		!live()
+	)
 		return readBoardManifestId(file);
 	const wait = Math.min(2000, Math.max(250, file.retryAfterMs));
 	await new Promise((resolve) => setTimeout(resolve, wait));

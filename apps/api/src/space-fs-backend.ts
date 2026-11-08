@@ -6,6 +6,7 @@ import { isSandboxDialable } from "@cohub/sandbox-controller";
 import type { AgentSandboxFsMutationOperation } from "@cohub/infra/agent-queue";
 import { enqueueSandboxFsMutationJob, SandboxFsMutationTimeoutError } from "./sandbox-fs-mutation-queue.js";
 import { SpaceFsError, assertSafeRelativePath } from "./space-fs.js";
+import type { SpaceFsSymlink } from "@cohub/protocol/fs";
 import { markWorkspaceChanged } from "./workspace-usage.js";
 
 // Provider-aware facade over the space filesystem. Cloud spaces read/write the
@@ -136,10 +137,23 @@ export async function listSpaceDirectory(spaceId: string, path?: string, options
     : direct.listSpaceDirectory(spaceId, path, options);
 }
 
-export async function readSpaceFile(spaceId: string, path: string, options?: Visibility) {
-  return (await isLocalSpace(spaceId))
-    ? remote.readSpaceFile(spaceId, path, options)
-    : direct.readSpaceFile(spaceId, path, options);
+/** Local sandboxes follow symlinks themselves, so only cloud reads can describe one. */
+export function readSpaceFile(
+  spaceId: string,
+  path: string,
+  options: Visibility & { describeSymlink: true },
+): Promise<Awaited<ReturnType<typeof direct.readSpaceFile>> | SpaceFsSymlink>;
+export function readSpaceFile(
+  spaceId: string,
+  path: string,
+  options?: Visibility,
+): ReturnType<typeof direct.readSpaceFile>;
+export async function readSpaceFile(spaceId: string, path: string, options?: Visibility & { describeSymlink?: boolean }) {
+  if (await isLocalSpace(spaceId)) return remote.readSpaceFile(spaceId, path, options);
+  const visibility = options?.visibility;
+  return options?.describeSymlink
+    ? direct.readSpaceFile(spaceId, path, { visibility, describeSymlink: true })
+    : direct.readSpaceFile(spaceId, path, { visibility });
 }
 
 export async function statSpaceFileVersion(spaceId: string, path: string) {

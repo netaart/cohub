@@ -2,7 +2,7 @@
 import { directoryCursor, FsPaginationError } from "./fs-pagination.js";
 import type { SpaceFsListOptions, SpaceFsTreePage } from "@cohub/protocol/fs";
 import { constants, type Stats } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -37,6 +37,7 @@ import {
   type SpaceFsReadFilesError,
   type SpaceFsReadFilesResponse,
   type SpaceFsPreparingFile,
+  type SpaceFsSymlink,
   type SpaceFsTreeResponse,
   type SpaceFsUploadResponse,
   type SpaceFsUploadTargetVersion,
@@ -684,7 +685,12 @@ export async function listSpaceDirectory(
 async function readSpaceFileMetadata(
   spaceId: string,
   path: string,
-  options?: { enforcePreviewLimit?: boolean; visibility?: SpaceFsVisibility; observation?: SpaceFsObservation },
+  options?: {
+    enforcePreviewLimit?: boolean;
+    visibility?: SpaceFsVisibility;
+    observation?: SpaceFsObservation;
+    allowSymlink?: boolean;
+  },
 ) {
   const observation = options?.observation;
   const observe = <T>(
@@ -739,7 +745,10 @@ async function readSpaceFileMetadata(
     "file_check",
     "Validate node type and preview size limits before reading content.",
     () => {
-      if (stats.isSymbolicLink()) throw new SpaceFsError(400, "symlink_not_supported", "Symlink preview is not supported.");
+      if (stats.isSymbolicLink()) {
+        if (options?.allowSymlink) return;
+        throw new SpaceFsError(400, "symlink_not_supported", "Symlink preview is not supported.");
+      }
       if (!stats.isFile()) throw new SpaceFsError(400, "not_a_file", "The selected path is not a file.");
       if (options?.enforcePreviewLimit !== false && stats.size > MAX_FILE_BYTES) {
         throw fileTooLarge();
@@ -751,7 +760,31 @@ async function readSpaceFileMetadata(
     }),
   );
 
-  return { target, relativePath, stats };
+  return { root, target, relativePath, stats };
+}
+
+// Cloud sandboxes mount the workspace here, so absolute links written inside them use this prefix.
+const SANDBOX_WORKSPACE_DIR = "/workspace";
+
+/** Describes a symlink from its link text alone; the target is never stat'ed or read. */
+async function describeSymlink(root: string, target: string, relativePath: string, stats: Stats): Promise<SpaceFsSymlink> {
+  const link = await readlink(target);
+  const sandboxRelative = link === SANDBOX_WORKSPACE_DIR || link.startsWith(`${SANDBOX_WORKSPACE_DIR}/`)
+    ? link.slice(SANDBOX_WORKSPACE_DIR.length + 1)
+    : null;
+  // The kernel resolves relative link text against the link's real parent directory.
+  const resolved = sandboxRelative !== null ? resolve(root, sandboxRelative) : resolve(await realpath(dirname(target)), link);
+  const targetPath = toRelativePath(root, resolved);
+  const inside = targetPath !== "" && targetPath !== ".." && !targetPath.startsWith("../") && !isAbsolute(targetPath);
+  return {
+    kind: "symlink",
+    path: relativePath,
+    name: basename(target),
+    size: stats.size,
+    mtimeMs: stats.mtimeMs,
+    target: link,
+    ...(inside ? { targetPath } : {}),
+  };
 }
 
 async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T, index: number) => Promise<R>) {
@@ -804,18 +837,44 @@ function toInlineFileResponse(target: string, relativePath: string, stats: Stats
   };
 }
 
+type ReadSpaceFileOptions = { visibility?: SpaceFsVisibility; describeSymlink?: boolean };
+
+/** Symlinks are rejected unless `describeSymlink` asks for their link text instead. */
+export function readSpaceFile(
+  spaceId: string,
+  path: string,
+  options: ReadSpaceFileOptions & { describeSymlink: true },
+): Promise<SpaceFsFileResponse | SpaceFsPreparingFile | SpaceFsSymlink>;
+export function readSpaceFile(
+  spaceId: string,
+  path: string,
+  options?: ReadSpaceFileOptions & { describeSymlink?: false },
+): Promise<SpaceFsFileResponse | SpaceFsPreparingFile>;
 export async function readSpaceFile(
   spaceId: string,
   path: string,
-  options?: { visibility?: SpaceFsVisibility },
-): Promise<SpaceFsFileResponse | SpaceFsPreparingFile> {
+  options?: ReadSpaceFileOptions,
+): Promise<SpaceFsFileResponse | SpaceFsPreparingFile | SpaceFsSymlink> {
   const visibility = options?.visibility ?? "full";
   return observeSpaceFs("file", { spaceId, path, visibility }, async (observation) => {
-    const { target, relativePath, stats } = await readSpaceFileMetadata(spaceId, path, {
+    const { root, target, relativePath, stats } = await readSpaceFileMetadata(spaceId, path, {
       enforcePreviewLimit: false,
       visibility,
       observation,
+      allowSymlink: options?.describeSymlink === true,
     });
+
+    if (stats.isSymbolicLink()) {
+      const symlink = await observeSpaceFsStage(
+        observation,
+        "symlink_describe",
+        "Read the symlink's link text; its target is not read.",
+        () => describeSymlink(root, target, relativePath, stats),
+        (result) => ({ targetInside: result.targetPath !== undefined }),
+      );
+      observation.result = { delivery: "symlink" };
+      return symlink;
+    }
 
     const mimeType = await observeSpaceFsStage(
       observation,

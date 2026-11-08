@@ -806,6 +806,7 @@ export type SpaceFsUploadProgress = {
   errors: SpaceFsUploadError[];
 };
 export type {
+  SpaceFsSymlink,
   SpaceFsCopyError,
   SpaceFsCopyInput,
   SpaceFsCopyOptions,

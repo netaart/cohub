@@ -1,6 +1,9 @@
-import type {
-	SpaceFsFileResponse,
-	SpaceFsPreparingFile,
+import {
+	isSpaceFsSymlink,
+	type SpaceFsFileResponse,
+	type SpaceFsPreparingFile,
+	type SpaceFsSymlink,
+	symlinkReadError,
 } from "@neta-art/cohub";
 import { parseBoardManifest } from "@neta-art/cohub/board";
 import { tryResolveTextFileResponse } from "$lib/space-file-text";
@@ -38,8 +41,9 @@ export function resolveBoardManifestText(
 }
 
 export async function readBoardManifestId(
-	rawFile: SpaceFsFileResponse | SpaceFsPreparingFile,
+	rawFile: SpaceFsFileResponse | SpaceFsPreparingFile | SpaceFsSymlink,
 ): Promise<string> {
+	if (isSpaceFsSymlink(rawFile)) throw symlinkReadError(rawFile);
 	if (!rawFile || typeof rawFile !== "object" || !("content" in rawFile))
 		throw new Error("Board manifest is being prepared. Retry in a moment.");
 	const { file, error } = await tryResolveTextFileResponse(rawFile);

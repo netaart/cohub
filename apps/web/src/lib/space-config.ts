@@ -1,5 +1,5 @@
 import { SPACE_CONFIG_PATH, withNewChatBackground } from "@cohub/protocol";
-import { HttpError } from "@neta-art/cohub";
+import { HttpError, isSpaceFsSymlink, symlinkReadError } from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
 import {
 	type NewChatBackgroundConfig,
@@ -200,6 +200,7 @@ async function readEditableSpaceConfig(spaceId: string): Promise<{
 }> {
 	try {
 		const raw = await sdk.space(spaceId).files.read(SPACE_CONFIG_PATH);
+		if (isSpaceFsSymlink(raw)) throw symlinkReadError(raw);
 		if (!("content" in raw))
 			throw new Error(`${SPACE_CONFIG_PATH} is being prepared.`);
 		const { content } = await resolveTextFileResponse(raw);

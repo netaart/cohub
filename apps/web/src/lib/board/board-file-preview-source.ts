@@ -21,9 +21,11 @@
  */
 
 import type { SpaceFsChange } from "@cohub/protocol/fs";
-import type {
-	SpaceFsFileResponse,
-	SpaceFsPreparingFile,
+import {
+	isSpaceFsSymlink,
+	type SpaceFsFileResponse,
+	type SpaceFsPreparingFile,
+	type SpaceFsSymlink,
 } from "@neta-art/cohub";
 import {
 	availabilityFromError,
@@ -184,7 +186,7 @@ async function readSnapshot(
 	// not go stale.
 	if (!shouldRead(request)) return { facts: base, complete: true };
 
-	let file: SpaceFsFileResponse | SpaceFsPreparingFile;
+	let file: SpaceFsFileResponse | SpaceFsPreparingFile | SpaceFsSymlink;
 	try {
 		file = await sdk.space(spaceId).files.read(request.path);
 	} catch (error) {
@@ -195,6 +197,8 @@ async function readSnapshot(
 		return { facts: base, complete: false };
 	}
 	setAvailability(spaceId, request.path, "ok");
+	// A symlink has no content of its own to excerpt.
+	if (isSpaceFsSymlink(file)) return { facts: base, complete: true };
 	// Still being prepared: metadata-only is right for now, but incomplete, so
 	// the next pass retries rather than caching this.
 	if (!("content" in file)) return { facts: base, complete: false };

@@ -1,6 +1,9 @@
-import type {
-	SpaceFsFileResponse,
-	SpaceFsPreparingFile,
+import {
+	isSpaceFsSymlink,
+	type SpaceFsFileResponse,
+	type SpaceFsPreparingFile,
+	type SpaceFsSymlink,
+	symlinkReadError,
 } from "@neta-art/cohub";
 import {
 	normalizeWorkspaceFileLink,
@@ -37,7 +40,7 @@ export const denyWorkspaceAsset: ResolveWorkspaceAsset = () =>
 type ReadWorkspaceAssetFile = (
 	path: string,
 	signal: AbortSignal,
-) => Promise<SpaceFsFileResponse | SpaceFsPreparingFile>;
+) => Promise<SpaceFsFileResponse | SpaceFsPreparingFile | SpaceFsSymlink>;
 
 export function createWorkspaceAssetLoader(
 	resolve: ResolveWorkspaceAsset,
@@ -106,6 +109,7 @@ export async function resolveWorkspaceFileAsset(
 		if (signal.aborted) throw abortError();
 		const file = await read(path, signal);
 		if (signal.aborted) throw abortError();
+		if (isSpaceFsSymlink(file)) throw symlinkReadError(file);
 		if ("content" in file) return fileResponseAsset(file);
 
 		const remainingMs = deadlineAt - Date.now();

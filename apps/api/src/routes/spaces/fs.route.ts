@@ -66,11 +66,12 @@ import {
   UPLOAD_MAX_BATCH_FILES,
   UPLOAD_MAX_FILE_BYTES,
 } from "@cohub/protocol";
-import type {
-  SpaceFsCopyOptions,
-  SpaceFsCopySource,
-  SpaceFsCreateUploadInput,
-  SpaceFsCompleteUploadInput,
+import {
+  isSpaceFsSymlink,
+  type SpaceFsCopyOptions,
+  type SpaceFsCopySource,
+  type SpaceFsCreateUploadInput,
+  type SpaceFsCompleteUploadInput,
 } from "@cohub/protocol/fs";
 
 
@@ -234,7 +235,8 @@ router.get("/file", async (c) => {
 
   const path = c.req.query("path") ?? "";
   try {
-    const result = await readSpaceFile(spaceId, path, { visibility });
+    const result = await readSpaceFile(spaceId, path, { visibility, describeSymlink: true });
+    if (isSpaceFsSymlink(result)) return c.json(result);
     if (!("content" in result)) return c.json(result, 202);
     return result.delivery === "url" ? c.json(result) : jsonWithEtag(c, result);
   } catch (error) {

@@ -1,11 +1,11 @@
-import type { SpaceFsChangedPayload } from "@cohub/protocol/fs";
+import { isSpaceFsSymlink, type SpaceFsChangedPayload } from "@cohub/protocol/fs";
 import { getRealtimeSpaceRoom } from "@cohub/protocol/realtime/types";
 import type { ResolvedFile, ResolveFileOptions } from "../media.js";
 import { type Fetch, HttpError, type HttpTransport } from "../transport.js";
 import type { SpaceFsFileResponse } from "../types.js";
 import type { WebsocketClient } from "../websocket.js";
 import type { LocalWorkspaces } from "../local-workspace.js";
-import { createLimiter, createSpaceFileReads, isUnauthorized, type SpaceFileRead, type SpaceFileReads } from "./space-file-reads.js";
+import { createLimiter, createSpaceFileReads, isUnauthorized, symlinkReadError, type SpaceFileRead, type SpaceFileReads } from "./space-file-reads.js";
 import { fileUrlStore, type StoredFileUrl } from "./space-file-url-store.js";
 
 export type ResolveSpaceFileOptions = ResolveFileOptions & {
@@ -101,10 +101,12 @@ export function createSpaceFileUrls(options: {
 	async function load(token: string | null, spaceId: string, path: string, background: boolean): Promise<Resolved | null> {
 		const first = await reads.read(spaceId, path, { background, token });
 		if ("content" in first) return resolvedOf(first);
+		if (isSpaceFsSymlink(first)) throw symlinkReadError(first);
 		return preparing(async () => {
 			const deadline = now() + PREPARING_TIMEOUT_MS;
 			let file: SpaceFileRead = first;
 			while (!("content" in file)) {
+				if (isSpaceFsSymlink(file)) throw symlinkReadError(file);
 				const wait = Math.min(Math.max(250, Math.min(file.retryAfterMs, 2_000)), deadline - now());
 				if (wait <= 0) return null;
 				await sleep(wait);
