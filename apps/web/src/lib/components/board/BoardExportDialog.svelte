@@ -18,12 +18,12 @@ import {
 	type BoardStageExportBridge,
 	boardExportFilename,
 	copyImageToClipboard,
-	downloadBlob,
 	exportBoardImage,
 } from "$lib/board/board-image-export";
 import type { BoardVideoExportRequest } from "$lib/board/board-video-export.svelte";
 import Dialog from "$lib/components/Dialog.svelte";
 import Spinner from "$lib/components/Spinner.svelte";
+import { saveFile } from "$lib/downloads.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
@@ -263,8 +263,15 @@ async function run(mode: "download" | "copy") {
 				: scope === "frame"
 					? "frame"
 					: undefined;
-		downloadBlob(result.blob, boardExportFilename(title, outputFormat, suffix));
+		const { blob } = result;
+		const name = boardExportFilename(title, outputFormat, suffix);
 		onClose();
+		void saveFile({
+			key: name,
+			name,
+			mimeType: blob.type,
+			source: () => ({ kind: "blob", blob }),
+		});
 	} catch (cause) {
 		failure =
 			cause instanceof Error

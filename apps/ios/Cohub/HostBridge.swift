@@ -62,8 +62,8 @@ enum HostBridge {
                 return ["data": .string(data)]
             },
             M.filesSave: { [weak surface] params in
-                try surface?.files.save(params)
-                return true
+                guard let surface else { throw BridgeFailure.canceled() }
+                return try await surface.files.save(params) { [weak surface] payload in surface?.emit(HostProtocol.Event.filesProgress, payload) }
             },
             M.hapticsPerform: { params in .bool(Haptics.perform(params["kind"]?.string)) },
             M.shortcutsPush: { params in

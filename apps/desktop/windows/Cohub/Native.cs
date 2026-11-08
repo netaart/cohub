@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Media;
 using Cohub.Core;
@@ -23,6 +24,9 @@ internal static partial class Native
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool DestroyIcon(IntPtr handle);
 
+    [LibraryImport("shell32.dll")]
+    private static partial int SHGetKnownFolderPath(in Guid id, uint flags, IntPtr token, out IntPtr path);
+
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
@@ -39,6 +43,15 @@ internal static partial class Native
         DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkMode, ref dark, sizeof(int));
         DwmSetWindowAttribute(hwnd, DwmCaptionColor, ref caption, sizeof(int));
         DwmSetWindowAttribute(hwnd, DwmTextColor, ref text, sizeof(int));
+    }
+
+    public static string DownloadsFolder()
+    {
+        var downloads = new Guid("374DE290-123F-4565-9164-39C4925E467B");
+        if (SHGetKnownFolderPath(downloads, 0, IntPtr.Zero, out var path) != 0)
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        try { return Marshal.PtrToStringUni(path)!; }
+        finally { Marshal.FreeCoTaskMem(path); }
     }
 
     public static void BroadcastEnvironmentChange() =>

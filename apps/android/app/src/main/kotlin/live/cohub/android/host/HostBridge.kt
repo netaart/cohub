@@ -59,7 +59,7 @@ class HostBridge(
         (if (runtime != null) RUNTIME_METHODS else emptySet()) +
         (if (runtime != null && workspaces != null) setOf(HostProtocol.Methods.WORKSPACE_CALL) else emptySet()) +
         (if (runtime != null && display != null) DISPLAY_METHODS else emptySet()) +
-        (if (files != null) setOf(HostProtocol.Methods.FILES_SAVE) else emptySet())
+        (if (files != null) setOf(HostProtocol.Methods.FILES_SAVE, HostProtocol.Methods.FILES_REVEAL) else emptySet())
 
     @Volatile
     private var replyProxy: JavaScriptReplyProxy? = null
@@ -212,19 +212,29 @@ class HostBridge(
 
         HostProtocol.Methods.FILES_SAVE -> {
             val saver = files ?: throw IllegalStateException("This device cannot save files")
+            // Pages older than `files.progress` send no id.
+            val fileId = params.string("id") ?: UUID.randomUUID().toString()
             val name = params.string("name") ?: throw IllegalArgumentException("files.save requires a name")
-            val mimeType = params.string("mimeType")
             val url = params.string("url")
-            val data = params.string("data")
-            when {
-                url != null && data == null -> {
-                    require(url.startsWith("https://")) { "files.save only downloads https URLs" }
-                    saver.saveUrl(url, name, mimeType)
+            require(url == null || url.startsWith("https://")) { "files.save only downloads https URLs" }
+            val saved = saver.save(fileId, name, params.string("mimeType"), url, params.string("data")) { received, total ->
+                val payload = buildJsonObject {
+                    put("id", fileId)
+                    put("received", received)
+                    put("total", total)
                 }
-                data != null && url == null -> saver.saveBase64(data, name, mimeType)
-                else -> throw IllegalArgumentException("files.save requires exactly one of url or data")
+                // Progress arrives on the IO thread; the reply proxy is main-thread only.
+                scope.launch { emit(HostProtocol.Events.FILES_PROGRESS, payload) }
             }
-            JsonPrimitive(true)
+            buildJsonObject {
+                put("location", saved.location)
+                put("revealable", true)
+            }
+        }
+
+        HostProtocol.Methods.FILES_REVEAL -> {
+            val fileId = params.string("id") ?: throw IllegalArgumentException("files.reveal requires an id")
+            JsonPrimitive(files?.open(fileId) == true)
         }
 
         HostProtocol.Methods.NAVIGATION_INTERCEPT_BACK -> {

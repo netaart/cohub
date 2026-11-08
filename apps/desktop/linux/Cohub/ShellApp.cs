@@ -9,6 +9,7 @@ internal sealed class ShellApp : IDisposable
     private readonly Dictionary<IntPtr, ShellTab> tabs = [];
     private readonly ClosedTabs closedTabs = new();
     private readonly RepeatFilter repeats = new();
+    private readonly FileDownloads downloads = new(Downloads.Folder);
     private readonly CancellationTokenSource stopping = new();
     private readonly Gio.Menu folders = Gio.Menu.New();
     private readonly Gio.Menu updateSection = Gio.Menu.New();
@@ -338,12 +339,20 @@ internal sealed class ShellApp : IDisposable
             HostProtocol.Capabilities.Notifications, HostProtocol.Capabilities.Shortcuts, HostProtocol.Capabilities.MediaCapture,
             HostProtocol.Capabilities.Tabs,
             HostProtocol.Capabilities.About,
+            HostProtocol.Capabilities.Files,
         ];
         var handlers = new Dictionary<string, BridgeRouter.Handler>
         {
             [HostProtocol.Methods.AppReady] = _ =>
             {
                 tab.ReportReady();
+                return Ok();
+            },
+            [HostProtocol.Methods.FilesSave] = async parameters => await downloads.SaveAsync(parameters, payload => tab.Emit(HostProtocol.Events.FilesProgress, payload)),
+            [HostProtocol.Methods.FilesReveal] = parameters =>
+            {
+                if (downloads.Saved(JsonFields.Text(parameters, "id")) is not { } file) return Task.FromResult<JsonNode?>(false);
+                ShellWindow.OpenExternally(new Uri(Path.GetDirectoryName(file)!).AbsoluteUri);
                 return Ok();
             },
             [HostProtocol.Methods.AppearanceSet] = parameters =>

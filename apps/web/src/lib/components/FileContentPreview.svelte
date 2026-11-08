@@ -58,8 +58,7 @@ let {
 	render = "preview",
 	readonly = true,
 	isMobile = false,
-	downloadUrl = null,
-	downloadName = null,
+	onDownload,
 	allowDrawerSwipe = false,
 	initialPosition = null,
 	spaceId = null,
@@ -83,8 +82,7 @@ let {
 	render?: "preview" | "source";
 	readonly?: boolean;
 	isMobile?: boolean;
-	downloadUrl?: string | null;
-	downloadName?: string | null;
+	onDownload?: () => void;
 	allowDrawerSwipe?: boolean;
 	initialPosition?: WorkspaceFilePosition | null;
 	spaceId?: string | null;
@@ -168,10 +166,10 @@ const modelSource = $derived.by((): ModelSource | null => {
 		<div class="text-xs text-text-tertiary">
 			{file.mimeType ?? "application/octet-stream"} · {formatBytes(file.size)}
 		</div>
-		{#if downloadUrl}
-			<a class="action-btn primary mt-2" href={downloadUrl} download={downloadName ?? file.name}>
+		{#if onDownload}
+			<button type="button" class="action-btn primary mt-2" onclick={onDownload}>
 				{m.download({}, { locale })}
-			</a>
+			</button>
 		{/if}
 	</div>
 {/snippet}
@@ -272,8 +270,7 @@ const modelSource = $derived.by((): ModelSource | null => {
 					src={model.mediaUrl}
 					title={file.name}
 					subtitle={formatBytes(file.size)}
-					downloadUrl={downloadUrl ?? undefined}
-					downloadName={downloadName ?? file.name}
+					{onDownload}
 				/>
 			</div>
 		</div>
@@ -297,7 +294,7 @@ const modelSource = $derived.by((): ModelSource | null => {
 	{:else if model.kind === "model3d" && modelSource}
 		{#await modelPromise then module}
 			{@const ModelPreview = module.default}
-			<ModelPreview source={modelSource} {isMobile} {downloadUrl} {downloadName} />
+			<ModelPreview source={modelSource} {isMobile} {onDownload} />
 		{:catch}
 			{@render LazyError(m.model3d_preview_failed({}, { locale }), () => {
 				modelAttempt += 1;

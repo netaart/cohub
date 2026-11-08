@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import {
+  createPresignedGetObjectUrl,
   createPresignedPutObjectUrl,
   type PresignStorageConfig,
 } from "./object-presign.js";
@@ -70,5 +71,17 @@ describe("object presigning", () => {
     const headers = new URL(signed.uploadUrl).searchParams.get("X-Amz-SignedHeaders");
     assert(headers?.includes("content-md5"));
     assert(!headers?.includes("acl"));
+  });
+
+  it("signs a GET that downloads as an attachment under a non-ASCII name", () => {
+    mock.timers.enable({ apis: ["Date"], now: Date.UTC(2026, 0, 1) });
+    try {
+      const url = new URL(createPresignedGetObjectUrl(storage, "checkpoint-assets/report.pdf", { attachmentName: "报告 (1).pdf" }).downloadUrl);
+      assert.equal(url.searchParams.get("response-content-disposition"), "attachment;filename*=UTF-8''%E6%8A%A5%E5%91%8A%20%281%29.pdf");
+      // Reference value from @smithy/signature-v4's canonical request.
+      assert.equal(url.searchParams.get("X-Amz-Signature"), "c417ec9b1b7f706cfbba371cd1db64fcd04f9d26b87d81d2ea75f04e791a64e1");
+    } finally {
+      mock.timers.reset();
+    }
   });
 });

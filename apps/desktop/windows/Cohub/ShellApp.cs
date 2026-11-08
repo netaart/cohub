@@ -20,6 +20,7 @@ internal sealed class ShellApp : Application, IDisposable
     private readonly List<ShellWindow> windows = [];
     private readonly ClosedTabs closedTabs = new();
     private readonly RepeatFilter repeats = new();
+    private readonly FileDownloads downloads = new(Native.DownloadsFolder());
     private readonly Dictionary<string, JsonNode?> latestEvents = [];
     private readonly DispatcherTimer saving = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly CancellationTokenSource stopping = new();
@@ -247,7 +248,7 @@ internal sealed class ShellApp : Application, IDisposable
             HostProtocol.Capabilities.Cache, HostProtocol.Capabilities.Notifications, HostProtocol.Capabilities.Shortcuts,
             HostProtocol.Capabilities.MediaCapture, HostProtocol.Capabilities.Permissions, HostProtocol.Capabilities.Badge,
             HostProtocol.Capabilities.LaunchAtLogin, HostProtocol.Capabilities.GlobalShortcut, HostProtocol.Capabilities.Launch,
-            HostProtocol.Capabilities.Tabs, HostProtocol.Capabilities.About,
+            HostProtocol.Capabilities.Tabs, HostProtocol.Capabilities.About, HostProtocol.Capabilities.Files,
         ];
         var handlers = new Dictionary<string, BridgeRouter.Handler>
         {
@@ -287,6 +288,13 @@ internal sealed class ShellApp : Application, IDisposable
             {
                 if (JsonFields.Text(parameters, "text") is not { } text) throw BridgeException.Failed("share.text requires text");
                 Native.Share(tab.Window.Handle, text, JsonFields.Text(parameters, "title"));
+                return Ok();
+            },
+            [HostProtocol.Methods.FilesSave] = async parameters => await downloads.SaveAsync(parameters, payload => tab.Emit(HostProtocol.Events.FilesProgress, payload)),
+            [HostProtocol.Methods.FilesReveal] = parameters =>
+            {
+                if (downloads.Saved(JsonFields.Text(parameters, "id")) is not { } file) return Task.FromResult<JsonNode?>(false);
+                Process.Start("explorer.exe", $"/select,\"{file}\"")?.Dispose();
                 return Ok();
             },
             [HostProtocol.Methods.CacheClear] = async _ =>

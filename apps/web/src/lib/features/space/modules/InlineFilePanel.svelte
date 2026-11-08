@@ -65,8 +65,6 @@ type Props = {
 	inlineFile: InlineFilePanelState;
 	windows: Window[];
 	inlineFileCanGoBack: boolean;
-	inlineFileDownloadUrl: string;
-	inlineFileDownloadName: string;
 	inlineFilePreview: FilePreviewModel;
 	inlineFileViewMode: FileViewMode;
 	inlineFileDiff: SpacePendingDiffFileResponse | null;
@@ -116,8 +114,6 @@ let {
 	inlineFile,
 	windows,
 	inlineFileCanGoBack,
-	inlineFileDownloadUrl,
-	inlineFileDownloadName,
 	inlineFilePreview,
 	inlineFileViewMode = $bindable(),
 	inlineFileDiff,
@@ -414,18 +410,10 @@ $effect(() => {
 				{#if options.showRetry !== false && onRetryInlineFile}
 					<button type="button" class="action-btn" onclick={() => void onRetryInlineFile?.()}>{m.common_retry({}, { locale })}</button>
 				{/if}
-				<a
-					href={inlineFileDownloadUrl}
-					download={inlineFileDownloadName}
-					class="action-btn primary"
-					onclick={(e) => {
-						e.preventDefault();
-						void onDownloadInlineFile();
-					}}
-				>
+				<button type="button" class="action-btn primary" onclick={() => void onDownloadInlineFile()}>
 					<Download class="w-3.5 h-3.5" />
 					{m.download({}, { locale })}
-				</a>
+				</button>
 			</div>
 		</div>
 	</div>
@@ -568,8 +556,7 @@ $effect(() => {
 				readonly={!canEditContent}
 				{isMobile}
 				allowDrawerSwipe={isMobile}
-				downloadUrl={inlineFileDownloadUrl}
-				downloadName={inlineFileDownloadName}
+				onDownload={onDownloadInlineFile}
 				spaceId={inlineFileSpaceId}
 				app={inlineFileApp}
 				bind:markTarget={htmlMarkTarget}

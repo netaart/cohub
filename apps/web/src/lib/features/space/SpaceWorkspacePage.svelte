@@ -1188,8 +1188,6 @@ const inlineFileApp = $derived.by(() => {
 		) ?? null
 	);
 });
-const inlineFileDownloadUrl = $derived(fileWorkspace.inlineFileDownloadUrl);
-const inlineFileDownloadName = $derived(fileWorkspace.inlineFileDownloadName);
 
 const inlinePortEndpoint = $derived.by(() => {
 	if (!inlinePortPreview) return null;
@@ -2321,8 +2319,8 @@ async function handleMoveNode(node: SpaceFsNode, targetDir: string) {
 	if (next) windowManager.syncCurrent();
 	else if (routePreviewRef?.key === prevPath) syncPreviewQuery(null, true);
 }
-async function handleDownloadNode(node: SpaceFsNode) {
-	await fileWorkspace.handleDownloadNode(node);
+function handleDownloadNode(node: SpaceFsNode) {
+	fileWorkspace.handleDownloadNode(node);
 }
 async function handleDeleteNode(node: SpaceFsNode) {
 	const deleted = await fileWorkspace.handleDeleteNode(node);
@@ -2469,8 +2467,8 @@ function registerAppSurface(key: string, host: AppSurfaceHost | null) {
 		),
 	);
 }
-async function downloadInlineFile() {
-	await fileWorkspace.downloadInlineFile();
+function downloadInlineFile() {
+	fileWorkspace.downloadInlineFile();
 }
 async function retryInlineFile() {
 	const path = fileWorkspace.activeInlineFilePath;
@@ -3173,8 +3171,6 @@ const spaceFileDomainProps = $derived.by<
 	activeWindowKind,
 	inlinePortEndpoint,
 	previewEndpoints,
-	inlineFileDownloadUrl,
-	inlineFileDownloadName,
 	inlineFilePreview,
 	inlineFileDiff: fileWorkspace.inlineFileDiff,
 	inlineFileDiffLoading: fileWorkspace.inlineFileDiffLoading,

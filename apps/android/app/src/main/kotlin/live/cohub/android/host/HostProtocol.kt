@@ -28,6 +28,7 @@ object HostProtocol {
         const val APP_READY = "app.ready"
         const val HAPTICS_PERFORM = "haptics.perform"
         const val FILES_SAVE = "files.save"
+        const val FILES_REVEAL = "files.reveal"
         const val NAVIGATION_INTERCEPT_BACK = "navigation.interceptBack"
         const val SHORTCUTS_PUSH = "shortcuts.push"
         const val DISPLAY_STATUS = "display.status"
@@ -76,6 +77,7 @@ object HostProtocol {
         const val RUNTIME_CHANGED = "runtime.changed"
         const val DISPLAY_CHANGED = "display.changed"
         const val DISPLAY_OPEN = "display.open"
+        const val FILES_PROGRESS = "files.progress"
     }
 
     private val COLOR = Regex("^#[0-9a-fA-F]{6}$")

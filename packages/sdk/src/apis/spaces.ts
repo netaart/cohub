@@ -320,6 +320,19 @@ export type SpaceFileStream = {
   mimeType: string;
 };
 
+export type SpaceFileSaveSource =
+  | { kind: "url"; url: string; filename: string; mimeType: string | null }
+  | { kind: "blob"; blob: Blob; filename: string; mimeType: string | null };
+
+export function spaceFileSaveSource(file: SpaceFsFileResponse): SpaceFileSaveSource | null {
+  const { name: filename, mimeType } = file;
+  if (file.downloadUrl) return { kind: "url", url: file.downloadUrl, filename, mimeType };
+  if (file.delivery === "url") return null;
+  const type = mimeType ?? (file.kind === "text" ? "text/plain;charset=utf-8" : "application/octet-stream");
+  const body = file.encoding === "base64" ? base64ToBytes(file.content) : file.content;
+  return { kind: "blob", blob: new Blob([body as BlobPart], { type }), filename, mimeType };
+}
+
 export type WaitForSpaceFsCopyOptions = {
   pollMs?: number;
   signal?: AbortSignal;
@@ -587,6 +600,38 @@ export class SpaceFilesApi {
   async download(path: string, customFetch?: Fetch) {
     const { response, filename, mimeType } = await this.open(path, { fetch: customFetch });
     return { blob: await response.blob(), filename, mimeType };
+  }
+
+  /** Resolve how to save `path`, waiting while the CDN prepares it. Only falls back to buffering bytes when no attachment URL exists. */
+  async saveSource(path: string, options: OpenSpaceFileOptions = {}): Promise<SpaceFileSaveSource> {
+    const timeoutMs = Math.max(0, options.timeoutMs ?? 60_000);
+    const deadlineAt = Date.now() + timeoutMs;
+    const deadline = createSpaceFileDeadlineSignal(options.signal, timeoutMs);
+    const read = () => this.read(path, options.fetch, deadline.signal).catch((error: unknown) => {
+      // Too large to read inline (local runtimes): stream the bytes instead.
+      if (error instanceof SpaceFsError && error.status === 413) return null;
+      throw error;
+    });
+    let file: SpaceFileRead | null;
+    try {
+      file = await read();
+      while (file && !("content" in file) && !isSpaceFsSymlink(file)) {
+        const remainingMs = deadlineAt - Date.now();
+        if (remainingMs <= 0) throw new HttpError("File is being prepared. Please retry shortly.", 202, file);
+        await waitForSpaceFileRetry(Math.min(Math.max(250, Math.min(file.retryAfterMs, 2_000)), remainingMs), deadline.signal);
+        file = await read();
+      }
+    } catch (error) {
+      if (deadline.timedOut()) throw new HttpError("File is being prepared. Please retry shortly.", 202, null);
+      throw error;
+    } finally {
+      deadline.dispose();
+    }
+    const direct = file && "content" in file ? spaceFileSaveSource(file) : null;
+    if (direct) return direct;
+    const { response, filename, mimeType } = await this.open(path, options);
+    if (!response.ok) throw new HttpError(`Failed to download ${path} (${response.status})`, response.status, null);
+    return { kind: "blob", blob: await response.blob(), filename, mimeType };
   }
 
   write(input: SpaceFsWriteFileInput): Promise<SpaceFsWriteResult> {
@@ -1894,6 +1939,12 @@ export class SpaceCheckpointFilesApi {
       `/api/spaces/${this.spaceId}/checkpoints/${this.checkpointId}/fs/file?${params.toString()}`,
       { fetch: customFetch },
     );
+  }
+
+  async saveSource(path: string, customFetch?: Fetch): Promise<SpaceFileSaveSource> {
+    const source = spaceFileSaveSource(await this.read(path, customFetch));
+    if (!source) throw new HttpError(`Checkpoint file cannot be saved: ${path}`, 404, null);
+    return source;
   }
 }
 

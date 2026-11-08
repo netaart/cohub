@@ -294,6 +294,7 @@ export type {
   SessionSubscriptionHandlers,
   SpaceChannelBindingRecord,
   SpaceEventName,
+  SpaceFileSaveSource,
   SpaceFileStream,
   SpaceSandboxRecord,
   SpaceTurnListOptions,
@@ -322,6 +323,7 @@ export type {
 export {
   SpacePublicFilesApi,
   SpaceWebhooksApi,
+  spaceFileSaveSource,
 } from "./apis/spaces.js";
 export { clearFileUrlCache } from "./apis/space-file-url-store.js";
 export { BoardClient, claimBoardCaches } from "./board/client/index.js";

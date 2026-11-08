@@ -64,6 +64,8 @@ export type SpaceFsFileResponse = {
   content: string;
   delivery?: "inline" | "url";
   url?: string;
+  /** Same bytes as `url`, served as an attachment under `name`. */
+  downloadUrl?: string;
   media?: MediaFacts;
 };
 

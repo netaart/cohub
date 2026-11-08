@@ -8,23 +8,32 @@ final class Downloads: NSObject, WKDownloadDelegate {
 
     private var destinations: [ObjectIdentifier: URL] = [:]
 
-    static func save(_ params: JSON) async throws {
+    private var saved: [String: URL] = [:]
+
+    static func save(_ params: JSON, emit: @escaping @MainActor @Sendable (JSON) -> Void) async throws -> JSON {
         guard let name = params["name"]?.string else { throw BridgeFailure.failed("files.save requires a name") }
+        // Pages older than `files.progress` send no id.
+        let id = params["id"]?.string ?? UUID().uuidString
         let destination = try unique(name)
         if let data = params["data"]?.string {
             guard let bytes = Data(base64Encoded: data) else { throw BridgeFailure.failed("files.save data is not base64") }
             try bytes.write(to: destination, options: .withoutOverwriting)
         } else if let link = params["url"]?.string, let url = URL(string: link), url.scheme == "https" {
-            let (temporary, response) = try await URLSession.shared.download(from: url)
-            guard let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) else {
-                try? FileManager.default.removeItem(at: temporary)
-                throw BridgeFailure.failed("Download failed")
+            try await FileTransfer.download(URLRequest(url: url), to: destination) { received, total in
+                Task { @MainActor in emit(FileTransfer.progressEvent(id: id, received: received, total: total)) }
             }
-            try FileManager.default.moveItem(at: temporary, to: destination)
         } else {
             throw BridgeFailure.failed("files.save requires an https url or data")
         }
+        shared.saved[id] = destination
         finished(destination)
+        return ["location": "downloads", "revealable": true]
+    }
+
+    static func reveal(_ params: JSON) -> Bool {
+        guard let file = params["id"]?.string.flatMap({ shared.saved[$0] }), FileManager.default.fileExists(atPath: file.path) else { return false }
+        NSWorkspace.shared.activateFileViewerSelecting([file])
+        return true
     }
 
     static func unique(_ suggested: String) throws -> URL {

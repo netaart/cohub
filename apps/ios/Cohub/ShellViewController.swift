@@ -154,8 +154,8 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         webView.callAsyncJavaScript(BridgeScript.receive, arguments: ["data": text], in: nil, in: .page, completionHandler: nil)
     }
 
-    func emit(_ name: String) {
-        router.emit(name)
+    func emit(_ name: String, _ payload: JSON? = nil) {
+        router.emit(name, payload)
     }
 
     func share(_ text: String) {

@@ -2960,5 +2960,21 @@
 	"billing_recovery_keep_plan": "Keep plan",
 	"billing_recovery_end_choose": "End and choose plan",
 	"billing_recovery_pending": "Payment due",
-	"billing_recovery_processing": "Processing"
+	"billing_recovery_processing": "Processing",
+	"download_preparing": "Preparing…",
+	"download_saving": "Downloading…",
+	"download_progress": "{received} of {total}",
+	"download_started": "Download started",
+	"download_saved_downloads": "Saved to Downloads",
+	"download_saved_pictures": "Saved to Pictures",
+	"download_saved_movies": "Saved to Movies",
+	"download_saved_music": "Saved to Music",
+	"download_saved_photos": "Saved to Photos",
+	"download_saved_files": "Saved to Files",
+	"download_failed": "Download failed",
+	"download_still_preparing": "Still preparing. Try again shortly.",
+	"download_too_large": "Too large to save here",
+	"download_reveal_finder": "Show in Finder",
+	"download_reveal_folder": "Show in folder",
+	"download_open": "Open"
 }

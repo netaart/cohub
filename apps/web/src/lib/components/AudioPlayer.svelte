@@ -16,8 +16,7 @@ type Props = {
 	src: string;
 	title?: string | null;
 	subtitle?: string | null;
-	downloadUrl?: string | null;
-	downloadName?: string | null;
+	onDownload?: () => void;
 	/** Plays once ready; switching it off pauses. */
 	autoplay?: boolean;
 };
@@ -26,8 +25,7 @@ let {
 	src,
 	title = null,
 	subtitle = null,
-	downloadUrl = null,
-	downloadName = null,
+	onDownload,
 	autoplay = false,
 }: Props = $props();
 
@@ -223,16 +221,16 @@ $effect(() => {
 			<div class="audio-title">Audio unavailable</div>
 			<div class="audio-error-hint">{m.audio_playback_failed({}, { locale })}</div>
 		</div>
-		{#if downloadUrl}
-			<a
+		{#if onDownload}
+			<button
+				type="button"
 				class="audio-icon-btn"
-				href={downloadUrl}
-				download={downloadName ?? title ?? "audio"}
+				onclick={onDownload}
 				title={m.download({}, { locale })}
 				aria-label={m.audio_download({}, { locale })}
 			>
 				<Download class="h-4 w-4" />
-			</a>
+			</button>
 		{/if}
 	{:else}
 		<button
@@ -267,16 +265,16 @@ $effect(() => {
 				>
 					{currentRate}x
 				</button>
-				{#if downloadUrl}
-					<a
+				{#if onDownload}
+					<button
+						type="button"
 						class="audio-icon-btn"
-						href={downloadUrl}
-						download={downloadName ?? title ?? "audio"}
+						onclick={onDownload}
 						title={m.download({}, { locale })}
 						aria-label={m.audio_download({}, { locale })}
 					>
 						<Download class="h-4 w-4" />
-					</a>
+					</button>
 				{/if}
 			</div>
 			<div class="audio-bottom">

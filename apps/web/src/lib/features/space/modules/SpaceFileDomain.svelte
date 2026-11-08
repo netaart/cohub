@@ -107,8 +107,6 @@ export type SpaceFileDomainProps = {
 	activeWindowKind: Window["kind"] | null;
 	inlinePortEndpoint: SpacePublicEndpoint | null;
 	previewEndpoints: SpacePublicEndpoints;
-	inlineFileDownloadUrl: string;
-	inlineFileDownloadName: string;
 	inlineFilePreview: FilePreviewModel;
 	inlineFileViewMode: FileViewMode;
 	inlineFileDiff: SpacePendingDiffFileResponse | null;
@@ -282,8 +280,6 @@ let {
 	activeWindowKind,
 	inlinePortEndpoint,
 	previewEndpoints,
-	inlineFileDownloadUrl,
-	inlineFileDownloadName,
 	inlineFilePreview,
 	inlineFileViewMode = $bindable(),
 	inlineFileDiff,
@@ -516,8 +512,6 @@ function previewContentOut(node: Element) {
 		onActivateWindow={activateWindow}
 		onCloseWindow={closeWindow}
 		{inlineFileCanGoBack}
-		{inlineFileDownloadUrl}
-		{inlineFileDownloadName}
 		{inlineFilePreview}
 		bind:inlineFileViewMode
 		{inlineFileDiff}
