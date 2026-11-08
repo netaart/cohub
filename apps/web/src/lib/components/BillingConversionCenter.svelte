@@ -123,7 +123,7 @@ function buy() {
 		border: 1px solid var(--border-subtle);
 		background: var(--bg-elevated);
 		box-shadow: 0 8px 24px oklch(0% 0 0 / 0.18);
-		animation: rise 220ms cubic-bezier(0.16, 1, 0.3, 1);
+		animation: rise 220ms var(--ease-out);
 	}
 	@media (min-width: 640px) {
 		.strip {

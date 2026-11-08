@@ -180,7 +180,7 @@ $effect(() => {
 <style>
 	@media (prefers-reduced-motion: no-preference) {
 		.turn-navigator-panel {
-			animation: turn-navigator-enter 120ms cubic-bezier(0.16, 1, 0.3, 1);
+			animation: turn-navigator-enter 120ms var(--ease-out);
 			transform-origin: right top;
 		}
 	}

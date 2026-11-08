@@ -532,7 +532,7 @@
 		}
 
 		@media (prefers-reduced-motion: no-preference) {
-			transition: translate 340ms cubic-bezier(0.22, 1, 0.36, 1);
+			transition: translate 340ms var(--ease-out);
 		}
 	}
 
@@ -556,10 +556,13 @@
 		border-width: 2px;
 		border-radius: 0;
 		clip-path: var(--pixel-shape-inner);
+		scale: none;
 		transition: transform 80ms steps(1);
 
-		&:hover {
-			transform: translateY(-2px);
+		@media (hover: hover) {
+			&:hover {
+				transform: translateY(-2px);
+			}
 		}
 
 		&[aria-pressed="true"] {

@@ -356,7 +356,7 @@ $effect(() => {
 
 	.collab-activity {
 		transition:
-			transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+			transform 280ms var(--ease-out),
 			opacity 180ms ease-out;
 		animation: collab-activity-in 120ms ease-out both;
 	}

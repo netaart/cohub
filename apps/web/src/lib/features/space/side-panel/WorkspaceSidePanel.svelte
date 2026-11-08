@@ -12,7 +12,7 @@ import SpaceFileSidebar from "$lib/components/SpaceFileSidebar.svelte";
 import { createDeferredMount } from "$lib/deferred-mount.svelte";
 import { pointerDrag } from "$lib/drag/pointer-drag.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
-import { DURATION_PANEL } from "$lib/motion.svelte";
+import { DURATION_PANEL } from "$lib/motion";
 import { m } from "$lib/paraglide/messages.js";
 import type { SpaceFsNode } from "$lib/space-fs";
 import { uiState } from "$lib/stores/ui.svelte";

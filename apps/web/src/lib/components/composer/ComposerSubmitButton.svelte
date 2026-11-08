@@ -22,7 +22,7 @@ const {
 <button
 	type={stop ? "button" : buttonType}
 	{disabled}
-	class={`primary-key flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/40 disabled:scale-100 disabled:cursor-not-allowed disabled:bg-bg-hover-strong disabled:text-text-disabled ${stop ? "bg-text-primary text-bg-primary hover:bg-text-secondary" : "bg-brand text-brand-contrast-fg hover:bg-brand-hover"}`}
+	class={`primary-key flex h-9 w-9 shrink-0 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand/40 disabled:cursor-not-allowed disabled:bg-bg-hover-strong disabled:text-text-disabled ${stop ? "bg-text-primary text-bg-primary hover:bg-text-secondary" : "bg-brand text-brand-contrast-fg hover:bg-brand-hover"}`}
 	title={label}
 	aria-label={label}
 	{onclick}

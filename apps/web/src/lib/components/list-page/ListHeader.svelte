@@ -1,9 +1,7 @@
 <script lang="ts">
 import { Loader2 } from "lucide-svelte";
 import type { Snippet } from "svelte";
-import { fade } from "svelte/transition";
 import { getLocale } from "$lib/i18n/locale.svelte";
-import { DURATION_FAST, svelteEaseOut } from "$lib/motion.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { uiState } from "$lib/stores/ui.svelte";
 import { syncStatus } from "$lib/sync/sync-status.svelte";
@@ -56,13 +54,12 @@ const status = $derived.by(() => {
 			<span
 				class="flex min-w-0 items-center gap-1.5 text-[15px] font-semibold tracking-tight text-text-secondary lg:text-[13px]"
 				role="status"
-				in:fade={{ duration: DURATION_FAST, easing: svelteEaseOut }}
 			>
 				<Loader2 class="h-3.5 w-3.5 shrink-0 animate-spin text-text-tertiary lg:h-3 lg:w-3" aria-hidden="true" />
 				<span class="truncate">{status}</span>
 			</span>
 		{:else}
-			<h1 class="truncate text-[15px] font-semibold tracking-tight text-text-primary lg:text-[13px]" in:fade={{ duration: DURATION_FAST, easing: svelteEaseOut }}>{title}</h1>
+			<h1 class="truncate text-[15px] font-semibold tracking-tight text-text-primary lg:text-[13px]">{title}</h1>
 		{/if}
 	</div>
 	{#if actions}

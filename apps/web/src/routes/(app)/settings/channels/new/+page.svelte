@@ -338,7 +338,7 @@ async function handleSubmit(e: Event) {
         <button
           type="button"
           onclick={() => selectProvider("discord")}
-          class="w-full text-left rounded-md border border-border-subtle bg-bg-surface p-4 hover:border-provider-discord-border-hover hover:bg-provider-discord-bg-hover transition-all group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand/50"
+          class="w-full text-left rounded-md border border-border-subtle bg-bg-surface p-4 hover:border-provider-discord-border-hover hover:bg-provider-discord-bg-hover transition-colors group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand/50"
         >
           <div class="flex items-start gap-3">
             <div class="w-10 h-10 rounded-[7px] bg-provider-discord-bg border border-provider-discord-border flex items-center justify-center shrink-0">
@@ -358,7 +358,7 @@ async function handleSubmit(e: Event) {
         <button
           type="button"
           onclick={() => selectProvider("feishu")}
-          class="w-full text-left rounded-md border border-border-subtle bg-bg-surface p-4 hover:border-provider-feishu-border-hover hover:bg-provider-feishu-bg-hover transition-all group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand/50"
+          class="w-full text-left rounded-md border border-border-subtle bg-bg-surface p-4 hover:border-provider-feishu-border-hover hover:bg-provider-feishu-bg-hover transition-colors group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand/50"
         >
           <div class="flex items-start gap-3">
             <div class="w-10 h-10 rounded-[7px] bg-provider-feishu-bg border border-provider-feishu-border flex items-center justify-center shrink-0">
@@ -378,7 +378,7 @@ async function handleSubmit(e: Event) {
         <button
           type="button"
           onclick={() => selectProvider("wechat")}
-          class="w-full text-left rounded-md border border-border-subtle bg-bg-surface p-4 hover:border-provider-wechat-border-hover hover:bg-provider-wechat-bg-hover transition-all group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand/50"
+          class="w-full text-left rounded-md border border-border-subtle bg-bg-surface p-4 hover:border-provider-wechat-border-hover hover:bg-provider-wechat-bg-hover transition-colors group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand/50"
         >
           <div class="flex items-start gap-3">
             <div class="w-10 h-10 rounded-[7px] bg-provider-wechat-bg border border-provider-wechat-border flex items-center justify-center shrink-0">
@@ -398,7 +398,7 @@ async function handleSubmit(e: Event) {
         <button
           type="button"
           onclick={() => selectProvider("qq")}
-          class="w-full text-left rounded-md border border-border-subtle bg-bg-surface p-4 hover:border-brand/30 hover:bg-bg-hover transition-all group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand/50"
+          class="w-full text-left rounded-md border border-border-subtle bg-bg-surface p-4 hover:border-brand/30 hover:bg-bg-hover transition-colors group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand/50"
         >
           <div class="flex items-start gap-3">
             <div class="w-10 h-10 rounded-[7px] bg-brand-bg border border-brand-border flex items-center justify-center shrink-0">

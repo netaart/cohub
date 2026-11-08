@@ -1,5 +1,7 @@
 # Motion Design
 
+> In this repo, `.impeccable.md` → Motion is the contract and wins on conflict: no ease-in in UI, UI motion ≤300ms, no animation on keyboard-driven actions.
+
 ## Duration: The 100/300/500 Rule
 
 Timing matters more than easing. These durations feel right for most UI:
@@ -20,7 +22,7 @@ Timing matters more than easing. These durations feel right for most UI:
 | Curve | Use For | CSS |
 |-------|---------|-----|
 | **ease-out** | Elements entering | `cubic-bezier(0.16, 1, 0.3, 1)` |
-| **ease-in** | Elements leaving | `cubic-bezier(0.7, 0, 0.84, 0)` |
+| **ease-out, shorter** | Elements leaving | Same curve at ~50–75% of the enter duration; ease-in stalls the moment the user is watching |
 | **ease-in-out** | State toggles (there → back) | `cubic-bezier(0.65, 0, 0.35, 1)` |
 
 **For micro-interactions, use exponential curves**—they feel natural because they mimic real physics (friction, deceleration):

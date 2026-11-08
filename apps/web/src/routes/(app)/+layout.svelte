@@ -57,7 +57,7 @@ import {
 } from "$lib/layout/pointer-resize";
 import { startLiveLists } from "$lib/lists/live-lists";
 import { resolveAppArea, shouldHideMobileTabBar } from "$lib/mobile-nav";
-import { DURATION_DRAWER_OUT, DURATION_PANEL } from "$lib/motion.svelte";
+import { DURATION_DRAWER_OUT, DURATION_PANEL } from "$lib/motion";
 import {
 	beginMobileSessionViewTransition,
 	resolveMobileSessionNavTransition,

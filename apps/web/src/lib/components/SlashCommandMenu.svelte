@@ -134,7 +134,7 @@ $effect(() => {
 		role="presentation"
 	>
 		<div
-			class={`pointer-events-auto mx-1 w-[min(560px,calc(100vw-3rem))] ${layer.card} overflow-hidden rounded-[18px] border border-border-subtle/90 bg-bg-content shadow-[0_18px_60px_rgba(15,23,42,0.18)] outline-none transition-all duration-150 ease-out motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1`}
+			class={`pointer-events-auto mx-1 w-[min(560px,calc(100vw-3rem))] ${layer.card} overflow-hidden rounded-[18px] border border-border-subtle/90 bg-bg-content shadow-[0_18px_60px_rgba(15,23,42,0.18)] outline-none`}
 			role="listbox"
 			aria-label={m.slash_aria({}, { locale })}
 			aria-activedescendant={selectedItem ? itemId(selectedIndex) : undefined}
@@ -224,7 +224,7 @@ $effect(() => {
 	</div>
 
 	<div class={`absolute inset-x-0 z-40 md:hidden ${layer.mobile}`}>
-		<div class={`pointer-events-auto mx-1 ${layer.card} overflow-hidden rounded-[22px] border border-border-subtle bg-bg-content shadow-[0_18px_50px_rgba(15,23,42,0.24)] transition-all duration-150 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1`}>
+		<div class={`pointer-events-auto mx-1 ${layer.card} overflow-hidden rounded-[22px] border border-border-subtle bg-bg-content shadow-[0_18px_50px_rgba(15,23,42,0.24)]`}>
 			<div class="border-b border-border-subtle px-4 py-3">
 				<div class="flex items-center justify-between gap-3">
 					<div class="min-w-0">

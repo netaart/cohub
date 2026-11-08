@@ -52,7 +52,15 @@ export function formatTimeAgo(at: number, now: number, locale: Locale) {
 	const minutes = Math.round(ms / 60_000);
 	if (minutes < 60) return m.time_ago_min({ n: minutes }, { locale });
 	const hours = Math.round(minutes / 60);
-	return hours < 24
-		? m.time_ago_hour({ n: hours }, { locale })
-		: m.time_ago_day({ n: Math.round(hours / 24) }, { locale });
+	if (hours < 24) return m.time_ago_hour({ n: hours }, { locale });
+	const days = Math.round(hours / 24);
+	if (days <= 7) return m.time_ago_day({ n: days }, { locale });
+	const date = new Date(at);
+	return format(locale, {
+		month: "short",
+		day: "numeric",
+		...(date.getFullYear() === new Date(now).getFullYear()
+			? {}
+			: { year: "numeric" }),
+	}).format(date);
 }

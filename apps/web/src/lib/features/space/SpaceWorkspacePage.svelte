@@ -120,7 +120,7 @@ import {
 } from "$lib/labels/resource-label-cache-sync";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import type { ResizeSession, ResizeStart } from "$lib/layout/pointer-resize";
-import { DURATION_PANEL } from "$lib/motion.svelte";
+import { DURATION_PANEL } from "$lib/motion";
 import { m } from "$lib/paraglide/messages.js";
 import {
 	parseAppDomainEvent,
@@ -3638,9 +3638,9 @@ const headerActions = {
     min-height: 0;
     grid-template-columns: 1fr;
     transition:
-      flex-grow var(--motion-panel-duration) var(--motion-panel-ease),
-      grid-template-columns var(--motion-panel-duration) var(--motion-panel-ease),
-      opacity var(--motion-panel-fade-duration) var(--motion-panel-ease);
+      flex-grow var(--motion-panel-duration) var(--ease-out),
+      grid-template-columns var(--motion-panel-duration) var(--ease-out),
+      opacity var(--motion-panel-fade-duration) var(--ease-out);
   }
 
   .workspace-body--split .files-column-shell {
@@ -3671,8 +3671,8 @@ const headerActions = {
   .workspace-main {
     flex: 1 1 0%;
     transition:
-      flex var(--motion-panel-duration) var(--motion-panel-ease),
-      opacity var(--motion-panel-fade-duration) var(--motion-panel-ease);
+      flex var(--motion-panel-duration) var(--ease-out),
+      opacity var(--motion-panel-fade-duration) var(--ease-out);
   }
 
   @media (min-width: 960px) {
@@ -3693,7 +3693,7 @@ const headerActions = {
       opacity: 0;
       pointer-events: none;
       transition:
-        flex var(--motion-panel-duration) var(--motion-panel-ease),
+        flex var(--motion-panel-duration) var(--ease-out),
         opacity var(--motion-panel-fade-collapse-duration)
           var(--motion-panel-collapse-ease);
     }
@@ -3958,7 +3958,10 @@ const headerActions = {
     font-size: 11px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 120ms ease;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease,
+      box-shadow 120ms ease;
     white-space: nowrap;
   }
   :global(.segmented-btn:hover) { color: var(--text-secondary); }
