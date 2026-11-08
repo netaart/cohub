@@ -7,7 +7,7 @@ type Executor = typeof db | Transaction;
 type UserProfileRow = typeof userProfiles.$inferSelect;
 type SpaceRow = typeof spaces.$inferSelect;
 
-const USERNAME_CHANGE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const USERNAME_CHANGE_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
 /** Null when the user may rename now; the first rename (no history) is never limited. */
 export async function nextUsernameChangeAt(userUuid: string, executor: Executor = db): Promise<Date | null> {

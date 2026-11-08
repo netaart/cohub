@@ -476,7 +476,7 @@
 	"settings_set_username": "Set username",
 	"settings_display_name_required": "Display name is required.",
 	"settings_username_help": "Lowercase letters, numbers, and hyphens only.",
-	"settings_username_change_help": "Your old address will redirect to your new username. If someone else takes your old username later, the address becomes theirs. You can change it once every 7 days.",
+	"settings_username_change_help": "Your old address will redirect to your new username. If someone else takes your old username later, the address becomes theirs. You can change it once every 12 hours.",
 	"settings_username_change_too_soon": "You can change your username again on {date}.",
 	"settings_change_avatar": "Change avatar",
 	"settings_upload_avatar": "Upload avatar",

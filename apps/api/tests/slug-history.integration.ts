@@ -65,7 +65,7 @@ const historyCount = async (entityId: string) =>
   (await client.query<{ n: number }>(`SELECT count(*)::int AS n FROM v2.slug_history WHERE entity_id = $1`, [entityId])).rows[0]?.n;
 
 const backdateHistory = (entityId: string) =>
-  client.query(`UPDATE v2.slug_history SET created_at = now() - interval '8 days' WHERE entity_id = $1`, [entityId]);
+  client.query(`UPDATE v2.slug_history SET created_at = now() - interval '13 hours' WHERE entity_id = $1`, [entityId]);
 
 test("username renames redirect, are rate limited, and old names stay claimable", async () => {
   const alice = await createUser("alice-uuid", "alice");

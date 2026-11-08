@@ -476,7 +476,7 @@
 	"settings_set_username": "设置用户名",
 	"settings_display_name_required": "显示名称不能为空。",
 	"settings_username_help": "仅支持小写字母、数字和连字符。",
-	"settings_username_change_help": "改名后旧地址会跳转到新地址；旧用户名重新被别人使用后，该地址就归新主人。用户名每 7 天只能修改一次。",
+	"settings_username_change_help": "改名后旧地址会跳转到新地址；旧用户名重新被别人使用后，该地址就归新主人。用户名每 12 小时只能修改一次。",
 	"settings_username_change_too_soon": "你可以在 {date} 之后再次修改用户名。",
 	"settings_change_avatar": "更换头像",
 	"settings_upload_avatar": "上传头像",
