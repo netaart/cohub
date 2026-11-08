@@ -144,13 +144,26 @@ test("public Space paths resolve retired username and slug in one step", async (
 test("Home stays claimable and its old address follows the latest former Home", async () => {
   await createUser("fay-uuid", "fay");
 
+  const homeHistory = async () =>
+    (await client.query<{ entity_id: string }>(
+      `SELECT entity_id FROM v2.slug_history WHERE owner_uuid = 'fay-uuid' AND old_slug = 'home'`,
+    )).rows.map((row) => row.entity_id);
+
   const first = await createSpace("fay-uuid", "home");
   await renameSpace(first, "fay-uuid", "home", "first");
-  assert.equal((await resolvePublicSpace("fay", "home"))?.space.id, first);
+  assert.deepEqual(await homeHistory(), [first]);
+  const redirected = await resolvePublicSpace("fay", "home");
+  assert.equal(redirected?.space.id, first);
+  assert.equal(redirected?.redirected, true);
   assert.equal(await isSpaceSlugRetired("fay-uuid", "home"), false);
 
+  // ensureHome re-creates the system slug; the live Home wins over history.
   const second = await createSpace("fay-uuid", "home");
-  assert.equal((await resolvePublicSpace("fay", "home"))?.redirected, false);
+  const live = await resolvePublicSpace("fay", "home");
+  assert.equal(live?.space.id, second);
+  assert.equal(live?.redirected, false);
+
   await renameSpace(second, "fay-uuid", "home", "second");
+  assert.deepEqual(await homeHistory(), [second]);
   assert.equal((await resolvePublicSpace("fay", "home"))?.space.id, second);
 });

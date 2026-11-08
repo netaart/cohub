@@ -1,9 +1,14 @@
-import type { Handle } from "@sveltejs/kit";
+import type { Handle, RequestEvent } from "@sveltejs/kit";
 import { resolvePublicLocale } from "$lib/i18n/public-locale";
+import { publicSlugRedirectLocation } from "$lib/public-slug-redirect";
+import { loadPublicSpaceRedirect } from "$lib/server/public-api";
 import {
 	isPublicSharePath,
+	PRIVATE_NO_STORE_CACHE_CONTROL,
 	PUBLIC_NOT_FOUND_CACHE_CONTROL,
 } from "$lib/server/public-cache";
+
+const PUBLIC_SPACE_ROUTE_ID = "/(app)/[username]/[spaceSlug]";
 
 function resolveHtmlLang(pathname: string, html: string): string {
 	const urlLocale = resolvePublicLocale(pathname);
@@ -26,8 +31,37 @@ function resolveHtmlLang(pathname: string, html: string): string {
 	return "en";
 }
 
+/**
+ * The Space page is a CSR shell (`ssr = false`), so its loads never run for the document.
+ * Resolve retired usernames / Space slugs here to answer the document itself with a 308;
+ * client navigations follow `redirectTo` in the page's own load.
+ */
+async function publicSpaceRedirect(
+	event: RequestEvent,
+): Promise<Response | null> {
+	if (event.route.id !== PUBLIC_SPACE_ROUTE_ID || event.isDataRequest)
+		return null;
+	if (event.request.method !== "GET") return null;
+	const dest = event.request.headers.get("sec-fetch-dest");
+	if (dest && dest !== "document") return null;
+	const { username = "", spaceSlug = "" } = event.params;
+	const location = publicSlugRedirectLocation(
+		await loadPublicSpaceRedirect(username, spaceSlug, event.fetch),
+		event.url,
+	);
+	if (!location) return null;
+	// `home` can be reclaimed by a new Home Space, so the redirect must not be cached.
+	return new Response(null, {
+		status: 308,
+		headers: { location, "cache-control": PRIVATE_NO_STORE_CACHE_CONTROL },
+	});
+}
+
 /** Set <html lang> for SSR / prerendered HTML (client nav handled in pages). */
 export const handle: Handle = async ({ event, resolve }) => {
+	const spaceRedirect = await publicSpaceRedirect(event);
+	if (spaceRedirect) return spaceRedirect;
+
 	const response = await resolve(event, {
 		transformPageChunk: ({ html }) =>
 			html.replace(

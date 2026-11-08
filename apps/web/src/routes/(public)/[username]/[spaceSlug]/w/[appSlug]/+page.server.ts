@@ -1,8 +1,6 @@
 import { error, redirect } from "@sveltejs/kit";
-import {
-	loadPublicAppDetail,
-	publicSlugRedirectLocation,
-} from "$lib/server/public-api";
+import { publicSlugRedirectLocation } from "$lib/public-slug-redirect";
+import { loadPublicAppDetail } from "$lib/server/public-api";
 import { setPublicAppPageCache } from "$lib/server/public-cache";
 import type { PageServerLoad } from "./$types";
 
