@@ -73,22 +73,6 @@ export async function loadPublicAppDetail(
 	return { ok: true, detail };
 }
 
-/** `redirectTo` for a `/:username/:spaceSlug` Space page; null on a miss or any failure. */
-export async function loadPublicSpaceRedirect(
-	username: string,
-	spaceSlug: string,
-	fetcher: typeof fetch,
-): Promise<unknown> {
-	const response = await fetcher(
-		apiUrl(
-			`/api/spaces/by-slug/${encodeURIComponent(username)}/${encodeURIComponent(spaceSlug)}`,
-		),
-	).catch(() => null);
-	if (!response?.ok) return null;
-	const body = await readJson(response);
-	return isRecord(body) ? body.redirectTo : null;
-}
-
 /** Public profile page payload for SSR. */
 export async function loadPublicUserPage(
 	username: string,
