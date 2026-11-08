@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import type { AuthUser } from "./lib/middleware.js";
 import { db } from "./db/index.js";
 import { userProfiles } from "@cohub/db";
@@ -298,15 +298,31 @@ async function upsertUserProfile(input: {
   userUuid: string;
   logtoUserId: string;
   fields: UserProfileFields;
-  /** Explicit renames honor the weekly limit; Logto-driven syncs only record history. */
+  /** Explicit renames honor the rename interval; Logto-driven syncs only record history. */
   limitUsernameChange?: boolean;
 }) {
   const now = new Date();
   // Logto is the source of truth: persist fields.username as-is (including null).
   // Never rehydrate a local-only username that Logto does not have.
   const fields = input.fields;
+  const set = {
+    logtoUserId: input.logtoUserId,
+    username: fields.username,
+    displayName: fields.displayName,
+    avatarUrl: fields.avatarUrl,
+    source: fields.source,
+    syncedAt: now,
+    updatedAt: now,
+  };
+  const upsert = (executor: Pick<typeof db, "insert">, setWhere?: SQL) => executor
+    .insert(userProfiles)
+    .values({ userUuid: input.userUuid, ...set })
+    .onConflictDoUpdate({ target: userProfiles.userUuid, set, setWhere })
+    .returning();
   try {
-    const row = await db.transaction(async (tx) => {
+    // Hot path: a new profile or an unchanged username needs no history, so skip the locked transaction.
+    let [row] = await upsert(db, sql`${userProfiles.username} is null or ${userProfiles.username} = ${fields.username}`);
+    row ??= await db.transaction(async (tx) => {
       const [current] = await tx
         .select({ username: userProfiles.username })
         .from(userProfiles)
@@ -319,28 +335,7 @@ async function upsertUserProfile(input: {
         if (nextAllowedAt) throw new UsernameChangeTooSoonError(nextAllowedAt);
         await recordUsernameChange(tx, input.userUuid, previousUsername);
       }
-      const [row] = await tx.insert(userProfiles).values({
-        userUuid: input.userUuid,
-        logtoUserId: input.logtoUserId,
-        username: fields.username,
-        displayName: fields.displayName,
-        avatarUrl: fields.avatarUrl,
-        source: fields.source,
-        syncedAt: now,
-        updatedAt: now,
-      }).onConflictDoUpdate({
-        target: userProfiles.userUuid,
-        set: {
-          logtoUserId: input.logtoUserId,
-          username: fields.username,
-          displayName: fields.displayName,
-          avatarUrl: fields.avatarUrl,
-          source: fields.source,
-          syncedAt: now,
-          updatedAt: now,
-        },
-      }).returning();
-      return row;
+      return (await upsert(tx))[0];
     });
 
     if (!row) throw new Error("failed to upsert user profile");
