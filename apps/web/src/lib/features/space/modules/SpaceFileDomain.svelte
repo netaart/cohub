@@ -25,7 +25,7 @@ import type { AppSurfaceHost } from "$lib/features/app/surface-host";
 import type { FilePreviewModel } from "$lib/file-preview-model";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import type { ResizeStart } from "$lib/layout/pointer-resize";
-import { DURATION_PANEL, svelteEaseIn } from "$lib/motion.svelte";
+import { DURATION_PANEL_FADE_COLLAPSE, easeOut } from "$lib/motion";
 import { m } from "$lib/paraglide/messages.js";
 import type { FileViewMode } from "$lib/resource-kit/diff";
 import type { SpaceFsNode } from "$lib/space-fs";
@@ -475,12 +475,9 @@ function closeWindow(kind: Window["kind"], key: string) {
 }
 
 function previewContentOut(node: Element) {
-	const reducedMotion =
-		typeof window !== "undefined" &&
-		window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 	return fade(node, {
-		duration: isMobile || reducedMotion ? 0 : DURATION_PANEL,
-		easing: svelteEaseIn,
+		duration: isMobile ? 0 : DURATION_PANEL_FADE_COLLAPSE,
+		easing: easeOut,
 	});
 }
 </script>

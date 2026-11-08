@@ -37,7 +37,7 @@ import {
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { screenVariantSize } from "$lib/media/media-info";
 import { mediaFilename } from "$lib/media-download";
-import { EASE_OUT } from "$lib/motion.svelte";
+import { EASE_OUT } from "$lib/motion";
 import { m } from "$lib/paraglide/messages.js";
 import MediaImage from "$lib/resource-kit/MediaImage.svelte";
 import MediaVideo from "$lib/resource-kit/MediaVideo.svelte";

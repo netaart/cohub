@@ -5,18 +5,12 @@ import type {
 	LabelResourceType,
 } from "@neta-art/cohub";
 import { Check, Loader2, Plus, X } from "lucide-svelte";
-import { fade, scale, slide } from "svelte/transition";
 import { floatNear, portal } from "$lib/actions/portal";
 import LabelCreateForm from "$lib/components/LabelCreateForm.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import {
-	DURATION_MODAL_IN,
-	DURATION_MODAL_OUT,
-	svelteEaseIn,
-	svelteEaseOut,
-} from "$lib/motion.svelte";
+import { overlay } from "$lib/motion";
 import { m } from "$lib/paraglide/messages.js";
 import {
 	createSpaceLabel,
@@ -69,11 +63,6 @@ const isCompact = $derived(useCompactShell());
 const flatLabels = $derived(flattenLabels(labels));
 const labelOptions = $derived(flattenLabelsWithRefs(labels));
 const useAnchoredPopover = $derived(Boolean(anchorEl) && !isCompact);
-
-const FADE_IN = { duration: DURATION_MODAL_IN, easing: svelteEaseOut };
-const FADE_OUT = { duration: DURATION_MODAL_OUT, easing: svelteEaseIn };
-const SCALE_IN = { ...FADE_IN, start: 0.97 };
-const SCALE_OUT = { ...FADE_OUT, start: 0.97 };
 
 function getReactiveLabelDisplayName(label: LabelListItem) {
 	userLabelProfileVersion;
@@ -359,8 +348,7 @@ $effect(() => {
 		class:is-soft={useAnchoredPopover}
 		aria-label={m.label_dismiss_picker({}, { locale })}
 		onclick={onClose}
-		in:fade={FADE_IN}
-		out:fade={FADE_OUT}
+		transition:overlay|global={{ drawer: !useAnchoredPopover && isCompact }}
 	></button>
 
 	{#if useAnchoredPopover}
@@ -377,8 +365,8 @@ $effect(() => {
 				width: 360,
 				zIndex: 121,
 			}}
-			in:fade|local={FADE_IN}
-			out:fade|local={FADE_OUT}
+			style:transform-origin="top right"
+			transition:overlay|global={{ kind: "pop" }}
 		>
 			{@render pickerHeader()}
 			{@render pickerBody()}
@@ -390,8 +378,7 @@ $effect(() => {
 			aria-modal="true"
 			aria-label={m.inline_label_as({}, { locale })}
 			tabindex="-1"
-			in:slide|local={{ axis: "y", ...FADE_IN }}
-			out:slide|local={{ axis: "y", ...FADE_OUT }}
+			transition:overlay|global={{ kind: "sheet" }}
 		>
 			<div class="sheet-handle" aria-hidden="true"></div>
 			{@render pickerHeader()}
@@ -404,8 +391,7 @@ $effect(() => {
 			aria-modal="true"
 			aria-label={m.inline_label_as({}, { locale })}
 			tabindex="-1"
-			in:scale|local={SCALE_IN}
-			out:scale|local={SCALE_OUT}
+			transition:overlay|global={{ kind: "pop" }}
 		>
 			{@render pickerHeader()}
 			{@render pickerBody()}

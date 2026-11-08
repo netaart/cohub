@@ -1434,7 +1434,6 @@ onMount(() => {
 		border-radius: 14px;
 		background: var(--palette-bg);
 		box-shadow: 0 24px 80px color-mix(in oklch, var(--neutral-100) 74%, transparent), 0 0 0 1px color-mix(in oklch, var(--neutral-0) 4%, transparent) inset;
-		animation: command-enter 140ms cubic-bezier(0.16, 1, 0.3, 1);
 	}
 
 	.command-header {
@@ -1482,7 +1481,7 @@ onMount(() => {
 		background: var(--bg-hover);
 		color: var(--text-tertiary);
 		cursor: pointer;
-		transition: color 90ms cubic-bezier(0.25, 1, 0.5, 1);
+		transition: color 90ms var(--ease-out);
 	}
 
 	.command-clear:hover { color: var(--text-primary); }
@@ -1552,7 +1551,7 @@ onMount(() => {
 	}
 
 	.command-list {
-		transition: opacity 120ms cubic-bezier(0.25, 1, 0.5, 1);
+		transition: opacity 120ms var(--ease-out);
 	}
 
 	.command-list.searching {
@@ -1628,11 +1627,6 @@ onMount(() => {
 		color: var(--error-700);
 	}
 
-	@keyframes command-enter {
-		from { opacity: 0; transform: translateY(-8px) scale(0.985); }
-		to { opacity: 1; transform: translateY(0) scale(1); }
-	}
-
 	@media (max-width: 640px) {
 		.command-palette-root {
 			align-items: stretch;
@@ -1649,7 +1643,7 @@ onMount(() => {
 			border: 0;
 			border-radius: 0;
 			box-shadow: none;
-			animation: command-screen-enter 160ms cubic-bezier(0.16, 1, 0.3, 1);
+			animation: command-screen-enter 160ms var(--ease-out);
 		}
 
 		.command-header {

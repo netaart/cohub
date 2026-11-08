@@ -302,17 +302,16 @@ const boardHint = $derived(
 					{/if}
 				</div>
 
-				{#each currentRows as row, i (getRowKey(row))}
+				{#each currentRows as row (getRowKey(row))}
 					{@const userProfile = getUserProfile(row)}
 					{@const spaceHref = getSpaceHref(row)}
 					{@const secondary = getSecondaryMetrics(row)}
 					{@const hasAvatar = isSpaceRow(row) || (isUserRow(row) && Boolean(userProfile))}
 					<div
 						data-density="compact"
-						class="trending-table-row px-0 transition-all duration-300 ease-out"
+						class="trending-table-row px-0"
 						class:row-top={row.rank <= 3}
 						class:row-data={row.rank > 3}
-						style="--row-index: {i}; animation: rowFadeIn 0.35s ease-out both; animation-delay: {i * 35}ms;"
 					>
 						<div class="row-span-2 flex h-[var(--list-row-height)] items-center justify-center sm:row-span-1">
 							{#if row.rank === 1}
@@ -383,17 +382,6 @@ const boardHint = $derived(
 </div>
 
 <style>
-	@keyframes rowFadeIn {
-		from {
-			opacity: 0;
-			transform: translateY(6px);
-		}
-		to {
-			opacity: 1;
-			transform: translateY(0);
-		}
-	}
-
 	.trending-table {
 		display: grid;
 		grid-template-columns: 28px minmax(0, 1fr) auto;

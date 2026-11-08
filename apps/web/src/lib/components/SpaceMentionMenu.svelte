@@ -111,7 +111,7 @@ $effect(() => {
 
 {#if open}
 	<div class={`pointer-events-none absolute inset-x-0 z-40 hidden ${layer.desktop}`} role="presentation">
-		<div class={`pointer-events-auto mx-1 w-[min(580px,calc(100vw-3rem))] ${layer.card} overflow-hidden rounded-[18px] border border-border-subtle/90 bg-bg-content shadow-[0_18px_60px_rgba(15,23,42,0.18)] outline-none transition-all duration-150 ease-out motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1`} role="listbox" aria-label={m.mention_aria({}, { locale })} aria-activedescendant={selectedItem ? itemId(selectedIndex) : undefined} tabindex="-1">
+		<div class={`pointer-events-auto mx-1 w-[min(580px,calc(100vw-3rem))] ${layer.card} overflow-hidden rounded-[18px] border border-border-subtle/90 bg-bg-content shadow-[0_18px_60px_rgba(15,23,42,0.18)] outline-none`} role="listbox" aria-label={m.mention_aria({}, { locale })} aria-activedescendant={selectedItem ? itemId(selectedIndex) : undefined} tabindex="-1">
 			<div class="flex items-center justify-between gap-3 border-b border-border-subtle/70 px-3 py-2.5">
 				<div class="min-w-0">
 					<div class="text-[12px] font-medium leading-4 text-text-primary">{m.mention_spaces({}, { locale })}</div>
@@ -162,7 +162,7 @@ $effect(() => {
 	</div>
 
 	<div class={`absolute inset-x-0 z-40 md:hidden ${layer.mobile}`}>
-		<div class={`pointer-events-auto mx-1 ${layer.card} overflow-hidden rounded-[22px] border border-border-subtle bg-bg-content shadow-[0_18px_50px_rgba(15,23,42,0.24)] transition-all duration-150 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1`}>
+		<div class={`pointer-events-auto mx-1 ${layer.card} overflow-hidden rounded-[22px] border border-border-subtle bg-bg-content shadow-[0_18px_50px_rgba(15,23,42,0.24)]`}>
 			<div class="border-b border-border-subtle px-4 py-3">
 				<div class="flex items-center justify-between gap-3">
 					<div class="min-w-0"><div class="text-[12px] font-medium text-text-primary">{m.mention_spaces({}, { locale })}</div><div class="mt-0.5 truncate text-[11px] text-text-tertiary">{status}</div></div>

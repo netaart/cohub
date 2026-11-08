@@ -309,7 +309,7 @@ function tickLeft(entryIndex: number): string {
 		box-shadow: 0 12px 28px color-mix(in srgb, var(--overlay-scrim-strong) 18%, transparent);
 		backdrop-filter: blur(14px);
 		transform: translateX(-50%);
-		animation: replay-enter var(--motion-duration-modal-in, 200ms) cubic-bezier(0.16, 1, 0.3, 1) both;
+		animation: replay-enter var(--motion-duration-modal-in, 200ms) var(--ease-out) both;
 	}
 
 	@keyframes replay-enter {
@@ -411,7 +411,7 @@ function tickLeft(entryIndex: number): string {
 	}
 	.replay-fill {
 		background: var(--brand);
-		transition: width 120ms cubic-bezier(0.16, 1, 0.3, 1);
+		transition: width 120ms var(--ease-out);
 	}
 	.replay-track--scrubbing .replay-fill,
 	.replay-track--scrubbing .replay-thumb { transition: none; }
@@ -439,7 +439,7 @@ function tickLeft(entryIndex: number): string {
 		background: var(--brand);
 		box-shadow: 0 1px 4px color-mix(in srgb, var(--overlay-scrim-strong) 30%, transparent);
 		transform: translate(-50%, -50%);
-		transition: left 120ms cubic-bezier(0.16, 1, 0.3, 1);
+		transition: left 120ms var(--ease-out);
 		pointer-events: none;
 	}
 

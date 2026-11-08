@@ -210,7 +210,7 @@ function userTitle(
 	}
 
 	.new-chat-profile-fragment {
-		animation: new-chat-profile-fragment-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+		animation: new-chat-profile-fragment-in 180ms var(--ease-out) both;
 	}
 
 	@media (prefers-reduced-motion: reduce) {
@@ -227,7 +227,7 @@ function userTitle(
 
 		.new-chat-profile-body {
 			overflow: hidden;
-			transition: max-height 180ms cubic-bezier(0.22, 1, 0.36, 1);
+			transition: max-height 180ms var(--ease-out);
 		}
 	}
 </style>

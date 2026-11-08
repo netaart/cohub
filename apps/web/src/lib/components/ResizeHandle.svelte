@@ -111,7 +111,7 @@ $effect(() => () => cancel?.());
 		pointer-events: none;
 		transition:
 			opacity 150ms ease,
-			transform 220ms var(--motion-panel-ease),
+			transform 220ms var(--ease-out),
 			background-color 150ms ease;
 	}
 

@@ -607,7 +607,7 @@ async function handleDraftDrop(event: DragEvent) {
 			<div
 				class={`pointer-events-none absolute left-1/2 z-20 -translate-x-1/2 ${!host.hasUnread && host.shouldAutoFollow ? "lg:hidden" : ""}`}
 				style:bottom={`${Math.max(host.chatChromeHeight + 12, 96)}px`}
-				style="animation: cohub-scroll-to-bottom-in 180ms cubic-bezier(0.22, 1, 0.36, 1);"
+				style="animation: cohub-scroll-to-bottom-in 180ms var(--ease-out);"
 			>
 				<div
 					class="pointer-events-auto flex items-center gap-0.5 rounded-full border border-border-subtle/80 bg-bg-primary/95 p-1 shadow-[0_4px_18px_rgba(0,0,0,0.16)] backdrop-blur-sm"

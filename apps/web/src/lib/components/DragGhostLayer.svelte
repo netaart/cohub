@@ -11,7 +11,7 @@ import {
 	POINTER_DRAG_SETTLE_MS,
 	pointerDrag,
 } from "$lib/drag/pointer-drag.svelte";
-import { EASE_OUT } from "$lib/motion.svelte";
+import { EASE_OUT } from "$lib/motion";
 
 /** Offset so the card sits above-right of the fingertip, not under it. */
 const OFFSET_X = 14;

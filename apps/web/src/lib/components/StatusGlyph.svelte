@@ -43,7 +43,7 @@ const {
 	.status-glyph {
 		--d: var(--status-glyph-size, 0.45em);
 		--glyph-color: var(--color-text-placeholder);
-		--glyph-ease: cubic-bezier(0.16, 1, 0.3, 1);
+		--glyph-ease: var(--ease-out);
 		position: relative;
 		display: inline-block;
 		flex-shrink: 0;

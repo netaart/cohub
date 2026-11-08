@@ -20,7 +20,14 @@
 		cursor: pointer;
 		transition:
 			background-color 120ms ease,
-			opacity 120ms ease;
+			opacity 120ms ease,
+			scale 120ms var(--ease-out);
+
+		@media (prefers-reduced-motion: no-preference) {
+			&:active:not(:disabled) {
+				scale: 0.97;
+			}
+		}
 
 		&:focus-visible {
 			outline: 2px solid var(--brand-ring);
@@ -37,8 +44,10 @@
 		background: var(--brand);
 		color: var(--brand-contrast-fg);
 
-		&:hover:not(:disabled) {
-			background: var(--brand-hover);
+		@media (hover: hover) {
+			&:hover:not(:disabled) {
+				background: var(--brand-hover);
+			}
 		}
 	}
 
@@ -47,8 +56,10 @@
 		background: var(--bg-input);
 		color: var(--text-primary);
 
-		&:hover:not(:disabled) {
-			background: var(--bg-hover);
+		@media (hover: hover) {
+			&:hover:not(:disabled) {
+				background: var(--bg-hover);
+			}
 		}
 	}
 
@@ -56,8 +67,10 @@
 		border: 1px solid color-mix(in srgb, var(--error-700) 30%, transparent);
 		color: var(--error-700);
 
-		&:hover:not(:disabled) {
-			background: var(--error-900);
+		@media (hover: hover) {
+			&:hover:not(:disabled) {
+				background: var(--error-900);
+			}
 		}
 	}
 
@@ -182,7 +195,13 @@
 			background-color 100ms ease,
 			color 100ms ease;
 
-		&:hover {
+		@media (hover: hover) {
+			&:hover {
+				color: var(--text-secondary);
+			}
+		}
+
+		&:active {
 			color: var(--text-secondary);
 		}
 
@@ -215,7 +234,7 @@
 		background: var(--bg-input);
 		box-shadow: 0 1px 2px oklch(0% 0 0 / 0.08);
 		translate: calc(100% * var(--segmented-index)) 0;
-		transition: translate 240ms cubic-bezier(0.16, 1, 0.3, 1);
+		transition: translate 240ms var(--ease-out);
 	}
 
 	.segmented-item {
@@ -231,7 +250,13 @@
 		cursor: pointer;
 		transition: color 150ms ease;
 
-		&:hover:not(:disabled) {
+		@media (hover: hover) {
+			&:hover:not(:disabled) {
+				color: var(--text-secondary);
+			}
+		}
+
+		&:active:not(:disabled) {
 			color: var(--text-secondary);
 		}
 
@@ -303,9 +328,20 @@
 			border-color 100ms ease,
 			color 100ms ease;
 
-		&:hover:not(:disabled) {
+		@media (hover: hover) {
+			&:hover:not(:disabled) {
+				background: var(--bg-hover);
+				color: var(--text-primary);
+			}
+
+			&.is-danger:hover:not(:disabled) {
+				background: var(--color-error-bg);
+				color: var(--error-700);
+			}
+		}
+
+		&:active:not(:disabled) {
 			background: var(--bg-hover);
-			color: var(--text-primary);
 		}
 
 		&[aria-pressed="true"],
@@ -313,11 +349,6 @@
 			border-color: var(--brand-border);
 			background: var(--brand-bg);
 			color: var(--brand-muted-fg);
-		}
-
-		&.is-danger:hover:not(:disabled) {
-			background: var(--color-error-bg);
-			color: var(--error-700);
 		}
 
 		&:focus-visible {
@@ -342,12 +373,20 @@
 		background: var(--chip-color, transparent);
 		cursor: pointer;
 		transition:
-			transform 100ms ease,
+			scale 100ms var(--ease-out),
 			border-color 100ms ease,
 			box-shadow 100ms ease;
 
-		&:hover {
-			transform: scale(1.15);
+		@media (prefers-reduced-motion: no-preference) {
+			@media (hover: hover) {
+				&:hover {
+					scale: 1.15;
+				}
+			}
+
+			&:active {
+				scale: 0.94;
+			}
 		}
 
 		&[aria-pressed="true"] {

@@ -197,7 +197,7 @@ onMount(() => {
 		align-items: flex-start;
 		gap: 10px;
 		padding: 12px 12px 12px 14px;
-		animation: enter 220ms cubic-bezier(0.16, 1, 0.3, 1);
+		animation: enter 220ms var(--ease-out);
 	}
 	@media (min-width: 640px) {
 		.toast {

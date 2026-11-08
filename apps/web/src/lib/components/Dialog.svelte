@@ -1,14 +1,9 @@
 <script lang="ts">
 import { X } from "lucide-svelte";
-import { fade, scale, slide } from "svelte/transition";
 import { dismissOnBack } from "$lib/back-layers.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
-import {
-	DURATION_MODAL_IN,
-	DURATION_MODAL_OUT,
-	svelteEaseIn,
-	svelteEaseOut,
-} from "$lib/motion.svelte";
+import { useCompactShell } from "$lib/layout/compact-shell.svelte";
+import { overlay } from "$lib/motion";
 import { m } from "$lib/paraglide/messages.js";
 
 function portal(node: HTMLElement) {
@@ -49,76 +44,45 @@ dismissOnBack(
 	() => open,
 	() => onClose(),
 );
-const TRANSITION_IN = { duration: DURATION_MODAL_IN, easing: svelteEaseOut };
-const TRANSITION_OUT = { duration: DURATION_MODAL_OUT, easing: svelteEaseIn };
-const SCALE_TRANSITION_IN = { ...TRANSITION_IN, start: 0.95 };
-const SCALE_TRANSITION_OUT = { ...TRANSITION_OUT, start: 0.95 };
+const sheet = $derived(mobile && useCompactShell());
 </script>
 
 {#if open}
   <div
     use:portal
-    class="dialog-backdrop fixed inset-0 z-[var(--z-dialog)] flex items-end justify-center p-0 lg:items-center lg:p-4"
-    in:fade={TRANSITION_IN}
-    out:fade={TRANSITION_OUT}
+    class="fixed inset-0 z-[var(--z-dialog)] flex justify-center {sheet ? 'items-end' : 'items-center p-4'}"
     role="dialog"
     aria-modal="true"
   >
     <div
-      class="absolute inset-0"
+      class="dialog-backdrop absolute inset-0"
       onclick={onClose}
       aria-hidden="true"
+      transition:overlay={{ drawer: sheet }}
     ></div>
-
-    {#if mobile}
-      <!-- Desktop: centered modal -->
-      <div
-        class="dialog-surface relative hidden w-full lg:block"
-        style="max-width: {maxWidth}"
-        in:scale|local={SCALE_TRANSITION_IN}
-        out:scale|local={SCALE_TRANSITION_OUT}
-      >
-        {@render modalContent()}
+    <div
+      class="dialog-surface relative w-full"
+      class:is-sheet={sheet}
+      style="max-width: {sheet ? '480px' : maxWidth}"
+      transition:overlay={{ kind: sheet ? "sheet" : "pop" }}
+    >
+      <div class="flex flex-col" class:h-full={!sheet} style="max-height: {maxHeight}">
+        {#if title}
+          <div class="h-9 flex items-center justify-between px-3 border-b border-border-subtle text-[10px] font-medium uppercase tracking-wider text-text-tertiary select-none shrink-0">
+            <span>{title}</span>
+            {@render closeButton()}
+          </div>
+        {/if}
+        <div class="min-h-0 flex-1" class:pb-safe={sheet} class:overflow-y-auto={scrollable} class:overflow-hidden={!scrollable}>
+          {@render children()}
+        </div>
+        {#if footer}
+          {@render footer()}
+        {/if}
       </div>
-
-      <!-- Mobile: bottom sheet -->
-      <div
-        class="dialog-surface is-sheet relative w-full max-w-[480px] lg:hidden"
-        in:slide|local={{ axis: "y", ...TRANSITION_IN }}
-        out:slide|local={{ axis: "y", ...TRANSITION_OUT }}
-      >
-        {@render mobileSheetContent()}
-      </div>
-    {:else}
-      <!-- Desktop-only modal -->
-      <div
-        class="dialog-surface relative w-full"
-        style="max-width: {maxWidth}"
-        in:scale|local={SCALE_TRANSITION_IN}
-        out:scale|local={SCALE_TRANSITION_OUT}
-      >
-        {@render modalContent()}
-      </div>
-    {/if}
+    </div>
   </div>
 {/if}
-
-{#snippet modalContent()}
-  <div class="flex flex-col h-full" style="max-height: {maxHeight}">
-    {#if title}
-      <div class="h-9 flex items-center justify-between px-3 border-b border-border-subtle text-[10px] font-medium uppercase tracking-wider text-text-tertiary select-none shrink-0">
-        <span>{title}</span>
-        {@render closeButton()}
-      </div>
-    {/if}
-    <div class:flex-1={true} class:min-h-0={true} class:overflow-y-auto={scrollable} class:overflow-hidden={!scrollable}>
-      {@render children()}
-    </div>
-    {#if footer}
-      {@render footer()}
-    {/if}
-  </div>
-{/snippet}
 
 {#snippet closeButton()}
   <button
@@ -130,21 +94,4 @@ const SCALE_TRANSITION_OUT = { ...TRANSITION_OUT, start: 0.95 };
   >
     <X class="h-3.5 w-3.5" />
   </button>
-{/snippet}
-
-{#snippet mobileSheetContent()}
-  <div class="flex flex-col" style="max-height: {maxHeight}">
-    {#if title}
-      <div class="h-9 flex items-center justify-between px-3 border-b border-border-subtle text-[10px] font-medium uppercase tracking-wider text-text-tertiary select-none shrink-0">
-        <span>{title}</span>
-        {@render closeButton()}
-      </div>
-    {/if}
-    <div class:flex-1={true} class:min-h-0={true} class:pb-safe={true} class:overflow-y-auto={scrollable} class:overflow-hidden={!scrollable}>
-      {@render children()}
-    </div>
-    {#if footer}
-      {@render footer()}
-    {/if}
-  </div>
 {/snippet}
