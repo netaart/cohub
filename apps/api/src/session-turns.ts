@@ -349,7 +349,8 @@ const buildSegmentPredicate = (segment: Awaited<ReturnType<typeof ensureSessionT
 };
 
 export const listSessionTurns = async (sessionId: string, options?: { cursor?: number; limit?: number; direction?: "older" | "newer" }) => {
-  const limit = Math.min(options?.limit ?? 30, 100);
+  // Callers bound the page/window and include extra rows for the anchor and hasMore.
+  const limit = options?.limit ?? 30;
   const direction = options?.direction ?? "older";
   const segments = await ensureSessionTurnSegments(sessionId);
   const collected: SessionTurnRecord[] = [];
