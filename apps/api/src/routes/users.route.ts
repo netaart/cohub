@@ -17,6 +17,8 @@ const MAX_BATCH_USER_PROFILES = 100;
 const MAX_PUBLIC_USER_SPACES = 50;
 const MAX_PUBLIC_USER_WORKS = 50;
 const PUBLIC_USER_HTTP_CACHE = "public, max-age=60, stale-while-revalidate=300";
+/** An old username can be claimed at any time; cap how long a redirect may be reused. */
+const USER_REDIRECT_HTTP_CACHE = "public, max-age=60";
 
 type BatchProfilesBody = {
   userUuids?: unknown;
@@ -180,7 +182,7 @@ router.get("/by-username/:username", async (c) => {
       };
     });
 
-  c.header("Cache-Control", PUBLIC_USER_HTTP_CACHE);
+  c.header("Cache-Control", owner.redirected ? USER_REDIRECT_HTTP_CACHE : PUBLIC_USER_HTTP_CACHE);
   return c.json({
     profile,
     spaces: publicSpaces,

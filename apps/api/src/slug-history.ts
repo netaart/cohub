@@ -1,6 +1,5 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { slugHistory, spaces, userProfiles } from "@cohub/db";
-import { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 import { db } from "./db/index.js";
 
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -9,39 +8,6 @@ type UserProfileRow = typeof userProfiles.$inferSelect;
 type SpaceRow = typeof spaces.$inferSelect;
 
 const USERNAME_CHANGE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
-export const USERNAME_HISTORY_UNIQUE = "v2_uq_slug_history_username";
-export const SPACE_SLUG_HISTORY_UNIQUE = "v2_uq_slug_history_space";
-
-export async function retiredUsernames(candidates: string[], executor: Executor = db): Promise<Set<string>> {
-  if (candidates.length === 0) return new Set();
-  const rows = await executor
-    .select({ oldSlug: slugHistory.oldSlug })
-    .from(slugHistory)
-    .where(and(
-      eq(slugHistory.entityType, "username"),
-      inArray(slugHistory.oldSlug, candidates),
-    ));
-  return new Set(rows.map((row) => row.oldSlug));
-}
-
-export async function isUsernameRetired(username: string, executor: Executor = db): Promise<boolean> {
-  return (await retiredUsernames([username], executor)).has(username);
-}
-
-/** Home stays claimable by its owner: the product re-creates it under its system slug on demand. */
-export async function isSpaceSlugRetired(ownerUuid: string, slug: string): Promise<boolean> {
-  if (slug === HOME_SPACE_SLUG) return false;
-  const [row] = await db
-    .select({ id: slugHistory.id })
-    .from(slugHistory)
-    .where(and(
-      eq(slugHistory.entityType, "space"),
-      eq(slugHistory.ownerUuid, ownerUuid),
-      eq(slugHistory.oldSlug, slug),
-    ))
-    .limit(1);
-  return Boolean(row);
-}
 
 /** Null when the user may rename now; the first rename (no history) is never limited. */
 export async function nextUsernameChangeAt(userUuid: string, executor: Executor = db): Promise<Date | null> {
@@ -61,40 +27,33 @@ export async function recordUsernameChange(tx: Transaction, userUuid: string, ol
 }
 
 export async function recordSpaceSlugChange(tx: Transaction, space: Pick<SpaceRow, "id" | "userUuid">, oldSlug: string) {
-  const insert = tx.insert(slugHistory).values({
+  await tx.insert(slugHistory).values({
     entityType: "space",
     entityId: space.id,
     ownerUuid: space.userUuid,
     oldSlug,
   });
-  if (oldSlug !== HOME_SPACE_SLUG) {
-    await insert;
-    return;
-  }
-  // A reclaimed Home can be renamed again; its old address follows the latest former Home.
-  await insert.onConflictDoUpdate({
-    target: [slugHistory.ownerUuid, slugHistory.oldSlug],
-    targetWhere: sql`${slugHistory.entityType} = 'space' and ${slugHistory.ownerUuid} is not null`,
-    set: { entityId: space.id, createdAt: sql`now()` },
-  });
 }
 
 export type ResolvedOwner = { profile: UserProfileRow & { username: string }; redirected: boolean };
 
+/**
+ * Current holders always win; old names can be claimed by anyone at any time. Only an
+ * unclaimed name falls back to history, following whoever gave it up most recently.
+ */
 export async function resolveOwnerByUsername(username: string): Promise<ResolvedOwner | null> {
   const [current] = await db.select().from(userProfiles).where(eq(userProfiles.username, username)).limit(1);
   if (current?.username) return { profile: { ...current, username: current.username }, redirected: false };
 
-  const [retired] = await db
+  const [latest] = await db
     .select({ profile: userProfiles })
     .from(slugHistory)
-    .innerJoin(userProfiles, eq(userProfiles.userUuid, slugHistory.entityId))
+    .leftJoin(userProfiles, eq(userProfiles.userUuid, slugHistory.entityId))
     .where(and(eq(slugHistory.entityType, "username"), eq(slugHistory.oldSlug, username)))
+    .orderBy(desc(slugHistory.createdAt))
     .limit(1);
-  const currentUsername = retired?.profile.username;
-  return retired && currentUsername
-    ? { profile: { ...retired.profile, username: currentUsername }, redirected: true }
-    : null;
+  const profile = latest?.profile;
+  return profile?.username ? { profile: { ...profile, username: profile.username }, redirected: true } : null;
 }
 
 async function resolveOwnedSpace(ownerUuid: string, slug: string): Promise<{ space: SpaceRow; redirected: boolean } | null> {
@@ -105,11 +64,12 @@ async function resolveOwnedSpace(ownerUuid: string, slug: string): Promise<{ spa
     .limit(1);
   if (current) return { space: current, redirected: false };
 
-  // Spaces are hard-deleted: the join drops history of removed Spaces so they 404.
-  const [retired] = await db
+  // Spaces are hard-deleted: when the latest holder is gone the address 404s instead of
+  // falling back to an older holder.
+  const [latest] = await db
     .select({ space: spaces })
     .from(slugHistory)
-    .innerJoin(spaces, and(
+    .leftJoin(spaces, and(
       eq(spaces.id, sql`${slugHistory.entityId}::uuid`),
       eq(spaces.userUuid, ownerUuid),
     ))
@@ -118,8 +78,9 @@ async function resolveOwnedSpace(ownerUuid: string, slug: string): Promise<{ spa
       eq(slugHistory.ownerUuid, ownerUuid),
       eq(slugHistory.oldSlug, slug),
     ))
+    .orderBy(desc(slugHistory.createdAt))
     .limit(1);
-  return retired?.space.slug ? { space: retired.space, redirected: true } : null;
+  return latest?.space?.slug ? { space: latest.space, redirected: true } : null;
 }
 
 export type ResolvedPublicSpace = {
@@ -128,7 +89,7 @@ export type ResolvedPublicSpace = {
   redirected: boolean;
 };
 
-/** Resolve `/:username/:spaceSlug`, following retired slugs on both segments in one step. */
+/** Resolve `/:username/:spaceSlug`, following old names on both segments in one step. */
 export async function resolvePublicSpace(username: string, slug: string): Promise<ResolvedPublicSpace | null> {
   const owner = await resolveOwnerByUsername(username);
   if (!owner) return null;

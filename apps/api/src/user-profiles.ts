@@ -10,13 +10,7 @@ import {
   parseUsername,
   validatePublicIdentifierAssignment,
 } from "@cohub/protocol/public-identifiers";
-import {
-  isUsernameRetired,
-  nextUsernameChangeAt,
-  recordUsernameChange,
-  retiredUsernames,
-  USERNAME_HISTORY_UNIQUE,
-} from "./slug-history.js";
+import { nextUsernameChangeAt, recordUsernameChange } from "./slug-history.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -34,10 +28,6 @@ export type UserProfile = PublicUserProfile & {
 
 export class UsernameConflictError extends Error {
   override name = "UsernameConflictError";
-}
-
-export class UsernameRetiredError extends UsernameConflictError {
-  override name = "UsernameRetiredError";
 }
 
 export class UsernameChangeTooSoonError extends Error {
@@ -184,8 +174,7 @@ async function filterLocallyAvailableUsernames(input: {
       ne(userProfiles.userUuid, input.userUuid),
     ));
   const taken = new Set(takenRows.map((row) => row.username).filter((value): value is string => Boolean(value)));
-  const retired = await retiredUsernames(input.candidates);
-  return input.candidates.filter((candidate) => !taken.has(candidate) && !retired.has(candidate));
+  return input.candidates.filter((candidate) => !taken.has(candidate));
 }
 
 function getLogtoManagementErrorStatus(error: unknown): number | null {
@@ -325,15 +314,10 @@ async function upsertUserProfile(input: {
         .for("update")
         .limit(1);
       const previousUsername = current?.username ?? null;
-      if (previousUsername !== fields.username) {
-        if (fields.username && await isUsernameRetired(fields.username, tx)) {
-          throw new UsernameRetiredError("username was used before and cannot be reused");
-        }
-        if (previousUsername) {
-          const nextAllowedAt = input.limitUsernameChange ? await nextUsernameChangeAt(input.userUuid, tx) : null;
-          if (nextAllowedAt) throw new UsernameChangeTooSoonError(nextAllowedAt);
-          await recordUsernameChange(tx, input.userUuid, previousUsername);
-        }
+      if (previousUsername && previousUsername !== fields.username) {
+        const nextAllowedAt = input.limitUsernameChange ? await nextUsernameChangeAt(input.userUuid, tx) : null;
+        if (nextAllowedAt) throw new UsernameChangeTooSoonError(nextAllowedAt);
+        await recordUsernameChange(tx, input.userUuid, previousUsername);
       }
       const [row] = await tx.insert(userProfiles).values({
         userUuid: input.userUuid,
@@ -365,9 +349,6 @@ async function upsertUserProfile(input: {
     const constraint = getPostgresErrorConstraint(error);
     if (isPostgresUniqueViolation(error) && constraint === "v2_uq_user_profiles_username") {
       throw new UsernameConflictError("username is already taken");
-    }
-    if (isPostgresUniqueViolation(error) && constraint === USERNAME_HISTORY_UNIQUE) {
-      throw new UsernameConflictError("username change conflicted with another change; retry");
     }
     throw error;
   }
@@ -763,9 +744,6 @@ export async function updateCurrentUserProfile(user: AuthUser, input: { displayN
     ).limit(1);
     if (existing.length > 0) {
       throw new UsernameConflictError("username is already taken");
-    }
-    if (await isUsernameRetired(username)) {
-      throw new UsernameRetiredError("username was used before and cannot be reused");
     }
     if (trustedStoredProfile?.username) {
       const nextAllowedAt = await nextUsernameChangeAt(user.uuid);

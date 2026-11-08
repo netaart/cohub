@@ -88,7 +88,10 @@ export const userProfiles = v2.table(
 
 export type SlugHistoryEntityType = "username" | "space";
 
-/** Retired public slugs: they redirect to the entity's current slug and are never reassigned. */
+/**
+ * Old public slugs. An unclaimed old slug redirects to its latest former holder's current
+ * slug; anyone may claim it again, and the live holder then always wins.
+ */
 export const slugHistory = v2.table(
   "slug_history",
   {
@@ -100,12 +103,9 @@ export const slugHistory = v2.table(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    usernameUniqueIdx: uniqueIndex("v2_uq_slug_history_username")
-      .on(table.oldSlug)
-      .where(sql`${table.entityType} = 'username'`),
-    spaceUniqueIdx: uniqueIndex("v2_uq_slug_history_space")
-      .on(table.ownerUuid, table.oldSlug)
-      .where(sql`${table.entityType} = 'space' and ${table.ownerUuid} is not null`),
+    oldSlugIdx: index("v2_idx_slug_history_old_slug").on(table.entityType, table.oldSlug, table.createdAt.desc()),
+    ownerOldSlugIdx: index("v2_idx_slug_history_owner_old_slug")
+      .on(table.entityType, table.ownerUuid, table.oldSlug, table.createdAt.desc()),
     entityIdx: index("v2_idx_slug_history_entity").on(table.entityType, table.entityId, table.createdAt.desc()),
     entityTypeCheck: check("v2_chk_slug_history_entity_type", sql`${table.entityType} in ('username', 'space')`),
   }),

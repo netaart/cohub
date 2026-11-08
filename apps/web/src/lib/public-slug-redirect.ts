@@ -1,5 +1,5 @@
 /**
- * Page URL for an API `redirectTo` (retired username / Space slug): the canonical
+ * Page URL for an API `redirectTo` (old username / Space slug): the canonical
  * pathname with the page's own query string. Null when there is nothing to follow.
  */
 export function publicSlugRedirectLocation(

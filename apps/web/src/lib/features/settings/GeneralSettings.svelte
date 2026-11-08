@@ -178,9 +178,6 @@ async function saveEditingField() {
 }
 
 function profileSaveErrorMessage(error: unknown): string {
-	if (error instanceof HttpError && error.code === "username_retired") {
-		return m.settings_username_retired({}, { locale });
-	}
 	if (error instanceof HttpError && error.code === "username_change_too_soon") {
 		const body = error.body as { nextAllowedAt?: unknown } | null;
 		const date = formatDateTime(

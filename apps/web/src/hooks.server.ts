@@ -4,8 +4,8 @@ import { publicSlugRedirectLocation } from "$lib/public-slug-redirect";
 import { loadPublicSpaceRedirect } from "$lib/server/public-api";
 import {
 	isPublicSharePath,
-	PRIVATE_NO_STORE_CACHE_CONTROL,
 	PUBLIC_NOT_FOUND_CACHE_CONTROL,
+	PUBLIC_SLUG_REDIRECT_CACHE_CONTROL,
 } from "$lib/server/public-cache";
 
 const PUBLIC_SPACE_ROUTE_ID = "/(app)/[username]/[spaceSlug]";
@@ -33,7 +33,7 @@ function resolveHtmlLang(pathname: string, html: string): string {
 
 /**
  * The Space page is a CSR shell (`ssr = false`), so its loads never run for the document.
- * Resolve retired usernames / Space slugs here to answer the document itself with a 308;
+ * Resolve old usernames / Space slugs here to answer the document itself with a 308;
  * client navigations follow `redirectTo` in the page's own load.
  */
 async function publicSpaceRedirect(
@@ -50,10 +50,9 @@ async function publicSpaceRedirect(
 		event.url,
 	);
 	if (!location) return null;
-	// `home` can be reclaimed by a new Home Space, so the redirect must not be cached.
 	return new Response(null, {
 		status: 308,
-		headers: { location, "cache-control": PRIVATE_NO_STORE_CACHE_CONTROL },
+		headers: { location, "cache-control": PUBLIC_SLUG_REDIRECT_CACHE_CONTROL },
 	});
 }
 

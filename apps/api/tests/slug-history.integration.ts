@@ -34,9 +34,8 @@ mock.module("../src/logto-management.js", {
   },
 });
 
-const { isSpaceSlugRetired, recordSpaceSlugChange, resolveOwnerByUsername, resolvePublicSpace } = await import("../src/slug-history.js");
-const { isPostgresUniqueViolation } = await import("../src/db/postgres-error.js");
-const { updateCurrentUserProfile, UsernameChangeTooSoonError, UsernameRetiredError } = await import("../src/user-profiles.js");
+const { recordSpaceSlugChange, resolveOwnerByUsername, resolvePublicSpace } = await import("../src/slug-history.js");
+const { updateCurrentUserProfile, UsernameChangeTooSoonError } = await import("../src/user-profiles.js");
 
 async function createUser(uuid: string, username: string) {
   logtoUsers.set(`logto-${uuid}`, { id: `logto-${uuid}`, username, name: uuid });
@@ -68,7 +67,7 @@ const historyCount = async (entityId: string) =>
 const backdateHistory = (entityId: string) =>
   client.query(`UPDATE v2.slug_history SET created_at = now() - interval '8 days' WHERE entity_id = $1`, [entityId]);
 
-test("username renames record history, retire old names, and are rate limited", async () => {
+test("username renames redirect, are rate limited, and old names stay claimable", async () => {
   const alice = await createUser("alice-uuid", "alice");
   await createUser("bob-uuid", "bob");
 
@@ -86,16 +85,25 @@ test("username renames record history, retire old names, and are rate limited", 
   await updateCurrentUserProfile(alice, { username: "alice3" });
   assert.equal(await historyCount("alice-uuid"), 2);
 
-  const bob = { uuid: "bob-uuid", sub: "logto-bob-uuid" } as typeof alice;
-  await assert.rejects(updateCurrentUserProfile(bob, { username: "alice" }), UsernameRetiredError);
-  await backdateHistory("alice-uuid");
-  await assert.rejects(updateCurrentUserProfile(alice, { username: "alice" }), UsernameRetiredError);
-
   for (const old of ["alice", "alice2", "alice3"]) {
     const owner = await resolveOwnerByUsername(old);
     assert.equal(owner?.profile.username, "alice3");
     assert.equal(owner?.redirected, old !== "alice3");
   }
+
+  // Anyone may claim an old name; the live holder wins over history.
+  const bob = { uuid: "bob-uuid", sub: "logto-bob-uuid" } as typeof alice;
+  await updateCurrentUserProfile(bob, { username: "alice" });
+  const claimed = await resolveOwnerByUsername("alice");
+  assert.equal(claimed?.profile.userUuid, "bob-uuid");
+  assert.equal(claimed?.redirected, false);
+
+  // Two history rows for "alice": the latest holder to give it up wins.
+  await backdateHistory("bob-uuid");
+  await updateCurrentUserProfile(bob, { username: "bobby" });
+  const latest = await resolveOwnerByUsername("alice");
+  assert.equal(latest?.profile.username, "bobby");
+  assert.equal(latest?.redirected, true);
 });
 
 test("a failed Logto write leaves no history row", async () => {
@@ -106,7 +114,7 @@ test("a failed Logto write leaves no history row", async () => {
   assert.equal(await historyCount("carol-uuid"), 0);
 });
 
-test("public Space paths resolve retired username and slug in one step", async () => {
+test("public Space paths resolve old username and slug in one step", async () => {
   await createUser("dan-uuid", "dan");
   await createUser("erin-uuid", "erin");
   const danSpace = await createSpace("dan-uuid", "notes");
@@ -129,24 +137,27 @@ test("public Space paths resolve retired username and slug in one step", async (
   const erin = await resolvePublicSpace("erin", "notes");
   assert.equal(erin?.space.id, erinSpace);
   assert.equal(erin?.redirected, false);
-  await renameSpace(erinSpace, "erin-uuid", "notes", "notes-v2");
 
-  // A retired slug can't be inserted twice for the same owner.
-  await assert.rejects(
-    renameSpace(danSpace, "dan-uuid", "notes", "other"),
-    (error) => isPostgresUniqueViolation(error, "v2_uq_slug_history_space"),
-  );
+  // The owner can reuse an old slug; the live Space wins, then the latest holder.
+  const reused = await createSpace("dan-uuid", "notes");
+  const live = await resolvePublicSpace("dan", "notes");
+  assert.equal(live?.space.id, reused);
+  assert.equal(live?.redirected, false);
+  await renameSpace(reused, "dan-uuid", "notes", "diary");
+  assert.equal((await resolvePublicSpace("dan", "notes"))?.space.slug, "diary");
 
-  await client.query(`DELETE FROM v2.spaces WHERE id = $1`, [danSpace]);
+  // A deleted latest holder 404s rather than falling back to an older one.
+  await client.query(`DELETE FROM v2.spaces WHERE id = $1`, [reused]);
   assert.equal(await resolvePublicSpace("dan", "notes"), null);
+  assert.equal((await resolvePublicSpace("dan", "notes-v2"))?.space.id, danSpace);
 });
 
-test("Home stays claimable and its old address follows the latest former Home", async () => {
+test("the old Home address follows the latest former Home", async () => {
   await createUser("fay-uuid", "fay");
 
   const homeHistory = async () =>
     (await client.query<{ entity_id: string }>(
-      `SELECT entity_id FROM v2.slug_history WHERE owner_uuid = 'fay-uuid' AND old_slug = 'home'`,
+      `SELECT entity_id FROM v2.slug_history WHERE owner_uuid = 'fay-uuid' AND old_slug = 'home' ORDER BY created_at`,
     )).rows.map((row) => row.entity_id);
 
   const first = await createSpace("fay-uuid", "home");
@@ -155,7 +166,6 @@ test("Home stays claimable and its old address follows the latest former Home", 
   const redirected = await resolvePublicSpace("fay", "home");
   assert.equal(redirected?.space.id, first);
   assert.equal(redirected?.redirected, true);
-  assert.equal(await isSpaceSlugRetired("fay-uuid", "home"), false);
 
   // ensureHome re-creates the system slug; the live Home wins over history.
   const second = await createSpace("fay-uuid", "home");
@@ -164,6 +174,6 @@ test("Home stays claimable and its old address follows the latest former Home", 
   assert.equal(live?.redirected, false);
 
   await renameSpace(second, "fay-uuid", "home", "second");
-  assert.deepEqual(await homeHistory(), [second]);
+  assert.deepEqual(await homeHistory(), [first, second]);
   assert.equal((await resolvePublicSpace("fay", "home"))?.space.id, second);
 });

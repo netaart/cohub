@@ -670,7 +670,7 @@ router.get("/by-origin", async (c) => {
 
 /**
  * Resolve a published app by its public slug triple. Current slugs take a single join;
- * retired username / Space slugs fall back to slug history and report `redirectTo`.
+ * old usernames / Space slugs fall back to slug history and report `redirectTo`.
  */
 async function resolvePublishedAppBySlug(c: Context) {
   const username = c.req.param("username");
