@@ -1,0 +1,3 @@
+# New worktree: install dependencies.
+case $1 in *[!0]*) exit 0 ;; esac
+pnpm install --frozen-lockfile --prefer-offline
