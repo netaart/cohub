@@ -5,7 +5,7 @@ import { loadPublicSpaceRedirect } from "$lib/server/public-api";
 import {
 	isPublicSharePath,
 	PUBLIC_NOT_FOUND_CACHE_CONTROL,
-	PUBLIC_SLUG_REDIRECT_CACHE_CONTROL,
+	SLUG_REDIRECT_CACHE_CONTROL,
 } from "$lib/server/public-cache";
 
 const PUBLIC_SPACE_ROUTE_ID = "/(app)/[username]/[spaceSlug]";
@@ -52,7 +52,7 @@ async function publicSpaceRedirect(
 	if (!location) return null;
 	return new Response(null, {
 		status: 308,
-		headers: { location, "cache-control": PUBLIC_SLUG_REDIRECT_CACHE_CONTROL },
+		headers: { location, "cache-control": SLUG_REDIRECT_CACHE_CONTROL },
 	});
 }
 

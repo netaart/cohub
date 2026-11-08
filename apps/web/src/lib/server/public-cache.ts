@@ -10,9 +10,9 @@ export const PRIVATE_NO_STORE_CACHE_CONTROL = "private, no-store";
 
 /**
  * Old usernames / Space slugs can be claimed again at any time, so a 308 to the current
- * address must not be reused for long.
+ * address is never cached: the next request after a claim resolves to the new holder.
  */
-export const PUBLIC_SLUG_REDIRECT_CACHE_CONTROL = "public, max-age=60";
+export const SLUG_REDIRECT_CACHE_CONTROL = "no-store";
 
 export const PUBLIC_NOT_FOUND_CACHE_CONTROL =
 	"public, max-age=30, stale-while-revalidate=60";

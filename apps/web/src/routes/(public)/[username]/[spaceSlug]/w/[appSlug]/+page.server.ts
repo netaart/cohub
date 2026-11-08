@@ -2,7 +2,7 @@ import { error, redirect } from "@sveltejs/kit";
 import { publicSlugRedirectLocation } from "$lib/public-slug-redirect";
 import { loadPublicAppDetail } from "$lib/server/public-api";
 import {
-	PUBLIC_SLUG_REDIRECT_CACHE_CONTROL,
+	SLUG_REDIRECT_CACHE_CONTROL,
 	setPublicAppPageCache,
 } from "$lib/server/public-cache";
 import type { PageServerLoad } from "./$types";
@@ -35,7 +35,7 @@ export const load: PageServerLoad = async ({
 	if (result.ok) {
 		const location = publicSlugRedirectLocation(result.detail.redirectTo, url);
 		if (location) {
-			setHeaders({ "cache-control": PUBLIC_SLUG_REDIRECT_CACHE_CONTROL });
+			setHeaders({ "cache-control": SLUG_REDIRECT_CACHE_CONTROL });
 			redirect(308, location);
 		}
 		// This loader fetches the API anonymously, so the rendered document can only
