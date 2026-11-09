@@ -3,17 +3,18 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
+const PINS_FILE = "packages/cli/src/binary-pins.ts";
 const PINS = {
   sandboxd: {
     label: "sandboxd",
-    file: "packages/cli/src/commands/sandboxd-binary.ts",
+    file: PINS_FILE,
     constant: "SANDBOXD_VERSION",
     // Every tag republishes sandboxd; skip releases that did not change it.
     watch: ["apps/sandbox"],
   },
   rtc: {
     label: "the RTC helper",
-    file: "packages/cli/src/commands/rooms-rtc-binary.ts",
+    file: PINS_FILE,
     constant: "RTC_HELPER_VERSION",
     // The RTC workflow only publishes when the helper changed.
     watch: [],

@@ -10,6 +10,10 @@ on:
       - 'packages/protocol/src/host-bridge.ts'
       - 'packages/protocol/host-bridge.json'
       - '.github/workflows/desktop.yml'
+      # Bot PRs (Version Packages, binary pins) change only versions; prepublishOnly verifies pinned binaries.
+      - '!packages/cli/package.json'
+      - '!packages/cli/CHANGELOG.md'
+      - '!packages/cli/src/binary-pins.ts'
   push:
     branches:
       - main

@@ -40,6 +40,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/sandbox/go.mod
+          cache-dependency-path: apps/sandbox/go.sum
+      # A tag republishes the helper only when what it is built from changed: the
+      # module's packages it imports, the external module versions it links, or
+      # the license files it ships with. Unrelated sandboxd code and dependencies
+      # (go.mod, go.sum) do not count.
       - name: Detect RTC release changes
         id: scope
         env:
@@ -62,13 +70,32 @@ jobs:
           fi
           if [[ -z "$previous" ]]; then
             echo 'changed=true' >> "$GITHUB_OUTPUT"
-          elif git diff --quiet "$previous" "$GITHUB_SHA" -- apps/sandbox/cmd/cohub-rtc apps/sandbox/rtccore apps/sandbox/go.mod apps/sandbox/go.sum apps/sandbox/LICENSE apps/sandbox/NOTICE .github/workflows/rtc-binaries-build.yml; then
-            echo "No RTC changes since $previous"
-            echo 'changed=false' >> "$GITHUB_OUTPUT"
-          else
-            status=$?
-            if [[ "$status" != 1 ]]; then exit "$status"; fi
+            exit 0
+          fi
+          # Main-module package directories and external module@version pairs the helper builds from.
+          packages() { (cd "$1/apps/sandbox" && go list -deps -f '{{with .Module}}{{if .Main}}{{$.Dir}}{{end}}{{end}}' ./cmd/cohub-rtc | sed "s#^$PWD/#apps/sandbox/#" | sort -u); }
+          modules() { (cd "$1/apps/sandbox" && go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}}@{{.Version}}{{end}}{{end}}' ./cmd/cohub-rtc | sort -u); }
+          git worktree add -q --detach "$RUNNER_TEMP/previous" "$previous"
+          if [[ ! -d "$RUNNER_TEMP/previous/apps/sandbox/cmd/cohub-rtc" ]]; then
+            echo "RTC helper is new since $previous"
             echo 'changed=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          current_packages=$(packages .)
+          previous_packages=$(packages "$RUNNER_TEMP/previous")
+          mapfile -t paths < <(printf '%s\n%s\n' "$current_packages" "$previous_packages" | sort -u)
+          [[ " ${paths[*]} " == *" apps/sandbox/cmd/cohub-rtc "* ]] || { echo "Could not list RTC helper packages" >&2; exit 1; }
+          current_modules=$(modules .)
+          previous_modules=$(modules "$RUNNER_TEMP/previous")
+          if ! git diff --quiet "$previous" "$GITHUB_SHA" -- "${paths[@]}" apps/sandbox/LICENSE apps/sandbox/NOTICE; then
+            echo "RTC helper sources changed since $previous"
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          elif ! diff <(echo "$previous_modules") <(echo "$current_modules"); then
+            echo "RTC helper dependencies changed since $previous"
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo "No RTC helper changes since $previous"
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
           fi
 
   build:
