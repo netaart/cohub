@@ -551,10 +551,7 @@ export const persistMessageNode = async (input: PersistMessageInput & { message:
   const existing = await findMessageByIdempotencyKey(input.sessionId, input.idempotencyKey);
   if (existing) {
     if (existing.role === "assistant") {
-      await enqueueSessionMessagePostprocess({
-        sessionId: input.sessionId,
-        messageId: existing.id,
-      });
+      await enqueueSessionMessagePostprocess({ sessionId: input.sessionId, message: existing });
     } else if (existing.role === "user") {
       try {
         const [session] = await db.select({ meta: spaceSessions.meta })
@@ -765,10 +762,7 @@ export const persistMessageNode = async (input: PersistMessageInput & { message:
   await dispatchSessionOutputs(outputs).catch((error) => logger.error("[SpaceSessions] failed to dispatch session outputs", error));
 
   if (messageRole === "assistant") {
-    await enqueueSessionMessagePostprocess({
-      sessionId: input.sessionId,
-      messageId: messageNode.id,
-    });
+    await enqueueSessionMessagePostprocess({ sessionId: input.sessionId, message: messageNode });
   }
 
   return messageNode;

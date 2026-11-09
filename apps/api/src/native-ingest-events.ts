@@ -51,7 +51,7 @@ export async function publishNativeIngest(spaceId: string, effects: NativeIngest
   }
   for (const entry of settled) {
     for (const message of byTurn.get(entry.turnId) ?? []) {
-      if (message.role === "assistant") await enqueueSessionMessagePostprocess({ sessionId: entry.sessionId, messageId: message.id }).catch(warn("postprocess enqueue"));
+      if (message.role === "assistant") await enqueueSessionMessagePostprocess({ sessionId: entry.sessionId, message }).catch(warn("postprocess enqueue"));
     }
   }
   await touchSpaceActivity(spaceId).catch(warn("activity touch"));

@@ -871,7 +871,7 @@ export async function persistAssistantMessage(input: { spaceId: string; spaceSes
     if (persisted.created && prepared && input.turnId) indexTurnReferences({ spaceId: input.spaceId, sessionId: input.spaceSessionId, turnId: input.turnId, messages: [...prepared.rows, persisted.message] });
     if (persisted.created) {
       await publishMessagePersisted(input.spaceId, record).catch((error) => logger.warn("[Realtime] failed to publish local Runtime message", error));
-      await enqueueSessionMessagePostprocess({ sessionId: input.spaceSessionId, messageId: record.id }).catch((error) => logger.warn("[Postprocess] failed to enqueue local Runtime message", error));
+      await enqueueSessionMessagePostprocess({ sessionId: input.spaceSessionId, message: record }).catch((error) => logger.warn("[Postprocess] failed to enqueue local Runtime message", error));
     }
     if (localFinal && input.turnId) {
       const [turn] = await db.select().from(sessionTurns).where(eq(sessionTurns.id, input.turnId)).limit(1);
@@ -881,7 +881,7 @@ export async function persistAssistantMessage(input: { spaceId: string; spaceSes
     return { ok: true, message: record, created: persisted.created };
   }
   if (!persisted.created && !input.idempotencyKey) {
-    await enqueueSessionMessagePostprocess({ sessionId: input.spaceSessionId, messageId: record.id });
+    await enqueueSessionMessagePostprocess({ sessionId: input.spaceSessionId, message: record });
     return { ok: true, message: record, created: false };
   }
   if (persisted.created) await publishMessagePersisted(input.spaceId, record);
@@ -896,9 +896,9 @@ export async function persistAssistantMessage(input: { spaceId: string; spaceSes
     }
     if (persisted.created) await dispatchFinalAssistantToGateway({ spaceId: input.spaceId, sessionId: input.spaceSessionId, message: record }).catch((error) => logger.error("[GatewayOutbound] failed to dispatch assistant message", error));
   }
-  // Every assistant round is postprocessed, including intermediate tool-use messages.
+  // Every LLM round is postprocessed, including intermediate tool-use messages.
   // Billing uses a stable message operation ID; hourly aggregation intentionally runs last.
-  await enqueueSessionMessagePostprocess({ sessionId: input.spaceSessionId, messageId: record.id });
+  await enqueueSessionMessagePostprocess({ sessionId: input.spaceSessionId, message: record });
   return { ok: true, message: record };
 }
 
@@ -1267,10 +1267,7 @@ export async function persistCompactionEvent(
     await publishMessagePersisted(input.spaceId, toMessageRecord(state.messageRow)).catch((error) => {
       logger.warn("[Compaction] failed to publish compact message persisted", error);
     });
-    await enqueueSessionMessagePostprocess({
-      sessionId: input.sessionId,
-      messageId: state.messageRow.id,
-    }).catch((error) => logger.warn("[Compaction] failed to enqueue usage postprocess", error));
+    await enqueueSessionMessagePostprocess({ sessionId: input.sessionId, message: state.messageRow }).catch((error) => logger.warn("[Compaction] failed to enqueue usage postprocess", error));
   }
 
   logger.info(

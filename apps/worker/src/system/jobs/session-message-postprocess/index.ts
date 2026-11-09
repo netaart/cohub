@@ -4,6 +4,7 @@ import { qualifyAndRewardReferral } from "@cohub/core/referrals";
 import { readImageToTextCalls } from "@cohub/core/sessions";
 import { sessionMessages, sessionTurns, spaceSessions, tokenUsageStatsHourly } from "@cohub/db";
 import {
+  isLlmUsageMessage,
   SESSION_MESSAGE_POSTPROCESS_JOB,
   type SessionMessagePostprocessJobData,
   type Usage,
@@ -128,19 +129,13 @@ const maybeQualifyReferral = async (message: typeof sessionMessages.$inferSelect
   });
 };
 
-const isLlmUsageMessage = (message: typeof sessionMessages.$inferSelect) => {
-  if (message.role === "assistant") return true;
-  const meta = message.meta as Record<string, unknown> | null;
-  return message.role === "system" && meta?.messageKind === "compacted";
-};
-
 const aggregateUsage = async (
   message: typeof sessionMessages.$inferSelect,
   spaceId: string,
   userId: string | null,
   usage: Usage | null,
 ) => {
-  if (!isLlmUsageMessage(message) || message.usageAggregatedAt) return;
+  if (message.usageAggregatedAt) return;
   const bucketStartAt = new Date(message.createdAt ?? new Date());
   bucketStartAt.setUTCMinutes(0, 0, 0);
   const mainStats = resolveLlmRequestStats(message);

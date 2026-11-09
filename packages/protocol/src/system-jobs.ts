@@ -14,6 +14,12 @@ export type SessionMessagePostprocessJobData = {
   trace?: Record<string, unknown>;
 };
 
+export const isLlmUsageMessage = (message: { role: string; meta?: unknown }) => {
+  const meta = message.meta && typeof message.meta === "object" ? message.meta as Record<string, unknown> : null;
+  if (meta?.llm === false) return false;
+  return message.role === "assistant" || (message.role === "system" && meta?.messageKind === "compacted");
+};
+
 export const BOARD_SESSION_SYNC_JOB = "board.session.sync";
 
 export type BoardSessionSyncJobData = {
