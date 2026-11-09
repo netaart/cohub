@@ -179,7 +179,7 @@ async function loadMergedSkills(project: ProjectFiles, userId?: string | null, s
   ).skills;
 }
 
-function formatSkillsForPrompt(skills: Skill[]): string {
+function formatSkillsForPrompt(skills: Skill[], toPromptPath: (path: string) => string): string {
   // Skills with disableModelInvocation are hidden from the model; they remain
   // invocable explicitly via `/skill:name`.
   const visible = skills.filter((skill) => !skill.disableModelInvocation);
@@ -193,17 +193,35 @@ function formatSkillsForPrompt(skills: Skill[]): string {
     out += "  <skill>\n";
     out += `    <name>${skill.name}</name>\n`;
     out += `    <description>${skill.description}</description>\n`;
-    out += `    <location>${skill.sandboxFilePath}</location>\n`;
+    out += `    <location>${toPromptPath(skill.sandboxFilePath)}</location>\n`;
     out += "  </skill>\n";
   }
   out += "</available_skills>";
   return out;
 }
 
-function formatLocalWorkspace(workspace: LocalPromptWorkspace): string {
-  const mappings = [[SANDBOX_WORKSPACE_PATH, workspace.hostRoot], ...Object.entries(workspace.mounts?.hostPaths ?? {})]
+function localHostRoots(workspace: LocalPromptWorkspace): Array<[string, string]> {
+  return [[SANDBOX_WORKSPACE_PATH, workspace.hostRoot], ...Object.entries(workspace.mounts?.hostPaths ?? {})]
     .filter((entry): entry is [string, string] => Boolean(entry[1]));
-  let out = `This Space runs on the user's own machine through Cohub Local. File tools take sandbox paths; shell commands run directly on the host, start in the ${SANDBOX_WORKSPACE_PATH} folder, and need host paths or paths relative to it.`;
+}
+
+/**
+ * On a Local Runtime shell commands run on the host, so prompt paths use the host path that
+ * file tools also accept. Windows host paths stay sandbox paths: file tools take only POSIX paths.
+ */
+function localPromptPath(workspace: LocalPromptWorkspace | undefined): (path: string) => string {
+  if (!workspace) return (path) => path;
+  const roots = localHostRoots(workspace).filter(([, host]) => host.startsWith("/"));
+  return (path) => {
+    const match = roots.find(([root]) => path === root || path.startsWith(`${root}/`));
+    return match ? match[1] + path.slice(match[0].length) : path;
+  };
+}
+
+function formatLocalWorkspace(workspace: LocalPromptWorkspace): string {
+  const mappings = localHostRoots(workspace);
+  const start = workspace.hostRoot ? `\`${workspace.hostRoot}\`` : `the ${SANDBOX_WORKSPACE_PATH} folder`;
+  let out = `This Space runs on the user's own machine through Cohub Local. Shell commands run directly on the host and start in ${start}; use host paths or paths relative to it.`;
   if (mappings.length > 0) out += `\nSandbox path → host path:\n${mappings.map(([sandboxPath, hostPath]) => `- ${sandboxPath} → ${hostPath}`).join("\n")}`;
   return out;
 }
@@ -223,6 +241,7 @@ export async function buildCohubSystemPrompt(options: BuildCohubSystemPromptOpti
   const reachable = (skill: Skill) => !localWorkspace || Boolean(localWorkspace.mounts?.files.has(skill.sandboxFilePath));
   const spaceMods = (options.spaceMods ?? []).filter((mod) => mounted(mod.mountPath));
   const project = localWorkspace ? localProjectFiles(localWorkspace) : cloudProjectFiles(cwd);
+  const toPromptPath = localPromptPath(localWorkspace);
 
   const userAgentDir = userId ? getAgentUserAgentsPath(userId) : null;
   const systemPrompt = await loadFirstExisting([
@@ -259,7 +278,7 @@ export async function buildCohubSystemPrompt(options: BuildCohubSystemPromptOpti
   if (spaceMods.length > 0 || modContextFiles.length > 0) {
     let modContext = '# Mods\n\nMods are additional read-only resources mounted under /mods. Each list item is "name: path". Instruction priority: platform < mods < user < workspace.';
     for (const mod of spaceMods) {
-      modContext += `\n- ${mod.modSpaceName ?? mod.modSpaceId}: ${mod.mountPath}`;
+      modContext += `\n- ${mod.modSpaceName ?? mod.modSpaceId}: ${toPromptPath(mod.mountPath)}`;
     }
     for (const file of modContextFiles) {
       modContext += `\n\n## ${file.sandboxPath}\n\n${file.content}`;
@@ -276,7 +295,7 @@ export async function buildCohubSystemPrompt(options: BuildCohubSystemPromptOpti
   }
 
   if (skills.length > 0) {
-    sections.push(formatSkillsForPrompt(skills));
+    sections.push(formatSkillsForPrompt(skills, toPromptPath));
   }
 
   const visibleTools = selectedTools.filter((name) => toolSnippets[name]);
