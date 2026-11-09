@@ -4,6 +4,21 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.96 — 2026-11-09
+
+- **Display recording and replay**: sandboxd records a screen from the video it already streams—no second encoder and no extra bitrate for viewers—into Space files, logs each Turn's steps for replay, and adds window-scoped `look`, `capture`, `tree` and `act`; live sessions show the agent's pointer and every viewer's cursor.
+- **Device senses for Board scripts and Apps**: scripts receive `browser:*` events for motion, orientation, gamepads, microphone PCM, camera frames and location, with each source running only while a script listens and the Board is visible plus per-Board consent; live scripts can `fetch()` and open WebSockets, and recorded input replays in video exports and simulation.
+- **Incremental object-storage checkpoints**: saves hash only files whose stat changed, upload one pack per save plus an immutable per-commit manifest, and keep object storage as the source of truth; on a 100k-file, 926 MB NFS workspace, the first save fell from 1158s to 452s, no-change saves from 37.5s to 12.8s, and crash recovery from 1360s to 7.6s with bounded heap.
+- **Native iOS shell**: a UIKit WKWebView app over the `cohub.host.v1` bridge with PKCE sign-in, Keychain-only tokens, an App Group share inbox, downloads to Photos or Files, and TestFlight CI; desktop and iOS shells now share WebKit, auth and host-bridge code through CohubCore.
+- **Visible downloads on every device**: one `saveFile()` flow reports preparing, progress, saved and failed states with retry; CDN reads expose a `downloadUrl` served as an attachment, and native shells resolve `files.save`, stream `files.progress` and reveal the saved file.
+
+### Bug Fixes
+
+- **Agent message ownership**: user messages are claimed by `meta.userMessageId`, so an abort before a prompt no longer persists later messages under the previous Turn or marks the real owner as interrupted.
+- **Checkpoint symlinks**: saves keep relative links that resolve inside the workspace, and restore creates all links before resolving chains—2,000 links now restore in 0.7s instead of 12s.
+- **Sessions tail**: `cohub spaces sessions tail` streams over a realtime client again instead of failing at startup with `realtime transport is not configured for this client`.
+- **Mobile composer**: browser tabs cap the shell at `100dvh`, keeping the send button above Android browser toolbars.
+
 ## v2.95 — 2026-11-06
 
 - **Guest funding and balance transfers**: Spaces can accept funding from viewers — or, with the public funding toggle on, anyone signed in — via the wallet page, Space app pages, or the new `/spaces/:id/fund` route. Balance pays first and checkout covers the rest from one shared tier set; transfers debit only purchased balance, credit fixed denominations, and automatically refund the uncredited remainder through a pre-debit recovery job. Ships with SDK funding/transfer APIs, CLI `transfer`/`transfer-status`/`public-funding` commands, optional request IDs for safe retries, and a `space.wallet.updated` realtime event.
