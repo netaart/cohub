@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 public enum FileTransfer {
     public typealias Progress = @Sendable (_ received: Int64, _ total: Int64?) -> Void
