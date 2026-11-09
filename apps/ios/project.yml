@@ -70,7 +70,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(COHUB_BUNDLE_ID).share
         INFOPLIST_FILE: CohubShare/Info.plist
         CODE_SIGN_ENTITLEMENTS: CohubShare/CohubShare.entitlements
-        APPLICATION_EXTENSION_API_ONLY: NO
+        APPLICATION_EXTENSION_API_ONLY: YES
 
 schemes:
   Cohub:

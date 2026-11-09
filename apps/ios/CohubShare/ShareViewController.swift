@@ -72,9 +72,8 @@ final class ShareViewController: UIViewController {
         }
         guard let scheme = Bundle.main.object(forInfoDictionaryKey: "CohubURLScheme") as? String,
               let url = URL(string: "\(scheme)://open\(WebOrigin.newChatPath)"),
-              let application
+              openHostApp(url)
         else { return complete() }
-        application.open(url, options: [:]) { [weak self] _ in self?.complete() }
         Task { [weak self] in
             try? await Task.sleep(for: Self.openGrace)
             self?.complete()
@@ -87,12 +86,20 @@ final class ShareViewController: UIViewController {
         extensionContext?.completeRequest(returningItems: nil)
     }
 
-    private var application: UIApplication? {
+    private func openHostApp(_ url: URL) -> Bool {
+        typealias Open = @convention(c) (AnyObject, Selector, NSURL, NSDictionary, @convention(block) (Bool) -> Void) -> Void
+        let selector = NSSelectorFromString("openURL:options:completionHandler:")
         var responder: UIResponder? = self
         while let current = responder {
-            if let application = current as? UIApplication { return application }
+            if current is UIApplication, current.responds(to: selector) {
+                let open = unsafeBitCast(current.method(for: selector), to: Open.self)
+                open(current, selector, url as NSURL, NSDictionary()) { [weak self] _ in
+                    Task { @MainActor [weak self] in self?.complete() }
+                }
+                return true
+            }
             responder = current.next
         }
-        return nil
+        return false
     }
 }
