@@ -48,7 +48,12 @@ Billing 启用后，Cohub 使用 `usd_micro_cent` credit type：`1 usd_micro_cen
 
 两个 R2 Bucket 都需要为 `WEB_ORIGIN` 配置浏览器直传 CORS：允许 `PUT`，允许 `Content-Type`、`Cache-Control`、`Content-Disposition` 请求头，并暴露 `ETag`。公共文件使用的 OSS Bucket 还需允许 `x-oss-forbid-overwrite` 与 `Content-Length`。聊天附件 Bucket 绑定 `CHAT_ATTACHMENT_PUBLIC_BASE_URL` 对应的 Custom Domain；Space 上传 Bucket 不开放公共访问。
 
-`TURN_OBJECT_CDN_BASE_URL`（Space 文件 CDN）所在的 Cloudflare zone 需要一条 Response Header Transform Rule：请求带 `download` 查询参数时设置 `Content-Disposition: attachment`，并在 Cache Rule 中将该参数排除出缓存键，使下载与预览共用同一份缓存。文件名取自对象路径末段，无需另行指定。
+`TURN_OBJECT_CDN_BASE_URL`（Space 文件 CDN，prod 为 `sessions.cohub.live`，dev 为 `sessions.cohub.run`）所在的 Cloudflare zone 需要两条规则，使下载以附件返回，并与预览共用同一份边缘缓存（Free 套餐不支持自定义缓存键，因此改在请求阶段去掉参数）：
+
+- URL Rewrite Rule（Transform Rules → Rewrite URL）：`http.host eq "<CDN 主机>" and http.request.uri.query eq "download=1"` 时将 query 重写为空，缓存查找前即去掉 `?download=1`。
+- Response Header Transform Rule：`http.host eq "<CDN 主机>" and any(raw.http.request.uri.args.names[*] == "download")` 时设置 `Content-Disposition: attachment`。需用 `raw.` 字段读取重写前的原始 query。
+
+文件名取自对象路径末段，无需另行指定。
 
 CI 构建还需要配置 `GITEA_NPM_TOKEN` secret。该 token 只在构建期用于读取 `git.talesofai.com/api/packages/talesofai/npm/` 中的私有 npm 包，不是 API 运行时 secret。
 
