@@ -121,6 +121,13 @@ after(async () => {
 
 const workspace = join(root, "storage", spaceId, "workspace");
 const repoDir = join(root, "system", spaceId, "repo");
+let hydrations = 0;
+/** A fresh repository filled only from object storage: saves never write the cache repository. */
+const fromStorage = async (commit: string) => {
+  const dir = join(root, "hydrated", String(hydrations++));
+  await prepareCheckpointRepo({ sourceSpaceId: "unused", targetRepoDir: dir, commitHash: commit });
+  return dir;
+};
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 const save = async (description: string) => saveCheckpointForSpace({ spaceId: state.currentSpace, description });
 const manifestOf = async (commit: string) => JSON.parse(await readFile(join(bucket, "checkpoint-manifests", `${commit}.json`), "utf8"));
@@ -156,10 +163,11 @@ test("saves are incremental packs whose manifests rebuild every checkpoint byte 
   assert.deepEqual(skipped.filter((warning) => warning.reason === "unsafe_symlink_target").map((warning) => warning.path).sort(), ["chain", "escape"]);
   const firstManifest = await manifestOf(first.commitHash);
   assert.equal(firstManifest.seq, 0);
-  assert.equal(execFileSync("git", ["show", `${first.commitHash}:src/a.txt`], { cwd: repoDir, encoding: "utf8" }), "alpha\r\n");
-  assert.match(git(repoDir, "show", `${first.commitHash}:big.bin`), /^version https:\/\/cohub.run\/spec\/asset-pointer\/v1/);
-  assert.equal(git(repoDir, "ls-tree", first.commitHash, "run.sh").split(" ")[0], "100755");
-  assert.equal(git(repoDir, "ls-tree", first.commitHash, "link").split(" ")[0], "120000");
+  const firstRepo = await fromStorage(first.commitHash);
+  assert.equal(execFileSync("git", ["show", `${first.commitHash}:src/a.txt`], { cwd: firstRepo, encoding: "utf8" }), "alpha\r\n");
+  assert.match(git(firstRepo, "show", `${first.commitHash}:big.bin`), /^version https:\/\/cohub.run\/spec\/asset-pointer\/v1/);
+  assert.equal(git(firstRepo, "ls-tree", first.commitHash, "run.sh").split(" ")[0], "100755");
+  assert.equal(git(firstRepo, "ls-tree", first.commitHash, "link").split(" ")[0], "120000");
 
   await writeFile(join(workspace, "src/b.txt"), "beta\n");
   await rm(join(workspace, "run.sh"));
@@ -170,8 +178,11 @@ test("saves are incremental packs whose manifests rebuild every checkpoint byte 
   const secondManifest = await manifestOf(second.commitHash);
   assert.equal(secondManifest.seq, 1);
   assert.equal(secondManifest.packs.length, 2);
-  assert.equal(git(repoDir, "rev-parse", `${second.commitHash}^`), first.commitHash);
-  assert.deepEqual(await readdir(repoDir), [".git"]);
+  const secondRepo = await fromStorage(second.commitHash);
+  assert.equal(git(secondRepo, "rev-parse", `${second.commitHash}^`), first.commitHash);
+  // Trees rebuilt from the index must equal what git builds from the same files.
+  git(secondRepo, "fsck", "--connectivity-only", "--no-dangling", second.commitHash);
+  assert.equal(await stat(join(repoDir, ".git")).then(() => true, () => false), false, "saves must not touch the cache repository");
 
   const latest = join(root, "cache", spaceId, "latest");
   assert.equal(await readFile(join(latest, "src/b.txt"), "utf8"), "beta\n");
@@ -256,7 +267,7 @@ test("nested git repositories are stored as an incremental bundle chain", async 
   git(nested, "-c", "user.email=a@b", "-c", "user.name=a", "commit", "-q", "--allow-empty", "-m", "two");
   const second = await save("nested two");
   assert.equal(second.stats.bundledGitRepoCount, 1);
-  const repos = JSON.parse(git(join(root, "system", spaceId, "repo"), "show", `${second.commitHash}:.cohub/system/user-git-repos.v2.json`));
+  const repos = JSON.parse(git(await fromStorage(second.commitHash), "show", `${second.commitHash}:.cohub/system/user-git-repos.v2.json`));
   assert.deepEqual(repos.repos[0].bundles.map((bundle: { level: number; base: string[] }) => [bundle.level, bundle.base.length]), [[4, 0], [0, 1]]);
   state.lookup = second.checkpointId;
   const target = join(root, "nested-restore");
@@ -265,7 +276,7 @@ test("nested git repositories are stored as an incremental bundle chain", async 
   assert.equal(git(join(target, "nested"), "log", "--format=%s", "main"), "two\none");
 });
 
-test("the first save on a pre-v3 repository uploads a baseline holding its history", async () => {
+test("the first save after a pre-v3 parent is a parentless baseline holding its full snapshot", async () => {
   const legacySpace = "33333333-3333-4333-8333-333333333333";
   const legacyRepo = join(root, "system", legacySpace, "repo");
   await mkdir(join(legacyRepo, "docs"), { recursive: true });
@@ -283,10 +294,10 @@ test("the first save on a pre-v3 repository uploads a baseline holding its histo
   const saved = await save("after upgrade");
   const manifest = await manifestOf(saved.commitHash);
   assert.equal(manifest.seq, 0);
-  assert.deepEqual(await readdir(legacyRepo), [".git"]);
-  const fresh = join(root, "legacy-fresh");
-  await prepareCheckpointRepo({ sourceSpaceId: legacySpace, targetRepoDir: fresh, commitHash: saved.commitHash });
-  assert.equal(git(fresh, "show", `${saved.commitHash}^:docs/old.md`), "old");
+  assert.equal(manifest.parent, null);
+  const fresh = await fromStorage(saved.commitHash);
+  assert.equal(git(fresh, "show", `${saved.commitHash}:new.md`), "new");
+  assert.equal(git(fresh, "rev-list", "--count", saved.commitHash), "1");
   state.currentSpace = spaceId;
 });
 
@@ -310,4 +321,56 @@ test("restore refuses a symlink chain that escapes the workspace, whatever order
     /escape the workspace while restoring: chain/,
   );
   assert.equal(await lstat(join(target, "chain")).then(() => true, () => false), false);
+});
+
+test("trees rebuilt from the index match the workspace, and the diff matches git, across random edits", async () => {
+  const randomSpace = "55555555-5555-4555-8555-555555555555";
+  const ws = join(root, "storage", randomSpace, "workspace");
+  state.spaces.set(randomSpace, { id: randomSpace, headCheckpointId: null, slug: null, userUuid: "user" });
+  state.currentSpace = randomSpace;
+  state.lookup = "";
+  let seed = 7;
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) % 2 ** 31;
+    return seed % n;
+  };
+  const dirs = ["", "a", "a/b", "a/b/c", "d", "d/e"];
+  const pathOf = () => `${dirs[rand(dirs.length)]}/f${rand(12)}`.replace(/^\//, "");
+  let parent: string | null = null;
+  for (let round = 0; round < 14; round += 1) {
+    for (let op = 0; op < 6; op += 1) {
+      const path = join(ws, pathOf());
+      if (rand(4) === 0) await rm(path, { force: true, recursive: true });
+      else await mkdir(dirname(path), { recursive: true }).then(() => writeFile(path, `${round}-${op}-${rand(1000)}\n`), () => undefined);
+    }
+    if (round === 7) await rm(join(ws, "a/b"), { recursive: true, force: true });
+    if (round === 9) {
+      await rm(join(ws, "d/e"), { recursive: true, force: true });
+      await mkdir(join(ws, "d"), { recursive: true });
+      await writeFile(join(ws, "d/e"), "now a file\n");
+    }
+    if (round === 11) {
+      await rm(join(ws, "d/e"), { recursive: true, force: true });
+      await mkdir(join(ws, "d/e/g"), { recursive: true });
+      await writeFile(join(ws, "d/e/g/h"), "a directory again\n");
+    }
+    const saved = await save(`random ${round}`);
+    const repo = await fromStorage(saved.commitHash);
+    const stored = git(repo, "ls-tree", "-r", saved.commitHash).split("\n").filter((line) => !line.endsWith(".json") || !line.includes(".cohub/system/")).sort();
+    const walk = async (dir: string): Promise<string[]> => (await Promise.all((await readdir(join(ws, dir), { withFileTypes: true })).map((entry) => {
+      const rel = dir ? `${dir}/${entry.name}` : entry.name;
+      return entry.isDirectory() ? walk(rel) : [rel];
+    }))).flat();
+    const listing = await walk("");
+    const expected = listing.map((path) => `100644 blob ${execFileSync("git", ["hash-object", "--no-filters", join(ws, path)], { encoding: "utf8" }).trim()}\t${path}`).sort();
+    assert.deepEqual(stored, expected, `round ${round}`);
+    const meta = state.checkpoints.get(saved.checkpointId)?.meta as { diffs?: { parent?: { summary?: { files: Array<{ status: string; path: string }> } } } } | undefined;
+    if (parent) {
+      const gitDiff = git(repo, "diff-tree", "-r", "--no-renames", "--name-status", parent, saved.commitHash).split("\n").filter((line) => line && !line.includes(".cohub/system/")).sort();
+      const ours = (meta?.diffs?.parent?.summary?.files ?? []).map((file) => `${file.status}\t${file.path}`).sort();
+      assert.deepEqual(ours, gitDiff, `diff round ${round}`);
+    }
+    parent = saved.commitHash;
+  }
+  state.currentSpace = spaceId;
 });

@@ -229,9 +229,10 @@ async function downloadPack(store: CheckpointObjectReader, repoDir: string, pack
   if (await isPackInstalled(repoDir, pack.checksum)) return false;
   const packDir = checkpointPackDir(repoDir);
   await mkdir(packDir, { recursive: true, mode: 0o775 });
+  // No .pack/.idx suffix: git must never mistake an in-flight or orphaned temp file for a pack.
   const token = crypto.randomUUID();
-  const packPath = join(packDir, `tmp_cohub_${token}.pack`);
-  const idxPath = join(packDir, `tmp_cohub_${token}.idx`);
+  const packPath = join(packDir, `tmp_cohub_${token}_pack`);
+  const idxPath = join(packDir, `tmp_cohub_${token}_idx`);
   try {
     if (!await store.download(pack.packKey, packPath)) throw new Error(`checkpoint pack missing: ${pack.packKey}`);
     if (!await store.download(pack.idxKey, idxPath)) throw new Error(`checkpoint pack index missing: ${pack.idxKey}`);

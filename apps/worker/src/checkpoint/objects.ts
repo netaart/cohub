@@ -1,21 +1,9 @@
-import { copyFile, mkdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  checkpointGitDir,
-  checkpointPackDir,
-  installPackFiles,
-  isPackInstalled,
-  runCheckpointGit,
-} from "@cohub/core/checkpoint/storage";
+import { runCheckpointGit } from "@cohub/core/checkpoint/storage";
 import { config } from "../config.js";
 
-/**
- * Builds checkpoint commits without a working tree: new objects go to a local
- * object directory, existing ones are read from the cache repository through
- * alternates, and everything the commit adds is written out as one pack.
- */
 export type ObjectBuilder = {
-  repoDir: string;
   tmpDir: string;
   env: NodeJS.ProcessEnv;
 };
@@ -30,19 +18,15 @@ export type BuiltPack = {
   idxSize: number;
 };
 
-export async function createObjectBuilder(repoDir: string, tmpDir: string): Promise<ObjectBuilder> {
-  const objectDir = join(tmpDir, "objects");
-  await mkdir(objectDir, { recursive: true, mode: 0o700 });
-  return {
-    repoDir,
-    tmpDir,
-    env: {
-      GIT_DIR: checkpointGitDir(repoDir),
-      GIT_OBJECT_DIRECTORY: objectDir,
-      GIT_ALTERNATE_OBJECT_DIRECTORIES: join(checkpointGitDir(repoDir), "objects"),
-      GIT_INDEX_FILE: join(tmpDir, "index"),
-    },
-  };
+/**
+ * A throwaway bare repository on worker-local disk. A save writes only the
+ * objects it introduces here; everything it reuses is named by id and already
+ * lives in the parent's packs in object storage, so no cache is read.
+ */
+export async function createObjectBuilder(tmpDir: string): Promise<ObjectBuilder> {
+  const gitDir = join(tmpDir, "git");
+  await runCheckpointGit(["init", "-q", "--bare", gitDir], { cwd: tmpDir });
+  return { tmpDir, env: { GIT_DIR: gitDir, GIT_INDEX_FILE: join(tmpDir, "index") } };
 }
 
 const git = (builder: ObjectBuilder, args: string[], input?: string) =>
@@ -101,48 +85,37 @@ export async function writeTree(builder: ObjectBuilder, entries: TreeEntry[]) {
   await rm(builder.env.GIT_INDEX_FILE as string, { force: true });
   const input = entries.map((entry) => `${entry.mode} ${entry.oid}\t${entry.path}\0`).join("");
   await git(builder, ["update-index", "-z", "--index-info"], input);
-  const { stdout } = await git(builder, ["write-tree"]);
+  const { stdout } = await git(builder, ["write-tree", "--missing-ok"]);
   return stdout.trim();
 }
 
-export async function commitTree(builder: ObjectBuilder, input: { tree: string; parent: string | null; message: string; date: Date }) {
-  const date = `${Math.floor(input.date.getTime() / 1000)} +0000`;
-  const { stdout } = await runCheckpointGit(
-    ["commit-tree", input.tree, ...(input.parent ? ["-p", input.parent] : []), "-m", input.message],
-    {
-      cwd: builder.tmpDir,
-      env: {
-        ...builder.env,
-        GIT_AUTHOR_NAME: "Cohub Worker",
-        GIT_AUTHOR_EMAIL: config.checkpointGitAuthorEmail,
-        GIT_AUTHOR_DATE: date,
-        GIT_COMMITTER_NAME: "Cohub Worker",
-        GIT_COMMITTER_EMAIL: config.checkpointGitAuthorEmail,
-        GIT_COMMITTER_DATE: date,
-      },
-    },
-  );
+/** `commit-tree` insists the parent exists locally; the raw object does not need it. */
+export async function writeCommit(builder: ObjectBuilder, input: { tree: string; parent: string | null; message: string; date: Date }) {
+  const identity = `Cohub Worker <${config.checkpointGitAuthorEmail}> ${Math.floor(input.date.getTime() / 1000)} +0000`;
+  const body = [`tree ${input.tree}`, ...(input.parent ? [`parent ${input.parent}`] : []), `author ${identity}`, `committer ${identity}`, "", input.message, ""].join("\n");
+  const { stdout } = await git(builder, ["hash-object", "-t", "commit", "-w", "--stdin"], body);
   return stdout.trim();
 }
 
 /**
- * Pack every object reachable from `include` and not from `exclude`. Packs
- * are never thin, so each one is readable on its own.
+ * Pack `objects` as listed, or every object reachable from `include` and not
+ * from `exclude`. Packs are never thin, so each one is readable on its own.
  */
 export async function packObjects(input: {
   env: NodeJS.ProcessEnv;
   cwd: string;
   outDir: string;
-  include: string[];
-  exclude: string[];
+  objects?: string[];
+  include?: string[];
+  exclude?: string[];
   /** Skip delta search; saves use this to stay latency-bound, compaction recompresses later. */
   fast?: boolean;
 }): Promise<BuiltPack> {
   await mkdir(input.outDir, { recursive: true, mode: 0o700 });
-  const revs = [...input.include, ...input.exclude.map((oid) => `^${oid}`)].join("\n");
+  const list = input.objects ? [...new Set(input.objects)] : [...(input.include ?? []), ...(input.exclude ?? []).map((oid) => `^${oid}`)];
   const { stdout } = await runCheckpointGit(
-    [...(input.fast ? ["-c", "pack.compression=1"] : []), "pack-objects", "--revs", "-q", "--delta-base-offset", ...(input.fast ? ["--window=0"] : []), join(input.outDir, "pack")],
-    { cwd: input.cwd, env: input.env, input: `${revs}\n` },
+    [...(input.fast ? ["-c", "pack.compression=1"] : []), "pack-objects", ...(input.objects ? [] : ["--revs"]), "-q", "--delta-base-offset", ...(input.fast ? ["--window=0"] : []), join(input.outDir, "pack")],
+    { cwd: input.cwd, env: input.env, input: `${list.join("\n")}\n` },
   );
   const checksum = stdout.trim();
   if (!/^[0-9a-f]{40}$/.test(checksum)) throw new Error(`pack-objects returned an invalid checksum: ${checksum}`);
@@ -152,19 +125,3 @@ export async function packObjects(input: {
   return { checksum, packPath, idxPath, size: packStat.size, idxSize: idxStat.size };
 }
 
-/** Copy a locally built pack into the cache repository. */
-export async function installLocalPack(repoDir: string, pack: BuiltPack) {
-  if (await isPackInstalled(repoDir, pack.checksum)) return;
-  const packDir = checkpointPackDir(repoDir);
-  await mkdir(packDir, { recursive: true, mode: 0o775 });
-  const token = crypto.randomUUID();
-  const packPath = join(packDir, `tmp_cohub_${token}.pack`);
-  const idxPath = join(packDir, `tmp_cohub_${token}.idx`);
-  try {
-    await copyFile(pack.packPath, packPath);
-    await copyFile(pack.idxPath, idxPath);
-    await installPackFiles(repoDir, pack.checksum, { packPath, idxPath });
-  } finally {
-    await Promise.all([rm(packPath, { force: true }), rm(idxPath, { force: true })]);
-  }
-}
