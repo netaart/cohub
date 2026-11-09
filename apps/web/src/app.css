@@ -38,6 +38,13 @@ body {
 		color 0.2s ease;
 }
 
+/* Some Android browsers report a layout viewport that runs under their bottom toolbar. */
+@media (display-mode: browser) {
+	html {
+		height: min(100%, 100dvh);
+	}
+}
+
 :root {
 	--motion-panel-duration: 280ms;
 	--motion-panel-fade-duration: 160ms;
