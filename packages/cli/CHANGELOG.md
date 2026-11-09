@@ -1,5 +1,12 @@
 # @neta-art/cohub-cli
 
+## 10.25.1
+
+### Patch Changes
+
+- ed0c578: Download the RTC helper v2.96.0.
+- ed0c578: Download sandboxd v2.96.0.
+
 ## 10.25.0
 
 ### Minor Changes
