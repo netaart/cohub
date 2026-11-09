@@ -151,9 +151,9 @@ early. Memory and cores say nothing about the GPU, so no tier raises the live bu
 Multisampling is off from 3× density, where it no longer shows and costs the most.
 
 Display density never changes CSS geometry or document coordinates. The canvas
-fills its host, and its backing store matches the device-pixel content box, so
-fractional display scaling composites without resampling. Density is capped at
-3× and a 10-megapixel budget that still fits a 4K screen.
+fills its host at its CSS size, and its backing store matches the device-pixel
+content box, so fractional display scaling composites without resampling.
+Density is capped at 3× and a 10-megapixel budget that still fits a 4K screen.
 
 Text is a bitmap, sharp only when one texel lands on one device pixel.
 `context.textResolution` is that density in texels per world unit. While the
