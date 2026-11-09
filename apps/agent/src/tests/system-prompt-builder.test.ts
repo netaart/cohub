@@ -164,8 +164,9 @@ const localPrompt = await buildLocalPrompt({
   files: new Set(["/mods/shared-mod/.agents/skills/shared-mod-skill/SKILL.md", "/configs/user/.agents/skills/owner-skill/SKILL.md"]),
 });
 assert.ok(localPrompt.includes("Local project rule.") && !localPrompt.includes("Project rule: run typecheck."), "local Spaces should use the Runtime's project files, not the cloud copy");
-assert.ok(localPrompt.includes("<location>/workspace/.agents/skills/local-skill/SKILL.md</location>"), "local project skills should be listed");
-assert.ok(localPrompt.includes("<location>/mods/shared-mod/.agents/skills/shared-mod-skill/SKILL.md</location>") && localPrompt.includes("owner-skill"), "mounted local Spaces should match the cloud sandbox prompt");
+assert.ok(localPrompt.includes(`<location>${hostRoot}/.agents/skills/local-skill/SKILL.md</location>`), "local project skills should be listed at their host path");
+assert.ok(localPrompt.includes(`<location>${modHostPath}/.agents/skills/shared-mod-skill/SKILL.md</location>`) && localPrompt.includes("owner-skill"), "mounted skills are listed at the host path shell commands can use");
+assert.ok(!localPrompt.includes("<location>/configs/") && !localPrompt.includes("<location>/mods/"), "no sandbox-only skill paths on a POSIX host");
 assert.ok(localPrompt.includes(`- /workspace → ${hostRoot}`) && localPrompt.includes(`- /mods/shared-mod → ${modHostPath}`), "host paths should be mapped for shell commands");
 
 const unmountedPrompt = await buildLocalPrompt(null);
@@ -179,3 +180,10 @@ const fallbackPrompt = await buildLocalPrompt({
   files: new Set(["/configs/platform/.agents/skills/owner-skill/SKILL.md"]),
 });
 assert.ok(fallbackPrompt.includes("Platform fallback"), "a skill that was not mirrored must not hide a mirrored lower-priority one");
+
+const windowsPrompt = await buildCohubSystemPrompt({
+  cwd: workspace,
+  selectedTools: ["read"],
+  localWorkspace: { hostRoot: "C:\\Users\\me\\proj", files: {}, skills: [localSkill], mounts: null },
+});
+assert.ok(windowsPrompt.includes("<location>/workspace/.agents/skills/local-skill/SKILL.md</location>"), "Windows hosts keep sandbox paths, which file tools accept");
