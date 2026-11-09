@@ -13,6 +13,7 @@ export const COMMANDS: ReadonlyArray<{ names: readonly string[]; load: () => Pro
   { names: ["runtime"], load: async () => (await import("./commands/runtime.js")).registerRuntime },
   { names: ["channels"], load: async () => (await import("./commands/channels.js")).registerChannels },
   { names: ["generate"], load: async () => (await import("./commands/generations.js")).registerGenerations },
+  { names: ["upload"], load: async () => (await import("./commands/generations.js")).registerUpload },
   { names: ["models"], load: async () => (await import("./commands/models.js")).registerModels },
   { names: ["prompts"], load: async () => (await import("./commands/prompts.js")).registerPrompts },
   { names: ["public"], load: async () => (await import("./commands/public.js")).registerPublic },

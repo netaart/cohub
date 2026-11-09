@@ -76,7 +76,7 @@ COHUB_SPACE_ID=<spaceId> cohub spaces get
 ```
 
 Commands that start new work — `prompt`, `completion`, `decision`, `generate`,
-`apps`, and `public` — fall back to your Home Space when nothing else names a target. Every
+`upload`, `apps`, and `public` — fall back to your Home Space when nothing else names a target. Every
 other Space command reads or changes existing Space state, so it stops with an
 error instead of guessing.
 
@@ -420,6 +420,8 @@ cohub generate -m song2 --text "prompt=upbeat synthwave" --text "lyrics=[Verse] 
 `models ls` shows each LLM's per-million-token cost (for example `$3 /M input · $15 /M output`) and hides models marked `hidden`. `models ls --model-type multimodal` shows each model's unit price (for example `$0.04 / image` or `$0.10–$0.50 / second`); `--json` returns the raw `pricing` object (`unit`, `amount` or `min`/`max`, optional `note`).
 
 `generate --text <role>=<text>` passes a text input tagged with a role from the model's text inputs (`cohub models show <model>`); repeat it for each text block.
+
+`generate --content <json|path|->` and `completion --content <json|path|->` send content blocks as given: a JSON array inline, from a file, or `-` for stdin. `cohub upload <paths...>` prints an unlisted public URL for each local file, so a block can reuse it across tasks.
 
 ## Output discipline
 
