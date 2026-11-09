@@ -12,7 +12,7 @@ import type {
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset, uploadLikeStickerAsset } from "../avatar.js";
-import { createClient } from "../client.js";
+import { createClient, createRealtimeClient } from "../client.js";
 import { collectOption, readPromptContent } from "../command-input.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
 import { SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
@@ -1670,10 +1670,11 @@ function registerSessions(spacesCmd: Command): void {
     .option("--json", "Output as JSON")
     .action(async (id: string, opts: { json?: boolean }) => {
       const spaceId = await resolveSpace(spacesCmd);
-      const client = createClient();
+      const client = createRealtimeClient();
       const session = client.space(spaceId).session(id);
 
       process.stdout.write("  Listening for events...\n\n");
+      process.once("SIGINT", () => void client.disconnect().finally(() => process.exit(130)));
 
       let lastAppendPath: string | null = null;
       session.on("turn.patch", (e: { payload?: Record<string, unknown> }) => {
