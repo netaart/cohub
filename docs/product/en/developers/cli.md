@@ -434,6 +434,8 @@ cohub -s <spaceId> spaces sessions ls --json
 
 Human-readable output is fine for interactive use. JSON is better for automation.
 
+With `--json`, an API or network error is printed as JSON on stderr, with `status` (the HTTP status) when the API answered. A failed command exits with code 1.
+
 ## Next steps
 
 - Product loop from the UI: [Quick start](/docs/learn/quick-start)

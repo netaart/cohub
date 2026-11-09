@@ -376,6 +376,8 @@ cohub -s <spaceId> spaces sessions ls --json
 
 交互使用可读输出即可；自动化优先 JSON。
 
+使用 `--json` 时，API 或网络错误会以 JSON 输出到 stderr；API 有响应时其中带 `status`（HTTP 状态码）。命令失败时退出码为 1。
+
 ## 下一步
 
 - UI 产品闭环：[快速开始](/zh/docs/learn/quick-start)
