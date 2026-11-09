@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, mock, test } from "node:test";
@@ -225,15 +225,24 @@ test("a task retried after its worker died finishes the committed checkpoint ins
 });
 
 test("compaction covers fold into later manifests and keep the closure", async () => {
+  // A download killed mid-install (old naming) must not stall cache repacks; a live temp pair must survive them.
+  const packDir = join(repoDir, ".git", "objects", "pack");
+  const anyPack = (await readdir(packDir)).find((name) => name.endsWith(".pack")) as string;
+  await cp(join(packDir, anyPack), join(packDir, "tmp_cohub_dead.pack"));
+  await writeFile(join(packDir, "tmp_cohub_dead.idx"), "truncated");
+  const stale = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  await Promise.all(["tmp_cohub_dead.pack", "tmp_cohub_dead.idx"].map((name) => utimes(join(packDir, name), stale, stale)));
+  await writeFile(join(packDir, "tmp_cohub_live_pack"), "in flight");
   let last = null as Awaited<ReturnType<typeof save>> | null;
   for (let index = 0; index < 17; index += 1) {
     await writeFile(join(workspace, `step-${index}.txt`), `${index}\n`);
     last = await save(`step ${index}`);
   }
-  const packDir = join(repoDir, ".git", "objects", "pack");
-  const packCount = async () => (await readdir(packDir)).filter((name) => name.endsWith(".pack")).length;
-  assert.ok(await packCount() <= 17, `cache holds ${await packCount()} packs`);
+  const names = await readdir(packDir);
+  const packs = names.filter((name) => name.endsWith(".pack")).length;
+  assert.ok(packs <= 17, `cache holds ${packs} packs`);
   git(repoDir, "fsck", "--connectivity-only", "--no-dangling", "main");
+  assert.deepEqual(names.filter((name) => name.startsWith("tmp_cohub_")), ["tmp_cohub_live_pack"]);
   const at16 = compactions.find((entry) => entry.seq === 16);
   assert.ok(at16);
   {

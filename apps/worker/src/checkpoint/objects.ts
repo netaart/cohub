@@ -1,7 +1,9 @@
 import { copyFile, mkdir, readdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  CHECKPOINT_TMP_PACK_PREFIX,
   checkpointGitDir,
+  checkpointTmpPackPaths,
   checkpointPackDir,
   installPackFiles,
   isPackInstalled,
@@ -157,9 +159,7 @@ export async function installLocalPack(repoDir: string, pack: BuiltPack) {
   if (await isPackInstalled(repoDir, pack.checksum)) return;
   const packDir = checkpointPackDir(repoDir);
   await mkdir(packDir, { recursive: true, mode: 0o775 });
-  const token = crypto.randomUUID();
-  const packPath = join(packDir, `tmp_cohub_${token}.pack`);
-  const idxPath = join(packDir, `tmp_cohub_${token}.idx`);
+  const { packPath, idxPath } = checkpointTmpPackPaths(packDir);
   try {
     await copyFile(pack.packPath, packPath);
     await copyFile(pack.idxPath, idxPath);
@@ -171,6 +171,14 @@ export async function installLocalPack(repoDir: string, pack: BuiltPack) {
 
 /** Above this many packs, every git process in the cache (saves, API reads) pays noticeably for scanning them. */
 const CACHE_PACK_LIMIT = 16;
+/** Temp pack files older than this belong to a process that died mid-install. */
+const STALE_TMP_MS = 60 * 60 * 1000;
+/**
+ * Merge without delta search (save packs carry none) and with bounded mmap
+ * windows: a rollup that takes in a 512 MB baseline stays near 70 MB RSS
+ * instead of git's unbounded defaults.
+ */
+const REPACK_CONFIG = ["-c", "pack.window=0", "-c", "core.packedGitWindowSize=16m", "-c", "core.packedGitLimit=64m", "-c", "core.deltaBaseCacheLimit=16m"];
 
 /**
  * Keep the cache repository's pack count logarithmic. A geometric repack only
@@ -178,8 +186,14 @@ const CACHE_PACK_LIMIT = 16;
  * reachability, so every object and completion marker stays valid.
  */
 export async function compactCachePacks(repoDir: string) {
-  const packs = (await readdir(checkpointPackDir(repoDir)).catch(() => [])).filter((name) => name.endsWith(".pack")).length;
-  if (packs <= CACHE_PACK_LIMIT) return { packs, repacked: false };
-  await runCheckpointGit(["repack", "--geometric=2", "-d", "-q"], { cwd: repoDir, env: { GIT_DIR: checkpointGitDir(repoDir) } });
-  return { packs, repacked: true };
+  const packDir = checkpointPackDir(repoDir);
+  const names = await readdir(packDir).catch(() => []);
+  const cutoff = Date.now() - STALE_TMP_MS;
+  await Promise.all(names.filter((name) => name.startsWith(CHECKPOINT_TMP_PACK_PREFIX)).map(async (name) => {
+    const path = join(packDir, name);
+    const mtimeMs = (await stat(path).catch(() => null))?.mtimeMs;
+    if (mtimeMs !== undefined && mtimeMs < cutoff) await rm(path, { force: true });
+  }));
+  if (names.filter((name) => name.endsWith(".pack")).length <= CACHE_PACK_LIMIT) return;
+  await runCheckpointGit([...REPACK_CONFIG, "repack", "--geometric=2", "-d", "-q"], { cwd: repoDir, env: { GIT_DIR: checkpointGitDir(repoDir) } });
 }

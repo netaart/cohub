@@ -143,6 +143,14 @@ export function runCheckpointGit(args: string[], options: { cwd: string; env?: N
   });
 }
 
+export const CHECKPOINT_TMP_PACK_PREFIX = "tmp_cohub_";
+
+/** Temp names carry no .pack/.idx suffix, so git never mistakes an in-flight or orphaned file for a pack. */
+export const checkpointTmpPackPaths = (packDir: string) => {
+  const token = crypto.randomUUID();
+  return { packPath: join(packDir, `${CHECKPOINT_TMP_PACK_PREFIX}${token}_pack`), idxPath: join(packDir, `${CHECKPOINT_TMP_PACK_PREFIX}${token}_idx`) };
+};
+
 export const checkpointGitDir = (repoDir: string) => join(repoDir, ".git");
 export const checkpointPackDir = (repoDir: string) => join(repoDir, ".git", "objects", "pack");
 
@@ -229,9 +237,7 @@ async function downloadPack(store: CheckpointObjectReader, repoDir: string, pack
   if (await isPackInstalled(repoDir, pack.checksum)) return false;
   const packDir = checkpointPackDir(repoDir);
   await mkdir(packDir, { recursive: true, mode: 0o775 });
-  const token = crypto.randomUUID();
-  const packPath = join(packDir, `tmp_cohub_${token}.pack`);
-  const idxPath = join(packDir, `tmp_cohub_${token}.idx`);
+  const { packPath, idxPath } = checkpointTmpPackPaths(packDir);
   try {
     if (!await store.download(pack.packKey, packPath)) throw new Error(`checkpoint pack missing: ${pack.packKey}`);
     if (!await store.download(pack.idxKey, idxPath)) throw new Error(`checkpoint pack index missing: ${pack.idxKey}`);
