@@ -15,16 +15,22 @@ export type { ResolvedTheme, ThemeMode } from "$lib/theme-registry";
 // --- Reactive state (Svelte 5 runes) ---
 let _mode = $state<ThemeMode>("system");
 let _resolved = $state<ResolvedTheme>("dark");
+let pin: { theme: ResolvedTheme } | null = null;
+
+function syncChrome() {
+	syncSystemChromeColor(THEME_COLOR[pin?.theme ?? _resolved]);
+}
+
+function paint() {
+	document.documentElement.setAttribute("data-theme", pin?.theme ?? _resolved);
+	syncChrome();
+}
 
 /** Update reactive state + DOM attribute. Called on init, user action, and system change. */
 function applyTheme(mode: ThemeMode, skipDom = false) {
-	const resolved = resolveThemeMode(mode);
 	_mode = mode;
-	_resolved = resolved;
-	if (!skipDom && typeof document !== "undefined") {
-		document.documentElement.setAttribute("data-theme", resolved);
-		syncSystemChromeColor(THEME_COLOR[resolved]);
-	}
+	_resolved = resolveThemeMode(mode);
+	if (!skipDom && typeof document !== "undefined") paint();
 }
 
 // --- Public reactive getters ---
@@ -44,6 +50,18 @@ export function setTheme(mode: ThemeMode) {
 	applyTheme(mode);
 }
 
+/** The newest pin wins: a page mounts before the one it replaces is destroyed. */
+export function pinTheme(theme: ResolvedTheme): () => void {
+	const current = { theme };
+	pin = current;
+	paint();
+	return () => {
+		if (pin !== current) return;
+		pin = null;
+		paint();
+	};
+}
+
 // --- Initialization ---
 if (typeof window !== "undefined") {
 	const stored = localStorage.getItem(THEME_STORAGE_KEY);
@@ -54,10 +72,8 @@ if (typeof window !== "undefined") {
 	applyTheme(initial, true);
 	// Custom themes load after the shell boots; their change event re-syncs
 	// the color once those overrides are applied.
-	syncSystemChromeColor(THEME_COLOR[resolveThemeMode(initial)]);
-	window.addEventListener(CUSTOM_THEME_CHANGED_EVENT, () => {
-		syncSystemChromeColor(THEME_COLOR[_resolved]);
-	});
+	syncChrome();
+	window.addEventListener(CUSTOM_THEME_CHANGED_EVENT, syncChrome);
 
 	// React to system preference changes (only affects "system" mode).
 	// applyTheme("system") resolves via getSystemTheme() and updates both

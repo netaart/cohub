@@ -88,9 +88,10 @@
         var resolved;
         var path = location.pathname;
         // Marketing home renders light so product captures only need one theme;
-        // other public pages follow the visitor theme.
-        var isHome = path === '/' || path === '';
-        if (isHome) {
+        // other public pages follow the visitor theme. In native shells "/" only
+        // forwards into the app, so it keeps the user's theme.
+        var isHome = path === '/' || path === '' || path === '/zh';
+        if (isHome && !window.cohubHost) {
           resolved = 'light';
         } else if (Object.hasOwn(themeColors, stored)) {
           resolved = stored;
