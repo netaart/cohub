@@ -8,7 +8,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
 // Bumped by a PR from sandbox-binaries-build.yml once every platform artifact is on the CDN.
-export const SANDBOXD_VERSION = "v2.95.0";
+export const SANDBOXD_VERSION = "v2.96.0";
 
 const BINARY_NAME = "cohub-sandboxd";
 const binaryName = (goos: string) => goos === "windows" ? `${BINARY_NAME}.exe` : BINARY_NAME;
