@@ -7,10 +7,7 @@ import type {
 import { ChevronDown, ChevronRight } from "lucide-svelte";
 import IntermediateMessageBubble from "$lib/components/IntermediateMessageBubble.svelte";
 import StatusGlyph from "$lib/components/StatusGlyph.svelte";
-import {
-	buildToolCallViewModels,
-	summarizeToolCalls,
-} from "$lib/components/tool-call-format";
+import { summarizeToolCalls } from "$lib/components/tool-call-format";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import type { ModelCatalogItem } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
@@ -39,12 +36,9 @@ const {
 
 const locale = $derived(getLocale());
 let open = $state(false);
-const tools = $derived(
-	buildToolCallViewModels({
-		content: messages.flatMap((message) => message.content),
-	}),
+const summary = $derived(
+	summarizeToolCalls(messages.flatMap((message) => message.content)),
 );
-const summary = $derived(summarizeToolCalls(tools));
 const tone = $derived(
 	summary.running ? "activity" : summary.failed ? "error" : "success",
 );
@@ -53,9 +47,9 @@ const label = $derived(
 		messages.length > 1
 			? m.process_steps_many({ count: messages.length }, { locale })
 			: m.process_steps_one({ count: 1 }, { locale }),
-		tools.length > 1
-			? m.process_tools_many({ count: tools.length }, { locale })
-			: tools.length === 1
+		summary.count > 1
+			? m.process_tools_many({ count: summary.count }, { locale })
+			: summary.count === 1
 				? m.process_tools_one({ count: 1 }, { locale })
 				: "",
 	]

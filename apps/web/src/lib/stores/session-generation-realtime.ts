@@ -122,6 +122,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+// Every patch re-sends the whole turn; keeping unchanged objects lets renders skip them.
+function mergeMessage(
+	current: StreamingIntermediateMessage,
+	incoming: StreamingIntermediateMessage,
+): StreamingIntermediateMessage {
+	for (const key of Object.keys(
+		incoming,
+	) as (keyof StreamingIntermediateMessage)[]) {
+		if (current[key] !== incoming[key]) return { ...current, ...incoming };
+	}
+	return current;
+}
+
 function getToolUseIds(content: ContentBlock[]): string[] {
 	return content
 		.filter(
@@ -166,7 +179,7 @@ function mergeMessagesSharingToolUseId(
 			for (const id of toolUseIds) indexByToolUseId.set(id, newIndex);
 			continue;
 		}
-		merged[existingIndex] = { ...merged[existingIndex], ...message };
+		merged[existingIndex] = mergeMessage(merged[existingIndex], message);
 		for (const id of toolUseIds) indexByToolUseId.set(id, existingIndex);
 	}
 	return merged;
@@ -232,7 +245,7 @@ function compactIntermediateMessages(messages: StreamingIntermediateMessage[]) {
 			merged.push(message);
 			continue;
 		}
-		merged[index] = { ...merged[index], ...message };
+		merged[index] = mergeMessage(merged[index], message);
 	}
 	return placeCompactionMessages(mergeMessagesSharingToolUseId(merged));
 }
