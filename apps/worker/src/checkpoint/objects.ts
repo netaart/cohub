@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   checkpointGitDir,
@@ -167,4 +167,19 @@ export async function installLocalPack(repoDir: string, pack: BuiltPack) {
   } finally {
     await Promise.all([rm(packPath, { force: true }), rm(idxPath, { force: true })]);
   }
+}
+
+/** Above this many packs, every git process in the cache (saves, API reads) pays noticeably for scanning them. */
+const CACHE_PACK_LIMIT = 16;
+
+/**
+ * Keep the cache repository's pack count logarithmic. A geometric repack only
+ * merges whole packs (`pack-objects --stdin-packs`) and never prunes by
+ * reachability, so every object and completion marker stays valid.
+ */
+export async function compactCachePacks(repoDir: string) {
+  const packs = (await readdir(checkpointPackDir(repoDir)).catch(() => [])).filter((name) => name.endsWith(".pack")).length;
+  if (packs <= CACHE_PACK_LIMIT) return { packs, repacked: false };
+  await runCheckpointGit(["repack", "--geometric=2", "-d", "-q"], { cwd: repoDir, env: { GIT_DIR: checkpointGitDir(repoDir) } });
+  return { packs, repacked: true };
 }

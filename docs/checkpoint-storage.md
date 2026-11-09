@@ -13,7 +13,7 @@ checkpoint-assets/...                                   large files and nested-r
 
 - Every object is written once and never changed. Keys are content-addressed or derived from commit hashes.
 - Invariant: the packs listed in `manifest(c).packs` contain every object reachable from commit `c`. Packs are self-contained (never thin), so each can be read alone.
-- `SPACE_SYSTEM_ROOT/<spaceId>/repo` is a cache. The API and workers fetch missing packs from the manifest on first read and mark complete commits under `.git/cohub-complete/`. Deleting the cache loses nothing.
+- `SPACE_SYSTEM_ROOT/<spaceId>/repo` is a cache. The API and workers fetch missing packs from the manifest on first read and mark complete commits under `.git/cohub-complete/`. Deleting the cache loses nothing. Each save adds a pack to it; once it holds more than 16, the save ends with `git repack --geometric=2 -d`, which merges whole packs without pruning anything, keeping the count logarithmic.
 
 ## Save
 

@@ -230,6 +230,10 @@ test("compaction covers fold into later manifests and keep the closure", async (
     await writeFile(join(workspace, `step-${index}.txt`), `${index}\n`);
     last = await save(`step ${index}`);
   }
+  const packDir = join(repoDir, ".git", "objects", "pack");
+  const packCount = async () => (await readdir(packDir)).filter((name) => name.endsWith(".pack")).length;
+  assert.ok(await packCount() <= 17, `cache holds ${await packCount()} packs`);
+  git(repoDir, "fsck", "--connectivity-only", "--no-dangling", "main");
   const at16 = compactions.find((entry) => entry.seq === 16);
   assert.ok(at16);
   {

@@ -42,7 +42,7 @@ import { type FileIndex, loadFileIndex, writeFileIndex } from "../checkpoint/fil
 import { foldCovers, tilesSequence, uploadPack, writeManifest } from "../checkpoint/manifest.js";
 import { refreshLatest } from "../checkpoint/materialize.js";
 import { findCheckpointForTaskRun, updateCheckpointMeta } from "../checkpoint/metadata.js";
-import { commitTree, createObjectBuilder, installLocalPack, packObjects, writeTree } from "../checkpoint/objects.js";
+import { commitTree, compactCachePacks, createObjectBuilder, installLocalPack, packObjects, writeTree } from "../checkpoint/objects.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PATH, ensureCheckpointDirs, getCheckpointLatestSubPath } from "../checkpoint/paths.js";
 import { saveCheckpointWithLock, type SaveCheckpointInput, type SaveCheckpointResult } from "../checkpoint/save.js";
 import { buildSnapshot } from "../checkpoint/snapshot.js";
@@ -404,6 +404,9 @@ const finishCheckpoint = async (ctx: SaveContext & {
     scanFiles: async () => ctx.files ?? (await scanWorkspace(dirs.workspaceDir)).files,
   })).then(() => null, (error: unknown) => formatErrorMessage(error));
   if (latestError) console.warn(`[save_checkpoint] failed to refresh latest space=${spaceId} checkpoint=${checkpoint.id}: ${latestError}`);
+
+  await timeIt(timings, "compactCachePacks", () => compactCachePacks(dirs.repoDir))
+    .catch((error) => console.warn(`[save_checkpoint] failed to compact cache packs space=${spaceId}:`, error));
 
   let publishedUserConfig: { targetDir: string; copiedPaths: string[]; meta: Record<string, unknown> } | null = null;
   if (!latestError && space.slug === HOME_SPACE_SLUG) {
