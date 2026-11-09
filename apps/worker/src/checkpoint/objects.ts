@@ -85,7 +85,7 @@ export async function writeTree(builder: ObjectBuilder, entries: TreeEntry[]) {
   await rm(builder.env.GIT_INDEX_FILE as string, { force: true });
   const input = entries.map((entry) => `${entry.mode} ${entry.oid}\t${entry.path}\0`).join("");
   await git(builder, ["update-index", "-z", "--index-info"], input);
-  const { stdout } = await git(builder, ["write-tree", "--missing-ok"]);
+  const { stdout } = await git(builder, ["write-tree"]);
   return stdout.trim();
 }
 
@@ -117,10 +117,15 @@ export async function packObjects(input: {
     [...(input.fast ? ["-c", "pack.compression=1"] : []), "pack-objects", ...(input.objects ? [] : ["--revs"]), "-q", "--delta-base-offset", ...(input.fast ? ["--window=0"] : []), join(input.outDir, "pack")],
     { cwd: input.cwd, env: input.env, input: `${list.join("\n")}\n` },
   );
+  return builtPack(input.outDir, stdout);
+}
+
+/** The pack `pack-objects` wrote under `outDir`, from the checksum it printed. */
+export async function builtPack(outDir: string, stdout: string): Promise<BuiltPack> {
   const checksum = stdout.trim();
   if (!/^[0-9a-f]{40}$/.test(checksum)) throw new Error(`pack-objects returned an invalid checksum: ${checksum}`);
-  const packPath = join(input.outDir, `pack-${checksum}.pack`);
-  const idxPath = join(input.outDir, `pack-${checksum}.idx`);
+  const packPath = join(outDir, `pack-${checksum}.pack`);
+  const idxPath = join(outDir, `pack-${checksum}.idx`);
   const [packStat, idxStat] = await Promise.all([stat(packPath), stat(idxPath)]);
   return { checksum, packPath, idxPath, size: packStat.size, idxSize: idxStat.size };
 }

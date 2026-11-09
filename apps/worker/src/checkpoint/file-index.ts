@@ -105,12 +105,28 @@ async function readIndexFile(path: string): Promise<FileIndex | null> {
  */
 export const stageFileIndex = (systemDir: string, index: FileIndex) => writeIndexFile(systemDir, PENDING_FILE, index);
 
-/** Promote the staged index if it belongs to `commit`; returns it, or null. */
+/** Promote the staged index if it belongs to `commit`. */
 export async function promoteFileIndex(systemDir: string, commit: string) {
-  const pending = await readIndexFile(join(systemDir, PENDING_FILE));
-  if (pending?.commit !== commit) return null;
+  if (await readIndexCommit(join(systemDir, PENDING_FILE)) !== commit) return;
   await rename(join(systemDir, PENDING_FILE), join(systemDir, INDEX_FILE));
-  return pending;
+}
+
+async function readIndexCommit(path: string) {
+  const handle = await open(path, "r").catch(() => null);
+  if (!handle) return null;
+  const lines = createInterface({ input: handle.createReadStream().pipe(createGunzip()), crlfDelay: Number.POSITIVE_INFINITY });
+  try {
+    for await (const line of lines) {
+      const header = JSON.parse(line) as { version?: unknown; commit?: unknown };
+      return header.version === 1 && typeof header.commit === "string" ? header.commit : null;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    lines.close();
+    await handle.close().catch(() => undefined);
+  }
 }
 
 async function writeIndexFile(systemDir: string, name: string, index: FileIndex) {

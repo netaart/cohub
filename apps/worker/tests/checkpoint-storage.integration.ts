@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, mock, test } from "node:test";
@@ -113,6 +113,7 @@ const mocks = [
 const { saveCheckpointForSpace } = await import("../src/tasks/save-checkpoint-task.js");
 const { prepareCheckpointRepo, restoreWorkspaceFromCheckpoint } = await import("../src/checkpoint/restore.js");
 const { compactCheckpointCovers } = await import(`../src/checkpoint/compact.js?real=${Date.now()}`);
+const { loadFileIndex, promoteFileIndex, stageFileIndex } = await import("../src/checkpoint/file-index.js");
 
 after(async () => {
   for (const item of mocks) item.restore();
@@ -180,7 +181,6 @@ test("saves are incremental packs whose manifests rebuild every checkpoint byte 
   assert.equal(secondManifest.packs.length, 2);
   const secondRepo = await fromStorage(second.commitHash);
   assert.equal(git(secondRepo, "rev-parse", `${second.commitHash}^`), first.commitHash);
-  // Trees rebuilt from the index must equal what git builds from the same files.
   git(secondRepo, "fsck", "--connectivity-only", "--no-dangling", second.commitHash);
   assert.equal(await stat(join(repoDir, ".git")).then(() => true, () => false), false, "saves must not touch the cache repository");
 
@@ -256,6 +256,7 @@ test("compaction covers fold into later manifests and keep the closure", async (
     git(fresh, "fsck", "--connectivity-only", folded.commitHash);
   }
   assert.ok(last);
+  assert.equal(await stat(join(repoDir, ".git")).then(() => true, () => false), false, "compaction must not fill the cache repository");
 });
 
 test("nested git repositories are stored as an incremental bundle chain", async () => {
@@ -372,5 +373,103 @@ test("trees rebuilt from the index match the workspace, and the diff matches git
     }
     parent = saved.commitHash;
   }
+  state.currentSpace = spaceId;
+});
+
+test("a fork's first save, with no stat index, leaves the parent diff to the API", async () => {
+  const forkSpace = "66666666-6666-4666-8666-666666666666";
+  const forkWs = join(root, "storage", forkSpace, "workspace");
+  const source = [...state.checkpoints.values()].find((row) => row.spaceId === spaceId) as Row;
+  state.checkpoints.set("fork-alias", { ...source, id: "fork-alias", spaceId: forkSpace });
+  state.spaces.set(forkSpace, { id: forkSpace, headCheckpointId: "fork-alias", slug: null, userUuid: "user" });
+  state.currentSpace = forkSpace;
+  state.lookup = "";
+  await mkdir(forkWs, { recursive: true });
+  await writeFile(join(forkWs, "only.txt"), "fork\n");
+  const saved = await save("fork first");
+  const meta = state.checkpoints.get(saved.checkpointId)?.meta as { diffs?: unknown; stats: Record<string, unknown> };
+  assert.equal(meta.diffs, undefined);
+  assert.equal(meta.stats.changedFileCount, undefined);
+  assert.equal((await manifestOf(saved.commitHash)).parent, source.commitHash);
+  state.currentSpace = spaceId;
+});
+
+test("compaction refuses a range that references an object stored nowhere", async () => {
+  const badSpace = "77777777-7777-4777-8777-777777777777";
+  const badWs = join(root, "storage", badSpace, "workspace");
+  const systemDir = join(root, "system", badSpace);
+  state.spaces.set(badSpace, { id: badSpace, headCheckpointId: null, slug: null, userUuid: "user" });
+  state.currentSpace = badSpace;
+  state.lookup = "";
+  await mkdir(badWs, { recursive: true });
+  await writeFile(join(badWs, "victim.txt"), "real\n");
+  await settle();
+  const first = await save("seed");
+  // Simulate a stat index that names a blob no save ever stored; the next saves reuse it without reading the file.
+  const index = await loadFileIndex(systemDir);
+  assert.ok(index);
+  const victim = index.entries.get("victim.txt");
+  assert.ok(victim);
+  index.entries.set("victim.txt", { ...victim, oid: "1".repeat(40) });
+  await stageFileIndex(systemDir, index);
+  await promoteFileIndex(systemDir, first.commitHash);
+  const before = compactions.length;
+  for (let step = 1; step <= 16; step += 1) {
+    await writeFile(join(badWs, `step-${step}.txt`), `${step}\n`);
+    await save(`bad ${step}`);
+  }
+  const at16 = compactions.slice(before).find((entry) => entry.seq === 16);
+  assert.ok(at16);
+  await assert.rejects(compactCheckpointCovers({ spaceId: badSpace, ...at16 }), /references 1 objects stored nowhere: 1{40}/);
+  assert.equal(await stat(join(bucket, "checkpoint-covers", at16.commit, "L1.json")).then(() => true, () => false), false);
+  state.currentSpace = spaceId;
+});
+
+test("diffs over 500 changes keep rename detection and full stats", async () => {
+  const bigSpace = "88888888-8888-4888-8888-888888888888";
+  const bigWs = join(root, "storage", bigSpace, "workspace");
+  state.spaces.set(bigSpace, { id: bigSpace, headCheckpointId: null, slug: null, userUuid: "user" });
+  state.currentSpace = bigSpace;
+  state.lookup = "";
+  await mkdir(join(bigWs, "old"), { recursive: true });
+  for (let index = 0; index < 300; index += 1) await writeFile(join(bigWs, "old", `f${index}.txt`), `file ${index}\n${"x".repeat(200)}\n`);
+  await settle();
+  await save("seed");
+  await rename(join(bigWs, "old"), join(bigWs, "moved"));
+  await mkdir(join(bigWs, "fresh"), { recursive: true });
+  for (let index = 0; index < 300; index += 1) await writeFile(join(bigWs, "fresh", `n${index}.txt`), `new ${index}\n`);
+  const saved = await save("move and add");
+  const meta = state.checkpoints.get(saved.checkpointId)?.meta as { stats: Record<string, number>; diffs: { parent: { summary?: { truncated: boolean; files: unknown[] }; truncated?: boolean } } };
+  assert.equal(meta.stats.renamedFileCount, 300);
+  assert.equal(meta.stats.addedFileCount, 300);
+  assert.equal(meta.stats.changedFileCount, 600);
+  assert.equal(meta.diffs.parent.summary?.truncated ?? meta.diffs.parent.truncated, true);
+  state.currentSpace = spaceId;
+});
+
+test("a crash before latest refreshes keeps both indexes, so the retry updates latest incrementally", async () => {
+  const crashSpace = "99999999-9999-4999-8999-999999999990";
+  const ws = join(root, "storage", crashSpace, "workspace");
+  const latest = join(root, "cache", crashSpace, "latest");
+  state.spaces.set(crashSpace, { id: crashSpace, headCheckpointId: null, slug: null, userUuid: "user" });
+  state.currentSpace = crashSpace;
+  state.lookup = "";
+  await mkdir(ws, { recursive: true });
+  await writeFile(join(ws, "kept.txt"), "v1\n");
+  await settle();
+  await save("seed");
+  await writeFile(join(ws, "kept.txt"), "v2\n");
+  await settle();
+  const crash = (progress: Record<string, unknown>) => {
+    if (progress.stage === "materialize_latest") throw new Error("simulated crash before latest");
+  };
+  await assert.rejects(saveCheckpointForSpace({ spaceId: crashSpace, description: "crash", sourceTaskRunId: "run-latest", onProgress: crash }), /simulated crash/);
+  await writeFile(join(ws, "after-commit.txt"), "not in the checkpoint\n");
+  const resumed = await saveCheckpointForSpace({ spaceId: crashSpace, description: "crash", sourceTaskRunId: "run-latest" });
+  assert.equal(resumed.resumed, true);
+  assert.equal(await readFile(join(latest, "kept.txt"), "utf8"), "v2\n");
+  assert.equal(await stat(join(latest, "after-commit.txt")).then(() => true, () => false), false);
+  const next = await save("next");
+  assert.equal(next.stats.hashedFileCount, 1);
   state.currentSpace = spaceId;
 });

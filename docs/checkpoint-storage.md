@@ -13,7 +13,7 @@ checkpoint-assets/...                                   large files and nested-r
 
 - Every object is written once and never changed. Keys are content-addressed or derived from commit hashes.
 - Invariant: the packs listed in `manifest(c).packs` contain every object reachable from commit `c`. Packs are self-contained (never thin), so each can be read alone.
-- `SPACE_SYSTEM_ROOT/<spaceId>/repo` is a read cache for the API (checkpoint files and diffs), forks and compaction. They fetch missing packs from the manifest on first read and mark complete commits under `.git/cohub-complete/`. Saves never read or write it, and deleting it loses nothing.
+- `SPACE_SYSTEM_ROOT/<spaceId>/repo` is a read cache for the API (checkpoint files and diffs) and forks. They fetch missing packs from the manifest on first read and mark complete commits under `.git/cohub-complete/`. Saves never read or write it, and deleting it loses nothing.
 
 ## Save
 
@@ -24,7 +24,7 @@ A save needs only the workspace, the per-space stat index, `latest` and object s
 3. Hash changed files with `git hash-object --no-filters` into a throwaway bare repository on worker-local disk. Repository `.gitattributes` never change stored bytes. Files above `CHECKPOINT_ASSET_THRESHOLD_BYTES` are uploaded as assets and stored as pointers.
 4. Rebuild only the trees of directories with a changed or deleted path (`git mktree --missing`), reusing the index's tree ids for the rest, and write the commit object on the parent.
 5. Pack exactly the objects written in steps 3–4 and upload the pack.
-6. Diff against the parent from the change list. Up to 500 changes, old contents come from `latest` (each must hash to the id the index recorded) and git computes renames, line counts and patches on two small trees; past 500, or when `latest` does not match, the summary lists paths without line counts.
+6. Diff against the parent from the change list: old contents come from `latest` (each must hash to the id the index recorded), and git computes renames, line counts and patches on two small trees holding only the changed paths. Without a parent index (a fork's first save, a lost index) or with a stale `latest`, nothing is precomputed and the API diffs on demand.
 7. Write the manifest (the parent's packs, with finished covers folded in, plus the new pack) and stage the new stat index.
 8. In one transaction, capture board snapshots, insert the checkpoint and move the head only if it still equals the parent (`head_checkpoint_id IS NOT DISTINCT FROM parent`). If the head moved, the save fails and nothing changes.
 9. Finish: enqueue compaction, promote the staged index, and update `latest` by copying only the changed paths when it holds the parent, otherwise rebuild it from a scan. The meta is cleared first, so an interrupted update is rebuilt next time.
@@ -35,7 +35,9 @@ A parent without a manifest (pre-v3 history) makes the save a parentless baselin
 
 ## Compaction
 
-Saves number their manifests along the commit chain (`seq`). After the save at `seq = s`, for each level `k` with `s` a multiple of 16^k, the system worker packs `commit ^commit~16^k` with full delta compression and records it as cover `L<k>` of that commit. Later saves replace the 16^k packs in that range with the cover. Covers are aligned, so a manifest holds at most about 15 packs per level plus the baseline. Existing manifests are never rewritten, and older checkpoints keep reading the packs they list.
+Saves number their manifests along the commit chain (`seq`). After the save at `seq = s`, for each level `k` with `s` a multiple of 16^k, the system worker builds cover `L<k>` of that commit on worker-local disk: it downloads the packs the commit's manifest lists for the range (saves, or lower covers), merges them with `pack-objects --stdin-packs --no-reuse-object` under bounded delta search, and uploads the result. Later saves replace the 16^k packs in that range with the cover. Covers are aligned, so a manifest holds at most about 15 packs per level plus the baseline. Existing manifests are never rewritten, and older checkpoints keep reading the packs they list.
+
+Saves name reused files and directories by id without reading them, so level-1 compaction also checks the range: every object its commits reference must be in the range's packs or in the base commit's closure (read from the base manifest's pack indexes). A failure leaves no cover and fails the job.
 
 ## Nested Git repositories
 

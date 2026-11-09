@@ -182,29 +182,34 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
 
   const previousEntries = previousIndex?.entries ?? new Map<string, FileIndexEntry>();
   const assetPaths = new Set(snapshot.assets.map((asset) => asset.path));
-  for (const [path, entry] of previousEntries) if (entry.asset) assetPaths.add(path);
-  let diffStats: PrecomputedDiffStats = { changedFileCount: 0, addedFileCount: 0, modifiedFileCount: 0, deletedFileCount: 0, renamedFileCount: 0, copiedFileCount: 0, additions: 0, deletions: 0 };
+  // Diffs flag a path as an asset on either side; the workspace totals count current assets only.
+  const diffAssetPaths = new Set(assetPaths);
+  for (const [path, entry] of previousEntries) if (entry.asset) diffAssetPaths.add(path);
+  let diffStats: PrecomputedDiffStats | null = null;
   let diffMeta: CheckpointDiffMeta | null = null;
-  // Against a pre-manifest parent nothing is known about what changed; the API diffs those on demand.
-  if (gitParent || !parentCommitHash) {
+  // The change list is only known against the parent when its index was used, and old contents come
+  // from latest; otherwise (a fork's first save, a lost index, a stale latest) the API diffs on demand.
+  const canDiff = !parentCommitHash || (previousIndex !== null && await readLatestCommit(dirs.latestDir) === parentCommitHash);
+  if (canDiff) {
     try {
-      const diff = await timeIt(timings, "buildDiff", async () => diffChanges({
+      const diff = await timeIt(timings, "buildDiff", () => diffChanges({
         builder,
         latestDir: dirs.latestDir,
-        latestMatchesParent: await readLatestCommit(dirs.latestDir) === parentCommitHash,
         changes: [
           ...snapshot.changed.map((path) => ({ path, before: previousEntries.get(path), after: snapshot.leaves.get(path) })),
           ...snapshot.deleted.map((path) => ({ path, before: previousEntries.get(path), after: undefined })),
         ],
-        assetPaths,
+        assetPaths: diffAssetPaths,
         checkpointId,
         commitHash,
         parentCheckpointId,
         parentCommitHash,
         spaceId,
       }));
-      diffStats = diff.stats;
-      diffMeta = await timeIt(timings, "materializeDiffMeta", () => materializeDiffMeta({ summary: diff.summary, commitHash, spaceId, checkpointId, tmpDir: localTmpDir, files: diff.patches }));
+      if (diff) {
+        diffStats = diff.stats;
+        diffMeta = await timeIt(timings, "materializeDiffMeta", () => materializeDiffMeta({ summary: diff.summary, commitHash, spaceId, checkpointId, tmpDir: localTmpDir, files: diff.patches }));
+      }
     } catch (error) {
       // Diff precompute must never fail a save. API can still compute on demand.
       console.warn(`[save_checkpoint] failed to materialize diff meta space=${spaceId} checkpoint=${checkpointId}:`, error);
@@ -230,14 +235,7 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
   const stats = {
     fileCount: smallFileCount + assetCount,
     fileBytes: smallFileBytes + assetBytes,
-    changedFileCount: diffStats.changedFileCount,
-    addedFileCount: diffStats.addedFileCount,
-    modifiedFileCount: diffStats.modifiedFileCount,
-    deletedFileCount: diffStats.deletedFileCount,
-    renamedFileCount: diffStats.renamedFileCount,
-    copiedFileCount: diffStats.copiedFileCount,
-    additions: diffStats.additions,
-    deletions: diffStats.deletions,
+    ...diffStats,
     smallFileCount,
     smallFileBytes,
     assetCount,
@@ -362,8 +360,6 @@ const finishCheckpoint = async (ctx: SaveContext & {
   }
 
   const latestChanges = ctx.latestChanges ?? await timeIt(timings, "loadIndexChanges", () => indexChanges(dirs.systemDir, commitHash)).catch(() => null);
-  await timeIt(timings, "promoteFileIndex", () => promoteFileIndex(dirs.systemDir, commitHash))
-    .catch((error) => console.warn(`[save_checkpoint] failed to promote the stat index space=${spaceId}:`, error));
 
   // A failed refresh leaves latest marked incomplete; the next refresh rebuilds it.
   const latestMeta = {
@@ -386,6 +382,9 @@ const finishCheckpoint = async (ctx: SaveContext & {
     scanFiles: async () => ctx.files ?? (await scanWorkspace(dirs.workspaceDir)).files,
   })).then(() => null, (error: unknown) => formatErrorMessage(error));
   if (latestError) console.warn(`[save_checkpoint] failed to refresh latest space=${spaceId} checkpoint=${checkpoint.id}: ${latestError}`);
+  // Promoted only after latest, so a retry still has both indexes to update latest incrementally.
+  await timeIt(timings, "promoteFileIndex", () => promoteFileIndex(dirs.systemDir, commitHash))
+    .catch((error) => console.warn(`[save_checkpoint] failed to promote the stat index space=${spaceId}:`, error));
 
   let publishedUserConfig: { targetDir: string; copiedPaths: string[]; meta: Record<string, unknown> } | null = null;
   if (!latestError && space.slug === HOME_SPACE_SLUG) {
