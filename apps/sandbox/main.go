@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -325,17 +326,16 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 		return report.Payload{Status: status, Meta: meta}
 	}
 	go func() {
-		err := reporter.WaitForBootstrap(ctx, payload, func(status string, err error) {
-			setup := &protocol.SandboxSetupInfo{Status: "waiting"}
-			if status == "failed" {
-				setup.Error = "Workspace bootstrap failed; setup has not run"
-			}
-			state.SetSetup(setup)
+		err := reporter.WaitForBootstrap(ctx, payload, func(_ string, err error) {
+			state.SetSetup(&protocol.SandboxSetupInfo{Status: "waiting"})
 			if err != nil {
 				logger.Warn("waiting for workspace bootstrap", slog.String("error", err.Error()))
 			}
 		})
-		if err != nil {
+		if errors.Is(err, report.ErrBootstrapFailed) {
+			// Terminal: degrade like a failed setup so the Space stays usable.
+			state.SetSetup(&protocol.SandboxSetupInfo{Status: "failed", Error: "Workspace bootstrap failed; setup has not run"})
+		} else if err != nil {
 			return
 		}
 		runner := workspace.NewSetupRunner(cfg, sandbox.processes, logger, func(setup *protocol.SandboxSetupInfo) {
@@ -346,7 +346,9 @@ func runCloud(logger *slog.Logger, cfg env.Config) {
 				}
 			}
 		})
-		runner.Run(ctx)
+		if err == nil {
+			runner.Run(ctx)
+		}
 		searchManager.Activate()
 		for ctx.Err() == nil {
 			if _, err := reporter.ReportWithBootstrap(ctx, payload()); err == nil {
