@@ -1,5 +1,22 @@
 [
 	{
+		"version": "2.97",
+		"date": "2026-11-10",
+		"tags": ["v2.97.0"],
+		"highlights": [
+			"**Checkpoint save pipeline**: a normal save no longer touches the per-space cache repository — it reuses the parent's stat index, writes objects into a throwaway local repo, rebuilds only trees for changed directories, and derives the diff from a change list; cache reads repack geometrically once they exceed 16 packs.",
+			"**Checkpoint Board playback**: read a Board exactly as a checkpoint captured it via the new `GET /api/spaces/:id/checkpoints/:checkpointId/boards/:boardId`, `space.checkpoints(id).board(target)` and `.files.resolve(path)` in the SDK, `cohub boards get --checkpoint <id>` in the CLI, and a read-only Board view in the web app whose media resolves from the checkpoint.",
+			"**Streaming render performance**: realtime intermediate-message patches now keep unchanged message objects, and tool-call summaries are computed in a single pass over content, so long streaming turns no longer rebuild every message and tool view on each patch."
+		],
+		"fixes": [
+			"Large native Turns stage their messages across bounded `messages` frames before sealing, so a result over the 32 MiB frame limit settles instead of staying running forever.",
+			"A failed workspace bootstrap is now terminal: the sandbox skips setup and degrades like a failed setup, create-space reruns skip Spaces that are already ready, and late or duplicate failures cannot overwrite a ready bootstrap.",
+			"Workspace usage scans count hardlinks by inode and use 8 pdu threads, bounding worker memory on hardlink-heavy workspaces.",
+			"The Board canvas derives its logical size from the CSS box, so rendering lines up with taps on displays whose `devicePixelRatio` disagrees with the canvas device-pixel box.",
+			"Non-LLM turns, including direct shell and generation results, are kept out of the usage ledger, so they no longer trigger wallet billing or referral qualification."
+		]
+	},
+	{
 		"version": "2.96",
 		"date": "2026-11-09",
 		"tags": ["v2.96.0"],

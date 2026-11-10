@@ -4,6 +4,20 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.97 — 2026-11-10
+
+- **Checkpoint save pipeline**: a normal save no longer touches the per-space cache repository — it reuses the parent's stat index, writes objects into a throwaway local repo, rebuilds only trees for changed directories, and derives the diff from a change list; cache reads repack geometrically once they exceed 16 packs.
+- **Checkpoint Board playback**: read a Board exactly as a checkpoint captured it via the new `GET /api/spaces/:id/checkpoints/:checkpointId/boards/:boardId`, `space.checkpoints(id).board(target)` and `.files.resolve(path)` in the SDK, `cohub boards get --checkpoint <id>` in the CLI, and a read-only Board view in the web app whose media resolves from the checkpoint.
+- **Streaming render performance**: realtime intermediate-message patches now keep unchanged message objects, and tool-call summaries are computed in a single pass over content, so long streaming turns no longer rebuild every message and tool view on each patch.
+
+### Bug Fixes
+
+- Large native Turns stage their messages across bounded `messages` frames before sealing, so a result over the 32 MiB frame limit settles instead of staying running forever.
+- A failed workspace bootstrap is now terminal: the sandbox skips setup and degrades like a failed setup, create-space reruns skip Spaces that are already ready, and late or duplicate failures cannot overwrite a ready bootstrap.
+- Workspace usage scans count hardlinks by inode and use 8 pdu threads, bounding worker memory on hardlink-heavy workspaces.
+- The Board canvas derives its logical size from the CSS box, so rendering lines up with taps on displays whose `devicePixelRatio` disagrees with the canvas device-pixel box.
+- Non-LLM turns, including direct shell and generation results, are kept out of the usage ledger, so they no longer trigger wallet billing or referral qualification.
+
 ## v2.96 — 2026-11-09
 
 - **Display recording and replay**: sandboxd records a screen from the video it already streams—no second encoder and no extra bitrate for viewers—into Space files, logs each Turn's steps for replay, and adds window-scoped `look`, `capture`, `tree` and `act`; live sessions show the agent's pointer and every viewer's cursor.
