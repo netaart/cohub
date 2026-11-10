@@ -1,11 +1,11 @@
 <script lang="ts">
-import { Clock, Loader2, Plus } from "lucide-svelte";
+import { Loader2, Plus } from "lucide-svelte";
 import { untrack } from "svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import type { SpaceCronjobsFeed } from "../resources/space-cronjobs-feed.svelte";
+import CronjobRow from "./CronjobRow.svelte";
 import LoadError from "./LoadError.svelte";
-import SidePanelRow from "./SidePanelRow.svelte";
 
 type Props = {
 	feed: SpaceCronjobsFeed | null;
@@ -62,23 +62,7 @@ $effect(() => {
 		{:else}
 			<div role="list">
 				{#each jobs as job (job.id)}
-					<SidePanelRow
-						title={job.title}
-						subtitle={job.cronExpression}
-						active={job.id === activeCronjobId}
-						onOpen={() => onOpenCronjob(job.id)}
-					>
-						{#snippet leading()}
-							<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] {job.enabled ? 'text-status-running' : 'text-text-placeholder'}">
-								<Clock class="h-3.5 w-3.5" />
-							</span>
-						{/snippet}
-						{#snippet trailing()}
-							{#if !job.enabled}
-								<span class="px-1 text-[10px] text-text-placeholder">{m.cron_paused({}, { locale })}</span>
-							{/if}
-						{/snippet}
-					</SidePanelRow>
+					<CronjobRow {job} active={job.id === activeCronjobId} onOpen={() => onOpenCronjob(job.id)} />
 				{/each}
 			</div>
 		{/if}

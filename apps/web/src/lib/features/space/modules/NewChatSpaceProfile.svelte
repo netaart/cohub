@@ -1,10 +1,15 @@
 <script lang="ts">
+import type { ResourceAppKind, ResourceAppTarget } from "@cohub/protocol";
 import type {
+	CronJobRecord,
 	SpaceMember,
 	SpaceRecord,
 	SpaceUsageResponse,
+	SpaceWalletSummary,
 	UserProfile,
 } from "@neta-art/cohub";
+import { ArrowRight } from "lucide-svelte";
+import type { Snippet } from "svelte";
 import { canViewSpaceCost } from "$lib/activity";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import StatusGlyph, {
@@ -12,9 +17,14 @@ import StatusGlyph, {
 	type StatusGlyphTone,
 } from "$lib/components/StatusGlyph.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
+import { formatCurrency } from "$lib/i18n/format";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { formatShortDateTime } from "$lib/resource-kit/time";
+import type { SpaceAppsFeed } from "../resources/space-apps-feed.svelte";
+import type { SpaceCronjobsFeed } from "../resources/space-cronjobs-feed.svelte";
+import AppRow from "../side-panel/AppRow.svelte";
+import CronjobRow from "../side-panel/CronjobRow.svelte";
 import {
 	displayUserName,
 	formatTokenCount,
@@ -40,6 +50,9 @@ type Props = {
 	space: SpaceRecord | null;
 	members: SpaceMember[];
 	usage: SpaceUsageResponse | null;
+	wallet: SpaceWalletSummary | null;
+	apps: SpaceAppsFeed | null;
+	cronjobs: SpaceCronjobsFeed | null;
 	sandbox: SpaceSandboxSnapshot | null;
 	sandboxLoadedFor: string | null;
 	expanded: boolean;
@@ -48,13 +61,22 @@ type Props = {
 	contentEl?: HTMLDivElement | null;
 	bodyEl?: HTMLDivElement | null;
 	onToggleExpanded: () => void;
+	onOpenResource: (target: ResourceAppTarget) => void;
+	onOpenResourceList: (kind: ResourceAppKind) => void;
 };
+
+const RECENT_LIMIT = 3;
+/** Mirrors the mobile `nth-child` rule below. */
+const MOBILE_RECENT_LIMIT = 2;
 
 let {
 	spaceId,
 	space,
 	members,
 	usage,
+	wallet,
+	apps,
+	cronjobs,
 	sandbox,
 	sandboxLoadedFor,
 	expanded,
@@ -63,6 +85,8 @@ let {
 	contentEl = $bindable(),
 	bodyEl = $bindable(),
 	onToggleExpanded,
+	onOpenResource,
+	onOpenResourceList,
 }: Props = $props();
 
 const locale = $derived(getLocale());
@@ -107,6 +131,29 @@ const usageText = $derived.by(() => {
 		{ locale },
 	);
 });
+const walletText = $derived(
+	wallet?.spaceId === spaceId && wallet.balanceUsd > 0
+		? m.space_profile_wallet(
+				{
+					amount: formatCurrency(wallet.balanceUsd, "USD", {
+						locale,
+						maximumFractionDigits: 2,
+					}),
+				},
+				{ locale },
+			)
+		: "",
+);
+const recentApps = $derived(apps?.ready ? apps.items : []);
+const recentJobs = $derived(
+	cronjobs?.ready
+		? cronjobs.items.toSorted(
+				(a, b) =>
+					Number(b.enabled) - Number(a.enabled) ||
+					b.updatedAt.localeCompare(a.updatedAt),
+			)
+		: ([] as CronJobRecord[]),
+);
 const spaceName = $derived(space?.name || space?.title || "Untitled space");
 const owner = $derived(space?.ownerProfile ?? null);
 const sortedMembers = $derived(
@@ -140,8 +187,14 @@ function userTitle(
 							<StatusGlyph {...SANDBOX_GLYPH[sandboxStatusKind(sandbox)]} label={sandboxStatusLabel(sandbox)} class="translate-y-[0.02rem] [--status-glyph-size:0.48rem]" />
 						{/if}
 					</div>
-					{#if space?.createdAt}
-						<div class="mt-2 font-mono text-[10px] text-text-placeholder sm:text-[11px]">Created {formatShortDateTime(space.createdAt)}</div>
+					{#if space?.createdAt || walletText}
+						<div class="mt-2 font-mono text-[10px] text-text-placeholder sm:text-[11px]">
+							{#if space?.createdAt}Created {formatShortDateTime(space.createdAt)}{/if}
+							{#if walletText}
+								{#if space?.createdAt}<span aria-hidden="true"> · </span>{/if}
+								<a href={`/spaces/${spaceId}/wallet`} class="transition-colors hover:text-text-secondary">{walletText}</a>
+							{/if}
+						</div>
 					{/if}
 				</div>
 			</div>
@@ -194,8 +247,43 @@ function userTitle(
 				{expanded ? m.space_profile_show_less({}, { locale }) : m.space_profile_show_full({}, { locale })}
 			</button>
 		{/if}
+		{#if recentApps.length > 0 || recentJobs.length > 0}
+			<div class="new-chat-profile-fragment grid grid-cols-2 gap-x-3 gap-y-5 sm:gap-x-8" style:animation-delay="90ms">
+				{#if recentApps.length > 0}
+					{@render recent(m.side_panel_tab_apps({}, { locale }), "app", recentApps.length, appRows)}
+				{/if}
+				{#if recentJobs.length > 0}
+					{@render recent(m.side_panel_tab_scheduled({}, { locale }), "cronjob", recentJobs.length, jobRows)}
+				{/if}
+			</div>
+		{/if}
 	</div>
 </section>
+
+{#snippet appRows()}
+	{#each recentApps.slice(0, RECENT_LIMIT) as app (app.id)}
+		<AppRow {spaceId} {app} draggable onOpen={() => onOpenResource({ kind: "app", id: app.id })} />
+	{/each}
+{/snippet}
+
+{#snippet jobRows()}
+	{#each recentJobs.slice(0, RECENT_LIMIT) as job (job.id)}
+		<CronjobRow {job} onOpen={() => onOpenResource({ kind: "cronjob", id: job.id })} />
+	{/each}
+{/snippet}
+
+{#snippet recent(title: string, kind: ResourceAppKind, count: number, rows: Snippet)}
+	<section class="min-w-0">
+		<h2 class="mb-1 px-1.5 text-[11px] font-medium text-text-placeholder">{title}</h2>
+		<div class="new-chat-recent-list -mx-0.5" role="list">{@render rows()}</div>
+		{#if count > MOBILE_RECENT_LIMIT}
+			<button type="button" class="mt-0.5 inline-flex h-7 items-center gap-1 rounded-[5px] px-1.5 text-[11px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary {count <= RECENT_LIMIT ? 'sm:hidden' : ''}" onclick={() => onOpenResourceList(kind)}>
+				{m.space_profile_view_all({ count }, { locale })}
+				<ArrowRight class="h-3 w-3" />
+			</button>
+		{/if}
+	</section>
+{/snippet}
 
 <style>
 	@keyframes new-chat-profile-fragment-in {
@@ -223,6 +311,10 @@ function userTitle(
 		.new-chat-profile-panel {
 			max-height: 100%;
 			overflow: hidden;
+		}
+
+		.new-chat-recent-list > :global(:nth-child(n + 3)) {
+			display: none;
 		}
 
 		.new-chat-profile-body {
