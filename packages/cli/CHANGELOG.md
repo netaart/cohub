@@ -1,5 +1,15 @@
 # @neta-art/cohub-cli
 
+## 10.26.0
+
+### Minor Changes
+
+- 7cb9bf6: Read a Board as a checkpoint saved it. `space.checkpoints(id).board(target)` takes a Board id or a `.board` path and returns the saved document; `version` is the Board version at save time, and `checkpointId` and `capturedAt` are added. `checkpoints(id).files.resolve(path)` gives a browser-ready URL for a saved file. In the CLI, `cohub boards get plan.board --checkpoint <id>` prints the saved Board and accepts `--only`, `--items`, `--within` and `--animations`.
+
+### Patch Changes
+
+- 99600c0: Sync a local Turn too large for one Runtime frame by staging its messages in bounded frames before sealing it, instead of leaving it running.
+
 ## 10.25.1
 
 ### Patch Changes
