@@ -5,7 +5,7 @@ import type { TaskPayload } from "@cohub/protocol/task";
 import { normalizeRequestSource } from "@cohub/protocol/provenance";
 import { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 import { checkpoints, spaces } from "@cohub/db";
-import { readCheckpointManifest } from "@cohub/core/checkpoint/storage";
+import { ensureCheckpointCommits, readCheckpointManifest, runCheckpointGit } from "@cohub/core/checkpoint/storage";
 import { checkpointForkReference } from "@cohub/core/references";
 import { enqueueReferences } from "../reference-index-queue.js";
 import { registerTask } from "./registry.js";
@@ -21,7 +21,7 @@ import { getSkillsDir, publishSkillsCacheFromDir } from "../skills-cache.js";
 import { publishSpaceEvent } from "../space-events.js";
 import { ensureWorkerLocalTmpDir, getWorkerLocalTmpDir, removeWorkerLocalTmpDir } from "../local-tmp.js";
 import { checkpointObjectStore } from "../checkpoint/assets.js";
-import { diffChanges } from "../checkpoint/change-diff.js";
+import { diffChanges, diffInRepo } from "../checkpoint/change-diff.js";
 import {
   materializeDiffMeta,
   type PrecomputedDiffStats,
@@ -32,9 +32,9 @@ import { saveBoardCheckpointSnapshots } from "../checkpoint/board.js";
 import { enqueueCheckpointCompaction } from "../checkpoint/compact.js";
 import { type FileIndexEntry, loadFileIndex, loadStagedFileIndex, promoteFileIndex, stageFileIndex } from "../checkpoint/file-index.js";
 import { foldCovers, tilesSequence, uploadPack, writeManifest } from "../checkpoint/manifest.js";
-import { readLatestCommit, refreshLatest } from "../checkpoint/materialize.js";
+import { diffCommitPaths, readLatestCommit, refreshLatest } from "../checkpoint/materialize.js";
 import { findCheckpointForTaskRun, updateCheckpointMeta } from "../checkpoint/metadata.js";
-import { createObjectBuilder, packObjects, writeCommit } from "../checkpoint/objects.js";
+import { createObjectBuilder, packObjects, readFromCache, writeCommit } from "../checkpoint/objects.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PATH, ensureCheckpointDirs, getCheckpointLatestSubPath } from "../checkpoint/paths.js";
 import { saveCheckpointWithLock, type SaveCheckpointInput, type SaveCheckpointResult } from "../checkpoint/save.js";
 import { buildSnapshot } from "../checkpoint/snapshot.js";
@@ -125,14 +125,15 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
       return manifest && tilesSequence(manifest.packs, 0, manifest.seq) ? manifest : null;
     })
     : null;
-  // A parent without a manifest predates object storage: this save becomes a parentless baseline with its full snapshot.
-  const gitParent = parentManifest ? parentCommitHash : null;
-  const previousIndex = gitParent
+  const previousIndex = parentCommitHash && parentManifest
     ? await timeIt(timings, "loadFileIndex", async () => {
+      // A worker that died after committing the parent may have left its index staged.
+      await promoteFileIndex(dirs.systemDir, parentCommitHash).catch(() => undefined);
       const index = await loadFileIndex(dirs.systemDir);
-      return index?.commit === gitParent ? index : null;
+      return index?.commit === parentCommitHash ? index : null;
     })
     : null;
+
 
   await progress("scan_workspace");
   const scanStartedAtNs = BigInt(Date.now()) * 1_000_000n;
@@ -157,6 +158,14 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
 
   await progress("upload_assets", { fileCount: scan.files.length });
   const builder = await createObjectBuilder(localTmpDir);
+  /**
+   * Without the parent's index (a fork's first save, a lost index, a pre-v3 parent), the save reads
+   * the parent from the cache repository as before, so packs and diffs come out the same.
+   */
+  const readParent = async () => {
+    await ensureCheckpointCommits(checkpointObjectStore, dirs.repoDir, [parentCommitHash as string]);
+    await readFromCache(builder, dirs.repoDir);
+  };
   const snapshot = await timeIt(timings, "writeObjects", () => buildSnapshot({
     builder,
     files: scan.files,
@@ -167,17 +176,17 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
     onAssetTiming: (label, ms) => { timings[label] = (timings[label] ?? 0) + Math.round(ms); },
   }));
   const trees = await timeIt(timings, "writeTrees", () => writeTrees({ env: builder.env, cwd: localTmpDir, leaves: snapshot.leaves, dirty: snapshot.dirty, previous: previousIndex?.trees ?? new Map() }));
-  const commitHash = await timeIt(timings, "writeCommit", () => writeCommit(builder, { tree: trees.root, parent: gitParent, message: commitMessage, date: createdAt }));
+  const commitHash = await timeIt(timings, "writeCommit", () => writeCommit(builder, { tree: trees.root, parent: parentCommitHash, message: commitMessage, date: createdAt }));
 
   await progress("commit_checkpoint", { commitHash });
   const seq = parentManifest ? parentManifest.seq + 1 : 0;
-  const pack = await timeIt(timings, "packObjects", () => packObjects({
-    env: builder.env,
-    cwd: localTmpDir,
-    outDir: join(localTmpDir, "pack"),
-    objects: [...snapshot.blobs, ...trees.written, commitHash],
-    fast: true,
-  }));
+  const pack = await timeIt(timings, "packObjects", async () => {
+    const outDir = join(localTmpDir, "pack");
+    if (!parentCommitHash || previousIndex) return packObjects({ env: builder.env, cwd: localTmpDir, outDir, objects: [...snapshot.blobs, ...trees.written, commitHash], fast: true });
+    // Without the parent's index, pack against the parent read from the cache; a pre-v3 parent's history goes in too.
+    await readParent();
+    return packObjects({ env: builder.env, cwd: localTmpDir, outDir, include: [commitHash], exclude: parentManifest ? [parentCommitHash] : [], fast: true });
+  });
   const packRef = await timeIt(timings, "uploadPack", () => uploadPack(spaceId, pack, { first: seq, last: seq, tip: commitHash }));
 
   const previousEntries = previousIndex?.entries ?? new Map<string, FileIndexEntry>();
@@ -187,38 +196,45 @@ const saveCheckpointInDir = async (input: SaveCheckpointInput, localTmpDir: stri
   for (const [path, entry] of previousEntries) if (entry.asset) diffAssetPaths.add(path);
   let diffStats: PrecomputedDiffStats | null = null;
   let diffMeta: CheckpointDiffMeta | null = null;
-  // The change list is only known against the parent when its index was used, and old contents come
-  // from latest; otherwise (a fork's first save, a lost index, a stale latest) the API diffs on demand.
-  const canDiff = !parentCommitHash || (previousIndex !== null && await readLatestCommit(dirs.latestDir) === parentCommitHash);
-  if (canDiff) {
-    try {
-      const diff = await timeIt(timings, "buildDiff", () => diffChanges({
-        builder,
-        latestDir: dirs.latestDir,
-        changes: [
-          ...snapshot.changed.map((path) => ({ path, before: previousEntries.get(path), after: snapshot.leaves.get(path) })),
-          ...snapshot.deleted.map((path) => ({ path, before: previousEntries.get(path), after: undefined })),
-        ],
-        assetPaths: diffAssetPaths,
-        checkpointId,
-        commitHash,
-        parentCheckpointId,
-        parentCommitHash,
-        spaceId,
-      }));
-      if (diff) {
-        diffStats = diff.stats;
-        diffMeta = await timeIt(timings, "materializeDiffMeta", () => materializeDiffMeta({ summary: diff.summary, commitHash, spaceId, checkpointId, tmpDir: localTmpDir, files: diff.patches }));
+  try {
+    const diff = await timeIt(timings, "buildDiff", async () => {
+      // From the change list when the parent's index was used and latest holds the parent's files.
+      if (!parentCommitHash || (previousIndex && await readLatestCommit(dirs.latestDir) === parentCommitHash)) {
+        const fromChanges = await diffChanges({
+          builder,
+          latestDir: dirs.latestDir,
+          changes: [
+            ...snapshot.changed.map((path) => ({ path, before: previousEntries.get(path), after: snapshot.leaves.get(path) })),
+            ...snapshot.deleted.map((path) => ({ path, before: previousEntries.get(path), after: undefined })),
+          ],
+          assetPaths: diffAssetPaths,
+          checkpointId,
+          commitHash,
+          parentCheckpointId,
+          parentCommitHash,
+          spaceId,
+        });
+        if (fromChanges || !parentCommitHash) return fromChanges;
       }
-    } catch (error) {
-      // Diff precompute must never fail a save. API can still compute on demand.
-      console.warn(`[save_checkpoint] failed to materialize diff meta space=${spaceId} checkpoint=${checkpointId}:`, error);
+      await readParent();
+      // Without the parent's index, its assets come from its asset manifest.
+      const parentAssets = await runCheckpointGit(["show", `${parentCommitHash}:${CHECKPOINT_ASSET_MANIFEST_PATH}`], { cwd: localTmpDir, env: builder.env })
+        .then(({ stdout }) => (JSON.parse(stdout) as { assets?: Array<{ path: string }> }).assets ?? [], () => []);
+      for (const asset of parentAssets) diffAssetPaths.add(asset.path);
+      return diffInRepo({ repoDir: builder.env.GIT_DIR as string, base: parentCommitHash, head: commitHash, checkpointId, commitHash, parentCheckpointId, parentCommitHash, assetPaths: diffAssetPaths, spaceId, tmpDir: localTmpDir });
+    });
+    if (diff) {
+      diffStats = diff.stats;
+      diffMeta = await timeIt(timings, "materializeDiffMeta", () => materializeDiffMeta({ summary: diff.summary, commitHash, spaceId, checkpointId, tmpDir: localTmpDir, files: diff.patches }));
     }
+  } catch (error) {
+    // Diff precompute must never fail a save. API can still compute on demand.
+    console.warn(`[save_checkpoint] failed to materialize diff meta space=${spaceId} checkpoint=${checkpointId}:`, error);
   }
 
   const manifest = await timeIt(timings, "writeManifest", async () => {
     const basePacks = parentManifest ? await foldCovers(parentManifest.packs) : [];
-    const value = { version: 1 as const, commit: commitHash, parent: gitParent, seq, packs: [...basePacks, packRef] };
+    const value = { version: 1 as const, commit: commitHash, parent: parentCommitHash, seq, packs: [...basePacks, packRef] };
     await writeManifest(value);
     return value;
   });
@@ -379,6 +395,10 @@ const finishCheckpoint = async (ctx: SaveContext & {
     workspaceDir: dirs.workspaceDir,
     checkpointMeta: latestMeta,
     changes: latestChanges,
+    diffFrom: async (from) => {
+      await ensureCheckpointCommits(checkpointObjectStore, dirs.repoDir, [from, commitHash]);
+      return diffCommitPaths(dirs.repoDir, from, commitHash);
+    },
     scanFiles: async () => ctx.files ?? (await scanWorkspace(dirs.workspaceDir)).files,
   })).then(() => null, (error: unknown) => formatErrorMessage(error));
   if (latestError) console.warn(`[save_checkpoint] failed to refresh latest space=${spaceId} checkpoint=${checkpoint.id}: ${latestError}`);

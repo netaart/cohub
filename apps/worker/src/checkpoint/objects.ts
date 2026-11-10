@@ -1,6 +1,6 @@
 import { mkdir, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runCheckpointGit } from "@cohub/core/checkpoint/storage";
+import { checkpointGitDir, runCheckpointGit } from "@cohub/core/checkpoint/storage";
 import { config } from "../config.js";
 
 export type ObjectBuilder = {
@@ -28,6 +28,10 @@ export async function createObjectBuilder(tmpDir: string): Promise<ObjectBuilder
   await runCheckpointGit(["init", "-q", "--bare", gitDir], { cwd: tmpDir });
   return { tmpDir, env: { GIT_DIR: gitDir, GIT_INDEX_FILE: join(tmpDir, "index") } };
 }
+
+/** Let the builder read objects from the cache repository (read-only, through alternates). */
+export const readFromCache = (builder: ObjectBuilder, repoDir: string) =>
+  writeFile(join(builder.env.GIT_DIR as string, "objects", "info", "alternates"), `${checkpointGitDir(repoDir)}/objects\n`);
 
 const git = (builder: ObjectBuilder, args: string[], input?: string) =>
   runCheckpointGit(args, { cwd: builder.tmpDir, env: builder.env, input });

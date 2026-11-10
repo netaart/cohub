@@ -114,6 +114,7 @@ const { saveCheckpointForSpace } = await import("../src/tasks/save-checkpoint-ta
 const { prepareCheckpointRepo, restoreWorkspaceFromCheckpoint } = await import("../src/checkpoint/restore.js");
 const { compactCheckpointCovers } = await import(`../src/checkpoint/compact.js?real=${Date.now()}`);
 const { loadFileIndex, promoteFileIndex, stageFileIndex } = await import("../src/checkpoint/file-index.js");
+const { ensureCheckpointCommits } = await import("@cohub/core/checkpoint/storage");
 
 after(async () => {
   for (const item of mocks) item.restore();
@@ -243,6 +244,16 @@ test("compaction covers fold into later manifests and keep the closure", async (
   }
   const at16 = compactions.find((entry) => entry.seq === 16);
   assert.ok(at16);
+  // Hydrating a long manifest leaves a bounded number of packs in the cache.
+  const listed = (await manifestOf(last?.commitHash as string)).packs.length;
+  const hydrated = await fromStorage(last?.commitHash as string);
+  const cachePacks = (await readdir(join(hydrated, ".git", "objects", "pack"))).filter((name) => name.endsWith(".pack")).length;
+  assert.ok(listed > 16 && cachePacks <= 16, `${listed} packs listed, ${cachePacks} in the cache`);
+  git(hydrated, "fsck", "--connectivity-only", "--no-dangling", last?.commitHash as string);
+  await writeFile(join(workspace, "one-more.txt"), "1\n");
+  const next = await save("one more");
+  const { installed } = await ensureCheckpointCommits(store, hydrated, [next.commitHash]);
+  assert.equal(installed, 1, "packs merged by a cache repack were downloaded again");
   {
     const built = await compactCheckpointCovers({ spaceId, ...at16 });
     assert.deepEqual(built.built, [1]);
@@ -277,7 +288,7 @@ test("nested git repositories are stored as an incremental bundle chain", async 
   assert.equal(git(join(target, "nested"), "log", "--format=%s", "main"), "two\none");
 });
 
-test("the first save after a pre-v3 parent is a parentless baseline holding its full snapshot", async () => {
+test("the first save after a pre-v3 parent uploads a baseline holding its history, with the parent diff", async () => {
   const legacySpace = "33333333-3333-4333-8333-333333333333";
   const legacyRepo = join(root, "system", legacySpace, "repo");
   await mkdir(join(legacyRepo, "docs"), { recursive: true });
@@ -295,10 +306,13 @@ test("the first save after a pre-v3 parent is a parentless baseline holding its 
   const saved = await save("after upgrade");
   const manifest = await manifestOf(saved.commitHash);
   assert.equal(manifest.seq, 0);
-  assert.equal(manifest.parent, null);
+  assert.equal(manifest.parent, legacyCommit);
   const fresh = await fromStorage(saved.commitHash);
   assert.equal(git(fresh, "show", `${saved.commitHash}:new.md`), "new");
-  assert.equal(git(fresh, "rev-list", "--count", saved.commitHash), "1");
+  assert.equal(git(fresh, "show", `${saved.commitHash}^:docs/old.md`), "old");
+  const meta = state.checkpoints.get(saved.checkpointId)?.meta as { stats: Record<string, number> };
+  assert.equal(meta.stats.addedFileCount, 1);
+  assert.equal(meta.stats.deletedFileCount, 1);
   state.currentSpace = spaceId;
 });
 
@@ -376,7 +390,17 @@ test("trees rebuilt from the index match the workspace, and the diff matches git
   state.currentSpace = spaceId;
 });
 
-test("a fork's first save, with no stat index, leaves the parent diff to the API", async () => {
+test("saves without a usable index or latest still precompute the parent diff git computes", async () => {
+  const diffOf = (id: string) => ((state.checkpoints.get(id)?.meta as { diffs?: { parent?: { summary?: { files: Array<{ status: string; path: string }> } } } } | undefined)?.diffs?.parent?.summary?.files ?? [])
+    .map((file) => `${file.status}\t${file.path}`).sort();
+  const gitDiff = async (parent: string, commit: string) => {
+    const fields = execFileSync("git", ["diff-tree", "-r", "-z", "--no-renames", "--name-status", parent, commit], { cwd: await fromStorage(commit), encoding: "utf8" }).split("\0");
+    const lines: string[] = [];
+    for (let index = 0; index + 1 < fields.length; index += 2) if (!fields[index + 1]?.startsWith(".cohub/system/")) lines.push(`${fields[index]}\t${fields[index + 1]}`);
+    return lines.sort();
+  };
+
+  // A fork's first save: the fork has no stat index.
   const forkSpace = "66666666-6666-4666-8666-666666666666";
   const forkWs = join(root, "storage", forkSpace, "workspace");
   const source = [...state.checkpoints.values()].find((row) => row.spaceId === spaceId) as Row;
@@ -386,11 +410,24 @@ test("a fork's first save, with no stat index, leaves the parent diff to the API
   state.lookup = "";
   await mkdir(forkWs, { recursive: true });
   await writeFile(join(forkWs, "only.txt"), "fork\n");
-  const saved = await save("fork first");
-  const meta = state.checkpoints.get(saved.checkpointId)?.meta as { diffs?: unknown; stats: Record<string, unknown> };
-  assert.equal(meta.diffs, undefined);
-  assert.equal(meta.stats.changedFileCount, undefined);
-  assert.equal((await manifestOf(saved.commitHash)).parent, source.commitHash);
+  const forked = await save("fork first");
+  assert.ok(diffOf(forked.checkpointId).length > 1);
+  assert.deepEqual(diffOf(forked.checkpointId), await gitDiff(source.commitHash, forked.commitHash));
+
+  // A stale latest that still names an older commit: it catches up through diff-tree, not a rebuild.
+  const forkLatest = join(root, "cache", forkSpace, "latest");
+  const metaPath = join(forkLatest, ".cohub/system/checkpoint-meta.v1.json");
+  const staleMeta = await readFile(metaPath, "utf8");
+  await writeFile(join(forkWs, "only.txt"), "fork 2\n");
+  await save("advance");
+  await writeFile(metaPath, staleMeta);
+  await writeFile(join(forkLatest, "marker-not-in-workspace"), "untouched by an incremental update\n");
+  await writeFile(join(forkWs, "second.txt"), "two\n");
+  const stale = await save("stale latest");
+  assert.deepEqual(diffOf(stale.checkpointId), ["A\tsecond.txt"]);
+  assert.equal(await readFile(join(forkLatest, "only.txt"), "utf8"), "fork 2\n");
+  assert.equal(await readFile(join(forkLatest, "second.txt"), "utf8"), "two\n");
+  assert.equal(await readFile(join(forkLatest, "marker-not-in-workspace"), "utf8"), "untouched by an incremental update\n");
   state.currentSpace = spaceId;
 });
 

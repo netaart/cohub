@@ -15,12 +15,21 @@ type Change = { path: string; before: FileIndexEntry | undefined; after: TreeLea
 
 type DiffResult = { summary: PrecomputedDiffSummary; stats: PrecomputedDiffStats; patches: Record<string, CheckpointDiffFilePatchMeta> };
 
+/** The parent diff exactly as git computes it between two commits or trees in `repoDir`. */
+export async function diffInRepo(input: { repoDir: string; base: string; head: string; checkpointId: string; commitHash: string; parentCheckpointId: string | null; parentCommitHash: string | null; assetPaths: Set<string>; spaceId: string; tmpDir: string }): Promise<DiffResult> {
+  const diff = await buildCommitDiffSummary({ repoDir: input.repoDir, checkpointId: input.checkpointId, commitHash: input.head, parentCheckpointId: input.parentCheckpointId, parentCommitHash: input.base, assetPaths: input.assetPaths });
+  const patches = await materializeFilePatches({ repoDir: input.repoDir, parentCommitHash: input.base, commitHash: input.head, files: diff.summary.files, spaceId: input.spaceId, checkpointId: input.checkpointId, tmpDir: input.tmpDir });
+  diff.summary.baseCommitHash = input.parentCommitHash;
+  diff.summary.headCommitHash = input.commitHash;
+  return { ...diff, patches };
+}
+
 /**
  * Diff a save against its parent from the change list: git diffs two small
  * trees holding only the changed paths, so renames, line counts and patches
  * match a full tree diff. Old contents come from `latest`, which holds the
  * parent's files; returns null unless every one hashes to the id the index
- * recorded, and the API then diffs on demand.
+ * recorded, and the caller diffs against the parent's real tree instead.
  */
 export async function diffChanges(input: {
   builder: ObjectBuilder;
@@ -43,10 +52,5 @@ export async function diffChanges(input: {
   if (!oids?.every((oid, index) => oid === old[index]?.before?.oid)) return null;
   const oldTree = await writeTree(input.builder, old.map((change) => ({ path: change.path, mode: (change.before as FileIndexEntry).mode, oid: (change.before as FileIndexEntry).oid })));
   const newTree = await writeTree(input.builder, input.changes.filter((change) => change.after).map((change) => ({ path: change.path, ...(change.after as TreeLeaf) })));
-  const repoDir = input.builder.env.GIT_DIR as string;
-  const diff = await buildCommitDiffSummary({ repoDir, checkpointId: input.checkpointId, commitHash: newTree, parentCheckpointId: input.parentCheckpointId, parentCommitHash: oldTree, assetPaths: input.assetPaths });
-  const patches = await materializeFilePatches({ repoDir, parentCommitHash: oldTree, commitHash: newTree, files: diff.summary.files, spaceId: input.spaceId, checkpointId: input.checkpointId, tmpDir: input.builder.tmpDir });
-  diff.summary.baseCommitHash = input.parentCommitHash;
-  diff.summary.headCommitHash = input.commitHash;
-  return { ...diff, patches };
+  return diffInRepo({ ...input, repoDir: input.builder.env.GIT_DIR as string, base: oldTree, head: newTree, tmpDir: input.builder.tmpDir });
 }

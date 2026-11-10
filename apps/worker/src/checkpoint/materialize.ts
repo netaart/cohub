@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, readdir, readlink, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
+import { runGitWithOutput } from "./git.js";
 import { mapLimit } from "./limit.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH } from "./paths.js";
 import type { ScannedFile } from "./scan.js";
@@ -97,6 +98,20 @@ async function copyPathToLatest(workspaceDir: string, latestDir: string, path: s
   await copyEntryToLatest({ path, absPath, type: st.isSymbolicLink() ? "symlink" : "file" }, latestDir);
 }
 
+/** Workspace paths that differ between two commits, from git in `repoDir`. */
+export async function diffCommitPaths(repoDir: string, from: string, to: string) {
+  const { stdout } = await runGitWithOutput(["diff-tree", "-r", "-z", "--no-renames", "--name-status", from, to], repoDir);
+  const fields = stdout.split("\0");
+  const upserts: string[] = [];
+  const deletes: string[] = [];
+  for (let index = 0; index + 1 < fields.length; index += 2) {
+    const path = fields[index + 1] as string;
+    if (path.startsWith(".cohub/system/")) continue;
+    (fields[index] === "D" ? deletes : upserts).push(path);
+  }
+  return { upserts, deletes };
+}
+
 /**
  * Point latest at a new commit. When latest holds the commit the change list
  * was taken against, only those paths are copied or removed; otherwise it is
@@ -108,12 +123,20 @@ export async function refreshLatest(input: {
   workspaceDir: string;
   checkpointMeta: Record<string, unknown> & { commitHash: string };
   changes: { from: string | null; upserts: string[]; deletes: string[] } | null;
+  /** Paths that differ between latest's commit and the new one, when the change list does not apply. */
+  diffFrom: (from: string) => Promise<{ upserts: string[]; deletes: string[] } | null>;
   scanFiles: () => Promise<ScannedFile[]>;
 }) {
   const current = await readLatestCommit(input.latestDir);
   if (current === input.checkpointMeta.commitHash) return { mode: "current" as const, copied: 0, deleted: 0 };
-  const { changes } = input;
-  if (changes && current !== null && current === changes.from) {
+  let changes: { upserts: string[]; deletes: string[] } | null = input.changes && current !== null && current === input.changes.from ? input.changes : null;
+  if (!changes && current !== null) {
+    changes = await input.diffFrom(current).catch((error: unknown) => {
+      console.warn(`[checkpoint] incremental latest update failed, rebuilding: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+  }
+  if (changes) {
     await writeLatestMetaFile(input.latestDir, { incomplete: true });
     for (const path of changes.deletes) await removeWithEmptyParents(input.latestDir, path);
     await mapLimit(changes.upserts, COPY_CONCURRENCY, (path) => copyPathToLatest(input.workspaceDir, input.latestDir, path));
