@@ -143,7 +143,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     ...(gpu && owners.length ? { shaders: { renderer, owners, layers: options.shaderLayers } } : {}),
   });
 
-  const flattened = renderer.type === RendererType.CANVAS ? flattenBoardEffects(renderer, exportScene.root, plan.scale) : null;
+  const flattened = renderer.type === RendererType.CANVAS ? flattenBoardEffects(renderer, exportScene.root, plan.scale, new Rectangle(0, 0, plan.width, plan.height)) : null;
   try {
     const texture = renderer.textureGenerator.generateTexture({
       target: exportScene.root,

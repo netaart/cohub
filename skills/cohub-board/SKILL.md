@@ -97,9 +97,10 @@ cohub boards apply <board> -i -                # patch from stdin
 ```
 
 - Fields merge, arrays replace, `null` deletes, anything unmentioned stays.
-- `--replace` makes the document equal to the patch; anything it leaves out is deleted.
-  First run `cohub boards diff <board> --from <version you read>` to see what others
-  changed since (cards moved by someone playing on the web), and keep it.
+- `--replace` makes the document equal to the patch; anything it leaves out is deleted,
+  so a Board with items needs `--base-version <n>`, the version you read. First run
+  `cohub boards diff <board> --from <version you read>` to see what others changed
+  since (cards moved by someone playing on the web), and keep it.
 - Deleting a referenced item fails and lists the references; `--cascade` also
   deletes its children and tracks.
 - Concurrent writes merge; `--base-version <n>` fails instead — use it when
@@ -278,7 +279,7 @@ cohub boards export <board> -o /tmp/board.png
 cohub boards export <board> --items a,b -o /tmp/part.png       # or --frame <id>, --rect x,y,w,h
 cohub boards export <board> --frame s2 -o /tmp/page.png        # the frame as a page, its shaders included
 cohub boards export <board> --animation intro --at 1s,5s,9s --camera --size 1600x900 -o /tmp/preview-%d.png
-cohub boards export <board> --animation intro --at 0:10s:40ms --camera -o /tmp/intro.mp4
+cohub boards export <board> --animation intro --at 0:10s --fps 24 --camera -o /tmp/intro.mp4
 ```
 
 `--size` sets the output pixels of a camera export; it never sizes frames.

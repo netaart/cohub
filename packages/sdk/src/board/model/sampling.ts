@@ -41,9 +41,8 @@ export function createBoardAnimationSampler(
     }
     return value;
   }
-  let current:
-    | { time: number; value: ReturnType<typeof sample> & { scene: ReturnType<typeof buildBoardScene> } }
-    | undefined;
+  type Sampled = ReturnType<typeof sample> & { readonly scene: ReturnType<typeof buildBoardScene> };
+  let current: { time: number; value: Sampled } | undefined;
   return {
     frameAt(id: string, time: number): BoardFrame | undefined {
       const key = `${time}:${id}`;
@@ -68,7 +67,14 @@ export function createBoardAnimationSampler(
     at(time: number) {
       if (current?.time === time) return current.value;
       const sampled = stateAt(time);
-      const value = { ...sampled, scene: buildBoardScene(sampled.document) };
+      let scene: ReturnType<typeof buildBoardScene> | undefined;
+      const value: Sampled = {
+        ...sampled,
+        get scene() {
+          scene ??= buildBoardScene(sampled.document);
+          return scene;
+        },
+      };
       current = { time, value };
       return value;
     },

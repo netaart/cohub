@@ -1,6 +1,7 @@
 import {
 	type BoardCameraState,
 	type BoardViewport,
+	boardZoomFloor,
 	cameraForRect,
 	cameraForState,
 	FIT_PADDING,
@@ -59,6 +60,14 @@ export function createCameraModule(ctx: EditorContext) {
 	let motion: Motion | null = null;
 	let frame = 0;
 	let followed: BoardViewport | null = null;
+	let floor: { scene: typeof state.scene; width: number; height: number; zoom: number } | null = null;
+
+	function zoomFloor(zoom = state.camera.zoom): number {
+		const { scene, surfaceSize } = state;
+		if (floor?.scene !== scene || floor.width !== surfaceSize.width || floor.height !== surfaceSize.height)
+			floor = { scene, ...surfaceSize, zoom: boardZoomFloor(ctx.query.contentBounds(), surfaceSize) };
+		return Math.min(floor.zoom, zoom);
+	}
 
 	function move(viewport: BoardViewport) {
 		state.camera = normalizeViewport(viewport, state.camera);
@@ -174,7 +183,7 @@ export function createCameraModule(ctx: EditorContext) {
 	function zoomAt(point: ScreenPoint, factor: number, animate = false) {
 		if (!ctx.frames.release()) return;
 		takeCameraControl();
-		const target = zoomAround(state.camera, point, state.camera.zoom * factor);
+		const target = zoomAround(state.camera, point, state.camera.zoom * factor, zoomFloor());
 		if (animate) animateCamera(target);
 		else {
 			stop();
@@ -193,9 +202,9 @@ export function createCameraModule(ctx: EditorContext) {
 	function zoomBy(point: ScreenPoint, factor: number, smooth = false) {
 		if (!ctx.frames.release()) return;
 		takeCameraControl();
-		if (smooth) return glide((base) => zoomAround(base, point, base.zoom * factor), point);
+		if (smooth) return glide((base) => zoomAround(base, point, base.zoom * factor, zoomFloor(base.zoom)), point);
 		stop();
-		move(zoomAround(state.camera, point, state.camera.zoom * factor));
+		move(zoomAround(state.camera, point, state.camera.zoom * factor, zoomFloor()));
 	}
 
 	function fling(vx: number, vy: number) {
@@ -277,6 +286,7 @@ export function createCameraModule(ctx: EditorContext) {
 		cameraState,
 		restoreCameraState,
 		zoomAt,
+		zoomFloor,
 		zoomIn: () => zoomAt(surfaceCenter(), ZOOM_STEP, true),
 		zoomOut: () => zoomAt(surfaceCenter(), 1 / ZOOM_STEP, true),
 		resetZoom: () => {

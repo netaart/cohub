@@ -7,7 +7,6 @@ import {
 	type BoardSceneItem,
 	type BoardViewport,
 	appendBoardDrawSamples,
-	clampZoom,
 	createBoardItemId,
 	frameHandlePosition,
 	normalizeRotation,
@@ -693,7 +692,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		if (!a || !b || !pinch) return;
 		const distance = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
 		const midpoint = screenPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
-		const zoomed = zoomAround(state.camera, midpoint, clampZoom(pinch.zoom * (distance / pinch.distance)));
+		const zoomed = zoomAround(state.camera, midpoint, pinch.zoom * (distance / pinch.distance), ctx.camera.zoomFloor(pinch.zoom));
 		const next = panBy(zoomed, midpoint.x - pinch.midpoint.x, midpoint.y - pinch.midpoint.y);
 		if (ctx.frames.view()?.present) ctx.camera.show(next, false);
 		else ctx.camera.setCamera(next);

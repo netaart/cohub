@@ -1,4 +1,4 @@
-import { boardTextureEdge, boardTexturePixels } from "./asset-key.js";
+import { boardMediaNaturalSize, boardTextureEdge, boardTexturePixels } from "./asset-key.js";
 import type { BoardSceneItem as BoardItem } from "./scene.js";
 
 export const BOARD_EXPORT_TEXTURE_BYTES = 256 * 1024 ** 2;
@@ -16,7 +16,8 @@ export function boardTextureBytes(item: BoardItem, scale: number): number {
   const grow = Number.isFinite(edge) && pixels > 0 ? edge / pixels : 1;
   const width = Math.ceil((item.frame.width / (crop?.w || 1)) * scale * grow);
   const height = Math.ceil((item.frame.height / (crop?.h || 1)) * scale * grow);
-  return width * height * 4;
+  const natural = boardMediaNaturalSize(item);
+  return Math.min(width * height, natural ? natural.width * natural.height : Number.POSITIVE_INFINITY) * 4;
 }
 
 export function selectBoardExportAssets(

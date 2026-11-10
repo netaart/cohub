@@ -432,7 +432,7 @@ export async function applyBoardInTransaction(
 
 	const changed = summarizeBoardDelta(applied.after);
 	if (apply.dryRun) {
-		return { result: { mutationId, status: "validated", replayed: false, version: board.version, changed, diagnostics: [] } };
+		return { result: { mutationId, status: "validated", replayed: false, version: board.version, changed, diagnostics: applied.diagnostics } };
 	}
 
 	const now = new Date();
@@ -464,7 +464,7 @@ export async function applyBoardInTransaction(
 		playbackChanged = true;
 	}
 
-	const result: BoardApplyResult = { mutationId, status: "applied", replayed: false, version, changed, diagnostics: [] };
+	const result: BoardApplyResult = { mutationId, status: "applied", replayed: false, version, changed, diagnostics: applied.diagnostics };
 	await tx.insert(boardTransactions).values({
 		boardId: board.id,
 		txId: mutationId,

@@ -260,7 +260,7 @@ function registerExportCommand(boards: Command): void {
   withJson(boards.command("export <board>")
     .description("Render a Board to an image, or an animation to a frame sequence")
     .requiredOption("-o, --out <file>", "Output file; the extension picks the format. Sequences need %d, e.g. frames/%04d.png")
-    .option("--at <time>", "A moment, comma-separated moments, or start:end:step")
+    .option("--at <time>", "A moment, comma-separated moments, start:end:step, or start:end with --fps")
     .option("--camera", "Follow the animation camera")
     .option("--size <widthxheight>", "Camera output in pixels, the animation's viewport by default; frames keep their own size")
     .option("--animation <id>", "Animation the --at times refer to")
@@ -273,7 +273,7 @@ function registerExportCommand(boards: Command): void {
     .option("--paper <mode>", "Output paper: paper or transparent", "paper")
     .option("--format <format>", `Override the format (${BOARD_EXPORT_FORMATS.join(", ")}, ${BOARD_VIDEO_FORMATS.join(", ")})`)
     .option("--quality <q>", "JPEG/WebP quality from 0 to 1", "0.92")
-    .option("--fps <rate>", "Video frame rate; defaults to the --at step")
+    .option("--fps <rate>", "Frames a second for --at start:end; a video plays at it (defaults to the --at step)")
     .option("--image-memory <mib>", "Decoded image memory budget in MiB", String(BOARD_EXPORT_IMAGE_MEMORY_MIB))
     .option("--no-images", "Draw placeholders instead of downloading images")
     .option("--renderer <renderer>", "auto draws in Node and uses local Chrome for shaders; canvas or gpu forces one", "auto")
@@ -287,7 +287,7 @@ Boards without shaders never start it. Set COHUB_BOARD_GPU_DAEMON=0 to start one
 
 Examples:
   cohub boards export plan.board -o plan.png
-  cohub boards export plan.board --animation intro --at 0:20s:40ms -o intro.mp4 --async
+  cohub boards export plan.board --animation intro --at 0:20s --fps 24 -o intro.mp4 --async
   cohub boards export plan.board --frame s2 -o slide-2.png
   cohub boards export plan.board --animation lecture --at 4.5s -o moment.png
   cohub boards export plan.board --animation lecture --at 0:6s:40ms -o frames/%04d.png
@@ -303,7 +303,8 @@ page: its fill and shaders, without its outline and label.`)
       process.once("SIGINT", cancel);
       try {
         const out = options.out as string;
-        const times = options.at ? parseBoardTimes(options.at) : undefined;
+        const rate = options.fps ? parseNumber(options.fps, "--fps", { min: 0.01, max: 240 }) : undefined;
+        const times = options.at ? parseBoardTimes(options.at, "--at", 10_000, rate) : undefined;
         let camera: { width: number; height: number } | "viewport" | undefined;
         if (options.camera) {
           if (!options.animation || !times) throw new Error("--camera needs --animation and --at.");
@@ -329,7 +330,7 @@ page: its fill and shaders, without its outline and label.`)
         if (videoFormat) {
           if (!times || times.length < 2) throw new Error("Video export needs an --at range.");
           const step = (times[1] as number) - (times[0] as number);
-          const fps = options.fps ? parseNumber(options.fps, "--fps", { min: 0.01, max: 240 }) : 1000 / step;
+          const fps = rate ?? 1000 / step;
           if (existsSync(out) && !options.force) throw new Error(`${out} already exists; use --force to replace it.`);
           await mkdir(dirname(out), { recursive: true });
           const { runBoardVideoExport } = await import("../board-export.js");
@@ -681,7 +682,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
   withJson(boards.command("apply <board> [patch]")
     .description("Merge a patch into the Board: fields merge, null deletes")
     .option("-i, --input <file>", "Patch JSON; - for stdin")
-    .option("--replace", "Make the document equal to the input instead of merging")
+    .option("--replace", "Make the document equal to the input instead of merging; a Board with items needs --base-version")
     .option("--cascade", "Also delete children and tracks of deleted items, and tracks of deleted Board scripts")
     .option("--dry-run", "Validate without writing")
     .option("--base-version <n>", "Fail if the Board moved past this version")
@@ -696,13 +697,20 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
         const spaceId = await resolveSpace(boards);
         const board = await boardClient(boards, target, spaceId);
         const read = await readPatch(inline, options.input, BOARD_TRANSACTION_INPUT_MAX_BYTES);
+        let baseVersion = options.baseVersion === undefined ? undefined : parseNumber(options.baseVersion, "--base-version", { min: 0, integer: true });
+        if (options.replace && !options.dryRun && baseVersion === undefined) {
+          const current = await board.get({ only: ["items"], limit: 1 });
+          if (Object.keys(current.items ?? {}).length)
+            throw new Error(`--replace deletes everything the input leaves out of "${current.title ?? current.id}" (${current.id}, version ${current.version}). Pass --base-version ${current.version} to replace it.`);
+          baseVersion = current.version;
+        }
         const patch = await settleBoardPatch(spaceId, read, async (items) =>
           options.replace ? {} : board.get({ only: ["items"], items }).then((result) => result.items ?? {}, () => null));
         const result = await board.apply(patch, {
           ...(options.replace ? { replace: true } : {}),
           ...(options.cascade ? { cascade: true } : {}),
           ...(options.dryRun ? { dryRun: true } : {}),
-          ...(options.baseVersion === undefined ? {} : { baseVersion: parseNumber(options.baseVersion, "--base-version", { min: 0, integer: true }) }),
+          ...(baseVersion === undefined ? {} : { baseVersion }),
           ...(options.mutationId ? { mutationId: options.mutationId } : {}),
         });
         if (jsonRequested(options)) return outJson(result);

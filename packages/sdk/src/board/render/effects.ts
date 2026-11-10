@@ -10,6 +10,7 @@ import {
 	GlProgram,
 	type ICanvas,
 	ImageSource,
+	Matrix as Transform,
 	Rectangle,
 	type Renderer,
 	type RenderSurface,
@@ -372,7 +373,7 @@ const MAX_FLAT_PIXELS = 16_000_000;
 const MAX_FLAT_EDGE = 8192;
 
 /** Canvas filters apply per draw call, so exports draw blurred and shadowed layers into one picture first. */
-export function flattenBoardEffects(renderer: Renderer, root: Container, resolution: number): () => void {
+export function flattenBoardEffects(renderer: Renderer, root: Container, resolution: number, view: Rectangle): () => void {
 	const textures: Texture[] = [];
 	const visit = (node: Container) => {
 		for (const child of [...node.children]) visit(child);
@@ -390,12 +391,20 @@ export function flattenBoardEffects(renderer: Renderer, root: Container, resolut
 		target.updateLocalTransform();
 		const cast = parts.shadow && localCast(parts.shadow.cast, target.localTransform);
 		const grow = (parts.blur?.radius ?? 0) * 3 + (cast ? cast.blur * 1.5 + Math.max(Math.abs(cast.x), Math.abs(cast.y)) : 0);
-		const frame = new Rectangle(bounds.x - grow, bounds.y - grow, bounds.width + grow * 2, bounds.height + grow * 2);
+		const whole = new Rectangle(bounds.x - grow, bounds.y - grow, bounds.width + grow * 2, bounds.height + grow * 2);
+		const frame = visiblePart(target, whole, view, grow);
+		if (!frame) {
+			restore();
+			target.visible = false;
+			return;
+		}
 		const scale = Math.min(resolution, Math.sqrt(MAX_FLAT_PIXELS / (frame.width * frame.height)), MAX_FLAT_EDGE / Math.max(frame.width, frame.height));
 		const picture = renderer.generateTexture({ target, frame, resolution: scale, antialias: true });
 		restore();
-		const flat = paintEffects(renderer.texture.generateCanvas(picture), parts.blur?.radius ?? 0, cast, scale);
-		picture.destroy(true);
+		const pixels = renderer.texture.generateCanvas(picture);
+		releaseTexture(picture);
+		const flat = paintEffects(pixels, parts.blur?.radius ?? 0, cast, scale);
+		releaseCanvas(pixels);
 		textures.push(flat);
 		const layer = new Container({ label: "board-flat-effects" });
 		layer.setFromMatrix(target.localTransform);
@@ -406,8 +415,30 @@ export function flattenBoardEffects(renderer: Renderer, root: Container, resolut
 	};
 	visit(root);
 	return () => {
-		for (const texture of textures) texture.destroy(true);
+		for (const texture of textures) releaseTexture(texture);
 	};
+}
+
+function visiblePart(target: Container, frame: Rectangle, view: Rectangle, grow: number): Rectangle | null {
+	const toLocal = target.getGlobalTransform(new Transform(), false).invert();
+	const corners = [toLocal.apply({ x: view.x, y: view.y }), toLocal.apply({ x: view.right, y: view.y }), toLocal.apply({ x: view.x, y: view.bottom }), toLocal.apply({ x: view.right, y: view.bottom })];
+	const left = Math.max(frame.x, Math.min(...corners.map((point) => point.x)) - grow);
+	const top = Math.max(frame.y, Math.min(...corners.map((point) => point.y)) - grow);
+	const right = Math.min(frame.right, Math.max(...corners.map((point) => point.x)) + grow);
+	const bottom = Math.min(frame.bottom, Math.max(...corners.map((point) => point.y)) + grow);
+	return right > left && bottom > top ? new Rectangle(left, top, right - left, bottom - top) : null;
+}
+
+// V8 does not see native canvas memory; release it once drawn.
+function releaseCanvas(canvas: { width: number; height: number }) {
+	canvas.width = 1;
+	canvas.height = 1;
+}
+
+function releaseTexture(texture: Texture) {
+	const canvas = texture.source.resource as ICanvas | undefined;
+	texture.destroy(true);
+	if (canvas?.getContext) releaseCanvas(canvas);
 }
 
 function localCast(cast: ShadowCast, transform: { a: number; b: number; c: number; d: number }): ShadowCast {
@@ -440,9 +471,11 @@ function paintEffects(picture: ICanvas, blur: number, cast: ShadowCast | undefin
 		out.context.filter = `blur(${(cast.blur / 2) * resolution}px)`;
 		out.context.globalAlpha = cast.alpha;
 		out.context.drawImage(silhouette.canvas as unknown as CanvasImageSource, cast.x * resolution, cast.y * resolution);
+		releaseCanvas(silhouette.canvas);
 		out.context.filter = "none";
 		out.context.globalAlpha = 1;
 	}
 	out.context.drawImage(content, 0, 0);
+	if (content !== (picture as unknown as CanvasImageSource)) releaseCanvas(content as HTMLCanvasElement);
 	return new Texture({ source: new ImageSource({ resource: out.canvas as unknown as HTMLCanvasElement, resolution }) });
 }

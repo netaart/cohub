@@ -360,7 +360,8 @@ cohub -s <spaceId> boards apply <boardId> -i changes.json
 ```
 
 Group a whole change into one patch so it lands as one version. `--replace` makes
-the document equal to the patch instead of merging; `--cascade` also deletes
+the document equal to the patch instead of merging, and needs `--base-version` on a
+Board that has items; `--cascade` also deletes
 children and the tracks targeting a deleted item:
 
 ```bash

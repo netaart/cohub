@@ -271,8 +271,8 @@ export async function runBoardVideoExport(options: BoardVideoExportOptions): Pro
   const step = (times[1] as number) - (times[0] as number);
   if (!Number.isFinite(step) || step <= 0) throw new Error("Video export needs an increasing --at range.");
   const derivedFps = 1000 / step;
-  if (Math.abs(options.fps - derivedFps) > 0.01) throw new Error(`--fps must match the --at step (${derivedFps.toFixed(3)} fps).`);
-  if (times.some((time, index) => index > 0 && Math.abs(time - (times[index - 1] as number) - step) > 0.001)) throw new Error("Video export needs evenly spaced times.");
+  if (Math.abs(1000 / options.fps - step) > 0.0015) throw new Error(`--fps must match the --at step (${derivedFps.toFixed(3)} fps).`);
+  if (times.some((time, index) => index > 0 && Math.abs(time - (times[index - 1] as number) - step) > 0.0015)) throw new Error("Video export needs evenly spaced times.");
   await execFile("ffmpeg", ["-version"], { signal: options.signal }).catch(() => { throw new Error("Video export needs ffmpeg. Install ffmpeg and try again."); });
   const document = options.document ?? await settleBoardDocument(options.spaceId, (await loadBoardDocument(options.spaceId, options.target)).document);
   const tempDir = await mkdtemp(join(tmpdir(), "cohub-board-export-"));
