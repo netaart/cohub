@@ -40,7 +40,7 @@ turns a user's local folder into the sandbox of a Space:
   - The prompt lists only skills whose files a held mount contains, and is rebuilt when the connection or a held revision changes
   - The owner's user skills go only to a Runtime the Space owner registered. Mount files are private to the OS user (0700/0600), and sandboxd clears them at start and on exit
   - The fence exposes those directories read-only at their cloud paths, also through a workspace symlink. On a local sandbox fd/rg run from the mapped root with root-relative path arguments, since only cwd is mapped
-  - Shell commands run on the host, so the prompt lists each sandbox path's host path
+  - Shell commands run on the host, so the prompt lists each sandbox path's host path, and on POSIX hosts gives skill and Mod locations as host paths, which file tools accept too (Windows keeps sandbox paths, since file tools take only POSIX paths)
   - A Runtime without the `mounts` capability gets project skills only; an unreachable Runtime gets a prompt without project files, rebuilt on the next Turn
 - CLI: `cohub runtime up <dir>` creates and remembers the directory's Space on first use, then reuses it on later starts, while supervising the Workspace bridge and local Harness
 

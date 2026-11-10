@@ -75,7 +75,8 @@ export type SessionGenerationState = {
 	lastPatchAt: number | null;
 };
 
-const PERSIST_WRITE_DEBOUNCE_MS = 250;
+// Each write clones the whole turn; recovery refetches the server snapshot anyway.
+const PERSIST_WRITE_DEBOUNCE_MS = 2000;
 const MAX_PERSISTED_ERROR_LENGTH = 1000;
 const TERMINAL_STATUSES = new Set([
 	"idle",

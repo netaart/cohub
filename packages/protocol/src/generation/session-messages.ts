@@ -12,6 +12,7 @@ export type GenerationMessageMeta = {
   model: string;
   provider?: string | null;
   parameters: Record<string, unknown>;
+  llm?: false;
 };
 
 function imageBlocks(content: unknown[], attachmentKind: "generation-input" | "generation-output") {
@@ -106,6 +107,7 @@ export function buildGenerationResultMessage(input: {
       model: input.model,
       provider: input.provider ?? null,
       parameters,
+      llm: false,
     },
   };
 }

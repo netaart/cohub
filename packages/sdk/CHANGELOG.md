@@ -1,5 +1,35 @@
 # @neta-art/cohub
 
+## 13.16.0
+
+### Minor Changes
+
+- e0fece3: Board scripts read the device as the browser reports it. Listening to `browser:devicemotion`, `browser:deviceorientation`, `browser:gamepads`, `browser:audio` (mono PCM), `browser:video` (camera frames as ImageBitmaps) or `browser:position` starts that source while the Board is on screen, and stops it when no script listens. While one runs, the screen stays on. `ctx.env` reports the mode, pointer, orientation, screen angle, reduced motion, locale and the state of each source, and `envchange` reports changes. iOS asks for motion on the viewer's first tap. The microphone, camera and location also need the viewer's consent for each Board. `cohub boards examples senses --module` prints optional helpers for screen-axis motion and audio level, pitch, onsets and spectrum. Live scripts may `fetch()` and open WebSockets; exports have no network. In play, keys without modifiers reach listening scripts unless a field or button has focus. `navigator.vibrate`, `haptics` and `fullscreen` are available as capabilities.
+  
+  Record input in a Board saves what the scripts received to `<board>.inputs/`. `cohub boards export --inputs` and video exports replay it. `cohub boards simulate` accepts `{"input": …, "data": …}` and `{"inputs": …}` steps, and the test harness adds `device`, `input()` and `replay()`. The stage adds `senseConsent`, `locale`, `senses`, `key()`, `whenGesture()` and `recordInputs()`.
+  
+  Apps can declare `location` in `cohub:devices`. Motion sensors, gamepads and the screen wake lock work in interactive App frames without declaring anything. `client.app.devices.haptics(kind)` asks the host to vibrate, or vibrates directly when the App runs on its own origin.
+- bdd8f65: Displays record and replay. `cohub spaces displays record start | stop | ls` records a screen into the Space folder (`.cache/cohub/displays/recordings/`) from the video it already streams, with no second encoder; `--auto` records agents' plans instead; `record stop --auto` ends that. Recording pauses while the screen reports a focused password field, or a person steps in. The SDK adds `displays.record()`, `stopRecording()`, `recordings()` and `steps(turnId)`, the plans a Turn ran, which sandboxd logs for replay.
+  
+  `cohub spaces displays windows` lists a desktop's windows, and `--window <id>` on `look`, `capture`, `tree` and `act` reads one alone, in its own coordinates. A plan that stops now says what to do next: sandboxd adds `stopped.hint`, which names no command, and `stopped.next` (`look`, `lookImage` or `list`), a read safe to run as is, which the CLI prints as a command. A step that set a field says `readBack` when the field holds the text. Live sessions get the agent's pointer (`pointer` events) and the other viewers' cursors (`cursors`, `sendCursor()`).
+  
+  Needs a sandboxd with display recording; older ones answer `display_unsupported`.
+- 97d01a2: Space file reads that deliver through the CDN now carry `downloadUrl`, the same bytes served as an attachment under the file's name; checkpoint asset reads carry a signed equivalent. `files.saveSource(path)` (and the checkpoint variant) resolves how to save a file without buffering it when an attachment URL exists, and `spaceFileSaveSource(file)` derives it from a read you already have.
+  
+  Hosts: `files.save` now takes a caller-chosen `id`, resolves with `{ location, revealable }` once the file is on disk (a dismissed system sheet rejects as `canceled`), and streams `files.progress` events; `files.reveal({ id })` shows the saved file.
+- 6d2b802: `files.read()` on a cloud Space can now return a `SpaceFsSymlink` (`kind: "symlink"`) instead of failing with `symlink_not_supported`. It carries the link text as `target` and, when that resolves inside the workspace, a workspace-relative `targetPath`. The target itself is never read. Use `isSpaceFsSymlink()` to tell it apart; `symlinkReadError()` builds the old error for readers that need file content. Local Spaces still follow symlinks. `cohub spaces files cat --json` prints this description for a cloud symlink.
+  
+  Hosts: callers of `files.read()` that branch on `"content" in file` to detect a preparing file must check `isSpaceFsSymlink()` first.
+
+### Patch Changes
+
+- 3b0ecb3: Session patches copy only the content blocks they change. Untouched blocks keep their identity across generation `state` events instead of being deep-cloned on every patch.
+- e5b4b02: The SDK is much smaller in bundled apps. Zod is now imported as a namespace, so bundlers drop the parts that go unused, such as locales and JSON Schema. Gzipped through esm.sh-style bundling, the root entry drops from 206 KB to 142 KB, `/host-bridge` from 95 KB to 33 KB and `/board` from 166 KB to 104 KB. Every entry now comes from a single build that emits each module once. Before, the root entry carried its own copy of the Board model and layout, so text measurement installed by `/board/render` never reached `BoardClient`.
+  
+  `cohub --help` now prints from the command list captured at build time and loads no command code: about 70 ms instead of about 220 ms. `cohub --version` skips the command parser. `boards` and `runtime` commands load export rendering and the Runtime supervisor only when they need them, and the GPU export page ships minified. Together these make the package 1.4 MB smaller.
+  
+  Hosts: no action
+
 ## 13.15.0
 
 ### Minor Changes

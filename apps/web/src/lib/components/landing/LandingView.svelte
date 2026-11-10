@@ -18,6 +18,7 @@ import LandingTerminal from "$lib/components/landing/LandingTerminal.svelte";
 import PublicHeader from "$lib/components/PublicHeader.svelte";
 import {
 	hostOwnsCredentials,
+	isHosted,
 	markHostReady,
 	readyHost,
 } from "$lib/host-bridge";
@@ -29,13 +30,11 @@ import { m } from "$lib/paraglide/messages.js";
 import { CLI_NPM_URL, REPO_URL, repoFileUrl } from "$lib/project";
 import { canonicalUrl as buildCanonical } from "$lib/seo";
 import { authStore } from "$lib/stores/auth.svelte";
-import { getResolvedTheme } from "$lib/theme.svelte";
+import { pinTheme } from "$lib/theme.svelte";
 
 // Marketing home renders light regardless of the visitor's app theme, so every
 // product capture can be shot once. app.html sets this before first paint too.
-if (browser) {
-	document.documentElement.setAttribute("data-theme", "light");
-}
+const releaseTheme = browser && !isHosted() ? pinTheme("light") : null;
 
 /**
  * SSR always emits marketing HTML (SEO / no-JS).
@@ -85,8 +84,6 @@ async function handlePrimaryCta() {
 }
 
 onMount(() => {
-	document.documentElement.setAttribute("data-theme", "light");
-
 	void (async () => {
 		// A native host signs in outside the page, so it leaves no local hint.
 		const maybeSession =
@@ -121,8 +118,7 @@ onMount(() => {
 
 	return () => {
 		document.documentElement.removeAttribute("data-home-redirect");
-		// Restore the visitor's own theme when leaving marketing.
-		document.documentElement.setAttribute("data-theme", getResolvedTheme());
+		releaseTheme?.();
 	};
 });
 

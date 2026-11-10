@@ -6,8 +6,8 @@ import {
 	type RenderOptions,
 	render,
 } from "pele/lazy";
-import { triggerBlobDownload } from "$lib/browser-download";
 import { mediaLightbox } from "$lib/components/media-lightbox.svelte";
+import { saveFile } from "$lib/downloads.svelte";
 
 export type MermaidLabels = {
 	zoomIn: string;
@@ -158,7 +158,14 @@ async function downloadPng(canvas: HTMLElement, source: string) {
 	const blob = await new Promise<Blob | null>((resolve) =>
 		output.toBlob(resolve, "image/png"),
 	);
-	if (blob) triggerBlobDownload(blob, "diagram.png");
+	if (blob) {
+		await saveFile({
+			key: `diagram:${source}`,
+			name: "diagram.png",
+			mimeType: "image/png",
+			source: () => ({ kind: "blob", blob }),
+		});
+	}
 }
 
 function createToolbar(

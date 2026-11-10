@@ -10,6 +10,7 @@ import { bodyLimit } from "hono/body-limit";
 import { readFile } from "node:fs/promises";
 import { ensureFsCdnManifest, shouldUseFsCdnForMeta } from "../../space-fs-cdn-cache.js";
 import { FS_CDN_DOWNLOAD_WAIT_TIMEOUT_MS } from "../../space-fs-cdn-constants.js";
+import { cdnDownloadUrl } from "../../space-fs-cdn-policy.js";
 import { getOptionalAuth, useAuth, requireValidId, authzDenied } from "../../lib/middleware.js";
 import { jsonWithEtag } from "../../lib/json-etag.js";
 import { hasPermission } from "../../permissions.js";
@@ -533,7 +534,7 @@ router.get("/download", async (c) => {
     if (shouldUseFsCdnForMeta(meta)) {
       const manifest = await ensureFsCdnManifest(meta, "download_miss", FS_CDN_DOWNLOAD_WAIT_TIMEOUT_MS);
       if (!manifest) return c.json({ message: "file is preparing", retryAfterMs: 2000 }, 202);
-      return c.redirect(manifest.url, 302);
+      return c.redirect(cdnDownloadUrl(manifest.url), 302);
     }
     const buffer = await readFile(info.target);
     return c.body(new Uint8Array(buffer), 200, {

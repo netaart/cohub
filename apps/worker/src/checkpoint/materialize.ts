@@ -1,7 +1,6 @@
 import { constants } from "node:fs";
 import { copyFile, lstat, mkdir, readFile, readdir, readlink, rename, rm, rmdir, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
-import { hasCommit } from "@cohub/core/checkpoint/storage";
 import { runGitWithOutput } from "./git.js";
 import { mapLimit } from "./limit.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH } from "./paths.js";
@@ -9,7 +8,6 @@ import type { ScannedFile } from "./scan.js";
 
 /** NFS copies and stats are latency-bound; keep enough in flight without queueing the whole tree. */
 const COPY_CONCURRENCY = Number(process.env.CHECKPOINT_COPY_CONCURRENCY ?? 64);
-const SYSTEM_PREFIX = ".cohub/system/";
 
 const metaDir = dirname(CHECKPOINT_META_PATH);
 
@@ -100,48 +98,50 @@ async function copyPathToLatest(workspaceDir: string, latestDir: string, path: s
   await copyEntryToLatest({ path, absPath, type: st.isSymbolicLink() ? "symlink" : "file" }, latestDir);
 }
 
-/**
- * Bring latest from `fromCommit` to `toCommit` by copying only the paths
- * whose tree entries differ. The meta is cleared first, so an interrupted
- * update makes the next refresh rebuild in full.
- */
-async function applyLatestDiff(input: { latestDir: string; workspaceDir: string; repoDir: string; fromCommit: string; toCommit: string; checkpointMeta: Record<string, unknown> }) {
-  const { stdout } = await runGitWithOutput(["diff-tree", "-r", "-z", "--no-renames", "--name-status", input.fromCommit, input.toCommit], input.repoDir);
+/** Workspace paths that differ between two commits, from git in `repoDir`. */
+export async function diffCommitPaths(repoDir: string, from: string, to: string) {
+  const { stdout } = await runGitWithOutput(["diff-tree", "-r", "-z", "--no-renames", "--name-status", from, to], repoDir);
   const fields = stdout.split("\0");
-  const deletes: string[] = [];
   const upserts: string[] = [];
+  const deletes: string[] = [];
   for (let index = 0; index + 1 < fields.length; index += 2) {
-    const status = fields[index] as string;
     const path = fields[index + 1] as string;
-    if (path.startsWith(SYSTEM_PREFIX)) continue;
-    (status === "D" ? deletes : upserts).push(path);
+    if (path.startsWith(".cohub/system/")) continue;
+    (fields[index] === "D" ? deletes : upserts).push(path);
   }
-  await writeLatestMetaFile(input.latestDir, { incomplete: true });
-  for (const path of deletes) await removeWithEmptyParents(input.latestDir, path);
-  await mapLimit(upserts, COPY_CONCURRENCY, (path) => copyPathToLatest(input.workspaceDir, input.latestDir, path));
-  await writeLatestMetaFile(input.latestDir, input.checkpointMeta);
-  return { mode: "diff" as const, copied: upserts.length, deleted: deletes.length };
+  return { upserts, deletes };
 }
 
 /**
- * Point latest at `commitHash`. Any complete commit latest already holds is a
- * valid base for an incremental update; otherwise latest is rebuilt from a scan.
+ * Point latest at a new commit. When latest holds the commit the change list
+ * was taken against, only those paths are copied or removed; otherwise it is
+ * rebuilt from a scan. The meta is cleared first, so an interrupted update
+ * makes the next refresh rebuild in full.
  */
 export async function refreshLatest(input: {
   latestDir: string;
   workspaceDir: string;
-  repoDir: string;
-  commitHash: string;
-  checkpointMeta: Record<string, unknown>;
+  checkpointMeta: Record<string, unknown> & { commitHash: string };
+  changes: { from: string | null; upserts: string[]; deletes: string[] } | null;
+  /** Paths that differ between latest's commit and the new one, when the change list does not apply. */
+  diffFrom: (from: string) => Promise<{ upserts: string[]; deletes: string[] } | null>;
   scanFiles: () => Promise<ScannedFile[]>;
 }) {
-  const fromCommit = await readLatestCommit(input.latestDir);
-  if (fromCommit && await hasCommit(input.repoDir, fromCommit)) {
-    const applied = await applyLatestDiff({ ...input, fromCommit, toCommit: input.commitHash }).catch((error: unknown) => {
+  const current = await readLatestCommit(input.latestDir);
+  if (current === input.checkpointMeta.commitHash) return { mode: "current" as const, copied: 0, deleted: 0 };
+  let changes: { upserts: string[]; deletes: string[] } | null = input.changes && current !== null && current === input.changes.from ? input.changes : null;
+  if (!changes && current !== null) {
+    changes = await input.diffFrom(current).catch((error: unknown) => {
       console.warn(`[checkpoint] incremental latest update failed, rebuilding: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     });
-    if (applied) return applied;
+  }
+  if (changes) {
+    await writeLatestMetaFile(input.latestDir, { incomplete: true });
+    for (const path of changes.deletes) await removeWithEmptyParents(input.latestDir, path);
+    await mapLimit(changes.upserts, COPY_CONCURRENCY, (path) => copyPathToLatest(input.workspaceDir, input.latestDir, path));
+    await writeLatestMetaFile(input.latestDir, input.checkpointMeta);
+    return { mode: "diff" as const, copied: changes.upserts.length, deleted: changes.deletes.length };
   }
   const files = await input.scanFiles();
   await materializeLatest({ latestDir: input.latestDir, files, checkpointMeta: input.checkpointMeta });

@@ -4,6 +4,7 @@ import type { SpaceFsFileResponse, WorkContent } from "@neta-art/cohub";
 import { Download } from "lucide-svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import FileContentPreview from "$lib/components/FileContentPreview.svelte";
+import { saveFile } from "$lib/downloads.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
@@ -57,6 +58,16 @@ const error = $derived(resolved?.error ?? null);
 // Only text needs a follow-up fetch; media renders straight from the CDN URL.
 const loading = $derived(isTextMime(base.mimeType) && !resolved);
 
+function download() {
+	const { url, name, mimeType } = content;
+	void saveFile({
+		key: url,
+		name,
+		mimeType,
+		source: () => ({ kind: "url", url }),
+	});
+}
+
 $effect(() => {
 	const next = base;
 	let cancelled = false;
@@ -76,15 +87,15 @@ $effect(() => {
 			<span class="file-name">{content.name}</span>
 			<span class="file-type">{content.mimeType ?? "application/octet-stream"}</span>
 		</div>
-		<a
+		<button
+			type="button"
 			class="icon-btn"
-			href={content.url}
-			download={content.name}
+			onclick={download}
 			title={m.download({}, { locale })}
 			aria-label={m.download({}, { locale })}
 		>
 			<Download class="h-4 w-4" />
-		</a>
+		</button>
 	</header>
 	{#if error}
 		<div class="file-error">{error}</div>
@@ -96,7 +107,7 @@ $effect(() => {
 			<FileContentPreview
 				{file}
 				source={file.content}
-				downloadUrl={content.url}
+				onDownload={download}
 				{isMobile}
 				{resolveWorkspaceAsset}
 				{onOpenFile}

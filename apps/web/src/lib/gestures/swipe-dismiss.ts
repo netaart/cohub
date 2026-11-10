@@ -5,6 +5,8 @@
  * pointer events and drives the transform directly for a 1:1 finger feel.
  */
 
+import { EASE_OUT } from "$lib/motion";
+
 export const SWIPE_DISMISS_DIRECTION_LOCK_PX = 8;
 export const SWIPE_DISMISS_DIRECTION_RATIO = 1.2;
 export const SWIPE_DISMISS_DISTANCE_RATIO = 0.32;
@@ -87,6 +89,8 @@ export function swipeDismiss(node: HTMLElement, options: SwipeDismissOptions) {
 	let swallowClick = false;
 
 	const duration = () => opts.durationMs ?? 180;
+	const settleTransition = () =>
+		`transform ${duration()}ms ${EASE_OUT}, opacity ${duration()}ms ${EASE_OUT}`;
 
 	function setTransform(deltaX: number) {
 		node.style.transform = `translate3d(${deltaX}px, 0, 0)`;
@@ -113,7 +117,7 @@ export function swipeDismiss(node: HTMLElement, options: SwipeDismissOptions) {
 		// Force a style flush so the pending `transition: none` from the drag
 		// doesn't swallow the settle animation.
 		void node.offsetWidth;
-		node.style.transition = `transform ${duration()}ms cubic-bezier(0.16, 1, 0.3, 1), opacity ${duration()}ms ease-out`;
+		node.style.transition = settleTransition();
 		setTransform(0);
 		window.setTimeout(clearTransform, duration());
 	}
@@ -123,7 +127,7 @@ export function swipeDismiss(node: HTMLElement, options: SwipeDismissOptions) {
 		const target =
 			(deltaX < 0 ? -1 : 1) * (width + SWIPE_DISMISS_EXIT_PADDING_PX);
 		void node.offsetWidth;
-		node.style.transition = `transform ${duration()}ms cubic-bezier(0.7, 0, 0.84, 0), opacity ${duration()}ms ease-in`;
+		node.style.transition = settleTransition();
 		node.style.transform = `translate3d(${target}px, 0, 0)`;
 		node.style.opacity = "0";
 		window.setTimeout(() => opts.onDismiss(), duration());

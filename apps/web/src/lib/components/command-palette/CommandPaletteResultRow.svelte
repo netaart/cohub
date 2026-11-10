@@ -186,7 +186,7 @@ const timestamp = $derived.by(() => {
 		border-radius: var(--list-row-radius);
 		background: transparent;
 		color: inherit;
-		transition: background-color 90ms cubic-bezier(0.25, 1, 0.5, 1);
+		transition: background-color 90ms var(--ease-out);
 	}
 
 	.command-result-main {
@@ -222,7 +222,7 @@ const timestamp = $derived.by(() => {
 		color: var(--text-tertiary);
 		opacity: 0;
 		cursor: pointer;
-		transition: opacity 90ms cubic-bezier(0.25, 1, 0.5, 1), background-color 90ms cubic-bezier(0.25, 1, 0.5, 1), color 90ms cubic-bezier(0.25, 1, 0.5, 1);
+		transition: opacity 90ms var(--ease-out), background-color 90ms var(--ease-out), color 90ms var(--ease-out);
 	}
 
 	.command-pin-btn:focus-visible {

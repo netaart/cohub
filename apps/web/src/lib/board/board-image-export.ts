@@ -321,18 +321,6 @@ export function boardExportFilename(
 	return `${base || "board"}${suffix ? `-${suffix}` : ""}-${stamp}.${EXTENSION[format]}`;
 }
 
-export function downloadBlob(blob: Blob, filename: string): void {
-	const url = URL.createObjectURL(blob);
-	const anchor = document.createElement("a");
-	anchor.href = url;
-	anchor.download = filename;
-	anchor.rel = "noopener";
-	document.body.appendChild(anchor);
-	anchor.click();
-	anchor.remove();
-	setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
 export async function copyImageToClipboard(blob: Blob): Promise<void> {
 	if (!("clipboard" in navigator) || !("write" in navigator.clipboard)) {
 		throw new Error("This browser cannot copy images to the clipboard.");

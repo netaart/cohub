@@ -12,6 +12,7 @@ import { enqueueFsCdnWarmFile } from "./space-fs-cdn-queue.js";
 import {
   buildFsCdnFailKey,
   buildFsCdnManifestKey,
+  cdnDownloadUrl,
   shouldUseFsCdnCache,
 } from "./space-fs-cdn-policy.js";
 import { isTextMime, type SpaceFsFileResponse, type SpaceFsPreparingFile } from "@cohub/protocol/fs";
@@ -129,6 +130,7 @@ export function buildUrlFileResponse(meta: FsCdnFileMeta, manifest: FsCdnManifes
     content: "",
     delivery: "url",
     url: manifest.url,
+    downloadUrl: cdnDownloadUrl(manifest.url),
     ...(manifest.media ? { media: manifest.media } : {}),
   };
 }

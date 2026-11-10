@@ -1,4 +1,4 @@
-import { DURATION_PANEL } from "$lib/motion.svelte";
+import { DURATION_PANEL } from "$lib/motion";
 
 export function prefersReducedMotionNow(): boolean {
 	if (typeof window === "undefined") return false;

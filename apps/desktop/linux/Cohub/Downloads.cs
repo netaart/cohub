@@ -1,8 +1,13 @@
+using Cohub.Core;
+
 namespace Cohub;
 
 /// WebKitGTK downloads without asking; files land in the XDG download directory under a free name.
 internal static class Downloads
 {
+    public static string Folder => GLib.Functions.GetUserSpecialDir(GLib.UserDirectory.DirectoryDownload)
+        ?? Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), "Downloads");
+
     public delegate void Notify(string id, string title, string? body, string action, string target);
 
     public static void Track(WebKit.Download download, Notify notify)
@@ -23,15 +28,7 @@ internal static class Downloads
 
     private static string Unique(string? suggested)
     {
-        var directory = GLib.Functions.GetUserSpecialDir(GLib.UserDirectory.DirectoryDownload)
-            ?? Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile), "Downloads");
-        Directory.CreateDirectory(directory);
-        var name = Path.GetFileName(suggested ?? "").Replace(':', '-');
-        if (name.Length == 0 || name[0] == '.') name = $"download{name}";
-        var stem = Path.GetFileNameWithoutExtension(name);
-        var extension = Path.GetExtension(name);
-        var candidate = Path.Combine(directory, name);
-        for (var index = 2; File.Exists(candidate) || Directory.Exists(candidate); index++) candidate = Path.Combine(directory, $"{stem} ({index}){extension}");
-        return candidate;
+        Directory.CreateDirectory(Folder);
+        return FileDownloads.Unique(Folder, suggested);
     }
 }

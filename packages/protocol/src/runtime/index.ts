@@ -199,7 +199,7 @@ export function parseRuntimeRegistration(raw: string): RuntimeRegistration | nul
 }
 
 /** Control frames a Gateway accepts beyond the base protocol; older Gateways omit the list. */
-export const RUNTIME_CONTROL_FEATURES = ["capabilities", "approvals"] as const;
+export const RUNTIME_CONTROL_FEATURES = ["capabilities", "approvals", "nativeMessages"] as const;
 export const runtimeReadySchema = z.object({ type: z.literal("runtime.ready"), connectionId: z.string().uuid(), features: z.array(z.string()).optional() });
 
 export type RuntimeExecutionIdentity = { spaceId: string; sessionId: string; turnId: string; harness: LocalHarness };

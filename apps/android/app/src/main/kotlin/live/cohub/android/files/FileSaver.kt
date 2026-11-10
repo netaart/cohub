@@ -2,9 +2,11 @@ package live.cohub.android.files
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.provider.MediaStore.MediaColumns
 import android.util.Log
@@ -20,9 +22,11 @@ import live.cohub.android.BuildConfig
 import live.cohub.android.R
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 
 class FileSaver(
     private val context: Context,
@@ -30,30 +34,39 @@ class FileSaver(
     private val scope: CoroutineScope,
     private val accessToken: suspend () -> String?,
 ) {
-    fun saveUrl(url: String, name: String, mimeType: String?) = save(name) {
-        val request = Request.Builder().url(url).apply {
-            // Only the API origin may see the session's token.
-            if (sameOrigin(url, BuildConfig.API_ORIGIN)) accessToken()?.let { header("Authorization", "Bearer $it") }
-        }.build()
-        http.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("HTTP ${response.code} for $url")
-            val type = mimeType ?: response.body.contentType()?.let { "${it.type}/${it.subtype}" }
-            response.body.byteStream().use { write(name, type, it) }
+    private val saved = ConcurrentHashMap<String, Uri>()
+
+    class Saved(val location: String, val path: String, val uri: Uri)
+
+    suspend fun save(id: String, name: String, mimeType: String?, url: String?, data: String?, progress: (Long, Long?) -> Unit): Saved {
+        val result = withContext(Dispatchers.IO) {
+            when {
+                url != null && data == null -> download(url, name, mimeType, progress)
+                data != null && url == null -> Base64.getDecoder().decode(data).inputStream().use { write(name, mimeType, it) }
+                else -> throw IllegalArgumentException("files.save requires exactly one of url or data")
+            }
         }
+        saved[id] = result.uri
+        return result
     }
 
-    fun saveBase64(data: String, name: String, mimeType: String?) = save(name) {
-        Base64.getDecoder().decode(data).inputStream().use { write(name, mimeType, it) }
+    fun open(id: String): Boolean {
+        val uri = saved[id] ?: return false
+        val type = context.contentResolver.getType(uri)
+        val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching { context.startActivity(intent) }.isSuccess
     }
 
-    private fun save(name: String, block: suspend () -> SavedFolder) {
+    /** Downloads the page navigated to; nothing on the page reports it, so the shell does. */
+    fun saveUrl(url: String, name: String, mimeType: String?) {
         scope.launch {
-            val folder = runCatching { withContext(Dispatchers.IO) { block() } }
+            val saved = runCatching { withContext(Dispatchers.IO) { download(url, name, mimeType) { _, _ -> } } }
                 .onFailure { Log.w(TAG, "Could not save $name", it) }
                 .getOrNull()
             withContext(Dispatchers.Main) {
-                val message = if (folder != null) {
-                    context.getString(R.string.file_saved, folder.path)
+                val message = if (saved != null) {
+                    context.getString(R.string.file_saved, saved.path)
                 } else {
                     context.getString(R.string.file_save_failed)
                 }
@@ -62,23 +75,37 @@ class FileSaver(
         }
     }
 
-    private fun write(name: String, mimeType: String?, source: InputStream): SavedFolder {
+    private suspend fun download(url: String, name: String, mimeType: String?, progress: (Long, Long?) -> Unit): Saved {
+        val request = Request.Builder().url(url).apply {
+            // Only the API origin may see the session's token.
+            if (sameOrigin(url, BuildConfig.API_ORIGIN)) accessToken()?.let { header("Authorization", "Bearer $it") }
+        }.build()
+        return http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw IOException("HTTP ${response.code} for $url")
+            val type = mimeType ?: response.body.contentType()?.let { "${it.type}/${it.subtype}" }
+            val total = response.body.contentLength().takeIf { it > 0 }
+            response.body.byteStream().use { write(name, type, Counting(it, total, progress)) }
+        }
+    }
+
+    private fun write(name: String, mimeType: String?, source: InputStream): Saved {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) throw UnsupportedOperationException("Needs Android 10")
         val fileName = safeFileName(name)
         val type = mimeType?.lowercase()?.substringBefore(';')?.trim()?.takeIf { it.contains('/') }
             ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(fileName.substringAfterLast('.', "").lowercase())
             ?: GENERIC_TYPE
         val folder = SavedFolder.of(type)
-        return try {
-            insert(folder, fileName, type, source)
+        val target = try {
+            folder to insert(folder, fileName, type, source)
         } catch (error: IllegalArgumentException) {
             if (folder == SavedFolder.DOWNLOADS) throw error
-            insert(SavedFolder.DOWNLOADS, fileName, type, source)
+            SavedFolder.DOWNLOADS to insert(SavedFolder.DOWNLOADS, fileName, type, source)
         }
+        return Saved(target.first.location, target.first.path, target.second)
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun insert(folder: SavedFolder, name: String, mimeType: String, source: InputStream): SavedFolder {
+    private fun insert(folder: SavedFolder, name: String, mimeType: String, source: InputStream): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaColumns.DISPLAY_NAME, name)
@@ -95,7 +122,7 @@ class FileSaver(
             resolver.delete(uri, null, null)
             throw error
         }
-        return folder
+        return uri
     }
 
     private companion object {
@@ -110,11 +137,11 @@ class FileSaver(
     }
 }
 
-private enum class SavedFolder(directory: String) {
-    PICTURES(Environment.DIRECTORY_PICTURES),
-    MOVIES(Environment.DIRECTORY_MOVIES),
-    MUSIC(Environment.DIRECTORY_MUSIC),
-    DOWNLOADS(Environment.DIRECTORY_DOWNLOADS),
+private enum class SavedFolder(directory: String, val location: String) {
+    PICTURES(Environment.DIRECTORY_PICTURES, "pictures"),
+    MOVIES(Environment.DIRECTORY_MOVIES, "movies"),
+    MUSIC(Environment.DIRECTORY_MUSIC, "music"),
+    DOWNLOADS(Environment.DIRECTORY_DOWNLOADS, "downloads"),
     ;
 
     val path = "$directory/Cohub"
@@ -139,6 +166,30 @@ private enum class SavedFolder(directory: String) {
         }
     }
 }
+
+private class Counting(
+    source: InputStream,
+    private val total: Long?,
+    private val progress: (Long, Long?) -> Unit,
+) : FilterInputStream(source) {
+    private var received = 0L
+    private var reportedAt = 0L
+
+    override fun read(): Int = super.read().also { if (it >= 0) count(1) }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+        super.read(buffer, offset, length).also { if (it > 0) count(it.toLong()) }
+
+    private fun count(bytes: Long) {
+        received += bytes
+        val now = SystemClock.elapsedRealtime()
+        if (now - reportedAt < PROGRESS_INTERVAL_MS) return
+        reportedAt = now
+        progress(received, total)
+    }
+}
+
+private const val PROGRESS_INTERVAL_MS = 250L
 
 private val UNSAFE_NAME = Regex("""[\\/:*?"<>|\u0000-\u001f]+""")
 

@@ -7,8 +7,9 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip } from "node:zlib";
 
-// Bumped by a PR from rtc-binaries-build.yml once the helper artifacts are on the CDN.
-export const RTC_HELPER_VERSION: string = "v2.68.0";
+import { RTC_HELPER_VERSION } from "../binary-pins.js";
+
+export { RTC_HELPER_VERSION };
 const MAX_BINARY_BYTES = 128 * 1024 * 1024;
 
 async function digest(path: string) {

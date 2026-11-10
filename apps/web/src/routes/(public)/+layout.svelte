@@ -3,6 +3,7 @@ import "../../app.css";
 import { onMount } from "svelte";
 import { browser } from "$app/environment";
 import { page } from "$app/state";
+import DownloadToasts from "$lib/components/DownloadToasts.svelte";
 import { markHostReady } from "$lib/host-bridge";
 import "$lib/theme.svelte";
 
@@ -54,3 +55,5 @@ const isPublicAppPath = $derived.by(() => {
 		{@render children?.()}
 	</div>
 {/if}
+
+<DownloadToasts />

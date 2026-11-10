@@ -23,6 +23,7 @@ import {
 	type MediaItem,
 	mediaLightbox,
 } from "$lib/components/media-lightbox.svelte";
+import { downloads, saveFile } from "$lib/downloads.svelte";
 import {
 	createGallerySwipe,
 	type GallerySwipeOffset,
@@ -35,8 +36,8 @@ import {
 } from "$lib/gestures/image-gesture";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { screenVariantSize } from "$lib/media/media-info";
-import { downloadMedia } from "$lib/media-download";
-import { EASE_OUT } from "$lib/motion.svelte";
+import { mediaFilename } from "$lib/media-download";
+import { EASE_OUT } from "$lib/motion";
 import { m } from "$lib/paraglide/messages.js";
 import MediaImage from "$lib/resource-kit/MediaImage.svelte";
 import MediaVideo from "$lib/resource-kit/MediaVideo.svelte";
@@ -71,7 +72,6 @@ let offset = $state<GallerySwipeOffset>({ x: 0, y: 0 });
 let settling = $state(false);
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
 let settleDone: (() => void) | null = null;
-let downloading = $state(false);
 let press: { x: number; y: number } | null = null;
 /** The current image shows its original (zoomed in, or the variant failed). */
 let detail = $state(false);
@@ -237,16 +237,21 @@ function setZoom(next: number) {
 
 // ─── Download ───
 
-async function download() {
+const downloading = $derived(
+	currentSource.status === "ready" && downloads.busy(currentSource.src),
+);
+
+function download() {
 	const item = current;
 	const source = currentSource;
-	if (!item || source.status !== "ready" || downloading) return;
-	downloading = true;
-	try {
-		await downloadMedia({ ...item, src: source.src });
-	} finally {
-		downloading = false;
-	}
+	if (!item || source.status !== "ready") return;
+	const url = source.src;
+	void saveFile({
+		key: url,
+		name: mediaFilename({ ...item, src: url }),
+		mimeType: item.mimeType,
+		source: () => ({ kind: "url", url }),
+	});
 }
 
 // ─── Lifecycle ───

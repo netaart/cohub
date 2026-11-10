@@ -2964,5 +2964,21 @@
 	"billing_recovery_keep_plan": "保留套餐",
 	"billing_recovery_end_choose": "结束并选套餐",
 	"billing_recovery_pending": "待付款",
-	"billing_recovery_processing": "处理中"
+	"billing_recovery_processing": "处理中",
+	"download_preparing": "正在准备…",
+	"download_saving": "正在下载…",
+	"download_progress": "{received} / {total}",
+	"download_started": "已开始下载",
+	"download_saved_downloads": "已保存到「下载」",
+	"download_saved_pictures": "已保存到「图片」",
+	"download_saved_movies": "已保存到「影片」",
+	"download_saved_music": "已保存到「音乐」",
+	"download_saved_photos": "已存入「照片」",
+	"download_saved_files": "已保存到「文件」",
+	"download_failed": "下载失败",
+	"download_still_preparing": "文件仍在准备，请稍后重试",
+	"download_too_large": "文件过大，无法在此保存",
+	"download_reveal_finder": "在访达中显示",
+	"download_reveal_folder": "在文件夹中显示",
+	"download_open": "打开"
 }

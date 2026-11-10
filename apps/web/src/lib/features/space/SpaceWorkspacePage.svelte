@@ -120,7 +120,7 @@ import {
 } from "$lib/labels/resource-label-cache-sync";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import type { ResizeSession, ResizeStart } from "$lib/layout/pointer-resize";
-import { DURATION_PANEL } from "$lib/motion.svelte";
+import { DURATION_PANEL } from "$lib/motion";
 import { m } from "$lib/paraglide/messages.js";
 import {
 	parseAppDomainEvent,
@@ -1188,8 +1188,6 @@ const inlineFileApp = $derived.by(() => {
 		) ?? null
 	);
 });
-const inlineFileDownloadUrl = $derived(fileWorkspace.inlineFileDownloadUrl);
-const inlineFileDownloadName = $derived(fileWorkspace.inlineFileDownloadName);
 
 const inlinePortEndpoint = $derived.by(() => {
 	if (!inlinePortPreview) return null;
@@ -2321,8 +2319,8 @@ async function handleMoveNode(node: SpaceFsNode, targetDir: string) {
 	if (next) windowManager.syncCurrent();
 	else if (routePreviewRef?.key === prevPath) syncPreviewQuery(null, true);
 }
-async function handleDownloadNode(node: SpaceFsNode) {
-	await fileWorkspace.handleDownloadNode(node);
+function handleDownloadNode(node: SpaceFsNode) {
+	fileWorkspace.handleDownloadNode(node);
 }
 async function handleDeleteNode(node: SpaceFsNode) {
 	const deleted = await fileWorkspace.handleDeleteNode(node);
@@ -2469,8 +2467,8 @@ function registerAppSurface(key: string, host: AppSurfaceHost | null) {
 		),
 	);
 }
-async function downloadInlineFile() {
-	await fileWorkspace.downloadInlineFile();
+function downloadInlineFile() {
+	fileWorkspace.downloadInlineFile();
 }
 async function retryInlineFile() {
 	const path = fileWorkspace.activeInlineFilePath;
@@ -3173,8 +3171,6 @@ const spaceFileDomainProps = $derived.by<
 	activeWindowKind,
 	inlinePortEndpoint,
 	previewEndpoints,
-	inlineFileDownloadUrl,
-	inlineFileDownloadName,
 	inlineFilePreview,
 	inlineFileDiff: fileWorkspace.inlineFileDiff,
 	inlineFileDiffLoading: fileWorkspace.inlineFileDiffLoading,
@@ -3638,9 +3634,9 @@ const headerActions = {
     min-height: 0;
     grid-template-columns: 1fr;
     transition:
-      flex-grow var(--motion-panel-duration) var(--motion-panel-ease),
-      grid-template-columns var(--motion-panel-duration) var(--motion-panel-ease),
-      opacity var(--motion-panel-fade-duration) var(--motion-panel-ease);
+      flex-grow var(--motion-panel-duration) var(--ease-out),
+      grid-template-columns var(--motion-panel-duration) var(--ease-out),
+      opacity var(--motion-panel-fade-duration) var(--ease-out);
   }
 
   .workspace-body--split .files-column-shell {
@@ -3671,8 +3667,8 @@ const headerActions = {
   .workspace-main {
     flex: 1 1 0%;
     transition:
-      flex var(--motion-panel-duration) var(--motion-panel-ease),
-      opacity var(--motion-panel-fade-duration) var(--motion-panel-ease);
+      flex var(--motion-panel-duration) var(--ease-out),
+      opacity var(--motion-panel-fade-duration) var(--ease-out);
   }
 
   @media (min-width: 960px) {
@@ -3693,7 +3689,7 @@ const headerActions = {
       opacity: 0;
       pointer-events: none;
       transition:
-        flex var(--motion-panel-duration) var(--motion-panel-ease),
+        flex var(--motion-panel-duration) var(--ease-out),
         opacity var(--motion-panel-fade-collapse-duration)
           var(--motion-panel-collapse-ease);
     }
@@ -3958,7 +3954,10 @@ const headerActions = {
     font-size: 11px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 120ms ease;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease,
+      box-shadow 120ms ease;
     white-space: nowrap;
   }
   :global(.segmented-btn:hover) { color: var(--text-secondary); }

@@ -9,6 +9,7 @@ import AboutDialog from "$lib/components/AboutDialog.svelte";
 import BillingConversionCenter from "$lib/components/BillingConversionCenter.svelte";
 import CenteredLoading from "$lib/components/CenteredLoading.svelte";
 import CommandPalette from "$lib/components/CommandPalette.svelte";
+import DownloadToasts from "$lib/components/DownloadToasts.svelte";
 import DragGhostLayer from "$lib/components/DragGhostLayer.svelte";
 import FeedbackDialog from "$lib/components/FeedbackDialog.svelte";
 import HelpPanel from "$lib/components/HelpPanel.svelte";
@@ -22,6 +23,7 @@ import TurnNotificationStack from "$lib/components/TurnNotificationStack.svelte"
 import CustomThemeLayers from "$lib/custom-theme/CustomThemeLayers.svelte";
 import { createDeferredMount } from "$lib/deferred-mount.svelte";
 import { linkDeviceDisplays } from "$lib/device-display.svelte";
+import { installHostDownloads } from "$lib/downloads.svelte";
 import { pointerDrag } from "$lib/drag/pointer-drag.svelte";
 import CheckoutReturnHandler from "$lib/features/billing/CheckoutReturnHandler.svelte";
 import SpaceWalletReturn from "$lib/features/billing/SpaceWalletReturn.svelte";
@@ -43,7 +45,6 @@ import {
 	shouldStartRightDrawerGesture,
 } from "$lib/gestures/drawer-swipe";
 import { markHostReady } from "$lib/host-bridge";
-import { installHostDownloads } from "$lib/host-files";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import {
 	isComposingKeyboardEvent,
@@ -57,7 +58,7 @@ import {
 } from "$lib/layout/pointer-resize";
 import { startLiveLists } from "$lib/lists/live-lists";
 import { resolveAppArea, shouldHideMobileTabBar } from "$lib/mobile-nav";
-import { DURATION_DRAWER_OUT, DURATION_PANEL } from "$lib/motion.svelte";
+import { DURATION_DRAWER_OUT, DURATION_PANEL } from "$lib/motion";
 import {
 	beginMobileSessionViewTransition,
 	resolveMobileSessionNavTransition,
@@ -662,6 +663,7 @@ onMount(() => {
   <CheckoutReturnHandler />
   <SpaceWalletReturn />
   <TurnNotificationStack />
+  <DownloadToasts />
   <GlobalMarkCapture />
 
 {/if}

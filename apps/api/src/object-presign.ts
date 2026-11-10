@@ -18,6 +18,13 @@ const hexHmac = (key: Buffer | string, value: string) => createHmac("sha256", ke
 const toAmzDate = (date: Date) => date.toISOString().replace(/[:-]|\.\d{3}/g, "");
 const toDateStamp = (date: Date) => toAmzDate(date).slice(0, 8);
 const encodePath = (value: string) => value.split("/").map(encodeURIComponent).join("/");
+/** SigV4 wants RFC 3986: `encodeURIComponent` leaves `!'()*` bare. */
+const encodeRfc3986 = (value: string) =>
+  encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+const byCodeUnit = ([a]: [string, string], [b]: [string, string]) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** `attachment` under `filename`, spelled without spaces or quotes so it survives a query string. */
+export const attachmentDisposition = (filename: string) => `attachment;filename*=UTF-8''${encodeRfc3986(filename)}`;
 const canonicalHeaderValue = (value: string) => value.trim().replace(/\s+/g, " ");
 
 const signingKey = (secret: string, dateStamp: string, region: string) => {
@@ -53,6 +60,7 @@ const createPresignedObjectUrl = (
   cacheControl?: string | null,
   contentDisposition?: string | null,
   putConditions?: PutConditions,
+  responseContentDisposition?: string,
 ) => {
   if (!storage.bucket) throw new Error("bucket is required");
   if (!storage.endpoint) throw new Error("endpoint is required");
@@ -87,10 +95,12 @@ const createPresignedObjectUrl = (
   url.searchParams.set("X-Amz-Date", amzDate);
   url.searchParams.set("X-Amz-Expires", String(PRESIGN_TTL_SECONDS));
   url.searchParams.set("X-Amz-SignedHeaders", signedHeaders);
+  if (responseContentDisposition) url.searchParams.set("response-content-disposition", responseContentDisposition);
 
   const canonicalQuery = Array.from(url.searchParams.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .map(([key, value]): [string, string] => [encodeRfc3986(key), encodeRfc3986(value)])
+    .sort(byCodeUnit)
+    .map(([key, value]) => `${key}=${value}`)
     .join("&");
   const canonicalHeaders = Object.entries(headers)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -144,8 +154,10 @@ export const createPresignedPutObjectUrl = (
 export const createPresignedGetObjectUrl = (
   storage: PresignStorageConfig,
   objectKey: string,
+  options: { attachmentName?: string } = {},
 ) => {
-  const signed = createPresignedObjectUrl("GET", storage, objectKey);
+  const disposition = options.attachmentName ? attachmentDisposition(options.attachmentName) : undefined;
+  const signed = createPresignedObjectUrl("GET", storage, objectKey, null, null, null, undefined, disposition);
   return { downloadUrl: signed.url, expiresAt: signed.expiresAt };
 };
 

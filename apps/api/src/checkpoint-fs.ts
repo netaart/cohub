@@ -580,16 +580,21 @@ async function getCachedBlob(repoDir: string, checkpoint: CheckpointRecord, path
   return result.stdout;
 }
 
-function presignCheckpointAsset(objectKey: string) {
-  const signed = createPresignedGetObjectUrl({
-    endpoint: config.checkpointAssetOssEndpoint,
-    publicEndpoint: config.checkpointAssetOssPublicEndpoint,
-    region: config.checkpointAssetOssRegion,
-    bucket: config.checkpointAssetOssBucket,
-    accessKeyId: config.checkpointAssetOssAccessKeyId,
-    secretAccessKey: config.checkpointAssetOssSecretAccessKey,
-  }, objectKey);
-  return signed;
+const checkpointAssetStorage = () => ({
+  endpoint: config.checkpointAssetOssEndpoint,
+  publicEndpoint: config.checkpointAssetOssPublicEndpoint,
+  region: config.checkpointAssetOssRegion,
+  bucket: config.checkpointAssetOssBucket,
+  accessKeyId: config.checkpointAssetOssAccessKeyId,
+  secretAccessKey: config.checkpointAssetOssSecretAccessKey,
+});
+
+function presignCheckpointAsset(objectKey: string, name: string) {
+  const storage = checkpointAssetStorage();
+  return {
+    url: createPresignedGetObjectUrl(storage, objectKey).downloadUrl,
+    downloadUrl: createPresignedGetObjectUrl(storage, objectKey, { attachmentName: name }).downloadUrl,
+  };
 }
 
 export async function readAssetManifestMap(repoDir: string, checkpoint: CheckpointRecord, observation?: CheckpointFsObservation) {
@@ -820,7 +825,7 @@ export async function readCheckpointFile(input: { spaceId: string; checkpointId:
         observation,
         "asset_presign",
         "Object-storage presign creates a temporary download URL for large or binary checkpoint assets.",
-        () => presignCheckpointAsset(asset.objectKey),
+        () => presignCheckpointAsset(asset.objectKey, basename(path)),
         () => ({ delivery: "url", assetBytes: asset.size }),
       );
       const assetMime = asset.mimeType ?? mimeType;
@@ -836,7 +841,8 @@ export async function readCheckpointFile(input: { spaceId: string; checkpointId:
         encoding: kind === "text" ? "utf-8" as const : "base64" as const,
         content: "",
         delivery: "url",
-        url: signed.downloadUrl,
+        url: signed.url,
+        downloadUrl: signed.downloadUrl,
       };
     }
     const blob = await getCachedBlob(repoDir, checkpoint, path, observation, "file_blob");

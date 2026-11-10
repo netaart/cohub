@@ -50,26 +50,32 @@ export type ToolCallViewModel = {
 };
 
 export type ToolCallsSummary = {
+	count: number;
 	names: string;
 	failed: number;
 	running: boolean;
 };
 
 export function summarizeToolCalls(
-	tools: readonly ToolCallViewModel[],
+	content: readonly ContentBlock[],
 ): ToolCallsSummary {
+	const results = indexToolResults(content);
 	const counts = new Map<string, number>();
+	let count = 0;
 	let failed = 0;
 	let running = false;
-	for (const tool of tools) {
-		counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
-		if (tool.status === "failed") failed += 1;
-		if (tool.status === "running") running = true;
+	for (const block of content) {
+		if (block.type !== "tool_use") continue;
+		count += 1;
+		counts.set(block.name, (counts.get(block.name) ?? 0) + 1);
+		const status = toolCallStatus(block, results.get(block.id), null);
+		if (status === "failed") failed += 1;
+		if (status === "running") running = true;
 	}
 	const names = [...counts]
-		.map(([name, count]) => (count > 1 ? `${name} ×${count}` : name))
+		.map(([name, n]) => (n > 1 ? `${name} ×${n}` : name))
 		.join(" · ");
-	return { names, failed, running };
+	return { count, names, failed, running };
 }
 
 export function summarizeToolInput(
@@ -431,10 +437,32 @@ export function isSimpleInput(
 	return false;
 }
 
-function findToolResult(content: ContentBlock[], toolUseId: string) {
-	return content.find(
-		(block) => block.type === "tool_result" && block.tool_use_id === toolUseId,
-	);
+type ToolUseBlock = Extract<ContentBlock, { type: "tool_use" }>;
+type ToolResultBlock = Extract<ContentBlock, { type: "tool_result" }>;
+
+function indexToolResults(content: readonly ContentBlock[]) {
+	const results = new Map<string, ToolResultBlock>();
+	for (const block of content) {
+		if (block.type === "tool_result" && !results.has(block.tool_use_id)) {
+			results.set(block.tool_use_id, block);
+		}
+	}
+	return results;
+}
+
+function toolCallStatus(
+	block: ToolUseBlock,
+	result: ToolResultBlock | undefined,
+	fullTool: MessageToolCallsFile["toolCalls"][number] | null,
+): ToolCallStatus {
+	if (fullTool?.result) return fullTool.result.isError ? "failed" : "done";
+	if (result) return result.is_error ? "failed" : "done";
+	const metaStatus = block._meta?.toolStatus;
+	return metaStatus === "done" ||
+		metaStatus === "failed" ||
+		metaStatus === "running"
+		? metaStatus
+		: "running";
 }
 
 function toolResultImages(value: unknown) {
@@ -458,45 +486,29 @@ export function buildToolCallViewModels(input: {
 	content: ContentBlock[];
 	toolCallsFile?: MessageToolCallsFile | null;
 }): ToolCallViewModel[] {
+	const results = indexToolResults(input.content);
 	const toolUseBlocks = input.content.filter(
-		(block) => block.type === "tool_use",
+		(block): block is ToolUseBlock => block.type === "tool_use",
 	);
 	return toolUseBlocks.map((block) => {
 		const fullTool =
 			input.toolCallsFile?.toolCalls.find((tool) => tool.id === block.id) ??
 			null;
-		const result = findToolResult(input.content, block.id);
-		const metaStatus = block._meta?.toolStatus;
-		const status: ToolCallStatus = fullTool?.result
-			? fullTool.result.isError
-				? "failed"
-				: "done"
-			: result?.type === "tool_result"
-				? result.is_error
-					? "failed"
-					: "done"
-				: metaStatus === "done" ||
-						metaStatus === "failed" ||
-						metaStatus === "running"
-					? metaStatus
-					: "running";
+		const result = results.get(block.id);
+		const status = toolCallStatus(block, result, fullTool);
 		const phase =
 			status === "running"
-				? metaStatus === "running"
+				? block._meta?.toolStatus === "running"
 					? "executing"
 					: "drafting"
 				: undefined;
 		const resultContent = fullTool?.result
 			? stringifyToolValue(fullTool.result.content)
-			: result?.type === "tool_result"
+			: result
 				? stringifyToolValue(result.content)
 				: "";
 		const resultImages = toolResultImages(
-			fullTool?.result
-				? fullTool.result.content
-				: result?.type === "tool_result"
-					? result.content
-					: null,
+			fullTool?.result ? fullTool.result.content : (result?.content ?? null),
 		);
 		const partialResult = stringifyToolValue(block._meta?.partialResult);
 		const resultPartial = Boolean(partialResult);
@@ -504,9 +516,7 @@ export function buildToolCallViewModels(input: {
 			timingDurationMs(fullTool?.meta?.timing) ??
 			timingDurationMs(fullTool?.result?.meta?.timing) ??
 			timingDurationMs(block._meta?.timing) ??
-			(result?.type === "tool_result"
-				? timingDurationMs(result._meta?.timing)
-				: null);
+			timingDurationMs(result?._meta?.timing);
 		return {
 			id: block.id,
 			name: block.name,
@@ -517,9 +527,7 @@ export function buildToolCallViewModels(input: {
 			phase,
 			durationMs,
 			resultPartial,
-			resultOmitted:
-				result?.type === "tool_result" &&
-				result._meta?.resultDetail === "omitted",
+			resultOmitted: result?._meta?.resultDetail === "omitted",
 			...(resultImages.length > 0 ? { resultImages } : {}),
 		};
 	});

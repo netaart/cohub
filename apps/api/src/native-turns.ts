@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { hasPermission } from "./permissions.js";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions } from "@cohub/db";
-import { NATIVE_SYNC_SOURCE, SETTLED_TURN_STATUSES, isNativeClientTurn, type NativeTurnStart, type NativeTurnBinding, type NativeTurnComplete, type NativeIngest, type NativeIngestResult, type NativeKnownResult } from "@cohub/protocol";
+import { NATIVE_SYNC_SOURCE, SETTLED_TURN_STATUSES, isNativeClientTurn, type NativeTurnStart, type NativeTurnBinding, type NativeTurnComplete, type NativeTurnMessage, type NativeTurnMessages, type NativeTurnMessagesResult, type NativeIngest, type NativeIngestResult, type NativeKnownResult } from "@cohub/protocol";
 import { addSessionParticipantMeta, deriveMessagePreviewText, deriveSessionFallbackTitle, runtimeResolutionOpen } from "@cohub/core/sessions";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { unarchiveSessionInTx } from "@cohub/core/labels";
@@ -285,41 +285,105 @@ export async function getOwnedNativeTurn(spaceId: string, userId: string, sessio
   return row.turn;
 }
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type NativeTurnRow = typeof sessionTurns.$inferSelect;
+type MessageRow = typeof sessionMessages.$inferSelect;
+type MessageKind = "assistant_intermediate" | "assistant_final" | "assistant_error";
+
+const assistantMessagesOf = (turnId: string) => and(eq(sessionMessages.turnId, turnId), eq(sessionMessages.role, "assistant"));
+
+async function lockNativeTurn(tx: Tx, sessionId: string, turnId: string) {
+  await tx.select({ id: spaceSessions.id }).from(spaceSessions).where(eq(spaceSessions.id, sessionId)).for("update");
+  const [turn] = await tx.select().from(sessionTurns).where(eq(sessionTurns.id, turnId)).for("update");
+  if (!turn) throw new NativeTurnError(404, "Turn not found");
+  return turn;
+}
+
+async function stagedDigests(tx: Tx, turnId: string): Promise<string[]> {
+  const rows = await tx.select({ digest: sql<string | null>`${sessionMessages.meta}->>'nativeDigest'` }).from(sessionMessages)
+    .where(assistantMessagesOf(turnId)).orderBy(asc(sessionMessages.sequence));
+  return rows.map((row) => row.digest ?? "");
+}
+
+function nativeMessageRow(turn: NativeTurnRow, userId: string, message: NativeTurnMessage, ordinal: number, kind: MessageKind, completedAt: Date | null): MessageRow {
+  const meta = record(turn.meta), imported = record(meta.nativeSync).origin === "local_import";
+  const content = sanitizeContentBlocksForPostgresJson(message.content);
+  return {
+    id: messageId(turn.id, ordinal), sessionId: turn.sessionId, turnId: turn.id, role: "assistant", content, text: deriveMessagePreviewText({ content }) || null,
+    sequence: ordinal, idempotencyKey: `native:${turn.id}:${ordinal}`, provider: message.provider ?? null, model: message.model ?? null,
+    stopReason: message.stopReason ?? null, errorMessage: message.errorMessage ? sanitizePostgresJsonValue(message.errorMessage) : null, usage: message.usage ?? null,
+    meta: { turnId: turn.id, messageOrdinal: ordinal, nativeDigest: digest(message), harness: meta.harness, runtime: "local", source: NATIVE_SYNC_SOURCE, actorUserId: userId, anchorUserMessageId: meta.userMessageId,
+      ...(imported && completedAt ? { origin: "local_import", originalStartedAt: turn.startedAt, originalCompletedAt: completedAt.toISOString() } : {}),
+      messageKind: kind },
+    startedAt: turn.startedAt, completedAt, durationMs: null, usageAggregatedAt: null, createdAt: completedAt ?? new Date(),
+  };
+}
+
+/** Rows keep their Turn ordinal in `sequence`; the Session sequence is assigned here. */
+async function insertNativeMessages(tx: Tx, sessionId: string, rows: MessageRow[]) {
+  if (!rows.length) return;
+  const [last] = await tx.select({ sequence: sessionMessages.sequence }).from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId)).orderBy(desc(sessionMessages.sequence)).limit(1);
+  await tx.insert(sessionMessages).values(rows.map((row, index) => ({ ...row, sequence: (last?.sequence ?? 0) + index + 1, meta: sanitizePostgresJsonValue(row.meta) })));
+}
+
+/** Messages already staged must be resent unchanged; a `from` past the staged ones stages nothing. */
+export async function stageNativeMessages(spaceId: string, userId: string, sessionId: string, turnId: string, input: NativeTurnMessages): Promise<NativeTurnMessagesResult> {
+  await getOwnedNativeTurn(spaceId, userId, sessionId, turnId);
+  return db.transaction(async (tx) => {
+    const turn = await lockNativeTurn(tx, sessionId, turnId);
+    if (!["running", "abort_requested"].includes(turn.status) || record(record(turn.meta).runtimeRecovery).state === "confirmed_stopped") conflict("Execution was resolved");
+    const staged = await stagedDigests(tx, turnId);
+    if (input.from > staged.length) return { count: staged.length };
+    input.messages.forEach((message, index) => {
+      const ordinal = input.from + index;
+      if (ordinal < staged.length && staged[ordinal] !== digest(message)) conflict("Staged Turn messages are immutable");
+    });
+    const fresh = input.messages.slice(staged.length - input.from).map((message, index) => nativeMessageRow(turn, userId, message, staged.length + index, "assistant_intermediate", null));
+    await insertNativeMessages(tx, sessionId, fresh);
+    return { count: staged.length + fresh.length };
+  });
+}
+
 /** Completion, messages and terminal state commit atomically; object-storage artifacts retry separately. */
 export async function completeNativeTurn(spaceId: string, userId: string, sessionId: string, turnId: string, input: NativeTurnComplete) {
   await getOwnedNativeTurn(spaceId, userId, sessionId, turnId);
-  const completionDigest = digest(input);
+  const from = input.from ?? 0;
   const committed = await db.transaction(async (tx) => {
-    await tx.select({ id: spaceSessions.id }).from(spaceSessions).where(eq(spaceSessions.id, sessionId)).for("update");
-    const [turn] = await tx.select().from(sessionTurns).where(eq(sessionTurns.id, turnId)).for("update");
-    if (!turn) throw new NativeTurnError(404, "Turn not found");
+    const turn = await lockNativeTurn(tx, sessionId, turnId);
     const meta = record(turn.meta), receipt = record(meta.nativeSync);
     const imported = receipt.origin === "local_import";
     if (record(meta.runtimeRecovery).state === "confirmed_stopped") conflict("Execution was resolved; retain the local receipt");
-    if (receipt.completionDigest && receipt.completionDigest !== completionDigest) conflict("Turn result is immutable");
+    const staged = await stagedDigests(tx, turnId);
+    // A plain error, not a conflict: the Runtime resends after asking where the staged messages end.
+    if (from > staged.length) throw new Error(`Staged messages end at ${staged.length}; resend from there`);
+    const digests = [...staged.slice(0, from), ...input.messages.map((message) => digest(message))];
+    // Independent of how the messages were split across frames. Turns finalized before staging hold `digest(input)`.
+    const completionDigest = digest({ messages: digests, status: input.status, completedAt: input.completedAt });
+    const replay = receipt.completionDigest === completionDigest || receipt.completionDigest === digest(input);
+    if (receipt.completionDigest && !replay) conflict("Turn result is immutable");
     if (terminal.has(turn.status)) {
       // Replay of the exact same completion: only the artifact snapshot may still be missing.
-      if (receipt.completionDigest !== completionDigest) conflict("Turn already finalized");
+      if (!replay) conflict("Turn already finalized");
       return { changed: false, turn, messages: [], projection: null };
     }
+    if (staged.some((value, ordinal) => value !== digests[ordinal])) conflict("Staged Turn messages are immutable");
     const completedAt = new Date(input.completedAt);
-    const messages = input.messages.map((message, ordinal): typeof sessionMessages.$inferSelect => {
-      const final = ordinal === input.messages.length - 1;
-      const content = sanitizeContentBlocksForPostgresJson(message.content);
-      return {
-        id: messageId(turnId, ordinal), sessionId, turnId, role: "assistant", content, text: deriveMessagePreviewText({ content }) || null,
-        sequence: ordinal, idempotencyKey: `native:${turnId}:${ordinal}`, provider: message.provider ?? null, model: message.model ?? null,
-        stopReason: message.stopReason ?? null, errorMessage: message.errorMessage ? sanitizePostgresJsonValue(message.errorMessage) : null, usage: message.usage ?? null,
-        meta: { turnId, messageOrdinal: ordinal, harness: record(turn.meta).harness, runtime: "local", source: NATIVE_SYNC_SOURCE, actorUserId: userId, anchorUserMessageId: record(turn.meta).userMessageId,
-          ...(imported ? { origin: "local_import", originalStartedAt: turn.startedAt, originalCompletedAt: input.completedAt } : {}),
-          messageKind: final ? input.status === "completed" ? "assistant_final" : "assistant_error" : "assistant_intermediate" },
-        startedAt: turn.startedAt, completedAt, durationMs: null, usageAggregatedAt: null, createdAt: completedAt,
-      };
-    });
+    const finalKind: MessageKind = input.status === "completed" ? "assistant_final" : "assistant_error";
+    const kindOf = (ordinal: number): MessageKind => ordinal === digests.length - 1 ? finalKind : "assistant_intermediate";
+    const fresh = input.messages.slice(staged.length - from).map((message, index) => nativeMessageRow(turn, userId, message, staged.length + index, kindOf(staged.length + index), completedAt));
+    if (staged.length) {
+      // Staged rows learn what only the completion knows: when the Turn ended and which message is final.
+      const patch = imported ? { origin: "local_import", originalStartedAt: turn.startedAt, originalCompletedAt: input.completedAt } : {};
+      await tx.update(sessionMessages).set({ completedAt, createdAt: completedAt, meta: sql`${sessionMessages.meta} || ${JSON.stringify(patch)}::jsonb` }).where(assistantMessagesOf(turnId));
+      if (!fresh.length) {
+        await tx.update(sessionMessages).set({ meta: sql`jsonb_set(${sessionMessages.meta}, '{messageKind}', ${JSON.stringify(finalKind)}::jsonb)` })
+          .where(eq(sessionMessages.id, messageId(turnId, staged.length - 1)));
+      }
+    }
+    await insertNativeMessages(tx, sessionId, fresh);
+    const messages = staged.length ? await tx.select().from(sessionMessages).where(assistantMessagesOf(turnId)).orderBy(asc(sessionMessages.sequence)) : fresh;
     const final = messages.at(-1);
     const totalUsage = messages.reduce<ReturnType<typeof addUsage>>((sum, message) => addUsage(sum, message.usage), null);
-    const [last] = await tx.select({ sequence: sessionMessages.sequence }).from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId)).orderBy(desc(sessionMessages.sequence)).limit(1);
-    if (messages.length) await tx.insert(sessionMessages).values(messages.map((message, ordinal) => ({ ...message, sequence: (last?.sequence ?? 0) + ordinal + 1, meta: sanitizePostgresJsonValue(message.meta) })));
     const next = await tx.update(sessionTurns).set({ status: input.status, assistantContent: final?.content ?? [], assistantText: final?.text ?? null,
       provider: final?.provider ?? null, model: final?.model ?? null, stopReason: input.status === "interrupted" ? "aborted" : final?.stopReason ?? (input.status === "failed" ? "error" : "stop"),
       errorMessage: final?.errorMessage ?? null, finalUsage: final?.usage ?? null, totalUsage,

@@ -10,6 +10,7 @@ public static class HostProtocol
     {
         public const string Notifications = "notifications";
         public const string Share = "share";
+        public const string Files = "files";
         public const string Navigation = "navigation";
         public const string Cache = "cache";
         public const string Appearance = "appearance";
@@ -35,6 +36,8 @@ public static class HostProtocol
         public const string AppearanceSet = "appearance.set";
         public const string NavigationOpenPath = "navigation.openPath";
         public const string ShareText = "share.text";
+        public const string FilesSave = "files.save";
+        public const string FilesReveal = "files.reveal";
         public const string CacheClear = "cache.clear";
         public const string NotificationsRegister = "notifications.register";
         public const string NotificationsShow = "notifications.show";
@@ -63,6 +66,7 @@ public static class HostProtocol
         public const string AuthChanged = "auth.changed";
         public const string RuntimeChanged = "runtime.changed";
         public const string DisplayChanged = "display.changed";
+        public const string FilesProgress = "files.progress";
     }
 
     public static class ErrorCodes

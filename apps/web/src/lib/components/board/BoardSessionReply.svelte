@@ -139,7 +139,7 @@ function handleKeydown(event: KeyboardEvent) {
 	.board-session-reply {
 		position: absolute;
 		z-index: 24;
-		animation: reply-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+		animation: reply-in 160ms var(--ease-out);
 	}
 	.reply-input {
 		flex: 1;

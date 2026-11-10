@@ -26,13 +26,11 @@ import { m } from "$lib/paraglide/messages.js";
 const {
 	source,
 	isMobile = false,
-	downloadUrl = null,
-	downloadName = null,
+	onDownload,
 }: {
 	source: ModelSource;
 	isMobile?: boolean;
-	downloadUrl?: string | null;
-	downloadName?: string | null;
+	onDownload?: () => void;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -195,8 +193,8 @@ function togglePlaying() {
 				{#if failure === "load"}
 					<button type="button" class="action-btn" onclick={retry}>{m.common_retry({}, { locale })}</button>
 				{/if}
-				{#if downloadUrl}
-					<a class="action-btn" href={downloadUrl} download={downloadName ?? source.name}>{m.download({}, { locale })}</a>
+				{#if onDownload}
+					<button type="button" class="action-btn" onclick={onDownload}>{m.download({}, { locale })}</button>
 				{/if}
 			</div>
 		</div>

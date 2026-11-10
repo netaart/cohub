@@ -1,15 +1,9 @@
 <script lang="ts">
 import { Loader2, Scissors } from "lucide-svelte";
 import { onDestroy, tick } from "svelte";
-import { fade, scale } from "svelte/transition";
 import { portal } from "$lib/actions/portal";
 import { isApplePlatform } from "$lib/keyboard";
-import {
-	DURATION_MODAL_IN,
-	DURATION_MODAL_OUT,
-	svelteEaseIn,
-	svelteEaseOut,
-} from "$lib/motion.svelte";
+import { overlay } from "$lib/motion";
 import { attachComposerFiles } from "../attach/to-composer";
 import {
 	detectCaptureCapabilities,
@@ -84,11 +78,6 @@ const busy = $derived(phase === "copying" || phase === "attaching");
 
 /** User can sit on the share picker; after this we surface an error instead of spinning forever. */
 const SHARE_PICKER_TIMEOUT_MS = 90_000;
-
-const TRANSITION_IN = { duration: DURATION_MODAL_IN, easing: svelteEaseOut };
-const TRANSITION_OUT = { duration: DURATION_MODAL_OUT, easing: svelteEaseIn };
-const SCALE_IN = { ...TRANSITION_IN, start: 0.98 };
-const SCALE_OUT = { ...TRANSITION_OUT, start: 0.98 };
 
 $effect(() => {
 	if (!open) return;
@@ -464,7 +453,7 @@ onDestroy(() => {
 		class="mark-soft-notice toast-surface"
 		role="status"
 		aria-live="polite"
-		in:fade={TRANSITION_IN}
+		in:overlay
 	>
 		{softNotice}
 	</div>
@@ -476,8 +465,7 @@ onDestroy(() => {
 		use:portal
 		class="mark-overlay"
 		role="presentation"
-		in:fade={TRANSITION_IN}
-		out:fade={TRANSITION_OUT}
+		transition:overlay
 		onmousedown={onBackdropPointer}
 	>
 		<div
@@ -487,8 +475,7 @@ onDestroy(() => {
 			aria-modal="true"
 			aria-label="Mark preview"
 			tabindex="-1"
-			in:scale|local={SCALE_IN}
-			out:scale|local={SCALE_OUT}
+			transition:overlay={{ kind: "pop" }}
 		>
 			{#if (phase === "marking" || phase === "copying" || phase === "attaching") && session}
 				<MarkToolbar

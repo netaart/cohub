@@ -1,6 +1,3 @@
-import { triggerBlobDownload, triggerUrlDownload } from "$lib/browser-download";
-import { hostSavesFiles } from "$lib/host-files";
-
 export type DownloadableMedia = {
 	src: string;
 	type: "image" | "video" | "audio";
@@ -55,24 +52,4 @@ export function mediaFilename(media: DownloadableMedia): string {
 	const extension =
 		(mime && EXTENSION_BY_MIME[mime]) ?? DEFAULT_EXTENSION[media.type];
 	return `${base}.${extension}`;
-}
-
-/**
- * Fetch as a Blob so `download` is honored; fall back to the URL. `no-store`
- * matters: an `<img>` may have cached this URL without CORS headers, and a
- * cached opaque-origin response fails the fetch's CORS check.
- */
-export async function downloadMedia(media: DownloadableMedia) {
-	const filename = mediaFilename(media);
-	if (hostSavesFiles() && /^https:/i.test(media.src)) {
-		triggerUrlDownload(media.src, filename);
-		return;
-	}
-	try {
-		const response = await fetch(media.src, { cache: "no-store" });
-		if (!response.ok) throw new Error(`HTTP ${response.status}`);
-		triggerBlobDownload(await response.blob(), filename);
-	} catch {
-		triggerUrlDownload(media.src, filename);
-	}
 }

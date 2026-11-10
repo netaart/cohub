@@ -3,7 +3,7 @@ name: Sandbox CI
 on:
   pull_request:
     # Only sandbox and CLI changes need the Go and Windows runners. The
-    # package.json/CHANGELOG exclusions mirror ci.yml's Version Packages skip.
+    # exclusions skip bot PRs that only bump versions or binary pins.
     paths:
       - 'apps/sandbox/**'
       - 'packages/cli/**'
@@ -14,6 +14,7 @@ on:
       - '.github/workflows/sandbox-ci.yml'
       - '!**/package.json'
       - '!**/CHANGELOG.md'
+      - '!packages/cli/src/binary-pins.ts'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

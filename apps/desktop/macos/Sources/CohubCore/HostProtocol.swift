@@ -45,6 +45,7 @@ public enum HostProtocol {
         public static let navigationOpenPath = "navigation.openPath"
         public static let shareText = "share.text"
         public static let filesSave = "files.save"
+        public static let filesReveal = "files.reveal"
         public static let cacheClear = "cache.clear"
         public static let notificationsRegister = "notifications.register"
         public static let notificationsShow = "notifications.show"
@@ -75,6 +76,7 @@ public enum HostProtocol {
         public static let appBackground = "app.background"
         public static let runtimeChanged = "runtime.changed"
         public static let displayChanged = "display.changed"
+        public static let filesProgress = "files.progress"
     }
 
     public enum ErrorCode {

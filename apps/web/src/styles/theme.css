@@ -188,6 +188,10 @@
 
 	--spacing-workspace: 2rem;
 
+	/* Motion; mirrored in $lib/motion.ts */
+	--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
 	/* Backgrounds */
 	--color-bg-primary: var(--bg-primary);
 	--color-bg-content: var(--bg-content);
@@ -385,8 +389,8 @@ html[data-nav-transition="session-forward"]::view-transition-old(cohub-session-s
 html[data-nav-transition="session-forward"]::view-transition-new(cohub-session-surface),
 html[data-nav-transition="session-back"]::view-transition-old(cohub-session-surface),
 html[data-nav-transition="session-back"]::view-transition-new(cohub-session-surface) {
-	animation-duration: var(--motion-panel-duration, 280ms);
-	animation-timing-function: var(--motion-panel-ease, cubic-bezier(0.16, 1, 0.3, 1));
+	animation-duration: var(--motion-panel-duration);
+	animation-timing-function: var(--ease-out);
 	animation-fill-mode: both;
 }
 

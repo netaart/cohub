@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { uploadAssetIfMissing } from "./assets.js";
 import { mapLimit } from "./limit.js";
 import { fileMode, isRacy, reusableEntry, type FileIndex, type FileIndexEntry } from "./file-index.js";
-import { writeBlobs, type BlobSource, type ObjectBuilder, type TreeEntry } from "./objects.js";
+import { writeBlobs, type BlobSource, type ObjectBuilder } from "./objects.js";
+import type { TreeLeaf } from "./trees.js";
 import { CHECKPOINT_ASSET_MANIFEST_PATH, CHECKPOINT_META_PATH, USER_GIT_REPOS_PATH } from "./paths.js";
 import { stageFile, type ScannedFile } from "./scan.js";
 
@@ -104,12 +105,28 @@ export async function buildSnapshot(input: {
   for (const [index, file] of blobFiles.entries()) record(file, oids[index] as string, null);
   for (const [index, file] of assetFiles.entries()) record(file, oids[blobFiles.length + index] as string, uploaded[index] as CheckpointAsset);
 
-  const tree: TreeEntry[] = Array.from(entries, ([path, entry]) => ({ path, mode: entry.mode, oid: entry.oid }));
-  tree.push(
-    { path: CHECKPOINT_ASSET_MANIFEST_PATH, mode: "100644", oid: assetManifestOid },
-    { path: CHECKPOINT_META_PATH, mode: "100644", oid: metaOid },
-    { path: USER_GIT_REPOS_PATH, mode: "100644", oid: userGitReposOid },
-  );
+  const leaves = new Map<string, TreeLeaf>();
+  const changed: string[] = [];
+  for (const [path, entry] of entries) {
+    leaves.set(path, { mode: entry.mode, oid: entry.oid });
+    const before = previous.get(path);
+    if (before?.oid !== entry.oid || before.mode !== entry.mode) changed.push(path);
+  }
+  const deleted = [...previous.keys()].filter((path) => !entries.has(path));
+  const system: Array<[string, string]> = [[CHECKPOINT_ASSET_MANIFEST_PATH, assetManifestOid], [CHECKPOINT_META_PATH, metaOid], [USER_GIT_REPOS_PATH, userGitReposOid]];
+  for (const [path, oid] of system) leaves.set(path, { mode: "100644", oid });
 
-  return { tree, entries, assets, hashedFileCount };
+  return {
+    leaves,
+    entries,
+    assets,
+    hashedFileCount,
+    /** Workspace paths whose content or mode differs from the previous index. */
+    changed,
+    deleted,
+    /** Paths that touch a directory's tree: workspace changes plus the system files every save rewrites. */
+    dirty: [...changed, ...deleted, ...system.map(([path]) => path)],
+    /** Objects this save wrote; reused ones are already in the parent's packs. */
+    blobs: oids,
+  };
 }

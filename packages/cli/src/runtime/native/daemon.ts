@@ -158,10 +158,10 @@ export class NativeRuntime {
     if (this.codex.enabled) void this.codex.get();
   }
 
-  /** `approvals`: the Gateway relays approval decisions back. */
-  connect(send: ((event: NativeRuntimeEvent) => Promise<unknown>) | null, features: { approvals?: boolean } = {}): void {
+  /** `approvals`: the Gateway relays approval decisions back. `nativeMessages`: a large Turn is sent in several frames. */
+  connect(send: ((event: NativeRuntimeEvent) => Promise<unknown>) | null, features: { approvals?: boolean; nativeMessages?: boolean } = {}): void {
     this.send = send;
-    this.ingest.connect(send ? nativeWebSocketTransport(send) : null);
+    this.ingest.connect(send ? nativeWebSocketTransport(send, { messages: features.nativeMessages }) : null);
     this.approvals.connect(send && features.approvals ? send : null);
   }
 

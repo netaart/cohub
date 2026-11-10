@@ -905,25 +905,10 @@ export function createFileWorkspaceController(
 		await options.onOpenInlineFile(path);
 	}
 
-	async function downloadActiveFsFile(
-		path: string,
-		knownFile: SpaceFsFileResponse | null | undefined,
-	) {
-		await getActiveFsClient().download(path, knownFile);
-	}
-
-	async function downloadInlineFile() {
+	function downloadInlineFile() {
 		const inlineFile = getActiveInlineFile();
-		if (!inlineFile) return;
-		try {
-			await downloadActiveFsFile(inlineFile.path, inlineFile.response);
-		} catch (error) {
-			setInlineFileTab(inlineFile.path, (tab) => ({
-				...tab,
-				error:
-					error instanceof Error ? error.message : "Failed to download file",
-			}));
-		}
+		if (inlineFile)
+			void getActiveFsClient().save(inlineFile.path, inlineFile.response);
 	}
 
 	async function openInlineFile(
@@ -1734,14 +1719,8 @@ export function createFileWorkspaceController(
 		}
 	}
 
-	async function handleDownloadNode(node: SpaceFsNode) {
-		if (node.type !== "file") return;
-		try {
-			await downloadActiveFsFile(node.path, null);
-		} catch (error) {
-			fileTreeError =
-				error instanceof Error ? error.message : "Failed to download";
-		}
+	function handleDownloadNode(node: SpaceFsNode) {
+		if (node.type === "file") void getActiveFsClient().save(node.path);
 	}
 
 	async function handleDeleteNode(node: SpaceFsNode): Promise<boolean> {
@@ -1951,18 +1930,6 @@ export function createFileWorkspaceController(
 		get inlineFilePreview() {
 			return filePreviewModel(getActiveInlineFile()?.response);
 		},
-		get inlineFileDownloadUrl() {
-			const inlineFile = getActiveInlineFile();
-			if (!inlineFile) return "";
-			return getActiveFsClient().getDownloadUrl(
-				inlineFile.path,
-				inlineFile.response,
-			);
-		},
-		get inlineFileDownloadName() {
-			const inlineFile = getActiveInlineFile();
-			return inlineFile ? (inlineFile.path.split("/").pop() ?? "download") : "";
-		},
 		get inlineFileViewMode() {
 			return getActiveInlineFile()?.viewMode ?? "source";
 		},
@@ -2089,7 +2056,6 @@ export function createFileWorkspaceController(
 		reloadInlineFile,
 		copyInlineFileContent,
 		downloadInlineFile,
-		downloadActiveFsFile,
 		handleCreateFile,
 		handleCreateBoard,
 		handleCreateDir,

@@ -367,6 +367,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let cancelPrefetch: (() => void) | null = null;
 	const staleIds = new Set<string>();
 	let canvasBox: BoardCanvasBox | null = null;
+	let canvasSize = { width: 0, height: 0, resolution: 0 };
 	let cardEpoch = 0;
 	let fontEpoch = 0;
 	let shownEditingId: string | null = null;
@@ -1181,9 +1182,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		const size = { width: host.clientWidth, height: host.clientHeight };
 		if (size.width <= 0 || size.height <= 0) return false;
 		const density = host.ownerDocument.defaultView?.devicePixelRatio ?? 1;
-		const canvas = boardCanvasSize(canvasBox ?? { ...size, density, device: null }, density);
-		if (canvas.width !== app.screen.width || canvas.height !== app.screen.height || canvas.resolution !== app.renderer.resolution) {
+		const canvas = boardCanvasSize(canvasBox, size, density);
+		if (canvas.width !== canvasSize.width || canvas.height !== canvasSize.height || canvas.resolution !== canvasSize.resolution) {
 			app.renderer.resize(canvas.width, canvas.height, canvas.resolution);
+			canvasSize = canvas;
 		}
 		if (size.width !== surface.width || size.height !== surface.height) {
 			surface = size;

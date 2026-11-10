@@ -69,8 +69,8 @@ function categoryLabel() {
   return {
     task: m.sidebar_tasks,
     checkpoint: m.sidebar_saves,
-    cronjob: m.sidebar_scheduled,
-    app: m.sidebar_apps,
+    cronjob: m.side_panel_tab_scheduled,
+    app: m.side_panel_tab_apps,
   }[kind]({}, { locale });
 }
 

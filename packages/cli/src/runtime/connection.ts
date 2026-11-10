@@ -61,7 +61,7 @@ export type RuntimeConnectionOptions = {
   runtimeId?: string;
   diagnostics?: RuntimeDiagnostics;
   leaseConflictTimeoutMs?: number;
-  onNativeChannel?: (send: (event: NativeRuntimeEvent) => Promise<unknown>, features: { approvals: boolean }) => void;
+  onNativeChannel?: (send: (event: NativeRuntimeEvent) => Promise<unknown>, features: { approvals: boolean; nativeMessages: boolean }) => void;
   /** The web asked to stop a Turn; one running in a native client is stopped there. */
   onNativeStop?: (stop: RuntimeNativeStop) => void;
   onApprovalDecision?: (decision: RuntimeApprovalDecision) => void;
@@ -325,8 +325,8 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
   const sendNative = (event: NativeRuntimeEvent) => new Promise<unknown>((resolve, reject) => {
     if (!nativeChannelReady || !connectionId) { reject(new Error("Runtime native channel is unavailable")); return; }
     const requestId = randomUUID();
-    // An ingest batch writes each of its Turns durably; everything else answers from memory or one row.
-    const timer = setTimeout(() => { nativePending.delete(requestId); reject(new Error("Native Runtime event timed out")); }, event.type === "ingest" ? 120_000 : 30_000);
+    // Ingest and staged messages write durably; everything else answers from memory or one row.
+    const timer = setTimeout(() => { nativePending.delete(requestId); reject(new Error("Native Runtime event timed out")); }, event.type === "ingest" || event.type === "messages" ? 120_000 : 30_000);
     nativePending.set(requestId, { resolve, reject, timer });
     try { send({ type: "runtime.native", requestId, event }); }
     catch (error) { clearTimeout(timer); nativePending.delete(requestId); reject(error instanceof Error ? error : new Error(String(error))); }
@@ -505,7 +505,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         }, { connectionId });
         nativeChannelReady = true;
         capabilitiesFrame = frame.features?.includes("capabilities") === true;
-        options.onNativeChannel?.(sendNative, { approvals: frame.features?.includes("approvals") === true });
+        options.onNativeChannel?.(sendNative, { approvals: frame.features?.includes("approvals") === true, nativeMessages: frame.features?.includes("nativeMessages") === true });
         options.onReady();
         options.announce.current = announceHere;
         options.catalog.publish = publishCatalog;

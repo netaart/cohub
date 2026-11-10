@@ -73,6 +73,9 @@ func TestMountsSyncWriteAndFence(t *testing.T) {
 	if err != nil || resolved.path != skill || !resolved.isReadOnly(cfg) {
 		t.Fatalf("virtual mount path must resolve read-only: %v %+v", err, resolved)
 	}
+	if direct, err := resolveSandboxPath(cfg, skill, "/workspace"); err != nil || direct.path != skill || !direct.isReadOnly(cfg) {
+		t.Fatalf("the host path the prompt lists must resolve read-only: %v %+v", err, direct)
+	}
 	if _, err := resolveSandboxPath(cfg, filepath.Join(cfg.CacheDir, "mounts.json"), "/workspace"); err == nil {
 		t.Fatalf("mount state outside the mount roots must stay fenced")
 	}

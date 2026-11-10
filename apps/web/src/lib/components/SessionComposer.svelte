@@ -1417,7 +1417,7 @@ $effect(() => {
 							{/if}
 							<button
 								type="button"
-								class="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-bg-elevated/90 text-text-tertiary opacity-0 shadow-sm ring-1 ring-border-subtle transition-all hover:text-text-primary group-hover:opacity-100"
+								class="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-bg-elevated/90 text-text-tertiary opacity-0 shadow-sm ring-1 ring-border-subtle transition-[color,opacity] hover:text-text-primary group-hover:opacity-100 touch:opacity-100"
 								onclick={() => onremoveattachment?.(attachment.id)}
 								title={m.composer_remove_attachment({}, { locale })}
 							>
@@ -1750,7 +1750,7 @@ $effect(() => {
 							{/if}
 							<button
 								type="button"
-								class={`voice-record-button relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-all disabled:cursor-not-allowed disabled:opacity-50 ${isVoiceRecording ? 'border-brand/45 bg-brand text-brand-contrast-fg shadow-sm' : isVoiceStarting ? 'border-border-subtle bg-bg-hover-strong text-text-secondary' : 'border-transparent text-text-tertiary hover:bg-bg-hover hover:text-text-primary'}`}
+								class={`voice-record-button relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${isVoiceRecording ? 'border-brand/45 bg-brand text-brand-contrast-fg shadow-sm' : isVoiceStarting ? 'border-border-subtle bg-bg-hover-strong text-text-secondary' : 'border-transparent text-text-tertiary hover:bg-bg-hover hover:text-text-primary'}`}
 								disabled={disabled || sending || isVoiceStarting}
 								title={isVoiceRecording ? m.composer_stop_voice({}, { locale }) : m.composer_start_voice({}, { locale })}
 								aria-label={isVoiceRecording ? m.composer_stop_voice({}, { locale }) : m.composer_start_voice({}, { locale })}
@@ -1797,7 +1797,7 @@ $effect(() => {
 
 	:global(::view-transition-group(session-composer)) {
 		animation-duration: 140ms;
-		animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+		animation-timing-function: var(--ease-out);
 	}
 
 	:global(::view-transition-image-pair(session-composer)) {

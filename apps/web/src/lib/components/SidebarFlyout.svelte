@@ -147,7 +147,7 @@ onDestroy(clearCloseTimer);
 
 	@media (prefers-reduced-motion: no-preference) {
 		.sidebar-flyout-panel {
-			animation: sidebar-flyout-enter 120ms cubic-bezier(0.16, 1, 0.3, 1);
+			animation: sidebar-flyout-enter 120ms var(--ease-out);
 			transform-origin: left top;
 		}
 

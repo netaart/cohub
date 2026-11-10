@@ -64,6 +64,7 @@
     "app.ready",
     "haptics.perform",
     "files.save",
+    "files.reveal",
     "navigation.interceptBack",
     "shortcuts.push",
     "tabs.update",
@@ -85,7 +86,8 @@
     "app.background",
     "runtime.changed",
     "display.changed",
-    "display.open"
+    "display.open",
+    "files.progress"
   ],
   "errors": [
     "unsupported",

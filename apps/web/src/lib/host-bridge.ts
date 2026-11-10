@@ -65,9 +65,12 @@ export function hostPlatform(): HostPlatform | null {
 	return ensureBridge().status?.platform ?? null;
 }
 
+export function isHosted(): boolean {
+	return typeof window !== "undefined" && HOST_BRIDGE_GLOBAL in window;
+}
+
 export function hostAllowsMediaCapture(): boolean {
-	const hosted = typeof window !== "undefined" && HOST_BRIDGE_GLOBAL in window;
-	return !hosted || supportsHostCapability("media.capture");
+	return !isHosted() || supportsHostCapability("media.capture");
 }
 
 /**

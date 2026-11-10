@@ -201,7 +201,12 @@ export type HostHaptic = AppRuntimeHaptic;
 
 export const HOST_FILE_DATA_MAX_LENGTH = 16 * 1024 * 1024;
 
+/** A save streams to disk and may wait on a system sheet, so it outlives ordinary calls. */
+export const HOST_FILE_SAVE_TIMEOUT_MS = 60 * 60_000;
+
+/** `id` is chosen by the web side; it correlates `files.progress` events and `files.reveal`. */
 const savedFileSchema = z.object({
+  id: identifier,
   name: z.string().min(1).max(255),
   mimeType: z.string().min(1).max(255).optional(),
 });
@@ -211,6 +216,24 @@ export const hostFileSaveParamsSchema = z.union([
   savedFileSchema.extend({ data: z.base64().max(HOST_FILE_DATA_MAX_LENGTH) }).strict(),
 ]);
 export type HostFileSaveParams = z.infer<typeof hostFileSaveParamsSchema>;
+
+export const HOST_FILE_LOCATIONS = ["downloads", "pictures", "movies", "music", "photos", "files"] as const;
+export type HostFileLocation = (typeof HOST_FILE_LOCATIONS)[number];
+
+/** Resolves once the file is on disk; a dismissed system sheet rejects as `canceled`. */
+export const hostFileSavedSchema = z.object({
+  location: z.enum(HOST_FILE_LOCATIONS),
+  revealable: z.boolean(),
+}).strict();
+export type HostFileSaved = z.infer<typeof hostFileSavedSchema>;
+
+export const HOST_FILE_PROGRESS_EVENT = "files.progress" as const;
+export const hostFileProgressSchema = z.object({
+  id: identifier,
+  received: z.number().int().nonnegative(),
+  total: z.number().int().positive().nullable(),
+}).strict();
+export type HostFileProgress = z.infer<typeof hostFileProgressSchema>;
 
 const settingParams = z.object({ enabled: z.boolean().optional() }).strict();
 
@@ -335,7 +358,8 @@ export const HOST_BRIDGE_METHODS = {
   "appearance.set": { params: z.object({ backgroundColor: hostColorSchema }).strict(), result: z.boolean() },
   "app.ready": { params: z.undefined(), result: z.boolean() },
   "haptics.perform": { params: z.object({ kind: z.enum(HOST_HAPTICS) }).strict(), result: z.boolean() },
-  "files.save": { params: hostFileSaveParamsSchema, result: z.boolean() },
+  "files.save": { params: hostFileSaveParamsSchema, result: hostFileSavedSchema },
+  "files.reveal": { params: z.object({ id: identifier }).strict(), result: z.boolean() },
   "navigation.interceptBack": { params: z.object({ enabled: z.boolean() }).strict(), result: z.boolean() },
   "shortcuts.push": { params: hostShortcutSchema, result: z.boolean() },
   "tabs.update": { params: hostTabStateSchema, result: z.boolean() },
@@ -358,7 +382,7 @@ export const HOST_BRIDGE_METHODS = {
 } as const;
 export type HostBridgeMethod = keyof typeof HOST_BRIDGE_METHODS;
 
-export const HOST_BRIDGE_EVENTS = ["auth.changed", "auth.signedOut", "navigation.back", "app.foreground", "app.background", "runtime.changed", "display.changed", "display.open"] as const;
+export const HOST_BRIDGE_EVENTS = ["auth.changed", "auth.signedOut", "navigation.back", "app.foreground", "app.background", "runtime.changed", "display.changed", "display.open", HOST_FILE_PROGRESS_EVENT] as const;
 export type HostBridgeEventName = (typeof HOST_BRIDGE_EVENTS)[number];
 
 export const HOST_BRIDGE_ERROR = {

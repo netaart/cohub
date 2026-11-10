@@ -58,6 +58,15 @@ export function buildFsCdnObjectKey(input: {
   return `${prefix}fs-cache/spaces/${input.spaceId}/files/${pathHash}/${version}/${safeFilename}`;
 }
 
+/** Cohub CDN zones answer `Content-Disposition: attachment` when this query is present and keep it out of the cache key. */
+export const CDN_DOWNLOAD_QUERY = "download";
+
+export function cdnDownloadUrl(url: string) {
+  const download = new URL(url);
+  download.searchParams.set(CDN_DOWNLOAD_QUERY, "1");
+  return download.toString();
+}
+
 export function buildFsCdnManifestKey(input: { env: FsCdnEnvironment; spaceId: string; path: string }) {
   return `space-fs-cdn:${input.env}:${input.spaceId}:${fsCdnPathHash(input.path)}`;
 }

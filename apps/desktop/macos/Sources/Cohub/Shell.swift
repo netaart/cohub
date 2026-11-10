@@ -253,7 +253,10 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 tab?.share(text)
                 return true
             },
-            M.filesSave: { params in try await Downloads.save(params); return true },
+            M.filesSave: { [weak tab] params in
+                try await Downloads.save(params) { [weak tab] payload in tab?.emit(HostProtocol.Event.filesProgress, payload) }
+            },
+            M.filesReveal: { params in .bool(Downloads.reveal(params)) },
             M.permissionsStatus: { [weak self] _ in await HostPermissions.status(notifications: self?.notifications) },
             M.permissionsRequest: { [weak self] params in try await HostPermissions.request(params["kind"]?.string, notifications: self?.notifications) },
             M.permissionsOpenSettings: { params in .bool(Permissions.openSettings(params["kind"]?.string)) },

@@ -1,11 +1,12 @@
 @import "tailwindcss";
-@import "tw-animate-css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 @import "@fontsource-variable/figtree";
 @import "./styles/theme.css";
 @import "./styles/components.css";
 @plugin "@tailwindcss/typography";
+
+@custom-variant touch (@media (hover: none));
 
 /* ============================================================
    Cohub Theme System
@@ -37,12 +38,17 @@ body {
 		color 0.2s ease;
 }
 
-/* Motion tokens — keep numeric values aligned with $lib/motion.svelte.ts */
+/* Some Android browsers report a layout viewport that runs under their bottom toolbar. */
+@media (display-mode: browser) {
+	html {
+		height: min(100%, 100dvh);
+	}
+}
+
 :root {
 	--motion-panel-duration: 280ms;
 	--motion-panel-fade-duration: 160ms;
 	--motion-panel-fade-collapse-duration: 120ms;
-	--motion-panel-ease: cubic-bezier(0.16, 1, 0.3, 1);
 	--motion-panel-collapse-ease: cubic-bezier(0.4, 0, 0.6, 1);
 
 	/* ============================================================
@@ -117,7 +123,7 @@ body.panel-resizing iframe {
 	overflow: hidden;
 	/* Expand: expo-out. Collapse uses the same curve — still snappy
 	   enough and avoids dual-easing complexity on a shared class. */
-	transition: width var(--motion-panel-duration) var(--motion-panel-ease);
+	transition: width var(--motion-panel-duration) var(--ease-out);
 }
 
 /* Icon rail / flyout hosts need overflow so portaled menus are not clipped. */
@@ -147,7 +153,7 @@ body.panel-resizing iframe {
 	height: 100%;
 	min-height: 0;
 	min-width: 0;
-	transition: opacity var(--motion-panel-fade-duration) var(--motion-panel-ease);
+	transition: opacity var(--motion-panel-fade-duration) var(--ease-out);
 }
 
 .layout-resizing .panel-shell,
@@ -218,13 +224,19 @@ body.panel-resizing iframe {
 		"calt" 0;
 }
 
-/* Reduced motion */
+/* Reduced motion: keep color and opacity feedback, drop movement, slow loaders. */
 @media (prefers-reduced-motion: reduce) {
-	*,
-	*::before,
-	*::after {
-		animation-duration: 0.01ms;
-		transition-duration: 0.01ms;
+	:is(.transition-transform, .transition) {
+		transition-property:
+			color, background-color, border-color, outline-color, box-shadow, opacity;
+	}
+
+	.animate-ping {
+		animation: none;
+	}
+
+	.animate-spin {
+		animation-duration: 2.4s;
 	}
 }
 
@@ -318,7 +330,14 @@ body.panel-resizing iframe {
 		background-color 120ms ease,
 		color 120ms ease;
 
-	&:hover,
+	@media (hover: hover) {
+		&:hover {
+			background: var(--bg-hover);
+			color: var(--text-secondary);
+		}
+	}
+
+	&:active,
 	&[aria-expanded="true"] {
 		background: var(--bg-hover);
 		color: var(--text-secondary);
@@ -785,7 +804,7 @@ body.pointer-dragging {
 
 .streaming-tail {
 	opacity: 0;
-	animation: streaming-tail-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+	animation: streaming-tail-enter 180ms var(--ease-out) forwards;
 }
 
 .streaming-tail-muted {
@@ -1331,8 +1350,10 @@ body.pointer-dragging {
 	transition: background-color 120ms ease;
 }
 
-.markdown-content tbody tr:hover td {
-	background: color-mix(in srgb, var(--bg-hover) 50%, transparent);
+@media (hover: hover) {
+	.markdown-content tbody tr:hover td {
+		background: color-mix(in srgb, var(--bg-hover) 50%, transparent);
+	}
 }
 
 @media (max-width: 640px) {
@@ -1478,16 +1499,27 @@ body.pointer-dragging {
 	display: none;
 }
 
-.markdown-code-block:hover .markdown-code-copy,
 .markdown-code-copy:focus-visible,
 .markdown-code-copy.copied {
 	opacity: 1;
 }
 
-.markdown-code-copy:hover {
-	border-color: var(--border-primary);
-	background: var(--bg-elevated);
-	color: var(--text-primary);
+@media (hover: hover) {
+	.markdown-code-block:hover .markdown-code-copy {
+		opacity: 1;
+	}
+
+	.markdown-code-copy:hover {
+		border-color: var(--border-primary);
+		background: var(--bg-elevated);
+		color: var(--text-primary);
+	}
+}
+
+@media (hover: none) {
+	.markdown-code-copy {
+		opacity: 1;
+	}
 }
 
 .markdown-code-copy:focus-visible {

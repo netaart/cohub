@@ -6,6 +6,11 @@ import {
 	sessionGenerationStore,
 } from "./session-generation.svelte";
 
+const storedBySource = new WeakMap<
+	StreamingIntermediateMessage,
+	{ scope: string; stored: StoredIntermediateMessage | null }
+>();
+
 export function buildStreamingStoredIntermediateMessages(input: {
 	spaceId?: string | null;
 	sessionId: string;
@@ -19,11 +24,14 @@ export function buildStreamingStoredIntermediateMessages(input: {
 	);
 	const next = (input.intermediateMessages ?? [])
 		.map((message, index) => {
+			const scope = `${input.spaceId ?? ""}:${input.sessionId}:${input.turnId ?? ""}:${index}`;
+			const cached = storedBySource.get(message);
+			if (cached?.scope === scope) return cached.stored;
 			const streamMessageId =
 				message.id ??
 				message.messageId ??
 				`stream:${input.sessionId}:${input.turnId ?? "turn"}:intermediate:${index}`;
-			return createStreamingIntermediateMessage({
+			const stored = createStreamingIntermediateMessage({
 				spaceId: input.spaceId,
 				sessionId: input.sessionId,
 				turnId: input.turnId,
@@ -46,6 +54,8 @@ export function buildStreamingStoredIntermediateMessages(input: {
 				meta: message.meta,
 				createdAt: message.createdAt ?? previousCreatedAt.get(streamMessageId),
 			});
+			storedBySource.set(message, { scope, stored });
+			return stored;
 		})
 		.filter((message): message is StoredIntermediateMessage =>
 			Boolean(message),

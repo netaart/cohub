@@ -18,11 +18,9 @@ export function measureBoardCanvasBox(entry: ResizeObserverEntry, density: numbe
 	};
 }
 
-export function boardCanvasSize(box: BoardCanvasBox, density: number) {
-	const resolution = getBoardResolution(box, density);
-	const { device } = box;
-	if (device && box.density === density && resolution === density) {
-		return { width: device.width / density, height: device.height / density, resolution };
-	}
-	return { width: box.width, height: box.height, resolution };
+export function boardCanvasSize(box: BoardCanvasBox | null, host: { width: number; height: number }, density: number) {
+	const fresh = box && box.width > 0 && box.height > 0 && box.density === density ? box : null;
+	const { width, height } = fresh ?? host;
+	const scale = fresh?.device && fresh.device.width > 0 ? fresh.device.width / width : density;
+	return { width, height, resolution: getBoardResolution({ width, height }, scale) };
 }
