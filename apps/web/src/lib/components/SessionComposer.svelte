@@ -35,6 +35,10 @@ import {
 	COMPOSER_ATTACHMENT_ACCEPT,
 	type ComposerAttachment,
 	type ComposerImageAttachment,
+	createPastedTextFile,
+	isLargeComposerPaste,
+	MAX_COMPOSER_ATTACHMENTS,
+	MAX_COMPOSER_TEXT_ATTACHMENT_BYTES,
 } from "$lib/composer-attachments";
 import {
 	COMPACT_COMPOSER_MIN_HEIGHT,
@@ -1127,8 +1131,23 @@ function focusComposer() {
 	});
 }
 
+function pasteLargeText(text: string) {
+	const file = createPastedTextFile(text);
+	const canAttach =
+		onpickattachment &&
+		attachments.length < MAX_COMPOSER_ATTACHMENTS &&
+		(mode !== "create" || file.size <= MAX_COMPOSER_TEXT_ATTACHMENT_BYTES);
+	if (canAttach) onpickattachment(entriesFromFiles([file]));
+	else insertSnippet(text);
+}
+
 function handlePaste(event: ClipboardEvent) {
 	const clipboardText = event.clipboardData?.getData("text/plain") ?? "";
+	if (clipboardText && isLargeComposerPaste(clipboardText)) {
+		event.preventDefault();
+		pasteLargeText(clipboardText);
+		return;
+	}
 	if (clipboardText) {
 		pastedSpaceResolveController?.abort();
 		pastedSpaceResolveController = null;
@@ -1402,18 +1421,18 @@ $effect(() => {
 								<div class="min-w-0 flex-1 pr-4">
 									<div class="truncate text-[12px] font-medium leading-4 text-text-primary" title={attachment.kind === 'file' ? attachment.relativePath : attachment.name}>{attachment.kind === 'file' ? attachment.relativePath : attachment.name}</div>
 									<div class="mt-0.5 flex items-center gap-1.5 text-[10px] leading-3 text-text-tertiary">
-										<span>{attachment.kind === 'file' ? 'File' : 'Text'}</span>
+										<span>{attachment.kind === 'file' ? m.attach_file({}, { locale }) : m.attach_text({}, { locale })}</span>
 										<span aria-hidden="true">·</span>
 										<span>{Math.ceil(attachment.size / 1024)} KB</span>
 										{#if attachment.kind === 'file'}
 											<span aria-hidden="true">·</span>
-											<span class="min-w-0 truncate">{attachment.status === 'uploading' ? `Uploading ${Math.round(attachment.progress ?? 0)}%` : attachment.status === 'finalizing' ? 'Finalizing' : attachment.status === 'failed' ? 'Failed' : 'Ready'}</span>
+											<span class="min-w-0 truncate">{attachment.status === 'uploading' ? m.attach_status_uploading({ percent: Math.round(attachment.progress ?? 0) }, { locale }) : attachment.status === 'finalizing' ? m.attach_status_finalizing({}, { locale }) : attachment.status === 'failed' ? m.attach_status_failed({}, { locale }) : m.attach_status_ready({}, { locale })}</span>
 										{/if}
 									</div>
 								</div>
 							{/if}
 							{#if (attachment.kind === 'file' || attachment.kind === 'image') && (attachment.status === 'uploading' || attachment.status === 'finalizing')}
-								<UploadProgress class="absolute inset-x-0 bottom-0 z-10" value={attachment.status === 'uploading' ? attachment.progress ?? 0 : null} label={`Upload ${attachment.name}`} />
+								<UploadProgress class="absolute inset-x-0 bottom-0 z-10" value={attachment.status === 'uploading' ? attachment.progress ?? 0 : null} label={m.attach_upload_named({ name: attachment.name }, { locale })} />
 							{/if}
 							<button
 								type="button"
