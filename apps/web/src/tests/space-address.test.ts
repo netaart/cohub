@@ -60,6 +60,13 @@ test("links and the address bar use confirmed addresses only", () => {
 	);
 });
 
+test("reserved names held from before they were reserved keep id links", () => {
+	rememberSpaceAddress({ id: "x", slug: "notes", ownerProfile: owner("dev") });
+	rememberSpaceAddress({ id: "y", slug: "join", ownerProfile: owner("alice") });
+	assert.equal(buildSpaceSessionRoute("x", "s1"), "/spaces/x/sessions/s1");
+	assert.equal(buildSpaceSessionRoute("y", "s1"), "/spaces/y/sessions/s1");
+});
+
 test("one address belongs to one Space, and cache seeds never displace server data", () => {
 	rememberSpaceAddress({
 		id: "x",

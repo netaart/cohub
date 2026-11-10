@@ -121,7 +121,13 @@ export function rememberSpaceAddress(
 	const username = Object.hasOwn(space, "ownerProfile")
 		? space.ownerProfile?.username
 		: current?.username;
-	if (!slug || !username) {
+	// Names assigned before they were reserved stay on `/spaces/:id`: the platform route wins.
+	if (
+		!slug ||
+		!username ||
+		isReservedPublicIdentifier("username", username) ||
+		isReservedPublicIdentifier("spaceSlug", slug)
+	) {
 		if (current && (confirmed || !current.confirmed)) {
 			byAddress.delete(addressKey(current));
 			bySpace.delete(space.id);
