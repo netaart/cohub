@@ -10,7 +10,7 @@
  * reachable from commit `c`.
  */
 import { spawn } from "node:child_process";
-import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export const CHECKPOINT_COVER_FANOUT = 16;
@@ -182,8 +182,12 @@ export async function hasCommit(repoDir: string, commit: string) {
   return runCheckpointGit(["cat-file", "-e", `${commit}^{commit}`], { cwd: repoDir }).then(() => true, () => false);
 }
 
-export const isPackInstalled = (repoDir: string, checksum: string) =>
-  stat(join(checkpointPackDir(repoDir), `pack-${assertOid(checksum)}.idx`)).then(() => true, () => false);
+/** Survives a geometric repack, which merges a pack's objects into another and removes its files. */
+const installedMarker = (repoDir: string, checksum: string) => join(repoDir, ".git", "cohub-packs", assertOid(checksum));
+
+export const isPackInstalled = async (repoDir: string, checksum: string) =>
+  await stat(installedMarker(repoDir, checksum)).then(() => true, () => false)
+  || await stat(join(checkpointPackDir(repoDir), `pack-${assertOid(checksum)}.idx`)).then(() => true, () => false);
 
 async function readTail(path: string, offsetFromEnd: number, length: number) {
   const handle = await open(path, "r");
@@ -223,15 +227,18 @@ export async function installPackFiles(repoDir: string, checksum: string, files:
   await Promise.all([fsyncFile(files.packPath), fsyncFile(files.idxPath)]);
   await rename(files.packPath, join(packDir, `pack-${checksum}.pack`));
   await rename(files.idxPath, join(packDir, `pack-${checksum}.idx`));
+  await mkdir(join(repoDir, ".git", "cohub-packs"), { recursive: true, mode: 0o775 });
+  await writeFile(installedMarker(repoDir, checksum), "");
 }
 
 async function downloadPack(store: CheckpointObjectReader, repoDir: string, pack: CheckpointPackRef) {
   if (await isPackInstalled(repoDir, pack.checksum)) return false;
   const packDir = checkpointPackDir(repoDir);
   await mkdir(packDir, { recursive: true, mode: 0o775 });
+  // No .pack/.idx suffix: git must never mistake an in-flight or orphaned temp file for a pack.
   const token = crypto.randomUUID();
-  const packPath = join(packDir, `tmp_cohub_${token}.pack`);
-  const idxPath = join(packDir, `tmp_cohub_${token}.idx`);
+  const packPath = join(packDir, `tmp_cohub_${token}_pack`);
+  const idxPath = join(packDir, `tmp_cohub_${token}_idx`);
   try {
     if (!await store.download(pack.packKey, packPath)) throw new Error(`checkpoint pack missing: ${pack.packKey}`);
     if (!await store.download(pack.idxKey, idxPath)) throw new Error(`checkpoint pack index missing: ${pack.idxKey}`);
@@ -299,5 +306,22 @@ export async function ensureCheckpointCommits(store: CheckpointObjectReader, rep
     if (!await hasCommit(repoDir, commit)) throw new CheckpointObjectsUnavailableError(commit);
     await markCheckpointCommitComplete(repoDir, commit);
   }
+  if (installed > 0) await compactCachePacks(repoDir).catch((error) => console.warn(`[checkpoint-storage] cache repack failed repo=${repoDir}:`, error));
   return { installed };
+}
+
+/** Above this many packs, every git process reading the cache pays noticeably for scanning them. */
+const CACHE_PACK_LIMIT = 16;
+/** No delta search (merged packs keep their deltas) and bounded mmap windows keep the merge near 70 MB RSS. */
+const REPACK_CONFIG = ["-c", "pack.window=0", "-c", "core.packedGitWindowSize=16m", "-c", "core.packedGitLimit=64m", "-c", "core.deltaBaseCacheLimit=16m"];
+
+/**
+ * Keep the cache repository's pack count logarithmic in what it holds. A
+ * geometric repack merges whole packs and never prunes by reachability, so
+ * every object and completion marker stays valid.
+ */
+async function compactCachePacks(repoDir: string) {
+  const names = await readdir(checkpointPackDir(repoDir)).catch(() => [] as string[]);
+  if (names.filter((name) => name.endsWith(".pack")).length <= CACHE_PACK_LIMIT) return;
+  await runCheckpointGit([...REPACK_CONFIG, "repack", "--geometric=2", "-d", "-q"], { cwd: repoDir });
 }

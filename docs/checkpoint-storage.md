@@ -13,26 +13,31 @@ checkpoint-assets/...                                   large files and nested-r
 
 - Every object is written once and never changed. Keys are content-addressed or derived from commit hashes.
 - Invariant: the packs listed in `manifest(c).packs` contain every object reachable from commit `c`. Packs are self-contained (never thin), so each can be read alone.
-- `SPACE_SYSTEM_ROOT/<spaceId>/repo` is a cache. The API and workers fetch missing packs from the manifest on first read and mark complete commits under `.git/cohub-complete/`. Deleting the cache loses nothing.
+- `SPACE_SYSTEM_ROOT/<spaceId>/repo` is a read cache. Readers fetch missing packs from the manifest on first use and mark complete commits under `.git/cohub-complete/`; once it holds more than 16 packs, `git repack --geometric=2 -d` merges whole packs without pruning, keeping the count logarithmic. Deleting it loses nothing. A normal save never touches it.
 
 ## Save
 
-1. Load the parent's objects and the per-space stat index (`checkpoint-index.v1.ndjson.gz` under the system dir, streamed in and out). An index recorded at the parent or any ancestor of it is usable, since every blob it names is in the parent's closure.
+A normal save needs only the workspace, the per-space stat index, `latest` and object storage; everything it reuses is named by id and already lives in the parent's packs. When the parent's index is missing (a fork's first save, a lost index, a pre-v3 parent), the save reads the parent from the cache repository instead, so its pack, diff and `latest` update come out the same.
+
+1. Read the parent's manifest and the stat index (`checkpoint-index.v1.ndjson.gz` under the system dir, streamed). The index records every file's stat and blob id and every directory's tree id; it is used only when it belongs to the parent (a staged index of the parent, left by a worker that died after committing, is promoted first).
 2. Scan the workspace. A file whose type, mode, size, nanosecond mtime/ctime and inode all match the index reuses its blob without being read. Files touched within 3 seconds of a scan are marked racy and are hashed again next time. Relative symlinks are kept when their resolved real path stays inside the workspace (dangling ones when their text does); others are skipped with an `unsafe_symlink_target` warning. Restore creates symlinks after all files and checks them the same way.
-3. Hash changed files with `git hash-object --no-filters` into a local object directory. Repository `.gitattributes` never change stored bytes. Files above `CHECKPOINT_ASSET_THRESHOLD_BYTES` are uploaded as assets and stored as pointers.
-4. Write the tree from a temporary index, then `commit-tree` on the parent.
-5. Pack `commit ^parent` into one pack, upload it, install it into the cache, and compute the parent diff with `diff-tree`. Line counts cover every file only when the summary lists all of them (500 files); larger diffs count lines for the listed files and leave the totals at 0.
-6. Write the manifest: the parent's packs (with finished covers folded in) plus the new pack.
-7. In one transaction, capture board snapshots, insert the checkpoint and move the head only if it still equals the parent (`head_checkpoint_id IS NOT DISTINCT FROM parent`). If the head moved, the save fails and nothing changes.
-8. Finish: enqueue compaction, write the stat index, and bring `latest` from the commit its meta names to the new one by copying only the paths `diff-tree` reports; rebuild it from a scan when it names no commit in the cache. The meta is cleared first, so an interrupted update is rebuilt next time.
+3. Hash changed files with `git hash-object --no-filters` into a throwaway bare repository on worker-local disk. Repository `.gitattributes` never change stored bytes. Files above `CHECKPOINT_ASSET_THRESHOLD_BYTES` are uploaded as assets and stored as pointers.
+4. Rebuild only the trees of directories with a changed or deleted path (`git mktree --missing`), reusing the index's tree ids for the rest, and write the commit object on the parent.
+5. Pack exactly the objects written in steps 3–4 and upload the pack. After a pre-v3 parent, the pack also holds the parent's history.
+6. Diff against the parent from the change list: old contents come from `latest` (each must hash to the id the index recorded), and git computes renames, line counts and patches on two small trees holding only the changed paths. Without the parent's index, or when `latest` does not hold the parent, git diffs against the parent's tree read from the cache repository.
+7. Write the manifest (the parent's packs, with finished covers folded in, plus the new pack) and stage the new stat index.
+8. In one transaction, capture board snapshots, insert the checkpoint and move the head only if it still equals the parent (`head_checkpoint_id IS NOT DISTINCT FROM parent`). If the head moved, the save fails and nothing changes.
+9. Finish: enqueue compaction, update `latest` by copying only the changed paths (from the change list when `latest` holds the parent, otherwise from `diff-tree` between its commit and the new one in the cache repository, or a full rebuild when it names no commit), then promote the staged index. The meta is cleared first, so an interrupted update is rebuilt next time.
 
-Saves are serialized per space by a Redis lock owned by the task run (2-minute TTL, renewed while running). If a worker dies after step 7, the retried task takes its lock back, finds the checkpoint it already committed (`meta.sourceTaskRunId`) and runs only step 8. The next save reuses the last stat index through the ancestor rule above, so a crash never forces a full rehash.
+Saves are serialized per space by a Redis lock owned by the task run (2-minute TTL, renewed while running). If a worker dies after step 8, the retried task takes its lock back, finds the checkpoint it already committed (the checkpoint id is the task run id) and runs only step 9, deriving the changed paths from the staged and previous indexes.
 
-A parent without a manifest (pre-v3 history) makes the save a baseline: its pack holds the full closure and the manifest restarts at `seq` 0.
+A parent without a manifest (pre-v3 history) makes the save a baseline: its pack holds the commit's full history and the manifest restarts at `seq` 0.
 
 ## Compaction
 
-Saves number their manifests along the commit chain (`seq`). After the save at `seq = s`, for each level `k` with `s` a multiple of 16^k, the system worker packs `commit ^commit~16^k` with full delta compression and records it as cover `L<k>` of that commit. Later saves replace the 16^k packs in that range with the cover. Covers are aligned, so a manifest holds at most about 15 packs per level plus the baseline. Existing manifests are never rewritten, and older checkpoints keep reading the packs they list.
+Saves number their manifests along the commit chain (`seq`). After the save at `seq = s`, for each level `k` with `s` a multiple of 16^k, the system worker builds cover `L<k>` of that commit on worker-local disk: it downloads the packs the commit's manifest lists for the range (saves, or lower covers), merges them with `pack-objects --stdin-packs --no-reuse-object` under bounded delta search, and uploads the result. Later saves replace the 16^k packs in that range with the cover. Covers are aligned, so a manifest holds at most about 15 packs per level plus the baseline. Existing manifests are never rewritten, and older checkpoints keep reading the packs they list.
+
+Saves name reused files and directories by id without reading them, so level-1 compaction also checks the range: every object its commits reference must be in the range's packs or in the base commit's closure (read from the base manifest's pack indexes). A failure leaves no cover and fails the job.
 
 ## Nested Git repositories
 

@@ -18,6 +18,7 @@ import type { ScannedFile } from "./scan.js";
 const INDEX_FILE = "checkpoint-index.v1.ndjson.gz";
 /** Entries modified this close to the scan may change again without a visible stat change. */
 const RACY_WINDOW_NS = 3_000_000_000n;
+const PENDING_FILE = `${INDEX_FILE}.pending`;
 const WRITE_BATCH = 1_000;
 
 export type FileIndexAsset = {
@@ -41,6 +42,8 @@ export type FileIndexEntry = {
 export type FileIndex = {
   commit: string;
   entries: Map<string, FileIndexEntry>;
+  /** Tree id of every directory in `commit` ("" is the root), so a save rebuilds only the directories that changed. */
+  trees: Map<string, string>;
 };
 
 type Row = [string, ScannedFile["type"], string, number, string, string, string, string, 0 | 1, [string, string, string | null] | 0];
@@ -59,8 +62,11 @@ const fromRow = (row: Row): [string, FileIndexEntry] => {
 };
 
 /** The index as last written, whichever commit it belongs to; null when absent or unreadable. */
-export async function loadFileIndex(systemDir: string): Promise<FileIndex | null> {
-  const handle = await open(join(systemDir, INDEX_FILE), "r").catch(() => null);
+export const loadFileIndex = (systemDir: string) => readIndexFile(join(systemDir, INDEX_FILE));
+export const loadStagedFileIndex = (systemDir: string) => readIndexFile(join(systemDir, PENDING_FILE));
+
+async function readIndexFile(path: string): Promise<FileIndex | null> {
+  const handle = await open(path, "r").catch(() => null);
   if (!handle) return null;
   const gunzip = createGunzip();
   const source = handle.createReadStream();
@@ -69,6 +75,7 @@ export async function loadFileIndex(systemDir: string): Promise<FileIndex | null
   try {
     let commit: string | null = null;
     const entries = new Map<string, FileIndexEntry>();
+    const trees = new Map<string, string>();
     for await (const line of lines) {
       if (commit === null) {
         const header = JSON.parse(line) as { version?: unknown; commit?: unknown };
@@ -76,10 +83,14 @@ export async function loadFileIndex(systemDir: string): Promise<FileIndex | null
         commit = header.commit;
         continue;
       }
-      const [path, entry] = fromRow(JSON.parse(line) as Row);
-      entries.set(path, entry);
+      const row = JSON.parse(line) as Row | [string, string];
+      if (row.length === 2) trees.set(row[0], row[1]);
+      else {
+        const [path, entry] = fromRow(row as Row);
+        entries.set(path, entry);
+      }
     }
-    return commit ? { commit, entries } : null;
+    return commit ? { commit, entries, trees } : null;
   } catch {
     return null;
   } finally {
@@ -88,9 +99,39 @@ export async function loadFileIndex(systemDir: string): Promise<FileIndex | null
   }
 }
 
-export async function writeFileIndex(systemDir: string, index: FileIndex) {
+/**
+ * Written before the checkpoint commits and promoted after, so a run retried
+ * after its worker died still finds the index of the commit it made.
+ */
+export const stageFileIndex = (systemDir: string, index: FileIndex) => writeIndexFile(systemDir, PENDING_FILE, index);
+
+/** Promote the staged index if it belongs to `commit`. */
+export async function promoteFileIndex(systemDir: string, commit: string) {
+  if (await readIndexCommit(join(systemDir, PENDING_FILE)) !== commit) return;
+  await rename(join(systemDir, PENDING_FILE), join(systemDir, INDEX_FILE));
+}
+
+async function readIndexCommit(path: string) {
+  const handle = await open(path, "r").catch(() => null);
+  if (!handle) return null;
+  const lines = createInterface({ input: handle.createReadStream().pipe(createGunzip()), crlfDelay: Number.POSITIVE_INFINITY });
+  try {
+    for await (const line of lines) {
+      const header = JSON.parse(line) as { version?: unknown; commit?: unknown };
+      return header.version === 1 && typeof header.commit === "string" ? header.commit : null;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    lines.close();
+    await handle.close().catch(() => undefined);
+  }
+}
+
+async function writeIndexFile(systemDir: string, name: string, index: FileIndex) {
   await mkdir(systemDir, { recursive: true, mode: 0o775 });
-  const target = join(systemDir, INDEX_FILE);
+  const target = join(systemDir, name);
   const tmp = `${target}.tmp-${crypto.randomUUID()}`;
   async function* lines() {
     yield `${JSON.stringify({ version: 1, commit: index.commit })}\n`;
@@ -98,6 +139,13 @@ export async function writeFileIndex(systemDir: string, index: FileIndex) {
     let count = 0;
     for (const [path, entry] of index.entries) {
       batch += `${JSON.stringify(toRow(path, entry))}\n`;
+      if (++count % WRITE_BATCH === 0) {
+        yield batch;
+        batch = "";
+      }
+    }
+    for (const [dir, oid] of index.trees) {
+      batch += `${JSON.stringify([dir, oid])}\n`;
       if (++count % WRITE_BATCH === 0) {
         yield batch;
         batch = "";

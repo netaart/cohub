@@ -16,29 +16,21 @@ export const getCheckpointSystemDir = (spaceId: string) =>
 export const getCheckpointSystemRepoDir = (spaceId: string) =>
   join(getCheckpointSystemDir(spaceId), "repo");
 
-export const getCheckpointSystemTmpDir = (spaceId: string) =>
-  join(getCheckpointSystemDir(spaceId), "tmp");
-
 export const getCheckpointLatestDir = (spaceId: string) =>
   join(config.checkpointCacheRoot, spaceId, "latest");
 
 export const getCheckpointLatestSubPath = (spaceId: string) =>
   `${config.checkpointCacheSubpath}/${spaceId}/latest`;
 
+/** The cache repository is left to its readers (API, restore), which create it on first use. */
 export const ensureCheckpointDirs = async (spaceId: string) => {
   const workspaceDir = getCheckpointWorkspaceDir(spaceId);
   const systemDir = getCheckpointSystemDir(spaceId);
   const repoDir = getCheckpointSystemRepoDir(spaceId);
-  const tmpDir = getCheckpointSystemTmpDir(spaceId);
   const latestDir = getCheckpointLatestDir(spaceId);
 
-  await Promise.all([
-    mkdir(workspaceDir, { recursive: true, mode: 0o775 }),
-    mkdir(repoDir, { recursive: true, mode: 0o775 }),
-    mkdir(tmpDir, { recursive: true, mode: 0o775 }),
-    mkdir(latestDir, { recursive: true, mode: 0o775 }),
-  ]);
-  await Promise.all([workspaceDir, systemDir, repoDir, tmpDir, latestDir].map((dir) => chmod(dir, 0o775).catch(() => undefined)));
+  await Promise.all([workspaceDir, systemDir, latestDir].map((dir) => mkdir(dir, { recursive: true, mode: 0o775 })));
+  await Promise.all([workspaceDir, systemDir, latestDir].map((dir) => chmod(dir, 0o775).catch(() => undefined)));
 
-  return { workspaceDir, systemDir, repoDir, tmpDir, latestDir };
+  return { workspaceDir, systemDir, repoDir, latestDir };
 };
