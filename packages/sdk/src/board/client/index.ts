@@ -316,6 +316,13 @@ async function fileText(file: SpaceFsFileResponse, customFetch: Fetch = fetch): 
   return new TextDecoder().decode(Uint8Array.from(atob(file.content), (char) => char.charCodeAt(0)));
 }
 
+export async function readBoardId(files: Pick<BoardFiles, "read">, path: string, customFetch?: Fetch): Promise<string> {
+  const file = await files.read(path, customFetch);
+  if (isSpaceFsSymlink(file)) throw new Error(`${path} is a symbolic link to ${file.target}.`);
+  if (!("content" in file)) throw new Error(`${path} is being prepared; try again shortly.`);
+  return parseBoardManifest(await fileText(file, customFetch)).boardId;
+}
+
 export class SpaceBoardsApi {
   constructor(
     private readonly http: HttpTransport,
@@ -339,11 +346,8 @@ export class SpaceBoardsApi {
     return this.byId(isBoardPath(target) ? await this.resolveId(target, customFetch) : target);
   }
 
-  async resolveId(path: string, customFetch?: Fetch): Promise<string> {
-    const file = await this.files.read(path, customFetch);
-    if (isSpaceFsSymlink(file)) throw new Error(`${path} is a symbolic link to ${file.target}.`);
-    if (!("content" in file)) throw new Error(`${path} is being prepared; try again shortly.`);
-    return parseBoardManifest(await fileText(file, customFetch)).boardId;
+  resolveId(path: string, customFetch?: Fetch): Promise<string> {
+    return readBoardId(this.files, path, customFetch);
   }
 
   /** Create a `.board` file and its Board, optionally with an initial document. */

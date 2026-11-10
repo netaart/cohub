@@ -65,6 +65,7 @@ export type {
   BoardApplyInput,
   BoardApplyResult,
   BoardChangeSummary,
+  BoardCheckpointReadResult,
   BoardColor,
   BoardCreateInput,
   BoardDelta,

@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 
 import type {
   BoardApplyResult,
+  BoardCheckpointReadResult,
   BoardCreateInput,
   BoardPatch,
   BoardPlaybackSnapshot,
@@ -79,6 +80,36 @@ export function parseRect(value: string, name = "--rect"): { x: number; y: numbe
 function list(value: string | undefined): string[] | undefined {
   const entries = value?.split(",").map((entry) => entry.trim()).filter(Boolean);
   return entries?.length ? entries : undefined;
+}
+
+/** Filters a saved Board locally; the checkpoint API returns the whole document. */
+function selectCheckpointBoard(
+  saved: BoardCheckpointReadResult,
+  filter: { sections: Set<string> | null; items?: string[]; within?: string; animations?: string[] },
+) {
+  const { board, items, animations, ...rest } = saved;
+  let picked = Object.entries(items);
+  if (filter.items) picked = picked.filter(([id]) => filter.items?.includes(id));
+  if (filter.within) {
+    const inside = new Set([filter.within]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const [id, item] of Object.entries(items)) {
+        if (!inside.has(id) && typeof item.parent === "string" && inside.has(item.parent)) {
+          inside.add(id);
+          grew = true;
+        }
+      }
+    }
+    picked = picked.filter(([id]) => inside.has(id));
+  }
+  const show = (section: string) => !filter.sections || filter.sections.has(section);
+  return {
+    ...rest,
+    ...(show("board") ? { board } : {}),
+    ...(show("items") ? { items: Object.fromEntries(picked) } : {}),
+    ...(show("animations") ? { animations: filter.animations ? Object.fromEntries(Object.entries(animations).filter(([id]) => filter.animations?.includes(id))) : animations } : {}),
+  };
 }
 
 async function boardClient(boards: Command, target: string, spaceId?: string) {
@@ -596,16 +627,24 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
     .option("--limit <n>", "Page size for items")
     .option("--cursor <cursor>", "Continue from a previous page's next")
     .option("--since <version>", "Only the changes after this version; the whole Board when they are unavailable")
+    .option("--checkpoint <id>", "The Board as this checkpoint saved it")
     .addHelpText("after", `
   cohub boards get plan.board
   cohub boards get plan.board --within s2
   cohub boards get plan.board --only board
-  cohub boards get plan.board --since 12`)
-    .action(async (target: string, options: { only?: string; items?: string; within?: string; rect?: string; animations?: string; limit?: string; cursor?: string; since?: string }) => {
+  cohub boards get plan.board --since 12
+  cohub boards get plan.board --checkpoint <checkpoint-id>`)
+    .action(async (target: string, options: { only?: string; items?: string; within?: string; rect?: string; animations?: string; limit?: string; cursor?: string; since?: string; checkpoint?: string }) => {
       try {
         const only = list(options.only);
         if (only?.some((section) => section !== "board" && section !== "items" && section !== "animations")) throw new Error("--only takes board, items, animations, or a combination.");
         const sections = only ? new Set(only) : null;
+        if (options.checkpoint) {
+          const unsupported = (["rect", "limit", "cursor", "since"] as const).filter((name) => options[name] !== undefined);
+          if (unsupported.length) throw new Error(`--checkpoint cannot be combined with ${unsupported.map((name) => `--${name}`).join(", ")}.`);
+          const saved = await createClient().space(await resolveSpace(boards)).checkpoints(options.checkpoint).board(target);
+          return outJson(selectCheckpointBoard(saved, { sections, items: list(options.items), within: options.within, animations: list(options.animations) }));
+        }
         const input: BoardReadInput = {
           ...(only ? { only: only.filter((section): section is NonNullable<BoardReadInput["only"]>[number] => section !== "board") as BoardReadInput["only"] } : {}),
           ...(list(options.items) ? { items: list(options.items) } : {}),

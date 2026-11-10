@@ -65,6 +65,7 @@ export type SpaceFileDomainProps = {
 	spaceSlug: string | null;
 	spaceHasMinimalAccess: boolean;
 	activeFsReadonly: boolean;
+	activeCheckpointId: string | null;
 	canEditFiles: boolean;
 	activeFsSidebarSubtitle: string;
 	isMobile: boolean;
@@ -242,6 +243,7 @@ let {
 	spaceSlug,
 	spaceHasMinimalAccess,
 	activeFsReadonly,
+	activeCheckpointId,
 	canEditFiles,
 	activeFsSidebarSubtitle,
 	isMobile,
@@ -557,6 +559,7 @@ function previewContentOut(node: Element) {
 		board={board}
 		windows={windows}
 		spaceId={spaceId}
+		checkpointId={activeCheckpointId}
 		shell={appShell}
 		onNavigationOpen={onNavigationOpen}
 		active={activeWindowKind === "board"}

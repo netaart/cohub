@@ -255,9 +255,9 @@ const playing = untrack(() => mode === "play");
 const spaceId = untrack(() => (scope.kind === "space" ? scope.spaceId : null));
 const liveSpaceId = playing ? null : spaceId;
 const resolvedAssetSource = untrack(() =>
-	scope.kind === "app"
-		? scope.assetSource
-		: createSpaceBoardAssetSource(scope.spaceId),
+	scope.kind === "space"
+		? createSpaceBoardAssetSource(scope.spaceId)
+		: scope.assetSource,
 );
 
 const signals = readBoardDeviceSignals();

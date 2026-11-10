@@ -16,8 +16,7 @@ test("file-tree selection follows the active preview kind", () => {
 });
 
 test("workspace file links use the same Board routing as the file tree", () => {
-	assert.equal(workspaceFilePreviewKind("docs/readme.md", false), "file");
-	assert.equal(workspaceFilePreviewKind("boards/plan.board", false), "board");
-	assert.equal(workspaceFilePreviewKind("boards/PLAN.BOARD", false), "board");
-	assert.equal(workspaceFilePreviewKind("boards/plan.board", true), "file");
+	assert.equal(workspaceFilePreviewKind("docs/readme.md"), "file");
+	assert.equal(workspaceFilePreviewKind("boards/plan.board"), "board");
+	assert.equal(workspaceFilePreviewKind("boards/PLAN.BOARD"), "board");
 });

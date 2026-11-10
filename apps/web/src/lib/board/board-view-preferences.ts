@@ -59,12 +59,16 @@ function readAll(
 }
 
 export function boardViewKey(
-	scope: { kind: "space"; spaceId: string } | { kind: "app"; appId: string },
+	scope:
+		| { kind: "space"; spaceId: string }
+		| { kind: "checkpoint"; checkpointId: string }
+		| { kind: "app"; appId: string },
 	boardId: string,
 ) {
-	return scope.kind === "space"
-		? `${scope.spaceId}:${boardId}`
-		: `app:${scope.appId}`;
+	if (scope.kind === "space") return `${scope.spaceId}:${boardId}`;
+	if (scope.kind === "checkpoint")
+		return `checkpoint:${scope.checkpointId}:${boardId}`;
+	return `app:${scope.appId}`;
 }
 
 export function readBoardView(

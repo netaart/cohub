@@ -10,8 +10,10 @@ import type { BoardDocument } from "@neta-art/cohub/board";
 import type { BoardAutomationActivity } from "@neta-art/cohub/board/presence";
 import { Wallpaper } from "lucide-svelte";
 import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
+import { checkpointBoardAssetSource } from "$lib/board/checkpoint-board";
 import {
 	type BoardRuntimeViewState,
+	type BoardScope,
 	cohubPixiRuntime,
 } from "$lib/board/runtime/board-runtime";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -35,6 +37,7 @@ type Props = {
 	board: InlineBoardPanelState;
 	windows: Window[];
 	spaceId: string;
+	checkpointId?: string | null;
 	shell?: AppRuntimeShellContext;
 	onNavigationOpen?: (message: AppNavigationOpenMessage) => Promise<{
 		handled: boolean;
@@ -71,6 +74,7 @@ let {
 	board,
 	windows,
 	spaceId,
+	checkpointId = null,
 	shell,
 	onNavigationOpen,
 	active = true,
@@ -94,8 +98,21 @@ let {
 
 const locale = $derived(getLocale());
 
+const scope = $derived<BoardScope>(
+	checkpointId
+		? {
+				kind: "checkpoint",
+				spaceId,
+				checkpointId,
+				assetSource: checkpointBoardAssetSource(spaceId, checkpointId),
+			}
+		: { kind: "space", spaceId },
+);
+const editMode = $derived(checkpointId ? "view" : "edit");
+const live = $derived(!checkpointId);
+
 const headerActions = $derived.by((): PreviewHeaderAction[] => {
-	if (!onToggleNewChatBackground) return [];
+	if (!onToggleNewChatBackground || !live) return [];
 	const { path } = board;
 	const active = path === newChatBackgroundPath;
 	return [
@@ -162,14 +179,14 @@ const boardRuntimeModulePromise = $derived.by(() => {
 		{:then boardRuntimeModule}
 			{@const BoardRuntime = boardRuntimeModule.default}
 			<div class="min-h-0 flex-1">
-				{#key `${board.boardId}:${playDocument ? "play" : "edit"}`}
+				{#key `${checkpointId ?? "live"}:${board.boardId}:${playDocument ? "play" : editMode}`}
 					<BoardRuntime
-						mode={playDocument ? "play" : "edit"}
+						mode={playDocument ? "play" : editMode}
 						path={board.path}
 						boardId={board.boardId}
 						document={playDocument ?? board.document}
 						playback={playDocument ? null : board.playback}
-						scope={{ kind: "space", spaceId }}
+						{scope}
 						onTogglePlay={togglePlay}
 						onReset={playDocument ? startPlay : undefined}
 						shell={shell}
@@ -180,8 +197,8 @@ const boardRuntimeModulePromise = $derived.by(() => {
 						{onOpenActivity}
 						syncError={playDocument ? null : board.saveError}
 						syncing={!playDocument && board.saving}
-						onCommit={playDocument ? undefined : (patch) => onCommit(board.boardId as string, patch)}
-						onPlayback={playDocument ? undefined : (command) => onPlayback(board.boardId as string, command)}
+						onCommit={playDocument || !live ? undefined : (patch) => onCommit(board.boardId as string, patch)}
+						onPlayback={playDocument || !live ? undefined : (command) => onPlayback(board.boardId as string, command)}
 						onRetrySync={() => onRetrySave(board.boardId as string)}
 						{onViewStateChange}
 						{onOpenFile}

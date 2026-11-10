@@ -896,9 +896,7 @@ export function createFileWorkspaceController(
 
 	/** Open a file in the unified preview surface (Files column). */
 	async function openSpaceFile(path: string) {
-		if (
-			workspaceFilePreviewKind(path, options.getActiveFsReadonly()) === "board"
-		) {
+		if (workspaceFilePreviewKind(path) === "board") {
 			await options.onOpenInlineBoard(path);
 			return;
 		}
@@ -1569,7 +1567,7 @@ export function createFileWorkspaceController(
 				...entries,
 				buildFsEntry(path, "file"),
 			]);
-			if (workspaceFilePreviewKind(path, false) === "board")
+			if (workspaceFilePreviewKind(path) === "board")
 				await options.onOpenInlineBoard(path);
 			else await options.onOpenInlineFile(path);
 		} catch (error) {
