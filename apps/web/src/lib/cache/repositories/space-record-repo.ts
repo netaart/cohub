@@ -6,6 +6,7 @@ import {
 import {
 	idbDelete,
 	idbGet,
+	idbGetAllByIndex,
 	idbPut,
 	type SpaceRecordCacheRecord,
 } from "$lib/cache/db";
@@ -121,6 +122,19 @@ export const spaceRecordRepo = {
 			source: options?.source ?? "network",
 		});
 		return toSnapshot(record, options?.source ?? "network");
+	},
+
+	/** Every cached Space record of the current user, oldest update first. */
+	async listCached(): Promise<SpaceRecord[]> {
+		const userKey = getCacheUserKey();
+		const records = await idbGetAllByIndex<SpaceRecordCacheRecord>(
+			"space_records",
+			"by_user_space",
+			IDBKeyRange.bound([userKey], [userKey, []]),
+		);
+		return records
+			.sort((a, b) => a.updatedAt - b.updatedAt)
+			.map((record) => record.space);
 	},
 
 	async delete(spaceId: string) {

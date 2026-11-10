@@ -14,7 +14,10 @@ import { tick } from "svelte";
 import AdaptivePopover from "$lib/components/list-page/AdaptivePopover.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
-import { buildSpaceSettingsRoute } from "$lib/space-routes";
+import {
+	buildSpaceSettingsRoute,
+	buildSpaceWalletRoute,
+} from "$lib/space-routes";
 
 const {
 	space,
@@ -90,7 +93,7 @@ function run(action: (space: SpaceRecord) => void) {
 				<Tag class="h-3.5 w-3.5" />
 				<span>{m.spaces_label_add({}, { locale })}…</span>
 			</button>
-			<a href={`/spaces/${space.id}/wallet`} class="menu-option" role="menuitem" onclick={onClose}>
+			<a href={buildSpaceWalletRoute(space.id)} class="menu-option" role="menuitem" onclick={onClose}>
 				<Wallet class="h-3.5 w-3.5" />
 				<span>{m.wallet_title({}, { locale })}</span>
 			</a>

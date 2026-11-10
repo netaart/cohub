@@ -4,6 +4,7 @@ import {
 	readResourceAppTarget,
 	writeResourceAppTarget,
 } from "@cohub/protocol";
+import { toSpaceIdPath } from "$lib/stores/space-address";
 
 const RESOURCE_SEGMENTS = {
 	tasks: "task",
@@ -19,7 +20,7 @@ export function resourceFromUrl(
 ): { spaceId: string; target: ResourceAppTarget } | null {
 	const match =
 		/^\/spaces\/([^/]+)\/(tasks|checkpoints|cronjobs|apps)\/([^/]+)\/?$/.exec(
-			url.pathname,
+			toSpaceIdPath(url.pathname),
 		);
 	if (!match || !isUuid(match[1])) return null;
 	const params = new URLSearchParams({

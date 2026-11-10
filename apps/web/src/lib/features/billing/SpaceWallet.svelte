@@ -19,6 +19,7 @@ import { formatCurrency, formatDateTime } from "$lib/i18n/format";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import { buildSpaceRootRoute } from "$lib/space-routes";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 import SpaceFundPanel from "./SpaceFundPanel.svelte";
 import { fundLink } from "./space-fund";
@@ -154,7 +155,7 @@ onMount(() => {
 
 <div class="flex min-h-0 flex-1 flex-col overflow-y-auto bg-bg-primary">
   <header class="flex h-11 shrink-0 items-center gap-3 border-b border-border-subtle px-4">
-    <a href={`/spaces/${spaceId}`} class="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-secondary hover:bg-bg-hover" aria-label={m.space_back({}, { locale })}><ArrowLeft class="h-4 w-4" /></a>
+    <a href={buildSpaceRootRoute(spaceId)} class="inline-flex h-8 w-8 items-center justify-center rounded-md text-text-secondary hover:bg-bg-hover" aria-label={m.space_back({}, { locale })}><ArrowLeft class="h-4 w-4" /></a>
     <span class="min-w-0 truncate text-[13px] text-text-secondary">{space.data?.name ?? m.wallet_title({}, { locale })}</span>
   </header>
   <main class="mx-auto w-full max-w-3xl space-y-10 px-4 py-6 sm:px-8">

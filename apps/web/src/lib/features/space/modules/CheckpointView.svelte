@@ -31,6 +31,7 @@ import CheckpointDiffPanel from "$lib/resource-kit/CheckpointDiffPanel.svelte";
 import { asRecord } from "$lib/resource-kit/core";
 import { sdk } from "$lib/sdk";
 import {
+	buildSpaceCheckpointRoute,
 	buildSpaceNewSessionRoute,
 	buildSpaceTaskRoute,
 } from "$lib/space-routes";
@@ -578,7 +579,7 @@ onDestroy(() => {
 										<div class="text-[12px] text-text-tertiary">
 											{m.cp_comparing_against({}, { locale })}
 											<a
-												href="/spaces/{spaceId}/checkpoints/{detailDiffBase}"
+												href={buildSpaceCheckpointRoute(spaceId, detailDiffBase)}
 												class="font-mono text-[11px] text-brand transition-colors hover:text-brand-hover"
 												data-sveltekit-preload-data="hover"
 											>{detailDiffBase.slice(0, 8)}</a>
@@ -667,7 +668,7 @@ onDestroy(() => {
 										<span class="w-20 shrink-0 text-text-tertiary">{m.cp_parent({}, { locale })}</span>
 										{#if checkpointDetail.parentCheckpointId}
 											<a
-												href="/spaces/{spaceId}/checkpoints/{checkpointDetail.parentCheckpointId}"
+												href={buildSpaceCheckpointRoute(spaceId, checkpointDetail.parentCheckpointId)}
 												class="min-w-0 font-mono text-[12px] leading-snug text-brand transition-colors hover:text-brand-hover break-all"
 												data-sveltekit-preload-data="hover"
 											>{checkpointDetail.parentCheckpointId}</a>

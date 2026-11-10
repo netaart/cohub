@@ -1,8 +1,10 @@
+import { toSpaceIdPath } from "$lib/stores/space-address";
+
 /**
  * Resolve the active workspace route context.
  *
- * Canonical app routes are `/spaces/:id/...`. Pretty URLs (`/:username/:spaceSlug`)
- * resolve the id in page load and expose it as `page.data.spaceId`.
+ * Routes are `/spaces/:id/...`; friendly `/:username/:slug/...` paths are read as
+ * their `/spaces/:id/...` form.
  *
  * Never treat sessions-inbox draft targets (`newChatSpaceId` / `?space=`) as the
  * workspace space — those must not drive sidebar layout prefs.
@@ -111,8 +113,9 @@ function resolveSessionId(input: ResolveWorkspaceRouteInput): string | null {
  * notifications). Page loads remain the authority for pretty-URL id resolution.
  */
 export function resolveWorkspaceRouteContext(
-	input: ResolveWorkspaceRouteInput,
+	route: ResolveWorkspaceRouteInput,
 ): WorkspaceRouteContext {
+	const input = { ...route, pathname: toSpaceIdPath(route.pathname) };
 	const spaceId = resolveSpaceId(input);
 	const sessionId = resolveSessionId(input);
 	const appId = parseResourceId(input.pathname, "apps");

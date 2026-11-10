@@ -183,6 +183,7 @@ import {
 	SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX,
 	showsSessionInLabel,
 } from "$lib/stores/sidebar-source-labels";
+import { toSpaceIdPath } from "$lib/stores/space-address";
 import {
 	fetchLabelItemsFirstPageFresh,
 	fetchSpaceLabelsFresh,
@@ -375,6 +376,7 @@ let tasksPageInfo = $state<{ hasMore: boolean; nextCursor: string | null }>({
 });
 
 const currentPath = $derived(page.url.pathname);
+const currentSpacePath = $derived(toSpaceIdPath(currentPath));
 const activeInboxSessionId = $derived(
 	area === "chats" && typeof page.data.sessionId === "string"
 		? page.data.sessionId
@@ -3483,7 +3485,7 @@ $effect(() => {
             </button>
             <button
               type="button"
-              class="flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors duration-100 {currentPath === buildSpaceSettingsRoute(currentSpaceId!) ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
+              class="flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors duration-100 {currentSpacePath === toSpaceIdPath(buildSpaceSettingsRoute(currentSpaceId!)) ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
               onclick={() => { void handleNavigate(buildSpaceSettingsRoute(currentSpaceId!)); }}
               aria-label={m.sidebar_space_settings({}, { locale })}
               title={m.sidebar_space_settings({}, { locale })}
@@ -3492,7 +3494,7 @@ $effect(() => {
             </button>
             <button
               type="button"
-              class="flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors duration-100 {currentPath === buildSpaceActivityRoute(currentSpaceId!) ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
+              class="flex h-8 w-8 items-center justify-center rounded-[6px] transition-colors duration-100 {currentSpacePath === toSpaceIdPath(buildSpaceActivityRoute(currentSpaceId!)) ? 'bg-bg-active text-text-primary' : 'text-text-tertiary hover:bg-bg-hover hover:text-text-secondary'}"
               onclick={() => { void handleNavigate(buildSpaceActivityRoute(currentSpaceId!)); }}
               aria-label={m.nav_activity({}, { locale })}
               title={m.nav_activity({}, { locale })}

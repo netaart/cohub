@@ -92,6 +92,7 @@ import { filterSpacePickerItems } from "$lib/space-picker-model";
 import { buildUserNewSessionRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
 import { getRecentSpaces } from "$lib/stores/recent-space";
+import { toSpaceIdPath } from "$lib/stores/space-address";
 import {
 	getCachedSpaceFilterPref,
 	type SpaceFilterPref,
@@ -218,7 +219,7 @@ $effect(() => {
 });
 
 const currentSpaceId = $derived.by(() => {
-	const match = page.url.pathname.match(/^\/spaces\/([^/]+)/);
+	const match = toSpaceIdPath(page.url.pathname).match(/^\/spaces\/([^/]+)/);
 	const id = match?.[1] ?? null;
 	return id === "new" ? null : id;
 });

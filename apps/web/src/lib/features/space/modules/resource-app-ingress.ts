@@ -1,4 +1,5 @@
 import { redirect } from "@sveltejs/kit";
+import { buildSpaceRootRoute } from "$lib/space-routes";
 import { resourceFromUrl, resourceWorkspaceUrl } from "./resource-app-route";
 
 export function redirectResourcePage(url: URL) {
@@ -8,7 +9,7 @@ export function redirectResourcePage(url: URL) {
 	redirect(
 		307,
 		resourceWorkspaceUrl(
-			`/spaces/${resource.spaceId}`,
+			buildSpaceRootRoute(resource.spaceId),
 			url.searchParams,
 			resource.target,
 		),

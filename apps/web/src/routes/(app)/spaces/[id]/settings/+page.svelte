@@ -79,7 +79,11 @@ import { m } from "$lib/paraglide/messages.js";
 import { uploadSpaceAvatarImage } from "$lib/public-asset-images";
 import { sdk } from "$lib/sdk";
 import { validateSpaceSlugInput } from "$lib/slug-rules";
-import { buildSpaceLandingRoute } from "$lib/space-routes";
+import {
+	buildSpaceLandingRoute,
+	buildSpaceSettingsRoute,
+	buildSpaceWalletRoute,
+} from "$lib/space-routes";
 import { invalidateCachedSpaceMembers } from "$lib/stores/space-profile-cache";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 
@@ -1080,8 +1084,8 @@ $effect(() => {
 			<HeaderAction label={m.space_back({}, { locale })} icon={ArrowLeft} onclick={goBack} />
 			<h1 class="min-w-0 truncate text-[15px] font-semibold tracking-tight text-text-primary lg:text-[13px]">{m.space_title({}, { locale })}</h1>
 			{#snippet actions()}
-				<HeaderAction label={m.wallet_title({}, { locale })} icon={Wallet} href={`/spaces/${spaceId}/wallet`} showLabel />
-				<HeaderAction label={m.space_section_commerce({}, { locale })} icon={PackagePlus} href={`/spaces/${spaceId}/settings/commerce`} showLabel />
+				<HeaderAction label={m.wallet_title({}, { locale })} icon={Wallet} href={buildSpaceWalletRoute(spaceId)} showLabel />
+				<HeaderAction label={m.space_section_commerce({}, { locale })} icon={PackagePlus} href={`${buildSpaceSettingsRoute(spaceId)}/commerce`} showLabel />
 			{/snippet}
 		</ListHeader>
 		<div class="lg:hidden">

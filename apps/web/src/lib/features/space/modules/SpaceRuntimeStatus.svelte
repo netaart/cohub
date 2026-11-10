@@ -36,6 +36,7 @@ import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { formatTimeAgo } from "$lib/resource-kit/time";
 import { sdk } from "$lib/sdk";
+import { buildSpaceSettingsRoute } from "$lib/space-routes";
 import {
 	cachedRuntimeStatus,
 	cachedRuntimeStatusFetchedAt,
@@ -601,7 +602,7 @@ $effect(() => {
 				<span class="runtime-meta" class:is-failed={failed}>{failed ? m.runtime_refresh_failed({}, { locale }) : fetchedAt ? m.runtime_last_updated({ time: ageLabel(fetchedAt) }, { locale }) : ""}</span>
 				<div class="runtime-actions">
 					<button type="button" class="runtime-action" aria-label={m.runtime_refresh({}, { locale })} title={m.runtime_refresh({}, { locale })} disabled={refreshing} onclick={() => void refresh()}><RefreshCw class={`h-4 w-4 ${refreshing ? "animate-spin motion-reduce:animate-none" : ""}`} /></button>
-					{#if canManage}<button type="button" class="runtime-action" aria-label={m.runtime_manage({}, { locale })} title={m.runtime_manage({}, { locale })} onclick={() => { close(); void goto(`/spaces/${spaceId}/settings`); }}><Settings2 class="h-4 w-4" /></button>{/if}
+					{#if canManage}<button type="button" class="runtime-action" aria-label={m.runtime_manage({}, { locale })} title={m.runtime_manage({}, { locale })} onclick={() => { close(); void goto(buildSpaceSettingsRoute(spaceId)); }}><Settings2 class="h-4 w-4" /></button>{/if}
 				</div>
 			</div>
 		</div>
@@ -643,7 +644,7 @@ $effect(() => {
 						{#if virtualPanel.kind === "failed"}
 							<button type="button" class="runtime-device-action" data-secondary="true" onclick={() => void showVirtual()}>{m.display_retry({}, { locale })}</button>
 						{:else}
-							<button type="button" class="runtime-device-action" data-secondary="true" onclick={() => { close(); void goto(`/spaces/${spaceId}/settings`); }}>{m.runtime_manage({}, { locale })}</button>
+							<button type="button" class="runtime-device-action" data-secondary="true" onclick={() => { close(); void goto(buildSpaceSettingsRoute(spaceId)); }}>{m.runtime_manage({}, { locale })}</button>
 						{/if}
 					</div>
 				{/if}

@@ -3,10 +3,12 @@
  * Keep the Space workspace mounted across all main-panel routes.
  * Child pages provide route data; this shell owns long-lived preview runtimes.
  */
-import type { Snippet } from "svelte";
+import { type Snippet, untrack } from "svelte";
+import { goto, replaceState } from "$app/navigation";
 import { page } from "$app/state";
 import type { WindowKind } from "$lib/features/space/modules/window-route";
 import SpaceWorkspacePage from "$lib/features/space/SpaceWorkspacePage.svelte";
+import { canonicalSpaceLocation } from "$lib/stores/space-address";
 
 type WorkspaceRouteData = {
 	spaceId: string;
@@ -59,6 +61,27 @@ const workspaceData = $derived.by(() => {
 		taskId: data.taskId ?? null,
 		turnSequence: data.turnSequence ?? null,
 	} satisfies WorkspaceRouteData;
+});
+
+// Show the Space's current friendly address. A shallow replace keeps `page.url`
+// and history state on the route URL, so back/forward never re-resolve an address.
+$effect(() => {
+	const spaceId = page.params.id;
+	void page.url;
+	if (!spaceId) return;
+	const next = canonicalSpaceLocation(window.location, spaceId);
+	if (!next) return;
+	if ("replace" in next)
+		replaceState(
+			next.replace,
+			untrack(() => page.state),
+		);
+	else
+		void goto(next.navigate, {
+			replaceState: true,
+			noScroll: true,
+			keepFocus: true,
+		});
 });
 </script>
 

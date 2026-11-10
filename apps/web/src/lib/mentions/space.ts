@@ -3,6 +3,7 @@ import type {
 	SpacePublicProfile,
 	UserProfile,
 } from "@neta-art/cohub";
+import { buildSpaceRootRoute, buildSpaceSessionRoute } from "$lib/space-routes";
 import { COHUB_WEB_ORIGIN_SOURCE } from "./platform-origin";
 
 export type SpaceMention = {
@@ -94,8 +95,9 @@ export function buildSpaceMentionUri(spaceId: string, sessionId?: string) {
 }
 
 export function buildSpaceMentionHref(spaceId: string, sessionId?: string) {
-	const base = `/spaces/${encodeURIComponent(spaceId)}`;
-	return sessionId ? `${base}/sessions/${encodeURIComponent(sessionId)}` : base;
+	return sessionId
+		? buildSpaceSessionRoute(spaceId, sessionId)
+		: buildSpaceRootRoute(spaceId);
 }
 
 export function buildSpaceMentionMarkdown(input: {
