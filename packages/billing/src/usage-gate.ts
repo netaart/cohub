@@ -106,6 +106,7 @@ export function createBillingUsageGate(input: {
         const credit = await input.operations.getCreditStatus({
           userId: gateInput.userId,
           tokenType,
+          grants: "none",
         });
         if (!Number.isFinite(credit.netUsd)) {
           throw new Error("Billing returned a non-finite net balance");

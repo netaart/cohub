@@ -312,7 +312,7 @@ cohub -s <spaceId> spaces wallet transfer-status <requestId>
 cohub -s <spaceId> spaces wallet recharge <productKey>
 cohub -s <spaceId> spaces wallet confirm <orderId>
 cohub -s <spaceId> spaces wallet public-funding on
-cohub -s <spaceId> spaces wallet activity --page 1 --json
+cohub -s <spaceId> spaces wallet activity --json
 ```
 
 `transfer` moves purchased personal balance (whole USD) into the wallet;

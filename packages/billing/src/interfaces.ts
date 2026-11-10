@@ -505,6 +505,7 @@ export type BillingBalanceActivity = {
   tokenType: string;
   title: string;
   description: string | null;
+  usageType: string | null;
   sourceType: string | null;
   sourceId: string | null;
   operationId: string | null;
@@ -513,23 +514,28 @@ export type BillingBalanceActivity = {
   createdAt: string;
 };
 
+export const BILLING_BALANCE_ACTIVITY_FILTERS = ["usage", "grant", "refund"] as const;
+export type BillingBalanceActivityFilter = (typeof BILLING_BALANCE_ACTIVITY_FILTERS)[number];
+
 export type BillingBalanceActivityList = BillingUserRef & {
   billing: BillingPluginStatus;
   tokenType: string;
   unit: BillingCreditUnit;
-  page: number;
   limit: number;
   items: BillingBalanceActivity[];
-  pagination: BillingHistoryPagination;
+  nextCursor: string | null;
 };
 
 export type BillingBalanceActivityListInput = BillingUserRef & {
-  transactionLedger?: boolean;
   createCustomer?: boolean;
   tokenType?: CohubBillingTokenType;
-  page?: number;
+  cursor?: string | null;
+  offset?: number;
   limit?: number;
+  filter?: BillingBalanceActivityFilter;
 };
+
+export type BillingCreditGrantScope = "available" | "all" | "none";
 
 export type BillingUsageRecordInput = BillingUserRef & {
   amountUsd: number;
@@ -642,7 +648,7 @@ export interface BillingOperations {
   ensureCustomer(input: BillingUserRef): Promise<BillingUserRef>;
   getState(input: BillingUserRef): Promise<BillingAccountState>;
   getGenerationModelDiscount(input: GenerationModelDiscountInput): Promise<GenerationModelDiscount>;
-  getCreditStatus(input: BillingUserRef & { tokenType?: CohubBillingTokenType; createCustomer?: boolean }): Promise<BillingCreditStatus>;
+  getCreditStatus(input: BillingUserRef & { tokenType?: CohubBillingTokenType; createCustomer?: boolean; grants?: BillingCreditGrantScope }): Promise<BillingCreditStatus>;
   getCatalog(input?: BillingUserRef): Promise<BillingCatalog>;
   previewPromotionCode(input: BillingPromotionCodePreviewInput): Promise<BillingPromotionCodePreview>;
   listSubscriptions(input: BillingHistoryListInput): Promise<BillingSubscriptionHistoryList>;

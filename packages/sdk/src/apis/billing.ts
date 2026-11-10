@@ -1,4 +1,5 @@
 import type {
+  BillingBalanceActivityFilter,
   BillingBalanceActivityList,
   BillingCatalog,
   BillingCheckoutConfirmation,
@@ -15,20 +16,27 @@ import type { HttpTransport } from "../transport.js";
 export class BillingApi {
   constructor(private readonly transport: HttpTransport) {}
 
-  async getCredits(input?: { tokenType?: string }) {
-    const query = input?.tokenType
-      ? `?tokenType=${encodeURIComponent(input.tokenType)}`
-      : "";
+  async getCredits(input?: { tokenType?: string; includeExhausted?: boolean }) {
+    const params = new URLSearchParams();
+    if (input?.tokenType) params.set("tokenType", input.tokenType);
+    if (input?.includeExhausted) params.set("include", "exhausted");
+    const query = params.toString();
     return this.transport.request<BillingCreditStatus>(
-      `/api/billing/credits${query}`,
+      `/api/billing/credits${query ? `?${query}` : ""}`,
     );
   }
 
-  async getBalanceActivities(input?: { tokenType?: string; page?: number; limit?: number }) {
+  async getBalanceActivities(input?: {
+    tokenType?: string;
+    cursor?: string | null;
+    limit?: number;
+    filter?: BillingBalanceActivityFilter;
+  }) {
     const params = new URLSearchParams();
     if (input?.tokenType) params.set("tokenType", input.tokenType);
-    if (input?.page) params.set("page", String(input.page));
+    if (input?.cursor) params.set("cursor", input.cursor);
     if (input?.limit) params.set("limit", String(input.limit));
+    if (input?.filter) params.set("filter", input.filter);
     const query = params.toString();
     return this.transport.request<{ activities: BillingBalanceActivityList }>(
       `/api/billing/balance-activities${query ? `?${query}` : ""}`,

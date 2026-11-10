@@ -595,6 +595,7 @@ export type BillingBalanceActivity = {
   tokenType: string;
   title: string;
   description: string | null;
+  usageType: string | null;
   sourceType: string | null;
   sourceId: string | null;
   operationId: string | null;
@@ -603,15 +604,17 @@ export type BillingBalanceActivity = {
   createdAt: string;
 };
 
+export type BillingBalanceActivityFilter = "usage" | "grant" | "refund";
+
 export type BillingBalanceActivityList = {
   userId: string;
   billing: BillingPluginStatus;
   tokenType: string;
   unit: BillingCreditUnit;
-  page: number;
   limit: number;
   items: BillingBalanceActivity[];
-  pagination: BillingHistoryPagination;
+  /** Opaque; pass back as `cursor` to read older activity. Null at the end of history. */
+  nextCursor: string | null;
 };
 
 export type UserRulesResponse = {

@@ -63,6 +63,8 @@ export type {
   BillingUsageRecordInput,
   BillingUsageRecordResult,
   BillingUserRef,
+  BillingBalanceActivityFilter,
+  BillingCreditGrantScope,
   BusinessBillingOperations,
   BusinessCreditConsumeInput,
   BusinessCreditConsumeResult,
@@ -72,6 +74,7 @@ export type {
   CohubBillingUsageType,
 } from "./interfaces.js";
 export {
+  BILLING_BALANCE_ACTIVITY_FILTERS,
   COHUB_BILLING_BENEFITS,
   COHUB_BILLING_CREDIT_UNITS,
   COHUB_BILLING_FEATURES,
@@ -79,6 +82,7 @@ export {
   COHUB_BILLING_USAGE_TYPES,
 } from "./interfaces.js";
 export { COHUB_BILLING_POLICY } from "./constants.js";
+export { decodeLedgerCursor as parseBalanceActivityCursor } from "./balance-ledger.js";
 export {
   createBillingConversionIntent,
   createFeatureGateConversionIntent,

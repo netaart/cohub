@@ -1,3 +1,4 @@
+import type { BillingBalanceActivityFilter } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { formatLocalDateTime, handleHttp, json as outJson, jsonRequested, table } from "../output.js";
@@ -11,6 +12,8 @@ function parseInteger(value: string, name: string, min: number): number {
   }
   return parsed;
 }
+
+const usd = (value: number) => `${value < 0 ? "-" : ""}$${Math.abs(value).toFixed(2)}`;
 
 export function registerMe(program: Command): void {
   const meCmd = program.command("me").description("Account-level data across your spaces");
@@ -51,28 +54,64 @@ export function registerMe(program: Command): void {
     });
 
   meCmd
-    .command("billing-activity")
-    .description("List your personal wallet activity, including generation reserves and refunds")
-    .option("--page <n>", "Page number (default 1)")
+    .command("billing")
+    .description("Show your balance, current plan, and credits expiring soon")
     .option("--json", "Output as JSON")
-    .action(async (opts: { page?: string; json?: boolean }) => {
+    .action(async (opts: { json?: boolean }) => {
+      const client = createClient();
+      try {
+        const [credits, { catalog }] = await Promise.all([client.billing.getCredits(), client.billing.getCatalog()]);
+        const plan =
+          catalog.currentSubscriptions.find((item) => item.status === "active" || item.status === "trialing") ??
+          catalog.currentSubscriptions.find((item) => item.status === "past_due") ??
+          null;
+        if (jsonRequested(opts)) return outJson({ credits, plan });
+        if (!catalog.billing.configured) {
+          console.log("  Billing is not enabled on this server");
+          return;
+        }
+        console.log(`  Balance   ${usd(credits.netUsd)}`);
+        const period = plan?.currentPeriodEnd
+          ? `, ${plan.cancelAtPeriodEnd ? "ends" : "renews"} ${formatLocalDateTime(plan.currentPeriodEnd)}`
+          : "";
+        console.log(`  Plan      ${plan ? `${plan.productName ?? plan.productKey} (${plan.status}${period})` : "Free"}`);
+        for (const group of credits.groups) {
+          if (group.key === "lt_7d" || group.key === "lt_30d") {
+            console.log(`  Expiring  ${usd(group.remainingAmountUsd)} within ${group.key === "lt_7d" ? 7 : 30} days`);
+          }
+        }
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  meCmd
+    .command("billing-activity")
+    .description("List your personal wallet activity, newest first")
+    .option("--filter <filter>", "Only show usage, grant, or refund activity")
+    .option("--limit <n>", "Activities per page (default 50, max 100)")
+    .option("--cursor <cursor>", "Pagination cursor from a previous result")
+    .option("--json", "Output as JSON")
+    .action(async (opts: { filter?: string; limit?: string; cursor?: string; json?: boolean }) => {
+      if (opts.filter && !["usage", "grant", "refund"].includes(opts.filter)) {
+        process.stderr.write("\n  ✗ Invalid filter\n    filter must be usage, grant, or refund\n\n");
+        process.exit(1);
+      }
       const client = createClient();
       try {
         const { activities } = await client.billing.getBalanceActivities({
-          page: opts.page ? parseInteger(opts.page, "page", 1) : undefined,
+          filter: opts.filter as BillingBalanceActivityFilter | undefined,
+          limit: opts.limit ? parseInteger(opts.limit, "limit", 1) : undefined,
+          cursor: opts.cursor ?? null,
         });
         if (jsonRequested(opts)) return outJson(activities);
-        if (activities.items.length === 0) {
-          console.log("  (empty)");
-          return;
-        }
         table(activities.items, [
           { key: "title", label: "Activity" },
+          { key: "description", label: "Detail" },
           { key: "amountUsd", label: "Amount (USD)" },
-          { key: "operationId", label: "Operation" },
           { key: "createdAt", label: "Date" },
         ]);
-        if (activities.pagination.hasMore) console.log(`  More: --page ${activities.page + 1}`);
+        if (activities.nextCursor) console.log(`\n  More: --cursor ${activities.nextCursor}`);
       } catch (e: unknown) {
         handleHttp(e);
       }

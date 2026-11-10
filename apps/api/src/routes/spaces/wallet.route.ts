@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import * as z from "zod";
-import { spaceWalletBillingOperations, COHUB_BILLING_TOKEN_TYPES, type BillingCatalogProduct } from "@cohub/billing";
+import { spaceWalletBillingOperations, COHUB_BILLING_TOKEN_TYPES, parseBalanceActivityCursor, type BillingCatalogProduct } from "@cohub/billing";
 import { spaceWalletCustomerId, SpaceWalletTransferError, walletCreditsUsable } from "@cohub/core/space-wallet";
 import { spaces } from "@cohub/db";
 import { createLogger } from "@cohub/infra/logging";
@@ -36,7 +36,6 @@ const transferSchema = z.object({
   id: z.uuid(),
   amountUsd: z.number().int().min(SPACE_WALLET_TRANSFER_MIN_USD).max(SPACE_WALLET_TRANSFER_MAX_USD),
 });
-const pageSchema = z.coerce.number().int().min(1).max(10_000).default(1);
 const ACTOR_PATTERN = /^actor_user_id=([^;]+); /;
 const decodeActor = (value: string) => {
   try {
@@ -146,10 +145,10 @@ router.get("/activities", async (c) => {
   const user = await requireViewer(c);
   if (user instanceof Response) return user;
   const spaceId = c.get("walletSpace").id;
-  const parsed = pageSchema.safeParse(c.req.query("page"));
-  if (!parsed.success) return c.json({ message: "Invalid page" }, 400);
-  if (!spaceWalletBillingOperations.status.configured) return c.json({ items: [], hasMore: false } satisfies SpaceWalletActivityPage);
-  const activities = await spaceWalletBillingOperations.listBalanceActivities({ userId: spaceWalletCustomerId(spaceId), page: parsed.data, limit: 10, createCustomer: false, transactionLedger: true });
+  const cursor = c.req.query("cursor") || null;
+  if (cursor && !parseBalanceActivityCursor(cursor)) return c.json({ message: "Invalid cursor", code: "invalid_cursor" }, 400);
+  if (!spaceWalletBillingOperations.status.configured) return c.json({ items: [], nextCursor: null } satisfies SpaceWalletActivityPage);
+  const activities = await spaceWalletBillingOperations.listBalanceActivities({ userId: spaceWalletCustomerId(spaceId), cursor, limit: 30, createCustomer: false });
   const items: SpaceWalletActivity[] = [];
   for (const item of activities.items) {
     const actor = item.description?.match(ACTOR_PATTERN)?.[1];
@@ -164,7 +163,7 @@ router.get("/activities", async (c) => {
       actorUserId: actor ? decodeActor(actor) : null,
     });
   }
-  return c.json({ items, hasMore: activities.pagination.hasMore } satisfies SpaceWalletActivityPage);
+  return c.json({ items, nextCursor: activities.nextCursor } satisfies SpaceWalletActivityPage);
 });
 
 router.post("/orders", async (c) => {

@@ -22,9 +22,11 @@ import { m } from "$lib/paraglide/messages.js";
 import {
 	resolveSettingsSection,
 	resolveSettingsSectionRoot,
-	SETTINGS_SECTIONS,
 	settingsSectionHref,
+	visibleSettingsSections,
 } from "$lib/settings-nav";
+import { authStore } from "$lib/stores/auth.svelte";
+import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
 
 const { children } = $props();
 
@@ -33,13 +35,16 @@ const compact = $derived(useCompactShell());
 const activeSection = $derived(resolveSettingsSection(page.url.pathname));
 const rootSection = $derived(resolveSettingsSectionRoot(page.url.pathname));
 const paged = $derived(compact && rootSection !== null);
+const sections = $derived(
+	visibleSettingsSections(billingCatalogStore.available),
+);
 const tabs = new SwipeTabs(() => ({
-	index: SETTINGS_SECTIONS.indexOf(activeSection ?? "general"),
+	index: Math.max(0, sections.indexOf(activeSection ?? "general")),
 	enabled: paged,
 }));
 
 function open(index: number) {
-	const section = SETTINGS_SECTIONS[index];
+	const section = sections[index];
 	if (!section) return;
 	void goto(settingsSectionHref(section), {
 		replaceState: true,
@@ -56,7 +61,11 @@ function select(event: MouseEvent, index: number) {
 	else open(index);
 }
 
-onMount(() => onListScrollTop(() => tabs.scrollToTop()));
+onMount(() => {
+	if (authStore.isAuthenticated)
+		void billingCatalogStore.load({ silent: true }).catch(() => undefined);
+	return onListScrollTop(() => tabs.scrollToTop());
+});
 </script>
 
 <svelte:head>
@@ -79,11 +88,11 @@ onMount(() => onListScrollTop(() => tabs.scrollToTop()));
 		<FilterBar
 			label={m.nav_settings({}, { locale })}
 			role="navigation"
-			activeKey={SETTINGS_SECTIONS[tabs.shown] ?? null}
+			activeKey={sections[tabs.shown] ?? null}
 			position={activeSection ? tabs.position : null}
 			glide={tabs.glide}
 		>
-			{#each SETTINGS_SECTIONS as section, index (section)}
+			{#each sections as section, index (section)}
 				<FilterChip
 					label={settingsSectionLabel(section, locale)}
 					href={settingsSectionHref(section)}
@@ -95,11 +104,11 @@ onMount(() => onListScrollTop(() => tabs.scrollToTop()));
 	</div>
 
 	{#if paged}
-		<SwipePager keys={SETTINGS_SECTIONS} index={tabs.index} onChange={open} onPosition={tabs.track}>
+		<SwipePager keys={sections} index={tabs.index} onChange={open} onPosition={tabs.track}>
 			{#snippet page(index, active)}
 				<SettingsSection
 					bind:this={() => tabs.panes[index], (pane) => (tabs.panes[index] = pane)}
-					section={SETTINGS_SECTIONS[index] ?? "general"}
+					section={sections[index] ?? "general"}
 					{active}
 				/>
 			{/snippet}

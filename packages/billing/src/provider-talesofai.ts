@@ -38,6 +38,7 @@ import {
 } from "@talesofai-billing/sdk/admin/subscriptions";
 import { ApiError, createSdk } from "@talesofai-billing/sdk/base";
 import { createHash, randomUUID } from "node:crypto";
+import { readLedger, type LedgerRow, type LedgerSource } from "./balance-ledger.js";
 import {
   COHUB_BILLING_BENEFITS,
   COHUB_BILLING_CREDIT_UNITS,
@@ -45,6 +46,7 @@ import {
   COHUB_BILLING_USAGE_TYPES,
   type BillingAccountState,
   type BillingBalanceActivity,
+  type BillingBalanceActivityFilter,
   type BillingBalanceActivityList,
   type BillingBalanceActivityListInput,
   type BillingCatalog,
@@ -58,6 +60,7 @@ import {
   type BillingProductCreditBenefit,
   type BillingCreditBalance,
   type BillingCreditExpiryGroup,
+  type BillingCreditGrantScope,
   type BillingCreditGrantStatus,
   type BillingCreditStatus,
   type BillingCreditUnit,
@@ -404,6 +407,36 @@ function resolveCreditGrantBenefitName(grant: CreditGrant): string | null {
   );
 }
 
+function ledgerTransactionRow(row: CreditTransaction): LedgerRow {
+  return {
+    key: `transaction:${row.id}`,
+    type: row.type,
+    tokenType: row.token_type,
+    amountUsd: amountToUsd(row.amount, row.token_type),
+    usageType: row.usage_type ?? null,
+    sourceType: row.source_type ?? null,
+    sourceId: row.source_id ?? null,
+    operationId: row.operation_id ?? null,
+    reason: row.reason ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+function ledgerOverageRow(row: UsageOverage): LedgerRow {
+  return {
+    key: `overage:${row.id}`,
+    type: "overage",
+    tokenType: row.token_type,
+    amountUsd: amountToUsd(row.original_amount, row.token_type),
+    usageType: row.usage_type ?? null,
+    sourceType: row.source_type ?? null,
+    sourceId: row.source_id ?? null,
+    operationId: row.operation_id ?? null,
+    reason: row.reason ?? null,
+    createdAt: row.created_at,
+  };
+}
+
 function optionalAmount(value: number | undefined, tokenType: string) {
   if (typeof value !== "number") return { amount: null, amountUsd: null };
   return {
@@ -537,220 +570,6 @@ function groupCreditGrants(
       (group): group is BillingCreditExpiryGroup =>
         !!group && group.grants.length > 0,
     );
-}
-
-type UsageActivityDraft = {
-  id: string;
-  tokenType: string;
-  usageType: string | null;
-  sourceType: string | null;
-  sourceId: string | null;
-  operationId: string | null;
-  reason: string | null;
-  createdAt: string;
-  coveredAmountUsd: number;
-  overageAmountUsd: number;
-};
-
-function balanceActivityCreatedAtDesc(a: { createdAt: string }, b: { createdAt: string }): number {
-  const leftTime = Date.parse(a.createdAt);
-  const rightTime = Date.parse(b.createdAt);
-  const leftValue = Number.isNaN(leftTime) ? 0 : leftTime;
-  const rightValue = Number.isNaN(rightTime) ? 0 : rightTime;
-  return rightValue - leftValue;
-}
-
-function formatBillingLabel(value: string | null): string {
-  if (!value) return "Usage";
-  return value
-    .split(/[._-]/g)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function transactionActivityTitle(type: CreditTransaction["type"]): string {
-  switch (type) {
-    case "grant":
-      return "Credits added";
-    case "reversal":
-      return "Usage refund";
-    case "refund":
-      return "Refund";
-    case "expire":
-      return "Credits expired";
-    case "revoke":
-      return "Credits revoked";
-    case "adjust":
-      return "Balance adjusted";
-    default:
-      return "Balance activity";
-  }
-}
-
-function transactionActivityAmountUsd(transaction: CreditTransaction): number {
-  const amountUsd = amountToUsd(transaction.amount, transaction.token_type);
-  switch (transaction.type) {
-    case "consume":
-    case "expire":
-    case "revoke":
-      return -amountUsd;
-    case "grant":
-    case "reversal":
-    case "refund":
-    case "adjust":
-      return amountUsd;
-    case "settlement":
-      return 0;
-    default:
-      return amountUsd;
-  }
-}
-
-function mapTransactionActivity(
-  transaction: CreditTransaction,
-): BillingBalanceActivity | null {
-  if (transaction.type === "consume" || transaction.type === "settlement") {
-    return null;
-  }
-  const amountUsd = transactionActivityAmountUsd(transaction);
-  if (amountUsd === 0) return null;
-  return {
-    id: `transaction:${transaction.id}`,
-    kind: transaction.type,
-    tokenType: transaction.token_type,
-    title: transactionActivityTitle(transaction.type),
-    description: transaction.reason ?? transaction.source_type ?? null,
-    sourceType: transaction.source_type ?? null,
-    sourceId: transaction.source_id ?? null,
-    operationId: transaction.operation_id ?? null,
-    amountUsd,
-    status: null,
-    createdAt: transaction.created_at,
-  };
-}
-
-function getUsageActivityDraft(
-  drafts: Map<string, UsageActivityDraft>,
-  input: {
-    id: string;
-    tokenType: string;
-    usageType: string | null;
-    sourceType: string | null;
-    sourceId: string | null;
-    operationId: string | null;
-    reason: string | null;
-    createdAt: string;
-  },
-): UsageActivityDraft {
-  const key = input.operationId ? `operation:${input.operationId}` : input.id;
-  const existing = drafts.get(key);
-  if (existing) {
-    if (new Date(input.createdAt).getTime() > new Date(existing.createdAt).getTime()) {
-      existing.createdAt = input.createdAt;
-    }
-    existing.usageType ??= input.usageType;
-    existing.sourceType ??= input.sourceType;
-    existing.sourceId ??= input.sourceId;
-    existing.reason ??= input.reason;
-    return existing;
-  }
-  const draft: UsageActivityDraft = {
-    id: key,
-    tokenType: input.tokenType,
-    usageType: input.usageType,
-    sourceType: input.sourceType,
-    sourceId: input.sourceId,
-    operationId: input.operationId,
-    reason: input.reason,
-    createdAt: input.createdAt,
-    coveredAmountUsd: 0,
-    overageAmountUsd: 0,
-  };
-  drafts.set(key, draft);
-  return draft;
-}
-
-function mapUsageActivity(draft: UsageActivityDraft): BillingBalanceActivity | null {
-  const totalAmountUsd = roundUsd(draft.coveredAmountUsd + draft.overageAmountUsd);
-  if (totalAmountUsd <= 0) return null;
-  const hasCovered = draft.coveredAmountUsd > 0;
-  const hasOverage = draft.overageAmountUsd > 0;
-  return {
-    id: `usage:${draft.id}`,
-    kind: "usage",
-    tokenType: draft.tokenType,
-    title: formatBillingLabel(draft.usageType),
-    description: draft.reason ?? draft.sourceType,
-    sourceType: draft.sourceType,
-    sourceId: draft.sourceId,
-    operationId: draft.operationId,
-    amountUsd: -totalAmountUsd,
-    status: hasCovered && hasOverage ? "partial" : hasOverage ? "overage" : "covered",
-    createdAt: draft.createdAt,
-  };
-}
-
-function addUsageTransactionDraft(
-  drafts: Map<string, UsageActivityDraft>,
-  transaction: CreditTransaction,
-): void {
-  const draft = getUsageActivityDraft(drafts, {
-    id: `transaction:${transaction.id}`,
-    tokenType: transaction.token_type,
-    usageType: transaction.usage_type ?? null,
-    sourceType: transaction.source_type ?? null,
-    sourceId: transaction.source_id ?? null,
-    operationId: transaction.operation_id ?? null,
-    reason: transaction.reason ?? null,
-    createdAt: transaction.created_at,
-  });
-  draft.coveredAmountUsd = roundUsd(
-    draft.coveredAmountUsd + amountToUsd(transaction.amount, transaction.token_type),
-  );
-}
-
-function addUsageOverageDraft(
-  drafts: Map<string, UsageActivityDraft>,
-  overage: UsageOverage,
-): void {
-  const draft = getUsageActivityDraft(drafts, {
-    id: `overage:${overage.id}`,
-    tokenType: overage.token_type,
-    usageType: overage.usage_type ?? null,
-    sourceType: overage.source_type,
-    sourceId: overage.source_id,
-    operationId: overage.operation_id,
-    reason: overage.reason ?? null,
-    createdAt: overage.created_at,
-  });
-  draft.overageAmountUsd = roundUsd(
-    draft.overageAmountUsd + amountToUsd(overage.original_amount, overage.token_type),
-  );
-}
-
-function buildBalanceActivities(input: {
-  transactions: CreditTransaction[];
-  overages: UsageOverage[];
-}): BillingBalanceActivity[] {
-  const usageDrafts = new Map<string, UsageActivityDraft>();
-  const activities: BillingBalanceActivity[] = [];
-  for (const transaction of input.transactions) {
-    if (transaction.type === "consume") {
-      addUsageTransactionDraft(usageDrafts, transaction);
-      continue;
-    }
-    const activity = mapTransactionActivity(transaction);
-    if (activity) activities.push(activity);
-  }
-  for (const overage of input.overages) {
-    addUsageOverageDraft(usageDrafts, overage);
-  }
-  for (const draft of usageDrafts.values()) {
-    const activity = mapUsageActivity(draft);
-    if (activity) activities.push(activity);
-  }
-  return activities.sort(balanceActivityCreatedAtDesc);
 }
 
 function minorAmountToUsd(amount: number): number {
@@ -1819,87 +1638,49 @@ export function createTalesofaiBillingOperations(
       }),
     );
 
+  const ledgerSources = (input: {
+    userId: string;
+    tokenType: string;
+    filter?: BillingBalanceActivityFilter;
+  }): LedgerSource[] => {
+    const scope = { business_key: businessKey, external_user_id: input.userId, token_type: input.tokenType, include_count: false as const };
+    const transactions = (type?: CreditTransaction["type"]): LedgerSource => async ({ to, page, limit }) => {
+      const result = await sdk.admin.credits.listTransactions({ ...scope, type, created_at_to: to, sorting: "-created_at", page, limit });
+      return { hasMore: result.pagination.has_more, items: result.items.map((row) => ledgerTransactionRow(row)) };
+    };
+    const overages: LedgerSource = async ({ to, page, limit }) => {
+      const result = await sdk.admin.credits.listUsageOverages({ ...scope, created_at_to: to, sorting: "-created_at", page, limit });
+      return { hasMore: result.pagination.has_more, items: result.items.map((row) => ledgerOverageRow(row)) };
+    };
+    switch (input.filter) {
+      case "usage":
+        return [transactions("consume"), overages];
+      case "grant":
+        return [transactions("grant")];
+      case "refund":
+        return [transactions("refund"), transactions("reversal")];
+      default:
+        return [transactions(), overages];
+    }
+  };
+
   const listBalanceActivities = async (
     input: BillingBalanceActivityListInput,
   ): Promise<BillingBalanceActivityList> => {
     const tokenType = input.tokenType ?? COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
-    const page = Math.max(1, Math.floor(input.page ?? 1));
-    const limit = Math.min(10, Math.max(1, Math.floor(input.limit ?? 10)));
+    const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 50)));
+    const list = (items: BillingBalanceActivity[], nextCursor: string | null): BillingBalanceActivityList => ({
+      userId: input.userId, billing: status, tokenType, unit: getCreditUnit(tokenType), limit, items, nextCursor,
+    });
     if (input.createCustomer !== false) await ensureCustomer({ userId: input.userId });
-    else if (!await getCustomerCreditsOrEmpty({ sdk, businessKey, userId: input.userId })) {
-      return { userId: input.userId, billing: status, tokenType, unit: getCreditUnit(tokenType), page, limit, items: [], pagination: { hasMore: false, nextPage: null } };
-    }
-    if (input.transactionLedger) {
-      const result = await sdk.admin.credits.listTransactions({
-        business_key: businessKey,
-        external_user_id: input.userId,
-        token_type: tokenType,
-        sorting: "-created_at",
-        include_count: false,
-        page, limit,
-      });
-      const items = result.items.flatMap((transaction): BillingBalanceActivity[] => {
-        if (transaction.type === "consume" || transaction.type === "settlement") {
-          return [{
-            id: `transaction:${transaction.id}`, kind: "usage", tokenType,
-            title: transaction.type === "settlement" ? "Overage settlement" : "Usage",
-            description: transaction.reason ?? null,
-            sourceType: transaction.source_type, sourceId: transaction.source_id,
-            operationId: transaction.operation_id,
-            amountUsd: -amountToUsd(transaction.amount, tokenType), status: "covered",
-            createdAt: transaction.created_at,
-          }];
-        }
-        const activity = mapTransactionActivity(transaction);
-        return activity ? [activity] : [];
-      });
-      const hasMore = result.pagination.has_more;
-      return {
-        userId: input.userId, billing: status, tokenType, unit: getCreditUnit(tokenType), page, limit, items,
-        pagination: { hasMore, nextPage: hasMore ? page + 1 : null },
-      };
-    }
-    const [transactions, overages] = await Promise.all([
-      listAllPages((nextPage, nextLimit) =>
-        sdk.admin.credits.listTransactions({
-          business_key: businessKey,
-          external_user_id: input.userId,
-          token_type: tokenType,
-          sorting: "-created_at",
-          include_count: false,
-          page: nextPage,
-          limit: nextLimit,
-        }),
-      ),
-      listAllPages((nextPage, nextLimit) =>
-        sdk.admin.credits.listUsageOverages({
-          business_key: businessKey,
-          external_user_id: input.userId,
-          token_type: tokenType,
-          sorting: "-created_at",
-          include_count: false,
-          page: nextPage,
-          limit: nextLimit,
-        }),
-      ),
-    ]);
-    const activities = buildBalanceActivities({ transactions, overages });
-    const start = (page - 1) * limit;
-    const items = activities.slice(start, start + limit);
-    const hasMore = activities.length > start + limit;
-    return {
-      userId: input.userId,
-      billing: status,
-      tokenType,
-      unit: getCreditUnit(tokenType),
-      page,
+    else if (!await getCustomerCreditsOrEmpty({ sdk, businessKey, userId: input.userId })) return list([], null);
+    const page = await readLedger({
+      sources: ledgerSources({ userId: input.userId, tokenType, filter: input.filter }),
+      cursor: input.cursor ?? null,
+      offset: input.offset,
       limit,
-      items,
-      pagination: {
-        hasMore,
-        nextPage: hasMore ? page + 1 : null,
-      },
-    };
+    });
+    return list(page.items, page.nextCursor);
   };
 
   const listPublicProducts = async (): Promise<Product[]> => {
@@ -2980,24 +2761,27 @@ export function createTalesofaiBillingOperations(
     },
 
     async getCreditStatus(
-      input: BillingUserRef & { tokenType?: string; createCustomer?: boolean },
+      input: BillingUserRef & { tokenType?: string; createCustomer?: boolean; grants?: BillingCreditGrantScope },
     ): Promise<BillingCreditStatus> {
       const tokenType =
         input.tokenType ?? COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
+      const scope = input.grants ?? "available";
       const state = input.createCustomer === false
         ? await getCustomerCreditsOrEmpty({ sdk, businessKey, userId: input.userId })
         : await getCreditsAfterEnsure(input.userId);
       if (!state) return { netUsd: 0, globalAvailableUsd: 0, groups: [] };
       const balance = findBalance(state.credits, tokenType);
-      const grants = (
-        await listAllCreditGrants({ userId: input.userId, tokenType })
+      const grants = scope === "none" ? [] : (
+        await listAllCreditGrants({ userId: input.userId, tokenType, status: scope === "available" ? "active" : undefined })
       ).filter(
         (grant) =>
           CREDIT_GRANT_DISPLAY_STATUSES.includes(
             grant.status as CreditGrantDisplayStatus,
           ) && isCreditGrantDisplayable(grant),
       );
-      const grantStatuses = grants.map((grant) => mapCreditGrant(grant));
+      const grantStatuses = grants
+        .map((grant) => mapCreditGrant(grant))
+        .filter((grant) => scope === "all" || (grant.remainingAmount > 0 && (grant.daysRemaining === null || grant.daysRemaining > 0)));
       const openOverageUsd = amountToUsd(
         balance?.openOverageBalance ?? 0,
         tokenType,

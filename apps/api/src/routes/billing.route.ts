@@ -1,6 +1,14 @@
 import { Hono, type Context } from "hono";
 import { ApiError, isBillingApiError } from "../lib/billing-api-error.js";
-import { billingOperations, COHUB_BILLING_FEATURES, COHUB_BILLING_TOKEN_TYPES, type CohubBillingFeatureKey } from "@cohub/billing";
+import {
+  BILLING_BALANCE_ACTIVITY_FILTERS,
+  billingOperations,
+  COHUB_BILLING_FEATURES,
+  COHUB_BILLING_TOKEN_TYPES,
+  parseBalanceActivityCursor,
+  type BillingBalanceActivityFilter,
+  type CohubBillingFeatureKey,
+} from "@cohub/billing";
 import { config } from "../config.js";
 import { jsonError } from "../lib/json-error.js";
 import { getOptionalAuth, useAuth } from "../lib/middleware.js";
@@ -144,22 +152,47 @@ router.get("/credits", async (c) => {
   const credit = await billingOperations.getCreditStatus({
     userId: user.uuid,
     tokenType: resolved.tokenType,
+    grants: c.req.query("include") === "exhausted" ? "all" : "available",
   });
   return c.json(credit);
 });
+
+const ACTIVITY_LIMIT = 100;
+const LEGACY_ACTIVITY_MAX_OFFSET = 2_000;
 
 router.get("/balance-activities", async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
   const resolved = resolveTokenType(c.req.query("tokenType"));
   if ("error" in resolved) return c.json({ message: resolved.error }, 400);
+  const cursor = c.req.query("cursor") || null;
+  if (cursor && !parseBalanceActivityCursor(cursor)) return c.json({ message: "Invalid cursor", code: "invalid_cursor" }, 400);
+  const filter = c.req.query("filter");
+  if (filter && !(BILLING_BALANCE_ACTIVITY_FILTERS as readonly string[]).includes(filter)) {
+    return c.json({ message: "Invalid filter" }, 400);
+  }
+  // Requests without a cursor also answer older page-number clients (SDK <= 13.x).
+  const legacyPage = cursor ? null : parsePositiveInt(c.req.query("page"), 1, 10_000);
+  const limit = parsePositiveInt(c.req.query("limit"), 50, ACTIVITY_LIMIT);
+  const offset = legacyPage ? (legacyPage - 1) * limit : 0;
+  if (legacyPage && offset >= LEGACY_ACTIVITY_MAX_OFFSET) {
+    return c.json({
+      activities: { userId: user.uuid, billing: billingOperations.status, tokenType: resolved.tokenType, limit, items: [], nextCursor: null, page: legacyPage, pagination: { hasMore: false, nextPage: null } },
+    });
+  }
   const activities = await billingOperations.listBalanceActivities({
     userId: user.uuid,
     tokenType: resolved.tokenType,
-    page: parsePositiveInt(c.req.query("page"), 1, 10_000),
-    limit: parsePositiveInt(c.req.query("limit"), BILLING_PAGE_SIZE, BILLING_PAGE_SIZE),
+    cursor,
+    offset,
+    limit,
+    filter: filter as BillingBalanceActivityFilter | undefined,
   });
-  return c.json({ activities });
+  if (!legacyPage) return c.json({ activities });
+  const hasMore = activities.nextCursor !== null && offset + limit < LEGACY_ACTIVITY_MAX_OFFSET;
+  return c.json({
+    activities: { ...activities, page: legacyPage, pagination: { hasMore, nextPage: hasMore ? legacyPage + 1 : null } },
+  });
 });
 
 router.post("/checkout-confirmation", async (c) => {

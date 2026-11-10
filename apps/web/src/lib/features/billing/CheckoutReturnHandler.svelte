@@ -22,6 +22,7 @@ import {
 	stripCheckoutReturn,
 } from "./checkout-return";
 import { trackPurchase } from "./funnel";
+import { announceBillingChange } from "./refresh";
 
 /** Grace for the provider webhook to land after the redirect. */
 const SETTLE_POLLS = 3;
@@ -101,7 +102,7 @@ onMount(() => {
 		void billingCatalogStore
 			.refresh()
 			.catch((error) => console.warn("[billing] Refresh failed", error));
-		window.dispatchEvent(new Event("cohub:billing-refresh"));
+		announceBillingChange();
 	};
 	const visible = () => {
 		if (document.visibilityState === "visible") refresh();

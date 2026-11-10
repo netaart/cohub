@@ -91,6 +91,7 @@ import { sdk } from "$lib/sdk";
 import { filterSpacePickerItems } from "$lib/space-picker-model";
 import { buildUserNewSessionRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
+import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
 import { getRecentSpaces } from "$lib/stores/recent-space";
 import {
 	getCachedSpaceFilterPref,
@@ -280,11 +281,17 @@ function localizedCommandExcerpt(item: CommandPaletteItem) {
 }
 
 const localCommands = $derived(
-	resolveLocalCommandItems(searchPlan, localizedCommandTitle).map((item) => ({
-		...item,
-		title: localizedCommandTitle(item) ?? item.title,
-		excerpt: localizedCommandExcerpt(item) ?? item.excerpt,
-	})),
+	resolveLocalCommandItems(searchPlan, localizedCommandTitle)
+		.filter(
+			(item) =>
+				billingCatalogStore.available ||
+				settingsCommandSection(item) !== "billing",
+		)
+		.map((item) => ({
+			...item,
+			title: localizedCommandTitle(item) ?? item.title,
+			excerpt: localizedCommandExcerpt(item) ?? item.excerpt,
+		})),
 );
 const myUserUuid = $derived(authStore.userUuid);
 const filteredSpaceItems = $derived.by(() => {

@@ -23,8 +23,9 @@ export class SpaceWalletApi {
     return this.transport.request<SpaceWalletFunding>(`/api/spaces/${this.spaceId}/wallet/funding`);
   }
 
-  activities(page = 1) {
-    return this.transport.request<SpaceWalletActivityPage>(`/api/spaces/${this.spaceId}/wallet/activities?page=${page}`);
+  activities(cursor?: string | null) {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    return this.transport.request<SpaceWalletActivityPage>(`/api/spaces/${this.spaceId}/wallet/activities${query}`);
   }
 
   createOrder(input: { id: string; productKey: string; returnPath?: string }) {
