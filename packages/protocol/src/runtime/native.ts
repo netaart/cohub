@@ -47,13 +47,28 @@ export const nativeTurnProgressSchema = z.object({
 }).strict();
 export type NativeTurnProgress = z.infer<typeof nativeTurnProgressSchema>;
 
-/** Final, immutable Turn receipt. Native bytes are archived separately, without lossy normalization. */
+const messageOrdinal = z.number().int().nonnegative().max(10_000);
+
+/**
+ * Final, immutable Turn receipt. Native bytes are archived separately, without lossy normalization.
+ * `messages` start at ordinal `from`; earlier ones were staged with `messages` events.
+ */
 export const nativeTurnCompleteSchema = z.object({
   messages: z.array(nativeTurnMessageSchema).max(10_000),
+  from: messageOrdinal.optional(),
   status: z.enum(["completed", "failed", "interrupted"]),
   completedAt: z.iso.datetime(),
 }).strict();
 export type NativeTurnComplete = z.infer<typeof nativeTurnCompleteSchema>;
+
+/** Stages a registered Turn's messages from ordinal `from`, so no frame has to carry a whole Turn. */
+export const nativeTurnMessagesSchema = z.object({
+  from: messageOrdinal,
+  messages: z.array(nativeTurnMessageSchema).max(10_000),
+}).strict();
+export type NativeTurnMessages = z.infer<typeof nativeTurnMessagesSchema>;
+/** How many messages the Turn holds; a `from` beyond it stages nothing. */
+export type NativeTurnMessagesResult = { count: number };
 
 /** Durable ingest of one transcript's Turns. */
 export const nativeIngestTurnSchema = z.object({
@@ -105,6 +120,7 @@ export const nativeRuntimeEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ingest"), input: nativeIngestSchema }).strict(),
   z.object({ type: z.literal("known"), input: nativeKnownSchema }).strict(),
   z.object({ type: z.literal("progress"), sessionId: id, turnId: id, progress: nativeTurnProgressSchema }).strict(),
+  z.object({ type: z.literal("messages"), sessionId: id, turnId: id, input: nativeTurnMessagesSchema }).strict(),
   z.object({ type: z.literal("status"), sessionId: id, turnId: id, controllable: z.boolean().optional() }).strict(),
   z.object({ type: z.literal("approval"), sessionId: id, turnId: id, approval: runtimeApprovalSchema }).strict(),
   /** The Runtime stopped waiting: decided, timed out, or the Turn ended. */

@@ -5,7 +5,7 @@ import type { IngestTransport } from "./ingest.js";
  * Transcript ingest travels over the existing Runtime WebSocket: one connection, one credential, no
  * second channel and no local receipts.
  */
-export function nativeWebSocketTransport(send: (event: NativeRuntimeEvent) => Promise<unknown>): IngestTransport {
+export function nativeWebSocketTransport(send: (event: NativeRuntimeEvent) => Promise<unknown>, features: { messages?: boolean } = {}): IngestTransport {
   const call = async <T>(event: NativeRuntimeEvent, options?: { signal?: AbortSignal }): Promise<T> => {
     options?.signal?.throwIfAborted();
     return await send(event) as T;
@@ -14,6 +14,7 @@ export function nativeWebSocketTransport(send: (event: NativeRuntimeEvent) => Pr
     ingest: (event, options) => call(event, options),
     known: async (turnIds, options) => (await call<{ turns: Awaited<ReturnType<IngestTransport["known"]>> }>({ type: "known", input: { turnIds } }, options)).turns,
     progress: (event, options) => call(event, options),
+    ...(features.messages ? { messages: (event: Extract<NativeRuntimeEvent, { type: "messages" }>, options?: { signal?: AbortSignal }) => call<{ count: number }>(event, options) } : {}),
     status: (sessionId, turnId, controllable, options) => call({ type: "status", sessionId, turnId, ...(controllable === undefined ? {} : { controllable }) }, options),
   };
 }

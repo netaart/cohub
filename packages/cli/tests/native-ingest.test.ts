@@ -165,6 +165,25 @@ test("a new terminal conversation syncs in order, and a restart asks the server 
   } finally { await w.cleanup(); }
 });
 
+test("a settled Turn over the batch budget stages its messages in bounded frames, then seals them", async () => {
+  const w = await workspace();
+  const server = fakeServer();
+  const ingest = w.ingest();
+  try {
+    const id = randomUUID();
+    const path = join(w.piDirectory(w.project), "large.jsonl");
+    const reply = (n: number) => piMessage(`a${n}`, n ? `a${n - 1}` : "u0", "assistant", [{ type: "text", text: "é".repeat(1_500_000) }], { stopReason: n < 3 ? "toolUse" : "stop" });
+    await w.write(path, piHeader(id, w.project) + piMessage("u0", null, "user", "go") + [0, 1, 2, 3].map(reply).join(""), new Date(Date.now() - 60_000));
+    await ingest.load();
+    ingest.connect(server.transport);
+    const turnId = turnIdOf("pi", id, "u0");
+    await until(() => server.turns.get(turnId)?.settled === true);
+    assert.equal(server.staged.get(turnId), 4);
+    assert.ok(server.stagedFrames.length > 1 && server.stagedFrames.every((bytes) => bytes < 8 * 1024 * 1024));
+    assert.deepEqual(server.batches.map((batch) => batch.turns[0]?.result && { from: batch.turns[0].result.from, messages: batch.turns[0].result.messages.length }), [null, { from: 4, messages: 0 }]);
+  } finally { await ingest.close(AbortSignal.timeout(2_000)); await w.cleanup(); }
+});
+
 test("a Turn over a size limit is not resent until its transcript changes", async () => {
   const w = await workspace();
   const server = fakeServer();
