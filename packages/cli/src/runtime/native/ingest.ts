@@ -145,6 +145,10 @@ export async function discoverTranscripts(cwd: string, harnesses: Harness[], opt
 
 /** Ingest batches stay well under the Runtime frame limit. */
 const BATCH_MAX_BYTES = 8 * 1024 * 1024;
+/** Room left in a batch for the frame around its items: ids, harness, separators. */
+const ITEMS_MAX_BYTES = BATCH_MAX_BYTES - 64 * 1024;
+
+const frameBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 
 /** Split in order into batches of at most `count` items and the byte budget. */
 function* chunks<T>(items: T[], count: number, size: (item: T) => number = () => 0): Generator<T[]> {
@@ -152,7 +156,7 @@ function* chunks<T>(items: T[], count: number, size: (item: T) => number = () =>
   let bytes = 0;
   for (const item of items) {
     const itemBytes = size(item);
-    if (batch.length && (batch.length >= count || bytes + itemBytes > BATCH_MAX_BYTES)) { yield batch; batch = []; bytes = 0; }
+    if (batch.length && (batch.length >= count || bytes + itemBytes > ITEMS_MAX_BYTES)) { yield batch; batch = []; bytes = 0; }
     batch.push(item);
     bytes += itemBytes;
   }
@@ -735,11 +739,11 @@ export class NativeIngest {
         result: item.settled ? this.complete(item.turn.result ?? this.cutOff(item, pending)) : null,
       },
     }));
-    const sizes = new Map(payloads.map((payload) => [payload, JSON.stringify(payload.turn).length]));
+    const sizes = new Map(payloads.map((payload) => [payload, frameBytes(payload.turn)]));
     for (const batch of chunks(payloads, INGEST_BATCH_TURNS, (payload) => sizes.get(payload) ?? 0)) {
       const [only] = batch;
       // A Turn over the batch budget is batched alone; its messages are staged ahead of its result.
-      if (batch.length === 1 && only && (sizes.get(only) ?? 0) > BATCH_MAX_BYTES) only.turn = await this.stage(state, transport, only.turn, known.get(only.item.turnId)?.sessionId);
+      if (batch.length === 1 && only && (sizes.get(only) ?? 0) > ITEMS_MAX_BYTES) only.turn = await this.stage(state, transport, only.turn, known.get(only.item.turnId)?.sessionId);
       const result = await transport.ingest({
         type: "ingest",
         input: { harness: state.harness, nativeSessionId: state.nativeSessionId, turns: batch.map((payload) => payload.turn) },
@@ -771,20 +775,14 @@ export class NativeIngest {
   private async stage(state: TranscriptState, transport: IngestTransport, turn: NativeIngestTurn, sessionId?: string): Promise<NativeIngestTurn> {
     const result = turn.result, stage = transport.messages;
     if (!result || !stage) return turn;
-    if (!sessionId) {
-      // Messages need a registered Turn; it is registered running and settled by the sealing ingest.
-      const { result: _result, ...running } = turn;
-      const registered = await transport.ingest({ type: "ingest", input: { harness: state.harness, nativeSessionId: state.nativeSessionId, turns: [{ ...running, result: null }] } });
-      const entry = registered.turns.find((candidate) => candidate.turnId === turn.turnId);
-      if (!entry) throw new Error("Server did not record a native Turn");
-      if (entry.settled) return turn;
-      sessionId = entry.sessionId;
-    }
-    const target = sessionId;
+    // Messages need a registered Turn; it is registered running and settled by the sealing ingest.
+    const target = sessionId ?? (await transport.ingest({ type: "ingest", input: { harness: state.harness, nativeSessionId: state.nativeSessionId, turns: [{ ...turn, result: null }] } }))
+      .turns.find((entry) => entry.turnId === turn.turnId)?.sessionId;
+    if (!target) throw new Error("Server did not record a native Turn");
     const send = (from: number, messages: NativeTurnMessage[]) => stage({ type: "messages", sessionId: target, turnId: turn.turnId, input: { from, messages } });
     // An empty request asks how many messages a previous attempt already staged.
     let from = Math.min((await send(0, [])).count, result.messages.length);
-    for (const batch of chunks(result.messages.slice(from), STAGE_BATCH_MESSAGES, (message) => JSON.stringify(message).length)) {
+    for (const batch of chunks(result.messages.slice(from), STAGE_BATCH_MESSAGES, frameBytes)) {
       const { count } = await send(from, batch);
       if (count !== from + batch.length) throw new Error("Server staged an unexpected number of native messages");
       from = count;

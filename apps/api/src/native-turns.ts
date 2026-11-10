@@ -290,8 +290,6 @@ type NativeTurnRow = typeof sessionTurns.$inferSelect;
 type MessageRow = typeof sessionMessages.$inferSelect;
 type MessageKind = "assistant_intermediate" | "assistant_final" | "assistant_error";
 
-/** Independent of how the messages were split across frames. */
-const completionDigestOf = (input: NativeTurnComplete, messages: string[]) => digest({ messages, status: input.status, completedAt: input.completedAt });
 const assistantMessagesOf = (turnId: string) => and(eq(sessionMessages.turnId, turnId), eq(sessionMessages.role, "assistant"));
 
 async function lockNativeTurn(tx: Tx, sessionId: string, turnId: string) {
@@ -350,8 +348,6 @@ export async function stageNativeMessages(spaceId: string, userId: string, sessi
 export async function completeNativeTurn(spaceId: string, userId: string, sessionId: string, turnId: string, input: NativeTurnComplete) {
   await getOwnedNativeTurn(spaceId, userId, sessionId, turnId);
   const from = input.from ?? 0;
-  // Turns finalized before staging existed hold a digest of the whole single-frame result.
-  const legacyDigest = from === 0 ? digest({ messages: input.messages, status: input.status, completedAt: input.completedAt }) : null;
   const committed = await db.transaction(async (tx) => {
     const turn = await lockNativeTurn(tx, sessionId, turnId);
     const meta = record(turn.meta), receipt = record(meta.nativeSync);
@@ -361,32 +357,31 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
     // A plain error, not a conflict: the Runtime resends after asking where the staged messages end.
     if (from > staged.length) throw new Error(`Staged messages end at ${staged.length}; resend from there`);
     const digests = [...staged.slice(0, from), ...input.messages.map((message) => digest(message))];
-    const completionDigest = completionDigestOf(input, digests);
-    const replay = receipt.completionDigest === completionDigest || (legacyDigest !== null && receipt.completionDigest === legacyDigest);
+    // Independent of how the messages were split across frames. Turns finalized before staging hold `digest(input)`.
+    const completionDigest = digest({ messages: digests, status: input.status, completedAt: input.completedAt });
+    const replay = receipt.completionDigest === completionDigest || receipt.completionDigest === digest(input);
     if (receipt.completionDigest && !replay) conflict("Turn result is immutable");
     if (terminal.has(turn.status)) {
       // Replay of the exact same completion: only the artifact snapshot may still be missing.
       if (!replay) conflict("Turn already finalized");
       return { changed: false, turn, messages: [], projection: null };
     }
-    if (staged.length > digests.length) conflict("Turn result has fewer messages than were staged");
-    for (let ordinal = from; ordinal < staged.length; ordinal += 1) if (staged[ordinal] !== digests[ordinal]) conflict("Staged Turn messages are immutable");
+    if (staged.some((value, ordinal) => value !== digests[ordinal])) conflict("Staged Turn messages are immutable");
     const completedAt = new Date(input.completedAt);
     const finalKind: MessageKind = input.status === "completed" ? "assistant_final" : "assistant_error";
     const kindOf = (ordinal: number): MessageKind => ordinal === digests.length - 1 ? finalKind : "assistant_intermediate";
     const fresh = input.messages.slice(staged.length - from).map((message, index) => nativeMessageRow(turn, userId, message, staged.length + index, kindOf(staged.length + index), completedAt));
-    let messages = fresh;
     if (staged.length) {
       // Staged rows learn what only the completion knows: when the Turn ended and which message is final.
-      const patch = { ...(imported ? { origin: "local_import", originalStartedAt: turn.startedAt, originalCompletedAt: input.completedAt } : {}) };
+      const patch = imported ? { origin: "local_import", originalStartedAt: turn.startedAt, originalCompletedAt: input.completedAt } : {};
       await tx.update(sessionMessages).set({ completedAt, createdAt: completedAt, meta: sql`${sessionMessages.meta} || ${JSON.stringify(patch)}::jsonb` }).where(assistantMessagesOf(turnId));
       if (!fresh.length) {
         await tx.update(sessionMessages).set({ meta: sql`jsonb_set(${sessionMessages.meta}, '{messageKind}', ${JSON.stringify(finalKind)}::jsonb)` })
           .where(eq(sessionMessages.id, messageId(turnId, staged.length - 1)));
       }
-      await insertNativeMessages(tx, sessionId, fresh);
-      messages = await tx.select().from(sessionMessages).where(assistantMessagesOf(turnId)).orderBy(asc(sessionMessages.sequence));
-    } else await insertNativeMessages(tx, sessionId, fresh);
+    }
+    await insertNativeMessages(tx, sessionId, fresh);
+    const messages = staged.length ? await tx.select().from(sessionMessages).where(assistantMessagesOf(turnId)).orderBy(asc(sessionMessages.sequence)) : fresh;
     const final = messages.at(-1);
     const totalUsage = messages.reduce<ReturnType<typeof addUsage>>((sum, message) => addUsage(sum, message.usage), null);
     const next = await tx.update(sessionTurns).set({ status: input.status, assistantContent: final?.content ?? [], assistantText: final?.text ?? null,

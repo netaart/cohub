@@ -172,7 +172,7 @@ test("a settled Turn over the batch budget stages its messages in bounded frames
   try {
     const id = randomUUID();
     const path = join(w.piDirectory(w.project), "large.jsonl");
-    const reply = (n: number) => piMessage(`a${n}`, n ? `a${n - 1}` : "u0", "assistant", [{ type: "text", text: "x".repeat(3 * 1024 * 1024) }], { stopReason: n < 3 ? "toolUse" : "stop" });
+    const reply = (n: number) => piMessage(`a${n}`, n ? `a${n - 1}` : "u0", "assistant", [{ type: "text", text: "é".repeat(1_500_000) }], { stopReason: n < 3 ? "toolUse" : "stop" });
     await w.write(path, piHeader(id, w.project) + piMessage("u0", null, "user", "go") + [0, 1, 2, 3].map(reply).join(""), new Date(Date.now() - 60_000));
     await ingest.load();
     ingest.connect(server.transport);

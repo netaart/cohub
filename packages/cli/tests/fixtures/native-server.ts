@@ -41,7 +41,7 @@ export function fakeNativeServer() {
     async messages(event) {
       const turn = turns.get(event.turnId);
       if (!turn || turn.settled) throw new Error("Execution was resolved");
-      stagedFrames.push(JSON.stringify(event).length);
+      stagedFrames.push(Buffer.byteLength(JSON.stringify(event)));
       const count = staged.get(event.turnId) ?? 0;
       if (event.input.from <= count) staged.set(event.turnId, Math.max(count, event.input.from + event.input.messages.length));
       return { count: staged.get(event.turnId) ?? 0 };
