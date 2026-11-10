@@ -262,7 +262,7 @@ function registerExportCommand(boards: Command): void {
     .requiredOption("-o, --out <file>", "Output file; the extension picks the format. Sequences need %d, e.g. frames/%04d.png")
     .option("--at <time>", "A moment, comma-separated moments, or start:end:step")
     .option("--camera", "Follow the animation camera")
-    .option("--size <widthxheight>", "Camera output in pixels; frames keep their own size", "1600x900")
+    .option("--size <widthxheight>", "Camera output in pixels, the animation's viewport by default; frames keep their own size")
     .option("--animation <id>", "Animation the --at times refer to")
     .option("--frame <item-id>", "Export one frame as a page")
     .option("--items <ids>", "Comma-separated item ids")
@@ -304,10 +304,10 @@ page: its fill and shaders, without its outline and label.`)
       try {
         const out = options.out as string;
         const times = options.at ? parseBoardTimes(options.at) : undefined;
-        let camera: { width: number; height: number } | undefined;
+        let camera: { width: number; height: number } | "viewport" | undefined;
         if (options.camera) {
           if (!options.animation || !times) throw new Error("--camera needs --animation and --at.");
-          camera = parseSize(options.size ?? "1600x900");
+          camera = options.size ? parseSize(options.size) : "viewport";
         }
         const progress = (completed: number, total: number) => {
           if (!jsonRequested(options) && (completed === total || completed % 30 === 0)) process.stderr.write(`Rendered ${completed}/${total} frames\n`);

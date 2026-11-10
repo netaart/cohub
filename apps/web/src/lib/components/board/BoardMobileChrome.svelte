@@ -27,8 +27,8 @@ import {
 	MousePointer2,
 	Palette,
 	Pencil,
-	Play,
 	Plus,
+	Presentation,
 	Square,
 	SquareRoundCorner,
 	Trash2,
@@ -229,7 +229,7 @@ function focusContent() {
 			{/if}
 			{#if onPresent}
 				<button type="button" class="sheet-item sheet-item--wide" onclick={() => { moreOpen = false; onPresent(); }}>
-					<Play class="h-4 w-4" />
+					<Presentation class="h-4 w-4" />
 					<span>{m.board_present({}, { locale })}</span>
 				</button>
 			{/if}
@@ -298,7 +298,7 @@ function focusContent() {
 			aria-label={m.board_present({}, { locale })}
 			onclick={onPresent}
 		>
-			<Play class="h-4 w-4" />
+			<Presentation class="h-4 w-4" />
 		</button>
 	{/if}
 

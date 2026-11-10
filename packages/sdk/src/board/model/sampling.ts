@@ -1,4 +1,4 @@
-import { arrowBindings, type BoardDocument, type BoardFrame, type BoardItem } from "@cohub/protocol";
+import { arrowBindings, BOARD_CAMERA_VIEWPORT, type BoardDocument, type BoardFrame, type BoardItem } from "@cohub/protocol";
 import {
   applyBoardEvaluation,
   boardAnimationTime,
@@ -76,23 +76,33 @@ export function createBoardAnimationSampler(
 }
 export type BoardAnimationSampler = ReturnType<typeof createBoardAnimationSampler>;
 
+export function boardCameraScale(surface: Size, viewport: Size = BOARD_CAMERA_VIEWPORT): number {
+  return Math.min(surface.width / viewport.width, surface.height / viewport.height);
+}
+
 export function resolveBoardAnimationCamera(
   override: BoardCameraOverride,
   bounds: (id: string) => BoardFrame | undefined,
   surface: Size,
   time: number,
   base: BoardViewport = { x: 0, y: 0, zoom: 1 },
+  viewport: Size = BOARD_CAMERA_VIEWPORT,
 ): BoardViewport {
+  const scale = boardCameraScale(surface, viewport);
+  if (!(scale > 0) || Object.keys(override).length === 0) return base;
+  const left = (surface.width - viewport.width * scale) / 2;
+  const top = (surface.height - viewport.height * scale) / 2;
+  const framed = { x: (base.x - left) / scale, y: (base.y - top) / scale, zoom: base.zoom / scale };
   let camera =
-    override.focus === undefined ? base : (cameraForFocus(override.focus, bounds, surface, { padding: 48 }) ?? base);
+    override.focus === undefined ? framed : (cameraForFocus(override.focus, bounds, viewport, { padding: 48 }) ?? framed);
   if (override.zoom !== undefined) camera = { ...camera, zoom: override.zoom };
   if (override.center)
-    camera = cameraForState({ centerX: override.center.x, centerY: override.center.y, zoom: camera.zoom }, surface);
+    camera = cameraForState({ centerX: override.center.x, centerY: override.center.y, zoom: camera.zoom }, viewport);
   if (override.shake)
     camera = {
       ...camera,
       x: camera.x + Math.sin((time / 1000) * 91.3) * override.shake,
       y: camera.y + Math.cos((time / 1000) * 77.9) * override.shake,
     };
-  return camera;
+  return { x: camera.x * scale + left, y: camera.y * scale + top, zoom: camera.zoom * scale };
 }

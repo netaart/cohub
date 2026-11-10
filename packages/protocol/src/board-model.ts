@@ -1,6 +1,7 @@
 
 import * as z from "zod";
 import {
+	BOARD_CAMERA_VIEWPORT,
 	BOARD_DEFAULT_ITEM_SIZE,
 	BOARD_DEFAULT_SIZES,
 	BOARD_TEXT_FONT_SIZE,
@@ -828,6 +829,13 @@ export const BoardAnimationHeaderSchema = z
 		loop: z.boolean().default(false),
 		end: z.enum(["hold", "reset"]).default("hold").describe("hold keeps the last frame; reset returns to the start."),
 		markers: z.array(BoardMarkerSchema).max(10_000).default([]).describe("Labeled points on this timeline; a nested animation's markers do not carry over."),
+		viewport: z
+			.object({ width: z.number().int().positive().max(8192), height: z.number().int().positive().max(8192) })
+			.strict()
+			.optional()
+			.describe(
+				`Screen pixels the camera tracks are framed for, ${BOARD_CAMERA_VIEWPORT.width}x${BOARD_CAMERA_VIEWPORT.height} by default. Every screen and export shows that framing, scaled to fit.`,
+			),
 	})
 	.strict();
 export type BoardAnimationHeader = z.infer<typeof BoardAnimationHeaderSchema>;

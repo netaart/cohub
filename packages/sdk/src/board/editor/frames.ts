@@ -87,6 +87,7 @@ export function createFramesModule(ctx: EditorContext) {
 	function go(id: string, options: BoardFrameGoOptions = {}): boolean {
 		const next = region(id);
 		if (!next) return false;
+		ctx.camera.takeCameraControl();
 		const current = view();
 		const present = options.present ?? current?.present ?? false;
 		if (!current || (present && !current.present)) returnTo = state.camera;
@@ -96,7 +97,6 @@ export function createFramesModule(ctx: EditorContext) {
 			state.enteredId = null;
 			state.hoverId = null;
 		}
-		ctx.camera.takeCameraControl();
 		const camera = target(next.rect, present);
 		state.frameView = { id, present };
 		if (camera) ctx.camera.show(camera, options.animate !== false && !present);

@@ -1,5 +1,6 @@
 <script lang="ts">
 import {
+	BOARD_CAMERA_VIEWPORT,
 	BOARD_EXPORT_MAX_EDGE,
 	type BoardDocument,
 	type BoardExportRegion,
@@ -72,9 +73,21 @@ let failure = $state<string | null>(null);
 let warnings = $state<BoardImageExportWarning[]>([]);
 let animationId = $state("");
 let seconds = $state(0);
-let viewport = $state("1600x900");
+let chosenViewport = $state<string | null>(null);
 let hints = $state<BoardRenderDiagnostic[] | null>(null);
 const animationIds = $derived(Object.keys(boardDocument.animations));
+const framedViewport = $derived.by(() => {
+	const { width, height } = animation?.viewport ?? BOARD_CAMERA_VIEWPORT;
+	return `${width}x${height}`;
+});
+const viewports = $derived([
+	...new Set([framedViewport, "1600x900", "900x1600", "1080x1080"]),
+]);
+const viewport = $derived(
+	chosenViewport && viewports.includes(chosenViewport)
+		? chosenViewport
+		: framedViewport,
+);
 const cameraSize = $derived.by(() => {
 	const [width = 1600, height = 900] = viewport.split("x").map(Number);
 	return { width, height };
@@ -346,7 +359,7 @@ async function run(mode: "download" | "copy") {
 			</div>
 		{/if}
 		{#if scope === "camera"}
-			<label class="flex flex-col gap-1 text-xs text-text-secondary">{m.board_export_viewport({}, { locale })}<select class="export-select" bind:value={viewport}><option>1600x900</option><option>900x1600</option><option>1080x1080</option></select></label>
+			<label class="flex flex-col gap-1 text-xs text-text-secondary">{m.board_export_viewport({}, { locale })}<select class="export-select" value={viewport} onchange={(event) => { chosenViewport = event.currentTarget.value; }}>{#each viewports as option (option)}<option>{option}</option>{/each}</select></label>
 		{/if}
 		<button type="button" class="export-btn self-start" onclick={inspect}>{m.board_inspect({}, { locale })}</button>
 		{#if hints}

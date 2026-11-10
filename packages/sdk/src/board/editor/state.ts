@@ -1,6 +1,7 @@
 export type BoardEditorChannel =
 	| "document"
 	| "scene"
+	| "motion"
 	| "selection"
 	| "camera"
 	| "tool"
@@ -15,6 +16,7 @@ export type BoardEditorListener = () => void;
 
 export type BoardEditorChannels = {
 	emit(channel: BoardEditorChannel): void;
+	reroute<T>(from: BoardEditorChannel, to: BoardEditorChannel, run: () => T): T;
 	subscribe(
 		channels: BoardEditorChannel | readonly BoardEditorChannel[],
 		listener: BoardEditorListener,
@@ -23,10 +25,20 @@ export type BoardEditorChannels = {
 
 export function createChannels(): BoardEditorChannels {
 	const listeners = new Map<BoardEditorChannel, Set<BoardEditorListener>>();
+	let route: { from: BoardEditorChannel; to: BoardEditorChannel } | null = null;
 	return {
 		emit(channel) {
-			const subscribed = listeners.get(channel);
+			const subscribed = listeners.get(route?.from === channel ? route.to : channel);
 			if (subscribed) for (const listener of [...subscribed]) listener();
+		},
+		reroute(from, to, run) {
+			const previous = route;
+			route = { from, to };
+			try {
+				return run();
+			} finally {
+				route = previous;
+			}
 		},
 		subscribe(channels, listener) {
 			const list = typeof channels === "string" ? [channels] : channels;

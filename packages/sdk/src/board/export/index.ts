@@ -94,7 +94,7 @@ export function prepareBoardExport(input: BoardDocument, options: BoardExportOpt
   const sampled = sample?.document ?? base;
   const document = options.scripts?.document?.(sampled, options.at?.time ?? 0) ?? sampled;
   const scene = document === sampled ? sample?.scene ?? buildBoardScene(document) : buildBoardScene(document);
-  const camera = options.camera ? resolveBoardAnimationCamera(sample?.evaluation.camera ?? {}, (id) => scene.get(id)?.frame, options.camera, options.at?.time ?? 0) : undefined;
+  const camera = options.camera ? resolveBoardAnimationCamera(sample?.evaluation.camera ?? {}, (id) => scene.get(id)?.frame, options.camera, options.at?.time ?? 0, undefined, sample?.evaluation.cameraViewport) : undefined;
   const region: BoardExportRegion = camera && options.camera ? { kind: "rect", rect: { x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, width: options.camera.width / camera.zoom, height: options.camera.height / camera.zoom } } : options.region ?? { kind: "all" };
   const plan = planBoardExport({
     scene,

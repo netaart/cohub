@@ -289,6 +289,11 @@ A track drives one property of one target:
 
 A marker with `pause: true` stops playback there until `next`.
 
+Camera tracks frame their animation's `viewport` (`{ width, height }` in pixels; else
+the nearest nesting animation's, else 1600×900): `zoom` is pixels per board unit on that screen. Every screen
+and every `--camera` export shows the same framing, scaled to fit and centered, so a
+window of another shape sees more around it rather than less of it.
+
 A `focus` track holds its current target until the next focus keyframe.
 Use `boards schema track`, `boards schema animation` and `boards schema effect`
 for field definitions and behavior.
@@ -305,8 +310,10 @@ Alt to skip snapping); drag across lanes to select several, and ⌘C/⌘V copies
 the playhead. Selecting a keyframe edits its time, value and track interpolation;
 selecting the segment between two keyframes edits its easing, including a
 `cubic-bezier` curve. Double-click the ruler to add a marker. Animation settings set
-the name, duration, delay, play mode, loop and end, and **Key current view** records
-the camera. Viewers get a playback bar instead of the timeline.
+the name, duration, delay, play mode, loop, end and camera viewport, and **Key current view** records
+the camera. Viewers get a playback bar instead of the timeline: it hides while playing,
+Space plays and pauses, ←/→ skip 5 seconds and M toggles sound. Moving the view hands
+the camera to the viewer from the shot on screen until **Back to the camera**.
 
 ### Clips
 
@@ -464,7 +471,7 @@ failed compile. A frame that runs longer than `--timeout` (2 minutes) fails and 
 the scripts still running, the worker lane each is on, and the last event or call it got.
 
 Camera and fixed region options are mutually exclusive. `--size` sets camera output
-pixels and never sizes frames; `--scale` applies to fixed regions. In the web export
+pixels, the animation's `viewport` by default, and never sizes frames; `--scale` applies to fixed regions. In the web export
 dialog, choose an animation and time, then **Follow camera**. Export does not change
 shared playback.
 

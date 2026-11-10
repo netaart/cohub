@@ -362,6 +362,7 @@ export function createInteractionModule(ctx: EditorContext) {
 	function beginPinch() {
 		const [a, b] = [...activePointers.values()];
 		if (!a || !b) return;
+		ctx.camera.takeCameraControl();
 		const gesture = state.interaction;
 		state.interaction = { type: "idle" };
 		state.snapGuides = [];
@@ -846,10 +847,14 @@ export function createInteractionModule(ctx: EditorContext) {
 						: (ctx.query.pickAt(event.world, event.pointerType)?.id ?? null);
 				return;
 			case "panning": {
-				const held = holdsFrame(event.pointerType);
-				if ((interaction.tapSelection || held) && !interaction.moved && !dragged(event)) return;
-				if (!interaction.moved) state.interaction = { ...interaction, moved: true };
-				pan(interaction.origin, event.screen.x - interaction.start.x, event.screen.y - interaction.start.y, event.pointerType);
+				const slop = interaction.tapSelection || holdsFrame(event.pointerType) || ctx.camera.following();
+				if (slop && !interaction.moved && !dragged(event)) return;
+				let { origin } = interaction;
+				if (!interaction.moved) {
+					if (ctx.camera.takeCameraControl()) origin = { ...state.camera };
+					state.interaction = { ...interaction, origin, moved: true };
+				}
+				pan(origin, event.screen.x - interaction.start.x, event.screen.y - interaction.start.y, event.pointerType);
 				sample(event.screen);
 				return;
 			}

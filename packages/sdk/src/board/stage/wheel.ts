@@ -54,7 +54,6 @@ export function createBoardWheel(host: HTMLElement, editor: BoardEditor, options
 		stream.at = now;
 		if (!stream.ours) return;
 		event.preventDefault();
-		editor.takeCameraControl();
 		if (zoom) {
 			if (gestureScale !== null) return;
 			zoomedAt = now;
@@ -80,7 +79,6 @@ export function createBoardWheel(host: HTMLElement, editor: BoardEditor, options
 		if (options.busy()) return;
 		if (type === "gesturestart" || gestureScale === null) {
 			gestureScale = scale || 1;
-			editor.takeCameraControl();
 			return;
 		}
 		const factor = scale / gestureScale;

@@ -27,9 +27,12 @@ type Entry = {
 export type BoardMediaLoop = { id: string; src: string };
 
 export type BoardMediaClock = {
-	sync(input: { media: readonly BoardMediaState[]; loops: readonly BoardMediaLoop[]; now: number; scrubbing: boolean; onScreen: (id: string) => boolean }): void;
+	/** Returns how far the leading audio is ahead of `now`, in timeline milliseconds. */
+	sync(input: { media: readonly BoardMediaState[]; loops: readonly BoardMediaLoop[]; now: number; scrubbing: boolean; onScreen: (id: string) => boolean }): number | null;
 	texture(id: string): Texture | null;
 	readonly blocked: boolean;
+	readonly muted: boolean;
+	setMuted(muted: boolean): void;
 	unlock(): void;
 	subscribe(listener: () => void): () => void;
 	pause(): void;
@@ -41,6 +44,7 @@ const HOLD_DRIFT_S = 1 / 60;
 const NUDGE = 0.05;
 const RELEASE_MS = 2500;
 const WATCHDOG_MS = 300;
+const HAVE_FUTURE_DATA = 3;
 
 export function createBoardMediaClock(options: {
 	source: BoardAssetSource;
@@ -51,13 +55,23 @@ export function createBoardMediaClock(options: {
 	const samples = new Map<string, Sample>();
 	const listeners = new Set<() => void>();
 	let blocked = false;
+	let muted = false;
 	let destroyed = false;
+	let syncs = 0;
 	let watchdog: ReturnType<typeof setTimeout> | null = null;
+
+	function notify() {
+		for (const listener of listeners) listener();
+	}
 
 	function setBlocked(value: boolean) {
 		if (blocked === value) return;
 		blocked = value;
-		for (const listener of listeners) listener();
+		notify();
+	}
+
+	function silent(entry: Entry): boolean {
+		return entry.loop || muted || blocked || entry.element.volume === 0;
 	}
 
 	function seek(entry: Entry, seconds: number) {
@@ -184,29 +198,36 @@ export function createBoardMediaClock(options: {
 		if (element.paused) play(entry);
 	}
 
-	function drive(entry: Entry, state: BoardMediaState, rate: number) {
+	function drive(entry: Entry, state: BoardMediaState, rate: number, leads: boolean): number | null {
 		const { element } = entry;
 		if (entry.loop) entry.loop = element.loop = false;
 		const target = state.time / 1000;
 		const volume = Math.min(1, Math.max(0, state.volume));
 		if (Math.abs(element.volume - volume) > 0.001) element.volume = volume;
-		if (rate > 0) {
-			const muted = volume === 0 || blocked;
-			if (element.muted !== muted) element.muted = muted;
-			const drift = target - element.currentTime;
-			if (element.paused) {
-				if (Math.abs(drift) > HOLD_DRIFT_S) seek(entry, target);
-				element.playbackRate = rate;
-				play(entry);
-			} else if (Math.abs(drift) > SEEK_DRIFT_S) seek(entry, target + 0.05 * rate);
-			else {
-				const nudged = rate * (1 + Math.min(NUDGE, Math.max(-NUDGE, drift)));
-				if (Math.abs(element.playbackRate - nudged) > 0.004) element.playbackRate = nudged;
-			}
-			return;
+		if (rate <= 0) {
+			if (!element.paused) element.pause();
+			if (entry.kind === "video" && Math.abs((entry.pendingSeek ?? element.currentTime) - target) > HOLD_DRIFT_S) seek(entry, target);
+			return null;
 		}
-		if (!element.paused) element.pause();
-		if (entry.kind === "video" && Math.abs((entry.pendingSeek ?? element.currentTime) - target) > HOLD_DRIFT_S) seek(entry, target);
+		if (element.muted !== silent(entry)) element.muted = silent(entry);
+		const drift = target - element.currentTime;
+		if (element.paused) {
+			if (Math.abs(drift) > HOLD_DRIFT_S) seek(entry, target);
+			element.playbackRate = rate;
+			play(entry);
+			return null;
+		}
+		if (Math.abs(drift) > SEEK_DRIFT_S) {
+			seek(entry, target + 0.05 * rate);
+			return null;
+		}
+		if (leads && !element.seeking && entry.pendingSeek === null && element.readyState >= HAVE_FUTURE_DATA) {
+			if (Math.abs(element.playbackRate - rate) > 0.001) element.playbackRate = rate;
+			return (-drift * 1000) / rate;
+		}
+		const nudged = rate * (1 + Math.min(NUDGE, Math.max(-NUDGE, drift)));
+		if (Math.abs(element.playbackRate - nudged) > 0.004) element.playbackRate = nudged;
+		return null;
 	}
 
 	function stopTimed() {
@@ -219,17 +240,27 @@ export function createBoardMediaClock(options: {
 		samples.clear();
 	}
 
+	function hide() {
+		if (document.visibilityState === "hidden") stopTimed();
+	}
+	document.addEventListener("visibilitychange", hide);
+
+	// A long task delays this timer as much as frames; only a frame without a sync means they stopped.
 	function armWatchdog() {
 		if (watchdog !== null) clearTimeout(watchdog);
+		const seen = syncs;
 		watchdog = setTimeout(() => {
 			watchdog = null;
-			stopTimed();
+			requestAnimationFrame(() => {
+				if (syncs === seen && !destroyed) stopTimed();
+			});
 		}, WATCHDOG_MS);
 	}
 
 	return {
 		sync({ media, loops, now, scrubbing, onScreen }) {
-			if (destroyed) return;
+			if (destroyed) return null;
+			syncs += 1;
 			const wanted: Array<{ state: BoardMediaState; rate: number; rank: number; loop?: true }> = [];
 			const seen = new Set<string>();
 			for (const state of media) {
@@ -256,6 +287,7 @@ export function createBoardMediaClock(options: {
 			wanted.sort((a, b) => a.rank - b.rank);
 			const kept = new Set<string>();
 			let playing = false;
+			let skew: number | null = null;
 			for (const { state, rate, loop: looping } of wanted.slice(0, options.limit)) {
 				let entry = entries.get(state.id);
 				if (entry && (entry.src !== state.src || entry.kind !== state.kind)) {
@@ -270,7 +302,8 @@ export function createBoardMediaClock(options: {
 					loop(entry);
 					continue;
 				}
-				drive(entry, state, rate);
+				const lead = drive(entry, state, rate, skew === null && entry.kind === "audio");
+				skew ??= lead;
 				playing ||= rate > 0;
 			}
 			for (const [id, entry] of entries) {
@@ -280,6 +313,7 @@ export function createBoardMediaClock(options: {
 				if (!seen.has(id) || (now - entry.idleSince > RELEASE_MS && !entry.failed)) release(id);
 			}
 			if (playing) armWatchdog();
+			return skew;
 		},
 		texture(id) {
 			const entry = entries.get(id);
@@ -288,11 +322,21 @@ export function createBoardMediaClock(options: {
 		get blocked() {
 			return blocked;
 		},
+		get muted() {
+			return muted;
+		},
+		setMuted(value) {
+			if (muted === value) return;
+			muted = value;
+			for (const entry of entries.values()) if (!entry.loop) entry.element.muted = silent(entry);
+			notify();
+		},
 		unlock() {
+			if (!blocked) return;
 			setBlocked(false);
 			for (const entry of entries.values()) {
 				if (entry.loop || entry.element.paused) continue;
-				entry.element.muted = entry.element.volume === 0;
+				entry.element.muted = silent(entry);
 				play(entry);
 			}
 		},
@@ -303,6 +347,7 @@ export function createBoardMediaClock(options: {
 		pause: stopAll,
 		destroy() {
 			destroyed = true;
+			document.removeEventListener("visibilitychange", hide);
 			if (watchdog !== null) clearTimeout(watchdog);
 			for (const id of [...entries.keys()]) release(id);
 			listeners.clear();

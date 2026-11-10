@@ -1,5 +1,11 @@
 <script lang="ts">
-import { Clapperboard, LocateFixed, Minus, Play, Plus } from "lucide-svelte";
+import {
+	Clapperboard,
+	LocateFixed,
+	Minus,
+	Plus,
+	Presentation,
+} from "lucide-svelte";
 import type { Snippet } from "svelte";
 import type { BoardEditor } from "$lib/board/editor.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
@@ -68,7 +74,7 @@ function focusContent() {
 	{#if onPresent}
 		<div class="toolbar-divider"></div>
 		<button type="button" class="tool-key" title={m.board_present({}, { locale })} aria-label={m.board_present({}, { locale })} onclick={onPresent}>
-			<Play class="h-3.5 w-3.5" />
+			<Presentation class="h-3.5 w-3.5" />
 		</button>
 	{/if}
 </div>

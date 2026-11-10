@@ -58,6 +58,7 @@ export function createCameraModule(ctx: EditorContext) {
 	const { state } = ctx;
 	let motion: Motion | null = null;
 	let frame = 0;
+	let followed: BoardViewport | null = null;
 
 	function move(viewport: BoardViewport) {
 		state.camera = normalizeViewport(viewport, state.camera);
@@ -72,13 +73,20 @@ export function createCameraModule(ctx: EditorContext) {
 	}
 
 	function setCameraPolicy(policy: BoardCameraPolicy) {
-		if (state.cameraPolicy === policy) return;
 		state.cameraPolicy = policy;
-		ctx.preferencesChanged();
 	}
 
-	function takeCameraControl() {
+	function follow(viewport: BoardViewport | null) {
+		followed = viewport;
+	}
+
+	function takeCameraControl(): boolean {
+		if (state.cameraPolicy !== "follow" || !followed) return false;
+		stop();
+		move(followed);
+		followed = null;
 		setCameraPolicy("free");
+		return true;
 	}
 
 	function step(now: number) {
@@ -165,6 +173,7 @@ export function createCameraModule(ctx: EditorContext) {
 
 	function zoomAt(point: ScreenPoint, factor: number, animate = false) {
 		if (!ctx.frames.release()) return;
+		takeCameraControl();
 		const target = zoomAround(state.camera, point, state.camera.zoom * factor);
 		if (animate) animateCamera(target);
 		else {
@@ -175,6 +184,7 @@ export function createCameraModule(ctx: EditorContext) {
 
 	function scroll(dx: number, dy: number, smooth = false) {
 		if (!ctx.frames.release()) return;
+		takeCameraControl();
 		if (smooth) return glide((base) => panBy(base, -dx, -dy), motion?.kind === "glide" ? motion.anchor : surfaceCenter());
 		stop();
 		move(panBy(state.camera, -dx, -dy));
@@ -182,6 +192,7 @@ export function createCameraModule(ctx: EditorContext) {
 
 	function zoomBy(point: ScreenPoint, factor: number, smooth = false) {
 		if (!ctx.frames.release()) return;
+		takeCameraControl();
 		if (smooth) return glide((base) => zoomAround(base, point, base.zoom * factor), point);
 		stop();
 		move(zoomAround(state.camera, point, state.camera.zoom * factor));
@@ -194,6 +205,7 @@ export function createCameraModule(ctx: EditorContext) {
 
 	function focusRect(rect: Rect, focus: BoardFocusOptions = {}) {
 		ctx.frames.release({ present: true });
+		takeCameraControl();
 		const { surfaceSize } = state;
 		if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return;
 		const target = cameraForRect(rect, surfaceSize, {
@@ -255,7 +267,10 @@ export function createCameraModule(ctx: EditorContext) {
 		setCamera,
 		show,
 		setCameraPolicy,
+		follow,
 		takeCameraControl,
+		shown: () => followed ?? state.camera,
+		following: () => followed !== null && state.cameraPolicy === "follow",
 		stop,
 		viewCenter,
 		visibleRect,
@@ -264,7 +279,10 @@ export function createCameraModule(ctx: EditorContext) {
 		zoomAt,
 		zoomIn: () => zoomAt(surfaceCenter(), ZOOM_STEP, true),
 		zoomOut: () => zoomAt(surfaceCenter(), 1 / ZOOM_STEP, true),
-		resetZoom: () => zoomAt(surfaceCenter(), 1 / state.camera.zoom, true),
+		resetZoom: () => {
+			takeCameraControl();
+			zoomAt(surfaceCenter(), 1 / state.camera.zoom, true);
+		},
 		focusRect,
 		fitView,
 		focusItems,

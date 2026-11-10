@@ -221,7 +221,8 @@ the bracket keeps the pattern from matching the shell running `pkill` itself.
 
 An animation is one timeline of tracks; each track drives one property of one
 target by JSON path. `target: "camera"` moves the view through `focus`, `zoom`,
-`center` and `shake`. Write tracks directly, or generate them — these helpers
+`center` and `shake`, framed for the animation's `viewport` (1600×900 unless set);
+every screen and `--camera` export shows that framing scaled to fit. Write tracks directly, or generate them — these helpers
 print JSON and never write:
 
 ```bash

@@ -9,6 +9,7 @@ import {
 	type BoardItem,
 	type BoardTimelinePlacement,
 	type BoardTrack,
+	boardCameraScale,
 	boardInsertTime,
 	boardPlaceTarget,
 	boardRemoveTarget,
@@ -23,6 +24,8 @@ import {
 	newBoardTrackId,
 	createBoardItemId,
 	evaluateBoardAnimations,
+	pointToWorld,
+	screenPoint,
 } from "../model/index.js";
 import { remapItems } from "./clipboard.js";
 import type { BoardPlayhead, EditorContext } from "./context.js";
@@ -32,7 +35,7 @@ export type BoardKeyRef = { trackId: string; at: number };
 
 export type BoardKeyframeClip = Array<{ target: string; property: string } & BoardKeyframe>;
 
-export type BoardAnimationSettings = Partial<Pick<BoardAnimationHeader, "name" | "duration" | "play" | "delay" | "loop" | "end">>;
+export type BoardAnimationSettings = Partial<Pick<BoardAnimationHeader, "name" | "duration" | "play" | "delay" | "loop" | "end" | "viewport">>;
 
 export type BoardTrackSettings = Partial<Pick<BoardTrack, "interpolation" | "composite" | "orient">>;
 
@@ -101,9 +104,12 @@ export function createAnimationModule(ctx: EditorContext) {
 	/** The value a replacing keyframe needs to keep the shown state: the property evaluated without the additive tracks on it. */
 	function keyValue(found: NonNullable<ReturnType<typeof editing>>, target: string, property: string): unknown {
 		if (target === BOARD_CAMERA_TARGET) {
-			if (property === "zoom") return state.camera.zoom;
-			if (property === "center") return ctx.camera.viewCenter();
-			return undefined;
+			const shown = ctx.camera.shown();
+			const { width, height } = state.surfaceSize;
+			if (property === "center") return pointToWorld(screenPoint(width / 2, height / 2), shown);
+			if (property !== "zoom") return undefined;
+			const scale = boardCameraScale(state.surfaceSize, found.animation.viewport);
+			return scale > 0 ? shown.zoom / scale : shown.zoom;
 		}
 		const overlaps = (other: string) => other === property || other.startsWith(`${property}.`) || property.startsWith(`${other}.`);
 		const animations = { ...state.base.animations };
@@ -271,6 +277,7 @@ export function createAnimationModule(ctx: EditorContext) {
 		if (settings.duration !== undefined) next.duration = Math.max(1, Math.round(settings.duration));
 		if (settings.delay !== undefined) next.delay = ms(settings.delay);
 		if (!next.name) delete next.name;
+		if (!next.viewport) delete next.viewport;
 		return sameJson(next, animation) || commitAnimation(id, next);
 	}
 

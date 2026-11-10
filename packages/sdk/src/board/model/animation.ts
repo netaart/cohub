@@ -342,6 +342,7 @@ export type BoardEvaluation = {
 	items: ReadonlyMap<string, BoardItem>;
 	scripts: ReadonlyMap<string, BoardScript>;
 	camera: BoardCameraOverride;
+	cameraViewport: BoardAnimationHeader["viewport"];
 	times: ReadonlyMap<string, number>;
 };
 
@@ -405,17 +406,20 @@ export function evaluateBoardAnimations(
 ): BoardEvaluation {
 	const resolveColor = options.resolveColor ?? parseAnimationColor;
 	const local = new Map<string, number>(times instanceof Map ? times : Object.entries(times));
+	const nester = new Map<string, string>();
 	for (const id of compiled.order) {
 		const animation = compiled.animations.get(id);
 		const time = local.get(id);
 		if (!animation || time === undefined) continue;
 		for (const track of animation.children) {
 			const value = sampleBoardTrack(track, time, resolveColor);
-			if (typeof value === "number") local.set(track.target, Math.max(0, value));
+			if (typeof value !== "number") continue;
+			local.set(track.target, Math.max(0, value));
+			nester.set(track.target, id);
 		}
 	}
 
-	type Group = { target: string; path: readonly string[]; winner?: CompiledTrack; winnerTime: number; adds: Array<[CompiledTrack, number]> };
+	type Group = { target: string; path: readonly string[]; winner?: CompiledTrack; winnerTime: number; source?: string; adds: Array<[CompiledTrack, number]> };
 	const groups = new Map<string, Group>();
 	for (const [id, time] of local) {
 		const animation = compiled.animations.get(id);
@@ -429,11 +433,13 @@ export function evaluateBoardAnimations(
 			}
 			if (track.composite === "add") {
 				group.adds.push([track, time]);
+				group.source ??= id;
 				continue;
 			}
 			if (!group.winner || outranks(track, time, group.winner, group.winnerTime)) {
 				group.winner = track;
 				group.winnerTime = time;
+				group.source = id;
 			}
 		}
 	}
@@ -441,6 +447,7 @@ export function evaluateBoardAnimations(
 	const items = new Map<string, BoardItem>();
 	const scripts = new Map<string, BoardScript>();
 	const camera: BoardCameraOverride = {};
+	let cameraSource: string | undefined;
 	const ordered = [...groups.values()].sort((a, b) => a.path.length - b.path.length);
 	for (const group of ordered) {
 		const isCamera = group.target === BOARD_CAMERA_TARGET;
@@ -463,6 +470,7 @@ export function evaluateBoardAnimations(
 		}
 		if (isCamera) {
 			(camera as Record<string, unknown>)[group.path[0] as string] = value;
+			cameraSource ??= group.source;
 			continue;
 		}
 		if (script) {
@@ -476,7 +484,13 @@ export function evaluateBoardAnimations(
 		}
 		items.set(group.target, next);
 	}
-	return { items, scripts, camera, times: local };
+	let cameraViewport: BoardAnimationHeader["viewport"];
+	const visited = new Set<string>();
+	for (let id = cameraSource; id && !cameraViewport && !visited.has(id); id = nester.get(id)) {
+		visited.add(id);
+		cameraViewport = compiled.document.animations[id]?.viewport;
+	}
+	return { items, scripts, camera, cameraViewport, times: local };
 }
 
 export const BOARD_SCRIPT_HISTORY_MS = 1000 / 30;

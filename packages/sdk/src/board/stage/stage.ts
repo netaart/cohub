@@ -76,6 +76,7 @@ import { createBoardPointerGestures } from "./pointer-gestures.js";
 import { createBoardScriptController } from "./script-controller.js";
 import { type BoardConsentSense, createBoardSenses } from "./senses.js";
 import { type BoardMediaClock, type BoardMediaLoop, createBoardMediaClock } from "./media-clock.js";
+import { createBoardTimelineClock } from "./timeline-clock.js";
 import { createBoardLiveScheduler } from "./live.js";
 import { type BoardStageShaders, createBoardStageShaders } from "./shaders.js";
 import { type BoardLiveStroke, createBoardScene } from "./scene.js";
@@ -190,7 +191,7 @@ export type BoardStage = {
 	whenGesture(run: () => void): () => void;
 	recordInputs(onFull?: () => void): { stop(): BoardScriptInputLog };
 	/** Video and audio a timeline plays; `blocked` while the browser holds back sound until an interaction. */
-	readonly media: Pick<BoardMediaClock, "blocked" | "unlock" | "subscribe">;
+	readonly media: Pick<BoardMediaClock, "blocked" | "muted" | "setMuted" | "unlock" | "subscribe">;
 	/** Play a short particle burst at a world point, such as a reaction; never written to the Board. */
 	burst(burst: BoardBurst): void;
 	stats(): BoardStageStats;
@@ -212,7 +213,7 @@ export type BoardStageStats = {
 	views: BoardItemViewStats;
 };
 
-const LIVE_CHANNELS = ["document", "scene", "selection", "camera", "tool", "interaction", "hover", "editing", "playback"] as const;
+const LIVE_CHANNELS = ["document", "scene", "motion", "selection", "camera", "tool", "interaction", "hover", "editing", "playback"] as const;
 
 const DEFAULT_THEME: BoardStageTheme = { key: "dark", ...boardRenderTheme("dark") };
 
@@ -321,6 +322,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	const clock = createBoardFrameClock();
 	const device = defaultBoardDeviceBudget();
 	const currentLod = () => options.lod?.() ?? device.lod;
+	const timeline = createBoardTimelineClock();
+	let lastWall = 0;
 	const media = createBoardMediaClock({
 		source: options.source,
 		limit: device.media,
@@ -638,7 +641,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	}
 
 	function followCamera(frame: BoardPlayerFrame, renderScene: BoardScene): BoardViewport {
-		return resolveBoardAnimationCamera(frame.camera, (id) => renderScene.get(id)?.frame, surface, frame.time, editor.camera);
+		return resolveBoardAnimationCamera(frame.camera, (id) => renderScene.get(id)?.frame, surface, frame.time, editor.camera, frame.cameraViewport);
 	}
 
 	let effectSampler: ReturnType<typeof createBoardAnimationSampler> | undefined;
@@ -1053,7 +1056,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		scripts.update();
 		player.enter(editor.consumeRecentlyAdded(), editor.document);
 		const playback = options.playback?.() ?? null;
-		const frame = player.frame(editor.document, playback, performance.now(), Date.now(), editor.playhead?.animationId ?? null);
+		const now = performance.now();
+		const wall = timeline.at(now);
+		const frame = player.frame(editor.document, playback, now, wall, editor.playhead?.animationId ?? null);
 		const previews = previewItems();
 		const moving = new Map<string, BoardItem>(previews);
 		for (const [id, item] of frame.items) moving.set(id, item);
@@ -1067,12 +1072,14 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (editor.playhead && effectSampler) {
 			const { evaluation } = effectSampler.at(editor.playhead.time);
 			frame.camera = evaluation.camera;
+			frame.cameraViewport = evaluation.cameraViewport;
 			frame.scripts = evaluation.scripts.size ? new Map([...frame.scripts, ...evaluation.scripts]) : frame.scripts;
 			frame.time = editor.playhead.time;
 		}
 		scripts.animate(frame.scripts);
 		const follows = editor.cameraPolicy === "follow" && Object.keys(frame.camera).length > 0;
 		playbackCamera = follows ? followCamera(frame, editor.scene) : null;
+		editor.followCamera(playbackCamera);
 		const camera = renderCamera();
 		scripts.compose(camera, moving.size > 0);
 
@@ -1095,13 +1102,15 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			toned.clear();
 		}
 		textResolution.update(textureScale());
-		media.sync({
+		const skew = media.sync({
 			media: boardTimedMedia(renderScene, timedMediaIds()),
 			loops: syncLive(ids, camera, renderScene),
-			now: performance.now(),
+			now: wall,
 			scrubbing: editor.playhead !== null,
 			onScreen: (id) => (ids ? ids.has(id) : true),
 		});
+		timeline.lead(skew, playback?.status === "playing" ? playback.commandId : null, wall - lastWall);
+		lastWall = wall;
 		const context = renderContext(current, renderScene, frame.time);
 		lastContext = context;
 		if (animationId && effectSampler) {
@@ -1202,8 +1211,13 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		return toBoardPointerEvent(event, host, renderCamera(), event.type === "pointermove" && editor.interaction.type === "drawing");
 	}
 
+	function unlockGesture() {
+		senses.unlock();
+		media.unlock();
+	}
+
 	function scriptKey(event: KeyboardEvent): boolean {
-		if (event.type === "keydown") senses.unlock();
+		if (event.type === "keydown") unlockGesture();
 		const { type, key, shiftKey, altKey, ctrlKey, metaKey } = event;
 		return scripts.key({ type, key, shiftKey, altKey, ctrlKey, metaKey });
 	}
@@ -1225,10 +1239,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	function handlePointerDown(event: PointerEvent) {
 		if (!active || inViews(event)) return;
-		if (event.pointerType === "mouse") senses.unlock();
+		if (event.pointerType === "mouse") unlockGesture();
 		lastPointerType = event.pointerType;
 		if (event.button === 2) return;
-		editor.takeCameraControl();
 		const input = toInput(event);
 		const script = scripts.pointer("down", input);
 		if (script) host.focus({ preventScroll: true });
@@ -1328,7 +1341,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	}
 
 	function handlePointerUp(event: PointerEvent) {
-		if (active && event.pointerType !== "mouse" && event.type === "pointerup") senses.unlock();
+		if (active && event.pointerType !== "mouse" && event.type === "pointerup") unlockGesture();
 		const input = toInput(event);
 		const script = scripts.pointer("up", input);
 		if (script === "capture") return;
@@ -1384,7 +1397,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (editor.frameView?.present) return;
 		const item = editor.pickAt(point, pointerType);
 		if (options.onDoubleClick?.(item, point) === true) return;
-		if (editor.readonly || editor.tool === "play") return editor.toggleFrameAt(point);
+		if (editor.readonly || editor.tool === "play") {
+			if (!playbackCamera) editor.toggleFrameAt(point);
+			return;
+		}
 		if (item && editor.registry.capabilities(item).canEdit) {
 			editor.editingId = item.id;
 			return;
@@ -1633,6 +1649,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			get blocked() {
 				return media.blocked;
 			},
+			get muted() {
+				return media.muted;
+			},
+			setMuted: (muted) => media.setMuted(muted),
 			unlock: () => media.unlock(),
 			subscribe: (listener) => media.subscribe(listener),
 		},

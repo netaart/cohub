@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 const execFile = promisify(execFileCallback);
-import { boardExportView, boardMediaNaturalSize, parseBoardMediaSource, parseBoardScriptInputs } from "@neta-art/cohub/board";
+import { BOARD_CAMERA_VIEWPORT, boardExportView, boardMediaNaturalSize, parseBoardMediaSource, parseBoardScriptInputs } from "@neta-art/cohub/board";
 import type { BoardAssetKeySource, BoardDocument, BoardExportRegion, BoardMediaState, BoardSceneItem, BoardScriptSnapshot, BoardThemeId } from "@neta-art/cohub/board";
 import { imageVariantUrl, MEDIA_VARIANT_MAX, mediaVariantSize, videoFrameUrl } from "@neta-art/cohub/media";
 import type {
@@ -224,7 +224,7 @@ export type BoardExportRunOptions = {
   format: BoardNodeExportFormat;
   quality?: number;
   withImages: boolean;
-  camera?: { width: number; height: number };
+  camera?: { width: number; height: number } | "viewport";
   document?: BoardDocument;
   scripts?: BoardScriptHost;
   snapshots?: Record<string, BoardScriptSnapshot>;
@@ -328,9 +328,9 @@ export async function runBoardExport(
   options.signal?.throwIfAborted();
   const document = options.document ?? await settleBoardDocument(options.spaceId, (await loadBoardDocument(options.spaceId, options.target)).document);
   const inputs = options.inputs ? parseBoardScriptInputs(options.inputs) : undefined;
-  if (options.animation && !document.animations[options.animation]) {
-    throw new Error(`Animation ${options.animation} does not exist.`);
-  }
+  const animation = options.animation ? document.animations[options.animation] : undefined;
+  if (options.animation && !animation) throw new Error(`Animation ${options.animation} does not exist.`);
+  const camera = options.camera === "viewport" ? { ...(animation?.viewport ?? BOARD_CAMERA_VIEWPORT) } : options.camera;
   const times: Array<number | null> = options.times?.length ? options.times : [null];
   const timeoutMs = options.timeoutMs ?? BOARD_EXPORT_FRAME_TIMEOUT_MS;
   const imageMemoryBytes = (options.imageMemoryMiB ?? BOARD_EXPORT_IMAGE_MEMORY_MIB) * 1024 ** 2;
@@ -370,10 +370,10 @@ export async function runBoardExport(
     });
     if (!plan) return null;
 
-    const region: BoardExportRegion = times.length > 1 && !options.camera ? { kind: "rect", rect: plan.world } : options.region;
+    const region: BoardExportRegion = times.length > 1 && !camera ? { kind: "rect", rect: plan.world } : options.region;
     const firstTime = times[0] ?? null;
     const first = prepareBoardExport(document, {
-      sampler, region, camera: options.camera, scale: options.scale,
+      sampler, region, camera, scale: options.scale,
       padding: times.length > 1 ? 0 : options.padding,
       ...(firstTime === null ? {} : { at: { animation: options.animation, time: firstTime } }),
     });
@@ -459,7 +459,7 @@ export async function runBoardExport(
       options.signal?.throwIfAborted();
       const host = scriptHost;
       host?.clearFrames();
-      const frameOptions = { sampler, camera: options.camera, ...(time === null ? {} : { at: { animation: options.animation, time } }), region, scale: options.scale, padding: times.length > 1 ? 0 : options.padding };
+      const frameOptions = { sampler, camera, ...(time === null ? {} : { at: { animation: options.animation, time } }), region, scale: options.scale, padding: times.length > 1 ? 0 : options.padding };
       const initial = prepareBoardExport(document, frameOptions);
       if (!initial) return;
       let prepared = initial;
@@ -529,7 +529,7 @@ export async function runBoardExport(
         const result = await gpu.render({
           time,
           region,
-          ...(options.camera ? { camera: options.camera } : {}),
+          ...(camera ? { camera } : {}),
           scale: options.scale,
           ...(times.length > 1 || options.padding === undefined ? {} : { padding: options.padding }),
           background: options.background,
