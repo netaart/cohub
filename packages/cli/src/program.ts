@@ -8,7 +8,7 @@ export function createProgram(): Command {
     .summary("Work with Cohub from your terminal")
     .description("Send prompts, manage Space files, and publish public output.")
     .version(CLI_VERSION, "-v, --version", "Show version")
-    .option("-s, --space <space>", "Target Space: ID, slug, username/slug, or Space URL")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
     .option("--json", "Print machine-readable JSON when supported")
     .helpOption("-h, --help", "Show help")
     .addHelpText("after", `

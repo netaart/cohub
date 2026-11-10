@@ -9,7 +9,7 @@ Use the Cohub CLI for platform operations, and use file tools for normal file wo
 
 Prefer simple, explicit commands. Use `--json` when reading output for decisions, extracting IDs, or chaining commands.
 
-Most commands can target the current Cohub sandbox context. If a command needs a target Space, add `-s "$COHUB_SPACE_ID"` or an explicit Space ID, `username/slug`, or a Space URL. Space URLs look like `https://cohub.live/<username>/<slug>/sessions/<sessionId>` or `https://cohub.live/spaces/<spaceId>/...`; `-s` accepts either form, and the Chat id is the segment after `/sessions/`.
+Most commands can target the current Cohub sandbox context. If a command needs a target Space, add `-s "$COHUB_SPACE_ID"` or an explicit Space ID or `username/slug`. A Space URL `https://cohub.live/<username>/<slug>/...` maps to `-s <username>/<slug>`; the Chat id is the segment after `/sessions/`.
 
 For command details, use `-h`:
 
