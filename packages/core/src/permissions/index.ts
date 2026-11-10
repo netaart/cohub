@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { accessPolicies, spaceMembers, spaceSessions } from "@cohub/db";
+import { accessPolicies, spaceMembers, spaceSessions, spaces } from "@cohub/db";
 import type { AccessPolicyResourceType, SpaceRole } from "@cohub/db";
 
 export type Audience = "member_user" | "signed_in_user" | "anonymous_user";
@@ -42,6 +42,8 @@ export const ALL_PERMISSIONS = [
   "user.session.list",
   "user.taskrun.list",
   "user.usage.read",
+  "user.app.list",
+  "user.cronjob.list",
 ] as const;
 
 const ALL_PERMISSION_SET = new Set<Permission>(ALL_PERMISSIONS);
@@ -52,6 +54,8 @@ export const USER_LEVEL_PERMISSIONS = new Set<Permission>([
   "user.session.list",
   "user.taskrun.list",
   "user.usage.read",
+  "user.app.list",
+  "user.cronjob.list",
   "space.create",
 ]);
 
@@ -358,6 +362,19 @@ export function createDrizzlePermissionStore(db: DrizzlePermissionDb): Permissio
       return session?.spaceId ?? null;
     },
   };
+}
+
+export async function listSpaceAudienceUserIds(
+  db: DrizzlePermissionDb,
+  spaceId: string,
+  extraUserIds: readonly string[] = [],
+): Promise<string[] | null> {
+  const [[space], members] = await Promise.all([
+    db.select({ userUuid: spaces.userUuid }).from(spaces).where(eq(spaces.id, spaceId)).limit(1),
+    db.select({ userId: spaceMembers.userId }).from(spaceMembers).where(eq(spaceMembers.spaceId, spaceId)),
+  ]);
+  if (!space) return null;
+  return [...new Set([space.userUuid, ...members.map((member) => member.userId), ...extraUserIds])];
 }
 
 export function createBatchDrizzlePermissionStore(db: DrizzlePermissionDb): PermissionStore & {

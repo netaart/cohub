@@ -754,6 +754,26 @@ export type SpaceListChangedEvent = {
   payload: { spaceId: string; revision: string };
 };
 
+export type AppListChangedEvent = {
+  id: string;
+  timestamp: number;
+  domain: "space";
+  type: "app.list.changed";
+  spaceId?: string | null;
+  sessionId?: string | null;
+  payload: { appId: string; spaceId: string; revision: string };
+};
+
+export type CronJobListChangedEvent = {
+  id: string;
+  timestamp: number;
+  domain: "space";
+  type: "cronjob.list.changed";
+  spaceId?: string | null;
+  sessionId?: string | null;
+  payload: { cronJobId: string; spaceId: string | null; revision: string };
+};
+
 export type SpacePresenceUpdatedEvent = {
   id: string;
   timestamp: number;
@@ -1013,6 +1033,8 @@ export type RealtimeServerEvent =
   | SpaceFsChangedEvent
   | SpacePortsChangedEvent
   | SpaceListChangedEvent
+  | AppListChangedEvent
+  | CronJobListChangedEvent
   | SpacePresenceUpdatedEvent
   | BoardChangedEvent
   | BoardAwarenessUpdatedEvent

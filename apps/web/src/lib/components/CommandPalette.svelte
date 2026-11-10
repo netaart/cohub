@@ -86,6 +86,7 @@ import { settingsSectionLabel } from "$lib/components/settings-section";
 import ToolCallList from "$lib/components/ToolCallList.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent, isKeyboardClaimed } from "$lib/keyboard";
+import { isSpaceIdSegment } from "$lib/library-routes";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { filterSpacePickerItems } from "$lib/space-picker-model";
@@ -221,7 +222,7 @@ $effect(() => {
 const currentSpaceId = $derived.by(() => {
 	const match = page.url.pathname.match(/^\/spaces\/([^/]+)/);
 	const id = match?.[1] ?? null;
-	return id === "new" ? null : id;
+	return isSpaceIdSegment(id) ? id : null;
 });
 const searchPlan = $derived(buildSearchPlan(lens, query));
 const activeLens = $derived(lensOf(searchPlan.resourceTypes));

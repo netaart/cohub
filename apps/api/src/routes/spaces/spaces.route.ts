@@ -59,6 +59,7 @@ import {
 import { syncSpaceChannelConfigCache, getSpaceChannelsBySpaceId, bindSpaceChannelsToGateway, unbindSpaceChannelFromGateway, updateSpaceChannelConfig } from "../../channels.js";
 import { fallbackBoundChannelHealth, getChannelHealthMap } from "../../channel-health.js";
 import { createCronJob, enqueueTask } from "../../tasks.js";
+import { notifyCronJobListChanged } from "../../user-lists.js";
 import { RUN_COMMAND_TASK_TYPE } from "@cohub/core/commands";
 import { normalizeContentBlocks } from "@cohub/core/content/normalize";
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
@@ -2423,6 +2424,7 @@ router.post("/:id/prompt", async (c) => {
     sessionId,
   });
 
+  notifyCronJobListChanged(cronJob);
   return c.json({
     mode: "repeat",
     cronJobId: cronJob.id,

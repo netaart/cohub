@@ -17,6 +17,8 @@ export type {
   NativeTurnMessage, NativeTurnComplete, NativeTurnMessagesResult, NativeTurnProgress, NativeRuntimeEvent, NativeIngest, NativeIngestTurn, NativeIngestResult, NativeKnownResult, RuntimeNativeStop, RuntimeApproval, RuntimeApprovalDecision, SessionApproval, ApprovalDecision,
 } from "@cohub/protocol";
 export { buildViewportContentBlock } from "@cohub/protocol";
+export { isUserAppFilter, isUserCronJobFilter, USER_APP_FILTERS, USER_CRONJOB_FILTERS } from "@cohub/protocol";
+export type { UserAppFilter, UserCronJobFilter } from "@cohub/protocol";
 export type {
   ViewportAppContext, ViewportBoardContext, ViewportContext, ViewportFileContext, ViewportPortContext, ViewportSelectedNode, ViewportVisibleRect,
 } from "@cohub/protocol";

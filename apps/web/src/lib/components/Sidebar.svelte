@@ -81,6 +81,8 @@ import {
 import { requestAppNavigation } from "$lib/features/app/app-navigation-request";
 import { formatBalance } from "$lib/features/billing/format";
 import { currentCatalogSubscription } from "$lib/features/billing/product";
+import LibraryList from "$lib/features/library/LibraryList.svelte";
+import LibraryTabs from "$lib/features/library/LibraryTabs.svelte";
 import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
 import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
 import { setSessionArchived } from "$lib/features/sessions/session-archive";
@@ -101,6 +103,7 @@ import {
 } from "$lib/labels/resource-label-actions";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { requestListScrollTop } from "$lib/layout/list-scroll-top";
+import { libraryEntityAt } from "$lib/library-routes";
 import { sameData } from "$lib/lists/live-list-core";
 import {
 	type AppArea,
@@ -386,6 +389,7 @@ const workspaceRoute = $derived(
 const routeSpaceId = $derived(workspaceRoute.spaceId);
 const shown = $derived(isMobile || !useCompactShell());
 const spacesHome = $derived(area === "spaces" && !routeSpaceId && !isMobile);
+const libraryEntity = $derived(libraryEntityAt(currentPath) ?? "spaces");
 const fallbackSpaceId = $derived.by(() => {
 	if (area !== "spaces" || routeSpaceId || !isMobile) return null;
 	void currentPath;
@@ -3369,7 +3373,13 @@ $effect(() => {
       <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
 
       {#if spacesHome}
-        <SpacesViewsNav variant="rail" />
+        <LibraryTabs variant="rail" />
+        {#if libraryEntity === "spaces"}
+          <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
+          <SpacesViewsNav variant="rail" />
+        {:else}
+          <div class="flex-1"></div>
+        {/if}
       {:else if area === "spaces"}
         <div class="mt-2 flex w-full flex-col items-center gap-1">
           <button
@@ -3627,7 +3637,14 @@ $effect(() => {
   </div>
 
   {#if spacesHome}
-    <SpacesViewsNav variant="list" />
+    <LibraryTabs variant="sidebar" />
+    {#if libraryEntity === "spaces"}
+      <SpacesViewsNav variant="list" />
+    {:else}
+      <div class="mt-1 min-h-0 flex-1">
+        <LibraryList entity={libraryEntity} variant="sidebar" />
+      </div>
+    {/if}
   {:else if area === "spaces"}
     <!-- Space Switcher -->
     <div class="px-1.5 py-1 shrink-0 border-b border-border-subtle">

@@ -508,6 +508,7 @@ filesystem paths, while Cohub Sandbox runs use Space workspace paths. Pass
 cohub profile update --username <username>
 cohub spaces update <spaceId> --slug <space-slug>
 cohub -s <spaceId> apps ls --json
+cohub apps ls --all --filter mine --json
 cohub apps get <appId|url|username/space/app> --json
 cohub apps stats <appId|url|username/space/app>
 cohub apps download <appId|url|username/space/app> --output <path>
@@ -630,6 +631,7 @@ Manage them with `cron-jobs`:
 
 ```bash
 cohub cron-jobs ls <spaceId> --json
+cohub cron-jobs ls --filter attention --json
 cohub cron-jobs runs <cronJobId> --json
 cohub cron-jobs toggle <cronJobId> on
 cohub cron-jobs toggle <cronJobId> off

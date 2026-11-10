@@ -8,6 +8,8 @@
  * workspace space — those must not drive sidebar layout prefs.
  */
 
+import { isSpaceIdSegment } from "$lib/library-routes";
+
 export type WorkspaceLabelResource = {
 	type: "session" | "checkpoint" | "file";
 	ref: string;
@@ -60,8 +62,7 @@ function decodeFilePath(value: string): string {
 function parseSpaceIdFromPath(pathname: string): string | null {
 	const match = pathname.match(/^\/spaces\/([^/]+)/);
 	const id = match?.[1] ? decodePathSegment(match[1]) : null;
-	if (!id || id === "new") return null;
-	return id;
+	return isSpaceIdSegment(id) ? id : null;
 }
 
 function parseResourceId(

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
-import { getCohubContext, HttpError, type CohubHttpClient, type Permission, type AppCreateInput, type AppMeta, type AppStatus, type AppUpdateInput, type AppVersionRecord, type AppViewStatsResponse, type AppVisibility } from "@neta-art/cohub";
+import { getCohubContext, HttpError, isUserAppFilter, type CohubHttpClient, type Permission, type AppCreateInput, type AppMeta, type AppStatus, type AppUpdateInput, type AppVersionRecord, type AppViewStatsResponse, type AppVisibility } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient, createClientWithAccessToken } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
@@ -314,11 +314,35 @@ export function registerApps(program: Command): void {
   appsCmd
     .command("ls")
     .alias("list")
-    .description("List apps in the target space")
+    .description("List apps in the target space, or across all spaces with --all")
+    .option("--all", "List apps across spaces")
+    .option("--filter <filter>", "With --all: mine, all, or disabled", "mine")
+    .option("--cursor <cursor>", "With --all: pagination cursor")
     .option("--json", "Output as JSON")
-    .action(async (opts: { json?: boolean }) => {
-      const spaceId = await resolveSpace(appsCmd, { home: true });
+    .action(async (opts: { all?: boolean; filter: string; cursor?: string; json?: boolean }) => {
       const client = createClient();
+      if (opts.all) {
+        if (!isUserAppFilter(opts.filter)) error("Invalid filter", "Expected mine, all, or disabled");
+        try {
+          const result = await client.user.listApps({ filter: opts.filter, cursor: opts.cursor });
+          if (jsonRequested(opts)) return outJson(result);
+          if (result.items.length === 0) return console.log("  (empty)");
+          table(result.items.map((app) => ({ ...app, spaceName: app.space.name })), [
+            { key: "id", label: "ID" },
+            { key: "slug", label: "Slug" },
+            { key: "spaceName", label: "Space" },
+            { key: "status", label: "Status" },
+            { key: "visibility", label: "Visibility" },
+            { key: "latestVersion", label: "Version" },
+            { key: "updatedAt", label: "Updated" },
+          ]);
+          if (result.pageInfo.nextCursor) console.log(`\n  More: --cursor ${result.pageInfo.nextCursor}`);
+        } catch (e: unknown) {
+          handleHttp(e);
+        }
+        return;
+      }
+      const spaceId = await resolveSpace(appsCmd, { home: true });
       try {
         const result = await client.apps.listBySpace(spaceId);
         if (jsonRequested(opts)) return outJson(result);

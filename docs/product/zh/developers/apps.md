@@ -201,6 +201,7 @@ if (result.status === "joined") {
 | 创建生成任务 | `generation.create` | **仅 viewer** |
 | 轮询任务、读 task run | `taskrun.view` | app 或 viewer |
 | 列访客的 spaces / sessions / 活动 / 全部任务 | `user.space.list` / `user.session.list` / `user.usage.read` / `user.taskrun.list` | **仅 viewer** |
+| 跨 space 列访客的 App / 定时任务 | `user.app.list` / `user.cronjob.list` | **仅 viewer** |
 | 为访客创建 Space | 新 Space 上的请求 scope | **访客授权** |
 | 通过邀请加入 Space | 加入的 Space 上的请求 scope | **访客授权** |
 | 创建、列出、撤销邀请链接 | `member.manage` | **仅 viewer** |

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { isUserCronJobFilter } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp } from "../output.js";
@@ -16,22 +17,46 @@ export function registerCronJobs(program: Command): void {
   cmd
     .command("ls [spaceId]")
     .alias("list")
-    .description("List scheduled jobs")
+    .description("List scheduled jobs in a space, or yours across spaces")
+    .option("--filter <filter>", "Without a space: mine, all, paused, or attention", "mine")
+    .option("--cursor <cursor>", "Without a space: pagination cursor")
     .option("--json", "Output as JSON")
-    .action(async (spaceId: string | undefined, opts: { json?: boolean }) => {
+    .action(async (spaceId: string | undefined, opts: { filter: string; cursor?: string; json?: boolean }) => {
       const client = createClient();
       try {
-        const result = await client.cronJobs.list(spaceId);
+        if (spaceId) {
+          const result = await client.cronJobs.list(spaceId);
+          if (jsonRequested(opts)) return outJson(result);
+          if (result.jobs.length === 0) return console.log("  (empty)");
+          table(result.jobs, [
+            { key: "id", label: "ID" },
+            { key: "title", label: "Title" },
+            { key: "taskType", label: "Type" },
+            { key: "cronExpression", label: "Schedule" },
+            { key: "enabled", label: "Enabled" },
+          ]);
+          return;
+        }
+        if (!isUserCronJobFilter(opts.filter)) error("Invalid filter", "Expected mine, all, paused, or attention");
+        const result = await client.user.listCronJobs({ filter: opts.filter, cursor: opts.cursor });
         if (jsonRequested(opts)) return outJson(result);
-        if (result.jobs.length === 0) return console.log("  (empty)");
-        table(result.jobs, [
+        if (result.items.length === 0) return console.log("  (empty)");
+        table(result.items.map((job) => ({
+          ...job,
+          spaceName: job.space?.name ?? "-",
+          lastRunStatus: job.lastRun?.status ?? "-",
+          nextRun: job.nextRunAt ?? "-",
+        })), [
           { key: "id", label: "ID" },
           { key: "title", label: "Title" },
-          { key: "taskType", label: "Type" },
+          { key: "spaceName", label: "Space" },
           { key: "cronExpression", label: "Schedule" },
           { key: "enabled", label: "Enabled" },
-          { key: "spaceId", label: "Space" },
+          { key: "nextRun", label: "Next run" },
+          { key: "lastRunStatus", label: "Last run" },
+          { key: "access", label: "Access" },
         ]);
+        if (result.pageInfo.nextCursor) console.log(`\n  More: --cursor ${result.pageInfo.nextCursor}`);
       } catch (e: unknown) {
         handleHttp(e);
       }

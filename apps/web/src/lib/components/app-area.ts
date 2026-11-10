@@ -14,7 +14,7 @@ export function appAreaLabel(area: AppArea, locale: Locale) {
 		case "chats":
 			return m.nav_tab_chats({}, { locale });
 		case "spaces":
-			return m.nav_tab_spaces({}, { locale });
+			return m.nav_tab_library({}, { locale });
 		case "account":
 			return m.nav_tab_account({}, { locale });
 	}

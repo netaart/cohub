@@ -107,6 +107,8 @@ const OPERATION_GROUPS: OperationGroup[] = [
 			"user.space.list",
 			"user.taskrun.list",
 			"user.usage.read",
+			"user.app.list",
+			"user.cronjob.list",
 		],
 	},
 	{

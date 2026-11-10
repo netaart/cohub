@@ -42,7 +42,6 @@ import { enqueueAgentSessionForkJob } from "./agent-turn-queue.js";
 import { requestAgentTurnAbort } from "./agent-turn-abort.js";
 import { countToolCallsInContent, deriveMessagePreviewText } from "./session-content.js";
 import { fallbackPublicUserProfile, getProfilesByUuids } from "./user-profiles.js";
-// space public profile is inlined in attachSessionSpaceSummaries to avoid route-layer coupling
 import { enqueueSessionMessagePostprocess } from "./session-message-postprocess-queue.js";
 import { enqueueSessionTitleGeneration } from "./session-title-queue.js";
 import { touchSpaceActivity } from "./space-activity.js";
@@ -398,14 +397,25 @@ export type UserSessionSpaceSummary = {
   publicProfile: { avatarUrl: string | null };
 };
 
-export const attachSessionSpaceSummaries = async <T extends { spaceId: string }>(
-  sessions: T[],
+export function toSpaceSummary(space: { id: string; name: string; slug: string | null; meta: unknown }): UserSessionSpaceSummary {
+  const meta = space.meta && typeof space.meta === "object" && !Array.isArray(space.meta)
+    ? space.meta as Record<string, unknown>
+    : {};
+  const profile = meta.publicProfile && typeof meta.publicProfile === "object" && !Array.isArray(meta.publicProfile)
+    ? meta.publicProfile as Record<string, unknown>
+    : {};
+  const avatarUrl = typeof profile.avatarUrl === "string" && profile.avatarUrl.trim()
+    ? profile.avatarUrl.trim()
+    : null;
+  return { id: space.id, name: space.name, slug: space.slug ?? null, publicProfile: { avatarUrl } };
+}
+
+export const attachSpaceSummaries = async <T extends { spaceId: string | null }>(
+  rows: T[],
 ): Promise<Array<T & { space: UserSessionSpaceSummary | null }>> => {
-  if (sessions.length === 0) return [];
-  const spaceIds = [...new Set(sessions.map((session) => session.spaceId).filter(Boolean))];
-  if (spaceIds.length === 0) {
-    return sessions.map((session) => ({ ...session, space: null }));
-  }
+  if (rows.length === 0) return [];
+  const spaceIds = [...new Set(rows.flatMap((row) => (row.spaceId ? [row.spaceId] : [])))];
+  if (spaceIds.length === 0) return rows.map((row) => ({ ...row, space: null }));
 
   const spaceRows = await db
     .select({
@@ -417,32 +427,11 @@ export const attachSessionSpaceSummaries = async <T extends { spaceId: string }>
     .from(spaces)
     .where(inArray(spaces.id, spaceIds));
 
-  const spaceById = new Map(
-    spaceRows.map((space) => {
-      const meta = space.meta && typeof space.meta === "object" && !Array.isArray(space.meta)
-        ? space.meta as Record<string, unknown>
-        : {};
-      const profile = meta.publicProfile && typeof meta.publicProfile === "object" && !Array.isArray(meta.publicProfile)
-        ? meta.publicProfile as Record<string, unknown>
-        : {};
-      const avatarUrl = typeof profile.avatarUrl === "string" && profile.avatarUrl.trim()
-        ? profile.avatarUrl.trim()
-        : null;
-      return [
-        space.id,
-        {
-          id: space.id,
-          name: space.name,
-          slug: space.slug ?? null,
-          publicProfile: { avatarUrl },
-        } satisfies UserSessionSpaceSummary,
-      ] as const;
-    }),
-  );
+  const spaceById = new Map(spaceRows.map((space) => [space.id, toSpaceSummary(space)] as const));
 
-  return sessions.map((session) => ({
-    ...session,
-    space: spaceById.get(session.spaceId) ?? null,
+  return rows.map((row) => ({
+    ...row,
+    space: row.spaceId ? spaceById.get(row.spaceId) ?? null : null,
   }));
 };
 
