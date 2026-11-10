@@ -113,6 +113,14 @@ export type BoardReadResult = {
 	changes?: BoardDelta[];
 };
 
+/** A Board as captured by a checkpoint; `version` is the Board version at capture. */
+export type BoardCheckpointReadResult = Omit<BoardReadResult, "next" | "changes"> & {
+	checkpointId: string;
+	capturedAt: string;
+	items: Record<string, Record<string, unknown>>;
+	animations: Record<string, Record<string, unknown>>;
+};
+
 
 export const BoardApplyInputSchema = z
 	.object({

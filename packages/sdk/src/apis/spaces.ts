@@ -15,7 +15,8 @@ import type {
 } from "@cohub/protocol";
 import { getRealtimeSpaceRoom } from "@cohub/protocol/realtime/types";
 import { requireSessionContext } from "./session-context.js";
-import { BoardClient, SpaceBoardsApi } from "../board/client/index.js";
+import { BoardClient, readBoardId, SpaceBoardsApi } from "../board/client/index.js";
+import { isBoardPath } from "../board/model/index.js";
 import { ensureRealtimeConnected } from "../realtime.js";
 import { SpaceWalletApi } from "./space-wallet.js";
 import { SpaceDisplaysApi } from "./displays.js";
@@ -32,6 +33,7 @@ import {
   type GenerationStreamSubscriptionHandlers,
 } from "../session-generation-stream.js";
 import type {
+  BoardCheckpointReadResult,
   CheckpointDiffFileResponse,
   CheckpointDiffSummary,
   CheckpointRecord,
@@ -113,7 +115,7 @@ import type {
   ChannelConfig,
   ChannelHealth,
 } from "../types.js";
-import type { ResolvedFile } from "../media.js";
+import type { ResolvedFile, ResolveFileOptions } from "../media.js";
 import { SpaceInvitationsApi } from "./invitations.js";
 import { fileReadPath, symlinkReadError, type SpaceFileRead } from "./space-file-reads.js";
 import { inlineFileDataUrl, type ResolveSpaceFileOptions, type SpaceFileServices } from "./space-file-urls.js";
@@ -1946,6 +1948,19 @@ export class SpaceCheckpointFilesApi {
     if (!source) throw new HttpError(`Checkpoint file cannot be saved: ${path}`, 404, null);
     return source;
   }
+
+  /** A browser-ready URL for a saved file; null when it was not saved. */
+  async resolve(path: string, options: ResolveFileOptions = {}): Promise<ResolvedFile | null> {
+    let file: SpaceFsFileResponse;
+    try {
+      file = await this.read(path);
+    } catch (error) {
+      if (error instanceof HttpError && (error.status === 404 || error.status === 410)) return null;
+      throw error;
+    }
+    if (file.delivery === "url" && file.url) return file.media ? { url: file.url, media: file.media } : { url: file.url };
+    return (options.purpose ?? "preview") === "preview" ? { url: inlineFileDataUrl(file) } : null;
+  }
 }
 
 async function hydrateCheckpointDiffSummary(
@@ -2048,6 +2063,15 @@ export class SpaceCheckpointApi {
   get(customFetch?: Fetch) {
     return this.transport.request<SpaceCheckpointDetailResponse>(
       `/api/spaces/${this.spaceId}/checkpoints/${this.id}`,
+      { fetch: customFetch },
+    );
+  }
+
+  /** The Board as this checkpoint captured it, by id or by `.board` path. */
+  async board(target: string, customFetch?: Fetch) {
+    const boardId = isBoardPath(target) ? await readBoardId(this.files, target, customFetch) : target;
+    return this.transport.request<BoardCheckpointReadResult>(
+      `/api/spaces/${this.spaceId}/checkpoints/${this.id}/boards/${encodeURIComponent(boardId)}`,
       { fetch: customFetch },
     );
   }

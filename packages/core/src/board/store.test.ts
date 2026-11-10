@@ -7,7 +7,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { drizzle } from "drizzle-orm/pglite";
 import { and, eq } from "drizzle-orm";
-import { boardTransactions } from "@cohub/db";
+import { boardCheckpoints, boardTransactions, checkpoints } from "@cohub/db";
 import { applyBoardDelta, type BoardReadResult, BoardScriptSchema, parseBoardDocument } from "@cohub/protocol";
 import {
 	applyBoard,
@@ -21,6 +21,7 @@ import {
 	readBoardHistory,
 	restoreBoardVersion,
 } from "./store.js";
+import { readBoardCheckpoint } from "./checkpoints.js";
 
 const migrations = join(dirname(fileURLToPath(import.meta.url)), "../../../../apps/api/drizzle/v2");
 const spaceId = "11111111-1111-4111-8111-111111111111";
@@ -248,6 +249,26 @@ test("snapshots capture the document", async () => {
 	const parsed = parseBoardDocument(snapshot);
 	assert.ok(parsed.ok);
 	assert.equal(parsed.ok && parsed.document.board.background.pattern, "grid");
+});
+
+test("a checkpoint reads the Board as saved, also through a fork alias", async () => {
+	const { db, boardId } = await board({ items: { t: { type: "text", props: { text: "saved" } } } });
+	const [saved, alias] = [crypto.randomUUID(), crypto.randomUUID()];
+	const forkSpaceId = crypto.randomUUID();
+	await db.insert(checkpoints).values([
+		{ id: saved, spaceId, commitHash: "a".repeat(40), description: "save" },
+		{ id: alias, spaceId: forkSpaceId, commitHash: "a".repeat(40), description: "fork", meta: { kind: "fork_alias", sourceCheckpointId: saved } },
+	]);
+	const [snapshot] = await captureBoardSnapshots(db, { spaceId, boardIds: [boardId] });
+	await db.insert(boardCheckpoints).values({ checkpointId: saved, sourceBoardId: boardId, sourceSpaceId: spaceId, sourceVersion: 1, snapshot: snapshot as unknown as Record<string, unknown> });
+	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { t: { props: { text: "later" } } } } } });
+	for (const [space, checkpointId] of [[spaceId, saved], [forkSpaceId, alias]] as const) {
+		const read = await readBoardCheckpoint(db, { spaceId: space, checkpointId, boardId });
+		assert.equal(read.version, 1);
+		assert.equal((read.items.t?.props as { text?: string } | undefined)?.text, "saved");
+	}
+	await assert.rejects(readBoardCheckpoint(db, { spaceId: forkSpaceId, checkpointId: saved, boardId }), { code: "CHECKPOINT_NOT_FOUND" });
+	await assert.rejects(readBoardCheckpoint(db, { spaceId, checkpointId: saved, boardId: crypto.randomUUID() }), { code: "BOARD_NOT_FOUND" });
 });
 
 test("non-geometric edits persist and agree with history and realtime", async () => {

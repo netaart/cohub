@@ -16,6 +16,7 @@ import type {
 } from "@neta-art/cohub/board/replica";
 import { readBoardManifestId } from "$lib/board/board-manifest-text";
 import { boardPathMatchesTarget } from "$lib/board/board-sync-policy";
+import { loadCheckpointBoard } from "$lib/board/checkpoint-board";
 import { loadedCacheUserKey } from "$lib/cache/keys";
 import {
 	readBoardManifestCache,
@@ -43,6 +44,8 @@ type BoardPreviewControllerOptions = {
 	getSpaceId: () => string;
 	getSourceKey: () => string;
 	getReadonly?: () => boolean;
+	getCheckpointId?: () => string | null;
+	checkpointBoardMissing?: () => string;
 	readFile: (path: string) => Promise<BoardFileResponse>;
 	onOpenPanel?: () => void;
 	onClosePanel?: () => void;
@@ -179,6 +182,41 @@ export function createBoardWindowController(
 		);
 	}
 
+	function setBoard(path: string, update: Partial<InlineBoardPanelState>) {
+		boards = boards.map((item) =>
+			item.path === path ? { ...item, ...update } : item,
+		);
+	}
+
+	async function openSavedBoard(
+		path: string,
+		token: number,
+		source: { spaceId: string; sourceKey: string; checkpointId: string },
+	) {
+		try {
+			const boardId = await readManifest(path);
+			if (!isCurrent(token, path, source.sourceKey)) return;
+			const document = await loadCheckpointBoard({ ...source, boardId });
+			if (!isCurrent(token, path, source.sourceKey)) return;
+			setBoard(path, { boardId, document, loading: false, error: null });
+		} catch (cause) {
+			if (!isCurrent(token, path, source.sourceKey)) return;
+			const missing = cause instanceof HttpError && cause.status === 404;
+			const message =
+				missing && options.checkpointBoardMissing
+					? options.checkpointBoardMissing()
+					: cause instanceof Error
+						? cause.message
+						: "Failed to open board";
+			setBoard(path, {
+				boardId: null,
+				document: null,
+				loading: false,
+				error: message,
+			});
+		}
+	}
+
 	async function openBoard(
 		path: string,
 		input: { activate?: boolean; showLoading?: boolean } = {},
@@ -207,6 +245,12 @@ export function createBoardWindowController(
 				},
 			];
 		if (activate) options.onOpenPanel?.();
+		const checkpointId = options.getCheckpointId?.() ?? null;
+		if (checkpointId) {
+			if (!existing?.document)
+				await openSavedBoard(path, token, { spaceId, sourceKey, checkpointId });
+			return;
+		}
 		const manifest = { spaceId, sourceKey, path };
 		// Local first: open the cached Board while the server confirms the manifest.
 		const opened = !existing?.boardId;

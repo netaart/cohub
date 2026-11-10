@@ -14,6 +14,8 @@ import {
 import { normalizeGenerationPolicy, type GenerationContentBlock } from "@cohub/protocol/generation";
 import * as cronParser from "cron-parser";
 import { db } from "../../db/index.js";
+import { readBoardCheckpoint } from "@cohub/core/board";
+import { boardErrorBody, boardErrorResponse } from "../../board-error.js";
 import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/postgres-error.js";
 import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels, userProfiles } from "@cohub/db";
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
@@ -1686,6 +1688,25 @@ router.get("/:id/checkpoints/:checkpointId/fs/diff/file", async (c) => {
   } catch (error) {
     const { status, body } = checkpointFsJsonError(error);
     return c.json(body, status as never);
+  }
+});
+
+router.get("/:id/checkpoints/:checkpointId/boards/:boardId", async (c) => {
+  const spaceId = c.req.param("id");
+  const checkpointId = c.req.param("checkpointId");
+  const boardId = c.req.param("boardId");
+  if (!requireValidId(spaceId) || !requireValidId(checkpointId) || !requireValidId(boardId)) {
+    return c.json({ code: "BOARD_NOT_FOUND", message: "Board not found." }, 404);
+  }
+  if (!(await hasPermission(getOptionalAuth(c), "checkpoint.view", { spaceId }))) return authzDenied(c);
+  try {
+    const board = await readBoardCheckpoint(db, { spaceId, checkpointId, boardId });
+    c.header("Cache-Control", "private, max-age=31536000, immutable");
+    c.header("Vary", "Authorization, Cookie");
+    return c.json(board);
+  } catch (error) {
+    const response = boardErrorResponse(error);
+    return c.json(boardErrorBody(response), response.status as never);
   }
 });
 

@@ -25,6 +25,12 @@ export type BoardRuntimeMode = "edit" | "play" | "view";
 
 export type BoardScope =
 	| { kind: "space"; spaceId: string }
+	| {
+			kind: "checkpoint";
+			spaceId: string;
+			checkpointId: string;
+			assetSource: BoardAssetSource;
+	  }
 	| { kind: "app"; appId: string; assetSource: BoardAssetSource };
 
 export type BoardCommitHandler = (

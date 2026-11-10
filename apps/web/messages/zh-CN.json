@@ -2405,6 +2405,7 @@
 	"app_devices_turn_off_confirm": "关闭这个 App 的{devices}权限吗？App 会重新加载，未保存的内容会丢失。",
 	"board_failed_load": "白板加载失败。",
 	"board_data_unavailable": "白板数据不可用。",
+	"board_checkpoint_missing": "这个存档没有保存该白板的内容。",
 	"presence_live_messages": "实时消息",
 	"access_sign_in": "登录",
 	"access_go_home": "返回首页",

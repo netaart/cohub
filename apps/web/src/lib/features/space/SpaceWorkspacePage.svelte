@@ -602,7 +602,7 @@ async function openWorkspaceFile(
 			return;
 		}
 	}
-	if (workspaceFilePreviewKind(path, activeFsReadonly) === "board") {
+	if (workspaceFilePreviewKind(path) === "board") {
 		await openInlineBoard(path);
 		return;
 	}
@@ -1104,6 +1104,10 @@ const boardPreview = createBoardWindowController({
 	getSpaceId: () => spaceId,
 	getSourceKey: () => activeFsSourceKey,
 	getReadonly: () => activeFsReadonly,
+	getCheckpointId: () =>
+		activeFsSource.kind === "checkpoint" ? activeFsSource.checkpointId : null,
+	checkpointBoardMissing: () =>
+		m.board_checkpoint_missing({}, { locale: getLocale() }),
 	readFile: fileWorkspace.readActiveFsFile,
 	onOpenPanel: () => {
 		if (uiState.filesColumnHidden) uiState.setFilesColumnHidden(false);
@@ -2351,10 +2355,6 @@ async function openInlineBoard(
 	path: string,
 	options: { syncUrl?: boolean } = {},
 ) {
-	if (activeFsReadonly) {
-		await openInlineFile(path, options);
-		return;
-	}
 	if (filesColumnHidden) previewLayout.setFilesColumnHidden(false);
 	await windowManager.openBoard(path, options);
 }
@@ -3102,11 +3102,7 @@ $effect(() => {
 
 		// 3) URL is authoritative only when this adapter is triggered by route
 		// context. Internal tab changes are intentionally not dependencies here.
-		const target =
-			preview?.kind === "board" && activeFsReadonly
-				? { kind: "file" as const, key: preview.key }
-				: preview;
-		const result = windowManager.applyRoute(target);
+		const result = windowManager.applyRoute(preview);
 		if (!result.ok) {
 			// Wait for trusted port endpoint; effect re-runs when endpoints update.
 			return;
@@ -3133,6 +3129,8 @@ const spaceFileDomainProps = $derived.by<
 	spaceSlug,
 	spaceHasMinimalAccess,
 	activeFsReadonly,
+	activeCheckpointId:
+		activeFsSource.kind === "checkpoint" ? activeFsSource.checkpointId : null,
 	canEditFiles,
 	activeFsSidebarSubtitle,
 	isMobile,

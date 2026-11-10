@@ -2405,6 +2405,7 @@
 	"app_devices_turn_off_confirm": "Turn off {devices} for this app? It reloads, and anything it has not saved is lost.",
 	"board_failed_load": "Board failed to load.",
 	"board_data_unavailable": "Board data is unavailable.",
+	"board_checkpoint_missing": "This save has no copy of the Board.",
 	"presence_live_messages": "Live messages",
 	"access_sign_in": "Sign in",
 	"access_go_home": "Go home",
