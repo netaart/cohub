@@ -29,7 +29,7 @@ pnpm dev
 
 ## Checkpoint storage
 
-Checkpoint history is stored as Git packs and manifests in the checkpoint object storage bucket (`CHECKPOINT_ASSET_OSS_*`). The repositories under `SPACE_SYSTEM_ROOT` are caches that are refilled from the bucket. Postgres stores checkpoint metadata and commit hashes. No external Git host is required. See [checkpoint-storage.md](checkpoint-storage.md).
+Checkpoint history is stored as Git packs and manifests in the checkpoint object storage bucket (`CHECKPOINT_ASSET_OSS_*`, required by the worker, API and fs-api, all pointing at the same bucket). The repositories under `SPACE_SYSTEM_ROOT` are caches that are refilled from the bucket. Postgres stores checkpoint metadata and commit hashes. No external Git host is required. See [checkpoint-storage.md](checkpoint-storage.md).
 
 ## Billing
 

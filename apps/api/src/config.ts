@@ -253,10 +253,11 @@ export const config: AppConfig = {
   // not yet migrated (both are set during the transition).
   appAssetCdnBaseUrl:
     (process.env.APP_ASSET_CDN_BASE_URL ?? process.env.WORK_ASSET_CDN_BASE_URL)?.replace(/\/+$/, ""),
-  checkpointAssetOssEndpoint: process.env.CHECKPOINT_ASSET_OSS_ENDPOINT ?? process.env.TURN_OBJECT_S3_ENDPOINT ?? "http://127.0.0.1:9000",
-  checkpointAssetOssPublicEndpoint: process.env.CHECKPOINT_ASSET_OSS_PUBLIC_ENDPOINT ?? process.env.TURN_OBJECT_S3_PUBLIC_ENDPOINT,
-  checkpointAssetOssRegion: process.env.CHECKPOINT_ASSET_OSS_REGION ?? process.env.TURN_OBJECT_S3_REGION ?? "us-west-1",
-  checkpointAssetOssBucket: process.env.CHECKPOINT_ASSET_OSS_BUCKET ?? process.env.TURN_OBJECT_S3_BUCKET,
+  checkpointAssetOssEndpoint: process.env.CHECKPOINT_ASSET_OSS_ENDPOINT || process.env.TURN_OBJECT_S3_ENDPOINT || "http://127.0.0.1:9000",
+  checkpointAssetOssPublicEndpoint: process.env.CHECKPOINT_ASSET_OSS_PUBLIC_ENDPOINT || process.env.TURN_OBJECT_S3_PUBLIC_ENDPOINT || undefined,
+  checkpointAssetOssRegion: process.env.CHECKPOINT_ASSET_OSS_REGION || process.env.TURN_OBJECT_S3_REGION || "us-west-1",
+  // No fallback to another bucket: checkpoint history lives only where the worker writes it.
+  checkpointAssetOssBucket: process.env.CHECKPOINT_ASSET_OSS_BUCKET || undefined,
   checkpointAssetOssAccessKeyId: process.env.CHECKPOINT_ASSET_OSS_ACCESS_KEY_ID ?? process.env.TURN_OBJECT_S3_ACCESS_KEY_ID,
   checkpointAssetOssSecretAccessKey: process.env.CHECKPOINT_ASSET_OSS_SECRET_ACCESS_KEY ?? process.env.TURN_OBJECT_S3_SECRET_ACCESS_KEY,
   routerStatusUrl: process.env.ROUTER_STATUS_URL?.trim() || undefined,
