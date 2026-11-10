@@ -15,7 +15,7 @@ const LEGACY_CACHE_PATH = join(CONFIG_DIR, "default-space.json");
 /** Home space is stable; a one-day TTL bounds how long a stale hit survives. */
 const CACHE_TTL_MS = 86_400_000;
 
-const SPACE_REF_HINT = "Use a Space ID, a slug you own such as home, or username/slug.";
+const SPACE_REF_HINT = "Use a Space ID, a slug you own such as home, username/slug, or a Space URL.";
 
 type HomeSpaceCache = {
   key: string;
@@ -177,7 +177,7 @@ export function failSpaceTarget(e: unknown): never {
 export function missingSpaceError(): never {
   return error(
     "No target space",
-    "Pass -s <space> (an ID, home, or username/slug), set COHUB_SPACE_ID, or run in a directory bound with `cohub runtime up`.",
+    "Pass -s <space> (an ID, home, username/slug, or a Space URL), set COHUB_SPACE_ID, or run in a directory bound with `cohub runtime up`.",
   );
 }
 

@@ -4,6 +4,11 @@ import type {
 	UserProfile,
 } from "@neta-art/cohub";
 import { buildSpaceRootRoute, buildSpaceSessionRoute } from "$lib/space-routes";
+import {
+	parseSpaceAddressPath,
+	type SpaceAddress,
+	spaceIdAt,
+} from "$lib/stores/space-address";
 import { COHUB_WEB_ORIGIN_SOURCE } from "./platform-origin";
 
 export type SpaceMention = {
@@ -68,6 +73,41 @@ const COHUB_SPACE_LINK_PATTERN = new RegExp(
 	`${COHUB_WEB_ORIGIN_SOURCE}\\/spaces\\/(${ID_PATTERN})(?:\\/sessions\\/(${ID_PATTERN}))?(?:[?#][^\\s)\\]]*)?${RESOURCE_PATH_END_PATTERN}|(^|[\\s([{<:,;!?，。！？、；：])\\/spaces\\/(${ID_PATTERN})(?:\\/sessions\\/(${ID_PATTERN}))?(?:[?#][^\\s)\\]]*)?${RESOURCE_PATH_END_PATTERN}`,
 	"g",
 );
+
+/** `https://cohub.live/:username/:slug[/sessions/:id]`; the path is validated separately. */
+const FRIENDLY_SPACE_LINK_PATTERN = new RegExp(
+	`${COHUB_WEB_ORIGIN_SOURCE}(\\/[^/\\s?#)\\]]+\\/[^/\\s?#)\\]]+)(?:\\/sessions\\/(${ID_PATTERN}))?(?:[?#][^\\s)\\]]*)?${RESOURCE_PATH_END_PATTERN}`,
+	"g",
+);
+
+/** Friendly Space links in `value`, with the Space id when the address is confirmed. */
+function friendlySpaceLinks(value: string) {
+	const links: Array<{
+		raw: string;
+		address: SpaceAddress;
+		spaceId: string | null;
+		sessionId?: string;
+	}> = [];
+	for (const match of value.matchAll(FRIENDLY_SPACE_LINK_PATTERN)) {
+		const address = parseSpaceAddressPath(match[1] ?? "")?.address;
+		if (!address) continue;
+		const hit = spaceIdAt(address);
+		links.push({
+			raw: match[0],
+			address,
+			spaceId: hit?.confirmed ? hit.spaceId : null,
+			sessionId: match[2] || undefined,
+		});
+	}
+	return links;
+}
+
+/** Addresses of pasted friendly Space links that still need a server lookup. */
+export function unresolvedCohubSpaceAddresses(value: string): SpaceAddress[] {
+	return friendlySpaceLinks(value)
+		.filter((link) => !link.spaceId)
+		.map((link) => link.address);
+}
 
 function isSpaceMentionBoundary(text: string, index: number) {
 	if (index <= 0) return true;
@@ -209,6 +249,14 @@ export function parseCohubSpaceUrls(
 	maxMatches = 20,
 ): ParsedCohubSpaceLink[] {
 	const matches: ParsedCohubSpaceLink[] = [];
+	for (const link of friendlySpaceLinks(value)) {
+		if (!link.spaceId || matches.length >= maxMatches) continue;
+		matches.push({
+			raw: link.raw,
+			spaceId: link.spaceId,
+			sessionId: link.sessionId,
+		});
+	}
 	for (const match of value.matchAll(COHUB_SPACE_LINK_PATTERN)) {
 		const raw = match[0] ?? "";
 		const absoluteSpaceId = match[1]?.trim();
@@ -233,31 +281,47 @@ export function replaceCohubSpaceUrls(
 	value: string,
 	resolveLabel: (link: ParsedCohubSpaceLink) => string | null | undefined,
 ) {
-	return value.replace(
-		COHUB_SPACE_LINK_PATTERN,
-		(
-			match,
-			absoluteSpaceId: string,
-			absoluteSessionId: string,
-			relativePrefix: string,
-			relativeSpaceId: string,
-			relativeSessionId: string,
-		) => {
-			const spaceId = absoluteSpaceId?.trim() || relativeSpaceId?.trim();
-			const sessionId = absoluteSessionId?.trim() || relativeSessionId?.trim();
-			if (!spaceId) return match;
-			const link: ParsedCohubSpaceLink = {
-				raw: match.slice((relativePrefix ?? "").length),
-				spaceId,
-				sessionId: sessionId || undefined,
-			};
-			const label = resolveLabel(link);
-			if (!label) return match;
-			return `${relativePrefix ?? ""}${buildSpaceMentionMarkdown({
-				spaceId,
-				sessionId: sessionId || undefined,
-				label,
-			})}`;
-		},
+	const friendly = new Map(
+		friendlySpaceLinks(value).map((link) => [link.raw, link]),
 	);
+	return value
+		.replace(FRIENDLY_SPACE_LINK_PATTERN, (match) => {
+			const link = friendly.get(match);
+			if (!link?.spaceId) return match;
+			const parsed = {
+				raw: match,
+				spaceId: link.spaceId,
+				sessionId: link.sessionId,
+			};
+			const label = resolveLabel(parsed);
+			return label ? buildSpaceMentionMarkdown({ ...parsed, label }) : match;
+		})
+		.replace(
+			COHUB_SPACE_LINK_PATTERN,
+			(
+				match,
+				absoluteSpaceId: string,
+				absoluteSessionId: string,
+				relativePrefix: string,
+				relativeSpaceId: string,
+				relativeSessionId: string,
+			) => {
+				const spaceId = absoluteSpaceId?.trim() || relativeSpaceId?.trim();
+				const sessionId =
+					absoluteSessionId?.trim() || relativeSessionId?.trim();
+				if (!spaceId) return match;
+				const link: ParsedCohubSpaceLink = {
+					raw: match.slice((relativePrefix ?? "").length),
+					spaceId,
+					sessionId: sessionId || undefined,
+				};
+				const label = resolveLabel(link);
+				if (!label) return match;
+				return `${relativePrefix ?? ""}${buildSpaceMentionMarkdown({
+					spaceId,
+					sessionId: sessionId || undefined,
+					label,
+				})}`;
+			},
+		);
 }

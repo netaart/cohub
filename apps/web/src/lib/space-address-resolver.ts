@@ -37,7 +37,10 @@ function seedFromCache(): Promise<void> {
 	});
 }
 
-function resolveFromServer(address: SpaceAddress): Promise<string | null> {
+/** Resolve an address with the server and record the result as confirmed. */
+export function confirmSpaceAddress(
+	address: SpaceAddress,
+): Promise<string | null> {
 	const key = addressKey(address);
 	const inflight = verifying.get(key);
 	if (inflight) return inflight;
@@ -76,10 +79,10 @@ export async function resolveSpaceAddress(
 		await seedFromCache();
 		hit = spaceIdAt(address);
 	}
-	if (!hit) return resolveFromServer(address);
+	if (!hit) return confirmSpaceAddress(address);
 	if (!hit.confirmed) {
 		markAddressPending(address);
-		void resolveFromServer(address);
+		void confirmSpaceAddress(address);
 	}
 	return hit.spaceId;
 }

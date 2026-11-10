@@ -74,6 +74,7 @@ import type { SpaceMentionSuggestion } from "$lib/mentions/space";
 import {
 	buildSpaceMentionMarkdown,
 	parseCohubSpaceUrls,
+	unresolvedCohubSpaceAddresses,
 } from "$lib/mentions/space";
 import {
 	getCohubLinkMentionKey,
@@ -99,6 +100,7 @@ import {
 } from "$lib/model-catalog";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
+import { confirmSpaceAddress } from "$lib/space-address-resolver";
 import { authStore } from "$lib/stores/auth.svelte";
 import { billingConversion } from "$lib/stores/billing-conversion.svelte";
 import { entriesFromFiles, type LocalUploadEntry } from "$lib/upload-entries";
@@ -1140,7 +1142,14 @@ function handlePaste(event: ClipboardEvent) {
 		? parseCohubSpaceUrls(clipboardText)
 		: [];
 	const pastedAppLinks = clipboardText ? parseCohubAppUrls(clipboardText) : [];
-	if (pastedSpaceLinks.length > 0 || pastedAppLinks.length > 0) {
+	const pastedAddresses = clipboardText
+		? unresolvedCohubSpaceAddresses(clipboardText)
+		: [];
+	if (
+		pastedSpaceLinks.length > 0 ||
+		pastedAppLinks.length > 0 ||
+		pastedAddresses.length > 0
+	) {
 		event.preventDefault();
 		const spaceLabels = new Map<string, string>();
 		const appLabels = new Map<string, string>();
@@ -1175,12 +1184,19 @@ function handlePaste(event: ClipboardEvent) {
 		const unresolvedSpaces = pastedSpaceLinks.filter(
 			(link) => !spaceLabels.has(getCohubLinkMentionKey(link)),
 		);
-		if (unresolvedSpaces.length > 0) {
+		if (unresolvedSpaces.length > 0 || pastedAddresses.length > 0) {
 			const controller = new AbortController();
 			pastedSpaceResolveController = controller;
-			void resolveCohubLinkMentionLabels(unresolvedSpaces, {
-				signal: controller.signal,
-			})
+			// Friendly links carry no id; resolve their addresses before their labels.
+			void Promise.all(pastedAddresses.map(confirmSpaceAddress))
+				.then(() =>
+					resolveCohubLinkMentionLabels(
+						parseCohubSpaceUrls(clipboardText).filter(
+							(link) => !spaceLabels.has(getCohubLinkMentionKey(link)),
+						),
+						{ signal: controller.signal },
+					),
+				)
 				.then((labels) => {
 					if (controller.signal.aborted || labels.size === 0) return;
 					for (const [key, label] of labels) spaceLabels.set(key, label);
