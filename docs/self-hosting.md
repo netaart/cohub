@@ -128,7 +128,7 @@ show it. Stopped workspaces are measured 2 minutes after they stop or after a di
 ones are never re-scanned. Running workspaces are re-measured at most every 15 minutes after sandbox activity,
 and every 2 hours otherwise, since background processes record no activity. Stopped workspaces are scanned
 first. Failed scans back off exponentially up to 7 days. To bound NAS load, at most two scans run at a time
-across all workers, each with 4 pdu threads, and each gives up after 40 minutes.
+across all workers, each with 16 pdu threads, and each gives up after 40 minutes.
 
 The amd64 worker image includes pdu. On other architectures, install pdu 0.24.0 and set
 `WORKSPACE_USAGE_PDU_PATH`, or the worker skips workspace usage at startup. pdu runs under GNU

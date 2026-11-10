@@ -5,9 +5,10 @@ export const pduBinary = () => process.env.WORKSPACE_USAGE_PDU_PATH || "pdu";
 
 const MAX_STDOUT = 64 * 1024;
 const MAX_STDERR = 16 * 1024;
-// Entries deleted while pdu walks a live tree are expected; any other read error
-// would silently undercount, so it fails the scan.
-const VANISHED_ENTRY = /\(os error 2\)$/;
+// Entries deleted while pdu walks a live tree, and unreadable ones (users chmod
+// 000 directories), are skipped and not counted; any other read error would
+// silently undercount, so it fails the scan.
+const SKIPPED_ENTRY = /\(os error (2|13)\)$/;
 
 /** Splits stderr into lines as it streams so no error is lost to buffering limits. */
 export function createStderrClassifier() {
@@ -15,7 +16,7 @@ export function createStderrClassifier() {
   let fatal: string | null = null;
   const classify = (line: string) => {
     const trimmed = line.trim();
-    if (trimmed && !VANISHED_ENTRY.test(trimmed)) fatal ??= trimmed.slice(0, 300);
+    if (trimmed && !SKIPPED_ENTRY.test(trimmed)) fatal ??= trimmed.slice(0, 300);
   };
   return {
     push(chunk: string) {
