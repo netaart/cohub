@@ -69,7 +69,12 @@ export function createBoardAppRoom(input: {
 		)
 			return;
 		const update = parsed.data;
-		if (update.type !== "state" && update.type !== "reaction") return;
+		if (
+			update.type !== "state" &&
+			update.type !== "reaction" &&
+			update.type !== "script"
+		)
+			return;
 		const payload: BoardPresencePayload = {
 			connectionId: member.participantId,
 			actorId: member.userKey,
@@ -153,7 +158,8 @@ export function createBoardAppRoom(input: {
 						editingId: null,
 					},
 				});
-			else if (update.type === "reaction") room.send(EVENT, { seq, update });
+			else if (update.type === "reaction" || update.type === "script")
+				room.send(EVENT, { seq, update });
 		},
 		subscribe({ awareness }) {
 			if (!awareness) return () => undefined;

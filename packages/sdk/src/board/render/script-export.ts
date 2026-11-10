@@ -9,7 +9,7 @@ import type {
   BoardScriptView,
 } from "../model/script.js";
 import { boardScriptAttachments } from "../model/script-index.js";
-import { BOARD_SCRIPT_EMIT_DEPTH, BOARD_SCRIPT_EVENT_QUEUE, boardScriptEmit, createBoardScriptOutbox } from "../model/script-events.js";
+import { BOARD_SCRIPT_EMIT_DEPTH, BOARD_SCRIPT_EVENT_QUEUE, boardScriptBroadcast, boardScriptEmit, createBoardScriptOutbox } from "../model/script-events.js";
 import { type BoardScriptInputLog, boardScriptInputsBetween } from "../model/script-senses.js";
 import { type BrowserBoardScriptHost, createBoardScriptHost } from "./script-host.js";
 import { boardShaderOwners } from "./shader/layers.js";
@@ -78,6 +78,12 @@ export function createBrowserBoardScriptExport(
             const { target, event } = boardScriptEmit(started.document, id, input);
             last.set(id, `emit(${target}, "${event.type}")`);
             started.outbox.push(id, target, event);
+          },
+          "board.broadcast": async (id, input) => {
+            if (!started.document) return;
+            const event = boardScriptBroadcast(input);
+            last.set(id, `broadcast("${event.type}")`);
+            started.outbox.push(id, id, event);
           },
         },
         onFrame: () => started.wake(),

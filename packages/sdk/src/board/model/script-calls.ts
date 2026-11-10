@@ -13,6 +13,7 @@ export function layoutBoardScriptText(value: unknown): { width: number; height: 
 
 export const BOARD_SCRIPT_EXPORT_CALLS: Readonly<Record<string, (input: unknown) => unknown>> = {
   "board.emit": () => undefined,
+  "board.broadcast": () => undefined,
   "board.commit": () => false,
   "board.layoutText": layoutBoardScriptText,
 };

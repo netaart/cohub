@@ -155,6 +155,7 @@ export function sameAwarenessState(a: BoardAwarenessStateUpdate | null, b: Board
 		a.cursor?.x === b.cursor?.x &&
 		a.cursor?.y === b.cursor?.y &&
 		a.cursor?.pointerType === b.cursor?.pointerType &&
+		Boolean(a.cursor?.pressed) === Boolean(b.cursor?.pressed) &&
 		!viewportChanged(a.viewport ?? null, b.viewport ?? null) &&
 		a.selection.count === b.selection.count &&
 		(ab === bb || (ab !== null && bb !== null && sameFrame(ab, bb))) &&

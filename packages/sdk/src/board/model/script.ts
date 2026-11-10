@@ -38,6 +38,16 @@ export type BoardScriptEvent = {
   metaKey?: boolean;
   data?: unknown;
   depth?: number;
+  peer?: BoardScriptPeerInfo | null;
+  remote?: boolean;
+};
+
+export type BoardScriptPeerInfo = { id: string; actorId: string; name: string; color: string };
+
+export type BoardScriptPeer = BoardScriptPeerInfo & {
+  point: BoardVec2 | null;
+  pointerType: "mouse" | "pen" | "touch" | null;
+  pressed: boolean;
 };
 
 export type BoardScriptChangeSource = "user" | "script" | "remote";
@@ -124,6 +134,7 @@ export type BoardScriptHostEvents = BoardScriptBrowserEvents & {
   transformend: { ids: string[]; operation: "move" | "resize" | "rotate" | "arrow"; cancelled: boolean };
   change: { added: string[]; changed: string[]; removed: string[]; source: BoardScriptChangeSource };
   gesture: BoardScriptGesture;
+  peerschange: BoardScriptPeer[];
 };
 
 export type BoardScriptEventOf<Type extends string> = BoardScriptEvent & {
@@ -211,6 +222,8 @@ export type BoardScriptContext = {
   readonly params: BoardScript["params"];
   readonly targets: Readonly<Record<string, string>>;
   emit(target: string, type: string, data?: unknown): Promise<void>;
+  broadcast(type: string, data?: unknown): Promise<void>;
+  readonly peers: readonly BoardScriptPeer[];
   readonly items: Readonly<Record<string, BoardItem>>;
   readonly state: Record<string, unknown>;
   readonly frame: BoardScriptFrame;

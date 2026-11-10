@@ -8,7 +8,7 @@ import { layoutBoardScriptText } from "../model/script-calls.js";
 import { boardScriptTarget } from "../model/script-hit.js";
 import { createBoardScriptObservers, type BoardScriptWorldGesture } from "../model/script-observers.js";
 import { isBoardRootScript } from "../model/script-index.js";
-import { BOARD_SCRIPT_EVENT_QUEUE, boardScriptEmit } from "../model/script-events.js";
+import { BOARD_SCRIPT_EVENT_QUEUE, boardScriptBroadcast, boardScriptEmit } from "../model/script-events.js";
 import { composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
 import {
   BOARD_SCRIPT_EXPORT_ENV,
@@ -26,6 +26,8 @@ import {
   type BoardScriptEnv,
   type BoardScriptEvent,
   type BoardScriptOutput,
+  type BoardScriptPeer,
+  type BoardScriptPeerInfo,
   type BoardScriptSense,
   type BoardScriptSnapshot,
 } from "../model/script.js";
@@ -46,11 +48,17 @@ export type BoardScriptControllerOptions = {
   device?: () => BoardScriptDevice;
   onSensesChange?(): void;
   leader?: () => boolean;
+  peers?: BoardScriptPeerSource;
   now?: () => number;
   setTimer?: BoardScriptTimer;
   requestFrame(): void;
   requestScriptFrame(): void;
   onChange?(): void;
+};
+
+export type BoardScriptPeerSource = {
+  list(): readonly BoardScriptPeer[];
+  broadcast(owner: string, type: string, data: unknown): void;
 };
 
 export type BoardScriptPointerResult = false | "capture" | "tap" | "click";
@@ -208,6 +216,17 @@ export function createBoardScriptController(options: BoardScriptControllerOption
             return commits.commit(id, patch, !frame && activated(id));
           },
         }),
+        "board.broadcast": async (id, value) => {
+          try {
+            const event = boardScriptBroadcast(value);
+            if (host && !host.event(id, event))
+              throw new Error(`broadcast("${event.type}") from ${id}: ${BOARD_SCRIPT_EVENT_QUEUE} events are already waiting.`);
+            options.peers?.broadcast(id, event.type, event.data);
+          } catch (error) {
+            emitFailures.set(id, error instanceof Error ? error.message : String(error));
+            throw error;
+          }
+        },
         "board.layoutText": async (_id, value) => layoutBoardScriptText(value),
       },
       onOutput: (id, output) => {
@@ -333,6 +352,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
         safeRect: view.safeRect ?? { x: 0, y: 0, ...view.surface },
       }), editor.itemSource);
       if (observers.gestures) syncGesture();
+      if (observers.watchesPeers) observers.peers(editor.document, editor.scene, options.peers?.list() ?? []);
     }
     host.sync(scriptDocument(), editor.scene, view.camera, time, !paused, view.visibleIds);
   }
@@ -484,6 +504,16 @@ export function createBoardScriptController(options: BoardScriptControllerOption
           return current.log;
         },
       };
+    },
+    receive(owner: string, type: string, data: unknown, peer: BoardScriptPeerInfo) {
+      if (paused || !host) return;
+      let event: BoardScriptEvent;
+      try {
+        event = boardScriptBroadcast({ type, data });
+      } catch {
+        return;
+      }
+      host.event(owner, { ...event, peer, remote: true });
     },
     cursor(): string | null {
       if (!hover) return null;

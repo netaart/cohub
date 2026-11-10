@@ -151,6 +151,15 @@ within `width` × `height`; export `pixelated` and `frameRate` for pixel art. Pr
 native text for editable, inspectable labels; Canvas text can use `Geist` or
 `Geist Mono`.
 
+Every viewer runs the scripts on their own screen, so local effects stay local.
+When an effect answers input, such as sparks on a click, `ctx.broadcast(type, data)`
+it and draw it in an `on(type)` handler: every viewer receives it, this one included,
+with `peer` naming who sent it (`null` here). `peerschange` and `ctx.peers` give the
+other viewers' cursors for effects that follow them. Keep saving with `commit()` from
+your own input: answer another viewer's broadcast with presentation only, since its
+handler cannot commit, and a commit after an `await` there may save twice.
+`cohub boards examples sparks --module` shows both.
+
 `board.scripts` attaches a module to the Board itself: it reaches every item and
 draws over the whole view. For GPU effects a module exports `shader` (GLSL passes,
 instanced sprites, filters, state and `surface()` collisions with cards); rain that

@@ -58,6 +58,7 @@ export const BoardAwarenessStateUpdateSchema = z.object({
 		.optional(),
 	cursor: BoardAwarenessPointSchema.extend({
 		pointerType: z.enum(["mouse", "pen", "touch"]),
+		pressed: z.boolean().optional(),
 	})
 		.nullable(),
 	viewport: BoardAwarenessViewportSchema.nullable().optional(),
@@ -116,6 +117,9 @@ export const BoardAwarenessGestureSchema = z.discriminatedUnion("kind", [
 export const BOARD_REACTIONS = ["heart", "star", "spark", "confetti"] as const;
 export type BoardReaction = (typeof BOARD_REACTIONS)[number];
 
+export const BOARD_SCRIPT_BROADCAST_JSON_LENGTH = 1024;
+export const BOARD_SCRIPT_BROADCASTS_PER_SECOND = 10;
+
 export const BoardAwarenessUpdateSchema = z.discriminatedUnion("type", [
 	BoardAwarenessStateUpdateSchema,
 	z.object({
@@ -135,6 +139,17 @@ export const BoardAwarenessUpdateSchema = z.discriminatedUnion("type", [
 		type: z.literal("reaction"),
 		reaction: z.enum(BOARD_REACTIONS),
 		at: BoardAwarenessPointSchema,
+	}),
+	z.object({
+		type: z.literal("script"),
+		owner: idSchema,
+		event: z.string().min(1).max(64),
+		data: z
+			.json()
+			.refine(
+				(data) => JSON.stringify(data).length <= BOARD_SCRIPT_BROADCAST_JSON_LENGTH,
+				`Broadcast data exceeds ${BOARD_SCRIPT_BROADCAST_JSON_LENGTH} characters of JSON.`,
+			),
 	}),
 ]);
 

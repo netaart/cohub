@@ -432,11 +432,15 @@ Steps are {"steps": [...]}, points in board coordinates, run on a virtual clock:
   {"wait": "500ms"}  {"tool": "draw"}  {"tap": [x, y]}  {"drag": [[x, y], ...], "pointerType": "pen"}
   {"pointer": "down", "at": [x, y]}  {"key": "Enter"}  {"select": ["id"]}
   {"input": "browser:devicemotion", "data": {...}}  {"inputs": "takes/flick.json"}
+  {"peers": [{"name": "Ada", "at": [x, y], "pressed": true}]}
+  {"broadcast": "burst", "to": "<script id>", "data": {...}, "from": "Ada"}
 {"tool": "play"} acts like an App visitor: drags move unlocked items, empty space pans,
 script regions take every press, and keys reach scripts that listen for them.
 Every source (motion, gamepad, microphone, camera, location) is on. An input step
 delivers one browser event to the scripts listening, shaped as \`cohub boards schema
 script\` describes; an inputs step replays a recording on the virtual clock.
+A peers step sets the other viewers scripts see in ctx.peers; a broadcast step delivers
+another viewer's ctx.broadcast() to a script. What the scripts broadcast is reported.
 
 Shaders are compiled with a local Chrome, Chromium or Edge when one is found, before
 the steps run; their errors join the scripts' errors and stop the run.
@@ -479,6 +483,7 @@ Examples:
         const changed = Object.keys((result.changes as { items?: object }).items ?? {}).length;
         ok(`Simulated ${formatBoardTime(result.time)}: ${result.commits} commit${result.commits === 1 ? "" : "s"}, ${changed} item${changed === 1 ? "" : "s"} changed (not saved)`);
         for (const press of result.presses) console.log(`  step ${press.step + 1}: ${describePress(press)}`);
+        if (result.broadcasts.length) console.log(`  ${result.broadcasts.length} broadcast${result.broadcasts.length === 1 ? "" : "s"}: ${[...new Set(result.broadcasts.map(({ owner, type }) => `${owner} "${type}"`))].join(", ")}`);
         for (const [id, message] of Object.entries(result.errors)) console.log(`  ! ${id}: ${message.split("\n")[0]}`);
         for (const warning of result.warnings) console.log(`  ! ${warning}`);
         if (result.shaders && !result.shaders.compiled)

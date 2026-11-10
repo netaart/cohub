@@ -177,3 +177,38 @@ test("listening turns a source on: browser input, env changes and play keys reac
 function motion(x: number, y: number) {
   return { acceleration: { x: 0, y: 0, z: 0 }, accelerationIncludingGravity: { x, y, z: 0 }, rotationRate: { alpha: 0, beta: 0, gamma: 0 }, interval: 16, t: 0 };
 }
+
+test("broadcasts reach this viewer at once and other viewers without the right to save", async () => {
+  const board = await createBoardScriptHarness({
+    renderer,
+    readModule: async () => `
+export default function (ctx) {
+  ctx.state.seen = [];
+  ctx.hitRegions({ self: { target: "self" } });
+  ctx.on("click", ({ point }) => ctx.broadcast("burst", point));
+  ctx.on("peerschange", ({ data }) => { ctx.state.peers = data; });
+  ctx.on("burst", ({ data, peer }) => {
+    ctx.state.seen.push([peer?.name ?? null, data.x]);
+    ctx.commit({ items: { [ctx.self.id]: { opacity: 0.5 } } }).catch((error) => { ctx.state.refused = error.message; });
+    if (!peer) ctx.broadcast("echo");
+  });
+  ctx.on("echo", () => ctx.broadcast("echo").catch((error) => { ctx.state.echo = error.message; }));
+}`,
+    document: boardDocument({ items: { fx: { type: "custom", position: { x: 100, y: 100 }, size: { width: 200, height: 200 }, script: { src: "fx.js" } } } }),
+  });
+  try {
+    await board.tap({ x: 150, y: 150 });
+    assert.deepEqual(board.broadcasts[0], { owner: "fx", type: "burst", data: { x: 50, y: 50 } });
+    await board.broadcast("fx", "burst", { x: 7 }, { name: "Ada" });
+    await board.peers([{ name: "Ada", point: { x: 120, y: 130 }, pressed: true }]);
+    await board.flush();
+    const state = (await board.snapshot()).fx?.state as { seen: unknown; refused: string; echo: string; peers: Array<{ point: unknown; pressed: boolean }> };
+    assert.deepEqual(state.seen, [[null, 50], ["Ada", 7]]);
+    assert.match(state.refused, /another viewer's broadcast cannot commit/);
+    assert.match(state.echo, /handlers deep/);
+    assert.deepEqual(state.peers.map(({ point, pressed }) => [point, pressed]), [[{ x: 20, y: 30 }, true]]);
+    assert.equal(board.commits.length, 1);
+  } finally {
+    board.destroy();
+  }
+});

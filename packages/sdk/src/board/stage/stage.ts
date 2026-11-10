@@ -1,5 +1,12 @@
 import type { BoardPlaybackSnapshot } from "@cohub/protocol";
-import type { BoardScriptInputLog, BoardScriptOutput, BoardScriptSense, BoardScriptSenseState, BoardScriptSnapshot } from "../model/index.js";
+import type {
+	BoardScriptInputLog,
+	BoardScriptOutput,
+	BoardScriptPeer,
+	BoardScriptSense,
+	BoardScriptSenseState,
+	BoardScriptSnapshot,
+} from "../model/index.js";
 import { Application, Container, Graphics, type Renderer, RendererType, type Texture } from "pixi.js";
 import type { BoardActivation, BoardEditor, BoardPointerEvent } from "../editor/index.js";
 import { boardDragSlop, boardTextGestureWrap, isCreationBoardTool, isTouchLikePointer, resizeCursorForHandle } from "../editor/index.js";
@@ -85,8 +92,8 @@ import { createTextResolutionTracker } from "./text-resolution-tracker.js";
 import { type BoardItemView, type BoardItemViewStats, createBoardItemViewLayer } from "./views.js";
 import { createBoardWheel } from "./wheel.js";
 import type { BoardLod } from "../render/lod.js";
-import type { BoardPresence } from "../presence/index.js";
-import { boardReactionBurst, defaultBoardPeerColor, drawBoardPresence } from "./presence.js";
+import type { BoardPresence, BoardPresencePeer } from "../presence/index.js";
+import { boardReactionBurst, boardScriptPeerInfo, boardScriptPeers, defaultBoardPeerColor, drawBoardPresence } from "./presence.js";
 
 export type BoardStageTheme = {
 	key: string;
@@ -279,6 +286,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		senses.sync(scripts.senses, active && !disposed);
 		if (senses.wanted !== wanted) notifySenses();
 	};
+	const peerColor = (actorId: string) => (options.peerColor ?? ((id: string) => defaultBoardPeerColor(id, theme())))(actorId);
+	let scriptPeers: { from: readonly BoardPresencePeer[] | null; look: string; list: readonly BoardScriptPeer[] } = { from: null, look: "", list: [] };
 	const query = (value: string) => (typeof matchMedia === "function" ? matchMedia(value) : null);
 	const coarsePointer = query("(pointer: coarse)");
 	const portrait = query("(orientation: portrait)");
@@ -295,6 +304,15 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		}),
 		onSensesChange: syncSenses,
 		leader: options.scriptLeader ?? (presence ? () => presence.leadsScripts() : undefined),
+		peers: presence && {
+			list: () => {
+				const peers = presence.peers;
+				const look = theme().key;
+				if (peers !== scriptPeers.from || look !== scriptPeers.look) scriptPeers = { from: peers, look, list: boardScriptPeers(peers, peerColor) };
+				return scriptPeers.list;
+			},
+			broadcast: (owner, type, data) => presence.broadcast(owner, type, data),
+		},
 		requestFrame: () => scheduleTick(),
 		requestScriptFrame: () => scheduleScriptTick(),
 		createHost: (callbacks) => createBoardScriptHost({
@@ -776,7 +794,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			drawBoardPresence(overlay, presence.peers, {
 				zoom: camera.zoom,
 				look: current,
-				color: options.peerColor ?? ((actorId) => defaultBoardPeerColor(actorId, current)),
+				color: peerColor,
 			});
 		options.drawOverlay?.(overlay, { zoom: camera.zoom, theme: current, scene: renderScene });
 		drawTransient(overlay, current);
@@ -1228,13 +1246,11 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	const pointers = createBoardPointerGestures(host, { move: routePointerMove, end: handlePointerUp });
 
-	function onPointer(phase: BoardStagePointerPhase, event: PointerEvent, input: BoardPointerEvent) {
-		if (presence) {
-			const gone = phase === "leave" || (phase === "up" && (event.type === "pointercancel" || event.pointerType !== "mouse"));
-			const pointerType = event.pointerType === "pen" || event.pointerType === "touch" ? event.pointerType : "mouse";
-			presence.setCursor(gone ? null : { x: input.world.x, y: input.world.y, pointerType });
-		}
-		return options.onPointer?.(phase, event, input);
+	function shareCursor(phase: BoardStagePointerPhase, event: PointerEvent, input: BoardPointerEvent) {
+		if (!presence) return;
+		const gone = phase === "leave" || (phase === "up" && (event.type === "pointercancel" || event.pointerType !== "mouse"));
+		const pointerType = event.pointerType === "pen" || event.pointerType === "touch" ? event.pointerType : "mouse";
+		presence.setCursor(gone ? null : { x: input.world.x, y: input.world.y, pointerType, pressed: event.buttons !== 0 });
 	}
 
 	function handlePointerDown(event: PointerEvent) {
@@ -1243,13 +1259,14 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		lastPointerType = event.pointerType;
 		if (event.button === 2) return;
 		const input = toInput(event);
+		shareCursor("down", event, input);
 		const script = scripts.pointer("down", input);
 		if (script) host.focus({ preventScroll: true });
 		if (script === "capture") {
 			pointers.start(event);
 			return;
 		}
-		if (onPointer("down", event, input) === false) {
+		if (options.onPointer?.("down", event, input) === false) {
 			if (script === "tap") scripts.pointer("up", { ...input, cancelled: true });
 			return;
 		}
@@ -1324,11 +1341,12 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	function routePointerMove(event: PointerEvent) {
 		const input = toInput(event);
+		shareCursor("move", event, input);
 		const script = scripts.pointer("move", input);
 		if (script === "capture") return;
 		longPress.move(event);
 		taps.move(event);
-		if (onPointer("move", event, input) === false) return autoPan.stop();
+		if (options.onPointer?.("move", event, input) === false) return autoPan.stop();
 		autoPan.move(event);
 		if (script === "tap") return;
 		if (keyPress?.input.pointerId === event.pointerId) {
@@ -1343,11 +1361,12 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	function handlePointerUp(event: PointerEvent) {
 		if (active && event.pointerType !== "mouse" && event.type === "pointerup") unlockGesture();
 		const input = toInput(event);
+		shareCursor("up", event, input);
 		const script = scripts.pointer("up", input);
 		if (script === "capture") return;
 		longPress.end(event);
 		autoPan.stop();
-		if (onPointer("up", event, input) === false) {
+		if (options.onPointer?.("up", event, input) === false) {
 			held = null;
 			taps.cancel();
 			return settlePointer(event);
@@ -1387,8 +1406,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	function handlePointerLeave(event: PointerEvent) {
 		if (event.buttons !== 0) return;
-		scripts.pointer("leave", toInput(event));
-		if (onPointer("leave", event, toInput(event)) === false) return;
+		const input = toInput(event);
+		shareCursor("leave", event, input);
+		scripts.pointer("leave", input);
+		if (options.onPointer?.("leave", event, input) === false) return;
 		editor.pointerLeave();
 		hoverHit(null);
 	}
@@ -1440,6 +1461,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		? [
 				presence.subscribe(scheduleTick),
 				presence.onReaction(({ reaction, at }) => burst(boardReactionBurst(reaction, at, theme()))),
+				presence.onBroadcast(({ owner, event, data, peer }) => scripts.receive(owner, event, data, boardScriptPeerInfo(peer, peerColor))),
 			]
 		: [];
 	const stopPresence = () => {

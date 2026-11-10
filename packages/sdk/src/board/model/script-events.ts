@@ -1,4 +1,5 @@
 import type { BoardDocument } from "@cohub/protocol";
+import { BOARD_SCRIPT_BROADCAST_JSON_LENGTH } from "@cohub/protocol/realtime";
 import type { BoardScriptEvent, BoardScriptOutput } from "./script.js";
 import { isBoardRootScript } from "./script-index.js";
 import { boardScriptScope } from "./script-scope.js";
@@ -9,7 +10,7 @@ export const BOARD_SCRIPT_EMIT_DEPTH = 16;
 
 function supersedes(pending: BoardScriptEvent, event: BoardScriptEvent): boolean {
   if (pending.type !== event.type) return false;
-  if (event.type === "viewchange" || event.type === "selectionchange" || isBoardScriptLatestInput(event.type)) return true;
+  if (event.type === "viewchange" || event.type === "selectionchange" || event.type === "peerschange" || isBoardScriptLatestInput(event.type)) return true;
   if (event.type === "pointermove") return pending.pointerId === event.pointerId;
   if (event.type !== "gesture") return false;
   const a = pending.data as { id: string; phase: string };
@@ -37,7 +38,7 @@ export function queueBoardScriptEvent(queue: BoardScriptEvent[], event: BoardScr
 export type BoardScriptEmit = { target: string; event: BoardScriptEvent };
 
 export function boardScriptEmit(document: Pick<BoardDocument, "items" | "board">, sender: string, input: unknown): BoardScriptEmit {
-  const message = input as { target?: unknown; type?: unknown; data?: unknown; depth?: unknown } | null;
+  const message = input as { target?: unknown; type?: unknown; data?: unknown; depth?: unknown; remote?: unknown } | null;
   if (!message || typeof message.target !== "string" || typeof message.type !== "string" || !message.type)
     throw new Error("emit() takes a target id and an event type.");
   const { target, type } = message;
@@ -46,7 +47,27 @@ export function boardScriptEmit(document: Pick<BoardDocument, "items" | "board">
   const depth = typeof message.depth === "number" && Number.isSafeInteger(message.depth) && message.depth > 0 ? message.depth : 1;
   if (depth > BOARD_SCRIPT_EMIT_DEPTH)
     throw new Error(`emit(${target}, "${type}") from ${sender} is ${depth} handlers deep, past the limit of ${BOARD_SCRIPT_EMIT_DEPTH}: handlers keep answering each other. Emit from onFrame() to send it on the next step.`);
-  return { target, event: { type, data: message.data, depth } };
+  return { target, event: { type, data: message.data, depth, ...(message.remote === true ? { remote: true } : {}) } };
+}
+
+const RESERVED = /^(pointer|key|browser:)|^(click|focus|blur|change|selectionchange|transformend|viewchange|envchange|gesture|peerschange)$/;
+
+export function boardScriptBroadcast(input: unknown): BoardScriptEvent & { data: unknown } {
+  const message = input as { type?: unknown; data?: unknown; depth?: unknown } | null;
+  const type = message?.type;
+  if (typeof type !== "string" || !type || type.length > 64) throw new Error("broadcast() takes an event type of 1–64 characters.");
+  if (RESERVED.test(type)) throw new Error(`broadcast("${type}"): input and host event types are reserved.`);
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(message?.data ?? null);
+  } catch {}
+  if (json === undefined) throw new Error(`broadcast("${type}") data must be JSON.`);
+  if (json.length > BOARD_SCRIPT_BROADCAST_JSON_LENGTH)
+    throw new Error(`broadcast("${type}") data exceeds ${BOARD_SCRIPT_BROADCAST_JSON_LENGTH} characters of JSON.`);
+  const depth = typeof message?.depth === "number" && Number.isSafeInteger(message.depth) && message.depth > 0 ? message.depth : 1;
+  if (depth > BOARD_SCRIPT_EMIT_DEPTH)
+    throw new Error(`broadcast("${type}") is ${depth} handlers deep, past the limit of ${BOARD_SCRIPT_EMIT_DEPTH}: handlers keep answering each other. Broadcast from onFrame() to send it on the next step.`);
+  return { type, data: JSON.parse(json), depth, peer: null };
 }
 
 export function createBoardScriptOutbox(order: () => ReadonlyMap<string, number>) {

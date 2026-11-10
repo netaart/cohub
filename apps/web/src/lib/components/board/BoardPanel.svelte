@@ -907,7 +907,7 @@ const collaboration = presenceChannel
 	? createBoardPresence({
 			editor,
 			channel: presenceChannel,
-			publish: room || editable ? "all" : "reactions",
+			publish: room || editable ? "all" : "events",
 			formFactor: untrack(() => isMobile) ? "mobile" : "desktop",
 			cursorInterval: playing ? 100 : undefined,
 		})

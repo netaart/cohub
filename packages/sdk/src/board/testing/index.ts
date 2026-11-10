@@ -2,7 +2,13 @@ import type { BoardDocument, BoardPatch, BoardVec2 } from "@cohub/protocol";
 import { type BoardEditor, type BoardPointerEvent, type BoardToolId, createBoardEditor, selectionTransformControlAt } from "../editor/index.js";
 import type { BoardExportRegion } from "../model/export-plan.js";
 import { worldPoint, screenPoint } from "../model/geometry.js";
-import type { BoardScriptBrowserEvent, BoardScriptBrowserEvents, BoardScriptOutput, BoardScriptSense } from "../model/script.js";
+import type {
+  BoardScriptBrowserEvent,
+  BoardScriptBrowserEvents,
+  BoardScriptOutput,
+  BoardScriptPeer,
+  BoardScriptSense,
+} from "../model/script.js";
 import { BOARD_SCRIPT_EXPORT_ENV, type BoardScriptInputLog, boardScriptSenseStates } from "../model/script-senses.js";
 import type { BoardScriptHost } from "../render/renderers/board-renderer-registry.js";
 import { createNodeBoardRenderer, exportBoardImageBytes, type BoardNodeRenderer } from "../export/node/index.js";
@@ -36,6 +42,22 @@ export type BoardScriptHarnessHit =
   | { on: "empty"; under?: string };
 
 export type BoardScriptHarnessPress = { down: BoardScriptHarnessHit; taken: string };
+
+export type BoardScriptHarnessPeer = Partial<BoardScriptPeer> & { name: string };
+
+export type BoardScriptHarnessBroadcast = { owner: string; type: string; data: unknown };
+
+function harnessPeer(peer: BoardScriptHarnessPeer): BoardScriptPeer {
+  return {
+    id: peer.id ?? `peer-${peer.name}`,
+    actorId: peer.actorId ?? peer.name,
+    name: peer.name,
+    color: peer.color ?? "#3b82f6",
+    point: peer.point ?? null,
+    pointerType: peer.pointerType ?? (peer.point ? "mouse" : null),
+    pressed: peer.pressed ?? false,
+  };
+}
 
 const FRAME_MS = 1000 / 60;
 
@@ -75,6 +97,8 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
   let clock = 0;
   let timers: Array<{ at: number; run: () => void }> = [];
   let runtime: ReturnType<typeof createNodeBoardScriptRuntime> | null = null;
+  let peers: readonly BoardScriptPeer[] = [];
+  const broadcasts: BoardScriptHarnessBroadcast[] = [];
   const editor: BoardEditor = createBoardEditor({
     document: options.document,
     readonly: options.readonly === true,
@@ -94,6 +118,7 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     editor,
     device: () => device,
     leader: () => options.leader ?? true,
+    peers: { list: () => peers, broadcast: (owner, type, data) => broadcasts.push({ owner, type, data }) },
     now: () => clock,
     setTimer(run, ms) {
       const timer = { at: clock + ms, run };
@@ -235,6 +260,18 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
         if (start + t > clock) await this.advance(start + t - clock);
         controller.input(type as BoardScriptBrowserEvent, data as never);
       }
+      await frame();
+    },
+    get broadcasts(): readonly BoardScriptHarnessBroadcast[] {
+      return broadcasts;
+    },
+    async peers(next: readonly BoardScriptHarnessPeer[]) {
+      peers = next.map(harnessPeer);
+      await frame();
+    },
+    async broadcast(owner: string, type: string, data: unknown = null, from: BoardScriptHarnessPeer = { name: "Peer" }) {
+      const { point: _point, pointerType: _type, pressed: _pressed, ...peer } = harnessPeer(from);
+      controller.receive(owner, type, data, peer);
       await frame();
     },
     async flush() {

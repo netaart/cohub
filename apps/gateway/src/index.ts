@@ -57,6 +57,7 @@ import { summarizeRedisUrl } from "./logging.js";
 import { gatewayConfig } from "./config.js";
 import { GatewayManager } from "./manager/index.js";
 import {
+  BOARD_SCRIPT_MAX_BROADCASTS_PER_SECOND,
   consumeBoardAwarenessRate,
   hasBoardAwarenessCapacity,
   type BoardAwarenessRate,
@@ -102,6 +103,7 @@ type WsConnectionContext = {
   nextCompactStreamAlias: number;
   boardAwarenessSeqByBoard: Map<string, number>;
   boardAwarenessRate: BoardAwarenessRate;
+  boardScriptRate: BoardAwarenessRate;
   boardAwarenessPending: number;
   boardAwarenessTail: Promise<void>;
   appRooms: Map<string, { participantId: string; ticket: string; room: import("@cohub/protocol/realtime").RealtimeRoomDescriptor; hosted?: boolean }>;
@@ -471,7 +473,7 @@ const publishBoardAwareness = async (
   const previousSeq = ctx.boardAwarenessSeqByBoard.get(boardId) ?? -1;
   if (seq <= previousSeq) return;
 
-  const permission = update.type === "state" || update.type === "reaction" ? "view" : "edit";
+  const permission = update.type === "state" || update.type === "reaction" || update.type === "script" ? "view" : "edit";
   const allowed = await canPublishBoardAwareness(ctx, { boardId, spaceId, permission });
   if (!allowed) {
     sendWsError(socket, "FORBIDDEN", `Missing Board ${permission} permission`, requestId);
@@ -1153,6 +1155,7 @@ async function main() {
       nextCompactStreamAlias: 0,
       boardAwarenessSeqByBoard: new Map(),
       boardAwarenessRate: { startedAt: Date.now(), count: 0 },
+      boardScriptRate: { startedAt: Date.now(), count: 0 },
       boardAwarenessPending: 0,
       boardAwarenessTail: Promise.resolve(),
       appRooms: new Map(),
@@ -1483,6 +1486,8 @@ async function main() {
         if (message.type === "board.awareness.update") {
           if (
             !consumeBoardAwarenessRate(ctx.boardAwarenessRate) ||
+            (message.payload.update.type === "script" &&
+              !consumeBoardAwarenessRate(ctx.boardScriptRate, Date.now(), BOARD_SCRIPT_MAX_BROADCASTS_PER_SECOND)) ||
             !hasBoardAwarenessCapacity(ctx.boardAwarenessPending)
           ) return;
 

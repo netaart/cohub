@@ -13,7 +13,7 @@ import { BOARD_SCRIPT_HISTORY_MS } from "../../model/animation.js";
 import { BOARD_SCRIPT_EXPORT_CALLS } from "../../model/script-calls.js";
 import { BOARD_SCRIPT_EXPORT_ENV, type BoardScriptInputLog, boardScriptInputsBetween } from "../../model/script-senses.js";
 import type { BoardScriptEnv, BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot, BoardScriptView } from "../../model/script.js";
-import { BOARD_SCRIPT_EMIT_DEPTH, boardScriptEmit, boardScriptListens, createBoardScriptOutbox, queueBoardScriptEvent } from "../../model/script-events.js";
+import { BOARD_SCRIPT_EMIT_DEPTH, boardScriptBroadcast, boardScriptEmit, boardScriptListens, createBoardScriptOutbox, queueBoardScriptEvent } from "../../model/script-events.js";
 import {
   loadBoardScriptSources,
   createBoardScriptModuleReader,
@@ -426,9 +426,9 @@ export function createNodeBoardScriptHost(
   const lanes = createNodeScriptLanes(renderer, {
     ...options,
     async call(id, name, input) {
-      if (name === "board.emit" && current) {
+      if ((name === "board.emit" || name === "board.broadcast") && current) {
         try {
-          const { target, event } = boardScriptEmit(current, id, input);
+          const { target, event } = name === "board.emit" ? boardScriptEmit(current, id, input) : { target: id, event: boardScriptBroadcast(input) };
           outbox.push(id, target, event);
         } catch (error) {
           emitFailures.set(id, error instanceof Error ? error.message : String(error));
