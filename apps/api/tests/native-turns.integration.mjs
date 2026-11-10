@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test, mock, after } from "node:test";
 import { and, eq, SQL } from "drizzle-orm";
 import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
-import { sessionTurns, sessionMessages, spaceSessions, sessionForks, sessionTurnSegments, labelAssignments, taskRuns } from "@cohub/db";
+import { sessionTurns, sessionMessages, spaceSessions, sessionForks, sessionTurnSegments, labelAssignments, labels, taskRuns } from "@cohub/db";
 
 const home = process.env.RUNTIME_TEST_DB_HOME;
 if (!home) throw new Error("RUNTIME_TEST_DB_HOME must point to an isolated PGlite installation");
@@ -13,7 +13,7 @@ const engine = new PGlite();
 const database = drizzle(engine);
 const dialect = new PgDialect();
 await engine.exec("create schema v2");
-for (const table of [sessionTurns, sessionMessages, spaceSessions, sessionForks, sessionTurnSegments, labelAssignments, taskRuns]) {
+for (const table of [sessionTurns, sessionMessages, spaceSessions, sessionForks, sessionTurnSegments, labelAssignments, labels, taskRuns]) {
   const config = getTableConfig(table);
   const columns = config.columns.map((column) => {
     const value = column.default;
@@ -28,7 +28,8 @@ create unique index segments_ordinal on v2.session_turn_segments(session_id, ord
 create unique index fork_child on v2.session_forks(child_session_id);`);
 mock.module("../src/db/index.js", { exports: { db: database } });
 mock.module("../src/reference-index-queue.js", { exports: { enqueueReferences: () => {} } });
-mock.module("@cohub/core/labels/session-user", { exports: { assignSessionParticipantSystemLabels: async () => [] } });
+const sessionUserLabels = await import("@cohub/core/labels/session-user");
+mock.module("@cohub/core/labels/session-user", { exports: { ...sessionUserLabels, assignSessionParticipantSystemLabels: async () => [] } });
 mock.module("../src/lib/middleware.js", { exports: { useAuth: (c) => ({ uuid: c.req.header("x-user") ?? "owner" }), requireValidId: (id) => /^[a-f0-9-]{36}$/.test(id), authzDenied: (c) => c.json({ message: "forbidden" }, 403) } });
 mock.module("../src/permissions.js", { exports: { hasPermission: async (user, _permission, context) => user.uuid !== "denied" && !(user.uuid === "no-session-access" && context?.sessionId) } });
 mock.module("../src/space-sessions.js", { exports: { getSpaceSessionById: async (id) => (await database.select().from(spaceSessions).where(eq(spaceSessions.id, id)))[0] } });
@@ -46,6 +47,7 @@ mock.module("../src/session-output.js", { exports: {
 } });
 mock.module("../src/space-activity.js", { exports: { touchSpaceActivity: async () => {} } });
 mock.module("../src/agent-turn-queue.js", { exports: { enqueueAgentTurnJob: async () => {} } });
+mock.module("../src/session-archive.js", { exports: { publishSessionArchiveChange: async () => {} } });
 mock.module("../src/session-message-postprocess-queue.js", { exports: { enqueueSessionMessagePostprocess: async ({ messageId }) => { published.push(["postprocess", messageId]); } } });
 const progress = [];
 mock.module("../src/native-turn-progress.js", { exports: {
@@ -64,7 +66,7 @@ mock.module("../src/session-turns.js", { exports: {
     return { index: null, summary: { messageCount: rows.length - 1, toolCallCount: 0, usage: null, durationMs: null, lastMessageText: null, hasError: false } };
   },
 } });
-const { startNativeTurn, completeNativeTurn, getOwnedNativeTurn, ingestNativeTurns, knownNativeTurns } = await import("../src/native-turns.js");
+const { startNativeTurn, completeNativeTurn, getOwnedNativeTurn, ingestNativeTurns, knownNativeTurns, stageNativeMessages } = await import("../src/native-turns.js");
 const { publishNativeIngest } = await import("../src/native-ingest-events.js");
 after(() => engine.close());
 const at = "2026-09-21T00:00:00.000Z";
@@ -99,6 +101,40 @@ test("start and completion are idempotent; original IDs cannot be hijacked or ch
   assert.equal((await database.select().from(sessionMessages).where(eq(sessionMessages.turnId, input.turnId))).length, 2);
   const turn = await getOwnedNativeTurn(spaceId, "owner", first.binding.sessionId, input.turnId);
   assert.equal(turn.status, "completed"); assert.equal(turn.meta.runtime, "local");
+});
+
+test("staged messages persist while running and seal with a completion of only the rest", async () => {
+  const spaceId = crypto.randomUUID(), { binding } = await startNativeTurn(spaceId, "owner", start());
+  const message = (text) => ({ content: content(text), usage: { input: 1, output: 1 } });
+  const stage = (from, messages) => stageNativeMessages(spaceId, "owner", binding.sessionId, binding.turnId, { from, messages });
+  assert.deepEqual(await stage(0, [message("a"), message("b")]), { count: 2 });
+  assert.deepEqual(await stage(1, [message("b"), message("c")]), { count: 3 });
+  assert.deepEqual(await stage(5, [message("x")]), { count: 3 });
+  await assert.rejects(stage(2, [message("changed")]), /immutable/);
+  await assert.rejects(completeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId, { status: "completed", completedAt: at, from: 4, messages: [] }), /resend from there/);
+  const done = { status: "completed", completedAt: at, from: 3, messages: [message("d")] };
+  await completeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId, done);
+  await completeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId, done);
+  const all = { status: "completed", completedAt: at, messages: ["a", "b", "c", "d"].map(message) };
+  assert.equal((await completeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId, all)).changed, false);
+  await assert.rejects(stage(4, [message("e")]), /resolved/);
+  const rows = await database.select().from(sessionMessages).where(and(eq(sessionMessages.turnId, binding.turnId), eq(sessionMessages.role, "assistant")));
+  rows.sort((left, right) => left.sequence - right.sequence);
+  assert.deepEqual(rows.map((row) => [row.text, row.meta.messageKind, row.completedAt?.toISOString()]), [
+    ["a", "assistant_intermediate", at], ["b", "assistant_intermediate", at], ["c", "assistant_intermediate", at], ["d", "assistant_final", at]]);
+  const turn = await getOwnedNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId);
+  assert.equal(turn.assistantText, "d"); assert.deepEqual(turn.totalUsage, { input: 4, output: 4 });
+});
+
+test("a completion with an empty tail marks the last staged message final", async () => {
+  const spaceId = crypto.randomUUID(), { binding } = await startNativeTurn(spaceId, "owner", start());
+  await stageNativeMessages(spaceId, "owner", binding.sessionId, binding.turnId, { from: 0, messages: [{ content: content("a") }, { content: content("b") }] });
+  await completeNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId, { status: "failed", completedAt: at, from: 2, messages: [] });
+  const rows = await database.select().from(sessionMessages).where(and(eq(sessionMessages.turnId, binding.turnId), eq(sessionMessages.role, "assistant")));
+  rows.sort((left, right) => left.sequence - right.sequence);
+  assert.deepEqual(rows.map((row) => row.meta.messageKind), ["assistant_intermediate", "assistant_error"]);
+  const turn = await getOwnedNativeTurn(spaceId, "owner", binding.sessionId, binding.turnId);
+  assert.equal(turn.status, "failed"); assert.equal(turn.assistantText, "b");
 });
 
 test("two native clients sharing a Turn fork only the competing execution, atomically", async () => {

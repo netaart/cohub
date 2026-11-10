@@ -1,6 +1,6 @@
 import { appendFile, mkdir, open, readFile, readdir, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, type NativeIngestResult, type NativeRuntimeEvent, type NativeTurnComplete, type NativeTurnMessage } from "@neta-art/cohub";
+import { NATIVE_INGEST_MAX_TURNS, SETTLED_TURN_STATUSES, type NativeIngestResult, type NativeIngestTurn, type NativeRuntimeEvent, type NativeTurnComplete, type NativeTurnMessage, type NativeTurnMessagesResult } from "@neta-art/cohub";
 import { acceptsDirectory, acceptsTranscript, readSessionHeader, readTranscript, transcriptRoots, type Harness, type NativeTranscriptTurn } from "./adapters.js";
 import { SizeLimitError } from "./transcript.js";
 import { nativeTurnId } from "./identity.js";
@@ -30,6 +30,7 @@ const RETRY_MAX_MS = 5 * 60_000;
  * small enough to answer well within the request timeout; the protocol allows more.
  */
 const INGEST_BATCH_TURNS = Math.min(50, NATIVE_INGEST_MAX_TURNS);
+const STAGE_BATCH_MESSAGES = 1_000;
 
 export type TranscriptState = {
   harness: Harness;
@@ -75,6 +76,8 @@ export type IngestTransport = {
   ingest(event: Extract<NativeRuntimeEvent, { type: "ingest" }>, options?: { signal?: AbortSignal }): Promise<NativeIngestResult>;
   known(turnIds: string[], options?: { signal?: AbortSignal }): Promise<Array<{ turnId: string; sessionId: string; settled: boolean }>>;
   progress(event: Extract<NativeRuntimeEvent, { type: "progress" }>, options?: { signal?: AbortSignal }): Promise<{ accepted?: boolean; resync?: boolean } | unknown>;
+  /** Absent when the server cannot stage messages; a Turn then travels in one frame. */
+  messages?(event: Extract<NativeRuntimeEvent, { type: "messages" }>, options?: { signal?: AbortSignal }): Promise<NativeTurnMessagesResult>;
   status(sessionId: string, turnId: string, controllable?: boolean, options?: { signal?: AbortSignal }): Promise<{ abortRequested: boolean; status?: string }>;
 };
 
@@ -732,7 +735,11 @@ export class NativeIngest {
         result: item.settled ? this.complete(item.turn.result ?? this.cutOff(item, pending)) : null,
       },
     }));
-    for (const batch of chunks(payloads, INGEST_BATCH_TURNS, (payload) => JSON.stringify(payload.turn).length)) {
+    const sizes = new Map(payloads.map((payload) => [payload, JSON.stringify(payload.turn).length]));
+    for (const batch of chunks(payloads, INGEST_BATCH_TURNS, (payload) => sizes.get(payload) ?? 0)) {
+      const [only] = batch;
+      // A Turn over the batch budget is batched alone; its messages are staged ahead of its result.
+      if (batch.length === 1 && only && (sizes.get(only) ?? 0) > BATCH_MAX_BYTES) only.turn = await this.stage(state, transport, only.turn, known.get(only.item.turnId)?.sessionId);
       const result = await transport.ingest({
         type: "ingest",
         input: { harness: state.harness, nativeSessionId: state.nativeSessionId, turns: batch.map((payload) => payload.turn) },
@@ -755,6 +762,34 @@ export class NativeIngest {
     // Only the newest settled state needs raw bytes: every older version is a prefix of it.
     state.headTurnId = head;
     if (lastSettled) await this.archive(state, lastSettled.turn, lastSettled.turnId);
+  }
+
+  /**
+   * Sends a settled Turn's messages in frames within the batch budget, resuming where the server's
+   * staged messages end, and returns the Turn with an empty result tail to seal them.
+   */
+  private async stage(state: TranscriptState, transport: IngestTransport, turn: NativeIngestTurn, sessionId?: string): Promise<NativeIngestTurn> {
+    const result = turn.result, stage = transport.messages;
+    if (!result || !stage) return turn;
+    if (!sessionId) {
+      // Messages need a registered Turn; it is registered running and settled by the sealing ingest.
+      const { result: _result, ...running } = turn;
+      const registered = await transport.ingest({ type: "ingest", input: { harness: state.harness, nativeSessionId: state.nativeSessionId, turns: [{ ...running, result: null }] } });
+      const entry = registered.turns.find((candidate) => candidate.turnId === turn.turnId);
+      if (!entry) throw new Error("Server did not record a native Turn");
+      if (entry.settled) return turn;
+      sessionId = entry.sessionId;
+    }
+    const target = sessionId;
+    const send = (from: number, messages: NativeTurnMessage[]) => stage({ type: "messages", sessionId: target, turnId: turn.turnId, input: { from, messages } });
+    // An empty request asks how many messages a previous attempt already staged.
+    let from = Math.min((await send(0, [])).count, result.messages.length);
+    for (const batch of chunks(result.messages.slice(from), STAGE_BATCH_MESSAGES, (message) => JSON.stringify(message).length)) {
+      const { count } = await send(from, batch);
+      if (count !== from + batch.length) throw new Error("Server staged an unexpected number of native messages");
+      from = count;
+    }
+    return { ...turn, result: { ...result, from, messages: [] } };
   }
 
   private markRunning(state: TranscriptState, sessionId: string, item: Candidate): void {

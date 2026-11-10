@@ -14,6 +14,8 @@ export function fakeNativeServer() {
   const batches: Ingested[] = [];
   const progress: Array<{ turnId: string; from: number; messages: number }> = [];
   const statusRequests: string[] = [];
+  const staged = new Map<string, number>();
+  const stagedFrames: number[] = [];
   const controllable = new Map<string, boolean | undefined>();
   let knownCalls = 0;
   const stop = new Set<string>();
@@ -27,6 +29,7 @@ export function fakeNativeServer() {
       assert(event.input.turns.length <= 50, "ingest is batched small enough to answer in time");
       batches.push(event.input);
       return { turns: event.input.turns.map((turn) => {
+        if (turn.result?.from !== undefined) assert.equal(turn.result.from, staged.get(turn.turnId) ?? 0, "a result continues where the staged messages end");
         const parent = turn.parentTurnId ? turns.get(turn.parentTurnId) : null;
         if (turn.parentTurnId && !parent) throw new Error("Parent Turn is not recorded");
         const existing = turns.get(turn.turnId);
@@ -34,6 +37,14 @@ export function fakeNativeServer() {
         turns.set(turn.turnId, { sessionId, settled: turn.result !== null || Boolean(existing?.settled), parentTurnId: turn.parentTurnId, origin: turn.origin });
         return { turnId: turn.turnId, sessionId, forked: false, settled: turn.result !== null, created: !existing, changed: true };
       }) };
+    },
+    async messages(event) {
+      const turn = turns.get(event.turnId);
+      if (!turn || turn.settled) throw new Error("Execution was resolved");
+      stagedFrames.push(JSON.stringify(event).length);
+      const count = staged.get(event.turnId) ?? 0;
+      if (event.input.from <= count) staged.set(event.turnId, Math.max(count, event.input.from + event.input.messages.length));
+      return { count: staged.get(event.turnId) ?? 0 };
     },
     async progress(event) { progress.push({ turnId: event.turnId, from: event.progress.from ?? 0, messages: event.progress.messages.length }); return { accepted: true }; },
     async status(_sessionId, turnId, value) {
@@ -47,7 +58,8 @@ export function fakeNativeServer() {
     if (event.type === "ingest") return await transport.ingest(event);
     if (event.type === "known") return { turns: await transport.known(event.input.turnIds) };
     if (event.type === "progress") return await transport.progress(event);
+    if (event.type === "messages") return await transport.messages?.(event);
     return await transport.status(event.sessionId, event.turnId, event.controllable);
   };
-  return { turns, batches, progress, stop, statusRequests, controllable, transport, send, get knownCalls() { return knownCalls; } };
+  return { turns, batches, progress, stop, statusRequests, staged, stagedFrames, controllable, transport, send, get knownCalls() { return knownCalls; } };
 }

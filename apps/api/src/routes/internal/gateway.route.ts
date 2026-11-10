@@ -27,7 +27,7 @@ import {
 } from "../../public-asset-storage.js";
 import { UserUploadConfigError } from "../../user-upload-storage.js";
 import { nativeRuntimeEventSchema } from "@cohub/protocol";
-import { NativeTurnError, ingestNativeTurns, knownNativeTurns, observeNativeTurn } from "../../native-turns.js";
+import { NativeTurnError, ingestNativeTurns, knownNativeTurns, observeNativeTurn, stageNativeMessages } from "../../native-turns.js";
 import { publishNativeIngest } from "../../native-ingest-events.js";
 import { publishNativeProgress } from "../../native-turn-progress.js";
 import { ApprovalError, closeRuntimeApproval, openRuntimeApproval } from "../../runtime-approvals.js";
@@ -332,6 +332,7 @@ router.post("/native-runtime-event", async (c) => {
       return c.json({ result });
     }
     if (event.type === "known") return c.json({ result: await knownNativeTurns(spaceId, event.input.turnIds) });
+    if (event.type === "messages") return c.json({ result: await stageNativeMessages(spaceId, ownerUserId, event.sessionId, event.turnId, event.input) });
     if (event.type === "progress") return c.json({ result: await publishNativeProgress(spaceId, ownerUserId, event.sessionId, event.turnId, event.progress) });
     if (event.type === "approval") return c.json({ result: await openRuntimeApproval(spaceId, event.sessionId, event.turnId, event.approval) });
     if (event.type === "approval.closed") return c.json({ result: await closeRuntimeApproval(spaceId, event.sessionId, event.approvalId) });
