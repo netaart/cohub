@@ -1,6 +1,6 @@
 import { isBillingAccessBlockedError } from "@cohub/billing";
 import { createLogger } from "@cohub/infra/logging";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import type { Job } from "bullmq";
 import type { TaskPayload } from "@cohub/protocol/task";
 import { registerTask } from "./registry.js";
@@ -47,13 +47,17 @@ const getBootstrapErrorCode = (value: unknown) => {
   return null;
 };
 
+const bootstrapStatusSql = sql`${spaces.meta}->'bootstrap'->>'status'`;
+// A terminal ready state must never be overwritten by a late or duplicate failure.
+const notReady = sql`${bootstrapStatusSql} is distinct from 'ready'`;
+
 const ensureValidGitRef = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed || !SAFE_GIT_REF_REGEX.test(trimmed) || trimmed.startsWith("-") || trimmed.includes("..")) throw new Error("invalid git ref");
   return trimmed;
 };
 
-const updateBootstrap = async (input: {
+type BootstrapUpdate = {
   space: typeof spaces.$inferSelect;
   taskRunId: string;
   source?: ResolvedSpaceCreateSource;
@@ -65,7 +69,9 @@ const updateBootstrap = async (input: {
   finishedAt?: string;
   stageTimings?: Record<string, number>;
   initialCheckpointTaskRunId?: string | null;
-}) => {
+};
+
+const writeBootstrap = async (input: BootstrapUpdate, when?: SQL) => {
   const { meta, bootstrap: existingBootstrap } = getBootstrapMeta(input.space);
   const nextMeta = {
     ...meta,
@@ -83,10 +89,18 @@ const updateBootstrap = async (input: {
       ...("initialCheckpointTaskRunId" in input ? { initialCheckpointTaskRunId: input.initialCheckpointTaskRunId } : {}),
     },
   };
-  const [updated] = await db.update(spaces).set({ meta: sql`coalesce(${spaces.meta}, '{}'::jsonb) || ${JSON.stringify({ bootstrap: nextMeta.bootstrap })}::jsonb`, updatedAt: new Date() }).where(eq(spaces.id, input.space.id)).returning();
+  const [updated] = await db.update(spaces).set({ meta: sql`coalesce(${spaces.meta}, '{}'::jsonb) || ${JSON.stringify({ bootstrap: nextMeta.bootstrap })}::jsonb`, updatedAt: new Date() }).where(and(eq(spaces.id, input.space.id), when)).returning();
+  return updated;
+};
+
+const updateBootstrap = async (input: BootstrapUpdate) => {
+  const updated = await writeBootstrap(input);
   if (!updated) throw new Error("failed to update bootstrap state");
   return updated;
 };
+
+// Matching no row is expected when the guard rejects the write.
+const failBootstrap = (input: Omit<BootstrapUpdate, "status">, when = notReady) => writeBootstrap({ ...input, status: "failed" }, when);
 
 const assertRepoUrl = (value: string, hasToken: boolean) => {
   const url = new URL(value);
@@ -215,15 +229,20 @@ const createSpaceHandler = async (job: Job) => {
 
   const [space] = await db.select().from(spaces).where(eq(spaces.id, spaceId)).limit(1);
   if (!space) throw new Error("space not found");
+  // A re-delivered job (e.g. reclaimed after a stall) must not redo or undo a finished bootstrap.
+  const alreadyReady = () => {
+    logger.info(`[CreateSpace] bootstrap already ready for ${spaceId}; skipping task ${taskRunId}`);
+    return { ok: true, spaceId, alreadyReady: true };
+  };
+  if (getBootstrapMeta(space).bootstrap?.status === "ready") return alreadyReady();
 
   let resolvedSource: ReturnType<typeof resolveCreateSpaceSource>;
   try {
     resolvedSource = resolveCreateSpaceSource(payload);
   } catch (error) {
-    await updateBootstrap({
+    await failBootstrap({
       space,
       taskRunId,
-      status: "failed",
       errorMessage: sanitizeBootstrapError(error),
       errorCode: getBootstrapErrorCode(error),
       finishedAt: new Date().toISOString(),
@@ -233,7 +252,9 @@ const createSpaceHandler = async (job: Job) => {
   const { source, gitToken } = resolvedSource;
   const progress = (stage: string, extra?: Record<string, unknown>) => job.updateProgress({ stage, updatedAt: new Date().toISOString(), ...extra });
   const stageTimings: Record<string, number> = {};
-  let currentSpace = await updateBootstrap({ space, taskRunId, source, status: "running", stage: source.type === "checkpoint" ? "checkpoint_restore" : source.type === "git_repo" ? "import" : "prepare", startedAt: new Date().toISOString() });
+  const running = await writeBootstrap({ space, taskRunId, source, status: "running", stage: source.type === "checkpoint" ? "checkpoint_restore" : source.type === "git_repo" ? "import" : "prepare", startedAt: new Date().toISOString() }, notReady);
+  if (!running) return alreadyReady();
+  let currentSpace = running;
 
   try {
     await progress("prepare");
@@ -275,7 +296,9 @@ const createSpaceHandler = async (job: Job) => {
       result = { ok: true, spaceId: currentSpace.id, checkpointAliasId: aliasResult.alias.id, commitHash: restoreResult.checkpoint.commitHash, source, stages: { workspaceRestore: { status: "ready", durationMs: restoreDuration }, checkpointAlias: { status: "ready", durationMs: aliasDuration }, boardRestore: { status: "ready", durationMs: boardRestoreDuration, count: boardRestoreResult.count }, ...postStages } };
     } else {
       if (source.type === "git_repo") {
-        currentSpace = await updateBootstrap({ space: currentSpace, taskRunId, source, status: "running", stage: "import", stageTimings });
+        const importing = await writeBootstrap({ space: currentSpace, taskRunId, source, status: "running", stage: "import", stageTimings }, notReady);
+        if (!importing) return alreadyReady();
+        currentSpace = importing;
         await progress("import_git_repo");
         const { duration } = await timeIt("bootstrapFromGitRepo", () => bootstrapFromGitRepo({ workspaceDir, repoUrl: source.repoUrl, ref: source.ref, gitToken }));
         stageTimings.bootstrapFromGitRepo = duration;
@@ -303,9 +326,26 @@ const createSpaceHandler = async (job: Job) => {
 
     return result;
   } catch (error) {
-    await updateBootstrap({ space: currentSpace, taskRunId, source, status: "failed", errorMessage: sanitizeBootstrapError(error), errorCode: getBootstrapErrorCode(error), stageTimings, finishedAt: new Date().toISOString() }).catch(() => undefined);
+    await failBootstrap({ space: currentSpace, taskRunId, source, errorMessage: sanitizeBootstrapError(error), errorCode: getBootstrapErrorCode(error), stageTimings, finishedAt: new Date().toISOString() }).catch(() => undefined);
     throw error;
   }
+};
+
+/**
+ * BullMQ can fail a job without running the handler (e.g. "job stalled more than
+ * allowable limit"), which would leave bootstrap stuck in pending/running.
+ */
+export const markCreateSpaceJobFailed = async (job: Job, error: unknown) => {
+  const spaceId = (job.data as TaskPayload | undefined)?.spaceId;
+  if (job.name !== "create_space" || !spaceId || !job.id) return;
+  const [space] = await db.select().from(spaces).where(eq(spaces.id, spaceId)).limit(1);
+  if (!space) return;
+  await failBootstrap({
+    space,
+    taskRunId: String(job.id),
+    errorMessage: sanitizeBootstrapError(error),
+    errorCode: getBootstrapErrorCode(error),
+  }, sql`${bootstrapStatusSql} in ('pending', 'running')`);
 };
 
 // Bootstrap writes the workspace directly, so it is re-measured once settled.

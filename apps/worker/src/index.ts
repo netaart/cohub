@@ -18,6 +18,7 @@ import { context, SpanStatusCode, trace } from "@opentelemetry/api";
 import { getTracer, extractTrace } from "@cohub/infra/tracing/propagator";
 import { config, assertRequiredConfig } from "./config.js";
 import { getTaskHandler, getRegisteredTasks, markTaskRunFailed } from "./tasks/registry.js";
+import { markCreateSpaceJobFailed } from "./tasks/create-space-task.js";
 
 const logger = createLogger({ serviceName: "cohub-worker" });
 // Auto-register all tasks
@@ -77,6 +78,9 @@ taskWorker.on("failed", (job, error) => {
   if (!job) return;
   void markTaskRunFailed(job, error).catch((updateError) => {
     logger.error("[Worker] failed to sync BullMQ failure to task_runs", updateError);
+  });
+  void markCreateSpaceJobFailed(job, error).catch((updateError) => {
+    logger.error("[Worker] failed to sync BullMQ failure to space bootstrap", updateError);
   });
 });
 

@@ -14,6 +14,9 @@ import (
 	"github.com/cohub/apps/sandbox/env"
 )
 
+// ErrBootstrapFailed means bootstrap reached its terminal failed state.
+var ErrBootstrapFailed = errors.New("workspace bootstrap failed")
+
 type Client struct {
 	cfg        env.Config
 	hostname   string
@@ -111,8 +114,11 @@ func (c *Client) WaitForBootstrap(ctx context.Context, payload func() Payload, o
 		status := "waiting"
 		if err == nil && response.Bootstrap != nil {
 			status = response.Bootstrap.Status
-			if status == "ready" {
+			switch status {
+			case "ready":
 				return nil
+			case "failed":
+				return ErrBootstrapFailed
 			}
 		}
 		onWait(status, err)
