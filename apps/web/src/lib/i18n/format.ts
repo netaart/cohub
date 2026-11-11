@@ -84,7 +84,8 @@ export function formatCurrency(
 	const tag = toIntlTag(options.locale);
 
 	// Currency symbol + placement + sign all come from `Intl` so USD/CNY etc.
-	// follow the right rules instead of hardcoding a `$` prefix. The fraction
+	// follow the right rules instead of hardcoding a `$` prefix; the narrow
+	// symbol keeps zh-CN at "$" rather than "US$". The fraction
 	// digits are caller/tier-controlled so micro-costs keep precision. When only
 	// one bound is supplied we derive the other without ever producing an
 	// inverted (min > max) range, which `Intl` rejects with a RangeError.
@@ -116,6 +117,7 @@ export function formatCurrency(
 	return numberFormat(tag, {
 		style: "currency",
 		currency,
+		currencyDisplay: "narrowSymbol",
 		minimumFractionDigits,
 		maximumFractionDigits,
 		...(options.signDisplay ? { signDisplay: options.signDisplay } : {}),

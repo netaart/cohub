@@ -84,7 +84,6 @@ const usageParts = $derived.by(() => {
 	const { totalTokens, requestCount, costTotal } = usage.totals;
 	if (requestCount === 0) return null;
 	const base = {
-		days: usage.days,
 		tokens: formatTokenCount(totalTokens),
 		requests: formatCompact(requestCount, locale),
 		requestCount,
@@ -122,17 +121,15 @@ const schedulesParts = $derived.by(() => {
 	const schedules = overview?.schedules;
 	if (!schedules || (schedules.active === 0 && schedules.runs === 0))
 		return null;
-	const days = overview?.days ?? 7;
 	if (schedules.runs === 0) {
 		return [
 			{
 				type: "text" as const,
-				value: m.space_profile_schedules_idle({ days }, { locale }),
+				value: m.space_profile_schedules_idle({}, { locale }),
 			},
 		];
 	}
 	const base = {
-		days,
 		runs: formatCompact(schedules.runs, locale),
 		runCount: schedules.runs,
 	};
@@ -143,6 +140,7 @@ const schedulesParts = $derived.by(() => {
 			)
 		: m.space_profile_schedules.parts(base, { locale });
 });
+const recentDays = $derived(usage?.days ?? overview?.days ?? 7);
 const walletText = $derived(
 	wallet?.spaceId === spaceId && wallet.balanceUsd > 0
 		? m.space_profile_wallet(
@@ -243,11 +241,10 @@ function userTitle(
 			{#if appsParts}
 				<p><button type="button" class="new-chat-profile-stat" onclick={() => onOpenResourceList("app")}><MessageText parts={appsParts} strongClass={STRONG} /></button></p>
 			{/if}
-			{#if schedulesParts}
-				<p><button type="button" class="new-chat-profile-stat" onclick={() => onOpenResourceList("cronjob")}><MessageText parts={schedulesParts} strongClass={STRONG} /></button></p>
-			{/if}
-			{#if usageParts}
-				<p><a href={`/spaces/${spaceId}/activity`} class="new-chat-profile-stat"><MessageText parts={usageParts} strongClass={STRONG} /></a></p>
+			{#if usageParts || schedulesParts}
+				<p>
+					{m.space_profile_recent({ days: recentDays }, { locale })}{#if usageParts}<a href={`/spaces/${spaceId}/activity`} class="new-chat-profile-stat"><MessageText parts={usageParts} strongClass={STRONG} /></a>{/if}{#if usageParts && schedulesParts}{m.space_profile_clause_separator({}, { locale })}{/if}{#if schedulesParts}<button type="button" class="new-chat-profile-stat" onclick={() => onOpenResourceList("cronjob")}><MessageText parts={schedulesParts} strongClass={STRONG} /></button>{/if}{m.space_profile_sentence_end({}, { locale })}
+				</p>
 			{/if}
 		</div>
 		{#if canExpand}

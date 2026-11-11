@@ -2508,42 +2508,10 @@
 			}
 		}
 	],
-	"space_profile_schedules": [
-		{
-			"declarations": [
-				"input days",
-				"input runs",
-				"input runCount",
-				"local runsPlural = runCount: plural"
-			],
-			"selectors": ["runsPlural"],
-			"match": {
-				"runsPlural=one": "Over the last {days} days, scheduled tasks ran {#b}{runs}{/b} time, all successful.",
-				"runsPlural=*": "Over the last {days} days, scheduled tasks ran {#b}{runs}{/b} times, all successful."
-			}
-		}
-	],
-	"space_profile_schedules_failed": [
-		{
-			"declarations": [
-				"input days",
-				"input runs",
-				"input runCount",
-				"input failed",
-				"local runsPlural = runCount: plural"
-			],
-			"selectors": ["runsPlural"],
-			"match": {
-				"runsPlural=one": "Over the last {days} days, scheduled tasks ran {#b}{runs}{/b} time, and {#b}{failed}{/b} failed.",
-				"runsPlural=*": "Over the last {days} days, scheduled tasks ran {#b}{runs}{/b} times, and {#b}{failed}{/b} failed."
-			}
-		}
-	],
-	"space_profile_schedules_idle": "Scheduled tasks haven't completed a run in the last {days} days.",
+	"space_profile_recent": "Over the last {days} days, ",
 	"space_profile_usage": [
 		{
 			"declarations": [
-				"input days",
 				"input tokens",
 				"input requests",
 				"input requestCount",
@@ -2552,15 +2520,14 @@
 			],
 			"selectors": ["requestsPlural"],
 			"match": {
-				"requestsPlural=one": "Over the last {days} days, this Space used {#b}{tokens}{/b} tokens across {#b}{requests}{/b} request, totaling {#b}{cost}{/b}.",
-				"requestsPlural=*": "Over the last {days} days, this Space used {#b}{tokens}{/b} tokens across {#b}{requests}{/b} requests, totaling {#b}{cost}{/b}."
+				"requestsPlural=one": "this Space used {#b}{tokens}{/b} tokens across {#b}{requests}{/b} request, totaling {#b}{cost}{/b}",
+				"requestsPlural=*": "this Space used {#b}{tokens}{/b} tokens across {#b}{requests}{/b} requests, totaling {#b}{cost}{/b}"
 			}
 		}
 	],
 	"space_profile_usage_no_cost": [
 		{
 			"declarations": [
-				"input days",
 				"input tokens",
 				"input requests",
 				"input requestCount",
@@ -2568,11 +2535,43 @@
 			],
 			"selectors": ["requestsPlural"],
 			"match": {
-				"requestsPlural=one": "Over the last {days} days, this Space used {#b}{tokens}{/b} tokens across {#b}{requests}{/b} request.",
-				"requestsPlural=*": "Over the last {days} days, this Space used {#b}{tokens}{/b} tokens across {#b}{requests}{/b} requests."
+				"requestsPlural=one": "this Space used {#b}{tokens}{/b} tokens across {#b}{requests}{/b} request",
+				"requestsPlural=*": "this Space used {#b}{tokens}{/b} tokens across {#b}{requests}{/b} requests"
 			}
 		}
 	],
+	"space_profile_schedules": [
+		{
+			"declarations": [
+				"input runs",
+				"input runCount",
+				"local runsPlural = runCount: plural"
+			],
+			"selectors": ["runsPlural"],
+			"match": {
+				"runsPlural=one": "scheduled tasks ran {#b}{runs}{/b} time, all successful",
+				"runsPlural=*": "scheduled tasks ran {#b}{runs}{/b} times, all successful"
+			}
+		}
+	],
+	"space_profile_schedules_failed": [
+		{
+			"declarations": [
+				"input runs",
+				"input runCount",
+				"input failed",
+				"local runsPlural = runCount: plural"
+			],
+			"selectors": ["runsPlural"],
+			"match": {
+				"runsPlural=one": "scheduled tasks ran {#b}{runs}{/b} time, and {#b}{failed}{/b} failed",
+				"runsPlural=*": "scheduled tasks ran {#b}{runs}{/b} times, and {#b}{failed}{/b} failed"
+			}
+		}
+	],
+	"space_profile_schedules_idle": "scheduled tasks haven't completed a run",
+	"space_profile_clause_separator": "; ",
+	"space_profile_sentence_end": ".",
 	"space_profile_wallet": "Wallet {amount}",
 	"space_profile_show_less": "Show less",
 	"space_profile_show_full": "Show full profile",
