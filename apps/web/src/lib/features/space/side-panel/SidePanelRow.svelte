@@ -15,6 +15,7 @@ type Props = {
 	subtitle?: string;
 	active?: boolean;
 	disabled?: boolean;
+	dimmed?: boolean;
 	drag?: {
 		resource: CohubDragResource;
 		item: PointerDragItem;
@@ -30,6 +31,7 @@ const {
 	subtitle,
 	active = false,
 	disabled = false,
+	dimmed = false,
 	drag = null,
 	leading,
 	trailing,
@@ -45,7 +47,7 @@ const dragging = $derived(
 	class="side-panel-row group"
 	class:active
 	class:dragging
-	class:opacity-60={disabled}
+	class:opacity-60={disabled || dimmed}
 	role="listitem"
 	draggable={Boolean(drag) && !disabled}
 	ondragstart={(event) => {

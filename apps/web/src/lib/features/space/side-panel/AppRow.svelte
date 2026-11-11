@@ -1,10 +1,15 @@
 <script lang="ts">
 import type { AppRecord } from "@neta-art/cohub";
+import { Settings2 } from "lucide-svelte";
 import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
 import { boardAppCover } from "$lib/board/board-app";
 import AppIcon from "$lib/components/app/AppIcon.svelte";
+import { getLocale } from "$lib/i18n/locale.svelte";
+import { m } from "$lib/paraglide/messages.js";
 import { buildSpaceAppRoute } from "$lib/space-routes";
+import type { WorkspaceAppLaunch } from "../modules/workspace-app-open";
 import SidePanelRow from "./SidePanelRow.svelte";
+import SidePanelRowAction from "./SidePanelRowAction.svelte";
 
 type Props = {
 	spaceId: string;
@@ -12,7 +17,8 @@ type Props = {
 	active?: boolean;
 	draggable?: boolean;
 	touchDraggable?: boolean;
-	onOpen: () => void;
+	onOpen: (app: WorkspaceAppLaunch) => void;
+	onManage: () => void;
 };
 
 const {
@@ -22,8 +28,11 @@ const {
 	draggable = false,
 	touchDraggable = false,
 	onOpen,
+	onManage,
 }: Props = $props();
 
+const locale = $derived(getLocale());
+const published = $derived(app.status === "published");
 const title = $derived(appDisplayTitle(app.meta, app.slug));
 const drag = $derived.by(() => {
 	if (!draggable && !touchDraggable) return null;
@@ -53,8 +62,11 @@ const drag = $derived.by(() => {
 });
 </script>
 
-<SidePanelRow {title} subtitle={app.slug} {active} {drag} {onOpen}>
+<SidePanelRow {title} subtitle={app.slug} {active} dimmed={!published} {drag} onOpen={published ? () => onOpen({ appId: app.id, name: title, meta: app.meta }) : onManage}>
 	{#snippet leading()}
 		<AppIcon meta={app.meta} slug={app.slug} seed={app.id} size="sm" />
+	{/snippet}
+	{#snippet trailing()}
+		<SidePanelRowAction icon={Settings2} label={m.apps_panel_manage({}, { locale })} itemName={title} onclick={onManage} />
 	{/snippet}
 </SidePanelRow>

@@ -2,6 +2,7 @@
 import type { InstalledApp } from "@cohub/protocol";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import type { WorkspaceAppLaunch } from "../modules/workspace-app-open";
 import type { SpaceAppsFeed } from "../resources/space-apps-feed.svelte";
 import AppRow from "./AppRow.svelte";
 import InstalledAppsList from "./InstalledAppsList.svelte";
@@ -16,7 +17,8 @@ type Props = {
 	canWrite: boolean;
 	draggable: boolean;
 	touchDraggable: boolean;
-	onOpenApp: (appId: string) => void;
+	onOpenApp: (app: WorkspaceAppLaunch) => void;
+	onManageApp: (appId: string) => void;
 	onOpenMarketplace: () => void;
 	onOpenInstalled: (app: InstalledApp) => void;
 };
@@ -29,6 +31,7 @@ const {
 	draggable,
 	touchDraggable,
 	onOpenApp,
+	onManageApp,
 	onOpenMarketplace,
 	onOpenInstalled,
 }: Props = $props();
@@ -66,7 +69,7 @@ const apps = $derived(feed?.items ?? []);
 		{:else}
 			<div role="list">
 				{#each apps as app (app.id)}
-					<AppRow {spaceId} {app} active={app.id === activeAppId} {draggable} {touchDraggable} onOpen={() => onOpenApp(app.id)} />
+					<AppRow {spaceId} {app} active={app.id === activeAppId} {draggable} {touchDraggable} onOpen={onOpenApp} onManage={() => onManageApp(app.id)} />
 				{/each}
 			</div>
 		{/if}

@@ -17,6 +17,7 @@ import { m } from "$lib/paraglide/messages.js";
 import type { SpaceFsNode } from "$lib/space-fs";
 import { uiState } from "$lib/stores/ui.svelte";
 import type { LocalUploadEntry } from "$lib/upload-entries";
+import type { WorkspaceAppLaunch } from "../modules/workspace-app-open";
 import AppsPanel from "./AppsPanel.svelte";
 import MediaPanel from "./MediaPanel.svelte";
 import ScheduledPanel from "./ScheduledPanel.svelte";
@@ -35,6 +36,7 @@ type Props = {
 	canViewTasks: boolean;
 	canManageCronjobs: boolean;
 	activeSpaceResource: ResourceAppTarget | null;
+	activeAppWindowId: string | null;
 	nodes: SpaceFsNode[];
 	selectedPath: string;
 	loading: boolean;
@@ -78,8 +80,9 @@ type Props = {
 	onOpenPort: (port: string, url: string, options: { mobile: boolean }) => void;
 	onUploadPaneClose: () => void;
 	onUploadComplete: () => void | Promise<void>;
-	onOpenMarketplace: () => void;
-	onOpenInstalledApp: (app: InstalledApp) => void;
+	onOpenMarketplace: (options: { mobile: boolean }) => void;
+	onOpenInstalledApp: (app: InstalledApp, options: { mobile: boolean }) => void;
+	onOpenApp: (app: WorkspaceAppLaunch, options: { mobile: boolean }) => void;
 	onOpenResource: (
 		target: ResourceAppTarget,
 		options: { mobile: boolean },
@@ -93,6 +96,7 @@ let {
 	canViewTasks,
 	canManageCronjobs,
 	activeSpaceResource,
+	activeAppWindowId,
 	nodes,
 	selectedPath,
 	loading,
@@ -135,6 +139,7 @@ let {
 	onUploadComplete,
 	onOpenMarketplace,
 	onOpenInstalledApp,
+	onOpenApp,
 	onOpenResource,
 }: Props = $props();
 
@@ -180,7 +185,9 @@ function selectTab(tab: SidePanelTab) {
 }
 
 const activeAppId = $derived(
-	activeSpaceResource?.kind === "app" ? activeSpaceResource.id : null,
+	activeSpaceResource?.kind === "app"
+		? activeSpaceResource.id
+		: activeAppWindowId,
 );
 const activeCronjobId = $derived(
 	activeSpaceResource?.kind === "cronjob" ? activeSpaceResource.id : null,
@@ -306,9 +313,10 @@ $effect(() => {
 			{canWrite}
 			draggable={draggable && !mobile}
 			touchDraggable={draggable}
-			onOpenApp={(id) => onOpenResource({ kind: "app", id }, { mobile })}
-			{onOpenMarketplace}
-			onOpenInstalled={onOpenInstalledApp}
+			onOpenApp={(app) => onOpenApp(app, { mobile })}
+			onManageApp={(id) => onOpenResource({ kind: "app", id }, { mobile })}
+			onOpenMarketplace={() => onOpenMarketplace({ mobile })}
+			onOpenInstalled={(app) => onOpenInstalledApp(app, { mobile })}
 		/>
 	{:else if activeTab === "scheduled"}
 		<ScheduledPanel

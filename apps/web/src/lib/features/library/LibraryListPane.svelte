@@ -1,6 +1,14 @@
 <script lang="ts">
 import type { UserAppListItem, UserCronJobListItem } from "@neta-art/cohub";
-import { Check, Clock, Link2, Pause, Play, Trash2 } from "lucide-svelte";
+import {
+	Check,
+	Clock,
+	Link2,
+	PanelRight,
+	Pause,
+	Play,
+	Trash2,
+} from "lucide-svelte";
 import { goto } from "$app/navigation";
 import { appDisplayTitle } from "$lib/app-page-meta";
 import AppIcon from "$lib/components/app/AppIcon.svelte";
@@ -14,6 +22,7 @@ import {
 } from "$lib/components/list-page/list-row";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import SidebarActionButton from "$lib/components/sidebar/SidebarActionButton.svelte";
+import { buildSpaceAppWindowRoute } from "$lib/features/space/modules/window-route";
 import { dispatchCronjobsUpdated } from "$lib/features/space/resources/space-cronjobs-feed.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { scrollListToTop } from "$lib/layout/list-scroll-top";
@@ -116,9 +125,13 @@ function lostAccess(item: Item) {
 	return !isApps && (item as UserCronJobListItem).access === "lost";
 }
 
+function canRun(app: UserAppListItem) {
+	return Boolean(app.spaceId) && app.status === "published";
+}
+
 function hasActions(item: Item) {
-	if (!split) return lostAccess(item);
-	return isApps ? Boolean((item as UserAppListItem).publicUrl) : true;
+	if (isApps) return canRun(item as UserAppListItem);
+	return split || lostAccess(item);
 }
 
 function overlaid(item: Item) {
@@ -196,7 +209,10 @@ function emptyCopy() {
 {#snippet actions(item: Item)}
 	{#if isApps}
 		{@const app = item as UserAppListItem}
-		<SidebarActionButton icon={copiedId === app.id ? Check : Link2} title={m.library_copy_link({}, { locale })} onClick={() => void copyLink(app)} />
+		<SidebarActionButton icon={PanelRight} title={m.resource_app_open({}, { locale })} label={`${m.resource_app_open({}, { locale })} ${appDisplayTitle(app.meta, app.slug)}`} onClick={() => void goto(buildSpaceAppWindowRoute(app.spaceId, app.id))} />
+		{#if split && app.publicUrl}
+			<SidebarActionButton icon={copiedId === app.id ? Check : Link2} title={m.library_copy_link({}, { locale })} onClick={() => void copyLink(app)} />
+		{/if}
 	{:else}
 		{@const job = item as UserCronJobListItem}
 		{@const lost = job.access === "lost"}

@@ -121,6 +121,13 @@ export function withWindowParam(
 	return query ? `${pathname}?${query}` : pathname;
 }
 
+export function buildSpaceAppWindowRoute(spaceId: string, appId: string) {
+	return withWindowParam(buildSpaceRootRoute(spaceId), null, {
+		kind: "app",
+		key: appId,
+	});
+}
+
 /**
  * Preserve the current `?window=` when switching Main routes inside a space.
  * Chat/session navigation should only change the main panel, not collapse Files.

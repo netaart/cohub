@@ -20,6 +20,7 @@ import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import LoadError from "./LoadError.svelte";
 import SidePanelRow from "./SidePanelRow.svelte";
+import SidePanelRowAction from "./SidePanelRowAction.svelte";
 import SidePanelSection from "./SidePanelSection.svelte";
 
 type Props = {
@@ -215,7 +216,7 @@ onMount(() => {
 					{/snippet}
 					{#snippet trailing()}
 						<ToggleSwitch checked={app.enabled} label={app.enabled ? m.apps_panel_disable({}, { locale }) : m.apps_panel_enable({}, { locale })} disabled={!canWrite || Boolean(mutationId)} onchange={(enabled) => setEnabled(app, enabled)} />
-						<button type="button" class="inline-flex h-7 w-7 items-center justify-center rounded-[5px] text-text-placeholder opacity-0 transition-[opacity,color,background-color] hover:bg-bg-hover-strong hover:text-error-soft focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-0 [@media(hover:none)]:opacity-100" title={m.apps_panel_uninstall({}, { locale })} aria-label={`${m.apps_panel_uninstall({}, { locale })} ${app.snapshot.name}`} disabled={!canWrite || Boolean(mutationId)} onclick={() => uninstall(app)}><Trash2 class="h-3.5 w-3.5" /></button>
+						<SidePanelRowAction icon={Trash2} tone="danger" label={m.apps_panel_uninstall({}, { locale })} itemName={app.snapshot.name} disabled={!canWrite || Boolean(mutationId)} onclick={() => uninstall(app)} />
 					{/snippet}
 				</SidePanelRow>
 			{/each}

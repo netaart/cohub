@@ -3246,10 +3246,11 @@ const spaceFileDomainProps = $derived.by<
 	onOpenTask: openTask,
 	activeSpaceResource,
 	onOpenResource: (target) => void openResourceOrFallback(target),
-	onOpenApp: ({ appId, name }) =>
-		windowManager.openApp({
+	onOpenApp: ({ appId, name, meta }) =>
+		void openWorkspaceApp({
 			appId,
 			label: name,
+			meta,
 			openContext: {
 				source: "user",
 				...(activeSessionId ? { sessionId: activeSessionId } : {}),

@@ -38,6 +38,7 @@ import WorkspaceSidePanel from "../side-panel/WorkspaceSidePanel.svelte";
 import type { WorkspaceSidePanelController } from "../side-panel/workspace-side-panel-controller.svelte";
 import AppWindow from "./AppWindow.svelte";
 import type { InlineAppPreview } from "./app-window-controller.svelte";
+import { parseAppWindowKey } from "./app-window-key";
 import BoardWindow from "./BoardWindow.svelte";
 import type { InlineBoardPanelState } from "./board-window-controller.svelte";
 import DisplayWindow from "./DisplayWindow.svelte";
@@ -47,6 +48,7 @@ import InlineFilePanel from "./InlineFilePanel.svelte";
 import PortWindow from "./PortWindow.svelte";
 import type { PreviewChrome } from "./preview-header";
 import { appWindowSyncStatus, type Window } from "./windows";
+import type { WorkspaceAppLaunch } from "./workspace-app-open";
 
 type PublishTarget = {
 	targetType: "file" | "directory" | "port";
@@ -151,7 +153,7 @@ export type SpaceFileDomainProps = {
 	) => void | Promise<void>;
 	resolveWorkspaceAsset: ResolveWorkspaceAsset;
 	onOpenTask: (taskRunId: string) => void | Promise<void>;
-	onOpenApp: (app: { appId: string; name: string }) => void;
+	onOpenApp: (app: WorkspaceAppLaunch) => void;
 	onOpenSession: (sessionId: string) => void | Promise<void>;
 	onRevealPath: (path: string) => void | Promise<void>;
 	onJumpToTurn?: (sequence: number) => void | Promise<void>;
@@ -671,8 +673,15 @@ function previewContentOut(node: Element) {
 	canViewTasks={canViewTasks && !spaceHasMinimalAccess}
 	{canManageCronjobs}
 	{activeSpaceResource}
+	activeAppWindowId={activeWindowKind === "app" && activeInlineAppKey
+		? (parseAppWindowKey(activeInlineAppKey)?.appId ?? null)
+		: null}
 	onOpenResource={(target, options) => {
 		onOpenResource(target);
+		closeMobileDrawerIfNeeded(options.mobile);
+	}}
+	onOpenApp={(app, options) => {
+		onOpenApp(app);
 		closeMobileDrawerIfNeeded(options.mobile);
 	}}
 	nodes={spaceHasMinimalAccess ? [] : fileTree}
@@ -744,8 +753,14 @@ function previewContentOut(node: Element) {
 	}}
 	onUploadPaneClose={() => onSetUploadPaneVisible(false)}
 	onUploadComplete={onUploadComplete}
-	onOpenMarketplace={onOpenMarketplace}
-	onOpenInstalledApp={onOpenInstalledApp}
+	onOpenMarketplace={(options) => {
+		onOpenMarketplace();
+		closeMobileDrawerIfNeeded(options.mobile);
+	}}
+	onOpenInstalledApp={(app, options) => {
+		onOpenInstalledApp(app);
+		closeMobileDrawerIfNeeded(options.mobile);
+	}}
 />
 
 <AppPublishDialog

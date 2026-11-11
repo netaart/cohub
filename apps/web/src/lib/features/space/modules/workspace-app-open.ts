@@ -9,6 +9,12 @@ import {
 export const OVERLAY_LIMIT_MESSAGE =
 	"Too many overlay surfaces are already open.";
 
+export type WorkspaceAppLaunch = {
+	appId: string;
+	name: string;
+	meta?: AppMeta | null;
+};
+
 export type PublishedAppOpenInput = {
 	appId: string;
 	label?: string;

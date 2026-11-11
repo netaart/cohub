@@ -2821,6 +2821,7 @@
 	"apps_panel_update_failed": "Couldn't update installed Apps. Refresh and try again.",
 	"apps_panel_enable": "Enable",
 	"apps_panel_disable": "Disable",
+	"apps_panel_manage": "Manage",
 	"apps_panel_uninstall": "Uninstall",
 	"apps_panel_uninstall_confirm": "Uninstall {name}?",
 	"scheduled_panel_empty": "No scheduled prompts yet.",

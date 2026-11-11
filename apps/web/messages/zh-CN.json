@@ -2701,6 +2701,7 @@
 	"apps_panel_update_failed": "更新已安装应用失败，请刷新后重试。",
 	"apps_panel_enable": "启用",
 	"apps_panel_disable": "停用",
+	"apps_panel_manage": "管理",
 	"apps_panel_uninstall": "卸载",
 	"apps_panel_uninstall_confirm": "卸载 {name}？",
 	"scheduled_panel_empty": "还没有定时提示。",
