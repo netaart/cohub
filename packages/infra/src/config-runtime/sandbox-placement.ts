@@ -6,6 +6,9 @@ const CONFIG_PATH = join("platform", ".cohub", "sandbox", "placements.yaml");
 const SCHEMA = "cohub.sandbox.placement.v1";
 const POOL_NAME_PATTERN = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/;
 const TOLERATION_EFFECTS = new Set(["NoSchedule", "PreferNoSchedule", "NoExecute"]);
+// Kubernetes label syntax: Pod creation rejects anything else, which would strand provisioning on a "valid" config.
+const LABEL_NAME_PATTERN = /^[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$/;
+const DNS_SUBDOMAIN_PATTERN = /^(?=.{1,253}$)[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 
 export type SandboxResources = {
   limits: { cpu: string; memory: string };
@@ -48,23 +51,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+function isLabelKey(key: string) {
+  const slash = key.lastIndexOf("/");
+  const name = slash >= 0 ? key.slice(slash + 1) : key;
+  return LABEL_NAME_PATTERN.test(name) && (slash < 0 || DNS_SUBDOMAIN_PATTERN.test(key.slice(0, slash)));
+}
+
+function labelKey(pool: string, value: unknown) {
+  if (typeof value !== "string" || !isLabelKey(value)) {
+    throw new Error(`Sandbox placement pool ${pool} has an invalid label key: ${String(value)}`);
+  }
+  return value;
+}
+
+function labelValue(pool: string, value: unknown) {
+  if (typeof value !== "string" || !LABEL_NAME_PATTERN.test(value)) {
+    throw new Error(`Sandbox placement pool ${pool} has an invalid label value: ${String(value)}`);
+  }
+  return value;
+}
+
 function parseNodeSelector(pool: string, value: unknown) {
-  if (!isRecord(value)) throw new Error(`Sandbox placement pool ${pool} nodeSelector must be an object`);
-  const entries = Object.entries(value).map(([key, selectorValue]) => {
-    if (!key.trim() || typeof selectorValue !== "string" || !selectorValue.trim()) {
-      throw new Error(`Sandbox placement pool ${pool} nodeSelector entries must be non-empty strings`);
-    }
-    return [key.trim(), selectorValue.trim()] as const;
-  });
-  return Object.fromEntries(entries);
+  if (!isRecord(value) || Object.keys(value).length === 0) {
+    throw new Error(`Sandbox placement pool ${pool} nodeSelector must be a non-empty object`);
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, selectorValue]) => [labelKey(pool, key), labelValue(pool, selectorValue)]));
 }
 
 function parseTolerations(pool: string, value: unknown): SandboxPlacementToleration[] {
   if (!Array.isArray(value)) throw new Error(`Sandbox placement pool ${pool} tolerations must be a list`);
   return value.map((item) => {
-    if (!isRecord(item) || typeof item.key !== "string" || !item.key.trim()) {
-      throw new Error(`Sandbox placement pool ${pool} tolerations need a key`);
-    }
+    if (!isRecord(item)) throw new Error(`Sandbox placement pool ${pool} tolerations must be objects`);
+    const key = labelKey(pool, item.key);
     const effect = item.effect ?? "NoSchedule";
     if (typeof effect !== "string" || !TOLERATION_EFFECTS.has(effect)) {
       throw new Error(`Sandbox placement pool ${pool} toleration effect is invalid: ${String(effect)}`);
@@ -73,13 +91,13 @@ function parseTolerations(pool: string, value: unknown): SandboxPlacementTolerat
     if (operator !== "Equal" && operator !== "Exists") {
       throw new Error(`Sandbox placement pool ${pool} toleration operator must be Equal or Exists`);
     }
-    if (operator === "Equal" && (typeof item.value !== "string" || !item.value.trim())) {
-      throw new Error(`Sandbox placement pool ${pool} Equal toleration needs a value`);
+    if (operator === "Exists" && item.value !== undefined) {
+      throw new Error(`Sandbox placement pool ${pool} Exists toleration must not set a value`);
     }
     return {
-      key: item.key.trim(),
+      key,
       operator,
-      ...(operator === "Equal" ? { value: (item.value as string).trim() } : {}),
+      ...(operator === "Equal" ? { value: labelValue(pool, item.value) } : {}),
       effect: effect as SandboxPlacementToleration["effect"],
     };
   });
@@ -153,13 +171,13 @@ function formatCpu(millis: number) {
 }
 
 function formatMemory(bytes: number) {
-  for (const unit of ["Ti", "Gi", "Mi"] as const) {
+  for (const unit of ["Ti", "Gi"] as const) {
     if (bytes % MEMORY_UNITS[unit] === 0) return `${bytes / MEMORY_UNITS[unit]}${unit}`;
   }
-  return String(bytes);
+  return `${bytes / MEMORY_UNITS.Mi}Mi`;
 }
 
-export function scaleSandboxRequests(limits: SandboxResources["limits"], ratio: number): SandboxResources["requests"] {
+function scaleSandboxRequests(limits: SandboxResources["limits"], ratio: number): SandboxResources["requests"] {
   const mebibyte = MEMORY_UNITS.Mi;
   return {
     cpu: formatCpu(Math.max(1, Math.floor(parseCpuMillis(limits.cpu) * ratio))),

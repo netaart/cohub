@@ -8,8 +8,6 @@ import { db } from "./db/index.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
 
-export type { SandboxPlacement };
-
 export async function getSpaceSandboxPlacement(spaceId: string, specId: SandboxSpecId): Promise<SandboxPlacement> {
   const spec = SANDBOX_SPECS[specId] ?? SANDBOX_SPECS[DEFAULT_SANDBOX_SPEC_ID];
   const [space] = await db.select({ owner: spaces.userUuid }).from(spaces).where(eq(spaces.id, spaceId)).limit(1);

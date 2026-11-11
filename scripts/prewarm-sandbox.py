@@ -136,23 +136,22 @@ def default_scheduling(settings):
 
 def scheduling_targets(settings, pools):
     selector, tolerations = default_scheduling(settings)
+    if not selector:
+        raise ValueError(
+            "SANDBOX_NODE_SELECTOR must be configured; refusing cluster-wide prewarming"
+        )
     targets = [{"pool": None, "nodeSelector": selector, "tolerations": tolerations}]
     seen = {json.dumps([selector, tolerations], sort_keys=True)}
     for pool in pools:
         target = {
             "pool": pool["name"],
             "nodeSelector": pool.get("nodeSelector") or selector,
-            "tolerations": pool.get("tolerations") or tolerations,
+            "tolerations": pool["tolerations"] if "tolerations" in pool else tolerations,
         }
         key = json.dumps([target["nodeSelector"], target["tolerations"]], sort_keys=True)
         if key not in seen:
             seen.add(key)
             targets.append(target)
-    for target in targets:
-        if not target["nodeSelector"]:
-            raise ValueError(
-                f"Node selector for pool {target['pool'] or 'default'} must be configured; refusing cluster-wide prewarming"
-            )
     return targets
 
 
