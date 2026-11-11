@@ -40,7 +40,7 @@ export const renderSandboxPodTemplate = (vars: TemplateVars, placement?: Sandbox
   if (podSpec && placement?.nodeSelector) podSpec.nodeSelector = placement.nodeSelector;
   if (podSpec && placement?.tolerations) podSpec.tolerations = placement.tolerations;
   const metadata = pod.metadata as { labels?: Record<string, string> } | undefined;
-  if (metadata?.labels && placement?.pool) metadata.labels["cohub.run/sandbox-pool"] = placement.pool;
+  if (metadata?.labels && placement) metadata.labels["cohub.run/sandbox-pool"] = placement.pool;
   if (podSpec?.containers?.[0]) {
     podSpec.containers[0].resources = resources;
     if (validated.SANDBOX_IMAGE) podSpec.containers[0].image = validated.SANDBOX_IMAGE;

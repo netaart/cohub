@@ -107,11 +107,13 @@ Rollout resolves a target per running cloud space, uses bounded planning concurr
 
 ## Node pool placement
 
-`SANDBOX_NODE_SELECTOR` / `SANDBOX_TOLERATIONS` on the API set where sandboxes run by default. To send selected space owners to another node pool, add `platform/.cohub/sandbox/placements.yaml` under `PLATFORM_CONFIG_ROOT`:
+`SANDBOX_NODE_SELECTOR` / `SANDBOX_TOLERATIONS` on the API set where sandboxes run by default. To tune the default pool or send selected space owners to another node pool, add `platform/.cohub/sandbox/placements.yaml` under `PLATFORM_CONFIG_ROOT`:
 
 ```yaml
 schema: cohub.sandbox.placement.v1
 pools:
+  default:             # every owner not listed under users
+    requestRatio: 0.25
   heavy:
     nodeSelector: { cohub.run/workload: sandbox-heavy }
     tolerations:
@@ -121,8 +123,9 @@ users:
   <space-owner-uuid>: heavy
 ```
 
-- Matching uses the space owner, like spec entitlements. Unlisted owners keep the defaults; a missing file disables placement.
-- A pool's `nodeSelector` / `tolerations` replace the defaults when set; `nodeSelector` must be non-empty, `tolerations: []` clears them. Keys and values must be valid Kubernetes labels. Limits always come from the spec. Pods carry `cohub.run/sandbox-pool=<pool>`.
+- Matching uses the space owner, like spec entitlements. Unlisted owners use the `default` pool; without one, or without the file, they keep the API env and spec requests.
+- A pool's `nodeSelector` / `tolerations`, including the `default` pool's, replace the API env values when set; `nodeSelector` must be non-empty, `tolerations: []` clears them. Keys and values must be valid Kubernetes labels. Limits always come from the spec. Pods carry `cohub.run/sandbox-pool=<pool>`.
+- With a platform config space (`PLATFORM_SPACE_ID` on the worker), edit `.cohub/sandbox/placements.yaml` there; saving a checkpoint publishes it to `/configs/platform`. A workspace edit alone is not published.
 - The file reloads on change. An invalid edit is logged and the last valid config stays in effect.
 - Placement applies when a Pod is created. Running sandboxes move on their next recreate. A spec change that lands in a different pool is marked pending restart instead of resized in place, so the user decides when to restart, as with any spec change that cannot apply in place.
 - The file lists user IDs. Keep the platform config directory non-public, or the list is readable.

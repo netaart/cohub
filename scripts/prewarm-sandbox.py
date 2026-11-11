@@ -79,7 +79,7 @@ const path = join(process.env.PLATFORM_CONFIG_ROOT || "/configs", "platform/.coh
 let text = null;
 try { text = await readFile(path, "utf8"); } catch (error) { if (error.code !== "ENOENT") throw error; }
 const config = text === null ? null : parseSandboxPlacementConfig(text);
-const used = new Set(config ? config.users.values() : []);
+const used = new Set(["default", ...(config ? config.users.values() : [])]);
 console.log(JSON.stringify(config ? [...config.pools.values()].filter((pool) => used.has(pool.name)) : []));
 """
 
@@ -136,18 +136,18 @@ def default_scheduling(settings):
 
 def scheduling_targets(settings, pools):
     selector, tolerations = default_scheduling(settings)
-    if not selector:
-        raise ValueError(
-            "SANDBOX_NODE_SELECTOR must be configured; refusing cluster-wide prewarming"
-        )
-    targets = [{"pool": None, "nodeSelector": selector, "tolerations": tolerations}]
-    seen = {json.dumps([selector, tolerations], sort_keys=True)}
-    for pool in pools:
+    # The default pool always comes first; its unset fields, like any pool's, fall back to the API env.
+    targets, seen = [], set()
+    for pool in {"default": {"name": "default"}, **{pool["name"]: pool for pool in pools}}.values():
         target = {
             "pool": pool["name"],
             "nodeSelector": pool.get("nodeSelector") or selector,
             "tolerations": pool["tolerations"] if "tolerations" in pool else tolerations,
         }
+        if not target["nodeSelector"]:
+            raise ValueError(
+                f"No node selector for pool {pool['name']}: set SANDBOX_NODE_SELECTOR or the pool's nodeSelector; refusing cluster-wide prewarming"
+            )
         key = json.dumps([target["nodeSelector"], target["tolerations"]], sort_keys=True)
         if key not in seen:
             seen.add(key)
@@ -239,21 +239,20 @@ def prewarm(jobs, timeout):
                 namespace = manifest["metadata"]["namespace"]
                 resource = json.loads(kubectl(namespace, "get", "daemonset", name, "-o", "json"))
                 status = resource.get("status", {})
-                label = pool or "default"
                 print(
-                    f"Prewarm {name} ({label}): {status.get('numberReady', 0)}/{status.get('desiredNumberScheduled', 0)} nodes ready",
+                    f"Prewarm {name} ({pool}): {status.get('numberReady', 0)}/{status.get('desiredNumberScheduled', 0)} nodes ready",
                     flush=True,
                 )
                 if is_ready(resource):
                     print(kubectl(namespace, "get", "pods", "-l", f"cohub.run/prewarm={name}", "-o", "wide"), flush=True)
                     del pending[name]
-                elif pool and is_settled_empty(resource):
-                    print(f"Prewarm {name} ({label}): no matching nodes; skipped", flush=True)
+                elif pool != "default" and is_settled_empty(resource):
+                    print(f"Prewarm {name} ({pool}): no matching nodes; skipped", flush=True)
                     del pending[name]
             if pending:
                 time.sleep(5)
         if pending:
-            pools = ", ".join(pool or "default" for pool, _ in pending.values())
+            pools = ", ".join(pool for pool, _ in pending.values())
             raise TimeoutError(
                 f"Prewarming timed out after {timeout}s for {pools} (including zero matching nodes)"
             )

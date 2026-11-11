@@ -4,6 +4,8 @@ import { parse } from "yaml";
 
 const CONFIG_PATH = join("platform", ".cohub", "sandbox", "placements.yaml");
 const SCHEMA = "cohub.sandbox.placement.v1";
+/** Pool for owners not listed under `users`; when it isn't configured they keep the deployment defaults. */
+export const DEFAULT_SANDBOX_POOL = "default";
 const POOL_NAME_PATTERN = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/;
 const TOLERATION_EFFECTS = new Set(["NoSchedule", "PreferNoSchedule", "NoExecute"]);
 // Kubernetes label syntax: Pod creation rejects anything else, which would strand provisioning on a "valid" config.
@@ -36,7 +38,7 @@ export type SandboxPlacementConfig = {
 };
 
 export type SandboxPlacement = {
-  pool: string | null;
+  pool: string;
   resources: SandboxResources;
   nodeSelector?: Record<string, string>;
   tolerations?: SandboxPlacementToleration[];
@@ -190,9 +192,8 @@ export function resolveSandboxPlacement(
   ownerUserId: string,
   specResources: SandboxResources,
 ): SandboxPlacement {
-  const poolName = config.users.get(ownerUserId);
-  const pool = poolName ? config.pools.get(poolName) : undefined;
-  if (!pool) return { pool: null, resources: specResources };
+  const pool = config.pools.get(config.users.get(ownerUserId) ?? DEFAULT_SANDBOX_POOL);
+  if (!pool) return { pool: DEFAULT_SANDBOX_POOL, resources: specResources };
   return {
     pool: pool.name,
     resources: pool.requestRatio === undefined
