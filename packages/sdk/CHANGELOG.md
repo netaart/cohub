@@ -1,5 +1,15 @@
 # @neta-art/cohub
 
+## 13.19.0
+
+### Minor Changes
+
+- e90ad67: Add `sdk.space(id).overview.get()`: all-time App views, likes, and paid revenue (net of refunds), plus finished scheduled-task runs over the last 7 days. `cohub spaces get` now prints these below the Space details.
+
+### Patch Changes
+
+- 323921e: `spaces.getBySlug()`, `apps.getBySlug()`, `apps.listPublicVersions()` and `users.getByUsername()` responses now carry an optional `redirectTo` (typed as `PublicSlugRedirect`) when the request used an old username or Space slug that nobody holds now. The payload is still the resolved resource, so existing callers keep working; `redirectTo` is the canonical public path for hosts that want to update the URL.
+
 ## 13.18.0
 
 ### Minor Changes
