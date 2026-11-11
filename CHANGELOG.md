@@ -4,6 +4,17 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.99 — 2026-11-11
+
+- **Friendly Space URLs**: Spaces are now addressable at `/:username/:spaceSlug` across the web app, links, mentions, SDK, and published Apps; a new slug-history table redirects renamed usernames and Space slugs to the canonical address, usernames are limited to one change per 12 hours, and client-side address resolution serves from the local cache while revalidating in the background.
+- **Space overview**: The chat profile now shows a compact reach line — all-time App count, views, likes, and paid revenue — plus finished and failed schedule runs over 7 days, backed by `GET /api/spaces/:id/overview`, `sdk.space(id).overview.get()`, and an overview row in `cohub spaces get`.
+- **Library swipe navigation**: On mobile, Library pages swipe between filters with adjacent lists preloaded, per-filter scroll memory, and a shared pager-driven tab indicator; the list was extracted into `LibraryListPane` with virtualization intact.
+
+### Bug Fixes
+
+- Board App rooms now distinguish peers by connection instead of account, so opening the same App on another device or tab appears as another visitor and can play against itself.
+- Deleting an animation is no longer blocked by tracks in other Boards that reuse the same target id.
+
 ## v2.98 — 2026-11-11
 
 - **Library**: The Spaces manager becomes a Library where Spaces, Apps, and Scheduled prompts are peer lists. Apps and schedules list account-wide with filters, keyset pagination, next/last run, and Space summaries, open beside the list in their Space workspace, and stream `app.list.changed` / `cronjob.list.changed` events into IndexedDB-first views. SDK `user.listApps` / `user.listCronJobs`, `cohub apps ls --all`, and `cohub cron-jobs ls` cover it from code.
