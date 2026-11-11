@@ -564,7 +564,7 @@ async function preloadState(tx: Tx, boardId: string, settingsData: unknown, patc
 		? await tx
 				.select({ animationId: boardTracks.animationId, id: boardTracks.id, data: boardTracks.data })
 				.from(boardTracks)
-				.where(and(eq(boardTracks.boardId, boardId), sql.join(trackFilters.map((filter) => sql`(${filter})`), sql` OR `)))
+				.where(and(eq(boardTracks.boardId, boardId), or(...trackFilters)))
 		: [];
 	const tracks = new Map<string, Map<string, BoardTrack>>();
 	const refs = new Map<string, Array<{ animation: string; track: string }>>();

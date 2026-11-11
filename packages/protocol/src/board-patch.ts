@@ -535,7 +535,7 @@ export function applyBoardPatch(
 	for (const [id, value] of nextAnimations) {
 		if (value !== null) continue;
 		for (const ref of state.trackRefs(id)) {
-			if (ref.animation === id || track(ref.animation, ref.track) === undefined) continue;
+			if (ref.animation === id || track(ref.animation, ref.track)?.target !== id) continue;
 			if (options.cascade) setTrack(ref.animation, ref.track, null);
 			else diagnostics.push(error(`animations.${id}`, "ANIMATION_REFERENCED", `${id} is nested in ${ref.animation}.${ref.track}; delete the track or use cascade`));
 		}
