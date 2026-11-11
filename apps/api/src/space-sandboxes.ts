@@ -127,7 +127,10 @@ export const resizeSpaceSandboxToSpec = async (input: { spaceId: string; specId:
   const placement = await getSpaceSandboxPlacement(input.spaceId, input.specId);
   const placementPool = asMetaObject(sandbox.meta).placementPool ?? null;
   // nodeSelector is immutable on a running Pod, so a pool change can only land through recreation.
-  if (placementPool !== placement.pool) return { resized: false, pendingRestart: false, placementChanged: true };
+  if (placementPool !== placement.pool) {
+    await markSandboxSpecPendingRestart({ spaceId: input.spaceId, specId: input.specId, reason: "placement_changed" });
+    return { resized: false, pendingRestart: true, message: "restart the sandbox to apply the new spec" };
+  }
   const { resources } = placement;
   const k8sObjectApi = k8sCoreApi as typeof k8sCoreApi & {
     patchNamespacedPodResize?: (input: { name: string; namespace: string; body: unknown }) => Promise<unknown>;

@@ -124,7 +124,7 @@ users:
 - Matching uses the space owner, like spec entitlements. Unlisted owners keep the defaults; a missing file disables placement.
 - A pool's `nodeSelector` / `tolerations` replace the defaults when set; `nodeSelector` must be non-empty, `tolerations: []` clears them. Keys and values must be valid Kubernetes labels. Limits always come from the spec. Pods carry `cohub.run/sandbox-pool=<pool>`.
 - The file reloads on change. An invalid edit is logged and the last valid config stays in effect.
-- Placement applies when a Pod is created. Running sandboxes move on their next recreate. A spec change that lands in a different pool recreates the sandbox right away instead of resizing it in place; the user never sees a restart prompt for it.
+- Placement applies when a Pod is created. Running sandboxes move on their next recreate. A spec change that lands in a different pool is marked pending restart instead of resized in place, so the user decides when to restart, as with any spec change that cannot apply in place.
 - The file lists user IDs. Keep the platform config directory non-public, or the list is readable.
 
 ## Deferred

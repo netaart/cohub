@@ -1958,17 +1958,9 @@ router.patch("/:id/config", async (c) => {
     });
     return { resized: false, pendingRestart: true, message: error instanceof Error ? error.message : String(error) };
   }) : { resized: false, pendingRestart: imageChanged };
-  if ("placementChanged" in specResult) {
-    // The pool is operator config, so move the sandbox now instead of asking the user to restart.
-    void recoverSpaceSandbox({ ...getSpaceProvisionParams(user, updated), reason: "placement_changed", source: "manual", verify: false }).catch(async (error) => {
-      logger.warn("[SandboxSpec] failed to recreate sandbox for a new placement", { spaceId, specId: nextSpec, error });
-      await markSandboxSpecPendingRestart({ spaceId, specId: nextSpec, reason: "placement_recreate_failed" }).catch(() => undefined);
-    });
-  }
 
   await dispatchSpaceListChanged(spaceId);
-  const sandboxResult = "placementChanged" in specResult ? { resized: false, applying: true, pendingRestart: false } : specResult;
-  return c.json({ space: await serializeSpaceForResponse(updated, user), sandbox: sandboxResult });
+  return c.json({ space: await serializeSpaceForResponse(updated, user), sandbox: specResult });
 });
 
 // ── Sandbox ──────────────────────────────────────────────────────────────────
