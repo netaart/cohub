@@ -1,5 +1,11 @@
 # @neta-art/cohub-cli
 
+## 10.28.0
+
+### Minor Changes
+
+- e90ad67: Add `sdk.space(id).overview.get()`: all-time App views, likes, and paid revenue (net of refunds), plus finished scheduled-task runs over the last 7 days. `cohub spaces get` now prints these below the Space details.
+
 ## 10.27.1
 
 ### Patch Changes
