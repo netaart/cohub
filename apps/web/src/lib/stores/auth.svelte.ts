@@ -19,6 +19,7 @@ import {
 	getCachedMeProfile,
 	setCachedMeProfile,
 } from "$lib/stores/me-profile-cache";
+import { renameSpaceOwner } from "$lib/stores/space-address";
 
 type RestoredAuthSession = {
 	isAuthenticated: boolean;
@@ -203,8 +204,11 @@ class AuthStore {
 		avatarUrl?: string | null;
 		username?: string | null;
 	}) {
+		const previousUsername = this.profile?.username;
 		const { profile } = await sdk.user.updateProfile(input);
 		this.profile = profile;
+		if (previousUsername && profile.username)
+			renameSpaceOwner(previousUsername, profile.username);
 		if (this._userUuid) {
 			setCachedMeProfile(this.claims?.sub, {
 				uuid: this._userUuid,

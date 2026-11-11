@@ -6,6 +6,7 @@ import type {
 import { formatCompact, formatCost } from "$lib/activity";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
+import { buildSpaceAppRoute } from "$lib/space-routes";
 
 type AppRanking = SpaceActivityAppRanking & {
 	spaceId?: string;
@@ -84,7 +85,7 @@ const withCost = (value: number, cost: number) =>
 					<li class="grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 text-[12px]">
 						<span class="font-mono text-[10px] text-text-placeholder">{index + 1}</span>
 						<div class="min-w-0">
-							<a class="block truncate text-text-secondary transition-colors hover:text-brand" href={`/spaces/${row.spaceId ?? spaceId}/apps/${row.appId}`} title={row.title}>{row.title}</a>
+							<a class="block truncate text-text-secondary transition-colors hover:text-brand" href={buildSpaceAppRoute(row.spaceId ?? spaceId ?? "", row.appId)} title={row.title}>{row.title}</a>
 							{#if row.spaceName}
 								<div class="truncate text-[10px] text-text-placeholder">{row.spaceName}</div>
 							{/if}

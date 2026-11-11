@@ -1,5 +1,6 @@
 import { toSearchDisplayText } from "@cohub/protocol/search";
 import type { SessionRecord } from "@neta-art/cohub";
+import { buildSpaceSessionRoute } from "$lib/space-routes";
 
 const CHAT_TITLE_LIMIT = 120;
 
@@ -20,6 +21,6 @@ export function chatHref(
 	sessionId: string,
 	sequence?: number,
 ) {
-	const base = `/spaces/${spaceId}/sessions/${sessionId}`;
+	const base = buildSpaceSessionRoute(spaceId, sessionId);
 	return sequence === undefined ? base : `${base}?turn=${sequence}`;
 }

@@ -86,6 +86,31 @@ export const userProfiles = v2.table(
   }),
 );
 
+export type SlugHistoryEntityType = "username" | "space";
+
+/**
+ * Old public slugs. An unclaimed old slug redirects to its latest former holder's current
+ * slug; anyone may claim it again, and the live holder then always wins.
+ */
+export const slugHistory = v2.table(
+  "slug_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    entityType: text("entity_type").$type<SlugHistoryEntityType>().notNull(),
+    entityId: text("entity_id").notNull(),
+    ownerUuid: text("owner_uuid"),
+    oldSlug: varchar("old_slug", { length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    oldSlugIdx: index("v2_idx_slug_history_old_slug").on(table.entityType, table.oldSlug, table.createdAt.desc()),
+    ownerOldSlugIdx: index("v2_idx_slug_history_owner_old_slug")
+      .on(table.entityType, table.ownerUuid, table.oldSlug, table.createdAt.desc()),
+    entityIdx: index("v2_idx_slug_history_entity").on(table.entityType, table.entityId, table.createdAt.desc()),
+    entityTypeCheck: check("v2_chk_slug_history_entity_type", sql`${table.entityType} in ('username', 'space')`),
+  }),
+);
+
 
 export const userChannels = v2.table(
   "user_channels",

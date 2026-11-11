@@ -1,3 +1,4 @@
+import { toSpaceIdPath } from "$lib/stores/space-address";
 import { COMPACT_SHELL_MAX_WIDTH_PX } from "./layout/breakpoints.ts";
 import { isSpaceIdSegment } from "./library-routes.ts";
 
@@ -28,13 +29,15 @@ export function isUserNewSessionPath(pathname: string): boolean {
 
 /** Space root, which renders the new-session draft. */
 export function isSpaceSessionLandingPath(pathname: string): boolean {
-	const match = pathname.match(/^\/spaces\/([^/]+)\/?$/);
+	const match = toSpaceIdPath(pathname).match(/^\/spaces\/([^/]+)\/?$/);
 	return isSpaceIdSegment(match?.[1]);
 }
 
 /** Space-scoped chat detail (not the new landing). */
 export function isSpaceSessionDetailPath(pathname: string): boolean {
-	const match = pathname.match(/^\/spaces\/[^/]+\/sessions\/([^/]+)\/?$/);
+	const match = toSpaceIdPath(pathname).match(
+		/^\/spaces\/[^/]+\/sessions\/([^/]+)\/?$/,
+	);
 	if (!match) return false;
 	return match[1] !== "new";
 }

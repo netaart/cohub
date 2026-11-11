@@ -17,7 +17,7 @@ import { db } from "../../db/index.js";
 import { readBoardCheckpoint } from "@cohub/core/board";
 import { boardErrorBody, boardErrorResponse } from "../../board-error.js";
 import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/postgres-error.js";
-import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels, userProfiles } from "@cohub/db";
+import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels } from "@cohub/db";
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
 import { hostPromptImages } from "../../session-images.js";
 import { readWorkspaceUsage } from "../../workspace-usage.js";
@@ -68,6 +68,7 @@ import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-sourc
 import { asAccountIdentity, hasPermission, getSpaceMemberRole, filterSessionsByPermission, resolvePermissionAccess } from "../../permissions.js";
 import { checkpoints } from "@cohub/db";
 import { LogtoUserRequiredError } from "../../user-profiles.js";
+import { publicSpacePath, recordSpaceSlugChange, redirectTarget, resolvePublicSpace } from "../../slug-history.js";
 import {
   CHECKPOINT_DIFF_CACHE_CONTROL,
   getCheckpointDiffFile,
@@ -1255,25 +1256,18 @@ router.get("/by-slug/:username/:slug", async (c) => {
   const { slug, error: slugError } = normalizeSpaceSlug(rawSlug);
   if (slugError || !slug) return c.json({ message: "space not found" }, 404);
 
-  const [profile] = await db
-    .select({ userUuid: userProfiles.userUuid })
-    .from(userProfiles)
-    .where(eq(userProfiles.username, username))
-    .limit(1);
-  if (!profile) return c.json({ message: "space not found" }, 404);
-
-  const [space] = await db
-    .select()
-    .from(spaces)
-    .where(and(eq(spaces.userUuid, profile.userUuid), eq(spaces.slug, slug)))
-    .limit(1);
-  if (!space) return c.json({ message: "space not found" }, 404);
+  const resolved = await resolvePublicSpace(username, slug);
+  if (!resolved) return c.json({ message: "space not found" }, 404);
+  const { space } = resolved;
+  const redirect = resolved.redirected
+    ? { redirectTo: redirectTarget(c.req.url, publicSpacePath(resolved.owner.username, space.slug)) }
+    : {};
 
   if (await hasPermission(user, "space.view", { spaceId: space.id })) {
-    return c.json(await buildSpaceResponse(c, space, user));
+    return c.json({ ...(await buildSpaceResponse(c, space, user)), ...redirect });
   }
 
-  return c.json(await buildMinimalSpaceResponse(space));
+  return c.json({ ...(await buildMinimalSpaceResponse(space)), ...redirect });
 });
 
 // ── GET /api/me/spaces/by-slug/:slug ───────────────────────────────────────
@@ -1368,11 +1362,19 @@ router.patch("/:id", async (c) => {
   }
 
   try {
-    const [updated] = await db
+    const applyUpdates = (executor: Pick<typeof db, "update">) => executor
       .update(spaces)
       .set({ ...updates, updatedAt: new Date(), lastActivityAt: new Date() })
       .where(eq(spaces.id, spaceId))
       .returning();
+    const [updated] = updates.slug
+      ? await db.transaction(async (tx) => {
+          // Record the slug this update actually replaces, so concurrent renames each leave history.
+          const [locked] = await tx.select({ slug: spaces.slug }).from(spaces).where(eq(spaces.id, spaceId)).for("update");
+          if (locked?.slug && locked.slug !== updates.slug) await recordSpaceSlugChange(tx, space, locked.slug);
+          return await applyUpdates(tx);
+        })
+      : await applyUpdates(db);
 
     const result = updated ?? space;
     await dispatchSpaceListChanged(spaceId);

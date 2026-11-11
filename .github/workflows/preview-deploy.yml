@@ -185,7 +185,16 @@ jobs:
           contains(fromJSON('["labeled", "reopened"]'), github.event.action) ||
           steps.changes.outputs.web == 'true'
         working-directory: apps/web
-        run: pnpm exec wrangler deploy --name ${{ env.WEB_WORKER_NAME }} --routes "${{ env.WEB_HOSTNAME }}/*"
+        # The zone uses wildcard SSL for SaaS, so every route must name its zone; `--routes` cannot.
+        run: |
+          cp wrangler.toml wrangler.preview.toml
+          cat >> wrangler.preview.toml <<EOF
+
+          [[routes]]
+          pattern = "${WEB_HOSTNAME}/*"
+          zone_name = "cohub.live"
+          EOF
+          pnpm exec wrangler deploy -c wrangler.preview.toml --name "$WEB_WORKER_NAME"
 
       - name: Resolve preview URL
         if: >-

@@ -8,7 +8,7 @@ import { parseSessionArchiveFilter } from "@cohub/core/labels";
 import type { SessionArchiveFilter } from "@cohub/protocol/model";
 import { config } from "../config.js";
 import { requireValidId, useAuth, authzDenied } from "../lib/middleware.js";
-import { ensureCurrentUserProfile, resolveCurrentUserEmail, updateCurrentUserProfile, LogtoUserRequiredError, UsernameClearError, UsernameConflictError, UsernameReservedError, validateUsername } from "../user-profiles.js";
+import { ensureCurrentUserProfile, resolveCurrentUserEmail, updateCurrentUserProfile, LogtoUserRequiredError, UsernameChangeTooSoonError, UsernameClearError, UsernameConflictError, UsernameReservedError, validateUsername } from "../user-profiles.js";
 import {
   filterSessionsByPermission,
   getSpaceMemberRole,
@@ -152,6 +152,14 @@ router.patch("/profile", async (c) => {
   } catch (error) {
     if (error instanceof UsernameConflictError) {
       return c.json({ message: error.message }, 409);
+    }
+    if (error instanceof UsernameChangeTooSoonError) {
+      return c.json({
+        code: "username_change_too_soon",
+        field: "username",
+        message: error.message,
+        nextAllowedAt: error.nextAllowedAt.toISOString(),
+      }, 429);
     }
     if (error instanceof UsernameClearError) {
       return c.json({ message: error.message }, 400);

@@ -2,7 +2,7 @@ import type { AppDevice } from "@cohub/protocol/app-devices";
 import type { HttpTransport } from "../transport.js";
 import type { RequestSource } from "@cohub/protocol/provenance";
 import type { AppArtifactDescriptor, AppContentKind, AppDomainListResponse, AppDomainRecord, AppPromotionEventKey, AppVersionSource } from "@cohub/protocol";
-import type { Permission, PublicUserProfile, SpacePublicProfile } from "../types.js";
+import type { Permission, PublicSlugRedirect, PublicUserProfile, SpacePublicProfile } from "../types.js";
 
 export type AppTargetType = "file" | "directory" | "port";
 export type AppStatus = "published" | "disabled";
@@ -190,7 +190,7 @@ export type AppDetailResponse = {
 
 export type AppGetResponse = AppDetailResponse;
 
-export type AppResolveResponse = AppDetailResponse;
+export type AppResolveResponse = AppDetailResponse & PublicSlugRedirect;
 
 export type AppViewSource = "web" | "cli" | "api";
 
@@ -344,7 +344,7 @@ export class AppsApi {
     appSlug: string,
     options?: { signal?: AbortSignal },
   ) {
-    return this.transport.request<{ versions: PublicAppVersionSummary[] }>(
+    return this.transport.request<{ versions: PublicAppVersionSummary[] } & PublicSlugRedirect>(
       `/api/apps/by-slug/${encodeURIComponent(username)}/${encodeURIComponent(spaceSlug)}/${encodeURIComponent(appSlug)}/versions`,
       options?.signal ? { signal: options.signal } : undefined,
     );

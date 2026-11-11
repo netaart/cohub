@@ -1,4 +1,5 @@
 import type { LabelAssignmentListItem, SessionRecord } from "@neta-art/cohub";
+import { buildSpaceFileRoute, buildSpaceSessionRoute } from "$lib/space-routes";
 
 function withResource(
 	item: LabelAssignmentListItem,
@@ -46,7 +47,7 @@ function hydrateSessionItem(
 				null,
 			status: session.status ?? item.resource?.status ?? null,
 		},
-		`/spaces/${session.spaceId}/sessions/${session.id}`,
+		buildSpaceSessionRoute(session.spaceId, session.id),
 	);
 }
 
@@ -60,7 +61,7 @@ function hydrateFileItem(spaceId: string, item: LabelAssignmentListItem) {
 			subtitle: dirname(path),
 			status: null,
 		},
-		`/spaces/${spaceId}/files/${path.replace(/^\/+/, "")}`,
+		buildSpaceFileRoute(spaceId, path.replace(/^\/+/, "")),
 	);
 }
 

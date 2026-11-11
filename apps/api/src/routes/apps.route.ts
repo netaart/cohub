@@ -55,6 +55,7 @@ import { resolveAppVersionSources } from "../app-version-source.js";
 import { requiresSpaceAppAccess } from "../app-access.js";
 import { getLikeCount } from "@cohub/core/labels";
 import { ensureUserProfileByUuid, fallbackPublicUserProfile, type PublicUserProfile } from "../user-profiles.js";
+import { publicAppPath, redirectTarget, resolvePublicSpace } from "../slug-history.js";
 import {
   getAppTotalViews,
   getAppViewStats,
@@ -668,12 +669,15 @@ router.get("/by-origin", async (c) => {
   return c.json(detail);
 });
 
-router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
-  const user = getOptionalAuth(c);
+/**
+ * Resolve a published app by its public slug triple. Current slugs take a single join;
+ * old usernames / Space slugs fall back to slug history and report `redirectTo`.
+ */
+async function resolvePublishedAppBySlug(c: Context) {
   const username = c.req.param("username");
   const spaceSlug = c.req.param("spaceSlug");
   const appSlug = c.req.param("appSlug");
-  if (!username || !SLUG_RE.test(spaceSlug) || !SLUG_RE.test(appSlug)) return c.json({ message: "app not found" }, 404);
+  if (!username || !spaceSlug || !appSlug || !SLUG_RE.test(spaceSlug) || !SLUG_RE.test(appSlug)) return null;
 
   const [row] = await db
     .select({
@@ -686,6 +690,28 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
     .innerJoin(apps, and(eq(apps.spaceId, spaces.id), eq(apps.slug, appSlug), eq(apps.status, "published")))
     .where(eq(userProfiles.username, username))
     .limit(1);
+  if (row) return { ...row, redirectTo: undefined };
+
+  const resolved = await resolvePublicSpace(username, spaceSlug);
+  if (!resolved?.redirected) return null;
+  const [app] = await db
+    .select()
+    .from(apps)
+    .where(and(eq(apps.spaceId, resolved.space.id), eq(apps.slug, appSlug), eq(apps.status, "published")))
+    .limit(1);
+  if (!app) return null;
+  const { owner, space } = resolved;
+  return {
+    owner: { userUuid: owner.userUuid, username: owner.username, displayName: owner.displayName, avatarUrl: owner.avatarUrl },
+    space,
+    app,
+    redirectTo: redirectTarget(c.req.url, publicAppPath(owner.username, space.slug, app.slug)),
+  };
+}
+
+router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
+  const user = getOptionalAuth(c);
+  const row = await resolvePublishedAppBySlug(c);
   if (!row) return c.json({ message: "app not found" }, 404);
   if (!row.owner.username || !row.space.slug) return c.json({ message: "app public identity is incomplete" }, 409);
   if (requiresSpaceAppAccess(row.app) && !(await hasPermission(user, "space.view", { spaceId: row.space.id }))) return authzDenied(c);
@@ -722,26 +748,16 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug", async (c) => {
     version: version ? publicVersionSummary(version, null) : null,
     totalViews,
     likeCount,
+    redirectTo: row.redirectTo,
   });
 });
 
 /** Public version history for the Cohub bar version switcher. */
 router.get("/by-slug/:username/:spaceSlug/:appSlug/versions", async (c) => {
   const user = getOptionalAuth(c);
-  const username = c.req.param("username");
-  const spaceSlug = c.req.param("spaceSlug");
-  const appSlug = c.req.param("appSlug");
-  if (!username || !SLUG_RE.test(spaceSlug) || !SLUG_RE.test(appSlug)) return c.json({ message: "app not found" }, 404);
-
-  const [row] = await db
-    .select({ spaceId: spaces.id, app: apps })
-    .from(userProfiles)
-    .innerJoin(spaces, and(eq(spaces.userUuid, userProfiles.userUuid), eq(spaces.slug, spaceSlug)))
-    .innerJoin(apps, and(eq(apps.spaceId, spaces.id), eq(apps.slug, appSlug), eq(apps.status, "published")))
-    .where(eq(userProfiles.username, username))
-    .limit(1);
+  const row = await resolvePublishedAppBySlug(c);
   if (!row) return c.json({ message: "app not found" }, 404);
-  if (requiresSpaceAppAccess(row.app) && !(await hasPermission(user, "space.view", { spaceId: row.spaceId }))) return authzDenied(c);
+  if (requiresSpaceAppAccess(row.app) && !(await hasPermission(user, "space.view", { spaceId: row.space.id }))) return authzDenied(c);
 
   const versions = await db
     .select({
@@ -754,7 +770,7 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug/versions", async (c) => {
     .from(appVersions)
     .where(eq(appVersions.appId, row.app.id))
     .orderBy(desc(appVersions.version));
-  const sources = await resolveAppVersionSources({ versions, spaceId: row.spaceId, user });
+  const sources = await resolveAppVersionSources({ versions, spaceId: row.space.id, user });
   const hasViewerScopedSource = versions.some((version) => sources.get(version.id)?.session);
 
   c.header(
@@ -765,6 +781,7 @@ router.get("/by-slug/:username/:spaceSlug/:appSlug/versions", async (c) => {
   );
   return c.json({
     versions: versions.map((version) => publicVersionSummary(version, sources.get(version.id) ?? null)),
+    redirectTo: row.redirectTo,
   });
 });
 

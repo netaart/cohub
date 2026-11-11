@@ -11,7 +11,12 @@ import {
 	parseCohubSpaceUrls,
 	replaceCohubSpaceUrls,
 	tokenizeSpaceMentionText,
+	unresolvedCohubSpaceAddresses,
 } from "$lib/mentions/space";
+import {
+	clearSpaceAddresses,
+	rememberSpaceAddress,
+} from "$lib/stores/space-address";
 
 const SPACE_ID = "f7000115-55d8-4d97-a0e4-d2a55b6ffa41";
 const SESSION_ID = "3b1e6a2c-9d4f-4a7b-8c5d-2e1f0a9b8c7d";
@@ -165,4 +170,35 @@ test("space link keys stay stable across domains", () => {
 	assert.ok(live);
 	assert.ok(legacy);
 	assert.equal(getCohubSpaceLinkKey(live), getCohubSpaceLinkKey(legacy));
+});
+
+test("friendly Space links become mentions once their address is confirmed", () => {
+	const url = `https://cohub.live/alice/notes/sessions/${SESSION_ID}`;
+	clearSpaceAddresses();
+	assert.deepEqual(parseCohubSpaceUrls(url), []);
+	assert.deepEqual(unresolvedCohubSpaceAddresses(url), [
+		{ username: "alice", slug: "notes" },
+	]);
+	rememberSpaceAddress({
+		id: SPACE_ID,
+		slug: "notes",
+		ownerProfile: {
+			userUuid: "u",
+			username: "alice",
+			displayName: "A",
+			avatarUrl: null,
+		},
+	});
+	assert.deepEqual(parseCohubSpaceUrls(url), [
+		{ raw: url, spaceId: SPACE_ID, sessionId: SESSION_ID },
+	]);
+	assert.equal(
+		replaceCohubSpaceUrls(`see ${url}`, () => "Notes"),
+		`see ${buildSpaceMentionMarkdown({ spaceId: SPACE_ID, sessionId: SESSION_ID, label: "Notes" })}`,
+	);
+	assert.deepEqual(
+		unresolvedCohubSpaceAddresses("https://cohub.live/docs/cli"),
+		[],
+	);
+	clearSpaceAddresses();
 });

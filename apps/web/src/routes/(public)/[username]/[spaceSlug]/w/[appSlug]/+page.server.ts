@@ -1,6 +1,10 @@
-import { error } from "@sveltejs/kit";
+import { error, redirect } from "@sveltejs/kit";
+import { publicSlugRedirectLocation } from "$lib/public-slug-redirect";
 import { loadPublicAppDetail } from "$lib/server/public-api";
-import { setPublicAppPageCache } from "$lib/server/public-cache";
+import {
+	SLUG_REDIRECT_CACHE_CONTROL,
+	setPublicAppPageCache,
+} from "$lib/server/public-cache";
 import type { PageServerLoad } from "./$types";
 
 /** Read `?cohub_v=` as a version number; ignore anything malformed. */
@@ -29,6 +33,11 @@ export const load: PageServerLoad = async ({
 	});
 
 	if (result.ok) {
+		const location = publicSlugRedirectLocation(result.detail.redirectTo, url);
+		if (location) {
+			setHeaders({ "cache-control": SLUG_REDIRECT_CACHE_CONTROL });
+			redirect(308, location);
+		}
 		// This loader fetches the API anonymously, so the rendered document can only
 		// ever reflect anonymous-visible data — app visibility alone governs caching.
 		setPublicAppPageCache(setHeaders, {

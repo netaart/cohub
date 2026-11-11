@@ -7,7 +7,7 @@ description: Generate or transform images, video, speech, and music with Cohub m
 
 Use `cohub generate` to create or transform images, video, speech, and music.
 
-Prefer simple, explicit commands. Use `--json` when reading output for decisions, extracting URLs, or chaining commands. If a target Space is required, add `-s "$COHUB_SPACE_ID"` or an explicit Space ID.
+Prefer simple, explicit commands. Use `--json` when reading output for decisions, extracting URLs, or chaining commands. Commands target the current Space; for another, pass `-s <id>` or `-s <username>/<slug>`.
 
 ## Installation
 

@@ -1,5 +1,5 @@
 import type {
-	AppDetailResponse,
+	AppResolveResponse,
 	PublicUserPageResponse,
 } from "@neta-art/cohub";
 import { PUBLIC_API_ORIGIN } from "$env/static/public";
@@ -18,13 +18,13 @@ async function readJson(response: Response): Promise<unknown> {
 	return response.json().catch(() => null);
 }
 
-function asAppDetail(value: unknown): AppDetailResponse | null {
+function asAppDetail(value: unknown): AppResolveResponse | null {
 	if (!isRecord(value)) return null;
 	if (!isRecord(value.app) || typeof value.app.id !== "string") return null;
 	if (!isRecord(value.space) || typeof value.space.id !== "string") return null;
 	if (!isRecord(value.owner) || typeof value.owner.userUuid !== "string")
 		return null;
-	return value as AppDetailResponse;
+	return value as AppResolveResponse;
 }
 
 function asPublicUserPage(value: unknown): PublicUserPageResponse | null {
@@ -50,7 +50,7 @@ export async function loadPublicAppDetail(
 	path: PublicAppPath | null,
 	fetcher: typeof fetch,
 	options: { version?: number | null } = {},
-): Promise<{ ok: true; detail: AppDetailResponse } | PublicApiFailure> {
+): Promise<{ ok: true; detail: AppResolveResponse } | PublicApiFailure> {
 	if (!path) return { ok: false, status: 0 };
 	const query = options.version != null ? `?cohub_v=${options.version}` : "";
 	const url = apiUrl(

@@ -19,6 +19,7 @@ import { LiveList } from "$lib/lists/live-list.svelte";
 import { sdk } from "$lib/sdk";
 import { authStore } from "$lib/stores/auth.svelte";
 import { getRecentSpaces, onRecentSpaceVisit } from "$lib/stores/recent-space";
+import { rememberSpaceAddress } from "$lib/stores/space-address";
 import type { ViewerFlags } from "$lib/stores/space-pins.svelte";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 
@@ -63,6 +64,7 @@ class SpacesInbox {
 				query: "",
 				recentSpaces: recentVisits(),
 			});
+			for (const space of page.items) rememberSpaceAddress(space);
 			return {
 				items: page.items,
 				hasMore: page.pageInfo.hasMore,

@@ -6,10 +6,10 @@ import { db } from "../db/index.js";
 import { getSpacePublicProfile, requireValidId, useAuth } from "../lib/middleware.js";
 import { createAppPublicUrl } from "../lib/app-public-url.js";
 import {
-  getProfileByUsername,
   getProfilesByUuids,
   normalizeUsername,
 } from "../user-profiles.js";
+import { redirectTarget, resolveOwnerByUsername } from "../slug-history.js";
 
 const router = new Hono();
 
@@ -17,6 +17,8 @@ const MAX_BATCH_USER_PROFILES = 100;
 const MAX_PUBLIC_USER_SPACES = 50;
 const MAX_PUBLIC_USER_WORKS = 50;
 const PUBLIC_USER_HTTP_CACHE = "public, max-age=60, stale-while-revalidate=300";
+/** An old username can be claimed at any time, so a redirect is never reused. */
+const USER_REDIRECT_HTTP_CACHE = "no-store";
 
 type BatchProfilesBody = {
   userUuids?: unknown;
@@ -68,8 +70,14 @@ router.get("/by-username/:username", async (c) => {
   const username = normalizeUsername(c.req.param("username"));
   if (!username) return c.json({ message: "user not found" }, 404);
 
-  const profile = await getProfileByUsername(username);
-  if (!profile?.username) return c.json({ message: "user not found" }, 404);
+  const owner = await resolveOwnerByUsername(username);
+  if (!owner) return c.json({ message: "user not found" }, 404);
+  const profile = {
+    userUuid: owner.profile.userUuid,
+    username: owner.profile.username,
+    displayName: owner.profile.displayName,
+    avatarUrl: owner.profile.avatarUrl ?? null,
+  };
   const ownerUsername = profile.username;
 
   // Discoverable spaces only: join access policy + limit in SQL.
@@ -174,11 +182,14 @@ router.get("/by-username/:username", async (c) => {
       };
     });
 
-  c.header("Cache-Control", PUBLIC_USER_HTTP_CACHE);
+  c.header("Cache-Control", owner.redirected ? USER_REDIRECT_HTTP_CACHE : PUBLIC_USER_HTTP_CACHE);
   return c.json({
     profile,
     spaces: publicSpaces,
     apps: publicWorks,
+    ...(owner.redirected
+      ? { redirectTo: redirectTarget(c.req.url, `/${encodeURIComponent(ownerUsername)}`) }
+      : {}),
   });
 });
 

@@ -153,6 +153,7 @@ import {
 import { authStore } from "$lib/stores/auth.svelte";
 import { insertComposerSnippet } from "$lib/stores/composer-insert";
 import { sessionStore, startSessionSync } from "$lib/stores/session-store";
+import { toSpaceIdPath } from "$lib/stores/space-address";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 import { mergeCachedTaskRun } from "$lib/stores/task-runs-cache";
 import { uiState } from "$lib/stores/ui.svelte";
@@ -781,9 +782,12 @@ async function openResourceOrFallback(target: ResourceAppTarget) {
 	}[target.kind];
 	const search = new URLSearchParams({ native: "1" });
 	if (target.base) search.set("base", target.base);
-	await goto(`/spaces/${spaceId}/${segment}/${target.id}?${search}`, {
-		replaceState: true,
-	});
+	await goto(
+		`${buildSpaceRootRoute(spaceId)}/${segment}/${target.id}?${search}`,
+		{
+			replaceState: true,
+		},
+	);
 }
 
 async function openWorkspaceNavigation(
@@ -2225,7 +2229,7 @@ beforeNavigate((navigation) => {
 	const toUrl = navigation.to?.url;
 	if (!fromUrl || !toUrl) return;
 	// Query-only changes (preview open/close) keep drafts and App windows.
-	if (fromUrl.pathname === toUrl.pathname) return;
+	if (toSpaceIdPath(fromUrl.pathname) === toSpaceIdPath(toUrl.pathname)) return;
 	const fsSourceChanging =
 		fromUrl.pathname.includes("/checkpoints/") !==
 		toUrl.pathname.includes("/checkpoints/");

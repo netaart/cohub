@@ -21,7 +21,12 @@ import {
 } from "$lib/cache/db";
 import { getCacheUserKey } from "$lib/cache/keys";
 import { getSpacePublicProfile } from "$lib/space-profile";
-import { buildSpaceLandingRoute } from "$lib/space-routes";
+import {
+	buildSpaceCheckpointRoute,
+	buildSpaceFileRoute,
+	buildSpaceLandingRoute,
+	buildSpaceSessionRoute,
+} from "$lib/space-routes";
 import { getCachedSpaceList } from "$lib/stores/space-list-cache";
 import { chatHref, chatTitle } from "./chat-items";
 import { commandItemKey } from "./merge-results";
@@ -67,14 +72,11 @@ function labelHref(input: {
 	labelResourceRef: string;
 }) {
 	if (input.labelResourceType === "session")
-		return `/spaces/${input.spaceId}/sessions/${input.labelResourceRef}`;
+		return buildSpaceSessionRoute(input.spaceId, input.labelResourceRef);
 	if (input.labelResourceType === "checkpoint")
-		return `/spaces/${input.spaceId}/checkpoints/${input.labelResourceRef}`;
+		return buildSpaceCheckpointRoute(input.spaceId, input.labelResourceRef);
 	if (input.labelResourceType === "file")
-		return `/spaces/${input.spaceId}/files/${input.labelResourceRef
-			.split("/")
-			.map(encodeURIComponent)
-			.join("/")}`;
+		return buildSpaceFileRoute(input.spaceId, input.labelResourceRef);
 	return buildSpaceLandingRoute(input.spaceId);
 }
 

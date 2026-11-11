@@ -1,6 +1,7 @@
 import type { SpaceRecord } from "@neta-art/cohub";
 import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
 import { spaceRecordRepo } from "$lib/cache/repositories/space-record-repo";
+import { rememberSpaceAddress } from "$lib/stores/space-address";
 
 async function resolveCacheUserKey() {
 	const userKey = await getCacheUserKeyAsync();
@@ -64,6 +65,7 @@ export async function getCachedSpaceRecord(spaceId: string) {
 }
 
 export async function cacheSpaceRecord(space: SpaceRecord) {
+	rememberSpaceAddress(space);
 	if (!(await resolveCacheUserKey())) return null;
 	const cached = await spaceRecordRepo.getCached(space.id).catch(() => null);
 	if (!cached?.space && !isCacheableSpaceRecord(space)) return null;
@@ -74,6 +76,7 @@ export async function cacheSpaceRecord(space: SpaceRecord) {
 export async function patchCachedSpaceRecord(
 	space: Partial<SpaceRecord> & { id: string },
 ) {
+	rememberSpaceAddress(space);
 	if (!(await resolveCacheUserKey())) return null;
 	const cached = await spaceRecordRepo.getCached(space.id).catch(() => null);
 	if (!cached?.space) return null;

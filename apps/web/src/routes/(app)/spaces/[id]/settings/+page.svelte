@@ -79,7 +79,11 @@ import { m } from "$lib/paraglide/messages.js";
 import { uploadSpaceAvatarImage } from "$lib/public-asset-images";
 import { sdk } from "$lib/sdk";
 import { validateSpaceSlugInput } from "$lib/slug-rules";
-import { buildSpaceLandingRoute } from "$lib/space-routes";
+import {
+	buildSpaceLandingRoute,
+	buildSpaceSettingsRoute,
+	buildSpaceWalletRoute,
+} from "$lib/space-routes";
 import { invalidateCachedSpaceMembers } from "$lib/stores/space-profile-cache";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 
@@ -145,6 +149,7 @@ let editingSpaceSlug = $state(false);
 let spaceSlugDraft = $state("");
 let spaceSlugSaving = $state(false);
 let spaceSlugError = $state("");
+let previousSpacePath = $state("");
 let copiedSpaceId = $state(false);
 let copiedSpaceIdTimer: ReturnType<typeof setTimeout> | null = null;
 let copiedSpaceSlugLink = $state(false);
@@ -303,12 +308,14 @@ async function saveSpaceSlug() {
 		return;
 	}
 	spaceSlugSaving = true;
+	const previousPath = getSpacePublicPath(space);
 	try {
 		const updateResult = await sdk.space(spaceId).update({ slug: nextSlug });
 		space = updateResult.space;
 		cacheSpaceRecordSoon(updateResult.space);
 		editingSpaceSlug = false;
 		spaceSlugDraft = "";
+		previousSpacePath = previousPath;
 	} catch (err) {
 		spaceSlugError =
 			err instanceof Error ? err.message : m.space_failed_slug({}, { locale });
@@ -1077,8 +1084,8 @@ $effect(() => {
 			<HeaderAction label={m.space_back({}, { locale })} icon={ArrowLeft} onclick={goBack} />
 			<h1 class="min-w-0 truncate text-[15px] font-semibold tracking-tight text-text-primary lg:text-[13px]">{m.space_title({}, { locale })}</h1>
 			{#snippet actions()}
-				<HeaderAction label={m.wallet_title({}, { locale })} icon={Wallet} href={`/spaces/${spaceId}/wallet`} showLabel />
-				<HeaderAction label={m.space_section_commerce({}, { locale })} icon={PackagePlus} href={`/spaces/${spaceId}/settings/commerce`} showLabel />
+				<HeaderAction label={m.wallet_title({}, { locale })} icon={Wallet} href={buildSpaceWalletRoute(spaceId)} showLabel />
+				<HeaderAction label={m.space_section_commerce({}, { locale })} icon={PackagePlus} href={`${buildSpaceSettingsRoute(spaceId)}/commerce`} showLabel />
 			{/snippet}
 		</ListHeader>
 		<div class="lg:hidden">
@@ -1191,6 +1198,7 @@ $effect(() => {
 									{/if}
 								</div>
 								{#if spaceSlugError}<p class="mt-1 text-[11px] text-error-soft break-words">{spaceSlugError}</p>{/if}
+								{#if editingSpaceSlug && space?.slug}<p class="mt-1 text-[11px] leading-4 text-text-placeholder">{m.space_slug_change_help({}, { locale })}</p>{:else if previousSpacePath && !editingSpaceSlug}<p class="mt-1 text-[11px] leading-4 text-text-placeholder break-words">{m.space_slug_redirect_notice({ path: previousSpacePath }, { locale })}</p>{/if}
 								{#if getSpacePrettyUrlHint(space) && !editingSpaceSlug}<p class="mt-1 text-[11px] leading-4 text-text-placeholder">{getSpacePrettyUrlHint(space)}</p>{/if}
 							</div>
 						</div>

@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, sql, type SQL } from "drizzle-orm";
 import type { AuthUser } from "./lib/middleware.js";
 import { db } from "./db/index.js";
 import { userProfiles } from "@cohub/db";
@@ -10,6 +10,7 @@ import {
   parseUsername,
   validatePublicIdentifierAssignment,
 } from "@cohub/protocol/public-identifiers";
+import { nextUsernameChangeAt, recordUsernameChange } from "./slug-history.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -27,6 +28,13 @@ export type UserProfile = PublicUserProfile & {
 
 export class UsernameConflictError extends Error {
   override name = "UsernameConflictError";
+}
+
+export class UsernameChangeTooSoonError extends Error {
+  override name = "UsernameChangeTooSoonError";
+  constructor(readonly nextAllowedAt: Date) {
+    super(`username can be changed again after ${nextAllowedAt.toISOString()}`);
+  }
 }
 
 export class UsernameClearError extends Error {
@@ -290,33 +298,45 @@ async function upsertUserProfile(input: {
   userUuid: string;
   logtoUserId: string;
   fields: UserProfileFields;
+  /** Explicit renames honor the rename interval; Logto-driven syncs only record history. */
+  limitUsernameChange?: boolean;
 }) {
   const now = new Date();
   // Logto is the source of truth: persist fields.username as-is (including null).
   // Never rehydrate a local-only username that Logto does not have.
   const fields = input.fields;
+  const set = {
+    logtoUserId: input.logtoUserId,
+    username: fields.username,
+    displayName: fields.displayName,
+    avatarUrl: fields.avatarUrl,
+    source: fields.source,
+    syncedAt: now,
+    updatedAt: now,
+  };
+  const upsert = (executor: Pick<typeof db, "insert">, setWhere?: SQL) => executor
+    .insert(userProfiles)
+    .values({ userUuid: input.userUuid, ...set })
+    .onConflictDoUpdate({ target: userProfiles.userUuid, set, setWhere })
+    .returning();
   try {
-    const [row] = await db.insert(userProfiles).values({
-      userUuid: input.userUuid,
-      logtoUserId: input.logtoUserId,
-      username: fields.username,
-      displayName: fields.displayName,
-      avatarUrl: fields.avatarUrl,
-      source: fields.source,
-      syncedAt: now,
-      updatedAt: now,
-    }).onConflictDoUpdate({
-      target: userProfiles.userUuid,
-      set: {
-        logtoUserId: input.logtoUserId,
-        username: fields.username,
-        displayName: fields.displayName,
-        avatarUrl: fields.avatarUrl,
-        source: fields.source,
-        syncedAt: now,
-        updatedAt: now,
-      },
-    }).returning();
+    // Hot path: a new profile or an unchanged username needs no history, so skip the locked transaction.
+    let [row] = await upsert(db, sql`${userProfiles.username} is null or ${userProfiles.username} = ${fields.username}`);
+    row ??= await db.transaction(async (tx) => {
+      const [current] = await tx
+        .select({ username: userProfiles.username })
+        .from(userProfiles)
+        .where(eq(userProfiles.userUuid, input.userUuid))
+        .for("update")
+        .limit(1);
+      const previousUsername = current?.username ?? null;
+      if (previousUsername && previousUsername !== fields.username) {
+        const nextAllowedAt = input.limitUsernameChange ? await nextUsernameChangeAt(input.userUuid, tx) : null;
+        if (nextAllowedAt) throw new UsernameChangeTooSoonError(nextAllowedAt);
+        await recordUsernameChange(tx, input.userUuid, previousUsername);
+      }
+      return (await upsert(tx))[0];
+    });
 
     if (!row) throw new Error("failed to upsert user profile");
     return toUserProfile(row);
@@ -713,12 +733,16 @@ export async function updateCurrentUserProfile(user: AuthUser, input: { displayN
     throw new UsernameClearError("username cannot be cleared once set");
   }
 
-  if (username) {
+  if (username && username !== trustedStoredProfile?.username) {
     const existing = await db.select({ userUuid: userProfiles.userUuid }).from(userProfiles).where(
       and(eq(userProfiles.username, username), ne(userProfiles.userUuid, user.uuid)),
     ).limit(1);
     if (existing.length > 0) {
       throw new UsernameConflictError("username is already taken");
+    }
+    if (trustedStoredProfile?.username) {
+      const nextAllowedAt = await nextUsernameChangeAt(user.uuid);
+      if (nextAllowedAt) throw new UsernameChangeTooSoonError(nextAllowedAt);
     }
   }
 
@@ -748,12 +772,15 @@ export async function updateCurrentUserProfile(user: AuthUser, input: { displayN
       userUuid: user.uuid,
       logtoUserId,
       fields: updatedFields,
+      limitUsernameChange: username !== undefined,
     });
   } catch (error) {
+    // A concurrent rename may have committed meanwhile; restore Logto to the committed local username.
+    const committedUsername = (await getStoredUserProfile(user.uuid).catch(() => null))?.username;
     await updateLogtoUserProfile(logtoUserId, {
       displayName: previousFields.displayName,
       avatarUrl: previousFields.avatarUrl,
-      username: previousFields.username,
+      username: committedUsername ?? previousFields.username,
     }).catch((rollbackError) => {
       logger.warn("[user-profile] Failed to roll back Logto profile after local update failure:", rollbackError);
     });
@@ -777,13 +804,6 @@ export async function getProfilesByUsernames(usernames: string[]): Promise<Map<s
   return new Map(rows
     .filter((row): row is typeof row & { username: string } => Boolean(row.username))
     .map((row) => [row.username, toPublicUserProfile(row)]));
-}
-
-export async function getProfileByUsername(username: string): Promise<PublicUserProfile | null> {
-  const normalized = normalizeUsername(username);
-  if (!normalized) return null;
-  const [row] = await db.select().from(userProfiles).where(eq(userProfiles.username, normalized)).limit(1);
-  return row ? toPublicUserProfile(row) : null;
 }
 
 export function fallbackPublicUserProfile(userUuid: string): PublicUserProfile {

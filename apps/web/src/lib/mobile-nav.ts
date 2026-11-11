@@ -1,4 +1,5 @@
 import { libraryEntityAt } from "$lib/library-routes";
+import { toSpaceIdPath } from "$lib/stores/space-address";
 
 export type AppArea = "chats" | "spaces" | "account";
 
@@ -57,7 +58,7 @@ export function appAreaHref(area: AppArea): string {
 export function shouldHideMobileTabBar(pathname: string): boolean {
 	return (
 		isSpaceCreatePath(pathname) ||
-		SESSION_DETAIL_PATH.test(pathname) ||
-		SPACE_SURFACE_PATH.test(pathname)
+		SESSION_DETAIL_PATH.test(toSpaceIdPath(pathname)) ||
+		SPACE_SURFACE_PATH.test(toSpaceIdPath(pathname))
 	);
 }
