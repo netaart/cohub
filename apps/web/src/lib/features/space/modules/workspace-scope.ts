@@ -15,7 +15,7 @@ import { resolveWorkspaceSpaceId } from "$lib/workspace-route";
 
 /** What differs between a workspace mounted in its Space and in the Chats inbox. */
 export type WorkspaceScope = {
-	kind: "space" | "chats";
+	kind: "space" | "chats" | "library";
 	sessionRoute: (spaceId: string, sessionId: string) => string;
 	newSessionRoute: (spaceId: string) => string;
 	/** Space shown at `url` by this same instance; null when it would unmount. */

@@ -131,7 +131,6 @@ function emptyBalanceActivityList(input: {
   userId: string;
   tokenType: string;
   status: BillingPluginStatus;
-  page: number;
   limit: number;
 }): BillingBalanceActivityList {
   return {
@@ -139,13 +138,9 @@ function emptyBalanceActivityList(input: {
     billing: input.status,
     tokenType: input.tokenType,
     unit: getCreditUnit(input.tokenType),
-    page: input.page,
     limit: input.limit,
     items: [],
-    pagination: {
-      hasMore: false,
-      nextPage: null,
-    },
+    nextCursor: null,
   };
 }
 
@@ -427,8 +422,7 @@ export function createDisabledBillingOperations(
         userId: input.userId,
         tokenType,
         status,
-        page: input.page ?? 1,
-        limit: input.limit ?? 10,
+        limit: input.limit ?? 50,
       });
     },
 

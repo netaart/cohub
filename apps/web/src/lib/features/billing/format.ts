@@ -23,3 +23,7 @@ export function formatMoney(value: number, locale: Locale): string {
 		maximumFractionDigits: 2,
 	});
 }
+
+export function formatBalance(value: number, locale: Locale): string {
+	return formatCurrency(value, "USD", { locale });
+}

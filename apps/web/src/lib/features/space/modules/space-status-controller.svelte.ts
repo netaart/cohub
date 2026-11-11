@@ -3,14 +3,17 @@ import type {
 	SpaceMember,
 	SpaceRecord,
 	SpaceUsageResponse,
+	SpaceWalletSummary,
 } from "@neta-art/cohub";
 import { HttpError } from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
 import {
 	fetchSpaceMembersWithCache,
 	fetchSpaceUsageWithCache,
+	fetchSpaceWalletWithCache,
 	getCachedSpaceMembers,
 	getCachedSpaceUsage,
+	getCachedSpaceWallet,
 } from "$lib/stores/space-profile-cache";
 import { createRequestDedupe } from "./request-dedupe";
 
@@ -43,6 +46,8 @@ export function createSpaceStatusController(options: {
 	let membersLoadedFor = $state<string | null>(null);
 	let usage = $state<SpaceUsageResponse | null>(null);
 	let usageLoadedFor = $state<string | null>(null);
+	let wallet = $state<SpaceWalletSummary | null>(null);
+	let walletLoadedFor: string | null = null;
 	let sandbox = $state<SpaceSandboxSnapshot | null>(null);
 	let sandboxLoadedFor = $state<string | null>(null);
 	let notice = $state("");
@@ -128,6 +133,22 @@ export function createSpaceStatusController(options: {
 		}
 	}
 
+	async function loadWallet(
+		currentSpaceId = options.getSpaceId(),
+		force = false,
+	) {
+		if (!force && walletLoadedFor === currentSpaceId) return;
+		walletLoadedFor = currentSpaceId;
+		const cached = getCachedSpaceWallet(currentSpaceId);
+		if (cached && options.getSpaceId() === currentSpaceId) wallet ??= cached;
+		try {
+			const result = await fetchSpaceWalletWithCache(currentSpaceId);
+			if (options.getSpaceId() === currentSpaceId) wallet = result;
+		} catch {
+			if (walletLoadedFor === currentSpaceId) walletLoadedFor = null;
+		}
+	}
+
 	async function loadSandbox(currentSpaceId = options.getSpaceId()) {
 		try {
 			const result = await requests.run(`space:${currentSpaceId}:sandbox`, () =>
@@ -190,6 +211,8 @@ export function createSpaceStatusController(options: {
 		membersLoadedFor = null;
 		usage = null;
 		usageLoadedFor = null;
+		wallet = null;
+		walletLoadedFor = null;
 		sandbox = null;
 		sandboxLoadedFor = null;
 		notice = "";
@@ -222,6 +245,9 @@ export function createSpaceStatusController(options: {
 		get usageLoadedFor() {
 			return usageLoadedFor;
 		},
+		get wallet() {
+			return wallet;
+		},
 		get sandbox() {
 			return sandbox;
 		},
@@ -234,6 +260,7 @@ export function createSpaceStatusController(options: {
 		loadSpace,
 		loadMembers,
 		loadUsage,
+		loadWallet,
 		loadSandbox,
 		showNotice,
 		refreshStatus,

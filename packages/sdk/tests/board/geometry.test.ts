@@ -47,7 +47,7 @@ function localToWorld(frame: BoardFrame, lx: number, ly: number) {
 
 test("clampZoom bounds the zoom range", () => {
 	approx(clampZoom(10), 8);
-	approx(clampZoom(0.001), 0.05);
+	approx(clampZoom(0.0001), 0.001);
 	approx(clampZoom(1.5), 1.5);
 	approx(clampZoom(Number.NaN), 1);
 	approx(clampZoom(Number.POSITIVE_INFINITY), 1);

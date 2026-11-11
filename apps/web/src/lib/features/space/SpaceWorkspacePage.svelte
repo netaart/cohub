@@ -1,11 +1,13 @@
 <script lang="ts">
 import {
+	type ResourceAppKind,
 	type ResourceAppTarget,
 	readResourceAppLaunch,
 	readResourceAppTarget,
 	resourceAppLaunch,
 	resourceAppRef,
 	SPACE_INSTALLED_APPS_PATH,
+	SPACE_WALLET_UPDATED_EVENT,
 	writeResourceAppTarget,
 } from "@cohub/protocol";
 import type {
@@ -41,6 +43,7 @@ import {
 	type AccessState,
 	isBlockingAccessState,
 } from "$lib/access/access-state";
+import { canViewSpaceCost } from "$lib/activity";
 import { appDisplayTitle } from "$lib/app-page-meta";
 import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
 import { invalidateFilePreviews } from "$lib/board/board-file-preview-source";
@@ -603,7 +606,7 @@ async function openWorkspaceFile(
 			return;
 		}
 	}
-	if (workspaceFilePreviewKind(path, activeFsReadonly) === "board") {
+	if (workspaceFilePreviewKind(path) === "board") {
 		await openInlineBoard(path);
 		return;
 	}
@@ -750,19 +753,26 @@ async function hydrateAppRoute(ref: WindowRef, hash: string) {
 	);
 }
 
-async function openResourceOrFallback(target: ResourceAppTarget) {
-	const targetSpace = spaceId;
-	const result = await handleAppNavigationOpen({
+function openResourceApp(
+	kind: ResourceAppKind,
+	target: ResourceAppTarget | null = null,
+) {
+	return handleAppNavigationOpen({
 		protocol: "cohub.app.navigation",
 		version: 1,
 		type: "open",
 		requestId: crypto.randomUUID(),
 		target: {
 			kind: "app",
-			ref: resourceAppRef(target),
-			launch: resourceAppLaunch(targetSpace, target),
+			ref: resourceAppRef({ kind }),
+			launch: resourceAppLaunch(spaceId, target),
 		},
 	});
+}
+
+async function openResourceOrFallback(target: ResourceAppTarget) {
+	const targetSpace = spaceId;
+	const result = await openResourceApp(target.kind, target);
 	if (result.handled || targetSpace !== spaceId) return;
 	const segment = {
 		task: "tasks",
@@ -1108,6 +1118,10 @@ const boardPreview = createBoardWindowController({
 	getSpaceId: () => spaceId,
 	getSourceKey: () => activeFsSourceKey,
 	getReadonly: () => activeFsReadonly,
+	getCheckpointId: () =>
+		activeFsSource.kind === "checkpoint" ? activeFsSource.checkpointId : null,
+	checkpointBoardMissing: () =>
+		m.board_checkpoint_missing({}, { locale: getLocale() }),
 	readFile: fileWorkspace.readActiveFsFile,
 	onOpenPanel: () => {
 		if (uiState.filesColumnHidden) uiState.setFilesColumnHidden(false);
@@ -1462,6 +1476,7 @@ const spaceRealtime = createSpaceRealtimeController({
 	onConnectionRecovered: () => {
 		void sessionChat.onConnectionRecovered();
 		sidePanel.refresh();
+		refreshWallet();
 		dispatchAppsChanged({ spaceId });
 		scheduleDanmakuCatchup();
 	},
@@ -1472,6 +1487,7 @@ const spaceRealtime = createSpaceRealtimeController({
 		// Host owns list + active-session tail refresh (single path).
 		sessionChat.onVisibilityChanged(true);
 		scheduleDanmakuCatchup();
+		refreshWallet();
 	},
 	onOnline: () => {
 		fileWorkspace.retryFailedInlineFiles();
@@ -1582,7 +1598,9 @@ $effect(() => {
 });
 $effect(() => {
 	if (!shouldShowNewChatProfile || !space) return;
+	const cronjobs = sidePanel.cronjobs;
 	untrack(() => {
+		cronjobs?.start();
 		if (
 			hasAccessPermission("member.view") &&
 			spaceMembersLoadedFor !== spaceId
@@ -1590,6 +1608,7 @@ $effect(() => {
 			void loadSpaceMembers(spaceId);
 		}
 		if (spaceUsageLoadedFor !== spaceId) void loadSpaceUsage(spaceId);
+		if (canViewSpaceCost(space?.access)) void spaceStatus.loadWallet(spaceId);
 		if (
 			hasAccessPermission("sandbox.view") &&
 			spaceSandboxLoadedFor !== spaceId
@@ -1744,6 +1763,12 @@ function loadSpaceUsage(currentSpaceId = spaceId) {
 }
 function loadSpaceSandbox(currentSpaceId = spaceId) {
 	return spaceStatus.loadSandbox(currentSpaceId);
+}
+
+function refreshWallet() {
+	if (spaceStatus.wallet) void spaceStatus.loadWallet(spaceId, true);
+	else if (shouldShowNewChatProfile && canViewSpaceCost(space?.access))
+		void spaceStatus.loadWallet(spaceId);
 }
 
 function scheduleStatusRefresh() {
@@ -2014,6 +2039,8 @@ async function handleWsEvent(payload: ChannelEnvelope) {
 		// double-apply session/task semantics against the same host state.
 		if (payload.type === "space.ports.changed") {
 			applyPortsChanged(payload);
+		} else if (payload.type === SPACE_WALLET_UPDATED_EVENT) {
+			refreshWallet();
 		} else if (payload.type === "app.version.published") {
 			const published = parseAppVersionPublished(payload);
 			if (published) {
@@ -2355,10 +2382,6 @@ async function openInlineBoard(
 	path: string,
 	options: { syncUrl?: boolean } = {},
 ) {
-	if (activeFsReadonly) {
-		await openInlineFile(path, options);
-		return;
-	}
 	if (filesColumnHidden) previewLayout.setFilesColumnHidden(false);
 	await windowManager.openBoard(path, options);
 }
@@ -3106,11 +3129,7 @@ $effect(() => {
 
 		// 3) URL is authoritative only when this adapter is triggered by route
 		// context. Internal tab changes are intentionally not dependencies here.
-		const target =
-			preview?.kind === "board" && activeFsReadonly
-				? { kind: "file" as const, key: preview.key }
-				: preview;
-		const result = windowManager.applyRoute(target);
+		const result = windowManager.applyRoute(preview);
 		if (!result.ok) {
 			// Wait for trusted port endpoint; effect re-runs when endpoints update.
 			return;
@@ -3137,6 +3156,8 @@ const spaceFileDomainProps = $derived.by<
 	spaceSlug,
 	spaceHasMinimalAccess,
 	activeFsReadonly,
+	activeCheckpointId:
+		activeFsSource.kind === "checkpoint" ? activeFsSource.checkpointId : null,
 	canEditFiles,
 	activeFsSidebarSubtitle,
 	isMobile,
@@ -3529,6 +3550,11 @@ const headerActions = {
             {space}
             members={spaceMembers}
             usage={spaceUsage}
+            wallet={spaceStatus.wallet}
+            apps={sidePanel.apps}
+            cronjobs={sidePanel.cronjobs}
+            onOpenResource={(target) => void openResourceOrFallback(target)}
+            onOpenResourceList={(kind) => void openResourceApp(kind)}
             sandbox={spaceSandbox}
             sandboxLoadedFor={spaceSandboxLoadedFor}
             expanded={newChatProfileExpanded}

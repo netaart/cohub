@@ -432,7 +432,7 @@ export async function applyBoardInTransaction(
 
 	const changed = summarizeBoardDelta(applied.after);
 	if (apply.dryRun) {
-		return { result: { mutationId, status: "validated", replayed: false, version: board.version, changed, diagnostics: [] } };
+		return { result: { mutationId, status: "validated", replayed: false, version: board.version, changed, diagnostics: applied.diagnostics } };
 	}
 
 	const now = new Date();
@@ -464,7 +464,7 @@ export async function applyBoardInTransaction(
 		playbackChanged = true;
 	}
 
-	const result: BoardApplyResult = { mutationId, status: "applied", replayed: false, version, changed, diagnostics: [] };
+	const result: BoardApplyResult = { mutationId, status: "applied", replayed: false, version, changed, diagnostics: applied.diagnostics };
 	await tx.insert(boardTransactions).values({
 		boardId: board.id,
 		txId: mutationId,
@@ -564,7 +564,7 @@ async function preloadState(tx: Tx, boardId: string, settingsData: unknown, patc
 		? await tx
 				.select({ animationId: boardTracks.animationId, id: boardTracks.id, data: boardTracks.data })
 				.from(boardTracks)
-				.where(and(eq(boardTracks.boardId, boardId), sql.join(trackFilters.map((filter) => sql`(${filter})`), sql` OR `)))
+				.where(and(eq(boardTracks.boardId, boardId), or(...trackFilters)))
 		: [];
 	const tracks = new Map<string, Map<string, BoardTrack>>();
 	const refs = new Map<string, Array<{ animation: string; track: string }>>();

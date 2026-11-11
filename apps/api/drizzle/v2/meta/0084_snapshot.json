@@ -1,5 +1,5 @@
 {
-  "id": "62a5cd82-6fa5-4235-a457-afd1bd859278",
+  "id": "49d68454-a93a-49f7-8a44-be7f7f6a7d83",
   "prevId": "f81c9b54-1c08-4f85-a870-bf32f62ca7c0",
   "version": "7",
   "dialect": "postgresql",
@@ -4914,150 +4914,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "v2.slug_history": {
-      "name": "slug_history",
-      "schema": "v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "entity_type": {
-          "name": "entity_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "entity_id": {
-          "name": "entity_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "owner_uuid": {
-          "name": "owner_uuid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "old_slug": {
-          "name": "old_slug",
-          "type": "varchar(80)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "v2_idx_slug_history_old_slug": {
-          "name": "v2_idx_slug_history_old_slug",
-          "columns": [
-            {
-              "expression": "entity_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "old_slug",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "v2_idx_slug_history_owner_old_slug": {
-          "name": "v2_idx_slug_history_owner_old_slug",
-          "columns": [
-            {
-              "expression": "entity_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "owner_uuid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "old_slug",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "v2_idx_slug_history_entity": {
-          "name": "v2_idx_slug_history_entity",
-          "columns": [
-            {
-              "expression": "entity_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "entity_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "v2_chk_slug_history_entity_type": {
-          "name": "v2_chk_slug_history_entity_type",
-          "value": "\"v2\".\"slug_history\".\"entity_type\" in ('username', 'space')"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "v2.space_channels": {
       "name": "space_channels",
       "schema": "v2",
@@ -6885,11 +6741,23 @@
           "method": "btree",
           "with": {}
         },
-        "v2_idx_task_runs_cron_job_id": {
-          "name": "v2_idx_task_runs_cron_job_id",
+        "v2_idx_task_runs_cron_job_created": {
+          "name": "v2_idx_task_runs_cron_job_created",
           "columns": [
             {
               "expression": "cron_job_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

@@ -94,7 +94,7 @@ export function prepareBoardExport(input: BoardDocument, options: BoardExportOpt
   const sampled = sample?.document ?? base;
   const document = options.scripts?.document?.(sampled, options.at?.time ?? 0) ?? sampled;
   const scene = document === sampled ? sample?.scene ?? buildBoardScene(document) : buildBoardScene(document);
-  const camera = options.camera ? resolveBoardAnimationCamera(sample?.evaluation.camera ?? {}, (id) => scene.get(id)?.frame, options.camera, options.at?.time ?? 0) : undefined;
+  const camera = options.camera ? resolveBoardAnimationCamera(sample?.evaluation.camera ?? {}, (id) => scene.get(id)?.frame, options.camera, options.at?.time ?? 0, undefined, sample?.evaluation.cameraViewport) : undefined;
   const region: BoardExportRegion = camera && options.camera ? { kind: "rect", rect: { x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, width: options.camera.width / camera.zoom, height: options.camera.height / camera.zoom } } : options.region ?? { kind: "all" };
   const plan = planBoardExport({
     scene,
@@ -143,7 +143,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     ...(gpu && owners.length ? { shaders: { renderer, owners, layers: options.shaderLayers } } : {}),
   });
 
-  const flattened = renderer.type === RendererType.CANVAS ? flattenBoardEffects(renderer, exportScene.root, plan.scale) : null;
+  const flattened = renderer.type === RendererType.CANVAS ? flattenBoardEffects(renderer, exportScene.root, plan.scale, new Rectangle(0, 0, plan.width, plan.height)) : null;
   try {
     const texture = renderer.textureGenerator.generateTexture({
       target: exportScene.root,

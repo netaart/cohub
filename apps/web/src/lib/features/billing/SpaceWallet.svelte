@@ -1,15 +1,9 @@
 <script lang="ts">
 import { SPACE_WALLET_UPDATED_EVENT } from "@cohub/protocol";
-import type { SpaceWalletActivityPage } from "@neta-art/cohub";
-import {
-	ArrowLeft,
-	Check,
-	ChevronLeft,
-	ChevronRight,
-	Link,
-	RefreshCw,
-} from "lucide-svelte";
+import type { SpaceWalletActivity } from "@neta-art/cohub";
+import { ArrowLeft, Check, Link, Loader2, RefreshCw } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
+import { inScrollView } from "$lib/actions/in-scroll-view";
 import { userProfilesRepo } from "$lib/cache/repositories/user-profiles-repo";
 import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
@@ -21,6 +15,8 @@ import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { buildSpaceRootRoute } from "$lib/space-routes";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
+import { ActivityFeed } from "./activity-feed.svelte";
+import { formatBalance } from "./format";
 import SpaceFundPanel from "./SpaceFundPanel.svelte";
 import { fundLink } from "./space-fund";
 
@@ -32,8 +28,9 @@ const balance = untrack(
 );
 const activity = untrack(
 	() =>
-		new AccountResource(`space-wallet-activity:${spaceId}`, () =>
-			api.activities(),
+		new ActivityFeed<SpaceWalletActivity>(
+			`space-wallet-activity:${spaceId}`,
+			(cursor) => api.activities(cursor),
 		),
 );
 const space = untrack(
@@ -42,15 +39,11 @@ const space = untrack(
 			sdk.space(spaceId).get(),
 		),
 );
-let page = $state(1);
-let laterActivity = $state<SpaceWalletActivityPage | null>(null);
-let paging = $state(false);
-let pagingError = $state(false);
+let nearEnd = $state(false);
 let profilesVersion = $state(0);
 let savingFunding = $state(false);
 let fundingError = $state(false);
 let copied = $state(false);
-const activities = $derived(page === 1 ? activity.data : laterActivity);
 const canEdit = $derived(
 	space.data?.access?.permissions.includes("space.edit") === true,
 );
@@ -76,25 +69,7 @@ function actor(userUuid: string) {
 
 function refresh() {
 	if (!balance.refreshing) void balance.load({ force: true });
-	if (!activity.refreshing) void activity.load({ force: true });
-}
-
-async function changePage(next: number) {
-	if (paging) return;
-	if (next === 1) {
-		page = 1;
-		return;
-	}
-	paging = true;
-	pagingError = false;
-	try {
-		laterActivity = await api.activities(next);
-		page = next;
-	} catch {
-		pagingError = true;
-	} finally {
-		paging = false;
-	}
+	void activity.refresh();
 }
 
 async function setPublicFunding(enabled: boolean) {
@@ -121,7 +96,17 @@ async function copyLink() {
 }
 
 $effect(() => {
-	const ids = (activities?.items ?? []).flatMap((item) =>
+	if (
+		nearEnd &&
+		activity.hasMore &&
+		!activity.loadingMore &&
+		!activity.moreFailed
+	)
+		void activity.loadMore();
+});
+
+$effect(() => {
+	const ids = activity.items.flatMap((item) =>
 		item.actorUserId ? [item.actorUserId] : [],
 	);
 	if (ids.length) void userProfilesRepo.hydrate(ids);
@@ -191,9 +176,9 @@ onMount(() => {
 
     <section aria-labelledby="wallet-activity-heading">
       <h2 id="wallet-activity-heading" class="text-sm font-medium text-text-primary">{m.billing_activity_heading({}, { locale })}</h2>
-      {#if activity.error || pagingError}<p class="mt-3 text-sm text-error" role="alert">{m.billing_activity_load_failed({}, { locale })}</p>{/if}
+      {#if activity.error}<p class="mt-3 text-sm text-error" role="alert">{m.billing_activity_load_failed({}, { locale })}</p>{/if}
       <div class="mt-3 min-h-24 divide-y divide-border-subtle">
-        {#each activities?.items ?? [] as item (item.id)}
+        {#each activity.items as item (item.id)}
           {@const profile = item.actorUserId ? actor(item.actorUserId) : null}
           <div class="flex items-start justify-between gap-4 py-3">
             <div class="min-w-0">
@@ -205,14 +190,14 @@ onMount(() => {
                 {/if}
               </div>
             </div>
-            <span class="shrink-0 font-mono text-sm tabular-nums {item.amountUsd > 0 ? 'text-success-soft' : 'text-text-secondary'}">{money(item.amountUsd, 8)}</span>
+            <span class="shrink-0 font-mono text-sm tabular-nums {item.amountUsd > 0 ? 'text-success-soft' : 'text-text-secondary'}">{formatBalance(item.amountUsd, locale)}</span>
           </div>
         {:else}<p class="py-5 text-sm text-text-tertiary">{activity.loading ? m.common_loading({}, { locale }) : m.billing_no_activity({}, { locale })}</p>{/each}
       </div>
-      {#if page > 1 || activities?.hasMore}
-        <div class="mt-2 flex justify-end gap-2">
-          <button type="button" class="secondary-key flex h-9 w-9 items-center justify-center" disabled={page === 1 || paging} onclick={() => changePage(page - 1)} aria-label={m.billing_prev_page({}, { locale })}><ChevronLeft class="h-4 w-4" /></button>
-          <button type="button" class="secondary-key flex h-9 w-9 items-center justify-center" disabled={!activities?.hasMore || paging} onclick={() => changePage(page + 1)} aria-label={m.billing_next_page({}, { locale })}><ChevronRight class="h-4 w-4" /></button>
+      {#if activity.hasMore || activity.loadingMore}
+        <div use:inScrollView={(visible) => (nearEnd = visible)} class="flex h-12 items-center justify-center text-text-tertiary">
+          {#if activity.loadingMore}<Loader2 class="h-3.5 w-3.5 animate-spin" />
+          {:else if activity.moreFailed}<button type="button" class="text-xs hover:text-text-secondary" onclick={() => activity.loadMore()}>{m.billing_activity_load_failed({}, { locale })} · {m.common_retry({}, { locale })}</button>{/if}
         </div>
       {/if}
     </section>

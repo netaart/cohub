@@ -4,13 +4,14 @@ import { db } from "../db/index.js";
 import { cronJobs, taskRuns } from "@cohub/db";
 import { eq, and, isNull, desc, lt, or } from "drizzle-orm";
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
-import { getOptionalAuth, useAuth, requireValidId, authzDenied, getAppSessionPrincipal } from "../lib/middleware.js";
+import { getOptionalAuth, useAuth, requireValidId, authzDenied, getAppSessionPrincipal, type RequestPrincipal } from "../lib/middleware.js";
 import type { Context } from "hono";
 import { hasPermission } from "../permissions.js";
 import { disableCronJob, enableCronJob, removeCronJob, updateCronJob } from "../tasks.js";
 import { fallbackPublicUserProfile, getProfilesByUuids } from "../user-profiles.js";
 import { sanitizeTaskRunPricingForViewer } from "../task-run-privacy.js";
 import { preserveCronPayloadServerFields } from "./cron-jobs-payload.js";
+import { notifyCronJobListChanged } from "../user-lists.js";
 
 const router = new Hono();
 const { CronExpressionParser } = cronParser;
@@ -77,6 +78,12 @@ async function authorizeCronJobManage(c: Context, user: Exclude<ReturnType<typeo
   return job.userUuid === user.uuid;
 }
 
+// Creators can always stop their own schedules, even after losing Space access.
+function canStopOwnCronJob(c: Context, user: { uuid: string }, job: CronJobAuthSubject) {
+  const principal = c.get("principal") as RequestPrincipal | null | undefined;
+  return principal?.type === "user" && job.userUuid === user.uuid;
+}
+
 async function authorizeTaskRunView(user: ReturnType<typeof getOptionalAuth>, job: CronJobAuthSubject) {
   if (job.spaceId) return hasPermission(user, "taskrun.view", { spaceId: job.spaceId, sessionId: job.sessionId ?? undefined });
   return !!user && job.userUuid === user.uuid;
@@ -129,6 +136,7 @@ router.get("/", async (c) => {
   }
 
   if (!userId) return c.json({ message: "unauthorized" }, 401);
+  if (!(await hasPermission(user, "user.cronjob.list", { spaceId: "" }))) return authzDenied(c);
 
   const jobs = await db
     .select()
@@ -220,9 +228,10 @@ router.delete("/:id", async (c) => {
     .where(and(eq(cronJobs.id, cronJobId), isNull(cronJobs.deletedAt)))
     .limit(1);
   if (!job) return c.json({ message: "not found" }, 404);
-  if (!(await authorizeCronJobManage(c, user, job))) return authzDenied(c);
+  if (!canStopOwnCronJob(c, user, job) && !(await authorizeCronJobManage(c, user, job))) return authzDenied(c);
 
   await removeCronJob(cronJobId);
+  notifyCronJobListChanged(job);
   return c.json({ ok: true });
 });
 
@@ -239,10 +248,11 @@ router.patch("/:id", async (c) => {
     .where(and(eq(cronJobs.id, cronJobId), isNull(cronJobs.deletedAt)))
     .limit(1);
   if (!job) return c.json({ message: "not found" }, 404);
-  if (!(await authorizeCronJobManage(c, user, job))) return authzDenied(c);
 
   const body = await c.req.json<Record<string, unknown>>().catch(() => null);
   if (!body || typeof body !== "object" || Array.isArray(body)) return c.json({ message: "invalid json body" }, 400);
+  const pauseOnly = Object.keys(body).length === 1 && body.enabled === false;
+  if (!(pauseOnly && canStopOwnCronJob(c, user, job)) && !(await authorizeCronJobManage(c, user, job))) return authzDenied(c);
   if ("taskType" in body) return c.json({ message: "taskType cannot be changed" }, 400);
 
   const patch: {
@@ -311,10 +321,12 @@ router.patch("/:id", async (c) => {
         sessionId: job.sessionId,
       });
       const [hydrated] = await hydrateCronJobUserProfiles([enabledJob]);
+      notifyCronJobListChanged(job);
       return c.json({ ok: true, job: hydrated });
     }
     if (!patch.enabled && job.enabled) {
       await disableCronJob(cronJobId);
+      notifyCronJobListChanged(job);
     }
     const [freshJob] = await db.select().from(cronJobs).where(eq(cronJobs.id, cronJobId)).limit(1);
     const [hydrated] = await hydrateCronJobUserProfiles([freshJob ?? { ...job, enabled: patch.enabled }]);
@@ -322,6 +334,7 @@ router.patch("/:id", async (c) => {
   }
 
   const updatedJob = await updateCronJob(job, patch);
+  notifyCronJobListChanged(job);
   const [hydrated] = await hydrateCronJobUserProfiles([updatedJob]);
   return c.json({ ok: true, job: hydrated });
 });

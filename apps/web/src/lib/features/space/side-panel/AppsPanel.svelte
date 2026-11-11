@@ -1,16 +1,11 @@
 <script lang="ts">
 import type { InstalledApp } from "@cohub/protocol";
-import type { AppRecord } from "@neta-art/cohub";
-import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
-import { boardAppCover } from "$lib/board/board-app";
-import AppIcon from "$lib/components/app/AppIcon.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
-import { buildSpaceAppRoute } from "$lib/space-routes";
 import type { SpaceAppsFeed } from "../resources/space-apps-feed.svelte";
+import AppRow from "./AppRow.svelte";
 import InstalledAppsList from "./InstalledAppsList.svelte";
 import LoadError from "./LoadError.svelte";
-import SidePanelRow from "./SidePanelRow.svelte";
 import SidePanelSection from "./SidePanelSection.svelte";
 import { createSectionState } from "./side-panel-sections.svelte";
 
@@ -44,34 +39,6 @@ const sections = createSectionState("cohub:side-panel:apps-sections:v1", [
 	"installed",
 ]);
 const apps = $derived(feed?.items ?? []);
-
-function drag(app: AppRecord) {
-	if (!draggable && !touchDraggable) return null;
-	const title = appDisplayTitle(app.meta, app.slug);
-	const href = buildSpaceAppRoute(spaceId, app.id);
-	const icon = appIconUrl(app.meta);
-	const visual = { ...(icon ? { icon } : {}), ...boardAppCover(app.meta) };
-	return {
-		resource: {
-			type: "app" as const,
-			ref: app.slug,
-			appId: app.id,
-			title,
-			href,
-			...visual,
-		},
-		item: {
-			type: "app" as const,
-			path: "",
-			name: title,
-			appId: app.id,
-			appRef: app.slug,
-			appUrl: href,
-			...visual,
-		},
-		touch: touchDraggable,
-	};
-}
 </script>
 
 <div class="h-full min-h-0 overflow-y-auto px-1.5 pb-3 pt-1" data-pointer-drag-autoscroll>
@@ -99,17 +66,7 @@ function drag(app: AppRecord) {
 		{:else}
 			<div role="list">
 				{#each apps as app (app.id)}
-					<SidePanelRow
-						title={appDisplayTitle(app.meta, app.slug)}
-						subtitle={app.slug}
-						active={app.id === activeAppId}
-						drag={drag(app)}
-						onOpen={() => onOpenApp(app.id)}
-					>
-						{#snippet leading()}
-							<AppIcon meta={app.meta} slug={app.slug} seed={app.id} size="sm" />
-						{/snippet}
-					</SidePanelRow>
+					<AppRow {spaceId} {app} active={app.id === activeAppId} {draggable} {touchDraggable} onOpen={() => onOpenApp(app.id)} />
 				{/each}
 			</div>
 		{/if}

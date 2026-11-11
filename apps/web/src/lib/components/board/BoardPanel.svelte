@@ -92,7 +92,10 @@ import {
 	boardReceivesKeys,
 	registerBoardPanel,
 } from "$lib/board/board-keyboard";
-import { opensInPlace } from "$lib/board/board-media-playback";
+import {
+	boardAnimationReach,
+	opensInPlace,
+} from "$lib/board/board-media-playback";
 import { createBoardModelPreviews } from "$lib/board/board-model";
 import { createBoardModelItemView } from "$lib/board/board-model-view.svelte";
 import {
@@ -198,7 +201,7 @@ const locale = $derived(getLocale());
 let scriptStage = $state.raw<BoardStageController | null>(null);
 let stageView = $state<ReturnType<typeof BoardStage> | null>(null);
 let dock = $state<ReturnType<typeof BoardAnimationDock> | null>(null);
-let soundBlocked = $state(false);
+let sound = $state({ blocked: false, muted: false });
 const senseConsent = createBoardSenseConsent({
 	board: () => boardId ?? path ?? null,
 	viewer: () => authStore.userUuid,
@@ -208,10 +211,11 @@ const senseConsent = createBoardSenseConsent({
 $effect(() => {
 	const media = scriptStage?.media;
 	if (!media) return;
-	soundBlocked = media.blocked;
-	return media.subscribe(() => {
-		soundBlocked = media.blocked;
-	});
+	const read = () => {
+		sound = { blocked: media.blocked, muted: media.muted };
+	};
+	read();
+	return media.subscribe(read);
 });
 
 function dragToTimeline(
@@ -255,9 +259,9 @@ const playing = untrack(() => mode === "play");
 const spaceId = untrack(() => (scope.kind === "space" ? scope.spaceId : null));
 const liveSpaceId = playing ? null : spaceId;
 const resolvedAssetSource = untrack(() =>
-	scope.kind === "app"
-		? scope.assetSource
-		: createSpaceBoardAssetSource(scope.spaceId),
+	scope.kind === "space"
+		? createSpaceBoardAssetSource(scope.spaceId)
+		: scope.assetSource,
 );
 
 const signals = readBoardDeviceSignals();
@@ -683,6 +687,7 @@ function openTask(item: Extract<BoardSceneItem, { type: "task" }>) {
 }
 let replayOpen = $state(false);
 let animationOpen = $state(false);
+let playbackBar = $state<ReturnType<typeof BoardPlaybackBar> | null>(null);
 let localPlayback = $state<BoardPlaybackSnapshot | null>(null);
 const activePlayback = $derived(onPlayback ? playback : localPlayback);
 
@@ -902,7 +907,7 @@ const collaboration = presenceChannel
 	? createBoardPresence({
 			editor,
 			channel: presenceChannel,
-			publish: room || editable ? "all" : "reactions",
+			publish: room || editable ? "all" : "events",
 			formFactor: untrack(() => isMobile) ? "mobile" : "desktop",
 			cursorInterval: playing ? 100 : undefined,
 		})
@@ -963,6 +968,9 @@ const menuActions = $derived.by<BoardMenuAction[]>(() => {
 const hasAnimations = $derived(Object.keys(editor.animations).length > 0);
 const hasFrames = $derived(editor.frames.length > 0);
 const presenting = $derived(editor.frameView?.present ?? false);
+const watching = $derived(
+	animationOpen && !authoring && hasAnimations && !presenting,
+);
 let panel: HTMLDivElement | null = $state(null);
 
 $effect(() => (panel ? registerBoardPanel(panel) : undefined));
@@ -1053,7 +1061,7 @@ function openAt(target: BoardLaunch | null) {
 	const play = target?.play;
 	if (!play || !editor.animations[play.animationId]) return;
 	animationOpen = true;
-	if (onPlayback)
+	if (onPlayback || waitsForSound(play.animationId))
 		editor.setPlayhead({ animationId: play.animationId, time: play.at });
 	else
 		void sendPlayback({
@@ -1062,6 +1070,13 @@ function openAt(target: BoardLaunch | null) {
 			position: play.at,
 			commandId: crypto.randomUUID(),
 		});
+}
+
+function waitsForSound(animationId: string): boolean {
+	return (
+		navigator.userActivation?.hasBeenActive === false &&
+		boardAnimationReach(editor.document, animationId).sound
+	);
 }
 
 let openedLaunch = "";
@@ -1230,8 +1245,10 @@ function handleKeydown(event: KeyboardEvent) {
 		closeInPlace();
 		return;
 	}
-	if (isEditableTarget(event.target)) return;
-	if (scriptKey(event)) return;
+	const inBar = playbackBar?.contains(event.target) ?? false;
+	if (!inBar && isEditableTarget(event.target)) return;
+	if (!inBar && scriptKey(event)) return;
+	if (playbackBar?.key(event)) return;
 	if (
 		authoring &&
 		!presenting &&
@@ -1250,6 +1267,8 @@ function handleKeydown(event: KeyboardEvent) {
 
 function handleKeyup(event: KeyboardEvent) {
 	if (!active) return;
+	if (event.key === " " && playbackBar?.contains(event.target))
+		event.preventDefault();
 	if (receivesKeys() && scriptKey(event)) return;
 	handleBoardKeyUp(editor, event);
 }
@@ -1423,7 +1442,7 @@ onDestroy(() => {
 			</div>
 		{/if}
 		<div class="board-prompts">
-			{#if soundBlocked && !presenting}
+			{#if sound.blocked && !presenting && !watching}
 				<button type="button" class="board-sound" onclick={() => scriptStage?.media.unlock()}>
 					<VolumeX class="h-3.5 w-3.5" />
 					{m.board_sound_enable({}, { locale })}
@@ -1510,7 +1529,6 @@ onDestroy(() => {
 		<BoardFrameNav
 			{editor}
 			{isMobile}
-			onPresent={() => present()}
 			onReact={collaboration ? (reaction, at) => collaboration.react(reaction, at) : undefined}
 		/>
 		{#if !presenting}
@@ -1546,7 +1564,7 @@ onDestroy(() => {
 					/>
 				{/key}
 			{/if}
-			{#if isMobile}
+			{#if isMobile && !watching}
 				<BoardMobileChrome
 					onAddLink={() => openLink()}
 					{editor}
@@ -1601,7 +1619,7 @@ onDestroy(() => {
 					/>
 				</div>
 			{/if}
-			{#if !isMobile}
+			{#if !isMobile && !watching}
 				<BoardZoomMenu
 					{editor} timelineOpen={animationOpen}
 					onToggleTimeline={!authoring && hasAnimations ? toggleAnimation : undefined}
@@ -1609,10 +1627,13 @@ onDestroy(() => {
 					lead={hasPlayKeys ? playKeys : undefined}
 				/>
 			{/if}
-			{#if animationOpen && !authoring && hasAnimations}
+			{#if watching}
 				<BoardPlaybackBar
+					bind:this={playbackBar}
 					{editor}
 					playback={activePlayback}
+					media={scriptStage?.media ?? null}
+					{sound}
 					onPlayback={sendPlayback}
 					onClose={closeAnimation}
 				/>

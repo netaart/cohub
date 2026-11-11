@@ -65,17 +65,3 @@ export function currentReturnPath() {
 
 export const fundLink = (spaceId: string) =>
 	new URL(`/spaces/${spaceId}/fund`, window.location.origin).toString();
-
-export function transferActivityKind(item: {
-	kind: string;
-	sourceId: string | null;
-}): "out" | "returned" | null {
-	if (item.kind === "usage" && item.sourceId?.startsWith("cohub:swt:"))
-		return "out";
-	if (item.kind === "reversal" && item.sourceId?.startsWith("swt:"))
-		return "returned";
-	return null;
-}
-
-export const quotedName = (reason: string | null) =>
-	reason?.match(/"(.+)"$/)?.[1] ?? reason;

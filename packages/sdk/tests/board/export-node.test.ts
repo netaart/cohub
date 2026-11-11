@@ -112,6 +112,40 @@ describe("Node board export", { skip: available ? false : "@napi-rs/canvas is no
     }
   });
 
+  test("glows and blurs draw only what shows and give their native canvases back", async () => {
+    const native = await import("@napi-rs/canvas");
+    const adapter = DOMAdapter.get();
+    const canvases: Array<ReturnType<typeof native.createCanvas>> = [];
+    let largest = 0;
+    const isolated = await createNodeBoardRenderer({ canvasModule: {
+      ...native,
+      createCanvas(width, height) {
+        largest = Math.max(largest, width * height);
+        const canvas = native.createCanvas(width, height);
+        canvases.push(canvas);
+        return canvas;
+      },
+    } });
+    const glow = { color: "pink", opacity: 1, blur: 24, x: 0, y: 0 };
+    const neon = boardDocument({
+      items: {
+        coast: { type: "draw", style: { stroke: "cyan", strokeWidth: 8, shadow: glow }, props: { points: [{ x: 0, y: 0 }, { x: 60_000, y: 40_000 }] } },
+        sign: { type: "text", position: { x: 40, y: 20 }, style: { fill: "pink", shadow: glow }, props: { text: "押" } },
+        haze: { type: "shape", position: { x: 200, y: 150 }, size: { width: 160, height: 100 }, style: { fill: "blue", filter: { blur: 40 } } },
+      },
+    });
+    try {
+      for (let index = 0; index < 3; index++) {
+        assert.ok(exportBoardImageBytes(isolated, neon, { region: { kind: "rect", rect: { x: 0, y: 0, width: 480, height: 270 } }, scale: 1 }));
+      }
+      assert.ok(largest < 1_000_000, `a glowing coastline across the world drew a ${largest}-pixel canvas`);
+      assert.ok(canvases.every((canvas) => canvas.width * canvas.height < 480 * 270), "effect canvases must be released without waiting for GC");
+    } finally {
+      isolated.destroy();
+      DOMAdapter.set(adapter);
+    }
+  });
+
   test("renders a document to PNG bytes", () => {
     const result = exportBoardImageBytes(renderer, document, { scale: 1 });
     assert.ok(result, "expected an export result");

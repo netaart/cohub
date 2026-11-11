@@ -1,9 +1,10 @@
-import type {
-	BoardAwarenessGesture,
-	BoardAwarenessPoint,
-	BoardAwarenessStateUpdate,
-	BoardAwarenessUpdate,
-	BoardReaction,
+import {
+	BOARD_SCRIPT_BROADCASTS_PER_SECOND,
+	type BoardAwarenessGesture,
+	type BoardAwarenessPoint,
+	type BoardAwarenessStateUpdate,
+	type BoardAwarenessUpdate,
+	type BoardReaction,
 } from "@cohub/protocol/realtime";
 import type { BoardEditor, BoardEditorChannel } from "../editor/index.js";
 import { memo } from "../editor/state.js";
@@ -40,6 +41,7 @@ const CURSOR_VISIBLE_MS = 5_000;
 const PEER_TTL_MS = 10_000;
 const ENDED_GESTURE_TTL_MS = 12_000;
 const REACTION_INTERVAL_MS = 150;
+const PRESS_MS = 600;
 const TOUCH_HOLD_MS = 1_500;
 const TOUCH_FADE_MS = 250;
 const LABEL_MS = 2_500;
@@ -68,7 +70,7 @@ export type BoardPresenceGesture =
 	| Exclude<BoardAwarenessGesture, { kind: "draw" }>
 	| { kind: "draw"; id: string; itemId: string; color: string; size: number; from: 0; points: BoardDrawPoint[] };
 
-export type BoardPresenceCursorInput = { x: number; y: number; pointerType: "mouse" | "pen" | "touch" };
+export type BoardPresenceCursorInput = { x: number; y: number; pointerType: "mouse" | "pen" | "touch"; pressed?: boolean };
 
 export type BoardPresencePeer = {
 	readonly connectionId: string;
@@ -115,10 +117,19 @@ export type BoardPresenceStroke = { id: string; points: BoardDrawPoint[]; color:
 
 export type BoardReactionEvent = { reaction: BoardReaction; at: BoardAwarenessPoint; actorId: string | null };
 
+export type BoardPresencePress = { id: number; connectionId: string; actorId: string; x: number; y: number };
+
+export type BoardPresenceBroadcast = {
+	owner: string;
+	event: string;
+	data: unknown;
+	peer: { connectionId: string; actorId: string; actorName: string };
+};
+
 export type BoardPresenceOptions = {
 	editor: BoardEditor;
 	channel: BoardPresenceChannel;
-	publish?: "all" | "reactions" | "none";
+	publish?: "all" | "events" | "none";
 	formFactor?: "desktop" | "mobile";
 	cursorInterval?: number;
 	now?: () => number;
@@ -161,7 +172,11 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 	const peers = new Map<string, Peer>();
 	const listeners = new Set<() => void>();
 	const reactionListeners = new Set<(event: BoardReactionEvent) => void>();
+	const broadcastListeners = new Set<(event: BoardPresenceBroadcast) => void>();
 	let activityLog: BoardAutomationActivity[] = [];
+	let pressLog: Array<{ id: number; connectionId: string; actorId: string; point: BoardAwarenessPoint; at: number }> = [];
+	let pressSeq = 0;
+	let broadcastWindow = { startedAt: Number.NEGATIVE_INFINITY, count: 0 };
 	let version = 0;
 	let destroyed = false;
 
@@ -366,9 +381,18 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 			case "reaction":
 				for (const listener of [...reactionListeners]) listener({ reaction: update.reaction, at: update.at, actorId });
 				break;
+			case "script":
+				if (!visible) break;
+				for (const listener of [...broadcastListeners])
+					listener({ owner: update.owner, event: update.event, data: update.data, peer: { connectionId, actorId, actorName } });
+				break;
 			case "state": {
 				dirty ||= !sameAwarenessState(peer.state, update);
 				const previous = peer.state?.cursor ?? peer.lastCursor;
+				if (update.cursor?.pressed && !peer.state?.cursor?.pressed) {
+					pressLog = [...pressLog.filter((press) => at - press.at < PRESS_MS), { id: ++pressSeq, connectionId, actorId, point: update.cursor, at }];
+					dirty = true;
+				}
 				if (viewportChanged(peer.state?.viewport ?? null, update.viewport ?? null)) peer.viewportMovedAt = at;
 				if (update.cursor) {
 					if (!previous || previous.x !== update.cursor.x || previous.y !== update.cursor.y) peer.cursorMovedAt = at;
@@ -434,6 +458,7 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 			after(activitySettlesAt(activity));
 			after(activityExpiresAt(activity));
 		}
+		for (const press of pressLog) after(press.at + PRESS_MS);
 		return next;
 	}
 
@@ -459,6 +484,7 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 			}
 		}
 		activityLog = activityLog.filter((activity) => activityExpiresAt(activity) > at);
+		pressLog = pressLog.filter((press) => at - press.at < PRESS_MS);
 		changed();
 	}
 
@@ -539,6 +565,20 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 		},
 	);
 
+	const presses = memo(
+		() => [version, editor.camera, editor.visibleRect] as const,
+		(_version, camera, rect): readonly BoardPresencePress[] => {
+			const size = surface(camera, rect);
+			if (!size || !pressLog.length) return [];
+			const { x: cx, y: cy, zoom } = camera;
+			return pressLog.flatMap(({ id, connectionId, actorId, point }) => {
+				const x = point.x * zoom + cx;
+				const y = point.y * zoom + cy;
+				return x < 0 || y < 0 || x > size.width || y > size.height ? [] : [{ id, connectionId, actorId, x, y }];
+			});
+		},
+	);
+
 	const previews = memo(
 		() => [version, editor.scene] as const,
 		(_version, scene): ReadonlyMap<string, BoardItem> => {
@@ -604,6 +644,9 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 		get activities() {
 			return activities();
 		},
+		get presses() {
+			return presses();
+		},
 		subscribe(listener: () => void): () => void {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
@@ -612,8 +655,10 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 		strokes,
 		setCursor(next: BoardPresenceCursorInput | null) {
 			if (destroyed || (next === null && cursor === null)) return;
+			const pressing = Boolean(next?.pressed) !== Boolean(cursor?.pressed);
 			cursor = next;
-			scheduleState(next === null);
+			if (pressing && active) flushState();
+			else scheduleState(next === null);
 		},
 		setActive(next: boolean) {
 			if (active === next) return;
@@ -631,6 +676,19 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 		onReaction(listener: (event: BoardReactionEvent) => void): () => void {
 			reactionListeners.add(listener);
 			return () => reactionListeners.delete(listener);
+		},
+		broadcast(owner: string, event: string, data: unknown): boolean {
+			const time = now();
+			if (destroyed || publish === "none" || !visible) return false;
+			if (time - broadcastWindow.startedAt >= 1_000) broadcastWindow = { startedAt: time, count: 0 };
+			if (broadcastWindow.count >= BOARD_SCRIPT_BROADCASTS_PER_SECOND) return false;
+			broadcastWindow.count += 1;
+			send({ type: "script", owner, event, data: data as Extract<BoardAwarenessUpdate, { type: "script" }>["data"] });
+			return true;
+		},
+		onBroadcast(listener: (event: BoardPresenceBroadcast) => void): () => void {
+			broadcastListeners.add(listener);
+			return () => broadcastListeners.delete(listener);
 		},
 		leadsScripts(): boolean {
 			if (!active || !visible) return false;
@@ -655,10 +713,12 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 			globalThis.window?.removeEventListener("blur", clearCursor);
 			peers.clear();
 			activityLog = [];
+			pressLog = [];
 			version += 1;
 			for (const listener of [...listeners]) listener();
 			listeners.clear();
 			reactionListeners.clear();
+			broadcastListeners.clear();
 			return sendTail.finally(stopChannel);
 		},
 	};

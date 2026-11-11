@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 
 import type {
   BoardApplyResult,
+  BoardCheckpointReadResult,
   BoardCreateInput,
   BoardPatch,
   BoardPlaybackSnapshot,
@@ -79,6 +80,36 @@ export function parseRect(value: string, name = "--rect"): { x: number; y: numbe
 function list(value: string | undefined): string[] | undefined {
   const entries = value?.split(",").map((entry) => entry.trim()).filter(Boolean);
   return entries?.length ? entries : undefined;
+}
+
+/** Filters a saved Board locally; the checkpoint API returns the whole document. */
+function selectCheckpointBoard(
+  saved: BoardCheckpointReadResult,
+  filter: { sections: Set<string> | null; items?: string[]; within?: string; animations?: string[] },
+) {
+  const { board, items, animations, ...rest } = saved;
+  let picked = Object.entries(items);
+  if (filter.items) picked = picked.filter(([id]) => filter.items?.includes(id));
+  if (filter.within) {
+    const inside = new Set([filter.within]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const [id, item] of Object.entries(items)) {
+        if (!inside.has(id) && typeof item.parent === "string" && inside.has(item.parent)) {
+          inside.add(id);
+          grew = true;
+        }
+      }
+    }
+    picked = picked.filter(([id]) => inside.has(id));
+  }
+  const show = (section: string) => !filter.sections || filter.sections.has(section);
+  return {
+    ...rest,
+    ...(show("board") ? { board } : {}),
+    ...(show("items") ? { items: Object.fromEntries(picked) } : {}),
+    ...(show("animations") ? { animations: filter.animations ? Object.fromEntries(Object.entries(animations).filter(([id]) => filter.animations?.includes(id))) : animations } : {}),
+  };
 }
 
 async function boardClient(boards: Command, target: string, spaceId?: string) {
@@ -229,9 +260,9 @@ function registerExportCommand(boards: Command): void {
   withJson(boards.command("export <board>")
     .description("Render a Board to an image, or an animation to a frame sequence")
     .requiredOption("-o, --out <file>", "Output file; the extension picks the format. Sequences need %d, e.g. frames/%04d.png")
-    .option("--at <time>", "A moment, comma-separated moments, or start:end:step")
+    .option("--at <time>", "A moment, comma-separated moments, start:end:step, or start:end with --fps")
     .option("--camera", "Follow the animation camera")
-    .option("--size <widthxheight>", "Camera output in pixels; frames keep their own size", "1600x900")
+    .option("--size <widthxheight>", "Camera output in pixels, the animation's viewport by default; frames keep their own size")
     .option("--animation <id>", "Animation the --at times refer to")
     .option("--frame <item-id>", "Export one frame as a page")
     .option("--items <ids>", "Comma-separated item ids")
@@ -242,7 +273,7 @@ function registerExportCommand(boards: Command): void {
     .option("--paper <mode>", "Output paper: paper or transparent", "paper")
     .option("--format <format>", `Override the format (${BOARD_EXPORT_FORMATS.join(", ")}, ${BOARD_VIDEO_FORMATS.join(", ")})`)
     .option("--quality <q>", "JPEG/WebP quality from 0 to 1", "0.92")
-    .option("--fps <rate>", "Video frame rate; defaults to the --at step")
+    .option("--fps <rate>", "Frames a second for --at start:end; a video plays at it (defaults to the --at step)")
     .option("--image-memory <mib>", "Decoded image memory budget in MiB", String(BOARD_EXPORT_IMAGE_MEMORY_MIB))
     .option("--no-images", "Draw placeholders instead of downloading images")
     .option("--renderer <renderer>", "auto draws in Node and uses local Chrome for shaders; canvas or gpu forces one", "auto")
@@ -256,7 +287,7 @@ Boards without shaders never start it. Set COHUB_BOARD_GPU_DAEMON=0 to start one
 
 Examples:
   cohub boards export plan.board -o plan.png
-  cohub boards export plan.board --animation intro --at 0:20s:40ms -o intro.mp4 --async
+  cohub boards export plan.board --animation intro --at 0:20s --fps 24 -o intro.mp4 --async
   cohub boards export plan.board --frame s2 -o slide-2.png
   cohub boards export plan.board --animation lecture --at 4.5s -o moment.png
   cohub boards export plan.board --animation lecture --at 0:6s:40ms -o frames/%04d.png
@@ -272,11 +303,12 @@ page: its fill and shaders, without its outline and label.`)
       process.once("SIGINT", cancel);
       try {
         const out = options.out as string;
-        const times = options.at ? parseBoardTimes(options.at) : undefined;
-        let camera: { width: number; height: number } | undefined;
+        const rate = options.fps ? parseNumber(options.fps, "--fps", { min: 0.01, max: 240 }) : undefined;
+        const times = options.at ? parseBoardTimes(options.at, "--at", 10_000, rate) : undefined;
+        let camera: { width: number; height: number } | "viewport" | undefined;
         if (options.camera) {
           if (!options.animation || !times) throw new Error("--camera needs --animation and --at.");
-          camera = parseSize(options.size ?? "1600x900");
+          camera = options.size ? parseSize(options.size) : "viewport";
         }
         const progress = (completed: number, total: number) => {
           if (!jsonRequested(options) && (completed === total || completed % 30 === 0)) process.stderr.write(`Rendered ${completed}/${total} frames\n`);
@@ -298,7 +330,7 @@ page: its fill and shaders, without its outline and label.`)
         if (videoFormat) {
           if (!times || times.length < 2) throw new Error("Video export needs an --at range.");
           const step = (times[1] as number) - (times[0] as number);
-          const fps = options.fps ? parseNumber(options.fps, "--fps", { min: 0.01, max: 240 }) : 1000 / step;
+          const fps = rate ?? 1000 / step;
           if (existsSync(out) && !options.force) throw new Error(`${out} already exists; use --force to replace it.`);
           await mkdir(dirname(out), { recursive: true });
           const { runBoardVideoExport } = await import("../board-export.js");
@@ -401,11 +433,15 @@ Steps are {"steps": [...]}, points in board coordinates, run on a virtual clock:
   {"wait": "500ms"}  {"tool": "draw"}  {"tap": [x, y]}  {"drag": [[x, y], ...], "pointerType": "pen"}
   {"pointer": "down", "at": [x, y]}  {"key": "Enter"}  {"select": ["id"]}
   {"input": "browser:devicemotion", "data": {...}}  {"inputs": "takes/flick.json"}
+  {"peers": [{"name": "Ada", "at": [x, y], "pressed": true}]}
+  {"broadcast": "burst", "to": "<script id>", "data": {...}, "from": "Ada"}
 {"tool": "play"} acts like an App visitor: drags move unlocked items, empty space pans,
 script regions take every press, and keys reach scripts that listen for them.
 Every source (motion, gamepad, microphone, camera, location) is on. An input step
 delivers one browser event to the scripts listening, shaped as \`cohub boards schema
 script\` describes; an inputs step replays a recording on the virtual clock.
+A peers step sets the other viewers scripts see in ctx.peers; a broadcast step delivers
+another viewer's ctx.broadcast() to a script. What the scripts broadcast is reported.
 
 Shaders are compiled with a local Chrome, Chromium or Edge when one is found, before
 the steps run; their errors join the scripts' errors and stop the run.
@@ -448,6 +484,7 @@ Examples:
         const changed = Object.keys((result.changes as { items?: object }).items ?? {}).length;
         ok(`Simulated ${formatBoardTime(result.time)}: ${result.commits} commit${result.commits === 1 ? "" : "s"}, ${changed} item${changed === 1 ? "" : "s"} changed (not saved)`);
         for (const press of result.presses) console.log(`  step ${press.step + 1}: ${describePress(press)}`);
+        if (result.broadcasts.length) console.log(`  ${result.broadcasts.length} broadcast${result.broadcasts.length === 1 ? "" : "s"}: ${[...new Set(result.broadcasts.map(({ owner, type }) => `${owner} "${type}"`))].join(", ")}`);
         for (const [id, message] of Object.entries(result.errors)) console.log(`  ! ${id}: ${message.split("\n")[0]}`);
         for (const warning of result.warnings) console.log(`  ! ${warning}`);
         if (result.shaders && !result.shaders.compiled)
@@ -596,16 +633,24 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
     .option("--limit <n>", "Page size for items")
     .option("--cursor <cursor>", "Continue from a previous page's next")
     .option("--since <version>", "Only the changes after this version; the whole Board when they are unavailable")
+    .option("--checkpoint <id>", "The Board as this checkpoint saved it")
     .addHelpText("after", `
   cohub boards get plan.board
   cohub boards get plan.board --within s2
   cohub boards get plan.board --only board
-  cohub boards get plan.board --since 12`)
-    .action(async (target: string, options: { only?: string; items?: string; within?: string; rect?: string; animations?: string; limit?: string; cursor?: string; since?: string }) => {
+  cohub boards get plan.board --since 12
+  cohub boards get plan.board --checkpoint <checkpoint-id>`)
+    .action(async (target: string, options: { only?: string; items?: string; within?: string; rect?: string; animations?: string; limit?: string; cursor?: string; since?: string; checkpoint?: string }) => {
       try {
         const only = list(options.only);
         if (only?.some((section) => section !== "board" && section !== "items" && section !== "animations")) throw new Error("--only takes board, items, animations, or a combination.");
         const sections = only ? new Set(only) : null;
+        if (options.checkpoint) {
+          const unsupported = (["rect", "limit", "cursor", "since"] as const).filter((name) => options[name] !== undefined);
+          if (unsupported.length) throw new Error(`--checkpoint cannot be combined with ${unsupported.map((name) => `--${name}`).join(", ")}.`);
+          const saved = await createClient().space(await resolveSpace(boards)).checkpoints(options.checkpoint).board(target);
+          return outJson(selectCheckpointBoard(saved, { sections, items: list(options.items), within: options.within, animations: list(options.animations) }));
+        }
         const input: BoardReadInput = {
           ...(only ? { only: only.filter((section): section is NonNullable<BoardReadInput["only"]>[number] => section !== "board") as BoardReadInput["only"] } : {}),
           ...(list(options.items) ? { items: list(options.items) } : {}),
@@ -637,7 +682,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
   withJson(boards.command("apply <board> [patch]")
     .description("Merge a patch into the Board: fields merge, null deletes")
     .option("-i, --input <file>", "Patch JSON; - for stdin")
-    .option("--replace", "Make the document equal to the input instead of merging")
+    .option("--replace", "Make the document equal to the input instead of merging; a Board with items needs --base-version")
     .option("--cascade", "Also delete children and tracks of deleted items, and tracks of deleted Board scripts")
     .option("--dry-run", "Validate without writing")
     .option("--base-version <n>", "Fail if the Board moved past this version")
@@ -652,13 +697,20 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
         const spaceId = await resolveSpace(boards);
         const board = await boardClient(boards, target, spaceId);
         const read = await readPatch(inline, options.input, BOARD_TRANSACTION_INPUT_MAX_BYTES);
+        let baseVersion = options.baseVersion === undefined ? undefined : parseNumber(options.baseVersion, "--base-version", { min: 0, integer: true });
+        if (options.replace && !options.dryRun && baseVersion === undefined) {
+          const current = await board.get({ only: ["items"], limit: 1 });
+          if (Object.keys(current.items ?? {}).length)
+            throw new Error(`--replace deletes everything the input leaves out of "${current.title ?? current.id}" (${current.id}, version ${current.version}). Pass --base-version ${current.version} to replace it.`);
+          baseVersion = current.version;
+        }
         const patch = await settleBoardPatch(spaceId, read, async (items) =>
           options.replace ? {} : board.get({ only: ["items"], items }).then((result) => result.items ?? {}, () => null));
         const result = await board.apply(patch, {
           ...(options.replace ? { replace: true } : {}),
           ...(options.cascade ? { cascade: true } : {}),
           ...(options.dryRun ? { dryRun: true } : {}),
-          ...(options.baseVersion === undefined ? {} : { baseVersion: parseNumber(options.baseVersion, "--base-version", { min: 0, integer: true }) }),
+          ...(baseVersion === undefined ? {} : { baseVersion }),
           ...(options.mutationId ? { mutationId: options.mutationId } : {}),
         });
         if (jsonRequested(options)) return outJson(result);

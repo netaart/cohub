@@ -458,7 +458,7 @@ others resolve `false`. Commits coalesce into at most ten writes a second for
 input and one for autonomous work, and wait while the user is mid-gesture or
 editing text. Present every frame, commit when things settle. Other
 clients receive document changes; hover, simulation state and temporary scenes
-stay local. Read-only viewers cannot commit, and `ctx.capabilities.has("board.commit")`
+stay local unless a script broadcasts them. Read-only viewers cannot commit, and `ctx.capabilities.has("board.commit")`
 is false for them.
 
 ### Board Apps
@@ -473,6 +473,44 @@ scripted Board, and `cohub boards simulate` with `{"tool": "play"}`.
 
 `layoutText({ text, fontSize?, fontWeight?, font?, lineHeight?, width? })` resolves
 to the size a native text item would take, for laying out controls.
+
+## Share effects with other viewers
+
+Each viewer runs the scripts on their own screen, so a spark drawn for a click shows
+only where the click happened. `broadcast()` delivers a custom event to the same
+script on every viewer's screen, this one included, so the effect of one viewer's
+input reaches everyone:
+
+```js
+ctx.on("click", ({ point }) => ctx.broadcast("burst", point));
+ctx.on("burst", ({ data, peer }) => spawnSparks(data, peer?.color ?? "#e67845"));
+```
+
+`peer` is `null` on the sender's screen and `{ id, actorId, name, color }` elsewhere;
+`color` is the viewer's cursor color. Broadcasts are effects, not data: up to 1024
+characters of JSON, about ten a second per viewer, dropped past that, while the page
+is hidden, and for viewers who join later. Read-only viewers and App visitors
+broadcast too. Keep anything that should last in the document: a handler of another
+viewer's broadcast cannot `commit()` or `broadcast()` while it runs, because the
+sender already saved what its own handler committed. After an `await` the guard no
+longer knows the cause, so a commit there is unguarded and may save twice: answer
+broadcasts with presentation only. Unlike `emit()`, which reaches other scripts on this screen
+reliably, a broadcast is lossy and resolves without an answer. Exports, simulations
+and tests deliver it only to the sender.
+
+For effects that follow other viewers, such as a lantern around each cursor, listen
+for `peerschange`. `ctx.peers` then lists them with `point` in the owner's
+coordinates (null without a cursor), `pointerType` and `pressed`, updated about 25
+times a second:
+
+```js
+ctx.on("peerschange", ({ data }) => { ctx.state.peers = data; ctx.invalidate(); });
+```
+
+`cohub boards examples sparks --module` combines both. In tests, `board.broadcasts`
+lists what scripts sent, `board.broadcast(owner, type, data, from)` delivers another
+viewer's broadcast, and `board.peers([...])` sets the others; `boards simulate` has
+`peers` and `broadcast` steps.
 
 ## Script the whole Board
 

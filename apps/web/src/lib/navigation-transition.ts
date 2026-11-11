@@ -1,5 +1,6 @@
 import { toSpaceIdPath } from "$lib/stores/space-address";
 import { COMPACT_SHELL_MAX_WIDTH_PX } from "./layout/breakpoints.ts";
+import { isSpaceIdSegment } from "./library-routes.ts";
 
 /**
  * Mobile IM-style navigation transitions (View Transitions API).
@@ -29,7 +30,7 @@ export function isUserNewSessionPath(pathname: string): boolean {
 /** Space root, which renders the new-session draft. */
 export function isSpaceSessionLandingPath(pathname: string): boolean {
 	const match = toSpaceIdPath(pathname).match(/^\/spaces\/([^/]+)\/?$/);
-	return Boolean(match && match[1] !== "new");
+	return isSpaceIdSegment(match?.[1]);
 }
 
 /** Space-scoped chat detail (not the new landing). */

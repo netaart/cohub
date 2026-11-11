@@ -1,17 +1,39 @@
+import type {
+	BillingBalanceActivity,
+	BillingBalanceActivityFilter,
+} from "@neta-art/cohub";
+import { ActivityFeed } from "$lib/features/billing/activity-feed.svelte";
 import { AccountResource } from "$lib/features/settings/account-resource.svelte";
 import { sdk } from "$lib/sdk";
-
-export const BALANCE_ACTIVITY_PAGE_SIZE = 10;
 
 export const billingCredits = new AccountResource("billing-credits", () =>
 	sdk.billing.getCredits(),
 );
 
-export const billingActivity = new AccountResource("billing-activity", () =>
-	sdk.billing
-		.getBalanceActivities({ page: 1, limit: BALANCE_ACTIVITY_PAGE_SIZE })
-		.then(({ activities }) => activities),
-);
+export type BillingActivityFilter = BillingBalanceActivityFilter | "all";
+
+const billingActivityFeeds = new Map<
+	BillingActivityFilter,
+	ActivityFeed<BillingBalanceActivity>
+>();
+
+export function billingActivity(filter: BillingActivityFilter) {
+	let feed = billingActivityFeeds.get(filter);
+	if (!feed) {
+		const name =
+			filter === "all" ? "billing-activity" : `billing-activity:${filter}`;
+		feed = new ActivityFeed(name, (cursor) =>
+			sdk.billing
+				.getBalanceActivities({
+					cursor,
+					filter: filter === "all" ? undefined : filter,
+				})
+				.then(({ activities }) => activities),
+		);
+		billingActivityFeeds.set(filter, feed);
+	}
+	return feed;
+}
 
 export const referrals = new AccountResource("referrals-v2", () =>
 	sdk.referrals.getMine(),

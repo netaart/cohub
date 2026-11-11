@@ -66,7 +66,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			surfaceSize: { width: 0, height: 0 },
 			controlOutset: 0,
 			frameLabelSize: BOARD_FRAME_LABEL_SIZE,
-			cameraPolicy: preferences?.cameraPolicy ?? "follow",
+			cameraPolicy: "follow",
 			frameView: null,
 			tool: options.initialTool ?? "select",
 			toolStyles: preferences?.toolStyles ?? createBoardToolStyles(),
@@ -97,7 +97,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		channels,
 		chosenTool: options.initialTool ?? null,
 		preferencesChanged() {
-			options.onPreferencesChange?.({ toolStyles: state.toolStyles, cameraPolicy: state.cameraPolicy } satisfies BoardEditorPreferences);
+			options.onPreferencesChange?.({ toolStyles: state.toolStyles } satisfies BoardEditorPreferences);
 		},
 	} as EditorContext;
 	ctx.document = createDocumentModule(ctx);
@@ -115,7 +115,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 	const { document, query, camera, frames, selection, creation, deletion, copy, interaction, animation, snapshots, remote } = ctx;
 
 	const transformChannels: readonly BoardEditorChannel[] =
-		options.touchRotation === false ? ["scene", "selection", "hover"] : ["scene", "selection"];
+		options.touchRotation === false ? ["scene", "motion", "selection", "hover"] : ["scene", "motion", "selection"];
 
 	let viewStateQueued = false;
 	function emitViewState() {
@@ -221,7 +221,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			return read(["scene", "selection"], selection.autoplay);
 		},
 		get bounds() {
-			return read(["scene", "selection"], selection.bounds);
+			return read(["scene", "motion", "selection"], selection.bounds);
 		},
 		get selectionTransform() {
 			return read(transformChannels, selection.transform);
@@ -411,6 +411,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		setCamera: camera.setCamera,
 		setCameraPolicy: camera.setCameraPolicy,
 		takeCameraControl: camera.takeCameraControl,
+		followCamera: camera.follow,
 		viewCenter: tracked(["camera"], camera.viewCenter),
 		cameraState: tracked(["camera"], camera.cameraState),
 		restoreCameraState: camera.restoreCameraState,

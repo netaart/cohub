@@ -86,11 +86,13 @@ import { settingsSectionLabel } from "$lib/components/settings-section";
 import ToolCallList from "$lib/components/ToolCallList.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent, isKeyboardClaimed } from "$lib/keyboard";
+import { isSpaceIdSegment } from "$lib/library-routes";
 import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { filterSpacePickerItems } from "$lib/space-picker-model";
 import { buildUserNewSessionRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
+import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
 import { getRecentSpaces } from "$lib/stores/recent-space";
 import { toSpaceIdPath } from "$lib/stores/space-address";
 import {
@@ -221,7 +223,7 @@ $effect(() => {
 const currentSpaceId = $derived.by(() => {
 	const match = toSpaceIdPath(page.url.pathname).match(/^\/spaces\/([^/]+)/);
 	const id = match?.[1] ?? null;
-	return id === "new" ? null : id;
+	return isSpaceIdSegment(id) ? id : null;
 });
 const searchPlan = $derived(buildSearchPlan(lens, query));
 const activeLens = $derived(lensOf(searchPlan.resourceTypes));
@@ -281,11 +283,17 @@ function localizedCommandExcerpt(item: CommandPaletteItem) {
 }
 
 const localCommands = $derived(
-	resolveLocalCommandItems(searchPlan, localizedCommandTitle).map((item) => ({
-		...item,
-		title: localizedCommandTitle(item) ?? item.title,
-		excerpt: localizedCommandExcerpt(item) ?? item.excerpt,
-	})),
+	resolveLocalCommandItems(searchPlan, localizedCommandTitle)
+		.filter(
+			(item) =>
+				billingCatalogStore.available ||
+				settingsCommandSection(item) !== "billing",
+		)
+		.map((item) => ({
+			...item,
+			title: localizedCommandTitle(item) ?? item.title,
+			excerpt: localizedCommandExcerpt(item) ?? item.excerpt,
+		})),
 );
 const myUserUuid = $derived(authStore.userUuid);
 const filteredSpaceItems = $derived.by(() => {

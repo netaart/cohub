@@ -2,7 +2,6 @@
 import { resourceAppLaunch, resourceAppRef } from "@cohub/protocol";
 import { buildAppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type {
-	BillingCreditStatus,
 	CheckpointRecord,
 	LabelAssignmentListItem,
 	LabelListItem,
@@ -46,7 +45,6 @@ import { openAbout } from "$lib/about";
 import { floatNear } from "$lib/actions/portal";
 import { appHomeHref } from "$lib/app-entry";
 import { signOut } from "$lib/auth";
-import { handleUnauthorizedError } from "$lib/auth-redirect";
 import { removeLegacyLocalStorage } from "$lib/cache/cleanup";
 import { clearAllIndexedDbCache } from "$lib/cache/clear";
 import type { SessionListForkRecord } from "$lib/cache/db";
@@ -81,9 +79,14 @@ import {
 	setCohubResourceDragData,
 } from "$lib/drag/cohub-resource-drag";
 import { requestAppNavigation } from "$lib/features/app/app-navigation-request";
+import { formatBalance } from "$lib/features/billing/format";
+import { currentCatalogSubscription } from "$lib/features/billing/product";
+import LibraryList from "$lib/features/library/LibraryList.svelte";
+import LibraryTabs from "$lib/features/library/LibraryTabs.svelte";
 import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
 import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
 import { setSessionArchived } from "$lib/features/sessions/session-archive";
+import * as account from "$lib/features/settings/account-data";
 import { clearAccountSnapshots } from "$lib/features/settings/account-snapshots";
 import { resourceFromUrl } from "$lib/features/space/modules/resource-app-route";
 import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
@@ -100,6 +103,7 @@ import {
 } from "$lib/labels/resource-label-actions";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { requestListScrollTop } from "$lib/layout/list-scroll-top";
+import { libraryEntityAt } from "$lib/library-routes";
 import { sameData } from "$lib/lists/live-list-core";
 import {
 	type AppArea,
@@ -320,12 +324,6 @@ let checkpointsPageInfo = $state<{
 	hasMore: boolean;
 	nextCursor: string | null;
 }>({ hasMore: false, nextCursor: null });
-let billingCredit = $state<BillingCreditStatus | null>(null);
-let billingCreditLoading = $state(false);
-let billingCreditError = $state<string | null>(null);
-let billingCreditUserId = $state<string | null>(null);
-let billingConfigured = $state<boolean | null>(null);
-let billingSubscriptionName = $state<string | null>(null);
 
 let checkpointsCollapsed = $state(false);
 let chatsCollapsed = $state(false);
@@ -393,6 +391,7 @@ const workspaceRoute = $derived(
 const routeSpaceId = $derived(workspaceRoute.spaceId);
 const shown = $derived(isMobile || !useCompactShell());
 const spacesHome = $derived(area === "spaces" && !routeSpaceId && !isMobile);
+const libraryEntity = $derived(libraryEntityAt(currentPath) ?? "spaces");
 const fallbackSpaceId = $derived.by(() => {
 	if (area !== "spaces" || routeSpaceId || !isMobile) return null;
 	void currentPath;
@@ -497,85 +496,19 @@ const userDisplayName = $derived(
 	authStore.profile?.displayName?.trim() || m.common_user({}, { locale }),
 );
 
-let billingCreditRequest: Promise<boolean> | null = null;
-let billingPlanRequest: Promise<void> | null = null;
-const showBillingBalanceEntry = $derived(
-	billingConfigured !== false &&
-		(billingCreditLoading ||
-			Boolean(billingCredit) ||
-			Boolean(billingCreditError)),
+const billingAvailable = $derived(billingCatalogStore.available);
+const billingCredit = $derived(account.billingCredits.data);
+const billingCreditError = $derived(
+	account.billingCredits.error
+		? m.sidebar_failed_refresh({}, { locale })
+		: null,
 );
-const currentSubscriptionName = $derived(billingSubscriptionName);
-
-function clearBillingCredit() {
-	billingCredit = null;
-	billingCreditLoading = false;
-	billingCreditError = null;
-	billingCreditUserId = null;
-	billingConfigured = null;
-	billingSubscriptionName = null;
-}
-
-function markBillingUnavailable() {
-	billingCredit = null;
-	billingCreditLoading = false;
-	billingCreditError = null;
-	billingCreditUserId = authStore.userUuid;
-	billingConfigured = false;
-	billingSubscriptionName = null;
-}
-
-function formatUsdAmount(value: number | null | undefined) {
-	const amount =
-		typeof value === "number" && Number.isFinite(value) ? value : 0;
-	const sign = amount < 0 ? "-" : "";
-	return `${sign}$${Math.abs(amount).toFixed(8)}`;
-}
-
-async function refreshBillingCredit() {
-	if (billingCreditRequest) return billingCreditRequest;
-	billingCreditLoading = true;
-	billingCreditError = null;
-	billingCreditRequest = (async () => {
-		try {
-			billingCredit = await sdk.billing.getCredits();
-			billingCreditUserId = authStore.userUuid;
-			billingConfigured = true;
-			return true;
-		} catch (error) {
-			if (await handleUnauthorizedError(error)) {
-				clearBillingCredit();
-				return false;
-			}
-			console.warn("[sidebar] Failed to load billing credit", error);
-			billingCreditError = m.sidebar_failed_refresh({}, { locale });
-			return false;
-		} finally {
-			billingCreditLoading = false;
-			billingCreditRequest = null;
-		}
-	})();
-	return billingCreditRequest;
-}
-
-async function refreshBillingPlan() {
-	if (billingPlanRequest) return billingPlanRequest;
-	billingPlanRequest = (async () => {
-		try {
-			const catalog = await billingCatalogStore.load();
-			const sub =
-				catalog?.currentSubscriptions.find((s) => s.status === "active") ??
-				catalog?.currentSubscriptions.find((s) => s.status === "trialing");
-			billingSubscriptionName = sub?.productName ?? null;
-		} catch (error) {
-			if (await handleUnauthorizedError(error)) return;
-			console.warn("[sidebar] Failed to load billing plan", error);
-		} finally {
-			billingPlanRequest = null;
-		}
-	})();
-	return billingPlanRequest;
-}
+const currentSubscriptionName = $derived(
+	billingCatalogStore.catalog
+		? (currentCatalogSubscription(billingCatalogStore.catalog)?.productName ??
+				null)
+		: null,
+);
 
 const baseSettingsTabs = $derived(
 	SETTINGS_SECTIONS.map((id) => ({
@@ -586,9 +519,7 @@ const baseSettingsTabs = $derived(
 	})),
 );
 const settingsTabs = $derived(
-	baseSettingsTabs.filter(
-		(tab) => tab.id !== "billing" || billingConfigured !== false,
-	),
+	baseSettingsTabs.filter((tab) => tab.id !== "billing" || billingAvailable),
 );
 
 function fallbackSettingsReturnTo() {
@@ -2821,18 +2752,10 @@ function subscribeSidebarUpdates() {
 // Load only the space addressed by the current URL. The global space list is
 // owned by the picker and management page, not the workspace sidebar.
 $effect(() => {
-	const userId = authStore.userUuid;
-	if (!authStore.isAuthenticated || !userId) {
-		clearBillingCredit();
-		return;
-	}
-	if (billingCreditUserId && billingCreditUserId !== userId) {
-		clearBillingCredit();
-	}
-	if (!showUserMenu) return;
+	if (!showUserMenu || !authStore.isAuthenticated) return;
 	untrack(() => {
-		void refreshBillingCredit();
-		void refreshBillingPlan();
+		void account.billingCredits.load();
+		void billingCatalogStore.load().catch(() => undefined);
 	});
 });
 
@@ -3452,7 +3375,13 @@ $effect(() => {
       <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
 
       {#if spacesHome}
-        <SpacesViewsNav variant="rail" />
+        <LibraryTabs variant="rail" />
+        {#if libraryEntity === "spaces"}
+          <div class="mt-2 h-px w-6 bg-border-subtle/70"></div>
+          <SpacesViewsNav variant="rail" />
+        {:else}
+          <div class="flex-1"></div>
+        {/if}
       {:else if area === "spaces"}
         <div class="mt-2 flex w-full flex-col items-center gap-1">
           <button
@@ -3592,26 +3521,22 @@ $effect(() => {
               zIndex: 90,
             }}
           >
-            {#if billingConfigured !== false}
+            {#if billingAvailable}
               <div class="border-b border-border-subtle">
-                <a href={currentSubscriptionName ? "/settings/billing" : "/pricing"} class="rail-menu-item" title={currentSubscriptionName ? m.sidebar_open_billing({}, { locale }) : m.sidebar_view_plans({}, { locale })} onclick={(e) => { e.preventDefault(); if (currentSubscriptionName) openBillingSettings(); else { showUserMenu = false; handleNavigate('/pricing'); } }}>
+                <a href="/settings/billing" class="rail-menu-item" title={m.sidebar_open_billing({}, { locale })} onclick={(e) => { e.preventDefault(); openBillingSettings(); }}>
                   <CreditCard class="h-3.5 w-3.5" />
                   <span>{currentSubscriptionName ?? m.sidebar_free_plan({}, { locale })}</span>
-                  {#if showBillingBalanceEntry}
-                    <span class="ml-auto font-mono text-[11px] {billingCredit && billingCredit.netUsd < 0 ? 'text-error-soft' : 'text-text-secondary'}">
-                      {#if billingCreditLoading || (!billingCredit && !billingCreditError)}
-                        <Loader2 class="h-3.5 w-3.5 animate-spin text-text-tertiary" />
-                      {:else if billingCredit}
-                        {formatUsdAmount(billingCredit.netUsd)}
-                      {:else}
-                        <span class="text-text-placeholder">—</span>
-                      {/if}
-                    </span>
-                  {:else if !currentSubscriptionName}
-                    <span class="ml-auto text-[10px] font-medium text-brand">{m.sidebar_upgrade({}, { locale })}</span>
-                  {/if}
+                  <span class="ml-auto font-mono text-[11px] tabular-nums {billingCredit && billingCredit.netUsd < 0 ? 'text-error-soft' : 'text-text-secondary'}">
+                    {#if !billingCredit && !billingCreditError}
+                      <Loader2 class="h-3.5 w-3.5 animate-spin text-text-tertiary" />
+                    {:else if billingCredit}
+                      {formatBalance(billingCredit.netUsd, locale)}
+                    {:else}
+                      <span class="text-text-placeholder">—</span>
+                    {/if}
+                  </span>
                 </a>
-                {#if showBillingBalanceEntry && billingCreditError}
+                {#if billingCreditError}
                   <div class="px-2.5 pb-1 text-[11px] text-text-placeholder">{billingCreditError}</div>
                 {/if}
               </div>
@@ -3714,7 +3639,14 @@ $effect(() => {
   </div>
 
   {#if spacesHome}
-    <SpacesViewsNav variant="list" />
+    <LibraryTabs variant="sidebar" />
+    {#if libraryEntity === "spaces"}
+      <SpacesViewsNav variant="list" />
+    {:else}
+      <div class="mt-1 min-h-0 flex-1">
+        <LibraryList entity={libraryEntity} variant="sidebar" />
+      </div>
+    {/if}
   {:else if area === "spaces"}
     <!-- Space Switcher -->
     <div class="px-1.5 py-1 shrink-0 border-b border-border-subtle">
@@ -3985,31 +3917,27 @@ $effect(() => {
           zIndex: 90,
         }}
       >
-        {#if billingConfigured !== false}
+        {#if billingAvailable}
           <div class="border-b border-border-subtle">
             <a
-              href={currentSubscriptionName ? "/settings/billing" : "/pricing"}
+              href="/settings/billing"
               class="flex w-full items-center gap-2 px-2.5 py-[7px] text-[12px] text-text-tertiary transition-colors duration-100 hover:bg-bg-hover hover:text-text-secondary"
-              title={currentSubscriptionName ? m.sidebar_open_billing({}, { locale }) : m.sidebar_view_plans({}, { locale })}
-              onclick={(e) => { e.preventDefault(); if (currentSubscriptionName) openBillingSettings(); else { showUserMenu = false; handleNavigate('/pricing'); } }}
+              title={m.sidebar_open_billing({}, { locale })}
+              onclick={(e) => { e.preventDefault(); openBillingSettings(); }}
             >
               <CreditCard class="w-3.5 h-3.5" />
               <span>{currentSubscriptionName ?? m.sidebar_free_plan({}, { locale })}</span>
-              {#if showBillingBalanceEntry}
-                <span class="ml-auto font-mono text-[11px] {billingCredit && billingCredit.netUsd < 0 ? 'text-error-soft' : 'text-text-secondary'}">
-                  {#if billingCreditLoading || (!billingCredit && !billingCreditError)}
-                    <Loader2 class="h-3.5 w-3.5 animate-spin text-text-tertiary" />
-                  {:else if billingCredit}
-                    {formatUsdAmount(billingCredit.netUsd)}
-                  {:else}
-                    <span class="text-text-placeholder">—</span>
-                  {/if}
-                </span>
-              {:else if !currentSubscriptionName}
-                <span class="ml-auto text-[10px] font-medium text-brand">{m.sidebar_upgrade({}, { locale })}</span>
-              {/if}
+              <span class="ml-auto font-mono text-[11px] tabular-nums {billingCredit && billingCredit.netUsd < 0 ? 'text-error-soft' : 'text-text-secondary'}">
+                {#if !billingCredit && !billingCreditError}
+                  <Loader2 class="h-3.5 w-3.5 animate-spin text-text-tertiary" />
+                {:else if billingCredit}
+                  {formatBalance(billingCredit.netUsd, locale)}
+                {:else}
+                  <span class="text-text-placeholder">—</span>
+                {/if}
+              </span>
             </a>
-            {#if showBillingBalanceEntry && billingCreditError}
+            {#if billingCreditError}
               <div class="px-2.5 pb-2 text-[11px] text-text-placeholder">{billingCreditError}</div>
             {/if}
           </div>

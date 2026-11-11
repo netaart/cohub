@@ -74,6 +74,14 @@ const cursors = $derived.by(() => {
 	}));
 });
 
+const presses = $derived.by(() => {
+	changes();
+	return presence.presses.map((press) => ({
+		...press,
+		color: identityColor(press.actorId),
+	}));
+});
+
 const activities = $derived.by(() => {
 	changes();
 	return presence.activities.map((activity) => {
@@ -142,6 +150,15 @@ $effect(() => {
 {/snippet}
 
 <div class="collab-overlay" bind:clientWidth={width}>
+	{#each presses as press (press.id)}
+		<span
+			class="collab-press"
+			style:--collab-color={press.color}
+			style:transform={`translate3d(${press.x}px, ${press.y}px, 0)`}
+			aria-hidden="true"
+		></span>
+	{/each}
+
 	{#each cursors as cursor (cursor.connectionId)}
 		<div
 			class="collab-cursor"
@@ -279,6 +296,39 @@ $effect(() => {
 
 	.collab-touch-ring--released::after {
 		opacity: 0;
+	}
+
+	.collab-press {
+		position: absolute;
+		top: 0;
+		left: 0;
+	}
+
+	.collab-press::before {
+		content: "";
+		position: absolute;
+		top: -18px;
+		left: -18px;
+		height: 36px;
+		width: 36px;
+		border: 2px solid var(--collab-color);
+		border-radius: 9999px;
+		background: color-mix(in srgb, var(--collab-color) 16%, transparent);
+		animation:
+			collab-press-grow 520ms var(--ease-out) both,
+			collab-press-fade 520ms ease-in both;
+	}
+
+	@keyframes collab-press-grow {
+		from {
+			scale: 0.3;
+		}
+	}
+
+	@keyframes collab-press-fade {
+		to {
+			opacity: 0;
+		}
 	}
 
 	.collab-view-focus {
@@ -446,6 +496,10 @@ $effect(() => {
 		.collab-activity {
 			transition: none;
 			animation: none;
+		}
+
+		.collab-press::before {
+			animation: collab-press-fade 520ms ease-in both;
 		}
 	}
 </style>

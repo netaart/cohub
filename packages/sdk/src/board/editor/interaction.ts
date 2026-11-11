@@ -7,7 +7,6 @@ import {
 	type BoardSceneItem,
 	type BoardViewport,
 	appendBoardDrawSamples,
-	clampZoom,
 	createBoardItemId,
 	frameHandlePosition,
 	normalizeRotation,
@@ -362,6 +361,7 @@ export function createInteractionModule(ctx: EditorContext) {
 	function beginPinch() {
 		const [a, b] = [...activePointers.values()];
 		if (!a || !b) return;
+		ctx.camera.takeCameraControl();
 		const gesture = state.interaction;
 		state.interaction = { type: "idle" };
 		state.snapGuides = [];
@@ -692,7 +692,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		if (!a || !b || !pinch) return;
 		const distance = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
 		const midpoint = screenPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
-		const zoomed = zoomAround(state.camera, midpoint, clampZoom(pinch.zoom * (distance / pinch.distance)));
+		const zoomed = zoomAround(state.camera, midpoint, pinch.zoom * (distance / pinch.distance), ctx.camera.zoomFloor(pinch.zoom));
 		const next = panBy(zoomed, midpoint.x - pinch.midpoint.x, midpoint.y - pinch.midpoint.y);
 		if (ctx.frames.view()?.present) ctx.camera.show(next, false);
 		else ctx.camera.setCamera(next);
@@ -846,10 +846,14 @@ export function createInteractionModule(ctx: EditorContext) {
 						: (ctx.query.pickAt(event.world, event.pointerType)?.id ?? null);
 				return;
 			case "panning": {
-				const held = holdsFrame(event.pointerType);
-				if ((interaction.tapSelection || held) && !interaction.moved && !dragged(event)) return;
-				if (!interaction.moved) state.interaction = { ...interaction, moved: true };
-				pan(interaction.origin, event.screen.x - interaction.start.x, event.screen.y - interaction.start.y, event.pointerType);
+				const slop = interaction.tapSelection || holdsFrame(event.pointerType) || ctx.camera.following();
+				if (slop && !interaction.moved && !dragged(event)) return;
+				let { origin } = interaction;
+				if (!interaction.moved) {
+					if (ctx.camera.takeCameraControl()) origin = { ...state.camera };
+					state.interaction = { ...interaction, origin, moved: true };
+				}
+				pan(origin, event.screen.x - interaction.start.x, event.screen.y - interaction.start.y, event.pointerType);
 				sample(event.screen);
 				return;
 			}

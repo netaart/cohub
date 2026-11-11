@@ -44,13 +44,12 @@ export function registerSpaceWallet(spaces: Command): void {
     } catch (cause) { handleHttp(cause); }
   });
 
-  wallet.command("activity").option("--page <page>", "Page number", "1").option("--json", "Output as JSON").action(async (opts: { page: string; json?: boolean }) => {
+  wallet.command("activity").description("List wallet activity, newest first").option("--cursor <cursor>", "Pagination cursor from a previous result").option("--json", "Output as JSON").action(async (opts: { cursor?: string; json?: boolean }) => {
     try {
-      const page = Number(opts.page);
-      if (!Number.isInteger(page) || page < 1 || page > 10_000) throw new Error("Page must be an integer between 1 and 10000");
-      const value = await (await space()).activities(page);
+      const value = await (await space()).activities(opts.cursor);
       if (jsonRequested(opts)) return outJson(value);
       table(value.items, [{ key: "title", label: "Activity" }, { key: "amountUsd", label: "Amount (USD)" }, { key: "actorUserId", label: "User" }, { key: "createdAt", label: "Date" }]);
+      if (value.nextCursor) console.log(`\n  More: --cursor ${value.nextCursor}`);
     } catch (cause) { handleHttp(cause); }
   });
 

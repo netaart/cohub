@@ -84,7 +84,6 @@ export const STATE_CHANNELS: { readonly [K in keyof BoardEditorState]: BoardEdit
 
 export type BoardEditorPreferences = {
 	toolStyles: BoardToolStyleMap;
-	cameraPolicy: BoardCameraPolicy;
 };
 
 export type BoardViewState = {

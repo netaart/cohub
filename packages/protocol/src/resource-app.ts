@@ -57,7 +57,10 @@ export function writeResourceAppTarget(
   if (target.base) search.set("resourceBase", target.base);
 }
 
-export function resourceAppLaunch(spaceId: string, target: ResourceAppTarget) {
+export function resourceAppLaunch(
+  spaceId: string,
+  target: ResourceAppTarget | null = null,
+) {
   const params = new URLSearchParams({ space: spaceId });
   writeResourceAppTarget(params, target);
   return { hash: `#${params}` };

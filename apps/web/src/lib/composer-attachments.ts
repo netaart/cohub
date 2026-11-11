@@ -3,6 +3,9 @@ import type { ContentBlock } from "@cohub/protocol/core";
 export const MAX_COMPOSER_ATTACHMENTS = 14;
 export const MAX_COMPOSER_TEXT_ATTACHMENT_BYTES = 200 * 1024;
 
+const LARGE_PASTE_MIN_CHARS = 20_000;
+const LARGE_PASTE_MIN_LINES = 500;
+
 const supportedImageMimeTypes = new Set([
 	"image/jpeg",
 	"image/png",
@@ -176,6 +179,37 @@ export async function readComposerTextAttachment(
 		text,
 		size: file.size,
 	};
+}
+
+/** Native textarea paste slows down per line, so long pastes become attachments. */
+export function isLargeComposerPaste(text: string) {
+	if (text.length >= LARGE_PASTE_MIN_CHARS) return true;
+	let lines = 1;
+	for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) {
+		if (++lines >= LARGE_PASTE_MIN_LINES) return true;
+	}
+	return false;
+}
+
+function isJsonText(text: string) {
+	const first = text.trimStart()[0];
+	if (first !== "{" && first !== "[") return false;
+	try {
+		JSON.parse(text);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+export function createPastedTextFile(text: string, now = new Date()) {
+	const pad = (value: number) => String(value).padStart(2, "0");
+	const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+	const json = isJsonText(text);
+	return new File([text], `pasted-${stamp}.${json ? "json" : "txt"}`, {
+		type: json ? "application/json" : "text/plain",
+		lastModified: now.getTime(),
+	});
 }
 
 export function buildComposerTextContentBlock(

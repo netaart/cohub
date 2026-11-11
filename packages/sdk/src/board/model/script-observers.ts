@@ -4,9 +4,9 @@ import { rectsIntersect, type Rect } from "./geometry.js";
 import type { BoardScene } from "./scene.js";
 import { isBoardRootScript } from "./script-index.js";
 import { boardScriptScope, diffBoardScriptItems } from "./script-scope.js";
-import type { BoardScriptChangeSource, BoardScriptEvent, BoardScriptGesture, BoardScriptOutput, BoardScriptView } from "./script.js";
+import type { BoardScriptChangeSource, BoardScriptEvent, BoardScriptGesture, BoardScriptOutput, BoardScriptPeer, BoardScriptView } from "./script.js";
 
-const EVENTS = ["viewchange", "selectionchange", "transformend", "change", "gesture"] as const;
+const EVENTS = ["viewchange", "selectionchange", "transformend", "change", "gesture", "peerschange"] as const;
 type Subscription = {
   listens: Set<string>;
   document?: BoardDocument;
@@ -16,6 +16,7 @@ type Subscription = {
   view?: string;
   items?: Map<string, BoardItem>;
   diffed?: BoardDocument;
+  peers?: { from: readonly BoardScriptPeer[]; scene: BoardScene; key: string };
 };
 
 export type BoardScriptWorldGesture = Omit<BoardScriptGesture, "points" | "item"> & {
@@ -73,6 +74,7 @@ export function createBoardScriptObservers(send: (owner: string, event: BoardScr
     get size() { return subscribers.size; },
     get transforms() { return [...subscribers.values()].some((entry) => entry.listens.has("transformend")); },
     get gestures() { return [...subscribers.values()].some((entry) => entry.listens.has("gesture")); },
+    get watchesPeers() { return [...subscribers.values()].some((entry) => entry.listens.has("peerschange")); },
     update(owner: string, output: BoardScriptOutput | null) {
       const listens = new Set(EVENTS.filter((type) => output?.listens.includes(type)));
       if (!listens.size) { subscribers.delete(owner); return; }
@@ -83,6 +85,7 @@ export function createBoardScriptObservers(send: (owner: string, event: BoardScr
         entry.items = undefined;
         entry.diffed = undefined;
       }
+      if (!listens.has("peerschange")) entry.peers = undefined;
       entry.listens = listens;
       subscribers.set(owner, entry);
     },
@@ -142,6 +145,18 @@ export function createBoardScriptObservers(send: (owner: string, event: BoardScr
           ...(item ? { item } : {}),
         };
         send(owner, { type: "gesture", data });
+      }
+    },
+    peers(document: BoardDocument, scene: BoardScene, list: readonly BoardScriptPeer[]) {
+      for (const [owner, entry] of subscribers) {
+        if (!entry.listens.has("peerschange") || (entry.peers?.from === list && entry.peers.scene === scene)) continue;
+        if (!isBoardRootScript(document, owner) && !scene.get(owner)) continue;
+        const local = invertMatrix(scene.layout.matrix(owner));
+        const data = list.map((peer) => ({ ...peer, point: peer.point && applyMatrix(local, peer.point) }));
+        const key = JSON.stringify(data);
+        const changed = entry.peers?.key !== key;
+        entry.peers = { from: list, scene, key };
+        if (changed) send(owner, { type: "peerschange", data });
       }
     },
     clear() { subscribers.clear(); },

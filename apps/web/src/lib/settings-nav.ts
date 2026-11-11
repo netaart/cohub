@@ -8,12 +8,20 @@ export type SettingsSection =
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 	"general",
+	"billing",
 	"activity",
 	"referrals",
-	"billing",
 	"rules",
 	"channels",
 ];
+
+export function visibleSettingsSections(
+	billingAvailable: boolean,
+): readonly SettingsSection[] {
+	return billingAvailable
+		? SETTINGS_SECTIONS
+		: SETTINGS_SECTIONS.filter((section) => section !== "billing");
+}
 
 export function settingsSectionHref(section: SettingsSection): string {
 	return `/settings/${section}`;

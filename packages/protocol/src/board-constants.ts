@@ -15,6 +15,7 @@ export const BOARD_DRAW_STROKE_SIZE = 4;
 export const BOARD_ARROW_STROKE_SIZE = 2.5;
 
 export const BOARD_PAGE_SIZE = { width: 960, height: 540 } as const;
+export const BOARD_CAMERA_VIEWPORT = { width: 1600, height: 900 } as const;
 export const BOARD_MEDIA_EDGE = 480;
 export const BOARD_TEXT_SCALE = { title: 56, heading: 40, body: BOARD_TEXT_FONT_SIZE, caption: 16 } as const;
 

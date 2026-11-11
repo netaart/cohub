@@ -8,6 +8,7 @@ import {
 	type AppsChangedDetail,
 	dispatchAppsChanged,
 } from "$lib/features/app/app-realtime";
+import { onBillingChange } from "$lib/features/billing/refresh";
 import {
 	APP_HIDE_COHUB_BAR_FEATURE,
 	APP_SCOPE_OPTIONS,
@@ -426,10 +427,10 @@ export function createAppDetailController(options: {
 			if (detail) void loadHideCohubBarEntitlement();
 		};
 		window.addEventListener("focus", refresh);
-		window.addEventListener("cohub:billing-refresh", refresh);
+		const stopBilling = onBillingChange(refresh);
 		return () => {
 			window.removeEventListener("focus", refresh);
-			window.removeEventListener("cohub:billing-refresh", refresh);
+			stopBilling();
 		};
 	});
 

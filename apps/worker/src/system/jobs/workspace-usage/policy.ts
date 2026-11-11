@@ -6,10 +6,11 @@ import { spaceSandboxes, spaces, spaceWorkspaceUsage } from "@cohub/db";
 
 type Database = PgDatabase<PgQueryResultHKT, Record<string, unknown>>;
 
-// NAS protection: at most two scans at a time across all workers, four pdu threads
-// each (≈4x a single thread on NFS; more threads add load for little gain).
+// NAS protection: at most two scans at a time across all workers. Scans wait on
+// NFS round trips (≈5% CPU) and sped up with more threads in prod (16 ran ≈3.5x
+// faster than 4); 8 trades some of that speed for less NAS load.
 export const SCAN_CONCURRENCY = 2;
-export const PDU_THREADS = 4;
+export const PDU_THREADS = 8;
 export const SCAN_TIMEOUT_MS = 40 * 60_000;
 // An unfinished attempt is exclusive for this long. It outlives the hard scan
 // deadline, so a paused or dead holder's pdu cannot still be running after it.

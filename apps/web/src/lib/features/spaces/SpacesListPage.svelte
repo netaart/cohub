@@ -18,6 +18,7 @@ import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
 import ListHeader from "$lib/components/list-page/ListHeader.svelte";
 import SwipePager from "$lib/components/list-page/SwipePager.svelte";
 import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
+import LibraryTabs from "$lib/features/library/LibraryTabs.svelte";
 import SpaceLabelPicker from "$lib/features/spaces/SpaceLabelPicker.svelte";
 import SpaceRowMenu from "$lib/features/spaces/SpaceRowMenu.svelte";
 import SpacesListPane from "$lib/features/spaces/SpacesListPane.svelte";
@@ -285,12 +286,16 @@ onMount(() => {
 	</span>
 {/snippet}
 
+{#snippet libraryTabs()}
+	<LibraryTabs variant="header" />
+{/snippet}
+
 <section class="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
 	<div class="shrink-0 border-b border-border-subtle">
 		<ListHeader
 			title={m.spaces_title({}, { locale })}
 			brand={!selecting}
-			children={selecting ? selectionTitle : undefined}
+			children={selecting ? selectionTitle : compact ? libraryTabs : undefined}
 		>
 			{#snippet actions()}
 				{#if selecting}

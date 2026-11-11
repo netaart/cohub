@@ -1,8 +1,9 @@
+import { listSpaceAudienceUserIds } from "@cohub/core/permissions";
 import { createSessionSnapshotScheduler, publishSessionSnapshot, publishSessionTurnStates } from "@cohub/core/sessions";
 import { isSettledStatsTurn } from "@cohub/protocol/model";
 import { db } from "./db.js";
 import { randomUUID } from "node:crypto";
-import { REALTIME_OUTBOUND_CHANNEL, type RealtimeTaskRecord } from "@cohub/protocol/realtime";
+import { getRealtimeUserRoom, REALTIME_OUTBOUND_CHANNEL, type RealtimeTaskRecord } from "@cohub/protocol/realtime";
 import type { SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
 import { redisCommandClient } from "./redis.js";
@@ -105,6 +106,21 @@ async function publishTaskEvent(input: {
   ]);
 }
 
+async function publishCronJobRunFinished(task: { cronJobId: string; userUuid: string; spaceId: string | null }) {
+  const audience = (task.spaceId && (await listSpaceAudienceUserIds(db, task.spaceId, [task.userUuid]))) || [task.userUuid];
+  await redisCommandClient.publish(
+    REALTIME_OUTBOUND_CHANNEL,
+    JSON.stringify({
+      id: randomUUID(),
+      timestamp: Date.now(),
+      domain: "space",
+      type: "cronjob.list.changed",
+      rooms: audience.map(getRealtimeUserRoom),
+      payload: { cronJobId: task.cronJobId, spaceId: task.spaceId, revision: new Date().toISOString() },
+    }),
+  );
+}
+
 export const dispatchTaskCreated = (task: Parameters<typeof toRealtimeTaskRecord>[0]) =>
   publishTaskEvent({ type: "task.created", task });
 
@@ -117,6 +133,7 @@ export const dispatchTaskUpdated = async (input: {
     void scheduleSessionSnapshot(input.task.sessionId);
   }
   if (finished) void syncFinishedTaskBoards(input.task).catch((error) => logger.warn("[BoardTasks] sync failed", { taskRunId: input.task.id, error }));
+  if (finished && input.task.cronJobId && input.task.userUuid) void publishCronJobRunFinished({ cronJobId: input.task.cronJobId, userUuid: input.task.userUuid, spaceId: input.task.spaceId }).catch((error) => logger.warn("[CronJob] list notify failed", { taskRunId: input.task.id, error }));
   await publishTaskEvent({ type: "task.updated", task: input.task, changed: input.changed });
 };
 

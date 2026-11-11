@@ -9,6 +9,7 @@ export type {
   WorkspaceUsage,
 } from "@cohub/protocol";
 import type { WorkspaceUsage } from "@cohub/protocol";
+import type { AppRecord } from "./apis/apps.js";
 export type { SessionArchiveFilter, SessionStats, ExecutionStats, TurnMetrics, RequestMetric } from "@cohub/protocol/model";
 import type { MediaFacts } from "@cohub/protocol/core";
 import type {
@@ -65,6 +66,7 @@ export type {
   BoardApplyInput,
   BoardApplyResult,
   BoardChangeSummary,
+  BoardCheckpointReadResult,
   BoardColor,
   BoardCreateInput,
   BoardDelta,
@@ -600,6 +602,7 @@ export type BillingBalanceActivity = {
   tokenType: string;
   title: string;
   description: string | null;
+  usageType: string | null;
   sourceType: string | null;
   sourceId: string | null;
   operationId: string | null;
@@ -608,15 +611,17 @@ export type BillingBalanceActivity = {
   createdAt: string;
 };
 
+export type BillingBalanceActivityFilter = "usage" | "grant" | "refund";
+
 export type BillingBalanceActivityList = {
   userId: string;
   billing: BillingPluginStatus;
   tokenType: string;
   unit: BillingCreditUnit;
-  page: number;
   limit: number;
   items: BillingBalanceActivity[];
-  pagination: BillingHistoryPagination;
+  /** Opaque; pass back as `cursor` to read older activity. Null at the end of history. */
+  nextCursor: string | null;
 };
 
 export type UserRulesResponse = {
@@ -1442,6 +1447,30 @@ export type CronJobRecord<TPayload extends CronJobPayload = CronJobPayload> = {
   updatedAt: string;
 };
 
+export type UserAppListItem = AppRecord & {
+  space: UserSessionSpaceSummary;
+  publicUrl: string | null;
+};
+
+export type UserCronJobListItem = Omit<CronJobRecord, "payload" | "bullJobKey"> & {
+  space: UserSessionSpaceSummary | null;
+  /** `lost` when the viewer can no longer manage it in its Space; the creator may still pause or delete it. */
+  access: "full" | "lost";
+  nextRunAt: string | null;
+  lastRun: { status: TaskRunRecord["status"]; finishedAt: string | null; createdAt: string | null } | null;
+};
+
+export type UserListPage<T> = {
+  items: T[];
+  pageInfo: CursorPageInfo;
+};
+
+export type UserListOptions<F extends string> = {
+  filter?: F;
+  cursor?: string | null;
+  limit?: number;
+};
+
 export type TaskRunDetailResponse = {
   run: TaskRunRecord;
   progress: unknown;
@@ -1722,6 +1751,8 @@ export const PERMISSIONS = [
   "user.session.list",
   "user.taskrun.list",
   "user.usage.read",
+  "user.app.list",
+  "user.cronjob.list",
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -1736,6 +1767,8 @@ export const USER_LEVEL_PERMISSIONS = new Set<Permission>([
 	"user.session.list",
 	"user.taskrun.list",
 	"user.usage.read",
+	"user.app.list",
+	"user.cronjob.list",
 	"space.create",
 ]);
 

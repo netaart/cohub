@@ -593,8 +593,15 @@
     {
       "idx": 84,
       "version": "7",
-      "when": 1794111119586,
-      "tag": "0084_slug_history",
+      "when": 1794328583649,
+      "tag": "0084_task_runs_cron_job_created",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1794368515874,
+      "tag": "0085_slug_history",
       "breakpoints": true
     }
   ]

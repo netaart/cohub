@@ -25,11 +25,8 @@ export function activeWindowFilePath(
 	return "";
 }
 
-export function workspaceFilePreviewKind(
-	path: string,
-	readOnly: boolean,
-): "file" | "board" {
-	return isBoardFile(path) && !readOnly ? "board" : "file";
+export function workspaceFilePreviewKind(path: string): "file" | "board" {
+	return isBoardFile(path) ? "board" : "file";
 }
 
 /** What an App tab shows for the state its App reported. */

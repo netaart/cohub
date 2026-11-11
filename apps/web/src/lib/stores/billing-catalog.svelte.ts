@@ -1,4 +1,5 @@
 import type { BillingCatalog } from "@neta-art/cohub";
+import { announceBillingChange } from "$lib/features/billing/refresh";
 import { sdk } from "$lib/sdk";
 import { authStore } from "$lib/stores/auth.svelte";
 
@@ -12,6 +13,10 @@ class BillingCatalogStore {
 	private readonly staleMs = 5 * 60 * 1000;
 	private requestVersion = 0;
 	private deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+
+	get available() {
+		return this.catalog?.billing.configured !== false;
+	}
 
 	private currentScope() {
 		return authStore.isAuthenticated ? (authStore.userUuid ?? "auth") : "anon";
@@ -80,7 +85,7 @@ class BillingCatalogStore {
 		this.deadlineTimer = setTimeout(
 			() => {
 				this.loadedAt = 0;
-				window.dispatchEvent(new Event("cohub:billing-refresh"));
+				announceBillingChange();
 				void this.refresh().catch(() => undefined);
 			},
 			Math.min(2_147_483_647, Math.max(0, Math.min(...deadlines) - Date.now())),

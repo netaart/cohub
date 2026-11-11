@@ -7,10 +7,6 @@ import {
 import { ensureBoardTextMeasurement } from "@neta-art/cohub/board/render";
 import { createSubscriber } from "svelte/reactivity";
 import {
-	readBoardCameraPolicy,
-	writeBoardCameraPolicy,
-} from "$lib/board/board-camera-policy";
-import {
 	readBoardToolStyles,
 	writeBoardToolStyles,
 } from "$lib/board/board-tool-preferences";
@@ -35,14 +31,8 @@ export function createBoardEditor(
 	const subscribers = new Map<BoardEditorChannel, () => void>();
 	const editor: BoardEditor = createEditor({
 		...options,
-		preferences: {
-			toolStyles: readBoardToolStyles(),
-			cameraPolicy: readBoardCameraPolicy(),
-		},
-		onPreferencesChange: ({ toolStyles, cameraPolicy }) => {
-			writeBoardToolStyles(toolStyles);
-			writeBoardCameraPolicy(cameraPolicy);
-		},
+		preferences: { toolStyles: readBoardToolStyles() },
+		onPreferencesChange: ({ toolStyles }) => writeBoardToolStyles(toolStyles),
 		track: (channel) => {
 			let subscribe = subscribers.get(channel);
 			if (!subscribe) {

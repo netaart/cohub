@@ -94,15 +94,17 @@ export function createBoardAnimationTransport(input: {
 	}
 
 	function play() {
-		if (!animationId || !animation) return;
+		const id = animationId;
+		if (!id || !animation) return;
 		const from = time >= animation.duration ? 0 : time;
 		const request = { stale: input.playback(), from };
 		starting = request;
 		setTimeout(() => {
 			if (starting === request) starting = null;
 		}, 4000);
+		chosen = id;
 		editor.setPlayhead(null);
-		send({ type: "play", animationId, position: from });
+		send({ type: "play", animationId: id, position: from });
 	}
 
 	function pause() {

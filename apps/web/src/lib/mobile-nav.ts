@@ -1,3 +1,4 @@
+import { libraryEntityAt } from "$lib/library-routes";
 import { toSpaceIdPath } from "$lib/stores/space-address";
 
 export type AppArea = "chats" | "spaces" | "account";
@@ -11,7 +12,7 @@ export function isSpaceCreatePath(pathname: string): boolean {
 }
 
 export function isSpacesHomePath(pathname: string): boolean {
-	return pathname === "/spaces" || isSpaceCreatePath(pathname);
+	return libraryEntityAt(pathname) !== null || isSpaceCreatePath(pathname);
 }
 
 export function isSessionsPath(pathname: string): boolean {

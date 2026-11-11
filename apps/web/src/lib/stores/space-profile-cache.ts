@@ -1,4 +1,8 @@
-import type { SpaceMember, SpaceUsageResponse } from "@neta-art/cohub";
+import type {
+	SpaceMember,
+	SpaceUsageResponse,
+	SpaceWalletSummary,
+} from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
 
 type SpaceProfileCacheEntry<T> = {
@@ -95,6 +99,7 @@ async function fetchWithCache<T>({
 
 const membersKey = (spaceId: string) => `${spaceId}:members`;
 const usageKey = (spaceId: string, days: number) => `${spaceId}:usage:${days}`;
+const walletKey = (spaceId: string) => `${spaceId}:wallet`;
 export function getCachedSpaceMembers(spaceId: string) {
 	return readEntry<SpaceMember[]>(membersKey(spaceId))?.value ?? null;
 }
@@ -120,5 +125,18 @@ export function fetchSpaceUsageWithCache(spaceId: string, days: number) {
 		key: usageKey(spaceId, days),
 		ttlMs: SPACE_PROFILE_CACHE_TTL_MS,
 		fetcher: () => sdk.space(spaceId).usage.get(days),
+	});
+}
+
+export function getCachedSpaceWallet(spaceId: string) {
+	return readEntry<SpaceWalletSummary>(walletKey(spaceId))?.value ?? null;
+}
+
+/** Always fetches: usage charges move the balance without a wallet event. */
+export function fetchSpaceWalletWithCache(spaceId: string) {
+	return fetchWithCache({
+		key: walletKey(spaceId),
+		ttlMs: 0,
+		fetcher: () => sdk.space(spaceId).wallet.get(),
 	});
 }

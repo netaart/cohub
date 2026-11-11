@@ -1,12 +1,19 @@
 import type { Command } from "commander";
 import { json } from "../../output.js";
-import { BOARD_SCRIPT_DRAWING_EXAMPLE, BOARD_SCRIPT_RAIN_EXAMPLE, BOARD_SCRIPT_SENSES_EXAMPLE, BOARD_SCRIPT_TILT_EXAMPLE } from "@neta-art/cohub/board";
+import {
+  BOARD_SCRIPT_DRAWING_EXAMPLE,
+  BOARD_SCRIPT_RAIN_EXAMPLE,
+  BOARD_SCRIPT_SENSES_EXAMPLE,
+  BOARD_SCRIPT_SPARKS_EXAMPLE,
+  BOARD_SCRIPT_TILT_EXAMPLE,
+} from "@neta-art/cohub/board";
 
 const MODULES: Record<string, string> = {
   custom: BOARD_SCRIPT_DRAWING_EXAMPLE,
   rain: BOARD_SCRIPT_RAIN_EXAMPLE,
   tilt: BOARD_SCRIPT_TILT_EXAMPLE,
   senses: BOARD_SCRIPT_SENSES_EXAMPLE,
+  sparks: BOARD_SCRIPT_SPARKS_EXAMPLE,
 };
 
 /**
@@ -98,6 +105,14 @@ export const BOARD_EXAMPLES: Record<string, { description: string; value: Record
     value: {
       items: {
         table: { type: "custom", position: { x: 0, y: 0 }, size: { width: 360, height: 640 }, script: { src: "scripts/tilt.js" } },
+      },
+    },
+  },
+  sparks: {
+    description: "Sparks every viewer sees where anyone clicks, and halos on the others' cursors; use --module to print scripts/sparks.js.",
+    value: {
+      items: {
+        pad: { type: "custom", position: { x: 0, y: 0 }, size: { width: 640, height: 400 }, script: { src: "scripts/sparks.js" } },
       },
     },
   },

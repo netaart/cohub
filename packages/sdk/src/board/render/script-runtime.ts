@@ -61,6 +61,7 @@ export function createScriptRuntime(
   let disposed = false;
   let stepping = false;
   let depth = 0;
+  let remote = false;
   let revision = 0;
   let sceneRevision = 0;
   let randomState = 2166136261;
@@ -100,6 +101,7 @@ export function createScriptRuntime(
   };
   let anchor = effects?.anchor;
   let view: BoardScriptView | null = null;
+  let peers: BoardScriptContext["peers"] = [];
   let hits: BoardScriptOutput["hits"] = effects?.hits ?? {};
   let uniforms: BoardScriptOutput["uniforms"] = effects?.uniforms;
   let videoFrame: { close?(): void } | undefined;
@@ -140,8 +142,13 @@ export function createScriptRuntime(
       return input.script.targets ?? {};
     },
     async emit(target, type, data) {
-      await host.call("board.emit", { target, type, data, depth: depth + 1 });
+      await host.call("board.emit", { target, type, data, depth: depth + 1, ...(remote ? { remote } : {}) });
     },
+    async broadcast(type, data) {
+      if (remote) throw new Error("broadcast() cannot answer another viewer's broadcast.");
+      await host.call("board.broadcast", { type, data: data ?? null, depth: depth + 1 });
+    },
+    get peers() { return peers; },
     get items() {
       return input.items;
     },
@@ -219,6 +226,7 @@ export function createScriptRuntime(
     },
     async commit(patch) {
       if (input.capabilities && !input.capabilities.includes("board.commit")) throw new Error("This viewer cannot edit the Board.");
+      if (remote) throw new Error("A handler of another viewer's broadcast cannot commit; the viewer who sent it saves.");
       return (await host.call("board.commit", { patch, frame: stepping })) === true;
     },
     async layoutText(text) {
@@ -308,20 +316,22 @@ export function createScriptRuntime(
     event(event: BoardScriptEvent) {
       if (disposed) return;
       if (event.type === "viewchange") view = event.data as BoardScriptView;
+      if (event.type === "peerschange") peers = event.data as BoardScriptContext["peers"];
       if (event.type === "browser:video") {
         videoFrame?.close?.();
         videoFrame = (event.data as { frame?: { close?(): void } }).frame;
       }
       const listeners = handlers.get(event.type);
       if (!listeners?.size) return;
-      const outer = depth;
+      const outer = { depth, remote };
       depth = event.depth ?? 0;
+      remote = event.remote === true;
       try {
         seeded(() => {
           for (const handler of listeners) handler(event);
         });
       } finally {
-        depth = outer;
+        ({ depth, remote } = outer);
       }
       invalidate();
     },

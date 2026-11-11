@@ -21,7 +21,7 @@ import type {
 import type { SessionListPageInfo } from "$lib/cache/types";
 
 export const DB_NAME = "cohub-web-cache";
-export const DB_VERSION = 31;
+export const DB_VERSION = 32;
 
 export type DisplayReplayCacheRecord = {
 	key: string;
@@ -298,6 +298,14 @@ export type AppDomainsCacheRecord = {
 	lastAccessedAt: number;
 };
 
+export type LibraryListCacheRecord = {
+	key: string;
+	userKey: string;
+	items: unknown[];
+	hasMore: boolean;
+	updatedAt: number;
+};
+
 export type SpaceResourceListCacheRecord = {
 	key: string;
 	userKey: string;
@@ -354,6 +362,7 @@ export type StoreName =
 	| "session_files"
 	| "app_domains"
 	| "space_resource_lists"
+	| "library_lists"
 	| "viewer_likes"
 	| "display_replays";
 
@@ -879,6 +888,7 @@ export async function openCacheDb(): Promise<IDBDatabase | null> {
 			defineStore(db, tx, "space_resource_lists", [
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);
+			defineStore(db, tx, "library_lists", []);
 			defineStore(db, tx, "viewer_likes", [
 				{ name: "by_last_accessed", keyPath: "lastAccessedAt" },
 			]);

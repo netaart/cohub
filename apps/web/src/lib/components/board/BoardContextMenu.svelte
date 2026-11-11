@@ -39,7 +39,7 @@ import {
 	MonitorPlay,
 	PartyPopper,
 	Pencil,
-	Play,
+	Presentation,
 	RefreshCw,
 	Sparkles,
 	Star,
@@ -163,7 +163,7 @@ const actions = $derived.by<BoardMenuAction[]>(() => {
 		list.push({
 			id: "present",
 			label: m.board_present_from_here({}, { locale }),
-			icon: Play,
+			icon: Presentation,
 			run: () => onPresent(frame),
 		});
 	if (onAddLink)

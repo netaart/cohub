@@ -312,7 +312,7 @@ cohub -s <spaceId> spaces wallet transfer-status <requestId>
 cohub -s <spaceId> spaces wallet recharge <productKey>
 cohub -s <spaceId> spaces wallet confirm <orderId>
 cohub -s <spaceId> spaces wallet public-funding on
-cohub -s <spaceId> spaces wallet activity --page 1 --json
+cohub -s <spaceId> spaces wallet activity --json
 ```
 
 `transfer` moves purchased personal balance (whole USD) into the wallet;
@@ -360,7 +360,8 @@ cohub -s <spaceId> boards apply <boardId> -i changes.json
 ```
 
 Group a whole change into one patch so it lands as one version. `--replace` makes
-the document equal to the patch instead of merging; `--cascade` also deletes
+the document equal to the patch instead of merging, and needs `--base-version` on a
+Board that has items; `--cascade` also deletes
 children and the tracks targeting a deleted item:
 
 ```bash
@@ -507,6 +508,7 @@ filesystem paths, while Cohub Sandbox runs use Space workspace paths. Pass
 cohub profile update --username <username>
 cohub spaces update <spaceId> --slug <space-slug>
 cohub -s <spaceId> apps ls --json
+cohub apps ls --all --filter mine --json
 cohub apps get <appId|url|username/space/app> --json
 cohub apps stats <appId|url|username/space/app>
 cohub apps download <appId|url|username/space/app> --output <path>
@@ -629,6 +631,7 @@ Manage them with `cron-jobs`:
 
 ```bash
 cohub cron-jobs ls <spaceId> --json
+cohub cron-jobs ls --filter attention --json
 cohub cron-jobs runs <cronJobId> --json
 cohub cron-jobs toggle <cronJobId> on
 cohub cron-jobs toggle <cronJobId> off

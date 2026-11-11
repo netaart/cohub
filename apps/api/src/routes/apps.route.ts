@@ -49,6 +49,7 @@ import { featureGateResponse } from "../lib/feature-gate.js";
 import { createAppPublicUrl } from "../lib/app-public-url.js";
 import { applyRequestSourceToMeta, getRequestSource } from "../lib/request-source.js";
 import { dispatchAppVersionPublished } from "../app-events.js";
+import { notifyAppListChanged } from "../user-lists.js";
 import { parseHttpsOriginHostname, releaseAppDomainsInTransaction, resolveCustomDomainBinding } from "../app-domains.js";
 import { resolveAppVersionSources } from "../app-version-source.js";
 import { requiresSpaceAppAccess } from "../app-access.js";
@@ -979,6 +980,7 @@ router.post("/", async (c) => {
         });
       });
     }
+    notifyAppListChanged(result.app);
     return c.json({
       ...wrapAppRecord(wire, serializeApp(result.app)),
     }, 201);
@@ -1063,6 +1065,7 @@ async function updateApp(
     throw error;
   });
   if (!app) return c.json({ message: "slug already exists" }, 409);
+  notifyAppListChanged(app);
   return c.json({
     ...wrapAppRecord(wire, serializeApp(app)),
   });
@@ -1151,6 +1154,7 @@ async function publishAppVersion(
         error,
       });
     });
+    notifyAppListChanged(result.app);
     return c.json({
       ...wrapAppRecord(wire, serializeApp(result.app)),
       version: serializeAppVersion(result.version, source),
@@ -1235,6 +1239,7 @@ router.delete("/:id", async (c) => {
     return releasedDomains;
   });
   await afterDomainsReleased();
+  notifyAppListChanged(app);
   return c.json({ ok: true });
 });
 

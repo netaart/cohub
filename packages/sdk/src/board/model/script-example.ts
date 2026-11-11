@@ -243,3 +243,61 @@ export function draw(ctx, { width, height, state }) {
   ctx.fill();
 }
 `;
+
+export const BOARD_SCRIPT_SPARKS_EXAMPLE = `export default function (ctx) {
+  ctx.state.sparks = [];
+  ctx.state.peers = [];
+  ctx.hitRegions({ pad: { target: "self", label: "Make sparks" } });
+
+  // Every viewer receives the burst, this one included, so everyone sees it.
+  ctx.on("click", ({ point }) => ctx.broadcast("burst", { x: point.x, y: point.y }));
+
+  let stop = null;
+  const step = ({ dt }) => {
+    const s = dt / 1000;
+    ctx.state.sparks = ctx.state.sparks.filter((p) => {
+      p.x += p.vx * s;
+      p.y += p.vy * s;
+      p.vy += 240 * s;
+      p.life -= s * 1.4;
+      return p.life > 0;
+    });
+    if (!ctx.state.sparks.length && stop) {
+      stop();
+      stop = null;
+    }
+  };
+  ctx.on("burst", ({ data, peer }) => {
+    for (let i = 0; i < 24; i++) {
+      const angle = ctx.random() * Math.PI * 2;
+      const speed = 60 + ctx.random() * 140;
+      ctx.state.sparks.push({ x: data.x, y: data.y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 1, color: peer?.color ?? "#e67845" });
+    }
+    stop ??= ctx.onFrame(step);
+  });
+
+  ctx.on("peerschange", ({ data }) => {
+    ctx.state.peers = data;
+    ctx.invalidate();
+  });
+}
+
+export function draw(ctx, { state }) {
+  for (const peer of state.peers) {
+    if (!peer.point) continue;
+    ctx.strokeStyle = ctx.fillStyle = peer.color;
+    ctx.globalAlpha = peer.pressed ? 0.35 : 0.6;
+    ctx.beginPath();
+    ctx.arc(peer.point.x, peer.point.y, 18, 0, Math.PI * 2);
+    if (peer.pressed) ctx.fill();
+    else ctx.stroke();
+  }
+  for (const p of state.sparks) {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2 + 3 * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+`;

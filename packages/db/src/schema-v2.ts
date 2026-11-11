@@ -1359,7 +1359,7 @@ export const taskRuns = v2.table(
   },
   (table) => ({
     jobIdUniqueIdx: uniqueIndex("v2_uq_task_runs_job_id").on(table.jobId),
-    cronJobIdx: index("v2_idx_task_runs_cron_job_id").on(table.cronJobId),
+    cronJobCreatedIdx: index("v2_idx_task_runs_cron_job_created").on(table.cronJobId, table.createdAt, table.id),
     spaceIdx: index("v2_idx_task_runs_space_id").on(table.spaceId),
     sessionIdx: index("v2_idx_task_runs_session_id").on(table.sessionId),
     turnIdx: index("v2_idx_task_runs_turn_id").on(table.turnId),

@@ -1,7 +1,13 @@
 import { boardScriptSenseOf, diffMergePatch, parseBoardScriptInputs } from "@neta-art/cohub/board";
 import type { BoardDocument, BoardExportRegion, BoardScriptBrowserEvent, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
-import type { BoardScriptHarness, BoardScriptHarnessPointer, BoardScriptHarnessPress } from "@neta-art/cohub/board/testing";
+import type {
+  BoardScriptHarness,
+  BoardScriptHarnessBroadcast,
+  BoardScriptHarnessPeer,
+  BoardScriptHarnessPointer,
+  BoardScriptHarnessPress,
+} from "@neta-art/cohub/board/testing";
 import { loadBoardDocument } from "./board-document.js";
 import { gpuResources, readSpaceFileBytes, resolveBundledFonts, runBoardExport } from "./board-export.js";
 import { openBoardGpu } from "./board-gpu/daemon.js";
@@ -39,7 +45,9 @@ export type BoardSimulationStep =
   | { key: string }
   | { select: string[] }
   | { input: BoardScriptBrowserEvent; data: unknown }
-  | { inputs: string };
+  | { inputs: string }
+  | { peers: BoardScriptHarnessPeer[] }
+  | { broadcast: string; to: string; data: unknown; from: string };
 
 function point(value: unknown, name: string): Point {
   if (!Array.isArray(value) || value.length !== 2 || !value.every((n) => typeof n === "number" && Number.isFinite(n)))
@@ -112,7 +120,32 @@ function parseStep(entry: unknown, index: number): BoardSimulationStep {
     if (typeof step.inputs !== "string" || !step.inputs) throw new Error(`${name}.inputs must be a Space file path`);
     return { inputs: step.inputs };
   }
-  throw new Error(`${name} must be one of wait, tool, tap, drag, move, pointer, key, select, input or inputs`);
+  if ("peers" in step) {
+    if (!Array.isArray(step.peers)) throw new Error(`${name}.peers must list viewers`);
+    return { peers: step.peers.map((entry, at) => parsePeer(entry, `${name}.peers[${at}]`)) };
+  }
+  if ("broadcast" in step) {
+    if (typeof step.broadcast !== "string" || !step.broadcast) throw new Error(`${name}.broadcast must be an event type`);
+    if (typeof step.to !== "string" || !step.to) throw new Error(`${name}.to must be the id of the script that receives it`);
+    if (step.from !== undefined && typeof step.from !== "string") throw new Error(`${name}.from must be a viewer name`);
+    return { broadcast: step.broadcast, to: step.to, data: step.data ?? null, from: (step.from as string | undefined) ?? "Peer" };
+  }
+  throw new Error(`${name} must be one of wait, tool, tap, drag, move, pointer, key, select, input, inputs, peers or broadcast`);
+}
+
+function parsePeer(entry: unknown, name: string): BoardScriptHarnessPeer {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`${name} must be an object`);
+  const peer = entry as Record<string, unknown>;
+  if (typeof peer.name !== "string" || !peer.name) throw new Error(`${name}.name must be a viewer name`);
+  if (peer.pointerType !== undefined && !POINTER_TYPES.includes(peer.pointerType as never))
+    throw new Error(`${name}.pointerType must be one of ${POINTER_TYPES.join(", ")}`);
+  if (peer.pressed !== undefined && typeof peer.pressed !== "boolean") throw new Error(`${name}.pressed must be a boolean`);
+  return {
+    name: peer.name,
+    ...(peer.at !== undefined ? { point: point(peer.at, `${name}.at`) } : {}),
+    ...(peer.pointerType !== undefined ? { pointerType: peer.pointerType as BoardScriptHarnessPeer["pointerType"] } : {}),
+    ...(peer.pressed !== undefined ? { pressed: peer.pressed } : {}),
+  };
 }
 
 export type BoardSimulationPress = BoardScriptHarnessPress & { step: number };
@@ -132,6 +165,8 @@ async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationS
       await harness.key("keyup", step.key);
     } else if ("input" in step) await harness.input(step.input, step.data as never);
     else if ("inputs" in step) await harness.replay(parseBoardScriptInputs(await readInputs(step.inputs)));
+    else if ("peers" in step) await harness.peers(step.peers);
+    else if ("broadcast" in step) await harness.broadcast(step.to, step.broadcast, step.data, { name: step.from });
     else await harness.select(step.select);
     if (press) presses.push({ step: index, ...press });
   }
@@ -143,6 +178,7 @@ export type BoardSimulationResult = {
   changes: Record<string, unknown>;
   errors: Record<string, string>;
   presses: BoardSimulationPress[];
+  broadcasts: BoardScriptHarnessBroadcast[];
   warnings: string[];
   shaders?: { count: number; compiled: boolean };
   image?: { bytes: Uint8Array; width: number; height: number };
@@ -236,7 +272,7 @@ export async function runBoardSimulation(options: {
     const presses: BoardSimulationPress[] = [];
     if (early && Object.keys(early.errors).length) {
       return {
-        time: Math.round(current.time), commits: 0, changes: {}, errors: { ...initial.errors, ...early.errors }, presses,
+        time: Math.round(current.time), commits: 0, changes: {}, errors: { ...initial.errors, ...early.errors }, presses, broadcasts: [],
         warnings: ["Stopped before the steps: fix the shader errors first."],
         shaders: { count: initial.shaders.length, compiled: early.compiled },
       };
@@ -259,6 +295,7 @@ export async function runBoardSimulation(options: {
       changes: (diffMergePatch(document, current.document) as Record<string, unknown> | undefined) ?? {},
       errors,
       presses,
+      broadcasts: [...current.broadcasts],
       warnings,
       ...(shaders.length ? { shaders: { count: shaders.length, compiled } } : {}),
     };

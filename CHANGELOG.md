@@ -4,6 +4,34 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.98 — 2026-11-11
+
+- **Library**: The Spaces manager becomes a Library where Spaces, Apps, and Scheduled prompts are peer lists. Apps and schedules list account-wide with filters, keyset pagination, next/last run, and Space summaries, open beside the list in their Space workspace, and stream `app.list.changed` / `cronjob.list.changed` events into IndexedDB-first views. SDK `user.listApps` / `user.listCronJobs`, `cohub apps ls --all`, and `cohub cron-jobs ls` cover it from code.
+- **Billing ledger**: Balance activity now pages by cursor through the full history, merging transactions and overages so results no longer stop at ~2,000 entries or cost about a second per page; filters narrow to usage, grants, or refunds, and Space wallets share the ledger. Billing moves first in settings and leads with balance, plan, and top-up actions above a day-grouped activity feed; the CLI adds `cohub me billing` and `--cursor` activity paging.
+- **Board animation playback**: Soundtracks lead a smooth wall-clock timeline instead of being rate-nudged, so audio no longer warbles on long frames. Camera tracks frame each animation's own viewport (1600×900 by default), scaled to fit every screen and export; grabbing the camera during playback continues from the visible shot, and the playback bar is the only chrome while watching.
+- **Collaborative Board scripts**: Scripts can call `ctx.broadcast(type, data)` to deliver effects to the same script on every viewer, bounded by JSON size, per-viewer rate, and gateway limits. `ctx.peers` / `peerschange` expose collaborator cursors in owner coordinates, press states ripple in each collaborator's color, and the script harness plus `cohub boards simulate` gain `peers` and `broadcast` steps.
+- **New Chat overview**: The New Chat profile shows the Space wallet balance beside the creation date and lists the three most recent Apps and scheduled jobs (two on mobile), with rows opening the existing managers and `View all` jumping to their lists.
+
+### Bug Fixes
+
+- **Large Boards**: Exports release effect canvases as they are drawn and flatten only visible pixels, cutting frame-over-frame memory growth from ~170 MB to a flat ~1 GB for a long 1080p export; script-history replay is ~7x faster and oversized images count only their pixels against the image budget. Zoom now fits Boards larger than what 5% shows, animation cameras and exports reach 0.1%, and `boards export --at start:end --fps N` exports frame ranges.
+- **Composer paste**: Pastes over 20k characters or 500 lines become `pasted-*.json` / `.txt` attachments instead of blocking the textarea, which previously froze for ~30 s on a 300 KB paste; attachment status copy is localized.
+- **Board apply safety**: `boards apply --replace` on a Board with items now requires `--base-version` and names the Board and version instead of silently deleting omitted items; styling an item never draws, such as a text stroke or the fill of a decoration `none` frame, returns a `STYLE_NOT_DRAWN` warning.
+
+## v2.97 — 2026-11-10
+
+- **Checkpoint save pipeline**: a normal save no longer touches the per-space cache repository — it reuses the parent's stat index, writes objects into a throwaway local repo, rebuilds only trees for changed directories, and derives the diff from a change list; cache reads repack geometrically once they exceed 16 packs.
+- **Checkpoint Board playback**: read a Board exactly as a checkpoint captured it via the new `GET /api/spaces/:id/checkpoints/:checkpointId/boards/:boardId`, `space.checkpoints(id).board(target)` and `.files.resolve(path)` in the SDK, `cohub boards get --checkpoint <id>` in the CLI, and a read-only Board view in the web app whose media resolves from the checkpoint.
+- **Streaming render performance**: realtime intermediate-message patches now keep unchanged message objects, and tool-call summaries are computed in a single pass over content, so long streaming turns no longer rebuild every message and tool view on each patch.
+
+### Bug Fixes
+
+- Large native Turns stage their messages across bounded `messages` frames before sealing, so a result over the 32 MiB frame limit settles instead of staying running forever.
+- A failed workspace bootstrap is now terminal: the sandbox skips setup and degrades like a failed setup, create-space reruns skip Spaces that are already ready, and late or duplicate failures cannot overwrite a ready bootstrap.
+- Workspace usage scans count hardlinks by inode and use 8 pdu threads, bounding worker memory on hardlink-heavy workspaces.
+- The Board canvas derives its logical size from the CSS box, so rendering lines up with taps on displays whose `devicePixelRatio` disagrees with the canvas device-pixel box.
+- Non-LLM turns, including direct shell and generation results, are kept out of the usage ledger, so they no longer trigger wallet billing or referral qualification.
+
 ## v2.96 — 2026-11-09
 
 - **Display recording and replay**: sandboxd records a screen from the video it already streams—no second encoder and no extra bitrate for viewers—into Space files, logs each Turn's steps for replay, and adds window-scoped `look`, `capture`, `tree` and `act`; live sessions show the agent's pointer and every viewer's cursor.

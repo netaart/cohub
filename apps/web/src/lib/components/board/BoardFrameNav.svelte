@@ -1,13 +1,16 @@
 <script lang="ts">
 import type { BoardReaction } from "@cohub/protocol/realtime";
-import { type BoardRegionDirection, type WorldPoint, worldPoint } from "@neta-art/cohub/board";
+import {
+	type BoardRegionDirection,
+	type WorldPoint,
+	worldPoint,
+} from "@neta-art/cohub/board";
 import {
 	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
 	ChevronUp,
 	Heart,
-	Play,
 	X,
 } from "lucide-svelte";
 import { onDestroy } from "svelte";
@@ -18,12 +21,10 @@ import { m } from "$lib/paraglide/messages.js";
 const {
 	editor,
 	isMobile = false,
-	onPresent,
 	onReact,
 }: {
 	editor: BoardEditor;
 	isMobile?: boolean;
-	onPresent?: () => void;
 	onReact?: (reaction: BoardReaction, at: WorldPoint) => void;
 } = $props();
 
@@ -156,7 +157,11 @@ const map = $derived.by(() => {
 
 function heart() {
 	const rect = current?.rect;
-	if (rect) onReact?.("heart", worldPoint(rect.x + rect.width / 2, rect.y + rect.height * 0.9));
+	if (rect)
+		onReact?.(
+			"heart",
+			worldPoint(rect.x + rect.width / 2, rect.y + rect.height * 0.9),
+		);
 }
 
 function go(id: string) {
@@ -255,17 +260,6 @@ function go(id: string) {
 					onclick={heart}
 				>
 					<Heart class="h-3.5 w-3.5" />
-				</button>
-			{/if}
-			{#if !presenting && onPresent}
-				<button
-					type="button"
-					class="tool-key"
-					title={m.board_present({}, { locale })}
-					aria-label={m.board_present({}, { locale })}
-					onclick={onPresent}
-				>
-					<Play class="h-3.5 w-3.5" />
 				</button>
 			{/if}
 			<button

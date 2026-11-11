@@ -1,8 +1,10 @@
 <script lang="ts">
 import type { BoardAnimation, BoardPlayMode } from "@cohub/protocol";
+import { BOARD_CAMERA_VIEWPORT } from "@neta-art/cohub/board";
 import { Trash2 } from "lucide-svelte";
 import { onMount } from "svelte";
 import { floatNear } from "$lib/actions/portal";
+import { boardAnimationReach } from "$lib/board/board-media-playback";
 import type { BoardEditor } from "$lib/board/editor.svelte";
 import Segmented from "$lib/components/Segmented.svelte";
 import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
@@ -25,6 +27,28 @@ const {
 
 const locale = $derived(getLocale());
 let panel = $state<HTMLDivElement | null>(null);
+
+const size = ({ width, height }: { width: number; height: number }) =>
+	`${width}x${height}`;
+const viewport = $derived(size(animation.viewport ?? BOARD_CAMERA_VIEWPORT));
+const viewports = $derived([
+	...new Set([
+		size(BOARD_CAMERA_VIEWPORT),
+		"1920x1080",
+		"1080x1920",
+		"1080x1080",
+		viewport,
+	]),
+]);
+const framesCamera = $derived(
+	boardAnimationReach(editor.document, animationId).camera,
+);
+
+function setViewport(value: string) {
+	const [width = 0, height = 0] = value.split("x").map(Number);
+	const unset = value === size(BOARD_CAMERA_VIEWPORT);
+	update({ viewport: unset ? undefined : { width, height } });
+}
 
 const update = (settings: Parameters<BoardEditor["updateAnimation"]>[1]) =>
 	editor.updateAnimation(animationId, settings);
@@ -122,6 +146,14 @@ onMount(() => {
 				onchange={(end) => update({ end })}
 			/>
 		</div>
+	{/if}
+	{#if framesCamera}
+		<label class="field">
+			<span>{m.board_animation_viewport({}, { locale })}</span>
+			<select class="input" value={viewport} onchange={(event) => setViewport(event.currentTarget.value)}>
+				{#each viewports as option (option)}<option value={option}>{option.replace("x", " × ")}</option>{/each}
+			</select>
+		</label>
 	{/if}
 	<button type="button" class="delete" onclick={remove}>
 		<Trash2 class="h-3.5 w-3.5" />

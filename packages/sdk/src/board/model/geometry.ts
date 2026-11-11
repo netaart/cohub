@@ -69,6 +69,7 @@ export function worldRect(
 
 export const MIN_BOARD_ZOOM = 0.05;
 export const MAX_BOARD_ZOOM = 8;
+const LEAST_BOARD_ZOOM = 0.001;
 const DEFAULT_BOARD_VIEWPORT: BoardViewport = { x: 0, y: 0, zoom: 1 };
 export const MIN_ITEM_SIZE = 24;
 export const FIT_PADDING = 64;
@@ -84,9 +85,18 @@ export function stableCullRect(view: Rect): Rect {
 	return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
-export function clampZoom(zoom: number) {
+export function clampZoom(zoom: number, min = LEAST_BOARD_ZOOM) {
 	const value = Number.isFinite(zoom) ? zoom : DEFAULT_BOARD_VIEWPORT.zoom;
-	return Math.min(MAX_BOARD_ZOOM, Math.max(MIN_BOARD_ZOOM, value));
+	return Math.min(MAX_BOARD_ZOOM, Math.max(min, value));
+}
+
+export function boardZoomFloor(content: Rect | null, surface: Size): number {
+	if (!content || content.width <= 0 || content.height <= 0 || surface.width <= 0 || surface.height <= 0) return MIN_BOARD_ZOOM;
+	const fit = Math.min(
+		Math.max(1, surface.width - FIT_PADDING * 2) / content.width,
+		Math.max(1, surface.height - FIT_PADDING * 2) / content.height,
+	);
+	return clampZoom(Math.min(MIN_BOARD_ZOOM, fit));
 }
 
 export function normalizeViewport(
@@ -665,9 +675,10 @@ export function zoomAround(
 	viewport: BoardViewport,
 	anchor: ScreenPoint,
 	nextZoom: number,
+	minZoom?: number,
 ): BoardViewport {
 	const current = normalizeViewport(viewport);
-	const zoom = Number.isFinite(nextZoom) ? clampZoom(nextZoom) : current.zoom;
+	const zoom = Number.isFinite(nextZoom) ? clampZoom(nextZoom, minZoom) : current.zoom;
 	const world = pointToWorld(anchor, current);
 	return {
 		x: anchor.x - world.x * zoom,
@@ -715,7 +726,7 @@ export function cameraForRect(content: Rect, surface: Size, options: BoardCamera
 	const fitZoom = options.fit === "cover"
 		? Math.max(availableW / content.width, availableH / content.height)
 		: Math.min(availableW / content.width, availableH / content.height);
-	const minZoom = clampZoom(options.minZoom ?? MIN_BOARD_ZOOM);
+	const minZoom = clampZoom(options.minZoom ?? 0);
 	const maxZoom = clampZoom(options.maxZoom ?? MAX_BOARD_ZOOM);
 	const zoom = Math.min(Math.max(fitZoom, Math.min(minZoom, maxZoom)), Math.max(minZoom, maxZoom));
 	const center = rectCenter(content);

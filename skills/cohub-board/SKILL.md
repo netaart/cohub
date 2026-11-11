@@ -97,9 +97,10 @@ cohub boards apply <board> -i -                # patch from stdin
 ```
 
 - Fields merge, arrays replace, `null` deletes, anything unmentioned stays.
-- `--replace` makes the document equal to the patch; anything it leaves out is deleted.
-  First run `cohub boards diff <board> --from <version you read>` to see what others
-  changed since (cards moved by someone playing on the web), and keep it.
+- `--replace` makes the document equal to the patch; anything it leaves out is deleted,
+  so a Board with items needs `--base-version <n>`, the version you read. First run
+  `cohub boards diff <board> --from <version you read>` to see what others changed
+  since (cards moved by someone playing on the web), and keep it.
 - Deleting a referenced item fails and lists the references; `--cascade` also
   deletes its children and tracks.
 - Concurrent writes merge; `--base-version <n>` fails instead — use it when
@@ -150,6 +151,15 @@ spawn items running modules already in its scope. Draw in item-local coordinates
 within `width` × `height`; export `pixelated` and `frameRate` for pixel art. Prefer
 native text for editable, inspectable labels; Canvas text can use `Geist` or
 `Geist Mono`.
+
+Every viewer runs the scripts on their own screen, so local effects stay local.
+When an effect answers input, such as sparks on a click, `ctx.broadcast(type, data)`
+it and draw it in an `on(type)` handler: every viewer receives it, this one included,
+with `peer` naming who sent it (`null` here). `peerschange` and `ctx.peers` give the
+other viewers' cursors for effects that follow them. Keep saving with `commit()` from
+your own input: answer another viewer's broadcast with presentation only, since its
+handler cannot commit, and a commit after an `await` there may save twice.
+`cohub boards examples sparks --module` shows both.
 
 `board.scripts` attaches a module to the Board itself: it reaches every item and
 draws over the whole view. For GPU effects a module exports `shader` (GLSL passes,
@@ -221,7 +231,8 @@ the bracket keeps the pattern from matching the shell running `pkill` itself.
 
 An animation is one timeline of tracks; each track drives one property of one
 target by JSON path. `target: "camera"` moves the view through `focus`, `zoom`,
-`center` and `shake`. Write tracks directly, or generate them — these helpers
+`center` and `shake`, framed for the animation's `viewport` (1600×900 unless set);
+every screen and `--camera` export shows that framing scaled to fit. Write tracks directly, or generate them — these helpers
 print JSON and never write:
 
 ```bash
@@ -268,7 +279,7 @@ cohub boards export <board> -o /tmp/board.png
 cohub boards export <board> --items a,b -o /tmp/part.png       # or --frame <id>, --rect x,y,w,h
 cohub boards export <board> --frame s2 -o /tmp/page.png        # the frame as a page, its shaders included
 cohub boards export <board> --animation intro --at 1s,5s,9s --camera --size 1600x900 -o /tmp/preview-%d.png
-cohub boards export <board> --animation intro --at 0:10s:40ms --camera -o /tmp/intro.mp4
+cohub boards export <board> --animation intro --at 0:10s --fps 24 --camera -o /tmp/intro.mp4
 ```
 
 `--size` sets the output pixels of a camera export; it never sizes frames.

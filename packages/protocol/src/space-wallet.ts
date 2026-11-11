@@ -16,7 +16,7 @@ export type SpaceWalletActivity = {
 
 export type SpaceWalletActivityPage = {
   items: SpaceWalletActivity[];
-  hasMore: boolean;
+  nextCursor: string | null;
 };
 
 export const SPACE_WALLET_TRANSFER_MIN_USD = 1;

@@ -167,6 +167,7 @@ cohub -s <spaceId> apps publish demo --file ./dist/index.html
 cohub -s <spaceId> apps publish site --dir ./dist
 cohub -s <spaceId> apps publish site --source workspace --dir dist
 cohub -s <spaceId> apps ls --json
+cohub apps ls --all --filter mine --json
 cohub apps stats <workId|url|username/space/work>
 cohub apps domains add <app> app.example.com --yes
 cohub apps domains check <app> app.example.com
@@ -318,7 +319,7 @@ cohub -s <spaceId> boards get <boardId> --within s1
 
 `--since <version>` 只返回该版本之后的变更，放在 `changes` 中、按时间顺序排列，无变更时为 `[]`；变更不可用时返回整个 Board。
 
-`apply` 是唯一的写入方式：对文档应用 JSON Merge Patch，字段合并、`null` 删除、未提及的字段保持不变。`--replace` 让文档等于 patch 而非合并。`--dry-run` 校验但不写入，`--base-version` / `--mutation-id` 用于控制重试。
+`apply` 是唯一的写入方式：对文档应用 JSON Merge Patch，字段合并、`null` 删除、未提及的字段保持不变。`--replace` 让文档等于 patch 而非合并；Board 已有内容时需要同时传 `--base-version`。`--dry-run` 校验但不写入，`--base-version` / `--mutation-id` 用于控制重试。
 
 ```bash
 cohub -s <spaceId> boards apply <boardId> '{"items":{"title":{"props":{"text":"New title"}}}}'

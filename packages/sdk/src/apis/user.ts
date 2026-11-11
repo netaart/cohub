@@ -1,6 +1,16 @@
 import { LIKED_LABEL_NAME, LIKED_LABEL_SYSTEM_KEY, type LikeResourceType } from "@cohub/protocol";
 import { HttpError, type HttpTransport, type Fetch } from "../transport.js";
-import type { LabelAssignmentRecord, LabelListItem, LabelResourceType, MeResponse, SessionArchiveFilter, SessionRecord, SpaceRecord, UserActivityQuery, UserActivityResponse, UserProfile, UserRulesResponse, UserSessionsResponse, UserSessionSourceKey } from "../types.js";
+import type { UserAppFilter, UserCronJobFilter } from "@cohub/protocol";
+import type { LabelAssignmentRecord, UserAppListItem, UserCronJobListItem, UserListOptions, UserListPage, LabelListItem, LabelResourceType, MeResponse, SessionArchiveFilter, SessionRecord, SpaceRecord, UserActivityQuery, UserActivityResponse, UserProfile, UserRulesResponse, UserSessionsResponse, UserSessionSourceKey } from "../types.js";
+
+function userListQuery(options: UserListOptions<string>) {
+  const params = new URLSearchParams();
+  if (options.filter) params.set("filter", options.filter);
+  if (options.cursor) params.set("cursor", options.cursor);
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
 
 const usageDate = (value: string | Date) => value instanceof Date ? value.toISOString() : value;
 
@@ -55,6 +65,14 @@ export class UserApi {
       `/api/me/sessions${query ? `?${query}` : ""}`,
       { fetch },
     );
+  }
+
+  listApps(options: UserListOptions<UserAppFilter> = {}) {
+    return this.transport.request<UserListPage<UserAppListItem>>(`/api/me/apps${userListQuery(options)}`);
+  }
+
+  listCronJobs(options: UserListOptions<UserCronJobFilter> = {}) {
+    return this.transport.request<UserListPage<UserCronJobListItem>>(`/api/me/cron-jobs${userListQuery(options)}`);
   }
 
   getSession(sessionId: string, customFetch?: Fetch) {

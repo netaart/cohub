@@ -16,6 +16,7 @@ import {
 	type BoardPatch,
 	type BoardSettings,
 	BoardSettingsSchema,
+	type BoardStyle,
 	type BoardTrack,
 	BoardTrackSchema,
 	BoardVec2Schema,
@@ -344,6 +345,24 @@ function error(path: string, code: string, message: string): BoardDiagnostic {
 	return { severity: "error", code, path, message };
 }
 
+const OUTLINE = ["fill", "fillOpacity", "stroke", "strokeWidth", "dash", "radius", "trim"] as const satisfies readonly (keyof BoardStyle)[];
+
+function undrawnStyle(id: string, item: BoardItem, body: JsonRecord, created: boolean): BoardDiagnostic | null {
+	const [undrawn, reason]: readonly [readonly (keyof BoardStyle)[], string] =
+		item.type === "text"
+			? [OUTLINE.filter((key) => key !== "fill"), "text draws only its fill color"]
+			: item.type === "file"
+				? [OUTLINE, "file cards follow the theme"]
+				: item.type === "frame" && item.props.decoration === "none"
+					? [OUTLINE, 'a frame with decoration "none" draws no box; put a shape inside it instead']
+					: [[], ""];
+	const style = isRecord(body.style) ? body.style : {};
+	const all = created || (isRecord(body.props) && "decoration" in body.props);
+	const keys = undrawn.filter((key) => item.style[key] !== undefined && (all || key in style));
+	if (!keys.length) return null;
+	return { severity: "warning", code: "STYLE_NOT_DRAWN", path: `items.${id}.style`, message: `${keys.join(", ")} ${keys.length === 1 ? "has" : "have"} no effect: ${reason}.` };
+}
+
 function stripId(value: JsonRecord): JsonRecord {
 	if (!("id" in value)) return value;
 	const { id: _id, ...rest } = value;
@@ -366,6 +385,7 @@ export function applyBoardPatch(
 	}
 	const patch = parsedPatch.data as BoardPatch;
 	const diagnostics: BoardDiagnostic[] = [];
+	const warnings: BoardDiagnostic[] = [];
 	const keep = (existing: unknown): BoardKeepField | undefined => (options.keepUnknown ? keepAllBoardFields : existing ? keepBoardFieldsOf(existing) : undefined);
 	const nextItems = new Map<string, BoardItem | null>();
 	const nextAnimations = new Map<string, BoardAnimationHeader | null>();
@@ -416,6 +436,8 @@ export function applyBoardPatch(
 		}
 		if (current && boardJsonEquals(current, parsed.item)) continue;
 		nextItems.set(id, parsed.item);
+		const warning = undrawnStyle(id, parsed.item, body, replacing);
+		if (warning) warnings.push(warning);
 	}
 
 	for (const [id, value] of Object.entries(patch.animations ?? {})) {
@@ -513,7 +535,7 @@ export function applyBoardPatch(
 	for (const [id, value] of nextAnimations) {
 		if (value !== null) continue;
 		for (const ref of state.trackRefs(id)) {
-			if (ref.animation === id || track(ref.animation, ref.track) === undefined) continue;
+			if (ref.animation === id || track(ref.animation, ref.track)?.target !== id) continue;
 			if (options.cascade) setTrack(ref.animation, ref.track, null);
 			else diagnostics.push(error(`animations.${id}`, "ANIMATION_REFERENCED", `${id} is nested in ${ref.animation}.${ref.track}; delete the track or use cascade`));
 		}
@@ -619,7 +641,7 @@ export function applyBoardPatch(
 			slot(after.tracks, animationId)[trackId] = value;
 		}
 	}
-	return { ok: true, before: withoutEmpty(before), after: withoutEmpty(after), diagnostics: [] };
+	return { ok: true, before: withoutEmpty(before), after: withoutEmpty(after), diagnostics: warnings };
 }
 
 function validateTrack(

@@ -1,5 +1,5 @@
 
-import type { BoardDocument, BoardItem, BoardScript } from "@cohub/protocol/board-model";
+import type { BoardAnimationHeader, BoardDocument, BoardItem, BoardScript } from "@cohub/protocol/board-model";
 import type { BoardPlaybackCommand, BoardPlaybackSnapshot } from "@cohub/protocol";
 import type {
 	BoardCameraOverride,
@@ -22,6 +22,7 @@ export type BoardPlayerFrame = {
 	items: ReadonlyMap<string, BoardItem>;
 	scripts: ReadonlyMap<string, BoardScript>;
 	camera: BoardCameraOverride;
+	cameraViewport: BoardAnimationHeader["viewport"];
 	time: number;
 	playbackTime: number | null;
 	running: boolean;
@@ -121,6 +122,7 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 				items: evaluation?.items ?? new Map(),
 				scripts: evaluation?.scripts ?? new Map(),
 				camera: evaluation?.camera ?? {},
+				cameraViewport: evaluation?.cameraViewport,
 				time: playbackTime ?? now - openedAt,
 				playbackTime,
 				running,

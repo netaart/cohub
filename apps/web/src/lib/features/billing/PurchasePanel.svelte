@@ -16,6 +16,7 @@ import {
 	recommendedPack,
 } from "./product";
 import type { PurchaseFlow } from "./purchase.svelte";
+import { onBillingChange } from "./refresh";
 
 const {
 	flow,
@@ -130,8 +131,7 @@ $effect(() => {
 			needsRecheck = true;
 		});
 	};
-	window.addEventListener("cohub:billing-refresh", refresh);
-	return () => window.removeEventListener("cohub:billing-refresh", refresh);
+	return onBillingChange(refresh);
 });
 
 function switchFamily(next: PurchaseFocus) {

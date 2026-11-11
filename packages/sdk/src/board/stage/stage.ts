@@ -1,5 +1,12 @@
 import type { BoardPlaybackSnapshot } from "@cohub/protocol";
-import type { BoardScriptInputLog, BoardScriptOutput, BoardScriptSense, BoardScriptSenseState, BoardScriptSnapshot } from "../model/index.js";
+import type {
+	BoardScriptInputLog,
+	BoardScriptOutput,
+	BoardScriptPeer,
+	BoardScriptSense,
+	BoardScriptSenseState,
+	BoardScriptSnapshot,
+} from "../model/index.js";
 import { Application, Container, Graphics, type Renderer, RendererType, type Texture } from "pixi.js";
 import type { BoardActivation, BoardEditor, BoardPointerEvent } from "../editor/index.js";
 import { boardDragSlop, boardTextGestureWrap, isCreationBoardTool, isTouchLikePointer, resizeCursorForHandle } from "../editor/index.js";
@@ -76,6 +83,7 @@ import { createBoardPointerGestures } from "./pointer-gestures.js";
 import { createBoardScriptController } from "./script-controller.js";
 import { type BoardConsentSense, createBoardSenses } from "./senses.js";
 import { type BoardMediaClock, type BoardMediaLoop, createBoardMediaClock } from "./media-clock.js";
+import { createBoardTimelineClock } from "./timeline-clock.js";
 import { createBoardLiveScheduler } from "./live.js";
 import { type BoardStageShaders, createBoardStageShaders } from "./shaders.js";
 import { type BoardLiveStroke, createBoardScene } from "./scene.js";
@@ -84,8 +92,8 @@ import { createTextResolutionTracker } from "./text-resolution-tracker.js";
 import { type BoardItemView, type BoardItemViewStats, createBoardItemViewLayer } from "./views.js";
 import { createBoardWheel } from "./wheel.js";
 import type { BoardLod } from "../render/lod.js";
-import type { BoardPresence } from "../presence/index.js";
-import { boardReactionBurst, defaultBoardPeerColor, drawBoardPresence } from "./presence.js";
+import type { BoardPresence, BoardPresencePeer } from "../presence/index.js";
+import { boardReactionBurst, boardScriptPeerInfo, boardScriptPeers, defaultBoardPeerColor, drawBoardPresence } from "./presence.js";
 
 export type BoardStageTheme = {
 	key: string;
@@ -190,7 +198,7 @@ export type BoardStage = {
 	whenGesture(run: () => void): () => void;
 	recordInputs(onFull?: () => void): { stop(): BoardScriptInputLog };
 	/** Video and audio a timeline plays; `blocked` while the browser holds back sound until an interaction. */
-	readonly media: Pick<BoardMediaClock, "blocked" | "unlock" | "subscribe">;
+	readonly media: Pick<BoardMediaClock, "blocked" | "muted" | "setMuted" | "unlock" | "subscribe">;
 	/** Play a short particle burst at a world point, such as a reaction; never written to the Board. */
 	burst(burst: BoardBurst): void;
 	stats(): BoardStageStats;
@@ -212,7 +220,7 @@ export type BoardStageStats = {
 	views: BoardItemViewStats;
 };
 
-const LIVE_CHANNELS = ["document", "scene", "selection", "camera", "tool", "interaction", "hover", "editing", "playback"] as const;
+const LIVE_CHANNELS = ["document", "scene", "motion", "selection", "camera", "tool", "interaction", "hover", "editing", "playback"] as const;
 
 const DEFAULT_THEME: BoardStageTheme = { key: "dark", ...boardRenderTheme("dark") };
 
@@ -278,6 +286,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		senses.sync(scripts.senses, active && !disposed);
 		if (senses.wanted !== wanted) notifySenses();
 	};
+	const peerColor = (actorId: string) => (options.peerColor ?? ((id: string) => defaultBoardPeerColor(id, theme())))(actorId);
+	let scriptPeers: { from: readonly BoardPresencePeer[] | null; look: string; list: readonly BoardScriptPeer[] } = { from: null, look: "", list: [] };
 	const query = (value: string) => (typeof matchMedia === "function" ? matchMedia(value) : null);
 	const coarsePointer = query("(pointer: coarse)");
 	const portrait = query("(orientation: portrait)");
@@ -294,6 +304,15 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		}),
 		onSensesChange: syncSenses,
 		leader: options.scriptLeader ?? (presence ? () => presence.leadsScripts() : undefined),
+		peers: presence && {
+			list: () => {
+				const peers = presence.peers;
+				const look = theme().key;
+				if (peers !== scriptPeers.from || look !== scriptPeers.look) scriptPeers = { from: peers, look, list: boardScriptPeers(peers, peerColor) };
+				return scriptPeers.list;
+			},
+			broadcast: (owner, type, data) => presence.broadcast(owner, type, data),
+		},
 		requestFrame: () => scheduleTick(),
 		requestScriptFrame: () => scheduleScriptTick(),
 		createHost: (callbacks) => createBoardScriptHost({
@@ -321,6 +340,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	const clock = createBoardFrameClock();
 	const device = defaultBoardDeviceBudget();
 	const currentLod = () => options.lod?.() ?? device.lod;
+	const timeline = createBoardTimelineClock();
+	let lastWall = 0;
 	const media = createBoardMediaClock({
 		source: options.source,
 		limit: device.media,
@@ -638,7 +659,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	}
 
 	function followCamera(frame: BoardPlayerFrame, renderScene: BoardScene): BoardViewport {
-		return resolveBoardAnimationCamera(frame.camera, (id) => renderScene.get(id)?.frame, surface, frame.time, editor.camera);
+		return resolveBoardAnimationCamera(frame.camera, (id) => renderScene.get(id)?.frame, surface, frame.time, editor.camera, frame.cameraViewport);
 	}
 
 	let effectSampler: ReturnType<typeof createBoardAnimationSampler> | undefined;
@@ -773,7 +794,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			drawBoardPresence(overlay, presence.peers, {
 				zoom: camera.zoom,
 				look: current,
-				color: options.peerColor ?? ((actorId) => defaultBoardPeerColor(actorId, current)),
+				color: peerColor,
 			});
 		options.drawOverlay?.(overlay, { zoom: camera.zoom, theme: current, scene: renderScene });
 		drawTransient(overlay, current);
@@ -1053,7 +1074,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		scripts.update();
 		player.enter(editor.consumeRecentlyAdded(), editor.document);
 		const playback = options.playback?.() ?? null;
-		const frame = player.frame(editor.document, playback, performance.now(), Date.now(), editor.playhead?.animationId ?? null);
+		const now = performance.now();
+		const wall = timeline.at(now);
+		const frame = player.frame(editor.document, playback, now, wall, editor.playhead?.animationId ?? null);
 		const previews = previewItems();
 		const moving = new Map<string, BoardItem>(previews);
 		for (const [id, item] of frame.items) moving.set(id, item);
@@ -1067,12 +1090,14 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (editor.playhead && effectSampler) {
 			const { evaluation } = effectSampler.at(editor.playhead.time);
 			frame.camera = evaluation.camera;
+			frame.cameraViewport = evaluation.cameraViewport;
 			frame.scripts = evaluation.scripts.size ? new Map([...frame.scripts, ...evaluation.scripts]) : frame.scripts;
 			frame.time = editor.playhead.time;
 		}
 		scripts.animate(frame.scripts);
 		const follows = editor.cameraPolicy === "follow" && Object.keys(frame.camera).length > 0;
 		playbackCamera = follows ? followCamera(frame, editor.scene) : null;
+		editor.followCamera(playbackCamera);
 		const camera = renderCamera();
 		scripts.compose(camera, moving.size > 0);
 
@@ -1095,13 +1120,15 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			toned.clear();
 		}
 		textResolution.update(textureScale());
-		media.sync({
+		const skew = media.sync({
 			media: boardTimedMedia(renderScene, timedMediaIds()),
 			loops: syncLive(ids, camera, renderScene),
-			now: performance.now(),
+			now: wall,
 			scrubbing: editor.playhead !== null,
 			onScreen: (id) => (ids ? ids.has(id) : true),
 		});
+		timeline.lead(skew, playback?.status === "playing" ? playback.commandId : null, wall - lastWall);
+		lastWall = wall;
 		const context = renderContext(current, renderScene, frame.time);
 		lastContext = context;
 		if (animationId && effectSampler) {
@@ -1202,8 +1229,13 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		return toBoardPointerEvent(event, host, renderCamera(), event.type === "pointermove" && editor.interaction.type === "drawing");
 	}
 
+	function unlockGesture() {
+		senses.unlock();
+		media.unlock();
+	}
+
 	function scriptKey(event: KeyboardEvent): boolean {
-		if (event.type === "keydown") senses.unlock();
+		if (event.type === "keydown") unlockGesture();
 		const { type, key, shiftKey, altKey, ctrlKey, metaKey } = event;
 		return scripts.key({ type, key, shiftKey, altKey, ctrlKey, metaKey });
 	}
@@ -1214,29 +1246,27 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	const pointers = createBoardPointerGestures(host, { move: routePointerMove, end: handlePointerUp });
 
-	function onPointer(phase: BoardStagePointerPhase, event: PointerEvent, input: BoardPointerEvent) {
-		if (presence) {
-			const gone = phase === "leave" || (phase === "up" && (event.type === "pointercancel" || event.pointerType !== "mouse"));
-			const pointerType = event.pointerType === "pen" || event.pointerType === "touch" ? event.pointerType : "mouse";
-			presence.setCursor(gone ? null : { x: input.world.x, y: input.world.y, pointerType });
-		}
-		return options.onPointer?.(phase, event, input);
+	function shareCursor(phase: BoardStagePointerPhase, event: PointerEvent, input: BoardPointerEvent) {
+		if (!presence) return;
+		const gone = phase === "leave" || (phase === "up" && (event.type === "pointercancel" || event.pointerType !== "mouse"));
+		const pointerType = event.pointerType === "pen" || event.pointerType === "touch" ? event.pointerType : "mouse";
+		presence.setCursor(gone ? null : { x: input.world.x, y: input.world.y, pointerType, pressed: event.buttons !== 0 });
 	}
 
 	function handlePointerDown(event: PointerEvent) {
 		if (!active || inViews(event)) return;
-		if (event.pointerType === "mouse") senses.unlock();
+		if (event.pointerType === "mouse") unlockGesture();
 		lastPointerType = event.pointerType;
 		if (event.button === 2) return;
-		editor.takeCameraControl();
 		const input = toInput(event);
+		shareCursor("down", event, input);
 		const script = scripts.pointer("down", input);
 		if (script) host.focus({ preventScroll: true });
 		if (script === "capture") {
 			pointers.start(event);
 			return;
 		}
-		if (onPointer("down", event, input) === false) {
+		if (options.onPointer?.("down", event, input) === false) {
 			if (script === "tap") scripts.pointer("up", { ...input, cancelled: true });
 			return;
 		}
@@ -1311,11 +1341,12 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	function routePointerMove(event: PointerEvent) {
 		const input = toInput(event);
+		shareCursor("move", event, input);
 		const script = scripts.pointer("move", input);
 		if (script === "capture") return;
 		longPress.move(event);
 		taps.move(event);
-		if (onPointer("move", event, input) === false) return autoPan.stop();
+		if (options.onPointer?.("move", event, input) === false) return autoPan.stop();
 		autoPan.move(event);
 		if (script === "tap") return;
 		if (keyPress?.input.pointerId === event.pointerId) {
@@ -1328,13 +1359,14 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	}
 
 	function handlePointerUp(event: PointerEvent) {
-		if (active && event.pointerType !== "mouse" && event.type === "pointerup") senses.unlock();
+		if (active && event.pointerType !== "mouse" && event.type === "pointerup") unlockGesture();
 		const input = toInput(event);
+		shareCursor("up", event, input);
 		const script = scripts.pointer("up", input);
 		if (script === "capture") return;
 		longPress.end(event);
 		autoPan.stop();
-		if (onPointer("up", event, input) === false) {
+		if (options.onPointer?.("up", event, input) === false) {
 			held = null;
 			taps.cancel();
 			return settlePointer(event);
@@ -1374,8 +1406,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	function handlePointerLeave(event: PointerEvent) {
 		if (event.buttons !== 0) return;
-		scripts.pointer("leave", toInput(event));
-		if (onPointer("leave", event, toInput(event)) === false) return;
+		const input = toInput(event);
+		shareCursor("leave", event, input);
+		scripts.pointer("leave", input);
+		if (options.onPointer?.("leave", event, input) === false) return;
 		editor.pointerLeave();
 		hoverHit(null);
 	}
@@ -1384,7 +1418,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (editor.frameView?.present) return;
 		const item = editor.pickAt(point, pointerType);
 		if (options.onDoubleClick?.(item, point) === true) return;
-		if (editor.readonly || editor.tool === "play") return editor.toggleFrameAt(point);
+		if (editor.readonly || editor.tool === "play") {
+			if (!playbackCamera) editor.toggleFrameAt(point);
+			return;
+		}
 		if (item && editor.registry.capabilities(item).canEdit) {
 			editor.editingId = item.id;
 			return;
@@ -1424,6 +1461,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		? [
 				presence.subscribe(scheduleTick),
 				presence.onReaction(({ reaction, at }) => burst(boardReactionBurst(reaction, at, theme()))),
+				presence.onBroadcast(({ owner, event, data, peer }) => scripts.receive(owner, event, data, boardScriptPeerInfo(peer, peerColor))),
 			]
 		: [];
 	const stopPresence = () => {
@@ -1633,6 +1671,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			get blocked() {
 				return media.blocked;
 			},
+			get muted() {
+				return media.muted;
+			},
+			setMuted: (muted) => media.setMuted(muted),
 			unlock: () => media.unlock(),
 			subscribe: (listener) => media.subscribe(listener),
 		},

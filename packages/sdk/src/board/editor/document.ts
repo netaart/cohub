@@ -89,7 +89,11 @@ export function createDocumentModule(ctx: EditorContext) {
 		for (const id of changed) {
 			if (draft.has(id) || evaluated.has(id) || sameJson(previous.get(id), played.get(id))) changed.delete(id);
 		}
-		if (changed.size) rescene(changed);
+		if (changed.size) move(changed);
+	}
+
+	function move(ids: Iterable<string>) {
+		ctx.channels.reroute("scene", "motion", () => rescene(ids));
 	}
 
 	function setScriptItems(items: ReadonlyMap<string, BoardItem>): string[] {
@@ -105,7 +109,8 @@ export function createDocumentModule(ctx: EditorContext) {
 			if (before.z !== after.z) restacked.add(after.parent ?? "");
 			return false;
 		});
-		rescene(structural || [...restacked].some(reordered) ? undefined : changed);
+		if (structural || [...restacked].some(reordered)) rescene();
+		else move(changed);
 		return changed;
 	}
 

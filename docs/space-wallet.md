@@ -104,7 +104,7 @@ cohub -s SPACE spaces wallet transfer-status REQUEST_UUID
 cohub -s SPACE spaces wallet recharge PRODUCT
 cohub -s SPACE spaces wallet confirm REQUEST_UUID
 cohub -s SPACE spaces wallet public-funding on
-cohub -s SPACE spaces wallet activity --page 1 --json
+cohub -s SPACE spaces wallet activity --json
 ```
 
 ## Verification

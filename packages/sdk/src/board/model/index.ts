@@ -2,6 +2,7 @@ export * from "@cohub/protocol/board-model";
 export * from "@cohub/protocol/board-layout";
 export * from "@cohub/protocol/board-patch";
 export {
+	BOARD_CAMERA_VIEWPORT,
 	BOARD_SCHEMA_TARGETS,
 	boardJsonSchema,
 	boardSchemaOverview,

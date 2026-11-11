@@ -7,7 +7,7 @@ export function parseBoardTime(value: string, name = "time"): number {
   return Math.round(Number(match[1]) * (UNITS[(match[2] ?? "").toLowerCase()] ?? 1) * 1000) / 1000;
 }
 
-export function parseBoardTimes(value: string, name = "--at", limit = 10_000): number[] {
+export function parseBoardTimes(value: string, name = "--at", limit = 10_000, fps?: number): number[] {
   if (value.includes(",")) {
     const entries = value.split(",");
     if (entries.length > limit) throw new Error(`${name}: frame count exceeds the limit of ${limit}`);
@@ -15,11 +15,14 @@ export function parseBoardTimes(value: string, name = "--at", limit = 10_000): n
   }
   const parts = value.split(":");
   if (parts.length === 1) return [parseBoardTime(value, name)];
-  if (parts.length !== 3) throw new Error(`${name}: expected a time or start:end:step`);
-  const [start, end, step] = parts.map((part) => parseBoardTime(part, name)) as [number, number, number];
-  if (step <= 0) throw new Error(`${name}: step must be greater than zero`);
+  if (parts.length === 2 && !fps) throw new Error(`${name}: start:end needs --fps, or write start:end:step`);
+  if (parts.length !== 2 && parts.length !== 3) throw new Error(`${name}: expected a time or start:end:step`);
+  const [start, end, written] = parts.map((part) => parseBoardTime(part, name)) as [number, number, number | undefined];
+  const step = written ?? 1000 / (fps as number);
+  if (!(step > 0)) throw new Error(`${name}: step must be greater than zero`);
   if (end < start) throw new Error(`${name}: end must not be before start`);
-  const count = Math.floor((end - start) / step + 1e-9) + 1;
+  // Rounded steps (41.667ms) still reach the end.
+  const count = Math.floor((end - start + Math.min(0.5, step / 2)) / step) + 1;
   if (count > limit) throw new Error(`${name}: ${count} frames exceed the limit of ${limit}`);
   return Array.from({ length: count }, (_, index) => Math.round((start + index * step) * 1000) / 1000);
 }

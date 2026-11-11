@@ -19,7 +19,7 @@ import { redactCrossSpaceSessionForks } from "../session-fork-visibility.js";
 import { listSessionForksForSessions } from "../session-forks.js";
 import { pickSessionsPreservingOrder } from "../session-list.js";
 import {
-  attachSessionSpaceSummaries,
+  attachSpaceSummaries,
   encodeSessionListCursor,
   hydrateSessionParticipantProfiles,
   InvalidSessionListCursorError,
@@ -320,7 +320,7 @@ router.get("/sessions", async (c) => {
     const { sessions, fullViewSpaceIds, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source, archive });
     const visibleSessionIds = sessions.map((session) => session.id);
     const [withSpaces, forks] = await Promise.all([
-      hydrateSessionParticipantProfiles(sessions).then(attachSessionSpaceSummaries),
+      hydrateSessionParticipantProfiles(sessions).then(attachSpaceSummaries),
       includeForks
         ? listSessionForksForSessions(visibleSessionIds)
           .then((rows) => redactCrossSpaceSessionForks(rows, { fullViewSpaceIds, visibleSessionIds }))

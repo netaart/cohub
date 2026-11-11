@@ -67,14 +67,17 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     if [ -n "$GITEA_NPM_TOKEN" ]; then sed -i '/git.talesofai.com\/api\/packages\/talesofai\/npm\/:_authToken=/d' /root/.npmrc; fi; \
   fi
 
-# Workspace usage scanner. Upstream ships Linux binaries for amd64 only; other
+# Workspace usage scanner. A fork of pdu 0.24.0 that counts hardlinks by inode
+# instead of keeping their paths, which bounds memory on hardlink-heavy workspaces:
+# https://github.com/markbang/parallel-disk-usage/releases/tag/0.24.0-cohub.1
+# It still reports version 0.24.0. Only amd64 binaries are published; other
 # architectures get no pdu and the worker disables workspace usage at startup.
 FROM node:26-slim AS pdu
 ARG TARGETARCH
 RUN mkdir -p /out && if [ "$TARGETARCH" = "amd64" ] || [ -z "$TARGETARCH" ]; then \
     apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
-    curl -fsSL --retry 3 https://github.com/KSXGitHub/parallel-disk-usage/releases/download/0.24.0/pdu-x86_64-unknown-linux-musl -o /out/pdu && \
-    echo 'b991a68c1555d9144ea8ef2dd8cab91efb0b90ec8be53fdec4d0b2dd0e596f56  /out/pdu' | sha256sum -c - && \
+    curl -fsSL --retry 3 https://github.com/markbang/parallel-disk-usage/releases/download/0.24.0-cohub.1/pdu-x86_64-unknown-linux-musl -o /out/pdu && \
+    echo 'f3ce039bb321c5613fff29780946ed21163919074cb6a0f676517c2143717b88  /out/pdu' | sha256sum -c - && \
     chmod 755 /out/pdu; \
   fi
 

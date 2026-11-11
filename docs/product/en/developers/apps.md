@@ -257,6 +257,7 @@ if (result.status === "joined") {
 | Create generation task | `generation.create` | **viewer only** |
 | Poll tasks, read task runs | `taskrun.view` | app or viewer |
 | List viewer's spaces / sessions / activity / all tasks | `user.space.list` / `user.session.list` / `user.usage.read` / `user.taskrun.list` | **viewer only** |
+| List viewer's Apps / scheduled prompts across spaces | `user.app.list` / `user.cronjob.list` | **viewer only** |
 | Create a Space for the viewer | requested scopes on the new Space | **viewer consent** |
 | Join a Space with an invite | requested scopes on the joined Space | **viewer consent** |
 | Create, list, revoke invite links | `member.manage` | **viewer only** |

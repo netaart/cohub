@@ -431,7 +431,7 @@ stop();
 ```ts
 const wallet = client.space(spaceId).wallet;
 const balance = await wallet.get();
-const activity = await wallet.activities(1);
+const activity = await wallet.activities(); // older: wallet.activities(activity.nextCursor)
 
 // Funding: tiers (shared by both payment paths) and your transferable balance.
 const funding = await wallet.funding();
@@ -494,6 +494,18 @@ commerce, and App Actions — are documented in one place:
 
 Runtime APIs only work inside a published App; local pages get `null` from
 `context()`.
+
+### Balance and activity
+
+`billing.getCredits()` returns the balance with credit sources that can still be spent; pass `{ includeExhausted: true }` to also list depleted and expired ones. `billing.getBalanceActivities({ filter, limit, cursor })` reads activity newest first — usage charges for one operation are combined into a single entry — and returns `nextCursor` until the end of history. `filter` narrows to `usage`, `grant`, or `refund`.
+
+```ts
+let cursor: string | null = null;
+do {
+  const { activities } = await client.billing.getBalanceActivities({ filter: "grant", cursor });
+  cursor = activities.nextCursor;
+} while (cursor);
+```
 
 ### Subscription payment recovery
 

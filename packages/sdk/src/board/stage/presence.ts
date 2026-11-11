@@ -7,7 +7,8 @@ import {
 	pickBoardColor,
 	worldPoint,
 } from "../model/index.js";
-import { boardPeerColor, type BoardPresencePeer } from "../presence/index.js";
+import type { BoardScriptPeer, BoardScriptPeerInfo } from "../model/script.js";
+import { boardPeerColor, type BoardPresenceBroadcast, type BoardPresencePeer } from "../presence/index.js";
 import type { BoardBurst } from "./bursts.js";
 
 type Look = { colors: BoardShapeColors; colorScheme: "dark" | "light" };
@@ -30,6 +31,24 @@ export function boardReactionBurst(reaction: BoardReaction, at: { x: number; y: 
 
 export function defaultBoardPeerColor(actorId: string, look: Look): number {
 	return pickBoardColor(look.colors, boardPeerColor(actorId), look.colorScheme).stroke;
+}
+
+const cssColor = (color: number) => `#${color.toString(16).padStart(6, "0")}`;
+
+export function boardScriptPeerInfo(peer: BoardPresenceBroadcast["peer"], color: (actorId: string) => number): BoardScriptPeerInfo {
+	return { id: peer.connectionId, actorId: peer.actorId, name: peer.actorName, color: cssColor(color(peer.actorId)) };
+}
+
+export function boardScriptPeers(peers: readonly BoardPresencePeer[], color: (actorId: string) => number): BoardScriptPeer[] {
+	return peers.map((peer) => {
+		const cursor = peer.state?.cursor ?? null;
+		return {
+			...boardScriptPeerInfo(peer, color),
+			point: cursor && { x: cursor.x, y: cursor.y },
+			pointerType: cursor?.pointerType ?? null,
+			pressed: cursor?.pressed === true,
+		};
+	});
 }
 
 export function drawBoardPresence(
