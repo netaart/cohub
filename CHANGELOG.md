@@ -4,6 +4,18 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.100 — 2026-11-11
+
+- **Declarative sandbox node pools**: A new `placements.yaml` platform config routes selected space owners to dedicated node pools with per-pool node selectors, tolerations, and request ratios, hot-reloaded by the API without a restart; pods carry a `cohub.run/sandbox-pool` label, and a spec change that crosses pools is queued as a pending restart because node selectors are immutable on running pods.
+- **Open Apps from any App list**: Apps in the Library list and the workspace side panel now open straight into the workspace app window via a deep-linkable `?window=app` route, with a separate Manage action and dimmed styling for unpublished apps.
+- **Unified 7-day Space profile**: Usage and scheduled-task stats collapse into one "Over the last N days" sentence with locale-aware separators, zero-like/zero-view stats are omitted, and revenue renders as `$` in every locale.
+- **Placement-aware image prewarming**: The prewarm script parses placement config with the API's own module inside its pod, warms every in-use pool in parallel, and skips pools with no matching nodes instead of failing the run.
+
+### Bug Fixes
+
+- Currency formatting uses narrow currency symbols, so zh-CN shows `$` rather than `US$` and mixed USD/CNY figures stay consistent.
+- The new-chat Space profile no longer prints zero likes or zero views, and empty stat lines are dropped entirely.
+
 ## v2.99 — 2026-11-11
 
 - **Friendly Space URLs**: Spaces are now addressable at `/:username/:spaceSlug` across the web app, links, mentions, SDK, and published Apps; a new slug-history table redirects renamed usernames and Space slugs to the canonical address, usernames are limited to one change per 12 hours, and client-side address resolution serves from the local cache while revalidating in the background.
