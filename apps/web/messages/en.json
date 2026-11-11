@@ -2508,6 +2508,35 @@
 			}
 		}
 	],
+	"space_profile_apps_views": [
+		{
+			"declarations": [
+				"input views",
+				"input viewCount",
+				"local viewsPlural = viewCount: plural"
+			],
+			"selectors": ["viewsPlural"],
+			"match": {
+				"viewsPlural=one": "Apps in this Space have drawn {#b}{views}{/b} view in total.",
+				"viewsPlural=*": "Apps in this Space have drawn {#b}{views}{/b} views in total."
+			}
+		}
+	],
+	"space_profile_apps_views_revenue": [
+		{
+			"declarations": [
+				"input views",
+				"input viewCount",
+				"input revenue",
+				"local viewsPlural = viewCount: plural"
+			],
+			"selectors": ["viewsPlural"],
+			"match": {
+				"viewsPlural=one": "Apps in this Space have drawn {#b}{views}{/b} view in total, earning {#b}{revenue}{/b}.",
+				"viewsPlural=*": "Apps in this Space have drawn {#b}{views}{/b} views in total, earning {#b}{revenue}{/b}."
+			}
+		}
+	],
 	"space_profile_recent": "Over the last {days} days, ",
 	"space_profile_usage": [
 		{

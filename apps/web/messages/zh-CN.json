@@ -2471,6 +2471,8 @@
 	"common_apply": "应用",
 	"space_profile_apps": "此 Space 的 App 累计获得 {#b}{views}{/b} 次浏览、{#b}{likes}{/b} 个赞。",
 	"space_profile_apps_revenue": "此 Space 的 App 累计获得 {#b}{views}{/b} 次浏览、{#b}{likes}{/b} 个赞，收入 {#b}{revenue}{/b}。",
+	"space_profile_apps_views": "此 Space 的 App 累计获得 {#b}{views}{/b} 次浏览。",
+	"space_profile_apps_views_revenue": "此 Space 的 App 累计获得 {#b}{views}{/b} 次浏览，收入 {#b}{revenue}{/b}。",
 	"space_profile_recent": "最近 {days} 天，",
 	"space_profile_usage": "此 Space 使用了 {#b}{tokens}{/b} 个 Token、{#b}{requests}{/b} 次请求，合计 {#b}{cost}{/b}",
 	"space_profile_usage_no_cost": "此 Space 使用了 {#b}{tokens}{/b} 个 Token、{#b}{requests}{/b} 次请求",

@@ -97,25 +97,34 @@ const usageParts = $derived.by(() => {
 });
 const appsParts = $derived.by(() => {
 	const stats = overview?.apps;
-	if (!stats?.count) return null;
-	const base = {
+	if (!stats?.views) return null;
+	const views = {
 		views: formatCompact(stats.views, locale),
 		viewCount: stats.views,
-		likes: formatCompact(stats.likes, locale),
-		likeCount: stats.likes,
 	};
+	const likes = stats.likes
+		? { likes: formatCompact(stats.likes, locale), likeCount: stats.likes }
+		: null;
 	const revenue = stats.revenue;
 	if (!revenue || revenue.usd <= 0) {
-		return m.space_profile_apps.parts(base, { locale });
+		return likes
+			? m.space_profile_apps.parts({ ...views, ...likes }, { locale })
+			: m.space_profile_apps_views.parts(views, { locale });
 	}
 	const amount = formatCurrency(revenue.usd, "USD", {
 		locale,
 		maximumFractionDigits: revenue.usd >= 100 ? 0 : 2,
 	});
-	return m.space_profile_apps_revenue.parts(
-		{ ...base, revenue: revenue.partial ? `${amount}+` : amount },
-		{ locale },
-	);
+	const earned = { revenue: revenue.partial ? `${amount}+` : amount };
+	return likes
+		? m.space_profile_apps_revenue.parts(
+				{ ...views, ...likes, ...earned },
+				{ locale },
+			)
+		: m.space_profile_apps_views_revenue.parts(
+				{ ...views, ...earned },
+				{ locale },
+			);
 });
 const schedulesParts = $derived.by(() => {
 	const schedules = overview?.schedules;
