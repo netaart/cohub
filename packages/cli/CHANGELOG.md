@@ -1,5 +1,29 @@
 # @neta-art/cohub-cli
 
+## 10.27.0
+
+### Minor Changes
+
+- 8255bbf: Balance activity now reaches your full history and loads quickly at any depth. Previously the history stopped after the newest ~2,000 entries, and every page took about a second. `billing.getBalanceActivities({ cursor, limit, filter })` reads newest first, up to 100 entries per page (50 by default), and returns `nextCursor` until the end; `filter` narrows to `usage`, `grant`, or `refund`. Activities also carry `usageType`. `space(id).wallet.activities(cursor)` pages the same way and returns `{ items, nextCursor }`.
+  
+  `billing.getCredits()` lists only credit sources that can still be spent; pass `{ includeExhausted: true }` to also list depleted and expired ones.
+  
+  `cohub me billing` shows your balance, current plan, and credits expiring soon. `cohub me billing-activity` and `cohub spaces wallet activity` take `--cursor` (plus `--filter` and `--limit` for personal activity) instead of `--page`.
+  
+  Migrate `getBalanceActivities({ page })` to follow `activities.nextCursor`, and `wallet.activities(page)` to pass the previous `nextCursor`. `BillingBalanceActivityList.page` and `pagination` are removed. Servers still answer page-number requests from older SDKs for the newest 2,000 activities.
+- 0317483: `boards export --at 0:217s --fps 24` exports a range at a frame rate, and a written step that is rounded, such as `41.667ms`, no longer drops the last frame. `boards apply --replace` on a Board that has items now needs `--base-version`; without it the command names the Board and its version instead of deleting what the input leaves out. `boards apply` also prints a warning for style an item never draws, such as a text stroke or the fill of a `decoration: "none"` frame.
+- 12788eb: Board scripts can share effects with other viewers: `ctx.broadcast(type, data)` delivers an event to the same script on every viewer's screen, and `peerschange` / `ctx.peers` report the other viewers' cursors. Presence cursors carry `pressed`, and `presence.presses` places a peer's press for a click ripple. The script harness and `cohub boards simulate` gain `peers` and `broadcast` steps, and `cohub boards examples sparks` shows both. `createBoardPresence({ publish: "reactions" })` is now `"events"`, which shares broadcasts too.
+- 97da630: Board animations play smoothly and look the same everywhere. Camera tracks frame the animation's new `viewport` (1600×900 by default) and every screen and `--camera` export shows that framing scaled to fit; `boards export --camera` sizes to it unless `--size` is given. A playing soundtrack leads the visuals instead of being nudged, so audio no longer warbles. Moving the view during playback continues from the shot on screen, and played motion no longer wakes scene subscribers every frame.
+- 6edde64: List Apps and scheduled prompts across spaces: `sdk.user.listApps()` and `sdk.user.listCronJobs()`, with `cohub apps ls --all` and `cohub cron-jobs ls` (no space). App sessions need the new `user.app.list` / `user.cronjob.list` grants for these account-wide lists.
+  
+  `cohub cron-jobs ls` without a space now pages through `{ items, pageInfo }` (50 per page, `--cursor` for more) instead of returning `{ jobs }`.
+
+### Patch Changes
+
+- 0317483: Board exports with glows and blurs no longer grow native memory frame after frame: effect pictures give their canvases back as soon as they are drawn, and a long glowing line only draws the part that reaches the view. A 1080p export of a large Board now stays near 1 GB over hundreds of frames instead of adding about 170 MB a frame.
+- 0317483: Exports of animations that drive script params replay script history about seven times faster, since each sampled moment no longer builds a scene it never draws. A picture shown far larger than its pixels now counts only its pixels against `--image-memory`, so it no longer turns into a gray placeholder when the camera zooms in.
+- 0317483: A Board larger than what 5% zoom shows can now be zoomed out until it fits, by wheel, pinch or the zoom buttons, and Fit shows all of it. `boardZoomFloor(content, surface)` gives that limit, and `clampZoom` takes it as an optional floor. Animation cameras and exports keep the zoom they are given down to 0.1%, so a tour's overview stop shows the whole map.
+
 ## 10.26.0
 
 ### Minor Changes
