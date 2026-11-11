@@ -1,6 +1,6 @@
 ---
-"@neta-art/cohub": major
-"@neta-art/cohub-cli": major
+"@neta-art/cohub": minor
+"@neta-art/cohub-cli": minor
 ---
 
 Balance activity now reaches your full history and loads quickly at any depth. Previously the history stopped after the newest ~2,000 entries, and every page took about a second. `billing.getBalanceActivities({ cursor, limit, filter })` reads newest first, up to 100 entries per page (50 by default), and returns `nextCursor` until the end; `filter` narrows to `usage`, `grant`, or `refund`. Activities also carry `usageType`. `space(id).wallet.activities(cursor)` pages the same way and returns `{ items, nextCursor }`.
