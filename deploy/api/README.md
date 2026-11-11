@@ -123,7 +123,7 @@ kubectl rollout status deployment/cohub-api -n cohub --timeout=300s
 
 Recover/recreate 会删除旧 Pod 并用当前模板创建新 Pod，因此配置生效后的新 sandbox 或被 recover 的旧 sandbox 会自然落到专用节点池。
 
-如需把指定用户放到其他节点池并调整 request 比例，在 platform config 中维护 `platform/.cohub/sandbox/placements.yaml`，格式见 `docs/sandbox-environments.md` 的 Node pool placement。修改后运行 Configs Sync，无需重启 API。
+如需调整默认节点池（`default`），或把指定用户放到其他节点池并调整 request 比例，在 platform config 中维护 `platform/.cohub/sandbox/placements.yaml`，格式见 `docs/sandbox-environments.md` 的 Node pool placement。修改后运行 Configs Sync，无需重启 API。
 
 ## 可选 Billing 配置
 

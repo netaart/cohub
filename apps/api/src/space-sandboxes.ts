@@ -14,6 +14,7 @@ import { sessionsNamespace, config } from "./config.js";
 import { k8sCoreApi } from "./k8s.js";
 import { resolveSpaceSandboxPreferences } from "./space-sandbox-preferences.js";
 import { renderSandboxPodTemplate } from "./sandbox-template.js";
+import { DEFAULT_SANDBOX_POOL } from "@cohub/infra/config-runtime/sandbox-placement";
 import { getSpaceSandboxPlacement } from "./sandbox-placement.js";
 import { deleteSandboxPublicNetwork, getSandboxPublicEndpoints, reconcileSandboxPublicNetwork } from "./sandbox-public-network.js";
 import { createSandboxReportToken, hashSandboxReportToken } from "./crypto.js";
@@ -125,7 +126,7 @@ export const resizeSpaceSandboxToSpec = async (input: { spaceId: string; specId:
   }
   const podName = sandbox.podName ?? `sandbox-${input.spaceId}`;
   const placement = await getSpaceSandboxPlacement(input.spaceId, input.specId);
-  const placementPool = asMetaObject(sandbox.meta).placementPool ?? null;
+  const placementPool = asMetaObject(sandbox.meta).placementPool ?? DEFAULT_SANDBOX_POOL;
   // nodeSelector is immutable on a running Pod, so a pool change can only land through recreation.
   if (placementPool !== placement.pool) {
     await markSandboxSpecPendingRestart({ spaceId: input.spaceId, specId: input.specId, reason: "placement_changed" });
