@@ -141,20 +141,24 @@ class LibraryInbox {
 			: this.cronJobs) as unknown as LiveList<string, LibraryItem, null>;
 	}
 
-	view(entity: LibraryItemEntity) {
-		return this.#list(entity).view(this.filters[entity]);
+	view(entity: LibraryItemEntity, filter: string) {
+		return this.#list(entity).view(filter);
 	}
 
-	watch(entity: LibraryItemEntity) {
-		return this.#list(entity).watch(this.filters[entity]);
+	watch(entity: LibraryItemEntity, filter: string) {
+		return this.#list(entity).watch(filter);
 	}
 
-	loadMore(entity: LibraryItemEntity) {
-		return this.#list(entity).loadMore(this.filters[entity]);
+	open(entity: LibraryItemEntity, filter: string) {
+		return this.#list(entity).open(filter);
 	}
 
-	sync(entity: LibraryItemEntity) {
-		return this.#list(entity).sync(this.filters[entity]);
+	loadMore(entity: LibraryItemEntity, filter: string) {
+		return this.#list(entity).loadMore(filter);
+	}
+
+	sync(entity: LibraryItemEntity, filter: string) {
+		return this.#list(entity).sync(filter);
 	}
 
 	setCronJobEnabled(id: string, enabled: boolean) {
