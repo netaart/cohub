@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Temporarily warm sandbox images on the API's configured sandbox node pool."""
+"""Temporarily warm sandbox images on the API's sandbox node pools, including placement pools."""
 
 import argparse
 import json
 import os
 import signal
+import sys
 import subprocess
 import time
 import uuid
@@ -69,6 +70,38 @@ def load_settings(namespace, deployment):
     return settings
 
 
+# Parsed by the API's own module inside its Pod, so prewarming sees exactly what provisioning sees.
+PLACEMENT_SCRIPT = """
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { parseSandboxPlacementConfig } from "@cohub/infra/config-runtime/sandbox-placement";
+const path = join(process.env.PLATFORM_CONFIG_ROOT || "/configs", "platform/.cohub/sandbox/placements.yaml");
+let text = null;
+try { text = await readFile(path, "utf8"); } catch (error) { if (error.code !== "ENOENT") throw error; }
+const config = text === null ? null : parseSandboxPlacementConfig(text);
+const used = new Set(config ? config.users.values() : []);
+console.log(JSON.stringify(config ? [...config.pools.values()].filter((pool) => used.has(pool.name)) : []));
+"""
+
+
+def load_placement_pools(namespace, deployment):
+    try:
+        output = kubectl(
+            namespace,
+            "exec",
+            f"deployment/{deployment}",
+            "--",
+            "node",
+            "--input-type=module",
+            "-e",
+            PLACEMENT_SCRIPT,
+        )
+    except RuntimeError as error:
+        detail = str(error).rpartition(" failed: ")[2]
+        raise RuntimeError(f"kubectl exec deployment/{deployment} failed: {detail}") from None
+    return json.loads(output.strip().splitlines()[-1])
+
+
 def pairs(value):
     result = {}
     for entry in filter(None, (part.strip() for part in value.split(","))):
@@ -79,12 +112,8 @@ def pairs(value):
     return result
 
 
-def build_manifest(name, namespace, settings, images):
+def default_scheduling(settings):
     selector = pairs(settings.get("SANDBOX_NODE_SELECTOR", ""))
-    if not selector:
-        raise ValueError(
-            "SANDBOX_NODE_SELECTOR must be configured; refusing cluster-wide prewarming"
-        )
     tolerations = []
     for entry in filter(
         None,
@@ -102,6 +131,32 @@ def build_manifest(name, namespace, settings, images):
             tolerations.append(
                 {"key": key, "operator": "Equal", "value": val, "effect": effect}
             )
+    return selector, tolerations
+
+
+def scheduling_targets(settings, pools):
+    selector, tolerations = default_scheduling(settings)
+    targets = [{"pool": None, "nodeSelector": selector, "tolerations": tolerations}]
+    seen = {json.dumps([selector, tolerations], sort_keys=True)}
+    for pool in pools:
+        target = {
+            "pool": pool["name"],
+            "nodeSelector": pool.get("nodeSelector") or selector,
+            "tolerations": pool.get("tolerations") or tolerations,
+        }
+        key = json.dumps([target["nodeSelector"], target["tolerations"]], sort_keys=True)
+        if key not in seen:
+            seen.add(key)
+            targets.append(target)
+    for target in targets:
+        if not target["nodeSelector"]:
+            raise ValueError(
+                f"Node selector for pool {target['pool'] or 'default'} must be configured; refusing cluster-wide prewarming"
+            )
+    return targets
+
+
+def build_manifest(name, namespace, settings, images, target):
     labels = {
         "app.kubernetes.io/name": "sandbox-image-prewarm",
         "cohub.run/prewarm": name,
@@ -125,8 +180,8 @@ def build_manifest(name, namespace, settings, images):
         for index, image in enumerate(dict.fromkeys(images))
     ]
     pod = {
-        "nodeSelector": selector,
-        "tolerations": tolerations,
+        "nodeSelector": target["nodeSelector"],
+        "tolerations": target["tolerations"],
         "automountServiceAccountToken": False,
         "enableServiceLinks": False,
         "terminationGracePeriodSeconds": 1,
@@ -164,52 +219,67 @@ def is_ready(resource):
     )
 
 
-def prewarm(manifest, timeout):
-    namespace = manifest["metadata"]["namespace"]
-    name = manifest["metadata"]["name"]
-    selector = f"cohub.run/prewarm={name}"
+def is_settled_empty(resource):
+    status = resource.get("status", {})
+    return (
+        status.get("observedGeneration", 0) >= resource["metadata"].get("generation", 1)
+        and status.get("desiredNumberScheduled", 0) == 0
+    )
+
+
+def prewarm(jobs, timeout):
+    pending = {manifest["metadata"]["name"]: (pool, manifest) for pool, manifest in jobs}
+    created = []
     try:
-        print(kubectl(namespace, "create", "-f", "-", manifest=manifest), flush=True)
+        for _, manifest in jobs:
+            print(kubectl(manifest["metadata"]["namespace"], "create", "-f", "-", manifest=manifest), flush=True)
+            created.append(manifest)
         deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            resource = json.loads(
-                kubectl(namespace, "get", "daemonset", name, "-o", "json")
-            )
-            status = resource.get("status", {})
-            print(
-                f"Prewarm {name}: {status.get('numberReady', 0)}/{status.get('desiredNumberScheduled', 0)} nodes ready",
-                flush=True,
-            )
-            if is_ready(resource):
+        while pending and time.monotonic() < deadline:
+            for name, (pool, manifest) in list(pending.items()):
+                namespace = manifest["metadata"]["namespace"]
+                resource = json.loads(kubectl(namespace, "get", "daemonset", name, "-o", "json"))
+                status = resource.get("status", {})
+                label = pool or "default"
                 print(
-                    kubectl(namespace, "get", "pods", "-l", selector, "-o", "wide"),
+                    f"Prewarm {name} ({label}): {status.get('numberReady', 0)}/{status.get('desiredNumberScheduled', 0)} nodes ready",
                     flush=True,
                 )
-                return
-            time.sleep(5)
-        raise TimeoutError(
-            f"Prewarming timed out after {timeout}s (including zero matching nodes)"
-        )
+                if is_ready(resource):
+                    print(kubectl(namespace, "get", "pods", "-l", f"cohub.run/prewarm={name}", "-o", "wide"), flush=True)
+                    del pending[name]
+                elif pool and is_settled_empty(resource):
+                    print(f"Prewarm {name} ({label}): no matching nodes; skipped", flush=True)
+                    del pending[name]
+            if pending:
+                time.sleep(5)
+        if pending:
+            pools = ", ".join(pool or "default" for pool, _ in pending.values())
+            raise TimeoutError(
+                f"Prewarming timed out after {timeout}s for {pools} (including zero matching nodes)"
+            )
     except Exception:
-        try:
-            print(kubectl(namespace, "describe", "pods", "-l", selector), flush=True)
-        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-            print(f"Unable to collect diagnostics: {error}", flush=True)
+        for name, (_, manifest) in pending.items():
+            try:
+                print(kubectl(manifest["metadata"]["namespace"], "describe", "pods", "-l", f"cohub.run/prewarm={name}"), flush=True)
+            except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+                print(f"Unable to collect diagnostics: {error}", flush=True)
         raise
     finally:
-        print(
-            kubectl(
-                namespace,
-                "delete",
-                "daemonset",
-                name,
-                "--ignore-not-found",
-                "--cascade=foreground",
-                "--wait=true",
-                "--timeout=120s",
-            ),
-            flush=True,
-        )
+        for manifest in created:
+            print(
+                kubectl(
+                    manifest["metadata"]["namespace"],
+                    "delete",
+                    "daemonset",
+                    manifest["metadata"]["name"],
+                    "--ignore-not-found",
+                    "--cascade=foreground",
+                    "--wait=true",
+                    "--timeout=120s",
+                ),
+                flush=True,
+            )
 
 
 def main():
@@ -233,22 +303,36 @@ def main():
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
     suffix = "-dev" if args.env == "dev" else ""
-    settings = load_settings(f"cohub{suffix}", f"cohub-api{suffix}")
-    manifest = build_manifest(
-        f"sandbox-prewarm-{uuid.uuid4().hex[:12]}",
-        f"cohub-sessions{suffix}",
-        settings,
-        args.image,
-    )
+    namespace, deployment = f"cohub{suffix}", f"cohub-api{suffix}"
+    settings = load_settings(namespace, deployment)
+    try:
+        pools = load_placement_pools(namespace, deployment)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        print(f"Warning: unable to read sandbox placement pools; warming the default pool only: {error}", file=sys.stderr, flush=True)
+        pools = []
+    base = f"sandbox-prewarm-{uuid.uuid4().hex[:12]}"
+    jobs = [
+        (
+            target["pool"],
+            build_manifest(
+                base if index == 0 else f"{base}-p{index}",
+                f"cohub-sessions{suffix}",
+                settings,
+                args.image,
+                target,
+            ),
+        )
+        for index, target in enumerate(scheduling_targets(settings, pools))
+    ]
     if args.dry_run:
-        print(json.dumps(manifest, indent=2))
+        print(json.dumps([manifest for _, manifest in jobs], indent=2))
         return
 
     def interrupt(_signum, _frame):
         raise KeyboardInterrupt("Prewarming interrupted")
 
     signal.signal(signal.SIGTERM, interrupt)
-    prewarm(manifest, args.timeout)
+    prewarm(jobs, args.timeout)
 
 
 if __name__ == "__main__":
