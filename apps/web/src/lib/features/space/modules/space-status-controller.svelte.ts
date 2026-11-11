@@ -1,6 +1,7 @@
 import type {
 	SpaceBootstrapStatus,
 	SpaceMember,
+	SpaceOverview,
 	SpaceRecord,
 	SpaceUsageResponse,
 	SpaceWalletSummary,
@@ -9,9 +10,11 @@ import { HttpError } from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
 import {
 	fetchSpaceMembersWithCache,
+	fetchSpaceOverviewWithCache,
 	fetchSpaceUsageWithCache,
 	fetchSpaceWalletWithCache,
 	getCachedSpaceMembers,
+	getCachedSpaceOverview,
 	getCachedSpaceUsage,
 	getCachedSpaceWallet,
 } from "$lib/stores/space-profile-cache";
@@ -46,6 +49,8 @@ export function createSpaceStatusController(options: {
 	let membersLoadedFor = $state<string | null>(null);
 	let usage = $state<SpaceUsageResponse | null>(null);
 	let usageLoadedFor = $state<string | null>(null);
+	let overview = $state<SpaceOverview | null>(null);
+	let overviewFor: string | null = null;
 	let wallet = $state<SpaceWalletSummary | null>(null);
 	let walletLoadedFor: string | null = null;
 	let sandbox = $state<SpaceSandboxSnapshot | null>(null);
@@ -133,6 +138,23 @@ export function createSpaceStatusController(options: {
 		}
 	}
 
+	async function loadOverview(
+		currentSpaceId = options.getSpaceId(),
+		force = false,
+	) {
+		if (overviewFor !== currentSpaceId) {
+			overviewFor = currentSpaceId;
+			overview = getCachedSpaceOverview(currentSpaceId);
+		}
+		try {
+			const result = await requests.run(
+				`space:${currentSpaceId}:overview`,
+				() => fetchSpaceOverviewWithCache(currentSpaceId, force),
+			);
+			if (overviewFor === currentSpaceId) overview = result;
+		} catch {}
+	}
+
 	async function loadWallet(
 		currentSpaceId = options.getSpaceId(),
 		force = false,
@@ -211,6 +233,8 @@ export function createSpaceStatusController(options: {
 		membersLoadedFor = null;
 		usage = null;
 		usageLoadedFor = null;
+		overview = null;
+		overviewFor = null;
 		wallet = null;
 		walletLoadedFor = null;
 		sandbox = null;
@@ -245,6 +269,9 @@ export function createSpaceStatusController(options: {
 		get usageLoadedFor() {
 			return usageLoadedFor;
 		},
+		get overview() {
+			return overview;
+		},
 		get wallet() {
 			return wallet;
 		},
@@ -260,6 +287,7 @@ export function createSpaceStatusController(options: {
 		loadSpace,
 		loadMembers,
 		loadUsage,
+		loadOverview,
 		loadWallet,
 		loadSandbox,
 		showNotice,

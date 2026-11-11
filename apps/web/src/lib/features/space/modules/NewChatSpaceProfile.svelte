@@ -1,16 +1,15 @@
 <script lang="ts">
-import type { ResourceAppKind, ResourceAppTarget } from "@cohub/protocol";
+import type { ResourceAppKind } from "@cohub/protocol";
 import type {
-	CronJobRecord,
 	SpaceMember,
+	SpaceOverview,
 	SpaceRecord,
 	SpaceUsageResponse,
 	SpaceWalletSummary,
 	UserProfile,
 } from "@neta-art/cohub";
-import { ArrowRight } from "lucide-svelte";
-import type { Snippet } from "svelte";
-import { canViewSpaceCost } from "$lib/activity";
+import { canViewSpaceCost, formatCompact } from "$lib/activity";
+import MessageText from "$lib/components/MessageText.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import StatusGlyph, {
 	type StatusGlyphMotion,
@@ -21,10 +20,6 @@ import { formatCurrency } from "$lib/i18n/format";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 import { formatShortDateTime } from "$lib/resource-kit/time";
-import type { SpaceAppsFeed } from "../resources/space-apps-feed.svelte";
-import type { SpaceCronjobsFeed } from "../resources/space-cronjobs-feed.svelte";
-import AppRow from "../side-panel/AppRow.svelte";
-import CronjobRow from "../side-panel/CronjobRow.svelte";
 import {
 	displayUserName,
 	formatTokenCount,
@@ -50,9 +45,8 @@ type Props = {
 	space: SpaceRecord | null;
 	members: SpaceMember[];
 	usage: SpaceUsageResponse | null;
+	overview: SpaceOverview | null;
 	wallet: SpaceWalletSummary | null;
-	apps: SpaceAppsFeed | null;
-	cronjobs: SpaceCronjobsFeed | null;
 	sandbox: SpaceSandboxSnapshot | null;
 	sandboxLoadedFor: string | null;
 	expanded: boolean;
@@ -61,22 +55,16 @@ type Props = {
 	contentEl?: HTMLDivElement | null;
 	bodyEl?: HTMLDivElement | null;
 	onToggleExpanded: () => void;
-	onOpenResource: (target: ResourceAppTarget) => void;
 	onOpenResourceList: (kind: ResourceAppKind) => void;
 };
-
-const RECENT_LIMIT = 3;
-/** Mirrors the mobile `nth-child` rule below. */
-const MOBILE_RECENT_LIMIT = 2;
 
 let {
 	spaceId,
 	space,
 	members,
 	usage,
+	overview,
 	wallet,
-	apps,
-	cronjobs,
 	sandbox,
 	sandboxLoadedFor,
 	expanded,
@@ -85,51 +73,75 @@ let {
 	contentEl = $bindable(),
 	bodyEl = $bindable(),
 	onToggleExpanded,
-	onOpenResource,
 	onOpenResourceList,
 }: Props = $props();
 
 const locale = $derived(getLocale());
+const STRONG = "font-medium tabular-nums text-text-secondary";
 
-const usageText = $derived.by(() => {
-	if (!usage) return "";
-	const showCost = canViewSpaceCost(space?.access);
+const usageParts = $derived.by(() => {
+	if (!usage) return null;
+	const { totalTokens, requestCount, costTotal } = usage.totals;
+	if (requestCount === 0) return null;
 	const base = {
 		days: usage.days,
-		tokens: formatTokenCount(usage.summary.totalTokens),
-		requests: usage.summary.requestCount,
+		tokens: formatTokenCount(totalTokens),
+		requests: formatCompact(requestCount, locale),
+		requestCount,
 	};
-	const generation = usage.generation?.summary;
-	if (!showCost) {
-		return m.space_profile_usage_no_cost(
-			{
-				...base,
-				generation: generation?.requestCount
-					? m.space_profile_generation_no_cost(
-							{ count: generation.requestCount },
-							{ locale },
-						)
-					: "",
-			},
-			{ locale },
-		);
+	return canViewSpaceCost(space?.access)
+		? m.space_profile_usage.parts(
+				{ ...base, cost: formatUsageCost(costTotal, locale) },
+				{ locale },
+			)
+		: m.space_profile_usage_no_cost.parts(base, { locale });
+});
+const appsParts = $derived.by(() => {
+	const stats = overview?.apps;
+	if (!stats?.count) return null;
+	const base = {
+		views: formatCompact(stats.views, locale),
+		viewCount: stats.views,
+		likes: formatCompact(stats.likes, locale),
+		likeCount: stats.likes,
+	};
+	const revenue = stats.revenue;
+	if (!revenue || revenue.usd <= 0) {
+		return m.space_profile_apps.parts(base, { locale });
 	}
-	return m.space_profile_usage(
-		{
-			...base,
-			cost: formatUsageCost(usage.summary.costTotal, locale),
-			generation: generation?.requestCount
-				? m.space_profile_generation(
-						{
-							count: generation.requestCount,
-							cost: formatUsageCost(generation.costTotal, locale),
-						},
-						{ locale },
-					)
-				: "",
-		},
+	const amount = formatCurrency(revenue.usd, "USD", {
+		locale,
+		maximumFractionDigits: revenue.usd >= 100 ? 0 : 2,
+	});
+	return m.space_profile_apps_revenue.parts(
+		{ ...base, revenue: revenue.partial ? `${amount}+` : amount },
 		{ locale },
 	);
+});
+const schedulesParts = $derived.by(() => {
+	const schedules = overview?.schedules;
+	if (!schedules || (schedules.active === 0 && schedules.runs === 0))
+		return null;
+	const days = overview?.days ?? 7;
+	if (schedules.runs === 0) {
+		return [
+			{
+				type: "text" as const,
+				value: m.space_profile_schedules_idle({ days }, { locale }),
+			},
+		];
+	}
+	const base = {
+		days,
+		runs: formatCompact(schedules.runs, locale),
+		runCount: schedules.runs,
+	};
+	return schedules.failed > 0
+		? m.space_profile_schedules_failed.parts(
+				{ ...base, failed: formatCompact(schedules.failed, locale) },
+				{ locale },
+			)
+		: m.space_profile_schedules.parts(base, { locale });
 });
 const walletText = $derived(
 	wallet?.spaceId === spaceId && wallet.balanceUsd > 0
@@ -143,16 +155,6 @@ const walletText = $derived(
 				{ locale },
 			)
 		: "",
-);
-const recentApps = $derived(apps?.ready ? apps.items : []);
-const recentJobs = $derived(
-	cronjobs?.ready
-		? cronjobs.items.toSorted(
-				(a, b) =>
-					Number(b.enabled) - Number(a.enabled) ||
-					b.updatedAt.localeCompare(a.updatedAt),
-			)
-		: ([] as CronJobRecord[]),
 );
 const spaceName = $derived(space?.name || space?.title || "Untitled space");
 const owner = $derived(space?.ownerProfile ?? null);
@@ -200,12 +202,12 @@ function userTitle(
 			</div>
 		</header>
 
-		<div bind:this={bodyEl} class="new-chat-profile-body new-chat-profile-fragment max-w-[68ch] text-[13px] leading-7 text-text-tertiary sm:text-[14px]" class:expanded style:animation-delay="55ms" style:max-height={expanded ? undefined : `${bodyMaxHeight}px`}>
+		<div bind:this={bodyEl} class="new-chat-profile-body new-chat-profile-fragment max-w-[68ch] space-y-3 text-[13px] leading-7 text-text-tertiary sm:text-[14px]" class:expanded style:animation-delay="55ms" style:max-height={expanded ? undefined : `${bodyMaxHeight}px`}>
 			{#if space?.description}
-				<p class="mb-3 text-text-secondary sm:text-[15px]">{space.description}</p>
+				<p class="text-text-secondary sm:text-[15px]">{space.description}</p>
 			{/if}
 			{#if owner || space?.userUuid || sortedMembers.length > 0}
-				<p class="mb-3">
+				<p>
 					{#if owner || space?.userUuid}
 						<span>Created by </span>
 						<UserIdentity
@@ -238,8 +240,14 @@ function userTitle(
 					{:else}<span>. </span>{/if}
 				</p>
 			{/if}
-			{#if usage}
-				<p>{usageText}</p>
+			{#if appsParts}
+				<p><button type="button" class="new-chat-profile-stat" onclick={() => onOpenResourceList("app")}><MessageText parts={appsParts} strongClass={STRONG} /></button></p>
+			{/if}
+			{#if schedulesParts}
+				<p><button type="button" class="new-chat-profile-stat" onclick={() => onOpenResourceList("cronjob")}><MessageText parts={schedulesParts} strongClass={STRONG} /></button></p>
+			{/if}
+			{#if usageParts}
+				<p><a href={`/spaces/${spaceId}/activity`} class="new-chat-profile-stat"><MessageText parts={usageParts} strongClass={STRONG} /></a></p>
 			{/if}
 		</div>
 		{#if canExpand}
@@ -247,43 +255,8 @@ function userTitle(
 				{expanded ? m.space_profile_show_less({}, { locale }) : m.space_profile_show_full({}, { locale })}
 			</button>
 		{/if}
-		{#if recentApps.length > 0 || recentJobs.length > 0}
-			<div class="new-chat-profile-fragment grid grid-cols-2 gap-x-3 gap-y-5 sm:gap-x-8" style:animation-delay="90ms">
-				{#if recentApps.length > 0}
-					{@render recent(m.side_panel_tab_apps({}, { locale }), "app", recentApps.length, appRows)}
-				{/if}
-				{#if recentJobs.length > 0}
-					{@render recent(m.side_panel_tab_scheduled({}, { locale }), "cronjob", recentJobs.length, jobRows)}
-				{/if}
-			</div>
-		{/if}
 	</div>
 </section>
-
-{#snippet appRows()}
-	{#each recentApps.slice(0, RECENT_LIMIT) as app (app.id)}
-		<AppRow {spaceId} {app} draggable onOpen={() => onOpenResource({ kind: "app", id: app.id })} />
-	{/each}
-{/snippet}
-
-{#snippet jobRows()}
-	{#each recentJobs.slice(0, RECENT_LIMIT) as job (job.id)}
-		<CronjobRow {job} onOpen={() => onOpenResource({ kind: "cronjob", id: job.id })} />
-	{/each}
-{/snippet}
-
-{#snippet recent(title: string, kind: ResourceAppKind, count: number, rows: Snippet)}
-	<section class="min-w-0">
-		<h2 class="mb-1 px-1.5 text-[11px] font-medium text-text-placeholder">{title}</h2>
-		<div class="new-chat-recent-list -mx-0.5" role="list">{@render rows()}</div>
-		{#if count > MOBILE_RECENT_LIMIT}
-			<button type="button" class="mt-0.5 inline-flex h-7 items-center gap-1 rounded-[5px] px-1.5 text-[11px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary {count <= RECENT_LIMIT ? 'sm:hidden' : ''}" onclick={() => onOpenResourceList(kind)}>
-				{m.space_profile_view_all({ count }, { locale })}
-				<ArrowRight class="h-3 w-3" />
-			</button>
-		{/if}
-	</section>
-{/snippet}
 
 <style>
 	@keyframes new-chat-profile-fragment-in {
@@ -301,6 +274,30 @@ function userTitle(
 		animation: new-chat-profile-fragment-in 180ms var(--ease-out) both;
 	}
 
+	.new-chat-profile-stat {
+		display: inline;
+		border-radius: 3px;
+		text-align: start;
+		transition: color 120ms var(--ease-out);
+	}
+
+	.new-chat-profile-stat :global(strong) {
+		transition: color 120ms var(--ease-out);
+	}
+
+	.new-chat-profile-stat:hover {
+		color: var(--text-secondary);
+	}
+
+	.new-chat-profile-stat:hover :global(strong) {
+		color: var(--text-primary);
+	}
+
+	.new-chat-profile-stat:focus-visible {
+		outline: 2px solid color-mix(in srgb, var(--brand) 45%, transparent);
+		outline-offset: 2px;
+	}
+
 	@media (prefers-reduced-motion: reduce) {
 		.new-chat-profile-fragment {
 			animation: none;
@@ -311,10 +308,6 @@ function userTitle(
 		.new-chat-profile-panel {
 			max-height: 100%;
 			overflow: hidden;
-		}
-
-		.new-chat-recent-list > :global(:nth-child(n + 3)) {
-			display: none;
 		}
 
 		.new-chat-profile-body {

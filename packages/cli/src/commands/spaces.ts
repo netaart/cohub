@@ -8,6 +8,7 @@ import type {
   LabelListItem,
   LabelResourceType,
   SpaceListPage,
+  SpaceOverview,
   SpaceRecord,
 } from "@neta-art/cohub";
 import type { Command } from "commander";
@@ -98,6 +99,19 @@ const SANDBOX_SPEC_IDS = ["standard", "boost", "ultra"] as const;
 const LABEL_RESOURCE_TYPES = ["session", "checkpoint", "file"] as const;
 /** Table cell width for space descriptions; `--json` keeps the full value. */
 const SPACE_DESCRIPTION_COLUMN_WIDTH = 40;
+
+function printSpaceOverview({ apps, schedules, days }: SpaceOverview): void {
+  const revenue = apps.revenue ? `$${apps.revenue.usd.toFixed(2)}${apps.revenue.partial ? "+" : ""}` : undefined;
+  const runs = schedules ? `${schedules.runs} in ${days}d, ${schedules.failed} failed` : undefined;
+  console.log();
+  table([{ ...apps, revenue, active: schedules?.active, runs }], [
+    { key: "count", label: "Apps" },
+    { key: "views", label: "Views" },
+    { key: "likes", label: "Likes" },
+    ...(revenue ? [{ key: "revenue", label: "Revenue" }] : []),
+    ...(schedules ? [{ key: "active", label: "Schedules" }, { key: "runs", label: "Runs" }] : []),
+  ]);
+}
 
 function parseInteger(value: string, name: string, options: { min?: number; max?: number } = {}): number {
   if (!/^-?\d+$/.test(value.trim())) return error(`Invalid ${name}`, `${name} must be an integer`);
@@ -628,8 +642,11 @@ export function registerSpaces(program: Command): void {
       const spaceId = id?.trim() || await resolveSpace(spacesCmd);
       const client = createClient();
       try {
-        const space = await client.spaces.get(spaceId);
-        if (jsonRequested(opts)) return outJson(space);
+        const [space, overview] = await Promise.all([
+          client.spaces.get(spaceId),
+          client.space(spaceId).overview.get().catch(() => null),
+        ]);
+        if (jsonRequested(opts)) return outJson({ ...space, overview });
         const usage = space.workspaceUsage;
         const storage = usage ? `${usage.bytes === null ? "-" : formatBytes(usage.bytes)} (${usage.status})` : undefined;
         const likeSticker = space.publicProfile?.likeSticker?.url;
@@ -643,6 +660,7 @@ export function registerSpaces(program: Command): void {
           ...(storage ? [{ key: "storage", label: "Storage" }] : []),
           ...(likeSticker ? [{ key: "likeSticker", label: "Like sticker" }] : []),
         ]);
+        if (overview) printSpaceOverview(overview);
       } catch (e: unknown) {
         handleHttp(e);
       }

@@ -90,6 +90,7 @@ import type {
   SpaceFsUploadResponse,
   SpaceUsageResponse,
   SpaceActivityResponse,
+  SpaceOverview,
   SpaceStartupResponse,
   SpaceFsWriteFileInput,
   LabelItemsResponse,
@@ -1423,6 +1424,17 @@ export class SpaceUsageApi {
   }
 }
 
+export class SpaceOverviewApi {
+  constructor(
+    private readonly transport: HttpTransport,
+    private readonly spaceId: string,
+  ) {}
+
+  get(customFetch?: Fetch) {
+    return this.transport.request<SpaceOverview>(`/api/spaces/${this.spaceId}/overview`, { fetch: customFetch });
+  }
+}
+
 export class SpaceActivityApi {
   constructor(
     private readonly transport: HttpTransport,
@@ -2127,6 +2139,7 @@ export class SpaceClient {
   readonly checkpoints: SpaceCheckpointsApi;
   readonly usage: SpaceUsageApi;
   readonly activity: SpaceActivityApi;
+  readonly overview: SpaceOverviewApi;
   readonly channels: SpaceChannelsApi;
   readonly mods: SpaceModsApi;
   readonly webhooks: SpaceWebhooksApi;
@@ -2155,6 +2168,7 @@ export class SpaceClient {
     this.checkpoints = createSpaceCheckpointsApi(transport, id);
     this.usage = new SpaceUsageApi(transport, id);
     this.activity = new SpaceActivityApi(transport, id);
+    this.overview = new SpaceOverviewApi(transport, id);
     this.channels = new SpaceChannelsApi(transport, id);
     this.mods = new SpaceModsApi(transport, id);
     this.webhooks = new SpaceWebhooksApi(transport, id);

@@ -1951,6 +1951,19 @@ export type SpaceActivityResponse = SpaceUsageResponse & {
   };
 };
 
+export type SpaceOverview = {
+  days: number;
+  apps: {
+    count: number;
+    views: number;
+    likes: number;
+    /** `null` without `space.commerce.view` or when unavailable. */
+    revenue: { usd: number; partial: boolean } | null;
+  };
+  /** `null` without `cronjob.view`. */
+  schedules: { active: number; runs: number; failed: number } | null;
+};
+
 // ─── Referral types ───
 
 export type ReferralStatus = "pending" | "qualified" | "rewarded" | "expired" | "capped";

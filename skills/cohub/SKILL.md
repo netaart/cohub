@@ -345,7 +345,7 @@ cohub feedback "<message>" -f screenshot.png --runtime-logs
 
 ```bash
 cohub spaces ls
-cohub spaces get <spaceId>
+cohub spaces get <spaceId>   # includes App views, likes, revenue, and 7-day schedule runs
 cohub spaces create --name "<name>" --description "<description>"
 cohub spaces create --name "<name>" --checkpoint <checkpointId>
 cohub spaces rename <spaceId> "<new name>"

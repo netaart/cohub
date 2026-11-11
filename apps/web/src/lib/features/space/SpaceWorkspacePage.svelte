@@ -1598,9 +1598,8 @@ $effect(() => {
 });
 $effect(() => {
 	if (!shouldShowNewChatProfile || !space) return;
-	const cronjobs = sidePanel.cronjobs;
 	untrack(() => {
-		cronjobs?.start();
+		void spaceStatus.loadOverview(spaceId);
 		if (
 			hasAccessPermission("member.view") &&
 			spaceMembersLoadedFor !== spaceId
@@ -1616,6 +1615,17 @@ $effect(() => {
 			void loadSpaceSandbox(spaceId);
 		}
 	});
+});
+$effect(() => {
+	if (!shouldShowNewChatProfile) return;
+	const currentSpaceId = spaceId;
+	const refreshOverview = (event: Event) => {
+		const detail = (event as CustomEvent<{ spaceId?: string }>).detail;
+		if (detail?.spaceId === currentSpaceId)
+			void spaceStatus.loadOverview(currentSpaceId, true);
+	};
+	window.addEventListener(APPS_CHANGED_EVENT, refreshOverview);
+	return () => window.removeEventListener(APPS_CHANGED_EVENT, refreshOverview);
 });
 function updateNewChatProfileOverflow() {
 	const viewport = newChatProfileViewportEl;
@@ -3550,10 +3560,8 @@ const headerActions = {
             {space}
             members={spaceMembers}
             usage={spaceUsage}
+            overview={spaceStatus.overview}
             wallet={spaceStatus.wallet}
-            apps={sidePanel.apps}
-            cronjobs={sidePanel.cronjobs}
-            onOpenResource={(target) => void openResourceOrFallback(target)}
             onOpenResourceList={(kind) => void openResourceApp(kind)}
             sandbox={spaceSandbox}
             sandboxLoadedFor={spaceSandboxLoadedFor}

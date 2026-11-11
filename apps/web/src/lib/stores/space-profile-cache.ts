@@ -1,9 +1,11 @@
 import type {
 	SpaceMember,
+	SpaceOverview,
 	SpaceUsageResponse,
 	SpaceWalletSummary,
 } from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
+import { authStore } from "$lib/stores/auth.svelte";
 
 type SpaceProfileCacheEntry<T> = {
 	value: T;
@@ -100,6 +102,9 @@ async function fetchWithCache<T>({
 const membersKey = (spaceId: string) => `${spaceId}:members`;
 const usageKey = (spaceId: string, days: number) => `${spaceId}:usage:${days}`;
 const walletKey = (spaceId: string) => `${spaceId}:wallet`;
+const overviewKey = (spaceId: string) =>
+	`${spaceId}:overview:${authStore.userUuid ?? "anonymous"}`;
+const SPACE_OVERVIEW_CACHE_TTL_MS = 60 * 1000;
 export function getCachedSpaceMembers(spaceId: string) {
 	return readEntry<SpaceMember[]>(membersKey(spaceId))?.value ?? null;
 }
@@ -138,5 +143,17 @@ export function fetchSpaceWalletWithCache(spaceId: string) {
 		key: walletKey(spaceId),
 		ttlMs: 0,
 		fetcher: () => sdk.space(spaceId).wallet.get(),
+	});
+}
+
+export function getCachedSpaceOverview(spaceId: string) {
+	return readEntry<SpaceOverview>(overviewKey(spaceId))?.value ?? null;
+}
+
+export function fetchSpaceOverviewWithCache(spaceId: string, force = false) {
+	return fetchWithCache({
+		key: overviewKey(spaceId),
+		ttlMs: force ? 0 : SPACE_OVERVIEW_CACHE_TTL_MS,
+		fetcher: () => sdk.space(spaceId).overview.get(),
 	});
 }
