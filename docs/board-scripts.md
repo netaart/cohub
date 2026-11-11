@@ -487,7 +487,9 @@ ctx.on("burst", ({ data, peer }) => spawnSparks(data, peer?.color ?? "#e67845"))
 ```
 
 `peer` is `null` on the sender's screen and `{ id, actorId, name, color }` elsewhere;
-`color` is the viewer's cursor color. Broadcasts are effects, not data: up to 1024
+`color` is the viewer's cursor color. `id` is one screen: the same account on another
+device or tab is another peer with its own `id` and the same `actorId`, so key players
+by `id` and group people by `actorId`. Broadcasts are effects, not data: up to 1024
 characters of JSON, about ten a second per viewer, dropped past that, while the page
 is hidden, and for viewers who join later. Read-only viewers and App visitors
 broadcast too. Keep anything that should last in the document: a handler of another

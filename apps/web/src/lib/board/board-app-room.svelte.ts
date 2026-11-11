@@ -57,8 +57,7 @@ export function createBoardAppRoom(input: {
 		const member = current.members.find(
 			(candidate) => candidate.participantId === event.sender.participantId,
 		);
-		// The viewer's other tabs share their userKey: never draw them as someone else.
-		if (!member?.userKey || member.userKey === current.userKey) return;
+		if (!member?.userKey) return;
 		const data = event.data as { seq?: unknown; update?: unknown } | null;
 		const parsed = BoardAwarenessUpdateSchema.safeParse(data?.update);
 		const seq = data?.seq;

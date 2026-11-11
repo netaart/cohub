@@ -81,7 +81,7 @@ That means you can iterate in the Space, then deliberately publish when the outp
 
 ## Board Apps
 
-Publishing a `.board` file makes a Board App. Visitors play it right away: dragging an unlocked item moves it, dragging elsewhere pans, and scripts take every press; ✏️ unfolds the full editing tools. Changes stay on the visitor's device, saved per App version: a new version starts fresh, and **Reset** returns to the published Board. Lock (`locked`) what visitors should not move. Signed-in visitors see each other's cursors, clicks and reactions on the same version, and the effects scripts share with `broadcast()`.
+Publishing a `.board` file makes a Board App. Visitors play it right away: dragging an unlocked item moves it, dragging elsewhere pans, and scripts take every press; ✏️ unfolds the full editing tools. Changes stay on the visitor's device, saved per App version: a new version starts fresh, and **Reset** returns to the published Board. Lock (`locked`) what visitors should not move. Signed-in visitors see each other's cursors, clicks and reactions on the same version, and the effects scripts share with `broadcast()`; your own account on another device counts as another visitor, so you can play against yourself.
 
 ## Permissions
 
