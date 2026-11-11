@@ -1,5 +1,11 @@
 # @neta-art/cohub-cli
 
+## 10.27.1
+
+### Patch Changes
+
+- d0114fc: Download sandboxd v2.98.0.
+
 ## 10.27.0
 
 ### Minor Changes
