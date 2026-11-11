@@ -98,6 +98,7 @@ replace("../src/k8s.js", { k8sCoreApi: {
   },
 } });
 replace("../src/sandbox-template.js", { renderSandboxPodTemplate: () => ({ spec: { containers: [{}], volumes: [] } }) });
+replace("../src/sandbox-placement.js", { getSpaceSandboxPlacement: async () => ({ pool: null, resources: { limits: {}, requests: {} } }) });
 replace("@cohub/billing", { billingOperations: { getState: async () => ({ entitlements: [] }) }, COHUB_BILLING_FEATURES: {} });
 replace("@cohub/core/space-mods", { listEnabledSpaceMods: async () => [], getSpaceModMountSignature: () => "none" });
 replace("@cohub/sandbox-client", {

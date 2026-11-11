@@ -123,6 +123,8 @@ kubectl rollout status deployment/cohub-api -n cohub --timeout=300s
 
 Recover/recreate 会删除旧 Pod 并用当前模板创建新 Pod，因此配置生效后的新 sandbox 或被 recover 的旧 sandbox 会自然落到专用节点池。
 
+如需把指定用户放到其他节点池并调整 request 比例，在 platform config 中维护 `platform/.cohub/sandbox/placements.yaml`，格式见 `docs/sandbox-environments.md` 的 Node pool placement。修改后运行 Configs Sync，无需重启 API。
+
 ## 可选 Billing 配置
 
 API 支持可插拔 Talesofai Billing。`secrets.yaml` 中以下三项全部非空时启用，任意一项留空时自动禁用 billing：

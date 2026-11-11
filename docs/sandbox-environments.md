@@ -83,7 +83,7 @@ CI builds and smoke-tests both targets on the same builder before publishing. Sh
 
 ### Release-time image prewarming
 
-Before patching the prod API image configuration, CI runs `scripts/prewarm-sandbox.py` for both images; dev releases too often for prewarming to pay off. It creates a temporary DaemonSet in `cohub-sessions` on the API's `SANDBOX_NODE_SELECTOR` / `SANDBOX_TOLERATIONS` nodes, waits until every node is ready, then deletes it. Each Pod runs two unprivileged `/bin/sleep` containers with the exact images and `IfNotPresent`; no sandbox process or PVC is involved. The step is best-effort (`continue-on-error`) and times out after 600 seconds.
+Before patching the prod API image configuration, CI runs `scripts/prewarm-sandbox.py` for both images; dev releases too often for prewarming to pay off. It creates a temporary DaemonSet in `cohub-sessions` on the API's `SANDBOX_NODE_SELECTOR` / `SANDBOX_TOLERATIONS` nodes, plus one per [placement pool](#node-pool-placement) assigned to at least one owner, waits until every node is ready, then deletes them. Placement pools are read by running the API's own parser in the API Pod (`kubectl exec`); if that fails, only the default pool is warmed. A placement pool with no matching nodes is skipped. Each Pod runs two unprivileged `/bin/sleep` containers with the exact images and `IfNotPresent`; no sandbox process or PVC is involved. The step is best-effort (`continue-on-error`) and times out after 600 seconds.
 
 ```bash
 python3 scripts/prewarm-sandbox.py --env dev \
@@ -91,7 +91,7 @@ python3 scripts/prewarm-sandbox.py --env dev \
   --image REGISTRY/cohub-sandbox-game:VERSION --dry-run
 ```
 
-Settings must come from ConfigMaps or literal env values; an empty node selector is rejected. The CI identity needs DaemonSet create/get/delete and Pod/event read access in the sessions namespace. Nodes added later pull on first use. Use fresh tags or digests. If a killed runner leaves a DaemonSet, delete that printed name only.
+Settings must come from ConfigMaps or literal env values; an empty node selector is rejected. The CI identity needs DaemonSet create/get/delete and Pod/event read access in the sessions namespace, and `pods/exec` on the API Deployment for placement pools. Nodes added later pull on first use. Use fresh tags or digests. If a killed runner leaves a DaemonSet, delete that printed name only.
 
 ### Verification and rollout
 
@@ -104,6 +104,28 @@ pnpm rollout:sandbox:prod --image game --limit 5
 ```
 
 Rollout resolves a target per running cloud space, uses bounded planning concurrency, supports `--image default|game` and leaves dormant/local sandboxes alone. Review the dry-run plan before replacement. Restore the relevant image configuration to its previous tag/digest and rerun the same filtered rollout to roll back; do not change game spaces to the default image as a version rollback.
+
+## Node pool placement
+
+`SANDBOX_NODE_SELECTOR` / `SANDBOX_TOLERATIONS` on the API set where sandboxes run by default. To send selected space owners to another node pool, add `platform/.cohub/sandbox/placements.yaml` under `PLATFORM_CONFIG_ROOT`:
+
+```yaml
+schema: cohub.sandbox.placement.v1
+pools:
+  heavy:
+    nodeSelector: { cohub.run/workload: sandbox-heavy }
+    tolerations:
+      - { key: cohub.run/workload, value: sandbox-heavy, effect: NoSchedule }
+    requestRatio: 1    # requests = spec limits × ratio, in (0, 1]; omit to keep spec requests
+users:
+  <space-owner-uuid>: heavy
+```
+
+- Matching uses the space owner, like spec entitlements. Unlisted owners keep the defaults; a missing file disables placement.
+- A pool's `nodeSelector` / `tolerations` replace the defaults when set; `nodeSelector` must be non-empty, `tolerations: []` clears them. Keys and values must be valid Kubernetes labels. Limits always come from the spec. Pods carry `cohub.run/sandbox-pool=<pool>`.
+- The file reloads on change. An invalid edit is logged and the last valid config stays in effect.
+- Placement applies when a Pod is created. Running sandboxes move on their next recreate. A spec change that lands in a different pool is marked pending restart instead of resized in place, so the user decides when to restart, as with any spec change that cannot apply in place.
+- The file lists user IDs. Keep the platform config directory non-public, or the list is readable.
 
 ## Deferred
 

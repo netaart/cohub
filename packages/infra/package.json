@@ -95,6 +95,10 @@
     "./config-runtime/generation-billing": {
       "types": "./dist/config-runtime/generation-billing.d.ts",
       "default": "./dist/config-runtime/generation-billing.js"
+    },
+    "./config-runtime/sandbox-placement": {
+      "types": "./dist/config-runtime/sandbox-placement.d.ts",
+      "default": "./dist/config-runtime/sandbox-placement.js"
     }
   },
   "types": "./dist/index.d.ts",

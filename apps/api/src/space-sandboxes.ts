@@ -1,7 +1,5 @@
 import { and, asc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import {
-  DEFAULT_SANDBOX_SPEC_ID,
-  SANDBOX_SPECS,
   buildInvalidatedSandboxEndpointMeta,
   isSandboxAwaitingEndpointReport,
   isSandboxDialable,
@@ -16,6 +14,7 @@ import { sessionsNamespace, config } from "./config.js";
 import { k8sCoreApi } from "./k8s.js";
 import { resolveSpaceSandboxPreferences } from "./space-sandbox-preferences.js";
 import { renderSandboxPodTemplate } from "./sandbox-template.js";
+import { getSpaceSandboxPlacement } from "./sandbox-placement.js";
 import { deleteSandboxPublicNetwork, getSandboxPublicEndpoints, reconcileSandboxPublicNetwork } from "./sandbox-public-network.js";
 import { createSandboxReportToken, hashSandboxReportToken } from "./crypto.js";
 import { redisCommandClient } from "./redis.js";
@@ -106,10 +105,10 @@ const waitForSandboxPodResizeApplied = async (input: { podName: string; resource
 };
 
 export const markSandboxSpecPendingRestart = async (input: { spaceId: string; specId: SandboxSpecId; reason: string }) => {
-  const spec = SANDBOX_SPECS[input.specId] ?? SANDBOX_SPECS[DEFAULT_SANDBOX_SPEC_ID];
+  const placement = await getSpaceSandboxPlacement(input.spaceId, input.specId);
   await mergeSpaceSandboxMeta(input.spaceId, {
     desiredSpec: input.specId,
-    desiredSpecResources: spec.resources,
+    desiredSpecResources: placement.resources,
     specApplying: false,
     specPendingRestart: true,
     specPendingRestartReason: input.reason,
@@ -125,7 +124,14 @@ export const resizeSpaceSandboxToSpec = async (input: { spaceId: string; specId:
     return { resized: false, pendingRestart: true, skipped: true };
   }
   const podName = sandbox.podName ?? `sandbox-${input.spaceId}`;
-  const spec = SANDBOX_SPECS[input.specId] ?? SANDBOX_SPECS[DEFAULT_SANDBOX_SPEC_ID];
+  const placement = await getSpaceSandboxPlacement(input.spaceId, input.specId);
+  const placementPool = asMetaObject(sandbox.meta).placementPool ?? null;
+  // nodeSelector is immutable on a running Pod, so a pool change can only land through recreation.
+  if (placementPool !== placement.pool) {
+    await markSandboxSpecPendingRestart({ spaceId: input.spaceId, specId: input.specId, reason: "placement_changed" });
+    return { resized: false, pendingRestart: true, message: "restart the sandbox to apply the new spec" };
+  }
+  const { resources } = placement;
   const k8sObjectApi = k8sCoreApi as typeof k8sCoreApi & {
     patchNamespacedPodResize?: (input: { name: string; namespace: string; body: unknown }) => Promise<unknown>;
   };
@@ -142,20 +148,20 @@ export const resizeSpaceSandboxToSpec = async (input: { spaceId: string; specId:
       {
         op: "replace",
         path: "/spec/containers/0/resources",
-        value: spec.resources,
+        value: resources,
       },
     ],
   });
 
   await mergeSpaceSandboxMeta(input.spaceId, {
     desiredSpec: input.specId,
-    desiredSpecResources: spec.resources,
+    desiredSpecResources: resources,
     specApplying: true,
     specApplyingStartedAt: startedAt.toISOString(),
     specPendingRestart: false,
   });
 
-  const outcome = await waitForSandboxPodResizeApplied({ podName, resources: spec.resources });
+  const outcome = await waitForSandboxPodResizeApplied({ podName, resources });
   if (outcome.status === "pending") {
     await markSandboxSpecPendingRestart({ spaceId: input.spaceId, specId: input.specId, reason: "resize_deferred" });
     return { resized: false, pendingRestart: true, message: "restart the sandbox to apply the new spec" };
@@ -164,7 +170,7 @@ export const resizeSpaceSandboxToSpec = async (input: { spaceId: string; specId:
 
   await mergeSpaceSandboxMeta(input.spaceId, {
     appliedSpec: input.specId,
-    appliedSpecResources: spec.resources,
+    appliedSpecResources: resources,
     appliedSpecUpdatedAt: new Date().toISOString(),
     specApplying: false,
     specPendingRestart: false,
@@ -486,7 +492,7 @@ async function reconcileSpaceSandboxLocked(
   const allowedSpec = resolved.allowedSpec;
   const desiredSpec = resolved.effective.spec;
   const specEntitlementDowngraded = desiredSpec !== configuredSpec;
-  const desiredSpecConfig = SANDBOX_SPECS[desiredSpec];
+  const placement = await getSpaceSandboxPlacement(input.spaceId, desiredSpec);
   const podName = `sandbox-${input.spaceId}`;
   const existing = await getSpaceSandboxBySpaceId(input.spaceId);
   const existingSandbox = await claimSandboxProvisioning(input.spaceId, existing, lease);
@@ -588,7 +594,7 @@ async function reconcileSpaceSandboxLocked(
     CONFIGS_SUBPATH: config.configsSubpath,
     SANDBOX_SPEC_ID: desiredSpec,
     SANDBOX_IMAGE: resolved.imageRef,
-  }) as V1Pod;
+  }, placement) as V1Pod;
 
   const enabledMods = resolved.enabledMods;
   const modMountSignature = getSpaceModMountSignature(enabledMods);
@@ -673,7 +679,8 @@ async function reconcileSpaceSandboxLocked(
       desiredSpec,
       configuredSpec,
       ...(specEntitlementDowngraded ? { specEntitlementDowngraded: true, specEntitlementAllowedSpec: allowedSpec, specEntitlementCheckedAt: nowIso } : { specEntitlementDowngraded: false }),
-      desiredSpecResources: desiredSpecConfig.resources,
+      desiredSpecResources: placement.resources,
+      placementPool: placement.pool,
       modMountSignature,
       modMounts: enabledMods.map((mod) => ({
         modSpaceId: mod.modSpaceId,
@@ -682,7 +689,7 @@ async function reconcileSpaceSandboxLocked(
         name: mod.name ?? mod.modSpaceName,
       })),
       appliedSpec: desiredSpec,
-      appliedSpecResources: desiredSpecConfig.resources,
+      appliedSpecResources: placement.resources,
       specApplying: false,
       specPendingRestart: false,
       lastProvisionedAt: provisionedAt,
