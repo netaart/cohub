@@ -4,6 +4,18 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.101 — 2026-11-12
+
+- **Forgiving board touch input**: A release before the long press now opens a card, touch drag slop rises to 12px, taps catch nearly stopped flings, card keys accept touches within `touchHitSlop`, and touching or dragging away from the selection no longer drops it.
+- **Hand-tool picking**: The new `handClick: "pick"` option lets a mouse click with the hand tool select then open items with a pointer cursor; `registry.activation()` now receives the pointer type, and `createGhostClickGuard` is exported for host overlays.
+- **Client-IP removal**: Dropped the per-IP anonymous gateway connection cap, visitor IP forwarding to port Apps, and Meta `client_ip_address`, since carrier-grade NAT makes per-IP decisions unreliable.
+
+### Bug Fixes
+
+- **Session history pagination**: Caller-bounded pages and turn windows now keep their pagination sentinels, and older-message cursors no longer skip a sequence.
+- **Deep session forks**: Descendants flattened into the last fork level now sort by their own activity, so the newest or running fork appears first.
+- **Remote image inlining**: Image bytes are MIME-sniffed before being declared to providers, so stored objects with a stale `Content-Type` no longer cause requests to be rejected.
+
 ## v2.100 — 2026-11-11
 
 - **Declarative sandbox node pools**: A new `placements.yaml` platform config routes selected space owners to dedicated node pools with per-pool node selectors, tolerations, and request ratios, hot-reloaded by the API without a restart; pods carry a `cohub.run/sandbox-pool` label, and a spec change that crosses pools is queued as a pending restart because node selectors are immutable on running pods.

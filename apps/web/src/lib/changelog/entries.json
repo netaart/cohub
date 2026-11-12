@@ -1,5 +1,20 @@
 [
 	{
+		"version": "2.101",
+		"date": "2026-11-12",
+		"tags": ["v2.101.0"],
+		"highlights": [
+			"**Forgiving board touch input**: A release before the long press now opens a card, touch drag slop rises to 12px, taps catch nearly stopped flings, card keys accept touches within `touchHitSlop`, and touching or dragging away from the selection no longer drops it.",
+			"**Hand-tool picking**: The new `handClick: \"pick\"` option lets a mouse click with the hand tool select then open items with a pointer cursor; `registry.activation()` now receives the pointer type, and `createGhostClickGuard` is exported for host overlays.",
+			"**Client-IP removal**: Dropped the per-IP anonymous gateway connection cap, visitor IP forwarding to port Apps, and Meta `client_ip_address`, since carrier-grade NAT makes per-IP decisions unreliable."
+		],
+		"fixes": [
+			"**Session history pagination**: Caller-bounded pages and turn windows now keep their pagination sentinels, and older-message cursors no longer skip a sequence.",
+			"**Deep session forks**: Descendants flattened into the last fork level now sort by their own activity, so the newest or running fork appears first.",
+			"**Remote image inlining**: Image bytes are MIME-sniffed before being declared to providers, so stored objects with a stale `Content-Type` no longer cause requests to be rejected."
+		]
+	},
+	{
 		"version": "2.100",
 		"date": "2026-11-11",
 		"tags": ["v2.100.0"],
