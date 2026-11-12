@@ -116,10 +116,31 @@ test("running and kept rows stay visible past the first three", () => {
 	]);
 });
 
+const ids = ["r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7"];
+const chain = ids.map((id, i) => session(id, i, id === "r7"));
+const chainForks = ids.slice(1).map((id, i) => edge(id, ids[i]));
+
+test("rows past the depth cap flatten newest first", () => {
+	const rows = buildSessionForkTree(
+		[...chain, session("s4", 6), session("t5", 9)],
+		[...chainForks, edge("s4", "r3"), edge("t5", "s4")],
+		{ collapsed: new Set() },
+	);
+	assert.deepEqual(view(rows), [
+		["r0", 0, true, true, [], [true, 0, 0]],
+		["r1", 1, true, true, [], [true, 0, 0]],
+		["r2", 2, true, true, [], [true, 0, 0]],
+		["r3", 3, true, true, [], [true, 0, 0]],
+		["t5", 4, false, false, [], null],
+		["r7", 4, false, false, [], null],
+		["s4", 4, false, false, [], null],
+		["r6", 4, false, false, [], null],
+		["r5", 4, false, false, [], null],
+		["r4", 4, true, false, [], null],
+	]);
+});
+
 test("deep chains keep the first rows and stay under the depth cap", () => {
-	const ids = ["r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7"];
-	const chain = ids.map((id, i) => session(id, i, id === "r7"));
-	const chainForks = ids.slice(1).map((id, i) => edge(id, ids[i]));
 	const rows = buildSessionForkTree(chain, chainForks, {
 		collapsed: new Set(["r1"]),
 		keep: running,
@@ -132,10 +153,9 @@ test("deep chains keep the first rows and stay under the depth cap", () => {
 		]),
 		[
 			["r0", 0, 0],
-			["r1", 1, 2],
+			["r1", 1, 3],
 			["r2", 2, null],
 			["r3", 3, null],
-			["r4", 4, null],
 			["r7", 4, null],
 		],
 	);

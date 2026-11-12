@@ -1,6 +1,9 @@
 import type { RealtimeSessionFork, SessionRecord } from "@neta-art/cohub";
 import { formatResourceMentionTextForDisplay } from "$lib/mentions/resource";
-import { getSessionSortTime } from "$lib/session-sort";
+import {
+	compareSessionsByRecentActivity,
+	getSessionSortTime,
+} from "$lib/session-sort";
 
 export type SessionForkEdge = {
 	childSessionId: string;
@@ -175,16 +178,33 @@ export function buildSessionForkTree<T extends SessionRecord>(
 
 	const rows: { session: T; depth: number; fold?: SessionForkFold }[] = [];
 	const placed = new Set<string>();
-	const childrenOf = (session: T) =>
-		(children.get(session.id) ?? []).sort(compare);
+	// The last level holds every deeper descendant as one flat list, newest first.
+	const childrenOf = (session: T, depth: number): T[] => {
+		if (depth >= SESSION_TREE_MAX_DEPTH) return [];
+		if (depth < SESSION_TREE_MAX_DEPTH - 1)
+			return (children.get(session.id) ?? []).sort(compare);
+		const flat: T[] = [];
+		const seen = new Set([session.id]);
+		const visit = (id: string) => {
+			for (const child of children.get(id) ?? []) {
+				if (seen.has(child.id)) continue;
+				seen.add(child.id);
+				flat.push(child);
+				visit(child.id);
+			}
+		};
+		visit(session.id);
+		return flat.sort(compareSessionsByRecentActivity);
+	};
 	// A collapsed group shows its first descendant rows plus kept ones; each
 	// visible row hangs under its nearest visible ancestor.
 	const collapse = (
 		session: T,
+		treeDepth: number,
 		depth: number,
 		state: SessionForkFold & { seen: number },
 	) => {
-		for (const child of childrenOf(session)) {
+		for (const child of childrenOf(session, treeDepth)) {
 			if (placed.has(child.id)) continue;
 			placed.add(child.id);
 			const visible =
@@ -194,11 +214,12 @@ export function buildSessionForkTree<T extends SessionRecord>(
 				state.hidden++;
 				if (fold?.unread?.(child)) state.hiddenUnread++;
 			}
-			collapse(child, visible ? depth + 1 : depth, state);
+			collapse(child, treeDepth + 1, visible ? depth + 1 : depth, state);
 		}
 	};
 	// Groups that fit within the collapsed rows have nothing to fold.
-	const foldable = (id: string) => {
+	const foldable = (id: string, depth: number) => {
+		if (depth >= SESSION_TREE_MAX_DEPTH) return false;
 		const seen = new Set([id]);
 		const queue = [id];
 		for (const next of queue) {
@@ -216,7 +237,7 @@ export function buildSessionForkTree<T extends SessionRecord>(
 		placed.add(session.id);
 		const row: (typeof rows)[number] = { session, depth };
 		rows.push(row);
-		if (fold && foldable(session.id)) {
+		if (fold && foldable(session.id, depth)) {
 			row.fold = {
 				expanded: !fold.collapsed.has(session.id),
 				hidden: 0,
@@ -224,13 +245,13 @@ export function buildSessionForkTree<T extends SessionRecord>(
 			};
 			if (!row.fold.expanded) {
 				const state = { ...row.fold, seen: 0 };
-				collapse(session, depth + 1, state);
+				collapse(session, depth, depth + 1, state);
 				row.fold.hidden = state.hidden;
 				row.fold.hiddenUnread = state.hiddenUnread;
 				return;
 			}
 		}
-		for (const child of childrenOf(session)) append(child, depth + 1);
+		for (const child of childrenOf(session, depth)) append(child, depth + 1);
 	};
 	for (const root of roots.sort(compare)) append(root, 0);
 	for (const session of sessions) append(session, 0);
