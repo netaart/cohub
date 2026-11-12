@@ -1,5 +1,6 @@
 import dns from "node:dns/promises";
 import net from "node:net";
+import { sniffImageMimeType } from "@cohub/protocol/core";
 
 const MAX_REDIRECTS = 3;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -203,5 +204,7 @@ export async function fetchRemoteImage(input: { url: string; maxBytes?: number; 
   if (!response.ok) throw new Error(`${label} download failed ${response.status}`);
   const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || "application/octet-stream";
   if (!mimeType.startsWith("image/") && mimeType !== "application/octet-stream") throw new Error(`${label} is not an image: ${mimeType}`);
-  return { data: await readResponseBufferLimited(response, input.maxBytes ?? REMOTE_IMAGE_MAX_BYTES, label), mimeType };
+  const data = await readResponseBufferLimited(response, input.maxBytes ?? REMOTE_IMAGE_MAX_BYTES, label);
+  // Stored objects can carry a stale Content-Type (e.g. PNG bytes under a .webp key); providers reject mismatched base64 media types.
+  return { data, mimeType: sniffImageMimeType(data) ?? mimeType };
 }
