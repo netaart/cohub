@@ -1,6 +1,6 @@
 /** Every threshold that turns raw input into a click, drag, hold or camera move. */
 export const BOARD_INPUT = {
-	dragSlop: { mouse: 4, touch: 8, pen: 8 },
+	dragSlop: { mouse: 4, touch: 12, pen: 8 },
 	tapMs: 300,
 	longPressMs: 450,
 	doubleTapMs: 300,
@@ -13,6 +13,7 @@ export const BOARD_INPUT = {
 	flingSampleMs: 80,
 	flingDecay: 0.95,
 	flingStop: 0.02,
+	flingCatch: 0.1,
 	swipeDistance: 0.2,
 	swipeVelocity: 0.4,
 	edgeZone: 32,

@@ -24,7 +24,8 @@ export type BoardRegistry = {
 	readonly definitions: readonly BoardItemDefinition[];
 	get(type: string): BoardItemDefinition | undefined;
 	capabilities(item: Pick<BoardItem, "type">): BoardItemCapabilities;
-	activation(item: Pick<BoardItem, "type">, readonly?: boolean): BoardItemActivation;
+	/** `pointerType` is the press being judged, or the hovering pointer for cursors. */
+	activation(item: Pick<BoardItem, "type">, readonly?: boolean, pointerType?: string): BoardItemActivation;
 	resizeMode(item: Pick<BoardItem, "type">): BoardItemResizeMode;
 	bounds(item: BoardSceneItem): Rect;
 	hitTest(item: BoardSceneItem, point: WorldPoint): boolean;

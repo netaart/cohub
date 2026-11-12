@@ -136,8 +136,9 @@ export function createCameraModule(ctx: EditorContext) {
 		if (!frame) frame = requestAnimationFrame(step);
 	}
 
+	/** True when it halted a fling still fast enough that a press should only catch it. */
 	function stop(): boolean {
-		const flinging = motion?.kind === "fling";
+		const flinging = motion?.kind === "fling" && Math.hypot(motion.vx, motion.vy) >= BOARD_INPUT.flingCatch;
 		motion = null;
 		if (frame) cancelAnimationFrame(frame);
 		frame = 0;

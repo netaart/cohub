@@ -100,6 +100,11 @@ export type BoardEditorOptions = {
 	readonly?: boolean;
 	/** false: touch and pen move and resize the selection but never rotate it. */
 	touchRotation?: boolean;
+	/**
+	 * A mouse click with the hand tool. `pan` (default) only opens items that open on tap;
+	 * `pick` selects the item and opens it on a click once selected, keeping the hand tool.
+	 */
+	handClick?: "pan" | "pick";
 	preferences?: Partial<BoardEditorPreferences>;
 	onPreferencesChange?: (preferences: BoardEditorPreferences) => void;
 	onCommit: (patch: BoardPatch) => void | Promise<void>;

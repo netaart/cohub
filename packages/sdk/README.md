@@ -304,19 +304,25 @@ const assets = createBoardAssetManager({
 - **Opening cards.** Give a type `activation: "tap"` and handle `onActivate`: a
   quick press opens the card without selecting it, a drag moves it (or pans with
   the hand tool or read-only), and hovering shows a pointer instead of ports. A
-  press held in place past `BOARD_INPUT.tapMs` does nothing: it was a pick-up. A
-  press on a selected card reports `selected: true`. Return `false` from `onActivate`
-  to select the card instead. `{ readonly: "tap" }` opens only for viewers; built-in
-  media, file and task items work that way. The stage drops the click a touch screen
-  sends after a tap that opened something.
+  press held in place past `BOARD_INPUT.longPressMs` does nothing: it was a pick-up. A
+  press on a selected card reports `selected: true`; the hand tool opens it too. Return
+  `false` from `onActivate` to select the card instead. `{ readonly: "tap" }` opens only
+  for viewers; built-in media, file and task items work that way. A custom registry's
+  `activation(item, readonly, pointerType)` sees the pointer type of the press. Pass
+  `handClick: "pick"` to `createBoardEditor` so a mouse click with the hand tool selects
+  an item and a click on the selected card opens it, keeping the hand tool. The stage
+  drops the click a touch screen sends after a tap that opened something;
+  `createGhostClickGuard(window).arm()` does the same for your own overlays.
 - **Card keys.** A renderer's `hitAt(item, point, context)` returns `{ action, cursor? }`
   for keys it draws; the stage shows the cursor, passes the hovered key to renderers as
   `context.hoveredHit` and sends clicks to `onHit` on release (return `false` to treat
-  it as a press on the card); a drag that starts on a key moves the card. Media cards
+  it as a press on the card); a drag that starts on a key moves the card, and a finger
+  reaches a key within `BOARD_INPUT.touchHitSlop`. Media cards
   report `BOARD_PLAY_MEDIA` this way. `handlesHit(item, action)` names the keys you act
   on; the rest show no cursor and go to the editor.
 - **Touch, menus and feedback.** Touch browses with the hand tool: a tap selects and
-  switches to select, a touch away from the selection returns to the hand. A long press
+  switches to select, a tap away from the selection returns to the hand and a drag there
+  pans with the selection kept. A touch on a fast fling only stops it. A long press
   lifts the item for the same finger to move. `onContextMenu({ item, world, clientX,
   clientY })` answers a right click, a long press on empty space and a lifted item
   released in place; `onFeedback(kind)` marks `pickup`, `drop`, `menu`, `undo` and
