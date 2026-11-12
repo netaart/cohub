@@ -28,8 +28,11 @@ import {
   TOOL_CALL_LOOP_GUARD_PROMPT,
   TOOL_CALL_LOOP_GUARD_THRESHOLD,
 } from "./tool-call-loop-guard.js";
-import { isContextOverflowFailure, isRetryableProviderError } from "./provider-errors.js";
+import { isContextOverflowFailure } from "./provider-errors.js";
+import { AGENT_RETRY_BASE_DELAY_MS, AGENT_RETRY_MAX_RETRIES, getAssistantRetryOutcome, isRetryableAssistantFailure, shouldResetAssistantRetryState, waitRetryBackoff, type AssistantRetryOutcome } from "./assistant-retry.js";
 import { observeContextOverflow } from "./token-calibration.js";
+
+export { isRetryableAssistantFailure, shouldResetAssistantRetryState };
 
 export type CohubAgentSessionEvent = AgentEvent;
 
@@ -58,61 +61,10 @@ export type CohubAgentSession = {
 
 type ToolLike = AgentTool;
 
-const AGENT_RETRY_MAX_RETRIES = 2;
-const AGENT_RETRY_BASE_DELAY_MS = 1000;
 const LLM_REQUEST_MAX_BYTES = 30 * 1024 * 1024;
 
 const COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
 const COMPACTION_SUMMARY_SUFFIX = "\n</summary>";
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-function hasAssistantContent(message: AssistantMessage): boolean {
-  const content = Array.isArray(message.content) ? message.content : [];
-  return content.length > 0;
-}
-
-function isEmptySuccessfulAssistantMessage(message: AssistantMessage | undefined): boolean {
-  if (!message) return false;
-  if (message.stopReason === "error" || message.stopReason === "aborted") return false;
-  return !hasAssistantContent(message);
-}
-
-export function isRetryableAssistantFailure(message: AssistantMessage | undefined): boolean {
-  return isRetryableProviderError(message)
-    || isEmptySuccessfulAssistantMessage(message)
-    || isContextOverflowFailure(message);
-}
-
-type AssistantRetryOutcome = {
-  shouldRetry: boolean;
-  retryAttempt: number;
-  retryDelayMs?: number;
-  retryReason?: string;
-  forceCompaction?: boolean;
-};
-
-function getAssistantRetryOutcome(message: AssistantMessage | undefined, retryAttempt: number): AssistantRetryOutcome {
-  if (!isRetryableAssistantFailure(message)) {
-    return { shouldRetry: false, retryAttempt, retryReason: "not_retryable" };
-  }
-  if (retryAttempt >= AGENT_RETRY_MAX_RETRIES) {
-    return { shouldRetry: false, retryAttempt, retryReason: "retry_exhausted" };
-  }
-
-  const overflow = isContextOverflowFailure(message);
-  return {
-    shouldRetry: true,
-    retryAttempt: retryAttempt + 1,
-    // Overflow recovery starts with force-compact; no backoff needed.
-    retryDelayMs: overflow ? 0 : AGENT_RETRY_BASE_DELAY_MS * 2 ** retryAttempt,
-    retryReason: overflow
-      ? "context_overflow"
-      : message?.stopReason === "error"
-        ? (message?.errorMessage ?? "assistant_error")
-        : "empty_assistant_message",
-    forceCompaction: overflow,
-  };
-}
 
 function recordAssistantRetrySpanAttributes(span: Span | undefined, outcome: AssistantRetryOutcome) {
   if (!span) return;
@@ -135,11 +87,6 @@ function logAssistantRetry(sessionId: string, turnId: string | undefined, outcom
   } else {
     logger.debug(`[Agent] assistant retry not scheduled ${contextInfo} attempt=${outcome.retryAttempt} reason=${reason}`);
   }
-}
-
-
-export function shouldResetAssistantRetryState(message: AssistantMessage | undefined): boolean {
-  return !isRetryableAssistantFailure(message);
 }
 
 export type CreateCohubAgentSessionOptions = {
@@ -838,6 +785,7 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
   let lastAssistantMessage: AssistantMessage | undefined;
   let retryAttempt = 0;
   let retryCancelled = false;
+  let retryWaitController: AbortController | null = null;
   let retryPending = false;
   let retryInProgress = false;
   let retryRunPromise: Promise<void> | null = null;
@@ -871,10 +819,13 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
         retryPending = false;
         retryInProgress = true;
 
+        const waitController = new AbortController();
+        retryWaitController = waitController;
         const waitStarted = performance.now();
-        if (delayMs > 0) await sleep(delayMs);
+        if (delayMs > 0) await waitRetryBackoff(delayMs, waitController.signal);
         await recordRetryWait(contextSnapshot?.turnId, Math.max(0, performance.now() - waitStarted));
-        if (retryCancelled) {
+        retryWaitController = null;
+        if (retryCancelled || waitController.signal.aborted) {
           clearRetryState();
           return;
         }
@@ -1100,6 +1051,7 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
     },
     async abort() {
       retryCancelled = true;
+      retryWaitController?.abort();
       retryPending = false;
       agent.abort();
       await agent.waitForIdle();
@@ -1108,6 +1060,7 @@ export async function createCohubAgentSession(options: CreateCohubAgentSessionOp
     dispose() {
       unsubscribe();
       retryCancelled = true;
+      retryWaitController?.abort();
       retryPending = false;
       retryContext = null;
       retryAttempt = 0;
