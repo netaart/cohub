@@ -370,7 +370,6 @@ export function createInteractionModule(ctx: EditorContext) {
 		const gesture = state.interaction;
 		state.interaction = { type: "idle" };
 		state.snapGuides = [];
-		touchAway = false;
 		land(gesture);
 		ctx.remote.flushPending();
 		pinch = {
@@ -485,7 +484,7 @@ export function createInteractionModule(ctx: EditorContext) {
 			gesture.type === "pressing" ? gesture.itemId : gesture.type === "panning" && !gesture.moved ? gesture.tapSelection?.targetId : null;
 		const item = id ? state.scene.get(id) : null;
 		if (!movable(item)) return null;
-		if (touchAway) returnToHand();
+		if (touchAway) ctx.chosenTool = null;
 		state.selection = [item.id];
 		state.tool = "select";
 		state.interaction = {
@@ -517,7 +516,6 @@ export function createInteractionModule(ctx: EditorContext) {
 	}
 
 	function returnToHand() {
-		touchAway = false;
 		state.selection = [];
 		state.tool = "hand";
 		ctx.chosenTool = null;
@@ -959,8 +957,6 @@ export function createInteractionModule(ctx: EditorContext) {
 		state.interaction = { type: "idle" };
 		last = null;
 		press = null;
-		const away = touchAway;
-		touchAway = false;
 
 		switch (gesture.type) {
 			case "panning": {
@@ -971,7 +967,7 @@ export function createInteractionModule(ctx: EditorContext) {
 					if (Math.abs(state.camera.zoom / gesture.origin.zoom - 1) > 0.01) ctx.frames.refit(true);
 					else ctx.frames.swipe(event.screen.x - gesture.start.x, event.screen.y - gesture.start.y, vx, vy);
 				} else if (tap && !gesture.moved) {
-					if (away) returnToHand();
+					if (touchAway) returnToHand();
 					const target = tap.targetId && state.scene.get(tap.targetId) ? tap.targetId : null;
 					if (tap.additive && target) ctx.selection.toggle(target);
 					else state.selection = target ? [target] : [];
@@ -983,7 +979,7 @@ export function createInteractionModule(ctx: EditorContext) {
 				break;
 			}
 			case "pressing":
-				if (away) returnToHand();
+				if (touchAway) returnToHand();
 				activate(gesture.itemId, gesture.at, gesture.pointerType, state.selection.includes(gesture.itemId));
 				break;
 			case "translating":
@@ -1035,7 +1031,6 @@ export function createInteractionModule(ctx: EditorContext) {
 		pinch = null;
 		last = null;
 		press = null;
-		touchAway = false;
 		state.snapGuides = [];
 		state.interaction = { type: "idle" };
 		ctx.document.discardDraft();
