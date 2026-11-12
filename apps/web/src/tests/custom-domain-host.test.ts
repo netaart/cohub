@@ -85,6 +85,7 @@ describe("custom domain hosts", () => {
 			headers: {
 				"CF-Connecting-IP": "203.0.113.7",
 				"X-Forwarded-For": "1.1.1.1",
+				"X-Real-IP": "1.1.1.1",
 				"X-Cohub-Client-IP": "1.1.1.1",
 				Cookie: "sid=old",
 			},
@@ -94,8 +95,9 @@ describe("custom domain hosts", () => {
 		assert.equal(sent.url, `${UPSTREAM}/login?next=%2F`);
 		assert.equal(sent.method, "POST");
 		assert.equal(await sent.text(), "a=1");
-		assert.equal(sent.headers.get("x-real-ip"), "203.0.113.7");
-		assert.equal(sent.headers.get("x-forwarded-for"), "203.0.113.7");
+		assert.equal(sent.headers.get("x-real-ip"), null);
+		assert.equal(sent.headers.get("x-forwarded-for"), null);
+		assert.equal(sent.headers.get("cf-connecting-ip"), null);
 		assert.equal(sent.headers.get("x-forwarded-host"), host);
 		assert.equal(sent.headers.get("x-cohub-client-ip"), null);
 		assert.equal(sent.headers.get("cookie"), "sid=old");

@@ -63,8 +63,7 @@ export function serveStandaloneHostRequest(input: {
 		...input,
 		portPolicy: {
 			prefix: input.cohubEnv === "prod" ? "s" : "d",
-			// The first zone carries Cloudflare for SaaS. Proxying only within it
-			// keeps the subrequest same-zone, which preserves the visitor IP.
+			// The first zone carries Cloudflare for SaaS; proxy only within it.
 			zones: siteZones.slice(0, 1),
 		},
 	});

@@ -103,7 +103,7 @@ Do not commit real secrets or production-only credentials.
 | API / system worker | `APP_CUSTOM_DOMAIN_CNAME_TARGET` | 可选，默认 `cname.cohub.live` |
 | Web | `PUBLIC_SITE_HOST_SUFFIXES` | 构建期注入，取值自 GitHub Variable `SITE_HOST_SUFFIXES_DEV` / `SITE_HOST_SUFFIXES_PROD`，如 `cohub.live,cohub.run` |
 
-`PUBLIC_SITE_HOST_SUFFIXES` 列出由主站服务的 Zone，须覆盖所有指向该 Worker 的主站 host（含仍在使用的 `*.workers.dev` 等）。配置后，入口把其它所有 host 当作自定义域名：查不到绑定一律返回 404，绝不渲染主站。第一个 Zone 必须是开启 Cloudflare for SaaS 的 Zone（`cohub.live`），port App 只会被代理到该 Zone 内的沙箱主机（prod 为 `s-…`，dev 为 `d-…`），以保证同 Zone 转发拿到访客真实 IP；因此 API 的 `SANDBOX_PUBLIC_DOMAINS` 第一项也必须是该 Zone。
+`PUBLIC_SITE_HOST_SUFFIXES` 列出由主站服务的 Zone，须覆盖所有指向该 Worker 的主站 host（含仍在使用的 `*.workers.dev` 等）。配置后，入口把其它所有 host 当作自定义域名：查不到绑定一律返回 404，绝不渲染主站。第一个 Zone 必须是开启 Cloudflare for SaaS 的 Zone（`cohub.live`），port App 只会被代理到该 Zone 内的沙箱主机（prod 为 `s-…`，dev 为 `d-…`）；因此 API 的 `SANDBOX_PUBLIC_DOMAINS` 第一项也必须是该 Zone。
 
 上线顺序（不可颠倒）：
 

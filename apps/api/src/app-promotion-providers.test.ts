@@ -15,7 +15,7 @@ describe("buildMetaPromotionPayload", () => {
       eventName: "ViewContent",
       eventTime: 1_700_000_000,
       event,
-      userData: { client_ip_address: "203.0.113.10" },
+      userData: {},
       customData: {},
     });
 
@@ -32,10 +32,7 @@ describe("buildMetaPromotionPayload", () => {
       eventTime: 1_700_000_000,
       event,
       sourceUrl: "https://cohub.neta.art/work?cohub_campaign=promotion-1",
-      userData: {
-        client_ip_address: "203.0.113.10",
-        client_user_agent: "test-agent",
-      },
+      userData: { client_user_agent: "test-agent" },
       customData: { content_ids: ["product-1"], content_type: "product" },
       testEventCode: "TEST89717",
     });

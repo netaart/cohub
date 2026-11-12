@@ -4,7 +4,6 @@ import { createLogger } from "@cohub/infra/logging";
 
 
 import { createHash, randomUUID } from "node:crypto";
-import type { IncomingMessage } from "node:http";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -48,8 +47,6 @@ import {
   ANONYMOUS_REAUTHORIZE_MS,
   anonymousEnvelope,
   anonymousRoomRequest,
-  clientIp,
-  createAnonymousAdmission,
 } from "./anonymous-viewers.js";
 import { authenticateRealtimeToken, authorizeBoardAwareness, authorizeRealtimeRooms, notifySpacePresenceUpdated, requestGatewayChannelReconcile, submitInternalSessionPrompt, InternalPromptError, type RealtimeAuthResult } from "./api-client.js";
 import { listenOutboundCommands, initOutboundConsumerGroup } from "./bus.js";
@@ -90,7 +87,6 @@ import {
 const logger = createLogger({ serviceName: "cohub-gateway" });
 type WsConnectionContext = {
   connectionId: string;
-  ip: string;
   anonymous?: { idleSince: number };
   userId?: string;
   userName?: string;
@@ -267,14 +263,6 @@ const releaseAppRoomMemberships = async (ctx: WsConnectionContext) => {
   }
 };
 
-const anonymousAdmission = createAnonymousAdmission();
-
-const leaveAnonymous = (ctx: WsConnectionContext) => {
-  if (!ctx.anonymous) return;
-  ctx.anonymous = undefined;
-  anonymousAdmission.release(ctx.ip);
-};
-
 /**
  * Release everything the previous identity held before adopting a new one:
  * room publishes authorize against the stored membership, so a leftover entry
@@ -293,11 +281,6 @@ const resetConnectionIdentity = async (ctx: WsConnectionContext) => {
 };
 
 const adoptAnonymousIdentity = async (ctx: WsConnectionContext, socket: WebSocket, requestId?: string) => {
-  if (!ctx.anonymous && !anonymousAdmission.admit(ctx.ip)) {
-    sendWsError(socket, "TOO_MANY_CONNECTIONS", "too many anonymous connections", requestId);
-    socket.close(1008, "too many anonymous connections");
-    return;
-  }
   ctx.anonymous = { idleSince: Date.now() };
   await resetConnectionIdentity(ctx);
   if (wsConnections.get(ctx.connectionId) !== ctx) return;
@@ -313,7 +296,7 @@ const adoptAnonymousIdentity = async (ctx: WsConnectionContext, socket: WebSocke
 
 const cleanupWsConnection = async (ctx: WsConnectionContext | undefined) => {
   if (!ctx) return;
-  leaveAnonymous(ctx);
+  ctx.anonymous = undefined;
   unsubscribeConnectionFromAllRooms(ctx);
   await releaseAppRoomMemberships(ctx);
   wsSockets.delete(ctx.connectionId);
@@ -1143,11 +1126,10 @@ async function main() {
   relayControlWss.on("connection", (socket, request) => void handleRelayControlConnection(socket, request));
   relayDataWss.on("connection", (socket, request) => handleRelayDataConnection(socket, request));
 
-  wss.on("connection", (socket: WebSocket, request?: IncomingMessage) => {
+  wss.on("connection", (socket: WebSocket) => {
     const connectionId = randomUUID();
     const ctx: WsConnectionContext = {
       connectionId,
-      ip: clientIp(request),
       capabilities: new Set(),
       rooms: new Set(),
       presenceMetaBySpace: new Map(),
@@ -1216,7 +1198,7 @@ async function main() {
             sendWsError(socket, "UNAUTHORIZED", result.error.message, requestId);
             return;
           }
-          leaveAnonymous(ctx);
+          ctx.anonymous = undefined;
           await resetConnectionIdentity(ctx);
           ctx.userId = result.user.uuid;
           ctx.userName = typeof result.user.nick_name === "string" ? result.user.nick_name : undefined;
