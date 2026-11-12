@@ -44,7 +44,7 @@
 关键点：
 
 - SaaS Zone 就是 `cohub.live`。自定义域名只存在于 Cloudflare 与 Cohub 数据库中；Traefik 看到的仍是 `s-<space>-<port>.cohub.live`，与今天直接访问完全相同。
-- Worker 到 `s-…cohub.live` 是**同 Zone 子请求**：Worker 设置 `X-Real-IP` 后，上游收到的 `CF-Connecting-IP` 即访客真实 IP，App 无需改限流逻辑（跨 Zone 时会被替换为 `2a06:98c0:3600::103`，这是不选独立 Zone 的主要原因之一）。
+- Worker 到 `s-…cohub.live` 是**同 Zone 子请求**。Worker 不设置 `X-Real-IP`、`X-Forwarded-For`，上游拿不到访客真实 IP，App 不能按 IP 限流或识别访客。
 - 现有 `{id}.netaverses.cc` 独立域名链路原样保留；自定义域名只扩展“域名 → App”的解析来源与 port 代理能力。
 - 不使用 Cloudflare `custom_origin_server`：挂了 Worker 路由后它会被绕过；直接回源时 SNI/Host 是用户域名，Traefik 无对应证书。
 
@@ -282,7 +282,7 @@ App 记录不变；域名只经上述接口与实时事件获取。
 
 - isolate 内存缓存（现有 30s / 128 条）→ API（Redis）。不使用 `caches.default`：它按机房存储，无法全局主动失效。
 - 404 同样缓存 30s，防止扫描流量打穿到 API。
-- `asAppDetail` 放开 `content.kind === "port"`，并按沙箱主机的精确模式校验上游：`^https://<prefix>-<uuid>-<port>\.cohub\.live$`，`prefix` 与 `getSandboxPublicHostname` 一致（prod 为 `s`，dev 为 `d`，取自 `PUBLIC_COHUB_ENV`），Zone 必须是 `PUBLIC_SITE_HOST_SUFFIXES` 的第一项（SaaS Zone），端口属于 `SANDBOX_PUBLIC_PORTS`。既杜绝开放代理，也排除 `api.`、`dev.` 等主机以及跨 Zone 的 `cohub.run`（会丢失真实 IP）。
+- `asAppDetail` 放开 `content.kind === "port"`，并按沙箱主机的精确模式校验上游：`^https://<prefix>-<uuid>-<port>\.cohub\.live$`，`prefix` 与 `getSandboxPublicHostname` 一致（prod 为 `s`，dev 为 `d`，取自 `PUBLIC_COHUB_ENV`），Zone 必须是 `PUBLIC_SITE_HOST_SUFFIXES` 的第一项（SaaS Zone），端口属于 `SANDBOX_PUBLIC_PORTS`。既杜绝开放代理，也排除 `api.`、`dev.` 等主机以及跨 Zone 的 `cohub.run`。
 
 ### 8.3 静态 App
 
@@ -295,8 +295,8 @@ App 记录不变；域名只经上述接口与实时事件获取。
 | 方法 | 全部透传（含 POST/PUT/PATCH/DELETE/OPTIONS） |
 | 目标 | 以上游 origin 为基准逐个赋值 `pathname`、`search`（不做 URL 解析，`//evil.example` 这类路径不会跳到别的主机），再校验 origin 未变；`redirect: "manual"` |
 | 请求体 | 流式透传，不缓冲。上限默认 30 MiB（可配）：`Content-Length` 超限直接 413；无 `Content-Length`（HTTP/2 流、chunked）时经计数 `TransformStream` 透传，累计超限即中止上游请求并返回 413 |
-| 请求头 | 透传 Cookie、Origin、Content-Type、Authorization、`X-CSRF-Token` 等业务头；移除 hop-by-hop 头（WebSocket 升级请求保留 `Upgrade`/`Connection`）、`Host`、客户端传入的 `X-Forwarded-*`、`X-Cohub-*` |
-| 追加头 | `X-Real-IP: <CF-Connecting-IP>`（同 Zone 子请求下即上游的 `CF-Connecting-IP`）、`X-Forwarded-Host: <自定义域名>`、`X-Forwarded-Proto: https`。Traefik 对非信任来源可能覆盖 `X-Forwarded-*`，因此 App 生成绝对 URL 时以配置的公开 origin 为准 |
+| 请求头 | 透传 Cookie、Origin、Content-Type、Authorization、`X-CSRF-Token` 等业务头；移除 hop-by-hop 头（WebSocket 升级请求保留 `Upgrade`/`Connection`）、`Host`、客户端传入的 `X-Real-IP`、`Forwarded`、`X-Forwarded-*`、`X-Cohub-*`、`CF-*`；不转发访客 IP |
+| 追加头 | `X-Forwarded-Host: <自定义域名>`、`X-Forwarded-Proto: https`。Traefik 对非信任来源可能覆盖 `X-Forwarded-*`，因此 App 生成绝对 URL 时以配置的公开 origin 为准 |
 | WebSocket | 带 `Upgrade: websocket` 时透传给 `fetch`，原样返回 101 响应 |
 | 重定向 | 绝对地址的 `Location` 指向上游 origin 时改写为自定义域名 origin；相对地址原样返回，由浏览器按当前页面解析 |
 | Set-Cookie | 删除所有 `Domain=` 属性，服务端下发的 Cookie 统一为仅当前主机有效 |

@@ -42,12 +42,6 @@ function forwardedRequestHeaders(
 		headers.set("upgrade", "websocket");
 		headers.set("connection", "Upgrade");
 	}
-	// Same-zone subrequests surface X-Real-IP to the origin as CF-Connecting-IP.
-	const clientIp = request.headers.get("cf-connecting-ip");
-	if (clientIp) {
-		headers.set("x-real-ip", clientIp);
-		headers.set("x-forwarded-for", clientIp);
-	}
 	headers.set("x-forwarded-host", url.host);
 	headers.set("x-forwarded-proto", "https");
 	return headers;

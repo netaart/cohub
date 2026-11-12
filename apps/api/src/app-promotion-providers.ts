@@ -1,9 +1,7 @@
-import { isIP } from "node:net";
 import type { Context } from "hono";
 import { createLogger } from "@cohub/infra/logging";
 import type { AppPromotionEventKey } from "@cohub/protocol";
 import { config } from "./config.js";
-import { getRequestRemoteAddress, isPrivateNetworkAddress } from "./lib/middleware.js";
 import { buildMetaPromotionPayload } from "./app-promotion-meta-payload.js";
 
 export type AppPromotionProviderKey = "generic" | "meta";
@@ -33,15 +31,6 @@ export type AppPromotionProvider = {
 };
 
 const logger = createLogger({ serviceName: "cohub-api" });
-
-function resolveClientIp(c: Context) {
-  const raw = config.metaPromotionClientIpHeader
-    ? c.req.header(config.metaPromotionClientIpHeader)?.split(",")[0]
-    : getRequestRemoteAddress(c);
-  const value = raw?.trim().replace(/^::ffff:/, "");
-  if (!value || isIP(value) === 0 || isPrivateNetworkAddress(value)) return undefined;
-  return value;
-}
 
 function resolveSourceUrl(value: string | undefined) {
   if (!value) return undefined;
@@ -78,10 +67,8 @@ const metaProvider: AppPromotionProvider = {
     const eventName = META_EVENT_NAMES[event.eventKey];
     if (!eventName || !config.metaPromotionPixelId || !config.metaPromotionAccessToken) return;
     const userAgent = c.req.header("user-agent")?.trim();
-    const clientIp = resolveClientIp(c);
     const sourceUrl = resolveSourceUrl(event.sourceUrl);
     const userData = {
-      ...(clientIp ? { client_ip_address: clientIp } : {}),
       ...(userAgent ? { client_user_agent: userAgent } : {}),
       ...(event.fbp ? { fbp: event.fbp } : {}),
       ...(event.fbc ? { fbc: event.fbc } : {}),

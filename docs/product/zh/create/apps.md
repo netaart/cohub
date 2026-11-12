@@ -169,7 +169,7 @@ cohub apps domains rm <app> app.example.com --yes
 - 如果域名设置了 CAA 记录，需要允许 Let's Encrypt 和 Google Trust Services
 - 子域名上的代码可以写入父域名的 Cookie；只在信任该 App 的站点下绑定子域名，
   父站点的登录 Cookie 应使用 `__Host-` 前缀
-- 端口 App 照常拿到访客 IP；生成绝对 URL 和 OAuth 回调时请使用自定义域名，
+- 端口 App 拿不到访客 IP；生成绝对 URL 和 OAuth 回调时请使用自定义域名，
   不要依赖请求里的转发主机头
 - 域名连续 72 小时不再指向 `cname.cohub.live` 会被释放。**重新检查** 会重新
   发起验证；失败的域名会得到新的 TXT token

@@ -32,7 +32,7 @@ const SANDBOX_HOST_RE =
 export type PortUpstreamPolicy = {
 	/** `s` in production, `d` elsewhere, as the API names sandbox hosts. */
 	prefix: string;
-	/** Zones sandbox hosts live in; same-zone fetches keep the visitor IP. */
+	/** Zones sandbox hosts live in. */
 	zones: readonly string[];
 };
 

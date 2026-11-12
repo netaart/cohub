@@ -176,7 +176,7 @@ Notes:
 - If your domain has CAA records, allow Let's Encrypt and Google Trust Services
 - Code on a subdomain can set cookies for its parent domain; bind subdomains only
   of sites that trust the App, and keep the parent's sign-in cookies `__Host-`
-- A port App sees the visitor's IP as usual; build absolute URLs and OAuth
+- A port App does not receive the visitor's IP; build absolute URLs and OAuth
   callbacks from the custom domain, not the request's forwarded host
 - A domain that stops pointing at `cname.cohub.live` for 72 hours is released.
   **Check now** restarts validation; a failed domain gets a new TXT token
