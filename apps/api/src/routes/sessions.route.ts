@@ -413,7 +413,7 @@ router.get("/:id/messages", async (c) => {
     hasMore,
     nextCursor: pageMessages.length > 0
       ? direction === "older"
-        ? (pageMessages[0]?.sequence ?? 0) - 1
+        ? pageMessages[0]?.sequence
         : (pageMessages[pageMessages.length - 1]?.sequence ?? 0)
       : undefined,
   });
