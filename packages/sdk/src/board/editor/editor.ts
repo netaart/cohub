@@ -404,6 +404,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		itemAt: tracked(["scene", "camera"], query.itemAt),
 		pickAt: tracked(["scene", "camera"], query.pickAt),
 		opensOnTap: tracked(["scene"], interaction.opensOnTap),
+		handPicks: interaction.handPicks,
 		itemById: tracked(["scene"], query.itemById),
 		labelItemAt: tracked(["scene", "camera", "selection"], query.labelItemAt),
 		idsInRect: tracked(["scene"], query.idsInRect),

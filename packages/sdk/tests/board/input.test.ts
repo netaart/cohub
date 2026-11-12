@@ -68,7 +68,7 @@ test("cancelling a drag puts everything back", () => {
 	assert.deepEqual(editor.itemById("a")?.position, { x: 0, y: 0 });
 });
 
-test("touch browses with the hand: a tap selects and arms select, a touch away returns to the hand", () => {
+test("touch browses with the hand: a tap selects and arms select, a drag away keeps it, a tap away returns to the hand", () => {
 	const { editor, input } = setup("hand");
 	const finger = input("touch");
 	finger.down(50, 50);
@@ -76,6 +76,12 @@ test("touch browses with the hand: a tap selects and arms select, a touch away r
 	assert.deepEqual(editor.selection, ["a"]);
 	assert.equal(editor.tool, "select");
 	finger.down(400, 400);
+	finger.move(300, 400);
+	finger.up(300, 400);
+	assert.deepEqual(editor.selection, ["a"]);
+	assert.equal(editor.tool, "select");
+	finger.down(400, 400);
+	finger.up(400, 400);
 	assert.deepEqual(editor.selection, []);
 	assert.equal(editor.tool, "hand");
 });

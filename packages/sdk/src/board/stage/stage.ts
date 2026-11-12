@@ -9,7 +9,7 @@ import type {
 } from "../model/index.js";
 import { Application, Container, Graphics, type Renderer, RendererType, type Texture } from "pixi.js";
 import type { BoardActivation, BoardEditor, BoardPointerEvent } from "../editor/index.js";
-import { boardDragSlop, boardTextGestureWrap, isCreationBoardTool, isTouchLikePointer, resizeCursorForHandle } from "../editor/index.js";
+import { BOARD_INPUT, boardDragSlop, boardTextGestureWrap, isCreationBoardTool, isTouchLikePointer, resizeCursorForHandle } from "../editor/index.js";
 import {
 	type BoardArrowItem,
 	type BoardAssetSource,
@@ -804,7 +804,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	}
 
 	function opensOnTap(item: BoardSceneItem): boolean {
-		return !editor.selection.includes(item.id) && editor.opensOnTap(item);
+		return (editor.tool === "hand" || !editor.selection.includes(item.id)) && editor.opensOnTap(item, editor.pointerType);
 	}
 
 	function dropTargetFrame() {
@@ -816,6 +816,21 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (!lastContext || !scene?.getNode(item.id)) return null;
 		const hit = resolveRenderer(item, lastContext).hitAt?.(item, point, lastContext);
 		return hit && (options.handlesHit?.(item, hit.action) ?? true) ? hit : null;
+	}
+
+	/** A finger also reaches keys within `touchHitSlop` of where it landed, nearest ring first. */
+	function pressedKeyAt(item: BoardSceneItem, point: WorldPoint, pointerType: string) {
+		const hit = hitAt(item, point);
+		if (hit || !isTouchLikePointer(pointerType)) return hit;
+		const reach = BOARD_INPUT.touchHitSlop / Math.max(renderCamera().zoom, 0.0001);
+		for (const radius of [reach / 2, reach]) {
+			for (let step = 0; step < 8; step++) {
+				const angle = (step * Math.PI) / 4;
+				const near = hitAt(item, worldPoint(point.x + Math.cos(angle) * radius, point.y + Math.sin(angle) * radius));
+				if (near) return near;
+			}
+		}
+		return null;
 	}
 
 	function hoverHit(input: BoardPointerEvent | null) {
@@ -833,7 +848,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (event.button !== 0 || editor.gestureActive || !options.onHit) return false;
 		const press = boardStagePress(event);
 		const item = editor.pickAt(input.world, event.pointerType);
-		const hit = item ? hitAt(item, input.world) : null;
+		const hit = item ? pressedKeyAt(item, input.world, event.pointerType) : null;
 		if (!item || !hit) return false;
 		const fire = () => {
 			const current = editor.itemById(item.id);
@@ -877,7 +892,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		const hovered = editor.hoverId ? editor.itemById(editor.hoverId) : null;
 		if (editor.tool === "play") return hovered ? "grab" : "default";
 		if (hovered && (editor.tool === "select" || editor.tool === "hand") && opensOnTap(hovered)) return "pointer";
-		if (editor.tool === "hand") return "grab";
+		if (editor.tool === "hand") return hovered && editor.handPicks(editor.pointerType) ? "pointer" : "grab";
 		if (isCreationBoardTool(editor.tool)) return "crosshair";
 		return "default";
 	}
