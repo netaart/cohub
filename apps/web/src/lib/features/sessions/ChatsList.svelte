@@ -9,9 +9,7 @@ import {
 	LIST_ROW_AVATAR,
 	LIST_ROW_HEIGHT,
 } from "$lib/components/list-page/list-row";
-import SessionRow, {
-	SESSION_ROW_NAVIGATE_DELAY_MS,
-} from "$lib/components/SessionRow.svelte";
+import SessionRow from "$lib/components/SessionRow.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import {
 	type ChatsView,
@@ -19,13 +17,13 @@ import {
 } from "$lib/features/sessions/chats-inbox.svelte";
 import { chatsWorkspaceScope } from "$lib/features/sessions/chats-workspace-scope";
 import { setSessionArchived } from "$lib/features/sessions/session-archive";
+import { SessionRename } from "$lib/features/sessions/session-rename.svelte";
 import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { useCompactShell } from "$lib/layout/compact-shell.svelte";
 import { scrollListToTop } from "$lib/layout/list-scroll-top";
 import { scrollMemory } from "$lib/layout/scroll-memory";
 import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
 import {
 	buildSessionForkTree,
 	getSessionTreeTitle,
@@ -35,7 +33,6 @@ import {
 	buildUserSessionRoute,
 } from "$lib/space-routes";
 import { type ChatsFilter, chatsFilterScope } from "$lib/stores/chats-filter";
-import { sessionStore } from "$lib/stores/session-store";
 
 const {
 	view,
@@ -75,21 +72,12 @@ let scroller = $state<HTMLDivElement | null>(null);
 let scrollTop = $state(0);
 let viewportHeight = $state(600);
 let focusedSessionId = $state<string | null>(null);
-let renamingId = $state<string | null>(null);
-let renameValue = $state("");
-let renameSaving = $state(false);
-let renameError = $state("");
 let archiveFailed = $state(false);
-let navigateTimer: ReturnType<typeof setTimeout> | null = null;
+const rename = new SessionRename();
 
-function cancelPendingNavigation() {
-	if (navigateTimer) clearTimeout(navigateTimer);
-	navigateTimer = null;
-}
-
-onDestroy(cancelPendingNavigation);
+onDestroy(() => rename.cancelClick());
 $effect(() => {
-	if (!active) cancelPendingNavigation();
+	if (!active) rename.cancelClick();
 });
 const rowHeight = $derived(LIST_ROW_HEIGHT[density]);
 const windowTop = $derived(
@@ -110,7 +98,7 @@ const focusedIndex = $derived(
 		: -1,
 );
 const renamingIndex = $derived(
-	renamingId ? rows.findIndex((row) => row.session.id === renamingId) : -1,
+	rename.id ? rows.findIndex((row) => row.session.id === rename.id) : -1,
 );
 const visibleIndices = $derived.by(() => {
 	const indices = new Set<number>();
@@ -151,7 +139,7 @@ function listKeyboard(node: HTMLUListElement) {
 		const index = rowIndex(event.target);
 		const direction = event.shiftKey ? -1 : 1;
 		let next = index + direction;
-		if (renameSaving && rows[next]?.session.id === renamingId)
+		if (rename.saving && rows[next]?.session.id === rename.id)
 			next += direction;
 		if (
 			index < 0 ||
@@ -210,18 +198,7 @@ function forkTooltip(parentTitle: string | null | undefined) {
 }
 
 function open(event: MouseEvent, session: UserSessionListItem) {
-	if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)
-		return;
-	event.preventDefault();
-	cancelPendingNavigation();
-	if (!canRename || event.detail === 0) {
-		navigate(session);
-		return;
-	}
-	navigateTimer = setTimeout(() => {
-		navigateTimer = null;
-		navigate(session);
-	}, SESSION_ROW_NAVIGATE_DELAY_MS);
+	rename.click(event, () => navigate(session), canRename);
 }
 
 function navigate(session: UserSessionListItem) {
@@ -240,66 +217,8 @@ function navigate(session: UserSessionListItem) {
 	});
 }
 
-function startRename(session: SessionRecord, title: string) {
-	cancelPendingNavigation();
-	if (renameSaving) return;
-	renamingId = session.id;
-	renameValue = session.title ?? title;
-	renameError = "";
-}
-
-async function cancelRename() {
-	const id = renamingId;
-	const restoreFocus =
-		active &&
-		(document.activeElement === document.body ||
-			scroller
-				?.querySelector("[data-session-rename]")
-				?.contains(document.activeElement));
-	if (restoreFocus) focusedSessionId = id;
-	renamingId = null;
-	renameValue = "";
-	renameError = "";
-	await tick();
-	if (!restoreFocus || !active || document.activeElement !== document.body)
-		return;
-	const index = rows.findIndex((row) => row.session.id === id);
-	scroller
-		?.querySelector<HTMLAnchorElement>(`[data-chat-index="${index}"] a[href]`)
-		?.focus({ preventScroll: true });
-}
-
-async function submitRename(session: SessionRecord, title: string) {
-	if (renameSaving) return;
-	const trimmed = renameValue.trim();
-	if (!trimmed || trimmed === (session.title ?? title)) {
-		await cancelRename();
-		return;
-	}
-	renameSaving = true;
-	renameError = "";
-	try {
-		const result = await sdk
-			.space(session.spaceId)
-			.session(session.id)
-			.rename(trimmed);
-		sessionStore.merge(result.session);
-		await cancelRename();
-	} catch (error) {
-		renameError = error instanceof Error ? error.message : String(error);
-	} finally {
-		renameSaving = false;
-		await tick();
-		if (renameError && active && document.activeElement === document.body) {
-			scroller
-				?.querySelector<HTMLInputElement>("[data-session-rename] input")
-				?.focus({ preventScroll: true });
-		}
-	}
-}
-
 async function toggleArchive(session: SessionRecord) {
-	cancelPendingNavigation();
+	rename.cancelClick();
 	archiveFailed = false;
 	try {
 		await setSessionArchived(session, !session.archivedAt);
@@ -388,23 +307,9 @@ function onScroll(event: Event) {
 						tree={row.tree}
 						tooltip={tooltipFor(row)}
 						showInsert={false}
-						showRename={canRename}
-						renaming={renamingId === session.id}
-						{renameValue}
-						{renameSaving}
-						{renameError}
+						rename={canRename ? rename : undefined}
 						onNavigate={open}
-						onDoubleClick={!canRename ? undefined : (event, target) => {
-							if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-							event.preventDefault();
-							event.stopPropagation();
-							startRename(target, title);
-						}}
-						onRename={(target) => startRename(target, title)}
 						onArchive={canRename ? (target) => void toggleArchive(target) : undefined}
-						onRenameValueChange={(value) => renameValue = value}
-						onSubmitRename={(target) => void submitRename(target, title)}
-						onCancelRename={cancelRename}
 					>
 						{#snippet avatar()}
 							<SpaceAvatar name={spaceName(session)} profile={session.space?.publicProfile ?? null} seed={session.spaceId} size={LIST_ROW_AVATAR[density]} />

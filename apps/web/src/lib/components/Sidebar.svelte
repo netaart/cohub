@@ -55,9 +55,7 @@ import { APP_AREA_ICONS, appAreaLabel } from "$lib/components/app-area";
 import ChannelProviderIcon from "$lib/components/ChannelProviderIcon.svelte";
 import EntityIcon from "$lib/components/EntityIcon.svelte";
 import NewLabelPopover from "$lib/components/NewLabelPopover.svelte";
-import SessionRow, {
-	SESSION_ROW_NAVIGATE_DELAY_MS,
-} from "$lib/components/SessionRow.svelte";
+import SessionRow from "$lib/components/SessionRow.svelte";
 import SidebarFlyout from "$lib/components/SidebarFlyout.svelte";
 import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
 import Spinner from "$lib/components/Spinner.svelte";
@@ -86,6 +84,7 @@ import LibraryTabs from "$lib/features/library/LibraryTabs.svelte";
 import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
 import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
 import { setSessionArchived } from "$lib/features/sessions/session-archive";
+import { SessionRename } from "$lib/features/sessions/session-rename.svelte";
 import * as account from "$lib/features/settings/account-data";
 import { clearAccountSnapshots } from "$lib/features/settings/account-snapshots";
 import { resourceFromUrl } from "$lib/features/space/modules/resource-app-route";
@@ -159,12 +158,7 @@ import {
 	onSessionListCacheUpdated,
 	setCachedSessionList,
 } from "$lib/stores/session-list-cache";
-import { unreadTracker } from "$lib/stores/session-state.svelte";
 import { sessionStore, startSessionSync } from "$lib/stores/session-store";
-import {
-	getCachedCollapsedForkIds,
-	setCachedCollapsedForkIds,
-} from "$lib/stores/sidebar-fork-expanded";
 import {
 	getCachedExpandedLabelIdsSnapshot,
 	setCachedExpandedLabelIds,
@@ -274,8 +268,6 @@ let labelItemsPageInfoBySpace = $state<
 	>
 >({});
 let expandedLabelIdsBySpace = $state<Record<string, Set<string>>>({});
-/** Keyed by user + space, mirroring the persisted cache. */
-let collapsedForkIdsByScope = $state<Record<string, Set<string>>>({});
 let loadingLabelIdsBySpace = $state<Record<string, Set<string>>>({});
 /** Per space+label load tokens so stale finally blocks cannot clear a newer load. */
 const labelItemsLoadTokens = new Map<string, number>();
@@ -348,12 +340,7 @@ let creatingSession = $state(false);
 let createSessionError = $state("");
 const sidebarFlyoutPreviewLimit = 24;
 
-// Session rename state
-let renamingSessionId = $state<string | null>(null);
-let renameTitleValue = $state("");
-let renameSaving = $state(false);
-let renameInputElement: HTMLInputElement | null = $state(null);
-let sessionNavigateClickTimer: ReturnType<typeof setTimeout> | null = null;
+const sessionRename = new SessionRename();
 
 // Label rename state
 let renamingLabelId = $state<string | null>(null);
@@ -427,15 +414,6 @@ const activeSession = $derived(
 const activeCheckpoint = $derived(
 	checkpoints.find((checkpoint) => checkpoint.id === activeCheckpointId) ??
 		null,
-);
-const currentForkScope = $derived(
-	currentSpaceId ? `${getCacheUserKey()}:${currentSpaceId}` : null,
-);
-const currentCollapsedForkIds = $derived(
-	currentSpaceId && currentForkScope
-		? (collapsedForkIdsByScope[currentForkScope] ??
-				getCachedCollapsedForkIds(currentSpaceId))
-		: new Set<string>(),
 );
 const sidebarSessionItems = $derived.by(() =>
 	buildSidebarSessionItems(sessions),
@@ -2193,10 +2171,6 @@ function buildPreferredSessionRoute(spaceId: string, sessionId: string) {
 }
 
 async function handleNavigateToSession(sessionId: string) {
-	if (sessionNavigateClickTimer) {
-		clearTimeout(sessionNavigateClickTimer);
-		sessionNavigateClickTimer = null;
-	}
 	onClose?.();
 	if (!currentSpaceId) return;
 	await goto(buildPreferredSessionRoute(currentSpaceId, sessionId));
@@ -2275,67 +2249,8 @@ function insertPathReference(path: string) {
 	onClose?.();
 }
 
-// ── Session rename ──────────────────────────────────────────────────────
-
-function startRenameSession(session: SessionRecord) {
-	renamingSessionId = session.id;
-	renameTitleValue = session.title ?? sessionTitle(session);
-	void tick().then(() => {
-		renameInputElement?.focus();
-		renameInputElement?.select();
-	});
-}
-
-function scheduleSessionRowNavigate(sessionId: string) {
-	if (sessionNavigateClickTimer) clearTimeout(sessionNavigateClickTimer);
-	sessionNavigateClickTimer = setTimeout(() => {
-		sessionNavigateClickTimer = null;
-		void handleNavigateToSession(sessionId);
-	}, SESSION_ROW_NAVIGATE_DELAY_MS);
-}
-
-function handleSessionRowDoubleClick(
-	event: MouseEvent,
-	session: SessionRecord,
-) {
-	event.preventDefault();
-	event.stopPropagation();
-	if (sessionNavigateClickTimer) {
-		clearTimeout(sessionNavigateClickTimer);
-		sessionNavigateClickTimer = null;
-	}
-	startRenameSession(session);
-}
-
-function cancelRenameSession() {
-	renamingSessionId = null;
-	renameTitleValue = "";
-}
-
-async function submitRenameSession(session: SessionRecord) {
-	if (renameSaving || !currentSpaceId) return;
-	const trimmed = renameTitleValue.trim();
-	if (!trimmed) {
-		cancelRenameSession();
-		return;
-	}
-	if (trimmed === (session.title ?? sessionTitle(session))) {
-		cancelRenameSession();
-		return;
-	}
-	renameSaving = true;
-	try {
-		await sdk.space(currentSpaceId).session(session.id).rename(trimmed);
-		sessionStore.merge({
-			...(sessionStore.get(session.id) ?? session),
-			title: trimmed,
-		});
-	} catch {
-		// Silently fail
-	} finally {
-		renameSaving = false;
-		cancelRenameSession();
-	}
+function openSessionRow(event: MouseEvent, session: SessionRecord) {
+	sessionRename.click(event, () => void handleNavigateToSession(session.id));
 }
 
 function isUserLabel(label: LabelListItem) {
@@ -2488,47 +2403,19 @@ function forkTooltip(fork: SessionForkEdge) {
 
 function buildSidebarSessionItems(
 	sessionList: SessionRecord[],
-	foldable = true,
 ): SidebarSessionItem[] {
-	// Touch rows have no hover to reveal the toggle, so they stay fully expanded.
-	const fold =
-		foldable && !isMobile
-			? {
-					collapsed: currentCollapsedForkIds,
-					// The open chat and running forks stay visible inside a collapsed group.
-					keep: (session: SessionRecord) =>
-						Boolean(session.activeTurn) || session.id === activeSessionId,
-					unread: (session: SessionRecord) =>
-						unreadTracker.isUnread(session, session.lastMessageId),
-				}
-			: undefined;
-	return buildSessionForkTree(sessionList, sessionForks, fold).map((item) => ({
+	return buildSessionForkTree(sessionList, sessionForks).map((item) => ({
 		...item,
 		title: getSessionTreeTitle(item) ?? m.sidebar_new_chat({}, { locale }),
 		tooltip: item.fork ? forkTooltip(item.fork) : undefined,
 	}));
 }
 
-function toggleForkExpanded(sessionId: string) {
-	if (!currentSpaceId || !currentForkScope) return;
-	const next = new Set(currentCollapsedForkIds);
-	if (next.has(sessionId)) next.delete(sessionId);
-	else next.add(sessionId);
-	collapsedForkIdsByScope = {
-		...collapsedForkIdsByScope,
-		[currentForkScope]: next,
-	};
-	setCachedCollapsedForkIds(currentSpaceId, next);
-}
-
-function buildLabelSessionItems(
-	items: LabelAssignmentListItem[],
-	foldable = true,
-) {
+function buildLabelSessionItems(items: LabelAssignmentListItem[]) {
 	const labelSessions = items
 		.filter((item) => item.resourceType === "session")
 		.flatMap((item) => sessionStore.get(item.resourceRef) ?? []);
-	return buildSidebarSessionItems(labelSessions, foldable);
+	return buildSidebarSessionItems(labelSessions);
 }
 
 function orderLabelItemsBySessionTree(
@@ -2718,13 +2605,6 @@ function subscribeSidebarUpdates() {
 		if (!target.closest("[data-help-menu]")) {
 			showHelpMenu = false;
 		}
-		if (
-			renamingSessionId &&
-			!renameSaving &&
-			!target.closest("[data-session-rename]")
-		) {
-			cancelRenameSession();
-		}
 	}
 	document.addEventListener("click", handleClickOutside);
 
@@ -2738,6 +2618,7 @@ function subscribeSidebarUpdates() {
 		offChannelLabelDisplayNamesUpdated();
 		offTaskRunsCacheUpdated();
 		document.removeEventListener("click", handleClickOutside);
+		sessionRename.cancelClick();
 		window.removeEventListener(
 			"cohub:checkpoints-updated",
 			handleCheckpointsUpdated as EventListener,
@@ -2884,9 +2765,7 @@ $effect(() => {
 		{@const useSessionTreeOrder = isSessionActivityLabel(label)}
 		{@const labelSessionItems = useSessionTreeOrder ? buildLabelSessionItems(items) : []}
 		{@const labelSessionItemById = new Map(labelSessionItems.map((item) => [item.session.id, item]))}
-		{@const fullSessionItems = useSessionTreeOrder && currentCollapsedForkIds.size > 0 ? buildLabelSessionItems(items, false) : labelSessionItems}
-		{@const foldedSessionIds = new Set(fullSessionItems.flatMap((item) => labelSessionItemById.has(item.session.id) ? [] : [item.session.id]))}
-		{@const orderedItems = useSessionTreeOrder ? orderLabelItemsBySessionTree(items, fullSessionItems).filter((item) => item.resourceType !== "session" || !foldedSessionIds.has(item.resourceRef)) : items}
+		{@const orderedItems = useSessionTreeOrder ? orderLabelItemsBySessionTree(items, labelSessionItems) : items}
 		{@const canEditLabelItems = canAssignResourceToLabel(label)}
 		{@const itemIndentPx = Math.max(0, depth) * 16}
 		{@const itemIndentStyle = itemIndentPx > 0 ? `padding-left: ${itemIndentPx}px` : undefined}
@@ -2913,27 +2792,15 @@ $effect(() => {
 							density="dense"
 							active={isActive}
 							{isMobile}
-							renaming={renamingSessionId === session.id}
-							renameValue={renameTitleValue}
-							renameSaving={renameSaving}
+							rename={sessionRename}
 							tree={sessionItem?.tree}
-							fold={sessionItem?.fold}
-							onToggleFold={() => toggleForkExpanded(session.id)}
 							tooltip={sessionItem?.tooltip}
 							draggable={itemDraggable}
 							removeLabelTitle={canRemoveItem ? labelRemoveTitle : undefined}
 							removeLabelDisabled={labelDropBusyId === label.id}
-							onNavigate={(event, target) => {
-								event.preventDefault();
-								void handleNavigateToSession(target.id);
-							}}
-							onDoubleClick={handleSessionRowDoubleClick}
+							onNavigate={openSessionRow}
 							onInsert={insertPathReference}
-							onRename={startRenameSession}
 							onArchive={toggleSessionArchive}
-							onRenameValueChange={(value) => { renameTitleValue = value; }}
-							onSubmitRename={(target) => void submitRenameSession(target)}
-							onCancelRename={cancelRenameSession}
 							onRemoveLabel={canRemoveItem ? () => void removeLabelAssignment(label, item) : undefined}
 							onDragStart={(event) => handleLabelItemDragStart(event, label, item)}
 							onDragEnd={handleResourceDragEnd}
@@ -3254,25 +3121,13 @@ $effect(() => {
 					active={isActive}
 					{isMobile}
 					showSourceBadge={true}
-					renaming={renamingSessionId === session.id}
-					renameValue={renameTitleValue}
-					renameSaving={renameSaving}
+					rename={sessionRename}
 					tree={item.tree}
-					fold={item.fold}
-					onToggleFold={() => toggleForkExpanded(session.id)}
 					tooltip={item.tooltip}
 					draggable={!isMobile}
-					onNavigate={(event, target) => {
-						event.preventDefault();
-						scheduleSessionRowNavigate(target.id);
-					}}
-					onDoubleClick={handleSessionRowDoubleClick}
+					onNavigate={openSessionRow}
 					onInsert={insertPathReference}
-					onRename={startRenameSession}
 					onArchive={toggleSessionArchive}
-					onRenameValueChange={(value) => { renameTitleValue = value; }}
-					onSubmitRename={(target) => void submitRenameSession(target)}
-					onCancelRename={cancelRenameSession}
 					onDragStart={(event, target, title) => handleSessionDragStart(event, target, title)}
 					onDragEnd={handleResourceDragEnd}
 				/>

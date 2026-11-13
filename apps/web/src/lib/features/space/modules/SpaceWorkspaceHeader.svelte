@@ -292,13 +292,14 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 							class="menu-item"
 							role="menuitem"
 							disabled={!archived && context.activeSessionRunning}
+							title={!archived && context.activeSessionRunning ? m.session_archive_running({}, { locale }) : undefined}
 							onclick={() => {
 								actions.closeResourceActionMenu();
 								runAction(actions.toggleSessionArchive);
 							}}
 						>
 							{#if archived}<ArchiveRestore class="h-3.5 w-3.5" />{:else}<Archive class="h-3.5 w-3.5" />{/if}
-							<span class="truncate">{archived ? m.session_unarchive({}, { locale }) : context.activeSessionRunning ? m.session_archive_running({}, { locale }) : m.session_archive({}, { locale })}</span>
+							<span class="truncate">{archived ? m.session_unarchive({}, { locale }) : m.session_archive({}, { locale })}</span>
 						</button>
 					{/if}
 				</div>

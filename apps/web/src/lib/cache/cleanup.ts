@@ -23,6 +23,7 @@ const CLEANUP_STORAGE_KEY = "cohub:cache:last-cleanup-at:v1";
 const LEGACY_LOCAL_STORAGE_PREFIXES = [
 	"cohub:activity:v1:",
 	"cohub:board:seen:",
+	"cohub:sidebar-forks-collapsed:",
 ] as const;
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 

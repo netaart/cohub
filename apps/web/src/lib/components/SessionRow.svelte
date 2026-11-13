@@ -1,15 +1,9 @@
-<script lang="ts" module>
-// Single-click navigation waits this long so a double click can enter rename.
-export const SESSION_ROW_NAVIGATE_DELAY_MS = 120;
-</script>
-
 <script lang="ts">
 import type { SessionRecord } from "@neta-art/cohub";
 import {
 	Archive,
 	ArchiveRestore,
 	Check,
-	ChevronRight,
 	Link2Off,
 	Pencil,
 	TextCursorInput,
@@ -27,6 +21,7 @@ import StatusGlyph, {
 } from "$lib/components/StatusGlyph.svelte";
 import SidebarActionButton from "$lib/components/sidebar/SidebarActionButton.svelte";
 import UserAvatar from "$lib/components/UserAvatar.svelte";
+import type { SessionRename } from "$lib/features/sessions/session-rename.svelte";
 import { formatElapsedMs } from "$lib/format-duration";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { isComposingKeyboardEvent } from "$lib/keyboard";
@@ -36,7 +31,7 @@ import {
 	getSessionStoppedLabel,
 	type SessionRowStatusKind,
 } from "$lib/session-activity";
-import type { SessionForkFold, SessionRowTree } from "$lib/session-fork-tree";
+import type { SessionRowTree } from "$lib/session-fork-tree";
 import { getSessionPreview, getSessionPreviewText } from "$lib/session-preview";
 import { getSessionActivityAt } from "$lib/session-sort";
 import { authStore } from "$lib/stores/auth.svelte";
@@ -57,27 +52,16 @@ const {
 	showSourceBadge = false,
 	avatar,
 	tree,
-	fold,
 	tooltip,
 	draggable = false,
 	showInsert = true,
-	showRename = true,
-	renaming = false,
-	renameValue = "",
-	renameSaving = false,
-	renameError = "",
+	rename,
 	removeLabelTitle,
 	removeLabelDisabled = false,
 	onNavigate,
-	onDoubleClick,
 	onInsert,
-	onRename,
 	onArchive,
-	onRenameValueChange,
-	onSubmitRename,
-	onCancelRename,
 	onRemoveLabel,
-	onToggleFold,
 	onDragStart,
 	onDragEnd,
 }: {
@@ -90,27 +74,16 @@ const {
 	showSourceBadge?: boolean;
 	avatar?: Snippet;
 	tree?: SessionRowTree | null;
-	fold?: SessionForkFold | null;
 	tooltip?: string;
 	draggable?: boolean;
 	showInsert?: boolean;
-	showRename?: boolean;
-	renaming?: boolean;
-	renameValue?: string;
-	renameSaving?: boolean;
-	renameError?: string;
+	rename?: SessionRename;
 	removeLabelTitle?: string;
 	removeLabelDisabled?: boolean;
 	onNavigate: (event: MouseEvent, session: SessionRecord) => void;
-	onDoubleClick?: (event: MouseEvent, session: SessionRecord) => void;
 	onInsert?: (path: string) => void;
-	onRename?: (session: SessionRecord) => void;
 	onArchive?: (session: SessionRecord) => void;
-	onRenameValueChange?: (value: string) => void;
-	onSubmitRename?: (session: SessionRecord) => void;
-	onCancelRename?: () => void;
 	onRemoveLabel?: () => void;
-	onToggleFold?: () => void;
 	onDragStart?: (
 		event: DragEvent,
 		session: SessionRecord,
@@ -144,8 +117,13 @@ const GLYPHS: Record<
 };
 
 const locale = $derived(getLocale());
+let rowElement = $state<HTMLElement | null>(null);
 let renameInput = $state<HTMLInputElement | null>(null);
-const renameErrorId = $props.id();
+const rowId = $props.id();
+const renameErrorId = `${rowId}-rename-error`;
+const renaming = $derived(rename?.id === session.id && rename.owner === rowId);
+const renameSaving = $derived(renaming && Boolean(rename?.saving));
+const renameError = $derived(renaming ? (rename?.error ?? "") : "");
 
 const dense = $derived(density === "dense");
 const isUnread = $derived(
@@ -215,27 +193,6 @@ const treeStyle = $derived(
 		: undefined,
 );
 
-const foldLabel = $derived(
-	fold
-		? [
-				fold.expanded
-					? m.sidebar_fork_collapse({}, { locale })
-					: m.sidebar_fork_expand({}, { locale }),
-				!fold.expanded && fold.hidden > 0
-					? m.sidebar_fork_hidden({ count: fold.hidden }, { locale })
-					: null,
-				!fold.expanded && fold.hiddenUnread > 0
-					? m.sidebar_fork_hidden_unread(
-							{ count: fold.hiddenUnread },
-							{ locale },
-						)
-					: null,
-			]
-				.filter(Boolean)
-				.join(", ")
-		: "",
-);
-
 function railX(level: number) {
 	return level === 1
 		? "var(--tree-root-x)"
@@ -250,7 +207,7 @@ const actionCount = $derived(
 	isMobile
 		? 0
 		: (showInsert && onInsert ? 1 : 0) +
-				(showRename && onRename ? 1 : 0) +
+				(rename ? 1 : 0) +
 				(canToggleArchive ? 1 : 0) +
 				(onRemoveLabel ? 1 : 0),
 );
@@ -263,12 +220,47 @@ const HOVER_ROOM = [
 ] as const;
 const hoverRoomClass = $derived(HOVER_ROOM[actionCount] ?? "");
 
+let restoreFocus = false;
+let focused = false;
+
 $effect(() => {
-	if (!renaming) return;
+	if (!renaming) {
+		focused = false;
+		return;
+	}
+	if (renameSaving) return;
+	const active = document.activeElement;
+	if (focused && active && active !== document.body && active !== renameInput)
+		return;
+	focused = true;
 	requestAnimationFrame(() => {
 		renameInput?.focus();
 		renameInput?.select();
 	});
+});
+
+$effect(() => {
+	if (!renaming || !rename) return;
+	const controller = rename;
+	const onPointerDown = (event: PointerEvent) => {
+		if (
+			controller.saving ||
+			(event.target instanceof Element &&
+				event.target.closest("[data-session-rename]"))
+		)
+			return;
+		restoreFocus = false;
+		void controller.submit(session);
+	};
+	document.addEventListener("pointerdown", onPointerDown, true);
+	return () => document.removeEventListener("pointerdown", onPointerDown, true);
+});
+
+$effect(() => {
+	if (renaming || !restoreFocus || !rowElement) return;
+	restoreFocus = false;
+	if (document.activeElement === document.body)
+		rowElement.focus({ preventScroll: true });
 });
 
 function sessionParticipants(record: SessionRecord): Participant[] {
@@ -341,32 +333,6 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 	{/if}
 {/snippet}
 
-{#snippet foldToggle()}
-	{#if fold && onToggleFold}
-		<button
-			type="button"
-			class="-my-0.5 shrink-0 items-center gap-1 rounded px-0.5 py-0.5 text-[length:var(--list-meta-size)] leading-none tabular-nums text-text-tertiary transition-colors hover:bg-bg-hover-strong hover:text-text-primary {fold.expanded ? 'hidden group-hover/row:inline-flex group-focus-within/row:inline-flex' : 'inline-flex'}"
-			draggable="false"
-			aria-expanded={fold.expanded}
-			aria-label={foldLabel}
-			title={foldLabel}
-			onclick={(event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				onToggleFold();
-			}}
-			ondblclick={(event) => {
-				event.preventDefault();
-				event.stopPropagation();
-			}}
-		>
-			<ChevronRight class="h-3 w-3 transition-transform {fold.expanded ? 'rotate-90' : ''}" />
-			{#if !fold.expanded && fold.hidden > 0}<span>{fold.hidden}</span>{/if}
-			{#if !fold.expanded && fold.hiddenUnread > 0}<StatusGlyph tone="activity" class="[--status-glyph-size:5px]" />{/if}
-		</button>
-	{/if}
-{/snippet}
-
 {#snippet unreadDot()}
 	<StatusGlyph tone="activity" class="[--status-glyph-size:7px]" />
 {/snippet}
@@ -402,7 +368,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		<div class="flex min-w-0 flex-1 flex-col">
 			<input
 				bind:this={renameInput}
-				value={renameValue}
+				value={rename?.value ?? ""}
 				type="text"
 				class="min-w-0 flex-1 bg-transparent text-[length:var(--list-title-size)] leading-tight text-text-primary outline-none"
 				placeholder={m.sidebar_session_name({}, { locale })}
@@ -411,15 +377,18 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 				aria-describedby={renameError ? renameErrorId : undefined}
 				maxlength="80"
 				disabled={renameSaving}
-				oninput={(event) => onRenameValueChange?.(event.currentTarget.value)}
+				onfocus={() => (restoreFocus = true)}
+				oninput={(event) => {
+					if (rename) rename.value = event.currentTarget.value;
+				}}
 				onkeydown={(event) => {
 					if (renameSaving || isComposingKeyboardEvent(event)) return;
 					if (event.key === "Enter") {
 						event.preventDefault();
-						onSubmitRename?.(session);
+						void rename?.submit(session);
 					} else if (event.key === "Escape") {
 						event.preventDefault();
-						onCancelRename?.();
+						rename?.cancel();
 					}
 				}}
 			/>
@@ -432,7 +401,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 			class="shrink-0 rounded p-0.5 text-status-running transition-colors hover:bg-bg-hover disabled:opacity-50"
 			disabled={renameSaving}
 			title={m.common_save({}, { locale })}
-			onclick={() => onSubmitRename?.(session)}
+			onclick={() => void rename?.submit(session)}
 		>
 			<Check class="h-3.5 w-3.5" />
 		</button>
@@ -441,13 +410,14 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 			class="shrink-0 rounded p-0.5 text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:opacity-50"
 			disabled={renameSaving}
 			title={m.common_cancel({}, { locale })}
-			onclick={() => onCancelRename?.()}
+			onclick={() => rename?.cancel()}
 		>
 			<X class="h-3.5 w-3.5" />
 		</button>
 	</ListRow>
 {:else}
 	<ListRow
+		bind:ref={rowElement}
 		{density}
 		{href}
 		{active}
@@ -462,14 +432,13 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		draggable={!isMobile && draggable}
 		leading={avatar ? leading : undefined}
 		onclick={(event: MouseEvent) => onNavigate(event, session)}
-		ondblclick={(event: MouseEvent) => onDoubleClick?.(event, session)}
+		ondblclick={(event: MouseEvent) => rename?.doubleClick(event, session, title, rowId)}
 		ondragstart={(event: DragEvent) => onDragStart?.(event, session, title)}
 		ondragend={onDragEnd}
 	>
 		{@render treeGuide()}
 		<ListRowText
 			{title}
-			badge={fold && onToggleFold ? foldToggle : undefined}
 			{meta}
 			lead={participants.length > 0 ? people : undefined}
 			subtitle={dense && !glyph ? undefined : secondLine}
@@ -481,8 +450,8 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 					{#if showInsert && onInsert}
 						<SidebarActionButton icon={TextCursorInput} title={m.common_insert({}, { locale })} onClick={() => onInsert(`/sessions/${session.id}.jsonl`)} />
 					{/if}
-					{#if showRename && onRename}
-						<SidebarActionButton icon={Pencil} title={m.common_rename({}, { locale })} onClick={() => onRename(session)} />
+					{#if rename}
+						<SidebarActionButton icon={Pencil} title={m.common_rename({}, { locale })} onClick={() => rename.start(session, title, rowId)} />
 					{/if}
 					{#if canToggleArchive && onArchive}
 						<SidebarActionButton

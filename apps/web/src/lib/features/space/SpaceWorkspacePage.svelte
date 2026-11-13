@@ -3949,9 +3949,13 @@ const headerActions = {
     text-align: left;
     cursor: pointer;
   }
-  :global(.menu-item:hover) {
+  :global(.menu-item:hover:not(:disabled)) {
     background: var(--bg-hover);
     color: var(--text-primary);
+  }
+  :global(.menu-item:disabled) {
+    cursor: default;
+    opacity: 0.5;
   }
   :global(.menu-item.danger) {
     color: var(--color-error-soft);
