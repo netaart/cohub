@@ -4,14 +4,19 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
-## v2.101 — 2026-11-12
+## v2.101 — 2026-11-13
 
+- **Unified session renaming**: The Space sidebar and Chats list now share one rename flow — double-click to edit, Enter or clicking away saves, Escape cancels, failures stay inline, and a short click delay stops a single click from navigating before a double-click can start.
+- **iOS 16.0–16.3 support**: Username, markdown math, and unclosed-marker patterns no longer use regex lookbehind, and the client build targets Safari/iOS 16, so older iPhones and iPads no longer render blank pages, including share links.
+- **Simpler fork trees**: Removed the fork fold toggle and its cached expansion state, so nested session forks always show the full tree sorted by each fork's own recent activity.
 - **Forgiving board touch input**: A release before the long press now opens a card, touch drag slop rises to 12px, taps catch nearly stopped flings, card keys accept touches within `touchHitSlop`, and touching or dragging away from the selection no longer drops it.
 - **Hand-tool picking**: The new `handClick: "pick"` option lets a mouse click with the hand tool select then open items with a pointer cursor; `registry.activation()` now receives the pointer type, and `createGhostClickGuard` is exported for host overlays.
 - **Client-IP removal**: Dropped the per-IP anonymous gateway connection cap, visitor IP forwarding to port Apps, and Meta `client_ip_address`, since carrier-grade NAT makes per-IP decisions unreliable.
 
 ### Bug Fixes
 
+- **Wallet transfer allowance**: Exhausted purchases now count toward the transferable allowance, so spending all purchased credits no longer reports $0; `cohub spaces wallet funding` explains when a signed-in user session is required or the allowance is unavailable.
+- **Archive while running**: The archive menu item keeps its label while a session runs, stays disabled, and shows an explaining tooltip.
 - **Session history pagination**: Caller-bounded pages and turn windows now keep their pagination sentinels, and older-message cursors no longer skip a sequence.
 - **Deep session forks**: Descendants flattened into the last fork level now sort by their own activity, so the newest or running fork appears first.
 - **Remote image inlining**: Image bytes are MIME-sniffed before being declared to providers, so stored objects with a stale `Content-Type` no longer cause requests to be rejected.
