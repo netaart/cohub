@@ -68,7 +68,7 @@ cohub -s home spaces files ls
 COHUB_SPACE_ID=<spaceId> cohub spaces get
 ```
 
-`prompt`、`completion`、`decision`、`generate`、`apps` 和 `public` 这类开启新工作的命令，在没有任何目标时会回退到你的 Home Space。其余 Space 命令会读取或修改 Space 里已有的内容，没有目标时直接报错，不会替你猜。
+`prompt`、`completion`、`decision`、`generate`、`upload`、`apps` 和 `public` 这类开启新工作的命令，在没有任何目标时会回退到你的 Home Space。其余 Space 命令会读取或修改 Space 里已有的内容，没有目标时直接报错，不会替你猜。
 
 ## 术语
 
@@ -362,6 +362,8 @@ cohub generate "A calm lake at sunrise" --model <model> --output lake.png
 
 `search` 可搜索 Space、对话（按标题或对话中发送的消息）和标签条目。`--types chat,space,label` 用于限定结果类型，`--space-id` 可搜索某个 Space 中你有权查看的全部对话；对话行会显示命中的消息。
 
+`generate --content <json|path|->` 和 `completion --content <json|path|->` 原样发送内容块：内联 JSON 数组、JSON 文件，或用 `-` 从 stdin 读取。`cohub upload <paths...>` 为每个本地文件打印一个不公开列出的公开 URL，内容块可在多个任务中复用它。
+
 `models ls` 会展示每个 LLM 的百万 token 成本（如 `$3 /M input · $15 /M output`），并隐藏标记为 `hidden` 的模型。`models ls --model-type multimodal` 会展示每个生成模型的单位价格（如 `$0.04 / image`、`$0.10–$0.50 / second`）；`--json` 返回原始 `pricing` 对象（`unit`、`amount` 或 `min`/`max`、可选 `note`）。
 
 ## 输出约定
@@ -374,6 +376,8 @@ cohub -s <spaceId> spaces sessions ls --json
 ```
 
 交互使用可读输出即可；自动化优先 JSON。
+
+使用 `--json` 时，API 或网络错误会以 JSON 输出到 stderr；API 有响应时其中带 `status`（HTTP 状态码）。命令失败时退出码为 1。
 
 ## 下一步
 

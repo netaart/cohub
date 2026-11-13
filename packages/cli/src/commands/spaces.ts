@@ -14,7 +14,7 @@ import type {
 import type { Command } from "commander";
 import { uploadAvatarAsset, uploadChatImageAsset, uploadLikeStickerAsset } from "../avatar.js";
 import { createClient, createRealtimeClient } from "../client.js";
-import { collectOption, readPromptContent } from "../command-input.js";
+import { collectOption, readContentBlocks, readPromptContent, readStdin } from "../command-input.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
 import { SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
 import { resolveSpace } from "../space.js";
@@ -84,6 +84,7 @@ type CompletionOptions = {
   temperature?: string;
   maxTokens?: string;
   thinkingLevel?: string;
+  content?: string;
   json?: boolean;
 };
 
@@ -362,17 +363,10 @@ async function sendPrompt(command: Command, words: string[], opts: PromptOptions
 
 async function runCompletionCommand(command: Command, words: string[], opts: CompletionOptions) {
   const spaceId = await resolveSpace(command, { home: true });
-  const content = words.join(" ").trim();
-  if (!content && process.stdin.isTTY) {
-    return error("Message required", "Pass content args or pipe via stdin");
-  }
-  let text = content;
-  if (!text && !process.stdin.isTTY) {
-    const chunks: Buffer[] = [];
-    for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-    text = Buffer.concat(chunks).toString().trim();
-  }
-  if (!text) return error("Message required", "Pass content args or pipe via stdin");
+  const blocks = opts.content === undefined ? [] : await readContentBlocks(opts.content) as ContentBlock[];
+  let text = words.join(" ").trim();
+  if (!text && opts.content === undefined && !process.stdin.isTTY) text = (await readStdin()).trim();
+  if (!text && blocks.length === 0) return error("Message required", "Pass content args, pipe via stdin, or pass --content");
 
   const temperature = opts.temperature !== undefined ? Number(opts.temperature) : undefined;
   if (temperature !== undefined && !Number.isFinite(temperature)) {
@@ -393,7 +387,7 @@ async function runCompletionCommand(command: Command, words: string[], opts: Com
     provider: opts.provider,
     model: opts.model,
     systemPromptPath: opts.systemPrompt,
-    messages: [{ role: "user" as const, content: [{ type: "text" as const, text }] }],
+    messages: [{ role: "user" as const, content: [...(text ? [{ type: "text" as const, text }] : []), ...blocks] }],
     temperature,
     maxTokens,
     thinkingLevel,
@@ -473,6 +467,7 @@ export function registerPrompt(program: Command): void {
     .option("--temperature <n>", "Sampling temperature")
     .option("--max-tokens <n>", "Maximum output tokens")
     .option("--thinking-level <level>", "Thinking level: off|minimal|low|medium|high|xhigh")
+    .option("--content <json|path|->", "User message content blocks as a JSON array, a JSON file, or - for stdin; follow the content args")
     .option("--json", "Output as JSON")
     .action((words: string[], opts: CompletionOptions) => runCompletionCommand(program, words, opts));
 
@@ -841,6 +836,7 @@ export function registerSpaces(program: Command): void {
     .option("--temperature <n>", "Sampling temperature")
     .option("--max-tokens <n>", "Maximum output tokens")
     .option("--thinking-level <level>", "Thinking level: off|minimal|low|medium|high|xhigh")
+    .option("--content <json|path|->", "User message content blocks as a JSON array, a JSON file, or - for stdin; follow the content args")
     .option("--json", "Output as JSON")
     .action((words: string[], opts: CompletionOptions) => runCompletionCommand(spacesCmd, words, opts));
 

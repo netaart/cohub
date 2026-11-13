@@ -11,6 +11,7 @@ import {
 } from "@neta-art/cohub";
 import { probeMediaInfo, type MediaInfo } from "@neta-art/cohub/media";
 import { createClient } from "../client.js";
+import { readContentBlocks } from "../command-input.js";
 import { resolveSpace } from "../space.js";
 import { json as outJson, jsonRequested, ok, error, handleHttp, spinner } from "../output.js";
 
@@ -334,6 +335,7 @@ export function registerGenerations(program: Command): void {
     .option("--param <key=value>", "Generation parameter; repeatable, values may be JSON/number/boolean", collect, [])
     .option("--parameters <json>", "Generation parameters as a JSON object")
     .option("--meta <json>", "Meta as a JSON object")
+    .option("--content <json|path|->", "Content blocks as a JSON array, a JSON file, or - for stdin; sent as given after the other inputs")
     .option("-o, --output <path>", "Save generated output to a file or directory")
     .option("--inline", "Send local input files inline instead of uploading them to an unlisted public URL")
     .option("--async", "Queue the generation task and return immediately")
@@ -342,7 +344,8 @@ export function registerGenerations(program: Command): void {
     .addHelpText("after", `
 
 Local input files upload to an unlisted public URL before the task is created;
-pass --inline to keep them inside the task instead.
+pass --inline to keep them inside the task instead. \`cohub upload\` prints such a
+URL once, so later --content blocks can reuse it.
 
 Examples:
   cohub models ls --model-type multimodal
@@ -352,6 +355,7 @@ Examples:
   cohub -s <space-id> generate "Use these references" -m seedance-2-0-fast --image reference_image=https://example.com/a.png --image reference_image=https://example.com/b.png
   cohub -s <space-id> generate "Lip-sync to the reference take" -m seedance-2-0-fast --image reference_image=https://example.com/portrait.png --audio reference_audio=https://example.com/speech.mp3
   cohub -s <space-id> generate -m song2 --text "prompt=upbeat synthwave" --text "lyrics=[Verse] Neon lights" --param seed=42
+  cohub -s <space-id> generate "Say this in the reference voice" -m <model> --content '[{"type":"audio","source":{"type":"url","url":"https://example.com/ref.wav"},"meta":{"text":"What the reference says"}}]'
   cohub -s <space-id> generate "A calm lake" -m <model> --async
 `)
     .action(async (prompt: string | undefined, opts: {
@@ -363,6 +367,7 @@ Examples:
       param: string[];
       parameters?: string;
       meta?: string;
+      content?: string;
       output?: string;
       async?: boolean;
       inline?: boolean;
@@ -371,8 +376,9 @@ Examples:
     }) => {
       try {
         const texts = parseTextInputs(opts.text);
-        if (prompt === undefined && texts.length === 0) {
-          return error("Missing prompt", "Pass a prompt or at least one --text <role>=<text>.");
+        const blocks = opts.content === undefined ? [] : await readContentBlocks(opts.content) as GenerationContentBlock[];
+        if (prompt === undefined && texts.length === 0 && blocks.length === 0) {
+          return error("Missing prompt", "Pass a prompt, at least one --text <role>=<text>, or --content.");
         }
         const spaceId = await resolveSpace(program, { home: true });
         const sessionId = envValue("COHUB_SESSION_ID");
@@ -418,6 +424,7 @@ Examples:
           ...(prompt === undefined ? [] : [{ type: "text" as const, text: prompt }]),
           ...texts.map(({ role, text }) => ({ type: "text" as const, text, meta: { role } })),
           ...await Promise.all(inputs.map((input) => mediaContent(input, upload))),
+          ...blocks,
         ];
         const created = await client.generations.create({
           spaceId,
@@ -479,6 +486,38 @@ Examples:
           if (details) process.stderr.write(`  ${details}\n`);
         }
         if (savedPaths.length > 0) ok(`Saved to ${savedPaths.join(", ")}`);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+}
+
+export function registerUpload(program: Command): void {
+  program
+    .command("upload <paths...>")
+    .description("Upload local files to unlisted public URLs for reuse as generate inputs")
+    .option("--json", "Output as JSON")
+    .action(async (paths: string[], opts: { json?: boolean }) => {
+      try {
+        for (const path of paths) {
+          if (!(await pathExists(path))) return error("Input not found", path);
+        }
+        const spaceId = await resolveSpace(program, { home: true });
+        const sessionId = envValue("COHUB_SESSION_ID");
+        const client = createClient();
+        const uploads = await Promise.all(paths.map(async (path) => {
+          const mimeType = mimeTypeForPath(path) ?? "application/octet-stream";
+          const asset = await client.publicAssets.uploadGenerationInput({
+            spaceId,
+            sessionId,
+            file: await openAsBlob(path, { type: mimeType }),
+            mimeType,
+            filename: basename(path),
+          });
+          return { path, mimeType, publicUrl: asset.publicUrl };
+        }));
+        if (jsonRequested(opts)) return outJson(uploads);
+        for (const { publicUrl } of uploads) console.log(publicUrl);
       } catch (e: unknown) {
         handleHttp(e);
       }

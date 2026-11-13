@@ -137,7 +137,7 @@ cohub -s <spaceId> run -- git status
 
 Space-scoped commands use `-s`, then `COHUB_SPACE_ID`, then the Space remembered for
 the current directory. `<space>` is a Space ID, a slug you own such as `home`, or
-`username/slug`. Only `prompt`, `completion`, `decision`, `generate`, `apps`, and
+`username/slug`. Only `prompt`, `completion`, `decision`, `generate`, `upload`, `apps`, and
 `public` fall back to your Home Space; other commands exit with an error when no target is given:
 
 ```bash
@@ -433,6 +433,9 @@ cohub generate "Lip-sync to this spoken take" \
 
 cohub generate -m song2 --text "prompt=upbeat synthwave" --text "lyrics=[Verse] Neon lights" --param seed=42
 
+cohub upload ./reference.wav --json
+cohub generate "Say this in the reference voice" --model <model> --content content.json --json
+
 cohub generate "a calm lake" \
   --model <model> \
   --async
@@ -457,6 +460,8 @@ Supported inputs:
 Role-qualified values add `meta.role` to that content block. Text roles come from the model's text inputs (`cohub models show <model>`); repeat `--text <role>=<text>` for each text block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles (`reference_image`, `reference_video`, `reference_audio`) in one request.
 
 Pass generation parameters with `--param key=value` or `--parameters '<json>'`.
+
+`--content <json|path|->` adds content blocks as given (a JSON array inline, from a file, or `-` for stdin) after the other inputs, for per-block `meta` such as the transcript of each reference clip. `cohub upload <paths...>` uploads local files to unlisted public URLs once (`--json` gives `path`, `mimeType`, `publicUrl` for each), so those blocks can reuse a URL across tasks. `completion --content` takes the same array as the user message content, after any text.
 
 ## Files
 
