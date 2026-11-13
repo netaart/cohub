@@ -181,7 +181,7 @@ export function createSpaceWalletTransfers(input: {
 
   async function allowance(userId: string): Promise<number> {
     const [credit, totals] = await Promise.all([
-      billing.getCreditStatus({ userId }),
+      billing.getCreditStatus({ userId, grants: "all", grantKind: "purchased" }),
       billing.sumTransactions({ userId, usageType: SPACE_WALLET_TRANSFER_USAGE_TYPE }),
     ]);
     return transferableUsd(credit, totals.consumeUsd - totals.reversalUsd);

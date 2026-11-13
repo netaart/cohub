@@ -1625,6 +1625,7 @@ export function createTalesofaiBillingOperations(
     userId: string;
     tokenType: string;
     status?: CreditGrantDisplayStatus | "revoked";
+    grantKind?: CreditGrant["grant_kind"];
   }): Promise<CreditGrant[]> =>
     listAllPages((page, limit) =>
       sdk.admin.credits.listGrants({
@@ -1632,6 +1633,7 @@ export function createTalesofaiBillingOperations(
         external_user_id: input.userId,
         token_type: input.tokenType,
         status: input.status,
+        grant_kind: input.grantKind,
         include_count: false,
         page,
         limit,
@@ -2761,7 +2763,7 @@ export function createTalesofaiBillingOperations(
     },
 
     async getCreditStatus(
-      input: BillingUserRef & { tokenType?: string; createCustomer?: boolean; grants?: BillingCreditGrantScope },
+      input: BillingUserRef & { tokenType?: string; createCustomer?: boolean; grants?: BillingCreditGrantScope; grantKind?: "purchased" },
     ): Promise<BillingCreditStatus> {
       const tokenType =
         input.tokenType ?? COHUB_BILLING_TOKEN_TYPES.usdMicroCent;
@@ -2772,7 +2774,7 @@ export function createTalesofaiBillingOperations(
       if (!state) return { netUsd: 0, globalAvailableUsd: 0, groups: [] };
       const balance = findBalance(state.credits, tokenType);
       const grants = scope === "none" ? [] : (
-        await listAllCreditGrants({ userId: input.userId, tokenType, status: scope === "available" ? "active" : undefined })
+        await listAllCreditGrants({ userId: input.userId, tokenType, status: scope === "available" ? "active" : undefined, grantKind: input.grantKind })
       ).filter(
         (grant) =>
           CREDIT_GRANT_DISPLAY_STATUSES.includes(

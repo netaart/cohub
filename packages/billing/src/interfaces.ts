@@ -648,7 +648,7 @@ export interface BillingOperations {
   ensureCustomer(input: BillingUserRef): Promise<BillingUserRef>;
   getState(input: BillingUserRef): Promise<BillingAccountState>;
   getGenerationModelDiscount(input: GenerationModelDiscountInput): Promise<GenerationModelDiscount>;
-  getCreditStatus(input: BillingUserRef & { tokenType?: CohubBillingTokenType; createCustomer?: boolean; grants?: BillingCreditGrantScope }): Promise<BillingCreditStatus>;
+  getCreditStatus(input: BillingUserRef & { tokenType?: CohubBillingTokenType; createCustomer?: boolean; grants?: BillingCreditGrantScope; grantKind?: "purchased" }): Promise<BillingCreditStatus>;
   getCatalog(input?: BillingUserRef): Promise<BillingCatalog>;
   previewPromotionCode(input: BillingPromotionCodePreviewInput): Promise<BillingPromotionCodePreview>;
   listSubscriptions(input: BillingHistoryListInput): Promise<BillingSubscriptionHistoryList>;

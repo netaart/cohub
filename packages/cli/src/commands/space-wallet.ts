@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Command } from "commander";
+import { authSource } from "../auth.js";
 import { createClient } from "../client.js";
 import { handleHttp, json as outJson, jsonRequested, ok, table, warn } from "../output.js";
 import { resolveSpace } from "../space.js";
@@ -33,6 +34,9 @@ export function registerSpaceWallet(spaces: Command): void {
       table(value.tiers.map((tier) => ({ product: tier.productKey, amount: usd(tier.amountUsd), price: usd(tier.priceUsd) })), [{ key: "product", label: "Product" }, { key: "amount", label: "Credits" }, { key: "price", label: "Price" }]);
       console.log(`Public funding: ${value.publicFunding ? "on" : "off"}`);
       if (value.transfer) console.log(`Transferable balance: ${usd(value.transfer.allowanceUsd)} (whole dollars, ${usd(value.transfer.minUsd)}–${usd(value.transfer.maxUsd)})`);
+      else console.log(authSource() === "execution-token"
+        ? "Transferable balance: requires a signed-in user session (unset COHUB_EXECUTION_TOKEN, then run `cohub auth login`)"
+        : "Transferable balance: unavailable");
     } catch (cause) { handleHttp(cause); }
   });
 
