@@ -1,5 +1,11 @@
 # @neta-art/cohub-cli
 
+## 10.28.1
+
+### Patch Changes
+
+- 81fed10: `cohub spaces wallet funding` now explains a missing transferable balance: it asks for a signed-in user session when `COHUB_EXECUTION_TOKEN` is in use, and reports `unavailable` otherwise.
+
 ## 10.28.0
 
 ### Minor Changes
