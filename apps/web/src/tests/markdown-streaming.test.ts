@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { renderMarkdown, renderStreamingMarkdownSplit } from "../lib/markdown";
+import {
+	renderMarkdown,
+	renderStreamingMarkdownSplit,
+	splitStreamingStableMarkdown,
+} from "../lib/markdown";
 
 async function renderSplit(source: string) {
 	const { stableBlocks, tailHtml } = await renderStreamingMarkdownSplit(source);
@@ -209,6 +213,19 @@ test("renderStreamingMarkdownSplit splits long content into stable and tail", as
 	assert.ok(tailHtml.length > 0, "tail should contain the growing paragraph");
 	// remend repairs the unclosed **, so the tail renders as bold
 	assert.match(tailHtml, /bol/);
+});
+
+test("splitStreamingStableMarkdown holds back unclosed inline code and bold", () => {
+	const tail = `Tail paragraph ${"more ".repeat(30)}`;
+	const isSplit = (stable: string) =>
+		splitStreamingStableMarkdown(`${stable}\n\n${tail}`).stable !== "";
+
+	assert.equal(isSplit("Use `a` and ``b`` here."), true);
+	assert.equal(isSplit("Use ``a` here."), false);
+	assert.equal(isSplit("Mix **a** and ***b*** here."), true);
+	assert.equal(isSplit("Open ***a** here."), false);
+	assert.equal(isSplit("Mix __a__ and ___b___ here."), true);
+	assert.equal(isSplit("Open ___a__ here."), false);
 });
 
 test("renderStreamingMarkdownSplit renders very long tail as plain text", async () => {

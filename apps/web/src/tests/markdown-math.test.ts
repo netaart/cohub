@@ -27,3 +27,12 @@ test("keeps prices, code, and invalid TeX as source", async () => {
 	assert.match(html, /<code>\$y\$<\/code>/);
 	assert.match(html, /\$\$\\bad\{x\}\$\$/);
 });
+
+test("inline math needs non-space content before the closing dollar", async () => {
+	const html = await renderMarkdown("$a $ and $a\\ $ stay text");
+	assert.doesNotMatch(html, /katex/);
+	assert.equal(
+		count(await renderMarkdown("$x$ and $a\\$$"), /class="katex"/g),
+		2,
+	);
+});
