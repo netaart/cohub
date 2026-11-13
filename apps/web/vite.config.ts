@@ -77,6 +77,15 @@ export default defineConfig(({ mode }) => {
 				allow: [docsProductDir],
 			},
 		},
+		environments: {
+			client: {
+				// Vite's default floor is Safari 16.4; iOS 16.0–16.3 still opens share
+				// links, so lower newer syntax (e.g. class static blocks) for it.
+				build: {
+					target: ["chrome111", "edge111", "firefox114", "safari16", "ios16"],
+				},
+			},
+		},
 		build: {
 			chunkSizeWarningLimit: 1200,
 			minify: prodDeploy,

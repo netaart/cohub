@@ -14,6 +14,15 @@ describe("public identifier parsing", () => {
     assert.equal(parseUsername("bad--name"), null);
   });
 
+  it("enforces username hyphen and length boundaries", () => {
+    for (const valid of ["a", "0", "a-b", "a-b-c", "a".repeat(39), `a${"-b".repeat(19)}`]) {
+      assert.equal(parseUsername(valid), valid);
+    }
+    for (const invalid of ["", "-", "-a", "a-", "-a-", "a--b", "a".repeat(40), `a${"-b".repeat(19)}c`]) {
+      assert.equal(parseUsername(invalid), null);
+    }
+  });
+
   it("parses canonical space slugs without changing case", () => {
     assert.equal(parseSpaceSlug("home_space"), "home_space");
     assert.equal(parseSpaceSlug("Home"), null);

@@ -355,7 +355,9 @@ const BLOCK_MATH_START_PATTERN = /\n(?= {0,3}(?:\$\$|\\\[))/g;
 const INLINE_DISPLAY_MATH_PATTERN = /^\$\$((?:\\[\s\S]|[^\\$])+?)\$\$/;
 // Pandoc rules keep prices like "$5 and $10" as text; no backticks so a
 // later code span wins.
-const INLINE_MATH_PATTERN = /^\$(?![\s$])((?:\\.|[^\\$`\n])+?)(?<!\s)\$(?!\d)/;
+// The last content token must not be whitespace (no lookbehind: Safari < 16.4).
+const INLINE_MATH_PATTERN =
+	/^\$(?![\s$])((?:\\.|[^\\$`\n])*?(?:\\\S|[^\\$`\s]))\$(?!\d)/;
 const INLINE_PAREN_MATH_PATTERN = /^\\\(((?:(?!\n[ \t]*\n)[\s\S])+?)\\\)/;
 const INLINE_MATH_START_PATTERN = /\$|\\\(/;
 const TEX_ANNOTATION_PATTERN =
@@ -1062,13 +1064,20 @@ export const renderMarkdown = async (source: string) => {
 	});
 };
 
+function countRunsOfLength(text: string, run: RegExp, length: number) {
+	let count = 0;
+	for (const match of text.matchAll(run))
+		if (match[0].length === length) count++;
+	return count;
+}
+
 function hasUnclosedInlineMarkdown(source: string) {
 	const tail = source.slice(-320);
-	const inlineCodeTicks = (tail.match(/(?<!`)`(?!`)/g) ?? []).length;
+	const inlineCodeTicks = countRunsOfLength(tail, /`+/g, 1);
 	if (inlineCodeTicks % 2 === 1) return true;
 
-	const boldStars = (tail.match(/(?<!\*)\*\*(?!\*)/g) ?? []).length;
-	const boldUnderscores = (tail.match(/(?<!_)__(?!_)/g) ?? []).length;
+	const boldStars = countRunsOfLength(tail, /\*+/g, 2);
+	const boldUnderscores = countRunsOfLength(tail, /_+/g, 2);
 	if (boldStars % 2 === 1 || boldUnderscores % 2 === 1) return true;
 
 	const linkOpen = tail.lastIndexOf("[");

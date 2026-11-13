@@ -8,7 +8,8 @@ export type PublicIdentifierValidationResult =
 
 export const HOME_SPACE_SLUG = "home";
 
-const USERNAME_PATTERN = /^(?!-)(?!.*--)[a-z0-9-]{1,39}(?<!-)$/;
+// No lookbehind: Safari < 16.4 fails to parse it and blanks every page.
+const USERNAME_PATTERN = /^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/;
 const SPACE_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,78}[a-z0-9])?$/;
 
 /**
