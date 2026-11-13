@@ -6,6 +6,7 @@ packages:
   - "cohub-apps/checkpoint-explorer"
   - "cohub-apps/schedule-manager"
   - "cohub-apps/app-manager"
+  - "cohub-apps/score-editor"
 
 injectWorkspacePackages: true
 syncInjectedDepsAfterScripts:

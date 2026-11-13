@@ -1,0 +1,24 @@
+{
+  "name": "@cohub/score-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config harness/vite.config.ts",
+    "harness": "vite --config harness/vite.config.ts",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "biome lint .",
+    "test": "node ../../scripts/test/run.mjs \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@neta-art/cohub": "workspace:*",
+    "@neta-art/score-dialect-song2": "0.4.6",
+    "@neta-art/score-editor": "0.4.6"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "6.0.3",
+    "vite": "^8.2.2"
+  }
+}
