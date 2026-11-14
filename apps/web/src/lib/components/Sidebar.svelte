@@ -1,6 +1,7 @@
 <script lang="ts">
 import { resourceAppLaunch, resourceAppRef } from "@cohub/protocol";
 import { buildAppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
+import { isGenerationTaskType } from "@cohub/protocol/generation";
 import type {
 	CheckpointRecord,
 	LabelAssignmentListItem,
@@ -590,7 +591,7 @@ function getTaskRunTitle(run: TaskRunRecord) {
 	const data = getTaskRunPayloadData(run);
 	const explicitTitle = readTaskString(data, ["title", "name", "description"]);
 	if (explicitTitle) return compactTaskText(explicitTitle);
-	if (run.taskType === "generation") {
+	if (isGenerationTaskType(run.taskType)) {
 		const prompt = extractGenerationPromptPreview(run.payload);
 		return prompt
 			? compactTaskText(prompt)

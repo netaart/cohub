@@ -102,6 +102,8 @@ export type SpaceStartupResponse = {
   configRaw: string | null;
   revision: { mtimeMs: number; size: number } | null;
   previewSession: SpacePreviewSessionCredential | null;
+  /** Absent when the voice config could not be read; clients then keep their cached voice. */
+  speechVoice?: string | null;
   retryAfterMs?: number;
 };
 

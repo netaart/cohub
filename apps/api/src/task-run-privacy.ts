@@ -1,3 +1,5 @@
+import { isGenerationTaskType } from "@cohub/protocol/generation";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -80,7 +82,7 @@ export function sanitizeTaskRunPricingForViewer<T extends TaskRunView>(
     next = hideRunCommandExecutionFields(next);
   }
 
-  const isGeneration = next.taskType === "generation";
+  const isGeneration = isGenerationTaskType(next.taskType);
   const isBillingRetry = next.taskType === "generation.billing_retry";
   if ((!isGeneration && !isBillingRetry) || (viewerUserId && next.userUuid === viewerUserId)) return next;
 

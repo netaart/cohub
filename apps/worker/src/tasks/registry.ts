@@ -8,7 +8,9 @@ import { taskRuns } from "@cohub/db";
 import { dispatchTaskCreated, dispatchTaskUpdated } from "../realtime-events.js";
 import { createLogger } from "@cohub/infra/logging";
 import { failGenerationSession } from "./generation-session.js";
+import { settleTurnSpeechTask } from "./turn-speech.js";
 import { parseGenerationReserveHold } from "@cohub/core/generation-billing";
+import { isGenerationTaskType } from "@cohub/protocol/generation";
 import { generationReserveHolds } from "../generation-billing.js";
 
 
@@ -153,11 +155,14 @@ export const registerTask = (type: string, handler: TaskHandler) => {
 
       return result;
     } catch (error) {
-      if (job.name === "generation") {
+      if (isGenerationTaskType(job.name)) {
         const hold = parseGenerationReserveHold(payload.data?.reserveHold);
         if (hold) await generationReserveHolds.release(taskRunId, hold.payer, "task_failed");
         await failGenerationSession({ taskRunId, payload, error }).catch((sessionError) => {
           logger.warn("[GenerationSession] failed to persist failure", sessionError);
+        });
+        await settleTurnSpeechTask({ taskRunId, payload }).catch((speechError) => {
+          logger.warn("[TurnSpeech] failed to record segment failure", speechError);
         });
       }
       await recordJobFailure(job, error, {

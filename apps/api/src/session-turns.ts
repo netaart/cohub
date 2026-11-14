@@ -285,6 +285,9 @@ const withTimelineSource = <T extends SessionTurnRecord | SessionTurnIndexItem>(
   sourceTurnId: turn.id,
 });
 
+export const toTimelineTurnRecord = (row: typeof sessionTurns.$inferSelect, sessionId: string) =>
+  withTimelineSource(toTurnRecord(row), sessionId);
+
 export const createSessionTurn = async (input: {
   id?: string;
   sessionId: string;

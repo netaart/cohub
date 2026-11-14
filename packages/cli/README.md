@@ -266,6 +266,14 @@ Use `spaces prompt --session <sessionId>` to send to a Chat.
 Archiving hides a Chat for every member and frees its runtime files after a
 short grace period. Sending a message to an archived Chat restores it.
 
+Read a reply aloud with the configured voice (see
+[speech](../../docs/speech.md)). The command waits for the audio and prints one
+URL per segment; `--no-wait` returns at once:
+
+```bash
+cohub -s <spaceId> spaces sessions turns speak <sessionId> <turnId>
+```
+
 ## Space turns
 
 List recent turns across all visible Sessions in a Space:

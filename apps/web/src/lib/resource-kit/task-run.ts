@@ -1,4 +1,5 @@
 import type { ContentBlock } from "@cohub/protocol/core";
+import { TURN_SPEECH_TASK_TYPE } from "@cohub/protocol/generation";
 import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
 import type { TaskRunRecord } from "@neta-art/cohub";
 import { m } from "$messages";
@@ -10,6 +11,8 @@ export function taskTypeLabel(taskType: string, locale?: Locale) {
 	if (taskType === "save_checkpoint")
 		return m.task_type_save_checkpoint({}, { locale });
 	if (taskType === "generation") return m.task_type_generation({}, { locale });
+	if (taskType === TURN_SPEECH_TASK_TYPE)
+		return m.task_type_read_aloud({}, { locale });
 	if (taskType === "send_message")
 		return m.task_type_send_message({}, { locale });
 	return taskType;

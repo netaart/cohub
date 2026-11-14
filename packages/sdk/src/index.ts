@@ -95,6 +95,8 @@ export type { ParsedAppRef, AppPublicRef } from "./app-ref.js";
 export { isUuid } from "@cohub/protocol/identifiers";
 export { LIKE_RESOURCE_TYPES, LIKED_LABEL_SYSTEM_KEY, isLikeResourceType } from "@cohub/protocol";
 export type { LikeResourceType } from "@cohub/protocol";
+export { readTurnSpeech, SPEECH_CONFIG_PATH } from "@cohub/protocol";
+export type { SpeakTurnResponse, SpeechConfig, SpeechVoice, TurnSpeech, TurnSpeechSegment } from "@cohub/protocol";
 export { parseSpaceRef } from "./space-ref.js";
 export { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 export { SESSION_ARCHIVED_LABEL_SYSTEM_KEY } from "@cohub/protocol/model";

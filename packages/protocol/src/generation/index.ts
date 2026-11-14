@@ -1,6 +1,7 @@
 import type { GenerationContentBlock, GenerationModelDeclaration } from "@neta-art/generation";
 import type { BillingPayload } from "../billing.js";
 import type { RequestSource } from "../provenance.js";
+import type { TurnSpeechTarget } from "../speech.js";
 export * from "./catalog.js";
 export * from "./policy.js";
 export * from "./session-messages.js";
@@ -19,6 +20,10 @@ export type {
 
 export const GENERATION_TASK_TYPE = "generation" as const;
 export const GENERATION_BILLING_RETRY_TASK_TYPE = "generation.billing_retry" as const;
+export const TURN_SPEECH_TASK_TYPE = "generation.speech" as const;
+
+export const isGenerationTaskType = (taskType: string) =>
+  taskType === GENERATION_TASK_TYPE || taskType === TURN_SPEECH_TASK_TYPE;
 
 export type CreateGenerationTaskRequest = {
   spaceId: string;
@@ -51,6 +56,7 @@ export type GenerationTaskData = {
   modelDiscount?: GenerationModelDiscountSnapshot;
   /** Submission-time balance hold for whitelisted models; released when the task ends. */
   reserveHold?: GenerationReserveHold | null;
+  speech?: TurnSpeechTarget;
 };
 
 /** Persisted in the task payload so the worker and queued-turn cancellation can release it. */

@@ -23,6 +23,7 @@ import { createGenerationDeclarationLoader } from "@cohub/infra/config-runtime/g
 import {
   GENERATION_BILLING_RETRY_TASK_TYPE,
   GENERATION_TASK_TYPE,
+  TURN_SPEECH_TASK_TYPE,
   type GenerationBillingRetryTaskData,
   type GenerationModelDiscountSnapshot,
   type GenerationTaskData,
@@ -36,8 +37,9 @@ import { recordGenerationUsageStatsHourly } from "../generation-usage-stats.js";
 import { createGenerationTaskFetch } from "../generation-task-fetch.js";
 import { redisCommandClient } from "../redis.js";
 import { enqueueTask } from "./enqueue.js";
-import { registerTask } from "./registry.js";
+import { registerTask, type TaskHandler } from "./registry.js";
 import { finalizeGenerationSession, markGenerationSessionRunning } from "./generation-session.js";
+import { settleTurnSpeechTask } from "./turn-speech.js";
 import { spaceWalletBilling } from "../space-wallet-billing.js";
 
 const loader = createGenerationDeclarationLoader({
@@ -338,7 +340,7 @@ async function recordGenerationUsageBilling(input: {
   }
 }
 
-registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
+const runGenerationTask: TaskHandler = async (job: Job, context) => {
   const payload = job.data as TaskPayload;
   const spaceId = payload.spaceId;
   const sessionId = payload.sessionId;
@@ -481,8 +483,14 @@ registerTask(GENERATION_TASK_TYPE, async (job: Job, context) => {
       ...(data.meta ? { meta: data.meta } : {}),
     } satisfies GenerationTaskResult;
     await finalizeGenerationSession({ taskRunId, payload, result: taskResult });
+    await settleTurnSpeechTask({ taskRunId, payload, output: result.content }).catch((error) => {
+      console.warn("[TurnSpeech] failed to record segment", { taskRunId, error });
+    });
     return taskResult;
   } catch (error) {
     throw normalizeGenerationError(error);
   }
-});
+};
+
+registerTask(GENERATION_TASK_TYPE, runGenerationTask);
+registerTask(TURN_SPEECH_TASK_TYPE, runGenerationTask);

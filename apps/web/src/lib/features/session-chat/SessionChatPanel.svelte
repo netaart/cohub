@@ -41,6 +41,7 @@ import { insertComposerSnippet } from "$lib/stores/composer-insert";
 import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
 import { modelsStatusStore } from "$lib/stores/models-status.svelte";
 import { sessionStore } from "$lib/stores/session-store";
+import { provideTurnSpeech } from "$lib/turn-speech.svelte";
 import { entriesFromDataTransfer } from "$lib/upload-entries";
 import SessionApprovals from "./SessionApprovals.svelte";
 import SessionRuntimeRecovery from "./SessionRuntimeRecovery.svelte";
@@ -95,6 +96,7 @@ onMount(() => {
 provideMarkdownWorkspaceAsset(untrack(() => host.resolveWorkspaceAsset));
 provideSessionRelations(untrack(() => host.relations));
 provideDisplayReplay(() => host.spaceId);
+provideTurnSpeech(() => host.spaceId);
 
 const access = $derived(host.access);
 const activeSessionState = $derived(host.activeSessionState);

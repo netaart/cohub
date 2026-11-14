@@ -26,7 +26,12 @@ import { dispatchLabelAssignmentsUpdated } from "../realtime-events.js";
 import { buildSessionTurnResponse } from "../session-turn-response.js";
 import { parseSessionTitleInput } from "../session-title-input.js";
 import { changeSessionArchive } from "../session-archive.js";
-import { isNativeClientTurn } from "@cohub/protocol";
+import { isNativeClientTurn, type SpeakTurnResponse } from "@cohub/protocol";
+import { BillingAccessBlockedError } from "@cohub/billing";
+import { billingBlockedResponse } from "../lib/billing-blocked.js";
+import { getRequestSource } from "../lib/request-source.js";
+import { GenerationRequestError } from "../generations/enqueue.js";
+import { speakTurn, SpeechError } from "../speech.js";
 import type { SessionFilesResponse } from "@cohub/protocol/model";
 import { getSessionRuntimeTurn } from "../runtime.js";
 import { listSessionFiles } from "../session-files.js";
@@ -113,6 +118,41 @@ router.post("/:id/turns/:turnId/fork", async (c) => {
     return c.json({ session: hydratedChildSession ?? childSession, fork: enrichedFork ?? fork });
   } catch (error) {
     return c.json({ message: error instanceof Error ? error.message.toLowerCase().replace(/\.$/, "") : "failed to fork session" }, 400);
+  }
+});
+
+router.post("/:id/turns/:turnId/speech", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const sessionId = c.req.param("id");
+  const turnId = c.req.param("turnId");
+  if (!sessionId || !requireValidId(sessionId)) return c.json({ message: "session not found" }, 404);
+  if (!turnId || !requireValidId(turnId)) return c.json({ message: "turn not found" }, 404);
+
+  const session = await getSpaceSessionById(sessionId);
+  if (!session) return c.json({ message: "session not found" }, 404);
+  const scope = { spaceId: session.spaceId, sessionId: session.id };
+  if (!(await hasPermission(user, "session.view", scope)) || !(await hasPermission(user, "generation.create", scope))) {
+    return authzDenied(c);
+  }
+  const turn = await getSessionTurnById(session.id, turnId);
+  if (!turn) return c.json({ message: "turn not found" }, 404);
+
+  try {
+    const speech = await speakTurn({
+      userId: user.uuid,
+      spaceId: session.spaceId,
+      sessionId: session.id,
+      turn,
+      requestSource: getRequestSource(c),
+    });
+    return c.json({ speech } satisfies SpeakTurnResponse);
+  } catch (error) {
+    if (error instanceof BillingAccessBlockedError) return billingBlockedResponse(c, error);
+    if (error instanceof SpeechError || error instanceof GenerationRequestError) {
+      return c.json({ code: error.code, message: error.message }, error.status);
+    }
+    throw error;
   }
 });
 

@@ -132,6 +132,7 @@ Inspect turns:
 ```bash
 cohub spaces sessions turns ls <sessionId>
 cohub spaces sessions turns get <sessionId> <turnId>
+cohub spaces sessions turns speak <sessionId> <turnId>   # read the reply aloud; prints audio URLs
 ```
 
 Send to a Chat with `spaces prompt --session <sessionId>`.

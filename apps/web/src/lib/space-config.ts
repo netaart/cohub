@@ -1,4 +1,8 @@
-import { SPACE_CONFIG_PATH, withNewChatBackground } from "@cohub/protocol";
+import {
+	SPACE_CONFIG_PATH,
+	SPEECH_CONFIG_PATH,
+	withNewChatBackground,
+} from "@cohub/protocol";
 import { HttpError, isSpaceFsSymlink, symlinkReadError } from "@neta-art/cohub";
 import { sdk } from "$lib/sdk";
 import {
@@ -11,6 +15,7 @@ import {
 } from "$lib/space-config-parse";
 import { resolveTextFileResponse } from "$lib/space-file-text";
 import { spacePreviewSessionCache } from "$lib/space-preview-session-cache";
+import { setSpeechVoice } from "$lib/turn-speech.svelte";
 
 export type {
 	NewChatBackgroundConfig,
@@ -110,6 +115,8 @@ async function loadSpaceConfig(
 			request.then((startup) => startup.previewSession),
 		);
 		const startup = await request;
+		if (startup.speechVoice !== undefined)
+			setSpeechVoice(spaceId, startup.speechVoice);
 		if (activeVersion !== options.version || activeSpaceId !== spaceId) return;
 		if (startup.status === "preparing") {
 			scheduleRetry(
@@ -248,5 +255,6 @@ export async function setNewChatBoardBackground(
 }
 
 export function isSpaceConfigPath(path: string | null | undefined) {
-	return path?.replace(/\\/g, "/").replace(/^\.\/+/, "") === SPACE_CONFIG_PATH;
+	const normalized = path?.replace(/\\/g, "/").replace(/^\.\/+/, "");
+	return normalized === SPACE_CONFIG_PATH || normalized === SPEECH_CONFIG_PATH;
 }

@@ -12,6 +12,7 @@ import type {
   PublicFileUrlResponse,
   SpaceWebhookListItem,
   SpaceWebhookTriggerResponse,
+  SpeakTurnResponse,
 } from "@cohub/protocol";
 import { getRealtimeSpaceRoom } from "@cohub/protocol/realtime/types";
 import { requireSessionContext } from "./session-context.js";
@@ -1159,6 +1160,10 @@ export class SessionClient {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(input),
         },
+      ),
+      speak: () => this.transport.request<SpeakTurnResponse>(
+        `/api/sessions/${this.id}/turns/${turnId}/speech`,
+        { method: "POST" },
       ),
     };
   }

@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
-import { APPROVAL_MODES, harnessSchema, isApprovalMode, isModelThinkingLevel, MODEL_THINKING_LEVELS, readSentTurns, readSessionTurnOrigin, resolveCohubEnvironment, type HarnessKind } from "@neta-art/cohub";
+import { APPROVAL_MODES, harnessSchema, isApprovalMode, isModelThinkingLevel, MODEL_THINKING_LEVELS, readSentTurns, readSessionTurnOrigin, readTurnSpeech, resolveCohubEnvironment, type HarnessKind } from "@neta-art/cohub";
 import type {
   CohubHttpClient,
   ContentBlock,
@@ -1835,6 +1835,31 @@ function registerTurns(sessionsCmd: Command): void {
         const result = await client.space(spaceId).session(sessionId).cancelTurn(turnId);
         if (jsonRequested(opts)) return outJson(result);
         ok(`Turn cancelled: ${result.turn.id}`);
+      } catch (e: unknown) {
+        handleHttp(e);
+      }
+    });
+
+  turnsCmd
+    .command("speak <sessionId> <turnId>")
+    .description("Read a turn's reply aloud with the configured voice and print the audio URLs")
+    .option("--no-wait", "Return without waiting for audio still being rendered")
+    .option("--json", "Output as JSON")
+    .action(async (sessionId: string, turnId: string, opts: { wait: boolean; json?: boolean }) => {
+      const spaceId = await resolveSpace(sessionsCmd);
+      const session = createClient().space(spaceId).session(sessionId);
+      try {
+        let { speech } = await session.turn(turnId).speak();
+        const deadline = Date.now() + 5 * 60_000;
+        while (opts.wait && speech.segments.some((segment) => segment.status === "pending") && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
+          speech = readTurnSpeech((await session.turns.get(turnId)).turn.meta, speech.voice) ?? speech;
+        }
+        if (speech.segments.some((segment) => segment.status !== "completed")) process.exitCode = 1;
+        if (jsonRequested(opts)) return outJson(speech);
+        for (const [index, segment] of speech.segments.entries()) {
+          console.log(segment.url ?? `  Segment ${index + 1}: ${segment.status}`);
+        }
       } catch (e: unknown) {
         handleHttp(e);
       }

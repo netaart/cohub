@@ -28,6 +28,7 @@ import StatsGroup, {
 	type StatsGroupItem,
 } from "$lib/components/StatsGroup.svelte";
 import StatsPopover from "$lib/components/StatsPopover.svelte";
+import TurnSpeechButton from "$lib/components/TurnSpeechButton.svelte";
 import UserIdentity from "$lib/components/UserIdentity.svelte";
 import {
 	formatDurationDetail,
@@ -621,6 +622,10 @@ function handleCopy() {
             <Copy class="w-3.5 h-3.5" />
           {/if}
         </button>
+
+        {#if message.meta?.messageKind === 'assistant_final' && message.meta.turn && !isStreaming}
+          <TurnSpeechButton turn={message.meta.turn} />
+        {/if}
 
         {#if canFork}
           <button

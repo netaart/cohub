@@ -11,6 +11,7 @@ import {
   PREVIEW_SESSION_TTL_SECONDS,
 } from "../../preview-sessions.js";
 import { readSpaceFile, spaceFsJsonError } from "../../space-fs-backend.js";
+import { resolveSpeechVoiceId } from "../../speech.js";
 
 const router = new Hono();
 
@@ -30,10 +31,12 @@ router.get("/:id/startup", async (c) => {
     return authzDenied(c);
   }
 
+  const speechVoiceRequest = resolveSpeechVoiceId(user.uuid, spaceId).catch(() => undefined);
   try {
     const file = await readSpaceFile(spaceId, SPACE_CONFIG_PATH, {
       visibility: "full",
     });
+    const speechVoice = await speechVoiceRequest;
     if (!("content" in file)) {
       return json(c, {
         status: "preparing",
@@ -41,6 +44,7 @@ router.get("/:id/startup", async (c) => {
         configRaw: null,
         revision: { mtimeMs: file.mtimeMs, size: file.size },
         previewSession: null,
+        speechVoice,
         retryAfterMs: file.retryAfterMs,
       });
     }
@@ -65,6 +69,7 @@ router.get("/:id/startup", async (c) => {
             expiresIn: PREVIEW_SESSION_TTL_SECONDS,
           }
         : null,
+      speechVoice,
     });
   } catch (error) {
     const failure = spaceFsJsonError(error);
@@ -75,6 +80,7 @@ router.get("/:id/startup", async (c) => {
         configRaw: null,
         revision: null,
         previewSession: null,
+        speechVoice: await speechVoiceRequest,
       });
     }
     return c.json(failure.body, failure.status as never);

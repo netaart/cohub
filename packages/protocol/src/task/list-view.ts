@@ -1,3 +1,5 @@
+import { isGenerationTaskType } from "../generation/index.js";
+
 const INLINE_KEYS = ["data", "base64", "contentBase64"] as const;
 const MEDIA_TYPES = new Set(["image", "video", "audio", "3d"]);
 
@@ -55,7 +57,7 @@ function stripPayload(payload: unknown): unknown {
  * and gain `deferredBase64` markers. The detail endpoint returns the full run.
  */
 export function sanitizeTaskRunForList<T extends { taskType: string; payload: unknown; result: unknown }>(run: T): T {
-  if (run.taskType !== "generation") return run;
+  if (!isGenerationTaskType(run.taskType)) return run;
   const payload = stripPayload(run.payload);
   const result = stripAt(run.result, "output");
   return payload === run.payload && result === run.result ? run : { ...run, payload, result };
