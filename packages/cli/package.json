@@ -48,7 +48,7 @@
     "@types/node": "catalog:",
     "@types/ws": "^8.18.1",
     "commander": "^15.0.0",
-    "pixi.js": "^8.20.1",
+    "pixi.js": "^8.23.0",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
     "ws": "^8.21.3"

@@ -19,7 +19,7 @@ const measure = async (file) => {
     format: "esm",
     platform: "browser",
     target: "es2022",
-    external: ["pixi.js", "@napi-rs/canvas", "node:*"],
+    external: ["pixi.js", "@pixi/3d", "@napi-rs/canvas", "node:*"],
     logLevel: "error",
   });
   const code = outputFiles[0].contents;

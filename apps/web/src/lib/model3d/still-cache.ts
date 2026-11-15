@@ -1,11 +1,20 @@
-const CACHE = "cohub-model-stills-v1";
+const CACHE = "cohub-model-stills-v2";
+const RETIRED = ["cohub-model-stills-v1"];
 const LIMIT = 64;
 
 const request = (key: string) =>
 	`https://cohub.invalid/model-still/${encodeURIComponent(key)}`;
 
-const storage = () =>
-	typeof caches === "undefined" ? null : caches.open(CACHE);
+let purged = false;
+
+function storage() {
+	if (typeof caches === "undefined") return null;
+	if (!purged) {
+		purged = true;
+		for (const name of RETIRED) void caches.delete(name).catch(() => {});
+	}
+	return caches.open(CACHE);
+}
 
 export async function readModelStill(key: string): Promise<ImageBitmap | null> {
 	try {
@@ -38,5 +47,6 @@ export function saveModelStill(key: string, still: ImageBitmap): void {
 }
 
 export async function clearModelStills(): Promise<void> {
-	if (typeof caches !== "undefined") await caches.delete(CACHE);
+	if (typeof caches !== "undefined")
+		await Promise.all([CACHE, ...RETIRED].map((name) => caches.delete(name)));
 }

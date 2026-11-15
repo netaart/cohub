@@ -8,7 +8,8 @@
 			"!**/node_modules",
 			"!**/dist",
 			"!**/.wrangler",
-			"!src/lib/paraglide"
+			"!src/lib/paraglide",
+			"!static/draco"
 		]
 	},
 	"css": {

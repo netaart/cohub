@@ -97,7 +97,6 @@ import {
 	opensInPlace,
 } from "$lib/board/board-media-playback";
 import { createBoardModelPreviews } from "$lib/board/board-model";
-import { createBoardModelItemView } from "$lib/board/board-model-view.svelte";
 import {
 	enterPresentationFullscreen,
 	holdPresentation,
@@ -138,7 +137,6 @@ import BoardGenerationComposer from "$lib/components/board/BoardGenerationCompos
 import BoardLinkPopover from "$lib/components/board/BoardLinkPopover.svelte";
 import BoardMediaPlayer from "$lib/components/board/BoardMediaPlayer.svelte";
 import BoardMobileChrome from "$lib/components/board/BoardMobileChrome.svelte";
-import BoardModelViewer from "$lib/components/board/BoardModelViewer.svelte";
 import BoardPlaybackBar from "$lib/components/board/BoardPlaybackBar.svelte";
 import BoardPlayKeys from "$lib/components/board/BoardPlayKeys.svelte";
 import BoardScriptPanel from "$lib/components/board/BoardScriptPanel.svelte";
@@ -292,10 +290,6 @@ const itemViews = [
 		onRun: runApp,
 		shell: () => shell,
 		onNavigationOpen: () => onNavigationOpen,
-	}),
-	createBoardModelItemView({
-		assetSource: resolvedAssetSource,
-		isMobile: () => isMobile,
 	}),
 ];
 
@@ -702,7 +696,6 @@ let liveVersion = $state(0);
 let backdropStatus = $state<BoardBackdropStatus | null>(null);
 let generationSelectionRequest = $state(0);
 let playingId = $state<string | null>(null);
-let modelId = $state<string | null>(null);
 let regeneratingItemId = $state<string | null>(null);
 let notice = $state<{ text: string; error: boolean } | null>(null);
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -727,16 +720,18 @@ function openInPlace(itemId: string) {
 	const item = editor.itemById(itemId);
 	if (!opensInPlace(item, resolvedAssetSource)) return;
 	closeInPlace();
+	if (isBoardModelItem(item)) {
+		editor.setSelection([itemId]);
+		editor.enteredId = itemId;
+		return;
+	}
 	scriptStage?.setRunning(itemId, false);
-	if (isBoardModelItem(item)) modelId = itemId;
-	else playingId = itemId;
+	playingId = itemId;
 }
 
 function closeInPlace() {
-	const opened = modelId ?? playingId;
-	if (opened) scriptStage?.setRunning(opened, null);
+	if (playingId) scriptStage?.setRunning(playingId, null);
 	playingId = null;
-	modelId = null;
 }
 
 const videoExport =
@@ -1240,7 +1235,7 @@ function handleKeydown(event: KeyboardEvent) {
 		}
 		return;
 	}
-	if (event.key === "Escape" && (playingId || modelId)) {
+	if (event.key === "Escape" && playingId) {
 		event.preventDefault();
 		closeInPlace();
 		return;
@@ -1516,16 +1511,6 @@ onDestroy(() => {
 			surface={surfaceSize}
 			onClose={closeInPlace}
 		/>
-		{#if modelId}
-			<BoardModelViewer
-				{editor}
-				assetSource={resolvedAssetSource}
-				itemId={modelId}
-				{isMobile}
-				onOpenFile={openMediaSource}
-				onClose={closeInPlace}
-			/>
-		{/if}
 		<BoardFrameNav
 			{editor}
 			{isMobile}

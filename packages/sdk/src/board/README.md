@@ -14,7 +14,7 @@ testing  ──► stage, export/node, editor     (headless scripts on Node)
 client   ──► replica, model                 (space.board(id), part of the root entry)
 stage    ──► presence, editor, player, render, model  (pixi.js, DOM)
 presence ──► editor, model                  (others on the Board)
-export/node ──► export ──► render ──► model (pixi.js; export/node adds Node.js)
+export/node ──► export ──► render ──► model (pixi.js, PixiJS 3D on demand; export/node adds Node.js)
 editor   ──► model                          (no framework, no pixi.js)
 replica  ──► model
 player   ──► model
@@ -294,6 +294,27 @@ host element to `toBoardPointerEvent`, or use `elementClientToLocal` from
 Migration: replace `context.zoom` and `--board-zoom` layout calculations with world
 sizes; use `contentSize` / `context.detailed` for LOD. `BoardScriptHost.frame` is a
 texture read and no longer accepts the previously ignored resolution argument.
+
+## Models
+
+A model card (`render/renderers/model-card-renderer.ts`) shows a still: the asset
+manager asks the host's `modelPreviews` for a picture, which `renderModelStill` draws from
+the model's home view on one offscreen renderer that frees its context once idle. Running
+(`autoplay`) and entered models draw live instead, in the card's place and layer, so
+selection, clips, effects and z-order apply to them as to any card. `stage/models.ts`
+runs them: it loads each model, keeps a `View3D` per card, eases an entered model back
+home before handing its card back to the still, and takes the pointer and wheel over the
+entered card. A live view starts from the still's picture, the square in the middle of
+the card's rect, so the switch never shows; one that has no animation and is not entered
+is dropped once loaded, since it would draw what its still shows. Animations
+draw at 30 fps; a model being turned follows the display.
+
+`render/model3d` holds the engine: `source.ts` (where bytes come from, no 3D code),
+`load.ts` (glTF and STL parsing, normals and neutral surfaces), `scene.ts` (camera,
+lights, orbit and sizing), `still.ts` and `viewer.ts` (a model on its own canvas).
+`loadModelEngine()` imports it, and PixiJS 3D with it, the first time a model shows.
+PixiJS collects render systems when a renderer starts, so `prepareModelRenderer` adds
+3D's to a stage renderer that started before the engine loaded.
 
 ## Scripts
 

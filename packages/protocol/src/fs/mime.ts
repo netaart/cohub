@@ -120,13 +120,12 @@ export function isModelMime(mimeType: string | null | undefined): boolean {
   return normalizeMime(mimeType)?.startsWith("model/") ?? false;
 }
 
-export type ModelFormat = "glb" | "gltf" | "stl" | "obj";
+export type ModelFormat = "glb" | "gltf" | "stl";
 
 const MODEL_FORMAT_BY_MIME: Readonly<Record<string, ModelFormat>> = {
   "model/gltf-binary": "glb",
   "model/gltf+json": "gltf",
   "model/stl": "stl",
-  "model/obj": "obj",
 };
 
 export function modelFormatForPath(path: string, mimeType?: string | null): ModelFormat | null {

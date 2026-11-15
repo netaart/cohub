@@ -159,14 +159,14 @@ Board is layered by dependency, so each use pulls in only what it needs:
 | `@neta-art/cohub/board/editor` | The editor engine: selection, tools, gestures, undo, camera | — |
 | `@neta-art/cohub/board/player` | Animation playback | — |
 | `@neta-art/cohub/board/presence` | Others on the Board: cursors, selections, gestures, Agent writes | — |
-| `@neta-art/cohub/board/render` | Canvas renderers for each item type | `pixi.js` |
-| `@neta-art/cohub/board/stage` | An editor drawn into a DOM element, with input and DOM item views | `pixi.js` |
+| `@neta-art/cohub/board/render` | Canvas renderers for each item type, and a 3D model viewer | `pixi.js`, `@pixi/3d` for models |
+| `@neta-art/cohub/board/stage` | An editor drawn into a DOM element, with input and DOM item views | `pixi.js`, `@pixi/3d` for models |
 | `@neta-art/cohub/board/export` | Render a document to an image | `pixi.js` |
 | `@neta-art/cohub/board/export/node` | The same in Node.js | `pixi.js`, `@napi-rs/canvas` |
 | `@neta-art/cohub/board/testing` | Run a Board's scripts headlessly through taps, drags and pen strokes | `pixi.js`, `@napi-rs/canvas` |
 
-`pixi.js` and `@napi-rs/canvas` are optional peers: HTTP-only installs, agents
-and servers never load them.
+`pixi.js`, `@pixi/3d` and `@napi-rs/canvas` are optional peers: HTTP-only installs,
+agents and servers never load them, and `@pixi/3d` loads only once a 3D model shows.
 
 ### Embedding an editor
 

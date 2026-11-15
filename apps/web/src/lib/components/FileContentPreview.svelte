@@ -1,5 +1,4 @@
 <script lang="ts">
-import { modelFormatForPath } from "@cohub/protocol/fs";
 import type { AppRecord, SpaceFsFileResponse } from "@neta-art/cohub";
 import type { Snippet } from "svelte";
 import AudioPlayer from "$lib/components/AudioPlayer.svelte";
@@ -11,11 +10,7 @@ import { formatBytes } from "$lib/format-bytes";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { createLazyModuleLoader, pending } from "$lib/lazy-module";
 import { screenVariantSize } from "$lib/media/media-info";
-import {
-	type ModelSource,
-	readFileModelBytes,
-	workspaceReferences,
-} from "$lib/model3d/source";
+import { fileModelSource } from "$lib/model3d/file-source";
 import { m } from "$lib/paraglide/messages.js";
 import MediaVideo from "$lib/resource-kit/MediaVideo.svelte";
 import type { ResolveWorkspaceAsset } from "$lib/workspace-assets";
@@ -134,23 +129,7 @@ const modelPromise = $derived.by(() => {
 	modelAttempt;
 	return loadModelPreview();
 });
-const modelSource = $derived.by((): ModelSource | null => {
-	const format = modelFormatForPath(file.path, file.mimeType);
-	if (!format) return null;
-	const current = file;
-	const resolve = resolveWorkspaceAsset;
-	return {
-		key: `${current.path}:${current.size}:${current.mtimeMs}:${current.url ?? ""}`,
-		name: current.name,
-		format,
-		size: current.size,
-		read: (options) => readFileModelBytes(current, options),
-		references: (signal) =>
-			workspaceReferences(current.path, async (path) =>
-				resolve ? (await resolve(path, { signal })).src : null,
-			),
-	};
-});
+const modelSource = $derived(fileModelSource(file, resolveWorkspaceAsset));
 </script>
 
 {#snippet LazyError(label: string, retry: () => void)}

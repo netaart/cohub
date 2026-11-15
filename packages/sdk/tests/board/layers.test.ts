@@ -22,6 +22,7 @@ type Layer = keyof typeof LAYERS;
 const SHARED_SDK_MODULES = new Set(["types.ts", "media.ts", "indexeddb.ts"]);
 const PACKAGES: Record<string, Layer[]> = {
   "pixi.js": ["render", "export", "export/node", "stage"],
+  "@pixi/3d": ["render"],
   "@napi-rs/canvas": ["export/node"],
   "perfect-freehand": ["model"],
   "es-module-lexer": ["render"],

@@ -1,26 +1,15 @@
 <script lang="ts">
 import {
-	Box,
-	Grid3x3,
-	Pause,
-	Play,
-	Rotate3d,
-	RotateCcw,
-	TriangleAlert,
-} from "lucide-svelte";
+	loadModelEngine,
+	type ModelSource,
+	type ModelViewer,
+} from "@neta-art/cohub/board/render";
+import { Box, Pause, Play, RotateCcw } from "lucide-svelte";
 import { untrack } from "svelte";
 import Spinner from "$lib/components/Spinner.svelte";
 import { formatBytes } from "$lib/format-bytes";
-import { formatCompactNumber } from "$lib/i18n/format";
 import { getLocale } from "$lib/i18n/locale.svelte";
-import { loadModelSource } from "$lib/model3d/load";
-import type { ModelSource } from "$lib/model3d/source";
-import { disposeModel } from "$lib/model3d/studio";
-import {
-	createModelViewer,
-	type ModelStats,
-	type ModelViewer,
-} from "$lib/model3d/viewer";
+import "$lib/model3d/decoders";
 import { m } from "$lib/paraglide/messages.js";
 
 const {
@@ -36,6 +25,9 @@ const {
 const locale = $derived(getLocale());
 const autoLoadMaxBytes = $derived((isMobile ? 32 : 128) * 1024 ** 2);
 const sourceKey = $derived(source.key);
+const reducedMotion =
+	typeof matchMedia === "function" &&
+	matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 let canvas: HTMLCanvasElement | null = $state(null);
 let viewer: ModelViewer | null = $state(null);
@@ -44,29 +36,11 @@ let acceptedKey = $state<string | null>(null);
 let phase = $state<"loading" | "ready" | "error">("loading");
 let failure = $state<"load" | "webgl">("load");
 let progress = $state<number | null>(null);
-let stats = $state<ModelStats | null>(null);
-let missing = $state<string[]>([]);
-let autoRotate = $state(false);
-let wireframe = $state(false);
+let animated = $state(false);
 let playing = $state(false);
 
 const gated = $derived(
 	(source.size ?? 0) > autoLoadMaxBytes && acceptedKey !== sourceKey,
-);
-const sizeFormat = $derived(
-	new Intl.NumberFormat(locale, { maximumSignificantDigits: 3 }),
-);
-const sizeLabel = $derived(
-	stats
-		? m.model3d_size(
-				{
-					x: sizeFormat.format(stats.size[0]),
-					y: sizeFormat.format(stats.size[1]),
-					z: sizeFormat.format(stats.size[2]),
-				},
-				{ locale },
-			)
-		: "",
 );
 
 function fail(kind: "load" | "webgl") {
@@ -82,18 +56,26 @@ function retry() {
 $effect(() => {
 	const target = canvas;
 	if (!target) return;
-	let instance: ModelViewer;
-	try {
-		instance = createModelViewer(target, {
-			onContextLost: () => fail("load"),
+	let instance: ModelViewer | null = null;
+	let disposed = false;
+	void loadModelEngine()
+		.then(({ mountModelViewer }) =>
+			mountModelViewer(target, {
+				reducedMotion,
+				onContextLost: () => fail("load"),
+			}),
+		)
+		.then((mounted) => {
+			if (disposed) return mounted.destroy();
+			instance = mounted;
+			viewer = mounted;
+		})
+		.catch(() => {
+			if (!disposed) fail("webgl");
 		});
-	} catch {
-		fail("webgl");
-		return;
-	}
-	viewer = instance;
 	return () => {
-		instance.dispose();
+		disposed = true;
+		instance?.destroy();
 		viewer = null;
 	};
 });
@@ -104,51 +86,35 @@ $effect(() => {
 	if (!active) return;
 	phase = "loading";
 	progress = null;
-	stats = null;
-	missing = [];
-	active.clearModel();
+	animated = playing = false;
+	active.setModel(null);
 	if (gated) return;
 	const current = untrack(() => source);
 	const controller = new AbortController();
 	const { signal } = controller;
-
 	void (async () => {
-		const model = await loadModelSource(current, {
+		const { loadModel } = await loadModelEngine();
+		const model = await loadModel(current, {
 			signal,
 			onProgress: (fraction) => {
 				progress = fraction;
 			},
 		});
-		if (signal.aborted) {
-			disposeModel(model.root);
-			return;
-		}
-		stats = active.setModel(model);
-		missing = model.missing;
-		active.setAutoRotate(autoRotate);
-		active.setWireframe(wireframe);
+		if (signal.aborted) return model.destroy();
+		active.setModel(model);
+		animated = active.animated;
 		playing = active.playing;
 		phase = "ready";
 	})().catch(() => {
 		if (!signal.aborted) fail("load");
 	});
-
 	return () => controller.abort();
 });
 
-function toggleAutoRotate() {
-	autoRotate = !autoRotate;
-	viewer?.setAutoRotate(autoRotate);
-}
-
-function toggleWireframe() {
-	wireframe = !wireframe;
-	viewer?.setWireframe(wireframe);
-}
-
 function togglePlaying() {
-	playing = !playing;
-	viewer?.setPlaying(playing);
+	if (!viewer) return;
+	viewer.playing = !playing;
+	playing = viewer.playing;
 }
 </script>
 
@@ -159,7 +125,6 @@ function togglePlaying() {
 			class="model-canvas"
 			class:ready={phase === "ready"}
 			aria-label={source.name}
-			ondblclick={() => viewer?.resetView()}
 		></canvas>
 	{/key}
 
@@ -200,19 +165,9 @@ function togglePlaying() {
 		</div>
 	{/if}
 
-	{#if phase === "ready" && stats}
+	{#if phase === "ready"}
 		<div class="model-toolbar toolbar-surface" role="toolbar" aria-label={m.model3d_controls({}, { locale })}>
-			<span class="model-stat" title={sizeLabel}>
-				{m.model3d_triangles({ count: formatCompactNumber(stats.triangles, locale) }, { locale })}
-			</span>
-			{#if missing.length > 0}
-				<span class="model-stat model-missing" title={missing.join("\n")}>
-					<TriangleAlert class="h-3.5 w-3.5" />
-					{m.model3d_missing({ count: missing.length }, { locale })}
-				</span>
-			{/if}
-			<span class="toolbar-divider"></span>
-			{#if stats.animations > 0}
+			{#if animated}
 				{@const label = playing ? m.model3d_pause({}, { locale }) : m.model3d_play({}, { locale })}
 				<button type="button" class="tool-key" title={label} aria-label={label} onclick={togglePlaying}>
 					{#if playing}<Pause class="h-4 w-4" />{:else}<Play class="h-4 w-4" />{/if}
@@ -221,29 +176,9 @@ function togglePlaying() {
 			<button
 				type="button"
 				class="tool-key"
-				title={m.model3d_auto_rotate({}, { locale })}
-				aria-label={m.model3d_auto_rotate({}, { locale })}
-				aria-pressed={autoRotate}
-				onclick={toggleAutoRotate}
-			>
-				<Rotate3d class="h-4 w-4" />
-			</button>
-			<button
-				type="button"
-				class="tool-key"
-				title={m.model3d_wireframe({}, { locale })}
-				aria-label={m.model3d_wireframe({}, { locale })}
-				aria-pressed={wireframe}
-				onclick={toggleWireframe}
-			>
-				<Grid3x3 class="h-4 w-4" />
-			</button>
-			<button
-				type="button"
-				class="tool-key"
 				title={m.model3d_reset_view({}, { locale })}
 				aria-label={m.model3d_reset_view({}, { locale })}
-				onclick={() => viewer?.resetView()}
+				onclick={() => viewer?.home()}
 			>
 				<RotateCcw class="h-4 w-4" />
 			</button>
@@ -268,6 +203,7 @@ function togglePlaying() {
 		cursor: grab;
 		opacity: 0;
 		outline: none;
+		touch-action: none;
 		transition: opacity 180ms ease;
 	}
 
@@ -296,26 +232,7 @@ function togglePlaying() {
 		bottom: 16px;
 		left: 50%;
 		z-index: 10;
-		max-width: calc(100% - 24px);
 		transform: translateX(-50%);
-	}
-
-	.model-stat {
-		display: inline-flex;
-		min-width: 0;
-		align-items: center;
-		gap: 4px;
-		padding: 0 6px;
-		overflow: hidden;
-		color: var(--text-tertiary);
-		font-size: 11px;
-		font-variant-numeric: tabular-nums;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.model-missing {
-		color: var(--color-warning-soft);
 	}
 
 	@media (pointer: coarse) {

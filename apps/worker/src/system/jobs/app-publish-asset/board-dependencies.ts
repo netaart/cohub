@@ -5,8 +5,6 @@ import {
   glbJsonEnd,
   gltfReferences,
   modelFormatForPath,
-  mtlTextureReferences,
-  objMaterialLibraries,
   readGlbJson,
   resolveModelReference,
 } from "@cohub/protocol/fs";
@@ -17,11 +15,9 @@ export type BoardDependencyReader = {
 };
 
 const MAX_MODEL_JSON_BYTES = 16 * 1024 * 1024;
-const OBJ_HEADER_BYTES = 1024 * 1024;
-const MAX_MTL_BYTES = 1024 * 1024;
 
 // Never publish arbitrary paths a model names, such as `../.env`.
-const SIDECAR = /\.(bin|mtl|png|jpe?g|webp|gif|bmp|tga|ktx2|basis)$/i;
+const SIDECAR = /\.(bin|png|jpe?g|webp|gif|bmp|tga|ktx2|basis)$/i;
 
 const text = (bytes: Uint8Array | null) => (bytes ? new TextDecoder().decode(bytes) : "");
 
@@ -50,11 +46,6 @@ async function addModelSidecars(path: string, read: BoardDependencyReader, add: 
       }
       if (json && typeof json === "object") add(resolved(path, gltfReferences(json)));
       return;
-    }
-    case "obj": {
-      const libraries = resolved(path, objMaterialLibraries(text(await read.prefix(path, OBJ_HEADER_BYTES))));
-      add(libraries);
-      for (const library of libraries) add(resolved(library, mtlTextureReferences(text(await read.prefix(library, MAX_MTL_BYTES)))));
     }
   }
 }

@@ -32,6 +32,7 @@ import {
 	resolveSceneArrow,
 	type SceneItem,
 	elementClientToLocal,
+	isBoardModelItem,
 	itemBounds,
 	pointToWorld,
 	rectsIntersect,
@@ -85,6 +86,7 @@ import { type BoardConsentSense, createBoardSenses } from "./senses.js";
 import { type BoardMediaClock, type BoardMediaLoop, createBoardMediaClock } from "./media-clock.js";
 import { createBoardTimelineClock } from "./timeline-clock.js";
 import { createBoardLiveScheduler } from "./live.js";
+import { createBoardModelTheater } from "./models.js";
 import { type BoardStageShaders, createBoardStageShaders } from "./shaders.js";
 import { type BoardLiveStroke, createBoardScene } from "./scene.js";
 import { drawBoardFrameMask, drawBoardOverlay } from "./overlay.js";
@@ -234,6 +236,8 @@ const CULL_PADDING = 96;
 const PREFETCH_REST_MS = 200;
 const PREFETCH_LIMIT = 96;
 const FRAME_SAMPLES = 120;
+const ENTERED_MODEL_MIN_EDGE = 240;
+const ENTERED_MODEL_EDGE = 420;
 const ANTIALIAS_MAX_DENSITY = 3;
 
 const FRAME_SYNC = 1;
@@ -413,6 +417,21 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	});
 	const renderCamera = () => playbackCamera ?? editor.camera;
 	const toWorldPoint = (clientX: number, clientY: number) => pointToWorld(localPoint(clientX, clientY), renderCamera());
+	const models = createBoardModelTheater({
+		renderer: () => app?.renderer ?? null,
+		source: options.source,
+		maxBytes: device.modelBytes,
+		pick: (world) => editor.pickAt(world, lastPointerType)?.id ?? null,
+		density: () => app?.renderer.resolution ?? 1,
+		reducedMotion: () => options.reducedMotion?.() ?? false,
+		changed: (id) => {
+			staleIds.add(id);
+			scheduleTick();
+		},
+		frame: () => scheduleRender(),
+	});
+	let modelCursor = "";
+	let enteredModel: string | null = null;
 	const views = createBoardItemViewLayer(
 		host,
 		editor,
@@ -601,6 +620,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			releaseTexture: (key) => assets.release(key),
 			hoveredHit,
 			mediaTexture: (id) => media.texture(id),
+			modelLive: (id) => models.live(id),
 			covered: (id) => views.covered.has(id),
 		};
 	}
@@ -865,9 +885,29 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (pending) editor.pointerDown(pending.input);
 	}
 
+	function setModelCursor(next: string) {
+		if (next === modelCursor) return;
+		modelCursor = next;
+		scheduleTick();
+	}
+
+	function syncModels(renderScene: BoardScene, camera: BoardViewport) {
+		models.sync({ scene: renderScene, running: live.running, entered: editor.enteredId });
+		const entered = editor.enteredId;
+		if (entered === enteredModel) return;
+		enteredModel = entered;
+		if (!entered) return setModelCursor("");
+		const item = renderScene.get(entered);
+		if (!item || !isBoardModelItem(item)) return;
+		const edge = Math.min(item.frame.width, item.frame.height);
+		if (edge * camera.zoom < ENTERED_MODEL_MIN_EDGE)
+			editor.focusRect(itemBounds(item.frame), { maxZoom: ENTERED_MODEL_EDGE / Math.max(edge, 1), padding: 48 });
+	}
+
 	function cursorFor(): string {
 		const scripted = scripts.cursor();
 		if (scripted) return scripted;
+		if (modelCursor) return modelCursor;
 		const interaction = editor.interaction;
 		if (editor.frameView?.present) return interaction.type === "pressing" || hoveredHit ? "pointer" : "default";
 		switch (interaction.type) {
@@ -946,6 +986,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			if ((work | frameWork) & FRAME_RENDER) {
 				frameWork &= ~FRAME_RENDER;
 				if (bursts?.tick(now, camera.zoom)) frameWork |= FRAME_RENDER;
+				const modelWait = models.tick(now, camera.zoom);
+				if (modelWait === 0) frameWork |= FRAME_RENDER;
+				else if (modelWait !== null) scheduleCardTick(modelWait);
 				shaders?.prepare();
 				app.render();
 				if (app.canvas.style.visibility) app.canvas.style.visibility = "";
@@ -1144,6 +1187,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		});
 		timeline.lead(skew, playback?.status === "playing" ? playback.commandId : null, wall - lastWall);
 		lastWall = wall;
+		syncModels(renderScene, camera);
 		const context = renderContext(current, renderScene, frame.time);
 		lastContext = context;
 		if (animationId && effectSampler) {
@@ -1275,6 +1319,12 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (event.button === 2) return;
 		const input = toInput(event);
 		shareCursor("down", event, input);
+		if (models.pointer("down", input)) {
+			event.preventDefault();
+			pointers.start(event);
+			setModelCursor("grabbing");
+			return;
+		}
 		const script = scripts.pointer("down", input);
 		if (script) host.focus({ preventScroll: true });
 		if (script === "capture") {
@@ -1357,6 +1407,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	function routePointerMove(event: PointerEvent) {
 		const input = toInput(event);
 		shareCursor("move", event, input);
+		if (models.pointer("move", input)) return;
+		setModelCursor(models.over(input.world) ? "grab" : "");
 		const script = scripts.pointer("move", input);
 		if (script === "capture") return;
 		longPress.move(event);
@@ -1377,6 +1429,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (active && event.pointerType !== "mouse" && event.type === "pointerup") unlockGesture();
 		const input = toInput(event);
 		shareCursor("up", event, input);
+		if (models.pointer("up", input)) {
+			setModelCursor(models.over(input.world) && event.pointerType === "mouse" ? "grab" : "");
+			return settlePointer(event);
+		}
 		const script = scripts.pointer("up", input);
 		if (script === "capture") return;
 		longPress.end(event);
@@ -1451,10 +1507,17 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		if (!active || inViews(event) || scripts.hovering) return;
 		const pointerType = pointerTypeOf(event);
 		if (isTouchLikePointer(pointerType)) return;
-		openAt(toWorldPoint(event.clientX, event.clientY), pointerType);
+		const point = toWorldPoint(event.clientX, event.clientY);
+		if (!models.home(point)) openAt(point, pointerType);
 	}
 
-	const wheel = createBoardWheel(host, editor, { views: views.element, active: () => active, busy: () => pointers.size > 0 });
+	const wheel = createBoardWheel(host, editor, {
+		views: views.element,
+		active: () => active,
+		busy: () => pointers.size > 0,
+		// A trackpad pinch arrives as a ctrl-wheel with small deltas.
+		capture: (event, deltaY) => models.wheel(event.ctrlKey || event.metaKey ? deltaY * 8 : deltaY, toWorldPoint(event.clientX, event.clientY)),
+	});
 
 	const listeners: Array<[string, (event: never) => void, AddEventListenerOptions?]> = [
 		["keydown", handleScriptKey],
@@ -1724,6 +1787,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			scene?.destroy(renderContext(theme(), editor.scene, 0));
 			scene = null;
 			scripts.destroy();
+			models.destroy();
 			senses.destroy();
 			senseListeners.clear();
 			media.destroy();

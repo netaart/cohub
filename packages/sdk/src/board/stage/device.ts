@@ -22,13 +22,16 @@ export type BoardDeviceBudget = {
 	blurs: boolean;
 	/** Video and audio a timeline can play at once; also the videos that loop by themselves. */
 	media: number;
+	/** Models that run live at once, besides the one entered. */
 	models: number;
+	/** The largest model, with the files it loads, shown live. */
+	modelBytes: number;
 	apps: number;
 };
 
 const BUDGETS: Record<BoardDeviceTier, Omit<BoardDeviceBudget, "tier">> = {
-	low: { lod: COMPACT_BOARD_LOD, lru: COMPACT_LRU_BUDGET, concurrency: 4, prefetch: 0, drawViews: false, blurs: false, media: 2, models: 1, apps: 2 },
-	standard: { lod: DEFAULT_BOARD_LOD, lru: DEFAULT_LRU_BUDGET, concurrency: 6, prefetch: 0.5, drawViews: true, blurs: true, media: 4, models: 4, apps: 6 },
+	low: { lod: COMPACT_BOARD_LOD, lru: COMPACT_LRU_BUDGET, concurrency: 4, prefetch: 0, drawViews: false, blurs: false, media: 2, models: 1, modelBytes: 32 * 1024 * 1024, apps: 2 },
+	standard: { lod: DEFAULT_BOARD_LOD, lru: DEFAULT_LRU_BUDGET, concurrency: 6, prefetch: 0.5, drawViews: true, blurs: true, media: 4, models: 4, modelBytes: 128 * 1024 * 1024, apps: 6 },
 	// Memory and cores say nothing about the GPU, so no tier raises the live budget.
 	high: {
 		lod: DEFAULT_BOARD_LOD,
@@ -39,6 +42,7 @@ const BUDGETS: Record<BoardDeviceTier, Omit<BoardDeviceBudget, "tier">> = {
 		blurs: true,
 		media: 6,
 		models: 6,
+		modelBytes: 128 * 1024 * 1024,
 		apps: 8,
 	},
 };

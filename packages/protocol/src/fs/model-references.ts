@@ -37,37 +37,6 @@ export function gltfReferences(json: GltfJson): string[] {
 	return [...uris];
 }
 
-export function objMaterialLibraries(source: string): string[] {
-	const libraries = [...source.matchAll(/^[ \t]*mtllib[ \t]+(.+?)[ \t]*$/gm)]
-		.map((match) => match[1] ?? "")
-		.filter(Boolean);
-	return [...new Set(libraries)];
-}
-
-const MTL_TEXTURE = /^[ \t]*(map_kd|map_ks|map_ke|norm|map_bump|bump|disp|map_d)[ \t]+(.+?)[ \t]*$/gim;
-const MTL_OPTION_ARGS: Readonly<Record<string, number>> = {
-	"-blendu": 1, "-blendv": 1, "-boost": 1, "-cc": 1, "-clamp": 1, "-imfchan": 1, "-texres": 1, "-bm": 1,
-	"-mm": 2, "-o": 3, "-s": 3, "-t": 3,
-};
-
-export function mtlTextureReferences(source: string): string[] {
-	const files = new Set<string>();
-	for (const [, , value = ""] of source.matchAll(MTL_TEXTURE)) {
-		const tokens = value.split(/\s+/);
-		const last = tokens.length - 1;
-		let index = 0;
-		while (index < last && (tokens[index] as string).startsWith("-")) {
-			const max = MTL_OPTION_ARGS[(tokens[index] as string).toLowerCase()] ?? 0;
-			index += 1;
-			for (let taken = 0; taken < max && index < last && (taken === 0 || Number.isFinite(Number(tokens[index]))); taken += 1)
-				index += 1;
-		}
-		const file = tokens.slice(index).join(" ");
-		if (file) files.add(file);
-	}
-	return [...files];
-}
-
 export function resolveModelReference(fromPath: string, reference: string): string | null {
 	const raw = reference.trim().split(/[?#]/, 1)[0] ?? "";
 	if (!raw || isEmbedded(raw) || raw.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(raw)) return null;

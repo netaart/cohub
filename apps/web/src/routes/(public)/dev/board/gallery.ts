@@ -19,6 +19,21 @@ const image = (name: string, width: number, height: number) => ({
 	},
 });
 
+const model = (
+	name: string,
+	x: number,
+	size: { width: number; height: number },
+) => ({
+	type: "file",
+	parent: "models",
+	position: { x, y: 40 },
+	size,
+	props: {
+		src: `${GALLERY_ASSET_PREFIX}models/${name}`,
+		snapshot: { title: name },
+	},
+});
+
 const now = Date.now();
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString();
 
@@ -398,6 +413,18 @@ function galleryItems(): Record<string, unknown> {
 			props: { geometry: "rounded", text: "Above the App" },
 			style: { fill: "yellow" },
 		},
+		models: {
+			type: "frame",
+			position: { x: 1240, y: 880 },
+			size: { width: 900, height: 360 },
+			props: { label: "Models" },
+		},
+		duck: model("Duck.glb", 24, { width: 280, height: 280 }),
+		fox: {
+			...model("Fox.glb", 324, { width: 320, height: 280 }),
+			autoplay: true,
+		},
+		part: model("part.stl", 664, { width: 200, height: 160 }),
 	};
 }
 

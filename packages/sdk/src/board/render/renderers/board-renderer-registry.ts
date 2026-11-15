@@ -124,7 +124,14 @@ export type BoardRenderContext = {
 	hoveredHit?: { itemId: string; action: string } | null;
 	/** The current frame of a video a timeline or a muted loop plays, drawn instead of its cover. */
 	mediaTexture?: (id: string) => Texture | null;
+	modelLive?: (id: string) => BoardModelLive | null;
 	covered?: (id: string) => boolean;
+};
+
+export type BoardModelLive = {
+	readonly view: Container | null;
+	readonly interactive: boolean;
+	place(x: number, y: number, width: number, height: number): void;
 };
 
 export type BoardCardHit = { action: string; cursor?: string };

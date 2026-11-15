@@ -14,6 +14,7 @@ test("recognizes model MIME without accepting prototype properties as filenames"
 test("detects previewable model formats by name, then MIME type", () => {
   assert.equal(modelFormatForPath("assets/Robot.GLB"), "glb");
   assert.equal(modelFormatForPath("scan", "model/stl; charset=binary"), "stl");
+  assert.equal(modelFormatForPath("part.obj"), null);
   assert.equal(modelFormatForPath("part.3mf", "model/3mf"), null);
   assert.equal(modelFormatForPath("constructor"), null);
 });

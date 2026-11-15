@@ -134,12 +134,15 @@ The Web editor supports pasting media URLs, dropping links, and **Add from link*
 on desktop and mobile. Task cards offer **Add results to board**, which lays out
 their media results as items that keep their URLs.
 
-A `file` item whose source is a 3D model (`.glb`, `.gltf`, `.stl` or `.obj`) shows
-a still of the model; its corner key, double-click or Enter opens an orbitable view
-in place. glTF buffers and textures and OBJ materials resolve next to the model.
-The Web editor renders stills only for cards on screen, one at a time, and leaves
-models above 64 MB (16 MB on mobile) for the user to open. Other clients and
-exports draw a placeholder.
+A `file` item whose source is a 3D model (`.glb`, `.gltf` or `.stl`) shows a still
+of the model, drawn in the canvas with PixiJS 3D. Its corner key, double-click or
+Enter enters the card: drag to turn the model, scroll or pinch to zoom, double-click
+to return to the first view, and `Escape` or a click elsewhere to leave, as the model
+eases back to its still. A card too small to turn first zooms into view. A model with
+`autoplay` plays its first animation in place. glTF buffers and textures resolve next
+to the model, and Draco and meshopt compression decode as they load. The Web editor
+renders stills only for cards on screen, one at a time, and leaves models above 64 MB
+(16 MB on mobile) for the user to open. Other clients and exports draw a placeholder.
 
 A URL loads directly, without importing it into the Space. A Space path retains
 live file updates and resolves through the Space file API. Existing paths are not
@@ -155,8 +158,7 @@ limitations still apply (including video-frame support).
 Publishing captures Space file dependencies and lists remote references in
 `externalUrls` in the artifact manifest. Dependencies are media sources, extension
 `preview` covers and sources, script modules, and the files a model loads beside
-itself: glTF buffers and images, and OBJ material libraries named in the first
-megabyte with their textures. Remote media remains live and can change
+itself: glTF buffers and images. Remote media remains live and can change
 or disappear; it is not an immutable captured asset. A published Board never
 needs access to the original Space to resolve a URL. Automatic remote capture
 and proxying are not part of this behavior.

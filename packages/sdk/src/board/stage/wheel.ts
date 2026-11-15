@@ -35,7 +35,16 @@ function scrollsWithin(target: EventTarget | null, boundary: Element, dx: number
 	return false;
 }
 
-export function createBoardWheel(host: HTMLElement, editor: BoardEditor, options: { views: Element; active: () => boolean; busy: () => boolean }) {
+export function createBoardWheel(
+	host: HTMLElement,
+	editor: BoardEditor,
+	options: {
+		views: Element;
+		active: () => boolean;
+		busy: () => boolean;
+		capture?: (event: WheelEvent, deltaY: number) => boolean;
+	},
+) {
 	let stream: { at: number; step: boolean; ours: boolean } | null = null;
 	let zoomedAt = Number.NEGATIVE_INFINITY;
 	let gestureScale: number | null = null;
@@ -54,6 +63,7 @@ export function createBoardWheel(host: HTMLElement, editor: BoardEditor, options
 		stream.at = now;
 		if (!stream.ours) return;
 		event.preventDefault();
+		if (options.capture?.(event, dy)) return;
 		if (zoom) {
 			if (gestureScale !== null) return;
 			zoomedAt = now;

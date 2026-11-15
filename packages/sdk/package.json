@@ -199,20 +199,25 @@
     "@biomejs/biome": "catalog:",
     "@cohub/protocol": "workspace:*",
     "@napi-rs/canvas": "^1.0.13",
+    "@pixi/3d": "0.1.0",
     "@types/node": "catalog:",
     "esbuild": "^0.28.2",
     "fake-indexeddb": "^6.2.6",
-    "pixi.js": "^8.20.1",
+    "pixi.js": "^8.23.0",
     "tsdown": "^0.22.14",
     "tsx": "catalog:",
     "typescript": "^7.0.2"
   },
   "peerDependencies": {
     "@napi-rs/canvas": "^1.0.2",
-    "pixi.js": "^8.19.0"
+    "@pixi/3d": "0.1.0",
+    "pixi.js": "^8.23.0"
   },
   "peerDependenciesMeta": {
     "@napi-rs/canvas": {
+      "optional": true
+    },
+    "@pixi/3d": {
       "optional": true
     },
     "pixi.js": {

@@ -32,15 +32,12 @@ test("publishing captures Board and item script dependencies once", async () => 
 test("publishing captures the files a model loads beside itself", async () => {
   const parsed = parseBoardDocument({ ...emptyBoardDocument(), items: {
     car: { type: "file", props: { src: "models/car.gltf" } },
-    chair: { type: "file", props: { src: "models/chair.obj" } },
     broken: { type: "file", props: { src: "models/broken.gltf" } },
   } });
   assert.ok(parsed.ok);
   const sources = new Map([
     ["models/car.gltf", JSON.stringify({ buffers: [{ uri: "car.bin" }], images: [{ uri: "../textures/paint.png" }, { uri: "data:image/png;base64,AA==" }, { uri: "../.env" }] })],
     ["models/broken.gltf", JSON.stringify({ buffers: {} })],
-    ["models/chair.obj", "mtllib chair.mtl\nv 0 0 0\n"],
-    ["models/chair.mtl", "newmtl wood\nmap_Kd -s 2 2 1 wood.jpg\n"],
   ]);
   const refs = await collectBoardPublishReferences(parsed.document, {
     module: async () => "",
@@ -49,5 +46,5 @@ test("publishing captures the files a model loads beside itself", async () => {
       return source === undefined ? null : new TextEncoder().encode(source).subarray(0, maxBytes);
     },
   }, 1000);
-  assert.deepEqual(refs.files, ["models/broken.gltf", "models/car.bin", "models/car.gltf", "models/chair.mtl", "models/chair.obj", "models/wood.jpg", "textures/paint.png"]);
+  assert.deepEqual(refs.files, ["models/broken.gltf", "models/car.bin", "models/car.gltf", "textures/paint.png"]);
 });
