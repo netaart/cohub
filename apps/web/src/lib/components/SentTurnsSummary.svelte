@@ -11,6 +11,9 @@ const { turnId }: { turnId: string } = $props();
 const locale = $derived(getLocale());
 const relations = useSessionRelations();
 const sessions = $derived(relations?.sentByTurn(turnId) ?? NO_SENT_SESSIONS);
+const awaiting = $derived(
+	sessions.reduce((sum, session) => sum + (session.awaiting ?? 0), 0),
+);
 
 let expanded = $state(false);
 const entries = $derived(summarizeSentSessions(sessions, locale, { expanded }));
@@ -55,5 +58,11 @@ const targetLabel =
 				{/if}
 			</span>
 		{/each}
+		{#if awaiting > 0}
+			<span class="ml-1.5 inline-flex shrink-0 items-center gap-1.5 text-text-placeholder">
+				<span class="h-1.5 w-1.5 rounded-full bg-brand/60 motion-safe:animate-pulse" aria-hidden="true"></span>
+				{awaiting === 1 ? m.reply_awaiting({}, { locale }) : m.reply_awaiting_many({ count: awaiting }, { locale })}
+			</span>
+		{/if}
 	</p>
 {/if}

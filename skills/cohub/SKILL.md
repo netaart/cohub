@@ -68,6 +68,13 @@ cohub spaces prompt --title "<chat title>" "message"
 cohub spaces prompt --model <model> --provider <provider> "message"
 ```
 
+To delegate work to another Space and continue when it answers, add `--reply`. When that Chat finishes, its final reply arrives in your Chat as a new message and runs you again, so end your turn after sending instead of polling:
+
+```bash
+cohub -s <spaceId> spaces prompt --reply "message"
+cohub -s <spaceId> spaces prompt --reply --session <sessionId> "follow-up"
+```
+
 List LLM models with `cohub models ls`. For multimodal generation, use the `cohub-generate` skill.
 
 For classification, triage, or scoring, `cohub decision` answers `noul` (yes/no), `choice`, and `score` questions about text or images with calibrated probabilities:

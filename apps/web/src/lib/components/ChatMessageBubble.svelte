@@ -2,6 +2,9 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import {
 	collectToolMetrics,
+	readReplyBlockRole,
+	readReplyStatus,
+	readSessionTurnOrigin,
 	readTurnMetrics,
 	readTurnStats,
 	requestMetricSchema,
@@ -20,6 +23,7 @@ import {
 	Loader2,
 	TriangleAlert,
 } from "lucide-svelte";
+import { untrack } from "svelte";
 import HarnessIcon from "$lib/components/composer/HarnessIcon.svelte";
 import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
 import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
@@ -46,6 +50,8 @@ import {
 } from "$lib/format-usage";
 import { getGenerationCostPresentation } from "$lib/generation-cost";
 import { getLocale } from "$lib/i18n/locale.svelte";
+import { provideMarkdownWorkspaceAsset } from "$lib/markdown-asset-context";
+import { extractSpaceMentionsFromText } from "$lib/mentions/space";
 import {
 	findModelCatalogItem,
 	formatThinkingLevelShort,
@@ -56,6 +62,7 @@ import {
 import { m } from "$lib/paraglide/messages.js";
 import { readSentFrom } from "$lib/sent-turns";
 import type { ChatMessage } from "$lib/session-tree";
+import { createSpaceWorkspaceAssetResolver } from "$lib/space-workspace-assets";
 import {
 	formatCompactAbsoluteTime,
 	formatFullAbsoluteTime,
@@ -154,9 +161,49 @@ const cancelledByDisplay = $derived.by(() => {
 	return userId.replaceAll("-", "").slice(0, 8);
 });
 
-const isUserMessage = $derived(message.role === "user");
+const reply = $derived.by(() => {
+	const origin =
+		message.role === "user"
+			? readSessionTurnOrigin(message.meta?.turn?.meta)
+			: null;
+	if (origin?.kind !== "reply") return null;
+	const content = message.content ?? [];
+	const header = content.find(
+		(block) => readReplyBlockRole(block) === "header",
+	);
+	const status = content.find(
+		(block) => readReplyBlockRole(block) === "status",
+	);
+	return {
+		source: { spaceId: origin.spaceId, sessionId: origin.sessionId },
+		label:
+			header?.type === "text"
+				? (extractSpaceMentionsFromText(header.text)[0]?.label ?? "")
+				: "",
+		status: readReplyStatus(content),
+		statusDetail: status?.type === "text" ? status.text : "",
+		body: content.filter((block) => readReplyBlockRole(block) === null),
+	};
+});
+const replySpaceId = untrack(() => reply?.source.spaceId);
+if (replySpaceId)
+	provideMarkdownWorkspaceAsset(
+		createSpaceWorkspaceAssetResolver(replySpaceId),
+	);
+
+const replyStatusLabel = $derived(
+	reply?.status === "failed"
+		? m.reply_status_failed({}, { locale })
+		: reply?.status === "interrupted"
+			? m.reply_status_interrupted({}, { locale })
+			: reply?.status === "cancelled"
+				? m.reply_status_cancelled({}, { locale })
+				: "",
+);
+
+const isUserMessage = $derived(message.role === "user" && !reply);
 const isNote = $derived(
-	message.role === "user" && message.meta?.turn?.executionKind === "note",
+	isUserMessage && message.meta?.turn?.executionKind === "note",
 );
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -194,13 +241,15 @@ const sentFrom = $derived(
 );
 
 const messageContainerClass = $derived(
-	message.role === "user"
+	isUserMessage
 		? "ml-auto grid w-fit max-w-[var(--chat-user-message-max-width)]"
 		: "w-full",
 );
 
 const messageBubbleClass = $derived.by(() => {
 	const base = "px-[var(--chat-msg-inset)] py-2 text-[14px] leading-[1.7]";
+	if (reply)
+		return `${base} rounded-xl border border-border-subtle/70 bg-bg-hover/30 text-text-primary`;
 	if (message.role === "user") {
 		const user = `${base} justify-self-end`;
 		if (isCancelledBeforeDispatch)
@@ -550,7 +599,7 @@ let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
 function handleCopy() {
 	const text =
-		message.content
+		(reply?.body ?? message.content)
 			?.flatMap((block) => {
 				if (block.type === "text") return [block.text];
 				if (block.type === "shell_command") return [block.rawText];
@@ -582,8 +631,29 @@ function handleCopy() {
 {:else}
   <div class={`min-w-0 ${messageContainerClass}`}>
     <div class={messageBubbleClass}>
+      {#if reply}
+        <div class="mb-1 flex min-w-0 items-center gap-1.5 text-[12px] leading-5 text-text-tertiary">
+          <ArrowDownLeft class="h-3.5 w-3.5 shrink-0 text-brand/70" aria-hidden="true" />
+          <RelatedSessionLink
+            ref={reply.source}
+            class="inline-flex min-w-0 items-center gap-1 transition-colors [&[href]]:hover:text-text-secondary"
+          >
+            {#snippet children({ label })}
+              <span class="shrink-0 font-medium text-text-secondary">{m.reply_from({ space: reply.label || m.reply_other_space({}, { locale }) }, { locale })}</span>
+              <span class="shrink-0" aria-hidden="true">·</span>
+              <span class="min-w-0 truncate">{label}</span>
+            {/snippet}
+          </RelatedSessionLink>
+          {#if replyStatusLabel}
+            <span class="shrink-0 cursor-default rounded-[3px] bg-warning-soft/10 px-1.5 py-px text-[10px] font-medium leading-4 text-warning-soft/85" title={reply.statusDetail}>{replyStatusLabel}</span>
+          {/if}
+        </div>
+        {#if reply.body.length === 0 && !replyStatusLabel}
+          <p class="text-[13px] text-text-placeholder">{m.reply_empty({}, { locale })}</p>
+        {/if}
+      {/if}
       <MessageContentFlow
-        content={message.content?.length ? message.content : [{ type: 'text', text: message.text }]}
+        content={reply ? reply.body : message.content?.length ? message.content : [{ type: 'text', text: message.text }]}
         {isUserMessage}
         {thinkingExpanded}
         {isStreaming}
@@ -594,7 +664,7 @@ function handleCopy() {
         onMarkdownSegmentStart={handleMarkdownSegmentStart}
         onLoadToolCalls={message.toolCallsLoader ?? undefined}
         turnId={message.meta?.turnId ?? message.meta?.turn?.id ?? null}
-        {onOpenFile}
+        onOpenFile={reply ? undefined : onOpenFile}
         {onOpenUrl}
       />
 
@@ -643,7 +713,7 @@ function handleCopy() {
           </button>
         {/if}
 
-        {#if message.role === 'user'}
+        {#if isUserMessage}
           {#if sentFrom}
             <RelatedSessionLink
               ref={sentFrom}
@@ -684,7 +754,7 @@ function handleCopy() {
           {#if isNote}
             <span class="shrink-0 text-[11px] font-medium text-text-placeholder/65" title={m.chat_note_no_reply({}, { locale })}>{m.composer_note({}, { locale })}</span>
           {/if}
-        {:else}
+        {:else if !reply}
           {#if harnessLabel}
             <span class="inline-flex shrink-0 items-center gap-1 rounded-[3px] bg-bg-hover-strong px-1.5 py-px text-[10px] font-medium leading-none text-text-tertiary" title={harnessTitle}><HarnessIcon {harness} size={10} />{harnessLabel}</span>
           {/if}

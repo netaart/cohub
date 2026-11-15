@@ -1,7 +1,7 @@
 import { isUuidLike } from "./identifiers.js";
 import { normalizeRequestSource, type RequestSource } from "./provenance.js";
 
-export const SESSION_TURN_ORIGIN_KINDS = ["prompt", "scheduled_prompt", "background_task", "hook"] as const;
+export const SESSION_TURN_ORIGIN_KINDS = ["prompt", "scheduled_prompt", "background_task", "hook", "reply"] as const;
 
 export type SessionTurnOriginKind = typeof SESSION_TURN_ORIGIN_KINDS[number];
 
@@ -12,7 +12,7 @@ export type SessionTurnOrigin = {
   sessionId: string;
   turnId: string;
   toolCallId?: string;
-  /** Omitted for legacy records whose ancestry depth is unknown. */
+  /** Delegation nesting; a reply returns to its caller's depth. Omitted for legacy records. */
   depth?: number;
 };
 
@@ -30,7 +30,7 @@ export const normalizeSessionTurnOrigin = (value: unknown): SessionTurnOrigin | 
     sessionId: source.sessionId,
     turnId: source.turnId,
     ...(source.toolCallId ? { toolCallId: source.toolCallId } : {}),
-    ...(typeof input.depth === "number" && Number.isSafeInteger(input.depth) && input.depth > 0 ? { depth: input.depth } : {}),
+    ...(typeof input.depth === "number" && Number.isSafeInteger(input.depth) && input.depth >= 0 ? { depth: input.depth } : {}),
   };
 };
 

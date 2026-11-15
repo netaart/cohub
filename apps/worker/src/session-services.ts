@@ -12,6 +12,7 @@ import { dispatchLabelAssignmentsUpdated } from "./label-events.js";
 import { enqueueReferences } from "./reference-index-queue.js";
 import { dispatchTurnCreated, dispatchTurnUpdated, scheduleSessionSnapshot } from "./realtime-events.js";
 import { spaceWalletBilling } from "./space-wallet-billing.js";
+import { onTurnSettled } from "./turn-settled.js";
 
 const AGENT_TURN_JOB_NAME = "agent_turns";
 
@@ -57,6 +58,7 @@ export function getSessionDomainServices(input: {
     getRequestId: () => null,
     onSessionTurnCreated: dispatchTurnCreated,
     onSessionTurnUpdated: dispatchTurnUpdated,
+    onSessionTurnSettled: onTurnSettled,
     onSessionParticipantsUpdated: async ({ spaceId, sessionId, userUuids }) => {
       const affectedLabelIds = await assignSessionParticipantSystemLabels({ db, spaceId, sessionId, userUuids });
       if (affectedLabelIds.length === 0) return;

@@ -69,6 +69,10 @@ Use `@space` mentions when the Agent should pull context from another Space you 
 
 Mentions are for deliberate context references, not every message.
 
+### Replies from other Spaces
+
+An Agent can hand work to another Space and wait for it: `cohub -s <space> spaces prompt --reply "…"`. When that Chat finishes, its final reply comes back here as a message from that Space and the Agent continues. The sending message shows "awaiting reply" until it arrives.
+
 ## Working with turns
 
 Chats are turn-based:

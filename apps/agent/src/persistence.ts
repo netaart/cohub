@@ -23,6 +23,7 @@ import { listResourceLabelRefs } from "@cohub/core/labels";
 import { collectImageToTextTiming, collectToolMetrics } from "@cohub/protocol/model";
 import { interruptedSummaryPatch, interruptedTurnUsage, isFinalAssistantMessageMeta, runtimeResolutionOpen, publishSessionTurnStates, withNextSessionMessageSequence } from "@cohub/core/sessions";
 import { scheduleSessionSnapshot } from "./session-snapshot.js";
+import { onTurnSettled } from "./turn-settled.js";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { addImageToTextCallsToSummary, claimSessionFallbackTitle, countToolCallsInContent, createImageToTextUsageSummaryAccumulator, deriveMessagePreviewText, deriveSessionFallbackTitle, finalizeImageToTextUsageSummary, readImageToTextCalls, readSessionTitleSource, resolveMessageTurnId, shouldGenerateSessionTitle, summarizeSessionTurnCompactions, sumImageToTextUsage } from "@cohub/core/sessions";
 import { buildTraceHeaders, getCurrentRequestId } from "@cohub/infra/tracing";
@@ -267,6 +268,7 @@ export async function publishSessionTurnsUpdated(input: {
 
 async function publishTurnFinalized(spaceId: string, turn: SessionTurnRecord) {
   void scheduleSessionSnapshot(turn.sessionId, turn.sequence);
+  void onTurnSettled(turn);
   await clearPersistedSessionStreamSnapshot(spaceId, turn.sessionId, turn.id);
   const sessionLabelRefs = await listResourceLabelRefs({
     db,

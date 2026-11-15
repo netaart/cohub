@@ -1,4 +1,4 @@
-import { readSessionTurnOrigin } from "@cohub/protocol/model";
+import { readSessionTurnOrigin, readSessionTurnReply } from "@cohub/protocol/model";
 import type { ReferenceInput } from "./types.js";
 
 /** A causal edge, independent of whether the caller and child share a Space or Session. */
@@ -10,6 +10,7 @@ export const turnTriggerReference = (turn: {
 }): ReferenceInput | null => {
   const origin = readSessionTurnOrigin(turn.meta, turn.spaceId);
   if (!origin || origin.turnId === turn.id) return null;
+  const reply = readSessionTurnReply(turn.meta);
   return {
     kind: "turn_trigger",
     sourceType: "turn",
@@ -24,6 +25,7 @@ export const turnTriggerReference = (turn: {
       targetSpaceId: turn.spaceId,
       targetSessionId: turn.sessionId,
       ...(origin.toolCallId ? { toolCallId: origin.toolCallId } : {}),
+      ...(reply ? { reply: reply.mode } : {}),
     },
   };
 };

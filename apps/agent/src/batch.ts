@@ -5,8 +5,11 @@ import { db } from "./db.js";
 import { env } from "./env.js";
 import type { AgentTurnJobData } from "./queue.js";
 import { HOME_SPACE_SLUG, resolveHarness } from "@cohub/protocol";
+import { readSessionTurnReply } from "@cohub/protocol/model";
+import type { SettledTurn } from "@cohub/infra/session-turn-settled";
 import { limitBatchSize, limitBatchToApprovalMode } from "./runtime/batch-limit.js";
 import { DEFAULT_FOLLOWUP_DELIVERY, readMessageQueueConfig, type FollowupDelivery } from "./runtime/message-queue-config.js";
+import { onTurnSettled } from "./turn-settled.js";
 
 type TurnRow = {
   id: string;
@@ -27,6 +30,7 @@ type ExecutionBatchMeta = {
   mergedTurnIds: string[];
   userMessageIds: string[];
   anchorUserMessageId: string | null;
+  replies?: true;
 };
 
 export type ClaimedTurnBatch = {
@@ -88,7 +92,7 @@ function isStaleActiveTurn(turn: TurnRow) {
 }
 
 async function markStaleTurnInterrupted(tx: Transaction, turn: TurnRow) {
-  await tx.execute(sql`
+  const rows = await tx.execute(sql`
     update v2.session_turns
     set status = 'interrupted',
         stop_reason = 'stale_active_recovered',
@@ -97,7 +101,9 @@ async function markStaleTurnInterrupted(tx: Transaction, turn: TurnRow) {
         completed_at = now(),
         updated_at = now()
     where id = ${turn.id} and status in ('running', 'abort_requested')
+    returning id, status, meta
   `);
+  return rows[0] as SettledTurn | undefined;
 }
 
 function createExecutionBatch(queued: TurnRow[]): ExecutionBatchMeta {
@@ -110,6 +116,7 @@ function createExecutionBatch(queued: TurnRow[]): ExecutionBatchMeta {
     mergedTurnIds: queued.slice(0, -1).map((turn) => turn.id),
     userMessageIds,
     anchorUserMessageId: userMessageIds.at(-1) ?? null,
+    ...(queued.some((turn) => readSessionTurnReply(turn.meta)) ? { replies: true as const } : {}),
   };
 }
 
@@ -166,7 +173,8 @@ async function resolveFollowupDelivery(tx: Transaction, userUuid: string | null)
 }
 
 export async function claimNextTurnBatch(input: Pick<AgentTurnJobData, "sessionId">): Promise<ClaimResult> {
-  return db.transaction(async (tx) => {
+  let recovered: SettledTurn | undefined;
+  const claim = await db.transaction(async (tx) => {
     await tx.execute(sql`select id from v2.space_sessions where id = ${input.sessionId} for update`);
 
     const activeRows = await tx.execute(sql`
@@ -179,7 +187,7 @@ export async function claimNextTurnBatch(input: Pick<AgentTurnJobData, "sessionI
     const active = activeRows[0] ? normalizeTurn(activeRows[0] as Record<string, unknown>) : null;
     if (active) {
       if (resolveHarness(active.meta) === "cohub" && isStaleActiveTurn(active)) {
-        await markStaleTurnInterrupted(tx, active);
+        recovered = await markStaleTurnInterrupted(tx, active);
       } else {
         return { kind: "busy" as const, activeTurnId: active.id, activeUpdatedAt: active.updatedAt, activeStatus: active.status };
       }
@@ -228,6 +236,8 @@ export async function claimNextTurnBatch(input: Pick<AgentTurnJobData, "sessionI
     const batch = await claimQueuedTurns(tx, selected);
     return batch ? { kind: "claimed" as const, batch } : { kind: "noop" as const };
   });
+  if (recovered) void onTurnSettled(recovered);
+  return claim;
 }
 
 /** Recover the original claim, never collect newer queued follow-ups into a replay. */

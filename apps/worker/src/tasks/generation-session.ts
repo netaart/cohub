@@ -8,6 +8,7 @@ import { sanitizeContentBlocksForPostgresJson } from "@cohub/core/content/saniti
 import { db } from "../db.js";
 import { wakeAgentSession } from "../session-services.js";
 import { dispatchTurnUpdated } from "../realtime-events.js";
+import { onTurnSettled } from "../turn-settled.js";
 
 const toIso = (value: Date | null | undefined) => value?.toISOString() ?? null;
 
@@ -122,6 +123,7 @@ export async function finalizeGenerationSession(input: { taskRunId: string; payl
     await tx.update(spaceSessions).set({ latestMessageText: text, lastMessageAt: completedAt, updatedAt: completedAt }).where(eq(spaceSessions.id, sessionId));
     return turn;
   });
+  if (updatedTurn) void onTurnSettled(updatedTurn);
   if (updatedTurn && input.payload.spaceId) await dispatchTurnUpdated({ spaceId: input.payload.spaceId, turn: toTurnRecord(updatedTurn) }).catch(() => undefined);
   await wakeAgentSession(input.payload.spaceId ?? "", sessionId, "generation_complete").catch(() => undefined);
 }
@@ -188,6 +190,7 @@ export async function failGenerationSession(input: { taskRunId: string; payload:
     await tx.update(spaceSessions).set({ latestMessageText: text, lastMessageAt: completedAt, updatedAt: completedAt }).where(eq(spaceSessions.id, sessionId));
     return turn;
   });
+  if (updatedTurn) void onTurnSettled(updatedTurn);
   if (updatedTurn && input.payload.spaceId) await dispatchTurnUpdated({ spaceId: input.payload.spaceId, turn: toTurnRecord(updatedTurn) }).catch(() => undefined);
   await wakeAgentSession(input.payload.spaceId ?? "", sessionId, "generation_failed").catch(() => undefined);
 }

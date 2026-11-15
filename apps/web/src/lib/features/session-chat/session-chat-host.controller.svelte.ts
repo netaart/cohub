@@ -13,6 +13,7 @@ import type { SpaceFsChangedPayload } from "@cohub/protocol/fs";
 import type { GenerationContentBlock } from "@cohub/protocol/generation";
 import {
 	isAgentTurn,
+	readSessionTurnOrigin,
 	type SessionTurnIndexItem,
 	type SessionTurnRecord,
 	type StoredIntermediateMessage,
@@ -543,7 +544,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		const latestTurn = mergeComposerTurnSources(
 			activeSessionState?.turns ?? [],
 			activeTurnIndex,
-		).at(-1);
+		).findLast((turn) => readSessionTurnOrigin(turn.meta)?.kind !== "reply");
 		const modeKey = `${sessionKey}:${latestTurn?.id ?? "none"}:${latestTurn?.executionKind ?? "agent"}`;
 		if (restoredComposerModeKey === modeKey) return;
 		untrack(() => {

@@ -17,7 +17,7 @@ test("origin keeps caller identity, accepts opaque tool ids and ignores unrelate
   for (const invalid of [null, [], "local_import", {}, { ...origin, turnId: "invalid" }, { ...origin, kind: "unknown" }]) {
     assert.equal(normalizeSessionTurnOrigin(invalid), null);
   }
-  for (const depth of [-1, 0, 1.5, NaN, Infinity]) {
+  for (const depth of [-1, 1.5, NaN, Infinity]) {
     assert.equal(normalizeSessionTurnOrigin({ ...origin, depth })?.depth, undefined);
   }
 });

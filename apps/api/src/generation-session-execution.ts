@@ -15,6 +15,7 @@ import { createSessionTurn, setGenerationTurnAssistantProjection } from "./sessi
 import { loadGenerationDeclaration } from "./generations/declarations.js";
 import { resolveGenerationRequestParameters } from "./generations/schema.js";
 import { enqueueTask } from "./tasks.js";
+import { onTurnSettled } from "./turn-settled.js";
 import { defaultJobRetention } from "@cohub/infra/bullmq";
 import { admitGeneration, GenerationBillingUnavailableError, generationReserveHolds } from "./generation-billing.js";
 
@@ -155,7 +156,7 @@ export async function createGenerationSessionExecution(input: {
       const failed = buildGenerationResultMessage({ taskId: taskRunId, model: input.model, parameters, status: "failed", error: { message } });
       const failedText = failed.content.find((block) => block.type === "text")?.text ?? null;
       try {
-        await retryDatabaseOperation(async () => db.transaction(async (tx) => {
+        const settled = await retryDatabaseOperation(async () => db.transaction(async (tx) => {
           const completedAt = new Date();
           const [turn] = await tx.update(sessionTurns).set({
             status: "failed",
@@ -166,11 +167,13 @@ export async function createGenerationSessionExecution(input: {
             summary: { text: failedText, finishReason: "failed" },
             completedAt,
             updatedAt: completedAt,
-          }).where(and(eq(sessionTurns.id, failureTurnId), eq(sessionTurns.sessionId, failureSessionId), eq(sessionTurns.executionKind, "direct_generation"), sql`${sessionTurns.status} in ('queued', 'running')`)).returning({ id: sessionTurns.id });
-          if (!turn) return;
+          }).where(and(eq(sessionTurns.id, failureTurnId), eq(sessionTurns.sessionId, failureSessionId), eq(sessionTurns.executionKind, "direct_generation"), sql`${sessionTurns.status} in ('queued', 'running')`)).returning({ id: sessionTurns.id, status: sessionTurns.status, meta: sessionTurns.meta });
+          if (!turn) return null;
           await tx.update(sessionMessages).set({ content: failed.content, text: failedText, meta: { ...failed.meta, messageKind: "generation_result", turnId, generationTaskId: taskRunId, generationStatus: "failed" }, completedAt }).where(and(eq(sessionMessages.sessionId, failureSessionId), eq(sessionMessages.idempotencyKey, `generation:${taskRunId}:result`)));
           await tx.update(spaceSessions).set({ latestMessageText: failedText, lastMessageAt: completedAt, updatedAt: completedAt }).where(eq(spaceSessions.id, failureSessionId));
+          return turn;
         }));
+        if (settled) void onTurnSettled(settled);
       } catch (cleanupError) {
         console.error("[GenerationSession] failed to persist generation failure after retries", { sessionId: failureSessionId, turnId: failureTurnId, taskRunId, cleanupError });
       }

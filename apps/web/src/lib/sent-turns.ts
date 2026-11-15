@@ -7,7 +7,10 @@ import {
 
 export type RelatedSessionRef = { spaceId: string; sessionId: string };
 
-export type SentSession = RelatedSessionRef & { count: number };
+export type SentSession = RelatedSessionRef & {
+	count: number;
+	awaiting?: number;
+};
 
 export type SentTurnIndex = {
 	key: string;
@@ -38,14 +41,20 @@ export function hasSentTurns(
 function groupBySession(
 	refs: readonly SentTurnRef[],
 	fallbackSpaceId: string,
+	replied: ReadonlySet<string>,
 ): SentSession[] {
 	const sessions = new Map<string, SentSession>();
 	for (const ref of refs) {
 		const spaceId = ref.spaceId ?? fallbackSpaceId;
 		const key = `${spaceId}:${ref.sessionId}`;
-		const current = sessions.get(key);
-		if (current) current.count += 1;
-		else sessions.set(key, { spaceId, sessionId: ref.sessionId, count: 1 });
+		let session = sessions.get(key);
+		if (!session) {
+			session = { spaceId, sessionId: ref.sessionId, count: 0 };
+			sessions.set(key, session);
+		}
+		session.count += 1;
+		if (ref.reply && !replied.has(ref.turnId))
+			session.awaiting = (session.awaiting ?? 0) + 1;
 	}
 	return [...sessions.values()];
 }
@@ -57,8 +66,14 @@ export function buildSentTurnIndex(
 ): SentTurnIndex {
 	if (!spaceId || turns.length === 0) return EMPTY_SENT_TURNS;
 	const fanOut: Array<[turnId: string, refs: SentTurnRef[]]> = [];
+	const replied = new Set<string>();
 	let key = "";
 	for (const turn of turns) {
+		const origin = readSessionTurnOrigin(turn.meta);
+		if (origin?.kind === "reply") {
+			replied.add(origin.turnId);
+			key += `r${origin.turnId};`;
+		}
 		const refs = readFanOut(turn);
 		if (refs.length === 0) continue;
 		fanOut.push([turn.id, refs]);
@@ -71,7 +86,7 @@ export function buildSentTurnIndex(
 	const byCallerTurn = new Map<string, readonly SentSession[]>();
 	const byToolCall = new Map<string, SentTurnRef[]>();
 	for (const [turnId, refs] of fanOut) {
-		byCallerTurn.set(turnId, groupBySession(refs, spaceId));
+		byCallerTurn.set(turnId, groupBySession(refs, spaceId, replied));
 		for (const ref of refs) {
 			if (!ref.toolCallId) continue;
 			const own = byToolCall.get(ref.toolCallId);
@@ -85,7 +100,7 @@ export function buildSentTurnIndex(
 		byToolCall: new Map(
 			[...byToolCall].map(([toolCallId, refs]) => [
 				toolCallId,
-				groupBySession(refs, spaceId),
+				groupBySession(refs, spaceId, replied),
 			]),
 		),
 	};

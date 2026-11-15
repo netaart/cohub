@@ -90,6 +90,41 @@ Session are not shown, since they appear in the same timeline. Titles come from 
 loaded Space list, then the Session cache, then a bounded fetch of only the links on
 screen; a 403/404 renders the Session as unavailable rather than as a link.
 
+## Replies
+
+A child Turn with `meta.reply = { mode }` delivers its final result back to the Session
+in its `meta.origin` once it settles (completed, failed, interrupted or cancelled):
+
+- `note` records a note there; `prompt` also runs that Session's Agent with the caller
+  Turn's Harness, model and access mode.
+- The delivered Turn has `origin = { kind: "reply", …child Turn, depth: caller's depth }`,
+  so depth counts nesting and sequential delegations stay at one level. The caller's
+  `messagesSent` entry carries `reply` so clients show it as awaited.
+- Content is a header block (`Reply from @[Space](cohub://spaces/…/sessions/…):`), the
+  child's final text and images, and a status block when it did not complete. Both
+  frame blocks carry `_meta.reply` so clients render them natively, while every Harness
+  reads the reply as an ordinary user message. Neither frame block counts as a mention.
+- A merged follow-up is answered with its owner's result. A child that failed before any
+  Agent claimed it was already reported to its sender, so it is delivered as a note.
+  Waking stops past `MAX_REPLY_WAKE_DEPTH` (4) nested delegations, apps' delegated
+  authority is never reused, and a wake the Session cannot run (permission, billing,
+  Harness) becomes a note instead; nothing is delivered when the sender can no longer
+  write to the caller's Session.
+
+Every path that moves a Turn to a terminal status calls the app's `onTurnSettled`
+(`@cohub/infra/session-turn-settled`): Agent finalization and stale recovery, failures
+before running, cancelled follow-ups, local Runtime results and direct generations.
+Merged Turns settle with their batch owner, whose `executionBatch.replies` marks a batch
+holding a reply. The check is in memory (`needsTurnReplyDelivery`); only matches queue a
+`session.turn.reply` system job keyed by Turn. Delivery is idempotent through the
+`reply:<childTurnId>` client message ID, so retries and duplicate settle events converge.
+`turn_trigger` edges carry the reply mode.
+
+The API accepts `reply` only on immediate agent prompts sent from a Cohub Turn and
+rejects it otherwise. CLI callers delegate with
+`cohub -s <spaceId> spaces prompt --reply "…"`, which needs the `COHUB_*` caller
+headers of a running Turn.
+
 ## Recovery and validation
 
 No DB schema migration is required. Index writes use the existing asynchronous queue;

@@ -69,6 +69,10 @@ Prompt templates 可通过 `{{cohub.session.id}}`、`{{cohub.space.id}}` 和 `{{
 
 Mentions 适合有意的上下文引用，不适合每条消息都用。
 
+### 来自其他 Space 的回复
+
+Agent 可以把任务交给另一个 Space 并等待结果：`cohub -s <space> spaces prompt --reply "…"`。那个对话完成后，最终回复会作为来自该 Space 的消息回到这里，Agent 接着处理。回复到达前，发出的消息会显示「等待回复」。
+
 ## 与 turns 协作
 
 Chats 是 turn-based：

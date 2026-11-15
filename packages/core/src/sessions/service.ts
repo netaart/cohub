@@ -165,6 +165,7 @@ export function createSessionServices(input: {
   enqueueReferences?: (references: readonly ReferenceInput[]) => void;
   onSessionTurnCreated?: (input: { spaceId: string; turn: SessionTurnRecord }) => void | Promise<void>;
   onSessionTurnUpdated?: (input: { spaceId: string; turn: SessionTurnRecord }) => void | Promise<void>;
+  onSessionTurnSettled?: (turn: { id: string; status: string; meta: unknown }) => void | Promise<void>;
   onSessionActivityUpdated?: (input: { sessionId: string; changed: string[] }) => void | Promise<void>;
   onSessionParticipantsUpdated?: (input: { spaceId: string; sessionId: string; userUuids: string[] }) => void | Promise<void>;
   onSessionUnarchived?: (input: { spaceId: string; sessionId: string; labelId: string }) => void | Promise<void>;
@@ -224,8 +225,8 @@ export function createSessionServices(input: {
     return session;
   }
 
-  async function recordSentTurn(meta: unknown, child: { spaceId: string; sessionId: string; turnId: string }) {
-    const origin = readSessionTurnOrigin(meta, child.spaceId);
+  async function recordSentTurn(child: { spaceId: string; sessionId: string; turnId: string; meta: unknown }) {
+    const origin = readSessionTurnOrigin(child.meta, child.spaceId);
     const ref = sentTurnRefFor(origin, child);
     if (!origin || !ref) return;
     try {
@@ -328,7 +329,7 @@ export function createSessionServices(input: {
       sessionId: turnInput.sessionId,
       userUuids: [turnInput.userUuid],
     })).catch((error) => logger.warn("[Session] failed to publish session participant labels", error));
-    await recordSentTurn(row.meta, { spaceId, sessionId: row.sessionId, turnId: row.id });
+    await recordSentTurn({ spaceId, sessionId: row.sessionId, turnId: row.id, meta: row.meta });
     return { ...row, spaceId, created };
   }
 
@@ -391,6 +392,7 @@ export function createSessionServices(input: {
     if (row) {
       await Promise.resolve(input.onSessionTurnUpdated?.({ spaceId: session.spaceId, turn: toSessionTurnRecord(row) }))
         .catch((error) => logger.warn("[Session] failed to publish updated turn", error));
+      await Promise.resolve(input.onSessionTurnSettled?.(row)).catch((error) => logger.warn("[Session] failed to settle turn", error));
     }
     return row ?? null;
   }

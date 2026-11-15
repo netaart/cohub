@@ -14,6 +14,7 @@ import {
 } from "./channels.js";
 import { dispatchSpaceDomainEvent } from "./space-events.js";
 import { syncSessionBoardsLater } from "./board-session-sync.js";
+import { onTurnSettled } from "./turn-settled.js";
 import { db } from "./db/index.js";
 import { spaceChannels } from "@cohub/db";
 import { clearSessionStreamSnapshot } from "./session-stream-snapshot.js";
@@ -183,6 +184,7 @@ const truncateTurnPreview = (text: string | null | undefined) => {
 
 export const dispatchTurnFinalized = async (input: { spaceId: string; sessionId: string; turn: SessionTurnRecord }) => {
   void scheduleSessionSnapshot(input.sessionId, input.turn.sequence);
+  void onTurnSettled(input.turn);
   await clearSessionStreamSnapshot({ spaceId: input.spaceId, sessionId: input.sessionId, turnId: input.turn.id });
   const sessionLabelRefs = await listResourceLabelRefs({
     db,

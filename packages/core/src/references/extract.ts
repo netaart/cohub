@@ -1,5 +1,6 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import { isUuidLike } from "@cohub/protocol/identifiers";
+import { readReplyBlockRole } from "@cohub/protocol/model";
 import { parseMentions } from "./mentions.js";
 import { fileTargetId, normalizeFilePath } from "./paths.js";
 import type { ReferenceInput, ReferenceKind } from "./types.js";
@@ -20,7 +21,7 @@ export type TurnReferenceSource = {
 const collectText = (content: ContentBlock[] | null | undefined): string => {
   if (!content) return "";
   return content
-    .flatMap((block) => (block.type === "text" ? [block.text] : []))
+    .flatMap((block) => (block.type === "text" && !readReplyBlockRole(block) ? [block.text] : []))
     .join("\n");
 };
 
@@ -87,7 +88,7 @@ export const extractTurnReferences = (turn: TurnReferenceSource): ReferenceInput
 
   // Mentions: @space / @session links authored in the user's message. Recorded
   // in full, including self-references; consumers filter self-loops if needed.
-  const mentionText = collectText(turn.userContent) || turn.userText || "";
+  const mentionText = turn.userContent?.length ? collectText(turn.userContent) : turn.userText ?? "";
   const seenMentions = new Map<string, ReferenceInput>();
   for (const mention of parseMentions(mentionText)) {
     const targetType = mention.type === "app"
