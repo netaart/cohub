@@ -83,6 +83,7 @@ type Props = {
 	onOpenMarketplace: (options: { mobile: boolean }) => void;
 	onOpenInstalledApp: (app: InstalledApp, options: { mobile: boolean }) => void;
 	onOpenApp: (app: WorkspaceAppLaunch, options: { mobile: boolean }) => void;
+	appPublicHref: (appSlug: string) => string | null;
 	onOpenResource: (
 		target: ResourceAppTarget,
 		options: { mobile: boolean },
@@ -140,6 +141,7 @@ let {
 	onOpenMarketplace,
 	onOpenInstalledApp,
 	onOpenApp,
+	appPublicHref,
 	onOpenResource,
 }: Props = $props();
 
@@ -314,6 +316,7 @@ $effect(() => {
 			draggable={draggable && !mobile}
 			touchDraggable={draggable}
 			onOpenApp={(app) => onOpenApp(app, { mobile })}
+			{appPublicHref}
 			onManageApp={(id) => onOpenResource({ kind: "app", id }, { mobile })}
 			onOpenMarketplace={() => onOpenMarketplace({ mobile })}
 			onOpenInstalled={(app) => onOpenInstalledApp(app, { mobile })}

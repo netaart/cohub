@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { AppRecord } from "@neta-art/cohub";
-import { Settings2 } from "lucide-svelte";
+import { ExternalLink, Settings2 } from "lucide-svelte";
 import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
 import { boardAppCover } from "$lib/board/board-app";
 import AppIcon from "$lib/components/app/AppIcon.svelte";
@@ -17,6 +17,7 @@ type Props = {
 	active?: boolean;
 	draggable?: boolean;
 	touchDraggable?: boolean;
+	publicHref?: string | null;
 	onOpen: (app: WorkspaceAppLaunch) => void;
 	onManage: () => void;
 };
@@ -27,6 +28,7 @@ const {
 	active = false,
 	draggable = false,
 	touchDraggable = false,
+	publicHref = null,
 	onOpen,
 	onManage,
 }: Props = $props();
@@ -67,6 +69,9 @@ const drag = $derived.by(() => {
 		<AppIcon meta={app.meta} slug={app.slug} seed={app.id} size="sm" />
 	{/snippet}
 	{#snippet trailing()}
+		{#if publicHref}
+			<SidePanelRowAction icon={ExternalLink} label={m.window_open_in_new_tab({}, { locale })} itemName={title} href={publicHref} />
+		{/if}
 		<SidePanelRowAction icon={Settings2} label={m.apps_panel_manage({}, { locale })} itemName={title} onclick={onManage} />
 	{/snippet}
 </SidePanelRow>

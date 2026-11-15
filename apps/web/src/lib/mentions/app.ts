@@ -1,4 +1,5 @@
 import { parseSpaceSlug, parseUsername } from "@cohub/protocol";
+import { buildPublicAppRoute } from "$lib/space-routes";
 import { COHUB_WEB_ORIGIN_SOURCE } from "./platform-origin";
 
 export type AppMention = {
@@ -69,7 +70,7 @@ export function buildAppMentionHref(input: {
 	appSlug: string;
 	launchSuffix?: string;
 }) {
-	return `/${encodeURIComponent(input.username)}/${encodeURIComponent(input.spaceSlug)}/w/${encodeURIComponent(input.appSlug)}${input.launchSuffix ?? ""}`;
+	return `${buildPublicAppRoute(input)}${input.launchSuffix ?? ""}`;
 }
 
 export function buildAppMentionMarkdown(input: {

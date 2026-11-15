@@ -21,7 +21,7 @@ import {
 	withCohubBar,
 } from "$lib/resource-kit/app";
 import { sdk } from "$lib/sdk";
-import { buildSpaceLandingRoute } from "$lib/space-routes";
+import { buildPublicAppRoute, buildSpaceLandingRoute } from "$lib/space-routes";
 import { createKeyedRouteRequestGuard } from "./route-request-guard";
 
 export type AppTargetType = "file" | "directory" | "port";
@@ -128,10 +128,10 @@ export function createAppDetailController(options: {
 	}
 
 	function publicRoute(app: AppRecord | null = detail) {
-		const ownerUsername = options.getOwnerUsername();
+		const username = options.getOwnerUsername();
 		const spaceSlug = options.getSpaceSlug();
-		return ownerUsername && spaceSlug && app?.slug
-			? `/${encodeURIComponent(ownerUsername)}/${encodeURIComponent(spaceSlug)}/w/${encodeURIComponent(app.slug)}`
+		return username && spaceSlug && app?.slug
+			? buildPublicAppRoute({ username, spaceSlug, appSlug: app.slug })
 			: null;
 	}
 

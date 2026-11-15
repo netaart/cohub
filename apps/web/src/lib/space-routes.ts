@@ -90,5 +90,12 @@ export const buildSpaceCronjobNewRoute = (spaceId: string) =>
 export const buildSpaceAppRoute = (spaceId: string, appId: string) =>
 	`${buildSpaceRootRoute(spaceId)}/apps/${appId}`;
 
+export const buildPublicAppRoute = (input: {
+	username: string;
+	spaceSlug: string;
+	appSlug: string;
+}) =>
+	`/${encodeURIComponent(input.username)}/${encodeURIComponent(input.spaceSlug)}/w/${encodeURIComponent(input.appSlug)}`;
+
 export const buildSpaceTaskRoute = (spaceId: string, taskId: string) =>
 	`${buildSpaceRootRoute(spaceId)}/tasks/${taskId}`;

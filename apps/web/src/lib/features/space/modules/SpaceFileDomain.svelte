@@ -29,6 +29,7 @@ import { DURATION_PANEL_FADE_COLLAPSE, easeOut } from "$lib/motion";
 import { m } from "$lib/paraglide/messages.js";
 import type { FileViewMode } from "$lib/resource-kit/diff";
 import type { SpaceFsNode } from "$lib/space-fs";
+import { buildPublicAppRoute } from "$lib/space-routes";
 import { patchCachedSpaceList } from "$lib/stores/space-list-cache";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 import type { LocalUploadEntry } from "$lib/upload-entries";
@@ -377,6 +378,12 @@ function closeMobileDrawerIfNeeded(mobile: boolean) {
 
 function openSpacePath(path: string) {
 	void onOpenWorkspaceFile(path);
+}
+
+function appPublicHref(appSlug: string) {
+	return spaceOwnerUsername && spaceSlug
+		? buildPublicAppRoute({ username: spaceOwnerUsername, spaceSlug, appSlug })
+		: null;
 }
 
 function publishInlineFile() {
@@ -761,6 +768,7 @@ function previewContentOut(node: Element) {
 		onOpenInstalledApp(app);
 		closeMobileDrawerIfNeeded(options.mobile);
 	}}
+	{appPublicHref}
 />
 
 <AppPublishDialog

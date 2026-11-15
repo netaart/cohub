@@ -203,7 +203,7 @@ onDestroy(() => {
           {#if onPreviewApp && appDetail.status === 'published'}
             <button type="button" class="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-[5px] bg-brand-muted px-3 py-2 text-[12px] font-medium text-brand transition-colors hover:bg-brand-muted-hover sm:w-auto" onclick={() => onPreviewApp?.(appDetail!)}>
               <PanelRight class="h-3.5 w-3.5" />
-              <span>Open</span>
+              <span>{m.resource_app_open({}, { locale })}</span>
             </button>
           {/if}
           {#if publicRoute && appDetail.status === 'published'}

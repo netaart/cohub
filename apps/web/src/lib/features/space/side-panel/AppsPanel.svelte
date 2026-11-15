@@ -18,6 +18,7 @@ type Props = {
 	draggable: boolean;
 	touchDraggable: boolean;
 	onOpenApp: (app: WorkspaceAppLaunch) => void;
+	appPublicHref: (appSlug: string) => string | null;
 	onManageApp: (appId: string) => void;
 	onOpenMarketplace: () => void;
 	onOpenInstalled: (app: InstalledApp) => void;
@@ -31,6 +32,7 @@ const {
 	draggable,
 	touchDraggable,
 	onOpenApp,
+	appPublicHref,
 	onManageApp,
 	onOpenMarketplace,
 	onOpenInstalled,
@@ -69,7 +71,7 @@ const apps = $derived(feed?.items ?? []);
 		{:else}
 			<div role="list">
 				{#each apps as app (app.id)}
-					<AppRow {spaceId} {app} active={app.id === activeAppId} {draggable} {touchDraggable} onOpen={onOpenApp} onManage={() => onManageApp(app.id)} />
+					<AppRow {spaceId} {app} active={app.id === activeAppId} {draggable} {touchDraggable} publicHref={app.status === "published" ? appPublicHref(app.slug) : null} onOpen={onOpenApp} onManage={() => onManageApp(app.id)} />
 				{/each}
 			</div>
 		{/if}

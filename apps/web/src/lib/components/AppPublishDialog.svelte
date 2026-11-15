@@ -22,6 +22,7 @@ import {
 	validateSpaceSlugInput,
 	validateUsernameInput,
 } from "$lib/slug-rules";
+import { buildPublicAppRoute } from "$lib/space-routes";
 import { authStore } from "$lib/stores/auth.svelte";
 
 const WORK_HIDE_COHUB_BAR_FEATURE = "work.publish.hide_cohub_bar";
@@ -91,11 +92,15 @@ const canPublish = $derived(
 	Boolean(currentUsername && currentSpaceSlug && currentAppSlug && !publishing),
 );
 const publicPath = $derived(
-	`/${currentUsername || "username"}/${currentSpaceSlug || "space"}/w/${currentAppSlug || "app"}`,
+	buildPublicAppRoute({
+		username: currentUsername || "username",
+		spaceSlug: currentSpaceSlug || "space",
+		appSlug: currentAppSlug || "app",
+	}),
 );
 const appUrl = $derived.by(() => {
 	if (!currentUsername || !currentSpaceSlug || !published) return "";
-	return `${window.location.origin}/${currentUsername}/${currentSpaceSlug}/w/${published.slug}`;
+	return `${window.location.origin}${buildPublicAppRoute({ username: currentUsername, spaceSlug: currentSpaceSlug, appSlug: published.slug })}`;
 });
 const publishedUrl = $derived(appUrl);
 

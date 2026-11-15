@@ -3,6 +3,7 @@ import type { UserAppListItem, UserCronJobListItem } from "@neta-art/cohub";
 import {
 	Check,
 	Clock,
+	ExternalLink,
 	Link2,
 	PanelRight,
 	Pause,
@@ -210,8 +211,11 @@ function emptyCopy() {
 	{#if isApps}
 		{@const app = item as UserAppListItem}
 		<SidebarActionButton icon={PanelRight} title={m.resource_app_open({}, { locale })} label={`${m.resource_app_open({}, { locale })} ${appDisplayTitle(app.meta, app.slug)}`} onClick={() => void goto(buildSpaceAppWindowRoute(app.spaceId, app.id))} />
-		{#if split && app.publicUrl}
-			<SidebarActionButton icon={copiedId === app.id ? Check : Link2} title={m.library_copy_link({}, { locale })} onClick={() => void copyLink(app)} />
+		{#if app.publicUrl}
+			<SidebarActionButton icon={ExternalLink} title={m.window_open_in_new_tab({}, { locale })} label={`${m.window_open_in_new_tab({}, { locale })} ${appDisplayTitle(app.meta, app.slug)}`} href={app.publicUrl} />
+			{#if split}
+				<SidebarActionButton icon={copiedId === app.id ? Check : Link2} title={m.library_copy_link({}, { locale })} onClick={() => void copyLink(app)} />
+			{/if}
 		{/if}
 	{:else}
 		{@const job = item as UserCronJobListItem}
