@@ -35,6 +35,7 @@ import { speakTurn, SpeechError } from "../speech.js";
 import type { SessionFilesResponse } from "@cohub/protocol/model";
 import { getSessionRuntimeTurn } from "../runtime.js";
 import { listSessionFiles } from "../session-files.js";
+import { toSessionSpace } from "../session-space.js";
 
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -172,7 +173,7 @@ router.get("/:id", async (c) => {
 
   const [hydratedSession] = await hydrateSessionParticipantProfiles([session]);
   const [sessionWithActiveTurn] = await attachActiveTurns([hydratedSession ?? session]);
-  return c.json({ space, session: sessionWithActiveTurn ?? hydratedSession ?? session, user });
+  return c.json({ space: toSessionSpace(space), session: sessionWithActiveTurn ?? hydratedSession ?? session, user });
 });
 
 // ── PATCH /api/sessions/:id (rename) ─────────────────────────────────────────
