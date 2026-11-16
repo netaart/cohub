@@ -898,6 +898,9 @@ export const sessionTurns = v2.table(
       sql`(${table.meta}->>'clientMessageId')`,
     ).where(sql`${table.executionKind} = 'direct_generation' and ${table.meta}->>'clientMessageId' is not null`),
     directGenerationBarrierIdx: index("v2_idx_session_turns_direct_generation_barrier").on(table.sessionId, table.sequence, table.status).where(sql`${table.executionKind} = 'direct_generation'`),
+    // Predicates must match createRequestedTurnMetaReader's filter, or the planner falls back to scanning every Turn.
+    requestedThinkingLevelIdx: index("v2_idx_session_turns_requested_thinking_level").on(table.sessionId, table.sequence).where(sql`(${table.meta}->>'requestedThinkingLevel') is not null`),
+    requestedContextWindowIdx: index("v2_idx_session_turns_requested_context_window").on(table.sessionId, table.sequence).where(sql`(${table.meta}->>'requestedContextWindow') is not null`),
     createdAtIdx: index("v2_idx_session_turns_created_at").on(table.createdAt),
     spaceCreatedAtIdx: index("v2_idx_session_turns_space_created_at").on(table.spaceId, table.createdAt.desc().nullsFirst(), table.id.desc().nullsFirst()),
     userTextSearchIdx: index("v2_idx_session_turns_user_text_trgm").using("gin", table.userText.op("gin_trgm_ops")),

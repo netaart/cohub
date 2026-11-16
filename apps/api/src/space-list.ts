@@ -70,7 +70,8 @@ function recentPage(userUuid: string, visits: SpaceVisit[], limit: number) {
       union all
       (select space_id, last_message_at from v2.space_sessions
         where (meta -> 'participants' -> 'userUuids') ? ${userUuid} and last_message_at is not null
-        order by last_message_at desc limit ${RECENT_SESSION_WINDOW})
+        -- nulls last keeps the planner off a backward last_message_at scan that filters the whole table for sparse users.
+        order by last_message_at desc nulls last limit ${RECENT_SESSION_WINDOW})
       union all
       (select space_id, created_at from v2.space_members
         where user_id = ${userUuid}
