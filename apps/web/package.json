@@ -12,6 +12,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build && node ./scripts/generate-worker-entry-deps.mjs && node ./scripts/check-worker-deps.mjs && node ./scripts/ensure-i18n.mjs --stamp",
+		"build:board-viewer": "vite build -c vite.board-viewer.config.ts",
 		"generate:board-themes": "node --import ./scripts/register-alias.mjs scripts/board-themes.ts",
 		"i18n:compile": "node ./scripts/ensure-i18n.mjs --force",
 		"lint": "biome lint .",

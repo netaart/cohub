@@ -55,6 +55,21 @@ and, if needed, `COHUB_AUTH_RESOURCE` and `COHUB_AUTH_SCOPE`. Stored login sessi
 Home Space caches, and Runtime directory bindings are scoped to the API base URL.
 Sign in once for each custom server, or supply `COHUB_EXECUTION_TOKEN`.
 
+## Local Boards
+
+A path ending in `.board.json` is a Board without a Space or sign-in. The file holds the
+document; media and script paths are relative to its folder.
+
+```bash
+cohub boards create design/plan.board.json --title "Plan"
+cohub boards open design/plan.board.json      # the web Board panel on 127.0.0.1
+cohub boards apply design/plan.board.json '{"items":{"t":{"type":"text","props":{"text":"Hi"}}}}'
+```
+
+Edits in the browser and from the CLI merge live; `boards history` lists and restores
+versions. The viewer is built from `apps/web` with `pnpm --filter web build:board-viewer`
+into `board-viewer/`, which the release publishes with the CLI.
+
 ## Board export resources
 
 Board exports keep the requested resolution. Previews are fetched and decoded at the size

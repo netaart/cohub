@@ -1,4 +1,5 @@
 import { runBoardExport } from "../src/board-export.js";
+import { spaceBoardFiles } from "../src/board-files.js";
 import { parseBoardDocument } from "../src/board-kernel.js";
 
 const frames = Number(process.env.BOARD_EXPORT_BENCH_FRAMES ?? 2301);
@@ -19,7 +20,7 @@ if (!parsed.ok) throw new Error("Invalid benchmark document.");
 const start = performance.now();
 let peakRss = 0;
 const result = await runBoardExport({
-  document: parsed.document, spaceId: "unused", target: "unused", animation: "lecture",
+  document: parsed.document, files: spaceBoardFiles("unused"), animation: "lecture",
   times: Array.from({ length: frames }, (_, index) => index * 40),
   region: { kind: "frame", id: "page" }, scale: 1,
   colorScheme: "dark", background: "paper", format: "png", withImages: false,

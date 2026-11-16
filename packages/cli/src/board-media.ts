@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   type BoardDocument,
@@ -10,31 +9,29 @@ import {
   parseBoardItem,
   settleBoardMediaSizes,
 } from "@neta-art/cohub/board";
-import { createClient } from "./client.js";
+import type { BoardFiles } from "./board-files.js";
 import { localMediaFacts } from "./local-media.js";
-import { WORKSPACE_ROOT } from "./space-files/operands.js";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-export function boardMediaFileResolver(spaceId: string): BoardMediaFileResolver {
-  const local = process.env.COHUB_SPACE_ID === spaceId;
+export function boardMediaFileResolver(files: BoardFiles): BoardMediaFileResolver {
   return async (path, type, signal) => {
-    const file = resolve(WORKSPACE_ROOT, path);
-    const facts = local && file.startsWith(`${WORKSPACE_ROOT}/`) ? await localMediaFacts(file, type, signal) : null;
-    const resolved = facts ? null : await createClient().space(spaceId).files.resolve(path, { purpose: "playback", signal }).catch(() => null);
+    const file = files.local(path);
+    const facts = file ? await localMediaFacts(file, type, signal) : null;
+    const resolved = facts ? null : await files.resolve(path, signal);
     const size = facts ?? resolved?.media;
     return size ? { width: size.width, height: size.height } : (resolved?.url ?? null);
   };
 }
 
-export async function settleBoardDocument(spaceId: string, document: BoardDocument): Promise<BoardDocument> {
-  const settled = await settleBoardMediaSizes(document.items, { resolveFile: boardMediaFileResolver(spaceId) });
+export async function settleBoardDocument(files: BoardFiles, document: BoardDocument): Promise<BoardDocument> {
+  const settled = await settleBoardMediaSizes(document.items, { resolveFile: boardMediaFileResolver(files) });
   return Object.keys(settled).length ? { ...document, items: { ...document.items, ...settled } } : document;
 }
 
 export async function settleBoardPatch<T extends Record<string, unknown>>(
-  spaceId: string,
+  files: BoardFiles,
   patch: T,
   current: (ids: string[]) => Promise<Record<string, unknown> | null>,
 ): Promise<T> {
@@ -50,24 +47,25 @@ export async function settleBoardPatch<T extends Record<string, unknown>>(
   for (const [id, item] of Object.entries(existing)) {
     if (isRecord(item) && item.type === created[id]?.type) delete created[id];
   }
-  const settled = await settleBoardMediaSizes(created, { resolveFile: boardMediaFileResolver(spaceId) });
+  const settled = await settleBoardMediaSizes(created, { resolveFile: boardMediaFileResolver(files) });
   if (!Object.keys(settled).length) return patch;
-  const adopted = Object.entries(settled).map(([id, item]) => [id, mergePatch(items[id], diffMergePatch(created[id], item))]);
+  // A size is adopted whole: the patch may name neither edge, and half a size is invalid.
+  const adopted = Object.entries(settled).map(([id, item]) => {
+    const merged = mergePatch(items[id], diffMergePatch(created[id], item)) as Record<string, unknown>;
+    return [id, merged.size ? { ...merged, size: (item as { size?: unknown }).size } : merged];
+  });
   return { ...patch, items: { ...items, ...Object.fromEntries(adopted) } };
 }
 
 const run = promisify(execFile);
 
-export async function settleBoardMediaDurations(spaceId: string, document: BoardDocument, ids: readonly string[]): Promise<Record<string, BoardItem>> {
-  const local = process.env.COHUB_SPACE_ID === spaceId;
+export async function settleBoardMediaDurations(files: BoardFiles, document: BoardDocument, ids: readonly string[]): Promise<Record<string, BoardItem>> {
   const settled: Record<string, BoardItem> = {};
   for (const id of ids) {
     const item = document.items[id];
     if ((item?.type !== "video" && item?.type !== "audio") || item.props.snapshot?.durationMs) continue;
-    const file = item.props.src.startsWith("http") ? null : resolve(WORKSPACE_ROOT, item.props.src);
-    const input = file && local && file.startsWith(`${WORKSPACE_ROOT}/`)
-      ? file
-      : file ? (await createClient().space(spaceId).files.resolve(item.props.src, { purpose: "playback" }).catch(() => null))?.url : null;
+    const remote = item.props.src.startsWith("http");
+    const input = remote ? null : files.local(item.props.src) ?? (await files.resolve(item.props.src))?.url;
     const seconds = input
       ? Number((await run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", input], { timeout: 15_000 }).catch(() => ({ stdout: "" }))).stdout)
       : Number.NaN;

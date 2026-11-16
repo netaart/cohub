@@ -490,6 +490,24 @@ version you read: anything others did since, such as cards moved by someone play
 the web, would otherwise be overwritten. The SDK's `board.diff(from, to?)` returns it, and
 `diffBoardVersions(before, after)` compares two documents the same way.
 
+## Local Boards
+
+A `.board.json` file is a Board of its own, without a Space: `{ "version", "board",
+"items", "animations" }`. The CLI reads and writes it with the same `get`, `apply`,
+`inspect` and `export`; media and script paths are relative to its folder.
+Every write takes `<file>.lock`, validates the patch like the server, writes the
+file atomically and appends its delta to `.<file>.history.jsonl`, so `history`
+lists and restores versions. An edit made outside the CLI is recorded as a full
+document on the next write, before that write's delta.
+
+`cohub boards open <file>` serves the Board on 127.0.0.1 with the web app's Board
+panel. One server per user serves every opened file under a private key in the
+URL, and exits after an idle hour. The page syncs through the same replica as a
+Space Board: its edits are applies, and a write from the CLI or by hand reaches it
+as a change event. A pasted image is written to `assets/<content hash>.<ext>` beside
+the file instead of being uploaded, and Cohub App cards show only their cover.
+Task cards, sessions and shared playback need a Space.
+
 ## Export
 
 Use `--frame`, `--items` or `--rect` for a fixed region, or `--camera` for the animation's

@@ -18,6 +18,7 @@
   },
   "files": [
     "dist",
+    "board-viewer",
     "bin",
     "README.md",
     "LICENSE",
