@@ -2,14 +2,19 @@
 	{
 		"version": "2.102",
 		"date": "2026-11-16",
-		"tags": ["v2.102.0"],
+		"tags": ["v2.102.0", "v2.102.1"],
 		"highlights": [
+			"**Sanitized session Space**: session detail, which guests of shared Chats can read, now returns a Space stripped of internals — extra env vars, sandbox config, storage repo name, and bootstrap git credentials (including tokens embedded in repo URLs)",
+			"**Indexed recent-Space and Turn reads**: new partial GIN index on shared-participant sessions plus partial btree indexes for requested thinking level and context window keep the recent Space list and Turn meta lookups off full scans; the participants query now mirrors the index predicate and sorts nulls last to avoid a backward `last_message_at` scan",
+			"**App Action failure output**: failed App Action runs now report the last 4,000 characters of command output, so `ERR_MODULE_NOT_FOUND` and similar crashes are diagnosable from the error itself",
+			"**CLI ships the SDK again**: `@neta-art/cohub-cli` 10.29.1 restores `@neta-art/cohub` as a runtime dependency and stages both tarballs, fixing App Actions that import the SDK from the global CLI since 10.25.0",
 			"**Read aloud**: Chat replies can be spoken with the voice configured in `.cohub/speech.json` (Space, then user, then platform). Audio renders once per reply and voice, is stored on the turn, and is shared by every viewer with that voice; `session.turn(id).speak()`, `cohub spaces sessions turns speak`, and the chat's Read aloud button all use it, with replies cleaned of Markdown, code and URLs and split so playback starts on the first segment.",
 			"**Replies to the calling Chat**: `space.prompt({ reply: \"note\" | \"prompt\" })` and `cohub spaces prompt --reply` deliver the child turn's final text and images back to the Chat that sent it when it settles; `prompt` also wakes the caller's Agent to continue, nested delegations stop at depth 4, and the sent message shows \"awaiting reply\" until it arrives.",
 			"**3D models on Boards**: Model cards draw in the Board's own canvas with PixiJS 3D: `.glb`, `.gltf` and `.stl` cards show cached per-view stills, enter in place to orbit, pan, zoom and play animations, and offer shading modes, view presets, snapshots and **Use this view as cover** through `props.model.view` and `props.model.animation`. The engine moves to `@neta-art/cohub/board/render` (`loadModelEngine`, `boardModelSource`, `setModelDecoders`), and OBJ previews are gone.",
 			"**Apps open in a new tab**: Apps in the Space side panel and Library open in a new tab, with Manage kept as a separate action."
 		],
 		"fixes": [
+			"Live thinking text no longer flashes a phantom space mid-word: stray whitespace text nodes between the stable text and the streaming tail were removed, since `white-space: pre-wrap` rendered them as a visible space until the next delta arrived",
 			"Read-aloud segments that stall or finish without saving are marked failed and re-rendered on the next request instead of leaving playback pending.",
 			"Concurrent speech requests no longer render a reply twice or drop speech updates."
 		]
