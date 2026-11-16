@@ -70,7 +70,9 @@ function recentPage(userUuid: string, visits: SpaceVisit[], limit: number) {
       union all
       (select space_id, last_message_at from v2.space_sessions
         where (meta -> 'participants' -> 'userUuids') ? ${userUuid} and last_message_at is not null
-        -- nulls last keeps the planner off a backward last_message_at scan that filters the whole table for sparse users.
+          -- Shared sessions only: the creator's own are the segment above. Matches v2_idx_space_sessions_shared_participant_user_uuids;
+          -- nulls last keeps the planner off a backward last_message_at scan.
+          and (((meta -> 'participants' -> 'userUuids') -> 1) is not null or ((meta -> 'participants' -> 'userUuids') ->> 0) <> coalesce(user_uuid, ''))
         order by last_message_at desc nulls last limit ${RECENT_SESSION_WINDOW})
       union all
       (select space_id, created_at from v2.space_members
