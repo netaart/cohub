@@ -29,4 +29,12 @@ describe("App Action command result", () => {
       "App Action was aborted.",
     );
   });
+
+  it("keeps the output tail for diagnosis", () => {
+    const tail = `${"x".repeat(3971)}\nError [ERR_MODULE_NOT_FOUND]`;
+    assert.equal(
+      appActionFailureMessage(APP_ACTION_EXECUTION_SOURCE, { exitCode: 1, output: `head\n${tail}\n` }),
+      `App Action exited with code 1.\n${tail}`,
+    );
+  });
 });

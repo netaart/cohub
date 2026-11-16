@@ -12,14 +12,21 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
     ? value as Record<string, unknown>
     : null;
 
+const APP_ACTION_OUTPUT_TAIL_CHARS = 4000;
+
 export function appActionFailureMessage(
   source: unknown,
-  result: Pick<AgentRunCommandJobResult, "exitCode" | "termination">,
+  result: Pick<AgentRunCommandJobResult, "exitCode" | "termination"> & { output?: string },
 ): string | null {
   if (source !== APP_ACTION_EXECUTION_SOURCE || result.exitCode === 0) return null;
-  if (result.termination?.reason === "timed_out") return "App Action timed out.";
-  if (result.termination?.reason === "aborted") return "App Action was aborted.";
-  return `App Action exited with code ${result.exitCode ?? "unknown"}.`;
+  const message = result.termination?.reason === "timed_out"
+    ? "App Action timed out."
+    : result.termination?.reason === "aborted"
+      ? "App Action was aborted."
+      : `App Action exited with code ${result.exitCode ?? "unknown"}.`;
+  // Viewers already receive this output on success, so the tail adds no new exposure.
+  const tail = result.output?.trim().slice(-APP_ACTION_OUTPUT_TAIL_CHARS);
+  return tail ? `${message}\n${tail}` : message;
 }
 
 export function parseRunCommandExecutionContext(data: Record<string, unknown>): RunCommandExecutionContext {

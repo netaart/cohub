@@ -79,7 +79,9 @@ async function stageNode() {
 async function stageCli() {
   const packs = join(work, "packs");
   await mkdir(packs);
-  run("pnpm", ["--filter", "@neta-art/cohub-cli", "pack", "--pack-destination", packs], { cwd: root, shell: process.platform === "win32" });
+  for (const name of ["@neta-art/cohub", "@neta-art/cohub-cli"]) {
+    run("pnpm", ["--filter", name, "pack", "--pack-destination", packs], { cwd: root, shell: process.platform === "win32" });
+  }
   const tarballs = (await readdir(packs)).filter((file) => file.endsWith(".tgz")).map((file) => join(packs, file));
   const cli = join(out, "cli");
   await mkdir(cli, { recursive: true });
