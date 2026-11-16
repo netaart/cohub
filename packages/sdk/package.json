@@ -186,7 +186,6 @@
     "lint:fix": "biome lint --write .",
     "test": "node ./scripts/test.mjs",
     "bench:board": "tsx ./scripts/board-bench.ts",
-    "size": "node ./scripts/size.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -201,7 +200,6 @@
     "@napi-rs/canvas": "^1.0.13",
     "@pixi/3d": "0.1.0",
     "@types/node": "catalog:",
-    "esbuild": "^0.28.2",
     "fake-indexeddb": "^6.2.6",
     "pixi.js": "^8.23.0",
     "tsdown": "^0.22.14",
