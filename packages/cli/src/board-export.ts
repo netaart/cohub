@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 const execFile = promisify(execFileCallback);
-import { BOARD_CAMERA_VIEWPORT, boardExportView, boardMediaNaturalSize, parseBoardMediaSource, parseBoardScriptInputs } from "@neta-art/cohub/board";
+import { BOARD_CAMERA_VIEWPORT, boardDocumentUsesDepth, boardExportView, boardMediaNaturalSize, parseBoardMediaSource, parseBoardScriptInputs } from "@neta-art/cohub/board";
 import type { BoardAssetKeySource, BoardDocument, BoardExportRegion, BoardMediaState, BoardSceneItem, BoardScriptSnapshot, BoardThemeId } from "@neta-art/cohub/board";
 import { imageVariantUrl, MEDIA_VARIANT_MAX, mediaVariantSize, videoFrameUrl } from "@neta-art/cohub/media";
 import type {
@@ -431,6 +431,7 @@ export async function runBoardExport(
     };
     let completed = 0;
     let decided = options.renderer === "canvas";
+    let liftChecked = false;
     const emit = async (frame: BoardExportFrame) => {
       if (options.onFrame) await options.onFrame(frame, completed);
       else frames.push(frame);
@@ -483,10 +484,12 @@ export async function runBoardExport(
         if (!scripted) return;
         prepared = scripted;
       }
+      const lifts = boardDocumentUsesDepth(prepared.document);
       if (!decided) {
         decided = true;
+        liftChecked = lifts;
         const shaded = (host?.shaders?.(prepared.document, time ?? 0) ?? []).map((owner) => owner.id);
-        const browser = shaded.length ? findBoardGpuBrowser() : null;
+        const browser = shaded.length || lifts ? findBoardGpuBrowser() : null;
         if (browser) gpu = await launchGpu(browser);
         else if (host && shaded.length) {
           report(`Shaders in ${shaded.join(", ")} need Chrome, Chromium or Edge; install one or set COHUB_CHROME to draw them.`);
@@ -495,6 +498,10 @@ export async function runBoardExport(
           if (!scripted) return;
           prepared = scripted;
         }
+      } else if (lifts && !gpu && !liftChecked && options.renderer === "auto") {
+        liftChecked = true;
+        const browser = findBoardGpuBrowser();
+        if (browser) gpu = await launchGpu(browser);
       }
       const timed = boardTimedMedia(prepared.scene);
       media.push({ at: time ?? 0, media: timed });

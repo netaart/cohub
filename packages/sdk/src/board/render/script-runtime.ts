@@ -54,9 +54,11 @@ export function createScriptRuntime(
     throw new Error("frameRate must be a number from 1 to 60.");
   if (module.pixelated !== undefined && typeof module.pixelated !== "boolean")
     throw new Error("pixelated must be a boolean.");
+  if (module.bend !== undefined && (!module.bend || typeof module.bend !== "object" || typeof module.bend.glsl !== "string"))
+    throw new Error("bend must be { glsl: string }.");
   if (!initial.item && module.draw)
     throw new Error("A Board script has no box to draw(); use shader passes or scene().");
-  const DISPLAY = ["position", "size", "rotation", "scale", "opacity", "style", "props", "z"];
+  const DISPLAY = ["position", "size", "rotation", "scale", "opacity", "style", "props", "z", "depth"];
   let input = initial;
   let disposed = false;
   let stepping = false;
@@ -313,8 +315,12 @@ export function createScriptRuntime(
         params: context.params,
       };
     },
-    event(event: BoardScriptEvent) {
+    event(event: BoardScriptEvent, t?: number) {
       if (disposed) return;
+      if (t !== undefined && Number.isFinite(t) && t > time && frames.size === 0) {
+        time = t;
+        frame = { ...frame, t, dt: 0 };
+      }
       if (event.type === "viewchange") view = event.data as BoardScriptView;
       if (event.type === "peerschange") peers = event.data as BoardScriptContext["peers"];
       if (event.type === "browser:video") {
@@ -349,6 +355,7 @@ export function createScriptRuntime(
         anchor,
         hits,
         shader: module.shader,
+        bend: module.bend,
         uniforms,
         passes,
         listens: [...handlers]

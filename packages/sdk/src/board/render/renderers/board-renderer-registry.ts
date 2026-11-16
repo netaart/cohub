@@ -43,6 +43,7 @@ export type BoardRenderPalette = {
 export type BoardScriptHost = {
 	document?: (document: BoardDocument, time: number) => BoardDocument;
 	shaders?: (document: BoardDocument, time: number) => BoardShaderOwner[];
+	bend?: (id: string, time: number) => unknown;
 	ready?: (id: string) => boolean;
 	revision?: (id: string) => number;
 	frame: (item: SceneItem<BoardCustomItem>, time: number) => Texture | null;

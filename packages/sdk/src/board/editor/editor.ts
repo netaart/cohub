@@ -223,6 +223,9 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		get bounds() {
 			return read(["scene", "motion", "selection"], selection.bounds);
 		},
+		get visualBounds() {
+			return read(["scene", "motion", "selection", "camera"], selection.visualBounds);
+		},
 		get selectionTransform() {
 			return read(transformChannels, selection.transform);
 		},
@@ -401,6 +404,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		itemSource: document.itemSource,
 		consumeRecentlyAdded: document.consumeRecentlyAdded,
 
+		setPickScope: query.setScope,
+		inPickScope: query.inScope,
 		itemAt: tracked(["scene", "camera"], query.itemAt),
 		pickAt: tracked(["scene", "camera"], query.pickAt),
 		opensOnTap: tracked(["scene"], interaction.opensOnTap),

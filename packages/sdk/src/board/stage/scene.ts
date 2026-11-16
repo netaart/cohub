@@ -26,7 +26,7 @@ import { positionShell } from "../render/renderers/base-card-renderer.js";
 import { BOARD_LOD_HYSTERESIS, type BoardLod, boardCardDetailed, boardLodRatio, boardLodSize, DEFAULT_BOARD_LOD } from "../render/lod.js";
 import { textZoomBucket } from "../render/text-resolution.js";
 import { type BoardFrameBudget, fixedBoardFrameBudget } from "./frame-budget.js";
-import { type Container, type Filter, Graphics, Rectangle, Sprite, Text, type Texture } from "pixi.js";
+import { Container, type Filter, Graphics, Rectangle, Sprite, Text, type Texture } from "pixi.js";
 
 type CardEntry = {
 	item: BoardItem;
@@ -52,6 +52,15 @@ const NO_PLATES: ReadonlyMap<string, FarPlate> = new Map();
 
 function cardAlpha(id: string, scene: BoardModelScene, context: BoardRenderContext): number {
 	return scene.shown(id) ? scene.opacity(id) : context.selectedIds.has(id) ? GHOST_ALPHA : 0;
+}
+
+const PLACEMENT = new Set(["position", "rotation", "depth", "frame"]);
+
+function samePicture(a: BoardItem, b: BoardItem): boolean {
+	if (a.frame.width !== b.frame.width || a.frame.height !== b.frame.height) return false;
+	for (const key in a) if (!PLACEMENT.has(key) && a[key as keyof BoardItem] !== b[key as keyof BoardItem]) return false;
+	for (const key in b) if (!PLACEMENT.has(key) && !(key in a)) return false;
+	return true;
 }
 
 function idSetSignature(ids: Set<string>): number {
@@ -90,6 +99,7 @@ export type SceneSyncInput = {
 	view?: Rect;
 	lod?: BoardLod;
 	budget?: BoardFrameBudget;
+	elevated?: ReadonlySet<string>;
 };
 
 type FarRun = { key: string; order: number; items: BoardItem[] };
@@ -121,6 +131,9 @@ export type BoardSceneDecoration = {
 export type BoardScene = {
 	sync: (input: SceneSyncInput) => void;
 	getNode: (itemId: string) => BoardSceneNode | null;
+	elevatedHost: (itemId: string) => Container | null;
+	frameGroup: (itemId: string) => Container | null;
+	takeTouched: () => ReadonlySet<string>;
 	decorate: (itemId: string, decoration: BoardSceneDecoration | null) => boolean;
 	holders: (key: string) => ReadonlySet<string>;
 	repaintFar: (keys: ReadonlySet<string>, assetKey: (item: BoardItem) => string | null) => void;
@@ -160,6 +173,9 @@ export function createBoardScene(options: {
 	const pendingResolution = new Set<string>();
 	let liveVersion = 0;
 	let lifted: ReadonlySet<string> = new Set();
+	let elevated: ReadonlySet<string> = EMPTY_IDS;
+	const elevatedHosts = new Map<string, Container>();
+	let touched = new Set<string>();
 	const fixedBudget = fixedBoardFrameBudget();
 	let budget: BoardFrameBudget = fixedBudget;
 	const viewSprites = new Map<string, Sprite>();
@@ -212,6 +228,7 @@ export function createBoardScene(options: {
 		dropViewSprite(id);
 		setHeldKey(context, id, null);
 		cards.delete(id);
+		touched.add(id);
 		pendingResolution.delete(id);
 		animatedIds.delete(id);
 		tickingIds.delete(id);
@@ -227,13 +244,22 @@ export function createBoardScene(options: {
 		pools.set(entry.renderer.id, pool);
 	}
 
+	function elevatedHost(id: string): Container {
+		let host = elevatedHosts.get(id);
+		if (!host) {
+			host = new Container({ label: `board-elevated-${id}`, isRenderGroup: true, sortableChildren: true });
+			elevatedHosts.set(id, host);
+		}
+		return host;
+	}
+
 	function groupOf(frame: BoardItem, scene: BoardModelScene, context: BoardRenderContext): FrameGroup {
 		let entry = groups.get(frame.id);
 		if (!entry) {
 			entry = syncFrameGroup(undefined, frame, context);
 			groups.set(frame.id, entry);
 		}
-		const parent = outerHost(frame, scene, context);
+		const parent = elevated.has(frame.id) ? elevatedHost(frame.id) : outerHost(frame, scene, context);
 		if (entry.group.parent !== parent) parent.addChild(entry.group);
 		entry.group.zIndex = (orderById.get(frame.id) ?? 0) + 0.5;
 		return entry;
@@ -245,7 +271,8 @@ export function createBoardScene(options: {
 	}
 
 	function hostFor(item: BoardItem, scene: BoardModelScene, context: BoardRenderContext): Container {
-		return isSelfGroupedFrame(item) ? groupOf(item, scene, context).group : outerHost(item, scene, context);
+		if (isSelfGroupedFrame(item)) return groupOf(item, scene, context).group;
+		return elevated.has(item.id) ? elevatedHost(item.id) : outerHost(item, scene, context);
 	}
 
 	let groupingScene: BoardModelScene | null = null;
@@ -282,6 +309,12 @@ export function createBoardScene(options: {
 			}
 		}
 		syncGroupFrames(scene, context);
+		for (const [id, host] of elevatedHosts) {
+			if (elevated.has(id) && host.children.length) continue;
+			for (const child of [...host.children]) world.addChild(child);
+			host.destroy();
+			elevatedHosts.delete(id);
+		}
 	}
 
 	function syncGroupFrames(scene: BoardModelScene, context: BoardRenderContext) {
@@ -364,6 +397,7 @@ export function createBoardScene(options: {
 		hostFor(item, scene, context).addChild(container);
 		if (renderer.animated) animatedIds.add(item.id);
 		if (renderer.tick) tickingIds.add(item.id);
+		touched.add(item.id);
 		const entry: CardEntry = {
 			item,
 			container,
@@ -665,7 +699,9 @@ export function createBoardScene(options: {
 			orderById = new Map(idsByOrder.map((id, index) => [id, index]));
 		}
 
-		const groupingChanged = groupingFramesChanged(scene);
+		const elevatedChanged = (input.elevated ?? EMPTY_IDS) !== elevated;
+		elevated = input.elevated ?? EMPTY_IDS;
+		const groupingChanged = groupingFramesChanged(scene) || elevatedChanged;
 		const current = lodPlan(input);
 		const platesChanged = paintPlates(input, current);
 		const wanted = new Set<string>(pinnedIds);
@@ -712,14 +748,15 @@ export function createBoardScene(options: {
 			const observed =
 				entry.renderer.observesSelection === true &&
 				(selected !== entry.selected || hovered !== entry.hovered);
-			const changed =
+			const previous = entry.item;
+			const repainted =
 				input.staleIds?.has(id) ||
 				scriptRevision !== entry.scriptRevision ||
-				item !== entry.item ||
 				entry.renderer.animated ||
 				observed ||
 				resizing !== entry.resizing ||
 				globalSig !== entry.globalSig;
+			const changed = repainted || item !== previous;
 			entry.scriptRevision = scriptRevision;
 			entry.item = item;
 			entry.selected = selected;
@@ -729,6 +766,7 @@ export function createBoardScene(options: {
 			setHeldKey(context, id, item);
 			entry.container.alpha = cardAlpha(id, scene, context);
 			if (changed) {
+				if (repainted || !elevated.has(id) || !samePicture(item, previous)) touched.add(id);
 				entry.renderer.update(entry.container, item, context);
 				syncBoardItemEffects(entry.container, item, context);
 				if (entry.renderer.tick) tickingIds.add(id);
@@ -813,6 +851,7 @@ export function createBoardScene(options: {
 			const entry = cards.get(id);
 			if (!entry) continue;
 			entry.renderer.resolution?.(entry.container, entry.item, context);
+			touched.add(id);
 			if (entry.renderer.tick) tickingIds.add(id);
 			refreshed += 1;
 		}
@@ -826,7 +865,10 @@ export function createBoardScene(options: {
 			const entry = cards.get(id);
 			const wait = entry?.container.visible && !entry.container.culled ? (entry.renderer.tick?.(entry.container, clock) ?? null) : null;
 			if (wait === null) tickingIds.delete(id);
-			else next = next === null ? wait : Math.min(next, wait);
+			else {
+				touched.add(id);
+				next = next === null ? wait : Math.min(next, wait);
+			}
 		}
 		return next;
 	}
@@ -879,6 +921,9 @@ export function createBoardScene(options: {
 		clearPlates();
 		for (const entry of groups.values()) entry.group.destroy({ children: true });
 		groups.clear();
+		for (const host of elevatedHosts.values()) host.destroy({ children: true });
+		elevatedHosts.clear();
+		elevated = EMPTY_IDS;
 		animatedIds.clear();
 		tickingIds.clear();
 		for (const id of [...liveStrokes.keys()]) removeLiveStroke(id, context);
@@ -895,6 +940,13 @@ export function createBoardScene(options: {
 		getNode: (itemId) => {
 			const entry = cards.get(itemId);
 			return entry ? { item: entry.item, container: entry.container } : null;
+		},
+		elevatedHost: (itemId) => elevatedHosts.get(itemId) ?? null,
+		frameGroup: (itemId) => groups.get(itemId)?.group ?? null,
+		takeTouched: () => {
+			const taken = touched;
+			touched = new Set();
+			return taken;
 		},
 		decorate,
 		holders: (key) => holders.get(key) ?? EMPTY_IDS,

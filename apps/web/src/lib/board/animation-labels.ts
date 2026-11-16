@@ -22,6 +22,12 @@ const LABELS: Record<string, (locale: Locale) => string> = {
 	time: (locale) => m.board_prop_time({}, locale),
 	"props.time": (locale) => m.board_prop_time({}, locale),
 	"props.volume": (locale) => m.board_prop_volume({}, locale),
+	"depth.lift": (locale) => m.board_prop_depth_lift({}, locale),
+	"depth.tilt": (locale) => m.board_prop_depth_tilt({}, locale),
+	"depth.spin": (locale) => m.board_prop_depth_spin({}, locale),
+	"depth.bend.amount": (locale) => m.board_prop_depth_bend({}, locale),
+	"depth.bend.phase": (locale) => m.board_prop_depth_bend_phase({}, locale),
+	"depth.bend.kind": (locale) => m.board_prop_depth_bend_kind({}, locale),
 };
 
 export function boardPropertyLabel(property: string, locale: Locale): string {

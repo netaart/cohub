@@ -214,6 +214,11 @@ function warningText(warning: BoardImageExportWarning) {
 				{ id: warning.id },
 				{ locale },
 			);
+		case "depth-flat":
+			return m.board_export_warning_depth_flat(
+				{ count: warning.ids.length },
+				{ locale },
+			);
 	}
 }
 

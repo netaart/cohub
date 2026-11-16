@@ -216,6 +216,10 @@ export function createBrowserBoardScriptExport(
       return {
         ...host,
         shaders: (input) => boardShaderOwners(input, outputs, (id) => host.clock(id)),
+        bend: (id) => {
+          const output = outputs.get(id);
+          return output ? (output.bend ?? null) : undefined;
+        },
         document(input) {
           const items = { ...input.items };
           for (const [id, item] of composeBoardScriptItems(input, buildBoardScene(input), outputs))

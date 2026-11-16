@@ -38,7 +38,7 @@ const instances = new Map();
 const graphs = new Map();
 const calls = new Map();
 let callId = 0;
-const update = new Script('__runtime.update(JSON.parse(__inputJson)); for (const event of JSON.parse(__eventsJson, (_key, value) => value && Array.isArray(value.$f32) ? new Float32Array(value.$f32) : value)) __runtime.event(event); __runtime.step(__time)');
+const update = new Script('__runtime.update(JSON.parse(__inputJson)); for (const event of JSON.parse(__eventsJson, (_key, value) => value && Array.isArray(value.$f32) ? new Float32Array(value.$f32) : value)) __runtime.event(event, __time); __runtime.step(__time)');
 const draw = new Script('__runtime.draw(__drawing)');
 const output = new Script('JSON.stringify(__runtime.output())');
 const snapshot = new Script('JSON.stringify(__runtime.snapshot())');
@@ -456,6 +456,10 @@ export function createNodeBoardScriptHost(
     emitFailures,
     status: () => lanes.status(),
     shaders: (document, time) => boardShaderOwners(document, outputs.get(time) ?? [], () => time),
+    bend: (id, time) => {
+      const output = outputs.get(time)?.get(id);
+      return output ? (output.bend ?? null) : undefined;
+    },
     document(document, time) {
       const at = outputs.get(time);
       if (!at?.size) return document;

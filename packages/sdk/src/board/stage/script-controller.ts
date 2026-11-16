@@ -373,7 +373,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       onHandle: () => editor.tool === "select" && selectionTransformControlAt(editor.selectionTransform, input.world, editor.camera.zoom, input.pointerType, editor.controlOutset) !== null,
     })) return null;
     const point = input.world;
-    const candidates = editor.idsInRect({ x: point.x - 0.01, y: point.y - 0.01, width: 0.02, height: 0.02 }, true);
+    const candidates = editor.idsInRect({ x: point.x - 0.01, y: point.y - 0.01, width: 0.02, height: 0.02 }, true).filter(editor.inPickScope);
     const target = boardScriptTarget(editor.scene, candidates, point, outputs, editor.registry.hitTest);
     if (!target) return null;
     const hit = outputs.get(target.owner)?.hits[target.target];

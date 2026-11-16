@@ -132,8 +132,10 @@ Native timers, wall-clock time and `Math.random()` are not replayable.
 
 `present()` replaces this instance's current patch for the target, merging that
 patch onto the author/animation values. Passing `null` clears it. It never saves.
-It accepts `position`, `size`, `rotation`, `scale`, `opacity`, `style`, `props` and
-`z`; presenting `z` restacks siblings, e.g. to sort characters by depth. A negative
+It accepts `position`, `size`, `rotation`, `scale`, `opacity`, `style`, `props`,
+`z` and `depth`; presenting `z` restacks siblings, e.g. to sort characters by depth,
+and presenting `depth` lifts, turns and bends an item in perspective (see
+[Depth](board.md#depth)). A negative
 `scale.x` mirrors. Display order is author values, animation, script effects, then
 the user's active editing gesture. Keep separate properties under separate owners
 when composing scripts. Current document order determines competing script overrides.
@@ -615,6 +617,29 @@ The same source compiles for both stages; guard stage-only code with
 `#extension`, and `while` or `do` loops are rejected; every `for` loop shares a
 budget of 65536 iterations per invocation, so no shader can hang the GPU. Compile
 errors name the pass and the line in your source.
+
+### Bend in depth
+
+An item whose `depth.bend.kind` is `custom` takes its shape from the `bend` its own
+script module exports: GLSL with the same rules and includes as shader passes,
+defining the offset of each point in board units (x right, y down, z toward the
+viewer):
+
+```js
+export const bend = {
+  glsl: `
+vec3 bend(vec2 uv, vec2 size, float amount, float phase) {
+  float r = length((uv - 0.5) * 2.0);
+  return vec3(0.0, 0.0, amount * min(size.x, size.y) * 0.07 * sin(r * 14.0 - phase) * exp(-r * 1.6));
+}`,
+};
+```
+
+`uv` runs 0–1 across the item, `size` is its box, and `amount` and `phase` come
+from `depth.bend`, so tracks and `present()` drive it. The surface is shaded from
+its bent shape. It bends on the GPU, so hit tests and shadows use the surface
+before it bends; a bend that fails to compile reports its error and the item stays
+unbent.
 
 ### Surfaces
 

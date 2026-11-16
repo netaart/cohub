@@ -17,7 +17,7 @@ import {
   type BoardBackdropLayer,
   createBoardBackdropLayer,
 } from "../render/index.js";
-import type { BoardSettings } from "@cohub/protocol";
+import { type BoardSettings, isBoardDepthActive, resolveBoardDepth } from "@cohub/protocol";
 import type { BoardScene, BoardSceneItem } from "../model/scene.js";
 import { itemBounds, type Rect } from "../model/geometry.js";
 import { createBoardAtmosphereLayer } from "../render/atmosphere.js";
@@ -28,11 +28,23 @@ import { positionShell } from "../render/renderers/base-card-renderer.js";
 import type { BoardShaderLayer } from "../render/shader/layer.js";
 import { type BoardShaderLayers, type BoardShaderOwner, type BoardShaderPlacement, boardShaderColor, createBoardShaderLayers } from "../render/shader/layers.js";
 import { boardItemLocalToWorld, boardLocalView } from "../render/shader/placement.js";
+import { type BoardDepthShadow, type BoardDepthView, boardDepthOf, boardDepthRoots, boardDepthShadow, boardDepthSurface } from "../model/depth.js";
+import {
+  type BoardDepthLayer,
+  type BoardDepthPicture,
+  type BoardDepthStage,
+  boardDepthDensity,
+  createBoardDepthPicture,
+  createBoardDepthShadows,
+  drawBoardDepthParts,
+  resolveBoardDepthBend,
+} from "../render/depth/index.js";
 
 export type BoardExportSceneInput = {
   settings: BoardSettings;
   scene: BoardScene;
   items: readonly BoardSceneItem[];
+  extras?: readonly BoardSceneItem[];
   time?: number;
   frameAt?: BoardRenderContext["frameAt"];
   world: Rect;
@@ -51,6 +63,7 @@ export type BoardExportSceneInput = {
   backdropTexture?: Texture;
   page?: string;
   shaders?: { renderer: Renderer; owners: readonly BoardShaderOwner[]; quality?: number; layers?: BoardShaderLayers };
+  depth?: { renderer: Renderer; stage: BoardDepthStage };
 };
 
 export type BoardExportScene = {
@@ -122,25 +135,31 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
   world.position.set(-input.world.x * input.scale, -input.world.y * input.scale);
 
   const resolve = input.renderers ?? getBoardCardRenderer;
+  const planned = new Set(input.items.map((item) => item.id));
+  const roots = input.depth ? boardDepthRoots(input.scene).filter((item) => planned.has(item.id) && isBoardDepthActive(resolveBoardDepth(item.depth))) : [];
+  const hosts = new Map(roots.map((item) => [item.id, new Container({ label: `board-elevated-${item.id}`, isRenderGroup: true })]));
+  const extras = new Set((input.depth ? (input.extras ?? []) : []).map((item) => item.id));
+  const offstage = new Container({ label: "board-export-offstage" });
   const groups = new Map<string, FrameGroup>();
   function groupOf(frame: BoardSceneItem): FrameGroup {
     let entry = groups.get(frame.id);
     if (!entry) {
       entry = syncFrameGroup(undefined, frame, context);
-      outerHost(frame).addChild(entry.group);
+      (hosts.get(frame.id) ?? outerHost(frame)).addChild(entry.group);
       groups.set(frame.id, entry);
     }
     return entry;
   }
   function outerHost(item: BoardSceneItem): Container {
     const frame = input.scene.get(groupingAncestor(input.scene, item) ?? "");
+    if (extras.has(item.id) && (!frame || !extras.has(frame.id))) return offstage;
     return frame ? groupOf(frame).content : world;
   }
   const containers = new Map<string, Container>();
-  for (const item of input.items) {
+  for (const item of [...input.items, ...(input.extras ?? []).filter((extra) => extras.has(extra.id))]) {
     const opacity = input.scene.opacity(item.id);
     if (opacity <= 0) continue;
-    const host = isSelfGroupedFrame(item) ? groupOf(item).group : outerHost(item);
+    const host = isSelfGroupedFrame(item) ? groupOf(item).group : (hosts.get(item.id) ?? outerHost(item));
     const container = resolve(item, context).create(item, context);
     containers.set(item.id, container);
     container.alpha = opacity;
@@ -217,6 +236,9 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
     }, input.scene);
     layers.prepare(input.shaders.renderer, true);
   }
+  const depth = input.depth && roots.length
+    ? attachBoardDepth(input.depth, { scene: input.scene, roots, hosts, containers, groups, world, root, scripts: input.scripts, time: input.time ?? 0, fault: (id, message) => shaderErrors.push({ id, message }), view: { x: -input.world.x * input.scale, y: -input.world.y * input.scale, zoom: input.scale, width: outputWidth, height: outputHeight } })
+    : null;
   if (input.settings.atmosphere) {
     const atmosphere = createBoardAtmosphereLayer();
     atmosphere.sync(input.settings.atmosphere, { width: outputWidth, height: outputHeight, density: 1 });
@@ -228,10 +250,90 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
     missingImageKeys: [...missing],
     shaderErrors,
     destroy: () => {
+      depth?.destroy();
+      for (const host of hosts.values()) host.destroy({ children: true });
+      offstage.destroy({ children: true });
       if (layers === input.shaders?.layers) layers?.detach();
       else layers?.destroy();
       backdrop?.destroy();
       root.destroy({ children: true });
+    },
+  };
+}
+
+function attachBoardDepth(
+  { renderer, stage }: NonNullable<BoardExportSceneInput["depth"]>,
+  input: {
+    scene: BoardScene;
+    roots: readonly BoardSceneItem[];
+    hosts: ReadonlyMap<string, Container>;
+    containers: ReadonlyMap<string, Container>;
+    groups: ReadonlyMap<string, FrameGroup>;
+    world: Container;
+    root: Container;
+    scripts?: BoardRenderContext["scripts"];
+    time: number;
+    view: BoardDepthView;
+    fault: (id: string, message: string) => void;
+  },
+) {
+  const { scene, view } = input;
+  const pictures: BoardDepthPicture[] = [];
+  const backs = new Map<string, BoardDepthPicture>();
+  const layers: BoardDepthLayer[] = [];
+  const shadows = createBoardDepthShadows();
+  const shadowInput = new Map<string, { shadow: BoardDepthShadow; width: number; height: number; opacity: number }>();
+  const parts = (id: string) => {
+    const card = input.containers.get(id);
+    const group = input.groups.get(id)?.group;
+    if (group) return card && card.parent !== group ? [card, group] : [group];
+    return card ? [card] : [];
+  };
+  for (const item of input.roots) {
+    const depth = boardDepthOf(item);
+    const host = input.hosts.get(item.id);
+    if (!depth || !host || input.scene.opacity(item.id) <= 0) continue;
+    const surface = boardDepthSurface({ frame: item.frame, origin: item.origin, depth }, view);
+    const density = boardDepthDensity(view, 1, surface);
+    const picture = createBoardDepthPicture();
+    pictures.push(picture);
+    picture.draw(renderer, host, item.frame, density);
+    const backItem = depth.back && depth.back !== item.id ? scene.get(depth.back) : undefined;
+    let back: BoardDepthPicture | null = null;
+    if (backItem && parts(backItem.id).length) {
+      back = backs.get(backItem.id) ?? null;
+      if (!back) {
+        back = createBoardDepthPicture();
+        backs.set(backItem.id, back);
+        drawBoardDepthParts(renderer, back, parts(backItem.id), backItem.frame, density);
+      }
+    }
+    const bend = depth.bend.kind === "custom" ? resolveBoardDepthBend(renderer, item.id, input.scripts?.bend?.(item.id, input.time), input.fault) : null;
+    layers.push({
+      id: item.id,
+      surface,
+      front: picture.texture,
+      back: back?.texture ?? null,
+      opacity: scene.opacity(item.id),
+      bend: bend ? { source: bend, width: item.frame.width, height: item.frame.height, amount: depth.bend.amount, phase: depth.bend.phase, shade: depth.shade } : null,
+    });
+    const shadow = boardDepthShadow(surface, view, depth.shadow);
+    if (shadow) shadowInput.set(item.id, { shadow, width: item.frame.width, height: item.frame.height, opacity: scene.opacity(item.id) });
+  }
+  shadows.sync(shadowInput);
+  input.world.addChild(shadows.container);
+  stage.resize(view.width, view.height);
+  stage.view.position.set(0, 0);
+  stage.view.scale.set(1);
+  stage.sync(layers);
+  stage.view.visible = true;
+  input.root.addChild(stage.view);
+  return {
+    destroy() {
+      stage.view.removeFromParent();
+      stage.sync([]);
+      shadows.destroy();
+      for (const picture of [...pictures, ...backs.values()]) picture.destroy();
     },
   };
 }

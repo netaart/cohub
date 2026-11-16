@@ -2,6 +2,7 @@ import {
   type BoardSceneItem,
   boardAnimatesScriptParams,
   boardAssetKey,
+  boardDocumentUsesDepth,
   boardExportView,
   boardShaderParameters,
   boardAssetKeySource,
@@ -12,6 +13,7 @@ import {
 } from "@neta-art/cohub/board";
 import { createBoardExportScene, prepareBoardExport, renderBoardExport } from "@neta-art/cohub/board/export";
 import {
+  type BoardDepthStage,
   type BrowserBoardScriptExport,
   boardRenderTheme,
   createBoardRenderSampler,
@@ -19,11 +21,20 @@ import {
   createBoardShaderLayers,
   createBrowserBoardScriptExport,
   hasBoardEffects,
+  loadBoardDepthEngine,
 } from "@neta-art/cohub/board/render";
 import { autoDetectRenderer, ImageSource, Matrix, type Renderer, RenderTexture, Texture, type WebGLRenderer } from "pixi.js";
 import type { BoardGpuFrame, BoardGpuInit, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
 
 let renderer: Renderer | null = null;
+let depth: Promise<BoardDepthStage | undefined> | null = null;
+
+function depthStage(target: Renderer): Promise<BoardDepthStage | undefined> {
+  depth ??= loadBoardDepthEngine()
+    .then((engine) => engine.createBoardDepthStage(target))
+    .catch(() => undefined);
+  return depth;
+}
 let session: {
   init: BoardGpuInit;
   sampler: ReturnType<typeof createBoardRenderSampler>;
@@ -143,15 +154,17 @@ const api = {
     const rendererName = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
     const prepared = prepareBoardExport(document, { ...options, scripts });
     if (!prepared) throw new Error("Nothing to profile: the region contains no items.");
-    const visible = prepared.plan.items.filter((item) => prepared.scene.opacity(item.id) > 0);
+    const visible = [...prepared.plan.items, ...prepared.plan.extras].filter((item) => prepared.scene.opacity(item.id) > 0);
     const loaded = input.withImages ? await loadTextures(visible, prepared.plan.scale, input.imageMemory, {}) : new Map<string, Texture>();
     const inside = new Set(prepared.plan.items.map((item) => item.id));
     const owners = (scripts.shaders?.(prepared.document, time) ?? []).filter((owner) => owner.root || inside.has(owner.id));
     const layers = createBoardShaderLayers({ wait: true });
+    const lifted = boardDocumentUsesDepth(prepared.document) ? await depthStage(target) : undefined;
     const scene = createBoardExportScene({
       settings: prepared.document.board,
       scene: prepared.scene,
       items: prepared.plan.items,
+      extras: prepared.plan.extras,
       time,
       frameAt: sampler.frameAt,
       world: prepared.plan.world,
@@ -165,6 +178,7 @@ const api = {
       assetKey: boardAssetKey,
       ...(prepared.plan.page ? { page: prepared.plan.page } : {}),
       ...(owners.length ? { shaders: { renderer: target, owners, layers } } : {}),
+      ...(lifted ? { depth: { renderer: target, stage: lifted } } : {}),
     });
     const pixel = new Uint8Array(4);
     // Lowering the resolution draws the same scene smaller: rebuilding it would compile everything again.
@@ -286,11 +300,12 @@ const api = {
     };
     const prepared = prepareBoardExport(document, options);
     if (!prepared) throw new Error("Nothing to export: the region contains no items.");
-    const visible = prepared.plan.items.filter((item) => prepared.scene.opacity(item.id) > 0);
+    const visible = [...prepared.plan.items, ...prepared.plan.extras].filter((item) => prepared.scene.opacity(item.id) > 0);
     const overrides = frame.assetKeys ?? {};
     const loaded = frame.withImages ? await loadTextures(visible, prepared.plan.scale, frame.imageMemory, overrides) : new Map<string, Texture>();
     if (frame.withImages && frame.background === "paper" && document.board.background.image && background === undefined)
       background = await fetchTexture("background=1").catch(() => null);
+    const lifted = boardDocumentUsesDepth(prepared.document) ? await depthStage(renderer) : undefined;
     const result = renderBoardExport(renderer, document, {
       ...options,
       ...theme,
@@ -299,6 +314,7 @@ const api = {
       assetKey: (item: BoardSceneItem) => overrides[item.id] ?? boardAssetKey(item),
       backgroundTexture: frame.background === "paper" ? (background ?? undefined) : undefined,
       shaderLayers: session.layers,
+      ...(lifted ? { depth: lifted } : {}),
     });
     if (!result) throw new Error("Nothing to export: the region contains no items.");
     const canvas = result.canvas as unknown as HTMLCanvasElement;

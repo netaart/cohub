@@ -3,6 +3,7 @@ import { arrowBindings, type BoardDocument, parseBoardDocument } from "@cohub/pr
 import { effectBounds, itemBounds, type Rect, rectsIntersect, unionRects } from "./geometry.js";
 import { arrowPathBounds, resolveSceneArrow } from "./arrow-geometry.js";
 import type { BoardScene, BoardSceneItem } from "./scene.js";
+import { boardDepthItemOutline, boardDepthOf, boardDepthRoots } from "./depth.js";
 import type { BoardScriptView } from "./script.js";
 
 export type BoardExportRegion =
@@ -27,6 +28,7 @@ export type BoardExportPlan = {
   width: number;
   height: number;
   items: BoardSceneItem[];
+  extras: BoardSceneItem[];
   clamped: boolean;
   page?: string;
 };
@@ -131,22 +133,40 @@ export function planBoardExport(input: BoardExportPlanInput): BoardExportPlan | 
   if (!resolved.rect) return null;
 
   const padding = input.padding ?? resolved.padding ?? BOARD_EXPORT_DEFAULT_PADDING;
-  const world: Rect = {
-    x: resolved.rect.x - padding,
-    y: resolved.rect.y - padding,
-    width: Math.max(1, resolved.rect.width + padding * 2),
-    height: Math.max(1, resolved.rect.height + padding * 2),
-  };
-
+  const around = (rect: Rect): Rect => ({
+    x: rect.x - padding,
+    y: rect.y - padding,
+    width: Math.max(1, rect.width + padding * 2),
+    height: Math.max(1, rect.height + padding * 2),
+  });
+  let world = around(resolved.rect);
   const safeRequest = Number.isFinite(requestedScale) && requestedScale > 0 ? requestedScale : BOARD_EXPORT_DEFAULT_SCALE;
-  const scale = clampScale(safeRequest, world, maxEdge, maxPixels);
+  let scale = clampScale(safeRequest, world, maxEdge, maxPixels);
+  if (region.kind === "all" || region.kind === "items") {
+    const planned = new Set(resolved.items.map((item) => item.id));
+    const lifted = boardDepthRoots(input.scene).filter((item) => planned.has(item.id));
+    let rect = resolved.rect;
+    for (let pass = 0; lifted.length && pass < 8; pass++) {
+      const view = { x: -world.x * scale, y: -world.y * scale, zoom: scale, width: world.width * scale, height: world.height * scale };
+      const seen = lifted.flatMap((item) => boardDepthItemOutline(input.scene, item.id, view) ?? []);
+      const xs = seen.map((point) => point.x);
+      const ys = seen.map((point) => point.y);
+      const next = unionRects([rect, { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) }]);
+      if (!next || (next.width - rect.width < 0.5 && next.height - rect.height < 0.5)) break;
+      rect = next;
+      world = around(rect);
+      scale = clampScale(safeRequest, world, maxEdge, maxPixels);
+    }
+  }
+  const items = region.kind === "rect" || region.kind === "frame" ? withLiftedInto(input.scene, resolved.items, world, scale) : resolved.items;
   return {
     world,
     scale,
     requestedScale,
     width: Math.max(1, Math.floor(world.width * scale)),
     height: Math.max(1, Math.floor(world.height * scale)),
-    items: resolved.items,
+    items,
+    extras: boardDepthExtras(input.scene, items),
     clamped: scale < safeRequest - 1e-6,
     ...(resolved.page ? { page: resolved.page } : {}),
   };
@@ -155,4 +175,38 @@ export function planBoardExport(input: BoardExportPlanInput): BoardExportPlan | 
 export function boardExportView(plan: Pick<BoardExportPlan, "world" | "scale" | "width" | "height">): BoardScriptView {
   const { world, scale, width, height } = plan;
   return { camera: { x: -world.x * scale, y: -world.y * scale, zoom: scale }, width, height, safeRect: { x: 0, y: 0, width, height } };
+}
+
+function withLiftedInto(scene: BoardScene, items: BoardSceneItem[], world: Rect, scale: number): BoardSceneItem[] {
+  const planned = new Set(items.map((item) => item.id));
+  const view = { x: -world.x * scale, y: -world.y * scale, zoom: scale, width: world.width * scale, height: world.height * scale };
+  let added = false;
+  for (const root of boardDepthRoots(scene)) {
+    if (planned.has(root.id)) {
+      for (const id of scene.descendants(root.id)) if (!planned.has(id)) {
+        planned.add(id);
+        added = true;
+      }
+      continue;
+    }
+    const seen = boardDepthItemOutline(scene, root.id, view);
+    if (!seen?.length) continue;
+    const xs = seen.map((point) => point.x);
+    const ys = seen.map((point) => point.y);
+    if (!rectsIntersect(world, { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) })) continue;
+    for (const id of [root.id, ...scene.descendants(root.id)]) planned.add(id);
+    added = true;
+  }
+  return added ? scene.items.filter((item) => planned.has(item.id)) : items;
+}
+
+function boardDepthExtras(scene: BoardScene, items: readonly BoardSceneItem[]): BoardSceneItem[] {
+  const planned = new Set(items.map((item) => item.id));
+  const wanted = new Set<string>();
+  for (const root of boardDepthRoots(scene)) {
+    const back = planned.has(root.id) ? boardDepthOf(root)?.back : undefined;
+    if (!back || planned.has(back) || !scene.get(back)) continue;
+    for (const id of [back, ...scene.descendants(back)]) if (!planned.has(id)) wanted.add(id);
+  }
+  return wanted.size ? scene.items.filter((item) => wanted.has(item.id)) : [];
 }

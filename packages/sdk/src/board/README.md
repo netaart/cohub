@@ -316,6 +316,28 @@ lights, orbit and sizing), `still.ts` and `viewer.ts` (a model on its own canvas
 PixiJS collects render systems when a renderer starts, so `prepareModelRenderer` adds
 3D's to a stage renderer that started before the engine loaded.
 
+### Depth
+
+`model/depth.ts` is the pure geometry every client shares: the map-like camera (the eye
+1.5 view heights above the view's middle), an item's surface in screen space with its
+bend, spin, tilt and lift, ray hits back to item fractions, outlines, shadows, and which
+items are lifted roots (`boardDepthRoots`; depth inside a lifted frame stays in its
+picture). The editor uses it for what you see: `visualBounds`, and no resize or rotate
+handles while an item is off the plane.
+
+The stage draws a lifted root and its children into a detached render-group host
+(`scene.elevatedHost`), so the 2D pass skips it with no per-frame visibility changes,
+and `stage/depth.ts` captures that host into a picture only when something inside it
+was drawn anew (`scene.takeTouched`) or its density moved a quarter octave. The pictures
+go to one shared `View3D` (`render/depth/engine.ts`, loaded by `loadBoardDepthEngine()`
+once something lifts) between the Board's items and the editor overlay, whose camera
+matches the shared geometry exactly, so hits and outlines land on the pixels. Pointer
+input over a lifted picture is unprojected to the flat point it covers before anything
+else sees it, and picks are scoped to that item; a press keeps its offset until it
+lifts. Shadows are a 2D layer of nine-sliced soft sprites on the Board's plane. Model
+objects (`render/depth/objects.ts`) stand in the same view. Exports build the same
+layers from `export/scene.ts` with a stage the caller loads once.
+
 ## Scripts
 
 The public authoring contract is in [`docs/board-scripts.md`](../../../../docs/board-scripts.md).

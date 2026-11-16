@@ -27,14 +27,18 @@ export function registerBoardAuthoringCommands(boards: Command) {
     .option("--animation <id>", "Animation to sample")
     .option("--at <times>", "Time, comma-separated times, or start:end:step (up to 100 samples)", "0")
     .option("--items <ids>", "Limit measurements to comma-separated item ids")
+    .option("--view <widthxheight>", "Screen lifted items are measured on, looking straight at each (default: 1600x900)")
     .option("--json", "Output as JSON")
     .addHelpText("after", `
 Without --animation, inspects the static document, not playback.
 Bounds use world units with x/y at the top left; worldBounds includes rotation.
+Items lifted with depth add depth: the root carrying them, the face that shows,
+how much larger they look, and seenBounds, the area of the Board they cover as seen.
 Checks native layout only, not camera cropping or content drawn inside scripts.
 Example: cohub boards inspect lesson.board --animation lecture --at 0:20s:1s --json`)
-    .action(async (target: string, options: { animation?: string; at: string; items?: string }) => {
+    .action(async (target: string, options: { animation?: string; at: string; items?: string; view?: string }) => {
       try {
+        const view = options.view ? parseBoardViewSize(options.view) : undefined;
         const spaceId = await resolveSpace(boards);
         const document = await settleBoardDocument(spaceId, (await loadBoardDocument(spaceId, target)).document);
         const times = parseBoardTimes(options.at, "--at", 100);
@@ -52,7 +56,7 @@ Example: cohub boards inspect lesson.board --animation lecture --at 0:20s:1s --j
             coverage: "Native layout in world coordinates; excludes camera cropping and script-drawn content.",
             samples: times.map((time) => ({
               time,
-              ...inspectBoardItems(sampler?.at(time).scene ?? buildBoardScene(document), ids ?? undefined),
+              ...inspectBoardItems(sampler?.at(time).scene ?? buildBoardScene(document), ids ?? undefined, { view }),
             })),
           });
         } finally {
@@ -180,4 +184,12 @@ their time moves forward. Placing a target that is already on the timeline moves
         handleHttp(cause);
       }
     });
+}
+
+function parseBoardViewSize(value: string): { width: number; height: number } {
+  const match = /^(\d+)x(\d+)$/.exec(value.trim());
+  const width = Number(match?.[1]);
+  const height = Number(match?.[2]);
+  if (!match || !(width > 0 && height > 0 && width <= 16384 && height <= 16384)) throw new Error("--view takes widthxheight in pixels, e.g. 1600x900.");
+  return { width, height };
 }

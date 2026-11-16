@@ -1,5 +1,5 @@
 
-import type { BoardDocument } from "@cohub/protocol";
+import { type BoardDocument, isBoardDepthActive, resolveBoardDepth } from "@cohub/protocol";
 import { resolveBoardAnimationCamera, type BoardAnimationSampler } from "../model/sampling.js";
 import { createBoardRenderSampler } from "../render/sampling.js";
 import { type BoardSceneItem, buildBoardScene } from "../model/scene.js";
@@ -15,6 +15,8 @@ import {
 } from "../model/export-plan.js";
 import type { BoardScene } from "../model/scene.js";
 import { boardShaderPassOn } from "../model/shader.js";
+import { boardDepthRoots } from "../model/depth.js";
+import type { BoardDepthStage } from "../render/depth/index.js";
 import type { BoardShaderOwner } from "../render/shader/layers.js";
 import {
   type BoardBackdrop,
@@ -61,6 +63,7 @@ export type BoardExportOptions = {
   backgroundTexture?: Texture;
   maxEdge?: number;
   maxPixels?: number;
+  depth?: BoardDepthStage;
 };
 
 export type BoardExportWarning =
@@ -69,7 +72,8 @@ export type BoardExportWarning =
   | { kind: "many-items"; count: number }
   | { kind: "shaders-unsupported"; drawn: string[]; omitted: string[] }
   | { kind: "shader-failed"; id: string; message: string }
-  | { kind: "shader-hidden"; ids: string[]; reason: string };
+  | { kind: "shader-hidden"; ids: string[]; reason: string }
+  | { kind: "depth-flat"; ids: string[] };
 
 export type BoardExportResult = {
   canvas: ICanvas;
@@ -124,6 +128,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     settings: document.board,
     scene,
     items: plan.items,
+    extras: plan.extras,
     time: options.at?.time ?? 0,
     frameAt: sampler?.frameAt,
     world: plan.world,
@@ -141,6 +146,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     backdropTexture: options.backgroundTexture,
     ...(plan.page ? { page: plan.page } : {}),
     ...(gpu && owners.length ? { shaders: { renderer, owners, layers: options.shaderLayers } } : {}),
+    ...(gpu && options.depth ? { depth: { renderer, stage: options.depth } } : {}),
   });
 
   const flattened = renderer.type === RendererType.CANVAS ? flattenBoardEffects(renderer, exportScene.root, plan.scale, new Rectangle(0, 0, plan.width, plan.height)) : null;
@@ -184,6 +190,11 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
       warnings.push({ kind: "shaders-unsupported", drawn, omitted: owners.map((owner) => owner.id).filter((id) => !drawn.includes(id)) });
     }
     for (const failure of exportScene.shaderErrors) warnings.push({ kind: "shader-failed", ...failure });
+    if (!gpu || !options.depth) {
+      const planned = new Set(plan.items.map((item) => item.id));
+      const flat = boardDepthRoots(scene).filter((item) => planned.has(item.id) && isBoardDepthActive(resolveBoardDepth(item.depth))).map((item) => item.id);
+      if (flat.length) warnings.push({ kind: "depth-flat", ids: flat });
+    }
     if (gpu) for (const miss of boardShaderMisses(scene, plan, owners, exportScene.shaderErrors)) warnings.push({ kind: "shader-hidden", ...miss });
     return { canvas, plan, warnings };
   } finally {
@@ -240,6 +251,8 @@ export function describeBoardExportWarning(warning: BoardExportWarning): string 
     }
     case "shader-failed":
       return `Shader ${warning.id} was left out: ${warning.message}`;
+    case "depth-flat":
+      return `${listIds(warning.ids)} ${warning.ids.length === 1 ? "is" : "are"} lifted off the Board; this export draws ${warning.ids.length === 1 ? "it" : "them"} flat because depth needs WebGL.`;
     case "shader-hidden":
       return `${warning.ids.length === 1 ? "Shader" : "Shaders"} of ${listIds(warning.ids)} drew nothing: ${warning.reason.replace(/^its item is/, warning.ids.length === 1 ? "its item is" : "their items are")}.`;
   }

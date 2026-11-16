@@ -198,6 +198,7 @@ export type BoardScriptOutput = {
   frameRate?: number;
   pixelated?: boolean;
   shader?: BoardShader;
+  bend?: { glsl: string };
   uniforms?: BoardShaderUniformValues;
   passes?: BoardShaderPassStates;
   version: number;
@@ -258,6 +259,7 @@ export type BoardScriptModule = {
     | ((context: BoardScriptContext) => () => void);
   draw?: (context: CanvasRenderingContext2D, frame: BoardScriptFrame) => void;
   shader?: BoardShader;
+  bend?: { glsl: string };
   animated?: boolean;
   frameRate?: number;
   pixelated?: boolean;

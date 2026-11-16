@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { json } from "../../output.js";
 import {
   BOARD_SCRIPT_DRAWING_EXAMPLE,
+  BOARD_SCRIPT_HANKY_EXAMPLE,
   BOARD_SCRIPT_RAIN_EXAMPLE,
   BOARD_SCRIPT_SENSES_EXAMPLE,
   BOARD_SCRIPT_SPARKS_EXAMPLE,
@@ -14,6 +15,7 @@ const MODULES: Record<string, string> = {
   tilt: BOARD_SCRIPT_TILT_EXAMPLE,
   senses: BOARD_SCRIPT_SENSES_EXAMPLE,
   sparks: BOARD_SCRIPT_SPARKS_EXAMPLE,
+  depth: BOARD_SCRIPT_HANKY_EXAMPLE,
 };
 
 /**
@@ -113,6 +115,31 @@ export const BOARD_EXAMPLES: Record<string, { description: string; value: Record
     value: {
       items: {
         pad: { type: "custom", position: { x: 0, y: 0 }, size: { width: 640, height: 400 }, script: { src: "scripts/sparks.js" } },
+      },
+    },
+  },
+  depth: {
+    description: "Depth: a handkerchief that tosses and spins on three taps, and a card that flips to its back; use --module to print scripts/hanky.js.",
+    value: {
+      items: {
+        hanky: { type: "frame", position: { x: 0, y: 0 }, size: { width: 480, height: 480 }, props: { label: "Handkerchief", decoration: "none" } },
+        cloth: { type: "custom", parent: "hanky", size: { width: 480, height: 480 }, script: { src: "scripts/hanky.js", targets: { lift: "hanky" } } },
+        tag: { type: "shape", parent: "hanky", position: { x: 120, y: 196 }, size: { width: 240, height: 88 }, style: { fill: "#fff7e6", stroke: "#ffd23f", strokeWidth: 4, radius: 20 }, props: { geometry: "rounded", text: "Tap me three times", fontSize: 20 } },
+        card: { type: "frame", position: { x: 600, y: 86 }, size: { width: 220, height: 308 }, props: { label: "Card", decoration: "none" }, depth: { back: "back" } },
+        "card-face": { type: "shape", parent: "card", size: { width: 220, height: 308 }, style: { fill: "#fbf8f1", stroke: "#d9d2c3", radius: 18 }, props: { geometry: "rounded", text: "A ♥", fontSize: 56 } },
+        back: { type: "frame", position: { x: 880, y: 86 }, size: { width: 220, height: 308 }, props: { label: "Card back", decoration: "none" } },
+        "back-face": { type: "shape", parent: "back", size: { width: 220, height: 308 }, style: { fill: "#1f3b8f", stroke: "#f2c14e", strokeWidth: 6, radius: 18 }, props: { geometry: "rounded", text: "✦", fontSize: 72 } },
+      },
+      animations: {
+        flip: {
+          play: "always",
+          loop: true,
+          duration: 3600,
+          tracks: {
+            turn: { target: "card", property: "depth.tilt", keyframes: [{ at: 400, value: { x: 0, y: 0 } }, { at: 1300, value: { x: 0, y: 180 }, ease: "ease-in-out" }, { at: 2300, value: { x: 0, y: 180 } }, { at: 3200, value: { x: 0, y: 360 }, ease: "ease-in-out" }] },
+            rise: { target: "card", property: "depth.lift", keyframes: [{ at: 400, value: 0 }, { at: 850, value: 70, ease: "ease-out" }, { at: 1300, value: 0, ease: "ease-in" }, { at: 2300, value: 0 }, { at: 2750, value: 70, ease: "ease-out" }, { at: 3200, value: 0, ease: "ease-in" }] },
+          },
+        },
       },
     },
   },

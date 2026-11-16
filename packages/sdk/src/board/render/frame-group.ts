@@ -1,7 +1,7 @@
 
 import { Container, Graphics } from "pixi.js";
 import type { BoardScene, BoardSceneItem } from "../model/scene.js";
-import { framePoint } from "@cohub/protocol";
+import { framePoint, isBoardDepthActive, resolveBoardDepth } from "@cohub/protocol";
 import { type BoardEffectsContext, hasBoardEffects, rescaleBoardEffects, syncBoardEffects } from "./effects.js";
 
 export function isClippingFrame(item: BoardSceneItem): boolean {
@@ -13,7 +13,7 @@ export function isGroupingFrame(item: BoardSceneItem): boolean {
 }
 
 export function isSelfGroupedFrame(item: BoardSceneItem): boolean {
-	return item.type === "frame" && (hasBoardEffects(item.style) || item.script?.enabled === true);
+	return item.type === "frame" && (hasBoardEffects(item.style) || item.script?.enabled === true || isBoardDepthActive(resolveBoardDepth(item.depth)));
 }
 
 export function groupingAncestor(scene: BoardScene, item: BoardSceneItem): string | undefined {

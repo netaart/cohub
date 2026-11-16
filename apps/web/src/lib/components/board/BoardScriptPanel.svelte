@@ -35,7 +35,7 @@ let copied = $state(false);
 
 const position = $derived.by(() => {
 	if (placement !== "floating") return null;
-	const bounds = editor.bounds;
+	const bounds = editor.visualBounds;
 	if (!bounds) return null;
 	const { zoom, x, y } = editor.camera;
 	return {

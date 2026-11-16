@@ -1087,6 +1087,9 @@ importers:
       '@fontsource-variable/geist-mono':
         specifier: ^5.3.0
         version: 5.3.0
+      '@pixi/3d':
+        specifier: 0.1.0
+        version: 0.1.0(pixi.js@8.23.0)
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.4

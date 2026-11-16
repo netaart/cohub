@@ -108,7 +108,7 @@ const resultWithSource = $derived(
 );
 
 const position = $derived.by(() => {
-	const bounds = editor.bounds;
+	const bounds = editor.visualBounds;
 	if (!bounds) return null;
 	const camera = editor.camera;
 	const left = (bounds.x + bounds.width / 2) * camera.zoom + camera.x;

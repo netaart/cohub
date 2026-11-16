@@ -47,6 +47,8 @@ export function createQueryModule(ctx: EditorContext) {
 	let indexedScene: typeof state.scene | null = null;
 	let spatialDirty: Set<string> | null = null;
 	let mediaIdsByPath: Map<string, Set<string>> | null = null;
+	let scope: ((id: string) => boolean) | null = null;
+	const inScope = (id: string) => !scope || scope(id);
 
 	function invalidate(ids?: readonly string[]) {
 		if (!ids) {
@@ -207,13 +209,13 @@ export function createQueryModule(ctx: EditorContext) {
 		ensureSpatial();
 		for (const id of spatial.idsAtPoint(point)) {
 			const item = state.scene.get(id);
-			if (item && (includeTemporary || state.base.items[id]) && !exclude?.has(id) && hitsItem(item, point)) return item;
+			if (item && (includeTemporary || state.base.items[id]) && !exclude?.has(id) && inScope(id) && hitsItem(item, point)) return item;
 		}
 		return null;
 	}
 
 	function pickable(item: BoardSceneItem | undefined, id: string): item is BoardSceneItem {
-		return Boolean(item && state.base.items[id] && !isLocked(item) && !(item.type === "frame" && state.scene.children(id).length > 0));
+		return Boolean(item && state.base.items[id] && inScope(id) && !isLocked(item) && !(item.type === "frame" && state.scene.children(id).length > 0));
 	}
 
 	function pickAt(point: WorldPoint, pointerType = "mouse"): BoardSceneItem | null {
@@ -252,7 +254,7 @@ export function createQueryModule(ctx: EditorContext) {
 		const candidates = selection.length === 1 ? [...selection, ...nearby] : nearby;
 		for (const id of new Set(candidates)) {
 			const item = scene.get(id);
-			if (!item || !state.base.items[id] || isLocked(item) || !scene.shown(id)) continue;
+			if (!item || !state.base.items[id] || isLocked(item) || !scene.shown(id) || !inScope(id)) continue;
 			if (
 				item.type === "frame" &&
 				rectContainsPoint(frameLabelHitRect(item.frame, frameLabelSize), point)
@@ -289,7 +291,13 @@ export function createQueryModule(ctx: EditorContext) {
 		return registry.capabilities(item).canConnect ? item.id : null;
 	}
 
+	function setScope(next: ((id: string) => boolean) | null) {
+		scope = next;
+	}
+
 	return {
+		setScope,
+		inScope,
 		invalidate,
 		boundsOf,
 		itemById,

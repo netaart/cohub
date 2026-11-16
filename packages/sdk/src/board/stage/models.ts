@@ -46,7 +46,7 @@ export type BoardModelTheaterOptions = {
 const ANIMATION_FRAME_MS = 1000 / 30;
 
 function modelKey(item: BoardSceneItem): string | null {
-	if (item.type !== "file" || !isBoardModelItem(item)) return null;
+	if (item.type !== "file" || !isBoardModelItem(item) || item.props.model?.display === "object") return null;
 	return `${item.props.src}:${item.props.snapshot?.mtimeMs ?? ""}`;
 }
 

@@ -38,7 +38,7 @@ let failed = $state(false);
 let runtime: ReturnType<typeof resolveSessionReplyRuntime> | null = null;
 
 const position = $derived.by(() => {
-	const bounds = editor.bounds;
+	const bounds = editor.visualBounds;
 	if (!bounds) return null;
 	const { x, y, zoom } = editor.camera;
 	return {

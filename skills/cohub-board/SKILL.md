@@ -56,6 +56,7 @@ cohub boards schema frame --field props.decoration  # one field, without the ful
 cohub boards schema track        # also board, animation, camera
 cohub boards schema camera --field focus  # camera value types and units
 cohub boards schema script       # the script attachment and the module API
+cohub boards schema depth        # lifting items into perspective, and how it reads
 ```
 
 Worth knowing before you build:
@@ -82,6 +83,11 @@ Worth knowing before you build:
 - Any item takes `style.filter` (blur, saturate, hue, …), `style.shadow` (a glow
   with no offset) and `style.blend`; on a frame they treat it and its contents as one layer.
   Text reveals by `char`, `word` or `line` (`props.revealBy`) with `revealMotion`.
+- Any item's `depth` lifts it off the Board into perspective (`lift`, `tilt`, `spin`,
+  `bend`: wave, cloth, curl or custom GLSL, and a `back` item for when it turns over);
+  presets `flip`, `lift`, `land`, `toss`, `sway`, `wave`, `curl` animate it, and a model
+  file with `props.model.display: "object"` rests on the Board as a lit 3D object.
+  `boards examples depth` shows a handkerchief toss and a card flip.
 
 ## Read and write
 

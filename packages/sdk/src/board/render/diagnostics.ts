@@ -4,6 +4,7 @@ import type { BoardScene } from "../model/scene.js";
 import { boardAutoplayKind } from "../model/autoplay.js";
 import { effectBounds, itemBounds, rectsIntersect } from "../model/geometry.js";
 import { boardFontFamily } from "../model/text-metrics.js";
+import { boardDepthItemOutline, boardDepthOf, boardDepthRootOf, boardDepthScreenPoint, boardDepthSurface, hitBoardDepthSurface } from "../model/depth.js";
 import { BOARD_FONT_STACKS, ensureBoardTextMeasurement } from "./text-measurement.js";
 
 export type BoardRenderDiagnostic = {
@@ -57,19 +58,47 @@ export function measureBoardText(props: BoardTextItem["props"]) {
   return { ...layoutBoardText(props), missingCharacters: characters };
 }
 
-export function inspectBoardItems(scene: BoardScene, ids?: ReadonlySet<string>) {
+export const BOARD_INSPECT_VIEW = { width: 1600, height: 900 };
+
+function inspectBoardDepth(scene: BoardScene, id: string, screen: { width: number; height: number }) {
+  const root = boardDepthRootOf(scene, id);
+  const rootItem = root ? scene.get(root) : undefined;
+  const depth = rootItem && boardDepthOf(rootItem);
+  if (!root || !rootItem || !depth) return null;
+  const center = itemBounds(rootItem.frame);
+  const view = { x: screen.width / 2 - (center.x + center.width / 2), y: screen.height / 2 - (center.y + center.height / 2), zoom: 1, ...screen };
+  const surface = boardDepthSurface({ frame: rootItem.frame, origin: rootItem.origin, depth }, view);
+  const outline = boardDepthItemOutline(scene, id, view) ?? [];
+  const xs = outline.map((point) => point.x);
+  const ys = outline.map((point) => point.y);
+  const facing = hitBoardDepthSurface(surface, boardDepthScreenPoint(surface, 0.5, 0.5))?.back ? "back" : "front";
+  const round = (value: number) => Math.round(value * 100) / 100;
+  return {
+    root,
+    facing,
+    scale: round(surface.scale),
+    seenBounds: { x: round(Math.min(...xs)), y: round(Math.min(...ys)), width: round(Math.max(...xs) - Math.min(...xs)), height: round(Math.max(...ys) - Math.min(...ys)) },
+  };
+}
+
+export function inspectBoardItems(scene: BoardScene, ids?: ReadonlySet<string>, options: { view?: { width: number; height: number } } = {}) {
+  const view = options.view ?? BOARD_INSPECT_VIEW;
   return {
     diagnostics: inspectBoardScene(scene, 100, ids),
     items: scene.items
       .filter((item) => !ids || ids.has(item.id))
-      .map((item) => ({
-        id: item.id,
-        bounds: item.frame,
-        worldBounds: itemBounds(item.frame),
-        ...(item.style.filter?.blur || item.style.shadow ? { visualBounds: effectBounds(itemBounds(item.frame), item.style) } : {}),
-        opacity: scene.opacity(item.id),
-        ...(item.type === "text" ? { text: measureBoardText(item.props) } : {}),
-      })),
+      .map((item) => {
+        const depth = inspectBoardDepth(scene, item.id, view);
+        return {
+          id: item.id,
+          bounds: item.frame,
+          worldBounds: itemBounds(item.frame),
+          ...(item.style.filter?.blur || item.style.shadow ? { visualBounds: effectBounds(itemBounds(item.frame), item.style) } : {}),
+          opacity: scene.opacity(item.id),
+          ...(depth ? { depth } : {}),
+          ...(item.type === "text" ? { text: measureBoardText(item.props) } : {}),
+        };
+      }),
   };
 }
 

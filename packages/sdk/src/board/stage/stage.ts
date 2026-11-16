@@ -33,10 +33,15 @@ import {
 	type SceneItem,
 	elementClientToLocal,
 	isBoardModelItem,
+	boardModelFormat,
+	fileStem,
 	itemBounds,
 	pointToWorld,
 	rectsIntersect,
 	screenPoint,
+	type ScreenPoint,
+	boardDepthRootOf,
+	boardDocumentUsesDepth,
 	stableCullRect,
 	TEXT_LINE_HEIGHT,
 	visibleWorldRect,
@@ -88,7 +93,9 @@ import { type BoardMediaClock, type BoardMediaLoop, createBoardMediaClock } from
 import { createBoardTimelineClock } from "./timeline-clock.js";
 import { createBoardLiveScheduler } from "./live.js";
 import { createBoardModelTheater } from "./models.js";
+import { boardModelSource, loadModelEngine } from "../render/model3d/index.js";
 import { type BoardStageShaders, createBoardStageShaders } from "./shaders.js";
+import { type BoardStageDepth, createBoardStageDepth } from "./depth.js";
 import { type BoardLiveStroke, createBoardScene } from "./scene.js";
 import { drawBoardFrameMask, drawBoardOverlay } from "./overlay.js";
 import { createTextResolutionTracker } from "./text-resolution-tracker.js";
@@ -278,6 +285,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let bursts: ReturnType<typeof createBoardBursts> | null = null;
 	let scene: ReturnType<typeof createBoardScene> | null = null;
 	let shaders: BoardStageShaders | null = null;
+	let depth: BoardStageDepth | null = null;
+	let depthLayer: Container | null = null;
+	let depthDocument: unknown = null;
 	const senseListeners = new Set<() => void>();
 	const notifySenses = () => {
 		for (const listener of senseListeners) listener();
@@ -421,7 +431,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		},
 	});
 	const renderCamera = () => playbackCamera ?? editor.camera;
-	const toWorldPoint = (clientX: number, clientY: number) => pointToWorld(localPoint(clientX, clientY), renderCamera());
+	const toWorldPoint = (clientX: number, clientY: number) => {
+		const screen = localPoint(clientX, clientY);
+		return liftedPoint(screen) ?? pointToWorld(screen, renderCamera());
+	};
 	const models = createBoardModelTheater({
 		renderer: () => app?.renderer ?? null,
 		source: options.source,
@@ -814,6 +827,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			ports: editor.connectionPorts,
 			hoveredPort: editor.hoveredConnectionPort,
 			bindTarget: editor.bindTargetFrame ?? editor.arrowDraft?.targetFrame ?? dropTargetFrame(),
+			...(depth?.active && app ? { projected: projectedOutline(renderScene, camera, app.screen) } : {}),
 		});
 		if (presence?.peers.length)
 			drawBoardPresence(overlay, presence.peers, {
@@ -995,6 +1009,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 				if (modelWait === 0) frameWork |= FRAME_RENDER;
 				else if (modelWait !== null) scheduleCardTick(modelWait);
 				shaders?.prepare();
+				prepareDepth(camera, modelWait === 0);
 				app.render();
 				if (app.canvas.style.visibility) app.canvas.style.visibility = "";
 			}
@@ -1024,6 +1039,30 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		const samples = Array.from(frameTimes.subarray(0, Math.min(frameCount, FRAME_SAMPLES))).sort((a, b) => a - b);
 		const at = (ratio: number) => samples[Math.min(samples.length - 1, Math.floor(samples.length * ratio))] ?? 0;
 		return { p50: at(0.5), p95: at(0.95), max: samples.at(-1) ?? 0 };
+	}
+
+	function projectedOutline(renderScene: BoardScene, camera: BoardViewport, screen: { width: number; height: number }) {
+		const view = { x: camera.x, y: camera.y, zoom: camera.zoom, width: screen.width, height: screen.height };
+		return (id: string) => depth?.outline(renderScene, id, view) ?? null;
+	}
+
+	function prepareDepth(camera: BoardViewport, modelsMoving: boolean) {
+		const drawn = scene?.takeTouched() ?? NO_IDS;
+		if (!depth || !app) return;
+		if (editor.document !== depthDocument) {
+			depthDocument = editor.document;
+			if (boardDocumentUsesDepth(editor.document)) depth.warm();
+		}
+		const unseen = depth.active
+			? [...(shaders?.animated ? scripts.shaderOwners().flatMap((owner) => (owner.root ? [] : [owner.id])) : []), ...(modelsMoving ? live.running : [])]
+			: [];
+		const touched = unseen.length ? new Set([...drawn, ...unseen]) : drawn;
+		depth.prepare({
+			scene: editor.scene,
+			view: { x: camera.x, y: camera.y, zoom: camera.zoom, width: app.screen.width, height: app.screen.height },
+			resolution: app.renderer.resolution,
+			touched,
+		});
 	}
 
 	function scheduleRender() {
@@ -1201,6 +1240,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			context.frameAt = sampler.frameAt;
 		}
 		const pinnedIds = new Set(editor.selection);
+		if (depth) for (const id of depth.pinned(renderScene)) pinnedIds.add(id);
 		for (const item of renderScene.items) {
 			if (item.type === "effect" && item.props.kind === "trail" && renderScene.opacity(item.id) > 0) pinnedIds.add(item.id);
 		}
@@ -1232,6 +1272,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			view: ids ? cullView(camera) : undefined,
 			lod: currentLod(),
 			budget: clock,
+			elevated: depth?.elevated(renderScene),
 		});
 		staleIds.clear();
 		views.sync({
@@ -1289,8 +1330,44 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	const localPoint = (x: number, y: number) => elementClientToLocal(host)(x, y);
 	const inViews = (event: Event) => event.target instanceof Node && views.element.contains(event.target);
 
+	const liftOffsets = new Map<number, { x: number; y: number }>();
+	function liftedPoint(screen: ScreenPoint): WorldPoint | null {
+		editor.setPickScope(null);
+		if (!depth?.active) return null;
+		const hit = depth.unproject(editor.scene, screen);
+		if (hit) {
+			const subtree = new Set([hit.id, ...editor.scene.descendants(hit.id)]);
+			editor.setPickScope((id) => subtree.has(id));
+			return hit.world;
+		}
+		if (depth.elevated(editor.scene).size) editor.setPickScope((id) => !boardDepthRootOf(editor.scene, id));
+		return null;
+	}
+
 	function toInput(event: PointerEvent): BoardPointerEvent {
-		return toBoardPointerEvent(event, host, renderCamera(), event.type === "pointermove" && editor.interaction.type === "drawing");
+		const input = toBoardPointerEvent(event, host, renderCamera(), event.type === "pointermove" && editor.interaction.type === "drawing");
+		const ends = event.type === "pointerup" || event.type === "pointercancel" || event.type === "lostpointercapture";
+		const held = event.type === "pointerdown" ? undefined : liftOffsets.get(event.pointerId);
+		if (held && (event.buttons !== 0 || ends)) {
+			if (ends) liftOffsets.delete(event.pointerId);
+			editor.setPickScope(null);
+			return shiftInput(input, held.x, held.y);
+		}
+		liftOffsets.delete(event.pointerId);
+		const lifted = liftedPoint(input.screen);
+		const dx = lifted ? lifted.x - input.world.x : 0;
+		const dy = lifted ? lifted.y - input.world.y : 0;
+		if (event.type === "pointerdown" && depth?.active) liftOffsets.set(event.pointerId, { x: dx, y: dy });
+		return lifted ? shiftInput(input, dx, dy) : input;
+	}
+
+	function shiftInput(input: BoardPointerEvent, dx: number, dy: number): BoardPointerEvent {
+		if (!dx && !dy) return input;
+		return {
+			...input,
+			world: worldPoint(input.world.x + dx, input.world.y + dy),
+			...(input.samples ? { samples: input.samples.map((sample) => ({ ...sample, world: worldPoint(sample.world.x + dx, sample.world.y + dy) })) } : {}),
+		};
 	}
 
 	function unlockGesture() {
@@ -1616,9 +1693,36 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		bursts = createBoardBursts();
 		const shadersBelow = new Container({ label: "board-shaders-below" });
 		const shadersAbove = new Container({ label: "board-shaders-above" });
-		world.addChild(shadersBelow, nodes, shadersAbove, atmosphere.container, bursts.container, overlay);
+		depthLayer = new Container({ label: "board-depth-layer" });
+		world.addChild(shadersBelow, nodes, shadersAbove, depthLayer, atmosphere.container, bursts.container, overlay);
 		instance.stage.addChild(world);
 		scene = createBoardScene({ world: nodes, overlay, getRenderer: resolveRenderer, requestFrame: scheduleTick });
+		depth = createBoardStageDepth({
+			renderer: () => (app ? (app.renderer as unknown as Renderer) : null),
+			layer: () => depthLayer,
+			host: (id) => scene?.elevatedHost(id) ?? null,
+			parts: (id) => {
+				const card = scene?.getNode(id)?.container;
+				const group = scene?.frameGroup(id);
+				if (group) return card && card.parent !== group ? [card, group] : [group];
+				return card ? [card] : [];
+			},
+			bend: (id) => {
+				const output = scripts.output(id);
+				return output ? (output.bend ?? null) : undefined;
+			},
+			fault: (id, message) => scripts.host?.fault(id, message),
+			frame: scheduleTick,
+			loadModel: (item, signal) => {
+				if (item.type !== "file") return null;
+				const { src, snapshot } = item.props;
+				const format = boardModelFormat(src, snapshot?.mimeType);
+				const source = format && boardModelSource({ key: `${src}:${snapshot?.mtimeMs ?? ""}`, src, format, size: snapshot?.size, name: fileStem(src) }, options.source);
+				return source ? loadModelEngine().then((engine) => engine.loadModel(source, { signal, maxBytes: device.modelBytes })) : null;
+			},
+			reducedMotion: () => options.reducedMotion?.() ?? false,
+			maxEdge: device.tier === "low" ? 1024 : undefined,
+		});
 		shaders = createBoardStageShaders({
 			editor,
 			renderer: instance.renderer,
@@ -1798,6 +1902,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			editor.setPlayedItems(new Map());
 			editor.setScriptItems(new Map());
 			shaders?.destroy();
+			depth?.destroy();
+			depth = null;
 			shaders = null;
 			scene?.destroy(renderContext(theme(), editor.scene, 0));
 			scene = null;

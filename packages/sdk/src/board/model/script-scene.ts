@@ -59,6 +59,7 @@ const DISPLAY_FIELDS = new Set([
   "style",
   "props",
   "z",
+  "depth",
 ]);
 const CURSORS = new Set(["default", "pointer", "grab", "grabbing", "crosshair", "text", "move", "ew-resize", "ns-resize", "not-allowed"]);
 const TOOLS = new Set(["select", "hand", "text", "shape", "draw", "arrow", "frame"]);

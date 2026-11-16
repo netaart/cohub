@@ -27,6 +27,7 @@ export const BOARD_SCRIPT_API = {
     parameters: "Declares params as { name: { type: number | boolean | string | color, label?, default?, min?, max?, step? } }.",
     default: "Setup function (ctx) for behavior; may return a cleanup function.",
     shader: "GPU passes drawn with the owner: { layer?, inputs?, uniforms?, state?, passes: [{ glsl, sprites?, texel?, blend? }] }. See shader.",
+    bend: "{ glsl } defining vec3 bend(vec2 uv, vec2 size, float amount, float phase): the offset in board units (x right, y down, z toward the viewer) of each point of the owner while depth.bend.kind is custom; uv runs 0–1 across the item, size is its box, amount and phase come from depth.bend. Same rules and includes as shader passes; drawn on the GPU, so hit tests and shadows use the surface before it bends.",
   } satisfies Record<keyof BoardScriptModule, string>,
   frame: {
     t: "Clock time in milliseconds.",
@@ -52,7 +53,7 @@ export const BOARD_SCRIPT_API = {
     onDispose: "onDispose(handler): cleanup when the instance stops.",
     invalidate: "invalidate(): redraw a non-animated draw().",
     get: "get(id): an item in scope, as authored.",
-    present: "present(id, patch | null): temporarily override position, size, rotation, scale, opacity, style, props or z of an item in scope; never saved. Items that leave the scope drop their override.",
+    present: "present(id, patch | null): temporarily override position, size, rotation, scale, opacity, style, props, z or depth of an item in scope; never saved. Items that leave the scope drop their override.",
     scene: "scene(items, options?): replace this instance's world or screen layer of temporary Board items; never saved. IDs are unique across both layers.",
     hitRegions: "hitRegions(regions): replace the input declarations.",
     emit: "emit(id, type, data?): send a custom event to another scripted item in scope, or to any Board script by its key. Exports deliver it within the same moment, in document order. A handler may answer with emits; past 16 in a row the emit rejects, so emit from onFrame() to send on the next step.",

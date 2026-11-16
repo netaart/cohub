@@ -109,6 +109,58 @@ color in them animates by path (`style.filter.blur`, `style.shadow.color`, …):
 
 Exports draw all of them. Low-end devices skip blur and shadows and keep the rest.
 
+### Depth
+
+Any item's `depth` takes it off the Board into perspective. It draws as a live
+picture of itself, so text, media and script content stay current while it rises,
+leans, turns and bends:
+
+```json
+{"depth":{"lift":80,"tilt":{"x":20,"y":-30},"spin":0,"bend":{"kind":"cloth","amount":0.4,"phase":1.2},"shade":0.5,"shadow":1,"back":"card-back"}}
+```
+
+- `lift`: height toward the viewer in board units; a lifted item looks nearer and
+  larger and casts a soft shadow on the Board (`shadow`, 0–1).
+- `tilt`: degrees about the item's own axes through `origin`. `x` tips the top edge
+  away, `y` the right edge; `180` turns it over. `spin` turns it within that leaned
+  plane, after tilt; `rotation` still turns it on the Board.
+- `bend`: `wave` ripples like a flag held at its left edge, `cloth` drapes and
+  flutters around the origin, `curl` turns it like a page from its right edge, and
+  `custom` runs the bend GLSL its own script module exports (see
+  [Board scripts](board-scripts.md#bend-in-depth)). `amount` 0 is flat; `phase`
+  moves a wave or cloth along, one cycle every 2π.
+- `shade` (0–1) darkens the surface as it turns from the light.
+- `back`: an item drawn on the back face once the item turns over, read correctly
+  after a turn about the vertical axis (`tilt.y`). Without it the back shows the
+  front, dimmed. Keep the back item anywhere on the Board, such as beside the deck.
+
+Perspective follows a map's camera: the eye looks straight down at the middle of the
+view from 1.5 view heights away, so lifting reads the same on every screen and at
+every zoom, and items lean away from the middle as they rise. Lifted items draw above
+every flat item and hide each other by distance. A frame carries its children, shown
+within its box; depth inside a lifted frame stays part of its picture. At rest (`lift` 0, no tilt, spin or
+bend) an item draws flat as usual and costs nothing extra.
+
+Every number and `tilt` animates by path (`depth.lift`, `depth.tilt`,
+`depth.bend.phase`), and `cohub boards preset` writes `flip`, `lift`, `land`,
+`toss`, `sway`, `wave` and `curl`. Scripts present depth like any other field. The
+pointer acts on what it touches in the lifted picture: clicks, script hit regions and
+drags reach the item under it. Lifted items move, but resize and turn once they lie
+flat again, and arrows connect to them while flat.
+
+A 3D model file with `props.model.display: "object"` leaves its card and rests on the
+Board itself: fitted to the item's box as its cover view (`props.model.view`) shows
+it, lit, with a contact shadow, and drawn among lifted items so each hides the other
+by distance. `depth` lifts and turns it like any item; `autoplay` plays its
+`props.model.animation`. It shows or hides with its opacity but does not fade. While
+the model loads, and in exports, it shows its card.
+
+The web app loads PixiJS 3D only once something leaves the plane. Exports draw depth
+in WebGL, like shaders (see [Export](#export)); a whole-board export frames lifted
+items where they appear. `cohub boards examples depth` is a handkerchief that tosses
+on three taps and a card that flips to its back; `cohub boards schema depth` lists
+every field.
+
 ### Media sources
 
 Prefer an existing stable URL when adding media, including generation results:
@@ -460,8 +512,9 @@ Board uses the same frames; videos elsewhere decode in the page there, and are d
 without a cover in Node exports. Previews beyond the image memory budget (`--image-memory`) are drawn as
 placeholders, with a warning.
 
-Exports draw in Node until a script draws with a shader; then `--renderer auto` (the
-default) renders every frame in a local Chrome, Chromium or Edge, headless and with
+Exports draw in Node until a script draws with a shader or an item leaves the plane with
+`depth`; then `--renderer auto` (the default) renders every frame in a local Chrome,
+Chromium or Edge, headless and with
 software WebGL where there is no GPU, so the result matches the web app. Set
 `COHUB_CHROME` to pick the browser. Consecutive commands share that browser, which exits
 after a few idle minutes (`COHUB_BOARD_GPU_DAEMON=0` starts one per command). `--renderer
@@ -491,6 +544,12 @@ result after success. Ctrl+C cancels work. Replacing an existing output requires
 `--force`. Frame rate is inferred from the range step; an explicit `--fps` must agree,
 and video times must be evenly spaced.
 
+A whole-board or `--items` export frames lifted items where they appear; a sequence
+keeps its first frame's area, so give `--rect` or `--camera` when items lift later.
+Without WebGL, lifted items draw flat with a warning. Model objects draw as their cards.
+`renderBoardExport` draws depth when given `depth`, a stage from
+`loadBoardDepthEngine().createBoardDepthStage(renderer)` that frames can share.
+
 For batch rendering, reuse `createBoardRenderSampler(document, animation, theme)` from
 `@neta-art/cohub/board/render` with `exportBoardImageBytes` or `renderBoardExport`;
 `boardRenderTheme(id)` gives a built-in theme to spread into both.
@@ -514,7 +573,11 @@ Results include `mode` (`static` or `animation`) and the sampled times. Without
 `--animation`, inspection uses the static document, not playback. Each item's
 `bounds` is its world-space frame (`x/y` at the top left, independent of text
 alignment); `worldBounds` is its axis-aligned box including rotation, and `opacity`
-includes parents. `--items` filters measurements and relevant diagnostics.
+includes parents. `--items` filters measurements and relevant diagnostics. An item
+off the plane, or inside a lifted frame, adds `depth`: the lifted `root`, the face that
+shows (`front` or `back`), the apparent `scale` of its origin and `seenBounds`, the
+area of the Board it covers as seen, measured on a `--view` screen (1600x900) looking
+straight at its root.
 
 The SDK's `inspectBoardItems` returns these measurements; `measureBoardText` uses
 the rendering font stack and layout rules. `inspectBoardScene` reports possible

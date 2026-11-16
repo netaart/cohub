@@ -163,6 +163,55 @@ export const BoardScriptSchema = z.object({
 }).strict().describe("A JavaScript module attached to an item or the Board; `cohub boards schema script` lists its API.");
 export type BoardScript = z.infer<typeof BoardScriptSchema>;
 
+export const BOARD_DEPTH_BENDS = ["none", "wave", "cloth", "curl", "custom"] as const;
+export type BoardDepthBend = (typeof BOARD_DEPTH_BENDS)[number];
+export const BoardDepthSchema = z
+	.object({
+		lift: finite.default(0).describe("Height above the Board toward the viewer, in board units; a lifted item looks nearer and larger and casts a shadow."),
+		tilt: z.object({ x: finite.default(0), y: finite.default(0) }).strict().prefault({}).describe("Degrees the item leans about its own axes through its origin: x tips the top edge away, y the right edge; 180 turns it over."),
+		spin: finite.default(0).describe("Degrees the item turns within its leaned plane, after tilt; rotation turns it on the Board."),
+		bend: z
+			.object({
+				kind: z.enum(BOARD_DEPTH_BENDS).default("none").describe("wave ripples like a flag held at its left edge; cloth drapes and flutters around its origin; curl turns it like a page from its right edge; custom runs the bend GLSL its script module exports."),
+				amount: finite.default(0).describe("0 is flat, 1 a full bend."),
+				phase: finite.default(0).describe("Moves a wave or cloth along; one cycle every 2π. Animate it for motion."),
+			})
+			.strict()
+			.prefault({}),
+		shade: ratio.default(0.5).describe("How much the surface darkens as it turns from the light."),
+		shadow: ratio.default(1).describe("Strength of the shadow it casts on the Board while lifted."),
+		back: BoardIdSchema.optional().describe("An item drawn on the back face, shown once the item turns over; without it the back shows the front mirrored and dimmed."),
+	})
+	.strict()
+	.describe("Takes the item off the Board into perspective, drawn as a live picture that rises, leans, turns and bends. A frame carries its children; depth inside a lifted frame stays part of its picture.");
+export type BoardDepth = z.infer<typeof BoardDepthSchema>;
+
+const numberOr = (value: unknown, fallback: number) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
+
+export function resolveBoardDepth(value: unknown): BoardDepth | null {
+	if (!value || typeof value !== "object") return null;
+	const raw = value as Record<string, unknown>;
+	const tilt = raw.tilt && typeof raw.tilt === "object" ? (raw.tilt as Record<string, unknown>) : {};
+	const bend = raw.bend && typeof raw.bend === "object" ? (raw.bend as Record<string, unknown>) : {};
+	const kind = (BOARD_DEPTH_BENDS as readonly unknown[]).includes(bend.kind) ? (bend.kind as BoardDepthBend) : "none";
+	return {
+		lift: numberOr(raw.lift, 0),
+		tilt: { x: numberOr(tilt.x, 0), y: numberOr(tilt.y, 0) },
+		spin: numberOr(raw.spin, 0),
+		bend: { kind, amount: numberOr(bend.amount, 0), phase: numberOr(bend.phase, 0) },
+		shade: Math.min(1, Math.max(0, numberOr(raw.shade, 0.5))),
+		shadow: Math.min(1, Math.max(0, numberOr(raw.shadow, 1))),
+		...(typeof raw.back === "string" && raw.back ? { back: raw.back } : {}),
+	};
+}
+
+export function isBoardDepthActive(depth: BoardDepth | null | undefined): depth is BoardDepth {
+	return (
+		!!depth &&
+		(depth.lift !== 0 || depth.tilt.x % 360 !== 0 || depth.tilt.y % 360 !== 0 || depth.spin % 360 !== 0 || (depth.bend.kind !== "none" && depth.bend.amount !== 0))
+	);
+}
+
 const itemEnvelope = {
 	script: BoardScriptSchema.optional(),
 	parent: BoardIdSchema.optional().describe("A frame id; position becomes relative to the frame, and the item moves with it."),
@@ -174,6 +223,7 @@ const itemEnvelope = {
 	opacity: ratio.default(1),
 	visible: z.boolean().optional().describe("false hides the item and its children; key it on a timeline to show the item only for a span."),
 	style: BoardStyleSchema.default({}),
+	depth: BoardDepthSchema.optional(),
 	locked: z.boolean().optional(),
 	autoplay: z.boolean().optional().describe("true shows live content as the Board opens: an app runs, a video loops muted, a 3D model renders. Ignored for other items and for a video whose props.time follows a timeline."),
 	metadata: z.record(z.string(), z.unknown()).optional(),
@@ -358,6 +408,7 @@ export const BoardModelSettingsSchema = z
 	.object({
 		view: BoardModelViewSchema.optional().describe("Camera for the card's still and where the model turns back to; the default three-quarter view without it."),
 		animation: z.string().min(1).max(240).optional().describe("Animation clip that plays; the model's first without it."),
+		display: z.enum(["card", "object"]).optional().describe("card (default) shows a still in a card; object rests the model itself on the Board, facing the viewer as view shows it, fitted to the item's box, lit, shadowed and drawn among lifted items."),
 	})
 	.strict()
 	.describe("How a 3D model file shows; ignored for other files.");

@@ -7,6 +7,7 @@ import type {
 import {
 	type BoardExportRegion,
 	boardAnimatesScriptParams,
+	boardDocumentUsesDepth,
 	hasBoardScripts,
 	selectBoardExportAssets,
 } from "@neta-art/cohub/board";
@@ -20,9 +21,10 @@ import {
 	type BoardRenderPalette,
 	type BoardRenderStyle,
 	createBoardRenderSampler,
+	loadBoardDepthEngine,
 	prepareBrowserBoardScripts,
 } from "@neta-art/cohub/board/render";
-import { type Renderer, Texture } from "pixi.js";
+import { type Renderer, RendererType, Texture } from "pixi.js";
 
 export type BoardImageFormat = "png" | "jpeg" | "webp";
 
@@ -228,7 +230,9 @@ export async function exportBoardImage(
 		if (!prepared) return null;
 
 		const assets = selectBoardExportAssets(
-			prepared.plan.items.filter((item) => prepared.scene.opacity(item.id) > 0),
+			[...prepared.plan.items, ...prepared.plan.extras].filter(
+				(item) => prepared.scene.opacity(item.id) > 0,
+			),
 			bridge.assetKey,
 			{ scale: prepared.plan.scale },
 		);
@@ -253,6 +257,13 @@ export async function exportBoardImage(
 			}
 		}
 
+		const depth =
+			renderer.type === RendererType.WEBGL &&
+			boardDocumentUsesDepth(prepared.document)
+				? await loadBoardDepthEngine()
+						.then((engine) => engine.createBoardDepthStage(renderer))
+						.catch(() => undefined)
+				: undefined;
 		try {
 			return await bridge.withTextures(
 				assets.items,
@@ -271,6 +282,7 @@ export async function exportBoardImage(
 						viewTextures: bridge.viewTextures(),
 						assetKey: cappedAssetKey,
 						backgroundTexture: backgroundTexture?.texture,
+						depth,
 					});
 					if (!result) return null;
 
@@ -301,6 +313,7 @@ export async function exportBoardImage(
 			);
 		} finally {
 			backgroundTexture?.dispose();
+			depth?.destroy();
 		}
 	} finally {
 		scripts?.dispose();

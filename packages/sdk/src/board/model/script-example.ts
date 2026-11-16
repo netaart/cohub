@@ -301,3 +301,151 @@ export function draw(ctx, { state }) {
   }
 }
 `;
+
+export const BOARD_SCRIPT_HANKY_EXAMPLE = `// A handkerchief from a Northeastern song-and-dance duet: tap it three times, or type
+// "toss" in play, and it flies up spinning for every viewer, then drops back to rest.
+// It draws the cloth and lifts itself, or the frame named by script.targets.lift, whose
+// children then travel in the same picture.
+const DURATION = 3200;
+const ease = (t) => 1 - (1 - t) ** 3;
+const smooth = (t) => t * t * (3 - 2 * t);
+const clamp = (t) => Math.min(Math.max(t, 0), 1);
+
+export default function (ctx) {
+  let taps = 0;
+  let idle = 0;
+  let watch = null;
+  let typed = "";
+  let stop = null;
+  ctx.hitRegions({ hanky: { target: "self", label: "Toss the handkerchief", cursor: "pointer", over: true } });
+
+  const toss = () => {
+    spin();
+    ctx.broadcast("toss");
+  };
+  // Three taps, each within 600 ms of the last, timed on the script clock.
+  const forget = () => {
+    taps = 0;
+    watch?.();
+    watch = null;
+  };
+  ctx.on("click", () => {
+    taps += 1;
+    idle = 0;
+    if (taps >= 3) {
+      forget();
+      return toss();
+    }
+    watch ??= ctx.onFrame(({ dt }) => {
+      idle += dt;
+      if (idle > 600) forget();
+    });
+  });
+  ctx.on("keydown", ({ key }) => {
+    typed = (typed + key).slice(-4).toLowerCase();
+    if (typed === "toss") toss();
+  });
+  // Our own broadcast comes back with peer: null; we already spin.
+  ctx.on("toss", ({ peer }) => {
+    if (peer) spin();
+  });
+
+  const target = ctx.targets.lift ?? ctx.self.id;
+
+  function spin() {
+    if (stop) return;
+    const box = ctx.get(target)?.size ?? ctx.self.base.size;
+    const size = Math.max(box.width, box.height);
+    const gentle = ctx.env.reducedMotion;
+    let t = 0;
+    stop = ctx.onFrame(({ dt }) => {
+      t += dt;
+      const p = clamp(t / DURATION);
+      const windup = smooth(clamp(p / 0.12));
+      const q = clamp((p - 0.1) / 0.7);
+      const air = 4 * q * (1 - q);
+      const land = clamp((p - 0.8) / 0.2);
+      const settle = land ? Math.exp(-land * 5) * Math.sin(land * 18) : 0;
+      const hold = 1 - smooth(land);
+      ctx.present(target, {
+        depth: {
+          lift: gentle ? size * 0.1 * air : size * (0.06 * windup * hold + 0.55 * air) + size * 0.03 * settle,
+          tilt: gentle
+            ? { x: 0, y: 0 }
+            : { x: (30 * windup + 10 * Math.sin(t / 180) * air) * hold + 6 * settle, y: 14 * Math.sin(t / 260) * air },
+          spin: gentle ? 0 : 1440 * ease(p),
+          bend: { kind: "cloth", amount: (0.25 * windup + 0.35 * air) * hold + 0.12 * Math.abs(settle), phase: t / 70 },
+          shade: 0.7,
+        },
+      });
+      if (p < 1) return;
+      ctx.present(target, null);
+      stop();
+      stop = null;
+      if (ctx.capabilities.has("haptics")) ctx.capabilities.call("haptics", { kind: "confirm" });
+    });
+  }
+}
+
+// A red octagon of peonies and leaves, edged with gold stitching.
+export function draw(g, { width, height }) {
+  let seed = 7;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const cut = Math.min(width, height) * 0.2;
+  const octagon = (inset) => {
+    const c = cut + inset * 0.41;
+    g.beginPath();
+    g.moveTo(c, inset);
+    g.lineTo(width - c, inset);
+    g.lineTo(width - inset, c);
+    g.lineTo(width - inset, height - c);
+    g.lineTo(width - c, height - inset);
+    g.lineTo(c, height - inset);
+    g.lineTo(inset, height - c);
+    g.lineTo(inset, c);
+    g.closePath();
+  };
+  octagon(0);
+  g.save();
+  g.clip();
+  g.fillStyle = "#b3122e";
+  g.fillRect(0, 0, width, height);
+  const leaf = (x, y, r, a) => {
+    g.save();
+    g.translate(x, y);
+    g.rotate(a);
+    g.fillStyle = "#2f8f46";
+    g.beginPath();
+    g.ellipse(r * 0.9, 0, r * 0.75, r * 0.3, 0, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+  };
+  const peony = (x, y, r, colors) => {
+    for (let i = 0; i < 4; i++) leaf(x, y, r, rand() * Math.PI * 2);
+    for (const [k, color] of [[1, colors[0]], [0.78, colors[1]], [0.55, colors[0]], [0.34, colors[2]]]) {
+      g.fillStyle = color;
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2 + k * 3;
+        g.beginPath();
+        g.ellipse(x + Math.cos(a) * r * k * 0.45, y + Math.sin(a) * r * k * 0.45, r * k * 0.55, r * k * 0.36, a, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+    g.fillStyle = "#ffd23f";
+    g.beginPath();
+    g.arc(x, y, r * 0.14, 0, Math.PI * 2);
+    g.fill();
+  };
+  const palettes = [["#f2558c", "#ffc2d6", "#ffffff"], ["#ffffff", "#ffd6e3", "#f2558c"], ["#f7a531", "#ffe2a8", "#ffffff"], ["#5aa6ff", "#cfe4ff", "#ffffff"]];
+  const step = Math.max(width, height) / 3.2;
+  for (let y = step * 0.4; y < height + step * 0.5; y += step * 0.86)
+    for (let x = (Math.round(y / step) % 2) * step * 0.5 + step * 0.3; x < width + step * 0.5; x += step)
+      peony(x + (rand() - 0.5) * step * 0.2, y + (rand() - 0.5) * step * 0.2, step * (0.26 + rand() * 0.08), palettes[Math.floor(rand() * palettes.length)]);
+  g.restore();
+  g.lineWidth = 12;
+  g.strokeStyle = "#ffd23f";
+  g.setLineDash([3, 7]);
+  octagon(6);
+  g.stroke();
+}
+`;

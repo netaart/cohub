@@ -120,7 +120,7 @@ function scriptAgent(
       }
       const runtime = instance.runtime;
       if (data.input || data.delta) runtime.update(input);
-      for (const event of data.events ?? []) runtime.event(event);
+      for (const event of data.events ?? []) runtime.event(event, data.t);
       runtime.step(data.t ?? 0);
       let bitmap: ImageBitmap | undefined;
       if (instance.module?.draw && data.draw !== false && !(data.shaders && instance.module.shader)) {
@@ -140,7 +140,7 @@ function scriptAgent(
       }
       const output = runtime.output();
       const changed = output.version !== instance.outputVersion;
-      const { shader: _shader, parameters: _parameters, ...repeat } = output;
+      const { shader: _shader, bend: _bend, parameters: _parameters, ...repeat } = output;
       const sent = changed ? (instance.outputVersion < 0 ? output : repeat) : undefined;
       instance.outputVersion = output.version;
       send(

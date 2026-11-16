@@ -399,6 +399,7 @@ export function createBoardScriptHost(
     else data.bitmap?.close?.();
     if (output && entry.output) {
       output.shader ??= entry.output.shader;
+      output.bend ??= entry.output.bend;
       output.parameters ??= entry.output.parameters;
     }
     let changed = acceptsBitmap;

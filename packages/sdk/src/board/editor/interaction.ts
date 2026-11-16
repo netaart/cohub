@@ -28,6 +28,7 @@ import {
 	type WorldPoint,
 	worldPoint,
 	zoomAround,
+	isBoardDepthLifted,
 } from "../model/index.js";
 import { CONNECTION_PORT_RADIUS, type ConnectionPort, connectionPorts, connectionPortAt as portAt, portHitRadius } from "./connection-ports.js";
 import type { EditorContext } from "./context.js";
@@ -325,6 +326,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		if (!candidateId) return null;
 		const item = scene.get(candidateId);
 		if (!item || ctx.query.isLocked(item) || item.type === "arrow") return null;
+		if (isBoardDepthLifted(scene, item.id)) return null;
 		if (!selection.includes(item.id) && opensOnTap(item)) return null;
 		return registry.capabilities(item).canConnect ? item.id : null;
 	}

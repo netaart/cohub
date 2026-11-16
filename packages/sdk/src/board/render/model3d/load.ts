@@ -93,13 +93,20 @@ function withFaceNormals(geometry: Geometry3D): Geometry3D {
 		return out;
 	};
 	const positions = expand("aPosition", 3) as Float32Array;
-	return new Geometry3D({ positions, normals: faceNormals(positions), uvs: expand("aUV", 2), colors: expand("aColor", 4) });
+	const joints = expand("aJoints", 4);
+	return new Geometry3D({
+		positions,
+		normals: faceNormals(positions),
+		uvs: expand("aUV", 2),
+		colors: expand("aColor", 4),
+		...(joints ? { joints: Uint16Array.from(joints), weights: expand("aWeights", 4) } : {}),
+	});
 }
 
 function repairNormals(source: Scene3DSource) {
 	for (const primitives of source.geometries) {
 		primitives?.forEach((geometry, index) => {
-			if (!geometry || geometry.getAttribute("aNormal") || geometry.getAttribute("aJoints") || geometry.morphTargetCount > 0) return;
+			if (!geometry || geometry.getAttribute("aNormal") || geometry.morphTargetCount > 0) return;
 			primitives[index] = withFaceNormals(geometry);
 			geometry.destroy(true);
 		});

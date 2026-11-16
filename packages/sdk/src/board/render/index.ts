@@ -29,3 +29,4 @@ export * from "./text-measurement.js";
 export * from "./text-resolution.js";
 export * from "./video-thumbnail.js";
 export * from "./model3d/index.js";
+export * from "./depth/index.js";

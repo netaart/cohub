@@ -44,6 +44,7 @@ export type BoardOverlayInput = {
 	ports?: ReadonlyArray<{ x: number; y: number; radius: number }>;
 	hoveredPort?: { x: number; y: number } | null;
 	bindTarget?: BoardFrame | null;
+	projected?: (id: string) => readonly WorldPoint[] | null;
 };
 
 const HOVER_ALPHA = 0.55;
@@ -101,6 +102,14 @@ function strokeOutline(
 	graphics.restore();
 }
 
+function strokePolygon(graphics: Graphics, points: readonly WorldPoint[], line: Line) {
+	const first = points[0];
+	if (!first) return;
+	graphics.moveTo(first.x, first.y);
+	for (const point of points.slice(1)) graphics.lineTo(point.x, point.y);
+	graphics.closePath().stroke({ ...line, join: "round" });
+}
+
 function drawHandle(graphics: Graphics, point: WorldPoint, style: BoardRenderStyle, palette: BoardRenderPalette, inv: number, active: boolean) {
 	const size = (active ? style.selection.handleSize + 2 : style.selection.handleSize) * inv;
 	if (style.selection.handle === "square") graphics.rect(point.x - size / 2, point.y - size / 2, size, size);
@@ -141,18 +150,25 @@ export function drawBoardOverlay(graphics: Graphics, input: BoardOverlayInput) {
 	}
 
 	const hovered = input.hovered;
-	if (hovered && hovered.type === "arrow") strokeArrow(graphics, hovered, scene, palette.muted, inv, 0.2);
+	const hoverOutline = hovered ? input.projected?.(hovered.id) : null;
+	if (hoverOutline) strokePolygon(graphics, hoverOutline, { color: palette.muted, width: inv * style.selection.width, alpha: HOVER_ALPHA });
+	else if (hovered && hovered.type === "arrow") strokeArrow(graphics, hovered, scene, palette.muted, inv, 0.2);
 	else if (hovered) strokeOutline(graphics, expandFrame(hovered.frame, outset), isBoardCard(hovered), style, { color: palette.muted, width: inv * style.selection.width, alpha: HOVER_ALPHA }, inv, 0, 0);
 
 	if (selected.length === 0) return;
 	const single = selected.length === 1 ? selected[0] : undefined;
 	const dash = style.selection.dash;
 	const line = { color: brand, width: style.selection.width * inv, alpha: 1 };
+	let lifted = false;
 	for (const item of selected) {
-		if (item.type === "arrow") strokeArrow(graphics, item, scene, brand, inv, 0.3);
+		const outline = input.projected?.(item.id);
+		if (outline) {
+			lifted = true;
+			strokePolygon(graphics, outline, single ? line : { ...line, alpha: PEER_ALPHA });
+		} else if (item.type === "arrow") strokeArrow(graphics, item, scene, brand, inv, 0.3);
 		else if (!single) strokeOutline(graphics, expandFrame(item.frame, outset), isBoardCard(item), style, { ...line, alpha: PEER_ALPHA }, inv, 0, 0);
 	}
-	if (!transform) return;
+	if (!transform || lifted) return;
 	if (single?.type !== "arrow") {
 		const card = single ? isBoardCard(single) : false;
 		strokeOutline(graphics, expandFrame(transform.frame, outset), card, style, line, inv, dash, input.march);

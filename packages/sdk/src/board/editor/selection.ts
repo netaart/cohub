@@ -4,6 +4,11 @@ import {
 	type BoardMatrix,
 	type BoardSceneItem,
 	boardAutoplayKind,
+	boardDepthItemOutline,
+	boardDepthRootOf,
+	isBoardDepthLifted,
+	itemBounds,
+	unionRects,
 	hasAuthoredSize,
 	IDENTITY_MATRIX,
 	placeItem,
@@ -41,11 +46,29 @@ export function createSelectionModule(ctx: EditorContext) {
 		() => [items()] as const,
 		(selected) => selectionBounds(selected.map((item) => item.frame)),
 	);
+	const visualBounds = memo(
+		() => [items(), bounds(), state.camera, state.surfaceSize] as const,
+		(selected, flat, camera, surface) => {
+			if (!flat || !selected.some((item) => boardDepthRootOf(state.scene, item.id))) return flat;
+			const view = { ...camera, width: surface.width, height: surface.height };
+			return unionRects(
+				selected.map((item) => {
+					const outline = boardDepthItemOutline(state.scene, item.id, view);
+					if (!outline?.length) return itemBounds(item.frame);
+					const xs = outline.map((point) => point.x);
+					const ys = outline.map((point) => point.y);
+					return { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
+				}),
+			);
+		},
+	);
 	const rotatesOnTouch = ctx.options.touchRotation !== false;
 	const transform = memo(
 		() => [items(), bounds(), rotatesOnTouch || !isTouchLikePointer(state.hoverPointerType)] as const,
 		(selected, rect, rotates) => {
 			const resolved = resolveSelectionTransform(registry, selected, rect);
+			if (resolved && selected.some((item) => isBoardDepthLifted(state.scene, item.id)))
+				return { ...resolved, resizeMode: "none" as const, canRotate: false };
 			return resolved && !rotates ? { ...resolved, canRotate: false } : resolved;
 		},
 	);
@@ -239,6 +262,7 @@ export function createSelectionModule(ctx: EditorContext) {
 	return {
 		items,
 		bounds,
+		visualBounds,
 		transform,
 		set,
 		toggle,

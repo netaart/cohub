@@ -79,6 +79,71 @@ const PRESETS = {
 		ease: "linear",
 		tracks: [{ property: "rotation", keyframes: [[0, 0], [1, 360]] }],
 	},
+	flip: {
+		description: "Turn over about the vertical axis, rising as it turns; shows depth.back. Flip again to turn back.",
+		duration: 900,
+		ease: IN_OUT,
+		tracks: [
+			{ property: "depth.tilt", keyframes: [[0, { x: 0, y: 0 }], [1, { x: 0, y: 180 }]] },
+			{ property: "depth.lift", keyframes: [[0, 0], [0.5, 60], [1, 0]] },
+		],
+	},
+	lift: {
+		description: "Rise off the Board, leaning slightly, and stay up; land brings it back.",
+		duration: 500,
+		ease: OUT,
+		tracks: [
+			{ property: "depth.lift", keyframes: [[0, 0], [1, 60]] },
+			{ property: "depth.tilt", keyframes: [[0, { x: 0, y: 0 }], [1, { x: 6, y: -4 }]] },
+		],
+	},
+	land: {
+		description: "Settle back onto the Board after lift.",
+		duration: 450,
+		ease: "cubic-bezier(0.5, 0, 0.75, 0)",
+		tracks: [
+			{ property: "depth.lift", keyframes: [[0, 0], [1, -60]] },
+			{ property: "depth.tilt", keyframes: [[0, { x: 0, y: 0 }], [1, { x: -6, y: 4 }]] },
+		],
+	},
+	toss: {
+		description: "Toss up spinning like a handkerchief and drop back; size the height with --duration.",
+		duration: 2400,
+		ease: IN_OUT,
+		tracks: [
+			{ property: "depth.lift", keyframes: [[0, 0], [0.5, 280], [1, 0]] },
+			{ property: "depth.spin", keyframes: [[0, 0], [1, 1080]], ease: "cubic-bezier(0.2, 0.6, 0.35, 1)" },
+			{ property: "depth.tilt", keyframes: [[0, { x: 0, y: 0 }], [0.5, { x: 24, y: 10 }], [1, { x: 0, y: 0 }]] },
+			{ property: "depth.bend.kind", keyframes: [[0, "cloth"]] },
+			{ property: "depth.bend.amount", keyframes: [[0, 0], [0.5, 0.4], [1, 0]] },
+			{ property: "depth.bend.phase", keyframes: [[0, 0], [1, 30]], ease: "linear" },
+		],
+	},
+	sway: {
+		description: "Lean back and forth like a card in hand; loop it for an idle sway.",
+		duration: 3200,
+		ease: IN_OUT,
+		tracks: [{ property: "depth.tilt", keyframes: [[0, { x: 0, y: 0 }], [0.25, { x: 10, y: -14 }], [0.75, { x: -8, y: 12 }], [1, { x: 0, y: 0 }]] }],
+	},
+	wave: {
+		description: "Ripple like a flag held at its left edge; loop it.",
+		duration: 1600,
+		ease: "linear",
+		tracks: [
+			{ property: "depth.bend.kind", keyframes: [[0, "wave"]] },
+			{ property: "depth.bend.amount", keyframes: [[0, 0.8]] },
+			{ property: "depth.bend.phase", keyframes: [[0, 0], [1, 2 * Math.PI]] },
+		],
+	},
+	curl: {
+		description: "Turn away like a page from its right edge.",
+		duration: 1200,
+		ease: IN_OUT,
+		tracks: [
+			{ property: "depth.bend.kind", keyframes: [[0, "curl"]] },
+			{ property: "depth.bend.amount", keyframes: [[0, 0], [1, 1]] },
+		],
+	},
 } satisfies Record<string, PresetDefinition>;
 
 export type BoardPresetName = keyof typeof PRESETS;
