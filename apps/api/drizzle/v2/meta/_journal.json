@@ -610,6 +610,13 @@
       "when": 1794811885367,
       "tag": "0086_session_turns_requested_meta",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1794819883052,
+      "tag": "0087_space_sessions_shared_participants",
+      "breakpoints": true
     }
   ]
 }

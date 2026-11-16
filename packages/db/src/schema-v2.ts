@@ -725,6 +725,11 @@ export const spaceSessions = v2.table(
       "gin",
       sql`(${table.meta} -> 'participants' -> 'userUuids')`,
     ),
+    // Sessions whose participants are not just the creator; the recent Space list's participants segment repeats this predicate.
+    sharedParticipantUserUuidsIdx: index("v2_idx_space_sessions_shared_participant_user_uuids").using(
+      "gin",
+      sql`(${table.meta} -> 'participants' -> 'userUuids')`,
+    ).where(sql`((${table.meta} -> 'participants' -> 'userUuids') -> 1) is not null or ((${table.meta} -> 'participants' -> 'userUuids') ->> 0) <> coalesce(${table.userUuid}, '')`),
   }),
 );
 
