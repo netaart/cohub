@@ -492,15 +492,17 @@ the web, would otherwise be overwritten. The SDK's `board.diff(from, to?)` retur
 
 ## Local Boards
 
-A `.board.json` file is a Board of its own, without a Space: `{ "version", "board",
-"items", "animations" }`. The CLI reads and writes it with the same `get`, `apply`,
-`inspect` and `export`; media and script paths are relative to its folder.
+Outside a Space, a `.board` file is a Board of its own: `{ "version", "board",
+"items", "animations" }`, where a Space's `.board` file holds only `boardId`. The CLI
+tells them apart by content, and `create` makes a local file wherever no Space is
+targeted (`-s`, `COHUB_SPACE_ID` or a bound directory). It reads and writes it with the
+same `get`, `apply`, `inspect` and `export`; media and script paths are relative to its folder.
 Every write takes `<file>.lock`, validates the patch like the server, writes the
 file atomically and appends its delta to `.<file>.history.jsonl`, so `history`
 lists and restores versions. An edit made outside the CLI is recorded as a full
 document on the next write, before that write's delta.
 
-`cohub boards open <file>` serves the Board on 127.0.0.1 with the web app's Board
+`cohub boards open <file>` opens a Space Board on the Cohub desktop, and serves a local one on 127.0.0.1 with the web app's Board
 panel. One server per user serves every opened file under a private key in the
 URL, and exits after an idle hour. The page syncs through the same replica as a
 Space Board: its edits are applies, and a write from the CLI or by hand reaches it

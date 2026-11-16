@@ -1,13 +1,30 @@
 import { readFile, realpath } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { mimeTypeForPath } from "@neta-art/cohub";
+import { isBoardPath } from "@neta-art/cohub/board";
 import type { ResolvedFile } from "@neta-art/cohub/media";
 import { createClient } from "./client.js";
 import { WORKSPACE_ROOT } from "./space-files/operands.js";
 
-export const LOCAL_BOARD_SUFFIX = ".board.json";
+/** A Space `.board` file only names its Board; a local one holds the document itself. */
+export const isSpaceBoardManifest = (value: unknown) =>
+  Boolean(value) && typeof value === "object" && typeof (value as { boardId?: unknown }).boardId === "string";
 
-export const isLocalBoardPath = (target: string) => target.toLowerCase().endsWith(LOCAL_BOARD_SUFFIX);
+/**
+ * Whether `target` is a local Board, decided by the file and never by the caller:
+ * an existing `.board` file by its content, a missing one by whether this CLI
+ * targets a Space here (`create` makes it there).
+ */
+export async function isLocalBoard(target: string, targetsSpace: () => Promise<boolean>): Promise<boolean> {
+  if (!isBoardPath(target)) return false;
+  const text = await readFile(target, "utf8").catch(() => null);
+  if (text === null) return !(await targetsSpace());
+  try {
+    return !isSpaceBoardManifest(JSON.parse(text));
+  } catch {
+    return true;
+  }
+}
 
 /** Where the files a Board names by relative path (media, script modules) come from. */
 export type BoardFiles = {

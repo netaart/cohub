@@ -57,13 +57,14 @@ Sign in once for each custom server, or supply `COHUB_EXECUTION_TOKEN`.
 
 ## Local Boards
 
-A path ending in `.board.json` is a Board without a Space or sign-in. The file holds the
-document; media and script paths are relative to its folder.
+Where no Space is targeted (`-s`, `COHUB_SPACE_ID` or a bound directory), `boards create`
+writes the whole Board into the `.board` file, with no sign-in. Every Board command tells a
+local file from a Space's by its content; media and script paths are relative to its folder.
 
 ```bash
-cohub boards create design/plan.board.json --title "Plan"
-cohub boards open design/plan.board.json      # the web Board panel on 127.0.0.1
-cohub boards apply design/plan.board.json '{"items":{"t":{"type":"text","props":{"text":"Hi"}}}}'
+cohub boards create design/plan.board --title "Plan"
+cohub boards open design/plan.board      # the web Board panel on 127.0.0.1
+cohub boards apply design/plan.board '{"items":{"t":{"type":"text","props":{"text":"Hi"}}}}'
 ```
 
 Edits in the browser and from the CLI merge live; `boards history` lists and restores

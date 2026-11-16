@@ -6,7 +6,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { mimeTypeForPath } from "@neta-art/cohub";
-import { isLocalBoardPath, localBoardFiles } from "./board-files.js";
+import { isBoardPath } from "@neta-art/cohub/board";
+import { localBoardFiles } from "./board-files.js";
 import { applyLocalBoard, localBoardChange, localBoardReadResult, readLocalBoard, storeLocalBoardImage } from "./board-local.js";
 import { packagePath } from "./package-paths.js";
 import { CLI_VERSION } from "./version.js";
@@ -168,7 +169,7 @@ export async function serveBoardViewer(): Promise<void> {
   };
 
   const register = async (path: string) => {
-    if (!isLocalBoardPath(path)) throw Object.assign(new Error(`${path} is not a .board.json file.`), { status: 400 });
+    if (!isBoardPath(path)) throw Object.assign(new Error(`${path} is not a .board file.`), { status: 400 });
     const file = await realpath(resolve(path));
     await readLocalBoard(file);
     const id = createHmac("sha256", key).update(file).digest("base64url").slice(0, 16);

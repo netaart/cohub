@@ -14,7 +14,7 @@ import {
   isEmptyBoardDelta,
   parseBoardDocument,
 } from "@neta-art/cohub/board";
-import { LOCAL_BOARD_SUFFIX } from "./board-files.js";
+import { isSpaceBoardManifest } from "./board-files.js";
 import { localMediaFacts } from "./local-media.js";
 
 /**
@@ -60,6 +60,7 @@ function parse(path: string, text: string): { version: number; document: BoardDo
     throw new Error(`${path} is not valid JSON.`, { cause });
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${path} must contain a JSON object.`);
+  if (isSpaceBoardManifest(raw)) throw new Error(`${path} points to a Board in a Space; use it from that Space.`);
   const parsed = parseBoardDocument(raw, { keepUnknown: true });
   if (!parsed.ok) {
     const first = parsed.diagnostics[0];
@@ -78,7 +79,7 @@ export async function readLocalBoard(path: string): Promise<LocalBoard> {
 }
 
 export function localBoardTitle(path: string, document: BoardDocument): string {
-  return document.board.title || basename(path).slice(0, -LOCAL_BOARD_SUFFIX.length) || basename(path);
+  return document.board.title || basename(path).replace(/\.board$/i, "") || basename(path);
 }
 
 export function localBoardReadResult(id: string, path: string, board: LocalBoard): BoardReadResult {

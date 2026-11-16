@@ -34,12 +34,12 @@ import {
 } from "../board-command-support.js";
 import type { BoardSource } from "../board-document.js";
 import { BOARD_EXPORT_IMAGE_MEMORY_MIB, BOARD_EXPORT_RENDERERS } from "../board-export-resources.js";
-import { isLocalBoardPath, localBoardFiles, spaceBoardFiles } from "../board-files.js";
+import { isLocalBoard, localBoardFiles, spaceBoardFiles } from "../board-files.js";
 import { settleBoardDocument, settleBoardPatch } from "../board-media.js";
 import { formatBoardTime, parseBoardTime, parseBoardTimes } from "../board-time.js";
 import { createClient, createRealtimeClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
-import { resolveSpace } from "../space.js";
+import { resolveSpace, targetsSpace } from "../space.js";
 import { registerBoardExampleCommands } from "./boards/examples.js";
 import { registerBoardAuthoringCommands } from "./boards/authoring.js";
 
@@ -208,23 +208,25 @@ async function runExportTask(boards: Command, options: ExportOptions): Promise<v
 }
 
 /** Recorded input is a Space file for a Space Board and a local file for a local one. */
-async function readBoardInputs(target: string, source: BoardSource, path: string): Promise<string> {
-  if (isLocalBoardPath(target)) return readFile(path, "utf8");
+async function readBoardInputs(local: boolean, source: BoardSource, path: string): Promise<string> {
+  if (local) return readFile(path, "utf8");
   return new TextDecoder().decode((await source.files.read(path)).bytes);
 }
 
 const local = () => import("../board-local.js");
 
+const isLocal = (boards: Command, target: string) => isLocalBoard(target, () => targetsSpace(boards));
+
 const loadBoardSource = async (boards: Command, target: string) =>
-  (await import("../board-document.js")).loadBoardSource(target, () => resolveSpace(boards));
+  (await import("../board-document.js")).loadBoardSource(boards, target);
 
 async function loadSettledBoard(boards: Command, target: string): Promise<BoardSource> {
   const source = await loadBoardSource(boards, target);
   return { ...source, document: await settleBoardDocument(source.files, source.document) };
 }
 
-function requireSpaceBoard(target: string, what: string): void {
-  if (isLocalBoardPath(target)) throw new Error(`${what} needs a Board in a Space; ${target} is a local file.`);
+async function requireSpaceBoard(boards: Command, target: string, what: string): Promise<void> {
+  if (await isLocal(boards, target)) throw new Error(`${what} needs a Board in a Space; ${target} is a local file.`);
 }
 
 function parseSize(value: string): { width: number; height: number } {
@@ -324,7 +326,7 @@ delivered within the same moment, in document order. Exports have no network or
 device; --inputs replays a recording made with Record input in the Board's Scripts panel. --frame draws the frame as a
 page: its fill and shaders, without its outline and label.`)
     .action(async (target: string, options: ExportOptions) => {
-      if (options.async && isLocalBoardPath(target)) return handleHttp(new Error("--async runs in a Space's sandbox; export a local Board without it."));
+      if (options.async && (await isLocal(boards, target))) return handleHttp(new Error("--async runs in a Space's sandbox; export a local Board without it."));
       if (options.async) return runExportTask(boards, options);
       const controller = new AbortController();
       const cancel = () => controller.abort(new Error("Export cancelled."));
@@ -346,7 +348,7 @@ page: its fill and shaders, without its outline and label.`)
           if (!jsonRequested(options)) process.stderr.write(`Rendering ${width}x${height}, ${frames} frame(s)\n`);
         };
         const source = await loadSettledBoard(boards, target);
-        const inputs = options.inputs ? await readBoardInputs(target, source, options.inputs) : undefined;
+        const inputs = options.inputs ? await readBoardInputs(await isLocal(boards, target), source, options.inputs) : undefined;
         const pathVideoFormat = videoFormatFromPath(out);
         const requestedFormat = options.format?.toLowerCase();
         if (requestedFormat && ![...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].includes(requestedFormat as BoardNodeExportFormat | BoardVideoExportFormat)) throw new Error(`--format must be one of ${[...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].join(", ")}.`);
@@ -594,15 +596,18 @@ Examples:
 
 function registerViewerCommands(boards: Command): void {
   withJson(boards.command("open <path>")
-    .description("Show a local .board.json Board in the browser; edits there and from the CLI merge live")
-    .option("--no-browser", "Only print the URL"))
+    .description("Show a Board: a Space Board on the Cohub desktop, a local one in the browser")
+    .option("--no-browser", "For a local Board, only print the URL"))
     .addHelpText("after", `
-One local server serves every Board opened on this machine and stops after an
-idle hour. The URL carries a private key; share it only with yourself.
-  cohub boards open design/plan.board.json`)
-    .action(async (path: string, options: JsonOptions & { browser?: boolean }) => {
+A local Board is served from this machine by one server that stops after an idle
+hour; the URL carries a private key. Edits there and from the CLI merge live.
+  cohub boards open design/plan.board`)
+    .action(async (path: string, options: JsonOptions & { browser?: boolean }, command: Command) => {
       try {
-        if (!isLocalBoardPath(path)) throw new Error(`${path} is not a local Board; open Space Boards with cohub desktop open file://${path}.`);
+        if (!(await isLocal(boards, path))) {
+          const { openDesktopWindow } = await import("./desktop.js");
+          return openDesktopWindow(`file://${path}`, { json: options.json }, command);
+        }
         const { canOpenBrowser, openBoardViewer, openInBrowser } = await import("../board-viewer.js");
         const url = await openBoardViewer(path);
         const opened = options.browser !== false && canOpenBrowser();
@@ -628,10 +633,10 @@ export function registerBoards(program: Command): Command {
     .command("boards")
     .description("Read, write, animate and export Boards (by id or .board path)")
     .addHelpText("after", `
-A Board is one JSON document: { board, items, animations }. A path ending in
-.board.json is a local Board: the file holds the document, needs no Space, and
-media and script paths are relative to its folder.
-  open      show a local Board in the browser; edits there and here merge live
+A Board is one JSON document: { board, items, animations }. Outside a Cohub Space
+a .board file is the Board itself: it needs no sign-in, and media and script paths
+are relative to its folder.
+  open      show it: on the Cohub desktop, or in the browser for a local Board
   get       read it
   apply     write it with a JSON Merge Patch; null deletes
   schema    the fields of any part and what they mean; also the script API
@@ -649,18 +654,17 @@ media and script paths are relative to its folder.
 Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
 
   withJson(boards.command("create <path>")
-    .description("Create a Board file, optionally with an initial document; a .board.json path stays local")
+    .description("Create a Board file, optionally with an initial document; outside a Space the file is the Board")
     .option("--title <title>", "Board title")
     .option("-i, --input <file>", "Initial document JSON; - for stdin")
     .option("--mutation-id <id>", "Stable id for safe retries"))
     .addHelpText("after", `
   cohub boards examples lesson > lesson.json
-  cohub boards create lesson.board -i lesson.json
-  cohub boards create design/plan.board.json -i lesson.json   # local, no Space`)
+  cohub boards create lesson.board -i lesson.json`)
     .action(async (path: string, options: JsonOptions & { title?: string; input?: string; mutationId?: string }) => {
       try {
         const read = options.input ? await readBoardJsonObject(options.input, BOARD_CREATE_INPUT_MAX_BYTES) : undefined;
-        if (isLocalBoardPath(path)) {
+        if (await isLocal(boards, path)) {
           await mkdir(dirname(path), { recursive: true });
           const patch = read && await settleBoardPatch(localBoardFiles(dirname(path)), read, async () => ({}));
           const created = await (await local()).createLocalBoard(path, { ...(options.title ? { title: options.title } : {}), ...(patch ? { patch } : {}) });
@@ -714,7 +718,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
         const only = list(options.only);
         if (only?.some((section) => section !== "board" && section !== "items" && section !== "animations")) throw new Error("--only takes board, items, animations, or a combination.");
         const sections = only ? new Set(only) : null;
-        if (isLocalBoardPath(target)) {
+        if (await isLocal(boards, target)) {
           const unsupported = (["limit", "cursor", "since", "checkpoint"] as const).filter((name) => options[name] !== undefined);
           if (unsupported.length) throw new Error(`A local Board is read whole; drop ${unsupported.map((name) => `--${name}`).join(", ")}.`);
           const { localBoardReadResult, readLocalBoard } = await local();
@@ -773,7 +777,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
       try {
         const read = await readPatch(inline, options.input, BOARD_TRANSACTION_INPUT_MAX_BYTES);
         let baseVersion = options.baseVersion === undefined ? undefined : parseNumber(options.baseVersion, "--base-version", { min: 0, integer: true });
-        if (isLocalBoardPath(target)) {
+        if (await isLocal(boards, target)) {
           const { applyLocalBoard, readLocalBoard } = await local();
           const current = await readLocalBoard(target);
           if (options.replace && !options.dryRun && baseVersion === undefined) {
@@ -825,7 +829,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
     .option("--restore <version>", "Return the Board to this version as a new write"))
     .action(async (target: string, options: JsonOptions & { before?: string; limit?: string; restore?: string }) => {
       try {
-        if (isLocalBoardPath(target)) {
+        if (await isLocal(boards, target)) {
           const { localBoardHistory, restoreLocalBoard } = await local();
           if (options.restore !== undefined) {
             const { result } = await restoreLocalBoard(target, parseNumber(options.restore, "--restore", { min: 1, integer: true }));
@@ -887,7 +891,7 @@ Before rewriting a Board with apply --replace, see what others changed since the
   cohub boards diff plan.board --from 41 --to 44 --json`)
     .action(async (target: string, options: JsonOptions & { from: string; to?: string }) => {
       try {
-        requireSpaceBoard(target, "diff");
+        await requireSpaceBoard(boards, target, "diff");
         const board = await boardClient(boards, target);
         const result = await board.diff(
           parseNumber(options.from, "--from", { min: 0, integer: true }),
@@ -975,7 +979,7 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
     .description("Stream Board changes and playback as they happen"))
     .action(async (target: string, options: JsonOptions) => {
       try {
-        requireSpaceBoard(target, "watch");
+        await requireSpaceBoard(boards, target, "watch");
         const spaceId = await resolveSpace(boards);
         const client = createRealtimeClient();
         const board = await client.space(spaceId).boards.open(target);
@@ -1016,7 +1020,7 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
 function registerPlaybackCommands(boards: Command): void {
   const run = async (target: string, options: JsonOptions, command: (board: Awaited<ReturnType<typeof boardClient>>) => Promise<BoardPlaybackSnapshot | null>) => {
     try {
-      requireSpaceBoard(target, "Shared playback");
+      await requireSpaceBoard(boards, target, "Shared playback");
       const playback = await command(await boardClient(boards, target));
       if (jsonRequested(options)) return outJson({ playback });
       showPlayback(playback);

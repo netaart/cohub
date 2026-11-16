@@ -8,7 +8,7 @@ import { applyLocalBoard, createLocalBoard, localBoardHistory, readLocalBoard, r
 const text = (id: string, value: string) => ({ items: { [id]: { type: "text", props: { text: value } } } });
 
 test("local Boards keep every version, including edits made outside the CLI", async () => {
-  const path = join(await mkdtemp(join(tmpdir(), "board-local-")), "plan.board.json");
+  const path = join(await mkdtemp(join(tmpdir(), "board-local-")), "plan.board");
   await createLocalBoard(path, { title: "Plan", patch: text("a", "one") });
   await applyLocalBoard(path, text("a", "two"), { by: "cli" });
   await writeFile(path, (await readFile(path, "utf8")).replace('"two"', '"by hand"'));

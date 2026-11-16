@@ -22,18 +22,20 @@ same shape into the document and lands it as one version.
 `items` and `animations` are maps keyed by ids you choose. Requires Cohub CLI
 10.3.0+; if a command below is missing, run `npm install -g @neta-art/cohub-cli`.
 Board commands take a Board ID or a `.board` path and target the current Space
-(`-s <spaceId>` for another), or a local `.board.json` file; add `--json` when chaining.
+(`-s <spaceId>` for another); add `--json` when chaining.
 
 ## Workflow
 
 1. Look up fields with `boards schema`, and current content with `boards get`.
-2. Open the Board when possible so the user can follow along; otherwise continue
-   without it. Create the `.board` file first — it only points to the Board:
+2. Create the `.board` file and open it so the user can follow along:
 
    ```bash
    cohub boards create boards/plan.board --title "Plan"   # -i seed.json for an initial document
-   cohub desktop open file://boards/plan.board
+   cohub boards open boards/plan.board
    ```
+
+   `open` shows it on the user's Cohub desktop; outside Cohub it prints a local
+   URL — give it to the user. Their edits and yours merge live.
 
 3. Build in coherent patches, one visible step at a time: `--dry-run`, then `apply`.
 4. Check with `boards inspect` and an exported image.
@@ -45,25 +47,13 @@ cohub boards examples                        # basic, workflow, slides, lesson, 
 cohub boards examples workflow > seed.json
 ```
 
-## Local Boards
+Outside Cohub the `.board` file is the Board itself, with no sign-in:
 
-Outside a Cohub Space, or when the user wants the Board in their project, use a
-path ending in `.board.json`. The file holds the document itself; no Space or
-sign-in is needed.
-
-```bash
-cohub boards create design/plan.board.json --title "Plan"   # -i seed.json for an initial document
-cohub boards open design/plan.board.json                     # serves it locally and opens the browser
-```
-
-- Give the user the URL `open` prints. They can edit the Board there while you
-  apply patches; both merge, and the page follows every write.
-- Media `src` and script modules are paths relative to the Board file's folder;
-  images the user pastes land in its `assets/` folder.
-- `get`, `apply`, `inspect`, `frames`, `export`, `simulate` and `history` work as
-  in a Space; `watch`, `diff`, shared playback and `task` cards need a Space.
-- `boards history` marks the user's edits `viewer`. Write only through `apply`: a
-  hand edit to the file still becomes its own version, but skips validation.
+- Media and script paths are relative to its folder; images the user pastes land
+  in `assets/` there.
+- `watch`, `diff`, shared playback and `task` cards need a Space, and say so.
+- `boards history` marks the user's edits `viewer`. Write through `apply`; a hand
+  edit to the file still becomes a version, but skips validation.
 
 ## Schema
 
