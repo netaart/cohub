@@ -42,20 +42,13 @@ $effect(() => {
 onDestroy(() => cancelAnimationFrame(frame));
 </script>
 
+<!-- Keep these nodes touching: under white-space: pre-wrap any whitespace here
+     would render as a space at the stable/tail boundary, often mid-word. -->
 <span
 	class="streaming-words"
 	class:streaming-words-muted={tone === 'muted'}
 	aria-live="off"
->
-	{stableText}
-	{#if tailText}
-		{#key tailKey}
-			<span class="streaming-tail" class:streaming-tail-muted={tone === 'muted'}
-				>{tailText}</span
-			>
-		{/key}
-	{/if}
-	{#if active}
-		<span class="streaming-caret" aria-hidden="true"></span>
-	{/if}
-</span>
+>{stableText}{#if tailText}{#key tailKey}<span
+				class="streaming-tail"
+				class:streaming-tail-muted={tone === 'muted'}>{tailText}</span
+			>{/key}{/if}{#if active}<span class="streaming-caret" aria-hidden="true"></span>{/if}</span>
