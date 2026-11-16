@@ -2,7 +2,7 @@ import type { BoardFileItem } from "@cohub/protocol";
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
 import { fileMetaLine, fileStem } from "../../model/file-preview.js";
 import { isBoardModelItem } from "../../model/media.js";
-import type { SceneItem } from "../../model/scene.js";
+import type { BoardSceneItem, SceneItem } from "../../model/scene.js";
 import { type CardTag, createCardTag, syncCardTag, traceCube, zoomCardTag } from "../card-tag.js";
 import { cardElevation, containRect, drawCardSurface } from "../surface.js";
 import { boardCardDetailed } from "../lod.js";
@@ -21,6 +21,8 @@ type ModelParts = {
 	view: Container | null;
 	loading: boolean;
 	sig: string;
+	shown: { id: string; key: string } | null;
+	held: string | null;
 };
 
 const partsByContainer = new WeakMap<Container, ModelParts>();
@@ -34,8 +36,7 @@ export function modelKeyCenter(width: number, height: number) {
 	return { x: width - margin - radius, y: height - margin - radius, radius };
 }
 
-function showLive(parts: ModelParts, live: BoardModelLive | null, width: number, height: number) {
-	const view = live?.view ?? null;
+function showLive(parts: ModelParts, view: Container | null, live: BoardModelLive | null, width: number, height: number) {
 	if (parts.view !== view) {
 		parts.view?.removeFromParent();
 		parts.view = view;
@@ -43,6 +44,13 @@ function showLive(parts: ModelParts, live: BoardModelLive | null, width: number,
 	}
 	const inset = Math.min(width, height) * INSET_RATIO;
 	live?.place(inset, inset, width - inset * 2, height - inset * 2);
+}
+
+function hold(parts: ModelParts, key: string | null, item: BoardSceneItem, context: BoardRenderContext) {
+	if (parts.held === key) return;
+	if (parts.held) context.releaseTexture(parts.held);
+	parts.held = key;
+	if (key) context.acquireTexture(key, item);
 }
 
 function drawSpinner(spinner: Graphics, radius: number) {
@@ -61,13 +69,19 @@ function sync(container: Container, item: SceneItem<BoardFileItem>, context: Boa
 	const title = snapshot?.title || fileStem(src);
 	syncCardTag(parts.tag, { glyph: "model", text: `${title} · ${meta}`, width }, context);
 
+	const key = context.assetKey(item);
+	const current = key ? context.getTexture(key) : null;
+	const failed = Boolean(key && !current && context.hasError(key));
+	// Keep the last live frame or still until the next one arrives.
+	const waiting = key !== null && !current && !failed;
 	const live = context.modelLive?.(item.id) ?? null;
-	showLive(parts, live, width, height);
+	showLive(parts, live?.view ?? (waiting ? parts.view : null), live, width, height);
+	const previous = waiting && parts.shown?.id === item.id && parts.shown.key !== key ? parts.shown.key : null;
+	const texture = current ?? (previous ? context.getTexture(previous) : null);
+	hold(parts, texture && !current ? previous : null, item, context);
+	if (current && key) parts.shown = { id: item.id, key };
 	const shown = parts.view !== null;
 	parts.loading = Boolean(live && !shown);
-	const key = context.assetKey(item);
-	const texture = key ? context.getTexture(key) : null;
-	const failed = Boolean(key && !texture && context.hasError(key));
 	const detailed = boardCardDetailed(context.zoom);
 	const elevation = cardElevation(context, item.id);
 	const sig = [
@@ -130,7 +144,7 @@ export const modelCardRenderer: BoardCardRenderer = {
 		const spinner = new Graphics({ visible: false });
 		const tag = createCardTag();
 		root.addChild(plate, sprite, chrome, spinner, tag.root);
-		partsByContainer.set(root, { root, plate, sprite, chrome, spinner, tag, view: null, loading: false, sig: "" });
+		partsByContainer.set(root, { root, plate, sprite, chrome, spinner, tag, view: null, loading: false, sig: "", shown: null, held: null });
 		if (item.type === "file") sync(root, item, context);
 		return root;
 	},
@@ -158,8 +172,9 @@ export const modelCardRenderer: BoardCardRenderer = {
 			accentAlpha: 0.45,
 		});
 	},
-	destroy: (container) => {
+	destroy: (container, context) => {
 		const parts = partsByContainer.get(container);
+		if (parts?.held) context.releaseTexture(parts.held);
 		parts?.view?.removeFromParent();
 		parts?.root.destroy({ children: true });
 		partsByContainer.delete(container);

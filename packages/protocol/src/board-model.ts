@@ -345,6 +345,23 @@ const fileProps = {
 	src: BoardMediaSourceSchema,
 	snapshot: BoardMediaSnapshotSchema.optional(),
 };
+export const BoardModelViewSchema = z
+	.object({
+		yaw: finite.describe("Degrees around the model; 0 faces its front, 90 its right side."),
+		pitch: finite.min(-90).max(90).describe("Degrees above the model; 90 looks straight down."),
+		zoom: finite.positive().max(100).describe("1 fits the whole model; 2 is twice as close."),
+		target: z.tuple([finite, finite, finite]).optional().describe("Pivot offset from the model's centre, in model radii."),
+	})
+	.strict();
+export type BoardModelView = z.infer<typeof BoardModelViewSchema>;
+export const BoardModelSettingsSchema = z
+	.object({
+		view: BoardModelViewSchema.optional().describe("Camera for the card's still and where the model turns back to; the default three-quarter view without it."),
+		animation: z.string().min(1).max(240).optional().describe("Animation clip that plays; the model's first without it."),
+	})
+	.strict()
+	.describe("How a 3D model file shows; ignored for other files.");
+export type BoardModelSettings = z.infer<typeof BoardModelSettingsSchema>;
 export const BoardMediaOriginSchema = z
 	.object({ taskRunId: z.string().min(1).max(160), artifactId: z.string().min(1).max(240) })
 	.strict()
@@ -376,7 +393,7 @@ export const BoardAudioItemSchema = z
 	.object({ ...boxed(BOARD_DEFAULT_SIZES.audio), type: z.literal("audio"), props: z.object(timedFileProps).strict() })
 	.strict();
 export const BoardFileItemSchema = z
-	.object({ ...boxed(BOARD_DEFAULT_SIZES.file), type: z.literal("file"), props: z.object(fileProps).strict() })
+	.object({ ...boxed(BOARD_DEFAULT_SIZES.file), type: z.literal("file"), props: z.object({ ...fileProps, model: BoardModelSettingsSchema.optional() }).strict() })
 	.strict();
 
 export const BOARD_TASK_ARTIFACT_LIMIT = 6;

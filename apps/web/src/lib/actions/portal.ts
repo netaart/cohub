@@ -1,7 +1,11 @@
 /** Mount a node under document.body so it escapes local stacking/overflow. */
 export function portal(node: HTMLElement) {
 	if (typeof document === "undefined") return {};
-	document.body.appendChild(node);
+	const fullscreen = document.fullscreenElement;
+	(fullscreen instanceof HTMLDivElement
+		? fullscreen
+		: document.body
+	).appendChild(node);
 	return {
 		destroy() {
 			node.remove();

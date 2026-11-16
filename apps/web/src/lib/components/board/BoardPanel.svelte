@@ -53,6 +53,7 @@ import {
 } from "@neta-art/cohub/board/stage";
 import {
 	AppWindow,
+	Camera,
 	ExternalLink,
 	Gamepad2,
 	Play,
@@ -341,6 +342,48 @@ const appActions = $derived.by<BoardMenuAction[]>(() => {
 			run: () => onOpenApp({ appId: app.appId, name: app.name }),
 		});
 	return actions;
+});
+
+const selectedModel = $derived.by(() => {
+	const [item] = editor.selectedItems;
+	return editor.selectedItems.length === 1 &&
+		item?.type === "file" &&
+		isBoardModelItem(item)
+		? item
+		: null;
+});
+const modelCoverAction = $derived.by<BoardMenuAction | null>(() => {
+	const item = selectedModel;
+	if (!item || editor.readonly || item.locked || editor.enteredId !== item.id)
+		return null;
+	return {
+		id: "model-cover",
+		label: m.board_model_set_cover({}, { locale }),
+		icon: Camera,
+		run: () => {
+			const view = scriptStage?.model.view;
+			if (view)
+				editor.setSelectionProps("file", {
+					model: { ...item.props.model, view },
+				});
+		},
+	};
+});
+const modelActions = $derived.by<BoardMenuAction[]>(() => {
+	const item = selectedModel;
+	if (!item) return [];
+	const open: BoardMenuAction[] =
+		parseBoardMediaSource(item.props.src)?.kind === "file"
+			? [
+					{
+						id: "model-open",
+						label: m.board_open_file({}, { locale }),
+						icon: ExternalLink,
+						run: () => openMediaSource(item.props.src),
+					},
+				]
+			: [];
+	return modelCoverAction ? [modelCoverAction, ...open] : open;
 });
 
 const scriptItemId = $derived.by(() => {
@@ -939,13 +982,15 @@ const sessionActions = createBoardSessionActions({
 });
 const toolbarActions = $derived([
 	...appActions,
+	...modelActions,
 	...sessionActions.toolbar,
 	...(scriptSettingsAction ? [scriptSettingsAction] : []),
 ]);
 
 const menuActions = $derived.by<BoardMenuAction[]>(() => {
 	const id = scriptItemId;
-	if (!id) return [...appActions, ...sessionActions.menu];
+	const model = modelCoverAction ? [modelCoverAction] : [];
+	if (!id) return [...appActions, ...model, ...sessionActions.menu];
 	const restart: BoardMenuAction = {
 		id: "script-restart",
 		label: m.board_script_restart({}, { locale }),
@@ -954,6 +999,7 @@ const menuActions = $derived.by<BoardMenuAction[]>(() => {
 	};
 	return [
 		...appActions,
+		...model,
 		...sessionActions.menu,
 		...(scriptSettingsAction ? [scriptSettingsAction] : []),
 		restart,
@@ -1243,6 +1289,7 @@ function handleKeydown(event: KeyboardEvent) {
 	const inBar = playbackBar?.contains(event.target) ?? false;
 	if (!inBar && isEditableTarget(event.target)) return;
 	if (!inBar && scriptKey(event)) return;
+	if (!inBar && editor.enteredId && scriptStage?.model.key(event)) return;
 	if (playbackBar?.key(event)) return;
 	if (
 		authoring &&

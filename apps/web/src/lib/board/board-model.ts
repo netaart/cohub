@@ -1,5 +1,6 @@
 import {
 	type BoardAssetSource,
+	boardModelViewKey,
 	fileStem,
 	parseBoardMediaSource,
 } from "@neta-art/cohub/board";
@@ -28,10 +29,12 @@ export function createBoardModelPreviews(
 			if (!source) throw new Error("Model source is invalid");
 			const file = parseBoardMediaSource(request.src);
 			// Published files keep their URL, so their stills outlive the session.
-			const stillKey =
+			const url =
 				published && file?.kind === "file"
 					? (await assets.resolveFile(file.value))?.url
 					: null;
+			const view = boardModelViewKey(request.view);
+			const stillKey = url && (view ? `${url}#view=${view}` : url);
 			const { readModelStill, saveModelStill } = await import(
 				"$lib/model3d/still-cache"
 			);
@@ -41,6 +44,7 @@ export function createBoardModelPreviews(
 			const still = await renderModelStill(source, {
 				signal: AbortSignal.timeout(STILL_TIMEOUT_MS),
 				maxBytes,
+				view: request.view,
 			});
 			if (stillKey) saveModelStill(stillKey, still);
 			return still;

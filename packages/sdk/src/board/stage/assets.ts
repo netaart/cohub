@@ -11,6 +11,7 @@ import {
 	boardModelFormat,
 } from "../model/index.js";
 import { mediaHost } from "@cohub/protocol/core";
+import type { BoardModelView } from "@cohub/protocol/board-model";
 import type { ModelFormat } from "@cohub/protocol/fs";
 import {
 	fitsVideoFrames,
@@ -134,6 +135,7 @@ export type BoardModelPreviewRequest = {
 	src: string;
 	format: ModelFormat;
 	size?: number;
+	view?: BoardModelView;
 };
 
 export type BoardModelPreviews = {
@@ -703,10 +705,10 @@ export function createBoardAssetManager(
 	function modelLoader(item: BoardSceneItem, key: string): Load | null {
 		const previews = options.modelPreviews;
 		if (!previews || item.type !== "file") return null;
-		const { src, snapshot } = item.props;
+		const { src, snapshot, model } = item.props;
 		const format = boardModelFormat(src, snapshot?.mimeType);
 		if (!format) return null;
-		const request = { key, src, format, size: snapshot?.size };
+		const request = { key, src, format, size: snapshot?.size, view: model?.view };
 		return async () => ({ texture: Texture.from(await previews.load(request)), url: "", edge: Number.POSITIVE_INFINITY });
 	}
 

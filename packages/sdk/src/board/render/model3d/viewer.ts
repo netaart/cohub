@@ -1,12 +1,13 @@
 import { Application } from "pixi.js";
 import type { LoadedModel } from "./load.js";
 import { createModelScene, type ModelScene } from "./scene.js";
+import type { ModelStats } from "./view.js";
 
 export type ModelViewer = {
 	setModel(model: LoadedModel | null): void;
-	readonly animated: boolean;
-	playing: boolean;
-	home(): void;
+	readonly scene: ModelScene | null;
+	readonly stats: ModelStats | null;
+	snapshot(): Promise<Blob | null>;
 	destroy(): void;
 };
 
@@ -69,26 +70,21 @@ export async function mountModelViewer(canvas: HTMLCanvasElement, options: Model
 	visibility.observe(canvas);
 
 	const onDown = (event: PointerEvent) => {
-		if (!current || event.button > 0) return;
+		if (!current || event.button > 2) return;
 		canvas.setPointerCapture(event.pointerId);
-		current.scene.press(event.pointerId, event.clientX, event.clientY);
+		current.scene.press(event.pointerId, event.clientX, event.clientY, event.button > 0 || event.shiftKey);
 	};
 	const onMove = (event: PointerEvent) => {
-		if (!canvas.hasPointerCapture(event.pointerId)) return;
-		current?.scene.move(event.pointerId, event.clientX, event.clientY);
-		request();
+		if (canvas.hasPointerCapture(event.pointerId)) current?.scene.move(event.pointerId, event.clientX, event.clientY);
 	};
 	const onUp = (event: PointerEvent) => current?.scene.release(event.pointerId);
 	const onWheel = (event: WheelEvent) => {
 		if (!current) return;
 		event.preventDefault();
 		current.scene.wheel(event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY);
-		request();
 	};
-	const onDoubleClick = () => {
-		current?.scene.home();
-		request();
-	};
+	const onDoubleClick = () => current?.scene.home();
+	const onContextMenu = (event: Event) => event.preventDefault();
 	const onContextLost = (event: Event) => {
 		event.preventDefault();
 		options.onContextLost?.();
@@ -100,6 +96,7 @@ export async function mountModelViewer(canvas: HTMLCanvasElement, options: Model
 		["pointercancel", onUp as EventListener],
 		["wheel", onWheel as EventListener, { passive: false }],
 		["dblclick", onDoubleClick],
+		["contextmenu", onContextMenu],
 		["webglcontextlost", onContextLost],
 	];
 	for (const [type, listener, listenerOptions] of listeners) canvas.addEventListener(type, listener, listenerOptions);
@@ -116,26 +113,23 @@ export async function mountModelViewer(canvas: HTMLCanvasElement, options: Model
 		setModel(model) {
 			clear();
 			if (model) {
-				const scene = createModelScene(model, { reducedMotion: options.reducedMotion });
+				const scene = createModelScene(model, { reducedMotion: options.reducedMotion, changed: request });
 				current = { model, scene };
 				app.stage.addChild(scene.view);
 				scene.playing = !options.reducedMotion;
 			}
 			layout();
 		},
-		get animated() {
-			return current?.scene.animated ?? false;
+		get scene() {
+			return current?.scene ?? null;
 		},
-		get playing() {
-			return current?.scene.playing ?? false;
+		get stats() {
+			return current?.model.stats ?? null;
 		},
-		set playing(value) {
-			if (current) current.scene.playing = value;
-			request();
-		},
-		home() {
-			current?.scene.home();
-			request();
+		snapshot() {
+			if (!current) return Promise.resolve(null);
+			app.render();
+			return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
 		},
 		destroy() {
 			if (destroyed) return;

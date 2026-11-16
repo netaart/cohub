@@ -16,14 +16,32 @@ import {
 } from "@pixi/3d";
 import { BufferImageSource, ImageSource, Texture } from "pixi.js";
 import { ensureModelWithin, fetchModelBytes, type ModelLoadOptions, type ModelSource, modelDecoders } from "./source.js";
+import type { ModelStats } from "./view.js";
 
 export type LoadedModel = {
 	root: Container3D;
 	player: AnimationPlayer | null;
+	stats: ModelStats;
 	destroy(): void;
 };
 
-const NEUTRAL = { baseColor: 0x9aa0a8, roughness: 0.62, metallic: 0.04 };
+export const NEUTRAL = { baseColor: 0x9aa0a8, roughness: 0.62, metallic: 0.04 };
+
+function measure(root: Container3D, counts: Pick<ModelStats, "materials" | "textures" | "clips" | "unit">): ModelStats {
+	let triangles = 0;
+	let vertices = 0;
+	root.traverse((node) => {
+		if (!(node instanceof Mesh3D)) return;
+		const { geometry } = node;
+		const drawn = geometry.indices.length || geometry.vertexCount;
+		if (geometry.topology === "triangle-list") triangles += Math.floor(drawn / 3);
+		else if (geometry.topology === "triangle-strip") triangles += Math.max(0, drawn - 2);
+		vertices += geometry.vertexCount;
+	});
+	const bounds = root.getLocalBounds();
+	const size: ModelStats["size"] = bounds.isEmpty() ? [0, 0, 0] : [bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z];
+	return { triangles, vertices, size, ...counts };
+}
 
 type Fetch = (reference: string) => Promise<Uint8Array<ArrayBuffer>>;
 
@@ -134,11 +152,12 @@ async function parseGltfModel(bytes: Uint8Array<ArrayBuffer>, binary: boolean, r
 	repairNormals(source);
 	const model = new Model3D({ source, autoUpdate: false });
 	const neutral = neutralDefaults(model, json);
-	const first = model.player?.animationLabels[0];
-	if (first) model.player?.getState(first).gotoAndStop(0);
+	const clips = model.player?.animationLabels ?? [];
+	if (clips[0]) model.player?.getState(clips[0]).gotoAndStop(0);
 	return {
 		root: model,
-		player: first ? (model.player ?? null) : null,
+		player: clips.length ? (model.player ?? null) : null,
+		stats: measure(model, { materials: json.materials?.length ?? 0, textures: json.images?.length ?? 0, clips: clips.length, unit: "m" }),
 		destroy() {
 			model.destroy({ children: true });
 			for (const material of [...neutral, ...source.materials]) material?.destroy();
@@ -175,6 +194,7 @@ function parseStl(bytes: Uint8Array<ArrayBuffer>): LoadedModel {
 	return {
 		root,
 		player: null,
+		stats: measure(root, { materials: 0, textures: 0, clips: 0, unit: null }),
 		destroy() {
 			root.destroy({ children: true });
 			geometry.destroy(true);
