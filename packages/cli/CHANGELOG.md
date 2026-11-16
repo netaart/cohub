@@ -1,5 +1,17 @@
 # @neta-art/cohub-cli
 
+## 10.29.0
+
+### Minor Changes
+
+- bc8d5bf: Bring back replies: `space.prompt({ reply: "note" | "prompt" })` and `cohub spaces prompt --reply` deliver the final result of a prompt sent from a Cohub Turn back to the calling Chat, and `prompt` runs its Agent again. The `reply` origin kind, `SentTurnRef.reply`, `readSessionTurnReply()` and `readReplyStatus()` return. Prompts that open with a mention of another Space still run here.
+- 525caa2: Read chat replies aloud. `session.turn(turnId).speak()` and `cohub spaces sessions turns speak` render a reply with the voice configured in `.cohub/speech.json` (Space, then user, then platform). The audio is stored on the turn per voice and shared by every viewer with that voice. Space startup reports the caller's `speechVoice`.
+
+### Patch Changes
+
+- ac4de6a: Board model cards take `props.model`: `view` (yaw and pitch in degrees, zoom 1 fits the model) sets the camera for the card's still and the view an entered model turns back to, and `animation` picks the clip that plays. Stills cache per view. An entered model pans with Shift+drag or two fingers, and arrow keys, `+`, `-` and `0` turn, zoom and return it through `stage.model.key()`; `stage.model.view` reads the entered model's view so it can become the cover. `ModelScene.key()` and `homeView` back both, and `boardModelViewKey` keys a view for caching.
+- f02264a: Board models render with PixiJS 3D in the Board's own canvas. A `.glb`, `.gltf` or `.stl` card shows a still; entering it (its key, double-click or Enter) turns the model in place: drag to orbit, scroll or pinch to zoom, double-click to return, Escape to leave. Models with `autoplay` play their first animation live. `@neta-art/cohub/board/render` exports `loadModelEngine` (`loadModel`, `renderModelStill`, `mountModelViewer`), `boardModelSource` and `setModelDecoders`. OBJ is no longer previewed. The SDK now needs `pixi.js` 8.23 and takes `@pixi/3d` 0.1.0 as an optional peer, loaded only once a model shows.
+
 ## 10.28.1
 
 ### Patch Changes
