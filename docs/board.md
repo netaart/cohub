@@ -136,10 +136,14 @@ their media results as items that keep their URLs.
 
 A `file` item whose source is a 3D model (`.glb`, `.gltf` or `.stl`) shows a still
 of the model, drawn in the canvas with PixiJS 3D. Its corner key, double-click or
-Enter enters the card: drag to turn the model, scroll or pinch to zoom, double-click
-to return to the first view, and `Escape` or a click elsewhere to leave, as the model
+Enter enters the card: drag to turn the model, Shift+drag or two fingers to pan,
+scroll or pinch to zoom, arrow keys to turn, `+` and `-` to zoom, double-click or `0`
+to return to the cover view, and `Escape` or a click elsewhere to leave, as the model
 eases back to its still. A card too small to turn first zooms into view. A model with
-`autoplay` plays its first animation in place. glTF buffers and textures resolve next
+`autoplay` plays its first animation in place. `props.model.view` (yaw and pitch in
+degrees, zoom 1 fits the model) sets the still's camera; **Use this view as cover**
+writes the entered card's current view there. `props.model.animation` picks the clip
+that plays. glTF buffers and textures resolve next
 to the model, and Draco and meshopt compression decode as they load. The Web editor
 renders stills only for cards on screen, one at a time, and leaves models above 64 MB
 (16 MB on mobile) for the user to open. Other clients and exports draw a placeholder.

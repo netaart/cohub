@@ -1,4 +1,4 @@
-import { type BoardItem, parseBoardMediaSource } from "@cohub/protocol/board-model";
+import { type BoardItem, type BoardModelView, parseBoardMediaSource } from "@cohub/protocol/board-model";
 import { type ModelFormat, modelFormatForPath } from "@cohub/protocol/fs";
 
 const IMAGE_EXTENSIONS = new Set([
@@ -99,4 +99,8 @@ export function isBoardModelItem(
 		item?.type === "file" &&
 		boardModelFormat(item.props.src, item.props.snapshot?.mimeType) !== null
 	);
+}
+
+export function boardModelViewKey(view: BoardModelView | undefined): string {
+	return view ? [view.yaw, view.pitch, view.zoom, ...(view.target ?? [])].join(",") : "";
 }

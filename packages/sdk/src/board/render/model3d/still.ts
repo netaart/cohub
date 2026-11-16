@@ -2,6 +2,7 @@ import { autoDetectRenderer, type Renderer } from "pixi.js";
 import { loadModel } from "./load.js";
 import { createModelScene } from "./scene.js";
 import type { ModelLoadOptions, ModelSource } from "./source.js";
+import type { ModelView } from "./view.js";
 
 export const MODEL_STILL_EDGE = 640;
 const RELEASE_AFTER_MS = 30_000;
@@ -40,12 +41,12 @@ function release() {
 	void current?.then((instance) => instance.destroy()).catch(() => {});
 }
 
-export async function renderModelStill(source: ModelSource, options: ModelLoadOptions): Promise<ImageBitmap> {
+export async function renderModelStill(source: ModelSource, options: ModelLoadOptions & { view?: ModelView }): Promise<ImageBitmap> {
 	await idle();
 	const model = await loadModel(source, options);
 	const draw = async () => {
 		const target = await acquire();
-		const scene = createModelScene(model, { reducedMotion: true });
+		const scene = createModelScene(model, { reducedMotion: true, home: options.view });
 		try {
 			scene.resize(MODEL_STILL_EDGE, MODEL_STILL_EDGE);
 			target.render({ container: scene.view, clear: true });

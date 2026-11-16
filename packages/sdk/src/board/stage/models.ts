@@ -1,8 +1,9 @@
+import type { BoardModelSettings } from "@cohub/protocol/board-model";
 import type { Renderer } from "pixi.js";
 import type { BoardPointerEvent } from "../editor/index.js";
-import { type BoardAssetSource, type BoardScene, type BoardSceneItem, boardModelFormat, fileStem, isBoardModelItem, type WorldPoint } from "../model/index.js";
+import { type BoardAssetSource, type BoardScene, type BoardSceneItem, boardModelFormat, boardModelViewKey, fileStem, isBoardModelItem, type WorldPoint } from "../model/index.js";
 import type { BoardModelLive } from "../render/index.js";
-import { boardModelSource, type LoadedModel, loadModelEngine, type ModelScene } from "../render/model3d/index.js";
+import { boardModelSource, type LoadedModel, loadModelEngine, MODEL_VIEW_PRESETS, type ModelScene, type ModelView } from "../render/model3d/index.js";
 
 export type BoardModelTheater = {
 	sync(input: { scene: BoardScene; running: ReadonlySet<string>; entered: string | null }): void;
@@ -11,7 +12,9 @@ export type BoardModelTheater = {
 	pointer(phase: "down" | "move" | "up", input: BoardPointerEvent): boolean;
 	wheel(deltaY: number, world: WorldPoint): boolean;
 	home(world: WorldPoint): boolean;
+	key(key: string): boolean;
 	over(world: WorldPoint): boolean;
+	readonly view: ModelView | null;
 	destroy(): void;
 };
 
@@ -26,6 +29,7 @@ type Entry = {
 	retired: boolean;
 	failed: boolean;
 	live: BoardModelLive | null;
+	settings: BoardModelSettings | undefined;
 };
 
 export type BoardModelTheaterOptions = {
@@ -45,6 +49,8 @@ function modelKey(item: BoardSceneItem): string | null {
 	if (item.type !== "file" || !isBoardModelItem(item)) return null;
 	return `${item.props.src}:${item.props.snapshot?.mtimeMs ?? ""}`;
 }
+
+const settingsOf = (item: BoardSceneItem) => (item.type === "file" ? item.props.model : undefined);
 
 export function createBoardModelTheater(options: BoardModelTheaterOptions): BoardModelTheater {
 	const entries = new Map<string, Entry>();
@@ -101,9 +107,10 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 				return destroy(entry);
 			}
 			const reducedMotion = options.reducedMotion();
-			const scene = engine.createModelScene(model, { reducedMotion });
+			const scene = engine.createModelScene(model, { reducedMotion, home: entry.settings?.view, changed: options.frame });
 			entry.model = model;
 			entry.scene = scene;
+			scene.clip = entry.settings?.animation ?? scene.clip;
 			scene.playing = !reducedMotion;
 			layout(entry);
 			options.changed(entry.id);
@@ -120,6 +127,18 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 		entry.leaving = true;
 		entry.scene.home();
 		options.frame();
+	}
+
+	function configure(entry: Entry, settings: BoardModelSettings | undefined) {
+		const before = entry.settings;
+		entry.settings = settings;
+		const scene = entry.scene;
+		if (!scene) return;
+		if (boardModelViewKey(before?.view) !== boardModelViewKey(settings?.view)) {
+			scene.homeView = settings?.view ?? MODEL_VIEW_PRESETS.home;
+			if (entry.id !== entered) scene.home();
+		}
+		if (before?.animation !== settings?.animation) scene.clip = settings?.animation ?? scene.clips[0] ?? null;
 	}
 
 	const enteredEntry = () => (entered ? entries.get(entered) : undefined);
@@ -150,13 +169,16 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 				if (!item || modelKey(item) !== entry.key) {
 					if (item) release(entry);
 					else leave(entry);
-				} else entry.leaving = false;
+				} else {
+					entry.leaving = false;
+					configure(entry, settingsOf(item));
+				}
 			}
 			for (const [id, item] of wanted) {
 				const existing = entries.get(id);
 				if (existing && !existing.retired) continue;
 				if (existing) destroy(existing);
-				const entry: Entry = { id, key: modelKey(item) as string, controller: new AbortController(), model: null, scene: null, rect: null, leaving: false, retired: false, failed: false, live: null };
+				const entry: Entry = { id, key: modelKey(item) as string, controller: new AbortController(), model: null, scene: null, rect: null, leaving: false, retired: false, failed: false, live: null, settings: settingsOf(item) };
 				entries.set(id, entry);
 				void start(entry, item);
 			}
@@ -202,14 +224,12 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 			if (phase === "down") {
 				if (!pointers.size && (input.button !== 0 || !onEntered(input.world))) return false;
 				pointers.add(input.pointerId);
-				scene?.press(input.pointerId, input.screen.x, input.screen.y);
+				scene?.press(input.pointerId, input.screen.x, input.screen.y, input.shiftKey);
 				return true;
 			}
 			if (!pointers.has(input.pointerId)) return false;
-			if (phase === "move") {
-				scene?.move(input.pointerId, input.screen.x, input.screen.y);
-				options.frame();
-			} else {
+			if (phase === "move") scene?.move(input.pointerId, input.screen.x, input.screen.y);
+			else {
 				pointers.delete(input.pointerId);
 				scene?.release(input.pointerId);
 			}
@@ -218,16 +238,18 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 		wheel(deltaY, world) {
 			if (!onEntered(world)) return false;
 			enteredEntry()?.scene?.wheel(deltaY);
-			options.frame();
 			return true;
 		},
 		home(world) {
 			if (!onEntered(world)) return false;
 			enteredEntry()?.scene?.home();
-			options.frame();
 			return true;
 		},
+		key: (key) => enteredEntry()?.scene?.key(key) ?? false,
 		over: onEntered,
+		get view() {
+			return enteredEntry()?.scene?.viewpoint ?? null;
+		},
 		destroy() {
 			for (const entry of [...entries.values()]) destroy(entry);
 			pointers.clear();

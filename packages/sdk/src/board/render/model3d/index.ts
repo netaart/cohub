@@ -1,5 +1,6 @@
 export * from "./source.js";
-export type { LoadedModel, ModelScene, ModelViewer, ModelViewerOptions } from "./engine.js";
+export * from "./view.js";
+export type { LoadedModel, ModelScene, ModelSceneOptions, ModelViewer, ModelViewerOptions } from "./engine.js";
 
 export type ModelEngine = typeof import("./engine.js");
 

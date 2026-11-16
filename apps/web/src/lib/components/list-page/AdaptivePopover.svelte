@@ -18,7 +18,7 @@ const {
 	label: string;
 	onClose: () => void;
 	width?: number;
-	placement?: "bottom-start" | "bottom-end";
+	placement?: "bottom-start" | "bottom-end" | "top-start";
 	children: Snippet;
 } = $props();
 
@@ -71,7 +71,7 @@ $effect(() => {
 	<div
 		bind:this={panel}
 		class="menu-surface flex max-h-[min(420px,70vh)] flex-col overflow-y-auto p-1"
-		style:transform-origin={placement === "bottom-end" ? "top right" : "top left"}
+		style:transform-origin={placement === "bottom-end" ? "top right" : placement === "top-start" ? "bottom left" : "top left"}
 		use:floatNear={{ getAnchor: () => anchor, placement, gap: 6, width, zIndex: 120 }}
 		role="dialog"
 		aria-label={label}

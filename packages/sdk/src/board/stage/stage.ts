@@ -64,6 +64,7 @@ import {
 	boardShaderColor,
 	boardLodSize,
 	getBoardResolution,
+	type ModelView,
 	onBoardTextFontsChange,
 	parseBoardCssColor,
 	resolveBoardBackdrop,
@@ -197,6 +198,10 @@ export type BoardStage = {
 		subscribe(listener: () => void): () => void;
 	};
 	key(event: KeyboardEvent): boolean;
+	readonly model: {
+		key(event: KeyboardEvent): boolean;
+		readonly view: ModelView | null;
+	};
 	whenGesture(run: () => void): () => void;
 	recordInputs(onFull?: () => void): { stop(): BoardScriptInputLog };
 	/** Video and audio a timeline plays; `blocked` while the browser holds back sound until an interaction. */
@@ -1742,6 +1747,16 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			if (!scriptKey(event)) return false;
 			event.preventDefault();
 			return true;
+		},
+		model: {
+			key(event) {
+				if (event.metaKey || event.ctrlKey || event.altKey || !models.key(event.key)) return false;
+				event.preventDefault();
+				return true;
+			},
+			get view() {
+				return models.view;
+			},
 		},
 		whenGesture: (run) => senses.whenGesture(run),
 		recordInputs: (onFull) => scripts.record(onFull),

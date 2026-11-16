@@ -1,7 +1,7 @@
 import { boardItemPreview, featuredTaskArtifact, taskArtifactPreviewUrl } from "@cohub/protocol";
 import { type BoardMediaSource, isSafeBoardSourcePath, parseBoardMediaSource } from "@cohub/protocol/board-model";
 import { MEDIA_VARIANT_MAX, type MediaSize, mediaVariantSize } from "../../media.js";
-import { isBoardModelItem } from "./media.js";
+import { boardModelViewKey, isBoardModelItem } from "./media.js";
 import type { BoardSceneItem } from "./scene.js";
 
 export type BoardAssetMedia = "image" | "video" | "model";
@@ -12,6 +12,7 @@ export type BoardAssetKeySource = { kind: "file" | "url"; media: BoardAssetMedia
 export type BoardAssetRef = { src: string; media?: "image" | "video"; fit?: "contain" | "cover"; natural?: MediaSize };
 
 const COVER = "cover:";
+const MODEL_VIEW = "@";
 
 export function boardAssetRefKey({ src, media = "image", fit }: BoardAssetRef): string | null {
   if (!src) return null;
@@ -72,8 +73,11 @@ export function boardMediaNaturalSize(item: BoardSceneItem): MediaSize | null {
 export function boardAssetKey(item: BoardSceneItem): string | null {
   if (item.type === "task") return taskPreviewKey(item);
   if (item.type === "video") return stillKey("video", parseBoardMediaSource(item.props.src), item.props.snapshot?.mtimeMs);
-  if (item.type === "file" && isBoardModelItem(item))
-    return stillKey("model", parseBoardMediaSource(item.props.src), item.props.snapshot?.mtimeMs);
+  if (item.type === "file" && isBoardModelItem(item)) {
+    const key = stillKey("model", parseBoardMediaSource(item.props.src), item.props.snapshot?.mtimeMs);
+    const view = boardModelViewKey(item.props.model?.view);
+    return key && view ? `${key}${MODEL_VIEW}${view}` : key;
+  }
   return imageAssetKey(item);
 }
 
@@ -84,6 +88,7 @@ export function boardAssetKeySource(key: string): BoardAssetKeySource | null {
     if (separator < 0) return null;
     base = key.slice(separator + 1);
   }
+  if (base.startsWith("model")) base = base.split(MODEL_VIEW, 1)[0] as string;
   if (!base.startsWith(COVER)) return sourceOf(base);
   const source = sourceOf(base.slice(COVER.length));
   return source?.media === "image" ? { ...source, fit: "cover" } : null;

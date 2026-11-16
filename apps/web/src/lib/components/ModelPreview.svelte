@@ -1,12 +1,17 @@
 <script lang="ts">
 import {
 	loadModelEngine,
+	type ModelScene,
 	type ModelSource,
 	type ModelViewer,
 } from "@neta-art/cohub/board/render";
-import { Box, Pause, Play, RotateCcw } from "lucide-svelte";
-import { untrack } from "svelte";
+import { Box } from "lucide-svelte";
+import { onMount, untrack } from "svelte";
+import ModelControls, {
+	readModelControls,
+} from "$lib/components/ModelControls.svelte";
 import Spinner from "$lib/components/Spinner.svelte";
+import { saveFile } from "$lib/downloads.svelte";
 import { formatBytes } from "$lib/format-bytes";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import "$lib/model3d/decoders";
@@ -29,19 +34,26 @@ const reducedMotion =
 	typeof matchMedia === "function" &&
 	matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+let root: HTMLDivElement | null = $state(null);
 let canvas: HTMLCanvasElement | null = $state(null);
-let viewer: ModelViewer | null = $state(null);
+let viewer: ModelViewer | null = $state.raw(null);
 let attempt = $state(0);
 let acceptedKey = $state<string | null>(null);
 let phase = $state<"loading" | "ready" | "error">("loading");
 let failure = $state<"load" | "webgl">("load");
 let progress = $state<number | null>(null);
-let animated = $state(false);
-let playing = $state(false);
+let revision = $state(0);
+let fullscreen = $state<boolean | null>(null);
+let spinning = false;
 
 const gated = $derived(
 	(source.size ?? 0) > autoLoadMaxBytes && acceptedKey !== sourceKey,
 );
+const controls = $derived.by(() => {
+	revision;
+	const scene = phase === "ready" ? viewer?.scene : null;
+	return scene ? readModelControls(scene) : null;
+});
 
 function fail(kind: "load" | "webgl") {
 	failure = kind;
@@ -51,6 +63,14 @@ function fail(kind: "load" | "webgl") {
 function retry() {
 	phase = "loading";
 	attempt += 1;
+}
+
+function change(apply: (scene: ModelScene) => void) {
+	const scene = viewer?.scene;
+	if (!scene) return;
+	apply(scene);
+	spinning = scene.spinning;
+	revision += 1;
 }
 
 $effect(() => {
@@ -86,7 +106,6 @@ $effect(() => {
 	if (!active) return;
 	phase = "loading";
 	progress = null;
-	animated = playing = false;
 	active.setModel(null);
 	if (gated) return;
 	const current = untrack(() => source);
@@ -102,29 +121,75 @@ $effect(() => {
 		});
 		if (signal.aborted) return model.destroy();
 		active.setModel(model);
-		animated = active.animated;
-		playing = active.playing;
+		if (active.scene) active.scene.spinning = spinning;
 		phase = "ready";
+		revision += 1;
 	})().catch(() => {
 		if (!signal.aborted) fail("load");
 	});
 	return () => controller.abort();
 });
 
-function togglePlaying() {
-	if (!viewer) return;
-	viewer.playing = !playing;
-	playing = viewer.playing;
+onMount(() => {
+	const sync = () => {
+		fullscreen = document.fullscreenEnabled
+			? document.fullscreenElement === root
+			: null;
+	};
+	sync();
+	document.addEventListener("fullscreenchange", sync);
+	return () => document.removeEventListener("fullscreenchange", sync);
+});
+
+function toggleFullscreen() {
+	if (!root || fullscreen === null) return;
+	if (fullscreen) void document.exitFullscreen().catch(() => {});
+	else void root.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
+}
+
+async function saveSnapshot() {
+	const blob = await viewer?.snapshot();
+	if (!blob) return;
+	const stem = source.name.replace(/\.[^.]+$/, "") || "model";
+	void saveFile({
+		key: `model-image:${source.key}`,
+		name: `${stem}.png`,
+		mimeType: "image/png",
+		source: () => ({ kind: "blob", blob }),
+	});
+}
+
+const toggles: Record<string, (scene: ModelScene) => void> = {
+	" ": (scene) => (scene.playing = !scene.playing),
+	r: (scene) => (scene.spinning = !scene.spinning),
+	w: (scene) => (scene.wireframe = !scene.wireframe),
+	f: () => toggleFullscreen(),
+};
+
+function onKeydown(event: KeyboardEvent) {
+	const scene = viewer?.scene;
+	if (event.metaKey || event.ctrlKey || event.altKey || !scene || !controls)
+		return;
+	const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+	const shading = controls.shadings[Number(key) - 1];
+	const toggle = shading
+		? (target: ModelScene) => (target.shading = shading)
+		: toggles[key];
+	if (toggle) change(toggle);
+	else if (!scene.key(event.key)) return;
+	event.preventDefault();
 }
 </script>
 
-<div class="model-preview" data-drawer-swipe-ignore>
+<div bind:this={root} class="model-preview" data-drawer-swipe-ignore>
 	{#key attempt}
 		<canvas
 			bind:this={canvas}
 			class="model-canvas"
 			class:ready={phase === "ready"}
+			tabindex="0"
 			aria-label={source.name}
+			onkeydown={onKeydown}
 		></canvas>
 	{/key}
 
@@ -165,24 +230,17 @@ function togglePlaying() {
 		</div>
 	{/if}
 
-	{#if phase === "ready"}
-		<div class="model-toolbar toolbar-surface" role="toolbar" aria-label={m.model3d_controls({}, { locale })}>
-			{#if animated}
-				{@const label = playing ? m.model3d_pause({}, { locale }) : m.model3d_play({}, { locale })}
-				<button type="button" class="tool-key" title={label} aria-label={label} onclick={togglePlaying}>
-					{#if playing}<Pause class="h-4 w-4" />{:else}<Play class="h-4 w-4" />{/if}
-				</button>
-			{/if}
-			<button
-				type="button"
-				class="tool-key"
-				title={m.model3d_reset_view({}, { locale })}
-				aria-label={m.model3d_reset_view({}, { locale })}
-				onclick={() => viewer?.home()}
-			>
-				<RotateCcw class="h-4 w-4" />
-			</button>
-		</div>
+	{#if controls}
+		<ModelControls
+			{controls}
+			stats={viewer?.stats ?? null}
+			fileSize={source.size}
+			{fullscreen}
+			{reducedMotion}
+			onChange={change}
+			onSnapshot={saveSnapshot}
+			onFullscreen={toggleFullscreen}
+		/>
 	{/if}
 </div>
 
@@ -193,6 +251,10 @@ function togglePlaying() {
 		min-height: 0;
 		flex: 1;
 		overflow: hidden;
+	}
+
+	.model-preview:fullscreen {
+		background: var(--bg-content);
 	}
 
 	.model-canvas {
@@ -211,6 +273,10 @@ function togglePlaying() {
 		cursor: grabbing;
 	}
 
+	.model-canvas:focus-visible {
+		box-shadow: inset 0 0 0 2px var(--brand-ring);
+	}
+
 	.model-canvas.ready {
 		opacity: 1;
 	}
@@ -225,20 +291,6 @@ function togglePlaying() {
 		gap: 6px;
 		padding: 24px;
 		text-align: center;
-	}
-
-	.model-toolbar {
-		position: absolute;
-		bottom: 16px;
-		left: 50%;
-		z-index: 10;
-		transform: translateX(-50%);
-	}
-
-	@media (pointer: coarse) {
-		.model-toolbar {
-			--tool-key-size: 36px;
-		}
 	}
 
 	@media (prefers-reduced-motion: reduce) {
