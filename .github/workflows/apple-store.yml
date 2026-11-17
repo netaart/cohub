@@ -7,7 +7,6 @@ on:
       - 'apps/desktop/scripts/icons.mjs'
       - 'apps/ios/**'
       - 'scripts/apple/**'
-      - '.github/actions/apple-signing/**'
       - '.github/workflows/apple-store.yml'
   push:
     branches: [main]
@@ -17,7 +16,6 @@ on:
       - 'apps/desktop/scripts/icons.mjs'
       - 'apps/ios/**'
       - 'scripts/apple/**'
-      - '.github/actions/apple-signing/**'
       - '.github/workflows/apple-store.yml'
   workflow_dispatch:
     inputs:
@@ -85,7 +83,19 @@ jobs:
       - name: Validate release
         env:
           VERSION: ${{ inputs.version || '0.1.0' }}
-        run: bash scripts/apple/release-version.sh
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            git fetch --no-tags origin main
+            git merge-base --is-ancestor HEAD origin/main
+          fi
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo 'Expected a stable X.Y.Z marketing version' >&2
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "COHUB_COMMIT=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v7
         if: matrix.platform == 'macos'
         with:
@@ -98,22 +108,50 @@ jobs:
         run: |
           brew install xcodegen
           xcodegen generate --spec apps/ios/project.yml
-      - uses: ./.github/actions/apple-signing
-        id: signing
+      - name: Import application certificate
+        uses: apple-actions/import-codesign-certs@v7.2.0
+        id: certificates
         with:
-          team-id: ${{ vars.APPLE_TEAM_ID }}
-          certificate: ${{ matrix.platform == 'ios' && secrets.IOS_DISTRIBUTION_P12 || secrets.MAC_APP_STORE_P12 }}
-          installer-certificate: ${{ matrix.platform == 'macos' && secrets.MAC_APP_STORE_INSTALLER_P12 || '' }}
-          password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          profile: ${{ matrix.platform == 'ios' && secrets.IOS_APP_STORE_PROFILE || secrets.MAC_APP_STORE_PROFILE }}
-          share-profile: ${{ matrix.platform == 'ios' && secrets.IOS_SHARE_APP_STORE_PROFILE || '' }}
-      - name: Archive iOS
-        if: matrix.platform == 'ios'
+          p12-file-base64: ${{ matrix.platform == 'ios' && secrets.IOS_DISTRIBUTION_P12 || secrets.MAC_APP_STORE_P12 }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: Import Mac installer certificate
+        if: matrix.platform == 'macos'
+        uses: apple-actions/import-codesign-certs@v7.2.0
+        with:
+          create-keychain: 'false'
+          keychain-password: ${{ steps.certificates.outputs.keychain-password }}
+          p12-file-base64: ${{ secrets.MAC_APP_STORE_INSTALLER_P12 }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: Prepare provisioning profiles
+        id: signing
         env:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-          COHUB_APP_PROFILE: ${{ steps.signing.outputs.profile }}
-          COHUB_SHARE_PROFILE: ${{ steps.signing.outputs.share-profile }}
-        run: bash apps/ios/scripts/archive.sh "$VERSION" "$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
+          APPLE_PLATFORM: ${{ matrix.platform }}
+          APPLE_SIGNING_IDENTITIES: ${{ steps.certificates.outputs.identities }}
+          APPLE_PROFILE: ${{ matrix.platform == 'ios' && secrets.IOS_APP_STORE_PROFILE || secrets.MAC_APP_STORE_PROFILE }}
+          APPLE_SHARE_PROFILE: ${{ matrix.platform == 'ios' && secrets.IOS_SHARE_APP_STORE_PROFILE || '' }}
+        run: python3 scripts/apple/prepare-signing.py
+      - name: Archive iOS
+        if: matrix.platform == 'ios'
+        uses: apple-actions/xcodebuild@v1.3.0
+        with:
+          project: apps/ios/Cohub.xcodeproj
+          scheme: Cohub
+          configuration: Release
+          destination: generic/platform=iOS
+          action: archive
+          archive-path: ${{ runner.temp }}/Cohub.xcarchive
+          export-options-plist: ${{ steps.signing.outputs.export-options }}
+          export-path: ${{ runner.temp }}/cohub-ios-export
+          build-number: ${{ github.run_number }}.${{ github.run_attempt }}
+          build-settings: |
+            CODE_SIGN_STYLE=Manual
+            CODE_SIGN_IDENTITY=Apple Distribution
+            DEVELOPMENT_TEAM=${{ vars.APPLE_TEAM_ID }}
+            COHUB_APP_PROFILE=${{ steps.signing.outputs.profile }}
+            COHUB_SHARE_PROFILE=${{ steps.signing.outputs.share-profile }}
+            MARKETING_VERSION=${{ env.VERSION }}
+            COHUB_COMMIT=${{ env.COHUB_COMMIT }}
       - name: Build Mac PKG
         if: matrix.platform == 'macos'
         env:
@@ -145,6 +183,6 @@ jobs:
           fi
           test "${#artifacts[@]}" -eq 1
           bash scripts/apple/upload.sh "${artifacts[0]}"
-      - name: Remove signing credentials
+      - name: Remove provisioning profiles
         if: always()
-        run: python3 scripts/apple/cleanup-signing.py
+        run: python3 scripts/apple/prepare-signing.py --cleanup

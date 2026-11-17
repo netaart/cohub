@@ -30,16 +30,25 @@ permissions:
 
 jobs:
   build:
-    name: Build
+    name: Build (${{ matrix.scheme }})
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scheme: Cohub
+            configuration: Debug
+          - scheme: Cohub Dev
+            configuration: Debug Dev
     steps:
       - uses: actions/checkout@v7
       - run: brew install xcodegen
       - run: xcodegen generate --spec apps/ios/project.yml
-      - name: Build both environments for the simulator
-        run: |
-          set -euo pipefail
-          for scheme in Cohub "Cohub Dev"; do
-            xcodebuild -project apps/ios/Cohub.xcodeproj -scheme "$scheme" -destination 'generic/platform=iOS Simulator' \
-              CODE_SIGNING_ALLOWED=NO -quiet build
-          done
+      - name: Build for the simulator
+        uses: apple-actions/xcodebuild@v1.3.0
+        with:
+          project: apps/ios/Cohub.xcodeproj
+          scheme: ${{ matrix.scheme }}
+          configuration: ${{ matrix.configuration }}
+          destination: generic/platform=iOS Simulator
+          build-settings: CODE_SIGNING_ALLOWED=NO

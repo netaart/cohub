@@ -209,8 +209,13 @@ The `Apple Store` workflow validates the store app on PRs and main. Release tags
 manual runs on main export signed IPA/PKG artifacts; `submit=true` explicitly uploads
 them to App Store Connect without submitting for review. The `version` input is the
 marketing version (tags use their version); build numbers use the run number and attempt.
-Tag commits must belong to main. Signed jobs use `ios-release` / `desktop-release`,
-and always remove their temporary keychain and profiles.
+Tag commits must belong to main. Signed jobs use `ios-release` / `desktop-release`.
+`apple-actions/import-codesign-certs` imports certificates and removes its temporary
+keychain automatically; `apple-actions/xcodebuild` archives and exports iOS.
+`scripts/apple/prepare-signing.py` validates the saved profiles against those imported
+identities, installs them, prepares iOS export options, and removes the profiles afterward.
+The short upload script supports our individual API key (`sub=user`); the current
+Apple Actions download/upload actions expect a team key with an Issuer ID.
 
 | Variable / secret | Purpose |
 | --- | --- |
