@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import type * as z from "zod";
 
-export type RequestErrorStatus = 400 | 401 | 402 | 403 | 404 | 413 | 500 | 502 | 503;
+export type RequestErrorStatus = 400 | 401 | 402 | 403 | 404 | 409 | 413 | 500 | 502 | 503;
 
 export class RequestError extends Error {
   readonly status: RequestErrorStatus;

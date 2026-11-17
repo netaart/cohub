@@ -1398,7 +1398,7 @@ export function spaceFsJsonError(error: unknown) {
   }
   // Local sandbox offline (matched by name to avoid a cross-module import cycle).
   if (error instanceof Error && error.name === "SandboxOfflineError") {
-    return { status: 503, body: { code: "sandbox_offline", message: "local sandbox is offline" } };
+    return { status: 409, body: { code: "sandbox_offline", message: "local sandbox is offline" } };
   }
   const detail = error instanceof Error ? error.message : String(error);
   const truncated = detail.length > 200 ? `${detail.slice(0, 200)}…` : detail;

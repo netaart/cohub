@@ -46,7 +46,7 @@ test("directory conflicts restart without mixing pages or repeating the preview"
 });
 
 const offline = () =>
-	new HttpError("local sandbox is offline", 503, { code: "sandbox_offline" });
+	new HttpError("local sandbox is offline", 409, { code: "sandbox_offline" });
 const page = {
 	path: "",
 	entries: [entry("a")],
