@@ -173,7 +173,8 @@ router.get("/:id", async (c) => {
 
   const [hydratedSession] = await hydrateSessionParticipantProfiles([session]);
   const [sessionWithActiveTurn] = await attachActiveTurns([hydratedSession ?? session]);
-  return c.json({ space: toSessionSpace(space), session: sessionWithActiveTurn ?? hydratedSession ?? session, user });
+  const isMember = await hasPermission(user, "member.view", { spaceId: space.id });
+  return c.json({ space: toSessionSpace(space, isMember), session: sessionWithActiveTurn ?? hydratedSession ?? session, user });
 });
 
 // ── PATCH /api/sessions/:id (rename) ─────────────────────────────────────────

@@ -5,8 +5,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Session detail is readable by guests of shared Chats, so it carries no Space secrets or internals. */
-export function toSessionSpace(space: typeof spaces.$inferSelect) {
+export function toSessionSpace(space: typeof spaces.$inferSelect, isMember = true) {
   const { storageRepoName: _storageRepoName, meta, ...rest } = space;
+  if (!isMember) return { ...rest, baseCheckpointId: null, headCheckpointId: null, meta: toPublicSpaceMeta(meta) };
   if (!isRecord(meta)) return { ...rest, meta };
   const { extraEnv: _extraEnv, config: _config, ...safeMeta } = meta;
   if (isRecord(safeMeta.bootstrap)) {
