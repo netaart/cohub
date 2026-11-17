@@ -2,7 +2,9 @@ import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
 import { access, copyFile, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AgentMessage, Entry as PiEntry, JsonValue } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { JsonValue } from "@earendil-works/pi-ai";
+import type { Entry as PiEntry } from "./pi-compaction.js";
 import { createLogger } from "@cohub/infra/logging";
 
 

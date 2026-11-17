@@ -1,6 +1,7 @@
-import { calculateContextTokens, type AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { estimateProxyContextTokens } from "./compaction-policy.js";
+import { calculateContextTokens } from "./pi-compaction.js";
 
 /**
  * Per-model ratio of provider-reported tokens to our `chars / 4` estimate,

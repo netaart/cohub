@@ -1,13 +1,6 @@
-import {
-  BACKGROUND_CONTEXT,
-  compact,
-  convertToLlm,
-  generateSummaryWithUsage,
-  serializeConversation,
-  withAbortSignal,
-  type AgentMessage,
-} from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Message, Model, Models, ToolCall, Usage } from "@earendil-works/pi-ai";
+import { compact, convertToLlm, generateSummaryWithUsage, serializeConversation } from "./pi-compaction.js";
 import { IMAGE_URL_MIME_TYPE } from "@cohub/protocol/core";
 import { isContextOverflowFailure, isRetryableProviderError } from "./provider-errors.js";
 import { getTokenRatio, observeTokenRatio, parseOverflowTokens } from "./token-calibration.js";
@@ -314,7 +307,6 @@ export async function summarizeForCompaction(input: {
   abortSignal?: AbortSignal;
 }): Promise<SummaryOutcome> {
   const { preparation, model, abortSignal } = input;
-  const context = abortSignal ? withAbortSignal(abortSignal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT;
   const providerCalls: ProviderCallStats = { total: 0, succeeded: 0, failed: 0 };
   let lastResponse: AssistantMessage | undefined;
   // Transient provider errors are retried per call, so a split turn never replays
@@ -499,11 +491,7 @@ export async function summarizeForCompaction(input: {
         },
         models,
         model,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        context,
+        { signal: abortSignal },
       );
       if (result.ok) {
         let summary = result.value.summary;
@@ -527,12 +515,7 @@ export async function summarizeForCompaction(input: {
         models,
         model,
         Math.max(MIN_FOLD_RESERVE_TOKENS, Math.min(reserveTokens, Math.floor(fullBudget / 2 / OUTPUT_CHARS_PER_TOKEN / 0.8))),
-        undefined,
-        running,
-        undefined,
-        undefined,
-        undefined,
-        context,
+        { previousSummary: running, signal: abortSignal },
       );
       if (result.ok) {
         running = result.value.text;

@@ -1,4 +1,4 @@
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import type { AgentTool, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
 import { getCurrentToolExecutionContext, runWithToolExecutionContext } from "../../tool-context.js";
 import { assertValidSpaceId, UUID_OR_SHORT_UUID_PATTERN } from "../ids.js";

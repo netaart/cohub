@@ -121,7 +121,7 @@
       "accept": "application/json",
       "authorization": "Bearer sk-test",
       "content-type": "application/json",
-      "user-agent": "pi (<host>)",
+      "user-agent": "pi/<version> (<host>)",
       "x-stainless-lang": "js",
       "x-stainless-runtime": "node",
       "x-trace": "1"
@@ -310,7 +310,7 @@
     "url": "https://upstream.test/v1/models/gemini-3.8-flash:streamGenerateContent?alt=sse",
     "headers": {
       "content-type": "application/json",
-      "user-agent": "pi (<host>)",
+      "user-agent": "pi/<version> (<host>)",
       "x-goog-api-key": "sk-test",
       "x-trace": "1"
     },

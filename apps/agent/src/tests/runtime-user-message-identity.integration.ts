@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { after, mock, test } from "node:test";
 import type { Job } from "bullmq";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { resolveRuntimeModelsConfig } from "@cohub/infra/config-runtime/models";
 import type { AgentTurnAbortEvent } from "@cohub/protocol";
 import type { ClaimedTurnBatch } from "../batch.js";

@@ -1,8 +1,4 @@
-import {
-  DEFAULT_COMPACTION_SETTINGS,
-  prepareCompaction,
-  shouldCompact,
-} from "@earendil-works/pi-agent-core";
+import { DEFAULT_COMPACTION_SETTINGS, prepareCompaction, shouldCompact } from "./pi-compaction.js";
 import type { Usage } from "@earendil-works/pi-ai";
 import { logger } from "../logger.js";
 import type { SessionHandle } from "../session.js";

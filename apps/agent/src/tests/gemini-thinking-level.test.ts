@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import test, { describe } from "node:test";
-import { normalizeContext, type Api, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy";
+import test from "node:test";
+import type { Api, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { resolveRuntimeModelsConfig, type ModelsConfig } from "@cohub/infra/config-runtime/models";
 import { CohubModelRegistry } from "../runtime/model-registry.js";
 import { createModelsFromRegistry, streamSimpleWithModels } from "../runtime/pi-models-adapter.js";
@@ -66,35 +65,4 @@ test("Gemini 4 sends the requested reasoning as thinkingLevel", async () => {
 
 test("Gemini 2.5 keeps its thinking budget", async () => {
   assert.deepEqual(await thinkingConfig("gemini-2.5-flash", { reasoning: "high" }), { includeThoughts: true, thinkingBudget: 24576 });
-});
-
-describe("withGeminiThinkingLevel workaround", () => {
-  test("pi-ai still sends thinkingBudget for Gemini 4", async () => {
-    const body = await capturedBody(() =>
-      googleGenerativeAIApi().streamSimple(findModel("gemini-4-argon"), normalizeContext(context), { apiKey: "sk-test", maxRetries: 0, reasoning: "high" }),
-    );
-    const { thinkingConfig: piThinkingConfig } = body.generationConfig as { thinkingConfig?: { thinkingBudget?: number } };
-    assert.notEqual(
-      piThinkingConfig?.thinkingBudget,
-      undefined,
-      "pi-ai now sends thinkingLevel for Gemini 4 (earendil-works/pi#10890). Delete packages/model-runtime/src/gemini-thinking-level.ts, " +
-        "unwrap googleGenerativeAIApi() and googleVertexApi() in packages/model-runtime/src/pi-models-adapter.ts, and delete this block. " +
-        "The other tests in this file must pass unchanged.",
-    );
-  });
-
-  test("Gemini 4 keeps the caller's payload hook", async () => {
-    const body = await sentBody("gemini-4-argon", {
-      reasoning: "medium",
-      onPayload: (payload) => {
-        const params = payload as { config: Record<string, unknown> };
-        return { ...params, config: { ...params.config, temperature: 0.5 } };
-      },
-    });
-    assert.deepEqual(body.generationConfig, {
-      temperature: 0.5,
-      maxOutputTokens: 16384,
-      thinkingConfig: { includeThoughts: true, thinkingLevel: "MEDIUM" },
-    });
-  });
 });
