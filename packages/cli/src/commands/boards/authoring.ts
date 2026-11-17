@@ -12,10 +12,12 @@ import {
   createBoardAnimationSampler,
 } from "@neta-art/cohub/board";
 import { readBoardJsonObject } from "../../board-command-support.js";
-import { loadBoardSource } from "../../board-document.js";
-import { settleBoardDocument, settleBoardMediaDurations } from "../../board-media.js";
 import { parseBoardTime, parseBoardTimes } from "../../board-time.js";
 import { handleHttp, json as outJson, jsonRequested, table } from "../../output.js";
+
+const loadBoardSource = async (boards: Command, target: string) =>
+  (await import("../../board-document.js")).loadBoardSource(boards, target);
+const media = () => import("../../board-media.js");
 
 const DIRECTIONS: readonly BoardRegionDirection[] = ["left", "right", "up", "down"];
 
@@ -39,7 +41,7 @@ Example: cohub boards inspect lesson.board --animation lecture --at 0:20s:1s --j
       try {
         const view = options.view ? parseBoardViewSize(options.view) : undefined;
         const { files, document: loaded } = await loadBoardSource(boards, target);
-        const document = await settleBoardDocument(files, loaded);
+        const document = await (await media()).settleBoardDocument(files, loaded);
         const times = parseBoardTimes(options.at, "--at", 100);
         const sampler = options.animation ? createBoardAnimationSampler(document, options.animation) : null;
         const [{ resolveBundledFonts }, { createNodeBoardRenderer, inspectBoardItems }] = await Promise.all([
@@ -143,7 +145,7 @@ their time moves forward. Placing a target that is already on the timeline moves
         const rate = Number(options.rate);
         if (!Number.isFinite(rate) || rate <= 0) throw new Error("--rate must be a positive number.");
         const { files, document: loaded } = await loadBoardSource(boards, target);
-        const durations = options.duration ? {} : await settleBoardMediaDurations(files, loaded, targets);
+        const durations = options.duration ? {} : await (await media()).settleBoardMediaDurations(files, loaded, targets);
         const document = { ...loaded, items: { ...loaded.items, ...durations } };
         const patch = boardPlacePatch(document, options.animation, targets, {
           at: parseBoardTime(options.at, "--at"),

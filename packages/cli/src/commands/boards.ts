@@ -34,8 +34,6 @@ import {
 } from "../board-command-support.js";
 import type { BoardSource } from "../board-document.js";
 import { BOARD_EXPORT_IMAGE_MEMORY_MIB, BOARD_EXPORT_RENDERERS } from "../board-export-resources.js";
-import { isLocalBoard, localBoardFiles, spaceBoardFiles } from "../board-files.js";
-import { settleBoardDocument, settleBoardPatch } from "../board-media.js";
 import { formatBoardTime, parseBoardTime, parseBoardTimes } from "../board-time.js";
 import { createClient, createRealtimeClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
@@ -215,14 +213,20 @@ async function readBoardInputs(local: boolean, source: BoardSource, path: string
 
 const local = () => import("../board-local.js");
 
-const isLocal = (boards: Command, target: string) => isLocalBoard(target, () => targetsSpace(boards));
+/** Loaded on use, so `boards --help` stays within the startup budget. */
+const io = async () => {
+  const [files, media] = await Promise.all([import("../board-files.js"), import("../board-media.js")]);
+  return { ...files, ...media };
+};
+
+const isLocal = async (boards: Command, target: string) => (await io()).isLocalBoard(target, () => targetsSpace(boards));
 
 const loadBoardSource = async (boards: Command, target: string) =>
   (await import("../board-document.js")).loadBoardSource(boards, target);
 
 async function loadSettledBoard(boards: Command, target: string): Promise<BoardSource> {
   const source = await loadBoardSource(boards, target);
-  return { ...source, document: await settleBoardDocument(source.files, source.document) };
+  return { ...source, document: await (await io()).settleBoardDocument(source.files, source.document) };
 }
 
 async function requireSpaceBoard(boards: Command, target: string, what: string): Promise<void> {
@@ -666,6 +670,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
         const read = options.input ? await readBoardJsonObject(options.input, BOARD_CREATE_INPUT_MAX_BYTES) : undefined;
         if (await isLocal(boards, path)) {
           await mkdir(dirname(path), { recursive: true });
+          const { localBoardFiles, settleBoardPatch } = await io();
           const patch = read && await settleBoardPatch(localBoardFiles(dirname(path)), read, async () => ({}));
           const created = await (await local()).createLocalBoard(path, { ...(options.title ? { title: options.title } : {}), ...(patch ? { patch } : {}) });
           const row = { path, title: created.document.board.title ?? null, version: created.version };
@@ -675,6 +680,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
           return;
         }
         const spaceId = await resolveSpace(boards);
+        const { settleBoardPatch, spaceBoardFiles } = await io();
         const document = read && await settleBoardPatch(spaceBoardFiles(spaceId), read, async () => ({}));
         const input: BoardCreateInput = {
           path,
@@ -785,6 +791,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
               throw new Error(`--replace deletes everything the input leaves out of ${target} (version ${current.version}). Pass --base-version ${current.version} to replace it.`);
             baseVersion = current.version;
           }
+          const { localBoardFiles, settleBoardPatch } = await io();
           const patch = await settleBoardPatch(localBoardFiles(dirname(target)), read, async (ids) =>
             options.replace ? {} : Object.fromEntries(ids.flatMap((id) => (current.document.items[id] ? [[id, current.document.items[id]]] : []))));
           const { result } = await applyLocalBoard(target, patch, {
@@ -806,6 +813,7 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
             throw new Error(`--replace deletes everything the input leaves out of "${current.title ?? current.id}" (${current.id}, version ${current.version}). Pass --base-version ${current.version} to replace it.`);
           baseVersion = current.version;
         }
+        const { settleBoardPatch, spaceBoardFiles } = await io();
         const patch = await settleBoardPatch(spaceBoardFiles(spaceId), read, async (items) =>
           options.replace ? {} : board.get({ only: ["items"], items }).then((result) => result.items ?? {}, () => null));
         const result = await board.apply(patch, {
