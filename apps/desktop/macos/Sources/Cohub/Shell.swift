@@ -381,7 +381,7 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 log.error("Sign-in failed: \(error.localizedDescription, privacy: .public)")
                 let alert = NSAlert()
                 alert.messageText = L("Couldn't complete sign-in. Please try again.")
-                alert.beginSheetModal(for: window)
+                await alert.beginSheetModal(for: window)
             }
         }
     }
