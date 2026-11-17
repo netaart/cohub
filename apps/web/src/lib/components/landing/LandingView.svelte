@@ -371,6 +371,8 @@ const cliLines = [
 							<ul class="footer-list">
 								<li><a href={zh ? "/zh/docs" : "/docs"} class="footer-link">{m.landing_footer_docs({}, { locale })}</a></li>
 								<li><a href={zh ? "/zh/pricing" : "/pricing"} class="footer-link">{m.landing_footer_pricing({}, { locale })}</a></li>
+								<li><a href={zh ? "/zh/use-cases" : "/use-cases"} rel="external" class="footer-link">{m.landing_footer_use_cases({}, { locale })}</a></li>
+								<li><a href={zh ? "/zh/compare" : "/compare"} rel="external" class="footer-link">{m.landing_footer_compare({}, { locale })}</a></li>
 								<li><a href="/changelog" class="footer-link">{m.landing_footer_changelog({}, { locale })}</a></li>
 								<li><a href="/trending" class="footer-link">{m.landing_footer_trending({}, { locale })}</a></li>
 							</ul>
@@ -434,7 +436,11 @@ const cliLines = [
 					class="mt-12 flex flex-col items-start justify-between gap-3 border-t border-border-subtle pt-6 text-[12px] text-text-tertiary sm:flex-row sm:items-center"
 				>
 					<span>Copyright 2026 Viscept Limited</span>
-					<span>Apache License 2.0</span>
+					<div class="flex items-center gap-4">
+						<a href={zh ? "/zh/legal/terms-of-service" : "/legal/terms-of-service"} rel="external" class="footer-link">{m.landing_footer_terms({}, { locale })}</a>
+						<a href={zh ? "/zh/legal/privacy-policy" : "/legal/privacy-policy"} rel="external" class="footer-link">{m.landing_footer_privacy({}, { locale })}</a>
+						<span>Apache License 2.0</span>
+					</div>
 				</div>
 			</div>
 		</footer>
