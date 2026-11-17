@@ -1,5 +1,0 @@
----
-"@neta-art/cohub-cli": minor
----
-
-Local Boards: where no Space is targeted, `boards create` writes the whole Board into the `.board` file, and every Board command tells it from a Space's by content. `boards create`, `get`, `apply`, `inspect`, `frames`, `export`, `simulate` and `history` work on the file, with media and script paths relative to its folder, a lock around every write and a history beside it. `boards open <file>` shows a Space Board on the Cohub desktop and serves a local one on 127.0.0.1 with the web Board panel; edits there and from the CLI merge live, and pasted images are saved to the Board's `assets/` folder.

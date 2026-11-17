@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type {
   BoardApplyResult,
+  BoardCheckpointReadResult,
   BoardCreateInput,
   BoardPatch,
   BoardPlaybackSnapshot,
@@ -19,7 +20,6 @@ import {
   boardJsonSchema,
   boardPresetTracks,
   boardSchemaOverview,
-  createBoardLayout,
   isBoardPresetName,
   listBoardPresets,
 } from "@neta-art/cohub/board";
@@ -32,12 +32,12 @@ import {
   readBoardJsonObject,
   writeBoardOutput,
 } from "../board-command-support.js";
-import type { BoardSource } from "../board-document.js";
 import { BOARD_EXPORT_IMAGE_MEMORY_MIB, BOARD_EXPORT_RENDERERS } from "../board-export-resources.js";
+import { settleBoardPatch } from "../board-media.js";
 import { formatBoardTime, parseBoardTime, parseBoardTimes } from "../board-time.js";
 import { createClient, createRealtimeClient } from "../client.js";
 import { error, handleHttp, json as outJson, jsonRequested, ok, table } from "../output.js";
-import { resolveSpace, targetsSpace } from "../space.js";
+import { resolveSpace } from "../space.js";
 import { registerBoardExampleCommands } from "./boards/examples.js";
 import { registerBoardAuthoringCommands } from "./boards/authoring.js";
 
@@ -82,24 +82,14 @@ function list(value: string | undefined): string[] | undefined {
   return entries?.length ? entries : undefined;
 }
 
-type WholeBoard = { board: unknown; items: Record<string, Record<string, unknown>>; animations: Record<string, unknown> };
-
-/** Filters a whole Board here: checkpoints and local files have no server-side reads. */
-function selectBoard<T extends WholeBoard>(
-  saved: T,
-  filter: { sections: Set<string> | null; items?: string[]; within?: string; animations?: string[]; rect?: { x: number; y: number; width: number; height: number } },
+/** Filters a saved Board locally; the checkpoint API returns the whole document. */
+function selectCheckpointBoard(
+  saved: BoardCheckpointReadResult,
+  filter: { sections: Set<string> | null; items?: string[]; within?: string; animations?: string[] },
 ) {
   const { board, items, animations, ...rest } = saved;
   let picked = Object.entries(items);
   if (filter.items) picked = picked.filter(([id]) => filter.items?.includes(id));
-  if (filter.rect) {
-    const { x, y, width, height } = filter.rect;
-    const layout = createBoardLayout((id) => items[id] as never);
-    picked = picked.filter(([id]) => {
-      const box = layout.bounds(id);
-      return box.x <= x + width && box.x + box.width >= x && box.y <= y + height && box.y + box.height >= y;
-    });
-  }
   if (filter.within) {
     const inside = new Set([filter.within]);
     for (let grew = true; grew;) {
@@ -205,32 +195,9 @@ async function runExportTask(boards: Command, options: ExportOptions): Promise<v
   }
 }
 
-/** Recorded input is a Space file for a Space Board and a local file for a local one. */
-async function readBoardInputs(local: boolean, source: BoardSource, path: string): Promise<string> {
-  if (local) return readFile(path, "utf8");
-  return new TextDecoder().decode((await source.files.read(path)).bytes);
-}
-
-const local = () => import("../board-local.js");
-
-/** Loaded on use, so `boards --help` stays within the startup budget. */
-const io = async () => {
-  const [files, media] = await Promise.all([import("../board-files.js"), import("../board-media.js")]);
-  return { ...files, ...media };
-};
-
-const isLocal = async (boards: Command, target: string) => (await io()).isLocalBoard(target, () => targetsSpace(boards));
-
-const loadBoardSource = async (boards: Command, target: string) =>
-  (await import("../board-document.js")).loadBoardSource(boards, target);
-
-async function loadSettledBoard(boards: Command, target: string): Promise<BoardSource> {
-  const source = await loadBoardSource(boards, target);
-  return { ...source, document: await (await io()).settleBoardDocument(source.files, source.document) };
-}
-
-async function requireSpaceBoard(boards: Command, target: string, what: string): Promise<void> {
-  if (await isLocal(boards, target)) throw new Error(`${what} needs a Board in a Space; ${target} is a local file.`);
+async function readBoardInputs(spaceId: string, path: string): Promise<string> {
+  const { readSpaceFileBytes } = await import("../board-export.js");
+  return new TextDecoder().decode((await readSpaceFileBytes(createClient(), spaceId, path)).bytes);
 }
 
 function parseSize(value: string): { width: number; height: number } {
@@ -330,7 +297,6 @@ delivered within the same moment, in document order. Exports have no network or
 device; --inputs replays a recording made with Record input in the Board's Scripts panel. --frame draws the frame as a
 page: its fill and shaders, without its outline and label.`)
     .action(async (target: string, options: ExportOptions) => {
-      if (options.async && (await isLocal(boards, target))) return handleHttp(new Error("--async runs in a Space's sandbox; export a local Board without it."));
       if (options.async) return runExportTask(boards, options);
       const controller = new AbortController();
       const cancel = () => controller.abort(new Error("Export cancelled."));
@@ -351,8 +317,8 @@ page: its fill and shaders, without its outline and label.`)
         const onPlan = ({ width, height, frames }: { width: number; height: number; frames: number }) => {
           if (!jsonRequested(options)) process.stderr.write(`Rendering ${width}x${height}, ${frames} frame(s)\n`);
         };
-        const source = await loadSettledBoard(boards, target);
-        const inputs = options.inputs ? await readBoardInputs(await isLocal(boards, target), source, options.inputs) : undefined;
+        const spaceId = await resolveSpace(boards);
+        const inputs = options.inputs ? await readBoardInputs(spaceId, options.inputs) : undefined;
         const pathVideoFormat = videoFormatFromPath(out);
         const requestedFormat = options.format?.toLowerCase();
         if (requestedFormat && ![...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].includes(requestedFormat as BoardNodeExportFormat | BoardVideoExportFormat)) throw new Error(`--format must be one of ${[...BOARD_EXPORT_FORMATS, ...BOARD_VIDEO_FORMATS].join(", ")}.`);
@@ -369,8 +335,8 @@ page: its fill and shaders, without its outline and label.`)
           await mkdir(dirname(out), { recursive: true });
           const { runBoardVideoExport } = await import("../board-export.js");
           const result = await runBoardVideoExport({
-            files: source.files,
-            document: source.document,
+            spaceId,
+            target,
             ...(inputs ? { inputs } : {}),
             camera,
             timeoutMs: parseBoardTime(options.timeout ?? "2m", "--timeout"),
@@ -405,8 +371,8 @@ page: its fill and shaders, without its outline and label.`)
         }
         const { runBoardExport } = await import("../board-export.js");
         const result = await runBoardExport({
-          files: source.files,
-          document: source.document,
+          spaceId,
+          target,
           ...(inputs ? { inputs } : {}),
           camera,
           timeoutMs: parseBoardTime(options.timeout ?? "2m", "--timeout"),
@@ -496,7 +462,8 @@ Examples:
         const out = options.out;
         if (out && !options.force && existsSync(out)) throw new Error(`${out} already exists; use --force to replace it.`);
         const result = await runBoardSimulation({
-          source: await loadBoardSource(boards, target),
+          spaceId: await resolveSpace(boards),
+          target,
           steps,
           leader: !options.follower,
           timeoutMs: parseBoardTime(options.timeout ?? "2m", "--timeout"),
@@ -563,7 +530,8 @@ Examples:
       try {
         const { profileBoard } = await import("../board-profile.js");
         const profile = await profileBoard({
-          source: await loadBoardSource(boards, target),
+          spaceId: await resolveSpace(boards),
+          target,
           time: parseBoardTime(options.at ?? "2s", "--at"),
           ...(options.animation ? { animation: options.animation } : {}),
           region: parseExportRegion(options),
@@ -598,38 +566,6 @@ Examples:
     });
 }
 
-function registerViewerCommands(boards: Command): void {
-  withJson(boards.command("open <path>")
-    .description("Show a Board: a Space Board on the Cohub desktop, a local one in the browser")
-    .option("--no-browser", "For a local Board, only print the URL"))
-    .addHelpText("after", `
-A local Board is served from this machine by one server that stops after an idle
-hour; the URL carries a private key. Edits there and from the CLI merge live.
-  cohub boards open design/plan.board`)
-    .action(async (path: string, options: JsonOptions & { browser?: boolean }, command: Command) => {
-      try {
-        if (!(await isLocal(boards, path))) {
-          const { openDesktopWindow } = await import("./desktop.js");
-          return openDesktopWindow(`file://${path}`, { json: options.json }, command);
-        }
-        const { canOpenBrowser, openBoardViewer, openInBrowser } = await import("../board-viewer.js");
-        const url = await openBoardViewer(path);
-        const opened = options.browser !== false && canOpenBrowser();
-        if (opened) openInBrowser(url);
-        if (jsonRequested(options)) return outJson({ path, url, opened });
-        ok(opened ? `Opened ${path}` : `Serving ${path}`);
-        console.log(`  ${url}`);
-      } catch (cause) {
-        handleHttp(cause);
-      }
-    });
-
-  boards.command("viewer-daemon", { hidden: true }).action(async () => {
-    const { serveBoardViewer } = await import("../board-viewer.js");
-    await serveBoardViewer();
-  });
-}
-
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 export function registerBoards(program: Command): Command {
@@ -637,10 +573,7 @@ export function registerBoards(program: Command): Command {
     .command("boards")
     .description("Read, write, animate and export Boards (by id or .board path)")
     .addHelpText("after", `
-A Board is one JSON document: { board, items, animations }. Outside a Cohub Space
-a .board file is the Board itself: it needs no sign-in, and media and script paths
-are relative to its folder.
-  open      show it: on the Cohub desktop, or in the browser for a local Board
+A Board is one JSON document: { board, items, animations }.
   get       read it
   apply     write it with a JSON Merge Patch; null deletes
   schema    the fields of any part and what they mean; also the script API
@@ -658,7 +591,7 @@ are relative to its folder.
 Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
 
   withJson(boards.command("create <path>")
-    .description("Create a Board file, optionally with an initial document; outside a Space the file is the Board")
+    .description("Create a Board file, optionally with an initial document")
     .option("--title <title>", "Board title")
     .option("-i, --input <file>", "Initial document JSON; - for stdin")
     .option("--mutation-id <id>", "Stable id for safe retries"))
@@ -667,21 +600,9 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
   cohub boards create lesson.board -i lesson.json`)
     .action(async (path: string, options: JsonOptions & { title?: string; input?: string; mutationId?: string }) => {
       try {
-        const read = options.input ? await readBoardJsonObject(options.input, BOARD_CREATE_INPUT_MAX_BYTES) : undefined;
-        if (await isLocal(boards, path)) {
-          await mkdir(dirname(path), { recursive: true });
-          const { localBoardFiles, settleBoardPatch } = await io();
-          const patch = read && await settleBoardPatch(localBoardFiles(dirname(path)), read, async () => ({}));
-          const created = await (await local()).createLocalBoard(path, { ...(options.title ? { title: options.title } : {}), ...(patch ? { patch } : {}) });
-          const row = { path, title: created.document.board.title ?? null, version: created.version };
-          if (jsonRequested(options)) return outJson(row);
-          ok(`Created ${path}`);
-          console.log(`  Show it with: cohub boards open ${path}`);
-          return;
-        }
         const spaceId = await resolveSpace(boards);
-        const { settleBoardPatch, spaceBoardFiles } = await io();
-        const document = read && await settleBoardPatch(spaceBoardFiles(spaceId), read, async () => ({}));
+        const read = options.input ? await readBoardJsonObject(options.input, BOARD_CREATE_INPUT_MAX_BYTES) : undefined;
+        const document = read && await settleBoardPatch(spaceId, read, async () => ({}));
         const input: BoardCreateInput = {
           path,
           mutationId: options.mutationId ?? randomUUID(),
@@ -724,19 +645,11 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
         const only = list(options.only);
         if (only?.some((section) => section !== "board" && section !== "items" && section !== "animations")) throw new Error("--only takes board, items, animations, or a combination.");
         const sections = only ? new Set(only) : null;
-        if (await isLocal(boards, target)) {
-          const unsupported = (["limit", "cursor", "since", "checkpoint"] as const).filter((name) => options[name] !== undefined);
-          if (unsupported.length) throw new Error(`A local Board is read whole; drop ${unsupported.map((name) => `--${name}`).join(", ")}.`);
-          const { localBoardReadResult, readLocalBoard } = await local();
-          const read = localBoardReadResult(target, target, await readLocalBoard(target));
-          const whole = { ...read, items: read.items ?? {}, animations: read.animations ?? {} };
-          return outJson(selectBoard(whole, { sections, items: list(options.items), within: options.within, animations: list(options.animations), ...(options.rect ? { rect: parseRect(options.rect) } : {}) }));
-        }
         if (options.checkpoint) {
           const unsupported = (["rect", "limit", "cursor", "since"] as const).filter((name) => options[name] !== undefined);
           if (unsupported.length) throw new Error(`--checkpoint cannot be combined with ${unsupported.map((name) => `--${name}`).join(", ")}.`);
           const saved = await createClient().space(await resolveSpace(boards)).checkpoints(options.checkpoint).board(target);
-          return outJson(selectBoard(saved, { sections, items: list(options.items), within: options.within, animations: list(options.animations) }));
+          return outJson(selectCheckpointBoard(saved, { sections, items: list(options.items), within: options.within, animations: list(options.animations) }));
         }
         const input: BoardReadInput = {
           ...(only ? { only: only.filter((section): section is NonNullable<BoardReadInput["only"]>[number] => section !== "board") as BoardReadInput["only"] } : {}),
@@ -781,40 +694,17 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
   cohub boards preset rise --targets a,b --animation intro | cohub boards apply plan.board -i -`)
     .action(async (target: string, inline: string | undefined, options: JsonOptions & { input?: string; replace?: boolean; cascade?: boolean; dryRun?: boolean; baseVersion?: string; mutationId?: string }) => {
       try {
-        const read = await readPatch(inline, options.input, BOARD_TRANSACTION_INPUT_MAX_BYTES);
-        let baseVersion = options.baseVersion === undefined ? undefined : parseNumber(options.baseVersion, "--base-version", { min: 0, integer: true });
-        if (await isLocal(boards, target)) {
-          const { applyLocalBoard, readLocalBoard } = await local();
-          const current = await readLocalBoard(target);
-          if (options.replace && !options.dryRun && baseVersion === undefined) {
-            if (Object.keys(current.document.items).length)
-              throw new Error(`--replace deletes everything the input leaves out of ${target} (version ${current.version}). Pass --base-version ${current.version} to replace it.`);
-            baseVersion = current.version;
-          }
-          const { localBoardFiles, settleBoardPatch } = await io();
-          const patch = await settleBoardPatch(localBoardFiles(dirname(target)), read, async (ids) =>
-            options.replace ? {} : Object.fromEntries(ids.flatMap((id) => (current.document.items[id] ? [[id, current.document.items[id]]] : []))));
-          const { result } = await applyLocalBoard(target, patch, {
-            by: "cli",
-            replace: options.replace,
-            cascade: options.cascade,
-            dryRun: options.dryRun,
-            ...(baseVersion === undefined ? {} : { baseVersion }),
-            ...(options.mutationId ? { mutationId: options.mutationId } : {}),
-          });
-          if (jsonRequested(options)) return outJson(result);
-          return showApplied(result);
-        }
         const spaceId = await resolveSpace(boards);
         const board = await boardClient(boards, target, spaceId);
+        const read = await readPatch(inline, options.input, BOARD_TRANSACTION_INPUT_MAX_BYTES);
+        let baseVersion = options.baseVersion === undefined ? undefined : parseNumber(options.baseVersion, "--base-version", { min: 0, integer: true });
         if (options.replace && !options.dryRun && baseVersion === undefined) {
           const current = await board.get({ only: ["items"], limit: 1 });
           if (Object.keys(current.items ?? {}).length)
             throw new Error(`--replace deletes everything the input leaves out of "${current.title ?? current.id}" (${current.id}, version ${current.version}). Pass --base-version ${current.version} to replace it.`);
           baseVersion = current.version;
         }
-        const { settleBoardPatch, spaceBoardFiles } = await io();
-        const patch = await settleBoardPatch(spaceBoardFiles(spaceId), read, async (items) =>
+        const patch = await settleBoardPatch(spaceId, read, async (items) =>
           options.replace ? {} : board.get({ only: ["items"], items }).then((result) => result.items ?? {}, () => null));
         const result = await board.apply(patch, {
           ...(options.replace ? { replace: true } : {}),
@@ -837,28 +727,6 @@ Times are milliseconds; 500ms, 12.5s and 2m also work on the command line.`);
     .option("--restore <version>", "Return the Board to this version as a new write"))
     .action(async (target: string, options: JsonOptions & { before?: string; limit?: string; restore?: string }) => {
       try {
-        if (await isLocal(boards, target)) {
-          const { localBoardHistory, restoreLocalBoard } = await local();
-          if (options.restore !== undefined) {
-            const { result } = await restoreLocalBoard(target, parseNumber(options.restore, "--restore", { min: 1, integer: true }));
-            if (jsonRequested(options)) return outJson(result);
-            return showApplied(result);
-          }
-          const page = await localBoardHistory(target, {
-            ...(options.before ? { before: parseNumber(options.before, "--before", { min: 1, integer: true }) } : {}),
-            limit: parseNumber(options.limit ?? "20", "--limit", { min: 1, max: 500, integer: true }),
-          });
-          if (jsonRequested(options)) return outJson(page);
-          table(page.versions, [
-            { key: "version", label: "Version" },
-            { key: "at", label: "At" },
-            { key: "by", label: "By" },
-            { key: "items", label: "Items" },
-            { key: "animations", label: "Animations" },
-          ]);
-          if (page.nextBefore) console.log(`  More: --before ${page.nextBefore}`);
-          return;
-        }
         const board = await boardClient(boards, target);
         if (options.restore !== undefined) {
           const result = await board.restore(parseNumber(options.restore, "--restore", { min: 0, integer: true }));
@@ -899,7 +767,6 @@ Before rewriting a Board with apply --replace, see what others changed since the
   cohub boards diff plan.board --from 41 --to 44 --json`)
     .action(async (target: string, options: JsonOptions & { from: string; to?: string }) => {
       try {
-        await requireSpaceBoard(boards, target, "diff");
         const board = await boardClient(boards, target);
         const result = await board.diff(
           parseNumber(options.from, "--from", { min: 0, integer: true }),
@@ -975,7 +842,6 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
       }
     });
 
-  registerViewerCommands(boards);
   registerBoardExampleCommands(boards);
   registerExportCommand(boards);
   registerSimulateCommand(boards);
@@ -987,7 +853,6 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
     .description("Stream Board changes and playback as they happen"))
     .action(async (target: string, options: JsonOptions) => {
       try {
-        await requireSpaceBoard(boards, target, "watch");
         const spaceId = await resolveSpace(boards);
         const client = createRealtimeClient();
         const board = await client.space(spaceId).boards.open(target);
@@ -1028,7 +893,6 @@ Presets: ${BOARD_PRESET_NAMES.join(", ")}
 function registerPlaybackCommands(boards: Command): void {
   const run = async (target: string, options: JsonOptions, command: (board: Awaited<ReturnType<typeof boardClient>>) => Promise<BoardPlaybackSnapshot | null>) => {
     try {
-      await requireSpaceBoard(boards, target, "Shared playback");
       const playback = await command(await boardClient(boards, target));
       if (jsonRequested(options)) return outJson({ playback });
       showPlayback(playback);

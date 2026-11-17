@@ -1,5 +1,5 @@
 import { type BoardDocument, type BoardExportRegion, boardModelFormat } from "@neta-art/cohub/board";
-import type { BoardSource } from "./board-document.js";
+import { loadBoardDocument } from "./board-document.js";
 import { gpuResources } from "./board-export.js";
 import { openBoardGpu } from "./board-gpu/daemon.js";
 import { type BoardGpuProfile, findBoardGpuBrowser } from "./board-gpu/index.js";
@@ -15,7 +15,8 @@ const LARGE_MODEL = 8 * 1024 ** 2;
 export type BoardProfile = BoardGpuProfile & { hints: string[] };
 
 export async function profileBoard(options: {
-  source: BoardSource;
+  spaceId: string;
+  target: string;
   time: number;
   animation?: string;
   region: BoardExportRegion;
@@ -27,12 +28,12 @@ export async function profileBoard(options: {
 }): Promise<BoardProfile> {
   const browser = findBoardGpuBrowser();
   if (!browser) throw new Error("Profiling needs Chrome, Chromium or Edge. Install one, or set COHUB_CHROME to its path.");
-  const document = await settleBoardDocument(options.source.files, options.source.document);
+  const document = await settleBoardDocument(options.spaceId, (await loadBoardDocument(options.spaceId, options.target)).document);
   if (options.animation && !document.animations[options.animation]) throw new Error(`Animation ${options.animation} does not exist.`);
   const plan = planBoardExport({ scene: buildBoardScene(document), region: options.region, scale: 1, padding: 0 });
   if (!plan) throw new Error("Nothing to profile: the region contains no items.");
   const scale = Math.min(options.size.width / plan.world.width, options.size.height / plan.world.height);
-  const gpu = await openBoardGpu(gpuResources(options.source.files, document), { browser });
+  const gpu = await openBoardGpu(gpuResources(options.spaceId, document), { browser });
   try {
     await gpu.init({ document, animation: options.animation ?? null, theme: "dark" });
     const profile = await gpu.profile({

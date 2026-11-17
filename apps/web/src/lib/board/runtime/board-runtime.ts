@@ -5,11 +5,7 @@ import type {
 } from "@cohub/protocol";
 import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppRuntimeShellContext } from "@neta-art/cohub";
-import type {
-	BoardDocument,
-	BoardImageSource,
-	BoardLaunch,
-} from "@neta-art/cohub/board";
+import type { BoardDocument, BoardLaunch } from "@neta-art/cohub/board";
 import type { BoardAutomationActivity } from "@neta-art/cohub/board/presence";
 import type { BoardLod } from "@neta-art/cohub/board/render";
 import type { BoardDeviceTier, BoardStage } from "@neta-art/cohub/board/stage";
@@ -35,8 +31,7 @@ export type BoardScope =
 			checkpointId: string;
 			assetSource: BoardAssetSource;
 	  }
-	| { kind: "app"; appId: string; assetSource: BoardAssetSource }
-	| { kind: "local"; assetSource: BoardAssetSource };
+	| { kind: "app"; appId: string; assetSource: BoardAssetSource };
 
 export type BoardCommitHandler = (
 	patch: BoardPatch,
@@ -79,8 +74,6 @@ export type BoardRuntimeProps = {
 	onOpenFile?: (path: string) => void | Promise<void>;
 	onOpenApp?: (app: { appId: string; name: string }) => void;
 	onOpenSession?: (sessionId: string) => void | Promise<void>;
-	/** Keeps a pasted image beside the Board instead of uploading it to Cohub. */
-	storeImage?: (file: File) => Promise<BoardImageSource>;
 	/** Overrides the device's level-of-detail thresholds. */
 	lod?: BoardLod;
 	deviceTier?: BoardDeviceTier;

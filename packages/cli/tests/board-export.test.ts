@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseBoardDocument } from "../src/board-kernel.js";
 import { runBoardExport } from "../src/board-export.js";
-import { spaceBoardFiles } from "../src/board-files.js";
 import { createClient } from "../src/client.js";
 
 const parsed = parseBoardDocument({
@@ -26,7 +25,8 @@ const parsed = parseBoardDocument({
 });
 if (!parsed.ok) throw new Error("Invalid test document");
 const options = {
-  files: spaceBoardFiles("unused"),
+  spaceId: "unused",
+  target: "unused",
   document: parsed.document,
   animation: "intro",
   times: [0, 100, 200],

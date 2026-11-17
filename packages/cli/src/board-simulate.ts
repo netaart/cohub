@@ -8,9 +8,8 @@ import type {
   BoardScriptHarnessPointer,
   BoardScriptHarnessPress,
 } from "@neta-art/cohub/board/testing";
-import type { BoardSource } from "./board-document.js";
-import type { BoardFiles } from "./board-files.js";
-import { gpuResources, resolveBundledFonts, runBoardExport } from "./board-export.js";
+import { loadBoardDocument } from "./board-document.js";
+import { gpuResources, readSpaceFileBytes, resolveBundledFonts, runBoardExport } from "./board-export.js";
 import { openBoardGpu } from "./board-gpu/daemon.js";
 import { type BoardGpuShader, findBoardGpuBrowser } from "./board-gpu/index.js";
 import {
@@ -27,6 +26,7 @@ import {
 } from "./board-kernel.js";
 import { settleBoardDocument } from "./board-media.js";
 import { parseBoardTime } from "./board-time.js";
+import { createClient } from "./client.js";
 
 const TOOLS = ["select", "hand", "play", "text", "shape", "draw", "arrow", "frame"] as const;
 const POINTER_TYPES = ["mouse", "pen", "touch"] as const;
@@ -198,9 +198,9 @@ function shadersOf(harness: BoardScriptHarness): { shaders: BoardGpuShader[]; er
   return { shaders, errors };
 }
 
-async function checkShaders(shaders: BoardGpuShader[], files: BoardFiles, document: BoardDocument): Promise<{ errors: Record<string, string>; compiled: boolean }> {
+async function checkShaders(shaders: BoardGpuShader[], spaceId: string, document: BoardDocument): Promise<{ errors: Record<string, string>; compiled: boolean }> {
   const browser = findBoardGpuBrowser();
-  const exporter = browser ? await openBoardGpu(gpuResources(files, document), { browser }).catch(() => null) : null;
+  const exporter = browser ? await openBoardGpu(gpuResources(spaceId, document), { browser }).catch(() => null) : null;
   if (exporter) {
     try {
       return { errors: await exporter.compile(shaders), compiled: true };
@@ -220,7 +220,8 @@ async function checkShaders(shaders: BoardGpuShader[], files: BoardFiles, docume
 }
 
 export async function runBoardSimulation(options: {
-  source: BoardSource;
+  spaceId: string;
+  target: string;
   steps: readonly BoardSimulationStep[];
   leader: boolean;
   timeoutMs?: number;
@@ -232,9 +233,8 @@ export async function runBoardSimulation(options: {
     withImages: boolean;
   };
 }): Promise<BoardSimulationResult> {
-  const { files } = options.source;
-  const readModule = async (path: string) => new TextDecoder().decode((await files.read(path)).bytes);
-  const document: BoardDocument = await settleBoardDocument(files, options.source.document);
+  const client = createClient();
+  const document: BoardDocument = await settleBoardDocument(options.spaceId, (await loadBoardDocument(options.spaceId, options.target)).document);
   const renderer = await createNodeBoardRenderer({ fonts: resolveBundledFonts() });
   const progress = { step: -1, phase: "starting the scripts" };
   let harness: BoardScriptHarness | null = null;
@@ -259,7 +259,7 @@ export async function runBoardSimulation(options: {
       document,
       renderer,
       leader: options.leader,
-      readModule,
+      readModule: async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes),
     });
     const current = harness;
     if (stopped) {
@@ -268,7 +268,7 @@ export async function runBoardSimulation(options: {
     }
     progress.phase = "compiling shaders";
     const initial = shadersOf(current);
-    const early = initial.shaders.length ? await checkShaders(initial.shaders, files, current.document) : null;
+    const early = initial.shaders.length ? await checkShaders(initial.shaders, options.spaceId, current.document) : null;
     const presses: BoardSimulationPress[] = [];
     if (early && Object.keys(early.errors).length) {
       return {
@@ -278,14 +278,14 @@ export async function runBoardSimulation(options: {
       };
     }
     progress.phase = "running the steps";
-    await run(current, options.steps, progress, presses, readModule);
+    await run(current, options.steps, progress, presses, async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes));
     progress.phase = "settling the scripts";
     await current.flush();
     const { shaders, errors } = shadersOf(current);
     const checked = new Set(initial.shaders.map(({ id }) => id));
     const added = shaders.filter(({ id }) => !checked.has(id));
     progress.phase = "compiling shaders";
-    const late = added.length ? await checkShaders(added, files, current.document) : null;
+    const late = added.length ? await checkShaders(added, options.spaceId, current.document) : null;
     Object.assign(errors, late?.errors);
     const compiled = (early?.compiled ?? true) && (late?.compiled ?? true);
     const warnings = [...current.emitFailures].map(([id, message]) => `${id}: ${message}`);
@@ -304,7 +304,8 @@ export async function runBoardSimulation(options: {
       const shown = await current.shown(options.image.scale);
       const gpu = compiled && shaders.length > 0 && !Object.keys(errors).length && shaderShown(current.document, shaders, options.image.region);
       const exported = await runBoardExport({
-        files,
+        spaceId: options.spaceId,
+        target: options.target,
         ...(gpu
           ? { document: current.document, snapshots: await current.snapshot(), renderer: "gpu" as const }
           : { document: shown.document, ...(shown.scripts ? { scripts: shown.scripts } : {}) }),

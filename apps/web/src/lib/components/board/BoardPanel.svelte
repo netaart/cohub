@@ -188,7 +188,6 @@ const {
 	onOpenTask,
 	onOpenApp,
 	onOpenSession,
-	storeImage,
 	lod,
 	deviceTier,
 	onStageReady,
@@ -503,9 +502,7 @@ async function pasteImages(files: File[]) {
 	notice = { text: uploading, error: false };
 	const results = await Promise.allSettled(
 		files.map((file) =>
-			storeImage
-				? storeImage(file)
-				: uploadBoardImage(file, { spaceId: liveSpaceId ?? undefined }),
+			uploadBoardImage(file, { spaceId: liveSpaceId ?? undefined }),
 		),
 	);
 	imageUploads -= 1;

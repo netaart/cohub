@@ -27,15 +27,13 @@ Board commands take a Board ID or a `.board` path and target the current Space
 ## Workflow
 
 1. Look up fields with `boards schema`, and current content with `boards get`.
-2. Create the `.board` file and open it so the user can follow along:
+2. Open the Board when possible so the user can follow along; otherwise continue
+   without it. Create the `.board` file first — it only points to the Board:
 
    ```bash
    cohub boards create boards/plan.board --title "Plan"   # -i seed.json for an initial document
-   cohub boards open boards/plan.board
+   cohub desktop open file://boards/plan.board
    ```
-
-   `open` shows it on the user's Cohub desktop; outside Cohub it prints a local
-   URL — give it to the user. Their edits and yours merge live.
 
 3. Build in coherent patches, one visible step at a time: `--dry-run`, then `apply`.
 4. Check with `boards inspect` and an exported image.
@@ -46,14 +44,6 @@ Starter documents are valid patches for `create` and `apply`:
 cohub boards examples                        # basic, workflow, slides, lesson, custom
 cohub boards examples workflow > seed.json
 ```
-
-Outside Cohub the `.board` file is the Board itself, with no sign-in:
-
-- Media and script paths are relative to its folder; images the user pastes land
-  in `assets/` there.
-- `watch`, `diff`, shared playback and `task` cards need a Space, and say so.
-- `boards history` marks the user's edits `viewer`. Write through `apply`; a hand
-  edit to the file still becomes a version, but skips validation.
 
 ## Schema
 

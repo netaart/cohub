@@ -172,7 +172,7 @@ function reportOutcome(record: DesktopCommandRecord, called: boolean): void {
   );
 }
 
-export async function openDesktopWindow(target: string, opts: OpenOptions, command: Command): Promise<void> {
+async function openWindow(target: string, opts: OpenOptions, command: Command): Promise<void> {
   const callInput = opts.call ? readCallInput(opts) : undefined;
   if (!opts.call && (opts.data !== undefined || opts.input !== undefined)) {
     return error("Missing --call", "--data and --input only apply together with --call.");
@@ -278,7 +278,7 @@ function registerOpen(parent: Command, deprecated: boolean): void {
       if (deprecated) {
         ok("Deprecated: `cohub ui preview` is now `cohub desktop open`.");
       }
-      await openDesktopWindow(target, opts, thisCommand);
+      await openWindow(target, opts, thisCommand);
     });
   open.addHelpText("after", deprecated ? OPEN_NOTES : OPEN_HELP + OPEN_NOTES);
 }

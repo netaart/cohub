@@ -12,12 +12,11 @@ import {
   createBoardAnimationSampler,
 } from "@neta-art/cohub/board";
 import { readBoardJsonObject } from "../../board-command-support.js";
+import { loadBoardDocument } from "../../board-document.js";
+import { settleBoardDocument, settleBoardMediaDurations } from "../../board-media.js";
 import { parseBoardTime, parseBoardTimes } from "../../board-time.js";
 import { handleHttp, json as outJson, jsonRequested, table } from "../../output.js";
-
-const loadBoardSource = async (boards: Command, target: string) =>
-  (await import("../../board-document.js")).loadBoardSource(boards, target);
-const media = () => import("../../board-media.js");
+import { resolveSpace } from "../../space.js";
 
 const DIRECTIONS: readonly BoardRegionDirection[] = ["left", "right", "up", "down"];
 
@@ -40,8 +39,8 @@ Example: cohub boards inspect lesson.board --animation lecture --at 0:20s:1s --j
     .action(async (target: string, options: { animation?: string; at: string; items?: string; view?: string }) => {
       try {
         const view = options.view ? parseBoardViewSize(options.view) : undefined;
-        const { files, document: loaded } = await loadBoardSource(boards, target);
-        const document = await (await media()).settleBoardDocument(files, loaded);
+        const spaceId = await resolveSpace(boards);
+        const document = await settleBoardDocument(spaceId, (await loadBoardDocument(spaceId, target)).document);
         const times = parseBoardTimes(options.at, "--at", 100);
         const sampler = options.animation ? createBoardAnimationSampler(document, options.animation) : null;
         const [{ resolveBundledFonts }, { createNodeBoardRenderer, inspectBoardItems }] = await Promise.all([
@@ -79,7 +78,7 @@ without one, the frames inside it count. Frames inside pages do not. Left and ri
 Viewers step with N, the arrow keys and swipes; #focus=<frame>&present presents.`)
     .action(async (target: string, options: { json?: boolean }) => {
       try {
-        const { document } = await loadBoardSource(boards, target);
+        const { document } = await loadBoardDocument(await resolveSpace(boards), target);
         const regions = boardFrameRegions(buildBoardScene(document));
         const frames = regions.map((region, index) => ({
           index: index + 1,
@@ -115,7 +114,7 @@ Viewers step with N, the arrow keys and swipes; #focus=<frame>&present presents.
           )
         )
           throw new Error("Input needs a chapters array with animation IDs.");
-        const { document } = await loadBoardSource(boards, target);
+        const { document } = await loadBoardDocument(await resolveSpace(boards), target);
         outJson(boardSequencePatch(document, options.animation, input.chapters as BoardChapter[]));
       } catch (cause) {
         handleHttp(cause);
@@ -144,8 +143,9 @@ their time moves forward. Placing a target that is already on the timeline moves
         if (!targets.length) throw new Error("--targets needs at least one id.");
         const rate = Number(options.rate);
         if (!Number.isFinite(rate) || rate <= 0) throw new Error("--rate must be a positive number.");
-        const { files, document: loaded } = await loadBoardSource(boards, target);
-        const durations = options.duration ? {} : await (await media()).settleBoardMediaDurations(files, loaded, targets);
+        const spaceId = await resolveSpace(boards);
+        const { document: loaded } = await loadBoardDocument(spaceId, target);
+        const durations = options.duration ? {} : await settleBoardMediaDurations(spaceId, loaded, targets);
         const document = { ...loaded, items: { ...loaded.items, ...durations } };
         const patch = boardPlacePatch(document, options.animation, targets, {
           at: parseBoardTime(options.at, "--at"),
