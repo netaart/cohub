@@ -308,6 +308,17 @@ const MAX_REASON_LENGTH = 280;
  * dialog reserved but invisible until the SDK request times out.
  */
 const SPACE_LIST_TIMEOUT_MS = 10_000;
+/** A Space-bound authorize request whose consent depends on the viewer's Space list. */
+type SpaceConsentRequest = {
+	data: Record<string, unknown>;
+	requestId: string;
+	spaceId: string | undefined;
+	selectSpace: boolean;
+	scopes: Permission[];
+	alwaysAsk: boolean;
+	spaceLevel: boolean;
+	viewerUuid: string;
+};
 /** Bound a single authorize call so a stalled network can't wedge the flow. */
 const AUTHORIZE_TIMEOUT_MS = 30_000;
 /** Cap serial silent-renewal attempts per request (account grants may span Spaces). */
@@ -519,6 +530,7 @@ export function createAppBridgeCore(
 			&& isSameConsent(pending, next);
 	}
 	const joinReservations = new WeakSet<AppAuthorizeRequest>();
+	const spaceListRetries = new WeakMap<AppAuthorizeRequest, SpaceConsentRequest>();
 	let signInFlight: Promise<void> | null = null;
 	const pendingLoginKey = `cohub:app-login:${app.id}`;
 
@@ -1729,7 +1741,6 @@ export function createAppBridgeCore(
 					Boolean(spaceId) ||
 					selectSpace ||
 					scopes.some((scope) => !isUserLevelPermission(scope));
-				const lastPicked = readLastPickedSpace();
 
 				// Fast path: renew without loading the Space list when the target is
 				// already known client-side — account-level grants, or the Space the app
@@ -1738,7 +1749,7 @@ export function createAppBridgeCore(
 				const contextSpaceId = resolveContextSpaceId();
 				const preListTargets = !spaceLevel
 					? listGrantedAppSpacesForScopes(viewerUuid, app.id, scopes, app.spaceId)
-					: spaceId === undefined &&
+					: (spaceId === undefined || spaceId === contextSpaceId) &&
 						  !selectSpace &&
 						  contextSpaceId &&
 						  hasGrantedAppScopes(viewerUuid, app.id, scopes, contextSpaceId)
@@ -1752,103 +1763,16 @@ export function createAppBridgeCore(
 				}
 				if (state.pendingAuth !== reserved) return;
 
-				let spaces = spaceLevel
-					? await listViewerSpaces(spaceId, [...contextSpaceIds(), lastPicked])
-					: undefined;
-				if (state.pendingAuth !== reserved) return;
-				if (spaces && spaces.length === 0) {
-					const fallback = await ensureHomeSpace();
-					if (state.pendingAuth !== reserved) return;
-					if (fallback) spaces = [fallback];
-				}
-				const candidates = spaces ?? null;
-				// A failed Space lookup is different from an empty accessible list.
-				// Keep the dialog visible for retry, but never authorize an unresolved target.
-				if (spaceLevel && spaces === null) {
-					reserved.spaces = null;
-					state.authError = "Couldn't load your Spaces. Please try again.";
-					state.authOpen = true;
-					state.canChangeSpace = false;
-					notify();
-					return;
-				}
-				// An explicit target is honoured only when the viewer can use it. A list
-				// that failed to load stays unresolved for every Space-bound request, so
-				// confirmation is blocked rather than trusting an unverified target.
-				const explicitAccessible =
-					Boolean(spaceId) &&
-					candidates?.some((space) => space.id === spaceId) === true;
-				const structuredRequest = authorizationRequests.get(data.requestId);
-				if (spaceId && candidates && !explicitAccessible && structuredRequest?.fallback === "none") {
-					replyPendingAuth(reserved, { type: "cohub.app.error", code: "space_inaccessible", message: "The requested Space is unavailable." });
-					resetDialogState();
-					safeNotify();
-					return;
-				}
-				const defaultSpaceId = explicitAccessible
-					? spaceId
-					: resolveDefaultSpaceId(candidates);
-
-				// Remaining silent targets that need the loaded candidates: picker mode
-				// (last picked, only if still accessible), an accessible explicit target,
-				// or the resolved default. Account grants were already tried above.
-				const silentTargets = (
-					!spaceLevel
-						? []
-						: [
-								selectSpace
-									? lastPicked && candidates?.some((space) => space.id === lastPicked)
-										? lastPicked
-										: null
-									: explicitAccessible
-										? spaceId
-										: spaceId === undefined
-											? defaultSpaceId
-											: null,
-							].filter(
-								(target): target is string =>
-									Boolean(target) &&
-									hasGrantedAppScopes(viewerUuid, app.id, scopes, target ?? undefined),
-							)
-				).slice(0, MAX_SILENT_SPACE_ATTEMPTS);
-				if (
-					!alwaysAsk &&
-					(await attemptSilentRenewal(reserved, viewerUuid, scopes, silentTargets))
-				) {
-					return;
-				}
-				if (state.pendingAuth !== reserved) return;
-
-				if (spaceId && candidates && !explicitAccessible) {
-					// No resolved id: that would leak the viewer's Space to the app
-					// before they consent.
-					emitDiagnostic({
-						code: "space_inaccessible",
-						message: defaultSpaceId
-							? "The app requested a Space this viewer cannot access; using a Space the viewer controls instead."
-							: "The app requested a Space this viewer cannot access, and no viewer-controlled Space was available.",
-						detail: { requestedSpaceId: spaceId },
-					});
-				}
-				const spaceName = defaultSpaceId
-					? candidates?.find((space) => space.id === defaultSpaceId)?.name ?? null
-					: null;
-				// Mutate in place so the reservation keeps its identity: the outer catch
-				// releases state by identity, not by an app-supplied id.
-				Object.assign(reserved, {
-					...(explicitAccessible && spaceName ? { spaceName } : {}),
-					...(spaces !== undefined ? { spaces: spaces ?? null } : {}),
-					...(defaultSpaceId ? { defaultSpaceId } : {}),
+				await presentSpaceConsent(reserved, {
+					data: data as Record<string, unknown>,
+					requestId: data.requestId,
+					spaceId,
+					selectSpace,
+					scopes,
+					alwaysAsk,
+					spaceLevel,
+					viewerUuid,
 				});
-				state.selectedSpaceId = defaultSpaceId ?? null;
-				// An explicit, accessible target is fixed: the caller receives only a
-				// boolean and acts on the Space it named, so the viewer must not be able
-				// to redirect the grant elsewhere. Change is offered only when there is
-				// no target or the requested one is inaccessible.
-				state.canChangeSpace =
-					!explicitAccessible && (candidates?.length ?? 0) > 1;
-				state.authOpen = true;
-				notify();
 			}
 		} catch (error) {
 			if (error instanceof AppLoginRedirect) {
@@ -1876,6 +1800,113 @@ export function createAppBridgeCore(
 				code,
 			}, true);
 		}
+	}
+
+	/**
+	 * Loads the viewer's Spaces for a reserved consent, then renews silently or
+	 * opens the dialog. Runs again from `confirmAuth` when the list failed to load.
+	 */
+	async function presentSpaceConsent(reserved: AppAuthorizeRequest, request: SpaceConsentRequest) {
+		const { requestId, spaceId, selectSpace, scopes, alwaysAsk, spaceLevel, viewerUuid } = request;
+		const lastPicked = readLastPickedSpace();
+		let spaces = spaceLevel
+			? await listViewerSpaces(spaceId, [...contextSpaceIds(), lastPicked])
+			: undefined;
+		if (state.pendingAuth !== reserved) return;
+		if (spaces && spaces.length === 0) {
+			const fallback = await ensureHomeSpace();
+			if (state.pendingAuth !== reserved) return;
+			if (fallback) spaces = [fallback];
+		}
+		const candidates = spaces ?? null;
+		// A failed Space lookup is different from an empty accessible list.
+		// Keep the dialog visible for retry, but never authorize an unresolved target.
+		if (spaceLevel && spaces === null) {
+			reserved.spaces = null;
+			spaceListRetries.set(reserved, request);
+			state.authError = "Couldn't load your Spaces. Please try again.";
+			state.authOpen = true;
+			state.canChangeSpace = false;
+			notify();
+			return;
+		}
+		// An explicit target is honoured only when the viewer can use it. A list
+		// that failed to load stays unresolved for every Space-bound request, so
+		// confirmation is blocked rather than trusting an unverified target.
+		const explicitAccessible =
+			Boolean(spaceId) &&
+			candidates?.some((space) => space.id === spaceId) === true;
+		const structuredRequest = authorizationRequests.get(requestId);
+		if (spaceId && candidates && !explicitAccessible && structuredRequest?.fallback === "none") {
+			replyPendingAuth(reserved, { type: "cohub.app.error", code: "space_inaccessible", message: "The requested Space is unavailable." });
+			resetDialogState();
+			safeNotify();
+			return;
+		}
+		const defaultSpaceId = explicitAccessible
+			? spaceId
+			: resolveDefaultSpaceId(candidates);
+
+		// Remaining silent targets that need the loaded candidates: picker mode
+		// (last picked, only if still accessible), an accessible explicit target,
+		// or the resolved default. Account grants were already tried above.
+		const silentTargets = (
+			!spaceLevel
+				? []
+				: [
+						selectSpace
+							? lastPicked && candidates?.some((space) => space.id === lastPicked)
+								? lastPicked
+								: null
+							: explicitAccessible
+								? spaceId
+								: spaceId === undefined
+									? defaultSpaceId
+									: null,
+					].filter(
+						(target): target is string =>
+							Boolean(target) &&
+							hasGrantedAppScopes(viewerUuid, app.id, scopes, target ?? undefined),
+					)
+		).slice(0, MAX_SILENT_SPACE_ATTEMPTS);
+		if (
+			!alwaysAsk &&
+			(await attemptSilentRenewal(reserved, viewerUuid, scopes, silentTargets))
+		) {
+			return;
+		}
+		if (state.pendingAuth !== reserved) return;
+
+		if (spaceId && candidates && !explicitAccessible) {
+			// No resolved id: that would leak the viewer's Space to the app
+			// before they consent.
+			emitDiagnostic({
+				code: "space_inaccessible",
+				message: defaultSpaceId
+					? "The app requested a Space this viewer cannot access; using a Space the viewer controls instead."
+					: "The app requested a Space this viewer cannot access, and no viewer-controlled Space was available.",
+				detail: { requestedSpaceId: spaceId },
+			});
+		}
+		const spaceName = defaultSpaceId
+			? candidates?.find((space) => space.id === defaultSpaceId)?.name ?? null
+			: null;
+		// Mutate in place so the reservation keeps its identity: the outer catch
+		// releases state by identity, not by an app-supplied id.
+		Object.assign(reserved, {
+			...(explicitAccessible && spaceName ? { spaceName } : {}),
+			...(spaces !== undefined ? { spaces: spaces ?? null } : {}),
+			...(defaultSpaceId ? { defaultSpaceId } : {}),
+		});
+		state.selectedSpaceId = defaultSpaceId ?? null;
+		// An explicit, accessible target is fixed: the caller receives only a
+		// boolean and acts on the Space it named, so the viewer must not be able
+		// to redirect the grant elsewhere. Change is offered only when there is
+		// no target or the requested one is inaccessible.
+		state.canChangeSpace =
+			!explicitAccessible && (candidates?.length ?? 0) > 1;
+		state.authOpen = true;
+		notify();
 	}
 
 	/** Answers the dialog's request and every request that joined it. */
@@ -2035,8 +2066,34 @@ export function createAppBridgeCore(
 		const picked = state.canChangeSpace ? pickedSpaceId : undefined;
 		let requestedSpaceId = picked ?? state.selectedSpaceId ?? undefined;
 		if (pending.spaces === null) {
-			state.authError = "Couldn't load your Spaces. Please try again.";
+			const request = spaceListRetries.get(pending);
+			if (!request) {
+				state.authError = "Couldn't load your Spaces. Please try again.";
+				notify();
+				return;
+			}
+			// Confirming a dialog whose Space list failed retries the list.
+			state.authError = null;
+			state.authSaving = true;
 			notify();
+			try {
+				await presentSpaceConsent(pending, request);
+			} catch (error) {
+				if (error instanceof AppLoginRedirect) {
+					rememberAuthorization(request.data);
+					resetDialogState();
+					return;
+				}
+				replyPendingAuth(pending, {
+					type: "cohub.app.error",
+					message: error instanceof Error ? error.message : "Request failed.",
+					code: error instanceof AppAuthorizationError ? error.code : "request_failed",
+				});
+				resetDialogState();
+			} finally {
+				state.authSaving = false;
+				notify();
+			}
 			return;
 		}
 		if (pending.spaces !== undefined) {
