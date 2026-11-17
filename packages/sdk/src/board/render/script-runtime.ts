@@ -59,7 +59,7 @@ export function createScriptRuntime(
   if (!initial.item && module.draw)
     throw new Error("A Board script has no box to draw(); use shader passes or scene().");
   const DISPLAY = ["position", "size", "rotation", "scale", "opacity", "style", "props", "z", "depth"];
-  const CAMERA = ["focus", "zoom", "center", "shake"];
+  const CAMERA = ["focus", "zoom", "center", "shake", "pitch", "bearing"];
   let input = initial;
   let disposed = false;
   let stepping = false;

@@ -8,8 +8,10 @@ import {
   boardShaderParameters,
   boardAssetKeySource,
   boardModelFormat,
+  boardProjection,
   boardTextureEdge,
   isBoardModelObject,
+  isBoardViewLevel,
   normalizeBoardDocument,
   parseBoardScriptInputs,
   selectBoardExportAssets,
@@ -63,11 +65,15 @@ function freeRetired() {
 
 async function releaseModels() {
   const stage = await depth;
-  stage?.objects.sync({ x: 0, y: 0, zoom: 1, width: 1, height: 1 }, [], 0);
+  stage?.objects.sync(boardProjection({ x: 0, y: 0, zoom: 1 }, { width: 1, height: 1 }), [], 0);
   freeRetired();
   const entries = [...models.values()];
   models.clear();
   for (const entry of entries) void entry.model.then((model) => model?.destroy());
+}
+
+function usesDepth(prepared: NonNullable<ReturnType<typeof prepareBoardExport>>): boolean {
+  return boardDocumentUsesDepth(prepared.document) || (prepared.camera !== undefined && !isBoardViewLevel(prepared.camera.view));
 }
 
 function depthStage(target: Renderer): Promise<BoardDepthStage | undefined> {
@@ -210,7 +216,7 @@ const api = {
     const inside = new Set(prepared.plan.items.map((item) => item.id));
     const owners = (scripts.shaders?.(prepared.document, time) ?? []).filter((owner) => owner.root || inside.has(owner.id));
     const layers = createBoardShaderLayers({ wait: true });
-    const lifted = boardDocumentUsesDepth(prepared.document) ? await depthStage(target) : undefined;
+    const lifted = usesDepth(prepared) ? await depthStage(target) : undefined;
     const drawn = lifted ? await objectModels(prepared.plan.items) : undefined;
     const scene = createBoardExportScene({
       settings: prepared.document.board,
@@ -231,6 +237,7 @@ const api = {
       ...(prepared.plan.page ? { page: prepared.plan.page } : {}),
       ...(owners.length ? { shaders: { renderer: target, owners, layers } } : {}),
       ...(lifted ? { depth: { renderer: target, stage: lifted, models: drawn } } : {}),
+      ...(prepared.camera ? { camera: prepared.camera } : {}),
     });
     freeRetired();
     const pixel = new Uint8Array(4);
@@ -358,7 +365,7 @@ const api = {
     const loaded = frame.withImages ? await loadTextures(visible, prepared.plan.scale, frame.imageMemory, overrides) : new Map<string, Texture>();
     if (frame.withImages && frame.background === "paper" && document.board.background.image && background === undefined)
       background = await fetchTexture("background=1").catch(() => null);
-    const lifted = boardDocumentUsesDepth(prepared.document) ? await depthStage(renderer) : undefined;
+    const lifted = usesDepth(prepared) ? await depthStage(renderer) : undefined;
     const drawn = lifted ? await objectModels(prepared.plan.items) : undefined;
     const result = renderBoardExport(renderer, document, {
       ...options,

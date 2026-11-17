@@ -86,8 +86,12 @@ Worth knowing before you build:
 - Any item's `depth` lifts it off the Board into perspective (`lift`, `tilt`, `spin`,
   `bend`: wave, cloth, curl or custom GLSL, and a `back` item for when it turns over);
   presets `flip`, `lift`, `land`, `toss`, `sway`, `wave`, `curl` animate it, and a model
-  file with `props.model.display: "object"` rests on the Board as a lit 3D object.
+  file with `props.model.display: "object"` stands on the Board as a lit 3D object,
+  leaning toward a camera that looks down and upright under a low one.
   `boards examples depth` shows a handkerchief toss and a card flip.
+- `attach: { item, node? }` makes an item follow another's origin (`position` is the
+  offset); with `node`, one of a model object's named nodes (`props.snapshot.nodes`), it
+  rides that bone in 3D, raised by `depth.lift`.
 - A model's `props.model.animation` picks its clip; changing it crossfades over `fade`
   ms (250). With `autoplay` it plays on the Board clock; `time` (ms) drives it from a
   track or script instead, and `loop: false` holds the last pose. Clip names and lengths
@@ -228,10 +232,12 @@ or a simulate `{"inputs": "…"}` step; `{"input": "browser:devicemotion", "data
 delivers one event. `capabilities.call("navigator.vibrate" | "haptics" | "fullscreen")`
 answers back.
 
-`ctx.present("camera", { focus | center, zoom, shake })` directs the camera like a camera
-track: play and read-only views follow it until the viewer pans, `--camera` exports
-follow it, and editing never does. `cohub boards examples arena` steers a fox with WASD,
-switching its clips as it walks and runs, with the camera following.
+`ctx.present("camera", { focus | center, zoom, shake, pitch, bearing })` directs the camera
+like a camera track: play and read-only views follow it until the viewer pans, `--camera`
+exports follow it, and editing never does. `pitch` (0–60) lowers it toward the horizon and
+`bearing` turns it, so the Board becomes ground with models standing on it. `cohub boards
+examples arena` steers a fox with WASD under a low following camera, switching its clips
+as it walks and runs, with a glow riding its head.
 
 Published as an App, a Board opens in play: every visitor gets a local copy where
 drags move unlocked items and script regions take every press, saved per App version.
@@ -246,7 +252,7 @@ the bracket keeps the pattern from matching the shell running `pkill` itself.
 
 An animation is one timeline of tracks; each track drives one property of one
 target by JSON path. `target: "camera"` moves the view through `focus`, `zoom`,
-`center` and `shake`, framed for the animation's `viewport` (1600×900 unless set);
+`center`, `shake`, `pitch` and `bearing`, framed for the animation's `viewport` (1600×900 unless set);
 every screen and `--camera` export shows that framing scaled to fit. Write tracks directly, or generate them — these helpers
 print JSON and never write:
 

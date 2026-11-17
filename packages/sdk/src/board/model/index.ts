@@ -56,6 +56,7 @@ export * from "./text-metrics.js";
 export * from "./tool-styles.js";
 export * from "./geometry.js";
 export * from "./depth.js";
+export * from "./view-camera.js";
 export * from "./launch.js";
 export * from "./published.js";
 export * from "./client-geometry.js";

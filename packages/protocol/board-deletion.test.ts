@@ -51,3 +51,28 @@ test("type replacements validate existing children, bindings and tracks", () => 
 	assert.ok(movedChild.ok);
 	assert.ok(parseBoardDocument(movedChild.document).ok);
 });
+
+test("attached items follow their target and stay put when it goes", () => {
+	const base = document({ items: {
+		hero: { type: "shape", position: { x: 300, y: 200 }, size: { width: 100, height: 100 }, rotation: 40 },
+		slash: { type: "shape", position: { x: 10, y: -20 }, size: { width: 40, height: 40 }, attach: { item: "hero", node: "hand" } },
+	} });
+	const layout = createDocumentLayout(base.items);
+	assert.deepEqual(layout.matrix("slash").slice(4), [360, 230]);
+	const before = layout.frame("slash");
+	const result = applyBoardPatchToDocument(base, { items: { hero: null } });
+	assert.ok(result.ok);
+	assert.equal(result.document.items.slash?.attach, undefined);
+	const after = createDocumentLayout(result.document.items).frame("slash");
+	assert.ok(Math.abs(before.x - after.x) < 1e-6 && Math.abs(before.y - after.y) < 1e-6);
+	for (const [patch, code] of [
+		[{ items: { slash: { attach: { item: "ghost" } } } }, "ATTACH_NOT_FOUND"],
+		[{ items: { slash: { attach: { item: "slash" } } } }, "INVALID_ATTACH"],
+		[{ items: { hero: { attach: { item: "slash" } } } }, "INVALID_ATTACH"],
+		[{ items: { f: { type: "frame" }, slash: { parent: "f" } } }, "INVALID_ATTACH"],
+		[{ items: { hero: { type: "arrow", props: { start: { x: 0, y: 0 }, end: { x: 10, y: 0 } } } } }, "INVALID_ATTACH"],
+	] as const) {
+		const rejected = applyBoardPatchToDocument(base, patch);
+		assert.ok(!rejected.ok && rejected.diagnostics.some((diagnostic) => diagnostic.code === code), code);
+	}
+});

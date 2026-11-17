@@ -346,6 +346,25 @@ test("moving a bound target refreshes arrow bounds in its parent's world space",
 	assert.ok(nearby.items?.arrow);
 });
 
+test("attached items follow their target in spatial reads and stay put when it goes", async () => {
+	const { db, boardId } = await board({ items: {
+		hero: { type: "shape", size: { width: 100, height: 100 } },
+		tag: { type: "shape", position: { x: 10, y: 10 }, size: { width: 20, height: 20 }, attach: { item: "hero" } },
+		panel: { type: "frame", position: { x: 0, y: 100 }, size: { width: 100, height: 100 }, attach: { item: "hero" } },
+		note: { type: "shape", parent: "panel", position: { x: 10, y: 10 }, size: { width: 20, height: 20 } },
+	} });
+	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { hero: { position: { x: 1000, y: 0 } } } } } });
+	const nearby = await readBoard(db, { spaceId, boardId, read: { rect: { x: 1058, y: 58, width: 4, height: 4 } } });
+	assert.ok(nearby.items?.tag);
+	const inside = await readBoard(db, { spaceId, boardId, read: { rect: { x: 1068, y: 168, width: 4, height: 4 } } });
+	assert.ok(inside.items?.note);
+	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { hero: null } } } });
+	const parsed = parseBoardDocument(await readBoard(db, { spaceId, boardId }));
+	assert.ok(parsed.ok);
+	assert.deepEqual(parsed.document.items.tag?.position, { x: 1060, y: 60 });
+	assert.equal(parsed.document.items.tag?.attach, undefined);
+});
+
 test("a reparent cannot push unchanged descendants beyond the hierarchy limit", async () => {
 	const items = Object.fromEntries(["c", "s"].flatMap((prefix) => Array.from({ length: prefix === "c" ? 60 : 10 }, (_, i) => [
 		`${prefix}${i}`, { type: "frame", ...(i ? { parent: `${prefix}${i - 1}` } : {}) },

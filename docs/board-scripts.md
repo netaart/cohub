@@ -189,7 +189,9 @@ regions, and a scene to 1 MB.
 The world layer (the default) inherits the owner's transform. The screen layer,
 `scene(items, { space: "screen" })`, keeps screen-pixel size above every document
 item; it is interaction UI and is excluded from image export. Both layers coexist,
-e.g. dust in the world and a toolbar on screen.
+e.g. dust in the world and a toolbar on screen. When the camera tips or turns, the
+screen layer stays upright on the screen, and an anchored one follows where its item
+shows.
 
 Menus, tooltips, controllers and characters are ordinary module code. The platform
 has no menu or action-list protocol. Use native items and hit regions for controls.
@@ -317,14 +319,16 @@ ctx.onFrame(() => {
 
 It takes the camera track fields: `focus` (an item id, fitted with padding, or a world
 rect), `zoom` (pixels per board unit on the animation's `viewport`, 1600×900 by
-default, so every screen frames the same view), `center` (a world point) and `shake`
-(screen pixels). Each call replaces this script's camera fields; they override the
+default, so every screen frames the same view), `center` (a world point), `shake`
+(screen pixels), and `pitch` (0–60 degrees toward the horizon) and `bearing` (degrees
+clockwise) for a low or turned view (see [Pitch and bearing](board.md#pitch-and-bearing)). Each call replaces this script's camera fields; they override the
 animation camera one by one, a later script in document order wins a field, and `null`
 lets go. The camera follows in play and read-only
 views, and in `--camera` exports. While editing it never moves, so authors keep their
 view. When the viewer pans or zooms, they take the camera until **Back to the camera**;
 when the script lets go, the view stays where it was. `ctx.view` reports the camera the
-viewer sees; `boards simulate` reports the directed camera after a `{"tool": "play"}` step,
+viewer sees, with `pitch` and `bearing` while it tips or turns; pointer events keep
+reporting the Board point under the pointer; `boards simulate` reports the directed camera after a `{"tool": "play"}` step,
 and the test harness has `board.camera`.
 
 ## Sense the device

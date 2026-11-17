@@ -17,6 +17,7 @@ import {
 } from "../model/index.js";
 import {
 	type BoardClipboardPayload,
+	carriedBy,
 	DUPLICATE_OFFSET,
 	encodeClipboard,
 	materializeClipboard,
@@ -47,11 +48,13 @@ export function createCopyModule(ctx: EditorContext) {
 
 	function detachedSubtrees(ids: Iterable<string>, scene: BoardScene): Record<string, BoardItem> {
 		const items: Record<string, BoardItem> = {};
-		for (const root of ctx.query.rootsOf(ids)) {
+		const roots = ctx.query.rootsOf(ids);
+		const copied = new Set(roots.flatMap((root) => [root, ...scene.descendants(root)]));
+		for (const root of roots) {
 			const item = scene.get(root);
 			if (!item || !state.base.items[root]) continue;
 			const { id: _id, frame, ...stored } = item;
-			items[root] = ctx.document.reparent(stored as BoardItem, frame, undefined, scene.layout.box(root));
+			items[root] = item.attach && copied.has(item.attach.item) ? (stored as BoardItem) : ctx.document.reparent(stored as BoardItem, frame, undefined, scene.layout.box(root));
 			for (const child of scene.descendants(root)) {
 				if (!state.base.items[child]) continue;
 				const shown = scene.get(child);
@@ -81,7 +84,7 @@ export function createCopyModule(ctx: EditorContext) {
 			for (const arrowId of scene.binders(id)) {
 				if (!state.base.items[arrowId]) continue;
 				const shown = scene.get(arrowId);
-				if (copied[arrowId] || !shown || !arrowBindings(shown).every((bound) => copied[bound])) continue;
+				if (copied[arrowId] || shown?.type !== "arrow" || !arrowBindings(shown).every((bound) => copied[bound])) continue;
 				const { id: _id, frame, ...arrow } = shown;
 				copied[arrowId] = ctx.document.reparent(arrow as BoardItem, frame, undefined, scene.layout.box(arrowId));
 			}
@@ -90,10 +93,7 @@ export function createCopyModule(ctx: EditorContext) {
 		const moved = remapItems(
 			copied,
 			idMap,
-			(item) =>
-				item.parent && copied[item.parent]
-					? item
-					: { ...item, position: { x: item.position.x + offset, y: item.position.y + offset } },
+			(item) => (carriedBy(item, (other) => Boolean(copied[other])) ? item : { ...item, position: { x: item.position.x + offset, y: item.position.y + offset } }),
 			(id, which) => arrowEndPoint(scene, id, which),
 		);
 		let z = ctx.document.topZ(undefined, scene);

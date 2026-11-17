@@ -71,7 +71,7 @@ export function createCreationModule(ctx: EditorContext) {
 			}
 			const shown = probe.get(id);
 			const container =
-				shown && item.type !== "frame" && item.type !== "arrow" ? ctx.query.frameAt(rectCenter(shown.frame), created) : null;
+				shown && item.type !== "frame" && item.type !== "arrow" && !item.attach ? ctx.query.frameAt(rectCenter(shown.frame), created) : null;
 			const value =
 				container && shown ? ctx.document.reparent(item, shown.frame, container.id, probe.layout.box(id)) : item;
 			const z = nextZ.get(container?.id) ?? ctx.document.topZ(container?.id);
@@ -113,7 +113,7 @@ export function createCreationModule(ctx: EditorContext) {
 		const placed = sceneWith(id, frame);
 		for (const child of ctx.query.enclosedIn(rect, parent)) {
 			const stored = ctx.document.displayItem(child.id);
-			if (!stored || child.type === "arrow" || ctx.query.isLocked(child) || keyed.has(child.id)) continue;
+			if (!stored || child.type === "arrow" || child.attach || ctx.query.isLocked(child) || keyed.has(child.id)) continue;
 			const adopted = ctx.document.reparent(stored, child.frame, id, state.scene.layout.box(child.id), placed);
 			changes.set(child.id, { ...adopted, z: changes.size });
 		}

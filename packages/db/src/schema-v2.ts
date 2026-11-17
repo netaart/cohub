@@ -530,7 +530,7 @@ export const boards = v2.table(
  * One row per item. `data` holds the compact item; the columns beside it are
  * projections the server maintains for queries: hierarchy (`parent_id`, `z`),
  * world bounds for viewport reads, the Space file it shows (`src`) and the items
- * an arrow is bound to (`binds`).
+ * its placement follows: an arrow's bound ends or its attach target (`binds`).
  */
 export const boardItems = v2.table(
   "board_items",

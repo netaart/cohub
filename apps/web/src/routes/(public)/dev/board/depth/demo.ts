@@ -59,6 +59,15 @@ export function arenaDemoDocument(): BoardDocument {
 					},
 				},
 			},
+			halo: {
+				type: "effect",
+				position: { x: -36, y: -36 },
+				size: { width: 72, height: 72 },
+				attach: { item: "fox", node: "b_Head_05" },
+				depth: { lift: 40, shadow: 0 },
+				style: { fill: "#ffd76a" },
+				props: { kind: "glow", life: 1400 },
+			},
 			stone: {
 				type: "shape",
 				position: { x: 160, y: 520 },

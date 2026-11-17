@@ -1,7 +1,8 @@
 
 import * as z from "zod";
 import { boardJsonEquals } from "./board-json.js";
-import { applyMatrix, arrowBindings, createBoardLayout, invertMatrix, isArrowBinding } from "./board-layout.js";
+import { BOARD_MAX_PITCH } from "./board-constants.js";
+import { applyMatrix, arrowBindings, createBoardLayout, invertMatrix, isArrowBinding, itemBindings } from "./board-layout.js";
 import {
 	BOARD_CAMERA_TARGET,
 	type BoardAnimationHeader,
@@ -131,7 +132,7 @@ export type BoardPropertySpec = {
 	multiplicative?: boolean;
 };
 
-const NOT_ANIMATABLE = new Set(["type", "parent", "z", "locked", "autoplay", "metadata", "script"]);
+const NOT_ANIMATABLE = new Set(["type", "parent", "attach", "z", "locked", "autoplay", "metadata", "script"]);
 
 const CAMERA_PROPERTIES: Record<string, BoardPropertySpec> = {
 	focus: {
@@ -144,6 +145,11 @@ const CAMERA_PROPERTIES: Record<string, BoardPropertySpec> = {
 	zoom: { kind: "number", schema: z.number().finite().positive().describe("Pixels per world unit; overrides the zoom computed by focus."), multiplicative: true },
 	center: { kind: "vec2", schema: BoardVec2Schema.describe("World-space viewport center; overrides focus positioning using the resolved zoom.") },
 	shake: { kind: "number", schema: z.number().finite().nonnegative().describe("Shake amplitude in screen pixels, applied after focus, zoom and center.") },
+	pitch: {
+		kind: "number",
+		schema: z.number().finite().min(0).max(BOARD_MAX_PITCH).describe(`Degrees the eye tips from straight down toward the horizon, 0 to ${BOARD_MAX_PITCH}, about the middle of the view, which keeps its zoom.`),
+	},
+	bearing: { kind: "number", schema: z.number().finite().describe("Degrees the view turns clockwise like a map's bearing, about the middle of the view; 90 puts the Board's +x at the top.") },
 };
 
 const ANIMATION_PROPERTIES: Record<string, BoardPropertySpec> = {
@@ -293,6 +299,7 @@ export function boardPatchTouches(patch: BoardPatch): {
 			continue;
 		}
 		if (typeof value.parent === "string") parents.add(value.parent);
+		if (isRecord(value.attach) && typeof value.attach.item === "string") references.add(value.attach.item);
 		const props = isRecord(value.props) ? value.props : null;
 		for (const end of [props?.start, props?.end]) {
 			if (isRecord(end) && typeof end.item === "string") references.add(end.item);
@@ -507,6 +514,11 @@ export function applyBoardPatch(
 		}
 		for (const arrowId of state.binders(id)) {
 			const arrow = item(arrowId);
+			if (arrow?.attach?.item === id) {
+				const { attach: _attach, ...free } = arrow;
+				nextItems.set(arrowId, { ...free, position: applyMatrix(deletionLayout.parentMatrix(arrowId), arrow.position) } as BoardItem);
+				continue;
+			}
 			if (arrow?.type !== "arrow") continue;
 			const props = { ...(arrow as BoardArrowItem).props };
 			for (const which of ["start", "end"] as const) {
@@ -547,9 +559,11 @@ export function applyBoardPatch(
 	};
 
 	const validationItems = new Map(nextItems);
+	const carried = (id: string) => [...state.children(id), ...state.binders(id).filter((binder) => item(binder)?.attach?.item === id)];
 	const descendants: string[] = [];
 	for (const [id, value] of nextItems) {
-		if (value && value.parent !== state.item(id)?.parent) descendants.push(...state.children(id));
+		const before = state.item(id);
+		if (value && (value.parent !== before?.parent || !boardJsonEquals(value.attach, before?.attach))) descendants.push(...carried(id));
 	}
 	const seenDescendants = new Set<string>();
 	while (descendants.length) {
@@ -557,7 +571,7 @@ export function applyBoardPatch(
 		if (seenDescendants.has(id)) continue;
 		seenDescendants.add(id);
 		validationItems.set(id, item(id) ?? null);
-		descendants.push(...state.children(id));
+		descendants.push(...carried(id));
 	}
 	for (const [id, value] of validationItems) {
 		if (!value) continue;
@@ -585,6 +599,7 @@ export function applyBoardPatch(
 			if (!target) diagnostics.push(error(`items.${id}.props`, "BINDING_NOT_FOUND", `bound item ${bound} does not exist`));
 			else if (bound === id || target.type === "arrow") diagnostics.push(error(`items.${id}.props`, "INVALID_BINDING", "arrows bind to items other than arrows"));
 		}
+		diagnostics.push(...validateAttach(id, value, item, state));
 	}
 	for (const [id, value] of nextItems) {
 		if (!value || !state.item(id) || state.item(id)?.type === value.type) continue;
@@ -597,6 +612,7 @@ export function applyBoardPatch(
 			for (const binder of state.binders(id)) {
 				const arrow = item(binder);
 				if (arrow && arrowBindings(arrow).includes(id)) diagnostics.push(error(`items.${binder}.props`, "INVALID_BINDING", "arrows cannot bind to arrows"));
+				if (arrow?.attach?.item === id) diagnostics.push(error(`items.${binder}.attach`, "INVALID_ATTACH", "items cannot attach to arrows"));
 			}
 		}
 		for (const ref of state.trackRefs(id)) {
@@ -642,6 +658,31 @@ export function applyBoardPatch(
 		}
 	}
 	return { ok: true, before: withoutEmpty(before), after: withoutEmpty(after), diagnostics: warnings };
+}
+
+function validateAttach(id: string, value: BoardItem, item: (id: string) => BoardItem | undefined, state: BoardState): BoardDiagnostic[] {
+	const diagnostics: BoardDiagnostic[] = [];
+	const attach = value.attach;
+	if (attach) {
+		const path = `items.${id}.attach`;
+		const target = item(attach.item);
+		if (!target) diagnostics.push(error(path, "ATTACH_NOT_FOUND", `attach target ${attach.item} does not exist`));
+		else if (value.type === "arrow" || target.type === "arrow") diagnostics.push(error(path, "INVALID_ATTACH", "arrows bind their ends instead of attaching"));
+		else if (target.attach) diagnostics.push(error(path, "INVALID_ATTACH", `${attach.item} follows ${target.attach.item}; attach to that item instead`));
+		if (value.parent !== undefined) diagnostics.push(error(path, "INVALID_ATTACH", "an attached item follows its target instead of a frame; remove parent"));
+		for (const follower of state.binders(id))
+			if (item(follower)?.attach?.item === id) diagnostics.push(error(`items.${follower}.attach`, "INVALID_ATTACH", `${id} follows ${attach.item}; attach to that item instead`));
+	}
+	let attached = Boolean(attach);
+	let cursor = attach?.item ?? value.parent;
+	for (let depth = 0; cursor && cursor !== id && depth < 64; depth += 1) {
+		const next = item(cursor);
+		attached ||= Boolean(next?.attach);
+		cursor = next?.attach?.item ?? next?.parent;
+	}
+	if (cursor && attached)
+		diagnostics.push(error(`items.${id}.${attach ? "attach" : "parent"}`, "INVALID_ATTACH", cursor === id ? `${id} cannot follow itself through attach and frames` : "attach and frames place an item more than 64 levels deep"));
+	return diagnostics;
 }
 
 function validateTrack(
@@ -720,7 +761,7 @@ export function createDocumentState(document: BoardDocument): BoardState {
 		refs = new Map();
 		for (const [id, value] of Object.entries(document.items)) {
 			if (value.parent) children.set(value.parent, [...(children.get(value.parent) ?? []), id]);
-			for (const bound of arrowBindings(value)) binders.set(bound, [...(binders.get(bound) ?? []), id]);
+			for (const bound of itemBindings(value)) binders.set(bound, [...(binders.get(bound) ?? []), id]);
 		}
 		for (const [animationId, value] of Object.entries(document.animations)) {
 			for (const [trackId, track] of Object.entries(value.tracks)) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBoardEditor } from "../../src/board/editor/index.js";
+import { worldPoint } from "../../src/board/model/index.js";
 import { toBoardPointerEvent } from "../../src/board/stage/pointer.js";
 import { createBoardPointerGestures } from "../../src/board/stage/pointer-gestures.js";
 import { boardDocument } from "./fixtures.js";
@@ -37,7 +38,7 @@ for (const ending of ["release", "cancel", "unpressed move"]) {
 			document: boardDocument({ items: { a: { type: "shape", size: { width: 100, height: 100 } } } }),
 			onCommit() { commits++; },
 		});
-		const input = (event: PointerEvent) => toBoardPointerEvent(event, { left: 0, top: 0 } as DOMRect, { x: 0, y: 0, zoom: 1 });
+		const input = (event: PointerEvent) => toBoardPointerEvent(event, { left: 0, top: 0 } as DOMRect, (screen) => worldPoint(screen.x, screen.y));
 		const gestures = createBoardPointerGestures(host as unknown as HTMLElement, {
 			move: (event) => editor.pointerMove(input(event)),
 			end: (event) => {

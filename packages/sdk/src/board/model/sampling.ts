@@ -1,4 +1,4 @@
-import { arrowBindings, BOARD_CAMERA_VIEWPORT, type BoardDocument, type BoardFrame, type BoardItem } from "@cohub/protocol";
+import { BOARD_CAMERA_VIEWPORT, BOARD_MAX_PITCH, itemBindings, type BoardDocument, type BoardFrame, type BoardItem } from "@cohub/protocol";
 import {
   applyBoardEvaluation,
   boardAnimationTime,
@@ -57,7 +57,7 @@ export function createBoardAnimationSampler(
         if (!item) continue;
         items[next] = item;
         if (item.parent) pending.push(item.parent);
-        pending.push(...arrowBindings(item));
+        pending.push(...itemBindings(item));
       }
       const frame = buildBoardScene({ ...sampled, items }).get(id)?.frame;
       if (geometry.size >= 2048) geometry.clear();
@@ -110,5 +110,12 @@ export function resolveBoardAnimationCamera(
       x: camera.x + Math.sin((time / 1000) * 91.3) * override.shake,
       y: camera.y + Math.cos((time / 1000) * 77.9) * override.shake,
     };
-  return { x: camera.x * scale + left, y: camera.y * scale + top, zoom: camera.zoom * scale };
+  const { pitch, bearing } = override;
+  return {
+    x: camera.x * scale + left,
+    y: camera.y * scale + top,
+    zoom: camera.zoom * scale,
+    ...(pitch ? { pitch: Math.min(BOARD_MAX_PITCH, Math.max(0, pitch)) } : {}),
+    ...(bearing ? { bearing } : {}),
+  };
 }

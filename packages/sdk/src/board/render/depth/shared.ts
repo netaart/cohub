@@ -1,13 +1,14 @@
 import type { BoardFrame } from "@cohub/protocol";
 import { Container, type Renderer } from "pixi.js";
-import type { BoardDepthSurface, BoardDepthView } from "../../model/depth.js";
+import type { BoardDepthPose } from "../../model/depth.js";
+import type { BoardProjection } from "../../model/view-camera.js";
 import { type BoardDepthBend, compileBoardDepthBend, isBoardDepthBendSource, prepareBoardDepthBend } from "./bend.js";
 import type { BoardDepthPicture } from "./capture.js";
 
 const DENSITY_STEPS = 4;
 
-export function boardDepthDensity(view: BoardDepthView, resolution: number, surface: BoardDepthSurface): number {
-	const steps = Math.round(Math.log2(Math.max(view.zoom * resolution * surface.scale, 1e-3)) * DENSITY_STEPS);
+export function boardDepthDensity(projection: BoardProjection, resolution: number, pose: BoardDepthPose): number {
+	const steps = Math.round(Math.log2(Math.max(projection.scale(pose.x, pose.y, pose.z) * resolution, 1e-3)) * DENSITY_STEPS);
 	return 2 ** (steps / DENSITY_STEPS);
 }
 

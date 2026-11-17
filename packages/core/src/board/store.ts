@@ -37,7 +37,7 @@ import {
 	BOARD_SNAPSHOT_KIND,
 	type RequestSource,
 	applyBoardPatch,
-	arrowBindings,
+	itemBindings,
 	boardSessionSource,
 	boardTaskSource,
 	boardJsonEquals,
@@ -144,27 +144,34 @@ type Loaded = {
 };
 
 async function loadWithAncestors(db: Executor, boardId: string, ids: Iterable<string>, loaded: Loaded) {
-	const candidates = new Set(ids);
-	for (const id of candidates) {
-		const parent = loaded.items.get(id)?.parent;
-		if (parent) candidates.add(parent);
-	}
-	const missing = [...candidates].filter((id) => !loaded.items.has(id) && !loaded.parents.has(id));
-	if (!missing.length) return;
-	const rows = await rowsOf<{ id: string; data: unknown; parent_id: string | null }>(db.execute(sql`
-		WITH RECURSIVE up(id, depth) AS (
-			SELECT i.id, 0 FROM ${boardItems} i WHERE i.board_id = ${boardId} AND i.id = ANY(${textArray(missing)})
-			UNION
-			SELECT i.parent_id, up.depth + 1 FROM ${boardItems} i JOIN up ON i.board_id = ${boardId} AND i.id = up.id
-			WHERE i.parent_id IS NOT NULL AND up.depth < ${MAX_DEPTH}
-		)
-		SELECT i.id, i.data, i.parent_id FROM ${boardItems} i WHERE i.board_id = ${boardId} AND i.id IN (SELECT id FROM up)
-	`));
-	for (const id of missing) loaded.parents.set(id, undefined);
-	for (const row of rows) {
-		const item = readItem(row.id, row.data);
-		if (item) loaded.items.set(row.id, item);
-		loaded.parents.set(row.id, row.parent_id ?? undefined);
+	let pending: Iterable<string> = ids;
+	for (let round = 0; round < MAX_DEPTH; round++) {
+		const candidates = new Set(pending);
+		for (const id of candidates) {
+			const item = loaded.items.get(id);
+			if (item?.parent) candidates.add(item.parent);
+			if (item?.attach) candidates.add(item.attach.item);
+		}
+		const missing = [...candidates].filter((id) => !loaded.items.has(id) && !loaded.parents.has(id));
+		if (!missing.length) return;
+		const rows = await rowsOf<{ id: string; data: unknown; parent_id: string | null }>(db.execute(sql`
+			WITH RECURSIVE up(id, depth) AS (
+				SELECT i.id, 0 FROM ${boardItems} i WHERE i.board_id = ${boardId} AND i.id = ANY(${textArray(missing)})
+				UNION
+				SELECT i.parent_id, up.depth + 1 FROM ${boardItems} i JOIN up ON i.board_id = ${boardId} AND i.id = up.id
+				WHERE i.parent_id IS NOT NULL AND up.depth < ${MAX_DEPTH}
+			)
+			SELECT i.id, i.data, i.parent_id FROM ${boardItems} i WHERE i.board_id = ${boardId} AND i.id IN (SELECT id FROM up)
+		`));
+		for (const id of missing) loaded.parents.set(id, undefined);
+		const targets: string[] = [];
+		for (const row of rows) {
+			const item = readItem(row.id, row.data);
+			if (item) loaded.items.set(row.id, item);
+			if (item?.attach) targets.push(item.attach.item);
+			loaded.parents.set(row.id, row.parent_id ?? undefined);
+		}
+		pending = targets;
 	}
 }
 
@@ -185,6 +192,29 @@ async function loadDescendants(db: Executor, boardId: string, ids: string[]): Pr
 		if (item) result.set(row.id, item);
 	}
 	return result;
+}
+
+async function loadCarried(db: Executor, boardId: string, roots: string[], kindOf: (id: string) => string | undefined) {
+	const reached = new Map<string, BoardItem>();
+	const binders = new Map<string, BoardItem>();
+	const queried = new Set<string>();
+	let frontier = roots;
+	while (frontier.length) {
+		const known = (id: string) => reached.get(id)?.type ?? kindOf(id);
+		const descendants = await loadDescendants(db, boardId, frontier.filter((id) => known(id) === "frame"));
+		const kind = (id: string) => descendants.get(id)?.type ?? known(id);
+		const asked = [...frontier, ...descendants.keys()].filter((id) => !queried.has(id));
+		for (const id of asked) queried.add(id);
+		const bound = await loadBinders(db, boardId, asked.filter((id) => kind(id) !== "arrow"));
+		for (const [id, item] of bound) binders.set(id, item);
+		frontier = [];
+		for (const [id, item] of [...descendants, ...bound]) {
+			if (reached.has(id) || roots.includes(id)) continue;
+			reached.set(id, item);
+			if (!queried.has(id)) frontier.push(id);
+		}
+	}
+	return { reached, binders };
 }
 
 async function loadBinders(db: Executor, boardId: string, ids: string[]): Promise<Map<string, BoardItem>> {
@@ -510,7 +540,7 @@ async function preloadState(tx: Tx, boardId: string, settingsData: unknown, patc
 	const touches = boardPatchTouches(patch);
 	const loaded: Loaded = { items: new Map(), parents: new Map() };
 	await loadWithAncestors(tx, boardId, [...touches.items, ...touches.animations, ...touches.parents, ...touches.references], loaded);
-	await loadWithAncestors(tx, boardId, [...loaded.items.values()].flatMap(arrowBindings), loaded);
+	await loadWithAncestors(tx, boardId, [...loaded.items.values()].flatMap(itemBindings), loaded);
 
 	const deleted = new Set(touches.deletedItems);
 	const typeChanges = touches.items.filter((id) => {
@@ -530,7 +560,7 @@ async function preloadState(tx: Tx, boardId: string, settingsData: unknown, patc
 		loaded.items.set(id, item);
 		loaded.parents.set(id, item.parent);
 	}
-	if (descendants.size) await loadWithAncestors(tx, boardId, [...loaded.items.values()].flatMap(arrowBindings), loaded);
+	if (descendants.size) await loadWithAncestors(tx, boardId, [...loaded.items.values()].flatMap(itemBindings), loaded);
 	const children = new Map<string, Set<string>>();
 	for (const [id, item] of loaded.items) {
 		if (!item.parent) continue;
@@ -540,16 +570,23 @@ async function preloadState(tx: Tx, boardId: string, settingsData: unknown, patc
 	}
 	const bindersById = new Map<string, Set<string>>();
 	const binderItems = await loadBinders(tx, boardId, cascade ? subtree : dependencyRoots);
-	for (const [id, item] of binderItems) {
-		loaded.items.set(id, item);
-		for (const bound of arrowBindings(item)) {
-			const set = bindersById.get(bound) ?? new Set<string>();
-			set.add(id);
-			bindersById.set(bound, set);
-		}
+	for (const [id, item] of binderItems) loaded.items.set(id, item);
+	const placementChanges = touches.items.filter((id) => {
+		const current = loaded.items.get(id);
+		const next = patch.items?.[id];
+		return Boolean(current && next && ((Object.hasOwn(next, "parent") && next.parent !== current.parent) || (Object.hasOwn(next, "attach") && !boardJsonEquals(next.attach, current.attach))));
+	});
+	const placedThrough = await loadCarried(tx, boardId, placementChanges, (id) => loaded.items.get(id)?.type);
+	for (const [id, item] of placedThrough.reached) {
+		if (!loaded.items.has(id)) loaded.items.set(id, item);
+		loaded.parents.set(id, item.parent);
+		if (item.parent) children.set(item.parent, (children.get(item.parent) ?? new Set<string>()).add(id));
 	}
-	await loadWithAncestors(tx, boardId, [...binderItems.values()].flatMap(arrowBindings), loaded);
-	await loadWithAncestors(tx, boardId, [...binderItems.keys()], loaded);
+	for (const [id, item] of [...binderItems, ...placedThrough.binders]) {
+		for (const bound of itemBindings(item)) bindersById.set(bound, (bindersById.get(bound) ?? new Set<string>()).add(id));
+	}
+	await loadWithAncestors(tx, boardId, [...binderItems.values(), ...placedThrough.binders.values()].flatMap(itemBindings), loaded);
+	await loadWithAncestors(tx, boardId, [...binderItems.keys(), ...placedThrough.reached.keys()], loaded);
 
 	const animationIds = new Set([...touches.animations, ...touches.items, ...touches.references]);
 	const refIds = [...subtree, ...touches.deletedAnimations];
@@ -643,7 +680,7 @@ async function preloadState(tx: Tx, boardId: string, settingsData: unknown, patc
 	return { state, layout, loaded, animations, tracks, revisions, children, binders: bindersById, refs, maxZ };
 }
 
-const TRANSFORM_KEYS = ["position", "size", "rotation", "scale", "origin", "parent", "props"] as const;
+const TRANSFORM_KEYS = ["position", "size", "rotation", "scale", "origin", "parent", "attach", "props"] as const;
 
 function transformChanged(before: BoardItem | null | undefined, after: BoardItem | null | undefined): boolean {
 	if (!before || !after) return true;
@@ -661,15 +698,13 @@ async function writeDelta(tx: Tx, boardId: string, after: BoardDelta, preloaded:
 	const moved = Object.entries(after.items ?? {})
 		.filter(([id, item]) => transformChanged(before.get(id), item))
 		.map(([id]) => id);
-	const descendants = await loadDescendants(tx, boardId, moved.filter((id) => loaded.items.get(id)?.type === "frame" || before.get(id)?.type === "frame"));
-	for (const [id, item] of descendants) if (!(after.items && id in after.items)) loaded.items.set(id, item);
-	const affected = new Set([...moved, ...descendants.keys()]);
-	const binders = await loadBinders(tx, boardId, [...affected]);
-	for (const [id, item] of binders) {
+	const carried = await loadCarried(tx, boardId, moved, (id) => loaded.items.get(id)?.type ?? before.get(id)?.type);
+	const affected = new Set(moved);
+	for (const [id, item] of carried.reached) {
 		if (!(after.items && id in after.items)) loaded.items.set(id, item);
 		affected.add(id);
 	}
-	await loadWithAncestors(tx, boardId, [...binders.keys(), ...[...binders.values()].flatMap(arrowBindings)], loaded);
+	await loadWithAncestors(tx, boardId, [...carried.binders.keys(), ...[...carried.binders.values()].flatMap(itemBindings)], loaded);
 	for (const id of Object.keys(after.items ?? {})) affected.add(id);
 	const layout = createBoardLayout((id) => loaded.items.get(id));
 
@@ -693,7 +728,7 @@ async function writeDelta(tx: Tx, boardId: string, after: BoardDelta, preloaded:
 				z: item.z ?? 0,
 				...box,
 				src: itemSource(item),
-				binds: arrowBindings(item),
+				binds: itemBindings(item),
 				data: itemData(item),
 				version,
 				createdAt: now,

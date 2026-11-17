@@ -1,14 +1,17 @@
 import { FlatMaterial, Geometry3D, Mesh3D, type ShaderBit, View3D } from "@pixi/3d";
 import { Matrix, type Renderer, type Texture } from "pixi.js";
-import type { BoardDepthSurface } from "../../model/depth.js";
-import { boardDepthEye } from "../../model/depth.js";
+import type { BoardDepthPose, BoardDepthSurface } from "../../model/depth.js";
+import type { BoardProjection } from "../../model/view-camera.js";
 import { prepareModelRenderer } from "../model3d/renderer.js";
 import type { BoardDepthBend } from "./bend.js";
+import { type BoardGround, createBoardGround } from "./ground.js";
+import { aimBoardCamera, straightBit, toScene } from "./math.js";
 import { type BoardDepthObjects, createBoardDepthObjects } from "./objects.js";
 
 export type BoardDepthLayer = {
 	id: string;
 	surface: BoardDepthSurface;
+	pose: BoardDepthPose;
 	front: Texture;
 	back: Texture | null;
 	opacity: number;
@@ -18,7 +21,8 @@ export type BoardDepthLayer = {
 export type BoardDepthStage = {
 	readonly view: View3D;
 	readonly objects: BoardDepthObjects;
-	resize(width: number, height: number): void;
+	ground(): BoardGround;
+	aim(projection: BoardProjection): void;
 	sync(layers: readonly BoardDepthLayer[]): void;
 	readonly empty: boolean;
 	destroy(): void;
@@ -30,13 +34,6 @@ const LIGHT: [number, number, number] = (() => {
 	const length = Math.hypot(x, y, z);
 	return [x / length, -y / length, z / length];
 })();
-
-// Board pictures are premultiplied; materials premultiply what they draw, so take it out first.
-const straightBit: ShaderBit = {
-	name: "cohubDepthStraight",
-	gl: { fragment: { material: "{ if (alpha > 0.0001) albedo /= alpha; }" } },
-	gpu: { fragment: { material: "{ if (alpha > 0.0001) { albedo = albedo / alpha; } }" } },
-};
 
 const bendBits = new Map<string, ShaderBit>();
 
@@ -69,6 +66,7 @@ function bendBit(bend: BoardDepthBend): ShaderBit {
 }
 
 type Surface = {
+	surface: BoardDepthSurface | null;
 	segments: number;
 	bendKey: string | null;
 	geometry: Geometry3D;
@@ -125,17 +123,8 @@ export async function createBoardDepthStage(renderer: Renderer): Promise<BoardDe
 	view.label = "board-depth";
 	const objects = createBoardDepthObjects(view, LIGHT);
 	const surfaces = new Map<string, Surface>();
-	let size = { width: 0, height: 0 };
-
-	function aim(width: number, height: number) {
-		const eye = boardDepthEye({ x: 0, y: 0, zoom: 1, width, height });
-		const camera = view.camera;
-		camera.fov = (2 * Math.atan(height / 2 / eye.distance) * 180) / Math.PI;
-		camera.near = Math.max(1, eye.distance * 0.01);
-		camera.far = eye.distance * 8;
-		camera.position.set(eye.x, -eye.y, eye.distance);
-		camera.lookAt({ x: eye.x, y: -eye.y, z: 0 });
-	}
+	let ground: BoardGround | null = null;
+	let projection: BoardProjection | null = null;
 
 	function release(id: string) {
 		const entry = surfaces.get(id);
@@ -165,7 +154,7 @@ export async function createBoardDepthStage(renderer: Renderer): Promise<BoardDe
 			const front = new Mesh3D({ geometry, material: frontMaterial, castShadow: false, receiveShadow: false });
 			const back = new Mesh3D({ geometry, material: backMaterial, castShadow: false, receiveShadow: false });
 			view.root.addChild(front, back);
-			entry = { segments, bendKey, geometry, front, back, frontMaterial, backMaterial, frontTexture: layer.front, backTexture: layer.back };
+			entry = { surface: null, segments, bendKey, geometry, front, back, frontMaterial, backMaterial, frontTexture: layer.front, backTexture: layer.back };
 			surfaces.set(layer.id, entry);
 			return entry;
 		}
@@ -188,13 +177,13 @@ export async function createBoardDepthStage(renderer: Renderer): Promise<BoardDe
 	return {
 		view,
 		objects,
-		resize(width, height) {
-			const w = Math.max(1, Math.round(width));
-			const h = Math.max(1, Math.round(height));
-			if (w === size.width && h === size.height) return;
-			size = { width: w, height: h };
-			view.setSize(w, h);
-			aim(w, h);
+		ground() {
+			ground ??= createBoardGround();
+			return ground;
+		},
+		aim(next) {
+			projection = next;
+			aimBoardCamera(view, next);
 		},
 		sync(layers) {
 			const wanted = new Set(layers.map((layer) => layer.id));
@@ -202,7 +191,13 @@ export async function createBoardDepthStage(renderer: Renderer): Promise<BoardDe
 			for (const layer of layers) {
 				const entry = surfaceFor(layer);
 				if (layer.back) entry.backMaterial.alpha = layer.opacity;
-				const { surface } = layer;
+				const { surface, pose } = layer;
+				if (projection) {
+					const [x, y, z] = toScene(projection, pose.x, pose.y, pose.z);
+					for (const mesh of [entry.front, entry.back]) mesh.position.set(x, y, z);
+				}
+				if (entry.surface === surface) continue;
+				entry.surface = surface;
 				const source = layer.bend ? surface.flat : surface.positions;
 				const positions = entry.geometry.positions as Float32Array;
 				for (let i = 0; i < source.length; i += 3) {
@@ -242,6 +237,8 @@ export async function createBoardDepthStage(renderer: Renderer): Promise<BoardDe
 		destroy() {
 			for (const id of [...surfaces.keys()]) release(id);
 			objects.destroy();
+			ground?.destroy();
+			ground = null;
 			view.destroy({ children: true });
 		},
 	};

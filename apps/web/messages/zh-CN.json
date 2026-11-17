@@ -1939,6 +1939,8 @@
 	"board_camera_focus": "焦点",
 	"board_camera_zoom": "缩放",
 	"board_camera_shake": "抖动",
+	"board_camera_pitch": "俯仰",
+	"board_camera_bearing": "朝向",
 	"board_zoom_reset": "重置缩放到 100%",
 	"board_add_to_generation": "添加到生成",
 	"board_bring_front": "置顶",

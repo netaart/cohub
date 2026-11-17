@@ -6,14 +6,15 @@ import {
   type BoardDocument,
   type BoardItem,
   type BoardMediaFileResolver,
-  type BoardModelClip,
+  type BoardModelFacts,
   boardModelFormat,
   boardModelJsonLength,
   diffMergePatch,
   mergePatch,
   parseBoardItem,
   parseBoardMediaSource,
-  readBoardModelClips,
+  readBoardModelFacts,
+  withBoardModelFacts,
   settleBoardMediaSizes,
 } from "@neta-art/cohub/board";
 import { createClient } from "./client.js";
@@ -36,7 +37,7 @@ export function boardMediaFileResolver(spaceId: string): BoardMediaFileResolver 
 
 const GLTF_JSON_MAX_BYTES = 16 * 1024 * 1024;
 
-async function localModelClips(file: string): Promise<BoardModelClip[] | null> {
+async function localModelFacts(file: string): Promise<BoardModelFacts | null> {
   const handle = await open(file, "r").catch(() => null);
   if (!handle) return null;
   try {
@@ -45,7 +46,7 @@ async function localModelClips(file: string): Promise<BoardModelClip[] | null> {
     const length = Math.min(boardModelJsonLength(head.subarray(0, bytesRead)) ?? (await handle.stat()).size, GLTF_JSON_MAX_BYTES);
     const bytes = new Uint8Array(length);
     await handle.read(bytes, 0, length, 0);
-    return readBoardModelClips(bytes);
+    return readBoardModelFacts(bytes);
   } catch {
     return null;
   } finally {
@@ -53,24 +54,25 @@ async function localModelClips(file: string): Promise<BoardModelClip[] | null> {
   }
 }
 
-async function settleBoardModelClips(spaceId: string, items: Readonly<Record<string, BoardItem>>): Promise<Record<string, BoardItem>> {
+async function settleBoardModelFacts(spaceId: string, items: Readonly<Record<string, BoardItem>>): Promise<Record<string, BoardItem>> {
   if (process.env.COHUB_SPACE_ID !== spaceId) return {};
   const settled: Record<string, BoardItem> = {};
   await Promise.all(Object.entries(items).map(async ([id, item]) => {
-    if (item.type !== "file" || item.props.snapshot?.clips) return;
+    if (item.type !== "file" || item.props.snapshot?.clips || item.props.snapshot?.nodes) return;
     const format = boardModelFormat(item.props.src, item.props.snapshot?.mimeType);
     if (format !== "glb" && format !== "gltf") return;
     const source = parseBoardMediaSource(item.props.src);
     const file = source?.kind === "file" ? resolve(WORKSPACE_ROOT, source.value) : null;
-    const clips = file?.startsWith(`${WORKSPACE_ROOT}/`) ? await localModelClips(file) : null;
-    if (clips?.length) settled[id] = { ...item, props: { ...item.props, snapshot: { ...item.props.snapshot, clips } } };
+    const facts = file?.startsWith(`${WORKSPACE_ROOT}/`) ? await localModelFacts(file) : null;
+    const snapshot = facts && withBoardModelFacts(item.props.snapshot, facts);
+    if (snapshot) settled[id] = { ...item, props: { ...item.props, snapshot } };
   }));
   return settled;
 }
 
 async function settleItems(spaceId: string, items: Readonly<Record<string, BoardItem>>): Promise<Record<string, BoardItem>> {
   const sized = await settleBoardMediaSizes(items, { resolveFile: boardMediaFileResolver(spaceId) });
-  return { ...sized, ...(await settleBoardModelClips(spaceId, items)) };
+  return { ...sized, ...(await settleBoardModelFacts(spaceId, items)) };
 }
 
 export async function settleBoardDocument(spaceId: string, document: BoardDocument): Promise<BoardDocument> {

@@ -1,6 +1,6 @@
 import { ImageSource, Texture } from "pixi.js";
 import type { BoardEditor, BoardPointerEvent } from "../editor/index.js";
-import { itemBounds, type BoardFrame, type BoardScene, type BoardSceneItem, type BoardViewport } from "../model/index.js";
+import { boardViewCssTransform, boardViewRect, boardViewToWorld, itemBounds, rectsIntersect, type BoardFrame, type BoardScene, type BoardSceneItem, type BoardViewport } from "../model/index.js";
 import { boardBitmapResolution } from "../render/bitmap-resolution.js";
 import { toBoardPointerEvent } from "./pointer.js";
 import { type BoardViewSurface, boardViewDrawingSupported, createBoardViewSurface } from "./view-surface.js";
@@ -70,15 +70,9 @@ function worldStyle(frame: BoardFrame, order: number): string {
 }
 
 function onScreen(frame: BoardFrame, camera: BoardViewport, surface: { width: number; height: number }) {
-	const bounds = itemBounds(frame);
-	const left = bounds.x * camera.zoom + camera.x;
-	const top = bounds.y * camera.zoom + camera.y;
-	return (
-		left + bounds.width * camera.zoom >= -VISIBLE_MARGIN &&
-		top + bounds.height * camera.zoom >= -VISIBLE_MARGIN &&
-		left <= surface.width + VISIBLE_MARGIN &&
-		top <= surface.height + VISIBLE_MARGIN
-	);
+	const margin = VISIBLE_MARGIN / camera.zoom;
+	const seen = boardViewRect(camera, surface);
+	return rectsIntersect(itemBounds(frame), { x: seen.x - margin, y: seen.y - margin, width: seen.width + margin * 2, height: seen.height + margin * 2 });
 }
 
 export type BoardItemViewStats = { drawn: number; rasters: number; rasterMs: number };
@@ -151,7 +145,7 @@ export function createBoardItemViewLayer(
 	element.addEventListener("focusout", focusOut);
 	doc.addEventListener("pointerup", pointerEnd, true);
 	doc.addEventListener("pointercancel", pointerEnd, true);
-	const toPointerEvent = (event: PointerEvent) => toBoardPointerEvent(event, host, camera());
+	const toPointerEvent = (event: PointerEvent) => toBoardPointerEvent(event, host, (screen) => boardViewToWorld(camera(), { width: host.clientWidth, height: host.clientHeight }, screen));
 	const viewFor = (item: BoardSceneItem) =>
 		views.find((view) => (typeof view.type === "string" ? view.type === item.type : view.type(item)));
 
@@ -330,7 +324,7 @@ export function createBoardItemViewLayer(
 			resolution = density;
 			live = isLive;
 			running = isRunning;
-			const transform = `translate(${view.x}px,${view.y}px) scale(${view.zoom})`;
+			const transform = boardViewCssTransform(view, surface);
 			if (transform !== cameraStyle) world.style.transform = cameraStyle = transform;
 			const shown = new Set<string>();
 			const candidates = new Set(ids ?? scene.items.map((item) => item.id));

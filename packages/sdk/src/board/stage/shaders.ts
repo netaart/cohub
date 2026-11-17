@@ -1,7 +1,8 @@
 import { type BoardMatrix, multiplyMatrix } from "@cohub/protocol/board-layout";
 import { type Container, type Filter, Rectangle, type Renderer, RendererType } from "pixi.js";
 import type { BoardEditor } from "../editor/index.js";
-import { type BoardViewport, type Rect, visibleWorldRect } from "../model/geometry.js";
+import type { BoardViewport, Rect } from "../model/geometry.js";
+import { boardViewRect } from "../model/view-camera.js";
 import { boardItemLocalToWorld, boardLocalView } from "../render/shader/placement.js";
 import type { BoardScene } from "../model/scene.js";
 import { boardShaderSignature } from "../model/shader.js";
@@ -181,7 +182,7 @@ export function createBoardStageShaders(options: {
       const now = performance.now();
       if (layers.animated && lastSync) quality.sample(now - lastSync);
       lastSync = now;
-      const view = visibleWorldRect(camera, surface.width, surface.height);
+      const view = boardViewRect(camera, surface);
       layers.sync(renderer, owners, {
         zoom: camera.zoom,
         density: renderer.resolution,

@@ -1,7 +1,9 @@
-import { BOARD_MODEL_CLIP_LIMIT, BOARD_MODEL_FADE_MS, type BoardItem, type BoardMediaSnapshot } from "@cohub/protocol/board-model";
+import { BOARD_MODEL_CLIP_LIMIT, BOARD_MODEL_FADE_MS, BOARD_MODEL_NODE_LIMIT, type BoardItem, type BoardMediaSnapshot } from "@cohub/protocol/board-model";
 import { isBoardModelItem } from "./media.js";
 
 export type BoardModelClip = NonNullable<BoardMediaSnapshot["clips"]>[number];
+
+export type BoardModelFacts = { clips: BoardModelClip[]; nodes: string[] };
 
 export type BoardModelPlayback = {
 	clip: string | null;
@@ -24,12 +26,22 @@ export function boardModelPlayback(item: BoardItem, reducedMotion: boolean): Boa
 	};
 }
 
-export function readBoardModelClips(bytes: Uint8Array): BoardModelClip[] | null {
+export function boardModelNodes(names: Iterable<unknown>): string[] {
+	const nodes = new Set<string>();
+	for (const name of names) {
+		if (nodes.size >= BOARD_MODEL_NODE_LIMIT) break;
+		if (typeof name === "string" && name && name.length <= 240) nodes.add(name);
+	}
+	return [...nodes];
+}
+
+export function readBoardModelFacts(bytes: Uint8Array): BoardModelFacts | null {
 	const json = gltfJson(bytes);
 	if (!json) return null;
 	const accessors = Array.isArray(json.accessors) ? json.accessors : [];
 	const animations = Array.isArray(json.animations) ? json.animations : [];
-	return animations.slice(0, BOARD_MODEL_CLIP_LIMIT).map((animation, index) => {
+	const nodes = boardModelNodes((Array.isArray(json.nodes) ? json.nodes : []).map((node) => node?.name));
+	const clips = animations.slice(0, BOARD_MODEL_CLIP_LIMIT).map((animation, index) => {
 		let seconds = 0;
 		for (const sampler of Array.isArray(animation?.samplers) ? animation.samplers : []) {
 			const max = typeof sampler?.input === "number" ? accessors[sampler.input]?.max?.[0] : undefined;
@@ -38,10 +50,23 @@ export function readBoardModelClips(bytes: Uint8Array): BoardModelClip[] | null 
 		const name = typeof animation?.name === "string" && animation.name ? animation.name.slice(0, 240) : `anim_${index}`;
 		return { name, durationMs: Math.round(seconds * 1000) };
 	});
+	return { clips, nodes };
+}
+
+export function withBoardModelFacts(snapshot: BoardMediaSnapshot | undefined, facts: BoardModelFacts): BoardMediaSnapshot | null {
+	const { clips: _clips, nodes: _nodes, ...rest } = snapshot ?? {};
+	const next = { ...rest, ...(facts.clips.length ? { clips: facts.clips } : {}), ...(facts.nodes.length ? { nodes: facts.nodes } : {}) };
+	return sameBoardModelClips(snapshot?.clips, next.clips) && sameNodes(snapshot?.nodes, next.nodes) ? null : next;
+}
+
+function sameNodes(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+	if (!a || !b) return a === b;
+	return a.length === b.length && a.every((name, index) => name === b[index]);
 }
 
 type GltfJson = {
 	accessors?: Array<{ max?: number[] } | undefined>;
+	nodes?: Array<{ name?: unknown } | undefined>;
 	animations?: Array<{ name?: unknown; samplers?: Array<{ input: number } | undefined> } | undefined>;
 };
 

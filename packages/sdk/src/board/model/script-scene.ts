@@ -216,6 +216,10 @@ export function validateBoardScriptCommit(
   return result.document;
 }
 
+export function isBoardScriptScreenRoot(id: string): boolean {
+  return id.startsWith("~script-") && id.endsWith("-~screen");
+}
+
 export function scriptTemporaryPrefix(owner: string): string {
   let hash = 2166136261;
   for (const char of owner)
@@ -339,7 +343,7 @@ export function composeBoardScriptItems(
   scene: BoardScene,
   outputs: ReadonlyMap<string, BoardScriptOutput>,
   incoming: ReadonlyMap<string, BoardItem> = new Map(),
-  screen?: { zoom: number; x?: number; y?: number },
+  screen?: { zoom: number; x?: number; y?: number; place?: (point: { x: number; y: number }) => { x: number; y: number } },
   onError?: (owner: string, error: unknown) => void,
   gestureLayout?: BoardScene["layout"],
 ): Map<string, BoardItem> {
@@ -426,10 +430,10 @@ export function composeBoardScriptItems(
         result.set(rootId, {
           ...root,
           opacity: shown ? root.opacity : 0,
-          position: shown ? applyMatrix(layout.matrix(target), {
+          position: shown ? (screen?.place ?? ((point) => point))(applyMatrix(layout.matrix(target), {
             x: (anchor?.point?.x ?? 0) * box.width,
             y: (anchor?.point?.y ?? 0) * box.height,
-          }) : root.position,
+          })) : root.position,
         });
     }
   }

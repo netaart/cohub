@@ -263,6 +263,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 			}
 			ctx.chosenTool = value;
 			state.tool = value;
+			if (!options.readonly && value !== "play") ctx.camera.level();
 			if (isCreationBoardTool(value)) state.hoverId = null;
 			if (value === "draw" || value === "arrow" || value === "play") {
 				state.selection = [];
@@ -486,7 +487,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 		applyMediaFileChange: snapshots.applyMediaFileChange,
 		adoptMediaNaturalSizes: snapshots.adoptMediaNaturalSizes,
-		adoptModelClips: snapshots.adoptModelClips,
+		adoptModelFacts: snapshots.adoptModelFacts,
 		applyFileSnapshots: snapshots.applyFileSnapshots,
 
 		setPlayhead: animation.setPlayhead,

@@ -10,7 +10,7 @@ import type { BoardCameraOverride } from "./animation.js";
 export type BoardScriptCamera = BoardCameraOverride;
 
 export type BoardScriptView = {
-  camera: { x: number; y: number; zoom: number };
+  camera: { x: number; y: number; zoom: number; pitch?: number; bearing?: number };
   width: number;
   height: number;
   safeRect: { x: number; y: number; width: number; height: number };

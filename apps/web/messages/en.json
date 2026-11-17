@@ -1939,6 +1939,8 @@
 	"board_camera_focus": "Focus",
 	"board_camera_zoom": "Zoom",
 	"board_camera_shake": "Shake",
+	"board_camera_pitch": "Pitch",
+	"board_camera_bearing": "Bearing",
 	"board_zoom_reset": "Reset zoom to 100%",
 	"board_add_to_generation": "Add to generation",
 	"board_bring_front": "Bring to front",

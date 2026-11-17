@@ -29,13 +29,15 @@ function toJsonSchema(schema: z.ZodType): JsonSchema {
 export const BOARD_SCHEMA_TARGETS = ["board", "animation", "track", "script", "extension", "depth", BOARD_CAMERA_TARGET, ...BOARD_ITEM_TYPES] as const;
 
 export const BOARD_DEPTH_GUIDE = {
-	camera: "Like a map: the eye looks straight down at the middle of the view from 1.5 view heights away, so perspective reads the same on every screen and zoom, and lifted items lean away from the middle.",
-	order: "Bend, then spin within the item's plane, tilt about its own axes through origin, rotation on the Board, then lift toward the viewer.",
-	layers: "A lifted item draws above every flat item, with a soft shadow on the Board; lifted items hide each other by distance. Depth inside a lifted frame stays part of its picture.",
-	editing: "Pointers act on what they touch in the lifted picture. Lifted items move but resize and turn once they lie flat again; arrows connect while flat.",
+	camera: "Like a map: the eye looks at the middle of the view from 1.5 view heights away, so perspective reads the same on every screen and zoom. It looks straight down until camera pitch tips it toward the horizon (up to 60 degrees) and camera bearing turns it; both turn about the middle of the view.",
+	order: "Bend, then spin within the item's plane, tilt about its own axes through origin, rotation on the Board, then lift up off the Board.",
+	layers: "Flat items lie on the Board; a lifted item draws above them, with a soft shadow on the Board, and lifted items hide each other by distance. Depth inside a lifted frame stays part of its picture.",
+	models: "A model object stands on the Board leaning back toward the eye so it shows its cover view (props.model.view) from above; as the camera pitches it stands up, upright once pitch reaches 90 minus view.pitch. rotation and view.yaw turn it about its vertical axis. view.pitch 90 keeps it upright.",
+	attach: "attach { item, node } makes an item follow another's origin; on a model object, node rides one of its named nodes (props.snapshot.nodes) in 3D, and depth.lift raises it from there.",
+	editing: "Pointers act on what they touch in the lifted picture. Lifted items move but resize and turn once they lie flat again; arrows connect while flat. Editing levels a pitched or turned camera.",
 	animate: "Every number and vec2 animates by path (depth.lift, depth.tilt, depth.bend.phase); presets flip, lift, land, toss, sway, wave and curl write them. Scripts present depth with ctx.present.",
 	custom: "depth.bend.kind custom runs the bend GLSL the item's own script module exports: export const bend = { glsl }. See schema script.",
-	export: "Exports draw depth in local Chrome, like shaders; a whole-board export frames lifted items where they appear, and video frames keep the first frame's area unless --rect or --camera sets it.",
+	export: "Exports draw depth in local Chrome, like shaders; a whole-board export frames lifted items where they appear, and video frames keep the first frame's area unless --rect or --camera sets it. Camera exports keep its pitch and bearing.",
 };
 
 export type BoardJsonSchemaResult = {

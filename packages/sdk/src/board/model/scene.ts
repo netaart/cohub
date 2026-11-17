@@ -9,7 +9,7 @@ import {
 	type BoardLayout,
 	type BoardMatrix,
 	type BoardRect,
-	arrowBindings,
+	itemBindings,
 	clampBoardFontSize,
 	createBoardLayout,
 	drawPointsBounds,
@@ -78,7 +78,7 @@ export function buildBoardScene(document: BoardDocument, previous?: BoardScene |
 		const list = children.get(parent) ?? [];
 		list.push(id);
 		children.set(parent, list);
-		for (const bound of arrowBindings(item)) binders.set(bound, [...(binders.get(bound) ?? []), id]);
+		for (const bound of itemBindings(item)) binders.set(bound, [...(binders.get(bound) ?? []), id]);
 	}
 	const layout = createBoardLayout(
 		(id) => items[id],
@@ -92,7 +92,7 @@ export function buildBoardScene(document: BoardDocument, previous?: BoardScene |
 		const before = previous?.get(id);
 		let result = Boolean(item && before && stripSceneSource(before) === item) && depth < 64;
 		if (result && item?.parent && items[item.parent]) result = isStable(item.parent, depth + 1);
-		if (result && item) for (const bound of arrowBindings(item)) if (items[bound] && !isStable(bound, depth + 1)) result = false;
+		if (result && item) for (const bound of itemBindings(item)) if (items[bound] && !isStable(bound, depth + 1)) result = false;
 		stable.set(id, result);
 		return result;
 	};

@@ -1,28 +1,12 @@
 import { type BoardDepth, type BoardFrame, type BoardItem, type BoardVec2, framePoint, isBoardDepthActive, resolveBoardDepth } from "@cohub/protocol";
+import type { ScreenPoint, WorldPoint } from "./geometry.js";
 import { isBoardModelItem } from "./media.js";
 import type { BoardScene, BoardSceneItem } from "./scene.js";
+import { type BoardProjection, type BoardVec3, type BoardView, boardProjection } from "./view-camera.js";
 
-/**
- * Board depth follows a map's camera: the eye looks straight down at the middle of the view from
- * 1.5 view heights away (a 36.87° vertical field of view), so perspective feels the same on every
- * screen and at every zoom, while heights grow with zoom like the rest of the Board.
- */
-export const BOARD_DEPTH_EYE_HEIGHTS = 1.5;
-const NEAREST = 0.86;
+export type BoardDepthView = BoardView;
+
 const HEIGHT_SOFTNESS = 0.62;
-
-export type BoardDepthView = { x: number; y: number; zoom: number; width: number; height: number };
-
-export type BoardDepthEye = { x: number; y: number; distance: number };
-
-export function boardDepthEye(view: BoardDepthView): BoardDepthEye {
-	return { x: view.width / 2, y: view.height / 2, distance: Math.max(1, view.height) * BOARD_DEPTH_EYE_HEIGHTS };
-}
-
-export function projectBoardDepth(eye: BoardDepthEye, x: number, y: number, z: number): BoardVec2 {
-	const scale = eye.distance / Math.max(eye.distance - z, eye.distance * (1 - NEAREST));
-	return { x: eye.x + (x - eye.x) * scale, y: eye.y + (y - eye.y) * scale };
-}
 
 const RESTING = resolveBoardDepth({}) as BoardDepth;
 
@@ -30,21 +14,35 @@ export function isBoardModelObject(item: BoardItem | null | undefined): boolean 
 	return item?.type === "file" && item.props.model?.display === "object" && isBoardModelItem(item);
 }
 
-export function boardDepthOf(item: BoardItem): BoardDepth | null {
+export function boardAttachedNode(item: BoardItem, scene: Pick<BoardScene, "get"> | undefined): { target: BoardSceneItem; node: string } | null {
+	const node = item.attach?.node;
+	const target = node && scene?.get(item.attach?.item as string);
+	return target && node && isBoardModelObject(target) ? { target, node } : null;
+}
+
+export function boardDepthOf(item: BoardItem, scene?: Pick<BoardScene, "get">): BoardDepth | null {
 	const depth = resolveBoardDepth(item.depth);
 	if (isBoardDepthActive(depth)) return depth;
-	return isBoardModelObject(item) ? (depth ?? RESTING) : null;
+	return isBoardModelObject(item) || boardAttachedNode(item, scene) ? (depth ?? RESTING) : null;
+}
+
+export function boardDepthRiding(scene: Pick<BoardScene, "get">, item: BoardItem, node: (id: string, name: string) => BoardVec3 | null): { x: number; y: number; z: number } | undefined {
+	const attached = boardAttachedNode(item, scene);
+	const at = attached && node(attached.target.id, attached.node);
+	if (!attached || !at) return undefined;
+	const origin = framePoint(attached.target.frame, attached.target.origin.x, attached.target.origin.y);
+	return { x: at[0] - origin.x, y: at[1] - origin.y, z: at[2] };
 }
 
 export function isBoardDepthLifted(scene: Pick<BoardScene, "get">, id: string): boolean {
 	const root = boardDepthRootOf(scene, id);
 	const item = root ? scene.get(root) : undefined;
-	return isBoardDepthActive(resolveBoardDepth(item?.depth));
+	return Boolean(item && (isBoardDepthActive(resolveBoardDepth(item.depth)) || boardAttachedNode(item, scene)));
 }
 
 export function boardDepthRoots(scene: Pick<BoardScene, "items" | "get">): BoardSceneItem[] {
 	const roots: BoardSceneItem[] = [];
-	for (const item of scene.items) if (boardDepthOf(item) && boardDepthRootOf(scene, item.id) === item.id) roots.push(item);
+	for (const item of scene.items) if (boardDepthOf(item, scene) && boardDepthRootOf(scene, item.id) === item.id) roots.push(item);
 	return roots;
 }
 
@@ -54,7 +52,7 @@ export function boardDepthRootOf(scene: Pick<BoardScene, "get">, id: string): st
 	for (let guard = 0; cursor && guard < 64; guard++) {
 		const item = scene.get(cursor);
 		if (!item) break;
-		if (boardDepthOf(item)) root = cursor;
+		if (boardDepthOf(item, scene)) root = cursor;
 		cursor = item.parent;
 	}
 	return root;
@@ -70,11 +68,13 @@ export type BoardDepthSurface = {
 	readonly positions: Float32Array;
 	readonly flat: Float32Array;
 	readonly tones: Float32Array;
-	readonly basis: readonly [readonly number[], readonly number[], readonly number[]];
-	readonly scale: number;
-	readonly eye: BoardDepthEye;
+	readonly basis: readonly [BoardVec3, BoardVec3, BoardVec3];
+	readonly pivot: BoardVec2;
 	readonly frame: BoardFrame;
+	readonly depth: BoardDepth;
 };
+
+export type BoardDepthPose = { readonly x: number; readonly y: number; readonly z: number };
 
 export type BoardDepthPlacement = { frame: BoardFrame; origin: BoardVec2; depth: BoardDepth };
 
@@ -85,9 +85,13 @@ function normalize([x, y, z]: readonly number[]): [number, number, number] {
 	return [(x as number) / length, (y as number) / length, (z as number) / length];
 }
 
-function softHeight(height: number, distance: number): number {
-	const limit = distance * HEIGHT_SOFTNESS;
-	return height > 0 ? limit * Math.tanh(height / limit) : Math.max(height, -distance * 4);
+export function boardDepthHeight(lift: number, projection: Pick<BoardProjection, "distance">): number {
+	const limit = projection.distance * HEIGHT_SOFTNESS;
+	return lift > 0 ? limit * Math.tanh(lift / limit) : Math.max(lift, -projection.distance * 4);
+}
+
+export function boardDepthPose(surface: BoardDepthSurface, projection: Pick<BoardProjection, "distance">, shift?: { x: number; y: number; z: number }): BoardDepthPose {
+	return { x: surface.pivot.x + (shift?.x ?? 0), y: surface.pivot.y + (shift?.y ?? 0), z: (shift?.z ?? 0) + boardDepthHeight(surface.depth.lift, projection) };
 }
 
 export function bendBoardDepth(out: Float32Array, segments: number, width: number, height: number, origin: BoardVec2, depth: BoardDepth) {
@@ -141,22 +145,13 @@ export function bendBoardDepth(out: Float32Array, segments: number, width: numbe
 	}
 }
 
-export function boardDepthSurface(placement: BoardDepthPlacement, view: BoardDepthView, previous?: BoardDepthSurface | null): BoardDepthSurface {
-	const { frame, origin, depth } = placement;
-	const segments = boardDepthSegments(depth);
-	const count = (segments + 1) ** 2;
-	const reuse = previous && previous.segments === segments;
-	const positions = reuse ? (previous.positions as Float32Array) : new Float32Array(count * 3);
-	const flat = reuse ? (previous.flat as Float32Array) : new Float32Array(count * 3);
-	const tones = reuse ? (previous.tones as Float32Array) : new Float32Array(count);
-	const eye = boardDepthEye(view);
-	const zoom = view.zoom;
+export function boardDepthTurn(depth: BoardDepth, rotation: number): (x: number, y: number, z: number) => [number, number, number] {
 	const deg = Math.PI / 180;
 	const [cs, ss] = [Math.cos(depth.spin * deg), Math.sin(depth.spin * deg)];
 	const [cx, sx] = [Math.cos(depth.tilt.x * deg), Math.sin(depth.tilt.x * deg)];
 	const [cy, sy] = [Math.cos(depth.tilt.y * deg), Math.sin(depth.tilt.y * deg)];
-	const [cr, sr] = [Math.cos(frame.rotation * deg), Math.sin(frame.rotation * deg)];
-	const transform = (x: number, y: number, z: number): [number, number, number] => {
+	const [cr, sr] = [Math.cos(rotation * deg), Math.sin(rotation * deg)];
+	return (x, y, z) => {
 		const x1 = x * cs - y * ss;
 		const y1 = x * ss + y * cs;
 		const y2 = y1 * cx - z * sx;
@@ -165,20 +160,25 @@ export function boardDepthSurface(placement: BoardDepthPlacement, view: BoardDep
 		const z3 = -x1 * sy + z2 * cy;
 		return [x3 * cr - y2 * sr, x3 * sr + y2 * cr, z3];
 	};
-	const basis = [transform(zoom, 0, 0), transform(0, zoom, 0), transform(0, 0, zoom)] as const;
-	const pivot = framePoint(frame, origin.x, origin.y);
-	const px = pivot.x * zoom + view.x;
-	const py = pivot.y * zoom + view.y;
-	const lift = softHeight(depth.lift * zoom, eye.distance);
-	const ceiling = eye.distance * NEAREST;
+}
 
+export function boardDepthSurface(placement: BoardDepthPlacement, previous?: BoardDepthSurface | null): BoardDepthSurface {
+	const { frame, origin, depth } = placement;
+	const segments = boardDepthSegments(depth);
+	const count = (segments + 1) ** 2;
+	const reuse = previous && previous.segments === segments;
+	const positions = reuse ? (previous.positions as Float32Array) : new Float32Array(count * 3);
+	const flat = reuse ? (previous.flat as Float32Array) : new Float32Array(count * 3);
+	const tones = reuse ? (previous.tones as Float32Array) : new Float32Array(count);
+	const transform = boardDepthTurn(depth, frame.rotation);
+	const basis = [transform(1, 0, 0), transform(0, 1, 0), transform(0, 0, 1)] as const;
 	const local = new Float32Array(count * 3);
 	bendBoardDepth(local, segments, frame.width, frame.height, origin, depth);
 	const place = (target: Float32Array, source: Float32Array, i: number) => {
 		const [x, y, z] = transform(source[i] as number, source[i + 1] as number, source[i + 2] as number);
-		target[i] = px + x * zoom;
-		target[i + 1] = py + y * zoom;
-		target[i + 2] = Math.min(lift + z * zoom, ceiling);
+		target[i] = x;
+		target[i + 1] = y;
+		target[i + 2] = z;
 	};
 	for (let i = 0; i < local.length; i += 3) place(positions, local, i);
 	if (depth.bend.kind === "custom") {
@@ -191,11 +191,11 @@ export function boardDepthSurface(placement: BoardDepthPlacement, view: BoardDep
 			}
 		for (let i = 0; i < local.length; i += 3) place(flat, local, i);
 	} else flat.set(positions);
-	shade(positions, tones, segments, eye, depth.shade);
-	return { segments, positions, flat, tones, basis, scale: eye.distance / Math.max(eye.distance - lift, eye.distance * (1 - NEAREST)), eye, frame };
+	shade(positions, tones, segments, depth.shade);
+	return { segments, positions, flat, tones, basis, pivot: framePoint(frame, origin.x, origin.y), frame, depth };
 }
 
-function shade(positions: Float32Array, tones: Float32Array, segments: number, eye: BoardDepthEye, strength: number) {
+function shade(positions: Float32Array, tones: Float32Array, segments: number, strength: number) {
 	const side = segments + 1;
 	const at = (col: number, row: number, axis: number) =>
 		positions[(Math.min(Math.max(row, 0), segments) * side + Math.min(Math.max(col, 0), segments)) * 3 + axis] as number;
@@ -208,16 +208,14 @@ function shade(positions: Float32Array, tones: Float32Array, segments: number, e
 			const by = at(col, row + 1, 1) - at(col, row - 1, 1);
 			const bz = at(col, row + 1, 2) - at(col, row - 1, 2);
 			let n = normalize([ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx]);
-			const index = v * 3;
-			const toEye = [eye.x - (positions[index] as number), eye.y - (positions[index + 1] as number), eye.distance - (positions[index + 2] as number)];
-			if (n[0] * (toEye[0] as number) + n[1] * (toEye[1] as number) + n[2] * (toEye[2] as number) < 0) n = [-n[0], -n[1], -n[2]];
+			if (n[2] < 0) n = [-n[0], -n[1], -n[2]];
 			const light = n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2];
 			tones[v] = Math.min(1.2, Math.max(0.35, 1 + strength * 1.1 * (light - LIGHT[2])));
 		}
 	}
 }
 
-export function boardDepthPoint(surface: BoardDepthSurface, u: number, v: number): [number, number, number] {
+export function boardDepthPoint(surface: BoardDepthSurface, pose: BoardDepthPose, u: number, v: number): [number, number, number] {
 	const { segments, positions } = surface;
 	const fu = Math.min(Math.max(u, 0), 1) * segments;
 	const fv = Math.min(Math.max(v, 0), 1) * segments;
@@ -230,42 +228,43 @@ export function boardDepthPoint(surface: BoardDepthSurface, u: number, v: number
 	const mix = (axis: number) =>
 		(corner(col, row, axis) * (1 - tu) + corner(col + 1, row, axis) * tu) * (1 - tv) +
 		(corner(col, row + 1, axis) * (1 - tu) + corner(col + 1, row + 1, axis) * tu) * tv;
-	return [mix(0), mix(1), mix(2)];
+	return [pose.x + mix(0), pose.y + mix(1), pose.z + mix(2)];
 }
 
-export function boardDepthScreenPoint(surface: BoardDepthSurface, u: number, v: number): BoardVec2 {
-	const [x, y, z] = boardDepthPoint(surface, u, v);
-	return projectBoardDepth(surface.eye, x, y, z);
+export function boardDepthScreenPoint(surface: BoardDepthSurface, pose: BoardDepthPose, projection: BoardProjection, u: number, v: number): ScreenPoint {
+	const [x, y, z] = boardDepthPoint(surface, pose, u, v);
+	return projection.project(x, y, z);
 }
 
 export type BoardDepthHit = { u: number; v: number; distance: number; back: boolean };
 
-const screenBounds = new WeakMap<BoardDepthSurface, { x0: number; y0: number; x1: number; y1: number }>();
+const screenBounds = new WeakMap<BoardDepthPose, { surface: BoardDepthSurface; projection: BoardProjection; x0: number; y0: number; x1: number; y1: number }>();
 
-function boundsOnScreen(surface: BoardDepthSurface) {
-	let bounds = screenBounds.get(surface);
-	if (!bounds) {
-		bounds = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
-		const { positions, eye } = surface;
-		for (let i = 0; i < positions.length; i += 3) {
-			const point = projectBoardDepth(eye, positions[i] as number, positions[i + 1] as number, positions[i + 2] as number);
+function boundsOnScreen(surface: BoardDepthSurface, pose: BoardDepthPose, projection: BoardProjection) {
+	let bounds = screenBounds.get(pose);
+	if (bounds?.surface !== surface || bounds.projection !== projection) {
+		bounds = { surface, projection, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+		const p = surface.positions;
+		for (let i = 0; i < p.length; i += 3) {
+			const point = projection.project(pose.x + (p[i] as number), pose.y + (p[i + 1] as number), pose.z + (p[i + 2] as number));
 			bounds.x0 = Math.min(bounds.x0, point.x);
 			bounds.y0 = Math.min(bounds.y0, point.y);
 			bounds.x1 = Math.max(bounds.x1, point.x);
 			bounds.y1 = Math.max(bounds.y1, point.y);
 		}
-		screenBounds.set(surface, bounds);
+		screenBounds.set(pose, bounds);
 	}
 	return bounds;
 }
 
-export function hitBoardDepthSurface(surface: BoardDepthSurface, screen: BoardVec2): BoardDepthHit | null {
-	const bounds = boundsOnScreen(surface);
+export function hitBoardDepthSurface(surface: BoardDepthSurface, pose: BoardDepthPose, projection: BoardProjection, screen: { x: number; y: number }): BoardDepthHit | null {
+	const bounds = boundsOnScreen(surface, pose, projection);
 	if (screen.x < bounds.x0 || screen.x > bounds.x1 || screen.y < bounds.y0 || screen.y > bounds.y1) return null;
-	const { segments, eye, positions: p } = surface;
+	const { segments, positions: p } = surface;
 	const side = segments + 1;
-	const [ox, oy, oz] = [eye.x, eye.y, eye.distance];
-	const [rx, ry, rz] = [screen.x - eye.x, screen.y - eye.y, -eye.distance];
+	const ray = projection.ray(screen);
+	const [ox, oy, oz] = [ray.origin[0] - pose.x, ray.origin[1] - pose.y, ray.origin[2] - pose.z];
+	const [rx, ry, rz] = ray.direction;
 	let best: BoardDepthHit | null = null;
 	const triangle = (a: number, b: number, c: number, u0: number, v0: number, u1: number, v1: number, u2: number, v2: number) => {
 		const ax = p[a * 3] as number, ay = p[a * 3 + 1] as number, az = p[a * 3 + 2] as number;
@@ -273,7 +272,7 @@ export function hitBoardDepthSurface(surface: BoardDepthSurface, screen: BoardVe
 		const e2x = (p[c * 3] as number) - ax, e2y = (p[c * 3 + 1] as number) - ay, e2z = (p[c * 3 + 2] as number) - az;
 		const hx = ry * e2z - rz * e2y, hy = rz * e2x - rx * e2z, hz = rx * e2y - ry * e2x;
 		const det = e1x * hx + e1y * hy + e1z * hz;
-		if (Math.abs(det) < 1e-9) return;
+		if (Math.abs(det) < 1e-12) return;
 		const inv = 1 / det;
 		const sx = ox - ax, sy = oy - ay, sz = oz - az;
 		const b1 = inv * (sx * hx + sy * hy + sz * hz);
@@ -300,20 +299,17 @@ export function hitBoardDepthSurface(surface: BoardDepthSurface, screen: BoardVe
 	return best;
 }
 
-export function boardDepthOutline(surface: BoardDepthSurface, box = { x: 0, y: 0, width: 1, height: 1 }): BoardVec2[] {
+export function boardDepthOutline(surface: BoardDepthSurface, pose: BoardDepthPose, projection: BoardProjection, box = { x: 0, y: 0, width: 1, height: 1 }): ScreenPoint[] {
 	const steps = surface.segments > 1 ? 12 : 1;
-	const points: BoardVec2[] = [];
-	const edge = (u0: number, v0: number, u1: number, v1: number) => {
+	const points: ScreenPoint[] = [];
+	const corners = [[box.x, box.y], [box.x + box.width, box.y], [box.x + box.width, box.y + box.height], [box.x, box.y + box.height]] as const;
+	corners.forEach(([u0, v0], edge) => {
+		const [u1, v1] = corners[(edge + 1) % 4] as readonly [number, number];
 		for (let step = 0; step < steps; step++) {
 			const t = step / steps;
-			points.push(boardDepthScreenPoint(surface, u0 + (u1 - u0) * t, v0 + (v1 - v0) * t));
+			points.push(boardDepthScreenPoint(surface, pose, projection, u0 + (u1 - u0) * t, v0 + (v1 - v0) * t));
 		}
-	};
-	const { x, y, width, height } = box;
-	edge(x, y, x + width, y);
-	edge(x + width, y, x + width, y + height);
-	edge(x + width, y + height, x, y + height);
-	edge(x, y + height, x, y);
+	});
 	return points;
 }
 
@@ -333,28 +329,28 @@ export function boardDepthFlatPoint(frame: BoardFrame, u: number, v: number): Bo
 
 export type BoardDepthShadow = { corners: [BoardVec2, BoardVec2, BoardVec2, BoardVec2]; height: number; blur: number; alpha: number };
 
-export function boardDepthShadow(surface: BoardDepthSurface, view: BoardDepthView, strength: number): BoardDepthShadow | null {
+export function boardDepthShadow(surface: BoardDepthSurface, pose: BoardDepthPose, projection: BoardProjection, strength: number): BoardDepthShadow | null {
 	if (strength <= 0) return null;
-	const zoom = Math.max(view.zoom, 1e-6);
+	const zoom = projection.zoom;
 	let height = 0;
 	const corners = ([[0, 0], [1, 0], [1, 1], [0, 1]] as const).map(([u, v]) => {
-		const [x, y, z] = boardDepthPoint(surface, u, v);
+		const [x, y, z] = boardDepthPoint(surface, pose, u, v);
 		const above = Math.max(z, 0);
 		height = Math.max(height, above);
-		return { x: (x + above * 0.18 - view.x) / zoom, y: (y + above * 0.32 - view.y) / zoom };
+		return { x: x + above * 0.18, y: y + above * 0.32 };
 	}) as [BoardVec2, BoardVec2, BoardVec2, BoardVec2];
 	let mean = 0;
-	for (let i = 2; i < surface.positions.length; i += 3) mean += Math.max(surface.positions[i] as number, 0);
+	for (let i = 2; i < surface.positions.length; i += 3) mean += Math.max(pose.z + (surface.positions[i] as number), 0);
 	mean /= surface.positions.length / 3;
-	if (height < 0.5) return null;
-	const rise = Math.min(1, mean / 24);
-	const fade = 1 - Math.min(0.55, mean / surface.eye.distance);
-	return { corners, height: mean / zoom, blur: (6 + mean * 0.35) / zoom, alpha: strength * 0.32 * rise * fade };
+	if (height * zoom < 0.5) return null;
+	const rise = Math.min(1, (mean * zoom) / 24);
+	const fade = 1 - Math.min(0.55, mean / projection.distance);
+	return { corners, height: mean, blur: 6 / zoom + mean * 0.35, alpha: strength * 0.32 * rise * fade };
 }
 
-export function boardDocumentUsesDepth(document: { items: Readonly<Record<string, { depth?: unknown; props?: unknown }>>; animations: Readonly<Record<string, { tracks: Readonly<Record<string, { property: string }>> }>> }): boolean {
+export function boardDocumentUsesDepth(document: { items: Readonly<Record<string, { depth?: unknown; props?: unknown; attach?: { node?: string } }>>; animations: Readonly<Record<string, { tracks: Readonly<Record<string, { property: string }>> }>> }): boolean {
 	for (const item of Object.values(document.items)) {
-		if (item.depth) return true;
+		if (item.depth || item.attach?.node) return true;
 		const model = (item.props as { model?: { display?: string } } | undefined)?.model;
 		if (model?.display === "object") return true;
 	}
@@ -363,24 +359,28 @@ export function boardDocumentUsesDepth(document: { items: Readonly<Record<string
 	return false;
 }
 
-export function boardDepthItemOutline(scene: Pick<BoardScene, "get">, id: string, view: BoardDepthView): BoardVec2[] | null {
+export function boardDepthItemOutline(scene: Pick<BoardScene, "get">, id: string, view: BoardDepthView): WorldPoint[] | null {
 	const root = boardDepthRootOf(scene, id);
 	const item = scene.get(id);
 	const rootItem = root ? scene.get(root) : undefined;
-	const depth = rootItem && boardDepthOf(rootItem);
+	const depth = rootItem && boardDepthOf(rootItem, scene);
 	if (!item || !rootItem || !depth) return null;
-	const surface = boardDepthSurface({ frame: rootItem.frame, origin: rootItem.origin, depth }, view);
-	const zoom = Math.max(view.zoom, 1e-6);
-	const toWorld = (point: BoardVec2) => ({ x: (point.x - view.x) / zoom, y: (point.y - view.y) / zoom });
-	if (id === root) return boardDepthOutline(surface).map(toWorld);
-	const corners = ([[0, 0], [1, 0], [1, 1], [0, 1]] as const).map(([u, v]) => boardDepthFraction(rootItem.frame, framePoint(item.frame, u, v)));
+	const projection = boardProjection(view, view);
+	const surface = boardDepthSurface({ frame: rootItem.frame, origin: rootItem.origin, depth });
+	return boardDepthPictureOutline(id === root ? null : item.frame, surface, boardDepthPose(surface, projection), projection);
+}
+
+export function boardDepthPictureOutline(frame: BoardFrame | null, surface: BoardDepthSurface, pose: BoardDepthPose, projection: BoardProjection): WorldPoint[] {
+	const toBoard = (point: ScreenPoint) => projection.ground(point);
+	if (!frame) return boardDepthOutline(surface, pose, projection).map(toBoard);
+	const box = ([[0, 0], [1, 0], [1, 1], [0, 1]] as const).map(([u, v]) => boardDepthFraction(surface.frame, framePoint(frame, u, v)));
 	const steps = surface.segments > 1 ? 10 : 1;
-	const outline: BoardVec2[] = [];
-	corners.forEach((a, edge) => {
-		const b = corners[(edge + 1) % 4] as BoardVec2;
+	const outline: WorldPoint[] = [];
+	box.forEach((a, edge) => {
+		const b = box[(edge + 1) % 4] as BoardVec2;
 		for (let step = 0; step < steps; step++) {
 			const t = step / steps;
-			outline.push(toWorld(boardDepthScreenPoint(surface, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)));
+			outline.push(toBoard(boardDepthScreenPoint(surface, pose, projection, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)));
 		}
 	});
 	return outline;

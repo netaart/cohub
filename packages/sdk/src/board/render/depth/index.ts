@@ -1,5 +1,6 @@
 export type { BoardDepthLayer, BoardDepthStage } from "./engine.js";
-export type { BoardDepthObject } from "./objects.js";
+export type { BoardGround, BoardGroundOptions } from "./ground.js";
+export type { BoardDepthObject, BoardDepthObjectPlacement, BoardDepthObjects } from "./objects.js";
 export * from "./bend.js";
 export * from "./capture.js";
 export * from "./shadows.js";

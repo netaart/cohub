@@ -7,7 +7,7 @@ import type {
 	BoardScriptSenseState,
 	BoardScriptSnapshot,
 } from "../model/index.js";
-import { Application, Container, Graphics, type Renderer, RendererType, type Texture } from "pixi.js";
+import { Application, Container, Graphics, Matrix, type Renderer, RendererType, type Texture } from "pixi.js";
 import type { BoardActivation, BoardEditor, BoardPointerEvent } from "../editor/index.js";
 import { BOARD_INPUT, boardDragSlop, boardTextGestureWrap, isCreationBoardTool, isTouchLikePointer, resizeCursorForHandle } from "../editor/index.js";
 import {
@@ -34,7 +34,7 @@ import {
 	type SceneItem,
 	elementClientToLocal,
 	isBoardModelItem,
-	type BoardModelClip,
+	type BoardModelFacts,
 	itemBounds,
 	pointToWorld,
 	rectsIntersect,
@@ -42,6 +42,15 @@ import {
 	type ScreenPoint,
 	boardDepthRootOf,
 	boardDocumentUsesDepth,
+	boardProjection,
+	boardViewBearing,
+	boardViewCenter,
+	boardViewRect,
+	boardViewToWorld,
+	frameContainsPoint,
+	isBoardScriptScreenRoot,
+	isBoardViewLevel,
+	isBoardViewPitched,
 	stableCullRect,
 	TEXT_LINE_HEIGHT,
 	visibleWorldRect,
@@ -259,6 +268,8 @@ const FRAME_RENDER = 2;
 const FRAME_CARDS = 4;
 const FRAME_SCRIPTS = 8;
 const FRAME_RESIZE = 16;
+const FRAME_MOTION = 32;
+const GROUND_PIXELS = 2.5;
 
 const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5' fill='none' stroke='%23fff' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5' fill='none' stroke='%231d1d1f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 12 12, crosshair`;
 
@@ -288,8 +299,12 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let scene: ReturnType<typeof createBoardScene> | null = null;
 	let shaders: BoardStageShaders | null = null;
 	let depth: BoardStageDepth | null = null;
+	let ground: Container | null = null;
 	let depthLayer: Container | null = null;
+	let hud: Container | null = null;
 	let depthDocument: unknown = null;
+	let grounded = false;
+	let groundStale = true;
 	const senseListeners = new Set<() => void>();
 	const notifySenses = () => {
 		for (const listener of senseListeners) listener();
@@ -439,9 +454,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		},
 	});
 	const renderCamera = () => playbackCamera ?? editor.camera;
+	const groundPoint = (screen: ScreenPoint) => boardViewToWorld(renderCamera(), surface, screen);
 	const toWorldPoint = (clientX: number, clientY: number) => {
 		const screen = localPoint(clientX, clientY);
-		return liftedPoint(screen) ?? pointToWorld(screen, renderCamera());
+		return liftedPoint(screen) ?? groundPoint(screen);
 	};
 	const models = createBoardModelTheater({
 		renderer: () => app?.renderer ?? null,
@@ -455,7 +471,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			scheduleTick();
 		},
 		frame: () => scheduleRender(),
-		loaded: learnClips,
+		loaded: learnModel,
 	});
 	let modelCursor = "";
 	let enteredModel: string | null = null;
@@ -486,7 +502,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let cull: { rect: Rect | null; ids: Set<string> | null; scene: BoardScene | null } = { rect: null, ids: null, scene: null };
 	function visibleIds(): Set<string> | null {
 		if (surface.width === 0 || surface.height === 0) return null;
-		const rect = stableCullRect(visibleWorldRect(renderCamera(), surface.width, surface.height));
+		const rect = stableCullRect(boardViewRect(renderCamera(), surface));
 		const same =
 			cull.rect &&
 			cull.rect.x === rect.x &&
@@ -501,7 +517,13 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		return kept;
 	}
 
-	const textureScale = () => renderCamera().zoom * (app?.renderer.resolution ?? 1);
+	const textureScale = () => renderCamera().zoom * nearest(renderCamera()) * (app?.renderer.resolution ?? 1);
+	function nearest(camera: BoardViewport): number {
+		if (!isBoardViewPitched(camera)) return 1;
+		const projection = boardProjection(camera, surface);
+		const near = projection.ground(screenPoint(surface.width / 2, surface.height));
+		return projection.scale(near.x, near.y) / camera.zoom;
+	}
 	const textResolution = createTextResolutionTracker(TEXTURE_SETTLE_MS, scheduleTick);
 	let refined = { scale: 0, geometry: 0 };
 	let pendingRefine = "";
@@ -535,7 +557,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	}
 
 	function cullView(camera: BoardViewport): Rect {
-		const view = visibleWorldRect(camera, surface.width, surface.height);
+		const view = boardViewRect(camera, surface);
 		const pad = CULL_PADDING / camera.zoom;
 		return { x: view.x - pad, y: view.y - pad, width: view.width + pad * 2, height: view.height + pad * 2 };
 	}
@@ -573,10 +595,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		return worldPoint(ahead(previous.x, center.x), ahead(previous.y, center.y));
 	}
 
-	const learnedClips = new Map<string, BoardModelClip[]>();
-	function learnClips(id: string, model: LoadedModel) {
-		if (editor.readonly || !model.clips.length) return;
-		learnedClips.set(id, model.clips);
+	const learned = new Map<string, BoardModelFacts>();
+	function learnModel(id: string, model: LoadedModel) {
+		if (editor.readonly || (!model.clips.length && !model.nodes.length)) return;
+		learned.set(id, { clips: model.clips, nodes: model.nodes });
 		scheduleTick();
 	}
 
@@ -676,8 +698,22 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			});
 			app.stage.addChildAt(backdrop.container, 0);
 		}
-		const { width, height } = app.screen;
-		const view = { x: camera.x, y: camera.y, zoom: camera.zoom, width, height, density: app.renderer.resolution };
+		const { container } = backdrop;
+		const density = app.renderer.resolution;
+		if (isBoardViewLevel(camera) || !ground) {
+			if (container.parent !== app.stage) app.stage.addChildAt(container, 0);
+			container.position.set(0, 0);
+			container.scale.set(1);
+			const { width, height } = app.screen;
+			backdrop.sync(resolvedBackdrop.value, { x: camera.x, y: camera.y, zoom: camera.zoom, width, height, density }, options.reducedMotion?.() ?? false);
+			return;
+		}
+		const seen = boardViewRect(camera, surface);
+		const zoom = camera.zoom;
+		if (container.parent !== ground) ground.addChildAt(container, 0);
+		container.position.set(seen.x, seen.y);
+		container.scale.set(1 / zoom);
+		const view = { x: -seen.x * zoom, y: -seen.y * zoom, zoom, width: seen.width * zoom, height: seen.height * zoom, density };
 		backdrop.sync(resolvedBackdrop.value, view, options.reducedMotion?.() ?? false);
 	}
 
@@ -843,7 +879,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			ports: editor.connectionPorts,
 			hoveredPort: editor.hoveredConnectionPort,
 			bindTarget: editor.bindTargetFrame ?? editor.arrowDraft?.targetFrame ?? dropTargetFrame(),
-			...(depth?.active && app ? { projected: projectedOutline(renderScene, camera, app.screen) } : {}),
+			...(depth?.active ? { projected: projectedOutline(renderScene, camera) } : {}),
 		});
 		if (presence?.peers.length)
 			drawBoardPresence(overlay, presence.peers, {
@@ -1018,14 +1054,17 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 				work |= FRAME_RENDER;
 				if (next !== null) scheduleCardTick(next);
 			}
-			if ((work | frameWork) & FRAME_RENDER) {
-				frameWork &= ~FRAME_RENDER;
+			if ((work | frameWork) & (FRAME_RENDER | FRAME_MOTION)) {
+				if (moving || ((work | frameWork) & ~FRAME_MOTION) || depth?.riding) groundStale = true;
+				frameWork &= ~(FRAME_RENDER | FRAME_MOTION);
 				if (bursts?.tick(now, camera.zoom)) frameWork |= FRAME_RENDER;
 				const modelWait = models.tick(now, camera.zoom);
 				if (modelWait === 0) frameWork |= FRAME_RENDER;
 				else if (modelWait !== null) scheduleCardTick(modelWait);
 				shaders?.prepare();
 				prepareDepth(camera, modelWait === 0);
+				if (drawGround(camera, groundStale)) groundStale = false;
+				placeWorld(camera);
 				app.render();
 				if (app.canvas.style.visibility) app.canvas.style.visibility = "";
 			}
@@ -1041,7 +1080,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	function waitingCards(): number {
 		if (!scene || surface.width === 0) return 0;
-		const view = visibleWorldRect(renderCamera(), surface.width, surface.height);
+		const view = boardViewRect(renderCamera(), surface);
 		let waiting = 0;
 		for (const id of scene.liveIds()) {
 			const item = editor.scene.get(id);
@@ -1057,9 +1096,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		return { p50: at(0.5), p95: at(0.95), max: samples.at(-1) ?? 0 };
 	}
 
-	function projectedOutline(renderScene: BoardScene, camera: BoardViewport, screen: { width: number; height: number }) {
-		const view = { x: camera.x, y: camera.y, zoom: camera.zoom, width: screen.width, height: screen.height };
-		return (id: string) => depth?.outline(renderScene, id, view) ?? null;
+	function projectedOutline(renderScene: BoardScene, camera: BoardViewport) {
+		const projection = boardProjection(camera, surface);
+		return (id: string) => depth?.outline(renderScene, id, projection) ?? null;
 	}
 
 	function prepareDepth(camera: BoardViewport, modelsMoving: boolean) {
@@ -1073,12 +1112,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			? [...(shaders?.animated ? scripts.shaderOwners().flatMap((owner) => (owner.root ? [] : [owner.id])) : []), ...(modelsMoving ? live.running : [])]
 			: [];
 		const touched = unseen.length ? new Set([...drawn, ...unseen]) : drawn;
-		depth.prepare({
-			scene: editor.scene,
-			view: { x: camera.x, y: camera.y, zoom: camera.zoom, width: app.screen.width, height: app.screen.height },
-			resolution: app.renderer.resolution,
-			touched,
-		});
+		depth.prepare({ scene: editor.scene, projection: boardProjection(camera, surface), resolution: app.renderer.resolution, touched });
 	}
 
 	function scheduleRender() {
@@ -1159,7 +1193,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			return;
 		}
 		const camera = renderCamera();
-		const view = visibleWorldRect(camera, surface.width, surface.height);
+		const view = boardViewRect(camera, surface);
 		const culled = stableCullRect(view);
 		const padX = view.width * margin;
 		const padY = view.height * margin;
@@ -1184,6 +1218,81 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 	function syncScripts() {
 		scripts.sync({ camera: renderCamera(), surface, safeRect: options.safeRect?.(), visibleIds: visibleIds() });
+	}
+
+	const unworld = new Matrix();
+	let screens: { scene: BoardScene | null; ids: ReadonlySet<string> } = { scene: null, ids: NO_IDS };
+	function screenRoots(renderScene: BoardScene, level: boolean): ReadonlySet<string> {
+		if (level) return NO_IDS;
+		if (screens.scene !== renderScene) {
+			const ids = renderScene.items.filter((item) => isBoardScriptScreenRoot(item.id)).map((item) => item.id);
+			screens = { scene: renderScene, ids: ids.length || screens.ids.size ? new Set(ids) : NO_IDS };
+		}
+		return screens.ids;
+	}
+
+	let elevation: { lifted: ReadonlySet<string>; screens: ReadonlySet<string>; ids: ReadonlySet<string> } = { lifted: NO_IDS, screens: NO_IDS, ids: NO_IDS };
+	function elevatedIds(renderScene: BoardScene, level: boolean): ReadonlySet<string> {
+		const lifted = depth?.elevated(renderScene) ?? NO_IDS;
+		const held = screenRoots(renderScene, level);
+		if (elevation.lifted !== lifted || elevation.screens !== held)
+			elevation = { lifted, screens: held, ids: held.size ? new Set([...lifted, ...held]) : lifted };
+		return elevation.ids;
+	}
+
+	function placeWorld(camera: BoardViewport) {
+		if (!world || !depthLayer || !hud) return;
+		if (isBoardViewLevel(camera)) {
+			world.pivot.set(0, 0);
+			world.rotation = 0;
+			world.position.set(camera.x, camera.y);
+		} else {
+			const center = boardViewCenter(camera, surface);
+			world.pivot.set(center.x, center.y);
+			world.rotation = (-boardViewBearing(camera) * Math.PI) / 180;
+			world.position.set(surface.width / 2, surface.height / 2);
+		}
+		world.scale.set(camera.zoom);
+		hud.position.set(camera.x, camera.y);
+		hud.scale.set(camera.zoom);
+		if (depthLayer.parent !== world) return depthLayer.setFromMatrix(Matrix.IDENTITY);
+		world.updateLocalTransform();
+		depthLayer.setFromMatrix(unworld.copyFrom(world.localTransform).invert());
+	}
+
+	function arrange(pitched: boolean) {
+		if (!app || !world || !ground || !depthLayer || !bursts || !overlay || grounded === pitched) return;
+		grounded = pitched;
+		if (pitched) {
+			world.removeChild(ground);
+			ground.addChild(bursts.container, overlay);
+			app.stage.addChild(depthLayer);
+		} else {
+			world.addChildAt(ground, 0);
+			world.addChild(depthLayer, bursts.container, overlay);
+		}
+	}
+
+	function drawGround(camera: BoardViewport, stale: boolean): boolean {
+		const pitched = Boolean(depth && ground && app && isBoardViewPitched(camera));
+		if (!pitched) {
+			depth?.ground(null);
+			arrange(false);
+			return true;
+		}
+		arrange(true);
+		if (!stale) return true;
+		const renderer = app as Application;
+		const resolution = renderer.renderer.resolution;
+		const background = options.transparent ? null : ([...renderer.renderer.background.colorRgba.slice(0, 3), 1] as [number, number, number, number]);
+		const drawn = depth?.ground(ground, {
+			density: resolution,
+			maxPixels: surface.width * surface.height * resolution * resolution * GROUND_PIXELS,
+			maxEdge: device.tier === "low" ? 2048 : 4096,
+			background,
+		});
+		if (!drawn) arrange(false);
+		return Boolean(drawn);
 	}
 
 	function sync() {
@@ -1224,20 +1333,16 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			notifyScriptCamera();
 		}
 		const camera = renderCamera();
-		scripts.compose(camera, moving.size > 0);
+		const level = isBoardViewLevel(camera);
+		const projection = level ? null : boardProjection(camera, surface);
+		scripts.compose(camera, moving.size > 0, projection ? (point) => pointToWorld(projection.project(point.x, point.y), camera) : undefined);
 
 		syncBackdrop(current, camera);
 		const renderScene = editor.scene;
-		world.position.set(camera.x, camera.y);
-		world.scale.set(camera.zoom);
-		if (atmosphere) {
-			atmosphere.container.position.set(-camera.x / camera.zoom, -camera.y / camera.zoom);
-			atmosphere.container.scale.set(1 / camera.zoom);
-			atmosphere.sync(editor.settings.atmosphere, { width: app.screen.width, height: app.screen.height, density: app.renderer.resolution });
-		}
+		atmosphere?.sync(editor.settings.atmosphere, { width: app.screen.width, height: app.screen.height, density: app.renderer.resolution });
 
 		const ids = visibleIds();
-		const center = pointToWorld(screenPoint(surface.width / 2, surface.height / 2), camera);
+		const center = boardViewCenter(camera, surface);
 		assets.focus(loadFocus(center, camera));
 		adoptArrivals();
 		if (toned.size > 0) {
@@ -1295,8 +1400,12 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			view: ids ? cullView(camera) : undefined,
 			lod: currentLod(),
 			budget: clock,
-			elevated: depth?.elevated(renderScene),
+			elevated: elevatedIds(renderScene, level),
 		});
+		for (const id of screenRoots(renderScene, level)) {
+			const held = scene.elevatedHost(id);
+			if (held && held.parent !== hud) hud?.addChild(held);
+		}
 		staleIds.clear();
 		views.sync({
 			ids,
@@ -1316,9 +1425,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			options.onLiveChange?.(scene.liveIds());
 		}
 		adoptNaturalSizes();
-		if (learnedClips.size) {
-			editor.adoptModelClips([...learnedClips].map(([id, clips]) => ({ id, clips })));
-			learnedClips.clear();
+		if (learned.size) {
+			editor.adoptModelFacts([...learned].map(([id, facts]) => ({ id, facts })));
+			learned.clear();
 		}
 		scheduleRefine();
 		syncScripts();
@@ -1360,6 +1469,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	const liftOffsets = new Map<number, { x: number; y: number }>();
 	function liftedPoint(screen: ScreenPoint): WorldPoint | null {
 		editor.setPickScope(null);
+		const held = screenLayerAt(screen);
+		if (held) return held;
 		if (!depth?.active) return null;
 		const hit = depth.unproject(editor.scene, screen);
 		if (hit) {
@@ -1371,8 +1482,25 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		return null;
 	}
 
+	function screenLayerAt(screen: ScreenPoint): WorldPoint | null {
+		const camera = renderCamera();
+		const roots = screenRoots(editor.scene, isBoardViewLevel(camera));
+		if (!roots.size) return null;
+		const point = pointToWorld(screen, camera);
+		const layer = new Set<string>();
+		for (const root of roots) for (const id of [root, ...editor.scene.descendants(root)]) layer.add(id);
+		for (const id of layer) {
+			const item = editor.scene.get(id);
+			if (item && !roots.has(id) && frameContainsPoint(item.frame, point)) {
+				editor.setPickScope((candidate) => layer.has(candidate));
+				return point;
+			}
+		}
+		return null;
+	}
+
 	function toInput(event: PointerEvent): BoardPointerEvent {
-		const input = toBoardPointerEvent(event, host, renderCamera(), event.type === "pointermove" && editor.interaction.type === "drawing");
+		const input = toBoardPointerEvent(event, host, groundPoint, event.type === "pointermove" && editor.interaction.type === "drawing");
 		const ends = event.type === "pointerup" || event.type === "pointercancel" || event.type === "lostpointercapture";
 		const held = event.type === "pointerdown" ? undefined : liftOffsets.get(event.pointerId);
 		if (held && (event.buttons !== 0 || ends)) {
@@ -1384,7 +1512,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		const lifted = liftedPoint(input.screen);
 		const dx = lifted ? lifted.x - input.world.x : 0;
 		const dy = lifted ? lifted.y - input.world.y : 0;
-		if (event.type === "pointerdown" && depth?.active) liftOffsets.set(event.pointerId, { x: dx, y: dy });
+		if (event.type === "pointerdown" && (depth?.active || lifted)) liftOffsets.set(event.pointerId, { x: dx, y: dy });
 		return lifted ? shiftInput(input, dx, dy) : input;
 	}
 
@@ -1720,13 +1848,18 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		bursts = createBoardBursts();
 		const shadersBelow = new Container({ label: "board-shaders-below" });
 		const shadersAbove = new Container({ label: "board-shaders-above" });
+		ground = new Container({ isRenderGroup: true, label: "board-ground" });
+		ground.addChild(shadersBelow, nodes, shadersAbove);
+		hud = new Container({ label: "board-screen-layers" });
 		depthLayer = new Container({ label: "board-depth-layer" });
-		world.addChild(shadersBelow, nodes, shadersAbove, depthLayer, atmosphere.container, bursts.container, overlay);
+		depthLayer.addChild(hud, atmosphere.container);
+		world.addChild(ground, depthLayer, bursts.container, overlay);
 		instance.stage.addChild(world);
 		scene = createBoardScene({ world: nodes, overlay, getRenderer: resolveRenderer, requestFrame: scheduleTick });
 		depth = createBoardStageDepth({
 			renderer: () => (app ? (app.renderer as unknown as Renderer) : null),
 			layer: () => depthLayer,
+			shadows: () => ground,
 			host: (id) => scene?.elevatedHost(id) ?? null,
 			parts: (id) => {
 				const card = scene?.getNode(id)?.container;
@@ -1740,9 +1873,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			},
 			fault: (id, message) => scripts.host?.fault(id, message),
 			frame: scheduleTick,
-			animate: scheduleRender,
+			animate: () => requestFrame(FRAME_MOTION),
 			loadModel: (item, signal) => loadBoardItemModel(item, options.source, { signal, maxBytes: device.modelBytes }),
-			loaded: learnClips,
+			loaded: learnModel,
 			reducedMotion: () => options.reducedMotion?.() ?? false,
 			maxEdge: device.tier === "low" ? 1024 : undefined,
 		});
@@ -1865,7 +1998,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 				views: views.stats(),
 			};
 		},
-		toWorld: (clientX, clientY) => pointToWorld(localPoint(clientX, clientY), renderCamera()),
+		toWorld: (clientX, clientY) => groundPoint(localPoint(clientX, clientY)),
 		senses: {
 			get wanted() {
 				return senses.wanted;
@@ -1952,7 +2085,11 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			atmosphere = null;
 			bursts = null;
 			views.destroy();
+			if (ground && !ground.parent) ground.destroy({ children: true });
 			world = null;
+			ground = null;
+			hud = null;
+			depthLayer = null;
 			overlay = null;
 			app?.destroy({ removeView: true });
 			app = null;

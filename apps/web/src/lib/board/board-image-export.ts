@@ -9,6 +9,7 @@ import {
 	boardAnimatesScriptParams,
 	boardDocumentUsesDepth,
 	hasBoardScripts,
+	isBoardViewLevel,
 	selectBoardExportAssets,
 } from "@neta-art/cohub/board";
 import {
@@ -261,7 +262,9 @@ export async function exportBoardImage(
 
 		const depth =
 			renderer.type === RendererType.WEBGL &&
-			boardDocumentUsesDepth(prepared.document)
+			(boardDocumentUsesDepth(prepared.document) ||
+				(prepared.camera !== undefined &&
+					!isBoardViewLevel(prepared.camera.view)))
 				? await loadBoardDepthEngine()
 						.then((engine) => engine.createBoardDepthStage(renderer))
 						.catch(() => undefined)

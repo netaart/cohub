@@ -1,4 +1,4 @@
-import { type BoardAutoplayKind, type BoardDocument, type BoardScene, type BoardViewport, boardAutoplayKind, itemBounds } from "../model/index.js";
+import { type BoardAutoplayKind, type BoardDocument, type BoardScene, type BoardViewport, boardAutoplayKind, boardViewRect, itemBounds } from "../model/index.js";
 
 export type BoardLiveBudget = Record<BoardAutoplayKind, number>;
 
@@ -60,10 +60,8 @@ export function createBoardLiveScheduler(budget: BoardLiveBudget): BoardLiveSche
 			version += 1;
 		},
 		sync({ items, scene, visible, camera, surface, allow, now }) {
-			const left = -camera.x / camera.zoom;
-			const top = -camera.y / camera.zoom;
-			const right = left + surface.width / camera.zoom;
-			const bottom = top + surface.height / camera.zoom;
+			const seen = boardViewRect(camera, surface);
+			const [left, top, right, bottom] = [seen.x, seen.y, seen.x + seen.width, seen.y + seen.height];
 			const wanted: Record<BoardAutoplayKind, Ranked[]> = { video: [], model: [], app: [] };
 			const warm: Record<BoardAutoplayKind, string[]> = { video: [], model: [], app: [] };
 			for (const { id, kind, auto } of collect(items)) {

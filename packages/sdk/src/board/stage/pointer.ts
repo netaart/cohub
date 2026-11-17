@@ -1,9 +1,9 @@
 import {
 	type BoardDrawInputSample,
-	type BoardViewport,
 	elementClientToLocal,
-	pointToWorld,
+	type ScreenPoint,
 	screenPoint,
+	type WorldPoint,
 } from "../model/index.js";
 import type { BoardPointerEvent } from "../editor/index.js";
 
@@ -16,7 +16,7 @@ function pressureOf(event: PointerEvent): number {
 export function toBoardPointerEvent(
 	event: PointerEvent,
 	rect: DOMRect | HTMLElement,
-	camera: BoardViewport,
+	toWorld: (screen: ScreenPoint) => WorldPoint,
 	coalesce = false,
 ): BoardPointerEvent {
 	const local = "getBoundingClientRect" in rect
@@ -27,14 +27,14 @@ export function toBoardPointerEvent(
 	const samples: BoardDrawInputSample[] | undefined =
 		coalesced && coalesced.length > 1
 			? coalesced.map((sample) => ({
-					world: pointToWorld(local(sample.clientX, sample.clientY), camera),
+					world: toWorld(local(sample.clientX, sample.clientY)),
 					pressure: pressureOf(sample),
 				}))
 			: undefined;
 	return {
 		pointerId: event.pointerId,
 		screen,
-		world: pointToWorld(screen, camera),
+		world: toWorld(screen),
 		shiftKey: event.shiftKey,
 		metaKey: event.metaKey,
 		ctrlKey: event.ctrlKey,

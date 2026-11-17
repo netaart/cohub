@@ -1,12 +1,16 @@
 
 import { type BoardDocument, isBoardDepthActive, resolveBoardDepth } from "@cohub/protocol";
 import { resolveBoardAnimationCamera, type BoardAnimationSampler } from "../model/sampling.js";
+import type { BoardViewport } from "../model/geometry.js";
+import { boardViewRect, isBoardViewLevel } from "../model/view-camera.js";
 import { createBoardRenderSampler } from "../render/sampling.js";
 import { type BoardSceneItem, buildBoardScene } from "../model/scene.js";
 import { type ICanvas, Rectangle, type Renderer, RendererType, type Texture } from "pixi.js";
 import { type BoardShapeColors, buildFallbackShapeColors } from "../model/palette.js";
 import {
   BOARD_EXPORT_ITEM_WARN_THRESHOLD,
+  BOARD_EXPORT_MAX_EDGE,
+  BOARD_EXPORT_MAX_PIXELS,
   type BoardExportPlan,
   type BoardExportRegion,
   exportItemBounds,
@@ -76,6 +80,7 @@ export type BoardExportWarning =
   | { kind: "shader-failed"; id: string; message: string }
   | { kind: "shader-hidden"; ids: string[]; reason: string }
   | { kind: "depth-flat"; ids: string[] }
+  | { kind: "camera-level" }
   | { kind: "models-flat"; ids: string[] };
 
 export type BoardExportResult = {
@@ -104,27 +109,32 @@ export function prepareBoardExport(input: BoardDocument, options: BoardExportOpt
   const directed = options.camera ? options.scripts?.camera?.(document, options.at?.time ?? 0) : null;
   const override = { ...sample?.evaluation.camera, ...directed };
   const camera = options.camera ? resolveBoardAnimationCamera(override, (id) => scene.get(id)?.frame, options.camera, options.at?.time ?? 0, undefined, sample?.evaluation.cameraViewport) : undefined;
-  const region: BoardExportRegion = camera && options.camera ? { kind: "rect", rect: { x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, width: options.camera.width / camera.zoom, height: options.camera.height / camera.zoom } } : options.region ?? { kind: "all" };
+  const region: BoardExportRegion = camera && options.camera ? { kind: "rect", rect: boardViewRect(camera, options.camera) } : options.region ?? { kind: "all" };
+  const output = camera && options.camera;
+  const fit = output ? Math.min(1, (options.maxEdge ?? BOARD_EXPORT_MAX_EDGE) / Math.max(output.width, output.height), Math.sqrt((options.maxPixels ?? BOARD_EXPORT_MAX_PIXELS) / (output.width * output.height))) : 1;
   const plan = planBoardExport({
     scene,
     region,
-    scale: camera?.zoom ?? options.scale,
+    scale: camera ? camera.zoom * fit : options.scale,
     padding: camera ? 0 : options.padding,
-    maxEdge: options.maxEdge,
-    maxPixels: options.maxPixels,
+    maxEdge: output ? Number.POSITIVE_INFINITY : options.maxEdge,
+    maxPixels: output ? Number.POSITIVE_INFINITY : options.maxPixels,
   });
-  if (plan && camera && options.camera) {
-    const ratio = plan.clamped ? plan.scale / camera.zoom : 1;
-    plan.width = Math.max(1, Math.floor(options.camera.width * ratio));
-    plan.height = Math.max(1, Math.floor(options.camera.height * ratio));
+  let view: { view: BoardViewport; width: number; height: number } | undefined;
+  if (plan && camera && output) {
+    plan.requestedScale = camera.zoom;
+    plan.clamped = fit < 1;
+    plan.width = Math.max(1, Math.floor(output.width * fit));
+    plan.height = Math.max(1, Math.floor(output.height * fit));
+    view = { view: { ...camera, x: camera.x * fit, y: camera.y * fit, zoom: camera.zoom * fit }, width: plan.width, height: plan.height };
   }
-  return plan ? { document, scene, plan, sampler } : null;
+  return plan ? { document, scene, plan, sampler, camera: view } : null;
 }
 
 export function renderBoardExport(renderer: Renderer, input: BoardDocument, options: BoardExportOptions = {}): BoardExportResult | null {
   const prepared = prepareBoardExport(input, options);
   if (!prepared) return null;
-  const { document, scene, plan, sampler } = prepared;
+  const { document, scene, plan, sampler, camera } = prepared;
   const colorScheme = options.colorScheme ?? "dark";
   const palette = { ...defaultBoardPalette(colorScheme), ...options.palette };
   const owners = options.scripts?.shaders?.(document, options.at?.time ?? 0) ?? [];
@@ -152,6 +162,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     ...(plan.page ? { page: plan.page } : {}),
     ...(gpu && owners.length ? { shaders: { renderer, owners, layers: options.shaderLayers } } : {}),
     ...(gpu && options.depth ? { depth: { renderer, stage: options.depth, models: options.models } } : {}),
+    ...(camera ? { camera } : {}),
   });
 
   const flattened = renderer.type === RendererType.CANVAS ? flattenBoardEffects(renderer, exportScene.root, plan.scale, new Rectangle(0, 0, plan.width, plan.height)) : null;
@@ -196,6 +207,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     }
     for (const failure of exportScene.shaderErrors) warnings.push({ kind: "shader-failed", ...failure });
     const planned = new Set(plan.items.map((item) => item.id));
+    if ((!gpu || !options.depth) && camera && !isBoardViewLevel(camera.view)) warnings.push({ kind: "camera-level" });
     if (!gpu || !options.depth) {
       const flat = boardDepthRoots(scene).filter((item) => planned.has(item.id) && isBoardDepthActive(resolveBoardDepth(item.depth))).map((item) => item.id);
       if (flat.length) warnings.push({ kind: "depth-flat", ids: flat });
@@ -263,6 +275,8 @@ export function describeBoardExportWarning(warning: BoardExportWarning): string 
       return `${listIds(warning.ids)} could not be drawn in 3D; this export shows ${warning.ids.length === 1 ? "its card" : "their cards"}.`;
     case "depth-flat":
       return `${listIds(warning.ids)} ${warning.ids.length === 1 ? "is" : "are"} lifted off the Board; this export draws ${warning.ids.length === 1 ? "it" : "them"} flat because depth needs WebGL.`;
+    case "camera-level":
+      return "The camera tips or turns, which needs WebGL; this export shows it level.";
     case "shader-hidden":
       return `${warning.ids.length === 1 ? "Shader" : "Shaders"} of ${listIds(warning.ids)} drew nothing: ${warning.reason.replace(/^its item is/, warning.ids.length === 1 ? "its item is" : "their items are")}.`;
   }

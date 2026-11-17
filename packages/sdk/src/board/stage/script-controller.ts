@@ -295,18 +295,18 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     } else if (!wanted && host) stop();
   }
 
-  function compose(camera: BoardViewport, moving: boolean) {
+  function compose(camera: BoardViewport, moving: boolean, place?: (point: { x: number; y: number }) => { x: number; y: number }) {
     if (!host || (!outputs.size && composed.version === version)) return;
     const playhead = `${editor.playhead?.animationId ?? ""}:${editor.playhead?.time ?? ""}`;
     const gesture = screens.size > 0 && editor.gestureActive;
-    const pan = [...screens].some((id) => isBoardRootScript(editor.document, id)) ? `${camera.x},${camera.y}` : "";
+    const pan = place && screens.size ? `${camera.x},${camera.y},${camera.pitch},${camera.bearing}` : [...screens].some((id) => isBoardRootScript(editor.document, id)) ? `${camera.x},${camera.y}` : "";
     if (
       composed.version === version && composed.document === editor.document && !gesture && !composed.gesture &&
       !moving && !composed.moving && composed.zoom === camera.zoom && composed.pan === pan && composed.playhead === playhead
     )
       return;
     const animation = editor.animationItems();
-    const items = composeBoardScriptItems(editor.document, editor.scene, outputs, animation, camera,
+    const items = composeBoardScriptItems(editor.document, editor.scene, outputs, animation, place ? { ...camera, place } : camera,
       (owner, error) => host?.fault(owner, error instanceof Error ? error.message : String(error)),
       editor.gestureActive ? editor.scene.layout : undefined);
     const presented = new Set([...outputs.values()].flatMap((output) => Object.keys(output.patches)));

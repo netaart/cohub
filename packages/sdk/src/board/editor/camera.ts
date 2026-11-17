@@ -1,20 +1,27 @@
 import {
 	type BoardCameraState,
 	type BoardViewport,
+	boardViewBearing,
+	boardViewPitch,
+	boardViewRect,
+	boardViewToWorld,
 	boardZoomFloor,
 	cameraForRect,
 	cameraForState,
+	clampZoom,
 	FIT_PADDING,
+	isBoardViewLevel,
+	levelBoardView,
 	normalizeViewport,
-	panBy,
-	pointToWorld,
+	panBoardView,
+	placeBoardView,
 	type Rect,
 	type ScreenPoint,
 	screenPoint,
 	stateForCamera,
 	visibleWorldRect,
 	type WorldPoint,
-	zoomAround,
+	zoomBoardView,
 } from "../model/index.js";
 import type { BoardCameraPolicy, EditorContext } from "./context.js";
 import { BOARD_INPUT } from "./input.js";
@@ -42,17 +49,30 @@ function easeOutCubic(t: number) {
 	return 1 - (1 - t) * (1 - t) * (1 - t);
 }
 
-function glideStep(from: BoardViewport, to: BoardViewport, anchor: ScreenPoint, k: number): BoardViewport {
+type Size = { width: number; height: number };
+
+function glideStep(from: BoardViewport, to: BoardViewport, anchor: ScreenPoint, k: number, size: Size): BoardViewport {
 	const zoom = from.zoom * (to.zoom / from.zoom) ** k;
-	const a = pointToWorld(anchor, from);
-	const b = pointToWorld(anchor, to);
-	const x = a.x + (b.x - a.x) * k;
-	const y = a.y + (b.y - a.y) * k;
-	return { x: anchor.x - x * zoom, y: anchor.y - y * zoom, zoom };
+	const a = boardViewToWorld(from, size, anchor);
+	const b = boardViewToWorld(to, size, anchor);
+	return placeBoardView(from, size, anchor, { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }, zoom);
 }
 
 function settled(a: BoardViewport, b: BoardViewport) {
 	return Math.abs(a.x - b.x) < 0.1 && Math.abs(a.y - b.y) < 0.1 && Math.abs(a.zoom / b.zoom - 1) < 1e-4;
+}
+
+function between(from: BoardViewport, to: BoardViewport, t: number): BoardViewport {
+	const pitch = boardViewPitch(from) + (boardViewPitch(to) - boardViewPitch(from)) * t;
+	const turn = ((boardViewBearing(to) - boardViewBearing(from) + 540) % 360) - 180;
+	const bearing = boardViewBearing(from) + turn * t;
+	return {
+		x: from.x + (to.x - from.x) * t,
+		y: from.y + (to.y - from.y) * t,
+		zoom: from.zoom + (to.zoom - from.zoom) * t,
+		...(pitch ? { pitch } : {}),
+		...(Math.abs(bearing) > 1e-6 ? { bearing } : {}),
+	};
 }
 
 export function createCameraModule(ctx: EditorContext) {
@@ -93,10 +113,14 @@ export function createCameraModule(ctx: EditorContext) {
 	function takeCameraControl(): boolean {
 		if (state.cameraPolicy !== "follow" || !followed) return false;
 		stop();
-		move(followed);
+		move(editing() ? levelBoardView(followed) : followed);
 		followed = null;
 		setCameraPolicy("free");
 		return true;
+	}
+
+	function editing(): boolean {
+		return !ctx.options.readonly && state.tool !== "play";
 	}
 
 	function step(now: number) {
@@ -108,16 +132,12 @@ export function createCameraModule(ctx: EditorContext) {
 			const eased = easeOutCubic(t);
 			const { from, to } = current;
 			if (t >= 1) motion = null;
-			move({
-				x: from.x + (to.x - from.x) * eased,
-				y: from.y + (to.y - from.y) * eased,
-				zoom: from.zoom + (to.zoom - from.zoom) * eased,
-			});
+			move(t >= 1 ? to : between(from, to, eased));
 		} else {
 			const dt = Math.min(MAX_STEP_MS, Math.max(0, now - current.last));
 			current.last = now;
 			if (current.kind === "glide") {
-				const next = glideStep(state.camera, current.target, current.anchor, 1 - Math.exp(-dt / GLIDE_TAU_MS));
+				const next = glideStep(state.camera, current.target, current.anchor, 1 - Math.exp(-dt / GLIDE_TAU_MS), state.surfaceSize);
 				const done = settled(next, current.target);
 				if (done) motion = null;
 				move(done ? current.target : next);
@@ -126,7 +146,7 @@ export function createCameraModule(ctx: EditorContext) {
 				current.vx *= decay;
 				current.vy *= decay;
 				if (Math.hypot(current.vx, current.vy) < BOARD_INPUT.flingStop) motion = null;
-				move(panBy(state.camera, current.vx * dt, current.vy * dt));
+				move(pan(state.camera, current.vx * dt, current.vy * dt));
 			}
 		}
 		if (motion && !frame) frame = requestAnimationFrame(step);
@@ -168,18 +188,27 @@ export function createCameraModule(ctx: EditorContext) {
 	}
 
 	function viewCenter(): WorldPoint {
-		return pointToWorld(surfaceCenter(), state.camera);
+		return boardViewToWorld(state.camera, state.surfaceSize, surfaceCenter());
 	}
 
 	function visibleRect(): Rect | null {
 		const { camera, surfaceSize } = state;
 		if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return null;
-		return {
-			x: -camera.x / camera.zoom,
-			y: -camera.y / camera.zoom,
-			width: surfaceSize.width / camera.zoom,
-			height: surfaceSize.height / camera.zoom,
-		};
+		return boardViewRect(camera, surfaceSize);
+	}
+
+	function pan(camera: BoardViewport, dx: number, dy: number): BoardViewport {
+		const middle = surfaceCenter();
+		return panBoardView(camera, state.surfaceSize, middle, screenPoint(middle.x + dx, middle.y + dy));
+	}
+
+	function zoomAround(camera: BoardViewport, point: ScreenPoint, zoom: number, floor: number): BoardViewport {
+		return zoomBoardView(camera, state.surfaceSize, point, Number.isFinite(zoom) ? clampZoom(zoom, floor) : camera.zoom);
+	}
+
+	function level() {
+		if (isBoardViewLevel(state.camera)) return;
+		animateCamera(levelBoardView(state.camera));
 	}
 
 	function zoomAt(point: ScreenPoint, factor: number, animate = false) {
@@ -196,9 +225,9 @@ export function createCameraModule(ctx: EditorContext) {
 	function scroll(dx: number, dy: number, smooth = false) {
 		if (!ctx.frames.release()) return;
 		takeCameraControl();
-		if (smooth) return glide((base) => panBy(base, -dx, -dy), motion?.kind === "glide" ? motion.anchor : surfaceCenter());
+		if (smooth) return glide((base) => pan(base, -dx, -dy), motion?.kind === "glide" ? motion.anchor : surfaceCenter());
 		stop();
-		move(panBy(state.camera, -dx, -dy));
+		move(pan(state.camera, -dx, -dy));
 	}
 
 	function zoomBy(point: ScreenPoint, factor: number, smooth = false) {
@@ -249,7 +278,8 @@ export function createCameraModule(ctx: EditorContext) {
 		const { surfaceSize } = state;
 		if (surfaceSize.width <= 0 || surfaceSize.height <= 0) return false;
 		if (view) {
-			const camera = cameraForState(view, surfaceSize);
+			const shown = cameraForState(view, surfaceSize);
+			const camera = editing() ? levelBoardView(shown) : shown;
 			if (ctx.query.idsInRect(visibleWorldRect(camera, surfaceSize.width, surfaceSize.height)).length > 0) {
 				stop();
 				move(camera);
@@ -289,6 +319,9 @@ export function createCameraModule(ctx: EditorContext) {
 		restoreCameraState,
 		zoomAt,
 		zoomFloor,
+		zoomAround,
+		pan,
+		level,
 		zoomIn: () => zoomAt(surfaceCenter(), ZOOM_STEP, true),
 		zoomOut: () => zoomAt(surfaceCenter(), 1 / ZOOM_STEP, true),
 		resetZoom: () => {

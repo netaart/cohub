@@ -1,26 +1,55 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type BoardDepthView, boardDepthItemOutline, boardDepthOf, boardDepthRootOf, boardDepthRoots, boardDepthScreenPoint, boardDepthSurface, hitBoardDepthSurface } from "../../src/board/model/depth.js";
+import { type BoardDepthView, boardDepthItemOutline, boardDepthOf, boardDepthPose, boardDepthRootOf, boardDepthRoots, boardDepthScreenPoint, boardDepthSurface, hitBoardDepthSurface } from "../../src/board/model/depth.js";
 import { planBoardExport } from "../../src/board/model/export-plan.js";
+import { pointToWorld, screenPoint } from "../../src/board/model/geometry.js";
+import { boardProjection, boardViewRect, boardViewToWorld, panBoardView, zoomBoardView } from "../../src/board/model/view-camera.js";
 import { boardScene } from "./fixtures.js";
 
 const VIEW: BoardDepthView = { x: 100, y: 50, zoom: 1.5, width: 1200, height: 800 };
+const TIPPED: BoardDepthView = { ...VIEW, pitch: 50, bearing: 35 };
 const card = (depth: Record<string, unknown>) => ({ type: "shape", position: { x: 120, y: 80 }, size: { width: 300, height: 200 }, depth });
 
-test("rays find the point they show, through lift, tilt, spin and bends", () => {
-	for (const depth of [{ lift: 120, tilt: { x: 25, y: -40 }, spin: 33 }, { lift: 40, bend: { kind: "cloth", amount: 0.4, phase: 1 } }, { tilt: { y: 60 }, bend: { kind: "curl", amount: 0.3 } }]) {
-		const item = boardScene({ a: { ...card(depth), rotation: 15 } }).get("a");
-		const resolved = item && boardDepthOf(item);
-		assert.ok(item && resolved);
-		const surface = boardDepthSurface({ frame: item.frame, origin: item.origin, depth: resolved }, VIEW);
-		for (const [u, v] of [[0.5, 0.5], [0.2, 0.7], [0.8, 0.25]] as const) {
-			const screen = boardDepthScreenPoint(surface, u, v);
-			const hit = hitBoardDepthSurface(surface, screen);
-			assert.ok(hit);
-			const seen = boardDepthScreenPoint(surface, hit.u, hit.v);
-			assert.ok(Math.hypot(seen.x - screen.x, seen.y - screen.y) < 0.5);
+test("rays find the point they show, through lift, tilt, spin and bends, at any pitch and bearing", () => {
+	for (const view of [VIEW, TIPPED]) {
+		const projection = boardProjection(view, view);
+		for (const depth of [{ lift: 120, tilt: { x: 25, y: -40 }, spin: 33 }, { lift: 40, bend: { kind: "cloth", amount: 0.4, phase: 1 } }, { tilt: { y: 60 }, bend: { kind: "curl", amount: 0.3 } }]) {
+			const item = boardScene({ a: { ...card(depth), rotation: 15 } }).get("a");
+			const resolved = item && boardDepthOf(item);
+			assert.ok(item && resolved);
+			const surface = boardDepthSurface({ frame: item.frame, origin: item.origin, depth: resolved });
+			const pose = boardDepthPose(surface, projection);
+			for (const [u, v] of [[0.5, 0.5], [0.2, 0.7], [0.8, 0.25]] as const) {
+				const screen = boardDepthScreenPoint(surface, pose, projection, u, v);
+				const hit = hitBoardDepthSurface(surface, pose, projection, screen);
+				assert.ok(hit);
+				const seen = boardDepthScreenPoint(surface, pose, projection, hit.u, hit.v);
+				assert.ok(Math.hypot(seen.x - screen.x, seen.y - screen.y) < 0.5);
+			}
 		}
 	}
+});
+
+test("a tipped and turned camera keeps the Board under the pointer as it pans and zooms", () => {
+	const level = boardProjection(VIEW, VIEW);
+	const corner = screenPoint(37, 611);
+	assert.deepEqual(level.ground(corner), pointToWorld(corner, VIEW));
+	const projection = boardProjection(TIPPED, TIPPED);
+	const point = projection.ground(corner);
+	const back = projection.project(point.x, point.y);
+	assert.ok(Math.hypot(back.x - corner.x, back.y - corner.y) < 1e-6);
+	const middle = projection.ground(screenPoint(600, 400));
+	assert.ok(Math.abs(middle.x - (600 - VIEW.x) / VIEW.zoom) < 1e-9 && Math.abs(middle.y - (400 - VIEW.y) / VIEW.zoom) < 1e-9);
+	const to = screenPoint(300, 200);
+	const panned = panBoardView(TIPPED, TIPPED, corner, to);
+	const held = boardViewToWorld(panned, TIPPED, to);
+	assert.ok(Math.hypot(held.x - point.x, held.y - point.y) < 1e-6);
+	const zoomed = zoomBoardView(TIPPED, TIPPED, corner, 3);
+	const kept = boardViewToWorld(zoomed, TIPPED, corner);
+	assert.equal(zoomed.zoom, 3);
+	assert.ok(Math.hypot(kept.x - point.x, kept.y - point.y) < 1e-6);
+	const seen = boardViewRect(TIPPED, TIPPED);
+	assert.ok(point.x >= seen.x && point.x <= seen.x + seen.width && point.y >= seen.y && point.y <= seen.y + seen.height);
 });
 
 test("depth inside a lifted frame stays part of its picture", () => {

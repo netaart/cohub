@@ -149,11 +149,12 @@ export const BOARD_EXAMPLES: Record<string, { description: string; value: Record
     },
   },
   arena: {
-    description: "3D: a fox to steer in Play with WASD or a gamepad; its clips crossfade and the camera follows. Use --module to print scripts/arena.js.",
+    description: "3D: a fox to steer in Play with WASD or a gamepad; its clips crossfade, a glow rides its head and a low camera follows. Use --module to print scripts/arena.js.",
     value: {
       board: { background: { color: "#24331f" }, scripts: { arena: { src: "scripts/arena.js", targets: { fox: "fox" } } } },
       items: {
         fox: { type: "file", position: { x: 480, y: 260 }, size: { width: 240, height: 240 }, autoplay: true, props: { src: FOX, model: { display: "object", animation: "Survey", view: { yaw: 0, pitch: 30, zoom: 1 } } } },
+        halo: { type: "effect", position: { x: -36, y: -36 }, size: { width: 72, height: 72 }, attach: { item: "fox", node: "b_Head_05" }, depth: { lift: 40, shadow: 0 }, style: { fill: "#ffd76a" }, props: { kind: "glow", life: 1400 } },
         hint: { type: "text", position: { x: 380, y: 140 }, props: { text: "Press Play, then WASD or the arrow keys; hold Shift to run", fontSize: 24, align: "center", width: 440 }, style: { fill: "#f4f1e8" } },
         stone: { type: "shape", position: { x: 160, y: 520 }, size: { width: 120, height: 80 }, style: { fill: "#6d7566", stroke: "#4d5448" }, props: { geometry: "ellipse" } },
         pond: { type: "shape", position: { x: 860, y: 460 }, size: { width: 260, height: 150 }, style: { fill: "#3d6f8f", stroke: "#2c5670" }, props: { geometry: "ellipse" } },

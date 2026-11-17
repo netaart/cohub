@@ -1,7 +1,8 @@
+import { BOARD_MAX_PITCH } from "@cohub/protocol/board-constants";
 import { BOARD_ID_MAX_LENGTH } from "@cohub/protocol/board-model";
 import { type BoardCameraState, clampZoom } from "./geometry.js";
 
-/** `#focus=<itemId>`, `#view=<centerX>,<centerY>,<zoom>`, `#play=<animationId>&t=<ms>`; `&present` presents from the focused frame, or the first. */
+/** `#focus=<itemId>`, `#view=<centerX>,<centerY>,<zoom>[,<pitch>,<bearing>]`, `#play=<animationId>&t=<ms>`; `&present` presents from the focused frame, or the first. */
 export type BoardLaunch = {
 	focus?: string;
 	present?: boolean;
@@ -17,10 +18,11 @@ function key(value: string | null): string | undefined {
 
 function view(value: string | null): BoardCameraState | undefined {
 	const parts = value?.split(",") ?? [];
-	if (parts.length !== 3 || parts.some((part) => part.trim() === "")) return undefined;
-	const [centerX, centerY, zoom] = parts.map(Number) as [number, number, number];
-	if (![centerX, centerY, zoom].every(Number.isFinite) || zoom <= 0) return undefined;
-	return { centerX, centerY, zoom: clampZoom(zoom) };
+	if ((parts.length !== 3 && parts.length !== 5) || parts.some((part) => part.trim() === "")) return undefined;
+	const [centerX, centerY, zoom, pitch = 0, bearing = 0] = parts.map(Number) as [number, number, number, number?, number?];
+	if (![centerX, centerY, zoom, pitch, bearing].every(Number.isFinite) || zoom <= 0) return undefined;
+	const angled = Math.min(BOARD_MAX_PITCH, Math.max(0, pitch));
+	return { centerX, centerY, zoom: clampZoom(zoom), ...(angled ? { pitch: angled } : {}), ...(bearing ? { bearing } : {}) };
 }
 
 export function parseBoardLaunch(hash: string): BoardLaunch | null {
@@ -45,8 +47,9 @@ export function formatBoardLaunch(launch: BoardLaunch | null | undefined): strin
 	const parts: string[] = [];
 	if (launch?.focus) parts.push(`focus=${encodeURIComponent(launch.focus)}`);
 	else if (launch?.view) {
-		const { centerX, centerY, zoom } = launch.view;
-		parts.push(`view=${round(centerX, 1)},${round(centerY, 1)},${round(clampZoom(zoom), 4)}`);
+		const { centerX, centerY, zoom, pitch = 0, bearing = 0 } = launch.view;
+		const angles = pitch || bearing ? `,${round(pitch, 1)},${round(bearing, 1)}` : "";
+		parts.push(`view=${round(centerX, 1)},${round(centerY, 1)},${round(clampZoom(zoom), 4)}${angles}`);
 	}
 	if (launch?.present) parts.push("present");
 	if (launch?.play) {

@@ -326,27 +326,48 @@ PixiJS collects render systems when a renderer starts, so `prepareModelRenderer`
 
 ### Depth
 
-`model/depth.ts` is the pure geometry every client shares: the map-like camera (the eye
-1.5 view heights above the view's middle), an item's surface in screen space with its
-bend, spin, tilt and lift, ray hits back to item fractions, outlines, shadows, and which
-items are lifted roots (`boardDepthRoots`; depth inside a lifted frame stays in its
-picture). The editor uses it for what you see: `visualBounds`, and no resize or rotate
-handles while an item is off the plane.
+`model/view-camera.ts` is the Board's one camera: the eye 1.5 view heights from the
+view's middle, looking straight down until `pitch` tips it (up to 60°, so every screen
+point still looks down at the Board) and `bearing` turns it, both about the middle so a
+viewport's `x`, `y` and `zoom` keep their level meaning. `boardProjection` gives
+`project`, `ray`, `ground` and `scale`; `boardViewToWorld`, `boardViewRect`,
+`panBoardView` and `zoomBoardView` are what pointers, culling and navigation use, and
+they reduce to the level formulas exactly.
+
+`model/depth.ts` is the pure geometry every client shares, in board units with z up: an
+item's surface with its bend, spin, tilt and rotation relative to its pivot (the same at
+every camera, so it is worked out once per change), its pose (the pivot and its eased
+lift, plus the node an `attach` rides), ray hits back to item fractions, outlines,
+shadows, and which items are lifted roots (`boardDepthRoots`; depth inside a lifted frame
+stays in its picture). The editor uses it for what you see: `visualBounds`, and no resize
+or rotate handles while an item is off the plane.
 
 The stage draws a lifted root and its children into a detached render-group host
 (`scene.elevatedHost`), so the 2D pass skips it with no per-frame visibility changes,
 and `stage/depth.ts` captures that host into a picture only when something inside it
 was drawn anew (`scene.takeTouched`) or its density moved a quarter octave. The pictures
 go to one shared `View3D` (`render/depth/engine.ts`, loaded by `loadBoardDepthEngine()`
-once something lifts) between the Board's items and the editor overlay, whose camera
-matches the shared geometry exactly, so hits and outlines land on the pixels. Pointer
-input over a lifted picture is unprojected to the flat point it covers before anything
-else sees it, and picks are scoped to that item; a press keeps its offset until it
-lifts. Shadows are a 2D layer of nine-sliced soft sprites on the Board's plane. Model
-objects (`render/depth/objects.ts`) stand in the same view, fitted by their resting
-pose so a clip never resizes them. Exports build the same layers from `export/scene.ts`
-with a stage the caller loads once, and draw model objects from the `models` the caller
-loads with `loadBoardObjectModels`.
+once something lifts) between the Board's items and the editor overlay. Its camera is
+aimed from the projection each frame and its meshes sit relative to the view's middle,
+so far-off Boards keep their precision; a pan or zoom only moves meshes. Pointer input
+over a lifted picture is unprojected to the flat point it covers before anything else
+sees it, and picks are scoped to that item; a press keeps its offset until it lifts.
+Shadows are a 2D layer of nine-sliced soft sprites on the Board's plane. Model objects
+(`render/depth/objects.ts`) stand in the same view, fitted by their resting pose so a
+clip never resizes them, leaning toward a camera that looks down and upright under a
+low one; `objects.node` reads where a named node is as the model draws, from its
+skeleton for bones. Exports build the same layers from `export/scene.ts` with a stage the
+caller loads once, and draw model objects from the `models` the caller loads with
+`loadBoardObjectModels`.
+
+A level camera keeps the plain 2D path: the world container is placed by `x`, `y` and
+`zoom`, and a bearing alone only rotates it. A pitched camera takes the flat Board (the
+`board-ground` render group) out of the world and draws it into two to four bands, near
+to far (`boardGroundBands`, `render/depth/ground.ts`), each at the finest scale it shows,
+then lays them on the ground in a second `View3D` under the lifted items. The bands are
+drawn again only when something flat changed or the camera moved, not when only models
+animate. Script screen layers leave the world while the camera tips or turns and draw in
+screen space as a level camera would place them.
 
 ### Camera
 
@@ -354,8 +375,10 @@ The camera a viewer sees is the editor's own, unless an animation or a script di
 it: `stage.ts` merges the animation camera with `composeBoardScriptCamera` (scripts in
 play and read-only views only) and follows the result while the camera policy is
 `follow`. A pan takes control (`takeCameraControl`) until the host sets `follow` again;
-a script that lets go leaves the editor camera where it was directed. Camera exports
-merge the same two sources in `prepareBoardExport`.
+a script that lets go leaves the editor camera where it was directed. Pitch and bearing
+come only from a director or a link; the editor levels its camera when an editing tool is
+chosen or it takes control while editing. Camera exports merge the same two sources in
+`prepareBoardExport`.
 
 ## Scripts
 

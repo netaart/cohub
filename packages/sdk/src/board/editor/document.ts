@@ -1,6 +1,6 @@
 import {
 	applyBoardPatchToDocument,
-	arrowBindings,
+	itemBindings,
 	type BoardAnimation,
 	type BoardDocument,
 	type BoardFrame,
@@ -105,7 +105,7 @@ export function createDocumentModule(ctx: EditorContext) {
 		const structural = changed.some((id) => {
 			const before = previous.get(id) ?? state.base.items[id];
 			const after = items.get(id) ?? state.base.items[id];
-			if (!before || !after || before.parent !== after.parent || !sameJson(arrowBindings(before), arrowBindings(after))) return true;
+			if (!before || !after || before.parent !== after.parent || !sameJson(itemBindings(before), itemBindings(after))) return true;
 			if (before.z !== after.z) restacked.add(after.parent ?? "");
 			return false;
 		});
@@ -180,7 +180,7 @@ export function createDocumentModule(ctx: EditorContext) {
 					!before ||
 					before.parent !== item.parent ||
 					before.z !== item.z ||
-					!sameJson(arrowBindings(before), arrowBindings(item))
+					!sameJson(itemBindings(before), itemBindings(item))
 				) {
 					structural = true;
 					break;
@@ -240,7 +240,7 @@ export function createDocumentModule(ctx: EditorContext) {
 				!after ||
 				before.parent !== after.parent ||
 				before.z !== after.z ||
-				!sameJson(arrowBindings(before), arrowBindings(after))
+				!sameJson(itemBindings(before), itemBindings(after))
 			);
 		});
 		rescene(hierarchy ? undefined : ids);
@@ -333,7 +333,7 @@ export function createDocumentModule(ctx: EditorContext) {
 	}
 
 	function reparent(item: BoardItem, frame: BoardFrame, parent: string | undefined, box: Rect, scene = state.scene): BoardItem {
-		const { parent: _previous, ...root } = item;
+		const { parent: _previous, attach: _attach, ...root } = item;
 		const orphan = root as BoardItem;
 		const next = parent ? ({ ...orphan, parent } as BoardItem) : orphan;
 		const matrix = parent ? scene.layout.matrix(parent) : IDENTITY_MATRIX;

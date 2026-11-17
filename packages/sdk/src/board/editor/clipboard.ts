@@ -24,6 +24,11 @@ export type BoardClipboardPayload = {
 	origin: { x: number; y: number };
 };
 
+export function carriedBy(item: BoardItem, copied: (id: string) => boolean): boolean {
+	const by = item.attach?.item ?? item.parent;
+	return by !== undefined && copied(by);
+}
+
 export function encodeClipboard(items: Record<string, BoardItem>, origin: { x: number; y: number }): BoardClipboardPayload | null {
 	const ids = Object.keys(items);
 	if (ids.length === 0 || ids.length > MAX_CLIPBOARD_ITEMS) return null;
@@ -32,7 +37,7 @@ export function encodeClipboard(items: Record<string, BoardItem>, origin: { x: n
 		version: BOARD_CLIPBOARD_VERSION,
 		items: Object.fromEntries(ids.map((id) => {
 			const item = items[id] as BoardItem;
-			return [id, item.parent && items[item.parent] ? item : shiftItem(item, -origin.x, -origin.y)];
+			return [id, carriedBy(item, (other) => Boolean(items[other])) ? item : shiftItem(item, -origin.x, -origin.y)];
 		})),
 		origin,
 	};
@@ -71,7 +76,7 @@ export function materializeClipboard(
 	resolveEnd: (id: string, which: "start" | "end") => { x: number; y: number } | null = () => null,
 ): Record<string, BoardItem> {
 	const idMap = new Map(Object.keys(payload.items).map((id) => [id, createBoardItemId()]));
-	return remapItems(payload.items, idMap, (item) => (item.parent && idMap.has(item.parent) ? item : shiftItem(item, at.x, at.y)), resolveEnd);
+	return remapItems(payload.items, idMap, (item) => (carriedBy(item, (other) => idMap.has(other)) ? item : shiftItem(item, at.x, at.y)), resolveEnd);
 }
 
 export function remapItems(
@@ -86,6 +91,14 @@ export function remapItems(
 		const { locked: _locked, ...unlocked } = item;
 		item = unlocked as BoardItem;
 		if (item.script) item = { ...item, script: { ...item.script, targets: Object.fromEntries(Object.entries(item.script.targets).map(([name, target]) => [name, idMap.get(target) ?? target])) } };
+		if (item.attach) {
+			const target = idMap.get(item.attach.item);
+			if (target) item = { ...item, attach: { ...item.attach, item: target } };
+			else {
+				const { attach: _attach, ...free } = item;
+				item = free as BoardItem;
+			}
+		}
 		if (item.parent) {
 			const parent = idMap.get(item.parent);
 			if (parent) item = { ...item, parent };

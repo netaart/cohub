@@ -231,6 +231,12 @@ export function arrowBindings(item: BoardItem): string[] {
 	return [...new Set(ids)];
 }
 
+export function itemBindings(item: BoardItem): string[] {
+	const bound = arrowBindings(item);
+	const attached = item.attach?.item;
+	return attached && !bound.includes(attached) ? [...bound, attached] : bound;
+}
+
 export function bendControl(start: BoardVec2, end: BoardVec2, bend: number): BoardVec2 {
 	const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
 	if (!bend) return mid;
@@ -273,8 +279,7 @@ export function createBoardLayout(
 		if (cached) return cached;
 		const item = lookup(id);
 		if (!item) return IDENTITY_MATRIX;
-		const parent = item.parent && depth < MAX_DEPTH && lookup(item.parent) ? matrixOf(item.parent, depth + 1) : IDENTITY_MATRIX;
-		const matrix = multiplyMatrix(parent, localMatrixOf(id));
+		const matrix = multiplyMatrix(parentOf(item, depth), localMatrixOf(id));
 		matrices.set(id, matrix);
 		return matrix;
 	}
@@ -325,7 +330,16 @@ export function createBoardLayout(
 	}
 
 	function parentOf(item: BoardItem, depth: number): BoardMatrix {
-		return item.parent && depth < MAX_DEPTH && lookup(item.parent) ? matrixOf(item.parent, depth + 1) : IDENTITY_MATRIX;
+		if (depth >= MAX_DEPTH) return IDENTITY_MATRIX;
+		const attached = item.attach && lookup(item.attach.item) ? item.attach.item : null;
+		if (attached) return translate(originOf(attached, depth + 1));
+		return item.parent && lookup(item.parent) ? matrixOf(item.parent, depth + 1) : IDENTITY_MATRIX;
+	}
+
+	function originOf(id: string, depth: number): BoardVec2 {
+		const item = lookup(id) as BoardItem;
+		const box = boxOf(id, depth);
+		return applyMatrix(matrixOf(id, depth), { x: box.x + item.origin.x * box.width, y: box.y + item.origin.y * box.height });
 	}
 
 	function resolveBoundEnd(arrow: BoardArrowItem, end: BoardArrowBinding, other: BoardArrowEnd, depth: number): BoardVec2 {
@@ -487,7 +501,7 @@ export function createDocumentLayout(items: Readonly<Record<string, BoardItem>>)
 		if (!index) {
 			index = new Map();
 			for (const [itemId, item] of Object.entries(items)) {
-				const refs = [...(item.parent ? [item.parent] : []), ...arrowBindings(item)];
+				const refs = [...(item.parent ? [item.parent] : []), ...itemBindings(item)];
 				for (const ref of refs) {
 					const list = index.get(ref) ?? [];
 					list.push(itemId);

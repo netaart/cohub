@@ -2,9 +2,9 @@ import {
 	type BoardFileSnapshotFacts,
 	type BoardItem,
 	type BoardMediaSnapshot,
-	type BoardModelClip,
+	type BoardModelFacts,
 	mergeFileSnapshot,
-	sameBoardModelClips,
+	withBoardModelFacts,
 } from "../model/index.js";
 import { adoptBoardNaturalSize } from "@cohub/protocol";
 import type { EditorContext } from "./context.js";
@@ -51,25 +51,25 @@ export function createSnapshotsModule(ctx: EditorContext) {
 			if (item?.type !== "file") continue;
 			const cached = item.props.snapshot;
 			const read = mergeFileSnapshot(cached, entry.snapshot, entry.replace === true);
-			const kept = cached?.clips && (cached.mtimeMs === undefined || read.mtimeMs === cached.mtimeMs);
-			const merged = kept ? { ...read, clips: cached.clips } : read;
+			const kept = (cached?.clips || cached?.nodes) && (cached.mtimeMs === undefined || read.mtimeMs === cached.mtimeMs);
+			const merged = kept ? { ...read, ...(cached.clips ? { clips: cached.clips } : {}), ...(cached.nodes ? { nodes: cached.nodes } : {}) } : read;
 			if (!sameJson(merged, cached ?? {}))
 				changes.set(entry.id, { ...item, props: { ...item.props, snapshot: merged } });
 		}
 		commit(changes);
 	}
 
-	function adoptModelClips(models: Array<{ id: string; clips: BoardModelClip[] }>) {
+	function adoptModelFacts(models: Array<{ id: string; facts: BoardModelFacts }>) {
 		const changes = new Map<string, BoardItem>();
-		for (const { id, clips } of models) {
+		for (const { id, facts } of models) {
 			const item = state.base.items[id];
-			if (item?.type !== "file" || !clips.length || sameBoardModelClips(item.props.snapshot?.clips, clips)) continue;
-			changes.set(id, { ...item, props: { ...item.props, snapshot: { ...item.props.snapshot, clips } } });
+			const snapshot = item?.type === "file" ? withBoardModelFacts(item.props.snapshot, facts) : null;
+			if (item?.type === "file" && snapshot) changes.set(id, { ...item, props: { ...item.props, snapshot } });
 		}
 		commit(changes);
 	}
 
-	return { applyMediaFileChange, adoptMediaNaturalSizes, applyFileSnapshots, adoptModelClips };
+	return { applyMediaFileChange, adoptMediaNaturalSizes, applyFileSnapshots, adoptModelFacts };
 }
 
 export type SnapshotsModule = ReturnType<typeof createSnapshotsModule>;

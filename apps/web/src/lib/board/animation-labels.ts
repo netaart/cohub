@@ -19,6 +19,8 @@ const LABELS: Record<string, (locale: Locale) => string> = {
 	zoom: (locale) => m.board_camera_zoom({}, locale),
 	focus: (locale) => m.board_camera_focus({}, locale),
 	shake: (locale) => m.board_camera_shake({}, locale),
+	pitch: (locale) => m.board_camera_pitch({}, locale),
+	bearing: (locale) => m.board_camera_bearing({}, locale),
 	time: (locale) => m.board_prop_time({}, locale),
 	"props.time": (locale) => m.board_prop_time({}, locale),
 	"props.volume": (locale) => m.board_prop_volume({}, locale),

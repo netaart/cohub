@@ -212,9 +212,20 @@ export function isBoardDepthActive(depth: BoardDepth | null | undefined): depth 
 	);
 }
 
+export const BOARD_MODEL_NODE_LIMIT = 256;
+export const BoardAttachSchema = z
+	.object({
+		item: BoardIdSchema.describe("The item to follow; position becomes an offset from its origin, so the item moves with it."),
+		node: z.string().min(1).max(240).optional().describe("A named node of a 3D model object, such as a hand bone (props.snapshot.nodes lists them): the item rides on it in 3D as the model moves and animates."),
+	})
+	.strict()
+	.describe("Follows another item instead of sitting in a frame; on a 3D model object it can ride one of the model's nodes.");
+export type BoardAttach = z.infer<typeof BoardAttachSchema>;
+
 const itemEnvelope = {
 	script: BoardScriptSchema.optional(),
 	parent: BoardIdSchema.optional().describe("A frame id; position becomes relative to the frame, and the item moves with it."),
+	attach: BoardAttachSchema.optional(),
 	z: finite.optional().describe("Order among siblings; new items go on top."),
 	position: BoardVec2Schema.default({ x: 0, y: 0 }),
 	rotation: finite.default(0),
@@ -392,6 +403,11 @@ export const BoardMediaSnapshotSchema = z
 			.max(BOARD_MODEL_CLIP_LIMIT)
 			.optional()
 			.describe("A 3D model's animation clips in file order, with their lengths."),
+		nodes: z
+			.array(z.string().min(1).max(240))
+			.max(BOARD_MODEL_NODE_LIMIT)
+			.optional()
+			.describe("A 3D model's named nodes in file order, for attach.node."),
 	})
 	.strict()
 	.describe("Cached facts for an instant preview; filled in when the media loads.");

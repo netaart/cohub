@@ -10,8 +10,8 @@ import {
 	createBoardItemId,
 	frameHandlePosition,
 	normalizeRotation,
-	panBy,
-	pointToWorld,
+	boardViewToWorld,
+	panBoardView,
 	type Rect,
 	type ResizeHandle,
 	rectCenter,
@@ -27,7 +27,6 @@ import {
 	selectionBounds,
 	type WorldPoint,
 	worldPoint,
-	zoomAround,
 	isBoardDepthLifted,
 } from "../model/index.js";
 import { CONNECTION_PORT_RADIUS, type ConnectionPort, connectionPorts, connectionPortAt as portAt, portHitRadius } from "./connection-ports.js";
@@ -219,9 +218,10 @@ export function createInteractionModule(ctx: EditorContext) {
 		return view !== null && (view.present || (options.readonly === true && isTouchLikePointer(pointerType)));
 	}
 
-	function pan(origin: BoardViewport, dx: number, dy: number, pointerType: string) {
-		if (!holdsFrame(pointerType)) ctx.camera.setCamera(panBy(origin, dx, dy));
-		else if (pointerType !== "mouse") ctx.camera.show(panBy(origin, dx, dy), false);
+	function pan(origin: BoardViewport, from: ScreenPoint, to: ScreenPoint, pointerType: string) {
+		const next = panBoardView(origin, state.surfaceSize, from, to);
+		if (!holdsFrame(pointerType)) ctx.camera.setCamera(next);
+		else if (pointerType !== "mouse") ctx.camera.show(next, false);
 	}
 
 	function dragged(event: BoardPointerEvent): boolean {
@@ -294,7 +294,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		const moving = movingWith(origin);
 		for (const id of origin.keys()) {
 			const item = state.scene.get(id);
-			if (!item || item.type === "arrow") continue;
+			if (!item || item.type === "arrow" || item.attach) continue;
 			const parent = ctx.query.frameAt(rectCenter(item.frame), moving)?.id;
 			if (parent === item.parent) continue;
 			parents.set(id, parent);
@@ -448,8 +448,6 @@ export function createInteractionModule(ctx: EditorContext) {
 
 	function releasePress(gesture: BoardPress, event: BoardPointerEvent) {
 		if (!dragged(event)) return;
-		const dx = event.screen.x - gesture.start.x;
-		const dy = event.screen.y - gesture.start.y;
 		const item = state.scene.get(gesture.itemId);
 		const moves =
 			!touchAway &&
@@ -459,7 +457,7 @@ export function createInteractionModule(ctx: EditorContext) {
 			movable(item);
 		if (!moves) {
 			state.interaction = { type: "panning", start: gesture.start, origin: gesture.camera, moved: true, tapSelection: null };
-			pan(gesture.camera, dx, dy, event.pointerType);
+			pan(gesture.camera, gesture.start, event.screen, event.pointerType);
 			return;
 		}
 		const translating: Extract<BoardInteraction, { type: "translating" }> = {
@@ -712,8 +710,8 @@ export function createInteractionModule(ctx: EditorContext) {
 		if (!a || !b || !pinch) return;
 		const distance = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
 		const midpoint = screenPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
-		const zoomed = zoomAround(state.camera, midpoint, pinch.zoom * (distance / pinch.distance), ctx.camera.zoomFloor(pinch.zoom));
-		const next = panBy(zoomed, midpoint.x - pinch.midpoint.x, midpoint.y - pinch.midpoint.y);
+		const zoomed = ctx.camera.zoomAround(state.camera, midpoint, pinch.zoom * (distance / pinch.distance), ctx.camera.zoomFloor(pinch.zoom));
+		const next = panBoardView(zoomed, state.surfaceSize, pinch.midpoint, midpoint);
 		if (ctx.frames.view()?.present) ctx.camera.show(next, false);
 		else ctx.camera.setCamera(next);
 		pinch = { ...pinch, midpoint };
@@ -873,7 +871,7 @@ export function createInteractionModule(ctx: EditorContext) {
 					if (ctx.camera.takeCameraControl()) origin = { ...state.camera };
 					state.interaction = { ...interaction, origin, moved: true };
 				}
-				pan(origin, event.screen.x - interaction.start.x, event.screen.y - interaction.start.y, event.pointerType);
+				pan(origin, interaction.start, event.screen, event.pointerType);
 				sample(event.screen);
 				return;
 			}
@@ -935,7 +933,7 @@ export function createInteractionModule(ctx: EditorContext) {
 		if (!last || pinch || activePointers.size !== 1) return;
 		if (gesture === "idle" || gesture === "panning" || gesture === "pressing" || gesture === "drawing") return;
 		const { samples: _samples, ...input } = last;
-		move({ ...input, world: pointToWorld(input.screen, state.camera) });
+		move({ ...input, world: boardViewToWorld(state.camera, state.surfaceSize, input.screen) });
 	}
 
 	function pointerUp(event: BoardPointerEvent) {

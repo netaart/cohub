@@ -1,7 +1,7 @@
-import { BOARD_SHADOW_DEFAULTS, type BoardFrame, type BoardStyle } from "@cohub/protocol";
+import { BOARD_MAX_PITCH, BOARD_SHADOW_DEFAULTS, type BoardFrame, type BoardStyle } from "@cohub/protocol";
 
-export type BoardViewport = { x: number; y: number; zoom: number };
-export type BoardCameraState = { centerX: number; centerY: number; zoom: number };
+export type BoardViewport = { x: number; y: number; zoom: number; pitch?: number; bearing?: number };
+export type BoardCameraState = { centerX: number; centerY: number; zoom: number; pitch?: number; bearing?: number };
 export type BoardCameraFocus = string | { x: number; y: number; width: number; height: number };
 export type BoardCameraFit = { fit?: "contain" | "cover"; padding?: number; minZoom?: number; maxZoom?: number };
 
@@ -112,12 +112,16 @@ export function normalizeViewport(
 	const fallbackZoom = Number.isFinite(fallback.zoom)
 		? clampZoom(fallback.zoom)
 		: DEFAULT_BOARD_VIEWPORT.zoom;
+	const pitch = Number.isFinite(viewport.pitch) ? clamp(viewport.pitch as number, 0, BOARD_MAX_PITCH) : 0;
+	const bearing = Number.isFinite(viewport.bearing) ? (viewport.bearing as number) : 0;
 	return {
 		x: Number.isFinite(viewport.x) ? viewport.x : fallbackX,
 		y: Number.isFinite(viewport.y) ? viewport.y : fallbackY,
 		zoom: Number.isFinite(viewport.zoom)
 			? clampZoom(viewport.zoom)
 			: fallbackZoom,
+		...(pitch ? { pitch } : {}),
+		...(bearing ? { bearing } : {}),
 	};
 }
 
@@ -699,11 +703,13 @@ export function stateForCamera(
 	camera: BoardViewport,
 	surface: Size,
 ): BoardCameraState {
-	const { x, y, zoom } = normalizeViewport(camera);
+	const { x, y, zoom, pitch, bearing } = normalizeViewport(camera);
 	return {
 		centerX: (surface.width / 2 - x) / zoom,
 		centerY: (surface.height / 2 - y) / zoom,
 		zoom,
+		...(pitch ? { pitch } : {}),
+		...(bearing ? { bearing } : {}),
 	};
 }
 
@@ -716,6 +722,8 @@ export function cameraForState(
 		x: surface.width / 2 - state.centerX * zoom,
 		y: surface.height / 2 - state.centerY * zoom,
 		zoom,
+		pitch: state.pitch,
+		bearing: state.bearing,
 	});
 }
 

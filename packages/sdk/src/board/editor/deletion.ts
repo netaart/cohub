@@ -31,9 +31,15 @@ export function createDeletionModule(ctx: EditorContext) {
 		for (const id of doomed) changes.set(id, null);
 		for (const id of doomed) {
 			for (const arrowId of scene.binders(id)) {
-				if (!base.items[arrowId] || doomed.has(arrowId) || changes.has(arrowId)) continue;
+				const binder = base.items[arrowId];
+				if (!binder || doomed.has(arrowId) || changes.has(arrowId)) continue;
+				if (binder.attach?.item === id) {
+					const { attach: _attach, ...free } = binder;
+					changes.set(arrowId, { ...free, position: applyMatrix(scene.layout.parentMatrix(arrowId), binder.position) } as BoardItem);
+					continue;
+				}
 				const arrow = scene.get(arrowId) as SceneItem<BoardArrowItem> | undefined;
-				if (!arrow) continue;
+				if (arrow?.type !== "arrow") continue;
 				const resolved = resolveSceneArrow(arrow, scene);
 				const toLocal = invertMatrix(scene.layout.matrix(arrowId));
 				const free = (end: BoardArrowEnd, point: WorldPoint): BoardArrowEnd => {

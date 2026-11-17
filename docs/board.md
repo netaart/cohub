@@ -119,7 +119,7 @@ leans, turns and bends:
 {"depth":{"lift":80,"tilt":{"x":20,"y":-30},"spin":0,"bend":{"kind":"cloth","amount":0.4,"phase":1.2},"shade":0.5,"shadow":1,"back":"card-back"}}
 ```
 
-- `lift`: height toward the viewer in board units; a lifted item looks nearer and
+- `lift`: height up off the Board in board units; a lifted item looks nearer and
   larger and casts a soft shadow on the Board (`shadow`, 0–1).
 - `tilt`: degrees about the item's own axes through `origin`. `x` tips the top edge
   away, `y` the right edge; `180` turns it over. `spin` turns it within that leaned
@@ -134,9 +134,10 @@ leans, turns and bends:
   after a turn about the vertical axis (`tilt.y`). Without it the back shows the
   front, dimmed. Keep the back item anywhere on the Board, such as beside the deck.
 
-Perspective follows a map's camera: the eye looks straight down at the middle of the
-view from 1.5 view heights away, so lifting reads the same on every screen and at
-every zoom, and items lean away from the middle as they rise. Lifted items draw above
+Perspective follows a map's camera: the eye looks at the middle of the view from 1.5
+view heights away, so lifting reads the same on every screen and at every zoom, and
+items lean away from the middle as they rise. It looks straight down until the camera
+tips toward the horizon (see [Pitch and bearing](#pitch-and-bearing)). Lifted items draw above
 every flat item and hide each other by distance. A frame carries its children, shown
 within its box; depth inside a lifted frame stays part of its picture. At rest (`lift` 0, no tilt, spin or
 bend) an item draws flat as usual and costs nothing extra.
@@ -148,13 +149,35 @@ pointer acts on what it touches in the lifted picture: clicks, script hit region
 drags reach the item under it. Lifted items move, but resize and turn once they lie
 flat again, and arrows connect to them while flat.
 
-A 3D model file with `props.model.display: "object"` leaves its card and rests on the
-Board itself: fitted to the item's box as its cover view (`props.model.view`) shows
-it in its resting pose, lit, with a contact shadow, and drawn among lifted items so
-each hides the other by distance. All object models share one lit scene with the
-lifted items, so characters and cards stand together. `depth` lifts and turns it like
-any item, and turning `view.yaw` turns the model in place. It shows or hides with its
-opacity but does not fade, and shows its card while it loads.
+A 3D model file with `props.model.display: "object"` leaves its card and stands on the
+Board itself, lit, with a contact shadow, and drawn among lifted items so each hides
+the other by distance. All object models share one lit scene with the lifted items, so
+characters and cards stand together. Looking straight down, it leans back toward the
+eye so it shows its cover view (`props.model.view`), fitted to the item's box in its
+resting pose. As the camera pitches it stands up, upright once the pitch reaches 90°
+minus `view.pitch`, so a low camera sees characters standing in the scene; `view.pitch`
+90 keeps it upright. `rotation` and `view.yaw` turn it about its own vertical axis, and
+`depth` lifts and tips it like any item. It shows or hides with its opacity but does
+not fade, and shows its card while it loads.
+
+### Attach to an item or a model's node
+
+`attach` makes an item follow another instead of sitting in a frame: its `position`
+becomes an offset from the target's origin, so it moves wherever the target goes.
+Name a `node` of a 3D model object and it rides that node in 3D as the model moves and
+animates, such as a glow on a hand or a tag over a head:
+
+```json
+{"type":"effect","position":{"x":-36,"y":-36},"size":{"width":72,"height":72},"attach":{"item":"fox","node":"b_Head_05"},"depth":{"lift":40},"props":{"kind":"glow"}}
+```
+
+The item's origin sits on the node, and `depth.lift` raises it from there; it draws as
+a lifted item, so the model never hides it by accident. Loaded models record their named
+nodes in `props.snapshot.nodes`, and `boards apply` and `create` read them from glTF files
+in the sandbox. Until the model loads, and in Node exports, the item waits at the
+target's origin. An attached item has no `parent`, attaches to an item that is not
+attached itself, and goes free where it stands when the target is deleted or copied
+without it. `cohub boards examples arena` puts a glow on the fox's head.
 
 ### Models in motion
 
@@ -191,6 +214,7 @@ on the Board clock. Use `time` where an export must match the timeline to the fr
 | Model file, with buffers and textures | 128 MB | 32 MB |
 | Card stills drawn without opening | 64 MB | 16 MB |
 | Clips recorded per model | 64 | 64 |
+| Nodes recorded per model | 256 | 256 |
 
 The web app loads PixiJS 3D only once something leaves the plane. Exports draw depth
 in WebGL, like shaders (see [Export](#export)); a whole-board export frames lifted
@@ -368,7 +392,8 @@ A track drives one property of one target:
 
 - `target`: an item id, `camera`, a Board script id, or another animation id.
 - `property`: the JSON path in the target (`position`, `position.x`, `opacity`,
-  `style.fill`, `props.text`, …). Camera: `focus` (item id or rect), `zoom`, `shake`.
+  `style.fill`, `props.text`, …). Camera: `focus` (item id or rect), `zoom`, `center`,
+  `shake`, `pitch`, `bearing`.
   Animation: `time` (nesting, speed, reverse and hold are all time remapping).
   Board script: `params.<name>`; numbers blend, colors mix and other values step.
 - `keyframes`: `{ at, value, ease? }`. Easing defaults to linear; the destination
@@ -391,6 +416,23 @@ and every `--camera` export shows the same framing, scaled to fit and centered, 
 window of another shape sees more around it rather than less of it.
 
 A `focus` track holds its current target until the next focus keyframe.
+
+### Pitch and bearing
+
+`pitch` tips the camera from looking straight down toward the horizon, 0 to 60
+degrees, and `bearing` turns the view clockwise like a map's (90 puts the Board's +x at
+the top). Both turn about the middle of the view, which keeps its zoom, so `focus`,
+`center` and `zoom` frame a shot as they do level and the angles then lean into it. A
+keyframed `bearing` blends as a number, so 350 to 370 turns 20 degrees.
+
+A tipped camera shows the Board as ground in perspective, with lifted items and model
+objects standing on it; at 60 degrees the top of the view still looks down at the Board,
+so no horizon shows. Screen layers from scripts stay on the screen, anchored ones over
+their item. Viewers pan and zoom across the ground until **Back to the camera**. The
+camera tips and turns in play, read-only views and `--camera` exports; editing levels it
+first, so every editing tool works on the flat Board. `#view=<x>,<y>,<zoom>,<pitch>,<bearing>`
+opens a link at an angle.
+
 Use `boards schema track`, `boards schema animation` and `boards schema effect`
 for field definitions and behavior.
 
@@ -551,7 +593,7 @@ without a cover in Node exports. Previews beyond the image memory budget (`--ima
 placeholders, with a warning.
 
 Exports draw in Node until a script draws with a shader, an item leaves the plane with
-`depth`, or a 3D model shows; then `--renderer auto` (the default) renders every frame in a local Chrome,
+`depth`, a 3D model shows, or the camera tips or turns; then `--renderer auto` (the default) renders every frame in a local Chrome,
 Chromium or Edge, headless and with
 software WebGL where there is no GPU, so the result matches the web app. Set
 `COHUB_CHROME` to pick the browser. Consecutive commands share that browser, which exits
@@ -585,7 +627,7 @@ and video times must be evenly spaced.
 
 A whole-board or `--items` export frames lifted items where they appear; a sequence
 keeps its first frame's area, so give `--rect` or `--camera` when items lift later.
-Without WebGL, lifted items draw flat and model objects as their cards, with a warning.
+Without WebGL, lifted items draw flat, model objects as their cards and a tipped or turned camera level, with a warning.
 `renderBoardExport` draws depth when given `depth`, a stage from
 `loadBoardDepthEngine().createBoardDepthStage(renderer)` that frames can share, and
 model objects when also given `models`, from `loadBoardObjectModels(items, source,

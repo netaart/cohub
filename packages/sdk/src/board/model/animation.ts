@@ -336,6 +336,8 @@ export type BoardCameraOverride = {
 	zoom?: number;
 	center?: BoardVec2;
 	shake?: number;
+	pitch?: number;
+	bearing?: number;
 };
 
 export type BoardEvaluation = {
