@@ -29,8 +29,8 @@ const IDLE_TTL_MS = 5 * 60_000;
 
 /**
  * Raised when a space's local sandbox is not currently reachable (runner
- * offline / relay not connected). Callers map this to a 503 so the web client
- * can show its offline state instead of a hard error.
+ * offline / relay not connected). Callers map this to a 409: the user's machine
+ * being away is a Space state, not a server fault, so it stays out of 5xx.
  */
 export class SandboxOfflineError extends Error {
   constructor(public readonly spaceId: string, cause?: unknown) {
