@@ -52,11 +52,16 @@ export const SANDBOX_POD_TEMPLATE = {
       runAsUser: 1000,
       runAsGroup: 1000,
       fsGroup: 1000,
+      seccompProfile: { type: "RuntimeDefault" },
     },
     containers: [
       {
         name: "sandbox",
         image: config.sandboxImage,
+        securityContext: {
+          allowPrivilegeEscalation: false,
+          capabilities: { drop: ["ALL"] },
+        },
         env: [
           {
             name: "POD_IP",

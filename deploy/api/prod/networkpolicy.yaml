@@ -1,0 +1,26 @@
+# Blocks the cloud instance metadata service from every Pod in the sessions
+# namespace, which runs untrusted sandbox code: the IPv4 addresses and the
+# common cloud IPv6 metadata address. All other egress stays open.
+# Terway's eBPF policy engine matches ipBlock only against addresses outside the
+# cluster, so in-cluster Pods (DNS, Services) are allowed by namespaceSelector.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: block-instance-metadata
+  namespace: cohub-sessions
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 100.100.100.200/32
+              - 169.254.169.254/32
+        - ipBlock:
+            cidr: ::/0
+            except:
+              - fd00:ec2::254/128
+        - namespaceSelector: {}

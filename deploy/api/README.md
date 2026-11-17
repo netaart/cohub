@@ -14,6 +14,7 @@ deploy/api/
 │   ├── values.yaml
 │   ├── secrets.yaml        # 不提交 git
 │   ├── rbac.yaml
+│   ├── networkpolicy.yaml
 │   ├── deploy.sh
 │   ├── run-migration.sh
 │   └── README.md
@@ -21,6 +22,7 @@ deploy/api/
     ├── values.yaml
     ├── secrets.yaml        # 不提交 git
     ├── rbac.yaml
+    ├── networkpolicy.yaml
     ├── deploy.sh
     ├── run-migration.sh
     └── README.md
