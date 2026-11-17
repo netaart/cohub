@@ -56,6 +56,7 @@ import {
 	Camera,
 	ExternalLink,
 	Gamepad2,
+	LocateFixed,
 	Play,
 	RotateCcw,
 	Settings2,
@@ -215,6 +216,18 @@ $effect(() => {
 	};
 	read();
 	return media.subscribe(read);
+});
+
+let scriptCamera = $state(false);
+$effect(() => {
+	const stage = scriptStage;
+	scriptCamera = false;
+	if (!stage) return;
+	const read = () => {
+		scriptCamera = stage.scriptCamera;
+	};
+	read();
+	return stage.subscribeScripts(read);
 });
 
 function dragToTimeline(
@@ -1485,9 +1498,15 @@ onDestroy(() => {
 		{/if}
 		<div class="board-prompts">
 			{#if sound.blocked && !presenting && !watching}
-				<button type="button" class="board-sound" onclick={() => scriptStage?.media.unlock()}>
+				<button type="button" class="board-prompt" onclick={() => scriptStage?.media.unlock()}>
 					<VolumeX class="h-3.5 w-3.5" />
 					{m.board_sound_enable({}, { locale })}
+				</button>
+			{/if}
+			{#if scriptCamera && editor.cameraPolicy === "free" && !presenting}
+				<button type="button" class="board-prompt" onclick={() => editor.setCameraPolicy("follow")}>
+					<LocateFixed class="h-3.5 w-3.5" />
+					{m.board_camera_return({}, { locale })}
 				</button>
 			{/if}
 			<BoardSenseChip stage={scriptStage} consent={senseConsent} recording={recorder !== null} onRecord={canRecord ? toggleRecording : undefined} />
@@ -1850,7 +1869,7 @@ onDestroy(() => {
 		transform: translateX(-50%);
 		pointer-events: none;
 	}
-	.board-sound {
+	.board-prompt {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
@@ -1865,7 +1884,7 @@ onDestroy(() => {
 		font-weight: 500;
 		box-shadow: 0 8px 20px color-mix(in srgb, var(--overlay-scrim-strong) 12%, transparent);
 	}
-	.board-sound:hover { background: var(--bg-hover); }
+	.board-prompt:hover { background: var(--bg-hover); }
 
 	.board-notice--error {
 		border-color: var(--color-error-soft);

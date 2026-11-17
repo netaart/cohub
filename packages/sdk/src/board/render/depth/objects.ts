@@ -1,7 +1,9 @@
 import { Container3D, DirectionalLight, type View3D } from "@pixi/3d";
 import type { BoardDepth, BoardFrame, BoardModelView, BoardVec2 } from "@cohub/protocol";
 import { type BoardDepthView, boardDepthPoint, boardDepthSurface } from "../../model/depth.js";
+import type { BoardModelPlayback } from "../../model/model-clips.js";
 import type { LoadedModel } from "../model3d/load.js";
+import { createModelPlayback, type ModelPlayback } from "../model3d/playback.js";
 import { MODEL_VIEW_PRESETS } from "../model3d/view.js";
 
 export type BoardDepthObject = {
@@ -11,16 +13,14 @@ export type BoardDepthObject = {
 	origin: BoardVec2;
 	depth: BoardDepth;
 	view: BoardModelView | undefined;
-	clip: string | null;
-	playing: boolean;
+	playback: BoardModelPlayback;
 };
 
 export type BoardDepthObjectSize = { width: number; height: number; thickness: number };
 
 export type BoardDepthObjects = {
 	readonly empty: boolean;
-	sync(view: BoardDepthView, objects: readonly BoardDepthObject[]): ReadonlyMap<string, BoardDepthObjectSize>;
-	step(deltaMs: number): boolean;
+	sync(view: BoardDepthView, objects: readonly BoardDepthObject[], now: number): { sizes: ReadonlyMap<string, BoardDepthObjectSize>; moving: boolean };
 	destroy(): void;
 };
 
@@ -71,9 +71,8 @@ function quaternion(m: Mat3): [number, number, number, number] {
 }
 
 export function createBoardDepthObjects(view3d: View3D, light: readonly [number, number, number]): BoardDepthObjects {
-	const holders = new Map<string, { holder: Container3D; model: LoadedModel; clip: string | null }>();
+	const holders = new Map<string, { holder: Container3D; model: LoadedModel; playback: ModelPlayback | null; min: Vec3; max: Vec3 }>();
 	let sun: DirectionalLight | null = null;
-	let playing: LoadedModel[] = [];
 
 	function lights() {
 		if (sun) return;
@@ -96,11 +95,11 @@ export function createBoardDepthObjects(view3d: View3D, light: readonly [number,
 		get empty() {
 			return holders.size === 0;
 		},
-		sync(view, objects) {
-			const wanted = new Set(objects.map((object) => object.id));
-			for (const [id, entry] of [...holders]) if (!wanted.has(id) || !objects.some((object) => object.id === id && object.model === entry.model)) release(id);
+		sync(view, objects, now) {
+			const wanted = new Map(objects.map((object) => [object.id, object.model]));
+			for (const [id, entry] of [...holders]) if (wanted.get(id) !== entry.model) release(id);
 			const sizes = new Map<string, BoardDepthObjectSize>();
-			playing = [];
+			let moving = false;
 			if (objects.length) lights();
 			for (const object of objects) {
 				let entry = holders.get(object.id);
@@ -108,13 +107,19 @@ export function createBoardDepthObjects(view3d: View3D, light: readonly [number,
 					const holder = new Container3D();
 					holder.addChild(object.model.root);
 					view3d.root.addChild(holder);
-					entry = { holder, model: object.model, clip: null };
+					const bounds = object.model.root.getLocalBounds();
+					const empty = bounds.isEmpty();
+					entry = {
+						holder,
+						model: object.model,
+						playback: object.model.player ? createModelPlayback(object.model.player) : null,
+						min: empty ? [-0.5, -0.5, -0.5] : [bounds.min.x, bounds.min.y, bounds.min.z],
+						max: empty ? [0.5, 0.5, 0.5] : [bounds.max.x, bounds.max.y, bounds.max.z],
+					};
 					holders.set(object.id, entry);
 				}
 				const { frame, origin, depth } = object;
-				const bounds = object.model.root.getLocalBounds();
-				const min: Vec3 = bounds.isEmpty() ? [-0.5, -0.5, -0.5] : [bounds.min.x, bounds.min.y, bounds.min.z];
-				const max: Vec3 = bounds.isEmpty() ? [0.5, 0.5, 0.5] : [bounds.max.x, bounds.max.y, bounds.max.z];
+				const { min, max } = entry;
 				const center: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
 				const cover = coverRotation(object.view ?? MODEL_VIEW_PRESETS.home);
 				const lo: Vec3 = [Infinity, Infinity, Infinity];
@@ -150,25 +155,9 @@ export function createBoardDepthObjects(view3d: View3D, light: readonly [number,
 				entry.holder.quaternion.set(qx, qy, qz, qw);
 				entry.holder.scale.set(scale, scale, scale);
 				entry.holder.position.set(origin3[0] - (shift[0] as number), origin3[1] - (shift[1] as number), origin3[2] - (shift[2] as number));
-				const player = object.model.player;
-				if (player) {
-					const clip = object.clip ?? player.animationLabels[0] ?? null;
-					if (clip !== entry.clip) {
-						for (const label of player.animationLabels) player.getState(label)?.stop();
-						entry.clip = clip;
-					}
-					const state = clip ? player.getState(clip) : null;
-					if (object.playing && state) {
-						if (!state.playing) state.play();
-						playing.push(object.model);
-					} else state?.stop();
-				}
+				if (entry.playback?.pose(object.playback, now)) moving = true;
 			}
-			return sizes;
-		},
-		step(deltaMs) {
-			for (const model of playing) model.player?.update({ deltaMS: Math.min(deltaMs, 100) } as Parameters<NonNullable<LoadedModel["player"]>["update"]>[0]);
-			return playing.length > 0;
+			return { sizes, moving };
 		},
 		destroy() {
 			for (const id of [...holders.keys()]) release(id);

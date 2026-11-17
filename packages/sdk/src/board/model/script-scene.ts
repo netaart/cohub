@@ -1,6 +1,7 @@
 import {
   applyBoardPatchToDocument,
   mergePatch,
+  resolveBoardProperty,
 } from "@cohub/protocol/board-patch";
 import {
   parseBoardItem as parseItem,
@@ -8,7 +9,7 @@ import {
   type BoardItem,
   type BoardPatch,
 } from "@cohub/protocol/board-model";
-import type { BoardScriptOutput } from "./script.js";
+import type { BoardScriptCamera, BoardScriptOutput } from "./script.js";
 import { applyMatrix, createBoardLayout } from "@cohub/protocol/board-layout";
 import type { BoardScene } from "./scene.js";
 import { boardScriptAttachments, isBoardRootScript } from "./script-index.js";
@@ -84,6 +85,14 @@ export function validateBoardScriptOutput(output: BoardScriptOutput): void {
       throw new Error("Invalid screen scene anchor.");
   }
   if (output.shader !== undefined) validateBoardShader(output.shader);
+  if (output.camera !== undefined) {
+    if (!output.camera || typeof output.camera !== "object") throw new Error('present("camera") takes a record.');
+    for (const [field, value] of Object.entries(output.camera)) {
+      const property = resolveBoardProperty("camera", field);
+      if (!property.ok) throw new Error(`present("camera"): ${property.message}`);
+      if (!property.spec.schema.safeParse(value).success) throw new Error(`present("camera"): ${property.spec.schema.description ?? `invalid ${field}`}`);
+    }
+  }
   if (output.frameRate !== undefined && !(Number.isFinite(output.frameRate) && output.frameRate >= 1 && output.frameRate <= 60))
     throw new Error("frameRate must be a number from 1 to 60.");
   if (output.parameters) {
@@ -226,6 +235,11 @@ const preparedOutputs = new WeakMap<BoardScriptOutput, PreparedOutput>();
 const preparedScopes = new WeakMap<BoardDocument, Map<string, ReadonlySet<string>>>();
 function orderedScriptOwners(document: BoardDocument, outputs: ReadonlyMap<string, BoardScriptOutput>): string[] {
   return boardScriptAttachments(document).map(({ id }) => id).filter((id) => outputs.has(id));
+}
+
+export function composeBoardScriptCamera(document: BoardDocument, outputs: ReadonlyMap<string, BoardScriptOutput>): BoardScriptCamera | null {
+  const owners = orderedScriptOwners(document, outputs).filter((id) => outputs.get(id)?.camera);
+  return owners.length ? Object.assign({}, ...owners.map((id) => outputs.get(id)?.camera)) : null;
 }
 
 function scopeOf(document: BoardDocument, owner: string): ReadonlySet<string> {

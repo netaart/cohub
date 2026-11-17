@@ -374,6 +374,7 @@ export const BoardArrowItemSchema = z
 	})
 	.strict();
 
+export const BOARD_MODEL_CLIP_LIMIT = 64;
 export const BoardMediaSnapshotSchema = z
 	.object({
 		title: z.string().optional(),
@@ -386,6 +387,11 @@ export const BoardMediaSnapshotSchema = z
 		excerpt: z.string().optional(),
 		coverPath: z.string().optional(),
 		coverUrl: z.string().optional(),
+		clips: z
+			.array(z.object({ name: z.string().min(1).max(240), durationMs: nonNegative }).strict())
+			.max(BOARD_MODEL_CLIP_LIMIT)
+			.optional()
+			.describe("A 3D model's animation clips in file order, with their lengths."),
 	})
 	.strict()
 	.describe("Cached facts for an instant preview; filled in when the media loads.");
@@ -404,10 +410,14 @@ export const BoardModelViewSchema = z
 	})
 	.strict();
 export type BoardModelView = z.infer<typeof BoardModelViewSchema>;
+export const BOARD_MODEL_FADE_MS = 250;
 export const BoardModelSettingsSchema = z
 	.object({
 		view: BoardModelViewSchema.optional().describe("Camera for the card's still and where the model turns back to; the default three-quarter view without it."),
-		animation: z.string().min(1).max(240).optional().describe("Animation clip that plays; the model's first without it."),
+		animation: z.string().min(1).max(240).optional().describe("Animation clip that plays; the model's first without it. Changing it crossfades over fade."),
+		time: nonNegative.optional().describe("Position in the clip in milliseconds, for a timeline or a script to drive; without it an autoplay model plays the clip on the Board clock."),
+		loop: z.boolean().optional().describe("false plays the clip once and holds its last pose; it loops by default."),
+		fade: finite.min(0).max(10_000).optional().describe(`Crossfade in milliseconds when the clip changes; ${BOARD_MODEL_FADE_MS} by default, 0 cuts.`),
 		display: z.enum(["card", "object"]).optional().describe("card (default) shows a still in a card; object rests the model itself on the Board, facing the viewer as view shows it, fitted to the item's box, lit, shadowed and drawn among lifted items."),
 	})
 	.strict()

@@ -6,6 +6,7 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { isSafeBoardSourcePath } from "@neta-art/cohub/board";
 import type { BoardGpuFrame, BoardGpuInit, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
 import { packagePath } from "../package-paths.js";
 
@@ -81,6 +82,7 @@ const PAGE = (fonts: readonly { family: string; file: string }[]) => `<!doctype 
 
 export type BoardGpuResources = {
   readModule(path: string): Promise<string>;
+  readFile(path: string): Promise<Uint8Array>;
   readPicture(request: { key: string; edge: number } | { background: true }): Promise<{ bytes: Uint8Array; mimeType: string } | null>;
   fonts: readonly { family: string; path: string }[];
 };
@@ -112,6 +114,11 @@ export async function launchBoardGpuExporter(resources: BoardGpuResources, optio
       if (route === "module") {
         const code = await resources.readModule(url.searchParams.get("path") ?? "");
         return void response.writeHead(200, { "content-type": "text/javascript" }).end(code);
+      }
+      if (route === "file") {
+        const path = url.searchParams.get("path") ?? "";
+        if (!isSafeBoardSourcePath(path)) throw Object.assign(new Error("Not found"), { status: 404 });
+        return void response.writeHead(200, { "content-type": "application/octet-stream" }).end(await resources.readFile(path));
       }
       if (route === "asset") {
         const picture = await resources.readPicture(url.searchParams.has("background")

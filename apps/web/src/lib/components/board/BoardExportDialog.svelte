@@ -219,6 +219,11 @@ function warningText(warning: BoardImageExportWarning) {
 				{ count: warning.ids.length },
 				{ locale },
 			);
+		case "models-flat":
+			return m.board_export_warning_models_flat(
+				{ count: warning.ids.length },
+				{ locale },
+			);
 	}
 }
 

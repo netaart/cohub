@@ -16,6 +16,7 @@ import {
 	boardDepthRoots,
 	boardDepthShadow,
 	boardDepthSurface,
+	boardModelPlayback,
 	hitBoardDepthSurface,
 	isBoardDepthLifted,
 	isBoardModelObject,
@@ -49,7 +50,9 @@ export type BoardStageDepthOptions = {
 	bend: (id: string) => unknown;
 	fault: (id: string, message: string) => void;
 	frame: () => void;
+	animate: () => void;
 	loadModel: (item: BoardSceneItem, signal: AbortSignal) => Promise<LoadedModel> | null;
+	loaded?: (id: string, model: LoadedModel) => void;
 	reducedMotion: () => boolean;
 	maxEdge?: number;
 };
@@ -89,6 +92,7 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 	const lifts = new Map<string, Lift>();
 	const models = new Map<string, { key: string; model: LoadedModel | null; controller: AbortController }>();
 	let lastPrepare = 0;
+	let clock = 0;
 	const faults = new Map<string, string>();
 	const fault = (id: string, message: string) => {
 		if (faults.get(id) === message) return;
@@ -158,6 +162,7 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 				?.then((model) => {
 					if (controller.signal.aborted || models.get(item.id) !== next) return model.destroy();
 					next.model = model;
+					options.loaded?.(item.id, model);
 					options.frame();
 				})
 				.catch(() => undefined);
@@ -242,10 +247,10 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 				const host = options.host(item.id);
 				if (!depth || !host || !scene.shown(item.id) || scene.opacity(item.id) <= 0) continue;
 				const model = isBoardModelObject(item) ? modelOf(item) : null;
-				if (model && item.type === "file") {
+				const playback = model && boardModelPlayback(item, options.reducedMotion());
+				if (model && playback && item.type === "file") {
 					releaseLift(item.id);
-					const settings = item.props.model;
-					objects.push({ id: item.id, model, frame: item.frame, origin: item.origin, depth, view: settings?.view, clip: settings?.animation ?? null, playing: item.autoplay === true && !options.reducedMotion() });
+					objects.push({ id: item.id, model, frame: item.frame, origin: item.origin, depth, view: item.props.model?.view, playback });
 					continue;
 				}
 				let lift = lifts.get(item.id);
@@ -279,9 +284,10 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 			}
 			for (const id of [...models.keys()]) if (!wanted.has(id)) releaseModel(id);
 			const now = performance.now();
-			const sizes = stage.objects.sync(view, objects);
-			if (stage.objects.step(lastPrepare ? now - lastPrepare : 0)) options.frame();
+			clock += lastPrepare ? Math.min(now - lastPrepare, 100) : 0;
 			lastPrepare = now;
+			const { sizes, moving } = stage.objects.sync(view, objects, clock);
+			if (moving) options.animate();
 			for (const object of objects) {
 				const size = sizes.get(object.id) ?? { width: object.frame.width, height: object.frame.height, thickness: 0 };
 				const raised = { ...object.depth, lift: object.depth.lift + size.thickness / 2 };

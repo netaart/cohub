@@ -7,6 +7,7 @@ import { type BoardScriptAttachment, boardScriptAttachments } from "../../model/
 import {
   boardScriptOf,
   boardScriptScope,
+  composeBoardScriptCamera,
   composeBoardScriptItems,
 } from "../../model/script-scene.js";
 import { BOARD_SCRIPT_HISTORY_MS } from "../../model/animation.js";
@@ -456,6 +457,7 @@ export function createNodeBoardScriptHost(
     emitFailures,
     status: () => lanes.status(),
     shaders: (document, time) => boardShaderOwners(document, outputs.get(time) ?? [], () => time),
+    camera: (document, time) => composeBoardScriptCamera(document, outputs.get(time) ?? new Map()),
     bend: (id, time) => {
       const output = outputs.get(time)?.get(id);
       return output ? (output.bend ?? null) : undefined;

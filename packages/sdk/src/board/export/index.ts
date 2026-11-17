@@ -15,7 +15,8 @@ import {
 } from "../model/export-plan.js";
 import type { BoardScene } from "../model/scene.js";
 import { boardShaderPassOn } from "../model/shader.js";
-import { boardDepthRoots } from "../model/depth.js";
+import { boardDepthRoots, isBoardModelObject } from "../model/depth.js";
+import type { LoadedModel } from "../render/model3d/load.js";
 import type { BoardDepthStage } from "../render/depth/index.js";
 import type { BoardShaderOwner } from "../render/shader/layers.js";
 import {
@@ -64,6 +65,7 @@ export type BoardExportOptions = {
   maxEdge?: number;
   maxPixels?: number;
   depth?: BoardDepthStage;
+  models?: ReadonlyMap<string, LoadedModel>;
 };
 
 export type BoardExportWarning =
@@ -73,7 +75,8 @@ export type BoardExportWarning =
   | { kind: "shaders-unsupported"; drawn: string[]; omitted: string[] }
   | { kind: "shader-failed"; id: string; message: string }
   | { kind: "shader-hidden"; ids: string[]; reason: string }
-  | { kind: "depth-flat"; ids: string[] };
+  | { kind: "depth-flat"; ids: string[] }
+  | { kind: "models-flat"; ids: string[] };
 
 export type BoardExportResult = {
   canvas: ICanvas;
@@ -98,7 +101,9 @@ export function prepareBoardExport(input: BoardDocument, options: BoardExportOpt
   const sampled = sample?.document ?? base;
   const document = options.scripts?.document?.(sampled, options.at?.time ?? 0) ?? sampled;
   const scene = document === sampled ? sample?.scene ?? buildBoardScene(document) : buildBoardScene(document);
-  const camera = options.camera ? resolveBoardAnimationCamera(sample?.evaluation.camera ?? {}, (id) => scene.get(id)?.frame, options.camera, options.at?.time ?? 0, undefined, sample?.evaluation.cameraViewport) : undefined;
+  const directed = options.camera ? options.scripts?.camera?.(document, options.at?.time ?? 0) : null;
+  const override = { ...sample?.evaluation.camera, ...directed };
+  const camera = options.camera ? resolveBoardAnimationCamera(override, (id) => scene.get(id)?.frame, options.camera, options.at?.time ?? 0, undefined, sample?.evaluation.cameraViewport) : undefined;
   const region: BoardExportRegion = camera && options.camera ? { kind: "rect", rect: { x: -camera.x / camera.zoom, y: -camera.y / camera.zoom, width: options.camera.width / camera.zoom, height: options.camera.height / camera.zoom } } : options.region ?? { kind: "all" };
   const plan = planBoardExport({
     scene,
@@ -146,7 +151,7 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
     backdropTexture: options.backgroundTexture,
     ...(plan.page ? { page: plan.page } : {}),
     ...(gpu && owners.length ? { shaders: { renderer, owners, layers: options.shaderLayers } } : {}),
-    ...(gpu && options.depth ? { depth: { renderer, stage: options.depth } } : {}),
+    ...(gpu && options.depth ? { depth: { renderer, stage: options.depth, models: options.models } } : {}),
   });
 
   const flattened = renderer.type === RendererType.CANVAS ? flattenBoardEffects(renderer, exportScene.root, plan.scale, new Rectangle(0, 0, plan.width, plan.height)) : null;
@@ -190,11 +195,14 @@ export function renderBoardExport(renderer: Renderer, input: BoardDocument, opti
       warnings.push({ kind: "shaders-unsupported", drawn, omitted: owners.map((owner) => owner.id).filter((id) => !drawn.includes(id)) });
     }
     for (const failure of exportScene.shaderErrors) warnings.push({ kind: "shader-failed", ...failure });
+    const planned = new Set(plan.items.map((item) => item.id));
     if (!gpu || !options.depth) {
-      const planned = new Set(plan.items.map((item) => item.id));
       const flat = boardDepthRoots(scene).filter((item) => planned.has(item.id) && isBoardDepthActive(resolveBoardDepth(item.depth))).map((item) => item.id);
       if (flat.length) warnings.push({ kind: "depth-flat", ids: flat });
     }
+    const drawn = gpu && options.depth ? options.models : undefined;
+    const cards = plan.items.filter((item) => isBoardModelObject(item) && scene.opacity(item.id) > 0 && !drawn?.has(item.id)).map((item) => item.id);
+    if (cards.length) warnings.push({ kind: "models-flat", ids: cards });
     if (gpu) for (const miss of boardShaderMisses(scene, plan, owners, exportScene.shaderErrors)) warnings.push({ kind: "shader-hidden", ...miss });
     return { canvas, plan, warnings };
   } finally {
@@ -251,6 +259,8 @@ export function describeBoardExportWarning(warning: BoardExportWarning): string 
     }
     case "shader-failed":
       return `Shader ${warning.id} was left out: ${warning.message}`;
+    case "models-flat":
+      return `${listIds(warning.ids)} could not be drawn in 3D; this export shows ${warning.ids.length === 1 ? "its card" : "their cards"}.`;
     case "depth-flat":
       return `${listIds(warning.ids)} ${warning.ids.length === 1 ? "is" : "are"} lifted off the Board; this export draws ${warning.ids.length === 1 ? "it" : "them"} flat because depth needs WebGL.`;
     case "shader-hidden":

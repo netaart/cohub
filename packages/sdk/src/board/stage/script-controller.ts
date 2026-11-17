@@ -9,7 +9,7 @@ import { boardScriptTarget } from "../model/script-hit.js";
 import { createBoardScriptObservers, type BoardScriptWorldGesture } from "../model/script-observers.js";
 import { isBoardRootScript } from "../model/script-index.js";
 import { BOARD_SCRIPT_EVENT_QUEUE, boardScriptBroadcast, boardScriptEmit } from "../model/script-events.js";
-import { composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
+import { composeBoardScriptCamera, composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
 import {
   BOARD_SCRIPT_EXPORT_ENV,
   BOARD_SCRIPT_INPUT_LOG_BYTES,
@@ -23,6 +23,7 @@ import {
   BOARD_SCRIPT_SENSES,
   type BoardScriptBrowserEvent,
   type BoardScriptBrowserEvents,
+  type BoardScriptCamera,
   type BoardScriptEnv,
   type BoardScriptEvent,
   type BoardScriptOutput,
@@ -447,6 +448,9 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       animated = next;
     },
     compose,
+    camera(): BoardScriptCamera | null {
+      return paused || !outputs.size || env.mode === "edit" ? null : composeBoardScriptCamera(editor.document, outputs);
+    },
     moving(): Iterable<string> {
       const at = now();
       for (const [id, changed] of moved) if (at - changed > MOTION_MS) moved.delete(id);

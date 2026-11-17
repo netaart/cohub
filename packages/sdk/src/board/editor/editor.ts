@@ -486,6 +486,7 @@ export function createBoardEditor(options: BoardEditorOptions) {
 
 		applyMediaFileChange: snapshots.applyMediaFileChange,
 		adoptMediaNaturalSizes: snapshots.adoptMediaNaturalSizes,
+		adoptModelClips: snapshots.adoptModelClips,
 		applyFileSnapshots: snapshots.applyFileSnapshots,
 
 		setPlayhead: animation.setPlayhead,

@@ -494,6 +494,7 @@ onMount(() => {
 				assets.withTextures(items, use, {
 					edge: (item) => boardTextureEdge(item, scale),
 				}),
+			loadModels: (items) => mounted.loadModels(items),
 		});
 	});
 	window.addEventListener(CUSTOM_THEME_CHANGED_EVENT, handleCustomThemeChanged);

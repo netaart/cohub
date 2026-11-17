@@ -1,9 +1,9 @@
 import type { BoardModelSettings } from "@cohub/protocol/board-model";
 import type { Renderer } from "pixi.js";
 import type { BoardPointerEvent } from "../editor/index.js";
-import { type BoardAssetSource, type BoardScene, type BoardSceneItem, boardModelFormat, boardModelViewKey, fileStem, isBoardModelItem, type WorldPoint } from "../model/index.js";
+import { type BoardAssetSource, type BoardModelPlayback, type BoardScene, type BoardSceneItem, boardModelPlayback, boardModelViewKey, isBoardModelItem, type WorldPoint } from "../model/index.js";
 import type { BoardModelLive } from "../render/index.js";
-import { boardModelSource, type LoadedModel, loadModelEngine, MODEL_VIEW_PRESETS, type ModelScene, type ModelView } from "../render/model3d/index.js";
+import { type LoadedModel, loadBoardItemModel, loadModelEngine, MODEL_VIEW_PRESETS, type ModelPlayback, type ModelScene, type ModelView } from "../render/model3d/index.js";
 
 export type BoardModelTheater = {
 	sync(input: { scene: BoardScene; running: ReadonlySet<string>; entered: string | null }): void;
@@ -30,6 +30,8 @@ type Entry = {
 	failed: boolean;
 	live: BoardModelLive | null;
 	settings: BoardModelSettings | undefined;
+	pose: BoardModelPlayback | null;
+	playback: ModelPlayback | null;
 };
 
 export type BoardModelTheaterOptions = {
@@ -41,6 +43,7 @@ export type BoardModelTheaterOptions = {
 	reducedMotion: () => boolean;
 	changed: (id: string) => void;
 	frame: () => void;
+	loaded?: (id: string, model: LoadedModel) => void;
 };
 
 const ANIMATION_FRAME_MS = 1000 / 30;
@@ -52,6 +55,11 @@ function modelKey(item: BoardSceneItem): string | null {
 
 const settingsOf = (item: BoardSceneItem) => (item.type === "file" ? item.props.model : undefined);
 
+function cardPlayback(item: BoardSceneItem, reducedMotion: boolean): BoardModelPlayback | null {
+	const playback = boardModelPlayback(item, reducedMotion);
+	return playback && { ...playback, running: playback.time === null && !reducedMotion };
+}
+
 export function createBoardModelTheater(options: BoardModelTheaterOptions): BoardModelTheater {
 	const entries = new Map<string, Entry>();
 	const motionless = new Set<string>();
@@ -59,6 +67,7 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 	let entered: string | null = null;
 	let zoom = 1;
 	let lastTick = 0;
+	let clock = 0;
 
 	function layout(entry: Entry) {
 		if (!entry.scene || !entry.rect) return;
@@ -90,17 +99,15 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 	}
 
 	async function start(entry: Entry, item: BoardSceneItem) {
-		if (item.type !== "file") return;
-		const format = boardModelFormat(item.props.src, item.props.snapshot?.mimeType);
-		const source = format && boardModelSource({ key: entry.key, src: item.props.src, format, size: item.props.snapshot?.size, name: fileStem(item.props.src) }, options.source);
-		if (!source) return;
 		const { signal } = entry.controller;
 		const renderer = options.renderer();
-		if (!renderer) return;
+		const loading = renderer && loadBoardItemModel(item, options.source, { signal, maxBytes: options.maxBytes });
+		if (!renderer || !loading) return;
 		try {
 			const engine = await loadModelEngine();
-			const [model] = await Promise.all([engine.loadModel(source, { signal, maxBytes: options.maxBytes }), engine.prepareModelRenderer(renderer)]);
+			const [model] = await Promise.all([loading, engine.prepareModelRenderer(renderer)]);
 			if (signal.aborted) return model.destroy();
+			options.loaded?.(entry.id, model);
 			if (!model.player && entry.id !== entered) {
 				motionless.add(entry.key);
 				model.destroy();
@@ -110,8 +117,7 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 			const scene = engine.createModelScene(model, { reducedMotion, home: entry.settings?.view, changed: options.frame });
 			entry.model = model;
 			entry.scene = scene;
-			scene.clip = entry.settings?.animation ?? scene.clip;
-			scene.playing = !reducedMotion;
+			entry.playback = model.player ? engine.createModelPlayback(model.player) : null;
 			layout(entry);
 			options.changed(entry.id);
 			options.frame();
@@ -129,16 +135,16 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 		options.frame();
 	}
 
-	function configure(entry: Entry, settings: BoardModelSettings | undefined) {
+	function configure(entry: Entry, item: BoardSceneItem) {
 		const before = entry.settings;
+		const settings = settingsOf(item);
 		entry.settings = settings;
+		entry.pose = cardPlayback(item, options.reducedMotion());
 		const scene = entry.scene;
-		if (!scene) return;
-		if (boardModelViewKey(before?.view) !== boardModelViewKey(settings?.view)) {
+		if (scene && boardModelViewKey(before?.view) !== boardModelViewKey(settings?.view)) {
 			scene.homeView = settings?.view ?? MODEL_VIEW_PRESETS.home;
 			if (entry.id !== entered) scene.home();
 		}
-		if (before?.animation !== settings?.animation) scene.clip = settings?.animation ?? scene.clips[0] ?? null;
 	}
 
 	const enteredEntry = () => (entered ? entries.get(entered) : undefined);
@@ -171,14 +177,14 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 					else leave(entry);
 				} else {
 					entry.leaving = false;
-					configure(entry, settingsOf(item));
+					configure(entry, item);
 				}
 			}
 			for (const [id, item] of wanted) {
 				const existing = entries.get(id);
 				if (existing && !existing.retired) continue;
 				if (existing) destroy(existing);
-				const entry: Entry = { id, key: modelKey(item) as string, controller: new AbortController(), model: null, scene: null, rect: null, leaving: false, retired: false, failed: false, live: null, settings: settingsOf(item) };
+				const entry: Entry = { id, key: modelKey(item) as string, controller: new AbortController(), model: null, scene: null, rect: null, leaving: false, retired: false, failed: false, live: null, settings: settingsOf(item), pose: cardPlayback(item, options.reducedMotion()), playback: null };
 				entries.set(id, entry);
 				void start(entry, item);
 			}
@@ -207,14 +213,16 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 			const rescaled = nextZoom !== zoom;
 			zoom = nextZoom;
 			const delta = lastTick ? now - lastTick : 0;
+			clock += Math.min(delta, 100);
 			let wait: number | null = null;
 			for (const entry of entries.values()) {
 				if (!entry.scene || entry.retired) continue;
 				if (rescaled) layout(entry);
 				const moving = entry.scene.step(delta);
+				const posing = entry.playback && entry.pose ? entry.playback.pose(entry.pose, clock) : false;
 				if (entry.leaving && !moving) release(entry);
 				else if (moving) wait = 0;
-				else if (entry.scene.playing) wait = Math.min(wait ?? ANIMATION_FRAME_MS, ANIMATION_FRAME_MS);
+				else if (posing) wait = Math.min(wait ?? ANIMATION_FRAME_MS, ANIMATION_FRAME_MS);
 			}
 			lastTick = wait === null ? 0 : now;
 			return wait;

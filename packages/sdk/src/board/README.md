@@ -309,6 +309,14 @@ the card's rect, so the switch never shows; one that has no animation and is not
 is dropped once loaded, since it would draw what its still shows. Animations
 draw at 30 fps; a model being turned follows the display.
 
+Every model plays its clips through `render/model3d/playback.ts`: a pure function of
+`boardModelPlayback(item)` (the clip, a driven `time`, `loop`, `fade`, and whether it runs)
+and Board time. The first clip runs from time 0 and a later one from when it is chosen,
+crossfading by weights; an unchanged pose is not applied again. Cards, objects and
+exports share it, so a live view and an export of the same moment agree, and a sequence
+that keeps its stage carries crossfades across frames. Loaded models report their clips,
+which the stage records in `props.snapshot.clips` for editors.
+
 `render/model3d` holds the engine: `source.ts` (where bytes come from, no 3D code),
 `load.ts` (glTF and STL parsing, normals and neutral surfaces), `scene.ts` (camera,
 lights, orbit and sizing), `still.ts` and `viewer.ts` (a model on its own canvas).
@@ -335,8 +343,19 @@ matches the shared geometry exactly, so hits and outlines land on the pixels. Po
 input over a lifted picture is unprojected to the flat point it covers before anything
 else sees it, and picks are scoped to that item; a press keeps its offset until it
 lifts. Shadows are a 2D layer of nine-sliced soft sprites on the Board's plane. Model
-objects (`render/depth/objects.ts`) stand in the same view. Exports build the same
-layers from `export/scene.ts` with a stage the caller loads once.
+objects (`render/depth/objects.ts`) stand in the same view, fitted by their resting
+pose so a clip never resizes them. Exports build the same layers from `export/scene.ts`
+with a stage the caller loads once, and draw model objects from the `models` the caller
+loads with `loadBoardObjectModels`.
+
+### Camera
+
+The camera a viewer sees is the editor's own, unless an animation or a script directs
+it: `stage.ts` merges the animation camera with `composeBoardScriptCamera` (scripts in
+play and read-only views only) and follows the result while the camera policy is
+`follow`. A pan takes control (`takeCameraControl`) until the host sets `follow` again;
+a script that lets go leaves the editor camera where it was directed. Camera exports
+merge the same two sources in `prepareBoardExport`.
 
 ## Scripts
 

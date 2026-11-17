@@ -134,8 +134,9 @@ Native timers, wall-clock time and `Math.random()` are not replayable.
 patch onto the author/animation values. Passing `null` clears it. It never saves.
 It accepts `position`, `size`, `rotation`, `scale`, `opacity`, `style`, `props`,
 `z` and `depth`; presenting `z` restacks siblings, e.g. to sort characters by depth,
-and presenting `depth` lifts, turns and bends an item in perspective (see
-[Depth](board.md#depth)). A negative
+presenting `depth` lifts, turns and bends an item in perspective (see
+[Depth](board.md#depth)), and presenting `props.model` switches a model's clip with a
+crossfade (see [Models in motion](board.md#models-in-motion)). A negative
 `scale.x` mirrors. Display order is author values, animation, script effects, then
 the user's active editing gesture. Keep separate properties under separate owners
 when composing scripts. Current document order determines competing script overrides.
@@ -299,6 +300,32 @@ live. They have no user events. The embedding stage may provide a `safeRect` cal
 exclude its chrome, then call `stage.invalidate()` when that area changes. Without
 an override, the safe rectangle is the stage surface. Neither view state nor
 selection enters the document, history, or shared playback.
+
+## Direct the camera
+
+A script can point the viewer's camera, as a camera track does, by presenting the
+reserved id `camera`:
+
+```js
+ctx.on("hit", () => { ctx.state.shake = 16; });
+ctx.onFrame(() => {
+  const hero = ctx.get(ctx.targets.hero);
+  ctx.state.shake = Math.max(0, (ctx.state.shake ?? 0) - 1);
+  ctx.present("camera", { center: { x: hero.position.x + 120, y: hero.position.y + 120 }, zoom: 1.4, shake: ctx.state.shake });
+});
+```
+
+It takes the camera track fields: `focus` (an item id, fitted with padding, or a world
+rect), `zoom` (pixels per board unit on the animation's `viewport`, 1600×900 by
+default, so every screen frames the same view), `center` (a world point) and `shake`
+(screen pixels). Each call replaces this script's camera fields; they override the
+animation camera one by one, a later script in document order wins a field, and `null`
+lets go. The camera follows in play and read-only
+views, and in `--camera` exports. While editing it never moves, so authors keep their
+view. When the viewer pans or zooms, they take the camera until **Back to the camera**;
+when the script lets go, the view stays where it was. `ctx.view` reports the camera the
+viewer sees; `boards simulate` reports the directed camera after a `{"tool": "play"}` step,
+and the test harness has `board.camera`.
 
 ## Sense the device
 

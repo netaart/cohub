@@ -1,9 +1,13 @@
 import type {
+  BoardDepth,
   BoardItem,
   BoardPatch,
   BoardScript,
   BoardVec2,
 } from "@cohub/protocol";
+import type { BoardCameraOverride } from "./animation.js";
+
+export type BoardScriptCamera = BoardCameraOverride;
 
 export type BoardScriptView = {
   camera: { x: number; y: number; zoom: number };
@@ -156,6 +160,7 @@ export type BoardScriptItemPatch = Partial<
 > & {
   size?: { width?: number; height?: number };
   props?: Record<string, unknown>;
+  depth?: Partial<Omit<BoardDepth, "tilt" | "bend">> & { tilt?: Partial<BoardDepth["tilt"]>; bend?: Partial<BoardDepth["bend"]> };
 };
 export type BoardScriptHit = ({
   x: number;
@@ -173,7 +178,7 @@ export type BoardScriptSnapshot = {
   time: number;
   random: number;
   configuration?: string;
-  effects?: Pick<BoardScriptOutput, "patches" | "world" | "screen" | "anchor" | "hits" | "uniforms" | "passes">;
+  effects?: Pick<BoardScriptOutput, "patches" | "world" | "screen" | "anchor" | "hits" | "uniforms" | "passes" | "camera">;
 };
 export type BoardScriptParameter = {
   type: "number" | "boolean" | "string" | "color";
@@ -187,6 +192,7 @@ export type BoardScriptParameter = {
 export type BoardScriptOutput = {
   parameters?: Record<string, BoardScriptParameter>;
   patches: Record<string, Record<string, unknown>>;
+  camera?: BoardScriptCamera;
   world: Record<string, unknown>;
   screen: Record<string, unknown>;
   anchor?: BoardScriptAnchor;
@@ -236,6 +242,7 @@ export type BoardScriptContext = {
   onDispose(handler: () => void): void;
   invalidate(): void;
   get(id: string): BoardItem | undefined;
+  present(id: "camera", patch: BoardScriptCamera | null): void;
   present(id: string, patch: BoardScriptItemPatch | null): void;
   scene(
     items: Record<string, unknown>,

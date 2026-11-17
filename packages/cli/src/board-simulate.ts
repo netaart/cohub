@@ -1,5 +1,5 @@
 import { boardScriptSenseOf, diffMergePatch, parseBoardScriptInputs } from "@neta-art/cohub/board";
-import type { BoardDocument, BoardExportRegion, BoardScriptBrowserEvent, BoardThemeId } from "@neta-art/cohub/board";
+import type { BoardDocument, BoardExportRegion, BoardScriptBrowserEvent, BoardScriptCamera, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
 import type {
   BoardScriptHarness,
@@ -179,6 +179,7 @@ export type BoardSimulationResult = {
   errors: Record<string, string>;
   presses: BoardSimulationPress[];
   broadcasts: BoardScriptHarnessBroadcast[];
+  camera?: BoardScriptCamera;
   warnings: string[];
   shaders?: { count: number; compiled: boolean };
   image?: { bytes: Uint8Array; width: number; height: number };
@@ -296,6 +297,7 @@ export async function runBoardSimulation(options: {
       errors,
       presses,
       broadcasts: [...current.broadcasts],
+      ...(current.camera ? { camera: current.camera } : {}),
       warnings,
       ...(shaders.length ? { shaders: { count: shaders.length, compiled } } : {}),
     };

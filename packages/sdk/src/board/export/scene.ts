@@ -28,9 +28,12 @@ import { positionShell } from "../render/renderers/base-card-renderer.js";
 import type { BoardShaderLayer } from "../render/shader/layer.js";
 import { type BoardShaderLayers, type BoardShaderOwner, type BoardShaderPlacement, boardShaderColor, createBoardShaderLayers } from "../render/shader/layers.js";
 import { boardItemLocalToWorld, boardLocalView } from "../render/shader/placement.js";
-import { type BoardDepthShadow, type BoardDepthView, boardDepthOf, boardDepthRoots, boardDepthShadow, boardDepthSurface } from "../model/depth.js";
+import { type BoardDepthShadow, type BoardDepthView, boardDepthContactShadow, boardDepthOf, boardDepthRoots, boardDepthShadow, boardDepthSurface } from "../model/depth.js";
+import { boardModelPlayback } from "../model/model-clips.js";
+import type { LoadedModel } from "../render/model3d/load.js";
 import {
   type BoardDepthLayer,
+  type BoardDepthObject,
   type BoardDepthPicture,
   type BoardDepthStage,
   boardDepthDensity,
@@ -63,7 +66,7 @@ export type BoardExportSceneInput = {
   backdropTexture?: Texture;
   page?: string;
   shaders?: { renderer: Renderer; owners: readonly BoardShaderOwner[]; quality?: number; layers?: BoardShaderLayers };
-  depth?: { renderer: Renderer; stage: BoardDepthStage };
+  depth?: { renderer: Renderer; stage: BoardDepthStage; models?: ReadonlyMap<string, LoadedModel> };
 };
 
 export type BoardExportScene = {
@@ -136,7 +139,8 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
 
   const resolve = input.renderers ?? getBoardCardRenderer;
   const planned = new Set(input.items.map((item) => item.id));
-  const roots = input.depth ? boardDepthRoots(input.scene).filter((item) => planned.has(item.id) && isBoardDepthActive(resolveBoardDepth(item.depth))) : [];
+  const models = input.depth?.models;
+  const roots = input.depth ? boardDepthRoots(input.scene).filter((item) => planned.has(item.id) && (isBoardDepthActive(resolveBoardDepth(item.depth)) || models?.has(item.id))) : [];
   const hosts = new Map(roots.map((item) => [item.id, new Container({ label: `board-elevated-${item.id}`, isRenderGroup: true })]));
   const extras = new Set((input.depth ? (input.extras ?? []) : []).map((item) => item.id));
   const offstage = new Container({ label: "board-export-offstage" });
@@ -262,7 +266,7 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
 }
 
 function attachBoardDepth(
-  { renderer, stage }: NonNullable<BoardExportSceneInput["depth"]>,
+  { renderer, stage, models }: NonNullable<BoardExportSceneInput["depth"]>,
   input: {
     scene: BoardScene;
     roots: readonly BoardSceneItem[];
@@ -281,6 +285,7 @@ function attachBoardDepth(
   const pictures: BoardDepthPicture[] = [];
   const backs = new Map<string, BoardDepthPicture>();
   const layers: BoardDepthLayer[] = [];
+  const objects: BoardDepthObject[] = [];
   const shadows = createBoardDepthShadows();
   const shadowInput = new Map<string, { shadow: BoardDepthShadow; width: number; height: number; opacity: number }>();
   const parts = (id: string) => {
@@ -293,6 +298,12 @@ function attachBoardDepth(
     const depth = boardDepthOf(item);
     const host = input.hosts.get(item.id);
     if (!depth || !host || input.scene.opacity(item.id) <= 0) continue;
+    const model = models?.get(item.id);
+    const playback = model && boardModelPlayback(item, false);
+    if (model && playback && item.type === "file") {
+      objects.push({ id: item.id, model, frame: item.frame, origin: item.origin, depth, view: item.props.model?.view, playback });
+      continue;
+    }
     const surface = boardDepthSurface({ frame: item.frame, origin: item.origin, depth }, view);
     const density = boardDepthDensity(view, 1, surface);
     const picture = createBoardDepthPicture();
@@ -319,6 +330,11 @@ function attachBoardDepth(
     });
     const shadow = boardDepthShadow(surface, view, depth.shadow);
     if (shadow) shadowInput.set(item.id, { shadow, width: item.frame.width, height: item.frame.height, opacity: scene.opacity(item.id) });
+  }
+  const { sizes } = stage.objects.sync(view, objects, input.time);
+  for (const object of objects) {
+    const shadow = boardDepthContactShadow(object.frame, object.depth, sizes.get(object.id) ?? { ...object.frame, thickness: 0 });
+    if (shadow) shadowInput.set(object.id, { shadow, width: object.frame.width, height: object.frame.height, opacity: scene.opacity(object.id) });
   }
   shadows.sync(shadowInput);
   input.world.addChild(shadows.container);

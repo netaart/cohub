@@ -1988,6 +1988,7 @@
 	"board_export_warning_previews_omitted": "为控制导出内存，{count} 个预览已用占位图代替。",
 	"board_export_warning_shaders_unsupported": "{count} 个着色器效果需要 WebGL，本次导出改用其备用绘制或略过。",
 	"board_export_warning_depth_flat": "{count} 个抬起的条目需要 WebGL，本次导出按平放绘制。",
+	"board_export_warning_models_flat": "{count} 个 3D 模型未能绘制，本次导出显示为卡片。",
 	"board_export_warning_shader_failed": "着色器效果无法运行，导出时已略过：{id}。",
 	"board_nothing_export": "无可导出内容",
 	"board_nothing_export_detail": "该选区没有可导出的内容。",

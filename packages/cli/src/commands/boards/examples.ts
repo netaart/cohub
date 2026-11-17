@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { json } from "../../output.js";
 import {
+  BOARD_SCRIPT_ARENA_EXAMPLE,
   BOARD_SCRIPT_DRAWING_EXAMPLE,
   BOARD_SCRIPT_HANKY_EXAMPLE,
   BOARD_SCRIPT_RAIN_EXAMPLE,
@@ -16,7 +17,11 @@ const MODULES: Record<string, string> = {
   senses: BOARD_SCRIPT_SENSES_EXAMPLE,
   sparks: BOARD_SCRIPT_SPARKS_EXAMPLE,
   depth: BOARD_SCRIPT_HANKY_EXAMPLE,
+  arena: BOARD_SCRIPT_ARENA_EXAMPLE,
 };
+
+// Fox by PixelMannen (CC0), rigged and animated by @tomkranis (CC BY 4.0), from the Khronos glTF samples.
+const FOX = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Fox/glTF-Binary/Fox.glb";
 
 /**
  * Starter documents for `boards create -i` and patches for `boards apply -i`.
@@ -140,6 +145,19 @@ export const BOARD_EXAMPLES: Record<string, { description: string; value: Record
             rise: { target: "card", property: "depth.lift", keyframes: [{ at: 400, value: 0 }, { at: 850, value: 70, ease: "ease-out" }, { at: 1300, value: 0, ease: "ease-in" }, { at: 2300, value: 0 }, { at: 2750, value: 70, ease: "ease-out" }, { at: 3200, value: 0, ease: "ease-in" }] },
           },
         },
+      },
+    },
+  },
+  arena: {
+    description: "3D: a fox to steer in Play with WASD or a gamepad; its clips crossfade and the camera follows. Use --module to print scripts/arena.js.",
+    value: {
+      board: { background: { color: "#24331f" }, scripts: { arena: { src: "scripts/arena.js", targets: { fox: "fox" } } } },
+      items: {
+        fox: { type: "file", position: { x: 480, y: 260 }, size: { width: 240, height: 240 }, autoplay: true, props: { src: FOX, model: { display: "object", animation: "Survey", view: { yaw: 0, pitch: 30, zoom: 1 } } } },
+        hint: { type: "text", position: { x: 380, y: 140 }, props: { text: "Press Play, then WASD or the arrow keys; hold Shift to run", fontSize: 24, align: "center", width: 440 }, style: { fill: "#f4f1e8" } },
+        stone: { type: "shape", position: { x: 160, y: 520 }, size: { width: 120, height: 80 }, style: { fill: "#6d7566", stroke: "#4d5448" }, props: { geometry: "ellipse" } },
+        pond: { type: "shape", position: { x: 860, y: 460 }, size: { width: 260, height: 150 }, style: { fill: "#3d6f8f", stroke: "#2c5670" }, props: { geometry: "ellipse" } },
+        bush: { type: "shape", position: { x: 920, y: 120 }, size: { width: 140, height: 120 }, style: { fill: "#3f6b35", stroke: "#2f5428" }, props: { geometry: "ellipse" } },
       },
     },
   },

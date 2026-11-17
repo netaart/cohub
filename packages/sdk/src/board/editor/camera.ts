@@ -85,7 +85,8 @@ export function createCameraModule(ctx: EditorContext) {
 		state.cameraPolicy = policy;
 	}
 
-	function follow(viewport: BoardViewport | null) {
+	function follow(viewport: BoardViewport | null, options?: { settle?: boolean }) {
+		if (!viewport && options?.settle && followed && state.cameraPolicy === "follow") move(followed);
 		followed = viewport;
 	}
 

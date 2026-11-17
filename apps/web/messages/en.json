@@ -1988,6 +1988,7 @@
 	"board_export_warning_previews_omitted": "{count} previews were drawn as placeholders to stay within the export memory budget.",
 	"board_export_warning_shaders_unsupported": "{count} shader effects need WebGL; this export shows their fallback drawing or leaves them out.",
 	"board_export_warning_depth_flat": "{count} lifted items need WebGL; this export draws them flat.",
+	"board_export_warning_models_flat": "{count} 3D models could not be drawn; this export shows their cards.",
 	"board_export_warning_shader_failed": "A shader effect could not run and was left out: {id}.",
 	"board_nothing_export": "Nothing to export",
 	"board_nothing_export_detail": "That selection has nothing to export.",

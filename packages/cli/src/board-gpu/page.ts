@@ -1,4 +1,5 @@
 import {
+  type BoardAssetSource,
   type BoardSceneItem,
   boardAnimatesScriptParams,
   boardAssetKey,
@@ -6,7 +7,9 @@ import {
   boardExportView,
   boardShaderParameters,
   boardAssetKeySource,
+  boardModelFormat,
   boardTextureEdge,
+  isBoardModelObject,
   normalizeBoardDocument,
   parseBoardScriptInputs,
   selectBoardExportAssets,
@@ -21,13 +24,51 @@ import {
   createBoardShaderLayers,
   createBrowserBoardScriptExport,
   hasBoardEffects,
+  type LoadedModel,
   loadBoardDepthEngine,
+  loadBoardItemModel,
+  loadModelEngine,
+  boardModelSource,
 } from "@neta-art/cohub/board/render";
 import { autoDetectRenderer, ImageSource, Matrix, type Renderer, RenderTexture, Texture, type WebGLRenderer } from "pixi.js";
 import type { BoardGpuFrame, BoardGpuInit, BoardGpuProfile, BoardGpuProfileInput, BoardGpuResult, BoardGpuShader } from "./protocol.js";
 
 let renderer: Renderer | null = null;
 let depth: Promise<BoardDepthStage | undefined> | null = null;
+const MODEL_BYTES = 256 * 1024 * 1024;
+const assets: BoardAssetSource = { resolveFile: async (path) => ({ url: `file?path=${encodeURIComponent(path)}` }) };
+const models = new Map<string, { key: string; model: Promise<LoadedModel | null> }>();
+const retired: Array<Promise<LoadedModel | null>> = [];
+
+const modelKey = (item: BoardSceneItem) => (item.type === "file" ? `${item.props.src}:${item.props.snapshot?.mtimeMs ?? ""}` : "");
+
+async function objectModels(items: readonly BoardSceneItem[]): Promise<Map<string, LoadedModel>> {
+  const loaded = new Map<string, LoadedModel>();
+  await Promise.all(items.filter(isBoardModelObject).map(async (item) => {
+    let entry = models.get(item.id);
+    if (entry?.key !== modelKey(item)) {
+      if (entry) retired.push(entry.model);
+      entry = { key: modelKey(item), model: loadBoardItemModel(item, assets, { signal: AbortSignal.timeout(120_000), maxBytes: MODEL_BYTES })?.catch(() => null) ?? Promise.resolve(null) };
+      models.set(item.id, entry);
+    }
+    const model = await entry.model;
+    if (model) loaded.set(item.id, model);
+  }));
+  return loaded;
+}
+
+function freeRetired() {
+  for (const model of retired.splice(0)) void model.then((loaded) => loaded?.destroy());
+}
+
+async function releaseModels() {
+  const stage = await depth;
+  stage?.objects.sync({ x: 0, y: 0, zoom: 1, width: 1, height: 1 }, [], 0);
+  freeRetired();
+  const entries = [...models.values()];
+  models.clear();
+  for (const entry of entries) void entry.model.then((model) => model?.destroy());
+}
 
 function depthStage(target: Renderer): Promise<BoardDepthStage | undefined> {
   depth ??= loadBoardDepthEngine()
@@ -52,10 +93,7 @@ async function fetchTexture(query: string): Promise<Texture | null> {
 }
 
 async function loadTextures(items: readonly BoardSceneItem[], scale: number, maxBytes: number, overrides: Record<string, string>): Promise<Map<string, Texture>> {
-  const exportKey = (item: BoardSceneItem) => {
-    const key = overrides[item.id] ?? boardAssetKey(item);
-    return key && boardAssetKeySource(key)?.media !== "model" ? key : null;
-  };
+  const exportKey = (item: BoardSceneItem) => overrides[item.id] ?? boardAssetKey(item);
   const selection = selectBoardExportAssets([...items], exportKey, { scale, maxBytes });
   const wanted = new Set(selection.keys);
   for (const [key, entry] of textures) {
@@ -68,13 +106,25 @@ async function loadTextures(items: readonly BoardSceneItem[], scale: number, max
     const edge = Math.min(4096, Math.ceil(boardTextureEdge(item, scale)) || 4096);
     const cached = textures.get(key);
     if (cached === null || (cached && cached.edge >= edge)) return;
-    const texture = await fetchTexture(`key=${encodeURIComponent(key)}&edge=${edge}`).catch(() => null);
+    const still = boardAssetKeySource(key)?.media === "model";
+    const texture = await (still ? modelStill(item) : fetchTexture(`key=${encodeURIComponent(key)}&edge=${edge}`)).catch(() => null);
     if (texture) cached?.texture.destroy(true);
-    textures.set(key, texture ? { texture, edge } : (cached ?? null));
+    textures.set(key, texture ? { texture, edge: still ? Infinity : edge } : (cached ?? null));
   }));
   const result = new Map<string, Texture>();
   for (const [key, entry] of textures) if (entry) result.set(key, entry.texture);
   return result;
+}
+
+async function modelStill(item: BoardSceneItem): Promise<Texture | null> {
+  if (item.type !== "file") return null;
+  const { src, snapshot, model } = item.props;
+  const format = boardModelFormat(src, snapshot?.mimeType);
+  const source = format && boardModelSource({ key: modelKey(item), src, format, size: snapshot?.size }, assets);
+  if (!source) return null;
+  const engine = await loadModelEngine();
+  const bitmap = await engine.renderModelStill(source, { signal: AbortSignal.timeout(120_000), maxBytes: MODEL_BYTES, view: model?.view });
+  return new Texture({ source: new ImageSource({ resource: bitmap, alphaMode: "premultiply-alpha-on-upload" }) });
 }
 
 async function toBase64(blob: Blob): Promise<string> {
@@ -119,6 +169,7 @@ const api = {
       }
     background?.destroy(true);
     background = undefined;
+    await releaseModels();
     const sampler = createBoardRenderSampler(board, init.animation, boardRenderTheme(init.theme));
     session = {
       init: { ...init, document: board },
@@ -160,6 +211,7 @@ const api = {
     const owners = (scripts.shaders?.(prepared.document, time) ?? []).filter((owner) => owner.root || inside.has(owner.id));
     const layers = createBoardShaderLayers({ wait: true });
     const lifted = boardDocumentUsesDepth(prepared.document) ? await depthStage(target) : undefined;
+    const drawn = lifted ? await objectModels(prepared.plan.items) : undefined;
     const scene = createBoardExportScene({
       settings: prepared.document.board,
       scene: prepared.scene,
@@ -178,8 +230,9 @@ const api = {
       assetKey: boardAssetKey,
       ...(prepared.plan.page ? { page: prepared.plan.page } : {}),
       ...(owners.length ? { shaders: { renderer: target, owners, layers } } : {}),
-      ...(lifted ? { depth: { renderer: target, stage: lifted } } : {}),
+      ...(lifted ? { depth: { renderer: target, stage: lifted, models: drawn } } : {}),
     });
+    freeRetired();
     const pixel = new Uint8Array(4);
     // Lowering the resolution draws the same scene smaller: rebuilding it would compile everything again.
     let size = { width: prepared.plan.width, height: prepared.plan.height };
@@ -306,6 +359,7 @@ const api = {
     if (frame.withImages && frame.background === "paper" && document.board.background.image && background === undefined)
       background = await fetchTexture("background=1").catch(() => null);
     const lifted = boardDocumentUsesDepth(prepared.document) ? await depthStage(renderer) : undefined;
+    const drawn = lifted ? await objectModels(prepared.plan.items) : undefined;
     const result = renderBoardExport(renderer, document, {
       ...options,
       ...theme,
@@ -314,8 +368,9 @@ const api = {
       assetKey: (item: BoardSceneItem) => overrides[item.id] ?? boardAssetKey(item),
       backgroundTexture: frame.background === "paper" ? (background ?? undefined) : undefined,
       shaderLayers: session.layers,
-      ...(lifted ? { depth: lifted } : {}),
+      ...(lifted ? { depth: lifted, models: drawn } : {}),
     });
+    freeRetired();
     if (!result) throw new Error("Nothing to export: the region contains no items.");
     const canvas = result.canvas as unknown as HTMLCanvasElement;
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, `image/${frame.format}`, frame.quality));

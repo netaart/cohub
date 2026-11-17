@@ -15,12 +15,15 @@ import {
 	setDracoDecoderPath,
 } from "@pixi/3d";
 import { BufferImageSource, ImageSource, Texture } from "pixi.js";
+import { BOARD_MODEL_CLIP_LIMIT } from "@cohub/protocol/board-model";
+import type { BoardModelClip } from "../../model/model-clips.js";
 import { ensureModelWithin, fetchModelBytes, type ModelLoadOptions, type ModelSource, modelDecoders } from "./source.js";
 import type { ModelStats } from "./view.js";
 
 export type LoadedModel = {
 	root: Container3D;
 	player: AnimationPlayer | null;
+	clips: BoardModelClip[];
 	stats: ModelStats;
 	destroy(): void;
 };
@@ -164,6 +167,7 @@ async function parseGltfModel(bytes: Uint8Array<ArrayBuffer>, binary: boolean, r
 	return {
 		root: model,
 		player: clips.length ? (model.player ?? null) : null,
+		clips: clips.slice(0, BOARD_MODEL_CLIP_LIMIT).map((name) => ({ name: name.slice(0, 240), durationMs: Math.round((model.player?.getAnimation(name)?.duration ?? 0) * 1000) })),
 		stats: measure(model, { materials: json.materials?.length ?? 0, textures: json.images?.length ?? 0, clips: clips.length, unit: "m" }),
 		destroy() {
 			model.destroy({ children: true });
@@ -201,6 +205,7 @@ function parseStl(bytes: Uint8Array<ArrayBuffer>): LoadedModel {
 	return {
 		root,
 		player: null,
+		clips: [],
 		stats: measure(root, { materials: 0, textures: 0, clips: 0, unit: null }),
 		destroy() {
 			root.destroy({ children: true });

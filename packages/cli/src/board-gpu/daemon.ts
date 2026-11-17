@@ -15,7 +15,7 @@ const CONNECT_MS = 20_000;
 const TURN_MS = 20_000;
 
 type Picture = { bytes: Uint8Array; mimeType: string } | null;
-type Ask = { kind: "module"; path: string } | { kind: "picture"; request: Parameters<BoardGpuResources["readPicture"]>[0] };
+type Ask = { kind: "module"; path: string } | { kind: "file"; path: string } | { kind: "picture"; request: Parameters<BoardGpuResources["readPicture"]>[0] };
 type Message =
   | { id: number; method: Method; params?: unknown }
   | { id: number; result?: unknown; error?: string }
@@ -86,6 +86,11 @@ export async function serveBoardGpu(browser: string): Promise<void> {
       const answer = await ask({ kind: "module", path });
       if (answer.error !== undefined || answer.text === undefined) throw new Error(answer.error ?? `${path} is not available.`);
       return answer.text;
+    },
+    async readFile(path) {
+      const answer = await ask({ kind: "file", path });
+      if (answer.error !== undefined || answer.bytes === undefined) throw new Error(answer.error ?? `${path} is not available.`);
+      return Buffer.from(answer.bytes, "base64");
     },
     async readPicture(request) {
       const answer = await ask({ kind: "picture", request });
@@ -257,6 +262,7 @@ export async function connectBoardGpu(resources: BoardGpuResources, options: { b
   async function answer(request: Ask): Promise<Omit<Extract<Message, { answer: number }>, "answer">> {
     try {
       if (request.kind === "module") return { text: await resources.readModule(request.path) };
+      if (request.kind === "file") return { bytes: Buffer.from(await resources.readFile(request.path)).toString("base64") };
       const picture: Picture = await resources.readPicture(request.request);
       return picture ? { bytes: Buffer.from(picture.bytes).toString("base64"), mimeType: picture.mimeType } : { missing: true };
     } catch (error) {

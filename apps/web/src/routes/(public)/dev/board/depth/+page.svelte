@@ -8,12 +8,18 @@ import {
 } from "@neta-art/cohub/board/stage";
 import { cohubPixiRuntime } from "#lib/board/runtime/board-runtime.ts";
 import { page } from "$app/state";
-import { depthDemoDocument, depthScriptUrl } from "./demo.ts";
+import {
+	arenaDemoDocument,
+	depthDemoDocument,
+	depthScriptUrl,
+} from "./demo.ts";
 
-const document = depthDemoDocument({
-	still: page.url.searchParams.has("still"),
-	only: page.url.searchParams.get("only")?.split(","),
-});
+const document = page.url.searchParams.has("arena")
+	? arenaDemoDocument()
+	: depthDemoDocument({
+			still: page.url.searchParams.has("still"),
+			only: page.url.searchParams.get("only")?.split(","),
+		});
 const mode = page.url.searchParams.has("edit")
 	? "edit"
 	: page.url.searchParams.has("view")

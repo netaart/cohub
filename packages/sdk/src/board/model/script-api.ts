@@ -53,7 +53,7 @@ export const BOARD_SCRIPT_API = {
     onDispose: "onDispose(handler): cleanup when the instance stops.",
     invalidate: "invalidate(): redraw a non-animated draw().",
     get: "get(id): an item in scope, as authored.",
-    present: "present(id, patch | null): temporarily override position, size, rotation, scale, opacity, style, props, z or depth of an item in scope; never saved. Items that leave the scope drop their override.",
+    present: "present(id, patch | null): temporarily override position, size, rotation, scale, opacity, style, props, z or depth of an item in scope; never saved. Items that leave the scope drop their override. present(\"camera\", { focus, zoom, center, shake } | null) directs the camera as camera tracks do (focus an item id or rect, zoom in pixels per board unit on a 1600×900 framing, center a world point, shake in pixels), over the animation camera: play and read-only views follow it until the viewer pans, and camera exports follow it; editing never does. A model's props.model takes animation, time, loop and fade, so a script can switch clips with a crossfade or drive one frame by frame.",
     scene: "scene(items, options?): replace this instance's world or screen layer of temporary Board items; never saved. IDs are unique across both layers.",
     hitRegions: "hitRegions(regions): replace the input declarations.",
     emit: "emit(id, type, data?): send a custom event to another scripted item in scope, or to any Board script by its key. Exports deliver it within the same moment, in document order. A handler may answer with emits; past 16 in a row the emit rejects, so emit from onFrame() to send on the next step.",

@@ -449,3 +449,53 @@ export function draw(g, { width, height }) {
   g.stroke();
 }
 `;
+
+export const BOARD_SCRIPT_ARENA_EXAMPLE = `// A fox to steer with WASD, the arrow keys or a gamepad; hold Shift to run. In Play the camera
+// follows it, and its clips crossfade as it stops, walks and runs.
+export const parameters = {
+  speed: { type: "number", label: "Run speed", default: 420, min: 60, max: 1200 },
+  idle: { type: "string", label: "Idle clip", default: "Survey" },
+  walk: { type: "string", label: "Walk clip", default: "Walk" },
+  run: { type: "string", label: "Run clip", default: "Run" },
+};
+
+const KEYS = { left: ["a", "arrowleft"], right: ["d", "arrowright"], up: ["w", "arrowup"], down: ["s", "arrowdown"] };
+
+export default function (ctx) {
+  const fox = ctx.targets.fox;
+  const held = new Set();
+  const pressed = (name) => KEYS[name].some((key) => held.has(key));
+  ctx.on("keydown", ({ key }) => held.add(key.toLowerCase()));
+  ctx.on("keyup", ({ key }) => held.delete(key.toLowerCase()));
+  ctx.on("browser:gamepads", ({ data }) => { ctx.state.pad = data.pads[0] ?? null; });
+
+  ctx.onFrame(({ dt }) => {
+    const base = ctx.get(fox);
+    if (!base) return;
+    const pad = ctx.state.pad;
+    const dead = (value) => (Math.abs(value ?? 0) > 0.15 ? value : 0);
+    const x = (pressed("right") ? 1 : 0) - (pressed("left") ? 1 : 0) + dead(pad?.axes[0]);
+    const y = (pressed("down") ? 1 : 0) - (pressed("up") ? 1 : 0) + dead(pad?.axes[1]);
+    const push = Math.min(1, Math.hypot(x, y));
+    const running = held.has("shift") || Boolean(pad?.buttons[0]?.pressed);
+    const speed = push * ctx.params.speed * (running ? 1 : 0.4);
+    const at = (ctx.state.at ??= { ...base.position });
+    if (push > 0) {
+      at.x += (x / Math.hypot(x, y)) * speed * (dt / 1000);
+      at.y += (y / Math.hypot(x, y)) * speed * (dt / 1000);
+      // The view's yaw orbits the camera: 0 shows the fox's face, -90 has it face right.
+      const goal = (Math.atan2(-x, y) * 180) / Math.PI;
+      const turn = ((goal - (ctx.state.yaw ?? 0) + 540) % 360) - 180;
+      ctx.state.yaw = (ctx.state.yaw ?? 0) + turn * Math.min(1, dt / 90);
+    }
+    const clip = speed === 0 ? ctx.params.idle : running ? ctx.params.run : ctx.params.walk;
+    const view = base.props.model?.view ?? { yaw: 0, pitch: 30, zoom: 1 };
+    const yaw = ctx.state.yaw ?? view.yaw;
+    const shown = \`\${at.x},\${at.y},\${clip},\${yaw}\`;
+    if (shown === ctx.state.shown) return;
+    ctx.state.shown = shown;
+    ctx.present(fox, { position: at, props: { model: { animation: clip, view: { ...view, yaw } } } });
+    ctx.present("camera", { center: { x: at.x + base.size.width / 2, y: at.y + base.size.height / 2 }, zoom: 1.4 });
+  });
+}
+`;

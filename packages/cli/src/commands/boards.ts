@@ -484,6 +484,7 @@ Examples:
         const changed = Object.keys((result.changes as { items?: object }).items ?? {}).length;
         ok(`Simulated ${formatBoardTime(result.time)}: ${result.commits} commit${result.commits === 1 ? "" : "s"}, ${changed} item${changed === 1 ? "" : "s"} changed (not saved)`);
         for (const press of result.presses) console.log(`  step ${press.step + 1}: ${describePress(press)}`);
+        if (result.camera) console.log(`  camera: ${JSON.stringify(result.camera)}`);
         if (result.broadcasts.length) console.log(`  ${result.broadcasts.length} broadcast${result.broadcasts.length === 1 ? "" : "s"}: ${[...new Set(result.broadcasts.map(({ owner, type }) => `${owner} "${type}"`))].join(", ")}`);
         for (const [id, message] of Object.entries(result.errors)) console.log(`  ! ${id}: ${message.split("\n")[0]}`);
         for (const warning of result.warnings) console.log(`  ! ${warning}`);

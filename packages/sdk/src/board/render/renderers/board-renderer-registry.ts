@@ -6,6 +6,7 @@ import type { BoardScene, BoardSceneItem, SceneItem } from "../../model/scene.js
 import type { BoardRenderStyle } from "../style.js";
 import type { BoardLodKind } from "../lod.js";
 import type { BoardShaderOwner } from "../shader/layers.js";
+import type { BoardScriptCamera } from "../../model/script.js";
 import { mediaPlayHit } from "../media-interaction.js";
 import { ensureBoardTextMeasurement } from "../text-measurement.js";
 import { arrowCardRenderer } from "./arrow-card-renderer.js";
@@ -43,6 +44,7 @@ export type BoardRenderPalette = {
 export type BoardScriptHost = {
 	document?: (document: BoardDocument, time: number) => BoardDocument;
 	shaders?: (document: BoardDocument, time: number) => BoardShaderOwner[];
+	camera?: (document: BoardDocument, time: number) => BoardScriptCamera | null;
 	bend?: (id: string, time: number) => unknown;
 	ready?: (id: string) => boolean;
 	revision?: (id: string) => number;

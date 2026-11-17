@@ -1,4 +1,5 @@
 import {
+	BOARD_SCRIPT_ARENA_EXAMPLE,
 	BOARD_SCRIPT_HANKY_EXAMPLE,
 	type BoardDocument,
 	parseBoardDocument,
@@ -31,7 +32,53 @@ export function draw(g, { width, height }) {
 const SCRIPTS: Record<string, string> = {
 	"hanky.js": BOARD_SCRIPT_HANKY_EXAMPLE,
 	"ripple.js": RIPPLE,
+	"arena.js": BOARD_SCRIPT_ARENA_EXAMPLE,
 };
+
+const FOX =
+	"https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Fox/glTF-Binary/Fox.glb";
+
+export function arenaDemoDocument(): BoardDocument {
+	const parsed = parseBoardDocument({
+		board: {
+			background: { color: "#24331f" },
+			scripts: { arena: script("arena.js", { targets: { fox: "fox" } }) },
+		},
+		items: {
+			fox: {
+				type: "file",
+				position: { x: 480, y: 260 },
+				size: { width: 240, height: 240 },
+				autoplay: true,
+				props: {
+					src: FOX,
+					model: {
+						display: "object",
+						animation: "Survey",
+						view: { yaw: 0, pitch: 30, zoom: 1 },
+					},
+				},
+			},
+			stone: {
+				type: "shape",
+				position: { x: 160, y: 520 },
+				size: { width: 120, height: 80 },
+				style: { fill: "#6d7566" },
+				props: { geometry: "ellipse" },
+			},
+			pond: {
+				type: "shape",
+				position: { x: 860, y: 460 },
+				size: { width: 260, height: 150 },
+				style: { fill: "#3d6f8f" },
+				props: { geometry: "ellipse" },
+			},
+		},
+		animations: {},
+	});
+	if (!parsed.ok) throw new Error(parsed.diagnostics[0]?.message);
+	return parsed.document;
+}
 
 export function depthScriptUrl(path: string): string | null {
 	if (!path.startsWith(PREFIX)) return null;

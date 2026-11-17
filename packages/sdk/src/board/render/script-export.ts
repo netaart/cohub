@@ -2,7 +2,7 @@ import type { BoardDocument } from "@cohub/protocol";
 import { BOARD_SCRIPT_HISTORY_MS, boardScriptParamsKey } from "../model/animation.js";
 import { buildBoardScene } from "../model/scene.js";
 import { BOARD_SCRIPT_EXPORT_CALLS } from "../model/script-calls.js";
-import { composeBoardScriptItems } from "../model/script-scene.js";
+import { composeBoardScriptCamera, composeBoardScriptItems } from "../model/script-scene.js";
 import type {
   BoardScriptOutput,
   BoardScriptSnapshot,
@@ -216,6 +216,7 @@ export function createBrowserBoardScriptExport(
       return {
         ...host,
         shaders: (input) => boardShaderOwners(input, outputs, (id) => host.clock(id)),
+        camera: (input) => composeBoardScriptCamera(input, outputs),
         bend: (id) => {
           const output = outputs.get(id);
           return output ? (output.bend ?? null) : undefined;

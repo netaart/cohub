@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 const execFile = promisify(execFileCallback);
-import { BOARD_CAMERA_VIEWPORT, boardDocumentUsesDepth, boardExportView, boardMediaNaturalSize, parseBoardMediaSource, parseBoardScriptInputs } from "@neta-art/cohub/board";
+import { BOARD_CAMERA_VIEWPORT, boardDocumentUsesDepth, boardExportView, boardMediaNaturalSize, isBoardModelItem, parseBoardMediaSource, parseBoardScriptInputs } from "@neta-art/cohub/board";
 import type { BoardAssetKeySource, BoardDocument, BoardExportRegion, BoardMediaState, BoardSceneItem, BoardScriptSnapshot, BoardThemeId } from "@neta-art/cohub/board";
 import { imageVariantUrl, MEDIA_VARIANT_MAX, mediaVariantSize, videoFrameUrl } from "@neta-art/cohub/media";
 import type {
@@ -484,7 +484,7 @@ export async function runBoardExport(
         if (!scripted) return;
         prepared = scripted;
       }
-      const lifts = boardDocumentUsesDepth(prepared.document);
+      const lifts = boardDocumentUsesDepth(prepared.document) || (options.withImages && prepared.plan.items.some(isBoardModelItem));
       if (!decided) {
         decided = true;
         liftChecked = lifts;
@@ -626,6 +626,7 @@ export function gpuResources(spaceId: string, document: BoardDocument, framePict
   return {
     fonts: resolveBundledFonts().flatMap(({ path, family }) => (family ? [{ path, family }] : [])),
     readModule: async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, spaceId, path)).bytes),
+    readFile: async (path) => (await readSpaceFileBytes(client, spaceId, path)).bytes,
     async readPicture(request) {
       if ("background" in request) {
         const source = document.board.background.image && parseBoardMediaSource(document.board.background.image.src);

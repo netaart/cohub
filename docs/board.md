@@ -150,10 +150,47 @@ flat again, and arrows connect to them while flat.
 
 A 3D model file with `props.model.display: "object"` leaves its card and rests on the
 Board itself: fitted to the item's box as its cover view (`props.model.view`) shows
-it, lit, with a contact shadow, and drawn among lifted items so each hides the other
-by distance. `depth` lifts and turns it like any item; `autoplay` plays its
-`props.model.animation`. It shows or hides with its opacity but does not fade. While
-the model loads, and in exports, it shows its card.
+it in its resting pose, lit, with a contact shadow, and drawn among lifted items so
+each hides the other by distance. All object models share one lit scene with the
+lifted items, so characters and cards stand together. `depth` lifts and turns it like
+any item, and turning `view.yaw` turns the model in place. It shows or hides with its
+opacity but does not fade, and shows its card while it loads.
+
+### Models in motion
+
+A model plays its clips by the same rule wherever it appears, as an object, in a
+running card and in exports:
+
+```json
+{"props":{"model":{"display":"object","animation":"Run","fade":250,"loop":true}},"autoplay":true}
+```
+
+- `animation` picks the clip, the model's first without it. Changing it crossfades
+  from the clip that was playing over `fade` milliseconds (250 by default; 0 cuts).
+- With `autoplay`, the clip plays on the Board clock: the first from time 0, a later
+  one from when it is chosen. `loop: false` plays it once and holds its last pose.
+- `time` places the clip at a moment in milliseconds instead, for a timeline track
+  (`props.model.time`, like a video's `props.time`) or a script to drive frame by
+  frame. It plays without `autoplay`.
+
+A script presents these like any field, so switching from `Walk` to `Run` as a
+character speeds up is one `present()`; `cohub boards examples arena` steers a fox
+that way and points the camera at it (see [Board scripts](board-scripts.md#direct-the-camera)).
+Once a model has loaded, the app records its clips in `props.snapshot.clips` (`name`
+and `durationMs`), and `cohub boards apply` and `create` read them from glTF files in
+the sandbox, so scripts and agents know a clip's length before it plays.
+
+Exports draw models as the Board shows them, in a local browser (see [Export](#export)):
+object models in their pose at that moment, and model cards as their stills. A frame
+sequence carries each model's playback from frame to frame, so crossfades and clips
+chosen along the way export as they played; a single frame shows the clip at that time
+on the Board clock. Use `time` where an export must match the timeline to the frame.
+
+| Budget | Desktop | Low-end and mobile |
+|---|---|---|
+| Model file, with buffers and textures | 128 MB | 32 MB |
+| Card stills drawn without opening | 64 MB | 16 MB |
+| Clips recorded per model | 64 | 64 |
 
 The web app loads PixiJS 3D only once something leaves the plane. Exports draw depth
 in WebGL, like shaders (see [Export](#export)); a whole-board export frames lifted
@@ -192,13 +229,14 @@ Enter enters the card: drag to turn the model, Shift+drag or two fingers to pan,
 scroll or pinch to zoom, arrow keys to turn, `+` and `-` to zoom, double-click or `0`
 to return to the cover view, and `Escape` or a click elsewhere to leave, as the model
 eases back to its still. A card too small to turn first zooms into view. A model with
-`autoplay` plays its first animation in place. `props.model.view` (yaw and pitch in
+`autoplay` plays its clip in place, as [Models in motion](#models-in-motion) describes.
+`props.model.view` (yaw and pitch in
 degrees, zoom 1 fits the model) sets the still's camera; **Use this view as cover**
-writes the entered card's current view there. `props.model.animation` picks the clip
-that plays. glTF buffers and textures resolve next
+writes the entered card's current view there. glTF buffers and textures resolve next
 to the model, and Draco and meshopt compression decode as they load. The Web editor
 renders stills only for cards on screen, one at a time, and leaves models above 64 MB
-(16 MB on mobile) for the user to open. Other clients and exports draw a placeholder.
+(16 MB on mobile) for the user to open. Exports in a browser draw the still; Node
+exports draw a placeholder.
 
 A URL loads directly, without importing it into the Space. A Space path retains
 live file updates and resolves through the Space file API. Existing paths are not
@@ -512,8 +550,8 @@ Board uses the same frames; videos elsewhere decode in the page there, and are d
 without a cover in Node exports. Previews beyond the image memory budget (`--image-memory`) are drawn as
 placeholders, with a warning.
 
-Exports draw in Node until a script draws with a shader or an item leaves the plane with
-`depth`; then `--renderer auto` (the default) renders every frame in a local Chrome,
+Exports draw in Node until a script draws with a shader, an item leaves the plane with
+`depth`, or a 3D model shows; then `--renderer auto` (the default) renders every frame in a local Chrome,
 Chromium or Edge, headless and with
 software WebGL where there is no GPU, so the result matches the web app. Set
 `COHUB_CHROME` to pick the browser. Consecutive commands share that browser, which exits
@@ -522,7 +560,8 @@ canvas` stays in Node and warns which shaders fell back to `draw()` or were left
 `--renderer gpu` always uses the browser. `--async` runs the export as a Task in the
 Space's sandbox and returns its id at once; paths are then Space paths.
 
-Scripts see what is exported as their view: the camera for `--camera`, otherwise the
+A `--camera` export follows the camera scripts direct with `present("camera", …)` over
+the animation camera, as viewers do in play. Scripts see what is exported as their view: the camera for `--camera`, otherwise the
 fixed region at the output's pixels, delivered as `viewchange` like on a screen. A
 shader a script declares that the image does not show is named in the warnings with the
 reason: outside the area, hidden, clipped by a frame, every pass switched off, or a
@@ -546,9 +585,11 @@ and video times must be evenly spaced.
 
 A whole-board or `--items` export frames lifted items where they appear; a sequence
 keeps its first frame's area, so give `--rect` or `--camera` when items lift later.
-Without WebGL, lifted items draw flat with a warning. Model objects draw as their cards.
+Without WebGL, lifted items draw flat and model objects as their cards, with a warning.
 `renderBoardExport` draws depth when given `depth`, a stage from
-`loadBoardDepthEngine().createBoardDepthStage(renderer)` that frames can share.
+`loadBoardDepthEngine().createBoardDepthStage(renderer)` that frames can share, and
+model objects when also given `models`, from `loadBoardObjectModels(items, source,
+options)`; keep both across the frames of a sequence so each model keeps its playback.
 
 For batch rendering, reuse `createBoardRenderSampler(document, animation, theme)` from
 `@neta-art/cohub/board/render` with `exportBoardImageBytes` or `renderBoardExport`;

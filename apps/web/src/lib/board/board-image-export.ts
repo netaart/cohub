@@ -21,6 +21,7 @@ import {
 	type BoardRenderPalette,
 	type BoardRenderStyle,
 	createBoardRenderSampler,
+	type LoadedModel,
 	loadBoardDepthEngine,
 	prepareBrowserBoardScripts,
 } from "@neta-art/cohub/board/render";
@@ -153,6 +154,7 @@ export type BoardStageExportBridge = {
 		scale: number,
 		use: (textures: Map<string, Texture>) => T | Promise<T>,
 	) => Promise<T>;
+	loadModels: (items: BoardSceneItem[]) => Promise<Map<string, LoadedModel>>;
 };
 
 export type BoardImageExportResult = {
@@ -264,7 +266,14 @@ export async function exportBoardImage(
 						.then((engine) => engine.createBoardDepthStage(renderer))
 						.catch(() => undefined)
 				: undefined;
+		let models = new Map<string, LoadedModel>();
 		try {
+			if (depth)
+				models = await bridge.loadModels(
+					prepared.plan.items.filter(
+						(item) => prepared.scene.opacity(item.id) > 0,
+					),
+				);
 			return await bridge.withTextures(
 				assets.items,
 				prepared.plan.scale,
@@ -283,6 +292,7 @@ export async function exportBoardImage(
 						assetKey: cappedAssetKey,
 						backgroundTexture: backgroundTexture?.texture,
 						depth,
+						models,
 					});
 					if (!result) return null;
 
@@ -314,6 +324,7 @@ export async function exportBoardImage(
 		} finally {
 			backgroundTexture?.dispose();
 			depth?.destroy();
+			for (const model of models.values()) model.destroy();
 		}
 	} finally {
 		scripts?.dispose();

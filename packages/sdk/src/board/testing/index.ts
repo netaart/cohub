@@ -5,6 +5,7 @@ import { worldPoint, screenPoint } from "../model/geometry.js";
 import type {
   BoardScriptBrowserEvent,
   BoardScriptBrowserEvents,
+  BoardScriptCamera,
   BoardScriptOutput,
   BoardScriptPeer,
   BoardScriptSense,
@@ -213,6 +214,9 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     },
     get time() {
       return clock;
+    },
+    get camera(): BoardScriptCamera | null {
+      return controller.camera();
     },
     output: (id: string): BoardScriptOutput | null => controller.output(id),
     error: (id: string): string | null => controller.error(id),

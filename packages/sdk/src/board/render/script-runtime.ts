@@ -59,6 +59,7 @@ export function createScriptRuntime(
   if (!initial.item && module.draw)
     throw new Error("A Board script has no box to draw(); use shader passes or scene().");
   const DISPLAY = ["position", "size", "rotation", "scale", "opacity", "style", "props", "z", "depth"];
+  const CAMERA = ["focus", "zoom", "center", "shake"];
   let input = initial;
   let disposed = false;
   let stepping = false;
@@ -97,6 +98,7 @@ export function createScriptRuntime(
   const cleanups: Array<() => void> = [];
   const effects = structuredClone(initial.snapshot?.effects);
   let patches: BoardScriptOutput["patches"] = effects?.patches ?? {};
+  let camera: BoardScriptOutput["camera"] = effects?.camera;
   const layers: Record<"world" | "screen", Record<string, unknown>> = {
     world: effects?.world ?? {},
     screen: effects?.screen ?? {},
@@ -114,7 +116,14 @@ export function createScriptRuntime(
     if (scene) sceneRevision++;
     host.invalidate();
   };
-  const present: BoardScriptContext["present"] = (id, patch) => {
+  const present = (id: string, patch: Record<string, unknown> | null) => {
+    if (id === "camera") {
+      if (patch !== null && (!patch || typeof patch !== "object" || Object.keys(patch).some((key) => !CAMERA.includes(key))))
+        throw new Error(`present("camera") only directs ${CAMERA.join(", ")}.`);
+      camera = patch === null ? undefined : (structuredClone(patch) as BoardScriptOutput["camera"]);
+      invalidate();
+      return;
+    }
     if (patch === null) {
       if (!(id in patches)) return;
       delete patches[id];
@@ -134,7 +143,7 @@ export function createScriptRuntime(
       },
       present: (patch) => {
         if (!input.item) throw new Error("A Board script has no item to present; present() items in scope instead.");
-        present(initial.id, patch);
+        present(initial.id, patch as Record<string, unknown> | null);
       },
     },
     get params() {
@@ -189,7 +198,7 @@ export function createScriptRuntime(
     onDispose: (handler) => cleanups.push(handler),
     invalidate: () => invalidate(),
     get: (id) => input.items[id],
-    present,
+    present: present as BoardScriptContext["present"],
     scene(next, options) {
       const space = options?.space ?? "world";
       if (space !== "world" && space !== "screen") throw new Error("Scene space must be world or screen.");
@@ -350,6 +359,7 @@ export function createScriptRuntime(
       return {
         parameters: module.parameters,
         patches,
+        camera,
         world: layers.world,
         screen: layers.screen,
         anchor,
@@ -375,7 +385,7 @@ export function createScriptRuntime(
         state,
         time,
         random: randomState,
-        effects: includeEffects ? { patches, world: layers.world, screen: layers.screen, anchor, hits, uniforms, passes } : undefined,
+        effects: includeEffects ? { patches, camera, world: layers.world, screen: layers.screen, anchor, hits, uniforms, passes } : undefined,
       };
       return clone ? structuredClone(snapshot) : snapshot;
     },
@@ -386,6 +396,7 @@ export function createScriptRuntime(
       handlers.clear();
       frames.clear();
       patches = {};
+      camera = undefined;
       layers.world = {};
       layers.screen = {};
       hits = {};

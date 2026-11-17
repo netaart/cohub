@@ -88,6 +88,10 @@ Worth knowing before you build:
   presets `flip`, `lift`, `land`, `toss`, `sway`, `wave`, `curl` animate it, and a model
   file with `props.model.display: "object"` rests on the Board as a lit 3D object.
   `boards examples depth` shows a handkerchief toss and a card flip.
+- A model's `props.model.animation` picks its clip; changing it crossfades over `fade`
+  ms (250). With `autoplay` it plays on the Board clock; `time` (ms) drives it from a
+  track or script instead, and `loop: false` holds the last pose. Clip names and lengths
+  are in `props.snapshot.clips`. Exports draw models as shown, in a local browser.
 
 ## Read and write
 
@@ -223,6 +227,11 @@ source is unavailable. Record input in the Board, then replay it with `export --
 or a simulate `{"inputs": "…"}` step; `{"input": "browser:devicemotion", "data": {…}}`
 delivers one event. `capabilities.call("navigator.vibrate" | "haptics" | "fullscreen")`
 answers back.
+
+`ctx.present("camera", { focus | center, zoom, shake })` directs the camera like a camera
+track: play and read-only views follow it until the viewer pans, `--camera` exports
+follow it, and editing never does. `cohub boards examples arena` steers a fox with WASD,
+switching its clips as it walks and runs, with the camera following.
 
 Published as an App, a Board opens in play: every visitor gets a local copy where
 drags move unlocked items and script regions take every press, saved per App version.
