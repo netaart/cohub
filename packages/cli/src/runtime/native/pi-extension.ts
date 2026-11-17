@@ -61,6 +61,8 @@ function locateSocket(cwd: string): string | null {
 
 /** How often a missing or lost Runtime is looked for again. */
 const RECONNECT_MS = 3_000;
+/** A prompt whose run never starts (an input handler took it) stops holding the session after this. */
+const START_GRACE_MS = 10_000;
 
 const MESSAGE_FIELDS = ["message", "assistantMessageEvent"];
 const TOOL_FIELDS = ["toolCallId", "toolName", "args", "result", "partialResult", "isError"];
@@ -81,7 +83,8 @@ export function forwardedEvent(name: string, event: unknown): Record<string, unk
   return forwarded;
 }
 
-export default function cohub(pi: Pi) {
+/** Pi calls this with its extension API only; `open` is for tests. */
+export default function cohub(pi: Pi, open: (endpoint: string) => Socket = connect) {
   // Cohub may load this file explicitly into a Pi it starts; never attach twice.
   const marker = Symbol.for("cohub.pi.control");
   const globals = globalThis as Record<symbol, boolean>;
@@ -93,13 +96,18 @@ export default function cohub(pi: Pi) {
   let buffer = "";
   let retry: ReturnType<typeof setTimeout> | null = null;
   let probedAt = 0;
+  // `sendUserMessage` starts its run asynchronously and reports a refusal to Pi, not here. Until
+  // `agent_start` Pi still reports idle, so a second prompt would be accepted and then dropped.
+  let starting: ReturnType<typeof setTimeout> | null = null;
+  const started = () => { if (starting) clearTimeout(starting); starting = null; };
+  const busy = (ctx: PiContext) => starting !== null || !ctx.isIdle();
   const send = (message: unknown) => { if (socket && !socket.destroyed) socket.write(`${JSON.stringify(message)}\n`); };
 
   const run = async (command: Command) => {
     if (!context) throw new Error("Pi session is not ready");
     if (command.type === "abort") { context.abort(); return { idle: context.isIdle() }; }
     if (command.type === "context") { applyEnvironment(command.env); return { idle: context.isIdle() }; }
-    const idle = context.isIdle();
+    const idle = !busy(context);
     // A Cohub Turn is a Turn of its own. If the terminal user started one first, nothing is written
     // and Cohub waits for it to settle: queued behind it, the marker and the events would
     // interleave.
@@ -110,11 +118,16 @@ export default function cohub(pi: Pi) {
     }
     if (idle && command.thinkingLevel && pi.setThinkingLevel) pi.setThinkingLevel(command.thinkingLevel);
     // Choosing the model awaited; the terminal may have started meanwhile.
-    if (command.turnId && !context.isIdle()) return { idle: false, accepted: false };
+    if (command.turnId && busy(context)) return { idle: false, accepted: false };
     // The marker precedes the user message, so the transcript itself records which cloud Turn it is.
     applyEnvironment(command.env);
     if (command.turnId) pi.appendEntry("cohub.turn", { turnId: command.turnId });
-    pi.sendUserMessage(command.content, idle ? undefined : { deliverAs: command.deliverAs ?? "followUp" });
+    const startsRun = !busy(context);
+    if (startsRun) {
+      starting = setTimeout(started, START_GRACE_MS);
+      starting.unref?.();
+    }
+    pi.sendUserMessage(command.content, startsRun ? undefined : { deliverAs: command.deliverAs ?? "followUp" });
     return { idle, accepted: true };
   };
 
@@ -130,7 +143,7 @@ export default function cohub(pi: Pi) {
     if (process.platform === "win32") {
       try { endpoint = readFileSync(path, "utf8").trim(); } catch { return; }
     }
-    const current = connect(endpoint);
+    const current = open(endpoint);
     socket = current;
     buffer = "";
     current.on("connect", () => send({
@@ -157,6 +170,7 @@ export default function cohub(pi: Pi) {
   };
 
   pi.on("session_start", (_event, ctx) => attach(ctx));
+  pi.on("agent_start", started);
   for (const name of Object.keys(FORWARDED)) {
     pi.on(name, (event, ctx) => {
       context = ctx;
@@ -169,6 +183,7 @@ export default function cohub(pi: Pi) {
   pi.on("session_shutdown", () => {
     if (retry) clearTimeout(retry);
     retry = null;
+    started();
     socket?.end();
     socket = null;
     context = null;
