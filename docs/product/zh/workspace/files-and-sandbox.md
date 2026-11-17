@@ -164,3 +164,5 @@ Space 的显式设置优先于项目文件，项目文件优先于已启用的 m
 - [Chats](/zh/docs/workspace/chats)
 - [Saves](/zh/docs/workspace/saves)
 - [Apps](/zh/docs/create/apps)
+- [独立开发者 AI 工作台](/zh/use-cases/indie-developer-ai-workspace) —— 把 Sandbox 当作一个人用的云电脑
+- [Replit Agent 替代](/zh/compare/replit-agent-alternative) —— Sandbox 的对比

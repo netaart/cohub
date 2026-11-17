@@ -102,3 +102,5 @@ Spaces 可以把其他 Spaces 挂为 Mods。
 - [Files 与 Sandbox](/zh/docs/workspace/files-and-sandbox)
 - [Saves](/zh/docs/workspace/saves)
 - [Apps](/zh/docs/create/apps)
+- [团队共享 AI 上下文](/zh/use-cases/team-shared-ai-context) —— 整个团队用一个 Space
+- [多人 AI 协作](/zh/use-cases/multiplayer-ai-chat) —— 和朋友、Agent 在一个 Space 里一起做东西

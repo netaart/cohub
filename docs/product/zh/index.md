@@ -42,6 +42,8 @@ Cohub 是一个让人和 Agent 共同创作的共享工作区。
 | 几分钟走通闭环 | [快速开始](/zh/docs/learn/quick-start) |
 | 使用终端 | [CLI](/zh/docs/developers/cli) |
 | 做集成 | [SDK](/zh/docs/developers/sdk) |
+| 看看谁在用 Cohub、用来做什么 | [使用场景](/zh/use-cases) |
+| 把 Cohub 和其他工具对比 | [对比](/zh/compare) |
 
 ## 产品语言
 

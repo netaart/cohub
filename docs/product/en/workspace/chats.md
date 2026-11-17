@@ -144,3 +144,5 @@ See in-app help for the full shortcut list.
 - [Spaces](/docs/workspace/spaces)
 - [Files & Sandbox](/docs/workspace/files-and-sandbox)
 - [Saves](/docs/workspace/saves)
+- [Context network](/features/context-network) — bring context from other Spaces into a Chat
+- [AI research workspace](/use-cases/ai-research-workspace) — research across Spaces with shared context

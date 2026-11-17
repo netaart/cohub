@@ -98,3 +98,9 @@ Scheduled prompt 会在稍后发送或重复发送 prompt。
 Permissions 决定成员、匿名访客和 Apps 能做什么。
 
 Space 角色是 **host**、**builder**、**guest**。App 也会声明自身 scopes，需要运行时访问时请求 viewer 同意。
+
+## 相关
+
+- [在 Discord、微信里用 AI agent](/zh/use-cases/agent-in-discord-wechat) —— Channel 的实际用法
+- [定时让 AI 干活](/zh/use-cases/schedule-ai-agent-tasks) —— Scheduled prompt 的实际用法
+- [对比](/zh/compare) —— Cohub 与其他 AI 工具的区别

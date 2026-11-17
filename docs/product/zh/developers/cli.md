@@ -381,3 +381,8 @@ cohub -s <spaceId> spaces sessions ls --json
 - App 能力与权限：[App 开发](/zh/docs/developers/apps)
 - 程序化访问：[SDK](/zh/docs/developers/sdk)
 - 发布细节：[Apps](/zh/docs/create/apps)
+
+## 相关
+
+- [定时提示](/zh/features/scheduled-prompts) —— 用 `spaces prompt` 和 `cron-jobs` 让 Agent 按点干活
+- [自托管 Cohub](/zh/guides/self-host-cohub) —— 让 CLI 连接你自己的部署
