@@ -47,6 +47,7 @@ export const RESERVED_PLATFORM_PATH_SEGMENTS = Object.freeze([
   "teams",
   "trending",
   "u",
+  "updates",
   "user",
   "users",
   "use-cases",
