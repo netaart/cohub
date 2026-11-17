@@ -1,5 +1,24 @@
 # @neta-art/cohub-cli
 
+## 10.31.0
+
+### Minor Changes
+
+- 48f2207: Board models play their clips by one rule everywhere: `props.model.animation` crossfades over `fade` ms when it changes, an `autoplay` model plays on the Board clock, `time` drives a clip from a track or a script, and `loop: false` holds the last pose. Loaded models record their clips in `props.snapshot.clips`. Scripts direct the camera with `ctx.present("camera", { focus, zoom, center, shake })`, which play and read-only views follow until the viewer pans (the app offers Back to the camera) and editing ignores. Exports draw model objects in their pose and model cards as stills, and `--camera` exports follow the script camera. `renderBoardExport` takes `models` from `loadBoardObjectModels`; the stage adds `loadModels` and `scriptCamera`; `BoardScriptHost` adds `camera`; the test harness adds `camera`. The CLI records clips of sandbox glTF files on `create` and `apply`, renders model cards and objects in local Chrome, reports the directed camera in `boards simulate`, and adds `boards examples arena`.
+  
+  Hosts: an export bridge built on `exportBoardImage` passes `loadModels: (items) => stage.loadModels(items)`; show a "Back to the camera" control while `stage.scriptCamera` is true and `editor.cameraPolicy` is `"free"`, setting the policy to `"follow"`.
+- 77cbb86: The Board camera can tip and turn: camera tracks, `ctx.present("camera", …)` and `#view=x,y,zoom,pitch,bearing` links take `pitch` (0–60° toward the horizon) and `bearing` (degrees clockwise), both about the middle of the view. A tipped camera shows the flat Board as ground in perspective with lifted items and model objects standing on it, keeps script screen layers on screen, and lets viewers pan and zoom across the ground; editing levels it first, and `--camera` exports keep it. Model objects lean toward a camera that looks down and stand up under a low one, with `rotation` turning them about their own axis. `attach: { item, node? }` makes an item follow another's origin, and with `node` ride a named node of a model object in 3D; loaded models record their nodes in `props.snapshot.nodes`, which the CLI reads from sandbox glTF files.
+  
+  Depth geometry is now in board units with z up, the same at every camera: `boardDepthSurface(placement)` no longer takes a view, `boardDepthPose`, `hitBoardDepthSurface`, `boardDepthScreenPoint` and `boardDepthShadow` take a `BoardProjection` from `boardProjection(camera, size)`, and `BoardDepthStage.aim(projection)` replaces `resize`. `BoardViewport` adds optional `pitch` and `bearing`; `boardViewToWorld`, `boardViewRect`, `panBoardView` and `zoomBoardView` handle every camera. `toBoardPointerEvent` takes a screen-to-Board function instead of a camera, `editor.adoptModelFacts` replaces `adoptModelClips`, and `readBoardModelFacts` replaces `readBoardModelClips`.
+
+### Patch Changes
+
+- Updated dependencies [a8d03f1]
+- Updated dependencies [a8d03f1]
+- Updated dependencies [48f2207]
+- Updated dependencies [77cbb86]
+  - @neta-art/cohub@13.23.0
+
 ## 10.30.0
 
 ### Minor Changes
