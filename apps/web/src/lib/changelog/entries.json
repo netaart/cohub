@@ -1,5 +1,23 @@
 [
 	{
+		"version": "2.104",
+		"date": "2026-11-17",
+		"tags": ["v2.104.0"],
+		"highlights": [
+			"**Camera pitch and bearing**: Board cameras can now tip and turn. Camera tracks, `ctx.present(\"camera\", …)` and `#view=x,y,zoom,pitch,bearing` links take `pitch` (0–60° toward the horizon) and `bearing` (degrees clockwise), both about the middle of the view, so the flat Board shows as ground in perspective with lifted items and model objects standing on it. Viewers pan and zoom across the ground, script screen layers stay on screen, editing levels the camera first, and `--camera` exports keep the angles",
+			"**Models in motion**: `props.model` takes `time`, `loop` and `fade`; changing `animation` crossfades over `fade` milliseconds, `autoplay` plays the clip on the Board clock, `time` drives a clip from a timeline track or a script, and `loop: false` holds the last pose. Object models, running cards and exports pose every model by the same rule, and loaded models record their clips in `props.snapshot.clips`",
+			"**Script-directed camera**: `ctx.present(\"camera\", { focus, zoom, center, shake })` steers play and read-only views and camera exports, while editing ignores it; a viewer's pan takes control until **Back to the camera**. Exports draw model objects in their pose and model cards as stills, and `renderBoardExport` takes `models` from `loadBoardObjectModels` for model-aware hosts",
+			"**Attachments**: `attach: { item, node? }` makes an item follow another's origin — with `node`, it rides a named joint of a 3D model object as the model moves and animates. Loaded models record `props.snapshot.nodes`, and layout, validation, server bounds, deletion and copies all carry attachments; `cohub boards examples arena` puts a glow on the fox's head",
+			"**Depth in board units**: 3D geometry now lives in board units with z up behind one projection. `boardDepthSurface(placement)` no longer takes a view, the depth helpers take a `BoardProjection` from `boardProjection(camera, size)`, `BoardDepthStage.aim(projection)` replaces `resize`, `BoardViewport` adds optional `pitch` and `bearing`, and `boardViewToWorld`, `boardViewRect`, `panBoardView` and `zoomBoardView` handle every camera",
+			"**3D models in the CLI and exports**: `cohub boards create` and `apply` record a sandbox glTF file's clips and nodes, exports render model objects and card stills in local Chrome while keeping playback across a frame sequence, `boards simulate` reports the directed camera, and `boards examples arena` shows a low following camera with a glow riding the fox's head"
+		],
+		"fixes": [
+			"**App authorization on slow networks**: an authorization request that names the Space the App was invoked in now reuses a cached grant before loading the viewer's Space list, and a consent dialog whose Space list failed reloads it on confirm instead of repeating the error; a host can label its confirm action as a retry while `pendingAuth.spaces` is `null`",
+			"**Sandbox hardening**: sandbox pods now drop every Linux capability, disallow privilege escalation and run under the default seccomp profile, and a NetworkPolicy blocks the cloud instance metadata service (`169.254.169.254`, `100.100.100.200` and the IPv6 `fd00:ec2::254`) for every pod in the sessions namespace, closing an egress path from untrusted sandbox code to node credentials",
+			"**Public Space responses trimmed**: non-editors now get only what the Space page displays — no env vars, config, bootstrap credentials, storage repo name, checkpoint ids, workspace usage or full sandbox details — and session detail trims the Space for non-members, while listing checkpoints requires Space membership"
+		]
+	},
+	{
 		"version": "2.103",
 		"date": "2026-11-17",
 		"tags": ["v2.103.0"],
