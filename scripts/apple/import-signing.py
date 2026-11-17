@@ -57,7 +57,7 @@ for name, variable in [('profile', 'APPLE_PROFILE'), ('share-profile', 'APPLE_SH
     assert not data['Entitlements'].get('get-task-allow', False), 'Development signing is not allowed'
     assert certificate_hashes[0] in [hashlib.sha1(cert).hexdigest().upper() for cert in data['DeveloperCertificates']], 'Profile does not include the application signing certificate'
     platform = data['Platform']
-    bundle = 'live.cohub.desktop' if 'OSX' in platform else 'live.cohub.ios' + ('.share' if name == 'share-profile' else '')
+    bundle = 'live.cohub.ios' + ('.share' if name == 'share-profile' else '')
     entitlements = data['Entitlements']
     assert entitlements.get('application-identifier', entitlements.get('com.apple.application-identifier')) == team + '.' + bundle, 'Unexpected application identifier'
     if 'iOS' in platform:

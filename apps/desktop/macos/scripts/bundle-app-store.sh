@@ -24,11 +24,11 @@ with open(source, 'rb') as f:
 for key in list(info):
     if key.startswith('SU') or key in ['CFBundleDocumentTypes', 'NSDocumentsFolderUsageDescription', 'NSDesktopFolderUsageDescription', 'NSDownloadsFolderUsageDescription', 'NSRemovableVolumesUsageDescription', 'NSNetworkVolumesUsageDescription']:
         del info[key]
-info.update(CFBundleDisplayName='Cohub', CFBundleName='Cohub', CFBundleIdentifier='live.cohub.desktop',
+info.update(CFBundleDisplayName='Cohub', CFBundleName='Cohub', CFBundleIdentifier='live.cohub.ios',
     CFBundleShortVersionString=version, CFBundleVersion=build, LSMinimumSystemVersion='14.4',
     CFBundleInfoDictionaryVersion='6.0', ITSAppUsesNonExemptEncryption=False,
     CohubCommit=commit, CohubEnvironment='prod', CohubWebOrigin='https://cohub.live', CohubURLScheme='cohub')
-info['CFBundleURLTypes'] = [{'CFBundleURLName': 'live.cohub.desktop', 'CFBundleURLSchemes': ['cohub']}]
+info['CFBundleURLTypes'] = [{'CFBundleURLName': 'live.cohub.ios', 'CFBundleURLSchemes': ['cohub']}]
 with open(target, 'wb') as f:
     plistlib.dump(info, f)
 PY
@@ -50,7 +50,7 @@ python3 - "$here/Bundle/AppStore.entitlements" "$entitlements" "${APPLE_TEAM_ID:
 import plistlib, sys
 with open(sys.argv[1], 'rb') as f:
     data = plistlib.load(f)
-data['com.apple.application-identifier'] = sys.argv[3] + '.live.cohub.desktop'
+data['com.apple.application-identifier'] = sys.argv[3] + '.live.cohub.ios'
 data['com.apple.developer.team-identifier'] = sys.argv[3]
 with open(sys.argv[2], 'wb') as f:
     plistlib.dump(data, f)

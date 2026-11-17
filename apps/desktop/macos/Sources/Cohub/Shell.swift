@@ -28,7 +28,7 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         redirectURI: URL(string: config.origin.origin + "/mobile/auth/callback")!,
         apiResource: "https://api.talesofai"
     )
-    private lazy var auth = AuthSession(store: KeychainStore(service: "live.cohub.desktop"), config: authConfig)
+    private lazy var auth = AuthSession(store: KeychainStore(service: Bundle.main.bundleIdentifier ?? "live.cohub.ios"), config: authConfig)
     #else
     private var updater: SPUStandardUpdaterController?
     #endif

@@ -192,7 +192,7 @@ publishes a self-contained build and packs it with `vpk` into an AppImage that u
 
 ### Mac App Store
 
-The store build is a sandboxed cloud client (`live.cohub.desktop`, macOS 14.4+),
+The store build is a sandboxed cloud client (`live.cohub.ios`, macOS 14.4+),
 connecting to Spaces on the cloud and other computers. It signs in through the system
 browser and keeps credentials in Keychain. It contains no local Runtime, CLI installer
 or Sparkle updater; the website DMG retains those features and its existing pipeline.
@@ -223,8 +223,10 @@ and always remove their temporary keychain and profiles.
 | `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_KEY_P8` | Upload key ID and P8 contents |
 | `APP_STORE_CONNECT_ISSUER_ID` | Team key issuer; omit for an individual key |
 
-App Store Connect needs records for `live.cohub.ios` and `live.cohub.desktop` before
-upload. Device sign-in requires the deployed web AASA route and the existing native
+The iOS and macOS store builds share the `live.cohub.ios` Bundle ID and one App Store
+Connect record. Add macOS as a platform on the iOS record before uploading the PKG.
+Each platform uses its own provisioning profile; the website DMG retains
+`live.cohub.desktop`. Device sign-in requires the deployed web AASA route and the existing native
 Logto application's `https://cohub.live/mobile/auth/callback` redirect.
 
 ### Website distribution

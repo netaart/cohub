@@ -3,36 +3,28 @@ import { PUBLIC_COHUB_ENV } from "$env/static/public";
 
 const APPLE_TEAM_ID = "6RKNFNT44H";
 
-const IOS_BUNDLE_IDS: Record<string, string> = {
+const STORE_BUNDLE_IDS: Record<string, string> = {
 	dev: "live.cohub.ios.dev",
 	prod: "live.cohub.ios",
 };
 
 const env = PUBLIC_COHUB_ENV?.trim().toLowerCase() ?? "";
-const bundleId = IOS_BUNDLE_IDS[env];
+const bundleId = STORE_BUNDLE_IDS[env];
 const apps = APPLE_TEAM_ID && bundleId ? [`${APPLE_TEAM_ID}.${bundleId}`] : [];
-const desktopApps =
-	env === "prod" ? [`${APPLE_TEAM_ID}.live.cohub.desktop`] : [];
 
 const association = {
 	applinks: {
-		details: [
-			...apps.map((appID) => ({
-				appIDs: [appID],
-				components: [
-					{ "/": "/callback*", exclude: true },
-					{ "/": "/app-auth*", exclude: true },
-					{ "/": "/mobile/*", exclude: true },
-					{ "/": "/*" },
-				],
-			})),
-			...desktopApps.map((appID) => ({
-				appIDs: [appID],
-				components: [{ "/": "/mobile/auth/callback" }],
-			})),
-		],
+		details: apps.map((appID) => ({
+			appIDs: [appID],
+			components: [
+				{ "/": "/callback*", exclude: true },
+				{ "/": "/app-auth*", exclude: true },
+				{ "/": "/mobile/*", exclude: true },
+				{ "/": "/*" },
+			],
+		})),
 	},
-	webcredentials: { apps: [...apps, ...desktopApps] },
+	webcredentials: { apps },
 };
 
 export const GET: RequestHandler = () =>
