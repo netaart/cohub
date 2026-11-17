@@ -1,5 +1,5 @@
-import { intlTag } from "$lib/resource-kit/core";
-import type { Locale } from "./locale";
+import { intlTag } from "#lib/resource-kit/core.ts";
+import type { Locale } from "./locale.ts";
 
 /**
  * Locale-aware formatting primitives.

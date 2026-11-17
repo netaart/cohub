@@ -1,13 +1,13 @@
 <script lang="ts">
 import type { AppRecord } from "@neta-art/cohub";
 import { ExternalLink, Settings2 } from "lucide-svelte";
-import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
-import { boardAppCover } from "$lib/board/board-app";
-import AppIcon from "$lib/components/app/AppIcon.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { buildSpaceAppRoute } from "$lib/space-routes";
-import type { WorkspaceAppLaunch } from "../modules/workspace-app-open";
+import { appDisplayTitle, appIconUrl } from "#lib/app-page-meta.ts";
+import { boardAppCover } from "#lib/board/board-app.ts";
+import AppIcon from "#lib/components/app/AppIcon.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { buildSpaceAppRoute } from "#lib/space-routes.ts";
+import type { WorkspaceAppLaunch } from "../modules/workspace-app-open.ts";
 import SidePanelRow from "./SidePanelRow.svelte";
 import SidePanelRowAction from "./SidePanelRowAction.svelte";
 

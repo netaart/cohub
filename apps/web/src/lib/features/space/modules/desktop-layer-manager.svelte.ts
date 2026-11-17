@@ -4,15 +4,15 @@ import type {
 	AppDetailResponse,
 	AppRuntimeInvocationContext,
 } from "@neta-art/cohub";
-import { appDisplayTitle } from "$lib/app-page-meta";
-import { loadAppPreview } from "$lib/features/app/app-open";
-import type { AppSurfaceRegistry } from "$lib/features/app/surface-registry";
+import { appDisplayTitle } from "#lib/app-page-meta.ts";
+import { loadAppPreview } from "#lib/features/app/app-open.ts";
+import type { AppSurfaceRegistry } from "#lib/features/app/surface-registry.ts";
 import {
 	type OverlayGeometry,
 	type OverlayInputRegion,
 	sameGeometry,
 	sameInputRegion,
-} from "./desktop-layer-geometry";
+} from "./desktop-layer-geometry.ts";
 
 /** Upper bound on simultaneously mounted overlay iframes. */
 export const OVERLAY_MAX = 8;
@@ -51,11 +51,12 @@ export function createDesktopLayerManager(options: DesktopLayerManagerOptions) {
 
 	const loadApp =
 		options.loadApp ??
-		(async (appId: string) => (await import("$lib/sdk")).sdk.apps.get(appId));
+		(async (appId: string) =>
+			(await import("#lib/sdk.ts")).sdk.apps.get(appId));
 	const loadPublicApp =
 		options.loadPublicApp ??
 		(async (appId: string) =>
-			(await import("$lib/sdk")).sdk.apps.getPublicById(appId));
+			(await import("#lib/sdk.ts")).sdk.apps.getPublicById(appId));
 
 	function find(appId: string) {
 		return overlays.find((overlay) => overlay.appId === appId);

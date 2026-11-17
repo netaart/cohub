@@ -24,15 +24,15 @@ import {
 } from "lucide-svelte";
 import { onDestroy, untrack } from "svelte";
 import { MediaQuery } from "svelte/reactivity";
-import { identityColor } from "$lib/avatar-identity";
-import { presentDeviceDisplay } from "$lib/device-display.svelte";
-import { formatBytes } from "$lib/format-bytes";
-import { holdHostKeys } from "$lib/host-tabs";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { claimKeyboard } from "$lib/keyboard";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { displayUserName } from "../space-utils";
+import { identityColor } from "#lib/avatar-identity.ts";
+import { presentDeviceDisplay } from "#lib/device-display.svelte.ts";
+import { formatBytes } from "#lib/format-bytes.ts";
+import { holdHostKeys } from "#lib/host-tabs.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { claimKeyboard } from "#lib/keyboard.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { displayUserName } from "../space-utils.ts";
 import DisplayCursors, {
 	type DisplayCursorMark,
 	type DisplayRect,
@@ -43,7 +43,7 @@ import DisplayKeyboard, {
 import DisplayRecordings from "./DisplayRecordings.svelte";
 import DisplayReplayDialog from "./DisplayReplayDialog.svelte";
 import DisplayViewers from "./DisplayViewers.svelte";
-import { createDisplayCamera } from "./display-camera.svelte";
+import { createDisplayCamera } from "./display-camera.svelte.ts";
 import {
 	containedRect,
 	createModifierSync,
@@ -53,20 +53,23 @@ import {
 	textBatches,
 	toDisplayPoint,
 	wheelFraction,
-} from "./display-input";
-import { createDisplayRecording } from "./display-recording.svelte";
-import { formatClock } from "./display-replay";
+} from "./display-input.ts";
+import { createDisplayRecording } from "./display-recording.svelte.ts";
+import { formatClock } from "./display-replay.ts";
 import {
 	createDisplayTouch,
 	type DisplayTouchIntent,
 	type DisplayTouchMode,
 	readDisplayTouchMode,
 	writeDisplayTouchMode,
-} from "./display-touch";
-import { createDisplayView, type DisplayProblem } from "./display-view.svelte";
+} from "./display-touch.ts";
+import {
+	createDisplayView,
+	type DisplayProblem,
+} from "./display-view.svelte.ts";
 import PreviewHeader from "./PreviewHeader.svelte";
-import type { PreviewChrome, PreviewHeaderAction } from "./preview-header";
-import type { Window } from "./windows";
+import type { PreviewChrome, PreviewHeaderAction } from "./preview-header.ts";
+import type { Window } from "./windows.ts";
 
 type Props = {
 	spaceId: string;

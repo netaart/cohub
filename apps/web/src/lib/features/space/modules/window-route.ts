@@ -1,7 +1,8 @@
 import { readResourceAppTarget, writeResourceAppTarget } from "@cohub/protocol";
 import { DISPLAY_ID_PATTERN } from "@cohub/protocol/display";
-import { buildSpaceRootRoute } from "$lib/space-routes";
-import { parseAppWindowKey } from "./app-window-key";
+import { buildSpaceRootRoute } from "#lib/space-routes.ts";
+import type { ReadonlyURLSearchParams } from "$app/state";
+import { parseAppWindowKey } from "./app-window-key.ts";
 
 export type WindowKind = "file" | "board" | "port" | "app" | "display";
 
@@ -61,8 +62,8 @@ export function parseWindowParam(
 }
 
 function windowSearchParams(
-	search: string | URLSearchParams | null | undefined,
-): URLSearchParams | null {
+	search: string | ReadonlyURLSearchParams | null | undefined,
+): ReadonlyURLSearchParams | null {
 	if (!search) return null;
 	return typeof search === "string"
 		? new URLSearchParams(search.startsWith("?") ? search.slice(1) : search)
@@ -70,7 +71,7 @@ function windowSearchParams(
 }
 
 export function readWindowFromSearch(
-	search: string | URLSearchParams | null | undefined,
+	search: string | ReadonlyURLSearchParams | null | undefined,
 ): WindowRef | null {
 	const params = windowSearchParams(search);
 	return parseWindowParam(
@@ -83,7 +84,7 @@ export function readWindowFromSearch(
  * explicit window in the browser URL.
  */
 export function resolveRouteWindow(
-	search: string | URLSearchParams | null | undefined,
+	search: string | ReadonlyURLSearchParams | null | undefined,
 	shallowValue: string | null | undefined,
 ): WindowRef | null {
 	const params = windowSearchParams(search);
@@ -94,7 +95,7 @@ export function resolveRouteWindow(
 	return parseWindowParam(shallowValue);
 }
 
-export function readAppHash(search: URLSearchParams): string | null {
+export function readAppHash(search: ReadonlyURLSearchParams): string | null {
 	const hash = search.get("appHash");
 	return hash?.startsWith("#") && hash.length <= 2048 ? hash : null;
 }

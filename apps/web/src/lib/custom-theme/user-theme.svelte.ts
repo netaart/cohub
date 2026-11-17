@@ -1,7 +1,7 @@
 import { HOME_SPACE_SLUG } from "@cohub/protocol/public-identifiers";
 import { HttpError, type SpaceRecord } from "@neta-art/cohub";
-import { getThemeCss } from "$lib/custom-theme/theme-css.svelte";
-import { sdk } from "$lib/sdk";
+import { getThemeCss } from "#lib/custom-theme/theme-css.svelte.ts";
+import { sdk } from "#lib/sdk.ts";
 
 const ENABLED_STORAGE_KEY = "cohub:custom-theme-enabled";
 
@@ -39,7 +39,8 @@ class UserTheme {
 	#request = 0;
 
 	setHomeSpace(space: Pick<SpaceRecord, "id" | "userUuid" | "slug">) {
-		if (space.userUuid !== this.#userUuid || space.slug !== HOME_SPACE_SLUG) return;
+		if (space.userUuid !== this.#userUuid || space.slug !== HOME_SPACE_SLUG)
+			return;
 		this.#request += 1;
 		writeStorage(homeSpaceKey(space.userUuid), space.id);
 		this.spaceId = space.id;

@@ -1,35 +1,33 @@
 <script lang="ts">
 import "../../app.css";
 import { onMount } from "svelte";
-import { goto, onNavigate } from "$app/navigation";
-import { page } from "$app/state";
-import { OPEN_ABOUT_EVENT } from "$lib/about";
-import { scheduleCacheCleanup } from "$lib/cache/cleanup";
-import AboutDialog from "$lib/components/AboutDialog.svelte";
-import BillingConversionCenter from "$lib/components/BillingConversionCenter.svelte";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import CommandPalette from "$lib/components/CommandPalette.svelte";
-import DownloadToasts from "$lib/components/DownloadToasts.svelte";
-import DragGhostLayer from "$lib/components/DragGhostLayer.svelte";
-import FeedbackDialog from "$lib/components/FeedbackDialog.svelte";
-import HelpPanel from "$lib/components/HelpPanel.svelte";
-import MediaLightbox from "$lib/components/MediaLightbox.svelte";
-import MobileSidebarDrawer from "$lib/components/MobileSidebarDrawer.svelte";
-import MobileTabBar from "$lib/components/MobileTabBar.svelte";
-import { mediaLightbox } from "$lib/components/media-lightbox";
-import ResizeHandle from "$lib/components/ResizeHandle.svelte";
-import Sidebar from "$lib/components/Sidebar.svelte";
-import TurnNotificationStack from "$lib/components/TurnNotificationStack.svelte";
-import CustomThemeLayers from "$lib/custom-theme/CustomThemeLayers.svelte";
-import { createDeferredMount } from "$lib/deferred-mount.svelte";
-import { linkDeviceDisplays } from "$lib/device-display.svelte";
-import { installHostDownloads } from "$lib/downloads.svelte";
-import { pointerDrag } from "$lib/drag/pointer-drag.svelte";
-import CheckoutReturnHandler from "$lib/features/billing/CheckoutReturnHandler.svelte";
-import SpaceWalletReturn from "$lib/features/billing/SpaceWalletReturn.svelte";
-import { startDesktopCommandListener } from "$lib/features/desktop-command/bus";
-import GlobalMarkCapture from "$lib/features/preview-mark/ui/GlobalMarkCapture.svelte";
-import { buildDisplayWindowRoute } from "$lib/features/space/modules/window-route";
+import { OPEN_ABOUT_EVENT } from "#lib/about.ts";
+import { scheduleCacheCleanup } from "#lib/cache/cleanup.ts";
+import AboutDialog from "#lib/components/AboutDialog.svelte";
+import BillingConversionCenter from "#lib/components/BillingConversionCenter.svelte";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import CommandPalette from "#lib/components/CommandPalette.svelte";
+import DownloadToasts from "#lib/components/DownloadToasts.svelte";
+import DragGhostLayer from "#lib/components/DragGhostLayer.svelte";
+import FeedbackDialog from "#lib/components/FeedbackDialog.svelte";
+import HelpPanel from "#lib/components/HelpPanel.svelte";
+import MediaLightbox from "#lib/components/MediaLightbox.svelte";
+import MobileSidebarDrawer from "#lib/components/MobileSidebarDrawer.svelte";
+import MobileTabBar from "#lib/components/MobileTabBar.svelte";
+import { mediaLightbox } from "#lib/components/media-lightbox.ts";
+import ResizeHandle from "#lib/components/ResizeHandle.svelte";
+import Sidebar from "#lib/components/Sidebar.svelte";
+import TurnNotificationStack from "#lib/components/TurnNotificationStack.svelte";
+import CustomThemeLayers from "#lib/custom-theme/CustomThemeLayers.svelte";
+import { createDeferredMount } from "#lib/deferred-mount.svelte.ts";
+import { linkDeviceDisplays } from "#lib/device-display.svelte.ts";
+import { installHostDownloads } from "#lib/downloads.svelte.ts";
+import { pointerDrag } from "#lib/drag/pointer-drag.svelte.ts";
+import CheckoutReturnHandler from "#lib/features/billing/CheckoutReturnHandler.svelte";
+import SpaceWalletReturn from "#lib/features/billing/SpaceWalletReturn.svelte";
+import { startDesktopCommandListener } from "#lib/features/desktop-command/bus.ts";
+import GlobalMarkCapture from "#lib/features/preview-mark/ui/GlobalMarkCapture.svelte";
+import { buildDisplayWindowRoute } from "#lib/features/space/modules/window-route.ts";
 import {
 	type DrawerGestureDirection,
 	type DrawerGesturePhase,
@@ -43,34 +41,36 @@ import {
 	shouldOpenRightDrawer,
 	shouldStartDrawerGesture,
 	shouldStartRightDrawerGesture,
-} from "$lib/gestures/drawer-swipe";
-import { markHostReady } from "$lib/host-bridge";
-import { getLocale } from "$lib/i18n/locale.svelte";
+} from "#lib/gestures/drawer-swipe.ts";
+import { markHostReady } from "#lib/host-bridge.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import {
 	isComposingKeyboardEvent,
 	isEditableShortcutTarget,
 	isKeyboardClaimed,
-} from "$lib/keyboard";
-import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
+} from "#lib/keyboard.ts";
+import { DESKTOP_SHELL_MIN_WIDTH_PX } from "#lib/layout/breakpoints.ts";
 import {
 	pauseLayoutTweensOnWindowResize,
 	type ResizeStart,
-} from "$lib/layout/pointer-resize";
-import { startLiveLists } from "$lib/lists/live-lists";
-import { resolveAppArea, shouldHideMobileTabBar } from "$lib/mobile-nav";
-import { DURATION_DRAWER_OUT, DURATION_PANEL } from "$lib/motion";
+} from "#lib/layout/pointer-resize.ts";
+import { startLiveLists } from "#lib/lists/live-lists.ts";
+import { resolveAppArea, shouldHideMobileTabBar } from "#lib/mobile-nav.ts";
+import { DURATION_DRAWER_OUT, DURATION_PANEL } from "#lib/motion.ts";
 import {
 	beginMobileSessionViewTransition,
 	resolveMobileSessionNavTransition,
-} from "$lib/navigation-transition";
-import { m } from "$lib/paraglide/messages.js";
-import "$lib/theme.svelte";
-import { authStore } from "$lib/stores/auth.svelte";
-import { initSpacePinRealtime } from "$lib/stores/space-pins.svelte";
-import { turnNotifications } from "$lib/stores/turn-notifications.svelte";
-import { LEFT_SIDEBAR_RAIL, uiState } from "$lib/stores/ui.svelte";
-import { installViewportOffsetGuard } from "$lib/viewport-offset-guard";
-import { resolveWorkspaceSpaceId } from "$lib/workspace-route";
+} from "#lib/navigation-transition.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { goto, onNavigate } from "$app/navigation";
+import { page } from "$app/state";
+import "#lib/theme.svelte.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { initSpacePinRealtime } from "#lib/stores/space-pins.svelte.ts";
+import { turnNotifications } from "#lib/stores/turn-notifications.svelte.ts";
+import { LEFT_SIDEBAR_RAIL, uiState } from "#lib/stores/ui.svelte.ts";
+import { installViewportOffsetGuard } from "#lib/viewport-offset-guard.ts";
+import { resolveWorkspaceSpaceId } from "#lib/workspace-route.ts";
 
 const VCONSOLE_DISABLED_STORAGE_KEY = "cohub:vconsole-disabled";
 
@@ -79,6 +79,7 @@ const locale = $derived(getLocale());
 
 // Mobile IM-style push: Chats list ↔ session detail.
 onNavigate((navigation) => {
+	if (navigation.shallow) return;
 	const fromPath = navigation.from?.url.pathname ?? "";
 	const toPath = navigation.to?.url.pathname ?? "";
 	const kind = resolveMobileSessionNavTransition(fromPath, toPath);

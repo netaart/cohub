@@ -1,6 +1,6 @@
 import type { BoardPatch } from "@neta-art/cohub/board";
-import type { Author } from "./protocol";
-import { BURN_RADIUS, CARD_WIDTH, cardHeight, hash, MEADOW, type Point, seeded } from "./world";
+import type { Author } from "./protocol.ts";
+import { BURN_RADIUS, CARD_WIDTH, cardHeight, hash, MEADOW, type Point, seeded } from "./world.ts";
 
 type Items = NonNullable<BoardPatch["items"]>;
 type Item = Record<string, unknown>;

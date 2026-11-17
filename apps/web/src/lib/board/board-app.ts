@@ -2,8 +2,8 @@ import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppDetailResponse, AppMeta } from "@neta-art/cohub";
 import { type BoardSceneItem, boardAppMetadata } from "@neta-art/cohub/board";
 import type { BoardAppMetadata } from "@neta-art/cohub/board/editor";
-import { appCoverUrl, appThemeColor } from "$lib/app-page-meta";
-import { sdk } from "$lib/sdk";
+import { appCoverUrl, appThemeColor } from "#lib/app-page-meta.ts";
+import { sdk } from "#lib/sdk.ts";
 
 export type AppNavigationHandler = (
 	message: AppNavigationOpenMessage,

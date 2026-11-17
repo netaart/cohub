@@ -7,13 +7,13 @@ import type {
 } from "@neta-art/cohub/board/presence";
 import { Bot, Check, Scan, Smartphone, Terminal } from "lucide-svelte";
 import { createSubscriber } from "svelte/reactivity";
-import { identityColor } from "$lib/avatar-identity";
-import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { getModelDisplayName } from "$lib/model-catalog";
-import { m } from "$lib/paraglide/messages.js";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
+import { identityColor } from "#lib/avatar-identity.ts";
+import type { BoardCollaboratorProfile } from "#lib/board/board-collaborator.ts";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { getModelDisplayName } from "#lib/model-catalog.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { modelsCatalogStore } from "#lib/stores/models-catalog.svelte.ts";
 
 type Props = {
 	presence: BoardPresence;

@@ -1,4 +1,4 @@
-import type { CaptureResult, FrameSource } from "../types";
+import type { CaptureResult, FrameSource } from "../types.ts";
 
 export async function captureImageSource(input: {
 	src: string;

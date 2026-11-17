@@ -3,15 +3,15 @@ import type {
 	SpaceRecord,
 	UserSessionSpaceSummary,
 } from "@neta-art/cohub";
-import type { SessionListForkRecord } from "$lib/cache/db";
+import type { SessionListForkRecord } from "#lib/cache/db.ts";
 import {
 	buildSpaceNewSessionRoute,
 	buildSpaceSessionRoute,
 	buildUserNewSessionRoute,
 	buildUserSessionRoute,
 	parseUserSessionRoute,
-} from "$lib/space-routes";
-import { resolveWorkspaceSpaceId } from "$lib/workspace-route";
+} from "#lib/space-routes.ts";
+import { resolveWorkspaceSpaceId } from "#lib/workspace-route.ts";
 
 /** What differs between a workspace mounted in its Space and in the Chats inbox. */
 export type WorkspaceScope = {

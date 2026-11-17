@@ -27,10 +27,10 @@ import {
 	Type,
 	Undo2,
 } from "lucide-svelte";
-import type { BoardEditor, BoardToolId } from "$lib/board/editor.svelte";
-import BoardNumberControl from "$lib/components/board/BoardNumberControl.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import type { BoardEditor, BoardToolId } from "#lib/board/editor.svelte.ts";
+import BoardNumberControl from "#lib/components/board/BoardNumberControl.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

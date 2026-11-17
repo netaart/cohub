@@ -1,5 +1,5 @@
-import type { ResolveWorkspaceAsset } from "$lib/workspace-assets";
-import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
+import type { ResolveWorkspaceAsset } from "#lib/workspace-assets.ts";
+import type { WorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
 
 /** Discriminated chat route — no contradictory fields. */
 export type SessionChatRoute =

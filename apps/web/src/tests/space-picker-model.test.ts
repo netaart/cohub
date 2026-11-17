@@ -4,7 +4,7 @@ import {
 	filterSpacePickerItems,
 	normalizeSpacePickerQuery,
 	orderSpacePickerItems,
-} from "$lib/space-picker-model";
+} from "#lib/space-picker-model.ts";
 
 const spaces = [
 	{ id: "a", name: "Alpha", ownerUserUuid: "viewer", isPinned: true },

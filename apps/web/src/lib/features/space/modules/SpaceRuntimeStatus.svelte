@@ -8,11 +8,10 @@ import {
 } from "@neta-art/cohub";
 import { Monitor, RefreshCw, Settings2, X } from "lucide-svelte";
 import { tick, untrack } from "svelte";
-import { goto } from "$app/navigation";
-import { floatNear, portal } from "$lib/actions/portal";
-import HarnessIcon from "$lib/components/composer/HarnessIcon.svelte";
-import DeviceFolderPicker from "$lib/components/DeviceFolderPicker.svelte";
-import HostPermissionNotice from "$lib/components/HostPermissionNotice.svelte";
+import { floatNear, portal } from "#lib/actions/portal.ts";
+import HarnessIcon from "#lib/components/composer/HarnessIcon.svelte";
+import DeviceFolderPicker from "#lib/components/DeviceFolderPicker.svelte";
+import HostPermissionNotice from "#lib/components/HostPermissionNotice.svelte";
 import {
 	canFloatDeviceDisplay,
 	deviceDisplayStatus,
@@ -22,7 +21,7 @@ import {
 	setupPhoneControl,
 	shareDeviceDisplay,
 	stopDeviceDisplay,
-} from "$lib/device-display.svelte";
+} from "#lib/device-display.svelte.ts";
 import {
 	type DeviceRuntimeRefusal,
 	deviceRuntimeInstances,
@@ -30,25 +29,26 @@ import {
 	startDeviceRuntime,
 	stopDeviceRuntime,
 	takeDeviceConnectIssue,
-} from "$lib/device-runtime.svelte";
-import { hostPlatform } from "$lib/host-bridge";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { formatTimeAgo } from "$lib/resource-kit/time";
-import { sdk } from "$lib/sdk";
-import { buildSpaceSettingsRoute } from "$lib/space-routes";
+} from "#lib/device-runtime.svelte.ts";
+import { hostPlatform } from "#lib/host-bridge.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { formatTimeAgo } from "#lib/resource-kit/time.ts";
+import { sdk } from "#lib/sdk.ts";
+import { buildSpaceSettingsRoute } from "#lib/space-routes.ts";
+import { goto } from "$app/navigation";
 import {
 	cachedRuntimeStatus,
 	cachedRuntimeStatusFetchedAt,
 	refreshRuntimeStatus,
 	runtimeStatusVerified,
 	watchRuntimeStatus,
-} from "../runtime-status.svelte";
+} from "../runtime-status.svelte.ts";
 import {
 	freshWatcher,
 	harnessModelCounts,
 	runtimeTone,
-} from "../runtime-status-view";
+} from "../runtime-status-view.ts";
 import DisplayViewers from "./DisplayViewers.svelte";
 
 const RUNTIME_CLIENT_NAMES: Record<string, string> = {

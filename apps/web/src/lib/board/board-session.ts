@@ -8,17 +8,20 @@ import type {
 	BoardSessionLive,
 	BoardSessionStatus,
 } from "@neta-art/cohub/board/render";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
-import { getSessionRowStatus } from "$lib/session-activity";
-import { getSessionListTitle } from "$lib/session-fork-tree";
-import { getSessionPreview, getSessionPreviewText } from "$lib/session-preview";
-import { getSessionActivityAt } from "$lib/session-sort";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { getSessionRowStatus } from "#lib/session-activity.ts";
+import { getSessionListTitle } from "#lib/session-fork-tree.ts";
+import {
+	getSessionPreview,
+	getSessionPreviewText,
+} from "#lib/session-preview.ts";
+import { getSessionActivityAt } from "#lib/session-sort.ts";
 import {
 	chatsSourceName,
 	resolveSessionSourceKey,
-} from "$lib/stores/chats-filter";
-import { formatCompactAbsoluteTime } from "$lib/time-format";
+} from "#lib/stores/chats-filter.ts";
+import { formatCompactAbsoluteTime } from "#lib/time-format.ts";
 
 const EXCERPT_LIMIT = 360;
 

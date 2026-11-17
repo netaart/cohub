@@ -6,7 +6,7 @@ import { highlightTree } from "@lezer/highlight";
 import {
 	withLanguageHighlights,
 	YAML_SCALAR_HIGHLIGHT_STYLE,
-} from "$lib/code-editor-highlight";
+} from "#lib/code-editor-highlight.ts";
 
 /**
  * `@codemirror/lang-yaml` tags every plain scalar — string, number, bool and

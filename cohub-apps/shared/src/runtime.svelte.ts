@@ -1,5 +1,5 @@
 import type { AppRuntimeContext } from "@neta-art/cohub";
-import type { Locale } from "$kit/core";
+import type { Locale } from "$kit/core.ts";
 
 class Runtime {
   context = $state<AppRuntimeContext | null>(null);

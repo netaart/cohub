@@ -25,7 +25,7 @@ export function resourceAppRef(target: Pick<ResourceAppTarget, "kind">) {
 }
 
 export function readResourceAppTarget(
-  search: URLSearchParams,
+  search: Pick<URLSearchParams, "get">,
 ): ResourceAppTarget | null {
   const value = search.get("resource");
   if (!value) return null;

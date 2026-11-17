@@ -1,6 +1,6 @@
 <script lang="ts">
 import { onMount } from "svelte";
-import { isComposingKeyboardEvent, isKeyboardClaimed } from "$lib/keyboard";
+import { isComposingKeyboardEvent, isKeyboardClaimed } from "#lib/keyboard.ts";
 import PreviewMarkHost from "./PreviewMarkHost.svelte";
 
 /**

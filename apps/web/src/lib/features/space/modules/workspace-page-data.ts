@@ -1,4 +1,4 @@
-import { readWindowFromSearch, type WindowKind } from "./window-route";
+import { readWindowFromSearch, type WindowKind } from "./window-route.ts";
 
 export type WorkspacePageView =
 	| "space"

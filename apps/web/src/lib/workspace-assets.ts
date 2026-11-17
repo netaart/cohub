@@ -8,7 +8,7 @@ import {
 import {
 	normalizeWorkspaceFileLink,
 	parsePublicFileHref,
-} from "$lib/workspace-file-links";
+} from "#lib/workspace-file-links.ts";
 
 export type WorkspaceAsset = {
 	src: string;

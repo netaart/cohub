@@ -12,8 +12,8 @@
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import StickyNote from "@lucide/svelte/icons/sticky-note";
   import TreePine from "@lucide/svelte/icons/tree-pine";
-  import { LIMITS } from "../camp/protocol";
-  import type { Camp } from "../engine/camp.svelte";
+  import { LIMITS } from "../camp/protocol.ts";
+  import type { Camp } from "../engine/camp.svelte.ts";
 
   let { camp }: { camp: Camp } = $props();
   let text = $state("");

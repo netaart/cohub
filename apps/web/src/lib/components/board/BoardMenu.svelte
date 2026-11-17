@@ -17,7 +17,7 @@ export type BoardMenuItem =
 <script lang="ts">
 import { Check } from "lucide-svelte";
 import { onMount } from "svelte";
-import { floatNear } from "$lib/actions/portal";
+import { floatNear } from "#lib/actions/portal.ts";
 
 const {
 	anchor,

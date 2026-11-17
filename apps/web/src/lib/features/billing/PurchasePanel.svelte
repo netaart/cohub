@@ -1,22 +1,22 @@
 <script lang="ts">
 import type { BillingCatalogProduct } from "@neta-art/cohub";
 import { AlertCircle, ChevronUp } from "lucide-svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import Segmented from "$lib/components/Segmented.svelte";
-import { formatDateTime } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
+import Dialog from "#lib/components/Dialog.svelte";
+import Segmented from "#lib/components/Segmented.svelte";
+import { formatDateTime } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 import CheckoutSummary from "./CheckoutSummary.svelte";
-import { formatMoney } from "./format";
+import { formatMoney } from "./format.ts";
 import ProductCard from "./ProductCard.svelte";
 import {
 	bestYearlySavingsPercent,
 	isRecommended,
 	type PurchaseFocus,
 	recommendedPack,
-} from "./product";
-import type { PurchaseFlow } from "./purchase.svelte";
-import { onBillingChange } from "./refresh";
+} from "./product.ts";
+import type { PurchaseFlow } from "./purchase.svelte.ts";
+import { onBillingChange } from "./refresh.ts";
 
 const {
 	flow,

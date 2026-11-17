@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AppMeta } from "@neta-art/cohub";
-import type { WorkspaceAppOpenContext } from "$lib/features/space/modules/workspace-app-context";
+import type { WorkspaceAppOpenContext } from "#lib/features/space/modules/workspace-app-context.ts";
 import {
 	openPublishedApp,
 	type PublishedAppOpenPorts,
-} from "$lib/features/space/modules/workspace-app-open";
+} from "#lib/features/space/modules/workspace-app-open.ts";
 
 const OPEN = {
 	appId: "app-1",

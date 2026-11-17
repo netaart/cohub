@@ -1,8 +1,11 @@
-import type { DirectoryListing } from "$lib/space-fs-list";
 import type { SpaceFsEntry } from "@neta-art/cohub";
-import { deleteCacheDatabase } from "$lib/cache/db";
-import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
-import { spaceFsRepo } from "$lib/cache/repositories/space-fs-repo";
+import { deleteCacheDatabase } from "#lib/cache/db.ts";
+import {
+	canUseUserScopedCache,
+	getCacheUserKeyAsync,
+} from "#lib/cache/keys.ts";
+import { spaceFsRepo } from "#lib/cache/repositories/space-fs-repo.ts";
+import type { DirectoryListing } from "#lib/space-fs-list.ts";
 
 async function resolveCacheUserKey() {
 	const userKey = await getCacheUserKeyAsync();
@@ -93,12 +96,17 @@ export async function fetchSpaceFsDirWithCache(
 	}
 	const read = async () => {
 		const result = await fetcher();
-		return Array.isArray(result) ? { entries: result, truncated: false } : result;
+		return Array.isArray(result)
+			? { entries: result, truncated: false }
+			: result;
 	};
 	const preservePartial = async (entries: SpaceFsEntry[]) => {
 		const cached = canCache ? await spaceFsRepo.getDir(spaceId, dirPath) : null;
 		const merged = new Map(
-			[...(cached?.entries ?? []), ...entries].map((entry) => [entry.path, entry]),
+			[...(cached?.entries ?? []), ...entries].map((entry) => [
+				entry.path,
+				entry,
+			]),
 		);
 		return [...merged.values()];
 	};

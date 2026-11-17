@@ -3,13 +3,13 @@ import type { BoardAnimation, BoardPlayMode } from "@cohub/protocol";
 import { BOARD_CAMERA_VIEWPORT } from "@neta-art/cohub/board";
 import { Trash2 } from "lucide-svelte";
 import { onMount } from "svelte";
-import { floatNear } from "$lib/actions/portal";
-import { boardAnimationReach } from "$lib/board/board-media-playback";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import Segmented from "$lib/components/Segmented.svelte";
-import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { floatNear } from "#lib/actions/portal.ts";
+import { boardAnimationReach } from "#lib/board/board-media-playback.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import Segmented from "#lib/components/Segmented.svelte";
+import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

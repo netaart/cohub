@@ -1,5 +1,5 @@
 import type { Channel } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 export type ChannelLabelInfo = {
 	id: string;

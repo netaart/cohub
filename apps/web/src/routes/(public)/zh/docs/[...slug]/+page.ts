@@ -1,5 +1,5 @@
 import { error } from "@sveltejs/kit";
-import { getDocsNavItems, loadDocsPage } from "$lib/docs";
+import { getDocsNavItems, loadDocsPage } from "#lib/docs/index.ts";
 import type { EntryGenerator, PageLoad } from "./$types";
 
 export const prerender = true;

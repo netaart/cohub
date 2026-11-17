@@ -1,9 +1,9 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
 import { prefersReducedMotion } from "svelte/motion";
-import { setFilterBarPill } from "$lib/components/list-page/filter-bar";
-import type { PagerGlide } from "$lib/gestures/pager";
-import { EASE_OUT } from "$lib/motion";
+import { setFilterBarPill } from "#lib/components/list-page/filter-bar.ts";
+import type { PagerGlide } from "#lib/gestures/pager.ts";
+import { EASE_OUT } from "#lib/motion.ts";
 
 const {
 	label,

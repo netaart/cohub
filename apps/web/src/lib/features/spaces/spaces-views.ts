@@ -1,7 +1,7 @@
 import { Archive, Clock, LayoutGrid, Pin, UserRound } from "lucide-svelte";
-import type { SpacesFilter } from "$lib/features/spaces/spaces-filter";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
+import type { SpacesFilter } from "#lib/features/spaces/spaces-filter.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 export const SPACES_FILTER_ICONS = {
 	recent: Clock,

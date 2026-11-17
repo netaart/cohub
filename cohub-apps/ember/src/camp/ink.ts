@@ -1,5 +1,5 @@
-import { LIMITS } from "./protocol";
-import type { Point } from "./world";
+import { LIMITS } from "./protocol.ts";
+import type { Point } from "./world.ts";
 
 const TOLERANCE = 2.2;
 const MAX_ABS = 4000;

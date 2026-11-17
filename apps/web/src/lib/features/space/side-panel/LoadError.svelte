@@ -1,7 +1,7 @@
 <script lang="ts">
 import { AlertCircle, RefreshCw } from "lucide-svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const { message, onRetry }: { message: string; onRetry: () => void } = $props();
 const locale = $derived(getLocale());

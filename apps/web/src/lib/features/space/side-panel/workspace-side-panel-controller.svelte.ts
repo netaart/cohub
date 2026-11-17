@@ -3,18 +3,18 @@ import { onMount, untrack } from "svelte";
 import {
 	APPS_CHANGED_EVENT,
 	type AppsChangedDetail,
-} from "$lib/features/app/app-realtime";
-import { sessionGenerationStore } from "$lib/stores/session-generation.svelte";
-import { SpaceAppsFeed } from "../resources/space-apps-feed.svelte";
+} from "#lib/features/app/app-realtime.ts";
+import { sessionGenerationStore } from "#lib/stores/session-generation.svelte.ts";
+import { SpaceAppsFeed } from "../resources/space-apps-feed.svelte.ts";
 import {
 	CRONJOBS_UPDATED_EVENT,
 	SpaceCronjobsFeed,
-} from "../resources/space-cronjobs-feed.svelte";
+} from "../resources/space-cronjobs-feed.svelte.ts";
 import {
 	GenerationFeed,
 	ingestGenerationTaskEvent,
-} from "./generation-feed.svelte";
-import { SessionFilesFeed } from "./session-files.svelte";
+} from "./generation-feed.svelte.ts";
+import { SessionFilesFeed } from "./session-files.svelte.ts";
 
 type RealtimeEnvelope = {
 	type: string;

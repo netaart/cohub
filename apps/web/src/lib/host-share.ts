@@ -1,5 +1,9 @@
 import { HOST_SHARE_FILE_MAX_BYTES } from "@cohub/protocol/host-bridge";
-import { callHost, readyHost, supportsHostCapability } from "$lib/host-bridge";
+import {
+	callHost,
+	readyHost,
+	supportsHostCapability,
+} from "#lib/host-bridge.ts";
 
 const READ_TIMEOUT_MS = 60_000;
 

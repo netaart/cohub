@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { TaskRunRecord } from "@neta-art/cohub";
-import { mergeTaskRefresh, toGenerationTask } from "./task-output.js";
+import { mergeTaskRefresh, toGenerationTask } from "./task-output.ts";
 
 function generationRun(result: unknown): TaskRunRecord {
   return {

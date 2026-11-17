@@ -1,4 +1,4 @@
-import { notifyCustomThemeChanged } from "$lib/custom-theme/events";
+import { notifyCustomThemeChanged } from "#lib/custom-theme/events.ts";
 
 const LAYERS = ["user", "space"] as const;
 export type DocumentThemeLayer = (typeof LAYERS)[number];

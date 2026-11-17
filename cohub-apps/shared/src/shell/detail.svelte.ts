@@ -1,13 +1,13 @@
 import type { ResourceAppTarget } from "@cohub/protocol";
-import { asRecord } from "$kit/core";
-import { taskIsStreaming } from "$kit/task-run";
-import { statusCode } from "../access";
+import { asRecord } from "$kit/core.ts";
+import { taskIsStreaming } from "$kit/task-run.ts";
+import { statusCode } from "../access.ts";
 import {
   loadResource,
   subscribeSpace,
   type ResourceDetail,
-} from "../client";
-import { forgetCache, readCache, writeCache } from "../storage";
+} from "../client.ts";
+import { forgetCache, readCache, writeCache } from "../storage.ts";
 
 const POLL_MS = 5000;
 

@@ -3,18 +3,18 @@ import type { SessionRecord } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
+} from "#lib/cache/broadcast.ts";
 import {
 	idbDelete,
 	idbGet,
 	idbGetByIndex,
 	idbPut,
 	type SessionDetailCacheRecord,
-} from "$lib/cache/db";
-import { getCacheUserKey, sessionDetailKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
-import { sessionMatchesContext } from "$lib/session-context";
-import type { CacheSource } from "$lib/cache/types";
+} from "#lib/cache/db.ts";
+import { getCacheUserKey, sessionDetailKey } from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
+import type { CacheSource } from "#lib/cache/types.ts";
+import { sessionMatchesContext } from "#lib/session-context.ts";
 
 const SESSION_DETAIL_TTL_MS = 60_000;
 const memory = new MemoryLru<string, SessionDetailCacheRecord>(500);
@@ -169,7 +169,8 @@ export const sessionDetailRepo = {
 		if (
 			!record ||
 			!sessionMatchesContext(record.session, record.spaceId, sessionId)
-		) return null;
+		)
+			return null;
 		const cached = memory.get(record.key);
 		return {
 			spaceId: record.spaceId,

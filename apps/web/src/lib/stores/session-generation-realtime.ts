@@ -8,14 +8,14 @@ import type {
 import {
 	isArchivedMessageIdentity,
 	isSameLiveMessage,
-} from "$lib/session-generation-stream-guards";
-import type { StreamingIntermediateMessage } from "./session-generation.svelte";
-import { sessionGenerationStore } from "./session-generation.svelte";
+} from "#lib/session-generation-stream-guards.ts";
+import type { StreamingIntermediateMessage } from "./session-generation.svelte.ts";
+import { sessionGenerationStore } from "./session-generation.svelte.ts";
 import {
 	failGeneration,
 	interruptGeneration,
-} from "./session-generation-controller";
-import { generationTurnChanged } from "./session-generation-state";
+} from "./session-generation-controller.ts";
+import { generationTurnChanged } from "./session-generation-state.ts";
 
 type HandledGenerationRealtimeEffect = {
 	handled: true;

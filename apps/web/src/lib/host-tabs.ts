@@ -1,5 +1,9 @@
 import type { HostTabState } from "@cohub/protocol/host-bridge";
-import { callHost, readyHost, supportsHostCapability } from "$lib/host-bridge";
+import {
+	callHost,
+	readyHost,
+	supportsHostCapability,
+} from "#lib/host-bridge.ts";
 
 let sentDirty = false;
 let sentCapture = false;

@@ -8,7 +8,7 @@ import {
 	sanitizeRedirectPath,
 	signInAfterUnauthorized,
 	signInWithRedirectPath,
-} from "$lib/auth";
+} from "#lib/auth.ts";
 
 export const getCurrentRedirectPath = () => {
 	if (typeof window === "undefined") return undefined;

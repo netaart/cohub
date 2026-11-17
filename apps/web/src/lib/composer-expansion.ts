@@ -1,4 +1,4 @@
-import { prefersReducedMotion } from "$lib/navigation-transition";
+import { prefersReducedMotion } from "#lib/navigation-transition.ts";
 
 export const COMPOSER_BOUNDS_SELECTOR = "[data-composer-bounds]";
 export const COMPOSER_CHROME_SELECTOR = "[data-composer-chrome]";

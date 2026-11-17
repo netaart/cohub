@@ -1,9 +1,9 @@
 <script lang="ts">
 import type { AppDevice } from "@neta-art/cohub";
 import { Camera, MapPin, Mic } from "lucide-svelte";
-import { appDevicesLabel } from "$lib/features/app/app-devices";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { appDevicesLabel } from "#lib/features/app/app-devices.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	devices,

@@ -4,7 +4,7 @@ import type { AppDetailResponse } from "@neta-art/cohub";
 import {
 	createAppNavigationResolver,
 	resolveAppNavigation,
-} from "$lib/features/app/app-open";
+} from "#lib/features/app/app-open.ts";
 
 const detail = {
 	app: { id: "11111111-1111-4111-8111-111111111111", status: "published" },

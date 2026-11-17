@@ -16,9 +16,9 @@ import {
 	Trash2,
 } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
-import { m } from "$messages";
-import type { AppDomainCache, AppDomainChange } from "./app";
-import type { Locale } from "./core";
+import { m } from "../paraglide/messages.js";
+import type { AppDomainCache, AppDomainChange } from "./app.ts";
+import type { Locale } from "./core.ts";
 
 type Props = {
 	locale: Locale;

@@ -4,9 +4,9 @@ import type {
 	AppRuntimeShellContext,
 	SpaceRole,
 } from "@neta-art/cohub";
-import AppSurface from "$lib/components/app/AppSurface.svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import { sdk } from "$lib/sdk";
+import AppSurface from "#lib/components/app/AppSurface.svelte";
+import Spinner from "#lib/components/Spinner.svelte";
+import { sdk } from "#lib/sdk.ts";
 
 const {
 	appId,

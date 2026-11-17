@@ -4,7 +4,7 @@ import {
 	buildAppMentionMarkdown,
 	parseCohubAppUrls,
 	replaceCohubAppUrls,
-} from "$lib/mentions/app";
+} from "#lib/mentions/app.ts";
 import {
 	buildSpaceMentionMarkdown,
 	getCohubSpaceLinkKey,
@@ -12,11 +12,11 @@ import {
 	replaceCohubSpaceUrls,
 	tokenizeSpaceMentionText,
 	unresolvedCohubSpaceAddresses,
-} from "$lib/mentions/space";
+} from "#lib/mentions/space.ts";
 import {
 	clearSpaceAddresses,
 	rememberSpaceAddress,
-} from "$lib/stores/space-address";
+} from "#lib/stores/space-address.ts";
 
 const SPACE_ID = "f7000115-55d8-4d97-a0e4-d2a55b6ffa41";
 const SESSION_ID = "3b1e6a2c-9d4f-4a7b-8c5d-2e1f0a9b8c7d";

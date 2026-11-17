@@ -1,10 +1,10 @@
 import { error, redirect } from "@sveltejs/kit";
-import { publicSlugRedirectLocation } from "$lib/public-slug-redirect";
-import { loadPublicAppDetail } from "$lib/server/public-api";
+import { publicSlugRedirectLocation } from "#lib/public-slug-redirect.ts";
+import { loadPublicAppDetail } from "#lib/server/public-api.ts";
 import {
 	SLUG_REDIRECT_CACHE_CONTROL,
 	setPublicAppPageCache,
-} from "$lib/server/public-cache";
+} from "#lib/server/public-cache.ts";
 import type { PageServerLoad } from "./$types";
 
 /** Read `?cohub_v=` as a version number; ignore anything malformed. */

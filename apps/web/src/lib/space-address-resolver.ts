@@ -1,7 +1,10 @@
 import { HttpError } from "@neta-art/cohub";
-import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
-import { spaceRecordRepo } from "$lib/cache/repositories/space-record-repo";
-import { sdk } from "$lib/sdk";
+import {
+	canUseUserScopedCache,
+	getCacheUserKeyAsync,
+} from "#lib/cache/keys.ts";
+import { spaceRecordRepo } from "#lib/cache/repositories/space-record-repo.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	addressKey,
 	clearSpaceAddresses,
@@ -13,8 +16,8 @@ import {
 	type SpaceAddress,
 	settleAddress,
 	spaceIdAt,
-} from "$lib/stores/space-address";
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
+} from "#lib/stores/space-address.ts";
+import { cacheSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
 
 let seededFor: string | null = null;
 let seeding: Promise<void> = Promise.resolve();

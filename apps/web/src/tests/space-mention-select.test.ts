@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { textMatchScore } from "$lib/command-palette/score";
-import type { SpaceMentionSuggestion } from "$lib/mentions/space";
-import { mergeSpaceMentionSuggestions } from "$lib/mentions/space-mention-select";
+import { textMatchScore } from "#lib/command-palette/score.ts";
+import type { SpaceMentionSuggestion } from "#lib/mentions/space.ts";
+import { mergeSpaceMentionSuggestions } from "#lib/mentions/space-mention-select.ts";
 
 function suggestion(
 	id: string,

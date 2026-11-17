@@ -1,15 +1,15 @@
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
-import { idbGet, idbPut, type StoreName } from "$lib/cache/db";
+} from "#lib/cache/broadcast.ts";
+import { idbGet, idbPut, type StoreName } from "#lib/cache/db.ts";
 import {
 	canUseUserScopedCache,
 	encodeKeyPart,
 	getCacheUserKey,
 	getCacheUserKeyAsync,
-} from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
+} from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
 
 export type ActivityCacheRecord<T = unknown> = {
 	key: string;

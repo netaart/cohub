@@ -1,20 +1,20 @@
 <script lang="ts">
 import { AlertCircle, Check, RefreshCw, Upload, X } from "lucide-svelte";
 import { onDestroy } from "svelte";
-import UploadProgress from "$lib/components/UploadProgress.svelte";
-import { formatBytes } from "$lib/format-bytes";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import UploadProgress from "#lib/components/UploadProgress.svelte";
+import { formatBytes } from "#lib/format-bytes.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	type SpaceUploadProgress,
 	uploadSpaceEntries,
-} from "$lib/space-upload";
-import type { LocalUploadEntry } from "$lib/upload-entries";
+} from "#lib/space-upload.ts";
+import type { LocalUploadEntry } from "#lib/upload-entries.ts";
 import {
 	describeUploadError,
 	exceedsUploadFileLimit,
 	uploadFileLimitLabel,
-} from "$lib/upload-errors";
+} from "#lib/upload-errors.ts";
 
 type UploadItem = {
 	file: File;

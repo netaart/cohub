@@ -8,9 +8,9 @@ import type {
   CohubClient,
   RealtimeRoomMember,
 } from "@neta-art/cohub";
-import type { CameraQuality, MediaCandidate } from "./media-policy";
-import { type CampEvent, readColor, readText, ROOM_MAX_PARTICIPANTS, SIGNALS, SPIRIT_ROLE } from "../camp/protocol";
-import { decodePose, encodePose, type Pose, POSE_HZ, POSE_IDLE_MS, poseFromRelay, poseToRelay } from "./pose";
+import type { CameraQuality, MediaCandidate } from "./media-policy.ts";
+import { type CampEvent, readColor, readText, ROOM_MAX_PARTICIPANTS, SIGNALS, SPIRIT_ROLE } from "../camp/protocol.ts";
+import { decodePose, encodePose, type Pose, POSE_HZ, POSE_IDLE_MS, poseFromRelay, poseToRelay } from "./pose.ts";
 
 export type Transport = "connecting" | "peer" | "relay";
 

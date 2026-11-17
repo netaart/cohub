@@ -15,21 +15,21 @@ import {
   parseAppVersionPublished,
   upsertAppVersion,
   withCohubBar,
-} from "$kit/app";
-import { formatDateTime } from "$kit/time";
-import { hasScopes } from "../../shared/src/access";
-import { client, subscribeSpace, webUrl } from "../../shared/src/client";
-import { getLocale, runtime } from "../../shared/src/runtime.svelte";
-import { resourceTitle } from "../../shared/src/shell/title";
-import { appStatus, appVisibility } from "../../shared/src/status";
-import { readCache, writeCache } from "../../shared/src/storage";
+} from "$kit/app.ts";
+import { formatDateTime } from "$kit/time.ts";
+import { hasScopes } from "../../shared/src/access.ts";
+import { client, subscribeSpace, webUrl } from "../../shared/src/client.ts";
+import { getLocale, runtime } from "../../shared/src/runtime.svelte.ts";
+import { resourceTitle } from "../../shared/src/shell/title.ts";
+import { appStatus, appVisibility } from "../../shared/src/status.ts";
+import { readCache, writeCache } from "../../shared/src/storage.ts";
 import Button from "../../shared/src/ui/Button.svelte";
-import { cardClass, eyebrowClass, labelClass } from "../../shared/src/ui/classes";
+import { cardClass, eyebrowClass, labelClass } from "../../shared/src/ui/classes.ts";
 import CopyButton from "../../shared/src/ui/CopyButton.svelte";
-import { feedback } from "../../shared/src/ui/feedback.svelte";
-import type { LucideIcon } from "../../shared/src/ui/icon";
+import { feedback } from "../../shared/src/ui/feedback.svelte.ts";
+import type { LucideIcon } from "../../shared/src/ui/icon.ts";
 import StatusBadge from "../../shared/src/ui/StatusBadge.svelte";
-import type { ViewProps } from "../../shared/src/view-types";
+import type { ViewProps } from "../../shared/src/view-types.ts";
 import AppForm, { type AppValues } from "./AppForm.svelte";
 
 let { spaceId, detail, busy, draft, action, authorize, updateDraft, setDetail, refresh, removed, navigateRelated }: ViewProps = $props();

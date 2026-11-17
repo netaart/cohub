@@ -7,18 +7,18 @@ import {
 	type HarnessKind,
 	type RuntimeStatus,
 } from "@neta-art/cohub";
-import SessionComposer from "$lib/components/SessionComposer.svelte";
-import SessionApprovals from "$lib/features/session-chat/SessionApprovals.svelte";
+import SessionComposer from "#lib/components/SessionComposer.svelte";
+import SessionApprovals from "#lib/features/session-chat/SessionApprovals.svelte";
 import SpaceWorkspaceHeader, {
 	type SpaceWorkspaceHeaderContext,
-} from "$lib/features/space/modules/SpaceWorkspaceHeader.svelte";
-import { refreshRuntimeStatus } from "$lib/features/space/runtime-status.svelte";
-import { setLocalePreference } from "$lib/i18n/locale.svelte";
+} from "#lib/features/space/modules/SpaceWorkspaceHeader.svelte";
+import { refreshRuntimeStatus } from "#lib/features/space/runtime-status.svelte.ts";
+import { setLocalePreference } from "#lib/i18n/locale.svelte.ts";
 import {
 	type LocalModelSelection,
 	resolveLocalModel,
-} from "$lib/model-catalog";
-import { sdk } from "$lib/sdk";
+} from "#lib/model-catalog.ts";
+import { sdk } from "#lib/sdk.ts";
 
 const spaceId = "11111111-1111-4111-8111-111111111111";
 const models = [

@@ -4,7 +4,7 @@ import {
 	type AppSurfaceCallTarget,
 	type AppSurfaceInvoker,
 	createAppSurfaceRegistry,
-} from "$lib/features/app/surface-registry";
+} from "#lib/features/app/surface-registry.ts";
 
 const APP = { id: "app-1", surface: "overlay" as const };
 const invocation = { surface: "overlay" as const, spaceId: "space-1" };

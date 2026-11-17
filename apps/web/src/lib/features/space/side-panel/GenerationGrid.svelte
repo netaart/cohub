@@ -8,12 +8,15 @@ import {
 } from "@neta-art/cohub";
 import { taskRunToBoardTaskSnapshot } from "@neta-art/cohub/board";
 import { SvelteSet } from "svelte/reactivity";
-import { inScrollView } from "$lib/actions/in-scroll-view";
-import { type MediaItem, mediaLightbox } from "$lib/components/media-lightbox";
-import { setCohubResourceDragData } from "$lib/drag/cohub-resource-drag";
-import { screenVariantSize } from "$lib/media/media-info";
+import { inScrollView } from "#lib/actions/in-scroll-view.ts";
+import {
+	type MediaItem,
+	mediaLightbox,
+} from "#lib/components/media-lightbox.ts";
+import { setCohubResourceDragData } from "#lib/drag/cohub-resource-drag.ts";
+import { screenVariantSize } from "#lib/media/media-info.ts";
 import GenerationTile from "./GenerationTile.svelte";
-import { resolveGenerationOutputSource } from "./generation-feed.svelte";
+import { resolveGenerationOutputSource } from "./generation-feed.svelte.ts";
 
 type Props = {
 	tasks: GenerationTaskView[];

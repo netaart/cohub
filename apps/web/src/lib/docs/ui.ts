@@ -1,4 +1,4 @@
-import type { DocsLocale } from "./types";
+import type { DocsLocale } from "./types.ts";
 
 export type DocsUiCopy = {
 	docsLabel: string;

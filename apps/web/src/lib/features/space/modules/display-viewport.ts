@@ -1,4 +1,4 @@
-import type { Rect } from "./display-input";
+import type { Rect } from "./display-input.ts";
 
 export type DisplayView = { scale: number; x: number; y: number };
 

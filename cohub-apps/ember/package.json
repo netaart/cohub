@@ -12,7 +12,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "typecheck": "svelte-check --tsgo --incremental --tsconfig ./tsconfig.json",
     "lint": "biome lint src spirit preview public/scripts vite.config.ts",
     "lint:fix": "biome lint --write src spirit preview public/scripts vite.config.ts",
     "test": "node --import tsx --test 'src/**/*.test.ts' 'spirit/**/*.test.ts'",
@@ -25,17 +25,18 @@
     "@lucide/svelte": "^1.55.0",
     "@neta-art/cohub": "^11.1.0",
     "pixi.js": "8.20.1",
-    "svelte": "^5.57.0"
+    "svelte": "^5.57.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
-    "@sveltejs/vite-plugin-svelte": "^7.3.0",
-    "@types/node": "^26.6.4",
+    "@biomejs/biome": "^2.6.8",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@types/node": "^26.6.6",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "rolldown": "^1.2.13",
-    "svelte-check": "^4.7.6",
+    "svelte-check": "^4.7.8",
     "tsx": "^4.23.15",
-    "typescript": "^6.0.3",
-    "vite": "^8.2.2"
+    "typescript": "~6.0.3",
+    "vite": "^8.3.8"
   },
   "allowScripts": {
     "esbuild@0.28.2": true

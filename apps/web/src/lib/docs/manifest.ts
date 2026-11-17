@@ -3,7 +3,7 @@ import type {
 	DocsNavItem,
 	DocsSection,
 	DocsSectionId,
-} from "./types";
+} from "./types.ts";
 
 /**
  * Product docs navigation.

@@ -7,19 +7,19 @@ import type { AppRuntimeShellContext } from "@neta-art/cohub";
 import { HttpError, isSpaceFsSymlink } from "@neta-art/cohub";
 import { parseBoardLaunch } from "@neta-art/cohub/board";
 import type { BoardReplica } from "@neta-art/cohub/board/replica";
-import type { AppNavigationHandler } from "$lib/board/board-app";
-import { readBoardManifestId } from "$lib/board/board-manifest-text";
-import { cohubPixiRuntime } from "$lib/board/runtime/board-runtime";
-import { loadedCacheUserKey } from "$lib/cache/keys";
+import type { AppNavigationHandler } from "#lib/board/board-app.ts";
+import { readBoardManifestId } from "#lib/board/board-manifest-text.ts";
+import { cohubPixiRuntime } from "#lib/board/runtime/board-runtime.ts";
+import { loadedCacheUserKey } from "#lib/cache/keys.ts";
 import {
 	readBoardManifestCache,
 	writeBoardManifestCache,
-} from "$lib/cache/repositories/board-repo";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { subscribeSpaceBoardFileChanged } from "$lib/space-config";
+} from "#lib/cache/repositories/board-repo.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { subscribeSpaceBoardFileChanged } from "#lib/space-config.ts";
 
 type Props = {
 	spaceId: string;

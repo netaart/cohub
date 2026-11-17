@@ -6,8 +6,8 @@ import {
 } from "@neta-art/cohub/board";
 import { Link, X } from "lucide-svelte";
 import { onMount } from "svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	initialUrl = "",

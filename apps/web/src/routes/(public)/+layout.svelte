@@ -1,16 +1,16 @@
 <script lang="ts">
 import "../../app.css";
 import { onMount } from "svelte";
-import { browser } from "$app/environment";
+import DownloadToasts from "#lib/components/DownloadToasts.svelte";
+import { markHostReady } from "#lib/host-bridge.ts";
+import { browser } from "$app/env";
 import { page } from "$app/state";
-import DownloadToasts from "$lib/components/DownloadToasts.svelte";
-import { markHostReady } from "$lib/host-bridge";
-import "$lib/theme.svelte";
+import "#lib/theme.svelte.ts";
 
 const { children } = $props();
 const walletReturn =
 	browser && page.url.searchParams.has("wallet_order")
-		? import("$lib/features/billing/SpaceWalletReturn.svelte")
+		? import("#lib/features/billing/SpaceWalletReturn.svelte")
 		: null;
 
 // The home page reports for itself once it picks marketing or the app.

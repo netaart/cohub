@@ -10,8 +10,8 @@ import {
 	Play,
 	X,
 } from "lucide-svelte";
-import { identityColor } from "$lib/avatar-identity";
-import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
+import { identityColor } from "#lib/avatar-identity.ts";
+import type { BoardCollaboratorProfile } from "#lib/board/board-collaborator.ts";
 import {
 	BOARD_REPLAY_SPEEDS,
 	type BoardReplaySpeed,
@@ -19,10 +19,10 @@ import {
 	replayFraction,
 	replayStep,
 	replayVersionAt,
-} from "$lib/board/board-replay";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/board/board-replay.ts";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	entries,

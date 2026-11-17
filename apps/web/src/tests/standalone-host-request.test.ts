@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { serveStandaloneHostRequest } from "$lib/server/standalone-host-request";
+import { serveStandaloneHostRequest } from "#lib/server/standalone-host-request.ts";
 
 const TEMPLATE = "{id}-dev.netaverses.cc";
 const APP_ID = "3f6f0f1e-1111-4222-8333-444455556666";

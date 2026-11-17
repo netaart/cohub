@@ -1,6 +1,6 @@
 <script lang="ts">
 import { CircleAlert, LoaderCircle } from "lucide-svelte";
-import type { WindowSyncStatus } from "./window-sync-status";
+import type { WindowSyncStatus } from "./window-sync-status.ts";
 
 const {
 	status,

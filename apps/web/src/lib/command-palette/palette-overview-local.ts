@@ -4,7 +4,7 @@ import type {
 	PaletteOverviewSpace,
 	SpaceRecord,
 } from "@neta-art/cohub";
-import { getViewerTurnActivityBySpace } from "./personal-activity";
+import { getViewerTurnActivityBySpace } from "./personal-activity.ts";
 
 const DEFAULT_SPACE_LIMIT = 50;
 

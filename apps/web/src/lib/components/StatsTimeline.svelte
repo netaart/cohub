@@ -1,12 +1,12 @@
 <script lang="ts">
 import type { RequestMetric } from "@cohub/protocol/model";
-import { formatDurationMs } from "$lib/format-duration";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { formatDurationMs } from "#lib/format-duration.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	buildStatsTimeline,
 	type StatsTimelineModel,
-} from "$lib/stats-view-model";
+} from "#lib/stats-view-model.ts";
 
 let { requests = [] }: { requests?: readonly RequestMetric[] } = $props();
 const locale = $derived(getLocale());

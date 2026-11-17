@@ -9,18 +9,18 @@ import type { AppRuntimeShellContext } from "@neta-art/cohub";
 import type { BoardDocument } from "@neta-art/cohub/board";
 import type { BoardAutomationActivity } from "@neta-art/cohub/board/presence";
 import { Wallpaper } from "lucide-svelte";
-import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
-import { checkpointBoardAssetSource } from "$lib/board/checkpoint-board";
+import type { BoardCollaboratorProfile } from "#lib/board/board-collaborator.ts";
+import { checkpointBoardAssetSource } from "#lib/board/checkpoint-board.ts";
 import {
 	type BoardRuntimeViewState,
 	type BoardScope,
 	cohubPixiRuntime,
-} from "$lib/board/runtime/board-runtime";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/board/runtime/board-runtime.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import PreviewHeader from "./PreviewHeader.svelte";
-import type { PreviewChrome, PreviewHeaderAction } from "./preview-header";
-import type { Window } from "./windows";
+import type { PreviewChrome, PreviewHeaderAction } from "./preview-header.ts";
+import type { Window } from "./windows.ts";
 
 type InlineBoardPanelState = {
 	path: string;

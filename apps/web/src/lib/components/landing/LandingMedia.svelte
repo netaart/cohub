@@ -13,8 +13,9 @@
  * as the authenticated redirect target, so marketing media must never compete
  * with that path for bandwidth.
  */
-import { browser } from "$app/environment";
-import { landingMediaUrl } from "$lib/components/landing/media";
+
+import { landingMediaUrl } from "#lib/components/landing/media.ts";
+import { browser } from "$app/env";
 
 type Props = {
 	/** Asset basename, e.g. "hero" → <base>/hero.webp (and .webm/.mp4 for video) */

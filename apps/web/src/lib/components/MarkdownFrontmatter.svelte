@@ -1,9 +1,9 @@
 <script lang="ts">
 import { Check, ChevronDown, Copy } from "lucide-svelte";
 import { onDestroy } from "svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import type { MarkdownFrontmatterEntry } from "$lib/markdown-frontmatter";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import type { MarkdownFrontmatterEntry } from "#lib/markdown-frontmatter.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	raw: string;

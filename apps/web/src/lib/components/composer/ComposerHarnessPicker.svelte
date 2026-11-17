@@ -14,16 +14,16 @@ import {
 	ShieldOff,
 } from "lucide-svelte";
 import { tick } from "svelte";
-import { floatNear, portal } from "$lib/actions/portal";
-import { harnessOptions } from "$lib/features/space/runtime-status-view";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { floatNear, portal } from "#lib/actions/portal.ts";
+import { harnessOptions } from "#lib/features/space/runtime-status-view.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import HarnessIcon from "./HarnessIcon.svelte";
 import {
 	approvalMenuOptions,
 	harnessMenuKey,
 	movedIndex,
-} from "./harness-menu";
+} from "./harness-menu.ts";
 
 type Harness = HarnessKind;
 const {

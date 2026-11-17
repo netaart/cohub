@@ -1,8 +1,11 @@
 <script lang="ts">
-import { provideSettingsPageActive } from "$lib/features/settings/page-context.svelte";
-import { loadSettingsPage, settingsPage } from "$lib/features/settings/pages";
-import { scrollListToTop } from "$lib/layout/list-scroll-top";
-import type { SettingsSection } from "$lib/settings-nav";
+import { provideSettingsPageActive } from "#lib/features/settings/page-context.svelte.ts";
+import {
+	loadSettingsPage,
+	settingsPage,
+} from "#lib/features/settings/pages.ts";
+import { scrollListToTop } from "#lib/layout/list-scroll-top.ts";
+import type { SettingsSection } from "#lib/settings-nav.ts";
 
 const {
 	section,

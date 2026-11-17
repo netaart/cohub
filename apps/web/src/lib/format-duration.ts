@@ -1,5 +1,5 @@
-import { toIntlTag } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
+import { toIntlTag } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
 
 const UNIT_MS = {
 	en: "ms",

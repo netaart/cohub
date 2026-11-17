@@ -42,50 +42,50 @@ import {
 	X,
 } from "lucide-svelte";
 import { onDestroy, untrack } from "svelte";
-import { browser } from "$app/environment";
-import { goto } from "$app/navigation";
-import { PUBLIC_COHUB_ENV } from "$env/static/public";
-import { appDisplayTitle } from "$lib/app-page-meta";
+import { appDisplayTitle } from "#lib/app-page-meta.ts";
 import {
 	channelHealthClass,
 	channelHealthDetail,
 	channelHealthLabel,
 	channelHealthMessage,
-} from "$lib/channel-health";
-import { copyTextToClipboard } from "$lib/clipboard";
-import ChannelModelPicker from "$lib/components/ChannelModelPicker.svelte";
-import FilterBar from "$lib/components/list-page/FilterBar.svelte";
-import FilterChip from "$lib/components/list-page/FilterChip.svelte";
-import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
-import ListHeader from "$lib/components/list-page/ListHeader.svelte";
-import ListRowText from "$lib/components/list-page/ListRowText.svelte";
-import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
-import Sheet from "$lib/components/Sheet.svelte";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import UploadProgress from "$lib/components/UploadProgress.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { subscribeSpaceChannel } from "$lib/features/session-chat/space-channel";
-import SandboxSettings from "$lib/features/space-settings/SandboxSettings.svelte";
-import SettingsHeading from "$lib/features/space-settings/SettingsHeading.svelte";
+} from "#lib/channel-health.ts";
+import { copyTextToClipboard } from "#lib/clipboard.ts";
+import ChannelModelPicker from "#lib/components/ChannelModelPicker.svelte";
+import FilterBar from "#lib/components/list-page/FilterBar.svelte";
+import FilterChip from "#lib/components/list-page/FilterChip.svelte";
+import HeaderAction from "#lib/components/list-page/HeaderAction.svelte";
+import ListHeader from "#lib/components/list-page/ListHeader.svelte";
+import ListRowText from "#lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "#lib/components/list-page/list-row.ts";
+import Sheet from "#lib/components/Sheet.svelte";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import UploadProgress from "#lib/components/UploadProgress.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { subscribeSpaceChannel } from "#lib/features/session-chat/space-channel.ts";
+import SandboxSettings from "#lib/features/space-settings/SandboxSettings.svelte";
+import SettingsHeading from "#lib/features/space-settings/SettingsHeading.svelte";
 import SettingsRow, {
 	SETTINGS_SELECT,
-} from "$lib/features/space-settings/SettingsRow.svelte";
-import SpaceInvitations from "$lib/features/space-settings/SpaceInvitations.svelte";
-import SpaceLikeStickerSetting from "$lib/features/space-settings/SpaceLikeStickerSetting.svelte";
-import { SandboxSettingsState } from "$lib/features/space-settings/sandbox-settings.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
-import { m } from "$lib/paraglide/messages.js";
-import { uploadSpaceAvatarImage } from "$lib/public-asset-images";
-import { sdk } from "$lib/sdk";
-import { validateSpaceSlugInput } from "$lib/slug-rules";
+} from "#lib/features/space-settings/SettingsRow.svelte";
+import SpaceInvitations from "#lib/features/space-settings/SpaceInvitations.svelte";
+import SpaceLikeStickerSetting from "#lib/features/space-settings/SpaceLikeStickerSetting.svelte";
+import { SandboxSettingsState } from "#lib/features/space-settings/sandbox-settings.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { uploadSpaceAvatarImage } from "#lib/public-asset-images.ts";
+import { sdk } from "#lib/sdk.ts";
+import { validateSpaceSlugInput } from "#lib/slug-rules.ts";
 import {
 	buildSpaceLandingRoute,
 	buildSpaceSettingsRoute,
 	buildSpaceWalletRoute,
-} from "$lib/space-routes";
-import { invalidateCachedSpaceMembers } from "$lib/stores/space-profile-cache";
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
+} from "#lib/space-routes.ts";
+import { invalidateCachedSpaceMembers } from "#lib/stores/space-profile-cache.ts";
+import { cacheSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
+import { browser } from "$app/env";
+import { PUBLIC_COHUB_ENV } from "$app/env/public";
+import { goto } from "$app/navigation";
 
 const locale = $derived(getLocale());
 const props: { data: { spaceId: string } } = $props();

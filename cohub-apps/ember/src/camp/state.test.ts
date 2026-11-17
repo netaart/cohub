@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { gzipSync } from "node:zlib";
 import { test } from "node:test";
-import { type CampEvent, EVENTS } from "./protocol";
-import { hasCampHistory, restoreCamp } from "./restore";
-import { decodeSnapshot, emptyCamp, encodeSnapshot, foldCamp, rebase } from "./state";
+import { type CampEvent, EVENTS } from "./protocol.ts";
+import { hasCampHistory, restoreCamp } from "./restore.ts";
+import { decodeSnapshot, emptyCamp, encodeSnapshot, foldCamp, rebase } from "./state.ts";
 
 const at = 1_700_000_000_000;
 const ana = { name: "Ana", color: "#f4a261" };

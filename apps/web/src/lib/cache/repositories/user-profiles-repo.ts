@@ -2,12 +2,12 @@ import type { PublicUserProfile } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
-import { idbGet, idbPut, type UserProfileCacheRecord } from "$lib/cache/db";
-import { userProfileKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
-import type { CacheSource } from "$lib/cache/types";
-import { sdk } from "$lib/sdk";
+} from "#lib/cache/broadcast.ts";
+import { idbGet, idbPut, type UserProfileCacheRecord } from "#lib/cache/db.ts";
+import { userProfileKey } from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
+import type { CacheSource } from "#lib/cache/types.ts";
+import { sdk } from "#lib/sdk.ts";
 
 const USER_PROFILE_TTL_MS = 24 * 60 * 60 * 1000;
 const MISSING_USER_PROFILE_TTL_MS = 10 * 60 * 1000;

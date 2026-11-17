@@ -1,17 +1,17 @@
 <script lang="ts">
 import { HttpError } from "@neta-art/cohub";
 import { onMount } from "svelte";
-import { reportAppPromotionRegistration } from "$lib/app-promotion";
+import { reportAppPromotionRegistration } from "#lib/app-promotion.ts";
 import {
 	completeSignInCallback,
 	markAuthJustCompleted,
 	sanitizeRedirectPath,
-} from "$lib/auth";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import type { Locale } from "$lib/i18n/locale";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
+} from "#lib/auth.ts";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
 
 let error = $state("");
 const locale: Locale = $derived(getLocale());

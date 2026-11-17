@@ -1,5 +1,5 @@
 import { redirect } from "@sveltejs/kit";
-import { resolvePreferredLocale } from "$lib/i18n/locale";
+import { resolvePreferredLocale } from "#lib/i18n/locale.ts";
 import type { PageServerLoad } from "./$types";
 
 /** Fallback when the browser keeps the App Link; no client JS keeps the code out of logs. */

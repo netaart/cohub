@@ -16,33 +16,33 @@ import {
 	X,
 } from "lucide-svelte";
 import { onMount } from "svelte";
-import { ensureAuth } from "$lib/auth";
-import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
-import UploadProgress from "$lib/components/UploadProgress.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { getThemeCss } from "$lib/custom-theme/theme-css.svelte";
-import { userTheme } from "$lib/custom-theme/user-theme.svelte";
-import DeviceSettings from "$lib/features/settings/DeviceSettings.svelte";
-import { formatDateTime } from "$lib/i18n/format";
-import type { LocalePreference } from "$lib/i18n/locale";
+import { ensureAuth } from "#lib/auth.ts";
+import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
+import UploadProgress from "#lib/components/UploadProgress.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { getThemeCss } from "#lib/custom-theme/theme-css.svelte.ts";
+import { userTheme } from "#lib/custom-theme/user-theme.svelte.ts";
+import DeviceSettings from "#lib/features/settings/DeviceSettings.svelte";
+import { formatDateTime } from "#lib/i18n/format.ts";
 import {
 	getLocale,
 	getLocalePreference,
 	setLocalePreference,
-} from "$lib/i18n/locale.svelte";
+} from "#lib/i18n/locale.svelte.ts";
+import type { LocalePreference } from "#lib/i18n/locale.ts";
 import {
 	localizedThemeDescription,
 	localizedThemeLabel,
-} from "$lib/i18n/theme";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
-import { m } from "$lib/paraglide/messages.js";
-import { uploadUserAvatarImage } from "$lib/public-asset-images";
-import { validateUsernameInput } from "$lib/slug-rules";
-import { buildSpaceFileRoute, buildSpaceRootRoute } from "$lib/space-routes";
-import { authStore } from "$lib/stores/auth.svelte";
-import { getTheme } from "$lib/theme.svelte";
-import { THEME_OPTIONS, type ThemeMode } from "$lib/theme-registry";
-import { setThemeWithTransition } from "$lib/theme-transition";
+} from "#lib/i18n/theme.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { uploadUserAvatarImage } from "#lib/public-asset-images.ts";
+import { validateUsernameInput } from "#lib/slug-rules.ts";
+import { buildSpaceFileRoute, buildSpaceRootRoute } from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { getTheme } from "#lib/theme.svelte.ts";
+import { THEME_OPTIONS, type ThemeMode } from "#lib/theme-registry.ts";
+import { setThemeWithTransition } from "#lib/theme-transition.ts";
 
 const locale = $derived(getLocale());
 const localePreference = $derived(getLocalePreference());

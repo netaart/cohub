@@ -1,7 +1,7 @@
 import type { BillingCatalog } from "@neta-art/cohub";
-import { announceBillingChange } from "$lib/features/billing/refresh";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
+import { announceBillingChange } from "#lib/features/billing/refresh.ts";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 class BillingCatalogStore {
 	catalog = $state<BillingCatalog | null>(null);

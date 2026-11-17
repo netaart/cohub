@@ -1,4 +1,4 @@
-import { decodeInk, encodeInk } from "./ink";
+import { decodeInk, encodeInk } from "./ink.ts";
 import {
   type Author,
   type CampEvent,
@@ -15,9 +15,9 @@ import {
   readNumber,
   readText,
   readWood,
-} from "./protocol";
-import { clampCard } from "./scene";
-import { type Ember, type Point, placeStar, pruneEmbers } from "./world";
+} from "./protocol.ts";
+import { clampCard } from "./scene.ts";
+import { type Ember, type Point, placeStar, pruneEmbers } from "./world.ts";
 
 export type Card = { id: string; text: string; x: number; y: number; by: Author; sources: readonly string[]; z: number };
 export type Star = { id: string; x: number; y: number; by: Author; text: string; name?: string; prev?: string };

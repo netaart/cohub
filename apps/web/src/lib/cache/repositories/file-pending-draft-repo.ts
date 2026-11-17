@@ -3,8 +3,8 @@ import {
 	idbDelete,
 	idbGet,
 	idbPut,
-} from "$lib/cache/db";
-import { filePendingDraftKey, getCacheUserKey } from "$lib/cache/keys";
+} from "#lib/cache/db.ts";
+import { filePendingDraftKey, getCacheUserKey } from "#lib/cache/keys.ts";
 
 export type FilePendingDraft = {
 	spaceId: string;

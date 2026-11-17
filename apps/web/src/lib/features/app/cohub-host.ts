@@ -5,7 +5,7 @@ import {
 	parseAppNavigationOpenResponse,
 } from "@cohub/protocol/app-navigation";
 import { parseAppRef } from "@neta-art/cohub/app-ref";
-import { buildAppMentionHref } from "$lib/mentions/app";
+import { buildAppMentionHref } from "#lib/mentions/app.ts";
 
 type AppTarget = Extract<AppNavigationTarget, { kind: "app" }>;
 type OpenResult = Pick<AppNavigationOpenResponse, "handled" | "reason">;

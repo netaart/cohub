@@ -36,11 +36,11 @@ import {
 	filePreviewMemoKey,
 	filePreviewScope,
 } from "@neta-art/cohub/board";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 import {
 	isTextFileResponse,
 	tryResolveTextFileResponse,
-} from "$lib/space-file-text";
+} from "#lib/space-file-text.ts";
 
 /** Memoised results, keyed by space, path and mtime. */
 const MEMO_LIMIT = 512;

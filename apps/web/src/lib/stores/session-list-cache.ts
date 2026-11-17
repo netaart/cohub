@@ -1,17 +1,20 @@
 import type { SessionRecord } from "@neta-art/cohub";
-import type { SessionListForkRecord } from "$lib/cache/db";
-import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
+import type { SessionListForkRecord } from "#lib/cache/db.ts";
+import {
+	canUseUserScopedCache,
+	getCacheUserKeyAsync,
+} from "#lib/cache/keys.ts";
 import {
 	type SessionListForksPatch,
 	type SessionListIndexSnapshot,
 	sessionListIndexRepo,
-} from "$lib/cache/repositories/session-list-index-repo";
+} from "#lib/cache/repositories/session-list-index-repo.ts";
 import {
 	DEFAULT_SESSION_LIST_PAGE_INFO,
 	type SessionListPageInfo,
-} from "$lib/cache/types";
-import { mergeSessionForks } from "$lib/session-fork-tree";
-import { sessionStore } from "$lib/stores/session-store";
+} from "#lib/cache/types.ts";
+import { mergeSessionForks } from "#lib/session-fork-tree.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
 
 async function canUseCache() {
 	return canUseUserScopedCache(await getCacheUserKeyAsync());

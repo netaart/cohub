@@ -7,7 +7,7 @@ import {
 	type DisplayInfo,
 	HttpError,
 } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 export type DisplayProblem =
 	| "unavailable"

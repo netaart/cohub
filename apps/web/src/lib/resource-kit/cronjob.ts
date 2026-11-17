@@ -1,6 +1,6 @@
 import type { ModelThinkingLevel } from "@cohub/protocol";
-import { m } from "$messages";
-import { asRecord, type Locale } from "./core";
+import { m } from "../paraglide/messages.js";
+import { asRecord, type Locale } from "./core.ts";
 
 export type CronjobSelectedModel = {
 	provider: string;

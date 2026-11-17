@@ -1,9 +1,9 @@
 <script lang="ts">
 import { Search, X } from "lucide-svelte";
 import { onMount } from "svelte";
+import type { DocsSearchEntry } from "#lib/docs/index.ts";
+import { type DocsLocale, getDocsUi } from "#lib/docs/index.ts";
 import { goto } from "$app/navigation";
-import type { DocsSearchEntry } from "$lib/docs";
-import { type DocsLocale, getDocsUi } from "$lib/docs";
 
 let {
 	entries,

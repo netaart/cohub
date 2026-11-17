@@ -18,8 +18,8 @@ import {
 	X,
 } from "lucide-svelte";
 import { onDestroy, onMount } from "svelte";
-import type { BoardAssetSource } from "$lib/board/board-asset-source";
-import { referencePortForKind } from "$lib/board/board-content";
+import type { BoardAssetSource } from "#lib/board/board-asset-source.ts";
+import { referencePortForKind } from "#lib/board/board-content.ts";
 import {
 	type BoardGenerationMediaType,
 	type BoardGenerationReference,
@@ -35,25 +35,25 @@ import {
 	supportsBoardGenerationComposer,
 	validateBoardGeneration,
 	validateBoardGenerationParameters,
-} from "$lib/board/board-generation";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import { canUseUserScopedCache, getCacheUserKey } from "$lib/cache/keys";
-import ComposerModelTrigger from "$lib/components/composer/ComposerModelTrigger.svelte";
-import ComposerSubmitButton from "$lib/components/composer/ComposerSubmitButton.svelte";
-import ComposerSurface from "$lib/components/composer/ComposerSurface.svelte";
+} from "#lib/board/board-generation.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import { canUseUserScopedCache, getCacheUserKey } from "#lib/cache/keys.ts";
+import ComposerModelTrigger from "#lib/components/composer/ComposerModelTrigger.svelte";
+import ComposerSubmitButton from "#lib/components/composer/ComposerSubmitButton.svelte";
+import ComposerSurface from "#lib/components/composer/ComposerSurface.svelte";
 import {
 	getComposerKeyAction,
 	isMobileComposerInput,
-} from "$lib/composer-keyboard";
-import { getGenerationModelPickerItems } from "$lib/generation-model-catalog";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
+} from "#lib/composer-keyboard.ts";
+import { getGenerationModelPickerItems } from "#lib/generation-model-catalog.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
 import {
 	getCachedGenerationModels,
 	loadGenerationModels,
-} from "$lib/stores/generation-models-cache";
+} from "#lib/stores/generation-models-cache.ts";
 
 const {
 	editor,

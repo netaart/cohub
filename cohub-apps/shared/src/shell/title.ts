@@ -1,7 +1,7 @@
 import { m } from "$messages";
-import type { Locale } from "$kit/core";
-import { appActionName, taskTypeLabel } from "$kit/task-run";
-import type { ResourceDetail } from "../client";
+import type { Locale } from "$kit/core.ts";
+import { appActionName, taskTypeLabel } from "$kit/task-run.ts";
+import type { ResourceDetail } from "../client.ts";
 
 export function resourceTitle(detail: ResourceDetail, locale: Locale) {
   switch (detail.kind) {

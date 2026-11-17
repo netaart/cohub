@@ -4,16 +4,16 @@ import type {
 	BillingSubscriptionHistoryStatus,
 } from "@neta-art/cohub";
 import { ChevronLeft, ChevronRight, Clock, Loader2 } from "lucide-svelte";
-import { ensureAuth } from "$lib/auth";
-import { handleUnauthorizedError } from "$lib/auth-redirect";
-import { onSettingsPageActive } from "$lib/features/settings/page-context.svelte";
-import { formatDateTime } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { formatMoney } from "./format";
-import { subscriptionDisplayState } from "./product";
-import { announceBillingChange, onBillingChange } from "./refresh";
+import { ensureAuth } from "#lib/auth.ts";
+import { handleUnauthorizedError } from "#lib/auth-redirect.ts";
+import { onSettingsPageActive } from "#lib/features/settings/page-context.svelte.ts";
+import { formatDateTime } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { formatMoney } from "./format.ts";
+import { subscriptionDisplayState } from "./product.ts";
+import { announceBillingChange, onBillingChange } from "./refresh.ts";
 
 const { locale }: { locale: Locale } = $props();
 

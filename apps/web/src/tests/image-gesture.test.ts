@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createImageGestureHandlers } from "$lib/gestures/image-gesture";
+import { createImageGestureHandlers } from "#lib/gestures/image-gesture.ts";
 
 function createSurface() {
 	const image = {

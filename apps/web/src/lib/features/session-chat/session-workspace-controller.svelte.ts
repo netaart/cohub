@@ -1,8 +1,8 @@
 import type { SessionRecord, SessionTurnRecord } from "@neta-art/cohub";
-import type { AccessState } from "$lib/access/access-state";
-import { createRequestDedupe } from "$lib/features/space/modules/request-dedupe";
-import { sessionMatchesContext } from "$lib/session-context";
-import { sessionStore } from "$lib/stores/session-store";
+import type { AccessState } from "#lib/access/access-state.ts";
+import { createRequestDedupe } from "#lib/features/space/modules/request-dedupe.ts";
+import { sessionMatchesContext } from "#lib/session-context.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
 
 export type SessionViewState = {
 	session: SessionRecord | undefined;

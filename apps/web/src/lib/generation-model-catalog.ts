@@ -2,7 +2,7 @@ import {
 	filterDiscoverableGenerationModels,
 	type PublicGenerationDeclaration,
 } from "@cohub/protocol/generation";
-import { textMatchScore } from "$lib/command-palette/score";
+import { textMatchScore } from "#lib/command-palette/score.ts";
 
 type SearchableGenerationModel = Pick<
 	PublicGenerationDeclaration,

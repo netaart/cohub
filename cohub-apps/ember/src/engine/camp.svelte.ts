@@ -1,6 +1,6 @@
 import { type AppRuntimeContext, type CohubClient, createCohubClient } from "@neta-art/cohub";
-import { CampDocument } from "../camp/document";
-import { decodeInk, encodeInk } from "../camp/ink";
+import { CampDocument } from "../camp/document.ts";
+import { decodeInk, encodeInk } from "../camp/ink.ts";
 import {
   type CampEvent,
   createId,
@@ -10,17 +10,17 @@ import {
   readSnapshot,
   readText,
   WOOD_COOLDOWN_MS,
-} from "../camp/protocol";
-import { hasCampHistory, restoreCamp } from "../camp/restore";
-import { clampCard, cardSize } from "../camp/scene";
-import { type CampState, emptyCamp, encodeSnapshot, type Outcome, rebase, reduce, SNAPSHOT_EVERY } from "../camp/state";
-import { FIRE, hash, heatAt, type Point } from "../camp/world";
-import { localeFor, type Locale, type Messages, messagesFor } from "../i18n";
-import { CampSession, type Member, type Transport } from "../net/session";
-import { CampBoard } from "./board";
-import { normalizeCode, randomCode, spaceCode } from "./code";
-import { CampMedia, type DeviceNotice } from "./media.svelte";
-import { SpiritControl } from "./spirit.svelte";
+} from "../camp/protocol.ts";
+import { hasCampHistory, restoreCamp } from "../camp/restore.ts";
+import { clampCard, cardSize } from "../camp/scene.ts";
+import { type CampState, emptyCamp, encodeSnapshot, type Outcome, rebase, reduce, SNAPSHOT_EVERY } from "../camp/state.ts";
+import { FIRE, hash, heatAt, type Point } from "../camp/world.ts";
+import { localeFor, type Locale, type Messages, messagesFor } from "../i18n.ts";
+import { CampSession, type Member, type Transport } from "../net/session.ts";
+import { CampBoard } from "./board.ts";
+import { normalizeCode, randomCode, spaceCode } from "./code.ts";
+import { CampMedia, type DeviceNotice } from "./media.svelte.ts";
+import { SpiritControl } from "./spirit.svelte.ts";
 import {
   clearCachedCamp,
   flushCachedCamp,
@@ -31,8 +31,8 @@ import {
   writeCachedCamp,
   writeIntent,
   writeProfile,
-} from "./storage";
-import { World } from "./world";
+} from "./storage.ts";
+import { World } from "./world.ts";
 
 export type Phase = "boot" | "lobby" | "joining" | "camp" | "broken";
 

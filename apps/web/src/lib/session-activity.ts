@@ -1,6 +1,6 @@
 import type { SessionRecord } from "@neta-art/cohub";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 export type SessionRowStatusKind =
 	| "running"

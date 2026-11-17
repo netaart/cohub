@@ -1,8 +1,8 @@
 import type { SessionRecord, SpaceRecord } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
-import { getCachedSessionListSnapshot } from "$lib/stores/session-list-cache";
-import { sessionStore } from "$lib/stores/session-store";
-import type { ParsedCohubSpaceLink } from "./space";
+import { sdk } from "#lib/sdk.ts";
+import { getCachedSessionListSnapshot } from "#lib/stores/session-list-cache.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
+import type { ParsedCohubSpaceLink } from "./space.ts";
 
 const LINK_RESOLVE_LIMIT = 20;
 const SESSION_LABEL_LIMIT = 72;

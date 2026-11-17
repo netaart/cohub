@@ -4,7 +4,7 @@ import {
 	createWorkspaceAppInvocation,
 	type WorkspaceAppInvocation,
 	type WorkspaceAppOpenContext,
-} from "./workspace-app-context";
+} from "./workspace-app-context.ts";
 
 export const OVERLAY_LIMIT_MESSAGE =
 	"Too many overlay surfaces are already open.";

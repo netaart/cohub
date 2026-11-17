@@ -1,5 +1,5 @@
 <script lang="ts">
-import { type DocsLocale, getDocsUi } from "$lib/docs";
+import { type DocsLocale, getDocsUi } from "#lib/docs/index.ts";
 
 const {
 	locale,

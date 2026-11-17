@@ -1,11 +1,11 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import type { RelatedSessionView } from "$lib/related-sessions";
-import type { RelatedSessionRef } from "$lib/sent-turns";
-import { useSessionRelations } from "$lib/session-relations-context";
-import { buildSpaceSessionRoute } from "$lib/space-routes";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { RelatedSessionView } from "#lib/related-sessions.ts";
+import type { RelatedSessionRef } from "#lib/sent-turns.ts";
+import { useSessionRelations } from "#lib/session-relations-context.ts";
+import { buildSpaceSessionRoute } from "#lib/space-routes.ts";
 
 type RelatedSessionLabel = {
 	title: string | null;

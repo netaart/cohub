@@ -1,10 +1,10 @@
 import type { AppDomainListResponse } from "@neta-art/cohub";
-import { type AppDomainsCacheRecord, idbGet, idbPut } from "$lib/cache/db";
+import { type AppDomainsCacheRecord, idbGet, idbPut } from "#lib/cache/db.ts";
 import {
 	appDomainsKey,
 	canUseUserScopedCache,
 	getCacheUserKeyAsync,
-} from "$lib/cache/keys";
+} from "#lib/cache/keys.ts";
 
 async function resolveUserKey() {
 	const userKey = await getCacheUserKeyAsync();

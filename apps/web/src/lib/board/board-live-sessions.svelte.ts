@@ -1,11 +1,11 @@
 import type { BoardSessionLive } from "@neta-art/cohub/board/render";
 import { untrack } from "svelte";
 import { SvelteSet } from "svelte/reactivity";
-import { boardSessionLive } from "$lib/board/board-session";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { sdk } from "$lib/sdk";
-import { unreadTracker } from "$lib/stores/session-state.svelte";
-import { sessionStore } from "$lib/stores/session-store";
+import { boardSessionLive } from "#lib/board/board-session.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { sdk } from "#lib/sdk.ts";
+import { unreadTracker } from "#lib/stores/session-state.svelte.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
 
 const FETCH_LIMIT = 100;
 

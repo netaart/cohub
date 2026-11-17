@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { ContentBlock } from "@cohub/protocol/core";
-import StreamingWords from "$lib/components/StreamingWords.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import StreamingWords from "#lib/components/StreamingWords.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	blocks: Extract<ContentBlock, { type: "thinking" }>[];

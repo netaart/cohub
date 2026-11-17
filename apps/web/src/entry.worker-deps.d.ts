@@ -1,5 +1,3 @@
-/// <reference path="../entry.worker.ts" />
-
 /**
  * Types for `#worker-entry-deps`, the build outputs `entry.worker.ts` imports.
  *
@@ -10,9 +8,7 @@
  * `checkJs`.
  *
  * `package.json` maps this declaration and the generated module to the
- * `#worker-entry-deps` specifier. The reference above pulls the entry itself into
- * the program: it lives at the package root, which the generated `include` does
- * not cover, and `include` cannot be extended without replacing that list.
+ * `#worker-entry-deps` specifier.
  */
 
 /** The part of the Workers `ExecutionContext` the entry relies on. */

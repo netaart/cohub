@@ -1,5 +1,5 @@
-import { libraryEntityAt } from "$lib/library-routes";
-import { toSpaceIdPath } from "$lib/stores/space-address";
+import { libraryEntityAt } from "#lib/library-routes.ts";
+import { toSpaceIdPath } from "#lib/stores/space-address.ts";
 
 export type AppArea = "chats" | "spaces" | "account";
 

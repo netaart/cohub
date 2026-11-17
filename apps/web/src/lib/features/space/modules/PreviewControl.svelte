@@ -1,7 +1,7 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
-import { floatNear } from "$lib/actions/portal";
-import type { PreviewIcon } from "./preview-header";
+import { floatNear } from "#lib/actions/portal.ts";
+import type { PreviewIcon } from "./preview-header.ts";
 
 /**
  * Adaptive header control.

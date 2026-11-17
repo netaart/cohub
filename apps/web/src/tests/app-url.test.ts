@@ -4,7 +4,7 @@ import {
 	buildAppIframeUrl,
 	getAppFramePreconnectOrigin,
 	resolveAppFrame,
-} from "$lib/app-url";
+} from "#lib/app-url.ts";
 
 const BASE = "https://cohub.live/alice/demo/w/example";
 

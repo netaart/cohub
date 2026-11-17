@@ -4,11 +4,11 @@
  * Child pages provide route data; this shell owns long-lived preview runtimes.
  */
 import { type Snippet, untrack } from "svelte";
-import { goto, replaceState } from "$app/navigation";
+import type { WindowKind } from "#lib/features/space/modules/window-route.ts";
+import SpaceWorkspacePage from "#lib/features/space/SpaceWorkspacePage.svelte";
+import { canonicalSpaceLocation } from "#lib/stores/space-address.ts";
+import { goto } from "$app/navigation";
 import { page } from "$app/state";
-import type { WindowKind } from "$lib/features/space/modules/window-route";
-import SpaceWorkspacePage from "$lib/features/space/SpaceWorkspacePage.svelte";
-import { canonicalSpaceLocation } from "$lib/stores/space-address";
 
 type WorkspaceRouteData = {
 	spaceId: string;
@@ -72,15 +72,15 @@ $effect(() => {
 	const next = canonicalSpaceLocation(window.location, spaceId);
 	if (!next) return;
 	if ("replace" in next)
-		replaceState(
-			next.replace,
-			untrack(() => page.state),
-		);
+		void goto(next.replace, {
+			shallow: true,
+			replace: true,
+			state: untrack(() => page.state),
+		});
 	else
 		void goto(next.navigate, {
-			replaceState: true,
-			noScroll: true,
-			keepFocus: true,
+			replace: true,
+			reset: false,
 		});
 });
 </script>

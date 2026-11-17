@@ -14,18 +14,18 @@ import {
 	Plus,
 	Sparkles,
 } from "lucide-svelte";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import CommerceBenefitEditor from "#lib/components/commerce/CommerceBenefitEditor.svelte";
+import CommerceProductEditor from "#lib/components/commerce/CommerceProductEditor.svelte";
+import Dialog from "#lib/components/Dialog.svelte";
+import Spinner from "#lib/components/Spinner.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { formatCurrency, formatDateTime } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { buildSpaceSettingsRoute } from "#lib/space-routes.ts";
 import { goto } from "$app/navigation";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import CommerceBenefitEditor from "$lib/components/commerce/CommerceBenefitEditor.svelte";
-import CommerceProductEditor from "$lib/components/commerce/CommerceProductEditor.svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { formatCurrency, formatDateTime } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { buildSpaceSettingsRoute } from "$lib/space-routes";
 
 const locale = $derived(getLocale());
 

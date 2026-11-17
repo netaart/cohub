@@ -1,4 +1,4 @@
-import type { DocsFrontmatter, DocsTocItem } from "./types";
+import type { DocsFrontmatter, DocsTocItem } from "./types.ts";
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 

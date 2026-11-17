@@ -6,8 +6,8 @@ import {
 	type RenderOptions,
 	render,
 } from "pele/lazy";
-import { mediaLightbox } from "$lib/components/media-lightbox.svelte";
-import { saveFile } from "$lib/downloads.svelte";
+import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
+import { saveFile } from "#lib/downloads.svelte.ts";
 
 export type MermaidLabels = {
 	zoomIn: string;

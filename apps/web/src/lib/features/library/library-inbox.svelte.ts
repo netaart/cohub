@@ -7,13 +7,16 @@ import type {
 	UserListPage,
 	UserSessionSpaceSummary,
 } from "@neta-art/cohub";
-import { idbGet, idbPut, type LibraryListCacheRecord } from "$lib/cache/db";
-import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
-import { APPS_CHANGED_EVENT } from "$lib/features/app/app-realtime";
-import { CRONJOBS_UPDATED_EVENT } from "$lib/features/space/resources/space-cronjobs-feed.svelte";
-import type { LibraryItemEntity } from "$lib/library-routes";
-import { LiveList, type LivePage } from "$lib/lists/live-list.svelte";
-import { sdk } from "$lib/sdk";
+import { idbGet, idbPut, type LibraryListCacheRecord } from "#lib/cache/db.ts";
+import {
+	canUseUserScopedCache,
+	getCacheUserKeyAsync,
+} from "#lib/cache/keys.ts";
+import { APPS_CHANGED_EVENT } from "#lib/features/app/app-realtime.ts";
+import { CRONJOBS_UPDATED_EVENT } from "#lib/features/space/resources/space-cronjobs-feed.svelte.ts";
+import type { LibraryItemEntity } from "#lib/library-routes.ts";
+import { LiveList, type LivePage } from "#lib/lists/live-list.svelte.ts";
+import { sdk } from "#lib/sdk.ts";
 
 const PAGE_SIZE = 50;
 

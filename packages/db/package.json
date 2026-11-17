@@ -30,6 +30,6 @@
     "drizzle-orm": "^0.45.4"
   },
   "devDependencies": {
-    "typescript": "^7.0.2"
+    "typescript": "catalog:"
   }
 }

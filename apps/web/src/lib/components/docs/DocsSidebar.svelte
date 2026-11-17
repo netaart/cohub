@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { DocsSection } from "$lib/docs";
+import type { DocsSection } from "#lib/docs/index.ts";
 
 const {
 	sections,

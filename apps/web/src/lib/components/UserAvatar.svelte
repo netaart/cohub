@@ -1,8 +1,8 @@
 <script lang="ts">
 import { User } from "lucide-svelte";
-import { avatarInitials } from "$lib/avatar-initials";
-import { avatarImageUrl } from "$lib/avatar-url";
-import Avatar, { type AvatarSize } from "$lib/components/Avatar.svelte";
+import { avatarInitials } from "#lib/avatar-initials.ts";
+import { avatarImageUrl } from "#lib/avatar-url.ts";
+import Avatar, { type AvatarSize } from "#lib/components/Avatar.svelte";
 
 type Props = {
 	name?: string | null;

@@ -3,20 +3,20 @@ import type { CronJobRecord } from "@neta-art/cohub";
 import { Clock, Clock3, Pencil, Power, PowerOff, Trash2 } from "lucide-svelte";
 import { untrack } from "svelte";
 import { m } from "$messages";
-import { asRecord } from "$kit/core";
-import { cronjobPromptMeta, formatCronjobPrompt } from "$kit/cronjob";
-import { displaySafeJson } from "$kit/task-run";
-import { formatDateTime, formatShortDateTime } from "$kit/time";
-import { client } from "../../shared/src/client";
-import { getLocale } from "../../shared/src/runtime.svelte";
-import { scheduleStatus } from "../../shared/src/status";
+import { asRecord } from "$kit/core.ts";
+import { cronjobPromptMeta, formatCronjobPrompt } from "$kit/cronjob.ts";
+import { displaySafeJson } from "$kit/task-run.ts";
+import { formatDateTime, formatShortDateTime } from "$kit/time.ts";
+import { client } from "../../shared/src/client.ts";
+import { getLocale } from "../../shared/src/runtime.svelte.ts";
+import { scheduleStatus } from "../../shared/src/status.ts";
 import Button from "../../shared/src/ui/Button.svelte";
-import { cardClass, eyebrowClass, labelClass } from "../../shared/src/ui/classes";
+import { cardClass, eyebrowClass, labelClass } from "../../shared/src/ui/classes.ts";
 import CopyButton from "../../shared/src/ui/CopyButton.svelte";
-import { feedback } from "../../shared/src/ui/feedback.svelte";
+import { feedback } from "../../shared/src/ui/feedback.svelte.ts";
 import StatusBadge from "../../shared/src/ui/StatusBadge.svelte";
-import type { ViewProps } from "../../shared/src/view-types";
-import { previewCron } from "./cron";
+import type { ViewProps } from "../../shared/src/view-types.ts";
+import { previewCron } from "./cron.ts";
 import ScheduleForm, {
   type ScheduleFields,
   type ScheduleSubmission,

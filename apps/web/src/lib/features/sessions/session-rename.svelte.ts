@@ -1,6 +1,6 @@
 import type { SessionRecord } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
-import { sessionStore } from "$lib/stores/session-store";
+import { sdk } from "#lib/sdk.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
 
 // Single clicks wait this long so a double click can enter rename instead.
 const NAVIGATE_DELAY_MS = 120;

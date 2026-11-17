@@ -1,5 +1,5 @@
-import type { AppArea } from "$lib/mobile-nav";
-import type { CommandPaletteLens } from "./lens";
+import type { AppArea } from "#lib/mobile-nav.ts";
+import type { CommandPaletteLens } from "./lens.ts";
 
 export type CommandPaletteIntent = "navigate" | "new-chat";
 

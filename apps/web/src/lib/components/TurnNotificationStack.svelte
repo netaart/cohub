@@ -1,17 +1,17 @@
 <script lang="ts">
 import { ExternalLink, X } from "lucide-svelte";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import { swipeDismiss } from "$lib/gestures/swipe-dismiss";
-import { syncHostBadge } from "$lib/host-bridge";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import { swipeDismiss } from "#lib/gestures/swipe-dismiss.ts";
+import { syncHostBadge } from "#lib/host-bridge.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	getTurnNotificationHref,
 	getTurnNotificationMeta,
 	getTurnNotificationSpaceTitle,
 	type TurnNotification,
 	turnNotifications,
-} from "$lib/stores/turn-notifications.svelte";
+} from "#lib/stores/turn-notifications.svelte.ts";
 
 const locale = $derived(getLocale());
 

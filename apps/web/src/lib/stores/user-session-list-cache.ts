@@ -1,17 +1,17 @@
 import type { UserSessionListItem } from "@neta-art/cohub";
-import type { SessionListForkRecord } from "$lib/cache/db";
-import { idbGet, idbPut } from "$lib/cache/db";
+import type { SessionListForkRecord } from "#lib/cache/db.ts";
+import { idbGet, idbPut } from "#lib/cache/db.ts";
 import {
 	canUseUserScopedCache,
 	getCacheUserKeyAsync,
 	userSessionListKey,
-} from "$lib/cache/keys";
+} from "#lib/cache/keys.ts";
 import {
 	DEFAULT_SESSION_LIST_PAGE_INFO,
 	type SessionListPageInfo,
-} from "$lib/cache/types";
-import { mergeSessionRecords } from "$lib/session-record-merge";
-import { sortSessionsByRecentActivity } from "$lib/session-sort";
+} from "#lib/cache/types.ts";
+import { mergeSessionRecords } from "#lib/session-record-merge.ts";
+import { sortSessionsByRecentActivity } from "#lib/session-sort.ts";
 
 const STORE = "session_lists" as const;
 const TTL_MS = 30_000;

@@ -6,9 +6,9 @@ import {
 	NotebookPen,
 	Settings,
 } from "lucide-svelte";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
-import type { SettingsSection } from "$lib/settings-nav";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { SettingsSection } from "#lib/settings-nav.ts";
 
 export const SETTINGS_SECTION_ICONS = {
 	general: Settings,

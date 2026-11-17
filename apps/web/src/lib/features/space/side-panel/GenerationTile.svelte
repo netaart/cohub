@@ -8,12 +8,12 @@ import {
 	mediaPreviewCandidates,
 } from "@neta-art/cohub/media";
 import { AlertCircle, Info, Play } from "lucide-svelte";
-import { clock } from "$lib/clock.svelte";
-import EntityIcon from "$lib/components/EntityIcon.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import MediaImage from "$lib/resource-kit/MediaImage.svelte";
-import { formatElapsed } from "./side-panel-data";
+import { clock } from "#lib/clock.svelte.ts";
+import EntityIcon from "#lib/components/EntityIcon.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import MediaImage from "#lib/resource-kit/MediaImage.svelte";
+import { formatElapsed } from "./side-panel-data.ts";
 
 type Props = {
 	task: GenerationTaskView;

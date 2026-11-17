@@ -1,10 +1,10 @@
 <script lang="ts">
 import type { LabelListItem } from "@neta-art/cohub";
 import { X } from "lucide-svelte";
-import LabelCreateForm from "$lib/components/LabelCreateForm.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { createSpaceLabel } from "$lib/stores/space-labels";
+import LabelCreateForm from "#lib/components/LabelCreateForm.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { createSpaceLabel } from "#lib/stores/space-labels.ts";
 
 function portal(node: HTMLElement) {
 	if (typeof document === "undefined") return {};

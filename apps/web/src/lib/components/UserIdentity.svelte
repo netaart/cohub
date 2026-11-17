@@ -1,6 +1,6 @@
 <script lang="ts">
-import type { AvatarSize } from "$lib/components/Avatar.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
+import type { AvatarSize } from "#lib/components/Avatar.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
 
 type Props = {
 	name: string;

@@ -11,7 +11,7 @@
  */
 
 import { untrack } from "svelte";
-import { haptic } from "$lib/haptics";
+import { haptic } from "#lib/haptics.ts";
 import {
 	autoscrollStep,
 	describePointerDragPayload,
@@ -25,14 +25,14 @@ import {
 	type PointerDragPayload,
 	type PointerDropZone,
 	pickDropZone,
-} from "./pointer-drag-core";
+} from "./pointer-drag-core.ts";
 
 export {
 	POINTER_DRAG_SETTLE_MS,
 	type PointerDragItem,
 	type PointerDragPayload,
 	type PointerDropZone,
-} from "./pointer-drag-core";
+} from "./pointer-drag-core.ts";
 
 /** Marks the surface that retracts once the pointer drags out of it. */
 export const POINTER_DRAG_SURFACE_ATTR = "data-pointer-drag-surface";

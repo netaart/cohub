@@ -3,9 +3,9 @@ import type { AppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import type { AppRuntimeShellContext } from "@neta-art/cohub";
 import { RefreshCw, X } from "lucide-svelte";
 import { untrack } from "svelte";
-import AppSurface from "$lib/components/app/AppSurface.svelte";
-import type { AppSurfaceHost } from "$lib/features/app/surface-host";
-import type { AppSurfaceRegistry } from "$lib/features/app/surface-registry";
+import AppSurface from "#lib/components/app/AppSurface.svelte";
+import type { AppSurfaceHost } from "#lib/features/app/surface-host.ts";
+import type { AppSurfaceRegistry } from "#lib/features/app/surface-registry.ts";
 import {
 	hotAppIdsAt,
 	isTrackedInputRegion,
@@ -13,11 +13,11 @@ import {
 	pruneHotAppIds,
 	resolveOverlayRect,
 	resolveOverlayStyle,
-} from "./desktop-layer-geometry";
+} from "./desktop-layer-geometry.ts";
 import type {
 	DesktopLayerManager,
 	DesktopOverlay,
-} from "./desktop-layer-manager.svelte";
+} from "./desktop-layer-manager.svelte.ts";
 
 type Props = {
 	manager: DesktopLayerManager;

@@ -1,14 +1,14 @@
 <script lang="ts">
 import type { InstalledApp } from "@cohub/protocol";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import type { WorkspaceAppLaunch } from "../modules/workspace-app-open";
-import type { SpaceAppsFeed } from "../resources/space-apps-feed.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { WorkspaceAppLaunch } from "../modules/workspace-app-open.ts";
+import type { SpaceAppsFeed } from "../resources/space-apps-feed.svelte.ts";
 import AppRow from "./AppRow.svelte";
 import InstalledAppsList from "./InstalledAppsList.svelte";
 import LoadError from "./LoadError.svelte";
 import SidePanelSection from "./SidePanelSection.svelte";
-import { createSectionState } from "./side-panel-sections.svelte";
+import { createSectionState } from "./side-panel-sections.svelte.ts";
 
 type Props = {
 	spaceId: string;

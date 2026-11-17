@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { installViewportOffsetGuard } from "$lib/viewport-offset-guard";
+import { installViewportOffsetGuard } from "#lib/viewport-offset-guard.ts";
 
 type Listener = () => void;
 

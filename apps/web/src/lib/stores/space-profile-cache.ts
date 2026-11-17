@@ -4,8 +4,8 @@ import type {
 	SpaceUsageResponse,
 	SpaceWalletSummary,
 } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 type SpaceProfileCacheEntry<T> = {
 	value: T;

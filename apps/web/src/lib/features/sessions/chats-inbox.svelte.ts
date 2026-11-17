@@ -7,25 +7,24 @@ import type {
 	UserSessionSpaceSummary,
 } from "@neta-art/cohub";
 import { untrack } from "svelte";
-import { goto } from "$app/navigation";
-import { resolveSpaceEntryRoute } from "$lib/app-entry";
-import type { SessionListForkRecord } from "$lib/cache/db";
-import { getCacheUserKeyAsync } from "$lib/cache/keys";
-import { openCommandPalette } from "$lib/command-palette/open";
-import { subscribeSpaceChannel } from "$lib/features/session-chat";
-import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
-import { type LiveChange, LiveList } from "$lib/lists/live-list.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
+import { resolveSpaceEntryRoute } from "#lib/app-entry.ts";
+import type { SessionListForkRecord } from "#lib/cache/db.ts";
+import { getCacheUserKeyAsync } from "#lib/cache/keys.ts";
+import { openCommandPalette } from "#lib/command-palette/open.ts";
+import { subscribeSpaceChannel } from "#lib/features/session-chat/index.ts";
+import { spacesInbox } from "#lib/features/spaces/spaces-inbox.svelte.ts";
+import { type LiveChange, LiveList } from "#lib/lists/live-list.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
 import {
 	mergeSessionForks,
 	readRealtimeSessionFork,
-} from "$lib/session-fork-tree";
-import { mergeSessionRecord } from "$lib/session-record-merge";
-import { compareSessionsByRecentActivity } from "$lib/session-sort";
-import { getSpacePublicProfile } from "$lib/space-profile";
-import { buildUserNewSessionRoute } from "$lib/space-routes";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/session-fork-tree.ts";
+import { mergeSessionRecord } from "#lib/session-record-merge.ts";
+import { compareSessionsByRecentActivity } from "#lib/session-sort.ts";
+import { getSpacePublicProfile } from "#lib/space-profile.ts";
+import { buildUserNewSessionRoute } from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import {
 	type ChatsFilter,
 	chatsFilterScope,
@@ -35,27 +34,28 @@ import {
 	sameChatsFilter,
 	sessionFit,
 	writeChatsFilter,
-} from "$lib/stores/chats-filter";
-import { getRecentSpaces } from "$lib/stores/recent-space";
-import { findCachedSession } from "$lib/stores/session-detail-cache";
+} from "#lib/stores/chats-filter.ts";
+import { getRecentSpaces } from "#lib/stores/recent-space.ts";
+import { findCachedSession } from "#lib/stores/session-detail-cache.ts";
 import {
 	getCachedSessionListSnapshot,
 	setCachedSessionList,
-} from "$lib/stores/session-list-cache";
-import { sessionStore, startSessionSync } from "$lib/stores/session-store";
+} from "#lib/stores/session-list-cache.ts";
+import { sessionStore, startSessionSync } from "#lib/stores/session-store.ts";
 import {
 	fetchLabelItemsFirstPageFresh,
 	fetchSpaceLabels,
 	flattenLabelsWithRefs,
 	getCachedLabelItemsSnapshot,
 	getCachedSpaceLabelsSnapshot,
-} from "$lib/stores/space-labels";
-import { getCachedSpaceList } from "$lib/stores/space-list-cache";
-import { getCachedSpaceRecord } from "$lib/stores/space-record-cache";
+} from "#lib/stores/space-labels.ts";
+import { getCachedSpaceList } from "#lib/stores/space-list-cache.ts";
+import { getCachedSpaceRecord } from "#lib/stores/space-record-cache.ts";
 import {
 	getCachedUserSessionListSnapshot,
 	setCachedUserSessionList,
-} from "$lib/stores/user-session-list-cache";
+} from "#lib/stores/user-session-list-cache.ts";
+import { goto } from "$app/navigation";
 
 const PAGE_SIZE = 30;
 const SPACE_CHIP_LIMIT = 6;

@@ -1,4 +1,4 @@
-import { plainText, truncate } from "$lib/seo";
+import { plainText, truncate } from "#lib/seo.ts";
 import rawEntries from "./entries.json";
 
 export interface ChangelogEntry {

@@ -1,4 +1,4 @@
-import type { PagerGlide } from "$lib/gestures/pager";
+import type { PagerGlide } from "#lib/gestures/pager.ts";
 
 export type SwipeTabPane = { scrollToTop(): void };
 

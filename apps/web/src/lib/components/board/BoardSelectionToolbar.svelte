@@ -27,11 +27,11 @@ import {
 	Sparkles,
 	Trash2,
 } from "lucide-svelte";
-import { boardSelectionColor } from "$lib/board/board-selection-color";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import type { BoardMenuAction } from "$lib/components/board/BoardContextMenu.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { boardSelectionColor } from "#lib/board/board-selection-color.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import type { BoardMenuAction } from "#lib/components/board/BoardContextMenu.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

@@ -1,36 +1,36 @@
 <script lang="ts">
 import { BarChart3, CreditCard, Gift, Loader2 } from "lucide-svelte";
 import { tick } from "svelte";
-import { goto } from "$app/navigation";
-import { page } from "$app/state";
-import { ensureAuth } from "$lib/auth";
-import { handleUnauthorizedError } from "$lib/auth-redirect";
-import BalanceLedger from "$lib/features/billing/BalanceLedger.svelte";
-import CreditSources from "$lib/features/billing/CreditSources.svelte";
-import { formatBalance } from "$lib/features/billing/format";
-import { trackPurchase } from "$lib/features/billing/funnel";
-import PurchasePanel from "$lib/features/billing/PurchasePanel.svelte";
+import { ensureAuth } from "#lib/auth.ts";
+import { handleUnauthorizedError } from "#lib/auth-redirect.ts";
+import BalanceLedger from "#lib/features/billing/BalanceLedger.svelte";
+import CreditSources from "#lib/features/billing/CreditSources.svelte";
+import { formatBalance } from "#lib/features/billing/format.ts";
+import { trackPurchase } from "#lib/features/billing/funnel.ts";
+import PurchasePanel from "#lib/features/billing/PurchasePanel.svelte";
 import {
 	currentCatalogSubscription,
 	type PurchaseFocus,
 	subscriptionDisplayState,
-} from "$lib/features/billing/product";
-import { PurchaseFlow } from "$lib/features/billing/purchase.svelte";
+} from "#lib/features/billing/product.ts";
+import { PurchaseFlow } from "#lib/features/billing/purchase.svelte.ts";
 import {
 	announceBillingChange,
 	onBillingChange,
-} from "$lib/features/billing/refresh";
-import SubscriptionHistory from "$lib/features/billing/SubscriptionHistory.svelte";
-import * as account from "$lib/features/settings/account-data";
+} from "#lib/features/billing/refresh.ts";
+import SubscriptionHistory from "#lib/features/billing/SubscriptionHistory.svelte";
+import * as account from "#lib/features/settings/account-data.ts";
 import {
 	onSettingsPageActive,
 	settingsPageActive,
-} from "$lib/features/settings/page-context.svelte";
-import { formatDate } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
+} from "#lib/features/settings/page-context.svelte.ts";
+import { formatDate } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { billingCatalogStore } from "#lib/stores/billing-catalog.svelte.ts";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 
 type Tab = "activity" | "plans";
 
@@ -94,13 +94,12 @@ const tabs = $derived<[Tab, string][]>([
 function setTab(next: Tab, focus: PurchaseFocus | null = null) {
 	tab = next;
 	planFocus = focus;
-	const target = new URL(page.url);
+	const target = new URL(page.url.href);
 	if (next === "plans") target.searchParams.set("tab", "plans");
 	else target.searchParams.delete("tab");
 	void goto(`${target.pathname}${target.search}${target.hash}`, {
-		replaceState: true,
-		keepFocus: true,
-		noScroll: true,
+		replace: true,
+		reset: false,
 	});
 }
 

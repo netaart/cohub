@@ -1,15 +1,16 @@
 import { HttpError } from "@neta-art/cohub";
-import type { HandleClientError } from "@sveltejs/kit";
-import { shouldReloadForFailedDynamicImport } from "$lib/asset-import-recovery";
-import { installCohubDebuggerConsoleExports } from "$lib/debugger";
+import type { HandleClientError } from "@sveltejs/kit/hooks";
+import { shouldReloadForFailedDynamicImport } from "#lib/asset-import-recovery.ts";
+import { installCohubDebuggerConsoleExports } from "#lib/debugger.ts";
 
 installCohubDebuggerConsoleExports();
 
 // SvelteKit replaces unknown thrown errors with a generic "Internal Error";
 // keep the real SDK HttpError message so error boundaries can classify it.
-export const handleError: HandleClientError = ({ error, message }) => {
+export const handleError: HandleClientError = ({ kind, error }) => {
+	if (kind !== "unknown") return;
 	console.error(error);
-	return error instanceof HttpError ? { message: error.message } : { message };
+	if (error instanceof HttpError) return { message: error.message };
 };
 
 const FAILED_DYNAMIC_IMPORT_STORAGE_KEY = "cohub:failed-dynamic-import";

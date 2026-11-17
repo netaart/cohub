@@ -51,6 +51,6 @@
     "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
     "tsx": "catalog:",
-    "typescript": "^7.0.2"
+    "typescript": "catalog:"
   }
 }

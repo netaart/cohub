@@ -1,7 +1,7 @@
 import type { UserAppFilter, UserCronJobFilter } from "@neta-art/cohub";
-import type { Locale } from "$lib/i18n/locale";
-import type { LibraryEntity } from "$lib/library-routes";
-import { m } from "$lib/paraglide/messages.js";
+import type { Locale } from "#lib/i18n/locale.ts";
+import type { LibraryEntity } from "#lib/library-routes.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 export function libraryEntityLabel(entity: LibraryEntity, locale: Locale) {
 	switch (entity) {

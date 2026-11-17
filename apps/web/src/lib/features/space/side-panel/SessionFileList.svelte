@@ -6,12 +6,12 @@ import {
 	Loader2,
 	TextCursorInput,
 } from "lucide-svelte";
-import { setCohubResourceDragData } from "$lib/drag/cohub-resource-drag";
-import { pointerDragSource } from "$lib/drag/pointer-drag.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { formatTimeAgo } from "$lib/resource-kit/time";
-import type { SessionFileEntry } from "./side-panel-data";
+import { setCohubResourceDragData } from "#lib/drag/cohub-resource-drag.ts";
+import { pointerDragSource } from "#lib/drag/pointer-drag.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { formatTimeAgo } from "#lib/resource-kit/time.ts";
+import type { SessionFileEntry } from "./side-panel-data.ts";
 
 type Props = {
 	files: SessionFileEntry[];

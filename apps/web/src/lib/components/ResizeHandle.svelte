@@ -3,7 +3,7 @@ import {
 	type ResizeStart,
 	stepResize,
 	trackPointerResize,
-} from "$lib/layout/pointer-resize";
+} from "#lib/layout/pointer-resize.ts";
 
 const {
 	label,

@@ -1,7 +1,7 @@
-import type { EntityIconName } from "$lib/components/EntityIcon.svelte";
-import type { Locale } from "$lib/i18n/locale";
-import type { AppArea } from "$lib/mobile-nav";
-import { m } from "$lib/paraglide/messages.js";
+import type { EntityIconName } from "#lib/components/EntityIcon.svelte";
+import type { Locale } from "#lib/i18n/locale.ts";
+import type { AppArea } from "#lib/mobile-nav.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 export const APP_AREA_ICONS = {
 	chats: "chat",

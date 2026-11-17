@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CSV_PREVIEW_MAX_ROWS, parseCsv } from "$lib/csv-parse";
+import { CSV_PREVIEW_MAX_ROWS, parseCsv } from "#lib/csv-parse.ts";
 
 test("parses a plain comma-separated table with a header", () => {
 	const result = parseCsv("name,age,city\nAlice,30,NYC\nBob,25,LA\n");

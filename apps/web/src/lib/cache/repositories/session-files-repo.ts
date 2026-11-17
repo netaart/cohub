@@ -5,12 +5,12 @@ import {
 	idbGetAllByIndex,
 	idbPut,
 	type SessionFilesCacheRecord,
-} from "$lib/cache/db";
+} from "#lib/cache/db.ts";
 import {
 	canUseUserScopedCache,
 	getCacheUserKeyAsync,
 	sessionFilesKey,
-} from "$lib/cache/keys";
+} from "#lib/cache/keys.ts";
 
 const SESSIONS_PER_SPACE = 100;
 const ACCESS_TOUCH_INTERVAL_MS = 60_000;

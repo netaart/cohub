@@ -1,5 +1,5 @@
-import { getCurrentDeviceType } from "$lib/device-detection";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
+import { getCurrentDeviceType } from "#lib/device-detection.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
 
 export type ComposerKeyAction = "none" | "newline" | "submit";
 

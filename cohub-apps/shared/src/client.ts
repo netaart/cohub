@@ -14,7 +14,7 @@ import {
   type ResourceAppTarget,
 } from "@cohub/protocol";
 import type { AppNavigationTarget } from "@cohub/protocol/app-navigation";
-import type { AppTotals } from "$kit/app";
+import type { AppTotals } from "$kit/app.ts";
 
 const environment = import.meta.env.VITE_COHUB_ENV === "dev" ? "dev" : "prod";
 export const client = createCohubClient({ env: environment });

@@ -1,8 +1,8 @@
 import type { ExecutionStats, RequestMetric } from "@cohub/protocol/model";
-import { formatDurationMs } from "$lib/format-duration";
-import { formatTokenCount, getDisplayInputTokens } from "$lib/format-usage";
-import { formatCurrency } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
+import { formatDurationMs } from "#lib/format-duration.ts";
+import { formatTokenCount, getDisplayInputTokens } from "#lib/format-usage.ts";
+import { formatCurrency } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
 
 export type StatsScope = "turn" | "session";
 

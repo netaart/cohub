@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { mergeStreamingDeltaBlocks } from "../lib/session-streaming";
+import { mergeStreamingDeltaBlocks } from "../lib/session-streaming.ts";
 
 type MiniGenerationState = {
 	status: string;

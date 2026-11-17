@@ -6,17 +6,20 @@ import type {
 } from "@cohub/protocol/model";
 import { Loader2 } from "lucide-svelte";
 import { tick } from "svelte";
-import ChatMessageBubble from "$lib/components/ChatMessageBubble.svelte";
-import CompactionDivider from "$lib/components/CompactionDivider.svelte";
-import GenerationRuntimeStatusRow from "$lib/components/GenerationRuntimeStatusRow.svelte";
-import ProcessCard from "$lib/components/ProcessCard.svelte";
-import SentTurnsSummary from "$lib/components/SentTurnsSummary.svelte";
-import ToolExecutionCard from "$lib/components/ToolExecutionCard.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { getModelDisplayName, type ModelCatalogItem } from "$lib/model-catalog";
-import { m } from "$lib/paraglide/messages.js";
-import type { ChatMessage, TimelineItem } from "$lib/session-tree";
-import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
+import ChatMessageBubble from "#lib/components/ChatMessageBubble.svelte";
+import CompactionDivider from "#lib/components/CompactionDivider.svelte";
+import GenerationRuntimeStatusRow from "#lib/components/GenerationRuntimeStatusRow.svelte";
+import ProcessCard from "#lib/components/ProcessCard.svelte";
+import SentTurnsSummary from "#lib/components/SentTurnsSummary.svelte";
+import ToolExecutionCard from "#lib/components/ToolExecutionCard.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import {
+	getModelDisplayName,
+	type ModelCatalogItem,
+} from "#lib/model-catalog.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { ChatMessage, TimelineItem } from "#lib/session-tree.ts";
+import type { OpenWorkspaceFileTarget } from "#lib/workspace-file-links.ts";
 
 type Props = {
 	sessionId?: string | null;

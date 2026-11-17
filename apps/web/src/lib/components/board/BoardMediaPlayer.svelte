@@ -6,13 +6,13 @@ import {
 } from "@neta-art/cohub/media";
 import { ChevronLeft, ChevronRight, X } from "lucide-svelte";
 import { onMount } from "svelte";
-import type { BoardAssetSource } from "$lib/board/board-asset-source";
-import { playableBoardMediaList } from "$lib/board/board-media-playback";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { screenVariantSize } from "$lib/media/media-info";
-import { m } from "$lib/paraglide/messages.js";
-import MediaVideo from "$lib/resource-kit/MediaVideo.svelte";
+import type { BoardAssetSource } from "#lib/board/board-asset-source.ts";
+import { playableBoardMediaList } from "#lib/board/board-media-playback.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { screenVariantSize } from "#lib/media/media-info.ts";
+import { m } from "#lib/paraglide/messages.js";
+import MediaVideo from "#lib/resource-kit/MediaVideo.svelte";
 
 const {
 	editor,

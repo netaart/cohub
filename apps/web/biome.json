@@ -19,6 +19,9 @@
 	},
 	"linter": {
 		"rules": {
+			"correctness": {
+				"useImportExtensions": "error"
+			},
 			"style": {
 				"useConst": "off"
 			}
@@ -46,8 +49,8 @@
 							"options": {
 								"patterns": [
 									{
-										"group": ["$lib/**", "$app/**", "$env/**"],
-										"message": "resource-kit is shared with the resource Apps: use relative, $messages or package imports."
+										"group": ["#lib/**", "$app/**", "$env/**"],
+										"message": "resource-kit is shared with the resource Apps: use relative or package imports."
 									}
 								]
 							}

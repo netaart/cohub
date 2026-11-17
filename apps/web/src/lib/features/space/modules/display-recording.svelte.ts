@@ -1,7 +1,7 @@
 import type { DisplayInfo, DisplayRecordingMeta } from "@neta-art/cohub";
 import { untrack } from "svelte";
-import { sdk } from "$lib/sdk";
-import { loadRecordings } from "./display-replay";
+import { sdk } from "#lib/sdk.ts";
+import { loadRecordings } from "./display-replay.ts";
 
 const SAVED_MS = 8_000;
 // sandboxd closes the files a moment after the snapshot says the recording ended.

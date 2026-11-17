@@ -1,8 +1,8 @@
 <script lang="ts">
 import { Loader2 } from "lucide-svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import type { GenerationFeed } from "./generation-feed.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { GenerationFeed } from "./generation-feed.svelte.ts";
 import LoadError from "./LoadError.svelte";
 
 const { feed }: { feed: GenerationFeed } = $props();

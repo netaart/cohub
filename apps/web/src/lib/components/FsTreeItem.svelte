@@ -14,30 +14,30 @@ import {
 	Trash2,
 	Upload,
 } from "lucide-svelte";
-import { preloadBoardRuntime } from "$lib/board/runtime/board-runtime";
-import FsTreeItem from "$lib/components/FsTreeItem.svelte";
-import { useFileTreeMarks } from "$lib/components/file-tree-marks";
+import { preloadBoardRuntime } from "#lib/board/runtime/board-runtime.ts";
+import FsTreeItem from "#lib/components/FsTreeItem.svelte";
+import { useFileTreeMarks } from "#lib/components/file-tree-marks.ts";
 import {
 	COHUB_PATH_MIME,
 	getCohubResourceDragData,
 	hasCohubResourceDragData,
 	setCohubResourceDragData,
-} from "$lib/drag/cohub-resource-drag";
-import type { PointerDragPayload } from "$lib/drag/pointer-drag.svelte";
+} from "#lib/drag/cohub-resource-drag.ts";
+import type { PointerDragPayload } from "#lib/drag/pointer-drag.svelte.ts";
 import {
 	pointerDrag,
 	pointerDragSource,
 	pointerDropZone,
-} from "$lib/drag/pointer-drag.svelte";
-import { resolveFsMoveDestination } from "$lib/features/space/modules/file-workspace-utils";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import type { SpaceFsNode } from "$lib/space-fs";
+} from "#lib/drag/pointer-drag.svelte.ts";
+import { resolveFsMoveDestination } from "#lib/features/space/modules/file-workspace-utils.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { SpaceFsNode } from "#lib/space-fs.ts";
 import {
 	entriesFromDataTransfer,
 	entriesFromFiles,
 	type LocalUploadEntry,
-} from "$lib/upload-entries";
+} from "#lib/upload-entries.ts";
 
 const {
 	node,

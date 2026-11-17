@@ -11,7 +11,7 @@ import {
 	onHostEvent,
 	readyHost,
 	supportsHostCapability,
-} from "$lib/host-bridge";
+} from "#lib/host-bridge.ts";
 
 let status = $state<DeviceDisplayStatus | null>(null);
 let subscribed: Promise<void> | null = null;

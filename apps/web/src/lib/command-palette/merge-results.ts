@@ -1,6 +1,6 @@
 import type { GlobalSearchResult } from "@neta-art/cohub";
-import { sortCommandItems } from "./score";
-import type { CommandPaletteItem } from "./types";
+import { sortCommandItems } from "./score.ts";
+import type { CommandPaletteItem } from "./types.ts";
 
 type CommandItemKeySource = Pick<CommandPaletteItem, "type" | "id">;
 

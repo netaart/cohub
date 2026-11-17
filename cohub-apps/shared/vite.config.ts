@@ -1,6 +1,6 @@
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vite";
+import { defaultClientConditions, defineConfig } from "vite";
 
 const web = (path: string) =>
   new URL(`../../apps/web/src/lib/${path}`, import.meta.url).pathname;
@@ -10,6 +10,7 @@ export function resourceAppConfig() {
     base: "./",
     plugins: [tailwindcss(), svelte()],
     resolve: {
+      conditions: ["source", ...defaultClientConditions],
       dedupe: ["svelte", "lucide-svelte", "@neta-art/cohub", "@cohub/protocol"],
       alias: {
         $kit: web("resource-kit"),

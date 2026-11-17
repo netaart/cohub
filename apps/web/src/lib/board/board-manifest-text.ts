@@ -6,7 +6,7 @@ import {
 	symlinkReadError,
 } from "@neta-art/cohub";
 import { parseBoardManifest } from "@neta-art/cohub/board";
-import { tryResolveTextFileResponse } from "$lib/space-file-text";
+import { tryResolveTextFileResponse } from "#lib/space-file-text.ts";
 
 /**
  * Extract UTF-8 manifest text from a Space FS response.

@@ -14,15 +14,15 @@ import type {
 	BoardReplica,
 	BoardReplicaState,
 } from "@neta-art/cohub/board/replica";
-import { readBoardManifestId } from "$lib/board/board-manifest-text";
-import { boardPathMatchesTarget } from "$lib/board/board-sync-policy";
-import { loadCheckpointBoard } from "$lib/board/checkpoint-board";
-import { loadedCacheUserKey } from "$lib/cache/keys";
+import { readBoardManifestId } from "#lib/board/board-manifest-text.ts";
+import { boardPathMatchesTarget } from "#lib/board/board-sync-policy.ts";
+import { loadCheckpointBoard } from "#lib/board/checkpoint-board.ts";
+import { loadedCacheUserKey } from "#lib/cache/keys.ts";
 import {
 	readBoardManifestCache,
 	writeBoardManifestCache,
-} from "$lib/cache/repositories/board-repo";
-import { sdk } from "$lib/sdk";
+} from "#lib/cache/repositories/board-repo.ts";
+import { sdk } from "#lib/sdk.ts";
 
 type BoardFileResponse =
 	| SpaceFsFileResponse

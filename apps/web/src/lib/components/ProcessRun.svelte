@@ -5,13 +5,13 @@ import type {
 	StoredIntermediateMessage,
 } from "@cohub/protocol/model";
 import { ChevronDown, ChevronRight } from "lucide-svelte";
-import IntermediateMessageBubble from "$lib/components/IntermediateMessageBubble.svelte";
-import StatusGlyph from "$lib/components/StatusGlyph.svelte";
-import { summarizeToolCalls } from "$lib/components/tool-call-format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import type { ModelCatalogItem } from "$lib/model-catalog";
-import { m } from "$lib/paraglide/messages.js";
-import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
+import IntermediateMessageBubble from "#lib/components/IntermediateMessageBubble.svelte";
+import StatusGlyph from "#lib/components/StatusGlyph.svelte";
+import { summarizeToolCalls } from "#lib/components/tool-call-format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import type { ModelCatalogItem } from "#lib/model-catalog.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { OpenWorkspaceFileTarget } from "#lib/workspace-file-links.ts";
 
 type Props = {
 	turn: SessionTurnRecord;

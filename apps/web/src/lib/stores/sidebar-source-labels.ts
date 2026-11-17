@@ -4,7 +4,7 @@ import {
 	SESSION_ARCHIVED_LABEL_SYSTEM_KEY,
 	type SessionRecord,
 } from "@neta-art/cohub";
-import { buildSpaceSessionRoute } from "$lib/space-routes";
+import { buildSpaceSessionRoute } from "#lib/space-routes.ts";
 
 export const ALL_CHATS_LABEL_ID = "__all_chats__";
 export const SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX = "session-source:";

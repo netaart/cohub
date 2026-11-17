@@ -10,17 +10,17 @@ import {
 	Rocket,
 } from "lucide-svelte";
 import { onDestroy } from "svelte";
-import type { PreviewCaptureTarget } from "$lib/features/preview-mark";
-import PreviewMarkHost from "$lib/features/preview-mark/ui/PreviewMarkHost.svelte";
-import PreviewHeader from "$lib/features/space/modules/PreviewHeader.svelte";
+import type { PreviewCaptureTarget } from "#lib/features/preview-mark/index.ts";
+import PreviewMarkHost from "#lib/features/preview-mark/ui/PreviewMarkHost.svelte";
+import PreviewHeader from "#lib/features/space/modules/PreviewHeader.svelte";
 import type {
 	PreviewChrome,
 	PreviewHeaderAction,
-} from "$lib/features/space/modules/preview-header";
-import type { Window } from "$lib/features/space/modules/windows";
-import { toIntlTag } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/features/space/modules/preview-header.ts";
+import type { Window } from "#lib/features/space/modules/windows.ts";
+import { toIntlTag } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	port,

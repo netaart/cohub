@@ -1,6 +1,6 @@
 <script lang="ts">
 import { untrack } from "svelte";
-import type { BoardBezier } from "$lib/board/animation-timeline";
+import type { BoardBezier } from "#lib/board/animation-timeline.ts";
 
 const {
 	curve,

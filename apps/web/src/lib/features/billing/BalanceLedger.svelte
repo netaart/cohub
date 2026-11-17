@@ -2,22 +2,22 @@
 import type { BillingBalanceActivity } from "@neta-art/cohub";
 import { ChevronRight, Loader2 } from "lucide-svelte";
 import { untrack } from "svelte";
-import { inScrollView } from "$lib/actions/in-scroll-view";
-import Segmented from "$lib/components/Segmented.svelte";
-import * as account from "$lib/features/settings/account-data";
-import { settingsPageActive } from "$lib/features/settings/page-context.svelte";
-import { formatDate, formatDateTime } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
-import { formatBalance } from "./format";
+import { inScrollView } from "#lib/actions/in-scroll-view.ts";
+import Segmented from "#lib/components/Segmented.svelte";
+import * as account from "#lib/features/settings/account-data.ts";
+import { settingsPageActive } from "#lib/features/settings/page-context.svelte.ts";
+import { formatDate, formatDateTime } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { formatBalance } from "./format.ts";
 import {
 	type LedgerRun,
 	ledgerDays,
 	quotedName,
 	transferActivityKind,
 	usageSubject,
-} from "./ledger";
-import { onBillingChange } from "./refresh";
+} from "./ledger.ts";
+import { onBillingChange } from "./refresh.ts";
 
 const { locale }: { locale: Locale } = $props();
 const active = settingsPageActive();

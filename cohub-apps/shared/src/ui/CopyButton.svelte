@@ -2,7 +2,7 @@
 import { Check, Copy } from "lucide-svelte";
 import { onDestroy } from "svelte";
 import { m } from "$messages";
-import { getLocale } from "../runtime.svelte";
+import { getLocale } from "../runtime.svelte.ts";
 
 type Props = {
   value: string;

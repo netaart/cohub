@@ -19,24 +19,24 @@ import {
 	Save,
 } from "lucide-svelte";
 import { onDestroy } from "svelte";
-import { goto } from "$app/navigation";
-import { page } from "$app/state";
-import type { AccessState } from "$lib/access/access-state";
-import { classifyAccessError } from "$lib/access/access-state";
-import AccessStateView from "$lib/components/AccessStateView.svelte";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import CheckpointDiffPanel from "$lib/resource-kit/CheckpointDiffPanel.svelte";
-import { asRecord } from "$lib/resource-kit/core";
-import { sdk } from "$lib/sdk";
+import type { AccessState } from "#lib/access/access-state.ts";
+import { classifyAccessError } from "#lib/access/access-state.ts";
+import AccessStateView from "#lib/components/AccessStateView.svelte";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import CheckpointDiffPanel from "#lib/resource-kit/CheckpointDiffPanel.svelte";
+import { asRecord } from "#lib/resource-kit/core.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	buildSpaceCheckpointRoute,
 	buildSpaceNewSessionRoute,
 	buildSpaceTaskRoute,
-} from "$lib/space-routes";
-import { createKeyedRouteRequestGuard } from "./route-request-guard";
-import { withCurrentWindow } from "./window-route";
+} from "#lib/space-routes.ts";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
+import { createKeyedRouteRequestGuard } from "./route-request-guard.ts";
+import { withCurrentWindow } from "./window-route.ts";
 
 type Props = {
 	mode: "create" | "detail";
@@ -227,14 +227,13 @@ function openComparePicker() {
 
 function applyCompareBase(baseId: string | null) {
 	if (!checkpointId) return;
-	const url = new URL(page.url);
+	const url = new URL(page.url.href);
 	if (baseId) url.searchParams.set("base", baseId);
 	else url.searchParams.delete("base");
 	compareOpen = false;
 	void goto(`${url.pathname}${url.search}`, {
-		replaceState: true,
-		noScroll: true,
-		keepFocus: true,
+		replace: true,
+		reset: false,
 	});
 }
 

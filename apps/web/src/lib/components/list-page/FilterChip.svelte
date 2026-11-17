@@ -4,7 +4,7 @@ import type { HTMLAttributes } from "svelte/elements";
 import {
 	getFilterBarPill,
 	hasFilterBarPill,
-} from "$lib/components/list-page/filter-bar";
+} from "#lib/components/list-page/filter-bar.ts";
 
 let {
 	label,

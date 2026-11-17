@@ -8,8 +8,8 @@ import {
 } from "@neta-art/cohub/board";
 import type { BoardAssetManager } from "@neta-art/cohub/board/stage";
 import { onDestroy, onMount, untrack } from "svelte";
-import type { BoardAssetSource } from "$lib/board/board-asset-source";
-import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
+import type { BoardAssetSource } from "#lib/board/board-asset-source.ts";
+import type { BoardCollaboratorProfile } from "#lib/board/board-collaborator.ts";
 import {
 	BOARD_REPLAY_PAGE_SIZE,
 	BOARD_REPLAY_STEP_MS,
@@ -19,13 +19,13 @@ import {
 	loadBoardReplay,
 	replayNextVersion,
 	replayPreviousVersion,
-} from "$lib/board/board-replay";
-import { createBoardEditor } from "$lib/board/editor.svelte";
-import BoardReplayTimeline from "$lib/components/board/BoardReplayTimeline.svelte";
-import BoardStage from "$lib/components/board/BoardStage.svelte";
-import BoardZoomMenu from "$lib/components/board/BoardZoomMenu.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/board/board-replay.ts";
+import { createBoardEditor } from "#lib/board/editor.svelte.ts";
+import BoardReplayTimeline from "#lib/components/board/BoardReplayTimeline.svelte";
+import BoardStage from "#lib/components/board/BoardStage.svelte";
+import BoardZoomMenu from "#lib/components/board/BoardZoomMenu.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	boardId,

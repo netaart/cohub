@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
 	getBottomAnchoredScrollTop,
 	getExpandedComposerHeight,
-} from "$lib/composer-expansion";
+} from "#lib/composer-expansion.ts";
 
 test("expanded composer fills the visible panel", () => {
 	assert.equal(

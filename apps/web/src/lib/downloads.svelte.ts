@@ -12,7 +12,7 @@ import {
 	hostPlatform,
 	onHostEvent,
 	supportsHostCapability,
-} from "$lib/host-bridge";
+} from "#lib/host-bridge.ts";
 
 /**
  * `attachment` URLs download in place; `url` may render inline, so the browser

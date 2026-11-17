@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
-import { floatNear, portal } from "$lib/actions/portal";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { overlay } from "$lib/motion";
+import { floatNear, portal } from "#lib/actions/portal.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { overlay } from "#lib/motion.ts";
 
 const {
 	open,

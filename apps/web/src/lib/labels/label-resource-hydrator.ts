@@ -1,5 +1,8 @@
 import type { LabelAssignmentListItem, SessionRecord } from "@neta-art/cohub";
-import { buildSpaceFileRoute, buildSpaceSessionRoute } from "$lib/space-routes";
+import {
+	buildSpaceFileRoute,
+	buildSpaceSessionRoute,
+} from "#lib/space-routes.ts";
 
 function withResource(
 	item: LabelAssignmentListItem,

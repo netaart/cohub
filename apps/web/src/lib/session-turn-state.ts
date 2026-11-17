@@ -1,7 +1,11 @@
 import type { ChannelEnvelope } from "@cohub/protocol/realtime";
 import type { SessionRecord, SessionTurnRecord } from "@neta-art/cohub";
-import { sameData } from "$lib/lists/live-list-core";
-import { TURN_PHASE, turnAdvances, turnPhase } from "$lib/session-record-merge";
+import { sameData } from "#lib/lists/live-list-core.ts";
+import {
+	TURN_PHASE,
+	turnAdvances,
+	turnPhase,
+} from "#lib/session-record-merge.ts";
 
 type ActiveTurn = NonNullable<SessionRecord["activeTurn"]>;
 

@@ -3,7 +3,7 @@
   import Link from "@lucide/svelte/icons/link";
   import MessagesSquare from "@lucide/svelte/icons/messages-square";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
-  import type { Camp } from "../engine/camp.svelte";
+  import type { Camp } from "../engine/camp.svelte.ts";
 
   let { camp, logOpen = $bindable(false) }: { camp: Camp; logOpen: boolean } = $props();
   const t = $derived(camp.t);

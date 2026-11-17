@@ -6,17 +6,17 @@ import type {
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
-import type { SessionListForkRecord } from "$lib/cache/db";
+} from "#lib/cache/broadcast.ts";
+import type { SessionListForkRecord } from "#lib/cache/db.ts";
 import {
 	idbDelete,
 	idbGet,
 	idbPut,
 	type LabelItemsCacheRecord,
-} from "$lib/cache/db";
-import { getCacheUserKey, labelItemsKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
-import type { CacheSource } from "$lib/cache/types";
+} from "#lib/cache/db.ts";
+import { getCacheUserKey, labelItemsKey } from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
+import type { CacheSource } from "#lib/cache/types.ts";
 
 const LABEL_ITEMS_TTL_MS = 15_000;
 const memory = new MemoryLru<string, LabelItemsCacheRecord>(100);

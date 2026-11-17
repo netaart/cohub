@@ -1,3 +1,5 @@
+import { PUBLIC_LANDING_MEDIA_BASE } from "$app/env/public";
+
 /**
  * Where marketing captures live.
  *
@@ -10,9 +12,7 @@ const DEFAULT_BASE =
 	"https://public.cohub.run/s/cf327f11-5065-4f3a-bfe5-cdb0a70f3377/cohub-landing";
 
 /** No trailing slash, so callers can always join with a single "/". */
-const BASE = (
-	import.meta.env?.PUBLIC_LANDING_MEDIA_BASE?.trim() || DEFAULT_BASE
-).replace(/\/+$/, "");
+const BASE = (PUBLIC_LANDING_MEDIA_BASE ?? DEFAULT_BASE).replace(/\/+$/, "");
 
 export type LandingMediaExt = "webp" | "webm" | "mp4";
 

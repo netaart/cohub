@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { SpacePortStatus } from "@cohub/protocol/ports";
-import PortPreview from "$lib/components/PortPreview.svelte";
-import type { PreviewChrome } from "./preview-header";
-import type { Window } from "./windows";
+import PortPreview from "#lib/components/PortPreview.svelte";
+import type { PreviewChrome } from "./preview-header.ts";
+import type { Window } from "./windows.ts";
 
 type Props = {
 	windows: Window[];

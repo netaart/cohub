@@ -1,7 +1,7 @@
 import {
 	measureTurnRailMarkers,
 	type TurnRailMarkerAnchor,
-} from "./turn-rail-markers";
+} from "./turn-rail-markers.ts";
 
 export type SessionScrollAnchorKind =
 	| "user"

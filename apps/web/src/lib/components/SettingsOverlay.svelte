@@ -1,7 +1,7 @@
 <script lang="ts">
-import Dialog from "$lib/components/Dialog.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import Dialog from "#lib/components/Dialog.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	open,

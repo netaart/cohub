@@ -1,5 +1,5 @@
 import type { GenerationStreamEvent } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 type GenerationHandler = {
 	event: (event: GenerationStreamEvent) => void;

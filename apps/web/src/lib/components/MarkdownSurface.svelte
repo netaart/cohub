@@ -5,20 +5,20 @@ import {
 	onMount,
 	unmount as unmountComponent,
 } from "svelte";
-import { mediaLightbox } from "$lib/components/media-lightbox.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { createLazyModuleLoader } from "$lib/lazy-module";
-import { m } from "$lib/paraglide/messages.js";
-import { insertComposerSnippet } from "$lib/stores/composer-insert";
+import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { createLazyModuleLoader } from "#lib/lazy-module.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { insertComposerSnippet } from "#lib/stores/composer-insert.ts";
 import {
 	createWorkspaceAssetLoader,
 	type ResolveWorkspaceAsset,
 	WorkspaceAssetAccessError,
-} from "$lib/workspace-assets";
+} from "#lib/workspace-assets.ts";
 import {
 	normalizeWorkspaceFileLinkTarget,
 	type WorkspaceFileLinkTarget,
-} from "$lib/workspace-file-links";
+} from "#lib/workspace-file-links.ts";
 
 type MarkdownVariant = "chat" | "document";
 
@@ -47,10 +47,10 @@ const {
 let markdownEl = $state<HTMLElement | null>(null);
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
 let workspaceAssetRun = 0;
-let mermaidRenderer: typeof import("$lib/mermaid-renderer") | null = null;
+let mermaidRenderer: typeof import("#lib/mermaid-renderer.ts") | null = null;
 
 const loadMermaidRenderer = createLazyModuleLoader(
-	() => import("$lib/mermaid-renderer"),
+	() => import("#lib/mermaid-renderer.ts"),
 );
 
 const mountedAudioPlayers: {
@@ -321,7 +321,7 @@ function enhanceAudioPlayers() {
 		target.className = "markdown-audio-mount";
 		figure.insertBefore(target, audio);
 
-		void import("$lib/components/AudioPlayer.svelte")
+		void import("#lib/components/AudioPlayer.svelte")
 			.then(({ default: AudioPlayer }) => {
 				if (!target.isConnected) return;
 				const instance = mountComponent(AudioPlayer, {

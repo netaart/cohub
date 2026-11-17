@@ -2,9 +2,9 @@ import type {
 	BillingBalanceActivity,
 	BillingBalanceActivityFilter,
 } from "@neta-art/cohub";
-import { ActivityFeed } from "$lib/features/billing/activity-feed.svelte";
-import { AccountResource } from "$lib/features/settings/account-resource.svelte";
-import { sdk } from "$lib/sdk";
+import { ActivityFeed } from "#lib/features/billing/activity-feed.svelte.ts";
+import { AccountResource } from "#lib/features/settings/account-resource.svelte.ts";
+import { sdk } from "#lib/sdk.ts";
 
 export const billingCredits = new AccountResource("billing-credits", () =>
 	sdk.billing.getCredits(),

@@ -1,7 +1,7 @@
 import type {
 	CommandPaletteResourceType,
 	RemoteCommandPaletteResourceType,
-} from "./types";
+} from "./types.ts";
 
 export type CommandPaletteSearchPlan = {
 	query: string;

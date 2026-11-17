@@ -1,6 +1,6 @@
 import type { CronJobRecord } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
-import { SpaceListFeed } from "./space-list-feed.svelte";
+import { sdk } from "#lib/sdk.ts";
+import { SpaceListFeed } from "./space-list-feed.svelte.ts";
 
 export const CRONJOBS_UPDATED_EVENT = "cohub:cronjobs-updated";
 

@@ -2,17 +2,17 @@
 import type { TaskRunRecord } from "@neta-art/cohub";
 import { onDestroy, onMount, untrack } from "svelte";
 import { m } from "$messages";
-import { asRecord } from "$kit/core";
-import { mergeTaskRunRecord, taskRunDuration, type TaskRunRealtimePatch } from "$kit/task-run";
-import { formatShortDateTime } from "$kit/time";
-import { client, subscribeSpace } from "../../shared/src/client";
-import { getLocale, runtime } from "../../shared/src/runtime.svelte";
-import { taskStatus } from "../../shared/src/status";
+import { asRecord } from "$kit/core.ts";
+import { mergeTaskRunRecord, taskRunDuration, type TaskRunRealtimePatch } from "$kit/task-run.ts";
+import { formatShortDateTime } from "$kit/time.ts";
+import { client, subscribeSpace } from "../../shared/src/client.ts";
+import { getLocale, runtime } from "../../shared/src/runtime.svelte.ts";
+import { taskStatus } from "../../shared/src/status.ts";
 import Button from "../../shared/src/ui/Button.svelte";
 import Notice from "../../shared/src/ui/Notice.svelte";
 import StatusBadge from "../../shared/src/ui/StatusBadge.svelte";
-import { eyebrowClass } from "../../shared/src/ui/classes";
-import type { ViewProps } from "../../shared/src/view-types";
+import { eyebrowClass } from "../../shared/src/ui/classes.ts";
+import type { ViewProps } from "../../shared/src/view-types.ts";
 
 type Props = Pick<ViewProps, "spaceId" | "authorize" | "navigateRelated"> & { jobId: string };
 let { spaceId, jobId, authorize, navigateRelated }: Props = $props();

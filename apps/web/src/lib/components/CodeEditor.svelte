@@ -36,13 +36,13 @@ import { onDestroy, onMount } from "svelte";
 import {
 	getCodeEditorTheme,
 	withLanguageHighlights,
-} from "$lib/code-editor-highlight";
+} from "#lib/code-editor-highlight.ts";
 import {
 	isDarkTheme,
 	isResolvedTheme,
 	type ResolvedTheme,
-} from "$lib/theme-registry";
-import type { WorkspaceFilePosition } from "$lib/workspace-file-links";
+} from "#lib/theme-registry.ts";
+import type { WorkspaceFilePosition } from "#lib/workspace-file-links.ts";
 
 const {
 	value = "",

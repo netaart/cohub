@@ -4,7 +4,7 @@ import "@fontsource/geist/600.css";
 import "@fontsource/silkscreen/400.css";
 import { mount } from "svelte";
 import App from "./App.svelte";
-import { Camp } from "./engine/camp.svelte";
+import { Camp } from "./engine/camp.svelte.ts";
 import "./styles.css";
 
 const target = document.getElementById("app");

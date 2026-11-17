@@ -1,7 +1,7 @@
 <script lang="ts">
-import StatusGlyph from "$lib/components/StatusGlyph.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import StatusGlyph from "#lib/components/StatusGlyph.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	label?: string | null;

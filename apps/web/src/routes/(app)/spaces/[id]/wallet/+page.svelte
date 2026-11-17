@@ -1,5 +1,6 @@
 <script lang="ts">
-import SpaceWallet from "$lib/features/billing/SpaceWallet.svelte";
+import SpaceWallet from "#lib/features/billing/SpaceWallet.svelte";
+
 const { data }: { data: { spaceId: string } } = $props();
 </script>
 

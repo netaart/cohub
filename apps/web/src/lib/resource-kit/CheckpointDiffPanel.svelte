@@ -6,15 +6,15 @@ import type {
 	CheckpointDiffStatus,
 } from "@neta-art/cohub";
 import { ChevronDown, ChevronRight, FileDiff, Loader2 } from "lucide-svelte";
-import { m } from "$messages";
-import { intlTag, type Locale } from "./core";
+import { m } from "../paraglide/messages.js";
+import { intlTag, type Locale } from "./core.ts";
 import {
 	diffStatusClass,
 	formatDiffBytes,
 	formatDiffCounts,
 	patchLineClass,
 	patchLinePrefix,
-} from "./diff";
+} from "./diff.ts";
 
 type SummaryLike = {
 	files: CheckpointDiffFile[];

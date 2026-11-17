@@ -1,10 +1,10 @@
 import type { LabelResourceType } from "@neta-art/cohub";
-import type { LabelAssignableCohubResource } from "$lib/drag/cohub-resource-drag";
+import type { LabelAssignableCohubResource } from "#lib/drag/cohub-resource-drag.ts";
 import {
 	getLabelIdsByRefs,
 	getLabelRefsFromAssignments,
 	patchResourceLabels,
-} from "$lib/stores/space-labels";
+} from "#lib/stores/space-labels.ts";
 
 export type ResourceLabelMutationResult = {
 	changed: boolean;

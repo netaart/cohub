@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Menu } from "lucide-svelte";
 import type { Snippet } from "svelte";
-import { uiState } from "$lib/stores/ui.svelte";
+import { uiState } from "#lib/stores/ui.svelte.ts";
 
 const {
 	left,

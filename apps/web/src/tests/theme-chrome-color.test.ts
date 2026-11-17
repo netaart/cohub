@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_PWA_THEME_COLOR } from "$lib/system-chrome";
-import { RESOLVED_THEMES, THEME_COLOR } from "$lib/theme-registry";
+import { DEFAULT_PWA_THEME_COLOR } from "#lib/system-chrome.ts";
+import { RESOLVED_THEMES, THEME_COLOR } from "#lib/theme-registry.ts";
 
 const webRoot = fileURLToPath(new URL("../..", import.meta.url));
 const read = (path: string) => readFileSync(`${webRoot}/${path}`, "utf8");

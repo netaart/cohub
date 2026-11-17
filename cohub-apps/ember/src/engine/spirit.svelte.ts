@@ -1,6 +1,6 @@
 import type { CohubClient } from "@neta-art/cohub";
-import { EVENTS, type GoneData, LIVE_WINDOW_MS, readText, SUMMON_WINDOW_MS } from "../camp/protocol";
-import type { CampSession, Member } from "../net/session";
+import { EVENTS, type GoneData, LIVE_WINDOW_MS, readText, SUMMON_WINDOW_MS } from "../camp/protocol.ts";
+import type { CampSession, Member } from "../net/session.ts";
 
 const WATCH_INTERVAL_MS = 2500;
 

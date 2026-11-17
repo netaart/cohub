@@ -1,5 +1,9 @@
 <script lang="ts">
-import { type DocsLocale, type DocsTocItem, getDocsUi } from "$lib/docs";
+import {
+	type DocsLocale,
+	type DocsTocItem,
+	getDocsUi,
+} from "#lib/docs/index.ts";
 
 const {
 	items,

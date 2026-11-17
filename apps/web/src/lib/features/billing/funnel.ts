@@ -1,4 +1,4 @@
-import type { PurchaseSource } from "./purchase.svelte";
+import type { PurchaseSource } from "./purchase.svelte.ts";
 
 /**
  * Purchase funnel events. There is no analytics backend yet, so this is the

@@ -3,18 +3,18 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { CohubClient } from "@neta-art/cohub";
 import { compileModule } from "svelte/compiler";
-import ts from "typescript";
-import type { CampSession } from "../net/session";
-import type { World } from "./world";
+import { transformWithOxc } from "vite";
+import type { CampSession } from "../net/session.ts";
+import type { World } from "./world.ts";
 
 const file = new URL("./media.svelte.ts", import.meta.url);
-const plain = ts.transpileModule(readFileSync(file, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const { code: plain } = await transformWithOxc(readFileSync(file, "utf8"), file.pathname);
 const code = compileModule(plain, { filename: file.pathname, generate: "client" }).js.code
   .replace(/from ['"]([^'"]+)['"]/g, (_match, specifier: string) => {
-    const url = specifier.startsWith(".") ? new URL(`${specifier}.ts`, file).href : import.meta.resolve(specifier);
+    const url = specifier.startsWith(".") ? new URL(specifier, file).href : import.meta.resolve(specifier);
     return `from ${JSON.stringify(url)}`;
   });
-const { CampMedia } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`) as typeof import("./media.svelte");
+const { CampMedia } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`) as typeof import("./media.svelte.ts");
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void;

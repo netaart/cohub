@@ -1,7 +1,10 @@
 import type { SpaceRecord } from "@neta-art/cohub";
-import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
-import { spaceRecordRepo } from "$lib/cache/repositories/space-record-repo";
-import { rememberSpaceAddress } from "$lib/stores/space-address";
+import {
+	canUseUserScopedCache,
+	getCacheUserKeyAsync,
+} from "#lib/cache/keys.ts";
+import { spaceRecordRepo } from "#lib/cache/repositories/space-record-repo.ts";
+import { rememberSpaceAddress } from "#lib/stores/space-address.ts";
 
 async function resolveCacheUserKey() {
 	const userKey = await getCacheUserKeyAsync();

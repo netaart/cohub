@@ -1,10 +1,10 @@
 <script lang="ts">
 import { X } from "lucide-svelte";
-import { dismissOnBack } from "$lib/back-layers.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { overlay } from "$lib/motion";
-import { m } from "$lib/paraglide/messages.js";
+import { dismissOnBack } from "#lib/back-layers.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { overlay } from "#lib/motion.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 function portal(node: HTMLElement) {
 	if (typeof document === "undefined") return {};

@@ -1,6 +1,6 @@
 <script lang="ts">
 import { onDestroy, untrack } from "svelte";
-import { splitStreamingText } from "$lib/streaming-text";
+import { splitStreamingText } from "#lib/streaming-text.ts";
 
 type Props = {
 	text: string;

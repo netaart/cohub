@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { serveStandaloneHostRequest } from "$lib/server/standalone-host-request";
+import { serveStandaloneHostRequest } from "#lib/server/standalone-host-request.ts";
 
 const API_ORIGIN = "https://api.cohub.live";
 const UPSTREAM =

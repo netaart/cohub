@@ -13,10 +13,10 @@ import {
 	Undo2,
 	X,
 } from "lucide-svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import type { MarkColor, MarkTool } from "../types";
-import { MARK_COLOR_HEX } from "../types";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { MarkColor, MarkTool } from "../types.ts";
+import { MARK_COLOR_HEX } from "../types.ts";
 
 type Props = {
 	tool: MarkTool;

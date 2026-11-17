@@ -1,9 +1,9 @@
 <script lang="ts">
 import { ArrowUpRight } from "lucide-svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { LICENSE, RELEASE, REPO_URL } from "$lib/project";
+import Dialog from "#lib/components/Dialog.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { LICENSE, RELEASE, REPO_URL } from "#lib/project.ts";
 
 const locale = $derived(getLocale());
 const keyChoices = $derived(

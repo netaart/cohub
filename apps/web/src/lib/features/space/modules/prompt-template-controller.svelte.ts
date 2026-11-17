@@ -2,12 +2,12 @@ import type { PromptTemplateCatalogEntry } from "@neta-art/cohub";
 import {
 	readCachedPromptTemplates,
 	writeCachedPromptTemplates,
-} from "$lib/prompt-template-cache";
+} from "#lib/prompt-template-cache.ts";
 import {
 	createRefreshCoordinator,
 	type RefreshOptions,
-} from "$lib/refresh-coordinator";
-import { sdk } from "$lib/sdk";
+} from "#lib/refresh-coordinator.ts";
+import { sdk } from "#lib/sdk.ts";
 
 export type PromptQuickAction = {
 	name: string;

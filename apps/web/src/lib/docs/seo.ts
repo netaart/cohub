@@ -1,13 +1,13 @@
-import { page } from "$app/state";
-import { docsHref } from "$lib/docs/manifest";
+import { docsHref } from "#lib/docs/manifest.ts";
 import {
 	canonicalUrl,
 	defaultOgImage,
 	docsJsonLd,
 	type SeoBreadcrumb,
-} from "$lib/seo";
-import type { DocsPage } from "./types";
-import { getDocsUi } from "./ui";
+} from "#lib/seo.ts";
+import { page } from "$app/state";
+import type { DocsPage } from "./types.ts";
+import { getDocsUi } from "./ui.ts";
 
 export type DocsSeo = {
 	title: string;

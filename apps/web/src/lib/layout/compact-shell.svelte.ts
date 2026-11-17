@@ -1,4 +1,4 @@
-import { COMPACT_SHELL_MAX_WIDTH_PX } from "./breakpoints";
+import { COMPACT_SHELL_MAX_WIDTH_PX } from "./breakpoints.ts";
 
 const QUERY = `(max-width: ${COMPACT_SHELL_MAX_WIDTH_PX}px)`;
 

@@ -1,5 +1,5 @@
 import type { Permission } from "@neta-art/cohub";
-import type { TaskBrowserScope } from "./scope";
+import type { TaskBrowserScope } from "./scope.ts";
 
 export type AccessRequest = {
   scopes: Permission[];

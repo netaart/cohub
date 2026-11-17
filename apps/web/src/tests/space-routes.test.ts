@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildFileIngressMainRoute } from "$lib/features/space/modules/window-route";
+import { buildFileIngressMainRoute } from "#lib/features/space/modules/window-route.ts";
 import {
 	buildSpaceLandingRoute,
 	buildSpaceNewSessionRoute,
 	buildSpaceRootRoute,
-} from "$lib/space-routes";
-import { load as loadSpaceRoot } from "../routes/(app)/spaces/[id]/+page";
-import { load as loadLegacyNewSession } from "../routes/(app)/spaces/[id]/sessions/new/+page";
+} from "#lib/space-routes.ts";
+import { load as loadSpaceRoot } from "../routes/(app)/spaces/[id]/+page.ts";
+import { load as loadLegacyNewSession } from "../routes/(app)/spaces/[id]/sessions/new/+page.ts";
 
 test("the Space root is the canonical new-session route", () => {
 	const expected = "/spaces/space-id";

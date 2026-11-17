@@ -2,9 +2,9 @@ import type {
 	DesktopCommand,
 	DesktopCommandDispatchedPayload,
 } from "@neta-art/cohub";
-import { getClientInstanceId } from "$lib/client-instance";
+import { getClientInstanceId } from "#lib/client-instance.ts";
 
-const loadSdk = async () => (await import("$lib/sdk")).sdk;
+const loadSdk = async () => (await import("#lib/sdk.ts")).sdk;
 
 export type DesktopCommandOutcome =
 	| { status: "pending" }

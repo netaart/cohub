@@ -5,7 +5,7 @@ import {
   emptyBoardDocument,
   parseBoardItem,
 } from "@neta-art/cohub/board";
-import { LIMITS } from "./protocol";
+import { LIMITS } from "./protocol.ts";
 import {
   cardItems,
   cardRoot,
@@ -23,8 +23,8 @@ import {
   starRoot,
   wovenLink,
   wovenLinkId,
-} from "./scene";
-import type { CampState, Card, Ink, Star } from "./state";
+} from "./scene.ts";
+import type { CampState, Card, Ink, Star } from "./state.ts";
 
 type Raw = Record<string, unknown>;
 

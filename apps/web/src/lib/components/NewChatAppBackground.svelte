@@ -4,9 +4,9 @@ import type {
 	AppNavigationOpenResponse,
 } from "@cohub/protocol/app-navigation";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
-import type { CohubAppUrl } from "$lib/app-url";
-import AppSurface from "$lib/components/app/AppSurface.svelte";
-import { sdk } from "$lib/sdk";
+import type { CohubAppUrl } from "#lib/app-url.ts";
+import AppSurface from "#lib/components/app/AppSurface.svelte";
+import { sdk } from "#lib/sdk.ts";
 
 type Props = {
 	appUrl: CohubAppUrl;

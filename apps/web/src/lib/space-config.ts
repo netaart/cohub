@@ -4,7 +4,7 @@ import {
 	withNewChatBackground,
 } from "@cohub/protocol";
 import { HttpError, isSpaceFsSymlink, symlinkReadError } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 import {
 	type NewChatBackgroundConfig,
 	type NewChatComposerApplyPayload,
@@ -12,10 +12,10 @@ import {
 	type SpaceConfig,
 	type WorkspaceDefaultLayout,
 	type WorkspaceLayoutPresentation,
-} from "$lib/space-config-parse";
-import { resolveTextFileResponse } from "$lib/space-file-text";
-import { spacePreviewSessionCache } from "$lib/space-preview-session-cache";
-import { setSpeechVoice } from "$lib/turn-speech.svelte";
+} from "#lib/space-config-parse.ts";
+import { resolveTextFileResponse } from "#lib/space-file-text.ts";
+import { spacePreviewSessionCache } from "#lib/space-preview-session-cache.ts";
+import { setSpeechVoice } from "#lib/turn-speech.svelte.ts";
 
 export type {
 	NewChatBackgroundConfig,

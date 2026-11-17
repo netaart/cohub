@@ -5,7 +5,7 @@ import {
 	type DisplayPlatform,
 	splitDisplayText,
 } from "@cohub/protocol/display";
-import { isApplePlatform } from "$lib/keyboard";
+import { isApplePlatform } from "#lib/keyboard.ts";
 
 export type Rect = { left: number; top: number; width: number; height: number };
 

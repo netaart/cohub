@@ -40,34 +40,32 @@ import {
 	X,
 } from "lucide-svelte";
 import { onDestroy, onMount, tick, untrack } from "svelte";
-import { goto } from "$app/navigation";
-import { page } from "$app/state";
-import { openAbout } from "$lib/about";
-import { floatNear } from "$lib/actions/portal";
-import { appHomeHref } from "$lib/app-entry";
-import { signOut } from "$lib/auth";
-import { removeLegacyLocalStorage } from "$lib/cache/cleanup";
-import { clearAllIndexedDbCache } from "$lib/cache/clear";
-import type { SessionListForkRecord } from "$lib/cache/db";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { openCommandPalette } from "$lib/command-palette/open";
-import { clearCachedPaletteOverview } from "$lib/command-palette/palette-overview";
-import { APP_AREA_ICONS, appAreaLabel } from "$lib/components/app-area";
-import ChannelProviderIcon from "$lib/components/ChannelProviderIcon.svelte";
-import EntityIcon from "$lib/components/EntityIcon.svelte";
-import NewLabelPopover from "$lib/components/NewLabelPopover.svelte";
-import SessionRow from "$lib/components/SessionRow.svelte";
-import SidebarFlyout from "$lib/components/SidebarFlyout.svelte";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import Spinner from "$lib/components/Spinner.svelte";
+import { openAbout } from "#lib/about.ts";
+import { floatNear } from "#lib/actions/portal.ts";
+import { appHomeHref } from "#lib/app-entry.ts";
+import { signOut } from "#lib/auth.ts";
+import { removeLegacyLocalStorage } from "#lib/cache/cleanup.ts";
+import { clearAllIndexedDbCache } from "#lib/cache/clear.ts";
+import type { SessionListForkRecord } from "#lib/cache/db.ts";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { openCommandPalette } from "#lib/command-palette/open.ts";
+import { clearCachedPaletteOverview } from "#lib/command-palette/palette-overview.ts";
+import { APP_AREA_ICONS, appAreaLabel } from "#lib/components/app-area.ts";
+import ChannelProviderIcon from "#lib/components/ChannelProviderIcon.svelte";
+import EntityIcon from "#lib/components/EntityIcon.svelte";
+import NewLabelPopover from "#lib/components/NewLabelPopover.svelte";
+import SessionRow from "#lib/components/SessionRow.svelte";
+import SidebarFlyout from "#lib/components/SidebarFlyout.svelte";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import Spinner from "#lib/components/Spinner.svelte";
 import {
 	SETTINGS_SECTION_ICONS,
 	settingsSectionLabel,
-} from "$lib/components/settings-section";
-import SidebarCheckpointRow from "$lib/components/sidebar/SidebarCheckpointRow.svelte";
-import SidebarFallbackResourceRow from "$lib/components/sidebar/SidebarFallbackResourceRow.svelte";
-import SidebarFileRow from "$lib/components/sidebar/SidebarFileRow.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
+} from "#lib/components/settings-section.ts";
+import SidebarCheckpointRow from "#lib/components/sidebar/SidebarCheckpointRow.svelte";
+import SidebarFallbackResourceRow from "#lib/components/sidebar/SidebarFallbackResourceRow.svelte";
+import SidebarFileRow from "#lib/components/sidebar/SidebarFileRow.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
 import {
 	type CohubResourceDragPayload,
 	getCohubResourceDragData,
@@ -76,47 +74,47 @@ import {
 	isLabelAssignableResource,
 	type LabelAssignableCohubResource,
 	setCohubResourceDragData,
-} from "$lib/drag/cohub-resource-drag";
-import { requestAppNavigation } from "$lib/features/app/app-navigation-request";
-import { formatBalance } from "$lib/features/billing/format";
-import { currentCatalogSubscription } from "$lib/features/billing/product";
-import LibraryList from "$lib/features/library/LibraryList.svelte";
-import LibraryTabs from "$lib/features/library/LibraryTabs.svelte";
-import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
-import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
-import { setSessionArchived } from "$lib/features/sessions/session-archive";
-import { SessionRename } from "$lib/features/sessions/session-rename.svelte";
-import * as account from "$lib/features/settings/account-data";
-import { clearAccountSnapshots } from "$lib/features/settings/account-snapshots";
-import { resourceFromUrl } from "$lib/features/space/modules/resource-app-route";
-import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
-import SpacesViewsNav from "$lib/features/spaces/SpacesViewsNav.svelte";
-import { extractGenerationPromptPreview } from "$lib/generation-task-media";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
-import { hydrateLabelItemsById } from "$lib/labels/label-resource-hydrator";
+} from "#lib/drag/cohub-resource-drag.ts";
+import { requestAppNavigation } from "#lib/features/app/app-navigation-request.ts";
+import { formatBalance } from "#lib/features/billing/format.ts";
+import { currentCatalogSubscription } from "#lib/features/billing/product.ts";
+import LibraryList from "#lib/features/library/LibraryList.svelte";
+import LibraryTabs from "#lib/features/library/LibraryTabs.svelte";
+import ChatsPane from "#lib/features/sessions/ChatsPane.svelte";
+import { chatsInbox } from "#lib/features/sessions/chats-inbox.svelte.ts";
+import { setSessionArchived } from "#lib/features/sessions/session-archive.ts";
+import { SessionRename } from "#lib/features/sessions/session-rename.svelte.ts";
+import * as account from "#lib/features/settings/account-data.ts";
+import { clearAccountSnapshots } from "#lib/features/settings/account-snapshots.ts";
+import { resourceFromUrl } from "#lib/features/space/modules/resource-app-route.ts";
+import { withSidebarMainWindow } from "#lib/features/space/modules/window-route.ts";
+import SpacesViewsNav from "#lib/features/spaces/SpacesViewsNav.svelte";
+import { extractGenerationPromptPreview } from "#lib/generation-task-media.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
+import { hydrateLabelItemsById } from "#lib/labels/label-resource-hydrator.ts";
 import {
 	addResourceToLabel,
 	moveResourceToLabel,
 	type ResourceLabelMutationResult,
 	removeResourceFromLabel,
-} from "$lib/labels/resource-label-actions";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { requestListScrollTop } from "$lib/layout/list-scroll-top";
-import { libraryEntityAt } from "$lib/library-routes";
-import { sameData } from "$lib/lists/live-list-core";
+} from "#lib/labels/resource-label-actions.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { requestListScrollTop } from "#lib/layout/list-scroll-top.ts";
+import { libraryEntityAt } from "#lib/library-routes.ts";
+import { sameData } from "#lib/lists/live-list-core.ts";
 import {
 	type AppArea,
 	appAreaHref,
 	DESKTOP_APP_AREAS,
 	isAppAreaPage,
 	resolveAppArea,
-} from "$lib/mobile-nav";
-import { m } from "$lib/paraglide/messages.js";
-import { RELEASE } from "$lib/project";
-import { createRefreshCoordinator } from "$lib/refresh-coordinator";
-import { appActionName } from "$lib/resource-kit/task-run";
-import { sdk } from "$lib/sdk";
+} from "#lib/mobile-nav.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { RELEASE } from "#lib/project.ts";
+import { createRefreshCoordinator } from "#lib/refresh-coordinator.ts";
+import { appActionName } from "#lib/resource-kit/task-run.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	buildSessionForkTree,
 	getSessionListTitle,
@@ -126,13 +124,13 @@ import {
 	readRealtimeSessionFork,
 	type SessionForkEdge,
 	type SessionTreeItem,
-} from "$lib/session-fork-tree";
-import { sortSessionsByRecentActivity } from "$lib/session-sort";
+} from "#lib/session-fork-tree.ts";
+import { sortSessionsByRecentActivity } from "#lib/session-sort.ts";
 import {
 	resolveSettingsSection,
 	SETTINGS_SECTIONS,
 	settingsSectionHref,
-} from "$lib/settings-nav";
+} from "#lib/settings-nav.ts";
 import {
 	buildSessionsRoute,
 	buildSpaceActivityRoute,
@@ -143,27 +141,27 @@ import {
 	buildSpaceSessionRoute,
 	buildSpaceSettingsRoute,
 	buildSpaceTaskRoute,
-} from "$lib/space-routes";
-import { clearGrantedAppScopes } from "$lib/stores/app-grant-cache";
-import { authStore } from "$lib/stores/auth.svelte";
-import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
-import { insertComposerSnippet } from "$lib/stores/composer-insert";
+} from "#lib/space-routes.ts";
+import { clearGrantedAppScopes } from "#lib/stores/app-grant-cache.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { billingCatalogStore } from "#lib/stores/billing-catalog.svelte.ts";
+import { insertComposerSnippet } from "#lib/stores/composer-insert.ts";
 import {
 	clearRecentSpace,
 	getRecentSpace,
 	setRecentSpace,
-} from "$lib/stores/recent-space";
-import { fetchSessionDetailWithCache } from "$lib/stores/session-detail-cache";
+} from "#lib/stores/recent-space.ts";
+import { fetchSessionDetailWithCache } from "#lib/stores/session-detail-cache.ts";
 import {
 	getCachedSessionListSnapshot,
 	onSessionListCacheUpdated,
 	setCachedSessionList,
-} from "$lib/stores/session-list-cache";
-import { sessionStore, startSessionSync } from "$lib/stores/session-store";
+} from "#lib/stores/session-list-cache.ts";
+import { sessionStore, startSessionSync } from "#lib/stores/session-store.ts";
 import {
 	getCachedExpandedLabelIdsSnapshot,
 	setCachedExpandedLabelIds,
-} from "$lib/stores/sidebar-label-expanded";
+} from "#lib/stores/sidebar-label-expanded.ts";
 import {
 	ALL_CHATS_LABEL_ID,
 	buildOptimisticWebAppLabelSessionItem,
@@ -181,8 +179,8 @@ import {
 	isWebSessionSource,
 	SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX,
 	showsSessionInLabel,
-} from "$lib/stores/sidebar-source-labels";
-import { toSpaceIdPath } from "$lib/stores/space-address";
+} from "#lib/stores/sidebar-source-labels.ts";
+import { toSpaceIdPath } from "#lib/stores/space-address.ts";
 import {
 	fetchLabelItemsFirstPageFresh,
 	fetchSpaceLabelsFresh,
@@ -205,23 +203,25 @@ import {
 	onChannelLabelDisplayNamesUpdated,
 	onSpaceLabelsCacheUpdated,
 	onUserLabelProfilesUpdated,
-} from "$lib/stores/space-labels";
-import { clearAllCachedSpaceLists } from "$lib/stores/space-list-cache";
+} from "#lib/stores/space-labels.ts";
+import { clearAllCachedSpaceLists } from "#lib/stores/space-list-cache.ts";
 import {
 	cacheSpaceRecordSoon,
 	getCachedSpaceRecord,
-} from "$lib/stores/space-record-cache";
+} from "#lib/stores/space-record-cache.ts";
 import {
 	clearTaskRunsMemoryCache,
 	getCachedTaskRuns,
 	onTaskRunsCacheUpdated,
 	restoreCachedTaskRuns,
 	setCachedTaskRuns,
-} from "$lib/stores/task-runs-cache";
-import { uiState } from "$lib/stores/ui.svelte";
-import { syncStatus } from "$lib/sync/sync-status.svelte";
-import { formatCompactAbsoluteTime } from "$lib/time-format";
-import { resolveWorkspaceRouteContext } from "$lib/workspace-route";
+} from "#lib/stores/task-runs-cache.ts";
+import { uiState } from "#lib/stores/ui.svelte.ts";
+import { syncStatus } from "#lib/sync/sync-status.svelte.ts";
+import { formatCompactAbsoluteTime } from "#lib/time-format.ts";
+import { resolveWorkspaceRouteContext } from "#lib/workspace-route.ts";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 
 const {
 	isMobile = false,
@@ -2052,7 +2052,7 @@ function currentAppLocation() {
 }
 
 function withSettingsReturn(href: string) {
-	const target = new URL(href, page.url);
+	const target = new URL(href, page.url.href);
 	if (target.pathname.startsWith("/settings")) {
 		const current = currentAppLocation();
 		if (!current.startsWith("/settings")) {
@@ -2069,7 +2069,7 @@ function withSettingsReturn(href: string) {
 
 async function handleNavigate(
 	href: string,
-	options?: { keepSettingsReturn?: boolean; replaceState?: boolean },
+	options?: { keepSettingsReturn?: boolean; replace?: boolean },
 ) {
 	onClose?.();
 	const targetHref =
@@ -2077,7 +2077,7 @@ async function handleNavigate(
 			? withSettingsReturn(href)
 			: href;
 	await goto(targetHref, {
-		replaceState: options?.replaceState,
+		replace: options?.replace,
 	});
 }
 
@@ -2115,21 +2115,21 @@ function openSettings() {
 function openBillingSettings() {
 	showUserMenu = false;
 	void handleNavigate(withSettingsReturn("/settings/billing"), {
-		replaceState: area === "account",
+		replace: area === "account",
 	});
 }
 
 function openReferralsSettings() {
 	showUserMenu = false;
 	void handleNavigate(withSettingsReturn("/settings/referrals"), {
-		replaceState: area === "account",
+		replace: area === "account",
 	});
 }
 
 function returnFromSettings() {
 	onClose?.();
 	// When we opened settings in-app, `from` is set and tab switches use
-	// replaceState — so one history.back() restores the previous page.
+	// replace navigations — so one history.back() restores the previous page.
 	// Avoid bare history.back() without `from` (bookmark / hard entry).
 	const hasReturn = Boolean(page.url.searchParams.get("from"));
 	if (hasReturn && typeof window !== "undefined" && window.history.length > 1) {
@@ -2179,7 +2179,7 @@ async function handleNavigateToSession(sessionId: string) {
 
 async function navigateToResource(path: string) {
 	onClose?.();
-	const resource = resourceFromUrl(new URL(path, page.url));
+	const resource = resourceFromUrl(new URL(path, page.url.href));
 	if (
 		resource &&
 		requestAppNavigation({
@@ -2230,8 +2230,7 @@ async function handleCreateNewSession() {
 	createSessionError = "";
 	try {
 		await goto(mainRouteWithWindow(buildSpaceNewSessionRoute(currentSpaceId)), {
-			keepFocus: true,
-			noScroll: true,
+			reset: false,
 		});
 		onClose?.();
 		requestAnimationFrame(() => {
@@ -3356,7 +3355,7 @@ $effect(() => {
               class="rail-button {isActive ? 'bg-bg-active text-text-primary' : 'text-text-tertiary'}"
               title={tab.label}
               aria-label={tab.label}
-              onclick={(e) => { e.preventDefault(); void handleNavigate(tab.href, { keepSettingsReturn: true, replaceState: true }); }}
+              onclick={(e) => { e.preventDefault(); void handleNavigate(tab.href, { keepSettingsReturn: true, replace: true }); }}
             >
               <tab.icon class="h-4 w-4" />
             </a>
@@ -3750,7 +3749,7 @@ $effect(() => {
               ? 'bg-bg-active text-text-primary font-medium'
               : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover'
           }"
-          onclick={(e) => { e.preventDefault(); void handleNavigate(tab.href, { keepSettingsReturn: true, replaceState: true }); }}
+          onclick={(e) => { e.preventDefault(); void handleNavigate(tab.href, { keepSettingsReturn: true, replace: true }); }}
         >
           <tab.icon class="w-[15px] h-[15px] shrink-0" />
           <span>{tab.label}</span>

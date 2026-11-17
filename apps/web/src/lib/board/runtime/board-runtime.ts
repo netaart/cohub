@@ -13,11 +13,11 @@ import type {
 import type { BoardAutomationActivity } from "@neta-art/cohub/board/presence";
 import type { BoardLod } from "@neta-art/cohub/board/render";
 import type { BoardDeviceTier, BoardStage } from "@neta-art/cohub/board/stage";
-import type { BoardRoomChannel } from "$lib/board/board-app-room.svelte";
-import type { BoardAssetSource } from "$lib/board/board-asset-source";
-import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
-import { isBoardFile } from "$lib/board/board-file";
-import { createLazyModuleLoader, pending } from "$lib/lazy-module";
+import type { BoardRoomChannel } from "#lib/board/board-app-room.svelte.ts";
+import type { BoardAssetSource } from "#lib/board/board-asset-source.ts";
+import type { BoardCollaboratorProfile } from "#lib/board/board-collaborator.ts";
+import { isBoardFile } from "#lib/board/board-file.ts";
+import { createLazyModuleLoader, pending } from "#lib/lazy-module.ts";
 
 export type BoardRuntimeViewState = {
 	path: string;
@@ -90,7 +90,7 @@ export type BoardRuntimeProps = {
 const loadCohubPixiRuntime = createLazyModuleLoader(() =>
 	import.meta.env.SSR
 		? pending()
-		: import("$lib/components/board/BoardPanel.svelte"),
+		: import("#lib/components/board/BoardPanel.svelte"),
 );
 
 export const cohubPixiRuntime = {

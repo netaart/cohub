@@ -1,5 +1,5 @@
 import type { SpaceRecord } from "@neta-art/cohub";
-import type { Compare } from "$lib/lists/live-list-core";
+import type { Compare } from "#lib/lists/live-list-core.ts";
 
 export const SPACES_FILTERS = [
 	"recent",

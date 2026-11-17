@@ -11,13 +11,13 @@ import {
 } from "@cohub/protocol/display";
 import { ChevronDown, ClipboardPaste } from "lucide-svelte";
 import { onDestroy } from "svelte";
-import { portal } from "$lib/actions/portal";
-import { holdHostKeys } from "$lib/host-tabs";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
-import { m } from "$lib/paraglide/messages.js";
-import { eventModifiers, isNamedKey, keyboardInput, textBatches } from "./display-input";
-import { diffText } from "./display-text";
+import { portal } from "#lib/actions/portal.ts";
+import { holdHostKeys } from "#lib/host-tabs.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { eventModifiers, isNamedKey, keyboardInput, textBatches } from "./display-input.ts";
+import { diffText } from "./display-text.ts";
 
 type Props = {
 	desktop: boolean;

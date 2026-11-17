@@ -1,11 +1,11 @@
 import type { RequestHandler } from "@sveltejs/kit";
-import { buildAppPwaMeta, resolvePublicAppStartUrl } from "$lib/app-pwa";
-import { loadPublicAppDetail } from "$lib/server/public-api";
-import { PUBLIC_PAGE_CACHE_CONTROL } from "$lib/server/public-cache";
+import { buildAppPwaMeta, resolvePublicAppStartUrl } from "#lib/app-pwa.ts";
+import { loadPublicAppDetail } from "#lib/server/public-api.ts";
+import { PUBLIC_PAGE_CACHE_CONTROL } from "#lib/server/public-cache.ts";
 import {
 	DEFAULT_PWA_BACKGROUND_COLOR,
 	DEFAULT_PWA_THEME_COLOR,
-} from "$lib/system-chrome";
+} from "#lib/system-chrome.ts";
 
 function iconMimeType(url: string) {
 	const path = url.split("?")[0]?.split("#")[0]?.toLowerCase() ?? "";

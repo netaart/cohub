@@ -6,18 +6,18 @@ import {
 } from "@cohub/protocol";
 import { PackageOpen, Trash2 } from "lucide-svelte";
 import { onMount } from "svelte";
-import { avatarInitials } from "$lib/avatar-initials";
-import Avatar from "$lib/components/Avatar.svelte";
-import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
+import { avatarInitials } from "#lib/avatar-initials.ts";
+import Avatar from "#lib/components/Avatar.svelte";
+import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
 import {
 	cacheInstalledApps,
 	type InstalledAppsFile,
 	readInstalledApps,
 	writeInstalledApps,
-} from "$lib/features/app/app-center";
-import { INSTALLED_APPS_CHANGED_EVENT } from "$lib/features/app/app-realtime";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/features/app/app-center.ts";
+import { INSTALLED_APPS_CHANGED_EVENT } from "#lib/features/app/app-realtime.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import LoadError from "./LoadError.svelte";
 import SidePanelRow from "./SidePanelRow.svelte";
 import SidePanelRowAction from "./SidePanelRowAction.svelte";

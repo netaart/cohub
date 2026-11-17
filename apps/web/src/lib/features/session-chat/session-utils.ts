@@ -12,15 +12,15 @@ import {
 	getRequestedThinkingLevel,
 	type LocalModelRequest,
 	type ModelCatalogItem,
-} from "$lib/model-catalog";
-import { mergeTurnsById } from "$lib/stores/turn-cache";
-import type { SessionViewState } from "./session-workspace-controller.svelte";
+} from "#lib/model-catalog.ts";
+import { mergeTurnsById } from "#lib/stores/turn-cache.ts";
+import type { SessionViewState } from "./session-workspace-controller.svelte.ts";
 
 export {
 	areSessionTurnRecordsEqual,
 	areSessionTurnsEqual,
 	preserveSessionTurnRefs,
-} from "$lib/session-turn-equality";
+} from "#lib/session-turn-equality.ts";
 
 type HarnessTurn = {
 	meta?: Record<string, unknown> | null;

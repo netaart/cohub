@@ -1,6 +1,6 @@
 import { modelFormatForPath, normalizeMime } from "@cohub/protocol/fs";
 import type { SpaceFsFileResponse } from "@neta-art/cohub";
-import { isCsvPath, isTextFileResponse } from "$lib/space-file-text";
+import { isCsvPath, isTextFileResponse } from "#lib/space-file-text.ts";
 
 export type FilePreviewKind =
 	| "markdown"

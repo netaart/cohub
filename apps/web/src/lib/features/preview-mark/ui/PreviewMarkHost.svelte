@@ -1,24 +1,27 @@
 <script lang="ts">
 import { Loader2, Scissors } from "lucide-svelte";
 import { onDestroy, tick } from "svelte";
-import { portal } from "$lib/actions/portal";
-import { isApplePlatform } from "$lib/keyboard";
-import { overlay } from "$lib/motion";
-import { attachComposerFiles } from "../attach/to-composer";
+import { portal } from "#lib/actions/portal.ts";
+import { isApplePlatform } from "#lib/keyboard.ts";
+import { overlay } from "#lib/motion.ts";
+import { attachComposerFiles } from "../attach/to-composer.ts";
 import {
 	detectCaptureCapabilities,
 	iframeCaptureSupportedMessage,
-} from "../capture/capabilities";
+} from "../capture/capabilities.ts";
 import {
 	captureIframeElementFromStream,
 	captureViewportFromStream,
 	requestDisplayMedia,
-} from "../capture/iframe-capture";
-import { captureImageSource } from "../capture/image-capture";
-import { copyMarkedFrameToClipboard, exportMarkedFrame } from "../mark/export";
-import { createMarkSession, type MarkSession } from "../mark/session.svelte";
-import type { CaptureResult, PreviewCaptureTarget } from "../types";
-import { suggestedMarkedName } from "../types";
+} from "../capture/iframe-capture.ts";
+import { captureImageSource } from "../capture/image-capture.ts";
+import {
+	copyMarkedFrameToClipboard,
+	exportMarkedFrame,
+} from "../mark/export.ts";
+import { createMarkSession, type MarkSession } from "../mark/session.svelte.ts";
+import type { CaptureResult, PreviewCaptureTarget } from "../types.ts";
+import { suggestedMarkedName } from "../types.ts";
 import ImageMarkSurface from "./ImageMarkSurface.svelte";
 import MarkToolbar from "./MarkToolbar.svelte";
 

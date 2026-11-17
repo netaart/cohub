@@ -1,5 +1,5 @@
 import type { RequestHandler } from "@sveltejs/kit";
-import { PUBLIC_COHUB_ENV } from "$env/static/public";
+import { PUBLIC_COHUB_ENV } from "$app/env/public";
 
 const APPLE_TEAM_ID = "";
 

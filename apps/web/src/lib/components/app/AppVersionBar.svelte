@@ -1,12 +1,12 @@
 <script lang="ts">
 import type { PublicAppVersionSummary } from "@neta-art/cohub";
 import { History, Loader2, MessageSquare } from "lucide-svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { formatShortDateTime } from "$lib/resource-kit/time";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { formatShortDateTime } from "#lib/resource-kit/time.ts";
 import {
 	buildSpaceSessionRoute,
 	buildSpaceSessionTurnRoute,
-} from "$lib/space-routes";
+} from "#lib/space-routes.ts";
 
 type Props = {
 	versions: PublicAppVersionSummary[];

@@ -1,18 +1,18 @@
 <script lang="ts">
-import { goto } from "$app/navigation";
-import { page } from "$app/state";
 import {
 	SPACES_FILTERS,
 	type SpacesFilter,
-} from "$lib/features/spaces/spaces-filter";
-import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
+} from "#lib/features/spaces/spaces-filter.ts";
+import { spacesInbox } from "#lib/features/spaces/spaces-inbox.svelte.ts";
 import {
 	SPACES_FILTER_ICONS,
 	spacesFilterLabel,
-} from "$lib/features/spaces/spaces-views";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { requestListScrollTop } from "$lib/layout/list-scroll-top";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/features/spaces/spaces-views.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { requestListScrollTop } from "#lib/layout/list-scroll-top.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 
 const { variant }: { variant: "list" | "rail" } = $props();
 

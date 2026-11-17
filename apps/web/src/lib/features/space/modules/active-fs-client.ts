@@ -4,10 +4,13 @@ import type {
 	SpaceFsPreparingFile,
 	SpaceFsSymlink,
 } from "@neta-art/cohub";
-import { saveFile } from "$lib/downloads.svelte";
-import { sdk } from "$lib/sdk";
-import { spaceFileSource } from "$lib/space-file-save";
-import { type DirectoryListing, readDirectoryPages } from "$lib/space-fs-list";
+import { saveFile } from "#lib/downloads.svelte.ts";
+import { sdk } from "#lib/sdk.ts";
+import { spaceFileSource } from "#lib/space-file-save.ts";
+import {
+	type DirectoryListing,
+	readDirectoryPages,
+} from "#lib/space-fs-list.ts";
 
 export type ActiveFsSource =
 	| { kind: "live" }

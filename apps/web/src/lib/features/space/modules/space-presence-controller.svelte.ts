@@ -1,6 +1,6 @@
 import type { SpacePresenceSnapshot, SpacePresenceUser } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
-import { arePresenceUsersEqual } from "./space-presence-equality";
+import { sdk } from "#lib/sdk.ts";
+import { arePresenceUsersEqual } from "./space-presence-equality.ts";
 
 const sortPresenceUsers = (users: SpacePresenceUser[]) =>
 	[...users].sort(

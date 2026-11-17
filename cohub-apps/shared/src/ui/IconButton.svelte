@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { LucideIcon } from "./icon";
+import type { LucideIcon } from "./icon.ts";
 
 type Props = {
   icon: LucideIcon;

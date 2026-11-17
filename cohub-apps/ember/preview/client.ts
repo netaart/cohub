@@ -1,8 +1,8 @@
 import type { CohubClient, RealtimeRoomMember } from "@neta-art/cohub";
-import { cardSize } from "../src/camp/scene";
-import { type CampEvent, createId, EVENTS, SPIRIT_ROLE } from "../src/camp/protocol";
-import { emptyCamp, foldCamp } from "../src/camp/state";
-import { FIRE } from "../src/camp/world";
+import { cardSize } from "../src/camp/scene.ts";
+import { type CampEvent, createId, EVENTS, SPIRIT_ROLE } from "../src/camp/protocol.ts";
+import { emptyCamp, foldCamp } from "../src/camp/state.ts";
+import { FIRE } from "../src/camp/world.ts";
 
 type Stored = {
   id: string;

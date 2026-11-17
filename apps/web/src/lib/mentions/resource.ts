@@ -4,14 +4,14 @@ import {
 	type ParsedCohubAppLink,
 	parseAppMentionUri,
 	replaceCohubAppUrls,
-} from "./app";
+} from "./app.ts";
 import {
 	buildSpaceMentionHref,
 	buildSpaceMentionUri,
 	type ParsedCohubSpaceLink,
 	parseSpaceMentionUri,
 	replaceCohubSpaceUrls,
-} from "./space";
+} from "./space.ts";
 
 export type ResourceMentionTextToken =
 	| { type: "text"; text: string }

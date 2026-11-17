@@ -1,11 +1,11 @@
 <script lang="ts">
 import type { HarnessKind } from "@cohub/protocol/runtime";
 import { Monitor } from "lucide-svelte";
-import claude from "$lib/assets/harness-icons/claude.svg?url";
-import codex from "$lib/assets/harness-icons/codex.svg?url";
-import cursor from "$lib/assets/harness-icons/cursor.svg?url";
-import pi from "$lib/assets/harness-icons/pi.svg?url";
-import workbuddy from "$lib/assets/harness-icons/workbuddy.svg?url";
+import claude from "#lib/assets/harness-icons/claude.svg?url";
+import codex from "#lib/assets/harness-icons/codex.svg?url";
+import cursor from "#lib/assets/harness-icons/cursor.svg?url";
+import pi from "#lib/assets/harness-icons/pi.svg?url";
+import workbuddy from "#lib/assets/harness-icons/workbuddy.svg?url";
 
 // Monochrome marks are masked so they follow the text color in both themes.
 const icons: Partial<Record<HarnessKind, { url: string; mono?: boolean }>> = {

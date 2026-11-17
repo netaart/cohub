@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
-import type { LucideIcon } from "./icon";
+import type { LucideIcon } from "./icon.ts";
 
 type Props = {
   label: string;

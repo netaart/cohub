@@ -2,7 +2,7 @@ import type {
 	MessageToolCallsFile,
 	StoredIntermediateMessage,
 } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 export async function loadTurnIntermediate(input: {
 	spaceId: string;

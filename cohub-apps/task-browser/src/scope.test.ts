@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { taskBrowserScopes } from "./scope.js";
+import { taskBrowserScopes } from "./scope.ts";
 
 test("prioritizes Session, Space, then Mine", () => {
   assert.deepEqual(

@@ -1,27 +1,30 @@
 <script lang="ts">
 import { ChevronDown, ChevronRight, Loader2, Play } from "lucide-svelte";
-import ImageBlocks from "$lib/components/ImageBlocks.svelte";
-import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
-import StatusGlyph from "$lib/components/StatusGlyph.svelte";
-import ToolInputDetail from "$lib/components/ToolInputDetail.svelte";
-import ToolOutputDetail from "$lib/components/ToolOutputDetail.svelte";
+import ImageBlocks from "#lib/components/ImageBlocks.svelte";
+import RelatedSessionLink from "#lib/components/RelatedSessionLink.svelte";
+import StatusGlyph from "#lib/components/StatusGlyph.svelte";
+import ToolInputDetail from "#lib/components/ToolInputDetail.svelte";
+import ToolOutputDetail from "#lib/components/ToolOutputDetail.svelte";
 import {
 	getToolFilePath,
 	sanitizeToolDomId,
 	summarizeToolInput,
 	type ToolCallViewModel,
-} from "$lib/components/tool-call-format";
-import { actsOnDisplay, useDisplayReplay } from "$lib/display-replay-context";
+} from "#lib/components/tool-call-format.ts";
+import {
+	actsOnDisplay,
+	useDisplayReplay,
+} from "#lib/display-replay-context.ts";
 import {
 	formatDurationDetail,
 	formatDurationMs,
 	isDisplayableDurationMs,
-} from "$lib/format-duration";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { NO_SENT_SESSIONS } from "$lib/sent-turns";
-import { useSessionRelations } from "$lib/session-relations-context";
-import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
+} from "#lib/format-duration.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { NO_SENT_SESSIONS } from "#lib/sent-turns.ts";
+import { useSessionRelations } from "#lib/session-relations-context.ts";
+import type { OpenWorkspaceFileTarget } from "#lib/workspace-file-links.ts";
 
 type Props = {
 	tool: ToolCallViewModel;
@@ -132,14 +135,14 @@ const replayable = $derived(
 		actsOnDisplay(tool.name, tool.input),
 );
 let replay = $state<
-	| typeof import("$lib/features/space/modules/DisplayReplayDialog.svelte").default
+	| typeof import("#lib/features/space/modules/DisplayReplayDialog.svelte").default
 	| null
 >(null);
 let replaying = $state(false);
 
 async function openReplay() {
 	replay ??= (
-		await import("$lib/features/space/modules/DisplayReplayDialog.svelte")
+		await import("#lib/features/space/modules/DisplayReplayDialog.svelte")
 	).default;
 	replaying = true;
 }

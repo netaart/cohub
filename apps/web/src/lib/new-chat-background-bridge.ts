@@ -1,4 +1,4 @@
-import type { NewChatComposerApplyPayload } from "$lib/space-config";
+import type { NewChatComposerApplyPayload } from "#lib/space-config.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value && typeof value === "object");

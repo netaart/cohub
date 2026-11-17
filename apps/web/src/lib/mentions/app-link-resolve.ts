@@ -1,6 +1,6 @@
-import { appDisplayTitle } from "$lib/app-page-meta";
-import { sdk } from "$lib/sdk";
-import { getCohubAppLinkKey, type ParsedCohubAppLink } from "./app";
+import { appDisplayTitle } from "#lib/app-page-meta.ts";
+import { sdk } from "#lib/sdk.ts";
+import { getCohubAppLinkKey, type ParsedCohubAppLink } from "./app.ts";
 
 const LINK_RESOLVE_LIMIT = 20;
 

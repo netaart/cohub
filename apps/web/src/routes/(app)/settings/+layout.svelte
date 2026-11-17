@@ -1,32 +1,32 @@
 <script lang="ts">
 import { Search } from "lucide-svelte";
 import { onMount } from "svelte";
-import { goto } from "$app/navigation";
-import { page } from "$app/state";
-import { openAreaSearch } from "$lib/command-palette/open";
-import FilterBar from "$lib/components/list-page/FilterBar.svelte";
-import FilterChip from "$lib/components/list-page/FilterChip.svelte";
-import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
-import ListHeader from "$lib/components/list-page/ListHeader.svelte";
-import SwipePager from "$lib/components/list-page/SwipePager.svelte";
-import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
+import { openAreaSearch } from "#lib/command-palette/open.ts";
+import FilterBar from "#lib/components/list-page/FilterBar.svelte";
+import FilterChip from "#lib/components/list-page/FilterChip.svelte";
+import HeaderAction from "#lib/components/list-page/HeaderAction.svelte";
+import ListHeader from "#lib/components/list-page/ListHeader.svelte";
+import SwipePager from "#lib/components/list-page/SwipePager.svelte";
+import { SwipeTabs } from "#lib/components/list-page/swipe-tabs.svelte.ts";
 import {
 	settingsSectionLabel,
 	settingsSectionTitle,
-} from "$lib/components/settings-section";
-import SettingsSection from "$lib/features/settings/SettingsSection.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { onListScrollTop } from "$lib/layout/list-scroll-top";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/components/settings-section.ts";
+import SettingsSection from "#lib/features/settings/SettingsSection.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { onListScrollTop } from "#lib/layout/list-scroll-top.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	resolveSettingsSection,
 	resolveSettingsSectionRoot,
 	settingsSectionHref,
 	visibleSettingsSections,
-} from "$lib/settings-nav";
-import { authStore } from "$lib/stores/auth.svelte";
-import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
+} from "#lib/settings-nav.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { billingCatalogStore } from "#lib/stores/billing-catalog.svelte.ts";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 
 const { children } = $props();
 
@@ -47,9 +47,8 @@ function open(index: number) {
 	const section = sections[index];
 	if (!section) return;
 	void goto(settingsSectionHref(section), {
-		replaceState: true,
-		keepFocus: true,
-		noScroll: true,
+		replace: true,
+		reset: false,
 	});
 }
 

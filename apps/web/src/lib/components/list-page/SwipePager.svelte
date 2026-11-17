@@ -1,19 +1,19 @@
 <script lang="ts">
 import { type Snippet, untrack } from "svelte";
 import { prefersReducedMotion } from "svelte/motion";
-import { POINTER_DRAG_CLICK_SUPPRESS_MS } from "$lib/drag/pointer-drag-core";
-import { resolveGestureAxis } from "$lib/gestures/axis-lock";
+import { POINTER_DRAG_CLICK_SUPPRESS_MS } from "#lib/drag/pointer-drag-core.ts";
+import { resolveGestureAxis } from "#lib/gestures/axis-lock.ts";
 import {
 	addSample,
 	glideTiming,
 	type PagerGlide,
 	type PagerSample,
 	releasePage,
-} from "$lib/gestures/pager";
+} from "#lib/gestures/pager.ts";
 import {
 	canScrollHorizontally,
 	isTextEditingTarget,
-} from "$lib/gestures/pager-yield";
+} from "#lib/gestures/pager-yield.ts";
 
 const {
 	keys,

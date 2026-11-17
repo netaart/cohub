@@ -9,7 +9,7 @@ import {
 	resolveOverlayStyle,
 	sameGeometry,
 	sameInputRegion,
-} from "$lib/features/space/modules/desktop-layer-geometry";
+} from "#lib/features/space/modules/desktop-layer-geometry.ts";
 
 const viewport = { width: 1000, height: 600 };
 

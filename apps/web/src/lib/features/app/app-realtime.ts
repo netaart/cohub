@@ -1,9 +1,9 @@
 import type { AppRecord, AppVersionRecord } from "@neta-art/cohub";
-import { sortAppsByRecentUpdate } from "$lib/app-sort";
+import { sortAppsByRecentUpdate } from "#lib/app-sort.ts";
 import {
 	type AppDomainChange,
 	isNewerAppSnapshot,
-} from "$lib/resource-kit/app";
+} from "#lib/resource-kit/app.ts";
 
 export const APPS_CHANGED_EVENT = "cohub:apps-changed";
 export const INSTALLED_APPS_CHANGED_EVENT = "cohub:installed-apps-changed";

@@ -1,3 +1,5 @@
+import type { ReadonlyURL } from "$app/state";
+
 export type AppCheckoutStateStatus = "success" | "failed" | "cancel" | null;
 
 export type AppCheckoutState = {
@@ -5,7 +7,7 @@ export type AppCheckoutState = {
 	orderId: string | null;
 };
 
-export function readAppCheckoutState(url: URL): AppCheckoutState {
+export function readAppCheckoutState(url: ReadonlyURL): AppCheckoutState {
 	const value = url.searchParams.get("cohub_checkout");
 	const status =
 		value === "success" || value === "failed" || value === "cancel"

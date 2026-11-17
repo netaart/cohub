@@ -3,15 +3,15 @@ import type { DeviceFolderListing } from "@cohub/protocol/host-bridge";
 import { HostBridgeErrorClass } from "@neta-art/cohub/host-bridge";
 import { ChevronRight, CornerLeftUp, Folder, Loader2 } from "lucide-svelte";
 import { untrack } from "svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import HostPermissionNotice from "$lib/components/HostPermissionNotice.svelte";
+import Dialog from "#lib/components/Dialog.svelte";
+import HostPermissionNotice from "#lib/components/HostPermissionNotice.svelte";
 import {
 	browseDeviceFolder,
 	deviceFolderPickerIsNative,
 	pickDeviceFolder,
-} from "$lib/device-runtime.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/device-runtime.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	open,

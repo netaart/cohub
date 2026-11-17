@@ -1,15 +1,15 @@
 <script lang="ts">
 import { onMount } from "svelte";
-import { page } from "$app/state";
 import {
 	type ChangelogEntry,
 	changelogDescription,
 	entries,
 	latestEntry,
-} from "$lib/changelog";
-import PublicContentShell from "$lib/components/PublicContentShell.svelte";
-import PublicHeader from "$lib/components/PublicHeader.svelte";
-import { canonicalUrl } from "$lib/seo";
+} from "#lib/changelog/index.ts";
+import PublicContentShell from "#lib/components/PublicContentShell.svelte";
+import PublicHeader from "#lib/components/PublicHeader.svelte";
+import { canonicalUrl } from "#lib/seo.ts";
+import { page } from "$app/state";
 
 const description = changelogDescription();
 const pageTitle = latestEntry

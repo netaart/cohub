@@ -1,4 +1,4 @@
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 import {
 	GapTracker,
 	PhaseDisplay,
@@ -7,7 +7,7 @@ import {
 	SYNC_TIMING,
 	type SyncPhase,
 	type SyncSignals,
-} from "$lib/sync/sync-status-core";
+} from "#lib/sync/sync-status-core.ts";
 
 class SyncStatus {
 	phase = $state<SyncPhase>("idle");

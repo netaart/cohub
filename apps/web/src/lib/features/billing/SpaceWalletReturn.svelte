@@ -1,12 +1,13 @@
 <script lang="ts">
 import { CheckCircle2, Loader2, X, XCircle } from "lucide-svelte";
 import { onMount } from "svelte";
-import { replaceState } from "$app/navigation";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
-import { clearCheckoutOrder, WALLET_RETURN_PARAMS } from "./space-fund";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
+import { clearCheckoutOrder, WALLET_RETURN_PARAMS } from "./space-fund.ts";
 
 const POLLS = 4;
 const POLL_DELAY_MS = 1_500;
@@ -22,7 +23,7 @@ onMount(() => {
 	const spaceId = url.searchParams.get("wallet_space");
 	if (!orderId || !spaceId) return;
 	for (const param of WALLET_RETURN_PARAMS) url.searchParams.delete(param);
-	replaceState(url, history.state);
+	void goto(url, { shallow: true, replace: true, state: page.state });
 	state = "confirming";
 	let disposed = false;
 	void (async () => {

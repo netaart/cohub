@@ -4,9 +4,9 @@ import { CornerDownLeft, Loader2, SearchSlash } from "lucide-svelte";
 import {
 	COMPOSER_MENU_LAYER,
 	type ComposerMenuPlacement,
-} from "$lib/composer-expansion";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/composer-expansion.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 export type SlashCommandMenuItem = {
 	kind: "prompt" | "skill";

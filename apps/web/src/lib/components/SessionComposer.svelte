@@ -18,19 +18,19 @@ import {
 	X,
 } from "lucide-svelte";
 import { flushSync, onMount } from "svelte";
-import ComposerHarnessPicker from "$lib/components/composer/ComposerHarnessPicker.svelte";
-import ComposerModelTrigger from "$lib/components/composer/ComposerModelTrigger.svelte";
-import ComposerSubmitButton from "$lib/components/composer/ComposerSubmitButton.svelte";
-import ComposerSurface from "$lib/components/composer/ComposerSurface.svelte";
-import ModelSelector from "$lib/components/ModelSelector.svelte";
-import { mediaLightbox } from "$lib/components/media-lightbox.svelte";
-import SessionChatQuickActions from "$lib/components/SessionChatQuickActions.svelte";
+import ComposerHarnessPicker from "#lib/components/composer/ComposerHarnessPicker.svelte";
+import ComposerModelTrigger from "#lib/components/composer/ComposerModelTrigger.svelte";
+import ComposerSubmitButton from "#lib/components/composer/ComposerSubmitButton.svelte";
+import ComposerSurface from "#lib/components/composer/ComposerSurface.svelte";
+import ModelSelector from "#lib/components/ModelSelector.svelte";
+import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
+import SessionChatQuickActions from "#lib/components/SessionChatQuickActions.svelte";
 import SlashCommandMenu, {
 	type SlashCommandMenuItem,
-} from "$lib/components/SlashCommandMenu.svelte";
-import SpaceMentionMenu from "$lib/components/SpaceMentionMenu.svelte";
-import UploadProgress from "$lib/components/UploadProgress.svelte";
-import ViewportContextBlocks from "$lib/components/ViewportContextBlocks.svelte";
+} from "#lib/components/SlashCommandMenu.svelte";
+import SpaceMentionMenu from "#lib/components/SpaceMentionMenu.svelte";
+import UploadProgress from "#lib/components/UploadProgress.svelte";
+import ViewportContextBlocks from "#lib/components/ViewportContextBlocks.svelte";
 import {
 	COMPOSER_ATTACHMENT_ACCEPT,
 	type ComposerAttachment,
@@ -39,7 +39,7 @@ import {
 	isLargeComposerPaste,
 	MAX_COMPOSER_ATTACHMENTS,
 	MAX_COMPOSER_TEXT_ATTACHMENT_BYTES,
-} from "$lib/composer-attachments";
+} from "#lib/composer-attachments.ts";
 import {
 	COMPACT_COMPOSER_MIN_HEIGHT,
 	COMPOSER_BOUNDS_SELECTOR,
@@ -49,65 +49,68 @@ import {
 	getCompactComposerMaxHeight,
 	getExpandedComposerHeight,
 	runComposerResizeTransition,
-} from "$lib/composer-expansion";
+} from "#lib/composer-expansion.ts";
 import {
 	getComposerKeyAction,
 	isMobileComposerInput,
-} from "$lib/composer-keyboard";
+} from "#lib/composer-keyboard.ts";
 import {
 	COMPOSER_MODES,
 	type ComposerMode,
 	parseComposerModeCommand,
-} from "$lib/composer-mode";
-import type { PromptQuickAction } from "$lib/features/space/modules/prompt-template-controller.svelte";
+} from "#lib/composer-mode.ts";
+import type { PromptQuickAction } from "#lib/features/space/modules/prompt-template-controller.svelte.ts";
 import {
 	canOpenHostPermissionSettings,
 	openHostPermissionSettings,
-} from "$lib/host-permissions.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
-import { getCohubAppLinkKey, parseCohubAppUrls } from "$lib/mentions/app";
-import { resolveCohubAppLinkMentionLabels } from "$lib/mentions/app-link-resolve";
-import { loadOfficialSpaceMention } from "$lib/mentions/official-space";
+} from "#lib/host-permissions.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
+import { getCohubAppLinkKey, parseCohubAppUrls } from "#lib/mentions/app.ts";
+import { resolveCohubAppLinkMentionLabels } from "#lib/mentions/app-link-resolve.ts";
+import { loadOfficialSpaceMention } from "#lib/mentions/official-space.ts";
 import {
 	type ResourceMentionTextToken,
 	replaceCohubResourceUrls,
 	tokenizeResourceMentionText,
-} from "$lib/mentions/resource";
-import type { SpaceMentionSuggestion } from "$lib/mentions/space";
+} from "#lib/mentions/resource.ts";
+import type { SpaceMentionSuggestion } from "#lib/mentions/space.ts";
 import {
 	buildSpaceMentionMarkdown,
 	parseCohubSpaceUrls,
 	unresolvedCohubSpaceAddresses,
-} from "$lib/mentions/space";
+} from "#lib/mentions/space.ts";
 import {
 	getCohubLinkMentionKey,
 	resolveCohubLinkMentionLabels,
-} from "$lib/mentions/space-link-resolve";
+} from "#lib/mentions/space-link-resolve.ts";
 import {
 	mergeSpaceMentionSuggestions,
 	searchLocalSpaceMentions,
 	searchRemoteSpaceMentions,
-} from "$lib/mentions/space-search";
+} from "#lib/mentions/space-search.ts";
 import {
 	detectSpaceMentionTriggerFromText,
 	SPACE_MENTION_TRIGGER_SCAN_LIMIT,
 	type SpaceMentionTrigger,
 	spaceMentionTriggerKey,
 	type TextCaret,
-} from "$lib/mentions/space-trigger";
+} from "#lib/mentions/space-trigger.ts";
 import {
 	formatThinkingLevelShort,
 	isFastServiceTier,
 	type LocalModelSelection,
 	toLocalModelCatalog,
-} from "$lib/model-catalog";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { confirmSpaceAddress } from "$lib/space-address-resolver";
-import { authStore } from "$lib/stores/auth.svelte";
-import { billingConversion } from "$lib/stores/billing-conversion.svelte";
-import { entriesFromFiles, type LocalUploadEntry } from "$lib/upload-entries";
+} from "#lib/model-catalog.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { confirmSpaceAddress } from "#lib/space-address-resolver.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { billingConversion } from "#lib/stores/billing-conversion.svelte.ts";
+import {
+	entriesFromFiles,
+	type LocalUploadEntry,
+} from "#lib/upload-entries.ts";
 
 type SelectedModel = {
 	provider: string;

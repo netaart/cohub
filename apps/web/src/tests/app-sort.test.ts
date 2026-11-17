@@ -4,7 +4,7 @@ import type { AppRecord } from "@neta-art/cohub";
 import {
 	compareAppsByRecentUpdate,
 	sortAppsByRecentUpdate,
-} from "$lib/app-sort";
+} from "#lib/app-sort.ts";
 
 function app(
 	id: string,

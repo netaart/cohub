@@ -7,20 +7,23 @@ import {
 	SESSION_ARCHIVED_LABEL_SYSTEM_KEY,
 	type SessionRecord,
 } from "@neta-art/cohub";
-import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
-import { labelItemsRepo } from "$lib/cache/repositories/label-items-repo";
-import { labelTreeRepo } from "$lib/cache/repositories/label-tree-repo";
-import { resourceLabelsRepo } from "$lib/cache/repositories/resource-labels-repo";
-import { userProfilesRepo } from "$lib/cache/repositories/user-profiles-repo";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
+import {
+	canUseUserScopedCache,
+	getCacheUserKeyAsync,
+} from "#lib/cache/keys.ts";
+import { labelItemsRepo } from "#lib/cache/repositories/label-items-repo.ts";
+import { labelTreeRepo } from "#lib/cache/repositories/label-tree-repo.ts";
+import { resourceLabelsRepo } from "#lib/cache/repositories/resource-labels-repo.ts";
+import { userProfilesRepo } from "#lib/cache/repositories/user-profiles-repo.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
 import {
 	formatChannelLabelName,
 	getChannelLabelInfo,
 	hydrateChannelLabels,
 	onChannelLabelDisplayUpdated,
-} from "$lib/stores/channel-label-display";
-import { sessionStore } from "$lib/stores/session-store";
+} from "#lib/stores/channel-label-display.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
 
 const LABEL_ITEMS_PAGE_SIZE = 30;
 const SESSION_USER_LABEL_SYSTEM_KEY_PREFIX = "session-user:";

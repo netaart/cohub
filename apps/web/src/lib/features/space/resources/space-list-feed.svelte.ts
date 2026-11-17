@@ -1,9 +1,9 @@
-import { getCacheUserKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
 import {
 	readSpaceResourceList,
 	writeSpaceResourceList,
-} from "$lib/cache/repositories/space-resource-lists-repo";
+} from "#lib/cache/repositories/space-resource-lists-repo.ts";
 
 const snapshots = new MemoryLru<string, unknown[]>(48);
 

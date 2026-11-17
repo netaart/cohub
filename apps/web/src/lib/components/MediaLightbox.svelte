@@ -16,31 +16,31 @@ import {
 } from "lucide-svelte";
 import { untrack } from "svelte";
 import { innerHeight, innerWidth } from "svelte/reactivity/window";
-import { dismissOnBack } from "$lib/back-layers.svelte";
-import AudioPlayer from "$lib/components/AudioPlayer.svelte";
-import ImageViewer from "$lib/components/ImageViewer.svelte";
+import { dismissOnBack } from "#lib/back-layers.svelte.ts";
+import AudioPlayer from "#lib/components/AudioPlayer.svelte";
+import ImageViewer from "#lib/components/ImageViewer.svelte";
 import {
 	type MediaItem,
 	mediaLightbox,
-} from "$lib/components/media-lightbox.svelte";
-import { downloads, saveFile } from "$lib/downloads.svelte";
+} from "#lib/components/media-lightbox.svelte.ts";
+import { downloads, saveFile } from "#lib/downloads.svelte.ts";
 import {
 	createGallerySwipe,
 	type GallerySwipeOffset,
-} from "$lib/gestures/gallery-swipe";
+} from "#lib/gestures/gallery-swipe.ts";
 import {
 	clampImageZoom,
 	IMAGE_MAX_ZOOM,
 	IMAGE_MIN_ZOOM,
 	IMAGE_ZOOM_STEP,
-} from "$lib/gestures/image-gesture";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { screenVariantSize } from "$lib/media/media-info";
-import { mediaFilename } from "$lib/media-download";
-import { EASE_OUT } from "$lib/motion";
-import { m } from "$lib/paraglide/messages.js";
-import MediaImage from "$lib/resource-kit/MediaImage.svelte";
-import MediaVideo from "$lib/resource-kit/MediaVideo.svelte";
+} from "#lib/gestures/image-gesture.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { screenVariantSize } from "#lib/media/media-info.ts";
+import { mediaFilename } from "#lib/media-download.ts";
+import { EASE_OUT } from "#lib/motion.ts";
+import { m } from "#lib/paraglide/messages.js";
+import MediaImage from "#lib/resource-kit/MediaImage.svelte";
+import MediaVideo from "#lib/resource-kit/MediaVideo.svelte";
 
 const SLIDE_GAP_PX = 16;
 const SETTLE_MS = 220;

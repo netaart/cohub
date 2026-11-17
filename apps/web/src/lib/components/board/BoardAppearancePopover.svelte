@@ -19,10 +19,10 @@ import type {
 } from "@neta-art/cohub/board/stage";
 import { Image, Palette, RotateCcw, Trash2, X } from "lucide-svelte";
 import { untrack } from "svelte";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import BoardScriptsSection from "$lib/components/board/BoardScriptsSection.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import BoardScriptsSection from "#lib/components/board/BoardScriptsSection.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

@@ -3,13 +3,16 @@ import type {
 	SpacePublicProfile,
 	UserProfile,
 } from "@neta-art/cohub";
-import { buildSpaceRootRoute, buildSpaceSessionRoute } from "$lib/space-routes";
+import {
+	buildSpaceRootRoute,
+	buildSpaceSessionRoute,
+} from "#lib/space-routes.ts";
 import {
 	parseSpaceAddressPath,
 	type SpaceAddress,
 	spaceIdAt,
-} from "$lib/stores/space-address";
-import { COHUB_WEB_ORIGIN_SOURCE } from "./platform-origin";
+} from "#lib/stores/space-address.ts";
+import { COHUB_WEB_ORIGIN_SOURCE } from "./platform-origin.ts";
 
 export type SpaceMention = {
 	type: "space";

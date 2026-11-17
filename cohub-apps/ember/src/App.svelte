@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { Camp } from "./engine/camp.svelte";
+  import type { Camp } from "./engine/camp.svelte.ts";
   import CameraBubble from "./ui/CameraBubble.svelte";
   import Dock from "./ui/Dock.svelte";
   import Lobby from "./ui/Lobby.svelte";

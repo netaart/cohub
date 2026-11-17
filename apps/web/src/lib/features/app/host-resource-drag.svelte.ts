@@ -5,8 +5,8 @@ import type {
 import {
 	type CohubDragResource,
 	getCohubResourceDragData,
-} from "$lib/drag/cohub-resource-drag";
-import type { PointerDragPayload } from "$lib/drag/pointer-drag-core";
+} from "#lib/drag/cohub-resource-drag.ts";
+import type { PointerDragPayload } from "#lib/drag/pointer-drag-core.ts";
 
 /** Maps a host drag resource to what crosses into an App on drop. */
 export function toAppDropResource(

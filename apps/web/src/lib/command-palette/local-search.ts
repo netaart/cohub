@@ -18,26 +18,29 @@ import {
 	type SessionListCacheRecord,
 	type SessionTurnsCacheRecord,
 	type SpaceRecordCacheRecord,
-} from "$lib/cache/db";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { getSpacePublicProfile } from "$lib/space-profile";
+} from "#lib/cache/db.ts";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { getSpacePublicProfile } from "#lib/space-profile.ts";
 import {
 	buildSpaceCheckpointRoute,
 	buildSpaceFileRoute,
 	buildSpaceLandingRoute,
 	buildSpaceSessionRoute,
-} from "$lib/space-routes";
-import { getCachedSpaceList } from "$lib/stores/space-list-cache";
-import { chatHref, chatTitle } from "./chat-items";
-import { commandItemKey } from "./merge-results";
-import { allowsResourceType, type CommandPaletteSearchPlan } from "./scope";
+} from "#lib/space-routes.ts";
+import { getCachedSpaceList } from "#lib/stores/space-list-cache.ts";
+import { chatHref, chatTitle } from "./chat-items.ts";
+import { commandItemKey } from "./merge-results.ts";
+import { allowsResourceType, type CommandPaletteSearchPlan } from "./scope.ts";
 import {
 	blendCommandScore,
 	scoreCommandItem,
 	sortCommandItems,
 	textMatchScore,
-} from "./score";
-import type { CommandPaletteItem, CommandPaletteViewerRelation } from "./types";
+} from "./score.ts";
+import type {
+	CommandPaletteItem,
+	CommandPaletteViewerRelation,
+} from "./types.ts";
 
 const LOCAL_LIMIT = 40;
 const LOCAL_SESSION_LIST_SCAN_LIMIT = 120;

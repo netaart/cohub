@@ -7,27 +7,30 @@ import type {
 	PublicAppVersionSummary,
 } from "@neta-art/cohub";
 import { onMount, untrack } from "svelte";
-import { replaceState } from "$app/navigation";
-import { page } from "$app/state";
-import { buildAppPageMeta } from "$lib/app-page-meta";
-import { reportAppPromotionReady, startAppPromotion } from "$lib/app-promotion";
-import AppPageHead from "$lib/components/app/AppPageHead.svelte";
-import AppSurface from "$lib/components/app/AppSurface.svelte";
-import AppVersionBar from "$lib/components/app/AppVersionBar.svelte";
+import { buildAppPageMeta } from "#lib/app-page-meta.ts";
+import {
+	reportAppPromotionReady,
+	startAppPromotion,
+} from "#lib/app-promotion.ts";
+import AppPageHead from "#lib/components/app/AppPageHead.svelte";
+import AppSurface from "#lib/components/app/AppSurface.svelte";
+import AppVersionBar from "#lib/components/app/AppVersionBar.svelte";
 import {
 	type AppEmbedConnection,
 	type AppEmbedState,
 	connectAppEmbed,
 	isServedFrom,
 	resolveEmbedderOrigin,
-} from "$lib/features/app/app-embed";
-import { loadAppPreview } from "$lib/features/app/app-open";
+} from "#lib/features/app/app-embed.ts";
+import { loadAppPreview } from "#lib/features/app/app-open.ts";
 import {
 	cohubHostWindow,
 	offerAppOpen,
 	openAppFromPage,
-} from "$lib/features/app/cohub-host";
-import { sdk } from "$lib/sdk";
+} from "#lib/features/app/cohub-host.ts";
+import { sdk } from "#lib/sdk.ts";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 
 type ReadyView = {
 	app: AppDetailResponse["app"];
@@ -67,7 +70,7 @@ const launchState = $derived({
 
 /**
  * Displayed version; `null` is the current version. Driven by local state, not
- * `page.url`: `replaceState` rewrites the address bar without updating
+ * `page.url`: a shallow navigation rewrites the address bar without updating
  * `page.url`, so URL-derived reactivity would never fire on a switch.
  */
 let selectedVersion = $state<number | null>(
@@ -421,7 +424,7 @@ $effect(() => {
 			const url = new URL(window.location.href);
 			if (resolvedVersionParam === null) url.searchParams.delete("cohub_v");
 			else url.searchParams.set("cohub_v", String(resolvedVersionParam));
-			replaceState(url, {});
+			void goto(url, { shallow: true, replace: true });
 		})
 		.finally(() => {
 			if (!controller.signal.aborted) switching = false;
@@ -434,11 +437,11 @@ $effect(() => {
 function handleSelectVersion(version: number | null) {
 	if (version === selectedVersion) return;
 	selectedVersion = version;
-	// Read `location` directly: `page.url` is stale after `replaceState`.
+	// Read `location` directly: `page.url` is stale after a shallow navigation.
 	const url = new URL(window.location.href);
 	if (version === null) url.searchParams.delete("cohub_v");
 	else url.searchParams.set("cohub_v", String(version));
-	replaceState(url, {});
+	void goto(url, { shallow: true, replace: true });
 }
 </script>
 

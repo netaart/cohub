@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Typecheck for apps/web.
 //
-// - `svelte-kit sync` only runs when the generated .svelte-kit output is stale:
-//   missing, older than the config files (.svelte.config / package.json / vite.config / .env),
-//   or older than any file under src/ (route additions/renames/removals regenerate $types).
+// - `svelte-kit sync` only runs when the generated `$app/tsconfig` is stale: missing,
+//   older than the config files (package.json / vite.config / .env), or older than any
+//   file under src/ (route additions/renames/removals regenerate $types).
 // - `svelte-check --tsgo --incremental` reuses the svelte2tsx + tsgo caches under
 //   .svelte-kit/.svelte-check (gitignored), so steady-state runs are fast.
 
@@ -13,15 +13,8 @@ import path from "node:path";
 
 const webDir = path.resolve(import.meta.dirname, "../apps/web");
 const binDir = path.join(webDir, "node_modules", ".bin");
-const kitTsconfig = path.join(webDir, ".svelte-kit", "tsconfig.json");
-const CONFIG_FILES = [
-  "svelte.config.js",
-  "svelte.config.ts",
-  "package.json",
-  "vite.config.js",
-  "vite.config.ts",
-  ".env",
-];
+const kitTsconfig = path.join(webDir, "node_modules", "$app", "tsconfig.json");
+const CONFIG_FILES = ["package.json", "vite.config.ts", ".env"];
 
 function run(bin, args) {
   const result = spawnSync(path.join(binDir, bin), args, {

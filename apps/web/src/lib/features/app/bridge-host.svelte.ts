@@ -9,17 +9,17 @@ import {
 	type AppRuntimeShellContext,
 	createAppBridgeCore,
 } from "@neta-art/cohub";
-import { PUBLIC_API_ORIGIN } from "$env/static/public";
 import {
 	getAppPromotionCheckoutAttribution,
 	reportAppPromotionCheckoutStarted,
 	reportAttributedAppPromotionEvent,
-} from "$lib/app-promotion";
-import { getAuthToken, signInWithRedirectPath } from "$lib/auth";
-import { readInstalledApps } from "$lib/features/app/app-center";
-import { readHostAppearance } from "$lib/features/app/host-appearance.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/app-promotion.ts";
+import { getAuthToken, signInWithRedirectPath } from "#lib/auth.ts";
+import { readInstalledApps } from "#lib/features/app/app-center.ts";
+import { readHostAppearance } from "#lib/features/app/host-appearance.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { PUBLIC_API_ORIGIN } from "$app/env/public";
 
 /**
  * The subset of an app record the bridge host needs to answer bridge messages.

@@ -1,9 +1,9 @@
 <script lang="ts">
 import type { AppViewSource, AppViewStatsResponse } from "@neta-art/cohub";
 import { Eye, RefreshCw } from "lucide-svelte";
-import { m } from "$messages";
-import type { AppTotals } from "./app";
-import { intlTag, type Locale } from "./core";
+import { m } from "../paraglide/messages.js";
+import type { AppTotals } from "./app.ts";
+import { intlTag, type Locale } from "./core.ts";
 
 type Props = {
 	locale: Locale;
@@ -15,7 +15,15 @@ type Props = {
 	onReveal?: () => void;
 };
 
-let { locale, stats, totals = null, loading, error, onRetry, onReveal }: Props = $props();
+let {
+	locale,
+	stats,
+	totals = null,
+	loading,
+	error,
+	onRetry,
+	onReveal,
+}: Props = $props();
 
 const compactFormatter = $derived(
 	new Intl.NumberFormat(intlTag(locale), {
@@ -37,10 +45,30 @@ const metrics = $derived.by(() => {
 	const summary = stats?.summary;
 	const likes = summary ? summary.totalLikes : totals?.likeCount;
 	return [
-		{ value: summary?.totalViews ?? totals?.totalViews ?? null, label: m.app_stats_total, title: m.app_stats_total_views_title },
-		{ value: summary?.views24h ?? null, label: m.app_stats_last_24h, title: m.app_stats_24h_title },
-		{ value: summary?.views7d ?? null, label: m.app_stats_last_7d, title: m.app_stats_7d_title },
-		...(likes === undefined ? [] : [{ value: likes, label: m.app_stats_likes, title: m.app_like_count_title }]),
+		{
+			value: summary?.totalViews ?? totals?.totalViews ?? null,
+			label: m.app_stats_total,
+			title: m.app_stats_total_views_title,
+		},
+		{
+			value: summary?.views24h ?? null,
+			label: m.app_stats_last_24h,
+			title: m.app_stats_24h_title,
+		},
+		{
+			value: summary?.views7d ?? null,
+			label: m.app_stats_last_7d,
+			title: m.app_stats_7d_title,
+		},
+		...(likes === undefined
+			? []
+			: [
+					{
+						value: likes,
+						label: m.app_stats_likes,
+						title: m.app_like_count_title,
+					},
+				]),
 	];
 });
 const maxDailyViews = $derived(

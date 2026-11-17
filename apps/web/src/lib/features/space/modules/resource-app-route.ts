@@ -4,7 +4,7 @@ import {
 	readResourceAppTarget,
 	writeResourceAppTarget,
 } from "@cohub/protocol";
-import { toSpaceIdPath } from "$lib/stores/space-address";
+import { toSpaceIdPath } from "#lib/stores/space-address.ts";
 
 const RESOURCE_SEGMENTS = {
 	tasks: "task",

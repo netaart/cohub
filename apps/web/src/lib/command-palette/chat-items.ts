@@ -1,6 +1,6 @@
 import { toSearchDisplayText } from "@cohub/protocol/search";
 import type { SessionRecord } from "@neta-art/cohub";
-import { buildSpaceSessionRoute } from "$lib/space-routes";
+import { buildSpaceSessionRoute } from "#lib/space-routes.ts";
 
 const CHAT_TITLE_LIMIT = 120;
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { MessagePart } from "$lib/paraglide/runtime.js";
+import type { MessagePart } from "#lib/paraglide/runtime.js";
 
 const {
 	parts,

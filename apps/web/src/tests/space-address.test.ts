@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
-import { buildSpaceSessionRoute } from "$lib/space-routes";
+import { buildSpaceSessionRoute } from "#lib/space-routes.ts";
 import {
 	canonicalSpaceLocation,
 	clearSpaceAddresses,
@@ -10,7 +10,7 @@ import {
 	rememberSpaceAddress,
 	spaceIdAt,
 	toSpaceIdPath,
-} from "$lib/stores/space-address";
+} from "#lib/stores/space-address.ts";
 
 const owner = (username: string) => ({
 	userUuid: `${username}-uuid`,

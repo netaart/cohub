@@ -14,19 +14,19 @@ import {
 } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
 import { m } from "$messages";
-import { taskRunDuration, taskTypeLabel } from "$kit/task-run";
-import { formatTimeAgo } from "$kit/time";
-import type { ResourceScope } from "../browser-route";
-import { TASK_FILTERS, type ResourceRow, type TaskFilter } from "../resource-list";
-import { getLocale, runtime } from "../runtime.svelte";
-import { appStatus, appVisibility, scheduleStatus, taskStatus } from "../status";
+import { taskRunDuration, taskTypeLabel } from "$kit/task-run.ts";
+import { formatTimeAgo } from "$kit/time.ts";
+import type { ResourceScope } from "../browser-route.ts";
+import { TASK_FILTERS, type ResourceRow, type TaskFilter } from "../resource-list.ts";
+import { getLocale, runtime } from "../runtime.svelte.ts";
+import { appStatus, appVisibility, scheduleStatus, taskStatus } from "../status.ts";
 import Button from "../ui/Button.svelte";
 import IconButton from "../ui/IconButton.svelte";
 import Notice from "../ui/Notice.svelte";
 import Skeleton from "../ui/Skeleton.svelte";
 import StateView from "../ui/StateView.svelte";
 import StatusBadge from "../ui/StatusBadge.svelte";
-import type { ListController } from "./list.svelte";
+import type { ListController } from "./list.svelte.ts";
 
 type Props = {
   kind: ResourceAppKind;

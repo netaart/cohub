@@ -1,5 +1,5 @@
-import { isModelHidden, type ModelCatalogItem } from "$lib/model-catalog";
-import { sdk } from "$lib/sdk";
+import { isModelHidden, type ModelCatalogItem } from "#lib/model-catalog.ts";
+import { sdk } from "#lib/sdk.ts";
 
 class ModelsCatalogStore {
 	items = $state<ModelCatalogItem[] | null>(null);

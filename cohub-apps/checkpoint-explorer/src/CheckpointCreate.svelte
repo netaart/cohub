@@ -4,14 +4,14 @@ import { ListTodo, Save } from "lucide-svelte";
 import { onDestroy, untrack } from "svelte";
 import { m } from "$messages";
 import CheckpointDiffPanel from "$kit/CheckpointDiffPanel.svelte";
-import { statusCode } from "../../shared/src/access";
-import { client } from "../../shared/src/client";
-import { getLocale, runtime } from "../../shared/src/runtime.svelte";
+import { statusCode } from "../../shared/src/access.ts";
+import { client } from "../../shared/src/client.ts";
+import { getLocale, runtime } from "../../shared/src/runtime.svelte.ts";
 import Button from "../../shared/src/ui/Button.svelte";
-import { inputClass } from "../../shared/src/ui/classes";
+import { inputClass } from "../../shared/src/ui/classes.ts";
 import Field from "../../shared/src/ui/Field.svelte";
 import Notice from "../../shared/src/ui/Notice.svelte";
-import type { ViewProps } from "../../shared/src/view-types";
+import type { ViewProps } from "../../shared/src/view-types.ts";
 
 let { spaceId, busy, draft, action, authorize, updateDraft, navigateRelated, back }: ViewProps = $props();
 

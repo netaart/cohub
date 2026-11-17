@@ -3,8 +3,8 @@ import type {
 	DisplayPlanLog,
 	DisplayRecordingMeta,
 } from "@neta-art/cohub";
-import { displayReplaysRepo } from "$lib/cache/repositories/display-replays-repo";
-import { sdk } from "$lib/sdk";
+import { displayReplaysRepo } from "#lib/cache/repositories/display-replays-repo.ts";
+import { sdk } from "#lib/sdk.ts";
 
 export type DisplayChapter = {
 	at: number;

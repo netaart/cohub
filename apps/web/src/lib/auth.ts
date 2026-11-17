@@ -4,8 +4,13 @@ import {
 	type AuthTokenRequestOptions,
 	type ClearBrokenSessionOptions,
 	createAuthRefreshCoordinator,
-} from "$lib/auth-refresh-coordinator";
-import { callHost, hostOwnsCredentials, readyHost } from "$lib/host-bridge";
+} from "#lib/auth-refresh-coordinator.ts";
+import { callHost, hostOwnsCredentials, readyHost } from "#lib/host-bridge.ts";
+import {
+	PUBLIC_LOGTO_API_RESOURCE,
+	PUBLIC_LOGTO_APP_ID,
+	PUBLIC_LOGTO_ENDPOINT,
+} from "$app/env/public";
 
 const IS_DEV =
 	(typeof location !== "undefined" && location.hostname.startsWith("dev")) ||
@@ -27,14 +32,11 @@ const OFFICIAL = IS_DEV
 			resource: "https://api.talesofai",
 		};
 
-export const API_RESOURCE =
-	import.meta.env?.PUBLIC_LOGTO_API_RESOURCE?.trim() || OFFICIAL.resource;
+export const API_RESOURCE = PUBLIC_LOGTO_API_RESOURCE ?? OFFICIAL.resource;
 
-const LOGTO_ENDPOINT =
-	import.meta.env?.PUBLIC_LOGTO_ENDPOINT?.trim() || OFFICIAL.endpoint;
+const LOGTO_ENDPOINT = PUBLIC_LOGTO_ENDPOINT ?? OFFICIAL.endpoint;
 
-const LOGTO_APP_ID =
-	import.meta.env?.PUBLIC_LOGTO_APP_ID?.trim() || OFFICIAL.appId;
+const LOGTO_APP_ID = PUBLIC_LOGTO_APP_ID ?? OFFICIAL.appId;
 
 /**
  * Lazy browser-only client. Safe to import on the server; construction and

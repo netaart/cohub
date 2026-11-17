@@ -1,16 +1,16 @@
 import type { SpaceRecord } from "@neta-art/cohub";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { appAreaHref } from "$lib/mobile-nav";
-import { sdk } from "$lib/sdk";
-import { buildSpaceLandingRoute } from "$lib/space-routes";
-import { authStore } from "$lib/stores/auth.svelte";
-import { getRecentSpace } from "$lib/stores/recent-space";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { appAreaHref } from "#lib/mobile-nav.ts";
+import { sdk } from "#lib/sdk.ts";
+import { buildSpaceLandingRoute } from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { getRecentSpace } from "#lib/stores/recent-space.ts";
 import {
 	getCachedSpaceList,
 	patchCachedSpaceList,
 	setCachedSpaceList,
-} from "$lib/stores/space-list-cache";
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
+} from "#lib/stores/space-list-cache.ts";
+import { cacheSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
 
 function rememberSpace(space: SpaceRecord) {
 	cacheSpaceRecordSoon(space);

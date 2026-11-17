@@ -9,18 +9,18 @@ import {
 	readBoardDeviceSignals,
 	runBoardStageBench,
 } from "@neta-art/cohub/board/stage";
+import { cohubPixiRuntime } from "#lib/board/runtime/board-runtime.ts";
+import { getTheme, setTheme, type ThemeMode } from "#lib/theme.svelte.ts";
+import { RESOLVED_THEMES } from "#lib/theme-registry.ts";
 import { page } from "$app/state";
-import { cohubPixiRuntime } from "$lib/board/runtime/board-runtime";
-import { getTheme, setTheme, type ThemeMode } from "$lib/theme.svelte";
-import { RESOLVED_THEMES } from "$lib/theme-registry";
 import {
 	BENCH_SCENARIOS,
 	type BenchScenario,
 	boardGalleryDocument,
 	GALLERY_ASSET_PREFIX,
-} from "./gallery";
+} from "./gallery.ts";
 import LodTuner from "./LodTuner.svelte";
-import { motionScriptUrl } from "./motion";
+import { motionScriptUrl } from "./motion.ts";
 
 const assetOrigin = page.url.searchParams.get("assets");
 const bench = Number(page.url.searchParams.get("bench") ?? 0) || undefined;

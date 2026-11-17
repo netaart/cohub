@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
-import type { LucideIcon } from "./icon";
+import type { LucideIcon } from "./icon.ts";
 import { LoaderCircle } from "lucide-svelte";
 
 type Variant = "primary" | "brand" | "secondary" | "outline" | "ghost" | "danger";

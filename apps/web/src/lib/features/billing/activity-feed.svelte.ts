@@ -1,5 +1,5 @@
-import { getCacheUserKey } from "$lib/cache/keys";
-import { AccountResource } from "$lib/features/settings/account-resource.svelte";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { AccountResource } from "#lib/features/settings/account-resource.svelte.ts";
 
 export type FeedPage<T> = { items: T[]; nextCursor: string | null };
 

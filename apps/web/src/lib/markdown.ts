@@ -9,8 +9,8 @@ import {
 	type LanguageRegistration,
 } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
-import { RESOLVED_THEMES, THEME_REGISTRY } from "$lib/theme-registry";
-import { normalizeWorkspaceFileLinkTarget } from "$lib/workspace-file-links";
+import { RESOLVED_THEMES, THEME_REGISTRY } from "#lib/theme-registry.ts";
+import { normalizeWorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
 
 const MARKDOWN_RENDER_CACHE_LIMIT = 256;
 const STREAMING_MARKDOWN_TAIL_PLAIN_THRESHOLD = 1_800;

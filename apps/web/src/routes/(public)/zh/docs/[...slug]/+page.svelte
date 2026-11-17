@@ -1,7 +1,7 @@
 <script lang="ts">
-import DocsArticle from "$lib/components/docs/DocsArticle.svelte";
-import type { DocsPage } from "$lib/docs";
-import { docsSeo } from "$lib/docs/seo";
+import DocsArticle from "#lib/components/docs/DocsArticle.svelte";
+import type { DocsPage } from "#lib/docs/index.ts";
+import { docsSeo } from "#lib/docs/seo.ts";
 
 const {
 	data,

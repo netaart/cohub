@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MarketplaceCatalogSchema, ManifestSchema, isPermissionError, parseCatalog, toInstalledApp, unclaimedFileHandlers } from "./catalog";
+import { MarketplaceCatalogSchema, ManifestSchema, isPermissionError, parseCatalog, toInstalledApp, unclaimedFileHandlers } from "./catalog.ts";
 
 const id = "123e4567-e89b-42d3-a456-426614174000";
 const entry = { id, ref: "tzwm/cohub/task-browser", name: "Task Browser", url: "https://cdn.example.com/task-browser/index.html" };

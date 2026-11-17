@@ -1,10 +1,10 @@
 <script lang="ts">
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import ListRowText from "$lib/components/list-page/ListRowText.svelte";
-import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { buildSpaceLandingRoute } from "$lib/space-routes";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import ListRowText from "#lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "#lib/components/list-page/list-row.ts";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { buildSpaceLandingRoute } from "#lib/space-routes.ts";
 import type {
 	GenerationModelRow,
 	GenerationSpaceRow,
@@ -13,7 +13,7 @@ import type {
 	SpaceRow,
 	UserProfile,
 	UserRow,
-} from "$lib/trending";
+} from "#lib/trending.ts";
 import {
 	fetchGenerationModels,
 	fetchGenerationSpaces,
@@ -21,7 +21,7 @@ import {
 	fetchModels,
 	fetchSpaces,
 	fetchUsers,
-} from "$lib/trending";
+} from "#lib/trending.ts";
 
 type Board = "llm" | "generation";
 type Dimension = "spaces" | "users" | "models";

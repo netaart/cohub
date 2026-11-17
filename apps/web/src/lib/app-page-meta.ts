@@ -1,12 +1,12 @@
 import type { AppDetailResponse, AppMeta } from "@neta-art/cohub";
-import { getAppFramePreconnectOrigin } from "$lib/app-url";
+import { getAppFramePreconnectOrigin } from "#lib/app-url.ts";
 import {
 	canonicalUrl,
 	defaultOgImage,
 	plainText,
 	siteOrigin,
 	truncate,
-} from "$lib/seo";
+} from "#lib/seo.ts";
 
 const MAX_NAME_LENGTH = 72;
 const MAX_SHORT_NAME_LENGTH = 24;

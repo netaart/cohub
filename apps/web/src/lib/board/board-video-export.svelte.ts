@@ -1,10 +1,10 @@
 import type { SpaceRecord } from "@neta-art/cohub";
 import type { BoardExportRegion } from "@neta-art/cohub/board";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 import {
 	cacheSpaceRecordSoon,
 	getCachedSpaceRecord,
-} from "$lib/stores/space-record-cache";
+} from "#lib/stores/space-record-cache.ts";
 
 const FRAME_MS = 40;
 const POLL_MS = 1500;

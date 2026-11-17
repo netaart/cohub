@@ -3,8 +3,8 @@ import type {
 	BoardPlaybackSnapshot,
 } from "@cohub/protocol";
 import { untrack } from "svelte";
-import { followBoardPlayback } from "$lib/board/board-playback-clock.svelte";
-import type { BoardEditor } from "$lib/board/editor.svelte";
+import { followBoardPlayback } from "#lib/board/board-playback-clock.svelte.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
 
 type Command = BoardPlaybackCommand extends infer C
 	? C extends BoardPlaybackCommand

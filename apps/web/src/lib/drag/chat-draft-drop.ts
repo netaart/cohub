@@ -1,4 +1,4 @@
-import { COHUB_PATH_MIME } from "./cohub-resource-drag";
+import { COHUB_PATH_MIME } from "./cohub-resource-drag.ts";
 
 export type ChatDraftDropKind = "files" | "path";
 

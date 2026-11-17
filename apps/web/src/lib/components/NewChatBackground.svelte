@@ -5,18 +5,18 @@ import type {
 } from "@cohub/protocol/app-navigation";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
 import { MEDIA_VARIANT_MAX } from "@neta-art/cohub/media";
+import { type CohubAppUrl, parseCohubAppUrl } from "#lib/app-url.ts";
+import NewChatAppBackground from "#lib/components/NewChatAppBackground.svelte";
+import NewChatBoardBackground from "#lib/components/NewChatBoardBackground.svelte";
+import NewChatSpaceBackground from "#lib/components/NewChatSpaceBackground.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { parseNewChatBackgroundAction } from "#lib/new-chat-background-bridge.ts";
+import { m } from "#lib/paraglide/messages.js";
+import MediaVideo from "#lib/resource-kit/MediaVideo.svelte";
+import type { NewChatBackgroundConfig } from "#lib/space-config.ts";
+import { emitSpaceConfigBackgroundAction } from "#lib/space-config.ts";
+import { isDecorativeNewChatBackground } from "#lib/space-config-parse.ts";
 import { page } from "$app/state";
-import { type CohubAppUrl, parseCohubAppUrl } from "$lib/app-url";
-import NewChatAppBackground from "$lib/components/NewChatAppBackground.svelte";
-import NewChatBoardBackground from "$lib/components/NewChatBoardBackground.svelte";
-import NewChatSpaceBackground from "$lib/components/NewChatSpaceBackground.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { parseNewChatBackgroundAction } from "$lib/new-chat-background-bridge";
-import { m } from "$lib/paraglide/messages.js";
-import MediaVideo from "$lib/resource-kit/MediaVideo.svelte";
-import type { NewChatBackgroundConfig } from "$lib/space-config";
-import { emitSpaceConfigBackgroundAction } from "$lib/space-config";
-import { isDecorativeNewChatBackground } from "$lib/space-config-parse";
 
 type Props = {
 	background: NewChatBackgroundConfig;

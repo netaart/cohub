@@ -5,16 +5,16 @@ import type {
 } from "@cohub/protocol/generation";
 import type { ModelStatusEntry } from "@cohub/protocol/model/status";
 import { Brain, Check, ChevronDown, Image, Zap } from "lucide-svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import { getGenerationModelPickerItems } from "$lib/generation-model-catalog";
-import { formatCurrency } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
+import Dialog from "#lib/components/Dialog.svelte";
+import { getGenerationModelPickerItems } from "#lib/generation-model-catalog.ts";
+import { formatCurrency } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
 import {
 	type AvailabilityLevel,
 	availabilityLevel,
-} from "$lib/model-availability";
+} from "#lib/model-availability.ts";
 import {
 	clampThinkingLevel,
 	fastServiceTierChoice,
@@ -25,8 +25,8 @@ import {
 	isFastServiceTier,
 	type ModelThinkingLevel,
 	supportsFastServiceTier,
-} from "$lib/model-catalog";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/model-catalog.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type ModelItem = {
 	provider: string;

@@ -5,12 +5,12 @@ import type {
 	BillingPromotionCodePreview,
 } from "@neta-art/cohub";
 import { HttpError } from "@neta-art/cohub";
-import { handleUnauthorizedError } from "$lib/auth-redirect";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
-import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
+import { handleUnauthorizedError } from "#lib/auth-redirect.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { billingCatalogStore } from "#lib/stores/billing-catalog.svelte.ts";
 import {
 	type CheckoutContext,
 	currentCheckoutContext,
@@ -18,9 +18,9 @@ import {
 	readRenewalPurchaseIntent,
 	saveCheckoutContext,
 	saveRenewalPurchaseIntent,
-} from "./checkout-context";
-import { checkoutReturnUrl } from "./checkout-return";
-import { trackPurchase } from "./funnel";
+} from "./checkout-context.ts";
+import { checkoutReturnUrl } from "./checkout-return.ts";
+import { trackPurchase } from "./funnel.ts";
 import {
 	type CatalogView,
 	catalogView,
@@ -31,7 +31,7 @@ import {
 	purchaseFocus,
 	recommendedPack,
 	recommendedPlan,
-} from "./product";
+} from "./product.ts";
 
 export type PurchaseSource =
 	| "pricing"

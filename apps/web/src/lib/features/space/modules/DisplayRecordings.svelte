@@ -3,11 +3,11 @@ import type { DisplayRecordingMeta } from "@neta-art/cohub";
 import { DISPLAY_RECORDINGS_DIR } from "@neta-art/cohub";
 import { FolderInput, Play, Trash2 } from "lucide-svelte";
 import { onDestroy } from "svelte";
-import { formatBytes } from "$lib/format-bytes";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { formatClock, loadRecordings } from "./display-replay";
+import { formatBytes } from "#lib/format-bytes.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { formatClock, loadRecordings } from "./display-replay.ts";
 
 const {
 	spaceId,

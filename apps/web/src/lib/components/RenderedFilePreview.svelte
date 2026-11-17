@@ -1,17 +1,17 @@
 <script lang="ts">
 import type { AppRecord } from "@neta-art/cohub";
 import { onDestroy, untrack } from "svelte";
-import * as publicEnv from "$env/static/public";
-import { readAppCheckoutState } from "$lib/components/app/app-checkout-state";
-import AppAuthorizeDialog from "$lib/features/app/AppAuthorizeDialog.svelte";
-import { createAppBridgeHost } from "$lib/features/app/bridge-host.svelte";
-import type { PreviewCaptureTarget } from "$lib/features/preview-mark";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { readAppCheckoutState } from "#lib/components/app/app-checkout-state.ts";
+import AppAuthorizeDialog from "#lib/features/app/AppAuthorizeDialog.svelte";
+import { createAppBridgeHost } from "#lib/features/app/bridge-host.svelte.ts";
+import type { PreviewCaptureTarget } from "#lib/features/preview-mark/index.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	createSpacePreviewSessionController,
 	type SpacePreviewTarget,
-} from "$lib/space-preview-session.svelte";
+} from "#lib/space-preview-session.svelte.ts";
+import { PUBLIC_PREVIEW_ORIGIN } from "$app/env/public";
 
 let {
 	name,
@@ -35,8 +35,7 @@ let {
 
 const locale = $derived(getLocale());
 
-const previewOrigin =
-	publicEnv.PUBLIC_PREVIEW_ORIGIN?.replace(/\/+$/, "") ?? "";
+const previewOrigin = PUBLIC_PREVIEW_ORIGIN?.replace(/\/+$/, "") ?? "";
 let frame: HTMLIFrameElement | null = $state(null);
 let lastSrcdocFrame: HTMLIFrameElement | null = null;
 let lastSrcdoc = "";

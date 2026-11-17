@@ -1,4 +1,4 @@
-import { MARK_COLOR_HEX, type Point, type Stroke } from "../types";
+import { MARK_COLOR_HEX, type Point, type Stroke } from "../types.ts";
 
 export function drawStroke(
 	ctx: CanvasRenderingContext2D,

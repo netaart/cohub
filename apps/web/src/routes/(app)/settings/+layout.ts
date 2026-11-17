@@ -1,5 +1,5 @@
-import { loadSettingsPage } from "$lib/features/settings/pages";
-import { resolveSettingsSectionRoot } from "$lib/settings-nav";
+import { loadSettingsPage } from "#lib/features/settings/pages.ts";
+import { resolveSettingsSectionRoot } from "#lib/settings-nav.ts";
 
 export const ssr = false;
 

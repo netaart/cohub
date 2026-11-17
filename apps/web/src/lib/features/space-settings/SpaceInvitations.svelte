@@ -6,15 +6,15 @@ import {
 } from "@neta-art/cohub";
 import { Check, Copy, Link, Loader2, Trash2, X } from "lucide-svelte";
 import { onDestroy } from "svelte";
-import { copyTextToClipboard } from "$lib/clipboard";
-import Sheet from "$lib/components/Sheet.svelte";
+import { copyTextToClipboard } from "#lib/clipboard.ts";
+import Sheet from "#lib/components/Sheet.svelte";
 import {
 	formatInviteExpiry,
 	spaceRoleLabel,
-} from "$lib/features/invitations/invitation-format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
+} from "#lib/features/invitations/invitation-format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
 
 let {
 	spaceId,

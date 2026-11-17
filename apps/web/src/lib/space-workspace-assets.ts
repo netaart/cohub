@@ -1,8 +1,8 @@
-import { createActiveFsClient } from "$lib/features/space/modules/active-fs-client";
+import { createActiveFsClient } from "#lib/features/space/modules/active-fs-client.ts";
 import {
 	type ResolveWorkspaceAsset,
 	resolveWorkspaceFileAsset,
-} from "$lib/workspace-assets";
+} from "#lib/workspace-assets.ts";
 
 /**
  * Resolves workspace-relative markdown assets against a Space's live files.

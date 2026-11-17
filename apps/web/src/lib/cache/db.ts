@@ -18,7 +18,7 @@ import type {
 	SpaceRecord,
 	TaskRunRecord,
 } from "@neta-art/cohub";
-import type { SessionListPageInfo } from "$lib/cache/types";
+import type { SessionListPageInfo } from "#lib/cache/types.ts";
 
 export const DB_NAME = "cohub-web-cache";
 export const DB_VERSION = 32;

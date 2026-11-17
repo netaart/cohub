@@ -39,10 +39,10 @@ import {
 	Rotate3d,
 	RotateCcw,
 } from "lucide-svelte";
-import AdaptivePopover from "$lib/components/list-page/AdaptivePopover.svelte";
-import { formatBytes } from "$lib/format-bytes";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import AdaptivePopover from "#lib/components/list-page/AdaptivePopover.svelte";
+import { formatBytes } from "#lib/format-bytes.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	controls,

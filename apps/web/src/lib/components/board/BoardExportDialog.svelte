@@ -20,13 +20,13 @@ import {
 	boardExportFilename,
 	copyImageToClipboard,
 	exportBoardImage,
-} from "$lib/board/board-image-export";
-import type { BoardVideoExportRequest } from "$lib/board/board-video-export.svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import { saveFile } from "$lib/downloads.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/board/board-image-export.ts";
+import type { BoardVideoExportRequest } from "#lib/board/board-video-export.svelte.ts";
+import Dialog from "#lib/components/Dialog.svelte";
+import Spinner from "#lib/components/Spinner.svelte";
+import { saveFile } from "#lib/downloads.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	open,

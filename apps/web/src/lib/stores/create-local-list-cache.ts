@@ -1,5 +1,5 @@
-import { canUseUserScopedCache, getCacheUserKey } from "$lib/cache/keys";
-import { authStore } from "$lib/stores/auth.svelte";
+import { canUseUserScopedCache, getCacheUserKey } from "#lib/cache/keys.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 const DEV = typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
 

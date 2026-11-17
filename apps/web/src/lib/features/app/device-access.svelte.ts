@@ -8,9 +8,9 @@ import { untrack } from "svelte";
 import {
 	readAppDeviceConsent,
 	writeAppDeviceConsent,
-} from "$lib/features/app/app-devices";
-import { hostAllowsMediaCapture } from "$lib/host-bridge";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/features/app/app-devices.ts";
+import { hostAllowsMediaCapture } from "#lib/host-bridge.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 function hostSupports(device: AppDevice) {
 	if (typeof navigator === "undefined") return false;

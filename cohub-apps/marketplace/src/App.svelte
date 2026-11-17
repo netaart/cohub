@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { AppRuntimeInvocationContext, Permission, SpaceFsFileResponse } from "@neta-art/cohub";
-import { APPS_PATH, emptyManifest, isPermissionError, parseCatalog, parseManifest, toInstalledApp, unclaimedFileHandlers, type FileState, type InstalledApp, type MarketplaceEntry } from "./catalog";
+import { APPS_PATH, emptyManifest, isPermissionError, parseCatalog, parseManifest, toInstalledApp, unclaimedFileHandlers, type FileState, type InstalledApp, type MarketplaceEntry } from "./catalog.ts";
 import { createCohubClient } from "@neta-art/cohub";
 import { AlertCircle, Check, LoaderCircle, PackageOpen, Search } from "@lucide/svelte";
 import { onMount } from "svelte";

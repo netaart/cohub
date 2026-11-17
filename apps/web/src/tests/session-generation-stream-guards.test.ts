@@ -4,7 +4,7 @@ import {
 	isArchivedMessageIdentity,
 	isSameLiveMessage,
 	shouldPreserveLivePreviewOnArchive,
-} from "../lib/session-generation-stream-guards";
+} from "../lib/session-generation-stream-guards.ts";
 
 test("isSameLiveMessage matches by ordinal or stream id", () => {
 	assert.equal(

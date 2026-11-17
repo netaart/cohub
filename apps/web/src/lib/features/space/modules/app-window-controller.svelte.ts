@@ -1,19 +1,19 @@
 import type { AppWindowState } from "@cohub/protocol/app-runtime";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
 import type { AppDetailResponse } from "@neta-art/cohub";
-import { appDisplayTitle } from "$lib/app-page-meta";
-import { loadAppPreview } from "$lib/features/app/app-open";
-import type { AppSurfaceRegistry } from "$lib/features/app/surface-registry";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { isNewerAppSnapshot } from "$lib/resource-kit/app";
-import { appWindowKey } from "./app-window-key";
-import { createRequestDedupe } from "./request-dedupe";
+import { appDisplayTitle } from "#lib/app-page-meta.ts";
+import { loadAppPreview } from "#lib/features/app/app-open.ts";
+import type { AppSurfaceRegistry } from "#lib/features/app/surface-registry.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { isNewerAppSnapshot } from "#lib/resource-kit/app.ts";
+import { appWindowKey } from "./app-window-key.ts";
+import { createRequestDedupe } from "./request-dedupe.ts";
 import {
 	createWorkspaceAppInvocation,
 	type WorkspaceAppInvocation,
 	type WorkspaceAppOpenContext,
-} from "./workspace-app-context";
+} from "./workspace-app-context.ts";
 
 export type AppLaunchState = { search?: string; hash?: string };
 
@@ -98,11 +98,12 @@ export function createAppPreviewController(
 
 	const loadApp =
 		options.loadApp ??
-		(async (appId: string) => (await import("$lib/sdk")).sdk.apps.get(appId));
+		(async (appId: string) =>
+			(await import("#lib/sdk.ts")).sdk.apps.get(appId));
 	const loadPublicApp =
 		options.loadPublicApp ??
 		(async (appId: string) =>
-			(await import("$lib/sdk")).sdk.apps.getPublicById(appId));
+			(await import("#lib/sdk.ts")).sdk.apps.getPublicById(appId));
 
 	/**
 	 * A public App in a Space we cannot view is still previewable, and

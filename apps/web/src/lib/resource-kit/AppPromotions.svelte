@@ -15,8 +15,8 @@ import {
 	X,
 } from "lucide-svelte";
 import { onMount } from "svelte";
-import { m } from "$messages";
-import type { Locale } from "./core";
+import { m } from "../paraglide/messages.js";
+import type { Locale } from "./core.ts";
 
 type Props = {
 	locale: Locale;

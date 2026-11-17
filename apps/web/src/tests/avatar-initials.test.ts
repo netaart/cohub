@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { avatarInitials, isSingleGlyph } from "$lib/avatar-initials";
+import { avatarInitials, isSingleGlyph } from "#lib/avatar-initials.ts";
 
 test("avatarInitials takes two letters for Latin names", () => {
 	assert.equal(avatarInitials("Pixel Editor", "A"), "PE");

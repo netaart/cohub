@@ -13,15 +13,15 @@ import {
 	Search,
 	Settings,
 } from "lucide-svelte";
-import audio from "$lib/assets/pixel-icons/audio.svg";
-import chat from "$lib/assets/pixel-icons/chat.svg";
-import files from "$lib/assets/pixel-icons/files.svg";
-import images from "$lib/assets/pixel-icons/images.svg";
-import search from "$lib/assets/pixel-icons/search.svg";
-import settings from "$lib/assets/pixel-icons/settings.svg";
-import videos from "$lib/assets/pixel-icons/videos.svg";
-import works from "$lib/assets/pixel-icons/works.svg";
-import world from "$lib/assets/pixel-icons/world.svg";
+import audio from "#lib/assets/pixel-icons/audio.svg";
+import chat from "#lib/assets/pixel-icons/chat.svg";
+import files from "#lib/assets/pixel-icons/files.svg";
+import images from "#lib/assets/pixel-icons/images.svg";
+import search from "#lib/assets/pixel-icons/search.svg";
+import settings from "#lib/assets/pixel-icons/settings.svg";
+import videos from "#lib/assets/pixel-icons/videos.svg";
+import works from "#lib/assets/pixel-icons/works.svg";
+import world from "#lib/assets/pixel-icons/world.svg";
 
 type PixelArt = { src: string; cells: number };
 

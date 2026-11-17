@@ -5,12 +5,12 @@ import type { AppRecord, AppVersionRecord } from "@neta-art/cohub";
 import {
 	createAppMutationBuffer,
 	upsertAppSnapshot,
-} from "$lib/features/app/app-realtime";
+} from "#lib/features/app/app-realtime.ts";
 import {
 	isNewerAppSnapshot,
 	parseAppVersionPublished,
 	upsertAppVersion,
-} from "$lib/resource-kit/app";
+} from "#lib/resource-kit/app.ts";
 
 const app = (latestVersion: number, updatedAt: string): AppRecord => ({
 	id: "work-1",

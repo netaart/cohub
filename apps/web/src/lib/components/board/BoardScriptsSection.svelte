@@ -9,12 +9,12 @@ import { untrack } from "svelte";
 import {
 	type BoardScriptStatus,
 	watchBoardScriptStatus,
-} from "$lib/board/board-script-status";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import BoardScriptPanel from "$lib/components/board/BoardScriptPanel.svelte";
-import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/board/board-script-status.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import BoardScriptPanel from "#lib/components/board/BoardScriptPanel.svelte";
+import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

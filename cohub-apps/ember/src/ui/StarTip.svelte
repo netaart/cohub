@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { StarTip } from "../engine/camp.svelte";
-  import type { Messages } from "../i18n";
+  import type { StarTip } from "../engine/camp.svelte.ts";
+  import type { Messages } from "../i18n.ts";
 
   let { star, t }: { star: StarTip; t: Messages } = $props();
   let width = $state(0);

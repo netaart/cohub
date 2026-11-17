@@ -6,22 +6,22 @@ import {
 } from "@cohub/protocol";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { MessageToolCallsFile } from "@cohub/protocol/model";
-import { page } from "$app/state";
-import MarkdownView from "$lib/components/MarkdownView.svelte";
-import AttachmentBlocks from "$lib/components/TextAttachmentBlocks.svelte";
-import ThinkingBlocks from "$lib/components/ThinkingBlocks.svelte";
-import ToolCallList from "$lib/components/ToolCallList.svelte";
-import ViewportContextBlocks from "$lib/components/ViewportContextBlocks.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useMarkdownWorkspaceAsset } from "$lib/markdown-asset-context";
-import { screenVariantSize } from "$lib/media/media-info";
+import MarkdownView from "#lib/components/MarkdownView.svelte";
+import AttachmentBlocks from "#lib/components/TextAttachmentBlocks.svelte";
+import ThinkingBlocks from "#lib/components/ThinkingBlocks.svelte";
+import ToolCallList from "#lib/components/ToolCallList.svelte";
+import ViewportContextBlocks from "#lib/components/ViewportContextBlocks.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useMarkdownWorkspaceAsset } from "#lib/markdown-asset-context.ts";
+import { screenVariantSize } from "#lib/media/media-info.ts";
 import {
 	type ResourceMentionTextToken,
 	tokenizeResourceMentionText,
-} from "$lib/mentions/resource";
-import { m } from "$lib/paraglide/messages.js";
-import MediaVideo from "$lib/resource-kit/MediaVideo.svelte";
-import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
+} from "#lib/mentions/resource.ts";
+import { m } from "#lib/paraglide/messages.js";
+import MediaVideo from "#lib/resource-kit/MediaVideo.svelte";
+import type { OpenWorkspaceFileTarget } from "#lib/workspace-file-links.ts";
+import { page } from "$app/state";
 
 type TextBlock = Extract<ContentBlock, { type: "text" }>;
 type ThinkingBlock = Extract<ContentBlock, { type: "thinking" }>;

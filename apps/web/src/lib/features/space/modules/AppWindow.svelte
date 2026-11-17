@@ -4,16 +4,16 @@ import type { AppWindowState } from "@cohub/protocol/app-runtime";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
 import type { AppRuntimeShellContext } from "@neta-art/cohub";
 import { ExternalLink, Loader2, RefreshCw } from "lucide-svelte";
-import { buildAppIframeUrl } from "$lib/app-url";
-import AppSurface from "$lib/components/app/AppSurface.svelte";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import type { AppSurfaceHost } from "$lib/features/app/surface-host";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import type { InlineAppPreview } from "./app-window-controller.svelte";
+import { buildAppIframeUrl } from "#lib/app-url.ts";
+import AppSurface from "#lib/components/app/AppSurface.svelte";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import type { AppSurfaceHost } from "#lib/features/app/surface-host.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { InlineAppPreview } from "./app-window-controller.svelte.ts";
 import PreviewHeader from "./PreviewHeader.svelte";
-import type { PreviewChrome, PreviewHeaderAction } from "./preview-header";
-import type { Window } from "./windows";
+import type { PreviewChrome, PreviewHeaderAction } from "./preview-header.ts";
+import type { Window } from "./windows.ts";
 
 type Props = {
 	preview: InlineAppPreview;

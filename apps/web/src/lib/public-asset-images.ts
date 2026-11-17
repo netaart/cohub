@@ -4,8 +4,11 @@ import {
 	type PublicAssetMimeType,
 	type PublicAssetUploadProgress,
 } from "@neta-art/cohub";
-import { assertAvatarInputFile, normalizeAvatarImage } from "$lib/avatar-image";
-import { sdk } from "$lib/sdk";
+import {
+	assertAvatarInputFile,
+	normalizeAvatarImage,
+} from "#lib/avatar-image.ts";
+import { sdk } from "#lib/sdk.ts";
 
 export type PreparedChatImageAttachment = {
 	file: File;

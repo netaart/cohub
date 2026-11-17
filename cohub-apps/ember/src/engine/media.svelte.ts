@@ -1,9 +1,9 @@
 import type { AppDevice, CohubClient } from "@neta-art/cohub";
-import { type Point, voiceVolume } from "../camp/world";
-import { LevelMeter, VoiceMixer } from "../net/audio";
-import { CAMERA_RANGE, cameraQuality, type CameraQuality, type MediaCandidate, selectCampMedia } from "../net/media-policy";
-import type { CampSession, RemoteTrack } from "../net/session";
-import type { World } from "./world";
+import { type Point, voiceVolume } from "../camp/world.ts";
+import { LevelMeter, VoiceMixer } from "../net/audio.ts";
+import { CAMERA_RANGE, cameraQuality, type CameraQuality, type MediaCandidate, selectCampMedia } from "../net/media-policy.ts";
+import type { CampSession, RemoteTrack } from "../net/session.ts";
+import type { World } from "./world.ts";
 
 export type DeviceNotice = "micUnavailable" | "cameraUnavailable" | "deviceDenied" | "deviceUnavailable" | "noRtc" | "cameraLocal";
 

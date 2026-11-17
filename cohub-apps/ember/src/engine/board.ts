@@ -10,11 +10,11 @@ import {
 import { type BoardEditor, createBoardEditor } from "@neta-art/cohub/board/editor";
 import { defaultBoardPalette, ensureBoardTextMeasurement } from "@neta-art/cohub/board/render";
 import { type BoardLiveStroke, type BoardStage, createBoardAssetManager, mountBoardStage } from "@neta-art/cohub/board/stage";
-import { cardIdOf } from "../camp/document";
-import { createId } from "../camp/protocol";
-import { cardRoot, cardSize } from "../camp/scene";
-import { BURN_RADIUS, FIRE, MEADOW, type Point, SKY } from "../camp/world";
-import type { World } from "./world";
+import { cardIdOf } from "../camp/document.ts";
+import { createId } from "../camp/protocol.ts";
+import { cardRoot, cardSize } from "../camp/scene.ts";
+import { BURN_RADIUS, FIRE, MEADOW, type Point, SKY } from "../camp/world.ts";
+import type { World } from "./world.ts";
 
 export type BoardIntents = {
   walk(point: Point): void;

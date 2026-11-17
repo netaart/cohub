@@ -22,7 +22,7 @@ import {
 import {
 	boardGroupLabel,
 	boardPropertyLabel,
-} from "$lib/board/animation-labels";
+} from "#lib/board/animation-labels.ts";
 import {
 	type BoardDockSelection,
 	type BoardTrackGroup,
@@ -33,9 +33,9 @@ import {
 	formatBoardTime,
 	parseBoardKeyId,
 	snapBoardTime,
-} from "$lib/board/animation-timeline";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/board/animation-timeline.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	groups,

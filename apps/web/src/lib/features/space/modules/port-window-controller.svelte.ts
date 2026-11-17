@@ -1,13 +1,13 @@
 import type { SpacePublicEndpoints } from "@cohub/protocol/ports";
 import type { ChannelEnvelope } from "@cohub/protocol/realtime";
 import type { SpaceRecord } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 import {
 	applyPortsChangedToEndpoints,
 	extractPublicEndpoints,
 	isHttpUrl,
-} from "./port-window-utils";
-import { createRequestDedupe } from "./request-dedupe";
+} from "./port-window-utils.ts";
+import { createRequestDedupe } from "./request-dedupe.ts";
 
 export type InlinePortPreview = {
 	port: string;

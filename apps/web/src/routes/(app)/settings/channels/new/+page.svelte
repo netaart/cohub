@@ -10,20 +10,20 @@ import {
 	Webhook,
 } from "lucide-svelte";
 import { onDestroy } from "svelte";
+import { ensureAuth } from "#lib/auth.ts";
+import { handleUnauthorizedError } from "#lib/auth-redirect.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
-import { ensureAuth } from "$lib/auth";
-import { handleUnauthorizedError } from "$lib/auth-redirect";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
 
 const locale = $derived(getLocale());
 const currentPath = $derived(page.url.pathname);
 const currentSearch = $derived(page.url.search);
 
 function channelsListHref() {
-	const target = new URL("/settings/channels", page.url);
+	const target = new URL("/settings/channels", page.url.href);
 	const from = page.url.searchParams.get("from");
 	if (from) target.searchParams.set("from", from);
 	return target.pathname + target.search;
@@ -149,7 +149,7 @@ async function pollWeChatLogin(sessionKey: string, verifyCode?: string) {
 			wechatStatus = result.message;
 			if (result.connected) {
 				stopWeChatPolling();
-				await goto(channelsListHref(), { replaceState: true });
+				await goto(channelsListHref(), { replace: true });
 				return;
 			}
 			if (result.needVerifyCode) {
@@ -291,7 +291,7 @@ async function handleSubmit(e: Event) {
 			credentials,
 		});
 
-		await goto(channelsListHref(), { replaceState: true });
+		await goto(channelsListHref(), { replace: true });
 	} catch (error) {
 		if (
 			await handleUnauthorizedError(error, `${currentPath}${currentSearch}`)

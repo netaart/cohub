@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
 	readRenewalPurchaseIntent,
 	saveRenewalPurchaseIntent,
-} from "../lib/features/billing/checkout-context";
+} from "../lib/features/billing/checkout-context.ts";
 
 test("renewal loads preserve Credits selection and reconcile a Provider-unresolved action", async (t) => {
 	const { readFileSync } = await import("node:fs");

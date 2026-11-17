@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { UsageTotals } from "@neta-art/cohub";
-import { type ActivityDay, formatCompact, formatCost } from "$lib/activity";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { type ActivityDay, formatCompact, formatCost } from "#lib/activity.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	days: ActivityDay[];

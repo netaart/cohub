@@ -38,7 +38,7 @@ export function parseSiteHostSuffixes(value: string | null | undefined) {
  * trusted: a value that only differs in case or padding would otherwise match
  * one entry point and not the other.
  *
- * Kept free of `$lib`/`$env` aliases so Wrangler can bundle it for the entry,
+ * Kept free of SvelteKit `$app` modules so Wrangler can bundle it for the entry,
  * and kept standalone so it stays unit tested (`entry.worker.ts` is build glue).
  */
 export function serveStandaloneHostRequest(input: {

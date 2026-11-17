@@ -1,7 +1,7 @@
 import type { SpaceRecord, UserProfile } from "@neta-art/cohub";
-import { formatCurrency } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
-import type { SpaceSandboxSnapshot } from "./modules/space-status-controller.svelte";
+import { formatCurrency } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import type { SpaceSandboxSnapshot } from "./modules/space-status-controller.svelte.ts";
 
 export function fallbackUserName(userUuid: string | null | undefined): string {
 	if (!userUuid) return "Unknown user";
@@ -23,7 +23,7 @@ export function displayOwnerHandle(
 	return username ? `@${username}` : null;
 }
 
-export { formatBytes as formatFileSize } from "$lib/format-bytes";
+export { formatBytes as formatFileSize } from "#lib/format-bytes.ts";
 
 export function formatTokenCount(n: number): string {
 	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;

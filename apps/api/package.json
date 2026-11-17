@@ -65,7 +65,7 @@
     "@types/node": "catalog:",
     "drizzle-kit": "^0.31.11",
     "tsx": "catalog:",
-    "typescript": "^7.0.2"
+    "typescript": "catalog:"
   },
   "optionalDependencies": {
     "@talesofai-billing/sdk": "1.31.0"

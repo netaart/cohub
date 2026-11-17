@@ -1,4 +1,4 @@
-import type { CommandPaletteItem, CommandPaletteItemType } from "./types";
+import type { CommandPaletteItem, CommandPaletteItemType } from "./types.ts";
 
 const TYPE_PRIORITY: Record<CommandPaletteItemType, number> = {
 	command: 1,

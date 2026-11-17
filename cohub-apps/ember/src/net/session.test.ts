@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { CohubClient } from "@neta-art/cohub";
-import { CampSession, type SessionHandlers } from "./session";
+import { CampSession, type SessionHandlers } from "./session.ts";
 
 const handlers = (): SessionHandlers => ({
   onEvent() {}, onResync: async () => {}, onMembers() {}, onPose() {}, onDrag() {},

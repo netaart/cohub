@@ -1,8 +1,11 @@
 <script lang="ts">
 import type { PublicGenerationDeclaration } from "@cohub/protocol/generation";
 import type { ModelStatusEntry } from "@cohub/protocol/model/status";
-import ModelSelector from "$lib/components/ModelSelector.svelte";
-import type { ModelCatalogItem, ModelThinkingLevel } from "$lib/model-catalog";
+import ModelSelector from "#lib/components/ModelSelector.svelte";
+import type {
+	ModelCatalogItem,
+	ModelThinkingLevel,
+} from "#lib/model-catalog.ts";
 
 type SelectedModel = {
 	provider: string;

@@ -4,6 +4,7 @@ import {
 	readResourceAppTarget,
 	writeResourceAppTarget,
 } from "@cohub/protocol";
+import type { ReadonlyURL } from "$app/state";
 
 export const LIBRARY_ENTITIES = ["spaces", "apps", "scheduled"] as const;
 export type LibraryEntity = (typeof LIBRARY_ENTITIES)[number];
@@ -45,7 +46,7 @@ export function libraryItemHref(
 	return `${libraryHref(entity)}?${params}`;
 }
 
-export function librarySelectionAt(url: URL): LibrarySelection | null {
+export function librarySelectionAt(url: ReadonlyURL): LibrarySelection | null {
 	const entity = libraryEntityAt(url.pathname);
 	if (!entity || entity === "spaces") return null;
 	const spaceId = url.searchParams.get("space");
@@ -55,7 +56,7 @@ export function librarySelectionAt(url: URL): LibrarySelection | null {
 	return { spaceId, target };
 }
 
-export function librarySpaceAt(url: URL) {
+export function librarySpaceAt(url: ReadonlyURL) {
 	const entity = libraryEntityAt(url.pathname);
 	if (!entity || entity === "spaces") return null;
 	const spaceId = url.searchParams.get("space");

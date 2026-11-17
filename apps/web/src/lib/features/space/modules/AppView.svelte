@@ -13,36 +13,36 @@ import {
 	Trash2,
 } from "lucide-svelte";
 import { onDestroy, onMount } from "svelte";
-import { page } from "$app/state";
 import {
 	readAppDomains,
 	writeAppDomains,
-} from "$lib/cache/repositories/app-domains-repo";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
+} from "#lib/cache/repositories/app-domains-repo.ts";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
 import {
 	APP_DOMAINS_CHANGED_EVENT,
 	APPS_CHANGED_EVENT,
 	type AppsChangedDetail,
-} from "$lib/features/app/app-realtime";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import AppCustomDomain from "$lib/resource-kit/AppCustomDomain.svelte";
-import AppPromotions from "$lib/resource-kit/AppPromotions.svelte";
-import AppViewStats from "$lib/resource-kit/AppViewStats.svelte";
+} from "#lib/features/app/app-realtime.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import AppCustomDomain from "#lib/resource-kit/AppCustomDomain.svelte";
+import AppPromotions from "#lib/resource-kit/AppPromotions.svelte";
+import AppViewStats from "#lib/resource-kit/AppViewStats.svelte";
 import {
 	APP_SCOPE_GROUPS,
 	APP_SCOPE_OPTIONS,
 	type AppDomainChange,
 	appStatusTone,
-} from "$lib/resource-kit/app";
-import { formatDateTime } from "$lib/resource-kit/time";
-import { sdk } from "$lib/sdk";
+} from "#lib/resource-kit/app.ts";
+import { formatDateTime } from "#lib/resource-kit/time.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	buildSpaceSessionRoute,
 	buildSpaceSessionTurnRoute,
-} from "$lib/space-routes";
-import { authStore } from "$lib/stores/auth.svelte";
-import { createAppDetailController } from "./app-detail-controller.svelte";
+} from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { page } from "$app/state";
+import { createAppDetailController } from "./app-detail-controller.svelte.ts";
 
 type Props = {
 	spaceId: string;

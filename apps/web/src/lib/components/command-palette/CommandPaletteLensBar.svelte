@@ -2,13 +2,13 @@
 import {
 	COMMAND_PALETTE_LENSES,
 	type CommandPaletteLens,
-} from "$lib/command-palette/lens";
-import { commandLensLabel } from "$lib/command-palette/lens-copy";
-import FilterBar from "$lib/components/list-page/FilterBar.svelte";
-import FilterChip from "$lib/components/list-page/FilterChip.svelte";
-import type { PagerGlide } from "$lib/gestures/pager";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/command-palette/lens.ts";
+import { commandLensLabel } from "#lib/command-palette/lens-copy.ts";
+import FilterBar from "#lib/components/list-page/FilterBar.svelte";
+import FilterChip from "#lib/components/list-page/FilterChip.svelte";
+import type { PagerGlide } from "#lib/gestures/pager.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	lens,

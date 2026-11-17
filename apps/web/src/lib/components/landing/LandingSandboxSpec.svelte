@@ -11,8 +11,8 @@
  * Scoped to what the heading and lede do not already cover — isolation and
  * "a real computer" are stated up there, so repeating them here wastes a slot.
  */
-import type { PublicLocale } from "$lib/i18n/public-locale";
-import { m } from "$lib/paraglide/messages.js";
+import type { PublicLocale } from "#lib/i18n/public-locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = { locale?: PublicLocale };
 

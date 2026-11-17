@@ -24,21 +24,21 @@ import {
 	TriangleAlert,
 } from "lucide-svelte";
 import { untrack } from "svelte";
-import HarnessIcon from "$lib/components/composer/HarnessIcon.svelte";
-import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
-import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
-import StatsContent from "$lib/components/StatsContent.svelte";
+import HarnessIcon from "#lib/components/composer/HarnessIcon.svelte";
+import MessageContentFlow from "#lib/components/MessageContentFlow.svelte";
+import RelatedSessionLink from "#lib/components/RelatedSessionLink.svelte";
+import StatsContent from "#lib/components/StatsContent.svelte";
 import StatsGroup, {
 	type StatsGroupItem,
-} from "$lib/components/StatsGroup.svelte";
-import StatsPopover from "$lib/components/StatsPopover.svelte";
-import TurnSpeechButton from "$lib/components/TurnSpeechButton.svelte";
-import UserIdentity from "$lib/components/UserIdentity.svelte";
+} from "#lib/components/StatsGroup.svelte";
+import StatsPopover from "#lib/components/StatsPopover.svelte";
+import TurnSpeechButton from "#lib/components/TurnSpeechButton.svelte";
+import UserIdentity from "#lib/components/UserIdentity.svelte";
 import {
 	formatDurationDetail,
 	formatDurationMs,
 	isDisplayableDurationMs,
-} from "$lib/format-duration";
+} from "#lib/format-duration.ts";
 import {
 	formatInputTokens,
 	formatTokenCount,
@@ -47,27 +47,27 @@ import {
 	getContextUsagePercent,
 	getDisplayInputTokens,
 	getUsageCostTotal,
-} from "$lib/format-usage";
-import { getGenerationCostPresentation } from "$lib/generation-cost";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { provideMarkdownWorkspaceAsset } from "$lib/markdown-asset-context";
-import { extractSpaceMentionsFromText } from "$lib/mentions/space";
+} from "#lib/format-usage.ts";
+import { getGenerationCostPresentation } from "#lib/generation-cost.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { provideMarkdownWorkspaceAsset } from "#lib/markdown-asset-context.ts";
+import { extractSpaceMentionsFromText } from "#lib/mentions/space.ts";
 import {
 	findModelCatalogItem,
 	formatThinkingLevelShort,
 	getModelDisplayName,
 	getRequestedThinkingLevel,
 	type ModelCatalogItem,
-} from "$lib/model-catalog";
-import { m } from "$lib/paraglide/messages.js";
-import { readSentFrom } from "$lib/sent-turns";
-import type { ChatMessage } from "$lib/session-tree";
-import { createSpaceWorkspaceAssetResolver } from "$lib/space-workspace-assets";
+} from "#lib/model-catalog.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { readSentFrom } from "#lib/sent-turns.ts";
+import type { ChatMessage } from "#lib/session-tree.ts";
+import { createSpaceWorkspaceAssetResolver } from "#lib/space-workspace-assets.ts";
 import {
 	formatCompactAbsoluteTime,
 	formatFullAbsoluteTime,
-} from "$lib/time-format";
-import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
+} from "#lib/time-format.ts";
+import type { OpenWorkspaceFileTarget } from "#lib/workspace-file-links.ts";
 
 type Props = {
 	message: ChatMessage;

@@ -1,19 +1,19 @@
 <script lang="ts">
 import type { UserActivityResponse } from "@neta-art/cohub";
-import { buildActivityDays } from "$lib/activity";
-import { ensureAuth } from "$lib/auth";
-import { USER_ACTIVITY_SCOPE } from "$lib/cache/repositories/activity-repo";
-import ActivityHeatmap from "$lib/components/activity/ActivityHeatmap.svelte";
-import ActivityPage from "$lib/components/activity/ActivityPage.svelte";
-import ActivityRankings from "$lib/components/activity/ActivityRankings.svelte";
-import ActivityStatStrip from "$lib/components/activity/ActivityStatStrip.svelte";
-import { createActivityController } from "$lib/components/activity/activity-controller.svelte";
-import { onSettingsPageActive } from "$lib/features/settings/page-context.svelte";
-import { formatDateTime } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
+import { buildActivityDays } from "#lib/activity.ts";
+import { ensureAuth } from "#lib/auth.ts";
+import { USER_ACTIVITY_SCOPE } from "#lib/cache/repositories/activity-repo.ts";
+import ActivityHeatmap from "#lib/components/activity/ActivityHeatmap.svelte";
+import ActivityPage from "#lib/components/activity/ActivityPage.svelte";
+import ActivityRankings from "#lib/components/activity/ActivityRankings.svelte";
+import ActivityStatStrip from "#lib/components/activity/ActivityStatStrip.svelte";
+import { createActivityController } from "#lib/components/activity/activity-controller.svelte.ts";
+import { onSettingsPageActive } from "#lib/features/settings/page-context.svelte.ts";
+import { formatDateTime } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 function localDayRange(days: number) {
 	const to = new Date();

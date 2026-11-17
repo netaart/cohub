@@ -6,9 +6,9 @@ import {
 	Link2Off,
 	MessageSquare,
 } from "lucide-svelte";
-import SidebarActionButton from "$lib/components/sidebar/SidebarActionButton.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import SidebarActionButton from "#lib/components/sidebar/SidebarActionButton.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	item,

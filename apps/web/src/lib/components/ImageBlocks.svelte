@@ -1,9 +1,9 @@
 <script lang="ts">
 import type { ContentBlock } from "@cohub/protocol/core";
 import { mediaPreviewCandidates } from "@neta-art/cohub/media";
-import { mediaLightbox } from "$lib/components/media-lightbox.svelte";
-import { recordedSize, screenVariantSize } from "$lib/media/media-info";
-import MediaImage from "$lib/resource-kit/MediaImage.svelte";
+import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
+import { recordedSize, screenVariantSize } from "#lib/media/media-info.ts";
+import MediaImage from "#lib/resource-kit/MediaImage.svelte";
 
 type ImageBlock = Extract<ContentBlock, { type: "image" }>;
 

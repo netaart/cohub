@@ -1,7 +1,7 @@
 <script lang="ts">
   import X from "@lucide/svelte/icons/x";
   import { tick } from "svelte";
-  import type { Camp } from "../engine/camp.svelte";
+  import type { Camp } from "../engine/camp.svelte.ts";
 
   let { camp, onclose }: { camp: Camp; onclose: () => void } = $props();
   let list: HTMLOListElement | undefined = $state();

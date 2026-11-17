@@ -9,7 +9,7 @@ import {
 	loadModelEngine,
 } from "@neta-art/cohub/board/render";
 import type { BoardModelPreviews } from "@neta-art/cohub/board/stage";
-import "$lib/model3d/decoders";
+import "#lib/model3d/decoders.ts";
 
 const STILL_TIMEOUT_MS = 60_000;
 
@@ -36,7 +36,7 @@ export function createBoardModelPreviews(
 			const view = boardModelViewKey(request.view);
 			const stillKey = url && (view ? `${url}#view=${view}` : url);
 			const { readModelStill, saveModelStill } = await import(
-				"$lib/model3d/still-cache"
+				"#lib/model3d/still-cache.ts"
 			);
 			const cached = stillKey && (await readModelStill(stillKey));
 			if (cached) return cached;

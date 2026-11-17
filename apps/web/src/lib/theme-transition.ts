@@ -1,5 +1,5 @@
-import { setTheme } from "$lib/theme.svelte";
-import type { ThemeMode } from "$lib/theme-registry";
+import { setTheme } from "#lib/theme.svelte.ts";
+import type { ThemeMode } from "#lib/theme-registry.ts";
 
 type ViewTransitionDocument = Document & {
 	startViewTransition?: (callback: () => void) => {

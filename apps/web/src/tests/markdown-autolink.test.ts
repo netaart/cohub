@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { renderMarkdown } from "../lib/markdown";
+import { renderMarkdown } from "../lib/markdown.ts";
 
 test("renderMarkdown ends autolinks before Chinese prose punctuation", async () => {
 	const html = await renderMarkdown(

@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { SandboxSetupInfo } from "@cohub/protocol/sandbox";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { buildSpaceFileRoute } from "$lib/space-routes";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { buildSpaceFileRoute } from "#lib/space-routes.ts";
 
 const {
 	spaceId,

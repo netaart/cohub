@@ -1,21 +1,24 @@
 import type { GenerationStreamEvent } from "@neta-art/cohub";
 import { tick } from "svelte";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
-import { sdk } from "$lib/sdk";
-import { mergeSessionRecord } from "$lib/session-record-merge";
-import { sessionGenerationStore } from "$lib/stores/session-generation.svelte";
-import { completeGeneration } from "$lib/stores/session-generation-controller";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { sessionTurnsRepo } from "#lib/cache/repositories/session-turns-repo.ts";
+import { sdk } from "#lib/sdk.ts";
+import { mergeSessionRecord } from "#lib/session-record-merge.ts";
+import { sessionGenerationStore } from "#lib/stores/session-generation.svelte.ts";
+import { completeGeneration } from "#lib/stores/session-generation-controller.ts";
 import {
 	applyGenerationStreamEvent,
 	applyGenerationStreamSnapshot,
-} from "$lib/stores/session-generation-realtime";
-import { shouldResumePendingGeneration } from "$lib/stores/session-generation-state";
-import { SessionRecoveryCoordinator } from "$lib/stores/session-recovery-coordinator";
-import { subscribeGenerationChannel } from "./generation-channel";
-import type { SessionScrollAnchor } from "./session-scroll-controller.svelte";
-import { areSessionTurnsEqual, preserveSessionTurnRefs } from "./session-utils";
-import type { SessionViewState } from "./session-workspace-controller.svelte";
+} from "#lib/stores/session-generation-realtime.ts";
+import { shouldResumePendingGeneration } from "#lib/stores/session-generation-state.ts";
+import { SessionRecoveryCoordinator } from "#lib/stores/session-recovery-coordinator.ts";
+import { subscribeGenerationChannel } from "./generation-channel.ts";
+import type { SessionScrollAnchor } from "./session-scroll-controller.svelte.ts";
+import {
+	areSessionTurnsEqual,
+	preserveSessionTurnRefs,
+} from "./session-utils.ts";
+import type { SessionViewState } from "./session-workspace-controller.svelte.ts";
 
 type ConnectionState =
 	| "idle"

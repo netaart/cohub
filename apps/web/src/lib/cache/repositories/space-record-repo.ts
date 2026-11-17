@@ -2,17 +2,17 @@ import type { SpaceRecord } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
+} from "#lib/cache/broadcast.ts";
 import {
 	idbDelete,
 	idbGet,
 	idbGetAllByIndex,
 	idbPut,
 	type SpaceRecordCacheRecord,
-} from "$lib/cache/db";
-import { getCacheUserKey, spaceRecordKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
-import type { CacheSource } from "$lib/cache/types";
+} from "#lib/cache/db.ts";
+import { getCacheUserKey, spaceRecordKey } from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
+import type { CacheSource } from "#lib/cache/types.ts";
 
 const SPACE_RECORD_TTL_MS = 30_000;
 const memory = new MemoryLru<string, SpaceRecordCacheRecord>(50);

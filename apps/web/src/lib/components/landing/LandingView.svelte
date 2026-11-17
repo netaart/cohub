@@ -1,36 +1,36 @@
 <script lang="ts">
 import { ArrowRight, Star } from "lucide-svelte";
 import { onMount } from "svelte";
-import { browser } from "$app/environment";
-import { goto } from "$app/navigation";
-import { page } from "$app/state";
-import { resolveAppHomeRoute } from "$lib/app-entry";
+import { resolveAppHomeRoute } from "#lib/app-entry.ts";
 import {
 	hasLocalSessionHint,
 	hasRecoverableAuthSession,
 	signInWithRedirectPath,
-} from "$lib/auth";
-import LandingMedia from "$lib/components/landing/LandingMedia.svelte";
-import LandingProof from "$lib/components/landing/LandingProof.svelte";
-import LandingSandboxSpec from "$lib/components/landing/LandingSandboxSpec.svelte";
-import LandingSection from "$lib/components/landing/LandingSection.svelte";
-import LandingTerminal from "$lib/components/landing/LandingTerminal.svelte";
-import PublicHeader from "$lib/components/PublicHeader.svelte";
+} from "#lib/auth.ts";
+import LandingMedia from "#lib/components/landing/LandingMedia.svelte";
+import LandingProof from "#lib/components/landing/LandingProof.svelte";
+import LandingSandboxSpec from "#lib/components/landing/LandingSandboxSpec.svelte";
+import LandingSection from "#lib/components/landing/LandingSection.svelte";
+import LandingTerminal from "#lib/components/landing/LandingTerminal.svelte";
+import PublicHeader from "#lib/components/PublicHeader.svelte";
 import {
 	hostOwnsCredentials,
 	isHosted,
 	markHostReady,
 	readyHost,
-} from "$lib/host-bridge";
+} from "#lib/host-bridge.ts";
 import {
 	type PublicLocale,
 	resolvePublicLocale,
-} from "$lib/i18n/public-locale";
-import { m } from "$lib/paraglide/messages.js";
-import { CLI_NPM_URL, REPO_URL, repoFileUrl } from "$lib/project";
-import { canonicalUrl as buildCanonical } from "$lib/seo";
-import { authStore } from "$lib/stores/auth.svelte";
-import { pinTheme } from "$lib/theme.svelte";
+} from "#lib/i18n/public-locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { CLI_NPM_URL, REPO_URL, repoFileUrl } from "#lib/project.ts";
+import { canonicalUrl as buildCanonical } from "#lib/seo.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { pinTheme } from "#lib/theme.svelte.ts";
+import { browser } from "$app/env";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 
 // Marketing home renders light regardless of the visitor's app theme, so every
 // product capture can be shot once. app.html sets this before first paint too.

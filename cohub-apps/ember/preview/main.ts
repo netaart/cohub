@@ -4,9 +4,9 @@ import "@fontsource/geist/600.css";
 import "@fontsource/silkscreen/400.css";
 import { mount } from "svelte";
 import App from "../src/App.svelte";
-import { Camp } from "../src/engine/camp.svelte";
+import { Camp } from "../src/engine/camp.svelte.ts";
 import "../src/styles.css";
-import { createPreviewClient } from "./client";
+import { createPreviewClient } from "./client.ts";
 
 const target = document.getElementById("app");
 if (!target) throw new Error("Missing app mount target");

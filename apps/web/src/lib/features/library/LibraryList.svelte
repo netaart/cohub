@@ -6,24 +6,24 @@ import {
 	type UserCronJobFilter,
 } from "@neta-art/cohub";
 import { onMount, untrack } from "svelte";
-import { page } from "$app/state";
-import FilterBar from "$lib/components/list-page/FilterBar.svelte";
-import FilterChip from "$lib/components/list-page/FilterChip.svelte";
-import ListHeader from "$lib/components/list-page/ListHeader.svelte";
-import SwipePager from "$lib/components/list-page/SwipePager.svelte";
-import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { onListScrollTop } from "$lib/layout/list-scroll-top";
+import FilterBar from "#lib/components/list-page/FilterBar.svelte";
+import FilterChip from "#lib/components/list-page/FilterChip.svelte";
+import ListHeader from "#lib/components/list-page/ListHeader.svelte";
+import SwipePager from "#lib/components/list-page/SwipePager.svelte";
+import { SwipeTabs } from "#lib/components/list-page/swipe-tabs.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { onListScrollTop } from "#lib/layout/list-scroll-top.ts";
 import {
 	type LibraryItemEntity,
 	librarySelectionAt,
-} from "$lib/library-routes";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/library-routes.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { page } from "$app/state";
 import LibraryListPane from "./LibraryListPane.svelte";
 import LibraryTabs from "./LibraryTabs.svelte";
-import { appFilterLabel, cronJobFilterLabel } from "./library-copy";
-import { libraryInbox } from "./library-inbox.svelte";
+import { appFilterLabel, cronJobFilterLabel } from "./library-copy.ts";
+import { libraryInbox } from "./library-inbox.svelte.ts";
 
 const {
 	entity,

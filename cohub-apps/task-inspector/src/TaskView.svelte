@@ -22,11 +22,11 @@ import {
   taskIsStreaming,
   taskOutputContent,
   taskRunDuration,
-} from "$kit/task-run";
-import { formatDateTime } from "$kit/time";
-import { getLocale, runtime } from "../../shared/src/runtime.svelte";
-import { resourceTitle } from "../../shared/src/shell/title";
-import { taskStatus } from "../../shared/src/status";
+} from "$kit/task-run.ts";
+import { formatDateTime } from "$kit/time.ts";
+import { getLocale, runtime } from "../../shared/src/runtime.svelte.ts";
+import { resourceTitle } from "../../shared/src/shell/title.ts";
+import { taskStatus } from "../../shared/src/status.ts";
 import Button from "../../shared/src/ui/Button.svelte";
 import CodeBlock from "../../shared/src/ui/CodeBlock.svelte";
 import CopyButton from "../../shared/src/ui/CopyButton.svelte";
@@ -34,7 +34,7 @@ import Lightbox from "../../shared/src/ui/Lightbox.svelte";
 import Notice from "../../shared/src/ui/Notice.svelte";
 import Section from "../../shared/src/ui/Section.svelte";
 import StatusBadge from "../../shared/src/ui/StatusBadge.svelte";
-import type { ViewProps } from "../../shared/src/view-types";
+import type { ViewProps } from "../../shared/src/view-types.ts";
 import ContentFlow from "./ContentFlow.svelte";
 
 let { detail, spaceId, navigateRelated }: ViewProps = $props();

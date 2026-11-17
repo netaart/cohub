@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Check } from "lucide-svelte";
 import PreviewControl from "../PreviewControl.svelte";
-import type { PreviewIcon, PreviewOption } from "../preview-header";
+import type { PreviewIcon, PreviewOption } from "../preview-header.ts";
 import PreviewGroup from "./PreviewGroup.svelte";
 import PreviewIconButton from "./PreviewIconButton.svelte";
 

@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { GlobalSearchResult } from "@neta-art/cohub";
-import { withLocalCommands } from "../lib/command-palette/commands";
-import { mergeCommandResults } from "../lib/command-palette/merge-results";
-import { getViewerTurnActivityBySpace } from "../lib/command-palette/personal-activity";
-import { sortCommandItems } from "../lib/command-palette/score";
+import { withLocalCommands } from "../lib/command-palette/commands.ts";
+import { mergeCommandResults } from "../lib/command-palette/merge-results.ts";
+import { getViewerTurnActivityBySpace } from "../lib/command-palette/personal-activity.ts";
+import { sortCommandItems } from "../lib/command-palette/score.ts";
 import type {
 	CommandPaletteItem,
 	CommandPaletteViewerRelation,
-} from "../lib/command-palette/types";
+} from "../lib/command-palette/types.ts";
 
 let nextId = 0;
 

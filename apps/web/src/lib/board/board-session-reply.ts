@@ -1,12 +1,12 @@
 import { isAgentTurn, type SessionTurnRecord } from "@cohub/protocol/model";
 import type { CreateSpacePromptInput } from "@neta-art/cohub";
-import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
+import { sessionTurnsRepo } from "#lib/cache/repositories/session-turns-repo.ts";
 import {
 	resolveApprovalModeFromTurns,
 	resolveLocalModelFromTurns,
 	resolveTurnHarness,
-} from "$lib/features/session-chat/session-utils";
-import { sdk } from "$lib/sdk";
+} from "#lib/features/session-chat/session-utils.ts";
+import { sdk } from "#lib/sdk.ts";
 
 export type SessionReplyRuntime = Pick<
 	CreateSpacePromptInput,

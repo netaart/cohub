@@ -5,13 +5,13 @@ import type {
 	LabelResourceType,
 } from "@neta-art/cohub";
 import { Check, Loader2, Plus, X } from "lucide-svelte";
-import { floatNear, portal } from "$lib/actions/portal";
-import LabelCreateForm from "$lib/components/LabelCreateForm.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { overlay } from "$lib/motion";
-import { m } from "$lib/paraglide/messages.js";
+import { floatNear, portal } from "#lib/actions/portal.ts";
+import LabelCreateForm from "#lib/components/LabelCreateForm.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { overlay } from "#lib/motion.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	createSpaceLabel,
 	fetchResourceLabelsFresh,
@@ -29,7 +29,7 @@ import {
 	onSpaceLabelsCacheUpdated,
 	onUserLabelProfilesUpdated,
 	setResourceLabels,
-} from "$lib/stores/space-labels";
+} from "#lib/stores/space-labels.ts";
 
 const {
 	spaceId,

@@ -2,9 +2,16 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
+import adapter from "@sveltejs/adapter-cloudflare";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig, loadEnv } from "vite";
+import {
+	defaultClientConditions,
+	defaultServerConditions,
+	defineConfig,
+	loadEnv,
+	type Plugin,
+} from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 /** Keep each Shiki language/theme package as its own cacheable chunk. */
@@ -41,6 +48,14 @@ function buildInfo() {
 	};
 }
 
+const pwaForClient = ({
+	transformIndexHtml: _,
+	...plugin
+}: Plugin): Plugin => ({
+	...plugin,
+	applyToEnvironment: (environment) => environment.name === "client",
+});
+
 const docsProductDir = fileURLToPath(
 	new URL("../../docs/product", import.meta.url),
 );
@@ -55,14 +70,16 @@ export default defineConfig(({ mode }) => {
 	return {
 		define: { __COHUB_BUILD__: JSON.stringify(buildInfo()) },
 		resolve: {
-			// Workspace package aliases (@cohub/protocol, @neta-art/cohub) live in
-			// svelte.config.js `kit.alias`, which SvelteKit injects into Vite for us.
+			conditions: ["source", ...defaultClientConditions],
 			alias: [
 				{
 					find: /^\$docs-product\/(.*)$/,
 					replacement: `${docsProductDir}/$1`,
 				},
 			],
+		},
+		ssr: {
+			resolve: { conditions: ["source", ...defaultServerConditions] },
 		},
 		dev: {
 			sourcemap: {
@@ -113,8 +130,14 @@ export default defineConfig(({ mode }) => {
 				emitTsDeclarations: true,
 				strategy: ["globalVariable", "baseLocale"],
 			}),
-			sveltekit(),
-			VitePWA({
+			sveltekit({
+				// Build-only config: deployments wrap its Worker with `entry.worker.ts`.
+				adapter: adapter({ config: "./wrangler.adapter.toml" }),
+				output: { linkHeaderPreload: true },
+				version: { pollInterval: 0 },
+			}),
+			...VitePWA({
+				outDir: ".svelte-kit/output/client",
 				registerType: undefined,
 				injectRegister: null,
 				includeAssets: ["robots.txt", "pwa/*.png", "pwa/*.svg"],
@@ -201,7 +224,7 @@ export default defineConfig(({ mode }) => {
 						},
 					],
 				},
-			}),
+			}).map(pwaForClient),
 		],
 	};
 });

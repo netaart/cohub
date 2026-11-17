@@ -3,12 +3,12 @@ import {
 	canUseUserScopedCache,
 	getCacheUserKey,
 	getCacheUserKeyAsync,
-} from "$lib/cache/keys";
+} from "#lib/cache/keys.ts";
 import {
 	readTaskRunSummaries,
 	writeTaskRunSummaries,
 	writeTaskRunSummary,
-} from "$lib/cache/repositories/task-runs-repo";
+} from "#lib/cache/repositories/task-runs-repo.ts";
 
 type TaskRunPatch = Partial<TaskRunRecord> & {
 	id: string;

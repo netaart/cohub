@@ -15,38 +15,38 @@ import {
 } from "lucide-svelte";
 import type { Snippet } from "svelte";
 import { onMount, untrack } from "svelte";
-import AccessStateView from "$lib/components/AccessStateView.svelte";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import ChatTimeline from "$lib/components/ChatTimeline.svelte";
-import CreateModelSelectorDialog from "$lib/components/CreateModelSelectorDialog.svelte";
-import NewChatBackground from "$lib/components/NewChatBackground.svelte";
-import SessionComposer from "$lib/components/SessionComposer.svelte";
-import TurnBottomSheet from "$lib/components/TurnBottomSheet.svelte";
-import TurnRail from "$lib/components/TurnRail.svelte";
-import { provideDisplayReplay } from "$lib/display-replay-context";
+import AccessStateView from "#lib/components/AccessStateView.svelte";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import ChatTimeline from "#lib/components/ChatTimeline.svelte";
+import CreateModelSelectorDialog from "#lib/components/CreateModelSelectorDialog.svelte";
+import NewChatBackground from "#lib/components/NewChatBackground.svelte";
+import SessionComposer from "#lib/components/SessionComposer.svelte";
+import TurnBottomSheet from "#lib/components/TurnBottomSheet.svelte";
+import TurnRail from "#lib/components/TurnRail.svelte";
+import { provideDisplayReplay } from "#lib/display-replay-context.ts";
 import {
 	type ChatDraftDropKind,
 	classifyChatDraftDrop,
 	readCohubPathFromDataTransfer,
-} from "$lib/drag/chat-draft-drop";
-import { setSessionArchived } from "$lib/features/sessions/session-archive";
-import SessionModelSelectorDialog from "$lib/features/space/modules/SessionModelSelectorDialog.svelte";
-import { takeHostShare } from "$lib/host-share";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { provideMarkdownWorkspaceAsset } from "$lib/markdown-asset-context";
-import { m } from "$lib/paraglide/messages.js";
-import { provideSessionRelations } from "$lib/session-relations-context";
-import type { NewChatBackgroundConfig } from "$lib/space-config";
-import { insertComposerSnippet } from "$lib/stores/composer-insert";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
-import { modelsStatusStore } from "$lib/stores/models-status.svelte";
-import { sessionStore } from "$lib/stores/session-store";
-import { provideTurnSpeech } from "$lib/turn-speech.svelte";
-import { entriesFromDataTransfer } from "$lib/upload-entries";
+} from "#lib/drag/chat-draft-drop.ts";
+import { setSessionArchived } from "#lib/features/sessions/session-archive.ts";
+import SessionModelSelectorDialog from "#lib/features/space/modules/SessionModelSelectorDialog.svelte";
+import { takeHostShare } from "#lib/host-share.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { provideMarkdownWorkspaceAsset } from "#lib/markdown-asset-context.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { provideSessionRelations } from "#lib/session-relations-context.ts";
+import type { NewChatBackgroundConfig } from "#lib/space-config.ts";
+import { insertComposerSnippet } from "#lib/stores/composer-insert.ts";
+import { modelsCatalogStore } from "#lib/stores/models-catalog.svelte.ts";
+import { modelsStatusStore } from "#lib/stores/models-status.svelte.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
+import { provideTurnSpeech } from "#lib/turn-speech.svelte.ts";
+import { entriesFromDataTransfer } from "#lib/upload-entries.ts";
 import SessionApprovals from "./SessionApprovals.svelte";
 import SessionRuntimeRecovery from "./SessionRuntimeRecovery.svelte";
-import type { SessionChatHost } from "./session-chat-host.controller.svelte";
-import { resolveTurnHarness } from "./session-utils";
+import type { SessionChatHost } from "./session-chat-host.controller.svelte.ts";
+import { resolveTurnHarness } from "./session-utils.ts";
 
 let {
 	host,

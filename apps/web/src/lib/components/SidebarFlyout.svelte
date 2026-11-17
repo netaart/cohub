@@ -1,7 +1,7 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
 import { onDestroy } from "svelte";
-import { floatNear } from "$lib/actions/portal";
+import { floatNear } from "#lib/actions/portal.ts";
 
 const {
 	label,

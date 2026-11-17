@@ -4,7 +4,7 @@ import {
 	renderMarkdown,
 	renderStreamingMarkdownSplit,
 	splitStreamingStableMarkdown,
-} from "../lib/markdown";
+} from "../lib/markdown.ts";
 
 async function renderSplit(source: string) {
 	const { stableBlocks, tailHtml } = await renderStreamingMarkdownSplit(source);

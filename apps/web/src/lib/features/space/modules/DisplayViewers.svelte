@@ -1,10 +1,10 @@
 <script lang="ts">
 import type { DisplayViewer, SpacePresenceUser } from "@neta-art/cohub";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { authStore } from "$lib/stores/auth.svelte";
-import { displayUserName } from "../space-utils";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { displayUserName } from "../space-utils.ts";
 
 const {
 	viewers = [],

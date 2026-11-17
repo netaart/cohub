@@ -5,8 +5,8 @@ import {
 	diffBoardDocuments,
 	isEmptyBoardPatch,
 } from "@neta-art/cohub/board";
-import { loadPublishedBoard } from "$lib/board/published-board";
-import type { BoardPlayStore } from "$lib/cache/repositories/board-play-saves-repo";
+import { loadPublishedBoard } from "#lib/board/published-board.ts";
+import type { BoardPlayStore } from "#lib/cache/repositories/board-play-saves-repo.ts";
 
 const SAVE_INTERVAL_MS = 1_000;
 const MAX_SAVE_BYTES = 2 * 1024 * 1024;

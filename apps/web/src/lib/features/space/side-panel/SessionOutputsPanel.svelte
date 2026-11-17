@@ -1,14 +1,14 @@
 <script lang="ts">
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import GenerationGrid from "./GenerationGrid.svelte";
-import type { GenerationFeed } from "./generation-feed.svelte";
+import type { GenerationFeed } from "./generation-feed.svelte.ts";
 import LoadError from "./LoadError.svelte";
 import LoadMoreButton from "./LoadMoreButton.svelte";
 import SessionFileList from "./SessionFileList.svelte";
 import SidePanelSection from "./SidePanelSection.svelte";
-import type { SessionFilesFeed } from "./session-files.svelte";
-import { createSectionState } from "./side-panel-sections.svelte";
+import type { SessionFilesFeed } from "./session-files.svelte.ts";
+import { createSectionState } from "./side-panel-sections.svelte.ts";
 
 type Props = {
 	hasSession: boolean;

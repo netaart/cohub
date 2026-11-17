@@ -4,8 +4,8 @@ import type {
 	SpaceSandboxConfig,
 	SpaceSandboxRecord,
 } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
+import { sdk } from "#lib/sdk.ts";
+import { cacheSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
 
 export type SandboxSpecOption = {
 	id: SandboxSpecId;

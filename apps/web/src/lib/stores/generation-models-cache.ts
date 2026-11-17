@@ -3,10 +3,10 @@ import {
 	canUseUserScopedCache,
 	getCacheUserKey,
 	getCacheUserKeyAsync,
-} from "$lib/cache/keys";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
-import { isValidCachedGenerationModel } from "$lib/stores/generation-models-validation";
+} from "#lib/cache/keys.ts";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { isValidCachedGenerationModel } from "#lib/stores/generation-models-validation.ts";
 
 const STORAGE_PREFIX = "cohub:generation-models:v1";
 export const GENERATION_MODELS_CACHE_MAX_AGE_MS = 5 * 60 * 1000;

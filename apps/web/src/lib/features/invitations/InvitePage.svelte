@@ -8,21 +8,21 @@ import {
 } from "@neta-art/cohub";
 import { ArrowRight, Loader2 } from "lucide-svelte";
 import { onMount } from "svelte";
-import { goto, replaceState } from "$app/navigation";
-import { ensureAuth } from "$lib/auth";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
+import { ensureAuth } from "#lib/auth.ts";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import Spinner from "#lib/components/Spinner.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
 import {
 	formatInviteExpiry,
 	spaceRoleLabel,
-} from "$lib/features/invitations/invitation-format";
-import SpaceGuestApp from "$lib/features/invitations/SpaceGuestApp.svelte";
-import type { Locale } from "$lib/i18n/locale";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/features/invitations/invitation-format.ts";
+import SpaceGuestApp from "#lib/features/invitations/SpaceGuestApp.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { goto } from "$app/navigation";
 
 const props: { token: string } = $props();
 const token = $derived(props.token);
@@ -63,7 +63,8 @@ async function load() {
 		]);
 		detail = next;
 		loadState = "ready";
-		if (window.location.pathname !== invitePath) replaceState(invitePath, {});
+		if (window.location.pathname !== invitePath)
+			void goto(invitePath, { shallow: true, replace: true });
 		if (takeAcceptIntent() && authStore.isAuthenticated && !isMember) {
 			void accept();
 		}

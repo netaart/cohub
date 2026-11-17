@@ -4,11 +4,11 @@ import { BOARD_CAMERA_TARGET } from "@cohub/protocol";
 import { resolveBoardProperty } from "@neta-art/cohub/board";
 import type { BoardKeyRef } from "@neta-art/cohub/board/editor";
 import { Spline, Trash2 } from "lucide-svelte";
-import { floatNear } from "$lib/actions/portal";
+import { floatNear } from "#lib/actions/portal.ts";
 import {
 	boardGroupLabel,
 	boardPropertyLabel,
-} from "$lib/board/animation-labels";
+} from "#lib/board/animation-labels.ts";
 import {
 	BOARD_EASE_PRESETS,
 	type BoardDockSelection,
@@ -17,12 +17,12 @@ import {
 	formatBoardBezier,
 	parseBoardBezier,
 	parseBoardKeyId,
-} from "$lib/board/animation-timeline";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import BoardEaseCurve from "$lib/components/board/BoardEaseCurve.svelte";
-import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/board/animation-timeline.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import BoardEaseCurve from "#lib/components/board/BoardEaseCurve.svelte";
+import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

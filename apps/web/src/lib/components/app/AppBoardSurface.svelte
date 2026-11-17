@@ -6,21 +6,21 @@ import type {
 	PublishedBoard,
 } from "@neta-art/cohub/board";
 import type { BoardStage } from "@neta-art/cohub/board/stage";
-import type { AppNavigationHandler } from "$lib/board/board-app";
+import type { AppNavigationHandler } from "#lib/board/board-app.ts";
 import {
 	createBoardAppRoom,
 	createBoardRoomRelay,
-} from "$lib/board/board-app-room.svelte";
-import { type BoardPlay, loadBoardPlay } from "$lib/board/board-play.svelte";
+} from "#lib/board/board-app-room.svelte.ts";
+import { type BoardPlay, loadBoardPlay } from "#lib/board/board-play.svelte.ts";
 import {
 	type BoardScope,
 	cohubPixiRuntime,
-} from "$lib/board/runtime/board-runtime";
-import { openBoardPlayStore } from "$lib/cache/repositories/board-play-saves-repo";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/board/runtime/board-runtime.ts";
+import { openBoardPlayStore } from "#lib/cache/repositories/board-play-saves-repo.ts";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 const UNDO_RESET_MS = 6_000;
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-import { feedback } from "./feedback.svelte";
+import { feedback } from "./feedback.svelte.ts";
 
 let dialog = $state<HTMLDialogElement | null>(null);
 const request = $derived(feedback.confirm);

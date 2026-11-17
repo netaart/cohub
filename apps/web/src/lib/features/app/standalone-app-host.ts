@@ -2,7 +2,7 @@ import {
 	type CohubAppHostTemplate,
 	parseCohubAppHostTemplate,
 } from "@cohub/protocol";
-import { PUBLIC_APP_STANDALONE_HOST_TEMPLATE } from "$env/static/public";
+import { PUBLIC_APP_STANDALONE_HOST_TEMPLATE } from "$app/env/public";
 
 /**
  * Hostname template for published App standalone origins, from deployment

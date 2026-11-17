@@ -1,6 +1,6 @@
 import type { Component } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
-import type { SettingsSection } from "$lib/settings-nav";
+import type { SettingsSection } from "#lib/settings-nav.ts";
 
 type SettingsPage = Component;
 

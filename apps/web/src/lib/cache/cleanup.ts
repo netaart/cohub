@@ -15,9 +15,9 @@ import {
 	type SpaceFsDirCacheRecord,
 	type SpaceResourceListCacheRecord,
 	type ViewerLikeCacheRecord,
-} from "$lib/cache/db";
-import { getCacheUserKey } from "$lib/cache/keys";
-import type { ActivityCacheRecord } from "$lib/cache/repositories/activity-repo";
+} from "#lib/cache/db.ts";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import type { ActivityCacheRecord } from "#lib/cache/repositories/activity-repo.ts";
 
 const CLEANUP_STORAGE_KEY = "cohub:cache:last-cleanup-at:v1";
 const LEGACY_LOCAL_STORAGE_PREFIXES = [

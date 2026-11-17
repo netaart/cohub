@@ -1,12 +1,14 @@
 <script lang="ts">
-	import { MousePointer2, Square, Type } from "lucide-svelte";
-	import { getLocale } from "$lib/i18n/locale.svelte";
-	import { m } from "$lib/paraglide/messages.js";
+import { MousePointer2, Square, Type } from "lucide-svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
-	const { onAddText, onAddShape }: { onAddText: () => void; onAddShape: () => void } =
-		$props();
+const {
+	onAddText,
+	onAddShape,
+}: { onAddText: () => void; onAddShape: () => void } = $props();
 
-	const locale = $derived(getLocale());
+const locale = $derived(getLocale());
 </script>
 
 <div

@@ -4,7 +4,7 @@ import {
   type ResourceAppKind,
 } from "@cohub/protocol";
 import type { AppRuntimeContext, Permission } from "@neta-art/cohub";
-import { readScopes } from "./access";
+import { readScopes } from "./access.ts";
 
 export type ResourceScope =
   | { kind: "space"; spaceId: string; sessionId?: string }

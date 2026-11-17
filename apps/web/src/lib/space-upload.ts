@@ -1,12 +1,12 @@
 import { batchUploadEntries } from "@cohub/protocol";
 import type { SpaceFsUploadDestination } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 import {
 	type LocalUploadEntry,
 	sanitizeRelativePath,
-} from "$lib/upload-entries";
-import { UploadTransferError } from "$lib/upload-errors";
-import { isBrowserManagedUploadHeader } from "$lib/upload-headers";
+} from "#lib/upload-entries.ts";
+import { UploadTransferError } from "#lib/upload-errors.ts";
+import { isBrowserManagedUploadHeader } from "#lib/upload-headers.ts";
 
 export type SpaceUploadStage = "preparing" | "uploading" | "importing" | "done";
 

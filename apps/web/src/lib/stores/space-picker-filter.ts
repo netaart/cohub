@@ -1,4 +1,4 @@
-import { getCacheUserKey } from "$lib/cache/keys";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
 
 const VERSION = 2;
 const PREFIX = "cohub:space-picker-filter";

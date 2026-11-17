@@ -1,7 +1,7 @@
 <script lang="ts">
-import SpaceFundPanel from "$lib/features/billing/SpaceFundPanel.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import SpaceFundPanel from "#lib/features/billing/SpaceFundPanel.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const props: { params: { id: string } } = $props();
 const locale = $derived(getLocale());

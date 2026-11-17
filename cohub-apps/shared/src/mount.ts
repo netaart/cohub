@@ -6,7 +6,7 @@ import "./styles.css";
 import type { ResourceAppKind } from "@cohub/protocol";
 import { mount } from "svelte";
 import Shell from "./shell/Shell.svelte";
-import type { ResourceViewModule } from "./view-types";
+import type { ResourceViewModule } from "./view-types.ts";
 
 export function mountResourceApp(
   kind: ResourceAppKind,

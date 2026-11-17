@@ -2,9 +2,9 @@ import type { SkillCatalogEntry } from "@neta-art/cohub";
 import {
 	createRefreshCoordinator,
 	type RefreshOptions,
-} from "$lib/refresh-coordinator";
-import { sdk } from "$lib/sdk";
-import { readCachedSkills, writeCachedSkills } from "$lib/skill-cache";
+} from "#lib/refresh-coordinator.ts";
+import { sdk } from "#lib/sdk.ts";
+import { readCachedSkills, writeCachedSkills } from "#lib/skill-cache.ts";
 
 export function createSkillController(options: { getSpaceId: () => string }) {
 	let items = $state<SkillCatalogEntry[]>([]);

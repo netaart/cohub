@@ -1,8 +1,8 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { MessageToolCallsFile } from "@cohub/protocol/model";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
-import type { ToolState } from "$lib/session-tree";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { ToolState } from "#lib/session-tree.ts";
 
 export type ToolInputField = {
 	label: string;

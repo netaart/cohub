@@ -1,10 +1,10 @@
 <script lang="ts">
 import { ArrowUpRight, Check, Copy } from "lucide-svelte";
-import { aboutReport } from "$lib/about";
-import Dialog from "$lib/components/Dialog.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { BUILD_LABEL, LICENSE, REPO_URL, repoFileUrl } from "$lib/project";
+import { aboutReport } from "#lib/about.ts";
+import Dialog from "#lib/components/Dialog.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { BUILD_LABEL, LICENSE, REPO_URL, repoFileUrl } from "#lib/project.ts";
 
 const { open, onClose }: { open: boolean; onClose: () => void } = $props();
 

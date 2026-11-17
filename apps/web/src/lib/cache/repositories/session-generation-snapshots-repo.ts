@@ -1,7 +1,10 @@
-import type { SessionGenerationSnapshotCacheRecord } from "$lib/cache/db";
-import { idbDelete, idbDeleteWhere, idbGet, idbPut } from "$lib/cache/db";
-import { getCacheUserKey, sessionGenerationSnapshotKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
+import type { SessionGenerationSnapshotCacheRecord } from "#lib/cache/db.ts";
+import { idbDelete, idbDeleteWhere, idbGet, idbPut } from "#lib/cache/db.ts";
+import {
+	getCacheUserKey,
+	sessionGenerationSnapshotKey,
+} from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
 
 const SNAPSHOT_TTL_MS = 2 * 60 * 60 * 1000;
 const memory = new MemoryLru<string, SessionGenerationSnapshotCacheRecord>(16);

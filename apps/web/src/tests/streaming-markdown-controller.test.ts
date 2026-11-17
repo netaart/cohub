@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { StreamingMarkdownController } from "../lib/streaming-markdown-controller";
+import { StreamingMarkdownController } from "../lib/streaming-markdown-controller.ts";
 
 type FrameFn = (now: number) => void;
 

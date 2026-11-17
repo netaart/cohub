@@ -9,22 +9,22 @@ import {
 	Play,
 } from "lucide-svelte";
 import { onDestroy, untrack } from "svelte";
-import { identityColor } from "$lib/avatar-identity";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
+import { identityColor } from "#lib/avatar-identity.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
 import DisplayCursors, {
 	type DisplayCursorMark,
 	type DisplayRect,
 } from "./DisplayCursors.svelte";
-import { containedRect } from "./display-input";
+import { containedRect } from "./display-input.ts";
 import {
 	chapterAt,
 	chaptersOf,
 	formatClock,
 	loadRecordings,
 	loadTurnSteps,
-} from "./display-replay";
+} from "./display-replay.ts";
 
 const {
 	spaceId,

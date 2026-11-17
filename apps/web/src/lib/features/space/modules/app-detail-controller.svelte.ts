@@ -3,12 +3,11 @@ import type {
 	AppVersionRecord,
 	AppViewStatsResponse,
 } from "@neta-art/cohub";
-import { goto } from "$app/navigation";
 import {
 	type AppsChangedDetail,
 	dispatchAppsChanged,
-} from "$lib/features/app/app-realtime";
-import { onBillingChange } from "$lib/features/billing/refresh";
+} from "#lib/features/app/app-realtime.ts";
+import { onBillingChange } from "#lib/features/billing/refresh.ts";
 import {
 	APP_HIDE_COHUB_BAR_FEATURE,
 	APP_SCOPE_OPTIONS,
@@ -19,10 +18,14 @@ import {
 	selectedScopeList,
 	upsertAppVersion,
 	withCohubBar,
-} from "$lib/resource-kit/app";
-import { sdk } from "$lib/sdk";
-import { buildPublicAppRoute, buildSpaceLandingRoute } from "$lib/space-routes";
-import { createKeyedRouteRequestGuard } from "./route-request-guard";
+} from "#lib/resource-kit/app.ts";
+import { sdk } from "#lib/sdk.ts";
+import {
+	buildPublicAppRoute,
+	buildSpaceLandingRoute,
+} from "#lib/space-routes.ts";
+import { goto } from "$app/navigation";
+import { createKeyedRouteRequestGuard } from "./route-request-guard.ts";
 
 export type AppTargetType = "file" | "directory" | "port";
 export type AppStatus = "published" | "disabled";
@@ -307,7 +310,7 @@ export function createAppDetailController(options: {
 			notify(null);
 			notifyAppsUpdated({ deletedAppId });
 			await goto(buildSpaceLandingRoute(options.getSpaceId()), {
-				replaceState: true,
+				replace: true,
 			});
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : "Failed to delete app";

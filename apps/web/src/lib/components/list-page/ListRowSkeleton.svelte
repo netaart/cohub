@@ -1,6 +1,6 @@
 <script lang="ts">
-import ListRow from "$lib/components/list-page/ListRow.svelte";
-import type { FixedListRowDensity } from "$lib/components/list-page/list-row";
+import ListRow from "#lib/components/list-page/ListRow.svelte";
+import type { FixedListRowDensity } from "#lib/components/list-page/list-row.ts";
 
 const {
 	density,

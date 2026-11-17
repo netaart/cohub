@@ -1,4 +1,4 @@
-import { normalizeCropRect } from "../capture/geometry";
+import { normalizeCropRect } from "../capture/geometry.ts";
 import type {
 	CropRect,
 	FrozenFrame,
@@ -6,8 +6,8 @@ import type {
 	MarkTool,
 	Point,
 	Stroke,
-} from "../types";
-import { strokesAfterCrop } from "./transform";
+} from "../types.ts";
+import { strokesAfterCrop } from "./transform.ts";
 
 function uid() {
 	return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;

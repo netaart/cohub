@@ -4,7 +4,7 @@ import type { AppDetailResponse } from "@neta-art/cohub";
 import {
 	resolveStandaloneAssetUrl,
 	serveStandaloneApp,
-} from "$lib/server/standalone-app";
+} from "#lib/server/standalone-app.ts";
 
 const content = {
 	kind: "web",

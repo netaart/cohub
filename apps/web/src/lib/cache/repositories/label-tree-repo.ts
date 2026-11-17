@@ -2,16 +2,16 @@ import type { LabelListItem } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
+} from "#lib/cache/broadcast.ts";
 import {
 	idbDelete,
 	idbGet,
 	idbPut,
 	type LabelTreeCacheRecord,
-} from "$lib/cache/db";
-import { getCacheUserKey, labelTreeKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
-import type { CacheSource } from "$lib/cache/types";
+} from "#lib/cache/db.ts";
+import { getCacheUserKey, labelTreeKey } from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
+import type { CacheSource } from "#lib/cache/types.ts";
 
 const LABEL_TREE_TTL_MS = 30_000;
 const memory = new MemoryLru<string, LabelTreeCacheRecord>(50);

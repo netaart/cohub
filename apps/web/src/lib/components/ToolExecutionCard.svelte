@@ -1,8 +1,8 @@
 <script lang="ts">
-import ToolCallItem from "$lib/components/ToolCallItem.svelte";
-import { toolStateToViewModel } from "$lib/components/tool-call-format";
-import type { ToolState } from "$lib/session-tree";
-import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
+import ToolCallItem from "#lib/components/ToolCallItem.svelte";
+import { toolStateToViewModel } from "#lib/components/tool-call-format.ts";
+import type { ToolState } from "#lib/session-tree.ts";
+import type { OpenWorkspaceFileTarget } from "#lib/workspace-file-links.ts";
 
 type Props = {
 	tool: ToolState;

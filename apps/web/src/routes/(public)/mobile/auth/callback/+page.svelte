@@ -1,6 +1,6 @@
 <script lang="ts">
 import { Smartphone } from "lucide-svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { m } from "#lib/paraglide/messages.js";
 import type { PageProps } from "./$types";
 
 const { data }: PageProps = $props();

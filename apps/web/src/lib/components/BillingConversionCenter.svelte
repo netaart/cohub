@@ -8,14 +8,14 @@
  *           product for this audience and one primary action.
  */
 import { X } from "lucide-svelte";
-import Sheet from "$lib/components/Sheet.svelte";
-import { formatMoney } from "$lib/features/billing/format";
-import { trackPurchase } from "$lib/features/billing/funnel";
-import PurchasePanel from "$lib/features/billing/PurchasePanel.svelte";
-import { PurchaseFlow } from "$lib/features/billing/purchase.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { billingConversion } from "$lib/stores/billing-conversion.svelte";
+import Sheet from "#lib/components/Sheet.svelte";
+import { formatMoney } from "#lib/features/billing/format.ts";
+import { trackPurchase } from "#lib/features/billing/funnel.ts";
+import PurchasePanel from "#lib/features/billing/PurchasePanel.svelte";
+import { PurchaseFlow } from "#lib/features/billing/purchase.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { billingConversion } from "#lib/stores/billing-conversion.svelte.ts";
 
 const locale = $derived(getLocale());
 const open = $derived(billingConversion.open);

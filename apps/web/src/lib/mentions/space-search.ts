@@ -2,18 +2,18 @@ import type { GlobalSearchResult } from "@neta-art/cohub";
 import {
 	getCommandPaletteDefaultItems,
 	getLocalPaletteOverview,
-} from "$lib/command-palette/default-items";
-import { searchLocalCommandItems } from "$lib/command-palette/local-search";
-import { getPaletteOverviewSnapshot } from "$lib/command-palette/palette-overview";
-import { mergeLocalOverviewIntoSnapshot } from "$lib/command-palette/palette-overview-local";
-import { searchRemoteCommandItems } from "$lib/command-palette/remote-search";
-import type { CommandPaletteItem } from "$lib/command-palette/types";
-import { sdk } from "$lib/sdk";
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
-import type { SpaceMentionSuggestion } from "./space";
-import { commandSpaceToMentionSuggestion } from "./space-mention-select";
+} from "#lib/command-palette/default-items.ts";
+import { searchLocalCommandItems } from "#lib/command-palette/local-search.ts";
+import { getPaletteOverviewSnapshot } from "#lib/command-palette/palette-overview.ts";
+import { mergeLocalOverviewIntoSnapshot } from "#lib/command-palette/palette-overview-local.ts";
+import { searchRemoteCommandItems } from "#lib/command-palette/remote-search.ts";
+import type { CommandPaletteItem } from "#lib/command-palette/types.ts";
+import { sdk } from "#lib/sdk.ts";
+import { cacheSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
+import type { SpaceMentionSuggestion } from "./space.ts";
+import { commandSpaceToMentionSuggestion } from "./space-mention-select.ts";
 
-export { mergeSpaceMentionSuggestions } from "./space-mention-select";
+export { mergeSpaceMentionSuggestions } from "./space-mention-select.ts";
 
 const SPACE_LINK_RESOLVE_LIMIT = 20;
 const REMOTE_LIMIT = 30;

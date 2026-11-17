@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { AppPageMeta } from "$lib/app-page-meta";
+import type { AppPageMeta } from "#lib/app-page-meta.ts";
 
 const {
 	meta,

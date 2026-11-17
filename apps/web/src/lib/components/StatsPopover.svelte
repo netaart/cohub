@@ -2,11 +2,11 @@
 import { X } from "lucide-svelte";
 import type { Snippet } from "svelte";
 import { tick, untrack } from "svelte";
-import { floatNear } from "$lib/actions/portal";
-import Sheet from "$lib/components/Sheet.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { floatNear } from "#lib/actions/portal.ts";
+import Sheet from "#lib/components/Sheet.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 let {
 	title,

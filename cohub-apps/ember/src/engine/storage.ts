@@ -1,5 +1,5 @@
 
-import { type CampState, decodeSnapshot, encodeSnapshot } from "../camp/state";
+import { type CampState, decodeSnapshot, encodeSnapshot } from "../camp/state.ts";
 
 const PREFIX = "ember.camp.";
 const TTL_MS = 20 * 60 * 60 * 1000;

@@ -1,6 +1,6 @@
 import type { SpaceRole } from "@neta-art/cohub";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 export function spaceRoleLabel(role: SpaceRole, locale: Locale): string {
 	if (role === "host") return m.space_role_host({}, { locale });

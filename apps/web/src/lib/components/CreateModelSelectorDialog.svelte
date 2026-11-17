@@ -9,10 +9,10 @@ import {
 	Search,
 	Video,
 } from "lucide-svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import { getGenerationModelPickerItems } from "$lib/generation-model-catalog";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import Dialog from "#lib/components/Dialog.svelte";
+import { getGenerationModelPickerItems } from "#lib/generation-model-catalog.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	open,

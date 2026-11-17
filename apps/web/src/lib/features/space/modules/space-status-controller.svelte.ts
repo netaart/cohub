@@ -7,7 +7,7 @@ import type {
 	SpaceWalletSummary,
 } from "@neta-art/cohub";
 import { HttpError } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 import {
 	fetchSpaceMembersWithCache,
 	fetchSpaceOverviewWithCache,
@@ -17,8 +17,8 @@ import {
 	getCachedSpaceOverview,
 	getCachedSpaceUsage,
 	getCachedSpaceWallet,
-} from "$lib/stores/space-profile-cache";
-import { createRequestDedupe } from "./request-dedupe";
+} from "#lib/stores/space-profile-cache.ts";
+import { createRequestDedupe } from "./request-dedupe.ts";
 
 export type SpaceSandboxSnapshot = {
 	status: string | null;

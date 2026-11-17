@@ -3,25 +3,25 @@ import type { SessionRecord } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
+} from "#lib/cache/broadcast.ts";
 import {
 	idbDelete,
 	idbGet,
 	idbGetByIndex,
 	idbPut,
 	type SessionTurnsCacheRecord,
-} from "$lib/cache/db";
-import { createKeyedSerialQueue } from "$lib/cache/keyed-serial-queue";
-import { getCacheUserKey, sessionTurnsKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
+} from "#lib/cache/db.ts";
+import { createKeyedSerialQueue } from "#lib/cache/keyed-serial-queue.ts";
+import { getCacheUserKey, sessionTurnsKey } from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
 import {
 	persistSessionTurnsCacheSafely,
 	readSessionTurnsCacheSafely,
-} from "$lib/cache/repositories/session-turns-cache-safety";
-import type { CacheSource } from "$lib/cache/types";
-import { sessionMatchesContext } from "$lib/session-context";
-import { areSessionTurnRecordsEqual } from "$lib/session-turn-equality";
-import { mergeTurnsById } from "$lib/stores/turn-cache";
+} from "#lib/cache/repositories/session-turns-cache-safety.ts";
+import type { CacheSource } from "#lib/cache/types.ts";
+import { sessionMatchesContext } from "#lib/session-context.ts";
+import { areSessionTurnRecordsEqual } from "#lib/session-turn-equality.ts";
+import { mergeTurnsById } from "#lib/stores/turn-cache.ts";
 
 const SESSION_TURNS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_TURNS_PER_SESSION_CACHE = 500;
@@ -184,7 +184,8 @@ async function readRecord(spaceId: string, sessionId: string) {
 	const key = sessionTurnsKey(userKey, spaceId, sessionId);
 	const cached = memory.get(key);
 	if (cached) {
-		return !cached.session || sessionMatchesContext(cached.session, spaceId, sessionId)
+		return !cached.session ||
+			sessionMatchesContext(cached.session, spaceId, sessionId)
 			? { record: cached, source: "memory" as CacheSource }
 			: null;
 	}
@@ -195,8 +196,10 @@ async function readRecord(spaceId: string, sessionId: string) {
 	});
 	if (
 		!record ||
-		(record.session && !sessionMatchesContext(record.session, spaceId, sessionId))
-	) return null;
+		(record.session &&
+			!sessionMatchesContext(record.session, spaceId, sessionId))
+	)
+		return null;
 	return { record: remember(record), source: "indexeddb" as CacheSource };
 }
 
@@ -223,7 +226,10 @@ async function writeRecord(
 		trimAnchorSequence?: number | null;
 	},
 ) {
-	if (input.session && !sessionMatchesContext(input.session, spaceId, sessionId)) {
+	if (
+		input.session &&
+		!sessionMatchesContext(input.session, spaceId, sessionId)
+	) {
 		throw new Error("Session cache context mismatch");
 	}
 	const userKey = getCacheUserKey();
@@ -340,8 +346,10 @@ export const sessionTurnsRepo = {
 		});
 		if (
 			!record ||
-			(record.session && !sessionMatchesContext(record.session, record.spaceId, sessionId))
-		) return null;
+			(record.session &&
+				!sessionMatchesContext(record.session, record.spaceId, sessionId))
+		)
+			return null;
 		const cached = memory.get(record.key);
 		return {
 			spaceId: record.spaceId,

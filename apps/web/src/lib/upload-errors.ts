@@ -3,9 +3,9 @@ import {
 	UPLOAD_ERROR_RATE_LIMITED,
 	UPLOAD_MAX_FILE_BYTES,
 } from "@cohub/protocol";
-import { formatByteLimit } from "$lib/format-bytes";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
+import { formatByteLimit } from "#lib/format-bytes.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 /** A direct PUT to object storage failed; `status` is 0 when the connection dropped. */
 export class UploadTransferError extends Error {

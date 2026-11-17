@@ -2,10 +2,10 @@
 import { type HarnessKind, harnessLabel } from "@cohub/protocol/runtime";
 import type { ApprovalDecision, SessionApproval } from "@neta-art/cohub";
 import { FileDiff, Loader2, TerminalSquare } from "lucide-svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { subscribeSpaceChannel } from "./space-channel";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { subscribeSpaceChannel } from "./space-channel.ts";
 
 const {
 	spaceId,

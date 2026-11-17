@@ -1,4 +1,4 @@
-import { PUBLIC_API_ORIGIN } from "$env/static/public";
+import { PUBLIC_API_ORIGIN } from "$app/env/public";
 
 export type UserProfile = {
 	userUuid: string;

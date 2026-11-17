@@ -11,96 +11,96 @@ import {
 } from "lucide-svelte";
 import { onMount, tick, untrack } from "svelte";
 import { MediaQuery, SvelteMap } from "svelte/reactivity";
-import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
-import { page } from "$app/state";
-import { openAbout } from "$lib/about";
-import { getCacheUserKey } from "$lib/cache/keys";
+import { openAbout } from "#lib/about.ts";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
 import {
 	getCachedSpacePage,
 	setCachedSpacePage,
-} from "$lib/cache/space-list-page-cache";
+} from "#lib/cache/space-list-page-cache.ts";
 import {
 	resolveLocalCommandItems,
 	settingsCommandSection,
 	withLocalCommands,
-} from "$lib/command-palette/commands";
+} from "#lib/command-palette/commands.ts";
 import {
 	getCommandPaletteDefaultItems,
 	getLocalPaletteOverview,
 	spaceRecordToCommandItem,
-} from "$lib/command-palette/default-items";
+} from "#lib/command-palette/default-items.ts";
 import {
 	absorbLensPrefix,
 	buildSearchPlan,
 	COMMAND_PALETTE_LENSES,
 	type CommandPaletteLens,
 	lensOf,
-} from "$lib/command-palette/lens";
+} from "#lib/command-palette/lens.ts";
 import {
 	commandLensLabel,
 	commandLensPlaceholder,
-} from "$lib/command-palette/lens-copy";
-import { searchLocalCommandItems } from "$lib/command-palette/local-search";
+} from "#lib/command-palette/lens-copy.ts";
+import { searchLocalCommandItems } from "#lib/command-palette/local-search.ts";
 import {
 	commandItemKey,
 	mergeCommandResults,
 	sameCommandItemSequence,
-} from "$lib/command-palette/merge-results";
+} from "#lib/command-palette/merge-results.ts";
 import {
 	type CommandPaletteHistoryEntry,
 	type CommandPaletteIntent,
 	OPEN_COMMAND_PALETTE_EVENT,
 	type OpenCommandPaletteDetail,
-} from "$lib/command-palette/open";
+} from "#lib/command-palette/open.ts";
 import {
 	getPaletteOverviewSnapshot,
 	revalidatePaletteOverview,
 	schedulePaletteOverviewRevalidate,
-} from "$lib/command-palette/palette-overview";
-import { mergeLocalOverviewIntoSnapshot } from "$lib/command-palette/palette-overview-local";
-import { parseCommandPaletteQuery } from "$lib/command-palette/query";
+} from "#lib/command-palette/palette-overview.ts";
+import { mergeLocalOverviewIntoSnapshot } from "#lib/command-palette/palette-overview-local.ts";
+import { parseCommandPaletteQuery } from "#lib/command-palette/query.ts";
 import {
 	getRecentCommandItems,
 	openCommandItem,
 	rememberCommandItem,
-} from "$lib/command-palette/recent";
+} from "#lib/command-palette/recent.ts";
 import {
 	clearRecentQueries,
 	getRecentQueries,
 	type RecentQuery,
 	rememberRecentQuery,
-} from "$lib/command-palette/recent-queries";
-import { searchRemoteCommandItems } from "$lib/command-palette/remote-search";
-import { getRemoteResourceTypes } from "$lib/command-palette/scope";
-import type { CommandPaletteItem } from "$lib/command-palette/types";
-import CommandPaletteLensBar from "$lib/components/command-palette/CommandPaletteLensBar.svelte";
-import CommandPaletteRecentQueries from "$lib/components/command-palette/CommandPaletteRecentQueries.svelte";
-import CommandPaletteResultRow from "$lib/components/command-palette/CommandPaletteResultRow.svelte";
-import FilterBar from "$lib/components/list-page/FilterBar.svelte";
-import FilterChip from "$lib/components/list-page/FilterChip.svelte";
-import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
-import type { FixedListRowDensity } from "$lib/components/list-page/list-row";
-import SwipePager from "$lib/components/list-page/SwipePager.svelte";
-import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
-import { settingsSectionLabel } from "$lib/components/settings-section";
-import ToolCallList from "$lib/components/ToolCallList.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent, isKeyboardClaimed } from "$lib/keyboard";
-import { isSpaceIdSegment } from "$lib/library-routes";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { filterSpacePickerItems } from "$lib/space-picker-model";
-import { buildUserNewSessionRoute } from "$lib/space-routes";
-import { authStore } from "$lib/stores/auth.svelte";
-import { billingCatalogStore } from "$lib/stores/billing-catalog.svelte";
-import { getRecentSpaces } from "$lib/stores/recent-space";
-import { toSpaceIdPath } from "$lib/stores/space-address";
+} from "#lib/command-palette/recent-queries.ts";
+import { searchRemoteCommandItems } from "#lib/command-palette/remote-search.ts";
+import { getRemoteResourceTypes } from "#lib/command-palette/scope.ts";
+import type { CommandPaletteItem } from "#lib/command-palette/types.ts";
+import CommandPaletteLensBar from "#lib/components/command-palette/CommandPaletteLensBar.svelte";
+import CommandPaletteRecentQueries from "#lib/components/command-palette/CommandPaletteRecentQueries.svelte";
+import CommandPaletteResultRow from "#lib/components/command-palette/CommandPaletteResultRow.svelte";
+import FilterBar from "#lib/components/list-page/FilterBar.svelte";
+import FilterChip from "#lib/components/list-page/FilterChip.svelte";
+import ListRowSkeleton from "#lib/components/list-page/ListRowSkeleton.svelte";
+import type { FixedListRowDensity } from "#lib/components/list-page/list-row.ts";
+import SwipePager from "#lib/components/list-page/SwipePager.svelte";
+import { SwipeTabs } from "#lib/components/list-page/swipe-tabs.svelte.ts";
+import { settingsSectionLabel } from "#lib/components/settings-section.ts";
+import ToolCallList from "#lib/components/ToolCallList.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { isComposingKeyboardEvent, isKeyboardClaimed } from "#lib/keyboard.ts";
+import { isSpaceIdSegment } from "#lib/library-routes.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { filterSpacePickerItems } from "#lib/space-picker-model.ts";
+import { buildUserNewSessionRoute } from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { billingCatalogStore } from "#lib/stores/billing-catalog.svelte.ts";
+import { getRecentSpaces } from "#lib/stores/recent-space.ts";
+import { toSpaceIdPath } from "#lib/stores/space-address.ts";
 import {
 	getCachedSpaceFilterPref,
 	type SpaceFilterPref,
 	setCachedSpaceFilterPref,
-} from "$lib/stores/space-picker-filter";
-import { toggleSpacePin } from "$lib/stores/space-pins.svelte";
+} from "#lib/stores/space-picker-filter.ts";
+import { toggleSpacePin } from "#lib/stores/space-pins.svelte.ts";
+import { afterNavigate, goto } from "$app/navigation";
+import { page } from "$app/state";
 
 /** Immediately reflect pin state on rendered items after a toggle. */
 function syncPinStateInItems(spaceId: string, isPinned: boolean) {
@@ -701,9 +701,11 @@ function writeHistoryEntry() {
 		query,
 		intent: openIntent,
 	};
-	const state = { ...page.state, commandPalette };
-	if (page.state.commandPalette) replaceState("", state);
-	else pushState("", state);
+	void goto("", {
+		shallow: true,
+		replace: Boolean(page.state.commandPalette),
+		state: { ...page.state, commandPalette },
+	});
 }
 
 function closePalette() {
@@ -1017,8 +1019,7 @@ async function activate(
 			rememberCommandItem(item);
 			await leavePalette(() =>
 				goto(buildUserNewSessionRoute(spaceId), {
-					keepFocus: true,
-					noScroll: true,
+					reset: false,
 				}),
 			);
 			return;

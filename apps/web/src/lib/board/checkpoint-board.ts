@@ -3,7 +3,7 @@ import {
 	type BoardDocument,
 	parseBoardDocument,
 } from "@neta-art/cohub/board";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 const MAX_CACHED = 16;
 const cache = new Map<string, Promise<BoardDocument>>();

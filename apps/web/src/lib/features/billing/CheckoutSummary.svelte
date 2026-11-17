@@ -1,10 +1,10 @@
 <script lang="ts">
 import { Check, ChevronDown, Loader2, X } from "lucide-svelte";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
-import { formatMoney, formatPrice } from "./format";
-import { daysUntil, includedBalanceUsd, periodBalanceUsd } from "./product";
-import type { PurchaseFlow } from "./purchase.svelte";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { formatMoney, formatPrice } from "./format.ts";
+import { daysUntil, includedBalanceUsd, periodBalanceUsd } from "./product.ts";
+import type { PurchaseFlow } from "./purchase.svelte.ts";
 
 const {
 	flow,

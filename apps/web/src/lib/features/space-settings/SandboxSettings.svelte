@@ -11,12 +11,12 @@ import type {
 import { Loader2, RefreshCw, Zap } from "lucide-svelte";
 import StatusGlyph, {
 	type StatusGlyphTone,
-} from "$lib/components/StatusGlyph.svelte";
-import { formatBytes } from "$lib/format-bytes";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { formatTimeAgo } from "$lib/resource-kit/time";
-import { billingConversion } from "$lib/stores/billing-conversion.svelte";
+} from "#lib/components/StatusGlyph.svelte";
+import { formatBytes } from "#lib/format-bytes.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { formatTimeAgo } from "#lib/resource-kit/time.ts";
+import { billingConversion } from "#lib/stores/billing-conversion.svelte.ts";
 import SandboxDiagnostics from "./SandboxDiagnostics.svelte";
 import SandboxImage from "./SandboxImage.svelte";
 import SandboxSetup from "./SandboxSetup.svelte";
@@ -26,7 +26,7 @@ import SettingsRow, { SETTINGS_SELECT } from "./SettingsRow.svelte";
 import type {
 	SandboxConfigPatch,
 	SandboxSettingsState,
-} from "./sandbox-settings.svelte";
+} from "./sandbox-settings.svelte.ts";
 
 type Field = "image" | "spec" | "hibernation";
 

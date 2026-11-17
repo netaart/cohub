@@ -2,37 +2,40 @@
 import type { SessionRecord, UserSessionListItem } from "@neta-art/cohub";
 import { Plus } from "lucide-svelte";
 import { onDestroy, tick } from "svelte";
-import { goto } from "$app/navigation";
-import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
+import ListRowSkeleton from "#lib/components/list-page/ListRowSkeleton.svelte";
 import {
 	type FixedListRowDensity,
 	LIST_ROW_AVATAR,
 	LIST_ROW_HEIGHT,
-} from "$lib/components/list-page/list-row";
-import SessionRow from "$lib/components/SessionRow.svelte";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+} from "#lib/components/list-page/list-row.ts";
+import SessionRow from "#lib/components/SessionRow.svelte";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
 import {
 	type ChatsView,
 	chatsInbox,
-} from "$lib/features/sessions/chats-inbox.svelte";
-import { chatsWorkspaceScope } from "$lib/features/sessions/chats-workspace-scope";
-import { setSessionArchived } from "$lib/features/sessions/session-archive";
-import { SessionRename } from "$lib/features/sessions/session-rename.svelte";
-import { withSidebarMainWindow } from "$lib/features/space/modules/window-route";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { scrollListToTop } from "$lib/layout/list-scroll-top";
-import { scrollMemory } from "$lib/layout/scroll-memory";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/features/sessions/chats-inbox.svelte.ts";
+import { chatsWorkspaceScope } from "#lib/features/sessions/chats-workspace-scope.ts";
+import { setSessionArchived } from "#lib/features/sessions/session-archive.ts";
+import { SessionRename } from "#lib/features/sessions/session-rename.svelte.ts";
+import { withSidebarMainWindow } from "#lib/features/space/modules/window-route.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { scrollListToTop } from "#lib/layout/list-scroll-top.ts";
+import { scrollMemory } from "#lib/layout/scroll-memory.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	buildSessionForkTree,
 	getSessionTreeTitle,
-} from "$lib/session-fork-tree";
+} from "#lib/session-fork-tree.ts";
 import {
 	buildSpaceSessionRoute,
 	buildUserSessionRoute,
-} from "$lib/space-routes";
-import { type ChatsFilter, chatsFilterScope } from "$lib/stores/chats-filter";
+} from "#lib/space-routes.ts";
+import {
+	type ChatsFilter,
+	chatsFilterScope,
+} from "#lib/stores/chats-filter.ts";
+import { goto } from "$app/navigation";
 
 const {
 	view,
@@ -212,8 +215,7 @@ function navigate(session: UserSessionListItem) {
 		chatsWorkspaceScope.spaceAt(new URL(window.location.href)) ===
 		session.spaceId;
 	void goto(sameSpace ? withSidebarMainWindow(href, { isMobile }) : href, {
-		keepFocus: true,
-		noScroll: true,
+		reset: false,
 	});
 }
 

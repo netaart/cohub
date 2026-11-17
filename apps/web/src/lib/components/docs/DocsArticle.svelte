@@ -1,7 +1,7 @@
 <script lang="ts">
 import { ArrowLeft, ArrowRight, Check, Copy } from "lucide-svelte";
-import DocsToc from "$lib/components/docs/DocsToc.svelte";
-import { type DocsPage, getDocsUi } from "$lib/docs";
+import DocsToc from "#lib/components/docs/DocsToc.svelte";
+import { type DocsPage, getDocsUi } from "#lib/docs/index.ts";
 
 const {
 	doc,

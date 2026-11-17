@@ -1,10 +1,10 @@
-import { invalidatePaletteOverview } from "$lib/command-palette/palette-overview";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
+import { invalidatePaletteOverview } from "#lib/command-palette/palette-overview.ts";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import {
 	getCachedSpaceRecord,
 	patchCachedSpaceRecordSoon,
-} from "$lib/stores/space-record-cache";
+} from "#lib/stores/space-record-cache.ts";
 
 /**
  * Space pin store — manages optimistic pin/unpin and multi-client sync.

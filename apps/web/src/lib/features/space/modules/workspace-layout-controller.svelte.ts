@@ -1,13 +1,13 @@
-import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
-import type { ResizeStart } from "$lib/layout/pointer-resize";
-import { uiState, type WorkspacePresentation } from "$lib/stores/ui.svelte";
+import { DESKTOP_SHELL_MIN_WIDTH_PX } from "#lib/layout/breakpoints.ts";
+import type { ResizeStart } from "#lib/layout/pointer-resize.ts";
+import { uiState, type WorkspacePresentation } from "#lib/stores/ui.svelte.ts";
 import {
 	filesChromeEffectivelyHidden,
 	MAIN_PANEL_MIN_WIDTH,
 	mainCollapseArmed,
 	maxMainPanelWidth,
 	resolveFilesChromeToggle,
-} from "./layout-geometry";
+} from "./layout-geometry.ts";
 
 export type { WorkspacePresentation };
 export type MobileSurface = "main" | "files" | "preview";

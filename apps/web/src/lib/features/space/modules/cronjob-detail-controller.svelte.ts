@@ -1,28 +1,28 @@
 import type { CronJobRecord, TaskRunRecord } from "@neta-art/cohub";
 import { untrack } from "svelte";
-import { goto } from "$app/navigation";
 import {
 	type AccessState,
 	classifyAccessError,
-} from "$lib/access/access-state";
-import type { ModelThinkingLevel } from "$lib/model-catalog";
+} from "#lib/access/access-state.ts";
+import type { ModelThinkingLevel } from "#lib/model-catalog.ts";
 import {
 	buildSendMessagePayload,
 	defaultTimezone,
 	promptTextFromPayload,
 	validateCronjobForm,
-} from "$lib/resource-kit/cronjob";
-import { mergeTaskRunList } from "$lib/resource-kit/task-run";
-import { sdk } from "$lib/sdk";
+} from "#lib/resource-kit/cronjob.ts";
+import { mergeTaskRunList } from "#lib/resource-kit/task-run.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	buildSpaceCronjobRoute,
 	buildSpaceNewSessionRoute,
-} from "$lib/space-routes";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
-import { mergeCachedCronJobTaskRuns } from "$lib/stores/task-runs-cache";
-import { dispatchCronjobsUpdated } from "../resources/space-cronjobs-feed.svelte";
-import { createKeyedRouteRequestGuard } from "./route-request-guard";
-import type { TaskRealtimeEvent } from "./task-run-detail-controller.svelte";
+} from "#lib/space-routes.ts";
+import { modelsCatalogStore } from "#lib/stores/models-catalog.svelte.ts";
+import { mergeCachedCronJobTaskRuns } from "#lib/stores/task-runs-cache.ts";
+import { goto } from "$app/navigation";
+import { dispatchCronjobsUpdated } from "../resources/space-cronjobs-feed.svelte.ts";
+import { createKeyedRouteRequestGuard } from "./route-request-guard.ts";
+import type { TaskRealtimeEvent } from "./task-run-detail-controller.svelte.ts";
 
 export type CronjobMode = "create" | "detail";
 export type SelectedModel = {
@@ -316,7 +316,7 @@ export function createCronjobDetailController(options: {
 			runs = [];
 			notifyCronjobsUpdated();
 			await goto(buildSpaceNewSessionRoute(options.getSpaceId()), {
-				replaceState: true,
+				replace: true,
 			});
 		} catch (error) {
 			detailError = {

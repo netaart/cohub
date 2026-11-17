@@ -1,7 +1,7 @@
 <script lang="ts">
 import { ChevronRight } from "lucide-svelte";
-import { displaySafeJson } from "$kit/task-run";
-import { getLocale } from "../runtime.svelte";
+import { displaySafeJson } from "$kit/task-run.ts";
+import { getLocale } from "../runtime.svelte.ts";
 import CopyButton from "./CopyButton.svelte";
 import Section from "./Section.svelte";
 

@@ -1,4 +1,4 @@
-import { toSpaceIdPath } from "$lib/stores/space-address";
+import { toSpaceIdPath } from "#lib/stores/space-address.ts";
 import { COMPACT_SHELL_MAX_WIDTH_PX } from "./layout/breakpoints.ts";
 import { isSpaceIdSegment } from "./library-routes.ts";
 

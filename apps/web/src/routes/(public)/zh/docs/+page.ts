@@ -1,5 +1,5 @@
 import { error } from "@sveltejs/kit";
-import { loadDocsPage } from "$lib/docs";
+import { loadDocsPage } from "#lib/docs/index.ts";
 import type { PageLoad } from "./$types";
 
 export const prerender = true;

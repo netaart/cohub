@@ -1,5 +1,5 @@
 import { SvelteMap } from "svelte/reactivity";
-import { getCacheUserKeyAsync } from "$lib/cache/keys";
+import { getCacheUserKeyAsync } from "#lib/cache/keys.ts";
 import {
 	appendPage,
 	type Compare,
@@ -8,10 +8,10 @@ import {
 	placeItem,
 	sameData,
 	shareItems,
-} from "$lib/lists/live-list-core";
-import { syncStatus } from "$lib/sync/sync-status.svelte";
+} from "#lib/lists/live-list-core.ts";
+import { syncStatus } from "#lib/sync/sync-status.svelte.ts";
 
-export type { LiveFit } from "$lib/lists/live-list-core";
+export type { LiveFit } from "#lib/lists/live-list-core.ts";
 
 export type LivePage<T, E> = {
 	items: T[];

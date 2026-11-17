@@ -1,6 +1,6 @@
 <script lang="ts">
-import TreeItem from "$lib/components/TreeItem.svelte";
-import type { RepositoryTreeNode } from "$lib/types";
+import TreeItem from "#lib/components/TreeItem.svelte";
+import type { RepositoryTreeNode } from "#lib/types.ts";
 
 const {
 	nodes,

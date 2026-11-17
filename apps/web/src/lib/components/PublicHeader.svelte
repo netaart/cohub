@@ -1,8 +1,8 @@
 <script lang="ts">
 import { ChevronRight, Menu, X } from "lucide-svelte";
+import { resolvePublicLocale } from "#lib/i18n/public-locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 import { page } from "$app/state";
-import { resolvePublicLocale } from "$lib/i18n/public-locale";
-import { m } from "$lib/paraglide/messages.js";
 
 type Cta = "start" | "open-app" | "none";
 

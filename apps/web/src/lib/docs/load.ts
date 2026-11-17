@@ -1,4 +1,4 @@
-import { renderMarkdown } from "$lib/markdown";
+import { renderMarkdown } from "#lib/markdown.ts";
 import {
 	alternateDocsHref,
 	docsHref,
@@ -7,19 +7,19 @@ import {
 	getDocsNavTitle,
 	getDocsSections,
 	getDocsSectionTitle,
-} from "./manifest";
-import { injectHeadingAnchors, parseDocsFrontmatter } from "./parse";
+} from "./manifest.ts";
+import { injectHeadingAnchors, parseDocsFrontmatter } from "./parse.ts";
 import type {
 	DocsLocale,
 	DocsPage,
 	DocsSearchEntry,
 	DocsSibling,
-} from "./types";
+} from "./types.ts";
 
 /** Cap search body text so layout payloads stay small. */
 const SEARCH_BODY_CHARS = 800;
 
-// Alias resolves to repo docs/product via svelte.config / vite.config.
+// Alias resolves to repo docs/product via vite.config.
 const rawPages = import.meta.glob("$docs-product/*/**/*.md", {
 	query: "?raw",
 	import: "default",

@@ -1,11 +1,11 @@
 import type { SessionRecord, SessionTurnRecord } from "@neta-art/cohub";
 import { SvelteMap } from "svelte/reactivity";
-import { sameData } from "$lib/lists/live-list-core";
+import { sameData } from "#lib/lists/live-list-core.ts";
 import {
 	mergeSessionRecord,
 	type SessionRecordInput,
-} from "$lib/session-record-merge";
-import { mergeSessionTurnState } from "$lib/session-turn-state";
+} from "#lib/session-record-merge.ts";
+import { mergeSessionTurnState } from "#lib/session-turn-state.ts";
 
 export type SessionStorePersistence = {
 	save(records: SessionRecord[]): Promise<unknown>;

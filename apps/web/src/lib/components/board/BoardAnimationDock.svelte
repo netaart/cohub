@@ -46,18 +46,18 @@ import {
 	boardTrackGroups,
 	formatBoardTime,
 	parseBoardKeyId,
-} from "$lib/board/animation-timeline";
-import { createBoardAnimationTransport } from "$lib/board/board-animation-transport.svelte";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import BoardAnimationInspector from "$lib/components/board/BoardAnimationInspector.svelte";
-import BoardAnimationLanes from "$lib/components/board/BoardAnimationLanes.svelte";
-import BoardAnimationSettings from "$lib/components/board/BoardAnimationSettings.svelte";
+} from "#lib/board/animation-timeline.ts";
+import { createBoardAnimationTransport } from "#lib/board/board-animation-transport.svelte.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import BoardAnimationInspector from "#lib/components/board/BoardAnimationInspector.svelte";
+import BoardAnimationLanes from "#lib/components/board/BoardAnimationLanes.svelte";
+import BoardAnimationSettings from "#lib/components/board/BoardAnimationSettings.svelte";
 import BoardMenu, {
 	type BoardMenuItem,
-} from "$lib/components/board/BoardMenu.svelte";
-import BoardSequenceDialog from "$lib/components/board/BoardSequenceDialog.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/components/board/BoardMenu.svelte";
+import BoardSequenceDialog from "#lib/components/board/BoardSequenceDialog.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

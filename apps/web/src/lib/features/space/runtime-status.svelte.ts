@@ -1,14 +1,14 @@
 import { HttpError, type RuntimeStatus } from "@neta-art/cohub";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { subscribeSpaceChannel } from "$lib/features/session-chat/space-channel";
-import { sdk } from "$lib/sdk";
-import { createLocalListCache } from "$lib/stores/create-local-list-cache";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { subscribeSpaceChannel } from "#lib/features/session-chat/space-channel.ts";
+import { sdk } from "#lib/sdk.ts";
+import { createLocalListCache } from "#lib/stores/create-local-list-cache.ts";
 import {
 	createRuntimeStatusFreshness,
 	type RuntimeStatusFreshness,
 	runtimeStatusBackoffMs,
 	shouldRequestRuntimeStatus,
-} from "./runtime-status-policy";
+} from "./runtime-status-policy.ts";
 
 const cache = createLocalListCache<RuntimeStatus>({
 	storagePrefix: "cohub:runtime",

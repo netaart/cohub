@@ -2,8 +2,8 @@ import type {
 	AppResolveResponse,
 	PublicUserPageResponse,
 } from "@neta-art/cohub";
-import { PUBLIC_API_ORIGIN } from "$env/static/public";
-import type { PublicAppPath } from "$lib/app-pwa";
+import type { PublicAppPath } from "#lib/app-pwa.ts";
+import { PUBLIC_API_ORIGIN } from "$app/env/public";
 
 function apiUrl(path: string) {
 	const base = (PUBLIC_API_ORIGIN ?? "").replace(/\/$/, "");

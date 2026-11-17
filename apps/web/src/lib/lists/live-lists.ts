@@ -1,7 +1,7 @@
-import { libraryInbox } from "$lib/features/library/library-inbox.svelte";
-import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
-import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
-import { syncStatus } from "$lib/sync/sync-status.svelte";
+import { libraryInbox } from "#lib/features/library/library-inbox.svelte.ts";
+import { chatsInbox } from "#lib/features/sessions/chats-inbox.svelte.ts";
+import { spacesInbox } from "#lib/features/spaces/spaces-inbox.svelte.ts";
+import { syncStatus } from "#lib/sync/sync-status.svelte.ts";
 
 export function startLiveLists(): () => void {
 	const stops = [

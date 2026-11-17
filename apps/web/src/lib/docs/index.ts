@@ -5,7 +5,7 @@ export {
 	listDocsSources,
 	loadDocsPage,
 	loadDocsSearchIndex,
-} from "./load";
+} from "./load.ts";
 export {
 	alternateDocsHref,
 	DEFAULT_DOCS_LOCALE,
@@ -15,7 +15,7 @@ export {
 	getDocsSectionTitle,
 	isDocsLocale,
 	parseDocsPath,
-} from "./manifest";
+} from "./manifest.ts";
 export type {
 	DocsFrontmatter,
 	DocsLocale,
@@ -26,6 +26,6 @@ export type {
 	DocsSectionId,
 	DocsSibling,
 	DocsTocItem,
-} from "./types";
-export type { DocsUiCopy } from "./ui";
-export { getDocsUi } from "./ui";
+} from "./types.ts";
+export type { DocsUiCopy } from "./ui.ts";
+export { getDocsUi } from "./ui.ts";

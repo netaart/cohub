@@ -138,7 +138,7 @@ a twin of its launch screen over the WebView the same way and logs `First screen
 
 A WebView alone maps back to history, so an open dialog or drawer would stay
 put while the page behind it changes. Dismissible layers register with
-`dismissOnBack` (`$lib/back-layers.svelte`); while any is open the page asks
+`dismissOnBack` (`#lib/back-layers.svelte.ts`); while any is open the page asks
 the host to intercept, and each back gesture closes the topmost layer. A new
 document resets interception, so a page that crashed or reloaded mid-dialog
 can never trap back. iOS has no system back and leaves `navigation.back` out; its

@@ -5,7 +5,7 @@
  * Clicking sends `/name` directly (or prefills the composer when the prompt
  * declares an argument hint).
  */
-import type { PromptQuickAction } from "$lib/features/space/modules/prompt-template-controller.svelte";
+import type { PromptQuickAction } from "#lib/features/space/modules/prompt-template-controller.svelte.ts";
 
 let {
 	actions,

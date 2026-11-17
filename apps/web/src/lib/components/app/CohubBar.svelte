@@ -2,20 +2,20 @@
 import type { AppRecord, SpacePublicProfile } from "@neta-art/cohub";
 import { Eye, HandCoins } from "lucide-svelte";
 import { onMount, type Snippet } from "svelte";
-import { replaceState } from "$app/navigation";
-import { page } from "$app/state";
-import { appDisplayTitle } from "$lib/app-page-meta";
-import AppLikeButton from "$lib/components/app/AppLikeButton.svelte";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import UserIdentity from "$lib/components/UserIdentity.svelte";
+import { appDisplayTitle } from "#lib/app-page-meta.ts";
+import AppLikeButton from "#lib/components/app/AppLikeButton.svelte";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import UserIdentity from "#lib/components/UserIdentity.svelte";
 import {
 	currentReturnPath,
 	FUND_INTENT_PARAM,
-} from "$lib/features/billing/space-fund";
-import { formatCompactNumber, formatNumber } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { resolvePublicLocale } from "$lib/i18n/public-locale";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/features/billing/space-fund.ts";
+import { formatCompactNumber, formatNumber } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { resolvePublicLocale } from "#lib/i18n/public-locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 
 export type CohubBarSpace = {
 	id: string;
@@ -55,12 +55,12 @@ const {
 const locale = $derived(getLocale());
 const fundable = $derived(space?.publicProfile?.fundingEnabled === true);
 let fundDialog = $state<Promise<
-	typeof import("$lib/features/billing/SpaceFundDialog.svelte")
+	typeof import("#lib/features/billing/SpaceFundDialog.svelte")
 > | null>(null);
 let fundOpen = $state(false);
 
 function openFund() {
-	fundDialog ??= import("$lib/features/billing/SpaceFundDialog.svelte");
+	fundDialog ??= import("#lib/features/billing/SpaceFundDialog.svelte");
 	fundOpen = true;
 }
 
@@ -74,7 +74,7 @@ onMount(() => {
 	const url = new URL(window.location.href);
 	if (!url.searchParams.has(FUND_INTENT_PARAM)) return;
 	url.searchParams.delete(FUND_INTENT_PARAM);
-	replaceState(url, history.state);
+	void goto(url, { shallow: true, replace: true, state: page.state });
 	if (fundable) openFund();
 });
 // Brand link follows the page's URL locale, exactly like the public header.

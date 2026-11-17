@@ -7,12 +7,12 @@ export type OpenWithChoice =
 <script lang="ts">
 import { fileExtensionOf } from "@cohub/protocol";
 import { FileText, Loader2 } from "lucide-svelte";
-import AppIcon from "$lib/components/app/AppIcon.svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import { appDisplayTitle } from "$lib/app-page-meta";
-import type { FileHandlerApp } from "$lib/features/app/file-handlers";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import AppIcon from "#lib/components/app/AppIcon.svelte";
+import Dialog from "#lib/components/Dialog.svelte";
+import { appDisplayTitle } from "#lib/app-page-meta.ts";
+import type { FileHandlerApp } from "#lib/features/app/file-handlers.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	open,

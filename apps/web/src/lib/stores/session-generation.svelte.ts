@@ -1,7 +1,7 @@
 import type { ContentBlock, Usage } from "@cohub/protocol/core";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { sessionGenerationSnapshotsRepo } from "$lib/cache/repositories/session-generation-snapshots-repo";
-import { shouldPreserveLivePreviewOnArchive } from "$lib/session-generation-stream-guards";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { sessionGenerationSnapshotsRepo } from "#lib/cache/repositories/session-generation-snapshots-repo.ts";
+import { shouldPreserveLivePreviewOnArchive } from "#lib/session-generation-stream-guards.ts";
 import {
 	emptyGenerationStreamResiduals,
 	generationTurnChanged,
@@ -9,7 +9,7 @@ import {
 	resolveGenerationProgressResiduals,
 	resolveGenerationStreamResiduals,
 	shouldResumePendingGeneration,
-} from "$lib/stores/session-generation-state";
+} from "#lib/stores/session-generation-state.ts";
 
 export type SessionGenerationStatus =
 	| "idle"

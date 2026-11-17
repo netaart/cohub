@@ -1,4 +1,4 @@
-import { containedRect, type Rect } from "./display-input";
+import { containedRect, type Rect } from "./display-input.ts";
 import {
 	clampView,
 	type DisplayView,
@@ -8,7 +8,7 @@ import {
 	reveal,
 	type ViewGeometry,
 	zoomAt,
-} from "./display-viewport";
+} from "./display-viewport.ts";
 
 type CameraOptions = {
 	surface: () => HTMLElement | null;

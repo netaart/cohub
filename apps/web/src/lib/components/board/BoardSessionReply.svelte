@@ -1,18 +1,18 @@
 <script lang="ts">
 import { onMount } from "svelte";
-import { resolveSessionReplyRuntime } from "$lib/board/board-session-reply";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import ComposerSubmitButton from "$lib/components/composer/ComposerSubmitButton.svelte";
-import ComposerSurface from "$lib/components/composer/ComposerSurface.svelte";
+import { resolveSessionReplyRuntime } from "#lib/board/board-session-reply.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import ComposerSubmitButton from "#lib/components/composer/ComposerSubmitButton.svelte";
+import ComposerSurface from "#lib/components/composer/ComposerSurface.svelte";
 import {
 	getComposerKeyAction,
 	isMobileComposerInput,
-} from "$lib/composer-keyboard";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { sessionStore } from "$lib/stores/session-store";
+} from "#lib/composer-keyboard.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
 
 const {
 	editor,

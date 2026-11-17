@@ -1,17 +1,17 @@
 <script lang="ts">
 import { FolderKanban, MessageSquare, Pin, Plus, Tag } from "lucide-svelte";
-import { settingsCommandSection } from "$lib/command-palette/commands";
-import type { CommandPaletteItem } from "$lib/command-palette/types";
-import ListRowText from "$lib/components/list-page/ListRowText.svelte";
+import { settingsCommandSection } from "#lib/command-palette/commands.ts";
+import type { CommandPaletteItem } from "#lib/command-palette/types.ts";
+import ListRowText from "#lib/components/list-page/ListRowText.svelte";
 import {
 	type FixedListRowDensity,
 	LIST_ROW_AVATAR,
-} from "$lib/components/list-page/list-row";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import { SETTINGS_SECTION_ICONS } from "$lib/components/settings-section";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/components/list-page/list-row.ts";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import { SETTINGS_SECTION_ICONS } from "#lib/components/settings-section.ts";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import HighlightedText from "./HighlightedText.svelte";
 
 const {

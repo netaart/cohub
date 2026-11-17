@@ -1,9 +1,9 @@
 import type { RealtimeSessionFork, SessionRecord } from "@neta-art/cohub";
-import { formatResourceMentionTextForDisplay } from "$lib/mentions/resource";
+import { formatResourceMentionTextForDisplay } from "#lib/mentions/resource.ts";
 import {
 	compareSessionsByRecentActivity,
 	getSessionSortTime,
-} from "$lib/session-sort";
+} from "#lib/session-sort.ts";
 
 export type SessionForkEdge = {
 	childSessionId: string;

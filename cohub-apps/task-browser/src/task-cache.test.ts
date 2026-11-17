@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clearTaskCache, readTaskCache, writeTaskCache } from "./task-cache.js";
+import { clearTaskCache, readTaskCache, writeTaskCache } from "./task-cache.ts";
 
 class MemoryStorage implements Storage {
   private values = new Map<string, string>();

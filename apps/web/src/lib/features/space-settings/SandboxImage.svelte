@@ -3,8 +3,8 @@ import type {
 	SandboxImageId,
 	SandboxPreferenceStatus,
 } from "@cohub/protocol/sandbox";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import SettingsRow, { SETTINGS_SELECT } from "./SettingsRow.svelte";
 
 const {

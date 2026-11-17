@@ -1,7 +1,7 @@
 import type { Usage } from "@cohub/protocol/core";
-import { formatUsageCost, getUsageCostTotal } from "$lib/format-usage";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
+import { formatUsageCost, getUsageCostTotal } from "#lib/format-usage.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 export type GenerationCostPresentation = {
 	label: string;

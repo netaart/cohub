@@ -23,7 +23,7 @@ import { loadEnv } from "vite";
 const appDir = new URL("../", import.meta.url);
 const outfile = new URL(".svelte-kit/cloudflare/worker-entry-deps.js", appDir);
 const clientDir = new URL(".svelte-kit/output/client/", appDir);
-// SvelteKit's `kit.files.assets`; svelte.config.js keeps the default.
+// SvelteKit's `files.assets`; vite.config.ts keeps the default.
 const staticDir = new URL("static/", appDir);
 
 const NAMES = [

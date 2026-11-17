@@ -8,7 +8,7 @@ import {
 	IMAGE_ZOOM_STEP,
 	type ImageGestureState,
 	imageTransform,
-} from "$lib/gestures/image-gesture";
+} from "#lib/gestures/image-gesture.ts";
 
 let {
 	src,

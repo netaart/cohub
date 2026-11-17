@@ -1,8 +1,8 @@
 import type { SessionRecord } from "@neta-art/cohub";
 import { untrack } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
-import type { RelatedSessionRef } from "$lib/sent-turns";
-import { getSessionListTitle } from "$lib/session-fork-tree";
+import type { RelatedSessionRef } from "#lib/sent-turns.ts";
+import { getSessionListTitle } from "#lib/session-fork-tree.ts";
 
 export type RelatedSessionView =
 	| { status: "loading" }

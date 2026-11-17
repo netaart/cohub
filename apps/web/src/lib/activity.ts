@@ -1,6 +1,6 @@
 import type { SpaceAccess, SpaceUsageResponse } from "@neta-art/cohub";
-import { formatCurrency, toIntlTag } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
+import { formatCurrency, toIntlTag } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
 
 export type ActivityDay = {
 	date: string;

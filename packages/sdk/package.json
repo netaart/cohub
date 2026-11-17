@@ -48,6 +48,10 @@
         "types": "./dist/space-picker.d.ts",
         "import": "./dist/space-picker.js"
       },
+      "./app-ref": {
+        "types": "./dist/app-ref.d.ts",
+        "import": "./dist/app-ref.js"
+      },
       "./host-bridge": {
         "types": "./dist/host-bridge.d.ts",
         "import": "./dist/host-bridge.js"
@@ -123,6 +127,10 @@
     "./space-picker": {
       "types": "./src/space-picker.ts",
       "import": "./src/space-picker.ts"
+    },
+    "./app-ref": {
+      "types": "./src/app-ref.ts",
+      "import": "./src/app-ref.ts"
     },
     "./host-bridge": {
       "types": "./src/host-bridge.ts",
@@ -204,7 +212,7 @@
     "pixi.js": "^8.23.0",
     "tsdown": "^0.23.7",
     "tsx": "catalog:",
-    "typescript": "^7.0.2"
+    "typescript": "catalog:"
   },
   "peerDependencies": {
     "@napi-rs/canvas": "^1.0.2",

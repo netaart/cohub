@@ -1,10 +1,10 @@
 <script lang="ts">
 import type { SandboxSpecId } from "@neta-art/cohub";
 import { Check, Lock, Zap } from "lucide-svelte";
-import Sheet from "$lib/components/Sheet.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import type { SandboxSpecOption as SandboxSpec } from "./sandbox-settings.svelte";
+import Sheet from "#lib/components/Sheet.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { SandboxSpecOption as SandboxSpec } from "./sandbox-settings.svelte.ts";
 
 const locale = $derived(getLocale());
 

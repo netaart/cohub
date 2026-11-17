@@ -1,12 +1,12 @@
 <script lang="ts">
 import type { HostFileLocation } from "@cohub/protocol/host-bridge";
 import { Check, CircleAlert, X } from "lucide-svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import { type Download, downloads } from "$lib/downloads.svelte";
-import { formatBytes } from "$lib/format-bytes";
-import { hostPlatform } from "$lib/host-bridge";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import Spinner from "#lib/components/Spinner.svelte";
+import { type Download, downloads } from "#lib/downloads.svelte.ts";
+import { formatBytes } from "#lib/format-bytes.ts";
+import { hostPlatform } from "#lib/host-bridge.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const MAX_VISIBLE = 3;
 

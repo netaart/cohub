@@ -8,26 +8,26 @@ import type {
 	SpaceWalletSummary,
 	UserProfile,
 } from "@neta-art/cohub";
-import { canViewSpaceCost, formatCompact } from "$lib/activity";
-import MessageText from "$lib/components/MessageText.svelte";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+import { canViewSpaceCost, formatCompact } from "#lib/activity.ts";
+import MessageText from "#lib/components/MessageText.svelte";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
 import StatusGlyph, {
 	type StatusGlyphMotion,
 	type StatusGlyphTone,
-} from "$lib/components/StatusGlyph.svelte";
-import UserIdentity from "$lib/components/UserIdentity.svelte";
-import { formatCurrency } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { formatShortDateTime } from "$lib/resource-kit/time";
+} from "#lib/components/StatusGlyph.svelte";
+import UserIdentity from "#lib/components/UserIdentity.svelte";
+import { formatCurrency } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { formatShortDateTime } from "#lib/resource-kit/time.ts";
 import {
 	displayUserName,
 	formatTokenCount,
 	formatUsageCost,
 	sandboxStatusKind,
 	sandboxStatusLabel,
-} from "../space-utils";
-import type { SpaceSandboxSnapshot } from "./space-status-controller.svelte";
+} from "../space-utils.ts";
+import type { SpaceSandboxSnapshot } from "./space-status-controller.svelte.ts";
 
 const SANDBOX_GLYPH: Record<
 	ReturnType<typeof sandboxStatusKind>,

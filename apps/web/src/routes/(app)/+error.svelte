@@ -1,11 +1,11 @@
 <script lang="ts">
-import { page } from "$app/state";
 import {
 	type AccessState,
 	classifyAccessError,
-} from "$lib/access/access-state";
-import AccessStateView from "$lib/components/AccessStateView.svelte";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/access/access-state.ts";
+import AccessStateView from "#lib/components/AccessStateView.svelte";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { page } from "$app/state";
 
 const error = $derived(page.error);
 const status = $derived(page.status);

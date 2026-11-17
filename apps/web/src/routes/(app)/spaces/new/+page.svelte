@@ -15,14 +15,11 @@ import {
 } from "@neta-art/cohub";
 import { ArrowLeft, Loader2, PackagePlus, Plus } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
-import { goto, replaceState } from "$app/navigation";
-import { page } from "$app/state";
-import { PUBLIC_COHUB_ENV } from "$env/static/public";
-import { appHomeHref } from "$lib/app-entry";
-import { ensureAuth } from "$lib/auth";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import ChannelModelPicker from "$lib/components/ChannelModelPicker.svelte";
-import DeviceFolderPicker from "$lib/components/DeviceFolderPicker.svelte";
+import { appHomeHref } from "#lib/app-entry.ts";
+import { ensureAuth } from "#lib/auth.ts";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import ChannelModelPicker from "#lib/components/ChannelModelPicker.svelte";
+import DeviceFolderPicker from "#lib/components/DeviceFolderPicker.svelte";
 import {
 	deviceFolderName,
 	deviceRuntimeInstances,
@@ -31,17 +28,20 @@ import {
 	pickDeviceFolder,
 	reportDeviceConnectIssue,
 	startDeviceRuntime,
-} from "$lib/device-runtime.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { buildSpaceLandingRoute } from "$lib/space-routes";
-import { billingConversion } from "$lib/stores/billing-conversion.svelte";
+} from "#lib/device-runtime.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { buildSpaceLandingRoute } from "#lib/space-routes.ts";
+import { billingConversion } from "#lib/stores/billing-conversion.svelte.ts";
+import { PUBLIC_COHUB_ENV } from "$app/env/public";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 
 const locale = $derived(getLocale());
 
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
+import { cacheSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
 
 const currentPath = $derived(page.url.pathname);
 const currentSearch = $derived(page.url.search);
@@ -86,7 +86,7 @@ function selectFolder(next: DeviceFolderListing) {
 async function applyHandedOverFolder(fragment: string) {
 	const handedOver = new URLSearchParams(fragment.slice(1)).get("folder");
 	if (!handedOver) return;
-	replaceState(page.url.pathname, {});
+	void goto(page.url.pathname, { shallow: true, replace: true });
 	const picked = await pickDeviceFolder(handedOver).catch(() => null);
 	if (!picked) return;
 	placement = "device";

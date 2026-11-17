@@ -1,8 +1,8 @@
 <script lang="ts">
-import { type ActivityDay, formatCompact } from "$lib/activity";
-import { formatDate } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { type ActivityDay, formatCompact } from "#lib/activity.ts";
+import { formatDate } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type HeatmapMode = "llm" | "generation";
 

@@ -1,8 +1,8 @@
 import type { AppWindowState } from "@cohub/protocol/app-runtime";
-import { isBoardFile } from "$lib/board/board-file";
-import { parseAppWindowKey } from "./app-window-key";
-import type { WindowKind } from "./window-route";
-import type { WindowSyncStatus } from "./window-sync-status";
+import { isBoardFile } from "#lib/board/board-file.ts";
+import { parseAppWindowKey } from "./app-window-key.ts";
+import type { WindowKind } from "./window-route.ts";
+import type { WindowSyncStatus } from "./window-sync-status.ts";
 
 export type Window = {
 	kind: WindowKind;

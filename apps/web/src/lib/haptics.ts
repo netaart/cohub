@@ -1,6 +1,6 @@
 import { APP_RUNTIME_HAPTIC_VIBRATION } from "@cohub/protocol/app-runtime";
 import type { HostHaptic } from "@cohub/protocol/host-bridge";
-import { callHost, supportsHostCapability } from "$lib/host-bridge";
+import { callHost, supportsHostCapability } from "#lib/host-bridge.ts";
 
 const GAP_MS = 40;
 let lastAt = 0;

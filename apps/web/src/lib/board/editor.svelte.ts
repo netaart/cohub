@@ -9,7 +9,7 @@ import { createSubscriber } from "svelte/reactivity";
 import {
 	readBoardToolStyles,
 	writeBoardToolStyles,
-} from "$lib/board/board-tool-preferences";
+} from "#lib/board/board-tool-preferences.ts";
 
 export type {
 	AlignMode,

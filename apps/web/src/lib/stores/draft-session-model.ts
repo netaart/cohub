@@ -5,7 +5,7 @@
 //
 // Catalog validation (ensuring the model is still online) is performed by the
 // caller when reading, since this helper has no knowledge of the catalog.
-import { encodeKeyPart, getCacheUserKey } from "$lib/cache/keys";
+import { encodeKeyPart, getCacheUserKey } from "#lib/cache/keys.ts";
 
 const STORAGE_PREFIX = "cohub:draft-session-model:v1";
 

@@ -2,20 +2,20 @@
 import type { UserSessionSpaceSummary } from "@neta-art/cohub";
 import { Plus, Search, X } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
-import { openAreaSearch } from "$lib/command-palette/open";
-import FilterBar from "$lib/components/list-page/FilterBar.svelte";
-import FilterChip from "$lib/components/list-page/FilterChip.svelte";
-import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
-import ListHeader from "$lib/components/list-page/ListHeader.svelte";
-import SwipePager from "$lib/components/list-page/SwipePager.svelte";
-import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import ChatsList from "$lib/features/sessions/ChatsList.svelte";
-import ChatsSourcePicker from "$lib/features/sessions/ChatsSourcePicker.svelte";
-import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { onListScrollTop } from "$lib/layout/list-scroll-top";
-import { m } from "$lib/paraglide/messages.js";
+import { openAreaSearch } from "#lib/command-palette/open.ts";
+import FilterBar from "#lib/components/list-page/FilterBar.svelte";
+import FilterChip from "#lib/components/list-page/FilterChip.svelte";
+import HeaderAction from "#lib/components/list-page/HeaderAction.svelte";
+import ListHeader from "#lib/components/list-page/ListHeader.svelte";
+import SwipePager from "#lib/components/list-page/SwipePager.svelte";
+import { SwipeTabs } from "#lib/components/list-page/swipe-tabs.svelte.ts";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import ChatsList from "#lib/features/sessions/ChatsList.svelte";
+import ChatsSourcePicker from "#lib/features/sessions/ChatsSourcePicker.svelte";
+import { chatsInbox } from "#lib/features/sessions/chats-inbox.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { onListScrollTop } from "#lib/layout/list-scroll-top.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	variant,

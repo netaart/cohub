@@ -1,6 +1,6 @@
 <script lang="ts" module>
 import type { SpaceWalletFunding } from "@neta-art/cohub";
-import { getCacheUserKey } from "$lib/cache/keys";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
 
 const fundingCache = new Map<string, SpaceWalletFunding>();
 const cacheKey = (spaceId: string) => `${getCacheUserKey()}:${spaceId}`;
@@ -14,19 +14,19 @@ import {
 } from "@neta-art/cohub";
 import { CheckCircle2, Loader2 } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
-import { ensureAuth } from "$lib/auth";
-import { getCurrentRedirectPath } from "$lib/auth-redirect";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import { formatCurrency } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
+import { ensureAuth } from "#lib/auth.ts";
+import { getCurrentRedirectPath } from "#lib/auth-redirect.ts";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import { formatCurrency } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import {
 	clearRequestId,
 	currentReturnPath,
 	takeRequestId,
-} from "./space-fund";
+} from "./space-fund.ts";
 
 const {
 	spaceId,

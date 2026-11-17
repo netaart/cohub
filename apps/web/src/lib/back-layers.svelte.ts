@@ -3,7 +3,7 @@ import {
 	onHostEvent,
 	readyHost,
 	supportsHostCapability,
-} from "$lib/host-bridge";
+} from "#lib/host-bridge.ts";
 
 /** Layers that the native host's system back closes, topmost first. */
 const layers: Array<() => void> = [];

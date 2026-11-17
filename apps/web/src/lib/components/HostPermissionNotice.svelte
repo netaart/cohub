@@ -3,9 +3,9 @@ import type { HostPermission } from "@cohub/protocol/host-bridge";
 import {
 	canOpenHostPermissionSettings,
 	openHostPermissionSettings,
-} from "$lib/host-permissions.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/host-permissions.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const { kind, message }: { kind: HostPermission; message?: string } = $props();
 const locale = $derived(getLocale());

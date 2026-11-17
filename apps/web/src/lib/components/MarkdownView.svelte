@@ -1,5 +1,5 @@
 <script module lang="ts">
-let markdownModulePromise: Promise<typeof import("$lib/markdown")> | null =
+let markdownModulePromise: Promise<typeof import("#lib/markdown.ts")> | null =
 	null;
 
 function escapeHtml(value: string) {
@@ -16,7 +16,7 @@ function renderPlainTextFallback(markdownSource: string) {
 }
 
 function loadMarkdownModule() {
-	markdownModulePromise ??= import("$lib/markdown");
+	markdownModulePromise ??= import("#lib/markdown.ts");
 	return markdownModulePromise;
 }
 
@@ -31,16 +31,16 @@ let streamHandoff: {
 <script lang="ts">
 import type { ContentBlock } from "@cohub/protocol/core";
 import { onDestroy, tick, untrack } from "svelte";
-import MarkdownFrontmatter from "$lib/components/MarkdownFrontmatter.svelte";
-import MarkdownSurface from "$lib/components/MarkdownSurface.svelte";
-import { parseMarkdownFrontmatter } from "$lib/markdown-frontmatter";
-import { buildPublicFileUrl } from "$lib/public-files-url";
-import { StreamingMarkdownController } from "$lib/streaming-markdown-controller";
+import MarkdownFrontmatter from "#lib/components/MarkdownFrontmatter.svelte";
+import MarkdownSurface from "#lib/components/MarkdownSurface.svelte";
+import { parseMarkdownFrontmatter } from "#lib/markdown-frontmatter.ts";
+import { buildPublicFileUrl } from "#lib/public-files-url.ts";
+import { StreamingMarkdownController } from "#lib/streaming-markdown-controller.ts";
 import {
 	prepareMarkdownAssetHtml,
 	type ResolveWorkspaceAsset,
-} from "$lib/workspace-assets";
-import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
+} from "#lib/workspace-assets.ts";
+import type { WorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
 
 type MarkdownTextBlock = Extract<ContentBlock, { type: "text" }>;
 type MarkdownVariant = "chat" | "document";

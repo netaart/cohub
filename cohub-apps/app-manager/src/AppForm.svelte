@@ -15,11 +15,11 @@ export type AppValues = {
 import { Check } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
 import { m } from "$messages";
-import { APP_HIDE_COHUB_BAR_FEATURE, APP_SCOPE_OPTIONS } from "$kit/app";
-import { client } from "../../shared/src/client";
-import { getLocale } from "../../shared/src/runtime.svelte";
+import { APP_HIDE_COHUB_BAR_FEATURE, APP_SCOPE_OPTIONS } from "$kit/app.ts";
+import { client } from "../../shared/src/client.ts";
+import { getLocale } from "../../shared/src/runtime.svelte.ts";
 import Button from "../../shared/src/ui/Button.svelte";
-import { inputClass, labelClass } from "../../shared/src/ui/classes";
+import { inputClass, labelClass } from "../../shared/src/ui/classes.ts";
 import Field from "../../shared/src/ui/Field.svelte";
 
 type Props = {

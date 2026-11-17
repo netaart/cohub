@@ -46,10 +46,10 @@ import {
 	Trash2,
 } from "lucide-svelte";
 import { onDestroy, onMount, untrack } from "svelte";
-import { portal } from "$lib/actions/portal";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { portal } from "#lib/actions/portal.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

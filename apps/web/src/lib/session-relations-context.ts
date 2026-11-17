@@ -1,6 +1,6 @@
 import { getContext, setContext } from "svelte";
-import type { RelatedSessionView } from "$lib/related-sessions";
-import type { RelatedSessionRef, SentSession } from "$lib/sent-turns";
+import type { RelatedSessionView } from "#lib/related-sessions.ts";
+import type { RelatedSessionRef, SentSession } from "#lib/sent-turns.ts";
 
 export type SessionRelations = {
 	sentByTurn(turnId: string): readonly SentSession[];

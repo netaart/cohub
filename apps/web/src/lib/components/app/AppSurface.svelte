@@ -39,43 +39,43 @@ import type {
 } from "@neta-art/cohub";
 import { elementClientToLocal, parseBoardLaunch } from "@neta-art/cohub/board";
 import { onMount, type Snippet, untrack } from "svelte";
-import { page } from "$app/state";
-import { appDisplayTitle } from "$lib/app-page-meta";
-import { type AppLaunchState, resolveAppFrame } from "$lib/app-url";
-import WorkBoardSurface from "$lib/components/app/AppBoardSurface.svelte";
-import WorkFileSurface from "$lib/components/app/AppFileSurface.svelte";
-import { readAppCheckoutState } from "$lib/components/app/app-checkout-state";
+import { appDisplayTitle } from "#lib/app-page-meta.ts";
+import { type AppLaunchState, resolveAppFrame } from "#lib/app-url.ts";
+import WorkBoardSurface from "#lib/components/app/AppBoardSurface.svelte";
+import WorkFileSurface from "#lib/components/app/AppFileSurface.svelte";
+import { readAppCheckoutState } from "#lib/components/app/app-checkout-state.ts";
 import CohubBar, {
 	type CohubBarOwner,
 	type CohubBarSpace,
-} from "$lib/components/app/CohubBar.svelte";
-import { pointerDropZone } from "$lib/drag/pointer-drag.svelte";
-import type { PointerDropZone } from "$lib/drag/pointer-drag-core";
-import AppAuthorizeDialog from "$lib/features/app/AppAuthorizeDialog.svelte";
-import AppDeviceChip from "$lib/features/app/AppDeviceChip.svelte";
-import AppDevicesDialog from "$lib/features/app/AppDevicesDialog.svelte";
-import { createAppBridgeHost } from "$lib/features/app/bridge-host.svelte";
-import { createAppDeviceAccess } from "$lib/features/app/device-access.svelte";
-import { hostAppearanceKey } from "$lib/features/app/host-appearance.svelte";
+} from "#lib/components/app/CohubBar.svelte";
+import { pointerDropZone } from "#lib/drag/pointer-drag.svelte.ts";
+import type { PointerDropZone } from "#lib/drag/pointer-drag-core.ts";
+import AppAuthorizeDialog from "#lib/features/app/AppAuthorizeDialog.svelte";
+import AppDeviceChip from "#lib/features/app/AppDeviceChip.svelte";
+import AppDevicesDialog from "#lib/features/app/AppDevicesDialog.svelte";
+import { createAppBridgeHost } from "#lib/features/app/bridge-host.svelte.ts";
+import { createAppDeviceAccess } from "#lib/features/app/device-access.svelte.ts";
+import { hostAppearanceKey } from "#lib/features/app/host-appearance.svelte.ts";
 import {
 	dropTypesOf,
 	hostResourceDrag,
 	pointerDragResources,
 	readTransferResources,
 	trackHostResourceDrags,
-} from "$lib/features/app/host-resource-drag.svelte";
+} from "#lib/features/app/host-resource-drag.svelte.ts";
 import {
 	type AppSurfaceHost,
 	createAppSurfaceHost,
-} from "$lib/features/app/surface-host";
-import { haptic } from "$lib/haptics";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { parseNewChatBackgroundAction } from "$lib/new-chat-background-bridge";
-import { m } from "$lib/paraglide/messages.js";
-import { emitSpaceConfigBackgroundAction } from "$lib/space-config";
-import { createSpaceWorkspaceAssetResolver } from "$lib/space-workspace-assets";
-import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
+} from "#lib/features/app/surface-host.ts";
+import { haptic } from "#lib/haptics.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { parseNewChatBackgroundAction } from "#lib/new-chat-background-bridge.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { emitSpaceConfigBackgroundAction } from "#lib/space-config.ts";
+import { createSpaceWorkspaceAssetResolver } from "#lib/space-workspace-assets.ts";
+import type { WorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
+import { page } from "$app/state";
 
 type AppSurfaceMode = "page" | "background" | "app" | "overlay";
 

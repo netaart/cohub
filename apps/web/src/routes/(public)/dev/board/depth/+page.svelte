@@ -6,9 +6,9 @@ import {
 	readBoardDeviceSignals,
 	runBoardStageBench,
 } from "@neta-art/cohub/board/stage";
+import { cohubPixiRuntime } from "#lib/board/runtime/board-runtime.ts";
 import { page } from "$app/state";
-import { cohubPixiRuntime } from "$lib/board/runtime/board-runtime";
-import { depthDemoDocument, depthScriptUrl } from "./demo";
+import { depthDemoDocument, depthScriptUrl } from "./demo.ts";
 
 const document = depthDemoDocument({
 	still: page.url.searchParams.has("still"),

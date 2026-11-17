@@ -2,8 +2,8 @@
 import type { SpaceCommerceProduct } from "@neta-art/cohub";
 import { Loader2, Wallet } from "lucide-svelte";
 import { untrack } from "svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const locale = $derived(getLocale());
 

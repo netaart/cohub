@@ -9,13 +9,13 @@ import { Box } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
 import ModelControls, {
 	readModelControls,
-} from "$lib/components/ModelControls.svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import { saveFile } from "$lib/downloads.svelte";
-import { formatBytes } from "$lib/format-bytes";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import "$lib/model3d/decoders";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/components/ModelControls.svelte";
+import Spinner from "#lib/components/Spinner.svelte";
+import { saveFile } from "#lib/downloads.svelte.ts";
+import { formatBytes } from "#lib/format-bytes.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import "#lib/model3d/decoders.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	source,

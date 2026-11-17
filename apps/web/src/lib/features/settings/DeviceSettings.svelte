@@ -4,20 +4,20 @@ import {
 	type HostPermissions,
 } from "@cohub/protocol/host-bridge";
 import { onMount } from "svelte";
-import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
+import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
 import {
 	callHost,
 	hostPlatform,
 	readyHost,
 	supportsHostCapability,
-} from "$lib/host-bridge";
+} from "#lib/host-bridge.ts";
 import {
 	hostPermissions,
 	openHostPermissionSettings,
 	requestHostPermission,
-} from "$lib/host-permissions.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/host-permissions.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const locale = $derived(getLocale());
 const permissions = $derived(hostPermissions());

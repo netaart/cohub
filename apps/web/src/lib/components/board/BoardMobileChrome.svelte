@@ -36,10 +36,10 @@ import {
 	Type,
 } from "lucide-svelte";
 import type { Snippet } from "svelte";
-import { boardSelectionColor } from "$lib/board/board-selection-color";
-import type { BoardEditor, BoardToolId } from "$lib/board/editor.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { boardSelectionColor } from "#lib/board/board-selection-color.ts";
+import type { BoardEditor, BoardToolId } from "#lib/board/editor.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

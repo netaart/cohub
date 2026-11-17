@@ -2,11 +2,11 @@ import {
 	SETTINGS_SECTIONS,
 	type SettingsSection,
 	settingsSectionHref,
-} from "$lib/settings-nav";
-import { commandItemKey } from "./merge-results";
-import { allowsResourceType, type CommandPaletteSearchPlan } from "./scope";
-import { sortCommandItems, textMatchScore } from "./score";
-import type { CommandPaletteItem } from "./types";
+} from "#lib/settings-nav.ts";
+import { commandItemKey } from "./merge-results.ts";
+import { allowsResourceType, type CommandPaletteSearchPlan } from "./scope.ts";
+import { sortCommandItems, textMatchScore } from "./score.ts";
+import type { CommandPaletteItem } from "./types.ts";
 
 const COMMANDS: CommandPaletteItem[] = [
 	{

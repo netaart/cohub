@@ -11,17 +11,17 @@ import type {
 } from "@neta-art/cohub";
 import type { BoardItemViewContext } from "@neta-art/cohub/board/stage";
 import { LoaderCircle, Play } from "lucide-svelte";
-import { appCoverUrl, appThemeColor } from "$lib/app-page-meta";
-import { avatarInitials } from "$lib/avatar-initials";
+import { appCoverUrl, appThemeColor } from "#lib/app-page-meta.ts";
+import { avatarInitials } from "#lib/avatar-initials.ts";
 import type {
 	AppNavigationHandler,
 	BoardAppDetails,
 	BoardAppMeta,
-} from "$lib/board/board-app";
-import Avatar from "$lib/components/Avatar.svelte";
-import AppSurface from "$lib/components/app/AppSurface.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/board/board-app.ts";
+import Avatar from "#lib/components/Avatar.svelte";
+import AppSurface from "#lib/components/app/AppSurface.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	meta,

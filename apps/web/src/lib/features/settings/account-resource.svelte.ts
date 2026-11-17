@@ -1,13 +1,13 @@
-import { handleUnauthorizedError } from "$lib/auth-redirect";
+import { handleUnauthorizedError } from "#lib/auth-redirect.ts";
 import {
 	canUseUserScopedCache,
 	getCacheUserKey,
 	getCacheUserKeyAsync,
-} from "$lib/cache/keys";
+} from "#lib/cache/keys.ts";
 import {
 	readAccountSnapshot,
 	writeAccountSnapshot,
-} from "$lib/features/settings/account-snapshots";
+} from "#lib/features/settings/account-snapshots.ts";
 
 const FRESH_MS = 30_000;
 

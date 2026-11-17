@@ -1,4 +1,4 @@
-import type { CommandPaletteResourceType } from "./types";
+import type { CommandPaletteResourceType } from "./types.ts";
 
 const TYPE_ALIASES = new Map<string, CommandPaletteResourceType>([
 	["chat", "chat"],

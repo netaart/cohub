@@ -5,17 +5,17 @@ import { Activity, BarChart3, ChevronDown, GitCommitHorizontal, LoaderCircle, Ne
 import { onDestroy, untrack } from "svelte";
 import { m } from "$messages";
 import CheckpointDiffPanel from "$kit/CheckpointDiffPanel.svelte";
-import { asRecord, intlTag } from "$kit/core";
-import { formatDiffBytes } from "$kit/diff";
-import { formatShortDateTime } from "$kit/time";
-import { client, webUrl } from "../../shared/src/client";
-import { getLocale } from "../../shared/src/runtime.svelte";
-import { resourceTitle } from "../../shared/src/shell/title";
+import { asRecord, intlTag } from "$kit/core.ts";
+import { formatDiffBytes } from "$kit/diff.ts";
+import { formatShortDateTime } from "$kit/time.ts";
+import { client, webUrl } from "../../shared/src/client.ts";
+import { getLocale } from "../../shared/src/runtime.svelte.ts";
+import { resourceTitle } from "../../shared/src/shell/title.ts";
 import Button from "../../shared/src/ui/Button.svelte";
 import CopyButton from "../../shared/src/ui/CopyButton.svelte";
 import Popover from "../../shared/src/ui/Popover.svelte";
 import Section from "../../shared/src/ui/Section.svelte";
-import type { ViewProps } from "../../shared/src/view-types";
+import type { ViewProps } from "../../shared/src/view-types.ts";
 import CheckpointCreate from "./CheckpointCreate.svelte";
 import CheckpointFiles from "./CheckpointFiles.svelte";
 

@@ -4,11 +4,11 @@ import type {
 	LabelListItem,
 	LabelResourceType,
 } from "@neta-art/cohub";
-import { resourceLabelsRepo } from "$lib/cache/repositories/resource-labels-repo";
+import { resourceLabelsRepo } from "#lib/cache/repositories/resource-labels-repo.ts";
 import {
 	markLabelItemsStale,
 	setCachedSpaceLabels,
-} from "$lib/stores/space-labels";
+} from "#lib/stores/space-labels.ts";
 
 type ResourceLabelSnapshot = {
 	spaceId: string;

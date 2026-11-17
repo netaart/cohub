@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { accessRequestFor } from "./access.js";
+import { accessRequestFor } from "./access.ts";
 
 test("session and space scopes target their own space", () => {
   for (const scope of [

@@ -77,6 +77,16 @@
       }
     },
     {
+      "includes": ["cohub-apps/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useImportExtensions": "error"
+          }
+        }
+      }
+    },
+    {
       "includes": ["cohub-apps/shared/**/*.css"],
       "css": { "parser": { "tailwindDirectives": true } }
     }

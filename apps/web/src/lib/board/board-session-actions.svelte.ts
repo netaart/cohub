@@ -9,15 +9,15 @@ import {
 	Square,
 } from "lucide-svelte";
 import { untrack } from "svelte";
-import { sessionChangedItems } from "$lib/board/board-session";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import { copyTextToClipboard } from "$lib/clipboard";
-import type { BoardMenuAction } from "$lib/components/board/BoardContextMenu.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { buildSpaceSessionRoute } from "$lib/space-routes";
-import { sessionStore } from "$lib/stores/session-store";
+import { sessionChangedItems } from "#lib/board/board-session.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import { copyTextToClipboard } from "#lib/clipboard.ts";
+import type { BoardMenuAction } from "#lib/components/board/BoardContextMenu.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { buildSpaceSessionRoute } from "#lib/space-routes.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
 
 type SessionItem = Extract<BoardSceneItem, { type: "session" }>;
 

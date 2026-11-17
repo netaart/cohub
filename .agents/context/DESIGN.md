@@ -59,7 +59,7 @@ Cohub Web 使用 semantic theme tokens 管理颜色与主题。文档只约束�
 
 ### Motion
 
-动效短促、克制，只表达状态变化。Token 与 overlay 过渡在 `$lib/motion`，CSS 侧为 `--ease-out` / `--ease-drawer`（Tailwind `ease-out` / `ease-drawer`）与 `--motion-panel-*`，两边数值保持一致。以下规则适用于应用界面本身；Board 内容动画和营销页不受限。
+动效短促、克制，只表达状态变化。Token 与 overlay 过渡在 `#lib/motion.ts`，CSS 侧为 `--ease-out` / `--ease-drawer`（Tailwind `ease-out` / `ease-drawer`）与 `--motion-panel-*`，两边数值保持一致。以下规则适用于应用界面本身；Board 内容动画和营销页不受限。
 
 - **先问该不该动**：键盘触发、每天上百次的操作（命令面板、`/` `@` 菜单、列表切换）不做动画；常用 hover 只变颜色；弹窗、抽屉、toast 用标准动画；首次 / 少见时刻才放 delight。
 - **只用 ease-out**：进入、退出、按压、回弹都用 `--ease-out`，抽屉和 sheet 用 `--ease-drawer`；UI 不用 ease-in（开头慢，正是用户盯着看的时刻）。不手写 `cubic-bezier`。

@@ -1,14 +1,14 @@
 <script lang="ts">
 import { untrack } from "svelte";
-import * as publicEnv from "$env/static/public";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { parseNewChatBackgroundAction } from "$lib/new-chat-background-bridge";
-import { m } from "$lib/paraglide/messages.js";
-import { emitSpaceConfigBackgroundAction } from "$lib/space-config";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { parseNewChatBackgroundAction } from "#lib/new-chat-background-bridge.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { emitSpaceConfigBackgroundAction } from "#lib/space-config.ts";
 import {
 	createSpacePreviewSessionController,
 	type SpacePreviewTarget,
-} from "$lib/space-preview-session.svelte";
+} from "#lib/space-preview-session.svelte.ts";
+import { PUBLIC_PREVIEW_ORIGIN } from "$app/env/public";
 
 type Props = {
 	spaceId: string;
@@ -19,8 +19,7 @@ type Props = {
 const { spaceId, path }: Props = $props();
 
 const locale = $derived(getLocale());
-const previewOrigin =
-	publicEnv.PUBLIC_PREVIEW_ORIGIN?.replace(/\/+$/, "") ?? "";
+const previewOrigin = PUBLIC_PREVIEW_ORIGIN?.replace(/\/+$/, "") ?? "";
 let frame = $state<HTMLIFrameElement | null>(null);
 
 const canPreview = $derived(Boolean(previewOrigin && spaceId && path));

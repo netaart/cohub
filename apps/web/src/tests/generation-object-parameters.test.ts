@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PublicGenerationDeclaration } from "@cohub/protocol/generation";
-import { validateBoardGenerationParameters } from "../lib/board/board-generation";
-import { isValidCachedGenerationModel } from "../lib/stores/generation-models-validation";
+import { validateBoardGenerationParameters } from "../lib/board/board-generation.ts";
+import { isValidCachedGenerationModel } from "../lib/stores/generation-models-validation.ts";
 
 const song2 = {
 	schema: "neta.generation.model.v1",
@@ -25,7 +25,9 @@ test("board generation accepts a JSON object for an object parameter", () => {
 
 test("board generation rejects text and arrays for an object parameter", () => {
 	assert.equal(
-		validateBoardGenerationParameters(song2, { harmony: '{"follow":["verse"]}' }),
+		validateBoardGenerationParameters(song2, {
+			harmony: '{"follow":["verse"]}',
+		}),
 		"harmony must be a JSON object.",
 	);
 	assert.equal(

@@ -2,7 +2,7 @@ import type {
 	AppNavigationOpenMessage,
 	AppNavigationOpenResponse,
 } from "@cohub/protocol/app-navigation";
-import type { resolveAppNavigation } from "./app-open";
+import type { resolveAppNavigation } from "./app-open.ts";
 
 type AppTarget = Extract<AppNavigationOpenMessage["target"], { kind: "app" }>;
 type ResolvedApp = Awaited<ReturnType<typeof resolveAppNavigation>>;

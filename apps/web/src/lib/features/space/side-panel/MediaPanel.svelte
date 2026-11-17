@@ -2,10 +2,10 @@
 import type { GenerationOutputType } from "@neta-art/cohub";
 import { ExternalLink, Loader2 } from "lucide-svelte";
 import { onMount } from "svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import GenerationGrid from "./GenerationGrid.svelte";
-import type { GenerationFeed } from "./generation-feed.svelte";
+import type { GenerationFeed } from "./generation-feed.svelte.ts";
 import LoadError from "./LoadError.svelte";
 import LoadMoreButton from "./LoadMoreButton.svelte";
 

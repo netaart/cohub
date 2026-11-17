@@ -5,7 +5,7 @@ import {
 	isArchivedMessageIdentity,
 	isSameLiveMessage,
 	shouldPreserveLivePreviewOnArchive,
-} from "../lib/session-generation-stream-guards";
+} from "../lib/session-generation-stream-guards.ts";
 
 /**
  * Integration-style pure scenarios for intermediate archive + stale guards.

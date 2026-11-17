@@ -1,12 +1,12 @@
 import type { AppRecord } from "@neta-art/cohub";
-import { sortAppsByRecentUpdate } from "$lib/app-sort";
+import { sortAppsByRecentUpdate } from "#lib/app-sort.ts";
 import {
 	type AppsChangedDetail,
 	createAppMutationBuffer,
 	upsertAppSnapshot,
-} from "$lib/features/app/app-realtime";
-import { sdk } from "$lib/sdk";
-import { SpaceListFeed } from "./space-list-feed.svelte";
+} from "#lib/features/app/app-realtime.ts";
+import { sdk } from "#lib/sdk.ts";
+import { SpaceListFeed } from "./space-list-feed.svelte.ts";
 
 export class SpaceAppsFeed extends SpaceListFeed<AppRecord> {
 	readonly #buffer = createAppMutationBuffer();

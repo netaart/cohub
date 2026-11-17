@@ -14,35 +14,35 @@ import {
 	Trash2,
 } from "lucide-svelte";
 import { onDestroy } from "svelte";
-import { goto } from "$app/navigation";
-import AccessStateView from "$lib/components/AccessStateView.svelte";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import ModelSelector from "$lib/components/ModelSelector.svelte";
-import UserIdentity from "$lib/components/UserIdentity.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import AccessStateView from "#lib/components/AccessStateView.svelte";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import ModelSelector from "#lib/components/ModelSelector.svelte";
+import UserIdentity from "#lib/components/UserIdentity.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	cronjobModelLabel,
 	cronjobPromptMeta,
 	formatCronjobPrompt,
-} from "$lib/resource-kit/cronjob";
+} from "#lib/resource-kit/cronjob.ts";
 import {
 	displaySafeJson,
 	taskRunDuration,
 	taskRunStatusBadge,
-} from "$lib/resource-kit/task-run";
-import { formatDateTime, formatShortDateTime } from "$lib/resource-kit/time";
+} from "#lib/resource-kit/task-run.ts";
+import { formatDateTime, formatShortDateTime } from "#lib/resource-kit/time.ts";
 import {
 	buildSpaceNewSessionRoute,
 	buildSpaceTaskRoute,
-} from "$lib/space-routes";
-import { displayUserName } from "../space-utils";
+} from "#lib/space-routes.ts";
+import { goto } from "$app/navigation";
+import { displayUserName } from "../space-utils.ts";
 import {
 	type CronjobMode,
 	createCronjobDetailController,
-} from "./cronjob-detail-controller.svelte";
-import type { TaskRealtimeEvent } from "./task-run-detail-controller.svelte";
-import { withCurrentWindow } from "./window-route";
+} from "./cronjob-detail-controller.svelte.ts";
+import type { TaskRealtimeEvent } from "./task-run-detail-controller.svelte.ts";
+import { withCurrentWindow } from "./window-route.ts";
 
 type Props = {
 	mode: CronjobMode;

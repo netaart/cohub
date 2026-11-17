@@ -2,7 +2,7 @@ import type { Component } from "svelte";
 import type { Permission } from "@neta-art/cohub";
 import type { AppNavigationTarget } from "@cohub/protocol/app-navigation";
 import type { ResourceAppTarget } from "@cohub/protocol";
-import type { ResourceDetail } from "./client";
+import type { ResourceDetail } from "./client.ts";
 
 export type ResourceViewModule = { default: Component<ViewProps> };
 

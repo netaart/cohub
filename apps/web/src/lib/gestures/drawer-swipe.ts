@@ -2,8 +2,8 @@ import {
 	FLICK_VELOCITY_PX_PER_MS,
 	type GestureAxis,
 	resolveGestureAxis,
-} from "$lib/gestures/axis-lock";
-import { DESKTOP_SHELL_MIN_WIDTH_PX } from "$lib/layout/breakpoints";
+} from "#lib/gestures/axis-lock.ts";
+import { DESKTOP_SHELL_MIN_WIDTH_PX } from "#lib/layout/breakpoints.ts";
 
 export const MOBILE_DRAWER_WIDTH_PX = 280;
 export const MOBILE_DRAWER_MAX_WIDTH_VW = 85;

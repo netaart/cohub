@@ -1,7 +1,7 @@
 import type { Usage } from "@cohub/protocol/core";
-import { formatCurrency } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
+import { formatCurrency } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 /** Compact token count for message/process meta bars (matches chat bubble style). */
 export function formatTokenCount(n: number): string {

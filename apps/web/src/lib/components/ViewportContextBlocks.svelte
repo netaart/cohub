@@ -5,8 +5,8 @@ import {
 	viewportContextId,
 } from "@cohub/protocol";
 import { AppWindow, FileText, LayoutGrid, Radio, X } from "lucide-svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	contexts: ViewportContext[];

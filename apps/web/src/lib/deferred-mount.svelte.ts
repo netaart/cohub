@@ -1,4 +1,4 @@
-import { DURATION_PANEL } from "$lib/motion";
+import { DURATION_PANEL } from "#lib/motion.ts";
 
 export function prefersReducedMotionNow(): boolean {
 	if (typeof window === "undefined") return false;

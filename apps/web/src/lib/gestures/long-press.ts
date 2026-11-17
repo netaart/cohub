@@ -2,7 +2,7 @@ import {
 	isPointerDragPointerType,
 	isWithinActivateTolerance,
 	POINTER_DRAG_CLICK_SUPPRESS_MS,
-} from "$lib/drag/pointer-drag-core";
+} from "#lib/drag/pointer-drag-core.ts";
 
 export const LONG_PRESS_MS = 450;
 

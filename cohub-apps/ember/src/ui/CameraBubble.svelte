@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { Camp } from "../engine/camp.svelte";
-  import { CAMERA_RANGE } from "../net/media-policy";
+  import type { Camp } from "../engine/camp.svelte.ts";
+  import { CAMERA_RANGE } from "../net/media-policy.ts";
 
   let { camp, participantId, track, self = false }: {
     camp: Camp; participantId: string; track: MediaStreamTrack; self?: boolean;

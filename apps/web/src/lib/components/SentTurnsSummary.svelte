@@ -1,10 +1,10 @@
 <script lang="ts">
 import { ArrowUpRight } from "lucide-svelte";
-import RelatedSessionLink from "$lib/components/RelatedSessionLink.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { NO_SENT_SESSIONS, summarizeSentSessions } from "$lib/sent-turns";
-import { useSessionRelations } from "$lib/session-relations-context";
+import RelatedSessionLink from "#lib/components/RelatedSessionLink.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { NO_SENT_SESSIONS, summarizeSentSessions } from "#lib/sent-turns.ts";
+import { useSessionRelations } from "#lib/session-relations-context.ts";
 
 const { turnId }: { turnId: string } = $props();
 

@@ -1,12 +1,12 @@
 import type { SessionRecord } from "@neta-art/cohub";
-import { canUseUserScopedCache } from "$lib/cache/keys";
-import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
-import { userProfilesRepo } from "$lib/cache/repositories/user-profiles-repo";
-import { sdk } from "$lib/sdk";
-import type { SessionRecordInput } from "$lib/session-record-merge";
-import { SessionStore } from "$lib/session-store";
-import { readSessionTurnState } from "$lib/session-turn-state";
-import { authStore } from "$lib/stores/auth.svelte";
+import { canUseUserScopedCache } from "#lib/cache/keys.ts";
+import { sessionDetailRepo } from "#lib/cache/repositories/session-detail-repo.ts";
+import { userProfilesRepo } from "#lib/cache/repositories/user-profiles-repo.ts";
+import { sdk } from "#lib/sdk.ts";
+import type { SessionRecordInput } from "#lib/session-record-merge.ts";
+import { SessionStore } from "#lib/session-store.ts";
+import { readSessionTurnState } from "#lib/session-turn-state.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 export const sessionStore = new SessionStore({
 	async save(records) {

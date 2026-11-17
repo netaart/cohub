@@ -1,6 +1,6 @@
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
-import type { CommandPaletteLens } from "./lens";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { CommandPaletteLens } from "./lens.ts";
 
 export function commandLensLabel(lens: CommandPaletteLens, locale: Locale) {
 	const options = { locale };

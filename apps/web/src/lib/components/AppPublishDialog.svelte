@@ -8,22 +8,22 @@ import {
 	type SpaceRecord,
 } from "@neta-art/cohub";
 import { Check, Copy, ExternalLink, Rocket } from "lucide-svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import { dispatchAppsChanged } from "$lib/features/app/app-realtime";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { APP_SCOPE_GROUPS, APP_SCOPE_OPTIONS } from "$lib/resource-kit/app";
-import { sdk } from "$lib/sdk";
+import Dialog from "#lib/components/Dialog.svelte";
+import Spinner from "#lib/components/Spinner.svelte";
+import { dispatchAppsChanged } from "#lib/features/app/app-realtime.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { APP_SCOPE_GROUPS, APP_SCOPE_OPTIONS } from "#lib/resource-kit/app.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	normalizePublicSlugInput,
 	normalizeUsernameInput,
 	validateAppSlugInput,
 	validateSpaceSlugInput,
 	validateUsernameInput,
-} from "$lib/slug-rules";
-import { buildPublicAppRoute } from "$lib/space-routes";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/slug-rules.ts";
+import { buildPublicAppRoute } from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 const WORK_HIDE_COHUB_BAR_FEATURE = "work.publish.hide_cohub_bar";
 

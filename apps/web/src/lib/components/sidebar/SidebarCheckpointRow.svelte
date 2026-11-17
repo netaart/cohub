@@ -1,10 +1,10 @@
 <script lang="ts">
 import type { CheckpointRecord } from "@neta-art/cohub";
 import { Link2Off } from "lucide-svelte";
-import SidebarActionButton from "$lib/components/sidebar/SidebarActionButton.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { formatCompactAbsoluteTime } from "$lib/time-format";
+import SidebarActionButton from "#lib/components/sidebar/SidebarActionButton.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { formatCompactAbsoluteTime } from "#lib/time-format.ts";
 
 const {
 	checkpoint,

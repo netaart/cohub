@@ -7,13 +7,13 @@ export type ScheduleSubmission = ScheduleFields & { prompt: string };
 import { Check, Plus } from "lucide-svelte";
 import { untrack } from "svelte";
 import { m } from "$messages";
-import { formatShortDateTime } from "$kit/time";
-import { getLocale } from "../../shared/src/runtime.svelte";
+import { formatShortDateTime } from "$kit/time.ts";
+import { getLocale } from "../../shared/src/runtime.svelte.ts";
 import Button from "../../shared/src/ui/Button.svelte";
-import { cardClass, inputClass, labelClass } from "../../shared/src/ui/classes";
+import { cardClass, inputClass, labelClass } from "../../shared/src/ui/classes.ts";
 import Field from "../../shared/src/ui/Field.svelte";
 import Notice from "../../shared/src/ui/Notice.svelte";
-import { CRON_PRESETS, previewCron, type CronPreview } from "./cron";
+import { CRON_PRESETS, previewCron, type CronPreview } from "./cron.ts";
 
 type Props = {
   mode: "create" | "edit";

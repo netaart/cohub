@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { Tone } from "../status";
+import type { Tone } from "../status.ts";
 
 type Props = { tone: Tone; label?: string; live?: boolean; class?: string };
 let { tone, label, live = false, class: className = "" }: Props = $props();

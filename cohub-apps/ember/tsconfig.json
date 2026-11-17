@@ -6,13 +6,11 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "allowJs": true,
-    "checkJs": false,
     "types": ["node", "svelte", "vite/client"]
   },
   "include": ["src/**/*.ts", "src/**/*.svelte", "spirit/**/*.ts", "preview/**/*.ts", "vite.config.ts"]

@@ -7,7 +7,7 @@ import {
 	startCohubDebugger,
 	stopCohubDebugger,
 } from "@neta-art/cohub/debugger";
-import { saveFile } from "$lib/downloads.svelte";
+import { saveFile } from "#lib/downloads.svelte.ts";
 
 declare global {
 	interface Window {

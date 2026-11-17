@@ -1,5 +1,5 @@
-import type { BoardTrackGroup } from "$lib/board/animation-timeline";
-import { m } from "$lib/paraglide/messages.js";
+import type { BoardTrackGroup } from "#lib/board/animation-timeline.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Locale = Parameters<typeof m.board_prop_position>[1];
 

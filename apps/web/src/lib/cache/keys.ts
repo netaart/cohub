@@ -1,4 +1,4 @@
-import { authStore } from "$lib/stores/auth.svelte";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 /**
  * User-scoped cache partition key.

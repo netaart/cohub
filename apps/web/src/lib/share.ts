@@ -1,4 +1,4 @@
-import { callHost, supportsHostCapability } from "$lib/host-bridge";
+import { callHost, supportsHostCapability } from "#lib/host-bridge.ts";
 
 export type ShareContent = { title: string; text: string; url: string };
 

@@ -9,8 +9,8 @@ import {
 	type BoardAppDetails,
 	type BoardAppMeta,
 	boardAppMeta,
-} from "$lib/board/board-app";
-import BoardAppItem from "$lib/components/board/BoardAppItem.svelte";
+} from "#lib/board/board-app.ts";
+import BoardAppItem from "#lib/components/board/BoardAppItem.svelte";
 
 type AppItemProps = {
 	id: string;

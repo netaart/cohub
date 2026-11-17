@@ -1,4 +1,4 @@
-import { EARSHOT } from "../camp/world";
+import { EARSHOT } from "../camp/world.ts";
 
 export type MediaCandidate = { participantId: string; name: string; kind: "audio" | "video" };
 export type MediaPosition = { distance: number; visible: boolean; hearing?: number };

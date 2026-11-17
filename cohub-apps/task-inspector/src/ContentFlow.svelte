@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { ContentBlock } from "@cohub/protocol/core";
 import { Brain, ChevronRight, CircleAlert, Wrench } from "lucide-svelte";
-import { displaySafeJson } from "$kit/task-run";
-import { getLocale } from "../../shared/src/runtime.svelte";
+import { displaySafeJson } from "$kit/task-run.ts";
+import { getLocale } from "../../shared/src/runtime.svelte.ts";
 
 type Props = { content: ContentBlock[]; streaming: boolean; terminal?: boolean };
 let { content, streaming, terminal = false }: Props = $props();

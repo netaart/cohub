@@ -1,19 +1,25 @@
 <script lang="ts">
 import { HttpError } from "@neta-art/cohub";
-import { ArrowUpRight, FileText, Loader2, RefreshCw, ShieldAlert } from "lucide-svelte";
+import {
+	ArrowUpRight,
+	FileText,
+	Loader2,
+	RefreshCw,
+	ShieldAlert,
+} from "lucide-svelte";
+import { ensureAuth } from "#lib/auth.ts";
+import { handleUnauthorizedError } from "#lib/auth-redirect.ts";
+import { userTheme } from "#lib/custom-theme/user-theme.svelte.ts";
+import * as account from "#lib/features/settings/account-data.ts";
+import { onSettingsPageActive } from "#lib/features/settings/page-context.svelte.ts";
+import { formatDateTime } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { buildSpaceLandingRoute } from "#lib/space-routes.ts";
+import { billingConversion } from "#lib/stores/billing-conversion.svelte.ts";
+import { cacheSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
 import { goto } from "$app/navigation";
-import { ensureAuth } from "$lib/auth";
-import { handleUnauthorizedError } from "$lib/auth-redirect";
-import { userTheme } from "$lib/custom-theme/user-theme.svelte";
-import * as account from "$lib/features/settings/account-data";
-import { onSettingsPageActive } from "$lib/features/settings/page-context.svelte";
-import { formatDateTime } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { buildSpaceLandingRoute } from "$lib/space-routes";
-import { billingConversion } from "$lib/stores/billing-conversion.svelte";
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 
 const locale = $derived(getLocale());
 
@@ -59,9 +65,10 @@ async function openHomeSpace() {
 	} catch (error) {
 		if (await handleUnauthorizedError(error)) return;
 		if (billingConversion.handleHttpError(error)) return;
-		actionError = error instanceof HttpError && error.code === "home_space_name_taken"
-			? m.rules_home_name_taken({}, { locale })
-			: m.rules_open_home_failed({}, { locale });
+		actionError =
+			error instanceof HttpError && error.code === "home_space_name_taken"
+				? m.rules_home_name_taken({}, { locale })
+				: m.rules_open_home_failed({}, { locale });
 	} finally {
 		isOpening = false;
 	}

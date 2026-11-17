@@ -1,10 +1,10 @@
 <script lang="ts">
 import { Heart } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
-import { ResourceLike } from "$lib/features/likes/resource-like.svelte";
-import { formatCompactNumber, formatNumber } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { ResourceLike } from "#lib/features/likes/resource-like.svelte.ts";
+import { formatCompactNumber, formatNumber } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	appId: string;

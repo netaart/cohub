@@ -7,12 +7,12 @@ let cachedLabels: LabelListItem[] = [];
 <script lang="ts">
 import { Loader2, Plus, Tag } from "lucide-svelte";
 import { tick } from "svelte";
-import AdaptivePopover from "$lib/components/list-page/AdaptivePopover.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { flattenLabelsWithRefs } from "$lib/stores/space-labels";
+import AdaptivePopover from "#lib/components/list-page/AdaptivePopover.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { flattenLabelsWithRefs } from "#lib/stores/space-labels.ts";
 
 const {
 	open,

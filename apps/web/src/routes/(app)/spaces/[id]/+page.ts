@@ -1,4 +1,4 @@
-import { readWindowFromSearch } from "$lib/features/space/modules/window-route";
+import { readWindowFromSearch } from "#lib/features/space/modules/window-route.ts";
 import type { PageLoad } from "./$types";
 
 export const load: PageLoad = ({ params, url }) => {

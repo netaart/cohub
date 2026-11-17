@@ -17,17 +17,17 @@ import {
 	X,
 } from "lucide-svelte";
 import type { Snippet } from "svelte";
-import { floatNear } from "$lib/actions/portal";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { uiState } from "$lib/stores/ui.svelte";
+import { floatNear } from "#lib/actions/portal.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { uiState } from "#lib/stores/ui.svelte.ts";
 import type {
 	PreviewChrome,
 	PreviewHeaderAction,
 	PreviewHeaderVariant,
-} from "./preview-header";
+} from "./preview-header.ts";
 import WindowSyncStatus from "./WindowSyncStatus.svelte";
-import type { Window } from "./windows";
+import type { Window } from "./windows.ts";
 
 const {
 	windows,

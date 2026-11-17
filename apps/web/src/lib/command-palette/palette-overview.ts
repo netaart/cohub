@@ -2,10 +2,10 @@ import type { PaletteOverviewResponse } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { sdk } from "$lib/sdk";
-import { getRecentSpaces } from "$lib/stores/recent-space";
+} from "#lib/cache/broadcast.ts";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { sdk } from "#lib/sdk.ts";
+import { getRecentSpaces } from "#lib/stores/recent-space.ts";
 
 /**
  * Client cache for /api/palette/overview: a memory + localStorage snapshot

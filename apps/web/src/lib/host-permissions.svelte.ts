@@ -8,7 +8,7 @@ import {
 	hostPlatform,
 	readyHost,
 	supportsHostCapability,
-} from "$lib/host-bridge";
+} from "#lib/host-bridge.ts";
 
 let permissions = $state<HostPermissions | null>(null);
 let subscribed: Promise<void> | null = null;

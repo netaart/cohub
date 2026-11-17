@@ -3,9 +3,9 @@ import { tick } from "svelte";
 import {
 	describeTextValue,
 	isLongTextValue,
-} from "$lib/components/tool-call-format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/components/tool-call-format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	value: string;

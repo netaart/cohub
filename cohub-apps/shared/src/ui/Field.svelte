@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
-import { labelClass } from "./classes";
+import { labelClass } from "./classes.ts";
 
 type Props = { id: string; label: string; hint?: string; error?: string | null; optional?: string; children: Snippet; class?: string };
 let { id, label, hint, error, optional, children, class: className = "" }: Props = $props();

@@ -1,7 +1,7 @@
 import type { SpaceAccessPolicy } from "@neta-art/cohub";
-import { copyTextToClipboard } from "$lib/clipboard";
-import { sdk } from "$lib/sdk";
-import { buildSpaceSessionRoute } from "$lib/space-routes";
+import { copyTextToClipboard } from "#lib/clipboard.ts";
+import { sdk } from "#lib/sdk.ts";
+import { buildSpaceSessionRoute } from "#lib/space-routes.ts";
 
 function sessionShareUrl(spaceId: string, targetSessionId: string): string {
 	return `${window.location.origin}${buildSpaceSessionRoute(spaceId, targetSessionId)}`;

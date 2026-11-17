@@ -12,7 +12,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "typecheck": "svelte-check --tsgo --incremental --tsconfig ./tsconfig.json",
     "lint": "biome lint src/*.ts vite.config.ts",
     "lint:fix": "biome lint --write src/*.ts vite.config.ts",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
@@ -23,15 +23,16 @@
     "@fontsource/geist-mono": "^5.2.8",
     "@lucide/svelte": "^1.33.0",
     "@neta-art/cohub": "^8.21.0",
-    "svelte": "^5.56.9"
+    "svelte": "^5.57.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.3",
-    "@sveltejs/vite-plugin-svelte": "^7.3.0",
-    "@types/node": "^26.2.0",
-    "svelte-check": "^4.7.2",
-    "tsx": "^4.23.1",
-    "typescript": "^6.0.3",
-    "vite": "^8.2.1"
+    "@biomejs/biome": "^2.6.8",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@types/node": "^26.6.6",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "svelte-check": "^4.7.8",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.8"
   }
 }

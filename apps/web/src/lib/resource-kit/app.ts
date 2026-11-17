@@ -8,8 +8,8 @@ import type {
 	AppVersionRecord,
 	Permission,
 } from "@neta-art/cohub";
-import { m } from "$messages";
-import { asRecord, type Locale } from "./core";
+import { m } from "../paraglide/messages.js";
+import { asRecord, type Locale } from "./core.ts";
 
 export type AppTotals = Pick<AppDetailResponse, "totalViews" | "likeCount">;
 

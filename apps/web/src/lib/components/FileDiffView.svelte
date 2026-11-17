@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { SpacePendingDiffFileResponse } from "@neta-art/cohub";
 import { Loader2 } from "lucide-svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	diffStatusClass,
 	diffStatusLabel,
@@ -11,7 +11,7 @@ import {
 	isUnchangedPendingDiff,
 	patchLineClass,
 	patchLinePrefix,
-} from "$lib/resource-kit/diff";
+} from "#lib/resource-kit/diff.ts";
 
 type Props = {
 	patch: SpacePendingDiffFileResponse | null;

@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { PreviewIcon } from "../preview-header";
+import type { PreviewIcon } from "../preview-header.ts";
 
 /**
  * Shared icon button for header controls. One size and one icon scale across

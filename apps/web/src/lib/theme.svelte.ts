@@ -1,5 +1,5 @@
-import { CUSTOM_THEME_CHANGED_EVENT } from "$lib/custom-theme/events";
-import { syncSystemChromeColor } from "$lib/system-chrome";
+import { CUSTOM_THEME_CHANGED_EVENT } from "#lib/custom-theme/events.ts";
+import { syncSystemChromeColor } from "#lib/system-chrome.ts";
 import {
 	getSystemTheme,
 	isThemeMode,
@@ -8,9 +8,9 @@ import {
 	THEME_COLOR,
 	THEME_STORAGE_KEY,
 	type ThemeMode,
-} from "$lib/theme-registry";
+} from "#lib/theme-registry.ts";
 
-export type { ResolvedTheme, ThemeMode } from "$lib/theme-registry";
+export type { ResolvedTheme, ThemeMode } from "#lib/theme-registry.ts";
 
 // --- Reactive state (Svelte 5 runes) ---
 let _mode = $state<ThemeMode>("system");

@@ -2,18 +2,18 @@
 import type { AppPublicOwnerRecord, AppRecord } from "@neta-art/cohub";
 import { AlertTriangle, Loader2, ShieldCheck } from "lucide-svelte";
 import { onDestroy, onMount } from "svelte";
+import { getAuthToken, signInWithRedirectPath } from "#lib/auth.ts";
+import { readAppCheckoutState } from "#lib/components/app/app-checkout-state.ts";
+import AppAuthorizeDialog from "#lib/features/app/AppAuthorizeDialog.svelte";
+import { isLegacyAppOriginAllowed } from "#lib/features/app/app-origin-allowlist.ts";
+import { createAppBridgeHost } from "#lib/features/app/bridge-host.svelte.ts";
+import { standaloneAppHostTemplate } from "#lib/features/app/standalone-app-host.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { PUBLIC_API_ORIGIN } from "$app/env/public";
 import { page } from "$app/state";
-import { PUBLIC_API_ORIGIN } from "$env/static/public";
-import { getAuthToken, signInWithRedirectPath } from "$lib/auth";
-import { readAppCheckoutState } from "$lib/components/app/app-checkout-state";
-import AppAuthorizeDialog from "$lib/features/app/AppAuthorizeDialog.svelte";
-import { isLegacyAppOriginAllowed } from "$lib/features/app/app-origin-allowlist";
-import { createAppBridgeHost } from "$lib/features/app/bridge-host.svelte";
-import { standaloneAppHostTemplate } from "$lib/features/app/standalone-app-host";
-import type { Locale } from "$lib/i18n/locale";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { authStore } from "$lib/stores/auth.svelte";
 
 type BrokerState = "loading" | "need-login" | "ready" | "error";
 

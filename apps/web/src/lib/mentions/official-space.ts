@@ -1,15 +1,15 @@
 import { HttpError, type SpaceRecord } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
-import { getSpacePublicProfile } from "$lib/space-profile";
+import { sdk } from "#lib/sdk.ts";
+import { getSpacePublicProfile } from "#lib/space-profile.ts";
 import {
 	cacheSpaceRecordSoon,
 	getCachedSpaceRecord,
-} from "$lib/stores/space-record-cache";
+} from "#lib/stores/space-record-cache.ts";
 import {
 	buildSpaceMentionHref,
 	buildSpaceMentionUri,
 	type SpaceMentionSuggestion,
-} from "./space";
+} from "./space.ts";
 
 // https://cohub.live/tzwm/cohub
 const OFFICIAL_SPACE_ID = "cf327f11-5065-4f3a-bfe5-cdb0a70f3377";

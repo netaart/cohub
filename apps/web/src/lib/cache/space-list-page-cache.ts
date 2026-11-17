@@ -1,7 +1,7 @@
 import type { SpaceListPage, SpaceRecord } from "@neta-art/cohub";
-import { idbGet, idbPut } from "$lib/cache/db";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { cacheSpaceRecordsSoon } from "$lib/stores/space-record-cache";
+import { idbGet, idbPut } from "#lib/cache/db.ts";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { cacheSpaceRecordsSoon } from "#lib/stores/space-record-cache.ts";
 
 type CachedSpacePage = {
 	key: string;

@@ -9,9 +9,9 @@ import {
 	setInstalledFileHandler,
 } from "@cohub/protocol";
 import type { AppDetailResponse, AppMeta, AppRecord } from "@neta-art/cohub";
-import { appDisplayTitle } from "$lib/app-page-meta";
-import type { InstalledAppsFile } from "./app-center";
-import { type AppLoader, loadAppPreview } from "./app-open";
+import { appDisplayTitle } from "#lib/app-page-meta.ts";
+import type { InstalledAppsFile } from "./app-center.ts";
+import { type AppLoader, loadAppPreview } from "./app-open.ts";
 
 /** An App the viewer can open a file with. */
 export type FileHandlerApp = {

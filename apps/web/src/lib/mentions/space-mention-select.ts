@@ -1,13 +1,13 @@
 import type { GlobalSearchResult } from "@neta-art/cohub";
-import { mergeCommandResults } from "$lib/command-palette/merge-results";
-import { textMatchScore } from "$lib/command-palette/score";
-import type { CommandPaletteItem } from "$lib/command-palette/types";
-import { normalizeSpacePublicProfile } from "$lib/space-profile";
+import { mergeCommandResults } from "#lib/command-palette/merge-results.ts";
+import { textMatchScore } from "#lib/command-palette/score.ts";
+import type { CommandPaletteItem } from "#lib/command-palette/types.ts";
+import { normalizeSpacePublicProfile } from "#lib/space-profile.ts";
 import {
 	buildSpaceMentionHref,
 	buildSpaceMentionUri,
 	type SpaceMentionSuggestion,
-} from "./space";
+} from "./space.ts";
 
 function mentionSource(
 	source: CommandPaletteItem["source"],

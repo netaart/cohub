@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getDeviceType } from "$lib/device-detection";
+import { getDeviceType } from "#lib/device-detection.ts";
 
 const WINDOWS_CHROME_USER_AGENT =
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +

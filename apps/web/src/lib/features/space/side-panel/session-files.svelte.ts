@@ -1,16 +1,16 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { SessionFileRecord } from "@cohub/protocol/model";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
 import {
 	readSessionFiles,
 	writeSessionFiles,
-} from "$lib/cache/repositories/session-files-repo";
-import { sdk } from "$lib/sdk";
+} from "#lib/cache/repositories/session-files-repo.ts";
+import { sdk } from "#lib/sdk.ts";
 import type {
 	SessionGenerationState,
 	StreamingIntermediateMessage,
-} from "$lib/stores/session-generation.svelte";
+} from "#lib/stores/session-generation.svelte.ts";
 import {
 	extractLiveFileChanges,
 	fileToolBlocks,
@@ -19,7 +19,7 @@ import {
 	pruneCoveredLiveChanges,
 	sameLiveFileChanges,
 	withAncestorPaths,
-} from "./side-panel-data";
+} from "./side-panel-data.ts";
 
 const FILE_LIMIT = 200;
 const INDEX_REFRESH_DELAY_MS = 1_500;

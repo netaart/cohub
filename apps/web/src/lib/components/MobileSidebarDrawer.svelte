@@ -1,13 +1,13 @@
 <script lang="ts">
-import { dismissOnBack } from "$lib/back-layers.svelte";
-import Sidebar from "$lib/components/Sidebar.svelte";
+import { dismissOnBack } from "#lib/back-layers.svelte.ts";
+import Sidebar from "#lib/components/Sidebar.svelte";
 import {
 	getDrawerOpenRatio,
 	MOBILE_DRAWER_MAX_WIDTH_VW,
 	MOBILE_DRAWER_WIDTH_PX,
-} from "$lib/gestures/drawer-swipe";
-import { DURATION_DRAWER_OUT, drawerTransition } from "$lib/motion";
-import { uiState } from "$lib/stores/ui.svelte";
+} from "#lib/gestures/drawer-swipe.ts";
+import { DURATION_DRAWER_OUT, drawerTransition } from "#lib/motion.ts";
+import { uiState } from "#lib/stores/ui.svelte.ts";
 
 const {
 	dragOffsetPx = 0,

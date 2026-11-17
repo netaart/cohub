@@ -6,32 +6,38 @@ import type {
 } from "@neta-art/cohub";
 import { HttpError, isSpaceFsSymlink } from "@neta-art/cohub";
 
-import { ensureBoardExtension } from "$lib/board/board-file";
+import { ensureBoardExtension } from "#lib/board/board-file.ts";
 import {
 	deleteFilePendingDraft,
 	readFilePendingDraft,
 	writeFilePendingDraft,
-} from "$lib/cache/repositories/file-pending-draft-repo";
-import { filePreviewModel } from "$lib/file-preview-model";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { defaultFileViewMode, type FileViewMode } from "$lib/resource-kit/diff";
-import { sdk } from "$lib/sdk";
+} from "#lib/cache/repositories/file-pending-draft-repo.ts";
+import { filePreviewModel } from "#lib/file-preview-model.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import {
+	defaultFileViewMode,
+	type FileViewMode,
+} from "#lib/resource-kit/diff.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	isTextFileResponse,
 	tryResolveTextFileResponse,
-} from "$lib/space-file-text";
-import type { SpaceFsNode } from "$lib/space-fs";
+} from "#lib/space-file-text.ts";
+import type { SpaceFsNode } from "#lib/space-fs.ts";
 
 import {
 	clearCachedSpaceFsSubtree,
 	fetchSpaceFsDirWithCache,
 	getCachedSpaceFsDir,
 	patchCachedSpaceFsDir,
-} from "$lib/stores/space-fs-cache";
-import type { WorkspaceFilePosition } from "$lib/workspace-file-links";
-import { type ActiveFsSource, createActiveFsClient } from "./active-fs-client";
-import { createFileAutosaveCoordinator } from "./file-autosave-coordinator";
+} from "#lib/stores/space-fs-cache.ts";
+import type { WorkspaceFilePosition } from "#lib/workspace-file-links.ts";
+import {
+	type ActiveFsSource,
+	createActiveFsClient,
+} from "./active-fs-client.ts";
+import { createFileAutosaveCoordinator } from "./file-autosave-coordinator.ts";
 import {
 	buildFsEntry,
 	classifySaveConflict,
@@ -42,9 +48,9 @@ import {
 	resolveFsMoveDestination,
 	rewriteFsPathPrefix,
 	updateNodeState,
-} from "./file-workspace-utils";
-import type { WindowSyncStatus } from "./window-sync-status";
-import { workspaceFilePreviewKind } from "./windows";
+} from "./file-workspace-utils.ts";
+import type { WindowSyncStatus } from "./window-sync-status.ts";
+import { workspaceFilePreviewKind } from "./windows.ts";
 
 export type { ActiveFsSource, FileViewMode };
 

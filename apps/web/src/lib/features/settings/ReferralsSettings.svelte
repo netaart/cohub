@@ -1,16 +1,20 @@
 <script lang="ts">
 import type { ReferralListItem } from "@neta-art/cohub";
 import { Check, Copy, Gift, Loader2, RefreshCw, Share2 } from "lucide-svelte";
-import ListRowText from "$lib/components/list-page/ListRowText.svelte";
-import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import * as account from "$lib/features/settings/account-data";
-import { onSettingsPageActive } from "$lib/features/settings/page-context.svelte";
-import { formatCurrency, formatDate, formatDateTime } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { canShare, share } from "$lib/share";
+import ListRowText from "#lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "#lib/components/list-page/list-row.ts";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import * as account from "#lib/features/settings/account-data.ts";
+import { onSettingsPageActive } from "#lib/features/settings/page-context.svelte.ts";
+import {
+	formatCurrency,
+	formatDate,
+	formatDateTime,
+} from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { canShare, share } from "#lib/share.ts";
 
 const locale = $derived(getLocale());
 

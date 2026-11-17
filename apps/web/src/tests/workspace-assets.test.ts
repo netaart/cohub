@@ -7,7 +7,7 @@ import type {
 import {
 	createWorkspaceAssetLoader,
 	resolveWorkspaceFileAsset,
-} from "$lib/workspace-assets";
+} from "#lib/workspace-assets.ts";
 
 const ready: SpaceFsFileResponse = {
 	path: "images/cat.png",

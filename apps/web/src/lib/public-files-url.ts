@@ -1,4 +1,4 @@
-import { PUBLIC_COHUB_ENV, PUBLIC_FILES_ORIGIN } from "$env/static/public";
+import { PUBLIC_COHUB_ENV, PUBLIC_FILES_ORIGIN } from "$app/env/public";
 
 function publicFilesOrigin() {
 	return (PUBLIC_FILES_ORIGIN ?? "").trim().replace(/\/+$/, "");

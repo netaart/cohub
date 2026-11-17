@@ -8,30 +8,30 @@ import {
 	Trash2,
 	Webhook,
 } from "lucide-svelte";
-import { page } from "$app/state";
-import { ensureAuth } from "$lib/auth";
+import { ensureAuth } from "#lib/auth.ts";
 import {
 	channelHealthClass,
 	channelHealthDetail,
 	channelHealthLabel,
 	channelHealthMessage,
-} from "$lib/channel-health";
-import * as account from "$lib/features/settings/account-data";
+} from "#lib/channel-health.ts";
+import * as account from "#lib/features/settings/account-data.ts";
 import {
 	onSettingsPageActive,
 	settingsPageActive,
-} from "$lib/features/settings/page-context.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { buildSpaceLandingRoute } from "$lib/space-routes";
+} from "#lib/features/settings/page-context.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { buildSpaceLandingRoute } from "#lib/space-routes.ts";
+import { page } from "$app/state";
 
 const REFRESH_MS = 15_000;
 
 const active = settingsPageActive();
 const locale = $derived(getLocale());
 const newChannelHref = $derived.by(() => {
-	const target = new URL("/settings/channels/new", page.url);
+	const target = new URL("/settings/channels/new", page.url.href);
 	const from = page.url.searchParams.get("from");
 	if (from) target.searchParams.set("from", from);
 	return target.pathname + target.search;

@@ -1,19 +1,19 @@
 <script lang="ts">
 import { onMount } from "svelte";
-import { goto } from "$app/navigation";
-import { page } from "$app/state";
-import { signInWithRedirectPath } from "$lib/auth";
-import PublicHeader from "$lib/components/PublicHeader.svelte";
-import { trackPurchase } from "$lib/features/billing/funnel";
-import PurchasePanel from "$lib/features/billing/PurchasePanel.svelte";
-import { PurchaseFlow } from "$lib/features/billing/purchase.svelte";
+import { signInWithRedirectPath } from "#lib/auth.ts";
+import PublicHeader from "#lib/components/PublicHeader.svelte";
+import { trackPurchase } from "#lib/features/billing/funnel.ts";
+import PurchasePanel from "#lib/features/billing/PurchasePanel.svelte";
+import { PurchaseFlow } from "#lib/features/billing/purchase.svelte.ts";
 import {
 	type PublicLocale,
 	resolvePublicLocale,
-} from "$lib/i18n/public-locale";
-import { m } from "$lib/paraglide/messages.js";
-import { canonicalUrl } from "$lib/seo";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/i18n/public-locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { canonicalUrl } from "#lib/seo.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 
 const locale = $derived<PublicLocale>(resolvePublicLocale(page.url.pathname));
 const zh = $derived(locale === "zh-CN");

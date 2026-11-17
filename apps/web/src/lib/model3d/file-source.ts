@@ -5,7 +5,7 @@ import {
 	type ModelSource,
 	spaceModelReferences,
 } from "@neta-art/cohub/board/render";
-import type { ResolveWorkspaceAsset } from "$lib/workspace-assets";
+import type { ResolveWorkspaceAsset } from "#lib/workspace-assets.ts";
 
 function decodeBase64(value: string): Uint8Array {
 	const native = (Uint8Array as { fromBase64?: (value: string) => Uint8Array })

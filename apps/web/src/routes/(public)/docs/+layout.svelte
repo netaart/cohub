@@ -1,13 +1,13 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
-import DocsShell from "$lib/components/docs/DocsShell.svelte";
+import DocsShell from "#lib/components/docs/DocsShell.svelte";
 
 type Props = {
 	data: {
 		locale: "en" | "zh";
 		currentSlug: string;
-		sections: import("$lib/docs").DocsSection[];
-		searchEntries: import("$lib/docs").DocsSearchEntry[];
+		sections: import("#lib/docs/index.ts").DocsSection[];
+		searchEntries: import("#lib/docs/index.ts").DocsSearchEntry[];
 	};
 	children: Snippet;
 };

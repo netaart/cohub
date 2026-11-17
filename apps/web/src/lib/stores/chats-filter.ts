@@ -3,9 +3,9 @@ import type {
 	UserSessionSourceKey,
 	UserSessionSpaceSummary,
 } from "@neta-art/cohub";
-import type { Locale } from "$lib/i18n/locale";
-import type { LiveFit } from "$lib/lists/live-list-core";
-import { m } from "$lib/paraglide/messages.js";
+import type { Locale } from "#lib/i18n/locale.ts";
+import type { LiveFit } from "#lib/lists/live-list-core.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 export type ChatsFilter = {
 	source: UserSessionSourceKey | null;

@@ -4,14 +4,14 @@ import type {
 	SessionTurnRecord,
 	StoredIntermediateMessage,
 } from "@cohub/protocol/model";
-import { hasSentTurns } from "./sent-turns";
-import { createStreamingIntermediateMessage } from "./session-streaming-message";
+import { hasSentTurns } from "./sent-turns.ts";
+import { createStreamingIntermediateMessage } from "./session-streaming-message.ts";
 import type {
 	ChatMessage,
 	TimelineItem,
 	TurnFooterPhase,
-} from "./session-tree";
-import { reuseUnchangedItems } from "./structural-sharing";
+} from "./session-tree.ts";
+import { reuseUnchangedItems } from "./structural-sharing.ts";
 
 function getTurnContextWindow(turn: SessionTurnRecord) {
 	const raw = turn.meta?.contextWindow;

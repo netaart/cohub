@@ -1,8 +1,8 @@
 import type { SessionRecord } from "@neta-art/cohub";
-import { chatsInbox } from "$lib/features/sessions/chats-inbox.svelte";
-import { sdk } from "$lib/sdk";
-import { listCachedSession } from "$lib/stores/session-list-cache";
-import { sessionStore } from "$lib/stores/session-store";
+import { chatsInbox } from "#lib/features/sessions/chats-inbox.svelte.ts";
+import { sdk } from "#lib/sdk.ts";
+import { listCachedSession } from "#lib/stores/session-list-cache.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
 
 function applyArchivedAt(sessionId: string, archivedAt: string | null) {
 	const current = sessionStore.get(sessionId);

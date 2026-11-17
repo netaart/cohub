@@ -36,47 +36,47 @@ import {
 import type { Graphics } from "pixi.js";
 import { onDestroy, onMount, untrack } from "svelte";
 import { MediaQuery } from "svelte/reactivity";
-import { boardAppMeta } from "$lib/board/board-app";
-import type { BoardAssetSource } from "$lib/board/board-asset-source";
+import { boardAppMeta } from "#lib/board/board-app.ts";
+import type { BoardAssetSource } from "#lib/board/board-asset-source.ts";
 import {
 	type BoardResourceDrop,
 	boardPointerResources,
 	readBoardResourceDrop,
-} from "$lib/board/board-drop";
+} from "#lib/board/board-drop.ts";
 import {
 	fileAvailability,
 	filePreviewVersion,
 	isFilePreviewStale,
 	loadFilePreview,
 	subscribeFilePreviews,
-} from "$lib/board/board-file-preview-source";
-import type { BoardStageExportBridge } from "$lib/board/board-image-export";
-import { createBoardLiveSessions } from "$lib/board/board-live-sessions.svelte";
-import { createBoardLiveTasks } from "$lib/board/board-live-tasks";
-import { opensInPlace } from "$lib/board/board-media-playback";
+} from "#lib/board/board-file-preview-source.ts";
+import type { BoardStageExportBridge } from "#lib/board/board-image-export.ts";
+import { createBoardLiveSessions } from "#lib/board/board-live-sessions.svelte.ts";
+import { createBoardLiveTasks } from "#lib/board/board-live-tasks.ts";
+import { opensInPlace } from "#lib/board/board-media-playback.ts";
 import {
 	boardFullscreen,
 	cancelBoardFullscreen,
-} from "$lib/board/board-present";
-import { boardSessionDropSnapshot } from "$lib/board/board-session";
+} from "#lib/board/board-present.ts";
+import { boardSessionDropSnapshot } from "#lib/board/board-session.ts";
 import {
 	type BoardThemeSnapshot,
 	boardIdentityColor,
 	boardThemeKey,
 	resolveBoardTheme,
-} from "$lib/board/board-theme";
-import type { BoardEditor } from "$lib/board/editor.svelte";
+} from "#lib/board/board-theme.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
 import {
 	CUSTOM_THEME_CHANGED_EVENT,
 	type CustomThemeChangedDetail,
-} from "$lib/custom-theme/events";
-import { pointerDropZone } from "$lib/drag/pointer-drag.svelte";
-import { toBoardDropItems } from "$lib/drag/pointer-drag-core";
-import { haptic } from "$lib/haptics";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sessionStore } from "$lib/stores/session-store";
-import { getResolvedTheme } from "$lib/theme.svelte";
+} from "#lib/custom-theme/events.ts";
+import { pointerDropZone } from "#lib/drag/pointer-drag.svelte.ts";
+import { toBoardDropItems } from "#lib/drag/pointer-drag-core.ts";
+import { haptic } from "#lib/haptics.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sessionStore } from "#lib/stores/session-store.ts";
+import { getResolvedTheme } from "#lib/theme.svelte.ts";
 
 const {
 	editor,

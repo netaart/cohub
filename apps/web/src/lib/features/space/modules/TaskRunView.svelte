@@ -8,14 +8,13 @@ import {
 	LayoutDashboard,
 } from "lucide-svelte";
 import { onDestroy } from "svelte";
-import { goto } from "$app/navigation";
-import AudioPlayer from "$lib/components/AudioPlayer.svelte";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
-import { mediaLightbox } from "$lib/components/media-lightbox";
-import UserIdentity from "$lib/components/UserIdentity.svelte";
-import MediaImage from "$lib/resource-kit/MediaImage.svelte";
-import MediaVideo from "$lib/resource-kit/MediaVideo.svelte";
+import AudioPlayer from "#lib/components/AudioPlayer.svelte";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import MessageContentFlow from "#lib/components/MessageContentFlow.svelte";
+import { mediaLightbox } from "#lib/components/media-lightbox.ts";
+import UserIdentity from "#lib/components/UserIdentity.svelte";
+import MediaImage from "#lib/resource-kit/MediaImage.svelte";
+import MediaVideo from "#lib/resource-kit/MediaVideo.svelte";
 import {
 	appActionInput,
 	appActionName,
@@ -39,18 +38,19 @@ import {
 	taskRunDuration,
 	taskRunStatusBadge,
 	taskTypeLabel,
-} from "$lib/resource-kit/task-run";
-import { formatDateTime } from "$lib/resource-kit/time";
+} from "#lib/resource-kit/task-run.ts";
+import { formatDateTime } from "#lib/resource-kit/time.ts";
 import {
 	buildSpaceCheckpointRoute,
 	buildSpaceCronjobRoute,
-} from "$lib/space-routes";
-import { displayUserName } from "../space-utils";
+} from "#lib/space-routes.ts";
+import { goto } from "$app/navigation";
+import { displayUserName } from "../space-utils.ts";
 import {
 	createTaskRunDetailController,
 	type TaskRealtimeEvent,
-} from "./task-run-detail-controller.svelte";
-import { withCurrentWindow } from "./window-route";
+} from "./task-run-detail-controller.svelte.ts";
+import { withCurrentWindow } from "./window-route.ts";
 
 type Props = {
 	spaceId: string;
@@ -59,8 +59,8 @@ type Props = {
 	onDetailLoaded?: (run: TaskRunRecord | null) => void;
 };
 
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 let {
 	spaceId,
@@ -140,7 +140,7 @@ $effect(() => {
 	void goto(
 		withCurrentWindow(buildSpaceCheckpointRoute(spaceId, checkpointId)),
 		{
-			replaceState: true,
+			replace: true,
 		},
 	);
 });

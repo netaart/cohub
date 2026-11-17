@@ -27,109 +27,99 @@ import type {
 } from "@neta-art/cohub";
 import type { BoardDocument } from "@neta-art/cohub/board";
 import type { BoardAutomationActivity } from "@neta-art/cohub/board/presence";
-import type { Navigation } from "@sveltejs/kit";
 import { Check, Copy } from "lucide-svelte";
 import { flushSync, onDestroy, onMount, tick, untrack } from "svelte";
 import {
-	beforeNavigate,
-	goto,
-	onNavigate,
-	pushState,
-	replaceState,
-} from "$app/navigation";
-import { page } from "$app/state";
-import { PUBLIC_MARKETPLACE_APP_ID } from "$env/static/public";
-import {
 	type AccessState,
 	isBlockingAccessState,
-} from "$lib/access/access-state";
-import { canViewSpaceCost } from "$lib/activity";
-import { appDisplayTitle } from "$lib/app-page-meta";
-import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
-import { invalidateFilePreviews } from "$lib/board/board-file-preview-source";
-import { spaceFsRepo } from "$lib/cache/repositories/space-fs-repo";
-import { spaceRecordRepo } from "$lib/cache/repositories/space-record-repo";
+} from "#lib/access/access-state.ts";
+import { canViewSpaceCost } from "#lib/activity.ts";
+import { appDisplayTitle } from "#lib/app-page-meta.ts";
+import type { BoardCollaboratorProfile } from "#lib/board/board-collaborator.ts";
+import { invalidateFilePreviews } from "#lib/board/board-file-preview-source.ts";
+import { spaceFsRepo } from "#lib/cache/repositories/space-fs-repo.ts";
+import { spaceRecordRepo } from "#lib/cache/repositories/space-record-repo.ts";
 import {
 	createSpaceFsRefreshCoordinator,
 	type SpaceFsRefreshBatch,
-} from "$lib/cache/space-fs-refresh-coordinator";
-import { reconcileSpaceFsSequence } from "$lib/cache/space-fs-sequence";
-import AccessStateView from "$lib/components/AccessStateView.svelte";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import ResizeHandle from "$lib/components/ResizeHandle.svelte";
-import ResourceLabelPicker from "$lib/components/ResourceLabelPicker.svelte";
-import UserIdentity from "$lib/components/UserIdentity.svelte";
+} from "#lib/cache/space-fs-refresh-coordinator.ts";
+import { reconcileSpaceFsSequence } from "#lib/cache/space-fs-sequence.ts";
+import AccessStateView from "#lib/components/AccessStateView.svelte";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import ResizeHandle from "#lib/components/ResizeHandle.svelte";
+import ResourceLabelPicker from "#lib/components/ResourceLabelPicker.svelte";
+import UserIdentity from "#lib/components/UserIdentity.svelte";
 import {
 	isThemeCssPath,
 	refreshThemeCss,
-} from "$lib/custom-theme/theme-css.svelte";
-import { createDeferredMount } from "$lib/deferred-mount.svelte";
+} from "#lib/custom-theme/theme-css.svelte.ts";
+import { createDeferredMount } from "#lib/deferred-mount.svelte.ts";
 import {
 	cacheInstalledApps,
 	invalidateInstalledApps,
 	readInstalledApps,
 	writeInstalledApps,
-} from "$lib/features/app/app-center";
+} from "#lib/features/app/app-center.ts";
 import {
 	APP_NAVIGATION_OPEN_EVENT,
 	type AppNavigationOpenRequest,
-} from "$lib/features/app/app-navigation-request";
-import { createAppNavigator } from "$lib/features/app/app-navigator";
+} from "#lib/features/app/app-navigation-request.ts";
+import { createAppNavigator } from "#lib/features/app/app-navigator.ts";
 import {
 	createAppNavigationResolver,
 	loadAppPreview,
 	resolveAppNavigation,
-} from "$lib/features/app/app-open";
+} from "#lib/features/app/app-open.ts";
 import {
 	APPS_CHANGED_EVENT,
 	dispatchAppDomainsChanged,
 	dispatchAppsChanged,
 	dispatchInstalledAppsChanged,
-} from "$lib/features/app/app-realtime";
+} from "#lib/features/app/app-realtime.ts";
 import {
 	createFileHandlerResolver,
 	type FileHandlerApp,
 	saveDefaultFileHandler,
-} from "$lib/features/app/file-handlers";
-import type { AppSurfaceHost } from "$lib/features/app/surface-host";
+} from "#lib/features/app/file-handlers.ts";
+import type { AppSurfaceHost } from "#lib/features/app/surface-host.ts";
 import {
 	type AppSurfaceCallOutcome,
 	createAppSurfaceRegistry,
-} from "$lib/features/app/surface-registry";
+} from "#lib/features/app/surface-registry.ts";
 import {
 	type DesktopCommandOutcome,
 	registerDesktopCommandHost,
-} from "$lib/features/desktop-command/bus";
-import SpaceGuestApp from "$lib/features/invitations/SpaceGuestApp.svelte";
+} from "#lib/features/desktop-command/bus.ts";
+import SpaceGuestApp from "#lib/features/invitations/SpaceGuestApp.svelte";
 import {
 	createSessionChatHost,
 	getSessionTitle,
 	subscribeSpaceChannel,
-} from "$lib/features/session-chat";
-import SessionChatPanel from "$lib/features/session-chat/SessionChatPanel.svelte";
-import { createSessionRenameController } from "$lib/features/session-chat/session-rename-controller.svelte";
-import { setSessionArchived } from "$lib/features/sessions/session-archive";
-import { pushHostShortcut } from "$lib/host-bridge";
-import { setHostTabDirty } from "$lib/host-tabs";
-import { getLocale } from "$lib/i18n/locale.svelte";
+} from "#lib/features/session-chat/index.ts";
+import SessionChatPanel from "#lib/features/session-chat/SessionChatPanel.svelte";
+import { createSessionRenameController } from "#lib/features/session-chat/session-rename-controller.svelte.ts";
+import { setSessionArchived } from "#lib/features/sessions/session-archive.ts";
+import { pushHostShortcut } from "#lib/host-bridge.ts";
+import { setHostTabDirty } from "#lib/host-tabs.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
 // SettingsOverlay removed — settings merged inline into detail page
 import {
 	isComposingKeyboardEvent,
 	isEditableShortcutTarget,
-} from "$lib/keyboard";
+} from "#lib/keyboard.ts";
 import {
 	parseResourceLabelRealtimePayload,
 	syncResourceLabelsToCache,
-} from "$lib/labels/resource-label-cache-sync";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import type { ResizeSession, ResizeStart } from "$lib/layout/pointer-resize";
-import { DURATION_PANEL } from "$lib/motion";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/labels/resource-label-cache-sync.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import type { ResizeSession, ResizeStart } from "#lib/layout/pointer-resize.ts";
+import { DURATION_PANEL } from "#lib/motion.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	parseAppDomainEvent,
 	parseAppVersionPublished,
-} from "$lib/resource-kit/app";
-import { sdk } from "$lib/sdk";
+} from "#lib/resource-kit/app.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	activateSpaceConfig,
 	deactivateSpaceConfig,
@@ -140,50 +130,58 @@ import {
 	setNewChatBoardBackground,
 	subscribeSpaceConfig,
 	subscribeSpaceConfigBackgroundAction,
-} from "$lib/space-config";
-import type { SpaceFsNode } from "$lib/space-fs";
-import { getSpacePublicProfile } from "$lib/space-profile";
+} from "#lib/space-config.ts";
+import type { SpaceFsNode } from "#lib/space-fs.ts";
+import { getSpacePublicProfile } from "#lib/space-profile.ts";
 import {
 	buildSpaceCheckpointRoute,
 	buildSpaceCronjobRoute,
 	buildSpaceRootRoute,
 	buildSpaceSessionRoute,
 	buildSpaceTaskRoute,
-} from "$lib/space-routes";
-import { authStore } from "$lib/stores/auth.svelte";
-import { insertComposerSnippet } from "$lib/stores/composer-insert";
-import { sessionStore, startSessionSync } from "$lib/stores/session-store";
-import { toSpaceIdPath } from "$lib/stores/space-address";
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
-import { mergeCachedTaskRun } from "$lib/stores/task-runs-cache";
-import { uiState } from "$lib/stores/ui.svelte";
-import type { LocalUploadEntry } from "$lib/upload-entries";
+} from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { insertComposerSnippet } from "#lib/stores/composer-insert.ts";
+import { sessionStore, startSessionSync } from "#lib/stores/session-store.ts";
+import { toSpaceIdPath } from "#lib/stores/space-address.ts";
+import { cacheSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
+import { mergeCachedTaskRun } from "#lib/stores/task-runs-cache.ts";
+import { uiState } from "#lib/stores/ui.svelte.ts";
+import type { LocalUploadEntry } from "#lib/upload-entries.ts";
 import {
 	denyWorkspaceAsset,
 	type ResolveWorkspaceAsset,
 	resolveWorkspaceFileAsset,
-} from "$lib/workspace-assets";
-import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
-import { createAppPreviewController } from "./modules/app-window-controller.svelte";
-import { appWindowKey, parseAppWindowKey } from "./modules/app-window-key";
-import { createBoardWindowController } from "./modules/board-window-controller.svelte";
+} from "#lib/workspace-assets.ts";
+import type { WorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
+import { PUBLIC_MARKETPLACE_APP_ID } from "$app/env/public";
+import {
+	beforeNavigate,
+	goto,
+	type Navigation,
+	onNavigate,
+} from "$app/navigation";
+import { page } from "$app/state";
+import { createAppPreviewController } from "./modules/app-window-controller.svelte.ts";
+import { appWindowKey, parseAppWindowKey } from "./modules/app-window-key.ts";
+import { createBoardWindowController } from "./modules/board-window-controller.svelte.ts";
 import DesktopLayerHost from "./modules/DesktopLayerHost.svelte";
-import { createDesktopLayerManager } from "./modules/desktop-layer-manager.svelte";
-import { createDisplayWindowController } from "./modules/display-window-controller.svelte";
-import { createFileWorkspaceController } from "./modules/file-workspace-controller.svelte";
-import { classifyInlineFileFsChange } from "./modules/file-workspace-utils";
+import { createDesktopLayerManager } from "./modules/desktop-layer-manager.svelte.ts";
+import { createDisplayWindowController } from "./modules/display-window-controller.svelte.ts";
+import { createFileWorkspaceController } from "./modules/file-workspace-controller.svelte.ts";
+import { classifyInlineFileFsChange } from "./modules/file-workspace-utils.ts";
 import {
 	MAIN_PANEL_MIN_WIDTH,
 	PREVIEW_MIN_WIDTH,
-} from "./modules/layout-geometry";
+} from "./modules/layout-geometry.ts";
 import NewChatSpaceProfile from "./modules/NewChatSpaceProfile.svelte";
 import OpenWithDialog, {
 	type OpenWithChoice,
 } from "./modules/OpenWithDialog.svelte";
 import PortReadyToastView from "./modules/PortReadyToast.svelte";
-import { createPortPreviewController } from "./modules/port-window-controller.svelte";
-import { extractPublicEndpoints } from "./modules/port-window-utils";
-import { resourceFromUrl } from "./modules/resource-app-route";
+import { createPortPreviewController } from "./modules/port-window-controller.svelte.ts";
+import { extractPublicEndpoints } from "./modules/port-window-utils.ts";
+import { resourceFromUrl } from "./modules/resource-app-route.ts";
 import SessionShareDialog from "./modules/SessionShareDialog.svelte";
 import SpaceDanmakuLayer from "./modules/SpaceDanmakuLayer.svelte";
 import SpaceFileDomain, {
@@ -196,23 +194,23 @@ import SpaceWorkspaceHeader from "./modules/SpaceWorkspaceHeader.svelte";
 import {
 	createSpaceBootstrapController,
 	withBootstrapCacheTimeout,
-} from "./modules/space-bootstrap-controller.svelte";
+} from "./modules/space-bootstrap-controller.svelte.ts";
 import {
 	rememberSpaceDanmakuTurn,
 	runSpaceDanmakuCatchup,
-} from "./modules/space-danmaku-catchup";
+} from "./modules/space-danmaku-catchup.ts";
 import {
 	createSpaceDanmakuController,
 	extractDanmakuText,
-} from "./modules/space-danmaku-controller.svelte";
+} from "./modules/space-danmaku-controller.svelte.ts";
 import {
 	isDanmakuEnabled,
 	subscribeDanmakuPrefs,
-} from "./modules/space-danmaku-prefs";
-import { createSpacePresenceController } from "./modules/space-presence-controller.svelte";
-import { createSpaceRealtimeController } from "./modules/space-realtime-controller.svelte";
-import { createSpaceStatusController } from "./modules/space-status-controller.svelte";
-import { createWindowManager } from "./modules/window-manager.svelte";
+} from "./modules/space-danmaku-prefs.ts";
+import { createSpacePresenceController } from "./modules/space-presence-controller.svelte.ts";
+import { createSpaceRealtimeController } from "./modules/space-realtime-controller.svelte.ts";
+import { createSpaceStatusController } from "./modules/space-status-controller.svelte.ts";
+import { createWindowManager } from "./modules/window-manager.svelte.ts";
 import {
 	encodeWindowParam,
 	readAppHash,
@@ -221,25 +219,25 @@ import {
 	type WindowRef,
 	withCurrentWindow,
 	withWindowParam,
-} from "./modules/window-route";
+} from "./modules/window-route.ts";
 import {
 	activeWindowFilePath,
 	workspaceFilePreviewKind,
-} from "./modules/windows";
-import type { WorkspaceAppOpenContext } from "./modules/workspace-app-context";
+} from "./modules/windows.ts";
+import type { WorkspaceAppOpenContext } from "./modules/workspace-app-context.ts";
 import {
 	OVERLAY_LIMIT_MESSAGE,
 	openPublishedApp,
 	type PublishedAppOpenInput,
-} from "./modules/workspace-app-open";
-import { createWorkspaceLayoutController } from "./modules/workspace-layout-controller.svelte";
+} from "./modules/workspace-app-open.ts";
+import { createWorkspaceLayoutController } from "./modules/workspace-layout-controller.svelte.ts";
 import {
 	spaceWorkspaceScope,
 	type WorkspaceScope,
-} from "./modules/workspace-scope";
-import { cachedRuntimeStatus } from "./runtime-status.svelte";
-import { createWorkspaceSidePanelController } from "./side-panel/workspace-side-panel-controller.svelte";
-import { displayUserName, fallbackUserName } from "./space-utils";
+} from "./modules/workspace-scope.ts";
+import { cachedRuntimeStatus } from "./runtime-status.svelte.ts";
+import { createWorkspaceSidePanelController } from "./side-panel/workspace-side-panel-controller.svelte.ts";
+import { displayUserName, fallbackUserName } from "./space-utils.ts";
 
 type Props = {
 	data: {
@@ -388,9 +386,8 @@ const sessionChat = createSessionChatHost({
 		toSession: async (sessionId, opts) => {
 			// Keep open file/board/port preview when new chat becomes a real session.
 			await goto(withCurrentWindow(scope.sessionRoute(spaceId, sessionId)), {
-				replaceState: opts?.replace ?? true,
-				keepFocus: true,
-				noScroll: true,
+				replace: opts?.replace ?? true,
+				reset: false,
 			});
 		},
 		toTurn: async (sessionId, sequence) => {
@@ -404,17 +401,15 @@ const sessionChat = createSessionChatHost({
 					),
 				),
 				{
-					replaceState: true,
-					keepFocus: true,
-					noScroll: true,
+					replace: true,
+					reset: false,
 				},
 			);
 		},
 		toNewSession: async (opts) => {
 			await goto(withCurrentWindow(scope.newSessionRoute(spaceId)), {
-				replaceState: opts?.replace ?? false,
-				keepFocus: true,
-				noScroll: true,
+				replace: opts?.replace ?? false,
+				reset: false,
 			});
 		},
 	},
@@ -785,7 +780,7 @@ async function openResourceOrFallback(target: ResourceAppTarget) {
 	await goto(
 		`${buildSpaceRootRoute(spaceId)}/${segment}/${target.id}?${search}`,
 		{
-			replaceState: true,
+			replace: true,
 		},
 	);
 }
@@ -821,7 +816,7 @@ async function openWorkspaceNavigation(
 				: target.kind === "checkpoint"
 					? buildSpaceCheckpointRoute(spaceId, target.checkpointId)
 					: buildSpaceCronjobRoute(spaceId, target.cronjobId);
-		await goto(withCurrentWindow(route), { keepFocus: true, noScroll: true });
+		await goto(withCurrentWindow(route), { reset: false });
 		return { handled: true as const };
 	}
 	return { handled: false as const, reason: "unsupported" as const };
@@ -1823,8 +1818,7 @@ async function openSessionTurn(
 	);
 	if (sequence != null) href.searchParams.set("turn", String(sequence));
 	await goto(`${href.pathname}${href.search}`, {
-		keepFocus: true,
-		noScroll: true,
+		reset: false,
 	});
 }
 
@@ -2206,6 +2200,7 @@ async function resumeHeldNavigation() {
 // One guard for everything leaving the workspace would lose: file drafts that
 // are still syncing and App documents with unsaved work. Asks at most once.
 beforeNavigate((navigation) => {
+	if (navigation.shallow) return;
 	const destination = navigation.to?.url;
 	const resource = destination && resourceFromUrl(destination);
 	if (
@@ -2261,8 +2256,8 @@ beforeNavigate((navigation) => {
 	if (!flushingApps) void resumeHeldNavigation();
 });
 
-onNavigate(() => {
-	if (fileWorkspace.hasDirtyInlineFiles())
+onNavigate(({ shallow }) => {
+	if (!shallow && fileWorkspace.hasDirtyInlineFiles())
 		return fileWorkspace.persistInlineFileDrafts();
 });
 
@@ -2316,12 +2311,14 @@ function syncPreviewQuery(ref: WindowRef | null, replace = true) {
 	const next = withWindowParam(window.location.pathname, search, ref);
 	const current = `${window.location.pathname}${window.location.search}`;
 	if (next === current) return;
-	const state = {
-		...page.state,
-		workspacePreview: ref ? encodeWindowParam(ref) : null,
-	};
-	if (replace) replaceState(next, state);
-	else pushState(next, state);
+	void goto(next, {
+		shallow: true,
+		replace,
+		state: {
+			...page.state,
+			workspacePreview: ref ? encodeWindowParam(ref) : null,
+		},
+	});
 }
 
 function currentPreviewRef(): WindowRef | null {
@@ -2398,8 +2395,7 @@ async function openInlineBoard(
 async function openTask(taskRunId: string) {
 	if (!spaceId) return;
 	await goto(withCurrentWindow(buildSpaceTaskRoute(spaceId, taskRunId)), {
-		keepFocus: true,
-		noScroll: true,
+		reset: false,
 	});
 }
 function closeInlineBoard() {
@@ -2755,7 +2751,7 @@ onMount(() => {
 				request.fallbackHref &&
 				request.spaceId === spaceId
 			)
-				void goto(request.fallbackHref, { keepFocus: true, noScroll: true });
+				void goto(request.fallbackHref, { reset: false });
 		});
 	};
 	window.addEventListener(

@@ -8,150 +8,187 @@
   "sideEffects": false,
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./core": {
+      "source": "./src/core/index.ts",
       "types": "./dist/core/index.d.ts",
       "default": "./dist/core/index.js"
     },
     "./board-constants": {
+      "source": "./src/board-constants.ts",
       "types": "./dist/board-constants.d.ts",
       "default": "./dist/board-constants.js"
     },
     "./board-script-modules": {
+      "source": "./src/board-script-modules.ts",
       "types": "./dist/board-script-modules.d.ts",
       "default": "./dist/board-script-modules.js"
     },
     "./board-model": {
+      "source": "./src/board-model.ts",
       "types": "./dist/board-model.d.ts",
       "default": "./dist/board-model.js"
     },
     "./board-layout": {
+      "source": "./src/board-layout.ts",
       "types": "./dist/board-layout.d.ts",
       "default": "./dist/board-layout.js"
     },
     "./board-patch": {
+      "source": "./src/board-patch.ts",
       "types": "./dist/board-patch.d.ts",
       "default": "./dist/board-patch.js"
     },
     "./model": {
+      "source": "./src/model/index.ts",
       "types": "./dist/model/index.d.ts",
       "default": "./dist/model/index.js"
     },
     "./model/status": {
+      "source": "./src/model/status.ts",
       "types": "./dist/model/status.d.ts",
       "default": "./dist/model/status.js"
     },
     "./realtime": {
+      "source": "./src/realtime/index.ts",
       "types": "./dist/realtime/index.d.ts",
       "default": "./dist/realtime/index.js"
     },
     "./gateway": {
+      "source": "./src/gateway/index.ts",
       "types": "./dist/gateway/index.d.ts",
       "default": "./dist/gateway/index.js"
     },
     "./task": {
+      "source": "./src/task/index.ts",
       "types": "./dist/task/index.d.ts",
       "default": "./dist/task/index.js"
     },
     "./fs": {
+      "source": "./src/fs/index.ts",
       "types": "./dist/fs/index.d.ts",
       "default": "./dist/fs/index.js"
     },
     "./ports": {
+      "source": "./src/ports/index.ts",
       "types": "./dist/ports/index.d.ts",
       "default": "./dist/ports/index.js"
     },
     "./display": {
+      "source": "./src/display/index.ts",
       "types": "./dist/display/index.d.ts",
       "default": "./dist/display/index.js"
     },
     "./rtc": {
+      "source": "./src/rtc/index.ts",
       "types": "./dist/rtc/index.d.ts",
       "default": "./dist/rtc/index.js"
     },
     "./search": {
+      "source": "./src/search/index.ts",
       "types": "./dist/search/index.d.ts",
       "default": "./dist/search/index.js"
     },
     "./generation": {
+      "source": "./src/generation/index.ts",
       "types": "./dist/generation/index.d.ts",
       "default": "./dist/generation/index.js"
     },
     "./identifiers": {
+      "source": "./src/identifiers.ts",
       "types": "./dist/identifiers.d.ts",
       "default": "./dist/identifiers.js"
     },
     "./platform/default-space-mods": {
+      "source": "./src/platform/default-space-mods.ts",
       "types": "./dist/platform/default-space-mods.d.ts",
       "default": "./dist/platform/default-space-mods.js"
     },
     "./sandbox": {
+      "source": "./src/sandbox/index.ts",
       "types": "./dist/sandbox/index.d.ts",
       "default": "./dist/sandbox/index.js"
     },
     "./runtime": {
+      "source": "./src/runtime/index.ts",
       "types": "./dist/runtime/index.d.ts",
       "default": "./dist/runtime/index.js"
     },
     "./space-style": {
+      "source": "./src/space-style.ts",
       "types": "./dist/space-style.d.ts",
       "default": "./dist/space-style.js"
     },
     "./space-hooks": {
+      "source": "./src/space-hooks.ts",
       "types": "./dist/space-hooks.d.ts",
       "default": "./dist/space-hooks.js"
     },
     "./gateway/types": {
+      "source": "./src/gateway/types.ts",
       "types": "./dist/gateway/types.d.ts",
       "default": "./dist/gateway/types.js"
     },
     "./realtime/types": {
+      "source": "./src/realtime/types.ts",
       "types": "./dist/realtime/types.d.ts",
       "default": "./dist/realtime/types.js"
     },
     "./realtime/schema": {
+      "source": "./src/realtime/schema.ts",
       "types": "./dist/realtime/schema.d.ts",
       "default": "./dist/realtime/schema.js"
     },
     "./provenance": {
+      "source": "./src/provenance.ts",
       "types": "./dist/provenance.d.ts",
       "default": "./dist/provenance.js"
     },
     "./desktop-command": {
+      "source": "./src/desktop-command.ts",
       "types": "./dist/desktop-command.d.ts",
       "default": "./dist/desktop-command.js"
     },
     "./app-surface": {
+      "source": "./src/app-surface.ts",
       "types": "./dist/app-surface.d.ts",
       "default": "./dist/app-surface.js"
     },
     "./app-runtime": {
+      "source": "./src/app-runtime.ts",
       "types": "./dist/app-runtime.d.ts",
       "default": "./dist/app-runtime.js"
     },
     "./app-navigation": {
+      "source": "./src/app-navigation.ts",
       "types": "./dist/app-navigation.d.ts",
       "default": "./dist/app-navigation.js"
     },
     "./app-devices": {
+      "source": "./src/app-devices.ts",
       "types": "./dist/app-devices.d.ts",
       "default": "./dist/app-devices.js"
     },
     "./app-embed": {
+      "source": "./src/app-embed.ts",
       "types": "./dist/app-embed.d.ts",
       "default": "./dist/app-embed.js"
     },
     "./navigation": {
+      "source": "./src/navigation.ts",
       "types": "./dist/navigation.d.ts",
       "default": "./dist/navigation.js"
     },
     "./host-bridge": {
+      "source": "./src/host-bridge.ts",
       "types": "./dist/host-bridge.d.ts",
       "default": "./dist/host-bridge.js"
     },
     "./public-identifiers": {
+      "source": "./src/public-identifiers.ts",
       "types": "./dist/public-identifiers.d.ts",
       "default": "./dist/public-identifiers.js"
     }
@@ -173,6 +210,6 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "typescript": "^7.0.2"
+    "typescript": "catalog:"
   }
 }

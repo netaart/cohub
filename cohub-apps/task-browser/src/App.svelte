@@ -18,21 +18,21 @@ import {
   X,
 } from "@lucide/svelte";
 import { onMount } from "svelte";
-import { accessRequestFor } from "./access";
-import { detailOutputSource } from "./media";
-import { taskBrowserScopes, type TaskBrowserScope } from "./scope";
+import { accessRequestFor } from "./access.ts";
+import { detailOutputSource } from "./media.ts";
+import { taskBrowserScopes, type TaskBrowserScope } from "./scope.ts";
 import {
   clearTaskCache,
   readTaskCache,
   writeTaskCache,
   type TaskPageInfo,
-} from "./task-cache";
+} from "./task-cache.ts";
 import {
   type GenerationOutput,
   type GenerationTask,
   mergeTaskRefresh,
   toGenerationTask,
-} from "./task-output";
+} from "./task-output.ts";
 
 const client = createCohubClient();
 const PAGE_SIZE = 30;

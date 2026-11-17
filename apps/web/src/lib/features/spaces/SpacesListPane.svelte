@@ -1,23 +1,23 @@
 <script lang="ts">
 import type { SpaceRecord } from "@neta-art/cohub";
 import { Check, MoreHorizontal, Pin, Plus } from "lucide-svelte";
-import ListRow from "$lib/components/list-page/ListRow.svelte";
-import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
-import ListRowText from "$lib/components/list-page/ListRowText.svelte";
+import ListRow from "#lib/components/list-page/ListRow.svelte";
+import ListRowSkeleton from "#lib/components/list-page/ListRowSkeleton.svelte";
+import ListRowText from "#lib/components/list-page/ListRowText.svelte";
 import {
 	type FixedListRowDensity,
 	LIST_ROW_AVATAR,
 	LIST_ROW_HEIGHT,
-} from "$lib/components/list-page/list-row";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import type { SpacesFilter } from "$lib/features/spaces/spaces-filter";
-import { longPress } from "$lib/gestures/long-press";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { scrollListToTop } from "$lib/layout/list-scroll-top";
-import { scrollMemory } from "$lib/layout/scroll-memory";
-import { m } from "$lib/paraglide/messages.js";
-import { buildSpaceRootRoute } from "$lib/space-routes";
-import { formatCompactAbsoluteTime } from "$lib/time-format";
+} from "#lib/components/list-page/list-row.ts";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import type { SpacesFilter } from "#lib/features/spaces/spaces-filter.ts";
+import { longPress } from "#lib/gestures/long-press.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { scrollListToTop } from "#lib/layout/list-scroll-top.ts";
+import { scrollMemory } from "#lib/layout/scroll-memory.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { buildSpaceRootRoute } from "#lib/space-routes.ts";
+import { formatCompactAbsoluteTime } from "#lib/time-format.ts";
 
 const {
 	filter,

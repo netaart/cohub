@@ -1,10 +1,10 @@
 <script lang="ts">
 import { Loader2 } from "lucide-svelte";
 import type { Snippet } from "svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { uiState } from "$lib/stores/ui.svelte";
-import { syncStatus } from "$lib/sync/sync-status.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { uiState } from "#lib/stores/ui.svelte.ts";
+import { syncStatus } from "#lib/sync/sync-status.svelte.ts";
 
 const {
 	title,

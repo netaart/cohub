@@ -1,21 +1,21 @@
 <script lang="ts">
 import { untrack } from "svelte";
-import { goto } from "$app/navigation";
-import { page } from "$app/state";
-import { useSpaceTheme } from "$lib/custom-theme/page-space.svelte";
-import SpaceWorkspacePage from "$lib/features/space/SpaceWorkspacePage.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
+import { useSpaceTheme } from "#lib/custom-theme/page-space.svelte.ts";
+import SpaceWorkspacePage from "#lib/features/space/SpaceWorkspacePage.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
 import {
 	type LibraryItemEntity,
 	libraryEntityAt,
 	librarySpaceAt,
-} from "$lib/library-routes";
-import { m } from "$lib/paraglide/messages.js";
-import { uiState } from "$lib/stores/ui.svelte";
+} from "#lib/library-routes.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { uiState } from "#lib/stores/ui.svelte.ts";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 import LibraryList from "./LibraryList.svelte";
-import { libraryEntityLabel } from "./library-copy";
-import { libraryWorkspaceScope } from "./library-workspace-scope";
+import { libraryEntityLabel } from "./library-copy.ts";
+import { libraryWorkspaceScope } from "./library-workspace-scope.ts";
 
 const locale = $derived(getLocale());
 const isDesktop = $derived(!useCompactShell());
@@ -37,7 +37,7 @@ $effect(() => {
 	untrack(() => {
 		const search = new URLSearchParams(page.url.search);
 		search.delete("space");
-		void goto(`/spaces/${target}?${search}`, { replaceState: true });
+		void goto(`/spaces/${target}?${search}`, { replace: true });
 	});
 });
 </script>

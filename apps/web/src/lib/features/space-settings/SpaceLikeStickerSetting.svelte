@@ -1,15 +1,15 @@
 <script lang="ts">
 import type { SpaceRecord } from "@neta-art/cohub";
 import { Heart, Loader2, Upload } from "lucide-svelte";
-import UploadProgress from "$lib/components/UploadProgress.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import UploadProgress from "#lib/components/UploadProgress.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	LikeStickerImageError,
 	uploadSpaceLikeStickerImage,
-} from "$lib/public-asset-images";
-import { sdk } from "$lib/sdk";
-import { describeUploadError } from "$lib/upload-errors";
+} from "#lib/public-asset-images.ts";
+import { sdk } from "#lib/sdk.ts";
+import { describeUploadError } from "#lib/upload-errors.ts";
 import SettingsRow from "./SettingsRow.svelte";
 
 type Props = {

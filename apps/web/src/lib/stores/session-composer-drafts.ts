@@ -1,4 +1,4 @@
-import { encodeKeyPart, getCacheUserKey } from "$lib/cache/keys";
+import { encodeKeyPart, getCacheUserKey } from "#lib/cache/keys.ts";
 
 const STORAGE_PREFIX = "cohub:session-composer-draft:v1";
 const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000;

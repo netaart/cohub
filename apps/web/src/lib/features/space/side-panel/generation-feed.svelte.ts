@@ -6,20 +6,20 @@ import {
 	type TaskRunRecord,
 	toGenerationTaskView,
 } from "@neta-art/cohub";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
 import {
 	deleteTaskRunSummaries,
 	readTaskRunSummaries,
 	writeTaskRunSummaries,
-} from "$lib/cache/repositories/task-runs-repo";
-import { sdk } from "$lib/sdk";
+} from "#lib/cache/repositories/task-runs-repo.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	mergeTaskRunPage,
 	patchTaskRun,
 	sortTaskRuns,
 	upsertTaskRuns,
-} from "./side-panel-data";
+} from "./side-panel-data.ts";
 
 const GENERATION_TASK_TYPE = "generation";
 const PAGE_SIZE = 40;

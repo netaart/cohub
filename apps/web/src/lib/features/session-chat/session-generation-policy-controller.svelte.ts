@@ -3,13 +3,13 @@ import type {
 	GenerationPolicy,
 	PublicGenerationDeclaration,
 } from "@cohub/protocol/generation";
-import { getCacheUserKey, getCacheUserKeyAsync } from "$lib/cache/keys";
-import { authStore } from "$lib/stores/auth.svelte";
+import { getCacheUserKey, getCacheUserKeyAsync } from "#lib/cache/keys.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import {
 	GENERATION_MODELS_CACHE_MAX_AGE_MS,
 	getCachedGenerationModels,
 	loadGenerationModels,
-} from "$lib/stores/generation-models-cache";
+} from "#lib/stores/generation-models-cache.ts";
 
 type NumericGenerationConstraint = { min?: number; max?: number };
 type BooleanGenerationConstraint = { value?: boolean };

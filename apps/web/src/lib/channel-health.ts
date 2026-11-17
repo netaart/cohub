@@ -2,8 +2,8 @@ import type {
 	ChannelHealth,
 	ChannelRuntimeState,
 } from "@cohub/protocol/gateway/types";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 export function channelHealthLabel(
 	health: ChannelHealth | null | undefined,

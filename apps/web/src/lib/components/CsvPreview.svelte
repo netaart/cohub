@@ -3,9 +3,9 @@ import {
 	CSV_PREVIEW_MAX_COLUMNS,
 	CSV_PREVIEW_MAX_ROWS,
 	parseCsv,
-} from "$lib/csv-parse";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/csv-parse.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 let {
 	source = "",

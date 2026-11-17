@@ -1,7 +1,7 @@
 <script lang="ts">
   import Shuffle from "@lucide/svelte/icons/shuffle";
   import { untrack } from "svelte";
-  import { CAMPER_COLORS, type Camp } from "../engine/camp.svelte";
+  import { CAMPER_COLORS, type Camp } from "../engine/camp.svelte.ts";
 
   let { camp }: { camp: Camp } = $props();
   let name = $state(untrack(() => camp.profile.name));

@@ -1,8 +1,8 @@
 <script lang="ts">
 import { onMount } from "svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { buildSpaceSessionTurnRoute } from "$lib/space-routes";
-import type { SpaceDanmakuController } from "./space-danmaku-controller.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { buildSpaceSessionTurnRoute } from "#lib/space-routes.ts";
+import type { SpaceDanmakuController } from "./space-danmaku-controller.svelte.ts";
 
 type Props = {
 	controller: SpaceDanmakuController;

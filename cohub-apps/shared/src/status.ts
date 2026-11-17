@@ -1,6 +1,6 @@
 import type { AppRecord, TaskRunRecord } from "@neta-art/cohub";
 import { m } from "$messages";
-import type { Locale } from "$kit/core";
+import type { Locale } from "$kit/core.ts";
 
 export type Tone = "success" | "error" | "info" | "warning" | "brand" | "muted";
 

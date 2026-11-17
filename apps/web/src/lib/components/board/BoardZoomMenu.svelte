@@ -7,9 +7,9 @@ import {
 	Presentation,
 } from "lucide-svelte";
 import type { Snippet } from "svelte";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

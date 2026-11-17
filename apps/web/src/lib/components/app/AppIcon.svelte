@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { AppMeta } from "@neta-art/cohub";
-import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
-import { avatarInitials } from "$lib/avatar-initials";
-import Avatar, { type AvatarSize } from "$lib/components/Avatar.svelte";
+import { appDisplayTitle, appIconUrl } from "#lib/app-page-meta.ts";
+import { avatarInitials } from "#lib/avatar-initials.ts";
+import Avatar, { type AvatarSize } from "#lib/components/Avatar.svelte";
 
 type Props = {
 	meta?: AppMeta | null;

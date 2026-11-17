@@ -2,19 +2,19 @@
 import { Menu, Search, X } from "lucide-svelte";
 import type { Snippet } from "svelte";
 import { onMount } from "svelte";
-import { page } from "$app/state";
-import DocsLangSwitch from "$lib/components/docs/DocsLangSwitch.svelte";
-import DocsSearch from "$lib/components/docs/DocsSearch.svelte";
-import DocsSidebar from "$lib/components/docs/DocsSidebar.svelte";
-import PublicContentShell from "$lib/components/PublicContentShell.svelte";
-import PublicHeader from "$lib/components/PublicHeader.svelte";
+import DocsLangSwitch from "#lib/components/docs/DocsLangSwitch.svelte";
+import DocsSearch from "#lib/components/docs/DocsSearch.svelte";
+import DocsSidebar from "#lib/components/docs/DocsSidebar.svelte";
+import PublicContentShell from "#lib/components/PublicContentShell.svelte";
+import PublicHeader from "#lib/components/PublicHeader.svelte";
 import {
 	alternateDocsHref,
 	type DocsLocale,
 	type DocsSearchEntry,
 	type DocsSection,
 	getDocsUi,
-} from "$lib/docs";
+} from "#lib/docs/index.ts";
+import { page } from "$app/state";
 
 type Props = {
 	data: {

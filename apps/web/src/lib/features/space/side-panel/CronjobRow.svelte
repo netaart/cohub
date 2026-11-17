@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { CronJobRecord } from "@neta-art/cohub";
 import { Clock } from "lucide-svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import SidePanelRow from "./SidePanelRow.svelte";
 
 type Props = {

@@ -69,95 +69,95 @@ import {
 	boardAppMeta,
 	boardAppOpenUrl,
 	createBoardAppDetailLoader,
-} from "$lib/board/board-app";
-import { createBoardAppItemView } from "$lib/board/board-app-view.svelte";
-import { createSpaceBoardAssetSource } from "$lib/board/board-asset-source";
+} from "#lib/board/board-app.ts";
+import { createBoardAppItemView } from "#lib/board/board-app-view.svelte.ts";
+import { createSpaceBoardAssetSource } from "#lib/board/board-asset-source.ts";
 import {
 	hasPageTextSelection,
 	readBoardClipboard,
 	writeBoardClipboard,
-} from "$lib/board/board-clipboard";
-import { readBoardResourceDrop } from "$lib/board/board-drop";
+} from "#lib/board/board-clipboard.ts";
+import { readBoardResourceDrop } from "#lib/board/board-drop.ts";
 import {
 	generationPromptFromContent,
 	pendingGenerationTaskSnapshot,
 	pendingTaskPosition,
 	regenerationRequestFromTaskRun,
-} from "$lib/board/board-generation";
-import type { BoardStageExportBridge } from "$lib/board/board-image-export";
+} from "#lib/board/board-generation.ts";
+import type { BoardStageExportBridge } from "#lib/board/board-image-export.ts";
 import {
 	clipboardImageFiles,
 	uploadBoardImage,
-} from "$lib/board/board-image-paste";
+} from "#lib/board/board-image-paste.ts";
 import {
 	boardReceivesKeys,
 	registerBoardPanel,
-} from "$lib/board/board-keyboard";
+} from "#lib/board/board-keyboard.ts";
 import {
 	boardAnimationReach,
 	opensInPlace,
-} from "$lib/board/board-media-playback";
-import { createBoardModelPreviews } from "$lib/board/board-model";
+} from "#lib/board/board-media-playback.ts";
+import { createBoardModelPreviews } from "#lib/board/board-model.ts";
 import {
 	enterPresentationFullscreen,
 	holdPresentation,
-} from "$lib/board/board-present";
+} from "#lib/board/board-present.ts";
 import {
 	type BoardScriptStatus,
 	watchBoardScriptStatus,
-} from "$lib/board/board-script-status";
-import { createBoardSenseConsent } from "$lib/board/board-senses.svelte";
-import { createBoardSessionActions } from "$lib/board/board-session-actions.svelte";
-import { boardTimelineLanding } from "$lib/board/board-timeline";
+} from "#lib/board/board-script-status.ts";
+import { createBoardSenseConsent } from "#lib/board/board-senses.svelte.ts";
+import { createBoardSessionActions } from "#lib/board/board-session-actions.svelte.ts";
+import { boardTimelineLanding } from "#lib/board/board-timeline.ts";
 import {
 	type BoardVideoExportRequest,
 	createBoardVideoExport,
 	readBoardVideoExportAccess,
-} from "$lib/board/board-video-export.svelte";
+} from "#lib/board/board-video-export.svelte.ts";
 import {
 	boardViewKey,
 	readBoardView,
 	writeBoardView,
-} from "$lib/board/board-view-preferences";
-import { createBoardEditor } from "$lib/board/editor.svelte";
-import type { BoardRuntimeProps } from "$lib/board/runtime/board-runtime";
-import { canUseUserScopedCache, getCacheUserKey } from "$lib/cache/keys";
-import { copyTextToClipboard } from "$lib/clipboard";
-import BoardAnimationDock from "$lib/components/board/BoardAnimationDock.svelte";
-import BoardAppearancePopover from "$lib/components/board/BoardAppearancePopover.svelte";
-import BoardArrowToolbar from "$lib/components/board/BoardArrowToolbar.svelte";
-import BoardCollaboratorOverlay from "$lib/components/board/BoardCollaboratorOverlay.svelte";
+} from "#lib/board/board-view-preferences.ts";
+import { createBoardEditor } from "#lib/board/editor.svelte.ts";
+import type { BoardRuntimeProps } from "#lib/board/runtime/board-runtime.ts";
+import { canUseUserScopedCache, getCacheUserKey } from "#lib/cache/keys.ts";
+import { copyTextToClipboard } from "#lib/clipboard.ts";
+import BoardAnimationDock from "#lib/components/board/BoardAnimationDock.svelte";
+import BoardAppearancePopover from "#lib/components/board/BoardAppearancePopover.svelte";
+import BoardArrowToolbar from "#lib/components/board/BoardArrowToolbar.svelte";
+import BoardCollaboratorOverlay from "#lib/components/board/BoardCollaboratorOverlay.svelte";
 import BoardContextMenu, {
 	type BoardMenuAction,
-} from "$lib/components/board/BoardContextMenu.svelte";
-import BoardEmptyState from "$lib/components/board/BoardEmptyState.svelte";
-import BoardExportDialog from "$lib/components/board/BoardExportDialog.svelte";
-import BoardFloatingToolbar from "$lib/components/board/BoardFloatingToolbar.svelte";
-import BoardFrameNav from "$lib/components/board/BoardFrameNav.svelte";
-import BoardGenerationComposer from "$lib/components/board/BoardGenerationComposer.svelte";
-import BoardLinkPopover from "$lib/components/board/BoardLinkPopover.svelte";
-import BoardMediaPlayer from "$lib/components/board/BoardMediaPlayer.svelte";
-import BoardMobileChrome from "$lib/components/board/BoardMobileChrome.svelte";
-import BoardPlaybackBar from "$lib/components/board/BoardPlaybackBar.svelte";
-import BoardPlayKeys from "$lib/components/board/BoardPlayKeys.svelte";
-import BoardScriptPanel from "$lib/components/board/BoardScriptPanel.svelte";
-import BoardSelectionToolbar from "$lib/components/board/BoardSelectionToolbar.svelte";
-import BoardSenseChip from "$lib/components/board/BoardSenseChip.svelte";
-import BoardSessionReply from "$lib/components/board/BoardSessionReply.svelte";
-import BoardStage from "$lib/components/board/BoardStage.svelte";
-import BoardTextEditor from "$lib/components/board/BoardTextEditor.svelte";
-import BoardZoomMenu from "$lib/components/board/BoardZoomMenu.svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
-import { mergeCachedTaskRun } from "$lib/stores/task-runs-cache";
+} from "#lib/components/board/BoardContextMenu.svelte";
+import BoardEmptyState from "#lib/components/board/BoardEmptyState.svelte";
+import BoardExportDialog from "#lib/components/board/BoardExportDialog.svelte";
+import BoardFloatingToolbar from "#lib/components/board/BoardFloatingToolbar.svelte";
+import BoardFrameNav from "#lib/components/board/BoardFrameNav.svelte";
+import BoardGenerationComposer from "#lib/components/board/BoardGenerationComposer.svelte";
+import BoardLinkPopover from "#lib/components/board/BoardLinkPopover.svelte";
+import BoardMediaPlayer from "#lib/components/board/BoardMediaPlayer.svelte";
+import BoardMobileChrome from "#lib/components/board/BoardMobileChrome.svelte";
+import BoardPlaybackBar from "#lib/components/board/BoardPlaybackBar.svelte";
+import BoardPlayKeys from "#lib/components/board/BoardPlayKeys.svelte";
+import BoardScriptPanel from "#lib/components/board/BoardScriptPanel.svelte";
+import BoardSelectionToolbar from "#lib/components/board/BoardSelectionToolbar.svelte";
+import BoardSenseChip from "#lib/components/board/BoardSenseChip.svelte";
+import BoardSessionReply from "#lib/components/board/BoardSessionReply.svelte";
+import BoardStage from "#lib/components/board/BoardStage.svelte";
+import BoardTextEditor from "#lib/components/board/BoardTextEditor.svelte";
+import BoardZoomMenu from "#lib/components/board/BoardZoomMenu.svelte";
+import Spinner from "#lib/components/Spinner.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { mergeCachedTaskRun } from "#lib/stores/task-runs-cache.ts";
 import {
 	describeUploadError,
 	exceedsUploadFileLimit,
 	uploadFileLimitLabel,
-} from "$lib/upload-errors";
+} from "#lib/upload-errors.ts";
 
 const {
 	path,
@@ -1676,7 +1676,7 @@ onDestroy(() => {
 		{/if}
 
 		{#if replayOpen && history && spaceId}
-			{#await import("$lib/components/board/BoardReplayView.svelte") then { default: BoardReplayView }}
+			{#await import("#lib/components/board/BoardReplayView.svelte") then { default: BoardReplayView }}
 				<BoardReplayView
 					{boardId}
 					{path}

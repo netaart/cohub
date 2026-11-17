@@ -22,17 +22,17 @@ import {
 	TextCursorInput,
 	X,
 } from "lucide-svelte";
-import { floatNear } from "$lib/actions/portal";
-import ColumnHeader from "$lib/components/ColumnHeader.svelte";
-import SessionStatsDetails from "$lib/components/SessionStatsDetails.svelte";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import StatsPopover from "$lib/components/StatsPopover.svelte";
-import { getSessionTitle } from "$lib/features/session-chat";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
-import { m } from "$lib/paraglide/messages.js";
-import { buildSpaceRootRoute } from "$lib/space-routes";
-import { uiState } from "$lib/stores/ui.svelte";
+import { floatNear } from "#lib/actions/portal.ts";
+import ColumnHeader from "#lib/components/ColumnHeader.svelte";
+import SessionStatsDetails from "#lib/components/SessionStatsDetails.svelte";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import StatsPopover from "#lib/components/StatsPopover.svelte";
+import { getSessionTitle } from "#lib/features/session-chat/index.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { buildSpaceRootRoute } from "#lib/space-routes.ts";
+import { uiState } from "#lib/stores/ui.svelte.ts";
 import SpacePresenceStack from "./SpacePresenceStack.svelte";
 import SpaceRuntimeStatus from "./SpaceRuntimeStatus.svelte";
 

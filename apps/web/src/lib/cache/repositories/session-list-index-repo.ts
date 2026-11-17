@@ -2,28 +2,28 @@ import type { SessionRecord } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
-import type { SessionListForkRecord } from "$lib/cache/db";
+} from "#lib/cache/broadcast.ts";
+import type { SessionListForkRecord } from "#lib/cache/db.ts";
 import {
 	idbDelete,
 	idbGet,
 	idbPut,
 	type SessionListIndexCacheRecord,
 	type SessionListIndexItem,
-} from "$lib/cache/db";
-import { getCacheUserKey, sessionListIndexKey } from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
-import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
+} from "#lib/cache/db.ts";
+import { getCacheUserKey, sessionListIndexKey } from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
+import { sessionDetailRepo } from "#lib/cache/repositories/session-detail-repo.ts";
 import {
 	type CacheSource,
 	DEFAULT_SESSION_LIST_PAGE_INFO,
 	type SessionListPageInfo,
-} from "$lib/cache/types";
-import { mergeSessionRecords } from "$lib/session-record-merge";
+} from "#lib/cache/types.ts";
+import { mergeSessionRecords } from "#lib/session-record-merge.ts";
 import {
 	getSessionActivityAt,
 	sortSessionsByRecentActivity,
-} from "$lib/session-sort";
+} from "#lib/session-sort.ts";
 
 const SESSION_LIST_INDEX_TTL_MS = 30_000;
 const MAX_CACHED_SESSION_INDEX_ITEMS_PER_SPACE = 500;

@@ -1,6 +1,6 @@
 import type { AppPromotionEventKey } from "@cohub/protocol";
 import type { AppPromotionEventResponse } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 type MetaFbq = {
 	(...args: unknown[]): void;

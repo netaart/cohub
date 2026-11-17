@@ -4,8 +4,11 @@ import {
 	UPLOAD_ERROR_FILE_TOO_LARGE,
 	UPLOAD_ERROR_RATE_LIMITED,
 } from "@cohub/protocol";
-import { formatByteLimit } from "$lib/format-bytes";
-import { describeUploadError, UploadTransferError } from "$lib/upload-errors";
+import { formatByteLimit } from "#lib/format-bytes.ts";
+import {
+	describeUploadError,
+	UploadTransferError,
+} from "#lib/upload-errors.ts";
 
 /** Same `code` / `body` shape the SDK's HttpError exposes for api rejections. */
 const apiError = (body: Record<string, unknown>) =>

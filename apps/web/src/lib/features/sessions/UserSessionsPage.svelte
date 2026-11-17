@@ -5,33 +5,33 @@ import {
 	type UserSessionListItem,
 } from "@neta-art/cohub";
 import { onMount, untrack } from "svelte";
-import { goto } from "$app/navigation";
-import { useSpaceTheme } from "$lib/custom-theme/page-space.svelte";
-import ChatsPane from "$lib/features/sessions/ChatsPane.svelte";
+import { useSpaceTheme } from "#lib/custom-theme/page-space.svelte.ts";
+import ChatsPane from "#lib/features/sessions/ChatsPane.svelte";
 import {
 	chatsInbox,
 	openNewChatSpacePicker,
 	spaceSummaryOf,
-} from "$lib/features/sessions/chats-inbox.svelte";
-import { chatsWorkspaceScope } from "$lib/features/sessions/chats-workspace-scope";
-import SpaceWorkspacePage from "$lib/features/space/SpaceWorkspacePage.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
+} from "#lib/features/sessions/chats-inbox.svelte.ts";
+import { chatsWorkspaceScope } from "#lib/features/sessions/chats-workspace-scope.ts";
+import SpaceWorkspacePage from "#lib/features/space/SpaceWorkspacePage.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
 import {
 	buildSessionsRoute,
 	buildSpaceNewSessionRoute,
 	buildSpaceSessionRoute,
 	buildUserSessionRoute,
-} from "$lib/space-routes";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import {
 	clearLastUserSessionId,
 	getLastUserSessionId,
 	setLastUserSessionId,
-} from "$lib/stores/last-user-session";
-import { forgetCachedSession } from "$lib/stores/session-detail-cache";
+} from "#lib/stores/last-user-session.ts";
+import { forgetCachedSession } from "#lib/stores/session-detail-cache.ts";
+import { goto } from "$app/navigation";
 
 const {
 	data,
@@ -120,7 +120,7 @@ async function openInSpace(pathname: string) {
 	const search = new URLSearchParams(window.location.search);
 	search.delete("space");
 	const query = search.toString();
-	await goto(query ? `${pathname}?${query}` : pathname, { replaceState: true });
+	await goto(query ? `${pathname}?${query}` : pathname, { replace: true });
 }
 
 async function adoptServerSession(seq: number, sessionId: string) {
@@ -163,13 +163,13 @@ async function leaveFailedSession(sessionId: string, error: unknown) {
 		: null;
 	await goto(
 		fallback ? buildUserSessionRoute(fallback.id) : buildSessionsRoute(),
-		{ replaceState: true, keepFocus: true, noScroll: true },
+		{ replace: true, reset: false },
 	);
 }
 
 async function bounceNewChatToPicker() {
 	suppressNextAutoOpen = true;
-	await goto(buildSessionsRoute(), { replaceState: true });
+	await goto(buildSessionsRoute(), { replace: true });
 	openNewChatSpacePicker();
 }
 
@@ -218,9 +218,8 @@ $effect(() => {
 	if (!targetId) return;
 	untrack(() => {
 		void goto(buildUserSessionRoute(targetId), {
-			replaceState: true,
-			keepFocus: true,
-			noScroll: true,
+			replace: true,
+			reset: false,
 		});
 	});
 });

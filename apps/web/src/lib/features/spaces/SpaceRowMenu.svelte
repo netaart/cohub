@@ -11,13 +11,13 @@ import {
 	Wallet,
 } from "lucide-svelte";
 import { tick } from "svelte";
-import AdaptivePopover from "$lib/components/list-page/AdaptivePopover.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import AdaptivePopover from "#lib/components/list-page/AdaptivePopover.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	buildSpaceSettingsRoute,
 	buildSpaceWalletRoute,
-} from "$lib/space-routes";
+} from "#lib/space-routes.ts";
 
 const {
 	space,

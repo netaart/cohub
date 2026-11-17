@@ -2,19 +2,19 @@
 import type { Usage } from "@cohub/protocol/core";
 import type { ContextCompactionMeta } from "@cohub/protocol/model";
 import { Archive, ChevronDown, ChevronRight } from "lucide-svelte";
-import MessageContentFlow from "$lib/components/MessageContentFlow.svelte";
+import MessageContentFlow from "#lib/components/MessageContentFlow.svelte";
 import {
 	formatDurationMs,
 	isDisplayableDurationMs,
-} from "$lib/format-duration";
+} from "#lib/format-duration.ts";
 import {
 	formatTokenCount,
 	formatUsageCost,
 	getUsageCostTotal,
 	getUsageTotalTokens,
-} from "$lib/format-usage";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/format-usage.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	variant: "turn-boundary" | "turn-inline";

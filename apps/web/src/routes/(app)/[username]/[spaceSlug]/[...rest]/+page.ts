@@ -1,6 +1,6 @@
 import { HttpError } from "@neta-art/cohub";
 import { error, redirect } from "@sveltejs/kit";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 import type { PageLoad } from "./$types";
 
 /**

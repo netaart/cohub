@@ -1,5 +1,5 @@
 import { type ApprovalMode, isApprovalMode } from "@cohub/protocol";
-import { encodeKeyPart, getCacheUserKey } from "$lib/cache/keys";
+import { encodeKeyPart, getCacheUserKey } from "#lib/cache/keys.ts";
 
 const STORAGE_PREFIX = "cohub:approval-choice:v1";
 const TTL_MS = 30 * 24 * 60 * 60 * 1000;

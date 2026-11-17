@@ -6,7 +6,7 @@ import {
 	mergeFirstPage,
 	placeItem,
 	shareItems,
-} from "$lib/lists/live-list-core";
+} from "#lib/lists/live-list-core.ts";
 
 type Row = { id: string; at: number };
 const id = (row: Row) => row.id;

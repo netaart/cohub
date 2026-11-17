@@ -1,9 +1,9 @@
 <script lang="ts">
 import { Check, Copy, Globe, Loader2, Lock, QrCode } from "lucide-svelte";
 import { renderSVG } from "uqr";
-import Dialog from "$lib/components/Dialog.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import Dialog from "#lib/components/Dialog.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	open: boolean;

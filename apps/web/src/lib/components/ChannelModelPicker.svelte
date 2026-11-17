@@ -1,13 +1,13 @@
 <script lang="ts">
 import { Loader2, Settings } from "lucide-svelte";
-import ModelSelector from "$lib/components/ModelSelector.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
+import ModelSelector from "#lib/components/ModelSelector.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import {
 	getModelDisplayName,
 	type ModelThinkingLevel,
-} from "$lib/model-catalog";
-import { m } from "$lib/paraglide/messages.js";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
+} from "#lib/model-catalog.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { modelsCatalogStore } from "#lib/stores/models-catalog.svelte.ts";
 
 type ModelRef = {
 	provider: string;

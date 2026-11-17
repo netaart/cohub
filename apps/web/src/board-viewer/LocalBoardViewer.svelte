@@ -3,16 +3,16 @@ import {
 	type BoardReplicaState,
 	createBoardReplica,
 } from "@neta-art/cohub/board/replica";
-import { cohubPixiRuntime } from "$lib/board/runtime/board-runtime";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { cohubPixiRuntime } from "#lib/board/runtime/board-runtime.ts";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	localBoardAssetSource,
 	localBoardImageStore,
 	localBoardRemote,
 	readLocalBoardRoute,
-} from "./local-remote";
+} from "./local-remote.ts";
 
 const locale = $derived(getLocale());
 const route = readLocalBoardRoute(location.pathname);

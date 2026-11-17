@@ -1,20 +1,20 @@
 <script lang="ts">
 import type { SpacePresenceUser } from "@neta-art/cohub";
 import { onMount } from "svelte";
-import { floatNear, portal } from "$lib/actions/portal";
-import ListRow from "$lib/components/list-page/ListRow.svelte";
-import ListRowText from "$lib/components/list-page/ListRowText.svelte";
-import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
-import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { displayUserName } from "../space-utils";
+import { floatNear, portal } from "#lib/actions/portal.ts";
+import ListRow from "#lib/components/list-page/ListRow.svelte";
+import ListRowText from "#lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "#lib/components/list-page/list-row.ts";
+import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { displayUserName } from "../space-utils.ts";
 import {
 	isDanmakuEnabled,
 	setDanmakuEnabled,
 	subscribeDanmakuPrefs,
-} from "./space-danmaku-prefs";
+} from "./space-danmaku-prefs.ts";
 
 type Props = {
 	users: SpacePresenceUser[];

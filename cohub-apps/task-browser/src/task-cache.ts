@@ -1,4 +1,4 @@
-import type { GenerationTask } from "./task-output";
+import type { GenerationTask } from "./task-output.ts";
 
 export type TaskPageInfo = {
   hasMore: boolean;

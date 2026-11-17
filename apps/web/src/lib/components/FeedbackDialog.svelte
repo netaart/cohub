@@ -1,16 +1,16 @@
 <script lang="ts">
 import { Check, Download, Loader2, Paperclip, Send, X } from "lucide-svelte";
+import Dialog from "#lib/components/Dialog.svelte";
+import { saveCohubDebugBundle } from "#lib/debugger.ts";
+import { createDebugLogFile, submitFeedback } from "#lib/feedback.ts";
+import { formatBytes } from "#lib/format-bytes.ts";
+import { hostPlatform } from "#lib/host-bridge.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { BUILD_LABEL } from "#lib/project.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { PUBLIC_COHUB_ENV } from "$app/env/public";
 import { page } from "$app/state";
-import { PUBLIC_COHUB_ENV } from "$env/static/public";
-import Dialog from "$lib/components/Dialog.svelte";
-import { saveCohubDebugBundle } from "$lib/debugger";
-import { createDebugLogFile, submitFeedback } from "$lib/feedback";
-import { formatBytes } from "$lib/format-bytes";
-import { hostPlatform } from "$lib/host-bridge";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { BUILD_LABEL } from "$lib/project";
-import { authStore } from "$lib/stores/auth.svelte";
 
 const { open, onClose }: { open: boolean; onClose: () => void } = $props();
 

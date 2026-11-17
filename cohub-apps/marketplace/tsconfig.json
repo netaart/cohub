@@ -4,9 +4,8 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "strict": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
-    "allowJs": false,
     "isolatedModules": true,
     "noEmit": true,
     "types": ["node", "svelte", "vite/client"]

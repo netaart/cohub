@@ -4,11 +4,11 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "allowJs": true,
+    "customConditions": ["source"],
     "types": ["node", "svelte", "vite/client"],
     "paths": {
       "$kit/*": ["../../apps/web/src/lib/resource-kit/*"],

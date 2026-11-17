@@ -1,9 +1,9 @@
 <script lang="ts">
 import type { RuntimeSessionRecoveryStatus } from "@neta-art/cohub";
 import { AlertTriangle, Loader2, Square } from "lucide-svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
 
 const {
 	spaceId,

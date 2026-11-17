@@ -65,8 +65,7 @@ jobs:
       # Build first: workspace packages export types/runtime from dist/, so
       # typecheck and tests need the build artifacts present (clean checkout
       # has none). This mirrors the deploy workflows' build-before-check order.
-      # SvelteKit statically inlines $env/static/public at build time; a clean
-      # checkout has no .env, so named imports fail with MISSING_EXPORT.
+      # src/env.ts requires its non-optional variables at build time.
       # Use dev values, same as web-deploy-cloudflare.yml.
       - name: Setup web environment
         working-directory: apps/web

@@ -1,6 +1,6 @@
-import type { Reroute } from "@sveltejs/kit";
-import { browser } from "$app/environment";
-import { parseSpaceAddressPath } from "$lib/stores/space-address";
+import type { Reroute } from "@sveltejs/kit/hooks";
+import { parseSpaceAddressPath } from "#lib/stores/space-address.ts";
+import { browser } from "$app/env";
 
 /**
  * Friendly Space paths (`/:username/:slug/...`) render the `/spaces/:id/...` routes
@@ -11,7 +11,9 @@ export const reroute: Reroute = async ({ url }) => {
 	const parsed = parseSpaceAddressPath(url.pathname);
 	if (!parsed) return;
 	try {
-		const { resolveSpaceAddress } = await import("$lib/space-address-resolver");
+		const { resolveSpaceAddress } = await import(
+			"#lib/space-address-resolver.ts"
+		);
 		const spaceId = await resolveSpaceAddress(parsed.address);
 		return spaceId ? `/spaces/${spaceId}${parsed.rest}` : undefined;
 	} catch {

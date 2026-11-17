@@ -5,7 +5,7 @@
  * pointer events and drives the transform directly for a 1:1 finger feel.
  */
 
-import { EASE_OUT } from "$lib/motion";
+import { EASE_OUT } from "#lib/motion.ts";
 
 export const SWIPE_DISMISS_DIRECTION_LOCK_PX = 8;
 export const SWIPE_DISMISS_DIRECTION_RATIO = 1.2;

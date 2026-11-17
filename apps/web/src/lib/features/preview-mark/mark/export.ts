@@ -1,5 +1,5 @@
-import type { FrozenFrame, Stroke } from "../types";
-import { drawStroke } from "./draw";
+import type { FrozenFrame, Stroke } from "../types.ts";
+import { drawStroke } from "./draw.ts";
 
 const FILE_FORMATS: Array<{
 	mimeType: "image/webp" | "image/jpeg";

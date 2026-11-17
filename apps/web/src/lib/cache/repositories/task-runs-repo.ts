@@ -8,12 +8,12 @@ import {
 	idbPut,
 	type TaskRunDetailCacheRecord,
 	type TaskRunSummaryCacheRecord,
-} from "$lib/cache/db";
+} from "#lib/cache/db.ts";
 import {
 	canUseUserScopedCache,
 	getCacheUserKeyAsync,
 	taskRunKey,
-} from "$lib/cache/keys";
+} from "#lib/cache/keys.ts";
 
 const SUMMARY_LIMIT_PER_SPACE = 500;
 const DETAIL_LIMIT_PER_SPACE = 100;

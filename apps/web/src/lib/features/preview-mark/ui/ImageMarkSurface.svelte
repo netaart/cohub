@@ -1,6 +1,6 @@
 <script lang="ts">
-import { drawCropOverlay, drawStroke } from "../mark/draw";
-import type { MarkSession } from "../mark/session.svelte";
+import { drawCropOverlay, drawStroke } from "../mark/draw.ts";
+import type { MarkSession } from "../mark/session.svelte.ts";
 
 type Props = {
 	session: MarkSession;

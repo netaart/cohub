@@ -2,13 +2,13 @@ import type { LikeResourceType } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
-import { idbGet, idbPut, type ViewerLikeCacheRecord } from "$lib/cache/db";
+} from "#lib/cache/broadcast.ts";
+import { idbGet, idbPut, type ViewerLikeCacheRecord } from "#lib/cache/db.ts";
 import {
 	canUseUserScopedCache,
 	getCacheUserKey,
 	viewerLikeKey,
-} from "$lib/cache/keys";
+} from "#lib/cache/keys.ts";
 
 function userKey() {
 	const key = getCacheUserKey();

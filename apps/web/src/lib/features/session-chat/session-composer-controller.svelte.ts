@@ -9,16 +9,19 @@ import {
 	MAX_COMPOSER_ATTACHMENTS,
 	MAX_COMPOSER_TEXT_ATTACHMENT_BYTES,
 	readComposerTextAttachment,
-} from "$lib/composer-attachments";
-import type { Locale } from "$lib/i18n/locale";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { prepareChatImageAttachment } from "$lib/public-asset-images";
-import { entriesFromFiles, type LocalUploadEntry } from "$lib/upload-entries";
+} from "#lib/composer-attachments.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { prepareChatImageAttachment } from "#lib/public-asset-images.ts";
+import {
+	entriesFromFiles,
+	type LocalUploadEntry,
+} from "#lib/upload-entries.ts";
 import {
 	exceedsUploadFileLimit,
 	uploadFileLimitLabel,
-} from "$lib/upload-errors";
+} from "#lib/upload-errors.ts";
 
 export function revokeComposerAttachmentPreview(
 	attachment: ComposerAttachment,

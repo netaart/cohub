@@ -1,15 +1,15 @@
 <script lang="ts">
 import type { ExecutionStats, RequestMetric } from "@cohub/protocol/model";
-import StatsGroup from "$lib/components/StatsGroup.svelte";
-import StatsTimeline from "$lib/components/StatsTimeline.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import StatsGroup from "#lib/components/StatsGroup.svelte";
+import StatsTimeline from "#lib/components/StatsTimeline.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	buildStatsViewModel,
 	type StatsLabelKey,
 	type StatsScope,
 	type StatsSectionKey,
-} from "$lib/stats-view-model";
+} from "#lib/stats-view-model.ts";
 
 let {
 	stats,

@@ -1,22 +1,22 @@
 import type { ChannelEnvelope, SpaceRecord } from "@neta-art/cohub";
-import { goto } from "$app/navigation";
-import { page } from "$app/state";
-import { callHost, supportsHostCapability } from "$lib/host-bridge";
+import { callHost, supportsHostCapability } from "#lib/host-bridge.ts";
 import {
 	hostPermissions,
 	requestHostPermission,
-} from "$lib/host-permissions.svelte";
-import { flagHostTabAttention } from "$lib/host-tabs";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { buildSpaceSessionRoute } from "$lib/space-routes";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/host-permissions.svelte.ts";
+import { flagHostTabAttention } from "#lib/host-tabs.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { buildSpaceSessionRoute } from "#lib/space-routes.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import {
 	cacheSpaceRecordSoon,
 	getCachedSpaceRecord,
-} from "$lib/stores/space-record-cache";
-import { resolveWorkspaceRouteContext } from "$lib/workspace-route";
+} from "#lib/stores/space-record-cache.ts";
+import { resolveWorkspaceRouteContext } from "#lib/workspace-route.ts";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
 
 const MAX_VISIBLE = 3;
 const MAX_SEEN = 240;

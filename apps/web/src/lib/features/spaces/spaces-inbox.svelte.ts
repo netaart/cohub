@@ -7,21 +7,24 @@ import { HttpError } from "@neta-art/cohub";
 import {
 	getCachedSpacePage,
 	setCachedSpacePage,
-} from "$lib/cache/space-list-page-cache";
+} from "#lib/cache/space-list-page-cache.ts";
 import {
 	compareSpaces,
 	matchesSpacesFilter,
 	SPACES_FILTERS,
 	type SpacesFilter,
 	time,
-} from "$lib/features/spaces/spaces-filter";
-import { LiveList } from "$lib/lists/live-list.svelte";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
-import { getRecentSpaces, onRecentSpaceVisit } from "$lib/stores/recent-space";
-import { rememberSpaceAddress } from "$lib/stores/space-address";
-import type { ViewerFlags } from "$lib/stores/space-pins.svelte";
-import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
+} from "#lib/features/spaces/spaces-filter.ts";
+import { LiveList } from "#lib/lists/live-list.svelte.ts";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import {
+	getRecentSpaces,
+	onRecentSpaceVisit,
+} from "#lib/stores/recent-space.ts";
+import { rememberSpaceAddress } from "#lib/stores/space-address.ts";
+import type { ViewerFlags } from "#lib/stores/space-pins.svelte.ts";
+import { cacheSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
 
 const PAGE_SIZE = 50;
 const PINNED_SYSTEM_KEY = "user:pinned";

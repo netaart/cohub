@@ -4,12 +4,12 @@ import {
 	parseBoardMediaSource,
 } from "@neta-art/cohub/board";
 import type { BoardAppMetadata } from "@neta-art/cohub/board/editor";
-import { boardAppFace } from "$lib/board/board-app";
+import { boardAppFace } from "#lib/board/board-app.ts";
 import {
 	type BoardDropItem,
 	type PointerDragPayload,
 	toBoardDropItems,
-} from "$lib/drag/pointer-drag-core";
+} from "#lib/drag/pointer-drag-core.ts";
 
 export type BoardResourceDrop = {
 	files: BoardDropItem[];

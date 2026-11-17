@@ -1,5 +1,5 @@
 import type { BoardAssetSource } from "@neta-art/cohub/board";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 export type { BoardAssetSource } from "@neta-art/cohub/board";
 

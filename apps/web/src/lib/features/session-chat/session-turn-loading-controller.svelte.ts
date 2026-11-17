@@ -1,7 +1,7 @@
 import type { SessionTurnIndexItem } from "@cohub/protocol/model";
 import { HttpError } from "@neta-art/cohub";
-import { createRequestDedupe } from "$lib/features/space/modules/request-dedupe";
-import { sdk } from "$lib/sdk";
+import { createRequestDedupe } from "#lib/features/space/modules/request-dedupe.ts";
+import { sdk } from "#lib/sdk.ts";
 
 export function createSessionTurnLoadingController(options: {
 	getSpaceId: () => string;

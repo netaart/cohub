@@ -3,12 +3,12 @@ import type { Snippet } from "svelte";
 import {
 	type CohubDragResource,
 	setCohubResourceDragData,
-} from "$lib/drag/cohub-resource-drag";
+} from "#lib/drag/cohub-resource-drag.ts";
 import {
 	type PointerDragItem,
 	pointerDrag,
 	pointerDragSource,
-} from "$lib/drag/pointer-drag.svelte";
+} from "#lib/drag/pointer-drag.svelte.ts";
 
 type Props = {
 	title: string;

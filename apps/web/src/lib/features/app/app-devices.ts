@@ -1,6 +1,6 @@
 import { type AppDevice, parseAppDevices } from "@cohub/protocol/app-devices";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 // Cohub asks first: in a shared frame origin the browser cannot tell Apps apart.
 const STORAGE_KEY_PREFIX = "cohub:app:devices:v1";

@@ -1,11 +1,11 @@
 <script lang="ts">
 import type { BillingCreditStatus } from "@neta-art/cohub";
 import { ChevronRight, Loader2 } from "lucide-svelte";
-import { formatDate } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { formatBalance } from "./format";
+import { formatDate } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { formatBalance } from "./format.ts";
 
 const { credit, locale }: { credit: BillingCreditStatus; locale: Locale } =
 	$props();

@@ -1,6 +1,6 @@
 import { parseSpaceSlug, parseUsername } from "@cohub/protocol";
-import { buildPublicAppRoute } from "$lib/space-routes";
-import { COHUB_WEB_ORIGIN_SOURCE } from "./platform-origin";
+import { buildPublicAppRoute } from "#lib/space-routes.ts";
+import { COHUB_WEB_ORIGIN_SOURCE } from "./platform-origin.ts";
 
 export type AppMention = {
 	type: "app";

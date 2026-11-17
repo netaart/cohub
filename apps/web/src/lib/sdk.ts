@@ -1,19 +1,22 @@
 import { type CohubClientOptions, createCohubClient } from "@neta-art/cohub";
-import { PUBLIC_API_ORIGIN, PUBLIC_GATEWAY_ORIGIN } from "$env/static/public";
 import {
 	clearAuthToken,
 	getAuthSessionSnapshot,
 	recoverHostSession,
 	getAuthToken as resolveAccessToken,
 	setAuthToken,
-} from "$lib/auth";
-import { getCurrentRedirectPath, redirectToSignIn } from "$lib/auth-redirect";
-import { decideUnauthorizedRecovery } from "$lib/auth-unauthorized";
-import { getClientInstanceId } from "$lib/client-instance";
-import { hostOwnsCredentials } from "$lib/host-bridge";
-import { resolveHostWorkspace } from "$lib/host-workspace";
-import { createSharedGetFetch } from "$lib/shared-get-fetch";
-import { billingConversion } from "$lib/stores/billing-conversion.svelte";
+} from "#lib/auth.ts";
+import {
+	getCurrentRedirectPath,
+	redirectToSignIn,
+} from "#lib/auth-redirect.ts";
+import { decideUnauthorizedRecovery } from "#lib/auth-unauthorized.ts";
+import { getClientInstanceId } from "#lib/client-instance.ts";
+import { hostOwnsCredentials } from "#lib/host-bridge.ts";
+import { resolveHostWorkspace } from "#lib/host-workspace.ts";
+import { createSharedGetFetch } from "#lib/shared-get-fetch.ts";
+import { billingConversion } from "#lib/stores/billing-conversion.svelte.ts";
+import { PUBLIC_API_ORIGIN, PUBLIC_GATEWAY_ORIGIN } from "$app/env/public";
 
 type UnauthorizedContext = Parameters<
 	NonNullable<CohubClientOptions["onUnauthorized"]>

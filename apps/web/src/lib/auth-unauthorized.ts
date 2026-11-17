@@ -1,4 +1,4 @@
-import type { AuthSessionSnapshot } from "$lib/auth-refresh-coordinator";
+import type { AuthSessionSnapshot } from "#lib/auth-refresh-coordinator.ts";
 
 export type UnauthorizedRecoveryDecision =
 	| {

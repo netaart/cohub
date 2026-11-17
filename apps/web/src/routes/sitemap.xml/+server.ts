@@ -1,11 +1,11 @@
-import { entries } from "$lib/changelog";
+import { entries } from "#lib/changelog/index.ts";
 import {
 	DOCS_LOCALES,
 	type DocsLocale,
 	docsHref,
 	getDocsNavItems,
-} from "$lib/docs";
-import { siteOrigin } from "$lib/seo";
+} from "#lib/docs/index.ts";
+import { siteOrigin } from "#lib/seo.ts";
 
 export const prerender = true;
 

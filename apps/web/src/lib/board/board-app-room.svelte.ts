@@ -4,8 +4,8 @@ import type {
 	BoardPresenceChannel,
 	BoardPresencePayload,
 } from "@neta-art/cohub/board/presence";
-import type { BoardCollaboratorProfile } from "$lib/board/board-collaborator";
-import { sdk } from "$lib/sdk";
+import type { BoardCollaboratorProfile } from "#lib/board/board-collaborator.ts";
+import { sdk } from "#lib/sdk.ts";
 
 const EVENT = "board.awareness";
 const ROOM = { maxParticipants: 128, expiresInSeconds: 24 * 60 * 60 };

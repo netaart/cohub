@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { sameCommandItemSequence } from "../lib/command-palette/merge-results";
+import { sameCommandItemSequence } from "../lib/command-palette/merge-results.ts";
 
 type KeySource = Parameters<typeof sameCommandItemSequence>[0][number];
 

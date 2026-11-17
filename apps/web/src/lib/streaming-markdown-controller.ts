@@ -1,4 +1,4 @@
-import type { StreamingMarkdownRender } from "$lib/markdown";
+import type { StreamingMarkdownRender } from "#lib/markdown.ts";
 
 type StreamingMarkdownSnapshot = StreamingMarkdownRender & { source: string };
 
@@ -112,7 +112,7 @@ export class StreamingMarkdownController {
 				this.#publish({ ...createEmptySnapshot(), source });
 				return;
 			}
-			const { renderStreamingMarkdownSplit } = await import("$lib/markdown");
+			const { renderStreamingMarkdownSplit } = await import("#lib/markdown.ts");
 			const render = await renderStreamingMarkdownSplit(source, this.#snapshot);
 			if (!this.#disposed && source === this.#displayedSource)
 				this.#publish({ ...render, source });

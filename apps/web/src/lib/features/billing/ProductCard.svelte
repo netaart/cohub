@@ -1,9 +1,9 @@
 <script lang="ts">
 import type { BillingCatalogProduct } from "@neta-art/cohub";
 import { Check } from "lucide-svelte";
-import type { Locale } from "$lib/i18n/locale";
-import { m } from "$lib/paraglide/messages.js";
-import { formatPrice } from "./format";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { formatPrice } from "./format.ts";
 import {
 	type DisplayPrice,
 	daysUntil,
@@ -12,7 +12,7 @@ import {
 	isFreeProduct,
 	listSavingsPercent,
 	periodBalanceUsd,
-} from "./product";
+} from "./product.ts";
 
 const {
 	product,

@@ -5,10 +5,10 @@ import type {
 } from "@cohub/protocol/model";
 import { Loader2 } from "lucide-svelte";
 import { onDestroy } from "svelte";
-import TurnNavigatorPanel from "$lib/components/TurnNavigatorPanel.svelte";
-import { toIntlTag } from "$lib/i18n/format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import TurnNavigatorPanel from "#lib/components/TurnNavigatorPanel.svelte";
+import { toIntlTag } from "#lib/i18n/format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Marker = {
 	turn: SessionTurnIndexItem;

@@ -4,13 +4,13 @@ import { untrack } from "svelte";
 import {
 	readTaskRunDetail,
 	writeTaskRunDetail,
-} from "$lib/cache/repositories/task-runs-repo";
+} from "#lib/cache/repositories/task-runs-repo.ts";
 import {
 	displaySafeJson,
 	mergeTaskRunRecord,
-} from "$lib/resource-kit/task-run";
-import { sdk } from "$lib/sdk";
-import { createKeyedRouteRequestGuard } from "./route-request-guard";
+} from "#lib/resource-kit/task-run.ts";
+import { sdk } from "#lib/sdk.ts";
+import { createKeyedRouteRequestGuard } from "./route-request-guard.ts";
 
 export type TaskRealtimeEvent = {
 	spaceId: string;

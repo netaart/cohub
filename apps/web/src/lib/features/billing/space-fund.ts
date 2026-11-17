@@ -1,4 +1,4 @@
-import { getCacheUserKey } from "$lib/cache/keys";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
 
 export const WALLET_RETURN_PARAMS = [
 	"wallet_order",

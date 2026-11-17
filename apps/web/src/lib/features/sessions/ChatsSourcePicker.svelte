@@ -1,16 +1,16 @@
 <script lang="ts">
 import type { UserSessionSourceKey } from "@neta-art/cohub";
 import { Archive, Check, ListFilter } from "lucide-svelte";
-import AdaptivePopover from "$lib/components/list-page/AdaptivePopover.svelte";
-import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import AdaptivePopover from "#lib/components/list-page/AdaptivePopover.svelte";
+import HeaderAction from "#lib/components/list-page/HeaderAction.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	CHATS_SOURCE_GROUPS,
 	type ChatsSourceGroup,
 	chatsSourceName,
 	DEFAULT_CHATS_FILTER,
-} from "$lib/stores/chats-filter";
+} from "#lib/stores/chats-filter.ts";
 
 const {
 	value,

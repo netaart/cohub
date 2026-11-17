@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveAppArea, shouldHideMobileTabBar } from "$lib/mobile-nav";
+import { resolveAppArea, shouldHideMobileTabBar } from "#lib/mobile-nav.ts";
 
 test("mobile navigation follows global routes and yields immersive surfaces", () => {
 	assert.equal(resolveAppArea("/sessions/abc"), "chats");

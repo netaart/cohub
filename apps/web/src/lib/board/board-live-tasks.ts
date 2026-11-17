@@ -3,7 +3,7 @@ import {
 	getCachedTaskRuns,
 	onTaskRunsCacheUpdated,
 	restoreCachedTaskRuns,
-} from "$lib/stores/task-runs-cache";
+} from "#lib/stores/task-runs-cache.ts";
 
 export type BoardLiveTask = {
 	status: TaskRunRecord["status"];

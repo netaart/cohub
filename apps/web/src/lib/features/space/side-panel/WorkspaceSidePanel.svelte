@@ -1,23 +1,23 @@
 <script lang="ts">
 import type { InstalledApp, ResourceAppTarget } from "@cohub/protocol";
 import type { SpacePublicEndpoints } from "@cohub/protocol/ports";
-import { compactOnOverflow } from "$lib/actions/compact-on-overflow";
+import { compactOnOverflow } from "#lib/actions/compact-on-overflow.ts";
 import EntityIcon, {
 	type EntityIconName,
-} from "$lib/components/EntityIcon.svelte";
-import FileUploadPane from "$lib/components/FileUploadPane.svelte";
-import { provideFileTreeMarks } from "$lib/components/file-tree-marks";
-import MobileRightDrawer from "$lib/components/MobileRightDrawer.svelte";
-import SpaceFileSidebar from "$lib/components/SpaceFileSidebar.svelte";
-import { createDeferredMount } from "$lib/deferred-mount.svelte";
-import { pointerDrag } from "$lib/drag/pointer-drag.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { DURATION_PANEL } from "$lib/motion";
-import { m } from "$lib/paraglide/messages.js";
-import type { SpaceFsNode } from "$lib/space-fs";
-import { uiState } from "$lib/stores/ui.svelte";
-import type { LocalUploadEntry } from "$lib/upload-entries";
-import type { WorkspaceAppLaunch } from "../modules/workspace-app-open";
+} from "#lib/components/EntityIcon.svelte";
+import FileUploadPane from "#lib/components/FileUploadPane.svelte";
+import { provideFileTreeMarks } from "#lib/components/file-tree-marks.ts";
+import MobileRightDrawer from "#lib/components/MobileRightDrawer.svelte";
+import SpaceFileSidebar from "#lib/components/SpaceFileSidebar.svelte";
+import { createDeferredMount } from "#lib/deferred-mount.svelte.ts";
+import { pointerDrag } from "#lib/drag/pointer-drag.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { DURATION_PANEL } from "#lib/motion.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { SpaceFsNode } from "#lib/space-fs.ts";
+import { uiState } from "#lib/stores/ui.svelte.ts";
+import type { LocalUploadEntry } from "#lib/upload-entries.ts";
+import type { WorkspaceAppLaunch } from "../modules/workspace-app-open.ts";
 import AppsPanel from "./AppsPanel.svelte";
 import MediaPanel from "./MediaPanel.svelte";
 import ScheduledPanel from "./ScheduledPanel.svelte";
@@ -26,8 +26,8 @@ import {
 	readSidePanelTab,
 	type SidePanelTab,
 	writeSidePanelTab,
-} from "./side-panel-tabs";
-import type { WorkspaceSidePanelController } from "./workspace-side-panel-controller.svelte";
+} from "./side-panel-tabs.ts";
+import type { WorkspaceSidePanelController } from "./workspace-side-panel-controller.svelte.ts";
 
 type Props = {
 	spaceId: string;

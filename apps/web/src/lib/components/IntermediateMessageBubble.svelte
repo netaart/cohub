@@ -4,11 +4,11 @@ import type {
 	MessageToolCallsFile,
 	StoredIntermediateMessage,
 } from "@cohub/protocol/model";
-import ChatMessageBubble from "$lib/components/ChatMessageBubble.svelte";
-import SystemCompactionNotice from "$lib/components/SystemCompactionNotice.svelte";
-import type { ModelCatalogItem } from "$lib/model-catalog";
-import type { ChatMessage } from "$lib/session-tree";
-import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
+import ChatMessageBubble from "#lib/components/ChatMessageBubble.svelte";
+import SystemCompactionNotice from "#lib/components/SystemCompactionNotice.svelte";
+import type { ModelCatalogItem } from "#lib/model-catalog.ts";
+import type { ChatMessage } from "#lib/session-tree.ts";
+import type { OpenWorkspaceFileTarget } from "#lib/workspace-file-links.ts";
 
 type Props = {
 	message: StoredIntermediateMessage;

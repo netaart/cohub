@@ -1,4 +1,4 @@
-import { COMMAND_PALETTE_LENSES, type CommandPaletteLens } from "./lens";
+import { COMMAND_PALETTE_LENSES, type CommandPaletteLens } from "./lens.ts";
 
 export type RecentQuery = { lens: CommandPaletteLens; query: string };
 

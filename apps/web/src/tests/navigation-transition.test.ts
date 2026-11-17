@@ -4,7 +4,7 @@ import {
 	isSpaceSessionDetailPath,
 	isSpaceSessionLandingPath,
 	matchMobileSessionNavTransition,
-} from "$lib/navigation-transition";
+} from "#lib/navigation-transition.ts";
 
 test("the Space root is a mobile session landing path", () => {
 	assert.equal(isSpaceSessionLandingPath("/spaces/space-id"), true);

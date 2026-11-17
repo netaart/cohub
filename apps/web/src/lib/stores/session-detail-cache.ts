@@ -1,9 +1,12 @@
 import type { SessionRecord } from "@neta-art/cohub";
-import { canUseUserScopedCache, getCacheUserKeyAsync } from "$lib/cache/keys";
-import { sessionDetailRepo } from "$lib/cache/repositories/session-detail-repo";
-import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
-import { mergeSessionRecord } from "$lib/session-record-merge";
-import { sessionStore } from "$lib/stores/session-store";
+import {
+	canUseUserScopedCache,
+	getCacheUserKeyAsync,
+} from "#lib/cache/keys.ts";
+import { sessionDetailRepo } from "#lib/cache/repositories/session-detail-repo.ts";
+import { sessionTurnsRepo } from "#lib/cache/repositories/session-turns-repo.ts";
+import { mergeSessionRecord } from "#lib/session-record-merge.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
 
 const refreshInFlight = new Map<string, Promise<SessionRecord>>();
 

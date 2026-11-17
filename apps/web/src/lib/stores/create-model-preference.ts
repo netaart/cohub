@@ -2,7 +2,7 @@ import {
 	canUseUserScopedCache,
 	encodeKeyPart,
 	getCacheUserKeyAsync,
-} from "$lib/cache/keys";
+} from "#lib/cache/keys.ts";
 
 const STORAGE_PREFIX = "cohub:composer-create-model:v1";
 

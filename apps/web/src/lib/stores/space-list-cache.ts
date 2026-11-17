@@ -1,6 +1,6 @@
 import type { SpaceRecord } from "@neta-art/cohub";
-import { createLocalListCache } from "$lib/stores/create-local-list-cache";
-import { cacheSpaceRecordsSoon } from "$lib/stores/space-record-cache";
+import { createLocalListCache } from "#lib/stores/create-local-list-cache.ts";
+import { cacheSpaceRecordsSoon } from "#lib/stores/space-record-cache.ts";
 
 const SPACE_LIST_SCOPE = "all";
 

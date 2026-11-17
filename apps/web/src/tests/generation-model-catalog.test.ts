@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getGenerationModelPickerItems } from "../lib/generation-model-catalog";
+import { getGenerationModelPickerItems } from "../lib/generation-model-catalog.ts";
 
 const models = [
 	{ model: "image-fast", title: "Fast Image" },

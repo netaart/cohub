@@ -1,17 +1,17 @@
 <script lang="ts">
-import { goto } from "$app/navigation";
-import { page } from "$app/state";
-import EntityIcon from "$lib/components/EntityIcon.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { requestListScrollTop } from "$lib/layout/list-scroll-top";
+import EntityIcon from "#lib/components/EntityIcon.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { requestListScrollTop } from "#lib/layout/list-scroll-top.ts";
 import {
 	LIBRARY_ENTITIES,
 	type LibraryEntity,
 	libraryEntityAt,
 	libraryHref,
-} from "$lib/library-routes";
-import { m } from "$lib/paraglide/messages.js";
-import { libraryEntityLabel } from "./library-copy";
+} from "#lib/library-routes.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { goto } from "$app/navigation";
+import { page } from "$app/state";
+import { libraryEntityLabel } from "./library-copy.ts";
 
 const { variant }: { variant: "sidebar" | "rail" | "header" } = $props();
 
@@ -23,7 +23,7 @@ function open(event: MouseEvent, entity: LibraryEntity) {
 		return;
 	event.preventDefault();
 	if (current === entity) requestListScrollTop();
-	else void goto(libraryHref(entity), { keepFocus: true, noScroll: true });
+	else void goto(libraryHref(entity), { reset: false });
 }
 </script>
 

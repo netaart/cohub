@@ -1,10 +1,10 @@
 import type { StoredIntermediateMessage } from "@cohub/protocol/model";
-import { createStreamingIntermediateMessage } from "$lib/session-streaming-message";
-import { reuseUnchangedItems } from "$lib/structural-sharing";
+import { createStreamingIntermediateMessage } from "#lib/session-streaming-message.ts";
+import { reuseUnchangedItems } from "#lib/structural-sharing.ts";
 import {
 	type StreamingIntermediateMessage,
 	sessionGenerationStore,
-} from "./session-generation.svelte";
+} from "./session-generation.svelte.ts";
 
 const storedBySource = new WeakMap<
 	StreamingIntermediateMessage,

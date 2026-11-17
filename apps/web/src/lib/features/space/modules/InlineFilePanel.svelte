@@ -21,30 +21,30 @@ import {
 	TextCursorInput,
 	Trash2,
 } from "lucide-svelte";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import FileContentPreview from "$lib/components/FileContentPreview.svelte";
-import type { PreviewCaptureTarget } from "$lib/features/preview-mark";
-import PreviewMarkHost from "$lib/features/preview-mark/ui/PreviewMarkHost.svelte";
-import type { FilePreviewModel } from "$lib/file-preview-model";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { createLazyModuleLoader, pending } from "$lib/lazy-module";
-import { m } from "$lib/paraglide/messages.js";
-import type { FileViewMode } from "$lib/resource-kit/diff";
-import type { ResolveWorkspaceAsset } from "$lib/workspace-assets";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import FileContentPreview from "#lib/components/FileContentPreview.svelte";
+import type { PreviewCaptureTarget } from "#lib/features/preview-mark/index.ts";
+import PreviewMarkHost from "#lib/features/preview-mark/ui/PreviewMarkHost.svelte";
+import type { FilePreviewModel } from "#lib/file-preview-model.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { createLazyModuleLoader, pending } from "#lib/lazy-module.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { FileViewMode } from "#lib/resource-kit/diff.ts";
+import type { ResolveWorkspaceAsset } from "#lib/workspace-assets.ts";
 import type {
 	OpenWorkspaceFileTarget,
 	WorkspaceFilePosition,
-} from "$lib/workspace-file-links";
-import { formatFileSize } from "../space-utils";
+} from "#lib/workspace-file-links.ts";
+import { formatFileSize } from "../space-utils.ts";
 import PreviewHeader from "./PreviewHeader.svelte";
 import PreviewViewMode from "./preview-controls/PreviewViewMode.svelte";
 import type {
 	PreviewChrome,
 	PreviewHeaderAction,
 	PreviewOption,
-} from "./preview-header";
-import type { WindowSyncStatus } from "./window-sync-status";
-import type { Window } from "./windows";
+} from "./preview-header.ts";
+import type { WindowSyncStatus } from "./window-sync-status.ts";
+import type { Window } from "./windows.ts";
 
 type InlineFilePanelState = {
 	response: SpaceFsFileResponse | null;
@@ -162,7 +162,7 @@ const inlineFileDataUrl = $derived(inlineFilePreview.mediaUrl);
 const loadFileDiffViewModule = createLazyModuleLoader(() =>
 	import.meta.env.SSR
 		? pending()
-		: import("$lib/components/FileDiffView.svelte"),
+		: import("#lib/components/FileDiffView.svelte"),
 );
 let fileDiffLoadAttempt = $state(0);
 const fileDiffModulePromise = $derived.by(() => {

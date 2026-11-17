@@ -11,36 +11,40 @@ import {
 	X,
 } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
-import { openAreaSearch } from "$lib/command-palette/open";
-import FilterBar from "$lib/components/list-page/FilterBar.svelte";
-import FilterChip from "$lib/components/list-page/FilterChip.svelte";
-import HeaderAction from "$lib/components/list-page/HeaderAction.svelte";
-import ListHeader from "$lib/components/list-page/ListHeader.svelte";
-import SwipePager from "$lib/components/list-page/SwipePager.svelte";
-import { SwipeTabs } from "$lib/components/list-page/swipe-tabs.svelte";
-import LibraryTabs from "$lib/features/library/LibraryTabs.svelte";
-import SpaceLabelPicker from "$lib/features/spaces/SpaceLabelPicker.svelte";
-import SpaceRowMenu from "$lib/features/spaces/SpaceRowMenu.svelte";
-import SpacesListPane from "$lib/features/spaces/SpacesListPane.svelte";
+import { openAreaSearch } from "#lib/command-palette/open.ts";
+import FilterBar from "#lib/components/list-page/FilterBar.svelte";
+import FilterChip from "#lib/components/list-page/FilterChip.svelte";
+import HeaderAction from "#lib/components/list-page/HeaderAction.svelte";
+import ListHeader from "#lib/components/list-page/ListHeader.svelte";
+import SwipePager from "#lib/components/list-page/SwipePager.svelte";
+import { SwipeTabs } from "#lib/components/list-page/swipe-tabs.svelte.ts";
+import LibraryTabs from "#lib/features/library/LibraryTabs.svelte";
+import SpaceLabelPicker from "#lib/features/spaces/SpaceLabelPicker.svelte";
+import SpaceRowMenu from "#lib/features/spaces/SpaceRowMenu.svelte";
+import SpacesListPane from "#lib/features/spaces/SpacesListPane.svelte";
 import {
 	SPACES_FILTERS,
 	type SpacesFilter,
-} from "$lib/features/spaces/spaces-filter";
-import { spacesInbox } from "$lib/features/spaces/spaces-inbox.svelte";
-import { spacesFilterLabel } from "$lib/features/spaces/spaces-views";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { onListScrollTop } from "$lib/layout/list-scroll-top";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { pruneSelection, selectRange, toggleSelection } from "$lib/selection";
+} from "#lib/features/spaces/spaces-filter.ts";
+import { spacesInbox } from "#lib/features/spaces/spaces-inbox.svelte.ts";
+import { spacesFilterLabel } from "#lib/features/spaces/spaces-views.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { onListScrollTop } from "#lib/layout/list-scroll-top.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import {
+	pruneSelection,
+	selectRange,
+	toggleSelection,
+} from "#lib/selection.ts";
 import {
 	archiveFlags,
 	pinFlags,
 	setSpacesArchived,
 	setSpacesPinned,
 	type ViewerFlags,
-} from "$lib/stores/space-pins.svelte";
+} from "#lib/stores/space-pins.svelte.ts";
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
 

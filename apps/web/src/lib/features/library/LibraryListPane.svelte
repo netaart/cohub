@@ -10,30 +10,39 @@ import {
 	Play,
 	Trash2,
 } from "lucide-svelte";
-import { goto } from "$app/navigation";
-import { appDisplayTitle } from "$lib/app-page-meta";
-import AppIcon from "$lib/components/app/AppIcon.svelte";
-import ListRow from "$lib/components/list-page/ListRow.svelte";
-import ListRowSkeleton from "$lib/components/list-page/ListRowSkeleton.svelte";
-import ListRowText from "$lib/components/list-page/ListRowText.svelte";
+import { appDisplayTitle } from "#lib/app-page-meta.ts";
+import AppIcon from "#lib/components/app/AppIcon.svelte";
+import ListRow from "#lib/components/list-page/ListRow.svelte";
+import ListRowSkeleton from "#lib/components/list-page/ListRowSkeleton.svelte";
+import ListRowText from "#lib/components/list-page/ListRowText.svelte";
 import {
 	type FixedListRowDensity,
 	LIST_ROW_AVATAR,
 	LIST_ROW_HEIGHT,
-} from "$lib/components/list-page/list-row";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
-import SidebarActionButton from "$lib/components/sidebar/SidebarActionButton.svelte";
-import { buildSpaceAppWindowRoute } from "$lib/features/space/modules/window-route";
-import { dispatchCronjobsUpdated } from "$lib/features/space/resources/space-cronjobs-feed.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { scrollListToTop } from "$lib/layout/list-scroll-top";
-import { scrollMemory } from "$lib/layout/scroll-memory";
-import { type LibraryItemEntity, libraryItemHref } from "$lib/library-routes";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { buildSpaceAppRoute, buildSpaceCronjobRoute } from "$lib/space-routes";
-import { formatCompactAbsoluteTime } from "$lib/time-format";
-import { type LibraryItem as Item, libraryInbox } from "./library-inbox.svelte";
+} from "#lib/components/list-page/list-row.ts";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import SidebarActionButton from "#lib/components/sidebar/SidebarActionButton.svelte";
+import { buildSpaceAppWindowRoute } from "#lib/features/space/modules/window-route.ts";
+import { dispatchCronjobsUpdated } from "#lib/features/space/resources/space-cronjobs-feed.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { scrollListToTop } from "#lib/layout/list-scroll-top.ts";
+import { scrollMemory } from "#lib/layout/scroll-memory.ts";
+import {
+	type LibraryItemEntity,
+	libraryItemHref,
+} from "#lib/library-routes.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import {
+	buildSpaceAppRoute,
+	buildSpaceCronjobRoute,
+} from "#lib/space-routes.ts";
+import { formatCompactAbsoluteTime } from "#lib/time-format.ts";
+import { goto } from "$app/navigation";
+import {
+	type LibraryItem as Item,
+	libraryInbox,
+} from "./library-inbox.svelte.ts";
 
 const {
 	entity,
@@ -119,7 +128,7 @@ function open(event: MouseEvent, item: Item) {
 	)
 		return;
 	event.preventDefault();
-	void goto(hrefOf(item), { keepFocus: true, noScroll: true });
+	void goto(hrefOf(item), { reset: false });
 }
 
 function lostAccess(item: Item) {

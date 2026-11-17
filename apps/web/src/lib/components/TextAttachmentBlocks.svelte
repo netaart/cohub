@@ -2,12 +2,12 @@
 import type { ContentBlock } from "@cohub/protocol/core";
 import { mediaPreviewCandidates } from "@neta-art/cohub/media";
 import { ArrowUpRight } from "lucide-svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import { mediaLightbox } from "$lib/components/media-lightbox.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { recordedSize, screenVariantSize } from "$lib/media/media-info";
-import { m } from "$lib/paraglide/messages.js";
-import MediaImage from "$lib/resource-kit/MediaImage.svelte";
+import Dialog from "#lib/components/Dialog.svelte";
+import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { recordedSize, screenVariantSize } from "#lib/media/media-info.ts";
+import { m } from "#lib/paraglide/messages.js";
+import MediaImage from "#lib/resource-kit/MediaImage.svelte";
 
 type TextBlock = Extract<ContentBlock, { type: "text" }>;
 type ImageBlock = Extract<ContentBlock, { type: "image" }>;

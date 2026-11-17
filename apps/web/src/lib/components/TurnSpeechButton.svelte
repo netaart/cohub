@@ -2,13 +2,13 @@
 import type { SessionTurnRecord } from "@cohub/protocol";
 import { Loader2, Pause, Play, TriangleAlert, Volume2 } from "lucide-svelte";
 import { untrack } from "svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	getSpeechVoice,
 	turnSpeechPlayer,
 	useTurnSpeech,
-} from "$lib/turn-speech.svelte";
+} from "#lib/turn-speech.svelte.ts";
 
 const { turn }: { turn: SessionTurnRecord } = $props();
 

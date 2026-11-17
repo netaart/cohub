@@ -1,5 +1,5 @@
 import type { ModelStatusResponse } from "@cohub/protocol/model/status";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 class ModelsStatusStore {
 	status = $state<ModelStatusResponse | null>(null);

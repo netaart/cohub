@@ -2,8 +2,8 @@ import type { ContentBlock } from "@cohub/protocol/core";
 import { TURN_SPEECH_TASK_TYPE } from "@cohub/protocol/generation";
 import { APP_ACTION_EXECUTION_SOURCE } from "@cohub/protocol/task";
 import type { TaskRunRecord } from "@neta-art/cohub";
-import { m } from "$messages";
-import { asRecord, intlTag, type Locale } from "./core";
+import { m } from "../paraglide/messages.js";
+import { asRecord, intlTag, type Locale } from "./core.ts";
 
 export function taskTypeLabel(taskType: string, locale?: Locale) {
 	if (taskType === "run_command")

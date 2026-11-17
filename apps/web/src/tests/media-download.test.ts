@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mediaFilename } from "$lib/media-download";
+import { mediaFilename } from "#lib/media-download.ts";
 
 test("keeps an explicit filename that already has an extension", () => {
 	assert.equal(

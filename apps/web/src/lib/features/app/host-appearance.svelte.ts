@@ -3,9 +3,9 @@ import {
 	type AppAppearance,
 	type AppAppearanceToken,
 } from "@cohub/protocol/app-runtime";
-import { CUSTOM_THEME_CHANGED_EVENT } from "$lib/custom-theme/events";
-import { getResolvedTheme } from "$lib/theme.svelte";
-import { isDarkTheme } from "$lib/theme-registry";
+import { CUSTOM_THEME_CHANGED_EVENT } from "#lib/custom-theme/events.ts";
+import { getResolvedTheme } from "#lib/theme.svelte.ts";
+import { isDarkTheme } from "#lib/theme-registry.ts";
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 

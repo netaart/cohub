@@ -1,6 +1,6 @@
 <script lang="ts">
 import { ArrowUp, Square } from "lucide-svelte";
-import Spinner from "$lib/components/Spinner.svelte";
+import Spinner from "#lib/components/Spinner.svelte";
 
 const {
 	label,

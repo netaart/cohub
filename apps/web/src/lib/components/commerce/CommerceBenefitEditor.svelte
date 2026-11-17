@@ -2,9 +2,9 @@
 import type { SpaceCommerceBenefit } from "@neta-art/cohub";
 import { Plus, Trash2 } from "lucide-svelte";
 import { untrack } from "svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import Spinner from "#lib/components/Spinner.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const locale = $derived(getLocale());
 

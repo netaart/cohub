@@ -26,90 +26,90 @@ import {
 	type SessionRecord,
 } from "@neta-art/cohub";
 import { tick, untrack } from "svelte";
-import { classifyAccessError } from "$lib/access/access-state";
-import type { SessionListForkRecord } from "$lib/cache/db";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { sessionTurnsRepo } from "$lib/cache/repositories/session-turns-repo";
-import { shouldRefreshAgentCatalogs } from "$lib/cache/space-fs-invalidation";
-import { noteViewerActivity } from "$lib/command-palette/palette-overview";
+import { classifyAccessError } from "#lib/access/access-state.ts";
+import type { SessionListForkRecord } from "#lib/cache/db.ts";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { sessionTurnsRepo } from "#lib/cache/repositories/session-turns-repo.ts";
+import { shouldRefreshAgentCatalogs } from "#lib/cache/space-fs-invalidation.ts";
+import { noteViewerActivity } from "#lib/command-palette/palette-overview.ts";
 import {
 	buildComposerTextContentBlock,
 	type ComposerFileAttachment,
 	type ComposerImageAttachment,
 	type ComposerTextAttachment,
-} from "$lib/composer-attachments";
-import type { ComposerMode } from "$lib/composer-mode";
+} from "#lib/composer-attachments.ts";
+import type { ComposerMode } from "#lib/composer-mode.ts";
 import {
 	createPromptTemplateController,
 	type PromptQuickAction,
-} from "$lib/features/space/modules/prompt-template-controller.svelte";
-import { createKeyedRouteRequestGuard } from "$lib/features/space/modules/route-request-guard";
-import { createSkillController } from "$lib/features/space/modules/skill-controller.svelte";
+} from "#lib/features/space/modules/prompt-template-controller.svelte.ts";
+import { createKeyedRouteRequestGuard } from "#lib/features/space/modules/route-request-guard.ts";
+import { createSkillController } from "#lib/features/space/modules/skill-controller.svelte.ts";
 import {
 	cachedRuntimeStatus,
 	refreshRuntimeStatus,
-} from "$lib/features/space/runtime-status.svelte";
-import { isStale } from "$lib/features/space/runtime-status-view";
-import { resolvePreferredGenerationModel } from "$lib/generation-model-catalog";
-import { formatGenerationPolicyLabel } from "$lib/generation-policy-label";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { extractSpaceMentionsFromText } from "$lib/mentions/space";
+} from "#lib/features/space/runtime-status.svelte.ts";
+import { isStale } from "#lib/features/space/runtime-status-view.ts";
+import { resolvePreferredGenerationModel } from "#lib/generation-model-catalog.ts";
+import { formatGenerationPolicyLabel } from "#lib/generation-policy-label.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { extractSpaceMentionsFromText } from "#lib/mentions/space.ts";
 import {
 	formatThinkingLevelShort,
 	getRequestedThinkingLevel,
 	type LocalModelSelection,
 	type ModelThinkingLevel,
 	resolveLocalModel,
-} from "$lib/model-catalog";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/model-catalog.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	uploadChatAttachmentFile,
 	uploadChatImageDurable,
-} from "$lib/public-asset-images";
-import { createRelatedSessions } from "$lib/related-sessions";
-import { asRecord } from "$lib/resource-kit/core";
-import { sdk } from "$lib/sdk";
+} from "#lib/public-asset-images.ts";
+import { createRelatedSessions } from "#lib/related-sessions.ts";
+import { asRecord } from "#lib/resource-kit/core.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	buildSentTurnIndex,
 	EMPTY_SENT_TURNS,
 	NO_SENT_SESSIONS,
-} from "$lib/sent-turns";
+} from "#lib/sent-turns.ts";
 import {
 	mergeSessionForks,
 	readRealtimeSessionFork,
-} from "$lib/session-fork-tree";
-import type { SessionRelations } from "$lib/session-relations-context";
-import type { TimelineItem } from "$lib/session-tree";
-import { createTurnTimelineBuilder } from "$lib/session-turn-render";
-import type { NewChatComposerApplyPayload } from "$lib/space-config";
-import { materializeSpaceEntries } from "$lib/space-upload";
+} from "#lib/session-fork-tree.ts";
+import type { SessionRelations } from "#lib/session-relations-context.ts";
+import type { TimelineItem } from "#lib/session-tree.ts";
+import { createTurnTimelineBuilder } from "#lib/session-turn-render.ts";
+import type { NewChatComposerApplyPayload } from "#lib/space-config.ts";
+import { materializeSpaceEntries } from "#lib/space-upload.ts";
 import {
 	approvalChoiceKey,
 	readApprovalChoice,
 	writeApprovalChoice,
-} from "$lib/stores/approval-choices";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/stores/approval-choices.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import {
 	billingConversion,
 	isBillingAccessBlockedCode,
-} from "$lib/stores/billing-conversion.svelte";
+} from "#lib/stores/billing-conversion.svelte.ts";
 import {
 	readCreateModelPreference,
 	saveCreateModelPreference,
-} from "$lib/stores/create-model-preference";
+} from "#lib/stores/create-model-preference.ts";
 import {
 	readDraftSessionModel,
 	saveDraftSessionModel,
-} from "$lib/stores/draft-session-model";
-import { modelsCatalogStore } from "$lib/stores/models-catalog.svelte";
+} from "#lib/stores/draft-session-model.ts";
+import { modelsCatalogStore } from "#lib/stores/models-catalog.svelte.ts";
 import {
 	readSessionComposerDraftText,
 	removeSessionComposerDraftText,
 	sessionComposerDraftKey,
 	writeSessionComposerDraftText,
-} from "$lib/stores/session-composer-drafts";
-import { fetchSessionDetailWithCache } from "$lib/stores/session-detail-cache";
-import { sessionGenerationStore } from "$lib/stores/session-generation.svelte";
+} from "#lib/stores/session-composer-drafts.ts";
+import { fetchSessionDetailWithCache } from "#lib/stores/session-detail-cache.ts";
+import { sessionGenerationStore } from "#lib/stores/session-generation.svelte.ts";
 import {
 	buildStreamingStoredIntermediateMessages,
 	clearCompletedIntermediateHandoff,
@@ -120,37 +120,37 @@ import {
 	replaceGenerationTurnId,
 	resetGeneration,
 	startGenerationRequest,
-} from "$lib/stores/session-generation-controller";
+} from "#lib/stores/session-generation-controller.ts";
 import {
 	canResumeRecoveredGeneration,
 	hasRunningSessionTurn,
-} from "$lib/stores/session-generation-state";
+} from "#lib/stores/session-generation-state.ts";
 import {
 	listCachedSession,
 	patchCachedSessionList,
 	refreshCachedSessionList,
-} from "$lib/stores/session-list-cache";
-import { unreadTracker } from "$lib/stores/session-state.svelte";
-import { sessionStore } from "$lib/stores/session-store";
-import { mergeTurnsById } from "$lib/stores/turn-cache";
+} from "#lib/stores/session-list-cache.ts";
+import { unreadTracker } from "#lib/stores/session-state.svelte.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
+import { mergeTurnsById } from "#lib/stores/turn-cache.ts";
 import {
 	loadMessageToolCalls,
 	loadTurnIntermediate,
-} from "$lib/stores/turn-intermediate-cache";
-import { turnRecordToIndexItem } from "$lib/turn-nav-preview";
-import type { LocalUploadEntry } from "$lib/upload-entries";
-import { describeUploadError } from "$lib/upload-errors";
-import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
+} from "#lib/stores/turn-intermediate-cache.ts";
+import { turnRecordToIndexItem } from "#lib/turn-nav-preview.ts";
+import type { LocalUploadEntry } from "#lib/upload-entries.ts";
+import { describeUploadError } from "#lib/upload-errors.ts";
+import type { WorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
 import {
 	shouldClearActiveSessionForNewDraft,
 	shouldClearResolvedNewSessionOnRoute,
-} from "./new-chat-draft-isolation";
+} from "./new-chat-draft-isolation.ts";
 import {
 	createSessionComposerController,
 	revokeComposerAttachmentPreview,
-} from "./session-composer-controller.svelte";
-import { createSessionGenerationPolicyController } from "./session-generation-policy-controller.svelte";
-import { createSessionGenerationRealtimeController } from "./session-generation-realtime-controller.svelte";
+} from "./session-composer-controller.svelte.ts";
+import { createSessionGenerationPolicyController } from "./session-generation-policy-controller.svelte.ts";
+import { createSessionGenerationRealtimeController } from "./session-generation-realtime-controller.svelte.ts";
 import {
 	createSessionScrollController,
 	isSessionScrollAnchorKind,
@@ -160,10 +160,10 @@ import {
 	type SessionScrollAnchor,
 	type SessionScrollAnchorTarget,
 	shouldFollowSessionTail,
-} from "./session-scroll-controller.svelte";
-import { createSessionShareController } from "./session-share-controller.svelte";
-import { createSessionTaskController } from "./session-task-controller.svelte";
-import { createSessionTurnLoadingController } from "./session-turn-loading-controller.svelte";
+} from "./session-scroll-controller.svelte.ts";
+import { createSessionShareController } from "./session-share-controller.svelte.ts";
+import { createSessionTaskController } from "./session-task-controller.svelte.ts";
+import { createSessionTurnLoadingController } from "./session-turn-loading-controller.svelte.ts";
 import {
 	adoptPromptSessionState,
 	areSessionTurnsEqual,
@@ -181,29 +181,29 @@ import {
 	resolveTurnHarness,
 	type SessionComposerSelection,
 	shouldClearComposerDraftAfterSend,
-} from "./session-utils";
+} from "./session-utils.ts";
 import {
 	createSessionWorkspaceController,
 	type SessionViewState,
-} from "./session-workspace-controller.svelte";
+} from "./session-workspace-controller.svelte.ts";
 import {
 	acquireSpaceGeneration,
 	releaseSpaceGeneration,
 	setSpaceGenerationLastReleaseHandler,
-} from "./space-generation-lease";
-import { findCurrentTurnAnchorSequence } from "./turn-rail-markers";
+} from "./space-generation-lease.ts";
+import { findCurrentTurnAnchorSequence } from "./turn-rail-markers.ts";
 import type {
 	SelectedModel,
 	SessionChatAccess,
 	SessionChatContext,
 	SessionChatEnvironment,
 	SessionChatRoute,
-} from "./types";
+} from "./types.ts";
 import {
 	type ActiveViewportSource,
 	type BoardViewportObservation,
 	createViewportContextController,
-} from "./viewport-context-controller.svelte";
+} from "./viewport-context-controller.svelte.ts";
 
 const TURN_SCROLL_ANCHOR_OFFSET = 16;
 const SESSION_INITIAL_LOADING_DELAY_MS = 160;

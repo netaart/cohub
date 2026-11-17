@@ -1,10 +1,13 @@
 <script lang="ts">
 import { onDestroy } from "svelte";
-import { applyDocumentTheme } from "$lib/custom-theme/document-themes";
-import { getLentThemeSpace } from "$lib/custom-theme/page-space.svelte";
-import { ensureThemeCss } from "$lib/custom-theme/theme-css.svelte";
-import { spaceThemeCss, userTheme } from "$lib/custom-theme/user-theme.svelte";
-import { authStore } from "$lib/stores/auth.svelte";
+import { applyDocumentTheme } from "#lib/custom-theme/document-themes.ts";
+import { getLentThemeSpace } from "#lib/custom-theme/page-space.svelte.ts";
+import { ensureThemeCss } from "#lib/custom-theme/theme-css.svelte.ts";
+import {
+	spaceThemeCss,
+	userTheme,
+} from "#lib/custom-theme/user-theme.svelte.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 const { spaceId: routeSpaceId }: { spaceId: string | null } = $props();
 

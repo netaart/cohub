@@ -5,7 +5,7 @@ import {
 	MOTION_BOARD_SCRIPTS,
 	motionAnimations,
 	motionItems,
-} from "./motion";
+} from "./motion.ts";
 
 export const GALLERY_ASSET_PREFIX = "dev/";
 

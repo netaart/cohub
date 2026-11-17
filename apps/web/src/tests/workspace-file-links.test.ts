@@ -4,7 +4,7 @@ import {
 	normalizeWorkspaceFileLink,
 	normalizeWorkspaceFileLinkTarget,
 	parsePublicFileHref,
-} from "$lib/workspace-file-links";
+} from "#lib/workspace-file-links.ts";
 
 test("resolves workspace-prefixed paths", () => {
 	assert.equal(normalizeWorkspaceFileLink("/workspace/a/b.md"), "a/b.md");

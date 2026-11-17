@@ -2,9 +2,9 @@ import {
 	parseCommandPaletteQuery,
 	parseLabelScope,
 	takeTypePrefix,
-} from "./query";
-import type { CommandPaletteSearchPlan } from "./scope";
-import type { CommandPaletteResourceType } from "./types";
+} from "./query.ts";
+import type { CommandPaletteSearchPlan } from "./scope.ts";
+import type { CommandPaletteResourceType } from "./types.ts";
 
 export type CommandPaletteLens = "all" | CommandPaletteResourceType;
 

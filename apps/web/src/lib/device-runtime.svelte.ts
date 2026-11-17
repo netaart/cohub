@@ -12,7 +12,7 @@ import {
 	onHostEvent,
 	readyHost,
 	supportsHostCapability,
-} from "$lib/host-bridge";
+} from "#lib/host-bridge.ts";
 
 let instances = $state<DeviceRuntimeInstance[] | null>(null);
 let subscribed: Promise<void> | null = null;

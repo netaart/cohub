@@ -1,5 +1,5 @@
-import { client } from "../client";
-import { forgetDraft, readDraft, writeDraft } from "../storage";
+import { client } from "../client.ts";
+import { forgetDraft, readDraft, writeDraft } from "../storage.ts";
 
 /*
  * The unsaved form of the open resource: every edit is written to local storage

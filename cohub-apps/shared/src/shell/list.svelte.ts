@@ -1,23 +1,23 @@
 import { isAppSilentShellScope, type ResourceAppKind } from "@cohub/protocol";
 import { m } from "$messages";
-import { asRecord } from "$kit/core";
-import { scopeHash, scopePermissions, type ResourceScope } from "../browser-route";
-import { client, subscribeSpace, type SpaceEvent } from "../client";
+import { asRecord } from "$kit/core.ts";
+import { scopeHash, scopePermissions, type ResourceScope } from "../browser-route.ts";
+import { client, subscribeSpace, type SpaceEvent } from "../client.ts";
 import {
   hasAccountScope,
   hasScopes,
   isAccessError,
   resourceKey,
-} from "../access";
+} from "../access.ts";
 import {
   listResources,
   matchesTaskFilter,
   type ResourcePage,
   type ResourceRow,
   type TaskFilter,
-} from "../resource-list";
-import { runtime } from "../runtime.svelte";
-import { forgetCache, readCache, writeCache } from "../storage";
+} from "../resource-list.ts";
+import { runtime } from "../runtime.svelte.ts";
+import { forgetCache, readCache, writeCache } from "../storage.ts";
 
 type LoadMode = "replace" | "append" | "refresh";
 

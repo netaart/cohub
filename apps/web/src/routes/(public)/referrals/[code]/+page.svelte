@@ -2,15 +2,15 @@
 import type { PublicReferral } from "@neta-art/cohub";
 import { ArrowRight, Gift, Loader2 } from "lucide-svelte";
 import { onMount } from "svelte";
+import { ensureAuth } from "#lib/auth.ts";
+import Spinner from "#lib/components/Spinner.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import { goto } from "$app/navigation";
-import { ensureAuth } from "$lib/auth";
-import Spinner from "$lib/components/Spinner.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import type { Locale } from "$lib/i18n/locale";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
 
 const props: { params: { code: string } } = $props();
 const code = $derived(props.params.code);
@@ -60,7 +60,7 @@ async function claim() {
 			return;
 		}
 		await sdk.referrals.claim(code);
-		await goto("/", { replaceState: true });
+		await goto("/", { replace: true });
 	} catch (error) {
 		const httpError = error as {
 			status?: number;

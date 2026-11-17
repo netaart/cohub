@@ -3,12 +3,6 @@
 const DEFAULT_ORIGIN = "https://cohub.live";
 
 export function siteOrigin(originFromPage?: string | null): string {
-	const fromEnv =
-		typeof process !== "undefined"
-			? process.env.PUBLIC_SITE_ORIGIN?.trim().replace(/\/$/, "")
-			: undefined;
-	if (fromEnv) return fromEnv;
-
 	const fromPage = (originFromPage ?? "").replace(/\/$/, "");
 	if (
 		fromPage.startsWith("http") &&

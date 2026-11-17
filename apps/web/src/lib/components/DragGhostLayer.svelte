@@ -10,8 +10,8 @@ import { AppWindow, File as FileIcon, Folder, Layers } from "lucide-svelte";
 import {
 	POINTER_DRAG_SETTLE_MS,
 	pointerDrag,
-} from "$lib/drag/pointer-drag.svelte";
-import { EASE_OUT } from "$lib/motion";
+} from "#lib/drag/pointer-drag.svelte.ts";
+import { EASE_OUT } from "#lib/motion.ts";
 
 /** Offset so the card sits above-right of the fingertip, not under it. */
 const OFFSET_X = 14;

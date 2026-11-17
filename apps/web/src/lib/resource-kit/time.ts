@@ -1,5 +1,5 @@
-import { m } from "$messages";
-import { intlTag, type Locale } from "./core";
+import { m } from "../paraglide/messages.js";
+import { intlTag, type Locale } from "./core.ts";
 
 const formats = new Map<string, Intl.DateTimeFormat>();
 

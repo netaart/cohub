@@ -1,12 +1,12 @@
-import { setLocale as setParaglideLocale } from "$lib/paraglide/runtime.js";
+import { setLocale as setParaglideLocale } from "#lib/paraglide/runtime.js";
 import {
 	isLocalePreference,
 	LOCALE_STORAGE_KEY,
 	type Locale,
 	type LocalePreference,
 	resolvePreferredLocale,
-} from "./locale";
-import { isPublicLocalePath } from "./public-locale";
+} from "./locale.ts";
+import { isPublicLocalePath } from "./public-locale.ts";
 
 function browserLanguages(): readonly string[] {
 	return typeof navigator === "undefined" ? [] : navigator.languages;

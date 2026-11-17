@@ -1,8 +1,8 @@
 import { getContext, setContext } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
-import { sdk } from "$lib/sdk";
-import { billingConversion } from "$lib/stores/billing-conversion.svelte";
-import { TurnSpeechPlayer } from "$lib/turn-speech-player.svelte";
+import { sdk } from "#lib/sdk.ts";
+import { billingConversion } from "#lib/stores/billing-conversion.svelte.ts";
+import { TurnSpeechPlayer } from "#lib/turn-speech-player.svelte.ts";
 
 const voices = new SvelteMap<string, string | null>();
 const cacheKey = (spaceId: string) => `cohub:space-speech-voice:${spaceId}:v1`;

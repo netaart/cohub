@@ -6,9 +6,9 @@ import {
 	type BoardStage,
 } from "@neta-art/cohub/board/stage";
 import { Camera, Circle, Compass, MapPin, Mic, Square, X } from "lucide-svelte";
-import type { BoardSenseConsent } from "$lib/board/board-senses.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import type { BoardSenseConsent } from "#lib/board/board-senses.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	stage,

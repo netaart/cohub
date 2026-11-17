@@ -1,5 +1,5 @@
-import { type CampEvent, EVENTS, readSnapshot } from "./protocol";
-import { type CampState, decodeSnapshot, emptyCamp, foldCamp } from "./state";
+import { type CampEvent, EVENTS, readSnapshot } from "./protocol.ts";
+import { type CampState, decodeSnapshot, emptyCamp, foldCamp } from "./state.ts";
 
 type Group = { upTo: number; first: number; parts: number; chunks: Map<number, string> };
 

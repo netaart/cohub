@@ -1,9 +1,9 @@
 <script lang="ts">
 import { Loader2, Plus } from "lucide-svelte";
 import { untrack } from "svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import type { SpaceCronjobsFeed } from "../resources/space-cronjobs-feed.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { SpaceCronjobsFeed } from "../resources/space-cronjobs-feed.svelte.ts";
 import CronjobRow from "./CronjobRow.svelte";
 import LoadError from "./LoadError.svelte";
 

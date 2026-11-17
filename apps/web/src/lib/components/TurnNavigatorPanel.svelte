@@ -1,19 +1,19 @@
 <script lang="ts">
 import type { SessionTurnIndexItem } from "@cohub/protocol/model";
 import { Search } from "lucide-svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	formatCompactAbsoluteTime,
 	formatFullAbsoluteTime,
-} from "$lib/time-format";
+} from "#lib/time-format.ts";
 import {
 	formatTurnNavPreview,
 	formatTurnNavPreviewDisplay,
 	getTurnNavAttachmentLabel,
 	getTurnNavAuthorName,
 	shouldShowTurnNavAuthors,
-} from "$lib/turn-nav-preview";
+} from "#lib/turn-nav-preview.ts";
 
 type Props = {
 	turns: SessionTurnIndexItem[];

@@ -14,7 +14,7 @@ import {
 	type SpaceFsFileResponse,
 	symlinkReadError,
 } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 const MAX_CATALOG_BYTES = 5 * 1024 * 1024;
 

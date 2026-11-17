@@ -1,7 +1,7 @@
 import {
 	type AppPageDetail,
 	buildAppPwaMeta as buildSharedAppPwaMeta,
-} from "$lib/app-page-meta";
+} from "#lib/app-page-meta.ts";
 
 export type AppPwaDetail = AppPageDetail;
 

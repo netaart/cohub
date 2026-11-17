@@ -10,12 +10,12 @@ import {
 	HostBridgeErrorClass,
 	hostWorkspaceFileUrl,
 } from "@neta-art/cohub/host-bridge";
-import { deviceRuntimeInstance } from "$lib/device-runtime.svelte";
+import { deviceRuntimeInstance } from "#lib/device-runtime.svelte.ts";
 import {
 	callHost,
 	hostPlatform,
 	supportsHostCapability,
-} from "$lib/host-bridge";
+} from "#lib/host-bridge.ts";
 
 const encoder = new TextEncoder();
 

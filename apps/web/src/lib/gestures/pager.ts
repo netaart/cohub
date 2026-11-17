@@ -1,4 +1,4 @@
-import { FLICK_VELOCITY_PX_PER_MS } from "$lib/gestures/axis-lock";
+import { FLICK_VELOCITY_PX_PER_MS } from "#lib/gestures/axis-lock.ts";
 
 export type PagerSample = { t: number; x: number };
 export type PagerGlide = { duration: number; easing: string };

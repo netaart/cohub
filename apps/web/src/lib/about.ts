@@ -1,5 +1,9 @@
-import { callHost, readyHost, supportsHostCapability } from "$lib/host-bridge";
-import { BUILD_LABEL } from "$lib/project";
+import {
+	callHost,
+	readyHost,
+	supportsHostCapability,
+} from "#lib/host-bridge.ts";
+import { BUILD_LABEL } from "#lib/project.ts";
 
 export const OPEN_ABOUT_EVENT = "cohub:open-about";
 

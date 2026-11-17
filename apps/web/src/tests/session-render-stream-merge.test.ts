@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { mergeStreamingDeltaBlocks } from "../lib/session-streaming";
-import type { TimelineItem } from "../lib/session-tree";
+import { mergeStreamingDeltaBlocks } from "../lib/session-streaming.ts";
+import type { TimelineItem } from "../lib/session-tree.ts";
 import {
 	buildProcessEntries,
 	buildStreamingPreviewBlocks,
 	createTurnTimelineBuilder,
-} from "../lib/session-turn-render";
+} from "../lib/session-turn-render.ts";
 
 const buildTurnTimelineItems = createTurnTimelineBuilder();
 

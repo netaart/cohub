@@ -1,5 +1,5 @@
-import { formatCurrency } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
+import { formatCurrency } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
 
 /**
  * Price formatting for purchase surfaces: whole dollars stay whole ("$50"),

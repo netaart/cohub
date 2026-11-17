@@ -5,8 +5,8 @@
  * child navigations, so switching chats never remounts windows or panels.
  */
 import type { Snippet } from "svelte";
+import UserSessionsPage from "#lib/features/sessions/UserSessionsPage.svelte";
 import { page } from "$app/state";
-import UserSessionsPage from "$lib/features/sessions/UserSessionsPage.svelte";
 
 let { children }: { children: Snippet } = $props();
 

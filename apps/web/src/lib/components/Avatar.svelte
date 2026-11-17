@@ -42,8 +42,8 @@ const MAX_IMAGE_FAILURES = 2;
 
 <script lang="ts">
 import type { Snippet } from "svelte";
-import { isSingleGlyph } from "$lib/avatar-initials";
-import { identityTone, identityToken } from "$lib/avatar-identity";
+import { isSingleGlyph } from "#lib/avatar-initials.ts";
+import { identityTone, identityToken } from "#lib/avatar-identity.ts";
 
 type Props = {
 	src?: string | null;

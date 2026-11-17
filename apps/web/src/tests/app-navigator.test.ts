@@ -7,12 +7,14 @@ import type { AppDetailResponse } from "@neta-art/cohub";
 	value: T,
 ) => value;
 
-const { createAppNavigator } = await import("$lib/features/app/app-navigator");
+const { createAppNavigator } = await import(
+	"#lib/features/app/app-navigator.ts"
+);
 const { createAppSurfaceRegistry } = await import(
-	"$lib/features/app/surface-registry"
+	"#lib/features/app/surface-registry.ts"
 );
 const { createAppPreviewController } = await import(
-	"$lib/features/space/modules/app-window-controller.svelte"
+	"#lib/features/space/modules/app-window-controller.svelte.ts"
 );
 
 test("the same App launch reopens a closed tab and reuses an existing tab", async () => {

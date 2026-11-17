@@ -1,6 +1,6 @@
 import type { GlobalSearchResult, GlobalSearchType } from "@neta-art/cohub";
-import { sdk } from "$lib/sdk";
-import { patchCachedSpaceRecordSoon } from "$lib/stores/space-record-cache";
+import { sdk } from "#lib/sdk.ts";
+import { patchCachedSpaceRecordSoon } from "#lib/stores/space-record-cache.ts";
 
 function cacheRemoteSpaceResult(item: GlobalSearchResult) {
 	if (item.type !== "space") return;

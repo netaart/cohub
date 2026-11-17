@@ -1,7 +1,7 @@
 import { SPACE_CUSTOM_THEME_CSS_PATH } from "@cohub/protocol";
 import { HttpError, isSpaceFsSymlink, symlinkReadError } from "@neta-art/cohub";
 import { SvelteMap } from "svelte/reactivity";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 type StoredThemeCss =
 	| { type: "inline"; content: string }

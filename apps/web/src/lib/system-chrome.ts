@@ -1,4 +1,4 @@
-import { syncHostAppearance } from "$lib/host-bridge";
+import { syncHostAppearance } from "#lib/host-bridge.ts";
 
 // Matches light `--bg-primary` (oklch(100% 0 0)). The manifest, the inline
 // FOUC script and this fallback must agree so cold start, first paint and the

@@ -1,9 +1,9 @@
 <script lang="ts">
 import type { BoardChapter } from "@neta-art/cohub/board";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import Dialog from "#lib/components/Dialog.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const { editor, onClose }: { editor: BoardEditor; onClose: () => void } =
 	$props();

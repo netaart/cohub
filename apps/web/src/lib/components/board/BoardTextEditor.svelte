@@ -3,9 +3,9 @@ import { boardEditableText } from "@neta-art/cohub/board";
 import { boardTextEditLayout } from "@neta-art/cohub/board/render";
 import type { BoardStage } from "@neta-art/cohub/board/stage";
 import { tick, untrack } from "svelte";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const { editor, stage }: { editor: BoardEditor; stage: BoardStage | null } =
 	$props();

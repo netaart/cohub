@@ -8,11 +8,11 @@ import {
 	readRenewalPurchaseIntent,
 	saveCheckoutContext,
 	saveRenewalPurchaseIntent,
-} from "../lib/features/billing/checkout-context";
+} from "../lib/features/billing/checkout-context.ts";
 import {
 	readCheckoutReturn,
 	stripCheckoutReturn,
-} from "../lib/features/billing/checkout-return";
+} from "../lib/features/billing/checkout-return.ts";
 
 test("checkout receipts remain scoped to their purchase and user when newer purchases or other windows exist", () => {
 	const previous = Object.getOwnPropertyDescriptor(
@@ -86,7 +86,7 @@ test("checkout receipts remain scoped to their purchase and user when newer purc
 
 test("plan summaries keep grace and closing on the paid plan, then follow the confirmed result", async () => {
 	const { currentCatalogSubscription, subscriptionDisplayState } = await import(
-		"../lib/features/billing/product"
+		"../lib/features/billing/product.ts"
 	);
 	const paid = {
 		id: "paid",
@@ -165,7 +165,7 @@ test("plan summaries keep grace and closing on the paid plan, then follow the co
 });
 
 test("subscription processing keeps an explicit independent credits purchase intent", async () => {
-	const { purchaseFocus } = await import("../lib/features/billing/product");
+	const { purchaseFocus } = await import("../lib/features/billing/product.ts");
 	const product: Parameters<typeof purchaseFocus>[0]["monthlyPlans"][number] = {
 		id: "plan",
 		key: "pro",

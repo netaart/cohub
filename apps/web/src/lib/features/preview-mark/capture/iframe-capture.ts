@@ -3,12 +3,12 @@ import type {
 	CaptureResult,
 	FrameSource,
 	FrozenFrame,
-} from "../types";
+} from "../types.ts";
 import {
 	detectCaptureCapabilities,
 	iframeCaptureSupportedMessage,
-} from "./capabilities";
-import { cssRectToPixelRect } from "./geometry";
+} from "./capabilities.ts";
+import { cssRectToPixelRect } from "./geometry.ts";
 
 type VideoWithFrameCallback = HTMLVideoElement & {
 	requestVideoFrameCallback?: (callback: () => void) => number;

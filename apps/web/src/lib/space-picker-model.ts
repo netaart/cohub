@@ -5,7 +5,7 @@ import {
 	type SpacePickerFilter,
 	type SpacePickerItem,
 } from "@neta-art/cohub/space-picker";
-import { getRecentSpaces } from "$lib/stores/recent-space";
+import { getRecentSpaces } from "#lib/stores/recent-space.ts";
 
 export type { SpacePickerFilter, SpacePickerItem };
 export { normalizeSpacePickerQuery };

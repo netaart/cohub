@@ -1,7 +1,7 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
 import type { HTMLAnchorAttributes } from "svelte/elements";
-import type { ListRowDensity } from "$lib/components/list-page/list-row";
+import type { ListRowDensity } from "#lib/components/list-page/list-row.ts";
 
 type Props = Omit<HTMLAnchorAttributes, "children" | "class"> & {
 	density: ListRowDensity;

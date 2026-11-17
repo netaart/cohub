@@ -1,4 +1,4 @@
-import { appWindowKey, parseAppWindowKey } from "./app-window-key";
+import { appWindowKey, parseAppWindowKey } from "./app-window-key.ts";
 import {
 	alignWindowNavigation,
 	beginWindowNavigation,
@@ -6,14 +6,14 @@ import {
 	isCurrentWindowNavigation,
 	type WindowNavigationSource,
 	windowRefsEqual,
-} from "./window-navigation";
-import type { WindowKind, WindowRef } from "./window-route";
+} from "./window-navigation.ts";
+import type { WindowKind, WindowRef } from "./window-route.ts";
 import {
 	isValidAppKey,
 	isValidDisplayKey,
 	isValidPortKey,
-} from "./window-route";
-import type { WorkspaceAppOpenContext } from "./workspace-app-context";
+} from "./window-route.ts";
+import type { WorkspaceAppOpenContext } from "./workspace-app-context.ts";
 
 type FileTabLike = {
 	path: string;

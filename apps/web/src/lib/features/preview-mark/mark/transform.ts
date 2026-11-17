@@ -1,4 +1,4 @@
-import type { CropRect, Point, Stroke } from "../types";
+import type { CropRect, Point, Stroke } from "../types.ts";
 
 function offsetPoint(point: Point, dx: number, dy: number): Point {
 	return { x: point.x + dx, y: point.y + dy };

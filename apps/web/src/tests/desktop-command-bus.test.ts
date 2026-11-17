@@ -6,7 +6,7 @@ import {
 	type DesktopCommandTransport,
 	handleDesktopCommand,
 	registerDesktopCommandHost,
-} from "$lib/features/desktop-command/bus";
+} from "#lib/features/desktop-command/bus.ts";
 
 const payload = {
 	commandId: "cmd-1",

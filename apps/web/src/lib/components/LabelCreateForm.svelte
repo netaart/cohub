@@ -2,15 +2,15 @@
 import type { LabelListItem } from "@neta-art/cohub";
 import { ChevronDown, Plus } from "lucide-svelte";
 import { tick } from "svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import Spinner from "#lib/components/Spinner.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	flattenLabels,
 	flattenLabelsWithRefs,
 	getLabelDisplayName,
 	onUserLabelProfilesUpdated,
-} from "$lib/stores/space-labels";
+} from "#lib/stores/space-labels.ts";
 
 const {
 	labels,

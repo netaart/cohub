@@ -5,10 +5,10 @@ import type {
   CronJobRecord,
   TaskRunRecord,
 } from "@neta-art/cohub";
-import { asRecord } from "$kit/core";
-import { appActionName } from "$kit/task-run";
-import { client } from "./client";
-import type { ResourceScope } from "./browser-route";
+import { asRecord } from "$kit/core.ts";
+import { appActionName } from "$kit/task-run.ts";
+import { client } from "./client.ts";
+import type { ResourceScope } from "./browser-route.ts";
 
 export type TaskRow = {
   kind: "task";

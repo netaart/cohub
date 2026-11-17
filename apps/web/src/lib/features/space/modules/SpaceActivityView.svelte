@@ -1,19 +1,19 @@
 <script lang="ts">
 import type { SpaceActivityResponse } from "@neta-art/cohub";
 import { onMount, untrack } from "svelte";
+import { buildActivityDays, canViewSpaceCost } from "#lib/activity.ts";
+import { ensureAuth } from "#lib/auth.ts";
+import ActivityContributors from "#lib/components/activity/ActivityContributors.svelte";
+import ActivityHeatmap from "#lib/components/activity/ActivityHeatmap.svelte";
+import ActivityPage from "#lib/components/activity/ActivityPage.svelte";
+import ActivityRankings from "#lib/components/activity/ActivityRankings.svelte";
+import ActivityStatStrip from "#lib/components/activity/ActivityStatStrip.svelte";
+import { createActivityController } from "#lib/components/activity/activity-controller.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { getCachedSpaceRecord } from "#lib/stores/space-record-cache.ts";
 import { page } from "$app/state";
-import { buildActivityDays, canViewSpaceCost } from "$lib/activity";
-import { ensureAuth } from "$lib/auth";
-import ActivityContributors from "$lib/components/activity/ActivityContributors.svelte";
-import ActivityHeatmap from "$lib/components/activity/ActivityHeatmap.svelte";
-import ActivityPage from "$lib/components/activity/ActivityPage.svelte";
-import ActivityRankings from "$lib/components/activity/ActivityRankings.svelte";
-import ActivityStatStrip from "$lib/components/activity/ActivityStatStrip.svelte";
-import { createActivityController } from "$lib/components/activity/activity-controller.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { getCachedSpaceRecord } from "$lib/stores/space-record-cache";
 
 const { data }: { data: { spaceId: string } } = $props();
 const spaceId = untrack(() => data.spaceId);

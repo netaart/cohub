@@ -3,7 +3,7 @@ import {
 	type SpaceFsFileResponse,
 	spaceFileSaveSource,
 } from "@neta-art/cohub";
-import type { SaveSource } from "$lib/downloads.svelte";
+import type { SaveSource } from "#lib/downloads.svelte.ts";
 
 type SavableFiles = {
 	saveSource: (path: string) => Promise<SpaceFileSaveSource>;

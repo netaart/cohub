@@ -15,7 +15,7 @@ import {
 	devItemAsset,
 	devRegistry,
 	LIKE,
-} from "./dev-host";
+} from "./dev-host.ts";
 
 let host: HTMLDivElement;
 let log = $state<string[]>([]);

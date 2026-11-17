@@ -1,7 +1,7 @@
-import { handleUnauthorizedError } from "$lib/auth-redirect";
-import { activityRepo } from "$lib/cache/repositories/activity-repo";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { handleUnauthorizedError } from "#lib/auth-redirect.ts";
+import { activityRepo } from "#lib/cache/repositories/activity-repo.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 export const ACTIVITY_RANGES = [7, 30, 365] as const;
 export type ActivityRange = (typeof ACTIVITY_RANGES)[number];

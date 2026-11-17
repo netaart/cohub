@@ -1,42 +1,42 @@
 <script lang="ts">
 import type { AppRecord, SpaceFsFileResponse } from "@neta-art/cohub";
 import type { Snippet } from "svelte";
-import AudioPlayer from "$lib/components/AudioPlayer.svelte";
-import ImageViewer from "$lib/components/ImageViewer.svelte";
-import MarkdownView from "$lib/components/MarkdownView.svelte";
-import type { PreviewCaptureTarget } from "$lib/features/preview-mark";
-import { filePreviewModel } from "$lib/file-preview-model";
-import { formatBytes } from "$lib/format-bytes";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { createLazyModuleLoader, pending } from "$lib/lazy-module";
-import { screenVariantSize } from "$lib/media/media-info";
-import { fileModelSource } from "$lib/model3d/file-source";
-import { m } from "$lib/paraglide/messages.js";
-import MediaVideo from "$lib/resource-kit/MediaVideo.svelte";
-import type { ResolveWorkspaceAsset } from "$lib/workspace-assets";
+import AudioPlayer from "#lib/components/AudioPlayer.svelte";
+import ImageViewer from "#lib/components/ImageViewer.svelte";
+import MarkdownView from "#lib/components/MarkdownView.svelte";
+import type { PreviewCaptureTarget } from "#lib/features/preview-mark/index.ts";
+import { filePreviewModel } from "#lib/file-preview-model.ts";
+import { formatBytes } from "#lib/format-bytes.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { createLazyModuleLoader, pending } from "#lib/lazy-module.ts";
+import { screenVariantSize } from "#lib/media/media-info.ts";
+import { fileModelSource } from "#lib/model3d/file-source.ts";
+import { m } from "#lib/paraglide/messages.js";
+import MediaVideo from "#lib/resource-kit/MediaVideo.svelte";
+import type { ResolveWorkspaceAsset } from "#lib/workspace-assets.ts";
 import type {
 	WorkspaceFileLinkTarget,
 	WorkspaceFilePosition,
-} from "$lib/workspace-file-links";
+} from "#lib/workspace-file-links.ts";
 
 const loadCodeEditor = createLazyModuleLoader(() =>
-	import.meta.env.SSR ? pending() : import("$lib/components/CodeEditor.svelte"),
+	import.meta.env.SSR ? pending() : import("#lib/components/CodeEditor.svelte"),
 );
 const loadRenderedPreview = createLazyModuleLoader(() =>
 	import.meta.env.SSR
 		? pending()
-		: import("$lib/components/RenderedFilePreview.svelte"),
+		: import("#lib/components/RenderedFilePreview.svelte"),
 );
 const loadCsvPreview = createLazyModuleLoader(() =>
-	import.meta.env.SSR ? pending() : import("$lib/components/CsvPreview.svelte"),
+	import.meta.env.SSR ? pending() : import("#lib/components/CsvPreview.svelte"),
 );
 const loadPdfPreview = createLazyModuleLoader(() =>
-	import.meta.env.SSR ? pending() : import("$lib/components/PdfPreview.svelte"),
+	import.meta.env.SSR ? pending() : import("#lib/components/PdfPreview.svelte"),
 );
 const loadModelPreview = createLazyModuleLoader(() =>
 	import.meta.env.SSR
 		? pending()
-		: import("$lib/components/ModelPreview.svelte"),
+		: import("#lib/components/ModelPreview.svelte"),
 );
 
 /**

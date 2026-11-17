@@ -1,4 +1,4 @@
-import type { Point } from "../camp/world";
+import type { Point } from "../camp/world.ts";
 
 type Voice = {
   track: MediaStreamTrack;

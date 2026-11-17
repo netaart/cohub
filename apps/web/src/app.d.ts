@@ -14,15 +14,10 @@ declare global {
 		// interface PageData {}
 		interface PageState {
 			workspacePreview?: string | null;
-			commandPalette?: import("$lib/command-palette/open").CommandPaletteHistoryEntry;
+			commandPalette?: import("#lib/command-palette/open.ts").CommandPaletteHistoryEntry;
 		}
 		// interface Platform {}
 	}
-}
-
-declare module "$env/static/public" {
-	export const PUBLIC_PREVIEW_ORIGIN: string | undefined;
-	export const PUBLIC_MARKETPLACE_APP_ID: string | undefined;
 }
 
 export {};

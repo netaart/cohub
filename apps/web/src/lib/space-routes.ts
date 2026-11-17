@@ -1,4 +1,4 @@
-import { spaceAddressOf, spaceAddressPath } from "$lib/stores/space-address";
+import { spaceAddressOf, spaceAddressPath } from "#lib/stores/space-address.ts";
 
 /** `/:username/:slug` once the Space's address is confirmed, else `/spaces/:id`. */
 export const buildSpaceRootRoute = (spaceId: string) => {

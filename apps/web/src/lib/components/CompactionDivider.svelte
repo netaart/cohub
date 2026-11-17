@@ -3,7 +3,7 @@ import type {
 	ContextCompactionMeta,
 	SessionTurnRecord,
 } from "@cohub/protocol/model";
-import SystemCompactionNotice from "$lib/components/SystemCompactionNotice.svelte";
+import SystemCompactionNotice from "#lib/components/SystemCompactionNotice.svelte";
 
 type Props = {
 	turn: SessionTurnRecord;

@@ -6,13 +6,13 @@ import type {
 	StoredIntermediateMessage,
 } from "@cohub/protocol/model";
 import { ChevronDown, ChevronRight, Loader2, RotateCw } from "lucide-svelte";
-import IntermediateMessageBubble from "$lib/components/IntermediateMessageBubble.svelte";
-import ProcessRun from "$lib/components/ProcessRun.svelte";
+import IntermediateMessageBubble from "#lib/components/IntermediateMessageBubble.svelte";
+import ProcessRun from "#lib/components/ProcessRun.svelte";
 import {
 	formatDurationDetail,
 	formatDurationMs,
 	isDisplayableDurationMs,
-} from "$lib/format-duration";
+} from "#lib/format-duration.ts";
 import {
 	formatInputTokens,
 	formatTokenCount,
@@ -21,13 +21,13 @@ import {
 	getUsageCostTotal,
 	getUsageTotalTokens,
 	sumUsages,
-} from "$lib/format-usage";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import type { ModelCatalogItem } from "$lib/model-catalog";
-import { m } from "$lib/paraglide/messages.js";
-import type { ChatMessage } from "$lib/session-tree";
-import { buildProcessEntries, hasStepText } from "$lib/session-turn-render";
-import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
+} from "#lib/format-usage.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import type { ModelCatalogItem } from "#lib/model-catalog.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { ChatMessage } from "#lib/session-tree.ts";
+import { buildProcessEntries, hasStepText } from "#lib/session-turn-render.ts";
+import type { OpenWorkspaceFileTarget } from "#lib/workspace-file-links.ts";
 
 type IntermediateLoadState =
 	| { status: "idle" }

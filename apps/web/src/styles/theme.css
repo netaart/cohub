@@ -188,7 +188,7 @@
 
 	--spacing-workspace: 2rem;
 
-	/* Motion; mirrored in $lib/motion.ts */
+	/* Motion; mirrored in #lib/motion.ts */
 	--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 	--ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 

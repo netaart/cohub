@@ -1,7 +1,7 @@
 import { type CheckpointRecord, HttpError } from "@neta-art/cohub";
-import { formatDateTime } from "$lib/i18n/format";
-import type { Locale } from "$lib/i18n/locale";
-import { sdk } from "$lib/sdk";
+import { formatDateTime } from "#lib/i18n/format.ts";
+import type { Locale } from "#lib/i18n/locale.ts";
+import { sdk } from "#lib/sdk.ts";
 
 export async function pollCheckpointJob(taskRunId: string) {
 	const startedAt = Date.now();

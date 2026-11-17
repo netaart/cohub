@@ -4,12 +4,12 @@ import {
 	idbDelete,
 	idbGet,
 	idbPut,
-} from "$lib/cache/db";
+} from "#lib/cache/db.ts";
 import {
 	boardPlaySaveKey,
 	canUseUserScopedCache,
 	getCacheUserKeyAsync,
-} from "$lib/cache/keys";
+} from "#lib/cache/keys.ts";
 
 export type BoardPlaySaveRef = {
 	appId: string;

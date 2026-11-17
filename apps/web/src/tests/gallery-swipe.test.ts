@@ -4,7 +4,7 @@ import {
 	createGallerySwipe,
 	type GallerySwipeOffset,
 	type GallerySwipeOutcome,
-} from "$lib/gestures/gallery-swipe";
+} from "#lib/gestures/gallery-swipe.ts";
 
 const surface = { clientWidth: 400 } as HTMLElement;
 

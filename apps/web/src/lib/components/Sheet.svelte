@@ -1,6 +1,6 @@
 <script lang="ts">
-import { useCompactShell } from "$lib/layout/compact-shell.svelte";
-import { overlay } from "$lib/motion";
+import { useCompactShell } from "#lib/layout/compact-shell.svelte.ts";
+import { overlay } from "#lib/motion.ts";
 
 function portal(node: HTMLElement) {
 	if (typeof document === "undefined") return {};

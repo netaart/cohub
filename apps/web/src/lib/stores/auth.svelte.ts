@@ -12,14 +12,14 @@ import {
 	getHostSessionIdentity,
 	hasRecoverableAuthSession,
 	setSessionHint,
-} from "$lib/auth";
-import { sdk } from "$lib/sdk";
+} from "#lib/auth.ts";
+import { sdk } from "#lib/sdk.ts";
 import {
 	clearCachedMeProfile,
 	getCachedMeProfile,
 	setCachedMeProfile,
-} from "$lib/stores/me-profile-cache";
-import { renameSpaceOwner } from "$lib/stores/space-address";
+} from "#lib/stores/me-profile-cache.ts";
+import { renameSpaceOwner } from "#lib/stores/space-address.ts";
 
 type RestoredAuthSession = {
 	isAuthenticated: boolean;

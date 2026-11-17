@@ -1,4 +1,4 @@
-import { readText } from "../camp/protocol";
+import { readText } from "../camp/protocol.ts";
 import {
   EARSHOT,
   FIRE,
@@ -10,9 +10,9 @@ import {
   SPAWN,
   WALK_SPEED,
   walkable,
-} from "../camp/world";
-import { createTrack, type Pose, type PoseTrack, pushSample, RENDER_DELAY_MS, sampleTrack } from "../net/pose";
-import type { Member } from "../net/session";
+} from "../camp/world.ts";
+import { createTrack, type Pose, type PoseTrack, pushSample, RENDER_DELAY_MS, sampleTrack } from "../net/pose.ts";
+import type { Member } from "../net/session.ts";
 
 export type Body = {
   id: string;

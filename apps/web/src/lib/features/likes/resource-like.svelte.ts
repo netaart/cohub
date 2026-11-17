@@ -1,14 +1,14 @@
 import type { LikeResourceType } from "@neta-art/cohub";
-import { ensureAuth, hasLocalSessionHint } from "$lib/auth";
-import { getCurrentRedirectPath } from "$lib/auth-redirect";
+import { ensureAuth, hasLocalSessionHint } from "#lib/auth.ts";
+import { getCurrentRedirectPath } from "#lib/auth-redirect.ts";
 import {
 	onViewerLikeChanged,
 	readViewerLike,
 	writeViewerLike,
-} from "$lib/cache/repositories/viewer-likes-repo";
-import { haptic } from "$lib/haptics";
-import { sdk } from "$lib/sdk";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/cache/repositories/viewer-likes-repo.ts";
+import { haptic } from "#lib/haptics.ts";
+import { sdk } from "#lib/sdk.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 
 const FAILED_HINT_MS = 3_000;
 

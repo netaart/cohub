@@ -2,12 +2,12 @@ import {
 	idbGet,
 	idbPut,
 	type SpaceResourceListCacheRecord,
-} from "$lib/cache/db";
+} from "#lib/cache/db.ts";
 import {
 	canUseUserScopedCache,
 	getCacheUserKeyAsync,
 	spaceResourceListKey,
-} from "$lib/cache/keys";
+} from "#lib/cache/keys.ts";
 
 async function resolveUserKey() {
 	const userKey = await getCacheUserKeyAsync();

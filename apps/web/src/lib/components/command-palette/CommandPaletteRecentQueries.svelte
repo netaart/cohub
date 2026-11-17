@@ -1,11 +1,11 @@
 <script lang="ts">
 import { History } from "lucide-svelte";
-import { commandLensLabel } from "$lib/command-palette/lens-copy";
-import type { RecentQuery } from "$lib/command-palette/recent-queries";
-import FilterBar from "$lib/components/list-page/FilterBar.svelte";
-import FilterChip from "$lib/components/list-page/FilterChip.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import { commandLensLabel } from "#lib/command-palette/lens-copy.ts";
+import type { RecentQuery } from "#lib/command-palette/recent-queries.ts";
+import FilterBar from "#lib/components/list-page/FilterBar.svelte";
+import FilterChip from "#lib/components/list-page/FilterChip.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	queries,

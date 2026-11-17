@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AppMeta } from "@neta-art/cohub";
-import { appDisplayTitle, appIconUrl } from "$lib/app-page-meta";
+import { appDisplayTitle, appIconUrl } from "#lib/app-page-meta.ts";
 
 test("appIconUrl keeps absolute and inline icons", () => {
 	assert.equal(

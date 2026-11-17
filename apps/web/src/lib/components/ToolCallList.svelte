@@ -1,11 +1,11 @@
 <script lang="ts">
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { MessageToolCallsFile } from "@cohub/protocol/model";
-import ToolCallItem from "$lib/components/ToolCallItem.svelte";
-import { buildToolCallViewModels } from "$lib/components/tool-call-format";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import type { OpenWorkspaceFileTarget } from "$lib/workspace-file-links";
+import ToolCallItem from "#lib/components/ToolCallItem.svelte";
+import { buildToolCallViewModels } from "#lib/components/tool-call-format.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import type { OpenWorkspaceFileTarget } from "#lib/workspace-file-links.ts";
 
 type Props = {
 	content: ContentBlock[];

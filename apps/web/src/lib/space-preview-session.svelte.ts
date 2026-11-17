@@ -1,5 +1,5 @@
-import { sdk } from "$lib/sdk";
-import { spacePreviewSessionCache } from "$lib/space-preview-session-cache";
+import { sdk } from "#lib/sdk.ts";
+import { spacePreviewSessionCache } from "#lib/space-preview-session-cache.ts";
 
 export type SpacePreviewTarget = {
 	origin: string;

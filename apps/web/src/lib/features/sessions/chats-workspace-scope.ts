@@ -1,6 +1,6 @@
-import { createChatsWorkspaceScope } from "$lib/features/space/modules/workspace-scope";
-import { sessionStore } from "$lib/stores/session-store";
-import { chatsInbox, openNewChatSpacePicker } from "./chats-inbox.svelte";
+import { createChatsWorkspaceScope } from "#lib/features/space/modules/workspace-scope.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
+import { chatsInbox, openNewChatSpacePicker } from "./chats-inbox.svelte.ts";
 
 export const chatsWorkspaceScope = createChatsWorkspaceScope({
 	spaceOfSession: (sessionId) =>

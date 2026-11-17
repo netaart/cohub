@@ -1,8 +1,8 @@
+import { getCacheUserKey } from "#lib/cache/keys.ts";
 import { goto } from "$app/navigation";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { chatHref } from "./chat-items";
-import { commandItemKey } from "./merge-results";
-import type { CommandPaletteItem, CommandPaletteItemType } from "./types";
+import { chatHref } from "./chat-items.ts";
+import { commandItemKey } from "./merge-results.ts";
+import type { CommandPaletteItem, CommandPaletteItemType } from "./types.ts";
 
 const STORAGE_PREFIX = "cohub:command-palette:recent";
 const MAX_RECENT = 30;

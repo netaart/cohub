@@ -1,7 +1,7 @@
 <script lang="ts">
 import { ChevronLeft, ChevronRight, X } from "lucide-svelte";
 import { m } from "$messages";
-import { getLocale } from "../runtime.svelte";
+import { getLocale } from "../runtime.svelte.ts";
 
 type Item = { src: string; alt: string };
 type Props = { items: Item[]; index: number | null; onclose: () => void };

@@ -1,11 +1,11 @@
 // UI state shared across layout and pages
 // Using a class to wrap $state so it can be mutated from imports
 
-import { MAIN_PANEL_MIN_WIDTH } from "$lib/features/space/modules/layout-geometry";
+import { MAIN_PANEL_MIN_WIDTH } from "#lib/features/space/modules/layout-geometry.ts";
 import {
 	resolveDefaultLayoutGeometry,
 	type WorkspaceDefaultLayout,
-} from "$lib/features/space/modules/workspace-default-layout";
+} from "#lib/features/space/modules/workspace-default-layout.ts";
 
 type LayoutPrefKey =
 	| "leftSidebarWidth"

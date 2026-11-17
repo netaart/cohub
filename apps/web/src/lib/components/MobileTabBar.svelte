@@ -1,13 +1,13 @@
 <script lang="ts">
+import { APP_AREA_ICONS, appAreaLabel } from "#lib/components/app-area.ts";
+import EntityIcon from "#lib/components/EntityIcon.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { requestListScrollTop } from "#lib/layout/list-scroll-top.ts";
+import { APP_AREAS, appAreaHref, resolveAppArea } from "#lib/mobile-nav.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import { page } from "$app/state";
-import { APP_AREA_ICONS, appAreaLabel } from "$lib/components/app-area";
-import EntityIcon from "$lib/components/EntityIcon.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { requestListScrollTop } from "$lib/layout/list-scroll-top";
-import { APP_AREAS, appAreaHref, resolveAppArea } from "$lib/mobile-nav";
-import { m } from "$lib/paraglide/messages.js";
-import { authStore } from "$lib/stores/auth.svelte";
 
 const locale = $derived(getLocale());
 const activeArea = $derived(resolveAppArea(page.url.pathname));

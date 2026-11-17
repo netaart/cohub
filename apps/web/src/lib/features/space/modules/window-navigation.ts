@@ -1,4 +1,4 @@
-import type { WindowRef } from "./window-route";
+import type { WindowRef } from "./window-route.ts";
 
 export type WindowNavigationSource = "user" | "route" | "restore";
 

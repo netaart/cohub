@@ -1,5 +1,5 @@
 import { getContext, setContext } from "svelte";
-import type { ResolveWorkspaceAsset } from "$lib/workspace-assets";
+import type { ResolveWorkspaceAsset } from "#lib/workspace-assets.ts";
 
 const workspaceAssetContextKey = Symbol("cohub.markdown.workspace-asset");
 

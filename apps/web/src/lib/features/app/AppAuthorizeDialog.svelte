@@ -15,17 +15,17 @@ import {
 	UserPlus,
 } from "lucide-svelte";
 import { tick, untrack } from "svelte";
-import Dialog from "$lib/components/Dialog.svelte";
-import Spinner from "$lib/components/Spinner.svelte";
-import { spaceRoleLabel } from "$lib/features/invitations/invitation-format";
-import { spacesFilterLabel } from "$lib/features/spaces/spaces-views";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { APP_SCOPE_OPTIONS } from "$lib/resource-kit/app";
-import { sdk } from "$lib/sdk";
-import type { SpacePickerFilter } from "$lib/space-picker-model";
-import { authStore } from "$lib/stores/auth.svelte";
-import { getRecentSpaces } from "$lib/stores/recent-space";
+import Dialog from "#lib/components/Dialog.svelte";
+import Spinner from "#lib/components/Spinner.svelte";
+import { spaceRoleLabel } from "#lib/features/invitations/invitation-format.ts";
+import { spacesFilterLabel } from "#lib/features/spaces/spaces-views.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { APP_SCOPE_OPTIONS } from "#lib/resource-kit/app.ts";
+import { sdk } from "#lib/sdk.ts";
+import type { SpacePickerFilter } from "#lib/space-picker-model.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
+import { getRecentSpaces } from "#lib/stores/recent-space.ts";
 
 const {
 	open,

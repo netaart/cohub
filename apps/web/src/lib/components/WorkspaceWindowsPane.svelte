@@ -1,5 +1,5 @@
 <script lang="ts">
-import { holdContentThroughTweens } from "$lib/layout/hold-through-tweens";
+import { holdContentThroughTweens } from "#lib/layout/hold-through-tweens.ts";
 
 const {
 	ariaLabel = "Workspace preview",

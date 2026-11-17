@@ -10,15 +10,15 @@ import {
 	IDENTITY_TONE_COUNT,
 	identityToken,
 	identityTone,
-} from "$lib/avatar-identity";
+} from "#lib/avatar-identity.ts";
 import {
 	type BoardThemeTokenSource,
 	readBoardThemeBackdrop,
 	readBoardThemeColors,
 	readBoardThemeStyle,
-} from "$lib/board/board-theme-tokens";
-import { readCssColorNumber } from "$lib/board/css-color";
-import { getResolvedTheme, type ResolvedTheme } from "$lib/theme.svelte";
+} from "#lib/board/board-theme-tokens.ts";
+import { readCssColorNumber } from "#lib/board/css-color.ts";
+import { getResolvedTheme, type ResolvedTheme } from "#lib/theme.svelte.ts";
 
 /**
  * The complete theme context used by a browser board. `colorScheme` is only a

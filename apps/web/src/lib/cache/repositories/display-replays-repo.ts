@@ -1,10 +1,14 @@
-import { type DisplayReplayCacheRecord, idbGet, idbPut } from "$lib/cache/db";
+import {
+	type DisplayReplayCacheRecord,
+	idbGet,
+	idbPut,
+} from "#lib/cache/db.ts";
 import {
 	canUseUserScopedCache,
 	encodeKeyPart,
 	getCacheUserKeyAsync,
-} from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
+} from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
 
 const STORE = "display_replays";
 const memory = new MemoryLru<string, DisplayReplayCacheRecord>(64);

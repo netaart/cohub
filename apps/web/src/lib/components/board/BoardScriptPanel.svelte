@@ -1,12 +1,12 @@
 <script lang="ts">
 import type { BoardScriptParameter } from "@neta-art/cohub/board";
 import { Copy, FileCode, RotateCcw, X } from "lucide-svelte";
-import type { BoardScriptStatus } from "$lib/board/board-script-status";
-import type { BoardEditor } from "$lib/board/editor.svelte";
-import { copyTextToClipboard } from "$lib/clipboard";
-import ToggleSwitch from "$lib/components/ToggleSwitch.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import type { BoardScriptStatus } from "#lib/board/board-script-status.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import { copyTextToClipboard } from "#lib/clipboard.ts";
+import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const {
 	editor,

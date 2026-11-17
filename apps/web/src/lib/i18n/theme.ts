@@ -1,6 +1,6 @@
-import { m } from "$lib/paraglide/messages.js";
-import type { ThemeMode } from "$lib/theme-registry";
-import type { Locale } from "./locale";
+import { m } from "#lib/paraglide/messages.js";
+import type { ThemeMode } from "#lib/theme-registry.ts";
+import type { Locale } from "./locale.ts";
 
 export function localizedThemeLabel(theme: ThemeMode, locale: Locale): string {
 	const options = { locale };

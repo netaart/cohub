@@ -1,4 +1,4 @@
-import { toSpaceIdPath } from "$lib/stores/space-address";
+import { toSpaceIdPath } from "#lib/stores/space-address.ts";
 
 /**
  * Resolve the active workspace route context.
@@ -10,7 +10,7 @@ import { toSpaceIdPath } from "$lib/stores/space-address";
  * workspace space — those must not drive sidebar layout prefs.
  */
 
-import { isSpaceIdSegment } from "$lib/library-routes";
+import { isSpaceIdSegment } from "#lib/library-routes.ts";
 
 export type WorkspaceLabelResource = {
 	type: "session" | "checkpoint" | "file";

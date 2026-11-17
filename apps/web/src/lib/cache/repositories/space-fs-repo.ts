@@ -3,22 +3,22 @@ import type { SpaceFsEntry } from "@neta-art/cohub";
 import {
 	publishCacheMessage,
 	subscribeCacheMessages,
-} from "$lib/cache/broadcast";
+} from "#lib/cache/broadcast.ts";
 import {
 	idbGet,
 	idbRunTransaction,
 	type SpaceFsDirCacheRecord,
 	type SpaceFsEpochCacheRecord,
-} from "$lib/cache/db";
+} from "#lib/cache/db.ts";
 import {
 	getCacheUserKey,
 	normalizeDirPath,
 	spaceFsDirKey,
 	spaceFsEpochKey,
-} from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
-import { getFsInvalidationTargets } from "$lib/cache/space-fs-invalidation";
-import type { CacheSource } from "$lib/cache/types";
+} from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
+import { getFsInvalidationTargets } from "#lib/cache/space-fs-invalidation.ts";
+import type { CacheSource } from "#lib/cache/types.ts";
 
 const SPACE_FS_TTL_MS = 60_000;
 const memory = new MemoryLru<string, SpaceFsDirCacheRecord>(300);

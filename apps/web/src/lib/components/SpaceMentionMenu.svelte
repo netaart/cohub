@@ -1,15 +1,15 @@
 <script lang="ts">
 import { CornerDownLeft, Loader2, SearchSlash } from "lucide-svelte";
-import ListRowText from "$lib/components/list-page/ListRowText.svelte";
-import { LIST_ROW_AVATAR } from "$lib/components/list-page/list-row";
-import SpaceAvatar from "$lib/components/SpaceAvatar.svelte";
+import ListRowText from "#lib/components/list-page/ListRowText.svelte";
+import { LIST_ROW_AVATAR } from "#lib/components/list-page/list-row.ts";
+import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
 import {
 	COMPOSER_MENU_LAYER,
 	type ComposerMenuPlacement,
-} from "$lib/composer-expansion";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import type { SpaceMentionSuggestion } from "$lib/mentions/space";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/composer-expansion.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import type { SpaceMentionSuggestion } from "#lib/mentions/space.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 type Props = {
 	open?: boolean;

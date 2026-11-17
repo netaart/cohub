@@ -15,15 +15,15 @@ import {
 	X,
 } from "lucide-svelte";
 import { onDestroy, untrack } from "svelte";
-import { formatBoardTime } from "$lib/board/animation-timeline";
-import { createBoardAnimationTransport } from "$lib/board/board-animation-transport.svelte";
-import { boardAnimationReach } from "$lib/board/board-media-playback";
-import type { BoardEditor } from "$lib/board/editor.svelte";
+import { formatBoardTime } from "#lib/board/animation-timeline.ts";
+import { createBoardAnimationTransport } from "#lib/board/board-animation-transport.svelte.ts";
+import { boardAnimationReach } from "#lib/board/board-media-playback.ts";
+import type { BoardEditor } from "#lib/board/editor.svelte.ts";
 import BoardMenu, {
 	type BoardMenuItem,
-} from "$lib/components/board/BoardMenu.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/components/board/BoardMenu.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const IDLE_MS = 2500;
 const SEEK_STEP_MS = 5000;

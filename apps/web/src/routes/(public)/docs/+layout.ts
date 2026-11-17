@@ -3,7 +3,7 @@ import {
 	listDocsSources,
 	loadDocsSearchIndex,
 	parseDocsPath,
-} from "$lib/docs";
+} from "#lib/docs/index.ts";
 import type { LayoutLoad } from "./$types";
 
 export const prerender = true;

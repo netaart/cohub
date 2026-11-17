@@ -3,10 +3,10 @@ import type {
 	SpaceActivityAppRanking,
 	UserActivityRankings,
 } from "@neta-art/cohub";
-import { formatCompact, formatCost } from "$lib/activity";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { buildSpaceAppRoute } from "$lib/space-routes";
+import { formatCompact, formatCost } from "#lib/activity.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { buildSpaceAppRoute } from "#lib/space-routes.ts";
 
 type AppRanking = SpaceActivityAppRanking & {
 	spaceId?: string;

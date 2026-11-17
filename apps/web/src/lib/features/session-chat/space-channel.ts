@@ -1,5 +1,5 @@
 import type { ChannelEnvelope } from "@cohub/protocol/realtime";
-import { sdk } from "$lib/sdk";
+import { sdk } from "#lib/sdk.ts";
 
 type SpaceChannelListener = (event: ChannelEnvelope) => void;
 

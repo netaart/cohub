@@ -8,9 +8,9 @@
  * makes publicly in its own README.
  */
 import { ArrowUpRight } from "lucide-svelte";
-import type { PublicLocale } from "$lib/i18n/public-locale";
-import { m } from "$lib/paraglide/messages.js";
-import { REPO_URL } from "$lib/project";
+import type { PublicLocale } from "#lib/i18n/public-locale.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { REPO_URL } from "#lib/project.ts";
 
 type Props = { locale?: PublicLocale };
 

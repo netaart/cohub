@@ -2,11 +2,11 @@
 import { readSessionStats, type SessionStats } from "@cohub/protocol/model";
 import type { SessionRecord } from "@neta-art/cohub";
 import { onMount } from "svelte";
-import StatsContent from "$lib/components/StatsContent.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
-import { sdk } from "$lib/sdk";
-import { sessionStore } from "$lib/stores/session-store";
+import StatsContent from "#lib/components/StatsContent.svelte";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
+import { sdk } from "#lib/sdk.ts";
+import { sessionStore } from "#lib/stores/session-store.ts";
 
 let { session }: { session: SessionRecord } = $props();
 const locale = $derived(getLocale());

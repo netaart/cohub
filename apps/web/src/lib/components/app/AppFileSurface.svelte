@@ -2,17 +2,17 @@
 import { isTextMime } from "@cohub/protocol/fs";
 import type { SpaceFsFileResponse, WorkContent } from "@neta-art/cohub";
 import { Download } from "lucide-svelte";
-import CenteredLoading from "$lib/components/CenteredLoading.svelte";
-import FileContentPreview from "$lib/components/FileContentPreview.svelte";
-import { saveFile } from "$lib/downloads.svelte";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { m } from "$lib/paraglide/messages.js";
+import CenteredLoading from "#lib/components/CenteredLoading.svelte";
+import FileContentPreview from "#lib/components/FileContentPreview.svelte";
+import { saveFile } from "#lib/downloads.svelte.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { m } from "#lib/paraglide/messages.js";
 
 const locale = $derived(getLocale());
 
-import { tryResolveTextFileResponse } from "$lib/space-file-text";
-import type { ResolveWorkspaceAsset } from "$lib/workspace-assets";
-import type { WorkspaceFileLinkTarget } from "$lib/workspace-file-links";
+import { tryResolveTextFileResponse } from "#lib/space-file-text.ts";
+import type { ResolveWorkspaceAsset } from "#lib/workspace-assets.ts";
+import type { WorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
 
 const {
 	content,

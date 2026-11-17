@@ -3,13 +3,13 @@ import {
 	idbDelete,
 	idbGet,
 	idbPut,
-} from "$lib/cache/db";
+} from "#lib/cache/db.ts";
 import {
 	boardManifestKey,
 	canUseUserScopedCache,
 	getCacheUserKey,
-} from "$lib/cache/keys";
-import { MemoryLru } from "$lib/cache/memory-lru";
+} from "#lib/cache/keys.ts";
+import { MemoryLru } from "#lib/cache/memory-lru.ts";
 
 const manifests = new MemoryLru<string, string>(512);
 

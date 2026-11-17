@@ -5,12 +5,12 @@ import {
 import {
 	isComposerImageFile,
 	isSupportedComposerImageFile,
-} from "$lib/composer-attachments";
+} from "#lib/composer-attachments.ts";
 import {
 	prepareChatImageAttachment,
 	uploadChatAttachmentFile,
 	uploadChatImageDurable,
-} from "$lib/public-asset-images";
+} from "#lib/public-asset-images.ts";
 
 function boardImageUrl(publicUrl: string): string {
 	const url = normalizeBoardRemoteUrl(publicUrl);

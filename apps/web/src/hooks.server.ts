@@ -1,9 +1,9 @@
-import type { Handle } from "@sveltejs/kit";
-import { resolvePublicLocale } from "$lib/i18n/public-locale";
+import type { Handle } from "@sveltejs/kit/hooks";
+import { resolvePublicLocale } from "#lib/i18n/public-locale.ts";
 import {
 	isPublicSharePath,
 	PUBLIC_NOT_FOUND_CACHE_CONTROL,
-} from "$lib/server/public-cache";
+} from "#lib/server/public-cache.ts";
 
 function resolveHtmlLang(pathname: string, html: string): string {
 	const urlLocale = resolvePublicLocale(pathname);

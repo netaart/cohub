@@ -10,37 +10,40 @@ import {
 	X,
 } from "lucide-svelte";
 import type { Snippet } from "svelte";
-import { clock } from "$lib/clock.svelte";
-import ListRow from "$lib/components/list-page/ListRow.svelte";
-import ListRowText from "$lib/components/list-page/ListRowText.svelte";
-import type { ListRowDensity } from "$lib/components/list-page/list-row";
+import { clock } from "#lib/clock.svelte.ts";
+import ListRow from "#lib/components/list-page/ListRow.svelte";
+import ListRowText from "#lib/components/list-page/ListRowText.svelte";
+import type { ListRowDensity } from "#lib/components/list-page/list-row.ts";
 import StatusGlyph, {
 	type StatusGlyphMotion,
 	type StatusGlyphShape,
 	type StatusGlyphTone,
-} from "$lib/components/StatusGlyph.svelte";
-import SidebarActionButton from "$lib/components/sidebar/SidebarActionButton.svelte";
-import UserAvatar from "$lib/components/UserAvatar.svelte";
-import type { SessionRename } from "$lib/features/sessions/session-rename.svelte";
-import { formatElapsedMs } from "$lib/format-duration";
-import { getLocale } from "$lib/i18n/locale.svelte";
-import { isComposingKeyboardEvent } from "$lib/keyboard";
-import { m } from "$lib/paraglide/messages.js";
+} from "#lib/components/StatusGlyph.svelte";
+import SidebarActionButton from "#lib/components/sidebar/SidebarActionButton.svelte";
+import UserAvatar from "#lib/components/UserAvatar.svelte";
+import type { SessionRename } from "#lib/features/sessions/session-rename.svelte.ts";
+import { formatElapsedMs } from "#lib/format-duration.ts";
+import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
+import { m } from "#lib/paraglide/messages.js";
 import {
 	getSessionRowStatus,
 	getSessionStoppedLabel,
 	type SessionRowStatusKind,
-} from "$lib/session-activity";
-import type { SessionRowTree } from "$lib/session-fork-tree";
-import { getSessionPreview, getSessionPreviewText } from "$lib/session-preview";
-import { getSessionActivityAt } from "$lib/session-sort";
-import { authStore } from "$lib/stores/auth.svelte";
+} from "#lib/session-activity.ts";
+import type { SessionRowTree } from "#lib/session-fork-tree.ts";
+import {
+	getSessionPreview,
+	getSessionPreviewText,
+} from "#lib/session-preview.ts";
+import { getSessionActivityAt } from "#lib/session-sort.ts";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import {
 	chatsSourceName,
 	resolveSessionSourceKey,
-} from "$lib/stores/chats-filter";
-import { unreadTracker } from "$lib/stores/session-state.svelte";
-import { formatCompactAbsoluteTime } from "$lib/time-format";
+} from "#lib/stores/chats-filter.ts";
+import { unreadTracker } from "#lib/stores/session-state.svelte.ts";
+import { formatCompactAbsoluteTime } from "#lib/time-format.ts";
 
 const {
 	session,

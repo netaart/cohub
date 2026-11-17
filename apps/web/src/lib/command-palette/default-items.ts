@@ -10,19 +10,19 @@ import {
 	type SessionListCacheRecord,
 	type SessionTurnsCacheRecord,
 	type SpaceRecordCacheRecord,
-} from "$lib/cache/db";
-import { getCacheUserKey } from "$lib/cache/keys";
-import { getSpacePublicProfile } from "$lib/space-profile";
-import { buildSpaceLandingRoute } from "$lib/space-routes";
-import { getRecentSpaces } from "$lib/stores/recent-space";
-import { getCachedSpaceList } from "$lib/stores/space-list-cache";
-import { chatHref, chatTitle } from "./chat-items";
-import { commandItemKey } from "./merge-results";
-import { buildLocalPaletteOverview } from "./palette-overview-local";
-import { getViewerTurnActivityBySpace } from "./personal-activity";
-import { allowsResourceType, type CommandPaletteSearchPlan } from "./scope";
-import { recencyScore } from "./score";
-import type { CommandPaletteItem } from "./types";
+} from "#lib/cache/db.ts";
+import { getCacheUserKey } from "#lib/cache/keys.ts";
+import { getSpacePublicProfile } from "#lib/space-profile.ts";
+import { buildSpaceLandingRoute } from "#lib/space-routes.ts";
+import { getRecentSpaces } from "#lib/stores/recent-space.ts";
+import { getCachedSpaceList } from "#lib/stores/space-list-cache.ts";
+import { chatHref, chatTitle } from "./chat-items.ts";
+import { commandItemKey } from "./merge-results.ts";
+import { buildLocalPaletteOverview } from "./palette-overview-local.ts";
+import { getViewerTurnActivityBySpace } from "./personal-activity.ts";
+import { allowsResourceType, type CommandPaletteSearchPlan } from "./scope.ts";
+import { recencyScore } from "./score.ts";
+import type { CommandPaletteItem } from "./types.ts";
 
 const DEFAULT_LIMIT = 30;
 const SPACE_DEFAULT_LIMIT = 50;

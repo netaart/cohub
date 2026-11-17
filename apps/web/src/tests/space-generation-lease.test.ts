@@ -5,7 +5,7 @@ import {
 	acquireSpaceGeneration,
 	getSpaceGenerationLeaseCount,
 	releaseSpaceGeneration,
-} from "../lib/features/session-chat/space-generation-lease";
+} from "../lib/features/session-chat/space-generation-lease.ts";
 
 test("second host entering same space does not reset", () => {
 	const resets: string[] = [];
