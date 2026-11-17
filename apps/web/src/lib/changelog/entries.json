@@ -1,5 +1,19 @@
 [
 	{
+		"version": "2.103",
+		"date": "2026-11-17",
+		"tags": ["v2.103.0"],
+		"highlights": [
+			"**Board depth**: Board items can now take `depth` — `lift`, `tilt`, `spin`, `bend` (wave, cloth, curl, or custom GLSL exported by a script module), `shade`, `shadow` and a `back` item. Lifted items render as live pictures in one shared PixiJS 3D view with map-like perspective and soft shadows, while pointers, script hit regions, selection outlines and toolbars act on what is actually seen; depth animates along paths and through `ctx.present`",
+			"**3D models on the Board**: models with `props.model.display: \"object\"` rest on the Board as lit objects among lifted items with a contact shadow, and skinned models without normals now light correctly. Exports render depth in local Chrome, frame lifted items in whole-board output, and the CLI reports depth in `boards inspect`, adds `boards schema depth`, the `flip`/`lift`/`land`/`toss`/`sway`/`wave`/`curl` presets and `boards examples depth`",
+			"**SvelteKit 3 and TypeScript 7 toolchain**: SvelteKit moves to 3 with adapter-cloudflare 8, Vite 8, Svelte 5.57 and Paraglide 3. Config now lives in `vite.config.ts`, the app uses `#lib` subpath imports with explicit extensions and `$app/env/public`, workspace packages resolve through a `source` export condition instead of per-path aliases and a custom alias hook, and every Svelte app type-checks with TypeScript 7 (`@typescript/native`) while TS 6 remains only for svelte-check and SvelteKit's JS API",
+			"**Per-colo edge caching restored**: adapter-cloudflare 8 no longer caches public SSR responses at the edge, so Cohub brings back a per-colo page cache that reuses responses only when they are publicly cacheable, cookie-free and have a positive TTL, keeping public pages fast without caching personalized content"
+		],
+		"fixes": [
+			"Offline local sandboxes now answer with `409 Conflict` and `sandbox_offline` instead of `503`, so a user's machine being away is treated as Space state rather than a server fault and no longer counts as 5xx in error tracking"
+		]
+	},
+	{
 		"version": "2.102",
 		"date": "2026-11-16",
 		"tags": ["v2.102.0", "v2.102.1"],
