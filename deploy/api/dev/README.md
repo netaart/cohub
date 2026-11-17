@@ -7,6 +7,7 @@ dev/
 ├── values.yaml        # Dev 环境配置（可提交 git）
 ├── secrets.yaml       # 敏感配置（不提交 git）
 ├── rbac.yaml          # Dev 环境 RBAC 配置
+├── networkpolicy.yaml # Sessions namespace 出网策略（屏蔽实例元数据）
 ├── deploy.sh          # 部署脚本
 └── run-migration.sh   # 数据库迁移脚本
 ```
