@@ -7,7 +7,7 @@ import { resolveTurnHarness } from "./session-utils.ts";
  * Production data: cold resends of at least $1 carry ~85% of expired-cache
  * spend, while cheaper models rarely reach it and stay quiet.
  */
-export const COLD_RESEND_NOTICE_USD = 1;
+const COLD_RESEND_NOTICE_USD = 1;
 
 const SETTLED_STATUSES = new Set(["completed", "failed", "interrupted"]);
 
@@ -22,7 +22,7 @@ type CacheTurn = Pick<
 };
 
 export type ColdResend = {
-	/** The settled Turn whose cached prefix this estimate is about. */
+	/** The latest settled Turn; a dismissal lasts until another one settles. */
 	turnId: string;
 	/** When the prefix leaves the provider cache; `0` when it is already gone. */
 	expiresAt: number;
@@ -40,6 +40,15 @@ function modelNumber(record: unknown, key: string): number | null {
 		: null;
 }
 
+function promptTokens(usage: Usage | null | undefined): number {
+	return (
+		(usage?.input ?? 0) +
+		(usage?.cacheRead ?? 0) +
+		(usage?.cacheWrite ?? 0) +
+		(usage?.output ?? 0)
+	);
+}
+
 /**
  * Estimates what the next message re-sends once the provider cache is cold.
  * Returns null unless the resend is expensive enough to be worth a notice.
@@ -50,27 +59,27 @@ export function estimateColdResend(
 	catalog: ModelCatalogItem[] | null | undefined,
 ): ColdResend | null {
 	if (!selected) return null;
-	const last = turns
-		.filter(
-			(turn) =>
-				isAgentTurn(turn) &&
-				turn.intent !== "compact" &&
-				resolveTurnHarness(turn) === "cohub",
+	let last: CacheTurn | null = null;
+	let cached: CacheTurn | null = null;
+	let contextTokens = 0;
+	for (const turn of turns) {
+		if (
+			!isAgentTurn(turn) ||
+			turn.intent === "compact" ||
+			resolveTurnHarness(turn) !== "cohub"
 		)
-		.reduce<CacheTurn | null>(
-			(latest, turn) =>
-				!latest || turn.sequence > latest.sequence ? turn : latest,
-			null,
-		);
-	if (!last || !SETTLED_STATUSES.has(last.status) || !last.completedAt)
-		return null;
-	const usage = last.finalUsage;
-	const contextTokens =
-		(usage?.input ?? 0) +
-		(usage?.cacheRead ?? 0) +
-		(usage?.cacheWrite ?? 0) +
-		(usage?.output ?? 0);
-	if (contextTokens <= 0) return null;
+			continue;
+		if (!last || turn.sequence > last.sequence) last = turn;
+		// Shell commands and failed starts settle without a provider call, so
+		// the cached prefix belongs to the last Turn that reported usage.
+		const tokens = promptTokens(turn.finalUsage);
+		if (tokens > 0 && (!cached || turn.sequence > cached.sequence)) {
+			cached = turn;
+			contextTokens = tokens;
+		}
+	}
+	if (!last || !SETTLED_STATUSES.has(last.status)) return null;
+	if (!cached?.completedAt) return null;
 
 	const item = catalog?.find(
 		(entry) => entry.provider === selected.provider && entry.id === selected.id,
@@ -82,11 +91,11 @@ export function estimateColdResend(
 	const cost = (contextTokens * price) / 1_000_000;
 	if (cost < COLD_RESEND_NOTICE_USD) return null;
 
-	const completedAt = Date.parse(last.completedAt);
+	const completedAt = Date.parse(cached.completedAt);
 	if (!Number.isFinite(completedAt)) return null;
 	const sameModel =
-		(last.provider ?? "cohub") === selected.provider &&
-		last.model === selected.id;
+		(cached.provider ?? "cohub") === selected.provider &&
+		cached.model === selected.id;
 	let expiresAt = 0;
 	if (sameModel) {
 		// Without a measured lifetime the cache state is unknown: stay quiet.

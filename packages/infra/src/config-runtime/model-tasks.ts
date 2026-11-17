@@ -31,8 +31,6 @@ export const USER_MODEL_TASKS_REDIS_KEY_PREFIX = `configs:model-tasks:${MODEL_TA
 
 const SAFE_REDIS_KEY_SEGMENT_REGEX = /^[0-9a-zA-Z_-]+$/;
 const TASK_NAMES = ["sessionTitle", "imageToText", "contextCompaction"] as const;
-/** Tasks that run a built-in prompt; a configured prompt is ignored. */
-const BUILT_IN_PROMPT_TASKS = new Set<ModelTaskName>(["contextCompaction"]);
 
 export type ModelTaskName = typeof TASK_NAMES[number];
 
@@ -91,7 +89,6 @@ export type ResolvedModelTasksConfig = ModelTasksConfig & {
 };
 
 export type ImageToTextConfig = ModelTaskConfig;
-export type ContextCompactionConfig = ModelTaskConfig;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -240,7 +237,7 @@ function resolveTask(
   const provider = task.model?.provider?.trim();
   const id = task.model?.id?.trim();
   const prompt = task.prompt?.trim();
-  if (!provider || !id || (!prompt && !BUILT_IN_PROMPT_TASKS.has(name))) throw new Error("Model task config is incomplete");
+  if (!provider || !id || (!prompt && name !== "contextCompaction")) throw new Error("Model task config is incomplete");
 
   const providerConfig = models.providers[provider];
   const catalogModel = providerConfig?.models?.find((model) => model.id === id);
