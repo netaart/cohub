@@ -48,6 +48,8 @@ Allowed fields are `id`, `name`, `reasoning`, `defaultThinkingLevel`, `thinkingL
 
 `cost` defines actual per-token prices used by the SDK to calculate usage charges, including raw completion billing. Platform prices always come from trusted platform configuration. User catalog prices are discarded, including zero prices and stale copied prices. User-owned connections may define their own prices.
 
+`promptCache` (`{ "short"?: seconds, "long"?: seconds }`, positive integers, same shape as pi-ai `Model.promptCache`) records how long the provider keeps a prompt prefix cached. Like `cost`, platform values come from platform configuration only; a missing value means the lifetime is unknown. Web uses it to tell when a long session's cache has gone cold.
+
 Connection declarations (`api`, `baseUrl`, `apiKey`, `headers`, `compat`, `requestProfile`, `imageUrlInput`) and unknown extensions in a platform-model catalog override never enter the runtime connection. The complete platform provider and model connection remains intact. Platform price, endpoint, header, and model-retirement updates therefore do not invalidate otherwise valid user parameter overrides. Filtering does not change the user's file or cached raw values.
 
 For example, a user `cohub` catalog entry with a different URL and `apiKey: "NEW_API_KEY"` still uses the platform URL and platform-owned key. The user URL is never used. Use a separate provider with explicit user-owned credentials when a different destination is intended.

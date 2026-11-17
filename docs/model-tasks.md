@@ -19,11 +19,18 @@ Platform and user configuration can define auxiliary model tasks in `.cohub/mode
       "id": "vision-model"
     },
     "prompt": "Describe the image accurately and concisely."
+  },
+  "contextCompaction": {
+    "enabled": true,
+    "model": {
+      "provider": "cohub",
+      "id": "summary-model"
+    }
   }
 }
 ```
 
-A task model resolves `provider` and `id` from a model catalog. The `imageToText` model must support image input. Set a task's `enabled` field to `false` to disable it.
+A task model resolves `provider` and `id` from a model catalog. The `imageToText` model must support image input. Set a task's `enabled` field to `false` to disable it. `contextCompaction` summarizes session history during context compaction with its built-in prompt, so `prompt` is optional and ignored; without it the session's own model summarizes. Pick a model whose context window fits long sessions.
 
 Platform tasks resolve against the platform catalog only. A user can change a task's `prompt` or `enabled` without changing its platform model, even when the user's catalog contains a provider with the same name.
 

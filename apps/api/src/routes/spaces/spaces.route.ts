@@ -427,6 +427,8 @@ type SpacePromptInput = {
   thinkingLevel?: string | null;
   /** Optional context window for this session from this prompt on, capped at the platform value. */
   contextWindow?: number | null;
+  /** Compact the session context before this Turn runs. */
+  compactFirst?: boolean | null;
   approvalMode?: ApprovalMode | null;
   serviceTier?: string | null;
   clientMessageId?: string | null;
@@ -2205,6 +2207,13 @@ router.post("/:id/prompt", async (c) => {
   if (promptContextWindow && isLocalHarness(body.harness)) {
     return c.json({ message: "contextWindow is only supported by the cohub harness" }, 400);
   }
+  if (body.compactFirst != null && typeof body.compactFirst !== "boolean") {
+    return c.json({ message: "compactFirst must be a boolean" }, 400);
+  }
+  const compactFirst = body.compactFirst === true;
+  if (compactFirst && isLocalHarness(body.harness)) {
+    return c.json({ message: "compactFirst is only supported by the cohub harness" }, 400);
+  }
   const promptPermission = accessMode === "read_only" ? "session.prompt.readonly" : "session.prompt.fullaccess";
   if (!(await hasPermission(user, promptPermission, { spaceId }))) return authzDenied(c);
 
@@ -2273,6 +2282,7 @@ router.post("/:id/prompt", async (c) => {
   const requestSource = getRequestSource(c);
   const origin = await resolveSessionTurnOrigin(db, requestSource, mode === "immediate" ? "prompt" : "scheduled_prompt",
     (scope) => hasPermission(user, "session.view", scope));
+  if (compactFirst && (mode !== "immediate" || !body.sessionId)) return c.json({ message: "compactFirst needs an immediate prompt to an existing session" }, 400);
   if (reply && (mode !== "immediate" || !origin)) return c.json({ message: "reply needs an immediate prompt sent from a Cohub turn" }, 400);
   const provenance = { ...(requestSource ? { requestSource } : {}), ...(origin ? { origin } : {}) };
 
@@ -2329,6 +2339,7 @@ router.post("/:id/prompt", async (c) => {
         harness: body.harness ?? null,
         thinkingLevel: promptThinkingLevel ?? null,
         contextWindow: promptContextWindow,
+        compactFirst,
         approvalMode: body.approvalMode ?? null,
         serviceTier: body.serviceTier ?? null,
         generationPolicy,

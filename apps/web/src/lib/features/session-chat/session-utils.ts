@@ -144,8 +144,7 @@ export function resolveLastAgentTurnModel(
 		Pick<
 			SessionTurnRecord,
 			"sequence" | "executionKind" | "provider" | "model"
-		> &
-			HarnessTurn
+		> & { intent?: SessionTurnRecord["intent"] } & HarnessTurn
 	>,
 	catalog: ModelCatalogItem[] | null | undefined,
 ): { provider: string; id: string; name?: string } | null {
@@ -154,6 +153,8 @@ export function resolveLastAgentTurnModel(
 			(turn) =>
 				isAgentTurn(turn) &&
 				isCloudTurn(turn) &&
+				// Compactions may run on a separate summary model.
+				turn.intent !== "compact" &&
 				typeof turn.model === "string" &&
 				turn.model.trim(),
 		)

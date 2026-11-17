@@ -9,3 +9,6 @@ const loadModelTasksConfig = createModelTasksConfigLoader({
 
 export const loadImageToTextConfig = async (userId?: string | null) =>
   (await loadModelTasksConfig(userId)).imageToText ?? null;
+
+export const loadContextCompactionConfig = async (userId?: string | null) =>
+  (await loadModelTasksConfig(userId)).contextCompaction ?? null;

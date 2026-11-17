@@ -145,6 +145,7 @@ import {
 	shouldClearActiveSessionForNewDraft,
 	shouldClearResolvedNewSessionOnRoute,
 } from "./new-chat-draft-isolation.ts";
+import { estimateColdResend } from "./prompt-cache.ts";
 import {
 	createSessionComposerController,
 	revokeComposerAttachmentPreview,
@@ -780,6 +781,53 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			activeSessionState?.session?.activeTurn,
 		),
 	);
+	// Re-evaluated when the estimated cache lifetime ends or the tab returns.
+	let cacheClock = $state(Date.now());
+	let compactFirstSessionId = $state<string | null>(null);
+	let dismissedColdResendTurnId = $state<string | null>(null);
+	const coldResendEstimate = $derived.by(() =>
+		activeSessionId &&
+		composerMode === "agent" &&
+		composerHarness === "cohub" &&
+		!activeSessionIsRunning
+			? estimateColdResend(
+					// Loaded turns first: they win sequence ties against the index.
+					[...(activeSessionState?.turns ?? EMPTY_TURNS), ...activeTurnIndex],
+					activeSessionModel,
+					modelsCatalog,
+				)
+			: null,
+	);
+	const coldResend = $derived(
+		coldResendEstimate &&
+			cacheClock >= coldResendEstimate.expiresAt &&
+			dismissedColdResendTurnId !== coldResendEstimate.turnId
+			? coldResendEstimate
+			: null,
+	);
+	const compactFirst = $derived(
+		Boolean(activeSessionId) && compactFirstSessionId === activeSessionId,
+	);
+	$effect(() => {
+		const expiresAt = coldResendEstimate?.expiresAt;
+		if (expiresAt == null) return;
+		const delay = expiresAt - Date.now();
+		if (delay <= 0) {
+			if (untrack(() => cacheClock) < expiresAt) cacheClock = Date.now();
+			return;
+		}
+		const timer = setTimeout(() => {
+			cacheClock = Date.now();
+		}, delay + 250);
+		return () => clearTimeout(timer);
+	});
+	$effect(() => {
+		const onVisible = () => {
+			if (document.visibilityState === "visible") cacheClock = Date.now();
+		};
+		document.addEventListener("visibilitychange", onVisible);
+		return () => document.removeEventListener("visibilitychange", onVisible);
+	});
 	const buildTurnTimelineItems = createTurnTimelineBuilder();
 	const timeline = $derived.by<TimelineItem[]>(() => {
 		const state = activeSessionState;
@@ -3010,6 +3058,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			return;
 		const isNote = composerMode === "note";
 		const harness = composerHarness;
+		const sendCompactFirst = !isNote && harness === "cohub" && compactFirst;
 		// Fail closed: a disconnected Runtime must never dispatch a local turn.
 		if (!isNote && !canUseHarness(harness)) {
 			setComposerError(m.runtime_harness_unavailable());
@@ -3316,6 +3365,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 							...(thinkingLevel ? { thinkingLevel } : {}),
 							...(sentApprovalMode ? { approvalMode: sentApprovalMode } : {}),
 							...(serviceTier ? { serviceTier } : {}),
+							...(sendCompactFirst ? { compactFirst: true } : {}),
 							clientMessageId,
 							...(harness === "cohub"
 								? { generationPolicy: buildTurnGenerationPolicy() }
@@ -3336,6 +3386,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				writeApprovalChoice(sentApprovalKey, null);
 				approvalChoices = { ...approvalChoices, [sentApprovalKey]: null };
 			}
+			if (sendCompactFirst && compactFirstSessionId === sessionId)
+				compactFirstSessionId = null;
 			// The server accepted the prompt even if this host moved elsewhere.
 			// Invalidate before the UI-only early return so Recent revalidates later.
 			noteViewerActivity();
@@ -4567,6 +4619,18 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		relations,
 		get activeSessionIsRunning() {
 			return activeSessionIsRunning;
+		},
+		get coldResend() {
+			return coldResend;
+		},
+		get compactFirst() {
+			return compactFirst;
+		},
+		setCompactFirst(value: boolean) {
+			compactFirstSessionId = value ? activeSessionId : null;
+		},
+		dismissColdResend() {
+			dismissedColdResendTurnId = coldResend?.turnId ?? null;
 		},
 		get forkingTurnId() {
 			return forkingTurnId;

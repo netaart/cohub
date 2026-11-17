@@ -15,7 +15,7 @@ import { createSandboxCodingTools } from "./sandbox/tools.js";
 import { CohubModelRegistry, type CohubModel } from "./runtime/model-registry.js";
 import { resolveBatchContextWindow } from "./runtime/batch-limit.js";
 import { loadRuntimeModelsConfigs } from "./runtime/models-loader.js";
-import { loadImageToTextConfig } from "./runtime/image-to-text-config.js";
+import { loadImageToTextConfig } from "./runtime/model-tasks-config.js";
 import { loadSpaceEnvSnapshot } from "./runtime/env-cache.js";
 import { CompactionStateRecoveryError, maybeAutoCompact, OverflowRecoveryError, type CompactionOutcome } from "./runtime/compaction.js";
 import { clearCurrentSessionExecutionAuth, setCurrentSessionExecutionAuth } from "./runtime/session-execution-auth.js";
@@ -250,22 +250,28 @@ async function runWithRoundAutoCompaction<T>(
   input: {
     actorUserId: string | null;
     abortSignal?: AbortSignal;
+    /** The user asked to compact before this Turn's first LLM round. */
+    compactFirst?: boolean;
     onCompacted?: (outcome: Extract<CompactionOutcome, { compacted: true }>) => void;
   },
   fn: () => Promise<T>,
 ): Promise<T> {
   const previousTransform = handle.session.agent.transformContext;
   let compacting = false;
+  let compactRequested = input.compactFirst === true;
 
   handle.session.agent.transformContext = async (_messages, signal) => {
     if (!compacting) {
       compacting = true;
       try {
         const force = handle.session.consumePendingForcedCompaction();
+        const requested = compactRequested;
+        compactRequested = false;
         const compactOutcome = await maybeAutoCompact(handle, {
           actorUserId: input.actorUserId,
           abortSignal: signal ?? input.abortSignal,
           force,
+          requested,
         }).catch((error) => {
           // Recovery failures are fatal for both threshold and forced compaction.
           if (force || error instanceof CompactionStateRecoveryError) throw error;
@@ -274,6 +280,9 @@ async function runWithRoundAutoCompaction<T>(
         });
         if (compactOutcome.compacted) {
           input.onCompacted?.(compactOutcome);
+        } else if (requested && !force) {
+          // A failed requested compaction must not cost the user their message.
+          logger.warn(`[Agent] requested compaction skipped sessionId=${handle.sessionId} reason=${compactOutcome.reason}`);
         } else if (force) {
           logger.warn(
             `[Agent] overflow-compact did not compact sessionId=${handle.sessionId} reason=${compactOutcome.reason}`,
@@ -1103,6 +1112,7 @@ export async function processAgentTurnJob(job: Job<AgentTurnJobData>) {
             await runWithRoundAutoCompaction(activeHandle, {
               actorUserId,
               abortSignal: abortController.signal,
+              compactFirst: batch.turns.some((turn) => (turn.meta as Record<string, unknown> | null)?.compactFirst === true),
               onCompacted: (compactOutcome) => {
                 turnSpan.addEvent("agent.auto_compact", {
                   "agent.compaction.tokens_before": compactOutcome.tokensBefore,

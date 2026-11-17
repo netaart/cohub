@@ -1,8 +1,15 @@
 import type { Usage } from "@cohub/protocol/core";
 import type {
   ContextCompactionMeta,
+  ContextCompactionTriggerReason,
   SessionTurnCompactionSummary,
 } from "@cohub/protocol/model";
+
+const CONTEXT_COMPACTION_TRIGGER_REASONS = new Set<string>([
+  "threshold",
+  "overflow_recovery",
+  "requested",
+] satisfies ContextCompactionTriggerReason[]);
 
 type CompactionMessageLike = {
   meta?: unknown;
@@ -42,7 +49,7 @@ export function getContextCompactionMeta(meta: unknown): ContextCompactionMeta |
     !isNullableString(compaction.ownerTurnId) ||
     !isNullableNonNegativeInteger(compaction.ordinalInTurn) ||
     !isNullableNonNegativeInteger(compaction.llmRound) ||
-    (compaction.triggerReason !== "threshold" && compaction.triggerReason !== "overflow_recovery") ||
+    !CONTEXT_COMPACTION_TRIGGER_REASONS.has(compaction.triggerReason as string) ||
     !isNonNegativeInteger(compaction.contextWindow) ||
     !isNonNegativeInteger(compaction.tokensBefore) ||
     !isNullableNonNegativeInteger(compaction.estimatedTokensAfter) ||

@@ -14,7 +14,10 @@ import { sessionTurns } from "@cohub/db";
 import { and, eq, sql } from "drizzle-orm";
 import { getCurrentToolExecutionContext } from "../tool-context.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { createModelsFromCohubRegistry } from "./pi-models-adapter.js";
+import { loadContextCompactionConfig } from "./model-tasks-config.js";
+import { createTaskModels, toTaskRuntimeModel } from "./task-model.js";
 import { estimateProxyContextTokens, resolveReserveTokens } from "./compaction-policy.js";
 import { summarizeForCompaction } from "./compaction-summary.js";
 import { getContextTokenBudget, getTokenRatio } from "./token-calibration.js";
@@ -66,6 +69,22 @@ function resolveCompactionSettings(contextWindow: number) {
   };
 }
 
+/** The `contextCompaction` task model summarizes when configured; otherwise the session model does. */
+async function resolveSummarizer(handle: SessionHandle, model: Model<Api>, actorUserId: string | null): Promise<{ model: Model<Api>; models: Models } | null> {
+  const config = await loadContextCompactionConfig(actorUserId).catch((error) => {
+    logger.warn(`[Compaction] contextCompaction task unavailable; using session model sessionId=${handle.sessionId}:`, error);
+    return null;
+  });
+  if (config) {
+    const taskModel = toTaskRuntimeModel(config, { input: ["text"], contextWindow: model.contextWindow, maxTokens: model.maxTokens });
+    const { models, apiKey } = createTaskModels(config, taskModel);
+    if (apiKey) return { model: taskModel, models };
+    logger.warn(`[Compaction] contextCompaction task has no API key; using session model sessionId=${handle.sessionId}`);
+  }
+  if (!handle.session.modelRegistry.getApiKey(model.provider)) return null;
+  return { model, models: createModelsFromCohubRegistry(handle.session.modelRegistry, model) };
+}
+
 async function restorePreCompactionState(handle: SessionHandle, archivePath: string) {
   const restored = await handle.sessionManager.restoreFromArchive(archivePath).catch((error) => {
     logger.error(`[Compaction] restoreFromArchive failed sessionId=${handle.sessionId}:`, error);
@@ -93,7 +112,7 @@ async function restorePreCompactionState(handle: SessionHandle, archivePath: str
  */
 export async function maybeAutoCompact(
   handle: SessionHandle,
-  input: { actorUserId: string | null; abortSignal?: AbortSignal; force?: boolean },
+  input: { actorUserId: string | null; abortSignal?: AbortSignal; force?: boolean; requested?: boolean },
 ): Promise<CompactionOutcome> {
   const model = handle.session.agent.state.model;
   const contextWindow = model.contextWindow ?? 0;
@@ -103,6 +122,7 @@ export async function maybeAutoCompact(
   if (!settings.enabled) return { compacted: false, reason: "disabled" };
 
   const force = input.force === true;
+  const requested = !force && input.requested === true;
   const messages = handle.session.agent.state.messages;
   const proxyTokens = estimateProxyContextTokens(messages);
   // Learned from this model's real usage; 1 (the raw estimate) until a sample exists.
@@ -112,7 +132,7 @@ export async function maybeAutoCompact(
   // as text, so take the larger of the two views for the threshold decision.
   // tokensBefore reporting keeps using the accurate provider number.
   const thresholdTokens = Math.max(tokenBudget?.estimatedTokens ?? Math.ceil(proxyTokens * ratio), proxyTokens);
-  if (!force) {
+  if (!force && !requested) {
     if (!tokenBudget && proxyTokens <= 0) return { compacted: false, reason: "no_usage_data" };
     if (!shouldCompact(thresholdTokens, contextWindow, settings)) {
       return { compacted: false, reason: "below_threshold" };
@@ -121,7 +141,7 @@ export async function maybeAutoCompact(
 
   const tokensLabel = tokenBudget?.estimatedTokens ?? "unknown";
   logger.info(
-    `[Compaction] ${force ? "overflow-compact" : "auto-compact"} triggered sessionId=${handle.sessionId} model=${model.provider}/${model.id} contextWindow=${contextWindow} reserve=${settings.reserveTokens} tokens=${tokensLabel} proxyTokens=${proxyTokens} ratio=${ratio.toFixed(2)} threshold=${thresholdTokens}`,
+    `[Compaction] ${force ? "overflow-compact" : requested ? "requested-compact" : "auto-compact"} triggered sessionId=${handle.sessionId} model=${model.provider}/${model.id} contextWindow=${contextWindow} reserve=${settings.reserveTokens} tokens=${tokensLabel} proxyTokens=${proxyTokens} ratio=${ratio.toFixed(2)} threshold=${thresholdTokens}`,
   );
 
   let compactionEntryAppended = false;
@@ -133,6 +153,7 @@ export async function maybeAutoCompact(
     span.setAttribute("cohub.session_id", handle.sessionId);
     span.setAttribute("agent.context_window", contextWindow);
     span.setAttribute("agent.compaction.force", force);
+    span.setAttribute("agent.compaction.requested", requested);
 
     try {
       // ── 1. Prepare & summarize ──
@@ -170,12 +191,12 @@ export async function maybeAutoCompact(
       span.setAttribute("agent.compaction.turn_prefix_messages", preparation.turnPrefixMessages.length);
       span.setAttribute("agent.compaction.is_split_turn", preparation.isSplitTurn);
 
-      const apiKey = handle.session.modelRegistry.getApiKey(model.provider);
-      if (!apiKey) return { compacted: false, reason: "no_api_key" };
+      const summarizer = await resolveSummarizer(handle, model, input.actorUserId);
+      if (!summarizer) return { compacted: false, reason: "no_api_key" };
+      span.setAttribute("agent.compaction.summary_model", `${summarizer.model.provider}/${summarizer.model.id}`);
 
-      const models = createModelsFromCohubRegistry(handle.session.modelRegistry, model);
       const compactStartedAt = Date.now();
-      const compactAttempt = await summarizeForCompaction({ preparation, models, model, abortSignal: input.abortSignal });
+      const compactAttempt = await summarizeForCompaction({ ...summarizer, preparation, abortSignal: input.abortSignal });
       const compactDurationMs = Math.max(0, Date.now() - compactStartedAt);
       const summaryStats = compactAttempt.stats;
       span.setAttribute("agent.compaction.summary_requests", summaryStats.requests);
@@ -313,12 +334,12 @@ export async function maybeAutoCompact(
         ownerTurnId,
         firstKeptTurnId,
         llmRound: handle.currentLlmRound ?? toolContext?.llmRound ?? null,
-        triggerReason: force ? "overflow_recovery" : "threshold",
+        triggerReason: force ? "overflow_recovery" : requested ? "requested" : "threshold",
         summary: result.summary,
         tokensBefore: result.tokensBefore,
         estimatedTokensAfter,
         firstKeptEntryId,
-        model: { provider: model.provider, id: model.id },
+        model: { provider: summarizer.model.provider, id: summarizer.model.id },
         contextWindow,
         keepRecentTokens: settings.keepRecentTokens,
         summarizedMessageCount,
