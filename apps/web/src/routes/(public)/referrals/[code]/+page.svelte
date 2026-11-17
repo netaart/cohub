@@ -12,7 +12,7 @@ import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { authStore } from "$lib/stores/auth.svelte";
 
-const props = $props<{ params: { code: string } }>();
+const props: { params: { code: string } } = $props();
 const code = $derived(props.params.code);
 const locale: Locale = $derived(getLocale());
 let referral = $state<PublicReferral | null>(null);

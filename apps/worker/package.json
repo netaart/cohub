@@ -17,8 +17,8 @@
     "start:system": "node dist/entrances/system-worker.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1121.0",
-    "@aws-sdk/lib-storage": "^3.1121.0",
+    "@aws-sdk/client-s3": "^3.1170.0",
+    "@aws-sdk/lib-storage": "^3.1170.0",
     "@cohub/billing": "workspace:*",
     "@cohub/core": "workspace:*",
     "@cohub/db": "workspace:*",
@@ -27,7 +27,7 @@
     "@cohub/protocol": "workspace:*",
     "@cohub/sandbox-controller": "workspace:*",
     "@earendil-works/pi-ai": "catalog:",
-    "@kubernetes/client-node": "^2.0.0",
+    "@kubernetes/client-node": "^2.0.2",
     "@neta-art/generation": "0.2.15",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.223.0",
@@ -38,14 +38,14 @@
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "@opentelemetry/sdk-trace-node": "^2.12.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
-    "bullmq": "^6.3.12",
+    "bullmq": "^6.7.6",
     "bullmq-otel": "^2.0.1",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.10",
     "drizzle-orm": "^0.45.4",
-    "ignore": "^7.0.8",
+    "ignore": "^7.0.14",
     "ioredis": "6.0.0",
-    "postgres": "^3.4.9",
-    "yaml": "^2.9.0"
+    "postgres": "^4.1.1",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",

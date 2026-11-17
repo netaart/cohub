@@ -101,7 +101,7 @@ export async function loadBoardScriptSources(
   if (!isSafeBoardSourcePath(src) || !/\.m?js$/.test(src))
     throw new Error("Invalid script entry path.");
   const { init, parse } = await import("es-module-lexer");
-  await init;
+  await init();
   const sources: BoardScriptSources = {};
   const loading = new Map<string, Promise<void>>();
   const edges = new Map<string, readonly string[]>();
@@ -132,14 +132,18 @@ export async function loadBoardScriptSources(
       const [imports] = parse(code, path);
       const resolved: BoardScriptSource["imports"] = [];
       for (const entry of imports) {
-        if (entry.d === -2) throw new Error("import.meta is not available in Board scripts.");
-        if (entry.n === undefined) throw new Error("Dynamic imports must use a literal relative path.");
-        const typed = entry.d >= 0
-          ? entry.a >= 0 && /\btype\s*:\s*["']json["']/.test(code.slice(entry.a, entry.se))
-          : Boolean(entry.at?.some(([key, value]) => key === "type" && value === "json"));
-        if (typed !== isBoardScriptJson(entry.n))
-          throw new Error(typed ? `Only .json files import with type "json": ${entry.n}` : `Import ${entry.n} with { type: "json" }.`);
-        resolved.push({ start: entry.s, end: entry.e, path: resolveScriptImport(path, entry.n), dynamic: entry.d >= 0 });
+        if (entry.type === "import-meta")
+          throw new Error("import.meta is not available in Board scripts.");
+        const specifier = entry.specifier;
+        if (specifier === undefined || (entry.type === "dynamic" && entry.glob))
+          throw new Error("Dynamic imports must use a literal relative path.");
+        const typed = entry.type === "dynamic"
+          ? entry.attributesStart >= 0 &&
+            /\btype\s*:\s*["']json["']/.test(code.slice(entry.attributesStart, entry.importEnd))
+          : Boolean(entry.attributes?.some(([key, value]) => key === "type" && value === "json"));
+        if (typed !== isBoardScriptJson(specifier))
+          throw new Error(typed ? `Only .json files import with type "json": ${specifier}` : `Import ${specifier} with { type: "json" }.`);
+        resolved.push({ start: entry.start, end: entry.end, path: resolveScriptImport(path, specifier), dynamic: entry.type === "dynamic" });
       }
       // Waiting on a module that imports this one would never settle, so cycles fail here.
       const dependencies = resolved.map((entry) => entry.path);

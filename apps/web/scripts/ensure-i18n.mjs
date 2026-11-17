@@ -65,7 +65,8 @@ if (process.argv.includes("--stamp")) {
 	await writeFile(fingerprintFile, fingerprint);
 	process.exit(0);
 }
-if (previousFingerprint === fingerprint && generated) process.exit(0);
+const force = process.argv.includes("--force");
+if (!force && previousFingerprint === fingerprint && generated) process.exit(0);
 
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const child = spawn(
@@ -78,6 +79,8 @@ const child = spawn(
 		"./project.inlang",
 		"--outdir",
 		"./src/lib/paraglide",
+		"--output-structure",
+		"message-modules",
 		"--strategy",
 		"globalVariable",
 		"baseLocale",

@@ -19,7 +19,7 @@
     "smoke:runtime": "tsx scripts/smoke-runtime.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1121.0",
+    "@aws-sdk/client-s3": "^3.1170.0",
     "@cohub/core": "workspace:*",
     "@cohub/db": "workspace:*",
     "@cohub/infra": "workspace:*",
@@ -39,18 +39,18 @@
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "@opentelemetry/sdk-trace-node": "^2.12.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
-    "bullmq": "^6.3.12",
+    "bullmq": "^6.7.6",
     "bullmq-otel": "^2.0.1",
     "drizzle-orm": "^0.45.4",
-    "ignore": "^7.0.8",
+    "ignore": "^7.0.14",
     "ioredis": "6.0.0",
-    "postgres": "^3.4.9",
-    "ws": "^8.21.3",
-    "zod": "^4.6.5"
+    "postgres": "^4.1.1",
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@types/ws": "^8.18.1",
+    "@types/ws": "^8.18.2",
     "tsx": "catalog:",
     "typescript": "^7.0.2"
   }

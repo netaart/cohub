@@ -40,7 +40,7 @@ type DialogState =
 
 const NOT_INITIALIZED_CODE = "space_commerce_not_initialized";
 
-const props = $props<{ data: { spaceId: string } }>();
+const props: { data: { spaceId: string } } = $props();
 const spaceId = $derived(props.data.spaceId);
 
 let loading = $state(true);

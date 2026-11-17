@@ -8,7 +8,7 @@ import type { SandboxSpecOption as SandboxSpec } from "./sandbox-settings.svelte
 
 const locale = $derived(getLocale());
 
-const props = $props<{
+const props: {
 	open: boolean;
 	currentSpec: SandboxSpecId;
 	appliedSpec?: SandboxSpecId | null;
@@ -17,7 +17,7 @@ const props = $props<{
 	onClose: () => void;
 	onSelect: (spec: SandboxSpecId) => void;
 	onUpgrade: (spec: SandboxSpecId) => void;
-}>();
+} = $props();
 
 const orderedSpecs = $derived.by<SandboxSpec[]>(() =>
 	(Object.values(props.specs) as SandboxSpec[]).sort(

@@ -6,12 +6,12 @@ import { m } from "$lib/paraglide/messages.js";
 type LoadingSize = "compact" | "panel" | "page";
 type LoadingVariant = "plain" | "surface";
 
-const props = $props<{
+const props: {
 	label?: string;
 	size?: LoadingSize;
 	variant?: LoadingVariant;
 	class?: string;
-}>();
+} = $props();
 
 const locale = $derived(getLocale());
 const label = $derived(props.label ?? m.common_loading({}, { locale }));

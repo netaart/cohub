@@ -88,7 +88,7 @@ import { invalidateCachedSpaceMembers } from "$lib/stores/space-profile-cache";
 import { cacheSpaceRecordSoon } from "$lib/stores/space-record-cache";
 
 const locale = $derived(getLocale());
-const props = $props<{ data: { spaceId: string } }>();
+const props: { data: { spaceId: string } } = $props();
 const spaceId = $derived(props.data.spaceId);
 const sandboxSettings = $derived(new SandboxSettingsState(spaceId));
 const recommendedBaseMod =

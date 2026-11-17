@@ -128,10 +128,10 @@
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "@opentelemetry/sdk-trace-node": "^2.12.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
-    "bullmq": "^6.3.12",
+    "bullmq": "^6.7.6",
     "bullmq-otel": "^2.0.1",
     "ioredis": "6.0.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "catalog:",

@@ -3,7 +3,7 @@ import SpaceFundPanel from "$lib/features/billing/SpaceFundPanel.svelte";
 import { getLocale } from "$lib/i18n/locale.svelte";
 import { m } from "$lib/paraglide/messages.js";
 
-const props = $props<{ params: { id: string } }>();
+const props: { params: { id: string } } = $props();
 const locale = $derived(getLocale());
 </script>
 

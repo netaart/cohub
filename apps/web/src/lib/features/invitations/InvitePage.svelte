@@ -24,7 +24,7 @@ import { m } from "$lib/paraglide/messages.js";
 import { sdk } from "$lib/sdk";
 import { authStore } from "$lib/stores/auth.svelte";
 
-const props = $props<{ token: string }>();
+const props: { token: string } = $props();
 const token = $derived(props.token);
 const locale: Locale = $derived(getLocale());
 

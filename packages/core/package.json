@@ -153,9 +153,9 @@
     "@cohub/protocol": "workspace:*",
     "@cohub/sandbox-controller": "workspace:*",
     "drizzle-orm": "^0.45.4",
-    "ignore": "^7.0.8",
+    "ignore": "^7.0.14",
     "picomatch": "^4.0.7",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "catalog:",

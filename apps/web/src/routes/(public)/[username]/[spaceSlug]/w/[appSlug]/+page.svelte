@@ -58,7 +58,7 @@ type ClientData = {
 	requestedVersion: number | null;
 };
 
-const props = $props<{ data: ReadyData | ClientData }>();
+const props: { data: ReadyData | ClientData } = $props();
 
 const launchState = $derived({
 	search: page.url.search,

@@ -19,9 +19,9 @@
     "@cohub/infra": "workspace:*",
     "@cohub/media": "workspace:*",
     "@cohub/protocol": "workspace:*",
-    "@hono/node-server": "2.1.4",
-    "@hono/otel": "^1.1.2",
-    "@larksuiteoapi/node-sdk": "^1.73.0",
+    "@hono/node-server": "2.1.8",
+    "@hono/otel": "^1.3.0",
+    "@larksuiteoapi/node-sdk": "^1.76.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.223.0",
     "@opentelemetry/instrumentation": "^0.223.0",
@@ -31,18 +31,18 @@
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "@opentelemetry/sdk-trace-node": "^2.12.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
-    "bullmq": "^6.3.12",
-    "discord.js": "^14.27.0",
-    "dotenv": "^17.4.2",
-    "hono": "4.13.5",
+    "bullmq": "^6.7.6",
+    "discord.js": "^14.28.1",
+    "dotenv": "^18.0.10",
+    "hono": "4.13.19",
     "ioredis": "6.0.0",
-    "ws": "^8.21.3",
-    "zod": "^4.6.5"
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "@types/node": "catalog:",
-    "@types/ws": "^8.18.1",
+    "@types/ws": "^8.18.2",
     "tsx": "catalog:",
     "typescript": "^7.0.2"
   }
