@@ -3,6 +3,10 @@ main = "entry.worker.ts"
 compatibility_date = "2025-03-05"
 compatibility_flags = ["nodejs_compat"]
 
+# esbuild ignores the `source` export condition the app resolves workspace packages with.
+[alias]
+"@cohub/protocol" = "../../packages/protocol/src/index.ts"
+
 # Standalone App host routes are deployment-specific (a separate zone), so they
 # are configured outside the repository; see deploy/web/README.md.
 
