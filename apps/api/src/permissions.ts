@@ -360,6 +360,14 @@ export function canViewSpaceCost(user: AuthUserProfile | null, spaceId: string):
   return hasPermission(user, "member.view", { spaceId });
 }
 
+/**
+ * Builder+ by the viewer's own role, so guests and anonymous viewers of a public Space are excluded
+ * while App sessions acting for a member still pass. Callers also check the scoped permission.
+ */
+export async function isSpaceMember(user: AuthUserProfile | null, spaceId: string): Promise<boolean> {
+  return scopeListHasPermission(await resolveUserSpacePermissions(user, spaceId), "member.view");
+}
+
 export async function getSessionSpaceId(sessionId: string): Promise<string | null> {
   return permissionStore.getSessionSpaceId(sessionId);
 }

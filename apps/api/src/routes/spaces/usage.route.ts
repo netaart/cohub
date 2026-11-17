@@ -3,7 +3,7 @@ import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import * as schema from "@cohub/db";
 import { getOptionalAuth, requireValidId, authzDenied } from "../../lib/middleware.js";
-import { canViewSpaceCost, hasPermission } from "../../permissions.js";
+import { canViewSpaceCost, hasPermission, isSpaceMember } from "../../permissions.js";
 import { createLogger } from "@cohub/infra/logging";
 import {
   aggregateUsage,
@@ -27,7 +27,7 @@ router.get("/", async (c) => {
   const user = getOptionalAuth(c);
   const spaceId = c.req.param("id");
   if (!spaceId || !requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
-  if (!(await hasPermission(user, "space.view", { spaceId }))) return authzDenied(c);
+  if (!(await hasPermission(user, "space.view", { spaceId })) || !(await isSpaceMember(user, spaceId))) return authzDenied(c);
 
   const days = resolveUsageDays(c.req.query("days"));
   const { startDate, now } = buildUsageDateRange(days);
