@@ -2,7 +2,7 @@ import AppKit
 
 @MainActor
 enum MainMenu {
-    static func build(updater: NSMenuItem?) -> NSMenu {
+    static func build(updater: NSMenuItem?, commandLineTool: Bool) -> NSMenu {
         let bar = NSMenu()
 
         let app = submenu(bar, "Cohub")
@@ -11,8 +11,10 @@ enum MainMenu {
         app.addItem(.separator())
         app.addItem(withTitle: L("Settings…"), action: #selector(Shell.openSettings(_:)), keyEquivalent: ",")
         app.addItem(.separator())
-        app.addItem(withTitle: L("Install Command Line Tool…"), action: #selector(Shell.installCommandLineTool(_:)), keyEquivalent: "")
-        app.addItem(.separator())
+        if commandLineTool {
+            app.addItem(withTitle: L("Install Command Line Tool…"), action: #selector(Shell.installCommandLineTool(_:)), keyEquivalent: "")
+            app.addItem(.separator())
+        }
         let services = app.addItem(withTitle: L("Services"), action: nil, keyEquivalent: "")
         services.submenu = NSMenu()
         NSApp.servicesMenu = services.submenu

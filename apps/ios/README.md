@@ -53,6 +53,12 @@ Regenerate the icon and launch logo from `apps/web/static/favicon.svg` with
 `node apps/desktop/scripts/icons.mjs --ios apps/ios/Cohub/Assets.xcassets`
 (after `pnpm install`).
 
+Signed production IPA builds and explicit TestFlight uploads use the `Apple Store`
+workflow; `iOS` continues to compile both simulator schemes without signing credentials.
+The production main app and Share extension each need their own App Store profile,
+both assigned to `group.live.cohub.ios`. See the [store CI setup](../desktop/README.md#mac-app-store)
+for signing secrets and the upload controls. Main pushes do not upload development builds.
+
 Sign-in and Universal Links need the signing team in the web app's
 `/.well-known/apple-app-site-association` route (`APPLE_TEAM_ID`) and the redirect
 `https://<origin>/mobile/auth/callback` on the Logto native application (the one

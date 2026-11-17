@@ -23,6 +23,7 @@ struct ShellConfig {
 
         var service: (@Sendable () throws -> HostService.Launch)?
         var tool: URL?
+        #if !APP_STORE
         if let node = env["COHUB_DESKTOP_NODE"].map(URL.init(fileURLWithPath:)), let cli = env["COHUB_DESKTOP_CLI"].map(URL.init(fileURLWithPath:)) {
             service = { serve(node, cli, env["COHUB_SANDBOXD_BIN"].map(URL.init(fileURLWithPath:))) }
         } else if let bundled = bundle.resourceURL?.appendingPathComponent("runtime"), let id = bundle.bundleIdentifier,
@@ -40,6 +41,7 @@ struct ShellConfig {
             }
             tool = shim
         }
+        #endif
 
         return ShellConfig(
             origin: origin,

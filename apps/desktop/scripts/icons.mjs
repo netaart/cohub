@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const sharp = createRequire(join(root, "packages/cli/package.json"))("sharp");
+const sharp = createRequire(process.env.COHUB_ICON_MODULES ? join(process.env.COHUB_ICON_MODULES, "../package.json") : join(root, "packages/cli/package.json"))("sharp");
 const { values } = parseArgs({ options: { macos: { type: "string" }, windows: { type: "string" }, linux: { type: "string" }, ios: { type: "string" } } });
 
 const favicon = await readFile(join(root, "apps/web/static/favicon.svg"), "utf8");

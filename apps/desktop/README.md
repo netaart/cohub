@@ -190,6 +190,45 @@ publishes a self-contained build and packs it with `vpk` into an AppImage that u
 
 ## CI
 
+### Mac App Store
+
+The store build is a sandboxed cloud client (`live.cohub.desktop`, macOS 14.4+),
+connecting to Spaces on the cloud and other computers. It signs in through the system
+browser and keeps credentials in Keychain. It contains no local Runtime, CLI installer
+or Sparkle updater; the website DMG retains those features and its existing pipeline.
+
+```bash
+bash apps/desktop/macos/scripts/bundle-app-store.sh 1.2.3 1
+```
+
+Without signing inputs this builds an ad hoc app. With `CODESIGN_IDENTITY`,
+`INSTALLER_IDENTITY`, `APPLE_TEAM_ID` and `APP_PROFILE_PATH`, it exports a signed
+universal PKG. Store certificates cannot replace Developer ID certificates for the DMG.
+
+The `Apple Store` workflow validates the store app on PRs and main. Release tags and
+manual runs on main export signed IPA/PKG artifacts; `submit=true` explicitly uploads
+them to App Store Connect without submitting for review. The `version` input is the
+marketing version (tags use their version); build numbers use the run number and attempt.
+Tag commits must belong to main. Signed jobs use `ios-release` / `desktop-release`,
+and always remove their temporary keychain and profiles.
+
+| Variable / secret | Purpose |
+| --- | --- |
+| `vars.APPLE_TEAM_ID` | Apple development team |
+| `APPLE_CERTIFICATE_PASSWORD` | Password for the three P12 files |
+| `IOS_DISTRIBUTION_P12` | Base64 Apple Distribution P12 |
+| `IOS_APP_STORE_PROFILE`, `IOS_SHARE_APP_STORE_PROFILE` | Base64 iOS profiles |
+| `MAC_APP_STORE_P12`, `MAC_APP_STORE_INSTALLER_P12` | Base64 Mac application / installer P12 |
+| `MAC_APP_STORE_PROFILE` | Base64 Mac profile with Associated Domains |
+| `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_KEY_P8` | Upload key ID and P8 contents |
+| `APP_STORE_CONNECT_ISSUER_ID` | Team key issuer; omit for an individual key |
+
+App Store Connect needs records for `live.cohub.ios` and `live.cohub.desktop` before
+upload. Device sign-in requires the deployed web AASA route and the existing native
+Logto application's `https://cohub.live/mobile/auth/callback` redirect.
+
+### Website distribution
+
 `.github/workflows/desktop.yml` runs for every change to the shells, the CLI or the bridge:
 
 | Trigger | Channel | Version | Published to |

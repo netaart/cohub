@@ -1,0 +1,150 @@
+name: Apple Store
+
+on:
+  pull_request:
+    paths:
+      - 'apps/desktop/macos/**'
+      - 'apps/desktop/scripts/icons.mjs'
+      - 'apps/ios/**'
+      - 'scripts/apple/**'
+      - '.github/actions/apple-signing/**'
+      - '.github/workflows/apple-store.yml'
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+    paths:
+      - 'apps/desktop/macos/**'
+      - 'apps/desktop/scripts/icons.mjs'
+      - 'apps/ios/**'
+      - 'scripts/apple/**'
+      - '.github/actions/apple-signing/**'
+      - '.github/workflows/apple-store.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Marketing version (tags use their version)
+        default: '0.1.0'
+        required: true
+        type: string
+      platform:
+        description: Platform to build
+        default: all
+        type: choice
+        options: [all, ios, macos]
+      submit:
+        description: Upload to App Store Connect (does not submit for review)
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-store-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Sandboxed Mac app
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Install icon tooling
+        run: npm install --prefix "$RUNNER_TEMP/cohub-icons" --no-package-lock --ignore-scripts sharp@0.34.5
+      - name: Test core and build universal app
+        env:
+          COHUB_DISTRIBUTION: app-store
+          COHUB_ICON_MODULES: ${{ runner.temp }}/cohub-icons/node_modules
+        run: |
+          set -euo pipefail
+          swift test --package-path apps/desktop/macos
+          bash apps/desktop/macos/scripts/bundle-app-store.sh 0.1.0 "$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
+
+  archive:
+    name: Signed ${{ matrix.platform }} artifact
+    needs: build
+    if: >-
+      vars.APPLE_TEAM_ID != '' && github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
+      (github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
+    runs-on: macos-15
+    environment: ${{ matrix.platform == 'ios' && 'ios-release' || 'desktop-release' }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.platform == 'ios' && '["ios"]' || inputs.platform == 'macos' && '["macos"]' || '["ios","macos"]') }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Validate release
+        env:
+          VERSION: ${{ inputs.version || '0.1.0' }}
+        run: bash scripts/apple/release-version.sh
+      - uses: actions/setup-node@v7
+        if: matrix.platform == 'macos'
+        with:
+          node-version: '24'
+      - name: Prepare Mac icon tooling
+        if: matrix.platform == 'macos'
+        run: npm install --prefix "$RUNNER_TEMP/cohub-icons" --no-package-lock --ignore-scripts sharp@0.34.5
+      - name: Generate iOS project
+        if: matrix.platform == 'ios'
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec apps/ios/project.yml
+      - uses: ./.github/actions/apple-signing
+        id: signing
+        with:
+          team-id: ${{ vars.APPLE_TEAM_ID }}
+          certificate: ${{ matrix.platform == 'ios' && secrets.IOS_DISTRIBUTION_P12 || secrets.MAC_APP_STORE_P12 }}
+          installer-certificate: ${{ matrix.platform == 'macos' && secrets.MAC_APP_STORE_INSTALLER_P12 || '' }}
+          password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          profile: ${{ matrix.platform == 'ios' && secrets.IOS_APP_STORE_PROFILE || secrets.MAC_APP_STORE_PROFILE }}
+          share-profile: ${{ matrix.platform == 'ios' && secrets.IOS_SHARE_APP_STORE_PROFILE || '' }}
+      - name: Archive iOS
+        if: matrix.platform == 'ios'
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          COHUB_APP_PROFILE: ${{ steps.signing.outputs.profile }}
+          COHUB_SHARE_PROFILE: ${{ steps.signing.outputs.share-profile }}
+        run: bash apps/ios/scripts/archive.sh "$VERSION" "$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
+      - name: Build Mac PKG
+        if: matrix.platform == 'macos'
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          CODESIGN_IDENTITY: ${{ steps.signing.outputs.identity }}
+          INSTALLER_IDENTITY: ${{ steps.signing.outputs.installer-identity }}
+          APP_PROFILE_PATH: ${{ steps.signing.outputs.profile-path }}
+          COHUB_ICON_MODULES: ${{ runner.temp }}/cohub-icons/node_modules
+        run: bash apps/desktop/macos/scripts/bundle-app-store.sh "$VERSION" "$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cohub-${{ matrix.platform }}-app-store
+          path: ${{ matrix.platform == 'ios' && format('{0}/cohub-ios-export/*.ipa', runner.temp) || 'apps/desktop/macos/dist/app-store/*.pkg' }}
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload to App Store Connect
+        if: github.event_name == 'workflow_dispatch' && inputs.submit
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          if [[ "$PLATFORM" == ios ]]; then
+            artifacts=("$RUNNER_TEMP/cohub-ios-export/"*.ipa)
+          else
+            artifacts=(apps/desktop/macos/dist/app-store/*.pkg)
+          fi
+          test "${#artifacts[@]}" -eq 1
+          bash scripts/apple/upload.sh "${artifacts[0]}"
+      - name: Remove signing credentials
+        if: always()
+        run: python3 scripts/apple/cleanup-signing.py
