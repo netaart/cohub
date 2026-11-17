@@ -99,6 +99,7 @@ export default function cohub(pi: Pi, open: (endpoint: string) => Socket = conne
   // `sendUserMessage` starts its run asynchronously and reports a refusal to Pi, not here. Until
   // `agent_start` Pi still reports idle, so a second prompt would be accepted and then dropped.
   let starting: ReturnType<typeof setTimeout> | null = null;
+  const hold = () => { starting = setTimeout(started, START_GRACE_MS); starting.unref?.(); };
   const started = () => { if (starting) clearTimeout(starting); starting = null; };
   const busy = (ctx: PiContext) => starting !== null || !ctx.isIdle();
   const send = (message: unknown) => { if (socket && !socket.destroyed) socket.write(`${JSON.stringify(message)}\n`); };
@@ -112,23 +113,33 @@ export default function cohub(pi: Pi, open: (endpoint: string) => Socket = conne
     // and Cohub waits for it to settle: queued behind it, the marker and the events would
     // interleave.
     if (command.turnId && !idle) return { idle, accepted: false };
-    if (idle && command.model && context.modelRegistry && pi.setModel) {
-      const model = context.modelRegistry.find(command.model.provider, command.model.id);
-      if (!model || !await pi.setModel(model)) throw new Error("Model is unavailable in this Pi");
+    // Claim the session before the first await, so a Turn arriving meanwhile cannot switch this
+    // run's model and is refused instead.
+    const claimed = Boolean(command.turnId) && idle;
+    if (claimed) hold();
+    try {
+      if (idle && command.model && context.modelRegistry && pi.setModel) {
+        const model = context.modelRegistry.find(command.model.provider, command.model.id);
+        if (!model || !await pi.setModel(model)) throw new Error("Model is unavailable in this Pi");
+      }
+      if (idle && command.thinkingLevel && pi.setThinkingLevel) pi.setThinkingLevel(command.thinkingLevel);
+      // Choosing the model awaited; the terminal may have started meanwhile. Our own claim is not a
+      // reason to refuse.
+      if (command.turnId && !context.isIdle()) {
+        if (claimed) started();
+        return { idle: false, accepted: false };
+      }
+      // The marker precedes the user message, so the transcript itself records which cloud Turn it is.
+      applyEnvironment(command.env);
+      if (command.turnId) pi.appendEntry("cohub.turn", { turnId: command.turnId });
+      const startsRun = claimed || !busy(context);
+      if (startsRun && !claimed) hold();
+      pi.sendUserMessage(command.content, startsRun ? undefined : { deliverAs: command.deliverAs ?? "followUp" });
+      return { idle, accepted: true };
+    } catch (error) {
+      if (claimed) started();
+      throw error;
     }
-    if (idle && command.thinkingLevel && pi.setThinkingLevel) pi.setThinkingLevel(command.thinkingLevel);
-    // Choosing the model awaited; the terminal may have started meanwhile.
-    if (command.turnId && busy(context)) return { idle: false, accepted: false };
-    // The marker precedes the user message, so the transcript itself records which cloud Turn it is.
-    applyEnvironment(command.env);
-    if (command.turnId) pi.appendEntry("cohub.turn", { turnId: command.turnId });
-    const startsRun = !busy(context);
-    if (startsRun) {
-      starting = setTimeout(started, START_GRACE_MS);
-      starting.unref?.();
-    }
-    pi.sendUserMessage(command.content, startsRun ? undefined : { deliverAs: command.deliverAs ?? "followUp" });
-    return { idle, accepted: true };
   };
 
   const attach = (ctx: PiContext) => {
