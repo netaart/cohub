@@ -1,5 +1,7 @@
 # allow crawling everything by default
+# Site summary for AI agents: https://cohub.live/llms.txt (Chinese: https://cohub.live/zh/llms.txt)
 User-agent: *
 Disallow:
 
 Sitemap: https://cohub.live/sitemap.xml
+Sitemap: https://cohub.live/sitemap-seo.xml
