@@ -15,7 +15,7 @@ router.get("/", async (c) => {
     return c.json({ skills: [] });
   }
 
-  if (spaceId && !(await hasPermission(user, "space.view", { spaceId }))) {
+  if (spaceId && !(await hasPermission(user, "session.prompt.readonly", { spaceId }))) {
     return authzDenied(c);
   }
 

@@ -20,6 +20,7 @@ import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "../../db/
 import { spaces, spaceChannels, spaceSandboxes, spaceSessions, sessionTurns, taskRuns, userChannels } from "@cohub/db";
 import { eq, and, inArray, desc, lt, or, sql } from "drizzle-orm";
 import { hostPromptImages } from "../../session-images.js";
+import { toPublicSpaceMeta } from "../../session-space.js";
 import { readWorkspaceUsage } from "../../workspace-usage.js";
 import { isSpaceLikeStickerUrl } from "../../public-asset-storage.js";
 import { useAuth, getOptionalAuth, getAppSessionPrincipal, requireValidId, buildSpaceListItems, authzDenied, getSpacePublicProfile, normalizePublicAvatarUrl } from "../../lib/middleware.js";
@@ -65,7 +66,7 @@ import { normalizeContentBlocks } from "@cohub/core/content/normalize";
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { assignLabelsToSession, parseLabelRefs, parseSessionArchiveFilter, resolveLabelPaths, resolveOrCreateLabelPaths } from "@cohub/core/labels";
 import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
-import { asAccountIdentity, hasPermission, getSpaceMemberRole, filterSessionsByPermission, resolvePermissionAccess } from "../../permissions.js";
+import { asAccountIdentity, hasPermission, getSpaceMemberRole, filterSessionsByPermission, isSpaceMember, resolvePermissionAccess } from "../../permissions.js";
 import { checkpoints } from "@cohub/db";
 import { LogtoUserRequiredError } from "../../user-profiles.js";
 import { publicSpacePath, recordSpaceSlugChange, redirectTarget, resolvePublicSpace } from "../../slug-history.js";
@@ -1149,11 +1150,30 @@ function stripSensitiveSpaceFields(item: Record<string, unknown>): Record<string
   return rest;
 }
 
+function toPublicSpaceResponse(response: Awaited<ReturnType<typeof serializeSpaceForResponse>>) {
+  const { sandbox } = response;
+  return {
+    ...response,
+    storageRepoName: null,
+    baseCheckpointId: null,
+    headCheckpointId: null,
+    workspaceUsage: null,
+    meta: toPublicSpaceMeta(response.meta),
+    sandbox: sandbox && {
+      status: sandbox.status,
+      runtimeStatus: sandbox.runtimeStatus,
+      publicEndpoints: sandbox.publicEndpoints,
+    },
+  };
+}
+
 async function buildSpaceResponse(c: Context, space: SpaceRow, user: AuthUser | null) {
-  const response = await serializeSpaceForResponse(space, user);
-  if (!(await hasPermission(user, "space.edit", { spaceId: space.id }))) {
-    response.meta = stripSpaceEnv(response.meta);
-  }
+  const full = await serializeSpaceForResponse(space, user);
+  const canEdit = await hasPermission(user, "space.edit", { spaceId: space.id });
+  if (!canEdit) full.meta = stripSpaceEnv(full.meta);
+  const response = canEdit || (await hasPermission(user, "member.view", { spaceId: space.id }))
+    ? full
+    : toPublicSpaceResponse(full);
   if (!getAppSessionPrincipal(c)) return response;
   const [item] = await buildSpaceListItems([space]);
   return item ? stripSensitiveSpaceFields({ ...item, meta: response.meta }) : response;
@@ -1532,7 +1552,7 @@ router.get("/:id/checkpoints", async (c) => {
   const user = getOptionalAuth(c);
   const spaceId = c.req.param("id");
   if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
-  if (!(await hasPermission(user, "checkpoint.view", { spaceId }))) return authzDenied(c);
+  if (!(await hasPermission(user, "checkpoint.view", { spaceId })) || !(await isSpaceMember(user, spaceId))) return authzDenied(c);
 
   const limitParam = Number(c.req.query("limit") ?? DEFAULT_CHECKPOINT_LIST_LIMIT);
   const rawLimit = Math.trunc(limitParam);

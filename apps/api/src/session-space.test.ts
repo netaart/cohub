@@ -26,4 +26,20 @@ describe("toSessionSpace", () => {
       },
     });
   });
+
+  it("keeps only display fields for non-members", () => {
+    const space = toSessionSpace({
+      id: "space-1",
+      headCheckpointId: "cp-1",
+      storageRepoName: "space-1-repo",
+      meta: { config: {}, bootstrap: { status: "ready", stage: null, taskRunId: "run-1" }, publicProfile: null },
+    } as unknown as typeof spaces.$inferSelect, false);
+
+    assert.deepEqual(space, {
+      id: "space-1",
+      baseCheckpointId: null,
+      headCheckpointId: null,
+      meta: { bootstrap: { status: "ready", stage: null }, publicProfile: null },
+    });
+  });
 });
