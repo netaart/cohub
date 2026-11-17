@@ -1738,7 +1738,7 @@ export function createAppBridgeCore(
 				const contextSpaceId = resolveContextSpaceId();
 				const preListTargets = !spaceLevel
 					? listGrantedAppSpacesForScopes(viewerUuid, app.id, scopes, app.spaceId)
-					: spaceId === undefined &&
+					: (spaceId === undefined || spaceId === contextSpaceId) &&
 						  !selectSpace &&
 						  contextSpaceId &&
 						  hasGrantedAppScopes(viewerUuid, app.id, scopes, contextSpaceId)
