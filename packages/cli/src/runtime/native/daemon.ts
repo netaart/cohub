@@ -146,7 +146,7 @@ export class NativeRuntime {
     await this.refreshScope();
     if (this.options.harnesses.includes("pi")) {
       const version = await harnessVersion(this.options.executables.pi || "pi");
-      if (!atLeast(version, PI_MIN_VERSION)) this.pi.unavailable = `Pi ${formatVersion(version)} predates the Cohub extension (${PI_MIN_VERSION.join(".")}+); upgrade Pi, then restart the Runtime`;
+      if (!atLeast(version, PI_MIN_VERSION)) this.pi.unavailable = `Pi ${formatVersion(version)} is older than Cohub supports for live control (${PI_MIN_VERSION.join(".")}+); upgrade Pi, then restart the Runtime`;
       else await this.pi.listen(signal).catch((error: unknown) => {
         this.pi.unavailable = `Pi control socket unavailable (${serializeDiagnosticError(error).message}); restart the Runtime`;
         degraded("native.pi_socket_unavailable")(error);

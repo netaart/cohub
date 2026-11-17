@@ -71,7 +71,7 @@ test("runtime up leaves the extension of a Pi 0.x alone and says why", async () 
   const lines: string[] = [];
   await repairIntegrations(await fakePi("0.87.1"), (line) => lines.push(line));
   assert.equal(await piExtensionState(), "outdated");
-  assert.deepEqual(lines, ["Pi 0.87.1 predates the Cohub extension (1.0.0+); Pi chats sync read-only\n"]);
+  assert.deepEqual(lines, ["Pi 0.87.1 is older than Cohub supports for live control (1.0.0+); Pi chats sync read-only\n"]);
 });
 
 test("runtime up removes legacy Codex hooks and keeps the rest of the config", async () => {

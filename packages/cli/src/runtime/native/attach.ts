@@ -115,7 +115,7 @@ export async function repairIntegrations(piBinary: string | undefined, log: (lin
 async function maintainPiExtension(piBinary: string | undefined, log: (line: string) => void, announce = false) {
   const version = await harnessVersion(piBinary || "pi");
   if (!atLeast(version, PI_MIN_VERSION)) {
-    log(`Pi ${formatVersion(version)} predates the Cohub extension (${PI_MIN_VERSION.join(".")}+); Pi chats sync read-only\n`);
+    log(`Pi ${formatVersion(version)} is older than Cohub supports for live control (${PI_MIN_VERSION.join(".")}+); Pi chats sync read-only\n`);
     return;
   }
   try {
