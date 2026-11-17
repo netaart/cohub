@@ -192,6 +192,11 @@ export async function resolveBoundSpace(
   return bound?.spaceId ?? null;
 }
 
+/** Whether a Space is targeted without falling back to Home: `-s`, `COHUB_SPACE_ID` or a bound directory. */
+export async function targetsSpace(command: Command): Promise<boolean> {
+  return Boolean(explicitSpace(command) ?? (await resolveBoundSpace()));
+}
+
 export type SpaceTargetOptions = {
   /** Only for commands that start new work. */
   home?: boolean;

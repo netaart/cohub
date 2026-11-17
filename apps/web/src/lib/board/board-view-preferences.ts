@@ -62,12 +62,14 @@ export function boardViewKey(
 	scope:
 		| { kind: "space"; spaceId: string }
 		| { kind: "checkpoint"; checkpointId: string }
-		| { kind: "app"; appId: string },
+		| { kind: "app"; appId: string }
+		| { kind: "local" },
 	boardId: string,
 ) {
 	if (scope.kind === "space") return `${scope.spaceId}:${boardId}`;
 	if (scope.kind === "checkpoint")
 		return `checkpoint:${scope.checkpointId}:${boardId}`;
+	if (scope.kind === "local") return `local:${boardId}`;
 	return `app:${scope.appId}`;
 }
 

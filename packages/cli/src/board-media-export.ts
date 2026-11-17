@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { type BoardMediaSpan, type BoardMediaState, parseBoardMediaSource } from "@neta-art/cohub/board";
-import { createClient } from "./client.js";
+import type { BoardFiles } from "./board-files.js";
 import { downloadPublicAudio, downloadPublicVideo } from "./safe-remote-image.js";
 
 const execFile = promisify(execFileCallback);
@@ -21,11 +21,10 @@ async function ffmpeg(args: string[], signal?: AbortSignal) {
   }
 }
 
-export function createBoardMediaFiles(spaceId: string, dir: string, signal?: AbortSignal) {
+export function createBoardMediaFiles(boardFiles: BoardFiles, dir: string, signal?: AbortSignal) {
   const files = new Map<string, Promise<string>>();
   const audible = new Map<string, Promise<boolean>>();
   const durations = new Map<string, Promise<number>>();
-  const client = createClient();
   return {
     path(src: string, kind: "video" | "audio"): Promise<string> {
       let pending = files.get(src);
@@ -35,7 +34,7 @@ export function createBoardMediaFiles(spaceId: string, dir: string, signal?: Abo
           const source = parseBoardMediaSource(src);
           if (!source) throw new Error(`Invalid media source ${src}`);
           const { bytes } = source.kind === "file"
-            ? { bytes: new Uint8Array(await (await client.space(spaceId).files.download(source.value)).blob.arrayBuffer()) }
+            ? await boardFiles.read(source.value, signal)
             : await (kind === "video" ? downloadPublicVideo : downloadPublicAudio)(source.value);
           await writeFile(path, bytes);
           return path;

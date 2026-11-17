@@ -30,7 +30,7 @@
     "rollout:sandbox:dev": "tsx scripts/rollout-sandbox-dev.ts",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm --filter @neta-art/cohub-cli... build && changeset publish",
+    "release": "pnpm --filter @neta-art/cohub-cli... build && pnpm --filter web build:board-viewer && changeset publish",
     "changelog:generate": "tsx scripts/changelog/generate.ts",
     "changelog:render": "tsx scripts/changelog/render.ts",
     "changelog:release": "tsx scripts/changelog/release.ts",
