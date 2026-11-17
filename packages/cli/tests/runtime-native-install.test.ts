@@ -29,9 +29,9 @@ afterEach(async () => {
 });
 
 /** A Pi that only reports its version; `pi --version` answers before Pi loads extensions. */
-async function fakePi() {
+async function fakePi(version = "1.5.2") {
   const pi = join(home, "pi");
-  await writeFile(pi, "#!/bin/sh\necho 0.87.1\n");
+  await writeFile(pi, `#!/bin/sh\necho ${version}\n`);
   await chmod(pi, 0o755);
   return pi;
 }
@@ -64,6 +64,14 @@ test("runtime up replaces an outdated managed Pi extension", async () => {
   assert.equal(await piExtensionState(), "outdated");
   await repairIntegrations(await fakePi(), () => undefined);
   assert.equal(await piExtensionState(), "installed");
+});
+
+test("runtime up leaves the extension of a Pi 0.x alone and says why", async () => {
+  await writeFile(join(extensions, "cohub.ts"), LEGACY);
+  const lines: string[] = [];
+  await repairIntegrations(await fakePi("0.87.1"), (line) => lines.push(line));
+  assert.equal(await piExtensionState(), "outdated");
+  assert.deepEqual(lines, ["Pi 0.87.1 predates the Cohub extension (1.0.0+); Pi chats sync read-only\n"]);
 });
 
 test("runtime up removes legacy Codex hooks and keeps the rest of the config", async () => {

@@ -165,7 +165,7 @@ cohub runtime detach --harness pi --harness codex # Pause; retain data
 capability failure keeps the Runtime running without it, and `up` is idempotent. The Runtime
 Supervisor is the single local Daemon: Pi / Codex integrations use its private IPC,
 while native Turn events use the existing Runtime WebSocket. Configuration is backed up, existing
-Runtime bindings are reused, and competing continuations fork at complete Turns without blocking native work. Requires Pi 0.85.1+ or Codex with stable
+Runtime bindings are reused, and competing continuations fork at complete Turns without blocking native work. Requires Pi 1.0+ or Codex with stable
 Hooks enabled. User-level integrations remain inert outside opted-in directories. See
 [boundaries and privacy](../../docs/local-runtime.md#native-clients).
 

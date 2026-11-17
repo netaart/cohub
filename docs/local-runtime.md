@@ -343,7 +343,7 @@ they appear as ordinary Chats.
 Boundaries:
 - Terminal Codex clients started with `-c`, `--search` or `--enable` run an embedded server and are
   not attached; their Turns still sync, read-only.
-- Pi 0.85.1+ is driven through the extension. An older Pi, or a control socket that cannot listen,
+- Pi 1.0+ is driven through the extension. An older Pi, or a control socket that cannot listen,
   leaves Pi sessions read-only; `runtime status` and a Cohub Pi Turn say why.
 - Pi without the extension cannot be stopped from the web; Pi's last Turn counts as ended when its
   extension reports it settled, or after 10 s of quiet following a reply that ended. One left mid-tool
@@ -678,7 +678,7 @@ Never infer that a disconnected execution has stopped.
 - A Turn sent to a live terminal client runs in that process. Otherwise Cohub starts a Pi (or a
   private Codex app-server) for the Turn; in-process PTY handles and background terminals do not
   survive between such Turns. A shared Codex app-server keeps its threads loaded across Turns.
-- Verified with Pi 0.86.1 and Codex 0.156.1; approval modes and Fast with Codex 0.162.1 and 0.166.0 (0.156.1 hides them). Codex rollout-path recovery is an upstream
+- Verified with Pi 1.0.0 and 1.5.2 and Codex 0.156.1; approval modes and Fast with Codex 0.162.1 and 0.166.0 (0.156.1 hides them). Codex rollout-path recovery is an upstream
   experimental API; incompatible versions fail explicitly.
 - Cohub never grants an escalation by itself: Codex and Claude Code approvals are answered on a web
   card by a person (or by the Harness's own reviewer in Auto approval) and declined when nobody
