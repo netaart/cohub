@@ -1,3 +1,4 @@
+import { isSeoWorkerPath } from "#lib/seo-pages.ts";
 import type { DocsFrontmatter, DocsTocItem } from "./types.ts";
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
@@ -94,6 +95,17 @@ export function injectHeadingAnchors(html: string): {
 	);
 
 	return { html: nextHtml, toc };
+}
+
+/** Force a full page load for links to pages served by the SEO Worker. */
+export function markSeoWorkerLinks(html: string): string {
+	return html.replace(
+		/<a(\s[^>]*?)?\shref="([^"]+)"([^>]*)>/gi,
+		(full, before = "", href: string, after: string) => {
+			if (!isSeoWorkerPath(href) || /\srel=/i.test(full)) return full;
+			return `<a${before} href="${href}" rel="external"${after}>`;
+		},
+	);
 }
 
 export function htmlToPlainText(html: string): string {
