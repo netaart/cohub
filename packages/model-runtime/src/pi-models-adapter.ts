@@ -62,6 +62,8 @@ function modelFingerprint(model: Model<Api>): string {
     model.reasoning ? "1" : "0",
     String(model.contextWindow ?? 0),
     String(model.maxTokens ?? 0),
+    JSON.stringify(model.cost),
+    JSON.stringify(model.promptCache ?? null),
     JSON.stringify(model.compat ?? null),
     JSON.stringify(model.headers ?? null),
   ].join("\0");

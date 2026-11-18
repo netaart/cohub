@@ -7,12 +7,30 @@ export const MODELS_CACHE_TTL_SEC = 24 * 60 * 60;
 
 const SAFE_REDIS_KEY_SEGMENT_REGEX = /^[0-9a-zA-Z_-]+$/;
 
-export type ModelCost = {
+export type ModelCostRates = {
   input: number;
   output: number;
   cacheRead?: number;
   cacheWrite?: number;
 };
+
+export type ModelCostTier = Required<ModelCostRates> & {
+  inputTokensAbove: number;
+};
+
+export type ModelCost = ModelCostRates & {
+  tiers?: ModelCostTier[];
+};
+
+export function normalizeModelCost(cost: ModelCost | undefined): Required<ModelCostRates> & Pick<ModelCost, "tiers"> {
+  return {
+    input: cost?.input ?? 0,
+    output: cost?.output ?? 0,
+    cacheRead: cost?.cacheRead ?? 0,
+    cacheWrite: cost?.cacheWrite ?? 0,
+    ...(cost?.tiers ? { tiers: cost.tiers } : {}),
+  };
+}
 
 /** Prompt cache lifetimes in seconds, matching pi-ai `Model.promptCache`; absent means unknown. */
 export type ModelPromptCache = {
@@ -115,8 +133,21 @@ function isThinkingLevelMap(value: unknown): value is ThinkingLevelMap {
 function isModelCost(value: unknown, partial: boolean): boolean {
   if (!isRecord(value)) return false;
   const keys = ["input", "output", "cacheRead", "cacheWrite"] as const;
-  if (!Object.keys(value).every((key) => (keys as readonly string[]).includes(key))) return false;
+  if (!Object.keys(value).every((key) => key === "tiers" || (keys as readonly string[]).includes(key))) return false;
   if (!keys.every((key) => value[key] === undefined || isFiniteNonNegative(value[key]))) return false;
+  if (value.tiers !== undefined) {
+    if (!Array.isArray(value.tiers)) return false;
+    const thresholds = new Set<number>();
+    for (const tier of value.tiers) {
+      if (!isRecord(tier)
+        || !isFiniteNonNegative(tier.inputTokensAbove)
+        || !Number.isSafeInteger(tier.inputTokensAbove)
+        || thresholds.has(tier.inputTokensAbove)
+        || !Object.keys(tier).every((key) => key === "inputTokensAbove" || (keys as readonly string[]).includes(key))
+        || !keys.every((key) => isFiniteNonNegative(tier[key]))) return false;
+      thresholds.add(tier.inputTokensAbove);
+    }
+  }
   return partial || (isFiniteNonNegative(value.input) && isFiniteNonNegative(value.output));
 }
 

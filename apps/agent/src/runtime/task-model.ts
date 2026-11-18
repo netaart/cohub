@@ -1,12 +1,9 @@
 import type { ModelTaskConfig } from "@cohub/infra/config-runtime/model-tasks";
+import { normalizeModelCost } from "@cohub/infra/config-runtime/models";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { createModelsFromRegistry } from "./pi-models-adapter.js";
 
 export type TaskRuntimeModel = Model<Api> & Pick<ModelTaskConfig["model"], "requestProfile" | "imageUrlInput">;
-
-function finiteOrZero(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
 
 export function toTaskRuntimeModel(
   config: ModelTaskConfig,
@@ -21,12 +18,8 @@ export function toTaskRuntimeModel(
     baseUrl: model.baseUrl,
     reasoning: model.reasoning ?? false,
     input: model.input ?? defaults.input,
-    cost: {
-      input: finiteOrZero(model.cost?.input),
-      output: finiteOrZero(model.cost?.output),
-      cacheRead: finiteOrZero(model.cost?.cacheRead),
-      cacheWrite: finiteOrZero(model.cost?.cacheWrite),
-    },
+    cost: normalizeModelCost(model.cost),
+    promptCache: model.promptCache,
     contextWindow: model.contextWindow ?? defaults.contextWindow,
     maxTokens: model.maxTokens ?? defaults.maxTokens,
     headers: model.headers,

@@ -2,6 +2,7 @@ import {
   DEFAULT_CONTEXT_WINDOW,
   mergeHeaders,
   mergeModelsConfigs,
+  normalizeModelCost,
   type ModelDef,
   type ModelsConfig,
 } from "@cohub/infra/config-runtime/models";
@@ -14,19 +15,6 @@ export type RuntimeLlmModel = Model<Api> & {
   /** Discovery hint: hidden models stay resolvable by id but never become implicit defaults. */
   hidden?: boolean;
 };
-
-function finiteNumberOrZero(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function normalizeModelCost(cost: ModelDef["cost"] | undefined): Model<Api>["cost"] {
-  return {
-    input: finiteNumberOrZero(cost?.input),
-    output: finiteNumberOrZero(cost?.output),
-    cacheRead: finiteNumberOrZero(cost?.cacheRead),
-    cacheWrite: finiteNumberOrZero(cost?.cacheWrite),
-  };
-}
 
 export class CompletionModelRegistry {
   private models: RuntimeLlmModel[] = [];
@@ -55,6 +43,7 @@ export class CompletionModelRegistry {
           thinkingLevelMap: modelDef.thinkingLevelMap,
           input: modelDef.input ?? ["text"],
           cost: normalizeModelCost(modelDef.cost),
+          promptCache: modelDef.promptCache,
           contextWindow: modelDef.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
           maxTokens: modelDef.maxTokens ?? 16384,
           requestProfile: modelDef.requestProfile ?? providerConfig.requestProfile,

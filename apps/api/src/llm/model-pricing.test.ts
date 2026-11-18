@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { calculateCost, type Usage } from "@earendil-works/pi-ai";
-import { resolveRuntimeModelsConfig, type ModelsConfig } from "@cohub/infra/config-runtime/models";
+import { parseModelsConfig, resolveRuntimeModelsConfig, type ModelsConfig } from "@cohub/infra/config-runtime/models";
 import { CompletionModelRegistry } from "./completion-registry.js";
 
 const prices = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 };
@@ -58,3 +58,32 @@ test("Pi SDK uses configured prices for a user-owned connection", () => {
   assert.equal(registry.getApiKey("custom"), "user-key");
   assert.equal(calculateCost(selected, usage()).total, 0.003);
 });
+
+for (const [id, input, output, cacheRead, cacheWrite] of [
+  ["gpt-6.2-astra", 8, 40, 0.4, 10],
+  ["gpt-6.2-sol", 2, 10, 0.1, 2.5],
+] as const) {
+  test(`${id}: completion registry preserves official long-context prices and cache lifetime`, () => {
+    const cost = {
+      input, output, cacheRead, cacheWrite,
+      tiers: [{ inputTokensAbove: 272_000, input: input * 2, output: output * 1.5, cacheRead: cacheRead * 2, cacheWrite: cacheWrite * 2 }],
+    };
+    const config = parseModelsConfig(JSON.stringify({ providers: { cohub: {
+      api: "openai-responses", baseUrl: "https://api.openai.com/v1",
+      models: [{ id, cost, promptCache: { short: 1800 } }],
+    } } }));
+    const selected = new CompletionModelRegistry([config]).find("cohub", id);
+    assert.ok(selected);
+    assert.deepEqual(selected.cost, cost);
+    assert.deepEqual(selected.promptCache, { short: 1800 });
+    for (const inputTokens of [272_000, 272_001]) {
+      const billable = { ...usage(), input: inputTokens - 2000, cacheRead: 1000, cacheWrite: 1000 };
+      calculateCost(selected, billable);
+      const rates = inputTokens > 272_000 ? cost.tiers[0] : cost;
+      assert.ok(rates);
+      const expected = (billable.input * rates.input + billable.output * rates.output
+        + billable.cacheRead * rates.cacheRead + billable.cacheWrite * rates.cacheWrite) / 1_000_000;
+      assert.ok(Math.abs(billable.cost.total - expected) < 1e-12);
+    }
+  });
+}

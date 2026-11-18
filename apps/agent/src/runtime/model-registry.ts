@@ -3,6 +3,7 @@ import {
   DEFAULT_CONTEXT_WINDOW,
   mergeHeaders,
   mergeModelsConfigs,
+  normalizeModelCost,
   type ModelDef,
   type ModelRequestProfile,
   type ModelsConfig,
@@ -16,19 +17,6 @@ export type CohubModel<TApi extends Api = Api> = Model<TApi> & {
   contextWindowLimit?: number;
   contextWindowSource?: ModelDef["contextWindowSource"];
 };
-
-function finiteNumberOrZero(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function normalizeModelCost(cost: ModelDef["cost"] | undefined): Model<Api>["cost"] {
-  return {
-    input: finiteNumberOrZero(cost?.input),
-    output: finiteNumberOrZero(cost?.output),
-    cacheRead: finiteNumberOrZero(cost?.cacheRead),
-    cacheWrite: finiteNumberOrZero(cost?.cacheWrite),
-  };
-}
 
 export class CohubModelRegistry {
   private models: CohubModel[] = [];
@@ -68,6 +56,7 @@ export class CohubModelRegistry {
           thinkingLevelMap: modelDef.thinkingLevelMap,
           input: modelDef.input ?? ["text"],
           cost: normalizeModelCost(modelDef.cost),
+          promptCache: modelDef.promptCache,
           contextWindow: modelDef.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
           contextWindowLimit: modelDef.contextWindowLimit,
           contextWindowSource: modelDef.contextWindowSource,

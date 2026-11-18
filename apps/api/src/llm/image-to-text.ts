@@ -7,6 +7,7 @@ import type {
   ThinkingLevel,
 } from "@earendil-works/pi-ai";
 import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks";
+import { normalizeModelCost } from "@cohub/infra/config-runtime/models";
 import { createModelsFromRegistry } from "./pi-models-adapter.js";
 import type { RuntimeLlmModel } from "./completion-registry.js";
 
@@ -39,12 +40,8 @@ function toRuntimeModel(config: ImageToTextConfig): Model<Api> & Pick<ImageToTex
     baseUrl: model.baseUrl,
     reasoning: model.reasoning ?? false,
     input: model.input ?? ["text", "image"],
-    cost: {
-      input: finiteOrZero(model.cost?.input),
-      output: finiteOrZero(model.cost?.output),
-      cacheRead: finiteOrZero(model.cost?.cacheRead),
-      cacheWrite: finiteOrZero(model.cost?.cacheWrite),
-    },
+    cost: normalizeModelCost(model.cost),
+    promptCache: model.promptCache,
     contextWindow: model.contextWindow ?? 32_768,
     maxTokens: model.maxTokens ?? 2_048,
     headers: model.headers,
