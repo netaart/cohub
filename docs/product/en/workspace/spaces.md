@@ -102,5 +102,3 @@ Start simple: keep the default base Mod unless you know you need more.
 - [Files & Sandbox](/docs/workspace/files-and-sandbox)
 - [Saves](/docs/workspace/saves)
 - [Apps](/docs/create/apps)
-- [Shared AI context for teams](/use-cases/team-shared-ai-context) — one Space for a whole team
-- [Multiplayer AI chat](/use-cases/multiplayer-ai-chat) — build with friends and an agent in one Space

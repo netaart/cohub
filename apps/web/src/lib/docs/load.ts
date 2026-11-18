@@ -8,11 +8,7 @@ import {
 	getDocsSections,
 	getDocsSectionTitle,
 } from "./manifest.ts";
-import {
-	injectHeadingAnchors,
-	markSeoWorkerLinks,
-	parseDocsFrontmatter,
-} from "./parse.ts";
+import { injectHeadingAnchors, parseDocsFrontmatter } from "./parse.ts";
 import type {
 	DocsLocale,
 	DocsPage,
@@ -89,7 +85,7 @@ export async function loadDocsPage(
 
 	const { frontmatter, body } = parseDocsFrontmatter(source);
 	const rendered = await renderMarkdown(body);
-	const { html, toc } = injectHeadingAnchors(markSeoWorkerLinks(rendered));
+	const { html, toc } = injectHeadingAnchors(rendered);
 
 	const items = getDocsNavItems();
 	const index = items.findIndex((item) => item.slug === nav.slug);

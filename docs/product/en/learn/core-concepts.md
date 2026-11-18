@@ -98,9 +98,3 @@ Use one-shot schedules for reminders and recurring schedules for periodic agent 
 Permissions decide what members, anonymous viewers, and Apps can do.
 
 Space roles are **host**, **builder**, and **guest**. Apps also declare their own scopes, and request viewer consent when they need runtime access.
-
-## Related
-
-- [Run an agent in Discord or WeChat](/use-cases/agent-in-discord-wechat) — a Channel in practice
-- [Schedule AI agent tasks](/use-cases/schedule-ai-agent-tasks) — scheduled prompts in practice
-- [Compare](/compare) — how Cohub differs from other AI tools

@@ -439,8 +439,3 @@ Human-readable output is fine for interactive use. JSON is better for automation
 - App capabilities and permissions: [App development](/docs/developers/apps)
 - Programmatic access: [SDK](/docs/developers/sdk)
 - Publishing details: [Apps](/docs/create/apps)
-
-## Related
-
-- [Scheduled prompts](/features/scheduled-prompts) — cron for agents with `spaces prompt` and `cron-jobs`
-- [Self-host Cohub](/guides/self-host-cohub) — point the CLI at your own deployment

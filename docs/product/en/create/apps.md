@@ -206,4 +206,3 @@ Notes:
 - [Quick start](/docs/learn/quick-start)
 - [Files & Sandbox](/docs/workspace/files-and-sandbox)
 - [SDK](/docs/developers/sdk)
-- [Publish an app from an AI sandbox](/use-cases/publish-app-from-ai-sandbox) — from a running sandbox port to a public link

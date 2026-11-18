@@ -199,4 +199,3 @@ cohub apps domains rm <app> app.example.com --yes
 - [快速开始](/zh/docs/learn/quick-start)
 - [Files 与 Sandbox](/zh/docs/workspace/files-and-sandbox)
 - [SDK](/zh/docs/developers/sdk)
-- [AI 做的网页一键发布](/zh/use-cases/publish-app-from-ai-sandbox) —— 从沙盒里跑着的应用到公开链接

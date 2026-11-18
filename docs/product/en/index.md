@@ -42,8 +42,6 @@ That loop is the product. Everything else extends it: Labels, Channels, Mods, Sk
 | Ship something in minutes | [Quick start](/docs/learn/quick-start) |
 | Use the terminal | [CLI](/docs/developers/cli) |
 | Build integrations | [SDK](/docs/developers/sdk) |
-| See who uses Cohub, and for what | [Use cases](/use-cases) |
-| Compare Cohub with other tools | [Compare](/compare) |
 
 ## Product language
 

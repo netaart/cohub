@@ -887,4 +887,3 @@ real runtime, publish a new version after changes.
 - [SDK](/docs/developers/sdk) — the client surface
 - [CLI](/docs/developers/cli) — terminal workflows
 - [Sample Apps](https://github.com/netaart/cohub/blob/main/cohub-apps/README.md) — runnable examples per scenario
-- [Space hooks](/features/space-hooks) — hooks can call App Actions with `uses`

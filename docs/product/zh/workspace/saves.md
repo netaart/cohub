@@ -87,4 +87,3 @@ Cohub 可展示：
 - [Files 与 Sandbox](/zh/docs/workspace/files-and-sandbox)
 - [Apps](/zh/docs/create/apps)
 - [快速开始](/zh/docs/learn/quick-start)
-- [上下文网络](/zh/features/context-network) —— 在其他 Space 里复用这个 Space 的上下文

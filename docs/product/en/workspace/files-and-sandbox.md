@@ -182,5 +182,3 @@ Environment changes apply when the sandbox is next created or restarted; file ed
 - [Chats](/docs/workspace/chats)
 - [Saves](/docs/workspace/saves)
 - [Apps](/docs/create/apps)
-- [AI workspace for indie developers](/use-cases/indie-developer-ai-workspace) — the sandbox as a cloud machine for solo builders
-- [Cohub as a Replit Agent alternative](/compare/replit-agent-alternative) — how the sandbox compares

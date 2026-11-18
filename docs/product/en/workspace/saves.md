@@ -87,4 +87,3 @@ If your team shares a Space, write Save notes for the next reader, not only for 
 - [Files & Sandbox](/docs/workspace/files-and-sandbox)
 - [Apps](/docs/create/apps)
 - [Quick start](/docs/learn/quick-start)
-- [Context network](/features/context-network) — reuse a Space's context in other Spaces

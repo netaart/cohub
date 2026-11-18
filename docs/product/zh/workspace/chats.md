@@ -144,5 +144,3 @@ Chats 可以有超出 Space 默认策略的访问控制。
 - [Spaces](/zh/docs/workspace/spaces)
 - [Files 与 Sandbox](/zh/docs/workspace/files-and-sandbox)
 - [Saves](/zh/docs/workspace/saves)
-- [上下文网络](/zh/features/context-network) —— 把其他 Space 的上下文带进 Chat
-- [AI 研究工作区](/zh/use-cases/ai-research-workspace) —— 资料分 Space 存，用到时拉进来
