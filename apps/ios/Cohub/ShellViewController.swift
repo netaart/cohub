@@ -65,6 +65,16 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.userContentController.addUserScript(WKUserScript(source: BridgeScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+        configuration.userContentController.addUserScript(WKUserScript(source: #"""
+        (() => {
+          const record = value => window.webkit.messageHandlers.cohubHost.postMessage(JSON.stringify({type:'request',id:'diagnostic',method:'diagnostic.event',params:{message:String(value).replace(/https?:\S+/g,'<URL>').replace(/[A-Za-z0-9_-]{60,}/g,'<REDACTED>').slice(0,300)}}));
+          window.addEventListener('error', event => record('error: '+event.message));
+          window.addEventListener('unhandledrejection', event => record('rejection: '+(event.reason?.message ?? event.reason?.name ?? 'unknown')));
+          document.addEventListener('click', event => {const button=event.target.closest?.('button');if(button?.textContent?.trim().startsWith('Start'))record('click: '+button.textContent.trim());},true);
+          const original = console.error;
+          console.error = (...args) => {if(String(args[0]).startsWith('[home]'))record(args.map(v=>v?.message ?? String(v)).join(' '));original.apply(console,args);};
+        })();
+        """#, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
         let messages = ScriptMessageProxy()
         messages.target = self
         configuration.userContentController.add(messages, contentWorld: .page, name: HostProtocol.global)
@@ -148,11 +158,18 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
               shell.config.origin.isOrigin(scheme: origin.protocol, host: origin.host, port: origin.port),
               let text = message.body as? String
         else { return }
+        if let request = BridgeRequest.parse(text), request.method == "diagnostic.event" {
+            logger.notice("[DEBUG-native-login] web \(request.params["message"]?.string ?? "unknown", privacy: .public)")
+            return
+        }
+        logger.notice("[DEBUG-native-login] bridge \(BridgeRequest.parse(text)?.method ?? "invalid", privacy: .public)")
         router.receive(text)
     }
 
     func deliver(_ text: String) {
-        webView.__callAsyncJavaScript(BridgeScript.receive, arguments: ["data": text], inFrame: nil, in: .page, completionHandler: nil)
+        webView.__callAsyncJavaScript(BridgeScript.receive, arguments: ["data": text], inFrame: nil, in: .page) { _, error in
+            if let error = error as NSError? { logger.notice("[DEBUG-native-login] reply failed \(error.domain, privacy: .public) \(error.code)") }
+        }
     }
 
     func emit(_ name: String, _ payload: JSON? = nil) {

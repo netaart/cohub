@@ -51,6 +51,7 @@ final class Shell {
     }
 
     func signIn(redirectPath: String?) {
+        logger.notice("[DEBUG-native-login] signIn busy=\(self.signingIn) window=\(self.surface?.view.window != nil)")
         guard !signingIn, let window = surface?.view.window else { return }
         signingIn = true
         let destination = redirectPath.flatMap { WebOrigin.isInAppPath($0) ? $0 : nil } ?? "/"
