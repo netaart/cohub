@@ -151,7 +151,8 @@ final class StoreAcceptanceTests: XCTestCase {
         #if os(macOS)
         let screenshot = app.windows.firstMatch.screenshot()
         #else
-        let screenshot = app.screenshot()
+        let screenshot = XCUIScreen.main.screenshot()
+        print("Capture size: \(screenshot.image.size), orientation: \(screenshot.image.imageOrientation.rawValue)")
         #endif
         let attachment = XCTAttachment(data: screenshot.pngRepresentation, uniformTypeIdentifier: "public.png")
         attachment.name = "STORE_" + name
