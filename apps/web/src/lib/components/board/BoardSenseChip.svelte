@@ -5,7 +5,8 @@ import {
 	type BoardConsentSense,
 	type BoardStage,
 } from "@neta-art/cohub/board/stage";
-import { Camera, Circle, Compass, MapPin, Mic, Square, X } from "lucide-svelte";
+import { Camera, Compass, MapPin, Mic, Square, X } from "lucide-svelte";
+import { formatRecordingTime } from "#lib/board/board-input-recorder.svelte.ts";
 import type { BoardSenseConsent } from "#lib/board/board-senses.svelte.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
@@ -13,13 +14,13 @@ import { m } from "#lib/paraglide/messages.js";
 const {
 	stage,
 	consent,
-	recording = false,
-	onRecord,
+	recordingSince = null,
+	onStopRecording,
 }: {
 	stage: BoardStage | null;
 	consent: BoardSenseConsent;
-	recording?: boolean;
-	onRecord?: () => void;
+	recordingSince?: number | null;
+	onStopRecording?: () => void;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -29,6 +30,16 @@ const NO_STATES = {} as Record<BoardScriptSense, string>;
 let wanted = $state.raw<readonly BoardScriptSense[]>([]);
 let states = $state.raw<Record<BoardScriptSense, string>>(NO_STATES);
 let dismissed = $state("");
+let now = $state(Date.now());
+
+$effect(() => {
+	if (recordingSince === null) return;
+	now = Date.now();
+	const timer = setInterval(() => {
+		now = Date.now();
+	}, 1000);
+	return () => clearInterval(timer);
+});
 
 $effect(() => {
 	const senses = stage?.senses;
@@ -88,10 +99,14 @@ function label(senses: readonly BoardConsentSense[]) {
 		{/each}
 	</button>
 {/if}
-{#if onRecord && (recording || wanted.length)}
-	<button type="button" class="board-sense" class:board-sense--recording={recording} aria-pressed={recording} onclick={onRecord}>
-		{#if recording}<Square class="h-3 w-3" aria-hidden="true" />{:else}<Circle class="h-3 w-3" aria-hidden="true" />{/if}
-		{recording ? m.board_input_stop({}, { locale }) : m.board_input_record({}, { locale })}
+{#if recordingSince !== null && onStopRecording}
+	{@const stop = m.board_input_stop({}, { locale })}
+	<button type="button" class="board-sense board-sense--recording" title={stop} onclick={onStopRecording}>
+		<span class="recording-dot" aria-hidden="true"></span>
+		<span>{m.board_input_recording({}, { locale })}</span>
+		<span class="recording-time">{formatRecordingTime(now - recordingSince)}</span>
+		<Square class="h-3 w-3" fill="currentColor" aria-hidden="true" />
+		<span class="sr-only">{stop}</span>
 	</button>
 {/if}
 
@@ -124,7 +139,21 @@ function label(senses: readonly BoardConsentSense[]) {
 		line-height: 1.35;
 	}
 	.board-sense--using { color: var(--brand-muted-fg); }
-	.board-sense--recording { color: var(--color-error-soft); }
+	.board-sense--recording { gap: 8px; }
+	.recording-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: var(--error-500);
+		animation: recording-pulse 0.9s var(--ease-out) infinite alternate;
+	}
+	@keyframes recording-pulse { to { opacity: 0.35; } }
+	.recording-time {
+		min-width: 2.5em;
+		color: var(--text-secondary);
+		font-variant-numeric: tabular-nums;
+	}
+	.board-sense--recording :global(svg) { color: var(--text-tertiary); }
 	.board-sense-action {
 		border-radius: 999px;
 		padding: 2px 8px;

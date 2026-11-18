@@ -10,7 +10,6 @@ import {
 	type BoardLaunch,
 	type BoardMediaItemKind,
 	type BoardSceneItem,
-	type BoardScriptInputLog,
 	boardItemOrigin,
 	boardModelFormat,
 	boardOriginKey,
@@ -90,6 +89,11 @@ import {
 	clipboardImageFiles,
 	uploadBoardImage,
 } from "#lib/board/board-image-paste.ts";
+import {
+	type BoardInputRecording,
+	createBoardInputRecorder,
+	formatRecordingTime,
+} from "#lib/board/board-input-recorder.svelte.ts";
 import {
 	boardReceivesKeys,
 	registerBoardPanel,
@@ -820,21 +824,20 @@ async function exportVideo(request: BoardVideoExportRequest) {
 }
 
 const canRecord = $derived(Boolean(liveSpaceId && editable && path));
-let recorder = $state.raw<{ stop(): BoardScriptInputLog } | null>(null);
 let recordedInputs = $state<string | null>(null);
+const inputRecorder = createBoardInputRecorder({
+	stage: () => scriptStage,
+	onStop: (recording) => void saveInputs(recording),
+});
 
-async function toggleRecording() {
-	if (!recorder) {
-		recorder = scriptStage?.recordInputs(() => void toggleRecording()) ?? null;
-		return;
-	}
-	const log = recorder.stop();
-	recorder = null;
-	if (!liveSpaceId || !path) return;
+async function saveInputs({ log, duration, full }: BoardInputRecording) {
 	if (!log.inputs.length)
 		return showNotice(m.board_input_empty({}, { locale }));
+	if (!liveSpaceId || !path)
+		return showNotice(m.board_input_save_failed({}, { locale }), true);
 	const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
 	const target = `${path.replace(/\.board$/i, "")}.inputs/${stamp}.json`;
+	const time = formatRecordingTime(duration);
 	try {
 		await sdk.space(liveSpaceId).files.write({
 			path: target,
@@ -842,7 +845,11 @@ async function toggleRecording() {
 			encoding: "utf-8",
 		});
 		recordedInputs = target;
-		showNotice(m.board_input_saved({ path: target }, { locale }));
+		showNotice(
+			full
+				? m.board_input_full({ time }, { locale })
+				: m.board_input_saved({ time }, { locale }),
+		);
 	} catch {
 		showNotice(m.board_input_save_failed({}, { locale }), true);
 	}
@@ -1024,6 +1031,9 @@ const hasFrames = $derived(editor.frames.length > 0);
 const presenting = $derived(editor.frameView?.present ?? false);
 const watching = $derived(
 	animationOpen && !authoring && hasAnimations && !presenting,
+);
+const promptsDocked = $derived(
+	!presenting && (isMobile ? !watching : authoring),
 );
 let panel: HTMLDivElement | null = $state(null);
 
@@ -1425,7 +1435,7 @@ $effect(() => {
 });
 
 onDestroy(() => {
-	recorder?.stop();
+	inputRecorder.dispose();
 	videoExport?.destroy();
 	destroyed = true;
 	if (noticeTimer) clearTimeout(noticeTimer);
@@ -1444,6 +1454,24 @@ onDestroy(() => {
 	assets.destroy();
 });
 </script>
+
+{#snippet prompts()}
+	<div class="board-prompts">
+		{#if sound.blocked && !presenting && !watching}
+			<button type="button" class="board-prompt" onclick={() => scriptStage?.media.unlock()}>
+				<VolumeX class="h-3.5 w-3.5" />
+				{m.board_sound_enable({}, { locale })}
+			</button>
+		{/if}
+		{#if scriptCamera && editor.cameraPolicy === "free" && !presenting}
+			<button type="button" class="board-prompt" onclick={() => editor.setCameraPolicy("follow")}>
+				<LocateFixed class="h-3.5 w-3.5" />
+				{m.board_camera_return({}, { locale })}
+			</button>
+		{/if}
+		<BoardSenseChip stage={scriptStage} consent={senseConsent} recordingSince={inputRecorder.startedAt} onStopRecording={inputRecorder.toggle} />
+	</div>
+{/snippet}
 
 {#snippet playKeys()}
 	<BoardPlayKeys {editor} {playing} {isMobile} {onReset} {onTogglePlay} />
@@ -1496,21 +1524,9 @@ onDestroy(() => {
 				<button type="button" class="board-job-action" onclick={onTogglePlay}>{m.board_play_exit({}, { locale })}</button>
 			</div>
 		{/if}
-		<div class="board-prompts">
-			{#if sound.blocked && !presenting && !watching}
-				<button type="button" class="board-prompt" onclick={() => scriptStage?.media.unlock()}>
-					<VolumeX class="h-3.5 w-3.5" />
-					{m.board_sound_enable({}, { locale })}
-				</button>
-			{/if}
-			{#if scriptCamera && editor.cameraPolicy === "free" && !presenting}
-				<button type="button" class="board-prompt" onclick={() => editor.setCameraPolicy("follow")}>
-					<LocateFixed class="h-3.5 w-3.5" />
-					{m.board_camera_return({}, { locale })}
-				</button>
-			{/if}
-			<BoardSenseChip stage={scriptStage} consent={senseConsent} recording={recorder !== null} onRecord={canRecord ? toggleRecording : undefined} />
-		</div>
+		{#if !promptsDocked}
+			<div class="board-prompts-float" class:board-prompts-float--raised={watching}>{@render prompts()}</div>
+		{/if}
 		{#if notice}
 			<div class="board-notice" class:board-notice--error={notice.error} role="status" aria-live="polite">
 				{notice.text}
@@ -1603,6 +1619,7 @@ onDestroy(() => {
 					onToggleGeneration={generates ? toggleGeneration : undefined}
 					onToggleAppearance={toggleAppearance}
 					onToggleTimeline={toggleAnimation}
+					{prompts}
 				/>
 			{/if}
 			{#if spaceId && sessionActions.replyItem}
@@ -1631,6 +1648,7 @@ onDestroy(() => {
 					onPresent={hasFrames ? () => present() : undefined}
 					contextMenuOpen={contextMenu !== null}
 					lead={hasPlayKeys ? playKeys : undefined}
+					{prompts}
 				/>
 			{/if}
 			{#if scriptPanelOpen && scriptItemId && scriptStatus}
@@ -1665,6 +1683,7 @@ onDestroy(() => {
 						{editor}
 						{backdropStatus}
 						stage={scriptStage}
+						inputRecorder={canRecord ? inputRecorder : undefined}
 						onOpenSource={openFile}
 						onClose={() => { appearanceOpen = false; }}
 					/>
@@ -1859,16 +1878,22 @@ onDestroy(() => {
 	}
 
 	.board-prompts {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 8px;
+		pointer-events: none;
+	}
+	.board-prompts-float {
 		position: absolute;
 		bottom: 16px;
 		left: 50%;
 		z-index: 32;
-		display: flex;
-		align-items: center;
-		gap: 8px;
 		transform: translateX(-50%);
 		pointer-events: none;
 	}
+	.board-prompts-float--raised { bottom: 64px; }
 	.board-prompt {
 		display: inline-flex;
 		align-items: center;

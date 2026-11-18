@@ -19,6 +19,7 @@ import type {
 } from "@neta-art/cohub/board/stage";
 import { Image, Palette, RotateCcw, Trash2, X } from "lucide-svelte";
 import { untrack } from "svelte";
+import type { BoardInputRecorder } from "#lib/board/board-input-recorder.svelte.ts";
 import type { BoardEditor } from "#lib/board/editor.svelte.ts";
 import BoardScriptsSection from "#lib/components/board/BoardScriptsSection.svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
@@ -28,12 +29,14 @@ const {
 	editor,
 	backdropStatus = null,
 	stage = null,
+	inputRecorder,
 	onOpenSource,
 	onClose,
 }: {
 	editor: BoardEditor;
 	backdropStatus?: BoardBackdropStatus | null;
 	stage?: BoardStage | null;
+	inputRecorder?: BoardInputRecorder;
 	onOpenSource?: (path: string) => void;
 	onClose: () => void;
 } = $props();
@@ -275,7 +278,7 @@ function reset() {
 		<p class="section-hint">{m.board_motion_hint({}, { locale })}</p>
 	</div>
 
-	<BoardScriptsSection {editor} {stage} {onOpenSource} />
+	<BoardScriptsSection {editor} {stage} {inputRecorder} {onOpenSource} />
 
 	<div class="appearance-footer">
 		{#if editor.saving}

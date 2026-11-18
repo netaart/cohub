@@ -400,7 +400,7 @@ tap on the Board. Exports provide none of these, so check `capabilities.has()` f
 
 ### Record and replay input
 
-**Record input** beside the Board's sense controls records the browser input scripts
+**Record input** in Board settings, under Board scripts, records the browser input scripts
 receive, apart from camera frames, into `<board>.inputs/<time>.json` next to the Board.
 A recording stops by itself at about 9 MB, half a minute of microphone or many minutes
 of motion.

@@ -27,6 +27,7 @@ import {
 	Type,
 	Undo2,
 } from "lucide-svelte";
+import type { Snippet } from "svelte";
 import type { BoardEditor, BoardToolId } from "#lib/board/editor.svelte.ts";
 import BoardNumberControl from "#lib/components/board/BoardNumberControl.svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
@@ -41,6 +42,7 @@ const {
 	timelineOpen = false,
 	onToggleTimeline,
 	onAddLink,
+	prompts,
 }: {
 	editor: BoardEditor;
 	generationOpen?: boolean;
@@ -50,6 +52,7 @@ const {
 	timelineOpen?: boolean;
 	onToggleTimeline?: () => void;
 	onAddLink?: () => void;
+	prompts?: Snippet;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -158,6 +161,9 @@ function toolTitle(tool: ToolDef) {
 </script>
 
 <div class="board-toolbar-wrap">
+	{#if prompts}
+		<div class="toolbar-prompts">{@render prompts()}</div>
+	{/if}
 	{#if showStyles}
 		<div class="board-style-row toolbar-surface" role="toolbar" aria-label="{activeTool?.label ?? 'Tool'} style">
 			{#if editor.tool === "draw" || editor.tool === "arrow"}
@@ -311,6 +317,16 @@ function toolTitle(tool: ToolDef) {
 		width: max-content;
 		max-width: calc(100% - 20px);
 		transform: translateX(-50%);
+	}
+
+	.toolbar-prompts {
+		position: absolute;
+		bottom: calc(100% + 8px);
+		left: 50%;
+		width: max-content;
+		max-width: calc(100vw - 24px);
+		translate: -50% 0;
+		pointer-events: none;
 	}
 
 	.board-style-row {
