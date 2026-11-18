@@ -60,6 +60,8 @@ jobs:
           path.write_bytes(plistlib.dumps(entitlements))
           subprocess.run(['codesign','--force','--sign','-','--entitlements',str(path),str(app)],check=True)
           secret=secrets.token_urlsafe(32)
+          print('::add-mask::'+secret)
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('COHUB_TEST_KEYCHAIN_PASSWORD='+secret+'\n')
           def run(*args): subprocess.run(args,check=True,capture_output=True)
           run('security','create-keychain','-p',secret,'cohub-acceptance.keychain')
           run('security','unlock-keychain','-p',secret,'cohub-acceptance.keychain')
@@ -70,6 +72,16 @@ jobs:
           run('security','add-generic-password','-a','session','-s','live.cohub.ios','-w',credentials,'-T',str(app/'Contents/MacOS/Cohub'),'cohub-acceptance.keychain')
           print('Screenshot copy uses the verified binary with ad hoc sandbox signing and an authenticated review-session fixture. Store-package launch remains a separate TestFlight check.')
           PY
+          cat > "$RUNNER_TEMP/display.swift" <<'SWIFT'
+          import CoreGraphics
+          let display = CGMainDisplayID()
+          let modes = CGDisplayCopyAllDisplayModes(display, [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary) as? [CGDisplayMode] ?? []
+          if let mode = modes.filter({ $0.width >= 1440 && $0.height >= 900 }).min(by: { $0.width * $0.height < $1.width * $1.height }) {
+              let result = CGDisplaySetDisplayMode(display, mode, nil)
+              print("Display: \(mode.width)x\(mode.height), result: \(result.rawValue)")
+          }
+          SWIFT
+          swift "$RUNNER_TEMP/display.swift"
       - name: Prepare simulator
         if: matrix.device != 'mac'
         env:
@@ -104,7 +116,7 @@ jobs:
           tree = ET.parse(scheme); action = tree.getroot().find('TestAction')
           action.set('shouldUseLaunchSchemeArgsEnv','NO')
           variables = ET.SubElement(action,'EnvironmentVariables')
-          values = {'COHUB_REVIEW_EMAIL':os.environ['EMAIL'],'COHUB_REVIEW_MAILBOX_URL':os.environ['MAILBOX'],'COHUB_SCREENSHOT_SPACE':os.environ['SAMPLE_SPACE'],'COHUB_MAC_APP_PATH':os.environ.get('COHUB_MAC_APP_PATH','')}
+          values = {'COHUB_REVIEW_EMAIL':os.environ['EMAIL'],'COHUB_REVIEW_MAILBOX_URL':os.environ['MAILBOX'],'COHUB_SCREENSHOT_SPACE':os.environ['SAMPLE_SPACE'],'COHUB_MAC_APP_PATH':os.environ.get('COHUB_MAC_APP_PATH',''),'COHUB_TEST_KEYCHAIN_PASSWORD':os.environ.get('COHUB_TEST_KEYCHAIN_PASSWORD','')}
           for key,value in values.items(): ET.SubElement(variables,'EnvironmentVariable',key=key,value=value,isEnabled='YES')
           tree.write(scheme,encoding='UTF-8',xml_declaration=True)
           PY

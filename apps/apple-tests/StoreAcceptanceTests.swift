@@ -25,6 +25,13 @@ final class StoreAcceptanceTests: XCTestCase {
 
     func testLoginAndCapture() async throws {
         #if os(macOS)
+        let security = XCUIApplication(bundleIdentifier: "com.apple.SecurityAgent")
+        let password = security.secureTextFields.firstMatch
+        if password.waitForExistence(timeout: 8) {
+            password.tap()
+            password.typeText(try XCTUnwrap(ProcessInfo.processInfo.environment["COHUB_TEST_KEYCHAIN_PASSWORD"]))
+            security.buttons["Always Allow"].tap()
+        }
         XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 45), "The review session did not load in the sandboxed screenshot copy")
         capture("02-new-chat")
         #else
