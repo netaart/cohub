@@ -61,6 +61,10 @@ jobs:
           set -euo pipefail
           swift test --package-path apps/desktop/macos
           bash apps/desktop/macos/scripts/bundle-app-store.sh 0.1.0 "$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
+          if otool -L apps/desktop/macos/dist/app-store/Cohub.app/Contents/MacOS/Cohub | grep -q 'libswiftWebKit'; then
+            echo '::error::The Swift WebKit overlay is unavailable on supported older OS versions.'
+            exit 1
+          fi
 
   archive:
     name: Signed ${{ matrix.platform }} artifact

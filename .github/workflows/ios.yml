@@ -52,3 +52,11 @@ jobs:
           configuration: ${{ matrix.configuration }}
           destination: generic/platform=iOS Simulator
           build-settings: CODE_SIGNING_ALLOWED=NO
+      - name: Check older OS runtime compatibility
+        env:
+          CONFIGURATION: ${{ matrix.configuration }}
+        run: |
+          if otool -L ".build/DerivedData/Build/Products/$CONFIGURATION-iphonesimulator/Cohub.app/Cohub" | grep -q 'libswiftWebKit'; then
+            echo '::error::The Swift WebKit overlay is unavailable on supported older OS versions.'
+            exit 1
+          fi
