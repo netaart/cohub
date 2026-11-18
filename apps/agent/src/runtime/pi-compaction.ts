@@ -5,7 +5,9 @@
  * Source: earendil-works/pi v0.87.1 (f07218c4d4bbc12bef056a7058c3dd49dfe41abe), packages/agent/src/
  * harness: compaction/compaction.ts, compaction/utils.ts, messages.ts, session/context.ts,
  * session/types.ts (Entry), types.ts (Result, CompactionError) and utils/usage.ts. Only what Cohub
- * calls is kept (no branch summarization, compactWithRequest or entry projectors).
+ * calls is kept (no branch summarization, compactWithRequest or entry projectors). The message roles
+ * of messages.ts live in agent-messages.ts: session files and restore depend on them, not on this
+ * algorithm.
  *
  * Local changes:
  * - An AbortSignal replaces the chord Context; Cohub set no telemetry context.
@@ -52,74 +54,29 @@ import {
   type Api,
   type AssistantMessage,
   contentText,
-  type ImageContent,
   type JsonValue,
   type Message,
   type Model,
   type Models,
   type SimpleStreamOptions,
-  type TextContent,
   type Usage,
   uuidv7,
 } from "@earendil-works/pi-ai";
+import {
+  type BashExecutionMessage,
+  type BranchSummaryMessage,
+  COMPACTION_SUMMARY_PREFIX,
+  COMPACTION_SUMMARY_SUFFIX,
+  type CompactionSummaryMessage,
+} from "./agent-messages.js";
 
 // ── Messages ───────────────────────────────────────────────────────────────
 
-const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
-
-<summary>
-`;
-const COMPACTION_SUMMARY_SUFFIX = `
-</summary>`;
 const BRANCH_SUMMARY_PREFIX = `The following is a summary of a branch that this conversation came back from:
 
 <summary>
 `;
 const BRANCH_SUMMARY_SUFFIX = `</summary>`;
-
-export interface BashExecutionMessage {
-  role: "bashExecution";
-  command: string;
-  output: string;
-  exitCode: number | undefined;
-  cancelled: boolean;
-  truncated: boolean;
-  fullOutputPath?: string;
-  timestamp: number;
-  excludeFromContext?: boolean;
-}
-
-export interface CustomMessage<T = unknown> {
-  role: "custom";
-  customType: string;
-  content: string | (TextContent | ImageContent)[];
-  display: boolean;
-  details?: T;
-  timestamp: number;
-}
-
-export interface BranchSummaryMessage {
-  role: "branchSummary";
-  summary: string;
-  fromId: string | null;
-  timestamp: number;
-}
-
-export interface CompactionSummaryMessage {
-  role: "compactionSummary";
-  summary: string;
-  tokensBefore: number;
-  timestamp: number;
-}
-
-declare module "@earendil-works/pi-agent-core" {
-  interface CustomAgentMessages {
-    bashExecution: BashExecutionMessage;
-    custom: CustomMessage;
-    branchSummary: BranchSummaryMessage;
-    compactionSummary: CompactionSummaryMessage;
-  }
-}
 
 function bashExecutionToText(msg: BashExecutionMessage): string {
   let text = `Ran \`${msg.command}\`\n`;
