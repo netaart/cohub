@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { formatEpochMs, formatLocalDateTime, table } from "../src/output.js";
+import { formatEpochMs, formatLocalDateTime, handleHttp, table } from "../src/output.js";
 
 const originalTimezone = process.env.TZ;
 
@@ -39,4 +39,29 @@ test("table formats timestamp columns without changing other values", () => {
 
   assert.match(lines.join("\n"), /2026-09-23 16:01:02 \+08:00/);
   assert.match(lines.join("\n"), /Example/);
+});
+
+test("JSON errors carry the HTTP status next to the response body", () => {
+  const printed: unknown[] = [];
+  const originalWrite = process.stderr.write;
+  const originalExit = process.exit;
+  process.argv.push("--json");
+  process.stderr.write = ((chunk: string) => printed.push(JSON.parse(chunk))) as typeof process.stderr.write;
+  process.exit = (() => {
+    throw new Error("exit");
+  }) as typeof process.exit;
+  try {
+    for (const body of [{ message: "Provider stopped with: SAFETY" }, { message: "this is your referral link", status: "self" }]) {
+      assert.throws(() => handleHttp(Object.assign(new Error(body.message), { status: 502, body })), /exit/);
+    }
+  } finally {
+    process.argv.pop();
+    process.stderr.write = originalWrite;
+    process.exit = originalExit;
+  }
+
+  assert.deepEqual(printed, [
+    { status: 502, message: "Provider stopped with: SAFETY" },
+    { status: "self", message: "this is your referral link" },
+  ]);
 });

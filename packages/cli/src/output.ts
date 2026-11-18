@@ -198,7 +198,7 @@ export function handleHttp(e: unknown): never {
 
   if (jsonRequested()) {
     const payload = body && typeof body === "object"
-      ? body
+      ? { status, ...body }
       : {
           code: (e as { code?: unknown }).code ?? "CLI_ERROR",
           message: e instanceof Error ? e.message : String(e),

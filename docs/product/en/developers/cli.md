@@ -76,7 +76,7 @@ COHUB_SPACE_ID=<spaceId> cohub spaces get
 ```
 
 Commands that start new work — `prompt`, `completion`, `decision`, `generate`,
-`apps`, and `public` — fall back to your Home Space when nothing else names a target. Every
+`upload`, `apps`, and `public` — fall back to your Home Space when nothing else names a target. Every
 other Space command reads or changes existing Space state, so it stops with an
 error instead of guessing.
 
@@ -422,6 +422,8 @@ cohub generate -m song2 --text "prompt=upbeat synthwave" --text "lyrics=[Verse] 
 
 `generate --text <role>=<text>` passes a text input tagged with a role from the model's text inputs (`cohub models show <model>`); repeat it for each text block.
 
+`generate --content <json|path|->` and `completion --content <json|path|->` send content blocks as given: a JSON array inline, from a file, or `-` for stdin. `cohub upload <paths...>` prints an unlisted public URL for each local file, so a block can reuse it across tasks.
+
 ## Output discipline
 
 Use `--json` whenever a script or Agent needs to chain commands.
@@ -432,6 +434,8 @@ cohub -s <spaceId> spaces sessions ls --json
 ```
 
 Human-readable output is fine for interactive use. JSON is better for automation.
+
+With `--json`, an API or network error is printed as JSON on stderr, with `status` (the HTTP status) when the API answered. A failed command exits with code 1.
 
 ## Next steps
 
