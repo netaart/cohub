@@ -14,6 +14,12 @@ export type ModelCost = {
   cacheWrite?: number;
 };
 
+/** Prompt cache lifetimes in seconds, matching pi-ai `Model.promptCache`; absent means unknown. */
+export type ModelPromptCache = {
+  short?: number;
+  long?: number;
+};
+
 export type ModelThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelRequestProfile = "codex" | "claude-code";
 export type ThinkingLevelMap = Partial<Record<ModelThinkingLevel, string | null>>;
@@ -32,6 +38,7 @@ export type ModelDef = {
   hidden?: boolean;
   input?: Array<"text" | "image">;
   cost?: ModelCost;
+  promptCache?: ModelPromptCache;
   /** Effective context window; overrides of a platform model are capped at the platform value. */
   contextWindow?: number;
   /** Runtime-only: platform cap for overrides of `contextWindow`. */
@@ -113,6 +120,13 @@ function isModelCost(value: unknown, partial: boolean): boolean {
   return partial || (isFiniteNonNegative(value.input) && isFiniteNonNegative(value.output));
 }
 
+function isModelPromptCache(value: unknown): boolean {
+  return isRecord(value)
+    && Object.keys(value).every((key) => key === "short" || key === "long")
+    && (value.short === undefined || isPositiveInteger(value.short))
+    && (value.long === undefined || isPositiveInteger(value.long));
+}
+
 export function isModelDefinition(value: unknown, options: { partial?: boolean } = {}): boolean {
   if (!isRecord(value)) return false;
   const partial = options.partial === true;
@@ -126,6 +140,7 @@ export function isModelDefinition(value: unknown, options: { partial?: boolean }
     && (value.hidden === undefined || typeof value.hidden === "boolean")
     && (value.input === undefined || (Array.isArray(value.input) && value.input.length > 0 && value.input.every((item) => item === "text" || item === "image")))
     && (value.cost === undefined || isModelCost(value.cost, partial))
+    && (value.promptCache === undefined || isModelPromptCache(value.promptCache))
     && (value.contextWindow === undefined || isPositiveInteger(value.contextWindow))
     && (value.maxTokens === undefined || isPositiveInteger(value.maxTokens))
     && (value.requestProfile === undefined || REQUEST_PROFILES.has(value.requestProfile as ModelRequestProfile))
@@ -254,7 +269,7 @@ const MODEL_PARAMETER_FIELDS = new Set([
 ]);
 
 const PROTECTED_MODEL_FIELDS = new Set([
-  "api", "baseUrl", "apiKey", "headers", "compat", "requestProfile", "imageUrlInput", "cost",
+  "api", "baseUrl", "apiKey", "headers", "compat", "requestProfile", "imageUrlInput", "cost", "promptCache",
 ]);
 
 function assertMatchingPlatformField(
@@ -282,6 +297,7 @@ export function getProtectedModelFields(provider: ProviderConfig, model: ModelDe
     requestProfile: model.requestProfile ?? provider.requestProfile,
     imageUrlInput: model.imageUrlInput ?? provider.imageUrlInput,
     cost: model.cost,
+    promptCache: model.promptCache,
   };
 }
 

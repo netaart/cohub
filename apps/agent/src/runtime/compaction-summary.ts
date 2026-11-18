@@ -11,6 +11,7 @@ import type { Api, AssistantMessage, Message, Model, Models, ToolCall, Usage } f
 import { IMAGE_URL_MIME_TYPE } from "@cohub/protocol/core";
 import { isContextOverflowFailure, isRetryableProviderError } from "./provider-errors.js";
 import { getTokenRatio, observeTokenRatio, parseOverflowTokens } from "./token-calibration.js";
+import { resolveReserveTokens } from "./compaction-policy.js";
 
 type CompactionPreparation = Parameters<typeof compact>[0];
 type CompactResultValue = Extract<Awaited<ReturnType<typeof compact>>, { ok: true }>["value"];
@@ -349,7 +350,8 @@ export async function summarizeForCompaction(input: {
     },
   });
 
-  const reserveTokens = preparation.settings.reserveTokens;
+  // The summarizer may be a smaller task model than the session model, so reserve output against its own window.
+  const reserveTokens = Math.min(preparation.settings.reserveTokens, resolveReserveTokens(model.contextWindow));
   const maxOutputTokens = Math.min(Math.floor(0.8 * reserveTokens), model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY);
   let contextWindow = model.contextWindow;
   let ratio = getTokenRatio("summary", model) ?? DEFAULT_SUMMARY_RATIO;
@@ -492,6 +494,7 @@ export async function summarizeForCompaction(input: {
       const result = await compact(
         {
           ...preparation,
+          settings: { ...preparation.settings, reserveTokens },
           messagesToSummarize: chunk,
           turnPrefixMessages: tail,
           isSplitTurn: tail.length > 0,

@@ -38,7 +38,7 @@ export type SessionTurnIntermediateIndex = {
 };
 
 export type ContextCompactionScope = "between_turns" | "within_turn";
-export type ContextCompactionTriggerReason = "threshold" | "overflow_recovery";
+export type ContextCompactionTriggerReason = "threshold" | "overflow_recovery" | "requested";
 
 export type ContextCompactionProviderCalls = {
   total: number;

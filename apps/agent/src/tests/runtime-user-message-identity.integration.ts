@@ -86,7 +86,7 @@ mock.module("../sandbox-pool.js", { exports: { ensureSandboxConnection: async ()
 mock.module("../sandbox/tools.js", { exports: { createSandboxCodingTools: () => [readTool] } });
 mock.module("../execution-grants.js", { exports: { createAgentExecutionToken: async () => null } });
 mock.module("../runtime/models-loader.js", { exports: { loadRuntimeModelsConfigs: async () => [modelsConfig] } });
-mock.module("../runtime/image-to-text-config.js", { exports: { loadImageToTextConfig: async () => null } });
+mock.module("../runtime/model-tasks-config.js", { exports: { loadImageToTextConfig: async () => null, loadContextCompactionConfig: async () => null } });
 mock.module("../runtime/env-cache.js", { exports: { loadSpaceEnvSnapshot: async () => ({}) } });
 mock.module("../runtime/cross-space-query-access.js", { exports: { resolveSpaceFileVisibility: async () => "full", assertSpaceFileViewAccess: async () => {} } });
 mock.module("../runtime/remote-runtime.js", { exports: { executeRemoteHarnessTurn: unavailable, markRuntimeRecovery: unavailable, RuntimeExecutionUncertainError: class extends Error {} } });

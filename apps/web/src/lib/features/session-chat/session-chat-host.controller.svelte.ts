@@ -145,6 +145,7 @@ import {
 	shouldClearActiveSessionForNewDraft,
 	shouldClearResolvedNewSessionOnRoute,
 } from "./new-chat-draft-isolation.ts";
+import { estimateColdResend } from "./prompt-cache.ts";
 import {
 	createSessionComposerController,
 	revokeComposerAttachmentPreview,
@@ -780,6 +781,60 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			activeSessionState?.session?.activeTurn,
 		),
 	);
+	// Re-evaluated when the estimated cache lifetime ends or the tab returns.
+	let cacheClock = $state(Date.now());
+	// Per chat: queued "compact first" choices and the Turn whose notice was dismissed.
+	let compactFirstBySessionId = $state<Record<string, boolean>>({});
+	let dismissedColdResendBySessionId = $state<Record<string, string>>({});
+	const coldResendEligible = $derived(
+		Boolean(activeSessionId) &&
+			composerMode === "agent" &&
+			composerHarness === "cohub" &&
+			!activeSessionIsRunning,
+	);
+	const coldResendEstimate = $derived.by(() =>
+		coldResendEligible
+			? estimateColdResend(
+					// Loaded turns first: they win sequence ties against the index.
+					[...(activeSessionState?.turns ?? EMPTY_TURNS), ...activeTurnIndex],
+					activeSessionModel,
+					modelsCatalog,
+				)
+			: null,
+	);
+	const coldResend = $derived(
+		coldResendEstimate &&
+			activeSessionId &&
+			cacheClock >= coldResendEstimate.expiresAt &&
+			dismissedColdResendBySessionId[activeSessionId] !==
+				coldResendEstimate.turnId
+			? coldResendEstimate
+			: null,
+	);
+	const compactFirstQueued = $derived(
+		Boolean(activeSessionId && compactFirstBySessionId[activeSessionId]),
+	);
+	const compactFirst = $derived(coldResendEligible && compactFirstQueued);
+	$effect(() => {
+		const expiresAt = coldResendEstimate?.expiresAt;
+		if (expiresAt == null) return;
+		const delay = expiresAt - Date.now();
+		if (delay <= 0) {
+			if (untrack(() => cacheClock) < expiresAt) cacheClock = Date.now();
+			return;
+		}
+		const timer = setTimeout(() => {
+			cacheClock = Date.now();
+		}, delay + 250);
+		return () => clearTimeout(timer);
+	});
+	$effect(() => {
+		const onVisible = () => {
+			if (document.visibilityState === "visible") cacheClock = Date.now();
+		};
+		document.addEventListener("visibilitychange", onVisible);
+		return () => document.removeEventListener("visibilitychange", onVisible);
+	});
 	const buildTurnTimelineItems = createTurnTimelineBuilder();
 	const timeline = $derived.by<TimelineItem[]>(() => {
 		const state = activeSessionState;
@@ -3010,6 +3065,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			return;
 		const isNote = composerMode === "note";
 		const harness = composerHarness;
+		// The queued choice applies even if the notice is hidden by a running Turn.
+		const sendCompactFirst =
+			!isNote && harness === "cohub" && compactFirstQueued;
 		// Fail closed: a disconnected Runtime must never dispatch a local turn.
 		if (!isNote && !canUseHarness(harness)) {
 			setComposerError(m.runtime_harness_unavailable());
@@ -3316,6 +3374,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 							...(thinkingLevel ? { thinkingLevel } : {}),
 							...(sentApprovalMode ? { approvalMode: sentApprovalMode } : {}),
 							...(serviceTier ? { serviceTier } : {}),
+							...(sendCompactFirst ? { compactFirst: true } : {}),
 							clientMessageId,
 							...(harness === "cohub"
 								? { generationPolicy: buildTurnGenerationPolicy() }
@@ -3336,6 +3395,11 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				writeApprovalChoice(sentApprovalKey, null);
 				approvalChoices = { ...approvalChoices, [sentApprovalKey]: null };
 			}
+			if (sendCompactFirst && sessionId)
+				compactFirstBySessionId = {
+					...compactFirstBySessionId,
+					[sessionId]: false,
+				};
 			// The server accepted the prompt even if this host moved elsewhere.
 			// Invalidate before the UI-only early return so Recent revalidates later.
 			noteViewerActivity();
@@ -4567,6 +4631,26 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		relations,
 		get activeSessionIsRunning() {
 			return activeSessionIsRunning;
+		},
+		get coldResend() {
+			return coldResend;
+		},
+		get compactFirst() {
+			return compactFirst;
+		},
+		setCompactFirst(value: boolean) {
+			if (!activeSessionId) return;
+			compactFirstBySessionId = {
+				...compactFirstBySessionId,
+				[activeSessionId]: value,
+			};
+		},
+		dismissColdResend() {
+			if (!activeSessionId || !coldResend) return;
+			dismissedColdResendBySessionId = {
+				...dismissedColdResendBySessionId,
+				[activeSessionId]: coldResend.turnId,
+			};
 		},
 		get forkingTurnId() {
 			return forkingTurnId;

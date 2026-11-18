@@ -14,7 +14,7 @@ import {
 } from "../image-description-store.js";
 import { logger } from "../logger.js";
 import type { SessionManager } from "./local-session-manager.js";
-import { createModelsFromRegistry } from "./pi-models-adapter.js";
+import { createTaskModels, toTaskRuntimeModel } from "./task-model.js";
 
 const CUSTOM_TYPE = "image_description.v1";
 const DESCRIPTION_CONCURRENCY = 2;
@@ -63,41 +63,6 @@ function normalizeUsage(value: unknown): Usage | null {
   };
 }
 
-function toRuntimeModel(config: ImageToTextConfig): Model<Api> & Pick<ImageToTextConfig["model"], "requestProfile" | "imageUrlInput"> {
-  const model = config.model;
-  return {
-    id: model.id,
-    name: model.name?.trim() || model.id,
-    api: model.api as Api,
-    provider: model.provider,
-    baseUrl: model.baseUrl,
-    reasoning: model.reasoning ?? false,
-    input: model.input ?? ["text", "image"],
-    cost: {
-      input: finiteOrZero(model.cost?.input),
-      output: finiteOrZero(model.cost?.output),
-      cacheRead: finiteOrZero(model.cost?.cacheRead),
-      cacheWrite: finiteOrZero(model.cost?.cacheWrite),
-    },
-    contextWindow: model.contextWindow ?? 32_768,
-    maxTokens: model.maxTokens ?? 2_048,
-    headers: model.headers,
-    compat: model.compat as Model<Api>["compat"],
-    requestProfile: model.requestProfile,
-    imageUrlInput: model.imageUrlInput,
-  };
-}
-
-function createStandaloneRegistry(config: ImageToTextConfig, model: Model<Api>) {
-  const apiKey = config.model.apiKey;
-  return {
-    getAvailable: () => [model],
-    getApiKey: (provider: string) => provider === model.provider ? apiKey : undefined,
-    getHeaders: (provider: string, modelId?: string) =>
-      provider === model.provider && (!modelId || modelId === model.id) ? model.headers : undefined,
-  };
-}
-
 function extractAssistantText(content: unknown): string {
   if (!Array.isArray(content)) return "";
   return content.map((part) => {
@@ -111,9 +76,8 @@ async function describeImage(input: {
   image: ImageContent;
   signal?: AbortSignal;
 }): Promise<StoredImageDescription> {
-  const model = toRuntimeModel(input.config);
-  const registry = createStandaloneRegistry(input.config, model);
-  const models = createModelsFromRegistry(registry, model);
+  const model = toTaskRuntimeModel(input.config, { input: ["text", "image"], contextWindow: 32_768, maxTokens: 2_048 });
+  const { models, apiKey } = createTaskModels(input.config, model);
   const reasoning = input.config.model.reasoning
     ? input.config.model.defaultThinkingLevel as ThinkingLevel | undefined
     : undefined;
@@ -125,7 +89,7 @@ async function describeImage(input: {
       timestamp: Date.now(),
     }],
   }, {
-    apiKey: registry.getApiKey(model.provider),
+    apiKey,
     headers: model.headers,
     maxTokens: 1_200,
     reasoning,

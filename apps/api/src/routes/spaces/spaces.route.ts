@@ -428,6 +428,8 @@ type SpacePromptInput = {
   thinkingLevel?: string | null;
   /** Optional context window for this session from this prompt on, capped at the platform value. */
   contextWindow?: number | null;
+  /** Compact the session context before this Turn runs. */
+  compactFirst?: boolean | null;
   approvalMode?: ApprovalMode | null;
   serviceTier?: string | null;
   clientMessageId?: string | null;
@@ -2165,6 +2167,16 @@ router.post("/:id/prompt", async (c) => {
 
   const body = await c.req.json<SpacePromptInput>().catch(() => null);
   if (body?.reply != null && body.mode && body.mode !== "agent") return c.json({ message: "reply is only supported for agent prompts" }, 400);
+  if (body?.compactFirst != null && typeof body.compactFirst !== "boolean") return c.json({ message: "compactFirst must be a boolean" }, 400);
+  const compactFirst = body?.compactFirst === true;
+  if (compactFirst && (
+    (body.mode && body.mode !== "agent")
+    || isLocalHarness(body.harness)
+    || (body.schedule?.mode ?? "immediate") !== "immediate"
+    || !body.sessionId
+  )) {
+    return c.json({ message: "compactFirst needs an immediate agent prompt to an existing cohub session" }, 400);
+  }
   if (body?.mode === "create") {
     const generation = body.generation;
     if (!generation?.model || !Array.isArray(generation.content) || generation.content.length === 0) {
@@ -2349,6 +2361,7 @@ router.post("/:id/prompt", async (c) => {
         harness: body.harness ?? null,
         thinkingLevel: promptThinkingLevel ?? null,
         contextWindow: promptContextWindow,
+        compactFirst,
         approvalMode: body.approvalMode ?? null,
         serviceTier: body.serviceTier ?? null,
         generationPolicy,

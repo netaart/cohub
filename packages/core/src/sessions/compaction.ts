@@ -42,7 +42,7 @@ export function getContextCompactionMeta(meta: unknown): ContextCompactionMeta |
     !isNullableString(compaction.ownerTurnId) ||
     !isNullableNonNegativeInteger(compaction.ordinalInTurn) ||
     !isNullableNonNegativeInteger(compaction.llmRound) ||
-    (compaction.triggerReason !== "threshold" && compaction.triggerReason !== "overflow_recovery") ||
+    (compaction.triggerReason !== "threshold" && compaction.triggerReason !== "overflow_recovery" && compaction.triggerReason !== "requested") ||
     !isNonNegativeInteger(compaction.contextWindow) ||
     !isNonNegativeInteger(compaction.tokensBefore) ||
     !isNullableNonNegativeInteger(compaction.estimatedTokensAfter) ||

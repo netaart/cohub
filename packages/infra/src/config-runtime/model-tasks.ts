@@ -30,7 +30,7 @@ export const PLATFORM_MODEL_TASKS_REDIS_KEY = `configs:model-tasks:${MODEL_TASKS
 export const USER_MODEL_TASKS_REDIS_KEY_PREFIX = `configs:model-tasks:${MODEL_TASKS_CACHE_REDIS_KEY_VERSION}:user`;
 
 const SAFE_REDIS_KEY_SEGMENT_REGEX = /^[0-9a-zA-Z_-]+$/;
-const TASK_NAMES = ["sessionTitle", "imageToText"] as const;
+const TASK_NAMES = ["sessionTitle", "imageToText", "contextCompaction"] as const;
 
 export type ModelTaskName = typeof TASK_NAMES[number];
 
@@ -237,7 +237,7 @@ function resolveTask(
   const provider = task.model?.provider?.trim();
   const id = task.model?.id?.trim();
   const prompt = task.prompt?.trim();
-  if (!provider || !id || !prompt) throw new Error("Model task config is incomplete");
+  if (!provider || !id || (!prompt && name !== "contextCompaction")) throw new Error("Model task config is incomplete");
 
   const providerConfig = models.providers[provider];
   const catalogModel = providerConfig?.models?.find((model) => model.id === id);
@@ -267,7 +267,7 @@ function resolveTask(
   if (name === "imageToText" && !model.input?.includes("image")) {
     throw new Error("Image-to-text task requires an image-capable model");
   }
-  return { enabled: true, model: { ...model, api: model.api, baseUrl: model.baseUrl }, prompt };
+  return { enabled: true, model: { ...model, api: model.api, baseUrl: model.baseUrl }, prompt: prompt ?? "" };
 }
 
 type RedisLike = {

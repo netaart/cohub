@@ -44,6 +44,7 @@ import { sessionStore } from "#lib/stores/session-store.ts";
 import { provideTurnSpeech } from "#lib/turn-speech.svelte.ts";
 import { entriesFromDataTransfer } from "#lib/upload-entries.ts";
 import SessionApprovals from "./SessionApprovals.svelte";
+import SessionCacheNotice from "./SessionCacheNotice.svelte";
 import SessionRuntimeRecovery from "./SessionRuntimeRecovery.svelte";
 import type { SessionChatHost } from "./session-chat-host.controller.svelte.ts";
 import { resolveTurnHarness } from "./session-utils.ts";
@@ -504,6 +505,14 @@ async function handleDraftDrop(event: DragEvent) {
 							</button>
 						</div>
 					</div>
+				{/if}
+				{#if !archivedSession}
+					<SessionCacheNotice
+						coldResend={host.coldResend}
+						compactFirst={host.compactFirst}
+						oncompactfirst={host.setCompactFirst}
+						ondismiss={host.dismissColdResend}
+					/>
 				{/if}
 				<SessionComposer
 					bind:value={composerInput}

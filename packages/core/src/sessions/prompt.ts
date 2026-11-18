@@ -153,6 +153,8 @@ export type SubmitSessionPromptInput = {
   thinkingLevel?: string | null;
   /** Optional context window for this session from this Turn on, capped at the platform value. */
   contextWindow?: number | null;
+  /** Compact the session context before this Turn's first LLM round (cohub harness only). */
+  compactFirst?: boolean | null;
   /** Local Harness approval mode for this Turn; omit to keep the Harness's own settings. */
   approvalMode?: ApprovalMode | null;
   /** Local Harness service tier for this Turn; omit for the Harness default. */
@@ -405,6 +407,7 @@ export const submitSessionPrompt = async (
   if (input.approvalMode != null && !isApprovalMode(input.approvalMode)) throw new Error("approvalMode must be one of: inherit, auto, full_access, read_only");
   if (input.serviceTier != null && !runtimeServiceTierIdSchema.safeParse(input.serviceTier).success) throw new Error("serviceTier must be a non-empty string of at most 100 characters");
   if (!localHarness && (input.approvalMode != null || input.serviceTier != null)) throw new Error("approvalMode and serviceTier require a local Harness");
+  if (localHarness && input.compactFirst) throw new Error("compactFirst is only supported by the cohub harness");
   if (input.accessMode === "read_only" && input.approvalMode != null && input.approvalMode !== "read_only") throw new Error("approvalMode conflicts with read-only access");
   if (localHarness) {
     assertHarnessAccess(input.harness, input.accessMode);
@@ -509,6 +512,7 @@ export const submitSessionPrompt = async (
     harness: input.harness ?? "cohub",
     requestedThinkingLevel,
     ...(requestedContextWindow ? { requestedContextWindow } : {}),
+    ...(input.compactFirst && !isDirectShellCommand ? { compactFirst: true } : {}),
     ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
     ...(input.serviceTier ? { requestedServiceTier: input.serviceTier } : {}),
     promptTemplate,

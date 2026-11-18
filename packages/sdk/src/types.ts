@@ -1351,6 +1351,8 @@ export type CreateSpacePromptInput = {
   thinkingLevel?: ModelThinkingLevel | null;
   /** Optional context window for this session from this turn on, capped at the platform value. */
   contextWindow?: number | null;
+  /** Compact the session context before this turn runs; immediate prompts to an existing cohub session only. */
+  compactFirst?: boolean | null;
   /** Local Harness approval mode; requires Runtime support. Omit to keep the Harness's own settings. */
   approvalMode?: ApprovalMode | null;
   /** Local Harness service tier (for example Codex `priority`); omit for the Harness default. */
