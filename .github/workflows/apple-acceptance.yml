@@ -35,6 +35,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: brew install xcodegen
+      - name: Initialize the selected Xcode
+        if: matrix.device != 'mac'
+        run: |
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          sudo xcodebuild -runFirstLaunch
+          xcrun xcodebuild -version
       - name: Extract signed Mac client
         if: matrix.device == 'mac'
         env:
@@ -98,7 +104,6 @@ jobs:
           DEVICE: ${{ matrix.device }}
         run: |
           xcodegen generate --spec apps/ios/acceptance.yml
-          open -a Simulator
           python3 - <<'PY'
           import json, os, subprocess
           print('Reading available simulators',flush=True)
@@ -114,7 +119,7 @@ jobs:
           with open(os.environ['GITHUB_ENV'],'a') as f: f.write('SIMULATOR_ID='+chosen['udid']+'\n')
           print('Simulator:',chosen['name'])
           PY
-          open -a Simulator
+          open "$DEVELOPER_DIR/Applications/Simulator.app"
       - name: Configure private test environment
         env:
           EMAIL: ${{ secrets.APPLE_REVIEW_EMAIL }}
