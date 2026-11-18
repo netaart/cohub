@@ -370,7 +370,7 @@ jobs:
           # defaults to debug: there is no :app:testReleaseUnitTest anymore.
           # The tests are build-type agnostic, so run them once and lint the
           # variant we actually ship.
-          ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease \
+          ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :app:bundleRelease \
             -PcohubEnv=prod \
             -PcohubVersionName="$VERSION_NAME" \
             -PcohubVersionCode="$VERSION_CODE"
@@ -384,12 +384,25 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "dist/$FILE"
           (cd dist && sha256sum "$FILE" > "$FILE.sha256")
 
+      - name: Verify and collect Play bundle
+        env:
+          VERSION: ${{ steps.version.outputs.name }}
+          COHUB_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          bundle="dist/cohub-$VERSION.aab"
+          cp app/build/outputs/bundle/release/app-release.aab "$bundle"
+          jarsigner -verify -strict -keystore "$COHUB_ANDROID_KEYSTORE" -storepass:env COHUB_ANDROID_KEYSTORE_PASSWORD "$bundle" cohub
+          (cd dist && sha256sum "cohub-$VERSION.aab" > "cohub-$VERSION.aab.sha256")
+
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           files: |
             apps/android/dist/${{ steps.version.outputs.file }}
             apps/android/dist/${{ steps.version.outputs.file }}.sha256
+            apps/android/dist/*.aab
+            apps/android/dist/*.aab.sha256
           fail_on_unmatched_files: true
 
       - name: Publish to CDN
