@@ -2,9 +2,6 @@ import AuthenticationServices
 import CohubCore
 import CryptoKit
 import Foundation
-import os
-
-private let signInDiagnostics = Logger(subsystem: "live.cohub.ios", category: "Acceptance")
 
 @MainActor
 @available(macOS 14.4, *)
@@ -24,13 +21,9 @@ public final class SignIn: NSObject, ASWebAuthenticationPresentationContextProvi
 
     public init(anchor: ASPresentationAnchor) {
         self.anchor = anchor
-        signInDiagnostics.notice("[DEBUG-native-login] created")
     }
 
-    deinit { signInDiagnostics.notice("[DEBUG-native-login] released") }
-
     public func run(_ config: AuthConfig, forceLogin: Bool) async throws -> Grant? {
-        signInDiagnostics.notice("[DEBUG-native-login] run")
         let verifier = Self.random(bytes: 32), state = Self.random(bytes: 16)
         let challenge = Self.base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
         guard let url = AuthorizationRequest.url(config: config, challenge: challenge, state: state, forceLogin: forceLogin),
@@ -44,9 +37,7 @@ public final class SignIn: NSObject, ASWebAuthenticationPresentationContextProvi
             }
             session.presentationContextProvider = self
             self.session = session
-            let started = session.start()
-            signInDiagnostics.notice("[DEBUG-native-login] started=\(started)")
-            if !started { finish(nil, Failure(reason: "The sign-in session did not start")) }
+            if !session.start() { finish(nil, Failure(reason: "The sign-in session did not start")) }
         }
         guard let redirect else { return nil }
         guard let code = AuthorizationRequest.code(from: redirect, state: state) else { throw Failure(reason: "The sign-in response did not answer this request") }
@@ -54,8 +45,6 @@ public final class SignIn: NSObject, ASWebAuthenticationPresentationContextProvi
     }
 
     private func finish(_ url: URL?, _ error: Error?) {
-        let diagnostic = error as NSError?
-        signInDiagnostics.notice("[DEBUG-native-login] finish domain=\(diagnostic?.domain ?? "none", privacy: .public) code=\(diagnostic?.code ?? 0)")
         guard let continuation else { return }
         self.continuation = nil
         session = nil
