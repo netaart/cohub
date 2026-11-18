@@ -1,7 +1,7 @@
 name: Android
 
 # dev: PRs and main build a dev APK, signed and published to the CDN when the
-# secrets are available. release: vX.Y.Z tags build the prod APK.
+# secrets are available. release: vX.Y.Z tags build the prod APK and Play bundle.
 on:
   pull_request:
     paths:
@@ -144,7 +144,7 @@ jobs:
         run: |
           # AGP 9 only creates unit tests for the tested build type (debug by
           # default), so :app:testReleaseUnitTest no longer exists.
-          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease --continue \
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:bundleRelease --continue \
             -PcohubEnv=dev \
             -PcohubVersionCode="$VERSION_CODE" \
             -PcohubVersionSuffix="-dev.${VERSION_CODE}+${SHA}"
@@ -280,7 +280,7 @@ jobs:
             }
 
   release:
-    name: Release APK
+    name: Release APK and Play bundle
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     environment: android-release

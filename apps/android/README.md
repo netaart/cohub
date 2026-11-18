@@ -108,11 +108,11 @@ single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohu
   `android/main/cohub-dev-main-<sha>.apk`; the PR comment and the run summary
   link the APK with a QR code. Fork builds publish the debug variant with a
   throwaway debug key, so they install but cannot sign in.
-- **release** — every `vX.Y.Z` tag builds the prod APK (versionCode
+- **release** — every `vX.Y.Z` tag builds the prod APK and Google Play AAB (versionCode
   `X*1_000_000 + Y*1_000 + Z`), signed with the release key held by the
   `android-release` environment (`ANDROID_RELEASE_KEYSTORE_BASE64` /
-  `ANDROID_RELEASE_KEYSTORE_PASSWORD`, tags `v*.*.*` only), and attaches it to
-  the GitHub Release and `public.cohub.live/android/release/`.
+  `ANDROID_RELEASE_KEYSTORE_PASSWORD`, tags `v*.*.*` only), and attaches both files and their SHA-256 checksums to the GitHub Release.
+  The APK is also available at `public.cohub.live/android/release/`.
 
 Both keystores are PKCS12 with alias `cohub`. Sign-in returns through a
 verified App Link, so each signing certificate must be listed in
