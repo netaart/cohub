@@ -84,10 +84,15 @@ export type BoardRuntimeProps = {
 	onStageReady?: (stage: BoardStage | null) => void;
 };
 
+async function importBoardPanel() {
+	const module = await import("#lib/components/board/BoardPanel.svelte");
+	// A failed chunk the reload guard intercepts resolves to undefined.
+	if (!module) throw new Error("Board runtime failed to load");
+	return module;
+}
+
 const loadCohubPixiRuntime = createLazyModuleLoader(() =>
-	import.meta.env.SSR
-		? pending()
-		: import("#lib/components/board/BoardPanel.svelte"),
+	import.meta.env.SSR ? pending() : importBoardPanel(),
 );
 
 export const cohubPixiRuntime = {

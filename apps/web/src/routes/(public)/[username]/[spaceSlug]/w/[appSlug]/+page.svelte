@@ -8,13 +8,9 @@ import type {
 } from "@neta-art/cohub";
 import { onMount, untrack } from "svelte";
 import { buildAppPageMeta, publicBoardPoster } from "#lib/app-page-meta.ts";
-import {
-	reportAppPromotionReady,
-	startAppPromotion,
-} from "#lib/app-promotion.ts";
 import AppBoardPoster from "#lib/components/app/AppBoardPoster.svelte";
 import AppPageHead from "#lib/components/app/AppPageHead.svelte";
-import AppSurface from "#lib/components/app/AppSurface.svelte";
+import type AppSurfaceView from "#lib/components/app/AppSurface.svelte";
 import AppVersionBar from "#lib/components/app/AppVersionBar.svelte";
 import {
 	type AppEmbedConnection,
@@ -29,7 +25,7 @@ import {
 	offerAppOpen,
 	openAppFromPage,
 } from "#lib/features/app/cohub-host.ts";
-import { sdk } from "#lib/sdk.ts";
+import { createLazyModuleLoader, pending } from "#lib/lazy-module.ts";
 import { goto } from "$app/navigation";
 import { page } from "$app/state";
 
@@ -64,6 +60,23 @@ type ClientData = {
 
 const props: { data: ReadyData | ClientData } = $props();
 
+/**
+ * The surface, SDK and promotion code run only after hydration. Loading them
+ * then keeps their JS and CSS from competing with the server-rendered paint.
+ */
+async function importAppSurface() {
+	const module = await import("#lib/components/app/AppSurface.svelte");
+	// A failed chunk the reload guard intercepts resolves to undefined.
+	if (!module) throw new Error("App surface failed to load");
+	return module;
+}
+
+const loadAppSurface = createLazyModuleLoader(() =>
+	import.meta.env.SSR ? pending() : importAppSurface(),
+);
+const loadSdk = () => import("#lib/sdk.ts").then(({ sdk }) => sdk);
+const loadPromotion = () => import("#lib/app-promotion.ts");
+
 const launchState = $derived({
 	search: page.url.search,
 	hash: page.url.hash,
@@ -90,12 +103,16 @@ let switching = $state(false);
 let resolvedVersionParam: number | null = null;
 /** AppSurface uses window/postMessage; mount only after hydration. */
 let surfaceReady = $state(false);
+let AppSurface = $state<typeof AppSurfaceView | null>(null);
+let surfaceFailed = $state(false);
 let nested = $state(false);
 /** A Cohub host took over this navigation; nothing renders here. */
 let hostHandled = $state(false);
 let surfaceLoaded = false;
 let promotionReadyReported = false;
-let promotionRuntime: ReturnType<typeof startAppPromotion> | null = null;
+let promotionRuntime: ReturnType<
+	Awaited<ReturnType<typeof loadPromotion>>["startAppPromotion"]
+> | null = null;
 let activePromotionKey = "";
 /**
  * Another App embeds this page. Its hints shape the embedded App's shell and
@@ -171,13 +188,15 @@ $effect(() => {
 	embedder = null;
 	if (!appId || !embedderOrigin) return;
 	let cancelled = false;
-	void loadAppPreview(sdk.apps, appId).then(
-		({ app, content }) => {
-			if (!cancelled && isServedFrom(content, embedderOrigin))
-				embedder = { appId: app.id, slug: app.slug };
-		},
-		() => undefined,
-	);
+	void loadSdk()
+		.then((sdk) => loadAppPreview(sdk.apps, appId))
+		.then(
+			({ app, content }) => {
+				if (!cancelled && isServedFrom(content, embedderOrigin))
+					embedder = { appId: app.id, slug: app.slug };
+			},
+			() => undefined,
+		);
 	return () => {
 		cancelled = true;
 	};
@@ -205,7 +224,13 @@ function maybeReportPromotionReady() {
 	const appId = ready.app.id;
 	promotionReadyReported = true;
 	void promotionRuntime
-		.then((runtime) => reportAppPromotionReady(appId, promotionId, runtime))
+		.then(async (runtime) =>
+			(await loadPromotion()).reportAppPromotionReady(
+				appId,
+				promotionId,
+				runtime,
+			),
+		)
 		.catch(() => undefined);
 }
 
@@ -286,6 +311,15 @@ function handleBoardSettled(ok: boolean) {
 }
 
 onMount(() => {
+	void loadAppSurface().then(
+		(module) => {
+			AppSurface = module.default;
+		},
+		() => {
+			surfaceFailed = true;
+			if (poster) handleBoardSettled(false);
+		},
+	);
 	const host = cohubHostWindow();
 	if (!host) {
 		surfaceReady = true;
@@ -310,7 +344,10 @@ $effect(() => {
 	if (activePromotionKey === key) return;
 	activePromotionKey = key;
 	promotionReadyReported = false;
-	promotionRuntime = startAppPromotion(ready.app.id, promotionId);
+	const appId = ready.app.id;
+	promotionRuntime = loadPromotion().then(({ startAppPromotion }) =>
+		startAppPromotion(appId, promotionId),
+	);
 	promotionRuntime.catch(() => undefined);
 	maybeReportPromotionReady();
 });
@@ -353,8 +390,14 @@ $effect(() => {
 				};
 	if (!identity.username || !identity.spaceSlug || !identity.appSlug) return;
 	let cancelled = false;
-	void sdk.apps
-		.listPublicVersions(identity.username, identity.spaceSlug, identity.appSlug)
+	void loadSdk()
+		.then((sdk) =>
+			sdk.apps.listPublicVersions(
+				identity.username,
+				identity.spaceSlug,
+				identity.appSlug,
+			),
+		)
 		.then((result) => {
 			if (!cancelled) versions = result.versions;
 		})
@@ -383,10 +426,12 @@ $effect(() => {
 	clientLoading = true;
 	clientError = "";
 	clientDetail = null;
-	void sdk.apps
-		.getBySlug(username, spaceSlug, appSlug, {
-			version: version ?? undefined,
-		})
+	void loadSdk()
+		.then((sdk) =>
+			sdk.apps.getBySlug(username, spaceSlug, appSlug, {
+				version: version ?? undefined,
+			}),
+		)
 		.then((detail) => {
 			if (!cancelled) {
 				clientDetail = detail;
@@ -429,11 +474,13 @@ $effect(() => {
 	}
 	const controller = new AbortController();
 	switching = true;
-	void sdk.apps
-		.getBySlug(username, spaceSlug, appSlug, {
-			version: version ?? undefined,
-			signal: controller.signal,
-		})
+	void loadSdk()
+		.then((sdk) =>
+			sdk.apps.getBySlug(username, spaceSlug, appSlug, {
+				version: version ?? undefined,
+				signal: controller.signal,
+			}),
+		)
 		.then((detail) => {
 			if (controller.signal.aborted) return;
 			versionDetail = detail;
@@ -485,7 +532,7 @@ function handleSelectVersion(version: number | null) {
 	{/key}
 {/if}
 
-{#if ready && surfaceReady}
+{#if ready && surfaceReady && AppSurface}
 	<AppSurface
 		app={ready.app}
 		space={ready.space}
@@ -504,7 +551,7 @@ function handleSelectVersion(version: number | null) {
 		onReady={handleSurfaceReady}
 		onBoardSettled={poster ? handleBoardSettled : undefined}
 	/>
-{:else if ready}
+{:else if ready && !surfaceFailed}
 	<!-- SSR / first paint: head already has share meta; surface hydrates client-side. -->
 	<div class="h-full bg-bg-primary" aria-hidden="true"></div>
 {:else if clientLoading}

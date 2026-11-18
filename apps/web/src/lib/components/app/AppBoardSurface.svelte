@@ -46,7 +46,10 @@ const {
 	shell?: AppRuntimeShellContext;
 	onNavigationOpen?: AppNavigationHandler;
 	onReady?: () => void;
-	/** The current content's stage started (`true`) or cannot start (`false`). */
+	/**
+	 * The current content's stage started (`true`) or cannot start (`false`).
+	 * The caller then shows the failure, so the surface shows no error of its own.
+	 */
 	onSettled?: (ok: boolean) => void;
 } = $props();
 
@@ -155,7 +158,9 @@ function handleStage(next: BoardStage | null) {
 
 <div class="work-board-surface">
 	{#if failed}
-		<div class="board-message error" role="alert">{m.board_failed_load({}, { locale })}</div>
+		{#if !onSettled}
+			<div class="board-message error" role="alert">{m.board_failed_load({}, { locale })}</div>
+		{/if}
 	{:else if !current || !scope}
 		<CenteredLoading label={m.common_loading({}, { locale })} size="page" />
 	{:else}
@@ -190,7 +195,9 @@ function handleStage(next: BoardStage | null) {
 				{/if}
 			{/key}
 		{:catch}
-			<div class="board-message error" role="alert">{m.board_failed_load({}, { locale })}</div>
+			{#if !onSettled}
+				<div class="board-message error" role="alert">{m.board_failed_load({}, { locale })}</div>
+			{/if}
 		{/await}
 	{/if}
 </div>
