@@ -56,7 +56,8 @@ jobs:
         env:
           CONFIGURATION: ${{ matrix.configuration }}
         run: |
-          if otool -L ".build/DerivedData/Build/Products/$CONFIGURATION-iphonesimulator/Cohub.app/Cohub" | grep -q 'libswiftWebKit'; then
+          otool -L ".build/DerivedData/Build/Products/$CONFIGURATION-iphonesimulator/Cohub.app/Cohub" > "$RUNNER_TEMP/ios-libraries.txt"
+          if grep -q 'libswiftWebKit' "$RUNNER_TEMP/ios-libraries.txt"; then
             echo '::error::The Swift WebKit overlay is unavailable on supported older OS versions.'
             exit 1
           fi
