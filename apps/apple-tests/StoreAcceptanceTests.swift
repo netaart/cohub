@@ -61,7 +61,6 @@ final class StoreAcceptanceTests: XCTestCase {
         XCTAssertTrue(start.waitForExistence(timeout: 45), "The first screen did not become interactive")
         capture("01-welcome")
         start.tap()
-        app.tap()
         try await Task.sleep(for: .seconds(3))
         captureScreen("diagnostic-sign-in-start")
         let requestedAt = Date()
@@ -70,35 +69,33 @@ final class StoreAcceptanceTests: XCTestCase {
 
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let hosts = [app!, XCUIApplication(bundleIdentifier: "com.apple.SafariViewService"), XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")]
-        var browser = app!
-        for attempt in 0..<8 {
+        var browser: XCUIApplication?
+        for _ in 0..<15 {
             for host in [app!, springboard] {
                 let permission = host.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "继续"])).firstMatch
                 if permission.exists && permission.isHittable { permission.tap() }
             }
-            if let shown = hosts.first(where: { $0.state == .runningForeground && $0.textFields.firstMatch.exists }) { browser = shown; break }
-            if attempt > 0, start.exists && start.isHittable { start.tap() }
+            if let shown = hosts.first(where: { $0.webViews.textFields.firstMatch.exists }) { browser = shown; break }
             try await Task.sleep(for: .seconds(3))
         }
-        let field = browser.textFields.firstMatch
-        guard field.waitForExistence(timeout: 20) else {
+        guard let browser else {
             captureScreen("diagnostic-sign-in")
-            print(app.debugDescription)
             throw NSError(domain: "Native sign-in page did not appear", code: 1)
         }
+        let field = browser.webViews.textFields.firstMatch
         field.tap()
         field.typeText(email)
-        let signIn = browser.buttons.matching(NSPredicate(format: "label IN %@", ["Sign in", "Continue", "登录", "继续"])).firstMatch
+        let signIn = browser.webViews.buttons.matching(NSPredicate(format: "label IN %@", ["Sign in", "Continue", "登录", "继续"])).firstMatch
         XCTAssertTrue(signIn.waitForExistence(timeout: 10), "The sign-in action is missing")
         signIn.tap()
 
         let code = try await verificationCode(mailbox: mailbox, after: requestedAt)
         print("::add-mask::\(code)")
-        let codeFields = browser.textFields
+        let codeFields = browser.webViews.textFields
         XCTAssertTrue(codeFields.firstMatch.waitForExistence(timeout: 20), "The verification-code input is missing")
         codeFields.firstMatch.tap()
         codeFields.firstMatch.typeText(code)
-        let verify = browser.buttons.matching(NSPredicate(format: "label IN %@", ["Verify", "Continue", "Sign in", "验证", "继续", "登录"])).firstMatch
+        let verify = browser.webViews.buttons.matching(NSPredicate(format: "label IN %@", ["Verify", "Continue", "Sign in", "验证", "继续", "登录"])).firstMatch
         if verify.waitForExistence(timeout: 3), verify.isHittable { verify.tap() }
 
         let composer = app.textViews.firstMatch
