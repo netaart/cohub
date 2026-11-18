@@ -57,10 +57,12 @@ let imageFailed = $state(false);
 		color: var(--text-primary);
 	}
 
+	/* Reserves the usual share-image ratio so the title stays put while the cover loads. */
 	img {
 		width: 100%;
 		max-width: 48rem;
-		height: min(56vh, 30rem);
+		aspect-ratio: 1200 / 630;
+		max-height: min(56vh, 30rem);
 		object-fit: contain;
 	}
 
