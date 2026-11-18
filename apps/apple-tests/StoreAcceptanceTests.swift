@@ -3,6 +3,8 @@ import XCTest
 #if os(macOS)
 import AppKit
 import ApplicationServices
+#else
+import UIKit
 #endif
 
 @MainActor
@@ -16,6 +18,7 @@ final class StoreAcceptanceTests: XCTestCase {
         app = XCUIApplication(url: URL(fileURLWithPath: path))
         #else
         app = XCUIApplication()
+        if UIDevice.current.userInterfaceIdiom == .pad { XCUIDevice.shared.orientation = .landscapeLeft }
         #endif
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         #if os(macOS)
@@ -51,6 +54,8 @@ final class StoreAcceptanceTests: XCTestCase {
         XCTAssertTrue(start.waitForExistence(timeout: 45), "The first screen did not become interactive")
         capture("01-welcome")
         start.tap()
+        try await Task.sleep(for: .seconds(3))
+        captureScreen("diagnostic-sign-in-start")
         let requestedAt = Date()
         let email = try XCTUnwrap(ProcessInfo.processInfo.environment["COHUB_REVIEW_EMAIL"])
         let mailbox = try XCTUnwrap(ProcessInfo.processInfo.environment["COHUB_REVIEW_MAILBOX_URL"])
@@ -63,16 +68,13 @@ final class StoreAcceptanceTests: XCTestCase {
                 let permission = host.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "继续"])).firstMatch
                 if permission.exists && permission.isHittable { permission.tap() }
             }
-            if let shown = hosts.first(where: { $0.state != .notRunning && $0.textFields.firstMatch.exists }) { browser = shown; break }
+            if let shown = hosts.first(where: { $0.state == .runningForeground && $0.textFields.firstMatch.exists }) { browser = shown; break }
             if attempt > 0, start.exists && start.isHittable { start.tap() }
             try await Task.sleep(for: .seconds(3))
         }
         let field = browser.textFields.firstMatch
         guard field.waitForExistence(timeout: 20) else {
-            let diagnostic = XCTAttachment(data: XCUIScreen.main.screenshot().pngRepresentation, uniformTypeIdentifier: "public.png")
-            diagnostic.name = "STORE_diagnostic-sign-in"
-            diagnostic.lifetime = .keepAlways
-            add(diagnostic)
+            captureScreen("diagnostic-sign-in")
             print(app.debugDescription)
             throw NSError(domain: "Native sign-in page did not appear", code: 1)
         }
@@ -124,11 +126,21 @@ final class StoreAcceptanceTests: XCTestCase {
                     #if os(macOS)
                     resizeWindow()
                     #endif
-                    guard app.webViews.firstMatch.waitForExistence(timeout: 25) else {
-                        capture("diagnostic-" + name)
-                        throw NSError(domain: "The sample document preview did not load", code: 1)
+                    let heading: String
+                    switch (language, name) {
+                    case ("en", "04-agent-review"): heading = "Three next steps"
+                    case ("en", "05-launch-plan"): heading = "A small idea, ready to launch"
+                    case ("en", _): heading = "Welcome to the studio"
+                    case (_, "04-agent-review"): heading = "三个最有价值的下一步"
+                    case (_, "05-launch-plan"): heading = "把想法变成作品"
+                    default: heading = "欢迎来到创意工作室"
                     }
-                    try await Task.sleep(for: .seconds(4))
+                    let content = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", heading)).firstMatch
+                    guard content.waitForExistence(timeout: 35) else {
+                        capture("diagnostic-" + name)
+                        throw NSError(domain: "The sample content did not load", code: 1)
+                    }
+                    try await Task.sleep(for: .seconds(1))
                     capture(language + "-" + name)
                 }
             }
@@ -142,6 +154,13 @@ final class StoreAcceptanceTests: XCTestCase {
         let screenshot = app.screenshot()
         #endif
         let attachment = XCTAttachment(data: screenshot.pngRepresentation, uniformTypeIdentifier: "public.png")
+        attachment.name = "STORE_" + name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func captureScreen(_ name: String) {
+        let attachment = XCTAttachment(data: XCUIScreen.main.screenshot().pngRepresentation, uniformTypeIdentifier: "public.png")
         attachment.name = "STORE_" + name
         attachment.lifetime = .keepAlways
         add(attachment)
