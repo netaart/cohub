@@ -1,0 +1,123 @@
+name: Apple Acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/apple-store-validation]
+    paths:
+      - 'apps/apple-tests/**'
+      - 'apps/ios/acceptance.yml'
+      - 'apps/desktop/macos/acceptance.yml'
+      - '.github/workflows/apple-acceptance.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apple-acceptance
+  cancel-in-progress: false
+
+jobs:
+  screenshots:
+    name: ${{ matrix.device }} acceptance
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        device: [iphone, ipad, mac]
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install xcodegen
+      - uses: actions/setup-node@v7
+        if: matrix.device == 'mac'
+        with:
+          node-version: '24'
+      - name: Build Mac client
+        if: matrix.device == 'mac'
+        env:
+          COHUB_ICON_MODULES: ${{ runner.temp }}/cohub-icons/node_modules
+        run: |
+          npm install --prefix "$RUNNER_TEMP/cohub-icons" --no-package-lock --ignore-scripts sharp@0.34.5
+          bash apps/desktop/macos/scripts/bundle-app-store.sh 1.0.0 6.1
+          xcodegen generate --spec apps/desktop/macos/acceptance.yml
+      - name: Prepare simulator
+        if: matrix.device != 'mac'
+        env:
+          DEVICE: ${{ matrix.device }}
+        run: |
+          xcodegen generate --spec apps/ios/acceptance.yml
+          python3 - <<'PY'
+          import json, os, subprocess
+          devices = json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json']))['devices']
+          prefix = 'iPhone' if os.environ['DEVICE'] == 'iphone' else 'iPad'
+          candidates = [d for runtime, rows in devices.items() if 'iOS' in runtime for d in rows if d['name'].startswith(prefix)]
+          candidates.sort(key=lambda d: ('Pro Max' in d['name'] if prefix == 'iPhone' else '13-inch' in d['name'], d['name']), reverse=True)
+          chosen = candidates[0]
+          subprocess.run(['xcrun','simctl','boot',chosen['udid']],check=True)
+          subprocess.run(['xcrun','simctl','bootstatus',chosen['udid'],'-b'],check=True)
+          subprocess.run(['xcrun','simctl','status_bar',chosen['udid'],'override','--time','9:41','--batteryState','charged','--batteryLevel','100'],check=True)
+          with open(os.environ['GITHUB_ENV'],'a') as f: f.write('SIMULATOR_ID='+chosen['udid']+'\n')
+          print('Simulator:',chosen['name'])
+          PY
+      - name: Configure private test environment
+        env:
+          EMAIL: ${{ secrets.APPLE_REVIEW_EMAIL }}
+          MAILBOX: ${{ secrets.APPLE_REVIEW_MAILBOX_URL }}
+          DEVICE: ${{ matrix.device }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, xml.etree.ElementTree as ET
+          project = 'apps/desktop/macos/CohubAcceptance.xcodeproj' if os.environ['DEVICE']=='mac' else 'apps/ios/Cohub.xcodeproj'
+          scheme = pathlib.Path(project)/'xcshareddata/xcschemes/Cohub Acceptance.xcscheme'
+          tree = ET.parse(scheme); action = tree.getroot().find('TestAction')
+          action.set('shouldUseLaunchSchemeArgsEnv','NO')
+          variables = ET.SubElement(action,'EnvironmentVariables')
+          values = {'COHUB_REVIEW_EMAIL':os.environ['EMAIL'],'COHUB_REVIEW_MAILBOX_URL':os.environ['MAILBOX'],'COHUB_MAC_APP_PATH':str(pathlib.Path('apps/desktop/macos/dist/app-store/Cohub.app').resolve())}
+          for key,value in values.items(): ET.SubElement(variables,'EnvironmentVariable',key=key,value=value,isEnabled='YES')
+          tree.write(scheme,encoding='UTF-8',xml_declaration=True)
+          PY
+      - name: Exercise native login and capture screens
+        uses: apple-actions/xcodebuild@v1.3.0
+        with:
+          project: ${{ matrix.device == 'mac' && 'apps/desktop/macos/CohubAcceptance.xcodeproj' || 'apps/ios/Cohub.xcodeproj' }}
+          scheme: Cohub Acceptance
+          configuration: ${{ matrix.device == 'mac' && 'Debug' || 'Release' }}
+          destination: ${{ matrix.device == 'mac' && 'platform=macOS' || format('platform=iOS Simulator,id={0}', env.SIMULATOR_ID) }}
+          action: test
+          result-bundle-path: ${{ runner.temp }}/Acceptance.xcresult
+          build-settings: |
+            CODE_SIGNING_ALLOWED=NO
+            MARKETING_VERSION=1.0.0
+            CURRENT_PROJECT_VERSION=6.1
+      - name: Export selected screenshots
+        if: always()
+        run: |
+          if [[ -d "$RUNNER_TEMP/Acceptance.xcresult" ]]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/Acceptance.xcresult" --output-path "$RUNNER_TEMP/attachments"
+            python3 - <<'PY'
+          import json, os, pathlib, shutil
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])
+          output=root/'screenshots';output.mkdir(exist_ok=True)
+          for manifest in (root/'attachments').rglob('manifest.json'):
+            def visit(value):
+              if isinstance(value,dict):
+                name=value.get('suggestedHumanReadableName',''); file=value.get('exportedFileName','')
+                if name.startswith('STORE_') and file:
+                  source=manifest.parent/file
+                  if source.is_file():shutil.copyfile(source,output/(name if name.endswith('.png') else name+'.png'))
+                for item in value.values():visit(item)
+              elif isinstance(value,list):
+                for item in value:visit(item)
+            visit(json.loads(manifest.read_text()))
+          print('Exported store screenshots:',len(list(output.glob('*.png'))))
+          PY
+          fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cohub-${{ matrix.device }}-screenshots
+          path: ${{ runner.temp }}/screenshots/*.png
+          if-no-files-found: warn
+          retention-days: 14
