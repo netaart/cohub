@@ -1,9 +1,28 @@
 /*
- * Session compaction from @earendil-works/pi-agent-core 0.87.1 (harness/compaction, harness/messages,
- * harness/session/context), which pi-agent-core 1.0 removed. Kept so Cohub compacts exactly as it
- * did: same cut points, prompts and summaries. Adapted: an AbortSignal replaces the chord Context,
- * the unused retry policy and callbacks are gone (Cohub retries per call), and usage sums follow
- * pi-ai 1.x `totalFromProvider`.
+ * Session compaction from pi-agent-core 0.87.1, which pi-agent-core 1.0 removed. A bridge until Cohub
+ * moves to the compaction pi supports: keep its behaviour as is until then.
+ *
+ * Source: earendil-works/pi v0.87.1 (f07218c4d4bbc12bef056a7058c3dd49dfe41abe), packages/agent/src/
+ * harness: compaction/compaction.ts, compaction/utils.ts, messages.ts, session/context.ts,
+ * session/types.ts (Entry), types.ts (Result, CompactionError) and utils/usage.ts. Only what Cohub
+ * calls is kept (no branch summarization, compactWithRequest or entry projectors).
+ *
+ * Local changes:
+ * - An AbortSignal replaces the chord Context; Cohub set no telemetry context.
+ * - No retry policy or callbacks: Cohub passed none, which made each summary one provider call, and
+ *   retries per call itself (compaction-summary.ts).
+ * - compact() and generateSummaryWithUsage() take an options object instead of trailing positionals.
+ * - CompactionError records which request failed (`request`); compaction-summary.ts reads it.
+ * - Summed usage sets `cost.totalFromProvider` as pi-ai 1.x does.
+ * - EMPTY_HISTORY_TEXT, computeFileLists and formatFileOperations are exported for
+ *   compaction-summary.ts, which finishes summaries this module did not.
+ *
+ * Invariants:
+ * - Persisted: compaction `details` stay `{ readFiles, modifiedFiles }`; the next compaction reads
+ *   them back from the previous entry.
+ * - A cut never lands on a tool result, which must follow its call in the kept history.
+ * - compaction-summary.ts depends on EMPTY_HISTORY_TEXT, the file-list format and `request`;
+ *   change them together.
  *
  * MIT License
  *
@@ -241,13 +260,17 @@ const ok = <TValue, TError>(value: TValue): Result<TValue, TError> => ({ ok: tru
 const err = <TValue, TError>(error: TError): Result<TValue, TError> => ({ ok: false, error });
 
 export type CompactionErrorCode = "aborted" | "summarization_failed";
+/** Which summary request failed: the history, or the prefix of a split turn. */
+export type SummaryRequestKind = "history" | "prefix";
 
 export class CompactionError extends Error {
   code: CompactionErrorCode;
-  constructor(code: CompactionErrorCode, message: string) {
+  request: SummaryRequestKind;
+  constructor(code: CompactionErrorCode, message: string, request: SummaryRequestKind) {
     super(message);
     this.name = "CompactionError";
     this.code = code;
+    this.request = request;
   }
 }
 
@@ -307,13 +330,14 @@ function extractFileOpsFromMessage(message: AgentMessage, fileOps: FileOperation
   }
 }
 
-function computeFileLists(fileOps: FileOperations): { readFiles: string[]; modifiedFiles: string[] } {
+export function computeFileLists(fileOps: FileOperations): { readFiles: string[]; modifiedFiles: string[] } {
   const modified = new Set([...fileOps.edited, ...fileOps.written]);
   const readOnly = [...fileOps.read].filter((f) => !modified.has(f)).sort();
   return { readFiles: readOnly, modifiedFiles: [...modified].sort() };
 }
 
-function formatFileOperations(readFiles: string[], modifiedFiles: string[]): string {
+/** The file lists appended to every summary; Cohub's own summaries append the same. */
+export function formatFileOperations(readFiles: string[], modifiedFiles: string[]): string {
   const sections: string[] = [];
   if (readFiles.length > 0) sections.push(`<read-files>\n${readFiles.join("\n")}\n</read-files>`);
   if (modifiedFiles.length > 0) sections.push(`<modified-files>\n${modifiedFiles.join("\n")}\n</modified-files>`);
@@ -666,10 +690,11 @@ async function requestSummary(
   return await models.completeSimple(model, aiContext, requestOptions);
 }
 
-function summaryResult(response: AssistantMessage, label: string): Result<{ text: string; usage: Usage }, CompactionError> {
-  if (response.stopReason === "aborted") return err(new CompactionError("aborted", response.errorMessage || `${label} aborted`));
+function summaryResult(response: AssistantMessage, request: SummaryRequestKind): Result<{ text: string; usage: Usage }, CompactionError> {
+  const label = request === "prefix" ? "Turn prefix summarization" : "Summarization";
+  if (response.stopReason === "aborted") return err(new CompactionError("aborted", response.errorMessage || `${label} aborted`, request));
   if (response.stopReason === "error") {
-    return err(new CompactionError("summarization_failed", `${label} failed: ${response.errorMessage || "Unknown error"}`));
+    return err(new CompactionError("summarization_failed", `${label} failed: ${response.errorMessage || "Unknown error"}`, request));
   }
   return ok({ text: contentText(response.content), usage: response.usage });
 }
@@ -689,7 +714,7 @@ export async function generateSummaryWithUsage(
   let promptText = `<conversation>\n${serializeConversation(convertToLlm(currentMessages))}\n</conversation>\n\n`;
   if (previousSummary) promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
   promptText += basePrompt;
-  return summaryResult(await requestSummary(models, model, promptText, maxTokens, options), "Summarization");
+  return summaryResult(await requestSummary(models, model, promptText, maxTokens, options), "history");
 }
 
 async function generateTurnPrefixSummary(
@@ -701,10 +726,13 @@ async function generateTurnPrefixSummary(
 ): Promise<Result<{ text: string; usage: Usage }, CompactionError>> {
   const maxTokens = Math.min(Math.floor(0.5 * reserveTokens), model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY);
   const promptText = `<conversation>\n${serializeConversation(convertToLlm(messages))}\n</conversation>\n\n${TURN_PREFIX_SUMMARIZATION_PROMPT}`;
-  return summaryResult(await requestSummary(models, model, promptText, maxTokens, options), "Turn prefix summarization");
+  return summaryResult(await requestSummary(models, model, promptText, maxTokens, options), "prefix");
 }
 
 // ── Compaction ─────────────────────────────────────────────────────────────
+
+/** How a split-turn summary begins when no history preceded the turn. */
+export const EMPTY_HISTORY_TEXT = "No prior history.";
 
 /** File-operation details stored on generated compaction entries. */
 export interface CompactionDetails extends Record<string, JsonValue> {
@@ -807,7 +835,7 @@ export async function compact(
   let summary: string;
   let summaryUsage: Usage;
   if (isSplitTurn && turnPrefixMessages.length > 0) {
-    let historyText = "No prior history.";
+    let historyText = EMPTY_HISTORY_TEXT;
     let historyUsage: Usage | undefined;
     if (messagesToSummarize.length > 0) {
       const historyResult = await generateSummaryWithUsage(messagesToSummarize, models, model, reserveTokens, { ...options, previousSummary });
