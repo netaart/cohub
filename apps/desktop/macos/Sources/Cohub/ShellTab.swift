@@ -167,7 +167,7 @@ final class ShellTab: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func deliver(_ text: String) {
-        webView?.callAsyncJavaScript(BridgeScript.receive, arguments: ["data": text], in: nil, in: .page, completionHandler: nil)
+        webView?.__callAsyncJavaScript(BridgeScript.receive, arguments: ["data": text], inFrame: nil, in: .page, completionHandler: nil)
     }
 
     func share(_ text: String) {
