@@ -19,7 +19,7 @@ concurrency:
 jobs:
   screenshots:
     name: ${{ matrix.device }} acceptance
-    runs-on: macos-15
+    runs-on: ${{ matrix.device == 'mac' && 'macos-15' || 'macos-15-intel' }}
     timeout-minutes: 30
     strategy:
       max-parallel: 1
@@ -95,8 +95,8 @@ jobs:
           print('Reading available simulators',flush=True)
           devices = json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json'],timeout=120))['devices']
           prefix = 'iPhone' if os.environ['DEVICE'] == 'iphone' else 'iPad'
-          candidates = [d for runtime, rows in devices.items() if 'iOS' in runtime for d in rows if d['name'].startswith(prefix)]
-          candidates.sort(key=lambda d: ('Pro Max' in d['name'] if prefix == 'iPhone' else '13-inch' in d['name'], d['name']), reverse=True)
+          candidates = [{**d,'runtime':runtime} for runtime, rows in devices.items() if 'iOS' in runtime for d in rows if d['name'].startswith(prefix)]
+          candidates.sort(key=lambda d: ('Pro Max' in d['name'] if prefix == 'iPhone' else '13-inch' in d['name'], 'iOS-18-' in d['runtime'], d['name']), reverse=True)
           chosen = candidates[0]
           print('Booting:',chosen['name'],flush=True)
           if chosen['state'] != 'Booted':subprocess.run(['xcrun','simctl','boot',chosen['udid']],check=True,timeout=90)
