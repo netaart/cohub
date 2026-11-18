@@ -55,21 +55,24 @@ final class StoreAcceptanceTests: XCTestCase {
         let email = try XCTUnwrap(ProcessInfo.processInfo.environment["COHUB_REVIEW_EMAIL"])
         let mailbox = try XCTUnwrap(ProcessInfo.processInfo.environment["COHUB_REVIEW_MAILBOX_URL"])
 
-        #if os(iOS)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for host in [app!, springboard] {
-            let permission = host.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "继续"])).firstMatch
-            if permission.waitForExistence(timeout: 3) { permission.tap() }
-        }
         let hosts = [app!, XCUIApplication(bundleIdentifier: "com.apple.SafariViewService"), XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")]
         var browser = app!
-        for host in hosts where host.textFields.firstMatch.waitForExistence(timeout: 10) { browser = host; break }
-        #else
-        let browser = XCUIApplication(bundleIdentifier: "com.apple.Safari")
-        #endif
+        for attempt in 0..<8 {
+            for host in [app!, springboard] {
+                let permission = host.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "继续"])).firstMatch
+                if permission.exists && permission.isHittable { permission.tap() }
+            }
+            if let shown = hosts.first(where: { $0.state != .notRunning && $0.textFields.firstMatch.exists }) { browser = shown; break }
+            if attempt > 0, start.exists && start.isHittable { start.tap() }
+            try await Task.sleep(for: .seconds(3))
+        }
         let field = browser.textFields.firstMatch
         guard field.waitForExistence(timeout: 20) else {
-            capture("diagnostic-sign-in")
+            let diagnostic = XCTAttachment(data: XCUIScreen.main.screenshot().pngRepresentation, uniformTypeIdentifier: "public.png")
+            diagnostic.name = "STORE_diagnostic-sign-in"
+            diagnostic.lifetime = .keepAlways
+            add(diagnostic)
             print(app.debugDescription)
             throw NSError(domain: "Native sign-in page did not appear", code: 1)
         }
