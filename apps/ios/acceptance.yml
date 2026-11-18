@@ -1,5 +1,17 @@
 include: project.yml
 targets:
+  CohubSessionFixture:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ../apple-tests/ReviewSessionFixture.swift
+    dependencies:
+      - target: Cohub
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: live.cohub.acceptance.fixture
+        CODE_SIGN_ENTITLEMENTS: ""
   CohubAcceptance:
     type: bundle.ui-testing
     platform: iOS
@@ -18,9 +30,11 @@ schemes:
       targets:
         Cohub: all
         CohubAcceptance: [test]
+        CohubSessionFixture: [test]
     test:
       config: Release
       targets:
+        - CohubSessionFixture
         - CohubAcceptance
       language: en
       region: US

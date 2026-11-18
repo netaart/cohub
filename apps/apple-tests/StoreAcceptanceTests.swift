@@ -27,7 +27,7 @@ final class StoreAcceptanceTests: XCTestCase {
         #endif
     }
 
-    func testLoginAndCapture() async throws {
+    func testClientAndCapture() async throws {
         #if os(macOS)
         let security = XCUIApplication(bundleIdentifier: "com.apple.SecurityAgent")
         let password = security.secureTextFields.firstMatch
@@ -42,6 +42,11 @@ final class StoreAcceptanceTests: XCTestCase {
         }
         capture("02-new-chat")
         #else
+        if ProcessInfo.processInfo.environment["COHUB_SCREENSHOT_SESSION"]?.isEmpty == false {
+            print("Authentication mode: preauthenticated review-session fixture")
+            guard app.textViews.firstMatch.waitForExistence(timeout: 45) else { throw NSError(domain: "The screenshot review session did not load", code: 1) }
+        } else {
+        print("Authentication mode: native email-code login")
         let start = app.buttons.matching(NSPredicate(format: "label IN %@", ["Start", "Start a Space", "Sign in", "登录", "开始"])).firstMatch
         XCTAssertTrue(start.waitForExistence(timeout: 45), "The first screen did not become interactive")
         capture("01-welcome")
@@ -86,6 +91,7 @@ final class StoreAcceptanceTests: XCTestCase {
         let composer = app.textViews.firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 45), "The HTTPS callback did not return to the authenticated app")
         capture("02-new-chat")
+        }
         #endif
 
         app.terminate()
