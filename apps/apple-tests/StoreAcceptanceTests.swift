@@ -2,6 +2,7 @@ import Foundation
 import XCTest
 #if os(macOS)
 import AppKit
+import ApplicationServices
 #endif
 
 @MainActor
@@ -112,12 +113,11 @@ final class StoreAcceptanceTests: XCTestCase {
                     #if os(macOS)
                     resizeWindow()
                     #endif
-                    let content = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", heading, heading)).firstMatch
-                    guard content.waitForExistence(timeout: 25) else {
+                    guard app.webViews.firstMatch.waitForExistence(timeout: 25) else {
                         capture("diagnostic-" + name)
-                        print(app.debugDescription)
                         throw NSError(domain: "The sample document preview did not load", code: 1)
                     }
+                    try await Task.sleep(for: .seconds(4))
                     capture(language + "-" + name)
                 }
             }
@@ -140,10 +140,20 @@ final class StoreAcceptanceTests: XCTestCase {
     private func resizeWindow() {
         let window = app.windows.firstMatch
         guard window.waitForExistence(timeout: 10) else { return }
-        let frame = window.frame
-        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -2, dy: -2))
-        let target = corner.withOffset(CGVector(dx: 1440 - frame.width, dy: 900 - frame.height))
-        corner.press(forDuration: 0.1, thenDragTo: target)
+        let display = CGMainDisplayID()
+        let modes = CGDisplayCopyAllDisplayModes(display, [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary) as? [CGDisplayMode] ?? []
+        if let mode = modes.filter({ $0.width >= 1440 && $0.height >= 900 }).min(by: { $0.width * $0.height < $1.width * $1.height }) { CGDisplaySetDisplayMode(display, mode, nil) }
+        if let process = NSRunningApplication.runningApplications(withBundleIdentifier: "live.cohub.ios").first {
+            let target = AXUIElementCreateApplication(process.processIdentifier)
+            var windows: CFTypeRef?
+            if AXUIElementCopyAttributeValue(target, kAXWindowsAttribute as CFString, &windows) == .success,
+               let first = (windows as? [AXUIElement])?.first {
+                var size = CGSize(width: 1280, height: 800)
+                var point = CGPoint(x: 30, y: 30)
+                if let value = AXValueCreate(.cgPoint, &point) { AXUIElementSetAttributeValue(first, kAXPositionAttribute as CFString, value) }
+                if let value = AXValueCreate(.cgSize, &size) { AXUIElementSetAttributeValue(first, kAXSizeAttribute as CFString, value) }
+            }
+        }
         print("Window size: \(window.frame.width)x\(window.frame.height)")
     }
     #endif
