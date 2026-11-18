@@ -100,10 +100,12 @@ final class StoreAcceptanceTests: XCTestCase {
                 app.launch()
                 let languageButton = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", language == "en" ? "English" : "简体中文")).firstMatch
                 if languageButton.waitForExistence(timeout: 25), languageButton.isHittable { languageButton.tap() }
-                for (name, path, heading) in [
-                    ("05-launch-plan", "/spaces/\(space)/files/\(language == "en" ? "launch-plan.md" : "launch-plan-zh.md")", language == "en" ? "A small idea" : "把想法变成作品"),
-                    ("06-creative-brief", "/spaces/\(space)/files/\(language == "en" ? "creative-brief.md" : "creative-brief-zh.md")", language == "en" ? "Welcome to the studio" : "欢迎来到创意工作室"),
-                ] {
+                var pages = [
+                    ("05-launch-plan", "/spaces/\(space)/files/\(language == "en" ? "launch-plan.md" : "launch-plan-zh.md")"),
+                    ("06-creative-brief", "/spaces/\(space)/files/\(language == "en" ? "creative-brief.md" : "creative-brief-zh.md")"),
+                ]
+                if let chat = ProcessInfo.processInfo.environment[language == "en" ? "COHUB_CHAT_EN" : "COHUB_CHAT_ZH"], !chat.isEmpty { pages.insert(("04-agent-review", "/sessions/\(chat)"), at: 0) }
+                for (name, path) in pages {
                     app.terminate()
                     app.launchArguments = ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "en" ? "en_US" : "zh_CN", "-lastPage", path, "-lastPath", path, "-tabSession", ""]
                     #if os(macOS)

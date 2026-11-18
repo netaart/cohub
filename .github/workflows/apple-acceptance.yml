@@ -7,6 +7,10 @@ on:
         type: choice
         default: all
         options: [all, mac, iphone, ipad]
+      build_run:
+        type: string
+        description: Successful Apple Store run containing the Mac PKG
+        default: '44247841138'
 
 permissions:
   contents: read
@@ -33,10 +37,13 @@ jobs:
         if: matrix.device == 'mac'
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_RUN: ${{ inputs.build_run }}
         run: |
-          gh run download 44247841138 --repo "$GITHUB_REPOSITORY" --name cohub-macos-app-store --dir "$RUNNER_TEMP/signed-mac"
-          pkgutil --check-signature "$RUNNER_TEMP/signed-mac/Cohub-1.0.0.pkg"
-          pkgutil --expand-full "$RUNNER_TEMP/signed-mac/Cohub-1.0.0.pkg" "$RUNNER_TEMP/mac-package"
+          gh run download "$BUILD_RUN" --repo "$GITHUB_REPOSITORY" --name cohub-macos-app-store --dir "$RUNNER_TEMP/signed-mac"
+          packages=("$RUNNER_TEMP/signed-mac/"*.pkg)
+          test "${#packages[@]}" -eq 1
+          pkgutil --check-signature "${packages[0]}"
+          pkgutil --expand-full "${packages[0]}" "$RUNNER_TEMP/mac-package"
           python3 - <<'PY'
           import os, pathlib, subprocess
           app = next(pathlib.Path(os.environ['RUNNER_TEMP'],'mac-package').rglob('Cohub.app'))
@@ -111,6 +118,8 @@ jobs:
           EMAIL: ${{ secrets.APPLE_REVIEW_EMAIL }}
           MAILBOX: ${{ secrets.APPLE_REVIEW_MAILBOX_URL }}
           SAMPLE_SPACE: ${{ vars.APPLE_SCREENSHOT_SPACE_ID }}
+          CHAT_EN: ${{ vars.APPLE_SCREENSHOT_CHAT_EN }}
+          CHAT_ZH: ${{ vars.APPLE_SCREENSHOT_CHAT_ZH }}
           DEVICE: ${{ matrix.device }}
         run: |
           python3 - <<'PY'
@@ -121,6 +130,7 @@ jobs:
           action.set('shouldUseLaunchSchemeArgsEnv','NO')
           variables = ET.SubElement(action,'EnvironmentVariables')
           values = {'COHUB_REVIEW_EMAIL':os.environ['EMAIL'],'COHUB_REVIEW_MAILBOX_URL':os.environ['MAILBOX'],'COHUB_SCREENSHOT_SPACE':os.environ['SAMPLE_SPACE'],'COHUB_MAC_APP_PATH':os.environ.get('COHUB_MAC_APP_PATH',''),'COHUB_TEST_KEYCHAIN_PASSWORD':os.environ.get('COHUB_TEST_KEYCHAIN_PASSWORD','')}
+          values.update(COHUB_CHAT_EN=os.environ['CHAT_EN'],COHUB_CHAT_ZH=os.environ['CHAT_ZH'])
           for key,value in values.items(): ET.SubElement(variables,'EnvironmentVariable',key=key,value=value,isEnabled='YES')
           tree.write(scheme,encoding='UTF-8',xml_declaration=True)
           PY
