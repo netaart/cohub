@@ -1,5 +1,17 @@
 # @neta-art/cohub-cli
 
+## 10.32.0
+
+### Minor Changes
+
+- 1ec2822: The Local Runtime drives Pi 1.0 and later; Pi 0.x sessions still sync, read-only, until Pi is upgraded (`pi update`, or your package manager).
+- cf8c346: `space(id).prompt()` accepts `compactFirst: true` to compact an existing cohub session's context before the new Turn runs, so a long chat whose prompt cache has gone cold does not resend its whole history. `cohub spaces prompt --session <id> --compact-first` sends it from the CLI.
+
+### Patch Changes
+
+- Updated dependencies [cf8c346]
+  - @neta-art/cohub@13.24.0
+
 ## 10.31.0
 
 ### Minor Changes
