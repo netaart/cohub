@@ -105,7 +105,6 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "COHUB_COMMIT=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v7
-        if: matrix.platform == 'macos'
         with:
           node-version: '24'
       - name: Prepare Mac icon tooling
@@ -181,6 +180,7 @@ jobs:
           APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_CONNECT_KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          APPLE_BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
@@ -190,7 +190,7 @@ jobs:
             artifacts=(apps/desktop/macos/dist/app-store/*.pkg)
           fi
           test "${#artifacts[@]}" -eq 1
-          bash scripts/apple/upload.sh "${artifacts[0]}"
+          node scripts/apple/upload.mjs "${artifacts[0]}"
       - name: Remove provisioning profiles
         if: always()
         run: python3 scripts/apple/prepare-signing.py --cleanup

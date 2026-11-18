@@ -228,6 +228,10 @@ Apple Actions download/upload actions expect a team key with an Issuer ID.
 | `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_KEY_P8` | Upload key ID and P8 contents |
 | `APP_STORE_CONNECT_ISSUER_ID` | Team key issuer; omit for an individual key |
 
+Uploads use the App Store Connect Build Uploads API with either key type and wait
+for Apple processing. Retrying an accepted build reuses its upload reservation;
+Apple validation failures fail the workflow without submitting for review.
+
 The iOS and macOS store builds share the `live.cohub.ios` Bundle ID and one App Store
 Connect record. Add macOS as a platform on the iOS record before uploading the PKG.
 Each platform uses its own provisioning profile; the website DMG retains
