@@ -111,6 +111,18 @@ test("custom Codex providers retain an unlisted configured model without guessin
   ]);
 });
 
+test("an empty Codex list reuses native choices, not the previous configuration", () => {
+  const cache = {};
+  const entries = [{ id: "a", isDefault: true, defaultReasoningEffort: "medium", supportedReasoningEfforts: ["low", "medium", "high"].map((reasoningEffort) => ({ reasoningEffort })), additionalSpeedTiers: ["priority"] }, { id: "b" }];
+  codexModelCatalog({ config: { model_reasoning_effort: "high", service_tier: "fast" } }, entries, cache);
+  for (const config of [{ model_reasoning_effort: "low", service_tier: "default" }, {}]) {
+    assert.deepEqual(codexModelCatalog({ config }, [], cache), codexModelCatalog({ config }, entries));
+  }
+  for (const config of [{ model: "a" }, { model_provider: "changed" }]) {
+    assert.deepEqual(codexModelCatalog({ config }, [], structuredClone(cache)), codexModelCatalog({ config }, []));
+  }
+});
+
 test("a configured Codex service_tier is the default where the model offers it", () => {
   const entry = { id: "m", serviceTiers: [{ id: "priority", name: "Fast" }] };
   const tierOf = (service_tier?: string, model: Record<string, unknown> = entry) => codexModelCatalog({ config: { service_tier } }, [model])[0]?.defaultServiceTier;

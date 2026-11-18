@@ -29,17 +29,17 @@ export function piModelCatalog(entries: unknown[], state: JsonRecord): Model[] {
   });
 }
 
-function codexThinking(model: JsonRecord, configuredEffort: unknown): Pick<Model, "reasoning" | "defaultThinkingLevel" | "thinkingLevelMap"> {
+const codexLevel = (value: unknown) => thinkingLevel(value === "none" ? "off" : value);
+
+function codexThinking(model: JsonRecord): Pick<Model, "reasoning" | "defaultThinkingLevel" | "thinkingLevelMap"> {
   if (!Array.isArray(model.supportedReasoningEfforts)) return {};
   const efforts = new Set(model.supportedReasoningEfforts.map((entry) => record(entry).reasoningEffort));
   const thinkingLevelMap = thinkingLevelMapFor((level) => {
     const effort = level === "off" ? "none" : level;
     return efforts.has(effort) ? effort : null;
   });
-  const normalize = (value: unknown) => thinkingLevel(value === "none" ? "off" : value);
-  const configured = normalize(configuredEffort);
-  const fallback = normalize(model.defaultReasoningEffort);
-  const defaultThinkingLevel = [configured, fallback].find((level) => level && thinkingLevelMap[level] != null);
+  const level = codexLevel(model.defaultReasoningEffort);
+  const defaultThinkingLevel = level && thinkingLevelMap[level] != null ? level : undefined;
   return {
     reasoning: thinkingLevels.some((level) => level !== "off" && thinkingLevelMap[level] != null),
     thinkingLevelMap,
@@ -48,7 +48,7 @@ function codexThinking(model: JsonRecord, configuredEffort: unknown): Pick<Model
 }
 
 /** `serviceTiers` supersedes the deprecated `additionalSpeedTiers`, which only names tier ids. */
-function codexServiceTiers(model: JsonRecord, configuredTier: unknown): Pick<Model, "serviceTiers" | "defaultServiceTier"> {
+function codexServiceTiers(model: JsonRecord): Pick<Model, "serviceTiers" | "defaultServiceTier"> {
   const candidates = Array.isArray(model.serviceTiers)
     ? model.serviceTiers.map((entry) => {
       const tier = record(entry);
@@ -60,25 +60,40 @@ function codexServiceTiers(model: JsonRecord, configuredTier: unknown): Pick<Mod
     const parsed = runtimeServiceTierSchema.safeParse(tier);
     return parsed.success ? [parsed.data] : [];
   }).slice(0, RUNTIME_MAX_SERVICE_TIERS);
-  // A configured `service_tier` replaces the catalog default; `fast` is its legacy name for `priority`.
-  const configured = configuredTier === "fast" ? "priority" : configuredTier;
-  const preferred = configured === STANDARD_SERVICE_TIER ? undefined : typeof configured === "string" && configured ? configured : model.defaultServiceTier;
-  const defaultServiceTier = typeof preferred === "string" && tiers.some((tier) => tier.id === preferred) ? preferred : undefined;
+  const defaultServiceTier = tiers.find((tier) => tier.id === model.defaultServiceTier)?.id;
   return { ...(tiers.length ? { serviceTiers: tiers } : {}), ...(defaultServiceTier ? { defaultServiceTier } : {}) };
 }
 
-/** Use Codex's picker-visible model/list for every provider, including custom providers. */
-export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[]): Model[] {
-  const config = record(configResponse.config);
-  const provider = typeof config.model_provider === "string" ? config.model_provider : "openai";
-  const configuredModel = typeof config.model === "string" ? config.model : null;
-  const models: Model[] = entries.flatMap((value) => {
+// Private to one Runtime (including its preflight → worker handoff); never sent to the Gateway.
+export type CatalogCache = { codex?: { provider: string; configuredModel: string | null; models: Model[] } };
+
+function codexListedModels(provider: string, entries: unknown[]): Model[] {
+  return entries.flatMap((value) => {
     const model = record(value);
     const id = typeof model.model === "string" ? model.model : typeof model.id === "string" ? model.id : null;
     if (!id || model.hidden) return [];
-    // A configured model replaces the catalog's own default.
-    const isDefault = configuredModel ? id === configuredModel : model.isDefault === true;
-    return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id, ...(isDefault ? { isDefault } : {}), ...codexThinking(model, config.model_reasoning_effort), ...codexServiceTiers(model, config.service_tier) }];
+    return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id, ...(model.isDefault === true ? { isDefault: true } : {}), ...codexThinking(model), ...codexServiceTiers(model) }];
+  });
+}
+
+export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[], cache?: CatalogCache): Model[] {
+  const config = record(configResponse.config);
+  const provider = typeof config.model_provider === "string" ? config.model_provider : "openai";
+  const configuredModel = typeof config.model === "string" ? config.model : null;
+  const previous = cache?.codex;
+  const listed = !entries.length && previous?.provider === provider && previous.configuredModel === configuredModel
+    ? previous.models : codexListedModels(provider, entries);
+  if (cache) cache.codex = { provider, configuredModel, models: listed };
+
+  const effort = codexLevel(config.model_reasoning_effort);
+  const tier = config.service_tier === "fast" ? "priority" : config.service_tier;
+  const models = listed.map(({ isDefault, defaultServiceTier, ...model }) => {
+    const preferred = typeof tier === "string" && tier ? tier : defaultServiceTier;
+    const selectedTier = tier !== STANDARD_SERVICE_TIER && model.serviceTiers?.find((item) => item.id === preferred)?.id;
+    const selectedDefault = configuredModel ? model.id === configuredModel : isDefault;
+    return { ...model, ...(selectedDefault ? { isDefault: true } : {}),
+      ...(effort && model.thinkingLevelMap?.[effort] != null ? { defaultThinkingLevel: effort } : {}),
+      ...(selectedTier ? { defaultServiceTier: selectedTier } : {}) };
   });
   if (configuredModel && !models.some((model) => model.id === configuredModel)) models.unshift({ harness: "codex", provider, id: configuredModel, name: configuredModel, isDefault: true });
   return models;

@@ -426,6 +426,19 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					readApprovalChoice(approvalChoiceStorageKey)) ||
 					resolveApprovalModeFromTurns(composerAgentTurns, composerHarness),
 	);
+	function refreshLocalModels() {
+		void loadRuntimeCatalog();
+		if (
+			spaceId &&
+			composerHarness !== "cohub" &&
+			runtimeCatalog?.client?.catalogRefresh
+		) {
+			void sdk
+				.space(spaceId)
+				.requestRuntimeCatalogRefresh(composerHarness)
+				.catch(() => undefined);
+		}
+	}
 	async function loadRuntimeCatalog() {
 		const targetSpaceId = spaceId;
 		if (!targetSpaceId) return;
@@ -4689,6 +4702,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		},
 		setComposerHarness,
 		loadRuntimeCatalog,
+		refreshLocalModels,
 		get runtimeCatalog() {
 			return runtimeCatalog;
 		},

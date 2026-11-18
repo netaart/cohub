@@ -142,6 +142,7 @@ type Props = {
 	/** Whether the Space's local Runtime is connected; local harnesses are unavailable when false. */
 	runtimeOnline?: boolean;
 	onharnessopen?: () => void;
+	onlocalmodelopen?: () => void;
 	localModels?: RuntimeCapabilities["models"];
 	localModel?: LocalModelSelection | null;
 	onlocalmodelchange?: (model: LocalModelSelection) => void;
@@ -194,6 +195,7 @@ let {
 	localRuntime = false,
 	runtimeOnline = true,
 	onharnessopen,
+	onlocalmodelopen,
 	localModels = [],
 	localModel = null,
 	onlocalmodelchange,
@@ -1745,7 +1747,7 @@ $effect(() => {
 									ariaLabel={m.runtime_model({}, { locale })}
 									expanded={showLocalModelSelector}
 									disabled={disabled || sending || !runtimeOnline}
-									onclick={() => { onharnessopen?.(); showLocalModelSelector = true; }}
+									onclick={() => { showLocalModelSelector = true; onlocalmodelopen?.(); }}
 								/>
 							{/if}
 

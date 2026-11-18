@@ -2,6 +2,7 @@ import { access, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { LOCAL_HARNESSES, type LocalHarness, type RuntimeCapabilities } from "@neta-art/cohub";
 import { harnessExecutableCandidates } from "./process.js";
+import type { CatalogCache } from "../model-catalog.js";
 import { piHarness } from "./pi.js";
 import { codexHarness } from "./codex.js";
 import { claudeHarness } from "./claude.js";
@@ -47,9 +48,9 @@ async function harnessFeatures(harnesses: LocalHarness[], executables: HarnessEx
  * Explicitly requested harnesses must all work. With `onUnavailable`, a failing harness is reported
  * and left out instead, so auto-discovery still starts with the ones that work.
  */
-export async function discoverHarnesses(harnesses: LocalHarness[], executables: HarnessExecutables, cwd: string, onUnavailable?: (harness: LocalHarness, error: unknown) => void): Promise<RuntimeCapabilities> {
+export async function discoverHarnesses(harnesses: LocalHarness[], executables: HarnessExecutables, cwd: string, onUnavailable?: (harness: LocalHarness, error: unknown) => void, cache?: CatalogCache): Promise<RuntimeCapabilities> {
   const catalogs = await Promise.all(harnesses.map(async (harness) => {
-    try { return { harness, models: await adapters()[harness].models(harnessExecutable(harness, executables), cwd) }; }
+    try { return { harness, models: await adapters()[harness].models(harnessExecutable(harness, executables), cwd, { cache }) }; }
     catch (error) {
       if (!onUnavailable) throw error;
       onUnavailable(harness, error);
@@ -61,13 +62,17 @@ export async function discoverHarnesses(harnesses: LocalHarness[], executables: 
 }
 
 /** Rediscover the running harnesses' models; a harness that fails keeps its previous models. */
-export async function refreshHarnesses(current: RuntimeCapabilities, executables: HarnessExecutables, cwd: string, onUnavailable: (harness: LocalHarness, error: unknown) => void): Promise<RuntimeCapabilities> {
+export async function refreshHarnesses(current: RuntimeCapabilities, executables: HarnessExecutables, cwd: string, onUnavailable: (harness: LocalHarness, error: unknown) => void, options: { target?: LocalHarness; cache?: CatalogCache } = {}): Promise<RuntimeCapabilities> {
+  const { target, cache } = options;
   const catalogs = await Promise.all(current.harnesses.map(async (harness) => {
-    try { return await adapters()[harness].models(harnessExecutable(harness, executables), cwd, { strict: true }); }
+    const previous = current.models.filter((model) => model.harness === harness);
+    if (target && harness !== target) return previous;
+    try { return await adapters()[harness].models(harnessExecutable(harness, executables), cwd, { strict: true, cache }); }
     catch (error) {
       onUnavailable(harness, error);
-      return current.models.filter((model) => model.harness === harness);
+      return previous;
     }
   }));
+  if (target) return { ...current, models: catalogs.flat() };
   return { harnesses: current.harnesses, models: catalogs.flat(), ...await harnessFeatures(current.harnesses, executables, cwd, current) };
 }

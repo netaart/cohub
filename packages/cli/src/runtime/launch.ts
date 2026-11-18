@@ -179,9 +179,10 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   await repairIntegrations(options.pi);
   // Fail local preflight before creating remote state; the worker reuses this catalog. Without
   // `--harness`, a discovered harness that cannot start is skipped with a warning.
+  const catalogCache = {};
   const capabilities = await discoverHarnesses(harnesses, executables, root, options.harness.length ? undefined : (harness, error) => {
     process.stderr.write(`Skipping ${LOCAL_HARNESS_SPECS[harness].label}: ${serializeDiagnosticError(error).message.split("\n")[0]}\n`);
-  });
+  }, catalogCache);
   harnesses = capabilities.harnesses;
   if (!harnesses.length) process.stderr.write(`No local Harness found (${LOCAL_HARNESSES.map((harness) => LOCAL_HARNESS_SPECS[harness].label).join(", ")}); Turns run on Cohub. Reconnect after installing one\n`);
   const client = createClient();
@@ -196,7 +197,7 @@ export async function runtimeUp(program: Command, dir: string | undefined, optio
   });
   // Consent (or --yes) precedes any user-level integration install; failure never blocks startup.
   const native = await ensureNativeSync({ root, spaceId, identity, harnesses, yes: options.yes, executables });
-  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, executables, background: Boolean(options.detach), verbose: options.verbose, importHistory: native.importHistory, display };
+  const config: RuntimeLaunch = { spaceId, root, identity, harnesses, capabilities, catalogCache, executables, background: Boolean(options.detach), verbose: options.verbose, importHistory: native.importHistory, display };
   const existing = await requestRuntimeInstance(runtimeInstanceDirectory(identity, spaceId));
   if (existing) {
     if (existing.root !== root) throw new Error("This Space is running in another directory");

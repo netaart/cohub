@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   RUNTIME_MAX_FRAME_BYTES,
   RUNTIME_PROTOCOL_VERSION,
+  runtimeCatalogRefreshSchema,
   runtimeCapabilitiesSchema,
   runtimeCommandSchema,
   runtimeHelloCapabilities,
@@ -51,7 +52,7 @@ export type RuntimeConnectionOptions = {
   url: string;
   capabilities: RuntimeCapabilities;
   /** Rediscovers the catalog; a change is published to the registration without restarting. */
-  refreshCapabilities?: (current: RuntimeCapabilities) => Promise<RuntimeCapabilities>;
+  refreshCapabilities?: (current: RuntimeCapabilities, harness?: LocalHarness) => Promise<RuntimeCapabilities>;
   capabilitiesRefreshMs?: number;
   token: (forceRefresh?: boolean) => Promise<string>;
   signal: AbortSignal;
@@ -96,21 +97,24 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
   const timer = setInterval(() => {
     void flush();
   }, 10_000);
-  let refreshing = false;
-  const refreshCatalog = async () => {
-    if (!options.refreshCapabilities || refreshing || options.signal.aborted) return;
-    refreshing = true;
-    try {
-      const next = await options.refreshCapabilities(catalog.current);
+  let refreshQueue = Promise.resolve();
+  const scheduled = new Set<LocalHarness | undefined>();
+  const refreshCatalog = (harness?: LocalHarness) => {
+    const discover = options.refreshCapabilities;
+    if (!discover || scheduled.has(harness) || options.signal.aborted) return;
+    scheduled.add(harness);
+    refreshQueue = refreshQueue.then(async () => {
+      if (options.signal.aborted) return;
+      const next = await discover(catalog.current, harness);
       // The Gateway closes a Runtime that sends an invalid frame; an invalid catalog stays local.
       runtimeCapabilitiesSchema.parse(next);
       if (options.signal.aborted || isDeepStrictEqual(next, catalog.current)) return;
       catalog.current = next;
       log("info", "runtime.catalog_changed", { harnesses: next.harnesses, modelCount: next.models.length });
       catalog.publish?.();
-    } catch (error) {
+    }).catch((error) => {
       log("warn", "runtime.catalog_refresh_failed", { error: serializeDiagnosticError(error) });
-    } finally { refreshing = false; }
+    }).finally(() => { scheduled.delete(harness); });
   };
   const catalogTimer = options.refreshCapabilities ? setInterval(() => { void refreshCatalog(); }, options.capabilitiesRefreshMs ?? 60 * 60_000) : undefined;
   void flush();
@@ -135,6 +139,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
           seen,
           announce,
           catalog,
+          refreshCatalog,
           onReady: () => {
             readyAt = Date.now();
             conflictSince = null;
@@ -188,6 +193,7 @@ type ConnectOptions = RuntimeConnectionOptions & {
   announce: Announce;
   /** The latest catalog; `publish` brings the ready connection's registration up to date. */
   catalog: Catalog;
+  refreshCatalog: (harness: LocalHarness) => void;
 };
 
 type Catalog = { current: RuntimeCapabilities; publish: (() => void) | null };
@@ -471,7 +477,7 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
         spaceId: options.spaceId,
         token: currentToken,
         capabilities: registered,
-        client: { name: "cli", version: CLI_VERSION },
+        client: { name: "cli", version: CLI_VERSION, ...(options.refreshCapabilities ? { catalogRefresh: true } : {}) },
       });
     } catch (error) {
       log("error", "runtime.hello_failed", { error: serializeDiagnosticError(error) });
@@ -523,6 +529,11 @@ async function connect(options: ConnectOptions): Promise<ConnectOutcome> {
       }
       if (!connectionId) throw new Error("Runtime handshake is incomplete");
       if (raw.type === "runtime.heartbeat") {
+        return;
+      }
+      if (raw.type === "runtime.catalog.refresh") {
+        const frame = runtimeCatalogRefreshSchema.parse(raw);
+        if (frame.connectionId === connectionId && frame.spaceId === options.spaceId && options.catalog.current.harnesses.includes(frame.harness)) options.refreshCatalog(frame.harness);
         return;
       }
       if (raw.type === "runtime.native.stop") {

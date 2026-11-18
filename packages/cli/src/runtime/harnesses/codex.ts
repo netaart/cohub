@@ -166,7 +166,7 @@ async function codexPrompt(input: RuntimeTurnInput): Promise<JsonRecord[]> {
 export const codexHarness: LocalHarnessAdapter = {
   id: "codex",
   binary: "codex",
-  async models(executable, cwd) {
+  async models(executable, cwd, options) {
     const rpc = new JsonRpcProcess(...harnessCommand(executable, ["app-server", "--listen", "stdio://"], cwd), cwd, "jsonrpc");
     try {
       await initializeCodex(rpc);
@@ -181,7 +181,7 @@ export const codexHarness: LocalHarnessAdapter = {
         if (entries.length > 2000 || cursor && cursors.has(cursor)) throw new Error("Invalid model catalog pagination");
         if (cursor) cursors.add(cursor);
       } while (cursor);
-      return codexModelCatalog(config, entries);
+      return codexModelCatalog(config, entries, options?.cache);
     } finally { await rpc.close(); }
   },
   async approvalModes(executable) {

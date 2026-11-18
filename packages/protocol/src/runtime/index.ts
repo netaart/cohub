@@ -36,6 +36,9 @@ export const RUNTIME_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 export const RUNTIME_MAX_BATCH_MESSAGES = 64;
 export const RUNTIME_MAX_BATCH_INPUT_BYTES = 2 * 1024 * 1024;
 export const RUNTIME_RECOVERY_BATCH_SIZE = 64;
+export const RUNTIME_CATALOG_REFRESH_CHANNEL = "pubsub:runtime:catalog_refresh";
+export const runtimeCatalogRefreshSchema = z.object({ type: z.literal("runtime.catalog.refresh"), spaceId: z.string().uuid(), connectionId: z.string().uuid(), harness: localHarnessSchema });
+export type RuntimeCatalogRefresh = z.infer<typeof runtimeCatalogRefreshSchema>;
 export const runtimeRegistrationKey = (spaceId: string) => `runtime:space:${spaceId}`;
 export const runtimeWorkspaceKey = (spaceId: string) => `runtime:workspace:${spaceId}`;
 export const runtimeDisplaysKey = (spaceId: string) => `runtime:displays:${spaceId}`;
@@ -180,6 +183,7 @@ export type RuntimePendingExecution = z.infer<typeof runtimePendingExecutionSche
 export const runtimeClientSchema = z.object({
   name: z.string().min(1).max(32),
   version: z.string().min(1).max(64),
+  catalogRefresh: z.literal(true).optional(),
 });
 export type RuntimeClient = z.infer<typeof runtimeClientSchema>;
 

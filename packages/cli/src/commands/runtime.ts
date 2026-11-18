@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Command } from "commander";
-import { LOCAL_HARNESS_SPECS, LOCAL_HARNESSES } from "@neta-art/cohub";
+import { isLocalHarness, LOCAL_HARNESS_SPECS, LOCAL_HARNESSES } from "@neta-art/cohub";
 import { createClient } from "../client.js";
 import { json as outJson, jsonRequested } from "../output.js";
 import { currentIdentityKey } from "../space.js";
@@ -176,6 +176,21 @@ export function registerRuntime(program: Command) {
         if (job.failed.length) process.exitCode = 1;
       } catch (cause) { reportFailure(cause); }
       finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
+    });
+
+  runtime.command("refresh-models <harness>").description("Request a local Harness model catalog refresh")
+    .option("-s, --space <space>", "Target Space: ID, slug, or username/slug")
+    .option("--json", "JSON output")
+    .action(async (name: string, options: TargetOptions) => {
+      try {
+        if (!isLocalHarness(name)) throw new Error(`Harness must be one of: ${LOCAL_HARNESSES.join(", ")}`);
+        const spaceId = await resolveRuntimeTarget(program, options.space);
+        const result = await createClient().space(spaceId).requestRuntimeCatalogRefresh(name);
+        if (jsonRequested(options)) outJson(result);
+        else if (result.accepted) process.stdout.write("Refresh requested\n");
+        else process.stderr.write("Refresh unavailable; check the connection and Harness with cohub runtime status\n");
+        if (!result.accepted) process.exitCode = 1;
+      } catch (cause) { reportFailure(cause); }
     });
 
   runtime.command("status").description("Local and server status")
