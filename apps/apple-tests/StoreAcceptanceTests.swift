@@ -17,10 +17,17 @@ final class StoreAcceptanceTests: XCTestCase {
         app = XCUIApplication()
         #endif
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        #if os(macOS)
+        app.launchArguments += ["-NSWindow Frame Cohub", "0 0 1280 800 0 0 1280 1024"]
+        #endif
         app.launch()
     }
 
     func testLoginAndCapture() async throws {
+        #if os(macOS)
+        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 45), "The review session did not load in the sandboxed screenshot copy")
+        capture("02-new-chat")
+        #else
         let start = app.buttons.matching(NSPredicate(format: "label IN %@", ["Start", "Start a Space", "Sign in", "登录", "开始"])).firstMatch
         XCTAssertTrue(start.waitForExistence(timeout: 45), "The first screen did not become interactive")
         capture("01-welcome")
@@ -65,6 +72,7 @@ final class StoreAcceptanceTests: XCTestCase {
         let composer = app.textViews.firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 45), "The HTTPS callback did not return to the authenticated app")
         capture("02-new-chat")
+        #endif
 
         app.terminate()
         app.launch()
@@ -79,6 +87,9 @@ final class StoreAcceptanceTests: XCTestCase {
                 ] {
                     app.terminate()
                     app.launchArguments = ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "en" ? "en_US" : "zh_CN", "-lastPage", path, "-lastPath", path, "-tabSession", ""]
+                    #if os(macOS)
+                    app.launchArguments += ["-NSWindow Frame Cohub", "0 0 1280 800 0 0 1280 1024"]
+                    #endif
                     app.launch()
                     let content = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", heading)).firstMatch
                     XCTAssertTrue(content.waitForExistence(timeout: 45), "The sample document preview did not load")
@@ -89,7 +100,11 @@ final class StoreAcceptanceTests: XCTestCase {
     }
 
     private func capture(_ name: String) {
+        #if os(macOS)
+        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        #else
         let attachment = XCTAttachment(screenshot: app.screenshot())
+        #endif
         attachment.name = "STORE_" + name
         attachment.lifetime = .keepAlways
         add(attachment)

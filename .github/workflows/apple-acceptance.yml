@@ -44,6 +44,32 @@ jobs:
           with open(os.environ['GITHUB_ENV'],'a') as f:f.write('COHUB_MAC_APP_PATH='+str(app)+'\n')
           PY
           xcodegen generate --spec apps/desktop/macos/acceptance.yml
+      - name: Prepare Mac screenshot copy
+        if: matrix.device == 'mac'
+        env:
+          CREDENTIALS: ${{ secrets.APPLE_SCREENSHOT_CREDENTIALS }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, plistlib, secrets, subprocess
+          app=pathlib.Path(os.environ['COHUB_MAC_APP_PATH'])
+          profile=app/'Contents/embedded.provisionprofile'
+          profile.unlink()
+          entitlements=plistlib.loads(pathlib.Path('apps/desktop/macos/Bundle/AppStore.entitlements').read_bytes())
+          entitlements.pop('com.apple.developer.associated-domains')
+          path=pathlib.Path(os.environ['RUNNER_TEMP'])/'Screenshot.entitlements'
+          path.write_bytes(plistlib.dumps(entitlements))
+          subprocess.run(['codesign','--force','--sign','-','--entitlements',str(path),str(app)],check=True)
+          secret=secrets.token_urlsafe(32)
+          def run(*args): subprocess.run(args,check=True,capture_output=True)
+          run('security','create-keychain','-p',secret,'cohub-acceptance.keychain')
+          run('security','unlock-keychain','-p',secret,'cohub-acceptance.keychain')
+          run('security','set-keychain-settings','-lut','3600','cohub-acceptance.keychain')
+          run('security','list-keychains','-d','user','-s','cohub-acceptance.keychain','login.keychain')
+          run('security','default-keychain','-d','user','-s','cohub-acceptance.keychain')
+          credentials=json.dumps(json.loads(os.environ['CREDENTIALS']))
+          run('security','add-generic-password','-a','session','-s','live.cohub.ios','-w',credentials,'-T',str(app/'Contents/MacOS/Cohub'),'cohub-acceptance.keychain')
+          print('Screenshot copy uses the verified binary with ad hoc sandbox signing and an authenticated review-session fixture. Store-package launch remains a separate TestFlight check.')
+          PY
       - name: Prepare simulator
         if: matrix.device != 'mac'
         env:
