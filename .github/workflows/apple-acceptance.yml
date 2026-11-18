@@ -2,20 +2,18 @@ name: Apple Acceptance
 
 on:
   workflow_dispatch:
-  push:
-    branches: [codex/apple-store-validation]
-    paths:
-      - 'apps/apple-tests/**'
-      - 'apps/ios/acceptance.yml'
-      - 'apps/desktop/macos/acceptance.yml'
-      - '.github/workflows/apple-acceptance.yml'
+    inputs:
+      device:
+        type: choice
+        default: all
+        options: [all, mac, iphone, ipad]
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: apple-acceptance
+  group: apple-acceptance-${{ inputs.device || 'all' }}
   cancel-in-progress: false
 
 jobs:
@@ -27,7 +25,7 @@ jobs:
       max-parallel: 1
       fail-fast: false
       matrix:
-        device: [mac, iphone, ipad]
+        device: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.device != 'all' && format('["{0}"]', inputs.device) || '["mac","iphone","ipad"]') }}
     steps:
       - uses: actions/checkout@v7
       - run: brew install xcodegen
@@ -126,6 +124,14 @@ jobs:
           print('Exported store screenshots:',len(list(output.glob('*.png'))))
           PY
           fi
+      - name: Mac launch diagnostics
+        if: failure() && matrix.device == 'mac'
+        run: |
+          file "$COHUB_MAC_APP_PATH/Contents/MacOS/Cohub"
+          ls -l "$COHUB_MAC_APP_PATH/Contents/MacOS/Cohub"
+          codesign --display --verbose=4 --entitlements - "$COHUB_MAC_APP_PATH"
+          spctl --assess --verbose=4 "$COHUB_MAC_APP_PATH" || true
+          log show --last 8m --style compact --predicate 'eventMessage CONTAINS[c] "live.cohub.ios" OR eventMessage CONTAINS[c] "Cohub.app" OR (process == "amfid" AND eventMessage CONTAINS[c] "Cohub")' | tail -100
       - uses: actions/upload-artifact@v7
         if: always()
         with:
