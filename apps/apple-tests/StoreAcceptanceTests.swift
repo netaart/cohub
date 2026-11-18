@@ -58,16 +58,26 @@ final class StoreAcceptanceTests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 45), "The HTTPS callback did not return to the authenticated app")
         capture("02-new-chat")
 
-        let spaceLink = app.links.matching(NSPredicate(format: "label IN %@", ["Spaces", "Space", "空间"])).firstMatch
-        if spaceLink.exists && spaceLink.isHittable {
-            spaceLink.tap()
-            capture("03-spaces")
-        }
-
         app.terminate()
         app.launch()
         XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 45), "The signed-in session did not survive relaunch")
         capture("04-restored-session")
+
+        if let space = ProcessInfo.processInfo.environment["COHUB_SCREENSHOT_SPACE"], !space.isEmpty {
+            for language in ["en", "zh-Hans"] {
+                for (name, path, heading) in [
+                    ("05-launch-plan", "/spaces/\(space)/files/launch-plan.md", "A small idea"),
+                    ("06-creative-brief", "/spaces/\(space)/files/creative-brief.md", "Welcome to the studio"),
+                ] {
+                    app.terminate()
+                    app.launchArguments = ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "en" ? "en_US" : "zh_CN", "-lastPage", path, "-lastPath", path, "-tabSession", ""]
+                    app.launch()
+                    let content = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", heading)).firstMatch
+                    XCTAssertTrue(content.waitForExistence(timeout: 45), "The sample document preview did not load")
+                    capture(language + "-" + name)
+                }
+            }
+        }
     }
 
     private func capture(_ name: String) {
