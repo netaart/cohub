@@ -23,7 +23,7 @@ concurrency:
 jobs:
   screenshots:
     name: ${{ matrix.device }} acceptance
-    runs-on: ${{ matrix.device == 'mac' && 'macos-15' || 'macos-15-intel' }}
+    runs-on: ${{ matrix.device == 'mac' && 'macos-15' || 'macos-14' }}
     timeout-minutes: 30
     strategy:
       max-parallel: 1
