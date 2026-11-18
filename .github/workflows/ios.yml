@@ -28,6 +28,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+
 jobs:
   build:
     name: Build (${{ matrix.scheme }})

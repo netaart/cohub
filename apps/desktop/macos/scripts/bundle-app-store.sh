@@ -44,7 +44,7 @@ if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
   exit 0
 fi
 test -n "${INSTALLER_IDENTITY:-}" && test -f "${APP_PROFILE_PATH:-}"
-cp "$APP_PROFILE_PATH" "$contents/embedded.provisionprofile"
+install -m 644 "$APP_PROFILE_PATH" "$contents/embedded.provisionprofile"
 entitlements="$scratch/AppStore.entitlements"
 python3 - "$here/Bundle/AppStore.entitlements" "$entitlements" "${APPLE_TEAM_ID:?}" <<'PY'
 import plistlib, sys
