@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 // The version this stand-in speaks for; the Runtime refuses to drive an older Pi.
-if (process.argv.includes("--version")) { process.stdout.write("0.86.1\n"); process.exit(0); }
+if (process.argv.includes("--version")) { process.stdout.write("1.5.2\n"); process.exit(0); }
 const option = (name) => { const index = process.argv.indexOf(name); return index < 0 ? null : process.argv[index + 1]; };
 const path = option("--session");
 const extensionPath = option("-e");

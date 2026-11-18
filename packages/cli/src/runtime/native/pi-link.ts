@@ -8,10 +8,10 @@ import type { Version } from "./version.js";
 const MAX_LINE_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 20 * 60_000;
 /**
- * Oldest Pi whose extension API Cohub relies on (`agent_settled`, `appendEntry`, steer and follow-
- * up delivery).
+ * Oldest Pi Cohub drives: the 1.x extension API (`agent_settled`, `appendEntry`, steer and follow-up
+ * delivery) and RPC. Pi 0.x is no longer supported.
  */
-export const PI_MIN_VERSION: Version = [0, 85, 1];
+export const PI_MIN_VERSION: Version = [1, 0, 0];
 /** Delivered to a session's subscribers when its Pi goes away. */
 export const PI_DISCONNECTED = "cohub_disconnected";
 
