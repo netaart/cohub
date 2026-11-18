@@ -5,7 +5,7 @@ import { releaseGenerationTaskHold } from "../../generation-billing.js";
 import { getCurrentRequestId } from "@cohub/infra/tracing";
 import { Hono, type Context } from "hono";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { displaysSnapshotSchema, fileWatcherStatusSchema, isModelThinkingLevel, MODEL_THINKING_LEVELS, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, isSessionTurnReplyMode, isUuid, runtimeStopConfirmationSchema, type ApprovalMode, type HarnessKind, runtimeWorkspaceKey, approvalDecisionSchema, APPROVAL_DECISIONS, runtimeWorkspaceStatus } from "@cohub/protocol";
+import { RUNTIME_CATALOG_REFRESH_CHANNEL, displaysSnapshotSchema, fileWatcherStatusSchema, isModelThinkingLevel, MODEL_THINKING_LEVELS, getDefaultSpaceModsForEnv, runtimeDisplaysKey, harnessSchema, isLocalHarness, isSessionTurnReplyMode, isUuid, runtimeStopConfirmationSchema, type ApprovalMode, type HarnessKind, runtimeWorkspaceKey, approvalDecisionSchema, APPROVAL_DECISIONS, runtimeWorkspaceStatus } from "@cohub/protocol";
 import {
   HOME_SPACE_SLUG,
   parseSpaceSlug,
@@ -2062,6 +2062,21 @@ router.post("/:id/commands", async (c) => {
 });
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
+
+router.post("/:id/runtime/models/:harness/refresh", async (c) => {
+  const user = useAuth(c);
+  if (user instanceof Response) return user;
+  const { id: spaceId, harness } = c.req.param();
+  if (!requireValidId(spaceId)) return c.json({ message: "space not found" }, 404);
+  if (!isLocalHarness(harness)) return c.json({ message: "Unknown local Harness" }, 400);
+  if (!(await hasPermission(user, "sandbox.view", { spaceId }))) return authzDenied(c);
+  const registration = await getRuntimeRegistration(spaceId);
+  if (!registration?.client?.catalogRefresh || !registration.capabilities.harnesses.includes(harness)) return c.json({ accepted: false });
+  const { connectionId } = registration;
+  const acquired = await redisCommandClient.set(`runtime:catalog-refresh:${connectionId}:${harness}`, "1", "EX", 30, "NX");
+  if (acquired) await redisCommandClient.publish(RUNTIME_CATALOG_REFRESH_CHANNEL, JSON.stringify({ type: "runtime.catalog.refresh", spaceId, connectionId, harness }));
+  return c.json({ accepted: true }, 202);
+});
 
 router.get("/:id/runtime", async (c) => {
   const user = useAuth(c);

@@ -44,9 +44,11 @@ for (const gateway of ["current", "legacy"] as const) test(`a changed catalog re
   const spaceId = crypto.randomUUID();
   let ready = 0;
   let catalog = initial;
+  const requests: unknown[] = [];
   const running = serveRuntime({
     spaceId, cwd: scratch, url: `ws://127.0.0.1:${address.port}`, capabilities: initial,
-    refreshCapabilities: async () => structuredClone(catalog), capabilitiesRefreshMs: 50,
+    refreshCapabilities: async (_current, harness) => { requests.push(harness); await delay(25); return structuredClone(catalog); },
+    capabilitiesRefreshMs: gateway === "legacy" ? 50 : 60 * 60_000,
     token: async () => "token", signal: controller.signal, executor: idleExecutor(spaceId), onReady: () => { ready++; },
   });
   try {
@@ -54,11 +56,17 @@ for (const gateway of ["current", "legacy"] as const) test(`a changed catalog re
     await delay(150);
     assert.deepEqual(registration?.capabilities, initial);
     catalog = updated;
+    if (gateway === "current") {
+      const frame = { type: "runtime.catalog.refresh", harness: "codex", spaceId, connectionId: registration!.connectionId } as const;
+      relay.refreshCatalog(frame);
+      relay.refreshCatalog(frame);
+    }
     await until(() => registration?.capabilities.models.length === 2);
     // A Gateway without the update frame gets a fresh hello, which carries only the levels every Gateway reads.
     assert.deepEqual(registration?.capabilities, gateway === "current" ? updated : runtimeHelloCapabilities(updated));
     assert(hellos.every((hello) => !hello.includes("ultra")));
     await delay(150);
+    if (gateway === "current") assert.deepEqual(requests, ["codex"]);
     assert.equal(ready, gateway === "current" ? 1 : 2);
   } finally {
     controller.abort();

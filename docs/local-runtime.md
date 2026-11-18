@@ -536,6 +536,8 @@ until the updated binary is published (or selected with `COHUB_SANDBOXD_BIN`).
 新 sandboxd 发布前保留兼容路径，不修改为尚未发布的版本号。后台运行不承诺开机自启；
 OS 级托管与断网继续执行任务属于后续阶段，当前仍保留断连中止及结果对账的安全边界。
 
+Opening the local model picker shows the existing catalog immediately and asks the connected Runtime to rediscover just that Harness. Multiple clients opening the same picker within 30 seconds share a refresh; a change reaches them through `space.runtime.changed`. `cohub runtime refresh-models codex` requests the same background refresh. Older Runtimes continue using their published catalog.
+
 Web reuses the shared model selector for local catalogs. The Runtime publishes each Harness's
 default model (Codex `config.model` or its catalog default; Pi's current model) and default
 thinking level (Codex configured or model effort; Pi's level for its default model), so the composer always

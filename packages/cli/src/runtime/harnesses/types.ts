@@ -87,7 +87,7 @@ export type LocalHarnessAdapter = {
   /** Executable looked up on PATH unless overridden. */
   binary: string;
   /** Fails when the harness cannot run; with `strict`, also instead of falling back to a reduced catalog. */
-  models(executable: string, cwd: string, options?: { strict?: boolean }): Promise<HarnessModel[]>;
+  models(executable: string, cwd: string, options?: { strict?: boolean; previous?: HarnessModel[] }): Promise<HarnessModel[]>;
   /** Approval modes this installation enforces; absent or empty hides the choice. */
   approvalModes?(executable: string, cwd: string): Promise<ApprovalMode[]>;
   run(executor: Executor, turn: HarnessTurn): Promise<HarnessRun>;

@@ -2211,6 +2211,10 @@ export class SpaceClient {
     );
   }
 
+  requestRuntimeCatalogRefresh(harness: import("@cohub/protocol").LocalHarness) {
+    return this.transport.request<{ accepted: boolean }>(`/api/spaces/${this.id}/runtime/models/${harness}/refresh`, { method: "POST" });
+  }
+
   getRuntime(customFetch?: Fetch, options: { signal?: AbortSignal } = {}) {
     return this.transport.request<import("@cohub/protocol").RuntimeStatus>(
       `/api/spaces/${this.id}/runtime`, { fetch: customFetch, signal: options.signal },

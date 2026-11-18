@@ -2,7 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
 import { createLogger } from "@cohub/infra/logging";
-import { isUuid, RUNTIME_CONTROL_FEATURES, type RuntimeApprovalDecision, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
+import { isUuid, RUNTIME_CONTROL_FEATURES, type RuntimeCatalogRefresh, type RuntimeApprovalDecision, RUNTIME_MAX_FRAME_BYTES, runtimeClientFrameSchema, runtimeCommandSchema, type RuntimePendingExecution, type RuntimeRegistration, type RuntimeTraceContext } from "@cohub/protocol";
 
 const logger = createLogger({ serviceName: "cohub-gateway" });
 
@@ -444,5 +444,9 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
       await deps.release(spaceId, registration.record);
     }));
   }
-  return { control, peer, stop, decide, closeAll };
+  function refreshCatalog(frame: RuntimeCatalogRefresh) {
+    const registration = registrations.get(frame.spaceId);
+    if (registration?.record.connectionId === frame.connectionId && registration.record.client?.catalogRefresh) send(registration.socket, frame);
+  }
+  return { control, peer, stop, decide, refreshCatalog, closeAll };
 }

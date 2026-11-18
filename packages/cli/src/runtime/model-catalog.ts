@@ -68,7 +68,7 @@ function codexServiceTiers(model: JsonRecord, configuredTier: unknown): Pick<Mod
 }
 
 /** Use Codex's picker-visible model/list for every provider, including custom providers. */
-export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[]): Model[] {
+export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[], previous?: Model[]): Model[] {
   const config = record(configResponse.config);
   const provider = typeof config.model_provider === "string" ? config.model_provider : "openai";
   const configuredModel = typeof config.model === "string" ? config.model : null;
@@ -80,6 +80,10 @@ export function codexModelCatalog(configResponse: JsonRecord, entries: unknown[]
     const isDefault = configuredModel ? id === configuredModel : model.isDefault === true;
     return [{ harness: "codex", provider, id, name: typeof model.displayName === "string" ? model.displayName : id, ...(isDefault ? { isDefault } : {}), ...codexThinking(model, config.model_reasoning_effort), ...codexServiceTiers(model, config.service_tier) }];
   });
+  // Codex can return an empty page rather than an RPC error when the provider times out.
+  // Never carry a catalog across a provider or configured-default change.
+  if (!entries.length && configuredModel && previous?.length && previous.every((model) => model.provider === provider)
+    && previous.some((model) => model.isDefault && model.id === configuredModel)) return previous;
   if (configuredModel && !models.some((model) => model.id === configuredModel)) models.unshift({ harness: "codex", provider, id: configuredModel, name: configuredModel, isDefault: true });
   return models;
 }

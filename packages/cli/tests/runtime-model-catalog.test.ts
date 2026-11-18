@@ -104,6 +104,9 @@ test("custom Codex providers retain the native picker catalog and reasoning choi
 test("custom Codex providers retain an unlisted configured model without guessing capabilities", () => {
   const config = { model_provider: "custom", model: "unlisted" };
   const fallback = { harness: "codex", provider: "custom", id: "unlisted", name: "unlisted", isDefault: true };
+  const previous = codexModelCatalog({ config }, [{ id: "listed" }]);
+  assert.deepEqual(codexModelCatalog({ config }, [], previous), previous);
+  assert.deepEqual(codexModelCatalog({ config: { ...config, model_provider: "changed" } }, [], previous), [{ ...fallback, provider: "changed" }]);
   assert.deepEqual(codexModelCatalog({ config }, []), [fallback]);
   assert.deepEqual(codexModelCatalog({ config }, [{ id: "listed", isDefault: true }]), [
     fallback,

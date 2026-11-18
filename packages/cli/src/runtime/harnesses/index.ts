@@ -61,13 +61,16 @@ export async function discoverHarnesses(harnesses: LocalHarness[], executables: 
 }
 
 /** Rediscover the running harnesses' models; a harness that fails keeps its previous models. */
-export async function refreshHarnesses(current: RuntimeCapabilities, executables: HarnessExecutables, cwd: string, onUnavailable: (harness: LocalHarness, error: unknown) => void): Promise<RuntimeCapabilities> {
+export async function refreshHarnesses(current: RuntimeCapabilities, executables: HarnessExecutables, cwd: string, onUnavailable: (harness: LocalHarness, error: unknown) => void, target?: LocalHarness): Promise<RuntimeCapabilities> {
   const catalogs = await Promise.all(current.harnesses.map(async (harness) => {
-    try { return await adapters()[harness].models(harnessExecutable(harness, executables), cwd, { strict: true }); }
+    const previous = current.models.filter((model) => model.harness === harness);
+    if (target && harness !== target) return previous;
+    try { return await adapters()[harness].models(harnessExecutable(harness, executables), cwd, { strict: true, previous }); }
     catch (error) {
       onUnavailable(harness, error);
-      return current.models.filter((model) => model.harness === harness);
+      return previous;
     }
   }));
+  if (target) return { ...current, models: catalogs.flat() };
   return { harnesses: current.harnesses, models: catalogs.flat(), ...await harnessFeatures(current.harnesses, executables, cwd, current) };
 }

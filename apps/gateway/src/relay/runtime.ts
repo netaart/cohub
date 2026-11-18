@@ -1,5 +1,5 @@
 import { createAgentTurnsQueue, enqueueRuntimeRecovery } from "@cohub/infra/agent-queue";
-import { AGENT_TURN_ABORT_CHANNEL, RUNTIME_APPROVAL_CHANNEL, runtimeApprovalDecisionSchema, runtimeRegistrationKey, type RuntimeRegistration } from "@cohub/protocol";
+import { AGENT_TURN_ABORT_CHANNEL, RUNTIME_APPROVAL_CHANNEL, RUNTIME_CATALOG_REFRESH_CHANNEL, runtimeCatalogRefreshSchema, runtimeApprovalDecisionSchema, runtimeRegistrationKey, type RuntimeRegistration } from "@cohub/protocol";
 import { createLogger } from "@cohub/infra/logging";
 import { authorizeLocalSandbox } from "../api-client.js";
 import { gatewayConfig } from "../config.js";
@@ -70,8 +70,13 @@ export async function startRuntimeStopSubscriber() {
   const client = createPubSubRedisClient();
   stopSubscriber = client;
   if (client.status === "wait") await client.connect();
-  await client.subscribe(AGENT_TURN_ABORT_CHANNEL, RUNTIME_APPROVAL_CHANNEL);
+  await client.subscribe(AGENT_TURN_ABORT_CHANNEL, RUNTIME_APPROVAL_CHANNEL, RUNTIME_CATALOG_REFRESH_CHANNEL);
   client.on("message", (channel, message) => {
+    if (channel === RUNTIME_CATALOG_REFRESH_CHANNEL) {
+      try { relay.refreshCatalog(runtimeCatalogRefreshSchema.parse(JSON.parse(message))); }
+      catch (error) { logger.warn("runtime.catalog.refresh_failed", { error }); }
+      return;
+    }
     if (channel === RUNTIME_APPROVAL_CHANNEL) {
       const decision = (() => { try { return runtimeApprovalDecisionSchema.safeParse(JSON.parse(message)); } catch { return null; } })();
       if (decision?.success) relay.decide(decision.data);
