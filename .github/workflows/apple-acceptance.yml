@@ -23,13 +23,15 @@ concurrency:
 jobs:
   screenshots:
     name: ${{ matrix.device }} acceptance
-    runs-on: ${{ matrix.device == 'mac' && 'macos-15' || 'macos-14' }}
+    runs-on: macos-15
     timeout-minutes: 30
     strategy:
       max-parallel: 1
       fail-fast: false
       matrix:
         device: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.device != 'all' && format('["{0}"]', inputs.device) || '["mac","iphone","ipad"]') }}
+    env:
+      DEVELOPER_DIR: ${{ matrix.device == 'mac' && '/Applications/Xcode_26.0.1.app/Contents/Developer' || '/Applications/Xcode_16.4.app/Contents/Developer' }}
     steps:
       - uses: actions/checkout@v7
       - run: brew install xcodegen
