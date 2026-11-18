@@ -156,7 +156,9 @@ jobs:
           output-formatter: ''
           result-bundle-path: ${{ runner.temp }}/Acceptance.xcresult
           build-settings: |
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=${{ matrix.device == 'mac' && 'NO' || 'YES' }}
+            CODE_SIGN_IDENTITY=-
+            DEVELOPMENT_TEAM=6RKNFNT44H
             ONLY_ACTIVE_ARCH=YES
             MARKETING_VERSION=1.0.0
             CURRENT_PROJECT_VERSION=6.1
@@ -193,6 +195,20 @@ jobs:
           codesign --display --verbose=4 --entitlements - "$COHUB_MAC_APP_PATH"
           spctl --assess --verbose=4 "$COHUB_MAC_APP_PATH" || true
           log show --last 8m --style compact --predicate 'eventMessage CONTAINS[c] "live.cohub.ios" OR eventMessage CONTAINS[c] "Cohub.app" OR (process == "amfid" AND eventMessage CONTAINS[c] "Cohub")' | tail -100
+      - name: iOS launch diagnostics
+        if: failure() && matrix.device != 'mac' && env.SIMULATOR_ID != ''
+        timeout-minutes: 2
+        run: |
+          xcrun simctl list devices booted
+          xcrun simctl spawn "$SIMULATOR_ID" log show --last 8m --style compact --predicate 'process == "Cohub" OR eventMessage CONTAINS[c] "live.cohub.ios"' | tail -100
+          python3 - <<'PY'
+          import pathlib, os
+          roots=[pathlib.Path.home()/'Library/Logs/DiagnosticReports',pathlib.Path.home()/'Library/Developer/CoreSimulator/Devices'/os.environ['SIMULATOR_ID']/'data/Library/Logs/CrashReporter']
+          for root in roots:
+            for file in root.glob('Cohub*.ips'):
+              print(file.name)
+              print(file.read_text()[:10000])
+          PY
       - uses: actions/upload-artifact@v7
         if: always()
         with:
