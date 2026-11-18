@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { prepareCompaction, type CompactionSettings } from "@earendil-works/pi-agent-core";
+import { prepareCompaction, type CompactionSettings } from "../runtime/pi-compaction.js";
 import { SessionManager } from "../runtime/local-session-manager.js";
 import {
   findFirstKeptEntryId,

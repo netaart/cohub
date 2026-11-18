@@ -1,4 +1,5 @@
-import type { AgentMessage, Entry } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Entry } from "./pi-compaction.js";
 import type { ContextCompactionScope } from "@cohub/protocol/model";
 
 type CompactionPreparationLike = {

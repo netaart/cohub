@@ -17,8 +17,8 @@ import { openAICodexResponsesApi } from "@earendil-works/pi-ai/api/openai-codex-
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { piMessagesApi } from "@earendil-works/pi-ai/api/pi-messages.lazy";
-import { withGeminiThinkingLevel } from "./gemini-thinking-level.js";
 import { withImageInputs, type ImageInputOptions } from "./image-content.js";
+import { withoutMessageThreads } from "./message-threads.js";
 import { withRequestProfiles } from "./request-profile/index.js";
 
 /** Auth + catalog surface shared by completion registries. */
@@ -29,11 +29,11 @@ export type PiModelAuthSource = {
 };
 
 const PI_API_STREAMS = {
-  "anthropic-messages": anthropicMessagesApi(),
+  "anthropic-messages": withoutMessageThreads(anthropicMessagesApi()),
   "azure-openai-responses": azureOpenAIResponsesApi(),
   "bedrock-converse-stream": bedrockConverseStreamApi(),
-  "google-generative-ai": withGeminiThinkingLevel(googleGenerativeAIApi()),
-  "google-vertex": withGeminiThinkingLevel(googleVertexApi()),
+  "google-generative-ai": googleGenerativeAIApi(),
+  "google-vertex": googleVertexApi(),
   "mistral-conversations": mistralConversationsApi(),
   "openai-codex-responses": openAICodexResponsesApi(),
   "openai-completions": openAICompletionsApi(),

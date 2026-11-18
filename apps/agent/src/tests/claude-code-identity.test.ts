@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  Type,
   createAssistantMessageEventStream,
   normalizeContext,
   type Api,
@@ -11,6 +10,7 @@ import {
   type ProviderStreams,
   type ToolCall,
 } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { applyRequestProfile, withRequestProfiles } from "@cohub/model-runtime/request-profile";
 import {
   CLAUDE_CODE_BETA,

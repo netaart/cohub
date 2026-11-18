@@ -1,13 +1,15 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Api, AssistantMessage, Message, Model, Models, ToolCall, Usage } from "@earendil-works/pi-ai";
 import {
-  BACKGROUND_CONTEXT,
   compact,
+  computeFileLists,
   convertToLlm,
+  EMPTY_HISTORY_TEXT,
+  formatFileOperations,
   generateSummaryWithUsage,
   serializeConversation,
-  withAbortSignal,
-  type AgentMessage,
-} from "@earendil-works/pi-agent-core";
-import type { Api, AssistantMessage, Message, Model, Models, ToolCall, Usage } from "@earendil-works/pi-ai";
+  type SummaryRequestKind,
+} from "./pi-compaction.js";
 import { IMAGE_URL_MIME_TYPE } from "@cohub/protocol/core";
 import { isContextOverflowFailure, isRetryableProviderError } from "./provider-errors.js";
 import { getTokenRatio, observeTokenRatio, parseOverflowTokens } from "./token-calibration.js";
@@ -18,7 +20,7 @@ type CompactResultValue = Extract<Awaited<ReturnType<typeof compact>>, { ok: tru
 
 type ProviderCallStats = { total: number; succeeded: number; failed: number };
 
-type RequestKind = "history" | "prefix";
+type RequestKind = SummaryRequestKind;
 
 export type SummaryStats = {
   requests: number;
@@ -61,8 +63,6 @@ const OUTPUT_CHARS_PER_TOKEN = 5;
 const MIN_FOLD_RESERVE_TOKENS = 512;
 // Unfolding repeats only after an overflow tightened the budget.
 const MAX_SUMMARY_UNFOLDS = MAX_SHRINKS + 1;
-// pi's split-turn summary starts with this when it was given no history messages.
-const PI_EMPTY_HISTORY_TEXT = "No prior history.";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -268,23 +268,6 @@ function addUsage(a: Usage | undefined, b: Usage | undefined): Usage | undefined
   };
 }
 
-function fileLists(fileOps: CompactionPreparation["fileOps"]) {
-  const modified = new Set([...fileOps.edited, ...fileOps.written]);
-  return {
-    readFiles: [...fileOps.read].filter((file) => !modified.has(file)).sort(),
-    modifiedFiles: [...modified].sort(),
-  };
-}
-
-/** Same tags pi's `compact()` appends, for summaries finished without it. */
-function formatFileLists({ readFiles, modifiedFiles }: ReturnType<typeof fileLists>) {
-  const sections = [
-    ...(readFiles.length ? [`<read-files>\n${readFiles.join("\n")}\n</read-files>`] : []),
-    ...(modifiedFiles.length ? [`<modified-files>\n${modifiedFiles.join("\n")}\n</modified-files>`] : []),
-  ];
-  return sections.length ? `\n\n${sections.join("\n\n")}` : "";
-}
-
 const inputTokensOf = (usage: Usage | undefined) => (usage ? usage.input + usage.cacheRead + usage.cacheWrite : 0);
 
 function sum(values: readonly number[], start: number, end: number) {
@@ -315,7 +298,6 @@ export async function summarizeForCompaction(input: {
   abortSignal?: AbortSignal;
 }): Promise<SummaryOutcome> {
   const { preparation, model, abortSignal } = input;
-  const context = abortSignal ? withAbortSignal(abortSignal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT;
   const providerCalls: ProviderCallStats = { total: 0, succeeded: 0, failed: 0 };
   let lastResponse: AssistantMessage | undefined;
   // Transient provider errors are retried per call, so a split turn never replays
@@ -410,14 +392,15 @@ export async function summarizeForCompaction(input: {
 
   for (;;) {
     if (cursor >= sequence.length) {
+      const files = computeFileLists(preparation.fileOps);
       return done({
         ok: true,
         value: {
-          summary: withOmitted(running ?? PI_EMPTY_HISTORY_TEXT) + formatFileLists(fileLists(preparation.fileOps)),
+          summary: withOmitted(running ?? EMPTY_HISTORY_TEXT) + formatFileOperations(files.readFiles, files.modifiedFiles),
           tokensBefore: preparation.tokensBefore,
           usage,
           retainedTail: preparation.retainedTail,
-          details: fileLists(preparation.fileOps),
+          details: files,
         },
       });
     }
@@ -502,17 +485,13 @@ export async function summarizeForCompaction(input: {
         },
         models,
         model,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        context,
+        { signal: abortSignal },
       );
       if (result.ok) {
         let summary = result.value.summary;
         // pi drops previousSummary when a split turn has no history messages left.
-        if (chunk.length === 0 && tail.length > 0 && running && summary.startsWith(PI_EMPTY_HISTORY_TEXT)) {
-          summary = running + summary.slice(PI_EMPTY_HISTORY_TEXT.length);
+        if (chunk.length === 0 && tail.length > 0 && running && summary.startsWith(EMPTY_HISTORY_TEXT)) {
+          summary = running + summary.slice(EMPTY_HISTORY_TEXT.length);
         }
         if (tail.length === 0 && stats.shrinks === 0) {
           ratio = observeTokenRatio("summary", model, estimateTokens(requestChars.history - PROMPT_OVERHEAD_CHARS), inputTokensOf(result.value.usage)) ?? ratio;
@@ -523,19 +502,14 @@ export async function summarizeForCompaction(input: {
         });
       }
       failure = result.error.message;
-      if (failure.startsWith("Turn prefix")) failedKind = "prefix";
+      failedKind = result.error.request;
     } else {
       const result = await generateSummaryWithUsage(
         chunk,
         models,
         model,
         Math.max(MIN_FOLD_RESERVE_TOKENS, Math.min(reserveTokens, Math.floor(fullBudget / 2 / OUTPUT_CHARS_PER_TOKEN / 0.8))),
-        undefined,
-        running,
-        undefined,
-        undefined,
-        undefined,
-        context,
+        { previousSummary: running, signal: abortSignal },
       );
       if (result.ok) {
         running = result.value.text;

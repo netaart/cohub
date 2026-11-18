@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_COMPACTION_SETTINGS, type AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { DEFAULT_COMPACTION_SETTINGS } from "../runtime/pi-compaction.js";
 import type { Models } from "@earendil-works/pi-ai";
 import { outlineOmittedMessages, projectForSummary, summarizeForCompaction } from "../runtime/compaction-summary.js";
 import { getContextTokenBudget, parseOverflowTokens, resetTokenRatios } from "../runtime/token-calibration.js";

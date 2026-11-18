@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import test from "node:test";
-import { Type, type Context } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { resolveRuntimeModelsConfig, type ModelsConfig } from "@cohub/infra/config-runtime/models";
 import { CohubModelRegistry } from "../runtime/model-registry.js";
 import { createModelsFromRegistry, streamSimpleWithModels } from "../runtime/pi-models-adapter.js";
@@ -54,7 +55,7 @@ const VOLATILE_HEADERS = /^(x-stainless-(os|arch|runtime-version|package-version
 function normalizeHeaders(headers: Headers): Record<string, string> {
   const entries = [...headers.entries()]
     .filter(([name]) => !VOLATILE_HEADERS.test(name))
-    .map(([name, value]): [string, string] => [name, name === "user-agent" ? value.replace(/^pi \(.*\)$/, "pi (<host>)") : value]);
+    .map(([name, value]): [string, string] => [name, name === "user-agent" ? value.replace(/^pi\/\S+ \(.*\)$/, "pi/<version> (<host>)") : value]);
   return Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)));
 }
 

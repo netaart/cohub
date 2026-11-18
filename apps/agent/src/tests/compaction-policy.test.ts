@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { DEFAULT_COMPACTION_SETTINGS, shouldCompact } from "@earendil-works/pi-agent-core";
+import { DEFAULT_COMPACTION_SETTINGS, shouldCompact } from "../runtime/pi-compaction.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { estimateProxyContextTokens, FLAT_IMAGE_TOKEN_ESTIMATE, resolveReserveTokens } from "../runtime/compaction-policy.js";
 

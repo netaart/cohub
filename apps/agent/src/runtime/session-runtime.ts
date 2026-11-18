@@ -21,6 +21,7 @@ import type { ImageToTextConfig } from "@cohub/infra/config-runtime/model-tasks"
 import { ModelUnavailableError } from "@cohub/core/sessions";
 import { prepareAgentImagesForModel } from "./image-to-text.js";
 import { OMITTED_IMAGE_TEXT } from "./compaction-policy.js";
+import { COMPACTION_SUMMARY_PREFIX, COMPACTION_SUMMARY_SUFFIX } from "./agent-messages.js";
 import type { SpaceModListItem } from "@cohub/core/space-mods";
 import {
   EMPTY_TOOL_CALL_LOOP_GUARD_STATE,
@@ -62,8 +63,6 @@ const AGENT_RETRY_MAX_RETRIES = 2;
 const AGENT_RETRY_BASE_DELAY_MS = 1000;
 const LLM_REQUEST_MAX_BYTES = 30 * 1024 * 1024;
 
-const COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
-const COMPACTION_SUMMARY_SUFFIX = "\n</summary>";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 function hasAssistantContent(message: AssistantMessage): boolean {

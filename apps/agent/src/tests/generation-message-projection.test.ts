@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { estimateContextTokens } from "@earendil-works/pi-agent-core";
+import { estimateContextTokens } from "../runtime/pi-compaction.js";
 import { projectGenerationSessionMessage } from "../generation-message-projection.js";
 
 const createdAt = new Date("2026-08-18T00:00:00.000Z");
