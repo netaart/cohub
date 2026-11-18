@@ -2,7 +2,11 @@ import AppKit
 import CohubCore
 import os
 import ServiceManagement
+#if APP_STORE
+import CohubAppleAuth
+#else
 import Sparkle
+#endif
 import WebKit
 
 @MainActor
@@ -16,7 +20,18 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var remembersClosedTabs = true
     private var service: HostService?
     private(set) var workspaceFiles: WorkspaceFiles?
+    #if APP_STORE
+    private var signingIn = false
+    private lazy var authConfig = AuthConfig(
+        endpoint: URL(string: "https://auth.neta.art/")!,
+        appId: "kpwepos08jz70jy20d3hg",
+        redirectURI: URL(string: config.origin.origin + "/mobile/auth/callback")!,
+        apiResource: "https://api.talesofai"
+    )
+    private lazy var auth = AuthSession(store: KeychainStore(service: Bundle.main.bundleIdentifier ?? "live.cohub.ios"), config: authConfig)
+    #else
     private var updater: SPUStandardUpdaterController?
+    #endif
     private var notifications: Notifications?
     private var launched = false
     private var pendingPaths: [String] = []
@@ -31,16 +46,20 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let bundled = Bundle.main.bundleIdentifier != nil
+        var updateMenu: NSMenuItem?
+        #if !APP_STORE
         let updates = ["SUFeedURL", "SUPublicEDKey"].allSatisfy { (Bundle.main.object(forInfoDictionaryKey: $0) as? String)?.isEmpty == false }
         if bundled, updates {
             updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         }
-        if bundled { notifications = Notifications { [weak self] path in self?.open(path: path) } }
-        NSApp.mainMenu = MainMenu.build(updater: updater.map { updater in
+        updateMenu = updater.map { updater in
             let item = NSMenuItem(title: L("Check for Updates…"), action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
             item.target = updater
             return item
-        })
+        }
+        #endif
+        if bundled { notifications = Notifications { [weak self] path in self?.open(path: path) } }
+        NSApp.mainMenu = MainMenu.build(updater: updateMenu, commandLineTool: config.commandLineTool != nil)
         NSWindow.allowsAutomaticWindowTabbing = false
         startService()
         if ShellState.globalShortcut { shortcut.set(enabled: true) }
@@ -70,7 +89,7 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            let folder = url.isFileURL ? WebOrigin.newSpacePath(folder: url.path) : nil
+            let folder = url.isFileURL && config.service != nil ? WebOrigin.newSpacePath(folder: url.path) : nil
             guard let path = folder ?? WebOrigin.path(fromDeepLink: url, scheme: config.urlScheme) ?? config.origin.path(of: url) else { continue }
             if launched { open(path: path) } else { pendingPaths.append(path) }
         }
@@ -305,6 +324,31 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
                 return try await tab.pickFolder(service: service, handedOver: params["path"]?.string)
             }
         }
+        #if APP_STORE
+        capabilities += [C.authToken, C.authSignIn, C.authSession]
+        handlers[M.authGetAccessToken] = { [auth] params in
+            await auth.accessToken(forceRefresh: params["forceRefresh"]?.bool == true).map(JSON.string) ?? .null
+        }
+        handlers[M.authGetSessionVersion] = { [auth] _ in .number(Double(await auth.version)) }
+        handlers[M.authGetSession] = { [auth] _ in
+            let signedIn = await auth.signedIn
+            let subject = await auth.subject
+            return ["authenticated": .bool(signedIn), "userUuid": .null, "subject": subject.map(JSON.string) ?? .null, "email": .null]
+        }
+        handlers[M.authSignIn] = { [weak self, weak tab] params in
+            self?.signIn(tab: tab, path: params["redirectPath"]?.string)
+            return true
+        }
+        handlers[M.authSignOut] = { [weak self] _ in
+            guard let self else { return false }
+            UserDefaults.standard.set(true, forKey: "forceLogin")
+            await self.auth.signOut()
+            ShellState.shortcuts = []
+            for tab in self.allTabs { tab.emit(HostProtocol.Event.authSignedOut, nil) }
+            self.accountChanged(nil)
+            return true
+        }
+        #endif
         return BridgeRouter(
             platform: "macos",
             hostId: ShellState.hostId,
@@ -320,6 +364,28 @@ final class Shell: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             send: { [weak tab] text in tab?.deliver(text) }
         )
     }
+
+    #if APP_STORE
+    private func signIn(tab: ShellTab?, path: String?) {
+        guard !signingIn, let window = tab?.window?.window else { return }
+        signingIn = true
+        Task {
+            defer { signingIn = false }
+            do {
+                guard let grant = try await SignIn(anchor: window).run(authConfig, forceLogin: UserDefaults.standard.bool(forKey: "forceLogin")) else { return }
+                try await auth.completeSignIn(code: grant.code, verifier: grant.verifier)
+                UserDefaults.standard.set(false, forKey: "forceLogin")
+                for other in allTabs where other !== tab { other.refresh() }
+                tab?.load(path.flatMap { WebOrigin.isInAppPath($0) ? $0 : nil } ?? "/")
+            } catch {
+                log.error("Sign-in failed: \(error.localizedDescription, privacy: .public)")
+                let alert = NSAlert()
+                alert.messageText = L("Couldn't complete sign-in. Please try again.")
+                await alert.beginSheetModal(for: window)
+            }
+        }
+    }
+    #endif
 
     private func startService() {
         guard let launch = config.service else {

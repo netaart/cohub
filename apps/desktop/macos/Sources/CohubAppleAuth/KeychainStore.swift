@@ -2,18 +2,20 @@ import CohubCore
 import Foundation
 import Security
 
-struct KeychainStore: CredentialStore {
+public struct KeychainStore: CredentialStore {
     struct Failure: Error {
         let status: OSStatus
     }
 
     let service: String
 
+    public init(service: String) { self.service = service }
+
     private var query: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "session"]
     }
 
-    func read() throws -> Credentials? {
+    public func read() throws -> Credentials? {
         var request = query
         request[kSecReturnData as String] = true
         request[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -24,7 +26,7 @@ struct KeychainStore: CredentialStore {
         return try JSONDecoder().decode(Credentials.self, from: data)
     }
 
-    func write(_ credentials: Credentials?) throws {
+    public func write(_ credentials: Credentials?) throws {
         guard let credentials else {
             let status = SecItemDelete(query as CFDictionary)
             guard status == errSecSuccess || status == errSecItemNotFound else { throw Failure(status: status) }

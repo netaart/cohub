@@ -43,6 +43,7 @@ targets:
     platform: iOS
     sources:
       - Cohub
+      - ../desktop/macos/Sources/CohubAppleAuth
     dependencies:
       - target: CohubCore
         embed: false
@@ -55,6 +56,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Cohub/Cohub.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        PROVISIONING_PROFILE_SPECIFIER: $(COHUB_APP_PROFILE)
 
   CohubShare:
     type: app-extension
@@ -71,6 +73,7 @@ targets:
         INFOPLIST_FILE: CohubShare/Info.plist
         CODE_SIGN_ENTITLEMENTS: CohubShare/CohubShare.entitlements
         APPLICATION_EXTENSION_API_ONLY: YES
+        PROVISIONING_PROFILE_SPECIFIER: $(COHUB_SHARE_PROFILE)
 
 schemes:
   Cohub:

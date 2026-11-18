@@ -4,10 +4,11 @@ import CryptoKit
 import Foundation
 
 @MainActor
-final class SignIn: NSObject, ASWebAuthenticationPresentationContextProviding {
-    struct Grant {
-        let code: String
-        let verifier: String
+@available(macOS 14.4, *)
+public final class SignIn: NSObject, ASWebAuthenticationPresentationContextProviding {
+    public struct Grant {
+        public let code: String
+        public let verifier: String
     }
 
     struct Failure: Error {
@@ -18,11 +19,11 @@ final class SignIn: NSObject, ASWebAuthenticationPresentationContextProviding {
     private var session: ASWebAuthenticationSession?
     private var continuation: CheckedContinuation<URL?, Error>?
 
-    init(anchor: ASPresentationAnchor) {
+    public init(anchor: ASPresentationAnchor) {
         self.anchor = anchor
     }
 
-    func run(_ config: AuthConfig, forceLogin: Bool) async throws -> Grant? {
+    public func run(_ config: AuthConfig, forceLogin: Bool) async throws -> Grant? {
         let verifier = Self.random(bytes: 32), state = Self.random(bytes: 16)
         let challenge = Self.base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
         guard let url = AuthorizationRequest.url(config: config, challenge: challenge, state: state, forceLogin: forceLogin),
@@ -56,7 +57,7 @@ final class SignIn: NSObject, ASWebAuthenticationPresentationContextProviding {
         }
     }
 
-    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+    nonisolated public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         MainActor.assumeIsolated { anchor }
     }
 
