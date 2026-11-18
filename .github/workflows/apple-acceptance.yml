@@ -84,19 +84,23 @@ jobs:
           swift "$RUNNER_TEMP/display.swift"
       - name: Prepare simulator
         if: matrix.device != 'mac'
+        timeout-minutes: 8
         env:
           DEVICE: ${{ matrix.device }}
         run: |
           xcodegen generate --spec apps/ios/acceptance.yml
+          open -a Simulator
           python3 - <<'PY'
           import json, os, subprocess
-          devices = json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json']))['devices']
+          print('Reading available simulators',flush=True)
+          devices = json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json'],timeout=120))['devices']
           prefix = 'iPhone' if os.environ['DEVICE'] == 'iphone' else 'iPad'
           candidates = [d for runtime, rows in devices.items() if 'iOS' in runtime for d in rows if d['name'].startswith(prefix)]
           candidates.sort(key=lambda d: ('Pro Max' in d['name'] if prefix == 'iPhone' else '13-inch' in d['name'], d['name']), reverse=True)
           chosen = candidates[0]
-          subprocess.run(['xcrun','simctl','boot',chosen['udid']],check=True)
-          subprocess.run(['xcrun','simctl','bootstatus',chosen['udid'],'-b'],check=True)
+          print('Booting:',chosen['name'],flush=True)
+          if chosen['state'] != 'Booted':subprocess.run(['xcrun','simctl','boot',chosen['udid']],check=True,timeout=90)
+          subprocess.run(['xcrun','simctl','bootstatus',chosen['udid'],'-b'],check=True,timeout=240)
           subprocess.run(['xcrun','simctl','status_bar',chosen['udid'],'override','--time','9:41','--batteryState','charged','--batteryLevel','100'],check=True)
           with open(os.environ['GITHUB_ENV'],'a') as f: f.write('SIMULATOR_ID='+chosen['udid']+'\n')
           print('Simulator:',chosen['name'])
