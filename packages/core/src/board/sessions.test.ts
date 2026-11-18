@@ -49,14 +49,14 @@ async function session(input: { space?: string; title?: string | null; latest?: 
 
 async function board(document = {}, space = spaceId) {
 	const db = await dbPromise;
-	const { boardId } = await createBoard(db, { spaceId: space, title: "Sessions", actorId, document });
+	const { boardId } = await createBoard(db, { spaceId: space, title: "Sessions", actorId, document, sessionViewer: () => true });
 	return { db, boardId };
 }
 
 const card = (sessionId: string, extra: Record<string, unknown> = {}) => ({ type: "session", props: { sessionId, ...extra } });
 
-async function snapshot(db: BoardDatabase, boardId: string, id: string, space = spaceId): Promise<BoardSessionSnapshot> {
-	const item = (await readBoard(db, { spaceId: space, boardId, read: { items: [id] } })).items?.[id];
+async function snapshot(db: BoardDatabase, boardId: string, id: string): Promise<BoardSessionSnapshot> {
+	const item = (await readBoard(db, { boardId, read: { items: [id] } })).items?.[id];
 	assert.equal(item?.type, "session");
 	return (item.props as { snapshot: BoardSessionSnapshot }).snapshot;
 }
@@ -69,18 +69,19 @@ test("session cards take their snapshot from the Session, never from the writer"
 		excerpt: "Added jitter to api-client.ts.",
 		source: "cli",
 		activityAt: "2026-10-27T08:00:00.000Z",
+		spaceId,
 	});
 
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { s: { props: { snapshot: { title: "forged", issue: "failed" } } } } } } });
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { s: { props: { snapshot: { title: "forged", issue: "failed" } } } } } } });
 	assert.equal((await snapshot(db, boardId, "s")).title, "Fix reconnect storm");
 	assert.equal((await snapshot(db, boardId, "s")).issue, undefined);
 });
 
-test("sync refreshes stale cards on every Board in the Space, once", async () => {
+test("sync refreshes stale cards on every Board showing the Session, in any Space, once", async () => {
 	const id = await session();
 	const first = await board({ items: { a: card(id), b: card(id) } });
 	const second = await board({ items: { c: card(id) } });
-	const elsewhere = await board({ items: { d: card(id, { snapshot: { title: "Copied" } }) } }, otherSpaceId);
+	const elsewhere = await board({ items: { d: card(id) } }, otherSpaceId);
 	const { db } = first;
 
 	assert.deepEqual(await syncSessionBoards(db, { sessionId: id, actorId: "system", source: { via: "session" } }), []);
@@ -94,13 +95,29 @@ test("sync refreshes stale cards on every Board in the Space, once", async () =>
 		errorMessage: "Sandbox exited with code 137",
 	});
 	const writes = await syncSessionBoards(db, { sessionId: id, actorId: "system", source: { via: "session" } });
-	assert.deepEqual(writes.map((write) => write.boardId).sort(), [first.boardId, second.boardId].sort());
+	assert.deepEqual(
+		writes.map((write) => `${write.spaceId}:${write.boardId}`).sort(),
+		[`${spaceId}:${first.boardId}`, `${spaceId}:${second.boardId}`, `${otherSpaceId}:${elsewhere.boardId}`].sort(),
+	);
 	assert.deepEqual(writes.find((write) => write.boardId === first.boardId)?.outcome.result.changed.items.sort(), ["a", "b"]);
 	const current = await snapshot(db, second.boardId, "c");
 	assert.equal(current.title, "Reconnect with jitter");
 	assert.equal(current.issue, "failed");
 	assert.equal(current.errorExcerpt, "Sandbox exited with code 137");
-	assert.equal((await snapshot(db, elsewhere.boardId, "d", otherSpaceId)).title, "Copied");
+	assert.equal((await snapshot(db, elsewhere.boardId, "d")).title, "Reconnect with jitter");
 
 	assert.deepEqual(await syncSessionBoards(db, { sessionId: id, actorId: "system", source: { via: "session" } }), []);
+});
+
+test("a copy written without a viewer, as a fork restores it, stays as copied", async () => {
+	const id = await session();
+	const db = await dbPromise;
+	const document = { items: { d: card(id, { snapshot: { title: "Copied", spaceId } }) } };
+	const { boardId } = await createBoard(db, { spaceId: otherSpaceId, title: "Fork", actorId: "system", document });
+	assert.deepEqual(await snapshot(db, boardId, "d"), { title: "Copied" });
+
+	await db.update(spaceSessions).set({ title: "Renamed" }).where(eq(spaceSessions.id, id));
+	const writes = await syncSessionBoards(db, { sessionId: id, actorId: "system" });
+	assert.ok(writes.every((write) => write.boardId !== boardId));
+	assert.equal((await snapshot(db, boardId, "d")).title, "Copied");
 });

@@ -105,9 +105,10 @@ changes; call `clearFileUrlCache()` on sign-out.
 
 ## Boards
 
-A Board is one document of `board` settings, `items` and `animations`. Bind
-one with `space.board(boardId)`; every write is a JSON Merge Patch (`null`
-deletes, unmentioned fields stay):
+A Board is one document of `board` settings, `items` and `animations`. It lives
+in the Space that created it, its home, and any Space can link it with a `.board`
+file. Bind one with `client.boards.byId(boardId)`; every write is a JSON Merge
+Patch (`null` deletes, unmentioned fields stay):
 
 ```ts
 const created = await space.boards.create({
@@ -120,7 +121,7 @@ const created = await space.boards.create({
   },
 });
 
-const board = space.board(created.id); // or await space.boards.open("boards/plan.board")
+const board = client.boards.byId(created.id); // or await space.boards.open("boards/plan.board")
 const { items, version } = await board.get({ only: ["items"] });
 await board.apply({ items: { goal: { props: { text: "Shipped" } } } }, { baseVersion: version });
 
@@ -140,7 +141,7 @@ const { version, document, changed } = await board.sync(cached); // cached: { ve
 
 Task Items show a run by its `taskRunId`. Write only the id; the server fills
 the display snapshot from the run and rewrites it when the run finishes, on
-every Board in the Space that shows it. Lay a run's results out as media with
+every Board that shows it, whichever Space the run is in. Lay a run's results out as media with
 `createTaskResultItems`; each result keeps an `origin` leading back to the run.
 
 ```ts

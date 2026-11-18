@@ -1,40 +1,20 @@
 import { and, eq } from "drizzle-orm";
-import { type Context, Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
+import { Hono } from "hono";
 import {
   BOARD_EXTENSION,
-  BoardApplyInputSchema,
   BoardCreateInputSchema,
-  BoardHistoryInputSchema,
-  BoardPlaybackCommandSchema,
-  BoardReadInputSchema,
   isBoardPath,
   serializeBoardManifest,
 } from "@cohub/protocol";
 import { boards } from "@cohub/db";
-import {
-  applyBoard,
-  applyBoardPlayback,
-  createBoard,
-  readBoard,
-  readBoardHistory,
-  restoreBoardVersion,
-  BOARD_TASK_MUTATION_PREFIX,
-  type BoardApplyOutcome,
-  type BoardWriteInput,
-} from "@cohub/core/board";
+import { createBoard, readBoard } from "@cohub/core/board";
+import { boardViewers } from "../../board-access.js";
 import { buildBoardCreateIdentity } from "../../board-create-idempotency.js";
-import {
-  boardErrorBody as errorBody,
-  boardErrorResponse as errorResponse,
-  boardInputDiagnostics as zodDiagnostics,
-} from "../../board-error.js";
-import { dispatchBoardChanged, dispatchBoardPlaybackChanged } from "../../board-events.js";
+import { boardInputDiagnostics as zodDiagnostics } from "../../board-error.js";
 import { db } from "../../db/index.js";
-import { type AuthUser, authzDenied, getOptionalAuth, requireValidId, useAuth } from "../../lib/middleware.js";
+import { authzDenied, requireValidId, useAuth } from "../../lib/middleware.js";
 import { getRequestSource } from "../../lib/request-source.js";
-import { resolveRequestActor } from "../../lib/request-actor.js";
-import { hasPermission, isTaskRunOwner } from "../../permissions.js";
+import { hasPermission } from "../../permissions.js";
 import {
   assertSafeRelativePath,
   createSpaceFileExclusive,
@@ -44,15 +24,9 @@ import {
 } from "../../space-fs-backend.js";
 import { buildFileMutationChanges } from "../../space-fs-change.js";
 import { dispatchSpaceFsChanged } from "../../space-events.js";
-
-export const BOARD_WRITE_MAX_BYTES = 32 * 1024 * 1024;
+import boardsRouter, { boardWriteBodyLimit, failBoard } from "../boards.route.js";
 
 const router = new Hono();
-const boardNotFound = { code: "BOARD_NOT_FOUND", message: "Board not found." };
-const writeBodyLimit = bodyLimit({
-  maxSize: BOARD_WRITE_MAX_BYTES,
-  onError: (c) => c.json({ code: "BOARD_INPUT_TOO_LARGE", message: `Board input exceeds ${BOARD_WRITE_MAX_BYTES} bytes.` }, 413),
-});
 
 type BoardManifestWrite = Awaited<ReturnType<typeof createSpaceFileExclusive>>;
 
@@ -83,39 +57,12 @@ async function createOrReuseBoardManifest(
   }
 }
 
-function fail(c: Context, error: unknown) {
-  const response = errorResponse(error);
-  return c.json(errorBody(response), response.status as never);
-}
-
-function viewers(user: AuthUser, spaceId: string): Pick<BoardWriteInput, "taskViewer" | "sessionViewer"> {
-  return {
-    taskViewer: async ({ sessionId, userUuid }) =>
-      isTaskRunOwner(user, { userUuid }) || hasPermission(user, "taskrun.view", { spaceId, sessionId: sessionId ?? undefined }),
-    sessionViewer: ({ id }) => hasPermission(user, "session.view", { spaceId, sessionId: id }),
-  };
-}
-
 async function boardExists(spaceId: string, boardId: string) {
   const [row] = await db.select({ id: boards.id }).from(boards).where(and(eq(boards.id, boardId), eq(boards.spaceId, spaceId))).limit(1);
   return Boolean(row);
 }
 
-function boardParams(c: { req: { param: (name: string) => string | undefined } }) {
-  const spaceId = c.req.param("id");
-  const boardId = c.req.param("boardId");
-  return spaceId && boardId && requireValidId(spaceId) && requireValidId(boardId) ? { spaceId, boardId } : null;
-}
-
-async function announce(c: Context, spaceId: string, boardId: string, actorId: string, outcome: BoardApplyOutcome, source: ReturnType<typeof getRequestSource>) {
-  if (!outcome.written) return;
-  await dispatchBoardChanged({ spaceId, boardId, actorId, actor: await resolveRequestActor(c), outcome, source }).catch(() => undefined);
-  if (outcome.written.playback !== undefined) {
-    await dispatchBoardPlaybackChanged({ spaceId, boardId, playback: outcome.written.playback }).catch(() => undefined);
-  }
-}
-
-router.post("/", writeBodyLimit, async (c) => {
+router.post("/", boardWriteBodyLimit, async (c) => {
   const user = useAuth(c);
   if (user instanceof Response) return user;
   const spaceId = c.req.param("id");
@@ -139,7 +86,7 @@ router.post("/", writeBodyLimit, async (c) => {
   const boardId = identity?.boardId ?? crypto.randomUUID();
   const source = getRequestSource(c);
 
-  if (identity && (await boardExists(spaceId, boardId))) return c.json(await readBoard(db, { spaceId, boardId }));
+  if (identity && (await boardExists(spaceId, boardId))) return c.json(await readBoard(db, { boardId }));
 
   let written: BoardManifestWrite | null = null;
   try {
@@ -154,15 +101,15 @@ router.post("/", writeBodyLimit, async (c) => {
       boardId,
       title,
       actorId: user.uuid,
-      ...viewers(user, spaceId),
+      ...boardViewers(user),
       ...(body.document ? { document: body.document } : {}),
       ...(identity ? { mutationId: identity.transactionId } : {}),
       source,
     });
   } catch (error) {
-    if (identity && (await boardExists(spaceId, boardId))) return c.json(await readBoard(db, { spaceId, boardId }));
+    if (identity && (await boardExists(spaceId, boardId))) return c.json(await readBoard(db, { boardId }));
     if (written?.created) await deleteSpaceNode(spaceId, written.path).catch(() => undefined);
-    return fail(c, error);
+    return failBoard(c, error);
   }
 
   await dispatchSpaceFsChanged(spaceId, {
@@ -172,116 +119,12 @@ router.post("/", writeBodyLimit, async (c) => {
   }, written.executedBy === "sandbox" ? { skipHooks: true } : undefined).catch(() => undefined);
 
   try {
-    return c.json(await readBoard(db, { spaceId, boardId }));
+    return c.json(await readBoard(db, { boardId }));
   } catch (error) {
-    return fail(c, error);
+    return failBoard(c, error);
   }
 });
 
-router.get("/:boardId", async (c) => {
-  const params = boardParams(c);
-  if (!params) return c.json(boardNotFound, 404);
-  if (!(await hasPermission(getOptionalAuth(c), "file.view.filtered", { spaceId: params.spaceId }))) return authzDenied(c);
-  const list = (name: string) => c.req.query(name)?.split(",").map((value) => value.trim()).filter(Boolean);
-  const rect = list("rect")?.map(Number);
-  const limit = c.req.query("limit");
-  const only = list("only");
-  const items = list("items");
-  const animations = list("animations");
-  const within = c.req.query("within");
-  const cursor = c.req.query("cursor");
-  const since = c.req.query("since");
-  const read = BoardReadInputSchema.safeParse({
-    ...(only ? { only } : {}),
-    ...(rect ? { rect: { x: rect[0], y: rect[1], width: rect[2], height: rect[3] } } : {}),
-    ...(within ? { within } : {}),
-    ...(items ? { items } : {}),
-    ...(animations ? { animations } : {}),
-    ...(limit !== undefined ? { limit: Number(limit) } : {}),
-    ...(cursor ? { cursor } : {}),
-    ...(since !== undefined ? { since: Number(since) } : {}),
-  });
-  if (!read.success) return c.json({ code: "INVALID_BOARD_INPUT", message: "Board query is invalid.", diagnostics: zodDiagnostics(read.error, "query") }, 400);
-  try {
-    return c.json(await readBoard(db, { ...params, read: read.data }));
-  } catch (error) {
-    return fail(c, error);
-  }
-});
-
-router.post("/:boardId/apply", writeBodyLimit, async (c) => {
-  const user = useAuth(c);
-  if (user instanceof Response) return user;
-  const params = boardParams(c);
-  if (!params) return c.json(boardNotFound, 404);
-  if (!(await hasPermission(user, "file.edit", { spaceId: params.spaceId }))) return authzDenied(c);
-  const parsed = BoardApplyInputSchema.safeParse(await c.req.json<unknown>().catch(() => null));
-  if (!parsed.success) return c.json({ code: "INVALID_PATCH", message: "Board patch is invalid.", diagnostics: zodDiagnostics(parsed.error) }, 400);
-  if (parsed.data.mutationId?.startsWith(BOARD_TASK_MUTATION_PREFIX)) {
-    return c.json({ code: "INVALID_PATCH", message: `mutationId must not start with "${BOARD_TASK_MUTATION_PREFIX}".` }, 400);
-  }
-  const source = getRequestSource(c);
-  try {
-    const outcome = await applyBoard(db, { ...params, actorId: user.uuid, apply: parsed.data, source, ...viewers(user, params.spaceId) });
-    await announce(c, params.spaceId, params.boardId, user.uuid, outcome, source);
-    return c.json(outcome.result);
-  } catch (error) {
-    return fail(c, error);
-  }
-});
-
-router.get("/:boardId/history", async (c) => {
-  const params = boardParams(c);
-  if (!params) return c.json(boardNotFound, 404);
-  if (!(await hasPermission(getOptionalAuth(c), "file.view.filtered", { spaceId: params.spaceId }))) return authzDenied(c);
-  const before = c.req.query("before");
-  const limit = c.req.query("limit");
-  const history = BoardHistoryInputSchema.safeParse({
-    ...(before !== undefined ? { before: Number(before) } : {}),
-    ...(limit !== undefined ? { limit: Number(limit) } : {}),
-  });
-  if (!history.success) return c.json({ code: "INVALID_BOARD_INPUT", message: "Board history query is invalid.", diagnostics: zodDiagnostics(history.error, "query") }, 400);
-  try {
-    return c.json(await readBoardHistory(db, { ...params, history: history.data }));
-  } catch (error) {
-    return fail(c, error);
-  }
-});
-
-router.post("/:boardId/restore", async (c) => {
-  const user = useAuth(c);
-  if (user instanceof Response) return user;
-  const params = boardParams(c);
-  if (!params) return c.json(boardNotFound, 404);
-  if (!(await hasPermission(user, "file.edit", { spaceId: params.spaceId }))) return authzDenied(c);
-  const body = (await c.req.json<{ version?: unknown }>().catch(() => null)) ?? {};
-  const version = Number(body.version);
-  if (!Number.isInteger(version) || version < 0) return c.json({ code: "INVALID_BOARD_INPUT", message: "version must be a non-negative integer." }, 400);
-  const source = getRequestSource(c);
-  try {
-    const outcome = await restoreBoardVersion(db, { ...params, actorId: user.uuid, version, source });
-    await announce(c, params.spaceId, params.boardId, user.uuid, outcome, source);
-    return c.json(outcome.result);
-  } catch (error) {
-    return fail(c, error);
-  }
-});
-
-router.post("/:boardId/playback", async (c) => {
-  const user = useAuth(c);
-  if (user instanceof Response) return user;
-  const params = boardParams(c);
-  if (!params) return c.json(boardNotFound, 404);
-  if (!(await hasPermission(user, "file.edit", { spaceId: params.spaceId }))) return authzDenied(c);
-  const parsed = BoardPlaybackCommandSchema.safeParse(await c.req.json<unknown>().catch(() => null));
-  if (!parsed.success) return c.json({ code: "INVALID_BOARD_INPUT", message: "Board playback command is invalid.", diagnostics: zodDiagnostics(parsed.error) }, 400);
-  try {
-    const playback = await applyBoardPlayback(db, { ...params, command: parsed.data });
-    await dispatchBoardPlaybackChanged({ ...params, playback }).catch(() => undefined);
-    return c.json({ playback });
-  } catch (error) {
-    return fail(c, error);
-  }
-});
+router.route("/", boardsRouter);
 
 export default router;

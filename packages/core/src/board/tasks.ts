@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { boardItems, boards, taskRuns } from "@cohub/db";
 import {
 	type Actor,
@@ -20,12 +20,13 @@ import {
 	taskRunToBoardTaskSnapshot,
 	withObservedArtifactFacts,
 } from "@cohub/protocol";
+import { systemMayShow, unclaimed } from "./system-access.js";
 import type { BoardApplyOutcome, BoardDatabase } from "./store.js";
 
 type Executor = Parameters<Parameters<BoardDatabase["transaction"]>[0]>[0] | BoardDatabase;
 type JsonRecord = Record<string, unknown>;
 
-export type BoardTaskRunAccess = { id: string; sessionId: string | null; userUuid: string | null };
+export type BoardTaskRunAccess = { id: string; spaceId: string; sessionId: string | null; userUuid: string | null };
 
 export type BoardTaskViewer = (run: BoardTaskRunAccess) => boolean | Promise<boolean>;
 
@@ -74,16 +75,17 @@ const snapshotResult = sql`CASE WHEN jsonb_typeof(${taskRuns.result}->'output') 
 )) END`;
 
 /**
- * The runs a write shows, from the Board's Space only. The share lock orders a
- * write against the run finishing: the write either reads the final state, or
- * commits first so the completion sync sees its item.
+ * The runs a write shows, from any Space. The share lock orders a write against
+ * the run finishing: the write either reads the final state, or commits first so
+ * the completion sync sees its item.
  */
-async function loadTaskRuns(tx: Executor, spaceId: string, ids: Iterable<string>): Promise<Map<string, TaskRow>> {
+async function loadTaskRuns(tx: Executor, ids: Iterable<string>): Promise<Map<string, TaskRow>> {
 	const wanted = [...new Set(ids)].filter((id) => isUuid(id));
 	if (!wanted.length) return new Map();
 	const rows = await tx
 		.select({
 			id: taskRuns.id,
+			spaceId: sql<string>`${taskRuns.spaceId}`,
 			sessionId: taskRuns.sessionId,
 			userUuid: taskRuns.userUuid,
 			taskType: taskRuns.taskType,
@@ -95,7 +97,7 @@ async function loadTaskRuns(tx: Executor, spaceId: string, ids: Iterable<string>
 			result: snapshotResult,
 		})
 		.from(taskRuns)
-		.where(and(eq(taskRuns.spaceId, spaceId), sql`${taskRuns.id} = ANY(${sql.param(wanted)}::uuid[])`))
+		.where(and(isNotNull(taskRuns.spaceId), sql`${taskRuns.id} = ANY(${sql.param(wanted)}::uuid[])`))
 		.for("share");
 	return new Map(rows.map((row) => [row.id, row as TaskRow]));
 }
@@ -109,6 +111,7 @@ function snapshotOf(row: TaskRow): BoardTaskSnapshot {
 		errorMessage: row.errorMessage,
 		startedAt: row.startedAt?.toISOString() ?? null,
 		updatedAt: (row.updatedAt ?? new Date()).toISOString(),
+		spaceId: row.spaceId,
 	});
 }
 
@@ -119,7 +122,7 @@ export type BoardTaskResolution =
 export async function resolveBoardTaskSnapshots(
 	tx: Executor,
 	input: {
-		spaceId: string;
+		home: string;
 		patch: BoardPatch;
 		current: (id: string) => BoardItem | undefined;
 		viewer?: BoardTaskViewer;
@@ -158,13 +161,13 @@ export async function resolveBoardTaskSnapshots(
 	}
 	if (!candidates.length) return { ok: true, patch: input.patch };
 
-	const runs = await loadTaskRuns(tx, input.spaceId, candidates.map((candidate) => candidate.taskRunId));
+	const runs = await loadTaskRuns(tx, candidates.map((candidate) => candidate.taskRunId));
 	const decisions = new Map<string, Promise<boolean>>();
-	const visible = (run: TaskRow) => {
-		if (!input.viewer) return Promise.resolve(true);
+	const visible = (run: TaskRow, previous: BoardTaskSnapshot | undefined) => {
+		if (!input.viewer) return Promise.resolve(systemMayShow(input.home, run.spaceId, previous));
 		let decision = decisions.get(run.id);
 		if (!decision) {
-			decision = Promise.resolve(input.viewer({ id: run.id, sessionId: run.sessionId, userUuid: run.userUuid }));
+			decision = Promise.resolve(input.viewer({ id: run.id, spaceId: run.spaceId, sessionId: run.sessionId, userUuid: run.userUuid }));
 			decisions.set(run.id, decision);
 		}
 		return decision;
@@ -180,13 +183,14 @@ export async function resolveBoardTaskSnapshots(
 		};
 		if (!run) {
 			if (supplied !== undefined) continue;
-			if (!candidate.previous) return { ok: false, status: 404, code: "TASK_NOT_FOUND", path, message: `Task ${candidate.taskRunId} is not in this Space; write its snapshot to show it as is.` };
+			if (!candidate.previous) return { ok: false, status: 404, code: "TASK_NOT_FOUND", path, message: `Task ${candidate.taskRunId} does not exist; write its snapshot to show it as is.` };
 			keep();
 			continue;
 		}
-		if (!(await visible(run))) {
-			if (!candidate.previous) return { ok: false, status: 403, code: "TASK_FORBIDDEN", path, message: `You cannot view task ${candidate.taskRunId}.` };
-			keep();
+		if (!(await visible(run, candidate.previous))) {
+			if (candidate.previous) keep();
+			else if (!input.viewer && isRecord(supplied)) items[candidate.id] = { ...candidate.value, props: { ...props, snapshot: unclaimed(supplied) } };
+			else return { ok: false, status: 403, code: "TASK_FORBIDDEN", path, message: `You cannot view task ${candidate.taskRunId}.` };
 			continue;
 		}
 		const observed = supplied === undefined ? undefined : BoardTaskSnapshotSchema.safeParse(mergePatch(candidate.previous ?? {}, supplied));
@@ -214,8 +218,8 @@ function withArtifactSizes(snapshot: BoardTaskSnapshot, sizes: BoardTaskArtifact
 	return { ...snapshot, artifacts };
 }
 
-export async function readUnsizedTaskVisual(db: Executor, input: { spaceId: string; taskRunId: string }) {
-	const run = (await loadTaskRuns(db, input.spaceId, [input.taskRunId])).get(input.taskRunId);
+export async function readUnsizedTaskVisual(db: Executor, input: { taskRunId: string }) {
+	const run = (await loadTaskRuns(db, [input.taskRunId])).get(input.taskRunId);
 	const artifact = run && visual(snapshotOf(run));
 	return artifact && !(artifact.naturalWidth && artifact.naturalHeight) ? { type: artifact.type, url: artifact.url } : null;
 }
@@ -232,16 +236,16 @@ function fittedSize(item: BoardItem | undefined, before: BoardTaskSnapshot | und
 	return size && (size.width !== item.size.width || size.height !== item.size.height) ? size : undefined;
 }
 
-export async function listTaskBoards(db: Executor, input: { spaceId: string; taskRunId: string; limit?: number }) {
+export async function listTaskBoards(db: Executor, input: { taskRunId: string; limit?: number }) {
 	const rows = await db
-		.select({ id: boards.id, title: boards.title, items: sql<string[]>`array_agg(${boardItems.id} ORDER BY ${boardItems.id})` })
+		.select({ id: boards.id, spaceId: boards.spaceId, title: boards.title, items: sql<string[]>`array_agg(${boardItems.id} ORDER BY ${boardItems.id})` })
 		.from(boardItems)
 		.innerJoin(boards, eq(boards.id, boardItems.boardId))
-		.where(and(eq(boardItems.type, "task"), eq(boardItems.src, boardTaskSource(input.taskRunId)), eq(boards.spaceId, input.spaceId)))
+		.where(and(eq(boardItems.type, "task"), eq(boardItems.src, boardTaskSource(input.taskRunId))))
 		.groupBy(boards.id)
 		.orderBy(sql`max(${boards.updatedAt}) DESC`, boards.id)
 		.limit(input.limit ?? BOARD_TASK_SYNC_LIMIT);
-	return rows.map((row) => ({ boardId: row.id, title: row.title, itemIds: row.items }));
+	return rows.map((row) => ({ boardId: row.id, spaceId: row.spaceId, title: row.title, itemIds: row.items }));
 }
 
 export function boardChangedEvent(input: {

@@ -1,5 +1,5 @@
 import { context, trace, SpanStatusCode } from "@opentelemetry/api";
-import { boards, apps } from "@cohub/db";
+import { apps } from "@cohub/db";
 import { AppRoomStore } from "@cohub/infra/app-room";
 import { createLogger } from "@cohub/infra/logging";
 import { getTracer, extractTrace } from "@cohub/infra/tracing/propagator";
@@ -12,6 +12,7 @@ import { Hono } from "hono";
 import { bindAllActiveSpaceChannelsToGateway, handleInboundEvent, resolveChannelInboundForEventWithLock } from "../../channels.js";
 import type { Permission } from "@cohub/core/permissions";
 import { hasPermission } from "../../permissions.js";
+import { type BoardAccess, canAccessBoard, readBoardSpace } from "../../board-access.js";
 import { ensureInternalRequest, getOptionalAuth, getAppSessionPrincipal, requireValidId, useAccountPrincipal } from "../../lib/middleware.js";
 import { getSpaceById } from "../../space-sessions.js";
 import { canViewPublishedApp } from "../../app-access.js";
@@ -162,12 +163,8 @@ router.post("/authorize-realtime-rooms", async (c) => {
     const normalizedRoom = `${parsed.kind}:${parsed.id}`;
 
     if (parsed.kind === "board") {
-      const [board] = await db
-        .select({ spaceId: boards.spaceId })
-        .from(boards)
-        .where(eq(boards.id, parsed.id))
-        .limit(1);
-      const allowed = board ? await permitted(room, "file.view.filtered", board.spaceId) : false;
+      const spaceId = requireValidId(parsed.id) ? await readBoardSpace(parsed.id) : null;
+      const allowed = spaceId ? await permitted(room, "file.view.filtered", spaceId) : false;
       if (allowed) accepted.push(normalizedRoom);
       else reject(room, allowed, "Missing Board view permission");
       continue;
@@ -274,39 +271,18 @@ router.post("/authorize-board-awareness", async (c) => {
   const user = getOptionalAuth(c);
   if (!user) return c.json({ ok: false, message: "authentication is required" }, 401);
 
-  const body = await c.req.json<{
-    boardId?: string;
-    spaceId?: string;
-    permission?: "view" | "edit";
-  }>().catch(() => null);
+  const body = await c.req.json<{ boardId?: string; permission?: BoardAccess }>().catch(() => null);
   const boardId = typeof body?.boardId === "string" ? body.boardId.trim() : "";
-  const spaceId = typeof body?.spaceId === "string" ? body.spaceId.trim() : "";
   const permission = body?.permission === "edit" ? "edit" : "view";
-  if (!requireValidId(boardId) || !requireValidId(spaceId)) {
-    return c.json({ ok: false, message: "valid boardId and spaceId are required" }, 400);
-  }
+  if (!requireValidId(boardId)) return c.json({ ok: false, message: "a valid boardId is required" }, 400);
 
-  const [board] = await db
-    .select({ spaceId: boards.spaceId })
-    .from(boards)
-    .where(eq(boards.id, boardId))
-    .limit(1);
-  if (!board || board.spaceId !== spaceId) {
-    return c.json({ ok: false, message: "board not found" }, 404);
-  }
-
-  const requiredPermission = permission === "edit" ? "file.edit" : "file.view.filtered";
-  const allowed = await hasPermission(user, requiredPermission, { spaceId }).catch((error) => {
-    logger.warn("[BoardAwareness] failed to authorize update", {
-      boardId,
-      spaceId,
-      permission,
-      userId: user.uuid,
-      error,
-    });
+  const spaceId = await readBoardSpace(boardId);
+  if (!spaceId) return c.json({ ok: false, message: "board not found" }, 404);
+  const allowed = await canAccessBoard(user, spaceId, permission).catch((error) => {
+    logger.warn("[BoardAwareness] failed to authorize update", { boardId, spaceId, permission, userId: user.uuid, error });
     return false;
   });
-  if (!allowed) return c.json({ ok: false, message: `missing ${requiredPermission} permission` }, 403);
+  if (!allowed) return c.json({ ok: false, message: `missing Board ${permission} permission` }, 403);
   return c.json({ ok: true, boardId, spaceId, permission });
 });
 

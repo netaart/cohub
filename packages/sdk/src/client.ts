@@ -14,6 +14,7 @@ import { SpaceClient, SpacesApi, type WebSocketConnectionState } from "./apis/sp
 import { createSpaceFileServices, type SpaceFileServices } from "./apis/space-file-urls.js";
 import { createLocalWorkspaces } from "./local-workspace.js";
 import { TasksApi } from "./apis/tasks.js";
+import { BoardsApi } from "./board/client/index.js";
 import { DesktopCommandsApi } from "./apis/desktop-commands.js";
 import { UserApi } from "./apis/user.js";
 import { UsersApi } from "./apis/users.js";
@@ -68,6 +69,7 @@ export class CohubClient {
   readonly search: SearchApi;
   readonly references: ReferencesApi;
   readonly tasks: TasksApi;
+  readonly boards: BoardsApi;
   readonly cronJobs: CronJobsApi;
   readonly desktop: DesktopCommandsApi;
   readonly invite: PublicInviteApi;
@@ -182,6 +184,7 @@ export class CohubClient {
     this.search = new SearchApi(this.transport);
     this.references = new ReferencesApi(this.transport);
     this.tasks = new TasksApi(this.transport, this.websocketClient);
+    this.boards = new BoardsApi(this.transport, this.websocketClient);
     this.cronJobs = new CronJobsApi(this.transport);
     this.desktop = new DesktopCommandsApi(this.transport);
     this.invite = new PublicInviteApi(this.transport);

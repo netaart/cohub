@@ -330,7 +330,7 @@ export {
   spaceFileSaveSource,
 } from "./apis/spaces.js";
 export { clearFileUrlCache } from "./apis/space-file-url-store.js";
-export { BoardClient, claimBoardCaches } from "./board/client/index.js";
+export { BoardClient, BoardsApi, claimBoardCaches } from "./board/client/index.js";
 export type {
   BoardAwarenessUpdatedEvent,
   BoardChangedEvent,

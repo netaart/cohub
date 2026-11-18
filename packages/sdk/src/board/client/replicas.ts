@@ -17,26 +17,24 @@ export type BoardReplicaLeaseOptions = {
 
 export type BoardReplicaLease = { replica: BoardReplica; release(): void };
 
-type Entry = { replica: BoardReplica; boardKey: string; refs: number };
+type Entry = { replica: BoardReplica; boardId: string; refs: number };
 
 const shared = new WeakMap<HttpTransport, Map<string, Entry>>();
 
 export function leaseBoardReplica(
 	http: HttpTransport,
-	spaceId: string,
 	boardId: string,
 	remote: BoardRemote,
 	options: BoardReplicaLeaseOptions,
 ): BoardReplicaLease {
 	const entries = shared.get(http) ?? new Map<string, Entry>();
 	shared.set(http, entries);
-	const boardKey = `${spaceId}:${boardId}`;
-	const key = JSON.stringify([boardKey, options.readonly === true, options.userKey ?? null]);
+	const key = JSON.stringify([boardId, options.readonly === true, options.userKey ?? null]);
 	let entry = entries.get(key);
 	if (!entry) {
 		const storage =
 			options.userKey !== undefined && globalThis.indexedDB
-				? createIndexedDbBoardReplicaStorage({ userKey: options.userKey, spaceId, boardId })
+				? createIndexedDbBoardReplicaStorage({ userKey: options.userKey, boardId })
 				: undefined;
 		const replica = createBoardReplica({
 			remote,
@@ -44,7 +42,7 @@ export function leaseBoardReplica(
 			...(options.readonly ? { readonly: true } : {}),
 			...(options.clientId ? { clientId: options.clientId } : {}),
 		});
-		entry = { replica, boardKey, refs: 0 };
+		entry = { replica, boardId, refs: 0 };
 		entries.set(key, entry);
 		void replica.start();
 	}
@@ -64,9 +62,8 @@ export function leaseBoardReplica(
 	};
 }
 
-export function shareBoardPlayback(http: HttpTransport, spaceId: string, boardId: string, playback: BoardPlaybackSnapshot | null) {
-	const boardKey = `${spaceId}:${boardId}`;
-	for (const entry of shared.get(http)?.values() ?? []) if (entry.boardKey === boardKey) entry.replica.receivePlayback(playback);
+export function shareBoardPlayback(http: HttpTransport, boardId: string, playback: BoardPlaybackSnapshot | null) {
+	for (const entry of shared.get(http)?.values() ?? []) if (entry.boardId === boardId) entry.replica.receivePlayback(playback);
 }
 
 const OWNER_KEY = "cohub:board-cache-owner";

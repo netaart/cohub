@@ -58,6 +58,7 @@ export type BoardSessionRecord = {
 	createdAt: string | null;
 	activeTurn?: unknown;
 	lastTurnIssue?: BoardSessionTurnIssue | null;
+	spaceId?: string | null;
 };
 
 export function sessionToBoardSessionSnapshot(
@@ -77,5 +78,6 @@ export function sessionToBoardSessionSnapshot(
 		...(issue ? { issue } : {}),
 		...(errorExcerpt ? { errorExcerpt } : {}),
 		...(activityAt ? { activityAt } : {}),
+		...(session.spaceId ? { spaceId: session.spaceId } : {}),
 	};
 }

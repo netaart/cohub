@@ -11,7 +11,7 @@ import { boardDocument } from "./fixtures.js";
 let databases = 0;
 const scoped = () => {
 	databases += 1;
-	const storage = createIndexedDbBoardReplicaStorage({ userKey: "u", spaceId: "s", boardId: "b" }, { database: `board-test-${databases}` });
+	const storage = createIndexedDbBoardReplicaStorage({ userKey: "u", boardId: "b" }, { database: `board-test-${databases}` });
 	return { storage };
 };
 
@@ -30,7 +30,7 @@ function remote(options: { offline?: boolean } = {}) {
 			async get(): Promise<BoardReadResult> {
 				reads.push(version);
 				const { board, items, animations } = document;
-				return { id: "b", title: "B", version, updatedAt: null, board, items, animations, playback: null };
+				return { id: "b", spaceId: "s", title: "B", version, updatedAt: null, board, items, animations, playback: null };
 			},
 			async apply(patch: Parameters<typeof boardDocument>[0], { mutationId }: { mutationId: string }) {
 				if (options.offline) throw new Error("offline");
@@ -117,4 +117,27 @@ test("a stalled cache does not hold back the server document", async () => {
 	assert.ok(note);
 	assert.equal((note.props as { text?: string }).text, "kept");
 	replica.dispose();
+});
+
+test("upgrading keeps edits not yet sent, under the Board alone", async () => {
+	const database = "board-test-v1";
+	await new Promise<void>((resolve, reject) => {
+		const request = indexedDB.open(database, 1);
+		request.onupgradeneeded = () => {
+			const db = request.result;
+			db.createObjectStore("documents", { keyPath: "board" }).createIndex("user", "userKey");
+			const pending = db.createObjectStore("pending", { keyPath: ["board", "mutationId"] });
+			pending.createIndex("board", "board");
+			pending.createIndex("user", "userKey");
+			const patch = { items: { note: { type: "text" } } };
+			pending.put({ board: JSON.stringify(["u", "s", "b"]), mutationId: "m", userKey: "u", order: 1, patch });
+		};
+		request.onsuccess = () => {
+			request.result.close();
+			resolve();
+		};
+		request.onerror = () => reject(request.error);
+	});
+	const storage = createIndexedDbBoardReplicaStorage({ userKey: "u", boardId: "b" }, { database });
+	assert.deepEqual(await storage.listPending(), [{ mutationId: "m", patch: { items: { note: { type: "text" } } } }]);
 });

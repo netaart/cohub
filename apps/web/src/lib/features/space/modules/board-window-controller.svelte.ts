@@ -32,6 +32,7 @@ type BoardFileResponse =
 export type InlineBoardPanelState = {
 	path: string;
 	boardId: string | null;
+	spaceId: string | null;
 	document: BoardDocument | null;
 	playback: BoardPlaybackSnapshot | null;
 	loading: boolean;
@@ -81,6 +82,7 @@ export function createBoardWindowController(
 		updateBoards(boardId, (board) => ({
 			...board,
 			document: state.document ?? board.document,
+			spaceId: state.spaceId ?? board.spaceId,
 			playback: state.playback,
 			loading: !state.document,
 			saving: state.pending > 0,
@@ -91,9 +93,8 @@ export function createBoardWindowController(
 	function ensureReplica(boardId: string): BoardReplica {
 		const existing = replicas.get(boardId);
 		if (existing) return existing.replica;
-		const { replica, release } = sdk
-			.space(options.getSpaceId())
-			.board(boardId)
+		const { replica, release } = sdk.boards
+			.byId(boardId)
 			.replica({ userKey: loadedCacheUserKey() });
 		const stopState = replica.subscribe((state) =>
 			adoptReplicaState(boardId, state),
@@ -148,6 +149,7 @@ export function createBoardWindowController(
 				? {
 						...item,
 						boardId,
+						spaceId: sibling?.spaceId ?? null,
 						document: sibling?.document ?? null,
 						playback: sibling?.playback ?? null,
 						loading: !sibling?.document,
@@ -173,6 +175,7 @@ export function createBoardWindowController(
 				? {
 						...item,
 						boardId: null,
+						spaceId: null,
 						document: null,
 						playback: null,
 						loading: false,
@@ -236,6 +239,7 @@ export function createBoardWindowController(
 				{
 					path,
 					boardId: null,
+					spaceId: null,
 					document: null,
 					playback: null,
 					loading: true,
@@ -377,7 +381,7 @@ export function createBoardWindowController(
 	}
 
 	function playBoard(boardId: string, command: BoardPlaybackCommand) {
-		return sdk.space(options.getSpaceId()).board(boardId).control(command);
+		return sdk.boards.byId(boardId).control(command);
 	}
 
 	function dispose() {

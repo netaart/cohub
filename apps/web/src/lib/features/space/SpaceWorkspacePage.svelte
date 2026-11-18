@@ -2392,9 +2392,9 @@ async function openInlineBoard(
 	if (filesColumnHidden) previewLayout.setFilesColumnHidden(false);
 	await windowManager.openBoard(path, options);
 }
-async function openTask(taskRunId: string) {
-	if (!spaceId) return;
-	await goto(withCurrentWindow(buildSpaceTaskRoute(spaceId, taskRunId)), {
+async function openTask(taskRunId: string, taskSpaceId = spaceId) {
+	if (!taskSpaceId) return;
+	await goto(withCurrentWindow(buildSpaceTaskRoute(taskSpaceId, taskRunId)), {
 		reset: false,
 	});
 }
@@ -3252,7 +3252,8 @@ const spaceFileDomainProps = $derived.by<
 				...(activeSessionId ? { sessionId: activeSessionId } : {}),
 			},
 		}),
-	onOpenSession: (sessionId) => openSessionTurn(spaceId, sessionId),
+	onOpenSession: (sessionId, sessionSpaceId) =>
+		openSessionTurn(sessionSpaceId, sessionId),
 	onRevealPath: (path) => fileWorkspace.revealPath(path),
 	onJumpToTurn: (sequence) => sessionChat.jumpToTurnAndUpdateUrl(sequence),
 	onOpenTaskBrowser: openTaskBrowser,

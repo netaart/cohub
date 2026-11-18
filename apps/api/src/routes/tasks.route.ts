@@ -19,6 +19,7 @@ import {
 } from "../task-run-privacy.js";
 import { sanitizeTaskRunForList } from "@cohub/protocol/task";
 import { listTaskBoards } from "@cohub/core/board";
+import { canAccessBoard } from "../board-access.js";
 import type { TaskRunBoard } from "@cohub/protocol/task";
 
 const router = new Hono();
@@ -167,10 +168,11 @@ async function taskBoardsForViewer(
   run: { id: string; spaceId: string | null },
 ): Promise<TaskRunBoard[]> {
   if (!run.spaceId) return [];
-  const boards = await listTaskBoards(db, { spaceId: run.spaceId, taskRunId: run.id });
-  if (!boards.length) return [];
-  const titled = await hasPermission(user, "file.view.filtered", { spaceId: run.spaceId });
-  return boards.map(({ boardId, title, itemIds }) => ({ boardId, itemIds, ...(titled ? { title } : {}) }));
+  const boards = await listTaskBoards(db, { taskRunId: run.id });
+  const spaces = [...new Set(boards.map((board) => board.spaceId))];
+  const allowed = await Promise.all(spaces.map((spaceId) => canAccessBoard(user, spaceId, "view")));
+  const viewable = new Set(spaces.filter((_, index) => allowed[index]));
+  return boards.filter((board) => viewable.has(board.spaceId)).map(({ boardId, title, itemIds }) => ({ boardId, title, itemIds }));
 }
 
 router.get("/:taskId", async (c) => {

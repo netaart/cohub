@@ -102,6 +102,7 @@ export type BoardRecord = {
 
 export type BoardReadResult = {
 	id: string;
+	spaceId?: string;
 	title: string;
 	version: number;
 	updatedAt: string | null;

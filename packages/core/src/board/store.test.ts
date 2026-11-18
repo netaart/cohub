@@ -16,7 +16,6 @@ import {
 	type BoardDatabase,
 	captureBoardSnapshots,
 	createBoard,
-	deleteBoard,
 	readBoard,
 	readBoardHistory,
 	restoreBoardVersion,
@@ -49,14 +48,14 @@ test("script attachments and custom content survive storage, patches and history
 		image: { type: "image", props: { src: "asset.png" }, script: { src: "scripts/move.js", params: { speed: 40 } } },
 		custom: { type: "custom", script: { src: "scripts/chart.js", targets: { image: "image" } } },
 	} });
-	const initial = await readBoard(db, { spaceId, boardId });
+	const initial = await readBoard(db, { boardId });
 	assert.equal(BoardScriptSchema.parse(initial.items?.image?.script).params.speed, 40);
 	assert.equal(initial.items?.custom?.type, "custom");
 	assert.equal(BoardScriptSchema.parse(initial.items?.custom?.script).targets.image, "image");
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { image: { script: { params: { speed: 60 } } } } } } });
-	assert.equal(BoardScriptSchema.parse((await readBoard(db, { spaceId, boardId })).items?.image?.script).params.speed, 60);
-	await restoreBoardVersion(db, { spaceId, boardId, actorId, version: initial.version });
-	assert.equal(BoardScriptSchema.parse((await readBoard(db, { spaceId, boardId })).items?.image?.script).params.speed, 40);
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { image: { script: { params: { speed: 60 } } } } } } });
+	assert.equal(BoardScriptSchema.parse((await readBoard(db, { boardId })).items?.image?.script).params.speed, 60);
+	await restoreBoardVersion(db, { boardId, actorId, version: initial.version });
+	assert.equal(BoardScriptSchema.parse((await readBoard(db, { boardId })).items?.image?.script).params.speed, 40);
 });
 
 test("create, read and merge-patch items with derived bounds", async () => {
@@ -67,7 +66,7 @@ test("create, read and merge-patch items with derived bounds", async () => {
 			t: { type: "text", props: { text: "Hello" } },
 		},
 	});
-	const read = await readBoard(db, { spaceId, boardId });
+	const read = await readBoard(db, { boardId });
 	assert.equal(read.version, 1);
 	assert.deepEqual(read.items?.s, {
 		parent: "f",
@@ -82,10 +81,10 @@ test("create, read and merge-patch items with derived bounds", async () => {
 		type: "shape",
 		props: { geometry: "rectangle", text: "", fontSize: 20, align: "center" },
 	});
-	const inRect = await readBoard(db, { spaceId, boardId, read: { rect: { x: 105, y: 115, width: 10, height: 10 } } });
+	const inRect = await readBoard(db, { boardId, read: { rect: { x: 105, y: 115, width: 10, height: 10 } } });
 	assert.deepEqual(Object.keys(inRect.items ?? {}).sort(), ["f", "s"]);
 
-	const outcome = await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { f: { position: { x: 1000 } } } } } });
+	const outcome = await applyBoard(db, { boardId, actorId, apply: { patch: { items: { f: { position: { x: 1000 } } } } } });
 	assert.equal(outcome.result.status, "applied");
 	assert.equal(outcome.result.version, 2);
 	assert.deepEqual(outcome.written?.after.items?.f, {
@@ -100,11 +99,11 @@ test("create, read and merge-patch items with derived bounds", async () => {
 		type: "frame",
 		props: { label: "", clip: true },
 	});
-	const moved = await readBoard(db, { spaceId, boardId, read: { rect: { x: 1005, y: 115, width: 10, height: 10 } } });
+	const moved = await readBoard(db, { boardId, read: { rect: { x: 1005, y: 115, width: 10, height: 10 } } });
 	assert.deepEqual(Object.keys(moved.items ?? {}).sort(), ["f", "s"]);
-	const within = await readBoard(db, { spaceId, boardId, read: { within: "f" } });
+	const within = await readBoard(db, { boardId, read: { within: "f" } });
 	assert.deepEqual(Object.keys(within.items ?? {}).sort(), ["f", "s"]);
-	const page = await readBoard(db, { spaceId, boardId, read: { limit: 2 } });
+	const page = await readBoard(db, { boardId, read: { limit: 2 } });
 	assert.equal(Object.keys(page.items ?? {}).length, 2);
 	assert.ok(page.next);
 });
@@ -119,16 +118,16 @@ test("references, cascade, dry runs, idempotency and version checks", async () =
 		animations: { intro: { duration: 1000, tracks: { fade: { target: "a", property: "opacity", keyframes: [{ at: 0, value: 0 }, { at: 1000, value: 1 }] } } } },
 	});
 	await assert.rejects(
-		applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { a: null } } } }),
+		applyBoard(db, { boardId, actorId, apply: { patch: { items: { a: null } } } }),
 		(error: unknown) => error instanceof BoardError && error.status === 409 && error.code === "ITEM_REFERENCED",
 	);
-	const dry = await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { a: null } }, cascade: true, dryRun: true } });
+	const dry = await applyBoard(db, { boardId, actorId, apply: { patch: { items: { a: null } }, cascade: true, dryRun: true } });
 	assert.equal(dry.result.status, "validated");
-	assert.equal((await readBoard(db, { spaceId, boardId })).version, 1);
+	assert.equal((await readBoard(db, { boardId })).version, 1);
 
-	const deleted = await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { a: null } }, cascade: true, mutationId: "m1" } });
+	const deleted = await applyBoard(db, { boardId, actorId, apply: { patch: { items: { a: null } }, cascade: true, mutationId: "m1" } });
 	assert.equal(deleted.result.status, "applied");
-	const after = await readBoard(db, { spaceId, boardId });
+	const after = await readBoard(db, { boardId });
 	assert.equal(after.items?.a, undefined);
 	assert.deepEqual(after.items?.l?.props, {
 		start: { x: 100, y: 50 },
@@ -143,39 +142,39 @@ test("references, cascade, dry runs, idempotency and version checks", async () =
 	});
 	assert.deepEqual(after.animations?.intro?.tracks, {});
 
-	const replayed = await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { a: null } }, cascade: true, mutationId: "m1" } });
+	const replayed = await applyBoard(db, { boardId, actorId, apply: { patch: { items: { a: null } }, cascade: true, mutationId: "m1" } });
 	assert.equal(replayed.result.replayed, true);
 	assert.equal(replayed.result.version, deleted.result.version);
 
 	await assert.rejects(
-		applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { b: { position: { x: 1 } } } }, baseVersion: 1 } }),
+		applyBoard(db, { boardId, actorId, apply: { patch: { items: { b: { position: { x: 1 } } } }, baseVersion: 1 } }),
 		(error: unknown) => error instanceof BoardError && error.code === "VERSION_CONFLICT",
 	);
-	const unchanged = await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { b: { position: { x: 300 } } } } } });
+	const unchanged = await applyBoard(db, { boardId, actorId, apply: { patch: { items: { b: { position: { x: 300 } } } } } });
 	assert.equal(unchanged.result.status, "unchanged");
 });
 
 test("a cursor cannot page a spatial read", async () => {
 	const { db, boardId } = await board({ items: { f: { type: "frame", size: { width: 400, height: 300 } }, s: { type: "shape", parent: "f" } } });
 	await assert.rejects(
-		readBoard(db, { spaceId, boardId, read: { rect: { x: 0, y: 0, width: 10, height: 10 }, cursor: "f" } }),
+		readBoard(db, { boardId, read: { rect: { x: 0, y: 0, width: 10, height: 10 }, cursor: "f" } }),
 		(error: unknown) => error instanceof Error && /cursor pages by id/.test(error.message),
 	);
 });
 
 test("replace makes the document equal to the input", async () => {
 	const { db, boardId } = await board({ items: { a: { type: "shape" }, b: { type: "text", props: { text: "x" } } } });
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { b: { type: "text", props: { text: "y" } }, c: { type: "frame" } } }, replace: true } });
-	const read = await readBoard(db, { spaceId, boardId });
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { b: { type: "text", props: { text: "y" } }, c: { type: "frame" } } }, replace: true } });
+	const read = await readBoard(db, { boardId });
 	assert.deepEqual(Object.keys(read.items ?? {}).sort(), ["b", "c"]);
 	assert.equal(read.items?.b?.type === "text" && (read.items.b.props as { text: string }).text, "y");
 });
 
 test("history records before/after and restores an earlier version", async () => {
 	const { db, boardId } = await board({ items: { t: { type: "text", props: { text: "one" } } } });
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { t: { props: { text: "two" } }, u: { type: "shape" } } } } });
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { t: null } } } });
-	const history = await readBoardHistory(db, { spaceId, boardId });
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { t: { props: { text: "two" } }, u: { type: "shape" } } } } });
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { t: null } } } });
+	const history = await readBoardHistory(db, { boardId });
 	assert.deepEqual(history.transactions.map((entry) => entry.version), [3, 2, 1]);
 	assert.deepEqual(history.transactions[0]?.before?.items?.t, {
 		z: 1,
@@ -188,8 +187,8 @@ test("history records before/after and restores an earlier version", async () =>
 		type: "text",
 		props: { text: "two", fontSize: 24, fontWeight: 500, font: "sans", align: "left", lineHeight: 1.3333333333333333, reveal: 1, caret: false },
 	});
-	await restoreBoardVersion(db, { spaceId, boardId, actorId, version: 1 });
-	const read = await readBoard(db, { spaceId, boardId });
+	await restoreBoardVersion(db, { boardId, actorId, version: 1 });
+	const read = await readBoard(db, { boardId });
 	assert.deepEqual(Object.keys(read.items ?? {}), ["t"]);
 	assert.equal(read.items?.t?.type === "text" && (read.items.t.props as { text: string }).text, "one");
 });
@@ -199,7 +198,7 @@ test("since reads only the changes, and the whole Board when they are unavailabl
 		items: { t: { type: "text", props: { text: "one" } }, gone: { type: "shape" } },
 		animations: { intro: { duration: 1000, tracks: { fade: { target: "t", property: "opacity", keyframes: [{ at: 0, value: 0 }] } } } },
 	});
-	const read = (since: number) => readBoard(db, { spaceId, boardId, read: { since } });
+	const read = (since: number) => readBoard(db, { boardId, read: { since } });
 	const document = (result: BoardReadResult) => {
 		const parsed = parseBoardDocument(result);
 		assert.ok(parsed.ok);
@@ -208,12 +207,12 @@ test("since reads only the changes, and the whole Board when they are unavailabl
 	const base = document(await read(0));
 	assert.deepEqual(await read(1).then((result) => result.changes), []);
 
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { t: { props: { text: "two" } }, gone: null }, animations: { intro: null } } } });
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { board: { background: { pattern: "dots" } }, animations: { intro: { duration: 500, tracks: { rise: { target: "t", property: "rotation", keyframes: [{ at: 0, value: 0 }] } } } } } } });
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { t: { props: { text: "two" } }, gone: null }, animations: { intro: null } } } });
+	await applyBoard(db, { boardId, actorId, apply: { patch: { board: { background: { pattern: "dots" } }, animations: { intro: { duration: 500, tracks: { rise: { target: "t", property: "rotation", keyframes: [{ at: 0, value: 0 }] } } } } } } });
 	const incremental = await read(1);
 	assert.equal(incremental.items, undefined);
 	assert.equal(incremental.changes?.length, 2);
-	assert.deepEqual(incremental.changes.reduce(applyBoardDelta, base), document(await readBoard(db, { spaceId, boardId })));
+	assert.deepEqual(incremental.changes.reduce(applyBoardDelta, base), document(await readBoard(db, { boardId })));
 
 	assert.ok((await read(4)).items);
 	await db.update(boardTransactions).set({ changes: null }).where(and(eq(boardTransactions.boardId, boardId), eq(boardTransactions.resultVersion, 2)));
@@ -223,8 +222,8 @@ test("since reads only the changes, and the whole Board when they are unavailabl
 	assert.deepEqual(await read(2).then((result) => result.changes?.length), 1);
 	await db.update(boardTransactions).set({ changes: { after: { items: { t: { type: "retired" } } } } }).where(and(eq(boardTransactions.boardId, boardId), eq(boardTransactions.resultVersion, 3)));
 	assert.equal((await read(2)).changes, undefined);
-	await assert.rejects(readBoard(db, { spaceId, boardId, read: { since: 1, only: ["items"] } }));
-	assert.ok((await readBoard(db, { spaceId, boardId, read: { since: 3, only: undefined } })).changes);
+	await assert.rejects(readBoard(db, { boardId, read: { since: 1, only: ["items"] } }));
+	assert.ok((await readBoard(db, { boardId, read: { since: 3, only: undefined } })).changes);
 });
 
 test("shared playback follows the clock and stops when its timeline changes", async () => {
@@ -232,13 +231,13 @@ test("shared playback follows the clock and stops when its timeline changes", as
 		items: { t: { type: "text", props: { text: "x" } } },
 		animations: { intro: { duration: 1000, markers: [{ at: 500, pause: true }], tracks: { fade: { target: "t", property: "opacity", keyframes: [{ at: 0, value: 0 }] } } } },
 	});
-	const playing = await applyBoardPlayback(db, { spaceId, boardId, command: { commandId: "p1", type: "play", animationId: "intro" } });
+	const playing = await applyBoardPlayback(db, { boardId, command: { commandId: "p1", type: "play", animationId: "intro" } });
 	assert.equal(playing?.status, "playing");
-	const again = await applyBoardPlayback(db, { spaceId, boardId, command: { commandId: "p1", type: "play", animationId: "intro" } });
+	const again = await applyBoardPlayback(db, { boardId, command: { commandId: "p1", type: "play", animationId: "intro" } });
 	assert.equal(again?.playbackId, playing?.playbackId);
-	const outcome = await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { animations: { intro: { duration: 2000 } } } } });
+	const outcome = await applyBoard(db, { boardId, actorId, apply: { patch: { animations: { intro: { duration: 2000 } } } } });
 	assert.equal(outcome.written?.playback?.status, "stopped");
-	const stopped = await applyBoardPlayback(db, { spaceId, boardId, command: { commandId: "p2", type: "stop" } });
+	const stopped = await applyBoardPlayback(db, { boardId, command: { commandId: "p2", type: "stop" } });
 	assert.equal(stopped, null);
 });
 
@@ -261,7 +260,7 @@ test("a checkpoint reads the Board as saved, also through a fork alias", async (
 	]);
 	const [snapshot] = await captureBoardSnapshots(db, { spaceId, boardIds: [boardId] });
 	await db.insert(boardCheckpoints).values({ checkpointId: saved, sourceBoardId: boardId, sourceSpaceId: spaceId, sourceVersion: 1, snapshot: snapshot as unknown as Record<string, unknown> });
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { t: { props: { text: "later" } } } } } });
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { t: { props: { text: "later" } } } } } });
 	for (const [space, checkpointId] of [[spaceId, saved], [forkSpaceId, alias]] as const) {
 		const read = await readBoardCheckpoint(db, { spaceId: space, checkpointId, boardId });
 		assert.equal(read.version, 1);
@@ -274,9 +273,9 @@ test("a checkpoint reads the Board as saved, also through a fork alias", async (
 test("non-geometric edits persist and agree with history and realtime", async () => {
 	const { db, boardId } = await board({ items: { s: { type: "shape" } } });
 	for (const patch of [{ style: { fill: "blue" } }, { opacity: 0.5 }, { locked: true }, { z: 42 }, { metadata: { original: "retained" } }]) {
-		const outcome = await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { s: patch } } } });
-		const read = await readBoard(db, { spaceId, boardId });
-		const history = await readBoardHistory(db, { spaceId, boardId });
+		const outcome = await applyBoard(db, { boardId, actorId, apply: { patch: { items: { s: patch } } } });
+		const read = await readBoard(db, { boardId });
+		const history = await readBoardHistory(db, { boardId });
 		assert.deepEqual(read.items?.s, outcome.written?.after.items?.s);
 		assert.deepEqual(read.items?.s, history.transactions[0]?.after?.items?.s);
 		assert.equal(read.version, outcome.result.version);
@@ -291,11 +290,11 @@ test("partial arrow and track patches load inherited references", async () => {
 			focus: { target: "camera", property: "focus", keyframes: [{ at: 0, value: "b" }] },
 		} } },
 	});
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { arrow: { props: { label: "updated" } } } } } });
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { animations: { intro: { tracks: {
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { arrow: { props: { label: "updated" } } } } } });
+	await applyBoard(db, { boardId, actorId, apply: { patch: { animations: { intro: { tracks: {
 		fade: { keyframes: [{ at: 0, value: 0.5 }] }, focus: { interpolation: "step" },
 	} } } } } });
-	const parsed = parseBoardDocument(await readBoard(db, { spaceId, boardId }));
+	const parsed = parseBoardDocument(await readBoard(db, { boardId }));
 	assert.ok(parsed.ok);
 	assert.equal(parsed.document.items.arrow?.type === "arrow" && parsed.document.items.arrow.props.label, "updated");
 	assert.equal(parsed.document.animations.intro?.tracks.fade?.keyframes[0]?.value, 0.5);
@@ -304,23 +303,17 @@ test("partial arrow and track patches load inherited references", async () => {
 test("item and animation ids cannot collide across separate writes", async () => {
 	const { db, boardId } = await board({ items: { a: { type: "shape" } }, animations: { intro: { duration: 1000 } } });
 	for (const patch of [{ items: { intro: { type: "shape" } } }, { animations: { a: { duration: 1000 } } }]) {
-		await assert.rejects(applyBoard(db, { spaceId, boardId, actorId, apply: { patch } }), (error: unknown) => error instanceof BoardError && error.code === "ID_CONFLICT");
+		await assert.rejects(applyBoard(db, { boardId, actorId, apply: { patch } }), (error: unknown) => error instanceof BoardError && error.code === "ID_CONFLICT");
 	}
-});
-
-test("deleting through another space cannot remove board data", async () => {
-	const { db, boardId } = await board({ items: { a: { type: "shape" } } });
-	await assert.rejects(deleteBoard(db, { spaceId: "22222222-2222-4222-8222-222222222222", boardId }), (error: unknown) => error instanceof BoardError && error.status === 404);
-	assert.ok((await readBoard(db, { spaceId, boardId })).items?.a);
 });
 
 test("type changes preload existing dependents before validation", async () => {
 	const { db, boardId } = await board({ items: { f: { type: "frame" }, child: { type: "text", parent: "f" } }, animations: {
 		reveal: { duration: 1000, tracks: { text: { target: "child", property: "props.reveal", keyframes: [{ at: 0, value: 0 }] } } },
 	} });
-	await assert.rejects(applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { f: { type: "shape" } } } } }), /not a frame/);
-	await assert.rejects(applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { child: { type: "frame" } } } } }), /props.reveal/);
-	assert.ok(parseBoardDocument(await readBoard(db, { spaceId, boardId })).ok);
+	await assert.rejects(applyBoard(db, { boardId, actorId, apply: { patch: { items: { f: { type: "shape" } } } } }), /not a frame/);
+	await assert.rejects(applyBoard(db, { boardId, actorId, apply: { patch: { items: { child: { type: "frame" } } } } }), /props.reveal/);
+	assert.ok(parseBoardDocument(await readBoard(db, { boardId })).ok);
 });
 
 test("deleting a bound target loads the arrow's own ancestors", async () => {
@@ -329,8 +322,8 @@ test("deleting a bound target loads the arrow's own ancestors", async () => {
 		a: { type: "shape" }, b: { type: "shape", position: { x: 1000, y: 0 } },
 		arrow: { type: "arrow", parent: "f", props: { start: { item: "a" }, end: { item: "b" } } },
 	} });
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { a: null } }, cascade: true } });
-	const parsed = parseBoardDocument(await readBoard(db, { spaceId, boardId }));
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { a: null } }, cascade: true } });
+	const parsed = parseBoardDocument(await readBoard(db, { boardId }));
 	assert.ok(parsed.ok);
 	assert.equal(parsed.document.items.arrow?.parent, "f");
 });
@@ -341,8 +334,8 @@ test("moving a bound target refreshes arrow bounds in its parent's world space",
 		a: { type: "shape", size: { width: 50, height: 50 } },
 		arrow: { type: "arrow", parent: "f", props: { start: { item: "a" }, end: { x: 100, y: 100 } } },
 	} });
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { a: { position: { x: 200 } } } } } });
-	const nearby = await readBoard(db, { spaceId, boardId, read: { rect: { x: 498, y: 298, width: 4, height: 4 } } });
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { a: { position: { x: 200 } } } } } });
+	const nearby = await readBoard(db, { boardId, read: { rect: { x: 498, y: 298, width: 4, height: 4 } } });
 	assert.ok(nearby.items?.arrow);
 });
 
@@ -353,13 +346,13 @@ test("attached items follow their target in spatial reads and stay put when it g
 		panel: { type: "frame", position: { x: 0, y: 100 }, size: { width: 100, height: 100 }, attach: { item: "hero" } },
 		note: { type: "shape", parent: "panel", position: { x: 10, y: 10 }, size: { width: 20, height: 20 } },
 	} });
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { hero: { position: { x: 1000, y: 0 } } } } } });
-	const nearby = await readBoard(db, { spaceId, boardId, read: { rect: { x: 1058, y: 58, width: 4, height: 4 } } });
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { hero: { position: { x: 1000, y: 0 } } } } } });
+	const nearby = await readBoard(db, { boardId, read: { rect: { x: 1058, y: 58, width: 4, height: 4 } } });
 	assert.ok(nearby.items?.tag);
-	const inside = await readBoard(db, { spaceId, boardId, read: { rect: { x: 1068, y: 168, width: 4, height: 4 } } });
+	const inside = await readBoard(db, { boardId, read: { rect: { x: 1068, y: 168, width: 4, height: 4 } } });
 	assert.ok(inside.items?.note);
-	await applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { hero: null } } } });
-	const parsed = parseBoardDocument(await readBoard(db, { spaceId, boardId }));
+	await applyBoard(db, { boardId, actorId, apply: { patch: { items: { hero: null } } } });
+	const parsed = parseBoardDocument(await readBoard(db, { boardId }));
 	assert.ok(parsed.ok);
 	assert.deepEqual(parsed.document.items.tag?.position, { x: 1060, y: 60 });
 	assert.equal(parsed.document.items.tag?.attach, undefined);
@@ -370,6 +363,6 @@ test("a reparent cannot push unchanged descendants beyond the hierarchy limit", 
 		`${prefix}${i}`, { type: "frame", ...(i ? { parent: `${prefix}${i - 1}` } : {}) },
 	])));
 	const { db, boardId } = await board({ items });
-	await assert.rejects(applyBoard(db, { spaceId, boardId, actorId, apply: { patch: { items: { s0: { parent: "c59" } } } } }), (error: unknown) => error instanceof BoardError && error.code === "PARENT_DEPTH");
-	assert.ok(parseBoardDocument(await readBoard(db, { spaceId, boardId })).ok);
+	await assert.rejects(applyBoard(db, { boardId, actorId, apply: { patch: { items: { s0: { parent: "c59" } } } } }), (error: unknown) => error instanceof BoardError && error.code === "PARENT_DEPTH");
+	assert.ok(parseBoardDocument(await readBoard(db, { boardId })).ok);
 });

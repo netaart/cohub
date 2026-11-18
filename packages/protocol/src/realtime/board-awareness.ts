@@ -155,7 +155,8 @@ export const BoardAwarenessUpdateSchema = z.discriminatedUnion("type", [
 ]);
 
 export const BoardAwarenessClientPayloadSchema = z.object({
-	spaceId: z.string().uuid(),
+	/** @deprecated Ignored: the Board knows its Space. */
+	spaceId: z.string().uuid().optional(),
 	boardId: z.string().uuid(),
 	seq: z.number().int().nonnegative(),
 	update: BoardAwarenessUpdateSchema,

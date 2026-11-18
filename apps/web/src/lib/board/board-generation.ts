@@ -46,13 +46,12 @@ function isGenerationContentBlock(
 	);
 }
 
-/** Rebuild a public generation request from an authoritative TaskRun detail. */
 export function regenerationRequestFromTaskRun(
 	run: TaskRunRecord,
-	spaceId: string,
 ): CreateGenerationTaskRequest {
-	if (run.taskType !== "generation" || run.spaceId !== spaceId) {
-		throw new Error("This task cannot be regenerated on this board.");
+	const { spaceId } = run;
+	if (run.taskType !== "generation" || !spaceId) {
+		throw new Error("This task cannot be regenerated.");
 	}
 	const payload = record(run.payload);
 	const data = record(payload?.data) ?? payload;

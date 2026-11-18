@@ -75,7 +75,7 @@ async function finish(id: string, output: unknown[]) {
 
 async function board(document = {}, space = spaceId) {
 	const db = await dbPromise;
-	const { boardId } = await createBoard(db, { spaceId: space, title: "Tasks", actorId, document });
+	const { boardId } = await createBoard(db, { spaceId: space, title: "Tasks", actorId, document, taskViewer: () => true });
 	return { db, boardId };
 }
 
@@ -85,8 +85,8 @@ const task = (taskRunId: string, extra: Record<string, unknown> = {}) => ({
 	props: { taskRunId, ...extra },
 });
 
-async function snapshot(db: BoardDatabase, boardId: string, id: string, space = spaceId): Promise<BoardTaskSnapshot> {
-	const item = (await readBoard(db, { spaceId: space, boardId, read: { items: [id] } })).items?.[id];
+async function snapshot(db: BoardDatabase, boardId: string, id: string): Promise<BoardTaskSnapshot> {
+	const item = (await readBoard(db, { boardId, read: { items: [id] } })).items?.[id];
 	assert.equal(item?.type, "task");
 	return (item.props as { snapshot: BoardTaskSnapshot }).snapshot;
 }
@@ -103,7 +103,6 @@ test("task items take their snapshot from the run, never from the writer", async
 	assert.equal(current.startedAt, "2026-10-13T00:00:00.000Z");
 
 	await applyBoard(db, {
-		spaceId,
 		boardId,
 		actorId,
 		apply: { patch: { items: { t: { props: { snapshot: { status: "completed", title: "forged", artifactCount: 9 } } } } } },
@@ -113,19 +112,23 @@ test("task items take their snapshot from the run, never from the writer", async
 	assert.equal(current.artifactCount, 0);
 });
 
-test("completion updates every Board showing the task, once", async () => {
+test("completion updates every Board showing the task, in any Space, once", async () => {
 	const id = await generation({ status: "running" });
 	const first = await board({ items: { a: task(id), b: task(id), note: { type: "text", props: { text: "x" } } } });
 	const second = await board({ items: { c: task(id) } });
-	const elsewhere = await board({ items: { d: task(id, { snapshot: { taskType: "generation", status: "running", title: "Copied", artifactCount: 0 } }) } }, otherSpaceId);
+	const elsewhere = await board({ items: { d: task(id) } }, otherSpaceId);
 	const { db } = first;
+	assert.equal((await snapshot(db, elsewhere.boardId, "d")).spaceId, spaceId);
 
 	await finish(id, [image("https://cdn.example.com/a.png", { width: 1600, height: 900 }), image("https://cdn.example.com/b.png")]);
-	const writes = await syncTaskBoards(db, { spaceId, taskRunId: id, revision: "completed:1", actorId: owner, source: { via: "task" } });
-	assert.deepEqual(writes.map((write) => write.boardId).sort(), [first.boardId, second.boardId].sort());
+	const writes = await syncTaskBoards(db, { taskRunId: id, revision: "completed:1", actorId: owner, source: { via: "task" } });
+	assert.deepEqual(
+		writes.map((write) => `${write.spaceId}:${write.boardId}`).sort(),
+		[`${spaceId}:${first.boardId}`, `${spaceId}:${second.boardId}`, `${otherSpaceId}:${elsewhere.boardId}`].sort(),
+	);
 	assert.deepEqual(writes.find((write) => write.boardId === first.boardId)?.outcome.result.changed.items.sort(), ["a", "b"]);
 
-	for (const [boardId, itemId] of [[first.boardId, "a"], [first.boardId, "b"], [second.boardId, "c"]] as const) {
+	for (const [boardId, itemId] of [[first.boardId, "a"], [first.boardId, "b"], [second.boardId, "c"], [elsewhere.boardId, "d"]] as const) {
 		const current = await snapshot(db, boardId, itemId);
 		assert.equal(current.status, "completed");
 		assert.equal(current.artifactCount, 2);
@@ -133,16 +136,14 @@ test("completion updates every Board showing the task, once", async () => {
 		assert.equal(featured?.type, "image");
 		assert.equal(featured?.type === "image" ? featured.naturalWidth : undefined, 1600);
 	}
-	const fitted = await readBoard(db, { spaceId, boardId: first.boardId, read: { items: ["a"] } });
+	const fitted = await readBoard(db, { boardId: first.boardId, read: { items: ["a"] } });
 	assert.deepEqual(fitted.items?.a?.size, { width: 400, height: 225 });
 	assert.deepEqual(fitted.items?.a?.position, { x: 0, y: 0 });
 
-	assert.equal((await snapshot(db, elsewhere.boardId, "d", otherSpaceId)).status, "running");
-
-	const before = (await readBoard(db, { spaceId, boardId: first.boardId, read: { only: ["animations"] } })).version;
-	const retry = await syncTaskBoards(db, { spaceId, taskRunId: id, revision: "completed:1", actorId: owner });
+	const before = (await readBoard(db, { boardId: first.boardId, read: { only: ["animations"] } })).version;
+	const retry = await syncTaskBoards(db, { taskRunId: id, revision: "completed:1", actorId: owner });
 	assert.ok(retry.every((write) => write.outcome.result.replayed));
-	assert.equal((await readBoard(db, { spaceId, boardId: first.boardId, read: { only: ["animations"] } })).version, before);
+	assert.equal((await readBoard(db, { boardId: first.boardId, read: { only: ["animations"] } })).version, before);
 
 	const written = writes[0]?.outcome;
 	assert.ok(written);
@@ -155,12 +156,12 @@ test("completion fits cards to a result size learned before the write", async ()
 	const id = await generation({ status: "running" });
 	const { db, boardId } = await board({ items: { t: task(id) } });
 	await finish(id, [image("https://cdn.example.com/unsized.png")]);
-	const visual = await readUnsizedTaskVisual(db, { spaceId, taskRunId: id });
+	const visual = await readUnsizedTaskVisual(db, { taskRunId: id });
 	assert.deepEqual(visual, { type: "image", url: "https://cdn.example.com/unsized.png" });
 	assert.ok(visual);
 	const taskArtifactSizes = new Map([[visual.url, { width: 1600, height: 900 }]]);
-	await syncTaskBoards(db, { spaceId, taskRunId: id, revision: "completed:sized", actorId: owner, taskArtifactSizes });
+	await syncTaskBoards(db, { taskRunId: id, revision: "completed:sized", actorId: owner, taskArtifactSizes });
 	const featured = (await snapshot(db, boardId, "t")).artifacts[0];
 	assert.equal(featured?.type === "image" ? featured.naturalWidth : undefined, 1600);
-	assert.deepEqual((await readBoard(db, { spaceId, boardId, read: { items: ["t"] } })).items?.t?.size, { width: 400, height: 225 });
+	assert.deepEqual((await readBoard(db, { boardId, read: { items: ["t"] } })).items?.t?.size, { width: 400, height: 225 });
 });

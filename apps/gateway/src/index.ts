@@ -124,7 +124,7 @@ const wsConnectionIdsByRoom = new Map<RealtimeRoom, Set<string>>();
 const wsSockets = new Map<string, WebSocket>();
 const roomAuthCache = new Map<string, { expiresAt: number; accepted: boolean; rejection?: RealtimeRoomRejection }>();
 const presenceUpdateTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const boardAwarenessAuthCache = new Map<string, { expiresAt: number; allowed: boolean }>();
+const boardAwarenessAuthCache = new Map<string, { expiresAt: number; spaceId: string | null }>();
 
 const getWsConnectionKey = (connectionId: string) => `gateway:ws:connection:${connectionId}`;
 const getSpacePresenceConnectionsKey = (spaceId: string) => `gateway:presence:space:${spaceId}:connections`;
@@ -141,25 +141,25 @@ const getBoardIdFromRoom = (room: RealtimeRoom) => {
   return boardId || null;
 };
 
-const canPublishBoardAwareness = async (
+const authorizeBoardAwarenessFor = async (
   ctx: WsConnectionContext,
-  input: { boardId: string; spaceId: string; permission: "view" | "edit" },
+  input: { boardId: string; permission: "view" | "edit" },
 ) => {
-  if (!ctx.token) return false;
+  if (!ctx.token) return null;
   const tokenHash = createHash("sha256").update(ctx.token).digest("base64url");
-  const key = `${tokenHash}:${input.spaceId}:${input.boardId}:${input.permission}`;
+  const key = `${tokenHash}:${input.boardId}:${input.permission}`;
   const cached = boardAwarenessAuthCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.allowed;
-  const allowed = await authorizeBoardAwareness({ authToken: ctx.token, ...input }).catch(() => false);
+  if (cached && cached.expiresAt > Date.now()) return cached.spaceId;
+  const spaceId = await authorizeBoardAwareness({ authToken: ctx.token, ...input }).catch(() => null);
   boardAwarenessAuthCache.set(key, {
-    allowed,
+    spaceId,
     expiresAt: Date.now() + BOARD_AWARENESS_AUTH_TTL_MS,
   });
   if (boardAwarenessAuthCache.size > ROOM_AUTH_CACHE_MAX_ENTRIES) {
     const oldest = boardAwarenessAuthCache.keys().next().value;
     if (oldest) boardAwarenessAuthCache.delete(oldest);
   }
-  return allowed;
+  return spaceId;
 };
 
 const scheduleSpacePresenceUpdate = (spaceId: string) => {
@@ -444,7 +444,7 @@ const publishBoardAwareness = async (
   payload: Extract<WsClientEvent, { type: "board.awareness.update" }>["payload"],
   requestId?: string,
 ) => {
-  const { boardId, spaceId, seq, update } = payload;
+  const { boardId, seq, update } = payload;
   if (!ctx.userId || !ctx.capabilities.has(WS_BOARD_AWARENESS_CAPABILITY)) {
     sendWsError(socket, "UNSUPPORTED_CAPABILITY", "Board awareness is not enabled", requestId);
     return;
@@ -457,8 +457,8 @@ const publishBoardAwareness = async (
   if (seq <= previousSeq) return;
 
   const permission = update.type === "state" || update.type === "reaction" || update.type === "script" ? "view" : "edit";
-  const allowed = await canPublishBoardAwareness(ctx, { boardId, spaceId, permission });
-  if (!allowed) {
+  const spaceId = await authorizeBoardAwarenessFor(ctx, { boardId, permission });
+  if (!spaceId) {
     sendWsError(socket, "FORBIDDEN", `Missing Board ${permission} permission`, requestId);
     return;
   }

@@ -515,7 +515,6 @@ export class WebsocketClient {
   }
 
   async updateBoardAwareness(input: {
-    spaceId: string;
     boardId: string;
     update: BoardAwarenessUpdate;
     requestId?: string;
@@ -526,7 +525,6 @@ export class WebsocketClient {
       type: "board.awareness.update",
       requestId: input.requestId,
       payload: {
-        spaceId: input.spaceId,
         boardId: input.boardId,
         seq: this.boardAwarenessSeq,
         update: input.update,

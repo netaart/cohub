@@ -27,6 +27,7 @@ export type BoardTaskRunSource = GenerationRunPayload & {
 	errorMessage?: string | null;
 	startedAt?: string | null;
 	updatedAt: string;
+	spaceId?: string | null;
 };
 
 export const BOARD_TASK_SOURCE_PREFIX = "cohub-task:";
@@ -251,6 +252,7 @@ export function taskRunToBoardTaskSnapshot(
 		artifacts,
 		...(run.startedAt ? { startedAt: run.startedAt } : {}),
 		updatedAt: run.updatedAt,
+		...(run.spaceId ? { spaceId: run.spaceId } : {}),
 	};
 }
 

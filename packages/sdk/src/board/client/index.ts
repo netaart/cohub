@@ -54,14 +54,12 @@ export type BoardSyncResult = Pick<BoardReadResult, "id" | "title" | "version" |
 export type BoardClientOptions = {
   http: HttpTransport;
   websocket: WebsocketClient | null;
-  spaceId: string;
   boardId: string;
 };
 
 class BoardRealtimeClient {
   constructor(
     private readonly websocketClient: WebsocketClient | null,
-    private readonly spaceId: string,
     private readonly boardId: string,
   ) {}
 
@@ -73,7 +71,6 @@ class BoardRealtimeClient {
     const room = getRealtimeBoardRoom(this.boardId);
     const releaseRoom = this.websocketClient.retainRooms([room]);
     const unsubscribe = this.websocketClient.on("event", (event) => {
-      if (event.spaceId !== this.spaceId) return;
       if (event.type === "board.changed" && event.payload.boardId === this.boardId) {
         const changedEvent = event as BoardChangedEvent;
         handlers.event?.(changedEvent);
@@ -131,7 +128,6 @@ class BoardRealtimeClient {
 }
 
 export class BoardClient implements BoardRemote {
-  readonly spaceId: string;
   readonly id: string;
   readonly realtime: BoardRealtimeClient;
   private readonly http: HttpTransport;
@@ -142,15 +138,14 @@ export class BoardClient implements BoardRemote {
   }
 
   constructor(options: BoardClientOptions) {
-    this.spaceId = options.spaceId;
     this.id = options.boardId;
     this.http = options.http;
     this.websocket = options.websocket;
-    this.realtime = new BoardRealtimeClient(options.websocket, options.spaceId, options.boardId);
+    this.realtime = new BoardRealtimeClient(options.websocket, options.boardId);
   }
 
   private get path() {
-    return `/api/spaces/${this.spaceId}/boards/${this.id}`;
+    return `/api/boards/${this.id}`;
   }
 
   /** Read the Board, or part of it. Every value is complete, defaults included. */
@@ -232,7 +227,7 @@ export class BoardClient implements BoardRemote {
   }
 
   replica(options: BoardReplicaLeaseOptions = {}): BoardReplicaLease {
-    return leaseBoardReplica(this.http, this.spaceId, this.id, this, options);
+    return leaseBoardReplica(this.http, this.id, this, options);
   }
 
   async control(command: BoardPlaybackCommand) {
@@ -241,7 +236,7 @@ export class BoardClient implements BoardRemote {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(command),
     });
-    shareBoardPlayback(this.http, this.spaceId, this.id, playback);
+    shareBoardPlayback(this.http, this.id, playback);
     return playback;
   }
 
@@ -277,7 +272,7 @@ export class BoardClient implements BoardRemote {
   updateAwareness(...args: [BoardAwarenessUpdate] | [number, BoardAwarenessUpdate]) {
     const update = args.length === 2 ? args[1] : args[0];
     if (!this.websocket) return Promise.resolve();
-    return this.websocket.updateBoardAwareness({ spaceId: this.spaceId, boardId: this.id, update });
+    return this.websocket.updateBoardAwareness({ boardId: this.id, update });
   }
 
   subscribe(handlers: BoardSubscriptionHandlers) {
@@ -323,16 +318,25 @@ export async function readBoardId(files: Pick<BoardFiles, "read">, path: string,
   return parseBoardManifest(await fileText(file, customFetch)).boardId;
 }
 
-export class SpaceBoardsApi {
+export class BoardsApi {
   constructor(
-    private readonly http: HttpTransport,
-    private readonly spaceId: string,
-    private readonly websocket: WebsocketClient | null,
-    private readonly files: BoardFiles,
+    protected readonly http: HttpTransport,
+    protected readonly websocket: WebsocketClient | null,
   ) {}
 
   byId(boardId: string) {
-    return new BoardClient({ http: this.http, websocket: this.websocket, spaceId: this.spaceId, boardId });
+    return new BoardClient({ http: this.http, websocket: this.websocket, boardId });
+  }
+}
+
+export class SpaceBoardsApi extends BoardsApi {
+  constructor(
+    http: HttpTransport,
+    private readonly spaceId: string,
+    websocket: WebsocketClient | null,
+    private readonly files: BoardFiles,
+  ) {
+    super(http, websocket);
   }
 
   assetSource(): BoardAssetSource {

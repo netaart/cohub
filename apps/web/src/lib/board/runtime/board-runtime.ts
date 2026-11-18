@@ -24,7 +24,11 @@ export type BoardRuntimeViewState = {
 export type BoardRuntimeMode = "edit" | "play" | "view";
 
 export type BoardScope =
-	| { kind: "space"; spaceId: string }
+	| {
+			kind: "space";
+			spaceId: string;
+			linked?: boolean;
+	  }
 	| {
 			kind: "checkpoint";
 			spaceId: string;
@@ -73,7 +77,7 @@ export type BoardRuntimeProps = {
 	onViewStateChange?: (state: BoardRuntimeViewState) => void;
 	onOpenFile?: (path: string) => void | Promise<void>;
 	onOpenApp?: (app: { appId: string; name: string }) => void;
-	onOpenSession?: (sessionId: string) => void | Promise<void>;
+	onOpenSession?: (sessionId: string, spaceId: string) => void | Promise<void>;
 	/** Overrides the device's level-of-detail thresholds. */
 	lod?: BoardLod;
 	deviceTier?: BoardDeviceTier;

@@ -506,6 +506,7 @@ export const BoardTaskSnapshotSchema = z
 		artifacts: z.array(BoardTaskArtifactSchema).max(BOARD_TASK_ARTIFACT_LIMIT).default([]),
 		startedAt: z.string().max(64).optional(),
 		updatedAt: z.string().optional(),
+		spaceId: z.string().max(64).optional().describe("The Space the run belongs to."),
 	})
 	.strict();
 export type BoardTaskSnapshot = z.infer<typeof BoardTaskSnapshotSchema>;
@@ -534,6 +535,7 @@ export const BoardSessionSnapshotSchema = z
 		issue: z.enum(BOARD_SESSION_ISSUES).optional().describe("How the last run ended when it did not finish."),
 		errorExcerpt: z.string().max(240).optional(),
 		activityAt: z.string().max(64).optional(),
+		spaceId: z.string().max(64).optional().describe("The Space the chat belongs to."),
 	})
 	.strict();
 export type BoardSessionSnapshot = z.infer<typeof BoardSessionSnapshotSchema>;

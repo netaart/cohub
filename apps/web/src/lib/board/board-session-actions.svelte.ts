@@ -20,19 +20,23 @@ import { buildSpaceSessionRoute } from "#lib/space-routes.ts";
 import { sessionStore } from "#lib/stores/session-store.ts";
 
 type SessionItem = Extract<BoardSceneItem, { type: "session" }>;
+type SessionTarget = { sessionId: string; spaceId: string };
 
 const HISTORY_PAGES = 2;
 const HISTORY_LIMIT = 500;
 
 export function createBoardSessionActions(options: {
 	editor: BoardEditor;
-	spaceId: string | null;
+	home: string | null;
+	live: boolean;
 	isMobile: () => boolean;
 	fetchHistory?: (input: BoardHistoryInput) => Promise<BoardHistoryPage>;
-	onOpen: () => ((sessionId: string) => void | Promise<void>) | undefined;
+	onOpen: () =>
+		| ((sessionId: string, spaceId: string) => void | Promise<void>)
+		| undefined;
 	notice: (text: string, error?: boolean) => void;
 }) {
-	const { editor, spaceId } = options;
+	const { editor, home, live } = options;
 	let replyItemId = $state<string | null>(null);
 
 	const selected = $derived.by<SessionItem | null>(() => {
@@ -41,9 +45,16 @@ export function createBoardSessionActions(options: {
 			? item
 			: null;
 	});
-	const replyItem = $derived(
-		selected && selected.id === replyItemId ? selected : null,
-	);
+	const reply = $derived.by(() => {
+		const target =
+			live && selected?.id === replyItemId ? targetOf(selected) : null;
+		return selected && target ? { id: selected.id, ...target } : null;
+	});
+
+	function targetOf(item: SessionItem): SessionTarget | null {
+		const spaceId = item.props.snapshot.spaceId ?? home;
+		return spaceId ? { sessionId: item.props.sessionId, spaceId } : null;
+	}
 
 	$effect(() => {
 		const id = selected?.id ?? null;
@@ -54,21 +65,20 @@ export function createBoardSessionActions(options: {
 
 	function open(item: SessionItem): boolean {
 		const handler = options.onOpen();
-		if (!handler) return false;
-		void handler(item.props.sessionId);
+		const target = targetOf(item);
+		if (!handler || !target) return false;
+		void handler(target.sessionId, target.spaceId);
 		return true;
 	}
 
-	function route(sessionId: string) {
-		return spaceId
-			? new URL(buildSpaceSessionRoute(spaceId, sessionId), location.origin)
-					.href
-			: null;
+	function route({ spaceId, sessionId }: SessionTarget) {
+		return new URL(buildSpaceSessionRoute(spaceId, sessionId), location.origin)
+			.href;
 	}
 
-	async function stop(sessionId: string) {
+	async function stop({ spaceId, sessionId }: SessionTarget) {
 		const session = sessionStore.get(sessionId);
-		if (!spaceId || !session?.activeTurn) return;
+		if (!session?.activeTurn) return;
 		await sdk
 			.space(spaceId)
 			.session(sessionId)
@@ -108,9 +118,9 @@ export function createBoardSessionActions(options: {
 
 	const primary = $derived.by<BoardMenuAction[]>(() => {
 		const item = selected;
-		if (!item || !spaceId) return [];
+		const target = live && item ? targetOf(item) : null;
+		if (!item || !target) return [];
 		const locale = getLocale();
-		const { sessionId } = item.props;
 		const actions: BoardMenuAction[] = [];
 		if (options.onOpen())
 			actions.push({
@@ -129,20 +139,21 @@ export function createBoardSessionActions(options: {
 					replyItemId = replyItemId === item.id ? null : item.id;
 				},
 			});
-		if (sessionStore.get(sessionId)?.activeTurn)
+		if (sessionStore.get(target.sessionId)?.activeTurn)
 			actions.push({
 				id: "session-stop",
 				label: m.board_session_stop({}, { locale }),
 				icon: Square,
-				run: () => void stop(sessionId),
+				run: () => void stop(target),
 			});
 		return actions;
 	});
 
 	const secondary = $derived.by<BoardMenuAction[]>(() => {
 		const item = selected;
-		const url = item ? route(item.props.sessionId) : null;
-		if (!item || !url) return [];
+		const target = live && item ? targetOf(item) : null;
+		if (!item || !target) return [];
+		const url = route(target);
 		const locale = getLocale();
 		const actions: BoardMenuAction[] = [
 			{
@@ -182,8 +193,8 @@ export function createBoardSessionActions(options: {
 		get menu() {
 			return [...primary, ...secondary];
 		},
-		get replyItem() {
-			return replyItem;
+		get reply() {
+			return reply;
 		},
 		closeReply() {
 			replyItemId = null;

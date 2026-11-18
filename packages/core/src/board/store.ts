@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { AnyPgColumn, PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
-import { boardAnimations, boardItems, boardTracks, boardTransactions, boards, spaceSessions } from "@cohub/db";
+import { boardAnimations, boardItems, boardTracks, boardTransactions, boards } from "@cohub/db";
 import {
 	BOARD_CAMERA_TARGET,
 	type BoardAnimation,
@@ -232,8 +232,8 @@ async function loadBinders(db: Executor, boardId: string, ids: string[]): Promis
 }
 
 
-async function findBoard(db: Executor, spaceId: string, boardId: string, lock = false) {
-	const query = db.select().from(boards).where(and(eq(boards.id, boardId), eq(boards.spaceId, spaceId))).limit(1);
+async function findBoard(db: Executor, boardId: string, lock = false) {
+	const query = db.select().from(boards).where(eq(boards.id, boardId)).limit(1);
 	const [board] = lock ? await query.for("update") : await query;
 	if (!board) throw new BoardError(404, "BOARD_NOT_FOUND", "Board not found.");
 	return board;
@@ -245,20 +245,21 @@ function playbackOf(value: unknown): BoardPlaybackSnapshot | null {
 
 export async function readBoard(
 	db: BoardDatabase,
-	input: { spaceId: string; boardId: string; read?: BoardReadInput },
+	input: { boardId: string; read?: BoardReadInput },
 ): Promise<BoardReadResult> {
 	return db.transaction((tx) => readBoardInTransaction(tx, input), { isolationLevel: "repeatable read" });
 }
 
 async function readBoardInTransaction(
 	db: Executor,
-	input: { spaceId: string; boardId: string; read?: BoardReadInput },
+	input: { boardId: string; read?: BoardReadInput },
 ): Promise<BoardReadResult> {
 	const read = BoardReadInputSchema.parse(input.read ?? {});
-	const board = await findBoard(db, input.spaceId, input.boardId);
+	const board = await findBoard(db, input.boardId);
 	const sections = new Set(read.only ?? ["items", "animations"]);
 	const result: BoardReadResult = {
 		id: board.id,
+		spaceId: board.spaceId,
 		title: board.title,
 		version: board.version,
 		updatedAt: board.updatedAt.toISOString(),
@@ -382,7 +383,6 @@ export type BoardApplyOutcome = {
 };
 
 export type BoardWriteInput = {
-	spaceId: string;
 	boardId: string;
 	actorId: string;
 	source?: RequestSource | null;
@@ -419,7 +419,7 @@ export async function applyBoardInTransaction(
 ): Promise<BoardApplyOutcome> {
 	const { apply } = input;
 	const mutationId = apply.mutationId ?? randomUUID();
-	const board = await findBoard(tx, input.spaceId, input.boardId, true);
+	const board = await findBoard(tx, input.boardId, true);
 
 	const [existing] = await tx
 		.select({ receipt: boardTransactions.receipt })
@@ -434,9 +434,9 @@ export async function applyBoardInTransaction(
 
 	let patch = apply.patch as BoardPatch;
 	const resolveSnapshots = async (current: (id: string) => BoardItem | undefined, whole: boolean) => {
-		const tasks = await resolveBoardTaskSnapshots(tx, { spaceId: input.spaceId, patch, current, viewer: input.taskViewer, whole, artifactSizes: input.taskArtifactSizes });
+		const tasks = await resolveBoardTaskSnapshots(tx, { home: board.spaceId, patch, current, viewer: input.taskViewer, whole, artifactSizes: input.taskArtifactSizes });
 		if (!tasks.ok) throw new BoardError(tasks.status, tasks.code, `${tasks.path}: ${tasks.message}`, [{ severity: "error", code: tasks.code, path: tasks.path, message: tasks.message }]);
-		const sessions = await resolveBoardSessionSnapshots(tx, { spaceId: input.spaceId, patch: tasks.patch, current, viewer: input.sessionViewer, whole });
+		const sessions = await resolveBoardSessionSnapshots(tx, { home: board.spaceId, patch: tasks.patch, current, viewer: input.sessionViewer, whole });
 		if (!sessions.ok) throw new BoardError(sessions.status, sessions.code, `${sessions.path}: ${sessions.message}`, [{ severity: "error", code: sessions.code, path: sessions.path, message: sessions.message }]);
 		return sessions.patch;
 	};
@@ -816,7 +816,7 @@ async function writeDelta(tx: Tx, boardId: string, after: BoardDelta, preloaded:
 }
 
 
-export type BoardTaskSyncWrite = { boardId: string; outcome: BoardApplyOutcome };
+export type BoardSyncWrite = { spaceId: string; boardId: string; outcome: BoardApplyOutcome };
 
 export async function syncTaskBoards(
 	db: BoardDatabase,
@@ -825,13 +825,13 @@ export async function syncTaskBoards(
 		revision: string;
 		onError?: (boardId: string, error: unknown) => void;
 	},
-): Promise<BoardTaskSyncWrite[]> {
+): Promise<BoardSyncWrite[]> {
 	const source = boardTaskSource(input.taskRunId);
-	const writes: BoardTaskSyncWrite[] = [];
-	for (const { boardId } of await listTaskBoards(db, { spaceId: input.spaceId, taskRunId: input.taskRunId })) {
+	const writes: BoardSyncWrite[] = [];
+	for (const { boardId, spaceId } of await listTaskBoards(db, { taskRunId: input.taskRunId })) {
 		try {
 			const outcome = await db.transaction(async (tx) => {
-				await findBoard(tx, input.spaceId, boardId, true);
+				await findBoard(tx, boardId, true);
 				const live = await tx
 					.select({ id: boardItems.id })
 					.from(boardItems)
@@ -842,7 +842,6 @@ export async function syncTaskBoards(
 					mutationId: `${BOARD_TASK_MUTATION_PREFIX}${input.taskRunId}:${input.revision}`,
 				});
 				return applyBoardInTransaction(tx, {
-					spaceId: input.spaceId,
 					boardId,
 					actorId: input.actorId,
 					source: input.source,
@@ -850,7 +849,7 @@ export async function syncTaskBoards(
 					apply,
 				});
 			});
-			if (outcome) writes.push({ boardId, outcome });
+			if (outcome) writes.push({ spaceId, boardId, outcome });
 		} catch (error) {
 			input.onError?.(boardId, error);
 		}
@@ -858,23 +857,18 @@ export async function syncTaskBoards(
 	return writes;
 }
 
-export type BoardSessionSyncWrite = { spaceId: string; boardId: string; outcome: BoardApplyOutcome };
-
 export async function syncSessionBoards(
 	db: BoardDatabase,
-	input: Omit<BoardWriteInput, "boardId" | "spaceId" | "taskViewer" | "sessionViewer" | "taskArtifactSizes"> & {
+	input: Omit<BoardWriteInput, "boardId" | "taskViewer" | "sessionViewer" | "taskArtifactSizes"> & {
 		sessionId: string;
 		onError?: (boardId: string, error: unknown) => void;
 	},
-): Promise<BoardSessionSyncWrite[]> {
-	const [session] = await db.select({ spaceId: spaceSessions.spaceId }).from(spaceSessions).where(eq(spaceSessions.id, input.sessionId)).limit(1);
-	if (!session) return [];
-	const { spaceId } = session;
-	const fresh = (await readBoardSessionSnapshots(db, spaceId, [input.sessionId])).get(input.sessionId);
+): Promise<BoardSyncWrite[]> {
+	const fresh = (await readBoardSessionSnapshots(db, [input.sessionId])).get(input.sessionId);
 	if (!fresh) return [];
 	const syncBoard = (boardId: string) =>
 		db.transaction(async (tx) => {
-			await findBoard(tx, spaceId, boardId, true);
+			const board = await findBoard(tx, boardId, true);
 			// Re-read under the Board lock: a card relinked meanwhile is no longer this Session's.
 			const stale = await tx
 				.select({ id: boardItems.id })
@@ -884,18 +878,19 @@ export async function syncSessionBoards(
 			const apply = BoardApplyInputSchema.parse({
 				patch: { items: Object.fromEntries(stale.map(({ id }) => [id, { props: { sessionId: input.sessionId } }])) },
 			});
-			return applyBoardInTransaction(tx, { spaceId, boardId, actorId: input.actorId, source: input.source, apply });
+			const outcome = await applyBoardInTransaction(tx, { boardId, actorId: input.actorId, source: input.source, apply });
+			return { spaceId: board.spaceId, boardId, outcome };
 		});
-	const writes: BoardSessionSyncWrite[] = [];
+	const writes: BoardSyncWrite[] = [];
 	const tried = new Set<string>();
 	for (;;) {
-		const page = await listStaleSessionBoards(db, { spaceId, sessionId: input.sessionId, snapshot: fresh });
+		const page = await listStaleSessionBoards(db, { sessionId: input.sessionId, snapshot: fresh });
 		const pending = page.filter((boardId) => !tried.has(boardId));
 		for (const boardId of pending) {
 			tried.add(boardId);
 			try {
-				const outcome = await syncBoard(boardId);
-				if (outcome) writes.push({ spaceId, boardId, outcome });
+				const write = await syncBoard(boardId);
+				if (write) writes.push(write);
 			} catch (error) {
 				input.onError?.(boardId, error);
 			}
@@ -906,27 +901,27 @@ export async function syncSessionBoards(
 
 export async function createBoard(
 	db: BoardDatabase,
-	input: Omit<BoardWriteInput, "boardId"> & { boardId?: string; title: string; document?: BoardPatch; mutationId?: string },
+	input: Omit<BoardWriteInput, "boardId"> & { spaceId: string; boardId?: string; title: string; document?: BoardPatch; mutationId?: string },
 ): Promise<{ boardId: string; result: BoardApplyResult }> {
 	const boardId = input.boardId ?? randomUUID();
 	return db.transaction(async (tx) => {
 		const now = new Date();
 		await tx.insert(boards).values({ id: boardId, spaceId: input.spaceId, title: input.title, version: 0, settings: {}, createdAt: now, updatedAt: now }).onConflictDoNothing();
 		const apply = BoardApplyInputSchema.parse({ patch: input.document ?? {}, mutationId: input.mutationId ?? `create:${boardId}` });
-		const { result } = await applyBoardInTransaction(tx, { spaceId: input.spaceId, boardId, actorId: input.actorId, apply, source: input.source, taskViewer: input.taskViewer, sessionViewer: input.sessionViewer });
+		const { result } = await applyBoardInTransaction(tx, { boardId, actorId: input.actorId, apply, source: input.source, taskViewer: input.taskViewer, sessionViewer: input.sessionViewer });
 		return { boardId, result };
 	});
 }
 
-export async function deleteBoard(db: BoardDatabase, input: { spaceId: string; boardId: string }): Promise<void> {
+export async function deleteBoard(db: BoardDatabase, input: { boardId: string }): Promise<void> {
 	await db.transaction(async (tx) => {
-		await findBoard(tx, input.spaceId, input.boardId, true);
+		await findBoard(tx, input.boardId, true);
 		const ownedBy = (table: { boardId: AnyPgColumn }) => eq(table.boardId, input.boardId);
 		await tx.delete(boardTracks).where(ownedBy(boardTracks));
 		await tx.delete(boardAnimations).where(ownedBy(boardAnimations));
 		await tx.delete(boardItems).where(ownedBy(boardItems));
 		await tx.delete(boardTransactions).where(ownedBy(boardTransactions));
-		await tx.delete(boards).where(and(eq(boards.id, input.boardId), eq(boards.spaceId, input.spaceId)));
+		await tx.delete(boards).where(eq(boards.id, input.boardId));
 	});
 }
 
@@ -944,10 +939,10 @@ export function boardPlaybackPosition(playback: BoardPlaybackSnapshot, header: B
 
 export async function applyBoardPlayback(
 	db: BoardDatabase,
-	input: { spaceId: string; boardId: string; command: BoardPlaybackCommand },
+	input: { boardId: string; command: BoardPlaybackCommand },
 ): Promise<BoardPlaybackSnapshot | null> {
 	return db.transaction(async (tx) => {
-		const board = await findBoard(tx, input.spaceId, input.boardId, true);
+		const board = await findBoard(tx, input.boardId, true);
 		const current = playbackOf(board.playback);
 		const { command } = input;
 		if (current?.commandId === command.commandId) return current;
@@ -994,10 +989,10 @@ export async function applyBoardPlayback(
 
 export async function readBoardHistory(
 	db: BoardDatabase,
-	input: { spaceId: string; boardId: string; history?: BoardHistoryInput },
+	input: { boardId: string; history?: BoardHistoryInput },
 ): Promise<BoardHistoryPage> {
 	const history = BoardHistoryInputSchema.parse(input.history ?? {});
-	const board = await findBoard(db, input.spaceId, input.boardId);
+	const board = await findBoard(db, input.boardId);
 	const rows = await db
 		.select()
 		.from(boardTransactions)
@@ -1034,10 +1029,10 @@ export async function readBoardHistory(
 
 export async function restoreBoardVersion(
 	db: BoardDatabase,
-	input: { spaceId: string; boardId: string; actorId: string; version: number; source?: RequestSource | null },
+	input: { boardId: string; actorId: string; version: number; source?: RequestSource | null },
 ): Promise<BoardApplyOutcome> {
 	return db.transaction(async (tx) => {
-		const board = await findBoard(tx, input.spaceId, input.boardId, true);
+		const board = await findBoard(tx, input.boardId, true);
 		if (input.version >= board.version) throw new BoardError(400, "INVALID_VERSION", `Board is at version ${board.version}.`);
 		const rows = await tx
 			.select({ resultVersion: boardTransactions.resultVersion, changes: boardTransactions.changes })
@@ -1089,7 +1084,7 @@ export async function restoreBoardVersion(
 		}
 		if (Object.keys(animations).length) patch.animations = animations;
 		const apply = BoardApplyInputSchema.parse({ patch, cascade: true, mutationId: `restore:${board.id}:${input.version}:${board.version}` });
-		return applyBoardInTransaction(tx, { spaceId: input.spaceId, boardId: board.id, actorId: input.actorId, apply, source: input.source });
+		return applyBoardInTransaction(tx, { boardId: board.id, actorId: input.actorId, apply, source: input.source });
 	});
 }
 

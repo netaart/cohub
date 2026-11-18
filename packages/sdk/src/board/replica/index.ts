@@ -37,14 +37,15 @@ export type BoardReplicaStorage = {
 	listPending(): Promise<BoardPendingPatch[]>;
 	putPending(entry: BoardPendingPatch): Promise<void>;
 	deletePending(mutationId: string): Promise<void>;
-	readDocument(): Promise<{ version: number; document: Record<string, unknown> } | null>;
-	writeDocument(version: number, document: BoardDocument): Promise<void>;
+	readDocument(): Promise<{ version: number; document: Record<string, unknown>; spaceId?: string } | null>;
+	writeDocument(version: number, document: BoardDocument, spaceId?: string): Promise<void>;
 };
 
 export type BoardReplicaState = {
 	document: BoardDocument | null;
 	version: number;
 	title: string | null;
+	spaceId: string | null;
 	playback: BoardPlaybackSnapshot | null;
 	loaded: boolean;
 	pending: number;
@@ -97,6 +98,7 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 	let version = 0;
 	let sent: Array<{ version: number; patch: BoardPatch }> = [];
 	let title: string | null = null;
+	let spaceId: string | null = null;
 	let playback: BoardPlaybackSnapshot | null = null;
 	let playbackRevision = 0;
 	let loaded = false;
@@ -145,6 +147,7 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 			document,
 			version,
 			title,
+			spaceId,
 			playback,
 			loaded,
 			pending: pending.length,
@@ -187,13 +190,14 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 		unpersisted = null;
 		if (entry)
 			void storage
-				.writeDocument(entry.version, entry.document)
+				.writeDocument(entry.version, entry.document, spaceId ?? undefined)
 				.catch(() => undefined);
 	}
 
 	function adoptRead(result: BoardReadResult, base: BoardDocument | null, readPlaybackRevision: number) {
 		const next = readBoardDocument(result, result.changes ? base : server);
 		title = result.title;
+		spaceId = result.spaceId ?? null;
 		if (readPlaybackRevision === playbackRevision) playback = result.playback;
 		loaded = true;
 		if (next === server && result.version === version) return;
@@ -330,7 +334,9 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 		const cached = await storage.readDocument().catch(() => null);
 		if (disposed || server || !cached) return;
 		const parsed = parseBoardDocument(cached.document, { keepUnknown: true });
-		if (parsed.ok) adoptServer(parsed.document, cached.version, false);
+		if (!parsed.ok) return;
+		spaceId = cached.spaceId ?? null;
+		adoptServer(parsed.document, cached.version, false);
 	}
 
 	async function restore(document: Promise<void>) {

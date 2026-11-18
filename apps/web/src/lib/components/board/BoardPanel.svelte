@@ -200,7 +200,7 @@ const {
 	deviceTier,
 	onStageReady,
 }: BoardRuntimeProps & {
-	onOpenTask?: (taskRunId: string) => void;
+	onOpenTask?: (taskRunId: string, spaceId?: string) => void;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -276,6 +276,7 @@ function dropOnTimeline(data: DataTransfer, at: number) {
 const editable = untrack(() => mode !== "view");
 const playing = untrack(() => mode === "play");
 const spaceId = untrack(() => (scope.kind === "space" ? scope.spaceId : null));
+const linked = untrack(() => scope.kind === "space" && scope.linked === true);
 const liveSpaceId = playing ? null : spaceId;
 const resolvedAssetSource = untrack(() =>
 	scope.kind === "space"
@@ -620,28 +621,36 @@ function handleCopy(event: ClipboardEvent) {
 const checkedTasks = new Set<string>();
 $effect(() => {
 	if (!editable || !liveSpaceId) return;
-	const unsettled = new Map<string, string[]>();
+	const unsettled = new Map<string, Map<string, string[]>>();
 	for (const item of editor.items) {
 		if (item.type !== "task" || checkedTasks.has(item.id)) continue;
-		const { status } = item.props.snapshot;
+		const { status, spaceId: runSpaceId = liveSpaceId } = item.props.snapshot;
 		if (status !== "pending" && status !== "running") continue;
 		checkedTasks.add(item.id);
-		const ids = unsettled.get(item.props.taskRunId) ?? [];
-		unsettled.set(item.props.taskRunId, [...ids, item.id]);
+		const cards = unsettled.get(runSpaceId) ?? new Map<string, string[]>();
+		cards.set(item.props.taskRunId, [
+			...(cards.get(item.props.taskRunId) ?? []),
+			item.id,
+		]);
+		unsettled.set(runSpaceId, cards);
 	}
-	if (unsettled.size) untrack(() => void recheckTasks(unsettled));
+	for (const [runSpaceId, cards] of unsettled)
+		untrack(() => void recheckTasks(runSpaceId, cards));
 });
 
-async function recheckTasks(cards: ReadonlyMap<string, readonly string[]>) {
-	if (!spaceId || !boardClient) return;
+async function recheckTasks(
+	runSpaceId: string,
+	cards: ReadonlyMap<string, readonly string[]>,
+) {
+	if (!boardClient) return;
 	const runIds = [...cards.keys()];
 	for (let start = 0; start < runIds.length; start += 100) {
 		const { runs } = await sdk.tasks
-			.getMany(runIds.slice(start, start + 100), { spaceId })
+			.getMany(runIds.slice(start, start + 100), { spaceId: runSpaceId })
 			.catch(() => ({ runs: [] }));
 		const items: NonNullable<BoardPatch["items"]> = {};
 		for (const run of runs) {
-			mergeCachedTaskRun(spaceId, run);
+			mergeCachedTaskRun(runSpaceId, run);
 			if (run.status !== "completed" && run.status !== "failed") continue;
 			for (const id of cards.get(run.id) ?? [])
 				items[id] = { props: { taskRunId: run.id } };
@@ -692,7 +701,7 @@ function showSource(itemId: string) {
 			candidate.props.taskRunId === origin.taskRunId,
 	);
 	if (!card) {
-		void onOpenTask?.(origin.taskRunId);
+		openTaskRun(origin.taskRunId);
 		return;
 	}
 	editor.setSelection([card.id]);
@@ -726,15 +735,24 @@ function openMediaSource(src: string) {
 }
 
 async function openFile(path: string) {
-	if (onOpenFile) return onOpenFile(path);
+	if (onOpenFile && !linked) return onOpenFile(path);
 	const url = (await resolvedAssetSource.resolveFile(path))?.url;
 	if (url) window.open(url, "_blank", "noopener,noreferrer");
 	else showNotice(m.board_file_not_published({}, { locale }));
 }
 
+function openTaskRun(taskRunId: string) {
+	const card = editor.items.find(
+		(item) => item.type === "task" && item.props.taskRunId === taskRunId,
+	);
+	const runSpaceId =
+		card?.type === "task" ? card.props.snapshot.spaceId : undefined;
+	onOpenTask?.(taskRunId, runSpaceId ?? spaceId ?? undefined);
+}
+
 function openTask(item: Extract<BoardSceneItem, { type: "task" }>) {
 	if (onOpenTask) {
-		void onOpenTask(item.props.taskRunId);
+		openTaskRun(item.props.taskRunId);
 		return true;
 	}
 	const result = featuredTaskArtifact(item.props.snapshot.artifacts);
@@ -798,7 +816,9 @@ function closeInPlace() {
 }
 
 const videoExport =
-	liveSpaceId && editable ? createBoardVideoExport(liveSpaceId) : null;
+	liveSpaceId && editable && !linked
+		? createBoardVideoExport(liveSpaceId)
+		: null;
 let canExportVideo = $state(false);
 
 function openExport() {
@@ -826,7 +846,7 @@ async function exportVideo(request: BoardVideoExportRequest) {
 	});
 }
 
-const canRecord = $derived(Boolean(liveSpaceId && editable && path));
+const canRecord = $derived(Boolean(liveSpaceId && editable && path && !linked));
 let recordedInputs = $state<string | null>(null);
 const inputRecorder = createBoardInputRecorder({
 	stage: () => scriptStage,
@@ -885,7 +905,7 @@ async function regenerateTask(itemId: string) {
 	notice = null;
 	try {
 		const detail = await sdk.tasks.get(source.props.taskRunId);
-		const request = regenerationRequestFromTaskRun(detail.run, spaceId);
+		const request = regenerationRequestFromTaskRun(detail.run);
 		const created = await sdk.generations.create(request);
 		createdTaskRunId = created.taskRunId;
 		if (getCacheUserKey() !== submittingUserKey) {
@@ -930,7 +950,7 @@ async function regenerateTask(itemId: string) {
 }
 
 const boardClient = liveSpaceId
-	? sdk.space(liveSpaceId).board(untrack(() => boardId))
+	? sdk.boards.byId(untrack(() => boardId))
 	: null;
 const history = boardClient && {
 	fetchHistory: boardClient.history.bind(boardClient),
@@ -998,7 +1018,8 @@ $effect(() => {
 
 const sessionActions = createBoardSessionActions({
 	editor,
-	spaceId: liveSpaceId,
+	home: spaceId,
+	live: liveSpaceId !== null,
 	isMobile: () => isMobile,
 	fetchHistory: history ? history.fetchHistory : undefined,
 	onOpen: () => onOpenSession,
@@ -1627,12 +1648,12 @@ onDestroy(() => {
 					{prompts}
 				/>
 			{/if}
-			{#if spaceId && sessionActions.replyItem}
-				{#key sessionActions.replyItem.id}
+			{#if sessionActions.reply}
+				{#key sessionActions.reply.id}
 					<BoardSessionReply
 						{editor}
-						{spaceId}
-						sessionId={sessionActions.replyItem.props.sessionId}
+						spaceId={sessionActions.reply.spaceId}
+						sessionId={sessionActions.reply.sessionId}
 						onClose={sessionActions.closeReply}
 					/>
 				{/key}
@@ -1744,7 +1765,7 @@ onDestroy(() => {
 				onAddLink={authoring ? () => openLink() : undefined}
 				onAddTaskResults={authoring ? addTaskResults : undefined}
 				onShowSource={showSource}
-				{onOpenTask}
+				onOpenTask={onOpenTask ? openTaskRun : undefined}
 				onRegenerateTask={generates ? regenerateTask : undefined}
 				{regeneratingItemId}
 				onAddToGeneration={generates ? addSelectionToGeneration : undefined}

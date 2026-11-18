@@ -182,9 +182,8 @@ export const authorizeHostedRoom = async (input: {
 export const authorizeBoardAwareness = async (input: {
   authToken: string;
   boardId: string;
-  spaceId: string;
   permission: "view" | "edit";
-}): Promise<boolean> => {
+}): Promise<string | null> => {
   const response = await fetch(`${gatewayConfig.apiBaseUrl}/internal/gateway/authorize-board-awareness`, {
     method: "POST",
     headers: {
@@ -193,13 +192,11 @@ export const authorizeBoardAwareness = async (input: {
       authorization: `Bearer ${input.authToken}`,
       ...buildTraceHeaders(),
     },
-    body: JSON.stringify({
-      boardId: input.boardId,
-      spaceId: input.spaceId,
-      permission: input.permission,
-    }),
+    body: JSON.stringify({ boardId: input.boardId, permission: input.permission }),
   });
-  return response.ok;
+  if (!response.ok) return null;
+  const body = (await response.json().catch(() => null)) as { spaceId?: unknown } | null;
+  return typeof body?.spaceId === "string" ? body.spaceId : null;
 };
 
 export const authorizeRealtimeRooms = async (input: {

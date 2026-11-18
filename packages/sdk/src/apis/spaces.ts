@@ -16,7 +16,7 @@ import type {
 } from "@cohub/protocol";
 import { getRealtimeSpaceRoom } from "@cohub/protocol/realtime/types";
 import { requireSessionContext } from "./session-context.js";
-import { BoardClient, readBoardId, SpaceBoardsApi } from "../board/client/index.js";
+import { readBoardId, SpaceBoardsApi } from "../board/client/index.js";
 import { isBoardPath } from "../board/model/index.js";
 import { ensureRealtimeConnected } from "../realtime.js";
 import { SpaceWalletApi } from "./space-wallet.js";
@@ -2478,8 +2478,9 @@ export class SpaceClient {
     return new SessionClient(this.id, sessionId, this.transport, this.websocketClient);
   }
 
+  /** @deprecated A Board needs no Space: use `boards.byId`. */
   board(boardId: string) {
-    return new BoardClient({ http: this.transport, websocket: this.websocketClient, spaceId: this.id, boardId });
+    return this.boards.byId(boardId);
   }
 
   updatePresence(meta?: Record<string, unknown> | null) {

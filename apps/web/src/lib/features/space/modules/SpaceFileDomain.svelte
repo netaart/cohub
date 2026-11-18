@@ -153,9 +153,9 @@ export type SpaceFileDomainProps = {
 		target: string | WorkspaceFileLinkTarget,
 	) => void | Promise<void>;
 	resolveWorkspaceAsset: ResolveWorkspaceAsset;
-	onOpenTask: (taskRunId: string) => void | Promise<void>;
+	onOpenTask: (taskRunId: string, spaceId?: string) => void | Promise<void>;
 	onOpenApp: (app: WorkspaceAppLaunch) => void;
-	onOpenSession: (sessionId: string) => void | Promise<void>;
+	onOpenSession: (sessionId: string, spaceId: string) => void | Promise<void>;
 	onRevealPath: (path: string) => void | Promise<void>;
 	onJumpToTurn?: (sequence: number) => void | Promise<void>;
 	onOpenTaskBrowser?: () => void | Promise<void>;

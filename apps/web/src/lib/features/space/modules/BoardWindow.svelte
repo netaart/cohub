@@ -18,20 +18,10 @@ import {
 } from "#lib/board/runtime/board-runtime.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
+import type { InlineBoardPanelState } from "./board-window-controller.svelte.ts";
 import PreviewHeader from "./PreviewHeader.svelte";
 import type { PreviewChrome, PreviewHeaderAction } from "./preview-header.ts";
 import type { Window } from "./windows.ts";
-
-type InlineBoardPanelState = {
-	path: string;
-	boardId: string | null;
-	document: BoardDocument | null;
-	playback: BoardPlaybackSnapshot | null;
-	loading: boolean;
-	saving: boolean;
-	error: string | null;
-	saveError: string | null;
-};
 
 type Props = {
 	board: InlineBoardPanelState;
@@ -63,9 +53,9 @@ type Props = {
 	/** Open a workspace file in the window panel (file cards route here). */
 	onOpenFile?: (path: string) => void | Promise<void>;
 	/** Open a task detail view (task cards route here). */
-	onOpenTask?: (taskRunId: string) => void | Promise<void>;
+	onOpenTask?: (taskRunId: string, spaceId?: string) => void | Promise<void>;
 	onOpenApp?: (app: { appId: string; name: string }) => void;
-	onOpenSession?: (sessionId: string) => void | Promise<void>;
+	onOpenSession?: (sessionId: string, spaceId: string) => void | Promise<void>;
 	newChatBackgroundPath?: string | null;
 	onToggleNewChatBackground?: (path: string, enabled: boolean) => void;
 };
@@ -98,6 +88,7 @@ let {
 
 const locale = $derived(getLocale());
 
+const home = $derived(board.spaceId ?? spaceId);
 const scope = $derived<BoardScope>(
 	checkpointId
 		? {
@@ -106,7 +97,7 @@ const scope = $derived<BoardScope>(
 				checkpointId,
 				assetSource: checkpointBoardAssetSource(spaceId, checkpointId),
 			}
-		: { kind: "space", spaceId },
+		: { kind: "space", spaceId: home, linked: home !== spaceId },
 );
 const editMode = $derived(checkpointId ? "view" : "edit");
 const live = $derived(!checkpointId);
@@ -179,7 +170,7 @@ const boardRuntimeModulePromise = $derived.by(() => {
 		{:then boardRuntimeModule}
 			{@const BoardRuntime = boardRuntimeModule.default}
 			<div class="min-h-0 flex-1">
-				{#key `${checkpointId ?? "live"}:${board.boardId}:${playDocument ? "play" : editMode}`}
+				{#key `${checkpointId ?? "live"}:${board.boardId}:${home}:${playDocument ? "play" : editMode}`}
 					<BoardRuntime
 						mode={playDocument ? "play" : editMode}
 						path={board.path}

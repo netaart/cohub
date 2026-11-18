@@ -85,7 +85,7 @@ export async function restoreBoardCheckpointSnapshots(input: {
       }
       restored.push({ path: relative(resolve(input.workspaceDir), absolutePath).replaceAll("\\", "/"), boardId });
     } catch (error) {
-      await deleteBoard(db, { spaceId: input.targetSpaceId, boardId }).catch(() => undefined);
+      await deleteBoard(db, { boardId }).catch(() => undefined);
       throw error;
     }
   }

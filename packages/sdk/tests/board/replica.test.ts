@@ -268,9 +268,9 @@ for (const status of [401, 403]) {
 test("shared replicas never cross users", (t) => {
 	const http = {} as Parameters<typeof leaseBoardReplica>[0];
 	const remote = staticBoardRemote("b", boardDocument({}));
-	const alice = leaseBoardReplica(http, "s", "b", remote, { userKey: "alice" });
-	const again = leaseBoardReplica(http, "s", "b", remote, { userKey: "alice" });
-	const bob = leaseBoardReplica(http, "s", "b", remote, { userKey: "bob" });
+	const alice = leaseBoardReplica(http, "b", remote, { userKey: "alice" });
+	const again = leaseBoardReplica(http, "b", remote, { userKey: "alice" });
+	const bob = leaseBoardReplica(http, "b", remote, { userKey: "bob" });
 	t.after(() => {
 		for (const lease of [alice, again, bob]) lease.release();
 	});

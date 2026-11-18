@@ -113,9 +113,8 @@ $effect(() => {
 $effect(() => {
 	const id = boardId;
 	if (!id) return;
-	const { replica, release } = sdk
-		.space(spaceId)
-		.board(id)
+	const { replica, release } = sdk.boards
+		.byId(id)
 		.replica({ userKey: loadedCacheUserKey() });
 	const adopt = () => {
 		board = { boardId: id, replica, state: replica.state };
@@ -139,14 +138,15 @@ function navigate(target: AppNavigationTarget) {
 	<div class="new-chat-board-state">{m.newchat_bg_unavailable({}, { locale })}</div>
 {:else if shown?.state.document}
 	{@const { boardId: id, replica, state } = shown}
+	{@const home = state.spaceId ?? spaceId}
 	{#await runtime then { default: BoardRuntime }}
-		{#key id}
+		{#key `${id}:${home}`}
 			<BoardRuntime
 				{path}
 				boardId={id}
 				document={shown.state.document}
 				playback={state.playback}
-				scope={{ kind: "space", spaceId }}
+				scope={{ kind: "space", spaceId: home, linked: home !== spaceId }}
 				{shell}
 				{onNavigationOpen}
 				launch={parsedLaunch}
@@ -154,11 +154,11 @@ function navigate(target: AppNavigationTarget) {
 				keysWhenUsed
 				syncError={state.error}
 				onCommit={(patch) => replica.apply(patch)}
-				onPlayback={(command) => sdk.space(spaceId).board(id).control(command)}
+				onPlayback={(command) => sdk.boards.byId(id).control(command)}
 				onRetrySync={() => replica.retry()}
-				onOpenFile={(file) => navigate({ kind: "file", spaceId, path: file })}
-				onOpenTask={(taskRunId) => navigate({ kind: "task", spaceId, taskRunId })}
-				onOpenSession={(sessionId) => navigate({ kind: "session", spaceId, sessionId })}
+				onOpenFile={(file) => navigate({ kind: "file", spaceId: home, path: file })}
+				onOpenTask={(taskRunId, taskSpaceId) => navigate({ kind: "task", spaceId: taskSpaceId ?? home, taskRunId })}
+				onOpenSession={(sessionId, sessionSpaceId) => navigate({ kind: "session", spaceId: sessionSpaceId, sessionId })}
 				onOpenApp={(app) => navigate({ kind: "app", ref: app.appId })}
 			/>
 		{/key}

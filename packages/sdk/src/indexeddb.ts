@@ -8,7 +8,9 @@ export type IndexedDb = {
 
 const connections = new Map<string, Promise<IDBDatabase>>();
 
-function open(name: string, version: number, upgrade: (db: IDBDatabase) => void): Promise<IDBDatabase> {
+export type IndexedDbUpgrade = (db: IDBDatabase, tx: IDBTransaction, oldVersion: number) => void;
+
+function open(name: string, version: number, upgrade: IndexedDbUpgrade): Promise<IDBDatabase> {
 	const existing = connections.get(name);
 	if (existing) return existing;
 	const opening = new Promise<IDBDatabase>((resolve, reject) => {
@@ -23,7 +25,7 @@ function open(name: string, version: number, upgrade: (db: IDBDatabase) => void)
 			reject(new Error("IndexedDB did not open in time."));
 		}, OPEN_TIMEOUT_MS);
 		const request = factory.open(name, version);
-		request.onupgradeneeded = () => upgrade(request.result);
+		request.onupgradeneeded = (event) => upgrade(request.result, request.transaction as IDBTransaction, event.oldVersion);
 		request.onsuccess = () => {
 			clearTimeout(timer);
 			const db = request.result;
@@ -53,7 +55,7 @@ function open(name: string, version: number, upgrade: (db: IDBDatabase) => void)
 	return opening;
 }
 
-export function indexedDb(name: string, version: number, upgrade: (db: IDBDatabase) => void): IndexedDb {
+export function indexedDb(name: string, version: number, upgrade: IndexedDbUpgrade): IndexedDb {
 	async function transact<T>(stores: string[], mode: IDBTransactionMode, work: IndexedDbWork<T>, retry = true): Promise<T> {
 		const db = await open(name, version, upgrade);
 		let tx: IDBTransaction;

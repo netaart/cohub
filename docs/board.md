@@ -310,9 +310,11 @@ A `task` item shows one run. Writers send only `props.taskRunId`; the server
 reads the run and writes `props.snapshot` (status, prompt, failure reason,
 start time and up to six results). A snapshot written by a client never wins
 over the run, so history restores, pastes and duplicates cannot roll a task
-back. Writing a run the author cannot view fails with `TASK_FORBIDDEN`; a run
-in another Space keeps the snapshot written with it, so forked and copied
-Boards stay as they were.
+back. A Board shows runs of any Space, and the snapshot names the run's
+`spaceId`. Writing a run the author cannot view fails with `TASK_FORBIDDEN`;
+placing a run shares its card, kept current, with the Board's readers, while
+opening the run still takes access to its Space. Cards copied without a viewer,
+as forks restore them, keep the snapshot they were copied with.
 
 ```sh
 cohub generate "a calm lake at sunrise" -m <model> --async --json \
@@ -320,8 +322,8 @@ cohub generate "a calm lake at sunrise" -m <model> --async --json \
   | cohub boards apply plan.board -i -
 ```
 
-When a run finishes, the worker writes its final snapshot onto every Board in
-the run's Space that shows it, one version per Board, attributed to the task
+When a run finishes, the worker writes its final snapshot onto every Board that
+shows it, one version per Board, attributed to the task
 (`source.via = "task"`). Items deleted meanwhile stay deleted. When the first
 result is a sized image or video, the card takes its aspect ratio and keeps its
 long edge, top-left corner in place; nearby content may be overlapped. Clients
@@ -336,9 +338,9 @@ Results laid out from a card become ordinary media items that keep an
 A `session` item shows one chat. Writers send only `props.sessionId`; the server
 reads the Session and writes `props.snapshot`: its title, latest message as plain
 text, source, last activity, and whether the last run failed or was lost. As with
-tasks, a snapshot written by a client never wins over the Session. Putting a
-Session the author cannot view on a Board fails with `SESSION_FORBIDDEN`; a
-Session from another Space keeps the snapshot written with it. A Session with its own
+tasks, a snapshot written by a client never wins over the Session, and it names
+the Session's `spaceId`: a Board shows chats of any Space. Putting a Session the
+author cannot view on a Board fails with `SESSION_FORBIDDEN`. A Session with its own
 access policy may be hidden from the Board's readers, so its snapshot keeps only the
 title, source and status.
 
@@ -349,7 +351,7 @@ jq -n --arg id "$COHUB_SESSION_ID" '{items:{chat:{type:"session",position:{x:80,
 
 Snapshots follow the Session lazily: changes gather for two minutes, then the
 worker rewrites only the cards that are out of date, one version per Board,
-attributed to the Session (`source.via = "session"`). Viewers in the Space do not
+attributed to the Session (`source.via = "session"`). Viewers in its Space do not
 wait for it: their cards show the running state, latest message and unread dot
 live from the same data as the Chats list, without writing the document.
 
@@ -560,6 +562,15 @@ cohub boards path ship -i boards/path.json > boards/path-track.json
 distance. Original vertices are retained so interpolation does not cut corners.
 It creates no live dependency on another item. Use scripts for procedural
 meshes, physics and specialized drawings.
+
+## Home and links
+
+A Board is addressed by its id alone (`/api/boards/:boardId`). The Space that
+created it is its home: its relative file paths and script modules resolve there,
+new generations land there by default, and its members can view and edit it. A
+`.board` file is a link holding the id, so any Space can link the same Board;
+copying the file links it again, and deleting it leaves the Board in place. A link
+grants no access. Reads report the home as `spaceId`.
 
 ## Reading
 
