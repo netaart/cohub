@@ -678,3 +678,4 @@ if (state.orderId) await client.app.commerce.getOrder(state.orderId);
 - [SDK](/zh/docs/developers/sdk) —— 客户端全貌
 - [CLI](/zh/docs/developers/cli) —— 终端工作流
 - [示例 App](https://github.com/netaart/cohub/blob/main/cohub-apps/README.md) —— 按场景的可运行示例
+- [Space 钩子](/zh/features/space-hooks) —— 钩子可以用 `uses` 调用 App Action
