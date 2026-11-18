@@ -33,7 +33,7 @@ final class StoreAcceptanceTests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let permission = springboard.buttons["Continue"]
         if permission.waitForExistence(timeout: 5) { permission.tap() }
-        let browser = app
+        let browser = try XCTUnwrap(app)
         #else
         let browser = XCUIApplication(bundleIdentifier: "com.apple.Safari")
         #endif
