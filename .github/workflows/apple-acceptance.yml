@@ -31,7 +31,7 @@ jobs:
       matrix:
         device: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.device != 'all' && format('["{0}"]', inputs.device) || '["mac","iphone","ipad"]') }}
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+      DEVELOPER_DIR: ${{ matrix.device == 'mac' && '/Applications/Xcode_26.0.1.app/Contents/Developer' || '/Applications/Xcode_16.4.app/Contents/Developer' }}
     steps:
       - uses: actions/checkout@v7
       - run: brew install xcodegen
@@ -110,7 +110,7 @@ jobs:
           devices = json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','--json'],timeout=120))['devices']
           prefix = 'iPhone' if os.environ['DEVICE'] == 'iphone' else 'iPad'
           candidates = [{**d,'runtime':runtime} for runtime, rows in devices.items() if 'iOS' in runtime for d in rows if d['name'].startswith(prefix)]
-          candidates = [d for d in candidates if 'iOS-26-' in d['runtime']]
+          candidates = [d for d in candidates if 'iOS-18-' in d['runtime']]
           candidates.sort(key=lambda d: ('Pro Max' in d['name'] if prefix == 'iPhone' else '13-inch' in d['name'], d['name']), reverse=True)
           chosen = candidates[0]
           print('Booting:',chosen['name'],flush=True)
