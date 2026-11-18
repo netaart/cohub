@@ -92,6 +92,23 @@ export function appCoverUrl(
 	);
 }
 
+/**
+ * First-paint poster for a public Board App: only the author's cover, never the
+ * icon or the platform OG fallback. Space Apps get none, so a shared or cached
+ * document never carries their title or image. The key changes per App version.
+ */
+export function publicBoardPoster(detail: {
+	app: Pick<AppDetailResponse["app"], "id" | "meta" | "visibility">;
+	content?: { kind: string; url: string } | null;
+}) {
+	const { app, content } = detail;
+	if (content?.kind !== "board" || app.visibility !== "public") return null;
+	return {
+		key: `${app.id}:${content.url}`,
+		imageUrl: appCoverUrl(app.meta, content.url),
+	};
+}
+
 export function appThemeColor(meta: AppMeta | null | undefined) {
 	if (!isRecord(meta)) return null;
 	return (

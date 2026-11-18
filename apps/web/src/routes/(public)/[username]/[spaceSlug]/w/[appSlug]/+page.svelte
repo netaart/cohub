@@ -7,11 +7,12 @@ import type {
 	PublicAppVersionSummary,
 } from "@neta-art/cohub";
 import { onMount, untrack } from "svelte";
-import { buildAppPageMeta } from "#lib/app-page-meta.ts";
+import { buildAppPageMeta, publicBoardPoster } from "#lib/app-page-meta.ts";
 import {
 	reportAppPromotionReady,
 	startAppPromotion,
 } from "#lib/app-promotion.ts";
+import AppBoardPoster from "#lib/components/app/AppBoardPoster.svelte";
 import AppPageHead from "#lib/components/app/AppPageHead.svelte";
 import AppSurface from "#lib/components/app/AppSurface.svelte";
 import AppVersionBar from "#lib/components/app/AppVersionBar.svelte";
@@ -90,6 +91,8 @@ let resolvedVersionParam: number | null = null;
 /** AppSurface uses window/postMessage; mount only after hydration. */
 let surfaceReady = $state(false);
 let nested = $state(false);
+/** A Cohub host took over this navigation; nothing renders here. */
+let hostHandled = $state(false);
 let surfaceLoaded = false;
 let promotionReadyReported = false;
 let promotionRuntime: ReturnType<typeof startAppPromotion> | null = null;
@@ -265,6 +268,23 @@ const pageMeta = $derived(
 			}),
 );
 
+/**
+ * Server-rendered title and cover for a public Board, kept over the mounting
+ * surface until its stage starts. Only the anonymous SSR detail qualifies.
+ */
+const poster = $derived(
+	props.data.mode === "ready" && ready ? publicBoardPoster(ready) : null,
+);
+const posterKey = $derived(poster?.key ?? null);
+let posterStatus = $derived.by<"loading" | "ready" | "failed">(() => {
+	void posterKey;
+	return "loading";
+});
+
+function handleBoardSettled(ok: boolean) {
+	posterStatus = ok ? "ready" : "failed";
+}
+
 onMount(() => {
 	const host = cohubHostWindow();
 	if (!host) {
@@ -273,7 +293,8 @@ onMount(() => {
 	}
 	nested = true;
 	void offerAppOpen(host, window.location.href).then((handled) => {
-		if (!handled) surfaceReady = true;
+		if (handled) hostHandled = true;
+		else surfaceReady = true;
 	});
 });
 
@@ -458,6 +479,12 @@ function handleSelectVersion(version: number | null) {
 	/>
 {/snippet}
 
+{#if poster && !hostHandled}
+	{#key poster.key}
+		<AppBoardPoster title={pageMeta.name} imageUrl={poster.imageUrl} status={posterStatus} />
+	{/key}
+{/if}
+
 {#if ready && surfaceReady}
 	<AppSurface
 		app={ready.app}
@@ -475,6 +502,7 @@ function handleSelectVersion(version: number | null) {
 		onNavigationOpen={handleNavigationOpen}
 		onCloseRequest={handleCloseRequest}
 		onReady={handleSurfaceReady}
+		onBoardSettled={poster ? handleBoardSettled : undefined}
 	/>
 {:else if ready}
 	<!-- SSR / first paint: head already has share meta; surface hydrates client-side. -->

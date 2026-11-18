@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AppMeta } from "@neta-art/cohub";
-import { appDisplayTitle, appIconUrl } from "#lib/app-page-meta.ts";
+import {
+	appDisplayTitle,
+	appIconUrl,
+	publicBoardPoster,
+} from "#lib/app-page-meta.ts";
 
 test("appIconUrl keeps absolute and inline icons", () => {
 	assert.equal(
@@ -43,4 +47,44 @@ test("appDisplayTitle prefers title, then legacy name, then fallback", () => {
 	);
 	assert.equal(appDisplayTitle({} as AppMeta, "slug"), "slug");
 	assert.equal(appDisplayTitle(null, "slug"), "slug");
+});
+
+test("publicBoardPoster uses only the author cover of a public Board", () => {
+	const content = {
+		kind: "board" as const,
+		url: "https://cdn.example/a/v2/board.json",
+	};
+	const app = (meta: AppMeta, visibility: "public" | "space" = "public") => ({
+		id: "app_1",
+		meta,
+		visibility,
+	});
+	assert.deepEqual(
+		publicBoardPoster({ app: app({ image: "cover.png" } as AppMeta), content }),
+		{
+			key: "app_1:https://cdn.example/a/v2/board.json",
+			imageUrl: "https://cdn.example/a/v2/cover.png",
+		},
+	);
+	assert.equal(
+		publicBoardPoster({
+			app: app({ icon: "https://cdn.example/icon.png" } as AppMeta),
+			content,
+		})?.imageUrl,
+		null,
+	);
+	assert.equal(
+		publicBoardPoster({
+			app: app({ image: "https://cdn.example/c.png" } as AppMeta, "space"),
+			content,
+		}),
+		null,
+	);
+	assert.equal(
+		publicBoardPoster({
+			app: app({} as AppMeta),
+			content: { kind: "web", url: "https://cdn.example/index.html" },
+		}),
+		null,
+	);
 });

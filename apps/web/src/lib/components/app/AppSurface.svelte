@@ -118,6 +118,8 @@ type Props = {
 	onSurfaceHost?: (host: AppSurfaceHost) => (() => void) | undefined;
 	onComposerChip?: (chip: AppComposerChip | null) => void;
 	onReady?: () => void;
+	/** A Board App's current content started (`true`) or failed to start (`false`). */
+	onBoardSettled?: (ok: boolean) => void;
 	/** The App asked to close the surface it runs in. */
 	onCloseRequest?: () => void;
 	/** The App asked to change its overlay geometry or input region. */
@@ -159,6 +161,7 @@ const {
 	onSurfaceHost = undefined,
 	onComposerChip = undefined,
 	onReady = undefined,
+	onBoardSettled = undefined,
 	onCloseRequest = undefined,
 	onConfigureRequest = undefined,
 	onPointerState = undefined,
@@ -668,6 +671,7 @@ onMount(() => {
 				{shell}
 				{onNavigationOpen}
 				onReady={reportReady}
+				onSettled={onBoardSettled}
 			/>
 		</div>
 	{:else if fileContent}

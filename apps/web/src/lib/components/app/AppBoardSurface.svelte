@@ -15,6 +15,7 @@ import { type BoardPlay, loadBoardPlay } from "#lib/board/board-play.svelte.ts";
 import {
 	type BoardScope,
 	cohubPixiRuntime,
+	settleBoardStage,
 } from "#lib/board/runtime/board-runtime.ts";
 import { openBoardPlayStore } from "#lib/cache/repositories/board-play-saves-repo.ts";
 import CenteredLoading from "#lib/components/CenteredLoading.svelte";
@@ -34,6 +35,7 @@ const {
 	shell,
 	onNavigationOpen,
 	onReady,
+	onSettled,
 }: {
 	content: Extract<WorkContent, { kind: "board" }>;
 	appId: string;
@@ -44,11 +46,18 @@ const {
 	shell?: AppRuntimeShellContext;
 	onNavigationOpen?: AppNavigationHandler;
 	onReady?: () => void;
+	/** The current content's stage started (`true`) or cannot start (`false`). */
+	onSettled?: (ok: boolean) => void;
 } = $props();
 
 const locale = $derived(getLocale());
 const runtime = cohubPixiRuntime.load();
-runtime.catch(() => onReady?.());
+let stage: BoardStage | null = null;
+
+function settle(ok: boolean) {
+	onSettled?.(ok);
+	onReady?.();
+}
 
 let loaded = $state.raw<{
 	url: string;
@@ -75,6 +84,9 @@ $effect(() => {
 	let cancelled = false;
 	let play: BoardPlay | null = null;
 	failed = false;
+	runtime.catch(() => {
+		if (!cancelled) settle(false);
+	});
 	loadBoardPlay(url, { playable, store })
 		.then((next) => {
 			if (cancelled) return;
@@ -84,7 +96,7 @@ $effect(() => {
 		.catch(() => {
 			if (cancelled) return;
 			failed = true;
-			onReady?.();
+			settle(false);
 		});
 	return () => {
 		cancelled = true;
@@ -135,10 +147,9 @@ function undoReset() {
 
 $effect(() => dismissUndo);
 
-function handleStage(stage: BoardStage | null) {
-	void stage?.ready.then(() =>
-		requestAnimationFrame(() => requestAnimationFrame(() => onReady?.())),
-	);
+function handleStage(next: BoardStage | null) {
+	stage = next;
+	if (next) settleBoardStage(next, () => stage === next, settle);
 }
 </script>
 

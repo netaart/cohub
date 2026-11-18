@@ -95,6 +95,32 @@ export const cohubPixiRuntime = {
 	load: loadCohubPixiRuntime,
 } as const;
 
+/**
+ * Settles a mounted stage once: success after `ready` resolves true and two
+ * frames paint; `false` (canvas never started) or a rejection is failure. A
+ * stage that is no longer `current` reports nothing.
+ */
+export function settleBoardStage(
+	stage: BoardStage,
+	current: () => boolean,
+	onSettled: (ok: boolean) => void,
+) {
+	void stage.ready.then(
+		(ok) => {
+			if (!current()) return;
+			if (!ok) return onSettled(false);
+			requestAnimationFrame(() =>
+				requestAnimationFrame(() => {
+					if (current()) onSettled(true);
+				}),
+			);
+		},
+		() => {
+			if (current()) onSettled(false);
+		},
+	);
+}
+
 export function preloadBoardRuntime(path: string) {
 	if (isBoardFile(path)) void loadCohubPixiRuntime().catch(() => undefined);
 }
