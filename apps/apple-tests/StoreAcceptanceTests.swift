@@ -70,12 +70,15 @@ final class StoreAcceptanceTests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let hosts = [app!, XCUIApplication(bundleIdentifier: "com.apple.SafariViewService"), XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")]
         var browser: XCUIApplication?
-        for _ in 0..<15 {
+        for attempt in 0..<10 {
             for host in [app!, springboard] {
                 let permission = host.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "继续"])).firstMatch
                 if permission.exists && permission.isHittable { permission.tap() }
             }
-            if let shown = hosts.first(where: { $0.webViews.textFields.firstMatch.exists }) { browser = shown; break }
+            if let shown = hosts.first(where: { $0.state == .runningForeground && $0.webViews.textFields.firstMatch.exists }) { browser = shown; break }
+            if attempt % 2 == 0, app.state == .runningForeground, start.exists && start.isHittable {
+                start.tap()
+            }
             try await Task.sleep(for: .seconds(3))
         }
         guard let browser else {
