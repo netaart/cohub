@@ -13,6 +13,13 @@ final class StoreAcceptanceTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        addUIInterruptionMonitor(withDescription: "System sign-in consent") { alert in
+            let proceed = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "继续"])).firstMatch
+            guard proceed.exists else { return false }
+            print("Authentication consent accepted")
+            proceed.tap()
+            return true
+        }
         #if os(macOS)
         let path = try XCTUnwrap(ProcessInfo.processInfo.environment["COHUB_MAC_APP_PATH"])
         app = XCUIApplication(url: URL(fileURLWithPath: path))
@@ -54,6 +61,7 @@ final class StoreAcceptanceTests: XCTestCase {
         XCTAssertTrue(start.waitForExistence(timeout: 45), "The first screen did not become interactive")
         capture("01-welcome")
         start.tap()
+        app.tap()
         try await Task.sleep(for: .seconds(3))
         captureScreen("diagnostic-sign-in-start")
         let requestedAt = Date()
