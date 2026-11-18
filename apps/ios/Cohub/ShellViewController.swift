@@ -60,6 +60,7 @@ final class ShellViewController: UIViewController, WKNavigationDelegate, WKUIDel
 
     private func makeWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        configuration.limitsNavigationsToAppBoundDomains = true
         configuration.websiteDataStore = .default()
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
