@@ -2073,9 +2073,13 @@ router.post("/:id/runtime/models/:harness/refresh", async (c) => {
   const registration = await getRuntimeRegistration(spaceId);
   if (!registration?.client?.catalogRefresh || !registration.capabilities.harnesses.includes(harness)) return c.json({ accepted: false });
   const { connectionId } = registration;
-  const acquired = await redisCommandClient.set(`runtime:catalog-refresh:${connectionId}:${harness}`, "1", "EX", 30, "NX");
-  if (acquired) await redisCommandClient.publish(RUNTIME_CATALOG_REFRESH_CHANNEL, JSON.stringify({ type: "runtime.catalog.refresh", spaceId, connectionId, harness }));
-  return c.json({ accepted: true }, 202);
+  const accepted = await redisCommandClient.eval(`
+    if redis.call('EXISTS', KEYS[1]) == 1 then return 1 end
+    if redis.call('PUBLISH', ARGV[1], ARGV[2]) == 0 then return 0 end
+    redis.call('SET', KEYS[1], '1', 'EX', 30)
+    return 1`, 1, `runtime:catalog-refresh:${connectionId}:${harness}`, RUNTIME_CATALOG_REFRESH_CHANNEL,
+    JSON.stringify({ type: "runtime.catalog.refresh", spaceId, connectionId, harness }));
+  return accepted === 1 ? c.json({ accepted: true }, 202) : c.json({ accepted: false });
 });
 
 router.get("/:id/runtime", async (c) => {

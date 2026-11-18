@@ -10,6 +10,7 @@ import { createClient } from "../client.js";
 import { currentIdentityKey } from "../space.js";
 import { CLI_VERSION } from "../version.js";
 import { ensureSandboxdBinary } from "../commands/sandboxd-binary.js";
+import type { CatalogCache } from "./model-catalog.js";
 import { serveRuntime, type Execution } from "./connection.js";
 import { discoverHarnesses, refreshHarnesses, type HarnessExecutables } from "./harnesses/index.js";
 import { RuntimeDiagnostics, serializeDiagnosticError, type RuntimeDiagnostic, type RuntimeDiagnosticLevel } from "./diagnostics.js";
@@ -32,6 +33,7 @@ export type RuntimeLaunch = {
   harnesses: LocalHarness[];
   executables: HarnessExecutables;
   capabilities?: RuntimeCapabilities;
+  catalogCache?: CatalogCache;
   background: boolean;
   verbose?: boolean;
   /** Start importing earlier conversations as soon as the Runtime is connected. */
@@ -172,9 +174,10 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     });
     onState({ ...status });
     diagnostics.log("info", "runtime.cli_started", { platform: process.platform, node: process.versions.node, harnesses: config.harnesses });
+    const cache = config.catalogCache ?? {};
     const [binary, capabilities] = await Promise.all([
       ensureSandboxdBinary({ onStatus: (message) => diagnostics.log("info", "sandboxd.download", { message }) }),
-      config.capabilities ?? discoverHarnesses(config.harnesses, config.executables, config.root),
+      config.capabilities ?? discoverHarnesses(config.harnesses, config.executables, config.root, undefined, cache),
     ]);
     signal.throwIfAborted();
     const url = new URL(resolveWebsocketUrl()); url.pathname = url.pathname.replace(/\/ws$/, "/runtime/relay");
@@ -351,7 +354,7 @@ export async function runRuntime(config: RuntimeLaunch, onState: (status: Runtim
     let importRequested = Boolean(config.importHistory);
     await serveRuntime({
       spaceId: config.spaceId, cwd: config.root, url: url.toString(), capabilities,
-      refreshCapabilities: (current, target) => refreshHarnesses(current, config.executables, config.root, (harness, error) => diagnostics.log("warn", "runtime.harness_catalog_failed", { harness, error: serializeDiagnosticError(error) }), target),
+      refreshCapabilities: (current, target) => refreshHarnesses(current, config.executables, config.root, (harness, error) => diagnostics.log("warn", "runtime.harness_catalog_failed", { harness, error: serializeDiagnosticError(error) }), { target, cache }),
       runtimeId: status.runtimeId, diagnostics, token, signal, executor: native.executor, executions,
       onReady: () => { update({ harnessConnected: true }); retryDisconnectedBridge?.(); },
       onDisconnected: () => { native.connect(null); update({ harnessConnected: false }); retryDisconnectedBridge?.(); },

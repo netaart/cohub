@@ -104,14 +104,23 @@ test("custom Codex providers retain the native picker catalog and reasoning choi
 test("custom Codex providers retain an unlisted configured model without guessing capabilities", () => {
   const config = { model_provider: "custom", model: "unlisted" };
   const fallback = { harness: "codex", provider: "custom", id: "unlisted", name: "unlisted", isDefault: true };
-  const previous = codexModelCatalog({ config }, [{ id: "listed" }]);
-  assert.deepEqual(codexModelCatalog({ config }, [], previous), previous);
-  assert.deepEqual(codexModelCatalog({ config: { ...config, model_provider: "changed" } }, [], previous), [{ ...fallback, provider: "changed" }]);
   assert.deepEqual(codexModelCatalog({ config }, []), [fallback]);
   assert.deepEqual(codexModelCatalog({ config }, [{ id: "listed", isDefault: true }]), [
     fallback,
     { harness: "codex", provider: "custom", id: "listed", name: "listed" },
   ]);
+});
+
+test("an empty Codex list reuses native choices, not the previous configuration", () => {
+  const cache = {};
+  const entries = [{ id: "a", isDefault: true, defaultReasoningEffort: "medium", supportedReasoningEfforts: ["low", "medium", "high"].map((reasoningEffort) => ({ reasoningEffort })), additionalSpeedTiers: ["priority"] }, { id: "b" }];
+  codexModelCatalog({ config: { model_reasoning_effort: "high", service_tier: "fast" } }, entries, cache);
+  for (const config of [{ model_reasoning_effort: "low", service_tier: "default" }, {}]) {
+    assert.deepEqual(codexModelCatalog({ config }, [], cache), codexModelCatalog({ config }, entries));
+  }
+  for (const config of [{ model: "a" }, { model_provider: "changed" }]) {
+    assert.deepEqual(codexModelCatalog({ config }, [], structuredClone(cache)), codexModelCatalog({ config }, []));
+  }
 });
 
 test("a configured Codex service_tier is the default where the model offers it", () => {

@@ -187,7 +187,9 @@ export function registerRuntime(program: Command) {
         const spaceId = await resolveRuntimeTarget(program, options.space);
         const result = await createClient().space(spaceId).requestRuntimeCatalogRefresh(name);
         if (jsonRequested(options)) outJson(result);
-        else process.stdout.write(result.accepted ? "Refresh requested\n" : "Runtime refresh unavailable\n");
+        else if (result.accepted) process.stdout.write("Refresh requested\n");
+        else process.stderr.write("Refresh unavailable; check the connection and Harness with cohub runtime status\n");
+        if (!result.accepted) process.exitCode = 1;
       } catch (cause) { reportFailure(cause); }
     });
 

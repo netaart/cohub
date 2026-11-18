@@ -101,7 +101,7 @@ export async function serveRuntime(options: RuntimeConnectionOptions) {
   const scheduled = new Set<LocalHarness | undefined>();
   const refreshCatalog = (harness?: LocalHarness) => {
     const discover = options.refreshCapabilities;
-    if (!discover || scheduled.has(undefined) || scheduled.has(harness) || options.signal.aborted) return;
+    if (!discover || scheduled.has(harness) || options.signal.aborted) return;
     scheduled.add(harness);
     refreshQueue = refreshQueue.then(async () => {
       if (options.signal.aborted) return;

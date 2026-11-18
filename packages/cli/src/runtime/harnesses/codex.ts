@@ -181,7 +181,7 @@ export const codexHarness: LocalHarnessAdapter = {
         if (entries.length > 2000 || cursor && cursors.has(cursor)) throw new Error("Invalid model catalog pagination");
         if (cursor) cursors.add(cursor);
       } while (cursor);
-      return codexModelCatalog(config, entries, options?.previous);
+      return codexModelCatalog(config, entries, options?.cache);
     } finally { await rpc.close(); }
   },
   async approvalModes(executable) {
