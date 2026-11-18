@@ -4,8 +4,13 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
-## v2.104 — 2026-11-17
+## v2.104 — 2026-11-18
 
+- **Cold prompt cache notice**: long chats now warn when the provider's prompt cache has expired, showing the token count and estimated cost of the next resend, with a one-click **Compact first** action that compacts the session before the next Turn. Exposed end to end through the API, SDK, and CLI (`--compact-first`).
+- **Configurable compaction summarizer**: a new `contextCompaction` model task lets compaction summaries run on a dedicated model instead of the session model, with output reserves sized against the summarizer's own context window.
+- **Pi 1.0 Local Runtime**: the Runtime now drives Pi 1.0 and later; Pi 0.x sessions sync read-only. The upgrade to pi-ai/pi-agent-core 1.5.2 required vendoring the removed compaction algorithm as a documented bridge, and Anthropic message threads are explicitly disabled until Cohub opts in.
+- **Mac App Store distribution**: the desktop shell gains a sandboxed, App Store–signed build sharing one Bundle ID and App Store Connect record with iOS, with system-browser sign-in, Keychain credentials, and a signing/upload pipeline for IPA and PKG artifacts.
+- **Board input recording redesign**: recording moved from a floating chip into Board scripts settings with an explanation of what it captures, leaving only a compact timer on the canvas; bottom prompts now dock above the desktop toolbar and stack with mobile sheets instead of covering them.
 - **Camera pitch and bearing**: Board cameras can now tip and turn. Camera tracks, `ctx.present("camera", …)` and `#view=x,y,zoom,pitch,bearing` links take `pitch` (0–60° toward the horizon) and `bearing` (degrees clockwise), both about the middle of the view, so the flat Board shows as ground in perspective with lifted items and model objects standing on it. Viewers pan and zoom across the ground, script screen layers stay on screen, editing levels the camera first, and `--camera` exports keep the angles
 - **Models in motion**: `props.model` takes `time`, `loop` and `fade`; changing `animation` crossfades over `fade` milliseconds, `autoplay` plays the clip on the Board clock, `time` drives a clip from a timeline track or a script, and `loop: false` holds the last pose. Object models, running cards and exports pose every model by the same rule, and loaded models record their clips in `props.snapshot.clips`
 - **Script-directed camera**: `ctx.present("camera", { focus, zoom, center, shake })` steers play and read-only views and camera exports, while editing ignores it; a viewer's pan takes control until **Back to the camera**. Exports draw model objects in their pose and model cards as stills, and `renderBoardExport` takes `models` from `loadBoardObjectModels` for model-aware hosts
@@ -15,6 +20,8 @@ All notable changes to Cohub are documented in this file.
 
 ### Bug Fixes
 
+- iOS: native messaging now works on app-bound domains by limiting navigations to the declared domain set
+- Native shells: avoid linking a WebKit runtime library that older macOS and iOS versions do not ship
 - **App authorization on slow networks**: an authorization request that names the Space the App was invoked in now reuses a cached grant before loading the viewer's Space list, and a consent dialog whose Space list failed reloads it on confirm instead of repeating the error; a host can label its confirm action as a retry while `pendingAuth.spaces` is `null`
 - **Sandbox hardening**: sandbox pods now drop every Linux capability, disallow privilege escalation and run under the default seccomp profile, and a NetworkPolicy blocks the cloud instance metadata service (`169.254.169.254`, `100.100.100.200` and the IPv6 `fd00:ec2::254`) for every pod in the sessions namespace, closing an egress path from untrusted sandbox code to node credentials
 - **Public Space responses trimmed**: non-editors now get only what the Space page displays — no env vars, config, bootstrap credentials, storage repo name, checkpoint ids, workspace usage or full sandbox details — and session detail trims the Space for non-members, while listing checkpoints requires Space membership
