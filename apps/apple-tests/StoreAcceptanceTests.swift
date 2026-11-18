@@ -31,14 +31,22 @@ final class StoreAcceptanceTests: XCTestCase {
 
         #if os(iOS)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let permission = springboard.buttons["Continue"]
-        if permission.waitForExistence(timeout: 5) { permission.tap() }
-        let browser = try XCTUnwrap(app)
+        for host in [app!, springboard] {
+            let permission = host.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Continue", "继续"])).firstMatch
+            if permission.waitForExistence(timeout: 3) { permission.tap() }
+        }
+        let hosts = [app!, XCUIApplication(bundleIdentifier: "com.apple.SafariViewService"), XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")]
+        var browser = app!
+        for host in hosts where host.textFields.firstMatch.waitForExistence(timeout: 10) { browser = host; break }
         #else
         let browser = XCUIApplication(bundleIdentifier: "com.apple.Safari")
         #endif
         let field = browser.textFields.firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 35), "The native authentication session did not display the sign-in page")
+        guard field.waitForExistence(timeout: 20) else {
+            capture("diagnostic-sign-in")
+            print(app.debugDescription)
+            throw NSError(domain: "Native sign-in page did not appear", code: 1)
+        }
         field.tap()
         field.typeText(email)
         let signIn = browser.buttons.matching(NSPredicate(format: "label IN %@", ["Sign in", "Continue", "登录", "继续"])).firstMatch

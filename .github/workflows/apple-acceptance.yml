@@ -113,7 +113,7 @@ jobs:
           for manifest in (root/'attachments').rglob('manifest.json'):
             def visit(value):
               if isinstance(value,dict):
-                name=value.get('suggestedHumanReadableName',''); file=value.get('exportedFileName','')
+                name=value.get('suggestedHumanReadableName',''); file=value.get('exportedFileName',value.get('fileName',''))
                 if name.startswith('STORE_') and file:
                   source=manifest.parent/file
                   if source.is_file():shutil.copyfile(source,output/(name if name.endswith('.png') else name+'.png'))
@@ -122,6 +122,8 @@ jobs:
                 for item in value:visit(item)
             visit(json.loads(manifest.read_text()))
           print('Exported store screenshots:',len(list(output.glob('*.png'))))
+          if not list(output.glob('*.png')):
+            for file in (root/'attachments').glob('manifest.json'):print(file.read_text()[:3000])
           PY
           fi
       - name: Mac launch diagnostics
