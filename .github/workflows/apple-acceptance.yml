@@ -76,7 +76,7 @@ jobs:
           import CoreGraphics
           let display = CGMainDisplayID()
           let modes = CGDisplayCopyAllDisplayModes(display, [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary) as? [CGDisplayMode] ?? []
-          if let mode = modes.filter({ $0.width >= 1440 && $0.height >= 900 }).min(by: { $0.width * $0.height < $1.width * $1.height }) {
+          if let mode = modes.filter({ $0.width >= 1920 && $0.height >= 1080 }).min(by: { $0.width * $0.height < $1.width * $1.height }) {
               let result = CGDisplaySetDisplayMode(display, mode, nil)
               print("Display: \(mode.width)x\(mode.height), result: \(result.rawValue)")
           }

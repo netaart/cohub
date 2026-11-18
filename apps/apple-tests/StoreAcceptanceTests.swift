@@ -18,9 +18,12 @@ final class StoreAcceptanceTests: XCTestCase {
         #endif
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         #if os(macOS)
-        app.launchArguments += ["-NSWindow Frame Cohub", "0 0 1280 800 0 0 1280 1024"]
+        app.launchArguments += ["-NSWindow Frame Cohub", "0 0 1440 900 0 0 1920 1080"]
         #endif
         app.launch()
+        #if os(macOS)
+        resizeWindow()
+        #endif
     }
 
     func testLoginAndCapture() async throws {
@@ -32,7 +35,10 @@ final class StoreAcceptanceTests: XCTestCase {
             password.typeText(try XCTUnwrap(ProcessInfo.processInfo.environment["COHUB_TEST_KEYCHAIN_PASSWORD"]))
             security.buttons["Always Allow"].tap()
         }
-        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 45), "The review session did not load in the sandboxed screenshot copy")
+        guard app.textViews.firstMatch.waitForExistence(timeout: 45) else {
+            capture("diagnostic-session")
+            throw NSError(domain: "The review session did not load", code: 1)
+        }
         capture("02-new-chat")
         #else
         let start = app.buttons.matching(NSPredicate(format: "label IN %@", ["Start", "Start a Space", "Sign in", "登录", "开始"])).firstMatch
@@ -83,23 +89,35 @@ final class StoreAcceptanceTests: XCTestCase {
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.textViews.firstMatch.waitForExistence(timeout: 45), "The signed-in session did not survive relaunch")
+        guard app.textViews.firstMatch.waitForExistence(timeout: 45) else { throw NSError(domain: "The session did not survive relaunch", code: 1) }
         capture("04-restored-session")
 
         if let space = ProcessInfo.processInfo.environment["COHUB_SCREENSHOT_SPACE"], !space.isEmpty {
             for language in ["en", "zh-Hans"] {
+                app.terminate()
+                app.launchArguments = ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "en" ? "en_US" : "zh_CN", "-lastPage", "/settings/general", "-lastPath", "/settings/general", "-tabSession", ""]
+                app.launch()
+                let languageButton = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", language == "en" ? "English" : "简体中文")).firstMatch
+                if languageButton.waitForExistence(timeout: 25), languageButton.isHittable { languageButton.tap() }
                 for (name, path, heading) in [
-                    ("05-launch-plan", "/spaces/\(space)/files/launch-plan.md", "A small idea"),
-                    ("06-creative-brief", "/spaces/\(space)/files/creative-brief.md", "Welcome to the studio"),
+                    ("05-launch-plan", "/spaces/\(space)/files/\(language == "en" ? "launch-plan.md" : "launch-plan-zh.md")", language == "en" ? "A small idea" : "把想法变成作品"),
+                    ("06-creative-brief", "/spaces/\(space)/files/\(language == "en" ? "creative-brief.md" : "creative-brief-zh.md")", language == "en" ? "Welcome to the studio" : "欢迎来到创意工作室"),
                 ] {
                     app.terminate()
                     app.launchArguments = ["-AppleLanguages", "(\(language))", "-AppleLocale", language == "en" ? "en_US" : "zh_CN", "-lastPage", path, "-lastPath", path, "-tabSession", ""]
                     #if os(macOS)
-                    app.launchArguments += ["-NSWindow Frame Cohub", "0 0 1280 800 0 0 1280 1024"]
+                    app.launchArguments += ["-NSWindow Frame Cohub", "0 0 1440 900 0 0 1920 1080"]
                     #endif
                     app.launch()
-                    let content = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", heading)).firstMatch
-                    XCTAssertTrue(content.waitForExistence(timeout: 45), "The sample document preview did not load")
+                    #if os(macOS)
+                    resizeWindow()
+                    #endif
+                    let content = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", heading, heading)).firstMatch
+                    guard content.waitForExistence(timeout: 25) else {
+                        capture("diagnostic-" + name)
+                        print(app.debugDescription)
+                        throw NSError(domain: "The sample document preview did not load", code: 1)
+                    }
                     capture(language + "-" + name)
                 }
             }
@@ -108,14 +126,27 @@ final class StoreAcceptanceTests: XCTestCase {
 
     private func capture(_ name: String) {
         #if os(macOS)
-        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        let screenshot = app.windows.firstMatch.screenshot()
         #else
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        let screenshot = app.screenshot()
         #endif
+        let attachment = XCTAttachment(data: screenshot.pngRepresentation, uniformTypeIdentifier: "public.png")
         attachment.name = "STORE_" + name
         attachment.lifetime = .keepAlways
         add(attachment)
     }
+
+    #if os(macOS)
+    private func resizeWindow() {
+        let window = app.windows.firstMatch
+        guard window.waitForExistence(timeout: 10) else { return }
+        let frame = window.frame
+        let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -2, dy: -2))
+        let target = corner.withOffset(CGVector(dx: 1440 - frame.width, dy: 900 - frame.height))
+        corner.press(forDuration: 0.1, thenDragTo: target)
+        print("Window size: \(window.frame.width)x\(window.frame.height)")
+    }
+    #endif
 
     private func verificationCode(mailbox: String, after: Date) async throws -> String {
         let source = try XCTUnwrap(URLComponents(string: mailbox))
