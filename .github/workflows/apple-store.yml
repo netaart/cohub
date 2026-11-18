@@ -37,6 +37,9 @@ on:
 permissions:
   contents: read
 
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
+
 concurrency:
   group: apple-store-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
