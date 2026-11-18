@@ -9,6 +9,7 @@ import {
 	frameLabelOffset,
 	layoutShapeLabel,
 	SHAPE_LABEL_PADDING,
+	shapeLabelBox,
 } from "../model/text-metrics.js";
 import { ARROW_LABEL, arrowLabelAnchor, FRAME_LABEL_WEIGHT } from "./labels.js";
 import type { BoardRenderStyle } from "./style.js";
@@ -81,14 +82,15 @@ export function boardTextEditLayout(item: BoardSceneItem, { viewport, scene, sty
 	}
 	if (item.type === "shape") {
 		const { props } = item;
-		const text = layoutShapeLabel({ text: draft, fontSize: props.fontSize }, frame.width);
+		const box = shapeLabelBox(frame, item.size);
+		const text = layoutShapeLabel({ text: draft, fontSize: props.fontSize }, box.width);
 		return place(
 			{
 				center,
-				width: Math.max(0, frame.width - SHAPE_LABEL_PADDING * 2),
-				height: Math.min(frame.height, text.height),
-				padding: { x: SHAPE_LABEL_PADDING, y: Math.max(0, (frame.height - text.height) / 2) },
-				scale: zoom,
+				width: Math.max(0, box.width - SHAPE_LABEL_PADDING * 2),
+				height: Math.min(box.height, text.height),
+				padding: { x: SHAPE_LABEL_PADDING, y: Math.max(0, (box.height - text.height) / 2) },
+				scale: zoom * box.scale,
 				rotation,
 				font: boardTextStyle({ font: "sans", fontSize: props.fontSize, fontWeight: 500 }),
 				lineHeight: text.lineHeight,

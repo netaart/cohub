@@ -1,8 +1,9 @@
 
 import { type BoardDocument, isBoardDepthActive, resolveBoardDepth } from "@cohub/protocol";
 import { resolveBoardAnimationCamera, type BoardAnimationSampler } from "../model/sampling.js";
-import type { BoardViewport } from "../model/geometry.js";
-import { boardViewRect, isBoardViewLevel } from "../model/view-camera.js";
+import { boardProjection, boardViewRect, isBoardViewLevel } from "../model/view-camera.js";
+import { type BoardViewport, pointToWorld } from "../model/geometry.js";
+import type { BoardCameraOverride } from "../model/animation.js";
 import { createBoardRenderSampler } from "../render/sampling.js";
 import { type BoardSceneItem, buildBoardScene } from "../model/scene.js";
 import { type ICanvas, Rectangle, type Renderer, RendererType, type Texture } from "pixi.js";
@@ -13,6 +14,7 @@ import {
   BOARD_EXPORT_MAX_PIXELS,
   type BoardExportPlan,
   type BoardExportRegion,
+  boardExportView,
   exportItemBounds,
   normalizeBoardDocument,
   planBoardExport,
@@ -35,6 +37,7 @@ import { flattenBoardEffects } from "../render/effects.js";
 import { ensureBoardTextMeasurement } from "../render/text-measurement.js";
 import type { BoardCardRendererResolver, BoardScriptHost } from "../render/renderers/board-renderer-registry.js";
 import type { BoardShaderLayers } from "../render/shader/layers.js";
+import { isBoardScriptScreenRoot } from "../model/script-scene.js";
 import { createBoardExportScene } from "./scene.js";
 
 export type {
@@ -50,6 +53,9 @@ export type BoardExportBackground = "paper" | "transparent" | number;
 export type BoardExportOptions = {
   region?: BoardExportRegion;
   camera?: { width: number; height: number };
+  view?: BoardCameraOverride;
+  viewport?: { width: number; height: number };
+  screen?: boolean;
   sampler?: BoardAnimationSampler;
   at?: { animation?: string; time: number };
   scale?: number;
@@ -99,16 +105,17 @@ export function prepareBoardExport(input: BoardDocument, options: BoardExportOpt
   ensureBoardTextMeasurement();
   const base = options.sampler ? input : normalizeBoardDocument(input);
   if (options.camera && options.region && options.region.kind !== "all") throw new Error("Camera export cannot be combined with a fixed region.");
-  if (options.camera && !options.at) throw new Error("Camera export needs an animation time.");
+  if (options.camera && !options.at && !options.view) throw new Error("Camera export needs an animation time or a view.");
   if (options.camera && (![options.camera.width, options.camera.height].every((n) => Number.isSafeInteger(n) && n > 0))) throw new Error("Camera dimensions must be positive integers.");
+  const time = options.at?.time ?? 0;
   const sampler = options.at ? options.sampler ?? createBoardRenderSampler(base, options.at.animation ?? null, options) : undefined;
   const sample = options.at ? sampler?.at(options.at.time) : undefined;
   const sampled = sample?.document ?? base;
-  const document = options.scripts?.document?.(sampled, options.at?.time ?? 0) ?? sampled;
-  const scene = document === sampled ? sample?.scene ?? buildBoardScene(document) : buildBoardScene(document);
-  const directed = options.camera ? options.scripts?.camera?.(document, options.at?.time ?? 0) : null;
-  const override = { ...sample?.evaluation.camera, ...directed };
-  const camera = options.camera ? resolveBoardAnimationCamera(override, (id) => scene.get(id)?.frame, options.camera, options.at?.time ?? 0, undefined, sample?.evaluation.cameraViewport) : undefined;
+  let document = options.scripts?.document?.(sampled, time) ?? sampled;
+  let scene = document === sampled ? sample?.scene ?? buildBoardScene(document) : buildBoardScene(document);
+  const directed = options.camera && !options.view ? options.scripts?.camera?.(document, time) : null;
+  const override = options.view ?? { ...sample?.evaluation.camera, ...directed };
+  const camera = options.camera ? resolveBoardAnimationCamera(override, (id) => scene.get(id)?.frame, options.camera, time, undefined, options.viewport ?? sample?.evaluation.cameraViewport) : undefined;
   const region: BoardExportRegion = camera && options.camera ? { kind: "rect", rect: boardViewRect(camera, options.camera) } : options.region ?? { kind: "all" };
   const output = camera && options.camera;
   const fit = output ? Math.min(1, (options.maxEdge ?? BOARD_EXPORT_MAX_EDGE) / Math.max(output.width, output.height), Math.sqrt((options.maxPixels ?? BOARD_EXPORT_MAX_PIXELS) / (output.width * output.height))) : 1;
@@ -120,15 +127,31 @@ export function prepareBoardExport(input: BoardDocument, options: BoardExportOpt
     maxEdge: output ? Number.POSITIVE_INFINITY : options.maxEdge,
     maxPixels: output ? Number.POSITIVE_INFINITY : options.maxPixels,
   });
+  if (!plan) return null;
   let view: { view: BoardViewport; width: number; height: number } | undefined;
-  if (plan && camera && output) {
+  if (camera && output) {
     plan.requestedScale = camera.zoom;
     plan.clamped = fit < 1;
     plan.width = Math.max(1, Math.floor(output.width * fit));
     plan.height = Math.max(1, Math.floor(output.height * fit));
     view = { view: { ...camera, x: camera.x * fit, y: camera.y * fit, zoom: camera.zoom * fit }, width: plan.width, height: plan.height };
   }
-  return plan ? { document, scene, plan, sampler, camera: view } : null;
+  if (options.screen && options.scripts?.document) {
+    const shown = view?.view ?? boardExportView(plan).camera;
+    const projection = isBoardViewLevel(shown) ? null : boardProjection(shown, plan);
+    document = options.scripts.document(sampled, time, { ...shown, ...(projection ? { place: (point) => pointToWorld(projection.project(point.x, point.y), shown) } : {}) });
+    const composed = buildBoardScene(document);
+    const onScreen = (item: BoardSceneItem) => {
+      for (let at: BoardSceneItem | undefined = item, depth = 0; at && depth < 64; at = at.parent ? composed.get(at.parent) : undefined, depth++)
+        if (isBoardScriptScreenRoot(at.id)) return true;
+      return false;
+    };
+    const shownItems = planBoardExport({ scene: composed, region: { kind: "rect", rect: plan.world }, scale: plan.scale, padding: 0, maxEdge: Number.POSITIVE_INFINITY, maxPixels: Number.POSITIVE_INFINITY })?.items.filter(onScreen) ?? [];
+    plan.items = [...plan.items.map((item) => composed.get(item.id) ?? item), ...shownItems];
+    plan.extras = plan.extras.map((item) => composed.get(item.id) ?? item);
+    scene = composed;
+  }
+  return { document, scene, plan, sampler, camera: view };
 }
 
 export function renderBoardExport(renderer: Renderer, input: BoardDocument, options: BoardExportOptions = {}): BoardExportResult | null {
@@ -239,9 +262,8 @@ export function boardShaderMisses(
     const item = scene.get(id);
     if (!item) return [{ id, reason: "its item is not in the document" }];
     if (scene.opacity(id) <= 0) return [{ id, reason: "its item is hidden (opacity 0 or invisible)" }];
-    if (planned.has(id)) return [];
-    const bounds = exportItemBounds(item, scene);
-    return [{ id, reason: bounds ? "its item is outside the exported area" : "its item is clipped away by a parent frame" }];
+    if (planned.has(id) || exportItemBounds(item, scene)) return [];
+    return [{ id, reason: "its item is clipped away by a parent frame" }];
   });
   const grouped = new Map<string, string[]>();
   for (const { id, reason } of misses) grouped.set(reason, [...(grouped.get(reason) ?? []), id]);

@@ -1,4 +1,4 @@
-import type { Container, Renderer } from "pixi.js";
+import type { Container, Renderer, Texture } from "pixi.js";
 import { RendererType } from "pixi.js";
 import {
 	type BoardDepthPose,
@@ -19,6 +19,7 @@ import {
 	boardDepthRoots,
 	boardDepthShadow,
 	boardDepthSurface,
+	type BoardModelPlayback,
 	boardModelPlayback,
 	hitBoardDepthSurface,
 	isBoardDepthLifted,
@@ -26,9 +27,11 @@ import {
 	resolveBoardDepth,
 	worldPoint,
 } from "../model/index.js";
-import type { LoadedModel } from "../render/model3d/index.js";
+import { boardModelKey, type LoadedModel } from "../render/model3d/index.js";
 import {
 	type BoardDepthBend,
+	type BoardDepthGhost,
+	type BoardDepthGhosts,
 	type BoardDepthLayer,
 	type BoardDepthObject,
 	type BoardDepthObjectPlacement,
@@ -38,14 +41,17 @@ import {
 	type BoardGroundOptions,
 	BOARD_DEPTH_MAX_EDGE,
 	boardDepthDensity,
+	createBoardDepthGhosts,
 	createBoardDepthPicture,
 	createBoardDepthShadows,
 	drawBoardDepthParts,
 	loadBoardDepthEngine,
 	resolveBoardDepthBend,
 } from "../render/depth/index.js";
+import type { BoardModelLoader, BoardModelTicket } from "./model-loader.js";
 
 const NO_IDS: ReadonlySet<string> = new Set();
+const GHOST_SHADOW = 0.5;
 
 export type BoardStageDepthOptions = {
 	renderer: () => Renderer | null;
@@ -57,7 +63,8 @@ export type BoardStageDepthOptions = {
 	fault: (id: string, message: string) => void;
 	frame: () => void;
 	animate: () => void;
-	loadModel: (item: BoardSceneItem, signal: AbortSignal) => Promise<LoadedModel> | null;
+	models: BoardModelLoader;
+	cover: (item: BoardSceneItem) => Texture | null;
 	loaded?: (id: string, model: LoadedModel) => void;
 	reducedMotion: () => boolean;
 	maxEdge?: number;
@@ -67,10 +74,12 @@ export type BoardStageDepth = {
 	elevated(scene: BoardScene): ReadonlySet<string>;
 	pinned(scene: BoardScene): Iterable<string>;
 	warm(): void;
-	prepare(input: { scene: BoardScene; projection: BoardProjection; resolution: number; touched: ReadonlySet<string> }): void;
+	prepare(input: { scene: BoardScene; projection: BoardProjection; resolution: number; touched: ReadonlySet<string>; visible: ReadonlySet<string> | null }): void;
 	ground(content: Container | null, options?: BoardGroundOptions): boolean;
 	unproject(scene: BoardScene, screen: BoardVec2): { id: string; world: WorldPoint } | null;
 	outline(scene: BoardScene, id: string, projection: BoardProjection): WorldPoint[] | null;
+	loading(scene: BoardScene, ids: Iterable<string>): boolean;
+	loaded(): Iterable<string>;
 	readonly riding: boolean;
 	readonly active: boolean;
 	destroy(): void;
@@ -136,7 +145,8 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 	let projection: BoardProjection | null = null;
 	const solids = new Map<string, Solid>();
 	const lifts = new Map<string, Lift>();
-	const models = new Map<string, { key: string; model: LoadedModel | null; controller: AbortController }>();
+	const models = new Map<string, { key: string; ticket: BoardModelTicket }>();
+	let ghosts: BoardDepthGhosts | null = null;
 	let lastPrepare = 0;
 	let clock = 0;
 	let riders = 0;
@@ -167,6 +177,7 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 		if (!renderer) return;
 		if (renderer.type !== RendererType.WEBGL) {
 			failed = true;
+			elevatedScene = null;
 			return;
 		}
 		loading = true;
@@ -176,11 +187,14 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 				loading = false;
 				if (disposed) return next.destroy();
 				stage = next;
+				elevatedScene = null;
 				options.frame();
 			})
 			.catch((error) => {
 				loading = false;
 				failed = true;
+				elevatedScene = null;
+				options.frame();
 				console.error("Board depth failed to start", error);
 			});
 	}
@@ -193,47 +207,27 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 		return kind === "custom" ? resolveBoardDepthBend(renderer, id, options.bend(id), fault) : null;
 	}
 
-	function modelOf(item: BoardSceneItem): LoadedModel | null {
-		if (item.type !== "file") return null;
-		const key = `${item.props.src}:${item.props.snapshot?.mtimeMs ?? ""}`;
-		let entry = models.get(item.id);
-		if (entry && entry.key !== key) {
-			releaseModel(item.id);
-			entry = undefined;
-		}
-		if (!entry) {
-			const controller = new AbortController();
-			const next = { key, model: null as LoadedModel | null, controller };
-			models.set(item.id, next);
-			options
-				.loadModel(item, controller.signal)
-				?.then((model) => {
-					if (controller.signal.aborted || models.get(item.id) !== next) return model.destroy();
-					next.model = model;
-					options.loaded?.(item.id, model);
-					options.frame();
-				})
-				.catch(() => undefined);
-			entry = next;
-		}
-		return entry.model;
-	}
-
-	function releaseModel(id: string) {
-		const entry = models.get(id);
-		if (!entry) return;
-		models.delete(id);
-		entry.controller.abort();
-		entry.model?.destroy();
+	function modelOf(item: BoardSceneItem, retired: BoardModelTicket[]): BoardModelTicket {
+		const key = boardModelKey(item) as string;
+		const entry = models.get(item.id);
+		if (entry?.key === key) return entry.ticket;
+		if (entry) retired.push(entry.ticket);
+		const ticket = options.models.request(key, item, (model) => {
+			if (model) options.loaded?.(item.id, model);
+			options.frame();
+		});
+		models.set(item.id, { key, ticket });
+		return ticket;
 	}
 
 	function attach() {
 		const layer = options.layer();
 		const below = options.shadows();
-		if (!layer || !below || !stage) return;
+		if (!below) return;
 		shadows ??= createBoardDepthShadows();
 		if (shadows.container.parent !== below) below.addChild(shadows.container);
-		if (stage.view.parent !== layer) layer.addChildAt(stage.view, grounded ? 1 : 0);
+		if (ghosts && ghosts.container.parent !== below) below.addChild(ghosts.container);
+		if (stage && layer && stage.view.parent !== layer) layer.addChildAt(stage.view, grounded ? 1 : 0);
 	}
 
 	function ground(content: Container | null, groundOptions?: BoardGroundOptions): boolean {
@@ -279,10 +273,10 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 
 	return {
 		elevated(scene) {
-			if (!stage) return NO_IDS;
+			if (failed) return NO_IDS;
 			if (scene === elevatedScene) return elevated;
 			elevatedScene = scene;
-			const next = rootsOf(scene).map((item) => item.id);
+			const next = rootsOf(scene).flatMap((item) => (stage || isBoardModelObject(item) ? [item.id] : []));
 			if (next.length !== elevated.size || next.some((id) => !elevated.has(id))) elevated = next.length ? new Set(next) : NO_IDS;
 			return elevated;
 		},
@@ -299,33 +293,71 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 		},
 		warm: load,
 		ground,
-		prepare({ scene, projection: view, resolution, touched }) {
+		prepare({ scene, projection: view, resolution, touched, visible }) {
 			const list = rootsOf(scene);
 			if (list.length) load();
 			const renderer = options.renderer();
-			if (!stage || !renderer) return;
-			projection = view;
-			stage.aim(view);
 			const wanted = new Set(list.map((item) => item.id));
-			for (const id of [...lifts.keys()]) if (!wanted.has(id)) releaseLift(id);
+			const modelled = new Set<string>();
+			const retired: BoardModelTicket[] = [];
+			const reducedMotion = options.reducedMotion();
+			const shadowInput = new Map<string, { shadow: BoardDepthShadow; width: number; height: number; opacity: number }>();
 			const objects: BoardDepthObject[] = [];
 			const flats: Array<{ item: BoardSceneItem; depth: NonNullable<ReturnType<typeof boardDepthOf>> }> = [];
 			for (const item of list) {
 				const depth = boardDepthOf(item, scene);
-				if (!depth || !options.host(item.id) || !scene.shown(item.id) || scene.opacity(item.id) <= 0) continue;
-				const model = isBoardModelObject(item) ? modelOf(item) : null;
-				const playback = model && boardModelPlayback(item, options.reducedMotion());
-				if (model && playback && item.type === "file") {
-					releaseLift(item.id);
-					objects.push({ id: item.id, model, frame: item.frame, origin: item.origin, depth, view: item.props.model?.view, playback });
-				} else flats.push({ item, depth });
+				const object = isBoardModelObject(item) && !failed;
+				if (object) modelled.add(item.id);
+				if (!depth || !scene.shown(item.id) || scene.opacity(item.id) <= 0) continue;
+				if (!object || item.type !== "file") {
+					if (options.host(item.id)) flats.push({ item, depth });
+					continue;
+				}
+				const ticket = modelOf(item, retired);
+				objects.push({
+					id: item.id,
+					model: ticket.model,
+					cover: options.cover(item),
+					shimmer: !ticket.failed && !reducedMotion && (!visible || visible.has(item.id)),
+					frame: item.frame,
+					origin: item.origin,
+					depth,
+					view: item.props.model?.view,
+					playback: boardModelPlayback(item, reducedMotion) as BoardModelPlayback,
+					opacity: scene.opacity(item.id),
+				});
 			}
-			for (const id of [...models.keys()]) if (!wanted.has(id)) releaseModel(id);
+			const release = () => {
+				for (const ticket of retired) ticket.release();
+				for (const [id, entry] of [...models]) {
+					if (modelled.has(id)) continue;
+					models.delete(id);
+					entry.ticket.release();
+				}
+			};
+			if (!stage || !renderer) {
+				const flat = new Map<string, BoardDepthGhost>();
+				for (const object of objects) {
+					flat.set(object.id, { frame: object.frame, cover: object.cover, opacity: object.opacity });
+					const shadow = boardDepthContactShadow(object.frame, object.depth, { width: object.frame.width, height: object.frame.height, thickness: 0 });
+					if (shadow) shadowInput.set(object.id, { shadow, width: object.frame.width, height: object.frame.height, opacity: object.opacity * GHOST_SHADOW });
+				}
+				if (flat.size) ghosts ??= createBoardDepthGhosts();
+				attach();
+				ghosts?.sync(flat);
+				shadows?.sync(shadowInput);
+				return release();
+			}
+			ghosts?.destroy();
+			ghosts = null;
+			projection = view;
+			stage.aim(view);
+			for (const id of [...lifts.keys()]) if (!wanted.has(id) || modelled.has(id)) releaseLift(id);
 			const now = performance.now();
 			clock += lastPrepare ? Math.min(now - lastPrepare, 100) : 0;
 			lastPrepare = now;
-			const shadowInput = new Map<string, { shadow: BoardDepthShadow; width: number; height: number; opacity: number }>();
 			const { placements, moving } = stage.objects.sync(view, objects, clock);
+			release();
 			if (moving) options.animate();
 			solids.clear();
 			for (const object of objects) {
@@ -333,7 +365,7 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 				const item = scene.get(object.id) as BoardSceneItem;
 				solids.set(object.id, { item, hull: placement.hull });
 				const shadow = boardDepthContactShadow(object.frame, object.depth, placement.size);
-				if (shadow) shadowInput.set(object.id, { shadow, width: object.frame.width, height: object.frame.height, opacity: scene.opacity(object.id) });
+				if (shadow) shadowInput.set(object.id, { shadow, width: object.frame.width, height: object.frame.height, opacity: object.opacity * (object.model ? 1 : GHOST_SHADOW) });
 			}
 			const usedBacks = new Set<string>();
 			const layers: BoardDepthLayer[] = [];
@@ -424,6 +456,18 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 			const pose = boardDepthPose(surface, view, stage ? boardDepthRiding(scene, rootItem, stage.objects.node) : undefined);
 			return boardDepthPictureOutline(id === root ? null : item.frame, surface, pose, view);
 		},
+		loading(scene, ids) {
+			if (failed) return false;
+			for (const id of ids) {
+				if (!isBoardModelObject(scene.get(id)) || !scene.shown(id) || scene.opacity(id) <= 0) continue;
+				const ticket = models.get(id)?.ticket;
+				if (!stage || !ticket || (!ticket.model && !ticket.failed)) return true;
+			}
+			return false;
+		},
+		*loaded() {
+			for (const [id, { ticket }] of models) if (ticket.model) yield id;
+		},
 		get riding() {
 			return riders > 0;
 		},
@@ -433,14 +477,17 @@ export function createBoardStageDepth(options: BoardStageDepthOptions): BoardSta
 		destroy() {
 			disposed = true;
 			for (const id of [...lifts.keys()]) releaseLift(id);
-			for (const id of [...models.keys()]) releaseModel(id);
 			for (const entry of backs.values()) entry.picture.destroy();
 			backs.clear();
 			shadows?.destroy();
 			shadows = null;
+			ghosts?.destroy();
+			ghosts = null;
 			stage?.view.removeFromParent();
 			stage?.destroy();
 			stage = null;
+			for (const { ticket } of models.values()) ticket.release();
+			models.clear();
 		},
 	};
 }

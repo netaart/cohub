@@ -91,6 +91,7 @@ export const BOARD_SCRIPT_API = {
       gesture: "data: this viewer's draw, shape, frame or arrow gesture over the owner: id, tool, phase (start | update | end | cancel), points in owner coordinates, and on end the item it created.",
       envchange: "data: the new ctx.env.",
       peerschange: "data: the other viewers, as ctx.peers; their cursors move at about 25 Hz. Exports have none.",
+      "model:loaded": "data.id: a model object in scope whose model has loaded and now stands on the Board; once per load. A script that starts hears of every model already loaded before its first frame; exports and simulations send one for each model object then.",
       "browser:devicemotion": "data: the DeviceMotionEvent's acceleration, accelerationIncludingGravity, rotationRate (deg/s) and interval, in device axes, with t its timeStamp. One event per reading.",
       "browser:deviceorientation": "data: alpha, beta, gamma, absolute, and on iOS webkitCompassHeading and webkitCompassAccuracy; t.",
       "browser:deviceorientationabsolute": "As deviceorientation, relative to the Earth, where the browser offers it.",
@@ -103,13 +104,14 @@ export const BOARD_SCRIPT_API = {
     keys: "In play, keydown and keyup without modifiers also reach every listening script when no focused region takes them.",
   },
   env: {
-    mode: "edit, play (a Board App or Play), view (read-only) or export.",
+    mode: "edit, play (a Board App or Play), view (read-only) or export; script.modes picks the ones a script runs in.",
     pointer: "fine (mouse) or coarse (touch).",
     orientation: "portrait or landscape.",
     angle: "screen.orientation.angle: 0, 90, 180 or 270; turn device-axis motion by it to get screen axes.",
     reducedMotion: "The viewer asks for less motion.",
     locale: "The viewer's BCP 47 locale, or null.",
     senses: "{ motion, gamepad, microphone, camera, location }: on delivers while a script listens; ask waits for a tap (motion on iOS) or the viewer's consent (microphone, camera, location); denied; unavailable on this device and in exports. Listening is what turns a source on and off.",
+    ready: "false while a play or read-only view that just opened waits, at most 1.5 s, for the model objects in view to load, with the script clock and auto-play animations held at their start; true otherwise. envchange reports when it turns true.",
   } satisfies Record<keyof BoardScriptEnv, string>,
   view: {
     camera: "x, y and zoom of the level camera with the same middle, plus pitch and bearing in degrees when the camera tips or turns.",

@@ -129,8 +129,8 @@ async function modelStill(item: BoardSceneItem): Promise<Texture | null> {
   const source = format && boardModelSource({ key: modelKey(item), src, format, size: snapshot?.size }, assets);
   if (!source) return null;
   const engine = await loadModelEngine();
-  const bitmap = await engine.renderModelStill(source, { signal: AbortSignal.timeout(120_000), maxBytes: MODEL_BYTES, view: model?.view });
-  return new Texture({ source: new ImageSource({ resource: bitmap, alphaMode: "premultiply-alpha-on-upload" }) });
+  const { image } = await engine.renderModelStill(source, { signal: AbortSignal.timeout(120_000), maxBytes: MODEL_BYTES, view: model?.view, clip: model?.animation });
+  return new Texture({ source: new ImageSource({ resource: image, alphaMode: "premultiply-alpha-on-upload" }) });
 }
 
 async function toBase64(blob: Blob): Promise<string> {
@@ -161,6 +161,16 @@ const api = {
     }
     return errors;
   },
+  async release(): Promise<void> {
+    session?.scripts.dispose();
+    session?.layers.destroy();
+    session = null;
+    for (const entry of textures.values()) entry?.texture.destroy(true);
+    textures.clear();
+    background?.destroy(true);
+    background = undefined;
+    await releaseModels();
+  },
   async init(init: BoardGpuInit): Promise<{ renderer: string }> {
     const renderer = await ensureRenderer();
     await document.fonts.ready;
@@ -168,14 +178,16 @@ const api = {
     session?.scripts.dispose();
     const layers = session?.layers ?? createBoardShaderLayers({ wait: true });
     layers.rewind();
-    for (const [key, entry] of textures)
-      if (!/^([a-z]+-)?url:/.test(key)) {
-        entry?.texture.destroy(true);
-        textures.delete(key);
-      }
-    background?.destroy(true);
-    background = undefined;
-    await releaseModels();
+    if (!init.keep) {
+      for (const [key, entry] of textures)
+        if (!/^([a-z]+-)?url:/.test(key)) {
+          entry?.texture.destroy(true);
+          textures.delete(key);
+        }
+      background?.destroy(true);
+      background = undefined;
+      await releaseModels();
+    }
     const sampler = createBoardRenderSampler(board, init.animation, boardRenderTheme(init.theme));
     session = {
       init: { ...init, document: board },
@@ -187,6 +199,8 @@ const api = {
       }, {
         ...(init.snapshots ? { snapshots: init.snapshots } : {}),
         ...(init.inputs ? { inputs: parseBoardScriptInputs(init.inputs) } : {}),
+        ...(init.env ? { env: init.env } : {}),
+        ...(init.resume ? { resume: true } : {}),
         ...(init.animation && boardAnimatesScriptParams(board) ? { documentAt: (time: number) => sampler.at(time).document } : {}),
       }),
       layers,
@@ -347,17 +361,20 @@ const api = {
     const at = frame.time === null ? undefined : { animation: animation ?? undefined, time: frame.time };
     const time = frame.time ?? 0;
     const sample = at ? session.sampler.at(time).document : document;
-    const planned = prepareBoardExport(document, { sampler: session.sampler, region: frame.region, camera: frame.camera, scale: frame.scale, padding: frame.padding, ...(at ? { at } : {}) });
-    const scripts = await session.scripts.at(sample, time, planned ? boardExportView(planned.plan) : undefined);
-    const options = {
+    const framing = {
       sampler: session.sampler,
       region: frame.region,
       camera: frame.camera,
+      view: frame.view,
+      viewport: frame.viewport,
       scale: frame.scale,
       padding: frame.padding,
+      maxPixels: frame.maxPixels,
       ...(at ? { at } : {}),
-      scripts,
     };
+    const planned = prepareBoardExport(document, framing);
+    const scripts = await session.scripts.at(sample, time, planned ? boardExportView(planned.plan) : undefined);
+    const options = { ...framing, screen: frame.screen, scripts };
     const prepared = prepareBoardExport(document, options);
     if (!prepared) throw new Error("Nothing to export: the region contains no items.");
     const visible = [...prepared.plan.items, ...prepared.plan.extras].filter((item) => prepared.scene.opacity(item.id) > 0);

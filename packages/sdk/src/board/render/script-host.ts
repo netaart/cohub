@@ -82,6 +82,7 @@ export type BoardScriptHostOptions = {
   timeoutMs?: number;
   export?: boolean;
   snapshots?: Readonly<Record<string, BoardScriptSnapshot>>;
+  resume?: boolean;
   poolSize?: number;
 };
 
@@ -523,7 +524,7 @@ export function createBoardScriptHost(
       const alive = new Set<string>();
       const liveFocusTargets = new Set<string>();
       let focusSurface: { width: number; height: number } | undefined;
-      for (const attachment of boardScriptAttachments(board)) {
+      for (const attachment of boardScriptAttachments(board, env.mode)) {
         const { id, script, item } = attachment;
         alive.add(id);
         const signature = entrySignature(script);
@@ -555,7 +556,7 @@ export function createBoardScriptHost(
             snapshot,
             sent: false,
             delta: null,
-            startedAt: (options.export ? 0 : time) - (snapshot?.time ?? 0),
+            startedAt: (options.export && !options.resume ? 0 : time) - (snapshot?.time ?? 0),
             texture: new BoardBitmapTexture(),
             error: null,
             output: null,

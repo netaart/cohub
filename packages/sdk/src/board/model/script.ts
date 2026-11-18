@@ -3,6 +3,7 @@ import type {
   BoardItem,
   BoardPatch,
   BoardScript,
+  BoardScriptMode,
   BoardVec2,
 } from "@cohub/protocol";
 import type { BoardCameraOverride } from "./animation.js";
@@ -71,13 +72,14 @@ export type BoardScriptSense = (typeof BOARD_SCRIPT_SENSES)[number];
 export type BoardScriptSenseState = "on" | "ask" | "denied" | "unavailable";
 
 export type BoardScriptEnv = {
-  mode: "edit" | "play" | "view" | "export";
+  mode: BoardScriptMode;
   pointer: "fine" | "coarse";
   orientation: "portrait" | "landscape";
   angle: number;
   reducedMotion: boolean;
   locale: string | null;
   senses: Record<BoardScriptSense, BoardScriptSenseState>;
+  ready: boolean;
 };
 
 type Xyz = { x: number | null; y: number | null; z: number | null };
@@ -139,6 +141,7 @@ export type BoardScriptHostEvents = BoardScriptBrowserEvents & {
   change: { added: string[]; changed: string[]; removed: string[]; source: BoardScriptChangeSource };
   gesture: BoardScriptGesture;
   peerschange: BoardScriptPeer[];
+  "model:loaded": { id: string };
 };
 
 export type BoardScriptEventOf<Type extends string> = BoardScriptEvent & {

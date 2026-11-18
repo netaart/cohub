@@ -2,6 +2,8 @@ import type { BoardNodeRenderer } from "@neta-art/cohub/board/export/node";
 
 export const BOARD_EXPORT_IMAGE_MEMORY_MIB = 256;
 
+export const BOARD_GPU_EXPORT_MAX_PIXELS = 16_000_000;
+
 export const BOARD_EXPORT_RENDERERS = ["auto", "canvas", "gpu"] as const;
 export type BoardExportRenderer = (typeof BOARD_EXPORT_RENDERERS)[number];
 

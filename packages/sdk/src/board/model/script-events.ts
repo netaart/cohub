@@ -1,5 +1,6 @@
 import type { BoardDocument } from "@cohub/protocol";
 import { BOARD_SCRIPT_BROADCAST_JSON_LENGTH } from "@cohub/protocol/realtime";
+import { isBoardModelObject } from "./depth.js";
 import type { BoardScriptEvent, BoardScriptOutput } from "./script.js";
 import { isBoardRootScript } from "./script-index.js";
 import { boardScriptScope } from "./script-scope.js";
@@ -50,7 +51,15 @@ export function boardScriptEmit(document: Pick<BoardDocument, "items" | "board">
   return { target, event: { type, data: message.data, depth, ...(message.remote === true ? { remote: true } : {}) } };
 }
 
-const RESERVED = /^(pointer|key|browser:)|^(click|focus|blur|change|selectionchange|transformend|viewchange|envchange|gesture|peerschange)$/;
+const RESERVED = /^(pointer|key|browser:)|^(click|focus|blur|change|selectionchange|transformend|viewchange|envchange|gesture|peerschange|model:loaded)$/;
+
+export function boardScriptModelsLoaded(document: Pick<BoardDocument, "items" | "board">, owner: string, ids?: Iterable<string>): BoardScriptEvent[] {
+  const scope = boardScriptScope(document, owner);
+  const events: BoardScriptEvent[] = [];
+  for (const id of ids ?? Object.keys(document.items))
+    if (scope.has(id) && isBoardModelObject(document.items[id])) events.push({ type: "model:loaded", data: { id } });
+  return events;
+}
 
 export function boardScriptBroadcast(input: unknown): BoardScriptEvent & { data: unknown } {
   const message = input as { type?: unknown; data?: unknown; depth?: unknown } | null;

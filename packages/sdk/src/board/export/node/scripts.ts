@@ -14,7 +14,7 @@ import { BOARD_SCRIPT_HISTORY_MS } from "../../model/animation.js";
 import { BOARD_SCRIPT_EXPORT_CALLS } from "../../model/script-calls.js";
 import { BOARD_SCRIPT_EXPORT_ENV, type BoardScriptInputLog, boardScriptInputsBetween } from "../../model/script-senses.js";
 import type { BoardScriptEnv, BoardScriptEvent, BoardScriptOutput, BoardScriptSnapshot, BoardScriptView } from "../../model/script.js";
-import { BOARD_SCRIPT_EMIT_DEPTH, boardScriptBroadcast, boardScriptEmit, boardScriptListens, createBoardScriptOutbox, queueBoardScriptEvent } from "../../model/script-events.js";
+import { BOARD_SCRIPT_EMIT_DEPTH, boardScriptBroadcast, boardScriptEmit, boardScriptListens, boardScriptModelsLoaded, createBoardScriptOutbox, queueBoardScriptEvent } from "../../model/script-events.js";
 import {
   loadBoardScriptSources,
   createBoardScriptModuleReader,
@@ -24,7 +24,7 @@ import {
   createScriptRuntime,
   type ScriptRuntimeInput,
 } from "../../render/script-runtime.js";
-import type { BoardScriptHost } from "../../render/renderers/board-renderer-registry.js";
+import type { BoardScriptHost, BoardScriptScreen } from "../../render/renderers/board-renderer-registry.js";
 import { boardShaderOwners } from "../../render/shader/layers.js";
 import type { BoardScriptHostCallbacks, BoardScriptRuntimeHost } from "../../render/script-host.js";
 import type { BoardNodeRenderer } from "./index.js";
@@ -462,11 +462,11 @@ export function createNodeBoardScriptHost(
       const output = outputs.get(time)?.get(id);
       return output ? (output.bend ?? null) : undefined;
     },
-    document(document, time) {
+    document(document, time, screen) {
       const at = outputs.get(time);
       if (!at?.size) return document;
       const items = { ...document.items };
-      for (const [id, item] of composeBoardScriptItems(document, buildBoardScene(document), at))
+      for (const [id, item] of composeBoardScriptItems(document, buildBoardScene(document), at, new Map(), screen))
         items[id] = item;
       return { ...document, items };
     },
@@ -482,7 +482,7 @@ export function createNodeBoardScriptHost(
       const document = documentOf(items);
       current = document;
       emitFailures.clear();
-      const scripted = boardScriptAttachments(document);
+      const scripted = boardScriptAttachments(document, "export");
       ranks = new Map(scripted.map(({ id }, index) => [id, index]));
       const alive = new Set(scripted.map(({ id }) => id));
       for (const id of [...lanes.assigned()])
@@ -566,7 +566,8 @@ export function createNodeBoardScriptHost(
             errors.set(id, error instanceof Error ? error.message : String(error));
             return;
           }
-          const events = boardScriptInputsBetween(options?.inputs, sampled.has(id) && time >= last ? last : -1, time);
+          const fresh = !sampled.has(id) || time < last;
+          const events = [...(fresh ? boardScriptModelsLoaded(document, id) : []), ...boardScriptInputsBetween(options?.inputs, fresh ? -1 : last, time)];
           sampled.set(id, time);
           const shown = viewKey && `${JSON.stringify({ ...attachment.script, params: undefined })}|${viewKey}`;
           if (shown && views.get(id) !== shown) {
@@ -619,7 +620,7 @@ export function createNodeBoardScriptRuntime(
   draw(scale?: number): Promise<void>;
   readonly queued: boolean;
   status(): BoardScriptLaneStatus[];
-  document(document: BoardDocument, scene?: BoardScene): BoardDocument;
+  document(document: BoardDocument, scene?: BoardScene, screen?: BoardScriptScreen): BoardDocument;
 } {
   const { callbacks } = options;
   const capabilities = Object.keys(callbacks.capabilities);
@@ -708,7 +709,7 @@ export function createNodeBoardScriptRuntime(
     sync(document, scene, _camera, time) {
       syncedAt = time;
       const alive = new Set<string>();
-      for (const attachment of boardScriptAttachments(document)) {
+      for (const attachment of boardScriptAttachments(document, callbacks.env().mode)) {
         const { id, script, item } = attachment;
         alive.add(id);
         const signature = JSON.stringify({ ...script, params: undefined });
@@ -779,12 +780,12 @@ export function createNodeBoardScriptRuntime(
       for (const entry of entries.values()) if ((entry.events.length || entry.dirty) && !entry.error) return true;
       return false;
     },
-    document(document, scene = buildBoardScene(document)) {
+    document(document, scene = buildBoardScene(document), screen) {
       const outputs = new Map<string, BoardScriptOutput>();
       for (const [id, entry] of entries) if (entry.output) outputs.set(id, entry.output);
       if (!outputs.size) return document;
       const items = { ...document.items };
-      for (const [id, item] of composeBoardScriptItems(document, scene, outputs, new Map(), { zoom: 1 })) items[id] = item;
+      for (const [id, item] of composeBoardScriptItems(document, scene, outputs, new Map(), screen)) items[id] = item;
       return { ...document, items };
     },
     destroy() {

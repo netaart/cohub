@@ -7,8 +7,8 @@ import { sameJson } from "../model/json.js";
 import { layoutBoardScriptText } from "../model/script-calls.js";
 import { boardScriptTarget } from "../model/script-hit.js";
 import { createBoardScriptObservers, type BoardScriptWorldGesture } from "../model/script-observers.js";
-import { isBoardRootScript } from "../model/script-index.js";
-import { BOARD_SCRIPT_EVENT_QUEUE, boardScriptBroadcast, boardScriptEmit } from "../model/script-events.js";
+import { boardScriptAttachments, isBoardRootScript } from "../model/script-index.js";
+import { BOARD_SCRIPT_EVENT_QUEUE, boardScriptBroadcast, boardScriptEmit, boardScriptModelsLoaded } from "../model/script-events.js";
 import { composeBoardScriptCamera, composeBoardScriptItems, prepareBoardScriptOutput } from "../model/script-scene.js";
 import {
   BOARD_SCRIPT_EXPORT_ENV,
@@ -48,8 +48,9 @@ export type BoardScriptControllerOptions = {
   capabilities?: Record<string, (id: string, input: unknown) => Promise<unknown>>;
   device?: () => BoardScriptDevice;
   onSensesChange?(): void;
-  leader?: () => boolean;
+  leader?: (owner: string) => boolean;
   peers?: BoardScriptPeerSource;
+  models?: () => Iterable<string>;
   now?: () => number;
   setTimer?: BoardScriptTimer;
   requestFrame(): void;
@@ -64,7 +65,7 @@ export type BoardScriptPeerSource = {
 
 export type BoardScriptPointerResult = false | "capture" | "tap" | "click";
 
-export type BoardScriptDevice = Omit<BoardScriptEnv, "mode">;
+export type BoardScriptDevice = Omit<BoardScriptEnv, "mode" | "ready">;
 
 type Key = Pick<BoardScriptEvent, "type" | "key" | "shiftKey" | "altKey" | "ctrlKey" | "metaKey">;
 
@@ -92,9 +93,14 @@ export function createBoardScriptController(options: BoardScriptControllerOption
   const now = options.now ?? (() => performance.now());
   let host: BoardScriptRuntimeHost | null = null;
   let paused = false;
+  let held = false;
   let time = 0;
   let lastTick = now();
   const outputs = new Map<string, BoardScriptOutput>();
+  const greeted = new Map<string, BoardScriptEvent[]>();
+  function greet(id: string, pending: BoardScriptEvent[]) {
+    while (pending.length && host?.event(id, pending[0] as BoardScriptEvent)) pending.shift();
+  }
   const interactive = new Set<string>();
   const screens = new Set<string>();
   const activations = new Map<string, number>();
@@ -154,7 +160,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
 
   function readEnv(): BoardScriptEnv {
     const device = options.device?.() ?? BOARD_SCRIPT_EXPORT_ENV;
-    const next = { ...device, mode: editor.readonly ? "view" : editor.tool === "play" ? "play" : "edit" } as const;
+    const next = { ...device, mode: editor.scriptMode, ready: !held } as const;
     if (!sameBoardScriptEnv(env, next)) env = next;
     return env;
   }
@@ -246,6 +252,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
         } else {
           cancelPointers(id);
           outputs.delete(id);
+          greeted.delete(id);
           interactive.delete(id);
           screens.delete(id);
           activations.delete(id);
@@ -266,6 +273,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     commits.flush(true);
     observers.clear();
     syncTransformSubscription();
+    greeted.clear();
     interactive.clear();
     screens.clear();
     outputs.clear();
@@ -286,7 +294,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
   }
 
   function update() {
-    const wanted = editor.hasScripts;
+    const wanted = editor.runsScripts;
     if (wanted && !host) {
       readEnv();
       host = createHost();
@@ -345,7 +353,7 @@ export function createBoardScriptController(options: BoardScriptControllerOption
     if (!host) return;
     readEnv();
     const current = now();
-    if (!paused) time += Math.min(250, Math.max(0, current - lastTick));
+    if (!paused && !held) time += Math.min(250, Math.max(0, current - lastTick));
     lastTick = current;
     if (!paused && observers.size) {
       observers.sync(editor.document, editor.selection, () => ({
@@ -355,7 +363,11 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       if (observers.gestures) syncGesture();
       if (observers.watchesPeers) observers.peers(editor.document, editor.scene, options.peers?.list() ?? []);
     }
-    host.sync(scriptDocument(), editor.scene, view.camera, time, !paused, view.visibleIds);
+    const document = scriptDocument();
+    host.sync(document, editor.scene, view.camera, time, !paused, view.visibleIds);
+    for (const { id } of boardScriptAttachments(document, editor.scriptMode))
+      if (!greeted.has(id)) greeted.set(id, boardScriptModelsLoaded(editor.document, id, options.models?.() ?? []));
+    for (const [id, pending] of greeted) greet(id, pending);
   }
 
   function pointerEvent(target: BoardScriptPointerTarget, type: string, input: BoardPointerEvent, related?: BoardScriptPointerTarget | null) {
@@ -443,6 +455,16 @@ export function createBoardScriptController(options: BoardScriptControllerOption
       options.onSensesChange?.();
     },
     update,
+    hold(next: boolean) {
+      if (held && !next) lastTick = now();
+      held = next;
+    },
+    modelLoaded(id: string) {
+      for (const [owner, pending] of greeted) {
+        pending.push(...boardScriptModelsLoaded(editor.document, owner, [id]));
+        greet(owner, pending);
+      }
+    },
     animate(next: ReadonlyMap<string, BoardScript>) {
       if (next.size === animated.size && [...next].every(([id, script]) => sameJson(animated.get(id), script))) return;
       animated = next;

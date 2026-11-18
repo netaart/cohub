@@ -33,6 +33,11 @@ export function layoutShapeLabel(props: { text: string; fontSize: number }, widt
 	});
 }
 
+export function shapeLabelBox(frame: { width: number; height: number }, size: { width: number; height: number }) {
+	const scale = Math.max(1e-6, Math.min(frame.width / size.width, frame.height / size.height));
+	return { scale, width: frame.width / scale, height: frame.height / scale };
+}
+
 export const BOARD_FRAME_LABEL_SIZE = 12;
 export const BOARD_FRAME_LABEL_LINE_HEIGHT = 1.25;
 

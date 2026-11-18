@@ -14,6 +14,9 @@ export const BOARD_TEXT_MAX_FONT_SIZE = 512;
 export const BOARD_DRAW_STROKE_SIZE = 4;
 export const BOARD_ARROW_STROKE_SIZE = 2.5;
 
+export const BOARD_SCRIPT_MODES = ["edit", "play", "view", "export"] as const;
+export type BoardScriptMode = (typeof BOARD_SCRIPT_MODES)[number];
+
 export const BOARD_PAGE_SIZE = { width: 960, height: 540 } as const;
 export const BOARD_CAMERA_VIEWPORT = { width: 1600, height: 900 } as const;
 export const BOARD_MAX_PITCH = 60;

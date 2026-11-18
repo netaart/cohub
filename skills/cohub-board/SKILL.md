@@ -96,6 +96,12 @@ Worth knowing before you build:
   ms (250). With `autoplay` it plays on the Board clock; `time` (ms) drives it from a
   track or script instead, and `loop: false` holds the last pose. Clip names and lengths
   are in `props.snapshot.clips`. Exports draw models as shown, in a local browser.
+  Until a model object's model loads it shows a silhouette (or its cover) of its box;
+  scripts hear `model:loaded` with its id once it stands, and play or read-only views
+  hold `auto` animations and scripts (`ctx.env.ready` false) up to 1.5 s for the models
+  in view.
+  The app records a still of a model's current look as `props.snapshot.coverUrl`; leave
+  it as is, since a cover drawn for another look is ignored.
 
 ## Read and write
 
@@ -194,7 +200,9 @@ since `inspect` does not see shader pixels.
 Design a playful Board as one world before splitting it: one controller script (on
 the Board or one Frame) with regions as data reads as a whole and moves cards across
 regions, where a script per Frame becomes separate mini-games. Confirm that
-direction with the user before building out every region.
+direction with the user before building out every region. Give game and director
+scripts `"modes": ["play", "view", "export"]` so editing stays still, and simulate
+them after a `{"tool": "play"}` step.
 
 Keep it smooth: a pass with a `name` switches with `ctx.passes()` and costs nothing
 while off, so turn a full-view `filter` on only while it shows; drive motion through
@@ -213,9 +221,9 @@ shader passes in its box; set `clip: false` to let rain spill out. `present()` i
 never saved, even when the user drags or resizes a presented card.
 
 Verify interaction before handing over: `cohub boards simulate <board> -i steps.json
--o shot.png` runs the scripts through taps, drags, pen strokes and hovers
-(`{"move": [[x, y], …]}`) without saving, reports script errors, and renders shaders
-and screen UI that `export` leaves out. With `--json`, `presses` says for every tap and
+--camera -o shot.png` runs the scripts through taps, drags, pen strokes and hovers
+(`{"move": [[x, y], …]}`) without saving, reports script errors, and draws what the
+screen shows, screen UI included (see Check and export). With `--json`, `presses` says for every tap and
 drag where it landed (a script's hit region, a selection handle, an item, empty board)
 and what took it, so a stroke that started on a caption or a drag that grabbed a resize
 handle shows at once. It compiles shaders first and stops on errors, and gives up after
@@ -242,7 +250,8 @@ as it walks and runs, with a glow riding its head.
 Published as an App, a Board opens in play: every visitor gets a local copy where
 drags move unlocked items and script regions take every press, saved per App version.
 Lock what visitors should not move, keep progress in the document (`ctx.state` starts
-over), and check the visitor's view with `{"tool": "play"}` in the steps.
+over), and check the visitor's view with `--mode play` (a `{"tool": "play"}` step
+switches mid-run; `ctx.env.mode` follows).
 
 Long runs: wrap them in `timeout` (`timeout 300 cohub boards simulate …`) so a stuck run
 cannot hold the shell. To stop a stray process, use `pkill -f '[c]ohub boards simulate'`:
@@ -291,7 +300,18 @@ Video exports draw each video at its time and mix every playing clip's sound.
 ## Check and export
 
 `-o` picks the format; a `--at` range with `%d` writes a frame sequence, and a video
-extension writes a video. `--camera` renders what the audience sees.
+extension writes a video. `--camera` renders what the audience sees. `--view x,y,zoom[,pitch,bearing]`
+looks from a fixed camera, as a camera track would set it, without writing the document;
+never add probe animations to see a spot.
+
+Preview a session with `simulate`: `--mode edit|play|view`, `--viewport WxH` (the screen
+in `ctx.view`) and `--pointer coarse|fine` (`ctx.env.pointer`; coarse makes steps touches)
+set the device, `--camera` draws that screen following the camera scripts direct, with
+HUDs and buttons (`--no-screen` leaves them out), and `--at` draws frames on the
+simulated clock. The steps file may carry `mode`, `viewport` and `pointer` too, and
+`export --inputs` runs the same file. Browser frames (shaders, 3D) are capped at 16
+megapixels and scale goes down past it; prefer `--camera` or a region to a whole large
+Board.
 
 ```bash
 cohub boards inspect <board> --animation lecture --at 0:10s:1s --json  # final timeline, up to 100 samples
@@ -301,9 +321,15 @@ cohub boards export <board> --items a,b -o /tmp/part.png       # or --frame <id>
 cohub boards export <board> --frame s2 -o /tmp/page.png        # the frame as a page, its shaders included
 cohub boards export <board> --animation intro --at 1s,5s,9s --camera --size 1600x900 -o /tmp/preview-%d.png
 cohub boards export <board> --animation intro --at 0:10s --fps 24 --camera -o /tmp/intro.mp4
+cohub boards export <board> --view 1300,3400,0.7,35 -o /tmp/spot.png        # a temporary camera
+cohub boards simulate <board> -i steps.json --mode play --viewport 390x844 --pointer coarse --camera -o /tmp/phone.png
+cohub boards simulate <board> -i steps.json --mode play --camera --at 0:6s --fps 24 -o /tmp/take.mp4
+cohub boards export <board> --inputs steps.json --camera --at 0:6s --fps 24 -o /tmp/take.mp4  # same steps, a Space file
 ```
 
-`--size` sets the output pixels of a camera export; it never sizes frames.
+`--size` sets the output pixels of a camera export (the animation's viewport, or the
+simulated viewport, by default); it never sizes frames. `export` leaves screen layers
+out unless `--screen`.
 
 A long video with shaders renders slowly on a CPU. Add `--async` to run the export as
 a Task in the Space's sandbox and return at once (`cohub tasks get <id>` follows it);
@@ -311,8 +337,8 @@ never sleep and poll for it. Viewers can also export MP4 from the web app, which
 draws on their GPU.
 
 Exports give scripts the exported area as their view and deliver `emit` within the same
-moment. Warnings name any shader that did not draw and why (outside the area, hidden,
-clipped, every pass off, failed to compile).
+moment. Warnings name any shader that did not draw and why (hidden, clipped, every pass
+off, failed to compile); shaders outside the area are expected and not reported.
 
 `inspect` checks the static document unless `--animation` is given. `bounds` uses
 world units with `x/y` at the top left, regardless of text alignment; `worldBounds`

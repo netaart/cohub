@@ -1,4 +1,5 @@
 import {
+  HeadObjectCommand,
   ListObjectsV2Command,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -256,6 +257,19 @@ export async function listPublicFiles(
     entries,
     nextCursor: result.IsTruncated ? result.NextContinuationToken ?? null : null,
   };
+}
+
+export async function publicAssetObjectExists(objectKey: string): Promise<boolean> {
+  try {
+    await getS3Client().send(
+      new HeadObjectCommand({ Bucket: requirePublicAssetOssStorage().bucket, Key: objectKey }),
+      { abortSignal: AbortSignal.timeout(10_000) },
+    );
+    return true;
+  } catch (error) {
+    if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) return false;
+    throw error;
+  }
 }
 
 export function getPublicFileUrl(spaceId: string, inputPath: string): PublicFileUrlResponse {

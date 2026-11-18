@@ -441,6 +441,9 @@ cohub generate "Lip-sync to this spoken take" \
 
 cohub generate -m song2 --text "prompt=upbeat synthwave" --text "lyrics=[Verse] Neon lights" --param seed=42
 
+cohub generate -m meshy --param operation=animation --param action_id=92 \
+  --3d https://assets.meshy.ai/.../rigged.glb
+
 cohub generate "a calm lake" \
   --model <model> \
   --async
@@ -460,9 +463,11 @@ Supported inputs:
 --video reference_video=<path-or-url>
 --audio <path-or-url>
 --audio reference_audio=<path-or-url>
+--3d <path-or-url>
+--3d motion=<path-or-url>
 ```
 
-Role-qualified values add `meta.role` to that content block. Text roles come from the model's text inputs (`cohub models show <model>`); repeat `--text <role>=<text>` for each text block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles (`reference_image`, `reference_video`, `reference_audio`) in one request.
+Role-qualified values add `meta.role` to that content block. Text roles come from the model's text inputs (`cohub models show <model>`); repeat `--text <role>=<text>` for each text block. Repeat `--image reference_image=...` for multiple reference images. Seedance role-qualified media should use public URL inputs. Do not mix first/last frame roles with reference roles (`reference_image`, `reference_video`, `reference_audio`) in one request. A `--3d` URL from one of your generations in the last 3 days keeps that task's provider meta, which Meshy `animation` (rigging output, optional `motion=` clip) and `text-to-3d-refine` need; a downloaded local file does not.
 
 Pass generation parameters with `--param key=value` or `--parameters '<json>'`.
 

@@ -1,7 +1,10 @@
 <script lang="ts">
 import type { BoardScriptParameter } from "@neta-art/cohub/board";
 import { Copy, FileCode, RotateCcw, X } from "lucide-svelte";
-import type { BoardScriptStatus } from "#lib/board/board-script-status.ts";
+import {
+	type BoardScriptStatus,
+	boardScriptRunsHere,
+} from "#lib/board/board-script-status.ts";
 import type { BoardEditor } from "#lib/board/editor.svelte.ts";
 import { copyTextToClipboard } from "#lib/clipboard.ts";
 import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
@@ -31,6 +34,9 @@ const boardScript = $derived(editor.settings.scripts?.[ownerId]);
 const script = $derived(boardScript ?? editor.itemById(ownerId)?.script);
 const fileName = $derived(script?.src.split("/").pop() ?? "");
 const parameters = $derived(Object.entries(status.parameters));
+const state = $derived(
+	boardScriptRunsHere(editor, script) ? status.state : "off",
+);
 let copied = $state(false);
 
 const position = $derived.by(() => {
@@ -102,14 +108,16 @@ function stopKeys(event: KeyboardEvent) {
 	>
 		{#if placement !== "inline"}
 			<header class="script-head">
-				<span class="script-dot" data-state={status.state} aria-hidden="true"></span>
+				<span class="script-dot" data-state={state} aria-hidden="true"></span>
 				<span class="script-name" title={script.src}>{fileName}</span>
 				<span class="script-state">
-					{status.state === "error"
-						? m.board_script_failed({}, { locale })
-						: status.state === "running"
-							? m.board_script_running({}, { locale })
-							: m.board_script_starting({}, { locale })}
+					{state === "off"
+						? m.board_script_off({}, { locale })
+						: state === "error"
+							? m.board_script_failed({}, { locale })
+							: state === "running"
+								? m.board_script_running({}, { locale })
+								: m.board_script_starting({}, { locale })}
 				</span>
 				{#if onClose}
 					<button type="button" class="script-icon" title={m.board_close({}, { locale })} aria-label={m.board_close({}, { locale })} onclick={onClose}>
@@ -178,7 +186,7 @@ function stopKeys(event: KeyboardEvent) {
 					</label>
 				{/each}
 			</div>
-		{:else if status.state === "running"}
+		{:else if state === "running"}
 			<p class="script-empty">{m.board_script_no_parameters({}, { locale })}</p>
 		{/if}
 
@@ -189,10 +197,12 @@ function stopKeys(event: KeyboardEvent) {
 					{m.board_script_open_source({}, { locale })}
 				</button>
 			{/if}
-			<button type="button" class="script-link" onclick={onRestart}>
-				<RotateCcw class="h-3.5 w-3.5" />
-				{m.board_script_restart({}, { locale })}
-			</button>
+			{#if state !== "off"}
+				<button type="button" class="script-link" onclick={onRestart}>
+					<RotateCcw class="h-3.5 w-3.5" />
+					{m.board_script_restart({}, { locale })}
+				</button>
+			{/if}
 		</footer>
 	</div>
 {/if}
@@ -244,6 +254,7 @@ function stopKeys(event: KeyboardEvent) {
 	}
 	.script-dot[data-state="running"] { background: var(--success-500); }
 	.script-dot[data-state="error"] { background: var(--error-500); }
+	.script-dot[data-state="off"] { background: transparent; box-shadow: inset 0 0 0 1px var(--text-tertiary); }
 	.script-name {
 		min-width: 0;
 		overflow: hidden;

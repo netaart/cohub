@@ -2989,6 +2989,7 @@
 	"board_script_open_source": "Open source file",
 	"board_script_running": "Running",
 	"board_script_starting": "Starting…",
+	"board_script_off": "Not running in this mode",
 	"board_script_failed": "Couldn't run",
 	"board_script_copy_error": "Copy error",
 	"board_script_copied": "Error copied",

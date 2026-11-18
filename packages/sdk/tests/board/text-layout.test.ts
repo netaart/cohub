@@ -80,6 +80,28 @@ describe("board text layout", { skip: available ? false : "@napi-rs/canvas is no
 		assert.equal(label.font.fontSize, 16);
 	});
 
+	test("scales shape labels with an inherited scale, as on a zoomed-out screen layer", () => {
+		const shape = { type: "shape", size: { width: 160, height: 48 }, props: { text: "Start", fontSize: 24 } };
+		const scene = boardScene({
+			plain: shape,
+			screen: { type: "frame", position: { x: 0, y: 200 }, scale: 5, origin: { x: 0, y: 0 }, size: { width: 1, height: 1 }, props: { label: "" } },
+			button: { ...shape, parent: "screen" },
+		});
+		const context = renderContext(scene);
+		const labelHeight = (id: string) => {
+			const item = scene.get(id);
+			assert.ok(item);
+			const container = getBoardCardRenderer(item, context).create(item, context);
+			return (container.children[1] as Text).getBounds().height;
+		};
+		assert.ok(Math.abs(labelHeight("button") / labelHeight("plain") - 5) < 1e-6);
+		const button = scene.get("button");
+		assert.ok(button);
+		const edit = boardTextEditLayout(button, { viewport: { x: 0, y: 0, zoom: 0.2 }, scene, draft: "Start" });
+		assert.equal(edit?.scale, 1);
+		assert.equal(edit?.width, 160 - 16);
+	});
+
 	test("draws the computed lines and hides canvas text while editing", () => {
 		const props = { text: STORY, width: 300, fontSize: 18 };
 		const scene = boardScene({ t: { type: "text", props }, typing: { type: "text", props: { ...props, reveal: 0.4 } } });

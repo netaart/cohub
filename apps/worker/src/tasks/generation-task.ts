@@ -12,13 +12,7 @@ import {
 import type { Job } from "bullmq";
 import { parseGenerationReserveHold } from "@cohub/core/generation-billing";
 import { generationReserveHolds } from "../generation-billing.js";
-import {
-  createGenerationClient,
-  GenerationConfigError,
-  GenerationProviderError,
-  GenerationUnsupportedAdapterError,
-  GenerationValidationError,
-} from "@neta-art/generation";
+import { createGenerationClient, GenerationConfigError } from "@neta-art/generation";
 import { createGenerationDeclarationLoader } from "@cohub/infra/config-runtime/generation-declarations";
 import {
   GENERATION_BILLING_RETRY_TASK_TYPE,
@@ -33,6 +27,7 @@ import {
 import type { TaskPayload } from "@cohub/protocol/task";
 import { defaultJobRetention } from "@cohub/infra/bullmq";
 import { config } from "../config.js";
+import { normalizeGenerationError, withGenerationRetry } from "../generation-errors.js";
 import { recordGenerationUsageStatsHourly } from "../generation-usage-stats.js";
 import { createGenerationTaskFetch } from "../generation-task-fetch.js";
 import { redisCommandClient } from "../redis.js";
@@ -104,54 +99,6 @@ function parseGenerationTaskData(data: unknown): GenerationTaskData {
 function getGenerationApiKey(): string {
   if (!config.generationApiKey) throw new GenerationConfigError("Missing required env: GENERATION_API_KEY");
   return config.generationApiKey;
-}
-
-function summarizeProviderBody(body: string | undefined): string | null {
-  if (!body) return null;
-  return body.replace(/\s+/g, " ").trim().slice(0, 500) || null;
-}
-
-function truncateProviderDetail(value: string, maxLength = 1_000): string {
-  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
-}
-
-function summarizeProviderDetails(details: Record<string, unknown> | undefined): string | null {
-  if (!details) return null;
-  try {
-    const serialized = JSON.stringify(details);
-    if (!serialized) return null;
-    return `details ${truncateProviderDetail(serialized.replace(/\s+/g, " "))}`;
-  } catch {
-    return "details [unserializable]";
-  }
-}
-
-function providerStatusMessage(status: number | undefined): string | null {
-  if (status === undefined) return null;
-  if (status === 401 || status === 403) return "Generation provider rejected the configured credentials";
-  if (status === 429) return "Generation provider rate limit exceeded";
-  if (status >= 500) return "Generation provider is temporarily unavailable";
-  return "Generation provider request failed";
-}
-
-function normalizeGenerationError(error: unknown): Error {
-  if (error instanceof GenerationValidationError) {
-    return new Error(`Invalid generation input: ${error.message}`);
-  }
-  if (error instanceof GenerationProviderError) {
-    const parts = [providerStatusMessage(error.status) ?? error.message];
-    if (error.status !== undefined) parts.push(`HTTP ${error.status}`);
-    const details = summarizeProviderDetails(error.details);
-    if (details) parts.push(details);
-    const body = summarizeProviderBody(error.body);
-    if (body) parts.push(body);
-    return new Error(parts.join(" — "));
-  }
-  if (error instanceof GenerationConfigError || error instanceof GenerationUnsupportedAdapterError) {
-    return new Error(error.message);
-  }
-  if (error instanceof Error) return error;
-  return new Error(String(error));
 }
 
 async function recordGenerationStatsSafe(input: {
@@ -405,18 +352,33 @@ const runGenerationTask: TaskHandler = async (job: Job, context) => {
         });
     if (billingDecision.status === "blocked") throw new BillingAccessBlockedError(billingDecision);
 
-    const result = await createGenerationClient({
+    let gatewayRequests = 0;
+    const client = createGenerationClient({
       models: [declaration],
       includeBuiltinModels: false,
       apiKey: getGenerationApiKey(),
-      fetch: createGenerationTaskFetch(taskRunId, config.generationBaseUrl),
+      fetch: createGenerationTaskFetch(taskRunId, {
+        baseUrl: config.generationBaseUrl,
+        onGatewayRequest: () => { gatewayRequests += 1; },
+      }),
       ...(config.generationBaseUrl ? { baseUrl: config.generationBaseUrl } : {}),
-    }).generateResult({
-      model: data.model,
-      content: data.content,
-      parameters: data.parameters,
-      meta: data.meta,
     });
+    const result = await withGenerationRetry(
+      () => client.generateResult({
+        model: data.model,
+        content: data.content,
+        parameters: data.parameters,
+        meta: data.meta,
+      }),
+      {
+        gatewayRequests: () => gatewayRequests,
+        onRetry: (error) => console.warn("[Generation] retrying after a provider failure", {
+          taskRunId,
+          model: data.model,
+          error: normalizeGenerationError(error).message,
+        }),
+      },
+    );
 
     const usageType = resolveGenerationUsageType({
       adapterType: declaration.adapter?.type,

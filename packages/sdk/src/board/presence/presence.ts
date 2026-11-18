@@ -221,7 +221,7 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 		const size = surface();
 		return {
 			type: "state",
-			client: { formFactor, scripts: active && visible && editor.hasScripts },
+			client: { formFactor, scripts: active && visible && editor.runsScripts, scriptMode: editor.scriptMode },
 			cursor: active ? cursor : null,
 			viewport: size ? boardAwarenessViewport(editor.camera, size) : null,
 			tool: editor.tool,
@@ -690,12 +690,18 @@ export function createBoardPresence(options: BoardPresenceOptions) {
 			broadcastListeners.add(listener);
 			return () => broadcastListeners.delete(listener);
 		},
-		leadsScripts(): boolean {
+		leadsScripts(owner?: string): boolean {
 			if (!active || !visible) return false;
 			if (channel.connectionId === undefined) return true;
 			const self = channel.connectionId;
 			if (!self || !sharesState) return false;
-			for (const peer of peers.values()) if (peer.state?.client?.scripts && peer.connectionId < self) return false;
+			const { board, items } = editor.document;
+			const modes = owner ? (board.scripts?.[owner] ?? items[owner]?.script)?.modes : undefined;
+			for (const peer of peers.values()) {
+				const client = peer.state?.client;
+				if (!client?.scripts || client.scriptMode === "view" || peer.connectionId >= self) continue;
+				if (!modes || !client.scriptMode || modes.includes(client.scriptMode)) return false;
+			}
 			return true;
 		},
 		destroy(): Promise<void> {

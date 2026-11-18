@@ -2,6 +2,7 @@ import { boardItemPreview, featuredTaskArtifact, taskArtifactPreviewUrl } from "
 import { type BoardMediaSource, isSafeBoardSourcePath, parseBoardMediaSource } from "@cohub/protocol/board-model";
 import { MEDIA_VARIANT_MAX, type MediaSize, mediaVariantSize } from "../../media.js";
 import { boardModelViewKey, isBoardModelItem } from "./media.js";
+import { boardModelCover } from "./model-cover.js";
 import type { BoardSceneItem } from "./scene.js";
 
 export type BoardAssetMedia = "image" | "video" | "model";
@@ -74,9 +75,12 @@ export function boardAssetKey(item: BoardSceneItem): string | null {
   if (item.type === "task") return taskPreviewKey(item);
   if (item.type === "video") return stillKey("video", parseBoardMediaSource(item.props.src), item.props.snapshot?.mtimeMs);
   if (item.type === "file" && isBoardModelItem(item)) {
+    const cover = boardModelCover(item);
+    if (cover) return `url:${cover}`;
     const key = stillKey("model", parseBoardMediaSource(item.props.src), item.props.snapshot?.mtimeMs);
-    const view = boardModelViewKey(item.props.model?.view);
-    return key && view ? `${key}${MODEL_VIEW}${view}` : key;
+    const { view, animation } = item.props.model ?? {};
+    const look = `${boardModelViewKey(view)}${animation ? `${MODEL_VIEW}${encodeURIComponent(animation)}` : ""}`;
+    return key && look ? `${key}${MODEL_VIEW}${look}` : key;
   }
   return imageAssetKey(item);
 }

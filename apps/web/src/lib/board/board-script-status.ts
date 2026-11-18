@@ -1,4 +1,5 @@
-import type { BoardScriptParameter } from "@neta-art/cohub/board";
+import type { BoardScript, BoardScriptParameter } from "@neta-art/cohub/board";
+import type { BoardEditor } from "@neta-art/cohub/board/editor";
 import type { BoardStage } from "@neta-art/cohub/board/stage";
 
 export type BoardScriptStatus = {
@@ -6,6 +7,13 @@ export type BoardScriptStatus = {
 	error: string | null;
 	parameters: Readonly<Record<string, BoardScriptParameter>>;
 };
+
+export function boardScriptRunsHere(
+	editor: BoardEditor,
+	script: Pick<BoardScript, "modes"> | undefined,
+): boolean {
+	return !script?.modes || script.modes.includes(editor.scriptMode);
+}
 
 const NO_PARAMETERS: Readonly<Record<string, BoardScriptParameter>> = {};
 

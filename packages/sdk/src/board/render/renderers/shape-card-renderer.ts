@@ -1,7 +1,7 @@
 import { Container, Graphics, GraphicsPath, Matrix, Text } from "pixi.js";
 import type { BoardShapeItem } from "@cohub/protocol";
 import type { SceneItem } from "../../model/scene.js";
-import { layoutShapeLabel, SHAPE_LABEL_PADDING } from "../../model/text-metrics.js";
+import { layoutShapeLabel, SHAPE_LABEL_PADDING, shapeLabelBox } from "../../model/text-metrics.js";
 import { DEFAULT_ROUNDED_RADIUS, dashPattern, shapeOutlinePoints, tracePolyline, trimPolyline } from "../stroke.js";
 import { itemAlpha, itemColor } from "../palette.js";
 import { boardTextStyle, cssBaselineShift } from "../text-measurement.js";
@@ -73,7 +73,9 @@ function sync(container: Container, item: SceneItem<BoardShapeItem>, context: Bo
 	const parts = partsByContainer.get(container);
 	if (!parts) return;
 	positionShell(parts.root, item);
-	const { width, height } = item.frame;
+	const { frame, size } = item;
+	const { width, height } = size;
+	parts.shape.scale.set(frame.width / width, frame.height / height);
 	const { props, style } = item;
 	const stroke = itemColor(context, style.stroke ?? style.fill, "brand");
 	const fill = itemColor(context, style.fill ?? style.stroke, "brand", "fill");
@@ -108,7 +110,8 @@ function sync(container: Container, item: SceneItem<BoardShapeItem>, context: Bo
 
 	parts.label.alpha = itemAlpha(context, style.stroke);
 	const label = itemColor(context, style.stroke, "neutral", "label");
-	const layout = layoutShapeLabel(props, width);
+	const box = shapeLabelBox(frame, size);
+	const layout = layoutShapeLabel(props, box.width);
 	const text = layout.lines.join("\n");
 	const textSig = [text, label, props.fontSize, props.align, context.themeKey].join("|");
 	if (textSig !== parts.textSig) {
@@ -122,10 +125,14 @@ function sync(container: Container, item: SceneItem<BoardShapeItem>, context: Bo
 		});
 	}
 	parts.label.visible = props.text.length > 0 && context.editingId !== item.id;
-	syncTextResolution(parts.label, context.textResolution);
+	parts.label.scale.set(box.scale);
+	syncTextResolution(parts.label, context.textResolution * box.scale);
 	const anchor = props.align === "left" ? 0 : props.align === "right" ? 1 : 0.5;
 	parts.label.anchor.set(anchor, 0.5);
-	parts.label.position.set(SHAPE_LABEL_PADDING + Math.max(0, width - SHAPE_LABEL_PADDING * 2) * anchor, height / 2 + cssBaselineShift(parts.label.style));
+	parts.label.position.set(
+		(SHAPE_LABEL_PADDING + Math.max(0, box.width - SHAPE_LABEL_PADDING * 2) * anchor) * box.scale,
+		frame.height / 2 + cssBaselineShift(parts.label.style) * box.scale,
+	);
 }
 
 export const shapeCardRenderer: BoardCardRenderer = {
@@ -150,7 +157,7 @@ export const shapeCardRenderer: BoardCardRenderer = {
 	},
 	resolution: (container, _item, context) => {
 		const parts = partsByContainer.get(container);
-		if (parts) syncTextResolution(parts.label, context.textResolution);
+		if (parts) syncTextResolution(parts.label, context.textResolution * parts.label.scale.x);
 	},
 	renderFar: (graphics, item, context) => {
 		if (item.type !== "shape") return;

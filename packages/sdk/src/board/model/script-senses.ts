@@ -35,11 +35,12 @@ export const BOARD_SCRIPT_EXPORT_ENV: BoardScriptEnv = {
   reducedMotion: false,
   locale: null,
   senses: boardScriptSenseStates("unavailable"),
+  ready: true,
 };
 
 export function sameBoardScriptEnv(a: BoardScriptEnv, b: BoardScriptEnv): boolean {
   if (a === b) return true;
-  if (a.mode !== b.mode || a.pointer !== b.pointer || a.orientation !== b.orientation || a.angle !== b.angle || a.reducedMotion !== b.reducedMotion || a.locale !== b.locale)
+  if (a.mode !== b.mode || a.ready !== b.ready || a.pointer !== b.pointer || a.orientation !== b.orientation || a.angle !== b.angle || a.reducedMotion !== b.reducedMotion || a.locale !== b.locale)
     return false;
   return BOARD_SCRIPT_SENSES.every((sense) => a.senses[sense] === b.senses[sense]);
 }

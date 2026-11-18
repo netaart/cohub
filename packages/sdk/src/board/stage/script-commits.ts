@@ -26,7 +26,7 @@ const toError = (error: unknown) => (error instanceof Error ? error : new Error(
 
 export function createBoardScriptCommits(options: {
   target: BoardScriptCommitTarget;
-  leader: () => boolean;
+  leader: (owner: string) => boolean;
   now: () => number;
   setTimer?: BoardScriptTimer;
 }) {
@@ -47,16 +47,17 @@ export function createBoardScriptCommits(options: {
     batches[kind] = { waiters: [] };
     if (!batch.waiters.length) return;
     lastFlush[kind] = options.now();
-    if (kind === "auto" && !options.leader()) {
-      for (const waiter of batch.waiters) waiter.resolve(false);
-      return;
-    }
+    const waiters: Waiter[] = [];
+    for (const waiter of batch.waiters)
+      if (kind === "user" || options.leader(waiter.owner)) waiters.push(waiter);
+      else waiter.resolve(false);
+    if (!waiters.length) return;
     const base = options.target.document;
     const failed = new Map<string, Error>();
     const failures = new Map<Waiter, Error>();
     let document = base;
     const touched = new Set<string>();
-    for (const waiter of batch.waiters) {
+    for (const waiter of waiters) {
       const earlier = failed.get(waiter.owner);
       if (earlier) {
         failures.set(waiter, earlier);
@@ -76,7 +77,7 @@ export function createBoardScriptCommits(options: {
       if (change !== undefined) items[id] = change;
     }
     const settle = (error?: Error) => {
-      for (const waiter of batch.waiters) {
+      for (const waiter of waiters) {
         const failure = failures.get(waiter) ?? error;
         if (failure) waiter.reject(failure);
         else waiter.resolve(true);
@@ -96,7 +97,7 @@ export function createBoardScriptCommits(options: {
     commit(owner: string, patch: BoardPatch, user: boolean): Promise<boolean> {
       if (options.target.readonly) return Promise.reject(new Error("This viewer cannot edit the Board."));
       const kind = user ? "user" : "auto";
-      if (kind === "auto" && !options.leader()) return Promise.resolve(false);
+      if (kind === "auto" && !options.leader(owner)) return Promise.resolve(false);
       const batch = batches[kind];
       try {
         batch.document = validateBoardScriptCommit(batch.document ?? options.target.document, owner, patch);

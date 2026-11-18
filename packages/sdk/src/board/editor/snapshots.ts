@@ -3,6 +3,8 @@ import {
 	type BoardItem,
 	type BoardMediaSnapshot,
 	type BoardModelFacts,
+	boardModelCover,
+	isBoardModelItem,
 	mergeFileSnapshot,
 	withBoardModelFacts,
 } from "../model/index.js";
@@ -11,6 +13,8 @@ import type { EditorContext } from "./context.js";
 import { sameJson } from "./document-edits.js";
 
 export type BoardNaturalSize = { id: string; width: number; height: number };
+
+export type BoardModelLearned = { id: string; facts?: BoardModelFacts; coverUrl?: string };
 
 export function createSnapshotsModule(ctx: EditorContext) {
 	const { state } = ctx;
@@ -50,21 +54,33 @@ export function createSnapshotsModule(ctx: EditorContext) {
 			const item = state.base.items[entry.id];
 			if (item?.type !== "file") continue;
 			const cached = item.props.snapshot;
-			const read = mergeFileSnapshot(cached, entry.snapshot, entry.replace === true);
-			const kept = (cached?.clips || cached?.nodes) && (cached.mtimeMs === undefined || read.mtimeMs === cached.mtimeMs);
-			const merged = kept ? { ...read, ...(cached.clips ? { clips: cached.clips } : {}), ...(cached.nodes ? { nodes: cached.nodes } : {}) } : read;
+			const model = isBoardModelItem(item);
+			const { coverUrl, ...read } = mergeFileSnapshot(cached, entry.snapshot, entry.replace === true);
+			const sameFile = cached && (cached.mtimeMs === undefined || read.mtimeMs === cached.mtimeMs);
+			const cover = model ? (sameFile ? cached.coverUrl : undefined) : coverUrl;
+			const merged = {
+				...read,
+				...(sameFile && cached.clips ? { clips: cached.clips } : {}),
+				...(sameFile && cached.nodes ? { nodes: cached.nodes } : {}),
+				...(cover ? { coverUrl: cover } : {}),
+			};
 			if (!sameJson(merged, cached ?? {}))
 				changes.set(entry.id, { ...item, props: { ...item.props, snapshot: merged } });
 		}
 		commit(changes);
 	}
 
-	function adoptModelFacts(models: Array<{ id: string; facts: BoardModelFacts }>) {
+	function adoptModelFacts(models: BoardModelLearned[]) {
 		const changes = new Map<string, BoardItem>();
-		for (const { id, facts } of models) {
+		for (const { id, facts, coverUrl } of models) {
 			const item = state.base.items[id];
-			const snapshot = item?.type === "file" ? withBoardModelFacts(item.props.snapshot, facts) : null;
-			if (item?.type === "file" && snapshot) changes.set(id, { ...item, props: { ...item.props, snapshot } });
+			if (item?.type !== "file") continue;
+			let next = item;
+			const snapshot = facts && withBoardModelFacts(item.props.snapshot, facts);
+			if (snapshot) next = { ...next, props: { ...next.props, snapshot } };
+			const covered = coverUrl && next.props.snapshot?.coverUrl !== coverUrl ? { ...next, props: { ...next.props, snapshot: { ...next.props.snapshot, coverUrl } } } : null;
+			if (covered && boardModelCover(covered) === coverUrl) next = covered;
+			if (next !== item) changes.set(id, next);
 		}
 		commit(changes);
 	}

@@ -18,7 +18,7 @@ type GenerationSource =
   | { type: "url"; url: string }
   | { type: "base64"; mediaType: string; data: string };
 
-type MediaInputType = "image" | "video" | "audio";
+type MediaInputType = "image" | "video" | "audio" | "3d";
 
 const frameMediaRoles = new Set(["first_frame", "last_frame"]);
 const referenceMediaRoles = new Set(["reference_image", "reference_video", "reference_audio"]);
@@ -27,9 +27,15 @@ const rolesByMediaType: Record<MediaInputType, ReadonlySet<string>> = {
   image: new Set([...frameMediaRoles, "reference_image"]),
   video: new Set(["reference_video"]),
   audio: new Set(["reference_audio"]),
+  "3d": new Set(["motion"]),
 };
 
-const mediaRoles = new Set([...frameMediaRoles, ...referenceMediaRoles]);
+const mediaRoles = new Set(Object.values(rolesByMediaType).flatMap((roles) => [...roles]));
+
+const taskReferenceOperations = new Map([
+  ["animation", "rigging"],
+  ["text-to-3d-refine", "text-to-3d"],
+]);
 
 function parseValue(value: string): unknown {
   const trimmed = value.trim();
@@ -108,8 +114,8 @@ async function mediaContent(
     ({ type, source, ...(role ? { meta: { role } } : {}) }) as GenerationContentBlock;
   if (/^https?:\/\//.test(value)) return block({ type: "url", url: value });
 
-  const mediaType = mimeTypeForPath(value);
-  if (mediaType && /^(image|video|audio)\//.test(mediaType) && upload) {
+  const mediaType = mimeTypeForPath(value) ?? (type === "3d" ? "application/octet-stream" : undefined);
+  if (mediaType && (type === "3d" || /^(image|video|audio)\//.test(mediaType)) && upload) {
     try {
       return block({ type: "url", url: await upload(value, mediaType) });
     } catch (uploadError) {
@@ -138,7 +144,7 @@ function validateMediaRoleModes(inputs: MediaInput[]): void {
 }
 
 async function saveOutputs(output: GenerationContentBlock[], outputPath: string): Promise<string[]> {
-  const outputs = output.filter((block) => block.type === "text" || block.type === "image" || block.type === "video" || block.type === "audio");
+  const outputs = output.filter((block) => block.type === "text" || "source" in block);
   if (outputs.length === 0) return [];
 
   const info = await stat(outputPath).catch(() => null);
@@ -191,7 +197,7 @@ function outputName(block: GenerationContentBlock, url: string | undefined, inde
   const fromUrl = url ? basename(new URL(url).pathname) : "";
   const label = slugOutputLabel(block);
   if (fromUrl?.includes(".")) return `generation-${index + 1}-${label}-${fromUrl}`;
-  const ext = block.type === "video" ? "mp4" : block.type === "audio" ? "bin" : block.type === "text" ? "txt" : "png";
+  const ext = { text: "txt", image: "png", video: "mp4", audio: "bin", "3d": "glb" }[block.type];
   return `generation-${index + 1}-${label}.${ext}`;
 }
 
@@ -305,7 +311,7 @@ export function registerGenerations(program: Command): void {
   program
     .command("generate")
     .description("Generate multimodal outputs")
-    .argument("[prompt]", "Prompt text; optional when --text is given")
+    .argument("[prompt]", "Prompt text; optional when --text or a media input is given")
     .requiredOption("-m, --model <model>", "Multimodal model ID from `cohub models ls --model-type multimodal`")
     .option(
       "--text <role=text>",
@@ -331,6 +337,12 @@ export function registerGenerations(program: Command): void {
       collect,
       [],
     )
+    .option(
+      "--3d <path-or-url>",
+      "3D model or motion input file path or URL (GLB, glTF, OBJ, FBX, STL); prefix with motion= when needed; repeatable",
+      collect,
+      [],
+    )
     .option("--param <key=value>", "Generation parameter; repeatable, values may be JSON/number/boolean", collect, [])
     .option("--parameters <json>", "Generation parameters as a JSON object")
     .option("--meta <json>", "Meta as a JSON object")
@@ -342,7 +354,9 @@ export function registerGenerations(program: Command): void {
     .addHelpText("after", `
 
 Local input files upload to an unlisted public URL before the task is created;
-pass --inline to keep them inside the task instead.
+pass --inline to keep them inside the task instead. A --3d URL from one of your
+generations in the last 3 days carries its provider task, which follow-up
+operations such as Meshy animation need.
 
 Examples:
   cohub models ls --model-type multimodal
@@ -351,6 +365,7 @@ Examples:
   cohub -s <space-id> generate "Smooth transition" -m seedance-2-0-fast --image first_frame=https://example.com/first.png --image last_frame=https://example.com/last.png
   cohub -s <space-id> generate "Use these references" -m seedance-2-0-fast --image reference_image=https://example.com/a.png --image reference_image=https://example.com/b.png
   cohub -s <space-id> generate "Lip-sync to the reference take" -m seedance-2-0-fast --image reference_image=https://example.com/portrait.png --audio reference_audio=https://example.com/speech.mp3
+  cohub -s <space-id> generate -m meshy --param operation=animation --3d <rigging-output-url> --param action_id=92
   cohub -s <space-id> generate -m song2 --text "prompt=upbeat synthwave" --text "lyrics=[Verse] Neon lights" --param seed=42
   cohub -s <space-id> generate "A calm lake" -m <model> --async
 `)
@@ -360,6 +375,7 @@ Examples:
       image: string[];
       video: string[];
       audio: string[];
+      "3d": string[];
       param: string[];
       parameters?: string;
       meta?: string;
@@ -371,17 +387,18 @@ Examples:
     }) => {
       try {
         const texts = parseTextInputs(opts.text);
-        if (prompt === undefined && texts.length === 0) {
-          return error("Missing prompt", "Pass a prompt or at least one --text <role>=<text>.");
-        }
-        const spaceId = await resolveSpace(program, { home: true });
-        const sessionId = envValue("COHUB_SESSION_ID");
         const inputs = await Promise.all([
           ...opts.image.map((value) => parseMediaInput("image", value)),
           ...opts.video.map((value) => parseMediaInput("video", value)),
           ...opts.audio.map((value) => parseMediaInput("audio", value)),
+          ...opts["3d"].map((value) => parseMediaInput("3d", value)),
         ]);
+        if (prompt === undefined && texts.length === 0 && inputs.length === 0) {
+          return error("Missing prompt", "Pass a prompt, a --text <role>=<text>, or a media input.");
+        }
         validateMediaRoleModes(inputs);
+        const spaceId = await resolveSpace(program, { home: true });
+        const sessionId = envValue("COHUB_SESSION_ID");
         for (const { value } of inputs) {
           if (!/^https?:\/\//.test(value) && !(await pathExists(value))) {
             return error("Input not found", value);
@@ -398,6 +415,14 @@ Examples:
         } catch (policyError) {
           if (policyError instanceof GenerationPolicyError) return error("Generation settings", policyError.message);
           throw policyError;
+        }
+
+        const producer = taskReferenceOperations.get(String(parameters?.operation));
+        if (producer && inputs.some(({ type, value }) => type === "3d" && !/^https?:\/\//.test(value))) {
+          return error(
+            "Local 3D input",
+            `${parameters?.operation} needs the ${producer} result URL from the last 3 days; a local file has no provider task.`,
+          );
         }
 
         const meta = parseMeta(opts.meta);

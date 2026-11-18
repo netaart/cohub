@@ -1,4 +1,5 @@
 import { DirectionalLight, View3D } from "@pixi/3d";
+import { MODEL_LIGHTING, type ModelLighting } from "./lighting.js";
 import type { LoadedModel } from "./load.js";
 import { createModelShader, type ModelShader } from "./shading.js";
 import { MODEL_SHADINGS, MODEL_VIEW_PRESETS, type ModelShading, type ModelView } from "./view.js";
@@ -33,6 +34,7 @@ export type ModelSceneOptions = {
 	reducedMotion?: boolean;
 	home?: ModelView;
 	changed?: () => void;
+	lighting?: ModelLighting;
 };
 
 const FOV = 38;
@@ -92,13 +94,10 @@ function fitDistance(min: Vec, max: Vec, center: Vec, yaw: number, pitch: number
 export function createModelScene(model: LoadedModel, options: ModelSceneOptions = {}): ModelScene {
 	const reducedMotion = options.reducedMotion ?? false;
 	const changed = () => options.changed?.();
-	const view = new View3D({
-		environment: { skyColor: 0xffffff, groundColor: 0x77726c, intensity: 0.85 },
-		toneMapping: "aces",
-		exposure: 1.1,
-	});
+	const lighting = MODEL_LIGHTING[options.lighting ?? "card"];
+	const view = new View3D({ environment: lighting.environment, toneMapping: lighting.toneMapping, exposure: lighting.exposure });
 	view.eventMode = "none";
-	const light = new DirectionalLight({ intensity: 2.6, color: 0xfff8f0 });
+	const light = new DirectionalLight({ intensity: lighting.light, color: 0xfff8f0 });
 	view.root.addChild(model.root, light);
 
 	const bounds = model.root.getLocalBounds();

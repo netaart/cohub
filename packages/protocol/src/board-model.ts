@@ -4,6 +4,7 @@ import {
 	BOARD_CAMERA_VIEWPORT,
 	BOARD_DEFAULT_ITEM_SIZE,
 	BOARD_DEFAULT_SIZES,
+	BOARD_SCRIPT_MODES,
 	BOARD_TEXT_FONT_SIZE,
 	BOARD_TEXT_MAX_FONT_SIZE,
 	BOARD_TEXT_MIN_FONT_SIZE,
@@ -160,6 +161,7 @@ export const BoardScriptSchema = z.object({
 	targets: z.record(z.string().min(1).max(80), BoardIdSchema).default({}).describe("Named items the module can reach, as ctx.targets."),
 	seed: z.string().min(1).max(160).optional().describe("Seed for ctx.random() and shaders; defaults to the owner's id."),
 	enabled: z.boolean().default(true),
+	modes: z.array(z.enum(BOARD_SCRIPT_MODES)).min(1).optional().describe("Where the script runs: edit, play (a Board App or Play), view (read-only) or export; all by default. Elsewhere it does not load, draw, present or take input. Games and directed shows usually take [\"play\", \"view\", \"export\"]."),
 }).strict().describe("A JavaScript module attached to an item or the Board; `cohub boards schema script` lists its API.");
 export type BoardScript = z.infer<typeof BoardScriptSchema>;
 
@@ -397,7 +399,10 @@ export const BoardMediaSnapshotSchema = z
 		durationMs: nonNegative.optional(),
 		excerpt: z.string().optional(),
 		coverPath: z.string().optional(),
-		coverUrl: z.string().optional(),
+		coverUrl: z
+			.string()
+			.optional()
+			.describe("Cover image URL. A 3D model's is a still the app drew and stored for the look its name ends with; a card shows it instead of loading the model."),
 		clips: z
 			.array(z.object({ name: z.string().min(1).max(240), durationMs: nonNegative }).strict())
 			.max(BOARD_MODEL_CLIP_LIMIT)

@@ -150,6 +150,7 @@ export function sameAwarenessState(a: BoardAwarenessStateUpdate | null, b: Board
 	return (
 		a.client?.formFactor === b.client?.formFactor &&
 		a.client?.scripts === b.client?.scripts &&
+		a.client?.scriptMode === b.client?.scriptMode &&
 		a.tool === b.tool &&
 		a.editingId === b.editingId &&
 		a.cursor?.x === b.cursor?.x &&

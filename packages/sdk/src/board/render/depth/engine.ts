@@ -2,6 +2,7 @@ import { FlatMaterial, Geometry3D, Mesh3D, type ShaderBit, View3D } from "@pixi/
 import { Matrix, type Renderer, type Texture } from "pixi.js";
 import type { BoardDepthPose, BoardDepthSurface } from "../../model/depth.js";
 import type { BoardProjection } from "../../model/view-camera.js";
+import { MODEL_LIGHTING } from "../model3d/lighting.js";
 import { prepareModelRenderer } from "../model3d/renderer.js";
 import type { BoardDepthBend } from "./bend.js";
 import { type BoardGround, createBoardGround } from "./ground.js";
@@ -116,8 +117,8 @@ export async function createBoardDepthStage(renderer: Renderer): Promise<BoardDe
 		height: 1,
 		cull: "off",
 		// No tone curve: lifted pictures must keep the exact colours they have on the Board.
-		environment: { skyColor: 0xffffff, groundColor: 0x8a857e, intensity: 0.75 },
-		toneMapping: "none",
+		environment: MODEL_LIGHTING.object.environment,
+		toneMapping: MODEL_LIGHTING.object.toneMapping,
 	});
 	view.eventMode = "none";
 	view.label = "board-depth";

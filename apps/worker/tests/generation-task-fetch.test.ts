@@ -20,7 +20,7 @@ test("generation SDK sends the task header without changing authorization or pay
     models: [model],
     includeBuiltinModels: false,
     apiKey: "test-key",
-    fetch: createGenerationTaskFetch("task-1", undefined, fetchFn),
+    fetch: createGenerationTaskFetch("task-1", { fetchFn }),
   });
   await client.generateResult({ model: model.model, content: [{ type: "text", text: "A tree" }] });
 

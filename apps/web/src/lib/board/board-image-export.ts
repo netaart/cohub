@@ -204,7 +204,7 @@ export async function exportBoardImage(
 				theme,
 			)
 		: undefined;
-	const hasScripts = hasBoardScripts(document);
+	const hasScripts = hasBoardScripts(document, "export");
 	if (hasScripts && !bridge.readModule)
 		throw new Error("Script export needs a module reader.");
 	const sample =

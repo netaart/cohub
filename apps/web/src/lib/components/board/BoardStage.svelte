@@ -30,6 +30,7 @@ import {
 	type BoardContextMenuRequest,
 	type BoardFeedback,
 	type BoardItemView,
+	type BoardModelCoverUpload,
 	type BoardStage,
 	mountBoardStage,
 } from "@neta-art/cohub/board/stage";
@@ -106,6 +107,7 @@ const {
 	drawViews,
 	senseConsent,
 	fullscreenElement,
+	uploadModelCover,
 }: {
 	editor: BoardEditor;
 	playback?: BoardPlaybackSnapshot | null;
@@ -137,6 +139,7 @@ const {
 	drawViews?: boolean;
 	senseConsent?: (sense: BoardConsentSense) => boolean;
 	fullscreenElement?: () => HTMLElement | null;
+	uploadModelCover?: BoardModelCoverUpload;
 } = $props();
 
 const locale = $derived(getLocale());
@@ -466,6 +469,7 @@ onMount(() => {
 		scriptCapabilities,
 		senseConsent: (sense) => senseConsent?.(sense) ?? false,
 		locale: () => locale,
+		uploadModelCover: untrack(() => uploadModelCover),
 	});
 	stage = mounted;
 	onStageReady?.(mounted);

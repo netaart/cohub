@@ -29,6 +29,11 @@ export type LoadedModel = {
 	destroy(): void;
 };
 
+export type ModelAsset = {
+	create(): LoadedModel;
+	destroy(): void;
+};
+
 export const NEUTRAL = { baseColor: 0x9aa0a8, roughness: 0.62, metallic: 0.04 };
 
 function measure(root: Container3D, counts: Pick<ModelStats, "materials" | "textures" | "clips" | "unit">): ModelStats {
@@ -117,19 +122,20 @@ function repairNormals(source: Scene3DSource) {
 	}
 }
 
-function neutralDefaults(model: Model3D, json: GltfFormat): Material3D[] {
-	const index = json.materials?.length ?? 0;
-	const fallback = model.source.materials[index];
-	if (!fallback) return [];
-	const plain = new Material3D(NEUTRAL);
-	const painted = new Material3D({ ...NEUTRAL, baseColor: 0xffffff, vertexColors: true });
-	model.traverse((node) => {
-		if (node instanceof Mesh3D && node.material === fallback) node.material = node.geometry.getAttribute("aColor") ? painted : plain;
-	});
-	return [plain, painted];
+function neutralDefaults(source: Scene3DSource, json: GltfFormat): ((model: Model3D) => void) & { materials: Material3D[] } {
+	const fallback = source.materials[json.materials?.length ?? 0];
+	const plain = fallback && new Material3D(NEUTRAL);
+	const painted = fallback && new Material3D({ ...NEUTRAL, baseColor: 0xffffff, vertexColors: true });
+	const apply = (model: Model3D) => {
+		if (!plain || !painted) return;
+		model.traverse((node) => {
+			if (node instanceof Mesh3D && node.material === fallback) node.material = node.geometry.getAttribute("aColor") ? painted : plain;
+		});
+	};
+	return Object.assign(apply, { materials: plain && painted ? [plain, painted] : [] });
 }
 
-async function parseGltfModel(bytes: Uint8Array<ArrayBuffer>, binary: boolean, resolve: Fetch): Promise<LoadedModel> {
+async function parseGltfModel(bytes: Uint8Array<ArrayBuffer>, binary: boolean, resolve: Fetch): Promise<ModelAsset> {
 	let json: GltfFormat;
 	let buffers: ArrayBuffer[];
 	if (binary) {
@@ -161,19 +167,33 @@ async function parseGltfModel(bytes: Uint8Array<ArrayBuffer>, binary: boolean, r
 	const images = await loadImages(json, "", Promise.resolve(buffers), loader as unknown as Parameters<typeof loadImages>[3]);
 	const source = await parseGltf(json, buffers, images.textures);
 	repairNormals(source);
-	const model = new Model3D({ source, autoUpdate: false });
-	const neutral = neutralDefaults(model, json);
-	const clips = model.player?.animationLabels ?? [];
-	if (clips[0]) model.player?.getState(clips[0]).gotoAndStop(0);
+	const neutral = neutralDefaults(source, json);
+	const build = () => {
+		const model = new Model3D({ source, autoUpdate: false });
+		neutral(model);
+		return model;
+	};
+	const probe = build();
+	const labels = probe.player?.animationLabels ?? [];
+	const clips = labels.slice(0, BOARD_MODEL_CLIP_LIMIT).map((name) => ({ name: name.slice(0, 240), durationMs: Math.round((probe.player?.getAnimation(name)?.duration ?? 0) * 1000) }));
+	const nodes = boardModelNodes((json.nodes ?? []).map((node) => node.name));
+	const stats = measure(probe, { materials: json.materials?.length ?? 0, textures: json.images?.length ?? 0, clips: labels.length, unit: "m" });
+	probe.destroy({ children: true });
 	return {
-		root: model,
-		player: clips.length ? (model.player ?? null) : null,
-		clips: clips.slice(0, BOARD_MODEL_CLIP_LIMIT).map((name) => ({ name: name.slice(0, 240), durationMs: Math.round((model.player?.getAnimation(name)?.duration ?? 0) * 1000) })),
-		nodes: boardModelNodes((json.nodes ?? []).map((node) => node.name)),
-		stats: measure(model, { materials: json.materials?.length ?? 0, textures: json.images?.length ?? 0, clips: clips.length, unit: "m" }),
+		create() {
+			const model = build();
+			if (labels[0]) model.player?.getState(labels[0]).gotoAndStop(0);
+			return {
+				root: model,
+				player: labels.length ? (model.player ?? null) : null,
+				clips,
+				nodes,
+				stats,
+				destroy: () => model.destroy({ children: true }),
+			};
+		},
 		destroy() {
-			model.destroy({ children: true });
-			for (const material of [...neutral, ...source.materials]) material?.destroy();
+			for (const material of [...neutral.materials, ...source.materials]) material?.destroy();
 			source.destroy();
 		},
 	};
@@ -198,20 +218,24 @@ function stlTriangles(bytes: Uint8Array<ArrayBuffer>): Float32Array {
 	return new Float32Array(values.slice(0, values.length - (values.length % 9)));
 }
 
-function parseStl(bytes: Uint8Array<ArrayBuffer>): LoadedModel {
+function parseStl(bytes: Uint8Array<ArrayBuffer>): ModelAsset {
 	const positions = stlTriangles(bytes);
 	const geometry = new Geometry3D({ positions, normals: faceNormals(positions) });
 	const material = new Material3D(NEUTRAL);
-	const root = new Container3D();
-	root.addChild(new Mesh3D({ geometry, material, rotation: { x: -Math.PI / 2, y: 0, z: 0 } }));
+	const build = () => {
+		const root = new Container3D();
+		root.addChild(new Mesh3D({ geometry, material, rotation: { x: -Math.PI / 2, y: 0, z: 0 } }));
+		return root;
+	};
+	const probe = build();
+	const stats = measure(probe, { materials: 0, textures: 0, clips: 0, unit: null });
+	probe.destroy({ children: true });
 	return {
-		root,
-		player: null,
-		clips: [],
-		nodes: [],
-		stats: measure(root, { materials: 0, textures: 0, clips: 0, unit: null }),
+		create() {
+			const root = build();
+			return { root, player: null, clips: [], nodes: [], stats, destroy: () => root.destroy({ children: true }) };
+		},
 		destroy() {
-			root.destroy({ children: true });
 			geometry.destroy(true);
 			material.destroy();
 		},
@@ -219,6 +243,18 @@ function parseStl(bytes: Uint8Array<ArrayBuffer>): LoadedModel {
 }
 
 export async function loadModel(source: ModelSource, options: ModelLoadOptions): Promise<LoadedModel> {
+	const asset = await loadModelAsset(source, options);
+	const model = asset.create();
+	return {
+		...model,
+		destroy() {
+			model.destroy();
+			asset.destroy();
+		},
+	};
+}
+
+export async function loadModelAsset(source: ModelSource, options: ModelLoadOptions): Promise<ModelAsset> {
 	options.signal.throwIfAborted();
 	if (source.size !== null) ensureModelWithin(source.size, options.maxBytes);
 	const controller = new AbortController();
@@ -252,12 +288,12 @@ export async function loadModel(source: ModelSource, options: ModelLoadOptions):
 		const bytes = await source.read({ ...options, signal });
 		consumeBytes(bytes.byteLength);
 		const buffer = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? (bytes as Uint8Array<ArrayBuffer>) : new Uint8Array(bytes);
-		const model = source.format === "stl" ? parseStl(buffer) : await parseGltfModel(buffer, source.format === "glb", resolve);
+		const asset = source.format === "stl" ? parseStl(buffer) : await parseGltfModel(buffer, source.format === "glb", resolve);
 		if (signal.aborted) {
-			model.destroy();
+			asset.destroy();
 			signal.throwIfAborted();
 		}
-		return model;
+		return asset;
 	} finally {
 		controller.abort();
 	}

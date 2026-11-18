@@ -21,8 +21,12 @@ All use the same `script` field and runtime.
 }
 ```
 
-Author modules and attach them through the Agent, CLI or SDK. Scripts always run
-and take input, in the editor as for viewers; there is no separate interaction mode.
+Author modules and attach them through the Agent, CLI or SDK. Scripts run and take
+input in the editor as for viewers, and in exports; there is no separate interaction mode.
+`script.modes` limits a script to some of `edit`, `play` (a Board App or **Play**),
+`view` (read-only) and `export`; elsewhere it does not load, draw, present, take input
+or broadcast, and switching modes starts or stops it. Games and directed shows usually
+take `["play", "view", "export"]`, so editing their Board stays still.
 Selecting a scripted item adds **Interactive settings** to its toolbar: controls for
 the module's declared `parameters` (saved to `script.params`), the run status or
 error, the source file, and **Restart**, which starts that instance fresh.
@@ -279,6 +283,18 @@ again would save twice.
 ctx.on("change", ({ data: { added, changed, removed, source } }) => { /* … */ });
 ```
 
+`model:loaded` reports a model object in scope (`props.model.display: "object"`) whose
+model has loaded and now stands on the Board, with `data.id`, once per load. A script
+that starts hears of every model already loaded before its first frame; exports and
+simulations, which draw every model from the first frame, send one for each model
+object in scope then. Wait for it before driving a model's clips or riding its nodes:
+
+```js
+ctx.on("model:loaded", ({ data }) => {
+  if (data.id === ctx.targets.hero) ctx.present(data.id, { props: { model: { animation: "Wave" } } });
+});
+```
+
 `gesture` observes this viewer's drawing tools over the owner without taking their
 input: `tool` (`draw`, `shape`, `frame`, `arrow`), `phase` (`start`, `update`,
 `end`, `cancel`), `points` in owner coordinates, and on `end` the `item` it created
@@ -328,8 +344,8 @@ views, and in `--camera` exports. While editing it never moves, so authors keep 
 view. When the viewer pans or zooms, they take the camera until **Back to the camera**;
 when the script lets go, the view stays where it was. `ctx.view` reports the camera the
 viewer sees, with `pitch` and `bearing` while it tips or turns; pointer events keep
-reporting the Board point under the pointer; `boards simulate` reports the directed camera after a `{"tool": "play"}` step,
-and the test harness has `board.camera`.
+reporting the Board point under the pointer; `boards simulate --mode play` reports the directed camera and
+`--camera -o` draws the screen following it; the test harness has `board.camera` and `board.view`.
 
 ## Sense the device
 
@@ -337,12 +353,21 @@ and the test harness has `board.camera`.
 
 ```js
 ctx.env; // { mode: "play", pointer: "coarse", orientation: "portrait", angle: 0, reducedMotion: false,
-         //   locale: "en", senses: { motion: "on", gamepad: "on", microphone: "ask", camera: "ask", location: "ask" } }
+         //   locale: "en", senses: { motion: "on", gamepad: "on", microphone: "ask", camera: "ask", location: "ask" }, ready: true }
 ctx.on("envchange", ({ data }) => layout(data.orientation));
 ```
 
-`mode` is `edit`, `play` (a Board App or **Play**), `view` (read-only) or `export`.
+`mode` is `edit`, `play` (a Board App or **Play**), `view` (read-only) or `export`;
+`script.modes` decides which ones run the script at all.
 Exports and profiles report `export`, a fine pointer and every source `unavailable`.
+`ready` is false while a play or read-only view that just opened waits, at most 1.5 s,
+for the model objects in view to load; meanwhile the script clock, `onFrame` and
+`auto` animations hold at their start. It turns true, with an `envchange`, once they
+have loaded, and is always true while editing and in exports.
+
+`boards simulate` reports its `--mode` (a tool step switches between `edit` and `play`),
+its `--pointer`, the orientation of its `--viewport`, and every source `on`; exports
+that run simulate steps report the same.
 
 Scripts run in a worker, where the browser offers no device APIs, so the app reads the
 devices and forwards what the browser reports, field for field, as `browser:*` events.
@@ -412,7 +437,8 @@ cohub boards simulate wand.board '{"steps":[{"inputs":"wand.inputs/2026-11-08-09
 ```
 
 Inputs replay from time 0, each in the frame it was recorded in, so the export moves
-as the Board did live. `simulate` turns every source on, delivers one event with
+as the Board did live. `--inputs` also takes a simulate steps file (`{"steps": [...]}`):
+the export then runs the steps as `simulate` does and draws `--at` times of its clock. `simulate` turns every source on, delivers one event with
 `{"input": "browser:devicemotion", "data": {…}}` and replays a recording with
 `{"inputs": "…"}`; the test harness has `board.input(type, data)` and `board.replay(log)`.
 
@@ -486,10 +512,11 @@ Every editor runs the scripts, so commits are routed by what caused them. A comm
 made within 5 seconds of this viewer's input to the instance (a press, a key, a
 drag it ended, an edit or stroke it observed, or an `emit` from a script that had such
 input) saves right away on this client and enters its undo history. Any other
-commit, including every commit made in an `onFrame()` step, is autonomous: one live editor writes it, outside the undo history, and the
-others resolve `false`. Commits coalesce into at most ten writes a second for
-input and one for autonomous work, and wait while the user is mid-gesture or
-editing text. Present every frame, commit when things settle. Other
+commit, including every commit made in an `onFrame()` step, is autonomous: one live
+editor whose mode runs the script writes it, outside the undo history, and the others
+resolve `false`. Commits coalesce into at most ten writes a second for input and one
+for autonomous work, and wait while the user is mid-gesture or editing text. Present
+every frame, commit when things settle. Other
 clients receive document changes; hover, simulation state and temporary scenes
 stay local unless a script broadcasts them. Read-only viewers cannot commit, and `ctx.capabilities.has("board.commit")`
 is false for them.
@@ -743,7 +770,8 @@ command. Boards without shaders never start it.
 browser before it runs the steps, and stops at once with the errors, such as a pass
 that reads a uniform its shader does not declare; without a browser it checks the
 source but cannot compile it. With `-o` it draws the shaders too, resumed from where
-the simulated scripts stand, and warns about any it did not draw, and why.
+the simulated scripts stand, and warns about any it did not draw, and why. Browser
+frames are capped at 16 megapixels; past it, scale goes down.
 `cohub boards profile <board>` times a frame, and what each shader owner adds to it,
 and says what to change. It says whether the browser draws with software WebGL or a
 GPU, measures each owner over `--rounds` (3) and reports the median and range, and
@@ -826,7 +854,7 @@ editor, input routing, commit rules and runtime, on a virtual clock:
 ```js
 import { createBoardScriptHarness } from "@neta-art/cohub/board/testing";
 
-const board = await createBoardScriptHarness({ document, readModule });
+const board = await createBoardScriptHarness({ document, readModule, mode: "play", viewport: { width: 390, height: 844 } });
 board.tool = "draw";
 await board.drag(circle, { pointerType: "pen" });
 await board.advance(500);
@@ -843,9 +871,17 @@ on the selected card, never reaches the document or the undo history.
 `board.emitFailures` holds rejected emits by sender, and `board.status()` what each
 worker lane is running.
 
+The harness starts in `mode` `edit` (select tool), `play` (play tool) or `view`
+(read-only) on a `viewport` (1280×800) fitted to the content, follows the camera
+scripts direct, or holds `view`, and reports what is on screen in `board.view`.
+
 `cohub boards simulate <board>` does the same against a Space Board without saving,
-reports changes, script errors and, per step, `presses`, and renders the result with
-`-o`. `{"move": [[x, y], …]}` hovers through points with no button held, for umbrellas,
+reports changes, script errors and, per step, `presses`, and draws the result with
+`-o`: the whole Board or a region, or with `--camera` the screen, HUDs included
+(`--no-screen` drops them); `--at` with `%d` or a video extension draws frames on the
+simulated clock. `--mode`, `--viewport` and `--pointer` set the device, and the steps
+file may set them as `"mode"`, `"viewport": "390x844"` and `"pointer"`. It warns about scripts whose `modes` leave the final mode out.
+`{"move": [[x, y], …]}` hovers through points with no button held, for umbrellas,
 lanterns and other effects that follow the pointer. A run longer than `--timeout`
 (2 minutes) stops and names the scripts still running, their worker lane, and the last
 event or call each got.

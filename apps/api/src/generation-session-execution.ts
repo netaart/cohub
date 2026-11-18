@@ -14,6 +14,7 @@ import { getPostgresErrorConstraint, isPostgresUniqueViolation } from "./db/post
 import { createSessionTurn, setGenerationTurnAssistantProjection } from "./session-turns.js";
 import { loadGenerationDeclaration } from "./generations/declarations.js";
 import { resolveGenerationRequestParameters } from "./generations/schema.js";
+import { resolveOutputReferences } from "./generations/output-references.js";
 import { enqueueTask } from "./tasks.js";
 import { onTurnSettled } from "./turn-settled.js";
 import { defaultJobRetention } from "@cohub/infra/bullmq";
@@ -67,6 +68,7 @@ export async function createGenerationSessionExecution(input: {
     }
   }
 
+  input = { ...input, content: await resolveOutputReferences(input.userId, input.content) };
   const declaration = await loadGenerationDeclaration(input.userId, input.model);
   if (!declaration) throw new GenerationSessionExecutionError(404, "generation_model_not_found", `Generation model not found: ${input.model}`);
   let parameters: Record<string, unknown> | undefined;

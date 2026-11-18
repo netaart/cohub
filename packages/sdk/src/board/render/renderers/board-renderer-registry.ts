@@ -41,8 +41,10 @@ export type BoardRenderPalette = {
 	legendary: number;
 };
 
+export type BoardScriptScreen = { zoom: number; x?: number; y?: number; place?: (point: { x: number; y: number }) => { x: number; y: number } };
+
 export type BoardScriptHost = {
-	document?: (document: BoardDocument, time: number) => BoardDocument;
+	document?: (document: BoardDocument, time: number, screen?: BoardScriptScreen) => BoardDocument;
 	shaders?: (document: BoardDocument, time: number) => BoardShaderOwner[];
 	camera?: (document: BoardDocument, time: number) => BoardScriptCamera | null;
 	bend?: (id: string, time: number) => unknown;

@@ -1,9 +1,10 @@
 import type { BoardModelSettings } from "@cohub/protocol/board-model";
 import type { Renderer } from "pixi.js";
 import type { BoardPointerEvent } from "../editor/index.js";
-import { type BoardAssetSource, type BoardModelPlayback, type BoardScene, type BoardSceneItem, boardModelPlayback, boardModelViewKey, isBoardModelItem, type WorldPoint } from "../model/index.js";
+import { type BoardModelPlayback, type BoardScene, type BoardSceneItem, boardModelPlayback, boardModelViewKey, isBoardModelItem, type WorldPoint } from "../model/index.js";
 import type { BoardModelLive } from "../render/index.js";
-import { type LoadedModel, loadBoardItemModel, loadModelEngine, MODEL_VIEW_PRESETS, type ModelPlayback, type ModelScene, type ModelView } from "../render/model3d/index.js";
+import { boardModelKey, type LoadedModel, loadModelEngine, MODEL_VIEW_PRESETS, type ModelPlayback, type ModelScene, type ModelView } from "../render/model3d/index.js";
+import type { BoardModelLoader, BoardModelTicket } from "./model-loader.js";
 
 export type BoardModelTheater = {
 	sync(input: { scene: BoardScene; running: ReadonlySet<string>; entered: string | null }): void;
@@ -22,7 +23,7 @@ type Entry = {
 	id: string;
 	key: string;
 	controller: AbortController;
-	model: LoadedModel | null;
+	ticket: BoardModelTicket | null;
 	scene: ModelScene | null;
 	rect: { x: number; y: number; width: number; height: number } | null;
 	leaving: boolean;
@@ -36,8 +37,7 @@ type Entry = {
 
 export type BoardModelTheaterOptions = {
 	renderer: () => Renderer | null;
-	source: BoardAssetSource;
-	maxBytes: number;
+	models: BoardModelLoader;
 	pick: (world: WorldPoint) => string | null;
 	density: () => number;
 	reducedMotion: () => boolean;
@@ -50,7 +50,7 @@ const ANIMATION_FRAME_MS = 1000 / 30;
 
 function modelKey(item: BoardSceneItem): string | null {
 	if (item.type !== "file" || !isBoardModelItem(item) || item.props.model?.display === "object") return null;
-	return `${item.props.src}:${item.props.snapshot?.mtimeMs ?? ""}`;
+	return boardModelKey(item);
 }
 
 const settingsOf = (item: BoardSceneItem) => (item.type === "file" ? item.props.model : undefined);
@@ -81,9 +81,9 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 		if (entries.get(entry.id) === entry) entries.delete(entry.id);
 		entry.scene?.view.removeFromParent();
 		entry.scene?.destroy();
-		entry.model?.destroy();
+		entry.ticket?.release();
 		entry.scene = null;
-		entry.model = null;
+		entry.ticket = null;
 	}
 
 	// The card draws its still again first; the view goes once the card has let go.
@@ -101,21 +101,22 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 	async function start(entry: Entry, item: BoardSceneItem) {
 		const { signal } = entry.controller;
 		const renderer = options.renderer();
-		const loading = renderer && loadBoardItemModel(item, options.source, { signal, maxBytes: options.maxBytes });
-		if (!renderer || !loading) return;
+		if (!renderer) return;
+		const loading = new Promise<LoadedModel | null>((resolve) => {
+			entry.ticket = options.models.request(entry.key, item, resolve);
+		});
 		try {
 			const engine = await loadModelEngine();
 			const [model] = await Promise.all([loading, engine.prepareModelRenderer(renderer)]);
-			if (signal.aborted) return model.destroy();
+			if (signal.aborted) return;
+			if (!model) throw new Error("Model failed to load");
 			options.loaded?.(entry.id, model);
 			if (!model.player && entry.id !== entered) {
 				motionless.add(entry.key);
-				model.destroy();
 				return destroy(entry);
 			}
 			const reducedMotion = options.reducedMotion();
 			const scene = engine.createModelScene(model, { reducedMotion, home: entry.settings?.view, changed: options.frame });
-			entry.model = model;
 			entry.scene = scene;
 			entry.playback = model.player ? engine.createModelPlayback(model.player) : null;
 			layout(entry);
@@ -184,7 +185,7 @@ export function createBoardModelTheater(options: BoardModelTheaterOptions): Boar
 				const existing = entries.get(id);
 				if (existing && !existing.retired) continue;
 				if (existing) destroy(existing);
-				const entry: Entry = { id, key: modelKey(item) as string, controller: new AbortController(), model: null, scene: null, rect: null, leaving: false, retired: false, failed: false, live: null, settings: settingsOf(item), pose: cardPlayback(item, options.reducedMotion()), playback: null };
+				const entry: Entry = { id, key: modelKey(item) as string, controller: new AbortController(), ticket: null, scene: null, rect: null, leaving: false, retired: false, failed: false, live: null, settings: settingsOf(item), pose: cardPlayback(item, options.reducedMotion()), playback: null };
 				entries.set(id, entry);
 				void start(entry, item);
 			}

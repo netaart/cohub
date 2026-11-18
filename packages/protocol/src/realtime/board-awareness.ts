@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { BOARD_ARROW_STROKE_SIZE } from "../board-constants.js";
+import { BOARD_ARROW_STROKE_SIZE, BOARD_SCRIPT_MODES } from "../board-constants.js";
 
 const idSchema = z.string().min(1).max(160);
 const finiteSchema = z.number().finite();
@@ -54,6 +54,7 @@ export const BoardAwarenessStateUpdateSchema = z.object({
 		.object({
 			formFactor: z.enum(["desktop", "mobile"]),
 			scripts: z.boolean().optional(),
+			scriptMode: z.enum(BOARD_SCRIPT_MODES).optional(),
 		})
 		.optional(),
 	cursor: BoardAwarenessPointSchema.extend({

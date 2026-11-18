@@ -9,6 +9,7 @@ import { untrack } from "svelte";
 import type { BoardInputRecorder } from "#lib/board/board-input-recorder.svelte.ts";
 import {
 	type BoardScriptStatus,
+	boardScriptRunsHere,
 	watchBoardScriptStatus,
 } from "#lib/board/board-script-status.ts";
 import type { BoardEditor } from "#lib/board/editor.svelte.ts";
@@ -100,18 +101,19 @@ function remove(id: string) {
 	<p class="section-hint">{m.board_scripts_hint({}, { locale })}</p>
 	{#each scripts as [id, script] (id)}
 		{@const status = statuses[id]}
-		{@const state = !script.enabled ? "off" : (status?.state ?? "starting")}
-		<div class="script-row">
+		{@const here = boardScriptRunsHere(editor, script)}
+		{@const state = !script.enabled || !here ? "off" : (status?.state ?? "starting")}
+		<div class="script-row" title={script.enabled && !here ? m.board_script_off({}, { locale }) : undefined}>
 			<button
 				type="button"
 				class="script-toggle"
 				aria-expanded={expanded === id}
-				disabled={!script.enabled || !status}
+				disabled={state === "off" || !status}
 				onclick={() => { expanded = expanded === id ? null : id; }}
 			>
 				<span class="script-dot" data-state={state} aria-hidden="true"></span>
 				<span class="script-name" title={script.src}>{script.src.split("/").pop()}</span>
-				{#if script.enabled && status}
+				{#if state !== "off" && status}
 					<ChevronDown class="chevron h-3.5 w-3.5" />
 				{/if}
 			</button>
@@ -130,7 +132,7 @@ function remove(id: string) {
 				<Trash2 class="h-3.5 w-3.5" />
 			</button>
 		</div>
-		{#if expanded === id && script.enabled && status}
+		{#if expanded === id && state !== "off" && status}
 			<BoardScriptPanel
 				{editor}
 				ownerId={id}

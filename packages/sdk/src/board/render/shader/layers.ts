@@ -70,8 +70,11 @@ function grow(rect: Rect, margin: number): Rect {
   return { x: rect.x - rect.width * margin, y: rect.y - rect.height * margin, width: rect.width * (1 + 2 * margin), height: rect.height * (1 + 2 * margin) };
 }
 
-function surfaceOutline(item: BoardSceneItem): ReadonlyArray<{ x: number; y: number }> {
-  const { width, height } = item.frame;
+function surfaceBox(item: BoardSceneItem): { width: number; height: number } {
+  return item.type === "shape" ? item.size : item.frame;
+}
+
+function surfaceOutline(item: BoardSceneItem, width: number, height: number): ReadonlyArray<{ x: number; y: number }> {
   const radius = item.style?.radius;
   if (item.type === "shape") {
     const { geometry } = item.props as BoardShapeItem["props"];
@@ -89,9 +92,9 @@ export function boardSurfaceOutlines(scene: BoardScene, owner: string, world: Re
   for (const item of items) {
     if (item.id === owner || SKIPPED.has(item.type) || LIGHT_BLENDS.has(item.style?.blend ?? "") || item.id.startsWith(prefix) || scene.opacity(item.id) <= 0) continue;
     if (!rectsIntersect(itemBounds(item.frame), world)) continue;
-    const { width, height } = item.frame;
+    const { width, height } = surfaceBox(item);
     const points: number[] = [];
-    for (const point of surfaceOutline(item)) {
+    for (const point of surfaceOutline(item, width, height)) {
       const local = applyMatrix(worldToLocal, framePoint(item.frame, width ? point.x / width : 0, height ? point.y / height : 0));
       points.push(local.x, local.y);
     }

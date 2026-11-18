@@ -6,7 +6,8 @@ export type PublicAssetPurpose =
   | "space_like_sticker"
   | "chat_attachment"
   | "app_source"
-  | "generation_input";
+  | "generation_input"
+  | "board_preview";
 export type PublicAssetUploadProtocol = "presigned_put_v1";
 /** Preprocessed chat images. General chat files and avatars may use any mime string. */
 export type PublicAssetMimeType = "image/webp" | "image/jpeg";
@@ -16,6 +17,7 @@ export type CreatePublicAssetUploadInput = {
   uploadProtocol: PublicAssetUploadProtocol;
   spaceId?: string;
   sessionId?: string;
+  key?: string;
   file: {
     size: number;
     mimeType: string;
@@ -35,6 +37,17 @@ type PublicAssetUploadBase = {
 export type CreatePublicAssetUploadResponse = {
   expiresAt: string;
   asset: PublicAssetUploadBase;
+};
+
+export type StoredPublicAssetResponse = {
+  stored: true;
+  asset: Pick<PublicAssetUploadBase, "purpose" | "objectKey" | "publicUrl">;
+};
+
+export type UploadBoardPreviewInput = {
+  key: string;
+  file: Blob;
+  signal?: AbortSignal;
 };
 
 export type UploadPublicAssetInput = {
@@ -237,6 +250,25 @@ export class PublicAssetsApi {
   /** Durable, unlisted URL for a local generation input (image, video, audio, or 3D model named with its extension). */
   uploadGenerationInput(input: UploadGenerationInputInput) {
     return this.upload({ ...input, purpose: "generation_input" });
+  }
+
+  async uploadBoardPreview(input: UploadBoardPreviewInput): Promise<StoredPublicAssetResponse["asset"]> {
+    const plan = await this.transport.request<CreatePublicAssetUploadResponse | StoredPublicAssetResponse>("/api/public-assets/uploads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        purpose: "board_preview",
+        uploadProtocol: "presigned_put_v1",
+        key: input.key,
+        file: { size: input.file.size, mimeType: "image/webp" },
+      } satisfies CreatePublicAssetUploadInput),
+      signal: input.signal,
+    });
+    if ("stored" in plan) return plan.asset;
+    const response = await fetch(plan.asset.uploadUrl, { method: "PUT", headers: plan.asset.uploadHeaders, body: input.file, signal: input.signal });
+    if (!response.ok) throw new Error(`Board preview upload failed: HTTP ${response.status}`);
+    const { purpose, objectKey, publicUrl } = plan.asset;
+    return { purpose, objectKey, publicUrl };
   }
 
   /** Preprocessed chat image (webp/jpeg). Same durable path as uploadChatAttachment. */

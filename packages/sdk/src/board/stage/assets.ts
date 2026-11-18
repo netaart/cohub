@@ -8,7 +8,9 @@ import {
 	boardAssetKeySource,
 	boardAssetRefKey,
 	boardMediaNaturalSize,
+	boardModelCover,
 	boardModelFormat,
+	isBoardModelObject,
 } from "../model/index.js";
 import { mediaHost } from "@cohub/protocol/core";
 import type { BoardModelView } from "@cohub/protocol/board-model";
@@ -26,6 +28,7 @@ import {
 	videoFrameUrl,
 } from "../../media.js";
 import { Texture } from "pixi.js";
+import type { ModelStill } from "../render/model3d/index.js";
 import { defaultBoardDeviceBudget } from "./device.js";
 import { scheduleBoardIdle } from "./idle.js";
 import {
@@ -136,10 +139,11 @@ export type BoardModelPreviewRequest = {
 	format: ModelFormat;
 	size?: number;
 	view?: BoardModelView;
+	animation?: string;
 };
 
 export type BoardModelPreviews = {
-	load: (request: BoardModelPreviewRequest) => Promise<ImageBitmap>;
+	load: (request: BoardModelPreviewRequest) => Promise<ModelStill>;
 	maxBytes?: number;
 };
 
@@ -164,6 +168,7 @@ export type BoardAssetManager = {
 		options?: { timeoutMs?: number; edge?: (item: BoardSceneItem) => number },
 	) => Promise<T>;
 	subscribe: (listener: (key: string, change: BoardAssetChange) => void) => () => void;
+	subscribeModelStills: (listener: (key: string, still: ModelStill) => void) => () => void;
 	stats: () => { textures: number; cooling: number; bytes: number; loading?: number; prefetching?: number };
 	destroy: () => void;
 };
@@ -180,6 +185,11 @@ const SHRINK_CONCURRENCY = 4;
 const TRIM_DELAY = 400;
 const TRIM_MAX_DELAY = 2_000;
 const TONE_LIMIT = 8192;
+
+function objectCoverKey(item: BoardSceneItem): string | null {
+	const cover = boardModelCover(item);
+	return cover && boardAssetRefKey({ src: cover });
+}
 
 function footprintOf(texture: Texture | null): number {
 	if (!texture) return 0;
@@ -283,6 +293,7 @@ export function createBoardAssetManager(
 	const unavailable = new Set<string>();
 	const queue: Task[] = [];
 	const listeners = new Set<(key: string, change: BoardAssetChange) => void>();
+	const stillListeners = new Set<(key: string, still: ModelStill) => void>();
 	let active = 0;
 	const activeByMedia: Record<BoardAssetMedia, number> = {
 		image: 0,
@@ -362,7 +373,7 @@ export function createBoardAssetManager(
 	function resolveAsset(item: BoardSceneItem): { key: string | null; natural: Size | null } {
 		const asset = options.itemAsset?.(item);
 		const natural = (asset === undefined ? boardMediaNaturalSize(item) : asset?.natural) ?? null;
-		const key = asset === undefined ? boardAssetKey(item) : asset && boardAssetRefKey(asset);
+		const key = asset !== undefined ? asset && boardAssetRefKey(asset) : isBoardModelObject(item) ? objectCoverKey(item) : boardAssetKey(item);
 		const source = key ? boardAssetKeySource(key) : null;
 		if (source?.media === "video" && source.kind === "url" && options.loadVideoPreviews === false && slotOf("video", source.value) === "video")
 			return { key: null, natural };
@@ -708,8 +719,12 @@ export function createBoardAssetManager(
 		const { src, snapshot, model } = item.props;
 		const format = boardModelFormat(src, snapshot?.mimeType);
 		if (!format) return null;
-		const request = { key, src, format, size: snapshot?.size, view: model?.view };
-		return async () => ({ texture: Texture.from(await previews.load(request)), url: "", edge: Number.POSITIVE_INFINITY });
+		const request = { key, src, format, size: snapshot?.size, view: model?.view, animation: model?.animation };
+		return async () => {
+			const still = await previews.load(request);
+			for (const listener of stillListeners) listener(key, still);
+			return { texture: Texture.from(still.image), url: "", edge: Number.POSITIVE_INFINITY };
+		};
 	}
 
 	function starter(item: BoardSceneItem, key: string, source: BoardAssetKeySource): Start | null {
@@ -916,6 +931,12 @@ export function createBoardAssetManager(
 				listeners.delete(listener);
 			};
 		},
+		subscribeModelStills(listener) {
+			stillListeners.add(listener);
+			return () => {
+				stillListeners.delete(listener);
+			};
+		},
 		destroy() {
 			disposed = true;
 			stopSource?.();
@@ -928,6 +949,7 @@ export function createBoardAssetManager(
 			warm.clear();
 			unwarmable.clear();
 			listeners.clear();
+			stillListeners.clear();
 			pathVersions.clear();
 			itemEpochs.clear();
 			starters.clear();

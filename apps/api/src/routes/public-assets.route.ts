@@ -4,6 +4,7 @@ import { hasPermission } from "../permissions.js";
 import { authzDenied, getExecutionPrincipal, requireValidId, useAuth } from "../lib/middleware.js";
 import { PublicFileConfigError } from "../public-file-storage.js";
 import {
+  createBoardPreviewUpload,
   createPublicAssetUploadPlan,
   isPublicAssetPurpose,
   PublicAssetConfigError,
@@ -44,10 +45,21 @@ router.post("/uploads", async (c) => {
     if (body.sessionId && execution.sessionId && execution.sessionId !== body.sessionId) return authzDenied(c);
   }
 
-  // chat_attachment and generation_input are user-scoped: authenticated is enough.
+  // chat_attachment, generation_input and board_preview are user-scoped: authenticated is enough.
   // Optional spaceId/sessionId are association hints only and do not gate upload.
 
   try {
+    if (body.purpose === "board_preview") {
+      const preview = await createBoardPreviewUpload({
+        uploadProtocol: body.uploadProtocol,
+        userUuid: user.uuid,
+        key: body.key,
+        file: body.file,
+        endpoint: execution ? "internal" : "public",
+      });
+      if (!("stored" in preview)) await consumeUploadQuota(redisCommandClient, user.uuid, { entryCount: 1, totalBytes: body.file.size });
+      return c.json(preview);
+    }
     const plan = createPublicAssetUploadPlan({
       purpose: body.purpose,
       uploadProtocol: body.uploadProtocol,

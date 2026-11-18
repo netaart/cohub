@@ -1,11 +1,14 @@
 import type { BoardDocument, BoardPatch, BoardVec2 } from "@cohub/protocol";
 import { type BoardEditor, type BoardPointerEvent, type BoardToolId, createBoardEditor, selectionTransformControlAt } from "../editor/index.js";
 import type { BoardExportRegion } from "../model/export-plan.js";
-import { worldPoint, screenPoint } from "../model/geometry.js";
+import { type BoardViewport, pointToWorld, screenPoint, worldPoint } from "../model/geometry.js";
+import { resolveBoardAnimationCamera } from "../model/sampling.js";
+import { boardProjection, isBoardViewLevel } from "../model/view-camera.js";
 import type {
   BoardScriptBrowserEvent,
   BoardScriptBrowserEvents,
   BoardScriptCamera,
+  BoardScriptEnv,
   BoardScriptOutput,
   BoardScriptPeer,
   BoardScriptSense,
@@ -16,15 +19,19 @@ import { createNodeBoardRenderer, exportBoardImageBytes, type BoardNodeRenderer 
 import { createNodeBoardScriptRuntime } from "../export/node/scripts.js";
 import { type BoardScriptDevice, createBoardScriptController } from "../stage/script-controller.js";
 
+export type BoardScriptHarnessMode = "edit" | "play" | "view";
+
 export type BoardScriptHarnessOptions = {
   document: BoardDocument;
   readModule(path: string): Promise<string>;
   renderer?: BoardNodeRenderer;
-  readonly?: boolean;
-  tool?: BoardToolId;
+  mode?: BoardScriptHarnessMode;
+  viewport?: { width: number; height: number };
+  view?: BoardScriptCamera;
   leader?: boolean;
   timeoutMs?: number;
   device?: Partial<BoardScriptDevice>;
+  onFrame?(time: number): Promise<void> | void;
 };
 
 export type BoardScriptHarnessPointer = {
@@ -102,16 +109,18 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
   const broadcasts: BoardScriptHarnessBroadcast[] = [];
   const editor: BoardEditor = createBoardEditor({
     document: options.document,
-    readonly: options.readonly === true,
-    initialTool: options.tool ?? "select",
+    readonly: options.mode === "view",
+    initialTool: options.mode === "play" ? "play" : "select",
     onCommit(patch) {
       commits.push(patch);
     },
   });
-  const surface = { width: 1280, height: 800 };
+  const surface = { ...(options.viewport ?? { width: 1280, height: 800 }) };
   editor.surfaceSize = surface;
+  editor.fitView({ animate: false, maxZoom: 1 });
   const device: BoardScriptDevice = {
     ...BOARD_SCRIPT_EXPORT_ENV,
+    orientation: surface.height > surface.width ? "portrait" : "landscape",
     senses: boardScriptSenseStates("on"),
     ...options.device,
   };
@@ -119,6 +128,7 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     editor,
     device: () => device,
     leader: () => options.leader ?? true,
+    models: () => Object.keys(editor.document.items),
     peers: { list: () => peers, broadcast: (owner, type, data) => broadcasts.push({ owner, type, data }) },
     now: () => clock,
     setTimer(run, ms) {
@@ -143,18 +153,36 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     return due.length > 0;
   }
 
+  let shown: BoardViewport = editor.camera;
+  let directed = false;
+  function follow(): BoardViewport {
+    const directing = options.view ?? controller.camera();
+    const follows = editor.cameraPolicy === "follow" && directing !== null && Object.keys(directing).length > 0;
+    const followed = follows ? resolveBoardAnimationCamera(directing, (id) => editor.scene.get(id)?.frame, surface, clock, editor.camera) : null;
+    editor.followCamera(followed, { settle: directed });
+    directed = directing !== null && follows;
+    shown = followed ?? editor.camera;
+    return shown;
+  }
+
+  function compose(camera: BoardViewport) {
+    const projection = isBoardViewLevel(camera) ? null : boardProjection(camera, surface);
+    controller.compose(camera, false, projection ? (point) => pointToWorld(projection.project(point.x, point.y), camera) : undefined);
+  }
+
   async function frame() {
     controller.update();
     for (let round = 0; round < 16; round++) {
-      controller.sync({ camera: editor.camera, surface, visibleIds: null });
+      controller.sync({ camera: shown, surface, visibleIds: null });
       await runtime?.settle();
-      controller.compose(editor.camera, false);
+      compose(follow());
       if (!runTimers() && !runtime?.queued) break;
     }
+    await options.onFrame?.(clock);
   }
 
   function pointerEvent(point: BoardVec2, phase: "down" | "move" | "up", input: BoardScriptHarnessPointer = {}, pressed = phase !== "up"): BoardPointerEvent {
-    const { x, y, zoom } = editor.camera;
+    const { x, y, zoom } = shown;
     return {
       pointerId: input.pointerId ?? 1,
       world: worldPoint(point.x, point.y),
@@ -217,6 +245,12 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     },
     get camera(): BoardScriptCamera | null {
       return controller.camera();
+    },
+    get env(): BoardScriptEnv {
+      return { ...device, mode: editor.scriptMode, ready: true };
+    },
+    get view(): { camera: BoardViewport; width: number; height: number } {
+      return { camera: shown, ...surface };
     },
     output: (id: string): BoardScriptOutput | null => controller.output(id),
     error: (id: string): string | null => controller.error(id),
@@ -291,16 +325,21 @@ export async function createBoardScriptHarness(options: BoardScriptHarnessOption
     },
     async shown(scale = 1): Promise<{ document: BoardDocument; scripts?: BoardScriptHost }> {
       const host = runtime;
-      if (!host) return { document: editor.document };
+      const document = editor.document;
+      if (!host) return { document };
       await host.draw(scale);
+      const scene = editor.scene;
       return {
-        document: host.document(editor.document, editor.scene),
-        scripts: { frame: host.frame, error: host.error, ready: host.ready, release() {}, shaders: () => controller.shaderOwners() },
+        document,
+        scripts: {
+          frame: host.frame, error: host.error, ready: host.ready, release() {}, shaders: () => controller.shaderOwners(),
+          document: (input, _time, screen) => host.document(input, input === document ? scene : undefined, screen),
+        },
       };
     },
     async render(region: BoardExportRegion = { kind: "all" }, scale = 1): Promise<Uint8Array> {
       const { document, scripts } = await this.shown(scale);
-      const result = exportBoardImageBytes(renderer, document, { region, scale, colorScheme: "light", ...(scripts ? { scripts } : {}) });
+      const result = exportBoardImageBytes(renderer, document, { region, scale, colorScheme: "light", screen: true, ...(scripts ? { scripts } : {}) });
       if (!result) throw new Error("Nothing to render.");
       return result.bytes;
     },

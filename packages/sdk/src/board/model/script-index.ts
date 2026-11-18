@@ -1,4 +1,4 @@
-import type { BoardDocument, BoardItem, BoardPatch, BoardScript } from "@cohub/protocol";
+import type { BoardDocument, BoardItem, BoardPatch, BoardScript, BoardScriptMode } from "@cohub/protocol";
 
 export type BoardScriptAttachment = {
   readonly id: string;
@@ -8,23 +8,33 @@ export type BoardScriptAttachment = {
 
 type ScriptSource = Pick<BoardDocument, "items"> & { board?: Pick<BoardDocument["board"], "scripts"> };
 
-const attachmentsByItems = new WeakMap<BoardDocument["items"], { scripts: BoardDocument["board"]["scripts"]; list: readonly BoardScriptAttachment[] }>();
+type Attachments = {
+  scripts: BoardDocument["board"]["scripts"];
+  list: readonly BoardScriptAttachment[];
+  modes: Partial<Record<BoardScriptMode, readonly BoardScriptAttachment[]>>;
+};
 
-export function boardScriptAttachments(document: ScriptSource): readonly BoardScriptAttachment[] {
+const attachmentsByItems = new WeakMap<BoardDocument["items"], Attachments>();
+
+export function boardScriptAttachments(document: ScriptSource, mode?: BoardScriptMode): readonly BoardScriptAttachment[] {
   const scripts = document.board?.scripts;
-  const cached = attachmentsByItems.get(document.items);
-  if (cached && cached.scripts === scripts) return cached.list;
-  const list: BoardScriptAttachment[] = [];
-  for (const [id, script] of Object.entries(scripts ?? {}))
-    if (script.enabled) list.push({ id, script, item: null });
-  for (const [id, item] of Object.entries(document.items))
-    if (item.script?.enabled) list.push({ id, script: item.script, item });
-  attachmentsByItems.set(document.items, { scripts, list });
-  return list;
+  let cached = attachmentsByItems.get(document.items);
+  if (!cached || cached.scripts !== scripts) {
+    const list: BoardScriptAttachment[] = [];
+    for (const [id, script] of Object.entries(scripts ?? {}))
+      if (script.enabled) list.push({ id, script, item: null });
+    for (const [id, item] of Object.entries(document.items))
+      if (item.script?.enabled) list.push({ id, script: item.script, item });
+    cached = { scripts, list, modes: {} };
+    attachmentsByItems.set(document.items, cached);
+  }
+  if (!mode) return cached.list;
+  cached.modes[mode] ??= cached.list.filter(({ script }) => !script.modes || script.modes.includes(mode));
+  return cached.modes[mode];
 }
 
-export function hasBoardScripts(document: ScriptSource): boolean {
-  return boardScriptAttachments(document).length > 0;
+export function hasBoardScripts(document: ScriptSource, mode?: BoardScriptMode): boolean {
+  return boardScriptAttachments(document, mode).length > 0;
 }
 
 export function isBoardRootScript(document: ScriptSource, id: string): boolean {

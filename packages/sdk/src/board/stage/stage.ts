@@ -8,7 +8,7 @@ import type {
 	BoardScriptSnapshot,
 } from "../model/index.js";
 import { Application, Container, Graphics, Matrix, type Renderer, RendererType, type Texture } from "pixi.js";
-import type { BoardActivation, BoardEditor, BoardPointerEvent } from "../editor/index.js";
+import type { BoardActivation, BoardEditor, BoardModelLearned, BoardPointerEvent } from "../editor/index.js";
 import { BOARD_INPUT, boardDragSlop, boardTextGestureWrap, isCreationBoardTool, isTouchLikePointer, resizeCursorForHandle } from "../editor/index.js";
 import {
 	type BoardArrowItem,
@@ -34,7 +34,6 @@ import {
 	type SceneItem,
 	elementClientToLocal,
 	isBoardModelItem,
-	type BoardModelFacts,
 	itemBounds,
 	pointToWorld,
 	rectsIntersect,
@@ -102,7 +101,9 @@ import { type BoardMediaClock, type BoardMediaLoop, createBoardMediaClock } from
 import { createBoardTimelineClock } from "./timeline-clock.js";
 import { createBoardLiveScheduler } from "./live.js";
 import { createBoardModelTheater } from "./models.js";
-import { type LoadedModel, loadBoardItemModel, loadBoardObjectModels } from "../render/model3d/index.js";
+import { type BoardModelCoverUpload, createBoardModelCovers } from "./model-covers.js";
+import { type LoadedModel, loadBoardItemModelAsset, loadBoardObjectModels } from "../render/model3d/index.js";
+import { createBoardModelLoader } from "./model-loader.js";
 import { type BoardStageShaders, createBoardStageShaders } from "./shaders.js";
 import { type BoardStageDepth, createBoardStageDepth } from "./depth.js";
 import { type BoardLiveStroke, createBoardScene } from "./scene.js";
@@ -180,11 +181,12 @@ export type BoardStageOptions = {
 	autoplay?: (kind: BoardAutoplayKind) => boolean;
 	safeRect?: () => Rect;
 	scriptCapabilities?: Record<string, (id: string, input: unknown) => Promise<unknown>>;
-	scriptLeader?: () => boolean;
+	scriptLeader?: (owner: string) => boolean;
 	senseConsent?: (sense: BoardConsentSense) => boolean;
 	locale?: () => string | null;
 	lod?: () => BoardLod | undefined;
 	prefetch?: number;
+	uploadModelCover?: BoardModelCoverUpload;
 };
 
 export type BoardStage = {
@@ -270,6 +272,7 @@ const FRAME_SCRIPTS = 8;
 const FRAME_RESIZE = 16;
 const FRAME_MOTION = 32;
 const GROUND_PIXELS = 2.5;
+const FIRST_SCREEN_MS = 1_500;
 
 const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5' fill='none' stroke='%23fff' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5' fill='none' stroke='%231d1d1f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 12 12, crosshair`;
 
@@ -339,7 +342,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			senses: senses.states,
 		}),
 		onSensesChange: syncSenses,
-		leader: options.scriptLeader ?? (presence ? () => presence.leadsScripts() : undefined),
+		models: () => depth?.loaded() ?? [],
+		leader: options.scriptLeader ?? (presence ? (owner) => presence.leadsScripts(owner) : undefined),
 		peers: presence && {
 			list: () => {
 				const peers = presence.peers;
@@ -375,6 +379,10 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	let chained = false;
 	const clock = createBoardFrameClock();
 	const device = defaultBoardDeviceBudget();
+	const modelLoader = createBoardModelLoader({
+		load: (item, signal) => loadBoardItemModelAsset(item, options.source, { signal, maxBytes: device.modelBytes }),
+		concurrency: device.tier === "low" ? 2 : 3,
+	});
 	const currentLod = () => options.lod?.() ?? device.lod;
 	const timeline = createBoardTimelineClock();
 	let lastWall = 0;
@@ -461,8 +469,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	};
 	const models = createBoardModelTheater({
 		renderer: () => app?.renderer ?? null,
-		source: options.source,
-		maxBytes: device.modelBytes,
+		models: modelLoader,
 		pick: (world) => editor.pickAt(world, lastPointerType)?.id ?? null,
 		density: () => app?.renderer.resolution ?? 1,
 		reducedMotion: () => options.reducedMotion?.() ?? false,
@@ -595,11 +602,31 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		return worldPoint(ahead(previous.x, center.x), ahead(previous.y, center.y));
 	}
 
-	const learned = new Map<string, BoardModelFacts>();
-	function learnModel(id: string, model: LoadedModel) {
-		if (editor.readonly || (!model.clips.length && !model.nodes.length)) return;
-		learned.set(id, { clips: model.clips, nodes: model.nodes });
+	const learned = new Map<string, Omit<BoardModelLearned, "id">>();
+	const learn = (id: string, update: Omit<BoardModelLearned, "id">) => {
+		learned.set(id, { ...learned.get(id), ...update });
 		scheduleTick();
+	};
+	const covers =
+		options.uploadModelCover && !editor.readonly
+			? createBoardModelCovers({
+					editor,
+					source: options.source,
+					upload: options.uploadModelCover,
+					maxBytes: device.modelBytes,
+					drawsStill: (id) => {
+						const item = editor.itemById(id);
+						return Boolean(item && assets.assetKey(item));
+					},
+					adopt: (models) => {
+						for (const { id, coverUrl } of models) learn(id, { coverUrl });
+					},
+				})
+			: null;
+	function learnModel(id: string, model: LoadedModel) {
+		if (editor.readonly) return;
+		covers?.held(id);
+		if (model.clips.length || model.nodes.length) learn(id, { facts: { clips: model.clips, nodes: model.nodes } });
 	}
 
 	const naturalIds = new Set<string>();
@@ -1112,7 +1139,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			? [...(shaders?.animated ? scripts.shaderOwners().flatMap((owner) => (owner.root ? [] : [owner.id])) : []), ...(modelsMoving ? live.running : [])]
 			: [];
 		const touched = unseen.length ? new Set([...drawn, ...unseen]) : drawn;
-		depth.prepare({ scene: editor.scene, projection: boardProjection(camera, surface), resolution: app.renderer.resolution, touched });
+		depth.prepare({ scene: editor.scene, projection: boardProjection(camera, surface), resolution: app.renderer.resolution, touched, visible: visibleIds() });
 	}
 
 	function scheduleRender() {
@@ -1295,9 +1322,33 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		return Boolean(drawn);
 	}
 
+	let opening: number | null | undefined;
+	let openingTimer: ReturnType<typeof setTimeout> | null = null;
+	function holdFirstScreen(): boolean {
+		if (opening === null) return false;
+		const now = performance.now();
+		if (opening === undefined) {
+			if (!editor.readonly && editor.tool !== "play") {
+				opening = null;
+				return false;
+			}
+			opening = now + FIRST_SCREEN_MS;
+			openingTimer = setTimeout(scheduleTick, FIRST_SCREEN_MS);
+		}
+		const ids = visibleIds();
+		if (now < opening && (!ids || depth?.loading(editor.scene, ids))) {
+			player.hold();
+			return true;
+		}
+		opening = null;
+		player.reset();
+		return false;
+	}
+
 	function sync() {
 		if (!app || !world || !scene || !overlay) return;
 		const current = theme();
+		scripts.hold(holdFirstScreen());
 		scripts.update();
 		player.enter(editor.consumeRecentlyAdded(), editor.document);
 		const playback = options.playback?.() ?? null;
@@ -1343,7 +1394,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 
 		const ids = visibleIds();
 		const center = boardViewCenter(camera, surface);
-		assets.focus(loadFocus(center, camera));
+		const focus = loadFocus(center, camera);
+		assets.focus(focus);
+		modelLoader.focus(focus);
 		adoptArrivals();
 		if (toned.size > 0) {
 			scene?.repaintFar(toned, assets.assetKey);
@@ -1425,8 +1478,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			options.onLiveChange?.(scene.liveIds());
 		}
 		adoptNaturalSizes();
+		covers?.sync();
 		if (learned.size) {
-			editor.adoptModelFacts([...learned].map(([id, facts]) => ({ id, facts })));
+			editor.adoptModelFacts([...learned].map(([id, update]) => ({ id, ...update })));
 			learned.clear();
 		}
 		scheduleRefine();
@@ -1802,6 +1856,15 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		}
 		scheduleTick();
 	});
+	const stopStills = covers
+		? assets.subscribeModelStills((key, still) => {
+				const shown = [...(scene?.holders(key) ?? [])].flatMap((id) => {
+					const item = editor.itemById(id);
+					return item && assets.assetKey(item) === key ? [item] : [];
+				});
+				covers.drawn(shown, still);
+			})
+		: null;
 	const resizeObserver = new ResizeObserver((entries) => {
 		const entry = entries[entries.length - 1];
 		if (entry) canvasBox = measureBoardCanvasBox(entry, host.ownerDocument.defaultView?.devicePixelRatio ?? 1);
@@ -1874,8 +1937,15 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			fault: (id, message) => scripts.host?.fault(id, message),
 			frame: scheduleTick,
 			animate: () => requestFrame(FRAME_MOTION),
-			loadModel: (item, signal) => loadBoardItemModel(item, options.source, { signal, maxBytes: device.modelBytes }),
-			loaded: learnModel,
+			models: modelLoader,
+			cover: (item) => {
+				const key = assets.assetKey(item);
+				return key ? assets.getTexture(key) : null;
+			},
+			loaded: (id, model) => {
+				learnModel(id, model);
+				scripts.modelLoaded(id);
+			},
 			reducedMotion: () => options.reducedMotion?.() ?? false,
 			maxEdge: device.tier === "low" ? 1024 : undefined,
 		});
@@ -2047,6 +2117,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			disposed = true;
 			stopPresence();
 			if (liveTimer !== null) clearTimeout(liveTimer);
+			if (openingTimer !== null) clearTimeout(openingTimer);
 			pointers.cancel();
 			stopMarch();
 			stopRefine();
@@ -2062,6 +2133,8 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			ghostClicks.dispose();
 			stopFonts();
 			stopAssets();
+			stopStills?.();
+			covers?.destroy();
 			resizeObserver.disconnect();
 			cancelFrames();
 			stopPrefetch();
@@ -2076,6 +2149,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			scene = null;
 			scripts.destroy();
 			models.destroy();
+			modelLoader.destroy();
 			senses.destroy();
 			senseListeners.clear();
 			scriptListeners.clear();

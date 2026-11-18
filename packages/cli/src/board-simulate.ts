@@ -1,28 +1,25 @@
-import { boardScriptSenseOf, diffMergePatch, parseBoardScriptInputs } from "@neta-art/cohub/board";
-import type { BoardDocument, BoardExportRegion, BoardScriptBrowserEvent, BoardScriptCamera, BoardThemeId } from "@neta-art/cohub/board";
-import type { BoardNodeExportFormat } from "@neta-art/cohub/board/export/node";
+import { boardScriptSenseOf, diffMergePatch, parseBoardScriptInputs, stateForCamera } from "@neta-art/cohub/board";
+import type { BoardDocument, BoardScriptBrowserEvent, BoardScriptCamera } from "@neta-art/cohub/board";
 import type {
   BoardScriptHarness,
   BoardScriptHarnessBroadcast,
+  BoardScriptHarnessMode,
   BoardScriptHarnessPeer,
   BoardScriptHarnessPointer,
   BoardScriptHarnessPress,
 } from "@neta-art/cohub/board/testing";
+import { BOARD_SIMULATION_MODES, BOARD_SIMULATION_POINTERS, BOARD_SIMULATION_VIEWPORT, parseBoardSize } from "./board-command-support.js";
 import { loadBoardDocument } from "./board-document.js";
-import { gpuResources, readSpaceFileBytes, resolveBundledFonts, runBoardExport } from "./board-export.js";
+import { type BoardExportRunOptions, type BoardExportSource, gpuResources, readSpaceFileBytes, resolveBundledFonts } from "./board-export.js";
 import { openBoardGpu } from "./board-gpu/daemon.js";
 import { type BoardGpuShader, findBoardGpuBrowser } from "./board-gpu/index.js";
 import {
   boardScriptAttachments,
   boardShaderParameters,
-  buildBoardScene,
   checkBoardShader,
   createBoardScriptHarness,
   createNodeBoardRenderer,
   describeBoardScriptLanes,
-  itemBounds,
-  planBoardExport,
-  rectsIntersect,
 } from "./board-kernel.js";
 import { settleBoardDocument } from "./board-media.js";
 import { parseBoardTime } from "./board-time.js";
@@ -56,15 +53,42 @@ function point(value: unknown, name: string): Point {
 }
 
 function pointerInput(step: Record<string, unknown>, name: string): BoardScriptHarnessPointer {
-  const pointerType = step.pointerType ?? "mouse";
-  if (!POINTER_TYPES.includes(pointerType as never)) throw new Error(`${name}.pointerType must be one of ${POINTER_TYPES.join(", ")}`);
-  const input: BoardScriptHarnessPointer = { pointerType: pointerType as BoardScriptHarnessPointer["pointerType"] };
+  const input: BoardScriptHarnessPointer = {};
+  if (step.pointerType !== undefined) {
+    if (!POINTER_TYPES.includes(step.pointerType as never)) throw new Error(`${name}.pointerType must be one of ${POINTER_TYPES.join(", ")}`);
+    input.pointerType = step.pointerType as BoardScriptHarnessPointer["pointerType"];
+  }
   for (const key of ["shiftKey", "altKey", "ctrlKey", "metaKey"] as const) {
     if (step[key] === undefined) continue;
     if (typeof step[key] !== "boolean") throw new Error(`${name}.${key} must be a boolean`);
     input[key] = step[key];
   }
   return input;
+}
+
+export type BoardSimulationMode = (typeof BOARD_SIMULATION_MODES)[number] & BoardScriptHarnessMode;
+export type BoardSimulationPointer = (typeof BOARD_SIMULATION_POINTERS)[number];
+
+export type BoardSimulation = {
+  steps: BoardSimulationStep[];
+  mode?: BoardSimulationMode;
+  viewport?: { width: number; height: number };
+  pointer?: BoardSimulationPointer;
+};
+
+export function parseBoardSimulation(value: Record<string, unknown>): BoardSimulation {
+  const simulation: BoardSimulation = { steps: parseBoardSimulationSteps(value.steps ?? []) };
+  if (value.mode !== undefined) {
+    if (!BOARD_SIMULATION_MODES.includes(value.mode as never)) throw new Error(`mode must be one of ${BOARD_SIMULATION_MODES.join(", ")}`);
+    simulation.mode = value.mode as BoardSimulationMode;
+  }
+  if (value.viewport !== undefined) simulation.viewport = parseBoardSize(String(value.viewport), "viewport");
+  if (value.pointer !== undefined) {
+    if (!BOARD_SIMULATION_POINTERS.includes(value.pointer as never)) throw new Error(`pointer must be one of ${BOARD_SIMULATION_POINTERS.join(", ")}`);
+    simulation.pointer = value.pointer as BoardSimulationPointer;
+  }
+  if (simulation.mode === "view" && simulation.steps.some((step) => "tool" in step)) throw new Error("view mode has no tools; drop the tool steps or use edit or play.");
+  return simulation;
 }
 
 export function parseBoardSimulationSteps(value: unknown): BoardSimulationStep[] {
@@ -150,16 +174,24 @@ function parsePeer(entry: unknown, name: string): BoardScriptHarnessPeer {
 
 export type BoardSimulationPress = BoardScriptHarnessPress & { step: number };
 
-async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationStep[], progress: { step: number }, presses: BoardSimulationPress[], readInputs: (path: string) => Promise<string>) {
+async function run(
+  harness: BoardScriptHarness,
+  steps: readonly BoardSimulationStep[],
+  pointerType: NonNullable<BoardScriptHarnessPointer["pointerType"]>,
+  progress: { step: number },
+  presses: BoardSimulationPress[],
+  readInputs: (path: string) => Promise<string>,
+) {
   for (const [index, step] of steps.entries()) {
     progress.step = index;
     let press: BoardScriptHarnessPress | null = null;
+    const input = "input" in step && typeof step.input === "object" ? { pointerType, ...step.input } : undefined;
     if ("wait" in step) await harness.advance(step.wait);
     else if ("tool" in step) harness.tool = step.tool;
-    else if ("tap" in step) press = await harness.tap(step.tap, step.input);
-    else if ("drag" in step) press = await harness.drag(step.drag, step.input);
-    else if ("move" in step) await harness.move(step.move, step.input);
-    else if ("pointer" in step) press = await harness.pointer(step.pointer, step.at, step.input);
+    else if ("tap" in step) press = await harness.tap(step.tap, input);
+    else if ("drag" in step) press = await harness.drag(step.drag, input);
+    else if ("move" in step) await harness.move(step.move, input);
+    else if ("pointer" in step) press = await harness.pointer(step.pointer, step.at, input);
     else if ("key" in step) {
       await harness.key("keydown", step.key);
       await harness.key("keyup", step.key);
@@ -172,7 +204,7 @@ async function run(harness: BoardScriptHarness, steps: readonly BoardSimulationS
   }
 }
 
-export type BoardSimulationResult = {
+export type BoardSimulationResult<Rendered = never> = {
   time: number;
   commits: number;
   changes: Record<string, unknown>;
@@ -182,7 +214,15 @@ export type BoardSimulationResult = {
   camera?: BoardScriptCamera;
   warnings: string[];
   shaders?: { count: number; compiled: boolean };
-  image?: { bytes: Uint8Array; width: number; height: number };
+  rendered?: Rendered;
+};
+
+export type BoardSimulationRender<Rendered> = {
+  times?: number[];
+  camera: boolean;
+  scale: number;
+  size?: { width: number; height: number };
+  export(options: Required<Pick<BoardExportRunOptions, "document" | "viewport" | "drive" | "signal">> & Pick<BoardExportRunOptions, "view">): Promise<Rendered>;
 };
 
 export const BOARD_SIMULATION_TIMEOUT_MS = 120_000;
@@ -220,47 +260,79 @@ async function checkShaders(shaders: BoardGpuShader[], spaceId: string, document
   return { errors, compiled: false };
 }
 
-export async function runBoardSimulation(options: {
+export async function runBoardSimulation<Rendered = never>(options: {
   spaceId: string;
   target: string;
-  steps: readonly BoardSimulationStep[];
+  simulation: BoardSimulation;
   leader: boolean;
+  view?: BoardScriptCamera;
   timeoutMs?: number;
-  image?: {
-    region: BoardExportRegion;
-    scale: number;
-    theme: BoardThemeId;
-    format: BoardNodeExportFormat;
-    withImages: boolean;
-  };
-}): Promise<BoardSimulationResult> {
+  signal?: AbortSignal;
+  render?: BoardSimulationRender<Rendered>;
+}): Promise<BoardSimulationResult<Rendered>> {
   const client = createClient();
+  const { steps, mode, pointer } = options.simulation;
+  const viewport = options.simulation.viewport ?? BOARD_SIMULATION_VIEWPORT;
   const document: BoardDocument = await settleBoardDocument(options.spaceId, (await loadBoardDocument(options.spaceId, options.target)).document);
   const renderer = await createNodeBoardRenderer({ fonts: resolveBundledFonts() });
+  const readText = async (path: string) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes);
   const progress = { step: -1, phase: "starting the scripts" };
   let harness: BoardScriptHarness | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutMs = options.timeoutMs ?? BOARD_SIMULATION_TIMEOUT_MS;
+  let remaining = timeoutMs;
+  let armed = 0;
   let stopped = false;
+  const controller = new AbortController();
   const expired = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
+    controller.signal.addEventListener("abort", () => {
       stopped = true;
-      const busy = harness ? describeBoardScriptLanes(harness.status()) : [];
-      const at = harness ? ` at ${Math.round(harness.time)} ms of simulated time` : "";
-      const step = progress.step >= 0 ? `, step ${progress.step + 1} of ${options.steps.length}` : "";
-      reject(new Error([
-        `The simulation did not finish in ${timeoutMs / 1000} s${at}${step}, while ${progress.phase}.`,
-        ...busy.map((line) => `  ${line}`),
-        ...(!busy.length && progress.phase === "running the steps" ? ["  No script was busy: the scripts keep handing each other work, or a step waits on something else."] : []),
-      ].join("\n")));
-    }, timeoutMs);
+      reject(controller.signal.reason);
+    }, { once: true });
   });
-  const work = async (): Promise<BoardSimulationResult> => {
+  expired.catch(() => {});
+  const cancel = () => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) cancel();
+  else options.signal?.addEventListener("abort", cancel, { once: true });
+  const expire = () => {
+    const busy = harness ? describeBoardScriptLanes(harness.status()) : [];
+    const at = harness ? ` at ${Math.round(harness.time)} ms of simulated time` : "";
+    const step = progress.step >= 0 ? `, step ${progress.step + 1} of ${steps.length}` : "";
+    controller.abort(new Error([
+      `The simulation did not finish in ${timeoutMs / 1000} s${at}${step}, while ${progress.phase}.`,
+      ...busy.map((line) => `  ${line}`),
+      ...(!busy.length && progress.phase === "running the steps" ? ["  No script was busy: the scripts keep handing each other work, or a step waits on something else."] : []),
+    ].join("\n")));
+  };
+  const arm = () => {
+    armed = Date.now();
+    timer = setTimeout(expire, remaining);
+  };
+  const paused = async <T>(work: () => Promise<T>) => {
+    clearTimeout(timer);
+    remaining -= Date.now() - armed;
+    try {
+      return await work();
+    } finally {
+      if (!controller.signal.aborted) arm();
+    }
+  };
+  let onFrame: ((time: number) => Promise<void>) | null = null;
+  let exporting: Promise<Rendered> | null = null;
+  const work = async (): Promise<BoardSimulationResult<Rendered>> => {
     harness = await createBoardScriptHarness({
       document,
       renderer,
       leader: options.leader,
-      readModule: async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes),
+      viewport,
+      ...(mode ? { mode } : {}),
+      ...(options.view ? { view: options.view } : {}),
+      ...(pointer ? { device: { pointer } } : {}),
+      readModule: readText,
+      onFrame: (time) => {
+        controller.signal.throwIfAborted();
+        return onFrame?.(time);
+      },
     });
     const current = harness;
     if (stopped) {
@@ -278,10 +350,65 @@ export async function runBoardSimulation(options: {
         shaders: { count: initial.shaders.length, compiled: early.compiled },
       };
     }
-    progress.phase = "running the steps";
-    await run(current, options.steps, progress, presses, async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, options.spaceId, path)).bytes));
-    progress.phase = "settling the scripts";
-    await current.flush();
+    const runSteps = async () => {
+      progress.phase = "running the steps";
+      await run(current, steps, pointer === "coarse" ? "touch" : "mouse", progress, presses, readText);
+      progress.phase = "settling the scripts";
+      await current.flush();
+    };
+    let rendered: Rendered | undefined;
+    const render = options.render;
+    if (render) {
+      const screen = () => {
+        const { camera, width, height } = current.view;
+        const state = stateForCamera(camera, { width, height });
+        return { zoom: camera.zoom, view: { center: { x: state.centerX, y: state.centerY }, zoom: state.zoom, pitch: state.pitch ?? 0, bearing: state.bearing ?? 0 } };
+      };
+      const density = render.size ? Math.min(render.size.width / viewport.width, render.size.height / viewport.height) : 1;
+      const source = async (): Promise<BoardExportSource> => {
+        const { zoom, view } = screen();
+        const shown = await current.shown(render.camera ? zoom * density : render.scale);
+        return {
+          document: shown.document,
+          ...(shown.scripts ? { scripts: shown.scripts } : {}),
+          snapshots: await current.snapshot(),
+          env: current.env,
+          ...(render.camera ? { view } : {}),
+        };
+      };
+      let driven = false;
+      exporting = render.export({
+        document: current.document,
+        viewport,
+        signal: controller.signal,
+        ...(render.camera ? { view: screen().view } : {}),
+        drive: async (draw) => {
+          driven = true;
+          const capture = (time: number) => paused(async () => {
+            const phase = progress.phase;
+            progress.phase = "drawing a frame";
+            await draw(time, await source());
+            progress.phase = phase;
+          });
+          if (!render.times) {
+            await runSteps();
+            await capture(Math.round(current.time));
+            return;
+          }
+          const due = [...render.times];
+          onFrame = async (time) => {
+            while (due.length && (due[0] as number) <= time + 0.001) await capture(due.shift() as number);
+          };
+          await onFrame(current.time);
+          await runSteps();
+          progress.phase = "drawing the frames after the steps";
+          while (due.length) await current.advance(Math.max(0.001, (due[0] as number) - current.time));
+          onFrame = null;
+        },
+      });
+      rendered = await exporting;
+      if (!driven) await runSteps();
+    } else await runSteps();
     const { shaders, errors } = shadersOf(current);
     const checked = new Set(initial.shaders.map(({ id }) => id));
     const added = shaders.filter(({ id }) => !checked.has(id));
@@ -289,8 +416,13 @@ export async function runBoardSimulation(options: {
     const late = added.length ? await checkShaders(added, options.spaceId, current.document) : null;
     Object.assign(errors, late?.errors);
     const compiled = (early?.compiled ?? true) && (late?.compiled ?? true);
-    const warnings = [...current.emitFailures].map(([id, message]) => `${id}: ${message}`);
-    const result: BoardSimulationResult = {
+    const finalMode = current.editor.scriptMode;
+    const warnings = [
+      ...[...current.emitFailures].map(([id, message]) => `${id}: ${message}`),
+      ...boardScriptAttachments(current.document).flatMap(({ id, script }) =>
+        script.modes && !script.modes.includes(finalMode) ? [`${id}: runs only in ${script.modes.join(", ")}, not in ${finalMode} mode.`] : []),
+    ];
+    return {
       time: Math.round(current.time),
       commits: current.commits.length,
       changes: (diffMergePatch(document, current.document) as Record<string, unknown> | undefined) ?? {},
@@ -300,45 +432,18 @@ export async function runBoardSimulation(options: {
       ...(current.camera ? { camera: current.camera } : {}),
       warnings,
       ...(shaders.length ? { shaders: { count: shaders.length, compiled } } : {}),
+      ...(rendered === undefined ? {} : { rendered }),
     };
-    if (options.image) {
-      progress.phase = "rendering the image";
-      const shown = await current.shown(options.image.scale);
-      const gpu = compiled && shaders.length > 0 && !Object.keys(errors).length && shaderShown(current.document, shaders, options.image.region);
-      const exported = await runBoardExport({
-        spaceId: options.spaceId,
-        target: options.target,
-        ...(gpu
-          ? { document: current.document, snapshots: await current.snapshot(), renderer: "gpu" as const }
-          : { document: shown.document, ...(shown.scripts ? { scripts: shown.scripts } : {}) }),
-        region: options.image.region,
-        scale: options.image.scale,
-        theme: options.image.theme,
-        background: "paper",
-        format: options.image.format,
-        withImages: options.image.withImages,
-      });
-      const frame = exported?.frames[0];
-      if (frame) result.image = { bytes: frame.bytes, width: frame.width, height: frame.height };
-      warnings.push(...(exported?.warnings ?? []));
-    }
-    return result;
   };
+  arm();
   try {
     return await Promise.race([work(), expired]);
   } finally {
     clearTimeout(timer);
+    options.signal?.removeEventListener("abort", cancel);
+    controller.abort(new Error("The simulation stopped."));
     (harness as BoardScriptHarness | null)?.destroy();
+    await (exporting as Promise<Rendered> | null)?.catch(() => {});
     renderer.destroy();
   }
-}
-
-function shaderShown(document: BoardDocument, shaders: readonly BoardGpuShader[], region: BoardExportRegion): boolean {
-  const scene = buildBoardScene(document);
-  const plan = planBoardExport({ scene, region, scale: 1 });
-  if (!plan) return false;
-  return shaders.some(({ id }) => {
-    const item = scene.get(id);
-    return !item || rectsIntersect(itemBounds(item.frame), plan.world);
-  });
 }

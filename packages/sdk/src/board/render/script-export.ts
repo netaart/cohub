@@ -4,12 +4,14 @@ import { buildBoardScene } from "../model/scene.js";
 import { BOARD_SCRIPT_EXPORT_CALLS } from "../model/script-calls.js";
 import { composeBoardScriptCamera, composeBoardScriptItems } from "../model/script-scene.js";
 import type {
+  BoardScriptEnv,
+  BoardScriptEvent,
   BoardScriptOutput,
   BoardScriptSnapshot,
   BoardScriptView,
 } from "../model/script.js";
 import { boardScriptAttachments } from "../model/script-index.js";
-import { BOARD_SCRIPT_EMIT_DEPTH, BOARD_SCRIPT_EVENT_QUEUE, boardScriptBroadcast, boardScriptEmit, createBoardScriptOutbox } from "../model/script-events.js";
+import { BOARD_SCRIPT_EMIT_DEPTH, BOARD_SCRIPT_EVENT_QUEUE, boardScriptBroadcast, boardScriptEmit, boardScriptModelsLoaded, createBoardScriptOutbox } from "../model/script-events.js";
 import { type BoardScriptInputLog, boardScriptInputsBetween } from "../model/script-senses.js";
 import { type BrowserBoardScriptHost, createBoardScriptHost } from "./script-host.js";
 import { boardShaderOwners } from "./shader/layers.js";
@@ -29,6 +31,7 @@ type Run = {
   ranks: Map<string, number>;
   outbox: ReturnType<typeof createBoardScriptOutbox>;
   views: Map<string, string>;
+  greeted: Map<string, BoardScriptEvent[]>;
   last: Map<string, string>;
   inputsAt: number;
   wake(): void;
@@ -41,6 +44,8 @@ export function createBrowserBoardScriptExport(
     shaders?: boolean;
     documentAt?: (time: number) => BoardDocument;
     inputs?: BoardScriptInputLog;
+    env?: BoardScriptEnv;
+    resume?: boolean;
   } = {},
 ): BrowserBoardScriptExport {
   let run: Run | null = null;
@@ -61,6 +66,7 @@ export function createBrowserBoardScriptExport(
       ranks,
       outbox: createBoardScriptOutbox(() => ranks),
       views: new Map(),
+      greeted: new Map(),
       last,
       inputsAt: -1,
       wake: () => {},
@@ -70,6 +76,8 @@ export function createBrowserBoardScriptExport(
         export: true,
         shaders: options.shaders ?? true,
         snapshots: options.snapshots,
+        ...(options.resume ? { resume: true } : {}),
+        ...(options.env ? { env: () => options.env as BoardScriptEnv } : {}),
         timeoutMs: 15_000,
         capabilities: {
           ...Object.fromEntries(Object.entries(BOARD_SCRIPT_EXPORT_CALLS).map(([name, call]) => [name, async (_id: string, input: unknown) => call(input)])),
@@ -89,7 +97,10 @@ export function createBrowserBoardScriptExport(
         onFrame: () => started.wake(),
         onOutput(id, output) {
           if (output) outputs.set(id, output);
-          else outputs.delete(id);
+          else {
+            outputs.delete(id);
+            started.greeted.delete(id);
+          }
         },
       }),
     };
@@ -109,7 +120,7 @@ export function createBrowserBoardScriptExport(
     current.document = document;
     const { host } = current;
     const scene = buildBoardScene(document);
-    const ids = boardScriptAttachments(document).map(({ id }) => id);
+    const ids = boardScriptAttachments(document, options.env?.mode ?? "export").map(({ id }) => id);
     current.ranks.clear();
     for (const [index, id] of ids.entries()) current.ranks.set(id, index);
     const viewKey = view ? JSON.stringify(view) : null;
@@ -137,17 +148,28 @@ export function createBrowserBoardScriptExport(
           host.sync(document, scene, { x: 0, y: 0, zoom: 1 }, time, false);
           if (viewKey && !viewed) {
             viewed = true;
-            for (const id of ids)
-              if (current.views.get(id) !== viewKey) {
-                current.views.set(id, viewKey);
-                host.event(id, { type: "viewchange", data: view });
-              }
+            for (const id of ids) {
+              if (current.views.get(id) === viewKey) continue;
+              if (host.event(id, { type: "viewchange", data: view })) current.views.set(id, viewKey);
+              else viewed = false;
+            }
+          }
+          let greeting = false;
+          for (const id of ids) {
+            const pending = current.greeted.get(id) ?? boardScriptModelsLoaded(document, id);
+            current.greeted.set(id, pending);
+            while (pending.length && host.event(id, pending[0] as BoardScriptEvent)) pending.shift();
+            greeting ||= pending.length > 0;
           }
           for (const id of ids) {
             const error = host.error(id);
             if (error) throw new Error(error);
           }
           if (!ids.every((id) => host.settled(id))) return;
+          if (greeting) {
+            current.wake();
+            return;
+          }
           if (inputs.length) {
             deliver();
             current.wake();
@@ -221,9 +243,9 @@ export function createBrowserBoardScriptExport(
           const output = outputs.get(id);
           return output ? (output.bend ?? null) : undefined;
         },
-        document(input) {
+        document(input, _time, screen) {
           const items = { ...input.items };
-          for (const [id, item] of composeBoardScriptItems(input, buildBoardScene(input), outputs))
+          for (const [id, item] of composeBoardScriptItems(input, buildBoardScene(input), outputs, new Map(), screen))
             items[id] = item;
           return { ...input, items };
         },

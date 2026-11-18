@@ -20,7 +20,7 @@ export * from "./keymap.js";
 export type { BoardActivation, BoardInteraction, BoardPointerEvent, BoardTap, BoardTransformEnd } from "./interaction.js";
 export * from "./select.js";
 export * from "./selection-transform.js";
-export type { BoardNaturalSize } from "./snapshots.js";
+export type { BoardModelLearned, BoardNaturalSize } from "./snapshots.js";
 export * from "./snapping.js";
 export * from "./spatial.js";
 export type { BoardEditorChannel, BoardEditorListener } from "./state.js";

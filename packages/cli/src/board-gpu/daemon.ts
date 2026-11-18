@@ -71,6 +71,7 @@ export async function serveBoardGpu(browser: string): Promise<void> {
   let exporter: Promise<BoardGpuExporter> | null = null;
   let nextAsk = 0;
   let idle: ReturnType<typeof setTimeout> | null = null;
+  let releasing = Promise.resolve();
   const active = () => queue[0] ?? null;
 
   const ask = (request: Ask) => new Promise<Extract<Message, { answer: number }>>((resolve, reject) => {
@@ -118,6 +119,7 @@ export async function serveBoardGpu(browser: string): Promise<void> {
   const schedule = () => {
     if (idle) clearTimeout(idle);
     idle = queue.length ? null : setTimeout(() => void shutdown(), IDLE_MS);
+    if (!queue.length && exporter) releasing = exporter.then((gpu) => gpu.release()).catch(() => {});
   };
   const advance = () => {
     active()?.send({ granted: true });
@@ -141,7 +143,7 @@ export async function serveBoardGpu(browser: string): Promise<void> {
       }
       if (!("method" in message) || active() !== caller) return;
       caller.running++;
-      void browserFor()
+      void releasing.then(browserFor)
         .then((gpu) => call(gpu, message.method, message.params))
         .then((result) => caller.send({ id: message.id, result }), async (error: unknown) => {
           const text = error instanceof Error ? error.message : String(error);
@@ -286,6 +288,7 @@ export async function connectBoardGpu(resources: BoardGpuResources, options: { b
       const { data, ...rest } = await request<BoardGpuResult>("render", frame);
       return { ...rest, bytes: new Uint8Array(Buffer.from(data, "base64")) };
     },
+    release: async () => {},
     async close() {
       connected.end();
     },

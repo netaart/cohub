@@ -93,6 +93,7 @@ export type BoardGpuExporter = {
   render(frame: BoardGpuFrame): Promise<Omit<BoardGpuResult, "data"> & { bytes: Uint8Array }>;
   compile(shaders: BoardGpuShader[]): Promise<Record<string, string>>;
   profile(input: BoardGpuProfileInput): Promise<BoardGpuProfile>;
+  release(): Promise<void>;
   close(): Promise<void>;
 };
 
@@ -137,8 +138,16 @@ export async function launchBoardGpuExporter(resources: BoardGpuResources, optio
   const profile = await mkdtemp(join(tmpdir(), "cohub-board-gpu-"));
   let chrome: ChildProcess | null = null;
   const close = async () => {
-    chrome?.kill();
+    const child = chrome;
     chrome = null;
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      child.kill();
+      const force = setTimeout(() => child.kill("SIGKILL"), 3_000);
+      await exited;
+      clearTimeout(force);
+    }
+    server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(profile, { recursive: true, force: true }).catch(() => {});
   };
@@ -201,6 +210,7 @@ export async function launchBoardGpuExporter(resources: BoardGpuResources, optio
         const { data, ...rest } = await call<BoardGpuResult>(`cohubBoardGpu.render(${JSON.stringify(frame)})`);
         return { ...rest, bytes: new Uint8Array(Buffer.from(data, "base64")) };
       },
+      release: () => call("cohubBoardGpu.release()"),
       close,
     };
   } catch (error) {

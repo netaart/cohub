@@ -1,3 +1,4 @@
+import type { BoardScriptMode } from "@cohub/protocol";
 import {
 	BOARD_FRAME_LABEL_SIZE,
 	type BoardDocument,
@@ -152,6 +153,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		return value();
 	}
 
+	const scriptMode = (): BoardScriptMode => (options.readonly ? "view" : state.tool === "play" ? "play" : "edit");
+
 	const visibleRect = memo(() => [state.camera, state.surfaceSize] as const, (_camera, _surface) => camera.visibleRect());
 
 	function tracked<A extends unknown[], R>(
@@ -178,6 +181,8 @@ export function createBoardEditor(options: BoardEditorOptions) {
 		},
 
 		get hasScripts() { return read("document", () => hasBoardScripts(state.base)); },
+		get scriptMode() { return read("tool", scriptMode); },
+		get runsScripts() { return read(["document", "tool"], () => hasBoardScripts(state.base, scriptMode())); },
 		get document(): BoardDocument {
 			return read("document", () => state.base);
 		},

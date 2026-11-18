@@ -102,7 +102,10 @@ import {
 	boardAnimationReach,
 	opensInPlace,
 } from "#lib/board/board-media-playback.ts";
-import { createBoardModelPreviews } from "#lib/board/board-model.ts";
+import {
+	createBoardModelPreviews,
+	uploadBoardModelCover,
+} from "#lib/board/board-model.ts";
 import {
 	enterPresentationFullscreen,
 	holdPresentation,
@@ -943,6 +946,7 @@ const history = boardClient && {
 	},
 };
 const generates = editable && liveSpaceId !== null;
+const recordsCovers = untrack(() => mode === "edit") && spaceId !== null;
 
 const editor = createBoardEditor({
 	document: untrack(() => initialDocument),
@@ -1550,6 +1554,7 @@ onDestroy(() => {
 			presence={collaboration}
 			space={spaceId}
 			editable={editable && !presenting}
+			uploadModelCover={recordsCovers ? uploadBoardModelCover : undefined}
 			assetSource={resolvedAssetSource}
 			onOpenFile={openMediaSource}
 			onAddLinks={addLinks}

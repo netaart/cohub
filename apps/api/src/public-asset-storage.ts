@@ -3,7 +3,7 @@ import { AVATAR_MAX_FILE_BYTES, LIKE_STICKER_MAX_FILE_BYTES, UPLOAD_ERROR_FILE_T
 import { mimeTypeForPath } from "@cohub/protocol/fs";
 import { config } from "./config.js";
 import { createPresignedPutObjectUrl } from "./object-presign.js";
-import { buildPublicAssetCdnUrl, requirePublicAssetOssStorage } from "./public-file-storage.js";
+import { buildPublicAssetCdnUrl, publicAssetObjectExists, requirePublicAssetOssStorage } from "./public-file-storage.js";
 import {
   buildChatAttachmentPublicUrl,
   createUserUploadPutUrl,
@@ -19,6 +19,7 @@ export const PUBLIC_ASSET_PURPOSES = [
   "app_source",
   "generation_input",
   "session_image",
+  "board_preview",
 ] as const;
 export type PublicAssetPurpose = (typeof PUBLIC_ASSET_PURPOSES)[number];
 
@@ -32,6 +33,7 @@ export type CreatePublicAssetUploadInput = {
   uploadProtocol: PublicAssetUploadProtocol;
   spaceId?: string;
   sessionId?: string;
+  key?: string;
   file: {
     size: number;
     mimeType: string;
@@ -54,6 +56,11 @@ export type CreatePublicAssetUploadResponse = {
   asset: PublicAssetUploadBase;
 };
 
+export type StoredPublicAssetResponse = {
+  stored: true;
+  asset: Pick<PublicAssetUploadBase, "purpose" | "objectKey" | "publicUrl">;
+};
+
 export type CreateInternalPublicAssetUploadResponse = {
   expiresAt: string;
   asset: PublicAssetUploadBase & {
@@ -69,6 +76,9 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/png": "png",
   "image/gif": "gif",
 };
+
+const BOARD_PREVIEW_MAX_FILE_BYTES = 2 * 1024 * 1024;
+const BOARD_PREVIEW_KEY = /^[0-9a-f]{64}-[0-9a-z]{1,32}$/;
 
 const LIKE_STICKER_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
@@ -203,6 +213,10 @@ const normalizeUploadMimeType = (purpose: PublicAssetPurpose, file: { mimeType: 
   if (purpose === "chat_attachment") return normalizeChatMimeType(file.mimeType);
   if (purpose === "generation_input") return normalizeGenerationInputMimeType(file.mimeType, file.filename);
   if (purpose === "session_image") return normalizeSessionImageMimeType(file.mimeType);
+  if (purpose === "board_preview") {
+    if (normalizeSessionImageMimeType(file.mimeType) !== "image/webp") throw new PublicAssetValidationError("board previews must be WebP images");
+    return "image/webp";
+  }
   return file.mimeType;
 };
 
@@ -223,7 +237,12 @@ export const buildPublicAssetObjectKey = (input: {
   spaceId?: string;
   sessionId?: string;
   filename?: string;
+  key?: string;
 }) => {
+  if (input.purpose === "board_preview") {
+    if (typeof input.key !== "string" || !BOARD_PREVIEW_KEY.test(input.key)) throw new PublicAssetValidationError("invalid board preview key");
+    return `${envPrefix()}board-previews/${input.userUuid}/${input.key}.webp`;
+  }
   if (input.purpose === "user_avatar" || input.purpose === "space_avatar") {
     const extension = IMAGE_EXTENSIONS[input.mimeType];
     if (!extension) throw new PublicAssetValidationError("avatar images must be WebP, JPEG, PNG, or GIF");
@@ -332,6 +351,12 @@ export const assertPublicAssetUploadFile = (input: {
     return;
   }
 
+  if (input.purpose === "board_preview") {
+    normalizeUploadMimeType(input.purpose, file);
+    if (file.size > BOARD_PREVIEW_MAX_FILE_BYTES) throw new PublicAssetValidationError("board preview is too large", UPLOAD_ERROR_FILE_TOO_LARGE);
+    return;
+  }
+
   if (input.purpose === "space_like_sticker") {
     if (!LIKE_STICKER_EXTENSIONS[file.mimeType]) throw new PublicAssetValidationError("like stickers must be WebP, PNG, or GIF");
     if (file.size > LIKE_STICKER_MAX_FILE_BYTES) throw new PublicAssetValidationError("like sticker is too large", UPLOAD_ERROR_FILE_TOO_LARGE);
@@ -357,12 +382,13 @@ type PublicAssetPlanInput = {
   userUuid: string;
   spaceId?: string;
   sessionId?: string;
+  key?: string;
   file: CreatePublicAssetUploadInput["file"];
   endpoint?: "internal" | "public";
 };
 
 const signPutUrl = (input: PublicAssetPlanInput, objectKey: string, mimeType: string) => {
-  if (input.purpose === "session_image") {
+  if (input.purpose === "session_image" || input.purpose === "board_preview") {
     const storage = requirePublicAssetOssStorage();
     const signed = createPresignedPutObjectUrl(
       input.endpoint === "internal" ? { ...storage, publicEndpoint: storage.endpoint } : storage,
@@ -396,6 +422,7 @@ const createPutPlan = (input: PublicAssetPlanInput): CreateInternalPublicAssetUp
     sessionId: input.sessionId,
     mimeType,
     filename: input.file.filename,
+    key: input.key,
   });
   const signed = signPutUrl(input, objectKey, mimeType);
   return {
@@ -418,3 +445,11 @@ export const createPublicAssetUploadPlan = (
 export const createInternalPublicAssetUploadPlan = (
   input: PublicAssetPlanInput,
 ): CreateInternalPublicAssetUploadResponse => createPutPlan(input);
+
+export const createBoardPreviewUpload = async (
+  input: Omit<PublicAssetPlanInput, "purpose"> & { uploadProtocol: PublicAssetUploadProtocol },
+): Promise<CreatePublicAssetUploadResponse | StoredPublicAssetResponse> => {
+  const plan = createPutPlan({ ...input, purpose: "board_preview" });
+  const { purpose, objectKey, publicUrl } = plan.asset;
+  return (await publicAssetObjectExists(objectKey)) ? { stored: true, asset: { purpose, objectKey, publicUrl } } : plan;
+};

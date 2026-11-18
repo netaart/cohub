@@ -47,7 +47,7 @@ export function playbackClockAt(playback: BoardPlaybackSnapshot, document: Board
 export function createBoardPlayer(options: { resolveColor?: BoardColorResolver } = {}) {
 	let document: BoardDocument | null = null;
 	let compiled: CompiledBoardAnimations | null = null;
-	let openedAt = performance.now();
+	let openedAt: number | null = performance.now();
 	let entrance: { ids: string[]; startedAt: number; duration: number } | null = null;
 
 	function compile(next: BoardDocument) {
@@ -79,6 +79,9 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 			entrance = null;
 			compiled = null;
 		},
+		hold() {
+			openedAt = null;
+		},
 		enter(ids: readonly string[], current: BoardDocument) {
 			const preset = current.board.enter?.preset;
 			if (!preset || ids.length === 0 || ids.length > ENTER_MAX_ITEMS) return;
@@ -101,9 +104,9 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 					times.set(id, boardAnimationTime(header, wallNow) ?? 0);
 					running = true;
 				} else if (header.play === "auto") {
-					const time = boardAnimationTime(header, now - openedAt);
+					const time = boardAnimationTime(header, openedAt === null ? 0 : now - openedAt);
 					if (time !== null) times.set(id, time);
-					if (time !== null && time < header.duration) running = true;
+					if (time !== null && time < header.duration && openedAt !== null) running = true;
 				}
 			}
 			let playbackTime: number | null = null;
@@ -123,7 +126,7 @@ export function createBoardPlayer(options: { resolveColor?: BoardColorResolver }
 				scripts: evaluation?.scripts ?? new Map(),
 				camera: evaluation?.camera ?? {},
 				cameraViewport: evaluation?.cameraViewport,
-				time: playbackTime ?? now - openedAt,
+				time: playbackTime ?? (openedAt === null ? 0 : now - openedAt),
 				playbackTime,
 				running,
 			};

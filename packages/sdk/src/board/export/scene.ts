@@ -31,6 +31,7 @@ import { boardItemLocalToWorld, boardLocalView } from "../render/shader/placemen
 import { type BoardDepthShadow, type BoardDepthView, boardAttachedNode, boardDepthContactShadow, boardDepthOf, boardDepthPose, boardDepthRiding, boardDepthRoots, boardDepthShadow, boardDepthSurface } from "../model/depth.js";
 import { boardProjection, boardViewBearing, boardViewCenter, isBoardViewLevel, isBoardViewPitched } from "../model/view-camera.js";
 import { boardModelPlayback } from "../model/model-clips.js";
+import { isBoardScriptScreenRoot } from "../model/script-scene.js";
 import type { LoadedModel } from "../render/model3d/load.js";
 import {
   type BoardDepthLayer,
@@ -261,6 +262,22 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
     }, input.scene);
     layers.prepare(input.shaders.renderer, true);
   }
+  const hud = new Container({ label: "board-export-hud" });
+  if (turned) {
+    const owners = new Map<Container, string>([...containers].map(([id, container]) => [container, id]));
+    for (const [id, { group }] of groups) owners.set(group, id);
+    const onScreen = (id: string) => {
+      for (let item = input.scene.get(id), depth = 0; item && depth < 64; item = item.parent ? input.scene.get(item.parent) : undefined, depth++)
+        if (isBoardScriptScreenRoot(item.id)) return true;
+      return false;
+    };
+    for (const child of [...world.children]) {
+      const id = owners.get(child);
+      if (id && onScreen(id)) hud.addChild(child);
+    }
+    hud.position.set(camera.x, camera.y);
+    hud.scale.set(camera.zoom);
+  }
   const depth = input.depth && roots.length
     ? attachBoardDepth(input.depth, { scene: input.scene, roots, hosts, containers, groups, world, root, scripts: input.scripts, time: input.time ?? 0, fault: (id, message) => shaderErrors.push({ id, message }), view: { ...camera, width: outputWidth, height: outputHeight } })
     : null;
@@ -280,6 +297,7 @@ export function createBoardExportScene(input: BoardExportSceneInput): BoardExpor
     atmosphere.sync(input.settings.atmosphere, { width: outputWidth, height: outputHeight, density: 1 });
     root.addChild(atmosphere.container);
   }
+  root.addChild(hud);
 
   return {
     root,
@@ -335,7 +353,8 @@ function attachBoardDepth(
     const playback = model && boardModelPlayback(item, false);
     const depth = boardDepthOf(item, scene);
     if (!depth || !input.hosts.get(item.id) || input.scene.opacity(item.id) <= 0) continue;
-    if (model && playback && item.type === "file") objects.push({ id: item.id, model, frame: item.frame, origin: item.origin, depth, view: item.props.model?.view, playback });
+    if (model && playback && item.type === "file")
+      objects.push({ id: item.id, model, cover: null, shimmer: false, frame: item.frame, origin: item.origin, depth, view: item.props.model?.view, playback, opacity: scene.opacity(item.id) });
     else flats.push(item);
   }
   stage.aim(projection);

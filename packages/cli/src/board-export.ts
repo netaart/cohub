@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 
 const execFile = promisify(execFileCallback);
 import { BOARD_CAMERA_VIEWPORT, boardDocumentUsesDepth, boardExportView, boardMediaNaturalSize, isBoardModelItem, isBoardViewLevel, parseBoardMediaSource, parseBoardScriptInputs } from "@neta-art/cohub/board";
-import type { BoardAssetKeySource, BoardDocument, BoardExportRegion, BoardMediaState, BoardSceneItem, BoardScriptSnapshot, BoardThemeId } from "@neta-art/cohub/board";
+import type { BoardAssetKeySource, BoardDocument, BoardExportRegion, BoardMediaState, BoardSceneItem, BoardScriptCamera, BoardScriptEnv, BoardScriptSnapshot, BoardThemeId } from "@neta-art/cohub/board";
 import { imageVariantUrl, MEDIA_VARIANT_MAX, mediaVariantSize, videoFrameUrl } from "@neta-art/cohub/media";
 import type {
   BoardNodeExportFormat,
@@ -54,6 +54,7 @@ import { downloadPublicImage } from "./safe-remote-image.js";
 import { type BoardMediaFiles, boardAudioMix, createBoardMediaFiles, createBoardVideoFrames } from "./board-media-export.js";
 import {
   BOARD_EXPORT_IMAGE_MEMORY_MIB,
+  BOARD_GPU_EXPORT_MAX_PIXELS,
   type BoardExportRenderer,
   type BoardExportDecodeImage,
   BoardExportResourceError,
@@ -225,6 +226,10 @@ export type BoardExportRunOptions = {
   quality?: number;
   withImages: boolean;
   camera?: { width: number; height: number } | "viewport";
+  view?: BoardScriptCamera;
+  viewport?: { width: number; height: number };
+  screen?: boolean;
+  drive?: (render: (time: number | null, source: BoardExportSource) => Promise<void>) => Promise<void>;
   document?: BoardDocument;
   scripts?: BoardScriptHost;
   snapshots?: Record<string, BoardScriptSnapshot>;
@@ -265,7 +270,7 @@ export type BoardVideoExportOptions = Omit<BoardExportRunOptions, "format"> & {
 };
 
 export async function runBoardVideoExport(options: BoardVideoExportOptions): Promise<{ width: number; height: number; frames: number; warnings: string[] }> {
-  if (!options.animation) throw new Error("Video export needs --animation.");
+  if (!options.animation && !options.drive) throw new Error("Video export needs --animation.");
   if (!options.times || options.times.length < 2) throw new Error("Video export needs an --at range with at least two frames.");
   const times = options.times;
   const step = (times[1] as number) - (times[0] as number);
@@ -322,6 +327,14 @@ export async function runBoardVideoExport(options: BoardVideoExportOptions): Pro
   }
 }
 
+export type BoardExportSource = {
+  document: BoardDocument;
+  scripts?: BoardScriptHost;
+  snapshots?: Record<string, BoardScriptSnapshot>;
+  env?: BoardScriptEnv;
+  view?: BoardScriptCamera;
+};
+
 export async function runBoardExport(
   options: BoardExportRunOptions,
 ): Promise<BoardExportRunResult | null> {
@@ -335,6 +348,16 @@ export async function runBoardExport(
   const timeoutMs = options.timeoutMs ?? BOARD_EXPORT_FRAME_TIMEOUT_MS;
   const imageMemoryBytes = (options.imageMemoryMiB ?? BOARD_EXPORT_IMAGE_MEMORY_MIB) * 1024 ** 2;
   if (!Number.isSafeInteger(imageMemoryBytes) || imageMemoryBytes <= 0) throw new Error("Image memory budget must be a positive integer.");
+  const maxPixels = options.renderer === "gpu" || (options.renderer !== "canvas" && (options.view?.pitch || options.view?.bearing || hasBoardScripts(document) || boardDocumentUsesDepth(document) || (options.withImages && Object.values(document.items).some(isBoardModelItem))))
+    ? BOARD_GPU_EXPORT_MAX_PIXELS
+    : undefined;
+  const framing = {
+    ...(camera ? { camera } : {}),
+    ...(options.view ? { view: options.view } : {}),
+    ...(options.viewport ? { viewport: options.viewport } : {}),
+    ...(options.screen ? { screen: true } : {}),
+    ...(maxPixels ? { maxPixels } : {}),
+  };
   const nodeRenderer = await createNodeBoardRenderer({ fonts: resolveBundledFonts() });
   const images = createBoardExportImageBudget(nodeRenderer, imageMemoryBytes);
   const renderer = { ...nodeRenderer, decodeImage: images.decodeImage };
@@ -367,19 +390,23 @@ export async function runBoardExport(
       region: options.region,
       scale: options.scale,
       ...(options.padding === undefined ? {} : { padding: options.padding }),
+      ...(maxPixels ? { maxPixels } : {}),
     });
-    if (!plan) return null;
+    if (!plan && !options.drive) return null;
 
-    const region: BoardExportRegion = times.length > 1 && !camera ? { kind: "rect", rect: plan.world } : options.region;
+    let region: BoardExportRegion = plan && times.length > 1 && !camera && !options.drive ? { kind: "rect", rect: plan.world } : options.region;
+    let sized = !options.drive || times.length < 2 || camera !== undefined;
     const firstTime = times[0] ?? null;
     const first = prepareBoardExport(document, {
-      sampler, region, camera, scale: options.scale,
+      sampler, region, ...framing, scale: options.scale,
       padding: times.length > 1 ? 0 : options.padding,
       ...(firstTime === null ? {} : { at: { animation: options.animation, time: firstTime } }),
     });
-    if (!first) return null;
-    options.onPlan?.({ width: first.plan.width, height: first.plan.height, frames: times.length });
-    trace("plan", 0, first.plan);
+    if (!first && !options.drive) return null;
+    if (first) {
+      options.onPlan?.({ width: first.plan.width, height: first.plan.height, frames: times.length });
+      trace("plan", 0, first.plan);
+    }
     const warnings: string[] = [];
     const textures = textureCache.textures;
     let omittedKeys = new Set<string>();
@@ -398,7 +425,7 @@ export async function runBoardExport(
       }
     }
 
-    if (!options.scripts && options.renderer !== "gpu" && hasBoardScripts(document)) scriptHost = createNodeBoardScriptHost(renderer, {
+    if (!options.scripts && !options.drive && options.renderer !== "gpu" && hasBoardScripts(document, "export")) scriptHost = createNodeBoardScriptHost(renderer, {
       concurrency: 2,
       readModule: async (src) => {
         const { bytes } = await readSpaceFileBytes(createClient(), options.spaceId, src);
@@ -430,7 +457,7 @@ export async function runBoardExport(
       warnings.push(text);
     };
     let completed = 0;
-    let decided = options.renderer === "canvas";
+    let decided = options.renderer === "canvas" || options.renderer === "gpu";
     let liftChecked = false;
     const emit = async (frame: BoardExportFrame) => {
       if (options.onFrame) await options.onFrame(frame, completed);
@@ -438,31 +465,57 @@ export async function runBoardExport(
       completed++;
       options.onProgress?.(completed, times.length);
     };
+    const base: BoardExportSource = {
+      document,
+      ...(options.scripts ? { scripts: options.scripts } : {}),
+      ...(options.snapshots ? { snapshots: options.snapshots } : {}),
+    };
+    let shown = base;
+    let loaded: BoardExportSource | null = null;
     const launchGpu = async (browser: string) => {
+      if (gpu) return;
       doing = "starting the browser";
-      const exporter = await openBoardGpu(gpuResources(options.spaceId, document, (key) => framePictures.get(key)), { browser, signal: options.signal });
+      gpu = await openBoardGpu(gpuResources(options.spaceId, () => shown.document, (key) => framePictures.get(key)), { browser, signal: options.signal });
+      scriptHost?.destroy();
+      scriptHost = null;
+    };
+    const loadGpu = async (exporter: BoardGpuExporter, source: BoardExportSource) => {
+      if (loaded === source) return;
       try {
-        await exporter.init({ document, animation: options.animation ?? null, theme: options.theme, ...(options.snapshots ? { snapshots: options.snapshots } : {}), ...(options.inputs ? { inputs: options.inputs } : {}) });
+        await exporter.init({
+          document: source.document, animation: options.animation ?? null, theme: options.theme,
+          ...(source.snapshots ? { snapshots: source.snapshots } : {}),
+          ...(source.env ? { env: source.env } : {}),
+          ...(source === base ? {} : { resume: true }),
+          ...(options.inputs ? { inputs: options.inputs } : {}),
+          ...(loaded ? { keep: true } : {}),
+        });
       } catch (error) {
+        gpu = null;
         await exporter.close();
         throw error;
       }
-      scriptHost?.destroy();
-      scriptHost = null;
-      return exporter;
+      loaded = source;
     };
     if (options.renderer === "gpu") {
       const browser = findBoardGpuBrowser();
       if (!browser) throw new Error("GPU export needs Chrome, Chromium or Edge. Install one, or set COHUB_CHROME to its path.");
-      gpu = await launchGpu(browser);
+      await launchGpu(browser);
     }
-    const renderFrame = async (time: number | null) => {
+    const renderFrame = async (time: number | null, source: BoardExportSource) => {
       options.signal?.throwIfAborted();
+      shown = source;
       const host = scriptHost;
       host?.clearFrames();
-      const frameOptions = { sampler, camera, ...(time === null ? {} : { at: { animation: options.animation, time } }), region, scale: options.scale, padding: times.length > 1 ? 0 : options.padding };
-      const initial = prepareBoardExport(document, frameOptions);
+      const frameSampler = source === base ? sampler : createBoardRenderSampler(source.document, options.animation ?? null, theme);
+      const frameFraming = source.view ? { ...framing, view: source.view } : framing;
+      const frameOptions = { sampler: frameSampler, ...frameFraming, ...(time === null ? {} : { at: { animation: options.animation, time } }), region, scale: options.scale, padding: times.length > 1 ? 0 : options.padding };
+      const initial = prepareBoardExport(source.document, { ...frameOptions, ...(source.scripts ? { scripts: source.scripts } : {}) });
       if (!initial) return;
+      if (!sized) {
+        sized = true;
+        region = { kind: "rect", rect: initial.plan.world };
+      }
       let prepared = initial;
       trace("prepare", completed, initial.plan);
       const prepareScripts = async (scripts: NonNullable<typeof host>, shaders: boolean) => {
@@ -477,7 +530,7 @@ export async function runBoardExport(
           const error = scripts.error(id);
           if (error) throw new Error(`${initial.document.board.scripts?.[id]?.src ?? initial.scene.get(id)?.script?.src ?? id}: ${error}`);
         }
-        return prepareBoardExport(document, { ...frameOptions, scripts });
+        return prepareBoardExport(source.document, { ...frameOptions, scripts });
       };
       if (host && !gpu) {
         const scripted = await prepareScripts(host, !decided);
@@ -488,20 +541,22 @@ export async function runBoardExport(
       if (!decided) {
         decided = true;
         liftChecked = lifts;
-        const shaded = (host?.shaders?.(prepared.document, time ?? 0) ?? []).map((owner) => owner.id);
+        const shaded = ((host ?? source.scripts)?.shaders?.(prepared.document, time ?? 0) ?? []).map((owner) => owner.id);
         const browser = shaded.length || lifts ? findBoardGpuBrowser() : null;
-        if (browser) gpu = await launchGpu(browser);
-        else if (host && shaded.length) {
+        if (browser) await launchGpu(browser);
+        else if (shaded.length) {
           report(`Shaders in ${shaded.join(", ")} need Chrome, Chromium or Edge; install one or set COHUB_CHROME to draw them.`);
-          host.clearFrames();
-          const scripted = await prepareScripts(host, false);
-          if (!scripted) return;
-          prepared = scripted;
+          if (host) {
+            host.clearFrames();
+            const scripted = await prepareScripts(host, false);
+            if (!scripted) return;
+            prepared = scripted;
+          }
         }
       } else if (lifts && !gpu && !liftChecked && options.renderer === "auto") {
         liftChecked = true;
         const browser = findBoardGpuBrowser();
-        if (browser) gpu = await launchGpu(browser);
+        if (browser) await launchGpu(browser);
       }
       const timed = boardTimedMedia(prepared.scene);
       media.push({ at: time ?? 0, media: timed });
@@ -531,12 +586,14 @@ export async function runBoardExport(
           if (!gpu) frameTextures.set(key, await nodeRenderer.decodeImage(bytes, "image/jpeg"));
         }
       }
-      if (gpu) {
+      const browser = gpu as BoardGpuExporter | null;
+      if (browser) {
         trace("gpu", completed, prepared.plan);
-        const result = await gpu.render({
+        await loadGpu(browser, source);
+        const result = await browser.render({
           time,
           region,
-          ...(camera ? { camera } : {}),
+          ...frameFraming,
           scale: options.scale,
           ...(times.length > 1 || options.padding === undefined ? {} : { padding: options.padding }),
           background: options.background,
@@ -569,12 +626,12 @@ export async function runBoardExport(
       }
 
       trace("render", completed, prepared.plan);
-      const result = exportBoardImageBytes(renderer, document, {
+      const result = exportBoardImageBytes(renderer, source.document, {
         ...frameOptions,
         ...theme,
         background: options.background,
         textures: frameTextures.size ? new Map([...textures, ...frameTextures]) : textures,
-        scripts: options.scripts ?? scriptHost ?? undefined,
+        scripts: source.scripts ?? scriptHost ?? undefined,
         backgroundTexture,
         assetKey: (item: BoardSceneItem) => frameKeys[item.id] ?? assetKey(item),
         format: options.format,
@@ -597,20 +654,29 @@ export async function runBoardExport(
       });
       trace("rendered", completed, result.plan);
     };
-    for (const time of times) {
+    const renderAt = async (time: number | null, source = base) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       const stalled = new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error(describeStall(time, timeoutMs, doing, scriptHost?.status() ?? null))), timeoutMs);
       });
       try {
-        await Promise.race([renderFrame(time), stalled]);
+        await Promise.race([renderFrame(time, source), stalled]);
       } finally {
         clearTimeout(timer);
       }
-    }
+    };
+    if (options.drive) {
+      const driving = options.drive(renderAt);
+      driving.catch(() => {});
+      const { signal } = options;
+      await (signal ? Promise.race([driving, new Promise<never>((_resolve, reject) => {
+        if (signal.aborted) reject(signal.reason);
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      })]) : driving);
+    } else for (const time of times) await renderAt(time);
     return completed ? { frames, warnings, media } : null;
   } finally {
-    await gpu?.close();
+    await (gpu as BoardGpuExporter | null)?.close();
     scriptHost?.destroy();
     for (const texture of textureCache.textures.values()) texture.destroy(true);
     backgroundTexture?.destroy(true);
@@ -620,14 +686,33 @@ export async function runBoardExport(
   }
 }
 
-export function gpuResources(spaceId: string, document: BoardDocument, framePicture: (key: string) => Uint8Array | undefined = () => undefined): BoardGpuResources {
+export function gpuResources(
+  spaceId: string,
+  documentOf: BoardDocument | (() => BoardDocument),
+  framePicture: (key: string) => Uint8Array | undefined = () => undefined,
+): BoardGpuResources {
   const client = createClient();
-  const scene = buildBoardScene(document);
+  const modules = new Map<string, Promise<string>>();
+  let scene: { document: BoardDocument; scene: ReturnType<typeof buildBoardScene> } | null = null;
+  const current = () => {
+    const document = typeof documentOf === "function" ? documentOf() : documentOf;
+    if (scene?.document !== document) scene = { document, scene: buildBoardScene(document) };
+    return scene;
+  };
   return {
     fonts: resolveBundledFonts().flatMap(({ path, family }) => (family ? [{ path, family }] : [])),
-    readModule: async (path) => new TextDecoder().decode((await readSpaceFileBytes(client, spaceId, path)).bytes),
+    readModule(path) {
+      let code = modules.get(path);
+      if (!code) {
+        code = readSpaceFileBytes(client, spaceId, path).then(({ bytes }) => new TextDecoder().decode(bytes));
+        code.catch(() => modules.delete(path));
+        modules.set(path, code);
+      }
+      return code;
+    },
     readFile: async (path) => (await readSpaceFileBytes(client, spaceId, path)).bytes,
     async readPicture(request) {
+      const { document, scene } = current();
       if ("background" in request) {
         const source = document.board.background.image && parseBoardMediaSource(document.board.background.image.src);
         if (!source) return null;

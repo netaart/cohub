@@ -3,6 +3,7 @@ export * from "@cohub/protocol/board-layout";
 export * from "@cohub/protocol/board-patch";
 export {
 	BOARD_CAMERA_VIEWPORT,
+	BOARD_MAX_PITCH,
 	BOARD_SCHEMA_TARGETS,
 	boardJsonSchema,
 	boardSchemaOverview,
@@ -65,6 +66,7 @@ export * from "./media-sizes.js";
 export * from "./items/index.js";
 export * from "./media.js";
 export * from "./model-clips.js";
+export * from "./model-cover.js";
 export * from "./autoplay.js";
 export * from "./media-playback.js";
 export * from "./read.js";

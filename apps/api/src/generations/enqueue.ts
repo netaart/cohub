@@ -17,6 +17,7 @@ import { GenerationValidationError } from "@neta-art/generation";
 import { admitGeneration, GenerationBillingUnavailableError, generationReserveHolds } from "../generation-billing.js";
 import { enqueueTask } from "../tasks.js";
 import { loadGenerationDeclaration } from "./declarations.js";
+import { resolveOutputReferences } from "./output-references.js";
 import { resolveGenerationRequestParameters } from "./schema.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -57,6 +58,7 @@ export async function enqueueGeneration(input: GenerationRequestInput & {
   billing: BillingAccessDecision;
   hold: GenerationReserveHold | null;
 }> {
+  input = { ...input, content: await resolveOutputReferences(input.userId, input.content) };
   const { declaration, parameters } = await validateGenerationRequest(input);
   const usageType = resolveGenerationUsageType({
     adapterType: declaration.adapter?.type,

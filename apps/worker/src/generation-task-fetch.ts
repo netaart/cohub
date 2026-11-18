@@ -2,8 +2,11 @@ const DEFAULT_GENERATION_BASE_URL = "https://router.neta.art";
 
 export function createGenerationTaskFetch(
   taskRunId: string,
-  baseUrl = DEFAULT_GENERATION_BASE_URL,
-  fetchFn: typeof fetch = globalThis.fetch,
+  {
+    baseUrl = DEFAULT_GENERATION_BASE_URL,
+    fetchFn = globalThis.fetch,
+    onGatewayRequest,
+  }: { baseUrl?: string; fetchFn?: typeof fetch; onGatewayRequest?: () => void } = {},
 ): typeof fetch {
   const gateway = new URL(baseUrl);
   const basePath = gateway.pathname.replace(/\/+$/, "");
@@ -18,6 +21,7 @@ export function createGenerationTaskFetch(
       return fetchFn(input, init);
     }
 
+    onGatewayRequest?.();
     const headers = new Headers(init?.headers ?? request?.headers);
     headers.set("X-Cohub-Task-Id", taskRunId);
     const redirect = (init?.redirect ?? request?.redirect) === "manual" ? "manual" : "error";

@@ -54,7 +54,7 @@ cohub generate "restyle this image" \
   --param size=1024x1024
 ```
 
-Supported inputs: `--image`, `--video`, and `--audio`, each repeatable. Pass a URL or a local path; local files upload to an unlisted public URL first, so tasks store a reference instead of inline data. For files that must stay private, add `--inline` to keep them inside the task.
+Supported inputs: `--image`, `--video`, `--audio`, and `--3d`, each repeatable. Pass a URL or a local path; local files upload to an unlisted public URL first, so tasks store a reference instead of inline data. For files that must stay private, add `--inline` to keep them inside the task.
 
 When a model requires input roles, prefix the path or URL:
 
@@ -75,7 +75,7 @@ cohub generate "lip-sync to this spoken take" \
   --audio reference_audio=https://example.com/speech.mp3
 ```
 
-Roles include `first_frame`, `last_frame`, `reference_image`, `reference_video`, and `reference_audio`. Check `models show` for what a model accepts. Do not mix first/last frame roles with reference roles. Seedance 2 reference audio needs an image or video in the same request.
+Roles include `first_frame`, `last_frame`, `reference_image`, `reference_video`, `reference_audio`, and `motion` (3D). Check `models show` for what a model accepts. Do not mix first/last frame roles with reference roles. Seedance 2 reference audio needs an image or video in the same request. Meshy follow-ups such as `animation` take the previous step's output URL from your last 3 days (for example `--3d <rigging-output-url>`), not a downloaded file.
 
 ## Text roles
 

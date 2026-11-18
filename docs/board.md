@@ -29,7 +29,7 @@ shared runtime used by native items and custom content.
 
 Common fields: `type`, `parent`, `z`, `position`, `size`, `rotation` (degrees),
 `scale`, `origin` (normalized transform origin, default center), `opacity`, `visible`,
-`style`, `props`, `locked`, `metadata`, optional `script` (`src`, `params`, `targets`, `seed`, `enabled`).
+`style`, `props`, `locked`, `metadata`, optional `script` (`src`, `params`, `targets`, `seed`, `enabled`, `modes`).
 
 - `position` is relative to `parent`; a root item is in world space.
 - Children inherit the parent's transform, opacity and visibility. Only `frame` items can be parents.
@@ -157,8 +157,14 @@ eye so it shows its cover view (`props.model.view`), fitted to the item's box in
 resting pose. As the camera pitches it stands up, upright once the pitch reaches 90°
 minus `view.pitch`, so a low camera sees characters standing in the scene; `view.pitch`
 90 keeps it upright. `rotation` and `view.yaw` turn it about its own vertical axis, and
-`depth` lifts and tips it like any item. It shows or hides with its opacity but does
-not fade, and shows its card while it loads.
+`depth` lifts and tips it like any item, and it fades with its opacity.
+
+Until its model loads, it stands in its box as a soft silhouette with a gently sweeping
+light (still under reduced motion), or as its recorded cover when it has one, over its
+contact shadow, and stays selectable while editing; the model then fades in over 200 ms.
+Items that show the same file (`src` and `mtimeMs`) download and parse it once and
+each keep their own pose and clip. Up to three load at a time, nearest the middle of
+the view first.
 
 ### Attach to an item or a model's node
 
@@ -260,7 +266,16 @@ writes the entered card's current view there. glTF buffers and textures resolve 
 to the model, and Draco and meshopt compression decode as they load. The Web editor
 renders stills only for cards on screen, one at a time, and leaves models above 64 MB
 (16 MB on mobile) for the user to open. Exports in a browser draw the still; Node
-exports draw a placeholder.
+exports draw the model's cover, or a placeholder without one.
+
+An editor records each still it draws as the item's cover: the image is stored once per
+model file and look (source, display, view and clip) among the signed-in user's
+previews, and its URL goes into `props.snapshot.coverUrl`. Every client, signed in or
+not, then shows the cover without downloading the model, until the look or the file
+changes and an editor draws it again. An object model's cover is drawn in the object's
+lighting by the editor that loads it, for viewers to show while the model loads. A
+cover poses the item's clip, or the model's first, at its first frame. A glTF with
+separate buffer or texture files gets no cover.
 
 A URL loads directly, without importing it into the Space. A Space path retains
 live file updates and resolves through the Space file API. Existing paths are not
@@ -409,6 +424,11 @@ A track drives one property of one target:
   along the path.
 
 A marker with `pause: true` stops playback there until `next`.
+
+A play or read-only view that just opened holds `auto` animations and Board scripts at
+their start until the model objects in view have loaded, at most 1.5 s, so the first
+screen does not start without them. Editing never waits, and a shared playback keeps to
+its own clock.
 
 Camera tracks frame their animation's `viewport` (`{ width, height }` in pixels; else
 the nearest nesting animation's, else 1600×900): `zoom` is pixels per board unit on that screen. Every screen
@@ -572,8 +592,10 @@ the web, would otherwise be overwritten. The SDK's `board.diff(from, to?)` retur
 
 ## Export
 
-Use `--frame`, `--items` or `--rect` for a fixed region, or `--camera` for the animation's
-view at a specified time. `--frame` exports the frame as a page: its children, its own
+Use `--frame`, `--items` or `--rect` for a fixed region, `--camera` for the animation's
+view at a specified time, or `--view x,y,zoom[,pitch,bearing]` for a fixed camera centered
+on x,y, with zoom, pitch and bearing as a camera track sets them; `--view` needs no
+animation and changes nothing in the document. `--frame` exports the frame as a page: its children, its own
 fill and the shaders of its script, without its outline and label:
 
 ```sh
@@ -581,6 +603,7 @@ cohub boards export lesson.board --frame lab -o lab.png
 cohub boards export lesson.board --animation lecture --at 10s --camera --size 1600x900 -o preview.png
 cohub boards export lesson.board --animation lecture --at 1s,5s,9s --camera -o /tmp/preview-%d.png
 cohub boards export lesson.board --animation lecture --at 0:30s:100ms --camera -o lesson.mp4
+cohub boards export map.board --view 1300,3400,0.7,35 -o tower.png
 ```
 
 `--theme` picks any built-in Cohub theme (`dark`, `light`, `solarized-dark`,
@@ -599,19 +622,28 @@ software WebGL where there is no GPU, so the result matches the web app. Set
 `COHUB_CHROME` to pick the browser. Consecutive commands share that browser, which exits
 after a few idle minutes (`COHUB_BOARD_GPU_DAEMON=0` starts one per command). `--renderer
 canvas` stays in Node and warns which shaders fell back to `draw()` or were left out;
-`--renderer gpu` always uses the browser. `--async` runs the export as a Task in the
+`--renderer gpu` always uses the browser. A browser frame is at most 16 megapixels; past
+it, scale goes down with a warning, since software WebGL holds every pass of a frame in
+memory. `--async` runs the export as a Task in the
 Space's sandbox and returns its id at once; paths are then Space paths.
 
 A `--camera` export follows the camera scripts direct with `present("camera", …)` over
 the animation camera, as viewers do in play. Scripts see what is exported as their view: the camera for `--camera`, otherwise the
-fixed region at the output's pixels, delivered as `viewchange` like on a screen. A
+fixed region at the output's pixels, delivered as `viewchange` like on a screen. Their
+screen layers (HUDs, buttons) are left out unless `--screen`. A
 shader a script declares that the image does not show is named in the warnings with the
-reason: outside the area, hidden, clipped by a frame, every pass switched off, or a
-failed compile. A frame that runs longer than `--timeout` (2 minutes) fails and names
+reason: hidden, clipped by a frame, every pass switched off, or a failed compile; one
+outside the area is not reported.
+
+`--inputs` replays a recording of browser input, or runs a `cohub boards simulate` steps
+file: the export then simulates the steps (taps, keys, drags, tools, peers, broadcasts,
+input) in the file's `mode`, `viewport` and `pointer`, draws the `--at` times of the
+simulated clock (the end of the steps without `--at`), and `--camera` draws that screen.
+`simulate -o` draws the same way, with screen layers unless `--no-screen`. A frame that runs longer than `--timeout` (2 minutes) fails and names
 the scripts still running, the worker lane each is on, and the last event or call it got.
 
 Camera and fixed region options are mutually exclusive. `--size` sets camera output
-pixels, the animation's `viewport` by default, and never sizes frames; `--scale` applies to fixed regions. In the web export
+pixels, the animation's `viewport` (a simulation's viewport) by default, and never sizes frames; `--scale` applies to fixed regions. In the web export
 dialog, choose an animation and time, then **Follow camera**. Export does not change
 shared playback.
 
@@ -631,7 +663,8 @@ Without WebGL, lifted items draw flat, model objects as their cards and a tipped
 `renderBoardExport` draws depth when given `depth`, a stage from
 `loadBoardDepthEngine().createBoardDepthStage(renderer)` that frames can share, and
 model objects when also given `models`, from `loadBoardObjectModels(items, source,
-options)`; keep both across the frames of a sequence so each model keeps its playback.
+options)`, which loads each file once for the items that share it; keep both across the
+frames of a sequence so each model keeps its playback.
 
 For batch rendering, reuse `createBoardRenderSampler(document, animation, theme)` from
 `@neta-art/cohub/board/render` with `exportBoardImageBytes` or `renderBoardExport`;

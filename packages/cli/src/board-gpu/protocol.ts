@@ -1,5 +1,5 @@
 import type { BoardDocument } from "@neta-art/cohub";
-import type { BoardScriptParameter, BoardScriptSnapshot, BoardShader } from "@neta-art/cohub/board";
+import type { BoardScriptCamera, BoardScriptEnv, BoardScriptParameter, BoardScriptSnapshot, BoardShader } from "@neta-art/cohub/board";
 import type { BoardExportRegion, BoardThemeId } from "@neta-art/cohub/board";
 import type { BoardExportWarning } from "@neta-art/cohub/board/export";
 
@@ -9,11 +9,18 @@ export type BoardGpuInit = {
   theme: BoardThemeId;
   snapshots?: Record<string, BoardScriptSnapshot>;
   inputs?: string;
+  env?: BoardScriptEnv;
+  resume?: boolean;
+  keep?: boolean;
 };
 export type BoardGpuFrame = {
   time: number | null;
   region: BoardExportRegion;
   camera?: { width: number; height: number };
+  view?: BoardScriptCamera;
+  viewport?: { width: number; height: number };
+  screen?: boolean;
+  maxPixels?: number;
   scale: number;
   padding?: number;
   background: "paper" | "transparent";
