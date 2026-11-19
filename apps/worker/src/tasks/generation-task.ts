@@ -3,7 +3,6 @@ import {
   billingOperations,
   calculateGenerationUsageCharge,
   COHUB_BILLING_TOKEN_TYPES,
-  contentTypesFromBlocks,
   generationUsageKind,
   isGenerationModelDiscountFree,
   reconcileGenerationModelDiscountSnapshot,
@@ -40,6 +39,7 @@ import { spaceWalletBilling } from "../space-wallet-billing.js";
 const loader = createGenerationDeclarationLoader({
   platformConfigRoot: config.platformConfigRoot,
   redis: redisCommandClient,
+  warn: (message) => console.warn(`[Generation] ${message}`),
 });
 const billingUsageGate = spaceWalletBilling.gate;
 
@@ -329,11 +329,7 @@ const runGenerationTask: TaskHandler = async (job: Job, context) => {
       });
     }
 
-    // Gate uses request-side modality; billing/stats re-resolve with output after success.
-    const gateUsageType = resolveGenerationUsageType({
-      adapterType: declaration.adapter?.type,
-      contentTypes: contentTypesFromBlocks(data.content),
-    });
+    const usageType = resolveGenerationUsageType(declaration.category);
     // A held task fails closed: a turn that was cancelled, finished, or cannot be read must not be charged.
     if (data.reserveHold && runnable !== true) {
       throw new Error(runnable === false ? "Generation turn is no longer runnable." : "Generation turn state could not be verified.");
@@ -343,7 +339,7 @@ const runGenerationTask: TaskHandler = async (job: Job, context) => {
       ? { status: "allowed" as const, balanceState: "zero" as const, netUsd: 0 }
       : await billingUsageGate.evaluate({
           userId,
-          usageKind: generationUsageKind(gateUsageType),
+          usageKind: generationUsageKind(usageType),
           source: "generation_task",
           model: data.model,
           spaceId,
@@ -380,13 +376,6 @@ const runGenerationTask: TaskHandler = async (job: Job, context) => {
       },
     );
 
-    const usageType = resolveGenerationUsageType({
-      adapterType: declaration.adapter?.type,
-      contentTypes: [
-        ...contentTypesFromBlocks(result.content),
-        ...contentTypesFromBlocks(data.content),
-      ],
-    });
     const billing = await recordGenerationUsageBilling({
       retryOnly: job.attemptsMade > 0 || job.attemptsStarted > 1,
       userId,

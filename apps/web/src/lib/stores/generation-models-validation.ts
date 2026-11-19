@@ -140,6 +140,7 @@ export function isValidCachedGenerationModel(
 		typeof value.model === "string" &&
 		value.model.trim() !== "" &&
 		optional(value.title, isString) &&
+		optional(value.category, isString) &&
 		optional(value.description, isString) &&
 		optional(value.hidden, isBoolean) &&
 		optional(value.allowUnknownParameters, isBoolean) &&

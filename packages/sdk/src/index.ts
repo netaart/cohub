@@ -202,6 +202,7 @@ export { isAgentTurn, normalizeSessionTurnOrigin, readReplyStatus, readSentTurns
 export type { SentTurnRef, SessionTurnOrigin, SessionTurnOriginKind, SessionTurnReply, SessionTurnReplyMode, SessionTurnReplyStatus } from "@cohub/protocol/model";
 export type { RequestSource, RequestSourceVia } from "@cohub/protocol/provenance";
 export {
+  GENERATION_CATEGORIES,
   GenerationPolicyError,
   assertGenerationRequestAllowedByPolicy,
   decodeGenerationPolicy,
@@ -209,12 +210,16 @@ export {
   filterDiscoverableGenerationModels,
   filterGenerationDeclarationsByPolicy,
   findGenerationModelPolicy,
+  generationModelCategory,
   getAllowedGenerationModelIds,
+  groupGenerationModelsByCategory,
   isGenerationModelHidden,
   normalizeGenerationPolicy,
   parseGenerationPolicyFromEnv,
 } from "@cohub/protocol/generation";
 export type {
+  GenerationCategory,
+  GenerationCategoryGroup,
   GenerationModelPolicy,
   GenerationModelVisibility,
   GenerationParameterConstraint,

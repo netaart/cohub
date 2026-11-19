@@ -1,6 +1,7 @@
 schema: neta.generation.model.v1
 model: gemini-3.1-flash-image-preview
 title: Gemini 3.1 Flash Image Preview
+category: image
 description: Gemini image generation and editing model. Good for text rendering, infographics, style transfer, and iterative image editing with references.
 adapter:
   type: gemini.generateContent

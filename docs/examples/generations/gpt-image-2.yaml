@@ -1,6 +1,7 @@
 schema: neta.generation.model.v1
 model: gpt-image-2
 title: GPT Image 2
+category: image
 description: Image generation model with optional reference images. Good for photorealistic scenes, detailed images, and image editing with references.
 adapter:
   type: openai.images

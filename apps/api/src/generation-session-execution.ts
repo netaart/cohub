@@ -1,8 +1,4 @@
-import {
-  billingOperations,
-  contentTypesFromBlocks,
-  resolveGenerationUsageType,
-} from "@cohub/billing";
+import { billingOperations, resolveGenerationUsageType } from "@cohub/billing";
 import { GenerationValidationError } from "@neta-art/generation";
 import { buildGenerationRequestMessage, buildGenerationResultMessage } from "@cohub/protocol/generation";
 import { createInitialSpaceSession, getSpaceSessionById, persistMessageNode } from "./space-sessions.js";
@@ -78,7 +74,7 @@ export async function createGenerationSessionExecution(input: {
     if (error instanceof GenerationValidationError) throw new GenerationSessionExecutionError(400, "invalid_generation_input", error.message);
     throw error;
   }
-  const usageType = resolveGenerationUsageType({ adapterType: declaration.adapter?.type, contentTypes: contentTypesFromBlocks(input.content) });
+  const usageType = resolveGenerationUsageType(declaration.category);
   const discount = await billingOperations.getGenerationModelDiscount({ userId: input.userId, model: input.model }).catch(() => {
     throw new GenerationSessionExecutionError(503, "generation_pricing_unavailable", "Generation pricing is temporarily unavailable.");
   });

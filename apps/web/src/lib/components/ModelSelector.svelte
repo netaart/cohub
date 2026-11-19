@@ -6,7 +6,15 @@ import type {
 import type { ModelStatusEntry } from "@cohub/protocol/model/status";
 import { Brain, Check, ChevronDown, Image, Zap } from "lucide-svelte";
 import Dialog from "#lib/components/Dialog.svelte";
-import { getGenerationModelPickerItems } from "#lib/generation-model-catalog.ts";
+import GenerationCategoryIcon from "#lib/components/generation/GenerationCategoryIcon.svelte";
+import GenerationCategoryTabs from "#lib/components/generation/GenerationCategoryTabs.svelte";
+import GenerationModelGroups from "#lib/components/generation/GenerationModelGroups.svelte";
+import { generationCategoryLabel } from "#lib/components/generation/generation-labels.ts";
+import {
+	browseGenerationModels,
+	type GenerationCategoryFilter,
+	generationCategoryKey,
+} from "#lib/generation-model-catalog.ts";
 import { formatCurrency } from "#lib/i18n/format.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import type { Locale } from "#lib/i18n/locale.ts";
@@ -128,6 +136,7 @@ const locale = $derived(getLocale());
 
 let searchQuery = $state("");
 let generationSearchQuery = $state("");
+let generationFilter = $state<GenerationCategoryFilter>("all");
 let selectedIndex = $state(0);
 let navigationMode: "mouse" | "keyboard" = $state("mouse");
 let activeTab: "chat" | "generation" = $state("chat");
@@ -401,13 +410,6 @@ function getGenerationModelTitle(model: PublicGenerationDeclaration): string {
 	return model.title?.trim() || model.model;
 }
 
-function getGenerationKind(model: PublicGenerationDeclaration): string {
-	const inputTypes = new Set(model.content.input.map((item) => item.type));
-	if (inputTypes.has("video")) return m.model_kind_video({}, { locale });
-	if (inputTypes.has("image")) return m.model_kind_image({}, { locale });
-	return m.model_kind_multimodal({}, { locale });
-}
-
 function isEnumParameterSpec(spec: unknown): spec is { enum: unknown[] } {
 	return (
 		!!spec &&
@@ -642,6 +644,16 @@ function toggleGenerationModel(model: string, selected: boolean) {
 	onGenerationModelToggle?.(model, selected);
 }
 
+function toggleGenerationGroup(
+	models: readonly PublicGenerationDeclaration[],
+	selected: boolean,
+) {
+	for (const model of models) {
+		if (selectedGenerationModels.has(model.model) !== selected)
+			toggleGenerationModel(model.model, selected);
+	}
+}
+
 const filteredModels = $derived.by(() => {
 	const queryRaw = searchQuery.trim();
 	const isCurrent = (item: ModelItem) =>
@@ -687,9 +699,10 @@ const filteredModels = $derived.by(() => {
 	return result;
 });
 
-const filteredGenerationModels = $derived(
-	getGenerationModelPickerItems(generationModels, {
+const generationView = $derived(
+	browseGenerationModels(generationModels, {
 		query: generationSearchQuery,
+		filter: generationFilter,
 		selectedModelIds: selectedGenerationModels,
 	}),
 );
@@ -698,6 +711,7 @@ $effect(() => {
 	if (open) {
 		searchQuery = "";
 		generationSearchQuery = "";
+		generationFilter = "all";
 		selectedIndex = 0;
 		navigationMode = "mouse";
 		closeThinkingMenu();
@@ -1213,124 +1227,146 @@ const hoverCardPos = $derived.by(() => {
 				/>
 			</div>
 
-			<div class="mt-3 px-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
-				{m.model_selector_generation_header({}, { locale })}
-			</div>
+			{#if generationView.categories.length > 1}
+				<GenerationCategoryTabs class="mt-2.5" categories={generationView.categories} value={generationView.filter} onchange={(next) => (generationFilter = next)} />
+			{:else}
+				<div class="mt-3 px-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+					{m.model_selector_generation_header({}, { locale })}
+				</div>
+			{/if}
 
-			{#if filteredGenerationModels.length === 0}
-				<div class="mt-2 px-3 py-6 text-center text-[13px] text-text-tertiary">
+			{#if generationView.models.length === 0}
+				<div class="mt-2 flex flex-col items-center gap-2 px-3 py-6 text-center text-[13px] text-text-tertiary">
 					{generationSearchQuery
 						? m.model_selector_generation_no_matching({}, { locale })
 						: m.model_selector_generation_no_models({}, { locale })}
+					{#if generationView.outsideMatches > 0}
+						<button type="button" class="text-[12px] text-brand hover:underline" onclick={() => (generationFilter = "all")}>
+							{m.generation_category_outside_matches({ count: generationView.outsideMatches }, { locale })}
+						</button>
+					{/if}
 				</div>
 			{:else}
 				<div class="mt-1.5 -mx-3">
-					{#each filteredGenerationModels as model (model.model)}
-						{@const priceText = formatGenerationPrice(model, locale)}
-						<div class="px-3 py-2 transition-colors duration-100 hover:bg-bg-hover/60">
-							<div class="flex items-start gap-2.5">
-								<input
-									type="checkbox"
-									aria-label={m.model_selector_generation_use_aria({ model: getGenerationModelTitle(model) }, { locale })}
-									class="mt-1 h-3.5 w-3.5"
-									checked={selectedGenerationModels.has(model.model)}
-									onchange={(event) => toggleGenerationModel(model.model, event.currentTarget.checked)}
-								/>
-								<div class="min-w-0 flex-1">
-									<div class="flex items-start justify-between gap-2">
-										<button
-											type="button"
-											class="min-w-0 flex-1 text-left"
-											onclick={() => toggleGenerationModelExpanded(model.model)}
-											aria-expanded={isGenerationModelExpanded(model.model)}
-										>
-											<div class="flex items-center gap-1.5">
-												<ChevronDown class={`h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationModelExpanded(model.model) ? "rotate-0" : "-rotate-90"}`} />
-												<span class="truncate text-[13px] font-medium text-text-primary">{getGenerationModelTitle(model)}</span>
-												<span class="text-[10px] text-text-tertiary/80">{getGenerationKind(model)}</span>
-												{@render availabilityDot(model.model)}
+					<GenerationModelGroups models={generationView.models} grouped={!generationSearchQuery.trim()}>
+						{#snippet headerAction(category, groupModels)}
+							{@const selectedCount = groupModels.filter((model) => selectedGenerationModels.has(model.model)).length}
+							<input
+								type="checkbox"
+								class="h-3.5 w-3.5"
+								aria-label={m.generation_category_select_all({ category: generationCategoryLabel(category, locale) }, { locale })}
+								checked={selectedCount === groupModels.length}
+								indeterminate={selectedCount > 0 && selectedCount < groupModels.length}
+								onchange={(event) => toggleGenerationGroup(groupModels, event.currentTarget.checked)}
+							/>
+						{/snippet}
+						{#snippet row(model)}
+							{@const priceText = formatGenerationPrice(model, locale)}
+							<div class="px-3 py-2 transition-colors duration-100 hover:bg-bg-hover/60">
+								<div class="flex items-start gap-2.5">
+									<input
+										type="checkbox"
+										aria-label={m.model_selector_generation_use_aria({ model: getGenerationModelTitle(model) }, { locale })}
+										class="mt-1 h-3.5 w-3.5"
+										checked={selectedGenerationModels.has(model.model)}
+										onchange={(event) => toggleGenerationModel(model.model, event.currentTarget.checked)}
+									/>
+									<div class="min-w-0 flex-1">
+										<div class="flex items-start justify-between gap-2">
+											<button
+												type="button"
+												class="min-w-0 flex-1 text-left"
+												onclick={() => toggleGenerationModelExpanded(model.model)}
+												aria-expanded={isGenerationModelExpanded(model.model)}
+											>
+												<div class="flex items-center gap-1.5">
+													<ChevronDown class={`h-3.5 w-3.5 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationModelExpanded(model.model) ? "rotate-0" : "-rotate-90"}`} />
+													<span class="truncate text-[13px] font-medium text-text-primary">{getGenerationModelTitle(model)}</span>
+													{#if generationSearchQuery.trim()}<GenerationCategoryIcon category={generationCategoryKey(model)} class="h-3 w-3 shrink-0 text-text-tertiary/80" />{/if}
+													{@render availabilityDot(model.model)}
+												</div>
+												<div class="mt-0.5 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-text-tertiary">
+													<span class="truncate">{model.model}</span>
+													{#if priceText}
+														<span class="shrink-0 tabular-nums text-text-tertiary/75">· {priceText}</span>
+													{/if}
+												</div>
+											</button>
+											{#if generationPolicyMode === "limited" && selectedGenerationModels.has(model.model)}
+												<span class="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" aria-label={m.model_selector_selected({}, { locale })}></span>
+											{/if}
+										</div>
+
+										{#if isGenerationModelExpanded(model.model)}
+											<div class="mt-2 space-y-1 pl-5 text-[11px]">
+												{#each getParameterRows(model) as param (param.name)}
+													<div class="flex items-center justify-between gap-3 rounded-[5px] px-2 py-1 text-text-secondary">
+														<span class="truncate">{param.name}</span>
+														<span class="shrink-0 text-text-tertiary">{param.detail}</span>
+													</div>
+												{/each}
+
+												{#each getBooleanParameters(model) as param (param.name)}
+													<div class="rounded-[6px] bg-bg-subtle/45">
+														<button type="button" class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] text-text-secondary transition-colors duration-100 hover:text-text-primary" onclick={() => toggleGenerationParameterExpanded(model.model, param.name)} aria-expanded={isGenerationParameterExpanded(model.model, param.name)}>
+															<ChevronDown class={`h-3 w-3 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationParameterExpanded(model.model, param.name) ? "rotate-0" : "-rotate-90"}`} />
+															<span class="min-w-0 flex-1 truncate">{param.name}</span>
+															<span class="shrink-0 text-text-tertiary">{formatBooleanConstraintDetail(model.model, param.name)}</span>
+														</button>
+														{#if isGenerationParameterExpanded(model.model, param.name)}
+															<div class="grid grid-cols-3 gap-1 px-2 pb-2 pt-0.5">
+																{#each [
+										{ label: m.model_value_any({}, { locale }), value: undefined },
+										{ label: m.model_value_true({}, { locale }), value: true },
+										{ label: m.model_value_false({}, { locale }), value: false },
+									] as option (option.label)}
+																	<button type="button" class={`min-h-7 rounded px-2 text-[11px] transition-colors duration-100 ${getBooleanConstraint(model.model, param.name).value === option.value ? "bg-brand-bg text-brand-muted-fg" : "bg-bg-surface text-text-tertiary hover:text-text-primary"}`} disabled={generationPolicyMode !== "limited" || !selectedGenerationModels.has(model.model)} onclick={() => updateBooleanConstraint(model.model, param.name, { value: option.value })}>{option.label}</button>
+																{/each}
+															</div>
+														{/if}
+													</div>
+												{/each}
+
+												{#each getNumericParameters(model) as param (param.name)}
+													{@const constraint = getNumericConstraint(model.model, param.name)}
+													<div class="rounded-[6px] bg-bg-subtle/45">
+														<button type="button" class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] text-text-secondary transition-colors duration-100 hover:text-text-primary" onclick={() => toggleGenerationParameterExpanded(model.model, param.name)} aria-expanded={isGenerationParameterExpanded(model.model, param.name)}>
+															<ChevronDown class={`h-3 w-3 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationParameterExpanded(model.model, param.name) ? "rotate-0" : "-rotate-90"}`} />
+															<span class="min-w-0 flex-1 truncate">{param.name}</span>
+															<span class="shrink-0 text-text-tertiary">{formatNumericConstraintDetail(model.model, param.name, { min: param.min, max: param.max })}</span>
+														</button>
+														{#if isGenerationParameterExpanded(model.model, param.name)}
+															<div class="grid grid-cols-2 gap-2 px-2 pb-2 pt-0.5">
+																<label class="min-w-0 text-[10px] text-text-tertiary"><span>{m.model_value_min({}, { locale })}</span><input type="number" step={param.kind === "integer" ? "1" : "any"} placeholder={param.min === undefined ? m.model_value_any({}, { locale }) : String(param.min)} value={constraint.min ?? ""} disabled={generationPolicyMode !== "limited" || !selectedGenerationModels.has(model.model)} class="mt-1 min-h-7 w-full rounded border border-border-subtle bg-bg-input px-2 text-[11px] text-text-primary outline-none focus:border-brand/45 disabled:opacity-50" oninput={(event) => updateNumericConstraint(model.model, param.name, { ...constraint, min: event.currentTarget.value === "" ? undefined : Number(event.currentTarget.value) })} /></label>
+																<label class="min-w-0 text-[10px] text-text-tertiary"><span>{m.model_value_max({}, { locale })}</span><input type="number" step={param.kind === "integer" ? "1" : "any"} placeholder={param.max === undefined ? m.model_value_any({}, { locale }) : String(param.max)} value={constraint.max ?? ""} disabled={generationPolicyMode !== "limited" || !selectedGenerationModels.has(model.model)} class="mt-1 min-h-7 w-full rounded border border-border-subtle bg-bg-input px-2 text-[11px] text-text-primary outline-none focus:border-brand/45 disabled:opacity-50" oninput={(event) => updateNumericConstraint(model.model, param.name, { ...constraint, max: event.currentTarget.value === "" ? undefined : Number(event.currentTarget.value) })} /></label>
+															</div>
+														{/if}
+													</div>
+												{/each}
+
+												{#each getEnumParameters(model) as param (param.name)}
+													<div class="rounded-[6px] bg-bg-subtle/45">
+														<button type="button" class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] text-text-secondary transition-colors duration-100 hover:text-text-primary" onclick={() => toggleGenerationParameterExpanded(model.model, param.name)} aria-expanded={isGenerationParameterExpanded(model.model, param.name)}>
+															<ChevronDown class={`h-3 w-3 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationParameterExpanded(model.model, param.name) ? "rotate-0" : "-rotate-90"}`} />
+															<span class="min-w-0 flex-1 truncate">{param.name}</span>
+															<span class="shrink-0 text-text-tertiary">{getEnumParameterDetail(model, param.name, param.values)}</span>
+														</button>
+														{#if isGenerationParameterExpanded(model.model, param.name)}
+															<div class="flex flex-wrap gap-1 px-2 pb-2 pt-0.5">
+																{#each param.values as value (String(value))}
+																	<label class={`inline-flex min-h-7 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors duration-100 ${selectedGenerationModels.has(model.model) && getSelectedEnumValues(model.model, param.name, param.values).has(String(value)) ? "bg-brand-bg text-brand-muted-fg" : "bg-bg-surface text-text-tertiary hover:text-text-primary"}`}><input type="checkbox" class="h-3 w-3 disabled:opacity-35" disabled={generationPolicyMode !== "limited" || !selectedGenerationModels.has(model.model) || (getSelectedEnumValues(model.model, param.name, param.values).size === 1 && getSelectedEnumValues(model.model, param.name, param.values).has(String(value)))} checked={getSelectedEnumValues(model.model, param.name, param.values).has(String(value))} onchange={(event) => toggleGenerationEnumValue(model.model, param.name, String(value), event.currentTarget.checked)} /><span>{String(value)}</span></label>
+																{/each}
+															</div>
+														{/if}
+													</div>
+												{/each}
 											</div>
-											<div class="mt-0.5 flex min-w-0 items-center gap-1.5 pl-5 text-[11px] text-text-tertiary">
-												<span class="truncate">{model.model}</span>
-												{#if priceText}
-													<span class="shrink-0 tabular-nums text-text-tertiary/75">· {priceText}</span>
-												{/if}
-											</div>
-										</button>
-										{#if generationPolicyMode === "limited" && selectedGenerationModels.has(model.model)}
-											<span class="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" aria-label={m.model_selector_selected({}, { locale })}></span>
 										{/if}
 									</div>
-
-									{#if isGenerationModelExpanded(model.model)}
-										<div class="mt-2 space-y-1 pl-5 text-[11px]">
-											{#each getParameterRows(model) as param (param.name)}
-												<div class="flex items-center justify-between gap-3 rounded-[5px] px-2 py-1 text-text-secondary">
-													<span class="truncate">{param.name}</span>
-													<span class="shrink-0 text-text-tertiary">{param.detail}</span>
-												</div>
-											{/each}
-
-											{#each getBooleanParameters(model) as param (param.name)}
-												<div class="rounded-[6px] bg-bg-subtle/45">
-													<button type="button" class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] text-text-secondary transition-colors duration-100 hover:text-text-primary" onclick={() => toggleGenerationParameterExpanded(model.model, param.name)} aria-expanded={isGenerationParameterExpanded(model.model, param.name)}>
-														<ChevronDown class={`h-3 w-3 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationParameterExpanded(model.model, param.name) ? "rotate-0" : "-rotate-90"}`} />
-														<span class="min-w-0 flex-1 truncate">{param.name}</span>
-														<span class="shrink-0 text-text-tertiary">{formatBooleanConstraintDetail(model.model, param.name)}</span>
-													</button>
-													{#if isGenerationParameterExpanded(model.model, param.name)}
-														<div class="grid grid-cols-3 gap-1 px-2 pb-2 pt-0.5">
-															{#each [
-									{ label: m.model_value_any({}, { locale }), value: undefined },
-									{ label: m.model_value_true({}, { locale }), value: true },
-									{ label: m.model_value_false({}, { locale }), value: false },
-								] as option (option.label)}
-																<button type="button" class={`min-h-7 rounded px-2 text-[11px] transition-colors duration-100 ${getBooleanConstraint(model.model, param.name).value === option.value ? "bg-brand-bg text-brand-muted-fg" : "bg-bg-surface text-text-tertiary hover:text-text-primary"}`} disabled={generationPolicyMode !== "limited" || !selectedGenerationModels.has(model.model)} onclick={() => updateBooleanConstraint(model.model, param.name, { value: option.value })}>{option.label}</button>
-															{/each}
-														</div>
-													{/if}
-												</div>
-											{/each}
-
-											{#each getNumericParameters(model) as param (param.name)}
-												{@const constraint = getNumericConstraint(model.model, param.name)}
-												<div class="rounded-[6px] bg-bg-subtle/45">
-													<button type="button" class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] text-text-secondary transition-colors duration-100 hover:text-text-primary" onclick={() => toggleGenerationParameterExpanded(model.model, param.name)} aria-expanded={isGenerationParameterExpanded(model.model, param.name)}>
-														<ChevronDown class={`h-3 w-3 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationParameterExpanded(model.model, param.name) ? "rotate-0" : "-rotate-90"}`} />
-														<span class="min-w-0 flex-1 truncate">{param.name}</span>
-														<span class="shrink-0 text-text-tertiary">{formatNumericConstraintDetail(model.model, param.name, { min: param.min, max: param.max })}</span>
-													</button>
-													{#if isGenerationParameterExpanded(model.model, param.name)}
-														<div class="grid grid-cols-2 gap-2 px-2 pb-2 pt-0.5">
-															<label class="min-w-0 text-[10px] text-text-tertiary"><span>{m.model_value_min({}, { locale })}</span><input type="number" step={param.kind === "integer" ? "1" : "any"} placeholder={param.min === undefined ? m.model_value_any({}, { locale }) : String(param.min)} value={constraint.min ?? ""} disabled={generationPolicyMode !== "limited" || !selectedGenerationModels.has(model.model)} class="mt-1 min-h-7 w-full rounded border border-border-subtle bg-bg-input px-2 text-[11px] text-text-primary outline-none focus:border-brand/45 disabled:opacity-50" oninput={(event) => updateNumericConstraint(model.model, param.name, { ...constraint, min: event.currentTarget.value === "" ? undefined : Number(event.currentTarget.value) })} /></label>
-															<label class="min-w-0 text-[10px] text-text-tertiary"><span>{m.model_value_max({}, { locale })}</span><input type="number" step={param.kind === "integer" ? "1" : "any"} placeholder={param.max === undefined ? m.model_value_any({}, { locale }) : String(param.max)} value={constraint.max ?? ""} disabled={generationPolicyMode !== "limited" || !selectedGenerationModels.has(model.model)} class="mt-1 min-h-7 w-full rounded border border-border-subtle bg-bg-input px-2 text-[11px] text-text-primary outline-none focus:border-brand/45 disabled:opacity-50" oninput={(event) => updateNumericConstraint(model.model, param.name, { ...constraint, max: event.currentTarget.value === "" ? undefined : Number(event.currentTarget.value) })} /></label>
-														</div>
-													{/if}
-												</div>
-											{/each}
-
-											{#each getEnumParameters(model) as param (param.name)}
-												<div class="rounded-[6px] bg-bg-subtle/45">
-													<button type="button" class="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] text-text-secondary transition-colors duration-100 hover:text-text-primary" onclick={() => toggleGenerationParameterExpanded(model.model, param.name)} aria-expanded={isGenerationParameterExpanded(model.model, param.name)}>
-														<ChevronDown class={`h-3 w-3 shrink-0 text-text-tertiary transition-transform duration-100 ${isGenerationParameterExpanded(model.model, param.name) ? "rotate-0" : "-rotate-90"}`} />
-														<span class="min-w-0 flex-1 truncate">{param.name}</span>
-														<span class="shrink-0 text-text-tertiary">{getEnumParameterDetail(model, param.name, param.values)}</span>
-													</button>
-													{#if isGenerationParameterExpanded(model.model, param.name)}
-														<div class="flex flex-wrap gap-1 px-2 pb-2 pt-0.5">
-															{#each param.values as value (String(value))}
-																<label class={`inline-flex min-h-7 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors duration-100 ${selectedGenerationModels.has(model.model) && getSelectedEnumValues(model.model, param.name, param.values).has(String(value)) ? "bg-brand-bg text-brand-muted-fg" : "bg-bg-surface text-text-tertiary hover:text-text-primary"}`}><input type="checkbox" class="h-3 w-3 disabled:opacity-35" disabled={generationPolicyMode !== "limited" || !selectedGenerationModels.has(model.model) || (getSelectedEnumValues(model.model, param.name, param.values).size === 1 && getSelectedEnumValues(model.model, param.name, param.values).has(String(value)))} checked={getSelectedEnumValues(model.model, param.name, param.values).has(String(value))} onchange={(event) => toggleGenerationEnumValue(model.model, param.name, String(value), event.currentTarget.checked)} /><span>{String(value)}</span></label>
-															{/each}
-														</div>
-													{/if}
-												</div>
-											{/each}
-										</div>
-									{/if}
 								</div>
 							</div>
-						</div>
-					{/each}
+					{/snippet}
+					</GenerationModelGroups>
 				</div>
 			{/if}
 		</div>

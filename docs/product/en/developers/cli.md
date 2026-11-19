@@ -411,14 +411,14 @@ cohub boards export demo.board --animation intro --at 0:6s:40ms -o intro.mp4
 ```bash
 cohub search "release notes"
 cohub models ls
-cohub models ls --model-type multimodal
+cohub models ls --model-type multimodal --category video
 cohub generate "A calm lake at sunrise" --model <model> --output lake.png
 cohub generate -m song2 --text "prompt=upbeat synthwave" --text "lyrics=[Verse] Neon lights" --param seed=42
 ```
 
 `search` finds Spaces, chats by title or by the messages sent in them, and label items. `--types chat,space,label` narrows the result types, and `--space-id` searches every chat you can view in one Space; chat rows show the matching message.
 
-`models ls` shows each LLM's per-million-token cost (for example `$3 /M input · $15 /M output`) and hides models marked `hidden`. `models ls --model-type multimodal` shows each model's unit price (for example `$0.04 / image` or `$0.10–$0.50 / second`); `--json` returns the raw `pricing` object (`unit`, `amount` or `min`/`max`, optional `note`).
+`models ls` shows each LLM's per-million-token cost (for example `$3 /M input · $15 /M output`) and hides models marked `hidden`. `models ls --model-type multimodal` lists models by category (`image`, `video`, `audio`, `3d`, `decision`; `--category` narrows to one) and shows each model's unit price (for example `$0.04 / image` or `$0.10–$0.50 / second`); `--json` returns the raw `pricing` object (`unit`, `amount` or `min`/`max`, optional `note`).
 
 `generate --text <role>=<text>` passes a text input tagged with a role from the model's text inputs (`cohub models show <model>`); repeat it for each text block.
 

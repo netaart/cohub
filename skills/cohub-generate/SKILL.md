@@ -24,9 +24,10 @@ Always resolve models from the live list; do not hardcode a catalog.
 
 ```bash
 cohub models ls --model-type multimodal --json
+cohub models ls --model-type multimodal --category video --json
 ```
 
-Typical categories: text-to-image / image editing, text-to-video / image-to-video, text-to-speech (TTS), background removal, music.
+Each model declares the `category` it produces: `image`, `video`, `audio` (speech and music), `3d`, or `decision`. Filter by category first, then compare the candidates' inputs: text-to-video and image-to-video are both `video`.
 
 Before using non-default parameters or reference media, inspect the model schema for supported inputs, roles, parameters, defaults, and examples:
 
@@ -141,7 +142,7 @@ cohub generate "..." --model <model> --meta '<json>'      # pass model metadata
 
 ## Speech (TTS)
 
-Pick the speech model from the catalog instead of a fixed id: run `cohub models ls --model-type multimodal`, then `cohub models show <model>` on the audio models. To design a voice, use one that declares `meta.voice_prompt`; to clone, use one whose input takes `audio`.
+Pick the speech model from the catalog instead of a fixed id: run `cohub models ls --model-type multimodal --category audio`, then `cohub models show <model>` on the candidates. To design a voice, use one that declares `meta.voice_prompt`; to clone, use one whose input takes `audio`.
 
 ```bash
 TTS_MODEL=<model id from the catalog>

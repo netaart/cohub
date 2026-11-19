@@ -65,7 +65,7 @@ Generation requests share the platform credit balance with LLM turns.
 
 ```ts
 operationId: `generation:${taskRunId}`  // idempotent
-usageType: "generation.image" | "generation.video" | "generation.music" | "generation.3d" | "generation"
+usageType: "generation.image" | "generation.video" | "generation.audio" | "generation.3d" | "generation.decision" | "generation"
 officialCostUsd: result.cost
 amountUsd: officialCostUsd * discountMultiplier
 ```
@@ -74,7 +74,7 @@ The server resolves `pro_model_discount_v1` and `max_model_discount_v1` entitlem
 
 A zero multiplier is a valid free generation: both balance gates are bypassed, no zero-value ledger transaction is created, and the task records `billing.reason = "discounted_free"`. Present but invalid pricing configuration fails before provider execution instead of silently charging full price.
 
-Usage type is resolved from the model adapter (preferred) or output content types. Missing/non-positive provider `cost` skips charging and stores `billing.status = "skipped"` with reason `missing_cost` (task still succeeds — cost gaps are platform issues and must not break the user path; they are logged for ops follow-up). Transient billing write failures still complete the generation task, then enqueue an idempotent `generation.billing_retry` job (`operationId = generation:${taskRunId}`, up to 8 attempts with exponential backoff). Retries preserve the original official cost, multiplier, and effective amount.
+Usage type comes only from the declaration's `category` (`image`, `video`, `audio`, `3d`, `decision`), so the API gate, worker gate, and post-success charge always agree; an uncategorized model bills as generic `generation` and the declaration loaders log a warning naming it. Every video model must declare `category: video` to get the video balance gate. Ledger rows written before `generation.audio` keep the legacy `generation.music` type. Missing/non-positive provider `cost` skips charging and stores `billing.status = "skipped"` with reason `missing_cost` (task still succeeds — cost gaps are platform issues and must not break the user path; they are logged for ops follow-up). Transient billing write failures still complete the generation task, then enqueue an idempotent `generation.billing_retry` job (`operationId = generation:${taskRunId}`, up to 8 attempts with exponential backoff). Retries preserve the original official cost, multiplier, and effective amount.
 
 Completed tasks may include:
 

@@ -41,11 +41,20 @@ import { canUseUserScopedCache, getCacheUserKey } from "#lib/cache/keys.ts";
 import ComposerModelTrigger from "#lib/components/composer/ComposerModelTrigger.svelte";
 import ComposerSubmitButton from "#lib/components/composer/ComposerSubmitButton.svelte";
 import ComposerSurface from "#lib/components/composer/ComposerSurface.svelte";
+import GenerationCategoryIcon from "#lib/components/generation/GenerationCategoryIcon.svelte";
+import GenerationCategoryTabs from "#lib/components/generation/GenerationCategoryTabs.svelte";
+import GenerationModelGroups from "#lib/components/generation/GenerationModelGroups.svelte";
+import { generationInputSummary } from "#lib/components/generation/generation-labels.ts";
 import {
 	getComposerKeyAction,
 	isMobileComposerInput,
 } from "#lib/composer-keyboard.ts";
-import { getGenerationModelPickerItems } from "#lib/generation-model-catalog.ts";
+import {
+	browseGenerationModels,
+	type GenerationCategoryFilter,
+	generationCategoryKey,
+	getGenerationModelPickerItems,
+} from "#lib/generation-model-catalog.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { isComposingKeyboardEvent } from "#lib/keyboard.ts";
 import { m } from "#lib/paraglide/messages.js";
@@ -88,6 +97,7 @@ let parametersByModel = $state<Record<string, Record<string, unknown>>>({});
 let modelOpen = $state(false);
 let settingsOpen = $state(false);
 let modelQuery = $state("");
+let modelFilter = $state<GenerationCategoryFilter>("all");
 let loadingModels = $state(initialModels.length === 0);
 let resolvingSelection = $state(false);
 let submitting = $state(false);
@@ -130,9 +140,10 @@ const parameters = $derived.by(() => {
 		Object.entries(saved).filter(([name]) => name in declared),
 	);
 });
-const visibleModels = $derived(
-	getGenerationModelPickerItems(supportedModels, {
+const modelView = $derived(
+	browseGenerationModels(supportedModels, {
 		query: modelQuery,
+		filter: modelFilter,
 		selectedModelIds: selectedModelId ? [selectedModelId] : [],
 	}),
 );
@@ -262,6 +273,13 @@ function updateReferenceRole(id: string, role: string) {
 	references = references.map((reference) =>
 		reference.id === id ? { ...reference, role: role || undefined } : reference,
 	);
+}
+
+function toggleModelPicker() {
+	modelOpen = !modelOpen;
+	settingsOpen = false;
+	if (modelOpen)
+		modelFilter = selectedModel ? generationCategoryKey(selectedModel) : "all";
 }
 
 function chooseModel(model: PublicGenerationDeclaration) {
@@ -652,7 +670,7 @@ onDestroy(() => {
 						label={selectedModel?.title ?? selectedModel?.model ?? m.board_model({}, { locale })}
 						expanded={modelOpen}
 						loading={loadingModels && !selectedModel}
-						onclick={() => { modelOpen = !modelOpen; settingsOpen = false; }}
+						onclick={toggleModelPicker}
 					/>
 					{#if modelOpen}
 						<div class="popover model-popover">
@@ -660,22 +678,39 @@ onDestroy(() => {
 								<Search class="h-3.5 w-3.5" />
 								<input bind:value={modelQuery} placeholder={m.board_search_models({}, { locale })} aria-label={m.board_search_generation_models({}, { locale })} />
 							</label>
+							<GenerationCategoryTabs class="px-0.5 pt-1.5" categories={modelView.categories} value={modelView.filter} onchange={(next) => (modelFilter = next)} />
 							<div class="model-list">
-								{#each visibleModels as model (model.model)}
-									{@const compatible = modelAcceptsGenerationReferences(model, references)}
-									<button
-										type="button"
-										class="model-option"
-										class:model-option--active={model.model === selectedModelId}
-										disabled={!compatible}
-										title={compatible ? model.description : m.board_incompatible_refs({}, { locale })}
-										onclick={() => chooseModel(model)}
-									>
-										<span class="truncate font-medium">{model.title ?? model.model}</span>
-										<span class="truncate text-[10px] text-text-tertiary">{model.model}</span>
-									</button>
-								{/each}
-								{#if visibleModels.length === 0}<div class="empty-row">{m.board_no_matching({}, { locale })}</div>{/if}
+								<GenerationModelGroups
+									models={modelView.models}
+									grouped={!modelQuery.trim() && modelView.filter === "all" && modelView.categories.length > 1}
+									headerClass="px-[7px]"
+								>
+									{#snippet row(model)}
+										{@const compatible = modelAcceptsGenerationReferences(model, references)}
+										<button
+											type="button"
+											class="model-option"
+											class:model-option--active={model.model === selectedModelId}
+											disabled={!compatible}
+											title={compatible ? model.description : m.board_incompatible_refs({}, { locale })}
+											onclick={() => chooseModel(model)}
+										>
+											<GenerationCategoryIcon category={generationCategoryKey(model)} class="model-option-icon h-3.5 w-3.5" />
+											<span class="truncate font-medium">{model.title ?? model.model}</span>
+											<span class="truncate text-[10px] text-text-tertiary">{generationInputSummary(model, locale)} · {model.model}</span>
+										</button>
+									{/snippet}
+								</GenerationModelGroups>
+								{#if modelView.models.length === 0}
+									<div class="empty-row">
+										{m.board_no_matching({}, { locale })}
+										{#if modelView.outsideMatches > 0}
+											<button type="button" class="mt-1.5 block w-full text-brand hover:underline" onclick={() => (modelFilter = "all")}>
+												{m.generation_category_outside_matches({ count: modelView.outsideMatches }, { locale })}
+											</button>
+										{/if}
+									</div>
+								{/if}
 							</div>
 						</div>
 					{/if}
@@ -852,14 +887,16 @@ onDestroy(() => {
 	.model-option {
 		display: grid;
 		width: 100%;
-		grid-template-columns: minmax(0, 1fr);
-		gap: 1px;
+		grid-template-columns: auto minmax(0, 1fr);
+		column-gap: 7px;
+		row-gap: 1px;
 		border-radius: 5px;
 		padding: 6px 7px;
 		text-align: left;
 		font-size: 11px;
 		color: var(--text-secondary);
 	}
+	.model-option :global(.model-option-icon) { grid-row: span 2; align-self: center; color: var(--text-tertiary); }
 	.model-option:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.model-option--active { background: var(--brand-bg); color: var(--brand-muted-fg); }
 	.model-option:disabled { cursor: not-allowed; opacity: 0.38; }

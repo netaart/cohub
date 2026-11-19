@@ -68,7 +68,7 @@ export const COHUB_BILLING_USAGE_TYPES = {
   generationDecision: "generation.decision",
   generationImage: "generation.image",
   generationVideo: "generation.video",
-  generationMusic: "generation.music",
+  generationAudio: "generation.audio",
   generation3d: "generation.3d",
   sandboxCompute: "sandbox.compute",
   spaceStorage: "space.storage",

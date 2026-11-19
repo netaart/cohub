@@ -2,7 +2,10 @@ import type { Command } from "commander";
 import {
   filterDiscoverableGenerationModels,
   filterGenerationDeclarationsByPolicy,
+  GENERATION_CATEGORIES,
+  generationModelCategory,
   getAllowedGenerationModelIds,
+  groupGenerationModelsByCategory,
   parseGenerationPolicyFromEnv,
   type PublicGenerationDeclaration,
 } from "@neta-art/cohub";
@@ -10,11 +13,12 @@ import { createClient } from "../client.js";
 import { explicitSpace, failSpaceTarget, resolveSpaceRef } from "../space.js";
 import { table, json as outJson, jsonRequested, error, handleHttp, type Row } from "../output.js";
 
-type MultimodalModelSummary = Pick<PublicGenerationDeclaration, "model" | "title" | "description" | "pricing">;
+type MultimodalModelSummary = Pick<PublicGenerationDeclaration, "model" | "category" | "title" | "description" | "pricing">;
 
 export function toMultimodalModelSummary(model: PublicGenerationDeclaration): MultimodalModelSummary {
   return {
     model: model.model,
+    ...(model.category ? { category: model.category } : {}),
     ...(model.title ? { title: model.title } : {}),
     ...(model.description ? { description: model.description } : {}),
     // Keep pricing structured for `--json`; the human table formats it separately.
@@ -156,6 +160,7 @@ function formatParameter(name: string, spec: GenerationParameterSpec): string[] 
 function printMultimodalModel(model: PublicGenerationDeclaration): void {
   console.log(model.title ?? model.model);
   printSection("Model", [model.model]);
+  printSection("Category", [generationModelCategory(model) ?? "other"]);
   if (model.description) printSection("Description", [model.description]);
   if (model.pricing) printSection("Pricing", [formatGenerationPrice(model.pricing)]);
 
@@ -196,6 +201,7 @@ Examples:
   cohub models ls
   cohub models ls --space <spaceId>
   cohub models ls --model-type multimodal
+  cohub models ls --model-type multimodal --category video
   cohub models ls --model-type multimodal --json
   cohub models show <model>
   cohub models show <model> --json
@@ -206,8 +212,17 @@ Examples:
     .alias("list")
     .description("List available models")
     .option("--model-type <type>", "Model type: llm | multimodal", "llm")
+    .option("--category <category>", `Multimodal category: ${GENERATION_CATEGORIES.join(" | ")}`)
     .option("--json", "Output as JSON")
-    .action(async (opts: { modelType?: string; json?: boolean }, command: Command) => {
+    .action(async (opts: { modelType?: string; category?: string; json?: boolean }, command: Command) => {
+      if (opts.category !== undefined) {
+        if (opts.modelType !== "multimodal") {
+          return error("Invalid option", "--category requires --model-type multimodal");
+        }
+        if (!(GENERATION_CATEGORIES as readonly string[]).includes(opts.category)) {
+          return error("Invalid category", `Use one of: ${GENERATION_CATEGORIES.join(", ")}`);
+        }
+      }
       const client = createClient();
       try {
         if (opts.modelType === "multimodal") {
@@ -215,12 +230,17 @@ Examples:
           const policy = parseGenerationPolicyFromEnv(process.env);
           const allowedModelIds = getAllowedGenerationModelIds(policy);
           const filtered = filterGenerationDeclarationsByPolicy(response.models, policy);
-          const models = filterDiscoverableGenerationModels(filtered, {
+          const discoverable = filterDiscoverableGenerationModels(filtered, {
             includeModelIds: allowedModelIds ?? undefined,
-          }).map(toMultimodalModelSummary);
+          });
+          const models = groupGenerationModelsByCategory(discoverable)
+            .filter((group) => !opts.category || group.category === opts.category)
+            .flatMap((group) => group.models)
+            .map(toMultimodalModelSummary);
           if (jsonRequested(opts)) return outJson({ models });
           table(models as unknown as Row[], [
             { key: "model", label: "Model" },
+            { key: "category", label: "Category", format: (value) => (value ? String(value) : "other") },
             { key: "title", label: "Title" },
             {
               key: "pricing",

@@ -1,6 +1,7 @@
 schema: neta.generation.model.v1
 model: suno_music
 title: Suno Music
+category: audio
 description: Suno music model for songs, lyrics, sound effects, and integrated music tasks.
 adapter:
   type: suno.tasks

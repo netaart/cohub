@@ -57,6 +57,7 @@ export function toPublicGenerationDeclaration(declaration: GenerationModelDeclar
 export function createGenerationDeclarationLoader(input: {
   platformConfigRoot: string;
   redis: RedisLike;
+  warn?: (message: string) => void;
 }) {
   const platformGenerationsDir = () => join(input.platformConfigRoot, "platform", GENERATIONS_DIR);
   const userGenerationsDir = (userId: string) => join(input.platformConfigRoot, "users", userId, GENERATIONS_DIR);
@@ -69,6 +70,8 @@ export function createGenerationDeclarationLoader(input: {
   }): Promise<GenerationsConfig | null> {
     try {
       const { rawText, content } = await readGenerationsConfigFromDir(params.dir);
+      const uncategorized = content.declarations.filter((declaration) => !declaration.category).map((declaration) => declaration.model);
+      if (uncategorized.length > 0) input.warn?.(`Generation models without category in ${params.dir}: ${uncategorized.join(", ")}`);
       const cached = createCachedGenerationsConfig({ rawText, content });
       await input.redis.set(params.redisKey, JSON.stringify(cached), "EX", GENERATIONS_CACHE_TTL_SEC).catch(() => undefined);
       return content;

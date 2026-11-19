@@ -1,6 +1,5 @@
 import {
   billingOperations,
-  contentTypesFromBlocks,
   resolveGenerationUsageType,
   type BillingAccessDecision,
 } from "@cohub/billing";
@@ -60,10 +59,7 @@ export async function enqueueGeneration(input: GenerationRequestInput & {
 }> {
   input = { ...input, content: await resolveOutputReferences(input.userId, input.content) };
   const { declaration, parameters } = await validateGenerationRequest(input);
-  const usageType = resolveGenerationUsageType({
-    adapterType: declaration.adapter?.type,
-    contentTypes: contentTypesFromBlocks(input.content),
-  });
+  const usageType = resolveGenerationUsageType(declaration.category);
   const context = { userId: input.userId, spaceId: input.spaceId, model: input.model };
 
   let discount: Awaited<ReturnType<typeof billingOperations.getGenerationModelDiscount>>;

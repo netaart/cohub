@@ -115,7 +115,6 @@ export type {
 export {
   applyGenerationModelDiscount,
   calculateGenerationUsageCharge,
-  contentTypesFromBlocks,
   generationUsageKind,
   GenerationModelDiscountConfigError,
   GenerationModelDiscountSnapshotMismatchError,

@@ -3,7 +3,6 @@ import { test } from "node:test";
 import {
 	applyGenerationModelDiscount,
 	calculateGenerationUsageCharge,
-	contentTypesFromBlocks,
 	GenerationModelDiscountConfigError,
 	generationUsageKind,
 	isGenerationModelDiscountFree,
@@ -14,96 +13,20 @@ import {
 } from "../src/generation-usage.js";
 import { COHUB_BILLING_USAGE_TYPES } from "../src/interfaces.js";
 
-test("resolveGenerationUsageType prefers strict adapter families", () => {
-	assert.equal(
-		resolveGenerationUsageType({ adapterType: "openai.images", contentTypes: ["video"] }),
-		COHUB_BILLING_USAGE_TYPES.generationImage,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ adapterType: "ark.videoGenerations" }),
-		COHUB_BILLING_USAGE_TYPES.generationVideo,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ adapterType: "suno.tasks" }),
-		COHUB_BILLING_USAGE_TYPES.generationMusic,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ adapterType: "kling.videoGenerations" }),
-		COHUB_BILLING_USAGE_TYPES.generationVideo,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ adapterType: "meshy.tasks", contentTypes: ["text", "image"] }),
-		COHUB_BILLING_USAGE_TYPES.generation3d,
-	);
-});
-
-test("ambiguous adapters prefer content modality over adapter default", () => {
-	assert.equal(
-		resolveGenerationUsageType({ adapterType: "gemini.generateContent", contentTypes: ["video"] }),
-		COHUB_BILLING_USAGE_TYPES.generationVideo,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ adapterType: "gemini.generateContent", contentTypes: ["audio"] }),
-		COHUB_BILLING_USAGE_TYPES.generationMusic,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ adapterType: "gemini.generateContent", contentTypes: ["text"] }),
-		COHUB_BILLING_USAGE_TYPES.generationImage,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ adapterType: "gemini.generateContent" }),
-		COHUB_BILLING_USAGE_TYPES.generationImage,
-	);
-});
-
-test("resolveGenerationUsageType falls back to content types for unknown adapters", () => {
-	assert.equal(
-		resolveGenerationUsageType({ contentTypes: ["text", "image"] }),
-		COHUB_BILLING_USAGE_TYPES.generationImage,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ contentTypes: ["image", "video"] }),
-		COHUB_BILLING_USAGE_TYPES.generationVideo,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ contentTypes: ["audio"] }),
-		COHUB_BILLING_USAGE_TYPES.generationMusic,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ contentTypes: ["text", "image", "3d"] }),
-		COHUB_BILLING_USAGE_TYPES.generation3d,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ contentTypes: ["3d", "video"] }),
-		COHUB_BILLING_USAGE_TYPES.generationVideo,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ contentTypes: ["3d", "audio"] }),
-		COHUB_BILLING_USAGE_TYPES.generationMusic,
-	);
-	assert.equal(
-		resolveGenerationUsageType({ contentTypes: ["text"] }),
-		COHUB_BILLING_USAGE_TYPES.generation,
-	);
-	assert.equal(resolveGenerationUsageType({}), COHUB_BILLING_USAGE_TYPES.generation);
-});
-
-test("contentTypesFromBlocks extracts block types", () => {
-	assert.deepEqual(
-		contentTypesFromBlocks([
-			{ type: "text", text: "hi" },
-			{ type: "image", source: { type: "url", url: "https://example.com/a.png" } },
-			null,
-			{ type: "  video  " },
-		]),
-		["text", "image", "video"],
-	);
+test("resolveGenerationUsageType maps declaration categories", () => {
+	assert.equal(resolveGenerationUsageType("image"), COHUB_BILLING_USAGE_TYPES.generationImage);
+	assert.equal(resolveGenerationUsageType("video"), COHUB_BILLING_USAGE_TYPES.generationVideo);
+	assert.equal(resolveGenerationUsageType("audio"), COHUB_BILLING_USAGE_TYPES.generationAudio);
+	assert.equal(resolveGenerationUsageType("3d"), COHUB_BILLING_USAGE_TYPES.generation3d);
+	assert.equal(resolveGenerationUsageType("decision"), COHUB_BILLING_USAGE_TYPES.generationDecision);
+	assert.equal(resolveGenerationUsageType(undefined), COHUB_BILLING_USAGE_TYPES.generation);
+	assert.equal(resolveGenerationUsageType("toString"), COHUB_BILLING_USAGE_TYPES.generation);
 });
 
 test("generationUsageKind maps ledger types onto gate kinds", () => {
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generationImage), "generation.image");
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generationVideo), "generation.video");
-	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generationMusic), "generation.music");
+	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generationAudio), "generation.audio");
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generation3d), "generation.3d");
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generation), "generation");
 	assert.equal(generationUsageKind(COHUB_BILLING_USAGE_TYPES.generationLlm), "llm.turn");

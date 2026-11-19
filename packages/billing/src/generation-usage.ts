@@ -137,103 +137,16 @@ export function calculateGenerationUsageCharge(
   };
 }
 
-/** Strict image adapters — always image generation. */
-const IMAGE_ADAPTER_TYPES = new Set([
-  "openai.images",
-  "openai.imageEdits",
+const GENERATION_CATEGORY_USAGE_TYPES = new Map<string, CohubBillingUsageType>([
+  ["image", COHUB_BILLING_USAGE_TYPES.generationImage],
+  ["video", COHUB_BILLING_USAGE_TYPES.generationVideo],
+  ["audio", COHUB_BILLING_USAGE_TYPES.generationAudio],
+  ["3d", COHUB_BILLING_USAGE_TYPES.generation3d],
+  ["decision", COHUB_BILLING_USAGE_TYPES.generationDecision],
 ]);
 
-const VIDEO_ADAPTER_TYPES = new Set([
-  "ark.videoGenerations",
-  "kling.videoGenerations",
-  "minimax.h3VideoGenerations",
-]);
-
-const MUSIC_ADAPTER_TYPES = new Set([
-  "suno.tasks",
-]);
-
-const MODEL_3D_ADAPTER_TYPES = new Set([
-  "meshy.tasks",
-]);
-
-/**
- * Adapters that can host multiple modalities. Prefer content-block types;
- * fall back to a default usage type when content is inconclusive.
- */
-const AMBIGUOUS_ADAPTER_DEFAULTS: Record<string, CohubBillingUsageType> = {
-  "gemini.generateContent": COHUB_BILLING_USAGE_TYPES.generationImage,
-};
-
-function normalizeType(value: string | null | undefined): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-/**
- * Extract content block type strings from generation content/output arrays.
- * Shared by API gate and worker billing so modality resolution stays aligned.
- */
-export function contentTypesFromBlocks(blocks: Iterable<unknown> | null | undefined): string[] {
-  if (!blocks) return [];
-  const types: string[] = [];
-  for (const block of blocks) {
-    if (!block || typeof block !== "object" || Array.isArray(block)) continue;
-    const type = (block as { type?: unknown }).type;
-    if (typeof type === "string" && type.trim()) types.push(type.trim());
-  }
-  return types;
-}
-
-function usageTypeFromContentTypes(contentTypes: Iterable<string> | null | undefined): CohubBillingUsageType | null {
-  if (!contentTypes) return null;
-  let sawImage = false;
-  let sawVideo = false;
-  let sawAudio = false;
-  let saw3d = false;
-  for (const raw of contentTypes) {
-    const type = normalizeType(raw);
-    if (type === "image") sawImage = true;
-    else if (type === "video") sawVideo = true;
-    else if (type === "audio") sawAudio = true;
-    else if (type === "3d") saw3d = true;
-  }
-  // Prefer the highest-cost media family when multiple are present.
-  if (sawVideo) return COHUB_BILLING_USAGE_TYPES.generationVideo;
-  if (sawAudio) return COHUB_BILLING_USAGE_TYPES.generationMusic;
-  // 3d only needs to outrank image: 3D models take reference images and return thumbnails and texture maps
-  // alongside the model.
-  if (saw3d) return COHUB_BILLING_USAGE_TYPES.generation3d;
-  if (sawImage) return COHUB_BILLING_USAGE_TYPES.generationImage;
-  return null;
-}
-
-/**
- * Resolve a multimodal generation ledger usage type.
- *
- * Order:
- * 1. Strict adapter families (image / video / music / 3d)
- * 2. Content block modality (for ambiguous adapters / unknown adapters)
- * 3. Ambiguous-adapter default (e.g. gemini → image)
- * 4. Generic `generation`
- */
-export function resolveGenerationUsageType(input: {
-  adapterType?: string | null;
-  contentTypes?: Iterable<string> | null;
-} = {}): CohubBillingUsageType {
-  const adapterType = normalizeType(input.adapterType);
-
-  if (IMAGE_ADAPTER_TYPES.has(adapterType)) return COHUB_BILLING_USAGE_TYPES.generationImage;
-  if (VIDEO_ADAPTER_TYPES.has(adapterType)) return COHUB_BILLING_USAGE_TYPES.generationVideo;
-  if (MUSIC_ADAPTER_TYPES.has(adapterType)) return COHUB_BILLING_USAGE_TYPES.generationMusic;
-  if (MODEL_3D_ADAPTER_TYPES.has(adapterType)) return COHUB_BILLING_USAGE_TYPES.generation3d;
-
-  const fromContent = usageTypeFromContentTypes(input.contentTypes);
-  if (fromContent) return fromContent;
-
-  const ambiguousDefault = AMBIGUOUS_ADAPTER_DEFAULTS[adapterType];
-  if (ambiguousDefault) return ambiguousDefault;
-
-  return COHUB_BILLING_USAGE_TYPES.generation;
+export function resolveGenerationUsageType(category: string | null | undefined): CohubBillingUsageType {
+  return (category && GENERATION_CATEGORY_USAGE_TYPES.get(category)) || COHUB_BILLING_USAGE_TYPES.generation;
 }
 
 /** Map a generation usage type onto the matching usage-gate kind. */
@@ -243,8 +156,8 @@ export function generationUsageKind(usageType: CohubBillingUsageType): BillingUs
       return "generation.image";
     case COHUB_BILLING_USAGE_TYPES.generationVideo:
       return "generation.video";
-    case COHUB_BILLING_USAGE_TYPES.generationMusic:
-      return "generation.music";
+    case COHUB_BILLING_USAGE_TYPES.generationAudio:
+      return "generation.audio";
     case COHUB_BILLING_USAGE_TYPES.generation3d:
       return "generation.3d";
     case COHUB_BILLING_USAGE_TYPES.generationLlm:
