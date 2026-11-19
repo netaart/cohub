@@ -249,7 +249,11 @@ function select(product: BillingCatalogProduct) {
 
  {#if !recoveringPlan}
 	<div class="aside">
-		<CheckoutSummary {flow} {locale} {signedIn} {ctaLabel} {onbuy} />
+		{#if pending}
+			<div class="skeleton summary" aria-hidden="true"></div>
+		{:else}
+			<CheckoutSummary {flow} {locale} {signedIn} {ctaLabel} {onbuy} />
+		{/if}
 	</div>
  {/if}
 
@@ -355,6 +359,10 @@ function select(product: BillingCatalogProduct) {
 	}
 	.skeleton:last-child {
 		height: 269px;
+	}
+	/* Sized like the loaded checkout summary (288.5px, the default plan with no code row). */
+	.skeleton.summary {
+		height: 288.5px;
 	}
 	@keyframes pulse {
 		50% {
