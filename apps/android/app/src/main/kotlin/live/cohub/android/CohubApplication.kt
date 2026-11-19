@@ -47,10 +47,10 @@ class CohubApplication : Application() {
                 apiResource = BuildConfig.LOGTO_API_RESOURCE,
             ),
             onAccountChanged = { previous, current ->
-                runtime.accountChanged()
+                if (!BuildConfig.PLAY_BUILD) runtime.accountChanged()
                 if (previous is Account.SignedIn && current !is Account.SignedIn) {
                     display?.stop()
-                    runtime.stopAll()
+                    if (!BuildConfig.PLAY_BUILD) runtime.stopAll()
                     lastPage.clear()
                     LauncherShortcuts.clear(this)
                 }

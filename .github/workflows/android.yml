@@ -406,13 +406,28 @@ jobs:
           name = "{http://schemas.android.com/apk/res/android}name"
           permissions = {item.get(name) for item in root.findall("uses-permission")}
           services = {item.get(name) for item in root.findall("./application/service")}
-          assert "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" not in permissions
-          assert "android.permission.WRITE_SECURE_SETTINGS" not in permissions
-          assert "android.permission.BIND_ACCESSIBILITY_SERVICE" not in permissions
-          assert not any(service and service.endswith(".display.ControlService") for service in services)
+          prohibited = {
+              "MANAGE_EXTERNAL_STORAGE",
+              "FOREGROUND_SERVICE",
+              "FOREGROUND_SERVICE_SPECIAL_USE",
+              "FOREGROUND_SERVICE_MEDIA_PROJECTION",
+              "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+              "WRITE_SECURE_SETTINGS",
+              "BIND_ACCESSIBILITY_SERVICE",
+          }
+          assert permissions.isdisjoint({f"android.permission.{permission}" for permission in prohibited})
+          assert not any(service and service.endswith((".display.ControlService", ".runtime.RuntimeService")) for service in services)
           PY
           bundle="dist/cohub-$VERSION.aab"
           cp app/build/outputs/bundle/playRelease/app-playRelease.aab "$bundle"
+          python3 - "$bundle" <<'PY'
+          import sys
+          from zipfile import ZipFile
+
+          with ZipFile(sys.argv[1]) as bundle:
+              assert not any(item.endswith(("/libcohub_sandboxd.so", "/libcohub_node.so", "/libcohub_cli.so", "/assets/cli.zip"))
+                             for item in bundle.namelist())
+          PY
           jarsigner -verify -strict -keystore "$COHUB_ANDROID_KEYSTORE" -storepass:env COHUB_ANDROID_KEYSTORE_PASSWORD "$bundle" cohub
           (cd dist && sha256sum "cohub-$VERSION.aab" > "cohub-$VERSION.aab.sha256")
 

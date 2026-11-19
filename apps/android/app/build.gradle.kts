@@ -281,6 +281,7 @@ val stageCli = tasks.register<StageCli>("stageCli") {
 
 androidComponents {
     onVariants { variant ->
+        if (variant.buildType == "playRelease") return@onVariants
         variant.sources.jniLibs?.addGeneratedSourceDirectory(buildSandboxd, BuildSandboxd::outputDirectory)
         variant.sources.jniLibs?.addGeneratedSourceDirectory(stageCli, StageCli::jniLibs)
         variant.sources.assets?.addGeneratedSourceDirectory(stageCli, StageCli::assets)
