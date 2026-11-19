@@ -149,7 +149,7 @@ jobs:
         run: |
           # AGP 9 only creates unit tests for the tested build type (debug by
           # default), so :app:testReleaseUnitTest no longer exists.
-          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:bundleRelease --continue \
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleRelease :app:lintPlayRelease :app:bundlePlayRelease --continue \
             -PcohubEnv=dev \
             -PcohubVersionCode="$VERSION_CODE" \
             -PcohubVersionSuffix="-dev.${VERSION_CODE}+${SHA}"
@@ -377,7 +377,7 @@ jobs:
           # defaults to debug: there is no :app:testReleaseUnitTest anymore.
           # The tests are build-type agnostic, so run them once and lint the
           # variant we actually ship.
-          ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :app:bundleRelease \
+          ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :app:lintPlayRelease :app:bundlePlayRelease \
             -PcohubEnv=prod \
             -PcohubVersionName="$VERSION_NAME" \
             -PcohubVersionCode="$VERSION_CODE"
@@ -397,8 +397,22 @@ jobs:
           COHUB_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
+          manifest="app/build/intermediates/merged_manifests/playRelease/processPlayReleaseManifest/AndroidManifest.xml"
+          python3 - "$manifest" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          name = "{http://schemas.android.com/apk/res/android}name"
+          permissions = {item.get(name) for item in root.findall("uses-permission")}
+          services = {item.get(name) for item in root.findall("./application/service")}
+          assert "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" not in permissions
+          assert "android.permission.WRITE_SECURE_SETTINGS" not in permissions
+          assert "android.permission.BIND_ACCESSIBILITY_SERVICE" not in permissions
+          assert not any(service and service.endswith(".display.ControlService") for service in services)
+          PY
           bundle="dist/cohub-$VERSION.aab"
-          cp app/build/outputs/bundle/release/app-release.aab "$bundle"
+          cp app/build/outputs/bundle/playRelease/app-playRelease.aab "$bundle"
           jarsigner -verify -strict -keystore "$COHUB_ANDROID_KEYSTORE" -storepass:env COHUB_ANDROID_KEYSTORE_PASSWORD "$bundle" cohub
           (cd dist && sha256sum "cohub-$VERSION.aab" > "cohub-$VERSION.aab.sha256")
 

@@ -69,7 +69,7 @@ class CohubApplication : Application() {
     val lastPage: LastPage by lazy { LastPage(this) }
 
     val display: DeviceDisplay? by lazy {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) DeviceDisplay(this, scope, PhoneControl(this, scope), ::stopTurn) else null
+        if (!BuildConfig.PLAY_BUILD && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) DeviceDisplay(this, scope, PhoneControl(this, scope), ::stopTurn) else null
     }
 
     private suspend fun stopTurn(activity: Activity) = withContext(Dispatchers.IO) {

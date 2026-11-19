@@ -89,6 +89,7 @@ android {
         buildConfigField("String", "LOGTO_API_RESOURCE", "\"$logtoApiResource\"")
         buildConfigField("String", "OAUTH_REDIRECT_URI", "\"$webOrigin$oauthRedirectPath\"")
         buildConfigField("boolean", "WEB_DEBUGGING", "${cohubEnv == "dev"}")
+        buildConfigField("boolean", "PLAY_BUILD", "false")
         buildConfigField("String", "CLI_VERSION", "\"$cliVersion\"")
         buildConfigField("String", "COMMIT", "\"$commit\"")
     }
@@ -121,6 +122,11 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = ciSigning
+        }
+        create("playRelease") {
+            initWith(getByName("release"))
+            matchingFallbacks += "release"
+            buildConfigField("boolean", "PLAY_BUILD", "true")
         }
     }
 

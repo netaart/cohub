@@ -112,6 +112,8 @@ single values can still be overridden (`cohubWebOrigin`, `cohubApiOrigin`, `cohu
   `X*1_000_000 + Y*1_000 + Z`), signed with the release key held by the
   `android-release` environment (`ANDROID_RELEASE_KEYSTORE_BASE64` /
   `ANDROID_RELEASE_KEYSTORE_PASSWORD`, tags `v*.*.*` only), and attaches both files and their SHA-256 checksums to the GitHub Release.
+  The AAB uses `playRelease`, which keeps the device Runtime but omits screen sharing,
+  phone control, and the accessibility service. The direct APK uses `release`.
   The APK is also available at `public.cohub.live/android/release/`.
 
 Both keystores are PKCS12 with alias `cohub`. Sign-in returns through a

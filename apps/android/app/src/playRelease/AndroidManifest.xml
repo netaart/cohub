@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:node="remove" />
+    <application>
+        <service android:name=".display.ControlService" tools:node="remove" />
+        <service android:name=".runtime.RuntimeService"
+            android:foregroundServiceType="specialUse"
+            tools:replace="android:foregroundServiceType" />
+        <provider android:name=".helper.HelperHandoff" tools:node="remove" />
+        <receiver android:name=".helper.PhoneControl$PairingReceiver" tools:node="remove" />
+        <receiver android:name=".helper.PhoneControl$HandoverReceiver" tools:node="remove" />
+    </application>
+</manifest>

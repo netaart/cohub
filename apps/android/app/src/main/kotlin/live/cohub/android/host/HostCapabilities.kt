@@ -49,7 +49,8 @@ object HostCapabilities {
         ABOUT,
     )
 
-    fun advertised(runtime: Boolean, files: Boolean): List<String> =
+    fun advertised(runtime: Boolean, files: Boolean, display: Boolean = runtime): List<String> =
         always + listOfNotNull(FILES.takeIf { files }) +
-            if (runtime) listOf(RUNTIME, DISPLAY, DISPLAY_PRESENTING, DISPLAY_FLOAT, WORKSPACE, WORKSPACE_FILES) else emptyList()
+            (if (runtime) listOf(RUNTIME, WORKSPACE, WORKSPACE_FILES) else emptyList()) +
+            (if (runtime && display) listOf(DISPLAY, DISPLAY_PRESENTING, DISPLAY_FLOAT) else emptyList())
 }
