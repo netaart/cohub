@@ -27,9 +27,10 @@ export type DanmakuCatchupCandidate = {
 type CatchupOptions = {
 	spaceId: string;
 	userKey: string;
-	activeSessionId: string | null;
+	getActiveSessionId: () => string | null;
 	fetchLimit: number;
 	playLimit: number;
+	isCurrent: () => boolean;
 	fetchTurns: (options: {
 		author: "others";
 		after?: string;
@@ -199,12 +200,14 @@ export function selectSpaceDanmakuCatchupCandidates(input: {
 
 export async function runSpaceDanmakuCatchup(options: CatchupOptions) {
 	return withCatchupLock(options.userKey, options.spaceId, async () => {
+		if (!options.isCurrent()) return null;
 		const state = readState(options.userKey, options.spaceId);
 		const response = await options.fetchTurns({
 			author: "others",
 			...(state?.afterCursor ? { after: state.afterCursor } : {}),
 			limit: state ? options.fetchLimit : 1,
 		});
+		if (!options.isCurrent()) return null;
 
 		if (!state) {
 			writeState(options.userKey, options.spaceId, {
@@ -219,7 +222,7 @@ export async function runSpaceDanmakuCatchup(options: CatchupOptions) {
 		const candidates = selectSpaceDanmakuCatchupCandidates({
 			turns: response.turns,
 			recentTurnIds: state.recentTurnIds,
-			activeSessionId: options.activeSessionId,
+			activeSessionId: options.getActiveSessionId(),
 			limit: options.playLimit,
 		});
 		const acceptedIds = options.enqueue(candidates);

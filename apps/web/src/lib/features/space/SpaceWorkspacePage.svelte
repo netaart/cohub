@@ -53,6 +53,7 @@ import {
 	isThemeCssPath,
 	refreshThemeCss,
 } from "#lib/custom-theme/theme-css.svelte.ts";
+import { isSpaceDanmakuEnabled } from "#lib/danmaku-prefs.ts";
 import { createDeferredMount } from "#lib/deferred-mount.svelte.ts";
 import {
 	cacheInstalledApps,
@@ -202,10 +203,6 @@ import {
 	createSpaceDanmakuController,
 	extractDanmakuText,
 } from "./modules/space-danmaku-controller.svelte.ts";
-import {
-	isDanmakuEnabled,
-	subscribeDanmakuPrefs,
-} from "./modules/space-danmaku-prefs.ts";
 import { createSpacePresenceController } from "./modules/space-presence-controller.svelte.ts";
 import { createSpaceRealtimeController } from "./modules/space-realtime-controller.svelte.ts";
 import { createSpaceStatusController } from "./modules/space-status-controller.svelte.ts";
@@ -1422,11 +1419,16 @@ let appliedPreviewSessionKey: string | null = null;
 const spacePresence = createSpacePresenceController(() => spaceId);
 const danmakuController = createSpaceDanmakuController();
 let danmakuCatchupTimer: ReturnType<typeof setTimeout> | null = null;
-let danmakuCatchupInFlight: Promise<unknown> | null = null;
+let danmakuCatchupGeneration = 0;
+const danmakuCatchupInFlight = new Set<string>();
 
 function danmakuUserKey() {
 	return authStore.userUuid ?? "anonymous";
 }
+
+const danmakuEnabled = $derived(
+	isSpaceDanmakuEnabled(danmakuUserKey(), spaceId),
+);
 
 function canRunDanmakuCatchup() {
 	return (
@@ -1435,35 +1437,53 @@ function canRunDanmakuCatchup() {
 		typeof document !== "undefined" &&
 		document.visibilityState === "visible" &&
 		document.hasFocus() &&
-		isDanmakuEnabled() &&
+		danmakuEnabled &&
 		!mainPanelHidden
 	);
+}
+
+function resetDanmakuCatchup() {
+	if (danmakuCatchupTimer) clearTimeout(danmakuCatchupTimer);
+	danmakuCatchupTimer = null;
+	danmakuCatchupGeneration += 1;
 }
 
 function scheduleDanmakuCatchup(delayMs = 450) {
 	if (!canRunDanmakuCatchup() || danmakuCatchupTimer) return;
 	const scheduledSpaceId = spaceId;
+	const userKey = danmakuUserKey();
+	const generation = danmakuCatchupGeneration;
+	const key = JSON.stringify([userKey, scheduledSpaceId]);
+	const isSameScope = () =>
+		spaceId === scheduledSpaceId && userKey === danmakuUserKey();
+	const isCurrent = () =>
+		generation === danmakuCatchupGeneration &&
+		isSameScope() &&
+		canRunDanmakuCatchup();
 	danmakuCatchupTimer = setTimeout(() => {
 		danmakuCatchupTimer = null;
-		if (!canRunDanmakuCatchup() || spaceId !== scheduledSpaceId) return;
-		if (danmakuCatchupInFlight) return;
-		const run = runSpaceDanmakuCatchup({
+		if (!isCurrent() || danmakuCatchupInFlight.has(key)) return;
+		danmakuCatchupInFlight.add(key);
+		void runSpaceDanmakuCatchup({
 			spaceId: scheduledSpaceId,
-			userKey: danmakuUserKey(),
-			activeSessionId,
+			userKey,
+			getActiveSessionId: () => activeSessionId,
 			fetchLimit: 100,
 			playLimit: isMobile ? 40 : 100,
+			isCurrent,
 			fetchTurns: (options) => sdk.space(scheduledSpaceId).turns.list(options),
-			enqueue: (items) =>
-				spaceId === scheduledSpaceId && canRunDanmakuCatchup()
-					? danmakuController.enqueueCatchup(items)
-					: [],
-		}).catch((error) => {
-			console.warn("[space] Failed to load message catch-up:", error);
-		});
-		danmakuCatchupInFlight = run.finally(() => {
-			danmakuCatchupInFlight = null;
-		});
+			enqueue: danmakuController.enqueueCatchup,
+		})
+			.catch((error) => {
+				if (isCurrent())
+					console.warn("[space] Failed to load message catch-up:", error);
+			})
+			.finally(() => {
+				danmakuCatchupInFlight.delete(key);
+				if (generation !== danmakuCatchupGeneration && isSameScope()) {
+					scheduleDanmakuCatchup();
+				}
+			});
 	}, delayMs);
 }
 
@@ -2736,13 +2756,6 @@ onMount(() => {
 			void sessionChat.applyBackgroundComposerPayload(payload);
 		},
 	);
-	const offDanmakuPrefs = subscribeDanmakuPrefs((enabled) => {
-		if (!enabled) {
-			danmakuController.clear();
-			return;
-		}
-		scheduleDanmakuCatchup();
-	});
 	// The chat panel owns the agent catalog.
 	void sessionChat.loadGenerationModelsCatalog();
 	void sessionChat.loadPromptTemplates();
@@ -2880,7 +2893,6 @@ onMount(() => {
 		stopSessionSync();
 		offSpaceConfigUpdated();
 		offSpaceConfigBackgroundAction();
-		offDanmakuPrefs();
 		danmakuController.dispose();
 		spaceStatus.dispose();
 		boardPreview.dispose();
@@ -2915,8 +2927,7 @@ onMount(() => {
 		window.removeEventListener("focus", handleWindowFocus);
 		document.removeEventListener("visibilitychange", handleVisibilityChange);
 		document.removeEventListener("click", handleResourceActionMenuClickOutside);
-		if (danmakuCatchupTimer) clearTimeout(danmakuCatchupTimer);
-		danmakuCatchupTimer = null;
+		resetDanmakuCatchup();
 		deactivateSpaceConfig();
 	};
 });
@@ -2925,9 +2936,6 @@ function resetSpaceScopedState(currentSpaceId: string) {
 	spaceFsEventGeneration += 1;
 	spaceFsRefreshCoordinator.reset();
 	lastSandboxFsSeq = null;
-	if (danmakuCatchupTimer) clearTimeout(danmakuCatchupTimer);
-	danmakuCatchupTimer = null;
-	danmakuController.clear();
 	// Chat-scoped state (sessions/turns/tasks/scroll/generation/share) lives on host.
 	sessionChat.enterSpace(currentSpaceId);
 	space = null;
@@ -3008,19 +3016,13 @@ $effect(() => {
 	if (!rightSidebarAvailable) uiState.mobileRightDrawerOpen = false;
 });
 $effect(() => {
-	if (mainPanelHidden) {
-		danmakuController.clear();
-		return;
-	}
-	if (pageMounted) untrack(() => scheduleDanmakuCatchup());
-});
-$effect(() => {
-	const currentSpaceId = spaceId;
-	const currentUserKey = danmakuUserKey();
 	if (!pageMounted) return;
-	void currentSpaceId;
-	void currentUserKey;
-	untrack(() => scheduleDanmakuCatchup());
+	const enabled = inSpaceScope && danmakuEnabled && !mainPanelHidden;
+	void spaceId;
+	void danmakuUserKey();
+	resetDanmakuCatchup();
+	danmakuController.clear();
+	if (enabled) untrack(() => scheduleDanmakuCatchup());
 });
 $effect(() => {
 	if (

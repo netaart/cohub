@@ -7,27 +7,31 @@ import ListRowText from "#lib/components/list-page/ListRowText.svelte";
 import { LIST_ROW_AVATAR } from "#lib/components/list-page/list-row.ts";
 import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
 import UserAvatar from "#lib/components/UserAvatar.svelte";
+import {
+	isSpaceDanmakuEnabled,
+	setSpaceDanmakuEnabled,
+} from "#lib/danmaku-prefs.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
+import { authStore } from "#lib/stores/auth.svelte.ts";
 import { displayUserName } from "../space-utils.ts";
-import {
-	isDanmakuEnabled,
-	setDanmakuEnabled,
-	subscribeDanmakuPrefs,
-} from "./space-danmaku-prefs.ts";
 
 type Props = {
 	users: SpacePresenceUser[];
+	spaceId: string;
 	limit?: number;
 };
 
-let { users, limit = 4 }: Props = $props();
+let { users, spaceId, limit = 4 }: Props = $props();
 
 const locale = $derived(getLocale());
+const userId = $derived(authStore.userUuid);
+const danmakuEnabled = $derived(
+	userId !== null && isSpaceDanmakuEnabled(userId, spaceId),
+);
 
 let open = $state(false);
 let presenceRootEl: HTMLDivElement | null = $state(null);
-let danmakuEnabled = $state(isDanmakuEnabled());
 
 const visibleUsers = $derived(users.slice(0, limit));
 const firstUser = $derived(users[0]);
@@ -54,40 +58,32 @@ function getPanels(user: SpacePresenceUser) {
 	return [...directPanels, ...aggregatedPanels];
 }
 
-const locationLabel = (user: SpacePresenceUser) => {
-	const panels = getPanels(user);
-	const primaryItem = [...panels].sort(
-		(a, b) => itemPriority(a) - itemPriority(b),
-	)[0];
-	const label =
-		typeof primaryItem?.label === "string" ? primaryItem.label.trim() : "";
-	const kind =
-		typeof primaryItem?.kind === "string" ? primaryItem.kind.trim() : "";
-	if (label) return `in ${label}`;
-	if (kind === "session") return "in a chat";
-	if (kind === "file") return "in a file";
-	if (kind === "checkpoint") return "reviewing a save";
-	if (kind === "task") return "on a task";
-	if (kind === "app" || kind === "work") return "in an app";
-	if (kind === "cronjob") return "checking a cronjob";
-	return "in this space";
-};
+function locationLabel(item?: Record<string, unknown>) {
+	const label = typeof item?.label === "string" ? item.label.trim() : "";
+	if (label) return label;
+	const options = { locale };
+	switch (item?.kind) {
+		case "session":
+			return m.presence_in_chat({}, options);
+		case "file":
+			return m.presence_in_file({}, options);
+		case "checkpoint":
+			return m.presence_in_save({}, options);
+		case "task":
+			return m.presence_in_task({}, options);
+		case "app":
+		case "work":
+			return m.presence_in_app({}, options);
+		case "cronjob":
+			return m.presence_in_cronjob({}, options);
+		default:
+			return m.presence_in_space({}, options);
+	}
+}
 
-const title = $derived.by(() => {
-	if (users.length === 0) return "No one online";
-	const names = users.slice(0, 6).map((user) => {
-		const name = displayUserName(user.profile, user.userId);
-		return `${name} ${locationLabel(user)}`;
-	});
-	const suffix =
-		users.length > names.length
-			? ` and ${users.length - names.length} more`
-			: "";
-	return `${names.join(", ")}${suffix} online`;
-});
-
-const peopleLabel = $derived(users.length === 1 ? "person" : "people");
-const popoverTitle = $derived(`${users.length} ${peopleLabel} online`);
+const popoverTitle = $derived(
+	m.presence_online_count({ count: users.length }, { locale }),
+);
 const desktopCountVisible = $derived(overflowCount > 0);
 const mobileCountVisible = $derived(users.length > 1);
 
@@ -95,14 +91,7 @@ function toggleOpen() {
 	open = !open;
 }
 
-function toggleDanmaku() {
-	setDanmakuEnabled(!danmakuEnabled);
-}
-
 onMount(() => {
-	const offDanmakuPrefs = subscribeDanmakuPrefs((value) => {
-		danmakuEnabled = value;
-	});
 	const handlePointerDown = (event: PointerEvent) => {
 		if (!open || !presenceRootEl) return;
 		const target = event.target as Node | null;
@@ -121,7 +110,6 @@ onMount(() => {
 	document.addEventListener("pointerdown", handlePointerDown, true);
 	window.addEventListener("keydown", handleKeyDown);
 	return () => {
-		offDanmakuPrefs();
 		document.removeEventListener("pointerdown", handlePointerDown, true);
 		window.removeEventListener("keydown", handleKeyDown);
 	};
@@ -140,7 +128,7 @@ $effect(() => {
 			onclick={toggleOpen}
 			aria-haspopup="dialog"
 			aria-expanded={open}
-			aria-label={title}
+			aria-label={popoverTitle}
 		>
 			<div class="presence-avatars" aria-hidden="true">
 				{#each visibleUsers as user (user.userId)}
@@ -190,15 +178,13 @@ $effect(() => {
 				}}
 			>
 				<div class="presence-popover-header">
-					<span class="presence-popover-title">Online</span>
-					<span class="presence-popover-meta">{users.length} {peopleLabel}</span>
+					<span class="presence-popover-title">{m.presence_online({}, { locale })}</span>
+					<span class="presence-popover-meta">{users.length}</span>
 				</div>
 				<div class="presence-popover-list" role="list">
 					{#each users as user (user.userId)}
 						{@const panels = getPanels(user)}
-						{@const primaryPanel = [...panels].sort((a, b) => itemPriority(a) - itemPriority(b))[0]}
-						{@const label = typeof primaryPanel?.label === "string" ? primaryPanel.label.trim() : ""}
-						{@const kind = typeof primaryPanel?.kind === "string" ? primaryPanel.kind.trim() : ""}
+						{@const primaryPanel = panels.sort((a, b) => itemPriority(a) - itemPriority(b))[0]}
 						{@const userName = displayUserName(user.profile, user.userId)}
 						<ListRow density="compact" role="listitem">
 							{#snippet leading()}
@@ -206,20 +192,24 @@ $effect(() => {
 							{/snippet}
 							<ListRowText title={userName} tooltip={userName}>
 								{#snippet subtitle()}
-									{label || (kind === "session" ? "in a chat" : kind === "file" ? "in a file" : kind === "checkpoint" ? "reviewing a save" : kind === "task" ? "on a task" : (kind === "app" || kind === "work") ? "in an app" : kind === "cronjob" ? "checking a cronjob" : "in this space")}{#if panels.length > 1}<span class="ml-1.5">· {panels.length} panels</span>{/if}
+									{locationLabel(primaryPanel)}{#if panels.length > 1}<span class="ml-1.5">· {m.presence_panels({ count: panels.length }, { locale })}</span>{/if}
 								{/snippet}
 							</ListRowText>
 						</ListRow>
 					{/each}
 				</div>
-				<div class="presence-popover-footer">
-					<span class="presence-popover-footer-label">{m.presence_live_messages({}, { locale })}</span>
-					<ToggleSwitch
-						checked={danmakuEnabled}
-						label={m.presence_toggle_live({}, { locale })}
-						onchange={() => toggleDanmaku()}
-					/>
-				</div>
+				{#if userId}
+					<div class="presence-popover-footer">
+						<span class="presence-popover-footer-label">{m.presence_danmaku({}, { locale })}</span>
+						<ToggleSwitch
+							checked={danmakuEnabled}
+							label={m.presence_danmaku({}, { locale })}
+							onchange={(enabled) => {
+								if (userId) setSpaceDanmakuEnabled(userId, spaceId, enabled);
+							}}
+						/>
+					</div>
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -355,8 +345,6 @@ $effect(() => {
 		padding: 4px;
 	}
 
-	/* Live-messages toggle — pinned at the popover bottom so it stays
-	   visible even when the online list is long. */
 	.presence-popover-footer {
 		display: flex;
 		align-items: center;

@@ -22,6 +22,7 @@ import UploadProgress from "#lib/components/UploadProgress.svelte";
 import UserAvatar from "#lib/components/UserAvatar.svelte";
 import { getThemeCss } from "#lib/custom-theme/theme-css.svelte.ts";
 import { userTheme } from "#lib/custom-theme/user-theme.svelte.ts";
+import { getDanmakuDefault, setDanmakuDefault } from "#lib/danmaku-prefs.ts";
 import DeviceSettings from "#lib/features/settings/DeviceSettings.svelte";
 import { formatDateTime } from "#lib/i18n/format.ts";
 import {
@@ -54,6 +55,7 @@ const hasCustomTheme = $derived(
 type EditableField = "displayName" | "username";
 
 const userUuid = $derived(authStore.userUuid ?? "");
+const danmakuDefault = $derived(!userUuid || getDanmakuDefault(userUuid));
 const displayName = $derived(authStore.profile?.displayName ?? "");
 const avatarUrl = $derived(authStore.profile?.avatarUrl ?? "");
 const username = $derived(authStore.profile?.username ?? "");
@@ -310,6 +312,20 @@ onMount(() => {
 						{#if hasCustomTheme}<ToggleSwitch checked={userTheme.enabled} label={m.settings_custom_theme_toggle({}, { locale })} onchange={(enabled) => userTheme.setEnabled(enabled)} />{/if}
 					</div>
 				{/if}
+			</div>
+			<div class="mt-6 flex min-h-11 items-center gap-3 border-t border-border-subtle pt-6">
+				<div class="min-w-0 flex-1">
+					<h3 class="text-[13px] font-medium text-text-primary">{m.settings_danmaku_default({}, { locale })}</h3>
+					<p class="mt-1 text-[12px] leading-5 text-text-tertiary">{m.settings_danmaku_default_description({}, { locale })}</p>
+				</div>
+				<ToggleSwitch
+					checked={danmakuDefault}
+					disabled={!userUuid}
+					label={m.settings_danmaku_default({}, { locale })}
+					onchange={(enabled) => {
+						if (userUuid) setDanmakuDefault(userUuid, enabled);
+					}}
+				/>
 			</div>
 			<DeviceSettings />
 		</section>

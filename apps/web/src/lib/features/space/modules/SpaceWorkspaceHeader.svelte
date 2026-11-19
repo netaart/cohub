@@ -408,7 +408,7 @@ function handleSessionRenameKeydown(event: KeyboardEvent) {
 		{/snippet}
 
 		{#snippet right()}
-			<SpacePresenceStack users={context.onlineUsers} />
+			<SpacePresenceStack users={context.onlineUsers} spaceId={context.spaceId} />
 			{@render HeaderActions()}
 		{/snippet}
 	</ColumnHeader>
