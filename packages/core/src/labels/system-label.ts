@@ -7,6 +7,8 @@ type LabelsDb = PostgresJsDatabase<Record<string, unknown>>;
 const SCOPE_TYPE = "space";
 const CUSTOM_LABEL_NAME_SUFFIX = " (Custom)";
 
+export class SystemLabelNameConflictError extends Error {}
+
 const slugifyLabelName = (name: string) => {
   const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return slug || "label";
@@ -52,7 +54,7 @@ async function moveConflictingUserLabel(db: LabelsDb, input: { spaceId: string; 
       .where(and(eq(labels.id, existing.id), eq(labels.source, "user")));
     return;
   }
-  throw new Error(`failed to rename conflicting user label: ${input.name}`);
+  throw new SystemLabelNameConflictError(`failed to rename conflicting user label: ${input.name}`);
 }
 
 export async function getOrCreateSpaceSystemLabel(db: LabelsDb, input: {
