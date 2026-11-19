@@ -37,7 +37,7 @@ cohub models show <model> --json
 
 ## Generate
 
-Default to returning generated result links directly, with Markdown preview when possible (`![alt](url)` for images, direct links for video and audio). Give each image a short, distinct alt such as `![Gancao B2](url)`: chat shows it as the image title and the user refers to the image by it. Keep a set of images on consecutive lines so chat shows them as one gallery. Save locally only when the user asks for a file download, local editing, or post-processing.
+Default to returning generated result links directly, with Markdown preview when possible (`![alt](url)` for images, direct links for video and audio). For several images, give each a short distinct alt (shown as its title) and list them with no text in between so chat groups them as a gallery. Save locally only when the user asks for a file download, local editing, or post-processing.
 
 Generate from text:
 
