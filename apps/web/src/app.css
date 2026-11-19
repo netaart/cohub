@@ -491,10 +491,6 @@ body.pointer-dragging {
 	margin: 0 0 0.85em;
 }
 
-.markdown-content p + p {
-	margin-top: 0.5em;
-}
-
 .markdown-content [align="center"] {
 	text-align: center;
 }
@@ -802,9 +798,9 @@ body.pointer-dragging {
 	overflow-wrap: anywhere;
 }
 
-.streaming-tail {
-	opacity: 0;
-	animation: streaming-tail-enter 180ms var(--ease-out) forwards;
+.streaming-tail,
+.streaming-live-markdown [data-markdown-fade] {
+	animation: streaming-tail-enter 180ms var(--ease-out) backwards;
 }
 
 .streaming-tail-muted {
@@ -818,8 +814,8 @@ body.pointer-dragging {
 }
 
 @keyframes streaming-tail-enter {
-	to {
-		opacity: 1;
+	from {
+		opacity: 0;
 	}
 }
 
@@ -834,9 +830,9 @@ body.pointer-dragging {
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.streaming-tail {
+	.streaming-tail,
+	.streaming-live-markdown [data-markdown-fade] {
 		animation: none;
-		opacity: 1;
 	}
 
 	.streaming-live-markdown > :last-child::after,
@@ -1533,14 +1529,13 @@ body.pointer-dragging {
 	overflow-wrap: normal;
 }
 
-/* Shiki multi-theme output. */
 .markdown-content .shiki,
 .markdown-content .shiki span {
 	color: var(--shiki-light);
 }
 
 .markdown-content .shiki {
-	background-color: var(--shiki-light-bg);
+	background-color: var(--shiki-light-bg, var(--bg-code));
 }
 
 [data-theme="dark"] .markdown-content .shiki,
@@ -1549,7 +1544,7 @@ body.pointer-dragging {
 }
 
 [data-theme="dark"] .markdown-content .shiki {
-	background-color: var(--shiki-dark-bg);
+	background-color: var(--shiki-dark-bg, var(--bg-code));
 }
 
 [data-theme="solarized-light"] .markdown-content .shiki,
@@ -1558,7 +1553,7 @@ body.pointer-dragging {
 }
 
 [data-theme="solarized-light"] .markdown-content .shiki {
-	background-color: var(--shiki-solarized-light-bg, var(--shiki-light-bg));
+	background-color: var(--shiki-solarized-light-bg, var(--bg-code));
 }
 
 [data-theme="solarized-dark"] .markdown-content .shiki,
@@ -1567,21 +1562,18 @@ body.pointer-dragging {
 }
 
 [data-theme="solarized-dark"] .markdown-content .shiki {
-	background-color: var(--shiki-solarized-dark-bg, var(--shiki-dark-bg));
+	background-color: var(--shiki-solarized-dark-bg, var(--bg-code));
 }
 
 [data-theme="neta-studio"] .markdown-content .shiki,
-[data-theme="neta-studio"] .markdown-content .shiki span {
-	color: var(--shiki-neta-studio, var(--shiki-dark));
+[data-theme="neta-studio"] .markdown-content .shiki span,
+[data-theme="neta-pixel-dark"] .markdown-content .shiki,
+[data-theme="neta-pixel-dark"] .markdown-content .shiki span {
+	color: var(--shiki-dark);
 }
 
 [data-theme="neta-studio"] .markdown-content .shiki {
-	background-color: var(--shiki-neta-studio-bg, var(--bg-code));
-}
-
-[data-theme="neta-pixel-dark"] .markdown-content .shiki,
-[data-theme="neta-pixel-dark"] .markdown-content .shiki span {
-	color: var(--shiki-neta-pixel-dark, var(--shiki-dark));
+	background-color: var(--shiki-dark-bg, var(--bg-code));
 }
 
 [data-theme="neta-pixel-dark"] .markdown-content .shiki {

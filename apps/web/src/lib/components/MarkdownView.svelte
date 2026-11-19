@@ -1,6 +1,8 @@
 <script module lang="ts">
-let markdownModulePromise: Promise<typeof import("#lib/markdown.ts")> | null =
-	null;
+type MarkdownModule = typeof import("#lib/markdown.ts");
+
+let markdownModule: MarkdownModule | null = null;
+let markdownModulePromise: Promise<MarkdownModule> | null = null;
 
 function escapeHtml(value: string) {
 	return value
@@ -16,16 +18,17 @@ function renderPlainTextFallback(markdownSource: string) {
 }
 
 function loadMarkdownModule() {
-	markdownModulePromise ??= import("#lib/markdown.ts");
+	markdownModulePromise ??= import("#lib/markdown.ts").then(
+		(module) => (markdownModule = module),
+		(error) => {
+			markdownModulePromise = null;
+			throw error;
+		},
+	);
 	return markdownModulePromise;
 }
 
-// Lets a remounted settled view (live answer → persisted message) skip the plain-text flash.
-let streamHandoff: {
-	source: string;
-	stableBlocks: string[];
-	tailHtml: string;
-} | null = null;
+if (typeof document !== "undefined") void loadMarkdownModule().catch(() => {});
 </script>
 
 <script lang="ts">
@@ -124,11 +127,6 @@ function ensureController() {
 	unsubscribeController = controller.subscribe((snapshot) => {
 		stableBlocks = snapshot.stableBlocks;
 		tailHtml = snapshot.tailHtml;
-		streamHandoff = {
-			source: untrack(() => renderSource).trim(),
-			stableBlocks: snapshot.stableBlocks,
-			tailHtml: snapshot.tailHtml,
-		};
 		notifyStreamingRenderedSoon();
 	});
 	return controller;
@@ -146,41 +144,47 @@ function renderFullMarkdown(
 	markdownSource: string,
 	basePath: string | null,
 	resolver: ResolveWorkspaceAsset | undefined,
-	{ settling, replacing }: { settling: boolean; replacing: boolean },
 ) {
 	const seq = ++renderSeq;
-	if (!settling && !replacing) {
-		const handoff =
-			streamHandoff?.source === markdownSource.trim() ? streamHandoff : null;
-		stableBlocks = handoff?.stableBlocks ?? [
-			renderPlainTextFallback(markdownSource),
-		];
-		tailHtml = handoff?.tailHtml ?? "";
-	}
 	untrack(() => onStart?.());
-	void loadMarkdownModule()
-		.then(({ renderMarkdown }) => renderMarkdown(markdownSource))
-		.then((html) => {
-			if (seq !== renderSeq) return;
-			stableBlocks = [
+
+	const render = (module: MarkdownModule) => {
+		if (seq !== renderSeq) return;
+		let ready: Promise<void> | null = null;
+		try {
+			const result = module.renderMarkdownBlocks(markdownSource);
+			ready = result.ready;
+			stableBlocks = result.blocks.map((html) =>
 				prepareMarkdownAssetHtml(html, {
 					basePath,
 					extractWorkspaceAssets: Boolean(resolver),
 					publicFileUrl: buildPublicFileUrl,
 				}),
-			];
-			tailHtml = "";
+			);
 			hasRenderedMarkdown = true;
-			void tick().then(() => {
-				if (seq === renderSeq) untrack(() => onRendered?.());
-			});
-		})
+		} catch (error) {
+			console.warn("[markdown] render failed; showing plain text", { error });
+			stableBlocks = [renderPlainTextFallback(markdownSource)];
+		}
+		tailHtml = "";
+		void tick().then(() => {
+			if (seq === renderSeq) untrack(() => onRendered?.());
+		});
+		if (ready) void ready.then(() => render(module));
+	};
+
+	if (markdownModule) {
+		render(markdownModule);
+		return;
+	}
+	if (!hasRenderedMarkdown) {
+		stableBlocks = [renderPlainTextFallback(markdownSource)];
+		tailHtml = "";
+	}
+	void loadMarkdownModule()
+		.then(render)
 		.catch(() => {
 			if (seq !== renderSeq) return;
-			if (replacing && !settling) {
-				stableBlocks = [renderPlainTextFallback(markdownSource)];
-				tailHtml = "";
-			}
 			void tick().then(() => untrack(() => onRendered?.()));
 		});
 }
@@ -197,12 +201,8 @@ $effect(() => {
 		return;
 	}
 
-	const settling = controller !== null;
 	destroyController();
-	renderFullMarkdown(markdownSource, basePath, resolver, {
-		settling,
-		replacing: hasRenderedMarkdown,
-	});
+	renderFullMarkdown(markdownSource, basePath, resolver);
 });
 
 onDestroy(() => {

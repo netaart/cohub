@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	renderMarkdown,
+	renderMarkdownBlocks,
 	renderStreamingMarkdownSplit,
+	type StreamingMarkdownRender,
 	splitStreamingStableMarkdown,
 } from "../lib/markdown.ts";
 
@@ -261,4 +263,37 @@ test("renderStreamingMarkdownSplit keeps settled chunks and lists intact", async
 	assert.match(first.stableBlocks[0], /<ol>[\s\S]*second[\s\S]*<\/ol>/);
 	assert.equal(next.stableBlocks[0], first.stableBlocks[0]);
 	assert.equal(next.stableBlocks[1], first.stableBlocks[1]);
+});
+
+test("renderMarkdownBlocks keeps fenced code inside list items", () => {
+	const ordered = renderMarkdownBlocks(
+		"1. Step one:\n   ```bash\n   npm i\n   ```\n2. Step two",
+	).blocks.join("");
+	assert.match(ordered, /<li>Step one:<pre><code class="language-bash">/);
+	assert.doesNotMatch(ordered, /<ol start="2">/);
+
+	const loose = renderMarkdownBlocks(
+		"- item\n\n  ```ts\n  const x = 1;\n\n  const y = 2;\n  ```\n\n  continued",
+	).blocks.join("");
+	assert.match(
+		loose,
+		/<li><p>item<\/p>\n<pre>[\s\S]*const y = 2;[\s\S]*<p>continued<\/p>\n<\/li>/,
+	);
+});
+
+test("renderStreamingMarkdownSplit never settles a chunk inside a list's fence", async () => {
+	const code = Array.from(
+		{ length: 30 },
+		(_, i) => `   const v${i} = ${i};`,
+	).join("\n\n");
+	const source = `${"Intro paragraph that is long enough. ".repeat(8)}\n\n1. Install:\n\n   \`\`\`ts\n${code}\n   \`\`\`\n\n2. Done.`;
+	let streamed: StreamingMarkdownRender | undefined;
+	for (let end = 7; end < source.length + 7; end += 7) {
+		streamed = await renderStreamingMarkdownSplit(
+			source.slice(0, end),
+			streamed,
+		);
+		for (const chunk of streamed.stableSources)
+			assert.equal((chunk.match(/^\s*```/gm)?.length ?? 0) % 2, 0, chunk);
+	}
 });

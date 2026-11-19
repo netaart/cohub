@@ -152,6 +152,8 @@ export function fileResponseAsset(file: SpaceFsFileResponse): WorkspaceAsset {
 	};
 }
 
+const ASSET_TAG = /<(?:img|audio|video|source)\b/i;
+
 export function prepareMarkdownAssetHtml(
 	html: string,
 	options: {
@@ -168,7 +170,11 @@ export function prepareMarkdownAssetHtml(
 		extractWorkspaceAssets = false,
 		publicFileUrl,
 	} = options;
-	if (!extractWorkspaceAssets && !html.includes("/p/")) return html;
+	if (
+		!html.includes("/p/") &&
+		(!extractWorkspaceAssets || !ASSET_TAG.test(html))
+	)
+		return html;
 
 	const template = document.createElement("template");
 	template.innerHTML = html;

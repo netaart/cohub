@@ -8,6 +8,7 @@ import {
 import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { createLazyModuleLoader } from "#lib/lazy-module.ts";
+import { createMarkdownRegion } from "#lib/markdown-dom.ts";
 import { markdownGallery } from "#lib/media/markdown-gallery.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { insertComposerSnippet } from "#lib/stores/composer-insert.ts";
@@ -46,6 +47,11 @@ const {
 }: Props = $props();
 
 let markdownEl = $state<HTMLElement | null>(null);
+let regionEl = $state<HTMLElement | null>(null);
+let region: {
+	element: HTMLElement;
+	dom: ReturnType<typeof createMarkdownRegion>;
+} | null = null;
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
 let workspaceAssetRun = 0;
 let mermaidRenderer: typeof import("#lib/mermaid-renderer.ts") | null = null;
@@ -53,6 +59,13 @@ let mermaidRenderer: typeof import("#lib/mermaid-renderer.ts") | null = null;
 const loadMermaidRenderer = createLazyModuleLoader(
 	() => import("#lib/mermaid-renderer.ts"),
 );
+
+let codeHighlighter: typeof import("#lib/markdown-highlight.ts") | null = null;
+const loadCodeHighlighter = createLazyModuleLoader(
+	() => import("#lib/markdown-highlight.ts"),
+);
+const PLAIN_CODE_SELECTOR =
+	'pre:not([data-highlight]) > code[class^="language-"]';
 
 const mountedAudioPlayers: {
 	mount: HTMLElement;
@@ -98,17 +111,55 @@ function renderAssetFallback(
 	stateElement.parentNode?.insertBefore(fallback, stateElement.nextSibling);
 }
 
+function highlightCode(
+	root: HTMLElement,
+	include: (pre: HTMLPreElement) => boolean,
+) {
+	if (codeHighlighter) {
+		codeHighlighter.highlightCodeBlocks(root, include);
+		return;
+	}
+	if (!root.querySelector(PLAIN_CODE_SELECTOR)) return;
+	void loadCodeHighlighter()
+		.then((module) => {
+			codeHighlighter = module;
+			if (root.isConnected) module.highlightCodeBlocks(root, include);
+		})
+		.catch((error) => {
+			console.warn("[markdown] highlighter failed to load", { error });
+		});
+}
+
+$effect(() => {
+	const element = regionEl;
+	const blocks = stableBlocks;
+	const html = tailHtml;
+	const live = streamingLive;
+	if (!element) return;
+	if (region?.element !== element) {
+		region?.dom.dispose();
+		region = { element, dom: createMarkdownRegion(element) };
+	}
+	region.dom.setBlocks(blocks);
+	region.dom.setTail(html, live);
+});
+
 $effect(() => {
 	const _stableBlocks = stableBlocks;
 	const _streamingLive = streamingLive;
 	if (!markdownEl) return;
-	// Sweep even while streaming: {@html} can drop mounted players when the
-	// stable region is cleared, and Svelte won't dispose those instances.
+	if (region && region.element === regionEl) {
+		const { element, dom } = region;
+		const settled = (pre: HTMLPreElement) => !dom.isLive(pre);
+		highlightCode(element, settled);
+		enhanceCodeBlocks(element, settled);
+	}
+	// Sweep even while streaming: replaced blocks can drop mounted players.
 	sweepDisconnectedAudioPlayers();
 	renderDiagrams();
 	sizeGalleryTiles();
 	if (_streamingLive) return;
-	enhanceCodeBlocks();
+	enhanceCodeBlocks(markdownEl, () => true);
 	enhanceAudioPlayers();
 	checkVideoPosters();
 });
@@ -132,6 +183,7 @@ $effect(() => {
 			element.tagName === "SOURCE" && parent instanceof HTMLMediaElement
 				? parent
 				: element;
+		if (stateElement.dataset.workspaceAssetState !== "loading") return [];
 		const entries: Array<{
 			element: HTMLElement;
 			stateElement: HTMLElement;
@@ -389,10 +441,12 @@ function renderDiagrams() {
 		});
 }
 
-function enhanceCodeBlocks() {
-	if (!markdownEl) return;
-
-	for (const pre of markdownEl.querySelectorAll("pre")) {
+function enhanceCodeBlocks(
+	root: HTMLElement,
+	include: (pre: HTMLPreElement) => boolean,
+) {
+	for (const pre of root.querySelectorAll("pre")) {
+		if (!include(pre)) continue;
 		if (pre.parentElement?.classList.contains("markdown-code-block")) continue;
 
 		const wrapper = document.createElement("div");
@@ -593,6 +647,7 @@ onMount(() => {
 });
 
 onDestroy(() => {
+	region?.dom.dispose();
 	if (copyResetTimer) clearTimeout(copyResetTimer);
 	for (const { instance } of mountedAudioPlayers) {
 		unmountComponent(instance);
@@ -606,17 +661,11 @@ onDestroy(() => {
 	class="markdown-content"
 	data-variant={variant}
 >
-	{#if stableBlocks.length > 0}
-		<div class="markdown-stable-region">
-			{#each stableBlocks as html}{@html html}{/each}
-		</div>
-	{/if}
-	{#if tailHtml || streamingLive}
+	{#if stableBlocks.length > 0 || tailHtml || streamingLive}
 		<div
-			class="markdown-live-region"
+			bind:this={regionEl}
+			class="markdown-region"
 			class:streaming-live-markdown={streamingLive}
-		>
-			{@html tailHtml}
-		</div>
+		></div>
 	{/if}
 </div>

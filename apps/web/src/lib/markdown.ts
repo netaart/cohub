@@ -3,229 +3,18 @@ import DOMPurify from "isomorphic-dompurify";
 import type Katex from "katex";
 import { marked, type Token, Tokenizer, type Tokens } from "marked";
 import remend from "remend";
-import {
-	createHighlighterCore,
-	type HighlighterCore,
-	type LanguageRegistration,
-} from "shiki/core";
-import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { COHUB_WEB_ORIGIN_SOURCE } from "#lib/mentions/platform-origin.ts";
-import { RESOLVED_THEMES, THEME_REGISTRY } from "#lib/theme-registry.ts";
 import { normalizeWorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
 
-const MARKDOWN_RENDER_CACHE_LIMIT = 256;
+const MARKDOWN_RENDER_CACHE_LIMIT = 512;
 const STREAMING_MARKDOWN_TAIL_PLAIN_THRESHOLD = 1_800;
-const SHIKI_THEME_MAP = Object.fromEntries(
-	RESOLVED_THEMES.map((theme) => [theme, THEME_REGISTRY[theme].shikiTheme]),
-);
-const markdownRenderCache = new Map<string, Promise<string>>();
+const markdownRenderCache = new Map<string, string>();
 
-function cacheMarkdownRender(key: string, render: () => Promise<string>) {
-	const cached = markdownRenderCache.get(key);
-	if (cached) return cached;
-
-	const promise = render().catch((error) => {
-		markdownRenderCache.delete(key);
-		throw error;
-	});
-
-	markdownRenderCache.set(key, promise);
+function cacheMarkdownRender(key: string, html: string) {
+	markdownRenderCache.set(key, html);
 	if (markdownRenderCache.size > MARKDOWN_RENDER_CACHE_LIMIT) {
-		const firstKey = markdownRenderCache.keys().next().value;
-		if (firstKey) markdownRenderCache.delete(firstKey);
-	}
-
-	return promise;
-}
-
-// Shiki highlighter — singleton, lazily initialized
-let highlighterPromise: Promise<HighlighterCore> | null = null;
-type ShikiLanguageLoader = () => Promise<{ default: LanguageRegistration[] }>;
-
-const shikiLanguageLoaders = {
-	bash: () => import("@shikijs/langs/bash"),
-	c: () => import("@shikijs/langs/c"),
-	cpp: () => import("@shikijs/langs/cpp"),
-	css: () => import("@shikijs/langs/css"),
-	diff: () => import("@shikijs/langs/diff"),
-	dockerfile: () => import("@shikijs/langs/dockerfile"),
-	go: () => import("@shikijs/langs/go"),
-	graphql: () => import("@shikijs/langs/graphql"),
-	html: () => import("@shikijs/langs/html"),
-	ini: () => import("@shikijs/langs/ini"),
-	java: () => import("@shikijs/langs/java"),
-	javascript: () => import("@shikijs/langs/javascript"),
-	json: () => import("@shikijs/langs/json"),
-	jsx: () => import("@shikijs/langs/jsx"),
-	markdown: () => import("@shikijs/langs/markdown"),
-	protobuf: () => import("@shikijs/langs/protobuf"),
-	python: () => import("@shikijs/langs/python"),
-	rust: () => import("@shikijs/langs/rust"),
-	shellscript: () => import("@shikijs/langs/shellscript"),
-	sql: () => import("@shikijs/langs/sql"),
-	toml: () => import("@shikijs/langs/toml"),
-	tsx: () => import("@shikijs/langs/tsx"),
-	typescript: () => import("@shikijs/langs/typescript"),
-	xml: () => import("@shikijs/langs/xml"),
-	yaml: () => import("@shikijs/langs/yaml"),
-} satisfies Record<string, ShikiLanguageLoader>;
-
-type SupportedShikiLanguage = keyof typeof shikiLanguageLoaders;
-
-const shikiLanguageAliases = new Map<string, SupportedShikiLanguage>([
-	["bash", "bash"],
-	["c++", "cpp"],
-	["cpp", "cpp"],
-	["cxx", "cpp"],
-	["c", "c"],
-	["css", "css"],
-	["diff", "diff"],
-	["docker", "dockerfile"],
-	["dockerfile", "dockerfile"],
-	["go", "go"],
-	["golang", "go"],
-	["graphql", "graphql"],
-	["gql", "graphql"],
-	["html", "html"],
-	["ini", "ini"],
-	["java", "java"],
-	["javascript", "javascript"],
-	["js", "javascript"],
-	["json", "json"],
-	["jsx", "jsx"],
-	["markdown", "markdown"],
-	["md", "markdown"],
-	["mdx", "markdown"],
-	["proto", "protobuf"],
-	["protobuf", "protobuf"],
-	["py", "python"],
-	["python", "python"],
-	["rs", "rust"],
-	["rust", "rust"],
-	["sh", "shellscript"],
-	["shell", "shellscript"],
-	["shellscript", "shellscript"],
-	["sql", "sql"],
-	["toml", "toml"],
-	["tsx", "tsx"],
-	["ts", "typescript"],
-	["typescript", "typescript"],
-	["xml", "xml"],
-	["yaml", "yaml"],
-	["yml", "yaml"],
-]);
-
-const loadedShikiLanguages = new Set<SupportedShikiLanguage>();
-
-function normalizeShikiLanguage(rawLang: string) {
-	return shikiLanguageAliases.get(rawLang.toLowerCase()) ?? null;
-}
-
-function collectCodeTokenLanguages(
-	tokens: Token[],
-	languages = new Set<SupportedShikiLanguage>(),
-) {
-	for (const token of tokens) {
-		if (token.type === "code" && "lang" in token && token.lang) {
-			const rawLang = token.lang.split(" ")[0];
-			if (rawLang) {
-				const lang = normalizeShikiLanguage(rawLang);
-				if (lang) languages.add(lang);
-			}
-		}
-
-		if ("tokens" in token && Array.isArray(token.tokens)) {
-			collectCodeTokenLanguages(token.tokens, languages);
-		}
-	}
-
-	return languages;
-}
-
-async function createMarkdownHighlighter() {
-	return createHighlighterCore({
-		engine: createJavaScriptRegexEngine(),
-		themes: [
-			import("@shikijs/themes/github-light"),
-			import("@shikijs/themes/github-dark"),
-			import("@shikijs/themes/solarized-light"),
-			import("@shikijs/themes/solarized-dark"),
-		],
-		langs: [],
-	});
-}
-
-function getHighlighter() {
-	if (!highlighterPromise) {
-		highlighterPromise = createMarkdownHighlighter();
-	}
-	return highlighterPromise;
-}
-
-async function loadShikiLanguages(
-	highlighter: HighlighterCore,
-	languages: Set<SupportedShikiLanguage>,
-) {
-	const pending = [...languages].filter(
-		(lang) => !loadedShikiLanguages.has(lang),
-	);
-	if (pending.length === 0) return;
-
-	const modules = await Promise.all(
-		pending.map(async (lang) => ({
-			lang,
-			registration: (await shikiLanguageLoaders[lang]()).default,
-		})),
-	);
-
-	await highlighter.loadLanguage(
-		...modules.map(({ registration }) => registration),
-	);
-	for (const { lang } of modules) loadedShikiLanguages.add(lang);
-}
-
-/**
- * Walk tokens recursively and replace code tokens with html tokens
- * containing shiki-highlighted output.
- *
- * We use `html` tokens (not `code` tokens) because marked.parser
- * escapes code token content, which would break shiki's HTML output.
- */
-async function highlightCodeTokens(tokens: Token[]) {
-	const highlighter = await getHighlighter();
-	await loadShikiLanguages(highlighter, collectCodeTokenLanguages(tokens));
-
-	for (let i = 0; i < tokens.length; i++) {
-		const token = tokens[i];
-		if (token.type === "code" && "lang" in token && token.lang) {
-			const rawLang = token.lang.split(" ")[0]; // handle e.g. "ts {1-3}"
-			const lang = rawLang ? normalizeShikiLanguage(rawLang) : null;
-			if (!lang) continue;
-
-			try {
-				const highlighted = highlighter.codeToHtml(token.text, {
-					lang,
-					themes: SHIKI_THEME_MAP,
-					defaultColor: false,
-				});
-
-				// Replace code token with html token so marked renders it unescaped
-				const codeToken = token as Tokens.Code;
-				tokens[i] = {
-					type: "html",
-					raw: codeToken.raw,
-					text: highlighted,
-					pre: true,
-				} as Tokens.HTML;
-			} catch {
-				// Fallback: leave code as-is
-			}
-		}
-
-		// Recurse into nested tokens (lists, blockquotes, etc.)
-		if ("tokens" in token && Array.isArray(token.tokens)) {
-			await highlightCodeTokens(token.tokens);
-		}
+		const oldest = markdownRenderCache.keys().next().value;
+		if (oldest !== undefined) markdownRenderCache.delete(oldest);
 	}
 }
 
@@ -385,6 +174,7 @@ const TEX_ANNOTATION_PATTERN =
 
 let katex: typeof Katex | null = null;
 let katexPromise: Promise<void> | null = null;
+let katexFailed = false;
 
 function loadKatex() {
 	katexPromise ??= Promise.all([
@@ -395,7 +185,7 @@ function loadKatex() {
 			katex = module.default;
 		},
 		(error) => {
-			katexPromise = null;
+			katexFailed = true;
 			console.warn("Failed to load KaTeX; showing TeX source", error);
 		},
 	);
@@ -964,34 +754,36 @@ function prepareSourceHtmlTokens(tokens: Token[], allowHtml: boolean) {
 	});
 }
 
-type MarkdownRenderOptions = {
-	highlight?: boolean;
-	streamingSafe?: boolean;
-	diagrams?: boolean;
-};
+type MarkdownRenderMode = "stream" | "final";
 
-async function renderMarkdownHtml(
+/**
+ * visible as text and media or ask blocks stay code until the reply settles.
+ * `complete` is false while math waits for KaTeX and shows its TeX source.
+ */
+function renderMarkdownChunk(
 	source: string,
-	options?: MarkdownRenderOptions,
+	mode: MarkdownRenderMode,
+	cache = true,
 ) {
+	const key = `${mode}:${source}`;
+	const cached = cache ? markdownRenderCache.get(key) : undefined;
+	if (cached !== undefined) return { html: cached, complete: true };
+
 	const markedOptions = markdownOptions();
-	const tokens = marked.lexer(
-		normalizeNestedMarkdownCodeFences(source),
-		markedOptions,
-	);
-	// During streaming, incomplete source tags stay visible as text. Completed
-	// renders accept a small document-oriented HTML subset before Cohub adds its
-	// own generated HTML; the combined output is sanitized again below.
-	prepareSourceHtmlTokens(tokens, !options?.streamingSafe);
-	if (!options?.streamingSafe) {
+	const tokens = marked.lexer(source, markedOptions);
+	const final = mode === "final";
+	prepareSourceHtmlTokens(tokens, final);
+	if (final) {
 		enhanceMediaPreviewTokens(tokens);
 		enhanceCohubAskTokens(tokens);
 	}
-	if (!options?.streamingSafe || options.diagrams) enhanceMermaidTokens(tokens);
+	enhanceMermaidTokens(tokens);
 	linkWorkspaceCodeTokens(tokens);
-	if (options?.highlight !== false) await highlightCodeTokens(tokens);
-	if (!katex && hasMathTokens(tokens)) await loadKatex();
-	return marked.parser(tokens, markedOptions);
+	const complete = katex !== null || katexFailed || !hasMathTokens(tokens);
+	if (!complete) void loadKatex();
+	const html = sanitizeMarkdownHtml(marked.parser(tokens, markedOptions));
+	if (cache && complete) cacheMarkdownRender(key, html);
+	return { html, complete };
 }
 
 const EXTERNAL_LINK_PROTOCOLS = new Set(["http:", "https:"]);
@@ -1047,7 +839,11 @@ type MarkdownBlock = {
 	closedFence: boolean;
 };
 
-function splitMarkdownBlocks(source: string): MarkdownBlock[] {
+// Streaming also splits indented fences, so an open list fence streams as plain code.
+function splitMarkdownBlocks(
+	source: string,
+	splitIndentedFences = true,
+): MarkdownBlock[] {
 	if (!source) return [];
 
 	const lines = source.split(/\r?\n/);
@@ -1081,7 +877,10 @@ function splitMarkdownBlocks(source: string): MarkdownBlock[] {
 			continue;
 		}
 
-		const openingFence = isFencedCodeFenceLine(line.trim());
+		const openingFence =
+			splitIndentedFences || !/^\s/.test(line)
+				? isFencedCodeFenceLine(line.trim())
+				: null;
 		if (openingFence) {
 			commitBlock("text", true);
 			buffer.push(line);
@@ -1117,23 +916,6 @@ function escapeHtml(source: string) {
 		.replaceAll('"', "&quot;")
 		.replaceAll("'", "&#039;");
 }
-
-async function renderMarkdownBlock(
-	source: string,
-	options?: MarkdownRenderOptions,
-) {
-	const html = await renderMarkdownHtml(source, options);
-	return sanitizeMarkdownHtml(html);
-}
-
-export const renderMarkdown = async (source: string) => {
-	const normalizedSource = source.trim();
-	if (!normalizedSource) return "";
-
-	return cacheMarkdownRender(`full:${normalizedSource}`, async () => {
-		return renderMarkdownBlock(normalizedSource);
-	});
-};
 
 function countRunsOfLength(text: string, run: RegExp, length: number) {
 	let count = 0;
@@ -1252,7 +1034,7 @@ export const renderStreamingMarkdownSplit = async (
 	source: string,
 	previous?: StreamingMarkdownRender,
 ): Promise<StreamingMarkdownRender> => {
-	const streamingSource = source.trimStart();
+	const streamingSource = normalizeNestedMarkdownCodeFences(source.trimStart());
 	if (!streamingSource.trim()) return EMPTY_STREAMING_RENDER;
 
 	const blocks = splitMarkdownBlocks(streamingSource);
@@ -1289,31 +1071,31 @@ export const renderStreamingMarkdownSplit = async (
 		tailIsFence = false;
 	}
 
-	const hasTail = tailSource.trim().length > 0;
-	const stableBlocks = await Promise.all(
-		stableSources.map((chunk, index) =>
-			previous?.stableSources[index] === chunk
-				? previous.stableBlocks[index]
-				: cacheMarkdownRender(`stream-stable-v3:${chunk}`, () =>
-						renderMarkdownBlock(chunk, {
-							highlight: false,
-							streamingSafe: true,
-							diagrams: true,
-						}),
-					),
-		),
+	let complete = true;
+	const render = (chunk: string, cache = true) => {
+		const result = renderMarkdownChunk(chunk, "stream", cache);
+		complete &&= result.complete;
+		return result.html;
+	};
+
+	const stableBlocks = stableSources.map((chunk, index) =>
+		previous?.stableSources[index] === chunk
+			? previous.stableBlocks[index]
+			: render(chunk),
 	);
 
-	const tailHtml = !hasTail
+	const tailHtml = !tailSource.trim()
 		? ""
 		: tailIsFence
 			? renderPlainCodeBlock(tailSource)
 			: tailSource.length > STREAMING_MARKDOWN_TAIL_PLAIN_THRESHOLD
 				? renderStreamingPlainTail(tailSource)
-				: await renderMarkdownBlock(repairStreamingMarkdown(tailSource), {
-						highlight: false,
-						streamingSafe: true,
-					});
+				: render(repairStreamingMarkdown(tailSource), false);
+
+	if (!complete && katexPromise) {
+		await katexPromise;
+		return renderStreamingMarkdownSplit(source, previous);
+	}
 
 	return {
 		stableSources,
@@ -1325,3 +1107,49 @@ export const renderStreamingMarkdownSplit = async (
 		tailHtml,
 	};
 };
+
+export type MarkdownBlocksRender = {
+	blocks: string[];
+	ready: Promise<void> | null;
+};
+
+// Link references resolve document-wide, so such documents render whole.
+const LINK_DEFINITION_LINE = /^ {0,3}\[[^\]\n]+\]:/m;
+const FENCE_LINE = /^\s*(?:`{3,}|~{3,})/gm;
+
+export function renderMarkdownBlocks(source: string): MarkdownBlocksRender {
+	const normalized = normalizeNestedMarkdownCodeFences(source.trim());
+	if (!normalized) return { blocks: [], ready: null };
+
+	const sourceBlocks = splitMarkdownBlocks(normalized, false);
+	const split = sourceBlocks.some(
+		(block) => block.kind === "text" && LINK_DEFINITION_LINE.test(block.text),
+	)
+		? []
+		: sourceBlocks.flatMap((block) =>
+				block.kind === "fence" ? [block.text] : splitStableChunks(block.text),
+			);
+	const chunks =
+		split.length > 0 &&
+		split.every((chunk) => (chunk.match(FENCE_LINE)?.length ?? 0) % 2 === 0)
+			? split
+			: [normalized];
+
+	let complete = true;
+	const blocks = chunks.map((chunk) => {
+		const result = renderMarkdownChunk(chunk, "final");
+		complete &&= result.complete;
+		return result.html;
+	});
+	return { blocks, ready: complete ? null : katexPromise };
+}
+
+export async function renderMarkdown(source: string) {
+	let render = renderMarkdownBlocks(source);
+	if (render.ready) {
+		await render.ready;
+		render = renderMarkdownBlocks(source);
+	}
+	const { highlightCodeHtml } = await import("#lib/markdown-highlight.ts");
+	return highlightCodeHtml(render.blocks.join(""));
+}
