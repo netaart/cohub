@@ -1,9 +1,11 @@
 <script lang="ts">
 import type { AppRecord } from "@neta-art/cohub";
-import { ExternalLink, Settings2 } from "lucide-svelte";
+import { AppWindow, ExternalLink, Settings2 } from "lucide-svelte";
 import { appDisplayTitle, appIconUrl } from "#lib/app-page-meta.ts";
 import { boardAppCover } from "#lib/board/board-app.ts";
 import AppIcon from "#lib/components/app/AppIcon.svelte";
+import type { ContextMenuContent } from "#lib/context-menu/context-menu.svelte.ts";
+import { linkEntries, MENU_SEPARATOR } from "#lib/context-menu/menu.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { buildSpaceAppRoute } from "#lib/space-routes.ts";
@@ -62,9 +64,35 @@ const drag = $derived.by(() => {
 		touch: touchDraggable,
 	};
 });
+
+function open() {
+	onOpen({ appId: app.id, name: title, meta: app.meta });
+}
+
+function menu(): ContextMenuContent {
+	return {
+		title,
+		items: [
+			published && {
+				id: "open",
+				label: m.resource_app_open({}, { locale }),
+				icon: AppWindow,
+				run: open,
+			},
+			{
+				id: "manage",
+				label: m.apps_panel_manage({}, { locale }),
+				icon: Settings2,
+				run: onManage,
+			},
+			MENU_SEPARATOR,
+			...(publicHref ? linkEntries(publicHref) : []),
+		],
+	};
+}
 </script>
 
-<SidePanelRow {title} subtitle={app.slug} {active} dimmed={!published} {drag} onOpen={published ? () => onOpen({ appId: app.id, name: title, meta: app.meta }) : onManage}>
+<SidePanelRow {title} subtitle={app.slug} {active} dimmed={!published} {drag} {menu} onOpen={published ? open : onManage}>
 	{#snippet leading()}
 		<AppIcon meta={app.meta} slug={app.slug} seed={app.id} size="sm" />
 	{/snippet}

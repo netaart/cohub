@@ -4,11 +4,13 @@ import {
 	type SpaceInstalledApps,
 	setInstalledAppEnabled,
 } from "@cohub/protocol";
-import { PackageOpen, Trash2 } from "lucide-svelte";
+import { AppWindow, PackageOpen, Power, PowerOff, Trash2 } from "lucide-svelte";
 import { onMount } from "svelte";
 import { avatarInitials } from "#lib/avatar-initials.ts";
 import Avatar from "#lib/components/Avatar.svelte";
 import ToggleSwitch from "#lib/components/ToggleSwitch.svelte";
+import type { ContextMenuContent } from "#lib/context-menu/context-menu.svelte.ts";
+import { MENU_SEPARATOR } from "#lib/context-menu/menu.ts";
 import {
 	cacheInstalledApps,
 	type InstalledAppsFile,
@@ -118,6 +120,39 @@ function setEnabled(app: InstalledApp, enabled: boolean) {
 	);
 }
 
+function installedMenu(app: InstalledApp): ContextMenuContent {
+	const busy = !canWrite || Boolean(mutationId);
+	return {
+		title: app.snapshot.name,
+		items: [
+			{
+				id: "open",
+				label: m.resource_app_open({}, { locale }),
+				icon: AppWindow,
+				run: () => onOpenInstalled(app),
+			},
+			{
+				id: "toggle",
+				label: app.enabled
+					? m.apps_panel_disable({}, { locale })
+					: m.apps_panel_enable({}, { locale }),
+				icon: app.enabled ? PowerOff : Power,
+				disabled: busy,
+				run: () => setEnabled(app, !app.enabled),
+			},
+			MENU_SEPARATOR,
+			{
+				id: "uninstall",
+				label: m.apps_panel_uninstall({}, { locale }),
+				icon: Trash2,
+				danger: true,
+				disabled: busy,
+				run: () => uninstall(app),
+			},
+		],
+	};
+}
+
 function uninstall(app: InstalledApp) {
 	if (
 		!confirm(
@@ -209,6 +244,7 @@ onMount(() => {
 								touch: touchDraggable,
 							}
 						: null}
+					menu={() => installedMenu(app)}
 					onOpen={() => onOpenInstalled(app)}
 				>
 					{#snippet leading()}

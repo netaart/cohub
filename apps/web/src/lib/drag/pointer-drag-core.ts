@@ -9,8 +9,8 @@
 
 import { normalizeBoardRemoteUrl } from "@cohub/protocol";
 
-/** Press duration before a drag takes over from a tap / scroll. */
-export const POINTER_DRAG_ACTIVATE_MS = 350;
+/** Press duration before a hold takes over from a tap / scroll. */
+export const LONG_PRESS_MS = 400;
 /** Movement past this before activation means the user meant to scroll. */
 export const POINTER_DRAG_ACTIVATE_TOLERANCE_PX = 10;
 /** Horizontal travel out of the source surface before it retracts. */

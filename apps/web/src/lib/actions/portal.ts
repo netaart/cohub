@@ -14,8 +14,7 @@ export function portal(node: HTMLElement) {
 }
 
 type FloatOptions = {
-	/** Anchor element used for fixed positioning. */
-	getAnchor: () => HTMLElement | null | undefined;
+	getAnchor: () => Element | DOMRect | null | undefined;
 	/** Preferred placement. */
 	placement?: "right-start" | "bottom-end" | "bottom-start" | "top-start";
 	/** Gap between anchor and panel in px. */
@@ -31,11 +30,12 @@ type FloatOptions = {
 	stackWhenCramped?: boolean;
 };
 
-function isUsableAnchor(el: HTMLElement | null | undefined): el is HTMLElement {
-	if (!el || typeof window === "undefined") return false;
+function anchorRect(anchor: Element | DOMRect | null | undefined) {
+	if (!anchor || typeof window === "undefined") return null;
+	if (anchor instanceof DOMRect) return anchor;
 	// Hidden / display:none nodes report empty client rects.
-	const rect = el.getBoundingClientRect();
-	return rect.width > 0 || rect.height > 0;
+	const rect = anchor.getBoundingClientRect();
+	return rect.width > 0 || rect.height > 0 ? rect : null;
 }
 
 /**
@@ -51,8 +51,8 @@ export function floatNear(
 	let tries = 0;
 
 	function place() {
-		const anchor = opts.getAnchor();
-		if (!isUsableAnchor(anchor)) {
+		const rect = anchorRect(opts.getAnchor());
+		if (!rect) {
 			// Anchor may not be measured yet (first paint / dual mobile+desktop mounts).
 			if (tries < 8) {
 				tries += 1;
@@ -62,7 +62,6 @@ export function floatNear(
 		}
 		tries = 0;
 
-		const rect = anchor.getBoundingClientRect();
 		const gap = opts.gap ?? 8;
 		const zIndex = opts.zIndex ?? 120;
 		const width = opts.width;
@@ -88,12 +87,13 @@ export function floatNear(
 		if (placement === "bottom-end") {
 			top = rect.bottom + gap;
 			left = rect.right - panelW;
-		} else if (placement === "bottom-start") {
-			top = rect.bottom + gap;
+		} else if (placement === "bottom-start" || placement === "top-start") {
+			top =
+				placement === "bottom-start"
+					? rect.bottom + gap
+					: rect.top - gap - panelH;
 			left = rect.left;
-		} else if (placement === "top-start") {
-			top = rect.top - gap - panelH;
-			left = rect.left;
+			if (left + panelW > window.innerWidth - pad) left = rect.right - panelW;
 		} else {
 			// right-start: prefer right of anchor; flip left if needed
 			top = rect.top;

@@ -10,8 +10,12 @@ import {
 	LIST_ROW_HEIGHT,
 } from "#lib/components/list-page/list-row.ts";
 import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import {
+	type ContextMenuContent,
+	contextMenu,
+} from "#lib/context-menu/context-menu.svelte.ts";
+import { contextMenuTrigger } from "#lib/context-menu/trigger.ts";
 import type { SpacesFilter } from "#lib/features/spaces/spaces-filter.ts";
-import { longPress } from "#lib/gestures/long-press.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { scrollListToTop } from "#lib/layout/list-scroll-top.ts";
 import { scrollMemory } from "#lib/layout/scroll-memory.ts";
@@ -29,8 +33,7 @@ const {
 	selected,
 	onToggle,
 	onLoadMore,
-	menuId = null,
-	onMenu,
+	menu,
 }: {
 	filter: SpacesFilter;
 	spaces: SpaceRecord[];
@@ -41,8 +44,7 @@ const {
 	selected: ReadonlySet<string>;
 	onToggle: (id: string, event?: MouseEvent) => void;
 	onLoadMore?: () => void;
-	menuId?: string | null;
-	onMenu?: (space: SpaceRecord, anchor: HTMLElement) => void;
+	menu: (space: SpaceRecord, target: HTMLElement) => ContextMenuContent;
 } = $props();
 
 const OVERSCAN_ROWS = 6;
@@ -54,7 +56,6 @@ const density = $derived<FixedListRowDensity>(
 );
 const rowHeight = $derived(LIST_ROW_HEIGHT[density]);
 const selecting = $derived(selected.size > 0);
-const rowMenus = $derived(!compact && onMenu !== undefined);
 let scroller = $state<HTMLDivElement | null>(null);
 let scrollTop = $state(0);
 let viewportHeight = $state(600);
@@ -126,14 +127,8 @@ function handleRowClick(event: MouseEvent, id: string) {
 	onToggle(id, event);
 }
 
-function openMenuFromContext(event: MouseEvent, space: SpaceRecord) {
-	if (!rowMenus || selecting) return;
-	const trigger = (
-		event.currentTarget as HTMLElement
-	).querySelector<HTMLElement>("[data-row-menu]");
-	if (!trigger) return;
-	event.preventDefault();
-	onMenu?.(space, trigger);
+function menuFor(space: SpaceRecord, target: HTMLElement) {
+	return selecting ? null : menu(space, target);
 }
 
 function onScroll(event: Event) {
@@ -190,13 +185,12 @@ function onScroll(event: Event) {
 				<li
 					class="space-row absolute inset-x-0"
 					style:top={`${(start + index) * rowHeight}px`}
-					use:longPress={{ onLongPress: () => onToggle(space.id) }}
-					oncontextmenu={(event) => openMenuFromContext(event, space)}
 				>
 					<ListRow
 						{density}
 						selected={isSelected}
 						class="has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-brand/35"
+						{@attach contextMenuTrigger((target) => menuFor(space, target))}
 					>
 						{#snippet leading()}
 							{#if compact}
@@ -236,18 +230,16 @@ function onScroll(event: Event) {
 							</ListRowText>
 						</a>
 						{#snippet trailing()}
-							{#if rowMenus}
-								{@const open = menuId === space.id}
+							{#if !compact}
 								<button
 									type="button"
-									data-row-menu
-									class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-[opacity,background-color,color] duration-100 hover:bg-bg-active hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 {open ? 'bg-bg-active text-text-primary opacity-100' : selecting ? 'pointer-events-none opacity-0' : 'opacity-0 group-hover/row:opacity-100'}"
+									class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-[opacity,background-color,color] duration-100 hover:bg-bg-active hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/35 data-[context-open]:bg-bg-active data-[context-open]:text-text-primary data-[context-open]:opacity-100 {selecting ? 'pointer-events-none opacity-0' : 'opacity-0 group-hover/row:opacity-100'}"
 									aria-label={m.inline_more_actions({}, { locale })}
 									title={m.inline_more_actions({}, { locale })}
 									aria-haspopup="menu"
-									aria-expanded={open}
+									aria-expanded="false"
 									tabindex={selecting ? -1 : undefined}
-									onclick={(event) => onMenu?.(space, event.currentTarget)}
+									onclick={(event) => contextMenu.toggle({ target: event.currentTarget, source: (target) => menuFor(space, target) })}
 								>
 									<MoreHorizontal class="h-4 w-4" />
 								</button>

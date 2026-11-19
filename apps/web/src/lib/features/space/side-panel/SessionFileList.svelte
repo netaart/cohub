@@ -6,6 +6,8 @@ import {
 	Loader2,
 	TextCursorInput,
 } from "lucide-svelte";
+import type { ContextMenuContent } from "#lib/context-menu/context-menu.svelte.ts";
+import { contextMenuTrigger } from "#lib/context-menu/trigger.ts";
 import { setCohubResourceDragData } from "#lib/drag/cohub-resource-drag.ts";
 import { pointerDragSource } from "#lib/drag/pointer-drag.svelte.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
@@ -57,6 +59,40 @@ function kindLabel(kind: SessionFileEntry["lastKind"]) {
 		: m.session_file_change_edit({}, { locale });
 }
 
+function menu(file: SessionFileEntry): ContextMenuContent {
+	const sequence = file.lastTurnSequence;
+	return {
+		title: splitPath(file.path).name,
+		items: [
+			{
+				id: "open",
+				label: m.resource_app_open({}, { locale }),
+				icon: FileIcon,
+				run: () => onOpenFile(file.path),
+			},
+			onInsertReference && {
+				id: "insert",
+				label: m.file_insert({}, { locale }),
+				icon: TextCursorInput,
+				run: () => onInsertReference(file.path),
+			},
+			{
+				id: "show-in-files",
+				label: m.session_file_show_in_files({}, { locale }),
+				icon: ListTree,
+				run: () => onShowInFiles(file.path),
+			},
+			onJumpToTurn &&
+				sequence !== null && {
+					id: "jump-to-turn",
+					label: m.session_file_jump_to_turn({ sequence }, { locale }),
+					icon: History,
+					run: () => onJumpToTurn(sequence),
+				},
+		],
+	};
+}
+
 function dragStart(event: DragEvent, file: SessionFileEntry) {
 	if (!draggable) {
 		event.preventDefault();
@@ -96,6 +132,7 @@ function dragStart(event: DragEvent, file: SessionFileEntry) {
 					items: [{ type: "file", path: file.path, name: parts.name }],
 				}),
 			}}
+			{@attach contextMenuTrigger(() => menu(file))}
 		>
 			<button
 				type="button"

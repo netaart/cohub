@@ -9,7 +9,7 @@ import {
 	TextCursorInput,
 	X,
 } from "lucide-svelte";
-import type { Snippet } from "svelte";
+import { flushSync, type Snippet } from "svelte";
 import { clock } from "#lib/clock.svelte.ts";
 import ListRow from "#lib/components/list-page/ListRow.svelte";
 import ListRowText from "#lib/components/list-page/ListRowText.svelte";
@@ -21,6 +21,13 @@ import StatusGlyph, {
 } from "#lib/components/StatusGlyph.svelte";
 import SidebarActionButton from "#lib/components/sidebar/SidebarActionButton.svelte";
 import UserAvatar from "#lib/components/UserAvatar.svelte";
+import type { ContextMenuContent } from "#lib/context-menu/context-menu.svelte.ts";
+import {
+	linkEntries,
+	MENU_SEPARATOR,
+	removeLabelEntry,
+} from "#lib/context-menu/menu.ts";
+import { contextMenuTrigger } from "#lib/context-menu/trigger.ts";
 import type { SessionRename } from "#lib/features/sessions/session-rename.svelte.ts";
 import { formatElapsedMs } from "#lib/format-duration.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
@@ -266,6 +273,48 @@ $effect(() => {
 		rowElement.focus({ preventScroll: true });
 });
 
+function startRename() {
+	rename?.start(session, title, rowId);
+	// Focus within the menu tap, so touch keyboards open.
+	flushSync();
+	renameInput?.focus();
+	renameInput?.select();
+}
+
+function menu(): ContextMenuContent {
+	return {
+		title,
+		items: [
+			rename && {
+				id: "rename",
+				label: m.common_rename({}, { locale }),
+				icon: Pencil,
+				run: startRename,
+			},
+			canToggleArchive &&
+				onArchive && {
+					id: "archive",
+					label: archived
+						? m.session_unarchive({}, { locale })
+						: m.session_archive({}, { locale }),
+					icon: archived ? ArchiveRestore : Archive,
+					run: () => onArchive(session),
+				},
+			showInsert &&
+				onInsert && {
+					id: "insert",
+					label: m.common_insert({}, { locale }),
+					icon: TextCursorInput,
+					run: () => onInsert(`/sessions/${session.id}.jsonl`),
+				},
+			MENU_SEPARATOR,
+			...linkEntries(href),
+			MENU_SEPARATOR,
+			removeLabelEntry(removeLabelTitle, removeLabelDisabled, onRemoveLabel),
+		],
+	};
+}
+
 function sessionParticipants(record: SessionRecord): Participant[] {
 	const list: Participant[] = [];
 	const seen = new Set<string>();
@@ -424,7 +473,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		{density}
 		{href}
 		{active}
-		class="session-row {hoverRoomClass} {isMobile ? 'select-none [-webkit-touch-callout:none]' : ''}"
+		class="session-row {hoverRoomClass}"
 		style={treeStyle}
 		data-tree={guide ?? undefined}
 		data-depth={guide ? tree?.depth : undefined}
@@ -435,9 +484,10 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 		draggable={!isMobile && draggable}
 		leading={avatar ? leading : undefined}
 		onclick={(event: MouseEvent) => onNavigate(event, session)}
-		ondblclick={(event: MouseEvent) => rename?.doubleClick(event, session, title, rowId)}
+		ondblclick={(event: MouseEvent) => !isMobile && rename?.doubleClick(event, session, title, rowId)}
 		ondragstart={(event: DragEvent) => onDragStart?.(event, session, title)}
 		ondragend={onDragEnd}
+		{@attach contextMenuTrigger(menu)}
 	>
 		{@render treeGuide()}
 		<ListRowText
@@ -454,7 +504,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 						<SidebarActionButton icon={TextCursorInput} title={m.common_insert({}, { locale })} onClick={() => onInsert(`/sessions/${session.id}.jsonl`)} />
 					{/if}
 					{#if rename}
-						<SidebarActionButton icon={Pencil} title={m.common_rename({}, { locale })} onClick={() => rename.start(session, title, rowId)} />
+						<SidebarActionButton icon={Pencil} title={m.common_rename({}, { locale })} onClick={startRename} />
 					{/if}
 					{#if canToggleArchive && onArchive}
 						<SidebarActionButton

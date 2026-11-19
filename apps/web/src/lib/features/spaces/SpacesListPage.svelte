@@ -3,11 +3,14 @@ import type { SpaceRecord } from "@neta-art/cohub";
 import {
 	Archive,
 	ArchiveRestore,
+	CircleCheck,
 	Pin,
 	PinOff,
 	Plus,
 	Search,
+	Settings,
 	Tag,
+	Wallet,
 	X,
 } from "lucide-svelte";
 import { onMount, untrack } from "svelte";
@@ -18,9 +21,10 @@ import HeaderAction from "#lib/components/list-page/HeaderAction.svelte";
 import ListHeader from "#lib/components/list-page/ListHeader.svelte";
 import SwipePager from "#lib/components/list-page/SwipePager.svelte";
 import { SwipeTabs } from "#lib/components/list-page/swipe-tabs.svelte.ts";
+import type { ContextMenuContent } from "#lib/context-menu/context-menu.svelte.ts";
+import { linkEntries, MENU_SEPARATOR } from "#lib/context-menu/menu.ts";
 import LibraryTabs from "#lib/features/library/LibraryTabs.svelte";
 import SpaceLabelPicker from "#lib/features/spaces/SpaceLabelPicker.svelte";
-import SpaceRowMenu from "#lib/features/spaces/SpaceRowMenu.svelte";
 import SpacesListPane from "#lib/features/spaces/SpacesListPane.svelte";
 import {
 	SPACES_FILTERS,
@@ -39,12 +43,18 @@ import {
 	toggleSelection,
 } from "#lib/selection.ts";
 import {
+	buildSpaceRootRoute,
+	buildSpaceSettingsRoute,
+	buildSpaceWalletRoute,
+} from "#lib/space-routes.ts";
+import {
 	archiveFlags,
 	pinFlags,
 	setSpacesArchived,
 	setSpacesPinned,
 	type ViewerFlags,
 } from "#lib/stores/space-pins.svelte.ts";
+import { goto } from "$app/navigation";
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
@@ -64,14 +74,12 @@ let anchorId: string | null = null;
 let busy = $state(false);
 let labelAnchor = $state<HTMLElement | null>(null);
 let labelTarget = $state<LabelTarget | null>(null);
-let menu = $state<{ id: string; anchor: HTMLElement } | null>(null);
 
 const selecting = $derived(selected.size > 0);
 const allSelectedPinned = $derived(
 	selecting &&
 		spaces.every((space) => !selected.has(space.id) || space.isPinned),
 );
-const menuSpace = $derived(menu ? (list.find(menu.id) ?? null) : null);
 
 function neighbours() {
 	return [
@@ -191,52 +199,78 @@ function toggleSelectionLabel() {
 			};
 }
 
-function nameOf(space: SpaceRecord | null) {
+function nameOf(space: SpaceRecord) {
 	return (
-		space?.name?.trim() ||
-		space?.title?.trim() ||
+		space.name?.trim() ||
+		space.title?.trim() ||
 		m.spaces_default_name({}, { locale })
 	);
 }
 
-function openMenu(space: SpaceRecord, anchor: HTMLElement) {
-	menu = menu?.id === space.id ? null : { id: space.id, anchor };
-}
-
-function closeMenu() {
-	menu?.anchor.focus({ preventScroll: true });
-	menu = null;
-}
-
-function fromMenu(action: (space: SpaceRecord, anchor: HTMLElement) => void) {
-	return (space: SpaceRecord) => {
-		const anchor = menu?.anchor;
-		closeMenu();
-		if (anchor) action(space, anchor);
+function spaceMenu(
+	space: SpaceRecord,
+	target: HTMLElement,
+): ContextMenuContent {
+	return {
+		title: nameOf(space),
+		items: [
+			{
+				id: "pin",
+				label: space.isPinned
+					? m.command_unpin({}, { locale })
+					: m.command_pin({}, { locale }),
+				icon: space.isPinned ? PinOff : Pin,
+				run: () => void setPinned([space.id], !space.isPinned),
+			},
+			{
+				id: "archive",
+				label: space.isArchived
+					? m.spaces_unarchive({}, { locale })
+					: m.spaces_archive({}, { locale }),
+				icon: space.isArchived ? ArchiveRestore : Archive,
+				run: () => void setArchived([space.id], !space.isArchived),
+			},
+			{
+				id: "label",
+				label: `${m.spaces_label_add({}, { locale })}…`,
+				icon: Tag,
+				run: () => {
+					labelTarget = {
+						ids: [space.id],
+						anchor: target,
+						title: m.spaces_label_add({}, { locale }),
+					};
+				},
+			},
+			MENU_SEPARATOR,
+			{
+				id: "wallet",
+				label: m.wallet_title({}, { locale }),
+				icon: Wallet,
+				run: () => void goto(buildSpaceWalletRoute(space.id)),
+			},
+			space.relation !== "public" && {
+				id: "settings",
+				label: m.sidebar_space_settings({}, { locale }),
+				icon: Settings,
+				run: () => void goto(buildSpaceSettingsRoute(space.id)),
+			},
+			MENU_SEPARATOR,
+			...linkEntries(buildSpaceRootRoute(space.id)),
+			MENU_SEPARATOR,
+			{
+				id: "select",
+				label: m.spaces_select({}, { locale }),
+				icon: CircleCheck,
+				run: () => toggle(space.id),
+			},
+		],
 	};
 }
 
-const rowActions = {
-	onPin: fromMenu((space) => void setPinned([space.id], !space.isPinned)),
-	onArchive: fromMenu(
-		(space) => void setArchived([space.id], !space.isArchived),
-	),
-	onLabel: fromMenu((space, anchor) => {
-		labelTarget = {
-			ids: [space.id],
-			anchor,
-			title: m.spaces_label_add({}, { locale }),
-		};
-	}),
-	onSelect: fromMenu((space) => toggle(space.id)),
-};
-
 $effect(() => {
 	void filter;
-	untrack(() => {
-		clearSelection();
-		menu = null;
-	});
+	untrack(clearSelection);
 });
 
 $effect(() => {
@@ -377,14 +411,11 @@ onMount(() => {
 				selected={active ? selected : NO_SELECTION}
 				onToggle={toggle}
 				onLoadMore={active ? () => void list.loadMore(value) : undefined}
-				menuId={menu?.id ?? null}
-				onMenu={openMenu}
+				menu={spaceMenu}
 			/>
 		{/snippet}
 	</SwipePager>
 </section>
-
-<SpaceRowMenu space={menuSpace} name={nameOf(menuSpace)} anchor={menu?.anchor ?? null} {...rowActions} onClose={closeMenu} />
 
 <SpaceLabelPicker
 	open={labelTarget !== null}

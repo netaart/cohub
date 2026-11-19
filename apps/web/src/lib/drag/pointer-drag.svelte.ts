@@ -11,6 +11,8 @@
  */
 
 import { untrack } from "svelte";
+import { contextMenu } from "#lib/context-menu/context-menu.svelte.ts";
+import { consumeTouchMoves } from "#lib/gestures/consume-touch.ts";
 import { haptic } from "#lib/haptics.ts";
 import {
 	autoscrollStep,
@@ -18,7 +20,7 @@ import {
 	hasLeftRetractSurface,
 	isPointerDragPointerType,
 	isWithinActivateTolerance,
-	POINTER_DRAG_ACTIVATE_MS,
+	LONG_PRESS_MS,
 	POINTER_DRAG_CLICK_SUPPRESS_MS,
 	POINTER_DRAG_SETTLE_MS,
 	type PointerDragIntent,
@@ -375,11 +377,121 @@ function onWindowPointerCancel(event: PointerEvent) {
 	finishDrag(false);
 }
 
+function startDrag(
+	node: HTMLElement,
+	pointerId: number,
+	x: number,
+	y: number,
+	payload: PointerDragPayload,
+) {
+	const surface = node.closest<HTMLElement>(`[${POINTER_DRAG_SURFACE_ATTR}]`);
+	const surfaceBox = surface?.getBoundingClientRect();
+	current = {
+		pointerId,
+		node,
+		payload,
+		surfaceRect: surfaceBox
+			? { left: surfaceBox.left, right: surfaceBox.right }
+			: null,
+		lastX: x,
+		lastY: y,
+		autoscrollFrame: 0,
+		autoscrollTarget: null,
+		autoscrollStepPx: 0,
+		retractFrame: 0,
+	};
+
+	pointerDrag.payload = payload;
+	pointerDrag.x = x;
+	pointerDrag.y = y;
+	pointerDrag.active = true;
+	pointerDrag.settling = false;
+	pointerDrag.retracted = false;
+	pointerDrag.announcement = `Picked up ${describePointerDragPayload(payload)}`;
+	document.body.classList.add("pointer-dragging");
+	// Events live on the window rather than a captured node: the source row can
+	// slide away with its drawer mid-drag, and the window sees every move
+	// regardless of what the pointer is over.
+	window.addEventListener("pointermove", onWindowPointerMove);
+	window.addEventListener("pointerup", onWindowPointerUp);
+	window.addEventListener("pointercancel", onWindowPointerCancel);
+	// Non-passive: this is what actually stops the list from scrolling.
+	document.addEventListener("touchmove", onDocumentTouchMove, {
+		passive: false,
+	});
+	document.addEventListener("contextmenu", onContextMenu, true);
+	// Capture phase: a second finger must be intercepted before it reaches the
+	// board's own pointer handling.
+	document.addEventListener("pointerdown", onDocumentPointerDownCapture, true);
+	resolveTargetAt(x, y);
+}
+
+type Hold = {
+	pointerId: number;
+	node: HTMLElement;
+	x: number;
+	y: number;
+	getPayload: () => PointerDragPayload | null;
+	release: () => void;
+};
+
+let hold: Hold | null = null;
+
+function startHold(next: Omit<Hold, "release">) {
+	const release = consumeTouchMoves();
+	hold = { ...next, release };
+	window.addEventListener("pointermove", onHoldMove);
+	window.addEventListener("pointerup", onHoldEnd);
+	window.addEventListener("pointercancel", onHoldEnd);
+	document.addEventListener("contextmenu", preventDefault, true);
+}
+
+function endHold() {
+	if (!hold) return null;
+	const ended = hold;
+	hold = null;
+	ended.release();
+	window.removeEventListener("pointermove", onHoldMove);
+	window.removeEventListener("pointerup", onHoldEnd);
+	window.removeEventListener("pointercancel", onHoldEnd);
+	document.removeEventListener("contextmenu", preventDefault, true);
+	return ended;
+}
+
+function onHoldMove(event: PointerEvent) {
+	if (event.pointerId !== hold?.pointerId) return;
+	if (isWithinActivateTolerance(event.clientX - hold.x, event.clientY - hold.y))
+		return;
+	const ended = endHold();
+	const payload = ended && untrack(() => ended.getPayload());
+	if (!ended || !payload?.items.length) return;
+	contextMenu.close();
+	startDrag(ended.node, ended.pointerId, ended.x, ended.y, payload);
+	onWindowPointerMove(event);
+}
+
+function onHoldEnd(event: PointerEvent) {
+	if (event.pointerId !== hold?.pointerId) return;
+	endHold();
+	suppressClickUntil = Date.now() + POINTER_DRAG_CLICK_SUPPRESS_MS;
+}
+
+function preventDefault(event: Event) {
+	event.preventDefault();
+}
+
+const claimedPresses = new WeakSet<Event>();
+
+export function isClaimedPress(event: Event) {
+	return claimedPresses.has(event);
+}
+
 /**
  * Svelte action: make a node a long-press drag source for touch and pen.
  *
  * The press must stay within a small slop for the activation delay, so a flick
- * scrolls the list as usual and only a deliberate hold starts a drag.
+ * scrolls the list as usual and only a deliberate hold starts a drag (or opens
+ * the node's context menu, which moving then turns into a drag).
  */
 export function pointerDragSource(
 	node: HTMLElement,
@@ -399,74 +511,49 @@ export function pointerDragSource(
 
 	function activate() {
 		armTimer = 0;
-		if (armPointerId === null) return;
-		const payload = untrack(() => opts.getPayload());
-		if (!payload || payload.items.length === 0) {
-			armPointerId = null;
+		const pointerId = armPointerId;
+		armPointerId = null;
+		if (pointerId === null) return;
+		node.dispatchEvent(
+			new MouseEvent("contextmenu", {
+				bubbles: true,
+				cancelable: true,
+				clientX: armX,
+				clientY: armY,
+			}),
+		);
+		if (contextMenu.current?.target.contains(node)) {
+			haptic("longPress");
+			startHold({
+				pointerId,
+				node,
+				x: armX,
+				y: armY,
+				getPayload: () => opts.getPayload(),
+			});
 			return;
 		}
-		const surface = node.closest<HTMLElement>(`[${POINTER_DRAG_SURFACE_ATTR}]`);
-		const surfaceBox = surface?.getBoundingClientRect();
-		current = {
-			pointerId: armPointerId,
-			node,
-			payload,
-			surfaceRect: surfaceBox
-				? { left: surfaceBox.left, right: surfaceBox.right }
-				: null,
-			lastX: armX,
-			lastY: armY,
-			autoscrollFrame: 0,
-			autoscrollTarget: null,
-			autoscrollStepPx: 0,
-			retractFrame: 0,
-		};
-		armPointerId = null;
-
-		pointerDrag.payload = payload;
-		pointerDrag.x = armX;
-		pointerDrag.y = armY;
-		pointerDrag.active = true;
-		pointerDrag.settling = false;
-		pointerDrag.retracted = false;
-		pointerDrag.announcement = `Picked up ${describePointerDragPayload(payload)}`;
+		const payload = untrack(() => opts.getPayload());
+		if (!payload || payload.items.length === 0) return;
 		haptic("longPress");
-		document.body.classList.add("pointer-dragging");
-		// Events live on the window rather than a captured node: the source row can
-		// slide away with its drawer mid-drag, and the window sees every move
-		// regardless of what the pointer is over.
-		window.addEventListener("pointermove", onWindowPointerMove);
-		window.addEventListener("pointerup", onWindowPointerUp);
-		window.addEventListener("pointercancel", onWindowPointerCancel);
-		// Non-passive: this is what actually stops the list from scrolling.
-		document.addEventListener("touchmove", onDocumentTouchMove, {
-			passive: false,
-		});
-		document.addEventListener("contextmenu", onContextMenu, true);
-		// Capture phase: a second finger must be intercepted before it reaches the
-		// board's own pointer handling.
-		document.addEventListener(
-			"pointerdown",
-			onDocumentPointerDownCapture,
-			true,
-		);
-		resolveTargetAt(armX, armY);
+		startDrag(node, pointerId, armX, armY, payload);
 	}
 
 	function onPointerDown(event: PointerEvent) {
 		if (opts.enabled === false) return;
 		if (!isPointerDragPointerType(event.pointerType)) return;
-		// Already dragging, or a second finger arriving while armed: neither should
-		// start a competing gesture. An active drag is cancelled by the document
-		// capture handler, which sees every extra pointer, not just those on a row.
-		if (current || armPointerId !== null) {
+		claimedPresses.add(event);
+		// Already holding or dragging, or a second finger arriving while armed:
+		// neither should start a competing gesture. An active drag is cancelled by
+		// the document capture handler, which sees every extra pointer.
+		if (current || hold || armPointerId !== null) {
 			disarm();
 			return;
 		}
 		armPointerId = event.pointerId;
 		armX = event.clientX;
 		armY = event.clientY;
-		armTimer = window.setTimeout(activate, POINTER_DRAG_ACTIVATE_MS);
+		armTimer = window.setTimeout(activate, LONG_PRESS_MS);
 	}
 
 	function onPointerMove(event: PointerEvent) {
@@ -485,7 +572,10 @@ export function pointerDragSource(
 		event.stopPropagation();
 	}
 
-	node.addEventListener("pointerdown", onPointerDown, { passive: true });
+	node.addEventListener("pointerdown", onPointerDown, {
+		capture: true,
+		passive: true,
+	});
 	node.addEventListener("pointermove", onPointerMove, { passive: true });
 	node.addEventListener("pointerup", onPointerEnd, { passive: true });
 	node.addEventListener("pointercancel", onPointerEnd, { passive: true });
@@ -497,11 +587,12 @@ export function pointerDragSource(
 		},
 		destroy() {
 			disarm();
-			node.removeEventListener("pointerdown", onPointerDown);
+			node.removeEventListener("pointerdown", onPointerDown, true);
 			node.removeEventListener("pointermove", onPointerMove);
 			node.removeEventListener("pointerup", onPointerEnd);
 			node.removeEventListener("pointercancel", onPointerEnd);
 			node.removeEventListener("click", onClickCapture, true);
+			if (hold?.node === node) endHold();
 			if (current?.node === node) finishDrag(false);
 		},
 	};

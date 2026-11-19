@@ -29,7 +29,7 @@ Cohub Web 使用 semantic theme tokens 管理颜色与主题。文档只约束�
   - 按键：主操作 `.primary-key`，旁边的次要操作 `.secondary-key`，已确认过的不可撤销操作 `.danger-key`；纯文字操作不用按键原语。
   - 选择：2–4 个等宽互斥选项用 `Segmented`；无轨道的标签 / 筛选用 `.tab-key`；开关用 `ToggleSwitch` / `.toggle-track`。
   - 标识：状态 / 元信息用 `.tag`（`data-tone` 着色），促销 / 当前标记用 `.badge`。
-  - 浮层：菜单 / 下拉 `.menu-surface`，弹窗 `.dialog-backdrop` + `.dialog-surface`，提示 `.toast-surface`，加载 `Spinner`。
+  - 浮层：菜单 / 下拉 `.menu-surface`（菜单项 `.menu-item` / `.menu-separator`），弹窗 `.dialog-backdrop` + `.dialog-surface`，提示 `.toast-surface`，加载 `Spinner`。
   - 「东西 / 去哪里」的入口图标用 `EntityIcon`（像素主题会换成彩色像素图），动作图标直接用 lucide。
 - 「正在发生」（流式、运行中、唤醒、未读）用 `--activity`，不要直接用 `brand`；原生 checkbox / radio / range 自动跟随 `--control-accent`。
 
@@ -56,6 +56,7 @@ Cohub Web 使用 semantic theme tokens 管理颜色与主题。文档只约束�
 - 流式内容、工具调用和后台任务要优先保证可读性和稳定性，动画只用于表达状态，不制造噪音。
 - 移动端要优先保证核心路径顺畅：布局可读、触控目标足够、输入稳定，不依赖 hover 或过密信息。
 - 列表和侧栏应保持扫描效率：对齐、截断、状态点、时间和标题层级要一致。
+- 行操作菜单：一份 `MenuEntries`，用 `contextMenuTrigger` 挂到行上，统一接管右键、键盘菜单键和触屏长按；⋯ 按钮用 `contextMenu.toggle` 打开同一份。桌面在光标处弹出，紧凑布局的触屏用底部 sheet（顶部写对象名）。顺序：对象操作 → 链接（`linkEntries` 补回被替换掉的浏览器「新标签打开 / 复制链接」）→ 危险操作；hover 行内按钮只是其中常用项的快捷方式。可拖拽的行长按先出菜单，手指移动再转为拖拽。
 
 ### Motion
 

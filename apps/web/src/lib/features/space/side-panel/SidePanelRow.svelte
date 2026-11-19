@@ -1,5 +1,7 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
+import type { ContextMenuContent } from "#lib/context-menu/context-menu.svelte.ts";
+import { contextMenuTrigger } from "#lib/context-menu/trigger.ts";
 import {
 	type CohubDragResource,
 	setCohubResourceDragData,
@@ -23,6 +25,7 @@ type Props = {
 	} | null;
 	leading: Snippet;
 	trailing?: Snippet;
+	menu?: () => ContextMenuContent | null;
 	onOpen: () => void;
 };
 
@@ -35,6 +38,7 @@ const {
 	drag = null,
 	leading,
 	trailing,
+	menu,
 	onOpen,
 }: Props = $props();
 
@@ -63,6 +67,7 @@ const dragging = $derived(
 		getPayload: () =>
 			drag ? { origin: "side-panel", items: [drag.item] } : null,
 	}}
+	{@attach contextMenuTrigger(() => menu?.() ?? null)}
 >
 	<button
 		type="button"

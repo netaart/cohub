@@ -22,6 +22,9 @@ import {
 } from "#lib/components/list-page/list-row.ts";
 import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
 import SidebarActionButton from "#lib/components/sidebar/SidebarActionButton.svelte";
+import type { ContextMenuContent } from "#lib/context-menu/context-menu.svelte.ts";
+import { linkEntries, MENU_SEPARATOR } from "#lib/context-menu/menu.ts";
+import { contextMenuTrigger } from "#lib/context-menu/trigger.ts";
 import { buildSpaceAppWindowRoute } from "#lib/features/space/modules/window-route.ts";
 import { dispatchCronjobsUpdated } from "#lib/features/space/resources/space-cronjobs-feed.svelte.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
@@ -193,6 +196,55 @@ async function copyLink(app: UserAppListItem) {
 	}
 }
 
+function menu(item: Item): ContextMenuContent {
+	const href = canOpen(item) ? hrefOf(item) : null;
+	if (isApps) {
+		const app = item as UserAppListItem;
+		const url = app.publicUrl ?? href;
+		return {
+			title: appDisplayTitle(app.meta, app.slug),
+			items: [
+				canRun(app) && {
+					id: "open",
+					label: m.resource_app_open({}, { locale }),
+					icon: PanelRight,
+					run: () => void goto(buildSpaceAppWindowRoute(app.spaceId, app.id)),
+				},
+				MENU_SEPARATOR,
+				...(url ? linkEntries(url) : []),
+			],
+		};
+	}
+	const job = item as UserCronJobListItem;
+	const lost = job.access === "lost";
+	const busy = busyId === job.id;
+	return {
+		title: job.title,
+		items: [
+			(job.enabled || !lost) && {
+				id: "toggle",
+				label: job.enabled
+					? m.cron_pause({}, { locale })
+					: m.cron_resume({}, { locale }),
+				icon: job.enabled ? Pause : Play,
+				disabled: busy,
+				run: () => void toggleCronJob(job),
+			},
+			MENU_SEPARATOR,
+			...(href ? linkEntries(href) : []),
+			MENU_SEPARATOR,
+			lost && {
+				id: "delete",
+				label: m.common_delete({}, { locale }),
+				icon: Trash2,
+				danger: true,
+				disabled: busy,
+				run: () => void deleteCronJob(job),
+			},
+		],
+	};
+}
+
 function emptyCopy() {
 	if (isApps)
 		return {
@@ -329,7 +381,7 @@ function emptyCopy() {
 			{#each visible as item, index (item.id)}
 				{@const openable = canOpen(item)}
 				<li class="absolute inset-x-0" style:top={`${(start + index) * rowHeight}px`}>
-					<ListRow {density} active={item.id === selectedId} class="has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-brand/35">
+					<ListRow {density} active={item.id === selectedId} class="has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-brand/35" {@attach contextMenuTrigger(() => menu(item))}>
 						{#snippet leading()}
 							{#if isApps}
 								{@const app = item as UserAppListItem}

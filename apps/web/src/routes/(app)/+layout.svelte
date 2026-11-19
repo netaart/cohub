@@ -7,6 +7,7 @@ import AboutDialog from "#lib/components/AboutDialog.svelte";
 import BillingConversionCenter from "#lib/components/BillingConversionCenter.svelte";
 import CenteredLoading from "#lib/components/CenteredLoading.svelte";
 import CommandPalette from "#lib/components/CommandPalette.svelte";
+import ContextMenuHost from "#lib/components/context-menu/ContextMenuHost.svelte";
 import DownloadToasts from "#lib/components/DownloadToasts.svelte";
 import DragGhostLayer from "#lib/components/DragGhostLayer.svelte";
 import FeedbackDialog from "#lib/components/FeedbackDialog.svelte";
@@ -657,6 +658,7 @@ onMount(() => {
   <MediaLightbox />
   <CommandPalette />
   <DragGhostLayer />
+  <ContextMenuHost />
   <HelpPanel open={showHelpPanel} onClose={() => { showHelpPanel = false; }} />
   <AboutDialog open={showAbout} onClose={() => { showAbout = false; }} />
   <FeedbackDialog open={showFeedback} onClose={() => { showFeedback = false; }} />

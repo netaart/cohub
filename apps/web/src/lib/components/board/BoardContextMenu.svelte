@@ -1,16 +1,9 @@
 <script lang="ts" module>
-import type { Pencil as BoardMenuIcon } from "lucide-svelte";
+import type { MenuIcon, MenuItem } from "#lib/context-menu/menu.ts";
 
-export type BoardMenuAction = {
-	id: string;
-	label: string;
-	icon: typeof BoardMenuIcon;
-	danger?: boolean;
-	warning?: boolean;
+export type BoardMenuAction = MenuItem & {
+	icon: MenuIcon;
 	expanded?: boolean;
-	checked?: boolean;
-	disabled?: boolean;
-	run: () => void;
 };
 </script>
 
@@ -21,7 +14,6 @@ import {
 	ArrowDownToLine,
 	ArrowUpToLine,
 	BoxSelect,
-	Check,
 	Clapperboard,
 	ClipboardCopy,
 	Copy,
@@ -45,9 +37,8 @@ import {
 	Star,
 	Trash2,
 } from "lucide-svelte";
-import { onDestroy, onMount, untrack } from "svelte";
-import { portal } from "#lib/actions/portal.ts";
 import type { BoardEditor } from "#lib/board/editor.svelte.ts";
+import ContextMenu from "#lib/components/context-menu/ContextMenu.svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 
@@ -106,10 +97,6 @@ const REACTION_LABELS = {
 	spark: m.board_reaction_spark,
 	confetti: m.board_reaction_confetti,
 } satisfies Record<BoardReaction, unknown>;
-
-let menu: HTMLDivElement | null = $state(null);
-let left = $state(untrack(() => position.x));
-let top = $state(untrack(() => position.y));
 
 const hasSelection = $derived(editor.selection.length > 0);
 const canGenerate = $derived(
@@ -336,52 +323,9 @@ const actions = $derived.by<BoardMenuAction[]>(() => {
 		});
 	return list;
 });
-
-function run(action: BoardMenuAction) {
-	if (action.disabled) return;
-	action.run();
-	onClose();
-}
-
-function handlePointerDown(event: PointerEvent) {
-	if (menu && !menu.contains(event.target as Node)) onClose();
-}
-
-function handleKeydown(event: KeyboardEvent) {
-	if (event.key === "Escape") onClose();
-}
-
-onMount(() => {
-	document.addEventListener("pointerdown", handlePointerDown, true);
-	document.addEventListener("keydown", handleKeydown);
-	if (!sheet && menu) {
-		const rect = menu.getBoundingClientRect();
-		left = Math.min(position.x, window.innerWidth - rect.width - 8);
-		top = Math.min(position.y, window.innerHeight - rect.height - 8);
-	}
-});
-
-onDestroy(() => {
-	document.removeEventListener("pointerdown", handlePointerDown, true);
-	document.removeEventListener("keydown", handleKeydown);
-});
 </script>
 
-{#if sheet}
-	<div class="ctx-scrim" role="presentation" onclick={onClose}></div>
-{/if}
-
-<div
-	bind:this={menu}
-	use:portal
-	class="board-context-menu menu-surface"
-	class:board-context-menu--sheet={sheet}
-	style:left={sheet ? undefined : `${left}px`}
-	style:top={sheet ? undefined : `${top}px`}
-	role="menu"
-	tabindex="-1"
-	oncontextmenu={(event) => event.preventDefault()}
->
+{#snippet reactions()}
 	{#if onReact}
 		<div class="ctx-reactions" role="group" aria-label={m.board_react({}, { locale })}>
 			{#each BOARD_REACTIONS as reaction (reaction)}
@@ -399,57 +343,11 @@ onDestroy(() => {
 			{/each}
 		</div>
 	{/if}
-	{#each actions as action (action.id)}
-		<button
-			type="button"
-			class="ctx-item"
-			class:ctx-item--danger={action.danger}
-			disabled={action.disabled}
-			role={action.checked === undefined ? "menuitem" : "menuitemcheckbox"}
-			aria-checked={action.checked}
-			onclick={() => run(action)}
-		>
-			<action.icon class={action.warning ? "h-3.5 w-3.5 text-error" : "h-3.5 w-3.5"} />
-			<span>{action.label}</span>
-			{#if action.checked}<Check class="ctx-check h-3.5 w-3.5" />{/if}
-		</button>
-	{/each}
-</div>
+{/snippet}
+
+<ContextMenu open point={position} {sheet} items={actions} header={reactions} {onClose} />
 
 <style>
-	.board-context-menu {
-		position: fixed;
-		z-index: 130;
-		min-width: 168px;
-		padding: 4px;
-	}
-
-	.ctx-scrim {
-		position: fixed;
-		inset: 0;
-		z-index: 129;
-		background: color-mix(in srgb, var(--overlay-scrim-strong) 32%, transparent);
-	}
-
-	.board-context-menu--sheet {
-		right: 8px;
-		bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-		left: 8px;
-		min-width: 0;
-		border-radius: 14px;
-		padding: 6px;
-	}
-	.board-context-menu--sheet .ctx-item {
-		min-height: 46px;
-		border-radius: 10px;
-		padding: 10px 12px;
-		font-size: 14px;
-	}
-	.board-context-menu--sheet .ctx-item :global(svg) {
-		width: 16px;
-		height: 16px;
-	}
-
 	.ctx-reactions {
 		display: flex;
 		justify-content: space-between;
@@ -464,35 +362,27 @@ onDestroy(() => {
 		width: 32px;
 		height: 32px;
 		place-items: center;
-		border: 0;
 		border-radius: 8px;
-		background: transparent;
 		color: var(--text-secondary);
-		cursor: pointer;
-		transition: background-color 100ms ease, color 100ms ease, transform 120ms ease;
+		transition:
+			background-color 100ms ease,
+			color 100ms ease,
+			scale 120ms var(--ease-out);
 	}
-	.ctx-reaction:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.ctx-reaction:active { transform: scale(0.9); }
-	.board-context-menu--sheet .ctx-reaction { width: 44px; height: 44px; }
 
-	.ctx-item {
-		display: flex;
-		width: 100%;
-		align-items: center;
-		gap: 8px;
-		border: 0;
-		border-radius: 6px;
-		background: transparent;
-		padding: 7px 8px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 500;
-		text-align: left;
-		cursor: pointer;
-		transition: background-color 100ms ease, color 100ms ease;
+	.ctx-reaction:active {
+		scale: 0.9;
 	}
-	.ctx-item:hover { background: var(--bg-hover); color: var(--text-primary); }
-	.ctx-item:disabled { cursor: default; opacity: 0.55; }
-	.ctx-item :global(.ctx-check) { margin-left: auto; color: var(--brand); }
-	.ctx-item--danger:hover { background: var(--color-error-bg); color: var(--error-700); }
+
+	@media (hover: hover) {
+		.ctx-reaction:hover {
+			background: var(--bg-hover);
+			color: var(--text-primary);
+		}
+	}
+
+	:global([data-sheet]) .ctx-reaction {
+		width: 44px;
+		height: 44px;
+	}
 </style>

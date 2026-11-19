@@ -1,6 +1,13 @@
 <script lang="ts">
 import { File as FileIcon, Link2Off, TextCursorInput } from "lucide-svelte";
 import SidebarActionButton from "#lib/components/sidebar/SidebarActionButton.svelte";
+import type { ContextMenuContent } from "#lib/context-menu/context-menu.svelte.ts";
+import {
+	linkEntries,
+	MENU_SEPARATOR,
+	removeLabelEntry,
+} from "#lib/context-menu/menu.ts";
+import { contextMenuTrigger } from "#lib/context-menu/trigger.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 
@@ -32,6 +39,24 @@ const {
 
 const locale = $derived(getLocale());
 const actionCount = $derived((onInsert ? 1 : 0) + (onRemoveLabel ? 1 : 0));
+function menu(): ContextMenuContent {
+	return {
+		title,
+		items: [
+			onInsert && {
+				id: "insert",
+				label: m.common_insert({}, { locale }),
+				icon: TextCursorInput,
+				run: () => onInsert(path),
+			},
+			MENU_SEPARATOR,
+			...linkEntries(href),
+			MENU_SEPARATOR,
+			removeLabelEntry(removeLabelTitle, removeLabelDisabled, onRemoveLabel),
+		],
+	};
+}
+
 const hoverPaddingClass = $derived(
 	!isMobile && actionCount > 0
 		? actionCount > 1
@@ -49,6 +74,7 @@ const hoverPaddingClass = $derived(
 		onNavigate(path);
 	}}
 	title={subtitle ?? path}
+	{@attach contextMenuTrigger(menu)}
 >
 	<FileIcon class="h-3.5 w-3.5 shrink-0 text-text-placeholder" />
 	<span class="min-w-0 flex-1 truncate leading-tight">{title}</span>

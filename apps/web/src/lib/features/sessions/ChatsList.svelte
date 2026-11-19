@@ -59,8 +59,8 @@ const OVERSCAN_ROWS = 6;
 const locale = $derived(getLocale());
 const isMobile = $derived(useCompactShell());
 const isPage = $derived(variant === "page");
-// Touch layouts open on a single tap, so rename stays desktop-only.
-const canRename = $derived(!isPage && !isMobile);
+// Touch layouts open on a single tap; elsewhere a click waits for a double click to rename.
+const waitForDoubleClick = $derived(!isPage && !isMobile);
 const scoped = $derived(Boolean(filter.space));
 const density = $derived<FixedListRowDensity>(
 	isPage ? "comfortable" : "compact",
@@ -201,7 +201,7 @@ function forkTooltip(parentTitle: string | null | undefined) {
 }
 
 function open(event: MouseEvent, session: UserSessionListItem) {
-	rename.click(event, () => navigate(session), canRename);
+	rename.click(event, () => navigate(session), waitForDoubleClick);
 }
 
 function navigate(session: UserSessionListItem) {
@@ -304,14 +304,14 @@ function onScroll(event: Event) {
 						href={hrefFor(session)}
 						{density}
 						active={activeSessionId === session.id}
-						isMobile={isPage}
+						isMobile={isPage || isMobile}
 						showSourceBadge={!filter.source}
 						tree={row.tree}
 						tooltip={tooltipFor(row)}
 						showInsert={false}
-						rename={canRename ? rename : undefined}
+						{rename}
 						onNavigate={open}
-						onArchive={canRename ? (target) => void toggleArchive(target) : undefined}
+						onArchive={(target) => void toggleArchive(target)}
 					>
 						{#snippet avatar()}
 							<SpaceAvatar name={spaceName(session)} profile={session.space?.publicProfile ?? null} seed={session.spaceId} size={LIST_ROW_AVATAR[density]} />

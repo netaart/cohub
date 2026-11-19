@@ -358,7 +358,7 @@ $effect(() => {
 			{activePort}
 			draggable={draggable && !mobile}
 			touchDraggable={draggable}
-			showItemActions={showItemActions && !mobile}
+			{showItemActions}
 			{canWrite}
 			{previewEndpoints}
 		/>

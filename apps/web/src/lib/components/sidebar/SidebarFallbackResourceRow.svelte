@@ -7,6 +7,13 @@ import {
 	MessageSquare,
 } from "lucide-svelte";
 import SidebarActionButton from "#lib/components/sidebar/SidebarActionButton.svelte";
+import type { ContextMenuContent } from "#lib/context-menu/context-menu.svelte.ts";
+import {
+	linkEntries,
+	MENU_SEPARATOR,
+	removeLabelEntry,
+} from "#lib/context-menu/menu.ts";
+import { contextMenuTrigger } from "#lib/context-menu/trigger.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 
@@ -29,6 +36,17 @@ const {
 const locale = $derived(getLocale());
 const title = $derived(item.resource?.title ?? item.resourceRef);
 const subtitle = $derived(item.resource?.subtitle ?? item.resourceRef);
+function menu(): ContextMenuContent {
+	return {
+		title,
+		items: [
+			...linkEntries(item.href),
+			MENU_SEPARATOR,
+			removeLabelEntry(removeLabelTitle, removeLabelDisabled, onRemoveLabel),
+		],
+	};
+}
+
 const Icon = $derived.by(() => {
 	if (item.resourceType === "session") return MessageSquare;
 	if (item.resourceType === "checkpoint") return History;
@@ -44,6 +62,7 @@ const Icon = $derived.by(() => {
 		onNavigate(item.href);
 	}}
 	title={subtitle}
+	{@attach contextMenuTrigger(menu)}
 >
 	<Icon class="h-3.5 w-3.5 shrink-0 text-text-placeholder" />
 	<span class="min-w-0 flex-1 truncate">{title}</span>

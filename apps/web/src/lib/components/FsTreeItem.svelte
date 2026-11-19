@@ -6,6 +6,10 @@ import {
 	ChevronDown,
 	Download,
 	File as FileIcon,
+	FilePlus,
+	FolderPlus,
+	FolderUp,
+	LayoutTemplate,
 	Loader2,
 	MoreHorizontal,
 	Pencil,
@@ -17,6 +21,12 @@ import {
 import { preloadBoardRuntime } from "#lib/board/runtime/board-runtime.ts";
 import FsTreeItem from "#lib/components/FsTreeItem.svelte";
 import { useFileTreeMarks } from "#lib/components/file-tree-marks.ts";
+import {
+	type ContextMenuContent,
+	contextMenu,
+} from "#lib/context-menu/context-menu.svelte.ts";
+import { MENU_SEPARATOR } from "#lib/context-menu/menu.ts";
+import { contextMenuTrigger } from "#lib/context-menu/trigger.ts";
 import {
 	COHUB_PATH_MIME,
 	getCohubResourceDragData,
@@ -154,18 +164,6 @@ function moveIntoThisDir(dragged: {
 	return true;
 }
 
-// Inline dropdown state
-let menuOpen = $state(false);
-let menuEl: HTMLDivElement | null = $state(null);
-
-function openMenu() {
-	menuOpen = true;
-}
-
-function closeMenu() {
-	menuOpen = false;
-}
-
 function stop(handler: () => void) {
 	return (e: MouseEvent) => {
 		e.stopPropagation();
@@ -173,12 +171,99 @@ function stop(handler: () => void) {
 	};
 }
 
-function stopAndCloseMenu(handler: () => void) {
-	return (e: MouseEvent) => {
-		e.stopPropagation();
-		handler();
-		menuOpen = false;
+function menu(): ContextMenuContent | null {
+	if (!showItemActions) return null;
+	return {
+		title: node.name,
+		items: [
+			!isDir &&
+				onOpenWith && {
+					id: "open-with",
+					label: m.file_open_with({}, { locale }),
+					icon: AppWindow,
+					run: () => onOpenWith(node),
+				},
+			!isDir &&
+				onDownload && {
+					id: "download",
+					label: m.file_download({}, { locale }),
+					icon: Download,
+					run: () => onDownload(node),
+				},
+			...(isDir && canWrite
+				? [
+						{
+							id: "new-file",
+							label: m.files_new_file({}, { locale }),
+							icon: FilePlus,
+							run: () => onCreateFile(node.path),
+						},
+						onCreateBoard && {
+							id: "new-board",
+							label: m.files_new_board({}, { locale }),
+							icon: LayoutTemplate,
+							run: () => onCreateBoard(node.path),
+						},
+						{
+							id: "new-folder",
+							label: m.files_new_folder({}, { locale }),
+							icon: FolderPlus,
+							run: () => onCreateDir(node.path),
+						},
+						MENU_SEPARATOR,
+						onUpload && {
+							id: "upload-files",
+							label: m.files_upload_files({}, { locale }),
+							icon: Upload,
+							run: handleUploadClick,
+						},
+						onUpload && {
+							id: "upload-folder",
+							label: m.files_upload_folder({}, { locale }),
+							icon: FolderUp,
+							run: handleFolderUploadClick,
+						},
+						MENU_SEPARATOR,
+						onPublishDirectory && {
+							id: "publish",
+							label: m.file_publish({}, { locale }),
+							icon: Rocket,
+							run: () => onPublishDirectory(node.path),
+						},
+					]
+				: []),
+			MENU_SEPARATOR,
+			canWrite &&
+				onInsertReference && {
+					id: "insert",
+					label: m.file_insert({}, { locale }),
+					icon: TextCursorInput,
+					run: () => onInsertReference(node.path),
+				},
+			canWrite && {
+				id: "rename",
+				label: m.file_rename({}, { locale }),
+				icon: Pencil,
+				run: () => onRename(node),
+			},
+			MENU_SEPARATOR,
+			canWrite && {
+				id: "delete",
+				label: m.file_delete({}, { locale }),
+				icon: Trash2,
+				danger: true,
+				run: () => onDelete(node),
+			},
+		],
 	};
+}
+
+function toggleMenu(event: MouseEvent) {
+	event.stopPropagation();
+	contextMenu.toggle({
+		target: event.currentTarget as HTMLElement,
+		source: menu,
+	});
 }
 
 function handleClick() {
@@ -308,18 +393,6 @@ function handleUploadClick() {
 function handleFolderUploadClick() {
 	openUploadPicker(true);
 }
-
-// Close menu on outside click
-$effect(() => {
-	if (!menuOpen) return;
-	function onClick(e: MouseEvent) {
-		if (menuEl && !menuEl.contains(e.target as Node)) {
-			menuOpen = false;
-		}
-	}
-	document.addEventListener("click", onClick, true);
-	return () => document.removeEventListener("click", onClick, true);
-});
 </script>
 
 <div
@@ -327,7 +400,6 @@ $effect(() => {
   class:selected={isActive}
   data-space-file-path={node.path}
   class="tree-item"
-  class:menu-open={menuOpen}
   class:drop-target={isDragOver || isPointerDropTarget}
   class:move-target={isMoveTarget || isPointerDropTarget}
   class:drag-source={isPointerDragSource}
@@ -358,6 +430,7 @@ $effect(() => {
   onkeydown={handleKeydown}
   onpointerenter={() => preloadBoardRuntime(node.path)}
   onfocus={() => preloadBoardRuntime(node.path)}
+  {@attach contextMenuTrigger(menu)}
   ondragstart={(e) => {
     if (!draggable) {
       e.preventDefault();
@@ -419,58 +492,12 @@ $effect(() => {
       {#if canWrite}
         <button type="button" class="action" title={m.file_rename({}, { locale })} onclick={stop(() => onRename(node))}><Pencil class="w-3.5 h-3.5" /></button>
       {/if}
-      {#if isDir}
-        {#if onUpload}
-          <button type="button" class="action" title={m.files_upload_files({}, { locale })} onclick={stop(handleUploadClick)}><Upload class="w-3.5 h-3.5" /></button>
-        {/if}
-        <span class="relative">
-          <button type="button" class="action" title={m.file_more({}, { locale })} onclick={stop(openMenu)}>
-            <MoreHorizontal class="w-3.5 h-3.5" />
-          </button>
-          {#if menuOpen}
-            <div class="dropdown menu-surface" bind:this={menuEl}>
-              {#if onUpload}
-                <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(handleFolderUploadClick)}><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/><path d="M12 10V16"/><path d="m15 13-3-3-3 3"/></svg> {m.files_upload_folder({}, { locale })}</button>
-              {/if}
-              <div class="dropdown-sep"></div>
-              <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(() => onCreateFile(node.path))}>{m.files_new_file({}, { locale })}</button>
-              {#if onCreateBoard}
-                <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(() => onCreateBoard(node.path))}>{m.files_new_board({}, { locale })}</button>
-              {/if}
-              <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(() => onCreateDir(node.path))}>{m.files_new_folder({}, { locale })}</button>
-              {#if onPublishDirectory}
-                <div class="dropdown-sep"></div>
-                <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(() => onPublishDirectory(node.path))}><Rocket class="w-3.5 h-3.5" /> {m.file_publish({}, { locale })}</button>
-              {/if}
-              <div class="dropdown-sep"></div>
-              <button type="button" class="dropdown-item danger" onclick={stopAndCloseMenu(() => onDelete(node))}>{m.file_delete({}, { locale })}</button>
-            </div>
-          {/if}
-        </span>
-      {:else}
-        <span class="relative">
-          <button type="button" class="action" title={m.file_more({}, { locale })} onclick={stop(openMenu)}>
-            <MoreHorizontal class="w-3.5 h-3.5" />
-          </button>
-          {#if menuOpen}
-            <div class="dropdown menu-surface" bind:this={menuEl}>
-              {#if onOpenWith}
-                <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(() => onOpenWith(node))}><AppWindow class="w-3.5 h-3.5" /> {m.file_open_with({}, { locale })}</button>
-                <div class="dropdown-sep"></div>
-              {/if}
-              {#if onDownload}
-                <button type="button" class="dropdown-item" onclick={stopAndCloseMenu(() => onDownload(node))}><Download class="w-3.5 h-3.5" /> {m.file_download({}, { locale })}</button>
-                {#if canWrite}
-                  <div class="dropdown-sep"></div>
-                {/if}
-              {/if}
-              {#if canWrite}
-                <button type="button" class="dropdown-item danger" onclick={stopAndCloseMenu(() => onDelete(node))}><Trash2 class="w-3.5 h-3.5" /> Delete</button>
-              {/if}
-            </div>
-          {/if}
-        </span>
+      {#if isDir && onUpload}
+        <button type="button" class="action" title={m.files_upload_files({}, { locale })} onclick={stop(handleUploadClick)}><Upload class="w-3.5 h-3.5" /></button>
       {/if}
+      <button type="button" class="action" title={m.file_more({}, { locale })} aria-label={m.file_more({}, { locale })} aria-haspopup="menu" aria-expanded="false" onclick={toggleMenu}>
+        <MoreHorizontal class="w-3.5 h-3.5" />
+      </button>
     </span>
   {/if}
 </div>
@@ -545,8 +572,10 @@ $effect(() => {
     color: var(--text-secondary);
   }
 
-  .tree-item.menu-open {
-    z-index: 20;
+  .tree-item:global([data-context-open]),
+  .tree-item:has(.action:global([data-context-open])) {
+    background: var(--sidebar-item-hover-bg, var(--bg-hover));
+    color: var(--text-secondary);
   }
 
   .tree-item.drop-target {
@@ -592,14 +621,16 @@ $effect(() => {
     line-height: 1.25;
   }
 
-  .tree-item:hover:not(.menu-open) {
+  .tree-item:hover {
     z-index: 1;
   }
 
-  .tree-item:hover,
-  .tree-item:focus-within,
-  .tree-item.selected {
-    padding-right: 104px;
+  @media (hover: hover) {
+    .tree-item:hover,
+    .tree-item:focus-within,
+    .tree-item.selected {
+      padding-right: 104px;
+    }
   }
 
   .tree-mark {
@@ -613,10 +644,12 @@ $effect(() => {
   }
 
   /* Row actions overlay the trailing edge; they take precedence. */
-  .tree-item:hover .tree-mark,
-  .tree-item:focus-within .tree-mark,
-  .tree-item.selected .tree-mark {
-    visibility: hidden;
+  @media (hover: hover) {
+    .tree-item:hover .tree-mark,
+    .tree-item:focus-within .tree-mark,
+    .tree-item.selected .tree-mark {
+      visibility: hidden;
+    }
   }
 
   .actions {
@@ -632,11 +665,14 @@ $effect(() => {
     transition: opacity 100ms ease;
   }
 
-  .tree-item:hover .actions,
-  .tree-item:focus-within .actions,
-  .tree-item.selected .actions {
-    opacity: 1;
-    pointer-events: auto;
+  @media (hover: hover) {
+    .tree-item:hover .actions,
+    .tree-item:focus-within .actions,
+    .tree-item.selected .actions,
+    .actions:has(:global([data-context-open])) {
+      opacity: 1;
+      pointer-events: auto;
+    }
   }
 
   .action {
@@ -652,51 +688,9 @@ $effect(() => {
     cursor: pointer;
   }
 
-  .action:hover {
+  .action:hover,
+  .action:global([data-context-open]) {
     background: var(--bg-hover-strong);
     color: var(--text-primary);
-  }
-
-  /* Inline dropdown */
-  .relative { position: relative; }
-
-  .dropdown {
-    position: absolute;
-    right: 0;
-    top: calc(100% + 4px);
-    z-index: 30;
-    min-width: 150px;
-    padding: 4px;
-  }
-
-  .dropdown-item {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    border: none;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 12px;
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .dropdown-item:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-
-  .dropdown-item.danger:hover {
-    color: var(--color-error-soft);
-    background: var(--color-error-bg);
-  }
-
-  .dropdown-sep {
-    height: 1px;
-    margin: 4px 6px;
-    background: var(--border-subtle);
   }
 </style>

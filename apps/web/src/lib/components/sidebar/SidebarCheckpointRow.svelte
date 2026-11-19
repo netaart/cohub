@@ -2,6 +2,13 @@
 import type { CheckpointRecord } from "@neta-art/cohub";
 import { Link2Off } from "lucide-svelte";
 import SidebarActionButton from "#lib/components/sidebar/SidebarActionButton.svelte";
+import type { ContextMenuContent } from "#lib/context-menu/context-menu.svelte.ts";
+import {
+	linkEntries,
+	MENU_SEPARATOR,
+	removeLabelEntry,
+} from "#lib/context-menu/menu.ts";
+import { contextMenuTrigger } from "#lib/context-menu/trigger.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { formatCompactAbsoluteTime } from "#lib/time-format.ts";
@@ -34,6 +41,17 @@ const title = $derived(
 		m.sidebar_save_name({ id: compactId(checkpoint.id) }, { locale }),
 );
 const createdAt = $derived(formatCompactAbsoluteTime(checkpoint.createdAt));
+
+function menu(): ContextMenuContent {
+	return {
+		title,
+		items: [
+			...linkEntries(href),
+			MENU_SEPARATOR,
+			removeLabelEntry(removeLabelTitle, removeLabelDisabled, onRemoveLabel),
+		],
+	};
+}
 </script>
 
 <a
@@ -44,6 +62,7 @@ const createdAt = $derived(formatCompactAbsoluteTime(checkpoint.createdAt));
 		onNavigate(checkpoint);
 	}}
 	title={title}
+	{@attach contextMenuTrigger(menu)}
 >
 	<span class="flex min-w-0 flex-1 items-center gap-2 leading-tight">
 		<span class="min-w-0 flex-1 truncate leading-4">{title}</span>
