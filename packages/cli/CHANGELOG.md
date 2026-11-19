@@ -1,5 +1,35 @@
 # @neta-art/cohub-cli
 
+## 10.33.0
+
+### Minor Changes
+
+- 47eed70: `cohub boards simulate` previews what a viewer sees: `--mode edit|play|view`, `--viewport WxH` and `--pointer coarse|fine` set the device (`ctx.env`, `ctx.view`), `--camera` draws the screen following the camera scripts direct, HUDs included (`--no-screen` drops them), and `-o` takes `--at` frames as a `%d` sequence or a video, with the same options as `export`. `export --inputs` also runs simulate steps files, `export` and `simulate` take `--view x,y,zoom[,pitch,bearing]` for a temporary camera, and `export --screen` draws screen layers. Browser frames are capped at 16 megapixels; a forced GPU export with 3D no longer starts a second browser that kept the command from exiting, the shared browser frees a caller's models when it leaves, and shaders outside the exported area are no longer reported. The SDK harness takes `mode`, `viewport` and `view` in place of `readonly` and `tool`, follows directed cameras and exposes `view` and `env`; `prepareBoardExport` takes `view`, `viewport` and `screen`. `simulate -o --json` reports the files as `export --json` does.
+- 47eed70: `script.modes` limits a Board script to some of `edit`, `play`, `view` and `export` (all by default): elsewhere it does not load, draw, present, take input or broadcast, and switching modes starts or stops it. Games and directed shows usually take `["play", "view", "export"]`. `boardScriptAttachments(document, mode)` and `hasBoardScripts(document, mode)` take an optional mode, and the editor adds `scriptMode` and `runsScripts`. Presence shares each viewer's `scriptMode`, and `leadsScripts(owner)` and the stage's `scriptLeader(owner)` pick an autonomous-commit leader per script among the editors whose mode runs it. `cohub boards simulate` runs scripts as their modes allow and warns about scripts its final mode leaves out.
+  
+  A shape's outline, corner radius and dashes now scale with its transform, its own `scale` and its Frames', and its label scales by the smaller of the two axes, so a scaled shape keeps its proportions and buttons on a script's screen layer keep readable labels at any zoom.
+- 47eed70: `cohub generate --3d [motion=]<path-or-url>` sends 3D model and motion inputs; local files upload to an unlisted public URL like other media, and `-o` saves 3D outputs. A 3D input URL from one of your generations in the last 3 days carries that task's provider meta, so Meshy `animation` and `text-to-3d-refine` work from the previous step's output URL; the CLI rejects a local file for them. Failed generations now name provider failures such as "Generation provider returned no output" with the gateway's message and request ID, and a single provider request that returned no output, an upstream failure, or a 5xx is retried once.
+- 097f074: Generation models are organized by their declared `category`. `cohub models ls --model-type multimodal` adds a Category column, sorts by category, and accepts `--category image|video|audio|3d|decision`; `cohub models show` prints the category. The SDK exports `GENERATION_CATEGORIES`, `generationModelCategory`, and `groupGenerationModelsByCategory`. Generation billing derives its usage type from the same category, and audio models now record `generation.audio`.
+- 935bea0: Opening the local model picker refreshes that Harness in the background. `cohub runtime refresh-models <harness>` requests the same refresh. An empty Codex discovery retains known models for the same provider and configured model, with current thinking and service tier defaults.
+- 3f6ccec: Sessions and Turns record who started them: `human`, `agent` (another agent's Turn), or `automation` (schedules, hooks, API and WebSocket clients). `cohub me sessions` accepts `--initiator` and `--source`, and session and turn tables show a By column. `user.listSessions` accepts `initiator`, and the SDK exports `readSessionInitiator`, `readTurnInitiator`, and the shared source vocabulary. Desktop and mobile shells now report the `desktop` and `mobile` sources instead of `web`. An unknown `source` or `initiator` on `GET /api/me/sessions` returns 400 with `param` and `unknownKeys`, replacing `unknownSources`.
+
+### Patch Changes
+
+- 47eed70: Board model cards show a recorded cover instead of downloading the model for a still. An editing stage given `uploadModelCover` stores the still it draws, or for an object model a still in the object's lighting, once per model file and look, and writes its URL to `props.snapshot.coverUrl`; a cover drawn for another look is ignored. `publicAssets.uploadBoardPreview` stores a cover under its content key, skipping the upload when one is already stored, and `renderModelStill` takes `clip` and `lighting` and returns the image with the model file's sha256. Model stills pose the item's clip, and Node exports draw a model's cover.
+- 7bd07a6: Boards stand on their own: `client.boards.byId(boardId)` binds a Board without a Space, and requests go to `/api/boards/:boardId`. A Board's home is the Space that created it (`spaceId` on reads and on `replica.state`); a `.board` file in any Space links it. Task and session cards show runs and chats of any Space, and their snapshots name that `spaceId`. `space.board(id)` is deprecated, `BoardClient` no longer has `spaceId`, and the replica cache now keys Boards by id alone, dropping earlier cached copies.
+- a690ea4: Sync the current Codex context window usage and native thinking level for local sessions.
+- Updated dependencies [47eed70]
+- Updated dependencies [47eed70]
+- Updated dependencies [47eed70]
+- Updated dependencies [47eed70]
+- Updated dependencies [7bd07a6]
+- Updated dependencies [a690ea4]
+- Updated dependencies [097f074]
+- Updated dependencies [935bea0]
+- Updated dependencies [3f6ccec]
+- Updated dependencies [7c33d2b]
+  - @neta-art/cohub@13.25.0
+
 ## 10.32.0
 
 ### Minor Changes
