@@ -36,6 +36,7 @@ export * from "./display/index.js";
 export * from "./rtc/index.js";
 export * from "./search/index.js";
 export * from "./sent-turns.js";
+export * from "./session-attribution.js";
 export * from "./generation/index.js";
 export * from "./generation/blocks.js";
 export * from "./runtime/index.js";

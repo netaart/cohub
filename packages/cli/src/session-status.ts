@@ -1,4 +1,4 @@
-import type { SessionArchiveFilter, SessionRecord } from "@neta-art/cohub";
+import { readSessionInitiator, type SessionArchiveFilter, type SessionRecord } from "@neta-art/cohub";
 import type { Column } from "./output.js";
 
 type SessionStatusFields = Pick<SessionRecord, "activeTurn" | "lastTurnIssue" | "archivedAt">;
@@ -17,6 +17,12 @@ export const SESSION_STATUS_COLUMN: Column = {
   key: "activeTurn",
   label: "Status",
   format: (_value, row) => sessionStatusText(row as Partial<SessionStatusFields>),
+};
+
+export const SESSION_INITIATOR_COLUMN: Column = {
+  key: "initiator",
+  label: "By",
+  format: (_value, row) => readSessionInitiator(row as Partial<SessionRecord>) ?? "",
 };
 
 export function sessionArchiveFilter(opts: { archived?: boolean; all?: boolean }): SessionArchiveFilter | undefined {

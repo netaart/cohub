@@ -29,7 +29,7 @@ import type { TaskPayload } from "@cohub/protocol/task";
 import type { Job } from "bullmq";
 import { and, eq } from "drizzle-orm";
 import { apps, spaces, spaceSessions, taskRuns, userProfiles } from "@cohub/db";
-import { assignLabelsToSession, assignSessionSourceSystemLabel } from "@cohub/core/labels";
+import { assignLabelsToSession, assignSessionAttributionLabels } from "@cohub/core/labels";
 import { createLogger } from "@cohub/infra/logging";
 import { config } from "../config.js";
 import { db } from "../db.js";
@@ -152,8 +152,8 @@ async function runPromptHook(input: {
       origin,
     });
     sessionId = created.id;
-    await assignSessionSourceSystemLabel({ db, spaceId: input.spaceId, sessionId, source: "space_hook" }).catch((error) => {
-      logger.warn("[SpaceHooks] failed to assign source label", error);
+    await assignSessionAttributionLabels({ db, spaceId: input.spaceId, session: created }).catch((error) => {
+      logger.warn("[SpaceHooks] failed to assign attribution labels", error);
     });
   }
 

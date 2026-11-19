@@ -3,7 +3,7 @@ import { accessPolicies, type sessionMessages } from "@cohub/db";
 import { and, eq } from "drizzle-orm";
 import type { RealtimeMessageRecord, RealtimeSessionFork, RealtimeSessionRecord, RealtimeTaskRecord, RealtimeTurnRecord, SpacePresenceSnapshot } from "@cohub/protocol/realtime";
 import { getRealtimeSpaceRoom } from "@cohub/protocol/realtime";
-import type { MessageRecord, SessionActiveTurn, SessionRecord, SessionTurnIssue, SessionTurnRecord } from "@cohub/protocol/model";
+import { readSessionInitiator, type MessageRecord, type SessionActiveTurn, type SessionRecord, type SessionTurnIssue, type SessionTurnRecord } from "@cohub/protocol/model";
 import type { TaskRunStatus } from "@cohub/protocol/task";
 import { syncSessionBoardsLater } from "./board-session-sync.js";
 import { dispatchRealtimeEvent } from "./channels.js";
@@ -89,7 +89,9 @@ export const toRealtimeSessionRecord = (session: RealtimeSessionInput): Realtime
   ...(session.archivedAt !== undefined ? { archivedAt: session.archivedAt } : {}),
   createdAt: toIso(session.createdAt),
   updatedAt: toIso(session.updatedAt),
-  ...("meta" in session ? { participantUserUuids: readSessionParticipantUserUuids(session.meta) } : {}),
+  ...("meta" in session
+    ? { participantUserUuids: readSessionParticipantUserUuids(session.meta), initiator: readSessionInitiator(session) ?? undefined }
+    : {}),
 });
 
 export const messageRecordFromRow = (message: typeof sessionMessages.$inferSelect): MessageRecord => ({

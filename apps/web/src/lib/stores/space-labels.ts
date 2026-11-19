@@ -1,10 +1,14 @@
 import {
+	isSessionInitiator,
+	isSessionSourceKey,
 	type LabelAssignmentListItem,
 	type LabelAssignmentRecord,
 	type LabelItemsResponse,
 	type LabelListItem,
 	type LabelResourceType,
 	SESSION_ARCHIVED_LABEL_SYSTEM_KEY,
+	SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX,
+	SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX,
 	type SessionRecord,
 } from "@neta-art/cohub";
 import {
@@ -23,6 +27,7 @@ import {
 	hydrateChannelLabels,
 	onChannelLabelDisplayUpdated,
 } from "#lib/stores/channel-label-display.ts";
+import { chatsKindName } from "#lib/stores/chats-filter.ts";
 import { sessionStore } from "#lib/stores/session-store.ts";
 
 const LABEL_ITEMS_PAGE_SIZE = 30;
@@ -62,12 +67,31 @@ export function isSessionChannelLabel(label: LabelListItem) {
 	return Boolean(getSessionChannelIdFromLabel(label));
 }
 
+function attributionLabelName(label: LabelListItem): string | null {
+	const systemKey = label.systemKey ?? "";
+	if (systemKey.startsWith(SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX)) {
+		const kind = systemKey.slice(
+			SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX.length,
+		);
+		if (kind === "root") return m.session_initiator_root();
+		return isSessionInitiator(kind) ? chatsKindName(kind) : null;
+	}
+	if (systemKey.startsWith(SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX)) {
+		const kind = systemKey.slice(SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX.length);
+		if (kind === "root") return m.session_source_root();
+		return isSessionSourceKey(kind) ? chatsKindName(kind) : null;
+	}
+	return null;
+}
+
 export function getLabelDisplayName(
 	label: LabelListItem,
 	options?: { channelIncludeProvider?: boolean },
 ) {
 	if (label.systemKey === SESSION_ARCHIVED_LABEL_SYSTEM_KEY)
 		return m.chats_archived();
+	const attribution = attributionLabelName(label);
+	if (attribution) return attribution;
 	if (label.systemKey === `${SESSION_USER_LABEL_SYSTEM_KEY_PREFIX}root`)
 		return "User";
 	if (label.systemKey === `${SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX}root`)
@@ -96,6 +120,8 @@ export function getLabelChannelInfo(label: LabelListItem) {
 export function getLabelDisplayTitle(label: LabelListItem) {
 	if (label.systemKey === SESSION_ARCHIVED_LABEL_SYSTEM_KEY)
 		return m.chats_archived();
+	const attribution = attributionLabelName(label);
+	if (attribution) return attribution;
 	if (label.systemKey === `${SESSION_USER_LABEL_SYSTEM_KEY_PREFIX}root`)
 		return label.name === "User" ? "User" : `${label.name} · User`;
 	if (label.systemKey === `${SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX}root`)

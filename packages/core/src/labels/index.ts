@@ -228,7 +228,7 @@ export async function listLabelsByRank(db: LabelsDb, spaceId: string) {
 }
 
 export { assignSessionParticipantSystemLabels, getSessionUserLabelSystemKey, parseSessionUserLabelSystemKey, SESSION_USER_LABEL_SYSTEM_KEY_PREFIX, SESSION_USER_ROOT_LABEL_SYSTEM_KEY } from "./session-user.js";
-export { assignSessionSourceSystemLabel, getSessionSourceLabelSystemKey, resolveKnownSessionSourceLabelSystemKey, resolveSessionSourceKey, resolveSessionSourceLabelRef, resolveSessionSourceLabelSystemKey, SESSION_SOURCE_KEYS, SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX, SESSION_SOURCE_ROOT_LABEL_SYSTEM_KEY } from "./session-source.js";
+export { assignSessionAttributionLabels, assignSessionInitiatorLabel, getSessionInitiatorLabelSystemKey, getSessionSourceLabelSystemKey, resolveKnownSessionSourceLabelSystemKey, resolveSessionInitiatorLabelId, resolveSessionSourceLabelKey, SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX, SESSION_INITIATOR_ROOT_LABEL_SYSTEM_KEY, SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX, SESSION_SOURCE_ROOT_LABEL_SYSTEM_KEY } from "./session-attribution.js";
 export { assignSessionChannelSystemLabel, getSessionChannelLabelSystemKey, parseSessionChannelLabelSystemKey, SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX, SESSION_CHANNEL_ROOT_LABEL_SYSTEM_KEY } from "./session-channel.js";
 export { parseSessionArchiveFilter, SESSION_ARCHIVED_LABEL_NAME, SessionRunningError, sessionArchivedCondition, sessionArchiveFilterCondition, setSessionArchived, unarchiveSessionInTx } from "./session-archive.js";
 export { listResourceLabelRefs } from "./resource-events.js";

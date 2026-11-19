@@ -1,8 +1,9 @@
 import { billingOperations, resolveGenerationUsageType } from "@cohub/billing";
 import { GenerationValidationError } from "@neta-art/generation";
 import { buildGenerationRequestMessage, buildGenerationResultMessage } from "@cohub/protocol/generation";
+import { readTurnInitiator } from "@cohub/protocol/model";
+import type { RequestSource } from "@cohub/protocol/provenance";
 import { createInitialSpaceSession, getSpaceSessionById, persistMessageNode } from "./space-sessions.js";
-import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
 import { db } from "./db/index.js";
 import { sessionMessages, sessionTurns, spaceSessions, taskRuns } from "@cohub/db";
 import { and, eq, sql } from "drizzle-orm";
@@ -46,6 +47,7 @@ export async function createGenerationSessionExecution(input: {
   parameters?: Record<string, unknown>;
   meta?: Record<string, unknown>;
   source?: string | null;
+  requestSource?: RequestSource | null;
 }) {
   const requestedSessionId = input.sessionId?.trim() || null;
   const requestedClientMessageId = input.clientMessageId?.trim() || null;
@@ -88,6 +90,19 @@ export async function createGenerationSessionExecution(input: {
   }
   const { decision: billingDecision, hold } = admission;
 
+  const newSession = {
+    spaceId: input.spaceId,
+    userUuid: input.userId,
+    title: null,
+    source: input.source ?? "web",
+    externalSessionId: null,
+    meta: { createdBy: "direct_generation", ...(input.requestSource ? { requestSource: input.requestSource } : {}) },
+  };
+  const turnProvenance = {
+    source: newSession.source,
+    ...(input.requestSource ? { requestSource: input.requestSource } : {}),
+    initiator: readTurnInitiator({ source: newSession.source, requestSource: input.requestSource }),
+  };
   let enqueued = false;
   let sessionId = input.sessionId?.trim() || null;
   let turnId: string | null = null;
@@ -95,27 +110,19 @@ export async function createGenerationSessionExecution(input: {
     if (sessionId) {
       const session = await getSpaceSessionById(sessionId);
       if (!session) {
-        const created = await createInitialSpaceSession({ spaceId: input.spaceId, sessionId, userUuid: input.userId, title: null, source: input.source ?? "web", externalSessionId: null, meta: { createdBy: "direct_generation" } });
-        sessionId = created.id;
-        await assignSessionSourceSystemLabel({ db, spaceId: input.spaceId, sessionId, source: input.source ?? "web", provider: null }).catch((error) => {
-          console.warn("[GenerationSession] failed to assign source label", { sessionId, error });
-        });
+        sessionId = (await createInitialSpaceSession({ ...newSession, sessionId })).id;
       } else if (session.spaceId !== input.spaceId) {
         throw new GenerationSessionExecutionError(404, "generation_session_not_found", "Generation session not found in this space.");
       }
 
     }
     if (!sessionId) {
-      const session = await createInitialSpaceSession({ spaceId: input.spaceId, sessionId: crypto.randomUUID(), userUuid: input.userId, title: null, source: input.source ?? "web", externalSessionId: null, meta: { createdBy: "direct_generation" } });
-      sessionId = session.id;
-      await assignSessionSourceSystemLabel({ db, spaceId: input.spaceId, sessionId, source: input.source ?? "web", provider: null }).catch((error) => {
-        console.warn("[GenerationSession] failed to assign source label", { sessionId, error });
-      });
+      sessionId = (await createInitialSpaceSession({ ...newSession, sessionId: crypto.randomUUID() })).id;
     }
     const request = buildGenerationRequestMessage({ taskId: taskRunId, model: input.model, provider: declaration.adapter?.type ?? null, parameters, content: input.content });
     let turn: Awaited<ReturnType<typeof createSessionTurn>>;
     try {
-      turn = await createSessionTurn({ id: crypto.randomUUID(), sessionId, userUuid: input.userId, userContent: request.content, executionKind: "direct_generation", intent: "followup", meta: { ...(input.meta ?? {}), executionKind: "direct_generation", generationTaskId: taskRunId, clientMessageId: input.clientMessageId ?? null } });
+      turn = await createSessionTurn({ id: crypto.randomUUID(), sessionId, userUuid: input.userId, userContent: request.content, executionKind: "direct_generation", intent: "followup", meta: { ...(input.meta ?? {}), ...turnProvenance, executionKind: "direct_generation", generationTaskId: taskRunId, clientMessageId: input.clientMessageId ?? null } });
     } catch (error) {
       const clientMessageId = input.clientMessageId?.trim();
       if (!clientMessageId || !isPostgresUniqueViolation(error) || getPostgresErrorConstraint(error) !== "v2_uq_session_turns_direct_generation_client_message") throw error;

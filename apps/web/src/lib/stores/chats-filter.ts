@@ -1,100 +1,105 @@
-import type {
-	SessionRecord,
-	UserSessionSourceKey,
-	UserSessionSpaceSummary,
-} from "@neta-art/cohub";
+import {
+	APP_SESSION_SOURCES,
+	getSessionInitiatorLabelSystemKey,
+	getSessionSourceLabelSystemKey,
+	isSessionInitiator,
+	isSessionSourceKey,
+	readSessionInitiator,
+	resolveSessionSourceKey,
+	SESSION_SOURCE_NAMES,
+	type SessionInitiator,
+	type SessionSourceKey,
+} from "@cohub/protocol/model";
+import type { SessionRecord, UserSessionSpaceSummary } from "@neta-art/cohub";
 import type { Locale } from "#lib/i18n/locale.ts";
 import type { LiveFit } from "#lib/lists/live-list-core.ts";
 import { m } from "#lib/paraglide/messages.js";
 
+export type ChatsKind = SessionInitiator | SessionSourceKey;
+
 export type ChatsFilter = {
-	source: UserSessionSourceKey | null;
+	kind: ChatsKind | null;
 	space: UserSessionSpaceSummary | null;
 	archived: boolean;
 };
 
 export const DEFAULT_CHATS_FILTER: ChatsFilter = {
-	source: "web",
+	kind: "human",
 	space: null,
 	archived: false,
 };
 
-export const CHATS_SOURCE_GROUPS = [
-	{ id: "clients", sources: ["web", "cli", "websocket"] },
-	{ id: "channels", sources: ["feishu", "wechat", "discord", "qq"] },
-	{
-		id: "automations",
-		sources: ["scheduled_task", "space_hook", "public_api"],
-	},
-	{ id: "other", sources: ["other"] },
-] as const satisfies readonly {
-	id: string;
-	sources: readonly UserSessionSourceKey[];
-}[];
+export const CHATS_KIND_GROUPS = [
+	{ id: "initiators", kinds: ["human", "agent", "automation"] },
+	{ id: "clients", kinds: ["web", "desktop", "mobile", "cli", "websocket"] },
+	{ id: "channels", kinds: ["feishu", "wechat", "discord", "qq"] },
+	{ id: "automations", kinds: ["scheduled_task", "space_hook", "public_api"] },
+	{ id: "other", kinds: ["other"] },
+] as const satisfies readonly { id: string; kinds: readonly ChatsKind[] }[];
 
-export type ChatsSourceGroup = (typeof CHATS_SOURCE_GROUPS)[number]["id"];
+export type ChatsKindGroup = (typeof CHATS_KIND_GROUPS)[number]["id"];
 
-const SOURCE_KEYS = new Set<string>(
-	CHATS_SOURCE_GROUPS.flatMap((group) => group.sources),
-);
-
-export const CHATS_SOURCE_NAMES: Record<
-	Exclude<UserSessionSourceKey, "other">,
-	string
-> = {
-	web: "Web App",
-	cli: "CLI",
-	websocket: "Websocket",
-	feishu: "Feishu",
-	wechat: "WeChat",
-	discord: "Discord",
-	qq: "QQ",
-	scheduled_task: "Scheduled Task",
-	space_hook: "Hook",
-	public_api: "Public API",
-};
-
-export function isChatsSourceKey(
-	value: unknown,
-): value is UserSessionSourceKey {
-	return typeof value === "string" && SOURCE_KEYS.has(value);
+export function isChatsKind(value: unknown): value is ChatsKind {
+	return isSessionInitiator(value) || isSessionSourceKey(value);
 }
 
-export function chatsSourceName(
-	source: UserSessionSourceKey | null,
-	locale: Locale,
+export function sessionInitiatorName(
+	initiator: SessionInitiator,
+	locale?: Locale,
 ): string {
-	if (!source) return m.chats_source_all({}, { locale });
-	if (source === "other") return m.chats_source_other({}, { locale });
-	return CHATS_SOURCE_NAMES[source];
+	switch (initiator) {
+		case "human":
+			return m.session_initiator_human({}, { locale });
+		case "agent":
+			return m.session_initiator_agent({}, { locale });
+		case "automation":
+			return m.session_initiator_automation({}, { locale });
+	}
 }
 
-/** Mirrors the server's `resolveSessionSourceKey`. */
-export function resolveSessionSourceKey(
-	source: string | null | undefined,
-): UserSessionSourceKey {
-	const raw =
-		source
-			?.trim()
-			.toLowerCase()
-			.replace(/[\s-]+/g, "_") || "web";
-	if (raw === "web_app") return "web";
-	if (isChatsSourceKey(raw)) return raw;
-	const channel = raw.match(/^channel[:_](.+)$/)?.[1] ?? raw.split(":")[0];
-	return channel && channel !== raw && isChatsSourceKey(channel)
-		? channel
-		: "other";
+export function chatsKindName(kind: ChatsKind | null, locale?: Locale): string {
+	if (!kind) return m.chats_kind_all({}, { locale });
+	if (isSessionInitiator(kind)) return sessionInitiatorName(kind, locale);
+	if (kind === "other") return m.chats_kind_other({}, { locale });
+	return SESSION_SOURCE_NAMES[kind];
+}
+
+export function chatsKindSystemKey(kind: ChatsKind): string {
+	return isSessionInitiator(kind)
+		? getSessionInitiatorLabelSystemKey(kind)
+		: getSessionSourceLabelSystemKey(kind);
+}
+
+export function sessionAttributionName(
+	session: Pick<SessionRecord, "source"> &
+		Partial<Pick<SessionRecord, "meta" | "initiator">>,
+	locale: Locale,
+): string | null {
+	if (readSessionInitiator(session) === "agent")
+		return sessionInitiatorName("agent", locale);
+	const source = resolveSessionSourceKey(session.source);
+	return APP_SESSION_SOURCES.has(source) ? null : chatsKindName(source, locale);
+}
+
+export function showsAttribution(kind: ChatsKind | null): boolean {
+	return kind === null || kind === "human" || kind === "automation";
 }
 
 export function chatsFilterScope(filter: ChatsFilter): string {
-	const source = filter.archived ? "archived" : (filter.source ?? "all");
-	return filter.space ? `space:${filter.space.id}:${source}` : source;
+	const kind = filter.archived ? "archived" : (filter.kind ?? "all");
+	return filter.space ? `space:${filter.space.id}:${kind}` : kind;
 }
 
 export type SessionEventRecord = Partial<SessionRecord> & {
 	id: string;
 	spaceId: string;
 };
+
+function matchesKind(session: SessionEventRecord, kind: ChatsKind) {
+	return isSessionInitiator(kind)
+		? readSessionInitiator(session) === kind
+		: resolveSessionSourceKey(session.source) === kind;
+}
 
 export function sessionFit(
 	session: SessionEventRecord,
@@ -113,21 +118,34 @@ export function sessionFit(
 				Boolean(viewer && participants?.includes(viewer)));
 		if (!listed) return participants ? "out" : "keep";
 	}
-	if (!filter.source || filter.archived) return "in";
-	// Source labels are server-attributed: a raw mismatch never removes a row.
-	return resolveSessionSourceKey(session.source) === filter.source
-		? "in"
-		: "keep";
+	if (!filter.kind || filter.archived) return "in";
+	return matchesKind(session, filter.kind) ? "in" : "keep";
 }
 
 export function sameChatsFilter(a: ChatsFilter, b: ChatsFilter) {
-	return chatsFilterScope(a) === chatsFilterScope(b) && a.source === b.source;
+	return chatsFilterScope(a) === chatsFilterScope(b) && a.kind === b.kind;
+}
+
+function readKind(value: {
+	kind?: unknown;
+	source?: unknown;
+}): ChatsKind | null {
+	if ("kind" in value) {
+		if (value.kind === null) return null;
+		return isChatsKind(value.kind) ? value.kind : DEFAULT_CHATS_FILTER.kind;
+	}
+	if (value.source === null) return null;
+	if (value.source === "web") return "human";
+	return isSessionSourceKey(value.source)
+		? value.source
+		: DEFAULT_CHATS_FILTER.kind;
 }
 
 export function parseChatsFilter(raw: string | null): ChatsFilter {
 	if (!raw) return DEFAULT_CHATS_FILTER;
 	try {
 		const value = JSON.parse(raw) as {
+			kind?: unknown;
 			source?: unknown;
 			space?: {
 				id?: unknown;
@@ -136,12 +154,6 @@ export function parseChatsFilter(raw: string | null): ChatsFilter {
 				publicProfile?: unknown;
 			} | null;
 		};
-		const source =
-			value.source === null
-				? null
-				: isChatsSourceKey(value.source)
-					? value.source
-					: DEFAULT_CHATS_FILTER.source;
 		const space =
 			value.space && typeof value.space.id === "string" && value.space.id
 				? {
@@ -157,7 +169,7 @@ export function parseChatsFilter(raw: string | null): ChatsFilter {
 								: null,
 					}
 				: null;
-		return { source, space, archived: false };
+		return { kind: readKind(value), space, archived: false };
 	} catch {
 		return DEFAULT_CHATS_FILTER;
 	}

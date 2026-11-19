@@ -5,6 +5,7 @@ import {
 	readReplyBlockRole,
 	readReplyStatus,
 	readSessionTurnOrigin,
+	readTurnInitiator,
 	readTurnMetrics,
 	readTurnStats,
 	requestMetricSchema,
@@ -63,6 +64,7 @@ import { m } from "#lib/paraglide/messages.js";
 import { readSentFrom } from "#lib/sent-turns.ts";
 import type { ChatMessage } from "#lib/session-tree.ts";
 import { createSpaceWorkspaceAssetResolver } from "#lib/space-workspace-assets.ts";
+import { sessionInitiatorName } from "#lib/stores/chats-filter.ts";
 import {
 	formatCompactAbsoluteTime,
 	formatFullAbsoluteTime,
@@ -239,6 +241,12 @@ const backgroundTaskDetail = $derived(
 const sentFrom = $derived(
 	message.role === "user" ? readSentFrom(message.meta?.turn) : null,
 );
+
+const initiatorLabel = $derived.by(() => {
+	if (!isUserMessage || sentFrom || isBackgroundTaskUserMessage) return "";
+	const initiator = readTurnInitiator(turnMeta);
+	return initiator === "human" ? "" : sessionInitiatorName(initiator, locale);
+});
 
 const messageContainerClass = $derived(
 	isUserMessage
@@ -756,6 +764,9 @@ function handleCopy() {
               size="xxs"
               class="text-inherit"
             />
+          {/if}
+          {#if initiatorLabel}
+            <span class="shrink-0 text-[11px] font-medium text-text-placeholder/65">{initiatorLabel}</span>
           {/if}
           {#if isCancelledBeforeDispatch}
             <span class="shrink-0 text-[11px] font-medium text-text-placeholder/65" title={cancelledByDisplay

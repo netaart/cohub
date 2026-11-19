@@ -2,6 +2,7 @@ export * from "./metrics.js";
 import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
 import type { HarnessKind } from "../runtime/harnesses.js";
+import type { SessionInitiator } from "../session-attribution.js";
 
 export type SessionForkRecord = {
   id: string;
@@ -169,6 +170,7 @@ export type SessionRecord = {
   participantProfiles?: SessionUserProfile[];
   title: string | null;
   source: string | null;
+  initiator?: SessionInitiator;
   status: string | null;
   activeTurn?: SessionActiveTurn | null;
   activeTurnSequence?: number;

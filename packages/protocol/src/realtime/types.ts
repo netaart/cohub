@@ -406,6 +406,7 @@ export type RealtimeSessionRecord = Pick<
   | "userUuid"
   | "title"
   | "source"
+  | "initiator"
   | "status"
   | "activeTurn"
   | "activeTurnSequence"

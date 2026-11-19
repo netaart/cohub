@@ -3,7 +3,7 @@ import { randomUUID as defaultRandomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type { ContentBlock } from "@cohub/protocol/core";
-import { readSessionTurnOrigin, type SessionTurnIntent, type SessionTurnRecord, type SessionTurnOrigin } from "@cohub/protocol/model";
+import { readSessionTurnOrigin, readTurnInitiator, type SessionTurnIntent, type SessionTurnRecord, type SessionTurnOrigin } from "@cohub/protocol/model";
 import { isModelThinkingLevel } from "@cohub/protocol";
 import { sessionMessages, sessionTurnSegments, sessionTurns, spaceSessions, spaces } from "@cohub/db";
 import { sanitizePostgresJsonValue } from "../content/sanitize.js";
@@ -367,7 +367,7 @@ export function createSessionServices(input: {
       userUuid: noteInput.userUuid,
       userContent: noteInput.content,
       intent: "followup",
-      meta: { ...noteInput.meta, clientMessageId: noteInput.clientMessageId, userMessageId: randomUUID() },
+      meta: { ...noteInput.meta, initiator: readTurnInitiator(noteInput.meta), clientMessageId: noteInput.clientMessageId, userMessageId: randomUUID() },
       noteClientMessageId: noteInput.clientMessageId,
     });
   }

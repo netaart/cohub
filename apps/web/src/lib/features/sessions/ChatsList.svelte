@@ -34,6 +34,8 @@ import {
 import {
 	type ChatsFilter,
 	chatsFilterScope,
+	DEFAULT_CHATS_FILTER,
+	showsAttribution,
 } from "#lib/stores/chats-filter.ts";
 import { goto } from "$app/navigation";
 
@@ -66,7 +68,9 @@ const density = $derived<FixedListRowDensity>(
 	isPage ? "comfortable" : "compact",
 );
 const isDefaultFilter = $derived(
-	filter.source === "web" && !filter.space && !filter.archived,
+	filter.kind === DEFAULT_CHATS_FILTER.kind &&
+		!filter.space &&
+		!filter.archived,
 );
 const sessions = $derived(view.sessions);
 const forks = $derived(view.forks);
@@ -278,7 +282,7 @@ function onScroll(event: Event) {
 						<Plus class="h-3.5 w-3.5" />{m.sidebar_new_chat({}, { locale })}
 					</button>
 				{/if}
-				{#if filter.source || filter.space || filter.archived}
+				{#if filter.kind || filter.space || filter.archived}
 					<button
 						type="button"
 						class="inline-flex h-8 items-center rounded-[6px] px-3 text-[12px] text-text-tertiary transition-colors hover:bg-bg-hover hover:text-text-secondary"
@@ -305,7 +309,7 @@ function onScroll(event: Event) {
 						{density}
 						active={activeSessionId === session.id}
 						isMobile={isPage || isMobile}
-						showSourceBadge={!filter.source}
+						showSourceBadge={showsAttribution(filter.kind)}
 						tree={row.tree}
 						tooltip={tooltipFor(row)}
 						showInsert={false}

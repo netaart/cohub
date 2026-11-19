@@ -65,7 +65,6 @@ import { RUN_COMMAND_TASK_TYPE } from "@cohub/core/commands";
 import { normalizeContentBlocks } from "@cohub/core/content/normalize";
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { assignLabelsToSession, parseLabelRefs, parseSessionArchiveFilter, resolveLabelPaths, resolveOrCreateLabelPaths } from "@cohub/core/labels";
-import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
 import { asAccountIdentity, hasPermission, getSpaceMemberRole, filterSessionsByPermission, isSpaceMember, resolvePermissionAccess } from "../../permissions.js";
 import { checkpoints } from "@cohub/db";
 import { LogtoUserRequiredError } from "../../user-profiles.js";
@@ -145,16 +144,12 @@ async function resolveLabelRefIds(c: Context, user: AuthUser, spaceId: string, s
   }
 }
 
-async function applySessionLabels(input: { spaceId: string; sessionId: string; labelIds: string[]; userId: string; createdSession: SpaceRouteSessionRecord | null }) {
-  const { spaceId, sessionId, createdSession } = input;
-  if (input.labelIds.length > 0) {
-    await assignLabelsToSession({ db, spaceId, sessionId, labelIds: input.labelIds, userId: input.userId });
-  }
-  if (!createdSession) return;
-  await assignSessionSourceSystemLabel({ db, spaceId, sessionId, source: createdSession.source }).then(() =>
-    dispatchLabelAssignmentsUpdated({ spaceId, resourceType: "session", resourceRef: sessionId, sessionId }),
-  ).catch((error) => {
-    logger.warn("[SessionSourceLabel] failed to assign system source label", error);
+async function applySessionLabels(input: { spaceId: string; sessionId: string; labelIds: string[]; userId: string }) {
+  const { spaceId, sessionId } = input;
+  if (input.labelIds.length === 0) return;
+  await assignLabelsToSession({ db, spaceId, sessionId, labelIds: input.labelIds, userId: input.userId });
+  await dispatchLabelAssignmentsUpdated({ spaceId, resourceType: "session", resourceRef: sessionId, sessionId }).catch((error) => {
+    logger.warn("[SessionLabels] failed to dispatch requested labels", error);
   });
 }
 
@@ -199,7 +194,7 @@ async function recordNotePrompt(c: Context, user: AuthUser, spaceId: string, bod
   const createdSession = existingSession ? null : session;
 
   try {
-    await applySessionLabels({ spaceId, sessionId, labelIds, userId: user.uuid, createdSession });
+    await applySessionLabels({ spaceId, sessionId, labelIds, userId: user.uuid });
     const turn = await recordSessionNote({
       spaceId,
       sessionId,
@@ -2218,7 +2213,8 @@ router.post("/:id/prompt", async (c) => {
         content: generation.content,
         parameters: generation.parameters,
         meta: generation.meta,
-        source: body.source ?? "web",
+        source: resolveSessionSourceFromRequest(c, body.source),
+        requestSource: getRequestSource(c),
       });
       const [session, turn] = await Promise.all([
         getSpaceSessionById(execution.sessionId),
@@ -2363,7 +2359,7 @@ router.post("/:id/prompt", async (c) => {
     }
 
     try {
-      await applySessionLabels({ spaceId, sessionId, labelIds: promptLabelIds, userId: user.uuid, createdSession: createdPromptSession });
+      await applySessionLabels({ spaceId, sessionId, labelIds: promptLabelIds, userId: user.uuid });
       const { turnId } = await submitSessionPrompt({
         spaceId,
         sessionId,
@@ -2574,7 +2570,7 @@ router.post("/:id/sessions", async (c) => {
     meta: { createdBy: "api_space_session_create", ...(requestSource ? { requestSource } : {}), ...(origin ? { origin } : {}) },
   });
 
-  await applySessionLabels({ spaceId, sessionId: session.id, labelIds: userLabelIds, userId: user.uuid, createdSession: session });
+  await applySessionLabels({ spaceId, sessionId: session.id, labelIds: userLabelIds, userId: user.uuid });
 
   return c.json({ ok: true, session });
 });

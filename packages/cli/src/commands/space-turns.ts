@@ -1,10 +1,11 @@
-import type {
-  SpaceTurnAuthorFilter,
-  SpaceTurnListItem,
-  SpaceTurnListOptions,
-  SpaceTurnsResponse,
-  SessionTurnRecord,
-  TurnIntermediateMessagesFile,
+import {
+  readTurnInitiator,
+  type SpaceTurnAuthorFilter,
+  type SpaceTurnListItem,
+  type SpaceTurnListOptions,
+  type SpaceTurnsResponse,
+  type SessionTurnRecord,
+  type TurnIntermediateMessagesFile,
 } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
@@ -217,6 +218,7 @@ export function registerSpaceTurns(
           table(result.turns, [
             { key: "sequence", label: "Seq" },
             { key: "id", label: "Turn ID" },
+            { key: "meta", label: "By", format: (meta) => readTurnInitiator(meta) },
             { key: "status", label: "Status" },
             { key: "userText", label: "User" },
             { key: "assistantText", label: "Assistant" },

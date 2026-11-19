@@ -200,6 +200,23 @@ export {
 } from "@cohub/protocol/provenance";
 export { isAgentTurn, normalizeSessionTurnOrigin, readReplyStatus, readSentTurns, readSessionTurnOrigin, readSessionTurnReply } from "@cohub/protocol/model";
 export type { SentTurnRef, SessionTurnOrigin, SessionTurnOriginKind, SessionTurnReply, SessionTurnReplyMode, SessionTurnReplyStatus } from "@cohub/protocol/model";
+export {
+  APP_SESSION_SOURCES,
+  getSessionInitiatorLabelSystemKey,
+  getSessionSourceLabelSystemKey,
+  isSessionInitiator,
+  isSessionSourceKey,
+  readSessionInitiator,
+  readTurnInitiator,
+  resolveSessionSourceKey,
+  SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX,
+  SESSION_INITIATORS,
+  SESSION_SOURCE_KEYS,
+  SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX,
+  SESSION_SOURCE_NAMES,
+  sessionSourceForHostPlatform,
+} from "@cohub/protocol/model";
+export type { SessionInitiator, SessionSourceKey } from "@cohub/protocol/model";
 export type { RequestSource, RequestSourceVia } from "@cohub/protocol/provenance";
 export {
   GENERATION_CATEGORIES,

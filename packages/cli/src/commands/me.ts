@@ -1,8 +1,8 @@
-import type { BillingBalanceActivityFilter } from "@neta-art/cohub";
+import { type BillingBalanceActivityFilter, isSessionInitiator, isSessionSourceKey, SESSION_INITIATORS, SESSION_SOURCE_KEYS } from "@neta-art/cohub";
 import type { Command } from "commander";
 import { createClient } from "../client.js";
 import { formatLocalDateTime, handleHttp, json as outJson, jsonRequested, table } from "../output.js";
-import { SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
+import { SESSION_INITIATOR_COLUMN, SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
 
 function parseInteger(value: string, name: string, min: number): number {
   const parsed = Number.parseInt(value, 10);
@@ -11,6 +11,17 @@ function parseInteger(value: string, name: string, min: number): number {
     process.exit(1);
   }
   return parsed;
+}
+
+function parseKinds<K extends string>(value: string | undefined, name: string, known: readonly K[], isKind: (kind: string) => kind is K): K[] | null {
+  if (!value) return null;
+  const kinds = value.split(",").map((kind) => kind.trim().toLowerCase()).filter(Boolean);
+  const unknown = kinds.filter((kind) => !isKind(kind));
+  if (unknown.length > 0) {
+    process.stderr.write(`\n  ✗ Unknown ${name}: ${unknown.join(", ")}\n    Use one of: ${known.join(", ")}\n\n`);
+    process.exit(1);
+  }
+  return kinds as K[];
 }
 
 const usd = (value: number) => `${value < 0 ? "-" : ""}$${Math.abs(value).toFixed(2)}`;
@@ -24,15 +35,19 @@ export function registerMe(program: Command): void {
     .description("List sessions you created across all spaces (archived sessions are hidden by default)")
     .option("--limit <n>", "Maximum number of sessions (default 20)")
     .option("--cursor <cursor>", "Pagination cursor from a previous result")
+    .option("--initiator <kinds>", `Only sessions started by these, comma-separated: ${SESSION_INITIATORS.join(", ")}`)
+    .option("--source <kinds>", "Only sessions from these sources, comma-separated, e.g. web,desktop,cli")
     .option("--archived", "List only archived sessions")
     .option("--all", "Include archived sessions")
     .option("--json", "Output as JSON")
-    .action(async (opts: { limit?: string; cursor?: string; archived?: boolean; all?: boolean; json?: boolean }) => {
+    .action(async (opts: { limit?: string; cursor?: string; initiator?: string; source?: string; archived?: boolean; all?: boolean; json?: boolean }) => {
       const client = createClient();
       try {
         const result = await client.user.listSessions({
           limit: opts.limit ? parseInteger(opts.limit, "limit", 1) : undefined,
           cursor: opts.cursor ?? null,
+          initiator: parseKinds(opts.initiator, "initiator", SESSION_INITIATORS, isSessionInitiator),
+          source: parseKinds(opts.source, "source", SESSION_SOURCE_KEYS, isSessionSourceKey),
           archived: sessionArchiveFilter(opts),
         });
         if (jsonRequested(opts)) return outJson(result);
@@ -44,6 +59,7 @@ export function registerMe(program: Command): void {
           { key: "id", label: "ID" },
           { key: "spaceId", label: "Space" },
           { key: "title", label: "Title" },
+          SESSION_INITIATOR_COLUMN,
           SESSION_STATUS_COLUMN,
           { key: "totalMessages", label: "Messages" },
           { key: "createdAt", label: "Created" },

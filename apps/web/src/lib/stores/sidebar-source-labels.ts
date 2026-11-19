@@ -1,60 +1,75 @@
 import {
+	getSessionInitiatorLabelSystemKey,
+	getSessionSourceLabelSystemKey,
 	type LabelAssignmentListItem,
 	type LabelListItem,
+	readSessionInitiator,
 	SESSION_ARCHIVED_LABEL_SYSTEM_KEY,
+	SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX,
+	SESSION_INITIATORS,
+	SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX,
 	type SessionRecord,
 } from "@neta-art/cohub";
 import { buildSpaceSessionRoute } from "#lib/space-routes.ts";
 
 export const ALL_CHATS_LABEL_ID = "__all_chats__";
-export const SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX = "session-source:";
 export const SESSION_USER_LABEL_SYSTEM_KEY_PREFIX = "session-user:";
 export const SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX = "session-channel:";
 export const SESSION_USER_ROOT_LABEL_SYSTEM_KEY = `${SESSION_USER_LABEL_SYSTEM_KEY_PREFIX}root`;
 export const SESSION_CHANNEL_ROOT_LABEL_SYSTEM_KEY = `${SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX}root`;
-export const WEB_APP_SOURCE_LABEL_SYSTEM_KEY = `${SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX}web`;
+const SESSION_SOURCE_ROOT_LABEL_SYSTEM_KEY =
+	getSessionSourceLabelSystemKey("root");
+const SESSION_INITIATOR_ROOT_LABEL_SYSTEM_KEY =
+	getSessionInitiatorLabelSystemKey("root");
+const HUMAN_INITIATOR_LABEL_SYSTEM_KEY =
+	getSessionInitiatorLabelSystemKey("human");
 
-export function isWebAppSourceLabel(label: LabelListItem) {
+function findSystemRootLabel(labels: LabelListItem[], systemKey: string) {
 	return (
-		label.systemKey === WEB_APP_SOURCE_LABEL_SYSTEM_KEY ||
-		label.name === "Web App"
+		labels.find(
+			(label) =>
+				label.source === "system" &&
+				label.parentId === null &&
+				label.systemKey === systemKey,
+		) ?? null
 	);
-}
-
-export function compareSourceLabels(a: LabelListItem, b: LabelListItem) {
-	const aWeb = isWebAppSourceLabel(a);
-	const bWeb = isWebAppSourceLabel(b);
-	if (aWeb !== bWeb) return aWeb ? -1 : 1;
-	if (a.rank !== b.rank) return a.rank - b.rank;
-	return a.name.localeCompare(b.name);
 }
 
 export function findSourceRootLabel(labels: LabelListItem[]) {
 	return (
+		findSystemRootLabel(labels, SESSION_SOURCE_ROOT_LABEL_SYSTEM_KEY) ??
 		labels.find(
 			(label) =>
 				label.source === "system" &&
 				label.parentId === null &&
 				label.name.toLowerCase() === "source",
-		) ?? null
+		) ??
+		null
 	);
 }
 
-export function getSourceLabels(labels: LabelListItem[]) {
-	return (findSourceRootLabel(labels)?.children ?? [])
-		.slice()
-		.sort(compareSourceLabels);
+export function getSystemSourceLabels(labels: LabelListItem[]) {
+	const root = findSourceRootLabel(labels);
+	return root ? [root] : [];
+}
+
+const initiatorRank = (label: LabelListItem) =>
+	SESSION_INITIATORS.findIndex(
+		(initiator) =>
+			label.systemKey === getSessionInitiatorLabelSystemKey(initiator),
+	);
+
+export function getInitiatorLabels(labels: LabelListItem[]) {
+	return (
+		findSystemRootLabel(labels, SESSION_INITIATOR_ROOT_LABEL_SYSTEM_KEY)
+			?.children ?? []
+	)
+		.filter((label) => initiatorRank(label) >= 0)
+		.sort((a, b) => initiatorRank(a) - initiatorRank(b));
 }
 
 export function findSessionUserRootLabel(labels: LabelListItem[]) {
-	return (
-		labels.find(
-			(label) =>
-				label.source === "system" &&
-				label.parentId === null &&
-				label.systemKey === SESSION_USER_ROOT_LABEL_SYSTEM_KEY,
-		) ?? null
-	);
+	return findSystemRootLabel(labels, SESSION_USER_ROOT_LABEL_SYSTEM_KEY);
 }
 
 export function getSessionUserLabelSystemKey(userUuid: string) {
@@ -82,14 +97,7 @@ export function getSystemUserLabels(labels: LabelListItem[]) {
 }
 
 export function findSessionChannelRootLabel(labels: LabelListItem[]) {
-	return (
-		labels.find(
-			(label) =>
-				label.source === "system" &&
-				label.parentId === null &&
-				label.systemKey === SESSION_CHANNEL_ROOT_LABEL_SYSTEM_KEY,
-		) ?? null
-	);
+	return findSystemRootLabel(labels, SESSION_CHANNEL_ROOT_LABEL_SYSTEM_KEY);
 }
 
 export function getSystemChannelLabels(labels: LabelListItem[]) {
@@ -127,6 +135,7 @@ function hasSessionSystemKey(label: LabelListItem) {
 		systemKey &&
 			[
 				SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX,
+				SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX,
 				SESSION_USER_LABEL_SYSTEM_KEY_PREFIX,
 				SESSION_CHANNEL_LABEL_SYSTEM_KEY_PREFIX,
 				SESSION_ARCHIVED_LABEL_SYSTEM_KEY,
@@ -147,26 +156,23 @@ export function isSystemLabel(
 	return false;
 }
 
-export function findWebAppSourceLabel(labels: LabelListItem[]) {
-	return (
-		getSourceLabels(labels).find((label) => isWebAppSourceLabel(label)) ?? null
-	);
-}
-
 export function findDefaultExpandedLabelId(_labels: LabelListItem[]) {
 	return ALL_CHATS_LABEL_ID;
 }
 
-export function isWebSessionSource(session: SessionRecord) {
-	const source =
-		session.source
-			?.trim()
-			.toLowerCase()
-			.replace(/[\s-]+/g, "_") ?? "web";
-	return source === "web" || source === "web_app";
+export function findHumanInitiatorLabel(labels: LabelListItem[]) {
+	return (
+		getInitiatorLabels(labels).find(
+			(label) => label.systemKey === HUMAN_INITIATOR_LABEL_SYSTEM_KEY,
+		) ?? null
+	);
 }
 
-export function buildOptimisticWebAppLabelSessionItem(input: {
+export function isHumanSession(session: SessionRecord) {
+	return readSessionInitiator(session) === "human";
+}
+
+export function buildOptimisticLabelSessionItem(input: {
 	spaceId: string;
 	labelId: string;
 	session: SessionRecord;

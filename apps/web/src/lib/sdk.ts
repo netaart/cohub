@@ -1,4 +1,8 @@
-import { type CohubClientOptions, createCohubClient } from "@neta-art/cohub";
+import {
+	type CohubClientOptions,
+	createCohubClient,
+	sessionSourceForHostPlatform,
+} from "@neta-art/cohub";
 import {
 	clearAuthToken,
 	getAuthSessionSnapshot,
@@ -12,7 +16,7 @@ import {
 } from "#lib/auth-redirect.ts";
 import { decideUnauthorizedRecovery } from "#lib/auth-unauthorized.ts";
 import { getClientInstanceId } from "#lib/client-instance.ts";
-import { hostOwnsCredentials } from "#lib/host-bridge.ts";
+import { hostOwnsCredentials, hostPlatform } from "#lib/host-bridge.ts";
 import { resolveHostWorkspace } from "#lib/host-workspace.ts";
 import { createSharedGetFetch } from "#lib/shared-get-fetch.ts";
 import { billingConversion } from "#lib/stores/billing-conversion.svelte.ts";
@@ -122,7 +126,10 @@ const createWebSdk = (options: Partial<CohubClientOptions> = {}) => {
 			options.requestSource ??
 			(() => {
 				const clientId = getClientInstanceId();
-				return { via: "web", ...(clientId ? { clientId } : {}) };
+				return {
+					via: sessionSourceForHostPlatform(hostPlatform()),
+					...(clientId ? { clientId } : {}),
+				};
 			}),
 		fetch: createBillingAwareFetch(createSharedGetFetch(baseFetch)),
 		localWorkspace: options.localWorkspace ?? resolveHostWorkspace,

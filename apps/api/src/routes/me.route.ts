@@ -23,10 +23,10 @@ import {
   encodeSessionListCursor,
   hydrateSessionParticipantProfiles,
   InvalidSessionListCursorError,
-  InvalidSessionSourceFilterError,
+  InvalidSessionFilterError,
   listUserSessions,
-  parseSessionSourceKeys,
-  type SessionSourceFilter,
+  parseSessionAttributionFilter,
+  type SessionAttributionFilter,
 } from "../space-sessions.js";
 import {
   aggregateUsage,
@@ -208,7 +208,7 @@ router.get("/rules", async (c) => {
  */
 async function listVisibleUserSessions(
   user: { uuid: string },
-  options: { limit: number; cursor: string | null; source: SessionSourceFilter | null; archive: SessionArchiveFilter },
+  options: { limit: number; cursor: string | null; attribution: SessionAttributionFilter | null; archive: SessionArchiveFilter },
 ) {
   const identity = asAccountIdentity(user);
   if (!identity) {
@@ -238,7 +238,7 @@ async function listVisibleUserSessions(
   while (visible.length < limit && hasMore && guard < 8) {
     guard += 1;
     const batchLimit = Math.min(100, Math.max(limit * 2, limit - visible.length + 4));
-    const batch = await listUserSessions(identity.uuid, { limit: batchLimit, cursor, source: options.source, archive: options.archive });
+    const batch = await listUserSessions(identity.uuid, { limit: batchLimit, cursor, attribution: options.attribution, archive: options.archive });
     hasMore = Boolean(batch.pageInfo.hasMore);
     cursor = batch.pageInfo.nextCursor;
 
@@ -305,19 +305,19 @@ router.get("/sessions", async (c) => {
   const limit = Number.isFinite(limitParam) ? limitParam : 20;
   const cursor = c.req.query("cursor") ?? null;
   const includeForks = c.req.query("includeForks") === "1" || c.req.query("includeForks") === "true";
-  let source: SessionSourceFilter | null;
+  let attribution: SessionAttributionFilter | null;
   try {
-    source = parseSessionSourceKeys(c.req.query("source"));
+    attribution = parseSessionAttributionFilter({ source: c.req.query("source"), initiator: c.req.query("initiator") });
   } catch (error) {
-    if (error instanceof InvalidSessionSourceFilterError) {
-      return c.json({ message: error.message, unknownSources: error.unknownKeys }, 400);
+    if (error instanceof InvalidSessionFilterError) {
+      return c.json({ message: error.message, param: error.param, unknownKeys: error.unknownKeys }, 400);
     }
     throw error;
   }
   const archive = parseSessionArchiveFilter(c.req.query("archived"));
   if (!archive) return c.json({ message: "archived must be one of: exclude, only, include" }, 400);
   try {
-    const { sessions, fullViewSpaceIds, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, source, archive });
+    const { sessions, fullViewSpaceIds, pageInfo } = await listVisibleUserSessions(user, { limit, cursor, attribution, archive });
     const visibleSessionIds = sessions.map((session) => session.id);
     const [withSpaces, forks] = await Promise.all([
       hydrateSessionParticipantProfiles(sessions).then(attachSpaceSummaries),

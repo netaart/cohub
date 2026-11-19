@@ -2,6 +2,7 @@ import { LIKED_LABEL_NAME, LIKED_LABEL_SYSTEM_KEY, type LikeResourceType } from 
 import { HttpError, type HttpTransport, type Fetch } from "../transport.js";
 import type { UserAppFilter, UserCronJobFilter } from "@cohub/protocol";
 import type { LabelAssignmentRecord, UserAppListItem, UserCronJobListItem, UserListOptions, UserListPage, LabelListItem, LabelResourceType, MeResponse, SessionArchiveFilter, SessionRecord, SpaceRecord, UserActivityQuery, UserActivityResponse, UserProfile, UserRulesResponse, UserSessionsResponse, UserSessionSourceKey } from "../types.js";
+import type { SessionInitiator } from "@cohub/protocol/model";
 
 function userListQuery(options: UserListOptions<string>) {
   const params = new URLSearchParams();
@@ -51,13 +52,14 @@ export class UserApi {
     });
   }
 
-  listSessions(optionsOrFetch?: { limit?: number; cursor?: string | null; source?: readonly UserSessionSourceKey[] | null; includeForks?: boolean; archived?: SessionArchiveFilter } | Fetch, customFetch?: Fetch) {
+  listSessions(optionsOrFetch?: { limit?: number; cursor?: string | null; source?: readonly UserSessionSourceKey[] | null; initiator?: readonly SessionInitiator[] | null; includeForks?: boolean; archived?: SessionArchiveFilter } | Fetch, customFetch?: Fetch) {
     const options = typeof optionsOrFetch === "function" ? undefined : optionsOrFetch;
     const fetch = typeof optionsOrFetch === "function" ? optionsOrFetch : customFetch;
     const params = new URLSearchParams();
     if (options?.limit !== undefined) params.set("limit", String(options.limit));
     if (options?.cursor) params.set("cursor", options.cursor);
     if (options?.source?.length) params.set("source", options.source.join(","));
+    if (options?.initiator?.length) params.set("initiator", options.initiator.join(","));
     if (options?.includeForks) params.set("includeForks", "1");
     if (options?.archived && options.archived !== "exclude") params.set("archived", options.archived);
     const query = params.toString();

@@ -2,8 +2,7 @@ import type { ContentBlock } from "@cohub/protocol/core";
 import type { GenerationPolicy } from "@cohub/protocol/generation";
 import type { TaskPayload } from "@cohub/protocol/task";
 import { registerTask } from "./registry.js";
-import { assignLabelsToSession } from "@cohub/core/labels";
-import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
+import { assignLabelsToSession, assignSessionAttributionLabels } from "@cohub/core/labels";
 import { parsePromptEnv, type PromptAccessMode, type PromptAuthContext, type PromptEnv, type SubmitSessionPromptContext } from "@cohub/core/sessions";
 import { resolveDelegatedAppScopesAtUseTime } from "@cohub/core/apps";
 import type { Permission } from "@cohub/core/permissions";
@@ -95,10 +94,10 @@ const sendMessageHandler = async (job: import("bullmq").Job, context?: { taskRun
     await assignLabelsToSession({ db, spaceId, sessionId: promptSessionId, labelIds, userId });
   }
   if (createdSession) {
-    await assignSessionSourceSystemLabel({ db, spaceId, sessionId: promptSessionId, source }).then(() =>
+    await assignSessionAttributionLabels({ db, spaceId, session: createdSession }).then(() =>
       dispatchLabelAssignmentsUpdated({ spaceId, resourceType: "session", resourceRef: promptSessionId, sessionId: promptSessionId }),
     ).catch((error) => {
-      logger.warn("[SessionSourceLabel] failed to assign scheduled task source label", error);
+      logger.warn("[SessionLabels] failed to assign scheduled task attribution labels", error);
     });
   }
 

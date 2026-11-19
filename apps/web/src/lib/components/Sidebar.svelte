@@ -2,13 +2,15 @@
 import { resourceAppLaunch, resourceAppRef } from "@cohub/protocol";
 import { buildAppNavigationOpenMessage } from "@cohub/protocol/app-navigation";
 import { isGenerationTaskType } from "@cohub/protocol/generation";
-import type {
-	CheckpointRecord,
-	LabelAssignmentListItem,
-	LabelListItem,
-	SessionRecord,
-	SpaceRecord,
-	TaskRunRecord,
+import {
+	type CheckpointRecord,
+	type LabelAssignmentListItem,
+	type LabelListItem,
+	SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX,
+	SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX,
+	type SessionRecord,
+	type SpaceRecord,
+	type TaskRunRecord,
 } from "@neta-art/cohub";
 import { taskRunToBoardTaskSnapshot as taskBoardSnapshot } from "@neta-art/cohub/board";
 import {
@@ -164,20 +166,20 @@ import {
 } from "#lib/stores/sidebar-label-expanded.ts";
 import {
 	ALL_CHATS_LABEL_ID,
-	buildOptimisticWebAppLabelSessionItem,
+	buildOptimisticLabelSessionItem,
 	findDefaultExpandedLabelId,
+	findHumanInitiatorLabel,
 	findSessionUserLabel,
 	findSessionUserRootLabel,
-	findWebAppSourceLabel,
 	getArchivedLabels,
 	getDisplayLabels,
-	getSourceLabels,
+	getInitiatorLabels,
 	getSystemChannelLabels,
+	getSystemSourceLabels,
 	getSystemUserLabels,
 	isArchivedLabel,
+	isHumanSession,
 	isSystemLabel,
-	isWebSessionSource,
-	SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX,
 	showsSessionInLabel,
 } from "#lib/stores/sidebar-source-labels.ts";
 import { toSpaceIdPath } from "#lib/stores/space-address.ts";
@@ -466,7 +468,8 @@ const currentLoadingLabelIds = $derived(
 		? (loadingLabelIdsBySpace[currentSpaceId] ?? new Set<string>())
 		: new Set<string>(),
 );
-const sourceLabels = $derived(getSourceLabels(labels));
+const initiatorLabels = $derived(getInitiatorLabels(labels));
+const systemSourceLabels = $derived(getSystemSourceLabels(labels));
 const systemChannelLabels = $derived(getSystemChannelLabels(labels));
 const systemUserLabels = $derived(getSystemUserLabels(labels));
 const displayLabels = $derived(getDisplayLabels(labels));
@@ -1334,7 +1337,8 @@ function isSessionActivityLabel(label: LabelListItem) {
 		isArchivedLabel(label) ||
 		isSessionUserLabel(label) ||
 		isSessionChannelLabel(label) ||
-		label.systemKey?.startsWith(SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX)
+		label.systemKey?.startsWith(SESSION_SOURCE_LABEL_SYSTEM_KEY_PREFIX) ||
+		label.systemKey?.startsWith(SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX)
 	);
 }
 
@@ -1385,12 +1389,12 @@ function refreshExpandedSessionActivityLabels(
 	}
 }
 
-function optimisticPrependWebAppLabelSession(
+function optimisticPrependHumanLabelSession(
 	spaceId: string,
 	session: SessionRecord,
 ) {
-	if (!isWebSessionSource(session)) return;
-	const labelId = findWebAppSourceLabel(labels)?.id ?? null;
+	if (!isHumanSession(session)) return;
+	const labelId = findHumanInitiatorLabel(labels)?.id ?? null;
 	if (!labelId || !currentExpandedLabelIds.has(labelId)) return;
 	const existingItems = labelItemsBySpace[spaceId]?.[labelId] ?? [];
 	if (
@@ -1404,7 +1408,7 @@ function optimisticPrependWebAppLabelSession(
 		spaceId,
 		labelId,
 		[
-			buildOptimisticWebAppLabelSessionItem({ spaceId, labelId, session }),
+			buildOptimisticLabelSessionItem({ spaceId, labelId, session }),
 			...existingItems,
 		],
 		currentLabelItemsPageInfoById[labelId] ?? {
@@ -2533,7 +2537,7 @@ function subscribeSidebarUpdates() {
 			const known = new Set(sessionIds);
 			for (const session of nextSessions) {
 				if (!known.has(session.id))
-					optimisticPrependWebAppLabelSession(spaceId, session);
+					optimisticPrependHumanLabelSession(spaceId, session);
 			}
 			addSessionMembers(nextSessions);
 			applySessionForks(forks);
@@ -3024,8 +3028,8 @@ $effect(() => {
 	</div>
 {/snippet}
 
-{#snippet sourceLabelRows()}
-	{#each sourceLabels as label (label.id)}
+{#snippet initiatorLabelRows()}
+	{#each initiatorLabels as label (label.id)}
 		<div
 			role="button"
 			tabindex="0"
@@ -3041,7 +3045,7 @@ $effect(() => {
 			ondrop={(event) => handleLabelDrop(event, label)}
 		>
 			<ChevronDown class="h-3 w-3 shrink-0 transition-transform {currentExpandedLabelIds.has(label.id) ? '' : '-rotate-90'}" />
-			<span class="min-w-0 flex-1 truncate" title={m.sidebar_source_label({ label: getReactiveLabelDisplayTitle(label) }, { locale })}>{getReactiveLabelDisplayName(label)}</span>
+			<span class="min-w-0 flex-1 truncate" title={getReactiveLabelDisplayTitle(label)}>{getReactiveLabelDisplayName(label)}</span>
 		</div>
 		{@render labelAssignmentRows(label, 0)}
 	{/each}
@@ -3069,7 +3073,8 @@ $effect(() => {
 				{#if loadingLabels && labels.length === 0 && loadingSessions && sessions.length === 0}
 					{@render sidebarEmptyState(m.sidebar_loading_chats({}, { locale }), true)}
 				{:else}
-					{@render sourceLabelRows()}
+					{@render initiatorLabelRows()}
+					{@render labelTreeRows(systemSourceLabels)}
 					{@render labelTreeRows(systemChannelLabels)}
 					{@render labelTreeRows(systemUserLabels)}
 					{@render allChatsLabelRow()}

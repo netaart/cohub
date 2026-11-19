@@ -1,5 +1,5 @@
 import { BOARD_MONO_FONT_STACK } from "@cohub/protocol/board-constants";
-import type { BoardSessionItem } from "@cohub/protocol";
+import { APP_SESSION_SOURCES, type BoardSessionItem, resolveSessionSourceKey, SESSION_SOURCE_NAMES } from "@cohub/protocol";
 import { Container, Graphics, Text } from "pixi.js";
 import type { BoardSceneItem, SceneItem } from "../../model/scene.js";
 import { type CardTag, createCardTag, formatBoardDuration, syncCardTag, zoomCardTag } from "../card-tag.js";
@@ -74,10 +74,8 @@ function compactTime(value: string | undefined): string {
 }
 
 function sourceName(source: string | undefined): string {
-	const key = source?.trim().toLowerCase().replace(/^channel[:_]/, "").split(":")[0] ?? "";
-	if (!key || key === "web" || key === "web_app") return "";
-	if (key === "cli") return "CLI";
-	return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ");
+	const key = resolveSessionSourceKey(source);
+	return APP_SESSION_SOURCES.has(key) ? "" : SESSION_SOURCE_NAMES[key];
 }
 
 function snapshotView(item: SceneItem<BoardSessionItem>, context: BoardRenderContext, unavailable: boolean): SessionView {

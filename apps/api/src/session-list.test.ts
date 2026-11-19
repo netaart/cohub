@@ -4,9 +4,9 @@ import {
   decodeSessionListCursor,
   encodeSessionListCursor,
   InvalidSessionListCursorError,
-  InvalidSessionSourceFilterError,
+  InvalidSessionFilterError,
   mergeUserSessionListBranches,
-  parseSessionSourceKeys,
+  parseSessionAttributionFilter,
   pickSessionsPreservingOrder,
 } from "./session-list.js";
 
@@ -158,28 +158,30 @@ describe("decodeSessionListCursor", () => {
   });
 });
 
-describe("parseSessionSourceKeys", () => {
-  it("returns null when the filter is absent", () => {
-    assert.equal(parseSessionSourceKeys(null), null);
-    assert.equal(parseSessionSourceKeys(undefined), null);
-    assert.equal(parseSessionSourceKeys(""), null);
-    assert.equal(parseSessionSourceKeys("   "), null);
+describe("parseSessionAttributionFilter", () => {
+  it("returns null when no filter is given", () => {
+    assert.equal(parseSessionAttributionFilter({}), null);
+    assert.equal(parseSessionAttributionFilter({ source: "  ", initiator: "" }), null);
   });
 
   it("parses, trims and dedupes comma-separated kinds", () => {
-    assert.deepEqual(parseSessionSourceKeys("web"), { keys: ["web"] });
-    assert.deepEqual(parseSessionSourceKeys(" WEB , feishu "), {
-      keys: ["web", "feishu"],
+    assert.deepEqual(parseSessionAttributionFilter({ source: " WEB , feishu,web" }), {
+      source: ["web", "feishu"],
+      initiator: [],
     });
-    assert.deepEqual(parseSessionSourceKeys("web,web"), { keys: ["web"] });
+    assert.deepEqual(parseSessionAttributionFilter({ initiator: "human,agent" }), {
+      source: [],
+      initiator: ["human", "agent"],
+    });
   });
 
   it("rejects unknown kinds instead of silently returning everything", () => {
     assert.throws(
-      () => parseSessionSourceKeys("nope"),
+      () => parseSessionAttributionFilter({ initiator: "robot" }),
       (error: unknown) =>
-        error instanceof InvalidSessionSourceFilterError &&
-        error.unknownKeys[0] === "nope",
+        error instanceof InvalidSessionFilterError &&
+        error.param === "initiator" &&
+        error.unknownKeys[0] === "robot",
     );
   });
 });

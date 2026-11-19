@@ -1295,22 +1295,7 @@ export type UserSessionListItem = SessionRecord & {
 };
 
 
-/**
- * Source kinds for the `source` query on `GET /api/me/sessions`. Keys match the
- * `Source/*` labels a space sidebar shows; `other` catches anything unlabelled.
- */
-export type UserSessionSourceKey =
-  | "public_api"
-  | "scheduled_task"
-  | "space_hook"
-  | "web"
-  | "websocket"
-  | "cli"
-  | "feishu"
-  | "wechat"
-  | "discord"
-  | "qq"
-  | "other";
+export type UserSessionSourceKey = import("@cohub/protocol/model").SessionSourceKey;
 
 export type UserSessionsResponse = {
   sessions: UserSessionListItem[];

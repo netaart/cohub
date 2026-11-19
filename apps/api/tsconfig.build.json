@@ -94,8 +94,8 @@
       "@cohub/core/labels": [
         "../../packages/core/dist/labels/index.d.ts"
       ],
-      "@cohub/core/labels/session-source": [
-        "../../packages/core/dist/labels/session-source.d.ts"
+      "@cohub/core/labels/session-attribution": [
+        "../../packages/core/dist/labels/session-attribution.d.ts"
       ],
       "@cohub/core/sandbox-lifecycle": [
         "../../packages/core/dist/sandbox-lifecycle/index.d.ts"

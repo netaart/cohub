@@ -20,7 +20,6 @@ import { hasPermission } from "./permissions.js";
 import { getRecord, normalizeChannelModelConfig, type ChannelModelSelection } from "./lib/channel-model-config.js";
 import { buildSessionSourceChannel } from "./lib/session-source-channel.js";
 import { assignSessionChannelSystemLabel } from "@cohub/core/labels/session-channel";
-import { assignSessionSourceSystemLabel } from "@cohub/core/labels/session-source";
 import { dispatchLabelAssignmentsUpdated } from "./realtime-events.js";
 import { formatChannelBillingBlockedMessage, serializeChannelBillingBlocked } from "./lib/billing-blocked.js";
 
@@ -598,6 +597,7 @@ async function resolveOrCreateSessionBindingForEventImpl(input: { spaceId: strin
         sessionId: randomUUID(),
         userUuid: input.userUuid,
         source: sessionSource,
+        provider: input.provider,
         externalSessionId: null,
         meta: {
           source: input.provider,
@@ -607,25 +607,16 @@ async function resolveOrCreateSessionBindingForEventImpl(input: { spaceId: strin
         },
       });
 
-  await Promise.all([
-    assignSessionSourceSystemLabel({
-      db,
-      spaceId: input.spaceId,
-      sessionId: session.id,
-      source: sessionSource,
-      provider: input.provider,
-    }).catch((error: unknown) => logger.warn("[SessionSourceLabel] failed to assign channel source label", error)),
-    assignSessionChannelSystemLabel({
-      db,
-      spaceId: input.spaceId,
-      sessionId: session.id,
-      channelId: input.channelId,
-      spaceChannelId: input.spaceChannelId,
-      provider: input.provider,
-    }).catch((error: unknown) => logger.warn("[SessionChannelLabel] failed to assign channel label", error)),
-  ]).then(() =>
+  await assignSessionChannelSystemLabel({
+    db,
+    spaceId: input.spaceId,
+    sessionId: session.id,
+    channelId: input.channelId,
+    spaceChannelId: input.spaceChannelId,
+    provider: input.provider,
+  }).then(() =>
     dispatchLabelAssignmentsUpdated({ spaceId: input.spaceId, resourceType: "session", resourceRef: session.id, sessionId: session.id }),
-  ).catch((error: unknown) => logger.warn("[SessionLabels] failed to dispatch channel session label update", error));
+  ).catch((error: unknown) => logger.warn("[SessionChannelLabel] failed to assign channel label", error));
 
   binding = await createSpaceSessionBinding({
     spaceId: input.spaceId,

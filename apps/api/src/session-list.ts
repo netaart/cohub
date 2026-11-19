@@ -1,4 +1,4 @@
-import { SESSION_SOURCE_KEYS } from "@cohub/core/labels/session-source";
+import { isSessionInitiator, isSessionSourceKey, type SessionInitiator, type SessionSourceKey } from "@cohub/protocol/model";
 
 export const DEFAULT_SESSION_LIST_LIMIT = 20;
 export const MAX_SESSION_LIST_LIMIT = 100;
@@ -24,44 +24,37 @@ export type SessionListActivityRow = {
   lastMessageAt: Date | string | null;
 };
 
-/**
- * Source kinds a cross-space session list can be filtered by, comma-separated
- * in `?source=`. Keys come from `SESSION_SOURCE_KEYS` so the vocabulary stays
- * shared with the source labels in a space sidebar.
- */
-export type SessionSourceFilter = {
-  keys: readonly string[];
+export type SessionAttributionFilter = {
+  source: readonly SessionSourceKey[];
+  initiator: readonly SessionInitiator[];
 };
 
-/**
- * Parses `?source=web,feishu`. Returns null when the param is absent, and
- * throws for unknown keys so a typo fails loudly instead of silently
- * returning everything.
- */
-export const parseSessionSourceKeys = (
-  value: string | null | undefined,
-): SessionSourceFilter | null => {
-  const raw = value?.trim();
-  if (!raw) return null;
-  const keys = [...new Set(raw.split(",").map((key) => key.trim().toLowerCase()).filter(Boolean))];
-  if (keys.length === 0) return null;
-  const unknown = keys.filter((key) => !SESSION_SOURCE_KEYS.includes(key));
-  if (unknown.length > 0) {
-    throw new InvalidSessionSourceFilterError(unknown);
-  }
-  return { keys };
-};
-
-export class InvalidSessionSourceFilterError extends Error {
-  constructor(readonly unknownKeys: readonly string[]) {
-    super(`unknown session source keys: ${unknownKeys.join(", ")}`);
-    this.name = "InvalidSessionSourceFilterError";
+export class InvalidSessionFilterError extends Error {
+  constructor(readonly param: keyof SessionAttributionFilter, readonly unknownKeys: readonly string[]) {
+    super(`unknown session ${param} keys: ${unknownKeys.join(", ")}`);
+    this.name = "InvalidSessionFilterError";
   }
 }
 
-/** Local resolution used for `other`, which has no raw source value of its own. */
-export const isOtherSessionSource = (key: string) => key === "other";
+const parseFilterKeys = <K extends string>(
+  param: keyof SessionAttributionFilter,
+  value: string | null | undefined,
+  isKey: (key: string) => key is K,
+): K[] => {
+  const keys = [...new Set((value ?? "").split(",").map((key) => key.trim().toLowerCase()).filter(Boolean))];
+  const unknown = keys.filter((key) => !isKey(key));
+  if (unknown.length > 0) throw new InvalidSessionFilterError(param, unknown);
+  return keys as K[];
+};
 
+export const parseSessionAttributionFilter = (query: {
+  source?: string | null;
+  initiator?: string | null;
+}): SessionAttributionFilter | null => {
+  const source = parseFilterKeys("source", query.source, isSessionSourceKey);
+  const initiator = parseFilterKeys("initiator", query.initiator, isSessionInitiator);
+  return source.length > 0 || initiator.length > 0 ? { source, initiator } : null;
+};
 
 export const encodeSessionListCursor = (
   session: Pick<SessionListActivityRow, "id" | "lastMessageAt"> | null | undefined,

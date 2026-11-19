@@ -6,6 +6,7 @@ import {
   APP_VIEW_STATS_ACTIVE_REDIS_KEY,
   type AppViewStatsSource,
 } from "@cohub/protocol";
+import { APP_SESSION_SOURCES, resolveSessionSourceKey } from "@cohub/protocol/model";
 import type { RequestSource } from "@cohub/protocol/provenance";
 import { db } from "./db/index.js";
 
@@ -61,7 +62,8 @@ const dateKey = (date: Date) => date.toISOString().slice(0, 10);
 
 export function resolveAppViewSource(source: RequestSource | null | undefined, fallback: AppViewSource): AppViewSource {
   if (source?.via === "cli") return "cli";
-  if (source?.via === "web") return "web";
+  // Desktop and mobile shells view apps in the same Cohub UI.
+  if (source?.via && APP_SESSION_SOURCES.has(resolveSessionSourceKey(source.via))) return "web";
   if (source?.via) return "api";
   return fallback;
 }

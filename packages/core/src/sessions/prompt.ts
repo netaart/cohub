@@ -1,7 +1,7 @@
 import { BillingAccessBlockedError, type BillingAccessDecision, type BillingUsageGate } from "@cohub/billing";
 import type { ContentBlock } from "@cohub/protocol/core";
 import type { GenerationPolicy } from "@cohub/protocol/generation";
-import { normalizeSessionTurnOrigin, type SessionTurnIntent, type SessionTurnOrigin, type SessionTurnOriginKind, type SessionTurnReply } from "@cohub/protocol/model";
+import { normalizeSessionTurnOrigin, readTurnInitiator, type SessionTurnIntent, type SessionTurnOrigin, type SessionTurnOriginKind, type SessionTurnReply } from "@cohub/protocol/model";
 import { isRequestSourceClientId, normalizeRequestSource, type RequestSource } from "@cohub/protocol/provenance";
 import { assertHarnessAccess, harnessSchema, isApprovalMode, isLocalHarness, runtimeServiceTierIdSchema, supportsApprovalMode, type ApprovalMode, type HarnessKind, type RuntimeRegistration } from "@cohub/protocol/runtime";
 import { findRuntimeModel, isModelThinkingLevel } from "@cohub/protocol";
@@ -497,6 +497,7 @@ export const submitSessionPrompt = async (
     : requestSource?.turnId ? await deps.resolveOrigin?.(requestSource, originKind) ?? null : null;
   const baseMeta = {
     source: input.source,
+    initiator: readTurnInitiator({ source: input.source, context: input.context, origin, requestSource }),
     ...(requestSource ? { requestSource } : {}),
     ...(origin ? { origin } : {}),
     ...(origin && input.reply ? { reply: input.reply } : {}),

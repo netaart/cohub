@@ -9,6 +9,8 @@ import { enqueueReferences } from "./reference-index-queue.js";
 import { dispatchSessionCreated } from "./realtime-events.js";
 import type { SessionForkListItem } from "./session-fork-visibility.js";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
+import { assignSessionInitiatorLabel, SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX } from "@cohub/core/labels/session-attribution";
+import { readSessionInitiator } from "@cohub/protocol/model";
 import { inheritSessionMetaForFork, normalizeSessionTitle, readSessionParticipantUserUuids, refreshSessionStats, setSessionParticipantsMeta, setSessionTitleMeta } from "@cohub/core/sessions";
 
 type SegmentRow = typeof sessionTurnSegments.$inferSelect;
@@ -291,6 +293,7 @@ export async function createSessionForkInTransaction(tx: Transaction, input: Ses
       eq(labelAssignments.resourceType, "session"),
       eq(labelAssignments.resourceRef, parent.id),
       sql`${labels.systemKey} is distinct from ${SESSION_ARCHIVED_LABEL_SYSTEM_KEY}`,
+      sql`coalesce(${labels.systemKey}, '') not like ${`${SESSION_INITIATOR_LABEL_SYSTEM_KEY_PREFIX}%`}`,
     ));
   if (parentLabelAssignments.length > 0) {
     await tx
@@ -315,14 +318,16 @@ export async function createSessionForkInTransaction(tx: Transaction, input: Ses
 }
 
 export async function publishSessionFork(result: Awaited<ReturnType<typeof createSessionForkInTransaction>>) {
-  await assignSessionParticipantSystemLabels({
-    db,
-    spaceId: result.fork.spaceId,
-    sessionId: result.session.id,
-    userUuids: result.participantUserUuids,
-  }).catch((error) => {
-    logger.warn("[SessionFork] failed to assign participant labels", { sessionId: result.session.id, error });
-  });
+  const { spaceId } = result.fork;
+  const sessionId = result.session.id;
+  await Promise.all([
+    assignSessionParticipantSystemLabels({ db, spaceId, sessionId, userUuids: result.participantUserUuids }).catch((error) => {
+      logger.warn("[SessionFork] failed to assign participant labels", { sessionId, error });
+    }),
+    assignSessionInitiatorLabel({ db, spaceId, sessionId, initiator: readSessionInitiator(result.session) ?? "human" }).catch((error) => {
+      logger.warn("[SessionFork] failed to assign initiator label", { sessionId, error });
+    }),
+  ]);
   // Index the fork lineage. Enqueued for async, retryable indexing so stats
   // never block or fail the fork.
   enqueueReferences([

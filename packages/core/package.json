@@ -52,9 +52,9 @@
       "types": "./dist/labels/index.d.ts",
       "default": "./dist/labels/index.js"
     },
-    "./labels/session-source": {
-      "types": "./dist/labels/session-source.d.ts",
-      "default": "./dist/labels/session-source.js"
+    "./labels/session-attribution": {
+      "types": "./dist/labels/session-attribution.d.ts",
+      "default": "./dist/labels/session-attribution.js"
     },
     "./labels/session-user": {
       "types": "./dist/labels/session-user.d.ts",

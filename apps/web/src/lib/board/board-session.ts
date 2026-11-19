@@ -17,10 +17,7 @@ import {
 	getSessionPreviewText,
 } from "#lib/session-preview.ts";
 import { getSessionActivityAt } from "#lib/session-sort.ts";
-import {
-	chatsSourceName,
-	resolveSessionSourceKey,
-} from "#lib/stores/chats-filter.ts";
+import { sessionAttributionName } from "#lib/stores/chats-filter.ts";
 import { formatCompactAbsoluteTime } from "#lib/time-format.ts";
 
 const EXCERPT_LIMIT = 360;
@@ -34,18 +31,18 @@ export function boardSessionLive(
 	const status: BoardSessionStatus = row.kind === "unread" ? "idle" : row.kind;
 	const title =
 		getSessionListTitle(session) ?? m.sidebar_new_chat({}, { locale });
-	const source = resolveSessionSourceKey(session.source);
+	const attribution = sessionAttributionName(session, locale);
 	const excerpt =
 		row.errorMessage ??
-		(source === "web"
-			? getSessionPreviewText(session, EXCERPT_LIMIT)
-			: getSessionPreview(session, title, EXCERPT_LIMIT));
+		(attribution
+			? getSessionPreview(session, title, EXCERPT_LIMIT)
+			: getSessionPreviewText(session, EXCERPT_LIMIT));
 	const startedAt = row.startedAt ? Date.parse(row.startedAt) : Number.NaN;
 	return {
 		title,
 		excerpt,
 		meta: [
-			source === "web" ? "" : chatsSourceName(source, locale),
+			attribution ?? "",
 			formatCompactAbsoluteTime(getSessionActivityAt(session)),
 		]
 			.filter(Boolean)

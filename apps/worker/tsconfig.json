@@ -132,8 +132,8 @@
       "@cohub/core/labels": [
         "../../packages/core/src/labels/index.ts"
       ],
-      "@cohub/core/labels/session-source": [
-        "../../packages/core/src/labels/session-source.ts"
+      "@cohub/core/labels/session-attribution": [
+        "../../packages/core/src/labels/session-attribution.ts"
       ],
       "@cohub/core/sandbox-lifecycle": [
         "../../packages/core/src/sandbox-lifecycle/index.ts"

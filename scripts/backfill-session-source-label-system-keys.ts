@@ -9,7 +9,7 @@ import * as schema from "@cohub/db";
 import {
   resolveKnownSessionSourceLabelSystemKey,
   SESSION_SOURCE_ROOT_LABEL_SYSTEM_KEY,
-} from "@cohub/core/labels/session-source";
+} from "@cohub/core/labels/session-attribution";
 
 const connectionString = process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/cohub";
 const dbClient = postgres(connectionString, { prepare: false });

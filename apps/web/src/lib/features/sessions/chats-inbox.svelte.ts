@@ -1,10 +1,10 @@
-import type {
-	ChannelEnvelope,
-	SessionRecord,
-	SpaceRecord,
-	UserSessionListItem,
-	UserSessionSourceKey,
-	UserSessionSpaceSummary,
+import {
+	type ChannelEnvelope,
+	isSessionInitiator,
+	type SessionRecord,
+	type SpaceRecord,
+	type UserSessionListItem,
+	type UserSessionSpaceSummary,
 } from "@neta-art/cohub";
 import { untrack } from "svelte";
 import { resolveSpaceEntryRoute } from "#lib/app-entry.ts";
@@ -27,7 +27,9 @@ import { buildUserNewSessionRoute } from "#lib/space-routes.ts";
 import { authStore } from "#lib/stores/auth.svelte.ts";
 import {
 	type ChatsFilter,
+	type ChatsKind,
 	chatsFilterScope,
+	chatsKindSystemKey,
 	DEFAULT_CHATS_FILTER,
 	readChatsFilter,
 	type SessionEventRecord,
@@ -71,10 +73,6 @@ export type ChatsView = {
 	readonly loadingMore: boolean;
 	readonly error: string | null;
 };
-
-function sourceSystemKey(source: UserSessionSourceKey) {
-	return `session-source:${source}`;
-}
 
 function withSpace(
 	sessions: readonly SessionRecord[],
@@ -258,8 +256,8 @@ class ChatsInbox {
 		};
 	}
 
-	setSource(source: UserSessionSourceKey | null) {
-		this.#applyFilter({ ...this.filter, source, archived: false });
+	setKind(kind: ChatsKind | null) {
+		this.#applyFilter({ ...this.filter, kind, archived: false });
 	}
 
 	setSpace(space: UserSessionSpaceSummary | null) {
@@ -271,7 +269,7 @@ class ChatsInbox {
 	}
 
 	showAll() {
-		this.#applyFilter({ source: null, space: null, archived: false });
+		this.#applyFilter({ kind: null, space: null, archived: false });
 	}
 
 	reflectArchive(session: SessionRecord) {
@@ -470,7 +468,7 @@ class ChatsInbox {
 	}
 
 	async #readCachedPage(filter: ChatsFilter) {
-		const { space, source } = filter;
+		const { space, kind } = filter;
 		if (space && filter.archived) return null;
 		if (!space) {
 			const cached = await getCachedUserSessionListSnapshot(
@@ -484,7 +482,7 @@ class ChatsInbox {
 					}
 				: null;
 		}
-		if (!source) {
+		if (!kind) {
 			const cached = await getCachedSessionListSnapshot(space.id);
 			return cached
 				? {
@@ -497,7 +495,7 @@ class ChatsInbox {
 		const labels = (await getCachedSpaceLabelsSnapshot(space.id))?.labels;
 		const label = labels
 			? flattenLabelsWithRefs(labels).find(
-					(item) => item.systemKey === sourceSystemKey(source),
+					(item) => item.systemKey === chatsKindSystemKey(kind),
 				)
 			: null;
 		if (!label) return null;
@@ -512,12 +510,14 @@ class ChatsInbox {
 	}
 
 	async #fetchPage(filter: ChatsFilter, cursor: string | null) {
-		const { space, source, archived } = filter;
+		const { space, kind, archived } = filter;
 		if (!space) {
+			const facet = archived ? null : kind;
 			const result = await sdk.user.listSessions({
 				limit: PAGE_SIZE,
 				cursor,
-				source: source && !archived ? [source] : null,
+				initiator: facet && isSessionInitiator(facet) ? [facet] : null,
+				source: facet && !isSessionInitiator(facet) ? [facet] : null,
 				includeForks: true,
 				archived: archived ? "only" : undefined,
 			});
@@ -527,7 +527,7 @@ class ChatsInbox {
 				pageInfo: result.pageInfo ?? EMPTY_PAGE_INFO,
 			};
 		}
-		if (!source || archived) {
+		if (!kind || archived) {
 			const result = await sdk.space(space.id).sessions.list({
 				limit: PAGE_SIZE,
 				cursor,
@@ -551,7 +551,7 @@ class ChatsInbox {
 		}
 		const labels = await fetchSpaceLabels(space.id);
 		const label = flattenLabelsWithRefs(labels).find(
-			(item) => item.systemKey === sourceSystemKey(source),
+			(item) => item.systemKey === chatsKindSystemKey(kind),
 		);
 		if (!label) return { sessions: [], forks: [], pageInfo: EMPTY_PAGE_INFO };
 		const result = cursor

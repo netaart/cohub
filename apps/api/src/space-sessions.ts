@@ -11,7 +11,7 @@ import { SPACE_ENV_REDIS_KEY } from "@cohub/protocol/sandbox";
 import { isSandboxUsableStatus } from "@cohub/sandbox-controller";
 import { sanitizeContentBlocksForPostgresJson, sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { assignSessionParticipantSystemLabels } from "@cohub/core/labels/session-user";
-import { sessionArchiveFilterCondition } from "@cohub/core/labels";
+import { assignSessionAttributionLabels, sessionArchiveFilterCondition } from "@cohub/core/labels";
 import {
   claimSessionFallbackTitle,
   deriveSessionFallbackTitle,
@@ -45,24 +45,24 @@ import { fallbackPublicUserProfile, getProfilesByUuids } from "./user-profiles.j
 import { enqueueSessionMessagePostprocess } from "./session-message-postprocess-queue.js";
 import { enqueueSessionTitleGeneration } from "./session-title-queue.js";
 import { touchSpaceActivity } from "./space-activity.js";
-import { sessionListSourceCondition } from "./session-source-filter.js";
+import { sessionAttributionCondition } from "./session-attribution-filter.js";
 import {
   decodeSessionListCursor,
   mergeUserSessionListBranches,
   resolveSessionListLimit,
   paginateSessionRows,
   type SessionListCursor,
-  type SessionSourceFilter,
+  type SessionAttributionFilter,
 } from "./session-list.js";
 
 export {
   encodeSessionListCursor,
   InvalidSessionListCursorError,
-  InvalidSessionSourceFilterError,
+  InvalidSessionFilterError,
   MAX_SESSION_LIST_LIMIT,
   mergeUserSessionListBranches,
-  parseSessionSourceKeys,
-  type SessionSourceFilter,
+  parseSessionAttributionFilter,
+  type SessionAttributionFilter,
 } from "./session-list.js";
 
 
@@ -229,7 +229,28 @@ export async function assignSessionUserLabelsAndDispatch(input: { spaceId: strin
   });
 }
 
-export const createInitialSpaceSession = async (input: RegisterSessionInput) => {
+export async function labelNewSession(
+  session: { id: string; spaceId: string; userUuid: string | null; source: string | null; meta: unknown },
+  provider?: string | null,
+) {
+  const { spaceId, id: sessionId } = session;
+  const results = await Promise.allSettled([
+    assignSessionAttributionLabels({ db, spaceId, session, provider }),
+    assignSessionParticipantSystemLabels({ db, spaceId, sessionId, userUuids: [session.userUuid] }),
+  ]);
+  for (const result of results) {
+    if (result.status === "rejected") logger.warn("[SessionLabels] failed to label new session", { sessionId, error: result.reason });
+  }
+  await dispatchLabelAssignmentsUpdated({ spaceId, resourceType: "session", resourceRef: sessionId, sessionId }).catch((error) => {
+    logger.warn("[SessionLabels] failed to dispatch new session labels", { sessionId, error });
+  });
+}
+
+type NewSessionInput = RegisterSessionInput & {
+  provider?: string | null;
+};
+
+export const createInitialSpaceSession = async (input: NewSessionInput) => {
   const userUuid = normalizeRequiredUserUuid(input.userUuid);
   const title = normalizeSessionTitle(input.title);
   const participantMeta = initializeSessionParticipantsMeta(input.meta, userUuid);
@@ -250,13 +271,11 @@ export const createInitialSpaceSession = async (input: RegisterSessionInput) => 
   await dispatchSessionCreated(session).catch((error) => {
     logger.warn("[Realtime] failed to dispatch session.created", error);
   });
-  await assignSessionUserLabelsAndDispatch({ spaceId: input.spaceId, sessionId: session.id, userUuids: [userUuid] }).catch((error) => {
-    logger.warn("[SessionUserLabel] failed to assign participant label", error);
-  });
+  await labelNewSession(session, input.provider);
   return session;
 };
 
-export const registerSpaceSession = async (input: RegisterSessionInput) => {
+export const registerSpaceSession = async (input: NewSessionInput) => {
   const space = await getSpaceById(input.spaceId);
   if (!space) throw new Error("Space not found");
 
@@ -282,9 +301,7 @@ export const registerSpaceSession = async (input: RegisterSessionInput) => {
     await dispatchSessionCreated(session).catch((error) => {
       logger.warn("[Realtime] failed to dispatch session.created", error);
     });
-    await assignSessionUserLabelsAndDispatch({ spaceId: input.spaceId, sessionId: session.id, userUuids: [userUuid] }).catch((error) => {
-      logger.warn("[SessionUserLabel] failed to assign participant label", error);
-    });
+    await labelNewSession(session, input.provider);
     return session;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -449,22 +466,22 @@ export const attachSpaceSummaries = async <T extends { spaceId: string | null }>
  */
 export const listUserSessions = async (
   userUuid: string,
-  options?: { limit?: number; cursor?: string | null; source?: SessionSourceFilter | null; archive?: SessionArchiveFilter },
+  options?: { limit?: number; cursor?: string | null; attribution?: SessionAttributionFilter | null; archive?: SessionArchiveFilter },
 ) => {
   const limit = resolveSessionListLimit(options?.limit);
   const cursor = decodeSessionListCursor(options?.cursor);
   const activityCursor = sessionListActivityCursorCondition(cursor);
-  const sourceCondition = sessionListSourceCondition(options?.source ?? null);
+  const attributionCondition = sessionAttributionCondition(options?.attribution ?? null);
   const archiveCondition = sessionArchiveFilterCondition(options?.archive);
   const branchLimit = limit + 1;
 
-  const creatorWhere = and(eq(spaceSessions.userUuid, userUuid), activityCursor, sourceCondition, archiveCondition);
+  const creatorWhere = and(eq(spaceSessions.userUuid, userUuid), activityCursor, attributionCondition, archiveCondition);
 
   const participantWhere = and(
     userSessionParticipantCondition(userUuid),
     sql`${spaceSessions.userUuid} is distinct from ${userUuid}`,
     activityCursor,
-    sourceCondition,
+    attributionCondition,
     archiveCondition,
   );
 

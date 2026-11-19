@@ -7,7 +7,7 @@ import { dispatchSessionCreated, dispatchSessionUpdated, dispatchTurnCreated, me
 import { dispatchSessionOutput, dispatchTurnFinalized, dispatchTurnUpdated } from "./session-output.js";
 import { enqueueSessionMessagePostprocess } from "./session-message-postprocess-queue.js";
 import { getSessionTurnById, hydrateTurnAuthorProfiles } from "./session-turns.js";
-import { getSpaceSessionById } from "./space-sessions.js";
+import { getSpaceSessionById, labelNewSession } from "./space-sessions.js";
 import { touchSpaceActivity } from "./space-activity.js";
 
 const logger = createLogger({ serviceName: "cohub-api" });
@@ -32,7 +32,10 @@ export async function publishNativeIngest(spaceId: string, effects: NativeIngest
   for (const sessionId of new Set(effects.turns.map((turn) => turn.sessionId))) {
     const session = await getSpaceSessionById(sessionId).catch(() => null);
     const creation = created.get(sessionId);
-    if (session && creation) await dispatchSessionCreated(session, creation.fork).catch(warn("session.created"));
+    if (session && creation) {
+      await dispatchSessionCreated(session, creation.fork).catch(warn("session.created"));
+      if (!creation.fork) await labelNewSession(session);
+    }
     for (const entry of live.filter((turn) => turn.sessionId === sessionId)) {
       const turn = await getSessionTurnById(sessionId, entry.turnId).catch(() => null);
       if (!turn) continue;

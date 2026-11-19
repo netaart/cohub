@@ -16,7 +16,7 @@ import { uploadAvatarAsset, uploadChatImageAsset, uploadLikeStickerAsset } from 
 import { createClient, createRealtimeClient } from "../client.js";
 import { collectOption, readPromptContent } from "../command-input.js";
 import { table, json as outJson, jsonRequested, ok, error, handleHttp, formatEpochMs, truncateText } from "../output.js";
-import { SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
+import { SESSION_INITIATOR_COLUMN, SESSION_STATUS_COLUMN, sessionArchiveFilter } from "../session-status.js";
 import { resolveSpace } from "../space.js";
 import { uploadLocalFiles, type LocalUploadEntry } from "../space-files/upload.js";
 import { registerDecisionCommand } from "./decision.js";
@@ -1537,6 +1537,7 @@ function registerSessions(spacesCmd: Command): void {
         table(result.sessions, [
           { key: "id", label: "ID" },
           { key: "title", label: "Title" },
+          SESSION_INITIATOR_COLUMN,
           SESSION_STATUS_COLUMN,
           { key: "totalMessages", label: "Messages" },
           { key: "createdAt", label: "Created" },
@@ -1583,6 +1584,7 @@ function registerSessions(spacesCmd: Command): void {
         table([result.session], [
           { key: "id", label: "ID" },
           { key: "title", label: "Title" },
+          SESSION_INITIATOR_COLUMN,
           SESSION_STATUS_COLUMN,
           { key: "totalMessages", label: "Messages" },
           { key: "totalToolCalls", label: "Tool Calls" },

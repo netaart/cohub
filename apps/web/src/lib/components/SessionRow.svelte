@@ -45,10 +45,7 @@ import {
 } from "#lib/session-preview.ts";
 import { getSessionActivityAt } from "#lib/session-sort.ts";
 import { authStore } from "#lib/stores/auth.svelte.ts";
-import {
-	chatsSourceName,
-	resolveSessionSourceKey,
-} from "#lib/stores/chats-filter.ts";
+import { sessionAttributionName } from "#lib/stores/chats-filter.ts";
 import { unreadTracker } from "#lib/stores/session-state.svelte.ts";
 import { formatCompactAbsoluteTime } from "#lib/time-format.ts";
 
@@ -157,8 +154,7 @@ const statusText = $derived(
 		: status.label,
 );
 const time = $derived(formatCompactAbsoluteTime(getSessionActivityAt(session)));
-const sourceKey = $derived(resolveSessionSourceKey(session.source));
-const sourceName = $derived(chatsSourceName(sourceKey, locale));
+const attribution = $derived(sessionAttributionName(session, locale));
 const participants = $derived(
 	visibleParticipants(sessionParticipants(session), authStore.userUuid),
 );
@@ -173,13 +169,12 @@ const participantLabel = $derived(
 const hasMessages = $derived(
 	Boolean(session.latestMessageText || session.lastMessageAt),
 );
-// Web chats keep a preview that repeats the title; others fall back to the source.
 const preview = $derived(
 	dense
 		? null
-		: sourceKey === "web"
-			? getSessionPreviewText(session)
-			: getSessionPreview(session, title),
+		: attribution
+			? getSessionPreview(session, title)
+			: getSessionPreviewText(session),
 );
 const detail = $derived(status.errorMessage ?? preview);
 const unread = $derived(status.kind === "unread");
@@ -187,10 +182,10 @@ const stoppedLabel = $derived(
 	dense ? null : getSessionStoppedLabel(session, locale),
 );
 const showSourceLine = $derived(
-	!dense && !stoppedLabel && !preview && hasMessages && sourceKey !== "web",
+	!dense && !stoppedLabel && !preview && hasMessages && Boolean(attribution),
 );
 const sourceBadge = $derived(
-	showSourceBadge && !showSourceLine && sourceKey !== "web" ? sourceName : "",
+	showSourceBadge && !showSourceLine ? (attribution ?? "") : "",
 );
 
 const isFork = $derived(Boolean(tree && tree.depth > 0));
@@ -379,7 +374,7 @@ function visibleParticipants(list: Participant[], viewer: string | null) {
 	{:else if detail}
 		<span title={detail}>{detail}</span>
 	{:else if showSourceLine}
-		<span class="text-text-placeholder">{sourceName}</span>
+		<span class="text-text-placeholder">{attribution}</span>
 	{:else if !hasMessages}
 		<span class="text-text-placeholder">{m.chats_row_no_messages({}, { locale })}</span>
 	{/if}

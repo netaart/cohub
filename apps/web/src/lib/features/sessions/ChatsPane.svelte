@@ -10,8 +10,8 @@ import ListHeader from "#lib/components/list-page/ListHeader.svelte";
 import SwipePager from "#lib/components/list-page/SwipePager.svelte";
 import { SwipeTabs } from "#lib/components/list-page/swipe-tabs.svelte.ts";
 import SpaceAvatar from "#lib/components/SpaceAvatar.svelte";
+import ChatsKindPicker from "#lib/features/sessions/ChatsKindPicker.svelte";
 import ChatsList from "#lib/features/sessions/ChatsList.svelte";
-import ChatsSourcePicker from "#lib/features/sessions/ChatsSourcePicker.svelte";
 import { chatsInbox } from "#lib/features/sessions/chats-inbox.svelte.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { onListScrollTop } from "#lib/layout/list-scroll-top.ts";
@@ -34,12 +34,10 @@ const inbox = chatsInbox;
 const filter = $derived(inbox.filter);
 const isPage = $derived(variant === "page");
 const chips = $derived(inbox.spaceChips);
-const source = $derived(filter.source);
+const kind = $derived(filter.kind);
 const archived = $derived(filter.archived);
 const pages = $derived<(UserSessionSpaceSummary | null)[]>([null, ...chips]);
-const pageFilters = $derived(
-	pages.map((space) => ({ source, space, archived })),
-);
+const pageFilters = $derived(pages.map((space) => ({ kind, space, archived })));
 const keys = $derived(pages.map((space) => space?.id ?? ALL_KEY));
 const pageIndex = $derived(
 	Math.max(0, keys.indexOf(filter.space?.id ?? ALL_KEY)),
@@ -82,10 +80,10 @@ onMount(() => {
 				{#if isPage}
 					<HeaderAction label={m.list_search({}, { locale })} icon={Search} onclick={() => openAreaSearch("chats")} />
 				{/if}
-				<ChatsSourcePicker
-					value={filter.source}
+				<ChatsKindPicker
+					value={filter.kind}
 					{archived}
-					onChange={(source) => inbox.setSource(source)}
+					onChange={(kind) => inbox.setKind(kind)}
 					onArchived={() => inbox.setArchived(true)}
 				/>
 				<HeaderAction
