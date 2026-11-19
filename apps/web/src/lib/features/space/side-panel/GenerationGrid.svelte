@@ -14,6 +14,10 @@ import {
 	mediaLightbox,
 } from "#lib/components/media-lightbox.ts";
 import { setCohubResourceDragData } from "#lib/drag/cohub-resource-drag.ts";
+import {
+	clipMediaTitle,
+	durableMediaUrl,
+} from "#lib/media/media-ask.svelte.ts";
 import { screenVariantSize } from "#lib/media/media-info.ts";
 import GenerationTile from "./GenerationTile.svelte";
 import { resolveGenerationOutputSource } from "./generation-feed.svelte.ts";
@@ -75,6 +79,9 @@ function resolveSource({ task, output }: MediaGridItem) {
 
 function mediaItem(item: MediaGridItem): MediaItem {
 	const { task, output } = item;
+	const url = output.type === "image" ? durableMediaUrl(output.url) : undefined;
+	const title =
+		output.title ?? (task.prompt ? clipMediaTitle(task.prompt) : undefined);
 	return {
 		type: output.type,
 		src: output.url ?? undefined,
@@ -87,6 +94,7 @@ function mediaItem(item: MediaGridItem): MediaItem {
 		width: output.width ?? undefined,
 		height: output.height ?? undefined,
 		onDetails: () => onOpenTask(task.id),
+		...(url ? { ref: { url, ...(title ? { title } : {}) } } : {}),
 	};
 }
 

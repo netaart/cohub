@@ -248,6 +248,7 @@ $effect(() => {
 			{@const scrollAnchor = getTimelineScrollAnchor(item)}
 			<div
 				data-kind={item.kind}
+				data-media-scope
 				data-scroll-anchor-key={scrollAnchor?.itemKey}
 				data-scroll-anchor-kind={scrollAnchor?.kind}
 				data-scroll-anchor-turn-sequence={scrollAnchor?.turnSequence}

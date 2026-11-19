@@ -34,6 +34,7 @@ import SessionModelSelectorDialog from "#lib/features/space/modules/SessionModel
 import { takeHostShare } from "#lib/host-share.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { provideMarkdownWorkspaceAsset } from "#lib/markdown-asset-context.ts";
+import { mediaAsk } from "#lib/media/media-ask.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { provideSessionRelations } from "#lib/session-relations-context.ts";
 import type { NewChatBackgroundConfig } from "#lib/space-config.ts";
@@ -218,6 +219,32 @@ $effect(() => {
 const canAcceptDraftDrop = $derived(
 	Boolean(activeSessionState || isNewSessionRoute),
 );
+
+const canAskAboutMedia = $derived(
+	canAcceptDraftDrop && host.composerMode === "agent",
+);
+$effect(() => {
+	if (!canAskAboutMedia) return;
+	return mediaAsk.register({
+		get draft() {
+			return composerInput;
+		},
+		set draft(value: string) {
+			composerInput = value;
+		},
+		get sending() {
+			return host.sending;
+		},
+		get hasMarks() {
+			return host.hasMediaMarks;
+		},
+		send: () => host.handleSend(),
+		view: host.viewMedia,
+		marks: host.mediaMarks,
+		addMark: host.addMediaMark,
+		removeMark: host.removeMediaMark,
+	});
+});
 
 function resetDraftDropState() {
 	draftDropKind = null;

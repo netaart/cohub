@@ -980,6 +980,123 @@ body.pointer-dragging {
 	}
 }
 
+/* Adjacent image-only paragraphs form a gallery; text between them splits it. */
+.markdown-content[data-variant="chat"]
+	:is(.markdown-stable-region, .markdown-live-region)
+	> p[data-images]:is(
+		:not([data-images="1"]),
+		:has(+ p[data-images]),
+		p[data-images] + *
+	) {
+	display: contents;
+
+	& > img {
+		float: left;
+		width: min(8.5rem, calc(100% / 3 - 0.5rem));
+		min-width: 0;
+		max-width: none;
+		height: auto;
+		min-height: 0;
+		max-height: none;
+		aspect-ratio: 1;
+		margin: 0 0.5rem 0.5rem 0;
+		object-fit: cover;
+		background: color-mix(in srgb, var(--bg-elevated) 72%, var(--bg-content));
+	}
+
+	&:not(:has(+ p[data-images]))::after {
+		content: "";
+		display: block;
+		clear: both;
+	}
+}
+
+.markdown-content p.markdown-page {
+	margin: 0.5em 0 0.85em;
+}
+
+.markdown-content .markdown-page-card {
+	display: flex;
+	width: min(100%, 26rem);
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.625rem 0.75rem;
+	border: 1px solid var(--border-subtle);
+	border-radius: 0.625rem;
+	background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+	color: var(--text-primary);
+	text-decoration: none;
+	transition:
+		background-color 120ms var(--ease-out),
+		border-color 120ms var(--ease-out);
+
+	&::before,
+	&::after {
+		content: "";
+		flex-shrink: 0;
+		background: currentColor;
+		mask: var(--page-card-icon) center / contain no-repeat;
+	}
+
+	&::before {
+		width: 1.125rem;
+		height: 1.125rem;
+		color: var(--text-secondary);
+		--page-card-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='4' width='20' height='16' rx='2'/%3E%3Cpath d='M10 4v4'/%3E%3Cpath d='M2 8h20'/%3E%3Cpath d='M6 4v4'/%3E%3C/svg%3E");
+	}
+
+	&::after {
+		width: 0.875rem;
+		height: 0.875rem;
+		color: var(--text-tertiary);
+		--page-card-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 7h10v10'/%3E%3Cpath d='M7 17 17 7'/%3E%3C/svg%3E");
+	}
+
+	&:hover {
+		text-decoration: none;
+	}
+
+	@media (hover: hover) {
+		&:hover {
+			border-color: var(--border-strong);
+			background: var(--bg-hover);
+		}
+	}
+
+	&:focus-visible {
+		outline: 2px solid var(--brand);
+		outline-offset: 2px;
+	}
+}
+
+.markdown-content .markdown-page-card-text {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	flex-direction: column;
+	gap: 0.125rem;
+}
+
+.markdown-content .markdown-page-card-title,
+.markdown-content .markdown-page-card-meta {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.markdown-content .markdown-page-card-title {
+	font-size: 0.93em;
+	font-weight: 500;
+	line-height: 1.35;
+}
+
+.markdown-content .markdown-page-card-meta {
+	color: var(--text-tertiary);
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 0.75em;
+	line-height: 1.4;
+}
+
 .markdown-content .katex {
 	font-size: 1.1em;
 }

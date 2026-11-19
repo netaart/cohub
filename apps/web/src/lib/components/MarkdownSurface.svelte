@@ -8,6 +8,7 @@ import {
 import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { createLazyModuleLoader } from "#lib/lazy-module.ts";
+import { markdownGallery } from "#lib/media/markdown-gallery.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { insertComposerSnippet } from "#lib/stores/composer-insert.ts";
 import {
@@ -105,6 +106,7 @@ $effect(() => {
 	// stable region is cleared, and Svelte won't dispose those instances.
 	sweepDisconnectedAudioPlayers();
 	renderDiagrams();
+	sizeGalleryTiles();
 	if (_streamingLive) return;
 	enhanceCodeBlocks();
 	enhanceAudioPlayers();
@@ -275,6 +277,15 @@ $effect(() => {
 
 	return () => controller.abort();
 });
+
+// Gallery tiles come from CSS; their size lets the browser pick a small variant.
+function sizeGalleryTiles() {
+	for (const img of markdownEl?.querySelectorAll<HTMLImageElement>(
+		"p[data-images] > img[srcset]:not([sizes])",
+	) ?? []) {
+		if (getComputedStyle(img).float !== "none") img.sizes = "8.5rem";
+	}
+}
 
 function sweepDisconnectedAudioPlayers() {
 	for (let i = mountedAudioPlayers.length - 1; i >= 0; i -= 1) {
@@ -480,6 +491,7 @@ onMount(() => {
 		const original = img.dataset.originalSrc;
 		if (!original || img.dataset.fallback) return;
 		img.dataset.fallback = "original";
+		img.removeAttribute("srcset");
 		img.src = original;
 	}
 
@@ -553,30 +565,17 @@ onMount(() => {
 			return;
 		}
 
-		if (target.tagName === "IMG") {
+		const media =
+			target instanceof HTMLImageElement || target instanceof HTMLVideoElement
+				? target
+				: target.parentElement instanceof HTMLVideoElement
+					? target.parentElement
+					: null;
+		if (media) {
 			e.preventDefault();
 			e.stopPropagation();
-			const img = target as HTMLImageElement;
-			mediaLightbox.show({
-				// Rendered images may be CDN variants; view and download the original.
-				src: img.dataset.originalSrc ?? img.src,
-				type: "image" as const,
-				alt: img.alt,
-			});
-		} else if (
-			target.tagName === "VIDEO" ||
-			(target.tagName === "SOURCE" && target.parentElement?.tagName === "VIDEO")
-		) {
-			e.preventDefault();
-			e.stopPropagation();
-			const video =
-				target.tagName === "VIDEO"
-					? (target as HTMLVideoElement)
-					: (target.parentElement as HTMLVideoElement);
-			mediaLightbox.show({
-				src: video.src || (video.querySelector("source")?.src ?? ""),
-				type: "video" as const,
-			});
+			const gallery = markdownGallery(media);
+			mediaLightbox.show(gallery.items, gallery.index);
 		}
 	}
 

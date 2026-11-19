@@ -63,15 +63,34 @@ export type ViewportAppContext = {
   content: string;
 };
 
+/** A region on an image; `x`/`y`/`width`/`height` are fractions of the image size. */
+export type ViewportMediaMark = {
+  n: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type ViewportMediaContext = {
+  kind: "media";
+  url?: string;
+  path?: string;
+  title?: string;
+  marks?: ViewportMediaMark[];
+};
+
 export type ViewportContext =
   | ViewportFileContext
   | ViewportBoardContext
   | ViewportPortContext
-  | ViewportAppContext;
+  | ViewportAppContext
+  | ViewportMediaContext;
 
 export function viewportContextId(context: ViewportContext): string {
   if (context.kind === "port") return `port:${context.port}`;
   if (context.kind === "app") return `app:${context.appId}:${context.key}`;
+  if (context.kind === "media") return `media:${context.path ?? context.url ?? ""}`;
   return `${context.kind}:${context.path}`;
 }
 
@@ -114,7 +133,37 @@ export function formatViewportContextLabel(context: ViewportContext): string {
     return `${name}${selected}`;
   }
   if (context.kind === "app") return context.label;
+  if (context.kind === "media") {
+    const name =
+      context.title?.trim() ||
+      (context.path ?? context.url ?? "").split(/[?#]/)[0]?.split("/").pop() ||
+      "image";
+    const marks = context.marks?.map((mark) => `#${mark.n}`).join(" ");
+    return marks ? `${name} ${marks}` : name;
+  }
   return `:${context.port}`;
+}
+
+const formatFraction = (value: number) => String(Math.round(value * 1000) / 1000);
+
+function formatMediaContextLine(context: ViewportMediaContext) {
+  const source = context.path
+    ? `\`${escapeAttachmentPath(context.path)}\``
+    : escapeAttachmentUrl(context.url ?? "");
+  const details = [
+    ...(context.title ? [`"${escapeViewportLabel(context.title).replaceAll('"', "'")}"`] : []),
+    ...(context.path && context.url ? [escapeAttachmentUrl(context.url)] : []),
+  ];
+  const suffix = details.length > 0 ? ` (${details.join("; ")})` : "";
+  const marks = context.marks ?? [];
+  if (marks.length === 0) return `- image: ${source}${suffix}`;
+  return [
+    `- image: ${source}${suffix}, marked regions as x/y/w/h fractions of the image:`,
+    ...marks.map(
+      (mark) =>
+        `  - #${mark.n}: x=${formatFraction(mark.x)} y=${formatFraction(mark.y)} w=${formatFraction(mark.width)} h=${formatFraction(mark.height)}`,
+    ),
+  ].join("\n");
 }
 
 export function formatViewportContextLine(context: ViewportContext): string {
@@ -139,6 +188,7 @@ export function formatViewportContextLine(context: ViewportContext): string {
     const content = context.content.replace(/\r\n?/g, "\n").trim();
     return `- app: \`${escapeAttachmentPath(context.appId)}\` (${label})\n${content}`;
   }
+  if (context.kind === "media") return formatMediaContextLine(context);
   const url = context.url?.trim();
   const suffix = url ? ` (${escapeAttachmentUrl(url)})` : "";
   return `- port: \`${escapeAttachmentPath(context.port)}\`${suffix}`;
@@ -171,6 +221,8 @@ export function isViewportContentBlock(block: {
     block._meta?.attachmentKind === "viewport"
   );
 }
+
+const isFiniteNumber = (value: unknown): value is number => Number.isFinite(value);
 
 export function parseViewportContextsFromMeta(
   meta: Record<string, unknown> | undefined | null,
@@ -272,6 +324,32 @@ export function parseViewportContextsFromMeta(
         key: record.key,
         label: record.label,
         content: record.content,
+      });
+      continue;
+    }
+    if (
+      record.kind === "media" &&
+      (typeof record.path === "string" || typeof record.url === "string")
+    ) {
+      const marks = Array.isArray(record.marks)
+        ? record.marks.flatMap((mark) => {
+            if (!mark || typeof mark !== "object" || Array.isArray(mark)) return [];
+            const { n, x, y, width, height } = mark as Record<string, unknown>;
+            return isFiniteNumber(n) &&
+              isFiniteNumber(x) &&
+              isFiniteNumber(y) &&
+              isFiniteNumber(width) &&
+              isFiniteNumber(height)
+              ? [{ n, x, y, width, height } satisfies ViewportMediaMark]
+              : [];
+          })
+        : [];
+      result.push({
+        kind: "media",
+        ...(typeof record.url === "string" ? { url: record.url } : {}),
+        ...(typeof record.path === "string" ? { path: record.path } : {}),
+        ...(typeof record.title === "string" ? { title: record.title } : {}),
+        ...(marks.length > 0 ? { marks } : {}),
       });
     }
   }

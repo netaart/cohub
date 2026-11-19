@@ -1,3 +1,5 @@
+import type { MediaRef } from "#lib/media/media-ask.svelte.ts";
+
 export type MediaType = "image" | "video" | "audio";
 
 export interface MediaItem {
@@ -19,6 +21,7 @@ export interface MediaItem {
 	height?: number;
 	/** Opens the source record; the lightbox closes first. */
 	onDetails?: () => void;
+	ref?: MediaRef;
 }
 
 export type MediaSource =

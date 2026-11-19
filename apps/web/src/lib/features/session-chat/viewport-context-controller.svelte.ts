@@ -3,12 +3,19 @@ import {
 	type ViewportBoardContext,
 	type ViewportContext,
 	type ViewportFileContext,
+	type ViewportMediaContext,
+	type ViewportMediaMark,
 	type ViewportPortContext,
 	type ViewportSelectedNode,
 	type ViewportVisibleLines,
 	type ViewportVisibleRect,
 	viewportContextId,
 } from "@cohub/protocol";
+import {
+	type MediaMarkRect,
+	type MediaRef,
+	mediaRefId,
+} from "#lib/media/media-ask.svelte.ts";
 
 export type FileViewportObservation = {
 	path: string;
@@ -20,6 +27,13 @@ export type BoardViewportObservation = {
 	visibleRect?: ViewportVisibleRect | null;
 	selectedNodes?: ViewportSelectedNode[] | null;
 };
+
+type MarkedMedia = ViewportMediaContext & { marks: ViewportMediaMark[] };
+
+type MediaDraft = { media: MarkedMedia[]; lastN: number };
+
+const roundFraction = (value: number) =>
+	Math.round(Math.min(1, Math.max(0, value)) * 10_000) / 10_000;
 
 export type PortViewportObservation = {
 	port: string;
@@ -200,6 +214,13 @@ export function createViewportContextController() {
 	let snapshot = $state.raw<ViewportContext[] | null>(null);
 	let pendingBoardObservation: BoardViewportObservation | null = null;
 	let boardFlushFrame = 0;
+	/** Shown by the viewer itself, so it joins only at send. */
+	let viewingMedia: ViewportMediaContext | null = null;
+	let markedMedia = $state.raw<MarkedMedia[]>([]);
+	let lastMarkN = 0;
+	let mediaScope: string | null = null;
+	const parkedMedia = new Map<string, MediaDraft>();
+	let sendingMarks: Set<ViewportMediaMark> | null = null;
 
 	const activeContext = $derived.by<ViewportContext | null>(() => {
 		const source = activeSource;
@@ -220,13 +241,27 @@ export function createViewportContextController() {
 		return buildPortContext(source.port, source.url);
 	});
 
-	const contexts = $derived.by<ViewportContext[]>(() => {
-		if (snapshot) return snapshot;
+	function liveContexts({ sending }: { sending: boolean }): ViewportContext[] {
+		const result: ViewportContext[] = [];
 		const context = activeContext;
-		if (!context) return [];
-		if (dismissedIds.includes(viewportContextId(context))) return [];
-		return [context];
-	});
+		if (context && !dismissedIds.includes(viewportContextId(context)))
+			result.push(context);
+		result.push(...markedMedia);
+		const viewing = viewingMedia;
+		if (
+			sending &&
+			viewing &&
+			!markedMedia.some(
+				(media) => viewportContextId(media) === viewportContextId(viewing),
+			)
+		)
+			result.push(viewing);
+		return result;
+	}
+
+	const contexts = $derived.by<ViewportContext[]>(
+		() => snapshot ?? liveContexts({ sending: false }),
+	);
 
 	function cancelPendingBoardFlush() {
 		if (boardFlushFrame && typeof cancelAnimationFrame === "function") {
@@ -364,8 +399,71 @@ export function createViewportContextController() {
 	}
 
 	function dismiss(id: string) {
+		if (markedMedia.some((media) => viewportContextId(media) === id)) {
+			markedMedia = markedMedia.filter(
+				(media) => viewportContextId(media) !== id,
+			);
+			return;
+		}
 		if (dismissedIds.includes(id)) return;
 		dismissedIds = [...dismissedIds, id];
+	}
+
+	function setMediaScope(key: string | null, { carry = false } = {}) {
+		if (key === mediaScope) return;
+		const previous = mediaScope;
+		mediaScope = key;
+		if (carry) return;
+		if (previous && lastMarkN > 0)
+			parkedMedia.set(previous, { media: markedMedia, lastN: lastMarkN });
+		const parked = key ? parkedMedia.get(key) : undefined;
+		if (key) parkedMedia.delete(key);
+		markedMedia = parked?.media ?? [];
+		lastMarkN = parked?.lastN ?? 0;
+	}
+
+	function viewMedia(ref: MediaRef | null) {
+		viewingMedia = ref ? { kind: "media", ...ref } : null;
+	}
+
+	function mediaMarks(ref: MediaRef): readonly ViewportMediaMark[] {
+		const id = mediaRefId(ref);
+		return (
+			markedMedia.find((media) => viewportContextId(media) === id)?.marks ?? []
+		);
+	}
+
+	function addMediaMark(ref: MediaRef, rect: MediaMarkRect, floor = 0) {
+		const id = mediaRefId(ref);
+		lastMarkN = Math.max(lastMarkN, floor) + 1;
+		const n = lastMarkN;
+		const mark: ViewportMediaMark = {
+			n,
+			x: roundFraction(rect.x),
+			y: roundFraction(rect.y),
+			width: roundFraction(rect.width),
+			height: roundFraction(rect.height),
+		};
+		const existing = markedMedia.find(
+			(media) => viewportContextId(media) === id,
+		);
+		markedMedia = existing
+			? markedMedia.map((media) =>
+					media === existing
+						? { ...media, marks: [...media.marks, mark] }
+						: media,
+				)
+			: [...markedMedia, { kind: "media", ...ref, marks: [mark] }];
+		return n;
+	}
+
+	function removeMediaMark(ref: MediaRef, n: number) {
+		const id = mediaRefId(ref);
+		markedMedia = markedMedia.flatMap((media) => {
+			if (viewportContextId(media) !== id) return [media];
+			const marks = media.marks.filter((mark) => mark.n !== n);
+			return marks.length > 0 ? [{ ...media, marks }] : [];
+		});
 	}
 
 	function takeSendSnapshot(): ViewportContext[] {
@@ -376,14 +474,8 @@ export function createViewportContextController() {
 			applyBoardObservation(pending);
 		}
 		// Capture before freezing UI so we don't read the empty send-cycle list.
-		const next =
-			snapshot ??
-			(() => {
-				const context = activeContext;
-				if (!context) return [] as ViewportContext[];
-				if (dismissedIds.includes(viewportContextId(context))) return [];
-				return [context];
-			})();
+		const next = snapshot ?? liveContexts({ sending: true });
+		sendingMarks = new Set(markedMedia.flatMap((media) => media.marks));
 		// Freeze an empty composer list for the in-flight send so chips clear
 		// with the draft, while returning the captured contexts for the message.
 		snapshot = [];
@@ -393,11 +485,20 @@ export function createViewportContextController() {
 	function restoreAfterFailedSend() {
 		// Return to live derivation; keep dismissed ids.
 		snapshot = null;
+		sendingMarks = null;
 	}
 
 	function markSendSucceeded() {
 		// Unfreeze composer chips; dismissed sources stay dismissed until source changes.
 		snapshot = null;
+		const sent = sendingMarks;
+		sendingMarks = null;
+		if (!sent?.size) return;
+		markedMedia = markedMedia.flatMap((media) => {
+			const marks = media.marks.filter((mark) => !sent.has(mark));
+			return marks.length > 0 ? [{ ...media, marks }] : [];
+		});
+		if (markedMedia.length === 0) lastMarkN = 0;
 	}
 
 	function dispose() {
@@ -411,9 +512,17 @@ export function createViewportContextController() {
 		get activeContext() {
 			return activeContext;
 		},
+		get hasMediaMarks() {
+			return markedMedia.length > 0;
+		},
 		setActiveSource,
 		setFileVisibleLines,
 		setBoardViewState,
+		setMediaScope,
+		viewMedia,
+		mediaMarks,
+		addMediaMark,
+		removeMediaMark,
 		dismiss,
 		takeSendSnapshot,
 		restoreAfterFailedSend,

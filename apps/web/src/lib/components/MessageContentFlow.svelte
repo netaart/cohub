@@ -133,7 +133,7 @@ const userViewportContexts = $derived.by(() => {
 const userAttachmentBlocks = $derived(
 	content.filter(
 		(block): block is AttachmentBlock =>
-			block.type === "image" ||
+			(block.type === "image" && block._meta?.attachmentKind !== "viewport") ||
 			(block.type === "text" && block._meta?.attachmentKind === "text"),
 	),
 );

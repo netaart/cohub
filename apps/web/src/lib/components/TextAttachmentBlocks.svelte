@@ -5,6 +5,7 @@ import { ArrowUpRight } from "lucide-svelte";
 import Dialog from "#lib/components/Dialog.svelte";
 import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import { durableMediaUrl } from "#lib/media/media-ask.svelte.ts";
 import { recordedSize, screenVariantSize } from "#lib/media/media-info.ts";
 import { m } from "#lib/paraglide/messages.js";
 import MediaImage from "#lib/resource-kit/MediaImage.svelte";
@@ -70,12 +71,14 @@ function openImagePreview(block: ImageBlock) {
 	mediaLightbox.show(
 		imageBlocks.map((item, itemIndex) => {
 			const name = getFilename(item, itemIndex);
+			const url = durableMediaUrl(getImageSrc(item));
 			return {
 				src: getImageSrc(item),
 				type: "image" as const,
 				alt: name,
 				filename: name,
 				...recordedSize(item._meta),
+				...(url ? { ref: { url, title: name } } : {}),
 			};
 		}),
 		index,

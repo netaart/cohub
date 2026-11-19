@@ -4,7 +4,14 @@ import {
 	type ViewportContext,
 	viewportContextId,
 } from "@cohub/protocol";
-import { AppWindow, FileText, LayoutGrid, Radio, X } from "lucide-svelte";
+import {
+	AppWindow,
+	FileText,
+	Image as ImageIcon,
+	LayoutGrid,
+	Radio,
+	X,
+} from "lucide-svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
 
@@ -22,6 +29,7 @@ function iconFor(kind: ViewportContext["kind"]) {
 	if (kind === "file") return FileText;
 	if (kind === "board") return LayoutGrid;
 	if (kind === "app") return AppWindow;
+	if (kind === "media") return ImageIcon;
 	return Radio;
 }
 
@@ -57,6 +65,10 @@ function titleFor(context: ViewportContext) {
 		return parts.join(" · ");
 	}
 	if (context.kind === "app") return context.content;
+	if (context.kind === "media")
+		return [context.title, context.path ?? context.url]
+			.filter(Boolean)
+			.join("\n");
 	return context.url
 		? m.vctx_port_url({ port: context.port, url: context.url }, { locale })
 		: m.vctx_port_n({ port: context.port }, { locale });
@@ -67,6 +79,7 @@ function metaFor(context: ViewportContext) {
 		return m.vctx_app({ app: context.appId }, { locale });
 	if (context.kind === "file") return m.vctx_file({}, { locale });
 	if (context.kind === "board") return m.vctx_board({}, { locale });
+	if (context.kind === "media") return m.vctx_media({}, { locale });
 	return m.vctx_port({}, { locale });
 }
 </script>

@@ -9,6 +9,7 @@ import {
 	type LanguageRegistration,
 } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import { COHUB_WEB_ORIGIN_SOURCE } from "#lib/mentions/platform-origin.ts";
 import { RESOLVED_THEMES, THEME_REGISTRY } from "#lib/theme-registry.ts";
 import { normalizeWorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
 
@@ -262,6 +263,7 @@ function getMediaTypeFromHref(href: string): MarkdownMediaType | null {
 
 /** Wider than any message column, so a variant renders at the original's size. */
 const MARKDOWN_IMAGE_WIDTH = 1536;
+const MARKDOWN_IMAGE_WIDTHS = [384, 768, MARKDOWN_IMAGE_WIDTH] as const;
 
 function renderMediaPreviewHtml(input: {
 	href: string;
@@ -327,6 +329,16 @@ function markdownOptions() {
 	};
 }
 
+function countParagraphImages(tokens: Token[]) {
+	let images = 0;
+	for (const token of tokens) {
+		if (token.type === "image") images += 1;
+		else if (token.type === "br") continue;
+		else if (token.type !== "text" || token.raw.trim()) return 0;
+	}
+	return images;
+}
+
 // CDN images render as width-bounded WebP; the original stays reachable for
 // the viewer and downloads through `data-original-src`.
 marked.use({
@@ -334,8 +346,16 @@ marked.use({
 		image({ href, title, text }) {
 			const variant = imageVariantUrl(href, MARKDOWN_IMAGE_WIDTH, "width");
 			if (!variant) return false;
+			const srcset = MARKDOWN_IMAGE_WIDTHS.map(
+				(width) => `${imageVariantUrl(href, width, "width")} ${width}w`,
+			).join(", ");
 			const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
-			return `<img src="${escapeHtml(variant)}" alt="${escapeHtml(text)}"${titleAttr} data-original-src="${escapeHtml(href)}">`;
+			return `<img src="${escapeHtml(variant)}" srcset="${escapeHtml(srcset)}" alt="${escapeHtml(text)}"${titleAttr} data-original-src="${escapeHtml(href)}">`;
+		},
+		paragraph({ tokens }) {
+			const images = countParagraphImages(tokens);
+			if (!images) return false;
+			return `<p data-images="${images}">${this.parser.parseInline(tokens)}</p>\n`;
 		},
 	},
 });
@@ -489,15 +509,66 @@ function getStandaloneMediaToken(token: Token) {
 	return { href, label, title, type };
 }
 
+const COHUB_APP_HREF = new RegExp(
+	`^(?:${COHUB_WEB_ORIGIN_SOURCE})?/([a-z0-9][a-z0-9-]*)/([a-z0-9][a-z0-9_-]*)/w/([a-z0-9][a-z0-9_-]*)/?(?:[?#]\\S*)?$`,
+	"i",
+);
+
+type PageLink = {
+	kind: "html" | "app";
+	href: string;
+	title: string;
+	meta: string;
+};
+
+function getStandalonePageLink(token: Token): PageLink | null {
+	if (token.type !== "paragraph" || !("tokens" in token)) return null;
+	const inlineTokens = token.tokens;
+	if (!Array.isArray(inlineTokens) || inlineTokens.length !== 1) return null;
+	const link = inlineTokens[0];
+	if (link?.type !== "link") return null;
+	const href = String(link.href ?? "").trim();
+	const label = String(link.text ?? "").trim();
+	const named = label && label !== href ? label : "";
+
+	const app = COHUB_APP_HREF.exec(href);
+	if (app) {
+		return {
+			kind: "app",
+			href,
+			title: named || app[3],
+			meta: `${app[1]}/${app[2]}/w/${app[3]}`,
+		};
+	}
+	const file = normalizeWorkspaceFileLinkTarget(href);
+	if (!file || !/\.html?$/i.test(file.path)) return null;
+	return {
+		kind: "html",
+		href,
+		title: named || file.path.split("/").pop() || file.path,
+		meta: file.path,
+	};
+}
+
+function renderPageCardHtml(page: PageLink) {
+	return `<p class="markdown-page"><a class="markdown-page-card" href="${escapeHtml(page.href)}" data-page-kind="${page.kind}"><span class="markdown-page-card-text"><span class="markdown-page-card-title">${escapeHtml(page.title)}</span><span class="markdown-page-card-meta">${escapeHtml(page.meta)}</span></span></a></p>`;
+}
+
 function enhanceMediaPreviewTokens(tokens: Token[]) {
 	for (let i = 0; i < tokens.length; i++) {
 		const token = tokens[i];
 		const media = getStandaloneMediaToken(token);
-		if (media) {
+		const page = media ? null : getStandalonePageLink(token);
+		const html = media
+			? renderMediaPreviewHtml(media)
+			: page
+				? renderPageCardHtml(page)
+				: null;
+		if (html) {
 			tokens[i] = {
 				type: "html",
 				raw: token.raw,
-				text: renderMediaPreviewHtml(media),
+				text: html,
 				pre: false,
 			} as Tokens.HTML;
 			continue;

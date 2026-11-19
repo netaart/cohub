@@ -20,7 +20,7 @@ export { buildViewportContentBlock } from "@cohub/protocol";
 export { isUserAppFilter, isUserCronJobFilter, USER_APP_FILTERS, USER_CRONJOB_FILTERS } from "@cohub/protocol";
 export type { UserAppFilter, UserCronJobFilter } from "@cohub/protocol";
 export type {
-  ViewportAppContext, ViewportBoardContext, ViewportContext, ViewportFileContext, ViewportPortContext, ViewportSelectedNode, ViewportVisibleRect,
+  ViewportAppContext, ViewportBoardContext, ViewportContext, ViewportFileContext, ViewportMediaContext, ViewportMediaMark, ViewportPortContext, ViewportSelectedNode, ViewportVisibleRect,
 } from "@cohub/protocol";
 export { CohubHttpClient, createHttpClient } from "./http.js";
 export { BillingApi } from "./apis/billing.js";

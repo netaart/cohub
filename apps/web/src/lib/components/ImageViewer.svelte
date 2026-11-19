@@ -1,5 +1,6 @@
 <script lang="ts">
 import { Minus, Plus } from "lucide-svelte";
+import type { Snippet } from "svelte";
 import {
 	clampImageZoom,
 	createImageGestureHandlers,
@@ -18,6 +19,8 @@ let {
 	panY = $bindable(0),
 	dragging = $bindable(false),
 	showControls = false,
+	locked = false,
+	overlay,
 	class: className = "",
 	onerror,
 }: {
@@ -28,6 +31,8 @@ let {
 	panY?: number;
 	dragging?: boolean;
 	showControls?: boolean;
+	locked?: boolean;
+	overlay?: Snippet;
 	class?: string;
 	/** The image failed to load; hosts may swap `src` for a fallback. */
 	onerror?: () => void;
@@ -81,11 +86,43 @@ function onWheel(event: WheelEvent) {
 	});
 }
 
-const cursor = $derived(dragging ? "grabbing" : zoom > 1 ? "grab" : "zoom-in");
+const cursor = $derived(
+	locked ? "default" : dragging ? "grabbing" : zoom > 1 ? "grab" : "zoom-in",
+);
+const transform = $derived(imageTransform({ zoom, panX, panY }));
+const transition = $derived(
+	dragging ? "" : "transition: transform 150ms ease;",
+);
 
 $effect(() => {
 	if (!image || !stage) return;
-	image.style.transform = imageTransform({ zoom, panX, panY });
+	image.style.transform = transform;
+});
+
+let box = $state<{
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+} | null>(null);
+
+$effect(() => {
+	const img = image;
+	const root = stage;
+	if (!overlay || !img || !root) return;
+	const measure = () => {
+		box = {
+			left: img.offsetLeft,
+			top: img.offsetTop,
+			width: img.offsetWidth,
+			height: img.offsetHeight,
+		};
+	};
+	const observer = new ResizeObserver(measure);
+	observer.observe(img);
+	observer.observe(root);
+	measure();
+	return () => observer.disconnect();
 });
 </script>
 
@@ -97,12 +134,12 @@ $effect(() => {
 	aria-label={alt || "Image preview"}
 	style:touch-action="none"
 	style:cursor={cursor}
-	onpointerdown={gesture.onPointerDown}
-	onpointermove={gesture.onPointerMove}
-	onpointerup={gesture.onPointerUp}
-	onpointercancel={gesture.onPointerCancel}
-	onwheel={onWheel}
-	ondblclick={reset}
+	onpointerdown={locked ? undefined : gesture.onPointerDown}
+	onpointermove={locked ? undefined : gesture.onPointerMove}
+	onpointerup={locked ? undefined : gesture.onPointerUp}
+	onpointercancel={locked ? undefined : gesture.onPointerCancel}
+	onwheel={locked ? undefined : onWheel}
+	ondblclick={locked ? undefined : reset}
 >
 	<img
 		bind:this={image}
@@ -110,9 +147,17 @@ $effect(() => {
 		alt={alt}
 		draggable="false"
 		{onerror}
-		style={`transform: ${imageTransform({ zoom, panX, panY })}; ${dragging ? "" : "transition: transform 150ms ease;"}`}
+		style={`transform: ${transform}; ${transition}`}
 		class="max-h-full max-w-full select-none will-change-transform"
 	/>
+	{#if overlay && box}
+		<div
+			class="absolute"
+			style={`left: ${box.left}px; top: ${box.top}px; width: ${box.width}px; height: ${box.height}px; transform: ${transform}; ${transition}`}
+		>
+			{@render overlay()}
+		</div>
+	{/if}
 	{#if showControls}
 		<div class="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full bg-overlay-control px-1.5 py-1 shadow-sm">
 			<button

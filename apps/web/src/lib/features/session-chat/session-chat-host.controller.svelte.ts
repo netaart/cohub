@@ -979,6 +979,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			preserveComposerInputOnNextDraftKeyChange = false;
 			flushActiveComposerDraft();
 			activeComposerDraftKey = key;
+			viewport.setMediaScope(key, { carry: preserveInput });
 			if (preserveInput) {
 				if (key) writeSessionComposerDraftText(key, composer.input);
 				if (previousKey !== key) removeSessionComposerDraftText(previousKey);
@@ -3064,18 +3065,18 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		void handleSend();
 	}
 
-	async function handleSend() {
+	async function handleSend(): Promise<boolean> {
 		if (composerMode === "create") {
 			await handleDirectGenerationSend();
-			return;
+			return false;
 		}
 		if (
 			(!activeSessionState?.session && !isNewSessionRoute) ||
-			(!input.trim() && attachments.length === 0) ||
+			(!input.trim() && attachments.length === 0 && !viewport.hasMediaMarks) ||
 			sending ||
 			!(options.hasSpace?.() ?? Boolean(spaceId))
 		)
-			return;
+			return false;
 		const isNote = composerMode === "note";
 		const harness = composerHarness;
 		// The queued choice applies even if the notice is hidden by a running Turn.
@@ -3084,7 +3085,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		// Fail closed: a disconnected Runtime must never dispatch a local turn.
 		if (!isNote && !canUseHarness(harness)) {
 			setComposerError(m.runtime_harness_unavailable());
-			return;
+			return false;
 		}
 		const local = !isNote && harness !== "cohub";
 		const chosenApprovalMode = local ? approvalMode : null;
@@ -3095,7 +3096,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			!approvalModes.includes(chosenApprovalMode)
 		) {
 			setComposerError(m.runtime_approval_unsupported());
-			return;
+			return false;
 		}
 		const sentApprovalMode =
 			chosenApprovalMode && approvalModes.includes(chosenApprovalMode)
@@ -3237,7 +3238,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			const userText = input.trim();
 			if (disposed || spaceId !== opSpaceId) {
 				// Host left this space while upload was in flight — drop results.
-				return;
+				return false;
 			}
 			const pendingViewportContexts = viewport.takeSendSnapshot();
 			// Prefer sandbox paths when available; otherwise durable public URLs.
@@ -3280,6 +3281,17 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				},
 			);
 			const viewportBlock = buildViewportContentBlock(pendingViewportContexts);
+			const viewportImageBlocks = pendingViewportContexts.flatMap((context) =>
+				context.kind === "media" && context.url
+					? [
+							{
+								type: "image",
+								source: { type: "url", url: context.url },
+								_meta: { attachmentKind: "viewport" },
+							} satisfies ContentBlock,
+						]
+					: [],
+			);
 			const mentions = extractSpaceMentionsFromText(text);
 			content = [
 				...(text
@@ -3292,6 +3304,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 						]
 					: []),
 				...(viewportBlock ? [viewportBlock] : []),
+				...viewportImageBlocks,
 				...attachmentBlocks,
 			];
 
@@ -3416,10 +3429,11 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			// The server accepted the prompt even if this host moved elsewhere.
 			// Invalidate before the UI-only early return so Recent revalidates later.
 			noteViewerActivity();
+			viewport.markSendSucceeded();
 			// Prompt already accepted server-side. If we left the space, skip local
 			// adopt; other hosts / re-enter will load via WS or session fetch.
 			if (disposed || spaceId !== opSpaceId) {
-				return;
+				return true;
 			}
 			const acceptedTurn = sendResult.turn;
 			const acceptedSession = sendResult.session;
@@ -3494,11 +3508,11 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			}
 			for (const attachment of pendingAttachments)
 				revokeComposerAttachmentPreview(attachment);
-			viewport.markSendSucceeded();
 			if (isNewChat) {
 				await tick();
 				requestBottomFollow({ immediate: true });
 			}
+			return true;
 		} catch (error) {
 			// Always persist failed draft against the originating space/session key so
 			// a mid-send space switch cannot permanently lose the message.
@@ -3521,7 +3535,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			}
 			// Restore UI only if we still own the originating space/session context.
 			if (disposed || spaceId !== opSpaceId) {
-				return;
+				return false;
 			}
 			// Restore input and attachments on failure so user doesn't lose their message
 			viewport.restoreAfterFailedSend();
@@ -3619,6 +3633,7 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 					},
 				};
 			}
+			return false;
 		} finally {
 			composer.sending = false;
 		}
@@ -4816,6 +4831,9 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		get viewportContexts() {
 			return viewportContexts;
 		},
+		get hasMediaMarks() {
+			return viewport.hasMediaMarks;
+		},
 		get listEl() {
 			return scroll.listEl;
 		},
@@ -4905,6 +4923,10 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 		reportActiveSource,
 		reportFileVisibleLines,
 		reportBoardView,
+		viewMedia: viewport.viewMedia,
+		mediaMarks: viewport.mediaMarks,
+		addMediaMark: viewport.addMediaMark,
+		removeMediaMark: viewport.removeMediaMark,
 		flushComposerDraft: flushActiveComposerDraft,
 		refreshSessions: refreshSessionsList,
 		dispose,

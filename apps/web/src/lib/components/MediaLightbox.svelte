@@ -10,19 +10,24 @@ import {
 	Image as ImageIcon,
 	Info,
 	Loader2,
+	SquareDashedMousePointer,
 	X,
 	ZoomIn,
 	ZoomOut,
 } from "lucide-svelte";
-import { untrack } from "svelte";
+import { tick, untrack } from "svelte";
 import { innerHeight, innerWidth } from "svelte/reactivity/window";
 import { dismissOnBack } from "#lib/back-layers.svelte.ts";
 import AudioPlayer from "#lib/components/AudioPlayer.svelte";
 import ImageViewer from "#lib/components/ImageViewer.svelte";
+import MediaAskBar from "#lib/components/MediaAskBar.svelte";
+import MediaFilmstrip from "#lib/components/MediaFilmstrip.svelte";
+import MediaMarkLayer from "#lib/components/MediaMarkLayer.svelte";
 import {
 	type MediaItem,
 	mediaLightbox,
 } from "#lib/components/media-lightbox.svelte.ts";
+import { isMobileComposerInput } from "#lib/composer-keyboard.ts";
 import { downloads, saveFile } from "#lib/downloads.svelte.ts";
 import {
 	createGallerySwipe,
@@ -35,6 +40,11 @@ import {
 	IMAGE_ZOOM_STEP,
 } from "#lib/gestures/image-gesture.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
+import {
+	clipMediaTitle,
+	type MediaMarkRect,
+	mediaAsk,
+} from "#lib/media/media-ask.svelte.ts";
 import { screenVariantSize } from "#lib/media/media-info.ts";
 import { mediaFilename } from "#lib/media-download.ts";
 import { EASE_OUT } from "#lib/motion.ts";
@@ -52,6 +62,7 @@ const CLICK_SLOP_PX = 6;
 /** Past this zoom the screen-sized variant loses detail; load the original. */
 const DETAIL_ZOOM = 1.5;
 const AUDIO_COVER_PX = 240;
+const ASK_TITLE_CHARS = 24;
 
 const locale = $derived(getLocale());
 const current = $derived(mediaLightbox.current);
@@ -118,12 +129,78 @@ const imageReady = $derived(
 	current?.type === "image" && currentSource.status === "ready",
 );
 const zoomed = $derived(imageReady && zoom > 1);
+const caption = $derived(
+	Boolean(current?.title || current?.subtitle || current?.onDetails),
+);
 const trackStyle = $derived(
 	`transform: translate3d(${offset.x}px, ${offset.y}px, 0); transition: ${settling ? `transform ${SETTLE_MS}ms ${EASE_OUT}` : "none"};`,
 );
 const backdropOpacity = $derived(
 	1 - Math.min(0.6, Math.max(0, offset.y) / DISMISS_FADE_PX),
 );
+
+const askTarget = $derived(mediaAsk.target);
+const askRef = $derived(current?.type === "image" ? current.ref : undefined);
+const canAsk = $derived(Boolean(askTarget && askRef));
+const marks = $derived(askTarget && askRef ? askTarget.marks(askRef) : []);
+let marking = $state(false);
+let askInput = $state<HTMLTextAreaElement | null>(null);
+
+const askPlaceholder = $derived.by(() => {
+	const title = askRef?.title;
+	return title
+		? m.media_ask_named_placeholder(
+				{ title: clipMediaTitle(title, ASK_TITLE_CHARS) },
+				{ locale },
+			)
+		: m.media_ask_placeholder({}, { locale });
+});
+
+function toggleMarking() {
+	marking = !marking;
+	if (marking) setZoom(1);
+}
+
+function addMark(rect: MediaMarkRect) {
+	const target = askTarget;
+	if (!target || !askRef) return;
+	const draft = target.draft;
+	const floor = Math.max(
+		0,
+		...Array.from(draft.matchAll(/^#(\d+)(?=\s|$)/gm), (match) =>
+			Number(match[1]),
+		),
+	);
+	const n = target.addMark(askRef, rect, floor);
+	target.draft = `${draft}${draft && !draft.endsWith("\n") ? "\n" : ""}#${n} `;
+	if (isMobileComposerInput()) return;
+	void tick().then(() => {
+		const input = askInput;
+		input?.focus({ preventScroll: true });
+		input?.setSelectionRange(input.value.length, input.value.length);
+	});
+}
+
+function removeMark(n: number) {
+	const target = askTarget;
+	if (!target || !askRef) return;
+	target.removeMark(askRef, n);
+	target.draft = target.draft
+		.replace(new RegExp(`(^|\\n)#${n}[ \\t]*(?=\\n|$)`), "")
+		.replace(/^\n/, "");
+}
+
+$effect(() => {
+	const target = askTarget;
+	const ref = mediaLightbox.open ? askRef : undefined;
+	if (!target || !ref) return;
+	target.view(ref);
+	return () => target.view(null);
+});
+
+$effect(() => {
+	if (!canAsk) marking = false;
+});
 
 // ─── Navigation ───
 
@@ -162,6 +239,11 @@ function step(direction: -1 | 1) {
 	);
 }
 
+function jump(target: number) {
+	finishSettle();
+	mediaLightbox.go(target);
+}
+
 function openDetails(item: MediaItem) {
 	const onDetails = item.onDetails;
 	mediaLightbox.close();
@@ -171,9 +253,9 @@ function openDetails(item: MediaItem) {
 // ─── Gestures ───
 
 function canSwipeFrom(event: PointerEvent) {
-	if (zoomed) return false;
+	if (zoomed || marking) return false;
 	const target = event.target instanceof Element ? event.target : null;
-	if (target?.closest("button, a, input")) return false;
+	if (target?.closest("button, a, input, textarea, footer")) return false;
 	const video = target?.closest("video");
 	return (
 		!video ||
@@ -224,7 +306,8 @@ function onClick(event: MouseEvent) {
 	const target = event.target instanceof Element ? event.target : null;
 	if (target?.closest("button, a, input, [data-lightbox-content]")) return;
 	if (hitsMedia(x, y)) return;
-	mediaLightbox.close();
+	if (marking) marking = false;
+	else mediaLightbox.close();
 }
 
 // ─── Zoom ───
@@ -320,7 +403,8 @@ $effect(() => {
 			return;
 		switch (event.key) {
 			case "Escape":
-				mediaLightbox.close();
+				if (marking) marking = false;
+				else mediaLightbox.close();
 				break;
 			case "ArrowLeft":
 				step(-1);
@@ -330,16 +414,16 @@ $effect(() => {
 				break;
 			case "+":
 			case "=":
-				if (!imageReady) return;
+				if (!imageReady || marking) return;
 				setZoom(zoom + IMAGE_ZOOM_STEP);
 				break;
 			case "-":
 			case "_":
-				if (!imageReady) return;
+				if (!imageReady || marking) return;
 				setZoom(zoom - IMAGE_ZOOM_STEP);
 				break;
 			case "0":
-				if (!imageReady) return;
+				if (!imageReady || marking) return;
 				setZoom(1);
 				break;
 			default:
@@ -356,6 +440,16 @@ $effect(() => {
 	<button type="button" class="control" {onclick} title={label} aria-label={label}>
 		<Icon class="h-[18px] w-[18px]" />
 	</button>
+{/snippet}
+
+{#snippet markOverlay()}
+	<MediaMarkLayer
+		{marks}
+		active={marking}
+		removeLabel={(n) => m.media_mark_remove({ n }, { locale })}
+		onadd={addMark}
+		onremove={removeMark}
+	/>
 {/snippet}
 
 {#snippet pending(item: MediaItem)}
@@ -410,6 +504,8 @@ $effect(() => {
 			bind:zoom
 			bind:panX
 			bind:panY
+			locked={marking}
+			overlay={canAsk && (marking || marks.length > 0) ? markOverlay : undefined}
 			class="self-stretch"
 			onerror={() => imageFailed(source.src)}
 		/>
@@ -475,7 +571,12 @@ $effect(() => {
 				</span>
 			{/if}
 			<div class="ml-auto flex items-center gap-2">
-				{#if imageReady}
+				{#if canAsk && imageReady}
+					<button type="button" class="control" class:pressed={marking} onclick={toggleMarking} aria-pressed={marking} title={m.media_mark({}, { locale })} aria-label={m.media_mark({}, { locale })}>
+						<SquareDashedMousePointer class="h-[18px] w-[18px]" />
+					</button>
+				{/if}
+				{#if imageReady && !marking}
 					<div class="hidden items-center gap-0.5 rounded-full bg-overlay-control p-1 sm:flex">
 						<button type="button" class="zoom-button" onclick={() => setZoom(zoom - IMAGE_ZOOM_STEP)} disabled={zoom <= IMAGE_MIN_ZOOM} title={m.media_zoom_out({}, { locale })} aria-label={m.media_zoom_out({}, { locale })}>
 							<ZoomOut class="h-4 w-4" />
@@ -516,6 +617,12 @@ $effect(() => {
 				{/each}
 			</div>
 
+			{#if marking}
+				<p class="pointer-events-none absolute top-2 left-1/2 z-10 -translate-x-1/2 rounded-full bg-overlay-control px-3 py-1 text-[12px] text-overlay-control-text">
+					{m.media_mark_hint({}, { locale })}
+				</p>
+			{/if}
+
 			{#if !zoomed}
 				{#if mediaLightbox.hasPrev}
 					<div class="nav left-2 sm:left-4">
@@ -530,21 +637,40 @@ $effect(() => {
 			{/if}
 		</div>
 
-		{#if current.title || current.subtitle || current.onDetails}
-			<footer class="relative z-10 mx-auto flex w-full max-w-3xl shrink-0 items-start gap-3 px-4 pt-3 pb-[max(env(safe-area-inset-bottom),16px)]" data-lightbox-content>
-				<div class="min-w-0 flex-1 select-text">
-					{#if current.title}
-						<p class="line-clamp-2 text-[13px] leading-5 text-overlay-control-text" title={current.title}>{current.title}</p>
-					{/if}
-					{#if current.subtitle}
-						<p class="mt-0.5 truncate font-mono text-[11px] leading-4 text-overlay-control-text/60">{current.subtitle}</p>
-					{/if}
-				</div>
-				{#if current.onDetails}
-					<button type="button" class="pill shrink-0" onclick={() => openDetails(current)}>
-						<Info class="h-3.5 w-3.5" />
-						{m.generation_task_details({}, { locale })}
-					</button>
+		{#if caption || total > 1 || canAsk}
+			<footer class="relative z-10 mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-3 px-4 pt-3 pb-[max(env(safe-area-inset-bottom),16px)]" data-lightbox-content>
+				{#if caption}
+					<div class="flex items-start gap-3">
+						<div class="min-w-0 flex-1 select-text">
+							{#if current.title}
+								<p class="line-clamp-2 text-[13px] leading-5 text-overlay-control-text" title={current.title}>{current.title}</p>
+							{/if}
+							{#if current.subtitle}
+								<p class="mt-0.5 truncate font-mono text-[11px] leading-4 text-overlay-control-text/60">{current.subtitle}</p>
+							{/if}
+						</div>
+						{#if current.onDetails}
+							<button type="button" class="pill shrink-0" onclick={() => openDetails(current)}>
+								<Info class="h-3.5 w-3.5" />
+								{m.generation_task_details({}, { locale })}
+							</button>
+						{/if}
+					</div>
+				{/if}
+				{#if total > 1}
+					<div class="filmstrip-slot">
+						<MediaFilmstrip items={mediaLightbox.items} {index} label={m.media_gallery({}, { locale })} onselect={jump} />
+					</div>
+				{/if}
+				{#if canAsk && askTarget}
+					<MediaAskBar
+						target={askTarget}
+						bind:inputEl={askInput}
+						placeholder={askPlaceholder}
+						sendLabel={m.media_ask_send({}, { locale })}
+						sentLabel={m.media_ask_sent({}, { locale })}
+						failedLabel={m.media_ask_failed({}, { locale })}
+					/>
 				{/if}
 			</footer>
 		{/if}
@@ -570,6 +696,17 @@ $effect(() => {
 
 	.control:disabled {
 		opacity: 0.5;
+	}
+
+	.control.pressed {
+		background: var(--brand);
+		color: var(--brand-contrast-fg);
+	}
+
+	@media (pointer: coarse) {
+		footer:focus-within .filmstrip-slot {
+			display: none;
+		}
 	}
 
 	.zoom-button {
