@@ -130,14 +130,17 @@ onMount(() => {
 
 	<main class="main">
 		<section class="hero">
-			{#if promo}
-				<p class="eyebrow">
-					<span class="eyebrow-dot" aria-hidden="true"></span>
-					{signedIn
-						? m.pricing_eyebrow_offer_active({ percent: promo.percentOff }, { locale })
-						: m.pricing_eyebrow_offer_teaser({ percent: promo.percentOff }, { locale })}
-				</p>
-			{/if}
+			<!-- Reserved: the offer arrives after the catalog loads and must not push the headline. -->
+			<div class="eyebrow-slot">
+				{#if promo}
+					<p class="eyebrow">
+						<span class="eyebrow-dot" aria-hidden="true"></span>
+						{signedIn
+							? m.pricing_eyebrow_offer_active({ percent: promo.percentOff }, { locale })
+							: m.pricing_eyebrow_offer_teaser({ percent: promo.percentOff }, { locale })}
+					</p>
+				{/if}
+			</div>
 			<h1 class="headline">{m.pricing_headline({}, { locale })}</h1>
 			<p class="lede">{m.pricing_lede({}, { locale })}</p>
 		</section>
@@ -199,11 +202,16 @@ onMount(() => {
 		max-width: 44rem;
 		margin-bottom: clamp(2rem, 4vw, 3rem);
 	}
+	.eyebrow-slot {
+		display: flex;
+		align-items: center;
+		height: 28px;
+		margin-bottom: 14px;
+	}
 	.eyebrow {
 		display: inline-flex;
 		align-items: center;
 		gap: 8px;
-		margin: 0 0 14px;
 		padding: 4px 10px 4px 8px;
 		border-radius: 999px;
 		border: 1px solid var(--brand-border);
