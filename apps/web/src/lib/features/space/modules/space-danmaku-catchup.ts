@@ -178,6 +178,7 @@ export function selectSpaceDanmakuCatchupCandidates(input: {
 	const candidates = input.turns
 		.filter(
 			(turn) =>
+				turn.initiator === "human" &&
 				!recent.has(turn.id) &&
 				turn.sessionId !== input.activeSessionId &&
 				Boolean(turn.userUuid && turn.userPreview?.trim()),

@@ -2,6 +2,7 @@ import type { ContentBlock } from "../core/content.js";
 import type { Usage } from "../core/usage.js";
 import type { ModelThinkingLevel } from "./thinking.js";
 import type { BillingPayload } from "../billing.js";
+import type { SessionInitiator } from "../session-attribution.js";
 import type { HarnessArchiveIndex } from "../runtime/index.js";
 export type { HarnessArchiveIndex } from "../runtime/index.js";
 
@@ -192,6 +193,7 @@ export type SessionTurnIndexItem = {
 export type SpaceTurnAuthorFilter = "any" | "self" | "others";
 
 export type SpaceTurnListItem = SessionTurnIndexItem & {
+  initiator?: SessionInitiator | null;
   session: {
     id: string;
     title: string | null;

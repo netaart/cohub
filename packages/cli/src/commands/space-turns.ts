@@ -147,6 +147,7 @@ export function toSpaceTurnRows(turns: SpaceTurnListItem[]): Row[] {
   return turns.map((turn) => ({
     createdAt: turn.createdAt,
     author: turn.authorProfile?.displayName ?? turn.userUuid ?? "system",
+    initiator: turn.initiator ?? "unknown",
     sessionTitle: turn.session.title ?? "",
     sessionId: turn.session.id,
     sequence: turn.sequence,
@@ -234,6 +235,7 @@ export function registerSpaceTurns(
         table(toSpaceTurnRows(result.turns), [
           { key: "createdAt", label: "Created" },
           { key: "author", label: "Author" },
+          { key: "initiator", label: "By" },
           { key: "sessionTitle", label: "Session" },
           { key: "sessionId", label: "Session ID" },
           { key: "sequence", label: "Seq" },

@@ -11,6 +11,7 @@ export {
   getSessionSourceLabelSystemKey,
   isSessionInitiator,
   isSessionSourceKey,
+  readRecordedTurnInitiator,
   readSessionInitiator,
   readTurnInitiator,
   resolveSessionSourceKey,

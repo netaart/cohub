@@ -166,6 +166,7 @@ export async function startNativeTurn(spaceId: string, userId: string, input: Na
     const userMessageId = messageId(input.turnId, -1);
     const meta = {
       source: NATIVE_SYNC_SOURCE, harness: input.harness, runtime: "local", actorUserId: userId, userMessageId,
+      ...(input.origin === undefined ? { initiator: "human" } : {}),
       runtimeRecovery: { state: "executing", ownerUserId: userId },
       nativeSync: { version: 1, spaceId, requestDigest, nativeSessionId: input.nativeSessionId, parentTurnId: input.parentTurnId, observedAt: new Date().toISOString(),
         ...(input.origin ? { origin: input.origin, originalStartedAt: input.startedAt } : {}),

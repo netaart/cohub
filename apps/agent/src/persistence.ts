@@ -20,7 +20,7 @@ import type { ChannelProvider, GatewayOutboundCommand } from "@cohub/protocol/ga
 import { getRealtimeUserRoom } from "@cohub/protocol/realtime";
 import { sessionMessages, sessionTurns, spaceChannels, spaceSessionBindings, spaceSessions, providerMessageRefs, userChannels, userProfiles } from "@cohub/db";
 import { listResourceLabelRefs } from "@cohub/core/labels";
-import { collectImageToTextTiming, collectToolMetrics } from "@cohub/protocol/model";
+import { collectImageToTextTiming, collectToolMetrics, readRecordedTurnInitiator } from "@cohub/protocol/model";
 import { interruptedSummaryPatch, interruptedTurnUsage, isFinalAssistantMessageMeta, runtimeResolutionOpen, publishSessionTurnStates, withNextSessionMessageSequence } from "@cohub/core/sessions";
 import { scheduleSessionSnapshot } from "./session-snapshot.js";
 import { onTurnSettled } from "./turn-settled.js";
@@ -303,6 +303,7 @@ async function publishTurnFinalized(spaceId: string, turn: SessionTurnRecord) {
       sessionId: turn.sessionId,
       turnId: turn.id,
       status: turn.status,
+      initiator: readRecordedTurnInitiator(turn.meta),
       finishReason: turn.summary?.finishReason ?? null,
       userPreview: truncateTurnPreview(turn.userText),
       durationMs: turn.durationMs,

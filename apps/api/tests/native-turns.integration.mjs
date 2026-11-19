@@ -32,7 +32,10 @@ const sessionUserLabels = await import("@cohub/core/labels/session-user");
 mock.module("@cohub/core/labels/session-user", { exports: { ...sessionUserLabels, assignSessionParticipantSystemLabels: async () => [] } });
 mock.module("../src/lib/middleware.js", { exports: { useAuth: (c) => ({ uuid: c.req.header("x-user") ?? "owner" }), requireValidId: (id) => /^[a-f0-9-]{36}$/.test(id), authzDenied: (c) => c.json({ message: "forbidden" }, 403) } });
 mock.module("../src/permissions.js", { exports: { hasPermission: async (user, _permission, context) => user.uuid !== "denied" && !(user.uuid === "no-session-access" && context?.sessionId) } });
-mock.module("../src/space-sessions.js", { exports: { getSpaceSessionById: async (id) => (await database.select().from(spaceSessions).where(eq(spaceSessions.id, id)))[0] } });
+mock.module("../src/space-sessions.js", { exports: {
+  getSpaceSessionById: async (id) => (await database.select().from(spaceSessions).where(eq(spaceSessions.id, id)))[0],
+  labelNewSession: async () => {},
+} });
 const published = [];
 mock.module("../src/realtime-events.js", { exports: {
   dispatchSessionCreated: async (session, fork) => { published.push(["session.created", session.id, fork?.parentSessionId ?? null]); },
@@ -241,7 +244,10 @@ test("ingest places a transcript's Turns in one Session by parent, and a replay 
   assert(replay.turns.every((turn) => !turn.created && !turn.changed));
   const rows = await database.select().from(sessionTurns).where(eq(sessionTurns.sessionId, outcome.turns[0].sessionId));
   assert.deepEqual(rows.map((row) => row.sequence).sort(), [1, 2, 3]);
-  assert.equal(rows.find((row) => row.id === third.turnId)?.meta.nativeSync.origin, "local_import");
+  assert.equal(rows.find((row) => row.id === first.turnId)?.meta.initiator, "human");
+  const imported = rows.find((row) => row.id === third.turnId);
+  assert.equal(imported?.meta.nativeSync.origin, "local_import");
+  assert.equal(imported?.meta.initiator, undefined);
   // A later batch continues from a parent recorded earlier.
   const fourth = ingestTurn({ parentTurnId: third.turnId });
   assert.equal((await ingestNativeTurns(spaceId, "owner", { ...batch, turns: [fourth] })).turns[0].sessionId, outcome.turns[0].sessionId);

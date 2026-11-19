@@ -1,5 +1,5 @@
 import { createSessionSnapshotScheduler, publishSessionSnapshot } from "@cohub/core/sessions";
-import { isSettledStatsTurn } from "@cohub/protocol/model";
+import { isSettledStatsTurn, readRecordedTurnInitiator } from "@cohub/protocol/model";
 import { createLogger } from "@cohub/infra/logging";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
@@ -227,6 +227,7 @@ export const dispatchTurnFinalized = async (input: { spaceId: string; sessionId:
       sessionId: input.sessionId,
       turnId: input.turn.id,
       status: input.turn.status,
+      initiator: readRecordedTurnInitiator(input.turn.meta),
       finishReason: input.turn.summary?.finishReason ?? null,
       userPreview: truncateTurnPreview(input.turn.userText),
       durationMs: input.turn.durationMs,

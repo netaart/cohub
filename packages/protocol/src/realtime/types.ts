@@ -9,6 +9,7 @@ import type { SpacePortsChangedPayload } from "../ports/index.js";
 import type { BoardChangeSummary, BoardPlaybackSnapshot } from "../board.js";
 import type { BoardDelta } from "../board-model.js";
 import type { RequestSource } from "../provenance.js";
+import type { SessionInitiator } from "../session-attribution.js";
 import type { HarnessKind } from "../runtime/harnesses.js";
 import type { ApprovalMode } from "../runtime/index.js";
 import type { DesktopCommandDispatchedPayload } from "../desktop-command.js";
@@ -681,6 +682,7 @@ export type SessionTurnNotifyEvent = {
     sessionId: string;
     turnId: string;
     status: SessionTurnRecord["status"];
+    initiator?: SessionInitiator | null;
     finishReason?: SessionTurnSummary["finishReason"] | null;
     userPreview: string | null;
     durationMs: number | null;
