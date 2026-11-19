@@ -6,10 +6,10 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { createZstdDecompress } from "node:zlib";
 import { pipeline } from "node:stream/promises";
-import type { ContentBlock, NativeTurnComplete, NativeTurnMessage } from "@neta-art/cohub";
+import { isModelThinkingLevel, type ContentBlock, type NativeTurnComplete, type NativeTurnMessage } from "@neta-art/cohub";
 import { identifiable } from "../harnesses/process.js";
 import { piContent } from "./translate.js";
-import { codexTokenTotals, codexUsage } from "../codex-usage.js";
+import { codexContext, codexTokenTotals, codexUsage } from "../codex-usage.js";
 import { record, type JsonRecord } from "../json-rpc.js";
 
 export type NativeTranscriptTurn = {
@@ -418,6 +418,8 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
   let cloudSessionId = text(record(metadata.cohub).sessionId);
   let provider: string | null = text(metadata.model_provider) || null;
   let userFromResponse = false;
+  let thinkingLevel: NativeTurnComplete["thinkingLevel"];
+  let context: ReturnType<typeof codexContext> = {};
   const usageByTurn = new Map<string, NativeTurnMessage["usage"]>();
   const assistant = () => {
     let last = messages.at(-1);
@@ -426,12 +428,23 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
   };
   for (const line of lines.slice(1)) {
     const entry = line.value, payload = record(entry.payload);
-    if (entry.type === "turn_context") { model = text(payload.model) || model; provider = text(payload.model_provider) || provider; }
+    if (entry.type === "turn_context") {
+      model = text(payload.model) || model;
+      provider = text(payload.model_provider) || provider;
+      const effort = payload.effort === "none" ? "off" : payload.effort;
+      thinkingLevel = isModelThinkingLevel(effort) ? effort : undefined;
+    }
     if (entry.type === "event_msg" && ["turn_started", "task_started"].includes(text(payload.type))) {
       if (current) turns.push(current);
       current = { key: text(payload.turn_id), parentKey: turns.at(-1)?.key ?? null, userContent: [], messages: [], startedAt: iso(entry.timestamp), startBytes: line.startBytes, endBytes: line.endBytes, contentEndBytes: line.endBytes, boundaries: {}, sha256: line.sha256, result: null, path: segment.path, rolloutId: segment.rolloutId };
       if (!current.key) throw new Error("Codex Turn identity is missing");
       messages = current.messages; userFromResponse = false; calls.clear();
+      context = {}; thinkingLevel = undefined;
+    }
+    if (current && entry.type === "event_msg" && payload.type === "token_count") {
+      const info = record(payload.info);
+      const snapshot = codexContext(record(info.last_token_usage).total_tokens, info.model_context_window);
+      if (snapshot.contextTokens !== undefined) context = snapshot;
     }
     if (entry.type === "token_usage_record") {
       const usage = record(payload.turn_token_usage);
@@ -505,7 +518,8 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
       const final = assistant();
       final.stopReason = status === "interrupted" ? "aborted" : status === "failed" ? "error" : "stop";
       if (errorMessage) final.errorMessage = errorMessage;
-      current.result = { messages, completedAt: iso(entry.timestamp), status };
+      if (context.contextTokens !== undefined) final.usage = context;
+      current.result = { messages, completedAt: iso(entry.timestamp), status, ...(thinkingLevel ? { thinkingLevel } : {}) };
       turns.push(current); current = null; messages = [];
     }
   }
@@ -513,7 +527,7 @@ function parseCodexLines(lines: Line[], segment: CodexLineageSegment): { turns: 
   if (current && userFromResponse) turns.push(current);
   for (const turn of turns) {
     const last = turn.result?.messages.at(-1);
-    if (last && usageByTurn.has(turn.key)) last.usage = usageByTurn.get(turn.key);
+    if (last && usageByTurn.has(turn.key)) last.usage = { ...usageByTurn.get(turn.key), ...last.usage };
   }
   return { turns, ...(cloudSessionId ? { cloudSessionId } : {}), settled };
 }

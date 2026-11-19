@@ -211,7 +211,7 @@ for (const harness of ["pi", "codex"] as const) {
       if (harness === "codex") {
         assert.deepEqual(events.filter((event) => event.type === "message.start").map((event) => event.ordinal), [0, 1]);
         assert.equal(first.event.message.ordinal, 1, "Repeated native item/started must keep its ordinal");
-        assert.deepEqual(first.event.message.usage, { input: 125, output: 12, cacheRead: 15, cacheWrite: 0, totalTokens: 152 });
+        assert.deepEqual(first.event.message.usage, { input: 125, output: 12, cacheRead: 15, cacheWrite: 0, totalTokens: 152, contextTokens: 47 });
       }
       await executor.results.record(first.session, turn, "first", [first.event]);
       await executor.results.acknowledge(sessionId, turnId);

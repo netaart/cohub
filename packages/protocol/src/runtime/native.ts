@@ -1,12 +1,13 @@
 import * as z from "zod";
 import { contentBlockSchema } from "../core/content-schema.js";
+import { modelThinkingLevelSchema } from "../model/thinking.js";
 import { localHarnessSchema } from "./harnesses.js";
 
 const id = z.uuid();
 const content = z.array(contentBlockSchema).max(10_000);
 const count = z.number().finite().nonnegative().optional();
 const usage = z.object({
-  input: count, output: count, cacheRead: count, cacheWrite: count, totalTokens: count,
+  input: count, output: count, cacheRead: count, cacheWrite: count, totalTokens: count, contextTokens: count, contextWindow: count,
   cost: z.object({ input: count, output: count, cacheRead: count, cacheWrite: count, total: count }).nullable().optional(),
 });
 const nativeOrigin = z.enum(["local_import"]);
@@ -54,6 +55,7 @@ const messageOrdinal = z.number().int().nonnegative().max(10_000);
  * `messages` start at ordinal `from`; earlier ones were staged with `messages` events.
  */
 export const nativeTurnCompleteSchema = z.object({
+  thinkingLevel: modelThinkingLevelSchema.optional(),
   messages: z.array(nativeTurnMessageSchema).max(10_000),
   from: messageOrdinal.optional(),
   status: z.enum(["completed", "failed", "interrupted"]),
