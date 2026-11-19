@@ -292,7 +292,7 @@ const id = z.string().uuid();
 const ordinal = z.number().int().min(0).max(100_000);
 const content = z.array(contentBlockSchema).max(100_000);
 const count = z.number().finite().nonnegative().optional();
-const usageSchema = z.object({ input: count, output: count, cacheRead: count, cacheWrite: count, totalTokens: count,
+const usageSchema = z.object({ input: count, output: count, cacheRead: count, cacheWrite: count, totalTokens: count, contextTokens: count, contextWindow: count,
   cost: z.object({ input: count, output: count, cacheRead: count, cacheWrite: count, total: count }).nullable().optional(),
 });
 const runtimeMessageSchema = z.object({

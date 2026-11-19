@@ -106,12 +106,13 @@ test("Codex uses native Turn boundaries, not Stop-hook timing; usage and tool pa
     const rows = [
       { type: "session_meta", payload: { id: f.nativeSessionId, cwd: f.root, history_mode: "paginated" } },
       { type: "event_msg", payload: { type: "turn_started", turn_id: "native-turn" } },
-      { type: "turn_context", payload: { model: "codex-model" } },
+      { type: "turn_context", payload: { model: "codex-model", effort: "xhigh" } },
       { type: "event_msg", payload: { type: "user_message", message: "question" } },
       { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "question" }] } },
       { type: "response_item", payload: { type: "function_call", name: "exec_command", call_id: "tool", arguments: '{"cmd":"pwd"}' } },
       { type: "response_item", payload: { type: "function_call_output", call_id: "tool", output: "/project" } },
       { type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "answer" }] } },
+      { type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: 7 }, model_context_window: 100 } } },
       { type: "token_usage_record", payload: { turn_id: "native-turn", turn_token_usage: { input_tokens: 10, cached_input_tokens: 3, output_tokens: 5, total_tokens: 15 } } },
     ].map((row) => ({ timestamp: at, ...row }));
     await writeFile(f.path, rows.map(line).join(""));
@@ -121,6 +122,9 @@ test("Codex uses native Turn boundaries, not Stop-hook timing; usage and tool pa
     const turn = (await readNativeTranscript(f.path, "codex")).turns[0];
     assert.equal(turn?.result?.status, "completed");
     assert.deepEqual(turn?.result?.messages[0]?.content.map((block) => block.type), ["tool_use", "tool_result"]);
+    assert.equal(turn?.result?.thinkingLevel, "xhigh");
+    assert.equal(turn?.result?.messages.at(-1)?.usage?.contextTokens, 7);
+    assert.equal(turn?.result?.messages.at(-1)?.usage?.contextWindow, 100);
     assert.equal(turn?.result?.messages.at(-1)?.usage?.input, 7);
     assert.equal(turn?.result?.messages.at(-1)?.usage?.cacheRead, 3);
   } finally { await f.cleanup(); }

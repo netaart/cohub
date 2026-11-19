@@ -358,7 +358,8 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
     if (from > staged.length) throw new Error(`Staged messages end at ${staged.length}; resend from there`);
     const digests = [...staged.slice(0, from), ...input.messages.map((message) => digest(message))];
     // Independent of how the messages were split across frames. Turns finalized before staging hold `digest(input)`.
-    const completionDigest = digest({ messages: digests, status: input.status, completedAt: input.completedAt });
+    const thinking = input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {};
+    const completionDigest = digest({ ...thinking, messages: digests, status: input.status, completedAt: input.completedAt });
     const replay = receipt.completionDigest === completionDigest || receipt.completionDigest === digest(input);
     if (receipt.completionDigest && !replay) conflict("Turn result is immutable");
     if (terminal.has(turn.status)) {
@@ -389,7 +390,8 @@ export async function completeNativeTurn(spaceId: string, userId: string, sessio
       errorMessage: final?.errorMessage ?? null, finalUsage: final?.usage ?? null, totalUsage,
       summary: { text: final?.text ?? null, finishReason: input.status },
       completedAt, durationMs: Math.min(2_147_483_647, Math.max(0, completedAt.getTime() - (turn.startedAt?.getTime() ?? completedAt.getTime()))), updatedAt: new Date(),
-      meta: { ...meta, metrics: { ...record(meta.metrics), version: 1, tools: collectToolMetrics(messages.map((message) => message.content)) }, runtimeArchiveStatus: "pending", nativeSync: { ...receipt, completionDigest, ...(imported ? { originalCompletedAt: input.completedAt } : {}) } },
+      meta: { ...meta, ...(meta.harness === "codex" && final?.model && final.provider ? { model: final.model, provider: final.provider } : {}),
+        ...(input.thinkingLevel ? { requestedThinkingLevel: input.thinkingLevel } : {}), metrics: { ...record(meta.metrics), version: 1, tools: collectToolMetrics(messages.map((message) => message.content)) }, runtimeArchiveStatus: "pending", nativeSync: { ...receipt, completionDigest, ...(imported ? { originalCompletedAt: input.completedAt } : {}) } },
     }).where(and(eq(sessionTurns.id, turnId), runtimeResolutionOpen, inArray(sessionTurns.status, ["running", "abort_requested"]))).returning();
     if (!next) conflict("Execution was resolved");
     return { changed: true, turn: next, messages, projection: { latestMessageText: final?.text ?? turn.userText, lastMessageId: final?.id, completedAt } };

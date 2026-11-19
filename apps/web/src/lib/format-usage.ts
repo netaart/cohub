@@ -68,8 +68,8 @@ export function getContextUsagePercent(
 	usage: Usage | null | undefined,
 	contextWindow: number | null | undefined,
 ): number | null {
-	const input = getDisplayInputTokens(usage);
-	if (!input || !contextWindow || contextWindow <= 0) return null;
+	const input = usage?.contextTokens ?? (getDisplayInputTokens(usage) || null);
+	if (input == null || !contextWindow || contextWindow <= 0) return null;
 	return Math.max(0, Math.min(100, (input / contextWindow) * 100));
 }
 

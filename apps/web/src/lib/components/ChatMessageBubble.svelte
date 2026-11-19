@@ -445,7 +445,8 @@ const hasUsage = $derived.by(() => {
 	const u = message.meta?.usage;
 	if (!u) return false;
 	return Boolean(
-		u.input ||
+		u.contextTokens != null ||
+			u.input ||
 			u.output ||
 			u.cacheRead ||
 			u.cacheWrite ||
@@ -477,6 +478,13 @@ const visibleCost = $derived(
 const tokenDisplay = $derived.by(() => {
 	const u = message.meta?.usage;
 	if (!u) return "";
+	if (u.contextTokens != null) {
+		const used = formatTokenCount(u.contextTokens);
+		const counts = u.contextWindow
+			? `${used} / ${formatTokenCount(u.contextWindow)}`
+			: used;
+		return `${m.stats_context_usage({}, { locale })} ${counts}`;
+	}
 	// Cost stays in hover detail only; outer bar keeps the existing token-first layout.
 	const breakdown = formatUsageBreakdown(u, locale);
 	if (breakdown) return breakdown;
@@ -536,6 +544,7 @@ const tokenDetailText = $derived.by(() => {
 
 const modelContextWindow = $derived.by(() => {
 	const contextWindow =
+		message.meta?.usage?.contextWindow ??
 		(message.meta?.contextWindow as number | null | undefined) ??
 		modelMatch?.model?.contextWindow;
 	return typeof contextWindow === "number" && contextWindow > 0
@@ -544,7 +553,9 @@ const modelContextWindow = $derived.by(() => {
 });
 
 const inputContextPercent = $derived(
-	getContextUsagePercent(message.meta?.usage, modelContextWindow),
+	harness === "codex" && message.meta?.usage?.contextTokens == null
+		? null
+		: getContextUsagePercent(message.meta?.usage, modelContextWindow),
 );
 
 const finalResponseItems = $derived.by((): StatsGroupItem[] => {

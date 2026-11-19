@@ -3103,6 +3103,8 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 				? chosenApprovalMode
 				: null;
 		const sentApprovalKey = approvalChoiceStorageKey;
+		const sentModelKey = `${harnessSelectionKey}:${harness}`;
+		const sentModelChoice = localModelsBySession[sentModelKey];
 		const serviceTier = local ? localModel?.serviceTier : undefined;
 		composer.sending = true;
 		const model = isNote
@@ -3412,6 +3414,13 @@ export function createSessionChatHost(options: SessionChatHostOptions) {
 			);
 			if (sendResult.mode !== "immediate") {
 				throw new Error("Expected immediate prompt response");
+			}
+			if (
+				local &&
+				sentModelChoice &&
+				localModelsBySession[sentModelKey] === sentModelChoice
+			) {
+				delete localModelsBySession[sentModelKey];
 			}
 			if (
 				sentApprovalMode &&

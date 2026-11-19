@@ -853,7 +853,7 @@ export class NativeIngest {
   }
 
   private complete(result: NonNullable<NativeTranscriptTurn["result"]>): NativeTurnComplete {
-    return { messages: result.messages.map((message) => this.message(message)), status: result.status, completedAt: result.completedAt };
+    return { ...result, messages: result.messages.map((message) => this.message(message)) };
   }
 
   private markDirty(path: string): void {

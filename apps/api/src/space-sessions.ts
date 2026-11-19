@@ -125,6 +125,8 @@ const normalizeUsage = (usage: PersistMessageInput["message"]["usage"]): Usage |
     cacheRead: finiteNumberOrUndefined(usage.cacheRead),
     cacheWrite: finiteNumberOrUndefined(usage.cacheWrite),
     totalTokens: finiteNumberOrUndefined(usage.totalTokens),
+    contextTokens: finiteNumberOrUndefined(usage.contextTokens),
+    contextWindow: finiteNumberOrUndefined(usage.contextWindow),
     cost: cost && Object.keys(cost).length > 0 ? cost : null,
   }) as Usage;
 };

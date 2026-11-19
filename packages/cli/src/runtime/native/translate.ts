@@ -1,5 +1,5 @@
 import type { ContentBlock, NativeTurnProgress, RuntimeExecutionEvent, RuntimeMessage } from "@neta-art/cohub";
-import { codexTokenTotals, codexUsage, subtractCodexTokens, type CodexTokenTotals } from "../codex-usage.js";
+import { codexContext, codexTokenTotals, codexUsage, subtractCodexTokens, type CodexTokenTotals } from "../codex-usage.js";
 import { identifiable } from "../harnesses/process.js";
 import { record, type JsonRecord } from "../json-rpc.js";
 
@@ -117,7 +117,7 @@ export function codexTranslator(emit: (event: RuntimeExecutionEvent) => void, id
         const tokenUsage = record(params.tokenUsage);
         const total = codexTokenTotals(tokenUsage.total);
         baseline ??= subtractCodexTokens(total, codexTokenTotals(tokenUsage.last));
-        usage = codexUsage(subtractCodexTokens(total, baseline));
+        usage = { ...codexUsage(subtractCodexTokens(total, baseline)), ...codexContext(record(tokenUsage.last).totalTokens, tokenUsage.modelContextWindow) };
       }
       if (method === "item/started") {
         const item = record(params.item);
