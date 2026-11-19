@@ -1,8 +1,12 @@
-import { imageVariantUrl, mediaPreviewCandidates } from "@neta-art/cohub/media";
+import { mediaPreviewCandidates } from "@neta-art/cohub/media";
 import DOMPurify from "isomorphic-dompurify";
 import type Katex from "katex";
 import { marked, type Token, Tokenizer, type Tokens } from "marked";
 import remend from "remend";
+import {
+	MARKDOWN_IMAGE_WIDTH,
+	markdownImageVariants,
+} from "#lib/markdown-image.ts";
 import { COHUB_WEB_ORIGIN_SOURCE } from "#lib/mentions/platform-origin.ts";
 import { normalizeWorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
 
@@ -49,10 +53,6 @@ function getMediaTypeFromHref(href: string): MarkdownMediaType | null {
 		return null;
 	}
 }
-
-/** Wider than any message column, so a variant renders at the original's size. */
-const MARKDOWN_IMAGE_WIDTH = 1536;
-const MARKDOWN_IMAGE_WIDTHS = [384, 768, MARKDOWN_IMAGE_WIDTH] as const;
 
 function renderMediaPreviewHtml(input: {
 	href: string;
@@ -133,13 +133,10 @@ function countParagraphImages(tokens: Token[]) {
 marked.use({
 	renderer: {
 		image({ href, title, text }) {
-			const variant = imageVariantUrl(href, MARKDOWN_IMAGE_WIDTH, "width");
-			if (!variant) return false;
-			const srcset = MARKDOWN_IMAGE_WIDTHS.map(
-				(width) => `${imageVariantUrl(href, width, "width")} ${width}w`,
-			).join(", ");
+			const variants = markdownImageVariants(href);
+			if (!variants) return false;
 			const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
-			return `<img src="${escapeHtml(variant)}" srcset="${escapeHtml(srcset)}" alt="${escapeHtml(text)}"${titleAttr} data-original-src="${escapeHtml(href)}">`;
+			return `<img src="${escapeHtml(variants.src)}" srcset="${escapeHtml(variants.srcset)}" alt="${escapeHtml(text)}"${titleAttr} data-original-src="${escapeHtml(href)}">`;
 		},
 		paragraph({ tokens }) {
 			const images = countParagraphImages(tokens);
@@ -973,8 +970,8 @@ function findStreamingSafeIndex(source: string) {
 	return 0;
 }
 
-export function splitStreamingStableMarkdown(source: string) {
-	const safeIndex = findStreamingSafeIndex(source);
+export function splitStreamingStableMarkdown(source: string, floor = 0) {
+	const safeIndex = Math.max(findStreamingSafeIndex(source), floor);
 	return {
 		stable: source.slice(0, safeIndex),
 		tail: source.slice(safeIndex),
@@ -1021,6 +1018,7 @@ export type StreamingMarkdownRender = {
 	stableSources: string[];
 	stableBlocks: string[];
 	tailHtml: string;
+	liveBlock?: { index: number; stable: string };
 };
 
 const EMPTY_STREAMING_RENDER: StreamingMarkdownRender = {
@@ -1043,6 +1041,7 @@ export const renderStreamingMarkdownSplit = async (
 	const stableSources: string[] = [];
 	let tailSource = "";
 	let tailIsFence = false;
+	let liveBlock: StreamingMarkdownRender["liveBlock"];
 
 	for (let index = 0; index < blocks.length; index += 1) {
 		const block = blocks[index];
@@ -1065,10 +1064,16 @@ export const renderStreamingMarkdownSplit = async (
 
 		// Last text block: split at the most recent paragraph boundary so
 		// only the growing tail is re-rendered each commit.
-		const { stable, tail } = splitStreamingStableMarkdown(block.text);
+		const settled = previous?.liveBlock;
+		const floor =
+			settled?.index === index && block.text.startsWith(settled.stable)
+				? settled.stable.length
+				: 0;
+		const { stable, tail } = splitStreamingStableMarkdown(block.text, floor);
 		stableSources.push(...splitStableChunks(stable));
 		tailSource = tail;
 		tailIsFence = false;
+		liveBlock = { index, stable };
 	}
 
 	let complete = true;
@@ -1105,6 +1110,7 @@ export const renderStreamingMarkdownSplit = async (
 				? previous.stableBlocks
 				: stableBlocks,
 		tailHtml,
+		liveBlock,
 	};
 };
 

@@ -121,18 +121,52 @@ const frontmatter = $derived(
 );
 const renderSource = $derived(frontmatter?.body ?? source);
 
+function prepareHtml(
+	html: string,
+	basePath: string | null,
+	resolver: ResolveWorkspaceAsset | undefined,
+) {
+	return prepareMarkdownAssetHtml(html, {
+		basePath,
+		extractWorkspaceAssets: Boolean(resolver),
+		publicFileUrl: buildPublicFileUrl,
+	});
+}
+
+let streamedBlocks: readonly string[] = [];
+let preparedBlocks: string[] = [];
+
+function prepareStreamedBlocks(blocks: readonly string[]) {
+	if (blocks === streamedBlocks) return preparedBlocks;
+	const { basePath, resolver } = untrack(() => ({
+		basePath: assetBasePath,
+		resolver: assetResolver,
+	}));
+	preparedBlocks = blocks.map((html, index) =>
+		html === streamedBlocks[index]
+			? preparedBlocks[index]
+			: prepareHtml(html, basePath, resolver),
+	);
+	streamedBlocks = blocks;
+	return preparedBlocks;
+}
+
 function ensureController() {
 	if (controller) return controller;
 	controller = new StreamingMarkdownController();
 	unsubscribeController = controller.subscribe((snapshot) => {
-		stableBlocks = snapshot.stableBlocks;
-		tailHtml = snapshot.tailHtml;
+		stableBlocks = prepareStreamedBlocks(snapshot.stableBlocks);
+		tailHtml = untrack(() =>
+			prepareHtml(snapshot.tailHtml, assetBasePath, assetResolver),
+		);
 		notifyStreamingRenderedSoon();
 	});
 	return controller;
 }
 
 function destroyController() {
+	streamedBlocks = [];
+	preparedBlocks = [];
 	cancelStreamingRenderedNotify();
 	unsubscribeController?.();
 	unsubscribeController = null;
@@ -155,11 +189,7 @@ function renderFullMarkdown(
 			const result = module.renderMarkdownBlocks(markdownSource);
 			ready = result.ready;
 			stableBlocks = result.blocks.map((html) =>
-				prepareMarkdownAssetHtml(html, {
-					basePath,
-					extractWorkspaceAssets: Boolean(resolver),
-					publicFileUrl: buildPublicFileUrl,
-				}),
+				prepareHtml(html, basePath, resolver),
 			);
 			hasRenderedMarkdown = true;
 		} catch (error) {

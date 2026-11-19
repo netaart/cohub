@@ -33,11 +33,70 @@ function syncAttributes(element: Element, wanted: Element) {
 	}
 }
 
+const MEDIA_SELECTOR = "img, video, audio, iframe";
+const ATTACHED = "markdownAttached";
+
+function renderedText(node: Node) {
+	if (!(node instanceof Element)) return node.textContent ?? "";
+	const attached = node.querySelectorAll("[data-markdown-attached]");
+	if (attached.length === 0) return node.textContent ?? "";
+	const copy = node.cloneNode(true) as Element;
+	for (const extra of copy.querySelectorAll("[data-markdown-attached]"))
+		extra.remove();
+	return copy.textContent ?? "";
+}
+
+const isMedia = (node: Node): node is Element =>
+	node instanceof Element && node.matches(MEDIA_SELECTOR);
+
 // Settled blocks and the streaming tail share one parent; the tail is patched in place.
 export function createMarkdownRegion(root: HTMLElement) {
 	const liveStart = document.createComment("live");
 	let blocks: { html: string; marker: Comment }[] = [];
 	root.replaceChildren(liveStart);
+
+	const renderedMedia = new WeakMap<Element, string>();
+	function attachedAfter(node: Node) {
+		const attached: HTMLElement[] = [];
+		for (
+			let next = node.nextSibling;
+			next instanceof HTMLElement && ATTACHED in next.dataset;
+			next = next.nextSibling
+		)
+			attached.push(next);
+		return attached;
+	}
+
+	function adoptLiveMedia(block: DocumentFragment) {
+		const live = new Map<string, Element[]>();
+		for (let node = liveStart.nextSibling; node; node = node.nextSibling) {
+			if (!(node instanceof Element)) continue;
+			for (const media of [node, ...node.querySelectorAll(MEDIA_SELECTOR)]) {
+				const html = renderedMedia.get(media);
+				if (html) live.set(html, [...(live.get(html) ?? []), media]);
+			}
+		}
+		if (live.size === 0) return;
+		const promoted = new Set<Node>();
+		for (const media of block.querySelectorAll(MEDIA_SELECTOR)) {
+			const match = live.get(media.outerHTML)?.shift();
+			if (!match) continue;
+			let top: Node = match;
+			while (top.parentNode && top.parentNode !== root) top = top.parentNode;
+			promoted.add(top);
+			media.replaceWith(match, ...attachedAfter(match));
+		}
+		// Blocks settle whole; a misjudged node returns with the next tail patch.
+		for (const node of promoted)
+			if (node !== root && node.parentNode === root) root.removeChild(node);
+	}
+
+	function trackMedia(node: Node) {
+		if (!(node instanceof Element)) return;
+		if (isMedia(node)) renderedMedia.set(node, node.outerHTML);
+		for (const media of node.querySelectorAll(MEDIA_SELECTOR))
+			renderedMedia.set(media, media.outerHTML);
+	}
 
 	const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
 	const fading: { node: HTMLElement; until: number }[] = [];
@@ -129,9 +188,17 @@ export function createMarkdownRegion(root: HTMLElement) {
 				current = end;
 			} else if (
 				current instanceof Element &&
+				isMedia(target) &&
+				renderedMedia.get(current) === target.outerHTML
+			) {
+				current = attachedAfter(current).at(-1) ?? current;
+				current = current.nextSibling;
+			} else if (
+				current instanceof Element &&
 				target instanceof Element &&
 				current.nodeName === target.nodeName &&
-				!isFadeSpan(current)
+				!isFadeSpan(current) &&
+				!isMedia(target)
 			) {
 				syncAttributes(current, target);
 				patchChildren(current, target, current.firstChild);
@@ -139,6 +206,7 @@ export function createMarkdownRegion(root: HTMLElement) {
 			} else {
 				const next = current?.nextSibling ?? null;
 				const replaced = current?.textContent ?? "";
+				trackMedia(target);
 				parent.insertBefore(target, current);
 				if (current) parent.removeChild(current);
 				if (!replaced) fadeIn(target);
@@ -158,7 +226,7 @@ export function createMarkdownRegion(root: HTMLElement) {
 			node = node.nextSibling
 		) {
 			if (node.nodeName !== first.nodeName) continue;
-			if (!text.startsWith(node.textContent ?? "")) continue;
+			if (!text.startsWith(renderedText(node))) continue;
 			removeRange(liveStart.nextSibling, node);
 			return;
 		}
@@ -182,8 +250,10 @@ export function createMarkdownRegion(root: HTMLElement) {
 				}
 				const before = blocks[cursor]?.marker ?? liveStart;
 				const marker = document.createComment("");
+				const block = parseHtml(html);
+				adoptLiveMedia(block);
 				root.insertBefore(marker, before);
-				root.insertBefore(parseHtml(html), before);
+				root.insertBefore(block, before);
 				kept.push({ html, marker });
 			}
 			removeRange(blocks[cursor]?.marker ?? liveStart, liveStart);

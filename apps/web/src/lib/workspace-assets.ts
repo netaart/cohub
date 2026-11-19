@@ -15,10 +15,12 @@ export type WorkspaceAsset = {
 	mimeType: string | null;
 };
 
-export type ResolveWorkspaceAsset = (
+export type ResolveWorkspaceAsset = ((
 	path: string,
 	options: { signal: AbortSignal },
-) => Promise<WorkspaceAsset>;
+) => Promise<WorkspaceAsset>) & {
+	onChange?: (listener: (path: string) => void) => () => void;
+};
 
 /**
  * Raised when the viewer cannot read workspace files at all, e.g. a shared
@@ -53,7 +55,7 @@ export function createWorkspaceAssetLoader(
 	);
 	let nextLane = 0;
 
-	return (path: string) => {
+	const load = (path: string) => {
 		const cached = pending.get(path);
 		if (cached) return cached;
 		const lane = nextLane++ % lanes.length;
@@ -65,6 +67,8 @@ export function createWorkspaceAssetLoader(
 		pending.set(path, request);
 		return request;
 	};
+	load.invalidate = (path: string) => pending.delete(path);
+	return load;
 }
 
 const WORKSPACE_ASSET_TIMEOUT_MS = 15_000;

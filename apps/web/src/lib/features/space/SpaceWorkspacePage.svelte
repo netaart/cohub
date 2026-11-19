@@ -151,7 +151,6 @@ import type { LocalUploadEntry } from "#lib/upload-entries.ts";
 import {
 	denyWorkspaceAsset,
 	type ResolveWorkspaceAsset,
-	resolveWorkspaceFileAsset,
 } from "#lib/workspace-assets.ts";
 import type { WorkspaceFileLinkTarget } from "#lib/workspace-file-links.ts";
 import { PUBLIC_MARKETPLACE_APP_ID } from "$app/env/public";
@@ -378,10 +377,16 @@ const sessionChat = createSessionChatHost({
 	// lightweight placeholder instead of issuing requests that always fail.
 	// Public `/p/{spaceId}/{path}` references are rewritten to CDN URLs before
 	// this resolver runs, so they still render for those viewers.
-	resolveWorkspaceAsset: (path, options) =>
-		spaceHasMinimalAccess
-			? denyWorkspaceAsset(path, options)
-			: resolveWorkspaceAsset(path, options),
+	resolveWorkspaceAsset: Object.assign(
+		(path: string, options: { signal: AbortSignal }) =>
+			spaceHasMinimalAccess
+				? denyWorkspaceAsset(path, options)
+				: resolveWorkspaceAsset(path, options),
+		{
+			onChange: (listener: (path: string) => void) =>
+				resolveWorkspaceAsset.onChange?.(listener) ?? (() => {}),
+		},
+	),
 	router: {
 		toSession: async (sessionId, opts) => {
 			// Keep open file/board/port preview when new chat becomes a real session.
@@ -2377,8 +2382,8 @@ async function openLinkedInlineFile(target: string | WorkspaceFileLinkTarget) {
 	if (typeof target === "string") await openWorkspaceFile(target);
 	else await openWorkspaceFile(target.path, { position: target.position });
 }
-const resolveWorkspaceAsset: ResolveWorkspaceAsset = (path, { signal }) =>
-	resolveWorkspaceFileAsset(fileWorkspace.readActiveFsFile, path, { signal });
+const resolveWorkspaceAsset: ResolveWorkspaceAsset =
+	fileWorkspace.resolveActiveFsAsset;
 async function goBackInlineFile() {
 	await windowManager.goBackFile();
 }

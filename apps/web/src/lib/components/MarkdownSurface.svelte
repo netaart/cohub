@@ -4,11 +4,13 @@ import {
 	onDestroy,
 	onMount,
 	unmount as unmountComponent,
+	untrack,
 } from "svelte";
 import { mediaLightbox } from "#lib/components/media-lightbox.svelte.ts";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { createLazyModuleLoader } from "#lib/lazy-module.ts";
 import { createMarkdownRegion } from "#lib/markdown-dom.ts";
+import { markdownImageVariants } from "#lib/markdown-image.ts";
 import { markdownGallery } from "#lib/media/markdown-gallery.ts";
 import { m } from "#lib/paraglide/messages.js";
 import { insertComposerSnippet } from "#lib/stores/composer-insert.ts";
@@ -53,7 +55,13 @@ let region: {
 	dom: ReturnType<typeof createMarkdownRegion>;
 } | null = null;
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
-let workspaceAssetRun = 0;
+let workspaceAssets: {
+	load: ReturnType<typeof createWorkspaceAssetLoader>;
+	signal: AbortSignal;
+} | null = null;
+let requestedAssets = new WeakSet<HTMLElement>();
+const latestAssetLoad = new WeakMap<HTMLElement, object>();
+const latestPosterLoad = new WeakMap<HTMLElement, object>();
 let mermaidRenderer: typeof import("#lib/mermaid-renderer.ts") | null = null;
 
 const loadMermaidRenderer = createLazyModuleLoader(
@@ -70,6 +78,8 @@ const PLAIN_CODE_SELECTOR =
 const mountedAudioPlayers: {
 	mount: HTMLElement;
 	instance: ReturnType<typeof mountComponent>;
+	props: { src: string; title: string | null };
+	path?: string;
 }[] = [];
 
 const COPY_ICON =
@@ -102,6 +112,7 @@ function renderAssetFallback(
 	const label = assetFallbackLabel(element, input.path);
 	const fallback = document.createElement("span");
 	fallback.className = "markdown-asset-fallback";
+	fallback.dataset.markdownAttached = "";
 	fallback.title = input.reason;
 	fallback.setAttribute("role", "img");
 	fallback.setAttribute("aria-label", `${label} — ${input.reason}`);
@@ -131,6 +142,24 @@ function highlightCode(
 }
 
 $effect(() => {
+	const resolve = resolveWorkspaceAsset;
+	if (!resolve) return;
+	const controller = new AbortController();
+	requestedAssets = new WeakSet();
+	workspaceAssets = {
+		load: createWorkspaceAssetLoader(resolve, controller.signal),
+		signal: controller.signal,
+	};
+	untrack(loadWorkspaceAssets);
+	const unsubscribe = resolve.onChange?.(refreshWorkspaceAsset);
+	return () => {
+		unsubscribe?.();
+		controller.abort();
+		workspaceAssets = null;
+	};
+});
+
+$effect(() => {
 	const element = regionEl;
 	const blocks = stableBlocks;
 	const html = tailHtml;
@@ -142,6 +171,11 @@ $effect(() => {
 	}
 	region.dom.setBlocks(blocks);
 	region.dom.setTail(html, live);
+	// Same task as the insert, before any image request starts.
+	untrack(() => {
+		sizeGalleryTiles();
+		loadWorkspaceAssets();
+	});
 });
 
 $effect(() => {
@@ -157,186 +191,217 @@ $effect(() => {
 	// Sweep even while streaming: replaced blocks can drop mounted players.
 	sweepDisconnectedAudioPlayers();
 	renderDiagrams();
-	sizeGalleryTiles();
 	if (_streamingLive) return;
 	enhanceCodeBlocks(markdownEl, () => true);
 	enhanceAudioPlayers();
 	checkVideoPosters();
 });
 
-$effect(() => {
-	stableBlocks;
-	const root = markdownEl;
-	const resolve = resolveWorkspaceAsset;
-	if (!root || !resolve) return;
-
-	const run = ++workspaceAssetRun;
-	const controller = new AbortController();
-	const elements = Array.from(
-		root.querySelectorAll<HTMLElement>(
-			"[data-workspace-asset-src], [data-workspace-asset-poster]",
-		),
-	);
-	const targets = elements.flatMap((element) => {
-		const parent = element.parentElement;
-		const stateElement =
-			element.tagName === "SOURCE" && parent instanceof HTMLMediaElement
-				? parent
-				: element;
-		if (stateElement.dataset.workspaceAssetState !== "loading") return [];
-		const entries: Array<{
-			element: HTMLElement;
-			stateElement: HTMLElement;
-			attribute: "src" | "poster";
-			path: string;
-		}> = [];
-		if (element.dataset.workspaceAssetSrc) {
-			entries.push({
-				element,
-				stateElement,
-				attribute: "src",
-				path: element.dataset.workspaceAssetSrc,
-			});
-		}
-		if (element.dataset.workspaceAssetPoster) {
-			entries.push({
-				element,
-				stateElement,
-				attribute: "poster",
-				path: element.dataset.workspaceAssetPoster,
-			});
-		}
-		return entries;
+function waitForMedia(
+	target: HTMLElement,
+	event: "load" | "loadedmetadata",
+	signal: AbortSignal,
+) {
+	return new Promise<void>((resolve, reject) => {
+		let retried = false;
+		const settle = (done: () => void) => {
+			target.removeEventListener(event, onLoad);
+			target.removeEventListener("error", onError);
+			signal.removeEventListener("abort", onAbort);
+			done();
+		};
+		const onLoad = () => settle(resolve);
+		const onAbort = () => settle(() => reject(signal.reason));
+		const onError = () => {
+			if (!retried && target.dataset.fallback) retried = true;
+			else settle(() => reject(new Error(`Media failed to ${event}`)));
+		};
+		target.addEventListener(event, onLoad);
+		target.addEventListener("error", onError);
+		signal.addEventListener("abort", onAbort);
 	});
-	const loadAsset = createWorkspaceAssetLoader(resolve, controller.signal);
-	const remaining = new Map<HTMLElement, number>();
-	const failed = new Map<HTMLElement, unknown>();
-	const primaryTarget = new Map<
-		HTMLElement,
-		{ element: HTMLElement; path: string }
-	>();
-	for (const { element, stateElement, attribute, path } of targets) {
-		remaining.set(stateElement, (remaining.get(stateElement) ?? 0) + 1);
-		if (attribute === "src") {
-			primaryTarget.set(stateElement, { element, path });
+}
+
+type IsCurrent = () => boolean;
+
+async function loadWorkspaceSource(
+	element: HTMLElement,
+	path: string,
+	isCurrent: IsCurrent,
+) {
+	if (!workspaceAssets) return;
+	const { load, signal } = workspaceAssets;
+	const { src } = await load(path);
+	if (!isCurrent()) return;
+	if (element instanceof HTMLImageElement) {
+		const loaded = waitForMedia(element, "load", signal);
+		const variants = markdownImageVariants(src);
+		delete element.dataset.fallback;
+		if (variants) {
+			element.dataset.originalSrc = src;
+			element.srcset = variants.srcset;
+		} else {
+			delete element.dataset.originalSrc;
+			element.removeAttribute("srcset");
 		}
+		element.src = variants?.src ?? src;
+		return loaded;
 	}
-
-	const locale = getLocale();
-
-	function settle(element: HTMLElement, error: unknown, primary: boolean) {
-		if (controller.signal.aborted || run !== workspaceAssetRun) return;
-		if (error && primary) failed.set(element, error);
-		const next = (remaining.get(element) ?? 1) - 1;
-		remaining.set(element, next);
-		if (next > 0) return;
-		const failure = failed.get(element);
-		element.dataset.workspaceAssetState = failure ? "error" : "loaded";
-		element.removeAttribute("aria-busy");
-		if (!failure) return;
-		const target = primaryTarget.get(element);
-		if (!target) return;
-		renderAssetFallback(target.element, element, {
-			path: target.path,
-			reason:
-				failure instanceof WorkspaceAssetAccessError
-					? m.markdown_asset_no_access({}, { locale })
-					: m.markdown_asset_unavailable({}, { locale }),
-		});
+	const media =
+		element instanceof HTMLMediaElement
+			? element
+			: element.parentElement instanceof HTMLMediaElement
+				? element.parentElement
+				: null;
+	if (!media) {
+		element.setAttribute("src", src);
+		return;
 	}
+	const loaded = waitForMedia(media, "loadedmetadata", signal);
+	media.preload = "metadata";
+	element.setAttribute("src", src);
+	if (element.tagName === "SOURCE") media.load();
+	await loaded;
+	if (media instanceof HTMLAudioElement && !streamingLive && isCurrent())
+		enhanceAudioPlayers();
+}
 
-	function observeLoad(
-		target: EventTarget,
-		event: string,
-		stateElement: HTMLElement,
-		errorMessage: string,
-		primary: boolean,
-		onLoad?: () => void,
-	) {
-		const options = { once: true, signal: controller.signal };
-		target.addEventListener(
-			event,
-			() => {
-				onLoad?.();
-				settle(stateElement, null, primary);
-			},
-			options,
-		);
-		target.addEventListener(
-			"error",
-			() => settle(stateElement, new Error(errorMessage), primary),
-			options,
-		);
+async function loadWorkspacePoster(
+	video: HTMLElement,
+	path: string,
+	isCurrent: IsCurrent,
+) {
+	if (!workspaceAssets) return;
+	const { load, signal } = workspaceAssets;
+	const run = {};
+	latestPosterLoad.set(video, run);
+	const current = () => isCurrent() && latestPosterLoad.get(video) === run;
+	const { src } = await load(path);
+	if (!current()) return;
+	const poster = new Image();
+	const loaded = waitForMedia(poster, "load", signal);
+	poster.src = src;
+	await loaded;
+	if (current()) video.setAttribute("poster", src);
+}
+
+function clearAssetFallback(element: HTMLElement) {
+	if (element.dataset.workspaceAssetFallback !== "true") return;
+	const fallback = element.nextElementSibling;
+	if (fallback instanceof HTMLElement && "markdownAttached" in fallback.dataset)
+		fallback.remove();
+	element.hidden = false;
+	delete element.dataset.workspaceAssetFallback;
+}
+
+function loadAssetElement(element: HTMLElement) {
+	if (!workspaceAssets) return;
+	const { signal } = workspaceAssets;
+	const run = {};
+	latestAssetLoad.set(element, run);
+	const isCurrent = () =>
+		!signal.aborted && latestAssetLoad.get(element) === run;
+	const sources = [element, ...element.querySelectorAll("source")];
+	const primary = sources.find((source) => source.dataset.workspaceAssetSrc);
+	const jobs = sources.flatMap((source) => {
+		const { workspaceAssetSrc: src, workspaceAssetPoster: poster } =
+			source.dataset;
+		return [
+			...(src ? [loadWorkspaceSource(source, src, isCurrent)] : []),
+			...(poster
+				? [
+						loadWorkspacePoster(source, poster, isCurrent).catch(
+							() => undefined,
+						),
+					]
+				: []),
+		];
+	});
+	void Promise.all(jobs).then(
+		() => {
+			if (!isCurrent()) return;
+			clearAssetFallback(element);
+			element.dataset.workspaceAssetState = "loaded";
+			element.removeAttribute("aria-busy");
+		},
+		(error: unknown) => {
+			if (!isCurrent()) return;
+			element.dataset.workspaceAssetState = "error";
+			element.removeAttribute("aria-busy");
+			if (!primary?.dataset.workspaceAssetSrc) return;
+			const locale = getLocale();
+			renderAssetFallback(primary, element, {
+				path: primary.dataset.workspaceAssetSrc,
+				reason:
+					error instanceof WorkspaceAssetAccessError
+						? m.markdown_asset_no_access({}, { locale })
+						: m.markdown_asset_unavailable({}, { locale }),
+			});
+		},
+	);
+}
+
+function loadWorkspaceAssets() {
+	if (!regionEl || !workspaceAssets) return;
+	for (const element of regionEl.querySelectorAll<HTMLElement>(
+		'[data-workspace-asset-state="loading"]',
+	)) {
+		if (requestedAssets.has(element)) continue;
+		requestedAssets.add(element);
+		loadAssetElement(element);
 	}
+}
 
-	for (const { element, stateElement, attribute, path } of targets) {
-		const primary = attribute === "src";
-		void loadAsset(path)
-			.then(({ src }) => {
-				if (controller.signal.aborted || run !== workspaceAssetRun) return;
-				if (attribute === "poster") {
-					const poster = new Image();
-					observeLoad(
-						poster,
-						"load",
-						stateElement,
-						"Poster failed to load",
-						false,
-						() => element.setAttribute(attribute, src),
-					);
-					poster.src = src;
-					return;
-				}
-
-				if (element instanceof HTMLImageElement) {
-					observeLoad(
-						element,
-						"load",
-						stateElement,
-						"Image failed to load",
-						true,
-					);
-					element.src = src;
-					return;
-				}
-
-				const media =
-					element instanceof HTMLMediaElement
-						? element
-						: element.parentElement instanceof HTMLMediaElement
-							? element.parentElement
-							: null;
-				if (!media) {
-					element.setAttribute(attribute, src);
-					settle(stateElement, null, primary);
-					return;
-				}
-
-				observeLoad(
-					media,
-					"loadedmetadata",
-					stateElement,
-					"Media failed to load",
-					true,
-					media instanceof HTMLAudioElement ? enhanceAudioPlayers : undefined,
-				);
-				media.preload = "metadata";
-				element.setAttribute(attribute, src);
-				if (element.tagName === "SOURCE") media.load();
-			})
-			.catch((error) => settle(stateElement, error, primary));
+function refreshWorkspaceAsset(path: string) {
+	if (!workspaceAssets) return;
+	const { load, signal } = workspaceAssets;
+	load.invalidate(path);
+	if (!regionEl) return;
+	const value = CSS.escape(path);
+	const sources = new Set<HTMLElement>();
+	const posters = new Set<HTMLElement>();
+	for (const node of regionEl.querySelectorAll<HTMLElement>(
+		`[data-workspace-asset-src="${value}"], [data-workspace-asset-poster="${value}"]`,
+	)) {
+		const element = node.tagName === "SOURCE" ? node.parentElement : node;
+		if (!element || !requestedAssets.has(element)) continue;
+		if (node.dataset.workspaceAssetSrc === path) sources.add(element);
+		else posters.add(element);
 	}
+	const players = mountedAudioPlayers.filter(
+		(player) => player.path === path && player.mount.isConnected,
+	);
+	if (sources.size + posters.size + players.length === 0) return;
+	for (const element of sources) loadAssetElement(element);
+	for (const video of posters)
+		if (!sources.has(video))
+			void loadWorkspacePoster(video, path, () => !signal.aborted).catch(
+				() => undefined,
+			);
+	if (players.length === 0) return;
+	const run = {};
+	for (const player of players) latestAssetLoad.set(player.mount, run);
+	void load(path).then(
+		({ src }) => {
+			for (const player of players)
+				if (latestAssetLoad.get(player.mount) === run) player.props.src = src;
+		},
+		() => undefined,
+	);
+}
 
-	return () => controller.abort();
-});
+const GALLERY_TILE_SELECTOR =
+	'.markdown-region > p[data-images]:is(:not([data-images="1"]), :has(+ p[data-images]), p[data-images] + *) > img:not([sizes])';
+const canMatchGalleryTiles =
+	typeof CSS !== "undefined" && CSS.supports("selector(:has(+ p))");
 
-// Gallery tiles come from CSS; their size lets the browser pick a small variant.
+// Mirrors the gallery CSS in app.css.
 function sizeGalleryTiles() {
-	for (const img of markdownEl?.querySelectorAll<HTMLImageElement>(
-		"p[data-images] > img[srcset]:not([sizes])",
-	) ?? []) {
-		if (getComputedStyle(img).float !== "none") img.sizes = "8.5rem";
-	}
+	if (variant !== "chat" || !canMatchGalleryTiles || !regionEl) return;
+	for (const img of regionEl.querySelectorAll<HTMLImageElement>(
+		GALLERY_TILE_SELECTOR,
+	))
+		img.sizes = "8.5rem";
 }
 
 function sweepDisconnectedAudioPlayers() {
@@ -376,9 +441,13 @@ function enhanceAudioPlayers() {
 		if (!audio?.src) continue;
 
 		figure.dataset.audioEnhanced = "true";
-		const src = audio.currentSrc || audio.src;
-		const caption =
-			figure.querySelector("figcaption")?.textContent?.trim() || null;
+		const props = $state({
+			src: audio.currentSrc || audio.src,
+			title: figure.querySelector("figcaption")?.textContent?.trim() || null,
+		});
+		const path =
+			audio.dataset.workspaceAssetSrc ??
+			audio.querySelector("source")?.dataset.workspaceAssetSrc;
 
 		const target = document.createElement("div");
 		target.className = "markdown-audio-mount";
@@ -387,11 +456,8 @@ function enhanceAudioPlayers() {
 		void import("#lib/components/AudioPlayer.svelte")
 			.then(({ default: AudioPlayer }) => {
 				if (!target.isConnected) return;
-				const instance = mountComponent(AudioPlayer, {
-					target,
-					props: { src, title: caption },
-				});
-				mountedAudioPlayers.push({ mount: target, instance });
+				const instance = mountComponent(AudioPlayer, { target, props });
+				mountedAudioPlayers.push({ mount: target, instance, props, path });
 				// Release the native element only after the enhanced player is in
 				// place — avoids a duplicate media instance while keeping the
 				// native <audio> as the no-JS / streaming fallback.

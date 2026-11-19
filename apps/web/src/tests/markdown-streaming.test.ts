@@ -297,3 +297,22 @@ test("renderStreamingMarkdownSplit never settles a chunk inside a list's fence",
 			assert.equal((chunk.match(/^\s*```/gm)?.length ?? 0) % 2, 0, chunk);
 	}
 });
+
+test("renderStreamingMarkdownSplit never moves settled text back into the tail", async () => {
+	const source = Array.from(
+		{ length: 24 },
+		(_, i) =>
+			`第${i}段。${"潮水涨上来，又退下去。".repeat(1 + ((i * 7) % 11))}`,
+	).join("\n\n");
+	let streamed: StreamingMarkdownRender | undefined;
+	let settled = "";
+	for (let end = 3; end < source.length + 3; end += 3) {
+		streamed = await renderStreamingMarkdownSplit(
+			source.slice(0, end),
+			streamed,
+		);
+		const stable = streamed.stableSources.join("");
+		assert.ok(stable.startsWith(settled), `retreated at ${end}`);
+		settled = stable;
+	}
+});

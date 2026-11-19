@@ -11,6 +11,10 @@ import {
 	type DirectoryListing,
 	readDirectoryPages,
 } from "#lib/space-fs-list.ts";
+import {
+	type ResolveWorkspaceAsset,
+	resolveWorkspaceFileAsset,
+} from "#lib/workspace-assets.ts";
 
 export type ActiveFsSource =
 	| { kind: "live" }
@@ -29,6 +33,7 @@ export type ActiveFsClient = {
 		signal?: AbortSignal,
 	) => Promise<SpaceFsFileResponse | SpaceFsPreparingFile | SpaceFsSymlink>;
 	save: (path: string, knownFile?: SpaceFsFileResponse | null) => Promise<void>;
+	resolveAsset: ResolveWorkspaceAsset;
 };
 
 function filenameFromPath(path: string) {
@@ -80,6 +85,13 @@ export function createActiveFsClient(input: {
 			source: () => spaceFileSource(files, path, known),
 		});
 	};
+	const resolveAsset: ResolveWorkspaceAsset = async (path, { signal }) => {
+		if (source.kind === "checkpoint")
+			return resolveWorkspaceFileAsset(read, path, { signal });
+		const file = await sdk.space(spaceId).files.resolve(path, { signal });
+		if (!file) throw new Error("Asset is still preparing");
+		return { src: file.url, mimeType: null };
+	};
 	return {
 		source,
 		sourceKey: sourceKey(source),
@@ -87,5 +99,6 @@ export function createActiveFsClient(input: {
 		list,
 		read,
 		save,
+		resolveAsset,
 	};
 }

@@ -871,6 +871,9 @@ body.pointer-dragging {
 
 .markdown-content [data-workspace-asset-state="loading"] {
 	background: color-mix(in srgb, var(--bg-elevated) 72%, var(--bg-content));
+}
+
+.markdown-content [data-workspace-asset-state="loading"]:not(img[src]) {
 	opacity: 0.58;
 }
 
@@ -878,6 +881,11 @@ body.pointer-dragging {
 	min-width: min(100%, 12rem);
 	min-height: 7rem;
 	cursor: progress;
+}
+
+.markdown-content img[data-workspace-asset-state="loading"]:not([src]) {
+	content: linear-gradient(transparent, transparent);
+	color: transparent;
 }
 
 .markdown-content .markdown-asset-fallback {
@@ -978,7 +986,7 @@ body.pointer-dragging {
 
 /* Adjacent image-only paragraphs form a gallery; text between them splits it. */
 .markdown-content[data-variant="chat"]
-	:is(.markdown-stable-region, .markdown-live-region)
+	.markdown-region
 	> p[data-images]:is(
 		:not([data-images="1"]),
 		:has(+ p[data-images]),

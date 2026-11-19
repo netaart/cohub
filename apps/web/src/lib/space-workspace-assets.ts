@@ -1,8 +1,6 @@
 import { createActiveFsClient } from "#lib/features/space/modules/active-fs-client.ts";
-import {
-	type ResolveWorkspaceAsset,
-	resolveWorkspaceFileAsset,
-} from "#lib/workspace-assets.ts";
+import { sdk } from "#lib/sdk.ts";
+import type { ResolveWorkspaceAsset } from "#lib/workspace-assets.ts";
 
 /**
  * Resolves workspace-relative markdown assets against a Space's live files.
@@ -11,7 +9,12 @@ import {
 export function createSpaceWorkspaceAssetResolver(
 	spaceId: string,
 ): ResolveWorkspaceAsset {
-	const fs = createActiveFsClient({ spaceId, source: { kind: "live" } });
-	return (path, { signal }) =>
-		resolveWorkspaceFileAsset(fs.read, path, { signal });
+	const { resolveAsset } = createActiveFsClient({
+		spaceId,
+		source: { kind: "live" },
+	});
+	return Object.assign(resolveAsset, {
+		onChange: (listener: (path: string) => void) =>
+			sdk.space(spaceId).files.onUrlChange(listener),
+	});
 }

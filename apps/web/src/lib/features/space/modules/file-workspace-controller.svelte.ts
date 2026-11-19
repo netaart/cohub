@@ -32,6 +32,7 @@ import {
 	getCachedSpaceFsDir,
 	patchCachedSpaceFsDir,
 } from "#lib/stores/space-fs-cache.ts";
+import type { ResolveWorkspaceAsset } from "#lib/workspace-assets.ts";
 import type { WorkspaceFilePosition } from "#lib/workspace-file-links.ts";
 import {
 	type ActiveFsSource,
@@ -720,6 +721,15 @@ export function createFileWorkspaceController(
 	function readActiveFsFile(path: string, signal?: AbortSignal) {
 		return getActiveFsClient().read(path, signal);
 	}
+
+	const resolveActiveFsAsset: ResolveWorkspaceAsset = Object.assign(
+		(path: string, options: { signal: AbortSignal }) =>
+			getActiveFsClient().resolveAsset(path, options),
+		{
+			onChange: (listener: (path: string) => void) =>
+				sdk.space(options.getSpaceId()).files.onUrlChange(listener),
+		},
+	);
 
 	function directoryLoadError(hasEntries: boolean) {
 		return hasEntries
@@ -2071,6 +2081,7 @@ export function createFileWorkspaceController(
 		handleUploadComplete,
 		patchFsDirectory,
 		readActiveFsFile,
+		resolveActiveFsAsset,
 		listActiveFsDir,
 		markFileSavePending,
 		clearFileSavePendingSoon,
