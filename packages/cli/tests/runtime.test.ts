@@ -35,7 +35,7 @@ const session = (root: string, harness: "pi" | "codex" = "codex") => ({ harness,
 test("Runtime CLI exposes the complete lifecycle without legacy sandbox commands", () => {
   const program = new Command();
   registerRuntime(program);
-  assert.deepEqual(program.commands[0]?.commands.map((command) => command.name()), ["up", "attach", "detach", "import", "status", "down", "logs"]);
+  assert.deepEqual(program.commands[0]?.commands.map((command) => command.name()), ["up", "attach", "detach", "import", "refresh-models", "status", "down", "logs"]);
 });
 
 test("native sync consent is idempotent per directory and harness", () => {
