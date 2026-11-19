@@ -11,7 +11,7 @@ export const codexTokenTotals = (value: unknown): CodexTokenTotals => {
 export const subtractCodexTokens = (total: CodexTokenTotals, base: CodexTokenTotals): CodexTokenTotals =>
   Object.fromEntries(fields.map((key) => [key, Math.max(0, total[key] - base[key])])) as CodexTokenTotals;
 
-export function codexContext(total: unknown, window: unknown) {
+export function codexContext(total: unknown, window: unknown): Pick<NonNullable<RuntimeMessage["usage"]>, "contextTokens" | "contextWindow"> {
   if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) return {};
   return { contextTokens: total, ...(typeof window === "number" && Number.isSafeInteger(window) && window > 0 ? { contextWindow: window } : {}) };
 }
