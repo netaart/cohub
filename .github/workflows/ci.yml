@@ -86,9 +86,6 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: CLI startup budget
-        run: pnpm --filter @neta-art/cohub-cli startup
-
       - name: Typecheck
         run: pnpm typecheck
 

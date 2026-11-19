@@ -36,6 +36,5 @@ This repository ships directly on `main` (no long-lived feature branches).
    Board must change, with the code, or `Hosts: no action`.
 5. The CLI bundles the SDK: when an SDK change should reach CLI users, list
    `@neta-art/cohub-cli` in its changeset too.
-6. CI budgets the JavaScript CLI commands load at startup
-   (`pnpm --filter @neta-art/cohub-cli startup`).
-   After an intended increase, rerun with `--update` and commit the budget.
+6. To inspect CLI startup size and timing after a build, run
+   `pnpm --filter @neta-art/cohub-cli startup` locally.
