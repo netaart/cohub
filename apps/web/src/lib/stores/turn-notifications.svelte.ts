@@ -1,3 +1,4 @@
+import type { SessionTurnNotifyEvent } from "@cohub/protocol/realtime";
 import type { ChannelEnvelope, SpaceRecord } from "@neta-art/cohub";
 import { callHost, supportsHostCapability } from "#lib/host-bridge.ts";
 import {
@@ -29,20 +30,7 @@ const ACTIVE_SESSION_STORAGE_KEY = "cohub:active-session";
 const ACTIVE_SESSION_TTL_MS = 8_000;
 const ACTIVE_SESSION_PING_MS = 3_000;
 
-type TurnNotifyPayload = {
-	spaceId: string;
-	sessionId: string;
-	turnId: string;
-	status: string;
-	finishReason?: string | null;
-	userPreview: string | null;
-	durationMs: number | null;
-	stepCount: number | null;
-	sequence: number | null;
-	provider: string | null;
-	model: string | null;
-	completedAt: string | null;
-};
+type TurnNotifyPayload = SessionTurnNotifyEvent["payload"];
 
 export type TurnNotification = {
 	id: string;
@@ -453,6 +441,12 @@ class TurnNotificationsStore {
 	) {
 		const payload = event.payload;
 		if (this.hasSeen(payload.turnId)) return;
+		if (
+			payload.status === "completed" &&
+			(payload.initiator === "agent" || payload.initiator === "automation")
+		) {
+			return;
+		}
 
 		if (canUseDesktopNotifications())
 			this.desktopPermission = Notification.permission;

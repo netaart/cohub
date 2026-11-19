@@ -16,6 +16,7 @@ import type {
 } from "@cohub/protocol/app-navigation";
 import type { AppComposerChip } from "@cohub/protocol/app-surface";
 import type { SpaceFsChangedPayload } from "@cohub/protocol/fs";
+import { readRecordedTurnInitiator } from "@cohub/protocol/model";
 import type { ChannelEnvelope } from "@cohub/protocol/realtime";
 import type {
 	AppRecord,
@@ -2094,7 +2095,6 @@ async function handleWsEvent(payload: ChannelEnvelope) {
 			}
 		}
 
-		// Live danmaku: float other users' messages from other sessions (shell chrome).
 		const targetSessionId =
 			typeof payload.sessionId === "string" ? payload.sessionId : null;
 		if (
@@ -2107,6 +2107,7 @@ async function handleWsEvent(payload: ChannelEnvelope) {
 						id?: unknown;
 						sequence?: unknown;
 						userUuid?: unknown;
+						meta?: unknown;
 						createdAt?: unknown;
 						authorProfile?: {
 							displayName?: unknown;
@@ -2119,6 +2120,7 @@ async function handleWsEvent(payload: ChannelEnvelope) {
 			if (
 				senderUuid &&
 				senderUuid !== authStore.userUuid &&
+				readRecordedTurnInitiator(turn?.meta) === "human" &&
 				canRunDanmakuCatchup()
 			) {
 				const text = extractDanmakuText(turn);

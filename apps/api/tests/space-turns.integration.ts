@@ -94,8 +94,13 @@ test("Space Turns carry their Space, backfill safely, and page by keyset", async
   assert.equal(onlyMine.length, 2);
   assert.deepEqual(onlyMine, await pages({ sessionId: mine.id }));
 
-  const first = await listSpaceTurns({ spaceId: spaceA, userUuid: "me", limit: 2 });
-  const newer = await createSessionTurn({ sessionId: theirs.id, userUuid: "them", userContent: [] });
-  const caughtUp = await listSpaceTurns({ spaceId: spaceA, userUuid: "me", after: first.snapshotCursor, before: new Date(Date.now() + 1000).toISOString() });
-  assert.deepEqual(caughtUp.turns.map((turn) => turn.id), [newer.id]);
+  const first = await listSpaceTurns({ spaceId: spaceA, userUuid: "me", before: tie.toISOString(), limit: 2 });
+  const newer = await createSessionTurn({ sessionId: theirs.id, userUuid: "them", userContent: [], meta: { initiator: "human", privateKey: "not projected" } });
+  const automated = await createSessionTurn({ sessionId: theirs.id, userUuid: "them", userContent: [], meta: { initiator: "automation" } });
+  const legacy = await createSessionTurn({ sessionId: theirs.id, userUuid: "them", userContent: [] });
+  const caughtUp = await listSpaceTurns({ spaceId: spaceA, userUuid: "me", author: "others", after: first.snapshotCursor });
+  assert.deepEqual(new Map(caughtUp.turns.map((turn) => [turn.id, turn.initiator])), new Map([
+    [newer.id, "human"], [automated.id, "automation"], [legacy.id, null],
+  ]));
+  assert.equal(caughtUp.turns.some((turn) => "meta" in turn), false);
 });

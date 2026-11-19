@@ -1,7 +1,8 @@
-import type {
-  SpaceTurnAuthorFilter,
-  SpaceTurnListItem,
-  SpaceTurnsResponse,
+import {
+  isSessionInitiator,
+  type SpaceTurnAuthorFilter,
+  type SpaceTurnListItem,
+  type SpaceTurnsResponse,
 } from "@cohub/protocol/model";
 import { isUuidLike } from "@cohub/protocol/identifiers";
 import { sessionTurns, spaceSessions } from "@cohub/db";
@@ -147,6 +148,7 @@ export async function listSpaceTurns(input: {
       status: sessionTurns.status,
       intent: sessionTurns.intent,
       userUuid: sessionTurns.userUuid,
+      initiator: sql<string | null>`${sessionTurns.meta}->>'initiator'`,
       startedAt: sessionTurns.startedAt,
       completedAt: sessionTurns.completedAt,
       durationMs: sessionTurns.durationMs,
@@ -173,14 +175,18 @@ export async function listSpaceTurns(input: {
   const indexItems = await hydrateTurnIndexAuthorProfiles(
     pageRows.map((row) => toTurnIndexItem(row as SessionTurnIndexRow)),
   );
-  const turns: SpaceTurnListItem[] = indexItems.map((turn, index) => ({
-    ...turn,
-    session: {
-      id: turn.sessionId,
-      title: pageRows[index]?.sessionTitle ?? null,
-      source: pageRows[index]?.sessionSource ?? null,
-    },
-  }));
+  const turns: SpaceTurnListItem[] = indexItems.map((turn, index) => {
+    const row = pageRows[index];
+    return {
+      ...turn,
+      initiator: isSessionInitiator(row?.initiator) ? row.initiator : null,
+      session: {
+        id: turn.sessionId,
+        title: row?.sessionTitle ?? null,
+        source: row?.sessionSource ?? null,
+      },
+    };
+  });
   const last = pageRows.at(-1);
 
   return {

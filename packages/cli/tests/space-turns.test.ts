@@ -22,6 +22,7 @@ const turn: SpaceTurnListItem = {
   status: "completed",
   intent: "followup",
   userUuid: "user-1",
+  initiator: "human",
   authorProfile: {
     userUuid: "user-1",
     username: "ada",
@@ -109,6 +110,7 @@ test("space turn table rows retain identifiers, authors, and previews", () => {
     {
       createdAt: turn.createdAt,
       author: "Ada",
+      initiator: "human",
       sessionTitle: "Release",
       sessionId: "session-1",
       sequence: 7,

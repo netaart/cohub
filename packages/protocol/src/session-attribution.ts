@@ -104,6 +104,11 @@ export function readSessionInitiator(session: {
   return session.meta === undefined ? null : resolveInitiator(session.source, record(session.meta));
 }
 
+export function readRecordedTurnInitiator(meta: unknown): SessionInitiator | null {
+  const initiator = record(meta)?.initiator;
+  return isSessionInitiator(initiator) ? initiator : null;
+}
+
 export function readTurnInitiator(meta: unknown): SessionInitiator {
   const input = record(meta);
   return resolveInitiator(input?.source, input);
