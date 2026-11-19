@@ -4,6 +4,20 @@ All notable changes to Cohub are documented in this file.
 
 <!-- Generated from apps/web/src/lib/changelog/entries.json. Do not edit. -->
 
+## v2.105 — 2026-11-19
+
+- **Portable Boards**: Link the same Board from any Space and show tasks or chats from other Spaces on it. Use `client.boards.byId(boardId)` instead of the deprecated `space.board(id)`; `BoardClient.spaceId` has been removed. Read the home Space from Board data or `replica.state`.
+- **Board playback and previews**: 3D objects load once per file, with nearby objects first and a cover or silhouette until they are ready. Scripts can opt into edit, play, view, or export modes. `cohub boards simulate` can preview a device viewport and capture the scripted camera and screen layers as frames or video.
+- **Chat images and menus**: Browse chat images in a gallery, mark areas, and ask about them in place. Mobile long-press opens the same context actions as desktop right-click. Streaming Markdown preserves settled content, and workspace images load with less layout disruption.
+- **Session attribution**: Sessions and Turns distinguish who started them (human, agent, or automation) from where they came from (such as Web, desktop, or mobile). Filter by either in the API and CLI. Invalid filter responses now use `param` and `unknownKeys` instead of `unknownSources`. A batched backfill is available for historical session labels.
+- **Generation and local models**: Model listings and billing share the same generation categories, including dedicated audio usage. The CLI accepts 3D model and motion inputs and can chain supported Meshy steps. The local model picker refreshes its catalog in the background when opened.
+
+### Bug Fixes
+
+- Signing out now ends the Logto session so the next sign-in can switch accounts.
+- Local Codex sessions report native thinking level and current context-window usage. Replaced runtime connections now close their old peers on disconnect.
+- iOS and macOS App Store builds use the required Apple SDK and support uploading with an individual App Store Connect key.
+
 ## v2.104 — 2026-11-18
 
 - **Cold prompt cache notice**: long chats now warn when the provider's prompt cache has expired, showing the token count and estimated cost of the next resend, with a one-click **Compact first** action that compacts the session before the next Turn. Exposed end to end through the API, SDK, and CLI (`--compact-first`).
