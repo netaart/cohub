@@ -5,6 +5,7 @@ import {
 	clearBrokenAuthSession,
 	getAuthSessionSnapshot,
 	hasRecentAuthCompletion,
+	isSigningOut,
 	sanitizeRedirectPath,
 	signInAfterUnauthorized,
 	signInWithRedirectPath,
@@ -47,6 +48,7 @@ export const redirectToSignIn = async (
 	redirectPath = getCurrentRedirectPath(),
 	options: SignInRedirectOptions = {},
 ): Promise<void> => {
+	if (isSigningOut()) return;
 	const activeAttempt = signInRedirectAttempt;
 	if (activeAttempt) {
 		if (isSameRedirectAttempt(activeAttempt.options, options)) {

@@ -673,6 +673,11 @@ export const ensureAuth = async (options?: { redirectPath?: string }) => {
 	return true;
 };
 
+let signingOut = false;
+
+/** Suppresses 401 sign-in redirects that would pre-empt Logto's end_session navigation. */
+export const isSigningOut = () => signingOut;
+
 /**
  * Sign out of the active session, wherever the credential lives.
  *
@@ -692,9 +697,16 @@ export const signOut = async (): Promise<void> => {
 		}
 		return;
 	}
+	signingOut = true;
+	const postLogoutRedirectUri = `${window.location.origin}/`;
 	try {
-		await getLogtoClient().signOut(`${window.location.origin}/`);
+		await getLogtoClient().signOut(postLogoutRedirectUri);
 	} catch (error) {
-		console.error("[auth] Failed to sign out", error);
+		// Local tokens may already be gone; still end the Logto session, or the
+		// next sign-in silently restores the same account.
+		console.error("[auth] Failed to sign out; ending Logto session", error);
+		window.location.assign(
+			`${LOGTO_ENDPOINT.replace(/\/+$/, "")}/oidc/session/end?${new URLSearchParams({ client_id: LOGTO_APP_ID, post_logout_redirect_uri: postLogoutRedirectUri })}`,
+		);
 	}
 };
