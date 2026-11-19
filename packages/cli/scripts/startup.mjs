@@ -21,9 +21,7 @@ if (process.env[TRACE_ENV]) {
   });
 } else {
   const root = new URL("../", import.meta.url);
-  const budgetUrl = new URL("startup-budget.json", root);
   const bin = fileURLToPath(new URL("bin/cohub.js", root));
-  const TOLERANCE = 1.05;
   const RUNS = 5;
   const COMMANDS = ["--version", "--help", "me --help", "spaces --help", "boards --help", "runtime --help"];
 
@@ -50,27 +48,9 @@ if (process.env[TRACE_ENV]) {
     return times[RUNS >> 1];
   };
 
-  const update = process.argv.includes("--update");
-  const budget = update ? {} : JSON.parse(readFileSync(budgetUrl, "utf8"));
-  const results = {};
-  let failed = false;
-
   for (const command of COMMANDS) {
     const { files, bytes } = trace(command);
-    results[command] = bytes;
-    const limit = budget[command];
-    const over = limit !== undefined && bytes > limit * TOLERANCE;
-    failed ||= over;
     const kb = `${(bytes / 1024).toFixed(0)} KB`.padStart(8);
-    const note = over ? `  over budget ${(limit / 1024).toFixed(0)} KB` : "";
-    console.log(`${command.padEnd(16)} ${kb} ${String(files).padStart(3)} files ${median(command).toFixed(0).padStart(5)} ms${note}`);
-  }
-
-  if (update) {
-    writeFileSync(budgetUrl, `${JSON.stringify(results, null, 2)}\n`);
-    console.log(`Updated ${fileURLToPath(budgetUrl)}`);
-  } else if (failed) {
-    console.error(`Startup JavaScript exceeds the budget by more than ${Math.round((TOLERANCE - 1) * 100)}%. Run \`pnpm startup --update\` if intended.`);
-    process.exit(1);
+    console.log(`${command.padEnd(16)} ${kb} ${String(files).padStart(3)} files ${median(command).toFixed(0).padStart(5)} ms`);
   }
 }

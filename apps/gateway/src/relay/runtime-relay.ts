@@ -79,6 +79,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
     socket.send(data);
   };
   function control(socket: WebSocket, request?: IncomingMessage) {
+    const peers = new Map<string, WebSocket>();
     let current: { spaceId: string; record: RuntimeRegistration } | null = null;
     const advertisedRuntimeIdValue = new URL(request?.url ?? "/", "http://localhost").searchParams.get("runtimeId")?.trim() || "";
     const advertisedRuntimeId = isUuid(advertisedRuntimeIdValue) ? advertisedRuntimeIdValue : undefined;
@@ -213,7 +214,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
           if (closed || socket.readyState !== socket.OPEN) { await deps.release(frame.spaceId, record); return; }
           current = { spaceId: frame.spaceId, record };
           token = frame.token; authorizedAt = Date.now(); lastHeartbeat = Date.now(); registeredAt = Date.now();
-          registrations.set(frame.spaceId, { socket, record, peers: new Map() });
+          registrations.set(frame.spaceId, { socket, record, peers });
           clearTimeout(handshake);
           logger.info("runtime.control.registered", {
             spaceId: frame.spaceId,
@@ -280,7 +281,7 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
               if (task) void task.catch((error) => logger.warn("runtime.recovery_wakeup_failed", { spaceId: current?.spaceId, runtimeId: current?.record.runtimeId, execution, error }));
             }
           } else {
-            const peer = registrations.get(current.spaceId)?.peers.get(frame.requestId);
+            const peer = peers.get(frame.requestId);
             if (peer) send(peer, frame);
           }
         }
@@ -314,15 +315,13 @@ export function createRuntimeRelay(deps: RuntimeRelayDependencies) {
         registeredMs: Date.now() - registeredAt,
         heartbeatAgeMs: Date.now() - lastHeartbeat,
         bufferedBytes: socket.bufferedAmount,
-        activePeers: registration?.socket === socket ? registration.peers.size : 0,
+        activePeers: peers.size,
         code,
         reason: reason.toString(),
         ...client,
       });
-      if (registration?.socket === socket) {
-        registrations.delete(current.spaceId);
-        for (const peer of registration.peers.values()) peer.close(1011, "Runtime disconnected");
-      }
+      if (registration?.socket === socket) registrations.delete(current.spaceId);
+      for (const peer of peers.values()) peer.close(1011, "Runtime disconnected");
       void deps.release(current.spaceId, current.record).catch(() => undefined);
     });
   }
