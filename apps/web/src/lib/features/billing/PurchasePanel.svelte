@@ -54,6 +54,8 @@ const hasPlans = $derived(
 	(view?.monthlyPlans.length ?? 0) + (view?.yearlyPlans.length ?? 0) > 0,
 );
 const hasPacks = $derived(packs.length > 0);
+/** Catalog not in yet: keep the loaded geometry so the page does not move when it lands. */
+const pending = $derived(!view && !flow.loadError);
 const showTabs = $derived(hasPlans && hasPacks);
 const products = $derived<BillingCatalogProduct[]>(
 	family === "packs" ? packs : plans,
@@ -169,32 +171,32 @@ function select(product: BillingCatalogProduct) {
         </div>
       </section>
     {/if}
-		<div class="controls">
-			{#if showTabs}
+		<div class="controls" class:pending>
+			{#if showTabs || pending}
 				<Segmented
 					role="tablist"
 					label={m.purchase_family_label({}, { locale })}
 					value={family}
 					options={[
-						{ value: "plans", label: m.purchase_family_plans({}, { locale }) },
-						{ value: "packs", label: m.purchase_family_packs({}, { locale }) },
+						{ value: "plans", label: m.purchase_family_plans({}, { locale }), disabled: pending },
+						{ value: "packs", label: m.purchase_family_packs({}, { locale }), disabled: pending },
 					]}
 					onchange={switchFamily}
 				/>
 			{:else}
 				<span></span>
 			{/if}
-			{#if family === "plans" && hasPlans && !processing}
+			{#if family === "plans" && (hasPlans || pending) && !processing}
 				<Segmented
 					label={m.purchase_billing_interval({}, { locale })}
 					value={flow.interval}
 					options={[
-						{ value: "monthly", label: m.billing_monthly({}, { locale }) },
+						{ value: "monthly", label: m.billing_monthly({}, { locale }), disabled: pending },
 						{
 							value: "yearly",
 							label: m.billing_yearly({}, { locale }),
-							disabled: !flow.hasYearly,
-							note: flow.hasYearly && yearlySavings ? `−${yearlySavings}%` : undefined,
+							disabled: pending || !flow.hasYearly,
+							note: pending ? "−00%" : flow.hasYearly && yearlySavings ? `−${yearlySavings}%` : undefined,
 						},
 					]}
 					onchange={(interval) => flow.setInterval(interval)}
@@ -203,17 +205,17 @@ function select(product: BillingCatalogProduct) {
 		</div>
 
     {#if family === "packs" || !processing}
-		{#if flow.loading && !view}
-			<div class="grid" aria-busy="true">
-				{#each [0, 1, 2] as i (i)}
-					<div class="skeleton"></div>
-				{/each}
-			</div>
-		{:else if flow.loadError && !view}
+		{#if !view && flow.loadError}
 			<div class="notice">
 				<AlertCircle class="icon" aria-hidden="true" />
 				<span>{flow.loadError}</span>
 				<button type="button" onclick={() => flow.load({ force: true })}>{m.common_retry({}, { locale })}</button>
+			</div>
+		{:else if pending}
+			<div class="grid" aria-busy="true">
+				{#each [0, 1, 2] as i (i)}
+					<div class="skeleton"></div>
+				{/each}
 			</div>
 		{:else if products.length === 0}
 			<p class="muted">{m.pricing_no_plans({}, { locale })}</p>
@@ -247,11 +249,20 @@ function select(product: BillingCatalogProduct) {
 
  {#if !recoveringPlan}
 	<div class="aside">
-		<CheckoutSummary {flow} {locale} {signedIn} {ctaLabel} {onbuy} />
+		{#if pending}
+			<div class="skeleton summary" aria-hidden="true"></div>
+		{:else}
+			<CheckoutSummary {flow} {locale} {signedIn} {ctaLabel} {onbuy} />
+		{/if}
 	</div>
  {/if}
 
-	{#if flow.selected && !recoveringPlan}
+	{#if pending && !recoveringPlan}
+		<div class="bar placeholder" aria-hidden="true">
+			<div class="bar-toggle"><span class="bar-name">&nbsp;</span></div>
+			<div class="bar-cta"></div>
+		</div>
+	{:else if flow.selected && !recoveringPlan}
 		<div class="bar" class:open={summaryOpen}>
 			<button type="button" class="bar-toggle" aria-expanded={summaryOpen} onclick={() => (summaryOpen = !summaryOpen)}>
 				<span class="bar-name">{flow.selected.name}</span>
@@ -317,6 +328,9 @@ function select(product: BillingCatalogProduct) {
 		justify-content: space-between;
 		gap: 10px;
 	}
+	.controls.pending :global(.segmented-note) {
+		visibility: hidden;
+	}
 	.grid {
 		display: grid;
 		gap: 14px;
@@ -336,11 +350,21 @@ function select(product: BillingCatalogProduct) {
 		gap: 10px;
 	}
 
+	/* Sized like the three monthly plan cards (2 and 3 benefits). */
 	.skeleton {
-		height: 220px;
+		height: 245px;
 		border-radius: 10px;
 		background: var(--bg-hover-strong);
 		animation: pulse 1.4s ease-in-out infinite;
+	}
+	.skeleton:last-child {
+		height: 269px;
+	}
+	/* Matches the signed-out summary (288.5px, no code row). Auth is known only after hydration, so a signed-in
+	   summary (321px + 16.5px code row) shifts the catalog ~32px on desktop (CLS ~0.0024). Padding for it would add
+	   ~32px of blank space for every anonymous visitor, so this is intentional. */
+	.skeleton.summary {
+		height: 288.5px;
 	}
 	@keyframes pulse {
 		50% {
@@ -428,6 +452,9 @@ function select(product: BillingCatalogProduct) {
 		.bar {
 			display: none;
 		}
+	}
+	.bar.placeholder {
+		visibility: hidden;
 	}
 	.bar-toggle {
 		display: flex;
