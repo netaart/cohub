@@ -4,10 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { CohubModelRegistry } from "../runtime/model-registry.js";
-import { resolveSpaceBotPromptModel } from "../runtime/space-bot-model.js";
+import { resolveSpaceBotPromptModel, type PromptModelRequest } from "../runtime/space-bot-model.js";
 
 const root = await mkdtemp(join(tmpdir(), "space-bot-model-"));
-process.env.WORKSPACE_ROOT = root;
+// Other test files share this process and set WORKSPACE_ROOT when they load, so set it per call.
+const resolve = (spaceId: string, request: PromptModelRequest) => {
+  process.env.WORKSPACE_ROOT = root;
+  return resolveSpaceBotPromptModel(spaceId, request, registry);
+};
 
 const registry = {
   find: (provider: string, id: string) => (provider === "cohub" && id === "claude-opus-5-5" ? {} : undefined),
@@ -23,7 +27,7 @@ const bare = { requestedModel: undefined, requestedThinkingLevel: undefined, req
 
 test("a bare prompt runs on the Space Bot's model, thinking level and window", async () => {
   await writeBotJson("bot-space", { model: { provider: "cohub", id: "claude-opus-5-5", thinkingLevel: "high" }, contextWindow: 400000 });
-  assert.deepEqual(await resolveSpaceBotPromptModel("bot-space", bare, registry), {
+  assert.deepEqual(await resolve("bot-space", bare), {
     requestedModel: { provider: "cohub", id: "claude-opus-5-5" },
     requestedThinkingLevel: "high",
     requestedContextWindow: 400000,
@@ -33,26 +37,26 @@ test("a bare prompt runs on the Space Bot's model, thinking level and window", a
 test("an explicit model wins over bot.json, and missing bot.json keeps the deployment default", async () => {
   await writeBotJson("explicit-space", { model: { provider: "cohub", id: "claude-opus-5-5", thinkingLevel: "high" }, contextWindow: 400000 });
   const explicit = { requestedModel: { provider: "cohub", id: "other" }, requestedThinkingLevel: "low", requestedContextWindow: 90000 };
-  assert.deepEqual(await resolveSpaceBotPromptModel("explicit-space", explicit, registry), explicit);
-  assert.deepEqual(await resolveSpaceBotPromptModel("no-bot-space", bare, registry), bare);
+  assert.deepEqual(await resolve("explicit-space", explicit), explicit);
+  assert.deepEqual(await resolve("no-bot-space", bare), bare);
 });
 
 test("an unavailable or malformed bot.json falls back to the deployment default without failing", async () => {
   await writeBotJson("unknown-model-space", { model: { provider: "cohub", id: "gone" } });
-  assert.deepEqual(await resolveSpaceBotPromptModel("unknown-model-space", bare, registry), bare);
+  assert.deepEqual(await resolve("unknown-model-space", bare), bare);
   await writeBotJson("broken-space", "{ not json");
-  assert.deepEqual(await resolveSpaceBotPromptModel("broken-space", bare, registry), bare);
+  assert.deepEqual(await resolve("broken-space", bare), bare);
 });
 
 test("a bot.json without a window pins 200k like tell, and an explicit thinking level beats bot.json", async () => {
   await writeBotJson("window-space", { model: { provider: "cohub", id: "claude-opus-5-5", thinkingLevel: "high" } });
-  assert.deepEqual(await resolveSpaceBotPromptModel("window-space", bare, registry), {
+  assert.deepEqual(await resolve("window-space", bare), {
     requestedModel: { provider: "cohub", id: "claude-opus-5-5" },
     requestedThinkingLevel: "high",
     requestedContextWindow: 200000,
   });
   const explicitLevel = { ...bare, requestedThinkingLevel: "low" };
-  assert.deepEqual(await resolveSpaceBotPromptModel("window-space", explicitLevel, registry), {
+  assert.deepEqual(await resolve("window-space", explicitLevel), {
     requestedModel: { provider: "cohub", id: "claude-opus-5-5" },
     requestedThinkingLevel: "low",
     requestedContextWindow: 200000,
