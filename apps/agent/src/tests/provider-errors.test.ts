@@ -29,6 +29,17 @@ test("retries upstream HTTP/2 stream failures", () => {
   }
 });
 
+test("retries temporarily unavailable upstream responses with or without a status code", () => {
+  for (const errorMessage of [
+    "upstream provider is temporarily unavailable, please try again later",
+    "upstream_temporarily_unavailable",
+    "upstream service temporarily unavailable",
+    "503 Service Unavailable: upstream provider is temporarily unavailable",
+  ]) {
+    assert.equal(isRetryableProviderError(assistantError(errorMessage)), true, errorMessage);
+  }
+});
+
 test("classifies blocked upstream replays as retryable", () => {
   for (const errorMessage of ["upstream_replay_blocked", replayBlockedError, `Error Code ${replayBlockedError}`]) {
     const message = assistantError(errorMessage);
