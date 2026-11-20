@@ -22,6 +22,9 @@ allowBuilds:
   "@openrouter/sdk": false
 overrides:
   ioredis: ^6.0.0
+  "@esbuild-kit/core-utils@3.3.2>esbuild": ~0.25.12
+  "@tailwindcss/typography@0.5.20>postcss-selector-parser": ^6.1.6
+  "workbox-build@7.4.1>glob": ^14.0.6
 
 catalog:
   "@earendil-works/pi-agent-core": 1.5.2
@@ -31,13 +34,13 @@ catalog:
   "@tailwindcss/vite": 4.3.5
   "@types/node": 26.6.6
   "@typescript/native": npm:typescript@7.0.2
-  svelte: 5.57.3
+  svelte: 5.58.0
   svelte-check: 4.7.8
   tailwindcss: 4.3.5
   tsx: 4.23.15
   typescript: 7.0.2
   vite: 8.3.8
-  wrangler: 4.163.0
+  wrangler: 4.165.0
 
 catalogs:
   # svelte-check and SvelteKit still need the TypeScript 6 JS API.

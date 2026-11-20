@@ -39,7 +39,7 @@
   "devDependencies": {
     "@biomejs/biome": "catalog:",
     "@changesets/cli": "^3.0.3",
-    "@electric-sql/pglite": "^0.5.16",
+    "@electric-sql/pglite": "^0.5.17",
     "@napi-rs/canvas": "1.1.1",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.1",
