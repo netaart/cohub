@@ -171,27 +171,6 @@
 	}
 }
 
-/* Arial fallback fitted to Geist's advance widths and vertical metrics, so the swap
-   does not move text. Arimo is Arial's metric-compatible clone. */
-@font-face {
-	font-family: "Geist Fallback";
-	src: local("Arial Regular"), local("ArialMT"), local("Arial"), local("Arimo Regular"), local("Arimo-Regular");
-	font-weight: 100 500;
-	size-adjust: 102.61%;
-	ascent-override: 97.94%;
-	descent-override: 28.75%;
-	line-gap-override: 0%;
-}
-@font-face {
-	font-family: "Geist Fallback";
-	src: local("Arial Bold"), local("Arial-BoldMT"), local("Arial"), local("Arimo Bold"), local("Arimo-Bold");
-	font-weight: 501 900;
-	size-adjust: 99.69%;
-	ascent-override: 100.81%;
-	descent-override: 29.59%;
-	line-gap-override: 0%;
-}
-
 /* ============================================================
    Tailwind v4 @theme — semantic design tokens
    ============================================================ */
@@ -204,7 +183,7 @@
 	--breakpoint-2xl: 1536px;
 
 	/* Fonts */
-	--font-sans: "Geist Variable", "Geist", "Geist Fallback", system-ui, -apple-system, sans-serif;
+	--font-sans: "Geist Variable", "Geist", system-ui, -apple-system, sans-serif;
 	--font-mono: "Geist Mono Variable", "Geist Mono", "Fira Code", ui-monospace, monospace;
 
 	--spacing-workspace: 2rem;
