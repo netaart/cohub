@@ -1,6 +1,6 @@
 @import "tailwindcss";
-@import "./styles/geist.css";
-@import "./styles/geist-mono.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 @import "@fontsource-variable/figtree";
 @import "./styles/theme.css";
 @import "./styles/components.css";

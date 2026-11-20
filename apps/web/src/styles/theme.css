@@ -171,9 +171,8 @@
 	}
 }
 
-/* Fallback for a view where Geist misses its block period (font-display: optional). The
-   overrides fit Geist's advance widths and vertical metrics, so that layout stays close.
-   Arimo is Arial's metric-compatible clone. */
+/* Arial fallback fitted to Geist's advance widths and vertical metrics, so the swap
+   does not move text. Arimo is Arial's metric-compatible clone. */
 @font-face {
 	font-family: "Geist Fallback";
 	src: local("Arial Regular"), local("ArialMT"), local("Arial"), local("Arimo Regular"), local("Arimo-Regular");
