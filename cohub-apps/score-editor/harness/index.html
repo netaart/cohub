@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Score editor harness</title>
+    <style>
+      #chip {
+        position: fixed;
+        right: 12px;
+        bottom: 12px;
+        max-width: min(26rem, calc(100vw - 24px));
+        max-height: 50vh;
+        overflow: auto;
+        padding: 10px 12px;
+        border: 1px solid color-mix(in oklab, CanvasText 16%, Canvas);
+        border-radius: 8px;
+        background: Canvas;
+        color: CanvasText;
+        font: 12px/1.5 system-ui, sans-serif;
+        box-shadow: 0 6px 24px color-mix(in oklab, CanvasText 18%, transparent);
+      }
+
+      #chip[hidden] {
+        display: none;
+      }
+
+      #chip .chip-title {
+        color: GrayText;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      #chip .chip-label {
+        margin-top: 4px;
+        font-weight: 600;
+      }
+
+      #chip .chip-content {
+        margin: 4px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-family: ui-monospace, monospace;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <aside id="chip" hidden></aside>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

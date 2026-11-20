@@ -957,6 +957,28 @@ importers:
         specifier: 'catalog:'
         version: 8.3.8(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
 
+  cohub-apps/score-editor:
+    dependencies:
+      '@neta-art/cohub':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      '@neta-art/score-dialect-song2':
+        specifier: 0.4.6
+        version: 0.4.6(@neta-art/score-editor@0.4.6)
+      '@neta-art/score-editor':
+        specifier: 0.4.6
+        version: 0.4.6
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.4
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vite:
+        specifier: ^8.2.2
+        version: 8.2.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.0)
+
   cohub-apps/schedule-manager:
     dependencies:
       '@cohub/protocol':
@@ -3225,6 +3247,14 @@ packages:
     engines: {node: '>=20.0.0'}
     hasBin: true
 
+  '@neta-art/score-dialect-song2@0.4.6':
+    resolution: {integrity: sha512-jL9lmI/7u36ymLriifo4Jwg3U2gfTUa8sfJO6a85ah/H7Gt2gQHXes/XPIDxNsHhfpmOtlehb1hK4l//nV9smQ==}
+    peerDependencies:
+      '@neta-art/score-editor': ^0.4.6
+
+  '@neta-art/score-editor@0.4.6':
+    resolution: {integrity: sha512-EFf9037GM/zsw6b59Z2VOZH7byw26p0yGAcKO8kMQQhbyk5PY+r2uVE706/rk1RY6h679nOhGGQt0fQescLvyA==}
+
   '@openrouter/sdk@1.4.25':
     resolution: {integrity: sha512-H218lYMy9WhU5cMigUvW/k+e1BimCqTTP+9PqssdDXnQ0gFCeEME0HTsFGPbR6UgJgyYh2hTct43/9pMcBem5A==}
 
@@ -4376,6 +4406,9 @@ packages:
     resolution: {integrity: sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw==}
     engines: {node: '>=0.4.0'}
     hasBin: true
+
+  abcjs@6.7.1:
+    resolution: {integrity: sha512-H9fnuhSSP3tbcJf4K3a/sgX8lM2M5cx8drlXEsPNrsRca/MGxhSb6HcT0ICFVoNW7Izx3kMHf7PExarC+5LUJw==}
 
   agent-base@6.0.2:
     resolution: {integrity: sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==}
@@ -8842,6 +8875,14 @@ snapshots:
       '@typesafe-ai/sdk': 0.6.0
       yaml: 2.9.1
 
+  '@neta-art/score-dialect-song2@0.4.6(@neta-art/score-editor@0.4.6)':
+    dependencies:
+      '@neta-art/score-editor': 0.4.6
+
+  '@neta-art/score-editor@0.4.6':
+    dependencies:
+      abcjs: 6.7.1
+
   '@openrouter/sdk@1.4.25':
     dependencies:
       zod: 4.6.7
@@ -9679,6 +9720,8 @@ snapshots:
       event-target-shim: 5.0.1
 
   acorn@8.19.0: {}
+
+  abcjs@6.7.1: {}
 
   agent-base@6.0.2(supports-color@10.2.2):
     dependencies:
