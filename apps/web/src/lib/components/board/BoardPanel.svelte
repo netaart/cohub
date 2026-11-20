@@ -48,6 +48,7 @@ import {
 	type BoardStage as BoardStageController,
 	boardDeviceBudget,
 	createBoardAssetManager,
+	createBoardModelPreviews,
 	readBoardDeviceSignals,
 } from "@neta-art/cohub/board/stage";
 import {
@@ -98,14 +99,7 @@ import {
 	boardReceivesKeys,
 	registerBoardPanel,
 } from "#lib/board/board-keyboard.ts";
-import {
-	boardAnimationReach,
-	opensInPlace,
-} from "#lib/board/board-media-playback.ts";
-import {
-	createBoardModelPreviews,
-	uploadBoardModelCover,
-} from "#lib/board/board-model.ts";
+import { boardAnimationReach, opensInPlace } from "#lib/board/board-media-playback.ts";
 import {
 	enterPresentationFullscreen,
 	holdPresentation,
@@ -158,6 +152,8 @@ import BoardZoomMenu from "#lib/components/board/BoardZoomMenu.svelte";
 import Spinner from "#lib/components/Spinner.svelte";
 import { getLocale } from "#lib/i18n/locale.svelte.ts";
 import { m } from "#lib/paraglide/messages.js";
+import "#lib/model3d/decoders.ts";
+import { readModelStill, saveModelStill } from "#lib/model3d/still-cache.ts";
 import { sdk } from "#lib/sdk.ts";
 import { authStore } from "#lib/stores/auth.svelte.ts";
 import { mergeCachedTaskRun } from "#lib/stores/task-runs-cache.ts";
@@ -285,23 +281,20 @@ const resolvedAssetSource = untrack(() =>
 );
 
 const signals = readBoardDeviceSignals();
-const saveData = signals.saveData;
 const forced = untrack(
 	() => deviceTier && boardDeviceBudget(signals, deviceTier),
 );
 const assets = createBoardAssetManager({
-	loadVideoPreviews: !saveData,
 	concurrency: forced?.concurrency,
 	lruBudget: forced?.lru,
 	resolveFile: (path, options) =>
 		resolvedAssetSource.resolveFile(path, options),
 	subscribe: resolvedAssetSource.subscribe,
-	modelPreviews: saveData
-		? undefined
-		: createBoardModelPreviews(() => resolvedAssetSource, {
-				isMobile: untrack(() => isMobile),
-				published: !spaceId,
-			}),
+	modelPreviews: !spaceId && !signals.saveData && typeof createImageBitmap === "function"
+		? createBoardModelPreviews(resolvedAssetSource, {
+				cache: { read: readModelStill, write: saveModelStill },
+			})
+		: undefined,
 });
 const boardLod = $derived(lod ?? forced?.lod);
 const appDetails = createBoardAppDetailLoader();
@@ -1575,13 +1568,12 @@ onDestroy(() => {
 			presence={collaboration}
 			space={spaceId}
 			editable={editable && !presenting}
-			uploadModelCover={recordsCovers ? uploadBoardModelCover : undefined}
+			uploadModelCover={recordsCovers && !signals.saveData ? sdk.publicAssets.uploadBoardModelCover : undefined}
 			assetSource={resolvedAssetSource}
 			onOpenFile={openMediaSource}
 			onAddLinks={addLinks}
 			onOpenInPlace={openInPlace}
 			views={itemViews}
-			autoplay={!saveData}
 			onRunningChange={(ids) => { running = ids; }}
 			onSurfaceChange={handleSurfaceChange}
 			onExportReady={(bridge) => { exportBridge = bridge; }}

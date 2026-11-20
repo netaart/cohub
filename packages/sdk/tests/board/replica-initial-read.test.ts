@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { BoardPlaybackSnapshot, BoardReadResult } from "@cohub/protocol";
+import { BoardClient } from "../../src/board/client/index.js";
 import { createBoardReplica } from "../../src/board/replica/index.js";
+import type { HttpTransport } from "../../src/transport.js";
 import { boardDocument } from "./fixtures.js";
 
 const response = (version: number): BoardReadResult => ({
@@ -46,6 +48,35 @@ const playing: BoardPlaybackSnapshot = {
 	playbackId: "play", animationId: "intro", animationRevision: 1, revision: 1,
 	status: "playing", position: 0, effectiveAt: 0, timeScale: 1, seed: "intro", commandId: "start",
 };
+
+test("a play command overlapping the initial GET is reconciled without realtime", async (t) => {
+	const firstRead = Promise.withResolvers<BoardReadResult>();
+	const command = Promise.withResolvers<{ playback: BoardPlaybackSnapshot }>();
+	const next = { ...playing, playbackId: "next", animationId: "outro", revision: 2, commandId: "play-next" };
+	let reads = 0;
+	const http = {
+		request(path: string) {
+			if (path.endsWith("/playback")) return command.promise;
+			return ++reads === 1 ? firstRead.promise : Promise.resolve({ ...response(1), playback: next });
+		},
+	} as unknown as HttpTransport;
+	const board = new BoardClient({ boardId: "b", http, websocket: null });
+	const { replica, release } = board.replica();
+	t.after(release);
+	const control = board.control({ type: "play", commandId: next.commandId, animationId: next.animationId });
+	const initial = Promise.withResolvers<void>();
+	const reconciled = Promise.withResolvers<void>();
+	t.after(replica.subscribe(({ playback }) => {
+		if (playback === playing) initial.resolve();
+		if (playback === next) reconciled.resolve();
+	}));
+	firstRead.resolve({ ...response(1), playback: playing });
+	await initial.promise;
+	command.resolve({ playback: next });
+	assert.strictEqual(await control, next);
+	await reconciled.promise;
+	assert.equal(reads, 2);
+});
 
 for (const event of [playing, null]) {
 	test(`an in-flight GET cannot overwrite a newer ${event ? "play" : "stop"} event`, async () => {

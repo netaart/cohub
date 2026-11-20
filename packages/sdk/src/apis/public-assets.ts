@@ -271,6 +271,9 @@ export class PublicAssetsApi {
     return { purpose, objectKey, publicUrl };
   }
 
+  uploadBoardModelCover = async ({ key, image, signal }: { key: string; image: Blob; signal: AbortSignal }): Promise<string> =>
+    (await this.uploadBoardPreview({ key, file: image, signal })).publicUrl;
+
   /** Preprocessed chat image (webp/jpeg). Same durable path as uploadChatAttachment. */
   uploadChatImageAttachment(input: UploadChatImageAttachmentInput) {
     return this.uploadChatAttachment(input);

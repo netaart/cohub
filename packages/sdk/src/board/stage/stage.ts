@@ -90,7 +90,7 @@ import { createBoardAutoPan } from "./auto-pan.js";
 import { type BoardStagePress, boardStagePress, createBoardLongPress, createBoardTouchTaps, createGhostClickGuard } from "./presses.js";
 import { observeDisplayDensity } from "./display-density.js";
 import { type BoardBurst, createBoardBursts } from "./bursts.js";
-import { defaultBoardDeviceBudget } from "./device.js";
+import { defaultBoardDeviceBudget, readBoardDeviceSignals } from "./device.js";
 import { createBoardFrameClock } from "./frame-budget.js";
 import { scheduleBoardIdle } from "./idle.js";
 import { toBoardPointerEvent } from "./pointer.js";
@@ -330,6 +330,9 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	const query = (value: string) => (typeof matchMedia === "function" ? matchMedia(value) : null);
 	const coarsePointer = query("(pointer: coarse)");
 	const portrait = query("(orientation: portrait)");
+	const motion = options.reducedMotion ? null : query("(prefers-reduced-motion: reduce)");
+	const reducedMotion = options.reducedMotion ?? (() => motion?.matches ?? false);
+	const { saveData } = readBoardDeviceSignals();
 	const scripts = createBoardScriptController({
 		editor,
 		capabilities: options.scriptCapabilities,
@@ -337,7 +340,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			pointer: coarsePointer?.matches ? "coarse" : "fine",
 			orientation: portrait?.matches ? "portrait" : "landscape",
 			angle: typeof screen === "undefined" ? 0 : (screen.orientation?.angle ?? 0),
-			reducedMotion: options.reducedMotion?.() ?? false,
+			reducedMotion: reducedMotion(),
 			locale: options.locale?.() ?? (typeof navigator === "undefined" ? null : navigator.language || null),
 			senses: senses.states,
 		}),
@@ -398,7 +401,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	});
 	const live = createBoardLiveScheduler({ video: device.media, model: device.models, app: device.apps });
 	let liveTimer: ReturnType<typeof setTimeout> | null = null;
-	const allowAutoplay = (kind: BoardAutoplayKind) => options.autoplay?.(kind) ?? true;
+	const allowAutoplay = options.autoplay ?? ((kind: BoardAutoplayKind) => !saveData && (kind !== "video" || !reducedMotion()));
 	function syncLive(ids: ReadonlySet<string> | null, camera: BoardViewport, renderScene: BoardScene): BoardMediaLoop[] {
 		if (live.sync({ items: editor.document.items, scene: renderScene, visible: ids, camera, surface, allow: allowAutoplay, now: performance.now() }))
 			options.onRunningChange?.(live.running);
@@ -472,7 +475,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		models: modelLoader,
 		pick: (world) => editor.pickAt(world, lastPointerType)?.id ?? null,
 		density: () => app?.renderer.resolution ?? 1,
-		reducedMotion: () => options.reducedMotion?.() ?? false,
+		reducedMotion,
 		changed: (id) => {
 			staleIds.add(id);
 			scheduleTick();
@@ -685,7 +688,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			zoom: renderCamera().zoom,
 			blurs: device.blurs,
 			textResolution: textResolution.value,
-			reducedMotion: options.reducedMotion?.() ?? false,
+			reducedMotion: reducedMotion(),
 			labels: options.labels?.() ?? DEFAULT_BOARD_RENDER_LABELS,
 			taskRun: options.taskRun ?? (() => null),
 			...(options.session ? { session: options.session } : {}),
@@ -732,7 +735,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			container.position.set(0, 0);
 			container.scale.set(1);
 			const { width, height } = app.screen;
-			backdrop.sync(resolvedBackdrop.value, { x: camera.x, y: camera.y, zoom: camera.zoom, width, height, density }, options.reducedMotion?.() ?? false);
+			backdrop.sync(resolvedBackdrop.value, { x: camera.x, y: camera.y, zoom: camera.zoom, width, height, density }, reducedMotion());
 			return;
 		}
 		const seen = boardViewRect(camera, surface);
@@ -741,7 +744,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		container.position.set(seen.x, seen.y);
 		container.scale.set(1 / zoom);
 		const view = { x: -seen.x * zoom, y: -seen.y * zoom, zoom, width: seen.width * zoom, height: seen.height * zoom, density };
-		backdrop.sync(resolvedBackdrop.value, view, options.reducedMotion?.() ?? false);
+		backdrop.sync(resolvedBackdrop.value, view, reducedMotion());
 	}
 
 	function localGestureItemIds(): Set<string> {
@@ -916,7 +919,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			});
 		options.drawOverlay?.(overlay, { zoom: camera.zoom, theme: current, scene: renderScene });
 		drawTransient(overlay, current);
-		const marching = style.selection.dash > 0 && selected.length > 0 && !(options.reducedMotion?.() ?? false);
+		const marching = style.selection.dash > 0 && selected.length > 0 && !reducedMotion();
 		if (marching) scheduleMarch(style);
 		else stopMarch();
 	}
@@ -1821,7 +1824,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 	];
 
 	function burst(next: BoardBurst) {
-		bursts?.add(next, performance.now(), options.reducedMotion?.() ?? false);
+		bursts?.add(next, performance.now(), reducedMotion());
 		scheduleRender();
 	}
 
@@ -1946,7 +1949,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 				learnModel(id, model);
 				scripts.modelLoaded(id);
 			},
-			reducedMotion: () => options.reducedMotion?.() ?? false,
+			reducedMotion,
 			maxEdge: device.tier === "low" ? 1024 : undefined,
 		});
 		shaders = createBoardStageShaders({
@@ -1961,7 +1964,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 			owners: () => scripts.shaderOwners(),
 			fault: (id, message) => scripts.host?.fault(id, message),
 			dark: () => theme().colorScheme === "dark",
-			reducedMotion: () => options.reducedMotion?.() ?? false,
+			reducedMotion,
 			color: (value) => (lastContext ? boardShaderColor(lastContext, value) : [1, 1, 1, 1]),
 		});
 
@@ -1978,6 +1981,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		return true;
 	})();
 
+	motion?.addEventListener("change", scheduleTick);
 	return {
 		ready,
 		get renderer() {
@@ -2115,6 +2119,7 @@ export function mountBoardStage(host: HTMLElement, options: BoardStageOptions): 
 		loadModels: (items) => loadBoardObjectModels(items, options.source, { signal: AbortSignal.timeout(60_000), maxBytes: device.modelBytes }),
 		destroy() {
 			disposed = true;
+			motion?.removeEventListener("change", scheduleTick);
 			stopPresence();
 			if (liveTimer !== null) clearTimeout(liveTimer);
 			if (openingTimer !== null) clearTimeout(openingTimer);

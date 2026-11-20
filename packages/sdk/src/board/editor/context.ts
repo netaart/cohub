@@ -1,8 +1,10 @@
 import type {
 	BoardDocument,
+	BoardItemActivation,
 	BoardPatch,
 	BoardRegistry,
 	BoardScene,
+	BoardSceneItem,
 	BoardSettings,
 	BoardToolStyleMap,
 	BoardViewport,
@@ -94,6 +96,7 @@ export type BoardViewState = {
 export type BoardEditorOptions = {
 	document: BoardDocument;
 	registry?: BoardRegistry;
+	activation?: (item: BoardSceneItem, browsing: boolean, pointerType: string) => BoardItemActivation | undefined;
 	viewport?: BoardViewport;
 	initialTool?: BoardToolId;
 	key?: string;

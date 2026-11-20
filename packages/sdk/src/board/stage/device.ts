@@ -62,8 +62,9 @@ export type BoardDeviceEnvironment = {
 
 export function readBoardDeviceSignals(environment: BoardDeviceEnvironment = globalThis as BoardDeviceEnvironment): BoardDeviceSignals {
 	const { navigator: device, matchMedia, screen } = environment;
-	if (!device || !matchMedia || !screen) return {};
-	const connection = device.connection;
+	const connection = device?.connection;
+	const saveData = Boolean(connection?.saveData);
+	if (!device || !matchMedia || !screen) return { saveData };
 	return {
 		phone:
 			matchMedia("(pointer: coarse)").matches &&
@@ -71,7 +72,7 @@ export function readBoardDeviceSignals(environment: BoardDeviceEnvironment = glo
 			Math.min(screen.width, screen.height) < PHONE_SHORT_SIDE,
 		memory: device.deviceMemory,
 		cores: device.hardwareConcurrency,
-		saveData: Boolean(connection?.saveData),
+		saveData,
 		slowNetwork: /^(slow-2g|2g|3g)$/.test(connection?.effectiveType ?? ""),
 	};
 }

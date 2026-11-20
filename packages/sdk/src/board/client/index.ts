@@ -30,7 +30,7 @@ import { type BoardReplayEntry, createBoardReplayPlayer } from "../model/replay.
 import { type BoardElementChange, diffBoardVersions } from "../model/version-diff.js";
 import { createBoardEntityId } from "../model/items/id.js";
 import type { BoardRemote } from "../replica/index.js";
-import { type BoardReplicaLease, type BoardReplicaLeaseOptions, leaseBoardReplica, shareBoardPlayback } from "./replicas.js";
+import { type BoardReplicaLease, type BoardReplicaLeaseOptions, captureBoardPlaybackResponse, leaseBoardReplica } from "./replicas.js";
 
 export { type BoardReplicaLease, type BoardReplicaLeaseOptions, claimBoardCaches } from "./replicas.js";
 
@@ -231,12 +231,13 @@ export class BoardClient implements BoardRemote {
   }
 
   async control(command: BoardPlaybackCommand) {
+    const receive = captureBoardPlaybackResponse(this.http, this.id);
     const { playback } = await this.http.request<{ playback: BoardPlaybackSnapshot | null }>(`${this.path}/playback`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(command),
     });
-    shareBoardPlayback(this.http, this.id, playback);
+    receive(playback);
     return playback;
   }
 

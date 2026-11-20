@@ -62,8 +62,20 @@ export function leaseBoardReplica(
 	};
 }
 
-export function shareBoardPlayback(http: HttpTransport, boardId: string, playback: BoardPlaybackSnapshot | null) {
-	for (const entry of shared.get(http)?.values() ?? []) if (entry.boardId === boardId) entry.replica.receivePlayback(playback);
+export function captureBoardPlaybackResponse(http: HttpTransport, boardId: string) {
+	const receivers = new Map<Entry, (playback: BoardPlaybackSnapshot | null) => void>();
+	const entries = () => shared.get(http)?.values() ?? [];
+	for (const entry of entries()) {
+		if (entry.boardId === boardId) receivers.set(entry, entry.replica.capturePlaybackResponse());
+	}
+	return (playback: BoardPlaybackSnapshot | null) => {
+		for (const entry of entries()) {
+			if (entry.boardId !== boardId) continue;
+			const receive = receivers.get(entry);
+			if (receive) receive(playback);
+			else void entry.replica.refresh();
+		}
+	};
 }
 
 const OWNER_KEY = "cohub:board-cache-owner";

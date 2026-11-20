@@ -206,7 +206,8 @@ export function createInteractionModule(ctx: EditorContext) {
 	}
 
 	function opensOnTap(item: BoardSceneItem, pointerType = state.hoverPointerType) {
-		return registry.activation(item, browsing(), pointerType) === "tap";
+		const readonly = browsing();
+		return (options.activation?.(item, readonly, pointerType) ?? registry.activation(item, readonly, pointerType)) === "tap";
 	}
 
 	function handPicks(pointerType: string): boolean {

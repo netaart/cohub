@@ -1,167 +1,49 @@
-import type {
-	BoardPlaybackCommand,
-	BoardPlaybackSnapshot,
-} from "@cohub/protocol";
+import type { BoardPlaybackSnapshot } from "@cohub/protocol";
+import { createBoardTransport } from "@neta-art/cohub/board/player";
 import { untrack } from "svelte";
-import { followBoardPlayback } from "#lib/board/board-playback-clock.svelte.ts";
-import type { BoardEditor } from "#lib/board/editor.svelte.ts";
 
-type Command = BoardPlaybackCommand extends infer C
-	? C extends BoardPlaybackCommand
-		? Omit<C, "commandId">
-		: never
-	: never;
+type Options = Parameters<typeof createBoardTransport>[0];
 
-/**
- * Which animation is shown, where its time is, and the play controls, shared by the editor's dock
- * and the viewer's playback bar. While shared playback runs the editor has no playhead; when it
- * stops, `hold` parks the playhead where it ended so edits keep landing on the animation.
- */
-export function createBoardAnimationTransport(input: {
-	editor: BoardEditor;
+export function createBoardAnimationTransport({ editor, playback, ...options }: Omit<Options, "playback"> & {
 	playback: () => BoardPlaybackSnapshot | null;
-	send: (command: BoardPlaybackCommand) => unknown;
-	hold: boolean;
 }) {
-	const { editor } = input;
-	let chosen = $state<string | null>(null);
-	let starting = $state.raw<{
-		stale: BoardPlaybackSnapshot | null;
-		from: number;
-	} | null>(null);
-
-	const ids = $derived(Object.keys(editor.animations));
-	const animationId = $derived.by(() => {
-		const playback = input.playback();
-		return (
-			editor.playhead?.animationId ??
-			(playback && editor.animations[playback.animationId]
-				? playback.animationId
-				: null) ??
-			(chosen && editor.animations[chosen] ? chosen : null) ??
-			ids[0] ??
-			null
-		);
-	});
-	const animation = $derived(
-		animationId ? editor.animations[animationId] : undefined,
-	);
-	const live = $derived.by(() => {
-		const playback = input.playback();
-		return (
-			playback?.status === "playing" &&
-			playback.animationId === animationId &&
-			!editor.playhead
-		);
-	});
-	const clock = followBoardPlayback(() => ({
-		playback: live ? input.playback() : null,
-		document: editor.document,
+	const transport = untrack(() => createBoardTransport({
+		...options,
+		editor: {
+			get document() { return editor.document; },
+			get playhead() { return editor.playhead; },
+			get gestureActive() { return editor.gestureActive; },
+			get editingId() { return editor.editingId; },
+			setPlayhead: editor.setPlayhead,
+			subscribe: (channels, refresh) => editor.subscribe(channels, () => untrack(refresh)),
+		},
+		playback: playback(),
+		onError: (error) => console.warn("[board] Playback command failed", error),
 	}));
-	const pending = $derived(
-		starting !== null && starting.stale === input.playback(),
-	);
-	const current = $derived(
-		live && !pending && clock.snapshot === input.playback(),
-	);
-	const playing = $derived(pending || (live && (!current || clock.advancing)));
-	const time = $derived.by(() => {
-		const playback = input.playback();
-		if (pending && starting) return starting.from;
-		if (live) return current ? clock.time : (playback?.position ?? 0);
-		return (
-			editor.playhead?.time ??
-			(playback?.animationId === animationId ? playback.position : 0)
-		);
-	});
-	const nextMarker = $derived(
-		animation?.markers.find((marker) => marker.pause && marker.at > time + 1) ??
-			null,
-	);
+	let snapshot = $state.raw(transport.getSnapshot());
+	const { ids, animationId, animation, playing, starting, time, nextMarker } = $derived(snapshot);
 
 	$effect(() => {
-		if (!input.hold || !live || !current || clock.advancing) return;
-		const id = animationId;
-		const at = clock.time;
-		if (id) untrack(() => editor.setPlayhead({ animationId: id, time: at }));
+		const next = playback();
+		untrack(() => transport.setPlayback(next));
 	});
-
-	function send(command: Command) {
-		void input.send({
-			...command,
-			commandId: crypto.randomUUID(),
-		} as BoardPlaybackCommand);
-	}
-
-	function play() {
-		const id = animationId;
-		if (!id || !animation) return;
-		const from = time >= animation.duration ? 0 : time;
-		const request = { stale: input.playback(), from };
-		starting = request;
-		setTimeout(() => {
-			if (starting === request) starting = null;
-		}, 4000);
-		chosen = id;
-		editor.setPlayhead(null);
-		send({ type: "play", animationId: id, position: from });
-	}
-
-	function pause() {
-		if (!animationId) return;
-		const at = time;
-		send({ type: "pause" });
-		editor.setPlayhead({ animationId, time: at });
-	}
-
+	$effect(() => {
+		const sync = () => { snapshot = transport.getSnapshot(); };
+		const stop = untrack(() => transport.subscribe(sync));
+		sync();
+		return () => {
+			stop();
+			transport.destroy();
+		};
+	});
 	return {
-		get ids() {
-			return ids;
-		},
-		get animationId() {
-			return animationId;
-		},
-		get animation() {
-			return animation;
-		},
-		get playing() {
-			return playing;
-		},
-		get time() {
-			return time;
-		},
-		get nextMarker() {
-			return nextMarker;
-		},
-		play,
-		pause,
-		toggle() {
-			if (playing) pause();
-			else play();
-		},
-		seek(at: number) {
-			if (!animationId) return;
-			const value = Math.max(0, at);
-			if (playing) send({ type: "seek", position: value });
-			else editor.setPlayhead({ animationId, time: value });
-		},
-		next() {
-			if (!animationId || !nextMarker) return;
-			if (playing) send({ type: "next" });
-			else editor.setPlayhead({ animationId, time: nextMarker.at });
-		},
-		choose(id: string) {
-			chosen = id;
-			if (playing) send({ type: "stop" });
-			editor.setPlayhead({ animationId: id, time: 0 });
-		},
-		hold() {
-			if (animationId && !editor.playhead)
-				editor.setPlayhead({ animationId, time });
-		},
+		...transport,
+		get ids() { return ids; },
+		get animationId() { return animationId; },
+		get animation() { return animation; },
+		get playing() { return playing; },
+		get starting() { return starting; },
+		get time() { return time; },
+		get nextMarker() { return nextMarker; },
 	};
 }
-
-export type BoardAnimationTransport = ReturnType<
-	typeof createBoardAnimationTransport
->;

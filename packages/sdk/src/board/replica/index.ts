@@ -198,7 +198,10 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 		const next = readBoardDocument(result, result.changes ? base : server);
 		title = result.title;
 		spaceId = result.spaceId ?? null;
-		if (readPlaybackRevision === playbackRevision) playback = result.playback;
+		if (readPlaybackRevision === playbackRevision && playback !== result.playback) {
+			playbackRevision += 1;
+			playback = result.playback;
+		}
 		loaded = true;
 		if (next === server && result.version === version) return;
 		adoptServer(next, result.version, true);
@@ -355,6 +358,21 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 		emit();
 	}
 
+	function capturePlaybackResponse() {
+		const requestedAt = playbackRevision;
+		return (next: BoardPlaybackSnapshot | null) => {
+			if (disposed) return;
+			if (next && playback?.playbackId === next.playbackId) {
+				if (next.revision <= playback.revision) return;
+			} else if (requestedAt !== playbackRevision && next !== playback) {
+				// A stop resets the server revision. Different playbacks cannot be ordered by it.
+				void refresh();
+				return;
+			}
+			receivePlayback(next);
+		};
+	}
+
 	return {
 		get state(): BoardReplicaState {
 			return current;
@@ -387,6 +405,7 @@ export function createBoardReplica(options: BoardReplicaOptions) {
 		},
 		receive,
 		receivePlayback,
+		capturePlaybackResponse,
 		refresh,
 		retry,
 		dispose() {

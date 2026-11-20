@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const LAYERS = {
   model: [],
-  player: ["model"],
+  player: ["model", "editor"],
   replica: ["model"],
   editor: ["model"],
   presence: ["model", "editor"],

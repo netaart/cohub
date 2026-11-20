@@ -1,8 +1,6 @@
 <script lang="ts">
-import type {
-	BoardPlaybackCommand,
-	BoardPlaybackSnapshot,
-} from "@cohub/protocol";
+import type { BoardPlaybackSnapshot } from "@cohub/protocol";
+import type { BoardTransportSend } from "@neta-art/cohub/board/player";
 import type { BoardStage } from "@neta-art/cohub/board/stage";
 import {
 	ListOrdered,
@@ -40,7 +38,7 @@ const {
 	playback: BoardPlaybackSnapshot | null;
 	media: BoardStage["media"] | null;
 	sound: { blocked: boolean; muted: boolean };
-	onPlayback: (command: BoardPlaybackCommand) => unknown;
+	onPlayback: BoardTransportSend;
 	onClose: () => void;
 } = $props();
 
@@ -49,8 +47,10 @@ const transport = createBoardAnimationTransport({
 	editor: untrack(() => editor),
 	playback: () => playback,
 	send: (command) => onPlayback(command),
-	hold: false,
 });
+const playLabel = $derived(transport.starting
+	? m.common_loading({}, { locale })
+	: transport.playing ? m.board_pause({}, { locale }) : m.board_play({}, { locale }));
 const animation = $derived(transport.animation);
 const duration = $derived(Math.max(1, animation?.duration ?? 1));
 const chapters = $derived(
@@ -191,8 +191,9 @@ export function contains(target: EventTarget | null): boolean {
 		<button
 			type="button"
 			class="tool-key"
-			title={transport.playing ? m.board_pause({}, { locale }) : m.board_play({}, { locale })}
-			aria-label={transport.playing ? m.board_pause({}, { locale }) : m.board_play({}, { locale })}
+			title={playLabel}
+			aria-label={playLabel}
+			disabled={transport.starting}
 			onclick={toggle}
 		>
 			{#if transport.playing}<Pause class="h-3.5 w-3.5" fill="currentColor" />{:else}<Play class="h-3.5 w-3.5" fill="currentColor" />{/if}
@@ -204,6 +205,7 @@ export function contains(target: EventTarget | null): boolean {
 				class="tool-key name"
 				aria-haspopup="menu"
 				aria-expanded={listOpen}
+				disabled={transport.starting}
 				onclick={() => { listOpen = !listOpen; }}
 			>
 				<ListOrdered class="h-3.5 w-3.5 shrink-0" />
@@ -219,11 +221,12 @@ export function contains(target: EventTarget | null): boolean {
 			value={transport.time}
 			aria-label={m.board_playhead({}, { locale })}
 			aria-valuetext={formatBoardTime(transport.time)}
+			disabled={transport.starting}
 			oninput={(event) => transport.seek(Number(event.currentTarget.value))}
 		/>
 		<span class="time">{formatBoardTime(transport.time)}</span>
 		{#if transport.nextMarker}
-			<button type="button" class="tool-key" title={m.board_next_marker({}, { locale })} aria-label={m.board_next_marker({}, { locale })} onclick={transport.next}>
+			<button type="button" class="tool-key" title={m.board_next_marker({}, { locale })} aria-label={m.board_next_marker({}, { locale })} disabled={transport.starting} onclick={transport.next}>
 				<SkipForward class="h-3.5 w-3.5" />
 			</button>
 		{/if}

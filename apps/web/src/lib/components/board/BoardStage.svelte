@@ -36,7 +36,6 @@ import {
 } from "@neta-art/cohub/board/stage";
 import type { Graphics } from "pixi.js";
 import { onDestroy, onMount, untrack } from "svelte";
-import { MediaQuery } from "svelte/reactivity";
 import { boardAppMeta } from "#lib/board/board-app.ts";
 import type { BoardAssetSource } from "#lib/board/board-asset-source.ts";
 import {
@@ -89,7 +88,6 @@ const {
 	active = true,
 	presence,
 	views = [],
-	autoplay = true,
 	onRunningChange,
 	onPointer,
 	onSurfaceChange,
@@ -118,7 +116,6 @@ const {
 	active?: boolean;
 	presence?: BoardPresence | null;
 	views?: readonly BoardItemView[];
-	autoplay?: boolean;
 	onRunningChange?: (ids: ReadonlySet<string>) => void;
 	onPointer?: (
 		phase: "down" | "move" | "up" | "leave",
@@ -210,8 +207,6 @@ const liveSessions = spaceId
 			},
 		})
 	: null;
-
-const reducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
 
 function renderLabels(): BoardRenderLabels {
 	return {
@@ -443,9 +438,6 @@ onMount(() => {
 		labels: renderLabels,
 		taskRun: (taskRunId) => liveTasks?.get(taskRunId) ?? null,
 		session: (sessionId) => liveSessions?.get(sessionId) ?? null,
-		reducedMotion: () => reducedMotion.current,
-		autoplay: (kind) =>
-			autoplay && (kind !== "video" || !reducedMotion.current),
 		onRunningChange: (ids) => onRunningChange?.(ids),
 		fileState: (path) => (spaceId ? fileAvailability(spaceId, path) : "ok"),
 		presence: presence ?? undefined,
@@ -515,7 +507,6 @@ $effect(() => {
 	lod;
 	getResolvedTheme();
 	customThemeVersion;
-	reducedMotion.current;
 	untrack(() => stage?.invalidate());
 });
 

@@ -29,7 +29,8 @@ import {
 } from "../../media.js";
 import { Texture } from "pixi.js";
 import type { ModelStill } from "../render/model3d/index.js";
-import { defaultBoardDeviceBudget } from "./device.js";
+import { defaultBoardDeviceBudget, readBoardDeviceSignals } from "./device.js";
+import { createBoardModelPreviews } from "./model-previews.js";
 import { scheduleBoardIdle } from "./idle.js";
 import {
 	type LruBudget,
@@ -207,7 +208,7 @@ export type BoardAssetManagerOptions = {
 	concurrency?: number;
 	videoConcurrency?: number;
 	loadVideoPreviews?: boolean;
-	modelPreviews?: BoardModelPreviews;
+	modelPreviews?: BoardModelPreviews | false;
 	lruBudget?: LruBudget;
 	imageTexturePool?: BoardImageTexturePool;
 	loadTexture?: (
@@ -228,13 +229,17 @@ export type BoardAssetManagerOptions = {
 export function createBoardAssetManager(
 	options: BoardAssetManagerOptions,
 ): BoardAssetManager {
-	const concurrency = Math.max(1, options.concurrency ?? defaultBoardDeviceBudget().concurrency);
+	const device = defaultBoardDeviceBudget();
+	const { saveData } = readBoardDeviceSignals();
+	const loadVideoPreviews = options.loadVideoPreviews ?? !saveData;
+	const modelPreviews = options.modelPreviews ?? (!saveData && typeof createImageBitmap === "function" ? createBoardModelPreviews(options) : false);
+	const concurrency = Math.max(1, options.concurrency ?? device.concurrency);
 	const limits: Record<BoardAssetMedia, number> = {
 		image: concurrency,
 		video: Math.max(1, Math.min(options.videoConcurrency ?? 2, concurrency)),
 		model: 1,
 	};
-	const budget = options.lruBudget ?? defaultBoardDeviceBudget().lru;
+	const budget = options.lruBudget ?? device.lru;
 	const prefetchLimit = Math.min(PREFETCH_CONCURRENCY, concurrency - 1);
 	const now = options.now ?? (() => Date.now());
 	const imagePool = options.imageTexturePool ?? boardImageTexturePool;
@@ -375,7 +380,7 @@ export function createBoardAssetManager(
 		const natural = (asset === undefined ? boardMediaNaturalSize(item) : asset?.natural) ?? null;
 		const key = asset !== undefined ? asset && boardAssetRefKey(asset) : isBoardModelObject(item) ? objectCoverKey(item) : boardAssetKey(item);
 		const source = key ? boardAssetKeySource(key) : null;
-		if (source?.media === "video" && source.kind === "url" && options.loadVideoPreviews === false && slotOf("video", source.value) === "video")
+		if (source?.media === "video" && source.kind === "url" && !loadVideoPreviews && slotOf("video", source.value) === "video")
 			return { key: null, natural };
 		if (source?.media === "model" && !modelPreviewable(item)) return { key: null, natural };
 		return { key, natural };
@@ -664,7 +669,7 @@ export function createBoardAssetManager(
 					entry.frameless = true;
 					throw FRAMELESS;
 				}
-				if (options.loadVideoPreviews === false) throw NO_PREVIEW;
+				if (!loadVideoPreviews) throw NO_PREVIEW;
 				return loadSized(entry, source, "video", false);
 			}
 			const variant = variantUrl(source, Math.max(edge, SMALLEST_VARIANT), cover);
@@ -707,21 +712,19 @@ export function createBoardAssetManager(
 	}
 
 	function modelPreviewable(item: BoardSceneItem) {
-		const previews = options.modelPreviews;
-		if (!previews) return false;
+		if (!modelPreviews) return false;
 		const size = item.type === "file" ? item.props.snapshot?.size : undefined;
-		return size === undefined || size <= (previews.maxBytes ?? Number.POSITIVE_INFINITY);
+		return size === undefined || size <= (modelPreviews.maxBytes ?? Number.POSITIVE_INFINITY);
 	}
 
 	function modelLoader(item: BoardSceneItem, key: string): Load | null {
-		const previews = options.modelPreviews;
-		if (!previews || item.type !== "file") return null;
+		if (!modelPreviews || item.type !== "file") return null;
 		const { src, snapshot, model } = item.props;
 		const format = boardModelFormat(src, snapshot?.mimeType);
 		if (!format) return null;
 		const request = { key, src, format, size: snapshot?.size, view: model?.view, animation: model?.animation };
 		return async () => {
-			const still = await previews.load(request);
+			const still = await modelPreviews.load(request);
 			for (const listener of stillListeners) listener(key, still);
 			return { texture: Texture.from(still.image), url: "", edge: Number.POSITIVE_INFINITY };
 		};

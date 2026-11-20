@@ -17,11 +17,9 @@ function storedHeight(fallback: number): number {
 </script>
 
 <script lang="ts">
-import type {
-	BoardPlaybackCommand,
-	BoardPlaybackSnapshot,
-} from "@cohub/protocol";
+import type { BoardPlaybackSnapshot } from "@cohub/protocol";
 import type { BoardKeyRef } from "@neta-art/cohub/board/editor";
+import type { BoardTransportSend } from "@neta-art/cohub/board/player";
 import {
 	ChevronDown,
 	Circle,
@@ -70,7 +68,7 @@ const {
 	editor: BoardEditor;
 	playback: BoardPlaybackSnapshot | null;
 	isMobile?: boolean;
-	onPlayback: (command: BoardPlaybackCommand) => unknown;
+	onPlayback: BoardTransportSend;
 	onDropResources?: (data: DataTransfer, at: number) => void;
 	onClose: () => void;
 } = $props();
@@ -80,8 +78,11 @@ const transport = createBoardAnimationTransport({
 	editor: untrack(() => editor),
 	playback: () => playback,
 	send: (command) => onPlayback(command),
-	hold: true,
+	holdOnEnd: true,
 });
+const playLabel = $derived(transport.starting
+	? m.common_loading({}, { locale })
+	: transport.playing ? m.board_pause({}, { locale }) : m.board_play({}, { locale }));
 const animationId = $derived(transport.animationId);
 const animation = $derived(transport.animation);
 const time = $derived(transport.time);
@@ -145,7 +146,7 @@ $effect(() => {
 });
 
 $effect(() => {
-	if (!transport.playing && animationId && !editor.playhead)
+	if (!transport.starting && !transport.playing && animationId && !editor.playhead)
 		untrack(() => transport.hold());
 });
 
@@ -470,19 +471,20 @@ const moreItems = $derived<BoardMenuItem[]>([
 				<Settings2 class="h-3.5 w-3.5" />
 			</button>
 			<span class="divider"></span>
-			<button type="button" class="key key--start" title={m.board_to_start({}, { locale })} aria-label={m.board_to_start({}, { locale })} onclick={() => transport.seek(0)}>
+			<button type="button" class="key key--start" title={m.board_to_start({}, { locale })} aria-label={m.board_to_start({}, { locale })} disabled={transport.starting} onclick={() => transport.seek(0)}>
 				<SkipBack class="h-3.5 w-3.5" />
 			</button>
 			<button
 				type="button"
 				class="key key--play"
-				title={transport.playing ? m.board_pause({}, { locale }) : m.board_play({}, { locale })}
-				aria-label={transport.playing ? m.board_pause({}, { locale }) : m.board_play({}, { locale })}
+				title={playLabel}
+				aria-label={playLabel}
+				disabled={transport.starting}
 				onclick={transport.toggle}
 			>
 				{#if transport.playing}<Pause class="h-3.5 w-3.5" fill="currentColor" />{:else}<Play class="h-3.5 w-3.5" fill="currentColor" />{/if}
 			</button>
-			<button type="button" class="key" title={m.board_next_marker({}, { locale })} aria-label={m.board_next_marker({}, { locale })} disabled={!transport.nextMarker} onclick={transport.next}>
+			<button type="button" class="key" title={m.board_next_marker({}, { locale })} aria-label={m.board_next_marker({}, { locale })} disabled={transport.starting || !transport.nextMarker} onclick={transport.next}>
 				<SkipForward class="h-3.5 w-3.5" />
 			</button>
 			<span class="time">
