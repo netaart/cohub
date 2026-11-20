@@ -360,7 +360,9 @@ function select(product: BillingCatalogProduct) {
 	.skeleton:last-child {
 		height: 269px;
 	}
-	/* Sized like the loaded checkout summary (288.5px, the default plan with no code row). */
+	/* Matches the signed-out summary (288.5px, no code row). Auth is known only after hydration, so a signed-in
+	   summary (321px + 16.5px code row) shifts the catalog ~32px on desktop (CLS ~0.0024). Padding for it would add
+	   ~32px of blank space for every anonymous visitor, so this is intentional. */
 	.skeleton.summary {
 		height: 288.5px;
 	}
