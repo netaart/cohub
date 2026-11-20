@@ -1,5 +1,33 @@
 /* --- Neta Pixel Theme --- */
 
+/* Same URL as the preload in app.html; overrides the fontsource Latin face. */
+@font-face {
+	font-family: "Figtree Variable";
+	font-style: normal;
+	font-weight: 300 900;
+	font-display: swap;
+	src: url("/fonts/figtree-latin-wght-normal.woff2") format("woff2-variations");
+	unicode-range:
+		U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+		U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+		U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Arial stand-in for Figtree while it loads. size-adjust = Figtree/Arimo width on English pricing + docs text;
+   ascent/descent = Figtree hhea (950/250) divided by size-adjust. */
+@font-face {
+	font-family: "Figtree Fallback";
+	font-style: normal;
+	font-weight: 400;
+	src:
+		local("Arial"), local("ArialMT"), local("Arial Regular"), local("Arimo"),
+		local("Arimo Regular");
+	size-adjust: 99.8986%;
+	ascent-override: 95.0965%;
+	descent-override: 25.0254%;
+	line-gap-override: 0%;
+}
+
 [data-theme="neta-pixel"] {
 	color-scheme: light;
 
@@ -290,8 +318,8 @@
 /* `:root` raises specificity above component-scoped styles. */
 :root:is([data-theme="neta-pixel"], [data-theme="neta-pixel-dark"]) {
 	--font-sans:
-		"Figtree Variable", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei",
-		system-ui, sans-serif;
+		"Figtree Variable", "Figtree Fallback", "PingFang SC", "Noto Sans CJK SC",
+		"Microsoft YaHei", system-ui, sans-serif;
 
 	--pixel-shape-inner: polygon(
 		0 2px,

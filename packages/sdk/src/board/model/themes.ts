@@ -122,7 +122,7 @@ export const BOARD_THEME_DATA = {
 			progress: "mosaic",
 			icons: "pixel",
 			motion: "stepped",
-			font: "\"Figtree Variable\", \"PingFang SC\", \"Noto Sans CJK SC\", \"Microsoft YaHei\", system-ui, sans-serif",
+			font: "\"Figtree Variable\", \"Figtree Fallback\", \"PingFang SC\", \"Noto Sans CJK SC\", \"Microsoft YaHei\", system-ui, sans-serif",
 			frameLabelSize: 16,
 		},
 		backdrop: {
@@ -151,7 +151,7 @@ export const BOARD_THEME_DATA = {
 			progress: "mosaic",
 			icons: "pixel",
 			motion: "stepped",
-			font: "\"Figtree Variable\", \"PingFang SC\", \"Noto Sans CJK SC\", \"Microsoft YaHei\", system-ui, sans-serif",
+			font: "\"Figtree Variable\", \"Figtree Fallback\", \"PingFang SC\", \"Noto Sans CJK SC\", \"Microsoft YaHei\", system-ui, sans-serif",
 			frameLabelSize: 16,
 		},
 		backdrop: {
