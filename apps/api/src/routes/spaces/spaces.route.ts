@@ -65,7 +65,7 @@ import { RUN_COMMAND_TASK_TYPE } from "@cohub/core/commands";
 import { normalizeContentBlocks } from "@cohub/core/content/normalize";
 import { sanitizePostgresJsonValue } from "@cohub/core/content/sanitize";
 import { assignLabelsToSession, parseLabelRefs, parseSessionArchiveFilter, resolveLabelPaths, resolveOrCreateLabelPaths } from "@cohub/core/labels";
-import { asAccountIdentity, hasPermission, getSpaceMemberRole, filterSessionsByPermission, isSpaceMember, resolvePermissionAccess } from "../../permissions.js";
+import { asAccountIdentity, hasPermission, getSpaceMemberRole, filterSessionsByPermission, isSpaceMember, resolveFileViewVisibility, resolvePermissionAccess } from "../../permissions.js";
 import { checkpoints } from "@cohub/db";
 import { LogtoUserRequiredError } from "../../user-profiles.js";
 import { publicSpacePath, recordSpaceSlugChange, redirectTarget, resolvePublicSpace } from "../../slug-history.js";
@@ -75,7 +75,9 @@ import {
   getCheckpointDiffSummary,
 } from "../../checkpoint-diff.js";
 import { parseFsPagination } from "../../fs-pagination.js";
-import { checkpointFsJsonError, listCheckpointDirectory, readCheckpointFile } from "../../checkpoint-fs.js";
+import { checkpointFsJsonError, listCheckpointDirectory, readCheckpointFile, redactCheckpointForView } from "../../checkpoint-fs.js";
+import { isLocalSpace } from "../../space-fs-backend.js";
+import type { SpaceFsVisibility } from "@cohub/core/space-fs";
 import type { AuthUser } from "../../lib/middleware.js";
 import { submitSessionPrompt } from "../../session-prompts.js";
 import { recordSessionNote } from "../../session-notes.js";
@@ -1616,8 +1618,19 @@ router.get("/:id/checkpoints/:checkpointId", async (c) => {
 
   if (!checkpoint) return c.json({ message: "checkpoint not found" }, 404);
 
-  return c.json({ checkpoint });
+  // Non-full views lose diff and path metadata; see redactCheckpointForView.
+  const visibility = await resolveCheckpointFsVisibility(user, spaceId);
+  return c.json({ checkpoint: await redactCheckpointForView(checkpoint, visibility) });
 });
+
+// Checkpoint file views apply the same visibility as the workspace file routes. Filtered views need the
+// workspace .gitignore on this server, which local sandboxes do not provide, so those are denied.
+async function resolveCheckpointFsVisibility(user: AuthUser | null, spaceId: string): Promise<SpaceFsVisibility | null> {
+  if (!(await hasPermission(user, "checkpoint.view", { spaceId }))) return null;
+  const visibility = await resolveFileViewVisibility(user, spaceId);
+  if (visibility === "filtered" && await isLocalSpace(spaceId)) return null;
+  return visibility;
+}
 
 // In production, these checkpoints/fs routes are routed to fs-api by the gateway.
 // This remains a local/non-split fallback.
